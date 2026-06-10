@@ -1,0 +1,20 @@
+@import 'tailwindcss';
+
+/* vCenter-ish neutral theme: dense, slightly cool grays, blue accent. */
+:root {
+	color-scheme: light;
+}
+
+html,
+body {
+	height: 100%;
+	margin: 0;
+}
+
+body {
+	font-family:
+		'Segoe UI', system-ui, -apple-system, sans-serif;
+	font-size: 13px;
+	color: #1f2933;
+	background: #f4f5f7;
+}

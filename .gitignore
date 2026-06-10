@@ -1,0 +1,17 @@
+# Compiled binary (built from ./cmd/dotvirt)
+/dotvirt
+
+# Go build/test artifacts
+*.exe
+*.test
+*.out
+*.prof
+
+# Backups and local dumps
+*-backup-*.yaml
+
+# Editor/OS
+.DS_Store
+*.swp
+
+.claude/
