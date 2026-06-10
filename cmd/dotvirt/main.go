@@ -79,7 +79,7 @@ func run() error {
 		provider.WithEnricher(enricher(ctx, clusterClient))
 		clusterClient.Watch(ctx, hub.Changed()) // push on VM/VMI changes
 		vncHandler = stream.NewVNCProxy(clusterClient)
-		optionsProvider = optionsAdapter{clusterClient}
+		optionsProvider = clusterClient
 
 		exporter := export.New(clusterClient, writeRepo, cfg.RunningBranch)
 		go exporter.Run(ctx, cfg.ExportInterval)
@@ -93,7 +93,7 @@ func run() error {
 		}
 		provider.WithDrift(driftSource(ctx, argoClient))
 		argoClient.Watch(ctx, hub.Changed()) // push on Application drift changes
-		resyncer = resyncAdapter{argoClient}
+		resyncer = argoClient
 	}
 
 	coordinator := changeset.New(draftStore, writeRepo, provider, forgeClient, resyncer, cfg.BaseBranch, cfg.ProposedBranch)
@@ -151,21 +151,6 @@ func pollGit(ctx context.Context, repo *git.Repo, changed chan<- struct{}, inter
 			}
 		}
 	}
-}
-
-// optionsAdapter adapts the cluster client's typed ListOptions to the API's
-// any-returning OptionsProvider interface.
-type optionsAdapter struct{ c *cluster.Client }
-
-func (a optionsAdapter) ListOptions(ctx context.Context) (any, error) {
-	return a.c.ListOptions(ctx)
-}
-
-// resyncAdapter adapts the argo client's typed Resync to changeset.Resyncer.
-type resyncAdapter struct{ c *argo.Client }
-
-func (a resyncAdapter) Resync(ctx context.Context, namespace, name string) (any, error) {
-	return a.c.Resync(ctx, namespace, name)
 }
 
 // enricher adapts the cluster client's live state to the inventory provider's

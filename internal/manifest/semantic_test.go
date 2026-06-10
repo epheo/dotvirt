@@ -1,4 +1,4 @@
-package git
+package manifest
 
 import (
 	"testing"
@@ -22,14 +22,14 @@ func TestChangesForEdit(t *testing.T) {
 		RemoveNetworks: []string{"old"},
 	})
 
-	want := map[string]Change{
+	want := map[string]model.Change{
 		"Memory":     {Field: "Memory", Action: "change", From: "1Gi", To: "2Gi"},
 		"Label app":  {Field: "Label app", Action: "change", From: "web", To: "web2"},
 		"Label tier": {Field: "Label tier", Action: "add", To: "front"},
 		"Disk":       {Field: "Disk", Action: "add", To: "data (20Gi)"},
 		"Network":    {Field: "Network", Action: "remove", From: "old"},
 	}
-	got := map[string]Change{}
+	got := map[string]model.Change{}
 	for _, c := range changes {
 		got[c.Field] = c
 	}
@@ -53,7 +53,7 @@ func TestDiffVMs(t *testing.T) {
 	}}
 	changes := DiffVMs(main, running)
 
-	var power, disk *Change
+	var power, disk *model.Change
 	for i := range changes {
 		switch changes[i].Field {
 		case "Power":

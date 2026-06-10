@@ -10,6 +10,8 @@ import (
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/storage/memory"
+
+	"github.com/epheo/dotvirt/internal/manifest"
 )
 
 // EditResult reports the outcome of a VM edit committed to a feature branch.
@@ -26,8 +28,8 @@ type EditResult struct {
 // single clone so the edit is based on current source state. Returns the diff.
 //
 // sourceFile is the manifest's repo-relative path (from the inventory). The edit
-// is applied with ApplyEdit, so only the changed lines differ.
-func (w *WriteRepo) CommitVMEdit(source, featureBranch, sourceFile, namespace, name, message string, edit VMEdit) (EditResult, error) {
+// is applied with manifest.ApplyEdit, so only the changed lines differ.
+func (w *WriteRepo) CommitVMEdit(source, featureBranch, sourceFile, namespace, name, message string, edit manifest.VMEdit) (EditResult, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -50,7 +52,7 @@ func (w *WriteRepo) CommitVMEdit(source, featureBranch, sourceFile, namespace, n
 		return EditResult{}, fmt.Errorf("read %s on %s: %w", sourceFile, source, err)
 	}
 
-	edited, err := ApplyEdit(original, namespace, name, edit)
+	edited, err := manifest.ApplyEdit(original, namespace, name, edit)
 	if err != nil {
 		return EditResult{}, err
 	}
@@ -84,7 +86,7 @@ func (w *WriteRepo) CommitVMEdit(source, featureBranch, sourceFile, namespace, n
 		Branch: featureBranch,
 		File:   sourceFile,
 		Hash:   commit.String(),
-		Diff:   unifiedDiff(sourceFile, original, edited),
+		Diff:   manifest.UnifiedDiff(sourceFile, original, edited),
 	}
 
 	if w.push {
@@ -101,20 +103,20 @@ func (w *WriteRepo) CommitVMEdit(source, featureBranch, sourceFile, namespace, n
 }
 
 // ChangesetItem is one change to apply within a CommitChangeset: either an edit
-// of an existing manifest (Edit set, applied via ApplyEdit) or a brand-new file
+// of an existing manifest (Edit set, applied via manifest.ApplyEdit) or a brand-new file
 // (NewContent set). Exactly one mode is used per item.
 type ChangesetItem struct {
 	Path       string // repo-relative manifest path
-	Namespace  string // VM identity (for ApplyEdit targeting)
+	Namespace  string // VM identity (for manifest.ApplyEdit targeting)
 	Name       string
-	Edit       *VMEdit // edit mode
-	NewContent []byte  // create mode (full manifest)
+	Edit       *manifest.VMEdit // edit mode
+	NewContent []byte           // create mode (full manifest)
 }
 
 // CommitChangeset applies every item to one branch created off base and commits
 // them together — the propose step of the draft workflow. Edits re-read the
 // current source on base (so the proposal is against current trunk) and apply
-// via ApplyEdit (minimal diff); creates write a new file. Pushes when enabled.
+// via manifest.ApplyEdit (minimal diff); creates write a new file. Pushes when enabled.
 //
 // The branch is force-updated, so re-proposing replaces its contents rather than
 // stacking commits — keeping one PR per draft.
@@ -151,7 +153,7 @@ func (w *WriteRepo) CommitChangeset(base, branch, message string, items []Change
 			if err != nil {
 				return EditResult{}, fmt.Errorf("read %s on %s: %w", it.Path, base, err)
 			}
-			content, err = ApplyEdit(original, it.Namespace, it.Name, *it.Edit)
+			content, err = manifest.ApplyEdit(original, it.Namespace, it.Name, *it.Edit)
 			if err != nil {
 				return EditResult{}, fmt.Errorf("apply edit to %s: %w", it.Path, err)
 			}
@@ -247,7 +249,7 @@ func (w *WriteRepo) CommitNewFile(source, featureBranch, path, message string, c
 		Branch: featureBranch,
 		File:   path,
 		Hash:   commit.String(),
-		Diff:   unifiedDiff(path, nil, content),
+		Diff:   manifest.UnifiedDiff(path, nil, content),
 	}
 	if w.push {
 		err := repo.Push(&git.PushOptions{

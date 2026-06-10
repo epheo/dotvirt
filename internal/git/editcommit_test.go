@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/epheo/dotvirt/internal/manifest"
 )
 
 // seedRepo creates a bare repo with one VM manifest on main, returning the bare
@@ -60,7 +62,7 @@ func TestCommitVMEditCreatesFeatureBranch(t *testing.T) {
 
 	mem := "4Gi"
 	res, err := repo.CommitVMEdit("main", "dotvirt/edit-web-1", "web.yaml", "alpha", "web",
-		"dotvirt: edit alpha/web (memory=4Gi)", VMEdit{Memory: &mem})
+		"dotvirt: edit alpha/web (memory=4Gi)", manifest.VMEdit{Memory: &mem})
 	if err != nil {
 		t.Fatalf("CommitVMEdit: %v", err)
 	}

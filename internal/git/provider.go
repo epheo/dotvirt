@@ -3,6 +3,7 @@ package git
 import (
 	"sort"
 
+	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
@@ -53,11 +54,9 @@ func (p *Provider) WithDrift(d DriftSource) *Provider {
 	return p
 }
 
-// Branches lists the repo's branches.
+// Branches lists the repo's branches from the cached clone. Freshness is owned
+// by the background fetcher (the git poll), not by reads.
 func (p *Provider) Branches() ([]string, error) {
-	if err := p.repo.Fetch(); err != nil {
-		return nil, err
-	}
 	return p.repo.Branches()
 }
 
@@ -66,15 +65,12 @@ func (p *Provider) Branches() ([]string, error) {
 // NOT enrich with live/argo state — it's the pure manifest view. Fetches first
 // so it reflects the latest remote (e.g. dotvirt's running-branch exports).
 func (p *Provider) FindVM(branch, namespace, name string) (model.VM, bool, error) {
-	if err := p.repo.Fetch(); err != nil {
-		return model.VM{}, false, err
-	}
 	files, err := p.repo.VMManifests(branch)
 	if err != nil {
 		return model.VM{}, false, err
 	}
 	for _, f := range files {
-		vms, err := ParseVMs(f.Path, f.Content, defaultNamespace(f.Path))
+		vms, err := manifest.ParseVMs(f.Path, f.Content, defaultNamespace(f.Path))
 		if err != nil {
 			return model.VM{}, false, err
 		}
@@ -89,16 +85,12 @@ func (p *Provider) FindVM(branch, namespace, name string) (model.VM, bool, error
 
 // Inventory builds the inventory tree for a branch. An empty branch defaults to
 // the first available branch so the UI has something to show on first load.
-// It fetches first so the read reflects the latest remote state — including
-// dotvirt's own running-branch exports.
-func (p *Provider) Inventory(branch string) (any, error) {
-	if err := p.repo.Fetch(); err != nil {
-		return nil, err
-	}
+// Reads from the cached clone; the background fetcher owns freshness.
+func (p *Provider) Inventory(branch string) (model.Inventory, error) {
 	if branch == "" {
 		branches, err := p.repo.Branches()
 		if err != nil {
-			return nil, err
+			return model.Inventory{}, err
 		}
 		if len(branches) == 0 {
 			return model.Inventory{Branch: "", Projects: []model.Project{}}, nil
@@ -108,28 +100,28 @@ func (p *Provider) Inventory(branch string) (any, error) {
 
 	files, err := p.repo.VMManifests(branch)
 	if err != nil {
-		return nil, err
+		return model.Inventory{}, err
 	}
 
 	var live map[string]LiveState
 	if p.enrich != nil {
 		if live, err = p.enrich(); err != nil {
-			return nil, err
+			return model.Inventory{}, err
 		}
 	}
 
 	var drift map[string]Drift
 	if p.drift != nil {
 		if drift, err = p.drift(); err != nil {
-			return nil, err
+			return model.Inventory{}, err
 		}
 	}
 
 	byNS := map[string][]model.VM{}
 	for _, f := range files {
-		vms, err := ParseVMs(f.Path, f.Content, defaultNamespace(f.Path))
+		vms, err := manifest.ParseVMs(f.Path, f.Content, defaultNamespace(f.Path))
 		if err != nil {
-			return nil, err
+			return model.Inventory{}, err
 		}
 		for _, vm := range vms {
 			k := vm.Namespace + "/" + vm.Name

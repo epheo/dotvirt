@@ -4,14 +4,14 @@ import (
 	"fmt"
 
 	"github.com/epheo/dotvirt/internal/api"
-	"github.com/epheo/dotvirt/internal/git"
+	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/vmgen"
 )
 
-// editFromRequest maps an api.EditRequest into a git.VMEdit.
-func editFromRequest(req api.EditRequest) git.VMEdit {
-	edit := git.VMEdit{
+// editFromRequest maps an api.EditRequest into a manifest.VMEdit.
+func editFromRequest(req api.EditRequest) manifest.VMEdit {
+	edit := manifest.VMEdit{
 		Power:          req.Power,
 		CPUCores:       req.CPUCores,
 		Memory:         req.Memory,
@@ -23,33 +23,33 @@ func editFromRequest(req api.EditRequest) git.VMEdit {
 		RemoveNetworks: req.RemoveNetworks,
 	}
 	for _, d := range req.AddDisks {
-		edit.AddDisks = append(edit.AddDisks, git.DiskAdd{Name: d.Name, Size: d.Size})
+		edit.AddDisks = append(edit.AddDisks, manifest.DiskAdd{Name: d.Name, Size: d.Size})
 	}
 	for _, n := range req.AddNetworks {
-		edit.AddNetworks = append(edit.AddNetworks, git.NetworkAdd{Name: n.Name})
+		edit.AddNetworks = append(edit.AddNetworks, manifest.NetworkAdd{Name: n.Name})
 	}
 	return edit
 }
 
 // changesForCreate renders a new-VM spec as "add" semantic items for the draft
 // preview, without showing YAML.
-func changesForCreate(s vmgen.Spec) []git.Change {
-	out := []git.Change{
+func changesForCreate(s vmgen.Spec) []model.Change {
+	out := []model.Change{
 		{Field: "Create VM", Action: "add", To: s.Namespace + "/" + s.Name},
 		{Field: "Instance type", Action: "add", To: s.Instancetype},
 		{Field: "Preference", Action: "add", To: s.Preference},
 		{Field: "OS image", Action: "add", To: s.OSImage.Name},
 	}
 	if s.DiskSize != "" {
-		out = append(out, git.Change{Field: "Root disk", Action: "add", To: s.DiskSize})
+		out = append(out, model.Change{Field: "Root disk", Action: "add", To: s.DiskSize})
 	}
 	for _, d := range s.ExtraDisks {
-		out = append(out, git.Change{Field: "Disk", Action: "add", To: fmt.Sprintf("%s (%s)", d.Name, d.Size)})
+		out = append(out, model.Change{Field: "Disk", Action: "add", To: fmt.Sprintf("%s (%s)", d.Name, d.Size)})
 	}
 	for _, n := range s.Networks {
-		out = append(out, git.Change{Field: "Network", Action: "add", To: n.Name})
+		out = append(out, model.Change{Field: "Network", Action: "add", To: n.Name})
 	}
-	out = append(out, git.Change{Field: "Power", Action: "add", To: powerWord(s.Running)})
+	out = append(out, model.Change{Field: "Power", Action: "add", To: powerWord(s.Running)})
 	return out
 }
 
@@ -63,8 +63,8 @@ func powerWord(running bool) string {
 // editToMatch builds a VMEdit that transforms `from` (e.g. main/desired) into
 // `to` (e.g. running/actual) for the scalar + label + disk/network fields dotvirt
 // edits. Used by Adopt to propose the live state into git.
-func editToMatch(from, to model.VM) git.VMEdit {
-	var edit git.VMEdit
+func editToMatch(from, to model.VM) manifest.VMEdit {
+	var edit manifest.VMEdit
 	if from.Power != to.Power && to.Power != model.PowerUnknown {
 		p := string(to.Power)
 		edit.Power = &p
@@ -106,7 +106,7 @@ func editToMatch(from, to model.VM) git.VMEdit {
 	fromDisks, toDisks := diskNameSet(from), diskNameSet(to)
 	for name, size := range toDisks {
 		if _, ok := fromDisks[name]; !ok {
-			edit.AddDisks = append(edit.AddDisks, git.DiskAdd{Name: name, Size: size})
+			edit.AddDisks = append(edit.AddDisks, manifest.DiskAdd{Name: name, Size: size})
 		}
 	}
 	for name := range fromDisks {
@@ -117,7 +117,7 @@ func editToMatch(from, to model.VM) git.VMEdit {
 	fromNets, toNets := nicNameSet(from), nicNameSet(to)
 	for name, net := range toNets {
 		if _, ok := fromNets[name]; !ok {
-			edit.AddNetworks = append(edit.AddNetworks, git.NetworkAdd{Name: net})
+			edit.AddNetworks = append(edit.AddNetworks, manifest.NetworkAdd{Name: net})
 		}
 	}
 	for name := range fromNets {

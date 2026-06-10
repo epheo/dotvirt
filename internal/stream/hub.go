@@ -9,10 +9,12 @@ import (
 	"encoding/json"
 	"sync"
 	"time"
+
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // InventoryFunc computes the inventory for a branch (the git provider's method).
-type InventoryFunc func(branch string) (any, error)
+type InventoryFunc func(branch string) (model.Inventory, error)
 
 // Hub fans inventory updates out to subscribers. One Hub per process.
 type Hub struct {

@@ -1,6 +1,7 @@
-// Package git is dotvirt's git plane: it clones a repo once and reads VM
-// manifests from any branch's tree without checking it out, so inventory reads
-// never disturb a working copy.
+// Package git is dotvirt's git plane: it clones a repo once into memory and
+// reads VM manifests from any branch's tree without checking it out. Reads never
+// touch the network — a single background fetcher (driven by the git poll, and
+// nudged after dotvirt's own pushes) owns freshness by calling Refresh.
 package git
 
 import (
@@ -55,8 +56,10 @@ func (r *Repo) clone() error {
 	return nil
 }
 
-// Fetch updates all remote refs. Safe to call before a read to get fresh state.
-func (r *Repo) Fetch() error {
+// Refresh updates the cached clone's branch refs from the remote. This is the
+// single point of network freshness: the background fetcher calls it on a
+// schedule, and it's nudged after dotvirt's own pushes. Reads never call it.
+func (r *Repo) Refresh() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	err := r.repo.Fetch(&git.FetchOptions{
@@ -91,11 +94,13 @@ func (r *Repo) Branches() ([]string, error) {
 	return names, nil
 }
 
-// HeadsSignature fetches the remote and returns a stable string summarizing all
-// branch heads (name+hash). A change in this signature means some branch moved —
-// used by the live poll to know when to push fresh inventory.
+// HeadsSignature refreshes from the remote and returns a stable string
+// summarizing all branch heads (name+hash). A change means some branch moved.
+// This is the background fetcher's entry point: it both fetches (the single
+// network refresh) and reports whether anything changed, so the poll loop can
+// push fresh inventory to subscribers.
 func (r *Repo) HeadsSignature() (string, error) {
-	if err := r.Fetch(); err != nil {
+	if err := r.Refresh(); err != nil {
 		return "", err
 	}
 	r.mu.Lock()

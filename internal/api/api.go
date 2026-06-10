@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // InventoryProvider supplies branch lists and per-branch inventories.
@@ -14,7 +16,7 @@ import (
 // package doesn't depend on go-git directly.
 type InventoryProvider interface {
 	Branches() ([]string, error)
-	Inventory(branch string) (any, error)
+	Inventory(branch string) (model.Inventory, error)
 }
 
 // EditRequest is the body of an edit: which VM, on which source branch, and
@@ -50,7 +52,7 @@ type NetworkAdd struct {
 // OptionsProvider lists cluster choices for the wizard/editor (instancetypes,
 // preferences, OS images, networks). Implemented by the cluster client.
 type OptionsProvider interface {
-	ListOptions(ctx context.Context) (any, error)
+	ListOptions(ctx context.Context) (model.Options, error)
 }
 
 // ProposeRequest is the body of a propose: PR title + description.
@@ -63,15 +65,15 @@ type ProposeRequest struct {
 // staged (not committed); the whole draft is later proposed as one PR.
 // Implemented by the changeset coordinator (cmd wiring over internal/draft+git+forge).
 type Draft interface {
-	StageEdit(namespace, name string, req EditRequest) (any, error)
-	StageCreate(spec json.RawMessage) (any, error)
+	StageEdit(namespace, name string, req EditRequest) (model.DraftView, error)
+	StageCreate(spec json.RawMessage) (model.DraftView, error)
 	Unstage(namespace, name string) error
-	Get() (any, error)                           // semantic view of the draft
-	Discard() error                              // clear the whole draft
-	Propose(req ProposeRequest) (any, error)     // branch+commit+push+PR
-	VMDrift(namespace, name string) (any, error) // running-vs-main semantic diff
-	Adopt(namespace, name string) (any, error)   // stage live state into draft (running→main)
-	Resync(namespace, name string) (any, error)  // trigger ArgoCD sync (main→running)
+	Get() (model.DraftView, error)
+	Discard() error
+	Propose(req ProposeRequest) (model.ProposeResult, error)
+	VMDrift(namespace, name string) (model.DriftResult, error)
+	Adopt(namespace, name string) (model.DraftView, error)     // stage live state (running→main)
+	Resync(namespace, name string) (model.ResyncResult, error) // trigger ArgoCD sync (main→running)
 }
 
 // StreamHandler upgrades a request to a WebSocket that pushes live inventory.

@@ -1,15 +1,15 @@
-package git
+package manifest
 
 import (
 	"fmt"
 	"strings"
 )
 
-// unifiedDiff renders a minimal unified diff between two versions of a file.
+// UnifiedDiff renders a minimal unified diff between two versions of a file.
 // Since dotvirt edits change only a handful of lines in place, this emits a
 // compact line-by-line diff with a little surrounding context — enough for the
 // UI's "what will this commit change" preview.
-func unifiedDiff(path string, before, after []byte) string {
+func UnifiedDiff(path string, before, after []byte) string {
 	a := strings.Split(strings.TrimRight(string(before), "\n"), "\n")
 	b := strings.Split(strings.TrimRight(string(after), "\n"), "\n")
 

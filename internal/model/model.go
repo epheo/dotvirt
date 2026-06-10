@@ -71,3 +71,80 @@ type Inventory struct {
 	Branch   string    `json:"branch"`
 	Projects []Project `json:"projects"`
 }
+
+// Change is one human-readable, YAML-free change item (a semantic diff entry).
+// Action is "change" (From→To), "add" (To), or "remove" (From).
+type Change struct {
+	Field  string `json:"field"`
+	Action string `json:"action"` // change | add | remove
+	From   string `json:"from,omitempty"`
+	To     string `json:"to,omitempty"`
+}
+
+// --- DTOs returned across the API boundary ---
+
+// DriftResult is a VM's drift (running vs main) as semantic changes.
+type DriftResult struct {
+	Drift   bool     `json:"drift"`
+	Changes []Change `json:"changes"`
+}
+
+// DraftItem is one VM's pending change rendered for the UI.
+type DraftItem struct {
+	Kind      string   `json:"kind"` // edit | create
+	Namespace string   `json:"namespace"`
+	Name      string   `json:"name"`
+	Changes   []Change `json:"changes"`
+	YAML      string   `json:"yaml,omitempty"` // raw/edited manifest for the collapsed view
+}
+
+// DraftView is the whole draft changeset as semantic items.
+type DraftView struct {
+	Base   string      `json:"base"`
+	Branch string      `json:"branch"`
+	Count  int         `json:"count"`
+	Items  []DraftItem `json:"items"`
+}
+
+// ProposeResult is returned after proposing the draft as a PR.
+type ProposeResult struct {
+	Branch     string `json:"branch"`
+	Pushed     bool   `json:"pushed"`
+	PRURL      string `json:"prURL,omitempty"`
+	PRNumber   int    `json:"prNumber,omitempty"`
+	CompareURL string `json:"compareURL,omitempty"`
+	Existing   bool   `json:"existing,omitempty"`
+}
+
+// ResyncResult reports which ArgoCD Application was synced.
+type ResyncResult struct {
+	Application string `json:"application"`
+	Revision    string `json:"revision"`
+}
+
+// Options are the cluster-provided choices for the wizard/editor.
+type Options struct {
+	Instancetypes []Instancetype  `json:"instancetypes"`
+	Preferences   []Preference    `json:"preferences"`
+	OSImages      []OSImage       `json:"osImages"`
+	Networks      []NetworkOption `json:"networks"`
+}
+
+type Instancetype struct {
+	Name   string `json:"name"`
+	CPU    int64  `json:"cpu"`
+	Memory string `json:"memory"`
+}
+type Preference struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName,omitempty"`
+}
+type OSImage struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Ready     bool   `json:"ready"`
+}
+type NetworkOption struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+}

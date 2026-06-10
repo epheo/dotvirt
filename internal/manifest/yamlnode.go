@@ -1,4 +1,4 @@
-package git
+package manifest
 
 import "gopkg.in/yaml.v3"
 

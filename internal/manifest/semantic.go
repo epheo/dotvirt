@@ -1,4 +1,4 @@
-package git
+package manifest
 
 import (
 	"fmt"
@@ -7,77 +7,68 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 )
 
-// Change is one human-readable, YAML-free change item for the UI. Action is
-// "change" (From→To), "add" (To), or "remove" (From).
-type Change struct {
-	Field  string `json:"field"`
-	Action string `json:"action"` // change | add | remove
-	From   string `json:"from,omitempty"`
-	To     string `json:"to,omitempty"`
-}
-
-// ChangesForEdit renders a VMEdit as semantic Change items, relative to the VM's
+// ChangesForEdit renders a VMEdit as semantic model.Change items, relative to the VM's
 // current state (parsed from its source manifest). It mirrors what ApplyEdit
 // will do, so the preview matches the eventual diff — without showing YAML.
-func ChangesForEdit(current model.VM, edit VMEdit) []Change {
-	var out []Change
+func ChangesForEdit(current model.VM, edit VMEdit) []model.Change {
+	var out []model.Change
 
 	if edit.Power != nil && *edit.Power != string(current.Power) {
-		out = append(out, Change{Field: "Power", Action: "change", From: string(current.Power), To: *edit.Power})
+		out = append(out, model.Change{Field: "Power", Action: "change", From: string(current.Power), To: *edit.Power})
 	}
 	if edit.CPUCores != nil && *edit.CPUCores != current.CPUCores {
-		out = append(out, Change{Field: "CPU", Action: "change",
+		out = append(out, model.Change{Field: "CPU", Action: "change",
 			From: fmt.Sprintf("%d vCPU", current.CPUCores), To: fmt.Sprintf("%d vCPU", *edit.CPUCores)})
 	}
 	if edit.Memory != nil && *edit.Memory != current.Memory {
-		out = append(out, Change{Field: "Memory", Action: "change", From: current.Memory, To: *edit.Memory})
+		out = append(out, model.Change{Field: "Memory", Action: "change", From: current.Memory, To: *edit.Memory})
 	}
 	if edit.Instancetype != nil && *edit.Instancetype != current.Instancetype {
-		out = append(out, Change{Field: "Instance type", Action: "change", From: current.Instancetype, To: *edit.Instancetype})
+		out = append(out, model.Change{Field: "Instance type", Action: "change", From: current.Instancetype, To: *edit.Instancetype})
 	}
 	if edit.Preference != nil && *edit.Preference != current.Preference {
-		out = append(out, Change{Field: "Preference", Action: "change", From: current.Preference, To: *edit.Preference})
+		out = append(out, model.Change{Field: "Preference", Action: "change", From: current.Preference, To: *edit.Preference})
 	}
 
 	for _, k := range sortedKeys(edit.SetLabels) {
 		v := edit.SetLabels[k]
 		if old, ok := current.Labels[k]; ok {
 			if old != v {
-				out = append(out, Change{Field: "Label " + k, Action: "change", From: old, To: v})
+				out = append(out, model.Change{Field: "Label " + k, Action: "change", From: old, To: v})
 			}
 		} else {
-			out = append(out, Change{Field: "Label " + k, Action: "add", To: v})
+			out = append(out, model.Change{Field: "Label " + k, Action: "add", To: v})
 		}
 	}
 	for _, k := range sortedStrings(edit.RemoveLabels) {
 		if old, ok := current.Labels[k]; ok {
-			out = append(out, Change{Field: "Label " + k, Action: "remove", From: old})
+			out = append(out, model.Change{Field: "Label " + k, Action: "remove", From: old})
 		}
 	}
 
 	for _, d := range edit.AddDisks {
-		out = append(out, Change{Field: "Disk", Action: "add", To: fmt.Sprintf("%s (%s)", d.Name, d.Size)})
+		out = append(out, model.Change{Field: "Disk", Action: "add", To: fmt.Sprintf("%s (%s)", d.Name, d.Size)})
 	}
 	for _, name := range edit.RemoveDisks {
-		out = append(out, Change{Field: "Disk", Action: "remove", From: name})
+		out = append(out, model.Change{Field: "Disk", Action: "remove", From: name})
 	}
 	for _, n := range edit.AddNetworks {
-		out = append(out, Change{Field: "Network", Action: "add", To: n.Name})
+		out = append(out, model.Change{Field: "Network", Action: "add", To: n.Name})
 	}
 	for _, name := range edit.RemoveNetworks {
-		out = append(out, Change{Field: "Network", Action: "remove", From: name})
+		out = append(out, model.Change{Field: "Network", Action: "remove", From: name})
 	}
 	return out
 }
 
 // DiffVMs renders the difference between two parsed VMs (e.g. running vs main)
-// as semantic Change items — used for drift detail. "From" is the a side
+// as semantic model.Change items — used for drift detail. "From" is the a side
 // (e.g. main / desired), "To" is the b side (e.g. running / actual).
-func DiffVMs(a, b model.VM) []Change {
-	var out []Change
+func DiffVMs(a, b model.VM) []model.Change {
+	var out []model.Change
 	cmp := func(field, av, bv string) {
 		if av != bv {
-			out = append(out, Change{Field: field, Action: "change", From: av, To: bv})
+			out = append(out, model.Change{Field: field, Action: "change", From: av, To: bv})
 		}
 	}
 	cmp("Power", string(a.Power), string(b.Power))
@@ -94,12 +85,12 @@ func DiffVMs(a, b model.VM) []Change {
 		if bv, ok := b.Labels[k]; ok {
 			cmp("Label "+k, av, bv)
 		} else {
-			out = append(out, Change{Field: "Label " + k, Action: "remove", From: av})
+			out = append(out, model.Change{Field: "Label " + k, Action: "remove", From: av})
 		}
 	}
 	for _, k := range sortedKeys(b.Labels) {
 		if _, ok := a.Labels[k]; !ok {
-			out = append(out, Change{Field: "Label " + k, Action: "add", To: b.Labels[k]})
+			out = append(out, model.Change{Field: "Label " + k, Action: "add", To: b.Labels[k]})
 		}
 	}
 
@@ -129,16 +120,16 @@ func nicNamesOf(v model.VM) []string {
 }
 
 // diffNamedSet reports items added/removed between two lists (by value).
-func diffNamedSet(field string, a, b []string, out *[]Change) {
+func diffNamedSet(field string, a, b []string, out *[]model.Change) {
 	as, bs := toSet(a), toSet(b)
 	for _, x := range a {
 		if !bs[x] {
-			*out = append(*out, Change{Field: field, Action: "remove", From: x})
+			*out = append(*out, model.Change{Field: field, Action: "remove", From: x})
 		}
 	}
 	for _, x := range b {
 		if !as[x] {
-			*out = append(*out, Change{Field: field, Action: "add", To: x})
+			*out = append(*out, model.Change{Field: field, Action: "add", To: x})
 		}
 	}
 }
