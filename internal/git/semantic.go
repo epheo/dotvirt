@@ -1,0 +1,167 @@
+package git
+
+import (
+	"fmt"
+	"sort"
+
+	"github.com/epheo/dotvirt/internal/model"
+)
+
+// Change is one human-readable, YAML-free change item for the UI. Action is
+// "change" (From→To), "add" (To), or "remove" (From).
+type Change struct {
+	Field  string `json:"field"`
+	Action string `json:"action"` // change | add | remove
+	From   string `json:"from,omitempty"`
+	To     string `json:"to,omitempty"`
+}
+
+// ChangesForEdit renders a VMEdit as semantic Change items, relative to the VM's
+// current state (parsed from its source manifest). It mirrors what ApplyEdit
+// will do, so the preview matches the eventual diff — without showing YAML.
+func ChangesForEdit(current model.VM, edit VMEdit) []Change {
+	var out []Change
+
+	if edit.Power != nil && *edit.Power != string(current.Power) {
+		out = append(out, Change{Field: "Power", Action: "change", From: string(current.Power), To: *edit.Power})
+	}
+	if edit.CPUCores != nil && *edit.CPUCores != current.CPUCores {
+		out = append(out, Change{Field: "CPU", Action: "change",
+			From: fmt.Sprintf("%d vCPU", current.CPUCores), To: fmt.Sprintf("%d vCPU", *edit.CPUCores)})
+	}
+	if edit.Memory != nil && *edit.Memory != current.Memory {
+		out = append(out, Change{Field: "Memory", Action: "change", From: current.Memory, To: *edit.Memory})
+	}
+	if edit.Instancetype != nil && *edit.Instancetype != current.Instancetype {
+		out = append(out, Change{Field: "Instance type", Action: "change", From: current.Instancetype, To: *edit.Instancetype})
+	}
+	if edit.Preference != nil && *edit.Preference != current.Preference {
+		out = append(out, Change{Field: "Preference", Action: "change", From: current.Preference, To: *edit.Preference})
+	}
+
+	for _, k := range sortedKeys(edit.SetLabels) {
+		v := edit.SetLabels[k]
+		if old, ok := current.Labels[k]; ok {
+			if old != v {
+				out = append(out, Change{Field: "Label " + k, Action: "change", From: old, To: v})
+			}
+		} else {
+			out = append(out, Change{Field: "Label " + k, Action: "add", To: v})
+		}
+	}
+	for _, k := range sortedStrings(edit.RemoveLabels) {
+		if old, ok := current.Labels[k]; ok {
+			out = append(out, Change{Field: "Label " + k, Action: "remove", From: old})
+		}
+	}
+
+	for _, d := range edit.AddDisks {
+		out = append(out, Change{Field: "Disk", Action: "add", To: fmt.Sprintf("%s (%s)", d.Name, d.Size)})
+	}
+	for _, name := range edit.RemoveDisks {
+		out = append(out, Change{Field: "Disk", Action: "remove", From: name})
+	}
+	for _, n := range edit.AddNetworks {
+		out = append(out, Change{Field: "Network", Action: "add", To: n.Name})
+	}
+	for _, name := range edit.RemoveNetworks {
+		out = append(out, Change{Field: "Network", Action: "remove", From: name})
+	}
+	return out
+}
+
+// DiffVMs renders the difference between two parsed VMs (e.g. running vs main)
+// as semantic Change items — used for drift detail. "From" is the a side
+// (e.g. main / desired), "To" is the b side (e.g. running / actual).
+func DiffVMs(a, b model.VM) []Change {
+	var out []Change
+	cmp := func(field, av, bv string) {
+		if av != bv {
+			out = append(out, Change{Field: field, Action: "change", From: av, To: bv})
+		}
+	}
+	cmp("Power", string(a.Power), string(b.Power))
+	if a.CPUCores != b.CPUCores {
+		cmp("CPU", fmt.Sprintf("%d vCPU", a.CPUCores), fmt.Sprintf("%d vCPU", b.CPUCores))
+	}
+	cmp("Memory", a.Memory, b.Memory)
+	cmp("Instance type", a.Instancetype, b.Instancetype)
+	cmp("Preference", a.Preference, b.Preference)
+
+	// Labels present on one side only or differing.
+	for _, k := range sortedKeys(a.Labels) {
+		av := a.Labels[k]
+		if bv, ok := b.Labels[k]; ok {
+			cmp("Label "+k, av, bv)
+		} else {
+			out = append(out, Change{Field: "Label " + k, Action: "remove", From: av})
+		}
+	}
+	for _, k := range sortedKeys(b.Labels) {
+		if _, ok := a.Labels[k]; !ok {
+			out = append(out, Change{Field: "Label " + k, Action: "add", To: b.Labels[k]})
+		}
+	}
+
+	diffNamedSet("Disk", diskNamesOf(a), diskNamesOf(b), &out)
+	diffNamedSet("Network", nicNamesOf(a), nicNamesOf(b), &out)
+	return out
+}
+
+func diskNamesOf(v model.VM) []string {
+	var n []string
+	for _, d := range v.Disks {
+		label := d.Name
+		if d.Size != "" {
+			label = fmt.Sprintf("%s (%s)", d.Name, d.Size)
+		}
+		n = append(n, label)
+	}
+	return n
+}
+
+func nicNamesOf(v model.VM) []string {
+	var n []string
+	for _, x := range v.Networks {
+		n = append(n, x.Name)
+	}
+	return n
+}
+
+// diffNamedSet reports items added/removed between two lists (by value).
+func diffNamedSet(field string, a, b []string, out *[]Change) {
+	as, bs := toSet(a), toSet(b)
+	for _, x := range a {
+		if !bs[x] {
+			*out = append(*out, Change{Field: field, Action: "remove", From: x})
+		}
+	}
+	for _, x := range b {
+		if !as[x] {
+			*out = append(*out, Change{Field: field, Action: "add", To: x})
+		}
+	}
+}
+
+func toSet(s []string) map[string]bool {
+	m := make(map[string]bool, len(s))
+	for _, x := range s {
+		m[x] = true
+	}
+	return m
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sortedStrings(s []string) []string {
+	out := append([]string(nil), s...)
+	sort.Strings(out)
+	return out
+}

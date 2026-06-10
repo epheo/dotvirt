@@ -127,17 +127,80 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 	return res.json() as Promise<T>;
 }
 
+async function del(path: string): Promise<void> {
+	const res = await fetch(path, { method: 'DELETE' });
+	if (!res.ok) throw new Error(`${path}: ${res.status} ${await res.text()}`);
+}
+
+// --- Draft changeset types ---
+
+export interface Change {
+	field: string;
+	action: 'change' | 'add' | 'remove';
+	from?: string;
+	to?: string;
+}
+export interface DraftItem {
+	kind: 'edit' | 'create';
+	namespace: string;
+	name: string;
+	changes: Change[];
+	yaml?: string;
+}
+export interface DraftView {
+	base: string;
+	branch: string;
+	count: number;
+	items: DraftItem[];
+}
+export interface ProposeResult {
+	branch: string;
+	pushed: boolean;
+	prURL?: string;
+	prNumber?: number;
+	compareURL?: string;
+	existing?: boolean;
+}
+export interface DriftResult {
+	drift: boolean;
+	changes: Change[];
+}
+
 export const api = {
 	branches: () => get<string[]>('/api/branches'),
 	inventory: (branch?: string) =>
 		get<Inventory>(`/api/inventory${branch ? `?branch=${encodeURIComponent(branch)}` : ''}`),
-	editVM: (namespace: string, name: string, req: EditRequest) =>
-		post<EditResult>(
+	options: () => get<Options>('/api/options'),
+
+	// Staging (edit/create return the updated draft view).
+	stageEdit: (namespace: string, name: string, req: EditRequest) =>
+		post<DraftView>(
 			`/api/vms/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/edit`,
 			req
 		),
-	options: () => get<Options>('/api/options'),
-	createVM: (req: CreateVMRequest) => post<EditResult>('/api/vms', req)
+	stageCreate: (req: CreateVMRequest) => post<DraftView>('/api/vms', req),
+
+	// Draft management.
+	getDraft: () => get<DraftView>('/api/draft'),
+	unstage: (namespace: string, name: string) =>
+		del(`/api/draft/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`),
+	discardDraft: () => del('/api/draft'),
+	propose: (title: string, message: string) =>
+		post<ProposeResult>('/api/draft/propose', { title, message }),
+
+	// Drift (running vs main) for one VM.
+	drift: (namespace: string, name: string) =>
+		get<DriftResult>(`/api/vms/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/drift`),
+
+	// Reconcile: adopt live state into the draft (running→main), or re-sync the
+	// cluster from git via ArgoCD (main→running).
+	adopt: (namespace: string, name: string) =>
+		post<DraftView>(`/api/vms/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/adopt`, {}),
+	resync: (namespace: string, name: string) =>
+		post<{ application: string; revision: string }>(
+			`/api/vms/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/resync`,
+			{}
+		)
 };
 
 /**

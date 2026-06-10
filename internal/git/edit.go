@@ -13,7 +13,7 @@ import (
 type VMEdit struct {
 	Power        *string `json:"power,omitempty"` // "On" | "Off" -> runStrategy Always/Halted (or legacy running bool)
 	CPUCores     *int    `json:"cpuCores,omitempty"`
-	Memory       *string `json:"memory,omitempty"` // e.g. "4Gi"
+	Memory       *string `json:"memory,omitempty"`       // e.g. "4Gi"
 	Instancetype *string `json:"instancetype,omitempty"` // spec.instancetype.name
 	Preference   *string `json:"preference,omitempty"`   // spec.preference.name
 
@@ -30,8 +30,8 @@ type VMEdit struct {
 	RemoveNetworks []string     `json:"removeNetworks,omitempty"` // network/interface names to remove
 }
 
-// empty reports whether the edit changes nothing.
-func (e VMEdit) empty() bool {
+// Empty reports whether the edit changes nothing.
+func (e VMEdit) Empty() bool {
 	return e.Power == nil && e.CPUCores == nil && e.Memory == nil &&
 		e.Instancetype == nil && e.Preference == nil &&
 		len(e.SetLabels) == 0 && len(e.RemoveLabels) == 0 &&
@@ -42,13 +42,13 @@ func (e VMEdit) empty() bool {
 
 // DiskAdd adds a blank (emptyDisk) data disk to the template.
 type DiskAdd struct {
-	Name string
-	Size string // e.g. "10Gi"
+	Name string `json:"name"`
+	Size string `json:"size"` // e.g. "10Gi"
 }
 
 // NetworkAdd adds a multus (NAD-backed) network + bridge interface.
 type NetworkAdd struct {
-	Name string // NAD ref "<namespace>/<nad>"
+	Name string `json:"name"` // NAD ref "<namespace>/<nad>"
 }
 
 // ApplyEdit edits the VirtualMachine named (namespace, name) within a manifest,

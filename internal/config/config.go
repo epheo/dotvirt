@@ -30,6 +30,19 @@ type Config struct {
 	GitPollInterval time.Duration // how often to poll git for branch changes (drives live push)
 	Push            bool          // push commits to the remote (disable for local/offline testing)
 
+	// Changeset / PR workflow
+	BaseBranch     string // branch new work is cut from + PR target (the GitOps trunk)
+	ProposedBranch string // dotvirt-owned working branch holding the draft
+	DraftFile      string // path to the persisted draft changeset
+
+	// Forge (Forgejo) for PR creation; empty url/token degrades to push-only.
+	ForgeURL   string
+	ForgeToken string
+	ForgeOwner string
+	ForgeRepo  string
+
+	InsecureTLS bool // skip TLS verification for git + forge (dev, e.g. self-signed Route)
+
 	// Toggles for environments where a piece isn't wired yet.
 	ClusterEnabled bool
 	ArgoEnabled    bool
@@ -55,6 +68,16 @@ func Load(args []string) (*Config, error) {
 	fs.DurationVar(&c.ExportInterval, "export-interval", 30*time.Second, "how often to export live state to the running branch")
 	fs.DurationVar(&c.GitPollInterval, "git-poll-interval", 10*time.Second, "how often to poll git for branch changes (drives live inventory push)")
 	fs.BoolVar(&c.Push, "push", envBool("DOTVIRT_PUSH", true), "push commits to the remote (disable for local/offline testing)")
+
+	fs.StringVar(&c.BaseBranch, "base-branch", envOr("DOTVIRT_BASE_BRANCH", "main"), "branch new work is cut from + PR target")
+	fs.StringVar(&c.ProposedBranch, "proposed-branch", envOr("DOTVIRT_PROPOSED_BRANCH", "dotvirt/proposed"), "working branch holding the draft changeset")
+	fs.StringVar(&c.DraftFile, "draft-file", os.Getenv("DOTVIRT_DRAFT_FILE"), "path to the persisted draft (default <repo-cache>/draft.json)")
+	fs.StringVar(&c.ForgeURL, "forge-url", os.Getenv("DOTVIRT_FORGE_URL"), "Forgejo base URL (empty = push-only, no PR)")
+	fs.StringVar(&c.ForgeToken, "forge-token", os.Getenv("DOTVIRT_FORGE_TOKEN"), "Forgejo API token")
+	fs.StringVar(&c.ForgeOwner, "forge-owner", os.Getenv("DOTVIRT_FORGE_OWNER"), "Forgejo repo owner")
+	fs.StringVar(&c.ForgeRepo, "forge-repo", os.Getenv("DOTVIRT_FORGE_REPO"), "Forgejo repo name")
+	fs.BoolVar(&c.InsecureTLS, "insecure-tls", envBool("DOTVIRT_INSECURE_TLS", false), "skip TLS verification for git+forge (dev only)")
+
 	fs.BoolVar(&c.ClusterEnabled, "cluster", envBool("DOTVIRT_CLUSTER", false), "enable live cluster reads + running-branch export")
 	fs.BoolVar(&c.ArgoEnabled, "argo", envBool("DOTVIRT_ARGO", false), "enable ArgoCD drift reads")
 
@@ -63,6 +86,9 @@ func Load(args []string) (*Config, error) {
 	}
 	if c.RepoURL == "" {
 		return nil, fmt.Errorf("repo is required (-repo or DOTVIRT_REPO)")
+	}
+	if c.DraftFile == "" {
+		c.DraftFile = c.RepoCacheDir + "/draft.json"
 	}
 	return c, nil
 }

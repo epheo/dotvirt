@@ -9,15 +9,17 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/api"
 	"github.com/epheo/dotvirt/internal/argo"
+	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/config"
+	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/export"
+	"github.com/epheo/dotvirt/internal/forge"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/stream"
 )
@@ -34,6 +36,10 @@ func run() error {
 		return err
 	}
 
+	if cfg.InsecureTLS {
+		git.AllowInsecureTLS() // dev: trust self-signed Forgejo Route cert
+	}
+
 	repo, err := git.Open(cfg.RepoURL, cfg.GitUsername, cfg.GitToken)
 	if err != nil {
 		return err
@@ -44,9 +50,18 @@ func run() error {
 	defer stop()
 
 	// One writable view of the repo, shared by the running-branch exporter and
-	// the VM editor.
+	// the changeset coordinator (draft → propose → PR).
 	writeRepo := git.OpenWrite(cfg.RepoURL, cfg.GitUsername, cfg.GitToken, cfg.Push)
-	editor := git.NewEditor(writeRepo, branchSeq())
+
+	draftStore, err := draft.Open(cfg.DraftFile)
+	if err != nil {
+		return err
+	}
+	forgeClient := forge.New(forge.Config{
+		BaseURL: cfg.ForgeURL, Token: cfg.ForgeToken,
+		Owner: cfg.ForgeOwner, Repo: cfg.ForgeRepo,
+		InsecureTLS: cfg.InsecureTLS,
+	})
 
 	// Live inventory hub: watches + a git poll feed its change channel; it pushes
 	// recomputed inventory to WebSocket subscribers.
@@ -70,6 +85,7 @@ func run() error {
 		go exporter.Run(ctx, cfg.ExportInterval)
 	}
 
+	var resyncer changeset.Resyncer
 	if cfg.ArgoEnabled {
 		argoClient, err := argo.New(cfg.Kubeconfig)
 		if err != nil {
@@ -77,14 +93,16 @@ func run() error {
 		}
 		provider.WithDrift(driftSource(ctx, argoClient))
 		argoClient.Watch(ctx, hub.Changed()) // push on Application drift changes
+		resyncer = resyncAdapter{argoClient}
 	}
+
+	coordinator := changeset.New(draftStore, writeRepo, provider, forgeClient, resyncer, cfg.BaseBranch, cfg.ProposedBranch)
 
 	deps := api.Deps{
 		AllowOrigin: cfg.UIOrigin,
 		Inventory:   provider,
-		Editor:      editor,
-		Creator:     editor,
 		Options:     optionsProvider,
+		Draft:       coordinator,
 		Stream:      hub,
 		VNC:         vncHandler,
 	}
@@ -143,11 +161,11 @@ func (a optionsAdapter) ListOptions(ctx context.Context) (any, error) {
 	return a.c.ListOptions(ctx)
 }
 
-// branchSeq returns a function yielding monotonically increasing integers, used
-// to make feature branch names unique across edits within a process.
-func branchSeq() func() int {
-	var n atomic.Int64
-	return func() int { return int(n.Add(1)) }
+// resyncAdapter adapts the argo client's typed Resync to changeset.Resyncer.
+type resyncAdapter struct{ c *argo.Client }
+
+func (a resyncAdapter) Resync(ctx context.Context, namespace, name string) (any, error) {
+	return a.c.Resync(ctx, namespace, name)
 }
 
 // enricher adapts the cluster client's live state to the inventory provider's

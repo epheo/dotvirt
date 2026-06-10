@@ -1,12 +1,11 @@
 <script lang="ts">
-	import { api, type EditRequest, type EditResult, type Options, type VM } from '$lib/api';
+	import { api, type EditRequest, type Options, type VM } from '$lib/api';
 
 	let {
 		vm,
-		branch,
 		onclose,
-		onsaved
-	}: { vm: VM; branch: string; onclose: () => void; onsaved: () => void } = $props();
+		onstaged
+	}: { vm: VM; onclose: () => void; onstaged: () => void } = $props();
 
 	let options = $state<Options | null>(null);
 
@@ -25,10 +24,8 @@
 	let disks = $state((seed.disks ?? []).map((d) => ({ ...d, removed: false, isNew: false })));
 	let nics = $state((seed.networks ?? []).map((n) => ({ ...n, removed: false, isNew: false })));
 
-	let message = $state('');
 	let saving = $state(false);
 	let error = $state('');
-	let result = $state<EditResult | null>(null);
 
 	// Collapsible sections (vCenter expands them all by default).
 	let open = $state({ compute: true, storage: true, network: true });
@@ -49,7 +46,7 @@
 	}
 
 	function buildRequest(): EditRequest {
-		const req: EditRequest = { sourceBranch: branch, sourceFile: vm.sourceFile };
+		const req: EditRequest = { sourceBranch: '', sourceFile: vm.sourceFile };
 		if (power !== vm.power) req.power = power;
 		if (cpuCores !== vm.cpuCores) req.cpuCores = cpuCores;
 		if (memory !== (vm.memory ?? '')) req.memory = memory;
@@ -78,22 +75,22 @@
 		const removeNetworks = nics.filter((n) => !n.isNew && n.removed).map((n) => n.name);
 		if (removeNetworks.length) req.removeNetworks = removeNetworks;
 
-		if (message.trim()) req.message = message.trim();
 		return req;
 	}
 
 	const dirty = $derived.by(() => {
 		const r = buildRequest();
-		// More than the two always-present fields means there's a change.
+		// More than the two always-present fields (sourceBranch, sourceFile) means a change.
 		return Object.keys(r).length > 2;
 	});
 
-	async function save() {
+	async function stage() {
 		saving = true;
 		error = '';
 		try {
-			result = await api.editVM(vm.namespace, vm.name, buildRequest());
-			onsaved();
+			await api.stageEdit(vm.namespace, vm.name, buildRequest());
+			onstaged();
+			onclose();
 		} catch (e) {
 			error = String(e);
 		} finally {
@@ -115,17 +112,8 @@
 		</header>
 
 		<div class="min-h-0 flex-1 overflow-y-auto">
-			{#if result}
-				<div class="p-5">
-					<p class="mb-2 text-sm text-slate-700">
-						Committed to <code class="rounded bg-slate-100 px-1">{result.branch}</code>
-						{result.pushed ? '(pushed)' : '(local)'} — <code>{result.file}</code>
-					</p>
-					<pre class="overflow-x-auto rounded border border-slate-200 bg-slate-50 p-3 font-mono text-xs leading-relaxed">{result.diff}</pre>
-				</div>
-			{:else}
-				<!-- toolbar: ADD NEW DEVICE -->
-				<div class="flex items-center gap-2 border-b border-slate-100 px-5 py-2">
+			<!-- toolbar: ADD NEW DEVICE -->
+			<div class="flex items-center gap-2 border-b border-slate-100 px-5 py-2">
 					<span class="text-xs text-slate-400">Add new device:</span>
 					<button onclick={() => addNewDevice('disk')} class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50">Hard disk</button>
 					<button onclick={() => addNewDevice('network')} class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50">Network adapter</button>
@@ -248,22 +236,17 @@
 					</div>
 				</section>
 
-				{#if error}
-					<pre class="mx-5 mb-3 rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
-				{/if}
+			{#if error}
+				<pre class="mx-5 mb-3 rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
 			{/if}
 		</div>
 
 		<footer class="flex items-center gap-2 border-t border-slate-200 px-5 py-3">
-			{#if result}
-				<button onclick={onclose} class="ml-auto rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white">Done</button>
-			{:else}
-				<input bind:value={message} placeholder="commit message (optional)" class="flex-1 rounded border border-slate-300 px-2 py-1.5 text-sm" />
-				<button onclick={onclose} class="rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
-				<button onclick={save} disabled={!dirty || saving} class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300">
-					{saving ? 'Saving…' : 'OK'}
-				</button>
-			{/if}
+			<span class="text-xs text-slate-400">Changes are staged into the changeset; review &amp; open a PR from “Changes”.</span>
+			<button onclick={onclose} class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
+			<button onclick={stage} disabled={!dirty || saving} class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300">
+				{saving ? 'Staging…' : 'Stage change'}
+			</button>
 		</footer>
 	</div>
 </div>

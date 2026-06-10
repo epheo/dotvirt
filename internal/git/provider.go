@@ -61,6 +61,32 @@ func (p *Provider) Branches() ([]string, error) {
 	return p.repo.Branches()
 }
 
+// FindVM parses the VM (namespace, name) as it appears on a branch, for semantic
+// diffing (staging previews, drift). Returns ok=false if not present. It does
+// NOT enrich with live/argo state — it's the pure manifest view. Fetches first
+// so it reflects the latest remote (e.g. dotvirt's running-branch exports).
+func (p *Provider) FindVM(branch, namespace, name string) (model.VM, bool, error) {
+	if err := p.repo.Fetch(); err != nil {
+		return model.VM{}, false, err
+	}
+	files, err := p.repo.VMManifests(branch)
+	if err != nil {
+		return model.VM{}, false, err
+	}
+	for _, f := range files {
+		vms, err := ParseVMs(f.Path, f.Content, defaultNamespace(f.Path))
+		if err != nil {
+			return model.VM{}, false, err
+		}
+		for _, vm := range vms {
+			if vm.Namespace == namespace && vm.Name == name {
+				return vm, true, nil
+			}
+		}
+	}
+	return model.VM{}, false, nil
+}
+
 // Inventory builds the inventory tree for a branch. An empty branch defaults to
 // the first available branch so the UI has something to show on first load.
 // It fetches first so the read reflects the latest remote state — including

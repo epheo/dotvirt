@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api, streamInventory, type Inventory, type VM } from '$lib/api';
+	import ChangesPanel from '$lib/components/ChangesPanel.svelte';
 	import InventoryTree from '$lib/components/InventoryTree.svelte';
 	import NewVMWizard from '$lib/components/NewVMWizard.svelte';
 	import VMDetail from '$lib/components/VMDetail.svelte';
@@ -51,7 +52,20 @@
 	);
 
 	let showWizard = $state(false);
+	let showChanges = $state(false);
+	let draftCount = $state(0);
 	const namespaces = $derived(inventory ? inventory.projects.map((p) => p.namespace) : []);
+
+	async function refreshDraftCount() {
+		try {
+			draftCount = (await api.getDraft()).count;
+		} catch {
+			draftCount = 0;
+		}
+	}
+	$effect(() => {
+		refreshDraftCount();
+	});
 </script>
 
 <div class="flex h-screen flex-col">
@@ -79,9 +93,17 @@
 			<span class="text-slate-300">{connected ? 'Live' : 'Reconnecting…'}</span>
 		</span>
 		<button
+			onclick={() => (showChanges = true)}
+			class="ml-auto rounded border border-slate-600 px-3 py-1 text-xs font-medium text-slate-100 hover:bg-slate-700"
+		>
+			Changes{#if draftCount > 0}
+				<span class="ml-1 rounded-full bg-blue-500 px-1.5 text-white">{draftCount}</span>
+			{/if}
+		</button>
+		<button
 			onclick={() => (showWizard = true)}
 			disabled={!inventory}
-			class="ml-auto rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-40"
+			class="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-40"
 		>
 			+ New VM
 		</button>
@@ -113,23 +135,21 @@
 			{/if}
 		</aside>
 		<main class="min-w-0 flex-1 overflow-y-auto bg-white">
-			<VMDetail
-				vm={selected}
-				{branch}
-				onsaved={() => {
-					// A new feature branch may now exist — refresh the switcher.
+			<VMDetail vm={selected} {branch} onstaged={refreshDraftCount} />
+		</main>
+
+		{#if showChanges}
+			<ChangesPanel
+				onclose={() => (showChanges = false)}
+				onchanged={() => {
+					refreshDraftCount();
 					loadBranches();
 				}}
 			/>
-		</main>
+		{/if}
 	</div>
 
 	{#if showWizard}
-		<NewVMWizard
-			{branch}
-			{namespaces}
-			onclose={() => (showWizard = false)}
-			oncreated={() => loadBranches()}
-		/>
+		<NewVMWizard {namespaces} onclose={() => (showWizard = false)} onstaged={refreshDraftCount} />
 	{/if}
 </div>

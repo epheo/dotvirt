@@ -1,25 +1,72 @@
 <script lang="ts">
-	import type { VM } from '$lib/api';
+	import { api, type Change, type VM } from '$lib/api';
+	import ChangeList from './ChangeList.svelte';
 	import Console from './Console.svelte';
 	import EditSettings from './EditSettings.svelte';
 	import PowerDot from './PowerDot.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 
-	let { vm, branch, onsaved }: { vm: VM | null; branch: string; onsaved?: () => void } = $props();
+	let { vm, branch, onstaged }: { vm: VM | null; branch: string; onstaged?: () => void } = $props();
 
 	type Tab = 'summary' | 'console';
 	let tab = $state<Tab>('summary');
 	let editing = $state(false);
 
+	// Drift detail (running vs main) for the selected VM.
+	let driftChanges = $state<Change[] | null>(null);
+	let showDrift = $state(false);
+	let reconciling = $state(false);
+	let reconcileMsg = $state('');
+
 	// The `running` branch mirrors the cluster and is dotvirt-owned: not editable.
 	const editable = $derived(branch !== 'running' && branch !== '');
 
+	function loadDrift(ns: string, name: string) {
+		api
+			.drift(ns, name)
+			.then((d) => (driftChanges = d.drift ? d.changes : []))
+			.catch(() => (driftChanges = null));
+	}
+
 	$effect(() => {
-		// Reset to summary when the selection changes.
-		void vm;
+		// Reset when the selection changes, and (re)load drift for this VM.
+		const cur = vm;
 		tab = 'summary';
 		editing = false;
+		driftChanges = null;
+		showDrift = false;
+		reconcileMsg = '';
+		if (cur) loadDrift(cur.namespace, cur.name);
 	});
+
+	async function adopt() {
+		if (!vm) return;
+		reconciling = true;
+		reconcileMsg = '';
+		try {
+			await api.adopt(vm.namespace, vm.name);
+			reconcileMsg = 'Live state staged into Changes — open a PR to adopt it into git.';
+			onstaged?.();
+		} catch (e) {
+			reconcileMsg = String(e);
+		} finally {
+			reconciling = false;
+		}
+	}
+
+	async function resync() {
+		if (!vm) return;
+		reconciling = true;
+		reconcileMsg = '';
+		try {
+			const r = await api.resync(vm.namespace, vm.name);
+			reconcileMsg = `Re-sync triggered on ArgoCD app "${r.application}".`;
+		} catch (e) {
+			reconcileMsg = String(e);
+		} finally {
+			reconciling = false;
+		}
+	}
 </script>
 
 {#if vm}
@@ -135,6 +182,46 @@
 						</tr>
 					</tbody>
 				</table>
+
+				{#if driftChanges && driftChanges.length > 0}
+					<div class="mt-4 rounded border border-amber-200 bg-amber-50">
+						<button
+							onclick={() => (showDrift = !showDrift)}
+							class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-amber-800"
+						>
+							<span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
+							Drift — cluster differs from git ({driftChanges.length})
+							<span class="ml-auto text-xs text-amber-600">{showDrift ? '▾' : '▸'}</span>
+						</button>
+						{#if showDrift}
+							<div class="border-t border-amber-200 px-3 py-2">
+								<p class="mb-1 text-xs text-amber-700">Desired (main) → Actual (running):</p>
+								<ChangeList changes={driftChanges} />
+								<div class="mt-3 flex items-center gap-2">
+									<button
+										onclick={adopt}
+										disabled={reconciling}
+										title="Stage the live state into a PR so git matches the cluster"
+										class="rounded border border-amber-400 bg-white px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+									>
+										Adopt into PR (running→main)
+									</button>
+									<button
+										onclick={resync}
+										disabled={reconciling}
+										title="Trigger ArgoCD to reconcile the cluster back to git"
+										class="rounded border border-amber-400 bg-white px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+									>
+										Re-sync from git (main→running)
+									</button>
+								</div>
+								{#if reconcileMsg}
+									<p class="mt-2 text-xs text-slate-600">{reconcileMsg}</p>
+								{/if}
+							</div>
+						{/if}
+					</div>
+				{/if}
 			{:else}
 				{#key `${vm.namespace}/${vm.name}`}
 					<Console {vm} />
@@ -144,12 +231,7 @@
 	</div>
 
 	{#if editing}
-		<EditSettings
-			{vm}
-			{branch}
-			onclose={() => (editing = false)}
-			onsaved={() => onsaved?.()}
-		/>
+		<EditSettings {vm} onclose={() => (editing = false)} onstaged={() => onstaged?.()} />
 	{/if}
 {:else}
 	<div class="flex h-full items-center justify-center text-sm text-slate-400">

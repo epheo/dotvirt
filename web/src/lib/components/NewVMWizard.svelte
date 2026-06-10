@@ -1,16 +1,14 @@
 <script lang="ts">
-	import { api, type CreateVMRequest, type EditResult, type Options } from '$lib/api';
+	import { api, type CreateVMRequest, type Options } from '$lib/api';
 
 	let {
-		branch,
 		namespaces,
 		onclose,
-		oncreated
+		onstaged
 	}: {
-		branch: string;
 		namespaces: string[];
 		onclose: () => void;
-		oncreated: (r: EditResult) => void;
+		onstaged: () => void;
 	} = $props();
 
 	let options = $state<Options | null>(null);
@@ -33,7 +31,6 @@
 
 	let submitting = $state(false);
 	let error = $state('');
-	let result = $state<EditResult | null>(null);
 
 	$effect(() => {
 		if (!namespace) namespace = namespaces[0] ?? 'default';
@@ -63,10 +60,9 @@
 		if (!valid) return;
 		submitting = true;
 		error = '';
-		result = null;
 		const [imgName, imgNs] = osImage.split('|');
 		const req: CreateVMRequest = {
-			sourceBranch: branch,
+			sourceBranch: '',
 			name,
 			namespace,
 			instancetype,
@@ -79,8 +75,9 @@
 		};
 		if (user || sshKey) req.cloudInit = { user: user || undefined, sshKey: sshKey || undefined };
 		try {
-			result = await api.createVM(req);
-			oncreated(result);
+			await api.stageCreate(req);
+			onstaged();
+			onclose();
 		} catch (e) {
 			error = String(e);
 		} finally {
@@ -106,15 +103,6 @@
 				<p class="rounded bg-red-50 px-3 py-2 text-sm text-red-700">Failed to load options: {loadError}</p>
 			{:else if !options}
 				<p class="text-sm text-slate-400">Loading cluster options…</p>
-			{:else if result}
-				<div>
-					<p class="mb-2 text-sm text-slate-700">
-						Created on <code class="rounded bg-slate-100 px-1">{result.branch}</code>
-						{result.pushed ? '(pushed)' : '(local)'} — <code>{result.file}</code>
-					</p>
-					<pre
-						class="overflow-x-auto rounded border border-slate-200 bg-slate-50 p-3 font-mono text-xs leading-relaxed">{result.diff}</pre>
-				</div>
 			{:else}
 				<div class="grid grid-cols-2 gap-4 text-sm">
 					<label class="block">
@@ -205,19 +193,16 @@
 			{/if}
 		</div>
 
-		<footer class="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">
-			{#if result}
-				<button onclick={onclose} class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white">Done</button>
-			{:else}
-				<button onclick={onclose} class="rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
-				<button
-					onclick={submit}
-					disabled={!valid || submitting}
-					class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
-				>
-					{submitting ? 'Creating…' : 'Create VM'}
-				</button>
-			{/if}
+		<footer class="flex items-center gap-2 border-t border-slate-200 px-5 py-3">
+			<span class="text-xs text-slate-400">Staged into the changeset; open a PR from “Changes”.</span>
+			<button onclick={onclose} class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
+			<button
+				onclick={submit}
+				disabled={!valid || submitting}
+				class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
+			>
+				{submitting ? 'Staging…' : 'Stage VM'}
+			</button>
 		</footer>
 	</div>
 </div>

@@ -31,8 +31,8 @@ type Entry struct {
 	Name      string `json:"name"`
 
 	// Edit fields (KindEdit): the change to apply to an existing manifest.
-	SourceFile string       `json:"sourceFile,omitempty"`
-	Edit       *git.VMEdit  `json:"edit,omitempty"`
+	SourceFile string      `json:"sourceFile,omitempty"`
+	Edit       *git.VMEdit `json:"edit,omitempty"`
 
 	// Create fields (KindCreate): the wizard spec for a new VM.
 	Spec *vmgen.Spec `json:"spec,omitempty"`
