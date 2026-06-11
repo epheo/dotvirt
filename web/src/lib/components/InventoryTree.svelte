@@ -3,15 +3,28 @@
 	import PowerDot from './PowerDot.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 
+	type Scope =
+		| { kind: 'all' }
+		| { kind: 'project'; project: string }
+		| { kind: 'namespace'; project: string; namespace: string };
+
 	let {
 		inventory,
 		selected,
-		onselect
+		scope,
+		onselect,
+		onscope
 	}: {
 		inventory: Inventory;
 		selected: VM | null;
+		scope: Scope;
 		onselect: (vm: VM) => void;
+		onscope: (s: Scope) => void;
 	} = $props();
+
+	const projectScoped = (name: string) => scope.kind === 'project' && scope.project === name;
+	const nsScoped = (project: string, ns: string) =>
+		scope.kind === 'namespace' && scope.project === project && scope.namespace === ns;
 
 	// Collapsed state keyed by node id; default expanded.
 	let collapsed = $state<Record<string, boolean>>({});
@@ -27,27 +40,45 @@
 </script>
 
 <div class="select-none text-[13px]">
+	<!-- All VMs: resets the grid scope to the whole inventory. -->
+	<button
+		class="flex w-full items-center gap-1 px-2 py-1 text-left hover:bg-slate-100
+			{scope.kind === 'all' ? 'bg-blue-50' : ''}"
+		onclick={() => onscope({ kind: 'all' })}
+	>
+		<span class="w-3"></span>
+		<span class="text-slate-400">▤</span>
+		<span class="font-semibold text-slate-700">All VMs</span>
+	</button>
+
 	{#each inventory.projects as project (project.name)}
 		{@const pid = `p:${project.name}`}
 		<div>
-			<!-- Project -->
-			<button
-				class="flex w-full items-center gap-1 px-2 py-1 text-left hover:bg-slate-100"
-				onclick={() => toggle(pid)}
+			<!-- Project: chevron toggles collapse, the label sets the grid scope. -->
+			<div
+				class="flex w-full items-center gap-1 px-2 py-1 hover:bg-slate-100
+					{projectScoped(project.name) ? 'bg-blue-50' : ''}"
 			>
-				<span class="w-3 text-slate-400">{collapsed[pid] ? '▸' : '▾'}</span>
-				<span class="text-blue-500">▦</span>
-				<span class="truncate font-semibold text-slate-700">{project.name}</span>
-				{#if project.error}
-					<span
-						class="rounded bg-amber-100 px-1 text-[10px] font-medium text-amber-700"
-						title={project.error}>!</span
-					>
-				{:else if projectDrift(project)}
-					<span class="h-1.5 w-1.5 rounded-full bg-red-500" title="A VM is OutOfSync"></span>
-				{/if}
-				<span class="ml-auto text-xs text-slate-400">{vmCount(project)}</span>
-			</button>
+				<button class="w-3 text-slate-400" onclick={() => toggle(pid)} title="Expand/collapse"
+					>{collapsed[pid] ? '▸' : '▾'}</button
+				>
+				<button
+					class="flex min-w-0 flex-1 items-center gap-1 text-left"
+					onclick={() => onscope({ kind: 'project', project: project.name })}
+				>
+					<span class="text-blue-500">▦</span>
+					<span class="truncate font-semibold text-slate-700">{project.name}</span>
+					{#if project.error}
+						<span
+							class="rounded bg-amber-100 px-1 text-[10px] font-medium text-amber-700"
+							title={project.error}>!</span
+						>
+					{:else if projectDrift(project)}
+						<span class="h-1.5 w-1.5 rounded-full bg-red-500" title="A VM is OutOfSync"></span>
+					{/if}
+					<span class="ml-auto text-xs text-slate-400">{vmCount(project)}</span>
+				</button>
+			</div>
 
 			{#if !collapsed[pid]}
 				{#if project.error}
@@ -60,18 +91,26 @@
 				{#each project.namespaces as ns (ns.namespace)}
 					{@const nid = `n:${project.name}/${ns.namespace}`}
 					<div>
-						<button
-							class="flex w-full items-center gap-1 py-1 pr-2 pl-5 text-left hover:bg-slate-100"
-							onclick={() => toggle(nid)}
+						<div
+							class="flex w-full items-center gap-1 py-1 pr-2 pl-5 hover:bg-slate-100
+								{nsScoped(project.name, ns.namespace) ? 'bg-blue-50' : ''}"
 						>
-							<span class="w-3 text-slate-400">{collapsed[nid] ? '▸' : '▾'}</span>
-							<span class="text-slate-400">▣</span>
-							<span class="truncate text-slate-600">{ns.namespace}</span>
-							{#if nsDrift(ns)}
-								<span class="h-1.5 w-1.5 rounded-full bg-red-500" title="A VM is OutOfSync"></span>
-							{/if}
-							<span class="ml-auto text-xs text-slate-400">{ns.vms.length}</span>
-						</button>
+							<button class="w-3 text-slate-400" onclick={() => toggle(nid)} title="Expand/collapse"
+								>{collapsed[nid] ? '▸' : '▾'}</button
+							>
+							<button
+								class="flex min-w-0 flex-1 items-center gap-1 text-left"
+								onclick={() =>
+									onscope({ kind: 'namespace', project: project.name, namespace: ns.namespace })}
+							>
+								<span class="text-slate-400">▣</span>
+								<span class="truncate text-slate-600">{ns.namespace}</span>
+								{#if nsDrift(ns)}
+									<span class="h-1.5 w-1.5 rounded-full bg-red-500" title="A VM is OutOfSync"></span>
+								{/if}
+								<span class="ml-auto text-xs text-slate-400">{ns.vms.length}</span>
+							</button>
+						</div>
 
 						{#if !collapsed[nid]}
 							{#each ns.vms as vm (vm.name)}

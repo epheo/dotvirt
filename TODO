@@ -1,0 +1,7 @@
+  - Tabular VM list + sort/filter/search — the vCenter signature. Pure frontend, data already present. High impact, low risk.
+  - Health badge + icons — cheap polish, makes it look more enterprise. Health is already in the API, unrendered.
+  - Monitoring/performance charts — very vCenter, but needs a metrics source (Prometheus/metrics.k8s.io) the backend doesn't read yet. Real backend work.
+  - Snapshots — vCenter staple. KubeVirt has VirtualMachineSnapshot/Restore CRs. But snapshots are imperative cluster state, not git — they'd break the "everything through git/PR" model unless carefully framed. Conceptually heavy.
+  - Events/Tasks history — vCenter has it; maps to k8s Events. Moderate backend work.
+  - Bulk actions (power off N VMs → one PR) — natural extension of the changeset model, genuinely useful.
+
