@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { Activity, ChevronDown, ChevronRight, Cpu, HardDrive, MemoryStick, Pencil, Trash2, X } from 'lucide-svelte';
+	import { Activity, ChevronDown, ChevronRight, Cpu, HardDrive, MemoryStick, Pencil, Trash2 } from 'lucide-svelte';
 	import { api, type Change, type VM, type VMEvent } from '$lib/api';
 	import ChangeList from './ChangeList.svelte';
+	import ConfirmDelete from './ConfirmDelete.svelte';
 	import Console from './Console.svelte';
 	import EditSettings from './EditSettings.svelte';
 	import PowerDot from './PowerDot.svelte';
@@ -14,9 +15,8 @@
 	let editing = $state(false);
 
 	// Delete is destructive once the PR merges, so it's gated behind a confirm
-	// dialog that requires typing the VM name.
+	// dialog that requires typing the VM name (handled by ConfirmDelete).
 	let deleting = $state(false);
-	let confirmName = $state('');
 	let deleteBusy = $state(false);
 	let deleteErr = $state('');
 
@@ -59,7 +59,6 @@
 		tab = 'summary';
 		editing = false;
 		deleting = false;
-		confirmName = '';
 		deleteErr = '';
 		driftChanges = null;
 		showDrift = false;
@@ -99,13 +98,12 @@
 	}
 
 	async function confirmDelete() {
-		if (!vm || confirmName !== vm.name) return;
+		if (!vm) return;
 		deleteBusy = true;
 		deleteErr = '';
 		try {
 			await api.stageDelete(vm.namespace, vm.name);
 			deleting = false;
-			confirmName = '';
 			onstaged?.();
 		} catch (e) {
 			deleteErr = String(e);
@@ -149,7 +147,6 @@
 					<button
 						onclick={() => {
 							deleting = true;
-							confirmName = '';
 							deleteErr = '';
 						}}
 						title="Delete this VM (stages a removal into Changes)"
@@ -385,53 +382,20 @@
 	{/if}
 
 	{#if deleting}
-		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-			onclick={(e) => e.target === e.currentTarget && (deleting = false)}
-			onkeydown={(e) => e.key === 'Escape' && (deleting = false)}
-			role="presentation"
+		<ConfirmDelete
+			title="Delete VM — {vm.name}"
+			confirmWord={vm.name}
+			busy={deleteBusy}
+			error={deleteErr}
+			onconfirm={confirmDelete}
+			onclose={() => (deleting = false)}
 		>
-			<div class="w-full max-w-md rounded-lg bg-white shadow-xl">
-				<header class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-					<h2 class="text-base font-semibold text-red-700">Delete VM — {vm.name}</h2>
-					<button onclick={() => (deleting = false)} class="text-slate-400 hover:text-slate-700"><X size={18} /></button>
-				</header>
-				<div class="px-5 py-4 text-sm text-slate-700">
-					<p class="mb-3">
-						This removes <span class="font-mono text-xs">{vm.sourceFile}</span> from git and stages
-						the change into <strong>Changes</strong>. The VM is deleted from the cluster only when the
-						pull request is merged.
-					</p>
-					<label for="delete-confirm" class="mb-1 block text-xs text-slate-500">
-						Type <span class="font-mono">{vm.name}</span> to confirm:
-					</label>
-					<input
-						id="delete-confirm"
-						bind:value={confirmName}
-						class="w-full rounded border border-slate-300 px-2 py-1 font-mono text-sm focus:border-red-400 focus:outline-none"
-						placeholder={vm.name}
-					/>
-					{#if deleteErr}
-						<p class="mt-2 text-xs text-red-600">{deleteErr}</p>
-					{/if}
-				</div>
-				<footer class="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">
-					<button
-						onclick={() => (deleting = false)}
-						class="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
-					>
-						Cancel
-					</button>
-					<button
-						onclick={confirmDelete}
-						disabled={confirmName !== vm.name || deleteBusy}
-						class="rounded bg-red-600 px-3 py-1 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
-					>
-						Delete
-					</button>
-				</footer>
-			</div>
-		</div>
+			<p>
+				This removes <span class="font-mono text-xs">{vm.sourceFile}</span> from git and stages the
+				change into <strong>Changes</strong>. The VM is deleted from the cluster only when the pull
+				request is merged.
+			</p>
+		</ConfirmDelete>
 	{/if}
 {:else}
 	<div class="flex h-full items-center justify-center text-sm text-slate-400">

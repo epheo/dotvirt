@@ -112,21 +112,26 @@
 			<button onclick={onclose} class="text-slate-400 hover:text-slate-700"><X size={18} /></button>
 		</header>
 
-		<div class="min-h-0 flex-1 overflow-y-auto">
-			<!-- toolbar: ADD NEW DEVICE -->
-			<div class="flex items-center gap-2 border-b border-slate-100 px-5 py-2">
-					<span class="text-xs text-slate-400">Add new device:</span>
-					<button onclick={() => addNewDevice('disk')} class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50">Hard disk</button>
-					<button onclick={() => addNewDevice('network')} class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50">Network adapter</button>
-				</div>
+		<div class="min-h-0 flex-1 overflow-y-auto px-5 py-3">
+			<!-- Add new device toolbar -->
+			<div class="mb-3 flex items-center gap-2">
+				<span class="text-xs text-slate-400">Add new device:</span>
+				<button onclick={() => addNewDevice('disk')} class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50">Hard disk</button>
+				<button onclick={() => addNewDevice('network')} class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50">Network adapter</button>
+			</div>
 
-				<!-- Compute section -->
-				<section class="border-b border-slate-100">
-					<button onclick={() => (open.compute = !open.compute)} class="flex w-full items-center gap-2 px-5 py-2 text-left text-sm font-medium text-slate-700">
-						<span class="flex w-3 items-center text-slate-400">{#if open.compute}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}</span> Compute
+			<div class="space-y-3">
+				<!-- Compute -->
+				<section class="rounded border border-slate-200">
+					<button
+						onclick={() => (open.compute = !open.compute)}
+						class="flex w-full items-center gap-2 bg-slate-50 px-3 py-1.5 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase hover:bg-slate-100"
+					>
+						Compute
+						<span class="ml-auto text-slate-400">{#if open.compute}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}</span>
 					</button>
 					{#if open.compute}
-						<div class="grid grid-cols-2 gap-3 px-5 pb-3 pl-10 text-sm">
+						<div class="grid grid-cols-2 gap-3 p-3 text-sm">
 							<label class="block">
 								<span class="text-slate-500">Power state</span>
 								<select bind:value={power} class="mt-1 w-full rounded border border-slate-300 px-2 py-1">
@@ -165,13 +170,17 @@
 					{/if}
 				</section>
 
-				<!-- Storage section -->
-				<section class="border-b border-slate-100">
-					<button onclick={() => (open.storage = !open.storage)} class="flex w-full items-center gap-2 px-5 py-2 text-left text-sm font-medium text-slate-700">
-						<span class="flex w-3 items-center text-slate-400">{#if open.storage}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}</span> Storage ({disks.filter((d) => !d.removed).length} disks)
+				<!-- Storage -->
+				<section class="rounded border border-slate-200">
+					<button
+						onclick={() => (open.storage = !open.storage)}
+						class="flex w-full items-center gap-2 bg-slate-50 px-3 py-1.5 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase hover:bg-slate-100"
+					>
+						Storage <span class="font-normal text-slate-400 normal-case">({disks.filter((d) => !d.removed).length} disks)</span>
+						<span class="ml-auto text-slate-400">{#if open.storage}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}</span>
 					</button>
 					{#if open.storage}
-						<div class="px-5 pb-3 pl-10 text-sm">
+						<div class="p-3 text-sm">
 							{#each disks as disk, i (i)}
 								<div class="mb-1 flex items-center gap-2 {disk.removed ? 'opacity-40 line-through' : ''}">
 									<span class="w-32 truncate text-slate-700">Hard disk {i + 1}</span>
@@ -191,13 +200,17 @@
 					{/if}
 				</section>
 
-				<!-- Network section -->
-				<section class="border-b border-slate-100">
-					<button onclick={() => (open.network = !open.network)} class="flex w-full items-center gap-2 px-5 py-2 text-left text-sm font-medium text-slate-700">
-						<span class="flex w-3 items-center text-slate-400">{#if open.network}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}</span> Network ({nics.filter((n) => !n.removed).length} adapters)
+				<!-- Network -->
+				<section class="rounded border border-slate-200">
+					<button
+						onclick={() => (open.network = !open.network)}
+						class="flex w-full items-center gap-2 bg-slate-50 px-3 py-1.5 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase hover:bg-slate-100"
+					>
+						Network <span class="font-normal text-slate-400 normal-case">({nics.filter((n) => !n.removed).length} adapters)</span>
+						<span class="ml-auto text-slate-400">{#if open.network}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}</span>
 					</button>
 					{#if open.network}
-						<div class="px-5 pb-3 pl-10 text-sm">
+						<div class="p-3 text-sm">
 							{#each nics as nic, i (i)}
 								<div class="mb-1 flex items-center gap-2 {nic.removed ? 'opacity-40 line-through' : ''}">
 									<span class="w-32 truncate text-slate-700">Network adapter {i + 1}</span>
@@ -220,13 +233,13 @@
 					{/if}
 				</section>
 
-				<!-- Labels section -->
-				<section>
-					<div class="flex items-center justify-between px-5 py-2">
-						<span class="text-sm font-medium text-slate-700">Labels</span>
+				<!-- Labels -->
+				<section class="rounded border border-slate-200">
+					<div class="flex items-center justify-between bg-slate-50 px-3 py-1.5">
+						<span class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Labels</span>
 						<button onclick={() => (labelRows = [...labelRows, { key: '', value: '' }])} class="text-xs text-blue-600 hover:underline">+ Add</button>
 					</div>
-					<div class="px-5 pb-3 pl-10 text-sm">
+					<div class="p-3 text-sm">
 						{#each labelRows as row, i (i)}
 							<div class="mb-1 flex gap-2">
 								<input bind:value={row.key} placeholder="key" class="w-1/2 rounded border border-slate-300 px-2 py-0.5 text-xs" />
@@ -234,11 +247,13 @@
 								<button onclick={() => (labelRows = labelRows.filter((_, idx) => idx !== i))} class="text-red-500"><X size={14} /></button>
 							</div>
 						{/each}
+						{#if labelRows.length === 0}<p class="text-xs text-slate-400">No labels.</p>{/if}
 					</div>
 				</section>
+			</div>
 
 			{#if error}
-				<pre class="mx-5 mb-3 rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+				<pre class="mt-3 rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
 			{/if}
 		</div>
 
