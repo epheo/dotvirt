@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ChevronDown, ChevronRight, Pencil, Trash2, X } from 'lucide-svelte';
 	import { api, type Change, type VM } from '$lib/api';
 	import ChangeList from './ChangeList.svelte';
 	import Console from './Console.svelte';
@@ -104,9 +105,9 @@
 					<button
 						onclick={() => (editing = true)}
 						title="Edit settings"
-						class="rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+						class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
 					>
-						Edit Settings
+						<Pencil size={13} /> Edit Settings
 					</button>
 					<button
 						onclick={() => {
@@ -115,9 +116,9 @@
 							deleteErr = '';
 						}}
 						title="Delete this VM (stages a removal into Changes)"
-						class="rounded border border-red-300 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+						class="flex items-center gap-1.5 rounded border border-red-300 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
 					>
-						Delete VM
+						<Trash2 size={13} /> Delete VM
 					</button>
 				</div>
 			</div>
@@ -226,7 +227,7 @@
 						>
 							<span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
 							Drift — cluster differs from git ({driftChanges.length})
-							<span class="ml-auto text-xs text-amber-600">{showDrift ? '▾' : '▸'}</span>
+							<span class="ml-auto text-amber-600">{#if showDrift}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}</span>
 						</button>
 						{#if showDrift}
 							<div class="border-t border-amber-200 px-3 py-2">
@@ -279,7 +280,7 @@
 			<div class="w-full max-w-md rounded-lg bg-white shadow-xl">
 				<header class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
 					<h2 class="text-base font-semibold text-red-700">Delete VM — {vm.name}</h2>
-					<button onclick={() => (deleting = false)} class="text-slate-400 hover:text-slate-700">✕</button>
+					<button onclick={() => (deleting = false)} class="text-slate-400 hover:text-slate-700"><X size={18} /></button>
 				</header>
 				<div class="px-5 py-4 text-sm text-slate-700">
 					<p class="mb-3">

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ChevronDown, ChevronRight, Folder, X } from 'lucide-svelte';
 	import { api, type DraftView, type ProposeResult } from '$lib/api';
 	import ChangeList from './ChangeList.svelte';
 
@@ -52,7 +53,7 @@
 		<h2 class="text-base font-semibold text-slate-800">
 			Changes <span class="text-slate-400">({total})</span>
 		</h2>
-		<button onclick={onclose} class="text-slate-400 hover:text-slate-700">✕</button>
+		<button onclick={onclose} class="text-slate-400 hover:text-slate-700"><X size={18} /></button>
 	</header>
 
 	<div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
@@ -98,7 +99,7 @@
 		{#each drafts as { project, draft } (project)}
 			<section class="mb-5">
 				<div class="mb-2 flex items-center gap-2">
-					<span class="text-blue-500">▦</span>
+					<Folder size={14} class="text-blue-500" />
 					<span class="font-semibold text-slate-700">{project}</span>
 					<span class="text-xs text-slate-400">({draft.count})</span>
 					<button
@@ -136,9 +137,9 @@
 							{#if item.yaml}
 								<button
 									onclick={() => (showYaml[k] = !showYaml[k])}
-									class="mt-2 text-xs text-slate-400 hover:text-slate-600"
+									class="mt-2 flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
 								>
-									{showYaml[k] ? '▾ hide YAML' : '▸ view YAML'}
+									{#if showYaml[k]}<ChevronDown size={12} /> hide YAML{:else}<ChevronRight size={12} /> view YAML{/if}
 								</button>
 								{#if showYaml[k]}
 									<pre

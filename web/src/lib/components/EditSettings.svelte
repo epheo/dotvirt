@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ChevronDown, ChevronRight, X } from 'lucide-svelte';
 	import { api, type EditRequest, type Options, type VM } from '$lib/api';
 
 	let {
@@ -108,7 +109,7 @@
 	<div class="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-lg bg-white shadow-xl">
 		<header class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
 			<h2 class="text-base font-semibold text-slate-800">Edit Settings — {vm.name}</h2>
-			<button onclick={onclose} class="text-slate-400 hover:text-slate-700">✕</button>
+			<button onclick={onclose} class="text-slate-400 hover:text-slate-700"><X size={18} /></button>
 		</header>
 
 		<div class="min-h-0 flex-1 overflow-y-auto">
@@ -122,7 +123,7 @@
 				<!-- Compute section -->
 				<section class="border-b border-slate-100">
 					<button onclick={() => (open.compute = !open.compute)} class="flex w-full items-center gap-2 px-5 py-2 text-left text-sm font-medium text-slate-700">
-						<span class="w-3 text-slate-400">{open.compute ? '▾' : '▸'}</span> Compute
+						<span class="flex w-3 items-center text-slate-400">{#if open.compute}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}</span> Compute
 					</button>
 					{#if open.compute}
 						<div class="grid grid-cols-2 gap-3 px-5 pb-3 pl-10 text-sm">
@@ -167,7 +168,7 @@
 				<!-- Storage section -->
 				<section class="border-b border-slate-100">
 					<button onclick={() => (open.storage = !open.storage)} class="flex w-full items-center gap-2 px-5 py-2 text-left text-sm font-medium text-slate-700">
-						<span class="w-3 text-slate-400">{open.storage ? '▾' : '▸'}</span> Storage ({disks.filter((d) => !d.removed).length} disks)
+						<span class="flex w-3 items-center text-slate-400">{#if open.storage}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}</span> Storage ({disks.filter((d) => !d.removed).length} disks)
 					</button>
 					{#if open.storage}
 						<div class="px-5 pb-3 pl-10 text-sm">
@@ -193,7 +194,7 @@
 				<!-- Network section -->
 				<section class="border-b border-slate-100">
 					<button onclick={() => (open.network = !open.network)} class="flex w-full items-center gap-2 px-5 py-2 text-left text-sm font-medium text-slate-700">
-						<span class="w-3 text-slate-400">{open.network ? '▾' : '▸'}</span> Network ({nics.filter((n) => !n.removed).length} adapters)
+						<span class="flex w-3 items-center text-slate-400">{#if open.network}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}</span> Network ({nics.filter((n) => !n.removed).length} adapters)
 					</button>
 					{#if open.network}
 						<div class="px-5 pb-3 pl-10 text-sm">
@@ -230,7 +231,7 @@
 							<div class="mb-1 flex gap-2">
 								<input bind:value={row.key} placeholder="key" class="w-1/2 rounded border border-slate-300 px-2 py-0.5 text-xs" />
 								<input bind:value={row.value} placeholder="value" class="w-1/2 rounded border border-slate-300 px-2 py-0.5 text-xs" />
-								<button onclick={() => (labelRows = labelRows.filter((_, idx) => idx !== i))} class="text-red-500">✕</button>
+								<button onclick={() => (labelRows = labelRows.filter((_, idx) => idx !== i))} class="text-red-500"><X size={14} /></button>
 							</div>
 						{/each}
 					</div>

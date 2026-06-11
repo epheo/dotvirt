@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ChevronDown, ChevronRight, Folder, Layers, LayoutGrid } from 'lucide-svelte';
 	import type { Inventory, Project, ProjectNamespace, VM } from '$lib/api';
 	import PowerDot from './PowerDot.svelte';
 	import SyncBadge from './SyncBadge.svelte';
@@ -47,7 +48,7 @@
 		onclick={() => onscope({ kind: 'all' })}
 	>
 		<span class="w-3"></span>
-		<span class="text-slate-400">▤</span>
+		<LayoutGrid size={14} class="text-slate-400" />
 		<span class="font-semibold text-slate-700">All VMs</span>
 	</button>
 
@@ -59,14 +60,14 @@
 				class="flex w-full items-center gap-1 px-2 py-1 hover:bg-slate-100
 					{projectScoped(project.name) ? 'bg-blue-50' : ''}"
 			>
-				<button class="w-3 text-slate-400" onclick={() => toggle(pid)} title="Expand/collapse"
-					>{collapsed[pid] ? '▸' : '▾'}</button
-				>
+				<button class="flex w-3 items-center text-slate-400" onclick={() => toggle(pid)} title="Expand/collapse">
+					{#if collapsed[pid]}<ChevronRight size={12} />{:else}<ChevronDown size={12} />{/if}
+				</button>
 				<button
 					class="flex min-w-0 flex-1 items-center gap-1 text-left"
 					onclick={() => onscope({ kind: 'project', project: project.name })}
 				>
-					<span class="text-blue-500">▦</span>
+					<Folder size={14} class="shrink-0 text-blue-500" />
 					<span class="truncate font-semibold text-slate-700">{project.name}</span>
 					{#if project.error}
 						<span
@@ -95,15 +96,15 @@
 							class="flex w-full items-center gap-1 py-1 pr-2 pl-5 hover:bg-slate-100
 								{nsScoped(project.name, ns.namespace) ? 'bg-blue-50' : ''}"
 						>
-							<button class="w-3 text-slate-400" onclick={() => toggle(nid)} title="Expand/collapse"
-								>{collapsed[nid] ? '▸' : '▾'}</button
-							>
+							<button class="flex w-3 items-center text-slate-400" onclick={() => toggle(nid)} title="Expand/collapse">
+								{#if collapsed[nid]}<ChevronRight size={12} />{:else}<ChevronDown size={12} />{/if}
+							</button>
 							<button
 								class="flex min-w-0 flex-1 items-center gap-1 text-left"
 								onclick={() =>
 									onscope({ kind: 'namespace', project: project.name, namespace: ns.namespace })}
 							>
-								<span class="text-slate-400">▣</span>
+								<Layers size={13} class="shrink-0 text-slate-400" />
 								<span class="truncate text-slate-600">{ns.namespace}</span>
 								{#if nsDrift(ns)}
 									<span class="h-1.5 w-1.5 rounded-full bg-red-500" title="A VM is OutOfSync"></span>
