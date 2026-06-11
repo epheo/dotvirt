@@ -3,7 +3,17 @@
 	import PowerDot from './PowerDot.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 
-	let { vms, onselect }: { vms: VM[]; onselect: (vm: VM) => void } = $props();
+	let {
+		vms,
+		onselect,
+		selected = $bindable(new Set<string>())
+	}: {
+		vms: VM[];
+		onselect: (vm: VM) => void;
+		selected?: Set<string>;
+	} = $props();
+
+	const vmKey = (vm: VM) => `${vm.namespace}/${vm.name}`;
 
 	let search = $state('');
 	let powerFilter = $state<'all' | Power>('all');
@@ -86,6 +96,33 @@
 		{ key: 'memory', label: 'Memory', class: 'text-right' },
 		{ key: 'sync', label: 'Sync' }
 	];
+
+	// --- selection ---
+	const allSelected = $derived(rows.length > 0 && rows.every((vm) => selected.has(vmKey(vm))));
+	const someSelected = $derived(rows.some((vm) => selected.has(vmKey(vm))) && !allSelected);
+
+	function toggleOne(vm: VM) {
+		const k = vmKey(vm);
+		const next = new Set(selected);
+		next.has(k) ? next.delete(k) : next.add(k);
+		selected = next;
+	}
+
+	function toggleAll() {
+		const next = new Set(selected);
+		if (allSelected) rows.forEach((vm) => next.delete(vmKey(vm)));
+		else rows.forEach((vm) => next.add(vmKey(vm)));
+		selected = next;
+	}
+
+	// Drop selected keys for VMs no longer present (deleted/scoped out), so the
+	// action bar count never counts rows the user can't see.
+	$effect(() => {
+		const present = new Set(vms.map(vmKey));
+		if ([...selected].some((k) => !present.has(k))) {
+			selected = new Set([...selected].filter((k) => present.has(k)));
+		}
+	});
 </script>
 
 <div class="flex h-full flex-col">
@@ -123,6 +160,16 @@
 		<table class="w-full text-[13px]">
 			<thead class="sticky top-0 bg-slate-50 text-left text-xs text-slate-500">
 				<tr class="border-b border-slate-200">
+					<th class="w-8 px-3 py-2">
+						<input
+							type="checkbox"
+							checked={allSelected}
+							indeterminate={someSelected}
+							onchange={toggleAll}
+							title="Select all (filtered)"
+							class="cursor-pointer align-middle"
+						/>
+					</th>
 					{#each cols as c (c.key)}
 						<th class="px-3 py-2 font-medium {c.class ?? ''}">
 							<button
@@ -141,8 +188,17 @@
 				{#each rows as vm (vm.namespace + '/' + vm.name)}
 					<tr
 						onclick={() => onselect(vm)}
-						class="cursor-pointer hover:bg-blue-50"
+						class="cursor-pointer hover:bg-blue-50 {selected.has(vmKey(vm)) ? 'bg-blue-50' : ''}"
 					>
+						<td class="px-3 py-1.5">
+							<input
+								type="checkbox"
+								checked={selected.has(vmKey(vm))}
+								onclick={(e) => e.stopPropagation()}
+								onchange={() => toggleOne(vm)}
+								class="cursor-pointer align-middle"
+							/>
+						</td>
 						<td class="px-3 py-1.5"><PowerDot power={vm.power} /></td>
 						<td class="px-3 py-1.5 font-medium text-slate-800">{vm.name}</td>
 						<td class="px-3 py-1.5 text-slate-600">{vm.namespace}</td>
