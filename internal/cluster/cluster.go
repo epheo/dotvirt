@@ -13,6 +13,7 @@ import (
 	"time"
 
 	authzv1 "k8s.io/api/authorization/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -268,29 +269,76 @@ func (c *Client) ListEvents(ctx context.Context, namespace, name string) ([]mode
 	}
 	out := make([]model.Event, 0, len(list.Items))
 	for i := range list.Items {
-		e := &list.Items[i]
-		kind := e.InvolvedObject.Kind
-		if kind != "VirtualMachine" && kind != "VirtualMachineInstance" {
-			continue // same name, unrelated object (e.g. the virt-launcher Pod) — skip
+		if isVMEvent(&list.Items[i]) {
+			out = append(out, eventOf(&list.Items[i]))
 		}
-		// Prefer the legacy LastTimestamp; new-style events only set EventTime.
-		ts := e.LastTimestamp.Time
-		if ts.IsZero() {
-			ts = e.EventTime.Time
-		}
-		if ts.IsZero() {
-			ts = e.CreationTimestamp.Time
-		}
-		last := ""
-		if !ts.IsZero() {
-			last = ts.UTC().Format(time.RFC3339)
-		}
-		out = append(out, model.Event{
-			Type: e.Type, Reason: e.Reason, Message: e.Message,
-			Count: e.Count, Object: kind, LastSeen: last,
-		})
 	}
-	// Newest first; RFC3339 sorts lexically, undated events sink to the end.
-	sort.Slice(out, func(i, j int) bool { return out[i].LastSeen > out[j].LastSeen })
+	sortEventsDesc(out)
 	return out, nil
+}
+
+// ListVMEvents returns recent VM/VMI Events across the given namespaces (the set
+// the caller may see), newest-first and capped — the dock's Events lane. Listed
+// per-namespace with this client's token, so cluster RBAC gates it and nothing
+// leaks across tenants.
+func (c *Client) ListVMEvents(ctx context.Context, namespaces []string) ([]model.Event, error) {
+	out := []model.Event{}
+	for _, ns := range namespaces {
+		list, err := c.kube.CoreV1().Events(ns).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("list events in %s: %w", ns, err)
+		}
+		for i := range list.Items {
+			if isVMEvent(&list.Items[i]) {
+				out = append(out, eventOf(&list.Items[i]))
+			}
+		}
+	}
+	sortEventsDesc(out)
+	if len(out) > 200 {
+		out = out[:200] // the dock shows the most recent; cap to bound the payload
+	}
+	return out, nil
+}
+
+// isVMEvent reports whether an Event is about a VirtualMachine or its VMI (events
+// share the VM's name with the virt-launcher Pod, hence the kind check).
+func isVMEvent(e *corev1.Event) bool {
+	k := e.InvolvedObject.Kind
+	return k == "VirtualMachine" || k == "VirtualMachineInstance"
+}
+
+// eventOf maps a Kubernetes Event to the model DTO, taking the most recent of the
+// legacy LastTimestamp, the new-style EventTime, or the creation time.
+func eventOf(e *corev1.Event) model.Event {
+	ts := e.LastTimestamp.Time
+	if ts.IsZero() {
+		ts = e.EventTime.Time
+	}
+	if ts.IsZero() {
+		ts = e.CreationTimestamp.Time
+	}
+	last := ""
+	if !ts.IsZero() {
+		last = ts.UTC().Format(time.RFC3339)
+	}
+	ns := e.InvolvedObject.Namespace
+	if ns == "" {
+		ns = e.Namespace
+	}
+	return model.Event{
+		Namespace: ns,
+		Name:      e.InvolvedObject.Name,
+		Type:      e.Type,
+		Reason:    e.Reason,
+		Message:   e.Message,
+		Count:     e.Count,
+		Object:    e.InvolvedObject.Kind,
+		LastSeen:  last,
+	}
+}
+
+func sortEventsDesc(events []model.Event) {
+	// Newest first; RFC3339 sorts lexically, undated events sink to the end.
+	sort.Slice(events, func(i, j int) bool { return events[i].LastSeen > events[j].LastSeen })
 }

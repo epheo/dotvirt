@@ -189,14 +189,17 @@ type Proposal struct {
 	Title    string `json:"title,omitempty"`
 }
 
-// Event is a Kubernetes Event for a VM (or its VMI), shown in the Monitor tab.
+// Event is a Kubernetes Event for a VM (or its VMI), shown in the Monitor tab and
+// the dock's Events lane (which uses Namespace/Name to label which VM it's about).
 type Event struct {
-	Type     string `json:"type"` // Normal | Warning
-	Reason   string `json:"reason"`
-	Message  string `json:"message"`
-	Count    int32  `json:"count,omitempty"`
-	Object   string `json:"object"`             // VirtualMachine | VirtualMachineInstance
-	LastSeen string `json:"lastSeen,omitempty"` // RFC3339
+	Namespace string `json:"namespace,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Type      string `json:"type"` // Normal | Warning
+	Reason    string `json:"reason"`
+	Message   string `json:"message"`
+	Count     int32  `json:"count,omitempty"`
+	Object    string `json:"object"`             // VirtualMachine | VirtualMachineInstance
+	LastSeen  string `json:"lastSeen,omitempty"` // RFC3339
 }
 
 // ResyncResult reports which ArgoCD Application was synced.

@@ -191,6 +191,8 @@ export interface Proposal {
 	title?: string;
 }
 export interface VMEvent {
+	namespace?: string;
+	name?: string;
 	type: string; // Normal | Warning
 	reason: string;
 	message: string;
@@ -233,6 +235,7 @@ export const api = {
 		get<DriftResult>(`/api/vms/${enc(namespace)}/${enc(name)}/drift`),
 	events: (namespace: string, name: string) =>
 		get<VMEvent[]>(`/api/vms/${enc(namespace)}/${enc(name)}/events`),
+	allEvents: () => get<VMEvent[]>('/api/events'),
 	adopt: (namespace: string, name: string) =>
 		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/adopt`, {}),
 	resync: (namespace: string, name: string) =>

@@ -136,6 +136,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/inventory", s.handleInventory)
 	mux.HandleFunc("GET /api/options", s.handleOptions)
 	mux.HandleFunc("GET /api/proposals", s.handleProposals)
+	mux.HandleFunc("GET /api/events", s.handleAllEvents)
 
 	if s.stream != nil {
 		mux.HandleFunc("GET /api/inventory/stream", s.stream.Handler)

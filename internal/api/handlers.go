@@ -152,6 +152,28 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, opts)
 }
 
+// handleAllEvents lists recent VM/VMI Events across the caller's visible
+// namespaces — the dock's Events lane. Read under the caller's token, scoped to
+// the namespaces they may see.
+func (s *Server) handleAllEvents(w http.ResponseWriter, r *http.Request) {
+	id, c, err := s.userCluster(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	visible, err := s.visibleFor(r.Context(), id, c)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	nss := make([]string, 0, len(visible))
+	for ns := range visible {
+		nss = append(nss, ns)
+	}
+	events, err := c.ListVMEvents(r.Context(), nss)
+	respond(w, events, err)
+}
+
 // handleProposals lists the caller's open PRs across their visible projects — the
 // "PR #N open" rows in the Recent Tasks dock. Best-effort: a project whose forge
 // lookup errors is skipped (logged), not fatal, so one slow/broken repo can't
