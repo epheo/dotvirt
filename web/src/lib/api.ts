@@ -190,6 +190,14 @@ export interface Proposal {
 	prURL: string;
 	title?: string;
 }
+export interface VMEvent {
+	type: string; // Normal | Warning
+	reason: string;
+	message: string;
+	count?: number;
+	object: string; // VirtualMachine | VirtualMachineInstance
+	lastSeen?: string;
+}
 
 const enc = encodeURIComponent;
 
@@ -223,6 +231,8 @@ export const api = {
 	// Drift + reconcile for one VM (project resolved from the namespace).
 	drift: (namespace: string, name: string) =>
 		get<DriftResult>(`/api/vms/${enc(namespace)}/${enc(name)}/drift`),
+	events: (namespace: string, name: string) =>
+		get<VMEvent[]>(`/api/vms/${enc(namespace)}/${enc(name)}/events`),
 	adopt: (namespace: string, name: string) =>
 		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/adopt`, {}),
 	resync: (namespace: string, name: string) =>

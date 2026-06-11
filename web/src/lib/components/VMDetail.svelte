@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Activity, ChevronDown, ChevronRight, Cpu, HardDrive, MemoryStick, Pencil, Trash2, X } from 'lucide-svelte';
-	import { api, type Change, type VM } from '$lib/api';
+	import { api, type Change, type VM, type VMEvent } from '$lib/api';
 	import ChangeList from './ChangeList.svelte';
 	import Console from './Console.svelte';
 	import EditSettings from './EditSettings.svelte';
@@ -9,7 +9,7 @@
 
 	let { vm, onstaged }: { vm: VM | null; onstaged?: () => void } = $props();
 
-	type Tab = 'summary' | 'console';
+	type Tab = 'summary' | 'monitor' | 'console';
 	let tab = $state<Tab>('summary');
 	let editing = $state(false);
 
@@ -26,12 +26,32 @@
 	let reconciling = $state(false);
 	let reconcileMsg = $state('');
 
+	// Monitor tab: lazily-loaded Kubernetes events for the selected VM.
+	let events = $state<VMEvent[] | null>(null);
+	let eventsLoading = $state(false);
+
 	function loadDrift(ns: string, name: string) {
 		api
 			.drift(ns, name)
 			.then((d) => (driftChanges = d.drift ? d.changes : []))
 			.catch(() => (driftChanges = null));
 	}
+
+	function loadEvents(ns: string, name: string) {
+		eventsLoading = true;
+		api
+			.events(ns, name)
+			.then((e) => (events = e))
+			.catch(() => (events = []))
+			.finally(() => (eventsLoading = false));
+	}
+
+	// Lazy-load events the first time the Monitor tab is opened for this VM.
+	$effect(() => {
+		if (vm && tab === 'monitor' && events === null && !eventsLoading) {
+			loadEvents(vm.namespace, vm.name);
+		}
+	});
 
 	$effect(() => {
 		// Reset when the selection changes, and (re)load drift for this VM.
@@ -44,6 +64,8 @@
 		driftChanges = null;
 		showDrift = false;
 		reconcileMsg = '';
+		events = null;
+		eventsLoading = false;
 		if (cur) loadDrift(cur.namespace, cur.name);
 	});
 
@@ -92,8 +114,9 @@
 		}
 	}
 
-	// Uptime since the VMI entered Running, formatted compactly (e.g. "3d 21h").
-	function uptime(iso?: string): string {
+	// Elapsed time since an ISO timestamp, compact (e.g. "3d 21h") — VM uptime and
+	// event age both use it.
+	function elapsed(iso?: string): string {
 		if (!iso) return '';
 		const start = new Date(iso).getTime();
 		if (Number.isNaN(start)) return '';
@@ -137,7 +160,7 @@
 				</div>
 			</div>
 			<nav class="flex gap-1 text-sm">
-				{#each ['summary', 'console'] as const as t (t)}
+				{#each ['summary', 'monitor', 'console'] as const as t (t)}
 					<button
 						class="border-b-2 px-3 py-1.5 capitalize {tab === t
 							? 'border-blue-600 text-blue-700'
@@ -181,7 +204,7 @@
 					<div class="rounded border border-slate-200 bg-slate-50 p-3">
 						<div class="flex items-center gap-1.5 text-xs text-slate-500"><Activity size={13} /> Status</div>
 						<div class="mt-1 text-lg font-semibold text-slate-800">{vm.phase ?? vm.power}</div>
-						{#if uptime(vm.startedAt)}<div class="text-xs text-slate-400">up {uptime(vm.startedAt)}</div>{/if}
+						{#if elapsed(vm.startedAt)}<div class="text-xs text-slate-400">up {elapsed(vm.startedAt)}</div>{/if}
 					</div>
 				</div>
 
@@ -307,6 +330,47 @@
 							</div>
 						{/if}
 					</div>
+				{/if}
+			{:else if tab === 'monitor'}
+				{#if eventsLoading && !events}
+					<div class="py-8 text-center text-sm text-slate-400">Loading events…</div>
+				{:else if !events || events.length === 0}
+					<div class="py-8 text-center text-sm text-slate-400">No recent events.</div>
+				{:else}
+					<table class="w-full text-[13px]">
+						<thead class="text-left text-xs tracking-wide text-slate-400 uppercase">
+							<tr class="border-b border-slate-200">
+								<th class="py-1.5 pr-3 font-medium">Type</th>
+								<th class="py-1.5 pr-3 font-medium">Reason</th>
+								<th class="py-1.5 pr-3 font-medium">Message</th>
+								<th class="py-1.5 pr-3 font-medium">Object</th>
+								<th class="py-1.5 font-medium">Last seen</th>
+							</tr>
+						</thead>
+						<tbody class="divide-y divide-slate-100">
+							{#each events as e, i (i)}
+								<tr class={e.type === 'Warning' ? 'bg-amber-50/40' : ''}>
+									<td class="py-1.5 pr-3">
+										<span class="inline-flex items-center gap-1.5 whitespace-nowrap">
+											<span
+												class="h-1.5 w-1.5 rounded-full {e.type === 'Warning' ? 'bg-amber-500' : 'bg-slate-400'}"
+											></span>
+											{e.type}
+										</span>
+									</td>
+									<td class="py-1.5 pr-3 font-medium text-slate-700">{e.reason}</td>
+									<td class="py-1.5 pr-3 text-slate-600">{e.message}</td>
+									<td class="py-1.5 pr-3 whitespace-nowrap text-slate-500">
+										{e.object === 'VirtualMachineInstance' ? 'VMI' : 'VM'}
+									</td>
+									<td class="py-1.5 whitespace-nowrap text-slate-500">
+										{elapsed(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-slate-400"> ×{e.count}</span
+											>{/if}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
 				{/if}
 			{:else}
 				{#key `${vm.namespace}/${vm.name}`}

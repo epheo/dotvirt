@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"sort"
+	"time"
 
 	authzv1 "k8s.io/api/authorization/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -22,6 +24,7 @@ import (
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/kubecli"
 
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
@@ -251,4 +254,43 @@ func (c *Client) VNCConn(namespace, name string) (net.Conn, error) {
 		return nil, fmt.Errorf("open VNC for %s/%s: %w", namespace, name, err)
 	}
 	return stream.AsConn(), nil
+}
+
+// ListEvents returns recent Kubernetes Events for the VM ns/name and its VMI
+// (which shares the name), newest-first — the per-VM Monitor tab. Read with this
+// client's token, so cluster RBAC gates it like every other read.
+func (c *Client) ListEvents(ctx context.Context, namespace, name string) ([]model.Event, error) {
+	list, err := c.kube.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{
+		FieldSelector: "involvedObject.name=" + name,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list events for %s/%s: %w", namespace, name, err)
+	}
+	out := make([]model.Event, 0, len(list.Items))
+	for i := range list.Items {
+		e := &list.Items[i]
+		kind := e.InvolvedObject.Kind
+		if kind != "VirtualMachine" && kind != "VirtualMachineInstance" {
+			continue // same name, unrelated object (e.g. the virt-launcher Pod) — skip
+		}
+		// Prefer the legacy LastTimestamp; new-style events only set EventTime.
+		ts := e.LastTimestamp.Time
+		if ts.IsZero() {
+			ts = e.EventTime.Time
+		}
+		if ts.IsZero() {
+			ts = e.CreationTimestamp.Time
+		}
+		last := ""
+		if !ts.IsZero() {
+			last = ts.UTC().Format(time.RFC3339)
+		}
+		out = append(out, model.Event{
+			Type: e.Type, Reason: e.Reason, Message: e.Message,
+			Count: e.Count, Object: kind, LastSeen: last,
+		})
+	}
+	// Newest first; RFC3339 sorts lexically, undated events sink to the end.
+	sort.Slice(out, func(i, j int) bool { return out[i].LastSeen > out[j].LastSeen })
+	return out, nil
 }

@@ -351,6 +351,17 @@ func (s *Server) handleDrift(w http.ResponseWriter, r *http.Request) {
 	respond(w, result, err)
 }
 
+// handleEvents lists recent Kubernetes Events for a VM (+ its VMI) — the Monitor
+// tab. Read under the caller's token; resolveProject gates the namespace.
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	if !ok {
+		return
+	}
+	events, err := sc.cluster.ListEvents(r.Context(), r.PathValue("namespace"), r.PathValue("name"))
+	respond(w, events, err)
+}
+
 func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
 	if !ok {
