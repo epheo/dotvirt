@@ -11,8 +11,10 @@ await page.goto(BASE);
 await page.waitForSelector('textarea');
 await page.fill('textarea', TOKEN);
 await page.click('button[type="submit"]');
-await page.waitForSelector('table thead', { timeout: 15000 });
-await page.waitForTimeout(1500);
+// The table header paints immediately, but rows only arrive with the WS
+// inventory frame. Gate on an actual VM row so we never snap the empty
+// "No VMs in scope" grid (a fixed delay races the WS / an HMR reload).
+await page.waitForSelector('tbody tr', { timeout: 20000 });
 await page.screenshot({ path: `${OUT}/icons-1-grid.png` });
 
 // Drill into a VM to show the detail header icons (Edit/Delete) + back-bar arrow.
