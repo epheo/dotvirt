@@ -242,7 +242,17 @@ export const api = {
 		post<{ application: string; revision: string }>(
 			`/api/vms/${enc(namespace)}/${enc(name)}/resync`,
 			{}
-		)
+		),
+
+	// Imperative runtime ops (RBAC-gated; don't touch the git-managed spec).
+	restart: (namespace: string, name: string) =>
+		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/restart`, {}),
+	migrate: (namespace: string, name: string) =>
+		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/migrate`, {}),
+	pause: (namespace: string, name: string) =>
+		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/pause`, {}),
+	unpause: (namespace: string, name: string) =>
+		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/unpause`, {})
 };
 
 // draftsByProject fetches the draft for each named project and returns the

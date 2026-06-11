@@ -342,3 +342,29 @@ func sortEventsDesc(events []model.Event) {
 	// Newest first; RFC3339 sorts lexically, undated events sink to the end.
 	sort.Slice(events, func(i, j int) bool { return events[i].LastSeen > events[j].LastSeen })
 }
+
+// --- runtime ops (imperative, RBAC-gated) ---
+//
+// These run under the caller's token and act on the live VMI without touching
+// the git-managed VM spec, so ArgoCD self-heal leaves them alone — unlike power,
+// which is a spec edit and stays in the PR lane.
+
+// Restart restarts the VM: the running VMI is recreated per its run strategy.
+func (c *Client) Restart(ctx context.Context, namespace, name string) error {
+	return c.kubevirt.VirtualMachine(namespace).Restart(ctx, name, &kubevirtcorev1.RestartOptions{})
+}
+
+// Migrate live-migrates the running VMI to another node (the vMotion analog).
+func (c *Client) Migrate(ctx context.Context, namespace, name string) error {
+	return c.kubevirt.VirtualMachine(namespace).Migrate(ctx, name, &kubevirtcorev1.MigrateOptions{})
+}
+
+// Pause freezes the running VMI (vCPUs stopped, memory retained).
+func (c *Client) Pause(ctx context.Context, namespace, name string) error {
+	return c.kubevirt.VirtualMachineInstance(namespace).Pause(ctx, name, &kubevirtcorev1.PauseOptions{})
+}
+
+// Unpause resumes a paused VMI.
+func (c *Client) Unpause(ctx context.Context, namespace, name string) error {
+	return c.kubevirt.VirtualMachineInstance(namespace).Unpause(ctx, name, &kubevirtcorev1.UnpauseOptions{})
+}

@@ -30,6 +30,11 @@
 	let events = $state<VMEvent[] | null>(null);
 	let eventsLoading = $state(false);
 
+	// Imperative runtime ops (restart/pause/unpause/live-migrate).
+	let actionsOpen = $state(false);
+	let runtimeBusy = $state(false);
+	let runtimeMsg = $state('');
+
 	function loadDrift(ns: string, name: string) {
 		api
 			.drift(ns, name)
@@ -53,6 +58,28 @@
 		}
 	});
 
+	const opLabels: Record<string, string> = {
+		restart: 'Restart',
+		migrate: 'Live-migration',
+		pause: 'Pause',
+		unpause: 'Unpause'
+	};
+
+	async function runOp(kind: 'restart' | 'migrate' | 'pause' | 'unpause') {
+		if (!vm) return;
+		actionsOpen = false;
+		runtimeBusy = true;
+		runtimeMsg = '';
+		try {
+			await api[kind](vm.namespace, vm.name);
+			runtimeMsg = `${opLabels[kind]} requested — watch the Monitor tab for progress.`;
+		} catch (e) {
+			runtimeMsg = String(e);
+		} finally {
+			runtimeBusy = false;
+		}
+	}
+
 	$effect(() => {
 		// Reset when the selection changes, and (re)load drift for this VM.
 		const cur = vm;
@@ -65,6 +92,8 @@
 		reconcileMsg = '';
 		events = null;
 		eventsLoading = false;
+		actionsOpen = false;
+		runtimeMsg = '';
 		if (cur) loadDrift(cur.namespace, cur.name);
 	});
 
@@ -137,6 +166,31 @@
 				<span class="rounded bg-slate-200 px-1.5 py-0.5 text-xs text-slate-600">{vm.namespace}</span>
 				<SyncBadge sync={vm.sync} />
 				<div class="ml-auto flex items-center gap-2">
+					<div class="relative">
+						<button
+							onclick={() => (actionsOpen = !actionsOpen)}
+							disabled={runtimeBusy}
+							title="Runtime actions (don't change git; Argo won't revert)"
+							class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+						>
+							Actions <ChevronDown size={13} />
+						</button>
+						{#if actionsOpen}
+							<button
+								class="fixed inset-0 z-10 cursor-default"
+								onclick={() => (actionsOpen = false)}
+								aria-label="Close menu"
+							></button>
+							<div
+								class="absolute right-0 z-20 mt-1 w-44 rounded border border-slate-200 bg-white py-1 text-xs shadow-lg"
+							>
+								<button onclick={() => runOp('restart')} class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50">Restart</button>
+								<button onclick={() => runOp('pause')} class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50">Pause</button>
+								<button onclick={() => runOp('unpause')} class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50">Unpause</button>
+								<button onclick={() => runOp('migrate')} class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50">Live-migrate</button>
+							</div>
+						{/if}
+					</div>
 					<button
 						onclick={() => (editing = true)}
 						title="Edit settings"
@@ -169,6 +223,10 @@
 				{/each}
 			</nav>
 		</div>
+
+		{#if runtimeMsg}
+			<div class="border-b border-slate-200 bg-slate-50 px-4 py-1.5 text-xs text-slate-600">{runtimeMsg}</div>
+		{/if}
 
 		<div class="min-h-0 flex-1 overflow-y-auto p-4">
 			{#if tab === 'summary'}

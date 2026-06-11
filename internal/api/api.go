@@ -157,6 +157,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/events", s.handleEvents)
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/adopt", s.handleAdopt)
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/resync", s.handleResync)
+	mux.HandleFunc("POST /api/vms/{namespace}/{name}/restart", s.handleRestart)
+	mux.HandleFunc("POST /api/vms/{namespace}/{name}/migrate", s.handleMigrate)
+	mux.HandleFunc("POST /api/vms/{namespace}/{name}/pause", s.handlePause)
+	mux.HandleFunc("POST /api/vms/{namespace}/{name}/unpause", s.handleUnpause)
 
 	// CORS wraps the outside so it can answer preflight OPTIONS without auth; auth
 	// gates everything inside.
