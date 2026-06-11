@@ -37,9 +37,17 @@ import (
 // owns its read DTO and callers don't reach back into the fetch layer).
 type LiveVM struct {
 	Phase    string
-	GuestIP  string
+	GuestIP  string   // primary interface IP (the inventory grid's IP column)
+	IPs      []string // every guest-reported IP, for the detail view
 	NodeName string
-	Ready    bool
+
+	// Guest-agent + runtime facts for the VM summary dashboard. Empty when the VMI
+	// isn't running or the guest agent isn't reporting.
+	OS           string    // guest OS pretty name, e.g. "Fedora Linux 40 (Cloud Edition)"
+	MemoryActual string    // current guest memory (hotplug-aware), e.g. "1Gi"
+	StartedAt    time.Time // when the VMI entered Running, for uptime
+
+	Ready bool
 }
 
 // State is the SA-maintained snapshot. Build with New, start with Run; reads
@@ -165,11 +173,29 @@ func (s *State) Namespaces() []project.Namespace {
 }
 
 func liveFromVMI(vmi *kubevirtcorev1.VirtualMachineInstance) LiveVM {
-	live := LiveVM{Phase: string(vmi.Status.Phase), NodeName: vmi.Status.NodeName}
-	if len(vmi.Status.Interfaces) > 0 {
-		live.GuestIP = vmi.Status.Interfaces[0].IP
+	s := vmi.Status
+	live := LiveVM{
+		Phase:    string(s.Phase),
+		NodeName: s.NodeName,
+		OS:       s.GuestOSInfo.PrettyName,
 	}
-	for _, cond := range vmi.Status.Conditions {
+	if len(s.Interfaces) > 0 {
+		live.GuestIP = s.Interfaces[0].IP
+	}
+	for _, iface := range s.Interfaces {
+		live.IPs = append(live.IPs, iface.IPs...)
+	}
+	if s.Memory != nil && s.Memory.GuestCurrent != nil {
+		live.MemoryActual = s.Memory.GuestCurrent.String()
+	}
+	// Uptime is measured from when the VMI entered Running — not object creation,
+	// which predates boot.
+	for _, t := range s.PhaseTransitionTimestamps {
+		if t.Phase == kubevirtcorev1.Running {
+			live.StartedAt = t.PhaseTransitionTimestamp.Time
+		}
+	}
+	for _, cond := range s.Conditions {
 		if cond.Type == kubevirtcorev1.VirtualMachineInstanceReady {
 			live.Ready = cond.Status == corev1.ConditionTrue
 		}

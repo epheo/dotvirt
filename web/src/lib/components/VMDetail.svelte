@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChevronDown, ChevronRight, Pencil, Trash2, X } from 'lucide-svelte';
+	import { Activity, ChevronDown, ChevronRight, Cpu, HardDrive, MemoryStick, Pencil, Trash2, X } from 'lucide-svelte';
 	import { api, type Change, type VM } from '$lib/api';
 	import ChangeList from './ChangeList.svelte';
 	import Console from './Console.svelte';
@@ -91,6 +91,20 @@
 			deleteBusy = false;
 		}
 	}
+
+	// Uptime since the VMI entered Running, formatted compactly (e.g. "3d 21h").
+	function uptime(iso?: string): string {
+		if (!iso) return '';
+		const start = new Date(iso).getTime();
+		if (Number.isNaN(start)) return '';
+		let s = Math.max(0, Math.floor((Date.now() - start) / 1000));
+		const d = Math.floor(s / 86400);
+		const h = Math.floor((s % 86400) / 3600);
+		const m = Math.floor((s % 3600) / 60);
+		if (d > 0) return `${d}d ${h}h`;
+		if (h > 0) return `${h}h ${m}m`;
+		return `${m}m`;
+	}
 </script>
 
 {#if vm}
@@ -138,86 +152,122 @@
 
 		<div class="min-h-0 flex-1 overflow-y-auto p-4">
 			{#if tab === 'summary'}
-				<table class="w-full text-[13px]">
-					<tbody class="divide-y divide-slate-100">
-						<tr>
-							<td class="w-40 py-1.5 align-top text-slate-500">Power (desired)</td>
-							<td class="py-1.5 text-slate-800">{vm.power}</td>
-						</tr>
-						{#if vm.phase}
-							<tr>
-								<td class="py-1.5 align-top text-slate-500">Status (actual)</td>
-								<td class="py-1.5 text-slate-800">{vm.phase}</td>
-							</tr>
+				{#snippet field(label: string, value: string)}
+					<div class="flex justify-between gap-3 px-3 py-1.5">
+						<dt class="shrink-0 text-slate-500">{label}</dt>
+						<dd class="min-w-0 truncate text-right text-slate-800">{value || '—'}</dd>
+					</div>
+				{/snippet}
+
+				<!-- At-a-glance tiles: the vCenter-style capacity summary. -->
+				<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+					<div class="rounded border border-slate-200 bg-slate-50 p-3">
+						<div class="flex items-center gap-1.5 text-xs text-slate-500"><Cpu size={13} /> CPU</div>
+						<div class="mt-1 text-lg font-semibold text-slate-800">
+							{vm.cpuCores ?? '—'}<span class="ml-1 text-sm font-normal text-slate-500">vCPU</span>
+						</div>
+					</div>
+					<div class="rounded border border-slate-200 bg-slate-50 p-3">
+						<div class="flex items-center gap-1.5 text-xs text-slate-500"><MemoryStick size={13} /> Memory</div>
+						<div class="mt-1 text-lg font-semibold text-slate-800">{vm.memory ?? '—'}</div>
+						{#if vm.memoryActual && vm.memoryActual !== vm.memory}
+							<div class="text-xs text-slate-400">{vm.memoryActual} live</div>
 						{/if}
-						{#if vm.guestIP}
-							<tr>
-								<td class="py-1.5 align-top text-slate-500">IP address</td>
-								<td class="py-1.5 font-mono text-slate-800">{vm.guestIP}</td>
-							</tr>
-						{/if}
-						{#if vm.nodeName}
-							<tr>
-								<td class="py-1.5 align-top text-slate-500">Node</td>
-								<td class="py-1.5 text-slate-800">{vm.nodeName}</td>
-							</tr>
-						{/if}
-						{#if vm.instancetype}
-							<tr>
-								<td class="py-1.5 align-top text-slate-500">Instance type</td>
-								<td class="py-1.5 text-slate-800">{vm.instancetype}</td>
-							</tr>
-						{/if}
-						{#if vm.preference}
-							<tr>
-								<td class="py-1.5 align-top text-slate-500">Preference</td>
-								<td class="py-1.5 text-slate-800">{vm.preference}</td>
-							</tr>
-						{/if}
-						<tr>
-							<td class="py-1.5 align-top text-slate-500">CPU</td>
-							<td class="py-1.5 text-slate-800">{vm.cpuCores ?? '—'} vCPU</td>
-						</tr>
-						<tr>
-							<td class="py-1.5 align-top text-slate-500">Memory</td>
-							<td class="py-1.5 text-slate-800">{vm.memory ?? '—'}</td>
-						</tr>
+					</div>
+					<div class="rounded border border-slate-200 bg-slate-50 p-3">
+						<div class="flex items-center gap-1.5 text-xs text-slate-500"><HardDrive size={13} /> Disks</div>
+						<div class="mt-1 text-lg font-semibold text-slate-800">{vm.disks?.length ?? 0}</div>
+					</div>
+					<div class="rounded border border-slate-200 bg-slate-50 p-3">
+						<div class="flex items-center gap-1.5 text-xs text-slate-500"><Activity size={13} /> Status</div>
+						<div class="mt-1 text-lg font-semibold text-slate-800">{vm.phase ?? vm.power}</div>
+						{#if uptime(vm.startedAt)}<div class="text-xs text-slate-400">up {uptime(vm.startedAt)}</div>{/if}
+					</div>
+				</div>
+
+				<div class="mt-4 grid gap-4 md:grid-cols-2">
+					<!-- Guest & runtime: live identity reported by the guest agent. -->
+					<section class="rounded border border-slate-200">
+						<h3 class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+							Guest &amp; runtime
+						</h3>
+						<dl class="divide-y divide-slate-100 text-[13px]">
+							{@render field('Operating system', vm.os ?? '')}
+							{@render field('Power (desired)', vm.power)}
+							{@render field('Status (actual)', vm.phase ?? '')}
+							<div class="flex justify-between gap-3 px-3 py-1.5">
+								<dt class="shrink-0 text-slate-500">IP addresses</dt>
+								<dd class="min-w-0 text-right font-mono text-xs text-slate-800">
+									{#if vm.ips?.length}
+										{#each vm.ips as ip (ip)}<div>{ip}</div>{/each}
+									{:else}{vm.guestIP || '—'}{/if}
+								</dd>
+							</div>
+						</dl>
+					</section>
+
+					<!-- Configuration & placement: desired config + where it runs. -->
+					<section class="rounded border border-slate-200">
+						<h3 class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+							Configuration &amp; placement
+						</h3>
+						<dl class="divide-y divide-slate-100 text-[13px]">
+							{@render field('Instance type', vm.instancetype ?? '')}
+							{@render field('Preference', vm.preference ?? '')}
+							{@render field('Node', vm.nodeName ?? '')}
+							<div class="flex justify-between gap-3 px-3 py-1.5">
+								<dt class="shrink-0 text-slate-500">Source</dt>
+								<dd class="min-w-0 truncate text-right font-mono text-xs text-slate-600">{vm.sourceFile}</dd>
+							</div>
+						</dl>
+					</section>
+				</div>
+
+				{#if vm.disks?.length || vm.networks?.length}
+					<div class="mt-4 grid gap-4 md:grid-cols-2">
 						{#if vm.disks?.length}
-							<tr>
-								<td class="py-1.5 align-top text-slate-500">Disks</td>
-								<td class="py-1.5 text-slate-800">
+							<section class="rounded border border-slate-200">
+								<h3 class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+									Disks
+								</h3>
+								<ul class="divide-y divide-slate-100 px-3 text-[13px]">
 									{#each vm.disks as d (d.name)}
-										<div>{d.name} <span class="text-slate-400">({d.type}{d.size ? ` · ${d.size}` : ''})</span></div>
+										<li class="flex justify-between gap-3 py-1.5">
+											<span class="text-slate-800">{d.name}</span>
+											<span class="text-slate-400">{d.type}{d.size ? ` · ${d.size}` : ''}</span>
+										</li>
 									{/each}
-								</td>
-							</tr>
+								</ul>
+							</section>
 						{/if}
 						{#if vm.networks?.length}
-							<tr>
-								<td class="py-1.5 align-top text-slate-500">Networks</td>
-								<td class="py-1.5 text-slate-800">
+							<section class="rounded border border-slate-200">
+								<h3 class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+									Networks
+								</h3>
+								<ul class="divide-y divide-slate-100 px-3 text-[13px]">
 									{#each vm.networks as n (n.name)}
-										<div>{n.name} <span class="text-slate-400">({n.network})</span></div>
+										<li class="flex justify-between gap-3 py-1.5">
+											<span class="text-slate-800">{n.name}</span>
+											<span class="text-slate-400">{n.network}</span>
+										</li>
 									{/each}
-								</td>
-							</tr>
+								</ul>
+							</section>
 						{/if}
-						{#if vm.labels && Object.keys(vm.labels).length}
-							<tr>
-								<td class="py-1.5 align-top text-slate-500">Labels</td>
-								<td class="py-1.5">
-									{#each Object.entries(vm.labels) as [k, v] (k)}
-										<span class="mr-1 mb-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">{k}={v}</span>
-									{/each}
-								</td>
-							</tr>
-						{/if}
-						<tr>
-							<td class="py-1.5 align-top text-slate-500">Source</td>
-							<td class="py-1.5 font-mono text-xs text-slate-600">{vm.sourceFile}</td>
-						</tr>
-					</tbody>
-				</table>
+					</div>
+				{/if}
+
+				{#if vm.labels && Object.keys(vm.labels).length}
+					<div class="mt-4">
+						<h3 class="mb-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">Labels</h3>
+						<div>
+							{#each Object.entries(vm.labels) as [k, v] (k)}
+								<span class="mr-1 mb-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">{k}={v}</span>
+							{/each}
+						</div>
+					</div>
+				{/if}
 
 				{#if driftChanges && driftChanges.length > 0}
 					<div class="mt-4 rounded border border-amber-200 bg-amber-50">

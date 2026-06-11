@@ -49,9 +49,13 @@ type VM struct {
 	SourceFile   string            `json:"sourceFile"` // path within the repo
 
 	// From cluster (actual state), when cluster reads are enabled.
-	Phase    string `json:"phase,omitempty"` // VMI phase, e.g. Running
-	GuestIP  string `json:"guestIP,omitempty"`
-	NodeName string `json:"nodeName,omitempty"`
+	Phase        string   `json:"phase,omitempty"` // VMI phase, e.g. Running
+	GuestIP      string   `json:"guestIP,omitempty"`
+	IPs          []string `json:"ips,omitempty"` // every guest-reported IP
+	NodeName     string   `json:"nodeName,omitempty"`
+	OS           string   `json:"os,omitempty"`           // guest-agent OS pretty name
+	MemoryActual string   `json:"memoryActual,omitempty"` // current guest memory (hotplug-aware)
+	StartedAt    string   `json:"startedAt,omitempty"`    // RFC3339; VMI entered Running (for uptime)
 
 	// From ArgoCD, when enabled.
 	Sync   SyncStatus `json:"sync"`

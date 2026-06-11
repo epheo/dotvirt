@@ -32,7 +32,11 @@ export interface VM {
 	sourceFile: string;
 	phase?: string;
 	guestIP?: string;
+	ips?: string[]; // every guest-reported IP
 	nodeName?: string;
+	os?: string; // guest-agent OS, e.g. "Fedora Linux 40 (Cloud Edition)"
+	memoryActual?: string; // current guest memory (hotplug-aware)
+	startedAt?: string; // RFC3339; VMI entered Running (for uptime)
 	sync: SyncStatus;
 	health?: string;
 }
