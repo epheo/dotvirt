@@ -12,6 +12,13 @@
 	let tab = $state<Tab>('summary');
 	let editing = $state(false);
 
+	// Delete is destructive once the PR merges, so it's gated behind a confirm
+	// dialog that requires typing the VM name.
+	let deleting = $state(false);
+	let confirmName = $state('');
+	let deleteBusy = $state(false);
+	let deleteErr = $state('');
+
 	// Drift detail (running vs main) for the selected VM.
 	let driftChanges = $state<Change[] | null>(null);
 	let showDrift = $state(false);
@@ -30,6 +37,9 @@
 		const cur = vm;
 		tab = 'summary';
 		editing = false;
+		deleting = false;
+		confirmName = '';
+		deleteErr = '';
 		driftChanges = null;
 		showDrift = false;
 		reconcileMsg = '';
@@ -64,6 +74,22 @@
 			reconciling = false;
 		}
 	}
+
+	async function confirmDelete() {
+		if (!vm || confirmName !== vm.name) return;
+		deleteBusy = true;
+		deleteErr = '';
+		try {
+			await api.stageDelete(vm.namespace, vm.name);
+			deleting = false;
+			confirmName = '';
+			onstaged?.();
+		} catch (e) {
+			deleteErr = String(e);
+		} finally {
+			deleteBusy = false;
+		}
+	}
 </script>
 
 {#if vm}
@@ -74,13 +100,26 @@
 				<h2 class="text-lg font-semibold text-slate-800">{vm.name}</h2>
 				<span class="rounded bg-slate-200 px-1.5 py-0.5 text-xs text-slate-600">{vm.namespace}</span>
 				<SyncBadge sync={vm.sync} />
-				<button
-					onclick={() => (editing = true)}
-					title="Edit settings"
-					class="ml-auto rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-				>
-					Edit Settings
-				</button>
+				<div class="ml-auto flex items-center gap-2">
+					<button
+						onclick={() => (editing = true)}
+						title="Edit settings"
+						class="rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+					>
+						Edit Settings
+					</button>
+					<button
+						onclick={() => {
+							deleting = true;
+							confirmName = '';
+							deleteErr = '';
+						}}
+						title="Delete this VM (stages a removal into Changes)"
+						class="rounded border border-red-300 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+					>
+						Delete VM
+					</button>
+				</div>
 			</div>
 			<nav class="flex gap-1 text-sm">
 				{#each ['summary', 'console'] as const as t (t)}
@@ -228,6 +267,56 @@
 
 	{#if editing}
 		<EditSettings {vm} onclose={() => (editing = false)} onstaged={() => onstaged?.()} />
+	{/if}
+
+	{#if deleting}
+		<div
+			class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+			onclick={(e) => e.target === e.currentTarget && (deleting = false)}
+			onkeydown={(e) => e.key === 'Escape' && (deleting = false)}
+			role="presentation"
+		>
+			<div class="w-full max-w-md rounded-lg bg-white shadow-xl">
+				<header class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+					<h2 class="text-base font-semibold text-red-700">Delete VM — {vm.name}</h2>
+					<button onclick={() => (deleting = false)} class="text-slate-400 hover:text-slate-700">✕</button>
+				</header>
+				<div class="px-5 py-4 text-sm text-slate-700">
+					<p class="mb-3">
+						This removes <span class="font-mono text-xs">{vm.sourceFile}</span> from git and stages
+						the change into <strong>Changes</strong>. The VM is deleted from the cluster only when the
+						pull request is merged.
+					</p>
+					<label for="delete-confirm" class="mb-1 block text-xs text-slate-500">
+						Type <span class="font-mono">{vm.name}</span> to confirm:
+					</label>
+					<input
+						id="delete-confirm"
+						bind:value={confirmName}
+						class="w-full rounded border border-slate-300 px-2 py-1 font-mono text-sm focus:border-red-400 focus:outline-none"
+						placeholder={vm.name}
+					/>
+					{#if deleteErr}
+						<p class="mt-2 text-xs text-red-600">{deleteErr}</p>
+					{/if}
+				</div>
+				<footer class="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">
+					<button
+						onclick={() => (deleting = false)}
+						class="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+					>
+						Cancel
+					</button>
+					<button
+						onclick={confirmDelete}
+						disabled={confirmName !== vm.name || deleteBusy}
+						class="rounded bg-red-600 px-3 py-1 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+					>
+						Delete
+					</button>
+				</footer>
+			</div>
+		</div>
 	{/if}
 {:else}
 	<div class="flex h-full items-center justify-center text-sm text-slate-400">

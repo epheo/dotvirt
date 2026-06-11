@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -77,6 +78,7 @@ type PR struct {
 	Number  int    `json:"number"`
 	HTMLURL string `json:"html_url"`
 	State   string `json:"state"`
+	Merged  bool   `json:"merged"`
 	Title   string `json:"title"`
 	Head    struct {
 		Ref string `json:"ref"`
@@ -94,22 +96,43 @@ func (c *Client) CreatePR(title, body, head, base string) (PR, error) {
 	return pr, nil
 }
 
-// FindOpenPR returns the open PR for head→base, or ok=false if none. It filters
-// by head branch (Forgejo's "owner:branch" form) and confirms the returned PR's
-// head ref matches, so a user's re-propose never matches an unrelated PR (e.g.
-// another user's branch or a human feature PR) into the same base.
-func (c *Client) FindOpenPR(head, base string) (pr PR, ok bool, err error) {
-	q := fmt.Sprintf("/pulls?state=open&base=%s&head=%s:%s", url.QueryEscape(base), url.QueryEscape(c.owner), url.QueryEscape(head))
+// FindPR returns the PR for head→base regardless of state, or ok=false if none.
+// It filters by head branch (Forgejo's "owner:branch" form) and confirms the
+// returned PR's head ref matches, so a user's re-propose never matches an
+// unrelated PR (e.g. another user's branch or a human feature PR) into the same
+// base. An open match is preferred; otherwise the first head-matching PR is
+// returned — the reopen target when the prior PR was closed.
+func (c *Client) FindPR(head, base string) (pr PR, ok bool, err error) {
+	q := fmt.Sprintf("/pulls?state=all&base=%s&head=%s:%s", url.QueryEscape(base), url.QueryEscape(c.owner), url.QueryEscape(head))
 	var prs []PR
 	if err := c.do("GET", c.repoPath(q), nil, &prs); err != nil {
 		return PR{}, false, err
 	}
-	for _, p := range prs {
-		if p.Head.Ref == head {
-			return p, true, nil
+	var fallback *PR
+	for i := range prs {
+		if prs[i].Head.Ref != head {
+			continue
+		}
+		if prs[i].State == "open" {
+			return prs[i], true, nil
+		}
+		if fallback == nil {
+			fallback = &prs[i]
 		}
 	}
+	if fallback != nil {
+		return *fallback, true, nil
+	}
 	return PR{}, false, nil
+}
+
+// ReopenPR reopens a closed (unmerged) pull request and returns its updated state.
+func (c *Client) ReopenPR(number int) (PR, error) {
+	var pr PR
+	if err := c.do("PATCH", c.repoPath("/pulls/"+strconv.Itoa(number)), map[string]string{"state": "open"}, &pr); err != nil {
+		return PR{}, err
+	}
+	return pr, nil
 }
 
 // CompareURL is the browser URL to manually open a PR for head→base, used when

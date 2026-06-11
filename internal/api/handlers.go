@@ -326,6 +326,19 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 	respond(w, result, err)
 }
 
+// handleDelete stages the removal of a VM's manifest into the caller's draft. Like
+// edit/adopt it only mutates the user's own draft (no cluster write, no SA
+// escalation — Argo prunes the VM on merge under its own RBAC), so namespace
+// membership via resolveProject is the right gate, not resync's CanUpdateVM check.
+func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
+	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	if !ok {
+		return
+	}
+	result, err := s.draft.StageDelete(sc.id, sc.proj, r.PathValue("namespace"), r.PathValue("name"))
+	respond(w, result, err)
+}
+
 func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 	// Resync runs the reconcile with dotvirt's SA, so gate it on the caller's OWN
 	// authority over the VM (not just namespace read): they may trigger a sync only

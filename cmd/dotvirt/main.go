@@ -59,6 +59,9 @@ func run() error {
 		return err
 	}
 	forgeFactory := forge.NewFactory(cfg.ForgeURL, cfg.ForgeToken, cfg.InsecureTLS)
+	if forgeFactory == nil {
+		log.Printf("forge not configured (DOTVIRT_FORGE_URL/DOTVIRT_FORGE_TOKEN unset): propose will push-only, no PR will be created")
+	}
 	resolver := project.NewResolver(cfg.ProjectLabel, cfg.RepoAnnotation)
 
 	clusterFactory, err := cluster.NewFactory(cfg.Kubeconfig)

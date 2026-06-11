@@ -17,12 +17,14 @@ import (
 	"github.com/epheo/dotvirt/internal/vmgen"
 )
 
-// Kind distinguishes an edit of an existing VM from a brand-new VM.
+// Kind distinguishes an edit of an existing VM, a brand-new VM, and the removal
+// of an existing VM's manifest.
 type Kind string
 
 const (
 	KindEdit   Kind = "edit"
 	KindCreate Kind = "create"
+	KindDelete Kind = "delete" // remove the VM's manifest from the repo (Argo prunes on merge)
 )
 
 // Entry is one pending change, keyed by namespace/name within its (user,project).
@@ -31,9 +33,12 @@ type Entry struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
 
+	// SourceFile is the repo-relative manifest path. Set for KindEdit (the file to
+	// patch) and KindDelete (the file to remove).
+	SourceFile string `json:"sourceFile,omitempty"`
+
 	// Edit fields (KindEdit): the change to apply to an existing manifest.
-	SourceFile string           `json:"sourceFile,omitempty"`
-	Edit       *manifest.VMEdit `json:"edit,omitempty"`
+	Edit *manifest.VMEdit `json:"edit,omitempty"`
 
 	// Create fields (KindCreate): the wizard spec for a new VM.
 	Spec *vmgen.Spec `json:"spec,omitempty"`

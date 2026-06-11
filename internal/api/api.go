@@ -30,6 +30,7 @@ import (
 type Draft interface {
 	StageEdit(id auth.Identity, proj project.ProjectInfo, namespace, name string, req model.EditRequest) (model.DraftView, error)
 	StageCreate(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
+	StageDelete(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
 	Unstage(id auth.Identity, proj project.ProjectInfo, namespace, name string) error
 	Get(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
 	Discard(id auth.Identity, proj project.ProjectInfo) error
@@ -143,6 +144,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Draft changeset routes (all project-scoped).
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/edit", s.handleEdit)
+	mux.HandleFunc("POST /api/vms/{namespace}/{name}/delete", s.handleDelete)
 	mux.HandleFunc("POST /api/vms", s.handleCreate)
 	mux.HandleFunc("GET /api/draft", s.handleDraftGet)
 	mux.HandleFunc("DELETE /api/draft", s.handleDraftDiscard)

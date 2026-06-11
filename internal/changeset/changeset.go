@@ -119,6 +119,33 @@ func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, ra
 	return c.Get(id, proj)
 }
 
+// StageDelete records the removal of an existing VM in (id, proj)'s draft. The VM
+// must exist on the base branch (you can't delete what isn't in git — an unstaged
+// create should be unstaged, not deleted); its manifest path is captured so the
+// propose step removes that file and Argo prunes the VM on merge.
+func (c *Coordinator) StageDelete(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error) {
+	read, err := c.read(proj)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	vm, ok, err := read.FindVMOnBranch(c.baseBranch, namespace, name)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	if !ok {
+		return model.DraftView{}, fmt.Errorf("%w: %s/%s not on %s", model.ErrNotFound, namespace, name, c.baseBranch)
+	}
+	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
+		Kind:       draft.KindDelete,
+		Namespace:  namespace,
+		Name:       name,
+		SourceFile: vm.SourceFile,
+	}); err != nil {
+		return model.DraftView{}, err
+	}
+	return c.Get(id, proj)
+}
+
 // Unstage removes one VM's pending change from (id, proj)'s draft.
 func (c *Coordinator) Unstage(id auth.Identity, proj project.ProjectInfo, namespace, name string) error {
 	return c.store.Unstage(id.Username, proj.Name, namespace, name)
@@ -159,6 +186,8 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 			if _, content, err := vmgen.Manifest(*e.Spec); err == nil {
 				item.YAML = string(content)
 			}
+		case draft.KindDelete:
+			item.Changes = []model.Change{{Field: "lifecycle", Action: "remove", From: e.Namespace + "/" + e.Name}}
 		}
 		view.Items = append(view.Items, item)
 	}
@@ -220,22 +249,41 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	}
 
 	pr, err := fc.CreatePR(title, req.Message, branch, c.baseBranch)
-	if err != nil {
-		// A PR may already exist for this branch; try to find it.
-		if existing, ok, ferr := fc.FindOpenPR(branch, c.baseBranch); ferr == nil && ok {
+	if err == nil {
+		out.PRURL, out.PRNumber = pr.HTMLURL, pr.Number
+		return out, c.store.Clear(id.Username, proj.Name)
+	}
+
+	// CreatePR failed — the dominant case is 409: a PR for this stable head→base
+	// already exists, possibly closed. The branch is per-(user, project) and reused
+	// every propose, so look up the existing PR across all states and recover.
+	if existing, ok, ferr := fc.FindPR(branch, c.baseBranch); ferr == nil && ok {
+		switch {
+		case existing.State == "open":
 			out.PRURL, out.PRNumber, out.Existing = existing.HTMLURL, existing.Number, true
 			return out, c.store.Clear(id.Username, proj.Name)
+		case !existing.Merged:
+			// Closed but not merged: reopen so the freshly-pushed commits surface
+			// instead of sitting on a branch whose only PR is closed.
+			if reopened, rerr := fc.ReopenPR(existing.Number); rerr == nil {
+				out.PRURL, out.PRNumber, out.Existing = reopened.HTMLURL, reopened.Number, true
+				return out, c.store.Clear(id.Username, proj.Name)
+			} else {
+				log.Printf("propose %s/%s: found closed PR #%d but reopen failed: %v", proj.Name, branch, existing.Number, rerr)
+			}
+		default:
+			// Merged: the branch already landed; new commits sit atop a merged head.
+			log.Printf("propose %s/%s: existing PR #%d is merged; offering compare URL", proj.Name, branch, existing.Number)
 		}
-		// Partial success: the branch IS pushed, PR creation just failed (perms,
-		// rate-limit, …). Hand back the compare URL so the user can open the PR
-		// manually, and KEEP the draft staged so they can retry — this is a 200, not
-		// an error (returning err here would make the handler drop the result body).
-		log.Printf("propose %s/%s: branch pushed but PR creation failed: %v", proj.Name, branch, err)
-		out.CompareURL = fc.CompareURL(branch, c.baseBranch)
-		return out, nil
 	}
-	out.PRURL, out.PRNumber = pr.HTMLURL, pr.Number
-	return out, c.store.Clear(id.Username, proj.Name)
+
+	// Real failure / reopen failed / merged: the branch IS pushed. Hand back the
+	// compare URL so the user can open the PR manually, and KEEP the draft staged so
+	// they can retry — this is a 200, not an error (returning err here would make the
+	// handler drop the result body).
+	log.Printf("propose %s/%s: branch pushed but PR unavailable: %v", proj.Name, branch, err)
+	out.CompareURL = fc.CompareURL(branch, c.baseBranch)
+	return out, nil
 }
 
 // proposedBranch derives the per-(user, project) working branch under the
@@ -262,6 +310,8 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) ([]git.ChangesetIt
 				return nil, fmt.Errorf("generate %s/%s: %w", e.Namespace, e.Name, err)
 			}
 			items = append(items, git.ChangesetItem{Path: path, Namespace: e.Namespace, Name: e.Name, NewContent: content})
+		case draft.KindDelete:
+			items = append(items, git.ChangesetItem{Path: e.SourceFile, Namespace: e.Namespace, Name: e.Name, Delete: true})
 		}
 	}
 	return items, nil

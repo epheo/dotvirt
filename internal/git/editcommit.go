@@ -21,15 +21,17 @@ type EditResult struct {
 	Pushed bool   `json:"pushed"`
 }
 
-// ChangesetItem is one change to apply within a CommitChangeset: either an edit
-// of an existing manifest (Edit set, applied via manifest.ApplyEdit) or a brand-new file
-// (NewContent set). Exactly one mode is used per item.
+// ChangesetItem is one change to apply within a CommitChangeset: an edit of an
+// existing manifest (Edit set, applied via manifest.ApplyEdit), a brand-new file
+// (NewContent set), or the removal of an existing file (Delete set). Exactly one
+// mode is used per item.
 type ChangesetItem struct {
 	Path       string // repo-relative manifest path
 	Namespace  string // VM identity (for manifest.ApplyEdit targeting)
 	Name       string
 	Edit       *manifest.VMEdit // edit mode
 	NewContent []byte           // create mode (full manifest)
+	Delete     bool             // delete mode: remove Path from the worktree
 }
 
 // CommitChangeset applies every item to one branch created off base and commits
@@ -67,6 +69,12 @@ func (w *WriteRepo) CommitChangeset(base, branch, message string, items []Change
 	for _, it := range items {
 		var content []byte
 		switch {
+		case it.Delete:
+			// wt.Remove deletes the file and stages the removal; nothing to write.
+			if _, err := wt.Remove(it.Path); err != nil {
+				return EditResult{}, fmt.Errorf("remove %s: %w", it.Path, err)
+			}
+			continue
 		case it.Edit != nil:
 			original, err := readWorktree(wt, it.Path)
 			if err != nil {

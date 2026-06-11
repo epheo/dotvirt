@@ -84,27 +84,6 @@ func (r *Repo) Refresh() error {
 	return nil
 }
 
-// Branches lists local branch names (a mirror clone stores remote heads as
-// local heads), sorted, with the conventional default first.
-func (r *Repo) Branches() ([]string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	iter, err := r.repo.Branches()
-	if err != nil {
-		return nil, fmt.Errorf("list branches: %w", err)
-	}
-	var names []string
-	if err := iter.ForEach(func(ref *plumbing.Reference) error {
-		names = append(names, ref.Name().Short())
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	sort.Strings(names)
-	return names, nil
-}
-
 // HeadsSignature refreshes from the remote and returns a stable string
 // summarizing all branch heads (name+hash). A change means some branch moved.
 // This is the background fetcher's entry point: it both fetches (the single

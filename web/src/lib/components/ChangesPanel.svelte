@@ -119,9 +119,11 @@
 					<div class="mb-2 rounded border border-slate-200">
 						<div class="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
 							<span
-								class="rounded px-1.5 py-0.5 text-xs {item.kind === 'create'
-									? 'bg-green-100 text-green-700'
-									: 'bg-blue-100 text-blue-700'}">{item.kind}</span
+								class="rounded px-1.5 py-0.5 text-xs {item.kind === 'delete'
+									? 'bg-red-100 text-red-700'
+									: item.kind === 'create'
+										? 'bg-green-100 text-green-700'
+										: 'bg-blue-100 text-blue-700'}">{item.kind}</span
 							>
 							<span class="font-medium text-slate-800">{item.namespace}/{item.name}</span>
 							<button

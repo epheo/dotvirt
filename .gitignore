@@ -1,6 +1,9 @@
 # Compiled binary (built from ./cmd/dotvirt)
 /dotvirt
 
+# Local demo launcher (carries env wiring/credentials, not code)
+/run-demo.sh
+
 # Go build/test artifacts
 *.exe
 *.test

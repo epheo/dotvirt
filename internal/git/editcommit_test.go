@@ -53,3 +53,39 @@ spec:
 	run(work, "push", "-q", "origin", "main")
 	return bare
 }
+
+// TestCommitChangesetDeleteRemovesFile verifies a Delete item removes that file on
+// the working branch while leaving siblings untouched.
+func TestCommitChangesetDeleteRemovesFile(t *testing.T) {
+	bare := seedRunning(t) // README + tenant-a/web.yaml + tenant-a/db.yaml on main
+	w := OpenWrite(bare, "", "", true)
+
+	res, err := w.CommitChangeset("main", "dotvirt/proposed", "drop db",
+		[]ChangesetItem{{Path: "tenant-a/db.yaml", Namespace: "tenant-a", Name: "db", Delete: true}},
+		Author{Name: "u", Email: "u@x"})
+	if err != nil {
+		t.Fatalf("CommitChangeset: %v", err)
+	}
+	tree := lsTree(t, bare, res.Branch)
+	if contains(tree, "tenant-a/db.yaml") {
+		t.Error("db.yaml should have been removed")
+	}
+	if !contains(tree, "tenant-a/web.yaml") || !contains(tree, "README.md") {
+		t.Error("unrelated files must be kept")
+	}
+}
+
+// TestCommitChangesetDeleteAbsentNoop verifies that deleting an already-absent path
+// (the only item) surfaces the "no changes vs base" error rather than committing.
+func TestCommitChangesetDeleteAbsentNoop(t *testing.T) {
+	bare := seedRepo(t) // only web.yaml on main
+	w := OpenWrite(bare, "", "", true)
+
+	_, err := w.CommitChangeset("main", "dotvirt/proposed", "drop ghost",
+		[]ChangesetItem{{Path: "alpha/ghost.yaml", Namespace: "alpha", Name: "ghost", Delete: true}},
+		Author{Name: "u", Email: "u@x"})
+	// go-git's Remove of a missing path errors; either way it must NOT succeed.
+	if err == nil {
+		t.Fatal("expected an error deleting an absent file, got nil")
+	}
+}

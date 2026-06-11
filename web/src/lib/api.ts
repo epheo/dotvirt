@@ -156,7 +156,7 @@ export interface Change {
 	to?: string;
 }
 export interface DraftItem {
-	kind: 'edit' | 'create';
+	kind: 'edit' | 'create' | 'delete';
 	namespace: string;
 	name: string;
 	changes: Change[];
@@ -197,6 +197,8 @@ export const api = {
 	stageEdit: (namespace: string, name: string, req: EditRequest) =>
 		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/edit`, req),
 	stageCreate: (req: CreateVMRequest) => post<DraftView>('/api/vms', req),
+	stageDelete: (namespace: string, name: string) =>
+		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/delete`, {}),
 	unstage: (namespace: string, name: string) =>
 		del(`/api/draft/${enc(namespace)}/${enc(name)}`),
 
@@ -241,13 +243,12 @@ export async function draftsByProject(
 /**
  * streamInventory subscribes to the caller's live inventory over WebSocket. The
  * session cookie rides the handshake (same-origin), so the server pushes only the
- * caller's tree. Calls onInventory on each push and onStatus on connect/disconnect,
- * auto-reconnects with backoff, and invokes onUnauthorized if the handshake is
- * rejected (expired session). Returns a function to close the subscription.
+ * caller's tree. Calls onInventory on each push, auto-reconnects with backoff, and
+ * invokes onUnauthorized if the handshake is rejected (expired session). Returns a
+ * function to close the subscription.
  */
 export function streamInventory(
 	onInventory: (inv: Inventory) => void,
-	onStatus?: (connected: boolean) => void,
 	onUnauthorized?: () => void
 ): () => void {
 	let ws: WebSocket | null = null;
@@ -268,7 +269,6 @@ export function streamInventory(
 		ws.onopen = () => {
 			everOpen = true;
 			retry = 0;
-			onStatus?.(true);
 		};
 		ws.onmessage = (e) => {
 			try {
@@ -283,7 +283,6 @@ export function streamInventory(
 			reconnectTimer = setTimeout(connect, 500 * 2 ** (retry - 1)); // 0.5s..16s backoff
 		};
 		ws.onclose = () => {
-			onStatus?.(false);
 			if (closed) return;
 			if (everOpen) {
 				scheduleReconnect();
