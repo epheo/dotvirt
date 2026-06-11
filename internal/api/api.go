@@ -1,284 +1,179 @@
 // Package api wires dotvirt's JSON API. The frontend is a separate service
 // (SvelteKit), so this serves /api only and applies CORS for the UI origin.
+// Every request is identity-scoped: the auth middleware injects the caller's
+// Identity, and handlers resolve the caller's projects (and the repo behind each)
+// with the caller's own token, so cluster RBAC + per-project repos are the sole
+// isolation boundary.
 package api
 
 import (
-	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"time"
 
+	"github.com/epheo/dotvirt/internal/argo"
+	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/cluster"
+	"github.com/epheo/dotvirt/internal/clusterstate"
+	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/ttlcache"
 )
 
-// InventoryProvider supplies branch lists and per-branch inventories.
-// Implemented by the git plane (internal/git); kept as an interface so the API
-// package doesn't depend on go-git directly.
-type InventoryProvider interface {
-	Branches() ([]string, error)
-	Inventory(branch string) (model.Inventory, error)
-}
-
-// EditRequest is the body of an edit: which VM, on which source branch, and
-// which fields to change. Power is "On"/"Off"; nil fields are left unchanged.
-type EditRequest struct {
-	SourceBranch string  `json:"sourceBranch"`
-	SourceFile   string  `json:"sourceFile"`
-	Power        *string `json:"power,omitempty"`
-	CPUCores     *int    `json:"cpuCores,omitempty"`
-	Memory       *string `json:"memory,omitempty"`
-	Instancetype *string `json:"instancetype,omitempty"`
-	Preference   *string `json:"preference,omitempty"`
-
-	SetLabels      map[string]string `json:"setLabels,omitempty"`
-	RemoveLabels   []string          `json:"removeLabels,omitempty"`
-	AddDisks       []DiskAdd         `json:"addDisks,omitempty"`
-	RemoveDisks    []string          `json:"removeDisks,omitempty"`
-	AddNetworks    []NetworkAdd      `json:"addNetworks,omitempty"`
-	RemoveNetworks []string          `json:"removeNetworks,omitempty"`
-
-	Message string `json:"message,omitempty"` // optional commit message; auto-generated when empty
-}
-
-// DiskAdd / NetworkAdd mirror git.DiskAdd / git.NetworkAdd for the request body.
-type DiskAdd struct {
-	Name string `json:"name"`
-	Size string `json:"size"`
-}
-type NetworkAdd struct {
-	Name string `json:"name"`
-}
-
-// OptionsProvider lists cluster choices for the wizard/editor (instancetypes,
-// preferences, OS images, networks). Implemented by the cluster client.
-type OptionsProvider interface {
-	ListOptions(ctx context.Context) (model.Options, error)
-}
-
-// ProposeRequest is the body of a propose: PR title + description.
-type ProposeRequest struct {
-	Title   string `json:"title"`
-	Message string `json:"message"`
-}
-
-// Draft is the staging area for pending VM changes. Edits and new-VM specs are
-// staged (not committed); the whole draft is later proposed as one PR.
-// Implemented by the changeset coordinator (cmd wiring over internal/draft+git+forge).
+// Draft is the per-(user,project) staging area for pending VM changes, proposed
+// as one PR to the project's repo. Implemented by the changeset coordinator. Each
+// method takes the caller's Identity and the resolved target project. Request/
+// result DTOs live in model so the implementation needn't depend on this package.
 type Draft interface {
-	StageEdit(namespace, name string, req EditRequest) (model.DraftView, error)
-	StageCreate(spec json.RawMessage) (model.DraftView, error)
-	Unstage(namespace, name string) error
-	Get() (model.DraftView, error)
-	Discard() error
-	Propose(req ProposeRequest) (model.ProposeResult, error)
-	VMDrift(namespace, name string) (model.DriftResult, error)
-	Adopt(namespace, name string) (model.DraftView, error)     // stage live state (running→main)
-	Resync(namespace, name string) (model.ResyncResult, error) // trigger ArgoCD sync (main→running)
+	StageEdit(id auth.Identity, proj project.ProjectInfo, namespace, name string, req model.EditRequest) (model.DraftView, error)
+	StageCreate(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
+	Unstage(id auth.Identity, proj project.ProjectInfo, namespace, name string) error
+	Get(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
+	Discard(id auth.Identity, proj project.ProjectInfo) error
+	Propose(id auth.Identity, proj project.ProjectInfo, req model.ProposeRequest) (model.ProposeResult, error)
+	VMDrift(proj project.ProjectInfo, namespace, name string) (model.DriftResult, error)
+	Adopt(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
+	Resync(namespace, name string) (model.ResyncResult, error) // SA-identity; no user/project context
 }
 
 // StreamHandler upgrades a request to a WebSocket that pushes live inventory.
-// Implemented by internal/stream.Hub.
 type StreamHandler interface {
 	Handler(w http.ResponseWriter, r *http.Request)
 }
 
 // VNCHandler upgrades a request to a WebSocket bridged to a VMI's VNC console.
-// Implemented by internal/stream.VNCProxy.
 type VNCHandler interface {
 	Handler(w http.ResponseWriter, r *http.Request)
 }
 
-// Deps are the collaborators the API needs. Nil providers degrade gracefully:
-// their routes return 503 so the skeleton runs before later slices land.
-type Deps struct {
-	Inventory InventoryProvider
-	Options   OptionsProvider
-	Draft     Draft
-	Stream    StreamHandler
-	VNC       VNCHandler
-
-	// AllowOrigin is the UI origin permitted via CORS (e.g. http://localhost:5173).
-	// Empty disables CORS headers (same-origin or reverse-proxied deployments).
-	AllowOrigin string
+// Config carries the non-collaborator settings the handlers need.
+type Config struct {
+	BaseBranch  string // repo branch the inventory reads + drafts target
+	AllowOrigin string // CORS origin for the SvelteKit frontend; empty disables CORS
 }
 
-// Handler builds the API http.Handler.
-func Handler(d Deps) http.Handler {
+// visibleTTL bounds how long a token's visible-namespace set is reused. The set
+// only changes when the user's RBAC does (rare), so a short cache turns the former
+// per-build VisibleNamespaces call (a namespace LIST or an SSRR-per-candidate
+// probe) into one call per token per window — the only cluster touch left on the
+// read path.
+const visibleTTL = 30 * time.Second
+
+// Server holds the long-lived collaborators and builds per-request, identity-
+// scoped state. It replaces the old interface-bundle Deps.
+type Server struct {
+	clusterF *cluster.Factory
+	state    *clusterstate.State // SA-owned live+topology snapshot; the read path's source
+	drift    *argo.DriftCache    // nil when Argo disabled; SA-read, shared across subscribers
+	resolver *project.Resolver
+	repos    *git.RepoSet
+	visible  *ttlcache.Cache[map[string]bool] // per-token visible-namespace set
+	draft    Draft
+	auth     *auth.Authenticator // nil leaves the API open (dev)
+	stream   StreamHandler
+	vnc      VNCHandler
+	cfg      Config
+}
+
+// Deps are the collaborators for NewServer. Nil pieces degrade gracefully.
+type Deps struct {
+	ClusterFactory *cluster.Factory
+	State          *clusterstate.State
+	Drift          *argo.DriftCache // shared, TTL-cached SA drift; nil when Argo disabled
+	Resolver       *project.Resolver
+	Repos          *git.RepoSet
+	Draft          Draft
+	Auth           *auth.Authenticator
+	Stream         StreamHandler
+	VNC            VNCHandler
+	Config         Config
+}
+
+// NewServer builds the API server from its collaborators.
+func NewServer(d Deps) *Server {
+	return &Server{
+		clusterF: d.ClusterFactory,
+		state:    d.State,
+		drift:    d.Drift,
+		resolver: d.Resolver,
+		repos:    d.Repos,
+		visible:  ttlcache.New[map[string]bool](visibleTTL),
+		draft:    d.Draft,
+		auth:     d.Auth,
+		stream:   d.Stream,
+		vnc:      d.VNC,
+		cfg:      d.Config,
+	}
+}
+
+// UseStream attaches the live-inventory WebSocket hub. Set after construction
+// because the hub is built over the server's own InventoryForIdentity (chicken-
+// and-egg otherwise). nil leaves the stream route unmounted.
+func (s *Server) UseStream(h StreamHandler) { s.stream = h }
+
+// UseVNC attaches the VNC-console WebSocket proxy. nil leaves it unmounted.
+func (s *Server) UseVNC(h VNCHandler) { s.vnc = h }
+
+// Handler builds the API http.Handler with auth + CORS applied.
+func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	mux.HandleFunc("GET /api/branches", func(w http.ResponseWriter, r *http.Request) {
-		if d.Inventory == nil {
-			http.Error(w, "inventory provider not configured", http.StatusServiceUnavailable)
-			return
-		}
-		branches, err := d.Inventory.Branches()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		writeJSON(w, http.StatusOK, branches)
-	})
-
-	mux.HandleFunc("GET /api/inventory", func(w http.ResponseWriter, r *http.Request) {
-		if d.Inventory == nil {
-			http.Error(w, "inventory provider not configured", http.StatusServiceUnavailable)
-			return
-		}
-		branch := r.URL.Query().Get("branch")
-		inv, err := d.Inventory.Inventory(branch)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		writeJSON(w, http.StatusOK, inv)
-	})
-
-	if d.Stream != nil {
-		// WebSocket: live inventory push. The handler manages its own protocol;
-		// it bypasses the JSON CORS wrapper but the upgrader checks origin.
-		mux.HandleFunc("GET /api/inventory/stream", d.Stream.Handler)
+	if s.auth != nil {
+		mux.HandleFunc("POST /api/login", s.auth.Login)
+		mux.HandleFunc("POST /api/logout", s.auth.Logout)
+		mux.HandleFunc("GET /api/me", s.auth.Me)
 	}
 
-	if d.VNC != nil {
-		// WebSocket: VNC console bridged to KubeVirt's VNC subresource.
-		mux.HandleFunc("GET /api/vms/{namespace}/{name}/vnc", d.VNC.Handler)
+	mux.HandleFunc("GET /api/inventory", s.handleInventory)
+	mux.HandleFunc("GET /api/options", s.handleOptions)
+
+	if s.stream != nil {
+		mux.HandleFunc("GET /api/inventory/stream", s.stream.Handler)
+	}
+	if s.vnc != nil {
+		mux.HandleFunc("GET /api/vms/{namespace}/{name}/vnc", s.vnc.Handler)
 	}
 
-	mux.HandleFunc("GET /api/options", func(w http.ResponseWriter, r *http.Request) {
-		if d.Options == nil {
-			http.Error(w, "options provider not configured (cluster reads disabled)", http.StatusServiceUnavailable)
-			return
-		}
-		opts, err := d.Options.ListOptions(r.Context())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		writeJSON(w, http.StatusOK, opts)
-	})
+	// Draft changeset routes (all project-scoped).
+	mux.HandleFunc("POST /api/vms/{namespace}/{name}/edit", s.handleEdit)
+	mux.HandleFunc("POST /api/vms", s.handleCreate)
+	mux.HandleFunc("GET /api/draft", s.handleDraftGet)
+	mux.HandleFunc("DELETE /api/draft", s.handleDraftDiscard)
+	mux.HandleFunc("DELETE /api/draft/{namespace}/{name}", s.handleUnstage)
+	mux.HandleFunc("POST /api/draft/propose", s.handlePropose)
+	mux.HandleFunc("GET /api/vms/{namespace}/{name}/drift", s.handleDrift)
+	mux.HandleFunc("POST /api/vms/{namespace}/{name}/adopt", s.handleAdopt)
+	mux.HandleFunc("POST /api/vms/{namespace}/{name}/resync", s.handleResync)
 
-	// --- Draft changeset routes ---
-	// Staging an edit / a new VM, the semantic draft view, unstage, discard, and
-	// propose (branch+commit+push+PR). Edits and creates go into the draft rather
-	// than committing directly.
-
-	mux.HandleFunc("POST /api/vms/{namespace}/{name}/edit", func(w http.ResponseWriter, r *http.Request) {
-		if !draftReady(w, d) {
-			return
-		}
-		var req EditRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		if req.SourceFile == "" {
-			http.Error(w, "sourceFile is required", http.StatusBadRequest)
-			return
-		}
-		result, err := d.Draft.StageEdit(r.PathValue("namespace"), r.PathValue("name"), req)
-		respond(w, result, err)
-	})
-
-	mux.HandleFunc("POST /api/vms", func(w http.ResponseWriter, r *http.Request) {
-		if !draftReady(w, d) {
-			return
-		}
-		raw, err := readAll(r)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		result, err := d.Draft.StageCreate(raw)
-		respond(w, result, err)
-	})
-
-	mux.HandleFunc("GET /api/draft", func(w http.ResponseWriter, r *http.Request) {
-		if !draftReady(w, d) {
-			return
-		}
-		view, err := d.Draft.Get()
-		respond(w, view, err)
-	})
-
-	mux.HandleFunc("DELETE /api/draft", func(w http.ResponseWriter, r *http.Request) {
-		if !draftReady(w, d) {
-			return
-		}
-		if err := d.Draft.Discard(); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
-
-	mux.HandleFunc("DELETE /api/draft/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) {
-		if !draftReady(w, d) {
-			return
-		}
-		if err := d.Draft.Unstage(r.PathValue("namespace"), r.PathValue("name")); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
-
-	mux.HandleFunc("POST /api/draft/propose", func(w http.ResponseWriter, r *http.Request) {
-		if !draftReady(w, d) {
-			return
-		}
-		var req ProposeRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		result, err := d.Draft.Propose(req)
-		respond(w, result, err)
-	})
-
-	mux.HandleFunc("GET /api/vms/{namespace}/{name}/drift", func(w http.ResponseWriter, r *http.Request) {
-		if !draftReady(w, d) {
-			return
-		}
-		result, err := d.Draft.VMDrift(r.PathValue("namespace"), r.PathValue("name"))
-		respond(w, result, err)
-	})
-
-	// Reconcile: adopt live state into a PR (running→main), or re-sync the cluster
-	// from git (main→running).
-	mux.HandleFunc("POST /api/vms/{namespace}/{name}/adopt", func(w http.ResponseWriter, r *http.Request) {
-		if !draftReady(w, d) {
-			return
-		}
-		result, err := d.Draft.Adopt(r.PathValue("namespace"), r.PathValue("name"))
-		respond(w, result, err)
-	})
-
-	mux.HandleFunc("POST /api/vms/{namespace}/{name}/resync", func(w http.ResponseWriter, r *http.Request) {
-		if !draftReady(w, d) {
-			return
-		}
-		result, err := d.Draft.Resync(r.PathValue("namespace"), r.PathValue("name"))
-		respond(w, result, err)
-	})
-
-	return withCORS(d.AllowOrigin, mux)
+	// CORS wraps the outside so it can answer preflight OPTIONS without auth; auth
+	// gates everything inside.
+	var handler http.Handler = mux
+	if s.auth != nil {
+		handler = s.auth.Middleware(mux)
+	}
+	return withCORS(s.cfg.AllowOrigin, handler)
 }
 
-// withCORS adds CORS headers for the configured UI origin and answers
-// preflight OPTIONS requests.
+// withCORS adds CORS headers for the configured UI origin and answers preflight
+// OPTIONS requests. Credentials are allowed (the session cookie is sent
+// cross-origin in dev), which requires echoing a specific origin — never "*".
 func withCORS(origin string, next http.Handler) http.Handler {
 	if origin == "" {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		w.Header().Set("Vary", "Origin")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -292,23 +187,30 @@ func readAll(r *http.Request) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MiB
 }
 
-// draftReady writes 503 and returns false if the draft coordinator is absent
-// (e.g. no writable repo configured).
-func draftReady(w http.ResponseWriter, d Deps) bool {
-	if d.Draft == nil {
-		http.Error(w, "changeset/draft not configured", http.StatusServiceUnavailable)
-		return false
-	}
-	return true
-}
-
-// respond writes v as JSON, or the error as 500.
+// respond writes v as JSON, or the error mapped to a status by its kind.
 func respond(w http.ResponseWriter, v any, err error) {
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+
+// statusFor maps a domain error to an HTTP status by the kind it wraps (see
+// model.Err*), defaulting to 500 for anything unclassified.
+func statusFor(err error) int {
+	switch {
+	case errors.Is(err, model.ErrInvalid):
+		return http.StatusBadRequest
+	case errors.Is(err, model.ErrNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, model.ErrConflict):
+		return http.StatusConflict
+	case errors.Is(err, model.ErrUnavailable):
+		return http.StatusServiceUnavailable
+	default:
+		return http.StatusInternalServerError
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

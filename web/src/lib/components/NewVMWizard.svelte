@@ -62,7 +62,6 @@
 		error = '';
 		const [imgName, imgNs] = osImage.split('|');
 		const req: CreateVMRequest = {
-			sourceBranch: '',
 			name,
 			namespace,
 			instancetype,

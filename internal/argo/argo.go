@@ -1,6 +1,8 @@
 // Package argo is dotvirt's drift-read plane: it reads ArgoCD Application CRs and
 // reports each VM's sync/health straight from Argo's own status, so dotvirt never
-// re-implements diffing.
+// re-implements diffing. Like the cluster plane, identity is per-token: a Factory
+// mints one Client per bearer token (drift is read as the user); the SA client
+// drives background watches + resync, which have no user context.
 package argo
 
 import (
@@ -12,9 +14,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 // applicationsGVR is the ArgoCD Application resource.
@@ -31,29 +33,34 @@ type Drift struct {
 }
 
 // Client reads Application status via the dynamic client — no heavy argo-cd
-// module, just the handful of status fields dotvirt needs.
+// module, just the handful of status fields dotvirt needs. One identity.
 type Client struct {
 	dyn dynamic.Interface
 }
 
-// New builds a Client. kubeconfig empty means in-cluster config.
-func New(kubeconfig string) (*Client, error) {
-	cfg, err := restConfig(kubeconfig)
+// Factory mints per-token Clients, reusing the shared restfactory for the
+// identity machinery (see cluster.Factory). The SA client drives background
+// watches + resync.
+type Factory struct {
+	*restfactory.Factory[*Client]
+}
+
+// NewFactory builds a Factory. kubeconfig empty means in-cluster config.
+func NewFactory(kubeconfig string) (*Factory, error) {
+	base, err := restfactory.New(kubeconfig, clientFor)
 	if err != nil {
 		return nil, err
 	}
+	return &Factory{base}, nil
+}
+
+// clientFor is the restfactory build hook: a token-bearing config → a drift Client.
+func clientFor(cfg *rest.Config) (*Client, error) {
 	dyn, err := dynamic.NewForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("dynamic client: %w", err)
 	}
 	return &Client{dyn: dyn}, nil
-}
-
-func restConfig(kubeconfig string) (*rest.Config, error) {
-	if kubeconfig == "" {
-		return rest.InClusterConfig()
-	}
-	return clientcmd.BuildConfigFromFlags("", kubeconfig)
 }
 
 // VMDrift returns per-VM drift keyed by "namespace/name", built from every

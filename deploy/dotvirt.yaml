@@ -1,0 +1,85 @@
+# dotvirt itself: a single Deployment running the Go backend (which also serves
+# the built SPA assets, or front it with the frontend's static host). Uses the
+# `dotvirt` ServiceAccount from rbac.yaml for its background identity (TokenReview,
+# SA reads, Argo re-sync). In-cluster, leave -kubeconfig empty: the SA token is
+# read from the mounted volume.
+#
+# Secrets it needs (create out-of-band; NOT committed):
+#   - forgejo creds (one SA token used to clone/push every project repo)
+#   - a session-secret to sign cookies across restarts/replicas
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dotvirt
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dotvirt
+  namespace: dotvirt
+spec:
+  # Drafts are per-(user,project) files persisted to the PVC below, so a single
+  # replica keeps in-progress changesets across restarts. To scale to >1, switch
+  # the PVC to ReadWriteMany so all replicas share the draft dir; the session
+  # itself is stateless (the signed cookie holds the token).
+  replicas: 1
+  strategy: { type: Recreate } # the RWO draft PVC can't be mounted by two pods at once
+  selector:
+    matchLabels: { app: dotvirt }
+  template:
+    metadata:
+      labels: { app: dotvirt }
+    spec:
+      serviceAccountName: dotvirt
+      containers:
+        - name: dotvirt
+          image: ghcr.io/epheo/dotvirt:latest # build + push your own
+          args:
+            - "-addr=:8080"
+            - "-ui-origin=" # same-origin: SPA served behind the same Route
+            - "-argo=true"
+            - "-export-interval=30s"
+            - "-draft-dir=/var/lib/dotvirt/drafts" # persisted (see volume) so drafts survive restarts
+          env:
+            - name: DOTVIRT_GIT_USERNAME
+              valueFrom: { secretKeyRef: { name: dotvirt-forge, key: username } }
+            - name: DOTVIRT_GIT_TOKEN
+              valueFrom: { secretKeyRef: { name: dotvirt-forge, key: token } }
+            - name: DOTVIRT_FORGE_URL
+              valueFrom: { secretKeyRef: { name: dotvirt-forge, key: url } }
+            - name: DOTVIRT_FORGE_TOKEN
+              valueFrom: { secretKeyRef: { name: dotvirt-forge, key: token } }
+            - name: DOTVIRT_SESSION_SECRET
+              valueFrom: { secretKeyRef: { name: dotvirt-session, key: secret } }
+          ports:
+            - { containerPort: 8080, name: http }
+          volumeMounts:
+            - { name: drafts, mountPath: /var/lib/dotvirt/drafts }
+          readinessProbe:
+            httpGet: { path: /api/healthz, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: drafts
+          persistentVolumeClaim: { claimName: dotvirt-drafts }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dotvirt-drafts
+  namespace: dotvirt
+spec:
+  accessModes: [ReadWriteOnce] # switch to ReadWriteMany to run replicas > 1
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dotvirt
+  namespace: dotvirt
+spec:
+  selector: { app: dotvirt }
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }

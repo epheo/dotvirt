@@ -1,7 +1,7 @@
 // Package stream pushes live inventory to WebSocket subscribers. A single hub
-// listens for change signals (k8s/argo watches + a git poll), recomputes the
-// affected branches' inventories, and broadcasts them — so the UI never polls or
-// needs a refresh button.
+// listens for change signals (k8s/argo watches + a git poll), recomputes each
+// subscriber's OWN inventory (under their identity), and broadcasts it — so the UI
+// never polls and one user never receives another tenant's tree.
 package stream
 
 import (
@@ -10,11 +10,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
-// InventoryFunc computes the inventory for a branch (the git provider's method).
-type InventoryFunc func(branch string) (model.Inventory, error)
+// InventoryFunc computes the inventory visible to one identity (the API server's
+// InventoryForIdentity). Each subscriber's frame is built with their own identity,
+// so isolation holds on the live channel exactly as it does over HTTP.
+type InventoryFunc func(ctx context.Context, id auth.Identity) (model.Inventory, error)
 
 // Hub fans inventory updates out to subscribers. One Hub per process.
 type Hub struct {
@@ -27,9 +30,22 @@ type Hub struct {
 }
 
 type subscriber struct {
-	branch string
-	send   chan []byte
-	lastJS string // last inventory JSON sent, to suppress duplicate frames
+	identity auth.Identity
+	send     chan []byte
+	quit     chan struct{} // closed by remove(); senders select on it so send is never closed
+	lastJS   string        // last inventory JSON sent, to suppress duplicate frames
+}
+
+// push delivers a frame to the subscriber without blocking and without risking a
+// send on a closed channel: it races the buffered send against quit (closed when
+// the connection is torn down). A full buffer drops the frame — the next tick
+// resends current state.
+func (s *subscriber) push(data []byte) {
+	select {
+	case s.send <- data:
+	case <-s.quit:
+	default:
+	}
 }
 
 // NewHub builds a Hub. changed is the shared signal channel that watches and the
@@ -42,8 +58,7 @@ func NewHub(inventory InventoryFunc) *Hub {
 	}
 }
 
-// Notify signals that some source changed; safe to call from many goroutines.
-// Returns the channel writers should send to.
+// Changed returns the channel writers (watches, git poll) signal on change.
 func (h *Hub) Changed() chan<- struct{} { return h.changed }
 
 // Run drives broadcasts: it waits for change signals (debounced) and also pushes
@@ -61,48 +76,43 @@ func (h *Hub) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-h.changed:
-			// Debounce a burst of events into one recompute.
-			time.Sleep(debounce)
+			time.Sleep(debounce) // coalesce a burst of events into one recompute
 			drainSignal(h.changed)
-			h.broadcast()
+			h.broadcast(ctx)
 			resetTimer(timer, heartbeat)
 		case <-timer.C:
-			h.broadcast()
+			h.broadcast(ctx)
 			resetTimer(timer, heartbeat)
 		}
 	}
 }
 
-// broadcast recomputes each distinct subscribed branch once and pushes the
-// result to its subscribers, skipping any whose inventory is unchanged.
-func (h *Hub) broadcast() {
+// broadcast recomputes each subscriber's inventory under their identity and pushes
+// it, skipping any whose inventory is unchanged. A failing per-user build is
+// skipped (transient); the next tick retries.
+func (h *Hub) broadcast(ctx context.Context) {
 	h.mu.Lock()
-	branches := map[string][]*subscriber{}
+	subs := make([]*subscriber, 0, len(h.subs))
 	for s := range h.subs {
-		branches[s.branch] = append(branches[s.branch], s)
+		subs = append(subs, s)
 	}
 	h.mu.Unlock()
 
-	for branch, subs := range branches {
-		inv, err := h.inventory(branch)
+	for _, s := range subs {
+		inv, err := h.inventory(ctx, s.identity)
 		if err != nil {
-			continue // transient (e.g. fetch failure); next tick retries
+			continue
 		}
 		data, err := json.Marshal(inv)
 		if err != nil {
 			continue
 		}
 		js := string(data)
-		for _, s := range subs {
-			if s.lastJS == js {
-				continue
-			}
-			s.lastJS = js
-			select {
-			case s.send <- data:
-			default: // subscriber's buffer full / slow; drop this frame
-			}
+		if s.lastJS == js {
+			continue
 		}
+		s.lastJS = js
+		s.push(data)
 	}
 }
 

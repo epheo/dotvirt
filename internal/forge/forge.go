@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -23,35 +24,52 @@ type Client struct {
 	http    *http.Client
 }
 
-// Config configures a Client. BaseURL/Token/Owner/Repo are required to create
-// PRs; if BaseURL or Token is empty the caller should degrade to push-only.
-type Config struct {
-	BaseURL     string
-	Token       string
-	Owner       string
-	Repo        string
-	InsecureTLS bool // skip TLS verification (dev, e.g. self-signed Route)
+// Factory builds per-project Clients: in multi-tenant mode the PR target (owner +
+// repo) varies per project, derived from that project's git repo URL, but the
+// forge endpoint + token are shared. Returns nil if the forge isn't configured.
+type Factory struct {
+	baseURL  string
+	token    string
+	insecure bool
+	http     *http.Client
 }
 
-// New builds a Client. Returns nil if the forge isn't configured (no base URL or
-// token), so callers can check and degrade gracefully.
-func New(c Config) *Client {
-	if c.BaseURL == "" || c.Token == "" || c.Owner == "" || c.Repo == "" {
+// NewFactory builds a Factory from the shared forge endpoint + token. Returns nil
+// when unconfigured so callers degrade to push-only.
+func NewFactory(baseURL, token string, insecure bool) *Factory {
+	if baseURL == "" || token == "" {
 		return nil
 	}
+	return &Factory{
+		baseURL:  strings.TrimRight(baseURL, "/"),
+		token:    token,
+		insecure: insecure,
+		http:     httpClient(insecure),
+	}
+}
+
+// For returns a Client targeting the repo identified by repoURL (e.g.
+// https://forge/owner/repo.git → owner/repo). Returns nil if the owner/repo can't
+// be parsed, so the caller degrades to a compare link.
+func (f *Factory) For(repoURL string) *Client {
+	if f == nil {
+		return nil
+	}
+	owner, repo, ok := ownerRepo(repoURL)
+	if !ok {
+		return nil
+	}
+	return &Client{baseURL: f.baseURL, token: f.token, owner: owner, repo: repo, http: f.http}
+}
+
+func httpClient(insecure bool) *http.Client {
 	hc := &http.Client{Timeout: 15 * time.Second}
-	if c.InsecureTLS {
+	if insecure {
 		hc.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec G402 — dev flag
 		}
 	}
-	return &Client{
-		baseURL: strings.TrimRight(c.BaseURL, "/"),
-		token:   c.Token,
-		owner:   c.Owner,
-		repo:    c.Repo,
-		http:    hc,
-	}
+	return hc
 }
 
 // PR is a pull request as returned by Forgejo (subset).
@@ -60,6 +78,9 @@ type PR struct {
 	HTMLURL string `json:"html_url"`
 	State   string `json:"state"`
 	Title   string `json:"title"`
+	Head    struct {
+		Ref string `json:"ref"`
+	} `json:"head"`
 }
 
 // CreatePR opens a pull request from head into base. If one already exists for
@@ -73,19 +94,20 @@ func (c *Client) CreatePR(title, body, head, base string) (PR, error) {
 	return pr, nil
 }
 
-// FindOpenPR returns the open PR for head→base, or ok=false if none.
+// FindOpenPR returns the open PR for head→base, or ok=false if none. It filters
+// by head branch (Forgejo's "owner:branch" form) and confirms the returned PR's
+// head ref matches, so a user's re-propose never matches an unrelated PR (e.g.
+// another user's branch or a human feature PR) into the same base.
 func (c *Client) FindOpenPR(head, base string) (pr PR, ok bool, err error) {
-	// Forgejo's pulls list filters by head as "owner:branch".
-	q := fmt.Sprintf("/pulls?state=open&base=%s", base)
+	q := fmt.Sprintf("/pulls?state=open&base=%s&head=%s:%s", url.QueryEscape(base), url.QueryEscape(c.owner), url.QueryEscape(head))
 	var prs []PR
 	if err := c.do("GET", c.repoPath(q), nil, &prs); err != nil {
 		return PR{}, false, err
 	}
-	// The list response doesn't echo head in this subset; match by title is
-	// unreliable, so the caller treats "any open PR into base from our head" as
-	// the proposed one. We return the first open PR; refine if needed.
-	if len(prs) > 0 {
-		return prs[0], true, nil
+	for _, p := range prs {
+		if p.Head.Ref == head {
+			return p, true, nil
+		}
 	}
 	return PR{}, false, nil
 }
@@ -98,6 +120,38 @@ func (c *Client) CompareURL(head, base string) string {
 
 func (c *Client) repoPath(suffix string) string {
 	return fmt.Sprintf("/api/v1/repos/%s/%s%s", c.owner, c.repo, suffix)
+}
+
+// ownerRepo extracts the owner and repo from a Forgejo/Gitea repo URL. It takes
+// the last two path segments and strips a trailing ".git", so
+// https://forge.example/dotvirt/team-a.git → ("dotvirt", "team-a"). It fails
+// closed (ok=false) on anything it can't parse cleanly, so the caller degrades to
+// a compare link rather than building a malformed API path.
+func ownerRepo(repoURL string) (owner, repo string, ok bool) {
+	s := repoURL
+	// Drop any query string / fragment before touching the path or the .git suffix.
+	if i := strings.IndexAny(s, "?#"); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.TrimRight(s, "/")
+	s = strings.TrimSuffix(s, ".git")
+	// Drop scheme + host: keep the path.
+	if i := strings.Index(s, "://"); i >= 0 {
+		if slash := strings.IndexByte(s[i+3:], '/'); slash >= 0 {
+			s = s[i+3+slash+1:]
+		} else {
+			return "", "", false
+		}
+	}
+	parts := strings.Split(strings.Trim(s, "/"), "/")
+	if len(parts) < 2 {
+		return "", "", false
+	}
+	owner, repo = parts[len(parts)-2], parts[len(parts)-1]
+	if owner == "" || repo == "" {
+		return "", "", false
+	}
+	return owner, repo, true
 }
 
 func (c *Client) do(method, path string, body, out any) error {

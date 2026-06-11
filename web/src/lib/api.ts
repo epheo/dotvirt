@@ -1,4 +1,9 @@
 // Typed client for the dotvirt backend API. Mirrors internal/model.
+//
+// Every request is identity-scoped: a signed session cookie (set by login) is
+// sent with each fetch + on the WebSocket handshake, and the backend resolves the
+// caller's projects from the cluster. credentials:'same-origin' ensures the cookie
+// rides cross-origin in dev (Vite proxy) and same-origin in production.
 
 export type Power = 'On' | 'Off' | 'Unknown';
 export type SyncStatus = 'Synced' | 'OutOfSync' | 'NotTracked' | 'Unknown';
@@ -32,26 +37,62 @@ export interface VM {
 	health?: string;
 }
 
-export interface Project {
+export interface ProjectNamespace {
 	namespace: string;
 	vms: VM[];
 }
 
-export interface Inventory {
-	branch: string;
-	projects: Project[];
+export interface Project {
+	name: string;
+	repo?: string;
+	namespaces: ProjectNamespace[];
+	error?: string;
 }
 
-async function get<T>(path: string): Promise<T> {
-	const res = await fetch(path);
-	if (!res.ok) {
-		throw new Error(`${path}: ${res.status} ${await res.text()}`);
+export interface Inventory {
+	projects: Project[];
+	warnings?: string[]; // non-fatal degradations (e.g. live/sync status unavailable)
+}
+
+export interface User {
+	username: string;
+	groups: string[];
+}
+
+// Unauthorized is thrown when a call returns 401, so the UI can drop to the login
+// screen from anywhere.
+export class Unauthorized extends Error {
+	constructor() {
+		super('unauthorized');
+		this.name = 'Unauthorized';
 	}
+}
+
+async function req<T>(path: string, init?: RequestInit): Promise<T> {
+	const res = await fetch(path, { credentials: 'same-origin', ...init });
+	if (res.status === 401) throw new Unauthorized();
+	if (!res.ok) throw new Error(`${path}: ${res.status} ${await res.text()}`);
+	if (res.status === 204) return undefined as T;
 	return res.json() as Promise<T>;
 }
 
+function get<T>(path: string): Promise<T> {
+	return req<T>(path);
+}
+
+function post<T>(path: string, body: unknown): Promise<T> {
+	return req<T>(path, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body)
+	});
+}
+
+function del(path: string): Promise<void> {
+	return req<void>(path, { method: 'DELETE' });
+}
+
 export interface EditRequest {
-	sourceBranch: string;
 	sourceFile: string;
 	power?: Power;
 	cpuCores?: number;
@@ -65,14 +106,6 @@ export interface EditRequest {
 	addNetworks?: { name: string }[];
 	removeNetworks?: string[];
 	message?: string;
-}
-
-export interface EditResult {
-	branch: string;
-	file: string;
-	hash: string;
-	diff: string;
-	pushed: boolean;
 }
 
 export interface Instancetype {
@@ -101,7 +134,6 @@ export interface Options {
 }
 
 export interface CreateVMRequest {
-	sourceBranch: string;
 	name: string;
 	namespace: string;
 	instancetype: string;
@@ -113,23 +145,6 @@ export interface CreateVMRequest {
 	extraDisks?: { name: string; size: string }[];
 	networks?: { name: string }[];
 	labels?: Record<string, string>;
-}
-
-async function post<T>(path: string, body: unknown): Promise<T> {
-	const res = await fetch(path, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(body)
-	});
-	if (!res.ok) {
-		throw new Error(`${path}: ${res.status} ${await res.text()}`);
-	}
-	return res.json() as Promise<T>;
-}
-
-async function del(path: string): Promise<void> {
-	const res = await fetch(path, { method: 'DELETE' });
-	if (!res.ok) throw new Error(`${path}: ${res.status} ${await res.text()}`);
 }
 
 // --- Draft changeset types ---
@@ -166,67 +181,92 @@ export interface DriftResult {
 	changes: Change[];
 }
 
+const enc = encodeURIComponent;
+
 export const api = {
-	branches: () => get<string[]>('/api/branches'),
-	inventory: (branch?: string) =>
-		get<Inventory>(`/api/inventory${branch ? `?branch=${encodeURIComponent(branch)}` : ''}`),
+	// Auth
+	login: (token: string) => post<User>('/api/login', { token }),
+	logout: () => post<void>('/api/logout', {}),
+	me: () => get<User>('/api/me'),
+
+	inventory: () => get<Inventory>('/api/inventory'),
 	options: () => get<Options>('/api/options'),
 
-	// Staging (edit/create return the updated draft view).
+	// Staging — the backend resolves the project from the VM's namespace, so these
+	// per-VM routes need no project param.
 	stageEdit: (namespace: string, name: string, req: EditRequest) =>
-		post<DraftView>(
-			`/api/vms/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/edit`,
-			req
-		),
+		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/edit`, req),
 	stageCreate: (req: CreateVMRequest) => post<DraftView>('/api/vms', req),
-
-	// Draft management.
-	getDraft: () => get<DraftView>('/api/draft'),
 	unstage: (namespace: string, name: string) =>
-		del(`/api/draft/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`),
-	discardDraft: () => del('/api/draft'),
-	propose: (title: string, message: string) =>
-		post<ProposeResult>('/api/draft/propose', { title, message }),
+		del(`/api/draft/${enc(namespace)}/${enc(name)}`),
 
-	// Drift (running vs main) for one VM.
+	// Whole-draft ops are scoped to a project (?project=), since they aren't tied
+	// to one VM namespace.
+	getDraft: (project: string) => get<DraftView>(`/api/draft?project=${enc(project)}`),
+	discardDraft: (project: string) => del(`/api/draft?project=${enc(project)}`),
+	propose: (project: string, title: string, message: string) =>
+		post<ProposeResult>(`/api/draft/propose?project=${enc(project)}`, { title, message }),
+
+	// Drift + reconcile for one VM (project resolved from the namespace).
 	drift: (namespace: string, name: string) =>
-		get<DriftResult>(`/api/vms/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/drift`),
-
-	// Reconcile: adopt live state into the draft (running→main), or re-sync the
-	// cluster from git via ArgoCD (main→running).
+		get<DriftResult>(`/api/vms/${enc(namespace)}/${enc(name)}/drift`),
 	adopt: (namespace: string, name: string) =>
-		post<DraftView>(`/api/vms/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/adopt`, {}),
+		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/adopt`, {}),
 	resync: (namespace: string, name: string) =>
 		post<{ application: string; revision: string }>(
-			`/api/vms/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/resync`,
+			`/api/vms/${enc(namespace)}/${enc(name)}/resync`,
 			{}
 		)
 };
 
+// draftsByProject fetches the draft for each named project and returns the
+// non-empty ones, for the Changes panel + header badge. Projects with no repo are
+// skipped (they can't hold a draft).
+export async function draftsByProject(
+	projects: string[]
+): Promise<{ project: string; draft: DraftView }[]> {
+	const results = await Promise.all(
+		projects.map(async (project) => {
+			try {
+				return { project, draft: await api.getDraft(project) };
+			} catch (e) {
+				if (e instanceof Unauthorized) throw e;
+				return null;
+			}
+		})
+	);
+	return results.filter((r): r is { project: string; draft: DraftView } => !!r && r.draft.count > 0);
+}
+
 /**
- * streamInventory subscribes to live inventory for a branch over WebSocket.
- * Calls onInventory on each push and onStatus on connect/disconnect, and
- * auto-reconnects with backoff. Returns a function to close the subscription.
+ * streamInventory subscribes to the caller's live inventory over WebSocket. The
+ * session cookie rides the handshake (same-origin), so the server pushes only the
+ * caller's tree. Calls onInventory on each push and onStatus on connect/disconnect,
+ * auto-reconnects with backoff, and invokes onUnauthorized if the handshake is
+ * rejected (expired session). Returns a function to close the subscription.
  */
 export function streamInventory(
-	branch: string,
 	onInventory: (inv: Inventory) => void,
-	onStatus?: (connected: boolean) => void
+	onStatus?: (connected: boolean) => void,
+	onUnauthorized?: () => void
 ): () => void {
 	let ws: WebSocket | null = null;
 	let closed = false;
 	let retry = 0;
 	let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+	let everOpen = false;
 
 	const url = () => {
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-		return `${proto}://${location.host}/api/inventory/stream?branch=${encodeURIComponent(branch)}`;
+		return `${proto}://${location.host}/api/inventory/stream`;
 	};
 
 	const connect = () => {
 		if (closed) return;
+		everOpen = false;
 		ws = new WebSocket(url());
 		ws.onopen = () => {
+			everOpen = true;
 			retry = 0;
 			onStatus?.(true);
 		};
@@ -237,11 +277,34 @@ export function streamInventory(
 				/* ignore malformed frame */
 			}
 		};
-		ws.onclose = () => {
-			onStatus?.(false);
+		const scheduleReconnect = () => {
 			if (closed) return;
 			retry = Math.min(retry + 1, 6);
 			reconnectTimer = setTimeout(connect, 500 * 2 ** (retry - 1)); // 0.5s..16s backoff
+		};
+		ws.onclose = () => {
+			onStatus?.(false);
+			if (closed) return;
+			if (everOpen) {
+				scheduleReconnect();
+				return;
+			}
+			// A close before the socket ever opened can't expose the handshake status
+			// (the WS API hides it). It's EITHER an expired session (401 on upgrade) OR
+			// a transient failure (backend restart, blip). Don't assume 401 — probe the
+			// session: only sign out if it's genuinely gone, otherwise reconnect. This
+			// stops every deploy/blip from bouncing valid users to login.
+			api
+				.me()
+				.then(() => {
+					if (closed) return; // torn down while probing → do nothing
+					scheduleReconnect(); // session still valid → it was transient
+				})
+				.catch((e) => {
+					if (closed) return; // torn down while probing → don't sign out a dead subscription
+					if (e instanceof Unauthorized) onUnauthorized?.();
+					else scheduleReconnect();
+				});
 		};
 		ws.onerror = () => ws?.close();
 	};

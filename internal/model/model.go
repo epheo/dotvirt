@@ -1,6 +1,17 @@
 // Package model holds the API-facing types shared across dotvirt's planes.
 package model
 
+import "errors"
+
+// Error kinds the domain (e.g. changeset) can wrap so the HTTP layer maps them to
+// the right status instead of a blanket 500. Wrap with fmt.Errorf("%w: …", kind).
+var (
+	ErrInvalid     = errors.New("invalid request")         // → 400: bad/empty input, nothing to do
+	ErrNotFound    = errors.New("not found")               // → 404
+	ErrConflict    = errors.New("conflict")                // → 409: e.g. project not editable
+	ErrUnavailable = errors.New("temporarily unavailable") // → 503: a capability isn't wired/reachable
+)
+
 // Power is the desired run state derived from a VM manifest's runStrategy.
 type Power string
 
@@ -60,16 +71,30 @@ type NIC struct {
 	Network string `json:"network,omitempty"` // "pod" or the multus networkName
 }
 
-// Project is a namespace bucket in the vCenter-style inventory tree.
-type Project struct {
+// ProjectNamespace is one namespace bucket within a project: the VMs it holds.
+type ProjectNamespace struct {
 	Namespace string `json:"namespace"`
 	VMs       []VM   `json:"vms"`
 }
 
-// Inventory is the full tree for one branch.
+// Project is a tenant in the vCenter-style inventory tree: a named set of
+// namespaces backed by one git repo. Name + Repo come from namespace
+// label/annotation (dotvirt.io/project, dotvirt.io/repo). Error is set (and Repo
+// left empty) when a project's namespaces are labeled but have no usable repo —
+// surfaced as a warning in the UI rather than failing the whole inventory.
+type Project struct {
+	Name       string             `json:"name"`
+	Repo       string             `json:"repo,omitempty"`
+	Namespaces []ProjectNamespace `json:"namespaces"`
+	Error      string             `json:"error,omitempty"`
+}
+
+// Inventory is the full multi-project tree. Warnings carry non-fatal degradations
+// (e.g. live or drift state couldn't be read) so the UI can say "status
+// unavailable" instead of silently rendering every VM as stopped / not-tracked.
 type Inventory struct {
-	Branch   string    `json:"branch"`
 	Projects []Project `json:"projects"`
+	Warnings []string  `json:"warnings,omitempty"`
 }
 
 // Change is one human-readable, YAML-free change item (a semantic diff entry).
@@ -81,7 +106,42 @@ type Change struct {
 	To     string `json:"to,omitempty"`
 }
 
-// --- DTOs returned across the API boundary ---
+// --- DTOs crossing the API boundary ---
+
+// EditRequest is the body of an edit: which VM source file, and which fields to
+// change. Power is "On"/"Off"; nil fields are left unchanged.
+type EditRequest struct {
+	SourceFile   string  `json:"sourceFile"`
+	Power        *string `json:"power,omitempty"`
+	CPUCores     *int    `json:"cpuCores,omitempty"`
+	Memory       *string `json:"memory,omitempty"`
+	Instancetype *string `json:"instancetype,omitempty"`
+	Preference   *string `json:"preference,omitempty"`
+
+	SetLabels      map[string]string `json:"setLabels,omitempty"`
+	RemoveLabels   []string          `json:"removeLabels,omitempty"`
+	AddDisks       []DiskAdd         `json:"addDisks,omitempty"`
+	RemoveDisks    []string          `json:"removeDisks,omitempty"`
+	AddNetworks    []NetworkAdd      `json:"addNetworks,omitempty"`
+	RemoveNetworks []string          `json:"removeNetworks,omitempty"`
+
+	Message string `json:"message,omitempty"` // optional commit message; auto-generated when empty
+}
+
+// DiskAdd / NetworkAdd are the add-device entries in an EditRequest body.
+type DiskAdd struct {
+	Name string `json:"name"`
+	Size string `json:"size"`
+}
+type NetworkAdd struct {
+	Name string `json:"name"`
+}
+
+// ProposeRequest is the body of a propose: PR title + description.
+type ProposeRequest struct {
+	Title   string `json:"title"`
+	Message string `json:"message"`
+}
 
 // DriftResult is a VM's drift (running vs main) as semantic changes.
 type DriftResult struct {

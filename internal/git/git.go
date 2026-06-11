@@ -5,12 +5,14 @@
 package git
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -56,13 +58,22 @@ func (r *Repo) clone() error {
 	return nil
 }
 
+// fetchTimeout bounds a single background fetch. Without it a stalled connection
+// to the remote (common over a flaky/self-signed Route) would hold r.mu forever —
+// and since reads (VMManifests) also take r.mu, every inventory read for that repo
+// would deadlock. Capping the fetch lets it fail and release the lock; the poll
+// retries on the next tick.
+const fetchTimeout = 30 * time.Second
+
 // Refresh updates the cached clone's branch refs from the remote. This is the
 // single point of network freshness: the background fetcher calls it on a
 // schedule, and it's nudged after dotvirt's own pushes. Reads never call it.
 func (r *Repo) Refresh() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	err := r.repo.Fetch(&git.FetchOptions{
+	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+	defer cancel()
+	err := r.repo.FetchContext(ctx, &git.FetchOptions{
 		Auth:     r.auth,
 		RefSpecs: []config.RefSpec{"+refs/heads/*:refs/heads/*"},
 		Force:    true,

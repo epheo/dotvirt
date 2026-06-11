@@ -1,5 +1,7 @@
-// Command dotvirt serves a vCenter-like WebUI that edits a git repo of KubeVirt
-// manifests and reads live state from a cluster and ArgoCD.
+// Command dotvirt serves a vCenter-like WebUI that edits per-project git repos of
+// KubeVirt manifests and reads live state from a cluster and ArgoCD. It is a thin
+// multi-tenant lens: every request runs under the caller's own k8s token, and a
+// project is a set of namespaces (a cluster fact) backed by its own git repo.
 package main
 
 import (
@@ -14,13 +16,16 @@ import (
 
 	"github.com/epheo/dotvirt/internal/api"
 	"github.com/epheo/dotvirt/internal/argo"
+	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
+	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/config"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/export"
 	"github.com/epheo/dotvirt/internal/forge"
 	"github.com/epheo/dotvirt/internal/git"
+	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/stream"
 )
 
@@ -40,80 +45,119 @@ func run() error {
 		git.AllowInsecureTLS() // dev: trust self-signed Forgejo Route cert
 	}
 
-	repo, err := git.Open(cfg.RepoURL, cfg.GitUsername, cfg.GitToken)
-	if err != nil {
-		return err
-	}
-	provider := git.NewProvider(repo)
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// One writable view of the repo, shared by the running-branch exporter and
-	// the changeset coordinator (draft → propose → PR).
-	writeRepo := git.OpenWrite(cfg.RepoURL, cfg.GitUsername, cfg.GitToken, cfg.Push)
+	// Per-project git: one read mirror + writable view per repo URL, all on the
+	// single Forgejo credential. changed will drive the live hub in a later step;
+	// the per-repo poll signals it non-blockingly, so it's safe to leave unread.
+	changed := make(chan struct{}, 1)
+	repos := git.NewRepoSet(ctx, cfg.GitUsername, cfg.GitToken, cfg.Push, changed, cfg.GitPollInterval)
 
-	draftStore, err := draft.Open(cfg.DraftFile)
+	draftStore, err := draft.Open(cfg.DraftDir)
 	if err != nil {
 		return err
 	}
-	forgeClient := forge.New(forge.Config{
-		BaseURL: cfg.ForgeURL, Token: cfg.ForgeToken,
-		Owner: cfg.ForgeOwner, Repo: cfg.ForgeRepo,
-		InsecureTLS: cfg.InsecureTLS,
-	})
+	forgeFactory := forge.NewFactory(cfg.ForgeURL, cfg.ForgeToken, cfg.InsecureTLS)
+	resolver := project.NewResolver(cfg.ProjectLabel, cfg.RepoAnnotation)
 
-	// Live inventory hub: watches + a git poll feed its change channel; it pushes
-	// recomputed inventory to WebSocket subscribers.
-	hub := stream.NewHub(provider.Inventory)
-	go hub.Run(ctx)
-	go pollGit(ctx, repo, hub.Changed(), cfg.GitPollInterval)
-
-	var vncHandler api.VNCHandler
-	var optionsProvider api.OptionsProvider
-	if cfg.ClusterEnabled {
-		clusterClient, err := cluster.New(cfg.Kubeconfig, cfg.NamespaceLabel)
-		if err != nil {
-			return err
-		}
-		provider.WithEnricher(enricher(ctx, clusterClient))
-		clusterClient.Watch(ctx, hub.Changed()) // push on VM/VMI changes
-		vncHandler = stream.NewVNCProxy(clusterClient)
-		optionsProvider = clusterClient
-
-		exporter := export.New(clusterClient, writeRepo, cfg.RunningBranch)
-		go exporter.Run(ctx, cfg.ExportInterval)
+	clusterFactory, err := cluster.NewFactory(cfg.Kubeconfig)
+	if err != nil {
+		return err
+	}
+	saCluster, err := clusterFactory.SA()
+	if err != nil {
+		return err
 	}
 
+	// One SA-maintained snapshot of live VM state + project topology, fed by
+	// reflectors (not per-request fetches). It signals the same `changed` channel
+	// the git poll uses, so the hub re-broadcasts on any cluster change; the read
+	// path filters this shared snapshot per token instead of hitting the cluster.
+	clusterSnapshot := clusterstate.New(saCluster, cfg.ProjectLabel, changed)
+	clusterSnapshot.Run(ctx)
+
+	var saArgo *argo.Client
+	var driftCache *argo.DriftCache
 	var resyncer changeset.Resyncer
 	if cfg.ArgoEnabled {
-		argoClient, err := argo.New(cfg.Kubeconfig)
+		argoFactory, err := argo.NewFactory(cfg.Kubeconfig)
 		if err != nil {
 			return err
 		}
-		provider.WithDrift(driftSource(ctx, argoClient))
-		argoClient.Watch(ctx, hub.Changed()) // push on Application drift changes
-		resyncer = argoClient
+		if saArgo, err = argoFactory.SA(); err != nil {
+			return err
+		}
+		resyncer = saArgo
+		// Drift is read once per short window and shared across all subscribers
+		// (the inventory is rebuilt per subscriber on every change).
+		driftCache = argo.NewDriftCache(saArgo, 5*time.Second)
 	}
 
-	coordinator := changeset.New(draftStore, writeRepo, provider, forgeClient, resyncer, cfg.BaseBranch, cfg.ProposedBranch)
-
-	deps := api.Deps{
-		AllowOrigin: cfg.UIOrigin,
-		Inventory:   provider,
-		Options:     optionsProvider,
-		Draft:       coordinator,
-		Stream:      hub,
-		VNC:         vncHandler,
+	// Auth validates user tokens via TokenReview as dotvirt's SA.
+	saKube, err := clusterFactory.SAKube()
+	if err != nil {
+		return err
 	}
+	authenticator := auth.New(saKube, []byte(cfg.SessionSecret))
+
+	coordinator := changeset.New(draftStore, repos, forgeFactory, resyncer,
+		cfg.BaseBranch, cfg.ProposedBranch, cfg.RunningBranch)
+
+	server := api.NewServer(api.Deps{
+		ClusterFactory: clusterFactory,
+		State:          clusterSnapshot,
+		Drift:          driftCache,
+		Resolver:       resolver,
+		Repos:          repos,
+		Draft:          coordinator,
+		Auth:           authenticator,
+		Config:         api.Config{BaseBranch: cfg.BaseBranch, AllowOrigin: cfg.UIOrigin},
+	})
+
+	// WebSocket origin policy: same-origin + the configured UI origin (CORS doesn't
+	// cover WS handshakes, so this is the only origin gate for the stream/VNC sockets).
+	stream.SetAllowedOrigin(cfg.UIOrigin)
+
+	// Live inventory hub: each subscriber's frame is built under their identity
+	// (same path as GET /api/inventory). Fed by the SA watches + the RepoSet's
+	// per-repo git poll via the shared `changed` channel.
+	hub := stream.NewHub(server.InventoryForIdentity)
+	go hub.Run(ctx)
+	go forward(ctx, changed, hub.Changed())
+	server.UseStream(hub)
+
+	// VNC dials as the requesting user (KubeVirt RBAC gates the console).
+	server.UseVNC(stream.NewVNCProxy(func(token string) (stream.VNCDialer, error) {
+		return clusterFactory.For(token)
+	}))
+
+	// Per-project running-branch export, on the SA identity. Topology comes from the
+	// snapshot; the authoritative VM objects are listed with the SA client.
+	exporter := export.New(saCluster, clusterSnapshot, resolver, repos, cfg.RunningBranch)
+	go exporter.Run(ctx, cfg.ExportInterval)
+
+	if saArgo != nil {
+		saArgo.Watch(ctx, hub.Changed()) // push on Application drift changes
+	}
+
+	// Let the snapshot's initial LIST land before serving so the first inventory
+	// isn't empty — but bound the wait: a degraded cluster must not block startup,
+	// the snapshot fills in as reflectors sync and the hub pushes the update.
+	syncCtx, cancelSync := context.WithTimeout(ctx, 10*time.Second)
+	if err := clusterSnapshot.WaitForSync(syncCtx); err != nil && ctx.Err() == nil {
+		log.Printf("cluster snapshot not synced yet (%v); serving and filling in as watches catch up", err)
+	}
+	cancelSync()
+
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           api.Handler(deps),
+		Handler:           server.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	go func() {
-		log.Printf("dotvirt listening on %s (repo=%s)", cfg.Addr, cfg.RepoURL)
+		log.Printf("dotvirt listening on %s (project-label=%s)", cfg.Addr, cfg.ProjectLabel)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("listen: %v", err)
 		}
@@ -126,61 +170,19 @@ func run() error {
 	return srv.Shutdown(shutdownCtx)
 }
 
-// pollGit periodically fetches the repo and signals the hub when the set of
-// branch heads changes. Git has no watch, so a light poll keeps inventory live
-// for feature-branch commits and the running-branch export.
-func pollGit(ctx context.Context, repo *git.Repo, changed chan<- struct{}, interval time.Duration) {
-	last := ""
-	t := time.NewTicker(interval)
-	defer t.Stop()
+// forward relays change signals from src (the RepoSet's git-poll channel) to dst
+// (the hub's). Both are coalescing 1-buffered channels; a dropped duplicate is
+// fine since the hub recomputes the full state on any signal.
+func forward(ctx context.Context, src <-chan struct{}, dst chan<- struct{}) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
-			sig, err := repo.HeadsSignature()
-			if err != nil {
-				continue
-			}
-			if sig != last {
-				last = sig
-				select {
-				case changed <- struct{}{}:
-				default:
-				}
+		case <-src:
+			select {
+			case dst <- struct{}{}:
+			default:
 			}
 		}
-	}
-}
-
-// enricher adapts the cluster client's live state to the inventory provider's
-// Enricher signature.
-func enricher(ctx context.Context, c *cluster.Client) git.Enricher {
-	return func() (map[string]git.LiveState, error) {
-		live, err := c.LiveState(ctx)
-		if err != nil {
-			return nil, err
-		}
-		out := make(map[string]git.LiveState, len(live))
-		for k, v := range live {
-			out[k] = git.LiveState{Phase: v.Phase, GuestIP: v.GuestIP, NodeName: v.NodeName}
-		}
-		return out, nil
-	}
-}
-
-// driftSource adapts the argo client's drift map to the inventory provider's
-// DriftSource signature.
-func driftSource(ctx context.Context, c *argo.Client) git.DriftSource {
-	return func() (map[string]git.Drift, error) {
-		drift, err := c.VMDrift(ctx)
-		if err != nil {
-			return nil, err
-		}
-		out := make(map[string]git.Drift, len(drift))
-		for k, v := range drift {
-			out[k] = git.Drift{Sync: v.Sync, Health: v.Health}
-		}
-		return out, nil
 	}
 }

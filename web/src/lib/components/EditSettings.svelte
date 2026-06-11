@@ -46,7 +46,7 @@
 	}
 
 	function buildRequest(): EditRequest {
-		const req: EditRequest = { sourceBranch: '', sourceFile: vm.sourceFile };
+		const req: EditRequest = { sourceFile: vm.sourceFile };
 		if (power !== vm.power) req.power = power;
 		if (cpuCores !== vm.cpuCores) req.cpuCores = cpuCores;
 		if (memory !== (vm.memory ?? '')) req.memory = memory;
@@ -80,8 +80,8 @@
 
 	const dirty = $derived.by(() => {
 		const r = buildRequest();
-		// More than the two always-present fields (sourceBranch, sourceFile) means a change.
-		return Object.keys(r).length > 2;
+		// Anything beyond the always-present sourceFile means a real change was made.
+		return Object.keys(r).length > 1;
 	});
 
 	async function stage() {

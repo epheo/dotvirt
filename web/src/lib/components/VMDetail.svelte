@@ -6,7 +6,7 @@
 	import PowerDot from './PowerDot.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 
-	let { vm, branch, onstaged }: { vm: VM | null; branch: string; onstaged?: () => void } = $props();
+	let { vm, onstaged }: { vm: VM | null; onstaged?: () => void } = $props();
 
 	type Tab = 'summary' | 'console';
 	let tab = $state<Tab>('summary');
@@ -17,9 +17,6 @@
 	let showDrift = $state(false);
 	let reconciling = $state(false);
 	let reconcileMsg = $state('');
-
-	// The `running` branch mirrors the cluster and is dotvirt-owned: not editable.
-	const editable = $derived(branch !== 'running' && branch !== '');
 
 	function loadDrift(ns: string, name: string) {
 		api
@@ -79,9 +76,8 @@
 				<SyncBadge sync={vm.sync} />
 				<button
 					onclick={() => (editing = true)}
-					disabled={!editable}
-					title={editable ? 'Edit settings' : 'Switch off the running branch to edit'}
-					class="ml-auto rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+					title="Edit settings"
+					class="ml-auto rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
 				>
 					Edit Settings
 				</button>

@@ -1,0 +1,63 @@
+# One ArgoCD Application per dotvirt project, each syncing that project's git repo
+# into that project's namespaces. This is the ONLY component that creates Argo
+# Applications — dotvirt never does. It encodes the onboarding contract:
+#
+#   Onboarding a project (platform/admin, once per tenant):
+#     1. Create the project's git repo (e.g. Forgejo dotvirt/<project>) with the
+#        VMs on `main` and an (initially empty) `running` branch.
+#     2. Label + annotate the project's namespace(s):
+#          oc label      ns <ns> dotvirt.io/project=<project>
+#          oc annotate   ns <ns> dotvirt.io/repo=https://forge/dotvirt/<project>.git
+#     3. Add the project to this ApplicationSet's generator (see below). The
+#        ApplicationSet then provisions the per-project Argo Application; dotvirt
+#        picks the project up automatically from the namespace label/annotation.
+#
+# dotvirt needs none of this wired into itself: projects are live cluster facts.
+#
+# GENERATOR CHOICE: ArgoCD has no built-in "one entry per namespace carrying a
+# label" generator, so this ships a List generator — explicit, runs as-is, and is
+# the natural thing a platform GitOps repo templates. To drive it dynamically off
+# the dotvirt.io/project label instead, replace the List with an ApplicationSet
+# plugin generator (or a Matrix over a cluster generator) that emits the same
+# {project, repo, namespace} elements; the template below is unchanged.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: dotvirt-projects
+  namespace: openshift-gitops
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        # One element per project. Keep in sync with the namespace labels above.
+        elements:
+          - project: team-a
+            repo: http://forgejo-http.forgejo.svc:3000/dotvirt/team-a.git
+            namespace: tenant-a
+          - project: team-b
+            repo: http://forgejo-http.forgejo.svc:3000/dotvirt/team-b.git
+            namespace: tenant-b
+  template:
+    metadata:
+      name: "dotvirt-{{.project}}"
+      labels:
+        dotvirt.io/project: "{{.project}}"
+    spec:
+      project: default
+      source:
+        repoURL: "{{.repo}}"
+        targetRevision: main
+        path: "{{.namespace}}" # per-namespace directory in the project repo
+        directory:
+          recurse: true
+          include: "*.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.namespace}}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=false # namespaces are pre-created + labeled by the platform

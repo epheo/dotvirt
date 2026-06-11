@@ -6,6 +6,8 @@ import (
 	"net/http"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/epheo/dotvirt/internal/auth"
 )
 
 // VNCDialer opens a VNC stream to a VMI as a net.Conn carrying the RFB protocol.
@@ -14,22 +16,39 @@ type VNCDialer interface {
 	VNCConn(namespace, name string) (net.Conn, error)
 }
 
-// VNCProxy bridges a browser noVNC WebSocket to KubeVirt's VNC subresource.
+// DialerForToken returns a VNC dialer authenticated as the given bearer token, so
+// the console is opened with the user's own identity (KubeVirt RBAC gates it).
+// Supplied by main as a closure over cluster.Factory.For.
+type DialerForToken func(token string) (VNCDialer, error)
+
+// VNCProxy bridges a browser noVNC WebSocket to KubeVirt's VNC subresource, using
+// a per-request, per-user dialer.
 type VNCProxy struct {
-	dialer VNCDialer
+	dialerFor DialerForToken
 }
 
-// NewVNCProxy builds a VNC proxy over the given dialer.
-func NewVNCProxy(d VNCDialer) *VNCProxy { return &VNCProxy{dialer: d} }
+// NewVNCProxy builds a VNC proxy that dials as the requesting user.
+func NewVNCProxy(d DialerForToken) *VNCProxy { return &VNCProxy{dialerFor: d} }
 
 // Handler upgrades the request to a WebSocket and pipes it bidirectionally to the
-// VMI's VNC stream: browser binary frames -> virt-api, and back. Path params
-// supply namespace/name.
+// VMI's VNC stream: browser binary frames -> virt-api, and back. The dial uses the
+// caller's token (Identity from the auth middleware), so a user can only reach a
+// console their RBAC permits. Path params supply namespace/name.
 func (p *VNCProxy) Handler(w http.ResponseWriter, r *http.Request) {
+	id, ok := auth.FromContext(r.Context())
+	if !ok {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
 	namespace := r.PathValue("namespace")
 	name := r.PathValue("name")
 
-	conn, err := p.dialer.VNCConn(namespace, name)
+	dialer, err := p.dialerFor(id.Token)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	conn, err := dialer.VNCConn(namespace, name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return

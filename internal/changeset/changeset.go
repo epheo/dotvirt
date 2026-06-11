@@ -1,28 +1,26 @@
-// Package changeset coordinates dotvirt's draft → propose → PR workflow,
-// implementing api.Draft. It stages edits/creates into the draft store, renders
-// the draft as a semantic (YAML-free) diff, and proposes the whole draft as one
-// branch + commit + Forgejo PR off the base branch.
+// Package changeset coordinates dotvirt's draft → propose → PR workflow. It stages
+// edits/creates into per-(user,project) drafts, renders a draft as a semantic
+// (YAML-free) diff, and proposes it as one branch + commit + Forgejo PR against
+// that project's repo. Identity and project are passed per call: reads/writes
+// target the project's repo, drafts are keyed by the user. It satisfies api.Draft
+// without importing api — request/result DTOs live in model.
 package changeset
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 
-	"github.com/epheo/dotvirt/internal/api"
+	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/forge"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/vmgen"
 )
-
-// VMLookup finds the parsed VM as it appears on a branch, for computing semantic
-// diffs. Implemented by the git provider.
-type VMLookup interface {
-	FindVM(branch, namespace, name string) (model.VM, bool, error)
-}
 
 // Resyncer triggers an ArgoCD sync of the Application managing a VM, for the
 // main→running drift reconcile. Implemented by the argo client. May be nil.
@@ -30,32 +28,63 @@ type Resyncer interface {
 	Resync(ctx context.Context, namespace, name string) (model.ResyncResult, error)
 }
 
-// Coordinator implements api.Draft.
+// Coordinator implements api.Draft. It owns no single repo/identity: each method
+// receives the caller's Identity and the target ProjectInfo and resolves the
+// repo + branches from there.
 type Coordinator struct {
-	store      *draft.Store
-	repo       *git.WriteRepo
-	lookup     VMLookup
-	forge      *forge.Client // may be nil → degrade to compare URL
-	resyncer   Resyncer      // may be nil → re-sync unavailable
-	baseBranch string
-	proposed   string // working branch name, e.g. dotvirt/proposed
+	store    *draft.Store
+	repos    *git.RepoSet
+	forge    *forge.Factory // may be nil → degrade to compare URL
+	resyncer Resyncer       // may be nil → re-sync unavailable
+
+	baseBranch    string
+	proposed      string // working branch name, e.g. dotvirt/proposed
+	runningBranch string // dotvirt-owned branch reflecting live state
 }
 
 // New builds a Coordinator. forge and resyncer may be nil (PR creation degrades
 // to a compare link; re-sync becomes unavailable).
-func New(store *draft.Store, repo *git.WriteRepo, lookup VMLookup, fc *forge.Client, rs Resyncer, baseBranch, proposedBranch string) *Coordinator {
-	return &Coordinator{store: store, repo: repo, lookup: lookup, forge: fc, resyncer: rs, baseBranch: baseBranch, proposed: proposedBranch}
+func New(store *draft.Store, repos *git.RepoSet, ff *forge.Factory, rs Resyncer, baseBranch, proposedBranch, runningBranch string) *Coordinator {
+	return &Coordinator{
+		store: store, repos: repos, forge: ff, resyncer: rs,
+		baseBranch: baseBranch, proposed: proposedBranch, runningBranch: runningBranch,
+	}
+}
+
+// read returns the project repo's read mirror, for parsing VMs during previews.
+func (c *Coordinator) read(proj project.ProjectInfo) (*git.Repo, error) {
+	if err := requireRepo(proj); err != nil {
+		return nil, err
+	}
+	read, _, err := c.repos.Get(proj.Repo)
+	return read, err
+}
+
+// requireRepo rejects an action on a project with no usable repo BEFORE any draft
+// is persisted, so a repoless project never accumulates an orphaned, un-proposable
+// entry (and the user gets a clear error instead of a later 500).
+func requireRepo(proj project.ProjectInfo) error {
+	if proj.Repo == "" {
+		if proj.Error != "" {
+			return fmt.Errorf("%w: project %q is not editable: %s", model.ErrConflict, proj.Name, proj.Error)
+		}
+		return fmt.Errorf("%w: project %q has no repo configured", model.ErrConflict, proj.Name)
+	}
+	return nil
 }
 
 // --- staging ---
 
-// StageEdit records a VM edit in the draft.
-func (c *Coordinator) StageEdit(namespace, name string, req api.EditRequest) (model.DraftView, error) {
+// StageEdit records a VM edit in (id, proj)'s draft.
+func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, namespace, name string, req model.EditRequest) (model.DraftView, error) {
+	if err := requireRepo(proj); err != nil {
+		return model.DraftView{}, err
+	}
 	edit := editFromRequest(req)
 	if edit.Empty() {
-		return model.DraftView{}, fmt.Errorf("no fields to edit")
+		return model.DraftView{}, fmt.Errorf("%w: no fields to edit", model.ErrInvalid)
 	}
-	if err := c.store.Stage(draft.Entry{
+	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
 		Kind:       draft.KindEdit,
 		Namespace:  namespace,
 		Name:       name,
@@ -64,19 +93,22 @@ func (c *Coordinator) StageEdit(namespace, name string, req api.EditRequest) (mo
 	}); err != nil {
 		return model.DraftView{}, err
 	}
-	return c.Get()
+	return c.Get(id, proj)
 }
 
-// StageCreate records a new-VM spec in the draft.
-func (c *Coordinator) StageCreate(rawSpec json.RawMessage) (model.DraftView, error) {
+// StageCreate records a new-VM spec in (id, proj)'s draft.
+func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
+	if err := requireRepo(proj); err != nil {
+		return model.DraftView{}, err
+	}
 	var spec vmgen.Spec
 	if err := json.Unmarshal(rawSpec, &spec); err != nil {
-		return model.DraftView{}, fmt.Errorf("invalid VM spec: %w", err)
+		return model.DraftView{}, fmt.Errorf("%w: invalid VM spec: %v", model.ErrInvalid, err)
 	}
 	if spec.Name == "" || spec.Namespace == "" {
-		return model.DraftView{}, fmt.Errorf("name and namespace are required")
+		return model.DraftView{}, fmt.Errorf("%w: name and namespace are required", model.ErrInvalid)
 	}
-	if err := c.store.Stage(draft.Entry{
+	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
 		Kind:      draft.KindCreate,
 		Namespace: spec.Namespace,
 		Name:      spec.Name,
@@ -84,28 +116,40 @@ func (c *Coordinator) StageCreate(rawSpec json.RawMessage) (model.DraftView, err
 	}); err != nil {
 		return model.DraftView{}, err
 	}
-	return c.Get()
+	return c.Get(id, proj)
 }
 
-// Unstage removes one VM's pending change.
-func (c *Coordinator) Unstage(namespace, name string) error {
-	return c.store.Unstage(namespace, name)
+// Unstage removes one VM's pending change from (id, proj)'s draft.
+func (c *Coordinator) Unstage(id auth.Identity, proj project.ProjectInfo, namespace, name string) error {
+	return c.store.Unstage(id.Username, proj.Name, namespace, name)
 }
 
-// Discard clears the whole draft.
-func (c *Coordinator) Discard() error { return c.store.Clear() }
+// Discard clears (id, proj)'s draft.
+func (c *Coordinator) Discard(id auth.Identity, proj project.ProjectInfo) error {
+	return c.store.Clear(id.Username, proj.Name)
+}
 
 // --- semantic view ---
 
-// Get renders the draft as semantic diff items against the base branch.
-func (c *Coordinator) Get() (model.DraftView, error) {
-	entries := c.store.List()
-	view := model.DraftView{Base: c.baseBranch, Branch: c.proposed, Count: len(entries), Items: []model.DraftItem{}}
+// Get renders (id, proj)'s draft as semantic diff items against the base branch.
+func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error) {
+	entries, err := c.store.List(id.Username, proj.Name)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	view := model.DraftView{Base: c.baseBranch, Branch: c.proposedBranch(id.Username, proj.Name), Count: len(entries), Items: []model.DraftItem{}}
+	if len(entries) == 0 {
+		return view, nil
+	}
+	read, err := c.read(proj)
+	if err != nil {
+		return model.DraftView{}, err
+	}
 	for _, e := range entries {
 		item := model.DraftItem{Kind: string(e.Kind), Namespace: e.Namespace, Name: e.Name}
 		switch e.Kind {
 		case draft.KindEdit:
-			current, _, err := c.lookup.FindVM(c.baseBranch, e.Namespace, e.Name)
+			current, _, err := read.FindVMOnBranch(c.baseBranch, e.Namespace, e.Name)
 			if err != nil {
 				return model.DraftView{}, err
 			}
@@ -123,12 +167,22 @@ func (c *Coordinator) Get() (model.DraftView, error) {
 
 // --- propose ---
 
-// Propose builds the working branch from the whole draft, pushes it, and opens
-// (or finds) a Forgejo PR. Clears the draft on success.
-func (c *Coordinator) Propose(req api.ProposeRequest) (model.ProposeResult, error) {
-	entries := c.store.List()
+// Propose builds the working branch from (id, proj)'s whole draft, pushes it to
+// the project repo, and opens (or finds) a Forgejo PR. Clears the draft on success.
+func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req model.ProposeRequest) (model.ProposeResult, error) {
+	entries, err := c.store.List(id.Username, proj.Name)
+	if err != nil {
+		return model.ProposeResult{}, err
+	}
 	if len(entries) == 0 {
-		return model.ProposeResult{}, fmt.Errorf("draft is empty")
+		return model.ProposeResult{}, fmt.Errorf("%w: draft is empty", model.ErrInvalid)
+	}
+	if err := requireRepo(proj); err != nil {
+		return model.ProposeResult{}, err
+	}
+	_, write, err := c.repos.Get(proj.Repo)
+	if err != nil {
+		return model.ProposeResult{}, err
 	}
 
 	items, err := c.toChangesetItems(entries)
@@ -145,31 +199,53 @@ func (c *Coordinator) Propose(req api.ProposeRequest) (model.ProposeResult, erro
 		commitMsg = title + "\n\n" + req.Message
 	}
 
-	res, err := c.repo.CommitChangeset(c.baseBranch, c.proposed, commitMsg, items)
+	// The working branch is per-(user, project): a constant branch would be
+	// force-pushed by every user proposing into the same repo, so concurrent
+	// proposals would clobber each other's PR. Scoping it isolates them.
+	branch := c.proposedBranch(id.Username, proj.Name)
+
+	// Attribute the commit to the k8s user (committer stays dotvirt, the SA that
+	// pushes). K8s usernames aren't emails, so synthesize a stable noreply address.
+	by := git.Author{Name: id.Username, Email: authorEmail(id.Username)}
+	res, err := write.CommitChangeset(c.baseBranch, branch, commitMsg, items, by)
 	if err != nil {
 		return model.ProposeResult{}, err
 	}
-
 	out := model.ProposeResult{Branch: res.Branch, Pushed: res.Pushed}
 
-	if c.forge == nil {
-		// No forge configured: hand back a compare URL if we can't even build one,
-		// just report the pushed branch.
-		return out, c.store.Clear()
+	fc := c.forge.For(proj.Repo)
+	if fc == nil {
+		// No forge configured (or unparsable repo): report the pushed branch only.
+		return out, c.store.Clear(id.Username, proj.Name)
 	}
 
-	pr, err := c.forge.CreatePR(title, req.Message, c.proposed, c.baseBranch)
+	pr, err := fc.CreatePR(title, req.Message, branch, c.baseBranch)
 	if err != nil {
 		// A PR may already exist for this branch; try to find it.
-		if existing, ok, ferr := c.forge.FindOpenPR(c.proposed, c.baseBranch); ferr == nil && ok {
+		if existing, ok, ferr := fc.FindOpenPR(branch, c.baseBranch); ferr == nil && ok {
 			out.PRURL, out.PRNumber, out.Existing = existing.HTMLURL, existing.Number, true
-			return out, c.store.Clear()
+			return out, c.store.Clear(id.Username, proj.Name)
 		}
-		out.CompareURL = c.forge.CompareURL(c.proposed, c.baseBranch)
-		return out, fmt.Errorf("branch pushed but PR creation failed: %w", err)
+		// Partial success: the branch IS pushed, PR creation just failed (perms,
+		// rate-limit, …). Hand back the compare URL so the user can open the PR
+		// manually, and KEEP the draft staged so they can retry — this is a 200, not
+		// an error (returning err here would make the handler drop the result body).
+		log.Printf("propose %s/%s: branch pushed but PR creation failed: %v", proj.Name, branch, err)
+		out.CompareURL = fc.CompareURL(branch, c.baseBranch)
+		return out, nil
 	}
 	out.PRURL, out.PRNumber = pr.HTMLURL, pr.Number
-	return out, c.store.Clear()
+	return out, c.store.Clear(id.Username, proj.Name)
+}
+
+// proposedBranch derives the per-(user, project) working branch under the
+// configured prefix, e.g. dotvirt/proposed/<user>/<project>-<hash>. The readable
+// segments are sanitized to valid git refs (refSegment is lossy), so a short hash
+// of the RAW (user, project) is appended to guarantee distinct identities never
+// share a branch — without it, two usernames that sanitize to the same string
+// would force-push over each other's PR.
+func (c *Coordinator) proposedBranch(user, project string) string {
+	return c.proposed + "/" + refSegment(user) + "/" + refSegment(project) + "-" + shortHash(user, project)
 }
 
 func (c *Coordinator) toChangesetItems(entries []draft.Entry) ([]git.ChangesetItem, error) {
@@ -193,31 +269,34 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) ([]git.ChangesetIt
 
 // --- drift ---
 
-// Adopt stages the VM's live (running-branch) state as an edit into the draft,
-// so out-of-band cluster changes can be proposed INTO main (running→main
-// reconcile). It computes the field diff running-vs-main and stages an edit that
-// makes main match running.
-func (c *Coordinator) Adopt(namespace, name string) (model.DraftView, error) {
-	desired, okD, err := c.lookup.FindVM(c.baseBranch, namespace, name)
+// Adopt stages the VM's live (running-branch) state as an edit into (id, proj)'s
+// draft, so out-of-band cluster changes can be proposed INTO main (running→main
+// reconcile). It diffs running-vs-base and stages an edit making base match running.
+func (c *Coordinator) Adopt(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error) {
+	read, err := c.read(proj)
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	actual, okA, err := c.lookup.FindVM("running", namespace, name)
+	desired, okD, err := read.FindVMOnBranch(c.baseBranch, namespace, name)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	actual, okA, err := read.FindVMOnBranch(c.runningBranch, namespace, name)
 	if err != nil {
 		return model.DraftView{}, err
 	}
 	if !okA {
-		return model.DraftView{}, fmt.Errorf("%s/%s not present on the running branch", namespace, name)
+		return model.DraftView{}, fmt.Errorf("%w: %s/%s not present on the running branch", model.ErrNotFound, namespace, name)
 	}
 	if !okD {
-		return model.DraftView{}, fmt.Errorf("%s/%s not on %s yet; create it instead", namespace, name, c.baseBranch)
+		return model.DraftView{}, fmt.Errorf("%w: %s/%s not on %s yet; create it instead", model.ErrConflict, namespace, name, c.baseBranch)
 	}
 
 	edit := editToMatch(desired, actual)
 	if edit.Empty() {
-		return model.DraftView{}, fmt.Errorf("no drift to adopt for %s/%s", namespace, name)
+		return model.DraftView{}, fmt.Errorf("%w: no drift to adopt for %s/%s", model.ErrInvalid, namespace, name)
 	}
-	if err := c.store.Stage(draft.Entry{
+	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
 		Kind:       draft.KindEdit,
 		Namespace:  namespace,
 		Name:       name,
@@ -226,32 +305,36 @@ func (c *Coordinator) Adopt(namespace, name string) (model.DraftView, error) {
 	}); err != nil {
 		return model.DraftView{}, err
 	}
-	return c.Get()
+	return c.Get(id, proj)
 }
 
 // Resync triggers an ArgoCD sync of the Application managing the VM, bringing the
-// cluster back to git (main→running reconcile). Writes nothing to git.
+// cluster back to git (main→running reconcile). Writes nothing to git. It uses the
+// SA-identity resyncer (Argo operations have no user context).
 func (c *Coordinator) Resync(namespace, name string) (model.ResyncResult, error) {
 	if c.resyncer == nil {
-		return model.ResyncResult{}, fmt.Errorf("re-sync unavailable (ArgoCD not configured)")
+		return model.ResyncResult{}, fmt.Errorf("%w: re-sync unavailable (ArgoCD not configured)", model.ErrUnavailable)
 	}
 	return c.resyncer.Resync(context.Background(), namespace, name)
 }
 
 // VMDrift returns the semantic diff between a VM on the running branch (actual)
-// and on the base branch (desired).
-func (c *Coordinator) VMDrift(namespace, name string) (model.DriftResult, error) {
-	desired, okD, err := c.lookup.FindVM(c.baseBranch, namespace, name)
+// and on the base branch (desired), within proj's repo.
+func (c *Coordinator) VMDrift(proj project.ProjectInfo, namespace, name string) (model.DriftResult, error) {
+	read, err := c.read(proj)
 	if err != nil {
 		return model.DriftResult{}, err
 	}
-	actual, okA, err := c.lookup.FindVM("running", namespace, name)
+	desired, okD, err := read.FindVMOnBranch(c.baseBranch, namespace, name)
+	if err != nil {
+		return model.DriftResult{}, err
+	}
+	actual, okA, err := read.FindVMOnBranch(c.runningBranch, namespace, name)
 	if err != nil {
 		return model.DriftResult{}, err
 	}
 	result := model.DriftResult{}
 	if !okD || !okA {
-		// Present on only one side — treat as drift but we can't field-diff cleanly.
 		result.Drift = okD != okA
 		return result, nil
 	}

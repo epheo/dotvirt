@@ -3,6 +3,7 @@ package git
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,17 +51,41 @@ type CommitResult struct {
 	Hash      string // commit hash when Committed
 }
 
-// author is the identity dotvirt commits as.
+// author is the identity dotvirt commits as for its OWN writes (the running-branch
+// export, legacy single edits). User-facing proposals attribute the commit to the
+// k8s user instead — see Author and CommitChangeset.
 var author = &object.Signature{Name: "dotvirt", Email: "dotvirt@localhost", When: time.Unix(0, 0).UTC()}
 
-// Commit writes files onto branch and commits them. If the resulting tree is
-// identical to the branch head (no content changed), it commits nothing and
-// returns Committed=false — this keeps the running branch from churning when the
-// cluster hasn't changed.
+// Author identifies who a change is attributed to (the k8s user proposing it).
+// The committer stays dotvirt (the SA that pushes); git separates the two.
+type Author struct {
+	Name  string
+	Email string
+}
+
+// signature builds the commit author signature: the user when given, else dotvirt.
+// When is fixed (epoch) to keep re-proposed branches byte-stable like the export.
+func (a Author) signature() *object.Signature {
+	if a.Name == "" {
+		return author
+	}
+	email := a.Email
+	if email == "" {
+		email = "dotvirt@localhost"
+	}
+	return &object.Signature{Name: a.Name, Email: email, When: time.Unix(0, 0).UTC()}
+}
+
+// Commit writes files onto branch and prunes stale ones: any tracked file under
+// a managedDir that is NOT in files is deleted, so the branch reflects exactly
+// the supplied set within those directories (a VM deleted from the cluster has
+// its manifest removed). Files outside managedDirs (e.g. a README) are left
+// alone. If the resulting tree is identical to the branch head, it commits
+// nothing and returns Committed=false — keeping the running branch from churning.
 //
 // branch is created from the default branch if it doesn't exist yet (needed for
 // feature branches; the running branch is expected to exist).
-func (w *WriteRepo) Commit(branch, message string, files []File) (CommitResult, error) {
+func (w *WriteRepo) Commit(branch, message string, files []File, managedDirs []string) (CommitResult, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -81,7 +106,9 @@ func (w *WriteRepo) Commit(branch, message string, files []File) (CommitResult, 
 		return CommitResult{}, err
 	}
 
+	keep := make(map[string]struct{}, len(files))
 	for _, f := range files {
+		keep[f.Path] = struct{}{}
 		if err := writeWorktreeFile(wt, f); err != nil {
 			return CommitResult{}, err
 		}
@@ -90,6 +117,10 @@ func (w *WriteRepo) Commit(branch, message string, files []File) (CommitResult, 
 		if _, err := wt.Add(f.Path); err != nil {
 			return CommitResult{}, fmt.Errorf("stage %s: %w", f.Path, err)
 		}
+	}
+
+	if err := pruneStale(repo, wt, keep, managedDirs); err != nil {
+		return CommitResult{}, err
 	}
 
 	status, err := wt.Status()
@@ -116,6 +147,58 @@ func (w *WriteRepo) Commit(branch, message string, files []File) (CommitResult, 
 	}
 
 	return CommitResult{Branch: branch, Committed: true, Hash: commit.String()}, nil
+}
+
+// pruneStale removes tracked files that live under a managedDir but are absent
+// from keep — the deletions needed so the branch mirrors exactly the supplied set
+// within those directories. It walks the branch HEAD's tree (not worktree status,
+// which omits unmodified files — a stale VM manifest that isn't being rewritten
+// must still be deleted). A managedDir matches a file if the file equals it or
+// sits beneath it ("ns" matches "ns/vm.yaml"). No managedDirs means no pruning.
+func pruneStale(repo *git.Repository, wt *git.Worktree, keep map[string]struct{}, managedDirs []string) error {
+	if len(managedDirs) == 0 {
+		return nil
+	}
+	head, err := repo.Head()
+	if err != nil {
+		return err
+	}
+	commit, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		return err
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return err
+	}
+	var stale []string
+	if err := tree.Files().ForEach(func(f *object.File) error {
+		if _, ok := keep[f.Name]; ok {
+			return nil
+		}
+		if underAny(f.Name, managedDirs) {
+			stale = append(stale, f.Name)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, path := range stale {
+		if _, err := wt.Remove(path); err != nil {
+			return fmt.Errorf("prune %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+// underAny reports whether path is one of, or nested under, any dir in dirs.
+func underAny(path string, dirs []string) bool {
+	for _, d := range dirs {
+		if path == d || strings.HasPrefix(path, d+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // checkoutBranch checks out branch as a local branch tracking the remote. A

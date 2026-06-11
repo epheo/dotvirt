@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/epheo/dotvirt/internal/manifest"
 )
 
 // seedRepo creates a bare repo with one VM manifest on main, returning the bare
@@ -54,41 +52,4 @@ spec:
 	run(work, "remote", "add", "origin", bare)
 	run(work, "push", "-q", "origin", "main")
 	return bare
-}
-
-func TestCommitVMEditCreatesFeatureBranch(t *testing.T) {
-	bare := seedRepo(t)
-	repo := OpenWrite(bare, "", "", true)
-
-	mem := "4Gi"
-	res, err := repo.CommitVMEdit("main", "dotvirt/edit-web-1", "web.yaml", "alpha", "web",
-		"dotvirt: edit alpha/web (memory=4Gi)", manifest.VMEdit{Memory: &mem})
-	if err != nil {
-		t.Fatalf("CommitVMEdit: %v", err)
-	}
-
-	if res.Branch != "dotvirt/edit-web-1" {
-		t.Errorf("branch = %q", res.Branch)
-	}
-	if !strings.Contains(res.Diff, "-          guest: 2Gi") || !strings.Contains(res.Diff, "+          guest: 4Gi") {
-		t.Errorf("diff not minimal/expected:\n%s", res.Diff)
-	}
-
-	// main must be untouched; the feature branch must carry the change.
-	if got := showFile(t, bare, "main", "web.yaml"); strings.Contains(got, "4Gi") {
-		t.Error("source branch main was modified — edit leaked off the feature branch")
-	}
-	if got := showFile(t, bare, "dotvirt/edit-web-1", "web.yaml"); !strings.Contains(got, "guest: 4Gi") {
-		t.Error("feature branch missing the edit")
-	}
-}
-
-func showFile(t *testing.T, bare, ref, path string) string {
-	t.Helper()
-	cmd := exec.Command("git", "--git-dir", bare, "show", ref+":"+path)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git show %s:%s: %v\n%s", ref, path, err, out)
-	}
-	return string(out)
 }

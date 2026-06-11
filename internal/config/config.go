@@ -2,50 +2,52 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"time"
 )
 
-// Config holds everything dotvirt needs to connect its three read sources
-// (git, cluster, ArgoCD) and its one write target (git feature branches).
+// Config holds everything dotvirt needs. Per-project git repos come from cluster
+// annotations, not config — the only git input here is the one credential used to
+// clone/push every project repo.
 type Config struct {
 	Addr     string // HTTP listen address
 	UIOrigin string // CORS origin for the separate SvelteKit frontend; empty disables CORS
 
-	// Git plane
-	RepoURL       string // remote URL, or local path for a working copy
-	RepoCacheDir  string // where dotvirt keeps its working clone
-	RunningBranch string // branch dotvirt owns and writes cluster state to
-	ManifestGlob  string // glob (relative to repo root) selecting VM manifests
+	// Git credential (one cred for every project repo) + the branches dotvirt uses.
 	GitUsername   string // for https auth (token in GitToken)
 	GitToken      string
+	RunningBranch string // per-project branch dotvirt owns and writes cluster state to
 
 	// Cluster read
 	Kubeconfig     string // path; empty = in-cluster
-	NamespaceLabel string // label selector defining "projects"
+	ProjectLabel   string // namespace label whose value names the project (dotvirt.io/project)
+	RepoAnnotation string // namespace annotation holding the project's git repo URL (dotvirt.io/repo)
 
-	ExportInterval  time.Duration // how often to export live state to the running branch
+	ExportInterval  time.Duration // how often to export live state to each project's running branch
 	GitPollInterval time.Duration // how often to poll git for branch changes (drives live push)
 	Push            bool          // push commits to the remote (disable for local/offline testing)
 
 	// Changeset / PR workflow
-	BaseBranch     string // branch new work is cut from + PR target (the GitOps trunk)
-	ProposedBranch string // dotvirt-owned working branch holding the draft
-	DraftFile      string // path to the persisted draft changeset
+	BaseBranch     string // branch the inventory reads + PRs target (the GitOps trunk)
+	ProposedBranch string // dotvirt-owned working branch holding a draft
+	DraftDir       string // root dir for persisted drafts (<dir>/<user>/<project>.json)
 
-	// Forge (Forgejo) for PR creation; empty url/token degrades to push-only.
+	// Forge (Forgejo) for PR creation; empty url/token degrades to push-only. The
+	// per-project owner/repo are derived from each project's repo URL, not config.
 	ForgeURL   string
 	ForgeToken string
-	ForgeOwner string
-	ForgeRepo  string
 
 	InsecureTLS bool // skip TLS verification for git + forge (dev, e.g. self-signed Route)
 
-	// Toggles for environments where a piece isn't wired yet.
-	ClusterEnabled bool
-	ArgoEnabled    bool
+	// Auth
+	SessionSecret string // HMAC key signing the session cookie; random if empty
+
+	ArgoEnabled bool // enable ArgoCD drift reads + re-sync
 }
 
 // Load builds a Config from flags, with env-var fallbacks for secrets.
@@ -55,42 +57,49 @@ func Load(args []string) (*Config, error) {
 
 	fs.StringVar(&c.Addr, "addr", envOr("DOTVIRT_ADDR", ":8080"), "HTTP listen address")
 	fs.StringVar(&c.UIOrigin, "ui-origin", envOr("DOTVIRT_UI_ORIGIN", "http://localhost:5173"), "frontend origin allowed via CORS (empty to disable)")
-	fs.StringVar(&c.RepoURL, "repo", os.Getenv("DOTVIRT_REPO"), "git repo URL or local path")
-	fs.StringVar(&c.RepoCacheDir, "repo-cache", envOr("DOTVIRT_REPO_CACHE", "./.dotvirt-repo"), "local working clone dir")
-	fs.StringVar(&c.RunningBranch, "running-branch", envOr("DOTVIRT_RUNNING_BRANCH", "running"), "branch reflecting live cluster state (dotvirt-owned)")
-	fs.StringVar(&c.ManifestGlob, "glob", envOr("DOTVIRT_GLOB", "**/*.yaml"), "glob selecting VM manifests")
-	fs.StringVar(&c.GitUsername, "git-username", envOr("DOTVIRT_GIT_USERNAME", "dotvirt"), "git https username")
+	fs.StringVar(&c.GitUsername, "git-username", envOr("DOTVIRT_GIT_USERNAME", "dotvirt"), "git https username (clones/pushes every project repo)")
 	fs.StringVar(&c.GitToken, "git-token", os.Getenv("DOTVIRT_GIT_TOKEN"), "git https token/password")
+	fs.StringVar(&c.RunningBranch, "running-branch", envOr("DOTVIRT_RUNNING_BRANCH", "running"), "per-project branch reflecting live cluster state (dotvirt-owned)")
 
 	fs.StringVar(&c.Kubeconfig, "kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig path (empty = in-cluster)")
-	fs.StringVar(&c.NamespaceLabel, "namespace-label", envOr("DOTVIRT_NAMESPACE_LABEL", "dotvirt.io/project"), "label selector for project namespaces")
+	fs.StringVar(&c.ProjectLabel, "project-label", envOr("DOTVIRT_PROJECT_LABEL", "dotvirt.io/project"), "namespace label whose value names the project")
+	fs.StringVar(&c.RepoAnnotation, "repo-annotation", envOr("DOTVIRT_REPO_ANNOTATION", "dotvirt.io/repo"), "namespace annotation holding the project's git repo URL")
 
-	fs.DurationVar(&c.ExportInterval, "export-interval", 30*time.Second, "how often to export live state to the running branch")
+	fs.DurationVar(&c.ExportInterval, "export-interval", 30*time.Second, "how often to export live state to each project's running branch")
 	fs.DurationVar(&c.GitPollInterval, "git-poll-interval", 10*time.Second, "how often to poll git for branch changes (drives live inventory push)")
 	fs.BoolVar(&c.Push, "push", envBool("DOTVIRT_PUSH", true), "push commits to the remote (disable for local/offline testing)")
 
-	fs.StringVar(&c.BaseBranch, "base-branch", envOr("DOTVIRT_BASE_BRANCH", "main"), "branch new work is cut from + PR target")
+	fs.StringVar(&c.BaseBranch, "base-branch", envOr("DOTVIRT_BASE_BRANCH", "main"), "branch the inventory reads + PRs target")
 	fs.StringVar(&c.ProposedBranch, "proposed-branch", envOr("DOTVIRT_PROPOSED_BRANCH", "dotvirt/proposed"), "working branch holding the draft changeset")
-	fs.StringVar(&c.DraftFile, "draft-file", os.Getenv("DOTVIRT_DRAFT_FILE"), "path to the persisted draft (default <repo-cache>/draft.json)")
+	fs.StringVar(&c.DraftDir, "draft-dir", envOr("DOTVIRT_DRAFT_DIR", "./.dotvirt-drafts"), "root dir for persisted drafts (<dir>/<user>/<project>.json)")
 	fs.StringVar(&c.ForgeURL, "forge-url", os.Getenv("DOTVIRT_FORGE_URL"), "Forgejo base URL (empty = push-only, no PR)")
 	fs.StringVar(&c.ForgeToken, "forge-token", os.Getenv("DOTVIRT_FORGE_TOKEN"), "Forgejo API token")
-	fs.StringVar(&c.ForgeOwner, "forge-owner", os.Getenv("DOTVIRT_FORGE_OWNER"), "Forgejo repo owner")
-	fs.StringVar(&c.ForgeRepo, "forge-repo", os.Getenv("DOTVIRT_FORGE_REPO"), "Forgejo repo name")
 	fs.BoolVar(&c.InsecureTLS, "insecure-tls", envBool("DOTVIRT_INSECURE_TLS", false), "skip TLS verification for git+forge (dev only)")
+	fs.StringVar(&c.SessionSecret, "session-secret", os.Getenv("DOTVIRT_SESSION_SECRET"), "HMAC key signing the session cookie (random if empty; sessions then drop on restart)")
 
-	fs.BoolVar(&c.ClusterEnabled, "cluster", envBool("DOTVIRT_CLUSTER", false), "enable live cluster reads + running-branch export")
 	fs.BoolVar(&c.ArgoEnabled, "argo", envBool("DOTVIRT_ARGO", false), "enable ArgoCD drift reads")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
-	if c.RepoURL == "" {
-		return nil, fmt.Errorf("repo is required (-repo or DOTVIRT_REPO)")
-	}
-	if c.DraftFile == "" {
-		c.DraftFile = c.RepoCacheDir + "/draft.json"
+	if c.SessionSecret == "" {
+		secret, err := randomSecret()
+		if err != nil {
+			return nil, err
+		}
+		c.SessionSecret = secret
+		log.Println("config: no -session-secret set; using a random key — sessions won't survive a restart")
 	}
 	return c, nil
+}
+
+// randomSecret returns a 32-byte hex key for signing session cookies.
+func randomSecret() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate session secret: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func envOr(key, def string) string {
