@@ -317,6 +317,27 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) ([]git.ChangesetIt
 	return items, nil
 }
 
+// OpenProposal returns the open PR backing (id, proj)'s proposed branch, if any —
+// the staged→PR→synced lifecycle's middle state for the Recent Tasks feed. Returns
+// ok=false (nil error) when the project has no repo/forge or no open PR.
+func (c *Coordinator) OpenProposal(id auth.Identity, proj project.ProjectInfo) (model.Proposal, bool, error) {
+	if proj.Repo == "" {
+		return model.Proposal{}, false, nil
+	}
+	fc := c.forge.For(proj.Repo) // nil-safe: nil factory / unparsable repo → nil client
+	if fc == nil {
+		return model.Proposal{}, false, nil
+	}
+	pr, ok, err := fc.FindPR(c.proposedBranch(id.Username, proj.Name), c.baseBranch)
+	if err != nil {
+		return model.Proposal{}, false, err
+	}
+	if !ok || pr.State != "open" {
+		return model.Proposal{}, false, nil
+	}
+	return model.Proposal{Project: proj.Name, PRNumber: pr.Number, PRURL: pr.HTMLURL, Title: pr.Title}, true, nil
+}
+
 // --- drift ---
 
 // Adopt stages the VM's live (running-branch) state as an edit into (id, proj)'s

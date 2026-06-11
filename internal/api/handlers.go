@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -149,6 +150,39 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, opts)
+}
+
+// handleProposals lists the caller's open PRs across their visible projects — the
+// "PR #N open" rows in the Recent Tasks dock. Best-effort: a project whose forge
+// lookup errors is skipped (logged), not fatal, so one slow/broken repo can't
+// blank the whole feed.
+func (s *Server) handleProposals(w http.ResponseWriter, r *http.Request) {
+	id, c, err := s.userCluster(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	if s.draft == nil {
+		writeJSON(w, http.StatusOK, []model.Proposal{})
+		return
+	}
+	projects, err := s.projectsFor(r.Context(), id, c)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	out := []model.Proposal{}
+	for _, p := range projects {
+		pr, ok, err := s.draft.OpenProposal(id, p)
+		if err != nil {
+			log.Printf("proposals: %s: %v (skipping)", p.Name, err)
+			continue
+		}
+		if ok {
+			out = append(out, pr)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // scope is the per-request context every draft/VM handler resolves up front: the

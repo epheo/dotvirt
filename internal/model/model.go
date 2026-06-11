@@ -180,6 +180,15 @@ type ProposeResult struct {
 	Existing   bool   `json:"existing,omitempty"`
 }
 
+// Proposal is an open pull request backing a project's draft — the staged→PR→
+// synced lifecycle's middle state, surfaced as a Recent Tasks row.
+type Proposal struct {
+	Project  string `json:"project"`
+	PRNumber int    `json:"prNumber"`
+	PRURL    string `json:"prURL"`
+	Title    string `json:"title,omitempty"`
+}
+
 // ResyncResult reports which ArgoCD Application was synced.
 type ResyncResult struct {
 	Application string `json:"application"`

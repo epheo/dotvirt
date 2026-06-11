@@ -38,6 +38,7 @@ type Draft interface {
 	VMDrift(proj project.ProjectInfo, namespace, name string) (model.DriftResult, error)
 	Adopt(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
 	Resync(namespace, name string) (model.ResyncResult, error) // SA-identity; no user/project context
+	OpenProposal(id auth.Identity, proj project.ProjectInfo) (model.Proposal, bool, error)
 }
 
 // StreamHandler upgrades a request to a WebSocket that pushes live inventory.
@@ -134,6 +135,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/inventory", s.handleInventory)
 	mux.HandleFunc("GET /api/options", s.handleOptions)
+	mux.HandleFunc("GET /api/proposals", s.handleProposals)
 
 	if s.stream != nil {
 		mux.HandleFunc("GET /api/inventory/stream", s.stream.Handler)

@@ -184,6 +184,12 @@ export interface DriftResult {
 	drift: boolean;
 	changes: Change[];
 }
+export interface Proposal {
+	project: string;
+	prNumber: number;
+	prURL: string;
+	title?: string;
+}
 
 const enc = encodeURIComponent;
 
@@ -195,6 +201,7 @@ export const api = {
 
 	inventory: () => get<Inventory>('/api/inventory'),
 	options: () => get<Options>('/api/options'),
+	proposals: () => get<Proposal[]>('/api/proposals'),
 
 	// Staging — the backend resolves the project from the VM's namespace, so these
 	// per-VM routes need no project param.
