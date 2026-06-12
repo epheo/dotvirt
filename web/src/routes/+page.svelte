@@ -25,6 +25,7 @@
 	import Login from '$lib/components/Login.svelte';
 	import NewVMWizard from '$lib/components/NewVMWizard.svelte';
 	import Permissions from '$lib/components/Permissions.svelte';
+	import QuotaBand from '$lib/components/QuotaBand.svelte';
 	import StagedChangesModal from '$lib/components/StagedChangesModal.svelte';
 	import TaskDock from '$lib/components/TaskDock.svelte';
 	import VMDetail from '$lib/components/VMDetail.svelte';
@@ -668,6 +669,10 @@
 												{p.error}
 											</p>
 										{/if}
+										<!-- Quota-aware capacity: the project's ResourceQuotas. -->
+										<div class="border-t border-slate-100 px-3 py-2">
+											<QuotaBand scope={{ project: p.name }} showEmpty />
+										</div>
 									</section>
 								{/each}
 							{/if}

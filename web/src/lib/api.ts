@@ -300,6 +300,19 @@ export interface Migration {
 	failed?: boolean;
 }
 
+// One resource row of a ResourceQuota, pre-parsed for the capacity bars.
+export interface QuotaItem {
+	resource: string; // e.g. requests.cpu, requests.memory
+	used: number;
+	hard: number;
+	unit: 'cores' | 'bytes' | 'count';
+}
+export interface NamespaceQuota {
+	namespace: string;
+	name: string;
+	items: QuotaItem[];
+}
+
 // The caller's effective capabilities in one namespace (the Permissions tab).
 export interface Capability {
 	id: string;
@@ -376,6 +389,13 @@ export const api = {
 		if (scope.node) q.set('node', scope.node);
 		q.set('range', range);
 		return get<VMMetrics>(`/api/metrics/scope?${q.toString()}`);
+	},
+	quotas: (scope: { project?: string; namespace?: string }) => {
+		const q = new URLSearchParams();
+		if (scope.project) q.set('project', scope.project);
+		if (scope.namespace) q.set('namespace', scope.namespace);
+		const qs = q.toString();
+		return get<NamespaceQuota[]>(`/api/quotas${qs ? `?${qs}` : ''}`);
 	},
 	adopt: (namespace: string, name: string) =>
 		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/adopt`, {}),

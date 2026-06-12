@@ -315,6 +315,24 @@ type ClusterSummary struct {
 	TopMemory []ConsumerVM   `json:"topMemory"`
 }
 
+// QuotaItem is one resource row of a ResourceQuota: current usage against the
+// hard cap, pre-parsed for direct charting.
+type QuotaItem struct {
+	Resource string  `json:"resource"` // e.g. requests.cpu, requests.memory
+	Used     float64 `json:"used"`
+	Hard     float64 `json:"hard"`
+	Unit     string  `json:"unit"` // cores | bytes | count
+}
+
+// NamespaceQuota is one ResourceQuota in one namespace — the project capacity
+// band's input. A namespace may carry several (scoped) quotas.
+type NamespaceQuota struct {
+	Namespace string      `json:"namespace"`
+	Name      string      `json:"name"`
+	Items     []QuotaItem `json:"items"`
+}
+
+
 // Event is a Kubernetes Event for a VM (or its VMI), shown in the Monitor tab and
 // the dock's Events lane (which uses Namespace/Name to label which VM it's about).
 type Event struct {

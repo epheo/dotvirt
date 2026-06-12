@@ -172,6 +172,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/permissions", s.handlePermissions)
 	mux.HandleFunc("GET /api/metrics/cluster", s.handleClusterSummary)
 	mux.HandleFunc("GET /api/metrics/scope", s.handleScopeMetrics)
+	mux.HandleFunc("GET /api/quotas", s.handleQuotas)
 	mux.HandleFunc("GET /api/projects/{project}/history", s.handleHistory)
 	mux.HandleFunc("POST /api/projects/{project}/revert", s.handleRevert)
 

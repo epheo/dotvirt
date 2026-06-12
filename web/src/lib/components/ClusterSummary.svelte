@@ -2,6 +2,7 @@
 	import { api, Unauthorized, type ClusterSummary } from '$lib/api';
 	import { cores, bytes } from '$lib/format';
 	import { pollWhileVisible } from '$lib/poll';
+	import QuotaBand from './QuotaBand.svelte';
 	import Ring from './Ring.svelte';
 
 	let {
@@ -114,6 +115,14 @@
 				</ul>
 			</div>
 		</div>
+
+		<!-- Quota-aware capacity: ResourceQuota bars at project/namespace scope —
+		     the tenant's real boundary, where node-allocatable is the cluster's. -->
+		{#if scope.project || scope.namespace}
+			<div class="mt-3">
+				<QuotaBand scope={{ project: scope.project, namespace: scope.namespace }} />
+			</div>
+		{/if}
 	</div>
 {:else if loading}
 	<div class="border-b border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-400">

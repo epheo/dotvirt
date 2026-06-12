@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
@@ -44,18 +45,19 @@ func (s *Server) handleVMUsage(w http.ResponseWriter, r *http.Request) {
 	respond(w, u, err)
 }
 
-// scopeNamespaces resolves a container-scope metrics read's namespaces: the
+// scopeNamespaces resolves a container-scope read's namespaces: the
 // repo-backed projects' namespaces — the same VMs the inventory grid shows —
 // optionally narrowed by ?project= / ?namespace= so every container level
-// (all, project, namespace, node) gets its own view.
-func (s *Server) scopeNamespaces(r *http.Request) (auth.Identity, []string, error) {
+// (all, project, namespace, node) gets its own view. The caller's cluster
+// client rides along for handlers that read the cluster (quotas).
+func (s *Server) scopeNamespaces(r *http.Request) (auth.Identity, *cluster.Client, []string, error) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		return auth.Identity{}, nil, fmt.Errorf("%w: %v", model.ErrUnavailable, err)
+		return auth.Identity{}, nil, nil, fmt.Errorf("%w: %v", model.ErrUnavailable, err)
 	}
 	projects, err := s.projectsFor(r.Context(), id, c)
 	if err != nil {
-		return auth.Identity{}, nil, err
+		return auth.Identity{}, nil, nil, err
 	}
 	wantProject := r.URL.Query().Get("project")
 	wantNamespace := r.URL.Query().Get("namespace")
@@ -71,7 +73,7 @@ func (s *Server) scopeNamespaces(r *http.Request) (auth.Identity, []string, erro
 			nss = append(nss, n)
 		}
 	}
-	return id, nss, nil
+	return id, c, nss, nil
 }
 
 // handleClusterSummary returns the aggregate capacity view (the "All VMs" cluster
@@ -82,7 +84,7 @@ func (s *Server) handleClusterSummary(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "metrics not configured", http.StatusServiceUnavailable)
 		return
 	}
-	id, nss, err := s.scopeNamespaces(r)
+	id, _, nss, err := s.scopeNamespaces(r)
 	if err != nil {
 		http.Error(w, err.Error(), statusFor(err))
 		return
@@ -98,11 +100,24 @@ func (s *Server) handleScopeMetrics(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "metrics not configured", http.StatusServiceUnavailable)
 		return
 	}
-	id, nss, err := s.scopeNamespaces(r)
+	id, _, nss, err := s.scopeNamespaces(r)
 	if err != nil {
 		http.Error(w, err.Error(), statusFor(err))
 		return
 	}
 	m, err := s.metrics.ScopeMetrics(r.Context(), id.Token, nss, r.URL.Query().Get("node"), r.URL.Query().Get("range"))
 	respond(w, m, err)
+}
+
+// handleQuotas returns the ResourceQuotas across a container scope's
+// namespaces — the project capacity band + container Configure. Read under the
+// caller's token, so RBAC gates which namespaces' quotas are visible.
+func (s *Server) handleQuotas(w http.ResponseWriter, r *http.Request) {
+	_, c, nss, err := s.scopeNamespaces(r)
+	if err != nil {
+		http.Error(w, err.Error(), statusFor(err))
+		return
+	}
+	q, err := c.ListQuotas(r.Context(), nss)
+	respond(w, q, err)
 }
