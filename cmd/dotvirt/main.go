@@ -209,6 +209,12 @@ func run() error {
 // sweep). Failures are logged and retried next sweep — a forge hiccup must not
 // affect serving.
 func ensureWebhooks(ctx context.Context, state *clusterstate.State, resolver *project.Resolver, ff *forge.Factory, target, secret string) {
+	// The first sweep is only useful once the namespace reflector has its
+	// initial LIST — before that the project set reads empty and every hook
+	// would wait for the next ticker.
+	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	_ = state.WaitForSync(syncCtx)
+	cancel()
 	sweep := func() {
 		for _, p := range resolver.Resolve(state.Namespaces(), nil) {
 			if p.Repo == "" {
