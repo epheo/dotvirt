@@ -51,10 +51,16 @@ type CommitResult struct {
 	Hash      string // commit hash when Committed
 }
 
-// author is the identity dotvirt commits as for its OWN writes (the running-branch
-// export, legacy single edits). User-facing proposals attribute the commit to the
-// k8s user instead — see Author and CommitChangeset.
-var author = &object.Signature{Name: "dotvirt", Email: "dotvirt@localhost", When: time.Unix(0, 0).UTC()}
+// dotvirtSig is the signature dotvirt commits as for its OWN writes (the running-
+// branch export, legacy single edits) and as the committer of user proposals (the
+// SA that pushes). Built per call so the time is real — git history shows when a
+// change actually landed. Idempotency never depended on a fixed time: the export
+// skips a clean tree (Commit), and a changeset errors on no-op-vs-base
+// (CommitChangeset); a fixed epoch only made identical re-proposes a push no-op,
+// which isn't worth misdating every commit to 1970.
+func dotvirtSig() *object.Signature {
+	return &object.Signature{Name: "dotvirt", Email: "dotvirt@localhost", When: time.Now().UTC()}
+}
 
 // Author identifies who a change is attributed to (the k8s user proposing it).
 // The committer stays dotvirt (the SA that pushes); git separates the two.
@@ -64,16 +70,15 @@ type Author struct {
 }
 
 // signature builds the commit author signature: the user when given, else dotvirt.
-// When is fixed (epoch) to keep re-proposed branches byte-stable like the export.
 func (a Author) signature() *object.Signature {
 	if a.Name == "" {
-		return author
+		return dotvirtSig()
 	}
 	email := a.Email
 	if email == "" {
 		email = "dotvirt@localhost"
 	}
-	return &object.Signature{Name: a.Name, Email: email, When: time.Unix(0, 0).UTC()}
+	return &object.Signature{Name: a.Name, Email: email, When: time.Now().UTC()}
 }
 
 // Commit writes files onto branch and prunes stale ones: any tracked file under
@@ -131,7 +136,8 @@ func (w *WriteRepo) Commit(branch, message string, files []File, managedDirs []s
 		return CommitResult{Branch: branch, Committed: false}, nil
 	}
 
-	commit, err := wt.Commit(message, &git.CommitOptions{Author: author, Committer: author})
+	sig := dotvirtSig()
+	commit, err := wt.Commit(message, &git.CommitOptions{Author: sig, Committer: sig})
 	if err != nil {
 		return CommitResult{}, fmt.Errorf("commit: %w", err)
 	}

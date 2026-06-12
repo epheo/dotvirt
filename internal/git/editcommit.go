@@ -106,7 +106,7 @@ func (w *WriteRepo) CommitChangeset(base, branch, message string, items []Change
 	}
 
 	// Author = the k8s user who proposed; committer = dotvirt (the SA pushing).
-	if _, err := wt.Commit(message, &git.CommitOptions{Author: by.signature(), Committer: author}); err != nil {
+	if _, err := wt.Commit(message, &git.CommitOptions{Author: by.signature(), Committer: dotvirtSig()}); err != nil {
 		return EditResult{}, fmt.Errorf("commit: %w", err)
 	}
 

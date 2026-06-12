@@ -100,18 +100,20 @@
 		}
 	}
 
-	// Compact age for a commit timestamp (commits are usually hours/days old).
-	function age(iso: string): string {
-		const start = new Date(iso).getTime();
-		if (Number.isNaN(start)) return '';
-		const s = Math.max(0, Math.floor((Date.now() - start) / 1000));
-		const d = Math.floor(s / 86400);
-		const h = Math.floor((s % 86400) / 3600);
-		const m = Math.floor((s % 3600) / 60);
-		if (d > 0) return `${d}d ago`;
-		if (h > 0) return `${h}h ago`;
-		if (m > 0) return `${m}m ago`;
-		return 'just now';
+	// Commits dotvirt wrote before mid-2026 carried the Unix epoch as their date (a
+	// since-fixed byte-stable-re-propose hack); floor guards those so they read "—"
+	// rather than a misleading "56 years ago".
+	const EPOCH_FLOOR = Date.UTC(2020, 0, 1);
+
+	// fmtWhen renders a commit's author date as a compact absolute date.
+	function fmtWhen(iso: string): string {
+		const t = new Date(iso).getTime();
+		if (Number.isNaN(t) || t < EPOCH_FLOOR) return '—';
+		return new Date(t).toLocaleDateString(undefined, {
+			year: 'numeric',
+			month: 'short',
+			day: 'numeric'
+		});
 	}
 </script>
 
@@ -306,7 +308,8 @@
 															</p>
 															<p class="text-[10px] text-slate-400">
 																<code class="text-slate-500">{c.shortHash}</code>
-																· {c.author} · {age(c.when)}{#if c.merge} ·
+																· {c.author} ·
+																<span title={c.when}>{fmtWhen(c.when)}</span>{#if c.merge} ·
 																	<span class="text-slate-400">merge</span>{/if}
 															</p>
 														</div>

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -87,5 +88,31 @@ func TestCommitChangesetDeleteAbsentNoop(t *testing.T) {
 	// go-git's Remove of a missing path errors; either way it must NOT succeed.
 	if err == nil {
 		t.Fatal("expected an error deleting an absent file, got nil")
+	}
+}
+
+// TestCommitChangesetStampsRealTime guards the fix for epoch-dated commits: a
+// changeset must carry a real (recent) author time so the history view shows when
+// the change landed, not "1970".
+func TestCommitChangesetStampsRealTime(t *testing.T) {
+	bare := seedRepo(t)
+	w := OpenWrite(bare, "", "", true)
+
+	if _, err := w.CommitChangeset("main", "dotvirt/proposed", "add thing",
+		[]ChangesetItem{{Path: "alpha/new.yaml", NewContent: []byte("kind: VirtualMachine\n")}},
+		Author{Name: "alice", Email: "alice@x"}); err != nil {
+		t.Fatalf("CommitChangeset: %v", err)
+	}
+
+	out, err := exec.Command("git", "--git-dir", bare, "log", "-1", "--format=%at", "dotvirt/proposed").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git log: %v\n%s", err, out)
+	}
+	ts, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		t.Fatalf("parse author time %q: %v", out, err)
+	}
+	if ts < 1577836800 { // 2020-01-01: anything below means the old epoch placeholder
+		t.Errorf("commit author time %d is the epoch placeholder; want a real time", ts)
 	}
 }
