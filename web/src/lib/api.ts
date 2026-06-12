@@ -216,6 +216,37 @@ export interface VMMetrics {
 	stepSec: number;
 	charts: MetricChart[];
 }
+export interface UsageMetric {
+	used: number;
+	total?: number; // 0/undefined ⇒ no denominator
+	spark?: number[];
+}
+export interface VMUsage {
+	updated: number; // unix seconds
+	cpu: UsageMetric; // used = % of allocated, total = 100
+	memory: UsageMetric; // bytes
+	storage: UsageMetric; // bytes
+}
+export interface ClusterMetric {
+	used: number;
+	allocated?: number; // committed to VMs
+	total: number; // node-allocatable capacity
+	spark?: number[];
+}
+export interface ConsumerVM {
+	namespace: string;
+	name: string;
+	value: number;
+}
+export interface ClusterSummary {
+	updated: number;
+	cpu: ClusterMetric; // cores
+	memory: ClusterMetric; // bytes
+	storage: ClusterMetric; // bytes
+	vms: Record<string, number>; // phase → count
+	topCpu: ConsumerVM[];
+	topMemory: ConsumerVM[];
+}
 export interface VMEvent {
 	namespace?: string;
 	name?: string;
@@ -268,6 +299,9 @@ export const api = {
 	allEvents: () => get<VMEvent[]>('/api/events'),
 	metrics: (namespace: string, name: string, range: string) =>
 		get<VMMetrics>(`/api/vms/${enc(namespace)}/${enc(name)}/metrics?range=${enc(range)}`),
+	vmUsage: (namespace: string, name: string) =>
+		get<VMUsage>(`/api/vms/${enc(namespace)}/${enc(name)}/usage`),
+	clusterSummary: () => get<ClusterSummary>('/api/metrics/cluster'),
 	adopt: (namespace: string, name: string) =>
 		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/adopt`, {}),
 	resync: (namespace: string, name: string) =>

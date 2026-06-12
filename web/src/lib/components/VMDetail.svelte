@@ -3,6 +3,7 @@
 	import { api, type Change, type DraftItem, type VM, type VMEvent } from '$lib/api';
 	import ChangeList from './ChangeList.svelte';
 	import ConfirmDelete from './ConfirmDelete.svelte';
+	import CapacityUsage from './CapacityUsage.svelte';
 	import Console from './Console.svelte';
 	import EditSettings from './EditSettings.svelte';
 	import Performance from './Performance.svelte';
@@ -303,6 +304,12 @@
 						<div class="mt-1 text-lg font-semibold text-slate-800">{statusText}</div>
 						{#if elapsed(vm.startedAt)}<div class="text-xs text-slate-400">up {elapsed(vm.startedAt)}</div>{/if}
 					</div>
+				</div>
+
+				<!-- Live usage bars (vCenter "Capacity and Usage"), distinct from the
+				     configuration tiles above. -->
+				<div class="mt-4">
+					<CapacityUsage {vm} />
 				</div>
 
 				<div class="mt-4 grid gap-4 md:grid-cols-2">

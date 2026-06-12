@@ -121,6 +121,193 @@ func chartSpecs(ns, name, rw string) []chartSpec {
 	}
 }
 
+// labeledValue is one instant-query result series: its labels and current value.
+type labeledValue struct {
+	labels map[string]string
+	value  float64
+}
+
+// vector runs an instant query and returns its result series. A failed/empty query
+// yields an empty slice (callers treat a missing value as zero).
+func (c *Client) vector(ctx context.Context, token, query string) []labeledValue {
+	v := url.Values{}
+	v.Set("query", query)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/v1/query?"+v.Encode(), nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var body struct {
+		Data struct {
+			Result []struct {
+				Metric map[string]string  `json:"metric"`
+				Value  [2]json.RawMessage `json:"value"`
+			} `json:"result"`
+		} `json:"data"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&body) != nil {
+		return nil
+	}
+	out := make([]labeledValue, 0, len(body.Data.Result))
+	for _, r := range body.Data.Result {
+		var vs string
+		if json.Unmarshal(r.Value[1], &vs) != nil {
+			continue
+		}
+		f, err := strconv.ParseFloat(vs, 64)
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+			continue
+		}
+		out = append(out, labeledValue{labels: r.Metric, value: f})
+	}
+	return out
+}
+
+// scalars runs named instant queries concurrently, returning name→first value (0
+// when a query has no result).
+func (c *Client) scalars(ctx context.Context, token string, queries map[string]string) map[string]float64 {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	out := make(map[string]float64, len(queries))
+	for k, q := range queries {
+		wg.Add(1)
+		go func(k, q string) {
+			defer wg.Done()
+			var v float64
+			if vec := c.vector(ctx, token, q); len(vec) > 0 {
+				v = vec[0].value
+			}
+			mu.Lock()
+			out[k] = v
+			mu.Unlock()
+		}(k, q)
+	}
+	wg.Wait()
+	return out
+}
+
+type sparkResult struct {
+	vals []float64
+	last float64
+}
+
+// sparklines runs named queries over the last hour concurrently, returning each as
+// a recent-values slice plus its latest value (for an inline sparkline + readout).
+func (c *Client) sparklines(ctx context.Context, token string, queries map[string]string) map[string]sparkResult {
+	end := time.Now().Unix()
+	start := end - 3600
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	out := make(map[string]sparkResult, len(queries))
+	for k, q := range queries {
+		wg.Add(1)
+		go func(k, q string) {
+			defer wg.Done()
+			smp, _ := c.rangeQuery(ctx, token, q, start, end, 120) // 2m step → ~30 points
+			vals := make([]float64, len(smp))
+			for i, s := range smp {
+				vals[i] = s.v
+			}
+			var last float64
+			if len(vals) > 0 {
+				last = vals[len(vals)-1]
+			}
+			mu.Lock()
+			out[k] = sparkResult{vals: vals, last: last}
+			mu.Unlock()
+		}(k, q)
+	}
+	wg.Wait()
+	return out
+}
+
+// VMUsage returns a VM's point-in-time capacity-and-usage for the Summary tab: CPU
+// % of allocated, memory used of allocated, guest-FS used of provisioned — each
+// with a short sparkline.
+func (c *Client) VMUsage(ctx context.Context, token, ns, name string) (model.VMUsage, error) {
+	s := fmt.Sprintf("{namespace=%q,name=%q}", ns, name)
+	sp := c.sparklines(ctx, token, map[string]string{
+		"cpu":  fmt.Sprintf("rate(kubevirt_vmi_cpu_usage_seconds_total%s[2m])*100 / on(namespace,name) kubevirt_vmi_vcpu_count%s", s, s),
+		"mem":  fmt.Sprintf("kubevirt_vmi_memory_used_bytes%s", s),
+		"stor": fmt.Sprintf("sum(kubevirt_vmi_filesystem_used_bytes%s)", s),
+	})
+	tot := c.scalars(ctx, token, map[string]string{
+		"mem":  fmt.Sprintf("kubevirt_vmi_memory_domain_bytes%s", s),
+		"stor": fmt.Sprintf("sum(kubevirt_vmi_filesystem_capacity_bytes%s)", s),
+	})
+	return model.VMUsage{
+		Updated: time.Now().Unix(),
+		CPU:     model.UsageMetric{Used: sp["cpu"].last, Total: 100, Spark: sp["cpu"].vals},
+		Memory:  model.UsageMetric{Used: sp["mem"].last, Total: tot["mem"], Spark: sp["mem"].vals},
+		Storage: model.UsageMetric{Used: sp["stor"].last, Total: tot["stor"], Spark: sp["stor"].vals},
+	}, nil
+}
+
+// ClusterSummary returns the aggregate capacity view for the "All VMs" landing.
+// VM-scoped sums are limited to namespaces (the caller's visible set); node
+// capacity is cluster-wide. topConsumers lists the heaviest VMs by CPU + memory.
+func (c *Client) ClusterSummary(ctx context.Context, token string, namespaces []string) (model.ClusterSummary, error) {
+	// Scope VM metrics to the caller's namespaces. With none, match nothing (rather
+	// than every namespace) so usage reads zero while node capacity still shows.
+	nsSel := `{namespace="__dotvirt_none__"}`
+	if len(namespaces) > 0 {
+		nsSel = fmt.Sprintf("{namespace=~%q}", strings.Join(namespaces, "|"))
+	}
+	vm := func(metric string) string { return metric + nsSel } // VM metric scoped to the caller
+
+	sp := c.sparklines(ctx, token, map[string]string{
+		"cpu":  fmt.Sprintf("sum(rate(%s[2m]))", vm("kubevirt_vmi_cpu_usage_seconds_total")),
+		"mem":  fmt.Sprintf("sum(%s)", vm("kubevirt_vmi_memory_used_bytes")),
+		"stor": fmt.Sprintf("sum(%s)", vm("kubevirt_vmi_filesystem_used_bytes")),
+	})
+	sc := c.scalars(ctx, token, map[string]string{
+		"cpuAlloc":  fmt.Sprintf("sum(%s)", vm("kubevirt_vmi_vcpu_count")),
+		"cpuTotal":  `sum(kube_node_status_allocatable{resource="cpu"})`,
+		"memAlloc":  fmt.Sprintf("sum(%s)", vm("kubevirt_vmi_memory_domain_bytes")),
+		"memTotal":  `sum(kube_node_status_allocatable{resource="memory"})`,
+		"storTotal": fmt.Sprintf("sum(%s)", vm("kubevirt_vmi_filesystem_capacity_bytes")),
+	})
+
+	// kubevirt_vmi_phase_count has no namespace label; kubevirt_vmi_info does (one
+	// series per VMI, with a phase label), so it counts per namespace.
+	vms := map[string]int{}
+	for _, lv := range c.vector(ctx, token, fmt.Sprintf("sum by(phase)(%s)", vm("kubevirt_vmi_info"))) {
+		if p := lv.labels["phase"]; p != "" {
+			vms[p] = int(lv.value)
+		}
+	}
+	topCPU := consumers(c.vector(ctx, token, fmt.Sprintf("topk(5, sum by(namespace,name)(rate(%s[2m])))", vm("kubevirt_vmi_cpu_usage_seconds_total"))))
+	topMem := consumers(c.vector(ctx, token, fmt.Sprintf("topk(5, sum by(namespace,name)(%s))", vm("kubevirt_vmi_memory_used_bytes"))))
+
+	return model.ClusterSummary{
+		Updated:   time.Now().Unix(),
+		CPU:       model.ClusterMetric{Used: sp["cpu"].last, Allocated: sc["cpuAlloc"], Total: sc["cpuTotal"], Spark: sp["cpu"].vals},
+		Memory:    model.ClusterMetric{Used: sp["mem"].last, Allocated: sc["memAlloc"], Total: sc["memTotal"], Spark: sp["mem"].vals},
+		Storage:   model.ClusterMetric{Used: sp["stor"].last, Total: sc["storTotal"], Spark: sp["stor"].vals},
+		VMs:       vms,
+		TopCPU:    topCPU,
+		TopMemory: topMem,
+	}, nil
+}
+
+// consumers turns a topk vector into sorted ConsumerVM rows (highest first).
+func consumers(vec []labeledValue) []model.ConsumerVM {
+	out := make([]model.ConsumerVM, 0, len(vec))
+	for _, lv := range vec {
+		out = append(out, model.ConsumerVM{Namespace: lv.labels["namespace"], Name: lv.labels["name"], Value: lv.value})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Value > out[j].Value })
+	return out
+}
+
 type sample struct {
 	t int64
 	v float64

@@ -259,6 +259,53 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	respond(w, m, err)
 }
 
+// handleVMUsage returns a VM's point-in-time capacity-and-usage (the Summary tab's
+// "Capacity and Usage" bars), queried under the caller's token.
+func (s *Server) handleVMUsage(w http.ResponseWriter, r *http.Request) {
+	if s.metrics == nil {
+		http.Error(w, "metrics not configured", http.StatusServiceUnavailable)
+		return
+	}
+	ns, name := r.PathValue("namespace"), r.PathValue("name")
+	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	if !ok {
+		return
+	}
+	u, err := s.metrics.VMUsage(r.Context(), sc.id.Token, ns, name)
+	respond(w, u, err)
+}
+
+// handleClusterSummary returns the aggregate capacity view (the "All VMs" cluster
+// landing): rings of VM usage vs node-allocatable capacity, VM counts by phase, and
+// top-consumer VMs. VM-scoped sums are limited to the caller's visible namespaces.
+func (s *Server) handleClusterSummary(w http.ResponseWriter, r *http.Request) {
+	if s.metrics == nil {
+		http.Error(w, "metrics not configured", http.StatusServiceUnavailable)
+		return
+	}
+	id, c, err := s.userCluster(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	projects, err := s.projectsFor(r.Context(), id, c)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Aggregate over the repo-backed projects' namespaces — the same VMs the
+	// inventory grid shows — so the cluster band stays consistent with it.
+	var nss []string
+	for _, p := range projects {
+		if p.Repo == "" {
+			continue
+		}
+		nss = append(nss, p.Namespaces...)
+	}
+	cs, err := s.metrics.ClusterSummary(r.Context(), id.Token, nss)
+	respond(w, cs, err)
+}
+
 // handleProposals lists the caller's open PRs across their visible projects — the
 // same set the live inventory now carries; kept as a standalone read for parity.
 func (s *Server) handleProposals(w http.ResponseWriter, r *http.Request) {

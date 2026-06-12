@@ -151,6 +151,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/options", s.handleOptions)
 	mux.HandleFunc("GET /api/proposals", s.handleProposals)
 	mux.HandleFunc("GET /api/events", s.handleAllEvents)
+	mux.HandleFunc("GET /api/metrics/cluster", s.handleClusterSummary)
 	mux.HandleFunc("GET /api/projects/{project}/history", s.handleHistory)
 	mux.HandleFunc("POST /api/projects/{project}/revert", s.handleRevert)
 
@@ -172,6 +173,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/drift", s.handleDrift)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/events", s.handleEvents)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/metrics", s.handleMetrics)
+	mux.HandleFunc("GET /api/vms/{namespace}/{name}/usage", s.handleVMUsage)
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/adopt", s.handleAdopt)
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/resync", s.handleResync)
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/restart", s.handleRestart)

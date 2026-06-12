@@ -88,3 +88,24 @@ func p(f *float64) string {
 	}
 	return fmt.Sprintf("%g", *f)
 }
+
+// TestVectorAndConsumers verifies instant-vector parsing and that consumers() sorts
+// a topk result highest-first.
+func TestVectorAndConsumers(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[
+			{"metric":{"namespace":"a","name":"low"},"value":[100,"1"]},
+			{"metric":{"namespace":"b","name":"high"},"value":[100,"9"]}]}}`)
+	}))
+	defer srv.Close()
+
+	vec := New(srv.URL, false).vector(context.Background(), "tok", "q")
+	if len(vec) != 2 {
+		t.Fatalf("vector parsed %d series, want 2", len(vec))
+	}
+	cons := consumers(vec)
+	if cons[0].Name != "high" || cons[0].Value != 9 || cons[1].Name != "low" {
+		t.Errorf("consumers not sorted highest-first: %+v", cons)
+	}
+}

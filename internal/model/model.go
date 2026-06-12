@@ -230,6 +230,56 @@ type VMMetrics struct {
 	Charts  []MetricChart `json:"charts"`
 }
 
+// --- Capacity & usage (Summary "Capacity and Usage" widgets) ---
+
+// UsageMetric is one resource's point-in-time usage for a VM Summary bar — Used of
+// Total in the same unit, with a short recent history for an inline sparkline.
+type UsageMetric struct {
+	Used  float64   `json:"used"`
+	Total float64   `json:"total,omitempty"` // 0 ⇒ no known denominator (show the value alone)
+	Spark []float64 `json:"spark,omitempty"`
+}
+
+// VMUsage is a VM's live capacity-and-usage for the Summary tab (vCenter's
+// "Capacity and Usage" panel): CPU % of allocated, memory used of allocated,
+// guest-filesystem used of provisioned.
+type VMUsage struct {
+	Updated int64       `json:"updated"` // unix seconds ("Last updated")
+	CPU     UsageMetric `json:"cpu"`     // Used = % of allocated vCPU, Total = 100
+	Memory  UsageMetric `json:"memory"`  // bytes; Total = allocated (domain)
+	Storage UsageMetric `json:"storage"` // bytes; guest filesystem used / capacity
+}
+
+// ClusterMetric is one aggregate resource for the cluster/infrastructure rings:
+// Used now, Allocated (committed to VMs), of Total (node-allocatable capacity).
+type ClusterMetric struct {
+	Used      float64   `json:"used"`
+	Allocated float64   `json:"allocated,omitempty"` // committed to VMs (vCPU / declared memory)
+	Total     float64   `json:"total"`               // node-allocatable capacity (the boundary)
+	Spark     []float64 `json:"spark,omitempty"`
+}
+
+// ConsumerVM is one row in a "top consumers" list (a VM ranked by a resource).
+type ConsumerVM struct {
+	Namespace string  `json:"namespace"`
+	Name      string  `json:"name"`
+	Value     float64 `json:"value"`
+}
+
+// ClusterSummary is the aggregate capacity view for the "All VMs" landing — the
+// vCenter cluster-Summary analog: rings (used vs node-allocatable) + VM counts by
+// phase + top-consumer VMs. VM-scoped sums are limited to the caller's namespaces;
+// node capacity is the cluster-wide boundary.
+type ClusterSummary struct {
+	Updated   int64          `json:"updated"`
+	CPU       ClusterMetric  `json:"cpu"`     // cores
+	Memory    ClusterMetric  `json:"memory"`  // bytes
+	Storage   ClusterMetric  `json:"storage"` // bytes
+	VMs       map[string]int `json:"vms"`     // phase → count
+	TopCPU    []ConsumerVM   `json:"topCpu"`
+	TopMemory []ConsumerVM   `json:"topMemory"`
+}
+
 // Event is a Kubernetes Event for a VM (or its VMI), shown in the Monitor tab and
 // the dock's Events lane (which uses Namespace/Name to label which VM it's about).
 type Event struct {
