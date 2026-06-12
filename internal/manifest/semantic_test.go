@@ -18,7 +18,7 @@ func TestChangesForEdit(t *testing.T) {
 		CPUCores:       ptr(1), // unchanged — must NOT appear
 		SetLabels:      map[string]string{"app": "web2", "tier": "front"},
 		RemoveLabels:   []string{"gone"}, // not present — must NOT appear
-		AddDisks:       []DiskAdd{{Name: "data", Size: "20Gi"}},
+		AddDisks:       []model.DiskAdd{{Name: "data", Size: "20Gi"}},
 		RemoveNetworks: []string{"old"},
 	})
 

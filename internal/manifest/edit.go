@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // VMEdit is a set of field changes to apply to a VirtualMachine manifest. Nil/
@@ -23,11 +25,12 @@ type VMEdit struct {
 	SetAnnotations    map[string]string `json:"setAnnotations,omitempty"`
 	RemoveAnnotations []string          `json:"removeAnnotations,omitempty"`
 
-	// Disk/network edits on the VM template.
-	AddDisks       []DiskAdd    `json:"addDisks,omitempty"`
-	RemoveDisks    []string     `json:"removeDisks,omitempty"` // disk names to remove
-	AddNetworks    []NetworkAdd `json:"addNetworks,omitempty"`
-	RemoveNetworks []string     `json:"removeNetworks,omitempty"` // network/interface names to remove
+	// Disk/network edits on the VM template. The add-entries are model types so
+	// the API request, the persisted draft, and this edit share one definition.
+	AddDisks       []model.DiskAdd    `json:"addDisks,omitempty"`
+	RemoveDisks    []string           `json:"removeDisks,omitempty"` // disk names to remove
+	AddNetworks    []model.NetworkAdd `json:"addNetworks,omitempty"`
+	RemoveNetworks []string           `json:"removeNetworks,omitempty"` // network/interface names to remove
 }
 
 // Empty reports whether the edit changes nothing.
@@ -38,17 +41,6 @@ func (e VMEdit) Empty() bool {
 		len(e.SetAnnotations) == 0 && len(e.RemoveAnnotations) == 0 &&
 		len(e.AddDisks) == 0 && len(e.RemoveDisks) == 0 &&
 		len(e.AddNetworks) == 0 && len(e.RemoveNetworks) == 0
-}
-
-// DiskAdd adds a blank (emptyDisk) data disk to the template.
-type DiskAdd struct {
-	Name string `json:"name"`
-	Size string `json:"size"` // e.g. "10Gi"
-}
-
-// NetworkAdd adds a multus (NAD-backed) network + bridge interface.
-type NetworkAdd struct {
-	Name string `json:"name"` // NAD ref "<namespace>/<nad>"
 }
 
 // ApplyEdit edits the VirtualMachine named (namespace, name) within a manifest,

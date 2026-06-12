@@ -60,7 +60,7 @@ func shortHash(user, project string) string {
 
 // editFromRequest maps a model.EditRequest into a manifest.VMEdit.
 func editFromRequest(req model.EditRequest) manifest.VMEdit {
-	edit := manifest.VMEdit{
+	return manifest.VMEdit{
 		Power:          req.Power,
 		CPUCores:       req.CPUCores,
 		Memory:         req.Memory,
@@ -68,16 +68,11 @@ func editFromRequest(req model.EditRequest) manifest.VMEdit {
 		Preference:     req.Preference,
 		SetLabels:      req.SetLabels,
 		RemoveLabels:   req.RemoveLabels,
+		AddDisks:       req.AddDisks,
 		RemoveDisks:    req.RemoveDisks,
+		AddNetworks:    req.AddNetworks,
 		RemoveNetworks: req.RemoveNetworks,
 	}
-	for _, d := range req.AddDisks {
-		edit.AddDisks = append(edit.AddDisks, manifest.DiskAdd{Name: d.Name, Size: d.Size})
-	}
-	for _, n := range req.AddNetworks {
-		edit.AddNetworks = append(edit.AddNetworks, manifest.NetworkAdd{Name: n.Name})
-	}
-	return edit
 }
 
 // changesForCreate renders a new-VM spec as "add" semantic items for the draft
@@ -155,7 +150,7 @@ func editToMatch(from, to model.VM) manifest.VMEdit {
 	fromDisks, toDisks := diskNameSet(from), diskNameSet(to)
 	for name, size := range toDisks {
 		if _, ok := fromDisks[name]; !ok {
-			edit.AddDisks = append(edit.AddDisks, manifest.DiskAdd{Name: name, Size: size})
+			edit.AddDisks = append(edit.AddDisks, model.DiskAdd{Name: name, Size: size})
 		}
 	}
 	for name := range fromDisks {
@@ -166,7 +161,7 @@ func editToMatch(from, to model.VM) manifest.VMEdit {
 	fromNets, toNets := nicNameSet(from), nicNameSet(to)
 	for name, net := range toNets {
 		if _, ok := fromNets[name]; !ok {
-			edit.AddNetworks = append(edit.AddNetworks, manifest.NetworkAdd{Name: net})
+			edit.AddNetworks = append(edit.AddNetworks, model.NetworkAdd{Name: net})
 		}
 	}
 	for name := range fromNets {

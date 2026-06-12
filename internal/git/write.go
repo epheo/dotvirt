@@ -81,6 +81,40 @@ func (a Author) signature() *object.Signature {
 	return &object.Signature{Name: a.Name, Email: email, When: time.Now().UTC()}
 }
 
+// openWorktree clones the repo into memory and returns it with its worktree —
+// every write operation starts from fresh remote state. Callers hold w.mu.
+func (w *WriteRepo) openWorktree() (*git.Repository, *git.Worktree, error) {
+	repo, err := git.Clone(memory.NewStorage(), memfs.New(), &git.CloneOptions{
+		URL:  w.url,
+		Auth: w.auth,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("clone for write: %w", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		return nil, nil, err
+	}
+	return repo, wt, nil
+}
+
+// pushBranch force-pushes branch when pushes are enabled (no-op otherwise); an
+// already-up-to-date remote is not an error. Force is correct for both callers:
+// the export owns its branch outright, and a re-propose rebuilds its branch fresh.
+func (w *WriteRepo) pushBranch(repo *git.Repository, branch string) error {
+	if !w.push {
+		return nil
+	}
+	err := repo.Push(&git.PushOptions{
+		Auth:     w.auth,
+		RefSpecs: []config.RefSpec{config.RefSpec(fmt.Sprintf("+refs/heads/%s:refs/heads/%s", branch, branch))},
+	})
+	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return fmt.Errorf("push %s: %w", branch, err)
+	}
+	return nil
+}
+
 // Commit writes files onto branch and prunes stale ones: any tracked file under
 // a managedDir that is NOT in files is deleted, so the branch reflects exactly
 // the supplied set within those directories (a VM deleted from the cluster has
@@ -94,15 +128,7 @@ func (w *WriteRepo) Commit(branch, message string, files []File, managedDirs []s
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	repo, err := git.Clone(memory.NewStorage(), memfs.New(), &git.CloneOptions{
-		URL:  w.url,
-		Auth: w.auth,
-	})
-	if err != nil {
-		return CommitResult{}, fmt.Errorf("clone for write: %w", err)
-	}
-
-	wt, err := repo.Worktree()
+	repo, wt, err := w.openWorktree()
 	if err != nil {
 		return CommitResult{}, err
 	}
@@ -142,14 +168,8 @@ func (w *WriteRepo) Commit(branch, message string, files []File, managedDirs []s
 		return CommitResult{}, fmt.Errorf("commit: %w", err)
 	}
 
-	if w.push {
-		err := repo.Push(&git.PushOptions{
-			Auth:     w.auth,
-			RefSpecs: []config.RefSpec{config.RefSpec(fmt.Sprintf("+refs/heads/%s:refs/heads/%s", branch, branch))},
-		})
-		if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
-			return CommitResult{}, fmt.Errorf("push %s: %w", branch, err)
-		}
+	if err := w.pushBranch(repo, branch); err != nil {
+		return CommitResult{}, err
 	}
 
 	return CommitResult{Branch: branch, Committed: true, Hash: commit.String()}, nil

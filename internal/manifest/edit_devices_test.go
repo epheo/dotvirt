@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"sigs.k8s.io/yaml"
+
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // vmWithDevices mirrors a real VM manifest with disks, volumes, networks, and
@@ -90,7 +92,7 @@ func TestEditLabelsUpsertAndRemove(t *testing.T) {
 
 func TestAddDisk(t *testing.T) {
 	out, err := ApplyEdit([]byte(vmWithDevices), "alpha", "web", VMEdit{
-		AddDisks: []DiskAdd{{Name: "data", Size: "20Gi"}},
+		AddDisks: []model.DiskAdd{{Name: "data", Size: "20Gi"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +113,7 @@ func TestAddDisk(t *testing.T) {
 
 func TestAddNetwork(t *testing.T) {
 	out, err := ApplyEdit([]byte(vmWithDevices), "alpha", "web", VMEdit{
-		AddNetworks: []NetworkAdd{{Name: "tenant-a/mt-bridge"}},
+		AddNetworks: []model.NetworkAdd{{Name: "tenant-a/mt-bridge"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +131,7 @@ func TestAddNetwork(t *testing.T) {
 func TestRemoveDisk(t *testing.T) {
 	// First add two disks, then remove one by name; result should have rootdisk + kept.
 	added, err := ApplyEdit([]byte(vmWithDevices), "alpha", "web", VMEdit{
-		AddDisks: []DiskAdd{{Name: "data", Size: "20Gi"}, {Name: "logs", Size: "5Gi"}},
+		AddDisks: []model.DiskAdd{{Name: "data", Size: "20Gi"}, {Name: "logs", Size: "5Gi"}},
 	})
 	if err != nil {
 		t.Fatal(err)

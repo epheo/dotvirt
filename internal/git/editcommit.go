@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/storage/memory"
 
 	"github.com/epheo/dotvirt/internal/manifest"
 )
@@ -49,11 +46,7 @@ func (w *WriteRepo) CommitChangeset(base, branch, message string, items []Change
 		return EditResult{}, errors.New("nothing to propose")
 	}
 
-	repo, err := git.Clone(memory.NewStorage(), memfs.New(), &git.CloneOptions{URL: w.url, Auth: w.auth})
-	if err != nil {
-		return EditResult{}, fmt.Errorf("clone for propose: %w", err)
-	}
-	wt, err := repo.Worktree()
+	repo, wt, err := w.openWorktree()
 	if err != nil {
 		return EditResult{}, err
 	}
@@ -110,18 +103,10 @@ func (w *WriteRepo) CommitChangeset(base, branch, message string, items []Change
 		return EditResult{}, fmt.Errorf("commit: %w", err)
 	}
 
-	res := EditResult{Branch: branch}
-	if w.push {
-		err := repo.Push(&git.PushOptions{
-			Auth:     w.auth,
-			RefSpecs: []config.RefSpec{config.RefSpec(fmt.Sprintf("+refs/heads/%s:refs/heads/%s", branch, branch))},
-		})
-		if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
-			return EditResult{}, fmt.Errorf("push %s: %w", branch, err)
-		}
-		res.Pushed = true
+	if err := w.pushBranch(repo, branch); err != nil {
+		return EditResult{}, err
 	}
-	return res, nil
+	return EditResult{Branch: branch, Pushed: w.push}, nil
 }
 
 // resetBranchTo creates branch at the current HEAD (deleting any existing local
