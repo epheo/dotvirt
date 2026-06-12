@@ -1,0 +1,57 @@
+# Forgejo Actions CI (GitHub-Actions-compatible syntax). Needs a runner
+# registered on the Forgejo instance; the `docker` label is the conventional
+# container-capable runner.
+#
+# Secrets (repo settings → Actions → Secrets):
+#   REGISTRY_USERNAME / REGISTRY_PASSWORD — push credentials for registry.desku.be
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  REGISTRY: registry.desku.be
+  IMAGE: registry.desku.be/dotvirt
+
+jobs:
+  go:
+    runs-on: docker
+    container:
+      image: docker.io/library/golang:1.26
+    steps:
+      - uses: actions/checkout@v4
+      - run: go vet ./...
+        env: { GOFLAGS: -buildvcs=false }
+      - run: go test ./...
+        env: { GOFLAGS: -buildvcs=false }
+
+  web:
+    runs-on: docker
+    container:
+      image: docker.io/library/node:22
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+        working-directory: web
+      - run: npm run check
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+
+  # Image build+push, main only — the deploy manifests pin the short-sha tag.
+  image:
+    if: github.ref == 'refs/heads/main'
+    needs: [go, web]
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: |
+          docker build -f Containerfile -t "$IMAGE:${GITHUB_SHA::7}" -t "$IMAGE:latest" .
+      - name: Push image
+        run: |
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login "$REGISTRY" -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
+          docker push "$IMAGE:${GITHUB_SHA::7}"
+          docker push "$IMAGE:latest"

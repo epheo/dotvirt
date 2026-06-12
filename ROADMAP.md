@@ -15,7 +15,7 @@ every item here:
 Ordering decisions: a **structural week first** (the parity features stack ~8
 endpoints and several action-menu entries on exactly these seams), then
 **UI parity before productionizing** — ship/in-cluster is the last phase and can
-be pulled earlier at any time. Image registry: **ghcr.io/epheo/dotvirt**.
+be pulled earlier at any time. Image registry: **registry.desku.be/dotvirt**.
 
 Sizes: S < half day · M = 1–3 days · L = 1 week+.
 
@@ -63,7 +63,7 @@ Last by decision (UI-first); pull earlier at any time.
 | # | Task | Size | Sketch |
 |---|------|------|--------|
 | 4.1 | **Merge `feat/observability-summary` → main** | S | Linear branch; main hasn't diverged |
-| 4.2 | **Makefile + Forgejo Actions CI + image push** | M | `.forgejo/workflows/ci.yaml` (origin is a Forgejo — GH-Actions-compatible syntax; needs a registered runner): vet/test/lint, `npm run check && build`, main-branch job builds the `Containerfile` → push **ghcr.io/epheo/dotvirt** (PAT secret). Playwright e2e stays a `make e2e` target against the dev cluster (needs a live cluster) |
+| 4.2 | **Makefile + Forgejo Actions CI + image push** | M | `.forgejo/workflows/ci.yaml` (origin is a Forgejo — GH-Actions-compatible syntax; needs a registered runner): vet/test/lint, `npm run check && build`, main-branch job builds the `Containerfile` → push **registry.desku.be/dotvirt** (REGISTRY_* secrets). Playwright e2e stays a `make e2e` target against the dev cluster (needs a live cluster) |
 | 4.3 | **Complete deploy + first in-cluster apply** | M | `deploy/dotvirt.yaml`: add `DOTVIRT_METRICS_URL` (in-cluster thanos-querier), pin the image tag, add a Route (none exists — the file ends at the Service); extend `metrics.New` with a CA-bundle path (service-CA ConfigMap) so in-cluster Thanos isn't `-insecure-tls`. Verify login/WS/VNC/metrics through the Route |
 | 4.4 | **Verify the ApplicationSet plugin loop** | S | Label a fresh namespace → Argo app auto-provisioned → VM syncs → appears in dotvirt; watch for ConfigMap baseUrl/token mismatch |
 | 4.5 | **Forgejo webhook → instant updates** | M | `POST /api/webhooks/forge` (HMAC `X-Forgejo-Signature`, open-path like the appset plugin); on push/PR events: `RepoSet.Poke(repoURL)` + nudge the 1.2 refresher + hub; `forge.Client.EnsureWebhook` auto-registration on first repo open; lets the git poll interval stretch to minutes |
