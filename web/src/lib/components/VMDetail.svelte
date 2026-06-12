@@ -19,13 +19,15 @@
 		onstaged,
 		onaction,
 		stagedItem = null,
-		onstagedopen
+		onstagedopen,
+		onsearchlabel
 	}: {
 		vm: VM | null;
 		onstaged?: () => void;
 		onaction?: (a: { verb: string; namespace: string; name: string; ok: boolean }) => void;
 		stagedItem?: DraftItem | null;
 		onstagedopen?: () => void;
+		onsearchlabel?: (key: string, value: string) => void;
 	} = $props();
 
 	type Tab = 'summary' | 'monitor' | 'snapshots' | 'console';
@@ -420,7 +422,12 @@
 						<h3 class="mb-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">Labels</h3>
 						<div>
 							{#each Object.entries(vm.labels) as [k, v] (k)}
-								<span class="mr-1 mb-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">{k}={v}</span>
+								<button
+									onclick={() => onsearchlabel?.(k, v)}
+									title="Find everything labeled {k}={v}"
+									class="mr-1 mb-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+									>{k}={v}</button
+								>
 							{/each}
 						</div>
 					</div>
