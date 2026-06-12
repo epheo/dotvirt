@@ -135,6 +135,30 @@ func (s *State) bump() {
 // compare it to skip a broadcast when nothing moved (e.g. a resync with no delta).
 func (s *State) Version() uint64 { return s.version.Load() }
 
+// Synced reports whether every reflector's initial LIST has landed. Consumers
+// that act on the snapshot's COMPLETENESS (the exporter prunes manifests absent
+// from it) must check this — a half-filled snapshot looks like mass deletion.
+func (s *State) Synced() bool { return s.synced.Load() >= int32(len(s.specs)) }
+
+// VMObjects returns deep copies of the full VirtualMachine objects in the given
+// namespaces — the exporter's input, replacing a per-tick SA LIST per project.
+// Copies, because reflector-owned objects must never escape to be mutated.
+func (s *State) VMObjects(namespaces []string) []kubevirtcorev1.VirtualMachine {
+	want := make(map[string]bool, len(namespaces))
+	for _, ns := range namespaces {
+		want[ns] = true
+	}
+	var out []kubevirtcorev1.VirtualMachine
+	for _, obj := range s.vms.List() {
+		vm, ok := obj.(*kubevirtcorev1.VirtualMachine)
+		if !ok || !want[vm.Namespace] {
+			continue
+		}
+		out = append(out, *vm.DeepCopy())
+	}
+	return out
+}
+
 // LiveVMs returns the current live state of every VM in the snapshot, keyed by
 // "namespace/name". A VM with no running VMI is present with a zero (stopped)
 // LiveVM; a VMI supplies phase/IP/node. Pure in-memory — no cluster call.

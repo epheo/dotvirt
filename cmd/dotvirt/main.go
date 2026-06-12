@@ -150,9 +150,9 @@ func run() error {
 		return clusterFactory.For(token)
 	}))
 
-	// Per-project running-branch export, on the SA identity. Topology comes from the
-	// snapshot; the authoritative VM objects are listed with the SA client.
-	exporter := export.New(saCluster, clusterSnapshot, resolver, repos, cfg.RunningBranch)
+	// Per-project running-branch export, on the SA identity. Topology AND the VM
+	// objects come from the snapshot — an export tick touches the cluster zero times.
+	exporter := export.New(clusterSnapshot, resolver, repos, cfg.RunningBranch)
 	go exporter.Run(ctx, cfg.ExportInterval)
 
 	if saArgo != nil {

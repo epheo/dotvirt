@@ -231,21 +231,6 @@ func contains(haystack []string, wanted ...string) bool {
 	return false
 }
 
-// ListVMObjects returns the VirtualMachine objects in the given namespaces, for
-// export to the running branch. Callers strip server-set fields before
-// serializing (see export.go).
-func (c *Client) ListVMObjects(ctx context.Context, namespaces []string) ([]kubevirtcorev1.VirtualMachine, error) {
-	var all []kubevirtcorev1.VirtualMachine
-	for _, ns := range namespaces {
-		vms, err := c.kubevirt.VirtualMachine(ns).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("list VMs in %s: %w", ns, err)
-		}
-		all = append(all, vms.Items...)
-	}
-	return all, nil
-}
-
 // VNCConn opens a VNC stream to a running VMI and returns it as a net.Conn
 // carrying the RFB protocol. The caller bridges it to the browser's noVNC
 // WebSocket. preserveSession=false so each connection is independent.
@@ -280,16 +265,20 @@ func (c *Client) ListEvents(ctx context.Context, namespace, name string) ([]mode
 // ListVMEvents returns recent VM/VMI Events across the given namespaces (the set
 // the caller may see), newest-first and capped — the dock's Events lane. Listed
 // per-namespace with this client's token, so cluster RBAC gates it and nothing
-// leaks across tenants.
+// leaks across tenants. Field selectors can't OR, so it's one selected LIST per
+// kind — still far cheaper than listing every event in a busy namespace (pod
+// churn dominates) and filtering here.
 func (c *Client) ListVMEvents(ctx context.Context, namespaces []string) ([]model.Event, error) {
 	out := []model.Event{}
 	for _, ns := range namespaces {
-		list, err := c.kube.CoreV1().Events(ns).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("list events in %s: %w", ns, err)
-		}
-		for i := range list.Items {
-			if isVMEvent(&list.Items[i]) {
+		for _, kind := range []string{"VirtualMachine", "VirtualMachineInstance"} {
+			list, err := c.kube.CoreV1().Events(ns).List(ctx, metav1.ListOptions{
+				FieldSelector: "involvedObject.kind=" + kind,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("list events in %s: %w", ns, err)
+			}
+			for i := range list.Items {
 				out = append(out, eventOf(&list.Items[i]))
 			}
 		}

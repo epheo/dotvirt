@@ -1,8 +1,9 @@
 // Package export keeps each project's running branch in sync with the live
-// cluster: it discovers projects (with dotvirt's SA), lists each project's VMs,
+// cluster: it reads projects and their VM objects from the SA-owned snapshot,
 // serializes them deterministically, and commits any change to that project's
 // repo's running branch. dotvirt owns these branches; users never edit them. All
-// work runs under the SA identity — export has no user context.
+// work runs under the SA identity — export has no user context — and a tick
+// touches the cluster zero times (the reflectors already hold the VM objects).
 package export
 
 import (
@@ -21,24 +22,22 @@ import (
 )
 
 // Exporter snapshots each project's live VM state onto that project's running
-// branch, using the SA cluster client + the per-project RepoSet.
+// branch, reading from the SA snapshot and writing via the per-project RepoSet.
 type Exporter struct {
-	saCluster *cluster.Client
-	state     *clusterstate.State // SA snapshot: the project topology to export
-	resolver  *project.Resolver
-	repos     *git.RepoSet
-	branch    string // running branch name (same across projects)
+	state    *clusterstate.State // SA snapshot: project topology + full VM objects
+	resolver *project.Resolver
+	repos    *git.RepoSet
+	branch   string // running branch name (same across projects)
 
 	// lastSig is the content signature of the last successful export per repo, so a
 	// tick whose live VM set is unchanged skips the (network) clone entirely.
 	lastSig map[string]string
 }
 
-// New builds an Exporter. saCluster is dotvirt's SA client (for the authoritative
-// VM objects); state is the SA snapshot whose project-labeled namespaces drive
-// which projects to export (no per-tick namespace fetch).
-func New(saCluster *cluster.Client, state *clusterstate.State, resolver *project.Resolver, repos *git.RepoSet, runningBranch string) *Exporter {
-	return &Exporter{saCluster: saCluster, state: state, resolver: resolver, repos: repos, branch: runningBranch, lastSig: map[string]string{}}
+// New builds an Exporter over the SA snapshot, whose project-labeled namespaces
+// drive which projects to export and whose VM store supplies the objects.
+func New(state *clusterstate.State, resolver *project.Resolver, repos *git.RepoSet, runningBranch string) *Exporter {
+	return &Exporter{state: state, resolver: resolver, repos: repos, branch: runningBranch, lastSig: map[string]string{}}
 }
 
 // Once exports every resolved project once: for each project with a repo, write
@@ -47,13 +46,20 @@ func New(saCluster *cluster.Client, state *clusterstate.State, resolver *project
 // running branches it committed an update to. Topology comes from the shared
 // snapshot with no visible-namespace filter (the SA export sees every project).
 func (e *Exporter) Once(ctx context.Context) (int, error) {
+	// Exporting prunes manifests absent from the snapshot, so a half-filled
+	// snapshot (reflectors still on their initial LIST) would read as mass VM
+	// deletion. Skip the tick; a stale running branch beats a wrong one.
+	if !e.state.Synced() {
+		log.Printf("export: snapshot not synced yet; skipping this tick")
+		return 0, nil
+	}
 	projects := e.resolver.Resolve(e.state.Namespaces(), nil)
 	committed := 0
 	for _, p := range projects {
 		if p.Repo == "" {
 			continue // unannotated/conflicting project: nothing to export to
 		}
-		ok, err := e.exportProject(ctx, p)
+		ok, err := e.exportProject(p)
 		if err != nil {
 			log.Printf("export %s: %v", p.Name, err)
 			continue
@@ -66,11 +72,8 @@ func (e *Exporter) Once(ctx context.Context) (int, error) {
 	return committed, nil
 }
 
-func (e *Exporter) exportProject(ctx context.Context, p project.ProjectInfo) (bool, error) {
-	vms, err := e.saCluster.ListVMObjects(ctx, p.Namespaces)
-	if err != nil {
-		return false, err
-	}
+func (e *Exporter) exportProject(p project.ProjectInfo) (bool, error) {
+	vms := e.state.VMObjects(p.Namespaces)
 	_, write, err := e.repos.Get(p.Repo)
 	if err != nil {
 		return false, err
