@@ -47,6 +47,16 @@ type Config struct {
 	// MetricsURL is the Prometheus/Thanos query API base URL backing the per-VM
 	// Performance tab; empty disables the tab. InsecureTLS also covers this client.
 	MetricsURL string
+	// MetricsCA is a PEM bundle to trust for MetricsURL — in-cluster, the mounted
+	// service-CA that signs thanos-querier's serving cert (so no -insecure-tls).
+	MetricsCA string
+
+	// Webhook: Forgejo pushes/PR events hit POST /api/webhooks/forge (HMAC-signed
+	// with WebhookSecret; empty disables the endpoint). PublicURL is dotvirt's
+	// externally reachable base (the Route), used to auto-register that webhook on
+	// every project repo; empty disables auto-registration.
+	WebhookSecret string
+	PublicURL     string
 
 	// AppSetPluginToken is the shared bearer the ArgoCD ApplicationSet plugin
 	// generator presents to dotvirt's /api/v1/getparams.execute endpoint, which
@@ -90,6 +100,9 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.ForgeToken, "forge-token", os.Getenv("DOTVIRT_FORGE_TOKEN"), "Forgejo API token")
 	fs.BoolVar(&c.InsecureTLS, "insecure-tls", envBool("DOTVIRT_INSECURE_TLS", false), "skip TLS verification for git+forge (dev only)")
 	fs.StringVar(&c.MetricsURL, "metrics-url", os.Getenv("DOTVIRT_METRICS_URL"), "Prometheus/Thanos query API base URL for the Performance tab (empty disables)")
+	fs.StringVar(&c.MetricsCA, "metrics-ca", os.Getenv("DOTVIRT_METRICS_CA"), "PEM CA bundle path to trust for -metrics-url (e.g. the mounted service-CA)")
+	fs.StringVar(&c.WebhookSecret, "webhook-secret", os.Getenv("DOTVIRT_WEBHOOK_SECRET"), "HMAC secret for the Forgejo webhook endpoint (empty disables it)")
+	fs.StringVar(&c.PublicURL, "public-url", os.Getenv("DOTVIRT_PUBLIC_URL"), "dotvirt's externally reachable base URL, for webhook auto-registration (empty disables)")
 	fs.StringVar(&c.AppSetPluginToken, "appset-plugin-token", os.Getenv("DOTVIRT_APPSET_PLUGIN_TOKEN"), "shared bearer for the ArgoCD ApplicationSet plugin-generator endpoint (empty disables it)")
 	fs.StringVar(&c.StaticDir, "static-dir", os.Getenv("DOTVIRT_STATIC_DIR"), "directory of the built SPA to serve at the same origin (empty = dev: SPA served by Vite)")
 	fs.StringVar(&c.SessionSecret, "session-secret", os.Getenv("DOTVIRT_SESSION_SECRET"), "HMAC key signing the session cookie (random if empty; sessions then drop on restart)")

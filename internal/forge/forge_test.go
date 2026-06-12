@@ -2,6 +2,7 @@ package forge
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -141,5 +142,41 @@ func writeJSON(t *testing.T, w io.Writer, v any) {
 	t.Helper()
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		t.Fatalf("encode response: %v", err)
+	}
+}
+
+// EnsureWebhook creates the hook only when no hook for the target URL exists.
+func TestEnsureWebhookIdempotent(t *testing.T) {
+	posts := 0
+	existing := `[]`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/hooks"):
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, existing)
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/hooks"):
+			posts++
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"id":1}`)
+		default:
+			t.Errorf("unexpected call: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewFactory(srv.URL, "tok", false).For("https://forge/o/r.git")
+	if err := c.EnsureWebhook("https://dotvirt/api/webhooks/forge", "s3cret"); err != nil {
+		t.Fatalf("EnsureWebhook (create): %v", err)
+	}
+	if posts != 1 {
+		t.Fatalf("want 1 create, got %d", posts)
+	}
+
+	existing = `[{"id":1,"config":{"url":"https://dotvirt/api/webhooks/forge"}}]`
+	if err := c.EnsureWebhook("https://dotvirt/api/webhooks/forge", "s3cret"); err != nil {
+		t.Fatalf("EnsureWebhook (existing): %v", err)
+	}
+	if posts != 1 {
+		t.Fatalf("existing hook must not be recreated; got %d creates", posts)
 	}
 }

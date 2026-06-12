@@ -1,0 +1,68 @@
+package api
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"net/http"
+)
+
+// The Forgejo webhook: push/PR events trigger an immediate fetch of that repo
+// plus a proposals refresh, so the UI repaints in webhook latency instead of
+// the next poll tick (and the poll interval can stretch to minutes). The
+// endpoint authenticates by HMAC signature, not a user session — it's exempted
+// in auth.isOpenPath and disabled entirely when no secret is configured.
+
+// handleForgeWebhook validates the HMAC-SHA256 signature Forgejo puts on every
+// delivery, pokes the named repo's poller, and nudges the proposals refresher
+// (a PR opening/merging doesn't necessarily move branch heads).
+func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.WebhookSecret == "" {
+		http.Error(w, "webhook not configured", http.StatusNotFound)
+		return
+	}
+	body, err := readAll(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Forgejo sends its own header; Gitea-lineage servers send X-Gitea-Signature.
+	sig := r.Header.Get("X-Forgejo-Signature")
+	if sig == "" {
+		sig = r.Header.Get("X-Gitea-Signature")
+	}
+	if !validSignature(body, sig, s.cfg.WebhookSecret) {
+		http.Error(w, "invalid signature", http.StatusForbidden)
+		return
+	}
+
+	var event struct {
+		Repository struct {
+			CloneURL string `json:"clone_url"`
+			HTMLURL  string `json:"html_url"`
+		} `json:"repository"`
+	}
+	_ = json.Unmarshal(body, &event)
+	// Projects annotate the https clone URL; try the payload's forms against the
+	// open-repo cache (an unknown repo is simply not being watched yet).
+	for _, u := range []string{event.Repository.CloneURL, event.Repository.HTMLURL, event.Repository.HTMLURL + ".git"} {
+		if u != "" && u != ".git" {
+			s.repos.Poke(u)
+		}
+	}
+	s.nudgeProposals()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// validSignature checks the hex HMAC-SHA256 of body against the delivery
+// signature in constant time.
+func validSignature(body []byte, sigHex, secret string) bool {
+	sig, err := hex.DecodeString(sigHex)
+	if err != nil || len(sig) == 0 {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	return hmac.Equal(sig, mac.Sum(nil))
+}

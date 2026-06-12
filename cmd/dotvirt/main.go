@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -114,13 +115,18 @@ func run() error {
 	coordinator := changeset.New(draftStore, repos, forgeFactory, resyncer,
 		cfg.BaseBranch, cfg.ProposedBranch, cfg.RunningBranch)
 
+	metricsClient, err := metrics.New(cfg.MetricsURL, cfg.MetricsCA, cfg.InsecureTLS)
+	if err != nil {
+		return err
+	}
+
 	server := api.NewServer(api.Deps{
 		ClusterFactory: clusterFactory,
 		State:          clusterSnapshot,
 		Drift:          driftCache,
 		Resolver:       resolver,
 		Repos:          repos,
-		Metrics:        metrics.New(cfg.MetricsURL, cfg.InsecureTLS),
+		Metrics:        metricsClient,
 		Draft:          coordinator,
 		Auth:           authenticator,
 		Config: api.Config{
@@ -128,6 +134,7 @@ func run() error {
 			AllowOrigin:       cfg.UIOrigin,
 			AppSetPluginToken: cfg.AppSetPluginToken,
 			StaticDir:         cfg.StaticDir,
+			WebhookSecret:     cfg.WebhookSecret,
 		},
 	})
 
@@ -159,6 +166,15 @@ func run() error {
 		saArgo.Watch(ctx, changed) // push on Application drift changes
 	}
 
+	// Webhook auto-registration: ensure every project repo delivers push/PR
+	// events to dotvirt's public URL, so updates arrive in webhook latency
+	// rather than the next poll tick. Idempotent per sweep; new projects are
+	// picked up by the periodic re-sweep.
+	if cfg.PublicURL != "" && cfg.WebhookSecret != "" && forgeFactory != nil {
+		target := strings.TrimRight(cfg.PublicURL, "/") + "/api/webhooks/forge"
+		go ensureWebhooks(ctx, clusterSnapshot, resolver, forgeFactory, target, cfg.WebhookSecret)
+	}
+
 	// Let the snapshot's initial LIST land before serving so the first inventory
 	// isn't empty — but bound the wait: a degraded cluster must not block startup,
 	// the snapshot fills in as reflectors sync and the hub pushes the update.
@@ -186,4 +202,36 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// ensureWebhooks sweeps the resolved projects and registers dotvirt's webhook
+// on each repo, at startup and on a slow ticker (new projects join the next
+// sweep). Failures are logged and retried next sweep — a forge hiccup must not
+// affect serving.
+func ensureWebhooks(ctx context.Context, state *clusterstate.State, resolver *project.Resolver, ff *forge.Factory, target, secret string) {
+	sweep := func() {
+		for _, p := range resolver.Resolve(state.Namespaces(), nil) {
+			if p.Repo == "" {
+				continue
+			}
+			fc := ff.For(p.Repo)
+			if fc == nil {
+				continue
+			}
+			if err := fc.EnsureWebhook(target, secret); err != nil {
+				log.Printf("webhook: ensure on %s: %v", p.Repo, err)
+			}
+		}
+	}
+	sweep()
+	t := time.NewTicker(10 * time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			sweep()
+		}
+	}
 }

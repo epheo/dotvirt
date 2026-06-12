@@ -8,11 +8,13 @@ package metrics
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,14 +47,29 @@ type Client struct {
 }
 
 // New builds a Client for the query API at baseURL (e.g. the thanos-querier
-// Route). insecure skips TLS verification for a self-signed dev Route. Returns nil
-// when baseURL is empty — the API treats a nil client as "Performance disabled".
-func New(baseURL string, insecure bool) *Client {
+// Route, or the in-cluster service). caPath, when set, is a PEM bundle to trust
+// for that endpoint — in-cluster, the mounted service-CA that signs
+// thanos-querier's serving cert, so the connection needn't be insecure.
+// insecure skips TLS verification instead (self-signed dev Route). Returns
+// (nil, nil) when baseURL is empty — the API treats a nil client as
+// "Performance disabled".
+func New(baseURL, caPath string, insecure bool) (*Client, error) {
 	if baseURL == "" {
-		return nil
+		return nil, nil
 	}
 	tr := http.DefaultTransport.(*http.Transport).Clone()
-	if insecure {
+	switch {
+	case caPath != "":
+		pem, err := os.ReadFile(caPath)
+		if err != nil {
+			return nil, fmt.Errorf("metrics CA bundle: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("metrics CA bundle %s: no certificates found", caPath)
+		}
+		tr.TLSClientConfig = &tls.Config{RootCAs: pool}
+	case insecure:
 		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
 	return &Client{
@@ -63,7 +80,7 @@ func New(baseURL string, insecure bool) *Client {
 		cluster:   ttlcache.New[model.ClusterSummary](clusterTTL),
 		scope:     ttlcache.New[model.VMMetrics](clusterTTL),
 		alerts:    ttlcache.New[[]model.Alert](clusterTTL),
-	}
+	}, nil
 }
 
 // rangeSpec maps a UI range to a window + sample step, mirroring vCenter's tiers

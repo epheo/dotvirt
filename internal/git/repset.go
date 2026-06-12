@@ -33,6 +33,7 @@ type RepoSet struct {
 type repoPair struct {
 	read  *Repo
 	write *WriteRepo
+	poke  chan struct{} // out-of-cycle fetch trigger (webhook), coalesced
 }
 
 // NewRepoSet builds a RepoSet. forgeUser/forgeToken authenticate every repo's
@@ -80,19 +81,48 @@ func (s *RepoSet) Get(repoURL string) (*Repo, *WriteRepo, error) {
 		s.mu.Unlock()
 		return p.read, p.write, nil // someone else won the race; use theirs
 	}
-	pair := &repoPair{read: read, write: write}
+	pair := &repoPair{read: read, write: write, poke: make(chan struct{}, 1)}
 	s.cache[repoURL] = pair
 	s.mu.Unlock()
 
-	go s.poll(read)
+	go s.poll(pair)
 	return pair.read, pair.write, nil
 }
 
-// poll fetches repo on an interval and signals changed when its heads move. Like
-// main's former pollGit but one goroutine per open repo; HeadsSignature is the
-// single network fetch (reads never fetch).
-func (s *RepoSet) poll(repo *Repo) {
+// Poke fetches repoURL's heads now instead of waiting for the next poll tick —
+// the webhook's instant-update path. A repo not opened yet is ignored (the
+// regular resolve→Get path will open and poll it). Nil-safe like the other
+// optional collaborators.
+func (s *RepoSet) Poke(repoURL string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	p := s.cache[repoURL]
+	s.mu.Unlock()
+	if p == nil {
+		return
+	}
+	select {
+	case p.poke <- struct{}{}:
+	default: // a poke is already pending
+	}
+}
+
+// poll fetches repo on an interval — or immediately on a poke — and signals
+// changed when its heads move. Like main's former pollGit but one goroutine per
+// open repo; HeadsSignature is the single network fetch (reads never fetch).
+func (s *RepoSet) poll(p *repoPair) {
 	last := ""
+	check := func() {
+		sig, err := p.read.HeadsSignature()
+		if err != nil || sig == last {
+			return
+		}
+		last = sig
+		signal(s.ctx, s.changed)
+		signal(s.ctx, s.gitChanged)
+	}
 	t := time.NewTicker(s.interval)
 	defer t.Stop()
 	for {
@@ -100,15 +130,9 @@ func (s *RepoSet) poll(repo *Repo) {
 		case <-s.ctx.Done():
 			return
 		case <-t.C:
-			sig, err := repo.HeadsSignature()
-			if err != nil {
-				continue
-			}
-			if sig != last {
-				last = sig
-				signal(s.ctx, s.changed)
-				signal(s.ctx, s.gitChanged)
-			}
+			check()
+		case <-p.poke:
+			check()
 		}
 	}
 }

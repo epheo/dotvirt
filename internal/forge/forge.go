@@ -135,6 +135,39 @@ func (c *Client) ReopenPR(number int) (PR, error) {
 	return pr, nil
 }
 
+// hook is a repo webhook as returned by Forgejo (subset).
+type hook struct {
+	ID     int               `json:"id"`
+	Config map[string]string `json:"config"`
+}
+
+// EnsureWebhook registers a push+pull_request webhook delivering to targetURL
+// (HMAC-signed with secret) on the client's repo, if none exists yet for that
+// URL — idempotent, so it can run on every sweep. The "gitea" hook type is the
+// Forgejo-compatible one.
+func (c *Client) EnsureWebhook(targetURL, secret string) error {
+	var hooks []hook
+	if err := c.do("GET", c.repoPath("/hooks"), nil, &hooks); err != nil {
+		return err
+	}
+	for _, h := range hooks {
+		if h.Config["url"] == targetURL {
+			return nil
+		}
+	}
+	payload := map[string]any{
+		"type":   "gitea",
+		"active": true,
+		"events": []string{"push", "pull_request"},
+		"config": map[string]string{
+			"url":          targetURL,
+			"content_type": "json",
+			"secret":       secret,
+		},
+	}
+	return c.do("POST", c.repoPath("/hooks"), payload, nil)
+}
+
 // CompareURL is the browser URL to manually open a PR for head→base, used when
 // the forge API isn't configured.
 func (c *Client) CompareURL(head, base string) string {

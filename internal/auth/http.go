@@ -95,6 +95,10 @@ func isOpenPath(path string) bool {
 		// The ArgoCD ApplicationSet plugin generator authenticates with its own
 		// shared token (checked in the handler), not a user session/TokenReview.
 		return true
+	case "/api/webhooks/forge":
+		// Forgejo deliveries authenticate by HMAC signature (checked in the
+		// handler); the endpoint 404s when no webhook secret is configured.
+		return true
 	}
 	return false
 }

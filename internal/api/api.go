@@ -63,6 +63,7 @@ type Config struct {
 	AllowOrigin       string // CORS origin for the SvelteKit frontend; empty disables CORS
 	AppSetPluginToken string // bearer for the ArgoCD ApplicationSet plugin endpoint; empty disables it
 	StaticDir         string // built SPA dir to serve at the same origin; empty = dev (SPA on Vite)
+	WebhookSecret     string // HMAC secret for the Forgejo webhook endpoint; empty disables it
 }
 
 // visibleTTL bounds how long a token's visible-namespace set is reused. The set
@@ -167,6 +168,9 @@ func (s *Server) Handler() http.Handler {
 	// ArgoCD ApplicationSet plugin generator (auth: its own shared token, not a
 	// user session — exempted in auth.isOpenPath). Emits projects from labels.
 	mux.HandleFunc("POST /api/v1/getparams.execute", s.handleAppSetPlugin)
+	// Forgejo webhook (auth: HMAC delivery signature, not a user session —
+	// exempted in auth.isOpenPath). Pokes the repo's poller for instant updates.
+	mux.HandleFunc("POST /api/webhooks/forge", s.handleForgeWebhook)
 	mux.HandleFunc("GET /api/proposals", s.handleProposals)
 	mux.HandleFunc("GET /api/events", s.handleAllEvents)
 	mux.HandleFunc("GET /api/permissions", s.handlePermissions)

@@ -12,6 +12,16 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 )
 
+// mustNew builds a metrics client for tests (no CA, no insecure).
+func mustNew(t *testing.T, url string) *Client {
+	t.Helper()
+	c, err := New(url, "", false)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return c
+}
+
 func TestPromDur(t *testing.T) {
 	for d, want := range map[time.Duration]string{
 		2 * time.Minute:  "2m",
@@ -52,7 +62,7 @@ func TestVMMetricsAlignsSeries(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m, err := New(srv.URL, false).VMMetrics(context.Background(), "tok", "ns", "vm", "1h")
+	m, err := mustNew(t, srv.URL).VMMetrics(context.Background(), "tok", "ns", "vm", "1h")
 	if err != nil {
 		t.Fatalf("VMMetrics: %v", err)
 	}
@@ -107,7 +117,7 @@ func TestVMMetricsFansOutPerLabel(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m, err := New(srv.URL, false).VMMetrics(context.Background(), "tok", "ns", "vm", "1h")
+	m, err := mustNew(t, srv.URL).VMMetrics(context.Background(), "tok", "ns", "vm", "1h")
 	if err != nil {
 		t.Fatalf("VMMetrics: %v", err)
 	}
@@ -156,7 +166,7 @@ func TestScopeMetricsNamesAndAlignsSeries(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m, err := New(srv.URL, false).ScopeMetrics(context.Background(), "tok", []string{"a", "b"}, "", "1h")
+	m, err := mustNew(t, srv.URL).ScopeMetrics(context.Background(), "tok", []string{"a", "b"}, "", "1h")
 	if err != nil {
 		t.Fatalf("ScopeMetrics: %v", err)
 	}
@@ -201,7 +211,7 @@ func TestAlertsCollapsesAndSorts(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	alerts, err := New(srv.URL, false).Alerts(context.Background(), "tok", []string{"a", "b"})
+	alerts, err := mustNew(t, srv.URL).Alerts(context.Background(), "tok", []string{"a", "b"})
 	if err != nil {
 		t.Fatalf("Alerts: %v", err)
 	}
@@ -227,7 +237,7 @@ func TestVectorAndConsumers(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	vec := New(srv.URL, false).vector(context.Background(), "tok", "q")
+	vec := mustNew(t, srv.URL).vector(context.Background(), "tok", "q")
 	if len(vec) != 2 {
 		t.Fatalf("vector parsed %d series, want 2", len(vec))
 	}
