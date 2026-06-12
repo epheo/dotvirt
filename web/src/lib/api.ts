@@ -247,6 +247,14 @@ export interface ClusterSummary {
 	topCpu: ConsumerVM[];
 	topMemory: ConsumerVM[];
 }
+export interface Snapshot {
+	name: string;
+	created?: string;
+	phase?: string; // InProgress | Succeeded | Failed
+	readyToUse: boolean;
+	indications?: string[]; // Online | GuestAgent | NoGuestAgent
+	error?: string;
+}
 export interface VMEvent {
 	namespace?: string;
 	name?: string;
@@ -316,6 +324,18 @@ export const api = {
 			`/api/vms/${enc(namespace)}/${enc(name)}/resync`,
 			{}
 		),
+
+	// Snapshots (imperative, RBAC-gated; not git-managed).
+	snapshots: (namespace: string, name: string) =>
+		get<Snapshot[]>(`/api/vms/${enc(namespace)}/${enc(name)}/snapshots`),
+	takeSnapshot: (namespace: string, name: string, snapName?: string) =>
+		post<{ name: string }>(`/api/vms/${enc(namespace)}/${enc(name)}/snapshots`, {
+			name: snapName ?? ''
+		}),
+	restoreSnapshot: (namespace: string, name: string, snap: string) =>
+		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/snapshots/${enc(snap)}/restore`, {}),
+	deleteSnapshot: (namespace: string, name: string, snap: string) =>
+		del(`/api/vms/${enc(namespace)}/${enc(name)}/snapshots/${enc(snap)}`),
 
 	// Imperative runtime ops (RBAC-gated; don't touch the git-managed spec).
 	restart: (namespace: string, name: string) =>

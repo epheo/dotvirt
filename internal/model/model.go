@@ -293,6 +293,17 @@ type Event struct {
 	LastSeen  string `json:"lastSeen,omitempty"` // RFC3339
 }
 
+// Snapshot is a VirtualMachineSnapshot for a VM — the Snapshots tab. KubeVirt
+// snapshots are a flat list (no vCenter-style parent/child tree).
+type Snapshot struct {
+	Name        string   `json:"name"`
+	Created     string   `json:"created,omitempty"` // RFC3339
+	Phase       string   `json:"phase,omitempty"`   // InProgress | Succeeded | Failed
+	ReadyToUse  bool     `json:"readyToUse"`
+	Indications []string `json:"indications,omitempty"` // Online | GuestAgent | NoGuestAgent
+	Error       string   `json:"error,omitempty"`
+}
+
 // ResyncResult reports which ArgoCD Application was synced.
 type ResyncResult struct {
 	Application string `json:"application"`
