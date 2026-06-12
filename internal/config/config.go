@@ -44,6 +44,10 @@ type Config struct {
 
 	InsecureTLS bool // skip TLS verification for git + forge (dev, e.g. self-signed Route)
 
+	// MetricsURL is the Prometheus/Thanos query API base URL backing the per-VM
+	// Performance tab; empty disables the tab. InsecureTLS also covers this client.
+	MetricsURL string
+
 	// Auth
 	SessionSecret string // HMAC key signing the session cookie; random if empty
 
@@ -75,6 +79,7 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.ForgeURL, "forge-url", os.Getenv("DOTVIRT_FORGE_URL"), "Forgejo base URL (empty = push-only, no PR)")
 	fs.StringVar(&c.ForgeToken, "forge-token", os.Getenv("DOTVIRT_FORGE_TOKEN"), "Forgejo API token")
 	fs.BoolVar(&c.InsecureTLS, "insecure-tls", envBool("DOTVIRT_INSECURE_TLS", false), "skip TLS verification for git+forge (dev only)")
+	fs.StringVar(&c.MetricsURL, "metrics-url", os.Getenv("DOTVIRT_METRICS_URL"), "Prometheus/Thanos query API base URL for the Performance tab (empty disables)")
 	fs.StringVar(&c.SessionSecret, "session-secret", os.Getenv("DOTVIRT_SESSION_SECRET"), "HMAC key signing the session cookie (random if empty; sessions then drop on restart)")
 
 	fs.BoolVar(&c.ArgoEnabled, "argo", envBool("DOTVIRT_ARGO", false), "enable ArgoCD drift reads")

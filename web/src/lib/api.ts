@@ -200,6 +200,22 @@ export interface Commit {
 	when: string; // RFC3339
 	merge?: boolean; // a merge commit (not directly revertable)
 }
+export interface MetricSeries {
+	name: string;
+	values: (number | null)[]; // aligned to the chart's times; null = gap
+}
+export interface MetricChart {
+	key: string;
+	title: string;
+	unit: string; // '%' | 'bytes' | 'Bps' | 'ms'
+	times: number[]; // unix seconds, shared x-axis
+	series: MetricSeries[];
+}
+export interface VMMetrics {
+	range: string;
+	stepSec: number;
+	charts: MetricChart[];
+}
 export interface VMEvent {
 	namespace?: string;
 	name?: string;
@@ -250,6 +266,8 @@ export const api = {
 	events: (namespace: string, name: string) =>
 		get<VMEvent[]>(`/api/vms/${enc(namespace)}/${enc(name)}/events`),
 	allEvents: () => get<VMEvent[]>('/api/events'),
+	metrics: (namespace: string, name: string, range: string) =>
+		get<VMMetrics>(`/api/vms/${enc(namespace)}/${enc(name)}/metrics?range=${enc(range)}`),
 	adopt: (namespace: string, name: string) =>
 		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/adopt`, {}),
 	resync: (namespace: string, name: string) =>

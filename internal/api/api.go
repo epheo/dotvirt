@@ -18,6 +18,7 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/git"
+	"github.com/epheo/dotvirt/internal/metrics"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/ttlcache"
@@ -82,6 +83,7 @@ type Server struct {
 	repos     *git.RepoSet
 	visible   *ttlcache.Cache[map[string]bool]  // per-token visible-namespace set
 	proposals *ttlcache.Cache[[]model.Proposal] // per-token open-PR set (streamed)
+	metrics   *metrics.Client                   // Prometheus/Thanos for the Performance tab; nil disables it
 	draft     Draft
 	auth      *auth.Authenticator // nil leaves the API open (dev)
 	stream    StreamHandler
@@ -96,6 +98,7 @@ type Deps struct {
 	Drift          *argo.DriftCache // shared, TTL-cached SA drift; nil when Argo disabled
 	Resolver       *project.Resolver
 	Repos          *git.RepoSet
+	Metrics        *metrics.Client // Prometheus/Thanos query client; nil disables the Performance tab
 	Draft          Draft
 	Auth           *auth.Authenticator
 	Stream         StreamHandler
@@ -113,6 +116,7 @@ func NewServer(d Deps) *Server {
 		repos:     d.Repos,
 		visible:   ttlcache.New[map[string]bool](visibleTTL),
 		proposals: ttlcache.New[[]model.Proposal](proposalsTTL),
+		metrics:   d.Metrics,
 		draft:     d.Draft,
 		auth:      d.Auth,
 		stream:    d.Stream,
@@ -167,6 +171,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/draft/propose", s.handlePropose)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/drift", s.handleDrift)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/events", s.handleEvents)
+	mux.HandleFunc("GET /api/vms/{namespace}/{name}/metrics", s.handleMetrics)
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/adopt", s.handleAdopt)
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/resync", s.handleResync)
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/restart", s.handleRestart)

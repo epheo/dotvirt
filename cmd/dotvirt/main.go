@@ -25,6 +25,7 @@ import (
 	"github.com/epheo/dotvirt/internal/export"
 	"github.com/epheo/dotvirt/internal/forge"
 	"github.com/epheo/dotvirt/internal/git"
+	"github.com/epheo/dotvirt/internal/metrics"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/stream"
 )
@@ -113,6 +114,7 @@ func run() error {
 		Drift:          driftCache,
 		Resolver:       resolver,
 		Repos:          repos,
+		Metrics:        metrics.New(cfg.MetricsURL, cfg.InsecureTLS),
 		Draft:          coordinator,
 		Auth:           authenticator,
 		Config:         api.Config{BaseBranch: cfg.BaseBranch, AllowOrigin: cfg.UIOrigin},

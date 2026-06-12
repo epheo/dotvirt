@@ -5,6 +5,7 @@
 	import ConfirmDelete from './ConfirmDelete.svelte';
 	import Console from './Console.svelte';
 	import EditSettings from './EditSettings.svelte';
+	import Performance from './Performance.svelte';
 	import PowerDot from './PowerDot.svelte';
 	import StagedBadge from './StagedBadge.svelte';
 	import SyncBadge from './SyncBadge.svelte';
@@ -23,7 +24,7 @@
 		onstagedopen?: () => void;
 	} = $props();
 
-	type Tab = 'summary' | 'monitor' | 'console';
+	type Tab = 'summary' | 'monitor' | 'performance' | 'console';
 	let tab = $state<Tab>('summary');
 	let editing = $state(false);
 
@@ -250,7 +251,7 @@
 				</div>
 			</div>
 			<nav class="flex gap-1 text-sm">
-				{#each ['summary', 'monitor', 'console'] as const as t (t)}
+				{#each ['summary', 'monitor', 'performance', 'console'] as const as t (t)}
 					<button
 						class="border-b-2 px-3 py-1.5 capitalize {tab === t
 							? 'border-blue-600 text-blue-700'
@@ -473,6 +474,10 @@
 						</tbody>
 					</table>
 				{/if}
+			{:else if tab === 'performance'}
+				{#key `${vm.namespace}/${vm.name}`}
+					<Performance {vm} />
+				{/key}
 			{:else}
 				{#key `${vm.namespace}/${vm.name}`}
 					<Console {vm} />

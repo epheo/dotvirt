@@ -242,6 +242,23 @@ func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	respond(w, result, err)
 }
 
+// handleMetrics returns a VM's performance time-series (the Performance tab),
+// queried from the configured Prometheus/Thanos endpoint under the caller's token —
+// so the metrics backend's own RBAC gates which namespaces' data is returned.
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if s.metrics == nil {
+		http.Error(w, "metrics not configured", http.StatusServiceUnavailable)
+		return
+	}
+	ns, name := r.PathValue("namespace"), r.PathValue("name")
+	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	if !ok {
+		return
+	}
+	m, err := s.metrics.VMMetrics(r.Context(), sc.id.Token, ns, name, r.URL.Query().Get("range"))
+	respond(w, m, err)
+}
+
 // handleProposals lists the caller's open PRs across their visible projects — the
 // same set the live inventory now carries; kept as a standalone read for parity.
 func (s *Server) handleProposals(w http.ResponseWriter, r *http.Request) {

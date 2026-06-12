@@ -203,6 +203,33 @@ type Commit struct {
 	Merge     bool   `json:"merge,omitempty"` // a merge commit (not directly revertable)
 }
 
+// --- Performance metrics (the VM Performance tab) ---
+
+// MetricSeries is one line in a chart: a value per timestamp in the parent
+// MetricChart's Times grid (nil = a gap, no sample at that time).
+type MetricSeries struct {
+	Name   string     `json:"name"`
+	Values []*float64 `json:"values"`
+}
+
+// MetricChart is one performance chart: a shared time axis plus its series, with a
+// unit hint the UI formats by ("%", "bytes", "Bps", "ms").
+type MetricChart struct {
+	Key    string         `json:"key"`
+	Title  string         `json:"title"`
+	Unit   string         `json:"unit"`
+	Times  []int64        `json:"times"` // unix seconds, the shared x-axis
+	Series []MetricSeries `json:"series"`
+}
+
+// VMMetrics is a VM's performance time-series for one range — several charts built
+// from KubeVirt's kubevirt_vmi_* Prometheus metrics, shaped for direct charting.
+type VMMetrics struct {
+	Range   string        `json:"range"`
+	StepSec int           `json:"stepSec"`
+	Charts  []MetricChart `json:"charts"`
+}
+
 // Event is a Kubernetes Event for a VM (or its VMI), shown in the Monitor tab and
 // the dock's Events lane (which uses Namespace/Name to label which VM it's about).
 type Event struct {
