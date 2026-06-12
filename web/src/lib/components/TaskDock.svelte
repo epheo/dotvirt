@@ -64,7 +64,7 @@
 	}
 
 	type Task = {
-		kind: 'staged' | 'pr' | 'drift' | 'action';
+		kind: 'staged' | 'pr' | 'drift' | 'action' | 'migration';
 		verb: string;
 		namespace: string;
 		name: string;
@@ -73,14 +73,49 @@
 		by: string;
 		project: string;
 		url: string;
-		ok?: boolean; // for 'action' rows: did the request succeed
+		ok?: boolean; // for 'action'/'migration' rows: success
 		at?: number; // for 'action' rows: timestamp (keeps keys unique)
+		active?: boolean; // for 'migration' rows: still moving
 	};
 
-	// One unified feed ordered by lifecycle stage, not timestamp: staged changes
-	// (the draft) → open PRs (proposed) → standing drift (cluster ≠ git).
+	// One unified feed ordered by lifecycle stage, not timestamp: live migrations →
+	// runtime ops → staged changes (the draft) → open PRs (proposed) → standing
+	// drift (cluster ≠ git).
 	const tasks = $derived.by<Task[]>(() => {
 		const out: Task[] = [];
+		// Live node-to-node moves (vCenter's vMotion rows) — streamed off the VMI's
+		// migration state; finished ones linger for a short window.
+		const migrationLingerMs = 15 * 60 * 1000;
+		if (inventory) {
+			for (const proj of inventory.projects)
+				for (const ns of proj.namespaces)
+					for (const vm of ns.vms) {
+						const m = vm.migration;
+						if (!m) continue;
+						const active = !m.completed && !m.failed;
+						const endedRecently = m.endedAt
+							? Date.now() - new Date(m.endedAt).getTime() < migrationLingerMs
+							: false;
+						if (!active && !endedRecently) continue;
+						out.push({
+							kind: 'migration',
+							verb: 'Live-migration',
+							namespace: vm.namespace,
+							name: vm.name,
+							prTitle: '',
+							status: active
+								? `${m.sourceNode ?? '?'} → ${m.targetNode ?? '?'}${m.startedAt ? ` · ${age(m.startedAt)}` : ''}`
+								: m.failed
+									? 'Failed'
+									: `Migrated to ${m.targetNode ?? '?'}`,
+							by: '—',
+							project: proj.name,
+							url: '',
+							ok: !m.failed,
+							active
+						});
+					}
+		}
 		// Imperative runtime ops the user just triggered (most recent first).
 		for (const a of actions) {
 			out.push({
@@ -145,30 +180,50 @@
 		return out;
 	});
 
-	const alarms = $derived(tasks.filter((t) => t.kind === 'drift').length);
+	const alarms = $derived(
+		tasks.filter((t) => t.kind === 'drift' || (t.kind === 'migration' && !t.ok)).length
+	);
 
 	const dotClass = (t: Task) =>
 		t.kind === 'drift'
 			? 'bg-amber-500'
-			: t.kind === 'pr'
-				? 'bg-emerald-500'
-				: t.kind === 'action'
-					? t.ok
+			: t.kind === 'migration'
+				? t.active
+					? 'animate-pulse bg-blue-500'
+					: t.ok
 						? 'bg-emerald-500'
 						: 'bg-red-500'
-					: 'bg-blue-500';
+				: t.kind === 'pr'
+					? 'bg-emerald-500'
+					: t.kind === 'action'
+						? t.ok
+							? 'bg-emerald-500'
+							: 'bg-red-500'
+						: 'bg-blue-500';
 	const textClass = (t: Task) =>
 		t.kind === 'drift'
 			? 'text-amber-700'
-			: t.kind === 'pr'
-				? 'text-emerald-700'
-				: t.kind === 'action'
-					? t.ok
+			: t.kind === 'migration'
+				? t.active
+					? 'text-blue-700'
+					: t.ok
 						? 'text-emerald-700'
 						: 'text-red-700'
-					: 'text-slate-600';
+				: t.kind === 'pr'
+					? 'text-emerald-700'
+					: t.kind === 'action'
+						? t.ok
+							? 'text-emerald-700'
+							: 'text-red-700'
+						: 'text-slate-600';
 	const rowClass = (t: Task) =>
-		t.kind === 'drift' ? 'bg-amber-50/40' : t.kind === 'pr' ? 'bg-emerald-50/30' : '';
+		t.kind === 'drift'
+			? 'bg-amber-50/40'
+			: t.kind === 'migration' && !t.ok
+				? 'bg-red-50/40'
+				: t.kind === 'pr'
+					? 'bg-emerald-50/30'
+					: '';
 
 	// Row click: open the PR for proposed rows, else focus the target VM's detail.
 	function activate(t: Task) {

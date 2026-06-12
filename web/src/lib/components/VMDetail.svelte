@@ -328,6 +328,18 @@
 			</nav>
 		</div>
 
+		{#if vm.migration && !vm.migration.completed && !vm.migration.failed}
+			<div
+				class="flex items-center gap-2 border-b border-blue-200 bg-blue-50 px-4 py-1.5 text-xs text-blue-700"
+			>
+				<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500"></span>
+				Live-migrating{#if vm.migration.sourceNode}&nbsp;from {vm.migration.sourceNode}{/if}
+				to {vm.migration.targetNode || '…'}{#if elapsed(vm.migration.startedAt)}&nbsp;· started {elapsed(
+						vm.migration.startedAt
+					)} ago{/if}
+			</div>
+		{/if}
+
 		{#if runtimeMsg}
 			<div
 				class="border-b px-4 py-1.5 text-xs {runtimeOk

@@ -38,6 +38,7 @@ export interface VM {
 	os?: string; // guest-agent OS, e.g. "Fedora Linux 40 (Cloud Edition)"
 	memoryActual?: string; // current guest memory (hotplug-aware)
 	startedAt?: string; // RFC3339; VMI entered Running (for uptime)
+	migration?: Migration; // live (or last) node-to-node move
 	sync: SyncStatus;
 	health?: string;
 }
@@ -264,6 +265,16 @@ export interface VMEvent {
 	count?: number;
 	object: string; // VirtualMachine | VirtualMachineInstance
 	lastSeen?: string;
+}
+
+// A VM's live (or last) node-to-node move; active while neither flag is set.
+export interface Migration {
+	sourceNode?: string;
+	targetNode?: string;
+	startedAt?: string;
+	endedAt?: string;
+	completed?: boolean;
+	failed?: boolean;
 }
 
 // The caller's effective capabilities in one namespace (the Permissions tab).

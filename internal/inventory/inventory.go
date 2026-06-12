@@ -85,6 +85,20 @@ func enrich(vm *model.VM, in Inputs) {
 		if !s.StartedAt.IsZero() {
 			vm.StartedAt = s.StartedAt.UTC().Format(time.RFC3339)
 		}
+		if m := s.Migration; m != nil {
+			vm.Migration = &model.Migration{
+				SourceNode: m.SourceNode,
+				TargetNode: m.TargetNode,
+				Completed:  m.Completed,
+				Failed:     m.Failed,
+			}
+			if !m.StartedAt.IsZero() {
+				vm.Migration.StartedAt = m.StartedAt.UTC().Format(time.RFC3339)
+			}
+			if !m.EndedAt.IsZero() {
+				vm.Migration.EndedAt = m.EndedAt.UTC().Format(time.RFC3339)
+			}
+		}
 	}
 	if in.Drift != nil { // nil = Argo not wired; non-nil = configured (absent VM is NotTracked)
 		if d, ok := in.Drift[k]; ok {

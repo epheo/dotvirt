@@ -58,9 +58,24 @@ type VM struct {
 	MemoryActual string   `json:"memoryActual,omitempty"` // current guest memory (hotplug-aware)
 	StartedAt    string   `json:"startedAt,omitempty"`    // RFC3339; VMI entered Running (for uptime)
 
+	// Migration is the live (or last) node-to-node move — vCenter's vMotion
+	// progress, read from the VMI's migration state. Nil when never migrated.
+	Migration *Migration `json:"migration,omitempty"`
+
 	// From ArgoCD, when enabled.
 	Sync   SyncStatus `json:"sync"`
 	Health string     `json:"health,omitempty"`
+}
+
+// Migration mirrors the VMI's migration state. Active while neither Completed
+// nor Failed is set.
+type Migration struct {
+	SourceNode string `json:"sourceNode,omitempty"`
+	TargetNode string `json:"targetNode,omitempty"`
+	StartedAt  string `json:"startedAt,omitempty"` // RFC3339
+	EndedAt    string `json:"endedAt,omitempty"`   // RFC3339
+	Completed  bool   `json:"completed,omitempty"`
+	Failed     bool   `json:"failed,omitempty"`
 }
 
 // Disk is a disk device on the VM (from the template).

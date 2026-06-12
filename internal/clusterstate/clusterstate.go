@@ -49,6 +49,22 @@ type LiveVM struct {
 
 	Paused bool // VMI Paused condition is true (phase stays Running while paused)
 	Ready  bool
+
+	// Migration mirrors the VMI's MigrationState when one exists: the live (or
+	// just-finished) node-to-node move. KubeVirt keeps the last migration's state
+	// on the VMI, so a nil check distinguishes "never migrated" from "idle".
+	Migration *Migration
+}
+
+// Migration is a VM's node-to-node move — vCenter's vMotion progress. Active
+// while neither Completed nor Failed is set.
+type Migration struct {
+	SourceNode string
+	TargetNode string
+	StartedAt  time.Time
+	EndedAt    time.Time
+	Completed  bool
+	Failed     bool
 }
 
 // State is the SA-maintained snapshot. Build with New, start with Run; reads
@@ -227,6 +243,21 @@ func liveFromVMI(vmi *kubevirtcorev1.VirtualMachineInstance) LiveVM {
 		case kubevirtcorev1.VirtualMachineInstancePaused:
 			live.Paused = cond.Status == corev1.ConditionTrue
 		}
+	}
+	if ms := s.MigrationState; ms != nil {
+		m := &Migration{
+			SourceNode: ms.SourceNode,
+			TargetNode: ms.TargetNode,
+			Completed:  ms.Completed,
+			Failed:     ms.Failed,
+		}
+		if ms.StartTimestamp != nil {
+			m.StartedAt = ms.StartTimestamp.Time
+		}
+		if ms.EndTimestamp != nil {
+			m.EndedAt = ms.EndTimestamp.Time
+		}
+		live.Migration = m
 	}
 	return live
 }
