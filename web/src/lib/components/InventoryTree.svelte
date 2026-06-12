@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { ChevronDown, ChevronRight, Folder, Layers, LayoutGrid } from 'lucide-svelte';
-	import type { Inventory, Project, ProjectNamespace, VM } from '$lib/api';
+	import { ChevronDown, ChevronRight, Folder, Layers, LayoutGrid, Pencil, Trash2 } from 'lucide-svelte';
+	import type { DraftItem, Inventory, Project, ProjectNamespace, VM } from '$lib/api';
 	import PowerDot from './PowerDot.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 
@@ -13,12 +13,14 @@
 		inventory,
 		selected,
 		scope,
+		staged,
 		onselect,
 		onscope
 	}: {
 		inventory: Inventory;
 		selected: VM | null;
 		scope: Scope;
+		staged: Map<string, DraftItem>;
 		onselect: (vm: VM) => void;
 		onscope: (s: Scope) => void;
 	} = $props();
@@ -115,14 +117,32 @@
 
 						{#if !collapsed[nid]}
 							{#each ns.vms as vm (vm.name)}
+								{@const sc = staged.get(vm.namespace + '/' + vm.name)}
 								<button
 									class="flex w-full items-center gap-2 py-1 pr-2 pl-12 text-left hover:bg-blue-50
 										{isSelected(vm) ? 'bg-blue-100 hover:bg-blue-100' : ''}"
 									onclick={() => onselect(vm)}
 								>
 									<PowerDot power={vm.power} paused={vm.paused} />
-									<span class="truncate text-slate-700">{vm.name}</span>
-									<span class="ml-auto"><SyncBadge sync={vm.sync} compact /></span>
+									<span
+										class="truncate {sc?.kind === 'delete' ? 'text-slate-400 line-through' : 'text-slate-700'}"
+										>{vm.name}</span
+									>
+									<span class="ml-auto">
+										{#if sc}
+											<span
+												class="inline-flex items-center rounded px-1 text-[10px] font-medium {sc.kind ===
+												'delete'
+													? 'bg-red-100 text-red-700'
+													: 'bg-blue-100 text-blue-700'}"
+												title="Staged {sc.kind}"
+											>
+												{#if sc.kind === 'delete'}<Trash2 size={10} />{:else}<Pencil size={10} />{/if}
+											</span>
+										{:else}
+											<SyncBadge sync={vm.sync} compact />
+										{/if}
+									</span>
 								</button>
 							{/each}
 							{#if ns.vms.length === 0}

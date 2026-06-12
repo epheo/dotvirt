@@ -1,21 +1,26 @@
 <script lang="ts">
 	import { Activity, ChevronDown, ChevronRight, Cpu, HardDrive, MemoryStick, Pencil, Trash2 } from 'lucide-svelte';
-	import { api, type Change, type VM, type VMEvent } from '$lib/api';
+	import { api, type Change, type DraftItem, type VM, type VMEvent } from '$lib/api';
 	import ChangeList from './ChangeList.svelte';
 	import ConfirmDelete from './ConfirmDelete.svelte';
 	import Console from './Console.svelte';
 	import EditSettings from './EditSettings.svelte';
 	import PowerDot from './PowerDot.svelte';
+	import StagedBadge from './StagedBadge.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 
 	let {
 		vm,
 		onstaged,
-		onaction
+		onaction,
+		stagedItem = null,
+		onstagedopen
 	}: {
 		vm: VM | null;
 		onstaged?: () => void;
 		onaction?: (a: { verb: string; namespace: string; name: string; ok: boolean }) => void;
+		stagedItem?: DraftItem | null;
+		onstagedopen?: () => void;
 	} = $props();
 
 	type Tab = 'summary' | 'monitor' | 'console';
@@ -54,6 +59,13 @@
 		migrate: running
 	});
 	const statusText = $derived(vm ? (vm.paused ? 'Paused' : (vm.phase ?? vm.power)) : '');
+
+	// Staged changes for this VM, keyed by field label (for inline current→future).
+	const stagedChanges = $derived.by(() => {
+		const m = new Map<string, Change>();
+		for (const c of stagedItem?.changes ?? []) m.set(c.field, c);
+		return m;
+	});
 
 	function loadDrift(ns: string, name: string) {
 		api
@@ -189,6 +201,9 @@
 				<h2 class="text-lg font-semibold text-slate-800">{vm.name}</h2>
 				<span class="rounded bg-slate-200 px-1.5 py-0.5 text-xs text-slate-600">{vm.namespace}</span>
 				<SyncBadge sync={vm.sync} />
+				{#if stagedItem}
+					<StagedBadge item={stagedItem} onopen={() => onstagedopen?.()} />
+				{/if}
 				<div class="ml-auto flex items-center gap-2">
 					<div class="relative">
 						<button
@@ -266,12 +281,14 @@
 					<div class="rounded border border-slate-200 bg-slate-50 p-3">
 						<div class="flex items-center gap-1.5 text-xs text-slate-500"><Cpu size={13} /> CPU</div>
 						<div class="mt-1 text-lg font-semibold text-slate-800">
-							{vm.cpuCores ?? '—'}<span class="ml-1 text-sm font-normal text-slate-500">vCPU</span>
+							{#if stagedChanges.has('CPU')}<span class="text-slate-400 line-through">{vm.cpuCores ?? '—'} vCPU</span> <span class="text-blue-600">{stagedChanges.get('CPU')?.to}</span>{:else}{vm.cpuCores ?? '—'}<span class="ml-1 text-sm font-normal text-slate-500">vCPU</span>{/if}
 						</div>
 					</div>
 					<div class="rounded border border-slate-200 bg-slate-50 p-3">
 						<div class="flex items-center gap-1.5 text-xs text-slate-500"><MemoryStick size={13} /> Memory</div>
-						<div class="mt-1 text-lg font-semibold text-slate-800">{vm.memory ?? '—'}</div>
+						<div class="mt-1 text-lg font-semibold text-slate-800">
+							{#if stagedChanges.has('Memory')}<span class="text-slate-400 line-through">{vm.memory ?? '—'}</span> <span class="text-blue-600">{stagedChanges.get('Memory')?.to}</span>{:else}{vm.memory ?? '—'}{/if}
+						</div>
 						{#if vm.memoryActual && vm.memoryActual !== vm.memory}
 							<div class="text-xs text-slate-400">{vm.memoryActual} live</div>
 						{/if}
@@ -295,7 +312,12 @@
 						</h3>
 						<dl class="divide-y divide-slate-100 text-[13px]">
 							{@render field('Operating system', vm.os ?? '')}
-							{@render field('Power (desired)', vm.power)}
+							<div class="flex justify-between gap-3 px-3 py-1.5">
+								<dt class="shrink-0 text-slate-500">Power (desired)</dt>
+								<dd class="min-w-0 text-right">
+									{#if stagedChanges.has('Power')}<span class="text-slate-400 line-through">{vm.power}</span> <span class="text-blue-600">→ {stagedChanges.get('Power')?.to}</span>{:else}<span class="text-slate-800">{vm.power}</span>{/if}
+								</dd>
+							</div>
 							{@render field('Status (actual)', vm.paused ? 'Paused' : (vm.phase ?? ''))}
 							<div class="flex justify-between gap-3 px-3 py-1.5">
 								<dt class="shrink-0 text-slate-500">IP addresses</dt>

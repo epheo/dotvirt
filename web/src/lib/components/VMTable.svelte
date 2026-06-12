@@ -1,16 +1,21 @@
 <script lang="ts">
-	import type { Power, SyncStatus, VM } from '$lib/api';
+	import type { DraftItem, Power, SyncStatus, VM } from '$lib/api';
 	import PowerDot from './PowerDot.svelte';
+	import StagedBadge from './StagedBadge.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 
 	let {
 		vms,
 		onselect,
-		selected = $bindable(new Set<string>())
+		selected = $bindable(new Set<string>()),
+		staged,
+		onstagedopen
 	}: {
 		vms: VM[];
 		onselect: (vm: VM) => void;
 		selected?: Set<string>;
+		staged: Map<string, DraftItem>;
+		onstagedopen: (vm: VM) => void;
 	} = $props();
 
 	const vmKey = (vm: VM) => `${vm.namespace}/${vm.name}`;
@@ -186,6 +191,7 @@
 			</thead>
 			<tbody class="divide-y divide-slate-100">
 				{#each rows as vm (vm.namespace + '/' + vm.name)}
+					{@const sc = staged.get(vm.namespace + '/' + vm.name)}
 					<tr
 						onclick={() => onselect(vm)}
 						class="cursor-pointer hover:bg-blue-50 {selected.has(vmKey(vm)) ? 'bg-blue-50' : ''}"
@@ -200,13 +206,22 @@
 							/>
 						</td>
 						<td class="px-3 py-1.5"><PowerDot power={vm.power} paused={vm.paused} /></td>
-						<td class="px-3 py-1.5 font-medium text-slate-800">{vm.name}</td>
+						<td class="px-3 py-1.5 font-medium {sc?.kind === 'delete' ? 'text-slate-400 line-through' : 'text-slate-800'}">{vm.name}</td>
 						<td class="px-3 py-1.5 text-slate-600">{vm.namespace}</td>
 						<td class="px-3 py-1.5 text-slate-600">{vm.paused ? 'Paused' : (vm.phase ?? '—')}</td>
 						<td class="px-3 py-1.5 font-mono text-xs text-slate-600">{vm.guestIP ?? '—'}</td>
 						<td class="px-3 py-1.5 text-right text-slate-700">{vm.cpuCores ?? '—'}</td>
 						<td class="px-3 py-1.5 text-right text-slate-700">{vm.memory ?? '—'}</td>
-						<td class="px-3 py-1.5"><SyncBadge sync={vm.sync} /></td>
+						<td class="px-3 py-1.5">
+							{#if sc}
+								<span class="inline-flex items-center gap-1.5">
+									<StagedBadge item={sc} onopen={() => onstagedopen(vm)} />
+									<SyncBadge sync={vm.sync} compact />
+								</span>
+							{:else}
+								<SyncBadge sync={vm.sync} />
+							{/if}
+						</td>
 						<td class="px-3 py-1.5 text-slate-600">{vm.health ?? '—'}</td>
 					</tr>
 				{/each}
