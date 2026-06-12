@@ -97,9 +97,12 @@ type Project struct {
 // Inventory is the full multi-project tree. Warnings carry non-fatal degradations
 // (e.g. live or drift state couldn't be read) so the UI can say "status
 // unavailable" instead of silently rendering every VM as stopped / not-tracked.
+// Proposals rides along so the open-PR lane updates over the live stream — a PR
+// merged anywhere (the git poll sees main move) repaints it with no client poll.
 type Inventory struct {
-	Projects []Project `json:"projects"`
-	Warnings []string  `json:"warnings,omitempty"`
+	Projects  []Project  `json:"projects"`
+	Warnings  []string   `json:"warnings,omitempty"`
+	Proposals []Proposal `json:"proposals,omitempty"`
 }
 
 // Change is one human-readable, YAML-free change item (a semantic diff entry).

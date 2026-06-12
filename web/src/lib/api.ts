@@ -57,6 +57,7 @@ export interface Project {
 export interface Inventory {
 	projects: Project[];
 	warnings?: string[]; // non-fatal degradations (e.g. live/sync status unavailable)
+	proposals?: Proposal[]; // open PRs across the caller's projects, streamed live
 }
 
 export interface User {
@@ -220,7 +221,6 @@ export const api = {
 
 	inventory: () => get<Inventory>('/api/inventory'),
 	options: () => get<Options>('/api/options'),
-	proposals: () => get<Proposal[]>('/api/proposals'),
 
 	// Commit history + per-commit revert (a forward commit opened as a PR).
 	history: (project: string) => get<Commit[]>(`/api/projects/${enc(project)}/history`),

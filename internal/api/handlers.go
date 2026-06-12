@@ -114,7 +114,35 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	}
 	inv := inventory.Build(in)
 	inv.Warnings = warnings
+	inv.Proposals = s.proposalsFor(id, projects)
 	return inv, nil
+}
+
+// proposalsFor returns id's open PRs across its projects, cached per token for
+// proposalsTTL. It rides the inventory broadcast so the UI's open-PR lane updates
+// live (a merge moves main → the git poll rebroadcasts → the lane repaints), with
+// the TTL sparing the forge a FindPR-per-project on every frame. Best-effort: a
+// project whose forge lookup errors is skipped, never failing the inventory.
+func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo) []model.Proposal {
+	if s.draft == nil {
+		return nil
+	}
+	if v, ok := s.proposals.Get(restfactory.TokenKey(id.Token)); ok {
+		return v
+	}
+	out := []model.Proposal{}
+	for _, p := range projects {
+		pr, ok, err := s.draft.OpenProposal(id, p)
+		if err != nil {
+			log.Printf("proposals: %s: %v (skipping)", p.Name, err)
+			continue
+		}
+		if ok {
+			out = append(out, pr)
+		}
+	}
+	s.proposals.Put(restfactory.TokenKey(id.Token), out)
+	return out
 }
 
 func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
@@ -215,17 +243,11 @@ func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleProposals lists the caller's open PRs across their visible projects — the
-// "PR #N open" rows in the Recent Tasks dock. Best-effort: a project whose forge
-// lookup errors is skipped (logged), not fatal, so one slow/broken repo can't
-// blank the whole feed.
+// same set the live inventory now carries; kept as a standalone read for parity.
 func (s *Server) handleProposals(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return
-	}
-	if s.draft == nil {
-		writeJSON(w, http.StatusOK, []model.Proposal{})
 		return
 	}
 	projects, err := s.projectsFor(r.Context(), id, c)
@@ -233,16 +255,9 @@ func (s *Server) handleProposals(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	out := []model.Proposal{}
-	for _, p := range projects {
-		pr, ok, err := s.draft.OpenProposal(id, p)
-		if err != nil {
-			log.Printf("proposals: %s: %v (skipping)", p.Name, err)
-			continue
-		}
-		if ok {
-			out = append(out, pr)
-		}
+	out := s.proposalsFor(id, projects)
+	if out == nil {
+		out = []model.Proposal{}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

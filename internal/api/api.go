@@ -65,20 +65,28 @@ type Config struct {
 // read path.
 const visibleTTL = 30 * time.Second
 
+// proposalsTTL bounds how long a token's open-PR set is reused. Proposals are now
+// computed on the inventory broadcast (15s heartbeat + every git/k8s change), so
+// without a cache a forge FindPR-per-project would run on every frame. A short TTL
+// well under the broadcast cadence keeps the lane fresh (a merge repaints within a
+// poll interval) while coalescing event bursts into one forge round.
+const proposalsTTL = 5 * time.Second
+
 // Server holds the long-lived collaborators and builds per-request, identity-
 // scoped state. It replaces the old interface-bundle Deps.
 type Server struct {
-	clusterF *cluster.Factory
-	state    *clusterstate.State // SA-owned live+topology snapshot; the read path's source
-	drift    *argo.DriftCache    // nil when Argo disabled; SA-read, shared across subscribers
-	resolver *project.Resolver
-	repos    *git.RepoSet
-	visible  *ttlcache.Cache[map[string]bool] // per-token visible-namespace set
-	draft    Draft
-	auth     *auth.Authenticator // nil leaves the API open (dev)
-	stream   StreamHandler
-	vnc      VNCHandler
-	cfg      Config
+	clusterF  *cluster.Factory
+	state     *clusterstate.State // SA-owned live+topology snapshot; the read path's source
+	drift     *argo.DriftCache    // nil when Argo disabled; SA-read, shared across subscribers
+	resolver  *project.Resolver
+	repos     *git.RepoSet
+	visible   *ttlcache.Cache[map[string]bool]  // per-token visible-namespace set
+	proposals *ttlcache.Cache[[]model.Proposal] // per-token open-PR set (streamed)
+	draft     Draft
+	auth      *auth.Authenticator // nil leaves the API open (dev)
+	stream    StreamHandler
+	vnc       VNCHandler
+	cfg       Config
 }
 
 // Deps are the collaborators for NewServer. Nil pieces degrade gracefully.
@@ -98,17 +106,18 @@ type Deps struct {
 // NewServer builds the API server from its collaborators.
 func NewServer(d Deps) *Server {
 	return &Server{
-		clusterF: d.ClusterFactory,
-		state:    d.State,
-		drift:    d.Drift,
-		resolver: d.Resolver,
-		repos:    d.Repos,
-		visible:  ttlcache.New[map[string]bool](visibleTTL),
-		draft:    d.Draft,
-		auth:     d.Auth,
-		stream:   d.Stream,
-		vnc:      d.VNC,
-		cfg:      d.Config,
+		clusterF:  d.ClusterFactory,
+		state:     d.State,
+		drift:     d.Drift,
+		resolver:  d.Resolver,
+		repos:     d.Repos,
+		visible:   ttlcache.New[map[string]bool](visibleTTL),
+		proposals: ttlcache.New[[]model.Proposal](proposalsTTL),
+		draft:     d.Draft,
+		auth:      d.Auth,
+		stream:    d.Stream,
+		vnc:       d.VNC,
+		cfg:       d.Config,
 	}
 }
 
