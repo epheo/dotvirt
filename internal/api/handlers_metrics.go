@@ -1,6 +1,12 @@
 package api
 
-import "net/http"
+import (
+	"fmt"
+	"net/http"
+
+	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/model"
+)
 
 // The Prometheus/Thanos-backed reads (Performance tab, capacity bars, cluster
 // rings). All run under the caller's token, so the metrics backend's own RBAC
@@ -38,30 +44,21 @@ func (s *Server) handleVMUsage(w http.ResponseWriter, r *http.Request) {
 	respond(w, u, err)
 }
 
-// handleClusterSummary returns the aggregate capacity view (the "All VMs" cluster
-// landing): rings of VM usage vs node-allocatable capacity, VM counts by phase, and
-// top-consumer VMs. VM-scoped sums are limited to the caller's visible namespaces.
-func (s *Server) handleClusterSummary(w http.ResponseWriter, r *http.Request) {
-	if s.metrics == nil {
-		http.Error(w, "metrics not configured", http.StatusServiceUnavailable)
-		return
-	}
+// scopeNamespaces resolves a container-scope metrics read's namespaces: the
+// repo-backed projects' namespaces — the same VMs the inventory grid shows —
+// optionally narrowed by ?project= / ?namespace= so every container level
+// (all, project, namespace, node) gets its own view.
+func (s *Server) scopeNamespaces(r *http.Request) (auth.Identity, []string, error) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return
+		return auth.Identity{}, nil, fmt.Errorf("%w: %v", model.ErrUnavailable, err)
 	}
 	projects, err := s.projectsFor(r.Context(), id, c)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return auth.Identity{}, nil, err
 	}
-	// Aggregate over the repo-backed projects' namespaces — the same VMs the
-	// inventory grid shows. Optionally narrow to one project / namespace / node so
-	// every container level (all, project, namespace, node) gets its own summary.
 	wantProject := r.URL.Query().Get("project")
 	wantNamespace := r.URL.Query().Get("namespace")
-	node := r.URL.Query().Get("node")
 	var nss []string
 	for _, p := range projects {
 		if p.Repo == "" || (wantProject != "" && p.Name != wantProject) {
@@ -74,6 +71,38 @@ func (s *Server) handleClusterSummary(w http.ResponseWriter, r *http.Request) {
 			nss = append(nss, n)
 		}
 	}
-	cs, err := s.metrics.ClusterSummary(r.Context(), id.Token, nss, node)
+	return id, nss, nil
+}
+
+// handleClusterSummary returns the aggregate capacity view (the "All VMs" cluster
+// landing): rings of VM usage vs node-allocatable capacity, VM counts by phase, and
+// top-consumer VMs. VM-scoped sums are limited to the caller's visible namespaces.
+func (s *Server) handleClusterSummary(w http.ResponseWriter, r *http.Request) {
+	if s.metrics == nil {
+		http.Error(w, "metrics not configured", http.StatusServiceUnavailable)
+		return
+	}
+	id, nss, err := s.scopeNamespaces(r)
+	if err != nil {
+		http.Error(w, err.Error(), statusFor(err))
+		return
+	}
+	cs, err := s.metrics.ClusterSummary(r.Context(), id.Token, nss, r.URL.Query().Get("node"))
 	respond(w, cs, err)
+}
+
+// handleScopeMetrics returns the per-VM top-consumer time-series for a container
+// scope — the container Monitor's Performance view.
+func (s *Server) handleScopeMetrics(w http.ResponseWriter, r *http.Request) {
+	if s.metrics == nil {
+		http.Error(w, "metrics not configured", http.StatusServiceUnavailable)
+		return
+	}
+	id, nss, err := s.scopeNamespaces(r)
+	if err != nil {
+		http.Error(w, err.Error(), statusFor(err))
+		return
+	}
+	m, err := s.metrics.ScopeMetrics(r.Context(), id.Token, nss, r.URL.Query().Get("node"), r.URL.Query().Get("range"))
+	respond(w, m, err)
 }

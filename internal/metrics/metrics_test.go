@@ -89,6 +89,57 @@ func p(f *float64) string {
 	return fmt.Sprintf("%g", *f)
 }
 
+// TestScopeMetricsNamesAndAlignsSeries verifies the multi-series read behind the
+// scope charts: a topk result with two labeled series must come back as two
+// chart series named namespace/name (sorted), aligned on the union time axis,
+// and the query must carry the namespace scope.
+func TestScopeMetricsNamesAndAlignsSeries(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("query")
+		if !strings.Contains(q, `namespace=~"a|b"`) {
+			t.Errorf("query not scoped to the namespaces: %s", q)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(q, "cpu_usage_seconds_total") {
+			fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[
+				{"metric":{"namespace":"b","name":"vm2"},"values":[[130,"3"]]},
+				{"metric":{"namespace":"a","name":"vm1"},"values":[[100,"1"],[130,"2"]]}]}}`)
+			return
+		}
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[
+			{"metric":{"namespace":"a","name":"vm1"},"values":[[100,"5"]]}]}}`)
+	}))
+	defer srv.Close()
+
+	m, err := New(srv.URL, false).ScopeMetrics(context.Background(), "tok", []string{"a", "b"}, "", "1h")
+	if err != nil {
+		t.Fatalf("ScopeMetrics: %v", err)
+	}
+
+	var cpu model.MetricChart
+	for _, c := range m.Charts {
+		if c.Key == "cpu" {
+			cpu = c
+		}
+	}
+	if cpu.Key == "" {
+		t.Fatal("no cpu chart in result")
+	}
+	if len(cpu.Series) != 2 || cpu.Series[0].Name != "a/vm1" || cpu.Series[1].Name != "b/vm2" {
+		t.Fatalf("series = %+v, want [a/vm1 b/vm2] sorted by name", cpu.Series)
+	}
+	if len(cpu.Times) != 2 || cpu.Times[0] != 100 || cpu.Times[1] != 130 {
+		t.Fatalf("times = %v, want [100 130]", cpu.Times)
+	}
+	vm1, vm2 := cpu.Series[0].Values, cpu.Series[1].Values
+	if vm1[0] == nil || *vm1[0] != 1 || vm1[1] == nil || *vm1[1] != 2 {
+		t.Errorf("vm1 not aligned: [%s %s], want [1 2]", p(vm1[0]), p(vm1[1]))
+	}
+	if vm2[0] != nil || vm2[1] == nil || *vm2[1] != 3 {
+		t.Errorf("vm2 not aligned: [%s %s], want [nil 3]", p(vm2[0]), p(vm2[1]))
+	}
+}
+
 // TestVectorAndConsumers verifies instant-vector parsing and that consumers() sorts
 // a topk result highest-first.
 func TestVectorAndConsumers(t *testing.T) {

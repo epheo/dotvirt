@@ -351,6 +351,17 @@ export const api = {
 		const qs = q.toString();
 		return get<ClusterSummary>(`/api/metrics/cluster${qs ? `?${qs}` : ''}`);
 	},
+	scopeMetrics: (
+		scope: { project?: string; namespace?: string; node?: string },
+		range: string
+	) => {
+		const q = new URLSearchParams();
+		if (scope.project) q.set('project', scope.project);
+		if (scope.namespace) q.set('namespace', scope.namespace);
+		if (scope.node) q.set('node', scope.node);
+		q.set('range', range);
+		return get<VMMetrics>(`/api/metrics/scope?${q.toString()}`);
+	},
 	adopt: (namespace: string, name: string) =>
 		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/adopt`, {}),
 	resync: (namespace: string, name: string) =>

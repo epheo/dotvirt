@@ -565,7 +565,11 @@
 						</div>
 					{:else if containerTab === 'monitor'}
 						<div class="min-h-0 flex-1 overflow-y-auto">
-							<ContainerMonitor namespaces={scopedNamespaces} onselect={selectByKey} />
+							<ContainerMonitor
+							namespaces={scopedNamespaces}
+							scope={containerScope}
+							onselect={selectByKey}
+						/>
 						</div>
 					{:else if containerTab === 'permissions'}
 						<div class="min-h-0 flex-1 overflow-y-auto p-4">

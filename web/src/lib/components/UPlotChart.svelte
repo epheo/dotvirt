@@ -18,6 +18,7 @@
 		if (unit === 'ms') return v.toFixed(2) + ' ms';
 		if (unit === 'bytes') return bytes(v);
 		if (unit === 'Bps') return bytes(v) + '/s';
+		if (unit === 'cores') return v >= 0.1 || v === 0 ? v.toFixed(2) : v.toPrecision(2);
 		return String(v);
 	}
 

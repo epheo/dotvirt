@@ -40,6 +40,7 @@ type Client struct {
 	vmMetrics *ttlcache.Cache[model.VMMetrics]
 	vmUsage   *ttlcache.Cache[model.VMUsage]
 	cluster   *ttlcache.Cache[model.ClusterSummary]
+	scope     *ttlcache.Cache[model.VMMetrics]
 }
 
 // New builds a Client for the query API at baseURL (e.g. the thanos-querier
@@ -59,6 +60,7 @@ func New(baseURL string, insecure bool) *Client {
 		vmMetrics: ttlcache.New[model.VMMetrics](vmTTL),
 		vmUsage:   ttlcache.New[model.VMUsage](vmTTL),
 		cluster:   ttlcache.New[model.ClusterSummary](clusterTTL),
+		scope:     ttlcache.New[model.VMMetrics](clusterTTL),
 	}
 }
 
@@ -343,6 +345,146 @@ func (c *Client) ClusterSummary(ctx context.Context, token string, namespaces []
 	return out, nil
 }
 
+// scopeChartSpecs builds the per-VM top-consumer charts for a container scope
+// (the whole inventory, a project, a namespace, or a node). Each chart is ONE
+// topk query whose result series are the heaviest VMs, labeled namespace/name.
+// sel is the namespace(+node) selector, rw the rate() window.
+func scopeChartSpecs(sel, rw string) []chartSpec {
+	topk := func(expr string) string { return fmt.Sprintf("topk(5, sum by(namespace,name)(%s))", expr) }
+	rate := func(metric string) string { return fmt.Sprintf("rate(%s%s[%s])", metric, sel, rw) }
+	return []chartSpec{
+		{"cpu", "CPU — top VMs", "cores", []seriesSpec{
+			{"", topk(rate("kubevirt_vmi_cpu_usage_seconds_total"))},
+		}},
+		{"memory", "Memory — top VMs", "bytes", []seriesSpec{
+			{"", topk(fmt.Sprintf("kubevirt_vmi_memory_used_bytes%s", sel))},
+		}},
+		{"network", "Network — top VMs", "Bps", []seriesSpec{
+			{"", topk(rate("kubevirt_vmi_network_receive_bytes_total") + " + " + rate("kubevirt_vmi_network_transmit_bytes_total"))},
+		}},
+		{"disk", "Disk throughput — top VMs", "Bps", []seriesSpec{
+			{"", topk(rate("kubevirt_vmi_storage_read_traffic_bytes_total") + " + " + rate("kubevirt_vmi_storage_write_traffic_bytes_total"))},
+		}},
+	}
+}
+
+// ScopeMetrics returns the per-VM top-consumer time-series for a container
+// scope over the given range — the container Monitor's Performance view. Each
+// chart is one topk query; its result series are named namespace/name. Cached
+// by scope (not token), like ClusterSummary: any user authorized for this
+// namespace set gets identical data.
+func (c *Client) ScopeMetrics(ctx context.Context, token string, namespaces []string, node, rng string) (model.VMMetrics, error) {
+	spec, ok := ranges[rng]
+	if !ok {
+		rng, spec = defaultRange, ranges[defaultRange]
+	}
+	sorted := append([]string(nil), namespaces...)
+	sort.Strings(sorted)
+	key := strings.Join(sorted, ",") + "|" + node + "|" + rng
+	if v, ok := c.scope.Get(key); ok {
+		return v, nil
+	}
+
+	// Scope to the caller's namespaces (+ a node when drilling into one); with
+	// no namespaces, match nothing — same boundary as ClusterSummary.
+	sel := `{namespace="__dotvirt_none__"}`
+	if len(namespaces) > 0 {
+		inner := fmt.Sprintf("namespace=~%q", strings.Join(namespaces, "|"))
+		if node != "" {
+			inner += fmt.Sprintf(",node=%q", node)
+		}
+		sel = "{" + inner + "}"
+	}
+
+	end := time.Now().Unix()
+	start := end - int64(spec.window.Seconds())
+	step := int(spec.step.Seconds())
+	specs := scopeChartSpecs(sel, promDur(rateWindow(spec.step)))
+
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		firstErr error
+		anyData  bool
+	)
+	results := make([][]labeledSeries, len(specs))
+	for ci, cs := range specs {
+		wg.Add(1)
+		go func(ci int, query string) {
+			defer wg.Done()
+			series, err := c.rangeSeries(ctx, token, query, start, end, step)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				return
+			}
+			if len(series) > 0 {
+				anyData = true
+			}
+			results[ci] = series
+		}(ci, cs.series[0].query)
+	}
+	wg.Wait()
+	if firstErr != nil && !anyData {
+		return model.VMMetrics{}, fmt.Errorf("%w: %v", model.ErrUnavailable, firstErr)
+	}
+
+	out := model.VMMetrics{Range: rng, StepSec: step, Charts: make([]model.MetricChart, len(specs))}
+	for ci, cs := range specs {
+		out.Charts[ci] = chartFromSeries(cs, results[ci])
+	}
+	c.scope.Put(key, out)
+	return out, nil
+}
+
+// chartFromSeries aligns one chart's labeled result series onto a shared time
+// axis, naming each series by its namespace/name labels. Series are sorted by
+// name so colors stay stable across refreshes (topk order churns per step).
+func chartFromSeries(cs chartSpec, series []labeledSeries) model.MetricChart {
+	sort.Slice(series, func(i, j int) bool { return seriesName(series[i].labels) < seriesName(series[j].labels) })
+	set := map[int64]struct{}{}
+	for _, s := range series {
+		for _, smp := range s.samples {
+			set[smp.t] = struct{}{}
+		}
+	}
+	times := make([]int64, 0, len(set))
+	for t := range set {
+		times = append(times, t)
+	}
+	sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
+	at := make(map[int64]int, len(times))
+	for i, t := range times {
+		at[t] = i
+	}
+	chart := model.MetricChart{Key: cs.key, Title: cs.title, Unit: cs.unit, Times: times, Series: make([]model.MetricSeries, len(series))}
+	for si, s := range series {
+		vals := make([]*float64, len(times))
+		for _, smp := range s.samples {
+			v := smp.v
+			vals[at[smp.t]] = &v
+		}
+		chart.Series[si] = model.MetricSeries{Name: seriesName(s.labels), Values: vals}
+	}
+	return chart
+}
+
+// seriesName labels one scope-chart series by the VM it tracks.
+func seriesName(labels map[string]string) string {
+	ns, name := labels["namespace"], labels["name"]
+	switch {
+	case ns != "" && name != "":
+		return ns + "/" + name
+	case name != "":
+		return name
+	default:
+		return "value"
+	}
+}
+
 // consumers turns a topk vector into sorted ConsumerVM rows (highest first).
 func consumers(vec []labeledValue) []model.ConsumerVM {
 	out := make([]model.ConsumerVM, 0, len(vec))
@@ -358,9 +500,16 @@ type sample struct {
 	v float64
 }
 
-// rangeQuery runs one query_range and returns the first series' samples (our
-// queries each yield a single series). NaN/Inf values are dropped as gaps.
-func (c *Client) rangeQuery(ctx context.Context, token, query string, start, end int64, step int) ([]sample, error) {
+// labeledSeries is one query_range result series: its labels and samples.
+type labeledSeries struct {
+	labels  map[string]string
+	samples []sample
+}
+
+// rangeSeries runs one query_range and returns every result series with its
+// labels — the multi-series read behind the scope charts (and the per-NIC/
+// per-drive variants to come). NaN/Inf values are dropped as gaps.
+func (c *Client) rangeSeries(ctx context.Context, token, query string, start, end int64, step int) ([]labeledSeries, error) {
 	q := url.Values{}
 	q.Set("query", query)
 	q.Set("start", strconv.FormatInt(start, 10))
@@ -383,6 +532,7 @@ func (c *Client) rangeQuery(ctx context.Context, token, query string, start, end
 		Status string `json:"status"`
 		Data   struct {
 			Result []struct {
+				Metric map[string]string    `json:"metric"`
 				Values [][2]json.RawMessage `json:"values"`
 			} `json:"result"`
 		} `json:"data"`
@@ -390,24 +540,37 @@ func (c *Client) rangeQuery(ctx context.Context, token, query string, start, end
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return nil, err
 	}
-	if body.Status != "success" || len(body.Data.Result) == 0 {
+	if body.Status != "success" {
 		return nil, nil
 	}
-	raw := body.Data.Result[0].Values
-	out := make([]sample, 0, len(raw))
-	for _, pair := range raw {
-		var ts float64
-		var vs string
-		if json.Unmarshal(pair[0], &ts) != nil || json.Unmarshal(pair[1], &vs) != nil {
-			continue
+	out := make([]labeledSeries, 0, len(body.Data.Result))
+	for _, r := range body.Data.Result {
+		samples := make([]sample, 0, len(r.Values))
+		for _, pair := range r.Values {
+			var ts float64
+			var vs string
+			if json.Unmarshal(pair[0], &ts) != nil || json.Unmarshal(pair[1], &vs) != nil {
+				continue
+			}
+			v, err := strconv.ParseFloat(vs, 64)
+			if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+				continue
+			}
+			samples = append(samples, sample{t: int64(ts), v: v})
 		}
-		v, err := strconv.ParseFloat(vs, 64)
-		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
-			continue
-		}
-		out = append(out, sample{t: int64(ts), v: v})
+		out = append(out, labeledSeries{labels: r.Metric, samples: samples})
 	}
 	return out, nil
+}
+
+// rangeQuery runs one query_range and returns the first series' samples (the
+// curated per-VM queries each yield a single series).
+func (c *Client) rangeQuery(ctx context.Context, token, query string, start, end int64, step int) ([]sample, error) {
+	series, err := c.rangeSeries(ctx, token, query, start, end, step)
+	if err != nil || len(series) == 0 {
+		return nil, err
+	}
+	return series[0].samples, nil
 }
 
 // VMMetrics runs the curated charts for one VM over the given range concurrently,

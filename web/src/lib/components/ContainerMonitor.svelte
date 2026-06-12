@@ -1,11 +1,21 @@
 <script lang="ts">
 	import { api, Unauthorized, type VMEvent } from '$lib/api';
 	import { relativeAge } from '$lib/format';
+	import ScopePerformance from './ScopePerformance.svelte';
 
 	let {
 		namespaces,
+		scope = {},
 		onselect
-	}: { namespaces: string[]; onselect?: (namespace: string, name: string) => void } = $props();
+	}: {
+		namespaces: string[];
+		// The backend-resolvable container scope, for the Performance charts.
+		scope?: { project?: string; namespace?: string; node?: string };
+		onselect?: (namespace: string, name: string) => void;
+	} = $props();
+
+	// Monitor sub-rail: events + performance, mirroring the VM detail's Monitor.
+	let view = $state<'events' | 'performance'>('events');
 
 	let events = $state<VMEvent[] | null>(null);
 	let loading = $state(false);
@@ -35,7 +45,23 @@
 </script>
 
 <div class="p-4">
-	{#if loading && !events}
+	<div class="mb-3 flex gap-1 border-b border-slate-200 text-sm">
+		{#each ['events', 'performance'] as const as v (v)}
+			<button
+				class="border-b-2 px-3 py-1 capitalize {view === v
+					? 'border-blue-600 text-blue-700'
+					: 'border-transparent text-slate-500 hover:text-slate-700'}"
+				onclick={() => (view = v)}
+			>
+				{v}
+			</button>
+		{/each}
+	</div>
+	{#if view === 'performance'}
+		{#key `${scope.project ?? ''}|${scope.namespace ?? ''}|${scope.node ?? ''}`}
+			<ScopePerformance {scope} />
+		{/key}
+	{:else if loading && !events}
 		<div class="py-8 text-center text-sm text-slate-400">Loading events…</div>
 	{:else if !events || events.length === 0}
 		<div class="py-8 text-center text-sm text-slate-400">No recent events in scope.</div>
