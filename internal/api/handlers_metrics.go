@@ -109,6 +109,22 @@ func (s *Server) handleScopeMetrics(w http.ResponseWriter, r *http.Request) {
 	respond(w, m, err)
 }
 
+// handleAlarms returns the firing Prometheus alerts across the caller's scope —
+// the dock's Alarms tab + header badge.
+func (s *Server) handleAlarms(w http.ResponseWriter, r *http.Request) {
+	if s.metrics == nil {
+		http.Error(w, "metrics not configured", http.StatusServiceUnavailable)
+		return
+	}
+	id, _, nss, err := s.scopeNamespaces(r)
+	if err != nil {
+		http.Error(w, err.Error(), statusFor(err))
+		return
+	}
+	a, err := s.metrics.Alerts(r.Context(), id.Token, nss)
+	respond(w, a, err)
+}
+
 // handleQuotas returns the ResourceQuotas across a container scope's
 // namespaces — the project capacity band + container Configure. Read under the
 // caller's token, so RBAC gates which namespaces' quotas are visible.

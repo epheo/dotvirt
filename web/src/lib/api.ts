@@ -313,6 +313,15 @@ export interface NamespaceQuota {
 	items: QuotaItem[];
 }
 
+// One firing Prometheus alert (the dock's Alarms tab).
+export interface Alert {
+	name: string;
+	severity?: string;
+	namespace?: string;
+	vm?: string;
+	count?: number; // collapsed identical series
+}
+
 // The caller's effective capabilities in one namespace (the Permissions tab).
 export interface Capability {
 	id: string;
@@ -390,6 +399,7 @@ export const api = {
 		q.set('range', range);
 		return get<VMMetrics>(`/api/metrics/scope?${q.toString()}`);
 	},
+	alarms: () => get<Alert[]>('/api/alarms'),
 	quotas: (scope: { project?: string; namespace?: string }) => {
 		const q = new URLSearchParams();
 		if (scope.project) q.set('project', scope.project);

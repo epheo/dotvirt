@@ -185,6 +185,37 @@ func TestScopeMetricsNamesAndAlignsSeries(t *testing.T) {
 	}
 }
 
+// TestAlertsCollapsesAndSorts verifies the ALERTS read: identical alert tuples
+// collapse with a count, and rows order most-urgent-first.
+func TestAlertsCollapsesAndSorts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("query")
+		if !strings.Contains(q, `alertstate="firing"`) || !strings.Contains(q, `namespace=~"a|b"`) {
+			t.Errorf("unexpected alerts query: %s", q)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[
+			{"metric":{"alertname":"VMIDown","severity":"warning","namespace":"a","name":"vm1"},"value":[100,"1"]},
+			{"metric":{"alertname":"VMIDown","severity":"warning","namespace":"a","name":"vm1"},"value":[100,"1"]},
+			{"metric":{"alertname":"NodePressure","severity":"critical","namespace":"b"},"value":[100,"1"]}]}}`)
+	}))
+	defer srv.Close()
+
+	alerts, err := New(srv.URL, false).Alerts(context.Background(), "tok", []string{"a", "b"})
+	if err != nil {
+		t.Fatalf("Alerts: %v", err)
+	}
+	if len(alerts) != 2 {
+		t.Fatalf("want 2 collapsed rows, got %+v", alerts)
+	}
+	if alerts[0].Name != "NodePressure" || alerts[0].Severity != "critical" {
+		t.Errorf("critical should sort first: %+v", alerts[0])
+	}
+	if alerts[1].Name != "VMIDown" || alerts[1].Count != 2 || alerts[1].VM != "vm1" {
+		t.Errorf("duplicate series should collapse with count: %+v", alerts[1])
+	}
+}
+
 // TestVectorAndConsumers verifies instant-vector parsing and that consumers() sorts
 // a topk result highest-first.
 func TestVectorAndConsumers(t *testing.T) {

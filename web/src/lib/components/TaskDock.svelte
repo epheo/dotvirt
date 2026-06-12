@@ -1,6 +1,14 @@
 <script lang="ts">
 	import { ChevronDown, ChevronUp, ListChecks, RefreshCw } from 'lucide-svelte';
-	import { api, type DraftView, type Inventory, type Proposal, type VMEvent } from '$lib/api';
+	import {
+		api,
+		type Alert,
+		type DraftView,
+		type Inventory,
+		type Proposal,
+		type VMEvent
+	} from '$lib/api';
+	import { pollWhileVisible } from '$lib/poll';
 
 	let {
 		drafts,
@@ -21,12 +29,24 @@
 	} = $props();
 
 	let openPane = $state(true);
-	let tab = $state<'tasks' | 'events'>('tasks');
+	let tab = $state<'tasks' | 'events' | 'alarms'>('tasks');
 
 	// Events lane: fetched on demand when the Events tab is opened (not on the
 	// broadcast hot path), so a busy cluster's event churn can't spam the UI.
 	let events = $state<VMEvent[] | null>(null);
 	let eventsLoading = $state(false);
+
+	// Firing Prometheus alerts (vCenter's Triggered Alarms). Polled slowly even
+	// with the tab closed so the header badge stays honest; the read is one
+	// cached instant query server-side. null = endpoint unavailable (metrics off).
+	let firing = $state<Alert[] | null>(null);
+	function loadAlarms() {
+		api
+			.alarms()
+			.then((a) => (firing = a))
+			.catch(() => (firing = null));
+	}
+	$effect(() => pollWhileVisible(loadAlarms, 30000));
 
 	// Drag-to-resize the dock height (the fixed height was cramped for many rows).
 	let dockHeight = $state(192);
@@ -57,10 +77,11 @@
 			.finally(() => (eventsLoading = false));
 	}
 
-	function selectTab(t: 'tasks' | 'events') {
+	function selectTab(t: 'tasks' | 'events' | 'alarms') {
 		tab = t;
 		openPane = true;
 		if (t === 'events') loadEvents(); // refresh on each open
+		if (t === 'alarms') loadAlarms();
 	}
 
 	type Task = {
@@ -180,9 +201,15 @@
 		return out;
 	});
 
-	const alarms = $derived(
-		tasks.filter((t) => t.kind === 'drift' || (t.kind === 'migration' && !t.ok)).length
+	// Drift + failed migrations come from the streamed inventory; firing
+	// Prometheus alerts join them — one amber number for everything wrong.
+	const clientAlarms = $derived(
+		tasks.filter((t) => t.kind === 'drift' || (t.kind === 'migration' && !t.ok))
 	);
+	const alarms = $derived(clientAlarms.length + (firing?.length ?? 0));
+
+	const severityClass = (s?: string) =>
+		s === 'critical' ? 'bg-red-500' : s === 'warning' ? 'bg-amber-500' : 'bg-slate-400';
 
 	const dotClass = (t: Task) =>
 		t.kind === 'drift'
@@ -280,11 +307,19 @@
 		>
 			Events
 		</button>
-		{#if alarms > 0}
-			<span class="rounded-full bg-amber-200 px-1.5 text-[11px] font-medium text-amber-800">
-				{alarms} alarm{alarms > 1 ? 's' : ''}
-			</span>
-		{/if}
+		<button
+			onclick={() => selectTab('alarms')}
+			class="rounded px-2 py-0.5 font-semibold tracking-wide uppercase {tab === 'alarms' && openPane
+				? 'bg-white text-slate-700 shadow-sm'
+				: 'text-slate-500 hover:text-slate-700'}"
+		>
+			Alarms
+			{#if alarms > 0}
+				<span class="ml-0.5 rounded-full bg-amber-200 px-1.5 text-[11px] font-medium text-amber-800"
+					>{alarms}</span
+				>
+			{/if}
+		</button>
 		<button
 			onclick={() => {
 				onrefresh?.();
@@ -341,6 +376,74 @@
 									</td>
 									<td class="px-3 py-1.5 text-slate-600">{t.by}</td>
 									<td class="px-3 py-1.5 text-slate-500">{t.project}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				{/if}
+			{:else if tab === 'alarms'}
+				<!-- vCenter's Triggered Alarms: firing Prometheus alerts + the
+				     inventory-derived amber set (drift, failed migrations). -->
+				{#if alarms === 0}
+					<div class="px-3 py-5 text-center text-slate-400">
+						No triggered alarms{firing === null ? ' (alerts feed unavailable)' : ''}.
+					</div>
+				{:else}
+					<table class="w-full">
+						<thead
+							class="sticky top-0 bg-slate-50 text-left text-[11px] tracking-wide text-slate-400 uppercase"
+						>
+							<tr class="border-b border-slate-200">
+								<th class="px-3 py-1.5 font-medium">Alarm</th>
+								<th class="px-3 py-1.5 font-medium">Target</th>
+								<th class="px-3 py-1.5 font-medium">Severity</th>
+								<th class="px-3 py-1.5 font-medium">Source</th>
+							</tr>
+						</thead>
+						<tbody class="divide-y divide-slate-100">
+							{#each firing ?? [] as a (a.name + ':' + (a.namespace ?? '') + '/' + (a.vm ?? '') + ':' + (a.severity ?? ''))}
+								<tr
+									onclick={() => a.namespace && a.vm && onselect(a.namespace, a.vm)}
+									class="cursor-pointer bg-amber-50/40 hover:bg-blue-50"
+								>
+									<td class="px-3 py-1.5 font-medium text-slate-700">
+										{a.name}{#if (a.count ?? 0) > 1}<span class="text-slate-400"> ×{a.count}</span>{/if}
+									</td>
+									<td class="px-3 py-1.5 text-slate-800">
+										{#if a.vm}{a.vm} <span class="text-slate-400">· {a.namespace}</span>
+										{:else}{a.namespace ?? '—'}{/if}
+									</td>
+									<td class="px-3 py-1.5">
+										<span class="inline-flex items-center gap-1.5">
+											<span class="h-1.5 w-1.5 rounded-full {severityClass(a.severity)}"></span>
+											{a.severity ?? '—'}
+										</span>
+									</td>
+									<td class="px-3 py-1.5 text-slate-500">Prometheus</td>
+								</tr>
+							{/each}
+							{#each clientAlarms as t (t.kind + ':' + t.namespace + '/' + t.name)}
+								<tr
+									onclick={() => activate(t)}
+									class="cursor-pointer {t.kind === 'drift'
+										? 'bg-amber-50/40'
+										: 'bg-red-50/40'} hover:bg-blue-50"
+								>
+									<td class="px-3 py-1.5 font-medium text-slate-700">{t.verb}</td>
+									<td class="px-3 py-1.5 text-slate-800">
+										{t.name} <span class="text-slate-400">· {t.namespace}</span>
+									</td>
+									<td class="px-3 py-1.5">
+										<span class="inline-flex items-center gap-1.5">
+											<span
+												class="h-1.5 w-1.5 rounded-full {t.kind === 'drift'
+													? 'bg-amber-500'
+													: 'bg-red-500'}"
+											></span>
+											{t.kind === 'drift' ? 'warning' : 'critical'}
+										</span>
+									</td>
+									<td class="px-3 py-1.5 text-slate-500">dotvirt</td>
 								</tr>
 							{/each}
 						</tbody>

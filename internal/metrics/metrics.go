@@ -41,6 +41,7 @@ type Client struct {
 	vmUsage   *ttlcache.Cache[model.VMUsage]
 	cluster   *ttlcache.Cache[model.ClusterSummary]
 	scope     *ttlcache.Cache[model.VMMetrics]
+	alerts    *ttlcache.Cache[[]model.Alert]
 }
 
 // New builds a Client for the query API at baseURL (e.g. the thanos-querier
@@ -61,6 +62,7 @@ func New(baseURL string, insecure bool) *Client {
 		vmUsage:   ttlcache.New[model.VMUsage](vmTTL),
 		cluster:   ttlcache.New[model.ClusterSummary](clusterTTL),
 		scope:     ttlcache.New[model.VMMetrics](clusterTTL),
+		alerts:    ttlcache.New[[]model.Alert](clusterTTL),
 	}
 }
 
@@ -503,6 +505,69 @@ func seriesName(labels map[string]string) string {
 		return name
 	default:
 		return "value"
+	}
+}
+
+// Alerts returns the firing Prometheus alerts in the given namespaces — the
+// dock's Alarms tab and badge. It reads the ALERTS series directly (no
+// Alertmanager dependency); identical (name, severity, namespace, vm) series
+// collapse into one row with a count. Cached by scope like ClusterSummary.
+// Alarm definitions (PrometheusRules) are platform config, out of scope.
+func (c *Client) Alerts(ctx context.Context, token string, namespaces []string) ([]model.Alert, error) {
+	if len(namespaces) == 0 {
+		return []model.Alert{}, nil
+	}
+	sorted := append([]string(nil), namespaces...)
+	sort.Strings(sorted)
+	key := strings.Join(sorted, ",")
+	if v, ok := c.alerts.Get(key); ok {
+		return v, nil
+	}
+	q := fmt.Sprintf(`ALERTS{alertstate="firing",namespace=~%q}`, strings.Join(namespaces, "|"))
+	rows := map[string]*model.Alert{}
+	for _, lv := range c.vector(ctx, token, q) {
+		a := model.Alert{
+			Name:      lv.labels["alertname"],
+			Severity:  lv.labels["severity"],
+			Namespace: lv.labels["namespace"],
+			VM:        lv.labels["name"],
+		}
+		k := a.Name + "\x00" + a.Severity + "\x00" + a.Namespace + "\x00" + a.VM
+		if got, ok := rows[k]; ok {
+			got.Count++
+			continue
+		}
+		a.Count = 1
+		rows[k] = &a
+	}
+	out := make([]model.Alert, 0, len(rows))
+	for _, a := range rows {
+		out = append(out, *a)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if ri, rj := severityRank(out[i].Severity), severityRank(out[j].Severity); ri != rj {
+			return ri < rj
+		}
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].Namespace+"/"+out[i].VM < out[j].Namespace+"/"+out[j].VM
+	})
+	c.alerts.Put(key, out)
+	return out, nil
+}
+
+// severityRank orders alerts most-urgent-first (unknown severities last).
+func severityRank(s string) int {
+	switch s {
+	case "critical":
+		return 0
+	case "warning":
+		return 1
+	case "info":
+		return 2
+	default:
+		return 3
 	}
 }
 

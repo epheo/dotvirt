@@ -332,6 +332,16 @@ type NamespaceQuota struct {
 	Items     []QuotaItem `json:"items"`
 }
 
+// Alert is one firing Prometheus alert (the dock's Alarms tab). VM is set when
+// the alert's series carries a name label (kubevirt_vmi_* alerts do); Count
+// collapses identical (name, severity, namespace, vm) series.
+type Alert struct {
+	Name      string `json:"name"`
+	Severity  string `json:"severity,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	VM        string `json:"vm,omitempty"`
+	Count     int    `json:"count,omitempty"`
+}
 
 // Event is a Kubernetes Event for a VM (or its VMI), shown in the Monitor tab and
 // the dock's Events lane (which uses Namespace/Name to label which VM it's about).
