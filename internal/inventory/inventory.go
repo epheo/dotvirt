@@ -80,6 +80,7 @@ func enrich(vm *model.VM, in Inputs) {
 	k := vm.Namespace + "/" + vm.Name
 	if s, ok := in.Live[k]; ok {
 		vm.Phase, vm.GuestIP, vm.NodeName = s.Phase, s.GuestIP, s.NodeName
+		vm.Paused = s.Paused
 		vm.IPs, vm.OS, vm.MemoryActual = s.IPs, s.OS, s.MemoryActual
 		if !s.StartedAt.IsZero() {
 			vm.StartedAt = s.StartedAt.UTC().Format(time.RFC3339)

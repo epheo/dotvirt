@@ -31,6 +31,7 @@ export interface VM {
 	networks?: NIC[];
 	sourceFile: string;
 	phase?: string;
+	paused?: boolean; // VMI Paused condition (phase stays Running)
 	guestIP?: string;
 	ips?: string[]; // every guest-reported IP
 	nodeName?: string;

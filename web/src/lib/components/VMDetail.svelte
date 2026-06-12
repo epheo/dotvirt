@@ -8,7 +8,15 @@
 	import PowerDot from './PowerDot.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 
-	let { vm, onstaged }: { vm: VM | null; onstaged?: () => void } = $props();
+	let {
+		vm,
+		onstaged,
+		onaction
+	}: {
+		vm: VM | null;
+		onstaged?: () => void;
+		onaction?: (a: { verb: string; namespace: string; name: string; ok: boolean }) => void;
+	} = $props();
 
 	type Tab = 'summary' | 'monitor' | 'console';
 	let tab = $state<Tab>('summary');
@@ -34,6 +42,18 @@
 	let actionsOpen = $state(false);
 	let runtimeBusy = $state(false);
 	let runtimeMsg = $state('');
+
+	// VM state gates the Action menu items and the status label. A paused VMI
+	// keeps phase Running, so check the Paused flag too.
+	const running = $derived(vm?.phase === 'Running');
+	const isPaused = $derived(!!vm?.paused);
+	const can = $derived({
+		restart: running,
+		pause: running && !isPaused,
+		unpause: isPaused,
+		migrate: running
+	});
+	const statusText = $derived(vm ? (vm.paused ? 'Paused' : (vm.phase ?? vm.power)) : '');
 
 	function loadDrift(ns: string, name: string) {
 		api
@@ -67,17 +87,21 @@
 
 	async function runOp(kind: 'restart' | 'migrate' | 'pause' | 'unpause') {
 		if (!vm) return;
+		const target = vm;
 		actionsOpen = false;
 		runtimeBusy = true;
 		runtimeMsg = '';
+		let ok = true;
 		try {
-			await api[kind](vm.namespace, vm.name);
+			await api[kind](target.namespace, target.name);
 			runtimeMsg = `${opLabels[kind]} requested — watch the Monitor tab for progress.`;
 		} catch (e) {
+			ok = false;
 			runtimeMsg = String(e);
 		} finally {
 			runtimeBusy = false;
 		}
+		onaction?.({ verb: opLabels[kind], namespace: target.namespace, name: target.name, ok });
 	}
 
 	$effect(() => {
@@ -161,7 +185,7 @@
 	<div class="flex h-full flex-col">
 		<div class="border-b border-slate-200 px-4 pt-4">
 			<div class="mb-3 flex items-center gap-2">
-				<PowerDot power={vm.power} />
+				<PowerDot power={vm.power} paused={vm.paused} />
 				<h2 class="text-lg font-semibold text-slate-800">{vm.name}</h2>
 				<span class="rounded bg-slate-200 px-1.5 py-0.5 text-xs text-slate-600">{vm.namespace}</span>
 				<SyncBadge sync={vm.sync} />
@@ -184,10 +208,10 @@
 							<div
 								class="absolute right-0 z-20 mt-1 w-44 rounded border border-slate-200 bg-white py-1 text-xs shadow-lg"
 							>
-								<button onclick={() => runOp('restart')} class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50">Restart</button>
-								<button onclick={() => runOp('pause')} class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50">Pause</button>
-								<button onclick={() => runOp('unpause')} class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50">Unpause</button>
-								<button onclick={() => runOp('migrate')} class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50">Live-migrate</button>
+								<button onclick={() => runOp('restart')} disabled={!can.restart} class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent">Restart</button>
+								<button onclick={() => runOp('pause')} disabled={!can.pause} class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent">Pause</button>
+								<button onclick={() => runOp('unpause')} disabled={!can.unpause} class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent">Unpause</button>
+								<button onclick={() => runOp('migrate')} disabled={!can.migrate} class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent">Live-migrate</button>
 							</div>
 						{/if}
 					</div>
@@ -258,7 +282,7 @@
 					</div>
 					<div class="rounded border border-slate-200 bg-slate-50 p-3">
 						<div class="flex items-center gap-1.5 text-xs text-slate-500"><Activity size={13} /> Status</div>
-						<div class="mt-1 text-lg font-semibold text-slate-800">{vm.phase ?? vm.power}</div>
+						<div class="mt-1 text-lg font-semibold text-slate-800">{statusText}</div>
 						{#if elapsed(vm.startedAt)}<div class="text-xs text-slate-400">up {elapsed(vm.startedAt)}</div>{/if}
 					</div>
 				</div>
@@ -272,7 +296,7 @@
 						<dl class="divide-y divide-slate-100 text-[13px]">
 							{@render field('Operating system', vm.os ?? '')}
 							{@render field('Power (desired)', vm.power)}
-							{@render field('Status (actual)', vm.phase ?? '')}
+							{@render field('Status (actual)', vm.paused ? 'Paused' : (vm.phase ?? ''))}
 							<div class="flex justify-between gap-3 px-3 py-1.5">
 								<dt class="shrink-0 text-slate-500">IP addresses</dt>
 								<dd class="min-w-0 text-right font-mono text-xs text-slate-800">

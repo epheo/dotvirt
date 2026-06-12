@@ -120,7 +120,7 @@
 										{isSelected(vm) ? 'bg-blue-100 hover:bg-blue-100' : ''}"
 									onclick={() => onselect(vm)}
 								>
-									<PowerDot power={vm.power} />
+									<PowerDot power={vm.power} paused={vm.paused} />
 									<span class="truncate text-slate-700">{vm.name}</span>
 									<span class="ml-auto"><SyncBadge sync={vm.sync} compact /></span>
 								</button>

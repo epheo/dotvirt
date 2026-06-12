@@ -1,19 +1,23 @@
 <script lang="ts">
-	import { ChevronDown, ChevronUp, ListChecks } from 'lucide-svelte';
+	import { ChevronDown, ChevronUp, ListChecks, RefreshCw } from 'lucide-svelte';
 	import { api, type DraftView, type Inventory, type Proposal, type VMEvent } from '$lib/api';
 
 	let {
 		drafts,
 		proposals,
+		actions,
 		inventory,
 		username,
-		onselect
+		onselect,
+		onrefresh
 	}: {
 		drafts: { project: string; draft: DraftView }[];
 		proposals: Proposal[];
+		actions: { verb: string; namespace: string; name: string; ok: boolean; at: number }[];
 		inventory: Inventory | null;
 		username: string;
 		onselect: (namespace: string, name: string) => void;
+		onrefresh?: () => void;
 	} = $props();
 
 	let openPane = $state(true);
@@ -23,6 +27,26 @@
 	// broadcast hot path), so a busy cluster's event churn can't spam the UI.
 	let events = $state<VMEvent[] | null>(null);
 	let eventsLoading = $state(false);
+
+	// Drag-to-resize the dock height (the fixed height was cramped for many rows).
+	let dockHeight = $state(192);
+	let dragging = false;
+	let dragStartY = 0;
+	let dragStartH = 0;
+	function onResizeStart(e: PointerEvent) {
+		dragging = true;
+		dragStartY = e.clientY;
+		dragStartH = dockHeight;
+		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+	}
+	function onResizeMove(e: PointerEvent) {
+		if (!dragging) return;
+		const next = dragStartH + (dragStartY - e.clientY); // drag up → taller
+		dockHeight = Math.max(80, Math.min(next, window.innerHeight * 0.7));
+	}
+	function onResizeEnd() {
+		dragging = false;
+	}
 
 	function loadEvents() {
 		eventsLoading = true;
@@ -40,7 +64,7 @@
 	}
 
 	type Task = {
-		kind: 'staged' | 'pr' | 'drift';
+		kind: 'staged' | 'pr' | 'drift' | 'action';
 		verb: string;
 		namespace: string;
 		name: string;
@@ -49,12 +73,30 @@
 		by: string;
 		project: string;
 		url: string;
+		ok?: boolean; // for 'action' rows: did the request succeed
+		at?: number; // for 'action' rows: timestamp (keeps keys unique)
 	};
 
 	// One unified feed ordered by lifecycle stage, not timestamp: staged changes
 	// (the draft) → open PRs (proposed) → standing drift (cluster ≠ git).
 	const tasks = $derived.by<Task[]>(() => {
 		const out: Task[] = [];
+		// Imperative runtime ops the user just triggered (most recent first).
+		for (const a of actions) {
+			out.push({
+				kind: 'action',
+				verb: a.verb,
+				namespace: a.namespace,
+				name: a.name,
+				prTitle: '',
+				status: a.ok ? 'Requested' : 'Failed',
+				by: username,
+				project: '',
+				url: '',
+				ok: a.ok,
+				at: a.at
+			});
+		}
 		for (const { project, draft } of drafts) {
 			for (const it of draft.items) {
 				out.push({
@@ -105,12 +147,28 @@
 
 	const alarms = $derived(tasks.filter((t) => t.kind === 'drift').length);
 
-	const dotClass = (k: Task['kind']) =>
-		k === 'drift' ? 'bg-amber-500' : k === 'pr' ? 'bg-emerald-500' : 'bg-blue-500';
-	const textClass = (k: Task['kind']) =>
-		k === 'drift' ? 'text-amber-700' : k === 'pr' ? 'text-emerald-700' : 'text-slate-600';
-	const rowClass = (k: Task['kind']) =>
-		k === 'drift' ? 'bg-amber-50/40' : k === 'pr' ? 'bg-emerald-50/30' : '';
+	const dotClass = (t: Task) =>
+		t.kind === 'drift'
+			? 'bg-amber-500'
+			: t.kind === 'pr'
+				? 'bg-emerald-500'
+				: t.kind === 'action'
+					? t.ok
+						? 'bg-emerald-500'
+						: 'bg-red-500'
+					: 'bg-blue-500';
+	const textClass = (t: Task) =>
+		t.kind === 'drift'
+			? 'text-amber-700'
+			: t.kind === 'pr'
+				? 'text-emerald-700'
+				: t.kind === 'action'
+					? t.ok
+						? 'text-emerald-700'
+						: 'text-red-700'
+					: 'text-slate-600';
+	const rowClass = (t: Task) =>
+		t.kind === 'drift' ? 'bg-amber-50/40' : t.kind === 'pr' ? 'bg-emerald-50/30' : '';
 
 	// Row click: open the PR for proposed rows, else focus the target VM's detail.
 	function activate(t: Task) {
@@ -135,6 +193,18 @@
 </script>
 
 <section class="border-t border-slate-300 bg-white text-xs">
+	{#if openPane}
+		<!-- Drag the top edge to resize the dock. -->
+		<div
+			class="h-1.5 w-full cursor-ns-resize bg-slate-100 hover:bg-blue-300"
+			onpointerdown={onResizeStart}
+			onpointermove={onResizeMove}
+			onpointerup={onResizeEnd}
+			role="separator"
+			aria-orientation="horizontal"
+			aria-label="Resize panel"
+		></div>
+	{/if}
 	<!-- Tabbed header (vCenter's bottom pane): Recent Tasks | Events + collapse. -->
 	<div class="flex items-center gap-1 bg-slate-100 px-2 py-1 text-slate-600">
 		<ListChecks size={14} class="mx-1 text-slate-500" />
@@ -161,8 +231,18 @@
 			</span>
 		{/if}
 		<button
-			onclick={() => (openPane = !openPane)}
+			onclick={() => {
+				onrefresh?.();
+				if (tab === 'events') loadEvents();
+			}}
 			class="ml-auto p-1 text-slate-400 hover:text-slate-600"
+			title="Refresh"
+		>
+			<RefreshCw size={13} />
+		</button>
+		<button
+			onclick={() => (openPane = !openPane)}
+			class="p-1 text-slate-400 hover:text-slate-600"
 			title="Collapse/expand"
 		>
 			{#if openPane}<ChevronDown size={14} />{:else}<ChevronUp size={14} />{/if}
@@ -170,7 +250,7 @@
 	</div>
 
 	{#if openPane}
-		<div class="max-h-48 overflow-y-auto">
+		<div class="overflow-y-auto" style="height: {dockHeight}px">
 			{#if tab === 'tasks'}
 				{#if tasks.length === 0}
 					<div class="px-3 py-5 text-center text-slate-400">No active tasks.</div>
@@ -188,8 +268,8 @@
 							</tr>
 						</thead>
 						<tbody class="divide-y divide-slate-100">
-							{#each tasks as t (t.kind + ':' + t.project + ':' + t.namespace + '/' + t.name + ':' + t.url)}
-								<tr onclick={() => activate(t)} class="cursor-pointer hover:bg-blue-50 {rowClass(t.kind)}">
+							{#each tasks as t (t.kind + ':' + t.project + ':' + t.namespace + '/' + t.name + ':' + t.url + ':' + (t.at ?? ''))}
+								<tr onclick={() => activate(t)} class="cursor-pointer hover:bg-blue-50 {rowClass(t)}">
 									<td class="px-3 py-1.5 text-slate-700">{t.verb}</td>
 									<td class="px-3 py-1.5 font-medium text-slate-800">
 										{#if t.kind === 'pr'}
@@ -200,8 +280,8 @@
 									</td>
 									<td class="px-3 py-1.5">
 										<span class="inline-flex items-center gap-1.5">
-											<span class="h-1.5 w-1.5 rounded-full {dotClass(t.kind)}"></span>
-											<span class={textClass(t.kind)}>{t.status}</span>
+											<span class="h-1.5 w-1.5 rounded-full {dotClass(t)}"></span>
+											<span class={textClass(t)}>{t.status}</span>
 										</span>
 									</td>
 									<td class="px-3 py-1.5 text-slate-600">{t.by}</td>

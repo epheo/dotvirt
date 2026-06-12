@@ -49,7 +49,8 @@ type VM struct {
 	SourceFile   string            `json:"sourceFile"` // path within the repo
 
 	// From cluster (actual state), when cluster reads are enabled.
-	Phase        string   `json:"phase,omitempty"` // VMI phase, e.g. Running
+	Phase        string   `json:"phase,omitempty"`  // VMI phase, e.g. Running
+	Paused       bool     `json:"paused,omitempty"` // VMI Paused condition (phase stays Running)
 	GuestIP      string   `json:"guestIP,omitempty"`
 	IPs          []string `json:"ips,omitempty"` // every guest-reported IP
 	NodeName     string   `json:"nodeName,omitempty"`

@@ -199,10 +199,10 @@
 								class="cursor-pointer align-middle"
 							/>
 						</td>
-						<td class="px-3 py-1.5"><PowerDot power={vm.power} /></td>
+						<td class="px-3 py-1.5"><PowerDot power={vm.power} paused={vm.paused} /></td>
 						<td class="px-3 py-1.5 font-medium text-slate-800">{vm.name}</td>
 						<td class="px-3 py-1.5 text-slate-600">{vm.namespace}</td>
-						<td class="px-3 py-1.5 text-slate-600">{vm.phase ?? '—'}</td>
+						<td class="px-3 py-1.5 text-slate-600">{vm.paused ? 'Paused' : (vm.phase ?? '—')}</td>
 						<td class="px-3 py-1.5 font-mono text-xs text-slate-600">{vm.guestIP ?? '—'}</td>
 						<td class="px-3 py-1.5 text-right text-slate-700">{vm.cpuCores ?? '—'}</td>
 						<td class="px-3 py-1.5 text-right text-slate-700">{vm.memory ?? '—'}</td>

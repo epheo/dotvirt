@@ -47,7 +47,8 @@ type LiveVM struct {
 	MemoryActual string    // current guest memory (hotplug-aware), e.g. "1Gi"
 	StartedAt    time.Time // when the VMI entered Running, for uptime
 
-	Ready bool
+	Paused bool // VMI Paused condition is true (phase stays Running while paused)
+	Ready  bool
 }
 
 // State is the SA-maintained snapshot. Build with New, start with Run; reads
@@ -196,8 +197,11 @@ func liveFromVMI(vmi *kubevirtcorev1.VirtualMachineInstance) LiveVM {
 		}
 	}
 	for _, cond := range s.Conditions {
-		if cond.Type == kubevirtcorev1.VirtualMachineInstanceReady {
+		switch cond.Type {
+		case kubevirtcorev1.VirtualMachineInstanceReady:
 			live.Ready = cond.Status == corev1.ConditionTrue
+		case kubevirtcorev1.VirtualMachineInstancePaused:
+			live.Paused = cond.Status == corev1.ConditionTrue
 		}
 	}
 	return live
