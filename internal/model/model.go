@@ -80,9 +80,10 @@ type Migration struct {
 
 // Disk is a disk device on the VM (from the template).
 type Disk struct {
-	Name string `json:"name"`
-	Type string `json:"type,omitempty"` // dataVolume | emptyDisk | containerDisk | cloudInitNoCloud | …
-	Size string `json:"size,omitempty"` // for emptyDisk capacity, when known
+	Name         string `json:"name"`
+	Type         string `json:"type,omitempty"`         // dataVolume | emptyDisk | containerDisk | cloudInitNoCloud | …
+	Size         string `json:"size,omitempty"`         // emptyDisk capacity or dataVolume requested storage
+	StorageClass string `json:"storageClass,omitempty"` // dataVolume storageClassName (empty = cluster default)
 }
 
 // NIC is a network interface on the VM.
@@ -356,10 +357,11 @@ type ResyncResult struct {
 
 // Options are the cluster-provided choices for the wizard/editor.
 type Options struct {
-	Instancetypes []Instancetype  `json:"instancetypes"`
-	Preferences   []Preference    `json:"preferences"`
-	OSImages      []OSImage       `json:"osImages"`
-	Networks      []NetworkOption `json:"networks"`
+	Instancetypes  []Instancetype  `json:"instancetypes"`
+	Preferences    []Preference    `json:"preferences"`
+	OSImages       []OSImage       `json:"osImages"`
+	Networks       []NetworkOption `json:"networks"`
+	StorageClasses []StorageClass  `json:"storageClasses"`
 }
 
 type Instancetype struct {
@@ -379,4 +381,8 @@ type OSImage struct {
 type NetworkOption struct {
 	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
+}
+type StorageClass struct {
+	Name    string `json:"name"`
+	Default bool   `json:"default,omitempty"` // the cluster's default class annotation
 }

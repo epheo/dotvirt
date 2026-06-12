@@ -24,6 +24,7 @@
 	let instancetype = $state('');
 	let preference = $state('');
 	let diskSize = $state('30Gi');
+	let storageClass = $state(''); // '' = cluster default
 	let running = $state(true);
 	let sshKey = $state('');
 	let user = $state('');
@@ -69,6 +70,7 @@
 			preference,
 			osImage: { name: imgName, namespace: imgNs },
 			diskSize,
+			storageClass: storageClass || undefined,
 			running,
 			extraDisks: extraDisks.length ? extraDisks : undefined,
 			networks: selectedNetworks.length ? selectedNetworks.map((n) => ({ name: n })) : undefined
@@ -144,6 +146,16 @@
 					<label class="block">
 						<span class="text-slate-600">Root disk size</span>
 						<input bind:value={diskSize} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5" />
+					</label>
+
+					<label class="block">
+						<span class="text-slate-600">Storage class</span>
+						<select bind:value={storageClass} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
+							<option value="">cluster default</option>
+							{#each options.storageClasses as sc (sc.name)}
+								<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
+							{/each}
+						</select>
 					</label>
 
 					<label class="col-span-2 flex items-center gap-2">

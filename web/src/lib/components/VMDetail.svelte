@@ -645,7 +645,11 @@
 										{#each vm.disks as d (d.name)}
 											<li class="flex justify-between gap-3 py-1.5">
 												<span class="text-slate-800">{d.name}</span>
-												<span class="text-slate-400">{d.type}{d.size ? ` · ${d.size}` : ''}</span>
+												<span class="text-slate-400"
+													>{d.type}{d.size ? ` · ${d.size}` : ''}{d.storageClass
+														? ` · ${d.storageClass}`
+														: ''}</span
+												>
 											</li>
 										{/each}
 									</ul>

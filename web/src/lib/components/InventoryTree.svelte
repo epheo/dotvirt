@@ -2,14 +2,17 @@
 	import {
 		ChevronDown,
 		ChevronRight,
+		Database,
 		Folder,
 		Layers,
 		LayoutGrid,
+		Network,
 		Pencil,
 		Server,
 		Trash2
 	} from 'lucide-svelte';
 	import type { DraftItem, Inventory, Project, ProjectNamespace, VM } from '$lib/api';
+	import { vmNetworkKeys, vmStorageKeys } from '$lib/lenses';
 	import PowerDot from './PowerDot.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 
@@ -17,7 +20,9 @@
 		| { kind: 'all' }
 		| { kind: 'project'; project: string }
 		| { kind: 'namespace'; project: string; namespace: string }
-		| { kind: 'node'; node: string };
+		| { kind: 'node'; node: string }
+		| { kind: 'network'; network: string }
+		| { kind: 'storage'; storageClass: string };
 
 	let {
 		inventory,
@@ -57,19 +62,26 @@
 		oncontextcontainer(c, e.clientX, e.clientY);
 	}
 
-	// Inventory lens: by Project (tenant/logical, like vCenter's VMs & Templates) or
-	// by Node (physical, like Hosts & Clusters). Switching resets the grid scope.
-	let lens = $state<'project' | 'node'>('project');
-	function setLens(l: 'project' | 'node') {
+	// Inventory lens — vCenter's four organizing views over one object set:
+	// Projects (VMs & Templates), Nodes (Hosts & Clusters), Networks, Storage.
+	// Switching resets the grid scope.
+	type Lens = 'project' | 'node' | 'network' | 'storage';
+	let lens = $state<Lens>('project');
+	function setLens(l: Lens) {
 		if (l === lens) return;
 		lens = l;
 		onscope({ kind: 'all' });
 	}
+	const LENSES: { id: Lens; label: string }[] = [
+		{ id: 'project', label: 'Projects' },
+		{ id: 'node', label: 'Nodes' },
+		{ id: 'network', label: 'Networks' },
+		{ id: 'storage', label: 'Storage' }
+	];
 
 	const projectScoped = (name: string) => scope.kind === 'project' && scope.project === name;
 	const nsScoped = (project: string, ns: string) =>
 		scope.kind === 'namespace' && scope.project === project && scope.namespace === ns;
-	const nodeScoped = (node: string) => scope.kind === 'node' && scope.node === node;
 
 	// Collapsed state keyed by node id; default expanded.
 	let collapsed = $state<Record<string, boolean>>({});
@@ -83,18 +95,37 @@
 	const projectDrift = (p: Project) => p.namespaces.some(nsDrift);
 	const vmCount = (p: Project) => p.namespaces.reduce((n, ns) => n + ns.vms.length, 0);
 
-	// VMs grouped by the node they run on, for the "By Node" lens.
-	const byNode = $derived.by(() => {
+	// Flat groupings for the non-project lenses: one group per key, a VM under
+	// every key it matches (a VM with two NICs shows under both networks, as
+	// vCenter does). Keys come from $lib/lenses so the grid filter agrees.
+	const flatGroups = $derived.by(() => {
+		if (lens === 'project') return [];
 		const m = new Map<string, VM[]>();
+		const add = (key: string, vm: VM) => {
+			if (!m.has(key)) m.set(key, []);
+			m.get(key)!.push(vm);
+		};
 		for (const p of inventory.projects)
 			for (const ns of p.namespaces)
 				for (const vm of ns.vms) {
-					const node = vm.nodeName || '(unscheduled)';
-					if (!m.has(node)) m.set(node, []);
-					m.get(node)!.push(vm);
+					if (lens === 'node') add(vm.nodeName || '(unscheduled)', vm);
+					else if (lens === 'network') for (const k of vmNetworkKeys(vm)) add(k, vm);
+					else for (const k of vmStorageKeys(vm)) add(k, vm);
 				}
 		return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 	});
+
+	// Scope target + highlight for a flat-lens group row.
+	const flatScope = (key: string): Scope =>
+		lens === 'node'
+			? { kind: 'node', node: key }
+			: lens === 'network'
+				? { kind: 'network', network: key }
+				: { kind: 'storage', storageClass: key };
+	const flatScoped = (key: string) =>
+		(scope.kind === 'node' && scope.node === key) ||
+		(scope.kind === 'network' && scope.network === key) ||
+		(scope.kind === 'storage' && scope.storageClass === key);
 </script>
 
 {#snippet vmRow(vm: VM, pad: string)}
@@ -128,24 +159,21 @@
 {/snippet}
 
 <div class="select-none text-[13px]">
-	<!-- Lens switch (one object set, two organizing views). -->
-	<div class="flex gap-1 border-b border-slate-200 px-2 py-1.5">
-		<button
-			class="flex items-center gap-1 rounded px-2 py-0.5 text-xs {lens === 'project'
-				? 'bg-blue-100 font-medium text-blue-700'
-				: 'text-slate-500 hover:bg-slate-100'}"
-			onclick={() => setLens('project')}
-		>
-			<Folder size={12} /> Projects
-		</button>
-		<button
-			class="flex items-center gap-1 rounded px-2 py-0.5 text-xs {lens === 'node'
-				? 'bg-blue-100 font-medium text-blue-700'
-				: 'text-slate-500 hover:bg-slate-100'}"
-			onclick={() => setLens('node')}
-		>
-			<Server size={12} /> Nodes
-		</button>
+	<!-- Lens switch (one object set, four organizing views). -->
+	<div class="flex flex-wrap gap-1 border-b border-slate-200 px-2 py-1.5">
+		{#each LENSES as l (l.id)}
+			<button
+				class="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs {lens === l.id
+					? 'bg-blue-100 font-medium text-blue-700'
+					: 'text-slate-500 hover:bg-slate-100'}"
+				onclick={() => setLens(l.id)}
+			>
+				{#if l.id === 'project'}<Folder size={12} />{:else if l.id === 'node'}<Server
+						size={12}
+					/>{:else if l.id === 'network'}<Network size={12} />{:else}<Database size={12} />{/if}
+				{l.label}
+			</button>
+		{/each}
 	</div>
 
 	<!-- All VMs: resets the grid scope to the whole inventory. -->
@@ -263,31 +291,34 @@
 			</div>
 		{/if}
 	{:else}
-		<!-- By Node: physical placement (the Hosts & Clusters analog). -->
-		{#each byNode as [node, vms] (node)}
-			{@const nid = `node:${node}`}
+		<!-- Flat lenses: Nodes (physical placement, the Hosts & Clusters analog),
+		     Networks (by NIC network), Storage (by dataVolume storage class). -->
+		{#each flatGroups as [key, vms] (key)}
+			{@const gid = `${lens}:${key}`}
 			<div>
 				<div
 					class="flex w-full items-center gap-1 px-2 py-1 hover:bg-slate-100
-						{nodeScoped(node) ? 'bg-blue-50' : ''}"
+						{flatScoped(key) ? 'bg-blue-50' : ''}"
 				>
 					<button
 						class="flex w-3 items-center text-slate-400"
-						onclick={() => toggle(nid)}
+						onclick={() => toggle(gid)}
 						title="Expand/collapse"
 					>
-						{#if collapsed[nid]}<ChevronRight size={12} />{:else}<ChevronDown size={12} />{/if}
+						{#if collapsed[gid]}<ChevronRight size={12} />{:else}<ChevronDown size={12} />{/if}
 					</button>
 					<button
 						class="flex min-w-0 flex-1 items-center gap-1 text-left"
-						onclick={() => onscope({ kind: 'node', node })}
+						onclick={() => onscope(flatScope(key))}
 					>
-						<Server size={14} class="shrink-0 text-slate-500" />
-						<span class="truncate font-semibold text-slate-700">{node}</span>
+						{#if lens === 'node'}<Server size={14} class="shrink-0 text-slate-500" />
+						{:else if lens === 'network'}<Network size={14} class="shrink-0 text-slate-500" />
+						{:else}<Database size={14} class="shrink-0 text-slate-500" />{/if}
+						<span class="truncate font-semibold text-slate-700">{key}</span>
 						<span class="ml-auto text-xs text-slate-400">{vms.length}</span>
 					</button>
 				</div>
-				{#if !collapsed[nid]}
+				{#if !collapsed[gid]}
 					{#each vms as vm (vm.namespace + '/' + vm.name)}
 						{@render vmRow(vm, 'pl-7')}
 					{/each}
@@ -295,8 +326,8 @@
 			</div>
 		{/each}
 
-		{#if byNode.length === 0}
-			<div class="px-2 py-4 text-center text-xs text-slate-400">No running VMs to place.</div>
+		{#if flatGroups.length === 0}
+			<div class="px-2 py-4 text-center text-xs text-slate-400">No VMs in this view.</div>
 		{/if}
 	{/if}
 </div>

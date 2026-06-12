@@ -11,7 +11,8 @@ export type SyncStatus = 'Synced' | 'OutOfSync' | 'NotTracked' | 'Unknown';
 export interface Disk {
 	name: string;
 	type?: string;
-	size?: string;
+	size?: string; // emptyDisk capacity or dataVolume requested storage
+	storageClass?: string; // dataVolume storageClassName (empty = cluster default)
 }
 export interface NIC {
 	name: string;
@@ -133,11 +134,16 @@ export interface NetworkOption {
 	name: string;
 	namespace: string;
 }
+export interface StorageClass {
+	name: string;
+	default?: boolean; // the cluster's default class
+}
 export interface Options {
 	instancetypes: Instancetype[];
 	preferences: Preference[];
 	osImages: OSImage[];
 	networks: NetworkOption[];
+	storageClasses: StorageClass[];
 }
 
 export interface CreateVMRequest {
@@ -147,6 +153,7 @@ export interface CreateVMRequest {
 	preference: string;
 	osImage: { name: string; namespace: string };
 	diskSize?: string;
+	storageClass?: string; // root disk class; empty = cluster default
 	running: boolean;
 	cloudInit?: { user?: string; password?: string; sshKey?: string; extraUserData?: string };
 	extraDisks?: { name: string; size: string }[];

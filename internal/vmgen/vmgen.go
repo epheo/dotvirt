@@ -18,6 +18,7 @@ type Spec struct {
 	Preference   string            `json:"preference"`   // cluster preference name (OS tuning)
 	OSImage      OSImageRef        `json:"osImage"`      // boot DataSource
 	DiskSize     string            `json:"diskSize"`     // root disk size, e.g. "30Gi"
+	StorageClass string            `json:"storageClass"` // root disk class; empty = cluster default
 	Running      bool              `json:"running"`      // start immediately?
 	CloudInit    *CloudInit        `json:"cloudInit,omitempty"`
 	ExtraDisks   []ExtraDisk       `json:"extraDisks,omitempty"`
@@ -98,14 +99,23 @@ func vmSpec(s Spec) map[string]any {
 		"instancetype": map[string]any{"name": s.Instancetype},
 		"preference":   map[string]any{"name": s.Preference},
 		"dataVolumeTemplates": []any{
-			dataVolumeTemplate(rootVol, s.OSImage, orDefault(s.DiskSize, "30Gi")),
+			dataVolumeTemplate(rootVol, s.OSImage, orDefault(s.DiskSize, "30Gi"), s.StorageClass),
 		},
 		"template": template(s, rootVol),
 	}
 	return spec
 }
 
-func dataVolumeTemplate(name string, img OSImageRef, size string) map[string]any {
+func dataVolumeTemplate(name string, img OSImageRef, size, class string) map[string]any {
+	storage := map[string]any{
+		"resources": map[string]any{
+			"requests": map[string]any{"storage": size},
+		},
+	}
+	// Empty = omit, so the provisioner picks the cluster default class.
+	if class != "" {
+		storage["storageClassName"] = class
+	}
 	return map[string]any{
 		"metadata": map[string]any{"name": name},
 		"spec": map[string]any{
@@ -114,11 +124,7 @@ func dataVolumeTemplate(name string, img OSImageRef, size string) map[string]any
 				"name":      img.Name,
 				"namespace": img.Namespace,
 			},
-			"storage": map[string]any{
-				"resources": map[string]any{
-					"requests": map[string]any{"storage": size},
-				},
-			},
+			"storage": storage,
 		},
 	}
 }

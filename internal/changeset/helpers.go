@@ -87,6 +87,9 @@ func changesForCreate(s vmgen.Spec) []model.Change {
 	if s.DiskSize != "" {
 		out = append(out, model.Change{Field: "Root disk", Action: "add", To: s.DiskSize})
 	}
+	if s.StorageClass != "" {
+		out = append(out, model.Change{Field: "Storage class", Action: "add", To: s.StorageClass})
+	}
 	for _, d := range s.ExtraDisks {
 		out = append(out, model.Change{Field: "Disk", Action: "add", To: fmt.Sprintf("%s (%s)", d.Name, d.Size)})
 	}

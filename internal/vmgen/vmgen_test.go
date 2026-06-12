@@ -84,3 +84,31 @@ func TestManifestValidation(t *testing.T) {
 		t.Fatal("expected validation error")
 	}
 }
+
+// A chosen storage class lands on the root DV template; empty omits the field
+// so the provisioner picks the cluster default.
+func TestManifestStorageClass(t *testing.T) {
+	base := Spec{
+		Name: "vm1", Namespace: "ns1",
+		Instancetype: "u1.small", Preference: "fedora",
+		OSImage: OSImageRef{Name: "fedora", Namespace: "kv"},
+	}
+
+	withClass := base
+	withClass.StorageClass = "lvms-vgfast"
+	_, content, err := Manifest(withClass)
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+	if !strings.Contains(string(content), "storageClassName: lvms-vgfast") {
+		t.Errorf("manifest should pin the chosen class:\n%s", content)
+	}
+
+	_, content, err = Manifest(base)
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+	if strings.Contains(string(content), "storageClassName") {
+		t.Errorf("empty class must omit storageClassName (cluster default):\n%s", content)
+	}
+}

@@ -28,6 +28,17 @@ type vmDoc struct {
 		Preference *struct {
 			Name string `yaml:"name"`
 		} `yaml:"preference"`
+		// DataVolumeTemplates carry the provisioned disks' size + storage class
+		// (CDI accepts both storage and the legacy pvc spec form).
+		DataVolumeTemplates []struct {
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+			Spec struct {
+				Storage *dvStorageSpec `yaml:"storage"`
+				PVC     *dvStorageSpec `yaml:"pvc"`
+			} `yaml:"spec"`
+		} `yaml:"dataVolumeTemplates"`
 		Template struct {
 			Spec struct {
 				Domain struct {
@@ -59,8 +70,13 @@ type vmDoc struct {
 					} `yaml:"multus"`
 				} `yaml:"networks"`
 				Volumes []struct {
-					Name          string         `yaml:"name"`
-					DataVolume    map[string]any `yaml:"dataVolume"`
+					Name       string `yaml:"name"`
+					DataVolume *struct {
+						Name string `yaml:"name"`
+					} `yaml:"dataVolume"`
+					PVC *struct {
+						ClaimName string `yaml:"claimName"`
+					} `yaml:"persistentVolumeClaim"`
 					ContainerDisk map[string]any `yaml:"containerDisk"`
 					CloudInit     map[string]any `yaml:"cloudInitNoCloud"`
 					EmptyDisk     *struct {
@@ -121,9 +137,35 @@ func refName(ref *struct {
 	return ref.Name
 }
 
+// dvStorageSpec is the size + class part of a DataVolume's storage (or legacy
+// pvc) spec.
+type dvStorageSpec struct {
+	StorageClassName string `yaml:"storageClassName"`
+	Resources        struct {
+		Requests struct {
+			Storage string `yaml:"storage"`
+		} `yaml:"requests"`
+	} `yaml:"resources"`
+}
+
 // disksFromDoc derives disk devices, joining each disk with its volume to label
-// the type (and capacity for blank disks).
+// the type, and dataVolume volumes with their dataVolumeTemplates for the
+// provisioned size + storage class.
 func disksFromDoc(d vmDoc) []model.Disk {
+	// DV template name → (size, class), from whichever spec form is present.
+	type dvInfo struct{ size, class string }
+	dvs := map[string]dvInfo{}
+	for _, t := range d.Spec.DataVolumeTemplates {
+		spec := t.Spec.Storage
+		if spec == nil {
+			spec = t.Spec.PVC
+		}
+		if spec == nil {
+			continue
+		}
+		dvs[t.Metadata.Name] = dvInfo{size: spec.Resources.Requests.Storage, class: spec.StorageClassName}
+	}
+
 	ts := d.Spec.Template.Spec
 	volType := map[string]model.Disk{}
 	for _, v := range ts.Volumes {
@@ -131,6 +173,11 @@ func disksFromDoc(d vmDoc) []model.Disk {
 		switch {
 		case v.DataVolume != nil:
 			disk.Type = "dataVolume"
+			if info, ok := dvs[v.DataVolume.Name]; ok {
+				disk.Size, disk.StorageClass = info.size, info.class
+			}
+		case v.PVC != nil:
+			disk.Type = "pvc"
 		case v.ContainerDisk != nil:
 			disk.Type = "containerDisk"
 		case v.CloudInit != nil:

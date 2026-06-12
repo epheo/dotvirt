@@ -15,10 +15,11 @@ import (
 // GVRs for the cluster-provided wizard/editor choices: sizes (instancetypes),
 // OS tuning (preferences), boot images (DataSources), networks (NADs).
 var (
-	gvrInstancetypes = schema.GroupVersionResource{Group: "instancetype.kubevirt.io", Version: "v1beta1", Resource: "virtualmachineclusterinstancetypes"}
-	gvrPreferences   = schema.GroupVersionResource{Group: "instancetype.kubevirt.io", Version: "v1beta1", Resource: "virtualmachineclusterpreferences"}
-	gvrDataSources   = schema.GroupVersionResource{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datasources"}
-	gvrNADs          = schema.GroupVersionResource{Group: "k8s.cni.cncf.io", Version: "v1", Resource: "network-attachment-definitions"}
+	gvrInstancetypes  = schema.GroupVersionResource{Group: "instancetype.kubevirt.io", Version: "v1beta1", Resource: "virtualmachineclusterinstancetypes"}
+	gvrPreferences    = schema.GroupVersionResource{Group: "instancetype.kubevirt.io", Version: "v1beta1", Resource: "virtualmachineclusterpreferences"}
+	gvrDataSources    = schema.GroupVersionResource{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datasources"}
+	gvrNADs           = schema.GroupVersionResource{Group: "k8s.cni.cncf.io", Version: "v1", Resource: "network-attachment-definitions"}
+	gvrStorageClasses = schema.GroupVersionResource{Group: "storage.k8s.io", Version: "v1", Resource: "storageclasses"}
 )
 
 // dyn lazily builds a dynamic client from the cluster client's config.
@@ -68,6 +69,15 @@ func (c *Client) ListOptions(ctx context.Context) (model.Options, error) {
 	if items, err := listAllNS(ctx, dyn, gvrNADs); err == nil {
 		for i := range items {
 			opts.Networks = append(opts.Networks, model.NetworkOption{Name: items[i].GetName(), Namespace: items[i].GetNamespace()})
+		}
+	}
+
+	if items, err := listAll(ctx, dyn, gvrStorageClasses); err == nil {
+		for i := range items {
+			opts.StorageClasses = append(opts.StorageClasses, model.StorageClass{
+				Name:    items[i].GetName(),
+				Default: items[i].GetAnnotations()["storageclass.kubernetes.io/is-default-class"] == "true",
+			})
 		}
 	}
 

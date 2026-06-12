@@ -13,6 +13,7 @@
 		type VM
 	} from '$lib/api';
 	import { manifestURL, type VMAction } from '$lib/actions';
+	import { vmNetworkKeys, vmStorageKeys } from '$lib/lenses';
 	import ActionMenu from '$lib/components/ActionMenu.svelte';
 	import ChangesPanel from '$lib/components/ChangesPanel.svelte';
 	import ClusterSummary from '$lib/components/ClusterSummary.svelte';
@@ -34,7 +35,9 @@
 		| { kind: 'all' }
 		| { kind: 'project'; project: string }
 		| { kind: 'namespace'; project: string; namespace: string }
-		| { kind: 'node'; node: string };
+		| { kind: 'node'; node: string }
+		| { kind: 'network'; network: string }
+		| { kind: 'storage'; storageClass: string };
 	let scope = $state<Scope>({ kind: 'all' });
 
 	let user = $state<User | null>(null);
@@ -126,7 +129,8 @@
 	const allVMs = (inv: Inventory): VM[] =>
 		inv.projects.flatMap((p) => p.namespaces.flatMap((n) => n.vms));
 
-	// VMs in the current tree scope, feeding the center grid.
+	// VMs in the current tree scope, feeding the center grid. Network/storage
+	// membership uses the same key helpers as the tree's lens grouping.
 	const scopedVMs = $derived.by(() => {
 		if (!inventory) return [];
 		const sc = scope; // const preserves TS narrowing into the filter closures
@@ -134,6 +138,9 @@
 		if (sc.kind === 'all') return all;
 		if (sc.kind === 'node')
 			return all.filter((v) => (v.nodeName || '(unscheduled)') === sc.node);
+		if (sc.kind === 'network') return all.filter((v) => vmNetworkKeys(v).includes(sc.network));
+		if (sc.kind === 'storage')
+			return all.filter((v) => vmStorageKeys(v).includes(sc.storageClass));
 		return inventory.projects
 			.filter((p) => p.name === sc.project)
 			.flatMap((p) =>
@@ -156,9 +163,12 @@
 		const sc = scope;
 		if (sc.kind === 'project' || sc.kind === 'namespace')
 			return inventory.projects.filter((p) => p.name === sc.project);
-		if (sc.kind === 'node') return [];
+		if (sc.kind === 'node' || sc.kind === 'network' || sc.kind === 'storage') return [];
 		return inventory.projects;
 	});
+	// The metrics-backend scope. Network/storage lenses are navigation groupings,
+	// not metrics boundaries — their Summary/Monitor aggregate the whole
+	// inventory, like 'all'.
 	const containerScope = $derived(
 		scope.kind === 'project'
 			? { project: scope.project }
@@ -544,6 +554,14 @@
 							<span class="text-slate-300">/</span>
 							<span class="font-medium text-slate-700">Node: {scope.node}</span>
 						{/if}
+						{#if scope.kind === 'network'}
+							<span class="text-slate-300">/</span>
+							<span class="font-medium text-slate-700">Network: {scope.network}</span>
+						{/if}
+						{#if scope.kind === 'storage'}
+							<span class="text-slate-300">/</span>
+							<span class="font-medium text-slate-700">Storage: {scope.storageClass}</span>
+						{/if}
 					</div>
 
 					<nav class="flex gap-1 border-b border-slate-200 px-4 text-sm">
@@ -579,21 +597,33 @@
 						<!-- Read-only container settings: what backs each project. dotvirt owns
 						     nothing here — projects are namespace labels, config is the repo. -->
 						<div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-							{#if scope.kind === 'node'}
+							{#if scope.kind === 'node' || scope.kind === 'network' || scope.kind === 'storage'}
+								{@const label =
+									scope.kind === 'node'
+										? `Node: ${scope.node}`
+										: scope.kind === 'network'
+											? `Network: ${scope.network}`
+											: `Storage class: ${scope.storageClass}`}
 								<section class="max-w-2xl rounded border border-slate-200">
 									<h3
 										class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase"
 									>
-										Node: {scope.node}
+										{label}
 									</h3>
 									<dl class="divide-y divide-slate-100 text-[13px]">
 										<div class="flex justify-between gap-3 px-3 py-1.5">
-											<dt class="text-slate-500">VMs placed here</dt>
+											<dt class="text-slate-500">
+												{scope.kind === 'node' ? 'VMs placed here' : 'VMs attached'}
+											</dt>
 											<dd class="text-slate-800">{scopedVMs.length}</dd>
 										</div>
 									</dl>
 									<p class="border-t border-slate-100 px-3 py-2 text-xs text-slate-400">
-										Node configuration is managed by the cluster platform, not dotvirt.
+										{scope.kind === 'node'
+											? 'Node configuration is managed by the cluster platform, not dotvirt.'
+											: scope.kind === 'network'
+												? 'Network definitions (NADs) are managed by the cluster platform, not dotvirt.'
+												: 'Storage classes are managed by the cluster platform, not dotvirt.'}
 									</p>
 								</section>
 							{:else}

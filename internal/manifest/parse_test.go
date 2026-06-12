@@ -81,3 +81,76 @@ func TestPowerFromRunStrategy(t *testing.T) {
 		}
 	}
 }
+
+// Disks join their volumes for type, and dataVolume volumes join their
+// dataVolumeTemplates for provisioned size + storage class (both the storage
+// and the legacy pvc spec forms).
+func TestParseVMsDecodesDataVolumeStorage(t *testing.T) {
+	manifest := []byte(`
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: db
+  namespace: alpha
+spec:
+  runStrategy: Always
+  dataVolumeTemplates:
+    - metadata:
+        name: db-rootdisk
+      spec:
+        sourceRef:
+          kind: DataSource
+          name: fedora
+        storage:
+          storageClassName: lvms-vgfast
+          resources:
+            requests:
+              storage: 30Gi
+    - metadata:
+        name: db-data
+      spec:
+        pvc:
+          storageClassName: lvms-vgslow
+          resources:
+            requests:
+              storage: 100Gi
+  template:
+    spec:
+      domain:
+        devices:
+          disks:
+            - name: rootdisk
+            - name: data
+            - name: scratch
+      volumes:
+        - name: rootdisk
+          dataVolume:
+            name: db-rootdisk
+        - name: data
+          dataVolume:
+            name: db-data
+        - name: scratch
+          emptyDisk:
+            capacity: 2Gi
+`)
+	vms, err := ParseVMs("alpha/db.yaml", manifest, "alpha")
+	if err != nil {
+		t.Fatalf("ParseVMs: %v", err)
+	}
+	disks := vms[0].Disks
+	if len(disks) != 3 {
+		t.Fatalf("want 3 disks, got %+v", disks)
+	}
+	root := disks[0]
+	if root.Type != "dataVolume" || root.Size != "30Gi" || root.StorageClass != "lvms-vgfast" {
+		t.Errorf("rootdisk should carry its DV template's size+class: %+v", root)
+	}
+	data := disks[1]
+	if data.Type != "dataVolume" || data.Size != "100Gi" || data.StorageClass != "lvms-vgslow" {
+		t.Errorf("data disk should decode the legacy pvc spec form: %+v", data)
+	}
+	scratch := disks[2]
+	if scratch.Type != "emptyDisk" || scratch.Size != "2Gi" || scratch.StorageClass != "" {
+		t.Errorf("emptyDisk unchanged by DV join: %+v", scratch)
+	}
+}
