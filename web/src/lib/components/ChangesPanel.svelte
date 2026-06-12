@@ -1,14 +1,16 @@
 <script lang="ts">
 	import { ChevronDown, ChevronRight, Folder, X } from 'lucide-svelte';
-	import { api, type DraftView, type ProposeResult } from '$lib/api';
+	import { api, type DraftView, type Proposal, type ProposeResult } from '$lib/api';
 	import ChangeList from './ChangeList.svelte';
 
 	let {
 		drafts,
+		proposals,
 		onclose,
 		onchanged
 	}: {
 		drafts: { project: string; draft: DraftView }[];
+		proposals: Proposal[];
 		onclose: () => void;
 		onchanged: () => void;
 	} = $props();
@@ -57,10 +59,29 @@
 	</header>
 
 	<div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-		<!-- Proposal results live OUTSIDE the per-project loop: proposing empties a
-		     draft, so its project drops out of `drafts` and its section unmounts — the
-		     PR link must persist here regardless. -->
-		{#each Object.entries(result) as [project, r] (project)}
+		<!-- Open PRs (persistent, fetched from Forgejo) — survive closing the panel,
+		     unlike the transient propose response below. -->
+		{#each proposals as p (p.project)}
+			<div
+				class="mb-2 flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm"
+			>
+				<span class="font-medium text-slate-700">{p.project}</span>
+				<span class="rounded bg-emerald-100 px-1.5 text-xs font-medium text-emerald-700">
+					PR #{p.prNumber} open
+				</span>
+				<a
+					href={p.prURL}
+					target="_blank"
+					rel="noopener"
+					class="ml-auto min-w-0 truncate text-xs text-blue-700 underline">{p.title || p.prURL}</a
+				>
+			</div>
+		{/each}
+
+		<!-- Transient propose feedback. Open PRs are shown persistently above (from
+		     `proposals`), so here we surface only the no-PR cases: forge unconfigured
+		     (compare link) or push-only. -->
+		{#each Object.entries(result).filter(([, r]) => !r.prURL) as [project, r] (project)}
 			<div class="mb-2 rounded border border-green-200 bg-green-50 p-3 text-sm">
 				<div class="mb-1 flex items-center gap-1">
 					<span class="font-medium text-slate-700">{project}</span>
