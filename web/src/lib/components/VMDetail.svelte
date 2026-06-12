@@ -9,6 +9,7 @@
 	import Console from './Console.svelte';
 	import EditSettings from './EditSettings.svelte';
 	import Performance from './Performance.svelte';
+	import Permissions from './Permissions.svelte';
 	import PowerDot from './PowerDot.svelte';
 	import Snapshots from './Snapshots.svelte';
 	import StagedBadge from './StagedBadge.svelte';
@@ -34,7 +35,7 @@
 		intent?: { id: 'edit' | 'delete' | 'console' | 'snapshot'; seq: number } | null;
 	} = $props();
 
-	type Tab = 'summary' | 'monitor' | 'configure' | 'snapshots' | 'console';
+	type Tab = 'summary' | 'monitor' | 'configure' | 'permissions' | 'snapshots' | 'console';
 	let tab = $state<Tab>('summary');
 	// Monitor sub-rail (vCenter keeps all time-series under Monitor).
 	let monitorView = $state<'events' | 'performance'>('events');
@@ -314,7 +315,7 @@
 				</div>
 			</div>
 			<nav class="flex gap-1 text-sm">
-				{#each ['summary', 'monitor', 'configure', 'snapshots', 'console'] as const as t (t)}
+				{#each ['summary', 'monitor', 'configure', 'permissions', 'snapshots', 'console'] as const as t (t)}
 					<button
 						class="border-b-2 px-3 py-1.5 capitalize {tab === t
 							? 'border-blue-600 text-blue-700'
@@ -646,6 +647,8 @@
 						{/if}
 					</div>
 				</div>
+			{:else if tab === 'permissions'}
+				<Permissions namespaces={[vm.namespace]} />
 			{:else if tab === 'snapshots'}
 				{#key `${vm.namespace}/${vm.name}`}
 					<Snapshots {vm} />

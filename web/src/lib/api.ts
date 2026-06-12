@@ -266,6 +266,19 @@ export interface VMEvent {
 	lastSeen?: string;
 }
 
+// The caller's effective capabilities in one namespace (the Permissions tab).
+export interface Capability {
+	id: string;
+	label: string;
+	allowed: boolean;
+	detail?: string;
+}
+export interface Permissions {
+	namespace: string;
+	capabilities: Capability[];
+	incomplete?: boolean;
+}
+
 const enc = encodeURIComponent;
 
 export const api = {
@@ -305,6 +318,8 @@ export const api = {
 	events: (namespace: string, name: string) =>
 		get<VMEvent[]>(`/api/vms/${enc(namespace)}/${enc(name)}/events`),
 	allEvents: () => get<VMEvent[]>('/api/events'),
+	permissions: (namespace: string) =>
+		get<Permissions>(`/api/permissions?namespace=${enc(namespace)}`),
 	metrics: (namespace: string, name: string, range: string) =>
 		get<VMMetrics>(`/api/vms/${enc(namespace)}/${enc(name)}/metrics?range=${enc(range)}`),
 	vmUsage: (namespace: string, name: string) =>

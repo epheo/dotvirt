@@ -193,6 +193,24 @@ type Proposal struct {
 	Title    string `json:"title,omitempty"`
 }
 
+// Permissions is the caller's effective capability set in one namespace — the
+// Permissions tab. Curated to what the UI does under the user's token; config/
+// power/delete are PR-gated (the forge decides), so they aren't rows here.
+type Permissions struct {
+	Namespace    string       `json:"namespace"`
+	Capabilities []Capability `json:"capabilities"`
+	Incomplete   bool         `json:"incomplete,omitempty"` // the rules review couldn't enumerate everything
+}
+
+// Capability is one Permissions row: a UI action and whether the caller's token
+// may perform it, with the RBAC behind it for the tooltip.
+type Capability struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Allowed bool   `json:"allowed"`
+	Detail  string `json:"detail,omitempty"`
+}
+
 // Commit is one entry in a project's git history, shown in the Changes pane.
 type Commit struct {
 	Hash      string `json:"hash"`
