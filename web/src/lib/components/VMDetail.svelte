@@ -25,8 +25,10 @@
 		onstagedopen?: () => void;
 	} = $props();
 
-	type Tab = 'summary' | 'monitor' | 'performance' | 'console';
+	type Tab = 'summary' | 'monitor' | 'console';
 	let tab = $state<Tab>('summary');
+	// Monitor sub-rail (vCenter keeps all time-series under Monitor).
+	let monitorView = $state<'events' | 'performance'>('events');
 	let editing = $state(false);
 
 	// Delete is destructive once the PR merges, so it's gated behind a confirm
@@ -87,7 +89,7 @@
 
 	// Lazy-load events the first time the Monitor tab is opened for this VM.
 	$effect(() => {
-		if (vm && tab === 'monitor' && events === null && !eventsLoading) {
+		if (vm && tab === 'monitor' && monitorView === 'events' && events === null && !eventsLoading) {
 			loadEvents(vm.namespace, vm.name);
 		}
 	});
@@ -122,6 +124,7 @@
 		// Reset when the selection changes, and (re)load drift for this VM.
 		const cur = vm;
 		tab = 'summary';
+		monitorView = 'events';
 		editing = false;
 		deleting = false;
 		deleteErr = '';
@@ -252,7 +255,7 @@
 				</div>
 			</div>
 			<nav class="flex gap-1 text-sm">
-				{#each ['summary', 'monitor', 'performance', 'console'] as const as t (t)}
+				{#each ['summary', 'monitor', 'console'] as const as t (t)}
 					<button
 						class="border-b-2 px-3 py-1.5 capitalize {tab === t
 							? 'border-blue-600 text-blue-700'
@@ -441,7 +444,24 @@
 					</div>
 				{/if}
 			{:else if tab === 'monitor'}
-				{#if eventsLoading && !events}
+				<!-- Monitor sub-rail: events + performance, vCenter's time-series home. -->
+				<div class="mb-3 flex gap-1 border-b border-slate-200 text-sm">
+					{#each ['events', 'performance'] as const as v (v)}
+						<button
+							class="border-b-2 px-3 py-1 capitalize {monitorView === v
+								? 'border-blue-600 text-blue-700'
+								: 'border-transparent text-slate-500 hover:text-slate-700'}"
+							onclick={() => (monitorView = v)}
+						>
+							{v}
+						</button>
+					{/each}
+				</div>
+				{#if monitorView === 'performance'}
+					{#key `${vm.namespace}/${vm.name}`}
+						<Performance {vm} />
+					{/key}
+				{:else if eventsLoading && !events}
 					<div class="py-8 text-center text-sm text-slate-400">Loading events…</div>
 				{:else if !events || events.length === 0}
 					<div class="py-8 text-center text-sm text-slate-400">No recent events.</div>
@@ -481,10 +501,6 @@
 						</tbody>
 					</table>
 				{/if}
-			{:else if tab === 'performance'}
-				{#key `${vm.namespace}/${vm.name}`}
-					<Performance {vm} />
-				{/key}
 			{:else}
 				{#key `${vm.namespace}/${vm.name}`}
 					<Console {vm} />

@@ -251,17 +251,29 @@ func (c *Client) VMUsage(ctx context.Context, token, ns, name string) (model.VMU
 	}, nil
 }
 
-// ClusterSummary returns the aggregate capacity view for the "All VMs" landing.
-// VM-scoped sums are limited to namespaces (the caller's visible set); node
-// capacity is cluster-wide. topConsumers lists the heaviest VMs by CPU + memory.
-func (c *Client) ClusterSummary(ctx context.Context, token string, namespaces []string) (model.ClusterSummary, error) {
-	// Scope VM metrics to the caller's namespaces. With none, match nothing (rather
-	// than every namespace) so usage reads zero while node capacity still shows.
+// ClusterSummary returns the aggregate capacity view for a container scope (the
+// whole inventory, a project, a namespace, or a node). VM-scoped sums are limited
+// to namespaces (the caller's visible set) and optionally a node; capacity is the
+// node-allocatable total (cluster-wide, or that one node). topConsumers lists the
+// heaviest VMs by CPU + memory.
+func (c *Client) ClusterSummary(ctx context.Context, token string, namespaces []string, node string) (model.ClusterSummary, error) {
+	// Scope VM metrics to the caller's namespaces (+ a node when drilling into one).
+	// With no namespaces, match nothing so usage reads zero but node capacity shows.
 	nsSel := `{namespace="__dotvirt_none__"}`
 	if len(namespaces) > 0 {
-		nsSel = fmt.Sprintf("{namespace=~%q}", strings.Join(namespaces, "|"))
+		inner := fmt.Sprintf("namespace=~%q", strings.Join(namespaces, "|"))
+		if node != "" {
+			inner += fmt.Sprintf(",node=%q", node)
+		}
+		nsSel = "{" + inner + "}"
 	}
 	vm := func(metric string) string { return metric + nsSel } // VM metric scoped to the caller
+
+	// Capacity boundary = all nodes, or the single node when scoped to one.
+	nodeFilter := ""
+	if node != "" {
+		nodeFilter = fmt.Sprintf(`,node=%q`, node)
+	}
 
 	sp := c.sparklines(ctx, token, map[string]string{
 		"cpu":  fmt.Sprintf("sum(rate(%s[2m]))", vm("kubevirt_vmi_cpu_usage_seconds_total")),
@@ -270,9 +282,9 @@ func (c *Client) ClusterSummary(ctx context.Context, token string, namespaces []
 	})
 	sc := c.scalars(ctx, token, map[string]string{
 		"cpuAlloc":  fmt.Sprintf("sum(%s)", vm("kubevirt_vmi_vcpu_count")),
-		"cpuTotal":  `sum(kube_node_status_allocatable{resource="cpu"})`,
+		"cpuTotal":  fmt.Sprintf(`sum(kube_node_status_allocatable{resource="cpu"%s})`, nodeFilter),
 		"memAlloc":  fmt.Sprintf("sum(%s)", vm("kubevirt_vmi_memory_domain_bytes")),
-		"memTotal":  `sum(kube_node_status_allocatable{resource="memory"})`,
+		"memTotal":  fmt.Sprintf(`sum(kube_node_status_allocatable{resource="memory"%s})`, nodeFilter),
 		"storTotal": fmt.Sprintf("sum(%s)", vm("kubevirt_vmi_filesystem_capacity_bytes")),
 	})
 

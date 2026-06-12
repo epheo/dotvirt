@@ -301,7 +301,14 @@ export const api = {
 		get<VMMetrics>(`/api/vms/${enc(namespace)}/${enc(name)}/metrics?range=${enc(range)}`),
 	vmUsage: (namespace: string, name: string) =>
 		get<VMUsage>(`/api/vms/${enc(namespace)}/${enc(name)}/usage`),
-	clusterSummary: () => get<ClusterSummary>('/api/metrics/cluster'),
+	clusterSummary: (scope?: { project?: string; namespace?: string; node?: string }) => {
+		const q = new URLSearchParams();
+		if (scope?.project) q.set('project', scope.project);
+		if (scope?.namespace) q.set('namespace', scope.namespace);
+		if (scope?.node) q.set('node', scope.node);
+		const qs = q.toString();
+		return get<ClusterSummary>(`/api/metrics/cluster${qs ? `?${qs}` : ''}`);
+	},
 	adopt: (namespace: string, name: string) =>
 		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/adopt`, {}),
 	resync: (namespace: string, name: string) =>

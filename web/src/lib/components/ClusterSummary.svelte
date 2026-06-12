@@ -3,19 +3,29 @@
 	import { cores, bytes } from '$lib/format';
 	import Ring from './Ring.svelte';
 
-	let { onselect }: { onselect?: (namespace: string, name: string) => void } = $props();
+	let {
+		scope = {},
+		onselect
+	}: {
+		scope?: { project?: string; namespace?: string; node?: string };
+		onselect?: (namespace: string, name: string) => void;
+	} = $props();
 
 	let data = $state<ClusterSummary | null>(null);
 
 	async function load() {
 		try {
-			data = await api.clusterSummary();
+			data = await api.clusterSummary(scope);
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
 			data = null;
 		}
 	}
 	$effect(() => {
+		// Re-fetch when the container scope changes.
+		scope.project;
+		scope.namespace;
+		scope.node;
 		load();
 		const id = setInterval(load, 30000);
 		return () => clearInterval(id);

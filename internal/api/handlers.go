@@ -294,15 +294,24 @@ func (s *Server) handleClusterSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Aggregate over the repo-backed projects' namespaces — the same VMs the
-	// inventory grid shows — so the cluster band stays consistent with it.
+	// inventory grid shows. Optionally narrow to one project / namespace / node so
+	// every container level (all, project, namespace, node) gets its own summary.
+	wantProject := r.URL.Query().Get("project")
+	wantNamespace := r.URL.Query().Get("namespace")
+	node := r.URL.Query().Get("node")
 	var nss []string
 	for _, p := range projects {
-		if p.Repo == "" {
+		if p.Repo == "" || (wantProject != "" && p.Name != wantProject) {
 			continue
 		}
-		nss = append(nss, p.Namespaces...)
+		for _, n := range p.Namespaces {
+			if wantNamespace != "" && n != wantNamespace {
+				continue
+			}
+			nss = append(nss, n)
+		}
 	}
-	cs, err := s.metrics.ClusterSummary(r.Context(), id.Token, nss)
+	cs, err := s.metrics.ClusterSummary(r.Context(), id.Token, nss, node)
 	respond(w, cs, err)
 }
 
