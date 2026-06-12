@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Camera, RotateCcw, Trash2 } from 'lucide-svelte';
 	import { api, Unauthorized, type Snapshot, type VM } from '$lib/api';
+	import { relativeAge } from '$lib/format';
 
 	let { vm }: { vm: VM } = $props();
 
@@ -88,17 +89,6 @@
 		}
 	}
 
-	function age(iso?: string): string {
-		if (!iso) return '';
-		const s = Math.max(0, Math.floor(Date.now() / 1000 - new Date(iso).getTime() / 1000));
-		const d = Math.floor(s / 86400);
-		const h = Math.floor((s % 86400) / 3600);
-		const m = Math.floor((s % 3600) / 60);
-		if (d > 0) return `${d}d ${h}h ago`;
-		if (h > 0) return `${h}h ${m}m ago`;
-		if (m > 0) return `${m}m ago`;
-		return `${s}s ago`;
-	}
 </script>
 
 <div class="space-y-4 p-1">
@@ -144,7 +134,7 @@
 								<span class="ml-1 rounded bg-slate-100 px-1 text-[10px] text-slate-500">online</span>
 							{/if}
 						</td>
-						<td class="py-2 pr-3 whitespace-nowrap text-slate-500">{age(s.created)}</td>
+						<td class="py-2 pr-3 whitespace-nowrap text-slate-500">{relativeAge(s.created)}</td>
 						<td class="py-2 pr-3 whitespace-nowrap">
 							{#if s.readyToUse}
 								<span class="inline-flex items-center gap-1.5 text-green-700">

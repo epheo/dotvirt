@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api, Unauthorized, type VMEvent } from '$lib/api';
+	import { relativeAge } from '$lib/format';
 
 	let {
 		namespaces,
@@ -31,17 +32,6 @@
 		load();
 	});
 
-	function ago(iso?: string): string {
-		if (!iso) return '';
-		const s = Math.max(0, Math.floor(Date.now() / 1000 - new Date(iso).getTime() / 1000));
-		const d = Math.floor(s / 86400);
-		const h = Math.floor((s % 86400) / 3600);
-		const m = Math.floor((s % 3600) / 60);
-		if (d > 0) return `${d}d ${h}h`;
-		if (h > 0) return `${h}h ${m}m`;
-		if (m > 0) return `${m}m`;
-		return `${s}s`;
-	}
 </script>
 
 <div class="p-4">
@@ -84,7 +74,7 @@
 						<td class="py-1.5 pr-3 font-medium text-slate-700">{e.reason}</td>
 						<td class="py-1.5 pr-3 text-slate-600">{e.message}</td>
 						<td class="py-1.5 whitespace-nowrap text-slate-500">
-							{ago(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-slate-400"> ×{e.count}</span
+							{relativeAge(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-slate-400"> ×{e.count}</span
 								>{/if}
 						</td>
 					</tr>

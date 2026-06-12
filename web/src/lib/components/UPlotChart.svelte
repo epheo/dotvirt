@@ -2,6 +2,7 @@
 	import uPlot from 'uplot';
 	import 'uplot/dist/uPlot.min.css';
 	import type { MetricChart } from '$lib/api';
+	import { bytes } from '$lib/format';
 
 	let { chart }: { chart: MetricChart } = $props();
 
@@ -10,15 +11,6 @@
 
 	const palette = ['#2563eb', '#0d9488', '#f59e0b', '#dc2626', '#7c3aed', '#16a34a'];
 
-	function bytes(v: number): string {
-		const u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-		let i = 0;
-		while (v >= 1024 && i < u.length - 1) {
-			v /= 1024;
-			i++;
-		}
-		return v.toFixed(i === 0 ? 0 : 1) + ' ' + u[i];
-	}
 	// Format a value for the axis/legend by the chart's unit hint.
 	function fmt(unit: string, v: number | null): string {
 		if (v == null || Number.isNaN(v)) return '–';

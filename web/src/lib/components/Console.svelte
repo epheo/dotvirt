@@ -7,6 +7,7 @@
 	let screen = $state<HTMLDivElement>();
 	let status = $state<'connecting' | 'connected' | 'disconnected'>('connecting');
 	let detail = $state('');
+	let reconnectKey = $state(0); // bumping it re-runs the connect effect
 
 	function wsURL(v: VM) {
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -14,7 +15,9 @@
 	}
 
 	$effect(() => {
-		// Re-create the RFB session whenever the VM (or its running state) changes.
+		// Re-create the RFB session whenever the VM (or its running state) changes, or
+		// on an explicit reconnect.
+		reconnectKey;
 		if (!screen || vm.phase !== 'Running') return;
 
 		status = 'connecting';
@@ -53,6 +56,20 @@
 			></span>
 			<span class="text-slate-500 capitalize">{status}{detail ? ` — ${detail}` : ''}</span>
 		</div>
-		<div bind:this={screen} class="min-h-0 flex-1 overflow-hidden rounded bg-slate-900"></div>
+		<div class="relative min-h-0 flex-1 overflow-hidden rounded bg-slate-900">
+			<div bind:this={screen} class="h-full w-full"></div>
+			{#if status === 'disconnected'}
+				<div
+					class="absolute inset-0 flex flex-col items-center justify-center gap-1 text-sm text-slate-300"
+				>
+					<span>{detail || 'Disconnected'}</span>
+					<button
+						onclick={() => reconnectKey++}
+						class="rounded border border-slate-600 px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-800"
+						>Reconnect</button
+					>
+				</div>
+			{/if}
+		</div>
 	</div>
 {/if}

@@ -30,7 +30,7 @@
 	<div class="flex max-h-[80vh] w-full max-w-md flex-col rounded-lg bg-white shadow-xl">
 		<header class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
 			<h2 class="text-base font-semibold text-slate-800">Staged changes — {item.name}</h2>
-			<button onclick={onclose} class="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+			<button onclick={onclose} aria-label="Close" class="text-slate-400 hover:text-slate-700"><X size={18} /></button>
 		</header>
 		<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm">
 			<p class="mb-2 text-xs text-slate-500">{item.namespace}/{item.name} · not yet proposed</p>

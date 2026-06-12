@@ -95,7 +95,7 @@
 	<div class="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-lg bg-white shadow-xl">
 		<header class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
 			<h2 class="text-base font-semibold text-slate-800">New Virtual Machine</h2>
-			<button onclick={onclose} class="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+			<button onclick={onclose} aria-label="Close" class="text-slate-400 hover:text-slate-700"><X size={18} /></button>
 		</header>
 
 		<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
@@ -171,7 +171,7 @@
 							<div class="mb-1 flex gap-2">
 								<input bind:value={disk.name} placeholder="name" class="w-1/2 rounded border border-slate-300 px-2 py-1" />
 								<input bind:value={disk.size} placeholder="10Gi" class="w-1/3 rounded border border-slate-300 px-2 py-1" />
-								<button onclick={() => removeDisk(i)} type="button" class="text-red-500 hover:text-red-700"><X size={14} /></button>
+								<button onclick={() => removeDisk(i)} type="button" aria-label="Remove disk" class="text-red-500 hover:text-red-700"><X size={14} /></button>
 							</div>
 						{/each}
 					</div>

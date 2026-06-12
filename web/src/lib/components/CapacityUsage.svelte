@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api, Unauthorized, type VM, type VMUsage } from '$lib/api';
+	import { relativeAge } from '$lib/format';
 	import { pollWhileVisible } from '$lib/poll';
 	import UsageBar from './UsageBar.svelte';
 
@@ -30,11 +31,6 @@
 	// Point-in-time, refreshed on a cadence (vCenter's Summary is a live snapshot),
 	// paused while the tab is backgrounded.
 	$effect(() => pollWhileVisible(load, 30000));
-
-	function ago(ts: number): string {
-		const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
-		return s < 60 ? `${s}s ago` : `${Math.floor(s / 60)}m ago`;
-	}
 </script>
 
 <section class="rounded border border-slate-200">
@@ -42,7 +38,7 @@
 		class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase"
 	>
 		<span>Capacity &amp; usage</span>
-		{#if usage}<span class="font-normal text-slate-400 normal-case">updated {ago(usage.updated)}</span
+		{#if usage}<span class="font-normal text-slate-400 normal-case">updated {relativeAge(usage.updated)}</span
 			>{/if}
 	</h3>
 	<div class="space-y-3 p-3">

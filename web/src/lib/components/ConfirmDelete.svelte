@@ -35,7 +35,7 @@
 	<div class="flex max-h-[80vh] w-full max-w-md flex-col rounded-lg bg-white shadow-xl">
 		<header class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
 			<h2 class="text-base font-semibold text-red-700">{title}</h2>
-			<button onclick={onclose} class="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+			<button onclick={onclose} aria-label="Close" class="text-slate-400 hover:text-slate-700"><X size={18} /></button>
 		</header>
 		<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-slate-700">
 			{@render children?.()}

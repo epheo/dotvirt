@@ -14,12 +14,19 @@
 
 	let data = $state<ClusterSummary | null>(null);
 
+	let loading = $state(false);
+	let failed = $state(false);
+
 	async function load() {
+		if (!data) loading = true; // spinner only on first load, not on a poll refresh
 		try {
 			data = await api.clusterSummary(scope);
+			failed = false;
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			data = null;
+			failed = true;
+		} finally {
+			loading = false;
 		}
 	}
 	$effect(() => {
@@ -101,9 +108,19 @@
 							>
 							<span class="shrink-0 text-slate-400">{cores(c.value)} cores · {bytes(data.topMemory.find((m) => m.name === c.name && m.namespace === c.namespace)?.value ?? 0)}</span>
 						</li>
+					{:else}
+						<li class="text-slate-400">No usage data.</li>
 					{/each}
 				</ul>
 			</div>
 		</div>
+	</div>
+{:else if loading}
+	<div class="border-b border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-400">
+		Loading cluster metrics…
+	</div>
+{:else if failed}
+	<div class="border-b border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-400">
+		Cluster metrics unavailable.
 	</div>
 {/if}

@@ -40,13 +40,23 @@
 	const itemKey = (p: string, ns: string, name: string) => `${p}|${ns}/${name}`;
 
 	async function unstage(project: string, ns: string, name: string) {
-		await api.unstage(ns, name);
-		onchanged();
+		error[project] = '';
+		try {
+			await api.unstage(ns, name);
+			onchanged();
+		} catch (e) {
+			error[project] = String(e);
+		}
 	}
 
 	async function discardAll(project: string) {
-		await api.discardDraft(project);
-		onchanged();
+		error[project] = '';
+		try {
+			await api.discardDraft(project);
+			onchanged();
+		} catch (e) {
+			error[project] = String(e);
+		}
 	}
 
 	async function propose(project: string) {
@@ -122,7 +132,7 @@
 		<h2 class="text-base font-semibold text-slate-800">
 			Changes <span class="text-slate-400">({total})</span>
 		</h2>
-		<button onclick={onclose} class="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+		<button onclick={onclose} aria-label="Close" class="text-slate-400 hover:text-slate-700"><X size={18} /></button>
 	</header>
 
 	<div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">

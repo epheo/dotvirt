@@ -43,6 +43,7 @@
 	let showDrift = $state(false);
 	let reconciling = $state(false);
 	let reconcileMsg = $state('');
+	let reconcileOk = $state(true);
 
 	// Monitor tab: lazily-loaded Kubernetes events for the selected VM.
 	let events = $state<VMEvent[] | null>(null);
@@ -52,6 +53,7 @@
 	let actionsOpen = $state(false);
 	let runtimeBusy = $state(false);
 	let runtimeMsg = $state('');
+	let runtimeOk = $state(true);
 
 	// VM state gates the Action menu items and the status label. A paused VMI
 	// keeps phase Running, so check the Paused flag too.
@@ -118,6 +120,7 @@
 		} finally {
 			runtimeBusy = false;
 		}
+		runtimeOk = ok;
 		onaction?.({ verb: opLabels[kind], namespace: target.namespace, name: target.name, ok });
 	}
 
@@ -146,9 +149,11 @@
 		try {
 			await api.adopt(vm.namespace, vm.name);
 			reconcileMsg = 'Live state staged into Changes — open a PR to adopt it into git.';
+			reconcileOk = true;
 			onstaged?.();
 		} catch (e) {
 			reconcileMsg = String(e);
+			reconcileOk = false;
 		} finally {
 			reconciling = false;
 		}
@@ -161,8 +166,10 @@
 		try {
 			const r = await api.resync(vm.namespace, vm.name);
 			reconcileMsg = `Re-sync triggered on ArgoCD app "${r.application}".`;
+			reconcileOk = true;
 		} catch (e) {
 			reconcileMsg = String(e);
+			reconcileOk = false;
 		} finally {
 			reconciling = false;
 		}
@@ -270,7 +277,13 @@
 		</div>
 
 		{#if runtimeMsg}
-			<div class="border-b border-slate-200 bg-slate-50 px-4 py-1.5 text-xs text-slate-600">{runtimeMsg}</div>
+			<div
+				class="border-b px-4 py-1.5 text-xs {runtimeOk
+					? 'border-slate-200 bg-slate-50 text-slate-600'
+					: 'border-red-200 bg-red-50 text-red-700'}"
+			>
+				{runtimeMsg}
+			</div>
 		{/if}
 
 		<div class="min-h-0 flex-1 overflow-y-auto p-4">
@@ -438,7 +451,9 @@
 									</button>
 								</div>
 								{#if reconcileMsg}
-									<p class="mt-2 text-xs text-slate-600">{reconcileMsg}</p>
+									<p class="mt-2 text-xs {reconcileOk ? 'text-slate-600' : 'text-red-700'}">
+										{reconcileMsg}
+									</p>
 								{/if}
 							</div>
 						{/if}
