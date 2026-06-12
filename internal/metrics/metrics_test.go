@@ -89,6 +89,51 @@ func p(f *float64) string {
 	return fmt.Sprintf("%g", *f)
 }
 
+// TestVMMetricsFansOutPerLabel verifies a byLabel spec turns one query into one
+// chart series per label value ("Rx eth0", "Rx eth1"), sorted, while fixed
+// specs keep their single named series — and that memory carries the stacked
+// flag.
+func TestVMMetricsFansOutPerLabel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("query")
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(q, "network_receive_bytes_total") {
+			fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[
+				{"metric":{"interface":"eth1"},"values":[[100,"2"]]},
+				{"metric":{"interface":"eth0"},"values":[[100,"1"]]}]}}`)
+			return
+		}
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[[100,"5"]]}]}}`)
+	}))
+	defer srv.Close()
+
+	m, err := New(srv.URL, false).VMMetrics(context.Background(), "tok", "ns", "vm", "1h")
+	if err != nil {
+		t.Fatalf("VMMetrics: %v", err)
+	}
+	charts := map[string]model.MetricChart{}
+	for _, c := range m.Charts {
+		charts[c.Key] = c
+	}
+
+	net := charts["network"]
+	if len(net.Series) != 3 {
+		t.Fatalf("network series = %+v, want Rx eth0, Rx eth1, Tx <one>", net.Series)
+	}
+	if net.Series[0].Name != "Rx eth0" || net.Series[1].Name != "Rx eth1" {
+		t.Errorf("per-NIC fan-out wrong: %q, %q", net.Series[0].Name, net.Series[1].Name)
+	}
+	if iops := charts["iops"]; iops.Unit != "iops" || len(iops.Series) == 0 {
+		t.Errorf("iops chart missing or unitless: %+v", iops)
+	}
+	if !charts["memory"].Stacked {
+		t.Error("memory chart should be marked stacked")
+	}
+	if charts["cpu"].Stacked || len(charts["cpu"].Series) != 3 || charts["cpu"].Series[0].Name != "Usage" {
+		t.Errorf("fixed cpu chart changed: %+v", charts["cpu"].Series)
+	}
+}
+
 // TestScopeMetricsNamesAndAlignsSeries verifies the multi-series read behind the
 // scope charts: a topk result with two labeled series must come back as two
 // chart series named namespace/name (sorted), aligned on the union time axis,

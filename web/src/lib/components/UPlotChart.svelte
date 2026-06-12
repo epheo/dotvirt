@@ -18,12 +18,23 @@
 		if (unit === 'ms') return v.toFixed(2) + ' ms';
 		if (unit === 'bytes') return bytes(v);
 		if (unit === 'Bps') return bytes(v) + '/s';
+		if (unit === 'iops') return v.toFixed(1) + ' io/s';
 		if (unit === 'cores') return v >= 0.1 || v === 0 ? v.toFixed(2) : v.toPrecision(2);
 		return String(v);
 	}
 
+	// A stacked chart plots cumulative values (each series on top of the ones
+	// before it) with fills between adjacent series; the legend/cursor still
+	// reads the ORIGINAL per-series value via the value formatter below.
 	function makeData(c: MetricChart): uPlot.AlignedData {
-		return [c.times, ...c.series.map((s) => s.values)] as unknown as uPlot.AlignedData;
+		if (!c.stacked) {
+			return [c.times, ...c.series.map((s) => s.values)] as unknown as uPlot.AlignedData;
+		}
+		const accum = Array(c.times.length).fill(0);
+		const stacked = c.series.map((s) =>
+			s.values.map((v, i) => (accum[i] += v ?? 0))
+		);
+		return [c.times, ...stacked] as unknown as uPlot.AlignedData;
 	}
 
 	function makeOpts(c: MetricChart, w: number): uPlot.Options {
@@ -34,14 +45,25 @@
 			legend: { show: true, live: true },
 			cursor: { points: { size: 6 } },
 			scales: { x: { time: true } },
+			// Fill between adjacent stacked series (the bottom one fills to zero
+			// via its own fill).
+			bands: c.stacked
+				? c.series.slice(1).map((_s, i) => ({ series: [i + 2, i + 1] as [number, number] }))
+				: undefined,
 			series: [
 				{},
 				...c.series.map((s, i) => ({
 					label: s.name,
 					stroke: palette[i % palette.length],
+					fill: c.stacked ? palette[i % palette.length] + '4d' : undefined,
 					width: 1.5,
 					points: { show: false },
-					value: (_u: uPlot, v: number) => fmt(c.unit, v)
+					// On stacked charts the plotted value is cumulative; report the
+					// series' own value from the source chart instead.
+					value: (_u: uPlot, v: number, si?: number, idx?: number | null) =>
+						c.stacked && si != null && idx != null
+							? fmt(c.unit, c.series[si - 1]?.values[idx] ?? null)
+							: fmt(c.unit, v)
 				}))
 			],
 			axes: [

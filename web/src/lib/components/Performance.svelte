@@ -1,16 +1,12 @@
 <script lang="ts">
-	import { api, Unauthorized, type VM, type VMMetrics } from '$lib/api';
+	import { api, METRIC_RANGES, Unauthorized, type VM, type VMMetrics } from '$lib/api';
 	import { pollWhileVisible } from '$lib/poll';
 	import UPlotChart from './UPlotChart.svelte';
 
 	let { vm, onunauthorized }: { vm: VM; onunauthorized?: () => void } = $props();
 
 	// Mirrors vCenter's real-time / historical tiers.
-	const RANGES = [
-		{ key: '1h', label: 'Real-time' },
-		{ key: '1d', label: 'Day' },
-		{ key: '1w', label: 'Week' }
-	];
+	const RANGES = METRIC_RANGES;
 	let range = $state('1h');
 	let metrics = $state<VMMetrics | null>(null);
 	let loading = $state(false);

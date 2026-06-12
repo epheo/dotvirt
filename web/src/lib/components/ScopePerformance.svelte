@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { api, Unauthorized, type VMMetrics } from '$lib/api';
+	import { api, METRIC_RANGES, Unauthorized, type VMMetrics } from '$lib/api';
 	import { pollWhileVisible } from '$lib/poll';
 	import UPlotChart from './UPlotChart.svelte';
 
@@ -14,11 +14,7 @@
 		onunauthorized?: () => void;
 	} = $props();
 
-	const RANGES = [
-		{ key: '1h', label: 'Real-time' },
-		{ key: '1d', label: 'Day' },
-		{ key: '1w', label: 'Week' }
-	];
+	const RANGES = METRIC_RANGES;
 	let range = $state('1h');
 	let metrics = $state<VMMetrics | null>(null);
 	let loading = $state(false);

@@ -247,13 +247,14 @@ type MetricSeries struct {
 }
 
 // MetricChart is one performance chart: a shared time axis plus its series, with a
-// unit hint the UI formats by ("%", "bytes", "Bps", "ms").
+// unit hint the UI formats by ("%", "bytes", "Bps", "iops", "ms").
 type MetricChart struct {
-	Key    string         `json:"key"`
-	Title  string         `json:"title"`
-	Unit   string         `json:"unit"`
-	Times  []int64        `json:"times"` // unix seconds, the shared x-axis
-	Series []MetricSeries `json:"series"`
+	Key     string         `json:"key"`
+	Title   string         `json:"title"`
+	Unit    string         `json:"unit"`
+	Stacked bool           `json:"stacked,omitempty"` // series partition a whole; render as stacked area
+	Times   []int64        `json:"times"`             // unix seconds, the shared x-axis
+	Series  []MetricSeries `json:"series"`
 }
 
 // VMMetrics is a VM's performance time-series for one range — several charts built

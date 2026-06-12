@@ -215,7 +215,8 @@ export interface MetricSeries {
 export interface MetricChart {
 	key: string;
 	title: string;
-	unit: string; // '%' | 'bytes' | 'Bps' | 'ms'
+	unit: string; // '%' | 'bytes' | 'Bps' | 'iops' | 'ms'
+	stacked?: boolean; // series partition a whole; render as stacked area
 	times: number[]; // unix seconds, shared x-axis
 	series: MetricSeries[];
 }
@@ -224,6 +225,13 @@ export interface VMMetrics {
 	stepSec: number;
 	charts: MetricChart[];
 }
+// The Performance views' range tiers (vCenter's real-time/day/week/month).
+export const METRIC_RANGES = [
+	{ key: '1h', label: 'Real-time' },
+	{ key: '1d', label: 'Day' },
+	{ key: '1w', label: 'Week' },
+	{ key: '1mo', label: 'Month' }
+] as const;
 export interface UsageMetric {
 	used: number;
 	total?: number; // 0/undefined ⇒ no denominator

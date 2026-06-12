@@ -72,9 +72,10 @@ type rangeSpec struct {
 }
 
 var ranges = map[string]rangeSpec{
-	"1h": {time.Hour, 30 * time.Second},
-	"1d": {24 * time.Hour, 5 * time.Minute},
-	"1w": {7 * 24 * time.Hour, 30 * time.Minute},
+	"1h":  {time.Hour, 30 * time.Second},
+	"1d":  {24 * time.Hour, 5 * time.Minute},
+	"1w":  {7 * 24 * time.Hour, 30 * time.Minute},
+	"1mo": {30 * 24 * time.Hour, 2 * time.Hour}, // bounded by Prometheus retention in practice
 }
 
 const defaultRange = "1h"
@@ -103,39 +104,50 @@ func promDur(d time.Duration) string {
 type seriesSpec struct {
 	name  string
 	query string
+	// byLabel marks a multi-series query: one chart series per result, named
+	// "<name> <label value>" (per-NIC, per-drive). Empty = one fixed series.
+	byLabel string
 }
 
 type chartSpec struct {
 	key, title, unit string
+	stacked          bool // render as a stacked area (parts of a whole)
 	series           []seriesSpec
 }
 
 // chartSpecs builds the curated Overview charts for one VM — vCenter's CPU /
-// Memory / Network / Disk, plus disk latency. rw is the rate() window.
+// Memory / Network / Disk, plus IOPS and disk latency. Network and disk break
+// out per NIC / per drive. rw is the rate() window.
 func chartSpecs(ns, name, rw string) []chartSpec {
 	s := fmt.Sprintf("{namespace=%q,name=%q}", ns, name)
 	return []chartSpec{
-		{"cpu", "CPU", "%", []seriesSpec{
-			{"Usage", fmt.Sprintf("rate(kubevirt_vmi_cpu_usage_seconds_total%s[%s])*100 / on(namespace,name) kubevirt_vmi_vcpu_count%s", s, rw, s)},
-			{"Wait", fmt.Sprintf("rate(kubevirt_vmi_vcpu_wait_seconds_total%s[%s])*100", s, rw)},
-			{"Steal", fmt.Sprintf("rate(kubevirt_vmi_vcpu_delay_seconds_total%s[%s])*100", s, rw)},
+		{"cpu", "CPU", "%", false, []seriesSpec{
+			{"Usage", fmt.Sprintf("rate(kubevirt_vmi_cpu_usage_seconds_total%s[%s])*100 / on(namespace,name) kubevirt_vmi_vcpu_count%s", s, rw, s), ""},
+			{"Wait", fmt.Sprintf("rate(kubevirt_vmi_vcpu_wait_seconds_total%s[%s])*100", s, rw), ""},
+			{"Steal", fmt.Sprintf("rate(kubevirt_vmi_vcpu_delay_seconds_total%s[%s])*100", s, rw), ""},
 		}},
-		{"memory", "Memory", "bytes", []seriesSpec{
-			{"Used", fmt.Sprintf("kubevirt_vmi_memory_used_bytes%s", s)},
-			{"Cached", fmt.Sprintf("kubevirt_vmi_memory_cached_bytes%s", s)},
-			{"Free", fmt.Sprintf("kubevirt_vmi_memory_unused_bytes%s", s)},
+		// Used/Cached/Free partition the guest's memory — a stacked area whose
+		// top edge is the domain total, like vCenter's stacked memory chart.
+		{"memory", "Memory", "bytes", true, []seriesSpec{
+			{"Used", fmt.Sprintf("kubevirt_vmi_memory_used_bytes%s", s), ""},
+			{"Cached", fmt.Sprintf("kubevirt_vmi_memory_cached_bytes%s", s), ""},
+			{"Free", fmt.Sprintf("kubevirt_vmi_memory_unused_bytes%s", s), ""},
 		}},
-		{"network", "Network", "Bps", []seriesSpec{
-			{"Rx", fmt.Sprintf("sum(rate(kubevirt_vmi_network_receive_bytes_total%s[%s]))", s, rw)},
-			{"Tx", fmt.Sprintf("sum(rate(kubevirt_vmi_network_transmit_bytes_total%s[%s]))", s, rw)},
+		{"network", "Network", "Bps", false, []seriesSpec{
+			{"Rx", fmt.Sprintf("sum by(interface)(rate(kubevirt_vmi_network_receive_bytes_total%s[%s]))", s, rw), "interface"},
+			{"Tx", fmt.Sprintf("sum by(interface)(rate(kubevirt_vmi_network_transmit_bytes_total%s[%s]))", s, rw), "interface"},
 		}},
-		{"disk", "Disk throughput", "Bps", []seriesSpec{
-			{"Read", fmt.Sprintf("sum(rate(kubevirt_vmi_storage_read_traffic_bytes_total%s[%s]))", s, rw)},
-			{"Write", fmt.Sprintf("sum(rate(kubevirt_vmi_storage_write_traffic_bytes_total%s[%s]))", s, rw)},
+		{"disk", "Disk throughput", "Bps", false, []seriesSpec{
+			{"Read", fmt.Sprintf("sum by(drive)(rate(kubevirt_vmi_storage_read_traffic_bytes_total%s[%s]))", s, rw), "drive"},
+			{"Write", fmt.Sprintf("sum by(drive)(rate(kubevirt_vmi_storage_write_traffic_bytes_total%s[%s]))", s, rw), "drive"},
 		}},
-		{"latency", "Disk latency", "ms", []seriesSpec{
-			{"Read", fmt.Sprintf("sum(rate(kubevirt_vmi_storage_read_times_seconds_total%s[%s])) / sum(rate(kubevirt_vmi_storage_iops_read_total%s[%s])) * 1000", s, rw, s, rw)},
-			{"Write", fmt.Sprintf("sum(rate(kubevirt_vmi_storage_write_times_seconds_total%s[%s])) / sum(rate(kubevirt_vmi_storage_iops_write_total%s[%s])) * 1000", s, rw, s, rw)},
+		{"iops", "Disk IOPS", "iops", false, []seriesSpec{
+			{"Read", fmt.Sprintf("sum by(drive)(rate(kubevirt_vmi_storage_iops_read_total%s[%s]))", s, rw), "drive"},
+			{"Write", fmt.Sprintf("sum by(drive)(rate(kubevirt_vmi_storage_iops_write_total%s[%s]))", s, rw), "drive"},
+		}},
+		{"latency", "Disk latency", "ms", false, []seriesSpec{
+			{"Read", fmt.Sprintf("sum(rate(kubevirt_vmi_storage_read_times_seconds_total%s[%s])) / sum(rate(kubevirt_vmi_storage_iops_read_total%s[%s])) * 1000", s, rw, s, rw), ""},
+			{"Write", fmt.Sprintf("sum(rate(kubevirt_vmi_storage_write_times_seconds_total%s[%s])) / sum(rate(kubevirt_vmi_storage_iops_write_total%s[%s])) * 1000", s, rw, s, rw), ""},
 		}},
 	}
 }
@@ -353,17 +365,17 @@ func scopeChartSpecs(sel, rw string) []chartSpec {
 	topk := func(expr string) string { return fmt.Sprintf("topk(5, sum by(namespace,name)(%s))", expr) }
 	rate := func(metric string) string { return fmt.Sprintf("rate(%s%s[%s])", metric, sel, rw) }
 	return []chartSpec{
-		{"cpu", "CPU — top VMs", "cores", []seriesSpec{
-			{"", topk(rate("kubevirt_vmi_cpu_usage_seconds_total"))},
+		{"cpu", "CPU — top VMs", "cores", false, []seriesSpec{
+			{"", topk(rate("kubevirt_vmi_cpu_usage_seconds_total")), ""},
 		}},
-		{"memory", "Memory — top VMs", "bytes", []seriesSpec{
-			{"", topk(fmt.Sprintf("kubevirt_vmi_memory_used_bytes%s", sel))},
+		{"memory", "Memory — top VMs", "bytes", false, []seriesSpec{
+			{"", topk(fmt.Sprintf("kubevirt_vmi_memory_used_bytes%s", sel)), ""},
 		}},
-		{"network", "Network — top VMs", "Bps", []seriesSpec{
-			{"", topk(rate("kubevirt_vmi_network_receive_bytes_total") + " + " + rate("kubevirt_vmi_network_transmit_bytes_total"))},
+		{"network", "Network — top VMs", "Bps", false, []seriesSpec{
+			{"", topk(rate("kubevirt_vmi_network_receive_bytes_total") + " + " + rate("kubevirt_vmi_network_transmit_bytes_total")), ""},
 		}},
-		{"disk", "Disk throughput — top VMs", "Bps", []seriesSpec{
-			{"", topk(rate("kubevirt_vmi_storage_read_traffic_bytes_total") + " + " + rate("kubevirt_vmi_storage_write_traffic_bytes_total"))},
+		{"disk", "Disk throughput — top VMs", "Bps", false, []seriesSpec{
+			{"", topk(rate("kubevirt_vmi_storage_read_traffic_bytes_total") + " + " + rate("kubevirt_vmi_storage_write_traffic_bytes_total")), ""},
 		}},
 	}
 }
@@ -434,17 +446,26 @@ func (c *Client) ScopeMetrics(ctx context.Context, token string, namespaces []st
 
 	out := model.VMMetrics{Range: rng, StepSec: step, Charts: make([]model.MetricChart, len(specs))}
 	for ci, cs := range specs {
-		out.Charts[ci] = chartFromSeries(cs, results[ci])
+		out.Charts[ci] = buildChart(cs, namedFromLabeled(results[ci]))
 	}
 	c.scope.Put(key, out)
 	return out, nil
 }
 
-// chartFromSeries aligns one chart's labeled result series onto a shared time
-// axis, naming each series by its namespace/name labels. Series are sorted by
-// name so colors stay stable across refreshes (topk order churns per step).
-func chartFromSeries(cs chartSpec, series []labeledSeries) model.MetricChart {
-	sort.Slice(series, func(i, j int) bool { return seriesName(series[i].labels) < seriesName(series[j].labels) })
+// namedFromLabeled names topk result series by their namespace/name labels,
+// sorted so colors stay stable across refreshes (topk order churns per step).
+func namedFromLabeled(series []labeledSeries) []namedSeries {
+	out := make([]namedSeries, 0, len(series))
+	for _, ls := range series {
+		out = append(out, namedSeries{name: seriesName(ls.labels), samples: ls.samples})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
+	return out
+}
+
+// buildChart aligns one chart's series onto a shared time axis (the union of
+// all series' timestamps), with nil gaps where a series has no sample.
+func buildChart(cs chartSpec, series []namedSeries) model.MetricChart {
 	set := map[int64]struct{}{}
 	for _, s := range series {
 		for _, smp := range s.samples {
@@ -460,14 +481,14 @@ func chartFromSeries(cs chartSpec, series []labeledSeries) model.MetricChart {
 	for i, t := range times {
 		at[t] = i
 	}
-	chart := model.MetricChart{Key: cs.key, Title: cs.title, Unit: cs.unit, Times: times, Series: make([]model.MetricSeries, len(series))}
+	chart := model.MetricChart{Key: cs.key, Title: cs.title, Unit: cs.unit, Stacked: cs.stacked, Times: times, Series: make([]model.MetricSeries, len(series))}
 	for si, s := range series {
 		vals := make([]*float64, len(times))
 		for _, smp := range s.samples {
 			v := smp.v
 			vals[at[smp.t]] = &v
 		}
-		chart.Series[si] = model.MetricSeries{Name: seriesName(s.labels), Values: vals}
+		chart.Series[si] = model.MetricSeries{Name: s.name, Values: vals}
 	}
 	return chart
 }
@@ -573,10 +594,20 @@ func (c *Client) rangeQuery(ctx context.Context, token, query string, start, end
 	return series[0].samples, nil
 }
 
+// namedSeries is one resolved chart series: its display name and samples. The
+// chart builders consume these whether they came from a fixed spec or were
+// fanned out of a multi-series (byLabel / topk) query.
+type namedSeries struct {
+	name    string
+	samples []sample
+}
+
 // VMMetrics runs the curated charts for one VM over the given range concurrently,
 // then aligns each chart's series onto a shared time axis (one x-array + per-series
-// value arrays, gaps as nil — directly chartable). A per-series failure degrades to
-// gaps; a dead endpoint (every query errors with no data) returns ErrUnavailable.
+// value arrays, gaps as nil — directly chartable). A fixed spec yields one series;
+// a byLabel spec yields one per label value (per NIC, per drive). A per-series
+// failure degrades to gaps; a dead endpoint (every query errors with no data)
+// returns ErrUnavailable.
 func (c *Client) VMMetrics(ctx context.Context, token, ns, name, rng string) (model.VMMetrics, error) {
 	spec, ok := ranges[rng]
 	if !ok {
@@ -597,14 +628,28 @@ func (c *Client) VMMetrics(ctx context.Context, token, ns, name, rng string) (mo
 		firstErr error
 		anyData  bool
 	)
-	samples := make([][][]sample, len(specs)) // samples[chart][series]
+	results := make([][][]namedSeries, len(specs)) // results[chart][spec] = its series
 	for ci, cs := range specs {
-		samples[ci] = make([][]sample, len(cs.series))
+		results[ci] = make([][]namedSeries, len(cs.series))
 		for si, ss := range cs.series {
 			wg.Add(1)
-			go func(ci, si int, query string) {
+			go func(ci, si int, ss seriesSpec) {
 				defer wg.Done()
-				smp, err := c.rangeQuery(ctx, token, query, start, end, step)
+				var got []namedSeries
+				var err error
+				if ss.byLabel == "" {
+					// Fixed series: keep its legend entry even when empty.
+					var smp []sample
+					smp, err = c.rangeQuery(ctx, token, ss.query, start, end, step)
+					got = []namedSeries{{name: ss.name, samples: smp}}
+				} else {
+					var list []labeledSeries
+					list, err = c.rangeSeries(ctx, token, ss.query, start, end, step)
+					for _, ls := range list {
+						got = append(got, namedSeries{name: joinName(ss.name, ls.labels[ss.byLabel]), samples: ls.samples})
+					}
+					sort.Slice(got, func(i, j int) bool { return got[i].name < got[j].name })
+				}
 				mu.Lock()
 				defer mu.Unlock()
 				if err != nil {
@@ -613,11 +658,14 @@ func (c *Client) VMMetrics(ctx context.Context, token, ns, name, rng string) (mo
 					}
 					return
 				}
-				if len(smp) > 0 {
-					anyData = true
+				for _, s := range got {
+					if len(s.samples) > 0 {
+						anyData = true
+						break
+					}
 				}
-				samples[ci][si] = smp
-			}(ci, si, ss.query)
+				results[ci][si] = got
+			}(ci, si, ss)
 		}
 	}
 	wg.Wait()
@@ -627,33 +675,25 @@ func (c *Client) VMMetrics(ctx context.Context, token, ns, name, rng string) (mo
 
 	out := model.VMMetrics{Range: rng, StepSec: step, Charts: make([]model.MetricChart, len(specs))}
 	for ci, cs := range specs {
-		// Shared x-axis = the union of all series' timestamps in this chart.
-		set := map[int64]struct{}{}
-		for _, smp := range samples[ci] {
-			for _, s := range smp {
-				set[s.t] = struct{}{}
-			}
+		var series []namedSeries
+		for _, got := range results[ci] {
+			series = append(series, got...)
 		}
-		times := make([]int64, 0, len(set))
-		for t := range set {
-			times = append(times, t)
-		}
-		sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
-		at := make(map[int64]int, len(times))
-		for i, t := range times {
-			at[t] = i
-		}
-		chart := model.MetricChart{Key: cs.key, Title: cs.title, Unit: cs.unit, Times: times, Series: make([]model.MetricSeries, len(cs.series))}
-		for si, ss := range cs.series {
-			vals := make([]*float64, len(times))
-			for _, s := range samples[ci][si] {
-				v := s.v
-				vals[at[s.t]] = &v
-			}
-			chart.Series[si] = model.MetricSeries{Name: ss.name, Values: vals}
-		}
-		out.Charts[ci] = chart
+		out.Charts[ci] = buildChart(cs, series)
 	}
 	c.vmMetrics.Put(key, out)
 	return out, nil
+}
+
+// joinName composes a series display name from its spec prefix and the
+// fanned-out label value ("Rx" + "eth0" → "Rx eth0").
+func joinName(prefix, label string) string {
+	switch {
+	case label == "":
+		return prefix
+	case prefix == "":
+		return label
+	default:
+		return prefix + " " + label
+	}
 }
