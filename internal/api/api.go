@@ -55,8 +55,9 @@ type VNCHandler interface {
 
 // Config carries the non-collaborator settings the handlers need.
 type Config struct {
-	BaseBranch  string // repo branch the inventory reads + drafts target
-	AllowOrigin string // CORS origin for the SvelteKit frontend; empty disables CORS
+	BaseBranch        string // repo branch the inventory reads + drafts target
+	AllowOrigin       string // CORS origin for the SvelteKit frontend; empty disables CORS
+	AppSetPluginToken string // bearer for the ArgoCD ApplicationSet plugin endpoint; empty disables it
 }
 
 // visibleTTL bounds how long a token's visible-namespace set is reused. The set
@@ -166,6 +167,9 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/inventory", s.handleInventory)
 	mux.HandleFunc("GET /api/options", s.handleOptions)
+	// ArgoCD ApplicationSet plugin generator (auth: its own shared token, not a
+	// user session — exempted in auth.isOpenPath). Emits projects from labels.
+	mux.HandleFunc("POST /api/v1/getparams.execute", s.handleAppSetPlugin)
 	mux.HandleFunc("GET /api/proposals", s.handleProposals)
 	mux.HandleFunc("GET /api/events", s.handleAllEvents)
 	mux.HandleFunc("GET /api/metrics/cluster", s.handleClusterSummary)

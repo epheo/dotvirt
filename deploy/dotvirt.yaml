@@ -51,6 +51,12 @@ spec:
               valueFrom: { secretKeyRef: { name: dotvirt-forge, key: token } }
             - name: DOTVIRT_SESSION_SECRET
               valueFrom: { secretKeyRef: { name: dotvirt-session, key: secret } }
+            # Shared bearer for the ArgoCD ApplicationSet plugin generator (must
+            # match the dotvirt-appset-plugin secret in openshift-gitops). Enables
+            # label-driven project provisioning; omit the secret to disable it.
+            - name: DOTVIRT_APPSET_PLUGIN_TOKEN
+              valueFrom:
+                secretKeyRef: { name: dotvirt-appset-plugin, key: token, optional: true }
           ports:
             - { containerPort: 8080, name: http }
           volumeMounts:

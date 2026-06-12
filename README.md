@@ -89,16 +89,24 @@ Manifests in `deploy/`:
 |------|------|
 | `rbac.yaml` | dotvirt ServiceAccount + minimal ClusterRole: `create tokenreviews`, read namespaces, read VMs/VMIs (SA export + watch), `patch` Argo Applications (re-sync). **No** Forgejo-admin, **no** Argo-app-create. |
 | `dotvirt.yaml` | the dotvirt Deployment + Service (uses the SA; needs a Forgejo-creds secret + a session-secret). |
-| `applicationset.yaml` | one Argo Application per project, syncing `<dotvirt.io/repo>` → that project's namespaces. **The only component that creates Argo apps** — dotvirt does not. |
+| `applicationset.yaml` | one Argo Application per project, syncing `<dotvirt.io/repo>` → that project's namespaces. **The only component that creates Argo apps** — dotvirt does not. Driven by a **plugin generator** that calls dotvirt's `/api/v1/getparams.execute` (auth: a shared token), so the project list comes from the namespace labels, not a hardcoded list. |
 | `forgejo.yaml` | a self-hosted Forgejo (for evaluation; bring your own git forge in production). |
 
 ### Onboarding a project (once per tenant)
 
 1. Create the project's git repo (VMs on `main`, an empty `running` branch).
-2. Label + annotate the project's namespace(s) (see *How isolation works*).
-3. Add the project to `deploy/applicationset.yaml`'s generator. The ApplicationSet
-   provisions the per-project Argo Application; dotvirt picks the project up
-   automatically from the namespace label/annotation.
+2. Label + annotate the project's namespace(s) (see *How isolation works*):
+
+   ```
+   oc label    ns <ns> dotvirt.io/project=<project>
+   oc annotate ns <ns> dotvirt.io/repo=http://forge/dotvirt/<project>.git
+   ```
+
+That's it — no manual ApplicationSet edit. The ApplicationSet's plugin generator
+re-polls dotvirt (`requeueAfterSeconds`), which emits the labeled namespaces, and
+provisions the per-project Argo Application within a minute. dotvirt supplies the
+list under a shared token (`DOTVIRT_APPSET_PLUGIN_TOKEN`, matched by the
+`dotvirt-appset-plugin` secret) but still never creates the Application itself.
 
 ## Configuration (backend flags / env)
 

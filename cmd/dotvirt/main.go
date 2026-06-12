@@ -117,7 +117,11 @@ func run() error {
 		Metrics:        metrics.New(cfg.MetricsURL, cfg.InsecureTLS),
 		Draft:          coordinator,
 		Auth:           authenticator,
-		Config:         api.Config{BaseBranch: cfg.BaseBranch, AllowOrigin: cfg.UIOrigin},
+		Config: api.Config{
+			BaseBranch:        cfg.BaseBranch,
+			AllowOrigin:       cfg.UIOrigin,
+			AppSetPluginToken: cfg.AppSetPluginToken,
+		},
 	})
 
 	// WebSocket origin policy: same-origin + the configured UI origin (CORS doesn't
