@@ -28,7 +28,10 @@ func seedRepo(t *testing.T) string {
 		}
 	}
 
-	run(dir, "init", "-q", "--bare", bare)
+	// -b main on the bare init too: without it HEAD points at the host git's
+	// default branch (often an unborn master), and go-git's clone fails
+	// "reference not found" on machines without init.defaultBranch=main.
+	run(dir, "init", "-q", "--bare", "-b", "main", bare)
 	run(dir, "init", "-q", "-b", "main", work)
 	manifest := `apiVersion: kubevirt.io/v1
 kind: VirtualMachine
