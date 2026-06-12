@@ -191,6 +191,14 @@ export interface Proposal {
 	prURL: string;
 	title?: string;
 }
+export interface Commit {
+	hash: string;
+	shortHash: string;
+	message: string;
+	author: string;
+	when: string; // RFC3339
+	merge?: boolean; // a merge commit (not directly revertable)
+}
 export interface VMEvent {
 	namespace?: string;
 	name?: string;
@@ -213,6 +221,11 @@ export const api = {
 	inventory: () => get<Inventory>('/api/inventory'),
 	options: () => get<Options>('/api/options'),
 	proposals: () => get<Proposal[]>('/api/proposals'),
+
+	// Commit history + per-commit revert (a forward commit opened as a PR).
+	history: (project: string) => get<Commit[]>(`/api/projects/${enc(project)}/history`),
+	revert: (project: string, hash: string) =>
+		post<ProposeResult>(`/api/projects/${enc(project)}/revert`, { hash }),
 
 	// Staging — the backend resolves the project from the VM's namespace, so these
 	// per-VM routes need no project param.

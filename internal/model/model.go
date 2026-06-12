@@ -190,6 +190,16 @@ type Proposal struct {
 	Title    string `json:"title,omitempty"`
 }
 
+// Commit is one entry in a project's git history, shown in the Changes pane.
+type Commit struct {
+	Hash      string `json:"hash"`
+	ShortHash string `json:"shortHash"`
+	Message   string `json:"message"`
+	Author    string `json:"author"`
+	When      string `json:"when"`            // RFC3339
+	Merge     bool   `json:"merge,omitempty"` // a merge commit (not directly revertable)
+}
+
 // Event is a Kubernetes Event for a VM (or its VMI), shown in the Monitor tab and
 // the dock's Events lane (which uses Namespace/Name to label which VM it's about).
 type Event struct {

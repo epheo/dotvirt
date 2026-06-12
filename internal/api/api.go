@@ -39,6 +39,7 @@ type Draft interface {
 	Adopt(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
 	Resync(namespace, name string) (model.ResyncResult, error) // SA-identity; no user/project context
 	OpenProposal(id auth.Identity, proj project.ProjectInfo) (model.Proposal, bool, error)
+	Revert(id auth.Identity, proj project.ProjectInfo, hash string) (model.ProposeResult, error)
 }
 
 // StreamHandler upgrades a request to a WebSocket that pushes live inventory.
@@ -137,6 +138,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/options", s.handleOptions)
 	mux.HandleFunc("GET /api/proposals", s.handleProposals)
 	mux.HandleFunc("GET /api/events", s.handleAllEvents)
+	mux.HandleFunc("GET /api/projects/{project}/history", s.handleHistory)
+	mux.HandleFunc("POST /api/projects/{project}/revert", s.handleRevert)
 
 	if s.stream != nil {
 		mux.HandleFunc("GET /api/inventory/stream", s.stream.Handler)

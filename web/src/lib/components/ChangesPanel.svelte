@@ -1,16 +1,18 @@
 <script lang="ts">
-	import { ChevronDown, ChevronRight, Folder, X } from 'lucide-svelte';
-	import { api, type DraftView, type Proposal, type ProposeResult } from '$lib/api';
+	import { ChevronDown, ChevronRight, Folder, History, X } from 'lucide-svelte';
+	import { api, type Commit, type DraftView, type Proposal, type ProposeResult } from '$lib/api';
 	import ChangeList from './ChangeList.svelte';
 
 	let {
 		drafts,
 		proposals,
+		projects,
 		onclose,
 		onchanged
 	}: {
 		drafts: { project: string; draft: DraftView }[];
 		proposals: Proposal[];
+		projects: string[]; // repo-backed project names, for the History section
 		onclose: () => void;
 		onchanged: () => void;
 	} = $props();
@@ -22,6 +24,17 @@
 	let error = $state<Record<string, string>>({});
 	let result = $state<Record<string, ProposeResult>>({});
 	let showYaml = $state<Record<string, boolean>>({});
+
+	// Commit history: per-project, lazy-fetched on expand. Revert state is keyed by
+	// commit hash — armed (awaiting a confirm click), busy (in flight), and result.
+	let showHistory = $state(false);
+	let historyOpen = $state<Record<string, boolean>>({});
+	let history = $state<Record<string, Commit[]>>({});
+	let historyBusy = $state<Record<string, boolean>>({});
+	let historyError = $state<Record<string, string>>({});
+	let revertArmed = $state<string | null>(null);
+	let revertBusy = $state<string | null>(null);
+	let revertResult = $state<Record<string, ProposeResult>>({});
 
 	const total = $derived(drafts.reduce((n, d) => n + d.draft.count, 0));
 	const itemKey = (p: string, ns: string, name: string) => `${p}|${ns}/${name}`;
@@ -47,6 +60,58 @@
 		} finally {
 			busy[project] = false;
 		}
+	}
+
+	async function toggleHistory(project: string) {
+		historyOpen[project] = !historyOpen[project];
+		if (historyOpen[project] && !history[project]) await loadHistory(project);
+	}
+
+	async function loadHistory(project: string) {
+		historyBusy[project] = true;
+		historyError[project] = '';
+		try {
+			history[project] = await api.history(project);
+		} catch (e) {
+			historyError[project] = String(e);
+		} finally {
+			historyBusy[project] = false;
+		}
+	}
+
+	// Revert is two-click: the first arms the commit, the second fires it. It opens a
+	// forward-commit PR (restoring the pre-commit state), never a history rewrite, so
+	// the result surfaces inline as a PR link the user merges to land the revert.
+	async function revert(project: string, c: Commit) {
+		if (revertArmed !== c.hash) {
+			revertArmed = c.hash;
+			return;
+		}
+		revertArmed = null;
+		revertBusy = c.hash;
+		historyError[project] = '';
+		try {
+			revertResult[c.hash] = await api.revert(project, c.hash);
+			onchanged();
+		} catch (e) {
+			historyError[project] = String(e);
+		} finally {
+			revertBusy = null;
+		}
+	}
+
+	// Compact age for a commit timestamp (commits are usually hours/days old).
+	function age(iso: string): string {
+		const start = new Date(iso).getTime();
+		if (Number.isNaN(start)) return '';
+		const s = Math.max(0, Math.floor((Date.now() - start) / 1000));
+		const d = Math.floor(s / 86400);
+		const h = Math.floor((s % 86400) / 3600);
+		const m = Math.floor((s % 3600) / 60);
+		if (d > 0) return `${d}d ago`;
+		if (h > 0) return `${h}h ago`;
+		if (m > 0) return `${m}m ago`;
+		return 'just now';
 	}
 </script>
 
@@ -193,5 +258,103 @@
 				</div>
 			</section>
 		{/each}
+
+		<!-- Commit history per repo-backed project, lazy-fetched on expand. Any
+		     non-merge commit can be reverted as a forward-commit PR (never a rewrite). -->
+		{#if projects.length > 0}
+			<section class="mt-4 border-t border-slate-200 pt-3">
+				<button
+					onclick={() => (showHistory = !showHistory)}
+					class="flex w-full items-center gap-1.5 text-sm font-semibold text-slate-700"
+				>
+					{#if showHistory}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}
+					<History size={14} class="text-slate-400" /> History
+				</button>
+
+				{#if showHistory}
+					<div class="mt-2 space-y-3">
+						{#each projects as project (project)}
+							<div>
+								<button
+									onclick={() => toggleHistory(project)}
+									class="flex w-full items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-800"
+								>
+									{#if historyOpen[project]}<ChevronDown size={12} />{:else}<ChevronRight
+											size={12}
+										/>{/if}
+									<Folder size={12} class="text-blue-500" />
+									{project}
+								</button>
+
+								{#if historyOpen[project]}
+									{#if historyBusy[project]}
+										<p class="px-5 py-1.5 text-xs text-slate-400">Loading…</p>
+									{:else if historyError[project]}
+										<p class="px-5 py-1.5 text-xs whitespace-pre-wrap text-red-600">
+											{historyError[project]}
+										</p>
+									{:else if (history[project] ?? []).length === 0}
+										<p class="px-5 py-1.5 text-xs text-slate-400">No commits.</p>
+									{:else}
+										<ul class="mt-1 ml-1.5 border-l border-slate-200">
+											{#each history[project] as c (c.hash)}
+												<li class="group py-1 pl-3">
+													<div class="flex items-start gap-2">
+														<div class="min-w-0 flex-1">
+															<p class="truncate text-xs text-slate-700" title={c.message}>
+																{c.message}
+															</p>
+															<p class="text-[10px] text-slate-400">
+																<code class="text-slate-500">{c.shortHash}</code>
+																· {c.author} · {age(c.when)}{#if c.merge} ·
+																	<span class="text-slate-400">merge</span>{/if}
+															</p>
+														</div>
+														{#if !c.merge && !revertResult[c.hash]}
+															<button
+																onclick={() => revert(project, c)}
+																disabled={revertBusy === c.hash}
+																class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium {revertArmed ===
+																	c.hash || revertBusy === c.hash
+																	? 'bg-amber-100 text-amber-800'
+																	: 'text-amber-700 opacity-0 hover:bg-amber-50 group-hover:opacity-100'}"
+															>
+																{revertBusy === c.hash
+																	? 'Reverting…'
+																	: revertArmed === c.hash
+																		? 'Confirm revert'
+																		: 'Revert'}
+															</button>
+														{/if}
+													</div>
+													{#if revertResult[c.hash]}
+														{@const rr = revertResult[c.hash]}
+														<p class="mt-0.5 text-[10px] text-emerald-700">
+															{#if rr.prURL}
+																Revert PR{rr.existing ? ' (existing)' : ''}:
+																<a href={rr.prURL} target="_blank" rel="noopener" class="underline"
+																	>#{rr.prNumber}</a
+																>
+															{:else if rr.compareURL}
+																Branch <code>{rr.branch}</code> pushed —
+																<a href={rr.compareURL} target="_blank" rel="noopener" class="underline"
+																	>open PR</a
+																>
+															{:else}
+																Branch <code>{rr.branch}</code> pushed.
+															{/if}
+														</p>
+													{/if}
+												</li>
+											{/each}
+										</ul>
+									{/if}
+								{/if}
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</section>
+		{/if}
 	</div>
 </aside>

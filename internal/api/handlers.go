@@ -176,6 +176,44 @@ func (s *Server) handleAllEvents(w http.ResponseWriter, r *http.Request) {
 	respond(w, events, err)
 }
 
+// handleHistory lists recent commits on the project's base branch — the Changes
+// pane's history view.
+func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
+	sc, ok := s.resolveProject(w, r, byName(r.PathValue("project")))
+	if !ok {
+		return
+	}
+	if sc.proj.Repo == "" {
+		writeJSON(w, http.StatusOK, []model.Commit{})
+		return
+	}
+	read, _, err := s.repos.Get(sc.proj.Repo)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	commits, err := read.History(s.cfg.BaseBranch, 25)
+	respond(w, commits, err)
+}
+
+// handleRevert proposes a forward commit reverting one commit in the project's
+// repo — a new PR, never a history rewrite.
+func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
+	sc, ok := s.resolveProject(w, r, byName(r.PathValue("project")))
+	if !ok {
+		return
+	}
+	var req struct {
+		Hash string `json:"hash"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Hash == "" {
+		http.Error(w, "commit hash is required", http.StatusBadRequest)
+		return
+	}
+	result, err := s.draft.Revert(sc.id, sc.proj, req.Hash)
+	respond(w, result, err)
+}
+
 // handleProposals lists the caller's open PRs across their visible projects — the
 // "PR #N open" rows in the Recent Tasks dock. Best-effort: a project whose forge
 // lookup errors is skipped (logged), not fatal, so one slow/broken repo can't
