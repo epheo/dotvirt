@@ -23,6 +23,7 @@ type RepoSet struct {
 	// Poll wiring, shared by every repo's poll goroutine.
 	ctx      context.Context
 	changed  chan<- struct{}
+	onChange func() // git-specific hook (heads moved), distinct from the shared `changed`
 	interval time.Duration
 
 	mu    sync.Mutex
@@ -49,6 +50,12 @@ func NewRepoSet(ctx context.Context, forgeUser, forgeToken string, push bool, ch
 		cache:    map[string]*repoPair{},
 	}
 }
+
+// SetOnChange registers a callback fired whenever a repo's branch heads move (a
+// push or merge). dotvirt flushes the per-token proposals cache here, so the open-PR
+// lane refreshes on a real git change instead of re-polling the forge every
+// heartbeat. Call once at startup, before any Get starts a poll goroutine.
+func (s *RepoSet) SetOnChange(fn func()) { s.onChange = fn }
 
 // Get returns the read mirror and writable view for repoURL, opening them on
 // first call (and starting that repo's background poll). Subsequent calls return
@@ -103,6 +110,9 @@ func (s *RepoSet) poll(repo *Repo) {
 			if sig != last {
 				last = sig
 				signal(s.ctx, s.changed)
+				if s.onChange != nil {
+					s.onChange()
+				}
 			}
 		}
 	}

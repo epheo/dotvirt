@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api, Unauthorized, type ClusterSummary } from '$lib/api';
 	import { cores, bytes } from '$lib/format';
+	import { pollWhileVisible } from '$lib/poll';
 	import Ring from './Ring.svelte';
 
 	let {
@@ -22,13 +23,12 @@
 		}
 	}
 	$effect(() => {
-		// Re-fetch when the container scope changes.
+		// Re-fetch when the container scope changes; poll only while visible.
 		scope.project;
 		scope.namespace;
 		scope.node;
 		load();
-		const id = setInterval(load, 30000);
-		return () => clearInterval(id);
+		return pollWhileVisible(load, 30000);
 	});
 
 	// KubeVirt's phase label is lowercase ("running"); order known phases, capitalize

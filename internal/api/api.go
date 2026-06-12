@@ -66,12 +66,18 @@ type Config struct {
 // read path.
 const visibleTTL = 30 * time.Second
 
-// proposalsTTL bounds how long a token's open-PR set is reused. Proposals are now
-// computed on the inventory broadcast (15s heartbeat + every git/k8s change), so
-// without a cache a forge FindPR-per-project would run on every frame. A short TTL
-// well under the broadcast cadence keeps the lane fresh (a merge repaints within a
-// poll interval) while coalescing event bursts into one forge round.
-const proposalsTTL = 5 * time.Second
+// proposalsTTL bounds how long a token's open-PR set is reused. Proposals are
+// computed on the inventory broadcast (15s heartbeat + every git/k8s change), so an
+// uncached FindPR-per-project would run on every frame for every subscriber. The
+// TTL is a long backstop because freshness comes from event-driven invalidation:
+// RepoSet.SetOnChange flushes this cache on any git head move (a propose/merge), so
+// the lane is fresh on real change while idle heartbeats cost zero forge calls.
+const proposalsTTL = 60 * time.Second
+
+// optionsTTL caches the wizard catalog (instancetypes/preferences/datasources/
+// networks). It's SA-read, identical for every user, and changes rarely — so one
+// shared cache spares 4 cluster-wide LISTs on each wizard open.
+const optionsTTL = 60 * time.Second
 
 // Server holds the long-lived collaborators and builds per-request, identity-
 // scoped state. It replaces the old interface-bundle Deps.
@@ -83,6 +89,7 @@ type Server struct {
 	repos     *git.RepoSet
 	visible   *ttlcache.Cache[map[string]bool]  // per-token visible-namespace set
 	proposals *ttlcache.Cache[[]model.Proposal] // per-token open-PR set (streamed)
+	options   *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
 	metrics   *metrics.Client                   // Prometheus/Thanos for the Performance tab; nil disables it
 	draft     Draft
 	auth      *auth.Authenticator // nil leaves the API open (dev)
@@ -116,12 +123,22 @@ func NewServer(d Deps) *Server {
 		repos:     d.Repos,
 		visible:   ttlcache.New[map[string]bool](visibleTTL),
 		proposals: ttlcache.New[[]model.Proposal](proposalsTTL),
+		options:   ttlcache.New[model.Options](optionsTTL),
 		metrics:   d.Metrics,
 		draft:     d.Draft,
 		auth:      d.Auth,
 		stream:    d.Stream,
 		vnc:       d.VNC,
 		cfg:       d.Config,
+	}
+}
+
+// InvalidateProposals flushes the per-token open-PR cache. Wired to the RepoSet's
+// git-change hook so a propose/merge refreshes the lane immediately, while idle
+// heartbeat broadcasts keep serving the cached set (no forge call). Safe if nil.
+func (s *Server) InvalidateProposals() {
+	if s.proposals != nil {
+		s.proposals.Clear()
 	}
 }
 

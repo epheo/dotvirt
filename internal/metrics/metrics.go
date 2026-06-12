@@ -20,12 +20,26 @@ import (
 	"time"
 
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/ttlcache"
+)
+
+// Result caches are keyed by QUERY PARAMETERS, not the caller's token: the data for
+// a VM (or a scope) is identical for any user authorized to see it, and the API
+// handler has already gated access before calling here. So same-scope users and
+// re-mounts share one Thanos fan-out instead of each re-querying. TTLs are short
+// (well under the UI's 30s poll) to stay fresh while absorbing bursts.
+const (
+	vmTTL      = 15 * time.Second
+	clusterTTL = 20 * time.Second
 )
 
 // Client talks to a Prometheus query API (the OpenShift Thanos querier Route).
 type Client struct {
-	base string
-	http *http.Client
+	base      string
+	http      *http.Client
+	vmMetrics *ttlcache.Cache[model.VMMetrics]
+	vmUsage   *ttlcache.Cache[model.VMUsage]
+	cluster   *ttlcache.Cache[model.ClusterSummary]
 }
 
 // New builds a Client for the query API at baseURL (e.g. the thanos-querier
@@ -40,8 +54,11 @@ func New(baseURL string, insecure bool) *Client {
 		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
 	return &Client{
-		base: strings.TrimRight(baseURL, "/"),
-		http: &http.Client{Timeout: 20 * time.Second, Transport: tr},
+		base:      strings.TrimRight(baseURL, "/"),
+		http:      &http.Client{Timeout: 20 * time.Second, Transport: tr},
+		vmMetrics: ttlcache.New[model.VMMetrics](vmTTL),
+		vmUsage:   ttlcache.New[model.VMUsage](vmTTL),
+		cluster:   ttlcache.New[model.ClusterSummary](clusterTTL),
 	}
 }
 
@@ -233,6 +250,10 @@ func (c *Client) sparklines(ctx context.Context, token string, queries map[strin
 // % of allocated, memory used of allocated, guest-FS used of provisioned — each
 // with a short sparkline.
 func (c *Client) VMUsage(ctx context.Context, token, ns, name string) (model.VMUsage, error) {
+	key := ns + "/" + name
+	if v, ok := c.vmUsage.Get(key); ok {
+		return v, nil
+	}
 	s := fmt.Sprintf("{namespace=%q,name=%q}", ns, name)
 	sp := c.sparklines(ctx, token, map[string]string{
 		"cpu":  fmt.Sprintf("rate(kubevirt_vmi_cpu_usage_seconds_total%s[2m])*100 / on(namespace,name) kubevirt_vmi_vcpu_count%s", s, s),
@@ -243,12 +264,14 @@ func (c *Client) VMUsage(ctx context.Context, token, ns, name string) (model.VMU
 		"mem":  fmt.Sprintf("kubevirt_vmi_memory_domain_bytes%s", s),
 		"stor": fmt.Sprintf("sum(kubevirt_vmi_filesystem_capacity_bytes%s)", s),
 	})
-	return model.VMUsage{
+	out := model.VMUsage{
 		Updated: time.Now().Unix(),
 		CPU:     model.UsageMetric{Used: sp["cpu"].last, Total: 100, Spark: sp["cpu"].vals},
 		Memory:  model.UsageMetric{Used: sp["mem"].last, Total: tot["mem"], Spark: sp["mem"].vals},
 		Storage: model.UsageMetric{Used: sp["stor"].last, Total: tot["stor"], Spark: sp["stor"].vals},
-	}, nil
+	}
+	c.vmUsage.Put(key, out)
+	return out, nil
 }
 
 // ClusterSummary returns the aggregate capacity view for a container scope (the
@@ -257,6 +280,14 @@ func (c *Client) VMUsage(ctx context.Context, token, ns, name string) (model.VMU
 // node-allocatable total (cluster-wide, or that one node). topConsumers lists the
 // heaviest VMs by CPU + memory.
 func (c *Client) ClusterSummary(ctx context.Context, token string, namespaces []string, node string) (model.ClusterSummary, error) {
+	// Cache by the scope (sorted namespaces + node), not the token: any user with
+	// this namespace set gets the same aggregate, so same-scope viewers share it.
+	sorted := append([]string(nil), namespaces...)
+	sort.Strings(sorted)
+	key := strings.Join(sorted, ",") + "|" + node
+	if v, ok := c.cluster.Get(key); ok {
+		return v, nil
+	}
 	// Scope VM metrics to the caller's namespaces (+ a node when drilling into one).
 	// With no namespaces, match nothing so usage reads zero but node capacity shows.
 	nsSel := `{namespace="__dotvirt_none__"}`
@@ -299,7 +330,7 @@ func (c *Client) ClusterSummary(ctx context.Context, token string, namespaces []
 	topCPU := consumers(c.vector(ctx, token, fmt.Sprintf("topk(5, sum by(namespace,name)(rate(%s[2m])))", vm("kubevirt_vmi_cpu_usage_seconds_total"))))
 	topMem := consumers(c.vector(ctx, token, fmt.Sprintf("topk(5, sum by(namespace,name)(%s))", vm("kubevirt_vmi_memory_used_bytes"))))
 
-	return model.ClusterSummary{
+	out := model.ClusterSummary{
 		Updated:   time.Now().Unix(),
 		CPU:       model.ClusterMetric{Used: sp["cpu"].last, Allocated: sc["cpuAlloc"], Total: sc["cpuTotal"], Spark: sp["cpu"].vals},
 		Memory:    model.ClusterMetric{Used: sp["mem"].last, Allocated: sc["memAlloc"], Total: sc["memTotal"], Spark: sp["mem"].vals},
@@ -307,7 +338,9 @@ func (c *Client) ClusterSummary(ctx context.Context, token string, namespaces []
 		VMs:       vms,
 		TopCPU:    topCPU,
 		TopMemory: topMem,
-	}, nil
+	}
+	c.cluster.Put(key, out)
+	return out, nil
 }
 
 // consumers turns a topk vector into sorted ConsumerVM rows (highest first).
@@ -386,6 +419,10 @@ func (c *Client) VMMetrics(ctx context.Context, token, ns, name, rng string) (mo
 	if !ok {
 		rng, spec = defaultRange, ranges[defaultRange]
 	}
+	key := ns + "/" + name + "|" + rng
+	if v, ok := c.vmMetrics.Get(key); ok {
+		return v, nil
+	}
 	end := time.Now().Unix()
 	start := end - int64(spec.window.Seconds())
 	step := int(spec.step.Seconds())
@@ -454,5 +491,6 @@ func (c *Client) VMMetrics(ctx context.Context, token, ns, name, rng string) (mo
 		}
 		out.Charts[ci] = chart
 	}
+	c.vmMetrics.Put(key, out)
 	return out, nil
 }

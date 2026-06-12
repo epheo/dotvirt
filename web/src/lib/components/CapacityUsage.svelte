@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api, Unauthorized, type VM, type VMUsage } from '$lib/api';
+	import { pollWhileVisible } from '$lib/poll';
 	import UsageBar from './UsageBar.svelte';
 
 	let { vm }: { vm: VM } = $props();
@@ -26,11 +27,9 @@
 		vm.name;
 		load();
 	});
-	// Point-in-time, refreshed on a cadence (vCenter's Summary is a live snapshot).
-	$effect(() => {
-		const id = setInterval(load, 30000);
-		return () => clearInterval(id);
-	});
+	// Point-in-time, refreshed on a cadence (vCenter's Summary is a live snapshot),
+	// paused while the tab is backgrounded.
+	$effect(() => pollWhileVisible(load, 30000));
 
 	function ago(ts: number): string {
 		const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));

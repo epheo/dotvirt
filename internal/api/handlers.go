@@ -169,6 +169,12 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 		return
 	}
+	// Catalog is identical for everyone; serve the shared cache to skip 4 cluster
+	// LISTs per wizard open.
+	if v, ok := s.options.Get("all"); ok {
+		writeJSON(w, http.StatusOK, v)
+		return
+	}
 	sa, err := s.clusterF.SA()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
@@ -179,6 +185,7 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.options.Put("all", opts)
 	writeJSON(w, http.StatusOK, opts)
 }
 

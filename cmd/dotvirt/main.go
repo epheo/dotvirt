@@ -132,6 +132,11 @@ func run() error {
 	go forward(ctx, changed, hub.Changed())
 	server.UseStream(hub)
 
+	// Flush the open-PR cache on any git head move, so the lane is fresh on a real
+	// propose/merge while idle heartbeats don't re-poll the forge. Set before serving
+	// (and thus before any request starts a poll goroutine).
+	repos.SetOnChange(server.InvalidateProposals)
+
 	// VNC dials as the requesting user (KubeVirt RBAC gates the console).
 	server.UseVNC(stream.NewVNCProxy(func(token string) (stream.VNCDialer, error) {
 		return clusterFactory.For(token)

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api, Unauthorized, type VM, type VMMetrics } from '$lib/api';
+	import { pollWhileVisible } from '$lib/poll';
 	import UPlotChart from './UPlotChart.svelte';
 
 	let { vm, onunauthorized }: { vm: VM; onunauthorized?: () => void } = $props();
@@ -40,11 +41,11 @@
 		load();
 	});
 
-	// Auto-refresh in real-time mode (vCenter's ~20s; we use 30s to match the step).
+	// Auto-refresh in real-time mode (vCenter's ~20s; we use 30s to match the step),
+	// paused while the tab is backgrounded.
 	$effect(() => {
 		if (range !== '1h') return;
-		const id = setInterval(load, 30000);
-		return () => clearInterval(id);
+		return pollWhileVisible(load, 30000);
 	});
 </script>
 
