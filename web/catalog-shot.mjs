@@ -1,0 +1,21 @@
+import { chromium } from 'playwright';
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+page.setDefaultTimeout(30000);
+await page.goto('http://localhost:5173');
+await page.waitForSelector('textarea');
+await page.fill('textarea', process.env.OC_TOKEN);
+await page.click('button[type="submit"]');
+await page.waitForSelector('text=vm-tenant-a', { timeout: 20000 });
+await page.getByRole('button', { name: 'Catalog', exact: true }).click();
+await page.waitForSelector('text=Boot images');
+await page.waitForSelector('aside >> text=fedora');
+// Open a detail drawer, then hop to instance types.
+await page.locator('aside').getByRole('button', { name: /^fedora\b/ }).first().click();
+await page.waitForSelector('text=DataSource (CDI)');
+await page.screenshot({ path: '/tmp/catalog-1-images.png' });
+await page.getByRole('button', { name: 'Instance types' }).click();
+await page.waitForSelector('text=u1.medium');
+await page.screenshot({ path: '/tmp/catalog-2-instancetypes.png' });
+console.log('OK');
+await browser.close();

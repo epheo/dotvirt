@@ -15,6 +15,7 @@
 	import { manifestURL, type VMAction } from '$lib/actions';
 	import { vmNetworkKeys, vmStorageKeys } from '$lib/lenses';
 	import ActionMenu from '$lib/components/ActionMenu.svelte';
+	import CatalogPanel from '$lib/components/CatalogPanel.svelte';
 	import ChangesPanel from '$lib/components/ChangesPanel.svelte';
 	import ClusterSummary from '$lib/components/ClusterSummary.svelte';
 	import ConfirmDelete from '$lib/components/ConfirmDelete.svelte';
@@ -231,6 +232,8 @@
 
 	let showWizard = $state(false);
 	let showChanges = $state(false);
+	// The catalog browser shares the right-panel slot with Changes (one at a time).
+	let showCatalog = $state(false);
 
 	async function refreshDrafts() {
 		if (!projectNames.length) {
@@ -439,12 +442,25 @@
 			<GlobalSearch bind:this={search} {inventory} onpick={onSearchPick} />
 
 			<button
-				onclick={() => (showChanges = !showChanges)}
+				onclick={() => {
+					showChanges = !showChanges;
+					if (showChanges) showCatalog = false;
+				}}
 				class="rounded border border-slate-600 px-3 py-1 text-xs font-medium text-slate-100 hover:bg-slate-700"
 			>
 				Changes{#if draftCount > 0}<span class="ml-1 rounded-full bg-blue-500 px-1.5 text-white"
 						>{draftCount}</span
 					>{/if}
+			</button>
+			<button
+				onclick={() => {
+					showCatalog = !showCatalog;
+					if (showCatalog) showChanges = false;
+				}}
+				title="Browse the cluster's images, instance types, preferences, networks and storage classes"
+				class="rounded border border-slate-600 px-3 py-1 text-xs font-medium text-slate-100 hover:bg-slate-700"
+			>
+				Catalog
 			</button>
 			<button
 				onclick={() => (showWizard = true)}
@@ -735,6 +751,10 @@
 					onclose={() => (showChanges = false)}
 					onchanged={refreshDrafts}
 				/>
+			{/if}
+
+			{#if showCatalog}
+				<CatalogPanel onclose={() => (showCatalog = false)} />
 			{/if}
 		</div>
 
