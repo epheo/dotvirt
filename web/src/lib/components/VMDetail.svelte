@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { Activity, ChevronDown, ChevronRight, Cpu, HardDrive, MemoryStick, Pencil, Trash2 } from 'lucide-svelte';
 	import { api, type Change, type DraftItem, type VM, type VMEvent } from '$lib/api';
+	import { manifestURL, type VMAction } from '$lib/actions';
+	import ActionMenu from './ActionMenu.svelte';
 	import ChangeList from './ChangeList.svelte';
 	import ConfirmDelete from './ConfirmDelete.svelte';
 	import CapacityUsage from './CapacityUsage.svelte';
@@ -55,16 +57,8 @@
 	let runtimeMsg = $state('');
 	let runtimeOk = $state(true);
 
-	// VM state gates the Action menu items and the status label. A paused VMI
-	// keeps phase Running, so check the Paused flag too.
-	const running = $derived(vm?.phase === 'Running');
-	const isPaused = $derived(!!vm?.paused);
-	const can = $derived({
-		restart: running,
-		pause: running && !isPaused,
-		unpause: isPaused,
-		migrate: running
-	});
+	// A paused VMI keeps phase Running, so the label checks the Paused flag too.
+	// Action enablement lives in the registry ($lib/actions), not here.
 	const statusText = $derived(vm ? (vm.paused ? 'Paused' : (vm.phase ?? vm.power)) : '');
 
 	// Staged changes for this VM, keyed by field label (for inline current→future).
@@ -97,31 +91,50 @@
 		}
 	});
 
-	const opLabels: Record<string, string> = {
-		restart: 'Restart',
-		migrate: 'Live-migration',
-		pause: 'Pause',
-		unpause: 'Unpause'
-	};
-
-	async function runOp(kind: 'restart' | 'migrate' | 'pause' | 'unpause') {
+	// One handler for every registry action: runtime ops run via the registry's
+	// own run() (with busy/result reporting + the task log), host actions map to
+	// this view's modals/tabs.
+	async function handleAction(a: VMAction) {
+		actionsOpen = false;
 		if (!vm) return;
 		const target = vm;
-		actionsOpen = false;
-		runtimeBusy = true;
-		runtimeMsg = '';
-		let ok = true;
-		try {
-			await api[kind](target.namespace, target.name);
-			runtimeMsg = `${opLabels[kind]} requested — watch the Monitor tab for progress.`;
-		} catch (e) {
-			ok = false;
-			runtimeMsg = String(e);
-		} finally {
-			runtimeBusy = false;
+		if (a.kind === 'runtime' && a.run) {
+			runtimeBusy = true;
+			runtimeMsg = '';
+			let ok = true;
+			try {
+				await a.run(target);
+				runtimeMsg = `${a.verb} requested — watch the Monitor tab for progress.`;
+			} catch (e) {
+				ok = false;
+				runtimeMsg = String(e);
+			} finally {
+				runtimeBusy = false;
+			}
+			runtimeOk = ok;
+			onaction?.({ verb: a.verb ?? a.label, namespace: target.namespace, name: target.name, ok });
+			return;
 		}
-		runtimeOk = ok;
-		onaction?.({ verb: opLabels[kind], namespace: target.namespace, name: target.name, ok });
+		switch (a.id) {
+			case 'edit':
+				editing = true;
+				break;
+			case 'delete':
+				deleting = true;
+				deleteErr = '';
+				break;
+			case 'snapshot':
+				tab = 'snapshots';
+				break;
+			case 'console':
+				tab = 'console';
+				break;
+			case 'manifest':
+				// A plain navigation: the route is cookie-auth'd and sets
+				// Content-Disposition, so the browser downloads the YAML.
+				window.open(manifestURL(target), '_blank');
+				break;
+		}
 	}
 
 	$effect(() => {
@@ -222,7 +235,7 @@
 						<button
 							onclick={() => (actionsOpen = !actionsOpen)}
 							disabled={runtimeBusy}
-							title="Runtime actions (don't change git; Argo won't revert)"
+							title="All VM actions — runtime ops act immediately; config changes go through a PR"
 							class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
 						>
 							Actions <ChevronDown size={13} />
@@ -233,13 +246,8 @@
 								onclick={() => (actionsOpen = false)}
 								aria-label="Close menu"
 							></button>
-							<div
-								class="absolute right-0 z-20 mt-1 w-44 rounded border border-slate-200 bg-white py-1 text-xs shadow-lg"
-							>
-								<button onclick={() => runOp('restart')} disabled={!can.restart} class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent">Restart</button>
-								<button onclick={() => runOp('pause')} disabled={!can.pause} class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent">Pause</button>
-								<button onclick={() => runOp('unpause')} disabled={!can.unpause} class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent">Unpause</button>
-								<button onclick={() => runOp('migrate')} disabled={!can.migrate} class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent">Live-migrate</button>
+							<div class="absolute right-0 z-20 mt-1">
+								<ActionMenu {vm} onpick={handleAction} />
 							</div>
 						{/if}
 					</div>

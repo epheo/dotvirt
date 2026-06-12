@@ -2,7 +2,9 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"path"
 
 	"github.com/epheo/dotvirt/internal/model"
 )
@@ -152,6 +154,49 @@ func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.draft.Resync(ns, name)
 	respond(w, result, err)
+}
+
+// handleManifest returns the VM's manifest file as it exists on the base branch —
+// the "Download manifest" action. The git file IS the VM's full definition, so
+// this is dotvirt's OVF-export analog.
+func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
+	ns, name := r.PathValue("namespace"), r.PathValue("name")
+	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	if !ok {
+		return
+	}
+	if sc.proj.Repo == "" {
+		http.Error(w, "project has no repo", http.StatusNotFound)
+		return
+	}
+	read, _, err := s.repos.Get(sc.proj.Repo)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	vm, found, err := read.FindVMOnBranch(s.cfg.BaseBranch, ns, name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.Error(w, "VM is not in git", http.StatusNotFound)
+		return
+	}
+	files, err := read.VMManifests(s.cfg.BaseBranch)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	for _, f := range files {
+		if f.Path == vm.SourceFile {
+			w.Header().Set("Content-Type", "application/yaml")
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", path.Base(f.Path)))
+			_, _ = w.Write(f.Content)
+			return
+		}
+	}
+	http.Error(w, "manifest file not found", http.StatusNotFound)
 }
 
 // handleHistory lists recent commits on the project's base branch — the Changes

@@ -189,6 +189,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/draft/{namespace}/{name}", s.handleUnstage)
 	mux.HandleFunc("POST /api/draft/propose", s.handlePropose)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/drift", s.handleDrift)
+	mux.HandleFunc("GET /api/vms/{namespace}/{name}/manifest", s.handleManifest)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/events", s.handleEvents)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/usage", s.handleVMUsage)
