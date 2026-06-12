@@ -18,6 +18,7 @@ export type ActionId =
 	| 'migrate'
 	| 'console'
 	| 'snapshot'
+	| 'clone'
 	| 'edit'
 	| 'manifest'
 	| 'delete';
@@ -39,6 +40,9 @@ export interface VMAction {
 const running = (vm: VM) => vm.phase === 'Running';
 const paused = (vm: VM) => !!vm.paused;
 const always = () => true;
+// Git-backed verbs need a manifest on the base branch; a cluster-only VM (e.g.
+// a fresh clone target) has none until adopted.
+const inGit = (vm: VM) => !!vm.sourceFile;
 
 export const vmActions: VMAction[] = [
 	{
@@ -76,19 +80,26 @@ export const vmActions: VMAction[] = [
 	{ id: 'console', label: 'Open console', kind: 'host', sep: true, enabled: running },
 	{ id: 'snapshot', label: 'Snapshots', kind: 'host', enabled: always },
 	{
+		id: 'clone',
+		label: 'Clone…',
+		kind: 'host',
+		title: 'Copy this VM via snapshot + restore; adopt the result into git after',
+		enabled: always
+	},
+	{
 		id: 'edit',
 		label: 'Edit settings',
 		kind: 'host',
 		sep: true,
 		title: 'Stages a config change into a PR',
-		enabled: always
+		enabled: inGit
 	},
 	{
 		id: 'manifest',
 		label: 'Download manifest',
 		kind: 'host',
 		title: 'The VM definition as it exists in git',
-		enabled: always
+		enabled: inGit
 	},
 	{
 		id: 'delete',
@@ -97,7 +108,7 @@ export const vmActions: VMAction[] = [
 		danger: true,
 		sep: true,
 		title: 'Stages a removal into a PR',
-		enabled: always
+		enabled: inGit
 	}
 ];
 

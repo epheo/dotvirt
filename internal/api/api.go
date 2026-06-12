@@ -204,6 +204,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/snapshots", s.handleTakeSnapshot)
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/snapshots/{snapshot}/restore", s.handleRestoreSnapshot)
 	mux.HandleFunc("DELETE /api/vms/{namespace}/{name}/snapshots/{snapshot}", s.handleDeleteSnapshot)
+	mux.HandleFunc("GET /api/vms/{namespace}/{name}/clones", s.handleClones)
+	mux.HandleFunc("POST /api/vms/{namespace}/{name}/clone", s.handleCreateClone)
 
 	// CORS wraps the outside so it can answer preflight OPTIONS without auth; auth
 	// gates everything inside.

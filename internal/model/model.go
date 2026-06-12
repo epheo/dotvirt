@@ -337,6 +337,17 @@ type Snapshot struct {
 	Error       string   `json:"error,omitempty"`
 }
 
+// Clone is a VirtualMachineClone whose source is a VM — one row in the Clone
+// flow's progress list. The clone controller snapshots the source and restores
+// it into the target VM; the target exists only in the cluster (NotTracked)
+// until adopted into git.
+type Clone struct {
+	Name    string `json:"name"`
+	Target  string `json:"target"`
+	Phase   string `json:"phase,omitempty"`   // SnapshotInProgress | RestoreInProgress | CreatingTargetVM | Succeeded | Failed | …
+	Created string `json:"created,omitempty"` // RFC3339
+}
+
 // ResyncResult reports which ArgoCD Application was synced.
 type ResyncResult struct {
 	Application string `json:"application"`

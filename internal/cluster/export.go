@@ -16,6 +16,7 @@ var annotationsToStrip = []string{
 	"kubevirt.io/storage-observed-api-version",
 	"kubemacpool.io/transaction-timestamp",
 	"argocd.argoproj.io/tracking-id",
+	"restore.kubevirt.io/lastRestoreUID", // restore/clone bookkeeping; churns on every restore
 }
 
 // ExportManifest serializes a live VM into a clean, deterministic YAML manifest:

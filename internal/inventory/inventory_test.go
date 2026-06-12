@@ -29,7 +29,10 @@ func seedRepo(t *testing.T) string {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	run(dir, "init", "-q", "--bare", bare)
+	// -b main on the bare init too: without it HEAD points at the host git's
+	// default branch (often an unborn master), and go-git's clone fails
+	// "reference not found" on machines without init.defaultBranch=main.
+	run(dir, "init", "-q", "--bare", "-b", "main", bare)
 	run(dir, "init", "-q", "-b", "main", work)
 
 	write := func(path, content string) {
@@ -116,6 +119,37 @@ func TestBuildFiltersAndEnriches(t *testing.T) {
 	broken := inv.Projects[1]
 	if broken.Error == "" || len(broken.Namespaces) != 0 {
 		t.Errorf("broken project should keep its error and no namespaces: %+v", broken)
+	}
+}
+
+// A VM present in the live snapshot but absent from git (a fresh clone target,
+// an out-of-band create) is surfaced as a NotTracked row — empty SourceFile,
+// Power Unknown — so "Adopt into git" has something to act on. VMs outside the
+// project's namespaces stay invisible.
+func TestBuildSurfacesClusterOnlyVMs(t *testing.T) {
+	bare := seedRepo(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	repos := git.NewRepoSet(ctx, "", "", false, make(chan struct{}, 1), nil, time.Hour)
+
+	in := Inputs{
+		Branch:   "main",
+		Repos:    repos,
+		Projects: []project.ProjectInfo{{Name: "team-a", Repo: bare, Namespaces: []string{"tenant-a"}}},
+		Live: map[string]clusterstate.LiveVM{
+			"tenant-a/web":       {Phase: "Running"},
+			"tenant-a/web-clone": {},                 // cluster-only: halted clone target
+			"tenant-b/other":     {Phase: "Running"}, // outside the project → ignored
+		},
+	}
+	inv := Build(in)
+	vms := inv.Projects[0].Namespaces[0].VMs
+	if len(vms) != 2 || vms[0].Name != "web" || vms[1].Name != "web-clone" {
+		t.Fatalf("want [web web-clone], got %+v", vms)
+	}
+	clone := vms[1]
+	if clone.Sync != model.SyncNotTracked || clone.SourceFile != "" || clone.Power != model.PowerUnknown {
+		t.Errorf("cluster-only VM should be NotTracked with no source file and Unknown power, got %+v", clone)
 	}
 }
 

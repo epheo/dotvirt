@@ -151,6 +151,22 @@ func (r *Repo) VMManifests(branch string) ([]ManifestFile, error) {
 	return out, nil
 }
 
+// FileOnBranch returns one file's raw content on branch — e.g. a manifest to
+// adopt off the running branch.
+func (r *Repo) FileOnBranch(branch, path string) ([]byte, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tree, err := r.treeFor(branch)
+	if err != nil {
+		return nil, err
+	}
+	f, err := tree.File(path)
+	if err != nil {
+		return nil, fmt.Errorf("file %s on %s: %w", path, branch, err)
+	}
+	return readFile(f)
+}
+
 // treeFor resolves branch -> commit -> tree. Caller holds r.mu.
 func (r *Repo) treeFor(branch string) (*object.Tree, error) {
 	ref, err := r.repo.Reference(plumbing.NewBranchReferenceName(branch), true)

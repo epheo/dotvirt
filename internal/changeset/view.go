@@ -33,6 +33,12 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 			}
 			item.Changes = manifest.ChangesForEdit(current, *e.Edit)
 		case draft.KindCreate:
+			if e.Manifest != "" {
+				// Adopt-create: the manifest IS the change; show it as-is.
+				item.Changes = []model.Change{{Field: "Adopt VM from cluster", Action: "add", To: e.Namespace + "/" + e.Name}}
+				item.YAML = e.Manifest
+				break
+			}
 			item.Changes = changesForCreate(*e.Spec)
 			if _, content, err := vmgen.Manifest(*e.Spec); err == nil {
 				item.YAML = string(content)

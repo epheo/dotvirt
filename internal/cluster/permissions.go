@@ -46,6 +46,7 @@ func (c *Client) Permissions(ctx context.Context, namespace string) (model.Permi
 			capability("migrate", "Live-migrate", "subresources.kubevirt.io", "virtualmachines/migrate", "update"),
 			capability("snapshot", "Take snapshots", "snapshot.kubevirt.io", "virtualmachinesnapshots", "create"),
 			capability("restore", "Restore snapshots", "snapshot.kubevirt.io", "virtualmachinerestores", "create"),
+			capability("clone", "Clone", "clone.kubevirt.io", "virtualmachineclones", "create"),
 			capability("resync", "Trigger Argo re-sync", "kubevirt.io", "virtualmachines", "update"),
 		},
 	}, nil

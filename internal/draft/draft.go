@@ -40,8 +40,11 @@ type Entry struct {
 	// Edit fields (KindEdit): the change to apply to an existing manifest.
 	Edit *manifest.VMEdit `json:"edit,omitempty"`
 
-	// Create fields (KindCreate): the wizard spec for a new VM.
-	Spec *vmgen.Spec `json:"spec,omitempty"`
+	// Create fields (KindCreate): the wizard spec for a new VM, OR — when
+	// adopting a VM that exists only in the cluster — its raw manifest as read
+	// off the running branch (SourceFile then carries the path it lands at).
+	Spec     *vmgen.Spec `json:"spec,omitempty"`
+	Manifest string      `json:"manifest,omitempty"`
 }
 
 // Key is the stable identity used to dedupe/replace entries within a draft.

@@ -1,9 +1,11 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { Activity, ChevronDown, ChevronRight, Cpu, HardDrive, MemoryStick, Pencil, Trash2 } from 'lucide-svelte';
 	import { api, type Change, type DraftItem, type VM, type VMEvent } from '$lib/api';
 	import { manifestURL, type VMAction } from '$lib/actions';
 	import ActionMenu from './ActionMenu.svelte';
 	import ChangeList from './ChangeList.svelte';
+	import CloneModal from './CloneModal.svelte';
 	import ConfirmDelete from './ConfirmDelete.svelte';
 	import CapacityUsage from './CapacityUsage.svelte';
 	import Console from './Console.svelte';
@@ -32,7 +34,7 @@
 		onsearchlabel?: (key: string, value: string) => void;
 		// A one-shot request from outside (the context menu) to open a modal/tab
 		// here; seq distinguishes repeated requests for the same id.
-		intent?: { id: 'edit' | 'delete' | 'console' | 'snapshot'; seq: number } | null;
+		intent?: { id: 'edit' | 'delete' | 'console' | 'snapshot' | 'clone'; seq: number } | null;
 	} = $props();
 
 	type Tab = 'summary' | 'monitor' | 'configure' | 'permissions' | 'snapshots' | 'console';
@@ -57,6 +59,9 @@
 	let deleting = $state(false);
 	let deleteBusy = $state(false);
 	let deleteErr = $state('');
+
+	// Clone name-prompt modal (creates a VirtualMachineClone; imperative).
+	let cloning = $state(false);
 
 	// Drift detail (running vs main) for the selected VM.
 	let driftChanges = $state<Change[] | null>(null);
@@ -144,6 +149,9 @@
 			case 'snapshot':
 				tab = 'snapshots';
 				break;
+			case 'clone':
+				cloning = true;
+				break;
 			case 'console':
 				tab = 'console';
 				break;
@@ -155,24 +163,32 @@
 		}
 	}
 
+	// The reset keys on the selection's IDENTITY, not the vm object: every live
+	// inventory frame hands down a fresh object for the same VM, and resetting
+	// on reference would snap tabs back to Summary and close modals whenever
+	// cluster state moves (e.g. mid-clone, mid-migration).
+	const vmKey = $derived(vm ? `${vm.namespace}/${vm.name}` : '');
 	$effect(() => {
 		// Reset when the selection changes, and (re)load drift for this VM.
-		const cur = vm;
-		tab = 'summary';
-		monitorView = 'events';
-		configView = 'hardware';
-		editing = false;
-		editSection = undefined;
-		deleting = false;
-		deleteErr = '';
-		driftChanges = null;
-		showDrift = false;
-		reconcileMsg = '';
-		events = null;
-		eventsLoading = false;
-		actionsOpen = false;
-		runtimeMsg = '';
-		if (cur) loadDrift(cur.namespace, cur.name);
+		vmKey;
+		untrack(() => {
+			tab = 'summary';
+			monitorView = 'events';
+			configView = 'hardware';
+			editing = false;
+			editSection = undefined;
+			deleting = false;
+			deleteErr = '';
+			cloning = false;
+			driftChanges = null;
+			showDrift = false;
+			reconcileMsg = '';
+			events = null;
+			eventsLoading = false;
+			actionsOpen = false;
+			runtimeMsg = '';
+			if (vm) loadDrift(vm.namespace, vm.name);
+		});
 	});
 
 	// Apply an outside intent (context menu → "Edit settings" on an unselected
@@ -195,6 +211,9 @@
 				break;
 			case 'snapshot':
 				tab = 'snapshots';
+				break;
+			case 'clone':
+				cloning = true;
 				break;
 		}
 	});
@@ -297,8 +316,9 @@
 					</div>
 					<button
 						onclick={() => openEdit()}
-						title="Edit settings"
-						class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+						disabled={!vm.sourceFile}
+						title={vm.sourceFile ? 'Edit settings' : 'Not in git — adopt this VM first'}
+						class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-transparent"
 					>
 						<Pencil size={13} /> Edit Settings
 					</button>
@@ -307,8 +327,11 @@
 							deleting = true;
 							deleteErr = '';
 						}}
-						title="Delete this VM (stages a removal into Changes)"
-						class="flex items-center gap-1.5 rounded border border-red-300 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+						disabled={!vm.sourceFile}
+						title={vm.sourceFile
+							? 'Delete this VM (stages a removal into Changes)'
+							: 'Not in git — adopt this VM first'}
+						class="flex items-center gap-1.5 rounded border border-red-300 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 disabled:hover:bg-transparent"
 					>
 						<Trash2 size={13} /> Delete VM
 					</button>
@@ -435,6 +458,38 @@
 						</dl>
 					</section>
 				</div>
+
+				{#if !vm.sourceFile}
+					<!-- Cluster-only VM (e.g. a fresh clone target): no manifest on the
+					     base branch, so config stays read-only until adopted. The adopt
+					     stages a CREATE of the running-branch manifest into the PR flow. -->
+					<div class="mt-4 rounded border border-amber-200 bg-amber-50 px-3 py-2">
+						<div class="flex items-center gap-2 text-sm font-medium text-amber-800">
+							<span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
+							Not in git — this VM exists only in the cluster
+						</div>
+						<p class="mt-1 text-xs text-amber-700">
+							A clone target (or out-of-band create) has no manifest on the base branch yet:
+							config edits and ArgoCD sync don't apply. Adopting stages its live manifest into
+							<strong>Changes</strong>, to propose as a PR.
+						</p>
+						<div class="mt-2">
+							<button
+								onclick={adopt}
+								disabled={reconciling}
+								title="Stage this VM's live manifest into a PR so git starts tracking it"
+								class="rounded border border-amber-400 bg-white px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+							>
+								Adopt into git
+							</button>
+						</div>
+						{#if reconcileMsg}
+							<p class="mt-2 text-xs {reconcileOk ? 'text-slate-600' : 'text-red-700'}">
+								{reconcileMsg}
+							</p>
+						{/if}
+					</div>
+				{/if}
 
 				{#if driftChanges && driftChanges.length > 0}
 					<div class="mt-4 rounded border border-amber-200 bg-amber-50">
@@ -679,6 +734,14 @@
 			initialSection={editSection}
 			onclose={() => (editing = false)}
 			onstaged={() => onstaged?.()}
+		/>
+	{/if}
+
+	{#if cloning}
+		<CloneModal
+			{vm}
+			onclose={() => (cloning = false)}
+			ondone={(ok) => onaction?.({ verb: 'Clone', namespace: vm.namespace, name: vm.name, ok })}
 		/>
 	{/if}
 

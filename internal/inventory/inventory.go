@@ -64,47 +64,86 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 	for _, ns := range p.Namespaces {
 		byNS[ns] = []model.VM{}
 	}
+	inGit := map[string]struct{}{}
 	for _, vm := range vms {
 		if _, ok := allowed[vm.Namespace]; !ok {
 			continue // manifest for a namespace outside this project; ignore
 		}
+		inGit[vm.Namespace+"/"+vm.Name] = struct{}{}
 		enrich(&vm, in)
 		byNS[vm.Namespace] = append(byNS[vm.Namespace], vm)
+	}
+
+	// Cluster-only VMs: live in a project namespace but absent from git on the
+	// base branch (a fresh clone target, an out-of-band create). Shown so the
+	// inventory matches the cluster and "Adopt into git" has a row to act on.
+	// NotTracked by definition (nothing on main for Argo to manage); desired
+	// state doesn't exist, so Power is Unknown and config fields stay empty —
+	// an empty SourceFile is the UI's "not in git" marker.
+	for k, live := range in.Live {
+		ns, name, ok := splitKey(k)
+		if !ok {
+			continue
+		}
+		if _, inProject := allowed[ns]; !inProject {
+			continue
+		}
+		if _, tracked := inGit[k]; tracked {
+			continue
+		}
+		vm := model.VM{Namespace: ns, Name: name, Power: model.PowerUnknown, Sync: model.SyncNotTracked}
+		applyLive(&vm, live)
+		byNS[ns] = append(byNS[ns], vm)
 	}
 
 	out.Namespaces = git.GroupNamespaces(byNS)
 	return out
 }
 
+// splitKey splits a "namespace/name" snapshot key.
+func splitKey(k string) (ns, name string, ok bool) {
+	for i := 0; i < len(k); i++ {
+		if k[i] == '/' {
+			return k[:i], k[i+1:], true
+		}
+	}
+	return "", "", false
+}
+
 func enrich(vm *model.VM, in Inputs) {
 	k := vm.Namespace + "/" + vm.Name
 	if s, ok := in.Live[k]; ok {
-		vm.Phase, vm.GuestIP, vm.NodeName = s.Phase, s.GuestIP, s.NodeName
-		vm.Paused = s.Paused
-		vm.IPs, vm.OS, vm.MemoryActual = s.IPs, s.OS, s.MemoryActual
-		if !s.StartedAt.IsZero() {
-			vm.StartedAt = s.StartedAt.UTC().Format(time.RFC3339)
-		}
-		if m := s.Migration; m != nil {
-			vm.Migration = &model.Migration{
-				SourceNode: m.SourceNode,
-				TargetNode: m.TargetNode,
-				Completed:  m.Completed,
-				Failed:     m.Failed,
-			}
-			if !m.StartedAt.IsZero() {
-				vm.Migration.StartedAt = m.StartedAt.UTC().Format(time.RFC3339)
-			}
-			if !m.EndedAt.IsZero() {
-				vm.Migration.EndedAt = m.EndedAt.UTC().Format(time.RFC3339)
-			}
-		}
+		applyLive(vm, s)
 	}
 	if in.Drift != nil { // nil = Argo not wired; non-nil = configured (absent VM is NotTracked)
 		if d, ok := in.Drift[k]; ok {
 			vm.Sync, vm.Health = d.Sync, d.Health
 		} else {
 			vm.Sync = model.SyncNotTracked
+		}
+	}
+}
+
+// applyLive copies one VM's snapshot state onto its inventory row.
+func applyLive(vm *model.VM, s clusterstate.LiveVM) {
+	vm.Phase, vm.GuestIP, vm.NodeName = s.Phase, s.GuestIP, s.NodeName
+	vm.Paused = s.Paused
+	vm.IPs, vm.OS, vm.MemoryActual = s.IPs, s.OS, s.MemoryActual
+	if !s.StartedAt.IsZero() {
+		vm.StartedAt = s.StartedAt.UTC().Format(time.RFC3339)
+	}
+	if m := s.Migration; m != nil {
+		vm.Migration = &model.Migration{
+			SourceNode: m.SourceNode,
+			TargetNode: m.TargetNode,
+			Completed:  m.Completed,
+			Failed:     m.Failed,
+		}
+		if !m.StartedAt.IsZero() {
+			vm.Migration.StartedAt = m.StartedAt.UTC().Format(time.RFC3339)
+		}
+		if !m.EndedAt.IsZero() {
+			vm.Migration.EndedAt = m.EndedAt.UTC().Format(time.RFC3339)
 		}
 	}
 }

@@ -256,6 +256,14 @@ export interface Snapshot {
 	indications?: string[]; // Online | GuestAgent | NoGuestAgent
 	error?: string;
 }
+// A VirtualMachineClone sourced from a VM; the target VM lands cluster-only
+// (NotTracked) until adopted into git.
+export interface Clone {
+	name: string;
+	target: string;
+	phase?: string; // SnapshotInProgress | RestoreInProgress | CreatingTargetVM | Succeeded | Failed
+	created?: string;
+}
 export interface VMEvent {
 	namespace?: string;
 	name?: string;
@@ -350,6 +358,14 @@ export const api = {
 			`/api/vms/${enc(namespace)}/${enc(name)}/resync`,
 			{}
 		),
+
+	// Clone (imperative create; the target VM lands NotTracked until adopted).
+	clones: (namespace: string, name: string) =>
+		get<Clone[]>(`/api/vms/${enc(namespace)}/${enc(name)}/clones`),
+	createClone: (namespace: string, name: string, target: string) =>
+		post<{ name: string; target: string }>(`/api/vms/${enc(namespace)}/${enc(name)}/clone`, {
+			target
+		}),
 
 	// Snapshots (imperative, RBAC-gated; not git-managed).
 	snapshots: (namespace: string, name: string) =>
