@@ -5,8 +5,15 @@
 	let {
 		vm,
 		onclose,
-		onstaged
-	}: { vm: VM; onclose: () => void; onstaged: () => void } = $props();
+		onstaged,
+		initialSection
+	}: {
+		vm: VM;
+		onclose: () => void;
+		onstaged: () => void;
+		// Opened from a Configure section: expand just that section and scroll to it.
+		initialSection?: 'compute' | 'storage' | 'network' | 'labels';
+	} = $props();
 
 	let options = $state<Options | null>(null);
 
@@ -28,8 +35,19 @@
 	let saving = $state(false);
 	let error = $state('');
 
-	// Collapsible sections (vCenter expands them all by default).
-	let open = $state({ compute: true, storage: true, network: true });
+	// Collapsible sections (vCenter expands them all by default); a targeted open
+	// (from Configure) expands only the requested one.
+	// svelte-ignore state_referenced_locally
+	const target = initialSection;
+	let open = $state({
+		compute: !target || target === 'compute',
+		storage: !target || target === 'storage',
+		network: !target || target === 'network'
+	});
+
+	$effect(() => {
+		if (target) document.getElementById('edit-sec-' + target)?.scrollIntoView({ block: 'start' });
+	});
 
 	let optionsError = $state('');
 	$effect(() => {
@@ -131,7 +149,7 @@
 
 			<div class="space-y-3">
 				<!-- Compute -->
-				<section class="rounded border border-slate-200">
+				<section id="edit-sec-compute" class="rounded border border-slate-200">
 					<button
 						onclick={() => (open.compute = !open.compute)}
 						class="flex w-full items-center gap-2 bg-slate-50 px-3 py-1.5 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase hover:bg-slate-100"
@@ -180,7 +198,7 @@
 				</section>
 
 				<!-- Storage -->
-				<section class="rounded border border-slate-200">
+				<section id="edit-sec-storage" class="rounded border border-slate-200">
 					<button
 						onclick={() => (open.storage = !open.storage)}
 						class="flex w-full items-center gap-2 bg-slate-50 px-3 py-1.5 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase hover:bg-slate-100"
@@ -210,7 +228,7 @@
 				</section>
 
 				<!-- Network -->
-				<section class="rounded border border-slate-200">
+				<section id="edit-sec-network" class="rounded border border-slate-200">
 					<button
 						onclick={() => (open.network = !open.network)}
 						class="flex w-full items-center gap-2 bg-slate-50 px-3 py-1.5 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase hover:bg-slate-100"
@@ -243,7 +261,7 @@
 				</section>
 
 				<!-- Labels -->
-				<section class="rounded border border-slate-200">
+				<section id="edit-sec-labels" class="rounded border border-slate-200">
 					<div class="flex items-center justify-between bg-slate-50 px-3 py-1.5">
 						<span class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Labels</span>
 						<button onclick={() => (labelRows = [...labelRows, { key: '', value: '' }])} class="text-xs text-blue-600 hover:underline">+ Add</button>

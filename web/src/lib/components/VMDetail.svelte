@@ -34,11 +34,22 @@
 		intent?: { id: 'edit' | 'delete' | 'console' | 'snapshot'; seq: number } | null;
 	} = $props();
 
-	type Tab = 'summary' | 'monitor' | 'snapshots' | 'console';
+	type Tab = 'summary' | 'monitor' | 'configure' | 'snapshots' | 'console';
 	let tab = $state<Tab>('summary');
 	// Monitor sub-rail (vCenter keeps all time-series under Monitor).
 	let monitorView = $state<'events' | 'performance'>('events');
+	// Configure sub-rail (vCenter's settings verb: read-only sections, each with
+	// an Edit that stages a change through the PR flow).
+	type ConfigSection = 'hardware' | 'storage' | 'network' | 'labels' | 'source';
+	let configView = $state<ConfigSection>('hardware');
 	let editing = $state(false);
+	// Which EditSettings section a Configure "Edit" jumps to (undefined = all).
+	let editSection = $state<'compute' | 'storage' | 'network' | 'labels' | undefined>(undefined);
+
+	function openEdit(section?: 'compute' | 'storage' | 'network' | 'labels') {
+		editSection = section;
+		editing = true;
+	}
 
 	// Delete is destructive once the PR merges, so it's gated behind a confirm
 	// dialog that requires typing the VM name (handled by ConfirmDelete).
@@ -123,7 +134,7 @@
 		}
 		switch (a.id) {
 			case 'edit':
-				editing = true;
+				openEdit();
 				break;
 			case 'delete':
 				deleting = true;
@@ -148,7 +159,9 @@
 		const cur = vm;
 		tab = 'summary';
 		monitorView = 'events';
+		configView = 'hardware';
 		editing = false;
+		editSection = undefined;
 		deleting = false;
 		deleteErr = '';
 		driftChanges = null;
@@ -170,7 +183,7 @@
 		if (!i) return;
 		switch (i.id) {
 			case 'edit':
-				editing = true;
+				openEdit();
 				break;
 			case 'delete':
 				deleting = true;
@@ -282,7 +295,7 @@
 						{/if}
 					</div>
 					<button
-						onclick={() => (editing = true)}
+						onclick={() => openEdit()}
 						title="Edit settings"
 						class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
 					>
@@ -301,7 +314,7 @@
 				</div>
 			</div>
 			<nav class="flex gap-1 text-sm">
-				{#each ['summary', 'monitor', 'snapshots', 'console'] as const as t (t)}
+				{#each ['summary', 'monitor', 'configure', 'snapshots', 'console'] as const as t (t)}
 					<button
 						class="border-b-2 px-3 py-1.5 capitalize {tab === t
 							? 'border-blue-600 text-blue-700'
@@ -410,57 +423,6 @@
 					</section>
 				</div>
 
-				{#if vm.disks?.length || vm.networks?.length}
-					<div class="mt-4 grid gap-4 md:grid-cols-2">
-						{#if vm.disks?.length}
-							<section class="rounded border border-slate-200">
-								<h3 class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-									Disks
-								</h3>
-								<ul class="divide-y divide-slate-100 px-3 text-[13px]">
-									{#each vm.disks as d (d.name)}
-										<li class="flex justify-between gap-3 py-1.5">
-											<span class="text-slate-800">{d.name}</span>
-											<span class="text-slate-400">{d.type}{d.size ? ` · ${d.size}` : ''}</span>
-										</li>
-									{/each}
-								</ul>
-							</section>
-						{/if}
-						{#if vm.networks?.length}
-							<section class="rounded border border-slate-200">
-								<h3 class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-									Networks
-								</h3>
-								<ul class="divide-y divide-slate-100 px-3 text-[13px]">
-									{#each vm.networks as n (n.name)}
-										<li class="flex justify-between gap-3 py-1.5">
-											<span class="text-slate-800">{n.name}</span>
-											<span class="text-slate-400">{n.network}</span>
-										</li>
-									{/each}
-								</ul>
-							</section>
-						{/if}
-					</div>
-				{/if}
-
-				{#if vm.labels && Object.keys(vm.labels).length}
-					<div class="mt-4">
-						<h3 class="mb-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">Labels</h3>
-						<div>
-							{#each Object.entries(vm.labels) as [k, v] (k)}
-								<button
-									onclick={() => onsearchlabel?.(k, v)}
-									title="Find everything labeled {k}={v}"
-									class="mr-1 mb-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600 hover:bg-blue-50 hover:text-blue-700"
-									>{k}={v}</button
-								>
-							{/each}
-						</div>
-					</div>
-				{/if}
-
 				{#if driftChanges && driftChanges.length > 0}
 					<div class="mt-4 rounded border border-amber-200 bg-amber-50">
 						<button
@@ -560,6 +522,130 @@
 						</tbody>
 					</table>
 				{/if}
+			{:else if tab === 'configure'}
+				<!-- vCenter's settings verb: a left sub-rail of read-only sections; every
+				     Edit stages a change through the PR flow (nothing writes the cluster). -->
+				{#snippet cfgField(label: string, value: string)}
+					<div class="flex justify-between gap-3 px-3 py-1.5">
+						<dt class="shrink-0 text-slate-500">{label}</dt>
+						<dd class="min-w-0 truncate text-right text-slate-800">{value || '—'}</dd>
+					</div>
+				{/snippet}
+				{#snippet cfgHeader(title: string, section?: 'compute' | 'storage' | 'network' | 'labels')}
+					<div class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-1.5">
+						<h3 class="text-xs font-semibold tracking-wide text-slate-500 uppercase">{title}</h3>
+						{#if section}
+							<button
+								onclick={() => openEdit(section)}
+								class="flex items-center gap-1 text-xs text-blue-600 hover:underline"
+							>
+								<Pencil size={11} /> Edit
+							</button>
+						{/if}
+					</div>
+				{/snippet}
+				<div class="flex gap-4">
+					<nav class="w-36 shrink-0 text-[13px]">
+						{#each [['hardware', 'VM Hardware'], ['storage', 'Storage'], ['network', 'Network'], ['labels', 'Labels'], ['source', 'Source & sync']] as const as [id, label] (id)}
+							<button
+								onclick={() => (configView = id)}
+								class="block w-full rounded px-2.5 py-1.5 text-left {configView === id
+									? 'bg-blue-50 font-medium text-blue-700'
+									: 'text-slate-600 hover:bg-slate-50'}"
+							>
+								{label}
+							</button>
+						{/each}
+					</nav>
+					<div class="min-w-0 flex-1">
+						{#if configView === 'hardware'}
+							<section class="rounded border border-slate-200">
+								{@render cfgHeader('VM Hardware', 'compute')}
+								<dl class="divide-y divide-slate-100 text-[13px]">
+									{@render cfgField('CPU cores', vm.cpuCores ? String(vm.cpuCores) : '')}
+									{@render cfgField('Memory', vm.memory ?? '')}
+									{@render cfgField('Instance type', vm.instancetype ?? '')}
+									{@render cfgField('Preference', vm.preference ?? '')}
+									{@render cfgField('Power (desired)', vm.power)}
+								</dl>
+							</section>
+						{:else if configView === 'storage'}
+							<section class="rounded border border-slate-200">
+								{@render cfgHeader('Disks', 'storage')}
+								{#if vm.disks?.length}
+									<ul class="divide-y divide-slate-100 px-3 text-[13px]">
+										{#each vm.disks as d (d.name)}
+											<li class="flex justify-between gap-3 py-1.5">
+												<span class="text-slate-800">{d.name}</span>
+												<span class="text-slate-400">{d.type}{d.size ? ` · ${d.size}` : ''}</span>
+											</li>
+										{/each}
+									</ul>
+								{:else}
+									<p class="px-3 py-3 text-xs text-slate-400">No disks defined in the manifest.</p>
+								{/if}
+							</section>
+						{:else if configView === 'network'}
+							<section class="rounded border border-slate-200">
+								{@render cfgHeader('Network adapters', 'network')}
+								{#if vm.networks?.length}
+									<ul class="divide-y divide-slate-100 px-3 text-[13px]">
+										{#each vm.networks as n (n.name)}
+											<li class="flex justify-between gap-3 py-1.5">
+												<span class="text-slate-800">{n.name}</span>
+												<span class="text-slate-400">{n.network}</span>
+											</li>
+										{/each}
+									</ul>
+								{:else}
+									<p class="px-3 py-3 text-xs text-slate-400">No adapters defined in the manifest.</p>
+								{/if}
+							</section>
+						{:else if configView === 'labels'}
+							<section class="rounded border border-slate-200">
+								{@render cfgHeader('Labels', 'labels')}
+								<div class="px-3 py-2">
+									{#if vm.labels && Object.keys(vm.labels).length}
+										{#each Object.entries(vm.labels) as [k, v] (k)}
+											<button
+												onclick={() => onsearchlabel?.(k, v)}
+												title="Find everything labeled {k}={v}"
+												class="mr-1 mb-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+												>{k}={v}</button
+											>
+										{/each}
+									{:else}
+										<p class="py-1 text-xs text-slate-400">No labels.</p>
+									{/if}
+								</div>
+							</section>
+						{:else}
+							<section class="rounded border border-slate-200">
+								{@render cfgHeader('Source & sync')}
+								<dl class="divide-y divide-slate-100 text-[13px]">
+									<div class="flex justify-between gap-3 px-3 py-1.5">
+										<dt class="shrink-0 text-slate-500">Manifest</dt>
+										<dd class="min-w-0 truncate text-right font-mono text-xs text-slate-600">
+											{vm.sourceFile}
+										</dd>
+									</div>
+									{@render cfgField('Namespace', vm.namespace)}
+									{@render cfgField('Sync', vm.sync)}
+								</dl>
+								<div class="border-t border-slate-100 px-3 py-2">
+									<a
+										href={manifestURL(vm)}
+										target="_blank"
+										class="text-xs text-blue-600 hover:underline">Download manifest ↗</a
+									>
+									<p class="mt-1 text-xs text-slate-400">
+										This VM's configuration lives in git; edits become a pull request.
+									</p>
+								</div>
+							</section>
+						{/if}
+					</div>
+				</div>
 			{:else if tab === 'snapshots'}
 				{#key `${vm.namespace}/${vm.name}`}
 					<Snapshots {vm} />
@@ -573,7 +659,12 @@
 	</div>
 
 	{#if editing}
-		<EditSettings {vm} onclose={() => (editing = false)} onstaged={() => onstaged?.()} />
+		<EditSettings
+			{vm}
+			initialSection={editSection}
+			onclose={() => (editing = false)}
+			onstaged={() => onstaged?.()}
+		/>
 	{/if}
 
 	{#if deleting}
