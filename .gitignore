@@ -4,6 +4,9 @@
 # Local demo launcher (carries env wiring/credentials, not code)
 /run-demo.sh
 
+# Local draft store (per-(user,project) staged changes; runtime state)
+/.dotvirt-drafts/
+
 # Go build/test artifacts
 *.exe
 *.test
