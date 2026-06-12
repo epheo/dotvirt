@@ -83,6 +83,13 @@ cd web && npm run build             # static SPA -> web/build
 
 ## Deploy
 
+Build the image (multi-stage: the SvelteKit SPA is built static and the Go binary
+serves it + `/api` at the same origin):
+
+```
+podman build -f Containerfile -t <registry>/dotvirt:tag .
+```
+
 Manifests in `deploy/`:
 
 | File | What |

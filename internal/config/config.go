@@ -54,6 +54,10 @@ type Config struct {
 	// provision dynamically from the dotvirt.io/project label. Empty disables it.
 	AppSetPluginToken string
 
+	// StaticDir is the built SPA directory the binary serves at the same origin (the
+	// container packs it here). Empty in dev, where Vite serves the SPA on :5173.
+	StaticDir string
+
 	// Auth
 	SessionSecret string // HMAC key signing the session cookie; random if empty
 
@@ -87,6 +91,7 @@ func Load(args []string) (*Config, error) {
 	fs.BoolVar(&c.InsecureTLS, "insecure-tls", envBool("DOTVIRT_INSECURE_TLS", false), "skip TLS verification for git+forge (dev only)")
 	fs.StringVar(&c.MetricsURL, "metrics-url", os.Getenv("DOTVIRT_METRICS_URL"), "Prometheus/Thanos query API base URL for the Performance tab (empty disables)")
 	fs.StringVar(&c.AppSetPluginToken, "appset-plugin-token", os.Getenv("DOTVIRT_APPSET_PLUGIN_TOKEN"), "shared bearer for the ArgoCD ApplicationSet plugin-generator endpoint (empty disables it)")
+	fs.StringVar(&c.StaticDir, "static-dir", os.Getenv("DOTVIRT_STATIC_DIR"), "directory of the built SPA to serve at the same origin (empty = dev: SPA served by Vite)")
 	fs.StringVar(&c.SessionSecret, "session-secret", os.Getenv("DOTVIRT_SESSION_SECRET"), "HMAC key signing the session cookie (random if empty; sessions then drop on restart)")
 
 	fs.BoolVar(&c.ArgoEnabled, "argo", envBool("DOTVIRT_ARGO", false), "enable ArgoCD drift reads")

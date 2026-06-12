@@ -33,7 +33,7 @@ spec:
       serviceAccountName: dotvirt
       containers:
         - name: dotvirt
-          image: ghcr.io/epheo/dotvirt:latest # build + push your own
+          image: ghcr.io/epheo/dotvirt:latest # build: podman build -f Containerfile -t <registry>/dotvirt:tag .
           args:
             - "-addr=:8080"
             - "-ui-origin=" # same-origin: SPA served behind the same Route

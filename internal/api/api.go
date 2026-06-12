@@ -11,6 +11,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/argo"
@@ -58,6 +61,7 @@ type Config struct {
 	BaseBranch        string // repo branch the inventory reads + drafts target
 	AllowOrigin       string // CORS origin for the SvelteKit frontend; empty disables CORS
 	AppSetPluginToken string // bearer for the ArgoCD ApplicationSet plugin endpoint; empty disables it
+	StaticDir         string // built SPA dir to serve at the same origin; empty = dev (SPA on Vite)
 }
 
 // visibleTTL bounds how long a token's visible-namespace set is reused. The set
@@ -212,7 +216,35 @@ func (s *Server) Handler() http.Handler {
 	if s.auth != nil {
 		handler = s.auth.Middleware(mux)
 	}
-	return withCORS(s.cfg.AllowOrigin, handler)
+	apiHandler := withCORS(s.cfg.AllowOrigin, handler)
+
+	// In production the same binary serves the built SPA at the same origin (so
+	// ui-origin/CORS is empty). /api/* goes to the API; everything else is a static
+	// file or the SPA shell. Dev keeps the SPA on Vite, so StaticDir is empty.
+	if s.cfg.StaticDir == "" {
+		return apiHandler
+	}
+	return spaRouter(s.cfg.StaticDir, apiHandler)
+}
+
+// spaRouter serves /api/* via the API handler and every other path from the static
+// SPA build dir — a real file when one exists, else index.html so client-side
+// routes resolve. Static assets bypass auth (the SPA authenticates via /api/login).
+func spaRouter(dir string, apiHandler http.Handler) http.Handler {
+	fileServer := http.FileServer(http.Dir(dir))
+	index := filepath.Join(dir, "index.html")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			apiHandler.ServeHTTP(w, r)
+			return
+		}
+		clean := filepath.Join(dir, filepath.Clean("/"+r.URL.Path))
+		if fi, err := os.Stat(clean); err == nil && !fi.IsDir() {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		http.ServeFile(w, r, index)
+	})
 }
 
 // withCORS adds CORS headers for the configured UI origin and answers preflight

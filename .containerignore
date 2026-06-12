@@ -1,0 +1,9 @@
+.git
+**/node_modules
+web/build
+web/.svelte-kit
+web/test-results
+web/playwright-report
+.dotvirt-drafts
+*.log
+dotvirt

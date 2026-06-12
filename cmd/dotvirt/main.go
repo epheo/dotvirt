@@ -121,6 +121,7 @@ func run() error {
 			BaseBranch:        cfg.BaseBranch,
 			AllowOrigin:       cfg.UIOrigin,
 			AppSetPluginToken: cfg.AppSetPluginToken,
+			StaticDir:         cfg.StaticDir,
 		},
 	})
 
