@@ -49,14 +49,17 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// The one change bus: every source (git polls, k8s reflectors, the argo watch)
-	// signals this 1-buffered channel non-blockingly, and the hub is its only
-	// consumer — it coalesces bursts and rebroadcasts inventory.
+	// The one change bus: every source (git polls, k8s reflectors, the argo watch,
+	// the proposals refresher) signals this 1-buffered channel non-blockingly, and
+	// the hub is its only consumer — it coalesces bursts and rebroadcasts inventory.
+	// gitChanged is the git-only side of the same poll, consumed by the proposals
+	// refresher (which must not re-query the forge on every cluster event).
 	changed := make(chan struct{}, 1)
+	gitChanged := make(chan struct{}, 1)
 
 	// Per-project git: one read mirror + writable view per repo URL, all on the
 	// single Forgejo credential.
-	repos := git.NewRepoSet(ctx, cfg.GitUsername, cfg.GitToken, cfg.Push, changed, cfg.GitPollInterval)
+	repos := git.NewRepoSet(ctx, cfg.GitUsername, cfg.GitToken, cfg.Push, changed, gitChanged, cfg.GitPollInterval)
 
 	draftStore, err := draft.Open(cfg.DraftDir)
 	if err != nil {
@@ -138,10 +141,9 @@ func run() error {
 	go hub.Run(ctx)
 	server.UseStream(hub)
 
-	// Flush the open-PR cache on any git head move, so the lane is fresh on a real
-	// propose/merge while idle heartbeats don't re-poll the forge. Set before serving
-	// (and thus before any request starts a poll goroutine).
-	repos.SetOnChange(server.InvalidateProposals)
+	// Open-PR lanes refresh in the background — on git head moves, handler nudges,
+	// and a slow backstop — so the broadcast path never calls the forge.
+	go server.RunProposalsRefresher(ctx, gitChanged, changed)
 
 	// VNC dials as the requesting user (KubeVirt RBAC gates the console).
 	server.UseVNC(stream.NewVNCProxy(func(token string) (stream.VNCDialer, error) {

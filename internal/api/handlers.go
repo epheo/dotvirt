@@ -5,7 +5,6 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -119,33 +118,6 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	inv.Warnings = warnings
 	inv.Proposals = s.proposalsFor(id, projects)
 	return inv, nil
-}
-
-// proposalsFor returns id's open PRs across its projects, cached per token for
-// proposalsTTL. It rides the inventory broadcast so the UI's open-PR lane updates
-// live (a merge moves main → the git poll rebroadcasts → the lane repaints), with
-// the TTL sparing the forge a FindPR-per-project on every frame. Best-effort: a
-// project whose forge lookup errors is skipped, never failing the inventory.
-func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo) []model.Proposal {
-	if s.draft == nil {
-		return nil
-	}
-	if v, ok := s.proposals.Get(restfactory.TokenKey(id.Token)); ok {
-		return v
-	}
-	out := []model.Proposal{}
-	for _, p := range projects {
-		pr, ok, err := s.draft.OpenProposal(id, p)
-		if err != nil {
-			log.Printf("proposals: %s: %v (skipping)", p.Name, err)
-			continue
-		}
-		if ok {
-			out = append(out, pr)
-		}
-	}
-	s.proposals.Put(restfactory.TokenKey(id.Token), out)
-	return out
 }
 
 func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
@@ -289,6 +261,9 @@ func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.draft.Revert(sc.id, sc.proj, req.Hash)
+	if err == nil {
+		s.nudgeProposals() // the revert PR reaches every lane before the git poll notices
+	}
 	respond(w, result, err)
 }
 
@@ -539,6 +514,9 @@ func (s *Server) handlePropose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.draft.Propose(sc.id, sc.proj, req)
+	if err == nil {
+		s.nudgeProposals() // the new PR reaches every lane before the git poll notices
+	}
 	respond(w, result, err)
 }
 

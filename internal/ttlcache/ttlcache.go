@@ -42,14 +42,6 @@ func (c *Cache[V]) Get(key string) (V, bool) {
 	return zero, false
 }
 
-// Clear drops every entry — used to invalidate the whole cache on an external
-// event (e.g. proposals are flushed when git changes, not just on TTL expiry).
-func (c *Cache[V]) Clear() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	clear(c.m)
-}
-
 // Put stores val under key, stamped now, and evicts expired entries so the cache
 // stays bounded by the keys seen within one TTL window. The cache is reachable
 // before authentication (it negative-caches rejected tokens), so unbounded growth

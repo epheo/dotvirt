@@ -21,10 +21,10 @@ type RepoSet struct {
 	push  bool
 
 	// Poll wiring, shared by every repo's poll goroutine.
-	ctx      context.Context
-	changed  chan<- struct{}
-	onChange func() // git-specific hook (heads moved), distinct from the shared `changed`
-	interval time.Duration
+	ctx        context.Context
+	changed    chan<- struct{} // the process-wide inventory bus (hub recomputes)
+	gitChanged chan<- struct{} // git-only signal (proposals refresher re-queries the forge)
+	interval   time.Duration
 
 	mu    sync.Mutex
 	cache map[string]*repoPair
@@ -37,25 +37,22 @@ type repoPair struct {
 
 // NewRepoSet builds a RepoSet. forgeUser/forgeToken authenticate every repo's
 // clone/push; push=false disables pushes (offline/tests). ctx bounds the
-// per-repo poll goroutines; changed receives a signal whenever any repo's branch
-// heads move; interval is the poll period.
-func NewRepoSet(ctx context.Context, forgeUser, forgeToken string, push bool, changed chan<- struct{}, interval time.Duration) *RepoSet {
+// per-repo poll goroutines. Both channels receive a coalesced signal whenever any
+// repo's branch heads move: changed is the process-wide inventory bus, gitChanged
+// the git-only side (the proposals refresher, which must not wake on the cluster
+// events the bus also carries). Either may be nil to disable that signal.
+func NewRepoSet(ctx context.Context, forgeUser, forgeToken string, push bool, changed, gitChanged chan<- struct{}, interval time.Duration) *RepoSet {
 	return &RepoSet{
-		user:     forgeUser,
-		token:    forgeToken,
-		push:     push,
-		ctx:      ctx,
-		changed:  changed,
-		interval: interval,
-		cache:    map[string]*repoPair{},
+		user:       forgeUser,
+		token:      forgeToken,
+		push:       push,
+		ctx:        ctx,
+		changed:    changed,
+		gitChanged: gitChanged,
+		interval:   interval,
+		cache:      map[string]*repoPair{},
 	}
 }
-
-// SetOnChange registers a callback fired whenever a repo's branch heads move (a
-// push or merge). dotvirt flushes the per-token proposals cache here, so the open-PR
-// lane refreshes on a real git change instead of re-polling the forge every
-// heartbeat. Call once at startup, before any Get starts a poll goroutine.
-func (s *RepoSet) SetOnChange(fn func()) { s.onChange = fn }
 
 // Get returns the read mirror and writable view for repoURL, opening them on
 // first call (and starting that repo's background poll). Subsequent calls return
@@ -110,16 +107,14 @@ func (s *RepoSet) poll(repo *Repo) {
 			if sig != last {
 				last = sig
 				signal(s.ctx, s.changed)
-				if s.onChange != nil {
-					s.onChange()
-				}
+				signal(s.ctx, s.gitChanged)
 			}
 		}
 	}
 }
 
 // signal sends a coalesced change notification, dropping it if one is already
-// pending or ctx is done.
+// pending, ctx is done, or the channel is nil.
 func signal(ctx context.Context, changed chan<- struct{}) {
 	select {
 	case changed <- struct{}{}:

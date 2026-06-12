@@ -55,7 +55,7 @@ func newTestCoordinator(t *testing.T) *Coordinator {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	repos := git.NewRepoSet(ctx, "", "", false, make(chan struct{}, 1), time.Hour)
+	repos := git.NewRepoSet(ctx, "", "", false, make(chan struct{}, 1), nil, time.Hour)
 	return New(store, repos, nil, nil, "main", "dotvirt/proposed", "running")
 }
 
