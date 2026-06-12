@@ -9,13 +9,15 @@
 		onselect,
 		selected = $bindable(new Set<string>()),
 		staged,
-		onstagedopen
+		onstagedopen,
+		oncontextvm
 	}: {
 		vms: VM[];
 		onselect: (vm: VM) => void;
 		selected?: Set<string>;
 		staged: Map<string, DraftItem>;
 		onstagedopen: (vm: VM) => void;
+		oncontextvm?: (vm: VM, x: number, y: number) => void;
 	} = $props();
 
 	const vmKey = (vm: VM) => `${vm.namespace}/${vm.name}`;
@@ -194,6 +196,11 @@
 					{@const sc = staged.get(vm.namespace + '/' + vm.name)}
 					<tr
 						onclick={() => onselect(vm)}
+						oncontextmenu={(e) => {
+							if (!oncontextvm) return;
+							e.preventDefault();
+							oncontextvm(vm, e.clientX, e.clientY);
+						}}
 						class="cursor-pointer hover:bg-blue-50 {selected.has(vmKey(vm)) ? 'bg-blue-50' : ''}"
 					>
 						<td class="px-3 py-1.5">

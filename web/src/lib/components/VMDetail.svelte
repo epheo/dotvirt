@@ -20,7 +20,8 @@
 		onaction,
 		stagedItem = null,
 		onstagedopen,
-		onsearchlabel
+		onsearchlabel,
+		intent = null
 	}: {
 		vm: VM | null;
 		onstaged?: () => void;
@@ -28,6 +29,9 @@
 		stagedItem?: DraftItem | null;
 		onstagedopen?: () => void;
 		onsearchlabel?: (key: string, value: string) => void;
+		// A one-shot request from outside (the context menu) to open a modal/tab
+		// here; seq distinguishes repeated requests for the same id.
+		intent?: { id: 'edit' | 'delete' | 'console' | 'snapshot'; seq: number } | null;
 	} = $props();
 
 	type Tab = 'summary' | 'monitor' | 'snapshots' | 'console';
@@ -155,6 +159,30 @@
 		actionsOpen = false;
 		runtimeMsg = '';
 		if (cur) loadDrift(cur.namespace, cur.name);
+	});
+
+	// Apply an outside intent (context menu → "Edit settings" on an unselected
+	// VM). Declared AFTER the reset effect above: when a selection change and an
+	// intent arrive in the same flush, effects run in declaration order, so the
+	// intent survives the reset.
+	$effect(() => {
+		const i = intent;
+		if (!i) return;
+		switch (i.id) {
+			case 'edit':
+				editing = true;
+				break;
+			case 'delete':
+				deleting = true;
+				deleteErr = '';
+				break;
+			case 'console':
+				tab = 'console';
+				break;
+			case 'snapshot':
+				tab = 'snapshots';
+				break;
+		}
 	});
 
 	async function adopt() {

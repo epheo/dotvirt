@@ -25,7 +25,9 @@
 		scope,
 		staged,
 		onselect,
-		onscope
+		onscope,
+		oncontextvm,
+		oncontextcontainer
 	}: {
 		inventory: Inventory;
 		selected: VM | null;
@@ -33,7 +35,27 @@
 		staged: Map<string, DraftItem>;
 		onselect: (vm: VM) => void;
 		onscope: (s: Scope) => void;
+		oncontextvm?: (vm: VM, x: number, y: number) => void;
+		oncontextcontainer?: (
+			c: { project: string; repo?: string; namespace?: string; namespaces: string[] },
+			x: number,
+			y: number
+		) => void;
 	} = $props();
+
+	function ctxVM(e: MouseEvent, vm: VM) {
+		if (!oncontextvm) return;
+		e.preventDefault();
+		oncontextvm(vm, e.clientX, e.clientY);
+	}
+	function ctxContainer(
+		e: MouseEvent,
+		c: { project: string; repo?: string; namespace?: string; namespaces: string[] }
+	) {
+		if (!oncontextcontainer) return;
+		e.preventDefault();
+		oncontextcontainer(c, e.clientX, e.clientY);
+	}
 
 	// Inventory lens: by Project (tenant/logical, like vCenter's VMs & Templates) or
 	// by Node (physical, like Hosts & Clusters). Switching resets the grid scope.
@@ -81,6 +103,7 @@
 		class="flex w-full items-center gap-2 py-1 pr-2 text-left hover:bg-blue-50 {pad}
 			{isSelected(vm) ? 'bg-blue-100 hover:bg-blue-100' : ''}"
 		onclick={() => onselect(vm)}
+		oncontextmenu={(e) => ctxVM(e, vm)}
 	>
 		<PowerDot power={vm.power} paused={vm.paused} />
 		<span
@@ -155,6 +178,12 @@
 					<button
 						class="flex min-w-0 flex-1 items-center gap-1 text-left"
 						onclick={() => onscope({ kind: 'project', project: project.name })}
+						oncontextmenu={(e) =>
+							ctxContainer(e, {
+								project: project.name,
+								repo: project.repo,
+								namespaces: project.namespaces.map((n) => n.namespace)
+							})}
 					>
 						<Folder size={14} class="shrink-0 text-blue-500" />
 						<span class="truncate font-semibold text-slate-700">{project.name}</span>
@@ -196,6 +225,13 @@
 									class="flex min-w-0 flex-1 items-center gap-1 text-left"
 									onclick={() =>
 										onscope({ kind: 'namespace', project: project.name, namespace: ns.namespace })}
+									oncontextmenu={(e) =>
+										ctxContainer(e, {
+											project: project.name,
+											repo: project.repo,
+											namespace: ns.namespace,
+											namespaces: [ns.namespace]
+										})}
 								>
 									<Layers size={13} class="shrink-0 text-slate-400" />
 									<span class="truncate text-slate-600">{ns.namespace}</span>
