@@ -22,9 +22,12 @@
 			loading = false;
 		}
 	}
+	// Depend on a stable key, not the array identity: the parent re-derives the
+	// namespaces array every inventory frame, but its CONTENT only changes on a real
+	// scope change — without this the slow /api/events call re-fires continuously.
+	const key = $derived([...namespaces].sort().join(','));
 	$effect(() => {
-		// Re-filter when the scoped namespaces change.
-		namespaces;
+		key;
 		load();
 	});
 

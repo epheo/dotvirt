@@ -191,14 +191,20 @@ func (s *Server) handleAllEvents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	visible, err := s.visibleFor(r.Context(), id, c)
+	// Scope to the repo-backed projects' namespaces (the managed inventory), not
+	// every visible namespace — listing events across an admin's whole cluster takes
+	// many seconds and matches no VM the UI shows.
+	projects, err := s.projectsFor(r.Context(), id, c)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	nss := make([]string, 0, len(visible))
-	for ns := range visible {
-		nss = append(nss, ns)
+	var nss []string
+	for _, p := range projects {
+		if p.Repo == "" {
+			continue
+		}
+		nss = append(nss, p.Namespaces...)
 	}
 	events, err := c.ListVMEvents(r.Context(), nss)
 	respond(w, events, err)
