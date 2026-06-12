@@ -26,7 +26,7 @@ type Hub struct {
 	mu   sync.Mutex
 	subs map[*subscriber]struct{}
 
-	changed chan struct{}
+	changed <-chan struct{}
 }
 
 type subscriber struct {
@@ -48,18 +48,17 @@ func (s *subscriber) push(data []byte) {
 	}
 }
 
-// NewHub builds a Hub. changed is the shared signal channel that watches and the
-// git poll write to; the Hub coalesces bursts and recomputes once.
-func NewHub(inventory InventoryFunc) *Hub {
+// NewHub builds a Hub over the process-wide change channel — the single bus every
+// source (k8s/argo watches, git polls) signals and only the Hub consumes. It must
+// be 1-buffered so writers coalesce instead of blocking; the Hub drains bursts and
+// recomputes once.
+func NewHub(inventory InventoryFunc, changed <-chan struct{}) *Hub {
 	return &Hub{
 		inventory: inventory,
 		subs:      map[*subscriber]struct{}{},
-		changed:   make(chan struct{}, 1),
+		changed:   changed,
 	}
 }
-
-// Changed returns the channel writers (watches, git poll) signal on change.
-func (h *Hub) Changed() chan<- struct{} { return h.changed }
 
 // Run drives broadcasts: it waits for change signals (debounced) and also pushes
 // on a slow heartbeat so a subscriber that just connected gets current state even

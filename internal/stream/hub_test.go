@@ -18,7 +18,7 @@ func TestPushAfterRemoveDoesNotPanic(t *testing.T) {
 	inv := func(ctx context.Context, id auth.Identity) (model.Inventory, error) {
 		return model.Inventory{Projects: []model.Project{{Name: id.Username}}}, nil
 	}
-	h := NewHub(inv)
+	h := NewHub(inv, make(chan struct{}, 1))
 
 	var wg sync.WaitGroup
 	for i := 0; i < 200; i++ {
@@ -47,7 +47,7 @@ func TestBroadcastPerIdentity(t *testing.T) {
 		// Echo the username as the single project name.
 		return model.Inventory{Projects: []model.Project{{Name: id.Username}}}, nil
 	}
-	h := NewHub(inv)
+	h := NewHub(inv, make(chan struct{}, 1))
 
 	alice := &subscriber{identity: auth.Identity{Username: "alice"}, send: make(chan []byte, 1), quit: make(chan struct{})}
 	bob := &subscriber{identity: auth.Identity{Username: "bob"}, send: make(chan []byte, 1), quit: make(chan struct{})}

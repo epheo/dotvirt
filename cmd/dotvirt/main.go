@@ -49,10 +49,13 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Per-project git: one read mirror + writable view per repo URL, all on the
-	// single Forgejo credential. changed will drive the live hub in a later step;
-	// the per-repo poll signals it non-blockingly, so it's safe to leave unread.
+	// The one change bus: every source (git polls, k8s reflectors, the argo watch)
+	// signals this 1-buffered channel non-blockingly, and the hub is its only
+	// consumer — it coalesces bursts and rebroadcasts inventory.
 	changed := make(chan struct{}, 1)
+
+	// Per-project git: one read mirror + writable view per repo URL, all on the
+	// single Forgejo credential.
 	repos := git.NewRepoSet(ctx, cfg.GitUsername, cfg.GitToken, cfg.Push, changed, cfg.GitPollInterval)
 
 	draftStore, err := draft.Open(cfg.DraftDir)
@@ -130,11 +133,9 @@ func run() error {
 	stream.SetAllowedOrigin(cfg.UIOrigin)
 
 	// Live inventory hub: each subscriber's frame is built under their identity
-	// (same path as GET /api/inventory). Fed by the SA watches + the RepoSet's
-	// per-repo git poll via the shared `changed` channel.
-	hub := stream.NewHub(server.InventoryForIdentity)
+	// (same path as GET /api/inventory). It consumes the shared change bus directly.
+	hub := stream.NewHub(server.InventoryForIdentity, changed)
 	go hub.Run(ctx)
-	go forward(ctx, changed, hub.Changed())
 	server.UseStream(hub)
 
 	// Flush the open-PR cache on any git head move, so the lane is fresh on a real
@@ -153,7 +154,7 @@ func run() error {
 	go exporter.Run(ctx, cfg.ExportInterval)
 
 	if saArgo != nil {
-		saArgo.Watch(ctx, hub.Changed()) // push on Application drift changes
+		saArgo.Watch(ctx, changed) // push on Application drift changes
 	}
 
 	// Let the snapshot's initial LIST land before serving so the first inventory
@@ -183,21 +184,4 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
-}
-
-// forward relays change signals from src (the RepoSet's git-poll channel) to dst
-// (the hub's). Both are coalescing 1-buffered channels; a dropped duplicate is
-// fine since the hub recomputes the full state on any signal.
-func forward(ctx context.Context, src <-chan struct{}, dst chan<- struct{}) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-src:
-			select {
-			case dst <- struct{}{}:
-			default:
-			}
-		}
-	}
 }
