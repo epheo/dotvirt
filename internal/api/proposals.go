@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -138,6 +139,26 @@ func (s *Server) refreshProposals() bool {
 		s.proposals.Put(key, out)
 	}
 	return anyChanged
+}
+
+// handleProposals lists the caller's open PRs across their visible projects — the
+// same set the live inventory now carries; kept as a standalone read for parity.
+func (s *Server) handleProposals(w http.ResponseWriter, r *http.Request) {
+	id, c, err := s.userCluster(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	projects, err := s.projectsFor(r.Context(), id, c)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	out := s.proposalsFor(id, projects)
+	if out == nil {
+		out = []model.Proposal{}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func proposalsEqual(a, b []model.Proposal) bool {
