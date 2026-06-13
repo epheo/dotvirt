@@ -50,6 +50,20 @@
 		failed: 'text-red-600'
 	};
 	const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+	// Overcommit ratio = committed-to-VMs : node-allocatable (vCenter's "vCPU
+	// 3.2:1"). >1 means more is promised to VMs than the nodes physically have —
+	// fine for CPU (time-shared), a memory warning. Only meaningful with both a
+	// committed amount and a capacity denominator.
+	const overcommit = $derived.by(() => {
+		if (!data) return [];
+		const ratio = (m: { allocated?: number; total: number }) =>
+			m.allocated && m.total > 0 ? m.allocated / m.total : 0;
+		return [
+			{ label: 'vCPU', r: ratio(data.cpu) },
+			{ label: 'Memory', r: ratio(data.memory) }
+		].filter((x) => x.r > 0);
+	});
 </script>
 
 {#if data}
@@ -99,6 +113,24 @@
 					{/each}
 				</div>
 			</div>
+
+			{#if overcommit.length}
+				<div>
+					<div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Overcommit</div>
+					<div class="mt-2 flex gap-2">
+						{#each overcommit as o (o.label)}
+							<span
+								class="rounded px-2 py-1 text-sm font-medium {o.r > 1
+									? 'bg-amber-100 text-amber-800'
+									: 'bg-slate-100 text-slate-600'}"
+								title="{o.label} committed to VMs vs node-allocatable"
+							>
+								{o.label} {o.r.toFixed(1)}:1
+							</span>
+						{/each}
+					</div>
+				</div>
+			{/if}
 
 			<div class="min-w-[12rem] flex-1">
 				<div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Top consumers</div>
