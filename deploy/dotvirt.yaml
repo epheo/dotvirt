@@ -40,7 +40,7 @@ spec:
         - name: dotvirt
           # Pinned to the main commit the image was built from (make push tags
           # both <short-sha> and latest).
-          image: registry.desku.be/dotvirt:817a661
+          image: registry.desku.be/dotvirt:225407b
           args:
             - "-addr=:8080"
             - "-ui-origin=" # same-origin: SPA served behind the same Route
