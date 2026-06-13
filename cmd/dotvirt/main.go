@@ -135,6 +135,7 @@ func run() error {
 			AppSetPluginToken: cfg.AppSetPluginToken,
 			StaticDir:         cfg.StaticDir,
 			WebhookSecret:     cfg.WebhookSecret,
+			UploadProxyURL:    cfg.UploadProxyURL,
 		},
 	})
 

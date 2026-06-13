@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { ArrowLeft, Plus, Power, PowerOff, Trash2 } from 'lucide-svelte';
+	import { ArrowLeft, Plus, Power, PowerOff, Trash2, Upload } from 'lucide-svelte';
 	import {
 		api,
 		draftsByProject,
@@ -30,6 +30,7 @@
 	import QuotaBand from '$lib/components/QuotaBand.svelte';
 	import StagedChangesModal from '$lib/components/StagedChangesModal.svelte';
 	import TaskDock from '$lib/components/TaskDock.svelte';
+	import UploadModal from '$lib/components/UploadModal.svelte';
 	import VMDetail from '$lib/components/VMDetail.svelte';
 	import VMTable from '$lib/components/VMTable.svelte';
 
@@ -232,6 +233,7 @@
 	);
 
 	let showWizard = $state(false);
+	let showUpload = $state(false);
 	let showChanges = $state(false);
 	// The catalog browser shares the right-panel slot with Changes (one at a time).
 	let showCatalog = $state(false);
@@ -469,6 +471,14 @@
 				class="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-40"
 			>
 				<Plus size={14} /> New VM
+			</button>
+			<button
+				onclick={() => (showUpload = true)}
+				disabled={!namespaces.length}
+				title="Upload a disk image (qcow2/raw/iso) as a bootable DataVolume"
+				class="flex items-center gap-1.5 rounded border border-slate-600 px-3 py-1 text-xs font-medium text-slate-100 hover:bg-slate-700 disabled:opacity-40"
+			>
+				<Upload size={14} /> Upload
 			</button>
 			<div class="text-xs text-slate-400">{vmCount} VMs</div>
 			<span class="text-slate-600">|</span>
@@ -783,6 +793,10 @@
 				}}
 				onstaged={refreshDrafts}
 			/>
+		{/if}
+
+		{#if showUpload}
+			<UploadModal {namespaces} onclose={() => (showUpload = false)} />
 		{/if}
 
 		{#if ctx}

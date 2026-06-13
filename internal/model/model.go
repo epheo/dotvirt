@@ -378,6 +378,28 @@ type Clone struct {
 	Created string `json:"created,omitempty"` // RFC3339
 }
 
+// UploadStatus is an upload DataVolume's progress (the image-upload flow). Ready
+// (phase UploadReady) means cdi-uploadproxy will accept the bytes; Progress is
+// CDI's import-progress percentage once they're flowing.
+type UploadStatus struct {
+	Phase    string `json:"phase"`
+	Ready    bool   `json:"ready"`
+	Progress string `json:"progress,omitempty"`
+}
+
+// UploadToken is the bearer + endpoint the browser POSTs the image to, streaming
+// directly to cdi-uploadproxy (which ships open CORS).
+type UploadToken struct {
+	Token     string `json:"token"`
+	UploadURL string `json:"uploadUrl"`
+}
+
+// UploadTarget identifies the upload DataVolume just created.
+type UploadTarget struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+}
+
 // NodeInfo is a node's maintenance state for the By-Node view: whether it's
 // cordoned, and whether the caller's token may cordon it (so the UI hides the
 // action for users without node-update RBAC).

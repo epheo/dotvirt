@@ -65,6 +65,7 @@ type Config struct {
 	AppSetPluginToken string // bearer for the ArgoCD ApplicationSet plugin endpoint; empty disables it
 	StaticDir         string // built SPA dir to serve at the same origin; empty = dev (SPA on Vite)
 	WebhookSecret     string // HMAC secret for the Forgejo webhook endpoint; empty disables it
+	UploadProxyURL    string // cdi-uploadproxy base for image uploads; empty disables it
 }
 
 // visibleTTL bounds how long a token's visible-namespace set is reused. The set
@@ -180,6 +181,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/quotas", s.handleQuotas)
 	mux.HandleFunc("GET /api/nodes/{node}", s.handleNodeInfo)
 	mux.HandleFunc("POST /api/nodes/{node}/cordon", s.handleNodeCordon)
+	mux.HandleFunc("POST /api/uploads", s.handleCreateUpload)
+	mux.HandleFunc("GET /api/uploads/{namespace}/{name}", s.handleUploadStatus)
+	mux.HandleFunc("POST /api/uploads/{namespace}/{name}/token", s.handleUploadToken)
 	mux.HandleFunc("GET /api/projects/{project}/history", s.handleHistory)
 	mux.HandleFunc("POST /api/projects/{project}/revert", s.handleRevert)
 

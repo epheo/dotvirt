@@ -322,6 +322,22 @@ export interface Alert {
 	count?: number; // collapsed identical series
 }
 
+// Image-upload flow (the OVF-import analog): dotvirt mints the target + token,
+// the browser streams the image straight to cdi-uploadproxy.
+export interface UploadTarget {
+	namespace: string;
+	name: string;
+}
+export interface UploadStatus {
+	phase: string; // Pending | UploadScheduled | UploadReady | Succeeded | Failed | …
+	ready: boolean; // UploadReady — the proxy will accept bytes
+	progress?: string; // CDI import progress, once bytes flow
+}
+export interface UploadToken {
+	token: string;
+	uploadUrl: string; // the cdi-uploadproxy endpoint the browser POSTs to
+}
+
 // A node's maintenance state for the By-Node view.
 export interface NodeInfo {
 	name: string;
@@ -412,6 +428,15 @@ export const api = {
 	nodeInfo: (node: string) => get<NodeInfo>(`/api/nodes/${enc(node)}`),
 	setNodeCordon: (node: string, unschedulable: boolean) =>
 		post<void>(`/api/nodes/${enc(node)}/cordon`, { unschedulable }),
+
+	// Image upload: create the target DataVolume + mint a token; the browser
+	// then streams the file straight to the proxy (uploadUrl from uploadToken).
+	createUpload: (req: { namespace: string; name: string; size: string; storageClass?: string }) =>
+		post<UploadTarget>('/api/uploads', req),
+	uploadStatus: (namespace: string, name: string) =>
+		get<UploadStatus>(`/api/uploads/${enc(namespace)}/${enc(name)}`),
+	uploadToken: (namespace: string, name: string) =>
+		post<UploadToken>(`/api/uploads/${enc(namespace)}/${enc(name)}/token`, {}),
 	quotas: (scope: ScopeQuery) => get<NamespaceQuota[]>(`/api/quotas${scopeQS(scope)}`),
 	adopt: (namespace: string, name: string) =>
 		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/adopt`, {}),

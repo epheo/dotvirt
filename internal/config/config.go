@@ -51,6 +51,11 @@ type Config struct {
 	// service-CA that signs thanos-querier's serving cert (so no -insecure-tls).
 	MetricsCA string
 
+	// UploadProxyURL is the cdi-uploadproxy base the browser streams uploaded
+	// images to (e.g. https://cdi-uploadproxy-…apps.example/); from
+	// cdiconfig.status.uploadProxyURL. Empty disables the image-upload feature.
+	UploadProxyURL string
+
 	// Webhook: Forgejo pushes/PR events hit POST /api/webhooks/forge (HMAC-signed
 	// with WebhookSecret; empty disables the endpoint). PublicURL is dotvirt's
 	// externally reachable base (the Route), used to auto-register that webhook on
@@ -101,6 +106,7 @@ func Load(args []string) (*Config, error) {
 	fs.BoolVar(&c.InsecureTLS, "insecure-tls", envBool("DOTVIRT_INSECURE_TLS", false), "skip TLS verification for git+forge (dev only)")
 	fs.StringVar(&c.MetricsURL, "metrics-url", os.Getenv("DOTVIRT_METRICS_URL"), "Prometheus/Thanos query API base URL for the Performance tab (empty disables)")
 	fs.StringVar(&c.MetricsCA, "metrics-ca", os.Getenv("DOTVIRT_METRICS_CA"), "PEM CA bundle path to trust for -metrics-url (e.g. the mounted service-CA)")
+	fs.StringVar(&c.UploadProxyURL, "upload-proxy-url", os.Getenv("DOTVIRT_UPLOAD_PROXY_URL"), "cdi-uploadproxy base URL for image uploads (empty disables the feature)")
 	fs.StringVar(&c.WebhookSecret, "webhook-secret", os.Getenv("DOTVIRT_WEBHOOK_SECRET"), "HMAC secret for the Forgejo webhook endpoint (empty disables it)")
 	fs.StringVar(&c.PublicURL, "public-url", os.Getenv("DOTVIRT_PUBLIC_URL"), "dotvirt's externally reachable base URL, for webhook auto-registration (empty disables)")
 	fs.StringVar(&c.AppSetPluginToken, "appset-plugin-token", os.Getenv("DOTVIRT_APPSET_PLUGIN_TOKEN"), "shared bearer for the ArgoCD ApplicationSet plugin-generator endpoint (empty disables it)")

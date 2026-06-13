@@ -58,6 +58,12 @@ spec:
               value: "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091"
             - name: DOTVIRT_METRICS_CA
               value: "/etc/dotvirt/ca/service-ca.crt"
+            # Image upload: the cdi-uploadproxy Route the browser streams images
+            # to (cdiconfig.status.uploadProxyURL). Cluster-specific; empty
+            # disables the feature. Its cert is the cluster ingress CA the
+            # browser already trusts (same as this app's Route).
+            - name: DOTVIRT_UPLOAD_PROXY_URL
+              value: "https://cdi-uploadproxy-openshift-cnv.apps.hetznet.epheo.eu"
             # Instant updates: Forgejo webhooks deliver to PUBLIC_URL/api/webhooks/forge,
             # HMAC-signed with the webhook secret; dotvirt auto-registers the hook on
             # every project repo. Omit the secret to fall back to polling only.
