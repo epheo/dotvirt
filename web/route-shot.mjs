@@ -1,0 +1,15 @@
+import { chromium } from 'playwright';
+const TOKEN = process.env.OC_TOKEN;
+const R = 'https://dotvirt.apps.hetznet.epheo.eu';
+const browser = await chromium.launch({ args: ['--ignore-certificate-errors'] });
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true });
+page.setDefaultTimeout(30000);
+await page.goto(R);
+await page.waitForSelector('textarea');
+await page.fill('textarea', TOKEN);
+await page.click('button[type="submit"]');
+await page.waitForSelector('text=vm-tenant-a', { timeout: 25000 });
+await page.waitForTimeout(1500);
+await page.screenshot({ path: '/tmp/route-1-live.png' });
+console.log('OK');
+await browser.close();

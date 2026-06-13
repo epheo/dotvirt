@@ -79,3 +79,32 @@ metadata:
 type: Opaque
 stringData:
   token: "REPLACE-with-a-shared-secret"
+---
+# Argo repo CREDENTIAL TEMPLATE (not a per-repo entry): one prefix-matched
+# credential covers EVERY project repo dotvirt's plugin emits, so a newly-labeled
+# project provisions hands-off — no per-repo secret. The url is the forge's
+# owner-path prefix; Argo longest-prefix-matches it. Anonymous read works on these
+# repos, so username/password are belt-and-braces (and cover private repos).
+#
+# TLS: the plugin emits the forge's external Route URL (browser-reachable, so the
+# UI "Open repository" link works), whose cert is signed by the OpenShift ingress
+# CA — not publicly trusted. Rather than `insecure: true` (which the repo-creds
+# template does NOT honor), teach the ArgoCD repo-server to trust that CA, so the
+# clone is verified:
+#   oc extract configmap/default-ingress-cert -n openshift-config-managed --to=/tmp --confirm
+#   oc create configmap argocd-tls-certs-cm -n openshift-gitops \
+#     --from-file=forgejo.apps.hetznet.epheo.eu=/tmp/ca-bundle.crt --dry-run=client -o yaml | oc apply -f -
+#   oc rollout restart deploy/openshift-gitops-repo-server -n openshift-gitops
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dotvirt-forge-creds
+  namespace: openshift-gitops
+  labels:
+    argocd.argoproj.io/secret-type: repo-creds
+type: Opaque
+stringData:
+  type: git
+  url: https://forgejo.apps.hetznet.epheo.eu/dotvirt # owner-path prefix for all project repos
+  username: dotvirt
+  password: "REPLACE-with-the-forge-token" # same value as dotvirt-forge's token
