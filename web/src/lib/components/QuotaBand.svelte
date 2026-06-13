@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { api, Unauthorized, type NamespaceQuota } from '$lib/api';
 	import { bytes, cores } from '$lib/format';
 
@@ -15,10 +16,12 @@
 
 	let quotas = $state<NamespaceQuota[] | null>(null);
 
+	// Parents pass an inline scope literal (recreated each render); key on its
+	// value so refetch fires on real scope changes only, not every parent render.
 	const key = $derived(`${scope.project ?? ''}|${scope.namespace ?? ''}`);
 	$effect(() => {
 		key;
-		load();
+		untrack(load);
 	});
 	async function load() {
 		const s = scope;

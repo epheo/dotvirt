@@ -337,6 +337,22 @@ export interface Permissions {
 
 const enc = encodeURIComponent;
 
+// A container-scope read's query params (the project/namespace/node levels).
+export type ScopeQuery = { project?: string; namespace?: string; node?: string };
+
+// scopeQS builds the `?project=&namespace=&node=` suffix for a scope read,
+// omitting empty levels; returns '' when nothing is set. extra appends
+// additional params (e.g. range).
+function scopeQS(scope: ScopeQuery, extra?: Record<string, string>): string {
+	const q = new URLSearchParams();
+	if (scope.project) q.set('project', scope.project);
+	if (scope.namespace) q.set('namespace', scope.namespace);
+	if (scope.node) q.set('node', scope.node);
+	for (const [k, v] of Object.entries(extra ?? {})) q.set(k, v);
+	const qs = q.toString();
+	return qs ? `?${qs}` : '';
+}
+
 export const api = {
 	// Auth
 	login: (token: string) => post<User>('/api/login', { token }),
@@ -380,33 +396,12 @@ export const api = {
 		get<VMMetrics>(`/api/vms/${enc(namespace)}/${enc(name)}/metrics?range=${enc(range)}`),
 	vmUsage: (namespace: string, name: string) =>
 		get<VMUsage>(`/api/vms/${enc(namespace)}/${enc(name)}/usage`),
-	clusterSummary: (scope?: { project?: string; namespace?: string; node?: string }) => {
-		const q = new URLSearchParams();
-		if (scope?.project) q.set('project', scope.project);
-		if (scope?.namespace) q.set('namespace', scope.namespace);
-		if (scope?.node) q.set('node', scope.node);
-		const qs = q.toString();
-		return get<ClusterSummary>(`/api/metrics/cluster${qs ? `?${qs}` : ''}`);
-	},
-	scopeMetrics: (
-		scope: { project?: string; namespace?: string; node?: string },
-		range: string
-	) => {
-		const q = new URLSearchParams();
-		if (scope.project) q.set('project', scope.project);
-		if (scope.namespace) q.set('namespace', scope.namespace);
-		if (scope.node) q.set('node', scope.node);
-		q.set('range', range);
-		return get<VMMetrics>(`/api/metrics/scope?${q.toString()}`);
-	},
+	clusterSummary: (scope: ScopeQuery = {}) =>
+		get<ClusterSummary>(`/api/metrics/cluster${scopeQS(scope)}`),
+	scopeMetrics: (scope: ScopeQuery, range: string) =>
+		get<VMMetrics>(`/api/metrics/scope${scopeQS(scope, { range })}`),
 	alarms: () => get<Alert[]>('/api/alarms'),
-	quotas: (scope: { project?: string; namespace?: string }) => {
-		const q = new URLSearchParams();
-		if (scope.project) q.set('project', scope.project);
-		if (scope.namespace) q.set('namespace', scope.namespace);
-		const qs = q.toString();
-		return get<NamespaceQuota[]>(`/api/quotas${qs ? `?${qs}` : ''}`);
-	},
+	quotas: (scope: ScopeQuery) => get<NamespaceQuota[]>(`/api/quotas${scopeQS(scope)}`),
 	adopt: (namespace: string, name: string) =>
 		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/adopt`, {}),
 	resync: (namespace: string, name: string) =>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { api, Unauthorized, type VM, type VMUsage } from '$lib/api';
 	import { relativeAge } from '$lib/format';
 	import { pollWhileVisible } from '$lib/poll';
@@ -23,10 +24,14 @@
 		}
 	}
 
+	// Reload on selection change only. Key on the VM identity, not the vm object:
+	// the live stream hands down a fresh vm every frame, and load() reads
+	// vm.namespace/name synchronously — untrack keeps those reads from re-firing
+	// this effect each frame.
+	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
 	$effect(() => {
-		vm.namespace;
-		vm.name;
-		load();
+		vmKey;
+		untrack(load);
 	});
 	// Point-in-time, refreshed on a cadence (vCenter's Summary is a live snapshot),
 	// paused while the tab is backgrounded.

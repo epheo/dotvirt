@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { api, METRIC_RANGES, Unauthorized, type VM, type VMMetrics } from '$lib/api';
 	import { pollWhileVisible } from '$lib/poll';
 	import UPlotChart from './UPlotChart.svelte';
@@ -29,12 +30,14 @@
 		}
 	}
 
-	// Reload when the VM or range changes.
+	// Reload when the VM or range changes. Key on the VM identity (the live
+	// stream hands down a fresh vm object every frame); untrack the load so its
+	// synchronous vm reads don't re-fire this effect per frame.
+	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
 	$effect(() => {
-		vm.namespace;
-		vm.name;
+		vmKey;
 		range;
-		load();
+		untrack(load);
 	});
 
 	// Auto-refresh in real-time mode (vCenter's ~20s; we use 30s to match the step),

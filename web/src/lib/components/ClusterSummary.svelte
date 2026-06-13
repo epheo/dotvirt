@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { api, Unauthorized, type ClusterSummary } from '$lib/api';
 	import { cores, bytes } from '$lib/format';
 	import { pollWhileVisible } from '$lib/poll';
@@ -30,14 +31,15 @@
 			loading = false;
 		}
 	}
+	// Re-fetch when the container scope changes, keyed on a stable string so the
+	// reload fires on real scope changes only (untrack the load's scope reads).
+	const scopeKey = $derived(`${scope.project ?? ''}|${scope.namespace ?? ''}|${scope.node ?? ''}`);
 	$effect(() => {
-		// Re-fetch when the container scope changes; poll only while visible.
-		scope.project;
-		scope.namespace;
-		scope.node;
-		load();
-		return pollWhileVisible(load, 30000);
+		scopeKey;
+		untrack(load);
 	});
+	// Refresh on a cadence, paused while the tab is backgrounded.
+	$effect(() => pollWhileVisible(load, 30000));
 
 	// KubeVirt's phase label is lowercase ("running"); order known phases, capitalize
 	// for display, and tolerate any others.

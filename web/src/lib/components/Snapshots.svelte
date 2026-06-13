@@ -1,7 +1,9 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { Camera, RotateCcw, Trash2 } from 'lucide-svelte';
 	import { api, Unauthorized, type Snapshot, type VM } from '$lib/api';
 	import { relativeAge } from '$lib/format';
+	import { pollWhileVisible } from '$lib/poll';
 
 	let { vm }: { vm: VM } = $props();
 
@@ -30,18 +32,21 @@
 		}
 	}
 
+	// Reload on selection change. Key on the VM identity (the live stream hands
+	// down a fresh vm each frame); untrack the load so its synchronous vm reads
+	// don't re-fire this effect per frame.
+	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
 	$effect(() => {
-		vm.namespace;
-		vm.name;
-		load();
+		vmKey;
+		untrack(load);
 	});
 
-	// Poll while a snapshot is still being created so its status settles.
+	// Poll while a snapshot is still being created so its status settles, paused
+	// while the tab is backgrounded.
+	const pending = $derived(snapshots?.some((s) => !s.readyToUse && s.phase !== 'Failed') ?? false);
 	$effect(() => {
-		const pending = snapshots?.some((s) => !s.readyToUse && s.phase !== 'Failed');
 		if (!pending) return;
-		const id = setInterval(load, 4000);
-		return () => clearInterval(id);
+		return pollWhileVisible(load, 4000);
 	});
 
 	async function take() {

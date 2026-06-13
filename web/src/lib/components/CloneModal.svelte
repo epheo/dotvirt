@@ -1,7 +1,9 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { Copy, X } from 'lucide-svelte';
 	import { api, Unauthorized, type Clone, type VM } from '$lib/api';
 	import { relativeAge } from '$lib/format';
+	import { pollWhileVisible } from '$lib/poll';
 
 	// Clone name-prompt + progress: creating a VirtualMachineClone is imperative
 	// (RBAC-gated, like snapshots), but the resulting target VM is config state
@@ -41,17 +43,18 @@
 		}
 	}
 
+	// Load once on mount (untracked: the host hands down a fresh vm each frame,
+	// but this modal acts on the one it opened for).
 	$effect(() => {
-		load();
+		untrack(load);
 	});
 
-	// Poll while any clone is still progressing so phases settle live. A clone
-	// with no phase yet (controller hasn't picked it up) counts as in progress.
+	// Poll while any clone is still progressing so phases settle live (a clone
+	// with no phase yet counts as in progress), paused while backgrounded.
+	const active = $derived(clones?.some((c) => c.phase !== 'Succeeded' && c.phase !== 'Failed') ?? false);
 	$effect(() => {
-		const active = clones?.some((c) => c.phase !== 'Succeeded' && c.phase !== 'Failed');
 		if (!active) return;
-		const id = setInterval(load, 3000);
-		return () => clearInterval(id);
+		return pollWhileVisible(load, 3000);
 	});
 
 	async function create() {
