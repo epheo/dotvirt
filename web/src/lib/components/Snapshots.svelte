@@ -120,6 +120,15 @@
 		<pre class="rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
 	{/if}
 
+	<!-- Restore needs a stopped VM (KubeVirt rejects a running target), but power
+	     is PR-gated — so spell out the path rather than just greying the button. -->
+	{#if running && snapshots?.some((s) => s.readyToUse)}
+		<p class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+			Restore is disabled while the VM is running. Set its power to <strong>Off</strong> (via a pull
+			request from Edit Settings), and once it's stopped you can roll back to a snapshot here.
+		</p>
+	{/if}
+
 	{#if snapshots && snapshots.length}
 		<table class="w-full text-[13px]">
 			<thead class="text-left text-xs tracking-wide text-slate-400 uppercase">

@@ -39,7 +39,15 @@ func (c *Client) ListOptions(ctx context.Context) (model.Options, error) {
 	if err != nil {
 		return model.Options{}, err
 	}
-	var opts model.Options
+	// Non-nil slices so a source the SA can't list (RBAC) serializes as [] not
+	// null — the frontend treats each list as iterable unconditionally.
+	opts := model.Options{
+		Instancetypes:  []model.Instancetype{},
+		Preferences:    []model.Preference{},
+		OSImages:       []model.OSImage{},
+		Networks:       []model.NetworkOption{},
+		StorageClasses: []model.StorageClass{},
+	}
 
 	if items, err := listAll(ctx, dyn, gvrInstancetypes); err == nil {
 		for i := range items {

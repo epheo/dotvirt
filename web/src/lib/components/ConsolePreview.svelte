@@ -33,7 +33,7 @@
 	<button
 		onclick={onopen}
 		title="Open the live console"
-		class="group relative block w-full overflow-hidden rounded border border-slate-200 bg-slate-900"
+		class="group relative block w-full overflow-hidden rounded border border-slate-200 bg-slate-900 xl:w-80 xl:shrink-0"
 	>
 		<img
 			src={screenshotURL(vm, tick)}

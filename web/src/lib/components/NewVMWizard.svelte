@@ -40,11 +40,17 @@
 			.options()
 			.then((o) => {
 				options = o;
-				// Sensible defaults from what's available.
-				const fed = o.osImages.find((i) => i.ready && i.name === 'fedora') ?? o.osImages.find((i) => i.ready);
+				// Sensible defaults from what's available. Guard each list — a source
+				// the backend SA can't read comes back empty (or null on an old build).
+				const osImages = o.osImages ?? [];
+				const fed = osImages.find((i) => i.ready && i.name === 'fedora') ?? osImages.find((i) => i.ready);
 				if (fed) osImage = `${fed.name}|${fed.namespace}`;
-				preference = o.preferences.find((p) => p.name === 'fedora')?.name ?? o.preferences[0]?.name ?? '';
-				instancetype = o.instancetypes.find((i) => i.name === 'u1.medium')?.name ?? o.instancetypes[0]?.name ?? '';
+				preference =
+					(o.preferences ?? []).find((p) => p.name === 'fedora')?.name ?? o.preferences?.[0]?.name ?? '';
+				instancetype =
+					(o.instancetypes ?? []).find((i) => i.name === 'u1.medium')?.name ??
+					o.instancetypes?.[0]?.name ??
+					'';
 			})
 			.catch((e) => (loadError = String(e)));
 	});
@@ -121,7 +127,7 @@
 					<label class="block">
 						<span class="text-slate-600">OS image</span>
 						<select bind:value={osImage} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
-							{#each options.osImages.filter((i) => i.ready) as img (img.namespace + img.name)}
+							{#each (options.osImages ?? []).filter((i) => i.ready) as img (img.namespace + img.name)}
 								<option value={`${img.name}|${img.namespace}`}>{img.name}</option>
 							{/each}
 						</select>
@@ -192,7 +198,7 @@
 					<div class="col-span-2">
 						<span class="text-slate-600">Additional networks <span class="text-slate-400">(besides pod default)</span></span>
 						<select multiple bind:value={selectedNetworks} class="mt-1 h-20 w-full rounded border border-slate-300 px-2 py-1 text-xs">
-							{#each options.networks as net (net.namespace + net.name)}
+							{#each options.networks ?? [] as net (net.namespace + net.name)}
 								<option value={`${net.namespace}/${net.name}`}>{net.namespace}/{net.name}</option>
 							{/each}
 						</select>

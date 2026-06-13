@@ -411,15 +411,14 @@
 					</div>
 				</div>
 
-				<!-- Live usage bars (vCenter "Capacity and Usage"), distinct from the
-				     configuration tiles above. -->
-				<div class="mt-4">
-					<CapacityUsage {vm} />
-				</div>
-
-				<!-- Console preview thumbnail (running VMs only; hides itself if the
-				     screenshot subresource isn't available). -->
-				<div class="mt-4 max-w-md">
+				<!-- Live usage bars (vCenter "Capacity and Usage") + the console preview
+				     thumbnail (running VMs only). Side by side when there's room, stacked
+				     on narrow; the preview emits no DOM when hidden, so capacity reclaims
+				     the full width. -->
+				<div class="mt-4 flex flex-col gap-4 xl:flex-row xl:items-start">
+					<div class="min-w-0 flex-1">
+						<CapacityUsage {vm} />
+					</div>
 					<ConsolePreview {vm} onopen={() => (tab = 'console')} />
 				</div>
 
