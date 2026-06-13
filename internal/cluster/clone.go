@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"time"
 
@@ -23,10 +22,11 @@ var gvrClones = schema.GroupVersionResource{Group: "clone.kubevirt.io", Version:
 // ListClones returns the VirtualMachineClones whose source is vmName, newest
 // first.
 func (c *Client) ListClones(ctx context.Context, namespace, vmName string) ([]model.Clone, error) {
-	if c.dyn == nil {
-		return nil, fmt.Errorf("dynamic client unavailable")
+	dyn, err := c.dynamic()
+	if err != nil {
+		return nil, err
 	}
-	list, err := c.dyn.Resource(gvrClones).Namespace(namespace).List(ctx, metav1.ListOptions{})
+	list, err := dyn.Resource(gvrClones).Namespace(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -55,8 +55,9 @@ func cloneFrom(item unstructured.Unstructured) model.Clone {
 // running). The target VM is created by the clone controller — dotvirt writes
 // no config state here.
 func (c *Client) CreateClone(ctx context.Context, namespace, vmName, cloneName, target string) error {
-	if c.dyn == nil {
-		return fmt.Errorf("dynamic client unavailable")
+	dyn, err := c.dynamic()
+	if err != nil {
+		return err
 	}
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "clone.kubevirt.io/v1beta1",
@@ -67,6 +68,6 @@ func (c *Client) CreateClone(ctx context.Context, namespace, vmName, cloneName, 
 			"target": map[string]any{"apiGroup": "kubevirt.io", "kind": "VirtualMachine", "name": target},
 		},
 	}}
-	_, err := c.dyn.Resource(gvrClones).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
+	_, err = dyn.Resource(gvrClones).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
 	return err
 }

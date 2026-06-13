@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"time"
 
@@ -25,10 +24,11 @@ var (
 // ListSnapshots returns the VirtualMachineSnapshots whose source is vmName, newest
 // first.
 func (c *Client) ListSnapshots(ctx context.Context, namespace, vmName string) ([]model.Snapshot, error) {
-	if c.dyn == nil {
-		return nil, fmt.Errorf("dynamic client unavailable")
+	dyn, err := c.dynamic()
+	if err != nil {
+		return nil, err
 	}
-	list, err := c.dyn.Resource(gvrSnapshots).Namespace(namespace).List(ctx, metav1.ListOptions{})
+	list, err := dyn.Resource(gvrSnapshots).Namespace(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -59,8 +59,9 @@ func snapshotFrom(item unstructured.Unstructured) model.Snapshot {
 
 // CreateSnapshot takes a point-in-time snapshot of the VM.
 func (c *Client) CreateSnapshot(ctx context.Context, namespace, vmName, snapName string) error {
-	if c.dyn == nil {
-		return fmt.Errorf("dynamic client unavailable")
+	dyn, err := c.dynamic()
+	if err != nil {
+		return err
 	}
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "snapshot.kubevirt.io/v1beta1",
@@ -70,23 +71,25 @@ func (c *Client) CreateSnapshot(ctx context.Context, namespace, vmName, snapName
 			"source": map[string]any{"apiGroup": "kubevirt.io", "kind": "VirtualMachine", "name": vmName},
 		},
 	}}
-	_, err := c.dyn.Resource(gvrSnapshots).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
+	_, err = dyn.Resource(gvrSnapshots).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
 	return err
 }
 
 // DeleteSnapshot removes a VirtualMachineSnapshot.
 func (c *Client) DeleteSnapshot(ctx context.Context, namespace, snapName string) error {
-	if c.dyn == nil {
-		return fmt.Errorf("dynamic client unavailable")
+	dyn, err := c.dynamic()
+	if err != nil {
+		return err
 	}
-	return c.dyn.Resource(gvrSnapshots).Namespace(namespace).Delete(ctx, snapName, metav1.DeleteOptions{})
+	return dyn.Resource(gvrSnapshots).Namespace(namespace).Delete(ctx, snapName, metav1.DeleteOptions{})
 }
 
 // RestoreSnapshot rolls the VM back to a snapshot via a VirtualMachineRestore. The
 // VM must be stopped — the snapshot controller rejects a running target.
 func (c *Client) RestoreSnapshot(ctx context.Context, namespace, vmName, snapName string) error {
-	if c.dyn == nil {
-		return fmt.Errorf("dynamic client unavailable")
+	dyn, err := c.dynamic()
+	if err != nil {
+		return err
 	}
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "snapshot.kubevirt.io/v1beta1",
@@ -97,6 +100,6 @@ func (c *Client) RestoreSnapshot(ctx context.Context, namespace, vmName, snapNam
 			"virtualMachineSnapshotName": snapName,
 		},
 	}}
-	_, err := c.dyn.Resource(gvrRestores).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
+	_, err = dyn.Resource(gvrRestores).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
 	return err
 }

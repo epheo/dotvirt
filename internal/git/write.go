@@ -17,8 +17,9 @@ import (
 )
 
 // WriteRepo is a worktree-backed clone used for committing: the running-branch
-// export (cluster.Exporter) and feature-branch edits (Slice 4). Separate from
-// the read-only mirror Repo so writes never disturb inventory reads.
+// export (export.Exporter) and the proposed-branch changesets (changeset
+// CommitChangeset). Separate from the read-only mirror Repo so writes never
+// disturb inventory reads.
 type WriteRepo struct {
 	url  string
 	auth *http.BasicAuth

@@ -82,12 +82,13 @@ func (c *Coordinator) stageAdoptCreate(id auth.Identity, proj project.ProjectInf
 
 // Resync triggers an ArgoCD sync of the Application managing the VM, bringing the
 // cluster back to git (main→running reconcile). Writes nothing to git. It uses the
-// SA-identity resyncer (Argo operations have no user context).
-func (c *Coordinator) Resync(namespace, name string) (model.ResyncResult, error) {
+// SA-identity resyncer (Argo operations have no user context, but the request's
+// ctx still bounds the call so a hung Argo op doesn't outlive the HTTP request).
+func (c *Coordinator) Resync(ctx context.Context, namespace, name string) (model.ResyncResult, error) {
 	if c.resyncer == nil {
 		return model.ResyncResult{}, fmt.Errorf("%w: re-sync unavailable (ArgoCD not configured)", model.ErrUnavailable)
 	}
-	return c.resyncer.Resync(context.Background(), namespace, name)
+	return c.resyncer.Resync(ctx, namespace, name)
 }
 
 // VMDrift returns the semantic diff between a VM on the running branch (actual)

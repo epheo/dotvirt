@@ -136,3 +136,9 @@ list under a shared token (`DOTVIRT_APPSET_PLUGIN_TOKEN`, matched by the
 | `-export-interval` | — | `30s` | how often the SA exports live state to each project's running branch |
 | `-git-poll-interval` | — | `10s` | how often to poll git for branch changes (git has no watch) |
 | `-insecure-tls` | `DOTVIRT_INSECURE_TLS` | `false` | skip TLS verification for git + forge (dev; e.g. a self-signed Route) |
+| `-metrics-url` | `DOTVIRT_METRICS_URL` | — | Prometheus/Thanos query API for the Performance tab (empty disables it) |
+| `-metrics-ca` | `DOTVIRT_METRICS_CA` | — | PEM CA bundle to trust for `-metrics-url` (e.g. the mounted service-CA) instead of `-insecure-tls` |
+| `-webhook-secret` | `DOTVIRT_WEBHOOK_SECRET` | — | HMAC secret for the Forgejo webhook endpoint (empty disables it) |
+| `-public-url` | `DOTVIRT_PUBLIC_URL` | — | dotvirt's externally reachable base URL, for webhook auto-registration (empty disables) |
+| `-appset-plugin-token` | `DOTVIRT_APPSET_PLUGIN_TOKEN` | — | shared bearer for the ArgoCD ApplicationSet plugin endpoint (empty disables it) |
+| `-static-dir` | `DOTVIRT_STATIC_DIR` | — | built SPA dir to serve at the same origin (empty = dev: SPA on Vite) |

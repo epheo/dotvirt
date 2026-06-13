@@ -99,6 +99,70 @@ var ranges = map[string]rangeSpec{
 
 const defaultRange = "1h"
 
+// resolveRange maps a UI range to its spec, defaulting unknown ranges.
+func resolveRange(rng string) (string, rangeSpec) {
+	if spec, ok := ranges[rng]; ok {
+		return rng, spec
+	}
+	return defaultRange, ranges[defaultRange]
+}
+
+// scopeSelector scopes a VM metric to the caller's namespaces (+ a node when
+// drilling into one). With no namespaces it matches nothing, so usage reads
+// zero rather than leaking other tenants' data.
+func scopeSelector(namespaces []string, node string) string {
+	if len(namespaces) == 0 {
+		return `{namespace="__dotvirt_none__"}`
+	}
+	inner := fmt.Sprintf("namespace=~%q", strings.Join(namespaces, "|"))
+	if node != "" {
+		inner += fmt.Sprintf(",node=%q", node)
+	}
+	return "{" + inner + "}"
+}
+
+// scopeKey is the canonical cache key for a namespace scope plus extras —
+// sorted, so equal sets share one cache entry regardless of order.
+func scopeKey(namespaces []string, extra ...string) string {
+	sorted := append([]string(nil), namespaces...)
+	sort.Strings(sorted)
+	return strings.Join(append([]string{strings.Join(sorted, ",")}, extra...), "|")
+}
+
+// queryJSON performs one query-API GET under the caller's token and decodes
+// the response envelope into out — the single HTTP path under vector,
+// rangeSeries, and friends.
+func (c *Client) queryJSON(ctx context.Context, token, apiPath string, params url.Values, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+apiPath+"?"+params.Encode(), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("query API status %d", resp.StatusCode)
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// parseSampleValue decodes one Prometheus sample value; NaN/Inf are dropped as
+// gaps (false).
+func parseSampleValue(raw json.RawMessage) (float64, bool) {
+	var vs string
+	if json.Unmarshal(raw, &vs) != nil {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(vs, 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0, false
+	}
+	return v, true
+}
+
 // rateWindow is the lookback for rate(): a couple of steps, floored so even the
 // 30s step spans enough scrapes to be smooth.
 func rateWindow(step time.Duration) time.Duration {
@@ -182,19 +246,6 @@ type labeledValue struct {
 func (c *Client) vector(ctx context.Context, token, query string) []labeledValue {
 	v := url.Values{}
 	v.Set("query", query)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/v1/query?"+v.Encode(), nil)
-	if err != nil {
-		return nil
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil
-	}
 	var body struct {
 		Data struct {
 			Result []struct {
@@ -203,17 +254,13 @@ func (c *Client) vector(ctx context.Context, token, query string) []labeledValue
 			} `json:"result"`
 		} `json:"data"`
 	}
-	if json.NewDecoder(resp.Body).Decode(&body) != nil {
+	if c.queryJSON(ctx, token, "/api/v1/query", v, &body) != nil {
 		return nil
 	}
 	out := make([]labeledValue, 0, len(body.Data.Result))
 	for _, r := range body.Data.Result {
-		var vs string
-		if json.Unmarshal(r.Value[1], &vs) != nil {
-			continue
-		}
-		f, err := strconv.ParseFloat(vs, 64)
-		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+		f, ok := parseSampleValue(r.Value[1])
+		if !ok {
 			continue
 		}
 		out = append(out, labeledValue{labels: r.Metric, value: f})
@@ -315,22 +362,11 @@ func (c *Client) VMUsage(ctx context.Context, token, ns, name string) (model.VMU
 func (c *Client) ClusterSummary(ctx context.Context, token string, namespaces []string, node string) (model.ClusterSummary, error) {
 	// Cache by the scope (sorted namespaces + node), not the token: any user with
 	// this namespace set gets the same aggregate, so same-scope viewers share it.
-	sorted := append([]string(nil), namespaces...)
-	sort.Strings(sorted)
-	key := strings.Join(sorted, ",") + "|" + node
+	key := scopeKey(namespaces, node)
 	if v, ok := c.cluster.Get(key); ok {
 		return v, nil
 	}
-	// Scope VM metrics to the caller's namespaces (+ a node when drilling into one).
-	// With no namespaces, match nothing so usage reads zero but node capacity shows.
-	nsSel := `{namespace="__dotvirt_none__"}`
-	if len(namespaces) > 0 {
-		inner := fmt.Sprintf("namespace=~%q", strings.Join(namespaces, "|"))
-		if node != "" {
-			inner += fmt.Sprintf(",node=%q", node)
-		}
-		nsSel = "{" + inner + "}"
-	}
+	nsSel := scopeSelector(namespaces, node)
 	vm := func(metric string) string { return metric + nsSel } // VM metric scoped to the caller
 
 	// Capacity boundary = all nodes, or the single node when scoped to one.
@@ -405,27 +441,12 @@ func scopeChartSpecs(sel, rw string) []chartSpec {
 // by scope (not token), like ClusterSummary: any user authorized for this
 // namespace set gets identical data.
 func (c *Client) ScopeMetrics(ctx context.Context, token string, namespaces []string, node, rng string) (model.VMMetrics, error) {
-	spec, ok := ranges[rng]
-	if !ok {
-		rng, spec = defaultRange, ranges[defaultRange]
-	}
-	sorted := append([]string(nil), namespaces...)
-	sort.Strings(sorted)
-	key := strings.Join(sorted, ",") + "|" + node + "|" + rng
+	rng, spec := resolveRange(rng)
+	key := scopeKey(namespaces, node, rng)
 	if v, ok := c.scope.Get(key); ok {
 		return v, nil
 	}
-
-	// Scope to the caller's namespaces (+ a node when drilling into one); with
-	// no namespaces, match nothing — same boundary as ClusterSummary.
-	sel := `{namespace="__dotvirt_none__"}`
-	if len(namespaces) > 0 {
-		inner := fmt.Sprintf("namespace=~%q", strings.Join(namespaces, "|"))
-		if node != "" {
-			inner += fmt.Sprintf(",node=%q", node)
-		}
-		sel = "{" + inner + "}"
-	}
+	sel := scopeSelector(namespaces, node)
 
 	end := time.Now().Unix()
 	start := end - int64(spec.window.Seconds())
@@ -534,9 +555,7 @@ func (c *Client) Alerts(ctx context.Context, token string, namespaces []string) 
 	if len(namespaces) == 0 {
 		return []model.Alert{}, nil
 	}
-	sorted := append([]string(nil), namespaces...)
-	sort.Strings(sorted)
-	key := strings.Join(sorted, ",")
+	key := scopeKey(namespaces)
 	if v, ok := c.alerts.Get(key); ok {
 		return v, nil
 	}
@@ -618,19 +637,6 @@ func (c *Client) rangeSeries(ctx context.Context, token, query string, start, en
 	q.Set("start", strconv.FormatInt(start, 10))
 	q.Set("end", strconv.FormatInt(end, 10))
 	q.Set("step", strconv.Itoa(step))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/v1/query_range?"+q.Encode(), nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("query API status %d", resp.StatusCode)
-	}
 	var body struct {
 		Status string `json:"status"`
 		Data   struct {
@@ -640,7 +646,7 @@ func (c *Client) rangeSeries(ctx context.Context, token, query string, start, en
 			} `json:"result"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := c.queryJSON(ctx, token, "/api/v1/query_range", q, &body); err != nil {
 		return nil, err
 	}
 	if body.Status != "success" {
@@ -651,12 +657,11 @@ func (c *Client) rangeSeries(ctx context.Context, token, query string, start, en
 		samples := make([]sample, 0, len(r.Values))
 		for _, pair := range r.Values {
 			var ts float64
-			var vs string
-			if json.Unmarshal(pair[0], &ts) != nil || json.Unmarshal(pair[1], &vs) != nil {
+			if json.Unmarshal(pair[0], &ts) != nil {
 				continue
 			}
-			v, err := strconv.ParseFloat(vs, 64)
-			if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+			v, ok := parseSampleValue(pair[1])
+			if !ok {
 				continue
 			}
 			samples = append(samples, sample{t: int64(ts), v: v})
@@ -691,10 +696,7 @@ type namedSeries struct {
 // failure degrades to gaps; a dead endpoint (every query errors with no data)
 // returns ErrUnavailable.
 func (c *Client) VMMetrics(ctx context.Context, token, ns, name, rng string) (model.VMMetrics, error) {
-	spec, ok := ranges[rng]
-	if !ok {
-		rng, spec = defaultRange, ranges[defaultRange]
-	}
+	rng, spec := resolveRange(rng)
 	key := ns + "/" + name + "|" + rng
 	if v, ok := c.vmMetrics.Get(key); ok {
 		return v, nil

@@ -87,6 +87,10 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, v)
 		return
 	}
+	if s.clusterF == nil {
+		http.Error(w, "cluster not configured", http.StatusServiceUnavailable)
+		return
+	}
 	sa, err := s.clusterF.SA()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)

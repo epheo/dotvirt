@@ -41,17 +41,18 @@ func New(state *clusterstate.State, resolver *project.Resolver, repos *git.RepoS
 }
 
 // Once exports every resolved project once: for each project with a repo, write
-// its namespaces' live VMs to its repo's running branch. A failure for one project
-// is logged and skipped so the others still sync. Returns how many projects'
-// running branches it committed an update to. Topology comes from the shared
-// snapshot with no visible-namespace filter (the SA export sees every project).
-func (e *Exporter) Once(ctx context.Context) (int, error) {
+// its namespaces' live VMs to its repo's running branch. A per-project failure is
+// logged and skipped so the others still sync (the loop never aborts, hence no
+// returned error). Returns how many projects' running branches it committed an
+// update to. Topology comes from the shared snapshot with no visible-namespace
+// filter (the SA export sees every project).
+func (e *Exporter) once() int {
 	// Exporting prunes manifests absent from the snapshot, so a half-filled
 	// snapshot (reflectors still on their initial LIST) would read as mass VM
 	// deletion. Skip the tick; a stale running branch beats a wrong one.
 	if !e.state.Synced() {
 		log.Printf("export: snapshot not synced yet; skipping this tick")
-		return 0, nil
+		return 0
 	}
 	projects := e.resolver.Resolve(e.state.Namespaces(), nil)
 	committed := 0
@@ -69,7 +70,7 @@ func (e *Exporter) Once(ctx context.Context) (int, error) {
 			log.Printf("export: committed running state for %q -> %s", p.Name, p.Repo)
 		}
 	}
-	return committed, nil
+	return committed
 }
 
 func (e *Exporter) exportProject(p project.ProjectInfo) (bool, error) {
@@ -132,14 +133,9 @@ func manifestsFor(vms []kubevirtcorev1.VirtualMachine) ([]git.File, error) {
 }
 
 // Run exports once immediately, then every interval until ctx is cancelled.
-// Errors are logged and retried on the next tick rather than stopping the loop.
+// Per-project failures are logged and retried on the next tick (see once).
 func (e *Exporter) Run(ctx context.Context, interval time.Duration) {
-	tick := func() {
-		if _, err := e.Once(ctx); err != nil {
-			log.Printf("export: %v", err)
-		}
-	}
-	tick()
+	e.once()
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -147,7 +143,7 @@ func (e *Exporter) Run(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			tick()
+			e.once()
 		}
 	}
 }

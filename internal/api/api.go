@@ -7,6 +7,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -42,7 +43,7 @@ type Draft interface {
 	Propose(id auth.Identity, proj project.ProjectInfo, req model.ProposeRequest) (model.ProposeResult, error)
 	VMDrift(proj project.ProjectInfo, namespace, name string) (model.DriftResult, error)
 	Adopt(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
-	Resync(namespace, name string) (model.ResyncResult, error) // SA-identity; no user/project context
+	Resync(ctx context.Context, namespace, name string) (model.ResyncResult, error) // SA-identity; no user/project context
 	OpenProposal(id auth.Identity, proj project.ProjectInfo) (model.Proposal, bool, error)
 	Revert(id auth.Identity, proj project.ProjectInfo, hash string) (model.ProposeResult, error)
 }
@@ -103,7 +104,10 @@ type Server struct {
 	propNudge   chan struct{}
 }
 
-// Deps are the collaborators for NewServer. Nil pieces degrade gracefully.
+// Deps are the collaborators for NewServer. Nil pieces degrade gracefully. The
+// stream + VNC handlers aren't here: they're wired post-construction via
+// UseStream/UseVNC, because the hub is built over the server's own
+// InventoryForIdentity (chicken-and-egg otherwise).
 type Deps struct {
 	ClusterFactory *cluster.Factory
 	State          *clusterstate.State
@@ -113,8 +117,6 @@ type Deps struct {
 	Metrics        *metrics.Client // Prometheus/Thanos query client; nil disables the Performance tab
 	Draft          Draft
 	Auth           *auth.Authenticator
-	Stream         StreamHandler
-	VNC            VNCHandler
 	Config         Config
 }
 
@@ -132,8 +134,6 @@ func NewServer(d Deps) *Server {
 		metrics:   d.Metrics,
 		draft:     d.Draft,
 		auth:      d.Auth,
-		stream:    d.Stream,
-		vnc:       d.VNC,
 		cfg:       d.Config,
 
 		propTargets: map[string]propTarget{},

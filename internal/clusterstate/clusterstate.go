@@ -33,8 +33,8 @@ import (
 )
 
 // LiveVM is one VM's actual state, keyed by "namespace/name" for merging into the
-// git-derived inventory. Mirrors cluster.LiveVM (kept distinct so clusterstate
-// owns its read DTO and callers don't reach back into the fetch layer).
+// git-derived inventory — clusterstate's own read DTO, derived from the watched
+// VMI objects (inventory.applyLive copies it onto each model.VM).
 type LiveVM struct {
 	Phase    string
 	GuestIP  string   // primary interface IP (the inventory grid's IP column)
@@ -76,7 +76,6 @@ type State struct {
 
 	specs []reflectorSpec // reflector wiring, built in New, started in Run
 
-	version atomic.Uint64
 	synced  atomic.Int32    // reflectors whose initial LIST (first Replace) has landed
 	changed chan<- struct{} // coalesced "snapshot moved" signal for the hub
 }
@@ -135,9 +134,8 @@ func (s *State) WaitForSync(ctx context.Context) error {
 	return nil
 }
 
-// bump records that the snapshot moved and signals the hub (coalesced).
+// bump signals the hub that the snapshot moved (coalesced).
 func (s *State) bump() {
-	s.version.Add(1)
 	if s.changed == nil {
 		return
 	}
@@ -146,10 +144,6 @@ func (s *State) bump() {
 	default: // a signal is already pending; the hub recomputes the whole snapshot anyway
 	}
 }
-
-// Version is a monotonic counter that ticks on every snapshot change. The hub can
-// compare it to skip a broadcast when nothing moved (e.g. a resync with no delta).
-func (s *State) Version() uint64 { return s.version.Load() }
 
 // Synced reports whether every reflector's initial LIST has landed. Consumers
 // that act on the snapshot's COMPLETENESS (the exporter prunes manifests absent

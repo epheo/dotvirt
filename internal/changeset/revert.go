@@ -30,10 +30,7 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 		return model.ProposeResult{}, fmt.Errorf("%w: nothing to revert in that commit", model.ErrInvalid)
 	}
 
-	short := hash
-	if len(short) > 8 {
-		short = short[:8]
-	}
+	short := shortCommit(hash)
 	title := "Revert " + short
 	branch := c.revertBranch(id.Username, proj.Name, hash)
 	by := git.Author{Name: id.Username, Email: authorEmail(id.Username)}
@@ -62,9 +59,13 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 
 // revertBranch is the per-(user, project, commit) branch a revert lands on.
 func (c *Coordinator) revertBranch(user, project, hash string) string {
-	short := hash
-	if len(short) > 8 {
-		short = short[:8]
+	return c.proposed + "/revert/" + refSegment(user) + "/" + refSegment(project) + "-" + shortCommit(hash)
+}
+
+// shortCommit abbreviates a commit hash to 8 chars for branch names + titles.
+func shortCommit(hash string) string {
+	if len(hash) > 8 {
+		return hash[:8]
 	}
-	return c.proposed + "/revert/" + refSegment(user) + "/" + refSegment(project) + "-" + short
+	return hash
 }

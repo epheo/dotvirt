@@ -152,7 +152,7 @@ func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "you don't have permission to sync this VM", http.StatusForbidden)
 		return
 	}
-	result, err := s.draft.Resync(ns, name)
+	result, err := s.draft.Resync(r.Context(), ns, name)
 	respond(w, result, err)
 }
 

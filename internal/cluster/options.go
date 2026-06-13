@@ -22,7 +22,9 @@ var (
 	gvrStorageClasses = schema.GroupVersionResource{Group: "storage.k8s.io", Version: "v1", Resource: "storageclasses"}
 )
 
-// dyn lazily builds a dynamic client from the cluster client's config.
+// dynamic returns the client's dynamic interface, or a uniform error when it's
+// unavailable (degraded mode) — the single home for that guard, shared by every
+// CRD-backed method (options, snapshots, clones).
 func (c *Client) dynamic() (dynamic.Interface, error) {
 	if c.dyn == nil {
 		return nil, fmt.Errorf("dynamic client unavailable")

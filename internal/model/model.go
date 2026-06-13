@@ -175,7 +175,7 @@ type DriftResult struct {
 
 // DraftItem is one VM's pending change rendered for the UI.
 type DraftItem struct {
-	Kind      string   `json:"kind"` // edit | create
+	Kind      string   `json:"kind"` // edit | create | delete
 	Namespace string   `json:"namespace"`
 	Name      string   `json:"name"`
 	Changes   []Change `json:"changes"`
