@@ -25,6 +25,7 @@
 	import InventoryTree from '$lib/components/InventoryTree.svelte';
 	import Login from '$lib/components/Login.svelte';
 	import NewVMWizard from '$lib/components/NewVMWizard.svelte';
+	import NodeActions from '$lib/components/NodeActions.svelte';
 	import Permissions from '$lib/components/Permissions.svelte';
 	import QuotaBand from '$lib/components/QuotaBand.svelte';
 	import StagedChangesModal from '$lib/components/StagedChangesModal.svelte';
@@ -643,6 +644,11 @@
 												: 'Storage classes are managed by the cluster platform, not dotvirt.'}
 									</p>
 								</section>
+								{#if scope.kind === 'node'}
+									<!-- Node maintenance-lite: cordon/uncordon + evacuate (shown only
+									     when the caller's token may patch nodes). -->
+									<NodeActions node={scope.node} vms={scopedVMs} onaction={recordAction} />
+								{/if}
 							{:else}
 								{#each cfgProjects as p (p.name)}
 									<section class="max-w-2xl rounded border border-slate-200">

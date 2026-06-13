@@ -322,6 +322,13 @@ export interface Alert {
 	count?: number; // collapsed identical series
 }
 
+// A node's maintenance state for the By-Node view.
+export interface NodeInfo {
+	name: string;
+	unschedulable: boolean;
+	canCordon: boolean; // the caller's token may cordon it
+}
+
 // The caller's effective capabilities in one namespace (the Permissions tab).
 export interface Capability {
 	id: string;
@@ -401,6 +408,10 @@ export const api = {
 	scopeMetrics: (scope: ScopeQuery, range: string) =>
 		get<VMMetrics>(`/api/metrics/scope${scopeQS(scope, { range })}`),
 	alarms: () => get<Alert[]>('/api/alarms'),
+	// Node maintenance (cluster-scoped; the user's token is the gate).
+	nodeInfo: (node: string) => get<NodeInfo>(`/api/nodes/${enc(node)}`),
+	setNodeCordon: (node: string, unschedulable: boolean) =>
+		post<void>(`/api/nodes/${enc(node)}/cordon`, { unschedulable }),
 	quotas: (scope: ScopeQuery) => get<NamespaceQuota[]>(`/api/quotas${scopeQS(scope)}`),
 	adopt: (namespace: string, name: string) =>
 		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/adopt`, {}),

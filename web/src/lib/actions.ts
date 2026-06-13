@@ -116,3 +116,8 @@ export const vmActions: VMAction[] = [
 export function manifestURL(vm: VM): string {
 	return `/api/vms/${encodeURIComponent(vm.namespace)}/${encodeURIComponent(vm.name)}/manifest`;
 }
+
+/** A VM's console-screenshot PNG URL (cookie-auth'd); cb busts the img cache. */
+export function screenshotURL(vm: VM, cb: number): string {
+	return `/api/vms/${encodeURIComponent(vm.namespace)}/${encodeURIComponent(vm.name)}/screenshot?t=${cb}`;
+}

@@ -17,6 +17,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -242,6 +243,13 @@ func (c *Client) VNCConn(namespace, name string) (net.Conn, error) {
 	return stream.AsConn(), nil
 }
 
+// Screenshot returns a PNG of the VMI's graphical console (the vnc/screenshot
+// subresource), for the Summary's console preview. Needs a running VMI with a
+// VNC-capable graphics device; errors otherwise (the UI just hides the thumb).
+func (c *Client) Screenshot(ctx context.Context, namespace, name string) ([]byte, error) {
+	return c.kubevirt.VirtualMachineInstance(namespace).Screenshot(ctx, name, &kubevirtcorev1.ScreenshotOptions{})
+}
+
 // ListEvents returns recent Kubernetes Events for the VM ns/name and its VMI
 // (which shares the name), newest-first — the per-VM Monitor tab. Read with this
 // client's token, so cluster RBAC gates it like every other read.
@@ -356,4 +364,42 @@ func (c *Client) Pause(ctx context.Context, namespace, name string) error {
 // Unpause resumes a paused VMI.
 func (c *Client) Unpause(ctx context.Context, namespace, name string) error {
 	return c.kubevirt.VirtualMachineInstance(namespace).Unpause(ctx, name, &kubevirtcorev1.UnpauseOptions{})
+}
+
+// --- node maintenance-lite (cordon/uncordon; the By-Node view) ---
+
+// NodeInfo reads a node's schedulability under the caller's token, plus whether
+// that token may cordon it (an SSAR on node update) so the UI gates the action.
+// A read failure (no node-get RBAC) surfaces as an error the handler maps to
+// 403/404 — the action stays hidden for users who can't see nodes.
+func (c *Client) NodeInfo(ctx context.Context, name string) (model.NodeInfo, error) {
+	node, err := c.kube.CoreV1().Nodes().Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return model.NodeInfo{}, err
+	}
+	can, _ := c.canPatchNodes(ctx) // best-effort; false on review error
+	return model.NodeInfo{Name: name, Unschedulable: node.Spec.Unschedulable, CanCordon: can}, nil
+}
+
+// SetNodeCordon patches node.spec.unschedulable under the caller's token, so
+// cluster RBAC is the sole gate (a user without node-update gets 403). Cordon
+// stops new placements; running VMIs stay until Evacuate live-migrates them.
+func (c *Client) SetNodeCordon(ctx context.Context, name string, unschedulable bool) error {
+	patch := fmt.Appendf(nil, `{"spec":{"unschedulable":%t}}`, unschedulable)
+	_, err := c.kube.CoreV1().Nodes().Patch(ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
+	return err
+}
+
+// canPatchNodes reports whether this token may update nodes (cluster-scoped).
+func (c *Client) canPatchNodes(ctx context.Context) (bool, error) {
+	review := &authzv1.SelfSubjectAccessReview{
+		Spec: authzv1.SelfSubjectAccessReviewSpec{
+			ResourceAttributes: &authzv1.ResourceAttributes{Verb: "update", Resource: "nodes"},
+		},
+	}
+	res, err := c.kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, review, metav1.CreateOptions{})
+	if err != nil {
+		return false, err
+	}
+	return res.Status.Allowed, nil
 }

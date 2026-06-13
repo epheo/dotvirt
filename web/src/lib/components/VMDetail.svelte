@@ -9,6 +9,7 @@
 	import ConfirmDelete from './ConfirmDelete.svelte';
 	import CapacityUsage from './CapacityUsage.svelte';
 	import Console from './Console.svelte';
+	import ConsolePreview from './ConsolePreview.svelte';
 	import EditSettings from './EditSettings.svelte';
 	import Performance from './Performance.svelte';
 	import Permissions from './Permissions.svelte';
@@ -414,6 +415,12 @@
 				     configuration tiles above. -->
 				<div class="mt-4">
 					<CapacityUsage {vm} />
+				</div>
+
+				<!-- Console preview thumbnail (running VMs only; hides itself if the
+				     screenshot subresource isn't available). -->
+				<div class="mt-4 max-w-md">
+					<ConsolePreview {vm} onopen={() => (tab = 'console')} />
 				</div>
 
 				<div class="mt-4 grid gap-4 md:grid-cols-2">

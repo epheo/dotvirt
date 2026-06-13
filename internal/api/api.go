@@ -178,6 +178,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/metrics/scope", s.handleScopeMetrics)
 	mux.HandleFunc("GET /api/alarms", s.handleAlarms)
 	mux.HandleFunc("GET /api/quotas", s.handleQuotas)
+	mux.HandleFunc("GET /api/nodes/{node}", s.handleNodeInfo)
+	mux.HandleFunc("POST /api/nodes/{node}/cordon", s.handleNodeCordon)
 	mux.HandleFunc("GET /api/projects/{project}/history", s.handleHistory)
 	mux.HandleFunc("POST /api/projects/{project}/revert", s.handleRevert)
 
@@ -199,6 +201,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/drift", s.handleDrift)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/manifest", s.handleManifest)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/events", s.handleEvents)
+	mux.HandleFunc("GET /api/vms/{namespace}/{name}/screenshot", s.handleScreenshot)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/usage", s.handleVMUsage)
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/adopt", s.handleAdopt)

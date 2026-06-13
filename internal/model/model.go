@@ -378,6 +378,15 @@ type Clone struct {
 	Created string `json:"created,omitempty"` // RFC3339
 }
 
+// NodeInfo is a node's maintenance state for the By-Node view: whether it's
+// cordoned, and whether the caller's token may cordon it (so the UI hides the
+// action for users without node-update RBAC).
+type NodeInfo struct {
+	Name          string `json:"name"`
+	Unschedulable bool   `json:"unschedulable"`
+	CanCordon     bool   `json:"canCordon"`
+}
+
 // ResyncResult reports which ArgoCD Application was synced.
 type ResyncResult struct {
 	Application string `json:"application"`
