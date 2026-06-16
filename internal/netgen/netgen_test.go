@@ -168,6 +168,45 @@ func TestNamespaceManifestVMNetworkRequiresSubnet(t *testing.T) {
 	}
 }
 
+func TestRoleBindingManifest(t *testing.T) {
+	path, content, err := RoleBindingManifest(RoleBindingSpec{
+		Namespace: "tenant-a", Project: "team-a", Owners: []string{"alice", "bob"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "rbac/tenant-a.yaml" {
+		t.Errorf("path = %q", path)
+	}
+	y := string(content)
+	for _, want := range []string{
+		"kind: RoleBinding",
+		"name: tenant-a-admins",
+		"namespace: tenant-a",
+		"dotvirt.io/project: team-a",
+		"kind: ClusterRole",
+		"name: admin", // default namespace-admin role
+		"kind: User",
+		"name: alice",
+		"name: bob",
+	} {
+		if !strings.Contains(y, want) {
+			t.Errorf("RoleBinding missing %q:\n%s", want, y)
+		}
+	}
+	// A custom role overrides the "admin" default.
+	if _, c2, _ := RoleBindingManifest(RoleBindingSpec{Namespace: "ns", Owners: []string{"x"}, Role: "edit"}); !strings.Contains(string(c2), "name: edit") {
+		t.Errorf("custom role not honored:\n%s", c2)
+	}
+	// Errors: a namespace and at least one owner are required.
+	if _, _, err := RoleBindingManifest(RoleBindingSpec{Owners: []string{"x"}}); err == nil {
+		t.Error("expected error when namespace is empty")
+	}
+	if _, _, err := RoleBindingManifest(RoleBindingSpec{Namespace: "ns"}); err == nil {
+		t.Error("expected error when no owners are given")
+	}
+}
+
 func TestUplinkManifest(t *testing.T) {
 	path, content, err := UplinkManifest(UplinkSpec{Name: "physnet-prod", NIC: "eno2"})
 	if err != nil {

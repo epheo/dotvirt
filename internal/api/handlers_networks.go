@@ -98,6 +98,37 @@ func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 	respond(w, view, err)
 }
 
+// handleCreateProject bootstraps a new tenant project from the UI — the "New
+// Project" flow. It creates the project's forge repo and stages its first namespace
+// (+ an optional owners RoleBinding) into the platform repo. Gated on the same
+// namespace-create authority as handleCreateNamespace: creating a tenant is a
+// platform-admin act (it lands a Namespace + RBAC in the platform tier).
+func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
+	raw, err := readAll(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Peek the name for an early 400; the Coordinator re-decodes the full spec.
+	var peek struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &peek); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if peek.Name == "" {
+		http.Error(w, "a project name is required", http.StatusBadRequest)
+		return
+	}
+	plat, ok := s.platformScope(w, r, "", "namespaces")
+	if !ok {
+		return
+	}
+	view, err := s.draft.StageCreateProject(plat.id, plat.proj, raw)
+	respond(w, view, err)
+}
+
 // handleNetworks lists the networks (Distributed Port Groups) the caller may
 // attach a VM to, plus the physical fabric (Uplinks + Physical adapters) for
 // callers who can read nodes. The port-group catalog is read with dotvirt's SA —

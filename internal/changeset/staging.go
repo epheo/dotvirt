@@ -3,6 +3,7 @@ package changeset
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
@@ -130,6 +131,97 @@ func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinPro
 		return model.DraftView{}, err
 	}
 	return c.Get(id, commitProj)
+}
+
+// ProjectSpec describes a new tenant project to bootstrap from the UI: a forge repo,
+// a first namespace (optionally with a primary VM Network), and the owners granted
+// admin on it. This is what fills the "no New Project button" gap.
+type ProjectSpec struct {
+	Name      string             `json:"name"`      // project name → repo name + dotvirt.io/project
+	Namespace string             `json:"namespace"` // first namespace; defaults to Name
+	Owners    []string           `json:"owners,omitempty"`
+	VMNetwork *netgen.PrimaryNet `json:"vmNetwork,omitempty"`
+}
+
+// StageCreateProject bootstraps a new tenant. The repo is created imperatively (a
+// repo isn't a manifest), then the first namespace and — when owners are given — a
+// RoleBinding granting them namespace-admin are staged into the PLATFORM repo
+// (cluster-tenancy is admin-tier; a tenant repo couldn't carry either). commitProj
+// is the platform project.
+func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
+	if err := requireRepo(commitProj); err != nil {
+		return model.DraftView{}, err
+	}
+	var spec ProjectSpec
+	if err := json.Unmarshal(rawSpec, &spec); err != nil {
+		return model.DraftView{}, fmt.Errorf("%w: invalid project spec: %v", model.ErrInvalid, err)
+	}
+	if spec.Name == "" {
+		return model.DraftView{}, fmt.Errorf("%w: a project name is required", model.ErrInvalid)
+	}
+	ns := spec.Namespace
+	if ns == "" {
+		ns = spec.Name
+	}
+	// The new tenant repo is a sibling of the platform repo under the same owner.
+	repoURL := siblingRepoURL(commitProj.Repo, spec.Name)
+	if repoURL == "" {
+		return model.DraftView{}, fmt.Errorf("%w: cannot derive a repo URL from the platform repo %q", model.ErrInvalid, commitProj.Repo)
+	}
+	fc := c.forge.For(repoURL)
+	if fc == nil {
+		return model.DraftView{}, fmt.Errorf("%w: forge not configured; cannot create the project repo", model.ErrInvalid)
+	}
+	if _, err := fc.EnsureRepo(); err != nil {
+		return model.DraftView{}, fmt.Errorf("create project repo: %w", err)
+	}
+	// First namespace, joined to the new project/repo (stamps its dotvirt.io labels).
+	nsSpec := netgen.NamespaceSpec{Name: ns, Project: spec.Name, Repo: repoURL, VMNetwork: spec.VMNetwork}
+	nsPath, nsContent, err := netgen.NamespaceManifest(nsSpec)
+	if err != nil {
+		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+	}
+	if err := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
+		Kind:       draft.KindCreate,
+		Resource:   draft.ResourceNamespace,
+		Namespace:  ns,
+		Name:       ns,
+		SourceFile: nsPath,
+		Manifest:   string(nsContent),
+	}); err != nil {
+		return model.DraftView{}, err
+	}
+	// Owners → a namespace-admin RoleBinding (the delegation that makes it a tenant).
+	if len(spec.Owners) > 0 {
+		rbPath, rbContent, err := netgen.RoleBindingManifest(netgen.RoleBindingSpec{
+			Namespace: ns, Project: spec.Name, Owners: spec.Owners,
+		})
+		if err != nil {
+			return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		}
+		if err := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
+			Kind:       draft.KindCreate,
+			Resource:   draft.ResourceRoleBinding,
+			Namespace:  ns,
+			Name:       ns + "-admins",
+			SourceFile: rbPath,
+			Manifest:   string(rbContent),
+		}); err != nil {
+			return model.DraftView{}, err
+		}
+	}
+	return c.Get(id, commitProj)
+}
+
+// siblingRepoURL derives a repo URL alongside ref under the same owner: it replaces
+// ref's last path segment with name (…/<owner>/<ref>.git → …/<owner>/<name>.git).
+func siblingRepoURL(ref, name string) string {
+	s := strings.TrimSuffix(strings.TrimRight(ref, "/"), ".git")
+	i := strings.LastIndexByte(s, '/')
+	if i < 0 {
+		return ""
+	}
+	return s[:i+1] + name + ".git"
 }
 
 // StageCreateUplink records a new Uplink (an nmstate NNCP) in (id, proj)'s draft —

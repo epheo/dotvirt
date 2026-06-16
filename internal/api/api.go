@@ -39,6 +39,7 @@ type Draft interface {
 	StageCreateNetwork(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
 	StageCreateUplink(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
 	StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
+	StageCreateProject(id auth.Identity, commitProj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
 	StageDelete(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
 	Unstage(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) error
 	Get(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
@@ -176,6 +177,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/networks", s.handleCreateNetwork)
 	mux.HandleFunc("POST /api/uplinks", s.handleCreateUplink)
 	mux.HandleFunc("POST /api/namespaces", s.handleCreateNamespace)
+	mux.HandleFunc("POST /api/projects", s.handleCreateProject)
 	// ArgoCD ApplicationSet plugin generator (auth: its own shared token, not a
 	// user session — exempted in auth.isOpenPath). Emits projects from labels.
 	mux.HandleFunc("POST /api/v1/getparams.execute", s.handleAppSetPlugin)

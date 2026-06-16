@@ -139,6 +139,8 @@ func PlatformAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo string
 		"namespaceResourceWhitelist": []any{
 			map[string]any{"group": "k8s.ovn.org", "kind": "UserDefinedNetwork"},
 			map[string]any{"group": "k8s.cni.cncf.io", "kind": "NetworkAttachmentDefinition"},
+			// Tenant access delegation: a project's owners → namespace-admin grant.
+			map[string]any{"group": "rbac.authorization.k8s.io", "kind": "RoleBinding"},
 		},
 	})
 }
