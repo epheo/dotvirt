@@ -1,6 +1,6 @@
 # Build from the REPO ROOT so both modules are in context (the operator imports the
 # app module via the replace directive):
-#   docker build -f operator/Dockerfile -t registry.desku.be/dotvirt-operator:<tag> .
+#   docker build -f operator/Dockerfile -t quay.io/epheo/dotvirt-operator:<tag> .
 FROM golang:1.26 AS build
 WORKDIR /src
 COPY . .

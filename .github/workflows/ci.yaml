@@ -1,0 +1,61 @@
+# GitHub Actions CI. The `image` job runs in the `QUAY` environment, which holds the
+# secrets QUAY_USERNAME / QUAY_PASSWORD (push credentials for quay.io/epheo).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  IMAGE: quay.io/epheo/dotvirt
+  GOTOOLCHAIN: auto # go.mod pins 1.26.4; let the toolchain download
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+        env: { GOFLAGS: -buildvcs=false }
+      - run: go test ./...
+        env: { GOFLAGS: -buildvcs=false }
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run check
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+
+  # App image build+push, main only — deploy/operator pin the immutable digest of
+  # the short-sha tag this publishes.
+  image:
+    if: github.ref == 'refs/heads/main'
+    needs: [go, web]
+    runs-on: ubuntu-latest
+    environment: QUAY # GitHub Actions environment holding the QUAY_* push secrets
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_PASSWORD }}
+      - name: Build & push
+        run: |
+          docker build -f Containerfile -t "$IMAGE:${GITHUB_SHA::7}" -t "$IMAGE:latest" .
+          docker push "$IMAGE:${GITHUB_SHA::7}"
+          docker push "$IMAGE:latest"

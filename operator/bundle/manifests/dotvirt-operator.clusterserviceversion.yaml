@@ -23,7 +23,6 @@ metadata:
               "platformRepo": "https://forgejo.apps.hetznet.epheo.eu/dotvirt/platform.git",
               "url": "https://forgejo.apps.hetznet.epheo.eu"
             },
-            "image": "registry.desku.be/dotvirt:bb3e91a",
             "ingress": {
               "host": "dotvirt.apps.hetznet.epheo.eu",
               "type": "auto"
@@ -36,12 +35,12 @@ metadata:
       ]
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
-    createdAt: "2026-06-16T18:28:09Z"
+    createdAt: "2026-06-16T22:58:15Z"
     description: Installs dotvirt — a vCenter-like GitOps WebUI for KubeVirt — with
       its platform/tenant tier.
     operators.operatorframework.io/builder: operator-sdk-v1.42.2
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
-  name: dotvirt-operator.v0.0.3
+  name: dotvirt-operator.v0.0.4
 spec:
   apiservicedefinitions: {}
   customresourcedefinitions:
@@ -61,6 +60,9 @@ spec:
     Prerequisites: ArgoCD (OpenShift GitOps) and KubeVirt; OVN-Kubernetes, NMState,
     and CDI unlock networking and image upload.
   displayName: dotvirt operator
+  icon:
+  - base64data: PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjE2MS4yNiA1LjMzIDk4MS41NiA4MDAuMjUiIGZpbGw9Im5vbmUiPgogIDxjaXJjbGUgY3g9IjU2MS4zNSIgY3k9IjQwNS40MiIgcj0iMzk0LjA5IiBmaWxsPSIjRjM3NzJCIi8+CiAgPGNpcmNsZSBjeD0iMTAzNi43OCIgY3k9IjY5OS41NCIgcj0iMTAwLjA0IiBmaWxsPSIjRjM3NzJCIi8+CiAgPHBhdGggZmlsbD0iI0ZGRkZGRiIgZmlsbC1ydWxlPSJldmVub2RkIiBkPSJNNDgyLjk2LDY1NC4wMCBDNDgwLjg5LDY0NS4wNiA0ODIuODMsNTU0LjA4IDQ4Mi44Myw1MzcuMDAgQzQ4Mi44Myw0NTIuMzMgNDgyLjgzLDM2Ny42NyA0ODIuODMsMjgzLjAwIEM0ODIuODMsMjU0LjMzIDQ4Mi44MywyMjUuNjcgNDgyLjgzLDE5Ny4wMCBDNDgyLjgzLDE5My4xMiA0ODEuOTksMTcwLjk1IDQ4NC40NywxNzAuMDAgQzQ5MC42NywxNjcuODcgNTA1LjU4LDE2OS44MyA1MTIuNjcsMTY5LjgzIEM1MzQuMjIsMTY5LjgzIDU1NS43OCwxNjkuODMgNTc3LjMzLDE2OS44MyBDNjA2LjI5LDE2OS44MyA2MzUuNzEsMTY5LjI4IDY2NC4zMywxNzAuODIgQzY2OS4zOCwxNzEuMDkgNjc0LjY1LDE3MC4yMyA2NzkuNjcsMTcwLjg3IEM3MzMuNDksMTc3Ljc4IDc4Ni45NCwxOTMuMzQgODI5LjAwLDIzMC41MiBDODg1LjA0LDI4MC4wNyA5MDguNzQsMzU1LjQwIDkwNC44Miw0MjguMzMgQzkwNC4yNyw0MzguNTcgOTAyLjE2LDQ0OC45MyA5MDAuODcsNDU5LjAwIEM4OTguMTUsNDgwLjI1IDg5Mi4xOSw1MDIuODIgODgyLjYyLDUyMi4zMyBDODY3LjUwLDU1My4xNyA4NDcuMjAsNTc5LjM0IDgyMC43OCw2MDEuMzMgQzgwNi4yNiw2MTMuNDEgNzg5LjIyLDYyMS43NyA3NzIuMzMsNjMwLjA1IEM3MDkuNjAsNjYwLjgxIDYzNy43Miw2NTQuODMgNTY4LjMzLDY1NC44MyBDNTQ2LjY3LDY1NC44MyA1MjUuMDAsNjU0LjgzIDUwMy4zMyw2NTQuODMgQzUwMC42MSw2NTQuODMgNDgzLjU0LDY1NS4zMiA0ODIuOTYsNjU0LjAwIFogTTU5NC42NywyNzIuOTYgQzU5My40MSwyNzMuNTEgNTkzLjgzLDI4Ni40OCA1OTMuODMsMjg4LjY3IEM1OTMuODMsMzA1LjExIDU5My44MywzMjEuNTYgNTkzLjgzLDMzOC4wMCBDNTkzLjgzLDM4Ni41NiA1OTMuODMsNDM1LjExIDU5My44Myw0ODMuNjcgQzU5My44Myw0OTYuNzQgNTkxLjc2LDU0MS41MiA1OTMuOTYsNTUxLjAwIEM1OTQuNTIsNTUyLjI4IDYyOC4yOCw1NTEuODMgNjM1LjAwLDU1MS44MyBDNjgwLjI4LDU1MS44MyA3MjAuMDksNTQ2LjAxIDc1NS4wMCw1MTUuMTQgQzgxMC43Nyw0NjUuODQgODA2Ljg0LDM1NS43NyA3NTAuMDAsMzA1LjUyIEM3MTcuNzgsMjc3LjA0IDY3NS4zMSwyNzIuODMgNjM0LjAwLDI3Mi44MyBDNjIzLjM3LDI3Mi44MyA2MDQuMzMsMjcwLjcyIDU5NC42NywyNzIuOTYgWiIvPgo8L3N2Zz4K
+    mediatype: image/svg+xml
   install:
     spec:
       clusterPermissions:
@@ -208,7 +210,7 @@ spec:
               - args:
                 - --leader-elect
                 - --health-probe-bind-address=:8081
-                image: registry.desku.be/dotvirt-operator:a305c94
+                image: quay.io/epheo/dotvirt-operator@sha256:222d794d99c6a18fb48bfc3d164a45c8f400c666ab31b5d262596aa3db0dd184
                 livenessProbe:
                   httpGet:
                     path: /healthz
@@ -234,8 +236,6 @@ spec:
                     drop:
                     - ALL
                   readOnlyRootFilesystem: true
-              imagePullSecrets:
-              - name: dotvirt-regcred
               securityContext:
                 runAsNonRoot: true
               serviceAccountName: dotvirt-operator-controller
@@ -286,4 +286,5 @@ spec:
   minKubeVersion: 1.30.0
   provider:
     name: epheo
-  version: 0.0.3
+  replaces: dotvirt-operator.v0.0.3
+  version: 0.0.4

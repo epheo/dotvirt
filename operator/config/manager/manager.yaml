@@ -18,17 +18,12 @@ spec:
       labels: {app: dotvirt-operator}
     spec:
       serviceAccountName: dotvirt-operator-controller
-      # Pull credential for the private registry the operator + app images live in.
-      # Provide it in the operator's namespace (create out-of-band, e.g. copy
-      # dotvirt-regcred); harmless if absent for a public registry.
-      imagePullSecrets:
-        - name: dotvirt-regcred
       securityContext:
         runAsNonRoot: true
       terminationGracePeriodSeconds: 10
       containers:
         - name: manager
-          image: registry.desku.be/dotvirt-operator:latest
+          image: quay.io/epheo/dotvirt-operator:v0.0.4
           args: ["--leader-elect", "--health-probe-bind-address=:8081"]
           securityContext:
             allowPrivilegeEscalation: false

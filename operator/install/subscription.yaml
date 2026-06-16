@@ -1,0 +1,13 @@
+# Subscribe to the dotvirt operator from the self-hosted catalog. Automatic approval
+# means a new catalog (CatalogSource image bump) rolls the operator forward.
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: dotvirt-operator
+  namespace: dotvirt-olm
+spec:
+  channel: alpha
+  name: dotvirt-operator
+  source: dotvirt-catalog
+  sourceNamespace: dotvirt-olm
+  installPlanApproval: Automatic

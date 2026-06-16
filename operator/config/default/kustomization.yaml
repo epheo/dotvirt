@@ -6,5 +6,5 @@ resources:
   - ../rbac
   - ../manager
 images:
-  - name: registry.desku.be/dotvirt-operator
-    newTag: a305c94
+  - name: quay.io/epheo/dotvirt-operator
+    digest: sha256:222d794d99c6a18fb48bfc3d164a45c8f400c666ab31b5d262596aa3db0dd184

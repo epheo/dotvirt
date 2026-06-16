@@ -1,0 +1,17 @@
+# File-Based Catalog source of truth (opm `basic` template). `make catalog` renders
+# this into catalog/dotvirt-operator/catalog.yaml by pulling each olm.bundle image and
+# expanding its properties. The channel graph (replaces) lives here, in git — the
+# committed bundle no longer relies on `run bundle-upgrade` to inject the edge.
+schema: olm.template.basic
+entries:
+  - schema: olm.package
+    name: dotvirt-operator
+    defaultChannel: alpha
+  - schema: olm.channel
+    package: dotvirt-operator
+    name: alpha
+    entries:
+      - name: dotvirt-operator.v0.0.4
+        replaces: dotvirt-operator.v0.0.3
+  - schema: olm.bundle
+    image: quay.io/epheo/dotvirt-operator-bundle:v0.0.4

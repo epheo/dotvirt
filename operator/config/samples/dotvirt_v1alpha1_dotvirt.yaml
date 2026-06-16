@@ -7,7 +7,8 @@ metadata:
   name: dotvirt
   namespace: dotvirt
 spec:
-  image: registry.desku.be/dotvirt:bb3e91a
+  # No image pin: the operator deploys its built-in (digest-pinned) DefaultImage,
+  # so an OLM operator upgrade rolls the app. Set spec.image only to override.
   forge:
     managed: true # the operator deploys + bootstraps Forgejo and generates its token
     url: https://forgejo.apps.hetznet.epheo.eu # exposed via Route at this host

@@ -1,10 +1,10 @@
-# dotvirt build/test entry points. The same targets back .forgejo/workflows/ci.yaml.
+# dotvirt build/test entry points. The same targets back .github/workflows/ci.yaml.
 #
-# Image: registry.desku.be/dotvirt, tagged with the short commit (immutable, what
-# deploy/ pins) plus latest. Push needs `podman login registry.desku.be` first.
+# Image: quay.io/epheo/dotvirt, tagged with the short commit (immutable, what
+# deploy/ pins) plus latest. Push needs `podman login quay.io` first.
 
-REGISTRY ?= registry.desku.be
-IMAGE    ?= $(REGISTRY)/dotvirt
+REGISTRY ?= quay.io
+IMAGE    ?= $(REGISTRY)/epheo/dotvirt
 TAG      ?= $(shell git rev-parse --short HEAD)
 
 .PHONY: build test web check e2e image push run

@@ -11,7 +11,7 @@ import (
 )
 
 // DefaultImage is deployed when the Dotvirt spec doesn't pin one.
-const DefaultImage = "registry.desku.be/dotvirt:bb3e91a"
+const DefaultImage = "quay.io/epheo/dotvirt@sha256:40242961bfc6674dcbd6aa9d5793a5d23914410d4c80ac3ce9320db05d3856bf"
 
 // Secret names the operator generates (session, appset) or expects (the forge
 // credential — overridable via spec.forge.credentialsSecret).

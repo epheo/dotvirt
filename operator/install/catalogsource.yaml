@@ -1,0 +1,15 @@
+# Self-hosted dotvirt operator catalog. Bump .spec.image to the new catalog tag to
+# publish a release; OLM then upgrades subscribers within installPlanApproval.
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata:
+  name: dotvirt-catalog
+  namespace: dotvirt-olm
+spec:
+  sourceType: grpc
+  image: quay.io/epheo/dotvirt-operator-catalog:v0.0.4
+  displayName: dotvirt
+  publisher: epheo
+  updateStrategy:
+    registryPoll:
+      interval: 10m
