@@ -5,4 +5,7 @@ FROM quay.io/operator-framework/opm:v1.47.0
 ENTRYPOINT ["/bin/opm"]
 CMD ["serve", "/configs", "--cache-dir=/tmp/cache"]
 ADD catalog /configs
+# Pre-build the serve cache at image-build time; without it `opm serve` fails its
+# startup integrity check (empty /tmp/cache → missing pogreb digest).
+RUN ["/bin/opm", "serve", "/configs", "--cache-dir=/tmp/cache", "--cache-only"]
 LABEL operators.operatorframework.io.index.configs.v1=/configs
