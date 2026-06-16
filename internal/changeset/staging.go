@@ -3,6 +3,7 @@ package changeset
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -163,6 +164,15 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	if ns == "" {
 		ns = spec.Name
 	}
+	// The name becomes a repo path segment, a Namespace name, a label value, and a
+	// staged manifest path — so it must be a strict DNS-1123 label. This rejects
+	// path-traversal ("../x"), separators ("a/b"), and anything k8s would refuse.
+	if !validName(spec.Name) {
+		return model.DraftView{}, fmt.Errorf("%w: project name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, spec.Name)
+	}
+	if !validName(ns) {
+		return model.DraftView{}, fmt.Errorf("%w: namespace name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, ns)
+	}
 	// The new tenant repo is a sibling of the platform repo under the same owner.
 	repoURL := siblingRepoURL(commitProj.Repo, spec.Name)
 	if repoURL == "" {
@@ -211,6 +221,17 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 		}
 	}
 	return c.Get(id, commitProj)
+}
+
+// dns1123Label matches a single RFC-1123 label: lowercase alphanumeric and '-',
+// starting and ending alphanumeric. Length is checked separately.
+var dns1123Label = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+
+// validName reports whether s is a safe project/namespace name — a DNS-1123 label.
+// This is the trust boundary for a name that becomes a repo path, a Namespace, a
+// label value, and a git file path, so it rejects traversal and separators.
+func validName(s string) bool {
+	return len(s) > 0 && len(s) <= 63 && dns1123Label.MatchString(s)
 }
 
 // siblingRepoURL derives a repo URL alongside ref under the same owner: it replaces
