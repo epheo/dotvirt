@@ -123,6 +123,19 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 		secretEnv("DOTVIRT_WEBHOOK_SECRET", WebhookSecretName, "secret", true),
 	)
 
+	args := []string{
+		"-addr=:8080",
+		"-ui-origin=", // same-origin: the binary serves the SPA
+		"-argo=true",
+		"-draft-dir=/var/lib/dotvirt/drafts",
+	}
+	if dv.Spec.Forge.InsecureTLS {
+		// The managed/eval forge Route is self-signed, so the app must skip TLS
+		// verification for its forge API calls + git clones — the same flag the
+		// manual deploy carried. Metrics stays verified (its own CA env).
+		args = append(args, "-insecure-tls")
+	}
+
 	replicas := int32(1)
 	return &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
@@ -139,12 +152,7 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 					Containers: []corev1.Container{{
 						Name:  AppName,
 						Image: image,
-						Args: []string{
-							"-addr=:8080",
-							"-ui-origin=", // same-origin: the binary serves the SPA
-							"-argo=true",
-							"-draft-dir=/var/lib/dotvirt/drafts",
-						},
+						Args:  args,
 						Env:   env,
 						Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 8080}},
 						VolumeMounts: []corev1.VolumeMount{
