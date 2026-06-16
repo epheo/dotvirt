@@ -223,6 +223,90 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	return c.Get(id, commitProj)
 }
 
+// AdoptProject wires a repo to an EXISTING labeled-but-repoless project — the
+// read-only "no repo configured" dead-end the inventory shows. It mirrors
+// StageCreateProject but targets a project that already exists in the cluster: the
+// tenant repo is created imperatively, then each of the project's namespaces is
+// (re-)staged into the PLATFORM repo carrying the dotvirt.io/repo annotation. On
+// merge the namespaces come under Argo and the ApplicationSet generates the project's
+// app (it skips repoless projects). VMs in those namespaces then surface as
+// NotTracked and are brought in via AdoptNamespace — still PR-gated. commitProj is
+// the platform project; target is the project being adopted.
+func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.ProjectInfo, owners []string) (model.DraftView, error) {
+	if err := requireRepo(commitProj); err != nil {
+		return model.DraftView{}, err
+	}
+	if target.Repo != "" {
+		return model.DraftView{}, fmt.Errorf("%w: project %q already has a repo (%s)", model.ErrConflict, target.Name, target.Repo)
+	}
+	if !validName(target.Name) {
+		return model.DraftView{}, fmt.Errorf("%w: project name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, target.Name)
+	}
+	if len(target.Namespaces) == 0 {
+		return model.DraftView{}, fmt.Errorf("%w: project %q has no namespaces to adopt", model.ErrInvalid, target.Name)
+	}
+	// The tenant repo is a sibling of the platform repo under the same owner.
+	repoURL := siblingRepoURL(commitProj.Repo, target.Name)
+	if repoURL == "" {
+		return model.DraftView{}, fmt.Errorf("%w: cannot derive a repo URL from the platform repo %q", model.ErrInvalid, commitProj.Repo)
+	}
+	fc := c.forge.For(repoURL)
+	if fc == nil {
+		return model.DraftView{}, fmt.Errorf("%w: forge not configured; cannot create the project repo", model.ErrInvalid)
+	}
+	if _, err := fc.EnsureRepo(); err != nil {
+		return model.DraftView{}, fmt.Errorf("create project repo: %w", err)
+	}
+	if err := c.stageProjectAdoption(id.Username, commitProj.Name, target, repoURL, owners); err != nil {
+		return model.DraftView{}, err
+	}
+	return c.Get(id, commitProj)
+}
+
+// stageProjectAdoption stages the namespace (+ optional owner RoleBinding) manifests
+// that join target to repoURL into commitProjName's platform draft. Split from
+// AdoptProject so the staging is unit-testable without a forge. Each namespace
+// manifest is stamped with target's dotvirt.io/project label and dotvirt.io/repo
+// annotation (netgen.NamespaceManifest), staged as a create that the propose step
+// writes by path — create-or-overwrite — so a namespace already in the platform repo
+// (e.g. dotvirt-made, annotation later dropped) is corrected rather than duplicated.
+func (c *Coordinator) stageProjectAdoption(username, commitProjName string, target project.ProjectInfo, repoURL string, owners []string) error {
+	for _, ns := range target.Namespaces {
+		nsPath, nsContent, err := netgen.NamespaceManifest(netgen.NamespaceSpec{Name: ns, Project: target.Name, Repo: repoURL})
+		if err != nil {
+			return fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		}
+		if err := c.store.Stage(username, commitProjName, draft.Entry{
+			Kind:       draft.KindCreate,
+			Resource:   draft.ResourceNamespace,
+			Namespace:  ns,
+			Name:       ns,
+			SourceFile: nsPath,
+			Manifest:   string(nsContent),
+		}); err != nil {
+			return err
+		}
+		if len(owners) == 0 {
+			continue
+		}
+		rbPath, rbContent, err := netgen.RoleBindingManifest(netgen.RoleBindingSpec{Namespace: ns, Project: target.Name, Owners: owners})
+		if err != nil {
+			return fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		}
+		if err := c.store.Stage(username, commitProjName, draft.Entry{
+			Kind:       draft.KindCreate,
+			Resource:   draft.ResourceRoleBinding,
+			Namespace:  ns,
+			Name:       ns + "-admins",
+			SourceFile: rbPath,
+			Manifest:   string(rbContent),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // dns1123Label matches a single RFC-1123 label: lowercase alphanumeric and '-',
 // starting and ending alphanumeric. Length is checked separately.
 var dns1123Label = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)

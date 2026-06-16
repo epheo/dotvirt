@@ -126,6 +126,97 @@ func TestAdoptStagesEditForDriftedVM(t *testing.T) {
 	}
 }
 
+// AdoptNamespace stages only the untracked (cluster-only) VMs in a namespace:
+// alpha/copy is on running but not main, while alpha/web is tracked (and drifted) —
+// so a single bulk adopt picks up copy and leaves web for the per-VM drift path.
+func TestAdoptNamespaceStagesOnlyUntracked(t *testing.T) {
+	bare := seedBareWithRunning(t)
+	c := newTestCoordinator(t)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+
+	view, err := c.AdoptNamespace(id, proj, "alpha")
+	if err != nil {
+		t.Fatalf("AdoptNamespace: %v", err)
+	}
+	if view.Count != 1 || len(view.Items) != 1 {
+		t.Fatalf("want 1 staged item (alpha/copy), got count=%d items=%d", view.Count, len(view.Items))
+	}
+	if it := view.Items[0]; it.Kind != string(draft.KindCreate) || it.Name != "copy" {
+		t.Fatalf("want a create for alpha/copy, got %+v", it)
+	}
+
+	// Idempotent: copy is staged but not yet on base, so a second call re-stages the
+	// same entry rather than adding a duplicate.
+	view, err = c.AdoptNamespace(id, proj, "alpha")
+	if err != nil {
+		t.Fatalf("AdoptNamespace (rerun): %v", err)
+	}
+	if view.Count != 1 {
+		t.Fatalf("re-adopt should be idempotent, got count=%d", view.Count)
+	}
+}
+
+// A namespace with no cluster-only VMs has nothing to adopt — a clear ErrInvalid so
+// the UI can say so rather than opening an empty PR.
+func TestAdoptNamespaceNothingUntracked(t *testing.T) {
+	bare := seedBareWithRunning(t)
+	c := newTestCoordinator(t)
+
+	_, err := c.AdoptNamespace(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: bare}, "beta")
+	if !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("want model.ErrInvalid for a namespace with no untracked VMs, got %v", err)
+	}
+}
+
+// stageProjectAdoption stamps each of a project's namespaces with the dotvirt.io/repo
+// annotation (+ an owners RoleBinding) into the platform draft — the staging core of
+// AdoptProject, exercised without a forge.
+func TestStageProjectAdoptionStampsRepoOnEveryNamespace(t *testing.T) {
+	c := newTestCoordinator(t)
+	id := "alice"
+	const platform = "platform"
+	target := project.ProjectInfo{Name: "team-a", Namespaces: []string{"team-a", "team-a-db"}}
+	repoURL := "https://forge.example/acme/team-a.git"
+
+	if err := c.stageProjectAdoption(id, platform, target, repoURL, []string{"alice", "bob"}); err != nil {
+		t.Fatalf("stageProjectAdoption: %v", err)
+	}
+	entries, err := c.store.List(id, platform)
+	if err != nil {
+		t.Fatalf("store.List: %v", err)
+	}
+
+	nsByName := map[string]draft.Entry{}
+	rbByName := map[string]draft.Entry{}
+	for _, e := range entries {
+		switch e.Resource {
+		case draft.ResourceNamespace:
+			nsByName[e.Name] = e
+		case draft.ResourceRoleBinding:
+			rbByName[e.Name] = e
+		}
+	}
+	for _, ns := range target.Namespaces {
+		e, ok := nsByName[ns]
+		if !ok {
+			t.Fatalf("no namespace entry staged for %q", ns)
+		}
+		if e.Kind != draft.KindCreate {
+			t.Errorf("namespace %q: want KindCreate, got %q", ns, e.Kind)
+		}
+		if !strings.Contains(e.Manifest, repoURL) || !strings.Contains(e.Manifest, "dotvirt.io/repo") {
+			t.Errorf("namespace %q manifest must carry the dotvirt.io/repo annotation, got:\n%s", ns, e.Manifest)
+		}
+		if !strings.Contains(e.Manifest, "dotvirt.io/project") || !strings.Contains(e.Manifest, "team-a") {
+			t.Errorf("namespace %q manifest must carry the dotvirt.io/project label, got:\n%s", ns, e.Manifest)
+		}
+		if _, ok := rbByName[ns+"-admins"]; !ok {
+			t.Errorf("no owners RoleBinding staged for namespace %q", ns)
+		}
+	}
+}
+
 func TestAdoptAbsentFromRunningNotFound(t *testing.T) {
 	bare := seedBareWithRunning(t)
 	c := newTestCoordinator(t)

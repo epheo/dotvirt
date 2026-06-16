@@ -145,6 +145,9 @@
 			return;
 		}
 		switch (a.id) {
+			case 'adopt':
+				adopt();
+				break;
 			case 'edit':
 				openEdit();
 				break;

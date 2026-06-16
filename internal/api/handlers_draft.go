@@ -143,6 +143,19 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 	respond(w, result, err)
 }
 
+// handleAdoptNamespace stages every untracked (NotTracked) VM in a namespace into the
+// caller's draft in one shot — the "Adopt N untracked" bulk action. Same per-namespace
+// RBAC gate as the per-VM adopt; the result is one draft the caller proposes as one PR.
+func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
+	ns := r.PathValue("namespace")
+	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	if !ok {
+		return
+	}
+	result, err := s.draft.AdoptNamespace(sc.id, sc.proj, ns)
+	respond(w, result, err)
+}
+
 func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 	// Resync runs the reconcile with dotvirt's SA, so gate it on the caller's OWN
 	// authority over the VM (not just namespace read): they may trigger a sync only

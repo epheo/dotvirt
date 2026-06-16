@@ -23,7 +23,7 @@ metadata:
               "platformRepo": "https://forgejo.apps.hetznet.epheo.eu/dotvirt/platform.git",
               "url": "https://forgejo.apps.hetznet.epheo.eu"
             },
-            "image": "registry.desku.be/dotvirt:7ef41e3",
+            "image": "registry.desku.be/dotvirt:bb3e91a",
             "ingress": {
               "host": "dotvirt.apps.hetznet.epheo.eu",
               "type": "auto"
@@ -36,12 +36,12 @@ metadata:
       ]
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
-    createdAt: "2026-06-16T17:23:03Z"
+    createdAt: "2026-06-16T18:28:09Z"
     description: Installs dotvirt — a vCenter-like GitOps WebUI for KubeVirt — with
       its platform/tenant tier.
     operators.operatorframework.io/builder: operator-sdk-v1.42.2
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
-  name: dotvirt-operator.v0.0.2
+  name: dotvirt-operator.v0.0.3
 spec:
   apiservicedefinitions: {}
   customresourcedefinitions:
@@ -208,7 +208,7 @@ spec:
               - args:
                 - --leader-elect
                 - --health-probe-bind-address=:8081
-                image: registry.desku.be/dotvirt-operator:b9a2bb3
+                image: registry.desku.be/dotvirt-operator:a305c94
                 livenessProbe:
                   httpGet:
                     path: /healthz
@@ -286,4 +286,4 @@ spec:
   minKubeVersion: 1.30.0
   provider:
     name: epheo
-  version: 0.0.2
+  version: 0.0.3

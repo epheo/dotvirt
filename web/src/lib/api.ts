@@ -528,6 +528,12 @@ export const api = {
 	quotas: (scope: ScopeQuery) => get<NamespaceQuota[]>(`/api/quotas${scopeQS(scope)}`),
 	adopt: (namespace: string, name: string) =>
 		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/adopt`, {}),
+	// Bulk: stage every untracked (NotTracked) VM in a namespace into one draft.
+	adoptNamespace: (namespace: string) =>
+		post<DraftView>(`/api/namespaces/${enc(namespace)}/adopt`, {}),
+	// Wire a repo to an existing labeled-but-repoless project (the "no repo" dead-end).
+	adoptProject: (project: string, owners?: string[]) =>
+		post<DraftView>(`/api/projects/${enc(project)}/adopt`, owners?.length ? { owners } : {}),
 	resync: (namespace: string, name: string) =>
 		post<{ application: string; revision: string }>(
 			`/api/vms/${enc(namespace)}/${enc(name)}/resync`,
