@@ -66,6 +66,7 @@ func editFromRequest(req model.EditRequest) manifest.VMEdit {
 		Memory:         req.Memory,
 		Instancetype:   req.Instancetype,
 		Preference:     req.Preference,
+		Sizing:         req.Sizing,
 		SetLabels:      req.SetLabels,
 		RemoveLabels:   req.RemoveLabels,
 		AddDisks:       req.AddDisks,

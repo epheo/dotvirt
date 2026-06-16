@@ -28,6 +28,14 @@ type Config struct {
 	ProjectLabel   string // namespace label whose value names the project (dotvirt.io/project)
 	RepoAnnotation string // namespace annotation holding the project's git repo URL (dotvirt.io/repo)
 
+	// PlatformRepo is the platform-tier git repo holding cluster-scoped + tenancy
+	// manifests (Namespaces, CUDNs, NNCP uplinks, primary VM networks). dotvirt
+	// routes every cluster-scoped create here by KIND (never a tenant repo) and
+	// SSAR-gates it; empty disables those create flows. It is NOT a
+	// dotvirt.io/project-labeled project — it's platform-provisioned (its own Argo
+	// app + AppProject; see deploy/appprojects.yaml).
+	PlatformRepo string
+
 	ExportInterval  time.Duration // how often to export live state to each project's running branch
 	GitPollInterval time.Duration // how often to poll git for branch changes (drives live push)
 	Push            bool          // push commits to the remote (disable for local/offline testing)
@@ -93,6 +101,7 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.Kubeconfig, "kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig path (empty = in-cluster)")
 	fs.StringVar(&c.ProjectLabel, "project-label", envOr("DOTVIRT_PROJECT_LABEL", "dotvirt.io/project"), "namespace label whose value names the project")
 	fs.StringVar(&c.RepoAnnotation, "repo-annotation", envOr("DOTVIRT_REPO_ANNOTATION", "dotvirt.io/repo"), "namespace annotation holding the project's git repo URL")
+	fs.StringVar(&c.PlatformRepo, "platform-repo", os.Getenv("DOTVIRT_PLATFORM_REPO"), "platform-tier git repo for cluster-scoped + tenancy manifests (CUDN/NNCP/Namespace); empty disables those creates")
 
 	fs.DurationVar(&c.ExportInterval, "export-interval", 30*time.Second, "how often to export live state to each project's running branch")
 	fs.DurationVar(&c.GitPollInterval, "git-poll-interval", 10*time.Second, "how often to poll git for branch changes (drives live inventory push)")

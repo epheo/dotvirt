@@ -19,6 +19,12 @@ type VMEdit struct {
 	Instancetype *string `json:"instancetype,omitempty"` // spec.instancetype.name
 	Preference   *string `json:"preference,omitempty"`   // spec.preference.name
 
+	// Sizing selects which representation owns CPU/memory: "instancetype" (an
+	// instancetype reference; inline domain.cpu/memory must be absent) or "custom"
+	// (inline domain.cpu/memory; no instancetype). KubeVirt rejects a VM that has
+	// both, so the two are mutually exclusive. Nil leaves the representation as-is.
+	Sizing *string `json:"sizing,omitempty"`
+
 	// Metadata edits: keys to set (upsert) and keys to remove.
 	SetLabels         map[string]string `json:"setLabels,omitempty"`
 	RemoveLabels      []string          `json:"removeLabels,omitempty"`
@@ -36,7 +42,7 @@ type VMEdit struct {
 // Empty reports whether the edit changes nothing.
 func (e VMEdit) Empty() bool {
 	return e.Power == nil && e.CPUCores == nil && e.Memory == nil &&
-		e.Instancetype == nil && e.Preference == nil &&
+		e.Instancetype == nil && e.Preference == nil && e.Sizing == nil &&
 		len(e.SetLabels) == 0 && len(e.RemoveLabels) == 0 &&
 		len(e.SetAnnotations) == 0 && len(e.RemoveAnnotations) == 0 &&
 		len(e.AddDisks) == 0 && len(e.RemoveDisks) == 0 &&
@@ -67,15 +73,7 @@ func ApplyEdit(content []byte, namespace, name string, edit VMEdit) ([]byte, err
 	if edit.Power != nil {
 		applyPower(ed, vm, *edit.Power)
 	}
-	if edit.CPUCores != nil {
-		applyCPU(ed, vm, *edit.CPUCores)
-	}
-	if edit.Memory != nil {
-		applyMemory(ed, vm, *edit.Memory)
-	}
-	if edit.Instancetype != nil {
-		applyRef(ed, vm, "instancetype", *edit.Instancetype)
-	}
+	applySizing(ed, vm, edit)
 	if edit.Preference != nil {
 		applyRef(ed, vm, "preference", *edit.Preference)
 	}
@@ -83,6 +81,78 @@ func ApplyEdit(content []byte, namespace, name string, edit VMEdit) ([]byte, err
 	applyDisksNetworks(ed, vm, edit)
 
 	return ed.bytes(), nil
+}
+
+// applySizing writes the VM's CPU/memory in exactly one representation — an
+// instancetype reference or inline domain.cpu/domain.memory — never both, which
+// KubeVirt's webhook rejects. The Sizing mode picks which:
+//
+//   - "custom": drop spec.instancetype, then apply inline cpu/memory.
+//   - "instancetype": apply the instancetype ref, then strip any inline cpu/memory.
+//   - "" (mode unset, e.g. power/label/device-only edits or older clients): apply
+//     fields field-by-field, but if the VM carries an instancetype, never write
+//     inline cpu/memory — strip any that slipped in. This normalizes a VM that was
+//     wrongly given both (the conflict that fails the webhook) on any later edit.
+//
+// Preference is independent (it never defines cpu/memory) and is applied by the
+// caller in every mode.
+func applySizing(ed *lineEditor, vm *yaml.Node, edit VMEdit) {
+	mode := ""
+	if edit.Sizing != nil {
+		mode = *edit.Sizing
+	}
+	switch mode {
+	case "custom":
+		stripRef(ed, vm, "instancetype")
+		applyInline(ed, vm, edit)
+	case "instancetype":
+		if edit.Instancetype != nil {
+			applyRef(ed, vm, "instancetype", *edit.Instancetype)
+		}
+		stripInlineSizing(ed, vm)
+	default:
+		hasIT := get(get(vm, "spec"), "instancetype") != nil
+		setsIT := edit.Instancetype != nil && *edit.Instancetype != ""
+		if edit.Instancetype != nil {
+			applyRef(ed, vm, "instancetype", *edit.Instancetype)
+		}
+		if hasIT || setsIT {
+			stripInlineSizing(ed, vm) // never both — instancetype wins
+		} else {
+			applyInline(ed, vm, edit)
+		}
+	}
+}
+
+func applyInline(ed *lineEditor, vm *yaml.Node, edit VMEdit) {
+	if edit.CPUCores != nil {
+		applyCPU(ed, vm, *edit.CPUCores)
+	}
+	if edit.Memory != nil {
+		applyMemory(ed, vm, *edit.Memory)
+	}
+}
+
+// stripRef removes spec.<key> (e.g. instancetype) entirely, leaving siblings such
+// as preference intact.
+func stripRef(ed *lineEditor, vmRoot *yaml.Node, key string) {
+	ed.deleteChild(get(vmRoot, "spec"), key)
+}
+
+// stripInlineSizing removes the inline cpu/memory the instancetype owns:
+// domain.cpu, domain.memory, and the legacy resources.requests cpu/memory entries
+// (leaving any other resources.requests keys in place).
+func stripInlineSizing(ed *lineEditor, vmRoot *yaml.Node) {
+	domain := domainNode(vmRoot)
+	if domain == nil {
+		return
+	}
+	ed.deleteChild(domain, "cpu")
+	ed.deleteChild(domain, "memory")
+	if reqs := get(get(domain, "resources"), "requests"); reqs != nil {
+		ed.deleteChild(reqs, "cpu")
+		ed.deleteChild(reqs, "memory")
+	}
 }
 
 // applyRef sets spec.<key>.name (used for instancetype/preference), creating the
@@ -263,6 +333,38 @@ func (e *lineEditor) removeRange(start, end int) {
 		if i >= 0 {
 			e.markDeleted(i)
 		}
+	}
+}
+
+// deleteChild removes the "key: ..." entry of a block mapping, including its full
+// nested value: from the key's line down through the last line indented deeper
+// than the key (the same indent scan used to find a block's extent elsewhere).
+// No-op if the mapping or key is absent.
+func (e *lineEditor) deleteChild(mapping *yaml.Node, key string) {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value != key {
+			continue
+		}
+		start := mapping.Content[i].Line - 1
+		if start < 0 || start >= len(e.lines) {
+			return
+		}
+		keyIndent := indentOf(e.lines[start])
+		last := start
+		for j := start + 1; j < len(e.lines); j++ {
+			if strings.TrimSpace(e.lines[j]) == "" {
+				continue
+			}
+			if indentOf(e.lines[j]) <= keyIndent {
+				break
+			}
+			last = j
+		}
+		e.removeRange(start, last+1)
+		return
 	}
 }
 

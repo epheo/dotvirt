@@ -89,11 +89,19 @@ func (s *Server) handleDraftDiscard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUnstage(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	// Cluster-scoped entries (a CUDN/NNCP under the "cluster" sentinel namespace)
+	// can't be resolved by namespace, so they carry the target project explicitly.
+	var sc scope
+	var ok bool
+	if p := r.URL.Query().Get("project"); p != "" {
+		sc, ok = s.pickProject(w, r, p) // platform tier is gated; tenants resolve by name
+	} else {
+		sc, ok = s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	}
 	if !ok {
 		return
 	}
-	if err := s.draft.Unstage(sc.id, sc.proj, r.PathValue("namespace"), r.PathValue("name")); err != nil {
+	if err := s.draft.Unstage(sc.id, sc.proj, r.URL.Query().Get("resource"), r.PathValue("namespace"), r.PathValue("name")); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -202,7 +210,7 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 // handleHistory lists recent commits on the project's base branch — the Changes
 // pane's history view.
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byName(r.PathValue("project")))
+	sc, ok := s.pickProject(w, r, r.PathValue("project"))
 	if !ok {
 		return
 	}
@@ -222,7 +230,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 // handleRevert proposes a forward commit reverting one commit in the project's
 // repo — a new PR, never a history rewrite.
 func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byName(r.PathValue("project")))
+	sc, ok := s.pickProject(w, r, r.PathValue("project"))
 	if !ok {
 		return
 	}

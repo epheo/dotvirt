@@ -50,10 +50,23 @@ type LiveVM struct {
 	Paused bool // VMI Paused condition is true (phase stays Running while paused)
 	Ready  bool
 
+	// Interfaces is each VMI interface's runtime address info, merged onto the
+	// VM's manifest-declared NIC of the same name for the detail view's per-NIC
+	// IP/MAC (vCenter's per-adapter address columns).
+	Interfaces []LiveNIC
+
 	// Migration mirrors the VMI's MigrationState when one exists: the live (or
 	// just-finished) node-to-node move. KubeVirt keeps the last migration's state
 	// on the VMI, so a nil check distinguishes "never migrated" from "idle".
 	Migration *Migration
+}
+
+// LiveNIC is one VMI interface's runtime address info (name matches the VM's
+// manifest NIC name).
+type LiveNIC struct {
+	Name string
+	MAC  string
+	IP   string
 }
 
 // Migration is a VM's node-to-node move — vCenter's vMotion progress. Active
@@ -219,6 +232,7 @@ func liveFromVMI(vmi *kubevirtcorev1.VirtualMachineInstance) LiveVM {
 	}
 	for _, iface := range s.Interfaces {
 		live.IPs = append(live.IPs, iface.IPs...)
+		live.Interfaces = append(live.Interfaces, LiveNIC{Name: iface.Name, MAC: iface.MAC, IP: iface.IP})
 	}
 	if s.Memory != nil && s.Memory.GuestCurrent != nil {
 		live.MemoryActual = s.Memory.GuestCurrent.String()

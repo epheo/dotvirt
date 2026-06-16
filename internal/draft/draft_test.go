@@ -132,7 +132,7 @@ func TestClearRemovesFile(t *testing.T) {
 	if err := s.Stage("bob", "team-b", editEntry("ns", "vm")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Unstage("bob", "team-b", "ns", "vm"); err != nil {
+	if err := s.Unstage("bob", "team-b", ResourceVM, "ns", "vm"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "bob", "team-b.json")); !os.IsNotExist(err) {

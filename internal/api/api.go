@@ -36,8 +36,11 @@ import (
 type Draft interface {
 	StageEdit(id auth.Identity, proj project.ProjectInfo, namespace, name string, req model.EditRequest) (model.DraftView, error)
 	StageCreate(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
+	StageCreateNetwork(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
+	StageCreateUplink(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
+	StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
 	StageDelete(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
-	Unstage(id auth.Identity, proj project.ProjectInfo, namespace, name string) error
+	Unstage(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) error
 	Get(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
 	Discard(id auth.Identity, proj project.ProjectInfo) error
 	Propose(id auth.Identity, proj project.ProjectInfo, req model.ProposeRequest) (model.ProposeResult, error)
@@ -66,6 +69,7 @@ type Config struct {
 	StaticDir         string // built SPA dir to serve at the same origin; empty = dev (SPA on Vite)
 	WebhookSecret     string // HMAC secret for the Forgejo webhook endpoint; empty disables it
 	UploadProxyURL    string // cdi-uploadproxy base for image uploads; empty disables it
+	PlatformRepo      string // platform-tier repo for cluster-scoped + tenancy manifests; empty disables those creates
 }
 
 // visibleTTL bounds how long a token's visible-namespace set is reused. The set
@@ -88,10 +92,11 @@ type Server struct {
 	drift     *argo.DriftCache    // nil when Argo disabled; SA-read, shared across subscribers
 	resolver  *project.Resolver
 	repos     *git.RepoSet
-	visible   *ttlcache.Cache[map[string]bool]  // per-token visible-namespace set
-	proposals *ttlcache.Cache[[]model.Proposal] // per-token open-PR set; written by the refresher, read on broadcast
-	options   *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
-	metrics   *metrics.Client                   // Prometheus/Thanos for the Performance tab; nil disables it
+	visible   *ttlcache.Cache[map[string]bool]        // per-token visible-namespace set
+	proposals *ttlcache.Cache[[]model.Proposal]       // per-token open-PR set; written by the refresher, read on broadcast
+	options   *ttlcache.Cache[model.Options]          // shared wizard catalog (SA-read, identical for all)
+	networks  *ttlcache.Cache[model.NetworkInventory] // shared network catalog (SA-read; per-tenant scoping at serve time)
+	metrics   *metrics.Client                         // Prometheus/Thanos for the Performance tab; nil disables it
 	draft     Draft
 	auth      *auth.Authenticator // nil leaves the API open (dev)
 	stream    StreamHandler
@@ -132,6 +137,7 @@ func NewServer(d Deps) *Server {
 		visible:   ttlcache.New[map[string]bool](visibleTTL),
 		proposals: ttlcache.New[[]model.Proposal](proposalsCacheTTL),
 		options:   ttlcache.New[model.Options](optionsTTL),
+		networks:  ttlcache.New[model.NetworkInventory](optionsTTL),
 		metrics:   d.Metrics,
 		draft:     d.Draft,
 		auth:      d.Auth,
@@ -166,6 +172,10 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/inventory", s.handleInventory)
 	mux.HandleFunc("GET /api/options", s.handleOptions)
+	mux.HandleFunc("GET /api/networks", s.handleNetworks)
+	mux.HandleFunc("POST /api/networks", s.handleCreateNetwork)
+	mux.HandleFunc("POST /api/uplinks", s.handleCreateUplink)
+	mux.HandleFunc("POST /api/namespaces", s.handleCreateNamespace)
 	// ArgoCD ApplicationSet plugin generator (auth: its own shared token, not a
 	// user session — exempted in auth.isOpenPath). Emits projects from labels.
 	mux.HandleFunc("POST /api/v1/getparams.execute", s.handleAppSetPlugin)

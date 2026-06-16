@@ -7,12 +7,15 @@ import (
 )
 
 // handleAppSetPlugin serves the ArgoCD ApplicationSet plugin generator: it returns
-// one {project,repo,namespace} parameter per repo-backed project namespace, derived
-// from the dotvirt.io/project labels (read from the SA snapshot). Labeling a
-// namespace thus makes the platform ApplicationSet provision its Argo Application
-// automatically — dotvirt supplies the list but still never creates the App, so the
-// "owns nothing" contract holds. Authenticated by a shared token (not a user
-// session); the path is exempted from the user-auth middleware in auth.isOpenPath.
+// one {project,repo} parameter per repo-backed project (1 app = 1 project = its N
+// labeled namespaces), derived from the dotvirt.io/project labels (read from the SA
+// snapshot). Every emitted app lands in the dotvirt-tenants AppProject (the template
+// in deploy/applicationset.yaml), so this list can only ever mint RESTRICTED tenant
+// apps (namespaced workloads, no cluster-scoped infra) — the privileged platform app
+// is static and platform-owned, never generated from here. Labeling a namespace
+// folds it into its project's existing app — dotvirt supplies the list but never
+// creates the App, so "owns nothing" holds. Authenticated by a shared token (not a
+// user session); the path is exempted from user-auth in auth.isOpenPath.
 func (s *Server) handleAppSetPlugin(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.AppSetPluginToken == "" {
 		http.Error(w, "appset plugin not configured", http.StatusNotFound)
@@ -24,18 +27,15 @@ func (s *Server) handleAppSetPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type param struct {
-		Project   string `json:"project"`
-		Repo      string `json:"repo"`
-		Namespace string `json:"namespace"`
+		Project string `json:"project"`
+		Repo    string `json:"repo"`
 	}
 	params := []param{}
 	for _, p := range s.resolver.Resolve(s.state.Namespaces(), nil) {
 		if p.Repo == "" {
 			continue // a project with no usable repo can't be synced
 		}
-		for _, ns := range p.Namespaces {
-			params = append(params, param{Project: p.Name, Repo: p.Repo, Namespace: ns})
-		}
+		params = append(params, param{Project: p.Name, Repo: p.Repo})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"output": map[string]any{"parameters": params}})
 }

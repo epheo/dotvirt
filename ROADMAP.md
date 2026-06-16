@@ -102,3 +102,35 @@ config) · tag-category manager (labels + search filter suffice) · guest
 customization specs (cloud-init covers it) · datastore file browser (no API) ·
 VM rename (k8s can't; clone+delete once 3.1 lands) · pixel-level Clarity
 styling (IA/workflow parity is the goal).
+
+## Phase 6 — Networking (vCenter parity)
+
+A VMware admin creates and consumes networks by attaching a vNIC to a **port
+group**; they never see CNI, multus, or NADs. This phase abstracts OVN-K
+(UDN/CUDN/localnet) and nmstate (NNCP/NNS) entirely behind that vocabulary:
+**Network** when attaching, **Distributed Port Group** when managing, **Uplink**
+for the physical adapter, **"VM Network"** for the project default, and a **VLAN
+field** rather than OVN-K topology type-names. Every *create* is a UDN/CUDN/NNCP
+manifest proposed via PR and applied by Argo — owns-nothing, exactly like a VM.
+
+| # | Task | Size | Sketch |
+|---|------|------|--------|
+| 6.1 | **Network read layer** (keystone) | M | GVR reads: `userdefinednetworks`/`clusteruserdefinednetworks` (`k8s.ovn.org/v1`), NADs (dedup the UDN/CUDN-generated ones via ownerRefs), `nodenetworkstates`/`nodenetworkconfigurationpolicies` (`nmstate.io`), Nodes → `model.Network{kind: default·internal·vlan, scope, vlan, cidr, uplink, attachRef}`, `model.Uplink` (builtin br-ex + NNCP bridge-mappings), `model.PhysicalAdapter` (NNS interfaces). `GET /api/networks` (SA read like `/options`, project-scoped nets filtered to visible namespaces). NMState-operator detection → graceful degradation. Everything below builds on this |
+| 6.2 | **Networks + Physical Adapters views** | M | Third inventory lens **Networks** (absorbs old 3.3) rendering port-group objects + detail drawer; **Physical adapters** view (NNS) with NIC role/coverage "N/M nodes"; enrich VMDetail **Network adapters** with MAC/IP/link/VLAN from VMI status; backfill `Network.attachedVMs` from the assembled inventory |
+| 6.3 | **vCenter attach UX** | S | Replace the `ns/nad` multiselect in `NewVMWizard`/`EditSettings` with **Add Network Adapter → Select Network** over typed port groups (CUDN attach ref resolves namespace-relative). UX over today's `vmgen` attach path |
+| 6.4 | **New Distributed Port Group — internal** | M | Generalize `vmgen`→`manifestgen` to emit **Layer2 UDN** (project repo) / **CUDN** (platform repo); wizard = name + VLAN *None* + scope. Tenant-safe; proves the network-create-via-PR loop |
+| 6.5 | **Uplinks + VLAN port groups** | M–L | **Add Uplink** (node-scope selector + free-NIC picker) → NNCP (OVS bridge + `ovn.bridge-mappings`); "use existing" / **default br-ex** paths; **LLDP VLAN discovery**; New DPG with VLAN → **localnet CUDN**; NNCE health rollup + partial-coverage badge (+ optional VM `nodeAffinity`) |
+| 6.6 | **"VM Network" — project default** | L (stretch) | Primary UDN created **with** the namespace at project provisioning (label + UDN before workloads). Gated on a project-create flow dotvirt doesn't own today |
+
+**Cut line:** ship **6.1–6.3** first ("Networks parity") — see the whole topology
+in vCenter terms + attach to existing networks by friendly name, with zero write
+risk to network infra (6.3 only edits VM specs, the already-reviewed path).
+
+**Dependencies:** 6.1 before all · 6.2/6.3 follow 6.1 independently · 6.4 before
+6.5 (6.5 reuses `manifestgen` + the create-PR loop) · 6.6 last (needs a
+project-create flow).
+
+**Non-goals (Phase 6):** Layer3 UDN (no clean port-group analog) · SR-IOV/DPDK/
+macvtap binding types (bridge binding covers parity) · NetworkPolicy /
+microsegmentation UI (a future "distributed firewall" surface) · bond/LACP
+*creation* (discover & use existing; creating is a fast-follow).

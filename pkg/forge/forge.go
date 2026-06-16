@@ -143,11 +143,25 @@ type hook struct {
 
 // EnsureWebhook registers a push+pull_request webhook delivering to targetURL
 // (HMAC-signed with secret) on the client's repo, if none exists yet for that
-// URL — idempotent, so it can run on every sweep. The "gitea" hook type is the
-// Forgejo-compatible one.
+// URL — idempotent, so it can run on every sweep.
 func (c *Client) EnsureWebhook(targetURL, secret string) error {
+	return c.ensureHook(c.repoPath("/hooks"), targetURL, secret)
+}
+
+// EnsureOrgWebhook registers the same push+pull_request webhook on the client's
+// ORGANIZATION rather than a single repo, so one hook covers every repo in the org —
+// present and future. Idempotent. Used to point ArgoCD at all project repos with a
+// single registration, with no per-repo enumeration.
+func (c *Client) EnsureOrgWebhook(targetURL, secret string) error {
+	return c.ensureHook(fmt.Sprintf("/api/v1/orgs/%s/hooks", c.owner), targetURL, secret)
+}
+
+// ensureHook idempotently creates a "gitea" (Forgejo-compatible) push+pull_request
+// webhook at the given hooks collection path (repo- or org-level) unless one already
+// targets targetURL.
+func (c *Client) ensureHook(hooksPath, targetURL, secret string) error {
 	var hooks []hook
-	if err := c.do("GET", c.repoPath("/hooks"), nil, &hooks); err != nil {
+	if err := c.do("GET", hooksPath, nil, &hooks); err != nil {
 		return err
 	}
 	for _, h := range hooks {
@@ -159,13 +173,110 @@ func (c *Client) EnsureWebhook(targetURL, secret string) error {
 		"type":   "gitea",
 		"active": true,
 		"events": []string{"push", "pull_request"},
-		"config": map[string]string{
-			"url":          targetURL,
-			"content_type": "json",
-			"secret":       secret,
-		},
+		"config": map[string]string{"url": targetURL, "content_type": "json", "secret": secret},
 	}
-	return c.do("POST", c.repoPath("/hooks"), payload, nil)
+	return c.do("POST", hooksPath, payload, nil)
+}
+
+// EnsureRepo creates the client's repo if it doesn't already exist — under its
+// owner organization, auto-initialised so a `main` branch exists for Argo to sync.
+// Idempotent; created=true only when it had to create it. This is the one
+// imperative bootstrap step a declarative installer can't do (a forge API call, not
+// a kubectl apply); the installer operator uses it for the platform repo. The owner
+// is expected to be an organization.
+func (c *Client) EnsureRepo() (created bool, err error) {
+	exists, err := c.exists(fmt.Sprintf("/api/v1/repos/%s/%s", c.owner, c.repo))
+	if err != nil {
+		return false, err
+	}
+	if exists {
+		return false, nil
+	}
+	payload := map[string]any{
+		"name":           c.repo,
+		"auto_init":      true,
+		"default_branch": "main",
+		"private":        false,
+	}
+	if err := c.do("POST", fmt.Sprintf("/api/v1/orgs/%s/repos", c.owner), payload, nil); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// MintToken creates a scoped access token for username via BASIC AUTH (not a
+// bearer token) — the operator authenticates as the admin a managed Forgejo just
+// created and mints the narrow token dotvirt's runtime then uses. Returns the token.
+func (f *Factory) MintToken(username, password, tokenName string, scopes []string) (string, error) {
+	if f == nil {
+		return "", fmt.Errorf("forge not configured")
+	}
+	body, err := json.Marshal(map[string]any{"name": tokenName, "scopes": scopes})
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequest("POST", f.baseURL+"/api/v1/users/"+username+"/tokens", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.SetBasicAuth(username, password)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := f.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("forge mint token: %w", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("forge mint token: %s: %s", resp.Status, strings.TrimSpace(string(data)))
+	}
+	var out struct {
+		Sha1 string `json:"sha1"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return "", err
+	}
+	return out.Sha1, nil
+}
+
+// EnsureOrg creates the client's owner organization if it doesn't exist (idempotent).
+// Used to bootstrap a managed Forgejo's owner org (repos live under the org so a
+// single org webhook can cover them all).
+func (c *Client) EnsureOrg() error {
+	exists, err := c.exists("/api/v1/orgs/" + c.owner)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	return c.do("POST", "/api/v1/orgs", map[string]string{"username": c.owner}, nil)
+}
+
+// exists reports whether a GET on path returns 2xx (true) or 404 (false); any other
+// status is an error. Separate from do() because do() treats every non-2xx as error.
+func (c *Client) exists(path string) (bool, error) {
+	req, err := http.NewRequest("GET", c.baseURL+path, nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Authorization", "token "+c.token)
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("forge GET %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return false, nil
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		return true, nil
+	default:
+		return false, fmt.Errorf("forge GET %s: %s", path, resp.Status)
+	}
 }
 
 // CompareURL is the browser URL to manually open a PR for head→base, used when

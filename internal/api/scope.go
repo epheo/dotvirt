@@ -146,5 +146,50 @@ func (s *Server) draftScope(w http.ResponseWriter, r *http.Request) (scope, bool
 		http.Error(w, "project query parameter is required", http.StatusBadRequest)
 		return scope{}, false
 	}
+	return s.pickProject(w, r, want)
+}
+
+// pickProject resolves a project named by a ?project= query or {project} path
+// segment (the whole-project routes: draft, propose, unstage, history, revert). The
+// platform tier resolves ONLY for callers who can author platform changes — gated on
+// the CUDN-create signal (the dotvirt-platform-network-admin role grants it together
+// with NNCP/namespace), so a plain tenant cannot reach the platform repo's draft,
+// history, or revert. Any other name resolves from the caller's visible projects.
+func (s *Server) pickProject(w http.ResponseWriter, r *http.Request, want string) (scope, bool) {
+	if want == platformProjectName {
+		return s.platformScope(w, r, "k8s.ovn.org", "clusteruserdefinednetworks")
+	}
 	return s.resolveProject(w, r, byName(want))
+}
+
+// platformProjectName is the synthetic project name for the platform tier — the
+// repo holding cluster-scoped + tenancy manifests. It is config-only (-platform-repo),
+// never a dotvirt.io/project-labeled namespace, so project discovery never emits it.
+const platformProjectName = "platform"
+
+// platformScope resolves the platform tier for a cluster-scoped create: the
+// caller's identity + cluster, and the synthetic platform ProjectInfo from
+// -platform-repo. It SSAR-gates on the caller's authority to create group/resource —
+// the authoring SIGNAL (the user never applies it; Argo does, from the platform
+// repo), so the author-time check matches the apply-time AppProject boundary. Fails
+// closed: 503 if no platform repo is configured, 403 if the caller lacks the verb.
+func (s *Server) platformScope(w http.ResponseWriter, r *http.Request, group, resource string) (scope, bool) {
+	id, c, err := s.userCluster(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return scope{}, false
+	}
+	if s.draft == nil {
+		http.Error(w, "changeset/draft not configured", http.StatusServiceUnavailable)
+		return scope{}, false
+	}
+	if s.cfg.PlatformRepo == "" {
+		http.Error(w, "platform repo not configured (set -platform-repo)", http.StatusServiceUnavailable)
+		return scope{}, false
+	}
+	if !c.CanCreateClusterResource(r.Context(), group, resource) {
+		http.Error(w, "not authorized to create "+resource, http.StatusForbidden)
+		return scope{}, false
+	}
+	return scope{id: id, cluster: c, proj: project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}}, true
 }

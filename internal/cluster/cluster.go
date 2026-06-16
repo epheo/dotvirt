@@ -186,27 +186,29 @@ func (c *Client) canReadVMs(ctx context.Context, ns string) (bool, error) {
 	return false, nil
 }
 
-// CanUpdateVM reports whether this token may update the VirtualMachine ns/name,
-// via a SelfSubjectAccessReview. It gates the re-sync action: a user may drive an
-// Argo reconcile of a VM (run with dotvirt's SA) only if they could modify that VM
-// themselves — so read-only callers can't escalate into an SA-privileged sync.
-func (c *Client) CanUpdateVM(ctx context.Context, namespace, name string) (bool, error) {
-	review := &authzv1.SelfSubjectAccessReview{
-		Spec: authzv1.SelfSubjectAccessReviewSpec{
-			ResourceAttributes: &authzv1.ResourceAttributes{
-				Namespace: namespace,
-				Verb:      "update",
-				Group:     "kubevirt.io",
-				Resource:  "virtualmachines",
-				Name:      name,
-			},
-		},
-	}
+// allowed reports whether this token may perform the action described by attrs, via
+// a SelfSubjectAccessReview — the single SSAR primitive the capability checks share.
+func (c *Client) allowed(ctx context.Context, attrs *authzv1.ResourceAttributes) (bool, error) {
+	review := &authzv1.SelfSubjectAccessReview{Spec: authzv1.SelfSubjectAccessReviewSpec{ResourceAttributes: attrs}}
 	res, err := c.kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, review, metav1.CreateOptions{})
+	if err != nil {
+		return false, err
+	}
+	return res.Status.Allowed, nil
+}
+
+// CanUpdateVM reports whether this token may update the VirtualMachine ns/name. It
+// gates the re-sync action: a user may drive an Argo reconcile of a VM (run with
+// dotvirt's SA) only if they could modify that VM themselves — so read-only callers
+// can't escalate into an SA-privileged sync.
+func (c *Client) CanUpdateVM(ctx context.Context, namespace, name string) (bool, error) {
+	ok, err := c.allowed(ctx, &authzv1.ResourceAttributes{
+		Namespace: namespace, Verb: "update", Group: "kubevirt.io", Resource: "virtualmachines", Name: name,
+	})
 	if err != nil {
 		return false, fmt.Errorf("access review for %s/%s: %w", namespace, name, err)
 	}
-	return res.Status.Allowed, nil
+	return ok, nil
 }
 
 // grantsRead reports whether a resource rule allows get or list on the given
@@ -390,16 +392,27 @@ func (c *Client) SetNodeCordon(ctx context.Context, name string, unschedulable b
 	return err
 }
 
+// CanReadNodes reports whether this token may list nodes (cluster-scoped). It
+// gates the networking read's physical fabric (Uplinks + Physical adapters):
+// those are node-level infrastructure, so a plain tenant who can't see nodes
+// doesn't see node NICs either. Best-effort — a review error reads as "no".
+func (c *Client) CanReadNodes(ctx context.Context) bool {
+	ok, _ := c.allowed(ctx, &authzv1.ResourceAttributes{Verb: "list", Resource: "nodes"})
+	return ok
+}
+
 // canPatchNodes reports whether this token may update nodes (cluster-scoped).
 func (c *Client) canPatchNodes(ctx context.Context) (bool, error) {
-	review := &authzv1.SelfSubjectAccessReview{
-		Spec: authzv1.SelfSubjectAccessReviewSpec{
-			ResourceAttributes: &authzv1.ResourceAttributes{Verb: "update", Resource: "nodes"},
-		},
-	}
-	res, err := c.kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, review, metav1.CreateOptions{})
-	if err != nil {
-		return false, err
-	}
-	return res.Status.Allowed, nil
+	return c.allowed(ctx, &authzv1.ResourceAttributes{Verb: "update", Resource: "nodes"})
+}
+
+// CanCreateClusterResource reports whether this token may create the cluster-scoped
+// group/resource. It gates dotvirt's platform/Infrastructure authoring actions
+// (CUDN, NNCP, Namespace): the user never creates these — Argo applies them from the
+// platform repo — so can-i-create is the authorization SIGNAL standing in for "is a
+// platform operator" (matching the dotvirt-platform-network-admin role). Best-effort
+// like CanReadNodes — a review error reads as "no".
+func (c *Client) CanCreateClusterResource(ctx context.Context, group, resource string) bool {
+	ok, _ := c.allowed(ctx, &authzv1.ResourceAttributes{Verb: "create", Group: group, Resource: resource})
+	return ok
 }

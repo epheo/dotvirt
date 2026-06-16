@@ -1,0 +1,14 @@
+# Binds the manager ServiceAccount to the operator's ClusterRole (config/rbac/role.yaml,
+# generated from the +kubebuilder:rbac markers).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dotvirt-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dotvirt-operator
+subjects:
+  - kind: ServiceAccount
+    name: dotvirt-operator-controller
+    namespace: dotvirt-operator

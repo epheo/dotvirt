@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { ArrowLeft, Plus, Power, PowerOff, Trash2, Upload } from 'lucide-svelte';
+	import { ArrowLeft, Network, Plus, Power, PowerOff, Trash2, Upload } from 'lucide-svelte';
 	import {
 		api,
 		draftsByProject,
@@ -9,11 +9,13 @@
 		type DraftItem,
 		type DraftView,
 		type Inventory,
+		type NetworkInventory,
 		type User,
 		type VM
 	} from '$lib/api';
 	import { manifestURL, type VMAction } from '$lib/actions';
-	import { vmNetworkKeys, vmStorageKeys } from '$lib/lenses';
+	import { vmNetworkKeys, vmStorageKeys, POD_NETWORK } from '$lib/lenses';
+	import { networkByRef, kindLabel } from '$lib/networks';
 	import ActionMenu from '$lib/components/ActionMenu.svelte';
 	import CatalogPanel from '$lib/components/CatalogPanel.svelte';
 	import ChangesPanel from '$lib/components/ChangesPanel.svelte';
@@ -24,6 +26,9 @@
 	import GlobalSearch, { type SearchHit } from '$lib/components/GlobalSearch.svelte';
 	import InventoryTree from '$lib/components/InventoryTree.svelte';
 	import Login from '$lib/components/Login.svelte';
+	import AddUplinkModal from '$lib/components/AddUplinkModal.svelte';
+	import NewNamespaceModal from '$lib/components/NewNamespaceModal.svelte';
+	import NewNetworkModal from '$lib/components/NewNetworkModal.svelte';
 	import NewVMWizard from '$lib/components/NewVMWizard.svelte';
 	import NodeActions from '$lib/components/NodeActions.svelte';
 	import Permissions from '$lib/components/Permissions.svelte';
@@ -50,6 +55,22 @@
 	let inventory = $state<Inventory | null>(null);
 	let selected = $state<VM | null>(null);
 	let error = $state<string>('');
+	// The networking read layer (GET /api/networks), fetched once per session: the
+	// port-group catalog (passed to the VM detail + Networks lens so raw OVN-K refs
+	// render as vCenter port groups) plus the physical fabric (uplinks + node NICs,
+	// shown on the Nodes lens for node-readers). Changes rarely; backend caches 60s.
+	let netInv = $state<NetworkInventory | null>(null);
+	const networkCatalog = $derived(netInv?.networks ?? []);
+	const uplinks = $derived(netInv?.uplinks ?? []);
+	const physicalAdapters = $derived(netInv?.physicalAdapters ?? []);
+	const nmstatePresent = $derived(netInv?.nmstatePresent ?? false);
+	// May the caller author platform-tier networking (cluster-scoped CUDN/uplink +
+	// namespaces)? Gates the New VLAN / Add Uplink / New Namespace actions and the
+	// platform changeset, matching the backend platformScope SSAR gate.
+	const canManage = $derived(netInv?.canManage ?? false);
+	// The synthetic platform-tier project (matches the backend's platformProjectName);
+	// holds the cluster-scoped network + namespace changeset, proposable by authors.
+	const PLATFORM_PROJECT = 'platform';
 
 	// Bulk selection in the grid (keys "namespace/name"), the bulk-delete confirm, a
 	// transient result toast, and an in-flight guard.
@@ -142,7 +163,8 @@
 		if (sc.kind === 'all') return all;
 		if (sc.kind === 'node')
 			return all.filter((v) => (v.nodeName || '(unscheduled)') === sc.node);
-		if (sc.kind === 'network') return all.filter((v) => vmNetworkKeys(v).includes(sc.network));
+		if (sc.kind === 'network')
+			return all.filter((v) => vmNetworkKeys(v, networkCatalog).includes(sc.network));
 		if (sc.kind === 'storage')
 			return all.filter((v) => vmStorageKeys(v).includes(sc.storageClass));
 		return inventory.projects
@@ -209,6 +231,18 @@
 		return stop;
 	});
 
+	// The port-group catalog: fetched once on sign-in. A failure (e.g. the OVN-K
+	// CRDs absent) leaves it empty — NICs then fall back to their raw refs.
+	$effect(() => {
+		if (!user) return;
+		api
+			.networks()
+			.then((n) => (netInv = n))
+			.catch((e) => {
+				if (e instanceof Unauthorized) signedOut();
+			});
+	});
+
 	const projectNames = $derived(inventory ? inventory.projects.map((p) => p.name) : []);
 	// A stable primitive key for the SET of project names: $derived arrays are a new
 	// reference every inventory frame, which would re-fire the drafts effect on every
@@ -233,18 +267,25 @@
 	);
 
 	let showWizard = $state(false);
+	let showNetworkWizard = $state(false);
+	let showUplinkWizard = $state(false);
+	let showNamespaceWizard = $state(false);
+	let namespaceWizardProject = $state<string | null>(null);
 	let showUpload = $state(false);
 	let showChanges = $state(false);
 	// The catalog browser shares the right-panel slot with Changes (one at a time).
 	let showCatalog = $state(false);
 
 	async function refreshDrafts() {
-		if (!projectNames.length) {
+		// Platform authors also carry a platform-tier draft (cluster-scoped network +
+		// namespace changes); draftsByProject drops it for non-authors (403 → skipped).
+		const names = canManage ? [...projectNames, PLATFORM_PROJECT] : projectNames;
+		if (!names.length) {
 			drafts = [];
 			return;
 		}
 		try {
-			drafts = await draftsByProject(projectNames);
+			drafts = await draftsByProject(names);
 		} catch (e) {
 			if (e instanceof Unauthorized) signedOut();
 		}
@@ -473,6 +514,14 @@
 				<Plus size={14} /> New VM
 			</button>
 			<button
+				onclick={() => (showNetworkWizard = true)}
+				disabled={!namespaces.length}
+				title="Create a Distributed Port Group (an internal Layer 2 network) for a project"
+				class="flex items-center gap-1.5 rounded border border-slate-600 px-3 py-1 text-xs font-medium text-slate-100 hover:bg-slate-700 disabled:opacity-40"
+			>
+				<Network size={14} /> New Network
+			</button>
+			<button
 				onclick={() => (showUpload = true)}
 				disabled={!namespaces.length}
 				title="Upload a disk image (qcow2/raw/iso) as a bootable DataVolume"
@@ -519,6 +568,7 @@
 						{inventory}
 						{selected}
 						{scope}
+						networks={networkCatalog}
 						staged={stagedByKey}
 						onselect={(vm) => (selected = vm)}
 						onscope={setScope}
@@ -553,6 +603,7 @@
 								: null}
 							onstagedopen={() => selected && openStaged(selected)}
 							onsearchlabel={(k, v) => search?.searchFor(`label:${k}=${v}`)}
+							networks={networkCatalog}
 							intent={detailIntent}
 						/>
 					</div>
@@ -625,13 +676,64 @@
 						<!-- Read-only container settings: what backs each project. dotvirt owns
 						     nothing here — projects are namespace labels, config is the repo. -->
 						<div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-							{#if scope.kind === 'node' || scope.kind === 'network' || scope.kind === 'storage'}
+							{#if scope.kind === 'network'}
+								{@const pg = networkByRef(scope.network, networkCatalog)}
+								<section class="max-w-2xl rounded border border-slate-200">
+									<h3
+										class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase"
+									>
+										{pg ? pg.name : scope.network}
+									</h3>
+									<dl class="divide-y divide-slate-100 text-[13px]">
+										<div class="flex justify-between gap-3 px-3 py-1.5">
+											<dt class="shrink-0 text-slate-500">Type</dt>
+											<dd class="text-slate-800">
+												{pg
+													? kindLabel(pg.kind)
+													: scope.network === POD_NETWORK
+														? 'Pod network (cluster default)'
+														: '—'}
+											</dd>
+										</div>
+										{#if pg}
+											<div class="flex justify-between gap-3 px-3 py-1.5">
+												<dt class="shrink-0 text-slate-500">Scope</dt>
+												<dd class="min-w-0 truncate text-right text-slate-800">
+													{pg.scope === 'shared' ? 'Shared · all projects' : `Project · ${pg.namespace}`}
+												</dd>
+											</div>
+											{#if pg.vlan}
+												<div class="flex justify-between gap-3 px-3 py-1.5">
+													<dt class="shrink-0 text-slate-500">VLAN</dt>
+													<dd class="text-slate-800">{pg.vlan}</dd>
+												</div>
+											{/if}
+											{#if pg.uplink}
+												<div class="flex justify-between gap-3 px-3 py-1.5">
+													<dt class="shrink-0 text-slate-500">Uplink</dt>
+													<dd class="text-slate-800">{pg.uplink}</dd>
+												</div>
+											{/if}
+											{#if pg.subnets?.length}
+												<div class="flex justify-between gap-3 px-3 py-1.5">
+													<dt class="shrink-0 text-slate-500">Subnets</dt>
+													<dd class="min-w-0 truncate text-right text-slate-800">{pg.subnets.join(', ')}</dd>
+												</div>
+											{/if}
+											<div class="flex justify-between gap-3 px-3 py-1.5">
+												<dt class="shrink-0 text-slate-500">Backing</dt>
+												<dd class="min-w-0 truncate text-right text-slate-500">{pg.backing}</dd>
+											</div>
+										{/if}
+										<div class="flex justify-between gap-3 px-3 py-1.5">
+											<dt class="shrink-0 text-slate-500">VMs attached</dt>
+											<dd class="text-slate-800">{scopedVMs.length}</dd>
+										</div>
+									</dl>
+								</section>
+							{:else if scope.kind === 'node' || scope.kind === 'storage'}
 								{@const label =
-									scope.kind === 'node'
-										? `Node: ${scope.node}`
-										: scope.kind === 'network'
-											? `Network: ${scope.network}`
-											: `Storage class: ${scope.storageClass}`}
+									scope.kind === 'node' ? `Node: ${scope.node}` : `Storage class: ${scope.storageClass}`}
 								<section class="max-w-2xl rounded border border-slate-200">
 									<h3
 										class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase"
@@ -649,15 +751,62 @@
 									<p class="border-t border-slate-100 px-3 py-2 text-xs text-slate-400">
 										{scope.kind === 'node'
 											? 'Node configuration is managed by the cluster platform, not dotvirt.'
-											: scope.kind === 'network'
-												? 'Network definitions (NADs) are managed by the cluster platform, not dotvirt.'
-												: 'Storage classes are managed by the cluster platform, not dotvirt.'}
+											: 'Storage classes are managed by the cluster platform, not dotvirt.'}
 									</p>
 								</section>
 								{#if scope.kind === 'node'}
+									{@const nodeName = scope.node}
 									<!-- Node maintenance-lite: cordon/uncordon + evacuate (shown only
 									     when the caller's token may patch nodes). -->
 									<NodeActions node={scope.node} vms={scopedVMs} onaction={recordAction} />
+									{#if uplinks.length}
+										<section class="max-w-2xl rounded border border-slate-200">
+											<div class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-1.5">
+												<h3 class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Uplinks</h3>
+												<button
+													onclick={() => (showUplinkWizard = true)}
+													disabled={!canManage}
+													title={canManage ? '' : 'Requires platform-network authoring permission'}
+													class="text-xs text-blue-600 hover:underline disabled:text-slate-300"
+													>+ Add uplink</button
+												>
+											</div>
+											<ul class="divide-y divide-slate-100 px-3 text-[13px]">
+												{#each uplinks.filter((u) => !u.nodes || u.nodes.includes(nodeName)) as u (u.name)}
+													<li class="flex items-baseline justify-between gap-3 py-1.5">
+														<span class="text-slate-800">{u.name}{u.builtin ? ' · default' : ''}</span>
+														<span class="text-slate-400"
+															>{u.bridge} · {u.nodeCount} node{u.nodeCount === 1 ? '' : 's'}</span>
+													</li>
+												{/each}
+											</ul>
+										</section>
+									{/if}
+									<section class="max-w-2xl rounded border border-slate-200">
+										<h3 class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">Physical adapters</h3>
+										{#if !nmstatePresent}
+											<p class="px-3 py-3 text-xs text-slate-400">
+												Install the NMState operator instance to discover physical adapters.
+											</p>
+										{:else}
+											{@const nics = physicalAdapters.filter((a) => a.node === nodeName)}
+											{#if nics.length}
+												<ul class="divide-y divide-slate-100 px-3 text-[13px]">
+													{#each nics as a (a.name)}
+														<li class="flex items-baseline justify-between gap-3 py-1.5">
+															<span class="text-slate-800">{a.name}</span>
+															<span class="flex items-center gap-3 text-right text-slate-400">
+																<span>{a.role}</span>
+																<span>{a.state}{a.mtu ? ` · MTU ${a.mtu}` : ''}</span>
+															</span>
+														</li>
+													{/each}
+												</ul>
+											{:else}
+												<p class="px-3 py-3 text-xs text-slate-400">No physical adapters reported.</p>
+											{/if}
+										{/if}
+									</section>
 								{/if}
 							{:else}
 								{#each cfgProjects as p (p.name)}
@@ -763,7 +912,7 @@
 				<ChangesPanel
 					{drafts}
 					{proposals}
-					projects={repoProjects}
+					projects={canManage ? [...repoProjects, PLATFORM_PROJECT] : repoProjects}
 					onclose={() => (showChanges = false)}
 					onchanged={refreshDrafts}
 				/>
@@ -787,9 +936,42 @@
 		{#if showWizard}
 			<NewVMWizard
 				namespaces={wizardNamespaces ?? namespaces}
+				networks={networkCatalog}
 				onclose={() => {
 					showWizard = false;
 					wizardNamespaces = null;
+				}}
+				onstaged={refreshDrafts}
+			/>
+		{/if}
+
+		{#if showNetworkWizard}
+			<NewNetworkModal
+				{namespaces}
+				projects={repoProjects}
+				{uplinks}
+				{canManage}
+				onAddUplink={() => (showUplinkWizard = true)}
+				onclose={() => (showNetworkWizard = false)}
+				onstaged={refreshDrafts}
+			/>
+		{/if}
+
+		{#if showUplinkWizard}
+			<AddUplinkModal
+				adapters={physicalAdapters}
+				onclose={() => (showUplinkWizard = false)}
+				onstaged={refreshDrafts}
+			/>
+		{/if}
+
+		{#if showNamespaceWizard}
+			<NewNamespaceModal
+				projects={repoProjects}
+				project={namespaceWizardProject ?? undefined}
+				onclose={() => {
+					showNamespaceWizard = false;
+					namespaceWizardProject = null;
 				}}
 				onstaged={refreshDrafts}
 			/>
@@ -859,6 +1041,19 @@
 							class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
 							>New VM here…</button
 						>
+						{#if canManage}
+							<button
+								onclick={() => {
+									namespaceWizardProject = ctx && ctx.kind === 'container' ? ctx.project : null;
+									ctx = null;
+									showNamespaceWizard = true;
+								}}
+								disabled={!ctx.repo}
+								title={ctx.repo ? '' : 'Project has no backing repo'}
+								class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+								>New Namespace here…</button
+							>
+						{/if}
 						<div class="my-1 border-t border-slate-100"></div>
 						<button
 							onclick={() => {

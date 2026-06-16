@@ -16,16 +16,7 @@ func ChangesForEdit(current model.VM, edit VMEdit) []model.Change {
 	if edit.Power != nil && *edit.Power != string(current.Power) {
 		out = append(out, model.Change{Field: "Power", Action: "change", From: string(current.Power), To: *edit.Power})
 	}
-	if edit.CPUCores != nil && *edit.CPUCores != current.CPUCores {
-		out = append(out, model.Change{Field: "CPU", Action: "change",
-			From: fmt.Sprintf("%d vCPU", current.CPUCores), To: fmt.Sprintf("%d vCPU", *edit.CPUCores)})
-	}
-	if edit.Memory != nil && *edit.Memory != current.Memory {
-		out = append(out, model.Change{Field: "Memory", Action: "change", From: current.Memory, To: *edit.Memory})
-	}
-	if edit.Instancetype != nil && *edit.Instancetype != current.Instancetype {
-		out = append(out, model.Change{Field: "Instance type", Action: "change", From: current.Instancetype, To: *edit.Instancetype})
-	}
+	out = append(out, sizingChanges(current, edit)...)
 	if edit.Preference != nil && *edit.Preference != current.Preference {
 		out = append(out, model.Change{Field: "Preference", Action: "change", From: current.Preference, To: *edit.Preference})
 	}
@@ -57,6 +48,55 @@ func ChangesForEdit(current model.VM, edit VMEdit) []model.Change {
 	}
 	for _, name := range edit.RemoveNetworks {
 		out = append(out, model.Change{Field: "Network", Action: "remove", From: name})
+	}
+	return out
+}
+
+// sizingChanges renders the CPU/memory/instancetype part of an edit, honoring the
+// instancetype⇄inline mutual exclusion that applySizing enforces — so the preview
+// never shows an inline cpu/memory change that will actually be stripped, nor
+// hides the removal of the representation being replaced (e.g. a heal that only
+// strips a stray inline block, or a mode switch). Mirrors applySizing's outcome.
+func sizingChanges(current model.VM, edit VMEdit) []model.Change {
+	mode := ""
+	if edit.Sizing != nil {
+		mode = *edit.Sizing
+	}
+	// Will the result be sized by an instancetype? (Same decision as applySizing.)
+	usesInstancetype := false
+	switch mode {
+	case "custom":
+		usesInstancetype = false
+	case "instancetype":
+		usesInstancetype = true
+	default:
+		usesInstancetype = current.Instancetype != "" || (edit.Instancetype != nil && *edit.Instancetype != "")
+	}
+
+	var out []model.Change
+	if usesInstancetype {
+		// Instance type owns sizing; any inline cpu/memory is stripped.
+		if edit.Instancetype != nil && *edit.Instancetype != current.Instancetype {
+			out = append(out, model.Change{Field: "Instance type", Action: "change", From: current.Instancetype, To: *edit.Instancetype})
+		}
+		if current.CPUCores != 0 {
+			out = append(out, model.Change{Field: "CPU", Action: "remove", From: fmt.Sprintf("%d vCPU", current.CPUCores)})
+		}
+		if current.Memory != "" {
+			out = append(out, model.Change{Field: "Memory", Action: "remove", From: current.Memory})
+		}
+	} else {
+		// Inline cpu/memory owns sizing; any instancetype is removed.
+		if current.Instancetype != "" {
+			out = append(out, model.Change{Field: "Instance type", Action: "remove", From: current.Instancetype})
+		}
+		if edit.CPUCores != nil && *edit.CPUCores != current.CPUCores {
+			out = append(out, model.Change{Field: "CPU", Action: "change",
+				From: fmt.Sprintf("%d vCPU", current.CPUCores), To: fmt.Sprintf("%d vCPU", *edit.CPUCores)})
+		}
+		if edit.Memory != nil && *edit.Memory != current.Memory {
+			out = append(out, model.Change{Field: "Memory", Action: "change", From: current.Memory, To: *edit.Memory})
+		}
 	}
 	return out
 }

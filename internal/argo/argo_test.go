@@ -63,3 +63,41 @@ func TestVMDrift(t *testing.T) {
 		t.Errorf("drifted-vm: got %+v", got)
 	}
 }
+
+func TestVMDriftSyncMessage(t *testing.T) {
+	app := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "argoproj.io/v1alpha1",
+		"kind":       "Application",
+		"metadata":   map[string]any{"namespace": "openshift-gitops", "name": "managed"},
+		"status": map[string]any{
+			"resources": []any{
+				vmResource("prod", "bad-vm", "OutOfSync", "Healthy"),
+				vmResource("prod", "ok-vm", "Synced", "Healthy"),
+			},
+			"operationState": map[string]any{
+				"syncResult": map[string]any{
+					"resources": []any{
+						// Failed apply: carries the webhook error we want to surface.
+						map[string]any{"group": "kubevirt.io", "kind": "VirtualMachine", "namespace": "prod",
+							"name": "bad-vm", "status": "SyncFailed", "message": "admission webhook denied: 0 vCPU"},
+						// Synced row: benign "unchanged" message must NOT be surfaced as an error.
+						map[string]any{"group": "kubevirt.io", "kind": "VirtualMachine", "namespace": "prod",
+							"name": "ok-vm", "status": "Synced", "message": "virtualmachine ok-vm unchanged"},
+					},
+				},
+			},
+		},
+	}}
+	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), app)
+
+	drift, err := (&Client{dyn: dyn}).VMDrift(context.Background())
+	if err != nil {
+		t.Fatalf("VMDrift: %v", err)
+	}
+	if got := drift["prod/bad-vm"].Message; got != "admission webhook denied: 0 vCPU" {
+		t.Errorf("bad-vm message not surfaced: %q", got)
+	}
+	if got := drift["prod/ok-vm"].Message; got != "" {
+		t.Errorf("synced-vm should carry no error message, got %q", got)
+	}
+}

@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dotvirt-operator
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dotvirt-operator-controller
+  namespace: dotvirt-operator
+  labels: {app: dotvirt-operator}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: dotvirt-operator}
+  template:
+    metadata:
+      labels: {app: dotvirt-operator}
+    spec:
+      serviceAccountName: dotvirt-operator-controller
+      securityContext:
+        runAsNonRoot: true
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: manager
+          image: registry.desku.be/dotvirt-operator:latest
+          args: ["--leader-elect", "--health-probe-bind-address=:8081"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8081}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8081}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 10m, memory: 64Mi}
+            limits: {memory: 256Mi}

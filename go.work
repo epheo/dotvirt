@@ -1,0 +1,13 @@
+// Go workspace tying the dotvirt app module and its installer operator together,
+// so editor tooling and `go build ./...` span both. The operator is a SEPARATE
+// module (operator/go.mod) on purpose: controller-runtime drags in a large
+// k8s.io/* dependency tree that must not constrain the app binary's KubeVirt/Argo
+// client versions. It imports the app's shared pkg/forge via the replace in
+// operator/go.mod (which also lets the operator build standalone, e.g. in its
+// container image).
+go 1.26.4
+
+use (
+	.
+	./operator
+)

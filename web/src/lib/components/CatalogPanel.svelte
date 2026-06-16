@@ -46,7 +46,7 @@
 		if (!o) return [];
 		switch (kind) {
 			case 'images':
-				return o.osImages.map((i) => ({
+				return (o.osImages ?? []).map((i) => ({
 					key: `${i.namespace}/${i.name}`,
 					title: i.name,
 					fact: i.ready ? 'Ready' : 'Not ready',
@@ -58,7 +58,7 @@
 					]
 				}));
 			case 'instancetypes':
-				return o.instancetypes.map((it) => ({
+				return (o.instancetypes ?? []).map((it) => ({
 					key: it.name,
 					title: it.name,
 					fact: `${it.cpu} CPU / ${it.memory}`,
@@ -70,7 +70,7 @@
 					]
 				}));
 			case 'preferences':
-				return o.preferences.map((p) => ({
+				return (o.preferences ?? []).map((p) => ({
 					key: p.name,
 					title: p.displayName || p.name,
 					fact: p.name,
@@ -82,7 +82,7 @@
 					]
 				}));
 			case 'networks':
-				return o.networks.map((n) => ({
+				return (o.networks ?? []).map((n) => ({
 					key: `${n.namespace}/${n.name}`,
 					title: n.name,
 					fact: n.namespace,
@@ -94,7 +94,7 @@
 					]
 				}));
 			case 'storage':
-				return o.storageClasses.map((sc) => ({
+				return (o.storageClasses ?? []).map((sc) => ({
 					key: sc.name,
 					title: sc.name,
 					fact: sc.default ? 'default' : '',

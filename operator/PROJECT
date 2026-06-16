@@ -1,0 +1,18 @@
+# Kubebuilder project metadata for the dotvirt installer operator.
+# See https://book.kubebuilder.io/reference/project-config.html
+domain: dotvirt.io
+layout:
+  - go.kubebuilder.io/v4
+projectName: dotvirt-operator
+repo: github.com/epheo/dotvirt/operator
+resources:
+  - api:
+      crdVersion: v1
+      namespaced: true
+    controller: true
+    domain: dotvirt.io
+    group: dotvirt.io
+    kind: Dotvirt
+    path: github.com/epheo/dotvirt/operator/api/v1alpha1
+    version: v1alpha1
+version: "3"
