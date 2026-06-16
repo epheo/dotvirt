@@ -1,11 +1,17 @@
 package install
 
 import (
+	"net/url"
+	"strings"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
@@ -29,6 +35,28 @@ var forgejoSelector = map[string]string{"app": ForgejoServiceName}
 // ForgejoServiceURL is the in-cluster base URL of the managed Forgejo.
 func ForgejoServiceURL(dv *dotvirtv1alpha1.Dotvirt) string {
 	return "http://" + ForgejoServiceName + "." + dv.Namespace + ".svc:3000"
+}
+
+// ForgejoExternalURL is the browser/clone-facing base URL: the configured
+// spec.forge.url when set (exposed via Route/Ingress, so the forge UI and PRs are
+// reviewable off-cluster), else the in-cluster Service URL (internal-only eval).
+func ForgejoExternalURL(dv *dotvirtv1alpha1.Dotvirt) string {
+	if dv.Spec.Forge.URL != "" {
+		return strings.TrimRight(dv.Spec.Forge.URL, "/")
+	}
+	return ForgejoServiceURL(dv)
+}
+
+// ForgejoHost is the external hostname to expose the managed Forgejo on, derived
+// from spec.forge.url. Empty when no external URL is set (internal-only).
+func ForgejoHost(dv *dotvirtv1alpha1.Dotvirt) string {
+	if dv.Spec.Forge.URL == "" {
+		return ""
+	}
+	if u, err := url.Parse(dv.Spec.Forge.URL); err == nil {
+		return u.Host
+	}
+	return ""
 }
 
 // ForgejoServiceAccount runs the Forgejo pod; on OpenShift it's bound to anyuid.
@@ -85,7 +113,7 @@ func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt) []corev1.EnvVar {
 		{Name: "FORGEJO__security__INSTALL_LOCK", Value: "true"},
 		{Name: "FORGEJO__database__DB_TYPE", Value: "sqlite3"},
 		{Name: "GITEA_CUSTOM", Value: "/data/gitea"},
-		{Name: "FORGEJO__server__ROOT_URL", Value: ForgejoServiceURL(dv) + "/"},
+		{Name: "FORGEJO__server__ROOT_URL", Value: ForgejoExternalURL(dv) + "/"},
 	}
 }
 
@@ -145,6 +173,56 @@ su-exec git forgejo admin user create --admin --username ` + ForgejoBotUser +
 					}},
 				},
 			},
+		},
+	}
+}
+
+// ForgejoRoute exposes the managed Forgejo externally on OpenShift (edge TLS), so
+// the forge UI + PRs are reviewable in a browser and the repos are clonable
+// off-cluster. Mirrors the app Route; targets Forgejo's http port.
+func ForgejoRoute(dv *dotvirtv1alpha1.Dotvirt, host string) *unstructured.Unstructured {
+	spec := map[string]any{
+		"to":   map[string]any{"kind": "Service", "name": ForgejoServiceName},
+		"port": map[string]any{"targetPort": "http"},
+		"tls":  map[string]any{"termination": "edge", "insecureEdgeTerminationPolicy": "Redirect"},
+	}
+	if host != "" {
+		spec["host"] = host
+	}
+	u := &unstructured.Unstructured{Object: map[string]any{}}
+	u.SetGroupVersionKind(schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"})
+	u.SetName(ForgejoServiceName)
+	u.SetNamespace(dv.Namespace)
+	u.SetLabels(Labels(dv.Name))
+	u.Object["spec"] = spec
+	return u
+}
+
+// ForgejoIngress exposes the managed Forgejo on vanilla Kubernetes. TLS is left to
+// the cluster's ingress controller / cert-manager.
+func ForgejoIngress(dv *dotvirtv1alpha1.Dotvirt, host string) *networkingv1.Ingress {
+	pathType := networkingv1.PathTypePrefix
+	return &networkingv1.Ingress{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "Ingress"},
+		ObjectMeta: objectMeta(ForgejoServiceName, dv.Namespace, dv.Name),
+		Spec: networkingv1.IngressSpec{
+			Rules: []networkingv1.IngressRule{{
+				Host: host,
+				IngressRuleValue: networkingv1.IngressRuleValue{
+					HTTP: &networkingv1.HTTPIngressRuleValue{
+						Paths: []networkingv1.HTTPIngressPath{{
+							Path:     "/",
+							PathType: &pathType,
+							Backend: networkingv1.IngressBackend{
+								Service: &networkingv1.IngressServiceBackend{
+									Name: ForgejoServiceName,
+									Port: networkingv1.ServiceBackendPort{Number: 3000},
+								},
+							},
+						}},
+					},
+				},
+			}},
 		},
 	}
 }

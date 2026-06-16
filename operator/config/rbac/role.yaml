@@ -114,6 +114,12 @@ rules:
   - update
   - watch
 - apiGroups:
+  - route.openshift.io
+  resources:
+  - routes/custom-host
+  verbs:
+  - create
+- apiGroups:
   - security.openshift.io
   resourceNames:
   - anyuid
