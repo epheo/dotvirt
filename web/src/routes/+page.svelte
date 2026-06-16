@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { ArrowLeft, Network, Plus, Power, PowerOff, Trash2, Upload } from 'lucide-svelte';
+	import { ArrowLeft, FolderPlus, Network, Plus, Power, PowerOff, Trash2, Upload } from 'lucide-svelte';
 	import {
 		api,
 		draftsByProject,
@@ -28,6 +28,8 @@
 	import Login from '$lib/components/Login.svelte';
 	import AddUplinkModal from '$lib/components/AddUplinkModal.svelte';
 	import NewNamespaceModal from '$lib/components/NewNamespaceModal.svelte';
+	import NewProjectModal from '$lib/components/NewProjectModal.svelte';
+	import AdoptProjectModal from '$lib/components/AdoptProjectModal.svelte';
 	import NewNetworkModal from '$lib/components/NewNetworkModal.svelte';
 	import NewVMWizard from '$lib/components/NewVMWizard.svelte';
 	import NodeActions from '$lib/components/NodeActions.svelte';
@@ -271,6 +273,9 @@
 	let showUplinkWizard = $state(false);
 	let showNamespaceWizard = $state(false);
 	let namespaceWizardProject = $state<string | null>(null);
+	let showProjectWizard = $state(false);
+	// "Attach repo" target: the labeled-but-repoless project being adopted into git.
+	let adoptProjectTarget = $state<{ project: string; namespaces: string[] } | null>(null);
 	let showUpload = $state(false);
 	let showChanges = $state(false);
 	// The catalog browser shares the right-panel slot with Changes (one at a time).
@@ -441,11 +446,50 @@
 			window.open(manifestURL(vm), '_blank');
 			return;
 		}
+		if (a.id === 'adopt') {
+			try {
+				await api.adopt(vm.namespace, vm.name);
+				await refreshDrafts();
+				showToast(`${vm.name} staged into Changes — open a PR to adopt it into git.`);
+			} catch (e) {
+				if (e instanceof Unauthorized) return signedOut();
+				showToast(String(e));
+			}
+			return;
+		}
 		selected = vm;
 		detailIntent = {
 			id: a.id as 'edit' | 'delete' | 'console' | 'snapshot' | 'clone',
 			seq: ++intentSeq
 		};
+	}
+
+	// Untracked (NotTracked) VMs in the given namespaces — the rows a bulk adopt acts
+	// on. Drives both the "Adopt N untracked" label and which namespaces to call.
+	function untrackedVMs(namespaces: string[]): VM[] {
+		const want = new Set(namespaces);
+		const out: VM[] = [];
+		for (const p of inventory?.projects ?? [])
+			for (const ns of p.namespaces)
+				if (want.has(ns.namespace)) out.push(...ns.vms.filter((v) => v.sync === 'NotTracked'));
+		return out;
+	}
+
+	// Bulk-adopt every untracked VM under a container into one draft. Only namespaces
+	// that actually have untracked VMs are called (AdoptNamespace 400s on an empty one).
+	async function bulkAdoptUntracked(namespaces: string[]) {
+		const want = new Set(untrackedVMs(namespaces).map((v) => v.namespace));
+		try {
+			for (const ns of want) await api.adoptNamespace(ns);
+			showToast('Untracked VMs staged into Changes — open a PR to adopt them into git.');
+		} catch (e) {
+			if (e instanceof Unauthorized) return signedOut();
+			showToast(String(e));
+		} finally {
+			// Reflect whatever got staged before any failure — a mid-loop error still
+			// leaves the earlier namespaces' adopts in the draft.
+			await refreshDrafts();
+		}
 	}
 
 	// "New VM here" restricts the wizard to the right-clicked container's
@@ -507,6 +551,16 @@
 				Catalog
 			</button>
 			<button
+				onclick={() => (showProjectWizard = true)}
+				disabled={!canManage}
+				title={canManage
+					? 'Create a new tenant project (repo + first namespace)'
+					: 'Requires platform authoring permission'}
+				class="flex items-center gap-1.5 rounded border border-slate-600 px-3 py-1 text-xs font-medium text-slate-100 hover:bg-slate-700 disabled:opacity-40"
+			>
+				<FolderPlus size={14} /> New Project
+			</button>
+			<button
 				onclick={() => (showWizard = true)}
 				disabled={!inventory}
 				class="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-40"
@@ -562,7 +616,17 @@
 						{/each}
 					</div>
 				{:else if inventory.projects.length === 0}
-					<div class="p-4 text-center text-xs text-slate-400">No projects visible.</div>
+					<div class="space-y-3 p-6 text-center">
+						<p class="text-xs text-slate-400">No projects visible.</p>
+						{#if canManage}
+							<button
+								onclick={() => (showProjectWizard = true)}
+								class="inline-flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
+							>
+								<FolderPlus size={14} /> Create your first project
+							</button>
+						{/if}
+					</div>
 				{:else}
 					<InventoryTree
 						{inventory}
@@ -574,6 +638,8 @@
 						onscope={setScope}
 						oncontextvm={openVMContext}
 						oncontextcontainer={(c, x, y) => (ctx = { x, y, kind: 'container', ...c })}
+						{canManage}
+						onattachrepo={(project, namespaces) => (adoptProjectTarget = { project, namespaces })}
 					/>
 				{/if}
 			</aside>
@@ -977,6 +1043,19 @@
 			/>
 		{/if}
 
+		{#if showProjectWizard}
+			<NewProjectModal onclose={() => (showProjectWizard = false)} onstaged={refreshDrafts} />
+		{/if}
+
+		{#if adoptProjectTarget}
+			<AdoptProjectModal
+				project={adoptProjectTarget.project}
+				namespaces={adoptProjectTarget.namespaces}
+				onclose={() => (adoptProjectTarget = null)}
+				onstaged={refreshDrafts}
+			/>
+		{/if}
+
 		{#if showUpload}
 			<UploadModal {namespaces} onclose={() => (showUpload = false)} />
 		{/if}
@@ -1026,10 +1105,38 @@
 						>
 					</div>
 				{:else}
+					{@const untracked = untrackedVMs(ctx.namespaces)}
 					<div class="w-48 rounded border border-slate-200 bg-white py-1 text-xs shadow-lg">
 						<div class="truncate px-3 py-1 text-[10px] tracking-wide text-slate-400 uppercase">
 							{ctx.namespace ?? ctx.project}
 						</div>
+						{#if !ctx.repo && canManage}
+							<button
+								onclick={() => {
+									adoptProjectTarget =
+										ctx && ctx.kind === 'container'
+											? { project: ctx.project, namespaces: ctx.namespaces }
+											: null;
+									ctx = null;
+								}}
+								title="Create a repo for this project and bring it under GitOps"
+								class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50"
+								>Attach repo…</button
+							>
+							<div class="my-1 border-t border-slate-100"></div>
+						{/if}
+						{#if ctx.repo && untracked.length}
+							<button
+								onclick={() => {
+									const ns = ctx && ctx.kind === 'container' ? ctx.namespaces : [];
+									ctx = null;
+									bulkAdoptUntracked(ns);
+								}}
+								title="Stage every untracked VM here into one PR"
+								class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50"
+								>Adopt {untracked.length} untracked…</button
+							>
+						{/if}
 						<button
 							onclick={() => {
 								wizardNamespaces = ctx && ctx.kind === 'container' ? ctx.namespaces : null;

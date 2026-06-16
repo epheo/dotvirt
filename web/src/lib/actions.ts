@@ -19,6 +19,7 @@ export type ActionId =
 	| 'console'
 	| 'snapshot'
 	| 'clone'
+	| 'adopt'
 	| 'edit'
 	| 'manifest'
 	| 'delete';
@@ -87,10 +88,18 @@ export const vmActions: VMAction[] = [
 		enabled: always
 	},
 	{
+		id: 'adopt',
+		label: 'Adopt into git',
+		kind: 'host',
+		sep: true,
+		title: 'Stage this cluster-only VM into a PR to bring it under GitOps',
+		// The complement of inGit: only a NotTracked (live-but-ungitted) VM can be adopted.
+		enabled: (vm) => vm.sync === 'NotTracked'
+	},
+	{
 		id: 'edit',
 		label: 'Edit settings',
 		kind: 'host',
-		sep: true,
 		title: 'Stages a config change into a PR',
 		enabled: inGit
 	},

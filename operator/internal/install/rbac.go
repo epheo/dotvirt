@@ -73,6 +73,9 @@ func ArgocdApplyClusterRole(dv *dotvirtv1alpha1.Dotvirt) *rbacv1.ClusterRole {
 			rule([]string{"k8s.ovn.org"}, []string{"userdefinednetworks", "clusteruserdefinednetworks"}, allVerbs),
 			rule([]string{"k8s.cni.cncf.io"}, []string{"network-attachment-definitions"}, allVerbs),
 			rule([]string{"nmstate.io"}, []string{"nodenetworkconfigurationpolicies"}, allVerbs),
+			// Tenant access delegation: the platform repo's owners → namespace-admin
+			// RoleBindings, scoped to the platform tier by the dotvirt-platform AppProject.
+			rule([]string{"rbac.authorization.k8s.io"}, []string{"rolebindings"}, allVerbs),
 		},
 	}
 }

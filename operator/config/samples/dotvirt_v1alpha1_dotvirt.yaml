@@ -7,11 +7,12 @@ metadata:
   name: dotvirt
   namespace: dotvirt
 spec:
-  image: registry.desku.be/dotvirt:8780d07
+  image: registry.desku.be/dotvirt:bb3e91a
   forge:
-    url: https://forgejo.apps.hetznet.epheo.eu
+    managed: true # the operator deploys + bootstraps Forgejo and generates its token
+    url: https://forgejo.apps.hetznet.epheo.eu # exposed via Route at this host
     platformRepo: https://forgejo.apps.hetznet.epheo.eu/dotvirt/platform.git
-    credentialsSecret: dotvirt-forge
+    credentialsSecret: dotvirt-forge # the operator WRITES the generated token here
     insecureTLS: true # the bundled Forgejo Route is self-signed
   argocd:
     namespace: openshift-gitops

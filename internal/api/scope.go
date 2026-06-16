@@ -138,6 +138,19 @@ func byName(want string) projectPicker {
 	}
 }
 
+// projectByName resolves a project by name from the SA-owned snapshot, WITHOUT the
+// caller's RBAC filter. Only safe behind a platform-admin gate (platformScope): it's
+// how the platform tier addresses a tenant it's about to adopt, the same all-projects
+// view the exporter and ApplicationSet use.
+func (s *Server) projectByName(name string) (project.ProjectInfo, bool) {
+	for _, p := range s.resolver.Resolve(s.state.Namespaces(), nil) {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return project.ProjectInfo{}, false
+}
+
 // draftScope resolves the whole-draft routes (GET/DELETE/propose) that carry the
 // project via ?project= rather than a VM namespace.
 func (s *Server) draftScope(w http.ResponseWriter, r *http.Request) (scope, bool) {

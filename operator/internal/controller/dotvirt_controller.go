@@ -56,6 +56,8 @@ type DotvirtReconciler struct {
 // Grant the managed-Forgejo SA the anyuid SCC on OpenShift (the s6 image needs it).
 // +kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,verbs=use,resourceNames=anyuid
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get;list;watch;create;update;patch;delete
+// routes/custom-host: required to set an explicit spec.host on a Route (the forge + app exposure hosts).
+// +kubebuilder:rbac:groups=route.openshift.io,resources=routes/custom-host,verbs=create
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=argoproj.io,resources=appprojects;applications;applicationsets,verbs=get;list;watch;create;update;patch;delete
 
@@ -333,6 +335,30 @@ func (r *DotvirtReconciler) exposure(dv *dotvirtv1alpha1.Dotvirt) client.Object 
 	return nil
 }
 
+// forgejoExposure exposes the managed Forgejo on the host derived from
+// spec.forge.url (Route on OpenShift, Ingress on vanilla) so its UI + PRs are
+// reviewable off-cluster. nil when no external forge URL is set (internal-only).
+func (r *DotvirtReconciler) forgejoExposure(dv *dotvirtv1alpha1.Dotvirt) client.Object {
+	host := install.ForgejoHost(dv)
+	if host == "" {
+		return nil
+	}
+	t := string(dv.Spec.Ingress.Type)
+	if t == "" || t == "auto" {
+		t = "ingress"
+		if r.Platform == platform.OpenShift {
+			t = "route"
+		}
+	}
+	switch t {
+	case "route":
+		return install.ForgejoRoute(dv, host)
+	case "ingress":
+		return install.ForgejoIngress(dv, host)
+	}
+	return nil
+}
+
 // ensureSecret creates a labeled, owner-referenced Secret with a random value if it
 // doesn't already exist. Create-once: an existing secret is never regenerated, so
 // the session key / plugin token survive re-reconciles and restarts.
@@ -461,6 +487,12 @@ func (r *DotvirtReconciler) applyForgejo(ctx context.Context, dv *dotvirtv1alpha
 			return err
 		}
 	}
+	// PVC first (orphan: no ownerRef, so the git data survives uninstall) — applied
+	// before the Deployment that mounts it, so a retry of any later resource can't
+	// strand the pod Pending on a missing volume.
+	if err := install.Apply(ctx, r.Client, install.ForgejoPVC(dv), r.DryRun); err != nil {
+		return err
+	}
 	owned := []client.Object{
 		install.ForgejoServiceAccount(dv),
 		install.ForgejoService(dv),
@@ -468,6 +500,9 @@ func (r *DotvirtReconciler) applyForgejo(ctx context.Context, dv *dotvirtv1alpha
 	}
 	if r.Platform == platform.OpenShift {
 		owned = append(owned, install.ForgejoAnyuidBinding(dv))
+	}
+	if exp := r.forgejoExposure(dv); exp != nil {
+		owned = append(owned, exp)
 	}
 	for _, o := range owned {
 		if err := controllerutil.SetControllerReference(dv, o, r.Scheme); err != nil {
@@ -477,7 +512,7 @@ func (r *DotvirtReconciler) applyForgejo(ctx context.Context, dv *dotvirtv1alpha
 			return err
 		}
 	}
-	return install.Apply(ctx, r.Client, install.ForgejoPVC(dv), r.DryRun) // orphan: no ownerRef
+	return nil
 }
 
 // bootstrapForgejo mints the scoped token + ensures the owner org once the managed

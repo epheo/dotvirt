@@ -40,7 +40,10 @@ func (c *Coordinator) Adopt(id auth.Identity, proj project.ProjectInfo, namespac
 		return model.DraftView{}, fmt.Errorf("%w: %s/%s not on the running branch yet (live export may be pending)", model.ErrNotFound, namespace, name)
 	}
 	if !okD {
-		return c.stageAdoptCreate(id, proj, read, actual)
+		if err := c.stageAdoptCreate(id.Username, proj.Name, read, actual); err != nil {
+			return model.DraftView{}, err
+		}
+		return c.Get(id, proj)
 	}
 
 	edit := editToMatch(desired, actual)
@@ -61,21 +64,59 @@ func (c *Coordinator) Adopt(id auth.Identity, proj project.ProjectInfo, namespac
 
 // stageAdoptCreate stages a brand-new manifest from the running branch — the
 // adopt path for a VM with no file on base (a clone target, an out-of-band
-// create). The raw running-branch bytes are proposed as-is, at the same path,
-// so the proposal is exactly what the exporter saw in the cluster.
-func (c *Coordinator) stageAdoptCreate(id auth.Identity, proj project.ProjectInfo, read *git.Repo, actual model.VM) (model.DraftView, error) {
+// create). The raw running-branch bytes are staged as-is, at the same path, so
+// the proposal is exactly what the exporter saw in the cluster. It only stages
+// (the caller renders the view), so AdoptNamespace can loop it before one Get.
+func (c *Coordinator) stageAdoptCreate(username, projName string, read *git.Repo, actual model.VM) error {
 	content, err := read.FileOnBranch(c.runningBranch, actual.SourceFile)
 	if err != nil {
-		return model.DraftView{}, err
+		return err
 	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
+	return c.store.Stage(username, projName, draft.Entry{
 		Kind:       draft.KindCreate,
 		Namespace:  actual.Namespace,
 		Name:       actual.Name,
 		SourceFile: actual.SourceFile,
 		Manifest:   string(content),
-	}); err != nil {
+	})
+}
+
+// AdoptNamespace stages every untracked VM in namespace as a create in one draft:
+// VMs on the running branch but absent from base — the NotTracked rows the inventory
+// shows. A brownfield namespace is thus adopted into git in a single PR instead of
+// one drill-down per VM. VMs already in git (tracked, synced or drifted) are left
+// alone — drift is adopted per-VM, deliberately. Idempotent: re-staging replaces the
+// draft entry; a VM not yet on the running branch (export pending) isn't enumerated,
+// so it's skipped rather than failing the batch.
+func (c *Coordinator) AdoptNamespace(id auth.Identity, proj project.ProjectInfo, namespace string) (model.DraftView, error) {
+	read, err := c.read(proj)
+	if err != nil {
 		return model.DraftView{}, err
+	}
+	running, err := read.ParseVMsOnBranch(c.runningBranch)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	base, err := read.ParseVMsOnBranch(c.baseBranch)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	tracked := make(map[string]bool, len(base))
+	for _, vm := range base {
+		tracked[vm.Namespace+"/"+vm.Name] = true
+	}
+	staged := 0
+	for _, actual := range running {
+		if actual.Namespace != namespace || tracked[actual.Namespace+"/"+actual.Name] {
+			continue
+		}
+		if err := c.stageAdoptCreate(id.Username, proj.Name, read, actual); err != nil {
+			return model.DraftView{}, err
+		}
+		staged++
+	}
+	if staged == 0 {
+		return model.DraftView{}, fmt.Errorf("%w: no untracked VMs to adopt in %s", model.ErrInvalid, namespace)
 	}
 	return c.Get(id, proj)
 }

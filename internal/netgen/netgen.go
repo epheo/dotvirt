@@ -238,6 +238,59 @@ func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error)
 	return "namespaces/" + s.Name + ".yaml", out, nil
 }
 
+// RoleBindingSpec grants a tenant's owners admin on one of its namespaces — the
+// RBAC delegation that turns a project from a folder into a real tenant. The
+// RoleBinding is cluster-tenancy, so it is committed to the PLATFORM repo (granting
+// access is an admin op) and applied by the platform Application, never a tenant.
+type RoleBindingSpec struct {
+	Namespace string   `json:"namespace"`
+	Project   string   `json:"project"`        // dotvirt.io/project label
+	Owners    []string `json:"owners"`         // usernames granted the role
+	Role      string   `json:"role,omitempty"` // ClusterRole to bind; default "admin"
+}
+
+// RoleBindingManifest renders a namespace-scoped RoleBinding granting each owner the
+// given ClusterRole (default "admin" — the built-in namespace-admin role) on the
+// tenant namespace. One subject per owner (kind User).
+func RoleBindingManifest(s RoleBindingSpec) (path string, content []byte, err error) {
+	if s.Namespace == "" {
+		return "", nil, fmt.Errorf("a namespace is required")
+	}
+	if len(s.Owners) == 0 {
+		return "", nil, fmt.Errorf("at least one owner is required")
+	}
+	role := s.Role
+	if role == "" {
+		role = "admin" // the built-in namespace-admin ClusterRole
+	}
+	subjects := make([]any, 0, len(s.Owners))
+	for _, o := range s.Owners {
+		if o == "" {
+			return "", nil, fmt.Errorf("an owner name cannot be empty")
+		}
+		subjects = append(subjects, map[string]any{
+			"kind": "User", "apiGroup": "rbac.authorization.k8s.io", "name": o,
+		})
+	}
+	meta := map[string]any{"name": s.Namespace + "-admins", "namespace": s.Namespace}
+	if s.Project != "" {
+		meta["labels"] = map[string]any{"dotvirt.io/project": s.Project}
+	}
+	rb, err := yaml.Marshal(map[string]any{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "RoleBinding",
+		"metadata":   meta,
+		"roleRef": map[string]any{
+			"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": role,
+		},
+		"subjects": subjects,
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return "rbac/" + s.Namespace + ".yaml", rb, nil
+}
+
 // UplinkSpec describes a physical-network attachment to create: an OVS bridge
 // enslaving a NIC, mapped to a localnet physical-network name, across a set of
 // nodes — the vDS-uplink analog, as an nmstate NodeNetworkConfigurationPolicy.

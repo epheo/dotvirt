@@ -39,6 +39,7 @@ type Draft interface {
 	StageCreateNetwork(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
 	StageCreateUplink(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
 	StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
+	StageCreateProject(id auth.Identity, commitProj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
 	StageDelete(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
 	Unstage(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) error
 	Get(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
@@ -46,6 +47,8 @@ type Draft interface {
 	Propose(id auth.Identity, proj project.ProjectInfo, req model.ProposeRequest) (model.ProposeResult, error)
 	VMDrift(proj project.ProjectInfo, namespace, name string) (model.DriftResult, error)
 	Adopt(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
+	AdoptNamespace(id auth.Identity, proj project.ProjectInfo, namespace string) (model.DraftView, error)
+	AdoptProject(id auth.Identity, commitProj, target project.ProjectInfo, owners []string) (model.DraftView, error)
 	Resync(ctx context.Context, namespace, name string) (model.ResyncResult, error) // SA-identity; no user/project context
 	OpenProposal(id auth.Identity, proj project.ProjectInfo) (model.Proposal, bool, error)
 	Revert(id auth.Identity, proj project.ProjectInfo, hash string) (model.ProposeResult, error)
@@ -176,6 +179,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/networks", s.handleCreateNetwork)
 	mux.HandleFunc("POST /api/uplinks", s.handleCreateUplink)
 	mux.HandleFunc("POST /api/namespaces", s.handleCreateNamespace)
+	mux.HandleFunc("POST /api/projects", s.handleCreateProject)
 	// ArgoCD ApplicationSet plugin generator (auth: its own shared token, not a
 	// user session — exempted in auth.isOpenPath). Emits projects from labels.
 	mux.HandleFunc("POST /api/v1/getparams.execute", s.handleAppSetPlugin)
@@ -196,6 +200,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/uploads/{namespace}/{name}/token", s.handleUploadToken)
 	mux.HandleFunc("GET /api/projects/{project}/history", s.handleHistory)
 	mux.HandleFunc("POST /api/projects/{project}/revert", s.handleRevert)
+	mux.HandleFunc("POST /api/projects/{project}/adopt", s.handleAdoptProject)
 
 	if s.stream != nil {
 		mux.HandleFunc("GET /api/inventory/stream", s.stream.Handler)
@@ -219,6 +224,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/usage", s.handleVMUsage)
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/adopt", s.handleAdopt)
+	mux.HandleFunc("POST /api/namespaces/{namespace}/adopt", s.handleAdoptNamespace)
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/resync", s.handleResync)
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/restart", s.handleRestart)
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/migrate", s.handleMigrate)

@@ -37,16 +37,19 @@
 		scope,
 		staged,
 		networks = [],
+		canManage = false,
 		onselect,
 		onscope,
 		oncontextvm,
-		oncontextcontainer
+		oncontextcontainer,
+		onattachrepo
 	}: {
 		inventory: Inventory;
 		selected: VM | null;
 		scope: Scope;
 		staged: Map<string, DraftItem>;
 		networks?: PortGroup[]; // port-group catalog, for friendly Networks-lens grouping
+		canManage?: boolean; // gates the platform-tier "Attach repo" CTA on repoless projects
 		onselect: (vm: VM) => void;
 		onscope: (s: Scope) => void;
 		oncontextvm?: (vm: VM, x: number, y: number) => void;
@@ -55,6 +58,7 @@
 			x: number,
 			y: number
 		) => void;
+		onattachrepo?: (project: string, namespaces: string[]) => void;
 	} = $props();
 
 	function ctxVM(e: MouseEvent, vm: VM) {
@@ -241,6 +245,19 @@
 						<div class="py-1 pr-2 pl-7 text-xs text-amber-600 italic" title={project.error}>
 							{project.error}
 						</div>
+						{#if canManage && onattachrepo}
+							<button
+								onclick={() =>
+									onattachrepo?.(
+										project.name,
+										project.namespaces.map((n) => n.namespace)
+									)}
+								title="Create a repo for this project and bring it under GitOps"
+								class="mb-1 ml-7 rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 hover:bg-amber-100"
+							>
+								Attach repo
+							</button>
+						{/if}
 					{/if}
 
 					<!-- Namespaces -->

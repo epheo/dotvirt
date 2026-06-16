@@ -34,10 +34,11 @@ const (
 type Resource string
 
 const (
-	ResourceVM        Resource = "vm"
-	ResourceNetwork   Resource = "network"   // a Distributed Port Group (UDN/CUDN)
-	ResourceUplink    Resource = "uplink"    // a physical-network attachment (nmstate NNCP)
-	ResourceNamespace Resource = "namespace" // a namespace (+ optional primary "VM Network")
+	ResourceVM          Resource = "vm"
+	ResourceNetwork     Resource = "network"     // a Distributed Port Group (UDN/CUDN)
+	ResourceUplink      Resource = "uplink"      // a physical-network attachment (nmstate NNCP)
+	ResourceNamespace   Resource = "namespace"   // a namespace (+ optional primary "VM Network")
+	ResourceRoleBinding Resource = "rolebinding" // a tenant owners → namespace-admin grant
 )
 
 // Entry is one pending change, keyed by resource+namespace/name within its
