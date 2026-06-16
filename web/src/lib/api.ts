@@ -248,6 +248,12 @@ export interface NamespaceCreate {
 	project: string; // the project the namespace joins (its repo)
 	vmNetwork?: { name: string; subnet?: string }; // optional primary (Layer2) UDN; subnet required server-side (primary = IPAM)
 }
+export interface ProjectCreate {
+	name: string; // project name → tenant repo + dotvirt.io/project label
+	namespace?: string; // first namespace; defaults to name
+	owners?: string[]; // usernames granted namespace-admin on the first namespace
+	vmNetwork?: { name: string; subnet?: string }; // optional primary (Layer2) UDN on that namespace
+}
 export interface DraftView {
 	base: string;
 	branch: string;
@@ -471,6 +477,7 @@ export const api = {
 	createNetwork: (req: NetworkCreate) => post<DraftView>('/api/networks', req),
 	createUplink: (req: UplinkCreate) => post<DraftView>('/api/uplinks', req),
 	createNamespace: (req: NamespaceCreate) => post<DraftView>('/api/namespaces', req),
+	createProject: (req: ProjectCreate) => post<DraftView>('/api/projects', req),
 	stageDelete: (namespace: string, name: string) =>
 		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/delete`, {}),
 	unstage: (namespace: string, name: string, resource?: string, project?: string) => {

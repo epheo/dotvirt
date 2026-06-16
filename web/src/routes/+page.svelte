@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { ArrowLeft, Network, Plus, Power, PowerOff, Trash2, Upload } from 'lucide-svelte';
+	import { ArrowLeft, FolderPlus, Network, Plus, Power, PowerOff, Trash2, Upload } from 'lucide-svelte';
 	import {
 		api,
 		draftsByProject,
@@ -28,6 +28,7 @@
 	import Login from '$lib/components/Login.svelte';
 	import AddUplinkModal from '$lib/components/AddUplinkModal.svelte';
 	import NewNamespaceModal from '$lib/components/NewNamespaceModal.svelte';
+	import NewProjectModal from '$lib/components/NewProjectModal.svelte';
 	import NewNetworkModal from '$lib/components/NewNetworkModal.svelte';
 	import NewVMWizard from '$lib/components/NewVMWizard.svelte';
 	import NodeActions from '$lib/components/NodeActions.svelte';
@@ -271,6 +272,7 @@
 	let showUplinkWizard = $state(false);
 	let showNamespaceWizard = $state(false);
 	let namespaceWizardProject = $state<string | null>(null);
+	let showProjectWizard = $state(false);
 	let showUpload = $state(false);
 	let showChanges = $state(false);
 	// The catalog browser shares the right-panel slot with Changes (one at a time).
@@ -507,6 +509,16 @@
 				Catalog
 			</button>
 			<button
+				onclick={() => (showProjectWizard = true)}
+				disabled={!canManage}
+				title={canManage
+					? 'Create a new tenant project (repo + first namespace)'
+					: 'Requires platform authoring permission'}
+				class="flex items-center gap-1.5 rounded border border-slate-600 px-3 py-1 text-xs font-medium text-slate-100 hover:bg-slate-700 disabled:opacity-40"
+			>
+				<FolderPlus size={14} /> New Project
+			</button>
+			<button
 				onclick={() => (showWizard = true)}
 				disabled={!inventory}
 				class="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-40"
@@ -562,7 +574,17 @@
 						{/each}
 					</div>
 				{:else if inventory.projects.length === 0}
-					<div class="p-4 text-center text-xs text-slate-400">No projects visible.</div>
+					<div class="space-y-3 p-6 text-center">
+						<p class="text-xs text-slate-400">No projects visible.</p>
+						{#if canManage}
+							<button
+								onclick={() => (showProjectWizard = true)}
+								class="inline-flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
+							>
+								<FolderPlus size={14} /> Create your first project
+							</button>
+						{/if}
+					</div>
 				{:else}
 					<InventoryTree
 						{inventory}
@@ -975,6 +997,10 @@
 				}}
 				onstaged={refreshDrafts}
 			/>
+		{/if}
+
+		{#if showProjectWizard}
+			<NewProjectModal onclose={() => (showProjectWizard = false)} onstaged={refreshDrafts} />
 		{/if}
 
 		{#if showUpload}
