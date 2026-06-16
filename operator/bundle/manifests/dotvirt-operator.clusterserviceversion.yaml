@@ -36,7 +36,7 @@ metadata:
       ]
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
-    createdAt: "2026-06-16T17:07:08Z"
+    createdAt: "2026-06-16T17:10:42Z"
     description: Installs dotvirt — a vCenter-like GitOps WebUI for KubeVirt — with
       its platform/tenant tier.
     operators.operatorframework.io/builder: operator-sdk-v1.42.2
@@ -234,6 +234,8 @@ spec:
                     drop:
                     - ALL
                   readOnlyRootFilesystem: true
+              imagePullSecrets:
+              - name: dotvirt-regcred
               securityContext:
                 runAsNonRoot: true
               serviceAccountName: dotvirt-operator-controller

@@ -18,6 +18,11 @@ spec:
       labels: {app: dotvirt-operator}
     spec:
       serviceAccountName: dotvirt-operator-controller
+      # Pull credential for the private registry the operator + app images live in.
+      # Provide it in the operator's namespace (create out-of-band, e.g. copy
+      # dotvirt-regcred); harmless if absent for a public registry.
+      imagePullSecrets:
+        - name: dotvirt-regcred
       securityContext:
         runAsNonRoot: true
       terminationGracePeriodSeconds: 10
