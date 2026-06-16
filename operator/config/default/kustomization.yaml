@@ -1,0 +1,10 @@
+# The full operator install: CRD + RBAC + the manager Deployment. `make deploy`
+# renders this and applies it; `kubectl apply -k config/default` works too.
+# Override the image for a release: `kustomize edit set image` or the images: block.
+resources:
+  - ../crd
+  - ../rbac
+  - ../manager
+images:
+  - name: registry.desku.be/dotvirt-operator
+    newTag: latest

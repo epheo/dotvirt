@@ -17,6 +17,8 @@ export interface Disk {
 export interface NIC {
 	name: string;
 	network?: string;
+	mac?: string; // live, from VMI status
+	ip?: string; // live, from VMI status
 }
 
 export interface VM {
@@ -42,6 +44,7 @@ export interface VM {
 	migration?: Migration; // live (or last) node-to-node move
 	sync: SyncStatus;
 	health?: string;
+	syncError?: string; // ArgoCD apply failure (e.g. a webhook rejection) when OutOfSync
 }
 
 export interface ProjectNamespace {
@@ -107,6 +110,9 @@ export interface EditRequest {
 	memory?: string;
 	instancetype?: string;
 	preference?: string;
+	// Which representation owns CPU/memory. The two are mutually exclusive in
+	// KubeVirt, so the backend strips the other when this is set.
+	sizing?: 'instancetype' | 'custom';
 	setLabels?: Record<string, string>;
 	removeLabels?: string[];
 	addDisks?: { name: string; size: string }[];
@@ -146,6 +152,50 @@ export interface Options {
 	storageClasses: StorageClass[];
 }
 
+// --- Networks (the vCenter "Distributed Port Group" abstraction) ---
+export type NetworkKind = 'default' | 'internal' | 'vlan';
+export type NetworkScope = 'project' | 'shared';
+
+export interface Network {
+	name: string; // the port-group name shown to the user
+	kind: NetworkKind; // default ("VM Network") | internal | vlan
+	scope: NetworkScope; // project | shared
+	namespace?: string; // project-scoped (UDN/NAD)
+	vlan?: number;
+	subnets?: string[];
+	uplink?: string; // physicalNetworkName (vlan kind)
+	attachRef?: string; // "namespace/nad" (CUDN: bare name, resolved at attach)
+	backing: string; // UserDefinedNetwork | ClusterUserDefinedNetwork | NetworkAttachmentDefinition
+	topology?: string; // raw OVN-K topology, for the detail drawer
+	namespaces?: string[]; // for shared (CUDN) nets: where it's attachable; empty for project nets
+}
+export interface Uplink {
+	name: string; // physicalNetworkName
+	bridge: string; // OVS bridge (br-ex, br-physnet…)
+	builtin?: boolean; // the default br-ex uplink
+	nodes?: string[];
+	nodeCount: number;
+	ports?: string[];
+	vlans?: number[];
+	status?: string;
+}
+export interface PhysicalAdapter {
+	name: string;
+	node: string;
+	type?: string; // ethernet | bond
+	mac?: string;
+	state?: string; // up | down
+	mtu?: number;
+	role?: string; // cluster-uplink | enslaved | available
+}
+export interface NetworkInventory {
+	networks: Network[];
+	uplinks: Uplink[];
+	physicalAdapters: PhysicalAdapter[];
+	nmstatePresent: boolean;
+	canManage: boolean; // caller may author platform-tier networking (CUDN/uplink/namespace)
+}
+
 export interface CreateVMRequest {
 	name: string;
 	namespace: string;
@@ -171,10 +221,32 @@ export interface Change {
 }
 export interface DraftItem {
 	kind: 'edit' | 'create' | 'delete';
+	resource?: string; // '' == vm | network — disambiguates unstage
 	namespace: string;
 	name: string;
 	changes: Change[];
 	yaml?: string;
+}
+
+export interface NetworkCreate {
+	name: string;
+	scope?: string; // 'project' (namespace UDN, tenant) | 'shared'/'vlan' (CUDN, platform-routed by kind)
+	namespace?: string; // project scope
+	subnets?: string[];
+	vlan?: number; // vlan scope
+	physicalNetwork?: string; // vlan scope: the uplink's physical-network name
+	namespaces?: string[]; // shared/vlan scope: namespaces the CUDN publishes to
+}
+export interface UplinkCreate {
+	name: string; // physical-network name
+	nic: string; // physical port to enslave
+	bridge?: string; // OVS bridge; default br-<name>
+	nodeSelector?: Record<string, string>; // node labels; omit = all workers, or {kubernetes.io/hostname: <node>}
+}
+export interface NamespaceCreate {
+	name: string;
+	project: string; // the project the namespace joins (its repo)
+	vmNetwork?: { name: string; subnet?: string }; // optional primary (Layer2) UDN; subnet required server-side (primary = IPAM)
 }
 export interface DraftView {
 	base: string;
@@ -384,6 +456,7 @@ export const api = {
 
 	inventory: () => get<Inventory>('/api/inventory'),
 	options: () => get<Options>('/api/options'),
+	networks: () => get<NetworkInventory>('/api/networks'),
 
 	// Commit history + per-commit revert (a forward commit opened as a PR).
 	history: (project: string) => get<Commit[]>(`/api/projects/${enc(project)}/history`),
@@ -395,10 +468,18 @@ export const api = {
 	stageEdit: (namespace: string, name: string, req: EditRequest) =>
 		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/edit`, req),
 	stageCreate: (req: CreateVMRequest) => post<DraftView>('/api/vms', req),
+	createNetwork: (req: NetworkCreate) => post<DraftView>('/api/networks', req),
+	createUplink: (req: UplinkCreate) => post<DraftView>('/api/uplinks', req),
+	createNamespace: (req: NamespaceCreate) => post<DraftView>('/api/namespaces', req),
 	stageDelete: (namespace: string, name: string) =>
 		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/delete`, {}),
-	unstage: (namespace: string, name: string) =>
-		del(`/api/draft/${enc(namespace)}/${enc(name)}`),
+	unstage: (namespace: string, name: string, resource?: string, project?: string) => {
+		const q = new URLSearchParams();
+		if (resource) q.set('resource', resource);
+		if (project) q.set('project', project); // cluster-scoped entries resolve by project
+		const qs = q.toString();
+		return del(`/api/draft/${enc(namespace)}/${enc(name)}${qs ? `?${qs}` : ''}`);
+	},
 
 	// Whole-draft ops are scoped to a project (?project=), since they aren't tied
 	// to one VM namespace.

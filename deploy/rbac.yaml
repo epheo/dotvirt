@@ -63,6 +63,27 @@ rules:
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
     verbs: ["get", "list", "watch"]
+
+  # Networks lens (/api/networks, an SA read shared + cached for all users):
+  # decode OVN-K user-defined networks (UDN/CUDN) and the raw NADs above into
+  # vCenter-style port groups. Read-only — these are platform objects dotvirt
+  # never creates (creation is PR-gated to git, applied by Argo).
+  - apiGroups: ["k8s.ovn.org"]
+    resources: ["userdefinednetworks", "clusteruserdefinednetworks"]
+    verbs: ["get", "list", "watch"]
+
+  # Physical network fabric for the Uplinks + Physical-adapters views: nmstate's
+  # read-only node network state, plus the policies that declare custom uplinks
+  # (ovn bridge-mappings). Both gated at serve time behind the caller's node-read.
+  - apiGroups: ["nmstate.io"]
+    resources: ["nodenetworkstates", "nodenetworkconfigurationpolicies"]
+    verbs: ["get", "list", "watch"]
+
+  # Node coverage for uplinks: which nodes carry a bridge-mapping (the "N/M
+  # nodes" badge). The builtin br-ex uplink spans all nodes.
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -76,3 +97,91 @@ subjects:
   - kind: ServiceAccount
     name: dotvirt
     namespace: dotvirt
+---
+# ArgoCD apply-path RBAC. dotvirt PR-gates every change to git and the per-project
+# ApplicationSet's Argo Application applies it (see deploy/applicationset.yaml) — so
+# the ArgoCD application-controller, NOT dotvirt's SA, is what writes VMs and
+# networking to the cluster. The stock openshift-gitops controller role covers
+# Namespaces but NOT KubeVirt or OVN-K, and the old per-namespace
+# `argocd-kubevirt-admin` (ClusterRole/kubevirt.io:admin) bindings (a) only granted
+# KubeVirt, never UDN/CUDN, and (b) had to be hand-created per namespace — which the
+# "New Namespace" flow doesn't do, so any namespace dotvirt creates (e.g. tenant-c)
+# couldn't be reconciled. This ONE cluster-scoped grant covers exactly the kinds the
+# PR flow emits, so every project/namespace reconciles hands-off, including the
+# cluster-scoped CUDN/NNCP the per-namespace bindings structurally couldn't.
+# (Namespaces are intentionally omitted: the controller already holds that.)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dotvirt-argocd-apply
+rules:
+  # VMs (dotvirt's New VM wizard, applied by Argo from the project repo).
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachines"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Networking the vCenter port-group flows emit: Layer2/localnet UDNs + shared
+  # CUDNs (Phase 6.3-6.6), the NADs they back, and the NNCP uplinks (Phase 6.5).
+  # UDN+NAD are namespaced; CUDN+NNCP are cluster-scoped — hence a ClusterRole.
+  - apiGroups: ["k8s.ovn.org"]
+    resources: ["userdefinednetworks", "clusteruserdefinednetworks"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["k8s.cni.cncf.io"]
+    resources: ["network-attachment-definitions"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["nmstate.io"]
+    resources: ["nodenetworkconfigurationpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dotvirt-argocd-apply
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dotvirt-argocd-apply
+subjects:
+  - kind: ServiceAccount
+    name: openshift-gitops-argocd-application-controller
+    namespace: openshift-gitops
+---
+# Authoring authorization for the platform/"Infrastructure" surface. dotvirt gates
+# the cluster-scoped network + namespace CREATE actions in its UI behind a
+# SelfSubjectAccessReview with the USER's token (the same pattern that gates the
+# physical-fabric view behind node-read). The user never actually creates these
+# objects — Argo applies them from the `platform` repo — so this grant is purely
+# the AUTHORIZATION SIGNAL the UI reads: hold it and you see "New VLAN Port Group",
+# "Add Uplink", and "New Namespace"; lack it and those actions are hidden. It is
+# deliberately decoupled from the apply path (dotvirt-argocd-apply, the shared
+# controller SA). cluster-admins satisfy it implicitly; bind it to delegate
+# platform-network authoring to non-admins.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dotvirt-platform-network-admin
+rules:
+  - apiGroups: ["k8s.ovn.org"]
+    resources: ["clusteruserdefinednetworks"]
+    verbs: ["create"]
+  - apiGroups: ["nmstate.io"]
+    resources: ["nodenetworkconfigurationpolicies"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create"]
+---
+# Bind to your platform operators. Example binds a group — set the real subject(s).
+# (Omit/leave unbound and only cluster-admins see the Infrastructure authoring
+# actions, which is a safe default.)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dotvirt-platform-network-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dotvirt-platform-network-admin
+subjects:
+  - kind: Group
+    name: dotvirt-platform-admins
+    apiGroup: rbac.authorization.k8s.io

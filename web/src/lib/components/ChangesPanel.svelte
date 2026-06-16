@@ -39,10 +39,10 @@
 	const total = $derived(drafts.reduce((n, d) => n + d.draft.count, 0));
 	const itemKey = (p: string, ns: string, name: string) => `${p}|${ns}/${name}`;
 
-	async function unstage(project: string, ns: string, name: string) {
+	async function unstage(project: string, ns: string, name: string, resource?: string) {
 		error[project] = '';
 		try {
-			await api.unstage(ns, name);
+			await api.unstage(ns, name, resource, project);
 			onchanged();
 		} catch (e) {
 			error[project] = String(e);
@@ -226,7 +226,7 @@
 							>
 							<span class="font-medium text-slate-800">{item.namespace}/{item.name}</span>
 							<button
-								onclick={() => unstage(project, item.namespace, item.name)}
+								onclick={() => unstage(project, item.namespace, item.name, item.resource)}
 								class="ml-auto text-xs text-red-500 hover:text-red-700">unstage</button
 							>
 						</div>

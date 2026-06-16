@@ -1,0 +1,6 @@
+# Input to `operator-sdk generate bundle`: the install manifests (config/default)
+# + the sample CR (for the CSV's alm-examples) + the CSV base above.
+resources:
+  - bases/dotvirt-operator.clusterserviceversion.yaml
+  - ../default
+  - ../samples

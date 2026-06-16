@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { Activity, ChevronDown, ChevronRight, Cpu, HardDrive, MemoryStick, Pencil, Trash2 } from 'lucide-svelte';
-	import { api, type Change, type DraftItem, type VM, type VMEvent } from '$lib/api';
+	import { api, type Change, type DraftItem, type Network, type VM, type VMEvent } from '$lib/api';
 	import { manifestURL, type VMAction } from '$lib/actions';
+	import { resolveNIC, kindLabel } from '$lib/networks';
 	import ActionMenu from './ActionMenu.svelte';
 	import ChangeList from './ChangeList.svelte';
 	import CloneModal from './CloneModal.svelte';
@@ -25,6 +26,7 @@
 		stagedItem = null,
 		onstagedopen,
 		onsearchlabel,
+		networks = [],
 		intent = null
 	}: {
 		vm: VM | null;
@@ -33,6 +35,9 @@
 		stagedItem?: DraftItem | null;
 		onstagedopen?: () => void;
 		onsearchlabel?: (key: string, value: string) => void;
+		// The port-group catalog (GET /api/networks), to resolve each NIC's raw
+		// network ref into the vCenter port group the admin recognizes.
+		networks?: Network[];
 		// A one-shot request from outside (the context menu) to open a modal/tab
 		// here; seq distinguishes repeated requests for the same id.
 		intent?: { id: 'edit' | 'delete' | 'console' | 'snapshot' | 'clone'; seq: number } | null;
@@ -290,7 +295,7 @@
 				<PowerDot power={vm.power} paused={vm.paused} />
 				<h2 class="text-lg font-semibold text-slate-800">{vm.name}</h2>
 				<span class="rounded bg-slate-200 px-1.5 py-0.5 text-xs text-slate-600">{vm.namespace}</span>
-				<SyncBadge sync={vm.sync} />
+				<SyncBadge sync={vm.sync} error={vm.syncError} />
 				{#if stagedItem}
 					<StagedBadge item={stagedItem} onopen={() => onstagedopen?.()} />
 				{/if}
@@ -669,9 +674,34 @@
 								{#if vm.networks?.length}
 									<ul class="divide-y divide-slate-100 px-3 text-[13px]">
 										{#each vm.networks as n (n.name)}
-											<li class="flex justify-between gap-3 py-1.5">
-												<span class="text-slate-800">{n.name}</span>
-												<span class="text-slate-400">{n.network}</span>
+											{@const pg = resolveNIC(n, vm.namespace, networks)}
+											{@const detail = [
+												n.ip || null,
+												n.mac || null,
+												pg?.scope === 'shared' ? 'shared' : null,
+												pg?.uplink ? `uplink ${pg.uplink}` : null,
+												pg?.subnets?.length ? pg.subnets.join(', ') : null
+											]
+												.filter(Boolean)
+												.join(' · ')}
+											<li class="py-1.5">
+												<div class="flex items-baseline justify-between gap-3">
+													<span class="text-slate-800">{n.name}</span>
+													<span class="flex items-center gap-2 text-right">
+														<span class="text-slate-700"
+															>{pg ? pg.name : n.network && n.network !== 'pod' ? n.network : 'Pod network'}</span
+														>
+														{#if pg}
+															<span
+																class="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500"
+																>{kindLabel(pg.kind)}{pg.vlan ? ` ${pg.vlan}` : ''}</span
+															>
+														{/if}
+													</span>
+												</div>
+												{#if detail}
+													<div class="mt-0.5 text-right text-[11px] text-slate-400">{detail}</div>
+												{/if}
 											</li>
 										{/each}
 									</ul>
@@ -741,6 +771,7 @@
 	{#if editing}
 		<EditSettings
 			{vm}
+			{networks}
 			initialSection={editSection}
 			onclose={() => (editing = false)}
 			onstaged={() => onstaged?.()}

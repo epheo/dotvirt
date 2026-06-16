@@ -11,7 +11,14 @@
 		Server,
 		Trash2
 	} from 'lucide-svelte';
-	import type { DraftItem, Inventory, Project, ProjectNamespace, VM } from '$lib/api';
+	import type {
+		DraftItem,
+		Inventory,
+		Network as PortGroup,
+		Project,
+		ProjectNamespace,
+		VM
+	} from '$lib/api';
 	import { vmNetworkKeys, vmStorageKeys } from '$lib/lenses';
 	import PowerDot from './PowerDot.svelte';
 	import SyncBadge from './SyncBadge.svelte';
@@ -29,6 +36,7 @@
 		selected,
 		scope,
 		staged,
+		networks = [],
 		onselect,
 		onscope,
 		oncontextvm,
@@ -38,6 +46,7 @@
 		selected: VM | null;
 		scope: Scope;
 		staged: Map<string, DraftItem>;
+		networks?: PortGroup[]; // port-group catalog, for friendly Networks-lens grouping
 		onselect: (vm: VM) => void;
 		onscope: (s: Scope) => void;
 		oncontextvm?: (vm: VM, x: number, y: number) => void;
@@ -109,7 +118,7 @@
 			for (const ns of p.namespaces)
 				for (const vm of ns.vms) {
 					if (lens === 'node') add(vm.nodeName || '(unscheduled)', vm);
-					else if (lens === 'network') for (const k of vmNetworkKeys(vm)) add(k, vm);
+					else if (lens === 'network') for (const k of vmNetworkKeys(vm, networks)) add(k, vm);
 					else for (const k of vmStorageKeys(vm)) add(k, vm);
 				}
 		return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
@@ -152,7 +161,7 @@
 					{#if sc.kind === 'delete'}<Trash2 size={10} />{:else}<Pencil size={10} />{/if}
 				</span>
 			{:else}
-				<SyncBadge sync={vm.sync} compact />
+				<SyncBadge sync={vm.sync} error={vm.syncError} compact />
 			{/if}
 		</span>
 	</button>

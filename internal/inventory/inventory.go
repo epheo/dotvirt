@@ -117,7 +117,7 @@ func enrich(vm *model.VM, in Inputs) {
 	}
 	if in.Drift != nil { // nil = Argo not wired; non-nil = configured (absent VM is NotTracked)
 		if d, ok := in.Drift[k]; ok {
-			vm.Sync, vm.Health = d.Sync, d.Health
+			vm.Sync, vm.Health, vm.SyncError = d.Sync, d.Health, d.Message
 		} else {
 			vm.Sync = model.SyncNotTracked
 		}
@@ -129,6 +129,22 @@ func applyLive(vm *model.VM, s clusterstate.LiveVM) {
 	vm.Phase, vm.GuestIP, vm.NodeName = s.Phase, s.GuestIP, s.NodeName
 	vm.Paused = s.Paused
 	vm.IPs, vm.OS, vm.MemoryActual = s.IPs, s.OS, s.MemoryActual
+	// Merge live per-NIC addresses onto the manifest's adapters (by name). Build a
+	// fresh slice so the cached manifest VM isn't mutated across builds.
+	if len(s.Interfaces) > 0 && len(vm.Networks) > 0 {
+		live := make(map[string]clusterstate.LiveNIC, len(s.Interfaces))
+		for _, n := range s.Interfaces {
+			live[n.Name] = n
+		}
+		nics := make([]model.NIC, len(vm.Networks))
+		copy(nics, vm.Networks)
+		for i := range nics {
+			if ln, ok := live[nics[i].Name]; ok {
+				nics[i].MAC, nics[i].IP = ln.MAC, ln.IP
+			}
+		}
+		vm.Networks = nics
+	}
 	if !s.StartedAt.IsZero() {
 		vm.StartedAt = s.StartedAt.UTC().Format(time.RFC3339)
 	}

@@ -40,7 +40,7 @@ spec:
         - name: dotvirt
           # Pinned to the main commit the image was built from (make push tags
           # both <short-sha> and latest).
-          image: registry.desku.be/dotvirt:64c51af
+          image: registry.desku.be/dotvirt:e2b962b
           args:
             - "-addr=:8080"
             - "-ui-origin=" # same-origin: SPA served behind the same Route
@@ -88,6 +88,13 @@ spec:
             - name: DOTVIRT_APPSET_PLUGIN_TOKEN
               valueFrom:
                 secretKeyRef: { name: dotvirt-appset-plugin, key: token, optional: true }
+            # Platform-tier repo: holds cluster-scoped + tenancy manifests
+            # (Namespaces, CUDNs, NNCP uplinks, primary VM networks). dotvirt routes
+            # every cluster-scoped create here by KIND and SSAR-gates it; the
+            # dotvirt-platform Argo app applies it (see deploy/appprojects.yaml).
+            # Empty disables the cluster-scoped network + namespace create flows.
+            - name: DOTVIRT_PLATFORM_REPO
+              value: "https://forgejo.apps.hetznet.epheo.eu/dotvirt/platform.git"
           ports:
             - { containerPort: 8080, name: http }
           volumeMounts:

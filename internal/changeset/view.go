@@ -24,7 +24,7 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 		return model.DraftView{}, err
 	}
 	for _, e := range entries {
-		item := model.DraftItem{Kind: string(e.Kind), Namespace: e.Namespace, Name: e.Name}
+		item := model.DraftItem{Kind: string(e.Kind), Resource: string(e.Resource), Namespace: e.Namespace, Name: e.Name}
 		switch e.Kind {
 		case draft.KindEdit:
 			current, _, err := read.FindVMOnBranch(c.baseBranch, e.Namespace, e.Name)
@@ -34,8 +34,21 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 			item.Changes = manifest.ChangesForEdit(current, *e.Edit)
 		case draft.KindCreate:
 			if e.Manifest != "" {
-				// Adopt-create: the manifest IS the change; show it as-is.
-				item.Changes = []model.Change{{Field: "Adopt VM from cluster", Action: "add", To: e.Namespace + "/" + e.Name}}
+				// A verbatim-manifest create: a network (UDN/CUDN), an uplink (NNCP),
+				// or a VM adopted from the cluster. The manifest IS the change.
+				field, to := "Adopt VM from cluster", e.Namespace+"/"+e.Name
+				switch e.Resource {
+				case draft.ResourceNetwork:
+					field = "Create network"
+				case draft.ResourceUplink:
+					field = "Create uplink"
+				case draft.ResourceNamespace:
+					field = "Create namespace"
+				}
+				if e.Namespace == ClusterScopeNS || e.Resource == draft.ResourceNamespace {
+					to = e.Name // cluster-scoped, or the namespace itself: no prefix
+				}
+				item.Changes = []model.Change{{Field: field, Action: "add", To: to}}
 				item.YAML = e.Manifest
 				break
 			}

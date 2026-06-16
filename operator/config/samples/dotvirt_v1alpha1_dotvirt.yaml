@@ -1,0 +1,23 @@
+# A sample Dotvirt install (hetznet values). Apply into the namespace dotvirt runs
+# in; the operator provisions the rest. Under `make run ARGS=-dry-run` nothing is
+# persisted — the API server just validates the rendered resources.
+apiVersion: dotvirt.io/v1alpha1
+kind: Dotvirt
+metadata:
+  name: dotvirt
+  namespace: dotvirt
+spec:
+  image: registry.desku.be/dotvirt:e2b962b
+  forge:
+    url: https://forgejo.apps.hetznet.epheo.eu
+    platformRepo: https://forgejo.apps.hetznet.epheo.eu/dotvirt/platform.git
+    credentialsSecret: dotvirt-forge
+    insecureTLS: true # the bundled Forgejo Route is self-signed
+  argocd:
+    namespace: openshift-gitops
+    controllerServiceAccount: openshift-gitops-argocd-application-controller
+  ingress:
+    type: auto # Route on OpenShift, Ingress on vanilla
+    host: dotvirt.apps.hetznet.epheo.eu
+  metrics:
+    url: https://thanos-querier.openshift-monitoring.svc.cluster.local:9091

@@ -27,11 +27,26 @@ const (
 	KindDelete Kind = "delete" // remove the VM's manifest from the repo (Argo prunes on merge)
 )
 
-// Entry is one pending change, keyed by namespace/name within its (user,project).
+// Resource is what an entry acts on. VM is the default (empty == vm, for
+// back-compat with on-disk drafts); Network is a Distributed Port Group (UDN).
+// It's part of the entry key so a VM and a network with the same ns/name don't
+// clobber each other in the draft.
+type Resource string
+
+const (
+	ResourceVM        Resource = "vm"
+	ResourceNetwork   Resource = "network"   // a Distributed Port Group (UDN/CUDN)
+	ResourceUplink    Resource = "uplink"    // a physical-network attachment (nmstate NNCP)
+	ResourceNamespace Resource = "namespace" // a namespace (+ optional primary "VM Network")
+)
+
+// Entry is one pending change, keyed by resource+namespace/name within its
+// (user,project).
 type Entry struct {
-	Kind      Kind   `json:"kind"`
-	Namespace string `json:"namespace"`
-	Name      string `json:"name"`
+	Kind      Kind     `json:"kind"`
+	Resource  Resource `json:"resource,omitempty"` // empty == vm
+	Namespace string   `json:"namespace"`
+	Name      string   `json:"name"`
 
 	// SourceFile is the repo-relative manifest path. Set for KindEdit (the file to
 	// patch) and KindDelete (the file to remove).
@@ -47,8 +62,15 @@ type Entry struct {
 	Manifest string      `json:"manifest,omitempty"`
 }
 
-// Key is the stable identity used to dedupe/replace entries within a draft.
-func (e Entry) Key() string { return e.Namespace + "/" + e.Name }
+// Key is the stable identity used to dedupe/replace entries within a draft. VM
+// keys keep the bare "ns/name" form (back-compat with on-disk drafts and the
+// VM-scoped Unstage); other resources are prefixed so they can't collide.
+func (e Entry) Key() string {
+	if e.Resource == "" || e.Resource == ResourceVM {
+		return e.Namespace + "/" + e.Name
+	}
+	return string(e.Resource) + ":" + e.Namespace + "/" + e.Name
+}
 
 // Store is the disk-persisted set of drafts, one per (user, project). It serves
 // every user; isolation is by the (user, project) routing of each method, plus
@@ -153,15 +175,16 @@ func (s *Store) Stage(user, project string, e Entry) error {
 	return s.persistLocked(user, project, d)
 }
 
-// Unstage removes a VM's entry from (user,project)'s draft. No error if absent.
-func (s *Store) Unstage(user, project, namespace, name string) error {
+// Unstage removes one entry (of the given resource) from (user,project)'s draft.
+// No error if absent.
+func (s *Store) Unstage(user, project string, resource Resource, namespace, name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	d, err := s.loadLocked(user, project)
 	if err != nil {
 		return err
 	}
-	delete(d, namespace+"/"+name)
+	delete(d, Entry{Resource: resource, Namespace: namespace, Name: name}.Key())
 	return s.persistLocked(user, project, d)
 }
 

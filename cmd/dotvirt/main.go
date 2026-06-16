@@ -24,11 +24,11 @@ import (
 	"github.com/epheo/dotvirt/internal/config"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/export"
-	"github.com/epheo/dotvirt/internal/forge"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/metrics"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/stream"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 func main() {
@@ -136,6 +136,7 @@ func run() error {
 			StaticDir:         cfg.StaticDir,
 			WebhookSecret:     cfg.WebhookSecret,
 			UploadProxyURL:    cfg.UploadProxyURL,
+			PlatformRepo:      cfg.PlatformRepo,
 		},
 	})
 

@@ -65,6 +65,9 @@ type VM struct {
 	// From ArgoCD, when enabled.
 	Sync   SyncStatus `json:"sync"`
 	Health string     `json:"health,omitempty"`
+	// SyncError is ArgoCD's apply failure for this VM (e.g. a webhook rejection),
+	// surfaced so the UI can explain an OutOfSync VM instead of just flagging it.
+	SyncError string `json:"syncError,omitempty"`
 }
 
 // Migration mirrors the VMI's migration state. Active while neither Completed
@@ -86,10 +89,13 @@ type Disk struct {
 	StorageClass string `json:"storageClass,omitempty"` // dataVolume storageClassName (empty = cluster default)
 }
 
-// NIC is a network interface on the VM.
+// NIC is a network interface on the VM. Name/Network come from the manifest;
+// MAC/IP are merged from the live VMI status when running.
 type NIC struct {
 	Name    string `json:"name"`
 	Network string `json:"network,omitempty"` // "pod" or the multus networkName
+	MAC     string `json:"mac,omitempty"`     // live, from VMI status
+	IP      string `json:"ip,omitempty"`      // live, from VMI status
 }
 
 // ProjectNamespace is one namespace bucket within a project: the VMs it holds.
@@ -141,6 +147,7 @@ type EditRequest struct {
 	Memory       *string `json:"memory,omitempty"`
 	Instancetype *string `json:"instancetype,omitempty"`
 	Preference   *string `json:"preference,omitempty"`
+	Sizing       *string `json:"sizing,omitempty"` // "instancetype" | "custom" — which representation owns CPU/memory
 
 	SetLabels      map[string]string `json:"setLabels,omitempty"`
 	RemoveLabels   []string          `json:"removeLabels,omitempty"`
@@ -173,9 +180,10 @@ type DriftResult struct {
 	Changes []Change `json:"changes"`
 }
 
-// DraftItem is one VM's pending change rendered for the UI.
+// DraftItem is one pending change rendered for the UI.
 type DraftItem struct {
-	Kind      string   `json:"kind"` // edit | create | delete
+	Kind      string   `json:"kind"`               // edit | create | delete
+	Resource  string   `json:"resource,omitempty"` // "" == vm | network — disambiguates unstage
 	Namespace string   `json:"namespace"`
 	Name      string   `json:"name"`
 	Changes   []Change `json:"changes"`
@@ -445,4 +453,91 @@ type NetworkOption struct {
 type StorageClass struct {
 	Name    string `json:"name"`
 	Default bool   `json:"default,omitempty"` // the cluster's default class annotation
+}
+
+// --- Networks (the vCenter "Distributed Port Group" abstraction) ---
+//
+// dotvirt presents OVN-K networking in VMware terms: a Network is a port group a
+// VM NIC attaches to; an Uplink is the physical-adapter binding (the vDS uplink);
+// a PhysicalAdapter is one node NIC. The OVN-K objects behind them (UDN, CUDN,
+// localnet, NAD) and nmstate (NNCP, NNS) never surface to the user.
+
+// NetworkKind classifies a port group by how a VMware admin reads it.
+type NetworkKind string
+
+const (
+	NetworkDefault  NetworkKind = "default"  // primary network — the project's "VM Network"
+	NetworkInternal NetworkKind = "internal" // Layer2, no uplink — an isolated port group
+	NetworkVLAN     NetworkKind = "vlan"     // localnet — VLAN-backed, bridged to an uplink
+)
+
+// NetworkScope is a port group's reach: one project or shared across many.
+type NetworkScope string
+
+const (
+	ScopeProject NetworkScope = "project" // namespace-scoped (UDN/NAD) — one project
+	ScopeShared  NetworkScope = "shared"  // cluster-scoped (CUDN) — selected projects
+)
+
+// Network is one Distributed Port Group: a network a VM attaches a NIC to,
+// abstracting a UDN, CUDN, or raw NAD behind vCenter vocabulary.
+type Network struct {
+	Name      string       `json:"name"`                // the port-group name shown to the user
+	Kind      NetworkKind  `json:"kind"`                // default | internal | vlan
+	Scope     NetworkScope `json:"scope"`               // project | shared
+	Namespace string       `json:"namespace,omitempty"` // for project-scoped (UDN/NAD)
+	VLAN      int          `json:"vlan,omitempty"`      // 802.1q tag (vlan kind)
+	Subnets   []string     `json:"subnets,omitempty"`   // CIDRs, when IPAM-managed
+	Uplink    string       `json:"uplink,omitempty"`    // physicalNetworkName (vlan kind)
+	// AttachRef is how a VM attaches: "namespace/nad". For a CUDN it's the bare
+	// name — the generated NAD is namespace-relative, resolved at attach time (6.3).
+	AttachRef string `json:"attachRef,omitempty"`
+	Backing   string `json:"backing"`            // UserDefinedNetwork | ClusterUserDefinedNetwork | NetworkAttachmentDefinition
+	Topology  string `json:"topology,omitempty"` // raw OVN-K topology (Layer2|Layer3|Localnet), for the detail drawer
+	// Namespaces is where a shared (CUDN) network is actually attachable — the set
+	// where it generated a NAD (its namespaceSelector's effective result). Empty
+	// for project-scoped networks (those attach only in their own Namespace).
+	Namespaces []string `json:"namespaces,omitempty"`
+}
+
+// Uplink is a physical-network attachment point — the vDS uplink analog: an OVN-K
+// physical-network name mapped to an OVS bridge across a set of nodes. Builtin is
+// the always-present br-ex default (no NNCP required).
+type Uplink struct {
+	Name      string   `json:"name"`              // physicalNetworkName
+	Bridge    string   `json:"bridge"`            // OVS bridge (br-ex, br-physnet…)
+	Builtin   bool     `json:"builtin,omitempty"` // the default br-ex uplink
+	Nodes     []string `json:"nodes,omitempty"`   // nodes carrying the mapping
+	NodeCount int      `json:"nodeCount"`         // len(Nodes), for the "N/M nodes" badge
+	Ports     []string `json:"ports,omitempty"`   // physical NIC(s)/bond enslaved to the bridge
+	VLANs     []int    `json:"vlans,omitempty"`   // LLDP-discovered VLAN IDs (6.5)
+	Status    string   `json:"status,omitempty"`  // NNCE rollup: Available | Progressing | Failing (6.5)
+}
+
+// PhysicalAdapter is one node NIC from NodeNetworkState — the host "Physical
+// adapters" view. Role says what the NIC is already doing.
+type PhysicalAdapter struct {
+	Name  string `json:"name"` // eno1, bond0…
+	Node  string `json:"node"`
+	Type  string `json:"type,omitempty"` // ethernet | bond
+	MAC   string `json:"mac,omitempty"`
+	State string `json:"state,omitempty"` // up | down
+	MTU   int    `json:"mtu,omitempty"`
+	Role  string `json:"role,omitempty"` // cluster-uplink | enslaved | available
+}
+
+// NetworkInventory is GET /api/networks: the port groups the caller may attach to,
+// plus (for node-readers) the physical fabric. NMStatePresent=false means the
+// NMState operator isn't installed, so uplink/adapter discovery is unavailable —
+// the UI hides those affordances rather than showing empty panels.
+type NetworkInventory struct {
+	Networks         []Network         `json:"networks"`
+	Uplinks          []Uplink          `json:"uplinks"`
+	PhysicalAdapters []PhysicalAdapter `json:"physicalAdapters"`
+	NMStatePresent   bool              `json:"nmstatePresent"`
+	// CanManage is true when the caller may author platform-tier networking
+	// (cluster-scoped CUDN / uplink / namespace): a platform repo is configured AND
+	// the caller passes the CUDN-create SSAR. The UI shows the authoring actions
+	// (New VLAN Port Group, Add Uplink, New Namespace) only then.
+	CanManage bool `json:"canManage"`
 }

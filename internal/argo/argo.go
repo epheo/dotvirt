@@ -30,6 +30,9 @@ var applicationsGVR = schema.GroupVersionResource{
 type Drift struct {
 	Sync   model.SyncStatus
 	Health string
+	// Message is the apply/sync error from the Application's last operation, when
+	// this VM failed to sync (e.g. a KubeVirt webhook rejection). Empty when synced.
+	Message string
 }
 
 // Client reads Application status via the dynamic client — no heavy argo-cd
@@ -95,8 +98,38 @@ func (c *Client) VMDrift(ctx context.Context) (map[string]Drift, error) {
 				Health: nestedString(res, "health", "status"),
 			}
 		}
+		mergeSyncMessages(out, apps.Items[i].Object)
 	}
 	return out, nil
+}
+
+// mergeSyncMessages attaches per-VM apply errors onto the drift map. ArgoCD keeps
+// the live tree in status.resources[] (sync/health, no error text) but the actual
+// apply failure for each object in status.operationState.syncResult.resources[].
+// We surface the latter so the UI can show *why* a VM is OutOfSync. Synced rows
+// carry a benign "unchanged" message, so only non-Synced ones are kept.
+func mergeSyncMessages(out map[string]Drift, app map[string]any) {
+	results, found, err := unstructured.NestedSlice(app, "status", "operationState", "syncResult", "resources")
+	if err != nil || !found {
+		return
+	}
+	for _, raw := range results {
+		res, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if asString(res, "kind") != "VirtualMachine" {
+			continue
+		}
+		msg := asString(res, "message")
+		if msg == "" || asString(res, "status") == "Synced" {
+			continue
+		}
+		key := asString(res, "namespace") + "/" + asString(res, "name")
+		d := out[key]
+		d.Message = msg
+		out[key] = d
+	}
 }
 
 func syncStatus(s string) model.SyncStatus {

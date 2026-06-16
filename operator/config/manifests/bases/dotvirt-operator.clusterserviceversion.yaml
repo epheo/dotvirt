@@ -1,0 +1,37 @@
+# CSV base operator-sdk merges with the generated CRD + RBAC + Deployment (from
+# config/) into the full OLM bundle. `make bundle` produces bundle/ for OperatorHub.
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  name: dotvirt-operator.v0.0.0
+  annotations:
+    capabilities: Seamless Upgrades
+    categories: "Developer Tools, Modernization & Migration"
+    description: Installs dotvirt — a vCenter-like GitOps WebUI for KubeVirt — with its platform/tenant tier.
+spec:
+  displayName: dotvirt operator
+  description: |
+    The dotvirt operator provisions a complete dotvirt install from a single
+    `Dotvirt` resource: the workload + Route/Ingress, the RBAC, the ArgoCD
+    AppProject tier + ApplicationSet, the platform git repo (and optionally a
+    self-hosted Forgejo), repo-credentials, and an org-level instant-sync webhook.
+
+    dotvirt's runtime owns nothing — it reads git/cluster/Argo and proposes PRs,
+    riding the user's RBAC. This operator is only the install-time provisioner.
+
+    Prerequisites: ArgoCD (OpenShift GitOps) and KubeVirt; OVN-Kubernetes, NMState,
+    and CDI unlock networking and image upload.
+  provider:
+    name: epheo
+  maturity: alpha
+  version: 0.0.0
+  minKubeVersion: 1.30.0
+  keywords: [kubevirt, gitops, argocd, virtualization, vcenter, openshift]
+  links:
+    - name: Source
+      url: https://github.com/epheo/dotvirt
+  installModes:
+    - {type: OwnNamespace, supported: true}
+    - {type: SingleNamespace, supported: true}
+    - {type: MultiNamespace, supported: false}
+    - {type: AllNamespaces, supported: true}

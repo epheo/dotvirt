@@ -1,0 +1,123 @@
+# AppProjects are dotvirt's tenancy ENFORCEMENT boundary.
+#
+# Why this file exists: the dotvirt-argocd-apply ClusterRole (deploy/rbac.yaml)
+# grants the SHARED openshift-gitops application-controller SA cluster-wide create
+# on VMs + OVN-K networks + nmstate policies. One SA reconciles EVERY Application,
+# so RBAC alone cannot tell a tenant sync from a platform sync — a tenant PR
+# carrying a ClusterUserDefinedNetwork or a node NNCP would reconcile cluster-wide,
+# gated only by repo review. An ArgoCD AppProject CAN distinguish them: it caps
+# WHAT each Application may apply, regardless of what the controller SA could do.
+# (Previously every per-project app ran in `default` = no restriction.)
+#
+# Two tiers, keyed on the object's SCOPE:
+#   - dotvirt-tenants : per-project apps; namespaced workloads ONLY (VMs +
+#                       secondary UDNs/NADs). clusterResourceWhitelist is EMPTY,
+#                       so a tenant repo physically cannot land a CUDN, an NNCP, or
+#                       a Namespace even though the controller SA technically could.
+#   - dotvirt-platform: one app over the `platform` repo — the only tier allowed
+#                       cluster-scoped + tenancy objects (Namespaces, CUDNs, NNCP
+#                       uplinks) and the primary "VM Network" UDNs.
+#
+# dotvirt still writes NOTHING to the cluster; this only bounds what Argo applies
+# from each repo. "Owns nothing" becomes ENFORCED, not merely trusted.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: dotvirt-tenants
+  namespace: openshift-gitops
+spec:
+  description: Per-project tenant apps — namespaced workloads only, no cluster-scoped infra.
+  # Every project repo dotvirt's plugin emits lives under this forge prefix.
+  sourceRepos:
+    - https://forgejo.apps.hetznet.epheo.eu/dotvirt/*
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: '*'
+    # Negation (= deny): tenants may not target platform/operator namespaces, even
+    # though '*' matched above. The cluster-scoped block below is the primary fix;
+    # these keep a tenant repo from writing namespaced objects into platform space.
+    - server: https://kubernetes.default.svc
+      namespace: '!openshift-*'
+    - server: https://kubernetes.default.svc
+      namespace: '!kube-*'
+    - server: https://kubernetes.default.svc
+      namespace: '!dotvirt'
+  # THE enforcement: an empty whitelist permits NO cluster-scoped resource. This is
+  # what stops a tenant PR from landing a CUDN / NNCP / Namespace cluster-wide.
+  clusterResourceWhitelist: []
+  # The namespaced kinds dotvirt's tenant flows emit. (Omitting this would allow
+  # ALL namespaced kinds; we pin it to the VM + secondary-network surface so a
+  # tenant repo can't reconcile arbitrary namespaced objects either.)
+  namespaceResourceWhitelist:
+    - group: kubevirt.io
+      kind: VirtualMachine
+    - group: cdi.kubevirt.io
+      kind: DataVolume
+    - group: k8s.ovn.org
+      kind: UserDefinedNetwork # secondary (attach) UDNs; primary ones are platform-tier
+    - group: k8s.cni.cncf.io
+      kind: NetworkAttachmentDefinition
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: dotvirt-platform
+  namespace: openshift-gitops
+spec:
+  description: Platform tier — tenancy + cluster-scoped network infrastructure (the `platform` repo only).
+  sourceRepos:
+    - https://forgejo.apps.hetznet.epheo.eu/dotvirt/platform.git
+  destinations:
+    # Applies Namespaces anywhere and primary UDNs into tenant namespaces.
+    - server: https://kubernetes.default.svc
+      namespace: '*'
+  # The cluster-scoped + tenancy objects no tenant tier may touch.
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+    - group: k8s.ovn.org
+      kind: ClusterUserDefinedNetwork
+    - group: nmstate.io
+      kind: NodeNetworkConfigurationPolicy
+  # The primary "VM Network" UDN is namespaced but platform-authored (it redefines a
+  # namespace's default network), so the platform tier owns it. NADs cover the
+  # OVN-K-generated attachments the platform networks back.
+  namespaceResourceWhitelist:
+    - group: k8s.ovn.org
+      kind: UserDefinedNetwork
+    - group: k8s.cni.cncf.io
+      kind: NetworkAttachmentDefinition
+---
+# The single platform Application: syncs the `platform` repo (tenancy + cluster
+# networking) into the cluster. Hand-authored HERE, not emitted by the
+# ApplicationSet (which only generates per-project tenant apps from namespace
+# labels) — the platform tier stays platform-provisioned, like the ApplicationSet
+# itself. The `platform` repo is never labeled dotvirt.io/project, so the plugin
+# generator never mistakes it for a tenant app.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dotvirt-platform
+  namespace: openshift-gitops
+spec:
+  project: dotvirt-platform
+  source:
+    repoURL: https://forgejo.apps.hetznet.epheo.eu/dotvirt/platform.git
+    targetRevision: main
+    path: . # the whole platform repo
+    directory:
+      recurse: true
+      include: '*.yaml'
+  destination:
+    server: https://kubernetes.default.svc
+    # Fallback for namespace-less docs; objects carry their own scope (Namespaces
+    # and CUDN/NNCP are cluster-scoped, primary UDNs name their target namespace).
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # The repo carries explicit Namespace manifests; don't auto-create a target.
+      - CreateNamespace=false

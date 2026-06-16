@@ -28,6 +28,9 @@ await page.screenshot({ path: '/tmp/lens-2-storage.png' });
 console.log('storage lens ok');
 
 await page.getByRole('button', { name: 'New VM' }).click();
+// The wizard opens on "Name and project"; jump straight to the Storage step
+// (free rail navigation), where the storage-class select lives.
+await page.locator('div.fixed.inset-0.z-50').getByRole('button', { name: /Storage/ }).click();
 await page.waitForSelector('text=Storage class');
 await page.waitForTimeout(300);
 await page.screenshot({ path: '/tmp/lens-3-wizard.png' });

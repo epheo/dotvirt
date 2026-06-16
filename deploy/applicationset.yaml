@@ -11,11 +11,17 @@
 #
 # That's it — no manual ApplicationSet edit. dotvirt's resolver already discovers
 # projects from these labels; the plugin generator below calls dotvirt's
-# /api/v1/getparams.execute, which emits one {project, repo, namespace} element per
-# labeled namespace. So labeling a namespace dynamically provisions its Argo
-# Application (within requeueAfterSeconds). dotvirt supplies the list under a shared
-# token but STILL never creates the Application — the ApplicationSet does. Projects
-# stay live cluster facts keyed on the namespace label.
+# /api/v1/getparams.execute, which emits one {project, repo} element per repo-backed
+# project. So one Application per project syncs the whole repo across that project's
+# N labeled namespaces. Each runs in the `dotvirt-tenants` AppProject (see
+# deploy/appprojects.yaml), which permits ONLY namespaced workloads (VMs + secondary
+# networks): cluster-scoped + tenancy objects (Namespaces, CUDN, NNCP) are the
+# platform tier's job — applied by the separate dotvirt-platform app from the
+# `platform` repo — so a tenant repo physically cannot reconcile them. Labeling a
+# namespace folds it into its project's existing app (within requeueAfterSeconds).
+# dotvirt supplies the
+# list under a shared token but STILL never creates the Application — the
+# ApplicationSet does. Projects stay live cluster facts keyed on the project label.
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
@@ -24,6 +30,11 @@ metadata:
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
+  # Renaming the generated apps (per-namespace -> per-project) prunes the old
+  # apps; preserve their resources so the rename ADOPTS the running VMs into the
+  # new per-project apps instead of cascade-deleting + recreating them (downtime).
+  syncPolicy:
+    preserveResourcesOnDeletion: true
   generators:
     - plugin:
         configMapRef:
@@ -34,27 +45,37 @@ spec:
         requeueAfterSeconds: 60
   template:
     metadata:
-      name: "dotvirt-{{.project}}-{{.namespace}}"
+      name: "dotvirt-{{.project}}"
       labels:
         dotvirt.io/project: "{{.project}}"
     spec:
-      project: default
+      # Tenant tier: namespaced workloads only (no CUDN/NNCP/Namespace). See
+      # deploy/appprojects.yaml. Was `default` (unrestricted) — the change that
+      # actually stops a tenant PR landing cluster-scoped infra.
+      project: dotvirt-tenants
       source:
         repoURL: "{{.repo}}"
         targetRevision: main
-        path: "{{.namespace}}" # per-namespace directory in the project repo
+        path: "." # the whole project repo: one app = one project = its N namespaces
         directory:
           recurse: true
           include: "*.yaml"
       destination:
         server: https://kubernetes.default.svc
-        namespace: "{{.namespace}}"
+        # No fixed namespace: every VM manifest carries its own. "default" is just
+        # the fallback for any namespace-less doc (a tenant repo has none — its
+        # cluster-scoped objects moved to the platform tier).
+        namespace: default
       syncPolicy:
         automated:
           prune: true
           selfHeal: true
         syncOptions:
-          - CreateNamespace=false # namespaces are pre-created + labeled by the platform
+          # Namespaces are the platform tier's job now (the dotvirt-platform app
+          # applies them from the `platform` repo); a tenant app may not create
+          # them, so it must not auto-create its destination namespace — it syncs
+          # into namespaces the platform already provisioned.
+          - CreateNamespace=false
 ---
 # Plugin-generator config: where to reach dotvirt + the shared bearer token (the
 # token value is pulled from the Secret below via the $<secret-name>:<key> ref).
@@ -67,18 +88,18 @@ data:
   baseUrl: "http://dotvirt.dotvirt.svc.cluster.local:8080"
   token: "$dotvirt-appset-plugin:token"
 ---
-# The shared bearer the ApplicationSet presents to dotvirt's plugin endpoint. The
-# SAME value must reach dotvirt via DOTVIRT_APPSET_PLUGIN_TOKEN (see the
-# dotvirt-appset-plugin secret consumed in deploy/dotvirt.yaml). Replace the
-# placeholder with a real secret before applying.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: dotvirt-appset-plugin
-  namespace: openshift-gitops
-type: Opaque
-stringData:
-  token: "REPLACE-with-a-shared-secret"
+# The shared bearer the ApplicationSet presents to dotvirt's plugin endpoint lives
+# in Secret dotvirt-appset-plugin (openshift-gitops, key `token`); the SAME value
+# must reach dotvirt via DOTVIRT_APPSET_PLUGIN_TOKEN (the dotvirt-appset-plugin
+# secret in the dotvirt namespace, consumed in deploy/dotvirt.yaml).
+#
+# Created OUT-OF-BAND and deliberately NOT a resource in this file: `oc apply -f`
+# of this file would otherwise overwrite the live token with a placeholder and
+# break the plugin generator with a 401. Create it once, shared across both
+# namespaces:
+#   TOKEN=$(openssl rand -hex 24)
+#   oc create secret generic dotvirt-appset-plugin -n openshift-gitops --from-literal=token="$TOKEN"
+#   oc create secret generic dotvirt-appset-plugin -n dotvirt          --from-literal=token="$TOKEN"
 ---
 # Argo repo CREDENTIAL TEMPLATE (not a per-repo entry): one prefix-matched
 # credential covers EVERY project repo dotvirt's plugin emits, so a newly-labeled
@@ -95,16 +116,10 @@ stringData:
 #   oc create configmap argocd-tls-certs-cm -n openshift-gitops \
 #     --from-file=forgejo.apps.hetznet.epheo.eu=/tmp/ca-bundle.crt --dry-run=client -o yaml | oc apply -f -
 #   oc rollout restart deploy/openshift-gitops-repo-server -n openshift-gitops
-apiVersion: v1
-kind: Secret
-metadata:
-  name: dotvirt-forge-creds
-  namespace: openshift-gitops
-  labels:
-    argocd.argoproj.io/secret-type: repo-creds
-type: Opaque
-stringData:
-  type: git
-  url: https://forgejo.apps.hetznet.epheo.eu/dotvirt # owner-path prefix for all project repos
-  username: dotvirt
-  password: "REPLACE-with-the-forge-token" # same value as dotvirt-forge's token
+# Also created OUT-OF-BAND (same clobber reason — not a resource here). Example:
+#   oc create secret generic dotvirt-forge-creds -n openshift-gitops \
+#     --from-literal=type=git \
+#     --from-literal=url=https://forgejo.apps.hetznet.epheo.eu/dotvirt \
+#     --from-literal=username=dotvirt --from-literal=password=<forge-token>
+#   oc label secret dotvirt-forge-creds -n openshift-gitops \
+#     argocd.argoproj.io/secret-type=repo-creds
