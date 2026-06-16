@@ -36,12 +36,12 @@ metadata:
       ]
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
-    createdAt: "2026-06-16T17:10:42Z"
+    createdAt: "2026-06-16T17:23:03Z"
     description: Installs dotvirt — a vCenter-like GitOps WebUI for KubeVirt — with
       its platform/tenant tier.
     operators.operatorframework.io/builder: operator-sdk-v1.42.2
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
-  name: dotvirt-operator.v0.0.1
+  name: dotvirt-operator.v0.0.2
 spec:
   apiservicedefinitions: {}
   customresourcedefinitions:
@@ -208,7 +208,7 @@ spec:
               - args:
                 - --leader-elect
                 - --health-probe-bind-address=:8081
-                image: registry.desku.be/dotvirt-operator:7ef41e3
+                image: registry.desku.be/dotvirt-operator:b9a2bb3
                 livenessProbe:
                   httpGet:
                     path: /healthz
@@ -286,4 +286,4 @@ spec:
   minKubeVersion: 1.30.0
   provider:
     name: epheo
-  version: 0.0.1
+  version: 0.0.2
