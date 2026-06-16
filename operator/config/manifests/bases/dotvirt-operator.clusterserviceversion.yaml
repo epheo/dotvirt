@@ -1,15 +1,15 @@
-# CSV base operator-sdk merges with the generated CRD + RBAC + Deployment (from
-# config/) into the full OLM bundle. `make bundle` produces bundle/ for OperatorHub.
 apiVersion: operators.coreos.com/v1alpha1
 kind: ClusterServiceVersion
 metadata:
-  name: dotvirt-operator.v0.0.0
   annotations:
     capabilities: Seamless Upgrades
-    categories: "Developer Tools, Modernization & Migration"
-    description: Installs dotvirt — a vCenter-like GitOps WebUI for KubeVirt — with its platform/tenant tier.
+    categories: Developer Tools, Modernization & Migration
+    description: Installs dotvirt — a vCenter-like GitOps WebUI for KubeVirt — with
+      its platform/tenant tier.
+  name: dotvirt-operator.v0.0.0
 spec:
-  displayName: dotvirt operator
+  apiservicedefinitions: {}
+  customresourcedefinitions: {}
   description: |
     The dotvirt operator provisions a complete dotvirt install from a single
     `Dotvirt` resource: the workload + Route/Ingress, the RBAC, the ArgoCD
@@ -21,17 +21,32 @@ spec:
 
     Prerequisites: ArgoCD (OpenShift GitOps) and KubeVirt; OVN-Kubernetes, NMState,
     and CDI unlock networking and image upload.
+  displayName: dotvirt operator
+  install:
+    spec:
+      deployments: null
+    strategy: ""
+  installModes:
+  - supported: true
+    type: OwnNamespace
+  - supported: true
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: true
+    type: AllNamespaces
+  keywords:
+  - kubevirt
+  - gitops
+  - argocd
+  - virtualization
+  - vcenter
+  - openshift
+  links:
+  - name: Source
+    url: https://github.com/epheo/dotvirt
+  maturity: alpha
+  minKubeVersion: 1.30.0
   provider:
     name: epheo
-  maturity: alpha
   version: 0.0.0
-  minKubeVersion: 1.30.0
-  keywords: [kubevirt, gitops, argocd, virtualization, vcenter, openshift]
-  links:
-    - name: Source
-      url: https://github.com/epheo/dotvirt
-  installModes:
-    - {type: OwnNamespace, supported: true}
-    - {type: SingleNamespace, supported: true}
-    - {type: MultiNamespace, supported: false}
-    - {type: AllNamespaces, supported: true}
