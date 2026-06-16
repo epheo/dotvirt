@@ -5,9 +5,11 @@ apiVersion: operators.coreos.com/v1alpha1
 kind: CatalogSource
 metadata:
   name: dotvirt-catalog
-  namespace: dotvirt-olm
+  # openshift-marketplace so the operator shows in the OperatorHub UI (that's the
+  # namespace the console aggregates catalogs from).
+  namespace: openshift-marketplace
 spec:
   sourceType: grpc
-  image: quay.io/epheo/dotvirt-operator-catalog@sha256:d8285df9b23ce51f6f8dc8cd8d6ef1af42c554a5426bf1685e401635857ba04d
+  image: quay.io/epheo/dotvirt-operator-catalog@sha256:e937b6e60c1c6f86aaee38d7c4bfc14335686c59a7834a95eb7a8eeb96296db6
   displayName: dotvirt
   publisher: epheo

@@ -1,0 +1,6 @@
+# Install namespace for the dotvirt operator (the controller runs here; it watches
+# Dotvirt CRs in every namespace).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dotvirt-operator

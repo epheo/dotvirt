@@ -1,9 +1,8 @@
 # AllNamespaces OperatorGroup (empty spec) — the operator watches Dotvirt CRs
-# cluster-wide. For a FRESH install only; an existing install namespace (e.g. the
-# hetznet dotvirt-olm) already has one — a namespace may hold just a single group.
+# cluster-wide. One group per namespace.
 apiVersion: operators.coreos.com/v1
 kind: OperatorGroup
 metadata:
-  name: dotvirt
-  namespace: dotvirt-olm
+  name: dotvirt-operator
+  namespace: dotvirt-operator
 spec: {}

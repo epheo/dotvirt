@@ -4,10 +4,10 @@ apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
 metadata:
   name: dotvirt-operator
-  namespace: dotvirt-olm
+  namespace: dotvirt-operator
 spec:
   channel: alpha
   name: dotvirt-operator
   source: dotvirt-catalog
-  sourceNamespace: dotvirt-olm
+  sourceNamespace: openshift-marketplace
   installPlanApproval: Automatic

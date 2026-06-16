@@ -55,7 +55,8 @@ jobs:
           username: ${{ secrets.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_PASSWORD }}
       - name: Build & push
+        # Push the immutable per-commit SHA tag only — never a moving :latest (a
+        # moving tag orphans the digests that DefaultImage/relatedImages pin to).
         run: |
-          docker build -f Containerfile -t "$IMAGE:${GITHUB_SHA::7}" -t "$IMAGE:latest" .
+          docker build -f Containerfile -t "$IMAGE:${GITHUB_SHA::7}" .
           docker push "$IMAGE:${GITHUB_SHA::7}"
-          docker push "$IMAGE:latest"

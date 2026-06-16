@@ -23,7 +23,7 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
         - name: manager
-          image: quay.io/epheo/dotvirt-operator:v0.0.4
+          image: quay.io/epheo/dotvirt-operator:v0.0.5
           args: ["--leader-elect", "--health-probe-bind-address=:8081"]
           securityContext:
             allowPrivilegeEscalation: false

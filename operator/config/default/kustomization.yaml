@@ -7,4 +7,4 @@ resources:
   - ../manager
 images:
   - name: quay.io/epheo/dotvirt-operator
-    digest: sha256:222d794d99c6a18fb48bfc3d164a45c8f400c666ab31b5d262596aa3db0dd184
+    digest: sha256:26127ff6dcef5190b4d4aa59db7cbab10c6c733c6d9bb82fc4ce5415cd1b6307

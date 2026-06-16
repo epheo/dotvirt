@@ -1,7 +1,7 @@
 # dotvirt build/test entry points. The same targets back .github/workflows/ci.yaml.
 #
-# Image: quay.io/epheo/dotvirt, tagged with the short commit (immutable, what
-# deploy/ pins) plus latest. Push needs `podman login quay.io` first.
+# Image: quay.io/epheo/dotvirt, tagged with the immutable short-commit SHA — never a
+# moving :latest (references pin the @sha256 digest). Push needs `podman login quay.io`.
 
 REGISTRY ?= quay.io
 IMAGE    ?= $(REGISTRY)/epheo/dotvirt
@@ -27,11 +27,10 @@ e2e:
 	cd web && npx playwright test
 
 image:
-	podman build -f Containerfile -t $(IMAGE):$(TAG) -t $(IMAGE):latest .
+	podman build -f Containerfile -t $(IMAGE):$(TAG) .
 
 push: image
 	podman push $(IMAGE):$(TAG)
-	podman push $(IMAGE):latest
 
 run: build
 	./dotvirt
