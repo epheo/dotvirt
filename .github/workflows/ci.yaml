@@ -67,6 +67,45 @@ jobs:
           operator-sdk bundle validate ./operator/bundle
           go run github.com/operator-framework/operator-registry/cmd/opm@v1.51.0 validate operator/catalog
 
+  # Install the bundle on a throwaway kind cluster via OLM (à la community-operators
+  # CI) + run scorecard, so a bundle that won't install fails the PR. Uses public
+  # images + a local registry — no secrets, so it runs on fork PRs too.
+  bundle-test:
+    needs: [validate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kind + operator-sdk
+        run: |
+          curl -fsSLo ./kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
+          chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
+          sudo curl -fsSL -o /usr/local/bin/operator-sdk \
+            https://github.com/operator-framework/operator-sdk/releases/download/v1.42.2/operator-sdk_linux_amd64
+          sudo chmod +x /usr/local/bin/operator-sdk
+      - name: kind cluster + local registry
+        run: |
+          docker run -d --restart=always -p 127.0.0.1:5000:5000 --name kind-registry registry:2
+          cat <<EOF | kind create cluster --wait 5m --config=-
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          containerdConfigPatches:
+          - |-
+            [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5000"]
+              endpoint = ["http://kind-registry:5000"]
+          EOF
+          docker network connect kind kind-registry
+      - name: Install OLM
+        run: operator-sdk olm install --timeout 5m
+      - name: Build + push the (committed) bundle to the local registry
+        run: make -C operator bundle-build bundle-push BUNDLE_IMG=localhost:5000/dotvirt-operator-bundle:ci CONTAINER_TOOL=docker
+      - name: Install the bundle via OLM (assert it reaches Succeeded)
+        run: |
+          kubectl create namespace dotvirt-ci
+          operator-sdk run bundle localhost:5000/dotvirt-operator-bundle:ci -n dotvirt-ci --timeout 5m --use-http
+          kubectl -n dotvirt-ci get csv
+      - name: Scorecard (basic + olm)
+        run: operator-sdk scorecard ./operator/bundle --wait-time 180s
+
   # App image build+push, main only — deploy/operator pin the immutable digest of
   # the short-sha tag this publishes.
   image:

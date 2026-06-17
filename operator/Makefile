@@ -59,7 +59,23 @@ deploy: manifests ## Apply the CRD + operator to the current cluster (needs conf
 bundle: manifests ## Generate the OLM bundle for OperatorHub (needs operator-sdk on PATH).
 	$(OPERATOR_SDK) generate kustomize manifests -q
 	$(KUSTOMIZE) build config/manifests | $(OPERATOR_SDK) generate bundle --overwrite --version $(VERSION)
+	# operator-sdk regenerates annotations.yaml + bundle.Dockerfile, so re-inject the
+	# OpenShift version floor (which OCP releases embedded OperatorHub offers this on).
+	grep -q com.redhat.openshift.versions bundle/metadata/annotations.yaml || \
+		echo '  com.redhat.openshift.versions: "v4.18"' >> bundle/metadata/annotations.yaml
+	grep -q com.redhat.openshift.versions bundle.Dockerfile || \
+		echo 'LABEL com.redhat.openshift.versions="v4.18"' >> bundle.Dockerfile
+	# operator-sdk doesn't bundle scorecard automatically — add the config + the
+	# test annotations/labels + the image COPY so the published bundle is scorecard-able.
+	mkdir -p bundle/tests/scorecard
+	$(KUSTOMIZE) build config/scorecard > bundle/tests/scorecard/config.yaml
+	grep -q test.config.v1 bundle/metadata/annotations.yaml || printf '  operators.operatorframework.io.test.config.v1: tests/scorecard/\n  operators.operatorframework.io.test.mediatype.v1: scorecard+v1\n' >> bundle/metadata/annotations.yaml
+	grep -q test.config.v1 bundle.Dockerfile || printf 'COPY bundle/tests/scorecard /tests/scorecard/\nLABEL operators.operatorframework.io.test.config.v1=tests/scorecard/\nLABEL operators.operatorframework.io.test.mediatype.v1=scorecard+v1\n' >> bundle.Dockerfile
 	$(OPERATOR_SDK) bundle validate ./bundle
+
+.PHONY: scorecard
+scorecard: ## Run scorecard (basic + olm suites) against ./bundle (needs a cluster).
+	$(OPERATOR_SDK) scorecard ./bundle --wait-time 120s
 
 .PHONY: bundle-build bundle-push catalog catalog-build catalog-push
 bundle-build: ## Build the bundle image ($(BUNDLE_IMG)).
