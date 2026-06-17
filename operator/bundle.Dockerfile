@@ -13,3 +13,7 @@ LABEL operators.operatorframework.io.metrics.project_layout=go.kubebuilder.io/v4
 # Copy files to locations specified by labels.
 COPY bundle/manifests /manifests/
 COPY bundle/metadata /metadata/
+LABEL com.redhat.openshift.versions="v4.18"
+COPY bundle/tests/scorecard /tests/scorecard/
+LABEL operators.operatorframework.io.test.config.v1=tests/scorecard/
+LABEL operators.operatorframework.io.test.mediatype.v1=scorecard+v1

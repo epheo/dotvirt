@@ -4,12 +4,78 @@ metadata:
   annotations:
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
+    containerImage: quay.io/epheo/dotvirt-operator@sha256:26127ff6dcef5190b4d4aa59db7cbab10c6c733c6d9bb82fc4ce5415cd1b6307
     description: Installs dotvirt — a vCenter-like GitOps WebUI for KubeVirt — with
       its platform/tenant tier.
+    repository: https://github.com/epheo/dotvirt
+    support: https://github.com/epheo/dotvirt/issues
+  labels:
+    operatorframework.io/arch.amd64: supported
+    operatorframework.io/os.linux: supported
   name: dotvirt-operator.v0.0.0
 spec:
   apiservicedefinitions: {}
-  customresourcedefinitions: {}
+  customresourcedefinitions:
+    owned:
+    - description: A dotvirt install — the workload + Route/Ingress, RBAC, the ArgoCD
+        AppProject tier + ApplicationSet, the platform git repo, and (optionally)
+        a self-hosted Forgejo.
+      displayName: dotvirt
+      kind: Dotvirt
+      name: dotvirts.dotvirt.io
+      resources:
+      - kind: Deployment
+        name: ""
+        version: v1
+      - kind: Service
+        name: ""
+        version: v1
+      - kind: Route
+        name: ""
+        version: v1
+      specDescriptors:
+      - description: dotvirt app image to deploy (defaults to the operator's pinned
+          image).
+        displayName: App Image
+        path: image
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      - description: Base URL of the git forge.
+        displayName: Forge URL
+        path: forge.url
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      - description: The cluster-scoped + tenancy git repo.
+        displayName: Platform Repo
+        path: forge.platformRepo
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      - description: Deploy a self-hosted Forgejo for evaluation (false = bring your
+          own).
+        displayName: Managed Forgejo
+        path: forge.managed
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
+      - description: Hostname for the UI Route/Ingress.
+        displayName: Ingress Host
+        path: ingress.host
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      - description: Prometheus/Thanos query API for the Performance tab.
+        displayName: Metrics URL
+        path: metrics.url
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      statusDescriptors:
+      - displayName: Phase
+        path: phase
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      - displayName: Conditions
+        path: conditions
+        x-descriptors:
+        - urn:alm:descriptor:io.kubernetes.conditions
+      version: v1alpha1
   description: |
     The dotvirt operator provisions a complete dotvirt install from a single
     `Dotvirt` resource: the workload + Route/Ingress, the RBAC, the ArgoCD
@@ -48,6 +114,9 @@ spec:
   links:
   - name: Source
     url: https://github.com/epheo/dotvirt
+  maintainers:
+  - email: github@epheo.eu
+    name: epheo
   maturity: alpha
   minKubeVersion: 1.30.0
   provider:

@@ -1,0 +1,17 @@
+# Scorecard test config, assembled into the bundle as tests/scorecard/config.yaml by
+# `operator-sdk generate bundle`. basic + olm suites (run with `make scorecard`).
+resources:
+- bases/config.yaml
+patches:
+- path: patches/basic.config.yaml
+  target:
+    group: scorecard.operatorframework.io
+    version: v1alpha3
+    kind: Configuration
+    name: config
+- path: patches/olm.config.yaml
+  target:
+    group: scorecard.operatorframework.io
+    version: v1alpha3
+    kind: Configuration
+    name: config
