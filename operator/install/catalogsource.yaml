@@ -1,15 +1,15 @@
-# Self-hosted dotvirt operator catalog. Bump .spec.image to the new catalog tag to
-# publish a release; OLM then upgrades subscribers within installPlanApproval.
+# Self-hosted dotvirt operator catalog, pinned by immutable digest (== :v0.0.4). To
+# publish a release, bump .spec.image to the new catalog's digest; OLM then upgrades
+# subscribers within installPlanApproval.
 apiVersion: operators.coreos.com/v1alpha1
 kind: CatalogSource
 metadata:
   name: dotvirt-catalog
-  namespace: dotvirt-olm
+  # openshift-marketplace so the operator shows in the OperatorHub UI (that's the
+  # namespace the console aggregates catalogs from).
+  namespace: openshift-marketplace
 spec:
   sourceType: grpc
-  image: quay.io/epheo/dotvirt-operator-catalog:v0.0.4
+  image: quay.io/epheo/dotvirt-operator-catalog@sha256:7e38775d4bd763e2f9a90b7393380def4a23a82463a0fa7c144862400f55ba4e
   displayName: dotvirt
   publisher: epheo
-  updateStrategy:
-    registryPoll:
-      interval: 10m

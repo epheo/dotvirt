@@ -1,16 +1,19 @@
-# Release pipeline: on a vX.Y.Z tag, build + push the operator, bundle, and catalog
-# (the app image rides ci.yaml on main). Runs in the `QUAY` environment, which holds
-# the QUAY_USERNAME / QUAY_PASSWORD push secrets.
-#
-# Digest discipline: the tag is cut from a commit whose CSV/DefaultImage already
-# carry the immutable @sha256 digests (set during the release commit — see the
-# `make` digest dance in operator/Makefile). This job publishes the artifacts that
-# match that commit; it does not float tags.
+# Cut a digest-pinned OLM release. Runs hack/release.sh (build + push app, operator,
+# bundle, catalog to quay.io/epheo, each pinned by immutable @sha256 digest), then
+# opens a PR recording the digest pins. Manual trigger — the dance is stateful, so a
+# maintainer picks the version + the version it replaces. Runs in the `QUAY`
+# environment (QUAY_USERNAME / QUAY_PASSWORD push secrets).
 name: release
 
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, x.y.z"
+        required: true
+      prev:
+        description: "Version this release replaces, x.y.z"
+        required: true
 
 env:
   GOTOOLCHAIN: auto
@@ -18,7 +21,10 @@ env:
 jobs:
   release:
     runs-on: ubuntu-latest
-    environment: QUAY # GitHub Actions environment holding the QUAY_* push secrets
+    environment: QUAY
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -27,31 +33,31 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - uses: docker/login-action@v3
-        with:
-          registry: quay.io
-          username: ${{ secrets.QUAY_USERNAME }}
-          password: ${{ secrets.QUAY_PASSWORD }}
-      - name: Install operator-sdk
+      - name: Install skopeo + operator-sdk
         run: |
-          curl -fsSL -o /usr/local/bin/operator-sdk \
+          sudo apt-get update && sudo apt-get install -y skopeo
+          sudo curl -fsSL -o /usr/local/bin/operator-sdk \
             https://github.com/operator-framework/operator-sdk/releases/download/v1.42.2/operator-sdk_linux_amd64
-          chmod +x /usr/local/bin/operator-sdk
-      - name: Version from tag
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
-      - name: App image
-        run: make push TAG="${GITHUB_SHA::7}"
-      - name: Operator image
-        working-directory: operator
+          sudo chmod +x /usr/local/bin/operator-sdk
+      - name: Registry login (docker + skopeo)
+        env:
+          U: ${{ secrets.QUAY_USERNAME }}
+          P: ${{ secrets.QUAY_PASSWORD }}
         run: |
-          make docker-build IMG="quay.io/epheo/dotvirt-operator:${GITHUB_SHA::7}"
-          docker push "quay.io/epheo/dotvirt-operator:${GITHUB_SHA::7}"
-      - name: Bundle + catalog
-        working-directory: operator
+          echo "$P" | docker login quay.io -u "$U" --password-stdin
+          echo "$P" | skopeo login quay.io -u "$U" --password-stdin
+      - name: Cut release (build + push + digest-pin)
+        run: VERSION=${{ inputs.version }} PREV=${{ inputs.prev }} CONTAINER_TOOL=docker ./hack/release.sh
+      - name: Open digest-pin PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          make bundle VERSION="$VERSION"
-          make bundle-build bundle-push VERSION="$VERSION"
-          make catalog catalog-build catalog-push VERSION="$VERSION"
-      - name: Validate
-        working-directory: operator
-        run: operator-sdk bundle validate ./bundle
+          git config user.name "dotvirt-release[bot]"
+          git config user.email "dotvirt-release[bot]@users.noreply.github.com"
+          branch="release-v${{ inputs.version }}"
+          git switch -c "$branch"
+          git commit -am "release v${{ inputs.version }}: digest-pinned (replaces v${{ inputs.prev }})"
+          git push -u origin "$branch"
+          gh pr create --fill \
+            --title "release v${{ inputs.version }}" \
+            --body "Digest-pinned release cut by CI; images already pushed to quay.io/epheo. Merge to record the pins, then apply operator/install/catalogsource.yaml."

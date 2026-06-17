@@ -53,9 +53,9 @@ spec:
   provider:
     name: epheo
   relatedImages:
-  - image: quay.io/epheo/dotvirt@sha256:40242961bfc6674dcbd6aa9d5793a5d23914410d4c80ac3ce9320db05d3856bf
+  - image: quay.io/epheo/dotvirt@sha256:463b2d8384686f06f92121bd1c0101402514512ab552cef0cce3f47f0cf9aebe
     name: dotvirt
-  - image: quay.io/epheo/dotvirt-operator@sha256:222d794d99c6a18fb48bfc3d164a45c8f400c666ab31b5d262596aa3db0dd184
+  - image: quay.io/epheo/dotvirt-operator@sha256:26127ff6dcef5190b4d4aa59db7cbab10c6c733c6d9bb82fc4ce5415cd1b6307
     name: dotvirt-operator
-  replaces: dotvirt-operator.v0.0.3
+  replaces: dotvirt-operator.v0.0.4
   version: 0.0.0
