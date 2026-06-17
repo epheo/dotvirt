@@ -16,6 +16,9 @@
 # Backups and local dumps
 *-backup-*.yaml
 
+# Throwaway preview CatalogSource (per-rc, digest-pinned; written by hack/preview.sh)
+/operator/install/catalogsource-preview.yaml
+
 # Editor/OS
 .DS_Store
 *.swp

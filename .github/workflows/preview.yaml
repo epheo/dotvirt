@@ -1,0 +1,48 @@
+# Cut a candidate-channel preview (release-candidate) for QA — runs hack/preview.sh
+# (build + push app/operator/bundle + a preview catalog, all digest-pinned, into the
+# `candidate` channel only; `alpha` is untouched, so it's never a published release).
+# Uploads the preview CatalogSource as an artifact to apply on a candidate-channel
+# cluster (hetznet). Runs in the `QUAY` environment.
+name: preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release-candidate version, x.y.z-rc.N"
+        required: true
+
+env:
+  GOTOOLCHAIN: auto
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    environment: QUAY
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install skopeo + operator-sdk
+        run: |
+          sudo apt-get update && sudo apt-get install -y skopeo
+          sudo curl -fsSL -o /usr/local/bin/operator-sdk \
+            https://github.com/operator-framework/operator-sdk/releases/download/v1.42.2/operator-sdk_linux_amd64
+          sudo chmod +x /usr/local/bin/operator-sdk
+      - name: Registry login (docker + skopeo)
+        env:
+          U: ${{ secrets.QUAY_USERNAME }}
+          P: ${{ secrets.QUAY_PASSWORD }}
+        run: |
+          echo "$P" | docker login quay.io -u "$U" --password-stdin
+          echo "$P" | skopeo login quay.io -u "$U" --password-stdin
+      - name: Cut preview
+        run: VERSION=${{ inputs.version }} CONTAINER_TOOL=docker ./hack/preview.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: catalogsource-preview-${{ inputs.version }}
+          path: operator/install/catalogsource-preview.yaml

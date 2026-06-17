@@ -7,7 +7,7 @@ REGISTRY ?= quay.io
 IMAGE    ?= $(REGISTRY)/epheo/dotvirt
 TAG      ?= $(shell git rev-parse --short HEAD)
 
-.PHONY: build test web check e2e image push run release
+.PHONY: build test web check e2e image push run release preview
 
 build:
 	go build -o dotvirt ./cmd/dotvirt
@@ -40,3 +40,9 @@ run: build
 #   VERSION=0.0.6 PREV=0.0.5 make release
 release:
 	VERSION=$(VERSION) PREV=$(PREV) ./hack/release.sh
+
+# Cut a candidate-channel preview (release-candidate) for QA on a test cluster —
+# never enters the alpha channel. Throwaway. See hack/preview.sh.
+#   VERSION=0.0.6-rc.1 make preview
+preview:
+	VERSION=$(VERSION) ./hack/preview.sh

@@ -40,6 +40,33 @@ jobs:
       - run: npm run build
         working-directory: web
 
+  # Merge gate: build both images (no push) + validate the OLM artifacts, so a broken
+  # Containerfile/Dockerfile, stale generated manifest, or invalid CSV/catalog fails
+  # the PR instead of main. Uses no secrets, so it also runs on fork PRs.
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build images (no push)
+        run: |
+          docker build -f Containerfile -t dotvirt:pr .
+          docker build -f operator/Dockerfile -t dotvirt-operator:pr .
+      - name: Generated manifests in sync
+        run: |
+          make -C operator manifests generate
+          git diff --exit-code -- operator/api operator/config/crd operator/config/rbac \
+            || { echo "::error::stale generated manifests — run 'make -C operator manifests generate' and commit"; exit 1; }
+      - name: Validate bundle + catalog
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/operator-sdk \
+            https://github.com/operator-framework/operator-sdk/releases/download/v1.42.2/operator-sdk_linux_amd64
+          sudo chmod +x /usr/local/bin/operator-sdk
+          operator-sdk bundle validate ./operator/bundle
+          go run github.com/operator-framework/operator-registry/cmd/opm@v1.51.0 validate operator/catalog
+
   # App image build+push, main only — deploy/operator pin the immutable digest of
   # the short-sha tag this publishes.
   image:
