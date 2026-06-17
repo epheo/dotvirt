@@ -34,38 +34,27 @@ spec:
         name: ""
         version: v1
       specDescriptors:
-      - description: dotvirt app image to deploy (defaults to the operator's pinned
-          image).
+      - description: dotvirt app image to deploy. Defaults to the operator's pinned
+          digest, so an operator upgrade rolls the app; set only to override.
         displayName: App Image
         path: image
         x-descriptors:
         - urn:alm:descriptor:com.tectonic.ui:text
-      - description: Base URL of the git forge.
-        displayName: Forge URL
-        path: forge.url
-        x-descriptors:
-        - urn:alm:descriptor:com.tectonic.ui:text
-      - description: The cluster-scoped + tenancy git repo.
-        displayName: Platform Repo
-        path: forge.platformRepo
-        x-descriptors:
-        - urn:alm:descriptor:com.tectonic.ui:text
-      - description: Deploy a self-hosted Forgejo for evaluation (false = bring your
-          own).
-        displayName: Managed Forgejo
-        path: forge.managed
-        x-descriptors:
-        - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
-      - description: Hostname for the UI Route/Ingress.
-        displayName: Ingress Host
-        path: ingress.host
-        x-descriptors:
-        - urn:alm:descriptor:com.tectonic.ui:text
-      - description: Prometheus/Thanos query API for the Performance tab.
-        displayName: Metrics URL
-        path: metrics.url
-        x-descriptors:
-        - urn:alm:descriptor:com.tectonic.ui:text
+      - description: Git forge holding the platform repo — its URL and platform repo,
+          the credentials secret, and whether the operator self-hosts a Forgejo.
+        displayName: Forge
+        path: forge
+      - description: The ArgoCD (OpenShift GitOps) instance dotvirt drives — its namespace
+          and application-controller service account.
+        displayName: ArgoCD
+        path: argocd
+      - description: How the UI is exposed — a Route on OpenShift or an Ingress on
+          vanilla Kubernetes — and at which host.
+        displayName: Ingress
+        path: ingress
+      - description: Prometheus/Thanos query API backing the Performance tab.
+        displayName: Metrics
+        path: metrics
       statusDescriptors:
       - displayName: Phase
         path: phase
