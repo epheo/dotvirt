@@ -101,7 +101,7 @@ jobs:
       - name: Install the bundle via OLM (assert it reaches Succeeded)
         run: |
           kubectl create namespace dotvirt-ci
-          operator-sdk run bundle localhost:5000/dotvirt-operator-bundle:ci -n dotvirt-ci --timeout 5m
+          operator-sdk run bundle localhost:5000/dotvirt-operator-bundle:ci -n dotvirt-ci --timeout 5m --use-http
           kubectl -n dotvirt-ci get csv
       - name: Scorecard (basic + olm)
         run: operator-sdk scorecard ./operator/bundle --wait-time 180s
