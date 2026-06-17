@@ -10,6 +10,13 @@ name: alpha
 package: dotvirt-operator
 schema: olm.channel
 ---
+entries:
+- name: dotvirt-operator.v0.0.5
+  replaces: dotvirt-operator.v0.0.4
+name: candidate
+package: dotvirt-operator
+schema: olm.channel
+---
 image: quay.io/epheo/dotvirt-operator-bundle@sha256:02e421cc5cb4e390524339d8639935ed5808364c54083eb07422fdd55c6a75a9
 name: dotvirt-operator.v0.0.5
 package: dotvirt-operator

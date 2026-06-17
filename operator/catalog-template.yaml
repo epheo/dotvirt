@@ -9,7 +9,13 @@ entries:
     defaultChannel: alpha
   - schema: olm.channel
     package: dotvirt-operator
-    name: alpha
+    name: alpha # released versions only — the channel external consumers subscribe to
+    entries:
+      - name: dotvirt-operator.v0.0.5
+        replaces: dotvirt-operator.v0.0.4
+  - schema: olm.channel
+    package: dotvirt-operator
+    name: candidate # release-candidates + releases — the QA/preview channel (hetznet)
     entries:
       - name: dotvirt-operator.v0.0.5
         replaces: dotvirt-operator.v0.0.4
