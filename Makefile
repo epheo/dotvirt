@@ -7,7 +7,7 @@ REGISTRY ?= quay.io
 IMAGE    ?= $(REGISTRY)/epheo/dotvirt
 TAG      ?= $(shell git rev-parse --short HEAD)
 
-.PHONY: build test web check e2e image push run
+.PHONY: build test web check e2e image push run release
 
 build:
 	go build -o dotvirt ./cmd/dotvirt
@@ -34,3 +34,9 @@ push: image
 
 run: build
 	./dotvirt
+
+# Cut a digest-pinned OLM release end-to-end (app + operator + bundle + catalog,
+# every reference an immutable @sha256 digest). See hack/release.sh.
+#   VERSION=0.0.6 PREV=0.0.5 make release
+release:
+	VERSION=$(VERSION) PREV=$(PREV) ./hack/release.sh
