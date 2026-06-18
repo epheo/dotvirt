@@ -28,7 +28,7 @@ digest() { skopeo inspect --format '{{.Digest}}' "docker://$1"; }   # -> sha256:
 repin() { local ref="$1" d="$2"; shift 2; sed -i -E "s#${ref}@sha256:[0-9a-f]{64}#${ref}@${d}#g" "$@"; }
 
 echo ">> [1/4] app  -> $REG/dotvirt:$SHA (+ :v$VERSION)"
-$TOOL build -f Containerfile -t "$REG/dotvirt:$SHA" .
+$TOOL build --build-arg VERSION="$VERSION" -f Containerfile -t "$REG/dotvirt:$SHA" .
 $TOOL push "$REG/dotvirt:$SHA"
 skopeo copy "docker://$REG/dotvirt:$SHA" "docker://$REG/dotvirt:v$VERSION"
 D_APP="$(digest "$REG/dotvirt:$SHA")"; echo "   app digest: $D_APP"
@@ -36,7 +36,7 @@ repin "$REG/dotvirt" "$D_APP" operator/internal/install/dotvirt.go "$CSV"
 sed -i -E "s#replaces: dotvirt-operator\.v[0-9.]+#replaces: dotvirt-operator.v$PREV#" "$CSV"
 
 echo ">> [2/4] operator -> $REG/dotvirt-operator:v$VERSION"
-$TOOL build -f operator/Dockerfile -t "$REG/dotvirt-operator:v$VERSION" .
+$TOOL build --build-arg VERSION="$VERSION" -f operator/Dockerfile -t "$REG/dotvirt-operator:v$VERSION" .
 $TOOL push "$REG/dotvirt-operator:v$VERSION"
 D_OP="$(digest "$REG/dotvirt-operator:v$VERSION")"; echo "   operator digest: $D_OP"
 repin "$REG/dotvirt-operator" "$D_OP" "$CSV"
@@ -57,7 +57,7 @@ D_CAT="$(digest "$REG/dotvirt-operator-catalog:v$VERSION")"; echo "   catalog di
 repin "$REG/dotvirt-operator-catalog" "$D_CAT" operator/install/catalogsource.yaml
 
 echo ">> validate"
-operator-sdk bundle validate ./operator/bundle
+operator-sdk bundle validate ./operator/bundle --select-optional suite=operatorframework
 $OPM validate operator/catalog
 
 cat <<EOF

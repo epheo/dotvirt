@@ -13,6 +13,11 @@ KUSTOMIZE ?= go run sigs.k8s.io/kustomize/kustomize/v5@v5.4.3
 OPERATOR_SDK ?= operator-sdk
 OPM ?= go run github.com/operator-framework/operator-registry/cmd/opm@v1.51.0
 
+# Generated bundle CSV + its kustomize base (the source of spec.relatedImages, which
+# operator-sdk's `generate bundle` drops and the bundle target re-injects below).
+BUNDLE_CSV := bundle/manifests/dotvirt-operator.clusterserviceversion.yaml
+CSV_BASE   := config/manifests/bases/dotvirt-operator.clusterserviceversion.yaml
+
 .PHONY: help
 help: ## Show targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-14s %s\n", $$1, $$2}'
@@ -71,7 +76,16 @@ bundle: manifests ## Generate the OLM bundle for OperatorHub (needs operator-sdk
 	$(KUSTOMIZE) build config/scorecard > bundle/tests/scorecard/config.yaml
 	grep -q test.config.v1 bundle/metadata/annotations.yaml || printf '  operators.operatorframework.io.test.config.v1: tests/scorecard/\n  operators.operatorframework.io.test.mediatype.v1: scorecard+v1\n' >> bundle/metadata/annotations.yaml
 	grep -q test.config.v1 bundle.Dockerfile || printf 'COPY bundle/tests/scorecard /tests/scorecard/\nLABEL operators.operatorframework.io.test.config.v1=tests/scorecard/\nLABEL operators.operatorframework.io.test.mediatype.v1=scorecard+v1\n' >> bundle.Dockerfile
-	$(OPERATOR_SDK) bundle validate ./bundle
+	# operator-sdk's `generate bundle` drops spec.relatedImages, so re-inject the
+	# digest-pinned operand/operator/forge image list from the CSV base — it's what
+	# disconnected installs + `oc adm catalog mirror` resolve the operand images from.
+	grep -q '^  relatedImages:' $(BUNDLE_CSV) || { awk -v b=$(CSV_BASE) \
+		'/^  version: /&&!d{while((getline l<b)>0){if(l~/^  relatedImages:/)g=1;else if(g&&l~/^  [A-Za-z]/)g=0;if(g)print l}close(b);d=1}{print}' \
+		$(BUNDLE_CSV) > $(BUNDLE_CSV).tmp && mv $(BUNDLE_CSV).tmp $(BUNDLE_CSV); }
+	# Validate with the OperatorHub submission rules (operatorhubv2 + capabilities +
+	# categories + good-practices), not just the defaults — so a bundle that wouldn't be
+	# accepted into the community catalogs fails here instead of in their CI.
+	$(OPERATOR_SDK) bundle validate ./bundle --select-optional suite=operatorframework
 
 .PHONY: scorecard
 scorecard: ## Run scorecard (basic + olm suites) against ./bundle (needs a cluster).

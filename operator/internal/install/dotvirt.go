@@ -137,6 +137,8 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 	}
 
 	replicas := int32(1)
+	runAsNonRoot := true
+	noPrivilegeEscalation := false
 	return &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: objectMeta(AppName, dv.Namespace, dv.Name),
@@ -149,6 +151,13 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 				ObjectMeta: metav1.ObjectMeta{Labels: podLabels(dv.Name)},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: AppName,
+					// Restricted-v2 compatible (the app image is distroless-nonroot). No
+					// readOnlyRootFilesystem: the app writes git clones + temp under $HOME,
+					// and restricted-v2 doesn't require a read-only root.
+					SecurityContext: &corev1.PodSecurityContext{
+						RunAsNonRoot:   &runAsNonRoot,
+						SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+					},
 					Containers: []corev1.Container{{
 						Name:  AppName,
 						Image: image,
@@ -158,12 +167,27 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: "drafts", MountPath: "/var/lib/dotvirt/drafts"},
 						},
+						SecurityContext: &corev1.SecurityContext{
+							AllowPrivilegeEscalation: &noPrivilegeEscalation,
+							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+						},
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("50m"), corev1.ResourceMemory: resource.MustParse("128Mi")},
+							Limits:   corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("512Mi")},
+						},
 						ReadinessProbe: &corev1.Probe{
 							ProbeHandler: corev1.ProbeHandler{
 								HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(8080)},
 							},
 							InitialDelaySeconds: 5,
 							PeriodSeconds:       10,
+						},
+						LivenessProbe: &corev1.Probe{
+							ProbeHandler: corev1.ProbeHandler{
+								HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(8080)},
+							},
+							InitialDelaySeconds: 15,
+							PeriodSeconds:       20,
 						},
 					}},
 					Volumes: []corev1.Volume{{

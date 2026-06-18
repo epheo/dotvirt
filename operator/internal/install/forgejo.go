@@ -22,7 +22,11 @@ import (
 // replica). The bootstrap was verified live against a real Forgejo (see the
 // initContainer below). For production, bring your own forge instead.
 const (
-	ForgejoImage       = "codeberg.org/forgejo/forgejo:11"
+	// Pinned by digest (the codeberg.org/forgejo/forgejo:11 tag) so the eval forge is
+	// reproducible and declarable in the CSV's relatedImages. Re-pin manually when the
+	// upstream :11 tag moves. The s6 image starts as root, so this pod keeps the anyuid
+	// SCC by design (see ForgejoAnyuidBinding) — it is NOT hardened to non-root.
+	ForgejoImage       = "codeberg.org/forgejo/forgejo@sha256:d98d860ea64fd36cb0aabf0b46bbe1a37566b498eee4af0a6b246d5a45759d6d"
 	ForgejoSAName      = "dotvirt-forgejo"
 	ForgejoAdminSecret = "dotvirt-forgejo-admin" // generated admin password (key "password")
 	ForgejoPVCName     = "dotvirt-forgejo-data"
@@ -107,6 +111,15 @@ func ForgejoService(dv *dotvirtv1alpha1.Dotvirt) *corev1.Service {
 	}
 }
 
+// forgejoResources bounds the eval forge — modest single-replica sizing, shared by
+// the bootstrap init and main containers.
+func forgejoResources() corev1.ResourceRequirements {
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("50m"), corev1.ResourceMemory: resource.MustParse("256Mi")},
+		Limits:   corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")},
+	}
+}
+
 // forgejoEnv is the config shared by the init + main containers.
 func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt) []corev1.EnvVar {
 	return []corev1.EnvVar{
@@ -154,6 +167,7 @@ su-exec git forgejo admin user create --admin --username ` + ForgejoBotUser +
 						Command:      []string{"sh", "-c", bootstrap},
 						Env:          append(forgejoEnv(dv), adminPW),
 						VolumeMounts: []corev1.VolumeMount{dataMount},
+						Resources:    forgejoResources(),
 					}},
 					Containers: []corev1.Container{{
 						Name:         "forgejo",
@@ -166,6 +180,12 @@ su-exec git forgejo admin user create --admin --username ` + ForgejoBotUser +
 							InitialDelaySeconds: 8,
 							PeriodSeconds:       5,
 						},
+						LivenessProbe: &corev1.Probe{
+							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(3000)}},
+							InitialDelaySeconds: 30,
+							PeriodSeconds:       20,
+						},
+						Resources: forgejoResources(),
 					}},
 					Volumes: []corev1.Volume{{
 						Name:         "data",
