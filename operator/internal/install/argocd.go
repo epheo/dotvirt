@@ -1,15 +1,13 @@
 package install
 
 import (
-	"path"
-	"strings"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // RepoCredsName is the Argo repo-credentials template secret (in the ArgoCD ns).
@@ -43,24 +41,13 @@ func argoObject(kind, name, namespace, instance string, spec map[string]any) *un
 	return u
 }
 
-// OwnerPrefix is the forge owner path ("…/<owner>") of a repo URL — the Argo
-// repo-creds URL prefix that longest-prefix-matches every repo under that owner.
-// Returns the input unchanged when it can't strip a repo segment.
-func OwnerPrefix(repoURL string) string {
-	dir := path.Dir(strings.TrimSuffix(repoURL, ".git"))
-	if dir == "." || dir == "/" || dir == "" {
-		return repoURL
-	}
-	return dir
-}
-
 // repoPrefix is the owner-path glob ("…/<owner>/*") for the tenant AppProject's
 // sourceRepos. Falls back to "*" when it can't be derived.
 func repoPrefix(platformRepo string) string {
 	if platformRepo == "" {
 		return "*"
 	}
-	if p := OwnerPrefix(platformRepo); p != platformRepo {
+	if p := forge.OwnerPrefixURL(platformRepo); p != platformRepo {
 		return p + "/*"
 	}
 	return "*"

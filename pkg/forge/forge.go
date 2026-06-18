@@ -321,6 +321,25 @@ func ownerRepo(repoURL string) (owner, repo string, ok bool) {
 	return owner, repo, true
 }
 
+// OwnerPrefixURL is the forge owner URL ("scheme://host/.../<owner>") of a repo
+// URL — the prefix Argo longest-prefix-matches to attach one repo-credential to
+// every repo under that owner. Unlike path.Dir, it preserves the "://" in the
+// scheme (path.Dir collapses it to ":/", yielding a prefix Argo never matches).
+// Returns the input unchanged when there's no repo segment to strip.
+func OwnerPrefixURL(repoURL string) string {
+	s := strings.TrimSuffix(strings.TrimRight(repoURL, "/"), ".git")
+	// Find where the path starts, after scheme://host, so we never cut into "://".
+	pathStart := 0
+	if i := strings.Index(s, "://"); i >= 0 {
+		pathStart = i + 3
+	}
+	slash := strings.LastIndexByte(s[pathStart:], '/')
+	if slash <= 0 {
+		return repoURL // no owner/repo path segments to strip
+	}
+	return s[:pathStart+slash]
+}
+
 func (c *Client) do(method, path string, body, out any) error {
 	var reader io.Reader
 	if body != nil {

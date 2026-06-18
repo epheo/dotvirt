@@ -38,6 +38,29 @@ func TestOwnerRepo(t *testing.T) {
 	}
 }
 
+func TestOwnerPrefixURL(t *testing.T) {
+	cases := []struct {
+		url, want string
+	}{
+		// The scheme's "//" must survive — path.Dir would collapse it to "https:/",
+		// yielding a prefix Argo never longest-prefix-matches (the original bug).
+		{"https://forge.example/dotvirt/platform.git", "https://forge.example/dotvirt"},
+		{"https://forge.example/dotvirt/platform", "https://forge.example/dotvirt"},
+		{"https://forge.example/dotvirt/platform/", "https://forge.example/dotvirt"},
+		{"http://forgejo-http.forgejo.svc:3000/dotvirt/platform.git", "http://forgejo-http.forgejo.svc:3000/dotvirt"},
+		// Nested groups: only the last segment is stripped.
+		{"https://forge.example/org/sub/platform.git", "https://forge.example/org/sub"},
+		// No repo segment to strip → returned unchanged.
+		{"https://forge.example", "https://forge.example"},
+		{"https://forge.example/", "https://forge.example/"},
+	}
+	for _, c := range cases {
+		if got := OwnerPrefixURL(c.url); got != c.want {
+			t.Errorf("OwnerPrefixURL(%q) = %q, want %q", c.url, got, c.want)
+		}
+	}
+}
+
 // testClient points a Client at an httptest server with the standard owner/repo.
 func testClient(srvURL string) *Client {
 	return NewFactory(srvURL, "tok", false).For(srvURL + "/dotvirt/team-a.git")

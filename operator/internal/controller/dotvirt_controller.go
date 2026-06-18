@@ -595,7 +595,7 @@ func (r *DotvirtReconciler) repoCreds(ctx context.Context, dv *dotvirtv1alpha1.D
 	}
 	prefix := dv.Spec.Forge.URL
 	if dv.Spec.Forge.PlatformRepo != "" {
-		prefix = install.OwnerPrefix(dv.Spec.Forge.PlatformRepo)
+		prefix = forge.OwnerPrefixURL(dv.Spec.Forge.PlatformRepo)
 	}
 	return install.RepoCredsSecret(dv, argoNS, prefix, string(s.Data["username"]), token)
 }
