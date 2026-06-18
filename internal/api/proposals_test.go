@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -88,6 +89,46 @@ func TestProposalsHotPathNeverCallsForge(t *testing.T) {
 	}
 	if got := s.proposalsFor(id, projects); len(got) != 0 {
 		t.Fatalf("lane should be empty after the merge, got %v", got)
+	}
+}
+
+// TestProposalsPlatformProjectSticky pins the platform-PR fix: the synthetic
+// "platform" project is config-only and never in discovery, so a propose into it
+// must track it explicitly, and a later inventory build must NOT drop it — else its
+// PR shows briefly then vanishes.
+func TestProposalsPlatformProjectSticky(t *testing.T) {
+	fd := &fakeDraft{prs: map[string]model.Proposal{
+		"platform": {Project: "platform", PRNumber: 1, PRURL: "http://x/pr/1"},
+	}}
+	s := NewServer(Deps{Draft: fd})
+	id := auth.Identity{Token: "tok-admin", Username: "kube:admin"}
+
+	// A propose into the platform tier tracks it (handlePropose's pre-nudge step).
+	s.trackProposalsProject(id, project.ProjectInfo{Name: "platform", Repo: "http://x/platform.git"})
+	if !s.refreshProposals() {
+		t.Fatal("platform PR should wake the hub after a propose tracks it")
+	}
+	if got := s.proposalsFor(id, nil); len(got) != 1 || got[0].Project != "platform" {
+		t.Fatalf("platform lane = %v, want PR for platform", got)
+	}
+
+	// A subsequent inventory build (discovery never lists platform) must keep it.
+	s.trackProposals(id, []project.ProjectInfo{{Name: "team-a", Repo: "http://x/a.git"}})
+	s.refreshProposals()
+	if got := s.proposalsFor(id, nil); len(got) != 1 || got[0].Project != "platform" {
+		t.Fatalf("platform lane dropped after an inventory build: %v", got)
+	}
+}
+
+// TestCanAuthorPlatformNoRepo pins the safety gate: with no platform repo
+// configured, the inventory never seeds (or SSAR-checks) the platform tier.
+func TestCanAuthorPlatformNoRepo(t *testing.T) {
+	s := NewServer(Deps{}) // no PlatformRepo
+	id := auth.Identity{Token: "tok", Username: "u"}
+	// A nil cluster client is safe here: the repo-empty guard returns before any
+	// SSAR, so it must not be dereferenced.
+	if s.canAuthorPlatform(context.TODO(), id, nil) {
+		t.Fatal("canAuthorPlatform must be false when no platform repo is configured")
 	}
 }
 

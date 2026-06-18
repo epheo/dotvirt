@@ -8,6 +8,7 @@ import (
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/inventory"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/project"
 )
 
 // InventoryForIdentity builds the multi-tenant inventory visible to id: resolve
@@ -53,7 +54,14 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	}
 	inv := inventory.Build(in)
 	inv.Warnings = warnings
-	inv.Proposals = s.proposalsFor(id, projects)
+	// The platform tier is config-only (never a labeled namespace), so it's absent
+	// from `projects` — seed it for platform authors so its open PR shows on a cold
+	// load, not just right after a propose tracks it.
+	propProjects := projects
+	if s.canAuthorPlatform(ctx, id, userCluster) {
+		propProjects = append(propProjects, project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo})
+	}
+	inv.Proposals = s.proposalsFor(id, propProjects)
 	return inv, nil
 }
 
