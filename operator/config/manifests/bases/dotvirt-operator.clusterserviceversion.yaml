@@ -115,5 +115,7 @@ spec:
     name: dotvirt
   - image: quay.io/epheo/dotvirt-operator@sha256:26127ff6dcef5190b4d4aa59db7cbab10c6c733c6d9bb82fc4ce5415cd1b6307
     name: dotvirt-operator
+  - image: codeberg.org/forgejo/forgejo@sha256:d98d860ea64fd36cb0aabf0b46bbe1a37566b498eee4af0a6b246d5a45759d6d
+    name: forgejo
   replaces: dotvirt-operator.v0.0.4
   version: 0.0.0

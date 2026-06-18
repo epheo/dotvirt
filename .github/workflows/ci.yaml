@@ -64,7 +64,7 @@ jobs:
           sudo curl -fsSL -o /usr/local/bin/operator-sdk \
             https://github.com/operator-framework/operator-sdk/releases/download/v1.42.2/operator-sdk_linux_amd64
           sudo chmod +x /usr/local/bin/operator-sdk
-          operator-sdk bundle validate ./operator/bundle
+          operator-sdk bundle validate ./operator/bundle --select-optional suite=operatorframework
           go run github.com/operator-framework/operator-registry/cmd/opm@v1.51.0 validate operator/catalog
 
   # Install the bundle on a throwaway kind cluster via OLM (à la community-operators
