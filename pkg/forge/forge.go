@@ -248,6 +248,12 @@ func (f *Factory) MintToken(username, password, tokenName string, scopes []strin
 	if f == nil {
 		return "", fmt.Errorf("forge not configured")
 	}
+	// Re-mint safe: Forgejo 400s on a duplicate token name, so a re-mint (the stored
+	// token was rejected) must first delete the prior token of this name. The raw
+	// secret of an existing token can't be re-read, so rotation is delete-then-create.
+	if err := f.deleteToken(username, password, tokenName); err != nil {
+		return "", err
+	}
 	body, err := json.Marshal(map[string]any{"name": tokenName, "scopes": scopes})
 	if err != nil {
 		return "", err
@@ -275,6 +281,28 @@ func (f *Factory) MintToken(username, password, tokenName string, scopes []strin
 		return "", err
 	}
 	return out.Sha1, nil
+}
+
+// deleteToken removes a named access token via basic auth (Forgejo accepts the
+// token NAME as the path id). A 404 (no such token) is success — the goal state is
+// "no token of this name", so MintToken can recreate it cleanly on re-mint.
+func (f *Factory) deleteToken(username, password, tokenName string) error {
+	req, err := http.NewRequest("DELETE", f.baseURL+"/api/v1/users/"+username+"/tokens/"+url.PathEscape(tokenName), nil)
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(username, password)
+	req.Header.Set("Accept", "application/json")
+	resp, err := f.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("forge delete token: %w", err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode == http.StatusNotFound || (resp.StatusCode >= 200 && resp.StatusCode < 300) {
+		return nil
+	}
+	return fmt.Errorf("forge delete token: %s", resp.Status)
 }
 
 // ValidateToken reports whether token authenticates against the forge, via a GET
