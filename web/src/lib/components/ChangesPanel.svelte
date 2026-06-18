@@ -155,10 +155,12 @@
 			</div>
 		{/each}
 
-		<!-- Transient propose feedback. Open PRs are shown persistently above (from
-		     `proposals`), so here we surface only the no-PR cases: forge unconfigured
-		     (compare link) or push-only. -->
-		{#each Object.entries(result).filter(([, r]) => !r.prURL) as [project, r] (project)}
+		<!-- Transient propose feedback: surface the PR link straight from the propose
+		     response so it appears immediately, not once the background `proposals`
+		     refresh eventually lands. Drop an entry once the persistent banner above
+		     carries that exact PR, so the same PR is never listed twice — but a
+		     re-propose that lands a new PR still shows until the banner catches up. -->
+		{#each Object.entries(result).filter(([proj, r]) => !proposals.some((p) => p.project === proj && p.prNumber === r.prNumber)) as [project, r] (project)}
 			<div class="mb-2 rounded border border-green-200 bg-green-50 p-3 text-sm">
 				<div class="mb-1 flex items-center gap-1">
 					<span class="font-medium text-slate-700">{project}</span>

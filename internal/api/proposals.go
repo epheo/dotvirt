@@ -54,11 +54,53 @@ func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo) 
 }
 
 // trackProposals records id as a live refresh target. Called on every inventory
-// build, so the watched set mirrors who is actually looking.
+// build, so the watched set mirrors who is actually looking. The live UI's builds
+// already include the synthetic platform tier (InventoryForIdentity seeds it), but
+// the standalone GET /api/proposals passes only discovered projects — so carry a
+// previously-tracked platform entry forward rather than let that path drop it.
 func (s *Server) trackProposals(id auth.Identity, projects []project.ProjectInfo) {
+	key := restfactory.TokenKey(id.Token)
 	s.propMu.Lock()
 	defer s.propMu.Unlock()
-	s.propTargets[restfactory.TokenKey(id.Token)] = propTarget{id: id, projects: projects, lastSeen: time.Now()}
+	if prev, ok := s.propTargets[key]; ok && !hasProject(projects, platformProjectName) {
+		if p, found := findProject(prev.projects, platformProjectName); found {
+			projects = append(projects, p)
+		}
+	}
+	s.propTargets[key] = propTarget{id: id, projects: projects, lastSeen: time.Now()}
+}
+
+// trackProposalsProject ensures proj is in id's refresh target before a propose
+// nudges the refresher: the nudged pass only queries already-tracked projects, and a
+// token that hasn't built an inventory yet (or whose platform tier discovery never
+// lists) wouldn't be — so without this the new PR would wait for a later build.
+func (s *Server) trackProposalsProject(id auth.Identity, proj project.ProjectInfo) {
+	key := restfactory.TokenKey(id.Token)
+	s.propMu.Lock()
+	defer s.propMu.Unlock()
+	t, ok := s.propTargets[key]
+	if !ok {
+		t = propTarget{id: id}
+	}
+	if !hasProject(t.projects, proj.Name) {
+		t.projects = append(t.projects, proj)
+	}
+	t.lastSeen = time.Now()
+	s.propTargets[key] = t
+}
+
+func hasProject(ps []project.ProjectInfo, name string) bool {
+	_, ok := findProject(ps, name)
+	return ok
+}
+
+func findProject(ps []project.ProjectInfo, name string) (project.ProjectInfo, bool) {
+	for _, p := range ps {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return project.ProjectInfo{}, false
 }
 
 // nudgeProposals asks the refresher for an out-of-cycle pass (coalesced). Handlers

@@ -96,6 +96,7 @@ type Server struct {
 	resolver  *project.Resolver
 	repos     *git.RepoSet
 	visible   *ttlcache.Cache[map[string]bool]        // per-token visible-namespace set
+	platform  *ttlcache.Cache[bool]                   // per-token platform-author SSAR; gates seeding the platform PR lane
 	proposals *ttlcache.Cache[[]model.Proposal]       // per-token open-PR set; written by the refresher, read on broadcast
 	options   *ttlcache.Cache[model.Options]          // shared wizard catalog (SA-read, identical for all)
 	networks  *ttlcache.Cache[model.NetworkInventory] // shared network catalog (SA-read; per-tenant scoping at serve time)
@@ -138,6 +139,7 @@ func NewServer(d Deps) *Server {
 		resolver:  d.Resolver,
 		repos:     d.Repos,
 		visible:   ttlcache.New[map[string]bool](visibleTTL),
+		platform:  ttlcache.New[bool](visibleTTL),
 		proposals: ttlcache.New[[]model.Proposal](proposalsCacheTTL),
 		options:   ttlcache.New[model.Options](optionsTTL),
 		networks:  ttlcache.New[model.NetworkInventory](optionsTTL),

@@ -61,6 +61,23 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 	return set, nil
 }
 
+// canAuthorPlatform reports whether id may author platform-tier changes — the same
+// SSAR platformScope gates on (create CUDN), TTL-cached per token so the inventory
+// broadcast path stays free of a per-subscriber cluster call. False when no platform
+// repo is configured. Used to seed the synthetic platform project into the proposals
+// query so a platform PR surfaces on a cold page load, not only right after proposing.
+func (s *Server) canAuthorPlatform(ctx context.Context, id auth.Identity, c *cluster.Client) bool {
+	if s.cfg.PlatformRepo == "" {
+		return false
+	}
+	if v, ok := s.platform.Get(restfactory.TokenKey(id.Token)); ok {
+		return v
+	}
+	ok := c.CanCreateClusterResource(ctx, "k8s.ovn.org", "clusteruserdefinednetworks")
+	s.platform.Put(restfactory.TokenKey(id.Token), ok)
+	return ok
+}
+
 func namespaceNames(nss []project.Namespace) []string {
 	out := make([]string, 0, len(nss))
 	for _, ns := range nss {
