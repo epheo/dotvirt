@@ -9,6 +9,8 @@ import (
 	"log"
 	"os"
 	"time"
+
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // Config holds everything dotvirt needs. Per-project git repos come from cluster
@@ -19,8 +21,11 @@ type Config struct {
 	UIOrigin string // CORS origin for the separate SvelteKit frontend; empty disables CORS
 
 	// Git credential (one cred for every project repo) + the branches dotvirt uses.
-	GitUsername   string // for https auth (token in GitToken)
-	GitToken      string
+	// The git https token and the Forge API token are ONE credential (the forge bot):
+	// GitToken is a fallback for ForgeToken; both resolve through ForgeTokenSource so
+	// a rotated token is picked up without restart. See ForgeTokenFile / ForgeToken.
+	GitUsername   string // for https auth (the token comes from ForgeTokenSource)
+	GitToken      string // deprecated alias for ForgeToken (kept for BYO flag compat)
 	RunningBranch string // per-project branch dotvirt owns and writes cluster state to
 
 	// Cluster read
@@ -49,6 +54,11 @@ type Config struct {
 	// per-project owner/repo are derived from each project's repo URL, not config.
 	ForgeURL   string
 	ForgeToken string
+	// ForgeTokenFile, when set, is a mounted-secret path read on EVERY forge/git
+	// call (see ForgeTokenSource) — kubelet updates it in place, so an operator
+	// re-mint/rotation takes effect with no pod restart. Takes precedence over the
+	// static ForgeToken/GitToken env values.
+	ForgeTokenFile string
 
 	InsecureTLS bool // skip TLS verification for git + forge (dev, e.g. self-signed Route)
 
@@ -111,7 +121,8 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.ProposedBranch, "proposed-branch", envOr("DOTVIRT_PROPOSED_BRANCH", "dotvirt/proposed"), "working branch holding the draft changeset")
 	fs.StringVar(&c.DraftDir, "draft-dir", envOr("DOTVIRT_DRAFT_DIR", "./.dotvirt-drafts"), "root dir for persisted drafts (<dir>/<user>/<project>.json)")
 	fs.StringVar(&c.ForgeURL, "forge-url", os.Getenv("DOTVIRT_FORGE_URL"), "Forgejo base URL (empty = push-only, no PR)")
-	fs.StringVar(&c.ForgeToken, "forge-token", os.Getenv("DOTVIRT_FORGE_TOKEN"), "Forgejo API token")
+	fs.StringVar(&c.ForgeToken, "forge-token", os.Getenv("DOTVIRT_FORGE_TOKEN"), "Forgejo API token (git https + API; falls back to -git-token)")
+	fs.StringVar(&c.ForgeTokenFile, "forge-token-file", os.Getenv("DOTVIRT_FORGE_TOKEN_FILE"), "path to a mounted secret holding the forge token, re-read per call (rotation-safe; overrides -forge-token)")
 	fs.BoolVar(&c.InsecureTLS, "insecure-tls", envBool("DOTVIRT_INSECURE_TLS", false), "skip TLS verification for git+forge (dev only)")
 	fs.StringVar(&c.MetricsURL, "metrics-url", os.Getenv("DOTVIRT_METRICS_URL"), "Prometheus/Thanos query API base URL for the Performance tab (empty disables)")
 	fs.StringVar(&c.MetricsCA, "metrics-ca", os.Getenv("DOTVIRT_METRICS_CA"), "PEM CA bundle path to trust for -metrics-url (e.g. the mounted service-CA)")
@@ -145,6 +156,21 @@ func randomSecret() (string, error) {
 		return "", fmt.Errorf("generate session secret: %w", err)
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// ForgeTokenSource is the single resolver for the forge credential, shared by the
+// git RepoSet and the Forge API client so they never diverge. Prefers the mounted
+// file (rotation-safe, re-read per call) and falls back to the static token —
+// itself ForgeToken or, for BYO flag compatibility, GitToken.
+func (c *Config) ForgeTokenSource() forge.TokenSource {
+	if c.ForgeTokenFile != "" {
+		return forge.FileToken(c.ForgeTokenFile)
+	}
+	tok := c.ForgeToken
+	if tok == "" {
+		tok = c.GitToken
+	}
+	return forge.StaticToken(tok)
 }
 
 func envOr(key, def string) string {

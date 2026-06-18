@@ -63,7 +63,7 @@ func seedHistory(t *testing.T) string {
 }
 
 func TestHistoryOrderAndFields(t *testing.T) {
-	r, err := Open(seedHistory(t), "", "")
+	r, err := Open(seedHistory(t), "", nil)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestHistoryOrderAndFields(t *testing.T) {
 }
 
 func TestHistoryRespectsLimit(t *testing.T) {
-	r, err := Open(seedHistory(t), "", "")
+	r, err := Open(seedHistory(t), "", nil)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestHistoryRespectsLimit(t *testing.T) {
 }
 
 func TestRevertItemsRestoresEditedFile(t *testing.T) {
-	r, err := Open(seedHistory(t), "", "")
+	r, err := Open(seedHistory(t), "", nil)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestRevertItemsRestoresEditedFile(t *testing.T) {
 }
 
 func TestRevertItemsDeletesAddedFile(t *testing.T) {
-	r, err := Open(seedHistory(t), "", "")
+	r, err := Open(seedHistory(t), "", nil)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestRevertItemsDeletesAddedFile(t *testing.T) {
 }
 
 func TestRevertItemsRejectsRoot(t *testing.T) {
-	r, err := Open(seedHistory(t), "", "")
+	r, err := Open(seedHistory(t), "", nil)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

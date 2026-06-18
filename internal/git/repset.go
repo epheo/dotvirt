@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // RepoSet manages dotvirt's per-project git repositories: one read mirror + one
@@ -16,9 +18,9 @@ import (
 // fetch) and signals a shared change channel when that repo's heads move — so the
 // inventory hub recomputes. This generalizes main's former single pollGit.
 type RepoSet struct {
-	user  string
-	token string
-	push  bool
+	user    string
+	tokenFn forge.TokenSource
+	push    bool
 
 	// Poll wiring, shared by every repo's poll goroutine.
 	ctx        context.Context
@@ -42,10 +44,10 @@ type repoPair struct {
 // repo's branch heads move: changed is the process-wide inventory bus, gitChanged
 // the git-only side (the proposals refresher, which must not wake on the cluster
 // events the bus also carries). Either may be nil to disable that signal.
-func NewRepoSet(ctx context.Context, forgeUser, forgeToken string, push bool, changed, gitChanged chan<- struct{}, interval time.Duration) *RepoSet {
+func NewRepoSet(ctx context.Context, forgeUser string, tokenFn forge.TokenSource, push bool, changed, gitChanged chan<- struct{}, interval time.Duration) *RepoSet {
 	return &RepoSet{
 		user:       forgeUser,
-		token:      forgeToken,
+		tokenFn:    tokenFn,
 		push:       push,
 		ctx:        ctx,
 		changed:    changed,
@@ -70,11 +72,11 @@ func (s *RepoSet) Get(repoURL string) (*Repo, *WriteRepo, error) {
 	// Open outside the lock: the read clone hits the network and can be slow; we
 	// don't want to block Get for other repos. A rare duplicate open under a race
 	// is resolved below (first writer wins, later opens are discarded).
-	read, err := Open(repoURL, s.user, s.token)
+	read, err := Open(repoURL, s.user, s.tokenFn)
 	if err != nil {
 		return nil, nil, err
 	}
-	write := OpenWrite(repoURL, s.user, s.token, s.push)
+	write := OpenWrite(repoURL, s.user, s.tokenFn, s.push)
 
 	s.mu.Lock()
 	if p, ok := s.cache[repoURL]; ok {

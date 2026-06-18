@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -21,22 +22,33 @@ import (
 // CommitChangeset). Separate from the read-only mirror Repo so writes never
 // disturb inventory reads.
 type WriteRepo struct {
-	url  string
-	auth *http.BasicAuth
-	push bool // push commits to the remote (false for local/offline testing)
+	url      string
+	username string
+	tokenFn  forge.TokenSource // resolved per clone/push so a rotated token is picked up
+	push     bool              // push commits to the remote (false for local/offline testing)
 
 	mu sync.Mutex
 }
 
 // OpenWrite prepares a writable view of the repo. Cloning happens per-operation
-// so each commit starts from fresh remote state. push controls whether commits
-// are pushed back (set false when there's no writable remote, e.g. tests).
-func OpenWrite(url, username, token string, push bool) *WriteRepo {
-	w := &WriteRepo{url: url, push: push}
-	if token != "" {
-		w.auth = &http.BasicAuth{Username: username, Password: token}
+// so each commit starts from fresh remote state. username + tokenFn provide basic
+// auth, resolved on each clone/push. push controls whether commits are pushed back
+// (set false when there's no writable remote, e.g. tests).
+func OpenWrite(url, username string, tokenFn forge.TokenSource, push bool) *WriteRepo {
+	return &WriteRepo{url: url, username: username, tokenFn: tokenFn, push: push}
+}
+
+// auth builds a fresh BasicAuth from the current token (nil when no token yet).
+// Rebuilt per call so a rotated token takes effect without restart.
+func (w *WriteRepo) auth() *http.BasicAuth {
+	if w.tokenFn == nil {
+		return nil
 	}
-	return w
+	tok := w.tokenFn()
+	if tok == "" {
+		return nil
+	}
+	return &http.BasicAuth{Username: w.username, Password: tok}
 }
 
 // File is a path/content pair to write into the repo.
@@ -87,7 +99,7 @@ func (a Author) signature() *object.Signature {
 func (w *WriteRepo) openWorktree() (*git.Repository, *git.Worktree, error) {
 	repo, err := git.Clone(memory.NewStorage(), memfs.New(), &git.CloneOptions{
 		URL:  w.url,
-		Auth: w.auth,
+		Auth: w.auth(),
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("clone for write: %w", err)
@@ -107,7 +119,7 @@ func (w *WriteRepo) pushBranch(repo *git.Repository, branch string) error {
 		return nil
 	}
 	err := repo.Push(&git.PushOptions{
-		Auth:     w.auth,
+		Auth:     w.auth(),
 		RefSpecs: []config.RefSpec{config.RefSpec(fmt.Sprintf("+refs/heads/%s:refs/heads/%s", branch, branch))},
 	})
 	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {

@@ -86,6 +86,30 @@ func TestMintToken(t *testing.T) {
 	}
 }
 
+func TestValidateToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/user" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		// "good" authenticates, anything else is rejected.
+		if r.Header.Get("Authorization") == "token good" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"login":"dotvirt-bot"}`))
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	f := NewFactory(srv.URL, "ignored", false)
+	if valid, err := f.ValidateToken("good"); err != nil || !valid {
+		t.Errorf("ValidateToken(good) = (%v,%v), want (true,nil)", valid, err)
+	}
+	if valid, err := f.ValidateToken("stale"); err != nil || valid {
+		t.Errorf("ValidateToken(stale) = (%v,%v), want (false,nil)", valid, err)
+	}
+}
+
 // EnsureOrg creates the owner org when absent and is a no-op when it exists.
 func TestEnsureOrgCreatesWhenAbsent(t *testing.T) {
 	var posted bool

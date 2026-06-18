@@ -520,10 +520,22 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	if credName == "" {
 		credName = install.DefaultForgeSecret
 	}
-	// Already bootstrapped? (The minted token lives in dotvirt-forge.)
+	// Already bootstrapped AND the stored token still works? Trusting mere existence
+	// leaves a dead token in place forever after a Forgejo data reset or out-of-band
+	// rotation (Argo + the app then fail auth). Validate it; only short-circuit when
+	// it's genuinely valid, else fall through to re-mint. A forge blip surfaces as
+	// err (requeue) rather than a needless re-mint.
 	var existing corev1.Secret
 	if err := r.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: credName}, &existing); err == nil {
-		return true, nil
+		valid, err := forge.NewFactory(dv.Spec.Forge.URL, "unused", dv.Spec.Forge.InsecureTLS).
+			ValidateToken(string(existing.Data["token"]))
+		if err != nil {
+			return false, err
+		}
+		if valid {
+			return true, nil
+		}
+		logf.FromContext(ctx).Info("stored forge token rejected — re-minting", "secret", credName)
 	} else if !apierrors.IsNotFound(err) {
 		return false, err
 	}
@@ -560,18 +572,17 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	return true, nil
 }
 
-// writeForgeSecret creates the dotvirt-forge credential (create-once) from the
-// managed Forgejo's minted token, so the rest of the install treats it like a BYO
-// forge.
+// writeForgeSecret upserts the dotvirt-forge credential from the managed Forgejo's
+// minted token, so the rest of the install treats it like a BYO forge. Upsert (not
+// create-once) so a re-mint of a rejected token overwrites the stale value in place.
 func (r *DotvirtReconciler) writeForgeSecret(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, name, url, username, token string) error {
-	s := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: dv.Namespace, Labels: install.Labels(dv.Name)},
-		StringData: map[string]string{"url": url, "username": username, "token": token},
-	}
-	if err := controllerutil.SetControllerReference(dv, s, r.Scheme); err != nil {
-		return err
-	}
-	return r.Create(ctx, s)
+	s := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: dv.Namespace}}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, s, func() error {
+		s.Labels = install.Labels(dv.Name)
+		s.StringData = map[string]string{"url": url, "username": username, "token": token}
+		return controllerutil.SetControllerReference(dv, s, r.Scheme)
+	})
+	return err
 }
 
 // repoCreds builds the Argo repo-credentials Secret from the forge credential, or

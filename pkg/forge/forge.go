@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -19,10 +20,34 @@ import (
 // Client is a Forgejo API client scoped to one repository.
 type Client struct {
 	baseURL string // e.g. http://forgejo:3000
-	token   string
+	tokenFn TokenSource
 	owner   string
 	repo    string
 	http    *http.Client
+}
+
+// TokenSource yields the CURRENT forge token on each call. Resolving per-call
+// (rather than capturing a string once) lets a re-minted/rotated token — written
+// to a mounted secret file by the operator — take effect without a process
+// restart. StaticToken wraps a fixed value (BYO/dev); FileToken reads a mounted
+// secret key on each call.
+type TokenSource func() string
+
+// StaticToken is a TokenSource that always returns tok (a fixed credential).
+func StaticToken(tok string) TokenSource { return func() string { return tok } }
+
+// FileToken is a TokenSource reading path on each call — the projected-secret
+// volume the operator mounts. kubelet updates that file in place on rotation, so
+// each forge call picks up the current token. A read error yields "" (the caller
+// then behaves as unconfigured/unauthenticated rather than using a stale value).
+func FileToken(path string) TokenSource {
+	return func() string {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(b))
+	}
 }
 
 // Factory builds per-project Clients: in multi-tenant mode the PR target (owner +
@@ -30,20 +55,32 @@ type Client struct {
 // forge endpoint + token are shared. Returns nil if the forge isn't configured.
 type Factory struct {
 	baseURL  string
-	token    string
+	tokenFn  TokenSource
 	insecure bool
 	http     *http.Client
 }
 
-// NewFactory builds a Factory from the shared forge endpoint + token. Returns nil
-// when unconfigured so callers degrade to push-only.
+// NewFactory builds a Factory from the shared forge endpoint + a static token.
+// Returns nil when unconfigured so callers degrade to push-only. For a rotating
+// token (mounted file), use NewFactoryFn.
 func NewFactory(baseURL, token string, insecure bool) *Factory {
-	if baseURL == "" || token == "" {
+	if token == "" {
+		return nil
+	}
+	return NewFactoryFn(baseURL, StaticToken(token), insecure)
+}
+
+// NewFactoryFn is NewFactory with a TokenSource resolved per request — so a
+// rotated token takes effect without restart. Returns nil when the base URL is
+// unset (forge disabled); a tokenFn that currently yields "" still builds a
+// Factory (the token may appear once the mounted secret is written).
+func NewFactoryFn(baseURL string, tokenFn TokenSource, insecure bool) *Factory {
+	if baseURL == "" || tokenFn == nil {
 		return nil
 	}
 	return &Factory{
 		baseURL:  strings.TrimRight(baseURL, "/"),
-		token:    token,
+		tokenFn:  tokenFn,
 		insecure: insecure,
 		http:     httpClient(insecure),
 	}
@@ -60,7 +97,7 @@ func (f *Factory) For(repoURL string) *Client {
 	if !ok {
 		return nil
 	}
-	return &Client{baseURL: f.baseURL, token: f.token, owner: owner, repo: repo, http: f.http}
+	return &Client{baseURL: f.baseURL, tokenFn: f.tokenFn, owner: owner, repo: repo, http: f.http}
 }
 
 func httpClient(insecure bool) *http.Client {
@@ -240,6 +277,38 @@ func (f *Factory) MintToken(username, password, tokenName string, scopes []strin
 	return out.Sha1, nil
 }
 
+// ValidateToken reports whether token authenticates against the forge, via a GET
+// of the current-user endpoint. A 2xx means valid; 401/403 means invalid (so the
+// caller can re-mint) — distinguished from transport/other errors, which surface
+// as err so a forge blip isn't mistaken for a bad token. Used by the operator to
+// stop trusting a stored token blindly: a Forgejo data reset or out-of-band
+// rotation invalidates it, and only a re-mint recovers.
+func (f *Factory) ValidateToken(token string) (valid bool, err error) {
+	if f == nil {
+		return false, fmt.Errorf("forge not configured")
+	}
+	req, err := http.NewRequest("GET", f.baseURL+"/api/v1/user", nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Authorization", "token "+token)
+	req.Header.Set("Accept", "application/json")
+	resp, err := f.http.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("forge validate token: %w", err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	switch {
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		return true, nil
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return false, nil
+	default:
+		return false, fmt.Errorf("forge validate token: %s", resp.Status)
+	}
+}
+
 // EnsureOrg creates the client's owner organization if it doesn't exist (idempotent).
 // Used to bootstrap a managed Forgejo's owner org (repos live under the org so a
 // single org webhook can cover them all).
@@ -261,7 +330,7 @@ func (c *Client) exists(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	req.Header.Set("Authorization", "token "+c.token)
+	req.Header.Set("Authorization", "token "+c.tokenFn())
 	req.Header.Set("Accept", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -353,7 +422,7 @@ func (c *Client) do(method, path string, body, out any) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "token "+c.token)
+	req.Header.Set("Authorization", "token "+c.tokenFn())
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 

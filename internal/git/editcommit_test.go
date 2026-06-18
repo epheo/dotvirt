@@ -62,7 +62,7 @@ spec:
 // the working branch while leaving siblings untouched.
 func TestCommitChangesetDeleteRemovesFile(t *testing.T) {
 	bare := seedRunning(t) // README + tenant-a/web.yaml + tenant-a/db.yaml on main
-	w := OpenWrite(bare, "", "", true)
+	w := OpenWrite(bare, "", nil, true)
 
 	res, err := w.CommitChangeset("main", "dotvirt/proposed", "drop db",
 		[]ChangesetItem{{Path: "tenant-a/db.yaml", Namespace: "tenant-a", Name: "db", Delete: true}},
@@ -83,7 +83,7 @@ func TestCommitChangesetDeleteRemovesFile(t *testing.T) {
 // (the only item) surfaces the "no changes vs base" error rather than committing.
 func TestCommitChangesetDeleteAbsentNoop(t *testing.T) {
 	bare := seedRepo(t) // only web.yaml on main
-	w := OpenWrite(bare, "", "", true)
+	w := OpenWrite(bare, "", nil, true)
 
 	_, err := w.CommitChangeset("main", "dotvirt/proposed", "drop ghost",
 		[]ChangesetItem{{Path: "alpha/ghost.yaml", Namespace: "alpha", Name: "ghost", Delete: true}},
@@ -99,7 +99,7 @@ func TestCommitChangesetDeleteAbsentNoop(t *testing.T) {
 // the change landed, not "1970".
 func TestCommitChangesetStampsRealTime(t *testing.T) {
 	bare := seedRepo(t)
-	w := OpenWrite(bare, "", "", true)
+	w := OpenWrite(bare, "", nil, true)
 
 	if _, err := w.CommitChangeset("main", "dotvirt/proposed", "add thing",
 		[]ChangesetItem{{Path: "alpha/new.yaml", NewContent: []byte("kind: VirtualMachine\n")}},

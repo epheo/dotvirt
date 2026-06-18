@@ -73,7 +73,7 @@ func TestBuildFiltersAndEnriches(t *testing.T) {
 	bare := seedRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	repos := git.NewRepoSet(ctx, "", "", false, make(chan struct{}, 1), nil, time.Hour)
+	repos := git.NewRepoSet(ctx, "", nil, false, make(chan struct{}, 1), nil, time.Hour)
 
 	in := Inputs{
 		Branch: "main",
@@ -130,7 +130,7 @@ func TestBuildSurfacesClusterOnlyVMs(t *testing.T) {
 	bare := seedRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	repos := git.NewRepoSet(ctx, "", "", false, make(chan struct{}, 1), nil, time.Hour)
+	repos := git.NewRepoSet(ctx, "", nil, false, make(chan struct{}, 1), nil, time.Hour)
 
 	in := Inputs{
 		Branch:   "main",
@@ -157,7 +157,7 @@ func TestBuildDriftEnabledMarksNotTracked(t *testing.T) {
 	bare := seedRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	repos := git.NewRepoSet(ctx, "", "", false, make(chan struct{}, 1), nil, time.Hour)
+	repos := git.NewRepoSet(ctx, "", nil, false, make(chan struct{}, 1), nil, time.Hour)
 
 	in := Inputs{
 		Branch: "main",
