@@ -53,8 +53,6 @@ type DotvirtReconciler struct {
 // bind+escalate let the operator create ClusterRoles granting permissions it may
 // not itself hold (the standard installer pattern for RBAC-provisioning operators).
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings;rolebindings,verbs=get;list;watch;create;update;patch;delete;bind;escalate
-// Grant the managed-Forgejo SA the anyuid SCC on OpenShift (the s6 image needs it).
-// +kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,verbs=use,resourceNames=anyuid
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get;list;watch;create;update;patch;delete
 // routes/custom-host: required to set an explicit spec.host on a Route (the forge + app exposure hosts).
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes/custom-host,verbs=create
@@ -477,10 +475,11 @@ func (r *DotvirtReconciler) argoServerURL(ctx context.Context, dv *dotvirtv1alph
 	return "https://" + host
 }
 
-// applyForgejo renders the managed Forgejo workload (SA, anyuid binding on
-// OpenShift, Deployment with the verified bootstrap initContainer, Service) and the
-// data PVC. Everything but the PVC is owner-referenced for auto-cleanup; the PVC is
-// orphaned so the git data survives uninstall.
+// applyForgejo renders the managed Forgejo workload (SA, Deployment with the verified
+// bootstrap initContainer, Service) and the data PVC. The rootless image runs under
+// dotvirt's standard non-root securityContext, so no SCC binding is needed. Everything
+// but the PVC is owner-referenced for auto-cleanup; the PVC is orphaned so the git
+// data survives uninstall.
 func (r *DotvirtReconciler) applyForgejo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
 	if !r.DryRun {
 		if err := r.ensureSecret(ctx, dv, install.ForgejoAdminSecret, "password"); err != nil {
@@ -496,10 +495,8 @@ func (r *DotvirtReconciler) applyForgejo(ctx context.Context, dv *dotvirtv1alpha
 	owned := []client.Object{
 		install.ForgejoServiceAccount(dv),
 		install.ForgejoService(dv),
-		install.ForgejoDeployment(dv),
-	}
-	if r.Platform == platform.OpenShift {
-		owned = append(owned, install.ForgejoAnyuidBinding(dv))
+		// fsGroup only on vanilla K8s; OpenShift's restricted-v2 injects its own.
+		install.ForgejoDeployment(dv, r.Platform != platform.OpenShift),
 	}
 	if exp := r.forgejoExposure(dv); exp != nil {
 		owned = append(owned, exp)

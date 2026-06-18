@@ -119,11 +119,3 @@ rules:
   - routes/custom-host
   verbs:
   - create
-- apiGroups:
-  - security.openshift.io
-  resourceNames:
-  - anyuid
-  resources:
-  - securitycontextconstraints
-  verbs:
-  - use

@@ -7,7 +7,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -22,11 +21,13 @@ import (
 // replica). The bootstrap was verified live against a real Forgejo (see the
 // initContainer below). For production, bring your own forge instead.
 const (
-	// Pinned by digest (the codeberg.org/forgejo/forgejo:11 tag) so the eval forge is
-	// reproducible and declarable in the CSV's relatedImages. Re-pin manually when the
-	// upstream :11 tag moves. The s6 image starts as root, so this pod keeps the anyuid
-	// SCC by design (see ForgejoAnyuidBinding) — it is NOT hardened to non-root.
-	ForgejoImage       = "codeberg.org/forgejo/forgejo@sha256:d98d860ea64fd36cb0aabf0b46bbe1a37566b498eee4af0a6b246d5a45759d6d"
+	// Pinned by digest (the codeberg.org/forgejo/forgejo:11-rootless tag) so the eval
+	// forge is reproducible and declarable in the CSV's relatedImages. Re-pin manually
+	// when the upstream :11-rootless tag moves. The ROOTLESS image runs non-root and
+	// admits to OpenShift's restricted-v2 SCC with no anyuid grant (verified live: an
+	// arbitrary injected UID with gid 0 completes migrate + admin-create + serve), so
+	// it carries dotvirt's standard hardened securityContext like the operand does.
+	ForgejoImage       = "codeberg.org/forgejo/forgejo:11-rootless@sha256:5135f11de848bea6d59c0a96688e90c361380ba102bdc08dbd5aa52cca2b179b"
 	ForgejoSAName      = "dotvirt-forgejo"
 	ForgejoAdminSecret = "dotvirt-forgejo-admin" // generated admin password (key "password")
 	ForgejoPVCName     = "dotvirt-forgejo-data"
@@ -63,23 +64,12 @@ func ForgejoHost(dv *dotvirtv1alpha1.Dotvirt) string {
 	return ""
 }
 
-// ForgejoServiceAccount runs the Forgejo pod; on OpenShift it's bound to anyuid.
+// ForgejoServiceAccount runs the Forgejo pod under dotvirt's hardened, non-root
+// securityContext — no SCC grant required (the rootless image needs none).
 func ForgejoServiceAccount(dv *dotvirtv1alpha1.Dotvirt) *corev1.ServiceAccount {
 	return &corev1.ServiceAccount{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ServiceAccount"},
 		ObjectMeta: objectMeta(ForgejoSAName, dv.Namespace, dv.Name),
-	}
-}
-
-// ForgejoAnyuidBinding grants the Forgejo SA the anyuid SCC (OpenShift only) — the
-// s6 image starts as root, which the restricted SCC forbids (verified: it
-// CrashLoops otherwise). A no-op concept on vanilla Kubernetes (caller skips it).
-func ForgejoAnyuidBinding(dv *dotvirtv1alpha1.Dotvirt) *rbacv1.RoleBinding {
-	return &rbacv1.RoleBinding{
-		TypeMeta:   metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "RoleBinding"},
-		ObjectMeta: objectMeta(ForgejoSAName+"-anyuid", dv.Namespace, dv.Name),
-		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "system:openshift:scc:anyuid"},
-		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: ForgejoSAName, Namespace: dv.Namespace}},
 	}
 }
 
@@ -120,34 +110,45 @@ func forgejoResources() corev1.ResourceRequirements {
 	}
 }
 
-// forgejoEnv is the config shared by the init + main containers.
+// forgejoEnv is the config shared by the init + main containers. It does NOT override
+// GITEA_CUSTOM/GITEA_WORK_DIR: the rootless image's defaults all live under
+// /var/lib/gitea (the one PVC mount). Overriding to a custom path is what breaks the
+// rootless image's arbitrary-UID writability — keep the defaults.
 func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt) []corev1.EnvVar {
 	return []corev1.EnvVar{
 		{Name: "FORGEJO__security__INSTALL_LOCK", Value: "true"},
 		{Name: "FORGEJO__database__DB_TYPE", Value: "sqlite3"},
-		{Name: "GITEA_CUSTOM", Value: "/data/gitea"},
 		{Name: "FORGEJO__server__ROOT_URL", Value: ForgejoExternalURL(dv) + "/"},
 	}
 }
 
-// ForgejoDeployment runs Forgejo with a one-shot bootstrap initContainer that, on a
-// fresh volume, generates the config, migrates the DB, and creates the admin service
-// user — the exact sequence verified live. The main container then serves on the
-// prepared data. The operator mints the API token afterward (it can't exec).
-func ForgejoDeployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
+// ForgejoDeployment runs the rootless Forgejo with a one-shot bootstrap initContainer
+// that, on a fresh volume, migrates the DB and creates the admin service user — the
+// exact sequence verified live as an arbitrary OpenShift-injected UID. The main
+// container then serves on the prepared data. The operator mints the API token
+// afterward (it can't exec).
+//
+// No chown/su-exec: the container already runs as the unprivileged user, and the data
+// dir is group-writable (gid 0 on OpenShift via the SCC; fsGroup on vanilla K8s). The
+// PVC mounts at the image's default GITEA_WORK_DIR (/var/lib/gitea); /etc/gitea is the
+// image's other declared volume, backed by an emptyDir.
+func ForgejoDeployment(dv *dotvirtv1alpha1.Dotvirt, setFSGroup bool) *appsv1.Deployment {
 	replicas := int32(1)
-	dataMount := corev1.VolumeMount{Name: "data", MountPath: "/data"}
+	dataMount := corev1.VolumeMount{Name: "data", MountPath: "/var/lib/gitea"}
+	etcMount := corev1.VolumeMount{Name: "etc", MountPath: "/etc/gitea"}
 	adminPW := corev1.EnvVar{Name: "ADMIN_PW", ValueFrom: &corev1.EnvVarSource{
 		SecretKeyRef: &corev1.SecretKeySelector{
 			LocalObjectReference: corev1.LocalObjectReference{Name: ForgejoAdminSecret}, Key: "password",
 		},
 	}}
+	// environment-to-ini renders app.ini from the FORGEJO__* env (the rootless image's
+	// entrypoint normally does this; we override the command, so run it ourselves).
+	// migrate then has a config to load. No chown/su-exec: already the non-root user.
 	bootstrap := `set -e
-mkdir -p /data/gitea/conf
-chown -R git:git /data
-su-exec git environment-to-ini
-su-exec git forgejo migrate
-su-exec git forgejo admin user create --admin --username ` + ForgejoBotUser +
+mkdir -p "$(dirname "$GITEA_APP_INI")"
+environment-to-ini
+forgejo migrate
+forgejo admin user create --admin --username ` + ForgejoBotUser +
 		` --password "$ADMIN_PW" --email ` + ForgejoBotUser + `@dotvirt.local --must-change-password=false || true`
 
 	return &appsv1.Deployment{
@@ -161,20 +162,22 @@ su-exec git forgejo admin user create --admin --username ` + ForgejoBotUser +
 				ObjectMeta: metav1.ObjectMeta{Labels: forgejoSelector},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: ForgejoSAName,
+					SecurityContext:    forgejoPodSecurityContext(setFSGroup),
 					InitContainers: []corev1.Container{{
-						Name:         "bootstrap",
-						Image:        ForgejoImage,
-						Command:      []string{"sh", "-c", bootstrap},
-						Env:          append(forgejoEnv(dv), adminPW),
-						VolumeMounts: []corev1.VolumeMount{dataMount},
-						Resources:    forgejoResources(),
+						Name:            "bootstrap",
+						Image:           ForgejoImage,
+						Command:         []string{"sh", "-c", bootstrap},
+						Env:             append(forgejoEnv(dv), adminPW),
+						VolumeMounts:    []corev1.VolumeMount{dataMount, etcMount},
+						Resources:       forgejoResources(),
+						SecurityContext: forgejoContainerSecurityContext(),
 					}},
 					Containers: []corev1.Container{{
 						Name:         "forgejo",
 						Image:        ForgejoImage,
 						Env:          forgejoEnv(dv),
 						Ports:        []corev1.ContainerPort{{Name: "http", ContainerPort: 3000}},
-						VolumeMounts: []corev1.VolumeMount{dataMount},
+						VolumeMounts: []corev1.VolumeMount{dataMount, etcMount},
 						ReadinessProbe: &corev1.Probe{
 							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(3000)}},
 							InitialDelaySeconds: 8,
@@ -185,15 +188,48 @@ su-exec git forgejo admin user create --admin --username ` + ForgejoBotUser +
 							InitialDelaySeconds: 30,
 							PeriodSeconds:       20,
 						},
-						Resources: forgejoResources(),
+						Resources:       forgejoResources(),
+						SecurityContext: forgejoContainerSecurityContext(),
 					}},
-					Volumes: []corev1.Volume{{
-						Name:         "data",
-						VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: ForgejoPVCName}},
-					}},
+					Volumes: []corev1.Volume{
+						{
+							Name:         "data",
+							VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: ForgejoPVCName}},
+						},
+						{Name: "etc", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+					},
 				},
 			},
 		},
+	}
+}
+
+// forgejoPodSecurityContext is dotvirt's standard restricted-v2-compatible pod
+// context. On vanilla Kubernetes a fixed fsGroup makes the PVC group-writable for the
+// image's non-root UID. On OpenShift fsGroup MUST be omitted — restricted-v2 rejects
+// any fsGroup outside the namespace's assigned range and injects its own, so the
+// caller passes setFSGroup=false there (verified live: fsGroup:1000 → admission
+// "1000 is not an allowed group").
+func forgejoPodSecurityContext(setFSGroup bool) *corev1.PodSecurityContext {
+	runAsNonRoot := true
+	sc := &corev1.PodSecurityContext{
+		RunAsNonRoot:   &runAsNonRoot,
+		SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+	}
+	if setFSGroup {
+		fsGroup := int64(1000)
+		sc.FSGroup = &fsGroup
+	}
+	return sc
+}
+
+// forgejoContainerSecurityContext drops all capabilities and forbids privilege
+// escalation — the operand's posture, now shared by the rootless forge.
+func forgejoContainerSecurityContext() *corev1.SecurityContext {
+	noPrivilegeEscalation := false
+	return &corev1.SecurityContext{
+		AllowPrivilegeEscalation: &noPrivilegeEscalation,
+		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 	}
 }
 
