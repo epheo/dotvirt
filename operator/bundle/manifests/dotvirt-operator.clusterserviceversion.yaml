@@ -20,11 +20,11 @@ metadata:
               "credentialsSecret": "dotvirt-forge",
               "insecureTLS": true,
               "managed": true,
-              "platformRepo": "https://forgejo.apps.hetznet.epheo.eu/dotvirt/platform.git",
-              "url": "https://forgejo.apps.hetznet.epheo.eu"
+              "platformRepo": "https://forgejo.apps.example.com/dotvirt/platform.git",
+              "url": "https://forgejo.apps.example.com"
             },
             "ingress": {
-              "host": "dotvirt.apps.hetznet.epheo.eu",
+              "host": "dotvirt.apps.example.com",
               "type": "auto"
             },
             "metrics": {
@@ -36,7 +36,7 @@ metadata:
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
     containerImage: quay.io/epheo/dotvirt-operator@sha256:26127ff6dcef5190b4d4aa59db7cbab10c6c733c6d9bb82fc4ce5415cd1b6307
-    createdAt: "2026-06-17T07:45:00Z"
+    createdAt: "2026-06-18T12:07:18Z"
     description: Installs dotvirt — a vCenter-like GitOps WebUI for KubeVirt — with
       its platform/tenant tier.
     operators.operatorframework.io/builder: operator-sdk-v1.42.2
@@ -233,14 +233,6 @@ spec:
           - routes/custom-host
           verbs:
           - create
-        - apiGroups:
-          - security.openshift.io
-          resourceNames:
-          - anyuid
-          resources:
-          - securitycontextconstraints
-          verbs:
-          - use
         serviceAccountName: dotvirt-operator-controller
       deployments:
       - label:
@@ -333,6 +325,10 @@ spec:
   links:
   - name: Source
     url: https://github.com/epheo/dotvirt
+  - name: Documentation
+    url: https://github.com/epheo/dotvirt/blob/main/README.md
+  - name: Operator
+    url: https://github.com/epheo/dotvirt/blob/main/operator/README.md
   maintainers:
   - email: github@epheo.eu
     name: epheo
@@ -340,12 +336,11 @@ spec:
   minKubeVersion: 1.30.0
   provider:
     name: epheo
-  replaces: dotvirt-operator.v0.0.4
   relatedImages:
   - image: quay.io/epheo/dotvirt@sha256:463b2d8384686f06f92121bd1c0101402514512ab552cef0cce3f47f0cf9aebe
     name: dotvirt
   - image: quay.io/epheo/dotvirt-operator@sha256:26127ff6dcef5190b4d4aa59db7cbab10c6c733c6d9bb82fc4ce5415cd1b6307
     name: dotvirt-operator
-  - image: codeberg.org/forgejo/forgejo@sha256:d98d860ea64fd36cb0aabf0b46bbe1a37566b498eee4af0a6b246d5a45759d6d
+  - image: codeberg.org/forgejo/forgejo:11-rootless@sha256:5135f11de848bea6d59c0a96688e90c361380ba102bdc08dbd5aa52cca2b179b
     name: forgejo
   version: 0.0.5

@@ -1,6 +1,7 @@
-# A sample Dotvirt install (hetznet values). Apply into the namespace dotvirt runs
-# in; the operator provisions the rest. Under `make run ARGS=-dry-run` nothing is
-# persisted — the API server just validates the rendered resources.
+# A sample Dotvirt install. Replace the example.com hosts with your cluster's apps
+# domain, then apply into the namespace dotvirt runs in; the operator provisions the
+# rest. Under `make run ARGS=-dry-run` nothing is persisted — the API server just
+# validates the rendered resources.
 apiVersion: dotvirt.io/v1alpha1
 kind: Dotvirt
 metadata:
@@ -11,8 +12,8 @@ spec:
   # so an OLM operator upgrade rolls the app. Set spec.image only to override.
   forge:
     managed: true # the operator deploys + bootstraps Forgejo and generates its token
-    url: https://forgejo.apps.hetznet.epheo.eu # exposed via Route at this host
-    platformRepo: https://forgejo.apps.hetznet.epheo.eu/dotvirt/platform.git
+    url: https://forgejo.apps.example.com # exposed via Route at this host
+    platformRepo: https://forgejo.apps.example.com/dotvirt/platform.git
     credentialsSecret: dotvirt-forge # the operator WRITES the generated token here
     insecureTLS: true # the bundled Forgejo Route is self-signed
   argocd:
@@ -20,6 +21,6 @@ spec:
     controllerServiceAccount: openshift-gitops-argocd-application-controller
   ingress:
     type: auto # Route on OpenShift, Ingress on vanilla
-    host: dotvirt.apps.hetznet.epheo.eu
+    host: dotvirt.apps.example.com
   metrics:
     url: https://thanos-querier.openshift-monitoring.svc.cluster.local:9091
