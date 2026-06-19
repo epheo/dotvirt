@@ -37,17 +37,38 @@ This is enforced on the community-operator submissions (below) and expected here
 
 ## Releasing
 
-`hack/release.sh` cuts a digest-pinned release — it builds and pushes the app,
-operator, bundle, and catalog to `quay.io/epheo`, resolves each immutable `@sha256`,
-and pins them into `DefaultImage`, the CSV (`relatedImages` + the manager Deployment),
-the catalog template, and the `CatalogSource`. It never pushes a moving `:latest`.
+Two channels: **`alpha`** is released versions only (what external consumers
+subscribe to); **`candidate`** carries release-candidates *and* releases (the QA/test
+cluster subscribes here). Build with the CI-pinned `operator-sdk` (see the version in
+`.github/workflows/ci.yaml`) so the bundle's builder metadata matches.
+
+**Preview (QA on a test cluster), throwaway — never a published release:**
+`hack/preview.sh` builds + pushes preview images and a `candidate`-only catalog, then
+restores the working tree (nothing committed).
 
 ```sh
-VERSION=0.0.6 PREV=0.0.5 hack/release.sh   # PREV = the version this replaces
+VERSION=0.0.6-rc.1 hack/preview.sh
+kubectl apply -f operator/install/catalogsource-preview.yaml   # roll a candidate cluster
 ```
 
-Commit the pinned files, tag `v0.0.6`, then roll a cluster with
-`kubectl apply -f operator/install/catalogsource.yaml`.
+**Release:** `hack/release.sh` cuts a digest-pinned release — builds and pushes the
+app, operator, bundle, and catalog to `quay.io/epheo`, resolves each immutable
+`@sha256`, and pins them into `DefaultImage`, the CSV (`relatedImages` + the manager
+Deployment), the catalog template, and the `CatalogSource`. Never pushes `:latest`.
+
+```sh
+VERSION=0.0.6 PREV=0.0.5 hack/release.sh    # PREV = the version this replaces
+git commit -am "release v0.0.6" && git tag v0.0.6 && git push origin v0.0.6
+```
+
+`main` is branch-protected, so the digest-pinned release commit lands via a PR (the
+tag already points at it); merge that PR so `main` carries its own release commit.
+Roll a cluster with `kubectl apply -f operator/install/catalogsource.yaml`.
+
+> A preview/rc and a release both `replace` the prior *released* version, so there's
+> no OLM upgrade edge *between* previews (or preview→release). To move a cluster off a
+> preview, delete its CSV and re-create the Subscription (same channel) — OLM then
+> resolves to the catalog's current head.
 
 ## Submitting to OperatorHub / OpenShift OperatorHub
 
@@ -83,5 +104,6 @@ not semver).
   build multi-arch (`podman build --platform linux/amd64,linux/arm64` /
   `buildx` + `manifest`) in `hack/release.sh` and add the matching
   `operatorframework.io/arch.arm64` label to the CSV.
-- **Channels.** Only `alpha` today (matching the `v1alpha1` API). Add a `stable`
-  channel when the API graduates.
+- **Channels.** `alpha` is the only *published* channel today (matching the
+  `v1alpha1` API; `candidate` is internal QA — see Releasing). Add a `stable` channel
+  when the API graduates.
