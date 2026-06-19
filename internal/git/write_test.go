@@ -52,7 +52,7 @@ func seedRunning(t *testing.T) string {
 // files outside the managed dirs (README) untouched.
 func TestCommitPrunesStaleManaged(t *testing.T) {
 	bare := seedRunning(t)
-	w := OpenWrite(bare, "", "", true)
+	w := OpenWrite(bare, "", nil, true)
 
 	// Export now sees only web (db was deleted from the cluster).
 	files := []File{{Path: "tenant-a/web.yaml", Content: []byte("kind: VirtualMachine\nmetadata: {name: web, namespace: tenant-a}\n")}}
@@ -80,7 +80,7 @@ func TestCommitPrunesStaleManaged(t *testing.T) {
 // are given: stale files are NOT removed.
 func TestCommitNoPruneWithoutManaged(t *testing.T) {
 	bare := seedRunning(t)
-	w := OpenWrite(bare, "", "", true)
+	w := OpenWrite(bare, "", nil, true)
 
 	files := []File{{Path: "tenant-a/web.yaml", Content: []byte("kind: VirtualMachine\nmetadata: {name: web, namespace: tenant-a}\n")}}
 	if _, err := w.Commit("running", "sync", files, nil); err != nil {

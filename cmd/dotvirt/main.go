@@ -58,17 +58,18 @@ func run() error {
 	changed := make(chan struct{}, 1)
 	gitChanged := make(chan struct{}, 1)
 
-	// Per-project git: one read mirror + writable view per repo URL, all on the
-	// single Forgejo credential.
-	repos := git.NewRepoSet(ctx, cfg.GitUsername, cfg.GitToken, cfg.Push, changed, gitChanged, cfg.GitPollInterval)
+	// Per-project git + the Forge API share ONE token source (resolved per call, so
+	// an operator re-mint/rotation is picked up without restart).
+	tokenSrc := cfg.ForgeTokenSource()
+	repos := git.NewRepoSet(ctx, cfg.GitUsername, tokenSrc, cfg.Push, changed, gitChanged, cfg.GitPollInterval)
 
 	draftStore, err := draft.Open(cfg.DraftDir)
 	if err != nil {
 		return err
 	}
-	forgeFactory := forge.NewFactory(cfg.ForgeURL, cfg.ForgeToken, cfg.InsecureTLS)
+	forgeFactory := forge.NewFactoryFn(cfg.ForgeURL, tokenSrc, cfg.InsecureTLS)
 	if forgeFactory == nil {
-		log.Printf("forge not configured (DOTVIRT_FORGE_URL/DOTVIRT_FORGE_TOKEN unset): propose will push-only, no PR will be created")
+		log.Printf("forge not configured (DOTVIRT_FORGE_URL unset): propose will push-only, no PR will be created")
 	}
 	resolver := project.NewResolver(cfg.ProjectLabel, cfg.RepoAnnotation)
 

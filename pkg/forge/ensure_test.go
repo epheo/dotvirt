@@ -64,16 +64,24 @@ func TestEnsureOrgWebhookRegistersOnce(t *testing.T) {
 
 // MintToken authenticates with basic auth and returns the sha1 from the response.
 func TestMintToken(t *testing.T) {
+	var deleted, created bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u, p, ok := r.BasicAuth()
 		if !ok || u != "dotvirt-bot" || p != "pw" {
 			t.Errorf("expected basic auth dotvirt-bot:pw, got %q:%q ok=%v", u, p, ok)
 		}
-		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/users/dotvirt-bot/tokens" {
+		switch {
+		// Re-mint safety: the prior token of this name is deleted before create.
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/users/dotvirt-bot/tokens/dotvirt-operator":
+			deleted = true
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/users/dotvirt-bot/tokens":
+			created = true
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha1":"abc123","scopes":["write:organization"]}`))
+		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"sha1":"abc123","scopes":["write:organization"]}`))
 	}))
 	defer srv.Close()
 
@@ -83,6 +91,33 @@ func TestMintToken(t *testing.T) {
 	}
 	if tok != "abc123" {
 		t.Errorf("token = %q, want abc123", tok)
+	}
+	if !deleted || !created {
+		t.Errorf("expected delete-then-create; deleted=%v created=%v", deleted, created)
+	}
+}
+
+func TestValidateToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/user" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		// "good" authenticates, anything else is rejected.
+		if r.Header.Get("Authorization") == "token good" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"login":"dotvirt-bot"}`))
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	f := NewFactory(srv.URL, "ignored", false)
+	if valid, err := f.ValidateToken("good"); err != nil || !valid {
+		t.Errorf("ValidateToken(good) = (%v,%v), want (true,nil)", valid, err)
+	}
+	if valid, err := f.ValidateToken("stale"); err != nil || valid {
+		t.Errorf("ValidateToken(stale) = (%v,%v), want (false,nil)", valid, err)
 	}
 }
 

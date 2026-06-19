@@ -52,6 +52,13 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 			warnings = append(warnings, "sync status is temporarily unavailable")
 		}
 	}
+	// A configured platform repo whose namespaces never appear in the SA snapshot
+	// means the platform Argo app isn't applying them (repo-creds/auth, sync error)
+	// — distinct from a user legitimately scoped to no project. Surfaced cluster-wide
+	// (the snapshot is unfiltered) so "no projects" can't masquerade as a broken sync.
+	if s.cfg.PlatformRepo != "" && len(s.state.Namespaces()) == 0 {
+		warnings = append(warnings, "no projects found — the platform GitOps sync may be unhealthy (check the dotvirt-platform Application)")
+	}
 	inv := inventory.Build(in)
 	inv.Warnings = warnings
 	// The platform tier is config-only (never a labeled namespace), so it's absent

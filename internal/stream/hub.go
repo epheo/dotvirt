@@ -7,6 +7,7 @@ package stream
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"sync"
 	"time"
 
@@ -100,6 +101,9 @@ func (h *Hub) broadcast(ctx context.Context) {
 	for _, s := range subs {
 		inv, err := h.inventory(ctx, s.identity)
 		if err != nil {
+			// Transient (token expiry, API blip) — the next tick retries. Log it so a
+			// persistent build failure doesn't masquerade as an empty inventory.
+			log.Printf("stream: inventory build failed for %s: %v", s.identity.Username, err)
 			continue
 		}
 		data, err := json.Marshal(inv)

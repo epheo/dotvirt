@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -24,30 +25,42 @@ import (
 
 // Repo is a cached clone of the manifest repository. Reads are concurrency-safe.
 type Repo struct {
-	url  string
-	auth *http.BasicAuth
+	url      string
+	username string
+	tokenFn  forge.TokenSource // resolved per fetch so a rotated token is picked up
 
 	mu   sync.Mutex
 	repo *git.Repository
 }
 
-// Open clones url into memory (bare, all branches) and returns a Repo. username
-// and token are used for https basic auth; pass empty strings for public/local.
-func Open(url, username, token string) (*Repo, error) {
-	r := &Repo{url: url}
-	if token != "" {
-		r.auth = &http.BasicAuth{Username: username, Password: token}
-	}
+// Open clones url into memory (bare, all branches) and returns a Repo. username +
+// tokenFn provide https basic auth, resolved on each fetch (pass a nil/empty
+// source for public/local).
+func Open(url, username string, tokenFn forge.TokenSource) (*Repo, error) {
+	r := &Repo{url: url, username: username, tokenFn: tokenFn}
 	if err := r.clone(); err != nil {
 		return nil, err
 	}
 	return r, nil
 }
 
+// auth builds a fresh BasicAuth from the current token (nil when no token yet, so
+// go-git treats the remote as public). Rebuilt per call so rotation takes effect.
+func (r *Repo) auth() *http.BasicAuth {
+	if r.tokenFn == nil {
+		return nil
+	}
+	tok := r.tokenFn()
+	if tok == "" {
+		return nil
+	}
+	return &http.BasicAuth{Username: r.username, Password: tok}
+}
+
 func (r *Repo) clone() error {
 	repo, err := git.Clone(memory.NewStorage(), nil, &git.CloneOptions{
 		URL:          r.url,
-		Auth:         r.auth,
+		Auth:         r.auth(),
 		Mirror:       true, // fetch all refs; we read branches directly from refs
 		SingleBranch: false,
 	})
@@ -74,7 +87,7 @@ func (r *Repo) Refresh() error {
 	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 	defer cancel()
 	err := r.repo.FetchContext(ctx, &git.FetchOptions{
-		Auth:     r.auth,
+		Auth:     r.auth(),
 		RefSpecs: []config.RefSpec{"+refs/heads/*:refs/heads/*"},
 		Force:    true,
 	})

@@ -23,6 +23,10 @@ const (
 	DefaultForgeSecret    = "dotvirt-forge"
 )
 
+// forgeTokenMountPath is where the forge credential secret's "token" key is
+// projected into the app container (read per call → rotation-safe).
+const forgeTokenMountPath = "/var/run/dotvirt/forge/token"
+
 func secretEnv(name, secret, key string, optional bool) corev1.EnvVar {
 	return corev1.EnvVar{Name: name, ValueFrom: &corev1.EnvVarSource{
 		SecretKeyRef: &corev1.SecretKeySelector{
@@ -115,9 +119,11 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 		secretEnv("DOTVIRT_SESSION_SECRET", SessionSecretName, "secret", false),
 		secretEnv("DOTVIRT_APPSET_PLUGIN_TOKEN", AppsetSecretName, "token", true),
 		secretEnv("DOTVIRT_GIT_USERNAME", forgeSecret, "username", false),
-		secretEnv("DOTVIRT_GIT_TOKEN", forgeSecret, "token", false),
 		secretEnv("DOTVIRT_FORGE_URL", forgeSecret, "url", false),
-		secretEnv("DOTVIRT_FORGE_TOKEN", forgeSecret, "token", false),
+		// The forge token (git https + API, one credential) is MOUNTED, not injected
+		// as env: kubelet updates the file in place, so an operator re-mint/rotation
+		// reaches the app without a restart (env vars freeze at pod start).
+		corev1.EnvVar{Name: "DOTVIRT_FORGE_TOKEN_FILE", Value: forgeTokenMountPath},
 		// With a public URL + this secret, dotvirt self-registers its webhook on each
 		// project repo (forge -> dotvirt: instant inventory updates vs polling).
 		secretEnv("DOTVIRT_WEBHOOK_SECRET", WebhookSecretName, "secret", true),
@@ -166,6 +172,7 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 						Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 8080}},
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: "drafts", MountPath: "/var/lib/dotvirt/drafts"},
+							{Name: "forge-token", MountPath: "/var/run/dotvirt/forge", ReadOnly: true},
 						},
 						SecurityContext: &corev1.SecurityContext{
 							AllowPrivilegeEscalation: &noPrivilegeEscalation,
@@ -194,6 +201,14 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 						Name: "drafts",
 						VolumeSource: corev1.VolumeSource{
 							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: AppName + "-drafts"},
+						},
+					}, {
+						Name: "forge-token",
+						VolumeSource: corev1.VolumeSource{
+							Secret: &corev1.SecretVolumeSource{
+								SecretName: forgeSecret,
+								Items:      []corev1.KeyToPath{{Key: "token", Path: "token"}},
+							},
 						},
 					}},
 				},
