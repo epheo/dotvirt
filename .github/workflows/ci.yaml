@@ -95,13 +95,18 @@ jobs:
           EOF
           docker network connect kind kind-registry
       - name: Install OLM
-        run: operator-sdk olm install --timeout 5m
+        # Pin the OLM version (operator-sdk v1.42.2's default) — unpinned pulls
+        # latest-of-the-day, whose images intermittently fail to come up in kind and
+        # leave `run bundle` with no InstallPlan ("context deadline exceeded").
+        run: operator-sdk olm install --version 0.28.0 --timeout 5m
       - name: Build + push the (committed) bundle to the local registry
         run: make -C operator bundle-build bundle-push BUNDLE_IMG=localhost:5000/dotvirt-operator-bundle:ci CONTAINER_TOOL=docker
       - name: Install the bundle via OLM (assert it reaches Succeeded)
         run: |
           kubectl create namespace dotvirt-ci
-          operator-sdk run bundle localhost:5000/dotvirt-operator-bundle:ci -n dotvirt-ci --timeout 5m --use-http
+          # 10m (not 5m): a cold kind cluster must pull the OLM catalog/registry images
+          # before an InstallPlan can resolve; 5m was tight enough to flake.
+          operator-sdk run bundle localhost:5000/dotvirt-operator-bundle:ci -n dotvirt-ci --timeout 10m --use-http
           kubectl -n dotvirt-ci get csv
       - name: Scorecard (basic + olm)
         run: operator-sdk scorecard ./operator/bundle --wait-time 180s
