@@ -663,10 +663,17 @@ func (r *DotvirtReconciler) setCondition(dv *dotvirtv1alpha1.Dotvirt, condType s
 }
 
 // SetupWithManager detects the platform once and registers the reconciler.
+// Detection FAILS startup rather than defaulting: a wrong platform silently
+// mis-renders every platform-gated resource (most damagingly fsGroup, which an
+// OpenShift SCC then rejects — bricking Forgejo). Failing loud turns a transient
+// discovery-API blip at boot into a quick pod restart that retries, instead of a
+// permanent mis-render from an empty/guessed r.Platform.
 func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	if plat, err := platform.Detect(mgr.GetConfig()); err == nil {
-		r.Platform = plat
+	plat, err := platform.Detect(mgr.GetConfig())
+	if err != nil {
+		return fmt.Errorf("detect platform: %w", err)
 	}
+	r.Platform = plat
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&dotvirtv1alpha1.Dotvirt{}).
 		Named("dotvirt").
