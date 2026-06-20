@@ -168,9 +168,10 @@ func writeJSON(t *testing.T, w io.Writer, v any) {
 	}
 }
 
-// EnsureWebhook creates the hook only when no hook for the target URL exists.
+// EnsureWebhook creates the hook only when no hook for the target URL exists, and
+// re-asserts the secret on an existing hook in place (PATCH), never recreating it.
 func TestEnsureWebhookIdempotent(t *testing.T) {
-	posts := 0
+	posts, patches := 0, 0
 	existing := `[]`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -181,6 +182,9 @@ func TestEnsureWebhookIdempotent(t *testing.T) {
 			posts++
 			w.WriteHeader(http.StatusCreated)
 			fmt.Fprint(w, `{"id":1}`)
+		case r.Method == "PATCH" && strings.HasSuffix(r.URL.Path, "/hooks/1"):
+			patches++
+			w.WriteHeader(http.StatusOK)
 		default:
 			t.Errorf("unexpected call: %s %s", r.Method, r.URL.Path)
 		}
@@ -201,6 +205,9 @@ func TestEnsureWebhookIdempotent(t *testing.T) {
 	}
 	if posts != 1 {
 		t.Fatalf("existing hook must not be recreated; got %d creates", posts)
+	}
+	if patches != 1 {
+		t.Fatalf("existing hook must be reconciled in place; got %d patches", patches)
 	}
 }
 

@@ -1,6 +1,7 @@
 package forge
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -59,6 +60,44 @@ func TestEnsureOrgWebhookRegistersOnce(t *testing.T) {
 	}
 	if !posted {
 		t.Error("expected the org hook to be created")
+	}
+}
+
+// EnsureOrgWebhook re-asserts the HMAC secret on a hook that already targets the URL:
+// Forgejo never echoes the stored secret, so an existing hook is PATCHed back to the
+// configured one (in place, not recreated) rather than left to 403 every delivery.
+func TestEnsureOrgWebhookReconcilesSecret(t *testing.T) {
+	var patched bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/hooks":
+			// A hook for the target URL already exists, with no secret echoed back.
+			_, _ = w.Write([]byte(`[{"id":7,"config":{"url":"https://argo/api/webhook","content_type":"json"}}]`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/orgs/dotvirt/hooks/7":
+			patched = true
+			var body struct {
+				Config map[string]string `json:"config"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode PATCH body: %v", err)
+			}
+			if body.Config["secret"] != "rotated" {
+				t.Errorf("PATCH secret = %q, want rotated", body.Config["secret"])
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected %s %s (must reconcile in place, not recreate)", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewFactory(srv.URL, "tok", false).For("http://forge/dotvirt/platform.git")
+	if err := c.EnsureOrgWebhook("https://argo/api/webhook", "rotated"); err != nil {
+		t.Fatalf("EnsureOrgWebhook: %v", err)
+	}
+	if !patched {
+		t.Error("expected the existing hook to be PATCHed with the new secret")
 	}
 }
 

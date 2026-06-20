@@ -179,40 +179,43 @@ type hook struct {
 }
 
 // EnsureWebhook registers a push+pull_request webhook delivering to targetURL
-// (HMAC-signed with secret) on the client's repo, if none exists yet for that
-// URL — idempotent, so it can run on every sweep.
+// (HMAC-signed with secret) on the client's repo, re-asserting the secret if a hook
+// for that URL already exists — safe to run on every sweep.
 func (c *Client) EnsureWebhook(targetURL, secret string) error {
 	return c.ensureHook(c.repoPath("/hooks"), targetURL, secret)
 }
 
 // EnsureOrgWebhook registers the same push+pull_request webhook on the client's
 // ORGANIZATION rather than a single repo, so one hook covers every repo in the org —
-// present and future. Idempotent. Used to point ArgoCD at all project repos with a
-// single registration, with no per-repo enumeration.
+// present and future. Re-asserts the secret on each sweep. Used to point ArgoCD at all
+// project repos with a single registration, with no per-repo enumeration.
 func (c *Client) EnsureOrgWebhook(targetURL, secret string) error {
 	return c.ensureHook(fmt.Sprintf("/api/v1/orgs/%s/hooks", c.owner), targetURL, secret)
 }
 
-// ensureHook idempotently creates a "gitea" (Forgejo-compatible) push+pull_request
-// webhook at the given hooks collection path (repo- or org-level) unless one already
-// targets targetURL.
+// ensureHook registers a "gitea" (Forgejo-compatible) push+pull_request webhook
+// delivering to targetURL at the given hooks collection (repo- or org-level), and
+// reconciles the HMAC secret on every sweep. Forgejo never returns the stored secret,
+// so a hook found by URL is re-asserted unconditionally: a rotated or pre-existing
+// secret otherwise lingers and every delivery 403s on the HMAC check, silently
+// disabling the on-push refresh (only ArgoCD's poll remains). PATCH is idempotent, so
+// re-asserting each sweep is safe. Forgejo edits a hook at {collection}/{id}, for both
+// repo and org collections; EditHookOption has no "type", so the PATCH omits it.
 func (c *Client) ensureHook(hooksPath, targetURL, secret string) error {
 	var hooks []hook
 	if err := c.do("GET", hooksPath, nil, &hooks); err != nil {
 		return err
 	}
+	cfg := map[string]string{"url": targetURL, "content_type": "json", "secret": secret}
+	events := []string{"push", "pull_request"}
 	for _, h := range hooks {
 		if h.Config["url"] == targetURL {
-			return nil
+			return c.do("PATCH", fmt.Sprintf("%s/%d", hooksPath, h.ID),
+				map[string]any{"active": true, "events": events, "config": cfg}, nil)
 		}
 	}
-	payload := map[string]any{
-		"type":   "gitea",
-		"active": true,
-		"events": []string{"push", "pull_request"},
-		"config": map[string]string{"url": targetURL, "content_type": "json", "secret": secret},
-	}
-	return c.do("POST", hooksPath, payload, nil)
+	return c.do("POST", hooksPath,
+		map[string]any{"type": "gitea", "active": true, "events": events, "config": cfg}, nil)
 }
 
 // EnsureRepo creates the client's repo if it doesn't already exist — under its
