@@ -8,7 +8,6 @@
 /.dotvirt-drafts/
 
 # Go build/test artifacts
-*.exe
 *.test
 *.out
 *.prof
@@ -19,8 +18,10 @@
 # Throwaway preview CatalogSource (per-rc, digest-pinned; written by hack/preview.sh)
 /operator/install/catalogsource-preview.yaml
 
-# Editor/OS
-.DS_Store
-*.swp
+# operator-manifest-tools pin side-output (extract/replace manifests); `make bundle` removes
+# them, this covers a manual `pinning pin` run
+/operator/references.json
+/operator/replacements.json
 
-.claude/
+# Editor/OS
+*.swp

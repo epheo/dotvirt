@@ -27,11 +27,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Load pinned tool versions
+        run: grep -v '^#' hack/versions.env >> "$GITHUB_ENV"
       - name: Install skopeo + operator-sdk
         run: |
           sudo apt-get update && sudo apt-get install -y skopeo
           sudo curl -fsSL -o /usr/local/bin/operator-sdk \
-            https://github.com/operator-framework/operator-sdk/releases/download/v1.42.2/operator-sdk_linux_amd64
+            "https://github.com/operator-framework/operator-sdk/releases/download/$OPERATOR_SDK_VERSION/operator-sdk_linux_amd64"
           sudo chmod +x /usr/local/bin/operator-sdk
       - name: Registry login (docker + skopeo)
         env:
@@ -40,6 +42,8 @@ jobs:
         run: |
           echo "$P" | docker login quay.io -u "$U" --password-stdin
           echo "$P" | skopeo login quay.io -u "$U" --password-stdin
+      - uses: docker/setup-qemu-action@v3   # emulation for the catalog image's arm64 cache-build RUN
+      - uses: docker/setup-buildx-action@v3
       - name: Cut preview
         run: VERSION=${{ inputs.version }} CONTAINER_TOOL=docker ./hack/preview.sh
       - uses: actions/upload-artifact@v4

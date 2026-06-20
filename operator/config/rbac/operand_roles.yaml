@@ -1,0 +1,101 @@
+# Operand ClusterRoles — shipped as STATIC manifests (created + owned by OLM from the
+# bundle, or by `kustomize build config/default` for a non-OLM install), NOT authored
+# by the operator at runtime. Shipping them statically is what lets the operator drop
+# `escalate` and all ClusterRole writes: at reconcile it only creates the matching
+# ClusterRoleBindings (see internal/install/rbac.go), which needs just `bind` on these
+# named roles. Keep the names in sync with the roleRefs in rbac.go.
+---
+# dotvirt's runtime ServiceAccount read RBAC (TokenReview, namespace/VM reads, Argo app
+# patch for re-sync, wizard catalogs, network read). Read-only — Argo owns the apply path.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dotvirt
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/managed-by: dotvirt-operator
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachines", "virtualmachineinstances"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["instancetype.kubevirt.io"]
+    resources: ["virtualmachineclusterinstancetypes", "virtualmachineclusterpreferences"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cdi.kubevirt.io"]
+    resources: ["datasources"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["k8s.cni.cncf.io"]
+    resources: ["network-attachment-definitions"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["k8s.ovn.org"]
+    resources: ["userdefinednetworks", "clusteruserdefinednetworks"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["nmstate.io"]
+    resources: ["nodenetworkstates", "nodenetworkconfigurationpolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+# The apply rights for the kinds dotvirt's PR flow emits, granted to the SHARED Argo
+# application-controller SA (the binding targets it). The AppProjects — not this role —
+# scope which app may use the cluster-scoped kinds.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dotvirt-argocd-apply
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/managed-by: dotvirt-operator
+rules:
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachines"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["k8s.ovn.org"]
+    resources: ["userdefinednetworks", "clusteruserdefinednetworks"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["k8s.cni.cncf.io"]
+    resources: ["network-attachment-definitions"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["nmstate.io"]
+    resources: ["nodenetworkconfigurationpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Tenant access delegation: the platform repo's owners -> namespace-admin RoleBindings,
+  # scoped to the platform tier by the dotvirt-platform AppProject.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+# The authoring SIGNAL the UI's SSAR-gate reads (create cudn/nncp/namespaces). The user
+# never creates these — Argo applies them from the platform repo — so it's decoupled from
+# the apply path; bind it to delegate platform-network authoring to non-admins
+# (cluster-admins satisfy it implicitly).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dotvirt-platform-network-admin
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/managed-by: dotvirt-operator
+rules:
+  - apiGroups: ["k8s.ovn.org"]
+    resources: ["clusteruserdefinednetworks"]
+    verbs: ["create"]
+  - apiGroups: ["nmstate.io"]
+    resources: ["nodenetworkconfigurationpolicies"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create"]

@@ -134,6 +134,7 @@ func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt) []corev1.EnvVar {
 // image's other declared volume, backed by an emptyDir.
 func ForgejoDeployment(dv *dotvirtv1alpha1.Dotvirt, setFSGroup bool) *appsv1.Deployment {
 	replicas := int32(1)
+	forgejoImg := imageFromEnv("RELATED_IMAGE_FORGEJO", ForgejoImage)
 	dataMount := corev1.VolumeMount{Name: "data", MountPath: "/var/lib/gitea"}
 	etcMount := corev1.VolumeMount{Name: "etc", MountPath: "/etc/gitea"}
 	adminPW := corev1.EnvVar{Name: "ADMIN_PW", ValueFrom: &corev1.EnvVarSource{
@@ -165,7 +166,7 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 					SecurityContext:    forgejoPodSecurityContext(setFSGroup),
 					InitContainers: []corev1.Container{{
 						Name:            "bootstrap",
-						Image:           ForgejoImage,
+						Image:           forgejoImg,
 						Command:         []string{"sh", "-c", bootstrap},
 						Env:             append(forgejoEnv(dv), adminPW),
 						VolumeMounts:    []corev1.VolumeMount{dataMount, etcMount},
@@ -174,7 +175,7 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 					}},
 					Containers: []corev1.Container{{
 						Name:         "forgejo",
-						Image:        ForgejoImage,
+						Image:        forgejoImg,
 						Env:          forgejoEnv(dv),
 						Ports:        []corev1.ContainerPort{{Name: "http", ContainerPort: 3000}},
 						VolumeMounts: []corev1.VolumeMount{dataMount, etcMount},

@@ -1,12 +1,15 @@
 # Build from the REPO ROOT so both modules are in context (the operator imports the
 # app module via the replace directive):
 #   docker build -f operator/Dockerfile -t quay.io/epheo/dotvirt-operator:<tag> .
-FROM golang:1.26 AS build
+# CGO is disabled, so the manager cross-compiles for $TARGETARCH on the native build host
+# (no QEMU) — buildx sets TARGETOS/TARGETARCH per target platform.
+FROM --platform=$BUILDPLATFORM golang:1.26 AS build
+ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY . .
 # GOWORK=off so the operator builds standalone via its replace directive: the
 # repo-root go.work is copied in by `COPY . .`, and workspace mode rejects -mod=mod.
-RUN cd operator && CGO_ENABLED=0 GOWORK=off GOFLAGS=-mod=mod go build -trimpath -o /out/manager ./cmd
+RUN cd operator && CGO_ENABLED=0 GOWORK=off GOFLAGS=-mod=mod GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/manager ./cmd
 
 FROM gcr.io/distroless/static:nonroot
 ARG VERSION=dev

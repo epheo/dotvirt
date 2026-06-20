@@ -8,14 +8,26 @@ rules:
   - ""
   resources:
   - configmaps
-  - namespaces
+  verbs:
+  - create
+  - deletecollection
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - persistentvolumeclaims
-  - secrets
   - serviceaccounts
   - services
   verbs:
   - create
-  - delete
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - deletecollection
   - get
   - list
   - patch
@@ -27,11 +39,9 @@ rules:
   - deployments
   verbs:
   - create
-  - delete
   - get
   - list
   - patch
-  - update
   - watch
 - apiGroups:
   - argoproj.io
@@ -41,22 +51,15 @@ rules:
   - appprojects
   verbs:
   - create
-  - delete
-  - get
-  - list
+  - deletecollection
   - patch
-  - update
-  - watch
 - apiGroups:
   - dotvirt.io
   resources:
   - dotvirts
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
   - update
   - watch
 - apiGroups:
@@ -79,39 +82,34 @@ rules:
   - ingresses
   verbs:
   - create
-  - delete
-  - get
-  - list
   - patch
-  - update
-  - watch
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:
   - clusterrolebindings
+  verbs:
+  - create
+  - deletecollection
+  - patch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resourceNames:
+  - dotvirt
+  - dotvirt-argocd-apply
+  - dotvirt-platform-network-admin
+  resources:
   - clusterroles
-  - rolebindings
   verbs:
   - bind
-  - create
-  - delete
-  - escalate
-  - get
-  - list
-  - patch
-  - update
-  - watch
 - apiGroups:
   - route.openshift.io
   resources:
   - routes
   verbs:
   - create
-  - delete
   - get
   - list
   - patch
-  - update
   - watch
 - apiGroups:
   - route.openshift.io

@@ -2,7 +2,9 @@
 # binary, which serves both /api and the SPA at the same origin (-static-dir=/web).
 
 # --- Stage 1: build the SPA (adapter-static → /web/build) ---
-FROM docker.io/library/node:22-alpine AS web
+# Pinned to the build host's arch (the SPA output is arch-neutral static assets, so there's
+# no point emulating it per target platform).
+FROM --platform=$BUILDPLATFORM docker.io/library/node:22-alpine AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -10,13 +12,16 @@ COPY web/ ./
 RUN npm run build
 
 # --- Stage 2: build the static Go binary ---
-FROM docker.io/library/golang:1.26 AS build
+# CGO is disabled, so the Go toolchain cross-compiles for $TARGETARCH on the native build
+# host (no QEMU) — buildx sets TARGETOS/TARGETARCH per target platform.
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26 AS build
 ENV GOTOOLCHAIN=auto CGO_ENABLED=0 GOFLAGS=-buildvcs=false
+ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN go build -ldflags="-s -w" -o /dotvirt ./cmd/dotvirt
+RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /dotvirt ./cmd/dotvirt
 
 # --- Stage 3: minimal runtime ---
 FROM gcr.io/distroless/static:nonroot

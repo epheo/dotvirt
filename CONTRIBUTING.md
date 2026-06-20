@@ -39,31 +39,39 @@ This is enforced on the community-operator submissions (below) and expected here
 
 Two channels: **`alpha`** is released versions only (what external consumers
 subscribe to); **`candidate`** carries release-candidates *and* releases (the QA/test
-cluster subscribes here). Build with the CI-pinned `operator-sdk` (see the version in
-`.github/workflows/ci.yaml`) so the bundle's builder metadata matches.
+cluster subscribes here). All tool versions (`operator-sdk`, `opm`,
+`operator-manifest-tools`, …) are pinned in `hack/versions.env` — the single source
+the Makefile, the `hack/` scripts, and the workflows all read — so local and CI builds
+match.
 
 **Preview (QA on a test cluster), throwaway — never a published release:**
 `hack/preview.sh` builds + pushes preview images and a `candidate`-only catalog, then
-restores the working tree (nothing committed).
+restores the working tree (nothing committed). Run it locally, or trigger the `preview`
+workflow (`workflow_dispatch`, version input), which uploads the CatalogSource artifact.
 
 ```sh
 VERSION=0.0.6-rc.1 hack/preview.sh
 kubectl apply -f operator/install/catalogsource-preview.yaml   # roll a candidate cluster
 ```
 
-**Release:** `hack/release.sh` cuts a digest-pinned release — builds and pushes the
-app, operator, bundle, and catalog to `quay.io/epheo`, resolves each immutable
-`@sha256`, and pins them into `DefaultImage`, the CSV (`relatedImages` + the manager
-Deployment), the catalog template, and the `CatalogSource`. Never pushes `:latest`.
+**Release:** push a `v*` tag — the `release` workflow cuts a digest-pinned, multi-arch
+(`linux/amd64` + `linux/arm64`) release: it builds and pushes the app, operator, bundle,
+and catalog to `quay.io/epheo`, resolves each immutable `@sha256`, and pins them into
+`DefaultImage` + the manager's `RELATED_IMAGE_*` env (from which `operator-manifest-tools`
+assembles the bundle's `relatedImages` at `make bundle`), the operator Deployment, the
+catalog template, and the `CatalogSource`. Never pushes `:latest`. `PREV` (the version
+this replaces) is derived from the current `alpha` head.
 
 ```sh
-VERSION=0.0.6 PREV=0.0.5 hack/release.sh    # PREV = the version this replaces
-git commit -am "release v0.0.6" && git tag v0.0.6 && git push origin v0.0.6
+git tag v0.0.6 && git push origin v0.0.6
 ```
 
-`main` is branch-protected, so the digest-pinned release commit lands via a PR (the
-tag already points at it); merge that PR so `main` carries its own release commit.
-Roll a cluster with `kubectl apply -f operator/install/catalogsource.yaml`.
+`main` is branch-protected, so the run opens a **digest-pin PR** — the tag marks intent,
+the merged PR is the record. Merge it so `main` carries the pinned release commit, then
+roll a cluster with `kubectl apply -f operator/install/catalogsource.yaml`. To re-run or
+override `PREV`, trigger the workflow via `workflow_dispatch` (version + prev inputs); to
+cut one entirely locally, run `VERSION=0.0.6 PREV=0.0.5 hack/release.sh` and commit + tag
+the pinned tree yourself.
 
 > A preview/rc and a release both `replace` the prior *released* version, so there's
 > no OLM upgrade edge *between* previews (or preview→release). To move a cluster off a
@@ -99,11 +107,6 @@ not semver).
 
 ### Notes / future work
 
-- **Multi-arch.** Images are `linux/amd64` only; the CSV advertises
-  `operatorframework.io/arch.amd64` + `os.linux`. To support arm64 KubeVirt hosts,
-  build multi-arch (`podman build --platform linux/amd64,linux/arm64` /
-  `buildx` + `manifest`) in `hack/release.sh` and add the matching
-  `operatorframework.io/arch.arm64` label to the CSV.
 - **Channels.** `alpha` is the only *published* channel today (matching the
   `v1alpha1` API; `candidate` is internal QA — see Releasing). Add a `stable` channel
   when the API graduates.
