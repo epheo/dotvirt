@@ -1,6 +1,8 @@
 package install
 
 import (
+	"os"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -13,6 +15,16 @@ import (
 // DefaultImage is deployed when the Dotvirt spec doesn't pin one.
 const DefaultImage = "quay.io/epheo/dotvirt@sha256:c69b52142793b6c0e14e54233ca4edd9bb2b2b7fb022c02f9be0e66f731870d6"
 
+// imageFromEnv returns the operand image pinned in the operator's RELATED_IMAGE_* env (set
+// from the CSV by OLM, and overridable per-install), falling back to the digest compiled in
+// at build time when the env is unset (e.g. `make run`, non-OLM installs).
+func imageFromEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 // Secret names the operator generates (session, appset) or expects (the forge
 // credential — overridable via spec.forge.credentialsSecret).
 const (
@@ -22,6 +34,15 @@ const (
 	ArgoWebhookSecretName = "dotvirt-argo-webhook"
 	DefaultForgeSecret    = "dotvirt-forge"
 )
+
+// ForgeSecretName is the forge-credential Secret for this install: the spec override,
+// else the default the managed-Forgejo bootstrap writes.
+func ForgeSecretName(dv *dotvirtv1alpha1.Dotvirt) string {
+	if dv.Spec.Forge.CredentialsSecret != "" {
+		return dv.Spec.Forge.CredentialsSecret
+	}
+	return DefaultForgeSecret
+}
 
 // forgeTokenMountPath is where the forge credential secret's "token" key is
 // projected into the app container (read per call → rotation-safe).
@@ -90,14 +111,14 @@ func Service(dv *dotvirtv1alpha1.Dotvirt) *corev1.Service {
 	}
 }
 
-// Deployment runs the dotvirt binary (which also serves the SPA). The image, args,
-// platform-repo + metrics config, and the drafts volume are wired here; the
-// secret-backed env (git/forge/session/appset credentials) and the metrics-CA mount
-// land in the follow-up chunk alongside the secret generation.
+// Deployment runs the dotvirt binary (which also serves the SPA): the image, args,
+// platform-repo + metrics config, the drafts volume, and the secret-backed env
+// (git/forge/session/appset credentials, with the forge token mounted so a re-mint
+// reaches the app without a restart).
 func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 	image := dv.Spec.Image
 	if image == "" {
-		image = DefaultImage
+		image = imageFromEnv("RELATED_IMAGE_DOTVIRT", DefaultImage)
 	}
 
 	env := []corev1.EnvVar{}
@@ -111,10 +132,7 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: dv.Spec.Metrics.URL})
 	}
 
-	forgeSecret := dv.Spec.Forge.CredentialsSecret
-	if forgeSecret == "" {
-		forgeSecret = DefaultForgeSecret
-	}
+	forgeSecret := ForgeSecretName(dv)
 	env = append(env,
 		secretEnv("DOTVIRT_SESSION_SECRET", SessionSecretName, "secret", false),
 		secretEnv("DOTVIRT_APPSET_PLUGIN_TOKEN", AppsetSecretName, "token", true),

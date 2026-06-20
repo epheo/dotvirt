@@ -45,19 +45,30 @@ type DotvirtReconciler struct {
 	DryRun   bool              // -dry-run: validate via server-side dry-run apply; persist nothing
 }
 
-// +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts,verbs=get;list;watch;create;update;patch;delete
+// The operator's OWN least-privilege RBAC (generated into config/rbac/role.yaml). Verbs
+// are exactly what the controller's client does: install.Apply is server-side-apply, i.e.
+// create+patch (never update); only the kinds it actually reads (dotvirts, secrets,
+// deployments, routes) get list+watch (the cache); cleanup's DeleteAllOf is the
+// `deletecollection` verb. The operator does NOT author ClusterRoles — it only `bind`s the
+// three static operand roles — so it needs no `escalate` and no ClusterRole/RoleBinding writes.
+// +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts,verbs=get;list;watch;update
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts/finalizers,verbs=update
-// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=services;serviceaccounts;configmaps;secrets;persistentvolumeclaims;namespaces,verbs=get;list;watch;create;update;patch;delete
-// bind+escalate let the operator create ClusterRoles granting permissions it may
-// not itself hold (the standard installer pattern for RBAC-provisioning operators).
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings;rolebindings,verbs=get;list;watch;create;update;patch;delete;bind;escalate
-// +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;patch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;deletecollection
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=create;patch;deletecollection
+// +kubebuilder:rbac:groups="",resources=services;serviceaccounts;persistentvolumeclaims,verbs=create;patch
+// +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get;list;watch;create;patch
 // routes/custom-host: required to set an explicit spec.host on a Route (the forge + app exposure hosts).
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes/custom-host,verbs=create
-// +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=argoproj.io,resources=appprojects;applications;applicationsets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=create;patch
+// +kubebuilder:rbac:groups=argoproj.io,resources=appprojects;applications;applicationsets,verbs=create;patch;deletecollection
+// clusterrolebindings: the operator creates the bindings that wire the static operand roles
+// to the dotvirt SA / Argo controller / platform-admins, and DeleteAllOf-cleans them up.
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=create;patch;deletecollection
+// clusterroles `bind`: the operator's ONLY rbac-authoring right — bind these three named
+// static roles into the bindings above. No escalate, no role create/update/delete.
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=dotvirt;dotvirt-argocd-apply;dotvirt-platform-network-admin,verbs=bind
 
 // dotvirtFinalizer guards cleanup of the cluster-scoped + ArgoCD-namespace
 // resources, which a namespaced CR can't garbage-collect via ownerReferences.
@@ -120,10 +131,7 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// rest of the install can't tell it from a BYO forge.
 	if dv.Spec.Forge.Managed {
 		if err := r.applyForgejo(ctx, &dv); err != nil {
-			r.setCondition(&dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "ApplyFailed", err.Error())
-			dv.Status.Phase = "Provisioning"
-			_ = r.Status().Update(ctx, &dv)
-			return ctrl.Result{}, err
+			return r.failPhase(ctx, &dv, dotvirtv1alpha1.ConditionForgeReady, "ApplyFailed", err)
 		}
 		switch {
 		case r.DryRun:
@@ -131,10 +139,7 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		default:
 			ready, err := r.bootstrapForgejo(ctx, &dv)
 			if err != nil {
-				r.setCondition(&dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "Error", err.Error())
-				dv.Status.Phase = "Provisioning"
-				_ = r.Status().Update(ctx, &dv)
-				return ctrl.Result{}, err
+				return r.failPhase(ctx, &dv, dotvirtv1alpha1.ConditionForgeReady, "Error", err)
 			}
 			if !ready {
 				r.setCondition(&dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "Progressing", "waiting for Forgejo to come up")
@@ -182,17 +187,15 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err
 		}
 		if err := install.Apply(ctx, r.Client, obj, r.DryRun); err != nil {
-			r.setCondition(&dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionFalse, "ApplyFailed", err.Error())
-			dv.Status.Phase = "Provisioning"
-			_ = r.Status().Update(ctx, &dv)
-			return ctrl.Result{}, err
+			return r.failPhase(ctx, &dv, dotvirtv1alpha1.ConditionAvailable, "ApplyFailed", err)
 		}
 	}
 
-	// Cluster-scoped + ArgoCD-namespace resources: the SA's read RBAC, the
-	// shared-controller apply role, the authoring-signal role, and the AppProject
-	// tier (+ the static platform Application). Not owner-referenceable by a
-	// namespaced CR, so they carry managed-by labels and the finalizer cleans them up.
+	// Cluster-scoped + ArgoCD-namespace resources: the RBAC BINDINGS wiring the static
+	// operand ClusterRoles (config/rbac/operand_roles.yaml, OLM/kustomize-owned) to the
+	// dotvirt SA / Argo controller / platform-admins, plus the AppProject tier (+ the
+	// static platform Application). Not owner-referenceable by a namespaced CR, so they
+	// carry managed-by labels and the finalizer cleans them up.
 	argoNS, argoSA := r.argoTarget(&dv)
 	platformRepo := dv.Spec.Forge.PlatformRepo
 	// The plugin generator reads the appset token from the ArgoCD namespace, so
@@ -203,11 +206,8 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 	clusterObjs := []client.Object{
-		install.DotvirtClusterRole(&dv),
 		install.DotvirtClusterRoleBinding(&dv),
-		install.ArgocdApplyClusterRole(&dv),
 		install.ArgocdApplyClusterRoleBinding(&dv, argoNS, argoSA),
-		install.PlatformNetworkAdminClusterRole(&dv),
 		install.PlatformNetworkAdminBinding(&dv),
 		install.TenantsAppProject(&dv, argoNS, platformRepo, dv.Namespace),
 		install.AppsetPluginConfigMap(&dv, argoNS, dv.Namespace),
@@ -229,10 +229,7 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	for _, obj := range clusterObjs {
 		if err := install.Apply(ctx, r.Client, obj, r.DryRun); err != nil {
-			r.setCondition(&dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionFalse, "ApplyFailed", err.Error())
-			dv.Status.Phase = "Provisioning"
-			_ = r.Status().Update(ctx, &dv)
-			return ctrl.Result{}, err
+			return r.failPhase(ctx, &dv, dotvirtv1alpha1.ConditionAvailable, "ApplyFailed", err)
 		}
 	}
 
@@ -285,10 +282,7 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 // (it's a forge API call, not a kubectl apply). Reuses the app's shared forge
 // client (pkg/forge), driven by the forge credential in the CR's secret.
 func (r *DotvirtReconciler) ensurePlatformRepo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
-	secretName := dv.Spec.Forge.CredentialsSecret
-	if secretName == "" {
-		secretName = install.DefaultForgeSecret
-	}
+	secretName := install.ForgeSecretName(dv)
 	var s corev1.Secret
 	if err := r.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: secretName}, &s); err != nil {
 		return fmt.Errorf("read forge credentials %q: %w", secretName, err)
@@ -311,18 +305,23 @@ func (r *DotvirtReconciler) ensurePlatformRepo(ctx context.Context, dv *dotvirtv
 	return nil
 }
 
-// exposure builds the UI ingress object for the detected/configured type — a Route
-// on OpenShift, an Ingress on vanilla Kubernetes (nil if Ingress is selected without
-// a host, or for the not-yet-implemented Gateway type).
-func (r *DotvirtReconciler) exposure(dv *dotvirtv1alpha1.Dotvirt) client.Object {
-	t := string(dv.Spec.Ingress.Type)
-	if t == "" || t == "auto" {
-		t = "ingress"
-		if r.Platform == platform.OpenShift {
-			t = "route"
-		}
+// resolveExposureType picks the exposure kind for the configured/detected ingress type:
+// the explicit spec value, or Route on OpenShift / Ingress on vanilla when "auto"/unset.
+func (r *DotvirtReconciler) resolveExposureType(dv *dotvirtv1alpha1.Dotvirt) string {
+	if t := string(dv.Spec.Ingress.Type); t != "" && t != "auto" {
+		return t
 	}
-	switch t {
+	if r.Platform == platform.OpenShift {
+		return "route"
+	}
+	return "ingress"
+}
+
+// exposure builds the UI ingress object for the resolved type — a Route on OpenShift, an
+// Ingress on vanilla Kubernetes (nil if Ingress is selected without a host, or for the
+// not-yet-implemented Gateway type).
+func (r *DotvirtReconciler) exposure(dv *dotvirtv1alpha1.Dotvirt) client.Object {
+	switch r.resolveExposureType(dv) {
 	case "route":
 		return install.Route(dv, dv.Spec.Ingress.Host)
 	case "ingress":
@@ -341,14 +340,7 @@ func (r *DotvirtReconciler) forgejoExposure(dv *dotvirtv1alpha1.Dotvirt) client.
 	if host == "" {
 		return nil
 	}
-	t := string(dv.Spec.Ingress.Type)
-	if t == "" || t == "auto" {
-		t = "ingress"
-		if r.Platform == platform.OpenShift {
-			t = "route"
-		}
-	}
-	switch t {
+	switch r.resolveExposureType(dv) {
 	case "route":
 		return install.ForgejoRoute(dv, host)
 	case "ingress":
@@ -438,10 +430,7 @@ func (r *DotvirtReconciler) ensureArgoWebhook(ctx context.Context, dv *dotvirtv1
 		return false, fmt.Errorf("set argo webhook secret: %w", err)
 	}
 	// One org webhook covers every repo, using the forge credential to register it.
-	name := dv.Spec.Forge.CredentialsSecret
-	if name == "" {
-		name = install.DefaultForgeSecret
-	}
+	name := install.ForgeSecretName(dv)
 	var fs corev1.Secret
 	if err := r.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: name}, &fs); err != nil {
 		return false, fmt.Errorf("read forge credentials %q: %w", name, err)
@@ -516,10 +505,7 @@ func (r *DotvirtReconciler) applyForgejo(ctx context.Context, dv *dotvirtv1alpha
 // Forgejo is up, then writes the dotvirt-forge secret. Idempotent: a no-op once
 // dotvirt-forge exists; returns ready=false (caller requeues) while Forgejo isn't up.
 func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (bool, error) {
-	credName := dv.Spec.Forge.CredentialsSecret
-	if credName == "" {
-		credName = install.DefaultForgeSecret
-	}
+	credName := install.ForgeSecretName(dv)
 	// Already bootstrapped AND the stored token still works? Trusting mere existence
 	// leaves a dead token in place forever after a Forgejo data reset or out-of-band
 	// rotation (Argo + the app then fail auth). Validate it; only short-circuit when
@@ -592,10 +578,7 @@ func (r *DotvirtReconciler) repoCreds(ctx context.Context, dv *dotvirtv1alpha1.D
 	if dv.Spec.Forge.URL == "" {
 		return nil
 	}
-	name := dv.Spec.Forge.CredentialsSecret
-	if name == "" {
-		name = install.DefaultForgeSecret
-	}
+	name := install.ForgeSecretName(dv)
 	var s corev1.Secret
 	if err := r.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: name}, &s); err != nil {
 		return nil
@@ -629,10 +612,10 @@ func (r *DotvirtReconciler) argoTarget(dv *dotvirtv1alpha1.Dotvirt) (ns, sa stri
 // can't ownerRef). Not-found and missing-CRD are tolerated so cleanup is idempotent.
 func (r *DotvirtReconciler) cleanupClusterResources(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
 	sel := client.MatchingLabels{"dotvirt.io/instance": dv.Name}
-	for _, o := range []client.Object{&rbacv1.ClusterRole{}, &rbacv1.ClusterRoleBinding{}} {
-		if err := r.DeleteAllOf(ctx, o, sel); err != nil && !apierrors.IsNotFound(err) {
-			return err
-		}
+	// Only the ClusterRoleBindings are ours to delete — the operand ClusterRoles are
+	// static, OLM/kustomize-owned (config/rbac/operand_roles.yaml) and shared.
+	if err := r.DeleteAllOf(ctx, &rbacv1.ClusterRoleBinding{}, sel); err != nil && !apierrors.IsNotFound(err) {
+		return err
 	}
 	argoNS, _ := r.argoTarget(dv)
 	for _, kind := range []string{"AppProject", "Application", "ApplicationSet"} {
@@ -660,6 +643,17 @@ func (r *DotvirtReconciler) setCondition(dv *dotvirtv1alpha1.Dotvirt, condType s
 		Message:            msg,
 		ObservedGeneration: dv.Generation,
 	})
+}
+
+// failPhase records a failure condition + the Provisioning phase (best-effort status
+// write) and returns the original error so Reconcile requeues on it.
+func (r *DotvirtReconciler) failPhase(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, condType, reason string, err error) (ctrl.Result, error) {
+	r.setCondition(dv, condType, metav1.ConditionFalse, reason, err.Error())
+	dv.Status.Phase = "Provisioning"
+	if uerr := r.Status().Update(ctx, dv); uerr != nil {
+		logf.FromContext(ctx).Error(uerr, "status update failed", "phase", "Provisioning")
+	}
+	return ctrl.Result{}, err
 }
 
 // SetupWithManager detects the platform once and registers the reconciler.

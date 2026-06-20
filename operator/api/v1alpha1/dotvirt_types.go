@@ -41,8 +41,9 @@ type ForgeSpec struct {
 	// CredentialsSecret names a Secret holding the forge-admin credential used for
 	// the platform-repo bootstrap (keys: url, username, token).
 	CredentialsSecret string `json:"credentialsSecret,omitempty"`
-	// InsecureTLS skips TLS verification when calling the forge API (a self-signed
-	// forge Route, e.g. the bundled Forgejo). Dev/eval only.
+	// InsecureTLS skips TLS verification when calling the forge API (a self-signed forge
+	// Route, e.g. the bundled Forgejo). DEV/EVAL ONLY — never enable against a forge with
+	// a trusted certificate.
 	InsecureTLS bool `json:"insecureTLS,omitempty"`
 }
 
@@ -67,10 +68,9 @@ type IngressSpec struct {
 }
 
 // MetricsSpec points the Performance tab at a Prometheus/Thanos query API; empty
-// disables it. CASecret names a Secret with a CA bundle to trust (else system roots).
+// disables it.
 type MetricsSpec struct {
-	URL      string `json:"url,omitempty"`
-	CASecret string `json:"caSecret,omitempty"`
+	URL string `json:"url,omitempty"`
 }
 
 // DotvirtSpec is the desired dotvirt install.

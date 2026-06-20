@@ -15,7 +15,9 @@ spec:
     url: https://forgejo.apps.example.com # exposed via Route at this host
     platformRepo: https://forgejo.apps.example.com/dotvirt/platform.git
     credentialsSecret: dotvirt-forge # the operator WRITES the generated token here
-    insecureTLS: true # the bundled Forgejo Route is self-signed
+    # DEV/EVAL ONLY — skips forge TLS verification for the bundled self-signed Forgejo
+    # Route. Leave UNSET (defaults false) for a real forge with a trusted certificate.
+    insecureTLS: true
   argocd:
     namespace: openshift-gitops
     controllerServiceAccount: openshift-gitops-argocd-application-controller

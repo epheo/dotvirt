@@ -25,6 +25,17 @@ spec:
         - name: manager
           image: quay.io/epheo/dotvirt-operator:v0.0.6
           args: ["--leader-elect", "--health-probe-bind-address=:8081"]
+          # Operand images, digest-pinned. The operator reads these to decide what to deploy
+          # (RELATED_IMAGE_* convention), so an operand is overridable per-install via the
+          # operator's env, and operator-manifest-tools derives the bundle's spec.relatedImages
+          # from them — what disconnected mirroring (oc adm catalog mirror + an
+          # ImageDigestMirrorSet) redirects by digest. DOTVIRT is re-pinned each release;
+          # FORGEJO is static (bumped only when the upstream :11-rootless tag moves).
+          env:
+            - name: RELATED_IMAGE_DOTVIRT
+              value: quay.io/epheo/dotvirt@sha256:c69b52142793b6c0e14e54233ca4edd9bb2b2b7fb022c02f9be0e66f731870d6
+            - name: RELATED_IMAGE_FORGEJO
+              value: codeberg.org/forgejo/forgejo:11-rootless@sha256:5135f11de848bea6d59c0a96688e90c361380ba102bdc08dbd5aa52cca2b179b
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

@@ -3,3 +3,4 @@ resources:
   - role_binding.yaml
   - service_account.yaml
   - leader_election.yaml
+  - operand_roles.yaml # static ClusterRoles the operator only BINDS (not authors) at runtime
