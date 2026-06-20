@@ -11,9 +11,12 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/restfactory"
@@ -66,41 +69,55 @@ func clientFor(cfg *rest.Config) (*Client, error) {
 	return &Client{dyn: dyn}, nil
 }
 
-// VMDrift returns per-VM drift keyed by "namespace/name", built from every
-// Application's status.resources[] that references a VirtualMachine. VMs absent
-// from the map are managed by no Application (caller reports NotTracked).
-func (c *Client) VMDrift(ctx context.Context) (map[string]Drift, error) {
-	apps, err := c.dyn.Resource(applicationsGVR).Namespace(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("list ArgoCD applications: %w", err)
+// ApplicationsListWatch is the List+Watch source for the cluster-wide ArgoCD
+// Application reflector that backs Snapshot — the drift plane's equivalent of
+// cluster.VMListWatch.
+func (c *Client) ApplicationsListWatch() *cache.ListWatch {
+	return &cache.ListWatch{
+		ListFunc: func(o metav1.ListOptions) (runtime.Object, error) {
+			return c.dyn.Resource(applicationsGVR).Namespace(metav1.NamespaceAll).List(context.Background(), o)
+		},
+		WatchFunc: func(o metav1.ListOptions) (watch.Interface, error) {
+			return c.dyn.Resource(applicationsGVR).Namespace(metav1.NamespaceAll).Watch(context.Background(), o)
+		},
 	}
+}
 
+// driftFromApps builds per-VM drift keyed "namespace/name" from a set of ArgoCD
+// Application objects (the reflector store's *unstructured.Unstructured). VMs absent
+// from the result are managed by no Application (caller reports NotTracked). Only
+// scalar fields are read out of each object, so nothing escapes the store to be
+// mutated. Always returns a non-nil map.
+func driftFromApps(objs []any) map[string]Drift {
 	out := map[string]Drift{}
-	for i := range apps.Items {
-		resources, found, err := unstructured.NestedSlice(apps.Items[i].Object, "status", "resources")
-		if err != nil || !found {
+	for _, obj := range objs {
+		app, ok := obj.(*unstructured.Unstructured)
+		if !ok {
 			continue
 		}
-		for _, raw := range resources {
-			res, ok := raw.(map[string]any)
-			if !ok {
-				continue
-			}
-			if asString(res, "group") != "kubevirt.io" || asString(res, "kind") != "VirtualMachine" {
-				continue
-			}
-			ns, name := asString(res, "namespace"), asString(res, "name")
-			if name == "" {
-				continue
-			}
-			out[ns+"/"+name] = Drift{
-				Sync:   syncStatus(asString(res, "status")),
-				Health: nestedString(res, "health", "status"),
+		resources, found, err := unstructured.NestedSlice(app.Object, "status", "resources")
+		if err == nil && found {
+			for _, raw := range resources {
+				res, ok := raw.(map[string]any)
+				if !ok {
+					continue
+				}
+				if asString(res, "group") != "kubevirt.io" || asString(res, "kind") != "VirtualMachine" {
+					continue
+				}
+				ns, name := asString(res, "namespace"), asString(res, "name")
+				if name == "" {
+					continue
+				}
+				out[ns+"/"+name] = Drift{
+					Sync:   syncStatus(asString(res, "status")),
+					Health: nestedString(res, "health", "status"),
+				}
 			}
 		}
-		mergeSyncMessages(out, apps.Items[i].Object)
+		mergeSyncMessages(out, app.Object)
 	}
-	return out, nil
+	return out
 }
 
 // mergeSyncMessages attaches per-VM apply errors onto the drift map. ArgoCD keeps
@@ -118,7 +135,7 @@ func mergeSyncMessages(out map[string]Drift, app map[string]any) {
 		if !ok {
 			continue
 		}
-		if asString(res, "kind") != "VirtualMachine" {
+		if asString(res, "group") != "kubevirt.io" || asString(res, "kind") != "VirtualMachine" {
 			continue
 		}
 		msg := asString(res, "message")
@@ -126,7 +143,15 @@ func mergeSyncMessages(out map[string]Drift, app map[string]any) {
 			continue
 		}
 		key := asString(res, "namespace") + "/" + asString(res, "name")
-		d := out[key]
+		// Only annotate a VM the live tree (status.resources[]) already reported. A VM
+		// present ONLY here — a failed first apply that never entered the live tree —
+		// must NOT be synthesized with a zero Sync ("") : that empty status crashes the
+		// frontend SyncBadge (it indexes its style table by sync). Such a VM stays
+		// absent so the caller reports NotTracked.
+		d, ok := out[key]
+		if !ok {
+			continue
+		}
 		d.Message = msg
 		out[key] = d
 	}

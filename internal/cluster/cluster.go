@@ -168,6 +168,22 @@ func (c *Client) NamespaceListWatch(label string) *cache.ListWatch {
 	}
 }
 
+// RoleBindingListWatch is the List+Watch source for a cluster-wide RoleBinding
+// reflector (run on the SA client). dotvirt never reads RoleBindings; it watches
+// them only to learn when a token's namespace visibility may have changed, so the
+// per-token visible-namespace cache can be invalidated promptly instead of on a
+// blind TTL.
+func (c *Client) RoleBindingListWatch() *cache.ListWatch {
+	return &cache.ListWatch{
+		ListFunc: func(o metav1.ListOptions) (runtime.Object, error) {
+			return c.kube.RbacV1().RoleBindings(metav1.NamespaceAll).List(context.Background(), o)
+		},
+		WatchFunc: func(o metav1.ListOptions) (watch.Interface, error) {
+			return c.kube.RbacV1().RoleBindings(metav1.NamespaceAll).Watch(context.Background(), o)
+		},
+	}
+}
+
 // canReadVMs reports whether this token may get/list VirtualMachines in ns, via a
 // SelfSubjectRulesReview. It checks VM read specifically (not a broader proxy like
 // pods): a namespace's project membership exposes its git repo URL, so only users

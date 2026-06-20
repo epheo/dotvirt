@@ -16,6 +16,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/project"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
@@ -49,9 +50,12 @@ func New(state *clusterstate.State, resolver *project.Resolver, repos *git.RepoS
 func (e *Exporter) once() int {
 	// Exporting prunes manifests absent from the snapshot, so a half-filled
 	// snapshot (reflectors still on their initial LIST) would read as mass VM
-	// deletion. Skip the tick; a stale running branch beats a wrong one.
-	if !e.state.Synced() {
-		log.Printf("export: snapshot not synced yet; skipping this tick")
+	// deletion. Gate on exactly the stores the export reads — VMs + namespaces —
+	// NOT full Synced(): a permanently-failing VMI reflector (e.g. a removed RBAC
+	// verb) must not silently wedge export for every project forever. Skip the tick
+	// until ready; a stale running branch beats a wrong one.
+	if !e.state.ExportReady() {
+		log.Printf("export: VM/namespace snapshot not ready yet; skipping this tick (if this persists, a reflector's initial LIST is failing — check SA RBAC)")
 		return 0
 	}
 	projects := e.resolver.Resolve(e.state.Namespaces(), nil)
@@ -132,9 +136,18 @@ func manifestsFor(vms []kubevirtcorev1.VirtualMachine) ([]git.File, error) {
 	return files, nil
 }
 
-// Run exports once immediately, then every interval until ctx is cancelled.
-// Per-project failures are logged and retried on the next tick (see once).
-func (e *Exporter) Run(ctx context.Context, interval time.Duration) {
+// Run exports once immediately, then whenever the exported manifest set could have
+// moved — VMSpecChanged (a VM spec/generation change or add/remove) or
+// NamespaceChanged — and on a periodic backstop tick, until ctx is cancelled. It
+// deliberately does NOT wake on LiveChanged: the export reads VM specs + namespace
+// membership only (never VMI status), so a VMI heartbeat must not trigger the
+// marshal pipeline. The content-signature skip (exportSignature) makes a spurious
+// wake a cheap fingerprint compare; the ticker is the missed-event backstop for the
+// git-write target (an unwatchable external sink). Per-project failures are logged
+// and retried (see once).
+func (e *Exporter) Run(ctx context.Context, interval time.Duration, bus *eventbus.Bus) {
+	wake, cancel := bus.Subscribe(eventbus.VMSpecChanged, eventbus.NamespaceChanged)
+	defer cancel()
 	e.once()
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -142,6 +155,8 @@ func (e *Exporter) Run(ctx context.Context, interval time.Duration) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-wake:
+			e.once()
 		case <-t.C:
 			e.once()
 		}

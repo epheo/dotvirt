@@ -203,3 +203,23 @@ func TestEnsureWebhookIdempotent(t *testing.T) {
 		t.Fatalf("existing hook must not be recreated; got %d creates", posts)
 	}
 }
+
+func TestNormalizeRepoURL(t *testing.T) {
+	// Every spelling of the same repo must canonicalize to one key, so a push
+	// webhook reliably finds the repo's poller and its managing ArgoCD Application.
+	want := "https://forge.example/org/team-a"
+	for _, in := range []string{
+		"https://forge.example/org/team-a.git",
+		"https://forge.example/org/team-a",
+		"https://forge.example/org/team-a/",
+		"https://forge.example/org/team-a.GIT", // mixed-case suffix must still strip
+		"  https://Forge.Example/org/team-a.git  ",
+	} {
+		if got := NormalizeRepoURL(in); got != want {
+			t.Errorf("NormalizeRepoURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := NormalizeRepoURL(""); got != "" {
+		t.Errorf("NormalizeRepoURL(\"\") = %q, want empty", got)
+	}
+}

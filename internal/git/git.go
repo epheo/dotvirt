@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -31,17 +32,43 @@ type Repo struct {
 
 	mu   sync.Mutex
 	repo *git.Repository
+
+	// parseCache memoizes ParseVMsOnBranch keyed by the branch's commit hash, so the
+	// whole-tree walk+parse runs once per branch per actual content change instead of
+	// once per project per identity per inventory build. Self-invalidating: when the
+	// fetcher advances the mirror the branch hash moves, so the next read misses. The
+	// hash is read from the local mirror (no network), unlike HeadsSignature.
+	parseMu    sync.Mutex
+	parseCache map[string]branchParse
+}
+
+// branchParse is one branch's parsed VMs and the commit hash they reflect.
+type branchParse struct {
+	hash string
+	vms  []model.VM
 }
 
 // Open clones url into memory (bare, all branches) and returns a Repo. username +
 // tokenFn provide https basic auth, resolved on each fetch (pass a nil/empty
 // source for public/local).
 func Open(url, username string, tokenFn forge.TokenSource) (*Repo, error) {
-	r := &Repo{url: url, username: username, tokenFn: tokenFn}
+	r := &Repo{url: url, username: username, tokenFn: tokenFn, parseCache: map[string]branchParse{}}
 	if err := r.clone(); err != nil {
 		return nil, err
 	}
 	return r, nil
+}
+
+// branchHash returns branch's current commit hash from the local mirror (no fetch),
+// or "" if the branch can't be resolved — the parse-cache invalidation key.
+func (r *Repo) branchHash(branch string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ref, err := r.repo.Reference(plumbing.NewBranchReferenceName(branch), true)
+	if err != nil {
+		return ""
+	}
+	return ref.Hash().String()
 }
 
 // auth builds a fresh BasicAuth from the current token (nil when no token yet, so

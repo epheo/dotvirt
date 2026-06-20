@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"time"
 )
 
 // The Forgejo webhook: push/PR events trigger an immediate fetch of that repo
@@ -52,6 +54,19 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.nudgeProposals()
+	// Drive ArgoCD to pick up the push directly: nudge the Application(s) sourcing
+	// this repo to hard-refresh (auto-sync then reconciles), so a merge applies in
+	// webhook latency rather than ArgoCD's poll interval. Fire-and-forget on a
+	// detached, bounded context — the handler returns 204 now; best-effort, since
+	// Argo's own webhook + poll remain as backstops. Only when Argo is wired.
+	if s.drift != nil {
+		clone, html := event.Repository.CloneURL, event.Repository.HTMLURL
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			s.drift.RefreshForRepo(ctx, clone, html)
+		}()
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

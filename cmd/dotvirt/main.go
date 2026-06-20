@@ -23,6 +23,7 @@ import (
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/config"
 	"github.com/epheo/dotvirt/internal/draft"
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/export"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/metrics"
@@ -50,18 +51,17 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// The one change bus: every source (git polls, k8s reflectors, the argo watch,
-	// the proposals refresher) signals this 1-buffered channel non-blockingly, and
-	// the hub is its only consumer — it coalesces bursts and rebroadcasts inventory.
-	// gitChanged is the git-only side of the same poll, consumed by the proposals
-	// refresher (which must not re-query the forge on every cluster event).
-	changed := make(chan struct{}, 1)
-	gitChanged := make(chan struct{}, 1)
+	// The one change bus: every source (k8s/argo reflectors, the git poll/webhook,
+	// the proposals refresher) publishes a typed event here; every rebuild path (the
+	// hub, the exporter, the proposals refresher, the visibility-cache invalidator)
+	// subscribes to the kinds it needs. One fan-out for all of them — no source-
+	// specific channels, no single-consumer constraint.
+	bus := eventbus.New()
 
 	// Per-project git + the Forge API share ONE token source (resolved per call, so
 	// an operator re-mint/rotation is picked up without restart).
 	tokenSrc := cfg.ForgeTokenSource()
-	repos := git.NewRepoSet(ctx, cfg.GitUsername, tokenSrc, cfg.Push, changed, gitChanged, cfg.GitPollInterval)
+	repos := git.NewRepoSet(ctx, cfg.GitUsername, tokenSrc, cfg.Push, bus, cfg.GitPollInterval)
 
 	draftStore, err := draft.Open(cfg.DraftDir)
 	if err != nil {
@@ -83,27 +83,31 @@ func run() error {
 	}
 
 	// One SA-maintained snapshot of live VM state + project topology, fed by
-	// reflectors (not per-request fetches). It signals the same `changed` channel
-	// the git poll uses, so the hub re-broadcasts on any cluster change; the read
-	// path filters this shared snapshot per token instead of hitting the cluster.
-	clusterSnapshot := clusterstate.New(saCluster, cfg.ProjectLabel, changed)
+	// reflectors (not per-request fetches). Its reflectors publish VMSpecChanged /
+	// LiveChanged (VMs/VMIs) and NamespaceChanged to the bus, so the hub re-broadcasts
+	// on any cluster change; the read path filters this shared snapshot per token
+	// instead of hitting the cluster.
+	clusterSnapshot := clusterstate.New(saCluster, cfg.ProjectLabel, bus)
 	clusterSnapshot.Run(ctx)
 
-	var saArgo *argo.Client
-	var driftCache *argo.DriftCache
+	var argoSnapshot *argo.Snapshot
 	var resyncer changeset.Resyncer
 	if cfg.ArgoEnabled {
 		argoFactory, err := argo.NewFactory(cfg.Kubeconfig)
 		if err != nil {
 			return err
 		}
-		if saArgo, err = argoFactory.SA(); err != nil {
+		saArgo, err := argoFactory.SA()
+		if err != nil {
 			return err
 		}
-		resyncer = saArgo
-		// Drift is read once per short window and shared across all subscribers
-		// (the inventory is rebuilt per subscriber on every change).
-		driftCache = argo.NewDriftCache(saArgo, 5*time.Second)
+		// The Application snapshot is the drift plane: a reflector feeds an in-memory
+		// store and publishes DriftChanged, so reads are lock-free and the hub
+		// rebroadcasts on every Application move. It is also the resyncer — it owns the
+		// app index the per-VM re-sync resolves.
+		argoSnapshot = argo.NewSnapshot(saArgo, bus)
+		argoSnapshot.Run(ctx)
+		resyncer = argoSnapshot
 	}
 
 	// Auth validates user tokens via TokenReview as dotvirt's SA.
@@ -124,7 +128,8 @@ func run() error {
 	server := api.NewServer(api.Deps{
 		ClusterFactory: clusterFactory,
 		State:          clusterSnapshot,
-		Drift:          driftCache,
+		Drift:          argoSnapshot,
+		Bus:            bus,
 		Resolver:       resolver,
 		Repos:          repos,
 		Metrics:        metricsClient,
@@ -145,15 +150,23 @@ func run() error {
 	// cover WS handshakes, so this is the only origin gate for the stream/VNC sockets).
 	stream.SetAllowedOrigin(cfg.UIOrigin)
 
-	// Live inventory hub: each subscriber's frame is built under their identity
-	// (same path as GET /api/inventory). It consumes the shared change bus directly.
-	hub := stream.NewHub(server.InventoryForIdentity, changed)
+	// Live inventory hub: each connection's frame is built under its identity (same
+	// path as GET /api/inventory). It wakes on every kind that can alter a frame and
+	// reconciles to the summed version of those kinds — so it coalesces by build
+	// duration (no debounce) and never recomputes when nothing it depends on moved.
+	inventoryKinds := []eventbus.Kind{
+		eventbus.VMSpecChanged, eventbus.LiveChanged, eventbus.NamespaceChanged,
+		eventbus.RBACChanged, eventbus.DriftChanged, eventbus.GitChanged, eventbus.ProposalsChanged,
+	}
+	hubWake, _ := bus.Subscribe(inventoryKinds...)
+	hub := stream.NewHub(server.InventoryForIdentity, hubWake, func() uint64 { return bus.Version(inventoryKinds...) })
 	go hub.Run(ctx)
 	server.UseStream(hub)
 
-	// Open-PR lanes refresh in the background — on git head moves, handler nudges,
-	// and a slow backstop — so the broadcast path never calls the forge.
-	go server.RunProposalsRefresher(ctx, gitChanged, changed)
+	// Open-PR lanes refresh in the background — on git head moves (GitChanged),
+	// handler nudges, and a slow backstop — so the broadcast path never calls the
+	// forge; a changed lane publishes ProposalsChanged.
+	go server.RunProposalsRefresher(ctx, bus)
 
 	// VNC dials as the requesting user (KubeVirt RBAC gates the console).
 	server.UseVNC(stream.NewVNCProxy(func(token string) (stream.VNCDialer, error) {
@@ -163,11 +176,7 @@ func run() error {
 	// Per-project running-branch export, on the SA identity. Topology AND the VM
 	// objects come from the snapshot — an export tick touches the cluster zero times.
 	exporter := export.New(clusterSnapshot, resolver, repos, cfg.RunningBranch)
-	go exporter.Run(ctx, cfg.ExportInterval)
-
-	if saArgo != nil {
-		saArgo.Watch(ctx, changed) // push on Application drift changes
-	}
+	go exporter.Run(ctx, cfg.ExportInterval, bus)
 
 	// Webhook auto-registration: ensure every project repo delivers push/PR
 	// events to dotvirt's public URL, so updates arrive in webhook latency
@@ -184,6 +193,14 @@ func run() error {
 	syncCtx, cancelSync := context.WithTimeout(ctx, 10*time.Second)
 	if err := clusterSnapshot.WaitForSync(syncCtx); err != nil && ctx.Err() == nil {
 		log.Printf("cluster snapshot not synced yet (%v); serving and filling in as watches catch up", err)
+	}
+	// Let the drift snapshot's initial LIST land too, in the same bounded budget —
+	// best-effort, so a slow/absent Argo never blocks startup (the hub re-pushes once
+	// it syncs, and the inventory shows "sync temporarily unavailable" until then).
+	if argoSnapshot != nil {
+		if err := argoSnapshot.WaitForSync(syncCtx); err != nil && ctx.Err() == nil {
+			log.Printf("argo drift snapshot not synced yet (%v); serving without drift until it catches up", err)
+		}
 	}
 	cancelSync()
 

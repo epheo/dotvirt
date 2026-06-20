@@ -1,8 +1,6 @@
 package stream
 
 import (
-	"context"
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"time"
@@ -10,13 +8,13 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 const (
 	writeWait  = 10 * time.Second
 	pongWait   = 60 * time.Second
 	pingPeriod = (pongWait * 9) / 10
-	sendBuffer = 8
 )
 
 // allowedOrigin is the configured frontend origin (e.g. http://localhost:5173)
@@ -49,11 +47,11 @@ func checkOrigin(r *http.Request) bool {
 	return u.Host == r.Host
 }
 
-// Handler upgrades a request to a WebSocket subscribed to the caller's inventory.
-// The auth middleware has already validated the session and injected the Identity
-// into the request context (the cookie rides the WS upgrade), so we register the
-// subscriber under that identity and push only their tree. It sends current state
-// immediately, then pushes on every change until disconnect.
+// Handler upgrades a request to a WebSocket carrying the caller's inventory. The
+// auth middleware has already validated the session and injected the Identity (the
+// cookie rides the WS upgrade), so we register the connection under that identity;
+// the central reconciler builds its first frame on connect (the add() kick) and the
+// freshest frame on every change, under the connection's own identity.
 func (h *Hub) Handler(w http.ResponseWriter, r *http.Request) {
 	id, ok := auth.FromContext(r.Context())
 	if !ok {
@@ -61,89 +59,60 @@ func (h *Hub) Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := upgrader.Upgrade(w, r, nil)
+	wsconn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return // Upgrade already wrote an error response
 	}
 
-	sub := &subscriber{identity: id, send: make(chan []byte, sendBuffer), quit: make(chan struct{})}
-	h.add(sub)
-	defer h.remove(sub)
-
-	// Push current state right away so a fresh connection isn't blank. NOTE: use a
-	// fresh context, not r.Context() — net/http cancels the request context the
-	// moment Upgrade hijacks the connection, which would abort the inventory build.
-	go h.sendInitial(context.Background(), sub)
+	// Group connections by the token's hash (same key the API caches use), so two
+	// tabs of one user share a build — and the raw bearer never becomes a map key.
+	c := &conn{id: id, key: restfactory.TokenKey(id.Token), out: make(chan []byte, 1), quit: make(chan struct{})}
+	h.add(c)
+	defer h.remove(c)
 
 	done := make(chan struct{})
-	go readPump(conn, done) // drains control frames / detects disconnect
-	writePump(conn, sub, done)
-}
-
-func (h *Hub) add(s *subscriber) {
-	h.mu.Lock()
-	h.subs[s] = struct{}{}
-	h.mu.Unlock()
-}
-
-func (h *Hub) remove(s *subscriber) {
-	h.mu.Lock()
-	delete(h.subs, s)
-	h.mu.Unlock()
-	// Close quit (not send): senders (broadcast, sendInitial) may still be running
-	// in other goroutines, and closing send under them would panic. They select on
-	// quit and stop. send is intentionally never closed.
-	close(s.quit)
-}
-
-// sendInitial pushes current state immediately so a fresh connection isn't blank.
-// It deliberately does NOT set lastJS — only broadcast (the single Run goroutine)
-// owns that field, avoiding a race; the first broadcast re-sends one identical
-// frame, which the client renders idempotently.
-func (h *Hub) sendInitial(ctx context.Context, s *subscriber) {
-	inv, err := h.inventory(ctx, s.identity)
-	if err != nil {
-		return
-	}
-	if data, err := json.Marshal(inv); err == nil {
-		s.push(data)
-	}
+	go readPump(wsconn, done) // drains control frames / detects disconnect
+	writePump(wsconn, c, done)
 }
 
 // readPump consumes incoming messages (we expect only pongs/close) so the
 // connection's read deadline is maintained and disconnects are detected.
-func readPump(conn *websocket.Conn, done chan<- struct{}) {
+func readPump(wsconn *websocket.Conn, done chan<- struct{}) {
 	defer close(done)
-	conn.SetReadLimit(512)
-	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
-	conn.SetPongHandler(func(string) error {
-		return conn.SetReadDeadline(time.Now().Add(pongWait))
+	wsconn.SetReadLimit(512)
+	_ = wsconn.SetReadDeadline(time.Now().Add(pongWait))
+	wsconn.SetPongHandler(func(string) error {
+		return wsconn.SetReadDeadline(time.Now().Add(pongWait))
 	})
 	for {
-		if _, _, err := conn.ReadMessage(); err != nil {
+		if _, _, err := wsconn.ReadMessage(); err != nil {
 			return
 		}
 	}
 }
 
-func writePump(conn *websocket.Conn, sub *subscriber, done <-chan struct{}) {
+// writePump is the level-triggered writer: it drains the connection's conflating
+// mailbox (always the latest frame the reconciler delivered) and writes it, so a
+// slow client converges to current state without dropped frames. The ping keeps the
+// TCP connection alive (it is NOT a content heartbeat — content arrives on change).
+func writePump(wsconn *websocket.Conn, c *conn, done <-chan struct{}) {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		conn.Close()
+		wsconn.Close()
 	}()
 	for {
 		select {
 		case <-done:
 			return
-		case data := <-sub.send:
-			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		case data := <-c.out:
+			_ = wsconn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := wsconn.WriteMessage(websocket.TextMessage, data); err != nil {
 				return
 			}
 		case <-ticker.C:
-			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			_ = wsconn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := wsconn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
 		}

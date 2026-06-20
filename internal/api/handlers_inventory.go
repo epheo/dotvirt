@@ -41,13 +41,25 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		Repos:    s.repos,
 		Live:     s.state.LiveVMs(),
 	}
-	// Drift is TTL-cached + shared across subscribers. A nil cache means Argo is
-	// intentionally off (no warning); a non-nil cache that errors is a degradation
-	// worth surfacing.
+	// Drift comes from the SA-owned Application snapshot (lock-free, watch-fed).
+	// Distinguish three states the inventory must NOT conflate: Argo off (s.drift
+	// nil → no warning, Sync left unset); Argo configured but the reflector hasn't
+	// completed its initial LIST (s.drift.Drift() is nil → surface a warning, still
+	// leave Sync unset rather than flashing every VM to NotTracked); and synced
+	// (apply the always-non-nil drift map).
 	var warnings []string
 	if s.drift != nil {
-		if drift, err := s.drift.Get(ctx); err == nil {
-			in.Drift = drift // non-nil (VMDrift always returns a map) ⇒ drift enabled
+		// Drift() is nil exactly while Argo is configured but its reflector hasn't
+		// finished the initial LIST — surface that as a degradation (Sync left unset,
+		// not a flash of NotTracked); once synced it's an always-non-nil map. One call,
+		// so there's no window between a readiness check and the read.
+		if d := s.drift.Drift(); d != nil {
+			in.Drift = d
+			// Synced, but the watch is erroring: the drift shown is the last-good store.
+			// Warn so a permanent ArgoCD outage doesn't masquerade as fresh sync state.
+			if !s.drift.Healthy() {
+				warnings = append(warnings, "sync status may be stale — ArgoCD is unreachable")
+			}
 		} else {
 			warnings = append(warnings, "sync status is temporarily unavailable")
 		}

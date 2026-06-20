@@ -7,9 +7,29 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/restfactory"
 )
+
+// visibleSet is a token's visible-namespace set stamped with the RBAC version it was
+// derived at; the read is valid only while that version still matches the bus.
+type visibleSet struct {
+	ns  map[string]bool
+	ver uint64
+}
+
+// platformAuth is a token's platform-author verdict, stamped the same way.
+type platformAuth struct {
+	ok  bool
+	ver uint64
+}
+
+// rbacVersion is the change-version a token's derived authorization depends on: a
+// RoleBinding move OR a namespace add/remove/relabel can change what it may see.
+func (s *Server) rbacVersion() uint64 {
+	return s.bus.Version(eventbus.RBACChanged, eventbus.NamespaceChanged)
+}
 
 // This file is every handler's shared preamble: who is calling (identity →
 // cluster client), what they may see (visible namespaces → projects), and which
@@ -45,8 +65,10 @@ func (s *Server) projectsFor(ctx context.Context, id auth.Identity, c *cluster.C
 // token for visibleTTL. The snapshot's project namespaces feed the Forbidden→SSRR
 // fallback inside VisibleNamespaces.
 func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Client) (map[string]bool, error) {
-	if v, ok := s.visible.Get(restfactory.TokenKey(id.Token)); ok {
-		return v, nil
+	ver := s.rbacVersion()
+	key := restfactory.TokenKey(id.Token)
+	if e, ok := s.visible.Get(key); ok && e.ver == ver {
+		return e.ns, nil
 	}
 	candidates := namespaceNames(s.state.Namespaces())
 	names, err := c.VisibleNamespaces(ctx, candidates)
@@ -57,7 +79,7 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 	for _, n := range names {
 		set[n] = true
 	}
-	s.visible.Put(restfactory.TokenKey(id.Token), set)
+	s.visible.Put(key, visibleSet{ns: set, ver: ver})
 	return set, nil
 }
 
@@ -70,11 +92,13 @@ func (s *Server) canAuthorPlatform(ctx context.Context, id auth.Identity, c *clu
 	if s.cfg.PlatformRepo == "" {
 		return false
 	}
-	if v, ok := s.platform.Get(restfactory.TokenKey(id.Token)); ok {
-		return v
+	ver := s.rbacVersion()
+	key := restfactory.TokenKey(id.Token)
+	if e, ok := s.platform.Get(key); ok && e.ver == ver {
+		return e.ok
 	}
 	ok := c.CanCreateClusterResource(ctx, "k8s.ovn.org", "clusteruserdefinednetworks")
-	s.platform.Put(restfactory.TokenKey(id.Token), ok)
+	s.platform.Put(key, platformAuth{ok: ok, ver: ver})
 	return ok
 }
 

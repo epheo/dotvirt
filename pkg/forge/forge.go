@@ -418,6 +418,24 @@ func ownerRepo(repoURL string) (owner, repo string, ok bool) {
 	return owner, repo, true
 }
 
+// NormalizeRepoURL canonicalizes a git repo URL for equality comparison: trimmed,
+// no trailing slash, a single trailing ".git" stripped, lowercased. It lets the
+// same repo written three ways — the forge clone_url (…​.git), the html_url (no
+// .git), and a trailing-slash annotation — resolve to one key, so a push webhook
+// reliably finds the repo's poller (RepoSet) and its managing ArgoCD Application
+// (argo.Snapshot.RefreshForRepo). Returns "" for an empty/blank input.
+func NormalizeRepoURL(u string) string {
+	u = strings.TrimSpace(u)
+	if u == "" {
+		return ""
+	}
+	// Lowercase first so a mixed-case ".GIT" suffix or host still canonicalizes.
+	u = strings.ToLower(u)
+	u = strings.TrimRight(u, "/")
+	u = strings.TrimSuffix(u, ".git")
+	return u
+}
+
 // OwnerPrefixURL is the forge owner URL ("scheme://host/.../<owner>") of a repo
 // URL — the prefix Argo longest-prefix-matches to attach one repo-credential to
 // every repo under that owner. Unlike path.Dir, it preserves the "://" in the

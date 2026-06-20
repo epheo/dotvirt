@@ -6,14 +6,20 @@
 // of viewers plus a burst of VM events exhausted client-go's per-client rate
 // limiter and wedged the server for minutes.
 //
-// Instead, three reflectors run ONCE under dotvirt's ServiceAccount and keep
-// in-memory indexers of VirtualMachines, VirtualMachineInstances, and the
-// project-labeled Namespaces — the data is identical for every tenant, so it
-// belongs in one shared snapshot, not in N per-user fetches. A read becomes a
-// pure in-memory filter of this snapshot through the caller's visible-namespace
-// set (computed elsewhere, per token): the cluster is never touched on the read
-// path. This is the same idea DriftCache already applied to Argo drift, finished
-// for live state and topology and fed by watches rather than polled.
+// Instead, reflectors run ONCE under dotvirt's ServiceAccount and keep in-memory
+// indexers of VirtualMachines, VirtualMachineInstances, and the project-labeled
+// Namespaces — the data is identical for every tenant, so it belongs in one shared
+// snapshot, not in N per-user fetches. A read becomes a pure in-memory filter of
+// this snapshot through the caller's visible-namespace set (computed elsewhere, per
+// token): the cluster is never touched on the read path. This is the reflector
+// model the argo drift snapshot also follows — fed by watches, not polled.
+//
+// A fourth, signal-only reflector watches RoleBindings: dotvirt never reads them,
+// but a RoleBinding move can change which namespaces a token may see, so it
+// publishes RBACChanged to invalidate the per-token visible-set cache promptly.
+//
+// On any mutation a reflector publishes its kind to the shared event bus, which the
+// hub (and exporter) subscribe to; the read path doesn't diff anything.
 //
 // Authorization is unchanged: the snapshot is global truth, but a user only ever
 // sees the namespaces their own RBAC grants — the filter is the security gate.
@@ -21,15 +27,19 @@ package clusterstate
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/client-go/tools/cache"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
 	"github.com/epheo/dotvirt/internal/cluster"
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/reflect"
 )
 
 // LiveVM is one VM's actual state, keyed by "namespace/name" for merging into the
@@ -86,32 +96,57 @@ type State struct {
 	vms  cache.Indexer
 	vmis cache.Indexer
 	nss  cache.Indexer
+	// RoleBindings are watched too, but only as an RBACChanged signal — via a
+	// retain-nothing signal store, so there's no indexer for them here.
 
 	specs []reflectorSpec // reflector wiring, built in New, started in Run
 
-	synced  atomic.Int32    // reflectors whose initial LIST (first Replace) has landed
-	changed chan<- struct{} // coalesced "snapshot moved" signal for the hub
+	// Per-store readiness: each reflector's initial LIST (first Replace) landing.
+	// Tracked per store (not a single counter) so a consumer gates on exactly the
+	// stores it reads — the exporter must not stall on a failing VMI reflector, and
+	// nobody waits on the signal-only RoleBinding reflector. Lock-free ExportReady
+	// reads on the hot path.
+	vmsSynced, vmisSynced, nssSynced atomic.Bool
+	// allSynced is closed once the three readable stores have all synced, so
+	// WaitForSync blocks deterministically instead of polling.
+	syncedOnce sync.Once
+	allSynced  chan struct{}
+
+	bus *eventbus.Bus // reflectors publish their kind here on every mutation
 }
 
 // New builds the snapshot's reflectors over sa (dotvirt's ServiceAccount client),
-// watching the namespaces labeled projectLabel. changed receives a coalesced
-// signal whenever the snapshot moves, so the hub re-broadcasts; it is optional
-// (nil disables signalling, e.g. in tests).
-func New(sa *cluster.Client, projectLabel string, changed chan<- struct{}) *State {
-	s := &State{changed: changed}
+// watching the namespaces labeled projectLabel. Each reflector publishes its kind to
+// bus whenever the snapshot moves, so the inventory hub rebuilds (and the exporter
+// re-exports); bus is optional (nil disables signalling, e.g. in tests).
+func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
+	s := &State{bus: bus, allSynced: make(chan struct{})}
 	s.vms = newIndexer()
 	s.vmis = newIndexer()
 	s.nss = newIndexer()
+
+	vmSpec := func() { bus.Publish(eventbus.VMSpecChanged) }
+	live := func() { bus.Publish(eventbus.LiveChanged) }
+	namespace := func() { bus.Publish(eventbus.NamespaceChanged) }
+	rbac := func() { bus.Publish(eventbus.RBACChanged) }
 	s.specs = []reflectorSpec{
-		{s.vms, &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch()},
-		{s.vmis, &kubevirtcorev1.VirtualMachineInstance{}, sa.VMIListWatch()},
-		{s.nss, &corev1.Namespace{}, sa.NamespaceListWatch(projectLabel)},
+		// vms: VMSpecChanged is gated on metadata.generation by vmSpecStore, so a
+		// status-only VM write fires only LiveChanged — the exporter (which depends on
+		// VMSpecChanged) doesn't wake on VM-status heartbeats.
+		{newVMSpecStore(s.vms, vmSpec, live, func() { s.vmsSynced.Store(true); s.checkSynced() }), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch()},
+		{reflect.NewStore(s.vmis, live, func() { s.vmisSynced.Store(true); s.checkSynced() }), &kubevirtcorev1.VirtualMachineInstance{}, sa.VMIListWatch()},
+		// A namespace move is both a topology change (inventory) and a visibility
+		// change; NamespaceChanged is summed into both the inventory and RBAC versions.
+		{reflect.NewStore(s.nss, namespace, func() { s.nssSynced.Store(true); s.checkSynced() }), &corev1.Namespace{}, sa.NamespaceListWatch(projectLabel)},
+		// Signal-only: a retain-nothing store (never read), so the cluster-wide
+		// RoleBinding watch costs no per-object memory — it only nudges visibility.
+		{reflect.NewSignalStore(rbac, nil), &rbacv1.RoleBinding{}, sa.RoleBindingListWatch()},
 	}
 	return s
 }
 
 type reflectorSpec struct {
-	store    cache.Indexer
+	store    cache.Store // already wrapped to fire the right Publishes + readiness
 	expected any
 	lw       cache.ListerWatcher
 }
@@ -121,8 +156,7 @@ type reflectorSpec struct {
 // until the initial LIST has populated the snapshot.
 func (s *State) Run(ctx context.Context) {
 	for _, spec := range s.specs {
-		store := &countingStore{Indexer: spec.store, on: s.bump, synced: func() { s.synced.Add(1) }}
-		r := cache.NewReflector(spec.lw, spec.expected, store, 0)
+		r := cache.NewReflector(spec.lw, spec.expected, spec.store, 0)
 		go r.Run(ctx.Done())
 	}
 }
@@ -132,36 +166,36 @@ func newIndexer() cache.Indexer {
 	return cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
 }
 
-// WaitForSync blocks until each reflector's initial LIST has landed (all three
-// stores have seen their first Replace), or ctx is done. Callers use it so the
-// first inventory served isn't empty. Returns ctx.Err() on cancellation, nil once
-// synced.
+// WaitForSync blocks until every READABLE reflector's initial LIST has landed (the
+// VM, VMI and namespace stores — not the signal-only RoleBinding watch), or ctx is
+// done. Deterministic: it waits on a channel closed by the last store to sync, not a
+// poll. Returns ctx.Err() on cancellation, nil once synced.
 func (s *State) WaitForSync(ctx context.Context) error {
-	for s.synced.Load() < int32(len(s.specs)) {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
-	return nil
-}
-
-// bump signals the hub that the snapshot moved (coalesced).
-func (s *State) bump() {
-	if s.changed == nil {
-		return
-	}
 	select {
-	case s.changed <- struct{}{}:
-	default: // a signal is already pending; the hub recomputes the whole snapshot anyway
+	case <-s.allSynced:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
-// Synced reports whether every reflector's initial LIST has landed. Consumers
-// that act on the snapshot's COMPLETENESS (the exporter prunes manifests absent
-// from it) must check this — a half-filled snapshot looks like mass deletion.
-func (s *State) Synced() bool { return s.synced.Load() >= int32(len(s.specs)) }
+// checkSynced closes allSynced once all three readable stores have landed their
+// initial LIST. Invoked from each readable reflector's onSynced (each fires exactly
+// once); the sync.Once makes the close idempotent.
+func (s *State) checkSynced() {
+	if s.vmsSynced.Load() && s.vmisSynced.Load() && s.nssSynced.Load() {
+		s.syncedOnce.Do(func() { close(s.allSynced) })
+	}
+}
+
+// ExportReady reports whether the stores the exporter reads — VMs and namespaces —
+// have synced. The exporter prunes manifests absent from the snapshot, so it must
+// see a complete VM+namespace view; but it never reads VMIs, so a permanently
+// failing VMI reflector (e.g. a removed RBAC verb) must NOT wedge export. (Whole-
+// snapshot readiness, incl. VMIs, is what WaitForSync's allSynced channel gates.)
+func (s *State) ExportReady() bool {
+	return s.vmsSynced.Load() && s.nssSynced.Load()
+}
 
 // VMObjects returns deep copies of the full VirtualMachine objects in the given
 // namespaces — the exporter's input, replacing a per-tick SA LIST per project.

@@ -21,6 +21,11 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list", "watch"]
+  # Watched (never read) to learn when a token's namespace visibility may have
+  # changed, so the per-token visible-set cache is invalidated promptly.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["list", "watch"]
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachines", "virtualmachineinstances"]
     verbs: ["get", "list", "watch"]
