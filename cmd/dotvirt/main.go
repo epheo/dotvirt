@@ -178,12 +178,17 @@ func run() error {
 	exporter := export.New(clusterSnapshot, resolver, repos, cfg.RunningBranch)
 	go exporter.Run(ctx, cfg.ExportInterval, bus)
 
-	// Webhook auto-registration: ensure every project repo delivers push/PR
-	// events to dotvirt's public URL, so updates arrive in webhook latency
-	// rather than the next poll tick. Idempotent per sweep; new projects are
-	// picked up by the periodic re-sweep.
-	if cfg.PublicURL != "" && cfg.WebhookSecret != "" && forgeFactory != nil {
-		target := strings.TrimRight(cfg.PublicURL, "/") + "/api/webhooks/forge"
+	// Webhook auto-registration: ensure every project repo delivers push/PR events
+	// to dotvirt, so updates arrive in webhook latency rather than the next poll tick.
+	// The forge usually runs in-cluster and can't reach (or TLS-trust) the external
+	// Route, so delivery targets WebhookURL — the in-cluster Service — when set, else
+	// PublicURL. Idempotent per sweep; new projects are picked up by the re-sweep.
+	webhookBase := cfg.WebhookURL
+	if webhookBase == "" {
+		webhookBase = cfg.PublicURL
+	}
+	if webhookBase != "" && cfg.WebhookSecret != "" && forgeFactory != nil {
+		target := strings.TrimRight(webhookBase, "/") + "/api/webhooks/forge"
 		go ensureWebhooks(ctx, clusterSnapshot, resolver, forgeFactory, target, cfg.WebhookSecret)
 	}
 

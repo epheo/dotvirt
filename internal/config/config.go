@@ -76,10 +76,14 @@ type Config struct {
 
 	// Webhook: Forgejo pushes/PR events hit POST /api/webhooks/forge (HMAC-signed
 	// with WebhookSecret; empty disables the endpoint). PublicURL is dotvirt's
-	// externally reachable base (the Route), used to auto-register that webhook on
-	// every project repo; empty disables auto-registration.
+	// externally reachable base (the Route). WebhookURL is the base the forge DELIVERS
+	// to when registering the hook — distinct because an in-cluster forge typically
+	// can't reach or TLS-trust the external Route, so it points at the in-cluster
+	// Service (e.g. http://dotvirt.<ns>.svc:8080). Empty falls back to PublicURL;
+	// auto-registration runs when either base and WebhookSecret are set.
 	WebhookSecret string
 	PublicURL     string
+	WebhookURL    string
 
 	// AppSetPluginToken is the shared bearer the ArgoCD ApplicationSet plugin
 	// generator presents to dotvirt's /api/v1/getparams.execute endpoint, which
@@ -129,6 +133,7 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.UploadProxyURL, "upload-proxy-url", os.Getenv("DOTVIRT_UPLOAD_PROXY_URL"), "cdi-uploadproxy base URL for image uploads (empty disables the feature)")
 	fs.StringVar(&c.WebhookSecret, "webhook-secret", os.Getenv("DOTVIRT_WEBHOOK_SECRET"), "HMAC secret for the Forgejo webhook endpoint (empty disables it)")
 	fs.StringVar(&c.PublicURL, "public-url", os.Getenv("DOTVIRT_PUBLIC_URL"), "dotvirt's externally reachable base URL, for webhook auto-registration (empty disables)")
+	fs.StringVar(&c.WebhookURL, "webhook-url", os.Getenv("DOTVIRT_WEBHOOK_URL"), "base URL the forge delivers webhooks to (defaults to -public-url; set to the in-cluster Service URL when the forge can't reach/TLS-trust the external Route)")
 	fs.StringVar(&c.AppSetPluginToken, "appset-plugin-token", os.Getenv("DOTVIRT_APPSET_PLUGIN_TOKEN"), "shared bearer for the ArgoCD ApplicationSet plugin-generator endpoint (empty disables it)")
 	fs.StringVar(&c.StaticDir, "static-dir", os.Getenv("DOTVIRT_STATIC_DIR"), "directory of the built SPA to serve at the same origin (empty = dev: SPA served by Vite)")
 	fs.StringVar(&c.SessionSecret, "session-secret", os.Getenv("DOTVIRT_SESSION_SECRET"), "HMAC key signing the session cookie (random if empty; sessions then drop on restart)")

@@ -111,6 +111,13 @@ func Service(dv *dotvirtv1alpha1.Dotvirt) *corev1.Service {
 	}
 }
 
+// ServiceHost is dotvirt's in-cluster DNS host and ServiceURL its base URL. The forge
+// delivers webhooks here, not to the external Route: an in-cluster Forgejo can't hairpin
+// to the Route and doesn't trust its CA. dotvirt serves plain HTTP; the delivery is
+// still authenticated by HMAC.
+func ServiceHost(dv *dotvirtv1alpha1.Dotvirt) string { return AppName + "." + dv.Namespace + ".svc" }
+func ServiceURL(dv *dotvirtv1alpha1.Dotvirt) string  { return "http://" + ServiceHost(dv) + ":8080" }
+
 // Deployment runs the dotvirt binary (which also serves the SPA): the image, args,
 // platform-repo + metrics config, the drafts volume, and the secret-backed env
 // (git/forge/session/appset credentials, with the forge token mounted so a re-mint
@@ -128,6 +135,10 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 	if dv.Spec.Ingress.Host != "" {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_PUBLIC_URL", Value: "https://" + dv.Spec.Ingress.Host})
 	}
+	// The forge delivers webhooks to dotvirt's in-cluster Service, not the external
+	// Route (unreachable + TLS-untrusted from an in-cluster Forgejo). Always set, so the
+	// nudge works even without an external Ingress.
+	env = append(env, corev1.EnvVar{Name: "DOTVIRT_WEBHOOK_URL", Value: ServiceURL(dv)})
 	if dv.Spec.Metrics.URL != "" {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: dv.Spec.Metrics.URL})
 	}
