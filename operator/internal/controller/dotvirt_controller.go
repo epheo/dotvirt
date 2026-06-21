@@ -548,8 +548,13 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 		return false, err
 	}
 	url := dv.Spec.Forge.URL
+	// read:user lets the token read /api/v1/user — which is what ValidateToken probes.
+	// Under Forgejo's granular token scopes a write:* token can't reach /api/v1/user, so
+	// without this the freshly minted token validates as "rejected" and the operator
+	// re-mints every reconcile forever. write:organization/write:repository cover the org
+	// + repo webhook and PR operations.
 	token, err := forge.NewFactory(url, "unused", dv.Spec.Forge.InsecureTLS).
-		MintToken(install.ForgejoBotUser, string(admin.Data["password"]), "dotvirt-operator", []string{"write:organization", "write:repository"})
+		MintToken(install.ForgejoBotUser, string(admin.Data["password"]), "dotvirt-operator", []string{"read:user", "write:organization", "write:repository"})
 	if err != nil {
 		return false, err
 	}

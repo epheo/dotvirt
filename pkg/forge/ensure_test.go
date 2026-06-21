@@ -143,13 +143,16 @@ func TestValidateToken(t *testing.T) {
 		if r.URL.Path != "/api/v1/user" {
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
-		// "good" authenticates, anything else is rejected.
-		if r.Header.Get("Authorization") == "token good" {
+		switch r.Header.Get("Authorization") {
+		case "token good":
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"login":"dotvirt-bot"}`))
-			return
+		case "token scoped":
+			// Authenticated but missing read:user under Forgejo's granular scopes.
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			w.WriteHeader(http.StatusUnauthorized)
 		}
-		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer srv.Close()
 
@@ -157,8 +160,13 @@ func TestValidateToken(t *testing.T) {
 	if valid, err := f.ValidateToken("good"); err != nil || !valid {
 		t.Errorf("ValidateToken(good) = (%v,%v), want (true,nil)", valid, err)
 	}
+	// A 403 is a VALID credential lacking scope — not a bad token. Treating it as invalid
+	// is what made the operator re-mint every reconcile forever.
+	if valid, err := f.ValidateToken("scoped"); err != nil || !valid {
+		t.Errorf("ValidateToken(scoped/403) = (%v,%v), want (true,nil)", valid, err)
+	}
 	if valid, err := f.ValidateToken("stale"); err != nil || valid {
-		t.Errorf("ValidateToken(stale) = (%v,%v), want (false,nil)", valid, err)
+		t.Errorf("ValidateToken(stale/401) = (%v,%v), want (false,nil)", valid, err)
 	}
 }
 

@@ -394,12 +394,14 @@ func (f *Factory) deleteToken(username, password, tokenName string) error {
 	return fmt.Errorf("forge delete token: %s", resp.Status)
 }
 
-// ValidateToken reports whether token authenticates against the forge, via a GET
-// of the current-user endpoint. A 2xx means valid; 401/403 means invalid (so the
-// caller can re-mint) — distinguished from transport/other errors, which surface
-// as err so a forge blip isn't mistaken for a bad token. Used by the operator to
-// stop trusting a stored token blindly: a Forgejo data reset or out-of-band
-// rotation invalidates it, and only a re-mint recovers.
+// ValidateToken reports whether token authenticates against the forge, via a GET of
+// the current-user endpoint. Only 401 means invalid (so the caller re-mints). A 2xx —
+// or a 403 — means valid: under Forgejo's granular token scopes a 403 is the token
+// authenticating but lacking the read:user scope this endpoint needs, which proves the
+// credential is good (treating it as invalid re-mints on every reconcile forever).
+// Transport/other errors surface as err so a forge blip isn't mistaken for a bad token.
+// Used by the operator to stop trusting a stored token blindly: a Forgejo data reset or
+// out-of-band rotation invalidates it (401), and only a re-mint recovers.
 func (f *Factory) ValidateToken(token string) (valid bool, err error) {
 	if f == nil {
 		return false, fmt.Errorf("forge not configured")
@@ -419,7 +421,10 @@ func (f *Factory) ValidateToken(token string) (valid bool, err error) {
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return true, nil
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+	case resp.StatusCode == http.StatusForbidden:
+		// Authenticated but forbidden (scope) — a valid credential, not a bad token.
+		return true, nil
+	case resp.StatusCode == http.StatusUnauthorized:
 		return false, nil
 	default:
 		return false, fmt.Errorf("forge validate token: %s", resp.Status)
