@@ -123,6 +123,10 @@ func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt) []corev1.EnvVar {
 		// blocks private targets by default, so allow that host — keeping `external` so
 		// delivery to any public webhook still works.
 		{Name: "FORGEJO__webhook__ALLOWED_HOST_LIST", Value: ServiceHost(dv) + ",external"},
+		// The ArgoCD-direct webhook (a backstop to dotvirt's RefreshForRepo) targets
+		// ArgoCD's external Route, whose ingress CA Forgejo doesn't trust; skip webhook TLS
+		// verification so that delivery succeeds. Bounded exposure: deliveries stay in-cluster.
+		{Name: "FORGEJO__webhook__SKIP_TLS_VERIFY", Value: "true"},
 	}
 }
 
