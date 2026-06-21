@@ -168,9 +168,19 @@ func writeJSON(t *testing.T, w io.Writer, v any) {
 	}
 }
 
-// EnsureWebhook creates the hook only when no hook for the target URL exists, and
-// re-asserts the secret on an existing hook in place (PATCH), never recreating it.
-func TestEnsureWebhookIdempotent(t *testing.T) {
+// resetHookCache clears the package-level hook-secret fingerprint cache so each webhook
+// test starts from a cold process (first-sight re-asserts; converged sweeps don't).
+func resetHookCache() {
+	hookSecretsMu.Lock()
+	defer hookSecretsMu.Unlock()
+	hookSecrets = map[string]string{}
+}
+
+// EnsureWebhook creates the hook when absent, then re-asserts the secret in place at
+// most once per process: a converged hook (Forgejo never echoes the stored secret back,
+// so the first sight re-asserts it) is left untouched on later sweeps — no write churn.
+func TestEnsureWebhookReconcilesOnce(t *testing.T) {
+	resetHookCache()
 	posts, patches := 0, 0
 	existing := `[]`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -192,22 +202,106 @@ func TestEnsureWebhookIdempotent(t *testing.T) {
 	defer srv.Close()
 
 	c := NewFactory(srv.URL, "tok", false).For("https://forge/o/r.git")
-	if err := c.EnsureWebhook("https://dotvirt/api/webhooks/forge", "s3cret"); err != nil {
+	const target = "https://dotvirt/api/webhooks/forge"
+
+	// Absent → created once.
+	if err := c.EnsureWebhook(target, "s3cret"); err != nil {
 		t.Fatalf("EnsureWebhook (create): %v", err)
 	}
 	if posts != 1 {
 		t.Fatalf("want 1 create, got %d", posts)
 	}
 
+	// Now present. The first converging sweep re-asserts the secret; a second must not.
 	existing = `[{"id":1,"config":{"url":"https://dotvirt/api/webhooks/forge"}}]`
-	if err := c.EnsureWebhook("https://dotvirt/api/webhooks/forge", "s3cret"); err != nil {
-		t.Fatalf("EnsureWebhook (existing): %v", err)
+	for i := 0; i < 2; i++ {
+		if err := c.EnsureWebhook(target, "s3cret"); err != nil {
+			t.Fatalf("EnsureWebhook (existing): %v", err)
+		}
 	}
 	if posts != 1 {
 		t.Fatalf("existing hook must not be recreated; got %d creates", posts)
 	}
 	if patches != 1 {
-		t.Fatalf("existing hook must be reconciled in place; got %d patches", patches)
+		t.Fatalf("secret must be re-asserted once, not per sweep; got %d patches", patches)
+	}
+}
+
+// EnsureWebhook migrates a hook in place when only its host changed (external Route →
+// in-cluster Service): the existing hook is matched by URL PATH and PATCHed to the new
+// target, never duplicated.
+func TestEnsureWebhookMigratesInPlace(t *testing.T) {
+	resetHookCache()
+	var posted bool
+	var patchedURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/hooks"):
+			// Same path, old host.
+			fmt.Fprint(w, `[{"id":5,"config":{"url":"https://old-route.example/api/webhooks/forge"}}]`)
+		case r.Method == "PATCH" && strings.HasSuffix(r.URL.Path, "/hooks/5"):
+			var body struct {
+				Config map[string]string `json:"config"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode PATCH: %v", err)
+			}
+			patchedURL = body.Config["url"]
+			w.WriteHeader(http.StatusOK)
+		case r.Method == "POST":
+			posted = true
+			w.WriteHeader(http.StatusCreated)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewFactory(srv.URL, "tok", false).For("https://forge/o/r.git")
+	const target = "http://dotvirt.dotvirt.svc:8080/api/webhooks/forge"
+	if err := c.EnsureWebhook(target, "s3cret"); err != nil {
+		t.Fatalf("EnsureWebhook: %v", err)
+	}
+	if posted {
+		t.Error("a host change must migrate in place, not POST a duplicate hook")
+	}
+	if patchedURL != target {
+		t.Errorf("migrated hook url = %q, want %q", patchedURL, target)
+	}
+}
+
+// EnsureWebhook deletes extra hooks sharing the dotvirt path (duplicates from an earlier
+// URL-change migration or a manual add), collapsing to a single delivery target.
+func TestEnsureWebhookDeletesDuplicates(t *testing.T) {
+	resetHookCache()
+	deleted := map[string]bool{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/hooks"):
+			fmt.Fprint(w, `[{"id":1,"config":{"url":"https://dotvirt/api/webhooks/forge"}},`+
+				`{"id":2,"config":{"url":"https://dotvirt/api/webhooks/forge"}}]`)
+		case r.Method == "PATCH" && strings.HasSuffix(r.URL.Path, "/hooks/1"):
+			w.WriteHeader(http.StatusOK)
+		case r.Method == "DELETE":
+			deleted[r.URL.Path] = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewFactory(srv.URL, "tok", false).For("https://forge/o/r.git")
+	if err := c.EnsureWebhook("https://dotvirt/api/webhooks/forge", "s3cret"); err != nil {
+		t.Fatalf("EnsureWebhook: %v", err)
+	}
+	if len(deleted) != 1 {
+		t.Fatalf("want exactly one duplicate deleted, got %v", deleted)
+	}
+	for path := range deleted {
+		if !strings.HasSuffix(path, "/hooks/2") {
+			t.Errorf("deleted %q, want the duplicate /hooks/2", path)
+		}
 	}
 }
 

@@ -1,6 +1,7 @@
 package install
 
 import (
+	"fmt"
 	"os"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -106,17 +107,24 @@ func Service(dv *dotvirtv1alpha1.Dotvirt) *corev1.Service {
 		ObjectMeta: objectMeta(AppName, dv.Namespace, dv.Name),
 		Spec: corev1.ServiceSpec{
 			Selector: selectorLabels,
-			Ports:    []corev1.ServicePort{{Name: "http", Port: 8080, TargetPort: intstr.FromInt32(8080)}},
+			Ports:    []corev1.ServicePort{{Name: "http", Port: HTTPPort, TargetPort: intstr.FromInt32(HTTPPort)}},
 		},
 	}
 }
 
-// ServiceHost is dotvirt's in-cluster DNS host and ServiceURL its base URL. The forge
-// delivers webhooks here, not to the external Route: an in-cluster Forgejo can't hairpin
-// to the Route and doesn't trust its CA. dotvirt serves plain HTTP; the delivery is
-// still authenticated by HMAC.
-func ServiceHost(dv *dotvirtv1alpha1.Dotvirt) string { return AppName + "." + dv.Namespace + ".svc" }
-func ServiceURL(dv *dotvirtv1alpha1.Dotvirt) string  { return "http://" + ServiceHost(dv) + ":8080" }
+// ServiceHost is dotvirt's in-cluster DNS host and ServiceURL its base URL. A managed
+// forge delivers webhooks here, not to the external Route: an in-cluster Forgejo can't
+// hairpin to the Route and doesn't trust its CA. dotvirt serves plain HTTP; the delivery
+// is still authenticated by HMAC.
+func ServiceHost(dv *dotvirtv1alpha1.Dotvirt) string { return svcHost(AppName, dv.Namespace) }
+func ServiceURL(dv *dotvirtv1alpha1.Dotvirt) string  { return svcURL(AppName, dv.Namespace, HTTPPort) }
+
+// svcHost and svcURL build the in-cluster DNS host / base URL for a Service —
+// `<name>.<ns>.svc[:port]` — so the template lives in one place.
+func svcHost(name, namespace string) string { return name + "." + namespace + ".svc" }
+func svcURL(name, namespace string, port int32) string {
+	return fmt.Sprintf("http://%s:%d", svcHost(name, namespace), port)
+}
 
 // Deployment runs the dotvirt binary (which also serves the SPA): the image, args,
 // platform-repo + metrics config, the drafts volume, and the secret-backed env
@@ -135,10 +143,15 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 	if dv.Spec.Ingress.Host != "" {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_PUBLIC_URL", Value: "https://" + dv.Spec.Ingress.Host})
 	}
-	// The forge delivers webhooks to dotvirt's in-cluster Service, not the external
-	// Route (unreachable + TLS-untrusted from an in-cluster Forgejo). Always set, so the
-	// nudge works even without an external Ingress.
-	env = append(env, corev1.EnvVar{Name: "DOTVIRT_WEBHOOK_URL", Value: ServiceURL(dv)})
+	// A managed (in-cluster) Forgejo delivers webhooks to dotvirt's in-cluster Service,
+	// not the external Route (which it can't hairpin to and whose CA it doesn't trust).
+	// A bring-your-own forge is typically off-cluster and can't reach that Service URL, so
+	// leave this unset for it — the app then falls back to DOTVIRT_PUBLIC_URL (the
+	// external host the forge can reach), or skips self-registration if there's no public
+	// URL either.
+	if dv.Spec.Forge.Managed {
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_WEBHOOK_URL", Value: ServiceURL(dv)})
+	}
 	if dv.Spec.Metrics.URL != "" {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: dv.Spec.Metrics.URL})
 	}
@@ -159,7 +172,7 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 	)
 
 	args := []string{
-		"-addr=:8080",
+		fmt.Sprintf("-addr=:%d", HTTPPort),
 		"-ui-origin=", // same-origin: the binary serves the SPA
 		"-argo=true",
 		"-draft-dir=/var/lib/dotvirt/drafts",
@@ -198,7 +211,7 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 						Image: image,
 						Args:  args,
 						Env:   env,
-						Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 8080}},
+						Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: HTTPPort}},
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: "drafts", MountPath: "/var/lib/dotvirt/drafts"},
 							{Name: "forge-token", MountPath: "/var/run/dotvirt/forge", ReadOnly: true},
@@ -213,14 +226,14 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 						},
 						ReadinessProbe: &corev1.Probe{
 							ProbeHandler: corev1.ProbeHandler{
-								HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(8080)},
+								HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(HTTPPort)},
 							},
 							InitialDelaySeconds: 5,
 							PeriodSeconds:       10,
 						},
 						LivenessProbe: &corev1.Probe{
 							ProbeHandler: corev1.ProbeHandler{
-								HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(8080)},
+								HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(HTTPPort)},
 							},
 							InitialDelaySeconds: 15,
 							PeriodSeconds:       20,

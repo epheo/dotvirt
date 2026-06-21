@@ -14,6 +14,33 @@ func testDotvirt() *dotvirtv1alpha1.Dotvirt {
 	return &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "ns"}}
 }
 
+// envValue returns the value of the named env var (ok=false if absent).
+func envValue(env []corev1.EnvVar, name string) (string, bool) {
+	for _, e := range env {
+		if e.Name == name {
+			return e.Value, true
+		}
+	}
+	return "", false
+}
+
+// DOTVIRT_WEBHOOK_URL points the forge at dotvirt's in-cluster Service ONLY for a managed
+// (in-cluster) Forgejo, which can't hairpin to the external Route. A bring-your-own forge
+// is typically off-cluster and can't reach that Service URL, so the var is left unset and
+// the app falls back to its public URL — otherwise dotvirt registers an unreachable hook.
+func TestWebhookURLGatedOnManagedForge(t *testing.T) {
+	managed := testDotvirt()
+	managed.Spec.Forge.Managed = true
+	if got, ok := envValue(Deployment(managed).Spec.Template.Spec.Containers[0].Env, "DOTVIRT_WEBHOOK_URL"); !ok || got != ServiceURL(managed) {
+		t.Errorf("managed forge: DOTVIRT_WEBHOOK_URL = (%q, ok=%v), want %q", got, ok, ServiceURL(managed))
+	}
+
+	byo := testDotvirt() // Forge.Managed defaults to false
+	if got, ok := envValue(Deployment(byo).Spec.Template.Spec.Containers[0].Env, "DOTVIRT_WEBHOOK_URL"); ok {
+		t.Errorf("BYO forge: DOTVIRT_WEBHOOK_URL must be unset (app falls back to public URL), got %q", got)
+	}
+}
+
 // The operand must render restricted-v2 compatible — non-root, no privilege
 // escalation, all capabilities dropped, bounded resources, and a liveness probe — so
 // OpenShift's restricted SCC admits it WITHOUT the anyuid grant.

@@ -39,6 +39,7 @@ func TestEnsureRepoCreatesWhenAbsent(t *testing.T) {
 // EnsureOrgWebhook registers a single org-level hook (covering all repos) when none
 // targets the URL yet.
 func TestEnsureOrgWebhookRegistersOnce(t *testing.T) {
+	resetHookCache()
 	var posted bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -67,6 +68,7 @@ func TestEnsureOrgWebhookRegistersOnce(t *testing.T) {
 // Forgejo never echoes the stored secret, so an existing hook is PATCHed back to the
 // configured one (in place, not recreated) rather than left to 403 every delivery.
 func TestEnsureOrgWebhookReconcilesSecret(t *testing.T) {
+	resetHookCache()
 	var patched bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

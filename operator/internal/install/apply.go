@@ -25,6 +25,10 @@ const FieldManager = "dotvirt-operator"
 // AppName is the common name/label for the dotvirt workload.
 const AppName = "dotvirt"
 
+// HTTPPort is dotvirt's single HTTP port — the one source for the Service, the
+// container port and probes, the `-addr` flag, and every in-cluster URL built to it.
+const HTTPPort int32 = 8080
+
 // Labels are the recommended labels stamped on every rendered resource, plus a
 // per-instance label so cluster-scoped / cross-namespace resources (which can't
 // carry an ownerRef to a namespaced CR) can be found for finalizer cleanup.

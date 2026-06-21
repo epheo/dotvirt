@@ -1,6 +1,8 @@
 package install
 
 import (
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -71,7 +73,7 @@ func AppsetPluginConfigMap(dv *dotvirtv1alpha1.Dotvirt, argoNS, dotvirtNS string
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
 		ObjectMeta: metav1.ObjectMeta{Name: AppsetConfigMapName, Namespace: argoNS, Labels: Labels(dv.Name)},
 		Data: map[string]string{
-			"baseUrl": "http://" + AppName + "." + dotvirtNS + ".svc.cluster.local:8080",
+			"baseUrl": fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", AppName, dotvirtNS, HTTPPort),
 			"token":   "$" + AppsetConfigMapName + ":token",
 		},
 	}
