@@ -16,12 +16,19 @@ const PROJECT = process.env.PROJECT ?? 'team-a';
 const NS = process.env.NS ?? PROJECT;
 const SYNC_TIMEOUT = Number(process.env.SYNC_TIMEOUT ?? 240_000); // ArgoCD-sync ceiling, per the bash harness
 
+// This spec calls a dev/internal Forgejo directly (often a self-signed cert), so relax TLS
+// here only — the smoke suite keeps verifying certs (see playwright.config.ts).
+test.use({ ignoreHTTPSErrors: true });
+
 test('create → Synced → delete → gone, observed in the inventory', async ({ page }) => {
 	test.skip(
 		!process.env.OC_TOKEN || !process.env.FORGE_TOKEN,
 		'requires OC_TOKEN + FORGE_TOKEN against a live stack'
 	);
-	test.setTimeout(SYNC_TIMEOUT * 4); // two sync waits plus merge retries
+	// Three serial sync waits (~SYNC_TIMEOUT each: row appears, flips to Synced, row gone)
+	// plus two merge-retry loops and reloads — widen past a naive 4× so a slow ArgoCD can't
+	// abort mid-assertion and skip the finally-cleanup.
+	test.setTimeout(SYNC_TIMEOUT * 6);
 
 	const vm = `e2e-rt-${Date.now()}`;
 	await login(page);
