@@ -22,6 +22,7 @@ import (
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/metrics"
 	"github.com/epheo/dotvirt/internal/model"
@@ -75,11 +76,15 @@ type Config struct {
 	PlatformRepo      string // platform-tier repo for cluster-scoped + tenancy manifests; empty disables those creates
 }
 
-// visibleTTL bounds how long a token's visible-namespace set is reused. The set
-// only changes when the user's RBAC does (rare), so a short cache turns the former
-// per-build VisibleNamespaces call (a namespace LIST or an SSRR-per-candidate
-// probe) into one call per token per window — the only cluster touch left on the
-// read path.
+// visibleTTL bounds a token's cached visible-namespace set. The RBAC version stamp
+// (bus.Version(RBACChanged, NamespaceChanged)) makes the common case instant: a
+// RoleBinding or project-namespace change invalidates the entry immediately, lazily,
+// that token only — no all-token herd. But the version watches only namespaced
+// RoleBindings + namespaces; a token's visibility can ALSO change via a
+// ClusterRoleBinding/ClusterRole, which the version does NOT observe. The TTL is the
+// backstop that bounds staleness for those un-watched RBAC sources, so it stays short
+// — long enough to spare the periodic SelfSubjectRulesReview on quiet tokens, short
+// enough that a cluster-level revocation can't linger.
 const visibleTTL = 30 * time.Second
 
 // optionsTTL caches the wizard catalog (instancetypes/preferences/datasources/
@@ -92,11 +97,12 @@ const optionsTTL = 60 * time.Second
 type Server struct {
 	clusterF  *cluster.Factory
 	state     *clusterstate.State // SA-owned live+topology snapshot; the read path's source
-	drift     *argo.DriftCache    // nil when Argo disabled; SA-read, shared across subscribers
+	drift     *argo.Snapshot      // nil when Argo disabled; SA-owned, watch-fed Application snapshot
+	bus       *eventbus.Bus       // change-version source for the version-stamped auth caches
 	resolver  *project.Resolver
 	repos     *git.RepoSet
-	visible   *ttlcache.Cache[map[string]bool]        // per-token visible-namespace set
-	platform  *ttlcache.Cache[bool]                   // per-token platform-author SSAR; gates seeding the platform PR lane
+	visible   *ttlcache.Cache[visibleSet]             // per-token visible-namespace set, RBAC-version-stamped
+	platform  *ttlcache.Cache[platformAuth]           // per-token platform-author SSAR, RBAC-version-stamped
 	proposals *ttlcache.Cache[[]model.Proposal]       // per-token open-PR set; written by the refresher, read on broadcast
 	options   *ttlcache.Cache[model.Options]          // shared wizard catalog (SA-read, identical for all)
 	networks  *ttlcache.Cache[model.NetworkInventory] // shared network catalog (SA-read; per-tenant scoping at serve time)
@@ -121,7 +127,8 @@ type Server struct {
 type Deps struct {
 	ClusterFactory *cluster.Factory
 	State          *clusterstate.State
-	Drift          *argo.DriftCache // shared, TTL-cached SA drift; nil when Argo disabled
+	Drift          *argo.Snapshot // SA-owned drift snapshot (watch-fed); nil when Argo disabled
+	Bus            *eventbus.Bus  // change-version source for version-stamped caches
 	Resolver       *project.Resolver
 	Repos          *git.RepoSet
 	Metrics        *metrics.Client // Prometheus/Thanos query client; nil disables the Performance tab
@@ -136,10 +143,11 @@ func NewServer(d Deps) *Server {
 		clusterF:  d.ClusterFactory,
 		state:     d.State,
 		drift:     d.Drift,
+		bus:       d.Bus,
 		resolver:  d.Resolver,
 		repos:     d.Repos,
-		visible:   ttlcache.New[map[string]bool](visibleTTL),
-		platform:  ttlcache.New[bool](visibleTTL),
+		visible:   ttlcache.New[visibleSet](visibleTTL),
+		platform:  ttlcache.New[platformAuth](visibleTTL),
 		proposals: ttlcache.New[[]model.Proposal](proposalsCacheTTL),
 		options:   ttlcache.New[model.Options](optionsTTL),
 		networks:  ttlcache.New[model.NetworkInventory](optionsTTL),

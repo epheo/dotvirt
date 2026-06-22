@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/restfactory"
@@ -114,13 +115,17 @@ func (s *Server) nudgeProposals() {
 }
 
 // RunProposalsRefresher drives the lane's freshness off the hot path: it blocks on
-// {git heads moved, a nudge, the backstop tick}, re-queries the forge for every
-// watched token, and signals changed (the hub's bus) when a lane differs from the
-// cache — so subscribers repaint within a debounce, not a heartbeat.
-func (s *Server) RunProposalsRefresher(ctx context.Context, gitChanged <-chan struct{}, changed chan<- struct{}) {
+// {GitChanged from the bus, a handler nudge, the backstop tick}, re-queries the
+// forge for every watched token, and publishes ProposalsChanged when a lane differs
+// from the cache — so subscribers repaint within a debounce, not a heartbeat. It
+// subscribes to GitChanged ONLY (not the cluster/live kinds), so a VM phase change
+// never triggers a forge re-query.
+func (s *Server) RunProposalsRefresher(ctx context.Context, bus *eventbus.Bus) {
 	if s.draft == nil {
 		return
 	}
+	gitChanged, cancel := bus.Subscribe(eventbus.GitChanged)
+	defer cancel()
 	t := time.NewTicker(proposalsRefreshEvery)
 	defer t.Stop()
 	for {
@@ -132,10 +137,7 @@ func (s *Server) RunProposalsRefresher(ctx context.Context, gitChanged <-chan st
 		case <-t.C:
 		}
 		if s.refreshProposals() {
-			select {
-			case changed <- struct{}{}:
-			default:
-			}
+			bus.Publish(eventbus.ProposalsChanged)
 		}
 	}
 }

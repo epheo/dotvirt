@@ -1,12 +1,9 @@
 package argo
 
 import (
-	"context"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	dynamicfake "k8s.io/client-go/dynamic/fake"
 
 	"github.com/epheo/dotvirt/internal/model"
 )
@@ -32,26 +29,15 @@ func vmResource(ns, name, status, health string) any {
 	}
 }
 
-func TestVMDrift(t *testing.T) {
-	scheme := runtime.NewScheme()
-	gvrToListKind := map[any]string{} // not needed for List with our GVR
-	_ = gvrToListKind
-
-	objs := []runtime.Object{
+func TestDriftFromApps(t *testing.T) {
+	drift := driftFromApps([]any{
 		app("openshift-gitops", "managed", []any{
 			vmResource("prod", "synced-vm", "Synced", "Healthy"),
 			vmResource("prod", "drifted-vm", "OutOfSync", "Degraded"),
 			// A non-VM resource that must be ignored.
 			map[string]any{"group": "", "kind": "Service", "namespace": "prod", "name": "svc", "status": "Synced"},
 		}),
-	}
-	dyn := dynamicfake.NewSimpleDynamicClient(scheme, objs...)
-
-	c := &Client{dyn: dyn}
-	drift, err := c.VMDrift(context.Background())
-	if err != nil {
-		t.Fatalf("VMDrift: %v", err)
-	}
+	})
 
 	if len(drift) != 2 {
 		t.Fatalf("want 2 VM drift entries (Service ignored), got %d: %v", len(drift), drift)
@@ -64,40 +50,60 @@ func TestVMDrift(t *testing.T) {
 	}
 }
 
-func TestVMDriftSyncMessage(t *testing.T) {
-	app := &unstructured.Unstructured{Object: map[string]any{
+// appWithSyncResult builds an Application whose live tree (status.resources) and
+// operationState.syncResult.resources are supplied separately.
+func appWithSyncResult(ns, name string, resources, syncResult []any) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "argoproj.io/v1alpha1",
 		"kind":       "Application",
-		"metadata":   map[string]any{"namespace": "openshift-gitops", "name": "managed"},
+		"metadata":   map[string]any{"namespace": ns, "name": name},
 		"status": map[string]any{
-			"resources": []any{
-				vmResource("prod", "bad-vm", "OutOfSync", "Healthy"),
-				vmResource("prod", "ok-vm", "Synced", "Healthy"),
-			},
-			"operationState": map[string]any{
-				"syncResult": map[string]any{
-					"resources": []any{
-						// Failed apply: carries the webhook error we want to surface.
-						map[string]any{"group": "kubevirt.io", "kind": "VirtualMachine", "namespace": "prod",
-							"name": "bad-vm", "status": "SyncFailed", "message": "admission webhook denied: 0 vCPU"},
-						// Synced row: benign "unchanged" message must NOT be surfaced as an error.
-						map[string]any{"group": "kubevirt.io", "kind": "VirtualMachine", "namespace": "prod",
-							"name": "ok-vm", "status": "Synced", "message": "virtualmachine ok-vm unchanged"},
-					},
-				},
-			},
+			"resources":      resources,
+			"operationState": map[string]any{"syncResult": map[string]any{"resources": syncResult}},
 		},
 	}}
-	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), app)
+}
 
-	drift, err := (&Client{dyn: dyn}).VMDrift(context.Background())
-	if err != nil {
-		t.Fatalf("VMDrift: %v", err)
-	}
+func TestDriftFromAppsSyncMessage(t *testing.T) {
+	drift := driftFromApps([]any{appWithSyncResult("openshift-gitops", "managed",
+		[]any{
+			vmResource("prod", "bad-vm", "OutOfSync", "Healthy"),
+			vmResource("prod", "ok-vm", "Synced", "Healthy"),
+		},
+		[]any{
+			// Failed apply: carries the webhook error we want to surface.
+			map[string]any{"group": "kubevirt.io", "kind": "VirtualMachine", "namespace": "prod",
+				"name": "bad-vm", "status": "SyncFailed", "message": "admission webhook denied: 0 vCPU"},
+			// Synced row: benign "unchanged" message must NOT be surfaced as an error.
+			map[string]any{"group": "kubevirt.io", "kind": "VirtualMachine", "namespace": "prod",
+				"name": "ok-vm", "status": "Synced", "message": "virtualmachine ok-vm unchanged"},
+		},
+	)})
+
 	if got := drift["prod/bad-vm"].Message; got != "admission webhook denied: 0 vCPU" {
 		t.Errorf("bad-vm message not surfaced: %q", got)
 	}
 	if got := drift["prod/ok-vm"].Message; got != "" {
 		t.Errorf("synced-vm should carry no error message, got %q", got)
+	}
+}
+
+// TestDriftFromAppsEmptySyncSkipped is the regression for the empty-Sync badge
+// crash: a VM that appears ONLY in operationState.syncResult.resources (a failed
+// first apply that never entered the live status.resources tree) must NOT be
+// synthesized into the drift map with a zero Sync — it stays absent, so the caller
+// reports NotTracked rather than handing the frontend an empty sync status.
+func TestDriftFromAppsEmptySyncSkipped(t *testing.T) {
+	drift := driftFromApps([]any{appWithSyncResult("openshift-gitops", "managed",
+		// Live tree is empty — the object never got created.
+		[]any{},
+		[]any{
+			map[string]any{"group": "kubevirt.io", "kind": "VirtualMachine", "namespace": "prod",
+				"name": "never-applied", "status": "SyncFailed", "message": "admission webhook denied"},
+		},
+	)})
+
+	if got, ok := drift["prod/never-applied"]; ok {
+		t.Errorf("a VM present only in syncResult must be absent from drift (NotTracked), got %+v", got)
 	}
 }

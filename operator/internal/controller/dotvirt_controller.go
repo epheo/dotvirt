@@ -261,7 +261,7 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		} else if configured {
 			r.setCondition(&dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionTrue, "Registered", "org webhook → ArgoCD")
 		} else {
-			r.setCondition(&dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionUnknown, "NoArgoURL", "no Argo URL resolved; Argo falls back to its poll")
+			r.setCondition(&dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionUnknown, "NotRegistered", "ArgoCD webhook not registered (no Argo URL, or registration deferred); Argo falls back to its poll")
 		}
 	}
 
@@ -408,9 +408,12 @@ func (r *DotvirtReconciler) mirrorAppsetToken(ctx context.Context, dv *dotvirtv1
 
 // ensureArgoWebhook registers one ORG-level forge webhook → ArgoCD and sets the
 // matching webhook secret in argocd-secret, so a merge triggers an immediate sync
-// instead of waiting for Argo's poll. Best-effort: returns configured=false (no
-// error) when no Argo URL is resolvable or no platform repo names the org. Real-only
-// (the caller skips it in dry-run) — it mutates the forge + argocd-secret.
+// instead of waiting for Argo's poll. Best-effort: returns configured=false (no error)
+// when no Argo URL is resolvable, no platform repo names the org, or the forge
+// registration itself transiently fails (logged) — Argo's poll backstops a missed nudge,
+// so none of those should fail the install. err is reserved for operator-internal
+// failures (reading the webhook secret / forge credentials, applying argocd-secret).
+// Real-only (the caller skips it in dry-run) — it mutates the forge + argocd-secret.
 func (r *DotvirtReconciler) ensureArgoWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) (configured bool, err error) {
 	if dv.Spec.Forge.URL == "" || dv.Spec.Forge.PlatformRepo == "" {
 		return false, nil
@@ -439,8 +442,14 @@ func (r *DotvirtReconciler) ensureArgoWebhook(ctx context.Context, dv *dotvirtv1
 	if client == nil {
 		return false, fmt.Errorf("cannot parse platform repo URL %q", dv.Spec.Forge.PlatformRepo)
 	}
+	// Registering the hook is best-effort, like the app's own webhook sweep
+	// (cmd/dotvirt logs and moves on): a transient forge hiccup here must not read as a
+	// hard install error, because ArgoCD's poll already backstops a missed nudge. Log it
+	// and report unconfigured so the next reconcile retries. The secret/credential steps
+	// above stay hard errors — those are operator-internal, not forge-transient.
 	if err := client.EnsureOrgWebhook(strings.TrimRight(argoURL, "/")+"/api/webhook", value); err != nil {
-		return false, err
+		logf.FromContext(ctx).Info("argo webhook registration deferred; ArgoCD poll backstops", "error", err.Error())
+		return false, nil
 	}
 	return true, nil
 }
@@ -539,8 +548,13 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 		return false, err
 	}
 	url := dv.Spec.Forge.URL
+	// read:user lets the token read /api/v1/user — which is what ValidateToken probes.
+	// Under Forgejo's granular token scopes a write:* token can't reach /api/v1/user, so
+	// without this the freshly minted token validates as "rejected" and the operator
+	// re-mints every reconcile forever. write:organization/write:repository cover the org
+	// + repo webhook and PR operations.
 	token, err := forge.NewFactory(url, "unused", dv.Spec.Forge.InsecureTLS).
-		MintToken(install.ForgejoBotUser, string(admin.Data["password"]), "dotvirt-operator", []string{"write:organization", "write:repository"})
+		MintToken(install.ForgejoBotUser, string(admin.Data["password"]), "dotvirt-operator", []string{"read:user", "write:organization", "write:repository"})
 	if err != nil {
 		return false, err
 	}

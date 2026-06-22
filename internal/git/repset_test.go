@@ -12,8 +12,7 @@ func TestRepoSetCachesByURL(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	changed := make(chan struct{}, 1)
-	rs := NewRepoSet(ctx, "", nil, false, changed, nil, time.Hour) // long interval: poll won't fire in-test
+	rs := NewRepoSet(ctx, "", nil, false, nil, time.Hour) // long interval: poll won't fire in-test
 
 	read1, write1, err := rs.Get(bareA)
 	if err != nil {
@@ -50,7 +49,7 @@ func TestRepoSetCachesByURL(t *testing.T) {
 func TestRepoSetGetBadURLErrors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	rs := NewRepoSet(ctx, "", nil, false, make(chan struct{}, 1), nil, time.Hour)
+	rs := NewRepoSet(ctx, "", nil, false, nil, time.Hour)
 
 	if _, _, err := rs.Get("/nonexistent/repo.git"); err == nil {
 		t.Error("expected an error opening a nonexistent repo")

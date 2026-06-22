@@ -5,7 +5,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/cache"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 )
 
@@ -62,28 +61,50 @@ func TestNamespacesExposesLabelsAndAnnotations(t *testing.T) {
 	}
 }
 
-// TestCountingStoreBumpsAndSyncs checks the watch→signal plumbing: each mutation
-// bumps version and fires on(); the first Replace (initial relist) additionally
-// fires synced() exactly once.
-func TestCountingStoreBumpsAndSyncs(t *testing.T) {
-	var bumps, syncs int
-	cs := &countingStore{
-		Indexer: newIndexer(),
-		on:      func() { bumps++ },
-		synced:  func() { syncs++ },
-	}
+func testVM(gen int64) *kubevirtcorev1.VirtualMachine {
+	return &kubevirtcorev1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "vm", Generation: gen}}
+}
 
-	obj := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "a"}}
-	_ = cs.Replace([]any{obj}, "1") // initial relist
-	_ = cs.Add(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "b"}})
-	_ = cs.Replace([]any{obj}, "2") // a later relist must NOT re-fire synced
+// TestVMSpecStoreGatesOnGeneration is the core of the export-CPU fix: a status-only
+// VM Update (generation unchanged) must fire LiveChanged but NOT VMSpecChanged, so
+// the exporter doesn't wake on KubeVirt's frequent VM.status writes. Add/Delete and a
+// real spec change (generation bump) fire both.
+func TestVMSpecStoreGatesOnGeneration(t *testing.T) {
+	var spec, live int
+	store := newVMSpecStore(newIndexer(), func() { spec++ }, func() { live++ }, nil)
 
-	if bumps != 3 {
-		t.Errorf("every mutation should bump: want 3, got %d", bumps)
+	if err := store.Add(testVM(1)); err != nil {
+		t.Fatal(err)
 	}
-	if syncs != 1 {
-		t.Errorf("synced should fire exactly once (first Replace), got %d", syncs)
+	if spec != 1 || live != 1 {
+		t.Fatalf("after Add: spec=%d live=%d, want 1,1", spec, live)
+	}
+	// Status-only Update (same generation) → LiveChanged only.
+	_ = store.Update(testVM(1))
+	if spec != 1 || live != 2 {
+		t.Errorf("after status-only Update: spec=%d live=%d, want 1,2", spec, live)
+	}
+	// Spec change (generation bump) → both.
+	_ = store.Update(testVM(2))
+	if spec != 2 || live != 3 {
+		t.Errorf("after spec Update: spec=%d live=%d, want 2,3", spec, live)
+	}
+	// Delete → both (prunes the manifest).
+	_ = store.Delete(testVM(2))
+	if spec != 3 || live != 4 {
+		t.Errorf("after Delete: spec=%d live=%d, want 3,4", spec, live)
 	}
 }
 
-var _ cache.Store = (*countingStore)(nil) // countingStore must satisfy the reflector's store
+func TestVMSpecStoreReplaceFiresSyncedOnce(t *testing.T) {
+	var spec, live, synced int
+	store := newVMSpecStore(newIndexer(), func() { spec++ }, func() { live++ }, func() { synced++ })
+	_ = store.Replace([]any{testVM(1)}, "1")
+	_ = store.Replace([]any{testVM(1)}, "2") // a later relist must NOT re-fire synced
+	if spec != 2 || live != 2 {
+		t.Errorf("two Replaces: spec=%d live=%d, want 2,2", spec, live)
+	}
+	if synced != 1 {
+		t.Errorf("synced fired %d times, want exactly 1 (first Replace)", synced)
+	}
+}

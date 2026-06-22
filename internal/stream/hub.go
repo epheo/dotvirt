@@ -1,7 +1,12 @@
-// Package stream pushes live inventory to WebSocket subscribers. A single hub
-// listens for change signals (k8s/argo watches + a git poll), recomputes each
-// subscriber's OWN inventory (under their identity), and broadcasts it — so the UI
-// never polls and one user never receives another tenant's tree.
+// Package stream pushes live inventory to WebSocket clients. One central goroutine
+// reconciles each connected identity's inventory frame to the latest change-version
+// and hands every connection the freshest frame; connections are level-triggered
+// writers that always send the latest. There is no debounce (coalescing falls out of
+// the build duration — see Run), no heartbeat broadcast (a fresh connection is built
+// on connect; a quiet one needs no resend), and no send-buffer overflow (each
+// connection's mailbox conflates to the latest frame, so a slow client converges
+// instead of dropping frames). The UI never polls, and one user never receives
+// another tenant's tree (each frame is built under the connection's identity).
 package stream
 
 import (
@@ -9,101 +14,110 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
-	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
 // InventoryFunc computes the inventory visible to one identity (the API server's
-// InventoryForIdentity). Each subscriber's frame is built with their own identity,
-// so isolation holds on the live channel exactly as it does over HTTP.
+// InventoryForIdentity). Each frame is built with the connection's own identity, so
+// isolation holds on the live channel exactly as it does over HTTP.
 type InventoryFunc func(ctx context.Context, id auth.Identity) (model.Inventory, error)
 
-// Hub fans inventory updates out to subscribers. One Hub per process.
+// Hub is the central inventory reconciler. One Hub per process.
 type Hub struct {
 	inventory InventoryFunc
+	wake      <-chan struct{} // bus subscription over the inventory kinds (the edge)
+	version   func() uint64   // summed version of those kinds (the level)
+	kick      chan struct{}   // a connection was added — rebuild so it gets a first frame
 
-	mu   sync.Mutex
-	subs map[*subscriber]struct{}
-
-	changed <-chan struct{}
+	mu    sync.Mutex
+	conns map[*conn]struct{}
 }
 
-type subscriber struct {
-	identity auth.Identity
-	send     chan []byte
-	quit     chan struct{} // closed by remove(); senders select on it so send is never closed
-	lastJS   string        // last inventory JSON sent, to suppress duplicate frames
+// NewHub builds the hub over a bus subscription (wake) and a reader for the summed
+// version of the kinds that subscription covers. Passing both keeps this package
+// decoupled from the specific kind set — the caller (main) owns it.
+func NewHub(inventory InventoryFunc, wake <-chan struct{}, version func() uint64) *Hub {
+	return &Hub{
+		inventory: inventory,
+		wake:      wake,
+		version:   version,
+		kick:      make(chan struct{}, 1),
+		conns:     map[*conn]struct{}{},
+	}
 }
 
-// push delivers a frame to the subscriber without blocking and without risking a
-// send on a closed channel: it races the buffered send against quit (closed when
-// the connection is torn down). A full buffer drops the frame — the next tick
-// resends current state.
-func (s *subscriber) push(data []byte) {
+// conn is one WebSocket connection. The Run goroutine is the sole writer of lastJS
+// and the sole producer into out (a conflating 1-slot mailbox); the connection's
+// writePump drains out and writes the latest frame. quit is closed on teardown.
+type conn struct {
+	id     auth.Identity
+	key    string // groups connections of the same identity (same token → one build)
+	out    chan []byte
+	quit   chan struct{}
+	lastJS string // last frame delivered to THIS conn; owned by the Run goroutine
+}
+
+func (h *Hub) add(c *conn) {
+	h.mu.Lock()
+	h.conns[c] = struct{}{}
+	h.mu.Unlock()
+	// Wake Run so the new connection gets its first frame without waiting for a change.
 	select {
-	case s.send <- data:
-	case <-s.quit:
+	case h.kick <- struct{}{}:
 	default:
 	}
 }
 
-// NewHub builds a Hub over the process-wide change channel — the single bus every
-// source (k8s/argo watches, git polls) signals and only the Hub consumes. It must
-// be 1-buffered so writers coalesce instead of blocking; the Hub drains bursts and
-// recomputes once.
-func NewHub(inventory InventoryFunc, changed <-chan struct{}) *Hub {
-	return &Hub{
-		inventory: inventory,
-		subs:      map[*subscriber]struct{}{},
-		changed:   changed,
-	}
+func (h *Hub) remove(c *conn) {
+	h.mu.Lock()
+	delete(h.conns, c)
+	h.mu.Unlock()
+	close(c.quit) // unblocks any in-flight deliver; the writer stops on its own done
 }
 
-// Run drives broadcasts: it waits for change signals (debounced) and also pushes
-// on a slow heartbeat so a subscriber that just connected gets current state even
-// without an event. Stops when ctx is cancelled.
+// Run reconciles every connected identity's frame to the current change-version.
+// Self-clocking: on a wake it rebuilds toward the latest version, then re-checks; if
+// the version moved while it built (a burst), it loops immediately — the coalescing
+// window is the build duration, not a constant, so it batches exactly as much as the
+// load demands and adds no latency floor. Each pass emits the freshest frame to every
+// connection that hasn't seen it, so clients keep converging under sustained churn
+// rather than starving while the builder chases a moving target.
 func (h *Hub) Run(ctx context.Context) {
-	const debounce = 300 * time.Millisecond
-	const heartbeat = 15 * time.Second
-
-	timer := time.NewTimer(heartbeat)
-	defer timer.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-h.changed:
-			time.Sleep(debounce) // coalesce a burst of events into one recompute
-			drainSignal(h.changed)
-			h.broadcast(ctx)
-			resetTimer(timer, heartbeat)
-		case <-timer.C:
-			h.broadcast(ctx)
-			resetTimer(timer, heartbeat)
+		case <-h.wake:
+		case <-h.kick:
+		}
+		for {
+			target := h.version()
+			h.reconcile(ctx)
+			if h.version() == target {
+				break // nothing moved while we built — caught up
+			}
 		}
 	}
 }
 
-// broadcast recomputes each subscriber's inventory under their identity and pushes
-// it, skipping any whose inventory is unchanged. A failing per-user build is
-// skipped (transient); the next tick retries.
-func (h *Hub) broadcast(ctx context.Context) {
+// reconcile rebuilds the inventory frame once per distinct connected identity (two
+// tabs of one user share a build) and delivers it to that identity's connections
+// that haven't sent it yet. A per-identity build failure (e.g. token expiry) is
+// logged and skips that identity, never the others.
+func (h *Hub) reconcile(ctx context.Context) {
 	h.mu.Lock()
-	subs := make([]*subscriber, 0, len(h.subs))
-	for s := range h.subs {
-		subs = append(subs, s)
+	byKey := make(map[string][]*conn, len(h.conns))
+	for c := range h.conns {
+		byKey[c.key] = append(byKey[c.key], c)
 	}
 	h.mu.Unlock()
 
-	for _, s := range subs {
-		inv, err := h.inventory(ctx, s.identity)
+	for _, conns := range byKey {
+		inv, err := h.inventory(ctx, conns[0].id)
 		if err != nil {
-			// Transient (token expiry, API blip) — the next tick retries. Log it so a
-			// persistent build failure doesn't masquerade as an empty inventory.
-			log.Printf("stream: inventory build failed for %s: %v", s.identity.Username, err)
+			log.Printf("stream: inventory build failed for %s: %v", conns[0].id.Username, err)
 			continue
 		}
 		data, err := json.Marshal(inv)
@@ -111,30 +125,27 @@ func (h *Hub) broadcast(ctx context.Context) {
 			continue
 		}
 		js := string(data)
-		if s.lastJS == js {
-			continue
-		}
-		s.lastJS = js
-		s.push(data)
-	}
-}
-
-func drainSignal(ch <-chan struct{}) {
-	for {
-		select {
-		case <-ch:
-		default:
-			return
+		for _, c := range conns {
+			if c.lastJS == js {
+				continue // this connection already holds the latest frame
+			}
+			c.lastJS = js
+			c.deliver(data)
 		}
 	}
 }
 
-func resetTimer(t *time.Timer, d time.Duration) {
-	if !t.Stop() {
-		select {
-		case <-t.C:
-		default:
-		}
+// deliver puts data in c's conflating 1-slot mailbox, replacing any pending (older)
+// frame, so a slow writer always sends the freshest and never builds a backlog.
+// Called only from the Run goroutine (single producer), so the drain-then-send is
+// race-free; it never blocks (quit unblocks it on teardown).
+func (c *conn) deliver(data []byte) {
+	select {
+	case <-c.out: // drop a stale pending frame
+	default:
 	}
-	t.Reset(d)
+	select {
+	case c.out <- data:
+	case <-c.quit:
+	}
 }

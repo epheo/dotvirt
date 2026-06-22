@@ -11,6 +11,12 @@ export default defineConfig({
 	reporter: [['list']],
 	use: {
 		baseURL: process.env.BASE_URL ?? 'http://localhost:5173',
+		// TLS is verified by default so the smoke suite catches a genuinely broken-cert
+		// deployment. Set E2E_INSECURE_TLS=1 to tolerate a self-signed cert when running
+		// against a live dev/eval stack (an OpenShift ingress cert isn't in Playwright's
+		// trust store). roundtrip.spec.ts relaxes it unconditionally (test.use), since it
+		// also calls a dev Forgejo cross-origin.
+		ignoreHTTPSErrors: !!process.env.E2E_INSECURE_TLS,
 		trace: 'retain-on-failure'
 	},
 	projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }]

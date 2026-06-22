@@ -8,9 +8,22 @@ import (
 )
 
 // ParseVMsOnBranch parses every VM on a branch (pure manifest view, no live/argo
-// enrichment). Stateless over the Repo, so the multi-tenant inventory builder and
-// per-project lookups run it against any repo.
+// enrichment). Memoized by the branch's commit hash so the tree walk + parse runs
+// once per content change, shared across every identity's inventory build; the
+// result is read-only to callers (the inventory builder copies each VM out). A
+// content change advances the branch hash, missing the cache. The returned slice
+// must not be mutated.
 func (r *Repo) ParseVMsOnBranch(branch string) ([]model.VM, error) {
+	hash := r.branchHash(branch)
+	if hash != "" {
+		r.parseMu.Lock()
+		c, ok := r.parseCache[branch]
+		r.parseMu.Unlock()
+		if ok && c.hash == hash {
+			return c.vms, nil
+		}
+	}
+
 	files, err := r.VMManifests(branch)
 	if err != nil {
 		return nil, err
@@ -22,6 +35,12 @@ func (r *Repo) ParseVMsOnBranch(branch string) ([]model.VM, error) {
 			return nil, err
 		}
 		out = append(out, vms...)
+	}
+
+	if hash != "" {
+		r.parseMu.Lock()
+		r.parseCache[branch] = branchParse{hash: hash, vms: out}
+		r.parseMu.Unlock()
 	}
 	return out, nil
 }

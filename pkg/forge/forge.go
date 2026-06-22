@@ -5,7 +5,9 @@ package forge
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +16,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -178,41 +181,127 @@ type hook struct {
 	Config map[string]string `json:"config"`
 }
 
-// EnsureWebhook registers a push+pull_request webhook delivering to targetURL
-// (HMAC-signed with secret) on the client's repo, if none exists yet for that
-// URL — idempotent, so it can run on every sweep.
+// EnsureWebhook registers a push+pull_request webhook on the client's REPO delivering
+// to targetURL (HMAC-signed with secret). Idempotent and safe on every sweep: it
+// migrates the hook in place when targetURL's host changes and re-asserts the secret at
+// most once per process. See ensureHook.
 func (c *Client) EnsureWebhook(targetURL, secret string) error {
 	return c.ensureHook(c.repoPath("/hooks"), targetURL, secret)
 }
 
 // EnsureOrgWebhook registers the same push+pull_request webhook on the client's
 // ORGANIZATION rather than a single repo, so one hook covers every repo in the org —
-// present and future. Idempotent. Used to point ArgoCD at all project repos with a
-// single registration, with no per-repo enumeration.
+// present and future. Used to point ArgoCD at all project repos with a single
+// registration, with no per-repo enumeration. Same reconcile semantics as
+// EnsureWebhook (see ensureHook).
 func (c *Client) EnsureOrgWebhook(targetURL, secret string) error {
 	return c.ensureHook(fmt.Sprintf("/api/v1/orgs/%s/hooks", c.owner), targetURL, secret)
 }
 
-// ensureHook idempotently creates a "gitea" (Forgejo-compatible) push+pull_request
-// webhook at the given hooks collection path (repo- or org-level) unless one already
-// targets targetURL.
+// ensureHook converges a single "gitea" (Forgejo-compatible) push+pull_request webhook
+// delivering to targetURL within the given hooks collection (repo- or org-level).
+//
+// The hook is identified by its URL PATH, not its full URL. The host legitimately
+// changes — an external Route giving way to the in-cluster Service — and matching on the
+// path migrates that one hook in place rather than orphaning the old hook and POSTing a
+// duplicate that double-delivers. Extra hooks sharing the path (from an earlier
+// migration or a manual add) are deleted, so deliveries never split across a
+// half-configured second hook.
+//
+// Forgejo never echoes a hook's stored secret, so a converged hook is indistinguishable
+// from one carrying a stale/rotated secret that 403s every delivery. The fingerprint
+// cache (hookSecrets) records the secret last written per hook, so the secret is
+// re-asserted at most once per process — on first sight or after a rotation — not on
+// every sweep. That keeps steady-state sweeps write-free against Forgejo's single-replica
+// sqlite, and leaves a converged hook exactly as the forge has it (active or not) instead
+// of fighting its failure-driven auto-disable.
 func (c *Client) ensureHook(hooksPath, targetURL, secret string) error {
 	var hooks []hook
 	if err := c.do("GET", hooksPath, nil, &hooks); err != nil {
 		return err
 	}
+	cfg := map[string]string{"url": targetURL, "content_type": "json", "secret": secret}
+	// One desired payload; the create API additionally requires "type" (the edit API
+	// rejects it), added on the POST branch only.
+	desired := map[string]any{"active": true, "events": []string{"push", "pull_request"}, "config": cfg}
+
+	targetPath := urlPath(targetURL)
+	var ours []hook
 	for _, h := range hooks {
-		if h.Config["url"] == targetURL {
-			return nil
+		if urlPath(h.Config["url"]) == targetPath {
+			ours = append(ours, h)
 		}
 	}
-	payload := map[string]any{
-		"type":   "gitea",
-		"active": true,
-		"events": []string{"push", "pull_request"},
-		"config": map[string]string{"url": targetURL, "content_type": "json", "secret": secret},
+	if len(ours) == 0 {
+		return c.do("POST", hooksPath, withCreateType(desired), nil)
 	}
-	return c.do("POST", hooksPath, payload, nil)
+
+	// Reconcile the first match in place; PATCH only on a real change — a host migration
+	// or a secret the cache hasn't seen this process — so a re-enable (active:true) and a
+	// secret rewrite happen exactly when they recover something, not every sweep. Record
+	// only after the write lands, or a failed PATCH would falsely mark the hook converged.
+	primary := ours[0]
+	key := fmt.Sprintf("%s#%d", hooksPath, primary.ID)
+	if primary.Config["url"] != targetURL || !hookSecretMatches(key, secret) {
+		if err := c.do("PATCH", fmt.Sprintf("%s/%d", hooksPath, primary.ID), desired, nil); err != nil {
+			return err
+		}
+		recordHookSecret(key, secret)
+	}
+	for _, dup := range ours[1:] {
+		if err := c.do("DELETE", fmt.Sprintf("%s/%d", hooksPath, dup.ID), nil, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// hookSecrets fingerprints the secret last written to each reconciled hook, keyed by
+// "{collection}#{id}". It exists because Forgejo never echoes a hook's stored secret:
+// without it ensureHook could not tell a converged hook from one needing its secret
+// re-asserted, and would PATCH on every sweep. Process-lifetime state — a restart
+// re-asserts once, which is the intended recovery.
+var (
+	hookSecretsMu sync.Mutex
+	hookSecrets   = map[string]string{}
+)
+
+func hookFingerprint(secret string) string {
+	sum := sha256.Sum256([]byte(secret))
+	return hex.EncodeToString(sum[:])
+}
+
+// hookSecretMatches reports whether key was last reconciled with this secret.
+func hookSecretMatches(key, secret string) bool {
+	hookSecretsMu.Lock()
+	defer hookSecretsMu.Unlock()
+	return hookSecrets[key] == hookFingerprint(secret)
+}
+
+// recordHookSecret remembers the secret just written to key.
+func recordHookSecret(key, secret string) {
+	hookSecretsMu.Lock()
+	defer hookSecretsMu.Unlock()
+	hookSecrets[key] = hookFingerprint(secret)
+}
+
+// withCreateType copies a hook payload and sets the create-only "type" field.
+func withCreateType(base map[string]any) map[string]any {
+	out := make(map[string]any, len(base)+1)
+	for k, v := range base {
+		out[k] = v
+	}
+	out["type"] = "gitea"
+	return out
+}
+
+// urlPath returns the path component of a URL, or raw unchanged if it doesn't parse —
+// enough to identify a webhook across a host change without binding to scheme/host/port.
+func urlPath(raw string) string {
+	if u, err := url.Parse(raw); err == nil && u.Path != "" {
+		return u.Path
+	}
+	return raw
 }
 
 // EnsureRepo creates the client's repo if it doesn't already exist — under its
@@ -305,12 +394,14 @@ func (f *Factory) deleteToken(username, password, tokenName string) error {
 	return fmt.Errorf("forge delete token: %s", resp.Status)
 }
 
-// ValidateToken reports whether token authenticates against the forge, via a GET
-// of the current-user endpoint. A 2xx means valid; 401/403 means invalid (so the
-// caller can re-mint) — distinguished from transport/other errors, which surface
-// as err so a forge blip isn't mistaken for a bad token. Used by the operator to
-// stop trusting a stored token blindly: a Forgejo data reset or out-of-band
-// rotation invalidates it, and only a re-mint recovers.
+// ValidateToken reports whether token authenticates against the forge, via a GET of
+// the current-user endpoint. Only 401 means invalid (so the caller re-mints). A 2xx —
+// or a 403 — means valid: under Forgejo's granular token scopes a 403 is the token
+// authenticating but lacking the read:user scope this endpoint needs, which proves the
+// credential is good (treating it as invalid re-mints on every reconcile forever).
+// Transport/other errors surface as err so a forge blip isn't mistaken for a bad token.
+// Used by the operator to stop trusting a stored token blindly: a Forgejo data reset or
+// out-of-band rotation invalidates it (401), and only a re-mint recovers.
 func (f *Factory) ValidateToken(token string) (valid bool, err error) {
 	if f == nil {
 		return false, fmt.Errorf("forge not configured")
@@ -330,7 +421,10 @@ func (f *Factory) ValidateToken(token string) (valid bool, err error) {
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return true, nil
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+	case resp.StatusCode == http.StatusForbidden:
+		// Authenticated but forbidden (scope) — a valid credential, not a bad token.
+		return true, nil
+	case resp.StatusCode == http.StatusUnauthorized:
 		return false, nil
 	default:
 		return false, fmt.Errorf("forge validate token: %s", resp.Status)
@@ -416,6 +510,24 @@ func ownerRepo(repoURL string) (owner, repo string, ok bool) {
 		return "", "", false
 	}
 	return owner, repo, true
+}
+
+// NormalizeRepoURL canonicalizes a git repo URL for equality comparison: trimmed,
+// no trailing slash, a single trailing ".git" stripped, lowercased. It lets the
+// same repo written three ways — the forge clone_url (…​.git), the html_url (no
+// .git), and a trailing-slash annotation — resolve to one key, so a push webhook
+// reliably finds the repo's poller (RepoSet) and its managing ArgoCD Application
+// (argo.Snapshot.RefreshForRepo). Returns "" for an empty/blank input.
+func NormalizeRepoURL(u string) string {
+	u = strings.TrimSpace(u)
+	if u == "" {
+		return ""
+	}
+	// Lowercase first so a mixed-case ".GIT" suffix or host still canonicalizes.
+	u = strings.ToLower(u)
+	u = strings.TrimRight(u, "/")
+	u = strings.TrimSuffix(u, ".git")
+	return u
 }
 
 // OwnerPrefixURL is the forge owner URL ("scheme://host/.../<owner>") of a repo

@@ -1,6 +1,7 @@
 package forge
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -38,6 +39,7 @@ func TestEnsureRepoCreatesWhenAbsent(t *testing.T) {
 // EnsureOrgWebhook registers a single org-level hook (covering all repos) when none
 // targets the URL yet.
 func TestEnsureOrgWebhookRegistersOnce(t *testing.T) {
+	resetHookCache()
 	var posted bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -59,6 +61,45 @@ func TestEnsureOrgWebhookRegistersOnce(t *testing.T) {
 	}
 	if !posted {
 		t.Error("expected the org hook to be created")
+	}
+}
+
+// EnsureOrgWebhook re-asserts the HMAC secret on a hook that already targets the URL:
+// Forgejo never echoes the stored secret, so an existing hook is PATCHed back to the
+// configured one (in place, not recreated) rather than left to 403 every delivery.
+func TestEnsureOrgWebhookReconcilesSecret(t *testing.T) {
+	resetHookCache()
+	var patched bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/hooks":
+			// A hook for the target URL already exists, with no secret echoed back.
+			_, _ = w.Write([]byte(`[{"id":7,"config":{"url":"https://argo/api/webhook","content_type":"json"}}]`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/orgs/dotvirt/hooks/7":
+			patched = true
+			var body struct {
+				Config map[string]string `json:"config"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode PATCH body: %v", err)
+			}
+			if body.Config["secret"] != "rotated" {
+				t.Errorf("PATCH secret = %q, want rotated", body.Config["secret"])
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected %s %s (must reconcile in place, not recreate)", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewFactory(srv.URL, "tok", false).For("http://forge/dotvirt/platform.git")
+	if err := c.EnsureOrgWebhook("https://argo/api/webhook", "rotated"); err != nil {
+		t.Fatalf("EnsureOrgWebhook: %v", err)
+	}
+	if !patched {
+		t.Error("expected the existing hook to be PATCHed with the new secret")
 	}
 }
 
@@ -102,13 +143,16 @@ func TestValidateToken(t *testing.T) {
 		if r.URL.Path != "/api/v1/user" {
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
-		// "good" authenticates, anything else is rejected.
-		if r.Header.Get("Authorization") == "token good" {
+		switch r.Header.Get("Authorization") {
+		case "token good":
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"login":"dotvirt-bot"}`))
-			return
+		case "token scoped":
+			// Authenticated but missing read:user under Forgejo's granular scopes.
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			w.WriteHeader(http.StatusUnauthorized)
 		}
-		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer srv.Close()
 
@@ -116,8 +160,13 @@ func TestValidateToken(t *testing.T) {
 	if valid, err := f.ValidateToken("good"); err != nil || !valid {
 		t.Errorf("ValidateToken(good) = (%v,%v), want (true,nil)", valid, err)
 	}
+	// A 403 is a VALID credential lacking scope — not a bad token. Treating it as invalid
+	// is what made the operator re-mint every reconcile forever.
+	if valid, err := f.ValidateToken("scoped"); err != nil || !valid {
+		t.Errorf("ValidateToken(scoped/403) = (%v,%v), want (true,nil)", valid, err)
+	}
 	if valid, err := f.ValidateToken("stale"); err != nil || valid {
-		t.Errorf("ValidateToken(stale) = (%v,%v), want (false,nil)", valid, err)
+		t.Errorf("ValidateToken(stale/401) = (%v,%v), want (false,nil)", valid, err)
 	}
 }
 

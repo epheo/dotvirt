@@ -49,7 +49,7 @@ func Ingress(dv *dotvirtv1alpha1.Dotvirt, host string) *networkingv1.Ingress {
 							Backend: networkingv1.IngressBackend{
 								Service: &networkingv1.IngressServiceBackend{
 									Name: AppName,
-									Port: networkingv1.ServiceBackendPort{Number: 8080},
+									Port: networkingv1.ServiceBackendPort{Number: HTTPPort},
 								},
 							},
 						}},

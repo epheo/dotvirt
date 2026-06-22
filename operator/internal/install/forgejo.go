@@ -39,7 +39,7 @@ var forgejoSelector = map[string]string{"app": ForgejoServiceName}
 
 // ForgejoServiceURL is the in-cluster base URL of the managed Forgejo.
 func ForgejoServiceURL(dv *dotvirtv1alpha1.Dotvirt) string {
-	return "http://" + ForgejoServiceName + "." + dv.Namespace + ".svc:3000"
+	return svcURL(ForgejoServiceName, dv.Namespace, 3000)
 }
 
 // ForgejoExternalURL is the browser/clone-facing base URL: the configured
@@ -119,6 +119,18 @@ func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt) []corev1.EnvVar {
 		{Name: "FORGEJO__security__INSTALL_LOCK", Value: "true"},
 		{Name: "FORGEJO__database__DB_TYPE", Value: "sqlite3"},
 		{Name: "FORGEJO__server__ROOT_URL", Value: ForgejoExternalURL(dv) + "/"},
+		// dotvirt's webhook is delivered to its in-cluster Service; Forgejo's SSRF guard
+		// blocks private targets by default, so allow that host — keeping `external` so
+		// delivery to any public webhook still works.
+		{Name: "FORGEJO__webhook__ALLOWED_HOST_LIST", Value: ServiceHost(dv) + ",external"},
+		// Skip webhook TLS verification globally for this managed Forgejo. It's required by
+		// the ArgoCD-direct backstop (a fallback to dotvirt's RefreshForRepo), which targets
+		// ArgoCD's EXTERNAL Route — off-cluster, served by an ingress CA Forgejo doesn't
+		// trust. Being global, it also relaxes verification for any tenant-added external
+		// webhook on this forge: an accepted trade-off for the eval-grade managed forge, not
+		// the bounded in-cluster exposure the name might suggest. (dotvirt's own webhook
+		// needs no exemption — it's delivered to the in-cluster Service over plain HTTP.)
+		{Name: "FORGEJO__webhook__SKIP_TLS_VERIFY", Value: "true"},
 	}
 }
 
