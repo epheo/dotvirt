@@ -81,3 +81,12 @@ check against a real cluster.
 - **`make bundle`** — generate the OLM bundle for OperatorHub (needs `operator-sdk`
   on PATH; merges the CSV base in `config/manifests/bases/` with the generated CRD +
   RBAC + Deployment). Building/pushing the bundle image to a catalog is a release step.
+
+## Get Forgejo creds
+
+```
+oc get secret -n dotvirt dotvirt-forgejo-admin -ojson |jq -r .data.password |base64 -d
+```
+
+user: dotvirt-bot
+

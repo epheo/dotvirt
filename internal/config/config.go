@@ -42,7 +42,7 @@ type Config struct {
 	PlatformRepo string
 
 	ExportInterval  time.Duration // how often to export live state to each project's running branch
-	GitPollInterval time.Duration // how often to poll git for branch changes (drives live push)
+	GitPollInterval time.Duration // missed-event backstop: fetch each repo this often when no webhook poke arrives
 	Push            bool          // push commits to the remote (disable for local/offline testing)
 
 	// Changeset / PR workflow
@@ -118,7 +118,7 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.PlatformRepo, "platform-repo", os.Getenv("DOTVIRT_PLATFORM_REPO"), "platform-tier git repo for cluster-scoped + tenancy manifests (CUDN/NNCP/Namespace); empty disables those creates")
 
 	fs.DurationVar(&c.ExportInterval, "export-interval", 30*time.Second, "how often to export live state to each project's running branch")
-	fs.DurationVar(&c.GitPollInterval, "git-poll-interval", 10*time.Second, "how often to poll git for branch changes (drives live inventory push)")
+	fs.DurationVar(&c.GitPollInterval, "git-poll-interval", 5*time.Minute, "missed-event backstop: how often to fetch each project repo for head changes when no webhook poke arrives (webhooks are the primary trigger)")
 	fs.BoolVar(&c.Push, "push", envBool("DOTVIRT_PUSH", true), "push commits to the remote (disable for local/offline testing)")
 
 	fs.StringVar(&c.BaseBranch, "base-branch", envOr("DOTVIRT_BASE_BRANCH", "main"), "branch the inventory reads + PRs target")
