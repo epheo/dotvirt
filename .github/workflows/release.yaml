@@ -80,6 +80,6 @@ jobs:
           git switch -c "$branch"
           git commit -am "release v$REL_VERSION: digest-pinned (replaces v$REL_PREV)"
           git push -u origin "$branch"
-          gh pr create --fill \
+          gh pr create --base main --head "$branch" \
             --title "release v$REL_VERSION" \
             --body "Digest-pinned release cut by CI; images already pushed to quay.io/epheo. Merge to record the pins, then apply operator/install/catalogsource.yaml."
