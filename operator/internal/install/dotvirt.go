@@ -176,6 +176,10 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 		"-ui-origin=", // same-origin: the binary serves the SPA
 		"-argo=true",
 		"-draft-dir=/var/lib/dotvirt/drafts",
+		// Webhooks (self-registered above) are the primary trigger for inventory
+		// updates; the git poll is only the missed-event backstop, so keep it slow
+		// to spare the forge — the managed Forgejo is a single SQLite-backed pod.
+		"-git-poll-interval=5m",
 	}
 	if dv.Spec.Forge.InsecureTLS {
 		// The managed/eval forge Route is self-signed, so the app must skip TLS
