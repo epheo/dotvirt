@@ -91,6 +91,12 @@ jobs:
           sudo chmod +x /usr/local/bin/operator-sdk
       - name: kind cluster + local registry
         run: |
+          # The kind node shares the host's (global, non-namespaced) inotify limits.
+          # The runner's default fs.inotify.max_user_instances (~128) is exhausted by
+          # OLM + the operator stack's informers/watches, leaving pods stuck and the
+          # CatalogSource never serving — i.e. a Subscription with no InstallPlan. Raise
+          # the ceiling before the node starts. -w is runtime-only: fine on a throwaway VM.
+          sudo sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576
           docker run -d --restart=always -p 127.0.0.1:5000:5000 --name kind-registry registry:2
           cat <<EOF | kind create cluster --wait 5m --config=-
           kind: Cluster
