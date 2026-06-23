@@ -1,6 +1,19 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { ArrowLeft, FolderPlus, Network, Plus, Power, PowerOff, Trash2, Upload } from 'lucide-svelte';
+	import {
+		ArrowLeft,
+		ChevronDown,
+		ClipboardList,
+		FolderPlus,
+		Network,
+		Plus,
+		Power,
+		PowerOff,
+		Server,
+		Trash2,
+		Upload,
+		User as UserIcon
+	} from 'lucide-svelte';
 	import {
 		api,
 		draftsByProject,
@@ -24,6 +37,7 @@
 	import ContainerMonitor from '$lib/components/ContainerMonitor.svelte';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import GlobalSearch, { type SearchHit } from '$lib/components/GlobalSearch.svelte';
+	import HeaderMenu from '$lib/components/HeaderMenu.svelte';
 	import InventoryTree from '$lib/components/InventoryTree.svelte';
 	import Login from '$lib/components/Login.svelte';
 	import AddUplinkModal from '$lib/components/AddUplinkModal.svelte';
@@ -267,6 +281,19 @@
 	const repoProjects = $derived(
 		inventory ? inventory.projects.filter((p) => p.repo).map((p) => p.name) : []
 	);
+
+	// Repo-backed namespaces under the current tree scope — what "New VM" pre-targets
+	// from the + New menu, mirroring the tree context menu's "New VM here". null = no
+	// scope narrowing, so the wizard offers every creatable namespace.
+	const scopeNamespaces = $derived.by(() => {
+		const sc = scope;
+		if (sc.kind === 'project' || sc.kind === 'namespace') {
+			const p = inventory?.projects.find((proj) => proj.name === sc.project);
+			if (!p?.repo) return null;
+			return sc.kind === 'namespace' ? [sc.namespace] : p.namespaces.map((n) => n.namespace);
+		}
+		return null;
+	});
 
 	let showWizard = $state(false);
 	let showNetworkWizard = $state(false);
@@ -529,64 +556,127 @@
 
 			<GlobalSearch bind:this={search} {inventory} onpick={onSearchPick} />
 
+			<!-- Create actions collapse into one primary menu (vCenter keeps the global
+			     chrome to identity + search + tasks; creation is otherwise contextual via
+			     the tree's right-click menus). New VM pre-targets the current scope. -->
+			<HeaderMenu>
+				{#snippet trigger({ open, toggle })}
+					<button
+						onclick={toggle}
+						class="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-500"
+					>
+						<Plus size={14} /> New <ChevronDown
+							size={12}
+							class="transition-transform {open ? 'rotate-180' : ''}"
+						/>
+					</button>
+				{/snippet}
+				{#snippet children({ close })}
+					<button
+						onclick={() => {
+							close();
+							wizardNamespaces = scopeNamespaces;
+							showWizard = true;
+						}}
+						disabled={!namespaces.length}
+						title={namespaces.length ? '' : 'No project with a backing repo yet'}
+						class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+					>
+						<Server size={13} /> New VM
+					</button>
+					<button
+						onclick={() => {
+							close();
+							showNetworkWizard = true;
+						}}
+						disabled={!namespaces.length}
+						title="Create a Distributed Port Group (an internal Layer 2 network) for a project"
+						class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+					>
+						<Network size={13} /> New Network
+					</button>
+					<button
+						onclick={() => {
+							close();
+							showUpload = true;
+						}}
+						disabled={!namespaces.length}
+						title="Upload a disk image (qcow2/raw/iso) as a bootable DataVolume"
+						class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+					>
+						<Upload size={13} /> Upload Image
+					</button>
+					<div class="my-1 border-t border-slate-100"></div>
+					<button
+						onclick={() => {
+							close();
+							showProjectWizard = true;
+						}}
+						disabled={!canManage}
+						title={canManage
+							? 'Create a new tenant project (repo + first namespace)'
+							: 'Requires platform authoring permission'}
+						class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+					>
+						<FolderPlus size={13} /> New Project
+					</button>
+				{/snippet}
+			</HeaderMenu>
+
+			<!-- Changes: the GitOps staging cart — a notification-style indicator (badge =
+			     pending staged edits), not a peer of New, so it reads as an icon. -->
 			<button
 				onclick={() => {
 					showChanges = !showChanges;
 					if (showChanges) showCatalog = false;
 				}}
-				class="rounded border border-slate-600 px-3 py-1 text-xs font-medium text-slate-100 hover:bg-slate-700"
+				title="Changes — staged edits waiting to be proposed"
+				class="relative rounded p-1.5 hover:bg-slate-700 {showChanges
+					? 'bg-slate-700 text-white'
+					: 'text-slate-300'}"
 			>
-				Changes{#if draftCount > 0}<span class="ml-1 rounded-full bg-blue-500 px-1.5 text-white"
+				<ClipboardList size={16} />
+				{#if draftCount > 0}
+					<span
+						class="absolute -top-1 -right-1 rounded-full bg-blue-500 px-1 text-[10px] font-medium text-white"
 						>{draftCount}</span
-					>{/if}
+					>
+				{/if}
 			</button>
-			<button
-				onclick={() => {
-					showCatalog = !showCatalog;
-					if (showCatalog) showChanges = false;
-				}}
-				title="Browse the cluster's images, instance types, preferences, networks and storage classes"
-				class="rounded border border-slate-600 px-3 py-1 text-xs font-medium text-slate-100 hover:bg-slate-700"
-			>
-				Catalog
-			</button>
-			<button
-				onclick={() => (showProjectWizard = true)}
-				disabled={!canManage}
-				title={canManage
-					? 'Create a new tenant project (repo + first namespace)'
-					: 'Requires platform authoring permission'}
-				class="flex items-center gap-1.5 rounded border border-slate-600 px-3 py-1 text-xs font-medium text-slate-100 hover:bg-slate-700 disabled:opacity-40"
-			>
-				<FolderPlus size={14} /> New Project
-			</button>
-			<button
-				onclick={() => (showWizard = true)}
-				disabled={!inventory}
-				class="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-40"
-			>
-				<Plus size={14} /> New VM
-			</button>
-			<button
-				onclick={() => (showNetworkWizard = true)}
-				disabled={!namespaces.length}
-				title="Create a Distributed Port Group (an internal Layer 2 network) for a project"
-				class="flex items-center gap-1.5 rounded border border-slate-600 px-3 py-1 text-xs font-medium text-slate-100 hover:bg-slate-700 disabled:opacity-40"
-			>
-				<Network size={14} /> New Network
-			</button>
-			<button
-				onclick={() => (showUpload = true)}
-				disabled={!namespaces.length}
-				title="Upload a disk image (qcow2/raw/iso) as a bootable DataVolume"
-				class="flex items-center gap-1.5 rounded border border-slate-600 px-3 py-1 text-xs font-medium text-slate-100 hover:bg-slate-700 disabled:opacity-40"
-			>
-				<Upload size={14} /> Upload
-			</button>
-			<div class="text-xs text-slate-400">{vmCount} VMs</div>
-			<span class="text-slate-600">|</span>
-			<span class="text-xs text-slate-300" title={user.groups.join(', ')}>{user.username}</span>
-			<button onclick={logout} class="text-xs text-slate-400 hover:text-white">Sign out</button>
+
+			<HeaderMenu align="right" class="ml-auto">
+				{#snippet trigger({ open, toggle })}
+					<button
+						onclick={toggle}
+						class="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
+					>
+						<UserIcon size={14} />
+						{user?.username}
+						<ChevronDown size={12} class="transition-transform {open ? 'rotate-180' : ''}" />
+					</button>
+				{/snippet}
+				{#snippet children({ close })}
+					<div class="border-b border-slate-100 px-3 py-2">
+						<div class="font-medium text-slate-800">{user?.username}</div>
+						{#if user?.groups.length}
+							<div class="mt-0.5 text-[11px] break-words text-slate-400">
+								{user.groups.join(', ')}
+							</div>
+						{/if}
+					</div>
+					<div class="px-3 py-1.5 text-slate-500">{vmCount} VMs in view</div>
+					<div class="border-t border-slate-100"></div>
+					<button
+						onclick={() => {
+							close();
+							logout();
+						}}
+						class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50"
+					>
+						Sign out
+					</button>
+				{/snippet}
+			</HeaderMenu>
 		</header>
 
 		{#if error}
@@ -640,6 +730,11 @@
 						oncontextcontainer={(c, x, y) => (ctx = { x, y, kind: 'container', ...c })}
 						{canManage}
 						onattachrepo={(project, namespaces) => (adoptProjectTarget = { project, namespaces })}
+						catalogActive={showCatalog}
+						oncatalog={() => {
+							showCatalog = !showCatalog;
+							if (showCatalog) showChanges = false;
+						}}
 					/>
 				{/if}
 			</aside>
