@@ -92,6 +92,14 @@
 	// namespaces)? Gates the New VLAN / Add Uplink / New Namespace actions and the
 	// platform changeset, matching the backend platformScope SSAR gate.
 	const canManage = $derived(netInv?.canManage ?? false);
+	// Per-action authoring authority (each the same SSAR the backend create enforces),
+	// so a button is shown only when the caller can actually use it — not the coarse
+	// canManage. Undefined caps (older backend) read as false.
+	const caps = $derived(netInv?.caps);
+	const canNamespace = $derived(!!caps?.namespace);
+	const canUplink = $derived(!!caps?.uplink);
+	const canEgress = $derived(!!(caps?.egressIP || caps?.externalRoute));
+	const canAdminFw = $derived(!!caps?.adminNetworkPolicy);
 	// The synthetic platform-tier project (matches the backend's platformProjectName);
 	// holds the cluster-scoped network + namespace changeset, proposable by authors.
 	const PLATFORM_PROJECT = 'platform';
@@ -638,10 +646,10 @@
 							close();
 							showProjectWizard = true;
 						}}
-						disabled={!canManage}
-						title={canManage
+						disabled={!canNamespace}
+						title={canNamespace
 							? 'Create a new tenant project (repo + first namespace)'
-							: 'Requires platform authoring permission'}
+							: 'Requires permission to create namespaces'}
 						class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
 					>
 						<FolderPlus size={13} /> New Project
@@ -651,10 +659,10 @@
 							close();
 							showTier0 = true;
 						}}
-						disabled={!canManage}
-						title={canManage
+						disabled={!canEgress}
+						title={canEgress
 							? 'Add a Tier-0 provider-edge service (Source NAT or external route)'
-							: 'Requires platform authoring permission'}
+							: 'Requires permission to create EgressIPs or external routes'}
 						class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
 					>
 						<Radio size={13} /> New Tier-0 Service
@@ -664,10 +672,10 @@
 							close();
 							showAdminFw = true;
 						}}
-						disabled={!canManage}
-						title={canManage
+						disabled={!canAdminFw}
+						title={canAdminFw
 							? 'Add a cluster-wide admin firewall (AdminNetworkPolicy / Baseline)'
-							: 'Requires platform authoring permission'}
+							: 'Requires permission to create AdminNetworkPolicies'}
 						class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
 					>
 						<Shield size={13} /> New Admin Firewall
@@ -760,7 +768,7 @@
 				{:else if inventory.projects.length === 0}
 					<div class="space-y-3 p-6 text-center">
 						<p class="text-xs text-slate-400">No projects visible.</p>
-						{#if canManage}
+						{#if canNamespace}
 							<button
 								onclick={() => (showProjectWizard = true)}
 								class="inline-flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
@@ -998,8 +1006,8 @@
 												<h3 class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Uplinks</h3>
 												<button
 													onclick={() => (showUplinkWizard = true)}
-													disabled={!canManage}
-													title={canManage ? '' : 'Requires platform-network authoring permission'}
+													disabled={!canUplink}
+													title={canUplink ? '' : 'Requires permission to create node network policies'}
 													class="text-xs text-blue-600 hover:underline disabled:text-slate-300"
 													>+ Add uplink</button
 												>
@@ -1367,7 +1375,7 @@
 							class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
 							>New Security Policy…</button
 						>
-						{#if canManage}
+						{#if canNamespace}
 							<button
 								onclick={() => {
 									namespaceWizardProject = ctx && ctx.kind === 'container' ? ctx.project : null;

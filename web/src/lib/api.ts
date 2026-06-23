@@ -188,12 +188,21 @@ export interface PhysicalAdapter {
 	mtu?: number;
 	role?: string; // cluster-uplink | enslaved | available
 }
+export interface NetworkCaps {
+	sharedSegment: boolean; // shared / VLAN CUDN
+	uplink: boolean; // nmstate NNCP
+	namespace: boolean; // namespaces (New Project / Namespace)
+	egressIP: boolean; // Tier-0 SNAT
+	externalRoute: boolean; // Tier-0 external route
+	adminNetworkPolicy: boolean; // cluster-wide admin DFW (ANP/BANP)
+}
 export interface NetworkInventory {
 	networks: Network[];
 	uplinks: Uplink[];
 	physicalAdapters: PhysicalAdapter[];
 	nmstatePresent: boolean;
-	canManage: boolean; // caller may author platform-tier networking (CUDN/uplink/namespace)
+	canManage: boolean; // coarse "any platform authoring" (CUDN); gates the platform-draft view
+	caps?: NetworkCaps; // per-action authoring authority for precise button gating
 }
 
 export interface CreateVMRequest {

@@ -321,7 +321,22 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	// must be able to create cluster-scoped networks (the platform-operator signal,
 	// also satisfied by cluster-admins). Gates the New VLAN / Add Uplink / New
 	// Namespace actions, matching the platformScope gate the create routes enforce.
-	out.CanManage = s.cfg.PlatformRepo != "" && c.CanCreateClusterResource(r.Context(), "k8s.ovn.org", "clusteruserdefinednetworks")
+	// Per-action authoring authority: the same SSARs the create handlers enforce, so
+	// the UI gates each button precisely. CanManage stays the coarse CUDN signal that
+	// gates the platform-draft view. All false when no platform repo is configured.
+	if s.cfg.PlatformRepo != "" {
+		ctx := r.Context()
+		cudn := c.CanCreateClusterResource(ctx, "k8s.ovn.org", "clusteruserdefinednetworks")
+		out.CanManage = cudn
+		out.Caps = model.NetworkCaps{
+			SharedSegment:      cudn,
+			Uplink:             c.CanCreateClusterResource(ctx, "nmstate.io", "nodenetworkconfigurationpolicies"),
+			Namespace:          c.CanCreateClusterResource(ctx, "", "namespaces"),
+			EgressIP:           c.CanCreateClusterResource(ctx, "k8s.ovn.org", "egressips"),
+			ExternalRoute:      c.CanCreateClusterResource(ctx, "k8s.ovn.org", "adminpolicybasedexternalroutes"),
+			AdminNetworkPolicy: c.CanCreateClusterResource(ctx, "policy.networking.k8s.io", "adminnetworkpolicies"),
+		}
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
