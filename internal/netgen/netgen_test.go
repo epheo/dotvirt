@@ -261,3 +261,240 @@ func TestSharedCUDN(t *testing.T) {
 		t.Error("expected error when no namespaces are selected")
 	}
 }
+
+func TestEgressFirewallManifest(t *testing.T) {
+	path, content, err := EgressFirewallManifest(EgressFirewallSpec{
+		Namespace: "tenant-a",
+		Rules: []EgressRule{
+			{Action: "Allow", CIDR: "10.0.0.0/8"},
+			{Action: "Allow", DNSName: "registry.example.com", Ports: []EgressPort{{Protocol: "TCP", Port: 443}}},
+			{Action: "Deny", CIDR: "0.0.0.0/0"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "tenant-a/egressfirewalls/default.yaml" {
+		t.Errorf("path = %q", path)
+	}
+	y := string(content)
+	for _, want := range []string{
+		"kind: EgressFirewall",
+		"name: default", // OVN-K requires the singleton be named default
+		"namespace: tenant-a",
+		"type: Allow",
+		"cidrSelector: 10.0.0.0/8",
+		"dnsName: registry.example.com",
+		"protocol: TCP",
+		"port: 443",
+		"type: Deny",
+	} {
+		if !strings.Contains(y, want) {
+			t.Errorf("EgressFirewall missing %q:\n%s", want, y)
+		}
+	}
+}
+
+func TestEgressFirewallValidate(t *testing.T) {
+	rule := []EgressRule{{Action: "Allow", CIDR: "1.0.0.0/8"}}
+	if _, _, err := EgressFirewallManifest(EgressFirewallSpec{Rules: rule}); err == nil {
+		t.Error("expected error without a namespace")
+	}
+	if _, _, err := EgressFirewallManifest(EgressFirewallSpec{Namespace: "n"}); err == nil {
+		t.Error("expected error without rules")
+	}
+	// Exactly one destination per rule (XOR cidr/dnsName).
+	if _, _, err := EgressFirewallManifest(EgressFirewallSpec{Namespace: "n", Rules: []EgressRule{{Action: "Allow"}}}); err == nil {
+		t.Error("expected error when neither cidr nor dnsName is set")
+	}
+	if _, _, err := EgressFirewallManifest(EgressFirewallSpec{Namespace: "n", Rules: []EgressRule{{Action: "Allow", CIDR: "1.0.0.0/8", DNSName: "x"}}}); err == nil {
+		t.Error("expected error when both cidr and dnsName are set")
+	}
+	if _, _, err := EgressFirewallManifest(EgressFirewallSpec{Namespace: "n", Rules: []EgressRule{{Action: "Permit", CIDR: "1.0.0.0/8"}}}); err == nil {
+		t.Error("expected error for an action other than Allow/Deny")
+	}
+}
+
+func TestEgressIPManifest(t *testing.T) {
+	path, content, err := EgressIPManifest(EgressIPSpec{
+		Name: "team-a-snat", EgressIPs: []string{"192.0.2.10", "192.0.2.11"}, Namespaces: []string{"team-a"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "egressips/team-a-snat.yaml" {
+		t.Errorf("path = %q", path)
+	}
+	y := string(content)
+	for _, want := range []string{
+		"kind: EgressIP",
+		"name: team-a-snat",
+		"192.0.2.10",
+		"192.0.2.11",
+		"kubernetes.io/metadata.name",
+		"team-a",
+	} {
+		if !strings.Contains(y, want) {
+			t.Errorf("EgressIP missing %q:\n%s", want, y)
+		}
+	}
+	// Validation: name, IPs, and namespaces are all required.
+	if _, _, err := EgressIPManifest(EgressIPSpec{EgressIPs: []string{"1.1.1.1"}, Namespaces: []string{"n"}}); err == nil {
+		t.Error("expected error without a name")
+	}
+	if _, _, err := EgressIPManifest(EgressIPSpec{Name: "x", Namespaces: []string{"n"}}); err == nil {
+		t.Error("expected error without egress IPs")
+	}
+	if _, _, err := EgressIPManifest(EgressIPSpec{Name: "x", EgressIPs: []string{"1.1.1.1"}}); err == nil {
+		t.Error("expected error without namespaces")
+	}
+}
+
+func TestExternalRouteManifest(t *testing.T) {
+	path, content, err := ExternalRouteManifest(ExternalRouteSpec{
+		Name: "team-a-gw", Namespaces: []string{"team-a"}, NextHops: []string{"10.0.0.1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "externalroutes/team-a-gw.yaml" {
+		t.Errorf("path = %q", path)
+	}
+	y := string(content)
+	for _, want := range []string{
+		"kind: AdminPolicyBasedExternalRoute",
+		"name: team-a-gw",
+		"namespaceSelector",
+		"team-a",
+		"static:",
+		"ip: 10.0.0.1",
+	} {
+		if !strings.Contains(y, want) {
+			t.Errorf("AdminPolicyBasedExternalRoute missing %q:\n%s", want, y)
+		}
+	}
+	if _, _, err := ExternalRouteManifest(ExternalRouteSpec{Namespaces: []string{"n"}, NextHops: []string{"1.1.1.1"}}); err == nil {
+		t.Error("expected error without a name")
+	}
+	if _, _, err := ExternalRouteManifest(ExternalRouteSpec{Name: "x", NextHops: []string{"1.1.1.1"}}); err == nil {
+		t.Error("expected error without namespaces")
+	}
+	if _, _, err := ExternalRouteManifest(ExternalRouteSpec{Name: "x", Namespaces: []string{"n"}}); err == nil {
+		t.Error("expected error without next-hops")
+	}
+}
+
+func TestNetworkPolicyManifest(t *testing.T) {
+	path, content, err := NetworkPolicyManifest(NetworkPolicySpec{
+		Name: "web-allow-db", Namespace: "team-a",
+		AppliedTo: map[string]string{"app": "db"},
+		Ingress: []PolicyRule{
+			{From: []map[string]string{{"app": "web"}}, Ports: []PolicyPort{{Protocol: "TCP", Port: 5432}}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "team-a/networkpolicies/web-allow-db.yaml" {
+		t.Errorf("path = %q", path)
+	}
+	y := string(content)
+	for _, want := range []string{
+		"kind: NetworkPolicy",
+		"name: web-allow-db",
+		"namespace: team-a",
+		"policyTypes",
+		"Ingress",
+		"app: db",  // applied-to Group
+		"app: web", // peer Group
+		"port: 5432",
+	} {
+		if !strings.Contains(y, want) {
+			t.Errorf("NetworkPolicy missing %q:\n%s", want, y)
+		}
+	}
+}
+
+func TestNetworkPolicyWholeNamespace(t *testing.T) {
+	// No AppliedTo → an empty podSelector ({}) that selects every pod in the namespace.
+	_, content, err := NetworkPolicyManifest(NetworkPolicySpec{Name: "default-deny", Namespace: "team-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	y := string(content)
+	if !strings.Contains(y, "podSelector: {}") {
+		t.Errorf("expected an empty podSelector for a whole-namespace policy:\n%s", y)
+	}
+	// Name + namespace are required.
+	if _, _, err := NetworkPolicyManifest(NetworkPolicySpec{Name: "x"}); err == nil {
+		t.Error("expected error without a namespace")
+	}
+}
+
+func TestAdminNetworkPolicyManifest(t *testing.T) {
+	path, content, err := AdminNetworkPolicyManifest(AdminNetworkPolicySpec{
+		Name: "tenant-isolation", Priority: 10,
+		Subject: map[string]string{"tier": "prod"},
+		Ingress: []AdminPolicyRule{
+			{Action: "Pass", Peers: []map[string]string{{"tier": "prod"}}},
+			{Action: "Deny", Peers: []map[string]string{{}}, Ports: []PolicyPort{{Protocol: "TCP", Port: 22}}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "adminnetworkpolicies/tenant-isolation.yaml" {
+		t.Errorf("path = %q", path)
+	}
+	y := string(content)
+	for _, want := range []string{
+		"kind: AdminNetworkPolicy",
+		"name: tenant-isolation",
+		"priority: 10",
+		"action: Pass", // ANP-only action
+		"action: Deny",
+		"namespaces:",
+		"tier: prod",
+		"portNumber",
+		"port: 22",
+	} {
+		if !strings.Contains(y, want) {
+			t.Errorf("ANP missing %q:\n%s", want, y)
+		}
+	}
+}
+
+func TestBaselineAdminNetworkPolicy(t *testing.T) {
+	// A baseline policy is the singleton named "default", carries no priority, and
+	// rejects the Pass action.
+	path, content, err := AdminNetworkPolicyManifest(AdminNetworkPolicySpec{
+		Name: "ignored", Baseline: true, Priority: 99,
+		Ingress: []AdminPolicyRule{{Action: "Deny", Peers: []map[string]string{{}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "baselineadminnetworkpolicies/default.yaml" {
+		t.Errorf("path = %q", path)
+	}
+	y := string(content)
+	if !strings.Contains(y, "kind: BaselineAdminNetworkPolicy") || !strings.Contains(y, "name: default") {
+		t.Errorf("expected a BaselineAdminNetworkPolicy named default:\n%s", y)
+	}
+	if strings.Contains(y, "priority") {
+		t.Errorf("a baseline policy must not carry a priority:\n%s", y)
+	}
+	// Pass is not a valid baseline action.
+	if _, _, err := AdminNetworkPolicyManifest(AdminNetworkPolicySpec{
+		Baseline: true, Ingress: []AdminPolicyRule{{Action: "Pass", Peers: []map[string]string{{}}}},
+	}); err == nil {
+		t.Error("expected error for a Pass action in a baseline policy")
+	}
+	// ANP requires a name and a valid priority.
+	if _, _, err := AdminNetworkPolicyManifest(AdminNetworkPolicySpec{Priority: 5}); err == nil {
+		t.Error("expected error for an ANP without a name")
+	}
+	if _, _, err := AdminNetworkPolicyManifest(AdminNetworkPolicySpec{Name: "x", Priority: 2000}); err == nil {
+		t.Error("expected error for an out-of-range priority")
+	}
+}

@@ -243,6 +243,64 @@ export interface UplinkCreate {
 	bridge?: string; // OVS bridge; default br-<name>
 	nodeSelector?: Record<string, string>; // node labels; omit = all workers, or {kubernetes.io/hostname: <node>}
 }
+// EgressFirewall — a namespace's north-south egress rules (the Tier-1 gateway
+// firewall). One per namespace (named "default" server-side); rules are first-match.
+export interface EgressFirewallPort {
+	protocol: 'TCP' | 'UDP' | 'SCTP';
+	port: number;
+}
+export interface EgressFirewallRule {
+	action: 'Allow' | 'Deny';
+	cidr?: string; // set exactly one of cidr / dnsName
+	dnsName?: string;
+	ports?: EgressFirewallPort[];
+}
+export interface EgressFirewallCreate {
+	namespace: string;
+	rules: EgressFirewallRule[];
+}
+// Tier-0 (provider-edge) services — cluster-scoped, platform-routed.
+export interface EgressIPCreate {
+	name: string;
+	egressIPs: string[]; // the source-NAT pool
+	namespaces: string[]; // projects it pins egress for
+}
+export interface ExternalRouteCreate {
+	name: string;
+	namespaces: string[]; // projects whose egress is steered
+	nextHops: string[]; // static external next-hop IPs
+}
+// Distributed Firewall (east-west) — a NetworkPolicy protecting a Group (a label
+// selector) inside one namespace, allowing ingress only from the named peer Groups.
+export interface PolicyPort {
+	protocol: 'TCP' | 'UDP' | 'SCTP';
+	port: number;
+}
+export interface PolicyRule {
+	from?: Record<string, string>[]; // peer Groups (podSelector matchLabels)
+	ports?: PolicyPort[];
+}
+export interface NetworkPolicyCreate {
+	name: string;
+	namespace: string;
+	appliedTo?: Record<string, string>; // the Group this protects; empty = whole namespace
+	ingress?: PolicyRule[];
+}
+// Cluster-wide admin Distributed Firewall — AdminNetworkPolicy (priority + Pass) or
+// the BaselineAdminNetworkPolicy default (Allow/Deny only). Platform-tier, admin-only.
+export interface AdminPolicyRule {
+	action: 'Allow' | 'Deny' | 'Pass';
+	peers: Record<string, string>[]; // peer Groups (namespaceSelector matchLabels; {} = all)
+	ports?: PolicyPort[];
+}
+export interface AdminNetworkPolicyCreate {
+	name: string;
+	baseline?: boolean; // a BaselineAdminNetworkPolicy (the singleton "default")
+	priority?: number; // 0..1000, lower = higher precedence (ANP only)
+	subject?: Record<string, string>; // namespaceSelector matchLabels; empty = all namespaces
+	ingress?: AdminPolicyRule[];
+	egress?: AdminPolicyRule[];
+}
 export interface NamespaceCreate {
 	name: string;
 	project: string; // the project the namespace joins (its repo)
@@ -476,6 +534,12 @@ export const api = {
 	stageCreate: (req: CreateVMRequest) => post<DraftView>('/api/vms', req),
 	createNetwork: (req: NetworkCreate) => post<DraftView>('/api/networks', req),
 	createUplink: (req: UplinkCreate) => post<DraftView>('/api/uplinks', req),
+	createEgressFirewall: (req: EgressFirewallCreate) => post<DraftView>('/api/egressfirewalls', req),
+	createEgressIP: (req: EgressIPCreate) => post<DraftView>('/api/egressips', req),
+	createExternalRoute: (req: ExternalRouteCreate) => post<DraftView>('/api/externalroutes', req),
+	createNetworkPolicy: (req: NetworkPolicyCreate) => post<DraftView>('/api/networkpolicies', req),
+	createAdminNetworkPolicy: (req: AdminNetworkPolicyCreate) =>
+		post<DraftView>('/api/adminnetworkpolicies', req),
 	createNamespace: (req: NamespaceCreate) => post<DraftView>('/api/namespaces', req),
 	createProject: (req: ProjectCreate) => post<DraftView>('/api/projects', req),
 	stageDelete: (namespace: string, name: string) =>

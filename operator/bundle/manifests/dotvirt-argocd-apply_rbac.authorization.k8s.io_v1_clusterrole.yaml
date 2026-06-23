@@ -24,6 +24,9 @@ rules:
   resources:
   - userdefinednetworks
   - clusteruserdefinednetworks
+  - egressfirewalls
+  - egressips
+  - adminpolicybasedexternalroutes
   verbs:
   - get
   - list
@@ -48,6 +51,31 @@ rules:
   - nmstate.io
   resources:
   - nodenetworkconfigurationpolicies
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - networkpolicies
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - policy.networking.k8s.io
+  resources:
+  - adminnetworkpolicies
+  - baselineadminnetworkpolicies
   verbs:
   - get
   - list
