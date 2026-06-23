@@ -6,6 +6,7 @@
 		Folder,
 		Layers,
 		LayoutGrid,
+		Library,
 		Network,
 		Pencil,
 		Server,
@@ -38,11 +39,13 @@
 		staged,
 		networks = [],
 		canManage = false,
+		catalogActive = false,
 		onselect,
 		onscope,
 		oncontextvm,
 		oncontextcontainer,
-		onattachrepo
+		onattachrepo,
+		oncatalog
 	}: {
 		inventory: Inventory;
 		selected: VM | null;
@@ -50,6 +53,7 @@
 		staged: Map<string, DraftItem>;
 		networks?: PortGroup[]; // port-group catalog, for friendly Networks-lens grouping
 		canManage?: boolean; // gates the platform-tier "Attach repo" CTA on repoless projects
+		catalogActive?: boolean; // highlights the pinned Catalog entry while its panel is open
 		onselect: (vm: VM) => void;
 		onscope: (s: Scope) => void;
 		oncontextvm?: (vm: VM, x: number, y: number) => void;
@@ -59,6 +63,7 @@
 			y: number
 		) => void;
 		onattachrepo?: (project: string, namespaces: string[]) => void;
+		oncatalog?: () => void; // opens the cluster resource catalog (a destination, not a scope)
 	} = $props();
 
 	function ctxVM(e: MouseEvent, vm: VM) {
@@ -172,6 +177,22 @@
 {/snippet}
 
 <div class="select-none text-[13px]">
+	<!-- Catalog: a pinned destination (cluster images, instance types, networks,
+	     storage classes) — vCenter parks its Content Libraries in the left nav, above
+	     the inventory lenses. Opens the catalog panel rather than re-scoping the grid. -->
+	{#if oncatalog}
+		<button
+			class="flex w-full items-center gap-1 border-b border-slate-200 px-2 py-1.5 text-left hover:bg-slate-100
+				{catalogActive ? 'bg-blue-50' : ''}"
+			onclick={oncatalog}
+			title="Browse the cluster's images, instance types, preferences, networks and storage classes"
+		>
+			<span class="w-3"></span>
+			<Library size={14} class="text-slate-400" />
+			<span class="font-semibold text-slate-700">Catalog</span>
+		</button>
+	{/if}
+
 	<!-- Lens switch (one object set, four organizing views). -->
 	<div class="flex flex-wrap gap-1 border-b border-slate-200 px-2 py-1.5">
 		{#each LENSES as l (l.id)}
