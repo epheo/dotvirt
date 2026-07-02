@@ -15,6 +15,8 @@ package install
 import (
 	"context"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -38,6 +40,19 @@ func Labels(instance string) map[string]string {
 		"app.kubernetes.io/managed-by": FieldManager,
 		"dotvirt.io/instance":          instance,
 	}
+}
+
+// unstructuredObject renders a labeled unstructured object with the given spec —
+// the shared shape for the kinds the operator applies without importing their API
+// module (the argoproj.io resources, the OpenShift Route).
+func unstructuredObject(gvk schema.GroupVersionKind, name, namespace, instance string, spec map[string]any) *unstructured.Unstructured {
+	u := &unstructured.Unstructured{Object: map[string]any{}}
+	u.SetGroupVersionKind(gvk)
+	u.SetName(name)
+	u.SetNamespace(namespace)
+	u.SetLabels(Labels(instance))
+	u.Object["spec"] = spec
+	return u
 }
 
 // Apply server-side-applies obj with the operator's field manager, force-owning the

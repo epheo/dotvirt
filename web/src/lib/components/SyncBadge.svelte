@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { X } from 'lucide-svelte';
 	import type { SyncStatus } from '$lib/api';
+	import Modal from './Modal.svelte';
 	let {
 		sync,
 		error = '',
@@ -12,7 +12,12 @@
 		{
 			Synced: { bg: 'bg-green-100', fg: 'text-green-700', label: 'Synced', dot: 'bg-green-500' },
 			OutOfSync: { bg: 'bg-red-100', fg: 'text-red-700', label: 'OutOfSync', dot: 'bg-red-500' },
-			NotTracked: { bg: 'bg-slate-100', fg: 'text-slate-500', label: 'Not tracked', dot: 'bg-slate-300' },
+			NotTracked: {
+				bg: 'bg-slate-100',
+				fg: 'text-slate-500',
+				label: 'Not tracked',
+				dot: 'bg-slate-300'
+			},
 			Unknown: { bg: 'bg-slate-100', fg: 'text-slate-500', label: 'Unknown', dot: 'bg-slate-300' }
 		}[sync]
 	);
@@ -60,31 +65,19 @@
 {/if}
 
 {#if open}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-		onclick={(e) => e.target === e.currentTarget && (open = false)}
-		onkeydown={(e) => e.key === 'Escape' && (open = false)}
-		role="presentation"
-	>
-		<div class="w-full max-w-lg rounded-lg bg-white shadow-xl">
-			<header class="flex items-center justify-between border-b border-slate-200 px-4 py-2.5">
-				<h3 class="flex items-center gap-2 text-sm font-semibold text-slate-800">
-					<span class="inline-block h-2 w-2 rounded-full {style.dot}"></span>
-					Sync detail — {style.label}
-				</h3>
-				<button onclick={() => (open = false)} aria-label="Close" class="text-slate-400 hover:text-slate-700"><X size={16} /></button>
-			</header>
-			<div class="px-4 py-3 text-sm">
-				{#if error}
-					<p class="mb-2 text-slate-600">ArgoCD could not apply this object:</p>
-					<pre class="max-h-72 overflow-auto rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
-				{:else}
-					<p class="text-slate-600">
-						This object differs from git and ArgoCD hasn't applied the latest change yet. No
-						apply error was reported — it's likely mid-sync or awaiting the next reconcile.
-					</p>
-				{/if}
-			</div>
+	<Modal title="Sync detail — {style.label}" size="lg" onclose={() => (open = false)}>
+		{#snippet icon()}<span class="inline-block h-2 w-2 rounded-full {style.dot}"></span>{/snippet}
+		<div class="px-4 py-3 text-sm">
+			{#if error}
+				<p class="mb-2 text-slate-600">ArgoCD could not apply this object:</p>
+				<pre
+					class="max-h-72 overflow-auto rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+			{:else}
+				<p class="text-slate-600">
+					This object differs from git and ArgoCD hasn't applied the latest change yet. No apply
+					error was reported — it's likely mid-sync or awaiting the next reconcile.
+				</p>
+			{/if}
 		</div>
-	</div>
+	</Modal>
 {/if}

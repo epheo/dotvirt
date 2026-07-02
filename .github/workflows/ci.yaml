@@ -71,6 +71,17 @@ jobs:
           sudo chmod +x /usr/local/bin/operator-sdk
           operator-sdk bundle validate ./operator/bundle --select-optional suite=operatorframework
           go run "github.com/operator-framework/operator-registry/cmd/opm@$OPM_VERSION" validate operator/catalog
+      - name: Committed bundle in sync
+        # operator/bundle is generated from operator/config by `make bundle`, and nothing
+        # else keeps them in sync — regenerate at the committed CSV's version and fail on
+        # drift. createdAt is a generation timestamp, not content, so it's ignored (the
+        # community-operators pipelines do the same). Uses the operator-sdk installed above.
+        run: |
+          VERSION="$(go run "github.com/mikefarah/yq/v4@$YQ_VERSION" '.spec.version' operator/bundle/manifests/dotvirt-operator.clusterserviceversion.yaml)"
+          make -C operator bundle VERSION="$VERSION"
+          git add -N operator # so newly generated files show in the diff
+          git diff --exit-code -I'^    createdAt:' -- operator \
+            || { echo "::error::stale bundle — run 'make -C operator bundle VERSION=$VERSION' and commit"; exit 1; }
 
   # Install the bundle on a throwaway kind cluster via OLM (à la community-operators
   # CI) + run scorecard, so a bundle that won't install fails the PR. Uses public

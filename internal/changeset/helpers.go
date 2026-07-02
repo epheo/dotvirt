@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/epheo/dotvirt/internal/manifest"
@@ -110,7 +112,9 @@ func powerWord(running bool) string {
 
 // editToMatch builds a VMEdit that transforms `from` (e.g. main/desired) into
 // `to` (e.g. running/actual) for the scalar + label + disk/network fields dotvirt
-// edits. Used by Adopt to propose the live state into git.
+// edits. Used by Adopt to propose the live state into git. Fields derived from
+// map walks are built in sorted key order so the edit — and the YAML it stages —
+// is deterministic.
 func editToMatch(from, to model.VM) manifest.VMEdit {
 	var edit manifest.VMEdit
 	if from.Power != to.Power && to.Power != model.PowerUnknown {
@@ -144,7 +148,7 @@ func editToMatch(from, to model.VM) manifest.VMEdit {
 	if len(set) > 0 {
 		edit.SetLabels = set
 	}
-	for k := range from.Labels {
+	for _, k := range slices.Sorted(maps.Keys(from.Labels)) {
 		if _, ok := to.Labels[k]; !ok {
 			edit.RemoveLabels = append(edit.RemoveLabels, k)
 		}
@@ -152,23 +156,23 @@ func editToMatch(from, to model.VM) manifest.VMEdit {
 
 	// Disks/networks present only in `to` are added; only in `from` are removed.
 	fromDisks, toDisks := diskNameSet(from), diskNameSet(to)
-	for name, size := range toDisks {
+	for _, name := range slices.Sorted(maps.Keys(toDisks)) {
 		if _, ok := fromDisks[name]; !ok {
-			edit.AddDisks = append(edit.AddDisks, model.DiskAdd{Name: name, Size: size})
+			edit.AddDisks = append(edit.AddDisks, model.DiskAdd{Name: name, Size: toDisks[name]})
 		}
 	}
-	for name := range fromDisks {
+	for _, name := range slices.Sorted(maps.Keys(fromDisks)) {
 		if _, ok := toDisks[name]; !ok {
 			edit.RemoveDisks = append(edit.RemoveDisks, name)
 		}
 	}
 	fromNets, toNets := nicNameSet(from), nicNameSet(to)
-	for name, net := range toNets {
+	for _, name := range slices.Sorted(maps.Keys(toNets)) {
 		if _, ok := fromNets[name]; !ok {
-			edit.AddNetworks = append(edit.AddNetworks, model.NetworkAdd{Name: net})
+			edit.AddNetworks = append(edit.AddNetworks, model.NetworkAdd{Name: toNets[name]})
 		}
 	}
-	for name := range fromNets {
+	for _, name := range slices.Sorted(maps.Keys(fromNets)) {
 		if _, ok := toNets[name]; !ok {
 			edit.RemoveNetworks = append(edit.RemoveNetworks, name)
 		}

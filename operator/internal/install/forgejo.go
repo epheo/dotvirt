@@ -6,11 +6,8 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
@@ -35,11 +32,15 @@ const (
 	ForgejoBotUser     = "dotvirt-bot" // the service user the operator mints a token for
 )
 
+// ForgejoHTTPPort is the managed Forgejo's single HTTP port — the one source for
+// its Service, the container port and probes, and every URL/exposure built to it.
+const ForgejoHTTPPort int32 = 3000
+
 var forgejoSelector = map[string]string{"app": ForgejoServiceName}
 
 // ForgejoServiceURL is the in-cluster base URL of the managed Forgejo.
 func ForgejoServiceURL(dv *dotvirtv1alpha1.Dotvirt) string {
-	return svcURL(ForgejoServiceName, dv.Namespace, 3000)
+	return svcURL(ForgejoServiceName, dv.Namespace, ForgejoHTTPPort)
 }
 
 // ForgejoExternalURL is the browser/clone-facing base URL: the configured
@@ -96,7 +97,7 @@ func ForgejoService(dv *dotvirtv1alpha1.Dotvirt) *corev1.Service {
 		ObjectMeta: objectMeta(ForgejoServiceName, dv.Namespace, dv.Name),
 		Spec: corev1.ServiceSpec{
 			Selector: forgejoSelector,
-			Ports:    []corev1.ServicePort{{Name: "http", Port: 3000, TargetPort: intstr.FromInt32(3000)}},
+			Ports:    []corev1.ServicePort{{Name: "http", Port: ForgejoHTTPPort, TargetPort: intstr.FromInt32(ForgejoHTTPPort)}},
 		},
 	}
 }
@@ -189,15 +190,15 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 						Name:         "forgejo",
 						Image:        forgejoImg,
 						Env:          forgejoEnv(dv),
-						Ports:        []corev1.ContainerPort{{Name: "http", ContainerPort: 3000}},
+						Ports:        []corev1.ContainerPort{{Name: "http", ContainerPort: ForgejoHTTPPort}},
 						VolumeMounts: []corev1.VolumeMount{dataMount, etcMount},
 						ReadinessProbe: &corev1.Probe{
-							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(3000)}},
+							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(ForgejoHTTPPort)}},
 							InitialDelaySeconds: 8,
 							PeriodSeconds:       5,
 						},
 						LivenessProbe: &corev1.Probe{
-							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(3000)}},
+							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(ForgejoHTTPPort)}},
 							InitialDelaySeconds: 30,
 							PeriodSeconds:       20,
 						},
@@ -243,55 +244,5 @@ func forgejoContainerSecurityContext() *corev1.SecurityContext {
 	return &corev1.SecurityContext{
 		AllowPrivilegeEscalation: &noPrivilegeEscalation,
 		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
-	}
-}
-
-// ForgejoRoute exposes the managed Forgejo externally on OpenShift (edge TLS), so
-// the forge UI + PRs are reviewable in a browser and the repos are clonable
-// off-cluster. Mirrors the app Route; targets Forgejo's http port.
-func ForgejoRoute(dv *dotvirtv1alpha1.Dotvirt, host string) *unstructured.Unstructured {
-	spec := map[string]any{
-		"to":   map[string]any{"kind": "Service", "name": ForgejoServiceName},
-		"port": map[string]any{"targetPort": "http"},
-		"tls":  map[string]any{"termination": "edge", "insecureEdgeTerminationPolicy": "Redirect"},
-	}
-	if host != "" {
-		spec["host"] = host
-	}
-	u := &unstructured.Unstructured{Object: map[string]any{}}
-	u.SetGroupVersionKind(schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"})
-	u.SetName(ForgejoServiceName)
-	u.SetNamespace(dv.Namespace)
-	u.SetLabels(Labels(dv.Name))
-	u.Object["spec"] = spec
-	return u
-}
-
-// ForgejoIngress exposes the managed Forgejo on vanilla Kubernetes. TLS is left to
-// the cluster's ingress controller / cert-manager.
-func ForgejoIngress(dv *dotvirtv1alpha1.Dotvirt, host string) *networkingv1.Ingress {
-	pathType := networkingv1.PathTypePrefix
-	return &networkingv1.Ingress{
-		TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "Ingress"},
-		ObjectMeta: objectMeta(ForgejoServiceName, dv.Namespace, dv.Name),
-		Spec: networkingv1.IngressSpec{
-			Rules: []networkingv1.IngressRule{{
-				Host: host,
-				IngressRuleValue: networkingv1.IngressRuleValue{
-					HTTP: &networkingv1.HTTPIngressRuleValue{
-						Paths: []networkingv1.HTTPIngressPath{{
-							Path:     "/",
-							PathType: &pathType,
-							Backend: networkingv1.IngressBackend{
-								Service: &networkingv1.IngressServiceBackend{
-									Name: ForgejoServiceName,
-									Port: networkingv1.ServiceBackendPort{Number: 3000},
-								},
-							},
-						}},
-					},
-				},
-			}},
-		},
 	}
 }

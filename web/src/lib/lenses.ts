@@ -4,6 +4,16 @@
 import type { Network, VM } from '$lib/api';
 import { resolveNIC } from '$lib/networks';
 
+// vCenter model: the tree is a scope selector, the center pane is the VM grid.
+// Every inventory level the tree can focus is one of these.
+export type Scope =
+	| { kind: 'all' }
+	| { kind: 'project'; project: string }
+	| { kind: 'namespace'; project: string; namespace: string }
+	| { kind: 'node'; node: string }
+	| { kind: 'network'; network: string }
+	| { kind: 'storage'; storageClass: string };
+
 export const NO_NETWORK = '(no network)';
 export const POD_NETWORK = 'Pod network';
 export const NO_STORAGE = '(no provisioned storage)';
