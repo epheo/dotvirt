@@ -41,7 +41,7 @@ func ApplicationSet(dv *dotvirtv1alpha1.Dotvirt, argoNS string) *unstructured.Un
 			},
 		},
 	}
-	spec := map[string]any{
+	return argoObject("ApplicationSet", ApplicationSetName, argoNS, dv.Name, map[string]any{
 		"goTemplate":        true,
 		"goTemplateOptions": []any{"missingkey=error"},
 		// Renaming generated apps prunes the old ones; preserve their resources so a
@@ -55,14 +55,7 @@ func ApplicationSet(dv *dotvirtv1alpha1.Dotvirt, argoNS string) *unstructured.Un
 			}},
 		},
 		"template": template,
-	}
-	u := &unstructured.Unstructured{Object: map[string]any{}}
-	u.SetGroupVersionKind(ArgoGVK("ApplicationSet"))
-	u.SetName(ApplicationSetName)
-	u.SetNamespace(argoNS)
-	u.SetLabels(Labels(dv.Name))
-	u.Object["spec"] = spec
-	return u
+	})
 }
 
 // AppsetPluginConfigMap tells the plugin generator where to reach dotvirt's

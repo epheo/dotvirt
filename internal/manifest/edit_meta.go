@@ -6,10 +6,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// applyMetadata upserts/removes labels and annotations under metadata.
+// applyMetadata upserts/removes labels under metadata.
 func applyMetadata(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) {
-	if len(edit.SetLabels) == 0 && len(edit.RemoveLabels) == 0 &&
-		len(edit.SetAnnotations) == 0 && len(edit.RemoveAnnotations) == 0 {
+	if len(edit.SetLabels) == 0 && len(edit.RemoveLabels) == 0 {
 		return
 	}
 	meta := get(vmRoot, "metadata")
@@ -17,12 +16,10 @@ func applyMetadata(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) {
 		return
 	}
 	applyMapEdits(ed, meta, "labels", edit.SetLabels, edit.RemoveLabels)
-	applyMapEdits(ed, meta, "annotations", edit.SetAnnotations, edit.RemoveAnnotations)
 }
 
-// applyMapEdits sets and removes keys within a string-map field (labels or
-// annotations) of a parent mapping, creating the field if a set is requested and
-// it's absent.
+// applyMapEdits sets and removes keys within a string-map field (e.g. labels) of
+// a parent mapping, creating the field if a set is requested and it's absent.
 func applyMapEdits(ed *lineEditor, parent *yaml.Node, field string, set map[string]string, remove []string) {
 	if len(set) == 0 && len(remove) == 0 {
 		return
@@ -33,20 +30,21 @@ func applyMapEdits(ed *lineEditor, parent *yaml.Node, field string, set map[stri
 		if len(set) == 0 {
 			return // nothing to remove from a non-existent map
 		}
-		// Create the field with the set entries.
+		// Create the field with the set entries, in sorted key order so the
+		// written YAML is deterministic and matches the (sorted) preview.
 		block := []string{field + ":"}
-		for k, v := range set {
-			block = append(block, "  "+quoteKey(k)+": "+v)
+		for _, k := range sortedKeys(set) {
+			block = append(block, "  "+quoteKey(k)+": "+set[k])
 		}
 		ed.insertBlock(parent, block)
 		return
 	}
 
-	for k, v := range set {
+	for _, k := range sortedKeys(set) {
 		if existing := get(m, k); existing != nil {
-			ed.setScalarAt(existing, v)
+			ed.setScalarAt(existing, set[k])
 		} else {
-			ed.insertChild(m, quoteKey(k), v)
+			ed.insertChild(m, quoteKey(k), set[k])
 		}
 	}
 	for _, k := range remove {

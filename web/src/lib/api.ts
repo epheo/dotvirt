@@ -70,8 +70,8 @@ export interface User {
 	groups: string[];
 }
 
-// Unauthorized is thrown when a call returns 401, so the UI can drop to the login
-// screen from anywhere.
+// Unauthorized is thrown when a call returns 401, so a caller can suppress its
+// own error rendering; the sign-out itself is handled centrally (below).
 export class Unauthorized extends Error {
 	constructor() {
 		super('unauthorized');
@@ -79,9 +79,21 @@ export class Unauthorized extends Error {
 	}
 }
 
+// The one signed-out sink: every 401 funnels through req(), so the page
+// registers a single handler here instead of each fetching component
+// remembering to report it. The WebSocket paths (streamInventory, VNC) don't
+// go through req and take their own onUnauthorized callback.
+let unauthorizedSink: (() => void) | undefined;
+export function onUnauthorized(fn: () => void) {
+	unauthorizedSink = fn;
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
 	const res = await fetch(path, { credentials: 'same-origin', ...init });
-	if (res.status === 401) throw new Unauthorized();
+	if (res.status === 401) {
+		unauthorizedSink?.();
+		throw new Unauthorized();
+	}
 	if (!res.ok) throw new Error(`${path}: ${res.status} ${await res.text()}`);
 	if (res.status === 204) return undefined as T;
 	return res.json() as Promise<T>;
@@ -587,7 +599,9 @@ export async function draftsByProject(
 			}
 		})
 	);
-	return results.filter((r): r is { project: string; draft: DraftView } => !!r && r.draft.count > 0);
+	return results.filter(
+		(r): r is { project: string; draft: DraftView } => !!r && r.draft.count > 0
+	);
 }
 
 /**

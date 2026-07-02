@@ -19,17 +19,9 @@
 		ProjectNamespace,
 		VM
 	} from '$lib/api';
-	import { vmNetworkKeys, vmStorageKeys } from '$lib/lenses';
+	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
 	import PowerDot from './PowerDot.svelte';
 	import SyncBadge from './SyncBadge.svelte';
-
-	type Scope =
-		| { kind: 'all' }
-		| { kind: 'project'; project: string }
-		| { kind: 'namespace'; project: string; namespace: string }
-		| { kind: 'node'; node: string }
-		| { kind: 'network'; network: string }
-		| { kind: 'storage'; storageClass: string };
 
 	let {
 		inventory,

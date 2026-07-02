@@ -74,6 +74,11 @@ type DotvirtReconciler struct {
 // resources, which a namespaced CR can't garbage-collect via ownerReferences.
 const dotvirtFinalizer = "dotvirt.io/finalizer"
 
+// reconcilePhase is one step of the install pipeline. It owns one status condition,
+// and halts the reconcile by returning a non-nil result (carrying any requeue) or
+// an error; (nil, nil) hands off to the next phase.
+type reconcilePhase func(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error)
+
 // Reconcile drives the install in order, recording a status condition per step so a
 // stuck install is legible from `kubectl get dotvirt` / `describe`.
 func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -85,19 +90,8 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	log.Info("reconciling dotvirt install", "platform", r.Platform)
 
-	// Being deleted: clean up the label-tracked cluster/ArgoCD-namespace resources
-	// (the ones not owner-referenceable), then drop the finalizer.
 	if !dv.DeletionTimestamp.IsZero() {
-		if !r.DryRun && controllerutil.ContainsFinalizer(&dv, dotvirtFinalizer) {
-			if err := r.cleanupClusterResources(ctx, &dv); err != nil {
-				return ctrl.Result{}, err
-			}
-			controllerutil.RemoveFinalizer(&dv, dotvirtFinalizer)
-			if err := r.Update(ctx, &dv); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, r.finalize(ctx, &dv)
 	}
 	// Ensure the finalizer is present before provisioning anything cluster-scoped.
 	// Skipped under -dry-run so a validation run mutates nothing (and the CR stays
@@ -108,160 +102,24 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
-	// Dependencies: ArgoCD + KubeVirt are hard PREREQUISITES we never install; if
-	// either is absent, record why and requeue (the admin may install the prereq
-	// operator). OVN-K/NMState/CDI are soft — note them and proceed.
-	depRes, err := deps.Probe(r.Config)
-	if err != nil {
-		log.Error(err, "dependency probe failed")
-	}
-	if len(depRes.MissingHard) > 0 {
-		r.setCondition(&dv, dotvirtv1alpha1.ConditionDependenciesReady, metav1.ConditionFalse, "MissingPrerequisite", depRes.Summary())
-		dv.Status.Phase = "BlockedOnDependencies"
-		dv.Status.ObservedGeneration = dv.Generation
-		if uerr := r.Status().Update(ctx, &dv); uerr != nil {
-			return ctrl.Result{}, uerr
-		}
-		return ctrl.Result{RequeueAfter: time.Minute}, nil
-	}
-	r.setCondition(&dv, dotvirtv1alpha1.ConditionDependenciesReady, metav1.ConditionTrue, "Satisfied", depRes.Summary())
-
-	// Managed Forgejo (opt-in, eval-grade): stand up + bootstrap a self-hosted forge
-	// before anything that needs the forge credential. Once dotvirt-forge exists, the
-	// rest of the install can't tell it from a BYO forge.
-	if dv.Spec.Forge.Managed {
-		if err := r.applyForgejo(ctx, &dv); err != nil {
-			return r.failPhase(ctx, &dv, dotvirtv1alpha1.ConditionForgeReady, "ApplyFailed", err)
-		}
-		switch {
-		case r.DryRun:
-			r.setCondition(&dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionUnknown, "DryRun", "skipped Forgejo bootstrap in dry-run")
-		default:
-			ready, err := r.bootstrapForgejo(ctx, &dv)
-			if err != nil {
-				return r.failPhase(ctx, &dv, dotvirtv1alpha1.ConditionForgeReady, "Error", err)
-			}
-			if !ready {
-				r.setCondition(&dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "Progressing", "waiting for Forgejo to come up")
-				dv.Status.Phase = "Provisioning"
-				if uerr := r.Status().Update(ctx, &dv); uerr != nil {
-					return ctrl.Result{}, uerr
-				}
-				return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-			}
-			r.setCondition(&dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionTrue, "Ready", "managed Forgejo bootstrapped")
-		}
-	}
-
-	// Generated secrets (create-once — never regenerated on re-reconcile, so the
-	// cookie key + plugin token survive restarts): the session key and the
-	// ApplicationSet plugin token. The forge credential is supplied by the admin
-	// (spec.forge.credentialsSecret) or, later, by the managed-Forgejo bootstrap.
-	if !r.DryRun {
-		for _, s := range []struct{ name, key string }{
-			{install.SessionSecretName, "secret"},
-			{install.AppsetSecretName, "token"},
-			{install.WebhookSecretName, "secret"},
-			{install.ArgoWebhookSecretName, "secret"},
-		} {
-			if err := r.ensureSecret(ctx, &dv, s.name, s.key); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-	}
-
-	// Namespaced workload: render + server-side-apply, owner-referenced to this CR
-	// for automatic GC (unlike the cluster-scoped resources below, which a
-	// namespaced CR can't own — those rely on the finalizer).
-	nsObjs := []client.Object{
-		install.ServiceAccount(&dv),
-		install.DraftsPVC(&dv),
-		install.Service(&dv),
-		install.Deployment(&dv),
-	}
-	if exposure := r.exposure(&dv); exposure != nil {
-		nsObjs = append(nsObjs, exposure)
-	}
-	for _, obj := range nsObjs {
-		if err := controllerutil.SetControllerReference(&dv, obj, r.Scheme); err != nil {
+	// The install pipeline, in dependency order. A phase that halts (requeue or
+	// error) has already recorded why; a completed pass falls through to the Ready
+	// status write below.
+	for _, phase := range []reconcilePhase{
+		r.reconcileDependencies,
+		r.reconcileForge,
+		r.reconcileSecrets,
+		r.reconcileWorkload,
+		r.reconcileArgo,
+		r.reconcilePlatformRepo,
+		r.reconcileArgoWebhook,
+	} {
+		res, err := phase(ctx, &dv)
+		if err != nil {
 			return ctrl.Result{}, err
 		}
-		if err := install.Apply(ctx, r.Client, obj, r.DryRun); err != nil {
-			return r.failPhase(ctx, &dv, dotvirtv1alpha1.ConditionAvailable, "ApplyFailed", err)
-		}
-	}
-
-	// Cluster-scoped + ArgoCD-namespace resources: the RBAC BINDINGS wiring the static
-	// operand ClusterRoles (config/rbac/operand_roles.yaml, OLM/kustomize-owned) to the
-	// dotvirt SA / Argo controller / platform-admins, plus the AppProject tier (+ the
-	// static platform Application). Not owner-referenceable by a namespaced CR, so they
-	// carry managed-by labels and the finalizer cleans them up.
-	argoNS, argoSA := r.argoTarget(&dv)
-	platformRepo := dv.Spec.Forge.PlatformRepo
-	// The plugin generator reads the appset token from the ArgoCD namespace, so
-	// mirror the generated one there (create-once).
-	if !r.DryRun {
-		if err := r.mirrorAppsetToken(ctx, &dv, argoNS); err != nil {
-			return ctrl.Result{}, err
-		}
-	}
-	clusterObjs := []client.Object{
-		install.DotvirtClusterRoleBinding(&dv),
-		install.ArgocdApplyClusterRoleBinding(&dv, argoNS, argoSA),
-		install.PlatformNetworkAdminBinding(&dv),
-		install.TenantsAppProject(&dv, argoNS, platformRepo, dv.Namespace),
-		install.AppsetPluginConfigMap(&dv, argoNS, dv.Namespace),
-		install.ApplicationSet(&dv, argoNS),
-	}
-	// The platform tier (its AppProject + the static Application) only applies when a
-	// platform repo is configured.
-	if platformRepo != "" {
-		clusterObjs = append(clusterObjs,
-			install.PlatformAppProject(&dv, argoNS, platformRepo),
-			install.PlatformApplication(&dv, argoNS, platformRepo),
-		)
-	}
-	// Argo repo-creds (from the forge credential) so Argo can clone the tenant +
-	// platform repos, including private ones. Best-effort — nil if the forge URL or
-	// secret is absent.
-	if rc := r.repoCreds(ctx, &dv, argoNS); rc != nil {
-		clusterObjs = append(clusterObjs, rc)
-	}
-	for _, obj := range clusterObjs {
-		if err := install.Apply(ctx, r.Client, obj, r.DryRun); err != nil {
-			return r.failPhase(ctx, &dv, dotvirtv1alpha1.ConditionAvailable, "ApplyFailed", err)
-		}
-	}
-
-	// Platform repo: ensure it exists — the imperative bootstrap pure declarative
-	// installers can't do. Skipped in dry-run (a real forge mutation server-side
-	// dry-run can't model).
-	switch {
-	case dv.Spec.Forge.PlatformRepo == "":
-		// No platform tier configured; nothing to bootstrap.
-	case r.DryRun:
-		r.setCondition(&dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionUnknown, "DryRun", "skipped platform-repo bootstrap in dry-run")
-	default:
-		if err := r.ensurePlatformRepo(ctx, &dv); err != nil {
-			r.setCondition(&dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionFalse, "Error", err.Error())
-		} else {
-			r.setCondition(&dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionTrue, "Ready", "platform repo present")
-		}
-	}
-
-	// forge→ArgoCD instant sync: one ORG-level webhook covers every repo (present +
-	// future) with no per-repo registration. Skipped in dry-run (it mutates the
-	// forge + argocd-secret, which server-side dry-run can't model).
-	switch {
-	case r.DryRun:
-		r.setCondition(&dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionUnknown, "DryRun", "skipped argo webhook in dry-run")
-	default:
-		if configured, err := r.ensureArgoWebhook(ctx, &dv, argoNS); err != nil {
-			r.setCondition(&dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionFalse, "Error", err.Error())
-		} else if configured {
-			r.setCondition(&dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionTrue, "Registered", "org webhook → ArgoCD")
-		} else {
-			r.setCondition(&dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionUnknown, "NotRegistered", "ArgoCD webhook not registered (no Argo URL, or registration deferred); Argo falls back to its poll")
+		if res != nil {
+			return *res, nil
 		}
 	}
 
@@ -277,23 +135,233 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{}, nil
 }
 
-// ensurePlatformRepo creates the platform repo on the forge if absent — the
-// install-time step a Helm/Kustomize/ArgoCD-app installer structurally can't do
-// (it's a forge API call, not a kubectl apply). Reuses the app's shared forge
-// client (pkg/forge), driven by the forge credential in the CR's secret.
-func (r *DotvirtReconciler) ensurePlatformRepo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
-	secretName := install.ForgeSecretName(dv)
+// finalize handles deletion: clean up the label-tracked cluster/ArgoCD-namespace
+// resources (the ones not owner-referenceable), then drop the finalizer.
+func (r *DotvirtReconciler) finalize(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
+	if r.DryRun || !controllerutil.ContainsFinalizer(dv, dotvirtFinalizer) {
+		return nil
+	}
+	if err := r.cleanupClusterResources(ctx, dv); err != nil {
+		return err
+	}
+	controllerutil.RemoveFinalizer(dv, dotvirtFinalizer)
+	return r.Update(ctx, dv)
+}
+
+// reconcileDependencies gates on the hard prerequisites: ArgoCD + KubeVirt are
+// PREREQUISITES we never install; if either is absent, record why and requeue (the
+// admin may install the prereq operator). OVN-K/NMState/CDI are soft — note them
+// and proceed.
+func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
+	depRes, err := deps.Probe(r.Config)
+	if err != nil {
+		logf.FromContext(ctx).Error(err, "dependency probe failed")
+	}
+	if len(depRes.MissingHard) > 0 {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionDependenciesReady, metav1.ConditionFalse, "MissingPrerequisite", depRes.Summary())
+		dv.Status.Phase = "BlockedOnDependencies"
+		dv.Status.ObservedGeneration = dv.Generation
+		if uerr := r.Status().Update(ctx, dv); uerr != nil {
+			return nil, uerr
+		}
+		return &ctrl.Result{RequeueAfter: time.Minute}, nil
+	}
+	r.setCondition(dv, dotvirtv1alpha1.ConditionDependenciesReady, metav1.ConditionTrue, "Satisfied", depRes.Summary())
+	return nil, nil
+}
+
+// reconcileForge stands up + bootstraps the managed Forgejo (opt-in, eval-grade)
+// before anything that needs the forge credential. Once dotvirt-forge exists, the
+// rest of the install can't tell it from a BYO forge — for which this phase is a
+// no-op. Requeues while Forgejo is still coming up.
+func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
+	if !dv.Spec.Forge.Managed {
+		return nil, nil
+	}
+	if err := r.applyForgejo(ctx, dv); err != nil {
+		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "ApplyFailed", err)
+	}
+	if r.DryRun {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionUnknown, "DryRun", "skipped Forgejo bootstrap in dry-run")
+		return nil, nil
+	}
+	ready, err := r.bootstrapForgejo(ctx, dv)
+	if err != nil {
+		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "Error", err)
+	}
+	if !ready {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "Progressing", "waiting for Forgejo to come up")
+		dv.Status.Phase = "Provisioning"
+		if uerr := r.Status().Update(ctx, dv); uerr != nil {
+			return nil, uerr
+		}
+		return &ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
+	r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionTrue, "Ready", "managed Forgejo bootstrapped")
+	return nil, nil
+}
+
+// reconcileSecrets ensures the generated secrets (create-once — never regenerated
+// on re-reconcile, so the cookie key + plugin token survive restarts): the session
+// key, the ApplicationSet plugin token, and the webhook secrets. The forge
+// credential is supplied by the admin (spec.forge.credentialsSecret) or, earlier
+// in the pipeline, by the managed-Forgejo bootstrap.
+func (r *DotvirtReconciler) reconcileSecrets(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
+	if r.DryRun {
+		return nil, nil
+	}
+	for _, s := range []struct{ name, key string }{
+		{install.SessionSecretName, "secret"},
+		{install.AppsetSecretName, "token"},
+		{install.WebhookSecretName, "secret"},
+		{install.ArgoWebhookSecretName, "secret"},
+	} {
+		if err := r.ensureSecret(ctx, dv, s.name, s.key); err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
+}
+
+// reconcileWorkload renders + server-side-applies the namespaced workload,
+// owner-referenced to this CR for automatic GC (unlike the cluster-scoped
+// resources reconcileArgo applies, which a namespaced CR can't own — those rely
+// on the finalizer).
+func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
+	objs := []client.Object{
+		install.ServiceAccount(dv),
+		install.DraftsPVC(dv),
+		install.Service(dv),
+		install.Deployment(dv),
+	}
+	if exposure := r.exposure(dv); exposure != nil {
+		objs = append(objs, exposure)
+	}
+	for _, obj := range objs {
+		if err := controllerutil.SetControllerReference(dv, obj, r.Scheme); err != nil {
+			return nil, err
+		}
+		if err := install.Apply(ctx, r.Client, obj, r.DryRun); err != nil {
+			return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionAvailable, "ApplyFailed", err)
+		}
+	}
+	return nil, nil
+}
+
+// reconcileArgo applies the cluster-scoped + ArgoCD-namespace resources: the RBAC
+// BINDINGS wiring the static operand ClusterRoles (config/rbac/operand_roles.yaml,
+// OLM/kustomize-owned) to the dotvirt SA / Argo controller / platform-admins, plus
+// the AppProject tier (+ the static platform Application). Not owner-referenceable
+// by a namespaced CR, so they carry managed-by labels and the finalizer cleans
+// them up.
+func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
+	argoNS, argoSA := r.argoTarget(dv)
+	platformRepo := dv.Spec.Forge.PlatformRepo
+	// The plugin generator reads the appset token from the ArgoCD namespace, so
+	// mirror the generated one there (create-once).
+	if !r.DryRun {
+		if err := r.mirrorAppsetToken(ctx, dv, argoNS); err != nil {
+			return nil, err
+		}
+	}
+	objs := []client.Object{
+		install.DotvirtClusterRoleBinding(dv),
+		install.ArgocdApplyClusterRoleBinding(dv, argoNS, argoSA),
+		install.PlatformNetworkAdminBinding(dv),
+		install.TenantsAppProject(dv, argoNS, platformRepo, dv.Namespace),
+		install.AppsetPluginConfigMap(dv, argoNS, dv.Namespace),
+		install.ApplicationSet(dv, argoNS),
+	}
+	// The platform tier (its AppProject + the static Application) only applies when a
+	// platform repo is configured.
+	if platformRepo != "" {
+		objs = append(objs,
+			install.PlatformAppProject(dv, argoNS, platformRepo),
+			install.PlatformApplication(dv, argoNS, platformRepo),
+		)
+	}
+	// Argo repo-creds (from the forge credential) so Argo can clone the tenant +
+	// platform repos, including private ones. Best-effort — nil if the forge URL or
+	// secret is absent.
+	if rc := r.repoCreds(ctx, dv, argoNS); rc != nil {
+		objs = append(objs, rc)
+	}
+	for _, obj := range objs {
+		if err := install.Apply(ctx, r.Client, obj, r.DryRun); err != nil {
+			return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionAvailable, "ApplyFailed", err)
+		}
+	}
+	return nil, nil
+}
+
+// reconcilePlatformRepo ensures the platform repo exists — the imperative
+// bootstrap pure declarative installers can't do. Skipped in dry-run (a real forge
+// mutation server-side dry-run can't model). A bootstrap failure is recorded on
+// the condition but doesn't halt the pipeline.
+func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
+	switch {
+	case dv.Spec.Forge.PlatformRepo == "":
+		// No platform tier configured; nothing to bootstrap.
+	case r.DryRun:
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionUnknown, "DryRun", "skipped platform-repo bootstrap in dry-run")
+	default:
+		if err := r.ensurePlatformRepo(ctx, dv); err != nil {
+			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionFalse, "Error", err.Error())
+		} else {
+			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionTrue, "Ready", "platform repo present")
+		}
+	}
+	return nil, nil
+}
+
+// reconcileArgoWebhook sets up forge→ArgoCD instant sync: one ORG-level webhook
+// covers every repo (present + future) with no per-repo registration. Skipped in
+// dry-run (it mutates the forge + argocd-secret, which server-side dry-run can't
+// model). A registration failure is recorded on the condition but doesn't halt
+// the pipeline — Argo falls back to its poll.
+func (r *DotvirtReconciler) reconcileArgoWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
+	if r.DryRun {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionUnknown, "DryRun", "skipped argo webhook in dry-run")
+		return nil, nil
+	}
+	argoNS, _ := r.argoTarget(dv)
+	if configured, err := r.ensureArgoWebhook(ctx, dv, argoNS); err != nil {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionFalse, "Error", err.Error())
+	} else if configured {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionTrue, "Registered", "org webhook → ArgoCD")
+	} else {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionUnknown, "NotRegistered", "ArgoCD webhook not registered (no Argo URL, or registration deferred); Argo falls back to its poll")
+	}
+	return nil, nil
+}
+
+// forgeClient reads the install's forge credential (ForgeSecretName — the
+// admin-supplied BYO secret, or the one the managed-Forgejo bootstrap minted) and
+// builds the app's shared forge client (pkg/forge) scoped to the platform repo.
+func (r *DotvirtReconciler) forgeClient(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*forge.Client, error) {
+	name := install.ForgeSecretName(dv)
 	var s corev1.Secret
-	if err := r.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: secretName}, &s); err != nil {
-		return fmt.Errorf("read forge credentials %q: %w", secretName, err)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: name}, &s); err != nil {
+		return nil, fmt.Errorf("read forge credentials %q: %w", name, err)
 	}
 	token := string(s.Data["token"])
 	if dv.Spec.Forge.URL == "" || token == "" {
-		return fmt.Errorf("forge url (spec.forge.url) and a credential token (%s/token) are required to bootstrap the platform repo", secretName)
+		return nil, fmt.Errorf("forge url (spec.forge.url) and a credential token (%s/token) are required", name)
 	}
-	client := forge.NewFactory(dv.Spec.Forge.URL, token, dv.Spec.Forge.InsecureTLS).For(dv.Spec.Forge.PlatformRepo)
-	if client == nil {
-		return fmt.Errorf("cannot parse platform repo URL %q", dv.Spec.Forge.PlatformRepo)
+	c := forge.NewFactory(dv.Spec.Forge.URL, token, dv.Spec.Forge.InsecureTLS).For(dv.Spec.Forge.PlatformRepo)
+	if c == nil {
+		return nil, fmt.Errorf("cannot parse platform repo URL %q", dv.Spec.Forge.PlatformRepo)
+	}
+	return c, nil
+}
+
+// ensurePlatformRepo creates the platform repo on the forge if absent — the
+// install-time step a Helm/Kustomize/ArgoCD-app installer structurally can't do
+// (it's a forge API call, not a kubectl apply).
+func (r *DotvirtReconciler) ensurePlatformRepo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
+	client, err := r.forgeClient(ctx, dv)
+	if err != nil {
+		return err
 	}
 	created, err := client.EnsureRepo()
 	if err != nil {
@@ -317,36 +385,36 @@ func (r *DotvirtReconciler) resolveExposureType(dv *dotvirtv1alpha1.Dotvirt) str
 	return "ingress"
 }
 
-// exposure builds the UI ingress object for the resolved type — a Route on OpenShift, an
-// Ingress on vanilla Kubernetes (nil if Ingress is selected without a host, or for the
-// not-yet-implemented Gateway type).
-func (r *DotvirtReconciler) exposure(dv *dotvirtv1alpha1.Dotvirt) client.Object {
+// exposureFor builds the external exposure of the named Service for the resolved
+// type: a Route on OpenShift (host may be empty — the router then assigns one), an
+// Ingress on vanilla Kubernetes (host required), nil for the not-yet-implemented
+// Gateway type.
+func (r *DotvirtReconciler) exposureFor(dv *dotvirtv1alpha1.Dotvirt, name string, port int32, host string) client.Object {
 	switch r.resolveExposureType(dv) {
 	case "route":
-		return install.Route(dv, dv.Spec.Ingress.Host)
+		return install.Route(dv, name, host)
 	case "ingress":
-		if dv.Spec.Ingress.Host != "" {
-			return install.Ingress(dv, dv.Spec.Ingress.Host)
+		if host != "" {
+			return install.Ingress(dv, name, port, host)
 		}
 	}
 	return nil
 }
 
+// exposure builds the UI ingress object on spec.ingress.host.
+func (r *DotvirtReconciler) exposure(dv *dotvirtv1alpha1.Dotvirt) client.Object {
+	return r.exposureFor(dv, install.AppName, install.HTTPPort, dv.Spec.Ingress.Host)
+}
+
 // forgejoExposure exposes the managed Forgejo on the host derived from
-// spec.forge.url (Route on OpenShift, Ingress on vanilla) so its UI + PRs are
-// reviewable off-cluster. nil when no external forge URL is set (internal-only).
+// spec.forge.url, so its UI + PRs are reviewable off-cluster. nil when no external
+// forge URL is set (internal-only).
 func (r *DotvirtReconciler) forgejoExposure(dv *dotvirtv1alpha1.Dotvirt) client.Object {
 	host := install.ForgejoHost(dv)
 	if host == "" {
 		return nil
 	}
-	switch r.resolveExposureType(dv) {
-	case "route":
-		return install.ForgejoRoute(dv, host)
-	case "ingress":
-		return install.ForgejoIngress(dv, host)
-	}
-	return nil
+	return r.exposureFor(dv, install.ForgejoServiceName, install.ForgejoHTTPPort, host)
 }
 
 // ensureSecret creates a labeled, owner-referenced Secret with a random value if it
@@ -433,14 +501,9 @@ func (r *DotvirtReconciler) ensureArgoWebhook(ctx context.Context, dv *dotvirtv1
 		return false, fmt.Errorf("set argo webhook secret: %w", err)
 	}
 	// One org webhook covers every repo, using the forge credential to register it.
-	name := install.ForgeSecretName(dv)
-	var fs corev1.Secret
-	if err := r.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: name}, &fs); err != nil {
-		return false, fmt.Errorf("read forge credentials %q: %w", name, err)
-	}
-	client := forge.NewFactory(dv.Spec.Forge.URL, string(fs.Data["token"]), dv.Spec.Forge.InsecureTLS).For(dv.Spec.Forge.PlatformRepo)
-	if client == nil {
-		return false, fmt.Errorf("cannot parse platform repo URL %q", dv.Spec.Forge.PlatformRepo)
+	client, err := r.forgeClient(ctx, dv)
+	if err != nil {
+		return false, err
 	}
 	// Registering the hook is best-effort, like the app's own webhook sweep
 	// (cmd/dotvirt logs and moves on): a transient forge hiccup here must not read as a
@@ -661,13 +724,13 @@ func (r *DotvirtReconciler) setCondition(dv *dotvirtv1alpha1.Dotvirt, condType s
 
 // failPhase records a failure condition + the Provisioning phase (best-effort status
 // write) and returns the original error so Reconcile requeues on it.
-func (r *DotvirtReconciler) failPhase(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, condType, reason string, err error) (ctrl.Result, error) {
+func (r *DotvirtReconciler) failPhase(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, condType, reason string, err error) error {
 	r.setCondition(dv, condType, metav1.ConditionFalse, reason, err.Error())
 	dv.Status.Phase = "Provisioning"
 	if uerr := r.Status().Update(ctx, dv); uerr != nil {
 		logf.FromContext(ctx).Error(uerr, "status update failed", "phase", "Provisioning")
 	}
-	return ctrl.Result{}, err
+	return err
 }
 
 // SetupWithManager detects the platform once and registers the reconciler.

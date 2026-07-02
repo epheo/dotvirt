@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { ArrowLeft, FolderPlus, Network, Plus, Power, PowerOff, Trash2, Upload } from 'lucide-svelte';
+	import { ArrowLeft, FolderPlus, Network, Plus, Upload } from 'lucide-svelte';
 	import {
 		api,
 		draftsByProject,
+		onUnauthorized,
 		streamInventory,
 		Unauthorized,
 		type DraftItem,
@@ -14,13 +15,14 @@
 		type VM
 	} from '$lib/api';
 	import { manifestURL, type VMAction } from '$lib/actions';
-	import { vmNetworkKeys, vmStorageKeys, POD_NETWORK } from '$lib/lenses';
-	import { networkByRef, kindLabel } from '$lib/networks';
+	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
 	import ActionMenu from '$lib/components/ActionMenu.svelte';
+	import BulkActionsBar from '$lib/components/BulkActionsBar.svelte';
 	import CatalogPanel from '$lib/components/CatalogPanel.svelte';
 	import ChangesPanel from '$lib/components/ChangesPanel.svelte';
 	import ClusterSummary from '$lib/components/ClusterSummary.svelte';
 	import ConfirmDelete from '$lib/components/ConfirmDelete.svelte';
+	import ContainerConfigure from '$lib/components/ContainerConfigure.svelte';
 	import ContainerMonitor from '$lib/components/ContainerMonitor.svelte';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import GlobalSearch, { type SearchHit } from '$lib/components/GlobalSearch.svelte';
@@ -32,9 +34,7 @@
 	import AdoptProjectModal from '$lib/components/AdoptProjectModal.svelte';
 	import NewNetworkModal from '$lib/components/NewNetworkModal.svelte';
 	import NewVMWizard from '$lib/components/NewVMWizard.svelte';
-	import NodeActions from '$lib/components/NodeActions.svelte';
 	import Permissions from '$lib/components/Permissions.svelte';
-	import QuotaBand from '$lib/components/QuotaBand.svelte';
 	import StagedChangesModal from '$lib/components/StagedChangesModal.svelte';
 	import TaskDock from '$lib/components/TaskDock.svelte';
 	import UploadModal from '$lib/components/UploadModal.svelte';
@@ -42,13 +42,6 @@
 	import VMTable from '$lib/components/VMTable.svelte';
 
 	// vCenter model: the tree is a scope selector, the center pane is the VM grid.
-	type Scope =
-		| { kind: 'all' }
-		| { kind: 'project'; project: string }
-		| { kind: 'namespace'; project: string; namespace: string }
-		| { kind: 'node'; node: string }
-		| { kind: 'network'; network: string }
-		| { kind: 'storage'; storageClass: string };
 	let scope = $state<Scope>({ kind: 'all' });
 
 	let user = $state<User | null>(null);
@@ -99,7 +92,8 @@
 	// VMs with an unproposed staged change (this user's draft), keyed "ns/name".
 	const stagedByKey = $derived.by(() => {
 		const m = new Map<string, DraftItem>();
-		for (const { draft } of drafts) for (const it of draft.items) m.set(`${it.namespace}/${it.name}`, it);
+		for (const { draft } of drafts)
+			for (const it of draft.items) m.set(`${it.namespace}/${it.name}`, it);
 		return m;
 	});
 
@@ -107,7 +101,9 @@
 	let stagedTarget = $state<VM | null>(null);
 	let stagedBusy = $state(false);
 	const stagedTargetItem = $derived(
-		stagedTarget ? (stagedByKey.get(`${stagedTarget.namespace}/${stagedTarget.name}`) ?? null) : null
+		stagedTarget
+			? (stagedByKey.get(`${stagedTarget.namespace}/${stagedTarget.name}`) ?? null)
+			: null
 	);
 	function openStaged(vm: VM) {
 		stagedTarget = vm;
@@ -119,8 +115,8 @@
 			await api.unstage(stagedTarget.namespace, stagedTarget.name);
 			stagedTarget = null;
 			await refreshDrafts();
-		} catch (e) {
-			if (e instanceof Unauthorized) signedOut();
+		} catch {
+			// Failure leaves the modal open to retry; a 401 signs out centrally.
 		} finally {
 			stagedBusy = false;
 		}
@@ -130,13 +126,16 @@
 		showChanges = true;
 	}
 
-	// Drop to the login screen on any 401.
+	// Drop to the login screen on any 401. Registered as the api layer's one
+	// signed-out sink, so every fetching component is covered without threading
+	// a callback; local Unauthorized catches only suppress their own error UI.
 	function signedOut() {
 		user = null;
 		inventory = null;
 		selected = null;
 		drafts = [];
 	}
+	onUnauthorized(signedOut);
 
 	async function checkAuth() {
 		try {
@@ -163,12 +162,10 @@
 		const sc = scope; // const preserves TS narrowing into the filter closures
 		const all = allVMs(inventory);
 		if (sc.kind === 'all') return all;
-		if (sc.kind === 'node')
-			return all.filter((v) => (v.nodeName || '(unscheduled)') === sc.node);
+		if (sc.kind === 'node') return all.filter((v) => (v.nodeName || '(unscheduled)') === sc.node);
 		if (sc.kind === 'network')
 			return all.filter((v) => vmNetworkKeys(v, networkCatalog).includes(sc.network));
-		if (sc.kind === 'storage')
-			return all.filter((v) => vmStorageKeys(v).includes(sc.storageClass));
+		if (sc.kind === 'storage') return all.filter((v) => vmStorageKeys(v).includes(sc.storageClass));
 		return inventory.projects
 			.filter((p) => p.name === sc.project)
 			.flatMap((p) =>
@@ -181,9 +178,7 @@
 	// Container workspace: the All/Project/Namespace/Node levels get the same tabbed
 	// workspace (Summary/VMs/Monitor/Configure) a VM does — vCenter's "same tabs at
 	// every level".
-	let containerTab = $state<'summary' | 'vms' | 'monitor' | 'configure' | 'permissions'>(
-		'summary'
-	);
+	let containerTab = $state<'summary' | 'vms' | 'monitor' | 'configure' | 'permissions'>('summary');
 
 	// Projects shown on the container Configure tab (the scoped one, or all).
 	const cfgProjects = $derived.by(() => {
@@ -240,9 +235,7 @@
 		api
 			.networks()
 			.then((n) => (netInv = n))
-			.catch((e) => {
-				if (e instanceof Unauthorized) signedOut();
-			});
+			.catch(() => {}); // a failure just leaves the catalog empty; 401 signs out centrally
 	});
 
 	const projectNames = $derived(inventory ? inventory.projects.map((p) => p.name) : []);
@@ -251,6 +244,16 @@
 	// VM state change. Keying the effect on this string fires it only when the set
 	// actually changes.
 	const projectKey = $derived([...projectNames].sort().join('\0'));
+	// The same trick for the SET of open PR lanes: a propose moves staged items
+	// into a PR and a merge/close clears the lane — possibly from another tab —
+	// so the drafts summary must refresh when this signature moves. It rides the
+	// live inventory (no extra fetch on the broadcast path).
+	const proposalsKey = $derived(
+		proposals
+			.map((p) => `${p.project}#${p.prNumber}`)
+			.sort()
+			.join('\0')
+	);
 	const vmCount = $derived(inventory ? allVMs(inventory).length : 0);
 	const draftCount = $derived(drafts.reduce((n, d) => n + d.draft.count, 0));
 	// Namespaces a VM can be created in: those in projects that have a repo (no
@@ -291,17 +294,19 @@
 		}
 		try {
 			drafts = await draftsByProject(names);
-		} catch (e) {
-			if (e instanceof Unauthorized) signedOut();
+		} catch {
+			// Keep the last good summary; a 401 signs out centrally.
 		}
 	}
 
-	// Recompute the draft summary only when the SET of projects changes: depend on
-	// the stable key, and read the project list via untrack so the effect doesn't
-	// also subscribe to the per-frame array reference (which would re-fire on every
-	// VM state change). Staging actions call refreshDrafts directly.
+	// Recompute the draft summary only when the SET of projects or PR lanes
+	// changes: depend on the stable keys, and read the project list via untrack so
+	// the effect doesn't also subscribe to the per-frame array reference (which
+	// would re-fire on every VM state change). Staging actions call refreshDrafts
+	// directly.
 	$effect(() => {
-		projectKey; // the one tracked dependency
+		projectKey;
+		proposalsKey;
 		untrack(() => {
 			if (user && projectNames.length) refreshDrafts();
 		});
@@ -338,17 +343,13 @@
 			const skipped = vms.length - actionable.length;
 			const results = await Promise.allSettled(actionable.map((vm) => stage(vm)));
 			if (results.some((r) => r.status === 'rejected' && r.reason instanceof Unauthorized)) {
-				signedOut();
-				return;
+				return; // signed out centrally by the api layer
 			}
 			const failed = results.filter((r) => r.status === 'rejected').length;
 			const staged = results.length - failed;
 			await refreshDrafts();
 			picked = new Set();
-			const extra = [
-				skipped ? `${skipped} skipped` : '',
-				failed ? `${failed} failed` : ''
-			]
+			const extra = [skipped ? `${skipped} skipped` : '', failed ? `${failed} failed` : '']
 				.filter(Boolean)
 				.join(', ');
 			showToast(`${verb} ${staged} of ${vms.length}${extra ? ` (${extra})` : ''}.`);
@@ -436,7 +437,7 @@
 				recordAction({ verb, namespace: vm.namespace, name: vm.name, ok: true });
 				showToast(`${verb} requested for ${vm.name}.`);
 			} catch (e) {
-				if (e instanceof Unauthorized) return signedOut();
+				if (e instanceof Unauthorized) return;
 				recordAction({ verb, namespace: vm.namespace, name: vm.name, ok: false });
 				showToast(String(e));
 			}
@@ -452,7 +453,7 @@
 				await refreshDrafts();
 				showToast(`${vm.name} staged into Changes — open a PR to adopt it into git.`);
 			} catch (e) {
-				if (e instanceof Unauthorized) return signedOut();
+				if (e instanceof Unauthorized) return;
 				showToast(String(e));
 			}
 			return;
@@ -483,7 +484,7 @@
 			for (const ns of want) await api.adoptNamespace(ns);
 			showToast('Untracked VMs staged into Changes — open a PR to adopt them into git.');
 		} catch (e) {
-			if (e instanceof Unauthorized) return signedOut();
+			if (e instanceof Unauthorized) return;
 			showToast(String(e));
 		} finally {
 			// Reflect whatever got staged before any failure — a mid-loop error still
@@ -687,8 +688,9 @@
 							<span class="text-slate-300">/</span>
 							<button
 								onclick={() => setScope({ kind: 'project', project: proj })}
-								class="hover:underline {scope.kind === 'project' ? 'font-medium text-slate-700' : ''}"
-								>{proj}</button
+								class="hover:underline {scope.kind === 'project'
+									? 'font-medium text-slate-700'
+									: ''}">{proj}</button
 							>
 						{/if}
 						{#if scope.kind === 'namespace'}
@@ -729,248 +731,47 @@
 					{:else if containerTab === 'monitor'}
 						<div class="min-h-0 flex-1 overflow-y-auto">
 							<ContainerMonitor
-							namespaces={scopedNamespaces}
-							scope={containerScope}
-							onselect={selectByKey}
-						/>
+								namespaces={scopedNamespaces}
+								scope={containerScope}
+								onselect={selectByKey}
+							/>
 						</div>
 					{:else if containerTab === 'permissions'}
 						<div class="min-h-0 flex-1 overflow-y-auto p-4">
 							<Permissions namespaces={scopedNamespaces} />
 						</div>
 					{:else if containerTab === 'configure'}
-						<!-- Read-only container settings: what backs each project. dotvirt owns
-						     nothing here — projects are namespace labels, config is the repo. -->
-						<div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-							{#if scope.kind === 'network'}
-								{@const pg = networkByRef(scope.network, networkCatalog)}
-								<section class="max-w-2xl rounded border border-slate-200">
-									<h3
-										class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase"
-									>
-										{pg ? pg.name : scope.network}
-									</h3>
-									<dl class="divide-y divide-slate-100 text-[13px]">
-										<div class="flex justify-between gap-3 px-3 py-1.5">
-											<dt class="shrink-0 text-slate-500">Type</dt>
-											<dd class="text-slate-800">
-												{pg
-													? kindLabel(pg.kind)
-													: scope.network === POD_NETWORK
-														? 'Pod network (cluster default)'
-														: '—'}
-											</dd>
-										</div>
-										{#if pg}
-											<div class="flex justify-between gap-3 px-3 py-1.5">
-												<dt class="shrink-0 text-slate-500">Scope</dt>
-												<dd class="min-w-0 truncate text-right text-slate-800">
-													{pg.scope === 'shared' ? 'Shared · all projects' : `Project · ${pg.namespace}`}
-												</dd>
-											</div>
-											{#if pg.vlan}
-												<div class="flex justify-between gap-3 px-3 py-1.5">
-													<dt class="shrink-0 text-slate-500">VLAN</dt>
-													<dd class="text-slate-800">{pg.vlan}</dd>
-												</div>
-											{/if}
-											{#if pg.uplink}
-												<div class="flex justify-between gap-3 px-3 py-1.5">
-													<dt class="shrink-0 text-slate-500">Uplink</dt>
-													<dd class="text-slate-800">{pg.uplink}</dd>
-												</div>
-											{/if}
-											{#if pg.subnets?.length}
-												<div class="flex justify-between gap-3 px-3 py-1.5">
-													<dt class="shrink-0 text-slate-500">Subnets</dt>
-													<dd class="min-w-0 truncate text-right text-slate-800">{pg.subnets.join(', ')}</dd>
-												</div>
-											{/if}
-											<div class="flex justify-between gap-3 px-3 py-1.5">
-												<dt class="shrink-0 text-slate-500">Backing</dt>
-												<dd class="min-w-0 truncate text-right text-slate-500">{pg.backing}</dd>
-											</div>
-										{/if}
-										<div class="flex justify-between gap-3 px-3 py-1.5">
-											<dt class="shrink-0 text-slate-500">VMs attached</dt>
-											<dd class="text-slate-800">{scopedVMs.length}</dd>
-										</div>
-									</dl>
-								</section>
-							{:else if scope.kind === 'node' || scope.kind === 'storage'}
-								{@const label =
-									scope.kind === 'node' ? `Node: ${scope.node}` : `Storage class: ${scope.storageClass}`}
-								<section class="max-w-2xl rounded border border-slate-200">
-									<h3
-										class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase"
-									>
-										{label}
-									</h3>
-									<dl class="divide-y divide-slate-100 text-[13px]">
-										<div class="flex justify-between gap-3 px-3 py-1.5">
-											<dt class="text-slate-500">
-												{scope.kind === 'node' ? 'VMs placed here' : 'VMs attached'}
-											</dt>
-											<dd class="text-slate-800">{scopedVMs.length}</dd>
-										</div>
-									</dl>
-									<p class="border-t border-slate-100 px-3 py-2 text-xs text-slate-400">
-										{scope.kind === 'node'
-											? 'Node configuration is managed by the cluster platform, not dotvirt.'
-											: 'Storage classes are managed by the cluster platform, not dotvirt.'}
-									</p>
-								</section>
-								{#if scope.kind === 'node'}
-									{@const nodeName = scope.node}
-									<!-- Node maintenance-lite: cordon/uncordon + evacuate (shown only
-									     when the caller's token may patch nodes). -->
-									<NodeActions node={scope.node} vms={scopedVMs} onaction={recordAction} />
-									{#if uplinks.length}
-										<section class="max-w-2xl rounded border border-slate-200">
-											<div class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-1.5">
-												<h3 class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Uplinks</h3>
-												<button
-													onclick={() => (showUplinkWizard = true)}
-													disabled={!canManage}
-													title={canManage ? '' : 'Requires platform-network authoring permission'}
-													class="text-xs text-blue-600 hover:underline disabled:text-slate-300"
-													>+ Add uplink</button
-												>
-											</div>
-											<ul class="divide-y divide-slate-100 px-3 text-[13px]">
-												{#each uplinks.filter((u) => !u.nodes || u.nodes.includes(nodeName)) as u (u.name)}
-													<li class="flex items-baseline justify-between gap-3 py-1.5">
-														<span class="text-slate-800">{u.name}{u.builtin ? ' · default' : ''}</span>
-														<span class="text-slate-400"
-															>{u.bridge} · {u.nodeCount} node{u.nodeCount === 1 ? '' : 's'}</span>
-													</li>
-												{/each}
-											</ul>
-										</section>
-									{/if}
-									<section class="max-w-2xl rounded border border-slate-200">
-										<h3 class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">Physical adapters</h3>
-										{#if !nmstatePresent}
-											<p class="px-3 py-3 text-xs text-slate-400">
-												Install the NMState operator instance to discover physical adapters.
-											</p>
-										{:else}
-											{@const nics = physicalAdapters.filter((a) => a.node === nodeName)}
-											{#if nics.length}
-												<ul class="divide-y divide-slate-100 px-3 text-[13px]">
-													{#each nics as a (a.name)}
-														<li class="flex items-baseline justify-between gap-3 py-1.5">
-															<span class="text-slate-800">{a.name}</span>
-															<span class="flex items-center gap-3 text-right text-slate-400">
-																<span>{a.role}</span>
-																<span>{a.state}{a.mtu ? ` · MTU ${a.mtu}` : ''}</span>
-															</span>
-														</li>
-													{/each}
-												</ul>
-											{:else}
-												<p class="px-3 py-3 text-xs text-slate-400">No physical adapters reported.</p>
-											{/if}
-										{/if}
-									</section>
-								{/if}
-							{:else}
-								{#each cfgProjects as p (p.name)}
-									<section class="max-w-2xl rounded border border-slate-200">
-										<h3
-											class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase"
-										>
-											Project: {p.name}
-										</h3>
-										<dl class="divide-y divide-slate-100 text-[13px]">
-											<div class="flex justify-between gap-3 px-3 py-1.5">
-												<dt class="shrink-0 text-slate-500">Repository</dt>
-												<dd class="min-w-0 truncate text-right">
-													{#if p.repo}
-														<a
-															href={p.repo}
-															target="_blank"
-															class="font-mono text-xs text-blue-600 hover:underline">{p.repo}</a
-														>
-													{:else}
-														<span class="text-slate-400">— not configured</span>
-													{/if}
-												</dd>
-											</div>
-											<div class="flex justify-between gap-3 px-3 py-1.5">
-												<dt class="shrink-0 text-slate-500">Namespaces</dt>
-												<dd class="min-w-0 text-right">
-													{#each p.namespaces as n (n.namespace)}
-														<span
-															class="ml-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600"
-															>{n.namespace} · {n.vms.length} VMs</span
-														>
-													{/each}
-												</dd>
-											</div>
-										</dl>
-										{#if p.error}
-											<p
-												class="border-t border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700"
-											>
-												{p.error}
-											</p>
-										{/if}
-										<!-- Quota-aware capacity: the project's ResourceQuotas. -->
-										<div class="border-t border-slate-100 px-3 py-2">
-											<QuotaBand scope={{ project: p.name }} showEmpty />
-										</div>
-									</section>
-								{/each}
-							{/if}
-						</div>
+						<ContainerConfigure
+							{scope}
+							vms={scopedVMs}
+							projects={cfgProjects}
+							networks={networkCatalog}
+							{uplinks}
+							{physicalAdapters}
+							{nmstatePresent}
+							{canManage}
+							onaction={recordAction}
+							onadduplink={() => (showUplinkWizard = true)}
+						/>
 					{:else}
 						{#if picked.size > 0}
-							<div
-								class="flex items-center gap-2 border-b border-slate-200 bg-blue-50 px-4 py-1.5 text-sm"
-							>
-								<span class="font-medium text-slate-700">{picked.size} selected</span>
-							<span class="text-slate-300">|</span>
-							<button
-								onclick={() => bulkPower('On')}
-								disabled={bulkBusy}
-								class="flex items-center gap-1.5 rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-							>
-								<Power size={13} class="text-green-600" /> Power On
-							</button>
-							<button
-								onclick={() => bulkPower('Off')}
-								disabled={bulkBusy}
-								class="flex items-center gap-1.5 rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-							>
-								<PowerOff size={13} class="text-slate-500" /> Power Off
-							</button>
-							<button
-								onclick={() => {
-									confirmingBulkDelete = true;
-								}}
-								disabled={bulkBusy}
-								class="flex items-center gap-1.5 rounded border border-red-300 bg-white px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-							>
-								<Trash2 size={13} /> Delete
-							</button>
-							<button
-								onclick={() => (picked = new Set())}
-								class="ml-auto text-xs text-slate-500 hover:text-slate-700"
-							>
-								Clear
-							</button>
-						</div>
+							<BulkActionsBar
+								count={picked.size}
+								busy={bulkBusy}
+								onpower={bulkPower}
+								ondelete={() => (confirmingBulkDelete = true)}
+								onclear={() => (picked = new Set())}
+							/>
+						{/if}
+						<VMTable
+							vms={scopedVMs}
+							bind:selected={picked}
+							staged={stagedByKey}
+							onselect={(vm) => (selected = vm)}
+							onstagedopen={openStaged}
+							oncontextvm={openVMContext}
+						/>
 					{/if}
-					<VMTable
-						vms={scopedVMs}
-						bind:selected={picked}
-						staged={stagedByKey}
-						onselect={(vm) => (selected = vm)}
-						onstagedopen={openStaged}
-						oncontextvm={openVMContext}
-					/>
-				{/if}
 				{/if}
 			</main>
 
@@ -1193,8 +994,8 @@
 				onclose={() => (confirmingBulkDelete = false)}
 			>
 				<p class="mb-3">
-					This stages removal of the following VMs into <strong>Changes</strong>. They are deleted from
-					the cluster only when each project's PR is merged.
+					This stages removal of the following VMs into <strong>Changes</strong>. They are deleted
+					from the cluster only when each project's PR is merged.
 				</p>
 				<ul class="max-h-40 overflow-y-auto rounded border border-slate-200 text-xs">
 					{#each pickedVMs as vm (vm.namespace + '/' + vm.name)}

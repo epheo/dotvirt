@@ -25,11 +25,9 @@ type VMEdit struct {
 	// both, so the two are mutually exclusive. Nil leaves the representation as-is.
 	Sizing *string `json:"sizing,omitempty"`
 
-	// Metadata edits: keys to set (upsert) and keys to remove.
-	SetLabels         map[string]string `json:"setLabels,omitempty"`
-	RemoveLabels      []string          `json:"removeLabels,omitempty"`
-	SetAnnotations    map[string]string `json:"setAnnotations,omitempty"`
-	RemoveAnnotations []string          `json:"removeAnnotations,omitempty"`
+	// Label edits: keys to set (upsert) and keys to remove.
+	SetLabels    map[string]string `json:"setLabels,omitempty"`
+	RemoveLabels []string          `json:"removeLabels,omitempty"`
 
 	// Disk/network edits on the VM template. The add-entries are model types so
 	// the API request, the persisted draft, and this edit share one definition.
@@ -44,7 +42,6 @@ func (e VMEdit) Empty() bool {
 	return e.Power == nil && e.CPUCores == nil && e.Memory == nil &&
 		e.Instancetype == nil && e.Preference == nil && e.Sizing == nil &&
 		len(e.SetLabels) == 0 && len(e.RemoveLabels) == 0 &&
-		len(e.SetAnnotations) == 0 && len(e.RemoveAnnotations) == 0 &&
 		len(e.AddDisks) == 0 && len(e.RemoveDisks) == 0 &&
 		len(e.AddNetworks) == 0 && len(e.RemoveNetworks) == 0
 }
