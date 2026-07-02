@@ -344,6 +344,367 @@ func UplinkManifest(s UplinkSpec) (path string, content []byte, err error) {
 	return "uplinks/" + s.Name + ".yaml", out, nil
 }
 
+// EgressFirewallSpec describes a namespace's north-south egress firewall — the
+// gateway-firewall analog on a project's Tier-1. OVN-K allows exactly one
+// EgressFirewall per namespace and it must be named "default"; its ordered rules
+// permit or deny egress from the namespace's pods (and VMs) to external CIDRs or DNS
+// names, optionally narrowed to a port. Namespace-scoped, so it rides the tenant's
+// own repo (unlike a cluster-scoped CUDN/uplink).
+type EgressFirewallSpec struct {
+	Namespace string       `json:"namespace"`
+	Rules     []EgressRule `json:"rules"`
+}
+
+// EgressRule is one ordered allow/deny against an external destination. Exactly one
+// of CIDR or DNSName names the destination; Ports optionally narrows it.
+type EgressRule struct {
+	Action  string       `json:"action"`            // Allow | Deny
+	CIDR    string       `json:"cidr,omitempty"`    // cidrSelector destination
+	DNSName string       `json:"dnsName,omitempty"` // dnsName destination
+	Ports   []EgressPort `json:"ports,omitempty"`
+}
+
+// EgressPort narrows a rule to a transport port.
+type EgressPort struct {
+	Protocol string `json:"protocol"` // TCP | UDP | SCTP
+	Port     int    `json:"port"`
+}
+
+// EgressFirewallManifest renders the EgressFirewall YAML plus its repo-relative
+// path. The object is always named "default" (OVN-K permits one per namespace); the
+// rules render in order, since an EgressFirewall is first-match.
+func EgressFirewallManifest(s EgressFirewallSpec) (path string, content []byte, err error) {
+	if s.Namespace == "" {
+		return "", nil, fmt.Errorf("a namespace is required")
+	}
+	if len(s.Rules) == 0 {
+		return "", nil, fmt.Errorf("at least one egress rule is required")
+	}
+	egress := make([]any, 0, len(s.Rules))
+	for i, r := range s.Rules {
+		if r.Action != "Allow" && r.Action != "Deny" {
+			return "", nil, fmt.Errorf("rule %d: action must be Allow or Deny", i+1)
+		}
+		// Exactly one destination: a CIDR or a DNS name (XOR).
+		if (r.CIDR == "") == (r.DNSName == "") {
+			return "", nil, fmt.Errorf("rule %d: set exactly one of cidr or dnsName", i+1)
+		}
+		to := map[string]any{}
+		if r.CIDR != "" {
+			to["cidrSelector"] = r.CIDR
+		} else {
+			to["dnsName"] = r.DNSName
+		}
+		rule := map[string]any{"type": r.Action, "to": to}
+		if len(r.Ports) > 0 {
+			ports := make([]any, 0, len(r.Ports))
+			for j, p := range r.Ports {
+				if p.Protocol != "TCP" && p.Protocol != "UDP" && p.Protocol != "SCTP" {
+					return "", nil, fmt.Errorf("rule %d port %d: protocol must be TCP, UDP or SCTP", i+1, j+1)
+				}
+				if p.Port <= 0 || p.Port > 65535 {
+					return "", nil, fmt.Errorf("rule %d port %d: port must be 1..65535", i+1, j+1)
+				}
+				ports = append(ports, map[string]any{"protocol": p.Protocol, "port": p.Port})
+			}
+			rule["ports"] = ports
+		}
+		egress = append(egress, rule)
+	}
+	out, err := yaml.Marshal(map[string]any{
+		"apiVersion": "k8s.ovn.org/v1",
+		"kind":       "EgressFirewall",
+		"metadata":   map[string]any{"name": "default", "namespace": s.Namespace},
+		"spec":       map[string]any{"egress": egress},
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return s.Namespace + "/egressfirewalls/default.yaml", out, nil
+}
+
+// EgressIPSpec describes a cluster-scoped EgressIP — the Tier-0 source-NAT pool that
+// pins a project's egress to fixed, routable IPs. OVN-K applies it to the namespaces
+// its selector matches; we render a namespaceSelector matching the chosen namespaces
+// by name. Cluster-scoped, so it lands in the platform repo.
+type EgressIPSpec struct {
+	Name       string   `json:"name"`
+	EgressIPs  []string `json:"egressIPs"`
+	Namespaces []string `json:"namespaces"`
+}
+
+// EgressIPManifest renders the EgressIP YAML plus its repo-relative path.
+func EgressIPManifest(s EgressIPSpec) (path string, content []byte, err error) {
+	switch {
+	case s.Name == "":
+		return "", nil, fmt.Errorf("a name is required")
+	case len(s.EgressIPs) == 0:
+		return "", nil, fmt.Errorf("at least one egress IP is required")
+	case len(s.Namespaces) == 0:
+		return "", nil, fmt.Errorf("at least one namespace must be selected")
+	}
+	out, err := yaml.Marshal(map[string]any{
+		"apiVersion": "k8s.ovn.org/v1",
+		"kind":       "EgressIP",
+		"metadata":   map[string]any{"name": s.Name},
+		"spec": map[string]any{
+			"egressIPs": toAny(s.EgressIPs),
+			"namespaceSelector": map[string]any{
+				"matchExpressions": []any{map[string]any{
+					"key":      "kubernetes.io/metadata.name",
+					"operator": "In",
+					"values":   toAny(s.Namespaces),
+				}},
+			},
+		},
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return "egressips/" + s.Name + ".yaml", out, nil
+}
+
+// ExternalRouteSpec describes a cluster-scoped AdminPolicyBasedExternalRoute — the
+// Tier-0 static route that steers a project's egress through external next-hop
+// gateways. Cluster-scoped, so it lands in the platform repo.
+type ExternalRouteSpec struct {
+	Name       string   `json:"name"`
+	Namespaces []string `json:"namespaces"`
+	NextHops   []string `json:"nextHops"` // static next-hop IPs
+}
+
+// ExternalRouteManifest renders the AdminPolicyBasedExternalRoute YAML plus its
+// repo-relative path.
+func ExternalRouteManifest(s ExternalRouteSpec) (path string, content []byte, err error) {
+	switch {
+	case s.Name == "":
+		return "", nil, fmt.Errorf("a name is required")
+	case len(s.Namespaces) == 0:
+		return "", nil, fmt.Errorf("at least one namespace must be selected")
+	case len(s.NextHops) == 0:
+		return "", nil, fmt.Errorf("at least one next-hop IP is required")
+	}
+	static := make([]any, 0, len(s.NextHops))
+	for _, ip := range s.NextHops {
+		static = append(static, map[string]any{"ip": ip})
+	}
+	out, err := yaml.Marshal(map[string]any{
+		"apiVersion": "k8s.ovn.org/v1",
+		"kind":       "AdminPolicyBasedExternalRoute",
+		"metadata":   map[string]any{"name": s.Name},
+		"spec": map[string]any{
+			"from": map[string]any{
+				"namespaceSelector": map[string]any{
+					"matchExpressions": []any{map[string]any{
+						"key":      "kubernetes.io/metadata.name",
+						"operator": "In",
+						"values":   toAny(s.Namespaces),
+					}},
+				},
+			},
+			"nextHops": map[string]any{"static": static},
+		},
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return "externalroutes/" + s.Name + ".yaml", out, nil
+}
+
+// NetworkPolicySpec describes a NetworkPolicy — the east-west Distributed Firewall.
+// It protects a Group (AppliedTo: a podSelector) inside one namespace, allowing
+// ingress only from the peer Groups named in its rules (a NetworkPolicy that selects
+// pods default-denies all other ingress). Namespace-scoped, so it rides the tenant's
+// own repo. Groups are label selectors — the same primitive NSX-T's dynamic Groups
+// compile to.
+type NetworkPolicySpec struct {
+	Name      string            `json:"name"`
+	Namespace string            `json:"namespace"`
+	AppliedTo map[string]string `json:"appliedTo,omitempty"` // podSelector matchLabels; empty = the whole namespace
+	Ingress   []PolicyRule      `json:"ingress,omitempty"`
+}
+
+// PolicyRule is one ingress rule: allow traffic from the peer Groups (From) to the
+// applied-to Group, optionally narrowed to Ports. An empty From means "any source";
+// an empty Ports means "any port".
+type PolicyRule struct {
+	From  []map[string]string `json:"from,omitempty"` // peer Groups (podSelector matchLabels)
+	Ports []PolicyPort        `json:"ports,omitempty"`
+}
+
+// PolicyPort narrows a rule to a transport port.
+type PolicyPort struct {
+	Protocol string `json:"protocol"` // TCP | UDP | SCTP
+	Port     int    `json:"port"`
+}
+
+// NetworkPolicyManifest renders the NetworkPolicy YAML plus its repo-relative path.
+func NetworkPolicyManifest(s NetworkPolicySpec) (path string, content []byte, err error) {
+	if s.Name == "" || s.Namespace == "" {
+		return "", nil, fmt.Errorf("a name and namespace are required")
+	}
+	// An empty podSelector ({}) selects every pod in the namespace — the "applied to
+	// the whole project" case; otherwise scope to the Group's labels.
+	podSelector := map[string]any{}
+	if len(s.AppliedTo) > 0 {
+		podSelector = map[string]any{"matchLabels": toStrAny(s.AppliedTo)}
+	}
+	spec := map[string]any{"podSelector": podSelector, "policyTypes": []any{"Ingress"}}
+	if len(s.Ingress) > 0 {
+		ingress := make([]any, 0, len(s.Ingress))
+		for _, r := range s.Ingress {
+			rule := map[string]any{}
+			if len(r.From) > 0 {
+				from := make([]any, 0, len(r.From))
+				for _, peer := range r.From {
+					from = append(from, map[string]any{"podSelector": map[string]any{"matchLabels": toStrAny(peer)}})
+				}
+				rule["from"] = from
+			}
+			if len(r.Ports) > 0 {
+				ports := make([]any, 0, len(r.Ports))
+				for i, p := range r.Ports {
+					if p.Protocol != "TCP" && p.Protocol != "UDP" && p.Protocol != "SCTP" {
+						return "", nil, fmt.Errorf("rule port %d: protocol must be TCP, UDP or SCTP", i+1)
+					}
+					if p.Port <= 0 || p.Port > 65535 {
+						return "", nil, fmt.Errorf("rule port %d: port must be 1..65535", i+1)
+					}
+					ports = append(ports, map[string]any{"protocol": p.Protocol, "port": p.Port})
+				}
+				rule["ports"] = ports
+			}
+			ingress = append(ingress, rule)
+		}
+		spec["ingress"] = ingress
+	}
+	out, err := yaml.Marshal(map[string]any{
+		"apiVersion": "networking.k8s.io/v1",
+		"kind":       "NetworkPolicy",
+		"metadata":   map[string]any{"name": s.Name, "namespace": s.Namespace},
+		"spec":       spec,
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return s.Namespace + "/networkpolicies/" + s.Name + ".yaml", out, nil
+}
+
+// AdminNetworkPolicySpec describes the cluster-wide admin DFW tier —
+// AdminNetworkPolicy (priority-ordered, actions Allow/Deny/Pass) or, when Baseline,
+// BaselineAdminNetworkPolicy (the cluster default: a singleton named "default", no
+// priority, actions Allow/Deny only). Both override or backstop tenant
+// NetworkPolicies, so they are cluster-scoped, platform-tier, and admin-only. Subject
+// and peers are namespace selectors — Groups of projects.
+type AdminNetworkPolicySpec struct {
+	Name     string            `json:"name"`
+	Baseline bool              `json:"baseline,omitempty"` // render a BaselineAdminNetworkPolicy
+	Priority int               `json:"priority,omitempty"` // 0..1000, lower = higher precedence (ANP only)
+	Subject  map[string]string `json:"subject,omitempty"`  // namespaceSelector matchLabels; empty = all namespaces
+	Ingress  []AdminPolicyRule `json:"ingress,omitempty"`
+	Egress   []AdminPolicyRule `json:"egress,omitempty"`
+}
+
+// AdminPolicyRule is one ordered admin rule: an action against the peer Groups
+// (namespace selectors), optionally narrowed to ports.
+type AdminPolicyRule struct {
+	Action string              `json:"action"`          // Allow | Deny | Pass (Pass is ANP-only)
+	Peers  []map[string]string `json:"peers,omitempty"` // namespaceSelector matchLabels — the from/to Groups
+	Ports  []PolicyPort        `json:"ports,omitempty"`
+}
+
+// AdminNetworkPolicyManifest renders the (Baseline)AdminNetworkPolicy YAML plus its
+// repo-relative path. A baseline policy is the cluster singleton "default" — no
+// priority, and Pass is not a valid action.
+func AdminNetworkPolicyManifest(s AdminNetworkPolicySpec) (path string, content []byte, err error) {
+	name := s.Name
+	if s.Baseline {
+		name = "default" // BANP is a cluster singleton named default
+	} else if name == "" {
+		return "", nil, fmt.Errorf("a name is required")
+	} else if s.Priority < 0 || s.Priority > 1000 {
+		return "", nil, fmt.Errorf("priority must be 0..1000")
+	}
+	subjectSel := map[string]any{}
+	if len(s.Subject) > 0 {
+		subjectSel = map[string]any{"matchLabels": toStrAny(s.Subject)}
+	}
+	spec := map[string]any{"subject": map[string]any{"namespaces": subjectSel}}
+	if !s.Baseline {
+		spec["priority"] = s.Priority
+	}
+	renderRules := func(rules []AdminPolicyRule, peerKey string) ([]any, error) {
+		out := make([]any, 0, len(rules))
+		for i, r := range rules {
+			switch r.Action {
+			case "Allow", "Deny":
+				// always valid
+			case "Pass":
+				if s.Baseline {
+					return nil, fmt.Errorf("rule %d: a baseline policy has no Pass action (Allow or Deny only)", i+1)
+				}
+			default:
+				return nil, fmt.Errorf("rule %d: action must be Allow, Deny or Pass", i+1)
+			}
+			if len(r.Peers) == 0 {
+				return nil, fmt.Errorf("rule %d: at least one peer Group is required", i+1)
+			}
+			peers := make([]any, 0, len(r.Peers))
+			for _, p := range r.Peers {
+				sel := map[string]any{}
+				if len(p) > 0 {
+					sel = map[string]any{"matchLabels": toStrAny(p)}
+				}
+				peers = append(peers, map[string]any{"namespaces": sel})
+			}
+			rule := map[string]any{"action": r.Action, peerKey: peers}
+			if len(r.Ports) > 0 {
+				ports := make([]any, 0, len(r.Ports))
+				for j, pt := range r.Ports {
+					if pt.Protocol != "TCP" && pt.Protocol != "UDP" && pt.Protocol != "SCTP" {
+						return nil, fmt.Errorf("rule %d port %d: protocol must be TCP, UDP or SCTP", i+1, j+1)
+					}
+					if pt.Port <= 0 || pt.Port > 65535 {
+						return nil, fmt.Errorf("rule %d port %d: port must be 1..65535", i+1, j+1)
+					}
+					ports = append(ports, map[string]any{"portNumber": map[string]any{"protocol": pt.Protocol, "port": pt.Port}})
+				}
+				rule["ports"] = ports
+			}
+			out = append(out, rule)
+		}
+		return out, nil
+	}
+	if len(s.Ingress) > 0 {
+		ing, err := renderRules(s.Ingress, "from")
+		if err != nil {
+			return "", nil, err
+		}
+		spec["ingress"] = ing
+	}
+	if len(s.Egress) > 0 {
+		eg, err := renderRules(s.Egress, "to")
+		if err != nil {
+			return "", nil, err
+		}
+		spec["egress"] = eg
+	}
+	kind, dir := "AdminNetworkPolicy", "adminnetworkpolicies"
+	if s.Baseline {
+		kind, dir = "BaselineAdminNetworkPolicy", "baselineadminnetworkpolicies"
+	}
+	out, err := yaml.Marshal(map[string]any{
+		"apiVersion": "policy.networking.k8s.io/v1alpha1",
+		"kind":       kind,
+		"metadata":   map[string]any{"name": name},
+		"spec":       spec,
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return dir + "/" + name + ".yaml", out, nil
+}
+
 func toAny(ss []string) []any {
 	out := make([]any, len(ss))
 	for i, s := range ss {

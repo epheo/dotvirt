@@ -34,11 +34,17 @@ const (
 type Resource string
 
 const (
-	ResourceVM          Resource = "vm"
-	ResourceNetwork     Resource = "network"     // a Distributed Port Group (UDN/CUDN)
-	ResourceUplink      Resource = "uplink"      // a physical-network attachment (nmstate NNCP)
-	ResourceNamespace   Resource = "namespace"   // a namespace (+ optional primary "VM Network")
-	ResourceRoleBinding Resource = "rolebinding" // a tenant owners → namespace-admin grant
+	ResourceVM                         Resource = "vm"
+	ResourceNetwork                    Resource = "network"                    // a Distributed Port Group (UDN/CUDN)
+	ResourceUplink                     Resource = "uplink"                     // a physical-network attachment (nmstate NNCP)
+	ResourceNamespace                  Resource = "namespace"                  // a namespace (+ optional primary "VM Network")
+	ResourceRoleBinding                Resource = "rolebinding"                // a tenant owners → namespace-admin grant
+	ResourceEgressFirewall             Resource = "egressfirewall"             // a namespace's north-south egress firewall (Tier-1)
+	ResourceEgressIP                   Resource = "egressip"                   // a cluster-scoped SNAT pool (Tier-0)
+	ResourceExternalRoute              Resource = "externalroute"              // a cluster-scoped external next-hop route (Tier-0)
+	ResourceNetworkPolicy              Resource = "networkpolicy"              // a namespace's east-west distributed firewall
+	ResourceAdminNetworkPolicy         Resource = "adminnetworkpolicy"         // cluster-wide admin DFW (ANP)
+	ResourceBaselineAdminNetworkPolicy Resource = "baselineadminnetworkpolicy" // cluster baseline DFW (BANP)
 )
 
 // Entry is one pending change, keyed by resource+namespace/name within its
