@@ -41,8 +41,8 @@ run: build
 release:
 	VERSION=$(VERSION) PREV=$(PREV) ./hack/release.sh
 
-# Cut a candidate-channel preview (release-candidate) for QA on a test cluster —
-# never enters the alpha channel. Throwaway. See hack/preview.sh.
+# Cut a candidate-v0 preview (release-candidate) for QA on a test cluster —
+# never enters the stable-v0 channel. Throwaway. See hack/preview.sh.
 #   VERSION=0.0.6-rc.1 make preview
 preview:
 	VERSION=$(VERSION) ./hack/preview.sh

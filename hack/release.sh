@@ -11,7 +11,7 @@
 # Idempotent: re-running rebuilds and re-pins. Afterwards the working tree holds the
 # digest-pinned files — commit them as the release commit and tag v$VERSION. The images are
 # already published; `kubectl apply -f operator/install/catalogsource.yaml` rolls a cluster
-# forward (OLM upgrades within the alpha channel).
+# forward (OLM upgrades within the stable-v0 channel).
 set -euo pipefail
 VERSION="${VERSION:?set VERSION=x.y.z}"
 PREV="${PREV:?set PREV=x.y.z — the version $VERSION replaces}"
@@ -22,7 +22,6 @@ build_push Containerfile . "$REG/dotvirt:$SHA" --build-arg VERSION="$VERSION"
 skopeo copy --multi-arch all "docker://$REG/dotvirt:$SHA" "docker://$REG/dotvirt:v$VERSION"
 D_APP="$(digest "$REG/dotvirt:$SHA")"; echo "   app digest: $D_APP"
 repin "$REG/dotvirt" "$D_APP" operator/internal/install/dotvirt.go operator/config/manager/manager.yaml
-sed -i -E "s#replaces: dotvirt-operator\.v[0-9.]+#replaces: dotvirt-operator.v$PREV#" "$CSV"
 
 echo ">> [2/4] operator -> $REG/dotvirt-operator:v$VERSION"
 build_push operator/Dockerfile . "$REG/dotvirt-operator:v$VERSION" --build-arg VERSION="$VERSION"

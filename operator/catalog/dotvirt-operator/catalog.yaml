@@ -1,19 +1,19 @@
 ---
-defaultChannel: alpha
+defaultChannel: stable-v0
 name: dotvirt-operator
 schema: olm.package
 ---
 entries:
 - name: dotvirt-operator.v0.0.7
   replaces: dotvirt-operator.v0.0.6
-name: alpha
+name: stable-v0
 package: dotvirt-operator
 schema: olm.channel
 ---
 entries:
 - name: dotvirt-operator.v0.0.7
   replaces: dotvirt-operator.v0.0.6
-name: candidate
+name: candidate-v0
 package: dotvirt-operator
 schema: olm.channel
 ---

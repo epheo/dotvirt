@@ -1,7 +1,7 @@
-# Cut a candidate-channel preview (release-candidate) for QA — runs hack/preview.sh
+# Cut a candidate-v0 preview (release-candidate) for QA — runs hack/preview.sh
 # (build + push app/operator/bundle + a preview catalog, all digest-pinned, into the
-# `candidate` channel only; `alpha` is untouched, so it's never a published release).
-# Uploads the preview CatalogSource as an artifact to apply on a candidate-channel
+# `candidate-v0` channel only; `stable-v0` is untouched, so it's never a published release).
+# Uploads the preview CatalogSource as an artifact to apply on a candidate-v0
 # cluster (hetznet). Runs in the `QUAY` environment.
 name: preview
 

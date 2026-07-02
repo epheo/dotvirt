@@ -21,8 +21,8 @@ make -C operator scorecard          # scorecard (needs a cluster)
 
 CI (`.github/workflows/ci.yaml`) runs `go vet`/`go test`, the SPA build, the operator
 build, a **generated-manifests-in-sync** check, `operator-sdk bundle validate
---select-optional suite=operatorframework` + `opm validate`, and an on-cluster
-kind + OLM install + scorecard. Run the equivalents locally before pushing.
+--select-optional suite=operatorframework` + `opm validate`, and an on-cluster kind + OLM
+install + scorecard. Run the equivalents locally before pushing.
 
 ## Sign your commits (DCO)
 
@@ -37,21 +37,22 @@ This is enforced on the community-operator submissions (below) and expected here
 
 ## Releasing
 
-Two channels: **`alpha`** is released versions only (what external consumers
-subscribe to); **`candidate`** carries release-candidates *and* releases (the QA/test
-cluster subscribes here). All tool versions (`operator-sdk`, `opm`,
+Two channels (OLM convention, `-v0` for the `v1alpha1` API): **`stable-v0`** is
+released versions only (what external consumers subscribe to); **`candidate-v0`**
+carries release-candidates *and* releases (the QA/test cluster subscribes here). All
+tool versions (`operator-sdk`, `opm`,
 `operator-manifest-tools`, …) are pinned in `hack/versions.env` — the single source
 the Makefile, the `hack/` scripts, and the workflows all read — so local and CI builds
 match.
 
 **Preview (QA on a test cluster), throwaway — never a published release:**
-`hack/preview.sh` builds + pushes preview images and a `candidate`-only catalog, then
+`hack/preview.sh` builds + pushes preview images and a `candidate-v0`-only catalog, then
 restores the working tree (nothing committed). Run it locally, or trigger the `preview`
 workflow (`workflow_dispatch`, version input), which uploads the CatalogSource artifact.
 
 ```sh
 VERSION=0.0.6-rc.1 hack/preview.sh
-kubectl apply -f operator/install/catalogsource-preview.yaml   # roll a candidate cluster
+kubectl apply -f operator/install/catalogsource-preview.yaml   # roll a candidate-v0 cluster
 ```
 
 **Release:** push a `v*` tag — the `release` workflow cuts a digest-pinned, multi-arch
@@ -60,7 +61,7 @@ and catalog to `quay.io/epheo`, resolves each immutable `@sha256`, and pins them
 `DefaultImage` + the manager's `RELATED_IMAGE_*` env (from which `operator-manifest-tools`
 assembles the bundle's `relatedImages` at `make bundle`), the operator Deployment, the
 catalog template, and the `CatalogSource`. Never pushes `:latest`. `PREV` (the version
-this replaces) is derived from the current `alpha` head.
+this replaces) is derived from the current `stable-v0` head.
 
 ```sh
 git tag v0.0.6 && git push origin v0.0.6
@@ -77,6 +78,33 @@ the pinned tree yourself.
 > no OLM upgrade edge *between* previews (or preview→release). To move a cluster off a
 > preview, delete its CSV and re-create the Subscription (same channel) — OLM then
 > resolves to the catalog's current head.
+
+## Seamless upgrades
+
+The CSV claims `capabilities: Seamless Upgrades` (operator capability **level 2**): a new
+operator version installs over the old one *and* keeps managing the `Dotvirt` instance the
+old one created, rolling the operand without the user touching the CR. Two things back this:
+
+- **The operand rolls with the operator** — `TestOperandImageRollsWithOperatorUpgrade`
+  (`operator/internal/install`) pins the render invariant: an unpinned CR takes the operand
+  image from `RELATED_IMAGE_DOTVIRT` (which OLM sets on the manager from each new CSV) and
+  falls back to the compiled-in, digest-pinned `DefaultImage` — so a newer operator
+  re-reconciles an existing CR into a rolled operand, and an explicit `spec.image` still wins.
+- **The OLM upgrade graph is valid** — `operator-sdk bundle validate` + `opm validate` (the
+  `validate` job) check the CSV/channel/`replaces` wiring on every PR, and the `bundle-test`
+  job installs the bundle on kind via OLM.
+
+To keep the claim honest as the API evolves, hold this discipline:
+
+- **Additive-only within `v1alpha1`.** Never make an existing field required, change its
+  type, or repurpose its meaning — an old CR must still validate and reconcile under the new
+  operator. New fields are optional with a safe zero-value default.
+- **The operand must roll on operator upgrade, not require a CR edit.** The app image is the
+  operator's pinned `DefaultImage` (the CR leaves `spec.image` empty), so bumping the
+  operator bumps the operand — keep it that way.
+- **A second stored API version needs a conversion webhook.** The first time you introduce
+  `v1beta1`/`v1` alongside `v1alpha1`, ship conversion so existing stored objects upgrade;
+  only then bump the channel to `stable-v1` and migrate subscribers.
 
 ## Submitting to OperatorHub / OpenShift OperatorHub
 
@@ -102,11 +130,14 @@ Then open **two** DCO-signed PRs (same bundle, separate repos):
 
 Each repo's CI runs the same `operator-sdk bundle validate` the `bundle` target runs,
 installs the bundle on a throwaway cluster, and runs scorecard. The `ci.yaml` lists
-`reviewers` (for merge) and `updateGraph: replaces-mode` (our CSV uses `spec.replaces`,
-not semver).
+`reviewers` (for merge) and `updateGraph: semver-mode`: the community pipeline derives
+the upgrade edge from the CSV's `spec.version`, so the **submitted bundle CSV carries no
+`spec.replaces`** (a first submission has no prior version in their catalog to replace).
+The `replaces` edge in our FBC (`operator/catalog-template.yaml`) is for **self-hosting
+only** and is not part of a community submission.
 
 ### Notes / future work
 
-- **Channels.** `alpha` is the only *published* channel today (matching the
-  `v1alpha1` API; `candidate` is internal QA — see Releasing). Add a `stable` channel
-  when the API graduates.
+- **Channels.** `stable-v0` is the *published* channel today; `candidate-v0` is
+  internal QA (rc + releases — see Releasing). The `-v0` suffix tracks the `v1alpha1`
+  API; add `stable-v1` (and migrate subscribers) when the API graduates.

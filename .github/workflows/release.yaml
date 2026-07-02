@@ -4,7 +4,7 @@
 # the tagged commit — the tag marks intent, the merged PR is the record.
 #
 # Triggered two ways: push a `v*` tag (VERSION from the tag, PREV = the current
-# alpha-channel head in operator/catalog-template.yaml — no manual input, so it can't
+# stable-v0-channel head in operator/catalog-template.yaml — no manual input, so it can't
 # drift), or workflow_dispatch for re-runs / overrides with an explicit version + prev.
 # Runs in the `QUAY` environment (QUAY_USERNAME / QUAY_PASSWORD push secrets).
 name: release
@@ -43,10 +43,10 @@ jobs:
         run: grep -v '^#' hack/versions.env >> "$GITHUB_ENV"
       - name: Resolve version + prev
         run: |
-          source hack/lib.sh   # current_alpha_head + repo-root cd
+          source hack/lib.sh   # current_stable_head + repo-root cd
           if [ "${{ github.event_name }}" = push ]; then
-            ver="${GITHUB_REF_NAME#v}"            # tag v1.2.3 -> 1.2.3
-            prev="$(current_alpha_head || true)"  # what it replaces — the alpha head recorded in git
+            ver="${GITHUB_REF_NAME#v}"             # tag v1.2.3 -> 1.2.3
+            prev="$(current_stable_head || true)"  # what it replaces — the stable-v0 head recorded in git
           else
             ver="${{ inputs.version }}"; prev="${{ inputs.prev }}"
           fi

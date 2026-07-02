@@ -1,6 +1,6 @@
-# Self-hosted dotvirt operator catalog, pinned by immutable digest (== :v0.0.4). To
-# publish a release, bump .spec.image to the new catalog's digest; OLM then upgrades
-# subscribers within installPlanApproval.
+# Self-hosted dotvirt operator catalog, pinned by immutable digest (hack/release.sh repins
+# it per release — the digest is the source of truth, not a tag). To publish a release, bump
+# .spec.image to the new catalog's digest; OLM then upgrades subscribers within installPlanApproval.
 apiVersion: operators.coreos.com/v1alpha1
 kind: CatalogSource
 metadata:

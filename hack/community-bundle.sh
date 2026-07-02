@@ -35,11 +35,15 @@ cp -r "$BUNDLE/manifests" "$OUT/manifests"
 cp -r "$BUNDLE/metadata" "$OUT/metadata"
 [ -d "$BUNDLE/tests" ] && cp -r "$BUNDLE/tests" "$OUT/tests"
 
-# Package-level ci.yaml: replaces-mode (our CSV uses spec.replaces, not semver) + the
-# reviewer who can approve the submission PR in the community repos.
+# Package-level ci.yaml: semver-mode + the reviewer who can approve the submission PR
+# in the community repos. semver-mode lets the community pipeline derive the upgrade
+# edge from the CSV's spec.version, so the submitted bundle CSV carries NO spec.replaces
+# (a first submission has no prior version in their catalog to replace anyway). The
+# replaces edge in our FBC (operator/catalog-template.yaml) is for SELF-HOSTING only and
+# is not part of a community submission.
 cat > "$DEST/operators/$PKG/ci.yaml" <<'EOF'
 ---
-updateGraph: replaces-mode
+updateGraph: semver-mode
 reviewers:
   - epheo
 EOF
