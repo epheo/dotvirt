@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { api, Unauthorized, type VMEvent } from '$lib/api';
 	import { relativeAge } from '$lib/format';
-	import ScopePerformance from './ScopePerformance.svelte';
+	import MetricsPanel from './MetricsPanel.svelte';
 
 	let {
 		namespaces,
@@ -27,7 +27,7 @@
 			const set = new Set(namespaces);
 			events = all.filter((e) => !e.namespace || set.has(e.namespace));
 		} catch (e) {
-			if (e instanceof Unauthorized) return;
+			if (e instanceof Unauthorized) return; // signed out centrally by the api layer
 			events = [];
 		} finally {
 			loading = false;
@@ -41,7 +41,6 @@
 		key;
 		load();
 	});
-
 </script>
 
 <div class="p-4">
@@ -59,7 +58,14 @@
 	</div>
 	{#if view === 'performance'}
 		{#key `${scope.project ?? ''}|${scope.namespace ?? ''}|${scope.node ?? ''}`}
-			<ScopePerformance {scope} />
+			<MetricsPanel
+				load={(r) =>
+					api.scopeMetrics(
+						{ project: scope.project, namespace: scope.namespace, node: scope.node },
+						r
+					)}
+				emptyText="No VM metrics in this scope yet."
+			/>
 		{/key}
 	{:else if loading && !events}
 		<div class="py-8 text-center text-sm text-slate-400">Loading events…</div>
@@ -93,14 +99,16 @@
 							{#if e.name}
 								<button
 									onclick={() => e.namespace && e.name && onselect?.(e.namespace, e.name)}
-									class="font-medium text-slate-700 hover:text-blue-700 hover:underline">{e.name}</button
+									class="font-medium text-slate-700 hover:text-blue-700 hover:underline"
+									>{e.name}</button
 								>
 							{:else}—{/if}
 						</td>
 						<td class="py-1.5 pr-3 font-medium text-slate-700">{e.reason}</td>
 						<td class="py-1.5 pr-3 text-slate-600">{e.message}</td>
 						<td class="py-1.5 whitespace-nowrap text-slate-500">
-							{relativeAge(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-slate-400"> ×{e.count}</span
+							{relativeAge(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-slate-400">
+									×{e.count}</span
 								>{/if}
 						</td>
 					</tr>

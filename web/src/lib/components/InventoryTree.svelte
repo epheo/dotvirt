@@ -21,17 +21,9 @@
 		ProjectNamespace,
 		VM
 	} from '$lib/api';
-	import { vmNetworkKeys, vmStorageKeys } from '$lib/lenses';
+	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
 	import PowerDot from './PowerDot.svelte';
 	import SyncBadge from './SyncBadge.svelte';
-
-	type Scope =
-		| { kind: 'all' }
-		| { kind: 'project'; project: string }
-		| { kind: 'namespace'; project: string; namespace: string }
-		| { kind: 'node'; node: string }
-		| { kind: 'network'; network: string }
-		| { kind: 'storage'; storageClass: string };
 
 	let {
 		inventory,
@@ -314,7 +306,9 @@
 									onclick={() => toggle(nid)}
 									title="Expand/collapse"
 								>
-									{#if collapsed[nid]}<ChevronRight size={12} />{:else}<ChevronDown size={12} />{/if}
+									{#if collapsed[nid]}<ChevronRight size={12} />{:else}<ChevronDown
+											size={12}
+										/>{/if}
 								</button>
 								<button
 									class="flex min-w-0 flex-1 items-center gap-1 text-left"
@@ -331,7 +325,8 @@
 									<Layers size={13} class="shrink-0 text-slate-400" />
 									<span class="truncate text-slate-600">{ns.namespace}</span>
 									{#if nsDrift(ns)}
-										<span class="h-1.5 w-1.5 rounded-full bg-red-500" title="A VM is OutOfSync"></span>
+										<span class="h-1.5 w-1.5 rounded-full bg-red-500" title="A VM is OutOfSync"
+										></span>
 									{/if}
 									<span class="ml-auto text-xs text-slate-400">{ns.vms.length}</span>
 								</button>

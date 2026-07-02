@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { X } from 'lucide-svelte';
+	import Modal from './Modal.svelte';
 
 	// A vCenter-style wizard scaffold: a left step-rail, one panel at a time, and a
 	// Back/Next/Finish footer. Navigation is deliberately *free* — every step is
@@ -64,80 +64,64 @@
 	}
 </script>
 
-<div
-	class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-	onclick={(e) => e.target === e.currentTarget && onclose()}
-	onkeydown={(e) => e.key === 'Escape' && onclose()}
-	role="presentation"
->
-	<div class="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-lg bg-white shadow-xl">
-		<header class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-			<h2 class="flex items-center gap-2 text-base font-semibold text-slate-800">
-				{#if icon}{@render icon()}{/if}{title}
-			</h2>
-			<button onclick={onclose} aria-label="Close" class="text-slate-400 hover:text-slate-700"
-				><X size={18} /></button
-			>
-		</header>
-
-		<div class="flex min-h-0 flex-1">
-			<!-- Step rail: every item is clickable (free navigation). -->
-			<nav class="w-52 shrink-0 space-y-0.5 overflow-y-auto border-r border-slate-200 bg-slate-50/60 p-2">
-				{#each steps as step, i (i)}
-					{@const b = railBadge(step, i)}
-					<button
-						type="button"
-						onclick={() => go(i)}
-						class="flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-sm {i ===
-						current
-							? 'bg-blue-50 font-medium text-blue-700'
-							: 'text-slate-600 hover:bg-slate-100'}"
+<Modal {title} size="3xl" {icon} {onclose}>
+	<div class="flex min-h-0 flex-1">
+		<!-- Step rail: every item is clickable (free navigation). -->
+		<nav
+			class="w-52 shrink-0 space-y-0.5 overflow-y-auto border-r border-slate-200 bg-slate-50/60 p-2"
+		>
+			{#each steps as step, i (i)}
+				{@const b = railBadge(step, i)}
+				<button
+					type="button"
+					onclick={() => go(i)}
+					class="flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-sm {i ===
+					current
+						? 'bg-blue-50 font-medium text-blue-700'
+						: 'text-slate-600 hover:bg-slate-100'}"
+				>
+					<span
+						class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] {b.cls}"
+						>{b.text}</span
 					>
-						<span
-							class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] {b.cls}"
-							>{b.text}</span
-						>
-						<span class="truncate">{step.title}</span>
-					</button>
-				{/each}
-			</nav>
+					<span class="truncate">{step.title}</span>
+				</button>
+			{/each}
+		</nav>
 
-			<!-- Active step body. -->
-			<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm">
-				{#if steps[current]}{@render steps[current].body()}{/if}
-			</div>
+		<!-- Active step body. -->
+		<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm">
+			{#if steps[current]}{@render steps[current].body()}{/if}
 		</div>
-
-		{#if error}
-			<pre
-				class="mx-5 mb-1 rounded bg-red-50 p-2 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
-		{/if}
-
-		<footer class="flex items-center gap-2 border-t border-slate-200 px-5 py-3">
-			{#if footerHint}<span class="text-xs text-slate-400">{footerHint}</span>{/if}
-			<button
-				onclick={onclose}
-				class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button
-			>
-			<button
-				onclick={back}
-				disabled={current === 0}
-				class="rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100 disabled:text-slate-300"
-				>Back</button
-			>
-			{#if last}
-				<button
-					onclick={onfinish}
-					disabled={!canFinish || submitting}
-					class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
-					>{finishLabel}</button
-				>
-			{:else}
-				<button
-					onclick={next}
-					class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white">Next</button
-				>
-			{/if}
-		</footer>
 	</div>
-</div>
+
+	{#if error}
+		<pre
+			class="mx-5 mb-1 rounded bg-red-50 p-2 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+	{/if}
+	{#snippet footer()}
+		{#if footerHint}<span class="text-xs text-slate-400">{footerHint}</span>{/if}
+		<button
+			onclick={onclose}
+			class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button
+		>
+		<button
+			onclick={back}
+			disabled={current === 0}
+			class="rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100 disabled:text-slate-300"
+			>Back</button
+		>
+		{#if last}
+			<button
+				onclick={onfinish}
+				disabled={!canFinish || submitting}
+				class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
+				>{finishLabel}</button
+			>
+		{:else}
+			<button onclick={next} class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white"
+				>Next</button
+			>
+		{/if}
+	{/snippet}
+</Modal>

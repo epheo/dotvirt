@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { X } from 'lucide-svelte';
 	import { api, type NetworkCreate, type Uplink } from '$lib/api';
 	import { TERMS, dual } from '$lib/vocab';
+	import Modal from './Modal.svelte';
+	import StageFooter from './StageFooter.svelte';
 
 	let {
 		namespaces,
@@ -79,188 +80,167 @@
 	}
 </script>
 
-<div
-	class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-	onclick={(e) => e.target === e.currentTarget && onclose()}
-	onkeydown={(e) => e.key === 'Escape' && onclose()}
-	role="presentation"
->
-	<div class="flex max-h-[90vh] w-full max-w-md flex-col rounded-lg bg-white shadow-xl">
-		<header class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-			<h2 class="text-base font-semibold text-slate-800">
-				New {TERMS.segment.nsx}
-				<span class="font-normal text-slate-400">· {TERMS.segment.vsphere}</span>
-			</h2>
-			<button onclick={onclose} aria-label="Close" class="text-slate-400 hover:text-slate-700"
-				><X size={18} /></button
-			>
-		</header>
-		<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
-			<!-- Segment type: an overlay (Geneve) Layer 2 network, or a VLAN bridged to a
+<Modal title={`New ${TERMS.segment.nsx} · ${TERMS.segment.vsphere}`} {onclose}>
+	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
+		<!-- Segment type: an overlay (Geneve) Layer 2 network, or a VLAN bridged to a
 			     Tier-0 uplink. -->
-			<div class="flex gap-2">
+		<div class="flex gap-2">
+			<button
+				onclick={() => (kind = 'overlay')}
+				class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'overlay'
+					? 'border-blue-500 bg-blue-50 text-blue-700'
+					: 'border-slate-300 text-slate-600'}"
+			>
+				<div class="font-medium">Overlay Segment</div>
+				<div class="text-slate-400">Internal · Geneve (Layer 2)</div>
+			</button>
+			{#if canManage}
 				<button
-					onclick={() => (kind = 'overlay')}
-					class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'overlay'
+					onclick={() => (kind = 'vlan')}
+					class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'vlan'
 						? 'border-blue-500 bg-blue-50 text-blue-700'
 						: 'border-slate-300 text-slate-600'}"
 				>
-					<div class="font-medium">Overlay Segment</div>
-					<div class="text-slate-400">Internal · Geneve (Layer 2)</div>
+					<div class="font-medium">VLAN Segment</div>
+					<div class="text-slate-400">Bridged to a Tier-0 uplink</div>
 				</button>
-				{#if canManage}
+			{/if}
+		</div>
+
+		<label class="block">
+			<span class="text-slate-600">Name</span>
+			<input
+				bind:value={name}
+				placeholder="db-net"
+				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+			/>
+		</label>
+
+		{#if kind === 'overlay'}
+			<!-- An overlay segment is a single-project UDN, or a Layer2 CUDN shared across
+				     several projects. -->
+			{#if canManage}
+				<div class="flex gap-2">
 					<button
-						onclick={() => (kind = 'vlan')}
-						class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'vlan'
+						onclick={() => (shared = false)}
+						class="flex-1 rounded border px-3 py-2 text-left text-xs {!shared
 							? 'border-blue-500 bg-blue-50 text-blue-700'
 							: 'border-slate-300 text-slate-600'}"
 					>
-						<div class="font-medium">VLAN Segment</div>
-						<div class="text-slate-400">Bridged to a Tier-0 uplink</div>
+						<div class="font-medium">This project</div>
+						<div class="text-slate-400">UDN · one namespace (Tier-1)</div>
 					</button>
-				{/if}
+					<button
+						onclick={() => (shared = true)}
+						class="flex-1 rounded border px-3 py-2 text-left text-xs {shared
+							? 'border-blue-500 bg-blue-50 text-blue-700'
+							: 'border-slate-300 text-slate-600'}"
+					>
+						<div class="font-medium">Shared</div>
+						<div class="text-slate-400">CUDN · selected projects</div>
+					</button>
+				</div>
+			{/if}
+			{#if !shared}
+				<label class="block">
+					<span class="text-slate-600">Project (namespace)</span>
+					<select
+						bind:value={namespace}
+						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+					>
+						{#each namespaces as ns (ns)}<option value={ns}>{ns}</option>{/each}
+					</select>
+				</label>
+			{/if}
+		{:else}
+			<div class="grid grid-cols-2 gap-3">
+				<label class="block">
+					<span class="text-slate-600">VLAN ID</span>
+					<input
+						type="number"
+						bind:value={vlan}
+						placeholder="200"
+						min="1"
+						max="4094"
+						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+					/>
+				</label>
+				<label class="block">
+					<span class="flex items-center justify-between text-slate-600"
+						>Uplink ({TERMS.uplink.nsx}){#if onAddUplink}<button
+								type="button"
+								onclick={onAddUplink}
+								class="text-xs font-normal text-blue-600 hover:underline">+ Add uplink…</button
+							>{/if}</span
+					>
+					<input
+						bind:value={physnet}
+						placeholder="physnet-prod"
+						list="uplink-list"
+						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+					/>
+					<datalist id="uplink-list">
+						{#each uplinks as u (u.name)}<option value={u.name}></option>{/each}
+					</datalist>
+				</label>
 			</div>
+		{/if}
 
-			<label class="block">
-				<span class="text-slate-600">Name</span>
-				<input
-					bind:value={name}
-					placeholder="db-net"
-					class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
-				/>
-			</label>
+		{#if isShared}
+			<div>
+				<span class="text-slate-600">Published to projects</span>
+				<div class="mt-1 max-h-28 space-y-1 overflow-y-auto rounded border border-slate-300 p-2">
+					{#each namespaces as ns (ns)}
+						<label class="flex items-center gap-2 text-xs">
+							<input
+								type="checkbox"
+								checked={selectedNs.includes(ns)}
+								onchange={(e) => toggleNs(ns, e.currentTarget.checked)}
+							/>
+							<span class="text-slate-700">{ns}</span>
+						</label>
+					{/each}
+				</div>
+			</div>
+		{/if}
 
+		<label class="block">
+			<span class="text-slate-600"
+				>Subnet <span class="text-slate-400">(optional CIDR; blank = no IPAM)</span></span
+			>
+			<input
+				bind:value={subnet}
+				placeholder="10.20.0.0/24"
+				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+			/>
+		</label>
+
+		<p class="rounded bg-slate-50 px-3 py-2 text-xs text-slate-500">
 			{#if kind === 'overlay'}
-				<!-- An overlay segment is a single-project UDN, or a Layer2 CUDN shared across
-				     several projects. -->
-				{#if canManage}
-					<div class="flex gap-2">
-						<button
-							onclick={() => (shared = false)}
-							class="flex-1 rounded border px-3 py-2 text-left text-xs {!shared
-								? 'border-blue-500 bg-blue-50 text-blue-700'
-								: 'border-slate-300 text-slate-600'}"
-						>
-							<div class="font-medium">This project</div>
-							<div class="text-slate-400">UDN · one namespace (Tier-1)</div>
-						</button>
-						<button
-							onclick={() => (shared = true)}
-							class="flex-1 rounded border px-3 py-2 text-left text-xs {shared
-								? 'border-blue-500 bg-blue-50 text-blue-700'
-								: 'border-slate-300 text-slate-600'}"
-						>
-							<div class="font-medium">Shared</div>
-							<div class="text-slate-400">CUDN · selected projects</div>
-						</button>
-					</div>
-				{/if}
-				{#if !shared}
-					<label class="block">
-						<span class="text-slate-600">Project (namespace)</span>
-						<select
-							bind:value={namespace}
-							class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
-						>
-							{#each namespaces as ns (ns)}<option value={ns}>{ns}</option>{/each}
-						</select>
-					</label>
-				{/if}
+				An isolated overlay segment (Layer 2){shared
+					? ', shared across the selected projects — a cluster-scoped CUDN, proposed to the platform repository'
+					: ' scoped to this project (a namespace UDN on its Tier-1)'}.
 			{:else}
-				<div class="grid grid-cols-2 gap-3">
-					<label class="block">
-						<span class="text-slate-600">VLAN ID</span>
-						<input
-							type="number"
-							bind:value={vlan}
-							placeholder="200"
-							min="1"
-							max="4094"
-							class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
-						/>
-					</label>
-					<label class="block">
-						<span class="flex items-center justify-between text-slate-600"
-							>Uplink ({TERMS.uplink.nsx}){#if onAddUplink}<button
-									type="button"
-									onclick={onAddUplink}
-									class="text-xs font-normal text-blue-600 hover:underline">+ Add uplink…</button
-								>{/if}</span
-						>
-						<input
-							bind:value={physnet}
-							placeholder="physnet-prod"
-							list="uplink-list"
-							class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
-						/>
-						<datalist id="uplink-list">
-							{#each uplinks as u (u.name)}<option value={u.name}></option>{/each}
-						</datalist>
-					</label>
-				</div>
+				A VLAN segment (localnet) bridged to the chosen {TERMS.uplink.nsx.toLowerCase()}, published
+				to the selected projects. Cluster-scoped — proposed to the platform repository; the uplink
+				must already carry that physical network.
 			{/if}
-
-			{#if isShared}
-				<div>
-					<span class="text-slate-600">Published to projects</span>
-					<div class="mt-1 max-h-28 space-y-1 overflow-y-auto rounded border border-slate-300 p-2">
-						{#each namespaces as ns (ns)}
-							<label class="flex items-center gap-2 text-xs">
-								<input
-									type="checkbox"
-									checked={selectedNs.includes(ns)}
-									onchange={(e) => toggleNs(ns, e.currentTarget.checked)}
-								/>
-								<span class="text-slate-700">{ns}</span>
-							</label>
-						{/each}
-					</div>
-				</div>
-			{/if}
-
-			<label class="block">
-				<span class="text-slate-600"
-					>Subnet <span class="text-slate-400">(optional CIDR; blank = no IPAM)</span></span
-				>
-				<input
-					bind:value={subnet}
-					placeholder="10.20.0.0/24"
-					class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
-				/>
-			</label>
-
-			<p class="rounded bg-slate-50 px-3 py-2 text-xs text-slate-500">
-				{#if kind === 'overlay'}
-					An isolated overlay segment (Layer 2){shared
-						? ', shared across the selected projects — a cluster-scoped CUDN, proposed to the platform repository'
-						: ' scoped to this project (a namespace UDN on its Tier-1)'}.
-				{:else}
-					A VLAN segment (localnet) bridged to the chosen {TERMS.uplink.nsx.toLowerCase()}, published to
-					the selected projects. Cluster-scoped — proposed to the platform repository; the uplink must
-					already carry that physical network.
-				{/if}
-			</p>
-			<p class="px-1 text-[11px] text-slate-400">
-				Looking for a project's default network? That is the primary {dual(TERMS.tier1)} segment —
-				create it with a New Namespace or New Project.
-			</p>
-			{#if error}
-				<pre class="rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
-			{/if}
-		</div>
-		<footer class="flex items-center gap-2 border-t border-slate-200 px-5 py-3">
-			<span class="text-xs text-slate-400">Staged into the changeset; open a PR from “Changes”.</span>
-			<button
-				onclick={onclose}
-				class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button
-			>
-			<button
-				onclick={submit}
-				disabled={!valid || submitting}
-				class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
-			>
-				{submitting ? 'Staging…' : 'Stage segment'}
-			</button>
-		</footer>
+		</p>
+		<p class="px-1 text-[11px] text-slate-400">
+			Looking for a project's default network? That is the primary {dual(TERMS.tier1)} segment — create
+			it with a New Namespace or New Project.
+		</p>
+		{#if error}
+			<pre class="rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+		{/if}
 	</div>
-</div>
+	{#snippet footer()}
+		<StageFooter
+			label="Stage segment"
+			disabled={!valid}
+			{submitting}
+			onsubmit={submit}
+			oncancel={onclose}
+		/>
+	{/snippet}
+</Modal>

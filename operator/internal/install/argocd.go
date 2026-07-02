@@ -32,13 +32,7 @@ func ArgoGVK(kind string) schema.GroupVersionKind {
 }
 
 func argoObject(kind, name, namespace, instance string, spec map[string]any) *unstructured.Unstructured {
-	u := &unstructured.Unstructured{Object: map[string]any{}}
-	u.SetGroupVersionKind(ArgoGVK(kind))
-	u.SetName(name)
-	u.SetNamespace(namespace)
-	u.SetLabels(Labels(instance))
-	u.Object["spec"] = spec
-	return u
+	return unstructuredObject(ArgoGVK(kind), name, namespace, instance, spec)
 }
 
 // repoPrefix is the owner-path glob ("…/<owner>/*") for the tenant AppProject's

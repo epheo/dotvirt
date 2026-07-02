@@ -9,35 +9,34 @@ import (
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 )
 
-// Route exposes dotvirt on OpenShift (edge TLS at the router). host may be empty —
-// the router then assigns one. Unstructured so the operator needn't import the
-// OpenShift API. In the dotvirt namespace, so it's owner-referenced like the
-// other namespaced resources.
-func Route(dv *dotvirtv1alpha1.Dotvirt, host string) *unstructured.Unstructured {
+// routeGVK renders Routes as unstructured so the operator needn't import the
+// OpenShift API.
+var routeGVK = schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"}
+
+// Route exposes the named Service (its "http" port, edge TLS at the router) on
+// OpenShift, as a Route of the same name. host may be empty — the router then
+// assigns one. In the dotvirt namespace, so it's owner-referenced like the other
+// namespaced resources.
+func Route(dv *dotvirtv1alpha1.Dotvirt, name, host string) *unstructured.Unstructured {
 	spec := map[string]any{
-		"to":   map[string]any{"kind": "Service", "name": AppName},
+		"to":   map[string]any{"kind": "Service", "name": name},
 		"port": map[string]any{"targetPort": "http"},
 		"tls":  map[string]any{"termination": "edge", "insecureEdgeTerminationPolicy": "Redirect"},
 	}
 	if host != "" {
 		spec["host"] = host
 	}
-	u := &unstructured.Unstructured{Object: map[string]any{}}
-	u.SetGroupVersionKind(schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"})
-	u.SetName(AppName)
-	u.SetNamespace(dv.Namespace)
-	u.SetLabels(Labels(dv.Name))
-	u.Object["spec"] = spec
-	return u
+	return unstructuredObject(routeGVK, name, dv.Namespace, dv.Name, spec)
 }
 
-// Ingress exposes dotvirt on vanilla Kubernetes. TLS is left to the cluster's
-// ingress controller / cert-manager (no cert secret is assumed here).
-func Ingress(dv *dotvirtv1alpha1.Dotvirt, host string) *networkingv1.Ingress {
+// Ingress exposes the named Service on vanilla Kubernetes, as an Ingress of the
+// same name. TLS is left to the cluster's ingress controller / cert-manager (no
+// cert secret is assumed here).
+func Ingress(dv *dotvirtv1alpha1.Dotvirt, name string, port int32, host string) *networkingv1.Ingress {
 	pathType := networkingv1.PathTypePrefix
 	return &networkingv1.Ingress{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "Ingress"},
-		ObjectMeta: objectMeta(AppName, dv.Namespace, dv.Name),
+		ObjectMeta: objectMeta(name, dv.Namespace, dv.Name),
 		Spec: networkingv1.IngressSpec{
 			Rules: []networkingv1.IngressRule{{
 				Host: host,
@@ -48,8 +47,8 @@ func Ingress(dv *dotvirtv1alpha1.Dotvirt, host string) *networkingv1.Ingress {
 							PathType: &pathType,
 							Backend: networkingv1.IngressBackend{
 								Service: &networkingv1.IngressServiceBackend{
-									Name: AppName,
-									Port: networkingv1.ServiceBackendPort{Number: HTTPPort},
+									Name: name,
+									Port: networkingv1.ServiceBackendPort{Number: port},
 								},
 							},
 						}},

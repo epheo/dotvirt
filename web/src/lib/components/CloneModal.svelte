@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { Copy, X } from 'lucide-svelte';
+	import { Copy } from 'lucide-svelte';
 	import { api, Unauthorized, type Clone, type VM } from '$lib/api';
 	import { relativeAge } from '$lib/format';
 	import { pollWhileVisible } from '$lib/poll';
+	import Modal from './Modal.svelte';
 
 	// Clone name-prompt + progress: creating a VirtualMachineClone is imperative
 	// (RBAC-gated, like snapshots), but the resulting target VM is config state
@@ -51,7 +52,9 @@
 
 	// Poll while any clone is still progressing so phases settle live (a clone
 	// with no phase yet counts as in progress), paused while backgrounded.
-	const active = $derived(clones?.some((c) => c.phase !== 'Succeeded' && c.phase !== 'Failed') ?? false);
+	const active = $derived(
+		clones?.some((c) => c.phase !== 'Succeeded' && c.phase !== 'Failed') ?? false
+	);
 	$effect(() => {
 		if (!active) return;
 		return pollWhileVisible(load, 3000);
@@ -74,95 +77,83 @@
 	}
 </script>
 
-<div
-	class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-	onclick={(e) => e.target === e.currentTarget && onclose()}
-	onkeydown={(e) => e.key === 'Escape' && onclose()}
-	role="presentation"
->
-	<div class="flex max-h-[80vh] w-full max-w-lg flex-col rounded-lg bg-white shadow-xl">
-		<header class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-			<h2 class="text-base font-semibold text-slate-800">Clone — {vm.name}</h2>
-			<button onclick={onclose} aria-label="Close" class="text-slate-400 hover:text-slate-700"
-				><X size={18} /></button
-			>
-		</header>
-		<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-slate-700">
-			<p class="mb-3 text-xs text-slate-500">
-				Clones via snapshot + restore (the source may stay running). The new VM exists only in the
-				cluster at first — open it and use <strong>Adopt into git</strong> to propose its manifest.
-			</p>
-			<label for="clone-target-input" class="mb-1 block text-xs text-slate-500">New VM name:</label>
-			<div class="flex items-center gap-2">
-				<input
-					id="clone-target-input"
-					bind:value={target}
-					class="flex-1 rounded border border-slate-300 px-2 py-1.5 font-mono text-sm focus:border-blue-400 focus:outline-none"
-					placeholder="{vm.name}-clone"
-				/>
-				<button
-					onclick={create}
-					disabled={!valid || busy}
-					class="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:bg-slate-300"
-				>
-					<Copy size={14} /> {busy ? 'Cloning…' : 'Clone'}
-				</button>
-			</div>
-			{#if target && !valid}
-				<p class="mt-1 text-xs text-amber-700">
-					Lowercase letters, digits and dashes only (≤63 chars), and not the source's own name.
-				</p>
-			{/if}
-			{#if error}
-				<pre class="mt-2 rounded bg-red-50 p-2 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
-			{/if}
-
-			{#if clones && clones.length}
-				<h3 class="mt-4 mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-					Clones of this VM
-				</h3>
-				<table class="w-full text-[13px]">
-					<thead class="text-left text-xs tracking-wide text-slate-400 uppercase">
-						<tr class="border-b border-slate-200">
-							<th class="py-1.5 pr-3 font-medium">Target VM</th>
-							<th class="py-1.5 pr-3 font-medium">Started</th>
-							<th class="py-1.5 font-medium">Status</th>
-						</tr>
-					</thead>
-					<tbody class="divide-y divide-slate-100">
-						{#each clones as c (c.name)}
-							<tr>
-								<td class="py-1.5 pr-3 font-medium text-slate-800">{c.target}</td>
-								<td class="py-1.5 pr-3 whitespace-nowrap text-slate-500">{relativeAge(c.created)}</td>
-								<td class="py-1.5 whitespace-nowrap">
-									{#if c.phase === 'Succeeded'}
-										<span class="inline-flex items-center gap-1.5 text-green-700">
-											<span class="h-1.5 w-1.5 rounded-full bg-green-500"></span> Succeeded
-										</span>
-									{:else if c.phase === 'Failed'}
-										<span class="inline-flex items-center gap-1.5 text-red-700">
-											<span class="h-1.5 w-1.5 rounded-full bg-red-500"></span> Failed
-										</span>
-									{:else}
-										<span class="inline-flex items-center gap-1.5 text-amber-600">
-											<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500"></span>
-											{c.phase || 'Starting…'}
-										</span>
-									{/if}
-								</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			{/if}
-		</div>
-		<footer class="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">
+<Modal title="Clone — {vm.name}" size="lg" {onclose}>
+	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-slate-700">
+		<p class="mb-3 text-xs text-slate-500">
+			Clones via snapshot + restore (the source may stay running). The new VM exists only in the
+			cluster at first — open it and use <strong>Adopt into git</strong> to propose its manifest.
+		</p>
+		<label for="clone-target-input" class="mb-1 block text-xs text-slate-500">New VM name:</label>
+		<div class="flex items-center gap-2">
+			<input
+				id="clone-target-input"
+				bind:value={target}
+				class="flex-1 rounded border border-slate-300 px-2 py-1.5 font-mono text-sm focus:border-blue-400 focus:outline-none"
+				placeholder="{vm.name}-clone"
+			/>
 			<button
-				onclick={onclose}
-				class="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+				onclick={create}
+				disabled={!valid || busy}
+				class="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:bg-slate-300"
 			>
-				Close
+				<Copy size={14} />
+				{busy ? 'Cloning…' : 'Clone'}
 			</button>
-		</footer>
+		</div>
+		{#if target && !valid}
+			<p class="mt-1 text-xs text-amber-700">
+				Lowercase letters, digits and dashes only (≤63 chars), and not the source's own name.
+			</p>
+		{/if}
+		{#if error}
+			<pre class="mt-2 rounded bg-red-50 p-2 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+		{/if}
+
+		{#if clones && clones.length}
+			<h3 class="mt-4 mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+				Clones of this VM
+			</h3>
+			<table class="w-full text-[13px]">
+				<thead class="text-left text-xs tracking-wide text-slate-400 uppercase">
+					<tr class="border-b border-slate-200">
+						<th class="py-1.5 pr-3 font-medium">Target VM</th>
+						<th class="py-1.5 pr-3 font-medium">Started</th>
+						<th class="py-1.5 font-medium">Status</th>
+					</tr>
+				</thead>
+				<tbody class="divide-y divide-slate-100">
+					{#each clones as c (c.name)}
+						<tr>
+							<td class="py-1.5 pr-3 font-medium text-slate-800">{c.target}</td>
+							<td class="py-1.5 pr-3 whitespace-nowrap text-slate-500">{relativeAge(c.created)}</td>
+							<td class="py-1.5 whitespace-nowrap">
+								{#if c.phase === 'Succeeded'}
+									<span class="inline-flex items-center gap-1.5 text-green-700">
+										<span class="h-1.5 w-1.5 rounded-full bg-green-500"></span> Succeeded
+									</span>
+								{:else if c.phase === 'Failed'}
+									<span class="inline-flex items-center gap-1.5 text-red-700">
+										<span class="h-1.5 w-1.5 rounded-full bg-red-500"></span> Failed
+									</span>
+								{:else}
+									<span class="inline-flex items-center gap-1.5 text-amber-600">
+										<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500"></span>
+										{c.phase || 'Starting…'}
+									</span>
+								{/if}
+							</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		{/if}
 	</div>
-</div>
+	{#snippet footer()}
+		<button
+			onclick={onclose}
+			class="ml-auto rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+		>
+			Close
+		</button>
+	{/snippet}
+</Modal>

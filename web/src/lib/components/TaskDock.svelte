@@ -8,6 +8,7 @@
 		type Proposal,
 		type VMEvent
 	} from '$lib/api';
+	import { duration } from '$lib/format';
 	import { pollWhileVisible } from '$lib/poll';
 
 	let {
@@ -125,7 +126,7 @@
 							name: vm.name,
 							prTitle: '',
 							status: active
-								? `${m.sourceNode ?? '?'} → ${m.targetNode ?? '?'}${m.startedAt ? ` · ${age(m.startedAt)}` : ''}`
+								? `${m.sourceNode ?? '?'} → ${m.targetNode ?? '?'}${m.startedAt ? ` · ${duration(m.startedAt)}` : ''}`
 								: m.failed
 									? 'Failed'
 									: `Migrated to ${m.targetNode ?? '?'}`,
@@ -257,21 +258,6 @@
 		if (t.url) window.open(t.url, '_blank', 'noopener');
 		else onselect(t.namespace, t.name);
 	}
-
-	// Compact age for events (sub-minute matters — events can be seconds old).
-	function age(iso?: string): string {
-		if (!iso) return '';
-		const start = new Date(iso).getTime();
-		if (Number.isNaN(start)) return '';
-		const s = Math.max(0, Math.floor((Date.now() - start) / 1000));
-		const d = Math.floor(s / 86400);
-		const h = Math.floor((s % 86400) / 3600);
-		const m = Math.floor((s % 3600) / 60);
-		if (d > 0) return `${d}d ${h}h`;
-		if (h > 0) return `${h}h ${m}m`;
-		if (m > 0) return `${m}m`;
-		return `${s}s`;
-	}
 </script>
 
 <section class="border-t border-slate-300 bg-white text-xs">
@@ -297,7 +283,9 @@
 				: 'text-slate-500 hover:text-slate-700'}"
 		>
 			Recent Tasks
-			<span class="ml-0.5 rounded-full bg-slate-300 px-1.5 text-[11px] text-slate-700">{tasks.length}</span>
+			<span class="ml-0.5 rounded-full bg-slate-300 px-1.5 text-[11px] text-slate-700"
+				>{tasks.length}</span
+			>
 		</button>
 		<button
 			onclick={() => selectTab('events')}
@@ -359,7 +347,10 @@
 						</thead>
 						<tbody class="divide-y divide-slate-100">
 							{#each tasks as t (t.kind + ':' + t.project + ':' + t.namespace + '/' + t.name + ':' + t.url + ':' + (t.at ?? ''))}
-								<tr onclick={() => activate(t)} class="cursor-pointer hover:bg-blue-50 {rowClass(t)}">
+								<tr
+									onclick={() => activate(t)}
+									class="cursor-pointer hover:bg-blue-50 {rowClass(t)}"
+								>
 									<td class="px-3 py-1.5 text-slate-700">{t.verb}</td>
 									<td class="px-3 py-1.5 font-medium text-slate-800">
 										{#if t.kind === 'pr'}
@@ -407,7 +398,9 @@
 									class="cursor-pointer bg-amber-50/40 hover:bg-blue-50"
 								>
 									<td class="px-3 py-1.5 font-medium text-slate-700">
-										{a.name}{#if (a.count ?? 0) > 1}<span class="text-slate-400"> ×{a.count}</span>{/if}
+										{a.name}{#if (a.count ?? 0) > 1}<span class="text-slate-400">
+												×{a.count}</span
+											>{/if}
 									</td>
 									<td class="px-3 py-1.5 text-slate-800">
 										{#if a.vm}{a.vm} <span class="text-slate-400">· {a.namespace}</span>
@@ -470,7 +463,9 @@
 						{#each events as e, i (i)}
 							<tr
 								onclick={() => e.namespace && e.name && onselect(e.namespace, e.name)}
-								class="cursor-pointer hover:bg-blue-50 {e.type === 'Warning' ? 'bg-amber-50/40' : ''}"
+								class="cursor-pointer hover:bg-blue-50 {e.type === 'Warning'
+									? 'bg-amber-50/40'
+									: ''}"
 							>
 								<td class="px-3 py-1.5 font-medium text-slate-700">{e.reason}</td>
 								<td class="px-3 py-1.5 text-slate-800">
@@ -480,13 +475,16 @@
 								<td class="px-3 py-1.5">
 									<span class="inline-flex items-center gap-1.5 whitespace-nowrap">
 										<span
-											class="h-1.5 w-1.5 rounded-full {e.type === 'Warning' ? 'bg-amber-500' : 'bg-slate-400'}"
+											class="h-1.5 w-1.5 rounded-full {e.type === 'Warning'
+												? 'bg-amber-500'
+												: 'bg-slate-400'}"
 										></span>
 										{e.type}
 									</span>
 								</td>
 								<td class="px-3 py-1.5 whitespace-nowrap text-slate-500">
-									{age(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-slate-400"> ×{e.count}</span
+									{duration(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-slate-400">
+											×{e.count}</span
 										>{/if}
 								</td>
 							</tr>
