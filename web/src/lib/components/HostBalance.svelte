@@ -15,7 +15,12 @@
 			data = null; // metrics off or no worker series: the card simply absents itself
 		}
 	}
-	$effect(() => pollWhileVisible(load, 30000));
+	// pollWhileVisible only paces refreshes — the initial load is the caller's,
+	// or the card sits empty until the first 30s tick.
+	$effect(() => {
+		void load();
+		return pollWhileVisible(load, 30000);
+	});
 
 	// Histogram geometry: percent maps 2:1 onto x (0-100% → 0-200px).
 	const W = 200;
