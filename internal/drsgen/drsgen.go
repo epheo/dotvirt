@@ -83,6 +83,13 @@ type Spec struct {
 	InstallPSI bool `json:"installPSI,omitempty"`
 }
 
+// SoftTaint resolves the SoftTainter tri-state: nil means enabled. The one
+// default living on a pointer (so Parse can distinguish an explicit false in a
+// committed manifest from an omitted field), resolved here for every consumer.
+func (s Spec) SoftTaint() bool {
+	return s.SoftTainter == nil || *s.SoftTainter
+}
+
 // File is one rendered manifest: its platform-repo path plus a short name that
 // identifies it in the draft (the ns/name-shaped draft keys need one).
 type File struct {
@@ -204,10 +211,6 @@ func subscription() map[string]any {
 // PrometheusCPUCombined makes it decide on real measured load (PSI) rather than
 // pod resource requests.
 func kubeDescheduler(s Spec) map[string]any {
-	soft := true
-	if s.SoftTainter != nil {
-		soft = *s.SoftTainter
-	}
 	return map[string]any{
 		"apiVersion": "operator.openshift.io/v1",
 		"kind":       "KubeDescheduler",
@@ -220,7 +223,7 @@ func kubeDescheduler(s Spec) map[string]any {
 			"profileCustomizations": map[string]any{
 				"devActualUtilizationProfile": "PrometheusCPUCombined",
 				"devDeviationThresholds":      s.Threshold,
-				"devEnableSoftTainter":        soft,
+				"devEnableSoftTainter":        s.SoftTaint(),
 			},
 			"evictionLimits": map[string]any{
 				"node":  s.EvictionNodeLimit,

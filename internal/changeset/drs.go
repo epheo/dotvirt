@@ -17,12 +17,14 @@ import (
 // committed state is read back off the base branch — the same
 // stage → propose → merge → Argo-applies path as every other platform kind.
 
-// StageEnableDRS records the DRS (descheduler) file set in (id, proj)'s draft —
-// proj is the platform repo (DRS is cluster infrastructure, so it always routes
-// to the platform tier). Files already identical on the base branch are skipped,
-// so a first enable stages the whole operator install while a re-configure
-// stages only the KubeDescheduler CR that changed; a spec that changes nothing
-// is rejected rather than staging an empty set.
+// StageEnableDRS makes (id, proj)'s draft represent exactly the base→spec
+// delta — proj is the platform repo (DRS is cluster infrastructure, so it
+// always routes to the platform tier). Declarative: the previous DRS entries
+// are replaced wholesale (a re-configure never leaves a stale sibling like a
+// dropped PSI opt-in behind), files already identical on the base branch are
+// skipped, and a spec matching the base resolves to an empty delta — a clean
+// draft, not an error. That empty case is also how a pending change is
+// cancelled: re-submitting the committed configuration.
 func (c *Coordinator) StageEnableDRS(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
 	read, err := c.read(proj)
 	if err != nil {
@@ -36,12 +38,9 @@ func (c *Coordinator) StageEnableDRS(id auth.Identity, proj project.ProjectInfo,
 	if err != nil {
 		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
 	}
-	// Restage from scratch so a re-configure (e.g. dropping InstallPSI) never
-	// leaves a stale sibling entry behind.
-	if err := c.unstageDRS(id, proj); err != nil {
+	if _, err := c.unstageResource(id, proj, draft.ResourceDRS); err != nil {
 		return model.DraftView{}, err
 	}
-	staged := 0
 	for _, f := range files {
 		if current, err := read.FileOnBranch(c.baseBranch, f.Path); err == nil && bytes.Equal(current, f.Content) {
 			continue // already live in git; nothing to propose for this file
@@ -56,10 +55,6 @@ func (c *Coordinator) StageEnableDRS(id auth.Identity, proj project.ProjectInfo,
 		}); err != nil {
 			return model.DraftView{}, err
 		}
-		staged++
-	}
-	if staged == 0 {
-		return model.DraftView{}, fmt.Errorf("%w: this DRS configuration is already on %s", model.ErrInvalid, c.baseBranch)
 	}
 	return c.Get(id, proj)
 }
@@ -73,17 +68,8 @@ func (c *Coordinator) StageDisableDRS(id auth.Identity, proj project.ProjectInfo
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	entries, err := c.store.List(id.Username, proj.Name)
+	pending, err := c.unstageResource(id, proj, draft.ResourceDRS)
 	if err != nil {
-		return model.DraftView{}, err
-	}
-	pending := 0
-	for _, e := range entries {
-		if e.Resource == draft.ResourceDRS {
-			pending++
-		}
-	}
-	if err := c.unstageDRS(id, proj); err != nil {
 		return model.DraftView{}, err
 	}
 	if _, err := read.FileOnBranch(c.baseBranch, drsgen.CRPath); err != nil {
@@ -104,21 +90,25 @@ func (c *Coordinator) StageDisableDRS(id auth.Identity, proj project.ProjectInfo
 	return c.Get(id, proj)
 }
 
-// unstageDRS drops every DRS entry from (id, proj)'s draft.
-func (c *Coordinator) unstageDRS(id auth.Identity, proj project.ProjectInfo) error {
+// unstageResource drops every entry of one resource from (id, proj)'s draft,
+// reporting how many it removed. Backs both the declarative DRS restage and
+// the atomic-resource unstage (see draft.Resource.Atomic).
+func (c *Coordinator) unstageResource(id auth.Identity, proj project.ProjectInfo, r draft.Resource) (int, error) {
 	entries, err := c.store.List(id.Username, proj.Name)
 	if err != nil {
-		return err
+		return 0, err
 	}
+	removed := 0
 	for _, e := range entries {
-		if e.Resource != draft.ResourceDRS {
+		if e.Resource != r {
 			continue
 		}
 		if err := c.store.Unstage(id.Username, proj.Name, e.Resource, e.Namespace, e.Name); err != nil {
-			return err
+			return removed, err
 		}
+		removed++
 	}
-	return nil
+	return removed, nil
 }
 
 // DRSState reads the platform repo's committed DRS configuration off the base
@@ -139,21 +129,50 @@ func (c *Coordinator) DRSState(proj project.ProjectInfo) (model.DRSGitState, err
 	// A hand-edited CR that no longer parses still reads as configured — the
 	// panel then shows the raw state without a config form prefill.
 	if spec, err := drsgen.Parse(content); err == nil {
-		soft := true
-		if spec.SoftTainter != nil {
-			soft = *spec.SoftTainter
-		}
-		out.Config = &model.DRSConfig{
-			Mode:               spec.Mode,
-			Threshold:          spec.Threshold,
-			IntervalSeconds:    spec.IntervalSeconds,
-			SoftTainter:        soft,
-			EvictionNodeLimit:  spec.EvictionNodeLimit,
-			EvictionTotalLimit: spec.EvictionTotalLimit,
-		}
+		out.Config = configFromSpec(spec)
 	}
 	if _, err := read.FileOnBranch(c.baseBranch, drsgen.PSIPath); err == nil {
 		out.PSIConfigured = true
 	}
 	return out, nil
+}
+
+// DRSDraft reads (id, proj)'s pending DRS entries back as configuration — the
+// staged plane between committed and live. The panel seeds its dialog from
+// this when present, so editing a not-yet-proposed change continues it (PSI
+// opt-in included) instead of silently resetting to the committed state.
+func (c *Coordinator) DRSDraft(id auth.Identity, proj project.ProjectInfo) (model.DRSDraftState, error) {
+	entries, err := c.store.List(id.Username, proj.Name)
+	if err != nil {
+		return model.DRSDraftState{}, err
+	}
+	var out model.DRSDraftState
+	for _, e := range entries {
+		if e.Resource != draft.ResourceDRS {
+			continue
+		}
+		switch {
+		case e.Kind == draft.KindDelete:
+			out.DisableStaged = true
+		case e.Name == "kubedescheduler":
+			if spec, err := drsgen.Parse([]byte(e.Manifest)); err == nil {
+				out.Config = configFromSpec(spec)
+			}
+		case e.Name == "psi-machineconfig":
+			out.PSI = true
+		}
+	}
+	return out, nil
+}
+
+// configFromSpec resolves a parsed KubeDescheduler Spec into the config DTO.
+func configFromSpec(spec drsgen.Spec) *model.DRSConfig {
+	return &model.DRSConfig{
+		Mode:               spec.Mode,
+		Threshold:          spec.Threshold,
+		IntervalSeconds:    spec.IntervalSeconds,
+		SoftTainter:        spec.SoftTaint(),
+		EvictionNodeLimit:  spec.EvictionNodeLimit,
+		EvictionTotalLimit: spec.EvictionTotalLimit,
+	}
 }

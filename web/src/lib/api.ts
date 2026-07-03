@@ -225,6 +225,25 @@ export interface NetworkInventory {
 
 export type DRSMode = 'Predictive' | 'Automatic';
 
+// The DRS vocabulary + bounds, mirrored from internal/drsgen (the backend
+// validator) so the status card, the dialog, and what the server accepts
+// never drift from each other.
+export const DRS_THRESHOLDS = [
+	{ value: 'AsymmetricLow', label: 'Conservative', detail: 'move only off clearly hot nodes' },
+	{ value: 'Low', label: 'Moderate', detail: '10% deviation from average' },
+	{ value: 'Medium', label: 'Eager', detail: '20% deviation from average' },
+	{ value: 'High', label: 'Aggressive', detail: '30% deviation from average' }
+] as const;
+export const DRS_BOUNDS = {
+	intervalSeconds: { min: 10, max: 86400 },
+	evictionNodeLimit: { min: 1, max: 100 },
+	evictionTotalLimit: { min: 1, max: 1000 }
+} as const;
+
+export function drsThresholdLabel(value: string): string {
+	return DRS_THRESHOLDS.find((t) => t.value === value)?.label ?? value;
+}
+
 export interface DRSConfig {
 	mode: DRSMode;
 	threshold: string; // AsymmetricLow | Low | Medium | High
@@ -235,6 +254,8 @@ export interface DRSConfig {
 }
 export interface DRSLive {
 	apiPresent: boolean; // the descheduler operator's CRD is served
+	synced: boolean; // initial LIST landed; before it, deployed=false means "unknown"
+	stale?: boolean; // the watch is failing — live fields may be missing/outdated
 	deployed: boolean; // a KubeDescheduler CR exists in the cluster
 	managementState?: string;
 	mode?: string;
@@ -243,11 +264,18 @@ export interface DRSLive {
 	available: boolean; // the operator's Available condition
 	degraded?: string; // the Degraded condition's message, when degraded
 }
+export interface DRSDraftState {
+	config?: DRSConfig; // the staged (unproposed) KubeDescheduler spec
+	psi?: boolean; // the PSI MachineConfig is staged too
+	disableStaged?: boolean;
+}
 export interface DRSView {
 	configured: boolean; // the KubeDescheduler CR is committed on the platform repo
 	config?: DRSConfig; // parsed committed config (absent if hand-edited beyond parse)
 	psiConfigured: boolean; // the PSI MachineConfig is committed
+	draft?: DRSDraftState; // the caller's pending change — the dialog edits this plane
 	live: DRSLive;
+	warning?: string; // non-fatal degradation (e.g. platform repo unreachable)
 	canManage: boolean; // kubedeschedulers-create SSAR — gates the panel's actions
 	canPSI: boolean; // machineconfigs-create SSAR — gates the PSI checkbox
 }

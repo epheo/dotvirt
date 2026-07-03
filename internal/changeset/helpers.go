@@ -139,6 +139,14 @@ func editToMatch(from, to model.VM) manifest.VMEdit {
 		pr := to.Preference
 		edit.Preference = &pr
 	}
+	if from.DRSExclude != to.DRSExclude {
+		v := to.DRSExclude
+		edit.DRSExclude = &v
+	}
+	if from.EvictionStrategy != to.EvictionStrategy {
+		es := to.EvictionStrategy // "" removes the field — the transform-to-actual semantics
+		edit.EvictionStrategy = &es
+	}
 
 	// Labels: set those changed/added in `to`, remove those only in `from`.
 	set := map[string]string{}

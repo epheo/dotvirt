@@ -24,7 +24,7 @@ func applyMapEdits(ed *lineEditor, parent *yaml.Node, field string, set map[stri
 	if len(set) == 0 && len(remove) == 0 {
 		return
 	}
-	m := get(parent, field)
+	m := mappingField(ed, parent, field)
 
 	if m == nil {
 		if len(set) == 0 {
@@ -40,6 +40,14 @@ func applyMapEdits(ed *lineEditor, parent *yaml.Node, field string, set map[stri
 		return
 	}
 
+	// If the edit empties the map, drop the whole field: a dangling `field:`
+	// key with a null value is the degenerate shape mappingField guards
+	// against — never leave one behind.
+	if len(set) == 0 && emptiesMap(m, remove) {
+		ed.deleteChild(parent, field)
+		return
+	}
+
 	for _, k := range sortedKeys(set) {
 		if existing := get(m, k); existing != nil {
 			ed.setScalarAt(existing, set[k])
@@ -52,6 +60,36 @@ func applyMapEdits(ed *lineEditor, parent *yaml.Node, field string, set map[stri
 			ed.removeLine(existing.Line - 1) // key/value share a line for scalars
 		}
 	}
+}
+
+// mappingField returns parent's field as an extendable block mapping. A
+// degenerate value — null (e.g. a map an earlier edit fully emptied) or an
+// empty {} — has no child line to anchor an insert on, so it is deleted here
+// and nil returned: the caller recreates the field wholesale.
+func mappingField(ed *lineEditor, parent *yaml.Node, field string) *yaml.Node {
+	m := get(parent, field)
+	if m == nil {
+		return nil
+	}
+	if m.Kind != yaml.MappingNode || len(m.Content) == 0 {
+		ed.deleteChild(parent, field)
+		return nil
+	}
+	return m
+}
+
+// emptiesMap reports whether removing the given keys leaves the map empty.
+func emptiesMap(m *yaml.Node, remove []string) bool {
+	removed := make(map[string]bool, len(remove))
+	for _, k := range remove {
+		removed[k] = true
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if !removed[m.Content[i].Value] {
+			return false
+		}
+	}
+	return true
 }
 
 // quoteKey quotes a map key if it contains characters (like '/') that need it.
@@ -86,7 +124,9 @@ func applyTemplateAnnotations(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) {
 	if tmpl == nil {
 		return
 	}
-	if meta := get(tmpl, "metadata"); meta != nil {
+	// mappingField, not get: an empty `metadata: {}` must be recreated as a
+	// block, the same degenerate-shape rule applyMapEdits applies one level down.
+	if meta := mappingField(ed, tmpl, "metadata"); meta != nil {
 		applyMapEdits(ed, meta, "annotations", set, remove)
 		return
 	}

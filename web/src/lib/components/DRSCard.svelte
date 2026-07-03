@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { api, type DRSView } from '$lib/api';
+	import { api, drsThresholdLabel, type DRSView } from '$lib/api';
 	import { pollWhileVisible } from '$lib/poll';
 	import InfoCard from './InfoCard.svelte';
 	import Row from './Row.svelte';
@@ -29,13 +29,6 @@
 		return pollWhileVisible(load, 30_000);
 	});
 
-	const THRESHOLD_LABELS: Record<string, string> = {
-		AsymmetricLow: 'Conservative',
-		Low: 'Moderate',
-		Medium: 'Eager',
-		High: 'Aggressive'
-	};
-
 	// One vCenter-style status line for the committed state.
 	const status = $derived.by(() => {
 		if (!view?.configured) return 'Not configured';
@@ -49,12 +42,23 @@
 		}
 	});
 
-	// The live plane, relative to what's committed: installing / running / degraded.
+	// The caller's staged, not-yet-proposed change.
+	const pending = $derived.by(() => {
+		const d = view?.draft;
+		if (!d) return '';
+		if (d.disableStaged) return 'Disable staged — propose it from "Changes"';
+		return 'Change staged — propose it from "Changes"';
+	});
+
+	// The live plane, relative to what's committed: installing / running /
+	// degraded — or explicitly unknown while the watch is stale or pre-sync.
 	const liveStatus = $derived.by(() => {
 		if (!view) return '';
 		const l = view.live;
+		if (l.stale) return 'Status unavailable — the descheduler watch is failing';
 		if (l.degraded) return `Operator degraded: ${l.degraded}`;
 		if (l.deployed) return l.available ? 'Operator running' : 'Operator starting';
+		if (l.apiPresent && !l.synced) return 'Reading descheduler state…';
 		if (view.configured) {
 			return l.apiPresent
 				? 'Waiting for the configuration to sync'
@@ -108,10 +112,7 @@
 		<dl class="divide-y divide-slate-100 text-[13px]">
 			<Row label="Status" value={status} />
 			{#if view.config}
-				<Row
-					label="Aggressiveness"
-					value={THRESHOLD_LABELS[view.config.threshold] ?? view.config.threshold}
-				/>
+				<Row label="Aggressiveness" value={drsThresholdLabel(view.config.threshold)} />
 				<Row label="Interval" value={`${view.config.intervalSeconds}s`} />
 				<Row label="Soft-taint hot nodes" value={view.config.softTainter ? 'Yes' : 'No'} />
 				<Row
@@ -120,8 +121,16 @@
 				/>
 			{/if}
 			<Row label="PSI (load signal)" value={view.psiConfigured ? 'Managed by dotvirt' : 'Not managed'} />
+			{#if pending}
+				<Row label="Pending" value={pending} />
+			{/if}
 			<Row label="Live state" value={liveStatus} />
 		</dl>
+		{#if view.warning}
+			<p class="border-t border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+				{view.warning}
+			</p>
+		{/if}
 		{#if view.live.degraded}
 			<p class="border-t border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
 				{view.live.degraded}

@@ -4,10 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,42 +15,6 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 )
-
-// seedBareFiles creates a bare repo with the given files on main — a platform
-// repo in whatever DRS state a test needs.
-func seedBareFiles(t *testing.T, files map[string][]byte) string {
-	t.Helper()
-	dir := t.TempDir()
-	bare := filepath.Join(dir, "remote.git")
-	work := filepath.Join(dir, "work")
-	run := func(wd string, args ...string) {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = wd
-		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@x", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@x")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
-	run(dir, "init", "-q", "--bare", "-b", "main", bare)
-	run(dir, "init", "-q", "-b", "main", work)
-	if len(files) == 0 {
-		files = map[string][]byte{"README.md": []byte("platform\n")}
-	}
-	for path, content := range files {
-		full := filepath.Join(work, filepath.FromSlash(path))
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, content, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	run(work, "add", "-A")
-	run(work, "commit", "-qm", "seed")
-	run(work, "remote", "add", "origin", bare)
-	run(work, "push", "-q", "origin", "main")
-	return bare
-}
 
 // drsFiles renders spec's file set keyed by path, for seeding repos.
 func drsFiles(t *testing.T, spec drsgen.Spec) map[string][]byte {
@@ -115,15 +76,115 @@ func TestStageEnableDRSStagesOnlyChangedFiles(t *testing.T) {
 	}
 }
 
-func TestStageEnableDRSUnchangedRejected(t *testing.T) {
+func TestStageEnableDRSUnchangedIsCleanDraft(t *testing.T) {
+	// Declarative: a spec matching the base branch is an empty delta — a clean
+	// draft, not an error. With a pending change staged first, the same submit
+	// is the cancel gesture (revert to the committed configuration).
 	spec := drsgen.Spec{Mode: drsgen.ModeAutomatic}
 	bare := seedBareFiles(t, drsFiles(t, spec))
 	c := newTestCoordinator(t)
 	id := auth.Identity{Username: "admin"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
-	if _, err := c.StageEnableDRS(id, proj, mustJSON(t, spec)); !errors.Is(err, model.ErrInvalid) {
-		t.Fatalf("want model.ErrInvalid for an unchanged config, got %v", err)
+	view, err := c.StageEnableDRS(id, proj, mustJSON(t, spec))
+	if err != nil {
+		t.Fatalf("StageEnableDRS unchanged: %v", err)
+	}
+	if view.Count != 0 {
+		t.Fatalf("want empty draft for an unchanged config, got %d items", view.Count)
+	}
+
+	if _, err := c.StageEnableDRS(id, proj, mustJSON(t, drsgen.Spec{Mode: drsgen.ModePredictive, InstallPSI: true})); err != nil {
+		t.Fatal(err)
+	}
+	view, err = c.StageEnableDRS(id, proj, mustJSON(t, spec))
+	if err != nil {
+		t.Fatalf("StageEnableDRS revert-to-committed: %v", err)
+	}
+	if view.Count != 0 {
+		t.Fatalf("want the pending change cancelled, got %d items", view.Count)
+	}
+}
+
+func TestStageEnableDRSReconfigureDropsStaleSiblings(t *testing.T) {
+	// A re-configure without the PSI opt-in must not leave the previously
+	// staged MachineConfig behind — the draft is replaced wholesale.
+	bare := seedBareFiles(t, nil)
+	c := newTestCoordinator(t)
+	id := auth.Identity{Username: "admin"}
+	proj := project.ProjectInfo{Name: "platform", Repo: bare}
+
+	if _, err := c.StageEnableDRS(id, proj, mustJSON(t, drsgen.Spec{Mode: drsgen.ModeAutomatic, InstallPSI: true})); err != nil {
+		t.Fatal(err)
+	}
+	view, err := c.StageEnableDRS(id, proj, mustJSON(t, drsgen.Spec{Mode: drsgen.ModeAutomatic}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Count != 4 {
+		t.Fatalf("want 4 items after dropping PSI, got %d", view.Count)
+	}
+	for _, it := range view.Items {
+		if it.Name == "psi-machineconfig" {
+			t.Fatal("stale PSI entry survived the re-configure")
+		}
+	}
+}
+
+func TestDRSDraft(t *testing.T) {
+	bare := seedBareFiles(t, nil)
+	c := newTestCoordinator(t)
+	id := auth.Identity{Username: "admin"}
+	proj := project.ProjectInfo{Name: "platform", Repo: bare}
+
+	state, err := c.DRSDraft(id, proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Config != nil || state.PSI || state.DisableStaged {
+		t.Fatalf("want empty draft state, got %+v", state)
+	}
+
+	soft := false
+	spec := drsgen.Spec{Mode: drsgen.ModePredictive, Threshold: "High", IntervalSeconds: 120,
+		SoftTainter: &soft, InstallPSI: true}
+	if _, err := c.StageEnableDRS(id, proj, mustJSON(t, spec)); err != nil {
+		t.Fatal(err)
+	}
+	state, err = c.DRSDraft(id, proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Config == nil || !state.PSI || state.DisableStaged {
+		t.Fatalf("want staged config + PSI, got %+v", state)
+	}
+	if state.Config.Mode != "Predictive" || state.Config.Threshold != "High" ||
+		state.Config.IntervalSeconds != 120 || state.Config.SoftTainter {
+		t.Fatalf("staged config doesn't round-trip: %+v", state.Config)
+	}
+}
+
+func TestUnstageDRSIsAtomic(t *testing.T) {
+	// The DRS file set is one logical change: unstaging any entry (the
+	// ChangesPanel's per-row button) must drop the whole set, never leaving a
+	// proposable half-install.
+	bare := seedBareFiles(t, nil)
+	c := newTestCoordinator(t)
+	id := auth.Identity{Username: "admin"}
+	proj := project.ProjectInfo{Name: "platform", Repo: bare}
+
+	if _, err := c.StageEnableDRS(id, proj, mustJSON(t, drsgen.Spec{Mode: drsgen.ModeAutomatic, InstallPSI: true})); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Unstage(id, proj, string(draft.ResourceDRS), ClusterScopeNS, "subscription"); err != nil {
+		t.Fatalf("Unstage: %v", err)
+	}
+	view, err := c.Get(id, proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Count != 0 {
+		t.Fatalf("want the whole DRS set unstaged, got %d items: %+v", view.Count, view.Items)
 	}
 }
 

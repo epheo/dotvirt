@@ -9,9 +9,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/epheo/dotvirt/internal/eventbus"
@@ -63,38 +61,16 @@ func (s *Snapshot) Run(ctx context.Context) {
 		func() { s.driftDirty.Store(true); s.bus.Publish(eventbus.DriftChanged) },
 		func() { s.synced.Store(true); close(s.syncedCh) }, // onSynced fires once → close is safe
 	)
-	r := cache.NewReflector(s.healthTracking(s.sa.ApplicationsListWatch()), &unstructured.Unstructured{}, store, 0)
+	lw := reflect.TrackHealth(s.sa.ApplicationsListWatch(), &s.healthy)
+	r := cache.NewReflector(lw, &unstructured.Unstructured{}, store, 0)
 	go r.Run(ctx.Done())
 }
 
-// Healthy reports whether the Applications watch is currently established. It goes
-// false when the reflector's list/watch errors (ArgoCD unreachable) and true again
-// when a watch re-establishes — a deterministic, error-driven staleness signal, not
-// a TTL. Drift keeps serving its last-good store while unhealthy; the inventory
-// surfaces a "may be stale" warning so a permanent outage isn't silent.
+// Healthy reports whether the Applications watch is currently established
+// (reflect.TrackHealth). Drift keeps serving its last-good store while
+// unhealthy; the inventory surfaces a "may be stale" warning so a permanent
+// outage isn't silent.
 func (s *Snapshot) Healthy() bool { return s.healthy.Load() }
-
-// healthTracking wraps lw so a failed List or Watch flips healthy false and a
-// successful Watch establish flips it true. The reflector re-lists+re-watches on a
-// drop, so a transient blip that immediately recovers stays healthy; a sustained
-// outage (repeated errors) reads as unhealthy.
-func (s *Snapshot) healthTracking(lw *cache.ListWatch) *cache.ListWatch {
-	list, watchFn := lw.ListFunc, lw.WatchFunc
-	return &cache.ListWatch{
-		ListFunc: func(o metav1.ListOptions) (runtime.Object, error) {
-			obj, err := list(o)
-			if err != nil {
-				s.healthy.Store(false)
-			}
-			return obj, err
-		},
-		WatchFunc: func(o metav1.ListOptions) (watch.Interface, error) {
-			w, err := watchFn(o)
-			s.healthy.Store(err == nil)
-			return w, err
-		},
-	}
-}
 
 // WaitForSync blocks until the initial Applications LIST has landed or ctx is done.
 // Deterministic — waits on the channel closed by the initial Replace, not a poll.

@@ -1,5 +1,12 @@
 <script lang="ts">
-	import { api, type DRSEnableRequest, type DRSMode, type DRSView } from '$lib/api';
+	import {
+		api,
+		DRS_BOUNDS,
+		DRS_THRESHOLDS,
+		type DRSEnableRequest,
+		type DRSMode,
+		type DRSView
+	} from '$lib/api';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 
@@ -16,32 +23,29 @@
 		onstaged: () => void;
 	} = $props();
 
-	// Aggressiveness maps to devDeviationThresholds — the DRS migration-threshold
-	// slider. Conservative only treats clearly-hot nodes as overused.
-	const THRESHOLDS = [
-		{ value: 'AsymmetricLow', label: 'Conservative — move only off clearly hot nodes' },
-		{ value: 'Low', label: 'Moderate — 10% deviation from average' },
-		{ value: 'Medium', label: 'Eager — 20% deviation from average' },
-		{ value: 'High', label: 'Aggressive — 30% deviation from average' }
-	];
-
-	// Seed from the committed config; the modal is mounted fresh per open.
+	// Seed from the pending draft when one is staged — editing an unproposed
+	// change continues it (PSI opt-in included) — else the committed config.
+	// The modal is mounted fresh per open.
 	// svelte-ignore state_referenced_locally
-	const cfg = view.config;
+	const cfg = view.draft?.config ?? view.config;
 	let mode = $state<DRSMode>(cfg?.mode ?? 'Automatic');
 	let threshold = $state(cfg?.threshold ?? 'AsymmetricLow');
 	let intervalSeconds = $state(cfg?.intervalSeconds ?? 60);
 	let softTainter = $state(cfg?.softTainter ?? true);
 	let evictionNodeLimit = $state(cfg?.evictionNodeLimit ?? 2);
 	let evictionTotalLimit = $state(cfg?.evictionTotalLimit ?? 5);
-	let installPSI = $state(false);
+	// svelte-ignore state_referenced_locally
+	let installPSI = $state(view.draft?.psi ?? false);
 	let showAdvanced = $state(false);
 
 	let submitting = $state(false);
 	let error = $state('');
 
+	const inBounds = (v: number, b: { min: number; max: number }) => v >= b.min && v <= b.max;
 	const valid = $derived(
-		intervalSeconds >= 10 && evictionNodeLimit >= 1 && evictionTotalLimit >= 1
+		inBounds(intervalSeconds, DRS_BOUNDS.intervalSeconds) &&
+			inBounds(evictionNodeLimit, DRS_BOUNDS.evictionNodeLimit) &&
+			inBounds(evictionTotalLimit, DRS_BOUNDS.evictionTotalLimit)
 	);
 
 	async function submit() {
@@ -98,7 +102,8 @@
 		<label class="block">
 			<span class="text-slate-600">Migration aggressiveness</span>
 			<select bind:value={threshold} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
-				{#each THRESHOLDS as t (t.value)}<option value={t.value}>{t.label}</option>{/each}
+				{#each DRS_THRESHOLDS as t (t.value)}<option value={t.value}>{t.label} — {t.detail}</option
+					>{/each}
 			</select>
 		</label>
 
@@ -106,8 +111,8 @@
 			<span class="text-slate-600">Evaluation interval (seconds)</span>
 			<input
 				type="number"
-				min="10"
-				max="86400"
+				min={DRS_BOUNDS.intervalSeconds.min}
+				max={DRS_BOUNDS.intervalSeconds.max}
 				bind:value={intervalSeconds}
 				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
 			/>
@@ -136,7 +141,8 @@
 						<span class="text-slate-600">Max migrations per node</span>
 						<input
 							type="number"
-							min="1"
+							min={DRS_BOUNDS.evictionNodeLimit.min}
+							max={DRS_BOUNDS.evictionNodeLimit.max}
 							bind:value={evictionNodeLimit}
 							class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
 						/>
@@ -145,7 +151,8 @@
 						<span class="text-slate-600">Max migrations cluster-wide</span>
 						<input
 							type="number"
-							min="1"
+							min={DRS_BOUNDS.evictionTotalLimit.min}
+							max={DRS_BOUNDS.evictionTotalLimit.max}
 							bind:value={evictionTotalLimit}
 							class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
 						/>

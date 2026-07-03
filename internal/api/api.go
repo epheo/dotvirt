@@ -50,6 +50,7 @@ type Draft interface {
 	StageEnableDRS(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
 	StageDisableDRS(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
 	DRSState(proj project.ProjectInfo) (model.DRSGitState, error)
+	DRSDraft(id auth.Identity, proj project.ProjectInfo) (model.DRSDraftState, error)
 	StageDelete(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
 	Unstage(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) error
 	Get(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
@@ -112,7 +113,7 @@ type Server struct {
 	resolver  *project.Resolver
 	repos     *git.RepoSet
 	visible   *ttlcache.Cache[visibleSet]             // per-token visible-namespace set, RBAC-version-stamped
-	platform  *ttlcache.Cache[platformAuth]           // per-token platform-author SSAR, RBAC-version-stamped
+	ssar      *ttlcache.Cache[ssarVerdict]            // per-(token, resource) create-SSAR, RBAC-version-stamped
 	proposals *ttlcache.Cache[[]model.Proposal]       // per-token open-PR set; written by the refresher, read on broadcast
 	options   *ttlcache.Cache[model.Options]          // shared wizard catalog (SA-read, identical for all)
 	networks  *ttlcache.Cache[model.NetworkInventory] // shared network catalog (SA-read; per-tenant scoping at serve time)
@@ -159,7 +160,7 @@ func NewServer(d Deps) *Server {
 		resolver:  d.Resolver,
 		repos:     d.Repos,
 		visible:   ttlcache.New[visibleSet](visibleTTL),
-		platform:  ttlcache.New[platformAuth](visibleTTL),
+		ssar:      ttlcache.New[ssarVerdict](visibleTTL),
 		proposals: ttlcache.New[[]model.Proposal](proposalsCacheTTL),
 		options:   ttlcache.New[model.Options](optionsTTL),
 		networks:  ttlcache.New[model.NetworkInventory](optionsTTL),

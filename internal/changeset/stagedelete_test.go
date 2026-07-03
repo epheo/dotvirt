@@ -3,10 +3,6 @@ package changeset
 import (
 	"context"
 	"errors"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,34 +12,6 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 )
-
-// seedBare creates a bare repo with one VM manifest (alpha/web) on main and
-// returns its path, usable as a RepoSet/project repo URL.
-func seedBare(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	bare := filepath.Join(dir, "remote.git")
-	work := filepath.Join(dir, "work")
-	run := func(wd string, args ...string) {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = wd
-		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@x", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@x")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
-	run(dir, "init", "-q", "--bare", "-b", "main", bare)
-	run(dir, "init", "-q", "-b", "main", work)
-	manifest := "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\nspec:\n  runStrategy: Always\n"
-	if err := os.WriteFile(filepath.Join(work, "web.yaml"), []byte(manifest), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	run(work, "add", "-A")
-	run(work, "commit", "-qm", "seed")
-	run(work, "remote", "add", "origin", bare)
-	run(work, "push", "-q", "origin", "main")
-	return bare
-}
 
 // newTestCoordinator builds a Coordinator over a disk draft store and a
 // push-disabled RepoSet (long poll interval so the background poll never fires).

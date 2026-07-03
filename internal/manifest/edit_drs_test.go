@@ -73,6 +73,79 @@ func TestApplyEditDRSExcludeRemovesAnnotation(t *testing.T) {
 	if strings.Contains(string(out), PreferNoEvictionAnnotation) {
 		t.Fatalf("annotation not removed:\n%s", out)
 	}
+	// Removing the map's last entry must drop the whole field — a dangling
+	// `annotations:` with a null value is degenerate YAML a later edit could
+	// not extend in place.
+	if strings.Contains(string(out), "annotations:") {
+		t.Fatalf("emptied annotations block left behind:\n%s", out)
+	}
+}
+
+// exclude reports whether the manifest parses with the DRS exclusion set.
+func excluded(t *testing.T, content []byte) bool {
+	t.Helper()
+	vms, err := ParseVMs("vm.yaml", content, "alpha")
+	if err != nil || len(vms) != 1 {
+		t.Fatalf("manifest no longer parses: %v (%d VMs)\n%s", err, len(vms), content)
+	}
+	return vms[0].DRSExclude
+}
+
+func TestApplyEditDRSExcludeRemoveThenReAdd(t *testing.T) {
+	// The full lifecycle on a VM whose template metadata holds ONLY the
+	// annotation: exclude → include → exclude must round-trip, including the
+	// shapes the intermediate edits produce.
+	const bare = `apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: web
+  namespace: alpha
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      annotations:
+        "descheduler.alpha.kubernetes.io/prefer-no-eviction": "true"
+    spec:
+      domain:
+        cpu:
+          cores: 1
+`
+	removed, err := ApplyEdit([]byte(bare), "alpha", "web", VMEdit{DRSExclude: ptr(false)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if excluded(t, removed) {
+		t.Fatalf("annotation not removed:\n%s", removed)
+	}
+	readded, err := ApplyEdit(removed, "alpha", "web", VMEdit{DRSExclude: ptr(true)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !excluded(t, readded) {
+		t.Fatalf("annotation not re-added after a remove:\n%s", readded)
+	}
+}
+
+func TestApplyEditDRSExcludeDegenerateShapes(t *testing.T) {
+	// Hand-written manifests can carry shapes the line editor can't extend in
+	// place — an empty flow mapping or a null-valued key. Both must be
+	// replaced wholesale, never silently skipped.
+	for name, tmpl := range map[string]string{
+		"empty flow metadata":    "  template:\n    metadata: {}\n",
+		"null annotations":       "  template:\n    metadata:\n      annotations:\n",
+		"empty flow annotations": "  template:\n    metadata:\n      annotations: {}\n",
+	} {
+		manifest := "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\nspec:\n  runStrategy: Always\n" +
+			tmpl + "    spec:\n      domain:\n        cpu:\n          cores: 1\n"
+		out, err := ApplyEdit([]byte(manifest), "alpha", "web", VMEdit{DRSExclude: ptr(true)})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !excluded(t, out) {
+			t.Errorf("%s: annotation silently dropped:\n%s", name, out)
+		}
+	}
 }
 
 func TestApplyEditDRSExcludeCreatesTemplateMetadata(t *testing.T) {

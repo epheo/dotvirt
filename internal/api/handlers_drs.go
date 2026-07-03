@@ -14,11 +14,13 @@ import (
 // boundary that lets only the platform app apply it.
 
 // handleDRS reports the DRS tier: the platform repo's committed configuration,
-// the live operator state from the SA-watched snapshot, and the caller's
-// authoring capability. Snapshot + git-mirror reads only — the two SSARs are
-// the sole cluster calls.
+// the caller's staged draft, the live operator state from the SA-watched
+// snapshot, and the caller's authoring capability. Snapshot + git-mirror reads
+// only — the SSARs ride the per-token cache (the panel polls this endpoint).
+// Each plane degrades independently: a git-side failure becomes a Warning on
+// an otherwise-served view, never a 500 that hides the live state.
 func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
-	_, c, err := s.userCluster(r)
+	id, c, err := s.userCluster(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
@@ -29,14 +31,19 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.cfg.PlatformRepo != "" && s.draft != nil {
 		ctx := r.Context()
-		view.CanManage = c.CanCreateClusterResource(ctx, "operator.openshift.io", "kubedeschedulers")
-		view.CanPSI = c.CanCreateClusterResource(ctx, "machineconfiguration.openshift.io", "machineconfigs")
-		git, err := s.draft.DRSState(project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+		view.CanManage = s.canCreateCached(ctx, id, c, "operator.openshift.io", "kubedeschedulers")
+		view.CanPSI = s.canCreateCached(ctx, id, c, "machineconfiguration.openshift.io", "machineconfigs")
+		platform := project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}
+		if git, err := s.draft.DRSState(platform); err != nil {
+			view.Warning = "platform repo unavailable — committed DRS state unknown: " + err.Error()
+		} else {
+			view.DRSGitState = git
 		}
-		view.DRSGitState = git
+		if view.CanManage {
+			if d, err := s.draft.DRSDraft(id, platform); err == nil && (d.Config != nil || d.PSI || d.DisableStaged) {
+				view.Draft = &d
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, view)
 }

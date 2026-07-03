@@ -572,6 +572,14 @@ type DRSGitState struct {
 	PSIConfigured bool       `json:"psiConfigured"`    // the PSI MachineConfig is committed
 }
 
+// DRSDraftState is the caller's pending (staged, not yet proposed) DRS change
+// — the plane between committed and live that the panel's dialog edits.
+type DRSDraftState struct {
+	Config        *DRSConfig `json:"config,omitempty"` // the staged KubeDescheduler spec
+	PSI           bool       `json:"psi,omitempty"`    // the PSI MachineConfig is staged too
+	DisableStaged bool       `json:"disableStaged,omitempty"`
+}
+
 // DRSLive is the descheduler's live state, read from the SA-watched
 // KubeDescheduler snapshot — never the cluster per-request.
 type DRSLive struct {
@@ -579,6 +587,12 @@ type DRSLive struct {
 	// cluster where the operator was never installed — the "not installed" state
 	// the panel shows until the first enable-PR merges and OLM installs it.
 	APIPresent bool `json:"apiPresent"`
+	// Synced: the initial LIST landed; until then Deployed=false means
+	// "unknown", not "absent". Stale: the API is served but the watch is
+	// currently failing (e.g. RBAC not yet reconciled, apiserver outage) — the
+	// live fields may be missing or outdated.
+	Synced bool `json:"synced"`
+	Stale  bool `json:"stale,omitempty"`
 	// Deployed: a KubeDescheduler CR exists in the cluster.
 	Deployed        bool     `json:"deployed"`
 	ManagementState string   `json:"managementState,omitempty"`
@@ -592,13 +606,17 @@ type DRSLive struct {
 }
 
 // DRSView is GET /api/drs: the DRS tier across its planes — the committed git
-// state (flattened), the live operator state — plus the caller's authoring
-// capability, the same SSARs the POST/DELETE handlers enforce.
+// state (flattened), the caller's staged draft, the live operator state — plus
+// the caller's authoring capability, the same SSARs the POST/DELETE handlers
+// enforce. Warning carries a non-fatal degradation (e.g. the platform repo is
+// unreachable, so the committed state is unknown) instead of failing the view.
 type DRSView struct {
 	DRSGitState
-	Live      DRSLive `json:"live"`
-	CanManage bool    `json:"canManage"` // kubedeschedulers-create — gates the panel's actions
-	CanPSI    bool    `json:"canPSI"`    // machineconfigs-create — gates the PSI checkbox
+	Draft     *DRSDraftState `json:"draft,omitempty"`
+	Live      DRSLive        `json:"live"`
+	Warning   string         `json:"warning,omitempty"`
+	CanManage bool           `json:"canManage"` // kubedeschedulers-create — gates the panel's actions
+	CanPSI    bool           `json:"canPSI"`    // machineconfigs-create — gates the PSI checkbox
 }
 
 // NetworkCaps mirrors each platform-tier create handler's platformScope SSAR, so the
