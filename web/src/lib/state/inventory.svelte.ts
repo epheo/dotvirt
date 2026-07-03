@@ -73,6 +73,13 @@ class InventoryStore {
 	findVM(namespace: string, name: string): VM | null {
 		return this.allVMs.find((v) => v.namespace === namespace && v.name === name) ?? null;
 	}
+
+	projectOf(namespace: string): string {
+		return (
+			this.inventory?.projects.find((p) => p.namespaces.some((n) => n.namespace === namespace))
+				?.name ?? ''
+		);
+	}
 }
 
 export const inventory = new InventoryStore();

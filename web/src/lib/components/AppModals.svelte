@@ -20,7 +20,13 @@
 	// exactly one can be open and opening any is a single assignment.
 	const m = $derived(ui.modal);
 	const close = () => (ui.modal = null);
-	const staged = () => drafts.refresh();
+	const staged = () => {
+		drafts.refresh();
+		ui.showToast('Staged into Changes — applies when the project’s PR merges.', {
+			label: 'Review & propose',
+			run: () => (ui.changesOpen = true)
+		});
+	};
 
 	// The per-VM staged-changes modal (opened from a Staged badge).
 	let stagedBusy = $state(false);

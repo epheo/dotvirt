@@ -31,6 +31,7 @@
 	import EditSettings from './EditSettings.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import MetricsPanel from './MetricsPanel.svelte';
+	import PendingBanner from './PendingBanner.svelte';
 	import Permissions from './Permissions.svelte';
 	import PowerDot from './PowerDot.svelte';
 	import Snapshots from './Snapshots.svelte';
@@ -383,6 +384,8 @@
 					)} ago{/if}
 			</div>
 		{/if}
+
+		<PendingBanner {vm} />
 
 		{#if runtimeMsg}
 			<div

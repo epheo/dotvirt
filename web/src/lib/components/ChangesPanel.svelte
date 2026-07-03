@@ -3,6 +3,7 @@
 	import { api, type Commit, type DraftView, type Proposal, type ProposeResult } from '$lib/api';
 	import ChangeList from './ChangeList.svelte';
 	import Drawer from './Drawer.svelte';
+	import GitOpsStepper from './GitOpsStepper.svelte';
 
 	let {
 		drafts,
@@ -133,19 +134,22 @@
 		<!-- Open PRs (persistent, fetched from Forgejo) — survive closing the panel,
 		     unlike the transient propose response below. -->
 		{#each proposals as p (p.project)}
-			<div
-				class="mb-2 flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm"
-			>
-				<span class="font-medium text-slate-700">{p.project}</span>
-				<span class="rounded bg-emerald-100 px-1.5 text-xs font-medium text-emerald-700">
-					PR #{p.prNumber} open
-				</span>
-				<a
-					href={p.prURL}
-					target="_blank"
-					rel="noopener"
-					class="ml-auto min-w-0 truncate text-xs text-blue-700 underline">{p.title || p.prURL}</a
-				>
+			<div class="mb-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
+				<div class="flex items-center gap-2">
+					<span class="font-medium text-slate-700">{p.project}</span>
+					<span class="rounded bg-emerald-100 px-1.5 text-xs font-medium text-emerald-700">
+						PR #{p.prNumber} open
+					</span>
+					<a
+						href={p.prURL}
+						target="_blank"
+						rel="noopener"
+						class="ml-auto min-w-0 truncate text-xs text-blue-700 underline">{p.title || p.prURL}</a
+					>
+				</div>
+				<div class="mt-1.5">
+					<GitOpsStepper stage="proposed" prNumber={p.prNumber} prUrl={p.prURL} />
+				</div>
 			</div>
 		{/each}
 
@@ -188,14 +192,42 @@
 		{/each}
 
 		{#if total === 0}
-			<p class="py-8 text-center text-sm text-slate-400">
-				No pending changes. Edit a VM or create one to stage changes here.
-			</p>
+			<!-- The one place the write model is explained: like vCenter's Recent
+			     Tasks, except every config change is a reviewable PR before it applies. -->
+			<div class="py-8 text-center">
+				<p class="mb-4 text-sm text-slate-400">No pending changes.</p>
+				<ol class="mx-auto max-w-[20rem] space-y-2 text-left text-xs text-slate-600">
+					<li class="flex items-start gap-2">
+						<span
+							class="mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-select text-[10px] font-semibold text-accent-ink"
+							>1</span
+						>
+						Edit or create a VM — the change is staged here, not applied.
+					</li>
+					<li class="flex items-start gap-2">
+						<span
+							class="mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-select text-[10px] font-semibold text-accent-ink"
+							>2</span
+						>
+						Propose — dotvirt opens a pull request in the project's repo.
+					</li>
+					<li class="flex items-start gap-2">
+						<span
+							class="mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-select text-[10px] font-semibold text-accent-ink"
+							>3</span
+						>
+						Merge it — ArgoCD applies the change to the cluster.
+					</li>
+				</ol>
+				<p class="mx-auto mt-4 max-w-[20rem] text-xs text-slate-400">
+					Every configuration change is a reviewable pull request before it touches the cluster.
+				</p>
+			</div>
 		{/if}
 
 		{#each drafts as { project, draft } (project)}
 			<section class="mb-5">
-				<div class="mb-2 flex items-center gap-2">
+				<div class="mb-1 flex items-center gap-2">
 					<Folder size={14} class="text-blue-500" />
 					<span class="font-semibold text-slate-700">{project}</span>
 					<span class="text-xs text-slate-400">({draft.count})</span>
@@ -203,6 +235,9 @@
 						onclick={() => discardAll(project)}
 						class="ml-auto text-xs text-slate-500 hover:text-slate-700">discard all</button
 					>
+				</div>
+				<div class="mb-2">
+					<GitOpsStepper stage="staged" />
 				</div>
 
 				{#if error[project]}
@@ -264,7 +299,7 @@
 						disabled={busy[project]}
 						class="w-full rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
 					>
-						{busy[project] ? 'Proposing…' : `Create pull request → ${project}`}
+						{busy[project] ? 'Proposing…' : `Propose pull request → ${project}`}
 					</button>
 				</div>
 			</section>

@@ -15,6 +15,7 @@
 	import ContainerMonitor from '$lib/components/ContainerMonitor.svelte';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import MenuItem from '$lib/components/MenuItem.svelte';
+	import PendingBanner from '$lib/components/PendingBanner.svelte';
 	import Permissions from '$lib/components/Permissions.svelte';
 	import TabBar from '$lib/components/TabBar.svelte';
 	import VMTable from '$lib/components/VMTable.svelte';
@@ -153,7 +154,10 @@
 			const extra = [skipped ? `${skipped} skipped` : '', failed ? `${failed} failed` : '']
 				.filter(Boolean)
 				.join(', ');
-			ui.showToast(`${verb} ${staged} of ${vms.length}${extra ? ` (${extra})` : ''}.`);
+			ui.showToast(
+				`${verb} ${staged} of ${vms.length}${extra ? ` (${extra})` : ''}.`,
+				staged > 0 ? { label: 'Review & propose', run: () => (ui.changesOpen = true) } : undefined
+			);
 		} finally {
 			bulkBusy = false;
 		}
@@ -190,6 +194,9 @@
 	{:else if scope.kind === 'storage'}
 		<StorageClassSummary storageClass={scope.storageClass} vms={scopedVMs} />
 	{:else}
+		{#if scope.kind === 'project' || scope.kind === 'namespace'}
+			<PendingBanner project={scope.project} />
+		{/if}
 		<div class="min-h-0 flex-1 overflow-y-auto">
 			<ClusterSummary scope={containerScope} onselect={openVM} />
 		</div>
