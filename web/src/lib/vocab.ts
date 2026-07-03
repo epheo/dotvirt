@@ -19,14 +19,30 @@ export interface Term {
 // `TERMS.tier1` rather than knowing which CRD backs it.
 export const TERMS = {
 	segment: { nsx: 'Segment', vsphere: 'Port Group' },
-	tier0: { nsx: 'Tier-0 Gateway', vsphere: 'Provider', backing: 'uplink + EgressIP + RouteAdvertisements' },
-	tier1: { nsx: 'Tier-1 Gateway', vsphere: 'Project Router', backing: 'primary UserDefinedNetwork' },
-	uplink: { nsx: 'Transport / Uplink', vsphere: 'Physical uplink', backing: 'NodeNetworkConfigurationPolicy' },
+	tier0: {
+		nsx: 'Tier-0 Gateway',
+		vsphere: 'Provider',
+		backing: 'uplink + EgressIP + RouteAdvertisements'
+	},
+	tier1: {
+		nsx: 'Tier-1 Gateway',
+		vsphere: 'Project Router',
+		backing: 'primary UserDefinedNetwork'
+	},
+	uplink: {
+		nsx: 'Transport / Uplink',
+		vsphere: 'Physical uplink',
+		backing: 'NodeNetworkConfigurationPolicy'
+	},
 	gatewayFirewall: { nsx: 'Gateway Firewall', vsphere: 'Egress Rules', backing: 'EgressFirewall' },
 	snat: { nsx: 'Source NAT', vsphere: 'Egress SNAT', backing: 'EgressIP' },
 	dhcp: { nsx: 'DHCP / IP Pool', vsphere: 'IP Pool', backing: 'UDN subnets (IPAM)' },
 	bgp: { nsx: 'Route Advertisement', vsphere: 'BGP peering', backing: 'RouteAdvertisements' },
-	dfw: { nsx: 'Distributed Firewall', vsphere: 'Security Policy', backing: 'NetworkPolicy / AdminNetworkPolicy' },
+	dfw: {
+		nsx: 'Distributed Firewall',
+		vsphere: 'Security Policy',
+		backing: 'NetworkPolicy / AdminNetworkPolicy'
+	},
 	group: { nsx: 'Group', vsphere: 'Selector', backing: 'label selector' },
 	tag: { nsx: 'Tag', vsphere: 'Custom Attribute', backing: 'label' }
 } satisfies Record<string, Term>;
@@ -48,29 +64,24 @@ export interface SegmentType extends Term {
 export function segmentType(n: Network): SegmentType {
 	switch (n.kind) {
 		case 'default':
-			return { nsx: 'Tier-1 Segment', vsphere: 'VM Network', backing: 'primary UserDefinedNetwork' };
+			return {
+				nsx: 'Tier-1 Segment',
+				vsphere: 'VM Network',
+				backing: 'primary UserDefinedNetwork'
+			};
 		case 'vlan':
-			return { nsx: 'VLAN Segment', vsphere: 'VLAN', backing: 'localnet ClusterUserDefinedNetwork' };
+			return {
+				nsx: 'VLAN Segment',
+				vsphere: 'VLAN',
+				backing: 'localnet ClusterUserDefinedNetwork'
+			};
 		default:
 			return n.scope === 'shared'
-				? { nsx: 'Overlay Segment', vsphere: 'Shared Port Group', backing: 'ClusterUserDefinedNetwork' }
+				? {
+						nsx: 'Overlay Segment',
+						vsphere: 'Shared Port Group',
+						backing: 'ClusterUserDefinedNetwork'
+					}
 				: { nsx: 'Overlay Segment', vsphere: 'Internal Port Group', backing: 'UserDefinedNetwork' };
 	}
-}
-
-// Which gateway a segment hangs off, for the topology map's two-tier layout. VLAN
-// (localnet) segments bridge to the physical fabric at the provider edge — Tier-0;
-// overlay segments and the primary VM Network live on the project router — Tier-1.
-// This mirrors the platform/tenant repo split the backend already enforces: a
-// cluster-scoped object is authored at the platform (Tier-0) tier, a namespace one
-// at the tenant (Tier-1) tier.
-export function networkTier(n: Network): 'tier0' | 'tier1' {
-	return n.kind === 'vlan' ? 'tier0' : 'tier1';
-}
-
-// Whether a segment is authored at the platform tier (a cluster-scoped CUDN: a
-// shared overlay or a VLAN localnet) rather than inside one project. Mirrors the
-// backend's scope routing — platform-tier creates land in the platform repo.
-export function isPlatformScoped(n: Network): boolean {
-	return n.scope === 'shared' || n.kind === 'vlan';
 }

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"regexp"
-	"strings"
 
 	"sigs.k8s.io/yaml"
 )
@@ -33,15 +32,16 @@ func requireName(field, s string) error {
 
 // validCIDR reports whether s parses as a CIDR (e.g. 10.0.0.0/24). Subnet/egress
 // values only ever land in YAML scalars, so this is correctness, not safety: a bad
-// value would otherwise render a manifest OVN-K rejects at apply time.
+// value would otherwise render a manifest OVN-K rejects at apply time. The raw value
+// is validated (no trimming) so what passes here is exactly what the manifest emits.
 func validCIDR(s string) bool {
-	_, _, err := net.ParseCIDR(strings.TrimSpace(s))
+	_, _, err := net.ParseCIDR(s)
 	return err == nil
 }
 
 // validIP reports whether s parses as a bare IP address.
 func validIP(s string) bool {
-	return net.ParseIP(strings.TrimSpace(s)) != nil
+	return net.ParseIP(s) != nil
 }
 
 // requireCIDRs validates each subnet as a CIDR.

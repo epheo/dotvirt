@@ -37,9 +37,20 @@
 	});
 	const vmsFor = (name: string): VM[] => vmsByKey.get(name) ?? [];
 
+	// The Segments lens (and grid scope) identify a port group by name, so the map
+	// collapses same-named networks to one card too. This keeps the map and the tree
+	// in agreement (a click scopes the grid by name), and avoids handing an {#each} a
+	// duplicate key — two project networks sharing a name across a project's namespaces
+	// otherwise crash the render in Svelte 5.
+	const byName = (nets: PortGroup[]): PortGroup[] => [
+		...new Map(nets.map((n) => [n.name, n])).values()
+	];
+
 	// Provider-edge (Tier-0) segments: cluster-scoped CUDNs — a shared overlay or a
 	// VLAN localnet bridged to an uplink.
-	const t0Segments = $derived(networks.filter((n) => n.scope === 'shared' || n.kind === 'vlan'));
+	const t0Segments = $derived(
+		byName(networks.filter((n) => n.scope === 'shared' || n.kind === 'vlan'))
+	);
 
 	// A project's (Tier-1's) own segments: its primary "VM Network" and any
 	// project-scoped overlay segments it owns.
@@ -47,8 +58,8 @@
 		const ns = new Set(p.namespaces.map((n) => n.namespace));
 		const own = networks.filter((n) => n.scope === 'project' && n.namespace && ns.has(n.namespace));
 		return {
-			primary: own.filter((n) => n.kind === 'default'),
-			overlays: own.filter((n) => n.kind !== 'default')
+			primary: byName(own.filter((n) => n.kind === 'default')),
+			overlays: byName(own.filter((n) => n.kind !== 'default'))
 		};
 	}
 
@@ -73,9 +84,11 @@
 					>VLAN {net.vlan}</span
 				>{/if}
 			{#if net.uplink}<span class="text-[10px] text-slate-400">↑ {net.uplink}</span>{/if}
-			{#if net.subnets?.length}<span class="text-[10px] text-slate-400">{net.subnets.join(', ')}</span
+			{#if net.subnets?.length}<span class="text-[10px] text-slate-400"
+					>{net.subnets.join(', ')}</span
 				>{/if}
-			<span class="ml-auto text-xs text-slate-400">{list.length} VM{list.length === 1 ? '' : 's'}</span
+			<span class="ml-auto text-xs text-slate-400"
+				>{list.length} VM{list.length === 1 ? '' : 's'}</span
 			>
 		</div>
 		{#if list.length}
@@ -115,7 +128,9 @@
 		{#if uplinks.length}
 			<div class="mb-2 flex flex-wrap gap-1.5 pl-6">
 				{#each uplinks as u (u.name)}
-					<span class="rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600">
+					<span
+						class="rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600"
+					>
 						{u.name}{u.builtin ? ' · default' : ''} <span class="text-slate-400">({u.bridge})</span>
 					</span>
 				{/each}
