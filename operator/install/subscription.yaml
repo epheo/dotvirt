@@ -6,7 +6,7 @@ metadata:
   name: dotvirt-operator
   namespace: dotvirt-operator
 spec:
-  channel: alpha
+  channel: stable-v0
   name: dotvirt-operator
   source: dotvirt-catalog
   sourceNamespace: openshift-marketplace

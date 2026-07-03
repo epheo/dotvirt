@@ -23,6 +23,11 @@ jobs:
         env: { GOFLAGS: -buildvcs=false }
       - run: go test ./...
         env: { GOFLAGS: -buildvcs=false }
+      # The operator is a SEPARATE module (operator/go.mod), so the root `go test ./...`
+      # above doesn't reach it — vet + test it explicitly.
+      - run: go vet ./... && go test ./...
+        working-directory: operator
+        env: { GOFLAGS: -buildvcs=false }
 
   web:
     runs-on: ubuntu-latest
