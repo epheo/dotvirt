@@ -53,7 +53,7 @@ test('create → Synced → delete → gone, observed in the inventory', async (
 		expect(created.ok(), `stage create → ${created.status()}`).toBeTruthy();
 
 		await page.reload();
-		await expect(page.getByRole('button', { name: /New VM/ })).toBeVisible();
+		await expect(page.getByRole('button', { name: /^New$/ })).toBeVisible();
 		await proposeAndMerge(page, PROJECT, `e2e: create ${vm}`);
 
 		// The create lands in the rendered inventory: the actual VM row appears, then its
@@ -61,7 +61,7 @@ test('create → Synced → delete → gone, observed in the inventory', async (
 		// propagates through dotvirt's watch). Match the VMTable row by its Power: name —
 		// the TaskDock's transient "Proposed"/"Configuration drift" overlay rows carry the
 		// same VM name but a different prefix, so an unscoped `tbody tr` would match all three.
-		await page.getByRole('button', { name: 'VMs', exact: true }).click();
+		await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
 		const row = page.getByRole('row', { name: new RegExp(`Power:.*${vm}`) });
 		await expect(row).toBeVisible({ timeout: SYNC_TIMEOUT });
 		await expect(row.getByText('Synced')).toBeVisible({ timeout: SYNC_TIMEOUT });
@@ -71,10 +71,10 @@ test('create → Synced → delete → gone, observed in the inventory', async (
 		expect(deleted.ok(), `stage delete → ${deleted.status()}`).toBeTruthy();
 
 		await page.reload();
-		await expect(page.getByRole('button', { name: /New VM/ })).toBeVisible();
+		await expect(page.getByRole('button', { name: /^New$/ })).toBeVisible();
 		await proposeAndMerge(page, PROJECT, `e2e: delete ${vm}`);
 
-		await page.getByRole('button', { name: 'VMs', exact: true }).click();
+		await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
 		await expect(page.getByRole('row', { name: new RegExp(`Power:.*${vm}`) })).toHaveCount(0, { timeout: SYNC_TIMEOUT });
 	} finally {
 		await cleanupVM(page, PROJECT, NS, vm);
