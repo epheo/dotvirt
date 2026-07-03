@@ -62,11 +62,11 @@ deploy: manifests ## Apply the CRD + operator to the current cluster (needs conf
 .PHONY: bundle
 bundle: manifests ## Generate the OLM bundle for OperatorHub (needs operator-sdk on PATH).
 	$(OPERATOR_SDK) generate kustomize manifests -q
-	# Channels follow the OLM convention (candidate/fast/stable, version-suffixed for the
-	# v1alpha1 API): stable-v0 = released, candidate-v0 = rc + released QA. Pass them
-	# explicitly so the generator doesn't fall back to its "alpha" default.
+	# Only stable-v0: the community pipelines build channels from this annotation, and only
+	# releases are submitted. Self-hosted membership (incl. candidate-v0) is defined by
+	# catalog-template.yaml, which ignores it.
 	$(KUSTOMIZE) build config/manifests | $(OPERATOR_SDK) generate bundle --overwrite --version $(VERSION) \
-		--channels stable-v0,candidate-v0 --default-channel stable-v0
+		--channels stable-v0 --default-channel stable-v0
 	# operator-sdk regenerates annotations.yaml + bundle.Dockerfile, so re-inject the
 	# OpenShift version floor (which OCP releases embedded OperatorHub offers this on).
 	grep -q com.redhat.openshift.versions bundle/metadata/annotations.yaml || \
