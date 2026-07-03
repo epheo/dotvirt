@@ -78,7 +78,7 @@ func TestDeploymentSecurityHardening(t *testing.T) {
 // (no anyuid): non-root, no privilege escalation, all caps dropped, an fsGroup for
 // PVC writability — plus bounded, probed, and digest-pinned.
 func TestForgejoDeploymentBoundedAndPinned(t *testing.T) {
-	d := ForgejoDeployment(testDotvirt(), true)
+	d := ForgejoDeployment(testDotvirt(), true, "")
 	c := d.Spec.Template.Spec.Containers[0]
 	if c.LivenessProbe == nil {
 		t.Error("forgejo must set a liveness probe")
@@ -106,11 +106,37 @@ func TestForgejoDeploymentBoundedAndPinned(t *testing.T) {
 // fsGroup is set on vanilla K8s (PVC writability) but MUST be omitted on OpenShift,
 // where restricted-v2 rejects an out-of-range fsGroup and injects its own.
 func TestForgejoFSGroupIsPlatformConditional(t *testing.T) {
-	if fg := ForgejoDeployment(testDotvirt(), true).Spec.Template.Spec.SecurityContext.FSGroup; fg == nil {
+	if fg := ForgejoDeployment(testDotvirt(), true, "").Spec.Template.Spec.SecurityContext.FSGroup; fg == nil {
 		t.Error("vanilla K8s (setFSGroup=true): fsGroup must be set")
 	}
-	if fg := ForgejoDeployment(testDotvirt(), false).Spec.Template.Spec.SecurityContext.FSGroup; fg != nil {
+	if fg := ForgejoDeployment(testDotvirt(), false, "").Spec.Template.Spec.SecurityContext.FSGroup; fg != nil {
 		t.Errorf("OpenShift (setFSGroup=false): fsGroup must be nil, got %d", *fg)
+	}
+}
+
+// The forge→ArgoCD webhook targets the Argo Route by name, which often resolves
+// to a PRIVATE ingress VIP; Forgejo's `external` allowlist entry matches public
+// resolved IPs only, so the host must be allowed by name or every delivery is
+// silently denied by the SSRF guard. Both containers share the env (the init
+// renders app.ini from it).
+func TestForgejoWebhookAllowlistIncludesArgoHost(t *testing.T) {
+	const argo = "openshift-gitops-server-openshift-gitops.apps.example.com"
+	d := ForgejoDeployment(testDotvirt(), false, argo)
+	for _, env := range [][]corev1.EnvVar{
+		d.Spec.Template.Spec.InitContainers[0].Env,
+		d.Spec.Template.Spec.Containers[0].Env,
+	} {
+		got, ok := envValue(env, "FORGEJO__webhook__ALLOWED_HOST_LIST")
+		if !ok || got != ServiceHost(testDotvirt())+",external,"+argo {
+			t.Errorf("ALLOWED_HOST_LIST = (%q, ok=%v), want service host + external + argo host", got, ok)
+		}
+	}
+
+	// No Argo URL resolvable yet: the baseline list, no trailing separator.
+	got, _ := envValue(ForgejoDeployment(testDotvirt(), false, "").Spec.Template.Spec.Containers[0].Env,
+		"FORGEJO__webhook__ALLOWED_HOST_LIST")
+	if got != ServiceHost(testDotvirt())+",external" {
+		t.Errorf("ALLOWED_HOST_LIST without an Argo host = %q", got)
 	}
 }
 
