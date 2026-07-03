@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { ChevronDown, ChevronRight, Folder, History } from 'lucide-svelte';
 	import { api, type Commit, type DraftView, type Proposal, type ProposeResult } from '$lib/api';
 	import ChangesLane from './ChangesLane.svelte';
@@ -28,6 +29,30 @@
 	// Propose results outlive their lane (a proposed lane empties and unmounts),
 	// so they're held here until the persistent PR banner carries that exact PR.
 	let result = $state<Record<string, ProposeResult>>({});
+
+	// A propose that landed a PR renders through the SAME banner as a live PR
+	// lane, so when the streamed proposal arrives it takes over invisibly —
+	// never a differently-styled box that swaps to "the definitive one".
+	const banners = $derived.by(() => {
+		const out: { project: string; prNumber: number; prURL: string; title?: string }[] = [
+			...proposals
+		];
+		const seen = new Set(out.map((p) => `${p.project}#${p.prNumber}`));
+		for (const [project, r] of Object.entries(result)) {
+			if (!r.prURL || !r.prNumber) continue; // push-only outcomes keep their own note below
+			if (seen.has(`${project}#${r.prNumber}`)) continue;
+			out.push({ project, prNumber: r.prNumber, prURL: r.prURL });
+		}
+		return out.sort((a, b) => a.project.localeCompare(b.project));
+	});
+
+	// Once the live stream carries a proposed PR, its transient result is spent —
+	// kept around it would resurface as a ghost banner after the PR merges.
+	$effect(() => {
+		for (const p of proposals) {
+			if (untrack(() => result[p.project])?.prNumber === p.prNumber) delete result[p.project];
+		}
+	});
 
 	// Commit history: per-project, re-fetched on every expand (a merge or revert
 	// changes it). Revert state is keyed by commit hash — armed (awaiting a
@@ -125,9 +150,10 @@
 				{/each}
 			</div>
 		{/if}
-		<!-- Open PRs (persistent, fetched from Forgejo) — survive closing the panel,
-		     unlike the transient propose response below. -->
-		{#each proposals as p (p.project)}
+		<!-- Open PRs: the live lanes off the inventory stream, plus any just-proposed
+		     PR straight from its propose response (same markup — the stream takes
+		     over invisibly once it carries the PR). -->
+		{#each banners as p (p.project + '#' + p.prNumber)}
 			<div class="mb-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
 				<div class="flex items-center gap-2">
 					<span class="font-medium text-slate-700">{p.project}</span>
@@ -147,12 +173,9 @@
 			</div>
 		{/each}
 
-		<!-- Transient propose feedback: surface the PR link straight from the propose
-		     response so it appears immediately, not once the background `proposals`
-		     refresh eventually lands. Drop an entry once the persistent banner above
-		     carries that exact PR, so the same PR is never listed twice — but a
-		     re-propose that lands a new PR still shows until the banner catches up. -->
-		{#each Object.entries(result).filter(([proj, r]) => !proposals.some((p) => p.project === proj && p.prNumber === r.prNumber)) as [project, r] (project)}
+		<!-- Push-only propose outcomes (no PR to banner): a branch was pushed, or
+		     stayed local — surface the compare link so the user can open the PR. -->
+		{#each Object.entries(result).filter(([, r]) => !r.prURL || !r.prNumber) as [project, r] (project)}
 			<div class="mb-2 rounded border border-green-200 bg-green-50 p-3 text-sm">
 				<div class="mb-1 flex items-center gap-1">
 					<span class="font-medium text-slate-700">{project}</span>
@@ -165,7 +188,7 @@
 			</div>
 		{/each}
 
-		{#if loaded && total === 0 && proposals.length > 0}
+		{#if loaded && total === 0 && banners.length > 0}
 			<p class="py-4 text-center text-sm text-slate-400">
 				Nothing staged — the open pull requests above carry everything proposed.
 			</p>
