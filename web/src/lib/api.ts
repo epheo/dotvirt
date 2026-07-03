@@ -113,6 +113,14 @@ function post<T>(path: string, body: unknown): Promise<T> {
 	});
 }
 
+function put<T>(path: string, body: unknown): Promise<T> {
+	return req<T>(path, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body)
+	});
+}
+
 function del(path: string): Promise<void> {
 	return req<void>(path, { method: 'DELETE' });
 }
@@ -637,6 +645,13 @@ export interface DeployTemplateRequest {
 	namespace: string;
 	name?: string; // overrides the NAME parameter; empty → template default (often generated)
 	parameters?: Record<string, string>;
+	powerOn?: boolean; // boot the VM once it syncs (templates blueprint Halted)
+}
+
+export interface UpdateTemplateRequest {
+	library: string;
+	name: string;
+	yaml: string;
 }
 
 export interface SaveTemplateRequest {
@@ -746,6 +761,7 @@ export const api = {
 	templates: () => get<{ templates: Template[] }>('/api/templates'),
 	deployTemplate: (req: DeployTemplateRequest) => post<DraftView>('/api/templates/deploy', req),
 	saveTemplate: (req: SaveTemplateRequest) => post<DraftView>('/api/templates', req),
+	updateTemplate: (req: UpdateTemplateRequest) => put<DraftView>('/api/templates', req),
 	resync: (namespace: string, name: string) =>
 		post<{ application: string; revision: string }>(
 			`/api/vms/${enc(namespace)}/${enc(name)}/resync`,

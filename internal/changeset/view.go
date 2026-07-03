@@ -27,6 +27,12 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 		item := model.DraftItem{Kind: string(e.Kind), Resource: string(e.Resource), Namespace: e.Namespace, Name: e.Name}
 		switch e.Kind {
 		case draft.KindEdit:
+			if e.Manifest != "" {
+				// A whole-file replacement (template edit): the manifest IS the change.
+				item.Changes = []model.Change{{Field: "Edit template", Action: "change", To: e.Name}}
+				item.YAML = e.Manifest
+				break
+			}
 			current, _, err := read.FindVMOnBranch(c.baseBranch, e.Namespace, e.Name)
 			if err != nil {
 				return model.DraftView{}, err

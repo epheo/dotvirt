@@ -235,17 +235,23 @@
 						{/each}
 					</ul>
 				{/if}
-				{#if !t.error}
-					<div class="border-t border-line p-3">
+				<div class="flex gap-2 border-t border-line p-3">
+					{#if !t.error}
 						<button
 							onclick={() =>
 								(ui.modal = { kind: 'deployTemplate', library: t.library, template: t.name })}
-							class="w-full rounded bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
+							class="flex-1 rounded bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
 						>
 							Deploy…
 						</button>
-					</div>
-				{/if}
+					{/if}
+					<button
+						onclick={() => (ui.modal = { kind: 'editTemplate', template: t })}
+						class="flex-1 rounded border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-inset"
+					>
+						Edit…
+					</button>
+				</div>
 			{/if}
 		</aside>
 	{/if}

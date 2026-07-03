@@ -120,6 +120,86 @@ func TestStageDeployFromTemplateErrors(t *testing.T) {
 	}
 }
 
+// Templates blueprint Halted; the PowerOn flag must flip only the rendered
+// manifest's run state, leaving the default deploy untouched.
+func TestStageDeployFromTemplatePowerOn(t *testing.T) {
+	bare := seedBareFiles(t, map[string][]byte{"templates/base.yaml": []byte(libraryTemplate)})
+	c := newTestCoordinator(t)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+
+	for _, tc := range []struct {
+		name    string
+		powerOn bool
+		want    string
+	}{
+		{"default stays halted", false, "runStrategy: Halted"},
+		{"powerOn boots", true, "runStrategy: Always"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			view, err := c.StageDeployFromTemplate(id, proj, proj, model.DeployTemplateRequest{
+				Template: "base", Namespace: "alpha", Name: "web-" + tc.name[:2], PowerOn: tc.powerOn,
+			})
+			if err != nil {
+				t.Fatalf("StageDeployFromTemplate: %v", err)
+			}
+			if got := view.Items[len(view.Items)-1].YAML; !strings.Contains(got, tc.want) {
+				t.Fatalf("want %q in staged manifest:\n%s", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestStageUpdateTemplate(t *testing.T) {
+	bare := seedBareFiles(t, map[string][]byte{"templates/base.yaml": []byte(libraryTemplate)})
+	c := newTestCoordinator(t)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+
+	edited := strings.Replace(libraryTemplate, "name: base", "name: base\n  annotations:\n    description: edited", 1)
+	view, err := c.StageUpdateTemplate(id, proj, model.UpdateTemplateRequest{Name: "base", YAML: edited})
+	if err != nil {
+		t.Fatalf("StageUpdateTemplate: %v", err)
+	}
+	if view.Count != 1 {
+		t.Fatalf("want 1 staged item, got %d", view.Count)
+	}
+	it := view.Items[0]
+	if it.Kind != string(draft.KindEdit) || it.Resource != string(draft.ResourceTemplate) || it.Name != "base" {
+		t.Fatalf("unexpected item: %+v", it)
+	}
+	if it.Changes[0].Field != "Edit template" || it.Changes[0].To != "base" {
+		t.Fatalf("unexpected changes: %+v", it.Changes)
+	}
+	if !strings.Contains(it.YAML, "description: edited") {
+		t.Fatalf("staged YAML is not the edited content:\n%s", it.YAML)
+	}
+}
+
+func TestStageUpdateTemplateErrors(t *testing.T) {
+	bare := seedBareFiles(t, map[string][]byte{"templates/base.yaml": []byte(libraryTemplate)})
+	c := newTestCoordinator(t)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+
+	for _, tc := range []struct {
+		name string
+		req  model.UpdateTemplateRequest
+		want error
+	}{
+		{"traversal name", model.UpdateTemplateRequest{Name: "../base", YAML: libraryTemplate}, model.ErrInvalid},
+		{"garbage YAML", model.UpdateTemplateRequest{Name: "base", YAML: ":\n:not yaml"}, model.ErrInvalid},
+		{"wrong kind", model.UpdateTemplateRequest{Name: "base", YAML: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: x\n"}, model.ErrInvalid},
+		{"not in library", model.UpdateTemplateRequest{Name: "ghost", YAML: libraryTemplate}, model.ErrNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := c.StageUpdateTemplate(id, proj, tc.req); !errors.Is(err, tc.want) {
+				t.Fatalf("want %v, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
 func TestStageSaveTemplate(t *testing.T) {
 	vm := "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\nspec:\n  runStrategy: Always\n"
 	bare := seedBareFiles(t, map[string][]byte{"alpha/web.yaml": []byte(vm)})
@@ -203,6 +283,10 @@ func TestProposeCommitsTemplateEntries(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	edited := strings.Replace(libraryTemplate, "name: base", "name: base\n  annotations:\n    description: edited", 1)
+	if _, err := c.StageUpdateTemplate(id, proj, model.UpdateTemplateRequest{Name: "base", YAML: edited}); err != nil {
+		t.Fatal(err)
+	}
 	res, err := c.Propose(id, proj, model.ProposeRequest{Title: "t"})
 	if err != nil {
 		t.Fatalf("Propose: %v", err)
@@ -212,5 +296,9 @@ func TestProposeCommitsTemplateEntries(t *testing.T) {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Errorf("%s not committed on %s: %v\n%s", path, res.Branch, err, out)
 		}
+	}
+	out, err := exec.Command("git", "-C", bare, "cat-file", "-p", res.Branch+":templates/base.yaml").CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "description: edited") {
+		t.Errorf("templates/base.yaml not replaced on %s: %v\n%s", res.Branch, err, out)
 	}
 }

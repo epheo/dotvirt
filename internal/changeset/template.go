@@ -8,6 +8,7 @@ import (
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
+	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/vmtemplate"
@@ -52,6 +53,16 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 	}
 	if !validName(rendered.Name) {
 		return model.DraftView{}, fmt.Errorf("%w: rendered VM name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, rendered.Name)
+	}
+	// Templates blueprint their VMs Halted; "Power on after deployment" flips
+	// the rendered manifest so the VM boots as soon as the merge syncs.
+	if req.PowerOn {
+		on := string(model.PowerOn)
+		patched, err := manifest.ApplyEdit(rendered.Manifest, req.Namespace, rendered.Name, manifest.VMEdit{Power: &on})
+		if err != nil {
+			return model.DraftView{}, fmt.Errorf("power on rendered VM: %w", err)
+		}
+		rendered.Manifest = patched
 	}
 
 	targetRead, err := c.read(targetProj)
@@ -126,6 +137,43 @@ func (c *Coordinator) StageSaveTemplate(id auth.Identity, commitProj, sourceProj
 		Name:       req.Name,
 		SourceFile: path,
 		Manifest:   string(tplYAML),
+	}); err != nil {
+		return model.DraftView{}, err
+	}
+	return c.Get(id, commitProj)
+}
+
+// StageUpdateTemplate replaces a library template's manifest — editing a
+// content-library item in place. The new content must still parse as a
+// VirtualMachineTemplate (an edit must never break the catalog), and the
+// template must already exist on the base branch: a merely-staged save is
+// edited by re-staging the save.
+func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.ProjectInfo, req model.UpdateTemplateRequest) (model.DraftView, error) {
+	if err := requireRepo(commitProj); err != nil {
+		return model.DraftView{}, err
+	}
+	if !validName(req.Name) {
+		return model.DraftView{}, fmt.Errorf("%w: template name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, req.Name)
+	}
+	path := git.TemplatesDir + "/" + req.Name + ".yaml"
+	if t := vmtemplate.Parse(path, []byte(req.YAML), commitProj.Name); t.Error != "" {
+		return model.DraftView{}, fmt.Errorf("%w: %s", model.ErrInvalid, t.Error)
+	}
+	read, err := c.read(commitProj)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	if _, err := read.FileOnBranch(c.baseBranch, path); err != nil {
+		return model.DraftView{}, fmt.Errorf("%w: template %q not in library %q", model.ErrNotFound, req.Name, commitProj.Name)
+	}
+
+	if err := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
+		Kind:       draft.KindEdit,
+		Resource:   draft.ResourceTemplate,
+		Namespace:  ClusterScopeNS,
+		Name:       req.Name,
+		SourceFile: path,
+		Manifest:   req.YAML,
 	}); err != nil {
 		return model.DraftView{}, err
 	}

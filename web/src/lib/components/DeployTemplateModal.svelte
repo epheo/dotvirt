@@ -30,6 +30,7 @@
 	let pickedKey = $state(library && template ? `${library}/${template}` : '');
 	let namespace = $state('');
 	let name = $state(''); // empty = the template's NAME default (often generated)
+	let powerOn = $state(false); // templates blueprint Halted; this boots the VM on sync
 	let params = $state<Record<string, string>>({});
 	let step = $state(0);
 	let busy = $state(false);
@@ -116,7 +117,8 @@
 				template: tpl.name,
 				namespace,
 				name: name.trim() || undefined,
-				parameters: Object.keys(sent).length ? sent : undefined
+				parameters: Object.keys(sent).length ? sent : undefined,
+				powerOn: powerOn || undefined
 			});
 			onstaged();
 			onclose();
@@ -265,5 +267,9 @@
 				</div>
 			{/each}
 		</dl>
+		<label class="mt-3 flex max-w-md items-center gap-2 text-[13px] text-ink">
+			<input type="checkbox" bind:checked={powerOn} class="accent-accent" />
+			Power on after deployment
+		</label>
 	{/if}
 {/snippet}

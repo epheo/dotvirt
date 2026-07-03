@@ -113,6 +113,35 @@ func (s *Server) libraryFor(w http.ResponseWriter, r *http.Request, sc scope, li
 	return project.ProjectInfo{}, false
 }
 
+// handleUpdateTemplate replaces a library template's manifest — editing a
+// content-library item. Editing IS writing to the library, so the gate matches
+// saving into it: project membership for a project library, the
+// virtualmachinetemplates create SSAR for the shared one.
+func (s *Server) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
+	raw, err := readAll(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var req model.UpdateTemplateRequest
+	if err := json.Unmarshal(raw, &req); err != nil || req.Library == "" || req.Name == "" || req.YAML == "" {
+		http.Error(w, "library, name, and yaml are required", http.StatusBadRequest)
+		return
+	}
+	var sc scope
+	var ok bool
+	if req.Library == platformProjectName {
+		sc, ok = s.platformScope(w, r, "template.kubevirt.io", "virtualmachinetemplates")
+	} else {
+		sc, ok = s.resolveProject(w, r, byName(req.Library))
+	}
+	if !ok {
+		return
+	}
+	view, err := s.draft.StageUpdateTemplate(sc.id, sc.proj, req)
+	respond(w, view, err)
+}
+
 // handleSaveTemplate derives a template from a VM's git manifest and stages it
 // into a library — "Clone to Template". Saving into the VM's own project needs
 // only that project's membership; saving into the shared library gates on the
