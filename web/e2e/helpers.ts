@@ -14,9 +14,9 @@ export async function login(page: Page) {
 	await expect(page.getByRole('button', { name: /^New$/ })).toBeVisible();
 }
 
-// openFirstVM switches to the VMs tab and opens the first VM's detail view.
+// openFirstVM switches to the VMs tab and opens the first VM's detail route.
 export async function openFirstVM(page: Page) {
-	await page.getByRole('button', { name: 'VMs', exact: true }).click();
+	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
 	const row = page.locator('tbody tr').first();
 	await expect(row).toBeVisible();
 	await row.click();
@@ -60,13 +60,13 @@ export async function proposeAndMerge(page: Page, project: string, title: string
 	// project is staged.
 	const form = page
 		.locator('aside section')
-		.filter({ has: page.getByRole('button', { name: `Create pull request → ${project}` }) });
+		.filter({ has: page.getByRole('button', { name: `Propose pull request → ${project}` }) });
 	await form.getByPlaceholder('Pull request title').fill(title);
 	const [resp] = await Promise.all([
 		page.waitForResponse(
 			(r) => r.url().includes('/api/draft/propose') && r.request().method() === 'POST'
 		),
-		form.getByRole('button', { name: `Create pull request → ${project}` }).click()
+		form.getByRole('button', { name: `Propose pull request → ${project}` }).click()
 	]);
 	// prNumber is omitted on the branch-only propose paths (the branch already merged, or a
 	// forge error after the push). The branch is always returned, so recover the open PR.
