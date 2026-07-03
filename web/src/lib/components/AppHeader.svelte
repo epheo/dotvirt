@@ -166,7 +166,7 @@
 	     pending staged edits), not a peer of New, so it reads as an icon. -->
 	<button
 		onclick={() => (ui.changesOpen = !ui.changesOpen)}
-		title="Changes — staged edits waiting to be proposed"
+		title="Changes — staged edits become a pull request"
 		class="relative rounded p-1.5 hover:bg-slate-700 {ui.changesOpen
 			? 'bg-slate-700 text-white'
 			: 'text-slate-300'}"

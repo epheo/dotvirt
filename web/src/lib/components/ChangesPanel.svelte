@@ -1,33 +1,63 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { ChevronDown, ChevronRight, Folder, History } from 'lucide-svelte';
 	import { api, type Commit, type DraftView, type Proposal, type ProposeResult } from '$lib/api';
-	import ChangeList from './ChangeList.svelte';
+	import ChangesLane from './ChangesLane.svelte';
 	import Drawer from './Drawer.svelte';
+	import GitOpsStepper from './GitOpsStepper.svelte';
 
 	let {
 		drafts,
 		proposals,
 		projects,
+		loaded = true,
+		refreshing = false,
 		onclose,
 		onchanged
 	}: {
 		drafts: { project: string; draft: DraftView }[];
 		proposals: Proposal[];
 		projects: string[]; // repo-backed project names, for the History section
+		// Draft-summary fetch state: `loaded` gates the empty state (never claim
+		// "no changes" before a summary has landed), `refreshing` shows in the title.
+		loaded?: boolean;
+		refreshing?: boolean;
 		onclose: () => void;
 		onchanged: () => void;
 	} = $props();
 
-	// Per-project PR form state, keyed by project name.
-	let title = $state<Record<string, string>>({});
-	let message = $state<Record<string, string>>({});
-	let busy = $state<Record<string, boolean>>({});
-	let error = $state<Record<string, string>>({});
-	let result = $state<Record<string, ProposeResult>>({});
-	let showYaml = $state<Record<string, boolean>>({});
+	// Propose results outlive their lane (a proposed lane empties and unmounts),
+	// so they're held here until the persistent PR banner carries that exact PR.
+	// The lane's typed title rides along for the synthesized banner.
+	let result = $state<Record<string, ProposeResult & { title?: string }>>({});
 
-	// Commit history: per-project, lazy-fetched on expand. Revert state is keyed by
-	// commit hash — armed (awaiting a confirm click), busy (in flight), and result.
+	// A propose that landed a PR renders through the SAME banner as a live PR
+	// lane, so when the streamed proposal arrives it takes over invisibly —
+	// never a differently-styled box that swaps to "the definitive one".
+	const banners = $derived.by(() => {
+		const out: { project: string; prNumber: number; prURL: string; title?: string }[] = [
+			...proposals
+		];
+		const seen = new Set(out.map((p) => `${p.project}#${p.prNumber}`));
+		for (const [project, r] of Object.entries(result)) {
+			if (!r.prURL || !r.prNumber) continue; // push-only outcomes keep their own note below
+			if (seen.has(`${project}#${r.prNumber}`)) continue;
+			out.push({ project, prNumber: r.prNumber, prURL: r.prURL, title: r.title });
+		}
+		return out.sort((a, b) => a.project.localeCompare(b.project));
+	});
+
+	// Once the live stream carries a proposed PR, its transient result is spent —
+	// kept around it would resurface as a ghost banner after the PR merges.
+	$effect(() => {
+		for (const p of proposals) {
+			if (untrack(() => result[p.project])?.prNumber === p.prNumber) delete result[p.project];
+		}
+	});
+
+	// Commit history: per-project, re-fetched on every expand (a merge or revert
+	// changes it). Revert state is keyed by commit hash — armed (awaiting a
+	// confirm click), busy (in flight), and result.
 	let showHistory = $state(false);
 	let historyOpen = $state<Record<string, boolean>>({});
 	let history = $state<Record<string, Commit[]>>({});
@@ -38,44 +68,10 @@
 	let revertResult = $state<Record<string, ProposeResult>>({});
 
 	const total = $derived(drafts.reduce((n, d) => n + d.draft.count, 0));
-	const itemKey = (p: string, ns: string, name: string) => `${p}|${ns}/${name}`;
-
-	async function unstage(project: string, ns: string, name: string, resource?: string) {
-		error[project] = '';
-		try {
-			await api.unstage(ns, name, resource, project);
-			onchanged();
-		} catch (e) {
-			error[project] = String(e);
-		}
-	}
-
-	async function discardAll(project: string) {
-		error[project] = '';
-		try {
-			await api.discardDraft(project);
-			onchanged();
-		} catch (e) {
-			error[project] = String(e);
-		}
-	}
-
-	async function propose(project: string) {
-		busy[project] = true;
-		error[project] = '';
-		try {
-			result[project] = await api.propose(project, title[project] ?? '', message[project] ?? '');
-			onchanged();
-		} catch (e) {
-			error[project] = String(e);
-		} finally {
-			busy[project] = false;
-		}
-	}
 
 	async function toggleHistory(project: string) {
 		historyOpen[project] = !historyOpen[project];
-		if (historyOpen[project] && !history[project]) await loadHistory(project);
+		if (historyOpen[project]) await loadHistory(project);
 	}
 
 	async function loadHistory(project: string) {
@@ -128,33 +124,59 @@
 	}
 </script>
 
-<Drawer title="Changes" count={total} {onclose}>
+<!-- One rendering for every propose outcome: a PR, a pushed branch awaiting a
+     PR, or a local-only branch. -->
+{#snippet prNote(r: ProposeResult, label: string)}
+	{#if r.prURL}
+		{label}{r.existing ? ' (existing)' : ''}:
+		<a href={r.prURL} target="_blank" rel="noopener" class="font-medium underline"
+			>#{r.prNumber ?? r.prURL}</a
+		>
+	{:else if r.compareURL}
+		Branch <code>{r.branch}</code> pushed —
+		<a href={r.compareURL} target="_blank" rel="noopener" class="font-medium underline">open PR</a>
+	{:else}
+		Branch <code>{r.branch}</code> pushed{r.pushed ? '' : ' (local only)'}.
+	{/if}
+{/snippet}
+
+<Drawer title="Changes" count={loaded ? total : undefined} busy={refreshing} {onclose}>
 	<div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-		<!-- Open PRs (persistent, fetched from Forgejo) — survive closing the panel,
-		     unlike the transient propose response below. -->
-		{#each proposals as p (p.project)}
-			<div
-				class="mb-2 flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm"
-			>
-				<span class="font-medium text-slate-700">{p.project}</span>
-				<span class="rounded bg-emerald-100 px-1.5 text-xs font-medium text-emerald-700">
-					PR #{p.prNumber} open
-				</span>
-				<a
-					href={p.prURL}
-					target="_blank"
-					rel="noopener"
-					class="ml-auto min-w-0 truncate text-xs text-blue-700 underline">{p.title || p.prURL}</a
-				>
+		{#if !loaded}
+			<!-- First open before the summary has landed: a skeleton, never a false
+			     "no pending changes". The last good summary renders during refreshes. -->
+			<div class="space-y-2 py-2">
+				{#each Array(3) as _, i (i)}
+					<div class="h-8 animate-pulse rounded bg-slate-100"></div>
+				{/each}
+			</div>
+		{/if}
+		<!-- Open PRs: the live lanes off the inventory stream, plus any just-proposed
+		     PR straight from its propose response (same markup — the stream takes
+		     over invisibly once it carries the PR). -->
+		{#each banners as p (p.project + '#' + p.prNumber)}
+			<div class="mb-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
+				<div class="flex items-center gap-2">
+					<span class="font-medium text-slate-700">{p.project}</span>
+					<span class="rounded bg-emerald-100 px-1.5 text-xs font-medium text-emerald-700">
+						PR #{p.prNumber} open
+					</span>
+					<a
+						href={p.prURL}
+						target="_blank"
+						rel="noopener"
+						class="ml-auto min-w-0 truncate text-xs text-blue-700 underline">{p.title || p.prURL}</a
+					>
+				</div>
+				<div class="mt-1.5">
+					<GitOpsStepper stage="proposed" prNumber={p.prNumber} prUrl={p.prURL} />
+				</div>
 			</div>
 		{/each}
 
-		<!-- Transient propose feedback: surface the PR link straight from the propose
-		     response so it appears immediately, not once the background `proposals`
-		     refresh eventually lands. Drop an entry once the persistent banner above
-		     carries that exact PR, so the same PR is never listed twice — but a
-		     re-propose that lands a new PR still shows until the banner catches up. -->
-		{#each Object.entries(result).filter(([proj, r]) => !proposals.some((p) => p.project === proj && p.prNumber === r.prNumber)) as [project, r] (project)}
+		<!-- Push-only propose outcomes (no PR to banner): a branch was pushed, or
+		     stayed local — surface the compare link so the user can open the PR. -->
+		{#each Object.entries(result).filter(([, r]) => !r.prURL || !r.prNumber) as [project, r] (project)}
 			<div class="mb-2 rounded border border-green-200 bg-green-50 p-3 text-sm">
 				<div class="mb-1 flex items-center gap-1">
 					<span class="font-medium text-slate-700">{project}</span>
@@ -163,116 +185,60 @@
 						class="ml-auto text-xs text-slate-400 hover:text-slate-600">dismiss</button
 					>
 				</div>
-				{#if r.prURL}
-					<p class="text-slate-700">Pull request opened{r.existing ? ' (existing)' : ''}:</p>
-					<a
-						href={r.prURL}
-						target="_blank"
-						rel="noopener"
-						class="font-medium text-blue-700 underline">{r.prURL}</a
-					>
-				{:else if r.compareURL}
-					<p class="text-slate-700">Branch <code>{r.branch}</code> pushed. Open a PR:</p>
-					<a
-						href={r.compareURL}
-						target="_blank"
-						rel="noopener"
-						class="font-medium text-blue-700 underline">{r.compareURL}</a
-					>
-				{:else}
-					<p class="text-slate-700">
-						Branch <code>{r.branch}</code> pushed{r.pushed ? '' : ' (local only)'}.
-					</p>
-				{/if}
+				<p class="text-slate-700">{@render prNote(r, 'Pull request opened')}</p>
 			</div>
 		{/each}
 
-		{#if total === 0}
-			<p class="py-8 text-center text-sm text-slate-400">
-				No pending changes. Edit a VM or create one to stage changes here.
+		{#if loaded && total === 0 && banners.length > 0}
+			<p class="py-4 text-center text-sm text-slate-400">
+				Nothing staged — the open pull requests above carry everything proposed.
 			</p>
+		{:else if loaded && total === 0}
+			<!-- The one place the write model is explained: like vCenter's Recent
+			     Tasks, except every config change is a reviewable PR before it applies. -->
+			<div class="py-8 text-center">
+				<p class="mb-4 text-sm text-slate-400">No pending changes.</p>
+				<ol class="mx-auto max-w-[20rem] space-y-2 text-left text-xs text-slate-600">
+					<li class="flex items-start gap-2">
+						<span
+							class="mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-select text-[10px] font-semibold text-accent-ink"
+							>1</span
+						>
+						Edit or create a VM — the change is staged here, not applied.
+					</li>
+					<li class="flex items-start gap-2">
+						<span
+							class="mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-select text-[10px] font-semibold text-accent-ink"
+							>2</span
+						>
+						Propose — dotvirt opens a pull request in the project's repo.
+					</li>
+					<li class="flex items-start gap-2">
+						<span
+							class="mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-select text-[10px] font-semibold text-accent-ink"
+							>3</span
+						>
+						Merge it — ArgoCD applies the change to the cluster.
+					</li>
+				</ol>
+				<p class="mx-auto mt-4 max-w-[20rem] text-xs text-slate-400">
+					Every configuration change is a reviewable pull request before it touches the cluster.
+				</p>
+			</div>
 		{/if}
 
 		{#each drafts as { project, draft } (project)}
-			<section class="mb-5">
-				<div class="mb-2 flex items-center gap-2">
-					<Folder size={14} class="text-blue-500" />
-					<span class="font-semibold text-slate-700">{project}</span>
-					<span class="text-xs text-slate-400">({draft.count})</span>
-					<button
-						onclick={() => discardAll(project)}
-						class="ml-auto text-xs text-slate-500 hover:text-slate-700">discard all</button
-					>
-				</div>
-
-				{#if error[project]}
-					<pre class="mb-2 rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error[
-							project
-						]}</pre>
-				{/if}
-
-				{#each draft.items as item (itemKey(project, item.namespace, item.name))}
-					{@const k = itemKey(project, item.namespace, item.name)}
-					<div class="mb-2 rounded border border-slate-200">
-						<div class="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
-							<span
-								class="rounded px-1.5 py-0.5 text-xs {item.kind === 'delete'
-									? 'bg-red-100 text-red-700'
-									: item.kind === 'create'
-										? 'bg-green-100 text-green-700'
-										: 'bg-blue-100 text-blue-700'}">{item.kind}</span
-							>
-							<span class="font-medium text-slate-800">{item.namespace}/{item.name}</span>
-							<button
-								onclick={() => unstage(project, item.namespace, item.name, item.resource)}
-								class="ml-auto text-xs text-red-500 hover:text-red-700">unstage</button
-							>
-						</div>
-						<div class="px-3 py-2">
-							<ChangeList changes={item.changes} />
-							{#if item.yaml}
-								<button
-									onclick={() => (showYaml[k] = !showYaml[k])}
-									class="mt-2 flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
-								>
-									{#if showYaml[k]}<ChevronDown size={12} /> hide YAML{:else}<ChevronRight
-											size={12}
-										/> view YAML{/if}
-								</button>
-								{#if showYaml[k]}
-									<pre
-										class="mt-1 overflow-x-auto rounded bg-slate-50 p-2 font-mono text-[11px] leading-snug text-slate-600">{item.yaml}</pre>
-								{/if}
-							{/if}
-						</div>
-					</div>
-				{/each}
-
-				<div class="mt-2 space-y-2">
-					<input
-						bind:value={title[project]}
-						placeholder="Pull request title"
-						class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
-					/>
-					<textarea
-						bind:value={message[project]}
-						placeholder="Description (optional)"
-						rows="2"
-						class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"></textarea>
-					<button
-						onclick={() => propose(project)}
-						disabled={busy[project]}
-						class="w-full rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
-					>
-						{busy[project] ? 'Proposing…' : `Create pull request → ${project}`}
-					</button>
-				</div>
-			</section>
+			<ChangesLane
+				{project}
+				{draft}
+				{onchanged}
+				onproposed={(r, title) => (result[project] = { ...r, title })}
+			/>
 		{/each}
 
 		<!-- Commit history per repo-backed project, lazy-fetched on expand. Any
 		     non-merge commit can be reverted as a forward-commit PR (never a rewrite). -->
-		{#if projects.length > 0}
+		{#if loaded && projects.length > 0}
 			<section class="mt-4 border-t border-slate-200 pt-3">
 				<button
 					onclick={() => (showHistory = !showHistory)}
@@ -341,24 +307,8 @@
 														{/if}
 													</div>
 													{#if revertResult[c.hash]}
-														{@const rr = revertResult[c.hash]}
 														<p class="mt-0.5 text-[10px] text-emerald-700">
-															{#if rr.prURL}
-																Revert PR{rr.existing ? ' (existing)' : ''}:
-																<a href={rr.prURL} target="_blank" rel="noopener" class="underline"
-																	>#{rr.prNumber}</a
-																>
-															{:else if rr.compareURL}
-																Branch <code>{rr.branch}</code> pushed —
-																<a
-																	href={rr.compareURL}
-																	target="_blank"
-																	rel="noopener"
-																	class="underline">open PR</a
-																>
-															{:else}
-																Branch <code>{rr.branch}</code> pushed.
-															{/if}
+															{@render prNote(revertResult[c.hash], 'Revert PR')}
 														</p>
 													{/if}
 												</li>

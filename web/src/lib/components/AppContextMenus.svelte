@@ -41,7 +41,10 @@
 			try {
 				await api.adopt(vm.namespace, vm.name);
 				await drafts.refresh();
-				ui.showToast(`${vm.name} staged into Changes — open a PR to adopt it into git.`);
+				ui.showToast(`${vm.name} staged into Changes — open a PR to adopt it into git.`, {
+					label: 'Review & propose',
+					run: () => (ui.changesOpen = true)
+				});
 			} catch (e) {
 				if (e instanceof Unauthorized) return;
 				ui.showToast(String(e));
@@ -65,7 +68,10 @@
 		const want = new Set(untrackedVMs(namespaces).map((v) => v.namespace));
 		try {
 			for (const ns of want) await api.adoptNamespace(ns);
-			ui.showToast('Untracked VMs staged into Changes — open a PR to adopt them into git.');
+			ui.showToast('Untracked VMs staged into Changes — open a PR to adopt them into git.', {
+				label: 'Review & propose',
+				run: () => (ui.changesOpen = true)
+			});
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
 			ui.showToast(String(e));
