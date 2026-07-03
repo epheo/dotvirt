@@ -210,11 +210,23 @@ func subscription() map[string]any {
 // KubeVirtRelieveAndMigrate profile is the virt-specific load-aware rebalancer;
 // PrometheusCPUCombined makes it decide on real measured load (PSI) rather than
 // pod resource requests.
+//
+// The CR ships in the same sync as the Subscription that provides its CRD, and
+// Argo's dry-run of a missing kind invalidates the whole operation — including
+// that Subscription — deadlocking the enable. SkipDryRunOnMissingResource lets
+// the install scaffolding apply; Argo then retries the CR until OLM registers
+// the API.
 func kubeDescheduler(s Spec) map[string]any {
 	return map[string]any{
 		"apiVersion": "operator.openshift.io/v1",
 		"kind":       "KubeDescheduler",
-		"metadata":   map[string]any{"name": "cluster", "namespace": Namespace},
+		"metadata": map[string]any{
+			"name":      "cluster",
+			"namespace": Namespace,
+			"annotations": map[string]any{
+				"argocd.argoproj.io/sync-options": "SkipDryRunOnMissingResource=true",
+			},
+		},
 		"spec": map[string]any{
 			"managementState":             "Managed",
 			"mode":                        s.Mode,

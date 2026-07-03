@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -553,11 +554,20 @@ func (r *DotvirtReconciler) applyForgejo(ctx context.Context, dv *dotvirtv1alpha
 	if err := install.Apply(ctx, r.Client, install.ForgejoPVC(dv), r.DryRun); err != nil {
 		return err
 	}
+	// The webhook allowlist needs ArgoCD's externally-visible host (see forgejoEnv),
+	// resolved the same way webhook registration does. Empty (no Argo URL yet)
+	// renders the baseline allowlist; the reconcile that registers the webhook then
+	// re-renders the Deployment with the host in place.
+	argoNS, _ := r.argoTarget(dv)
+	argoHost := ""
+	if u, err := url.Parse(r.argoServerURL(ctx, dv, argoNS)); err == nil {
+		argoHost = u.Hostname()
+	}
 	owned := []client.Object{
 		install.ForgejoServiceAccount(dv),
 		install.ForgejoService(dv),
 		// fsGroup only on vanilla K8s; OpenShift's restricted-v2 injects its own.
-		install.ForgejoDeployment(dv, r.Platform != platform.OpenShift),
+		install.ForgejoDeployment(dv, r.Platform != platform.OpenShift, argoHost),
 	}
 	if exp := r.forgejoExposure(dv); exp != nil {
 		owned = append(owned, exp)

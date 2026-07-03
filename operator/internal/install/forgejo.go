@@ -115,15 +115,22 @@ func forgejoResources() corev1.ResourceRequirements {
 // GITEA_CUSTOM/GITEA_WORK_DIR: the rootless image's defaults all live under
 // /var/lib/gitea (the one PVC mount). Overriding to a custom path is what breaks the
 // rootless image's arbitrary-UID writability — keep the defaults.
-func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt) []corev1.EnvVar {
+func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt, argoWebhookHost string) []corev1.EnvVar {
+	// dotvirt's webhook is delivered to its in-cluster Service; Forgejo's SSRF guard
+	// blocks private targets by default, so allow that host — keeping `external` so
+	// delivery to any public webhook still works. The ArgoCD webhook host must be
+	// allowed by NAME on top of `external`: that entry matches only public resolved
+	// IPs, and the Argo Route often resolves to a private ingress VIP (lab/on-prem
+	// clusters), where the SSRF guard would silently drop every forge→Argo delivery.
+	allowed := ServiceHost(dv) + ",external"
+	if argoWebhookHost != "" {
+		allowed += "," + argoWebhookHost
+	}
 	return []corev1.EnvVar{
 		{Name: "FORGEJO__security__INSTALL_LOCK", Value: "true"},
 		{Name: "FORGEJO__database__DB_TYPE", Value: "sqlite3"},
 		{Name: "FORGEJO__server__ROOT_URL", Value: ForgejoExternalURL(dv) + "/"},
-		// dotvirt's webhook is delivered to its in-cluster Service; Forgejo's SSRF guard
-		// blocks private targets by default, so allow that host — keeping `external` so
-		// delivery to any public webhook still works.
-		{Name: "FORGEJO__webhook__ALLOWED_HOST_LIST", Value: ServiceHost(dv) + ",external"},
+		{Name: "FORGEJO__webhook__ALLOWED_HOST_LIST", Value: allowed},
 		// Skip webhook TLS verification globally for this managed Forgejo. It's required by
 		// the ArgoCD-direct backstop (a fallback to dotvirt's RefreshForRepo), which targets
 		// ArgoCD's EXTERNAL Route — off-cluster, served by an ingress CA Forgejo doesn't
@@ -145,7 +152,7 @@ func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt) []corev1.EnvVar {
 // dir is group-writable (gid 0 on OpenShift via the SCC; fsGroup on vanilla K8s). The
 // PVC mounts at the image's default GITEA_WORK_DIR (/var/lib/gitea); /etc/gitea is the
 // image's other declared volume, backed by an emptyDir.
-func ForgejoDeployment(dv *dotvirtv1alpha1.Dotvirt, setFSGroup bool) *appsv1.Deployment {
+func ForgejoDeployment(dv *dotvirtv1alpha1.Dotvirt, setFSGroup bool, argoWebhookHost string) *appsv1.Deployment {
 	replicas := int32(1)
 	forgejoImg := imageFromEnv("RELATED_IMAGE_FORGEJO", ForgejoImage)
 	dataMount := corev1.VolumeMount{Name: "data", MountPath: "/var/lib/gitea"}
@@ -181,7 +188,7 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 						Name:            "bootstrap",
 						Image:           forgejoImg,
 						Command:         []string{"sh", "-c", bootstrap},
-						Env:             append(forgejoEnv(dv), adminPW),
+						Env:             append(forgejoEnv(dv, argoWebhookHost), adminPW),
 						VolumeMounts:    []corev1.VolumeMount{dataMount, etcMount},
 						Resources:       forgejoResources(),
 						SecurityContext: forgejoContainerSecurityContext(),
@@ -189,7 +196,7 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 					Containers: []corev1.Container{{
 						Name:         "forgejo",
 						Image:        forgejoImg,
-						Env:          forgejoEnv(dv),
+						Env:          forgejoEnv(dv, argoWebhookHost),
 						Ports:        []corev1.ContainerPort{{Name: "http", ContainerPort: ForgejoHTTPPort}},
 						VolumeMounts: []corev1.VolumeMount{dataMount, etcMount},
 						ReadinessProbe: &corev1.Probe{
