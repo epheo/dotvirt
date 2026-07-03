@@ -86,6 +86,12 @@
 		});
 	});
 
+	// Opening the Changes drawer re-reads the draft summary, so what it shows is
+	// current at open — the keyed effect above only makes it eventually current.
+	$effect(() => {
+		if (ui.changesOpen) untrack(() => drafts.refresh());
+	});
+
 	const canNamespace = $derived(!!inventory.caps?.namespace);
 </script>
 
@@ -166,6 +172,8 @@
 					projects={inventory.canManage
 						? [...inventory.repoProjects, PLATFORM_PROJECT]
 						: inventory.repoProjects}
+					loaded={drafts.loaded}
+					refreshing={drafts.refreshing}
 					onclose={() => (ui.changesOpen = false)}
 					onchanged={() => drafts.refresh()}
 				/>

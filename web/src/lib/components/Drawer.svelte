@@ -1,18 +1,21 @@
 <script lang="ts">
-	import { X } from 'lucide-svelte';
+	import { LoaderCircle, X } from 'lucide-svelte';
 	import type { Snippet } from 'svelte';
 
 	// The right-side panel shell (Changes, and anything summoned from the header):
 	// fixed width, hairline + shadow, titled header with a close affordance.
+	// `busy` shows a quiet spinner while the panel's data refreshes in place.
 	let {
 		title,
 		count = undefined,
+		busy = false,
 		onclose,
 		footer = undefined,
 		children
 	}: {
 		title: string;
 		count?: number;
+		busy?: boolean;
 		onclose: () => void;
 		footer?: Snippet;
 		children: Snippet;
@@ -21,9 +24,10 @@
 
 <aside class="flex h-full w-[28rem] flex-col border-l border-line-strong bg-panel shadow-xl">
 	<header class="flex items-center justify-between border-b border-line px-4 py-3">
-		<h2 class="text-base font-semibold text-ink">
+		<h2 class="flex items-center gap-1.5 text-base font-semibold text-ink">
 			{title}
 			{#if count !== undefined}<span class="text-ink-faint">({count})</span>{/if}
+			{#if busy}<LoaderCircle size={14} class="animate-spin text-ink-faint" />{/if}
 		</h2>
 		<button onclick={onclose} aria-label="Close" class="text-ink-faint hover:text-ink-soft">
 			<X size={18} />

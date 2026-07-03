@@ -9,12 +9,18 @@
 		drafts,
 		proposals,
 		projects,
+		loaded = true,
+		refreshing = false,
 		onclose,
 		onchanged
 	}: {
 		drafts: { project: string; draft: DraftView }[];
 		proposals: Proposal[];
 		projects: string[]; // repo-backed project names, for the History section
+		// Draft-summary fetch state: `loaded` gates the empty state (never claim
+		// "no changes" before a summary has landed), `refreshing` shows in the title.
+		loaded?: boolean;
+		refreshing?: boolean;
 		onclose: () => void;
 		onchanged: () => void;
 	} = $props();
@@ -129,8 +135,17 @@
 	}
 </script>
 
-<Drawer title="Changes" count={total} {onclose}>
+<Drawer title="Changes" count={loaded ? total : undefined} busy={refreshing} {onclose}>
 	<div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+		{#if !loaded}
+			<!-- First open before the summary has landed: a skeleton, never a false
+			     "no pending changes". The last good summary renders during refreshes. -->
+			<div class="space-y-2 py-2">
+				{#each Array(3) as _, i (i)}
+					<div class="h-8 animate-pulse rounded bg-slate-100"></div>
+				{/each}
+			</div>
+		{/if}
 		<!-- Open PRs (persistent, fetched from Forgejo) — survive closing the panel,
 		     unlike the transient propose response below. -->
 		{#each proposals as p (p.project)}
@@ -191,7 +206,11 @@
 			</div>
 		{/each}
 
-		{#if total === 0}
+		{#if loaded && total === 0 && proposals.length > 0}
+			<p class="py-4 text-center text-sm text-slate-400">
+				Nothing staged — the open pull requests above carry everything proposed.
+			</p>
+		{:else if loaded && total === 0}
 			<!-- The one place the write model is explained: like vCenter's Recent
 			     Tasks, except every config change is a reviewable PR before it applies. -->
 			<div class="py-8 text-center">
@@ -307,7 +326,7 @@
 
 		<!-- Commit history per repo-backed project, lazy-fetched on expand. Any
 		     non-merge commit can be reverted as a forward-commit PR (never a rewrite). -->
-		{#if projects.length > 0}
+		{#if loaded && projects.length > 0}
 			<section class="mt-4 border-t border-slate-200 pt-3">
 				<button
 					onclick={() => (showHistory = !showHistory)}
