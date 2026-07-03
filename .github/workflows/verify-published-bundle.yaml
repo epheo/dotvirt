@@ -37,9 +37,12 @@ jobs:
       - uses: ./.github/actions/olm-kind
       - name: Install from the published catalog (operator/install/, as an admin would)
         run: |
-          # kind has no OperatorHub console; the namespace is just where the committed
-          # CatalogSource expects to live.
-          kubectl create namespace openshift-marketplace
+          # The committed manifests target openshift-marketplace, OpenShift's global
+          # catalog namespace; upstream OLM's resolver only sees catalogs in the
+          # subscription's own namespace or ITS global namespace, olm — retarget the
+          # two platform-specific fields.
+          sed -i 's/^  namespace: openshift-marketplace$/  namespace: olm/' operator/install/catalogsource.yaml
+          sed -i 's/^  sourceNamespace: openshift-marketplace$/  sourceNamespace: olm/' operator/install/subscription.yaml
           if [ -n "${{ inputs.catalog-image }}" ]; then
             sed -i 's#^  image: .*#  image: ${{ inputs.catalog-image }}#' operator/install/catalogsource.yaml
           fi
@@ -54,7 +57,7 @@ jobs:
             sleep 10
           done
           if [ -z "$csv" ]; then
-            kubectl -n openshift-marketplace get pods
+            kubectl -n olm get pods,catalogsources
             kubectl -n dotvirt-operator describe subscription dotvirt-operator
             kubectl -n olm logs deploy/catalog-operator --tail 50 || true
             echo "::error::subscription never resolved to a CSV — catalog unreachable or not serving"

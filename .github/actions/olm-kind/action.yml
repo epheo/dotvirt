@@ -23,14 +23,19 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/olm-kind-images.tar
-        key: olm-kind-images-${{ hashFiles('hack/versions.env') }}
+        key: olm-kind-images-${{ hashFiles('hack/versions.env', '.github/actions/olm-kind/action.yml') }}
     - name: Pull + save preloaded images (cache miss)
       if: steps.images.outputs.cache-hit != 'true'
       shell: bash
+      # opm must be the literal :latest — operator-sdk only takes the FBC path when
+      # --index-image equals its hardcoded default (quay.io/operator-framework/opm:latest);
+      # any other ref flips `run bundle` into the deprecated SQLite registry path, which
+      # cannot serve the bundle. The cache freezes what :latest resolved to until this
+      # file or versions.env changes, and IfNotPresent keeps the pod off the network.
       run: |
         mkdir -p ~/.cache
         images=("$KIND_NODE_IMAGE" registry:2 "$OLM_INIT_IMAGE"
-          "quay.io/operator-framework/opm:$OPM_VERSION"
+          quay.io/operator-framework/opm:latest
           "quay.io/operator-framework/scorecard-test:$OPERATOR_SDK_VERSION")
         for img in "${images[@]}"; do docker pull "$img"; done
         docker save -o ~/.cache/olm-kind-images.tar "${images[@]}"
@@ -61,7 +66,7 @@ runs:
         # with IfNotPresent semantics — loading them into the node means those pods
         # never hit the network.
         kind load docker-image "$OLM_INIT_IMAGE" \
-          "quay.io/operator-framework/opm:$OPM_VERSION" \
+          quay.io/operator-framework/opm:latest \
           "quay.io/operator-framework/scorecard-test:$OPERATOR_SDK_VERSION"
     - name: Install OLM
       shell: bash

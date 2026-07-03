@@ -117,9 +117,9 @@ jobs:
         run: |
           kubectl create namespace dotvirt-ci
           # IfNotPresent (default: Always) so the preloaded opm/ubi images satisfy the
-          # FBC registry pod without any registry round-trip.
+          # FBC registry pod without any registry round-trip. No --index-image: only
+          # the default (opm:latest, preloaded by olm-kind) selects the FBC path.
           operator-sdk run bundle localhost:5000/dotvirt-operator-bundle:ci -n dotvirt-ci \
-            --index-image "quay.io/operator-framework/opm:$OPM_VERSION" \
             --image-pull-policy IfNotPresent \
             --timeout 10m --use-http
           kubectl -n dotvirt-ci get csv
