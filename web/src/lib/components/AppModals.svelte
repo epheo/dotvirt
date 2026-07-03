@@ -6,6 +6,7 @@
 	import AddUplinkModal from './AddUplinkModal.svelte';
 	import AdminFirewallModal from './AdminFirewallModal.svelte';
 	import AdoptProjectModal from './AdoptProjectModal.svelte';
+	import DeployTemplateModal from './DeployTemplateModal.svelte';
 	import DistributedFirewallModal from './DistributedFirewallModal.svelte';
 	import EgressFirewallModal from './EgressFirewallModal.svelte';
 	import NewNamespaceModal from './NewNamespaceModal.svelte';
@@ -107,6 +108,14 @@
 	<AdminFirewallModal onclose={close} onstaged={staged} />
 {:else if m?.kind === 'upload'}
 	<UploadModal namespaces={inventory.namespaces} onclose={close} />
+{:else if m?.kind === 'deployTemplate'}
+	<DeployTemplateModal
+		namespaces={inventory.namespaces}
+		library={m.library}
+		template={m.template}
+		onclose={close}
+		onstaged={staged}
+	/>
 {:else if m?.kind === 'staged' && stagedItem}
 	<StagedChangesModal
 		item={stagedItem}

@@ -51,7 +51,7 @@
 			}
 			return;
 		}
-		ui.requestDetail(a.id as 'edit' | 'delete' | 'console' | 'snapshot' | 'clone');
+		ui.requestDetail(a.id as 'edit' | 'delete' | 'console' | 'snapshot' | 'clone' | 'template');
 		goto(vmHref(vm.namespace, vm.name));
 	}
 

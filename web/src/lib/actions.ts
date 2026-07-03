@@ -19,6 +19,7 @@ export type ActionId =
 	| 'console'
 	| 'snapshot'
 	| 'clone'
+	| 'template'
 	| 'adopt'
 	| 'edit'
 	| 'manifest'
@@ -86,6 +87,13 @@ export const vmActions: VMAction[] = [
 		kind: 'host',
 		title: 'Copy this VM via snapshot + restore; adopt the result into git after',
 		enabled: always
+	},
+	{
+		id: 'template',
+		label: 'Clone to Template…',
+		kind: 'host',
+		title: 'Derive a reusable template from this VM’s git manifest — staged as a PR',
+		enabled: inGit
 	},
 	{
 		id: 'adopt',

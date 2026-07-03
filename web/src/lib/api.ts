@@ -605,6 +605,48 @@ function scopeQS(scope: ScopeQuery, extra?: Record<string, string>): string {
 	return qs ? `?${qs}` : '';
 }
 
+// The content library: VirtualMachineTemplate manifests stored under templates/
+// in library repos (each project + the shared "platform" library). Parameters
+// mirror template.kubevirt.io/v1beta1 so the form is exactly what the native
+// CRD will accept once the cluster ships it.
+export interface TemplateParameter {
+	name: string;
+	displayName?: string;
+	description?: string;
+	value?: string;
+	generate?: string; // 'expression' — value generated from `from` at deploy time
+	from?: string;
+	required?: boolean;
+}
+
+export interface Template {
+	name: string;
+	library: string; // owning project, or 'platform' (the shared library)
+	description?: string;
+	sourceFile: string;
+	parameters?: TemplateParameter[];
+	instancetype?: string;
+	preference?: string;
+	yaml: string;
+	error?: string; // parse failure — listed, but not deployable
+}
+
+export interface DeployTemplateRequest {
+	library: string;
+	template: string;
+	namespace: string;
+	name?: string; // overrides the NAME parameter; empty → template default (often generated)
+	parameters?: Record<string, string>;
+}
+
+export interface SaveTemplateRequest {
+	library: string;
+	name: string;
+	description?: string;
+	sourceNamespace: string;
+	sourceName: string;
+}
+
 export const api = {
 	// Auth
 	login: (token: string) => post<User>('/api/login', { token }),
@@ -697,6 +739,13 @@ export const api = {
 	// Wire a repo to an existing labeled-but-repoless project (the "no repo" dead-end).
 	adoptProject: (project: string, owners?: string[]) =>
 		post<DraftView>(`/api/projects/${enc(project)}/adopt`, owners?.length ? { owners } : {}),
+
+	// The template library (vSphere: Content Library). Deploy renders server-side
+	// and stages the VM into the draft; save derives a template from a VM's git
+	// manifest ("Clone to Template") — both land as PR-gated changes.
+	templates: () => get<{ templates: Template[] }>('/api/templates'),
+	deployTemplate: (req: DeployTemplateRequest) => post<DraftView>('/api/templates/deploy', req),
+	saveTemplate: (req: SaveTemplateRequest) => post<DraftView>('/api/templates', req),
 	resync: (namespace: string, name: string) =>
 		post<{ application: string; revision: string }>(
 			`/api/vms/${enc(namespace)}/${enc(name)}/resync`,

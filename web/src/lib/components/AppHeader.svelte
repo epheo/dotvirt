@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import {
+		BookCopy,
 		ChevronDown,
 		ClipboardList,
 		FolderPlus,
@@ -96,6 +97,17 @@
 			>
 				{#snippet icon()}<Server size={13} />{/snippet}
 				New VM
+			</MenuItem>
+			<MenuItem
+				onclick={() => {
+					close();
+					ui.modal = { kind: 'deployTemplate' };
+				}}
+				disabled={!inventory.namespaces.length}
+				title={inventory.namespaces.length ? '' : 'No project with a backing repo yet'}
+			>
+				{#snippet icon()}<BookCopy size={13} />{/snippet}
+				New VM from Template
 			</MenuItem>
 			<MenuItem
 				onclick={() => {

@@ -24,6 +24,7 @@
 	import ActionMenu from './ActionMenu.svelte';
 	import ChangeList from './ChangeList.svelte';
 	import CloneModal from './CloneModal.svelte';
+	import SaveTemplateModal from './SaveTemplateModal.svelte';
 	import ConfirmDelete from './ConfirmDelete.svelte';
 	import CapacityUsage from './CapacityUsage.svelte';
 	import Console from './Console.svelte';
@@ -68,7 +69,10 @@
 		networks?: Network[];
 		// A one-shot request from outside (the context menu) to open a modal/tab
 		// here; seq distinguishes repeated requests for the same id.
-		intent?: { id: 'edit' | 'delete' | 'console' | 'snapshot' | 'clone'; seq: number } | null;
+		intent?: {
+			id: 'edit' | 'delete' | 'console' | 'snapshot' | 'clone' | 'template';
+			seq: number;
+		} | null;
 	} = $props();
 
 	type Tab = 'summary' | 'monitor' | 'configure' | 'permissions' | 'snapshots' | 'console';
@@ -92,6 +96,7 @@
 
 	// Clone name-prompt modal (creates a VirtualMachineClone; imperative).
 	let cloning = $state(false);
+	let templating = $state(false);
 
 	// Drift detail (running vs main) for the selected VM.
 	let driftChanges = $state<Change[] | null>(null);
@@ -186,6 +191,9 @@
 			case 'clone':
 				cloning = true;
 				break;
+			case 'template':
+				templating = true;
+				break;
 			case 'console':
 				ontab?.('console');
 				break;
@@ -213,6 +221,7 @@
 			deleting = false;
 			deleteErr = '';
 			cloning = false;
+			templating = false;
 			driftChanges = null;
 			showDrift = false;
 			reconcileMsg = '';
@@ -247,6 +256,9 @@
 				break;
 			case 'clone':
 				cloning = true;
+				break;
+			case 'template':
+				templating = true;
 				break;
 		}
 	});
@@ -663,6 +675,10 @@
 			onclose={() => (cloning = false)}
 			ondone={(ok) => onaction?.({ verb: 'Clone', namespace: vm.namespace, name: vm.name, ok })}
 		/>
+	{/if}
+
+	{#if templating}
+		<SaveTemplateModal {vm} onclose={() => (templating = false)} onstaged={() => onstaged?.()} />
 	{/if}
 
 	{#if deleting}

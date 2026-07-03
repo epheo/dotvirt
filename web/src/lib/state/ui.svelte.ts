@@ -14,6 +14,7 @@ export type AppModal =
 	| { kind: 'tier0' }
 	| { kind: 'adminFw' }
 	| { kind: 'upload' }
+	| { kind: 'deployTemplate'; library?: string; template?: string } // Deploy from Template (Catalog / New ▾)
 	| { kind: 'staged'; vm: VM }; // the per-VM staged-changes modal (from a Staged badge)
 
 // Right-click context menus — vCenter's signature interaction. The bulk variant
@@ -67,11 +68,11 @@ class Ui {
 	// A one-shot request for the VM page to open a modal/tab on arrival (context
 	// menu → "Edit settings" on an unopened VM); seq re-fires repeats.
 	detailIntent = $state<{
-		id: 'edit' | 'delete' | 'console' | 'snapshot' | 'clone';
+		id: 'edit' | 'delete' | 'console' | 'snapshot' | 'clone' | 'template';
 		seq: number;
 	} | null>(null);
 	#intentSeq = 0;
-	requestDetail(id: 'edit' | 'delete' | 'console' | 'snapshot' | 'clone') {
+	requestDetail(id: 'edit' | 'delete' | 'console' | 'snapshot' | 'clone' | 'template') {
 		this.detailIntent = { id, seq: ++this.#intentSeq };
 	}
 

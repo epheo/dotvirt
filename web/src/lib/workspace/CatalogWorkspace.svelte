@@ -1,20 +1,24 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { api, Unauthorized, type Options } from '$lib/api';
+	import { api, Unauthorized, type Options, type Template } from '$lib/api';
+	import { ui } from '$lib/state/ui.svelte';
 	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
 
-	// Content-library-lite: a read-only browser over the cluster's catalog —
-	// boot images (DataSources), instance types, preferences, networks (NADs),
-	// storage classes. The data is the wizard's own /api/options; dotvirt never
-	// creates or edits these (platform objects). The kind rides ?kind= so a
-	// catalog tab is deep-linkable like every other tab.
+	// The Content Library: VM templates (deployable, git-backed) first, then a
+	// read-only browser over the cluster's catalog — boot images (DataSources),
+	// instance types, preferences, networks (NADs), storage classes. Catalog
+	// kinds are the wizard's own /api/options; templates come from the library
+	// repos via /api/templates. The kind rides ?kind= so a catalog tab is
+	// deep-linkable like every other tab.
 	let options = $state<Options | null>(null);
+	let templates = $state<Template[] | null>(null);
 	let error = $state('');
 
-	type Kind = 'images' | 'instancetypes' | 'preferences' | 'networks' | 'storage';
+	type Kind = 'templates' | 'images' | 'instancetypes' | 'preferences' | 'networks' | 'storage';
 	let picked = $state<string | null>(null); // selected item key within the kind
 
 	const KINDS: { id: Kind; label: string }[] = [
+		{ id: 'templates', label: 'VM Templates' },
 		{ id: 'images', label: 'Boot images' },
 		{ id: 'instancetypes', label: 'Instance types' },
 		{ id: 'preferences', label: 'Preferences' },
@@ -23,7 +27,7 @@
 	];
 	const kind = $derived.by<Kind>(() => {
 		const k = page.url.searchParams.get('kind');
-		return KINDS.some((x) => x.id === k) ? (k as Kind) : 'images';
+		return KINDS.some((x) => x.id === k) ? (k as Kind) : 'templates';
 	});
 	const kindLabel = $derived(KINDS.find((k) => k.id === kind)!.label);
 	$effect(() => {
@@ -39,12 +43,48 @@
 				if (e instanceof Unauthorized) return;
 				error = String(e);
 			});
+		api
+			.templates()
+			.then((t) => (templates = t.templates))
+			.catch((e) => {
+				if (e instanceof Unauthorized) return;
+				error = String(e);
+			});
 	});
 
+	// The shared library reads as vCenter's subscribed Content Library.
+	const libraryLabel = (lib: string) => (lib === 'platform' ? 'Shared library' : lib);
+
 	// One uniform row shape per kind: key, title, a right-aligned fact, and the
-	// detail fields shown when selected.
-	type Row = { key: string; title: string; fact: string; detail: [string, string][] };
+	// detail fields shown when selected. Template rows also carry the template so
+	// the detail pane can render parameters + Deploy.
+	type Row = {
+		key: string;
+		title: string;
+		fact: string;
+		detail: [string, string][];
+		template?: Template;
+	};
 	const rows = $derived.by<Row[]>(() => {
+		if (kind === 'templates') {
+			return (templates ?? []).map((t) => ({
+				key: `${t.library}/${t.name}`,
+				title: t.name,
+				fact: t.error
+					? 'Invalid'
+					: [libraryLabel(t.library), t.instancetype].filter(Boolean).join(' · '),
+				detail: [
+					['Kind', 'VirtualMachineTemplate (git)'],
+					['Library', libraryLabel(t.library)],
+					['Description', t.description || '—'],
+					['Instance type', t.instancetype || '—'],
+					['Preference', t.preference || '—'],
+					['Source file', t.sourceFile],
+					...(t.error ? ([['Error', t.error]] as [string, string][]) : [])
+				],
+				template: t
+			}));
+		}
 		const o = options;
 		if (!o) return [];
 		switch (kind) {
@@ -118,10 +158,14 @@
 	<div class="min-h-0 flex-1 overflow-y-auto">
 		{#if error}
 			<p class="m-4 rounded bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>
-		{:else if !options}
+		{:else if kind === 'templates' ? !templates : !options}
 			<p class="py-6 text-center text-sm text-ink-faint">Loading catalog…</p>
 		{:else if rows.length === 0}
-			<p class="py-6 text-center text-sm text-ink-faint">None available on this cluster.</p>
+			<p class="py-6 text-center text-sm text-ink-faint">
+				{kind === 'templates'
+					? 'No templates yet — save one from a VM (Clone to Template) or commit VirtualMachineTemplate manifests under templates/.'
+					: 'None available on this cluster.'}
+			</p>
 		{:else}
 			<table class="w-full text-left text-[13px]">
 				<thead class="border-b border-line text-xs text-ink-muted">
@@ -159,14 +203,56 @@
 				{#each pickedRow.detail as [label, value] (label)}
 					<div class="flex justify-between gap-3 px-3 py-1.5">
 						<dt class="shrink-0 text-ink-muted">{label}</dt>
-						<dd class="min-w-0 truncate text-right text-ink">{value}</dd>
+						<dd class="min-w-0 truncate text-right text-ink" title={value}>{value}</dd>
 					</div>
 				{/each}
 			</dl>
+			{#if pickedRow.template}
+				{@const t = pickedRow.template}
+				{#if t.parameters?.length}
+					<h4
+						class="border-y border-line bg-inset px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
+					>
+						Parameters
+					</h4>
+					<ul class="divide-y divide-slate-100 text-[13px]">
+						{#each t.parameters as p (p.name)}
+							<li class="px-3 py-1.5">
+								<div class="flex justify-between gap-3">
+									<span class="font-mono text-xs text-ink">{p.name}</span>
+									<span class="text-xs text-ink-muted">
+										{p.generate
+											? 'generated'
+											: p.value
+												? p.value
+												: p.required
+													? 'required'
+													: 'optional'}
+									</span>
+								</div>
+								{#if p.description}<p class="mt-0.5 text-xs text-ink-faint">{p.description}</p>{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+				{#if !t.error}
+					<div class="border-t border-line p-3">
+						<button
+							onclick={() =>
+								(ui.modal = { kind: 'deployTemplate', library: t.library, template: t.name })}
+							class="w-full rounded bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
+						>
+							Deploy…
+						</button>
+					</div>
+				{/if}
+			{/if}
 		</aside>
 	{/if}
 </div>
 
 <footer class="border-t border-line px-4 py-2 text-xs text-ink-faint">
-	Read-only — these are platform objects; the New VM wizard consumes them.
+	{kind === 'templates'
+		? 'Templates live in git (templates/ in each library repo); deploying stages a VM into Changes — it applies when the PR merges.'
+		: 'Read-only — these are platform objects; the New VM wizard consumes them.'}
 </footer>
