@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { ChevronDown, ChevronUp, ListChecks, RefreshCw } from 'lucide-svelte';
 	import {
 		api,
@@ -10,6 +11,7 @@
 	} from '$lib/api';
 	import { duration } from '$lib/format';
 	import { pollWhileVisible } from '$lib/poll';
+	import GitOpsStepper from './GitOpsStepper.svelte';
 	import TabBar from './TabBar.svelte';
 
 	let {
@@ -86,8 +88,34 @@
 		if (t === 'alarms') loadAlarms();
 	}
 
+	// A PR lane vanishing from the live stream means it merged (or closed); while
+	// the project still shows OutOfSync VMs, surface it as "ArgoCD syncing" — the
+	// merge→reconcile gap an admin otherwise can't see. Best-effort and purely
+	// client-derived; entries expire after a linger window.
+	const SYNC_LINGER_MS = 5 * 60 * 1000;
+	let merged = $state<{ project: string; prNumber: number; title: string; at: number }[]>([]);
+	let prevProposals: Proposal[] = [];
+	$effect(() => {
+		const cur = proposals;
+		untrack(() => {
+			const keys = new Set(cur.map((p) => `${p.project}#${p.prNumber}`));
+			const gone = prevProposals.filter((p) => !keys.has(`${p.project}#${p.prNumber}`));
+			if (gone.length)
+				merged = [
+					...merged,
+					...gone.map((p) => ({
+						project: p.project,
+						prNumber: p.prNumber,
+						title: p.title ?? '',
+						at: Date.now()
+					}))
+				].slice(-20);
+			prevProposals = cur;
+		});
+	});
+
 	type Task = {
-		kind: 'staged' | 'pr' | 'drift' | 'action' | 'migration';
+		kind: 'staged' | 'pr' | 'sync' | 'drift' | 'action' | 'migration';
 		verb: string;
 		namespace: string;
 		name: string;
@@ -183,6 +211,29 @@
 				url: p.prURL
 			});
 		}
+		// Freshly merged lanes: "syncing" while their project still drifts.
+		for (const m of merged) {
+			if (Date.now() - m.at > SYNC_LINGER_MS) continue;
+			const drifting = inventory?.projects.some(
+				(p) =>
+					p.name === m.project &&
+					p.namespaces.some((ns) => ns.vms.some((v) => v.sync === 'OutOfSync'))
+			);
+			out.push({
+				kind: 'sync',
+				verb: 'Merged',
+				namespace: '',
+				name: '',
+				prTitle: m.title || `PR #${m.prNumber}`,
+				status: drifting ? 'ArgoCD syncing…' : 'Synced',
+				by: username,
+				project: m.project,
+				url: '',
+				ok: true,
+				active: !!drifting,
+				at: m.at
+			});
+		}
 		if (inventory) {
 			for (const proj of inventory.projects)
 				for (const ns of proj.namespaces)
@@ -224,11 +275,15 @@
 						: 'bg-red-500'
 				: t.kind === 'pr'
 					? 'bg-emerald-500'
-					: t.kind === 'action'
-						? t.ok
-							? 'bg-emerald-500'
-							: 'bg-red-500'
-						: 'bg-blue-500';
+					: t.kind === 'sync'
+						? t.active
+							? 'animate-pulse bg-blue-500'
+							: 'bg-emerald-500'
+						: t.kind === 'action'
+							? t.ok
+								? 'bg-emerald-500'
+								: 'bg-red-500'
+							: 'bg-blue-500';
 	const textClass = (t: Task) =>
 		t.kind === 'drift'
 			? 'text-amber-700'
@@ -240,11 +295,15 @@
 						: 'text-red-700'
 				: t.kind === 'pr'
 					? 'text-emerald-700'
-					: t.kind === 'action'
-						? t.ok
-							? 'text-emerald-700'
-							: 'text-red-700'
-						: 'text-slate-600';
+					: t.kind === 'sync'
+						? t.active
+							? 'text-blue-700'
+							: 'text-emerald-700'
+						: t.kind === 'action'
+							? t.ok
+								? 'text-emerald-700'
+								: 'text-red-700'
+							: 'text-slate-600';
 	const rowClass = (t: Task) =>
 		t.kind === 'drift'
 			? 'bg-amber-50/40'
@@ -337,7 +396,7 @@
 								>
 									<td class="px-3 py-1.5 text-slate-700">{t.verb}</td>
 									<td class="px-3 py-1.5 font-medium text-slate-800">
-										{#if t.kind === 'pr'}
+										{#if t.kind === 'pr' || t.kind === 'sync'}
 											<span class="font-normal text-slate-700">{t.prTitle}</span>
 										{:else}
 											{t.name} <span class="font-normal text-slate-400">· {t.namespace}</span>
@@ -347,6 +406,13 @@
 										<span class="inline-flex items-center gap-1.5">
 											<span class="h-1.5 w-1.5 rounded-full {dotClass(t)}"></span>
 											<span class={textClass(t)}>{t.status}</span>
+											{#if t.kind === 'staged'}
+												<GitOpsStepper stage="staged" compact />
+											{:else if t.kind === 'pr'}
+												<GitOpsStepper stage="proposed" compact />
+											{:else if t.kind === 'sync'}
+												<GitOpsStepper stage={t.active ? 'merged' : 'synced'} compact />
+											{/if}
 										</span>
 									</td>
 									<td class="px-3 py-1.5 text-slate-600">{t.by}</td>

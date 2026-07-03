@@ -31,6 +31,7 @@
 	import EditSettings from './EditSettings.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import MetricsPanel from './MetricsPanel.svelte';
+	import PendingBanner from './PendingBanner.svelte';
 	import Permissions from './Permissions.svelte';
 	import PowerDot from './PowerDot.svelte';
 	import Snapshots from './Snapshots.svelte';
@@ -42,6 +43,8 @@
 
 	let {
 		vm,
+		tab = 'summary',
+		ontab,
 		onstaged,
 		onaction,
 		stagedItem = null,
@@ -51,6 +54,10 @@
 		intent = null
 	}: {
 		vm: VM | null;
+		// The active tab is owned by the page (?tab=); ontab is the programmatic
+		// switch (an action or intent jumping to Snapshots/Console).
+		tab?: Tab;
+		ontab?: (t: Tab) => void;
 		onstaged?: () => void;
 		onaction?: (a: { verb: string; namespace: string; name: string; ok: boolean }) => void;
 		stagedItem?: DraftItem | null;
@@ -65,7 +72,7 @@
 	} = $props();
 
 	type Tab = 'summary' | 'monitor' | 'configure' | 'permissions' | 'snapshots' | 'console';
-	let tab = $state<Tab>('summary');
+
 	// Monitor sub-rail (vCenter keeps all time-series under Monitor).
 	let monitorView = $state<'events' | 'performance'>('events');
 	let editing = $state(false);
@@ -174,13 +181,13 @@
 				deleteErr = '';
 				break;
 			case 'snapshot':
-				tab = 'snapshots';
+				ontab?.('snapshots');
 				break;
 			case 'clone':
 				cloning = true;
 				break;
 			case 'console':
-				tab = 'console';
+				ontab?.('console');
 				break;
 			case 'manifest':
 				// A plain navigation: the route is cookie-auth'd and sets
@@ -196,10 +203,10 @@
 	// cluster state moves (e.g. mid-clone, mid-migration).
 	const vmKey = $derived(vm ? `${vm.namespace}/${vm.name}` : '');
 	$effect(() => {
-		// Reset when the selection changes, and (re)load drift for this VM.
+		// Reset when the selection changes, and (re)load drift for this VM. The
+		// tab itself is URL state — a fresh VM route arrives without ?tab=.
 		vmKey;
 		untrack(() => {
-			tab = 'summary';
 			monitorView = 'events';
 			editing = false;
 			editSection = undefined;
@@ -233,10 +240,10 @@
 				deleteErr = '';
 				break;
 			case 'console':
-				tab = 'console';
+				ontab?.('console');
 				break;
 			case 'snapshot':
-				tab = 'snapshots';
+				ontab?.('snapshots');
 				break;
 			case 'clone':
 				cloning = true;
@@ -362,7 +369,7 @@
 					{ id: 'console', label: 'Console' }
 				]}
 				active={tab}
-				onchange={(t) => (tab = t as Tab)}
+				href={(t) => `?tab=${t}`}
 			/>
 		</div>
 
@@ -377,6 +384,8 @@
 					)} ago{/if}
 			</div>
 		{/if}
+
+		<PendingBanner {vm} />
 
 		{#if runtimeMsg}
 			<div
@@ -446,7 +455,7 @@
 					<div class="min-w-0 flex-1">
 						<CapacityUsage {vm} />
 					</div>
-					<ConsolePreview {vm} onopen={() => (tab = 'console')} />
+					<ConsolePreview {vm} onopen={() => ontab?.('console')} />
 				</div>
 
 				<div class="mt-4 grid gap-4 md:grid-cols-2">

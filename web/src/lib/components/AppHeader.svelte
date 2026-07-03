@@ -1,0 +1,215 @@
+<script lang="ts">
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
+	import {
+		ChevronDown,
+		ClipboardList,
+		FolderPlus,
+		Network,
+		Plus,
+		Radio,
+		Server,
+		Shield,
+		Upload,
+		User as UserIcon
+	} from 'lucide-svelte';
+	import { hrefForScope, scopeFromPath, vmHref } from '$lib/nav';
+	import { drafts } from '$lib/state/drafts.svelte';
+	import { inventory } from '$lib/state/inventory.svelte';
+	import { session } from '$lib/state/session.svelte';
+	import { ui } from '$lib/state/ui.svelte';
+	import GlobalSearch, { type SearchHit } from './GlobalSearch.svelte';
+	import HeaderMenu from './HeaderMenu.svelte';
+	import MenuItem from './MenuItem.svelte';
+
+	const canNamespace = $derived(!!inventory.caps?.namespace);
+	const canEgress = $derived(!!(inventory.caps?.egressIP || inventory.caps?.externalRoute));
+	const canAdminFw = $derived(!!inventory.caps?.adminNetworkPolicy);
+
+	// Repo-backed namespaces under the current URL's scope — what "New VM"
+	// pre-targets, mirroring the tree context menu's "New VM here". null = no
+	// scope narrowing, so the wizard offers every creatable namespace.
+	const scopeNamespaces = $derived.by(() => {
+		const sc = scopeFromPath(page.url.pathname);
+		if (sc.kind === 'project' || sc.kind === 'namespace') {
+			const p = inventory.inventory?.projects.find((proj) => proj.name === sc.project);
+			if (!p?.repo) return null;
+			return sc.kind === 'namespace' ? [sc.namespace] : p.namespaces.map((n) => n.namespace);
+		}
+		return null;
+	});
+
+	// Global search: a hit either opens a VM or focuses its scope.
+	function onSearchPick(hit: SearchHit) {
+		switch (hit.kind) {
+			case 'vm':
+				goto(vmHref(hit.vm.namespace, hit.vm.name));
+				break;
+			case 'project':
+				goto(hrefForScope({ kind: 'project', project: hit.project }));
+				break;
+			case 'namespace':
+				goto(hrefForScope({ kind: 'namespace', project: hit.project, namespace: hit.namespace }));
+				break;
+			case 'node':
+				goto(hrefForScope({ kind: 'node', node: hit.node }));
+				break;
+		}
+	}
+
+	// Object pages push label queries into the masthead search via ui.search.
+	let search = $state<GlobalSearch | null>(null);
+	$effect(() => {
+		ui.search = search;
+		return () => (ui.search = null);
+	});
+</script>
+
+<header class="flex items-center gap-3 border-b border-line-strong bg-bar px-4 py-2 text-white">
+	<a href="/compute" class="font-semibold">dotvirt</a>
+
+	<GlobalSearch bind:this={search} inventory={inventory.inventory} onpick={onSearchPick} />
+
+	<!-- Create actions collapse into one primary menu (vCenter keeps the global
+	     chrome to identity + search + tasks; creation is otherwise contextual via
+	     the tree's right-click menus). New VM pre-targets the current scope. -->
+	<HeaderMenu>
+		{#snippet trigger({ open, toggle })}
+			<button
+				onclick={toggle}
+				class="flex items-center gap-1.5 rounded bg-accent px-3 py-1 text-xs font-medium text-white hover:bg-accent-hover"
+			>
+				<Plus size={14} /> New <ChevronDown
+					size={12}
+					class="transition-transform {open ? 'rotate-180' : ''}"
+				/>
+			</button>
+		{/snippet}
+		{#snippet children({ close })}
+			<MenuItem
+				onclick={() => {
+					close();
+					ui.modal = { kind: 'newVM', namespaces: scopeNamespaces };
+				}}
+				disabled={!inventory.namespaces.length}
+				title={inventory.namespaces.length ? '' : 'No project with a backing repo yet'}
+			>
+				{#snippet icon()}<Server size={13} />{/snippet}
+				New VM
+			</MenuItem>
+			<MenuItem
+				onclick={() => {
+					close();
+					ui.modal = { kind: 'newNetwork' };
+				}}
+				disabled={!inventory.namespaces.length}
+				title="Create a Segment (Port Group) — an overlay or VLAN Layer 2 network VMs attach to"
+			>
+				{#snippet icon()}<Network size={13} />{/snippet}
+				New Segment
+			</MenuItem>
+			<MenuItem
+				onclick={() => {
+					close();
+					ui.modal = { kind: 'upload' };
+				}}
+				disabled={!inventory.namespaces.length}
+				title="Upload a disk image (qcow2/raw/iso) as a bootable DataVolume"
+			>
+				{#snippet icon()}<Upload size={13} />{/snippet}
+				Upload Image
+			</MenuItem>
+			<div class="my-1 border-t border-slate-100"></div>
+			<MenuItem
+				onclick={() => {
+					close();
+					ui.modal = { kind: 'newProject' };
+				}}
+				disabled={!canNamespace}
+				title={canNamespace
+					? 'Create a new tenant project (repo + first namespace)'
+					: 'Requires permission to create namespaces'}
+			>
+				{#snippet icon()}<FolderPlus size={13} />{/snippet}
+				New Project
+			</MenuItem>
+			<MenuItem
+				onclick={() => {
+					close();
+					ui.modal = { kind: 'tier0' };
+				}}
+				disabled={!canEgress}
+				title={canEgress
+					? 'Add a Tier-0 provider-edge service (Source NAT or external route)'
+					: 'Requires permission to create EgressIPs or external routes'}
+			>
+				{#snippet icon()}<Radio size={13} />{/snippet}
+				New Tier-0 Service
+			</MenuItem>
+			<MenuItem
+				onclick={() => {
+					close();
+					ui.modal = { kind: 'adminFw' };
+				}}
+				disabled={!canAdminFw}
+				title={canAdminFw
+					? 'Add a cluster-wide admin firewall (AdminNetworkPolicy / Baseline)'
+					: 'Requires permission to create AdminNetworkPolicies'}
+			>
+				{#snippet icon()}<Shield size={13} />{/snippet}
+				New Admin Firewall
+			</MenuItem>
+		{/snippet}
+	</HeaderMenu>
+
+	<!-- Changes: the GitOps staging cart — a notification-style indicator (badge =
+	     pending staged edits), not a peer of New, so it reads as an icon. -->
+	<button
+		onclick={() => (ui.changesOpen = !ui.changesOpen)}
+		title="Changes — staged edits become a pull request"
+		class="relative rounded p-1.5 hover:bg-slate-700 {ui.changesOpen
+			? 'bg-slate-700 text-white'
+			: 'text-slate-300'}"
+	>
+		<ClipboardList size={16} />
+		{#if drafts.count > 0}
+			<span
+				class="absolute -top-1 -right-1 rounded-full bg-accent-hover px-1 text-[10px] font-medium text-white"
+				>{drafts.count}</span
+			>
+		{/if}
+	</button>
+
+	<HeaderMenu align="right" class="ml-auto">
+		{#snippet trigger({ open, toggle })}
+			<button
+				onclick={toggle}
+				class="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
+			>
+				<UserIcon size={14} />
+				{session.user?.username}
+				<ChevronDown size={12} class="transition-transform {open ? 'rotate-180' : ''}" />
+			</button>
+		{/snippet}
+		{#snippet children({ close })}
+			<div class="border-b border-slate-100 px-3 py-2">
+				<div class="font-medium text-ink">{session.user?.username}</div>
+				{#if session.user?.groups.length}
+					<div class="mt-0.5 text-[11px] break-words text-ink-faint">
+						{session.user.groups.join(', ')}
+					</div>
+				{/if}
+			</div>
+			<div class="px-3 py-1.5 text-ink-muted">{inventory.vmCount} VMs in view</div>
+			<div class="border-t border-slate-100"></div>
+			<MenuItem
+				onclick={() => {
+					close();
+					session.logout();
+				}}
+			>
+				Sign out
+			</MenuItem>
+		{/snippet}
+	</HeaderMenu>
+</header>

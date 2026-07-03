@@ -108,15 +108,12 @@
 	</button>
 {/snippet}
 
-<div class="mx-auto max-w-4xl space-y-5 p-5 text-[13px]">
-	<header>
-		<h2 class="text-base font-semibold text-slate-800">Network Topology</h2>
-		<p class="mt-0.5 text-xs text-slate-500">
-			{TERMS.tier0.nsx} (provider edge) → {TERMS.tier1.nsx} (project router) → {TERMS.segment.nsx}s
-			({TERMS.segment.vsphere}s) → VMs. Overlay segments are isolated islands — there is no
-			in-overlay router between them yet, so cross-segment traffic exits to the fabric.
-		</p>
-	</header>
+<div class="max-w-5xl space-y-5 p-5 text-[13px]">
+	<p class="text-xs text-ink-muted">
+		{TERMS.tier0.nsx} (provider edge) → {TERMS.tier1.nsx} (project router) → {TERMS.segment.nsx}s ({TERMS
+			.segment.vsphere}s) → VMs. Overlay segments are isolated islands — there is no in-overlay
+		router between them yet, so cross-segment traffic exits to the fabric.
+	</p>
 
 	<!-- Tier-0: the platform provider edge — uplinks (transports) and cluster-scoped segments. -->
 	<section class="rounded-lg border border-slate-300 bg-slate-50 p-3">
