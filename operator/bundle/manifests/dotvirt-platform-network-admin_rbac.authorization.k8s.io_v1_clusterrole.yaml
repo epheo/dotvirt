@@ -46,3 +46,9 @@ rules:
   - machineconfigs
   verbs:
   - create
+- apiGroups:
+  - template.kubevirt.io
+  resources:
+  - virtualmachinetemplates
+  verbs:
+  - create

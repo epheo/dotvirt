@@ -110,6 +110,7 @@ func (s *Server) canCreateCached(ctx context.Context, id auth.Identity, c *clust
 var platformAuthorResources = []struct{ group, resource string }{
 	{"k8s.ovn.org", "clusteruserdefinednetworks"},
 	{"operator.openshift.io", "kubedeschedulers"},
+	{"template.kubevirt.io", "virtualmachinetemplates"},
 }
 
 // canAuthorPlatform reports whether id may author platform-tier changes —

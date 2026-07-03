@@ -46,6 +46,7 @@ const (
 	ResourceAdminNetworkPolicy         Resource = "adminnetworkpolicy"         // cluster-wide admin DFW (ANP)
 	ResourceBaselineAdminNetworkPolicy Resource = "baselineadminnetworkpolicy" // cluster baseline DFW (BANP)
 	ResourceDRS                        Resource = "drs"                        // the cluster DRS (descheduler) install/config file set
+	ResourceTemplate                   Resource = "template"                   // a VM template saved into a library's templates/ dir
 )
 
 // Atomic reports whether entries of this resource form one logical change that
@@ -74,6 +75,11 @@ type Entry struct {
 	// off the running branch (SourceFile then carries the path it lands at).
 	Spec     *vmgen.Spec `json:"spec,omitempty"`
 	Manifest string      `json:"manifest,omitempty"`
+
+	// FromTemplate names the library template ("<library>/<template>") a
+	// verbatim-manifest VM create was rendered from, so the draft view can say
+	// so instead of presenting it as an adoption.
+	FromTemplate string `json:"fromTemplate,omitempty"`
 }
 
 // Key is the stable identity used to dedupe/replace entries within a draft. VM

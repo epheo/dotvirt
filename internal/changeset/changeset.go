@@ -15,6 +15,7 @@ import (
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/vmtemplate"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
@@ -30,8 +31,9 @@ type Resyncer interface {
 type Coordinator struct {
 	store    *draft.Store
 	repos    *git.RepoSet
-	forge    *forge.Factory // may be nil → degrade to compare URL
-	resyncer Resyncer       // may be nil → re-sync unavailable
+	forge    *forge.Factory      // may be nil → degrade to compare URL
+	resyncer Resyncer            // may be nil → re-sync unavailable
+	renderer vmtemplate.Renderer // processes library templates into VM manifests
 
 	baseBranch    string
 	proposed      string // working branch name, e.g. dotvirt/proposed
@@ -42,7 +44,7 @@ type Coordinator struct {
 // to a compare link; re-sync becomes unavailable).
 func New(store *draft.Store, repos *git.RepoSet, ff *forge.Factory, rs Resyncer, baseBranch, proposedBranch, runningBranch string) *Coordinator {
 	return &Coordinator{
-		store: store, repos: repos, forge: ff, resyncer: rs,
+		store: store, repos: repos, forge: ff, resyncer: rs, renderer: vmtemplate.EngineRenderer{},
 		baseBranch: baseBranch, proposed: proposedBranch, runningBranch: runningBranch,
 	}
 }

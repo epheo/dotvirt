@@ -35,7 +35,8 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 		case draft.KindCreate:
 			if e.Manifest != "" {
 				// A verbatim-manifest create: a network (UDN/CUDN), an uplink (NNCP),
-				// or a VM adopted from the cluster. The manifest IS the change.
+				// a saved template, a VM rendered from a template, or a VM adopted
+				// from the cluster. The manifest IS the change.
 				field, to := "Adopt VM from cluster", e.Namespace+"/"+e.Name
 				switch e.Resource {
 				case draft.ResourceNetwork:
@@ -46,6 +47,11 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 					field = "Create namespace"
 				case draft.ResourceDRS:
 					field = "Configure DRS"
+				case draft.ResourceTemplate:
+					field = "Save as template"
+				}
+				if e.FromTemplate != "" {
+					field = "Deploy from template " + e.FromTemplate
 				}
 				if e.Namespace == ClusterScopeNS || e.Resource == draft.ResourceNamespace {
 					to = e.Name // cluster-scoped, or the namespace itself: no prefix

@@ -182,8 +182,12 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	if fc == nil {
 		return model.DraftView{}, fmt.Errorf("%w: forge not configured; cannot create the project repo", model.ErrInvalid)
 	}
-	if _, err := fc.EnsureRepo(); err != nil {
+	created, err := fc.EnsureRepo()
+	if err != nil {
 		return model.DraftView{}, fmt.Errorf("create project repo: %w", err)
+	}
+	if created {
+		c.seedTemplates(repoURL)
 	}
 	// First namespace, joined to the new project/repo (stamps its dotvirt.io labels).
 	nsSpec := netgen.NamespaceSpec{Name: ns, Project: spec.Name, Repo: repoURL, VMNetwork: spec.VMNetwork}
@@ -254,8 +258,12 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	if fc == nil {
 		return model.DraftView{}, fmt.Errorf("%w: forge not configured; cannot create the project repo", model.ErrInvalid)
 	}
-	if _, err := fc.EnsureRepo(); err != nil {
+	created, err := fc.EnsureRepo()
+	if err != nil {
 		return model.DraftView{}, fmt.Errorf("create project repo: %w", err)
+	}
+	if created {
+		c.seedTemplates(repoURL)
 	}
 	if err := c.stageProjectAdoption(id.Username, commitProj.Name, target, repoURL, owners); err != nil {
 		return model.DraftView{}, err

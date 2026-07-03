@@ -152,7 +152,12 @@ func PlatformApplication(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo strin
 			"repoURL":        platformRepo,
 			"targetRevision": "main",
 			"path":           ".",
-			"directory":      map[string]any{"recurse": true, "include": "*.yaml"},
+			// templates/ is the repo's VM-template library (VirtualMachineTemplate
+			// manifests dotvirt renders itself) — its CRD need not exist on-cluster,
+			// so Argo must never try to apply it. Argo compiles these globs without
+			// a separator, so the * crosses "/" (the same reason include matches
+			// nested <ns>/<vm>.yaml).
+			"directory": map[string]any{"recurse": true, "include": "*.yaml", "exclude": "templates/*"},
 		},
 		"destination": map[string]any{"server": inClusterServer, "namespace": "default"},
 		"syncPolicy": map[string]any{

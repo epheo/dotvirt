@@ -136,3 +136,8 @@ rules:
   - apiGroups: ["machineconfiguration.openshift.io"]
     resources: ["machineconfigs"]
     verbs: ["create"]
+  # Shared template library curation: the save-to-library SSAR gate. Rule-based,
+  # so it works while the template.kubevirt.io CRD is absent from the cluster.
+  - apiGroups: ["template.kubevirt.io"]
+    resources: ["virtualmachinetemplates"]
+    verbs: ["create"]
