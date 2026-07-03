@@ -44,6 +44,22 @@ export const TERMS = {
 		backing: 'NetworkPolicy / AdminNetworkPolicy'
 	},
 	group: { nsx: 'Group', vsphere: 'Selector', backing: 'label selector' },
+	// Content-library concepts (both idioms already agree on these names).
+	template: {
+		nsx: 'VM Template',
+		vsphere: 'VM Template',
+		backing: 'VirtualMachineTemplate (template.kubevirt.io/v1beta1) in git'
+	},
+	library: {
+		nsx: 'Template Library',
+		vsphere: 'Content Library',
+		backing: 'templates/ in the project or platform repo'
+	},
+	customization: {
+		nsx: 'Customization',
+		vsphere: 'Customization Spec',
+		backing: 'template parameters + cloud-init'
+	},
 	tag: { nsx: 'Tag', vsphere: 'Custom Attribute', backing: 'label' }
 } satisfies Record<string, Term>;
 
