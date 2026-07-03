@@ -1,0 +1,52 @@
+# Installs the PUBLISHED operator — the digest-pinned catalog recorded in
+# operator/install/ — on a throwaway kind cluster, the same way a cluster admin would.
+# Its subject is registry state (are the pinned digests still on quay, does the catalog
+# serve, does the channel head install), so it runs where that subject belongs: daily
+# as a canary, from release.yaml against a just-cut catalog, and on PRs that change the
+# pins or this scaffolding — never as a general PR gate, where a red would mean "the
+# registry changed", not "your diff is wrong".
+name: verify-published-bundle
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - operator/install/**
+      - .github/workflows/verify-published-bundle.yaml
+      - .github/actions/olm-kind/**
+  workflow_call:
+    inputs:
+      catalog-image:
+        description: Catalog image ref to verify (defaults to the operator/install/catalogsource.yaml pin)
+        type: string
+        required: false
+        default: ''
+      expected-csv:
+        description: CSV the subscription must resolve to (e.g. dotvirt-operator.v0.0.9)
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/olm-kind
+      - name: Install from the published catalog (operator/install/, as an admin would)
+        run: |
+          # The committed manifests target openshift-marketplace, OpenShift's global
+          # catalog namespace; upstream OLM's resolver only sees catalogs in the
+          # subscription's own namespace or ITS global namespace, olm — retarget the
+          # two platform-specific fields.
+          sed -i 's/^  namespace: openshift-marketplace$/  namespace: olm/' operator/install/catalogsource.yaml
+          sed -i 's/^  sourceNamespace: openshift-marketplace$/  sourceNamespace: olm/' operator/install/subscription.yaml
+          if [ -n "${{ inputs.catalog-image }}" ]; then
+            sed -i 's#^  image: .*#  image: ${{ inputs.catalog-image }}#' operator/install/catalogsource.yaml
+          fi
+          kubectl apply -f operator/install/namespace.yaml -f operator/install/catalogsource.yaml
+          kubectl apply -f operator/install/operatorgroup.yaml -f operator/install/subscription.yaml
+      - name: Assert the subscription resolves and the CSV reaches Succeeded
+        run: ./hack/wait-csv.sh dotvirt-operator dotvirt-operator "${{ inputs.expected-csv }}"

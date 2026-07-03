@@ -89,54 +89,93 @@ jobs:
             || { echo "::error::stale bundle — run 'make -C operator bundle VERSION=$VERSION' and commit"; exit 1; }
 
   # Install the bundle on a throwaway kind cluster via OLM (à la community-operators
-  # CI) + run scorecard, so a bundle that won't install fails the PR. Uses public
-  # images + a local registry — no secrets, so it runs on fork PRs too.
+  # CI) + run scorecard, so a bundle that won't install fails the PR. The committed
+  # bundle is pointed at THIS build's operator image (served from the kind-local
+  # registry), so the job gates the diff; whether the published quay digests still
+  # install is verify-published-bundle.yaml's subject, never a PR's. Everything else
+  # the install path pulls is preloaded by olm-kind, so a red here means the bundle
+  # broke — not that a registry hiccuped. No secrets, so it runs on fork PRs too.
   bundle-test:
     needs: [validate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Load pinned tool versions
-        run: grep -v '^#' hack/versions.env >> "$GITHUB_ENV"
-      - name: Install kind + operator-sdk
+      - uses: ./.github/actions/olm-kind
+      - name: Build the operator image from this tree
         run: |
-          curl -fsSLo ./kind "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64"
-          chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
-          sudo curl -fsSL -o /usr/local/bin/operator-sdk \
-            "https://github.com/operator-framework/operator-sdk/releases/download/$OPERATOR_SDK_VERSION/operator-sdk_linux_amd64"
-          sudo chmod +x /usr/local/bin/operator-sdk
-      - name: kind cluster + local registry
+          docker build -f operator/Dockerfile -t localhost:5000/dotvirt-operator:ci .
+          docker push localhost:5000/dotvirt-operator:ci
+      - name: Point the bundle at the freshly built image
+        # Swap only the manager image ref — the bundle otherwise stays exactly what
+        # validate proved in sync with operator/config.
         run: |
-          # The kind node shares the host's (global, non-namespaced) inotify limits.
-          # The runner's default fs.inotify.max_user_instances (~128) is exhausted by
-          # OLM + the operator stack's informers/watches, leaving pods stuck and the
-          # CatalogSource never serving — i.e. a Subscription with no InstallPlan. Raise
-          # the ceiling before the node starts. -w is runtime-only: fine on a throwaway VM.
-          sudo sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576
-          docker run -d --restart=always -p 127.0.0.1:5000:5000 --name kind-registry registry:2
-          cat <<EOF | kind create cluster --wait 5m --config=-
-          kind: Cluster
-          apiVersion: kind.x-k8s.io/v1alpha4
-          containerdConfigPatches:
-          - |-
-            [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5000"]
-              endpoint = ["http://kind-registry:5000"]
-          EOF
-          docker network connect kind kind-registry
-      - name: Install OLM
-        # Pin the OLM version (operator-sdk v1.42.2's default) — unpinned pulls
-        # latest-of-the-day, whose images intermittently fail to come up in kind and
-        # leave `run bundle` with no InstallPlan ("context deadline exceeded").
-        run: operator-sdk olm install --version "$OLM_VERSION" --timeout 5m
-      - name: Build + push the (committed) bundle to the local registry
+          sed -i -E 's#quay\.io/epheo/dotvirt-operator@sha256:[0-9a-f]+#localhost:5000/dotvirt-operator:ci#g' \
+            operator/bundle/manifests/dotvirt-operator.clusterserviceversion.yaml
+      - name: Build + push the bundle to the local registry
         run: make -C operator bundle-build bundle-push BUNDLE_IMG=localhost:5000/dotvirt-operator-bundle:ci CONTAINER_TOOL=docker
-      - name: Install the bundle via OLM (assert it reaches Succeeded)
+      - name: Render + push a CI catalog serving that bundle
+        # The same install mechanism as production and the canary — a catalog image
+        # (opm pinned via build-arg, catalog.Dockerfile) behind a CatalogSource — not
+        # operator-sdk's ephemeral `run bundle` registry pod, whose unpinned
+        # opm:latest/ubi machinery is a recurring flake source.
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/opm \
+            "https://github.com/operator-framework/operator-registry/releases/download/$OPM_VERSION/linux-amd64-opm"
+          sudo chmod +x /usr/local/bin/opm
+          CSV_NAME="$(awk '/^  name: dotvirt-operator\.v/{print $2; exit}' operator/bundle/manifests/dotvirt-operator.clusterserviceversion.yaml)"
+          echo "CSV_NAME=$CSV_NAME" >> "$GITHUB_ENV"
+          cat > /tmp/ci-catalog-template.yaml <<EOF
+          schema: olm.template.basic
+          entries:
+            - schema: olm.package
+              name: dotvirt-operator
+              defaultChannel: stable-v0
+            - schema: olm.channel
+              package: dotvirt-operator
+              name: stable-v0
+              entries:
+                - name: $CSV_NAME
+            - schema: olm.bundle
+              image: localhost:5000/dotvirt-operator-bundle:ci
+          EOF
+          opm alpha render-template basic --use-http -o yaml /tmp/ci-catalog-template.yaml \
+            > operator/catalog/dotvirt-operator/catalog.yaml
+          opm validate operator/catalog
+          docker build -f operator/catalog.Dockerfile --build-arg OPM_VERSION="$OPM_VERSION" \
+            -t localhost:5000/dotvirt-operator-catalog:ci operator
+          docker push localhost:5000/dotvirt-operator-catalog:ci
+      - name: Install via OLM from the CI catalog (assert the CSV reaches Succeeded)
         run: |
           kubectl create namespace dotvirt-ci
-          # 10m (not 5m): a cold kind cluster must pull the OLM catalog/registry images
-          # before an InstallPlan can resolve; 5m was tight enough to flake.
-          operator-sdk run bundle localhost:5000/dotvirt-operator-bundle:ci -n dotvirt-ci --timeout 10m --use-http
-          kubectl -n dotvirt-ci get csv
+          cat <<EOF | kubectl apply -f -
+          apiVersion: operators.coreos.com/v1alpha1
+          kind: CatalogSource
+          metadata:
+            name: dotvirt-catalog-ci
+            namespace: dotvirt-ci
+          spec:
+            sourceType: grpc
+            image: localhost:5000/dotvirt-operator-catalog:ci
+          ---
+          apiVersion: operators.coreos.com/v1
+          kind: OperatorGroup
+          metadata:
+            name: dotvirt-ci
+            namespace: dotvirt-ci
+          spec: {}
+          ---
+          apiVersion: operators.coreos.com/v1alpha1
+          kind: Subscription
+          metadata:
+            name: dotvirt-operator
+            namespace: dotvirt-ci
+          spec:
+            channel: stable-v0
+            name: dotvirt-operator
+            source: dotvirt-catalog-ci
+            sourceNamespace: dotvirt-ci
+          EOF
+          ./hack/wait-csv.sh dotvirt-ci dotvirt-operator "$CSV_NAME"
       - name: Scorecard (basic + olm)
         run: operator-sdk scorecard ./operator/bundle --wait-time 180s
 

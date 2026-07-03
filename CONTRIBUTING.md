@@ -92,7 +92,10 @@ old one created, rolling the operand without the user touching the CR. Two thing
   re-reconciles an existing CR into a rolled operand, and an explicit `spec.image` still wins.
 - **The OLM upgrade graph is valid** — `operator-sdk bundle validate` + `opm validate` (the
   `validate` job) check the CSV/channel/`replaces` wiring on every PR, and the `bundle-test`
-  job installs the bundle on kind via OLM.
+  job installs the bundle on kind via OLM, running the PR's own operator image. Whether the
+  *published* release (the digest-pinned catalog on quay) still installs is the
+  `verify-published-bundle` workflow's subject — a daily canary that also gates each
+  release cut and pin-recording PR.
 
 To keep the claim honest as the API evolves, hold this discipline:
 
