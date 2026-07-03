@@ -8,6 +8,7 @@
 	import AdoptProjectModal from './AdoptProjectModal.svelte';
 	import DeployTemplateModal from './DeployTemplateModal.svelte';
 	import DistributedFirewallModal from './DistributedFirewallModal.svelte';
+	import EditTemplateModal from './EditTemplateModal.svelte';
 	import EgressFirewallModal from './EgressFirewallModal.svelte';
 	import NewNamespaceModal from './NewNamespaceModal.svelte';
 	import NewNetworkModal from './NewNetworkModal.svelte';
@@ -116,6 +117,8 @@
 		onclose={close}
 		onstaged={staged}
 	/>
+{:else if m?.kind === 'editTemplate'}
+	<EditTemplateModal template={m.template} onclose={close} onstaged={staged} />
 {:else if m?.kind === 'staged' && stagedItem}
 	<StagedChangesModal
 		item={stagedItem}

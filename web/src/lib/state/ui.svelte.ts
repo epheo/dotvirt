@@ -1,4 +1,4 @@
-import type { VM } from '$lib/api';
+import type { Template, VM } from '$lib/api';
 
 // Every modal the shell can show, as one discriminated union — the shell
 // renders exactly one, and opening any modal is a single assignment.
@@ -15,6 +15,7 @@ export type AppModal =
 	| { kind: 'adminFw' }
 	| { kind: 'upload' }
 	| { kind: 'deployTemplate'; library?: string; template?: string } // Deploy from Template (Catalog / New ▾)
+	| { kind: 'editTemplate'; template: Template } // edit a library item's manifest (Catalog)
 	| { kind: 'staged'; vm: VM }; // the per-VM staged-changes modal (from a Staged badge)
 
 // Right-click context menus — vCenter's signature interaction. The bulk variant

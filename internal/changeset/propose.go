@@ -117,6 +117,12 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) ([]git.ChangesetIt
 	for _, e := range entries {
 		switch e.Kind {
 		case draft.KindEdit:
+			// A template edit replaces the file wholesale (Manifest set); a VM
+			// edit patches targeted fields in place.
+			if e.Manifest != "" {
+				items = append(items, git.ChangesetItem{Path: e.SourceFile, Namespace: e.Namespace, Name: e.Name, NewContent: []byte(e.Manifest)})
+				continue
+			}
 			items = append(items, git.ChangesetItem{
 				Path: e.SourceFile, Namespace: e.Namespace, Name: e.Name, Edit: e.Edit,
 			})

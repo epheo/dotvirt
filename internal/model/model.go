@@ -704,6 +704,15 @@ type DeployTemplateRequest struct {
 	Namespace  string            `json:"namespace"`
 	Name       string            `json:"name,omitempty"` // overrides the NAME parameter; empty → template default (often generated)
 	Parameters map[string]string `json:"parameters,omitempty"`
+	PowerOn    bool              `json:"powerOn,omitempty"` // boot the VM once it syncs (templates blueprint Halted)
+}
+
+// UpdateTemplateRequest replaces a library template's manifest — editing a
+// content-library item. The file updates when the library's PR merges.
+type UpdateTemplateRequest struct {
+	Library string `json:"library"`
+	Name    string `json:"name"`
+	YAML    string `json:"yaml"`
 }
 
 // SaveTemplateRequest derives a template from an existing VM's git manifest and
