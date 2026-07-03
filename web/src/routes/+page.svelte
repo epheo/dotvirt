@@ -9,7 +9,9 @@
 		Plus,
 		Power,
 		PowerOff,
+		Radio,
 		Server,
+		Shield,
 		Trash2,
 		Upload,
 		User as UserIcon
@@ -46,7 +48,12 @@
 	import NewNamespaceModal from '$lib/components/NewNamespaceModal.svelte';
 	import NewProjectModal from '$lib/components/NewProjectModal.svelte';
 	import AdoptProjectModal from '$lib/components/AdoptProjectModal.svelte';
+	import EgressFirewallModal from '$lib/components/EgressFirewallModal.svelte';
+	import DistributedFirewallModal from '$lib/components/DistributedFirewallModal.svelte';
+	import AdminFirewallModal from '$lib/components/AdminFirewallModal.svelte';
 	import NewNetworkModal from '$lib/components/NewNetworkModal.svelte';
+	import NetworkTopology from '$lib/components/NetworkTopology.svelte';
+	import Tier0Modal from '$lib/components/Tier0Modal.svelte';
 	import NewVMWizard from '$lib/components/NewVMWizard.svelte';
 	import Permissions from '$lib/components/Permissions.svelte';
 	import StagedChangesModal from '$lib/components/StagedChangesModal.svelte';
@@ -77,6 +84,14 @@
 	// namespaces)? Gates the New VLAN / Add Uplink / New Namespace actions and the
 	// platform changeset, matching the backend platformScope SSAR gate.
 	const canManage = $derived(netInv?.canManage ?? false);
+	// Per-action authoring authority (each the same SSAR the backend create enforces),
+	// so a button is shown only when the caller can actually use it — not the coarse
+	// canManage. Undefined caps (older backend) read as false.
+	const caps = $derived(netInv?.caps);
+	const canNamespace = $derived(!!caps?.namespace);
+	const canUplink = $derived(!!caps?.uplink);
+	const canEgress = $derived(!!(caps?.egressIP || caps?.externalRoute));
+	const canAdminFw = $derived(!!caps?.adminNetworkPolicy);
 	// The synthetic platform-tier project (matches the backend's platformProjectName);
 	// holds the cluster-scoped network + namespace changeset, proposable by authors.
 	const PLATFORM_PROJECT = 'platform';
@@ -220,7 +235,13 @@
 	function setScope(s: Scope) {
 		scope = s;
 		selected = null;
+		showTopology = false;
 	}
+
+	// Opening a VM (from the tree, search, or a task) leaves the topology map.
+	$effect(() => {
+		if (selected) showTopology = false;
+	});
 
 	function applyInventory(inv: Inventory) {
 		inventory = inv;
@@ -306,10 +327,22 @@
 	let showProjectWizard = $state(false);
 	// "Attach repo" target: the labeled-but-repoless project being adopted into git.
 	let adoptProjectTarget = $state<{ project: string; namespaces: string[] } | null>(null);
+	// "New Egress Firewall" (Tier-1 gateway firewall) target: the container's namespaces
+	// plus the preselected one when opened from a namespace row.
+	let egressFwTarget = $state<{ namespaces: string[]; namespace?: string } | null>(null);
+	// "New Security Policy" (east-west Distributed Firewall) target.
+	let dfwTarget = $state<{ namespaces: string[]; namespace?: string } | null>(null);
 	let showUpload = $state(false);
 	let showChanges = $state(false);
 	// The catalog browser shares the right-panel slot with Changes (one at a time).
 	let showCatalog = $state(false);
+	// The network topology map takes over the main pane (like a selected VM), opened
+	// from the tree's pinned Topology entry.
+	let showTopology = $state(false);
+	// New Tier-0 (provider-edge) service modal: SNAT pools + external routes.
+	let showTier0 = $state(false);
+	// New cluster-wide admin Distributed Firewall (ANP/BANP) modal.
+	let showAdminFw = $state(false);
 
 	async function refreshDrafts() {
 		// Platform authors also carry a platform-tier draft (cluster-scoped network +
@@ -591,10 +624,10 @@
 							showNetworkWizard = true;
 						}}
 						disabled={!namespaces.length}
-						title="Create a Distributed Port Group (an internal Layer 2 network) for a project"
+						title="Create a Segment (Port Group) — an overlay or VLAN Layer 2 network VMs attach to"
 						class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
 					>
-						<Network size={13} /> New Network
+						<Network size={13} /> New Segment
 					</button>
 					<button
 						onclick={() => {
@@ -613,13 +646,39 @@
 							close();
 							showProjectWizard = true;
 						}}
-						disabled={!canManage}
-						title={canManage
+						disabled={!canNamespace}
+						title={canNamespace
 							? 'Create a new tenant project (repo + first namespace)'
-							: 'Requires platform authoring permission'}
+							: 'Requires permission to create namespaces'}
 						class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
 					>
 						<FolderPlus size={13} /> New Project
+					</button>
+					<button
+						onclick={() => {
+							close();
+							showTier0 = true;
+						}}
+						disabled={!canEgress}
+						title={canEgress
+							? 'Add a Tier-0 provider-edge service (Source NAT or external route)'
+							: 'Requires permission to create EgressIPs or external routes'}
+						class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+					>
+						<Radio size={13} /> New Tier-0 Service
+					</button>
+					<button
+						onclick={() => {
+							close();
+							showAdminFw = true;
+						}}
+						disabled={!canAdminFw}
+						title={canAdminFw
+							? 'Add a cluster-wide admin firewall (AdminNetworkPolicy / Baseline)'
+							: 'Requires permission to create AdminNetworkPolicies'}
+						class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+					>
+						<Shield size={13} /> New Admin Firewall
 					</button>
 				{/snippet}
 			</HeaderMenu>
@@ -709,7 +768,7 @@
 				{:else if inventory.projects.length === 0}
 					<div class="space-y-3 p-6 text-center">
 						<p class="text-xs text-slate-400">No projects visible.</p>
-						{#if canManage}
+						{#if canNamespace}
 							<button
 								onclick={() => (showProjectWizard = true)}
 								class="inline-flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
@@ -736,11 +795,30 @@
 							showCatalog = !showCatalog;
 							if (showCatalog) showChanges = false;
 						}}
+						topologyActive={showTopology}
+						ontopology={() => {
+							showTopology = !showTopology;
+							if (showTopology) {
+								selected = null;
+								showCatalog = false;
+								showChanges = false;
+							}
+						}}
 					/>
 				{/if}
 			</aside>
 			<main class="flex min-w-0 flex-1 flex-col overflow-hidden bg-white">
-				{#if selected}
+				{#if showTopology}
+					<div class="min-h-0 flex-1 overflow-y-auto">
+						<NetworkTopology
+							networks={networkCatalog}
+							{uplinks}
+							vms={inventory ? allVMs(inventory) : []}
+							projects={inventory?.projects ?? []}
+							onpick={(net) => setScope({ kind: 'network', network: net })}
+						/>
+					</div>
+				{:else if selected}
 					<div
 						class="flex items-center gap-2 border-b border-slate-200 px-4 py-1.5 text-xs text-slate-500"
 					>
@@ -910,7 +988,6 @@
 		{#if showNetworkWizard}
 			<NewNetworkModal
 				{namespaces}
-				projects={repoProjects}
 				{uplinks}
 				{canManage}
 				onAddUplink={() => (showUplinkWizard = true)}
@@ -943,6 +1020,10 @@
 			<NewProjectModal onclose={() => (showProjectWizard = false)} onstaged={refreshDrafts} />
 		{/if}
 
+		{#if showTier0}
+			<Tier0Modal {namespaces} onclose={() => (showTier0 = false)} onstaged={refreshDrafts} />
+		{/if}
+
 		{#if adoptProjectTarget}
 			<AdoptProjectModal
 				project={adoptProjectTarget.project}
@@ -950,6 +1031,29 @@
 				onclose={() => (adoptProjectTarget = null)}
 				onstaged={refreshDrafts}
 			/>
+		{/if}
+
+		{#if egressFwTarget}
+			<EgressFirewallModal
+				namespaces={egressFwTarget.namespaces}
+				namespace={egressFwTarget.namespace}
+				onclose={() => (egressFwTarget = null)}
+				onstaged={refreshDrafts}
+			/>
+		{/if}
+
+		{#if dfwTarget}
+			<DistributedFirewallModal
+				namespaces={dfwTarget.namespaces}
+				namespace={dfwTarget.namespace}
+				vms={inventory ? allVMs(inventory) : []}
+				onclose={() => (dfwTarget = null)}
+				onstaged={refreshDrafts}
+			/>
+		{/if}
+
+		{#if showAdminFw}
+			<AdminFirewallModal onclose={() => (showAdminFw = false)} onstaged={refreshDrafts} />
 		{/if}
 
 		{#if showUpload}
@@ -1044,7 +1148,33 @@
 							class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
 							>New VM here…</button
 						>
-						{#if canManage}
+						<button
+							onclick={() => {
+								const c = ctx && ctx.kind === 'container' ? ctx : null;
+								ctx = null;
+								egressFwTarget = c ? { namespaces: c.namespaces, namespace: c.namespace } : null;
+							}}
+							disabled={!ctx.repo}
+							title={ctx.repo
+								? 'Add a north-south egress firewall (the Tier-1 gateway firewall)'
+								: 'Project has no backing repo'}
+							class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+							>New Egress Firewall…</button
+						>
+						<button
+							onclick={() => {
+								const c = ctx && ctx.kind === 'container' ? ctx : null;
+								ctx = null;
+								dfwTarget = c ? { namespaces: c.namespaces, namespace: c.namespace } : null;
+							}}
+							disabled={!ctx.repo}
+							title={ctx.repo
+								? 'Add an east-west Distributed Firewall policy (NetworkPolicy)'
+								: 'Project has no backing repo'}
+							class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+							>New Security Policy…</button
+						>
+						{#if canNamespace}
 							<button
 								onclick={() => {
 									namespaceWizardProject = ctx && ctx.kind === 'container' ? ctx.project : null;
