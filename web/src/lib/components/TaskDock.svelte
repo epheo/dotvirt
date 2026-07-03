@@ -10,6 +10,7 @@
 	} from '$lib/api';
 	import { duration } from '$lib/format';
 	import { pollWhileVisible } from '$lib/poll';
+	import TabBar from './TabBar.svelte';
 
 	let {
 		drafts,
@@ -260,7 +261,7 @@
 	}
 </script>
 
-<section class="border-t border-slate-300 bg-white text-xs">
+<section class="border-t border-line-strong bg-panel text-xs">
 	{#if openPane}
 		<!-- Drag the top edge to resize the dock. -->
 		<div
@@ -275,39 +276,22 @@
 	{/if}
 	<!-- Tabbed header (vCenter's bottom pane): Recent Tasks | Events + collapse. -->
 	<div class="flex items-center gap-1 bg-slate-100 px-2 py-1 text-slate-600">
-		<ListChecks size={14} class="mx-1 text-slate-500" />
-		<button
-			onclick={() => selectTab('tasks')}
-			class="rounded px-2 py-0.5 font-semibold tracking-wide uppercase {tab === 'tasks' && openPane
-				? 'bg-white text-slate-700 shadow-sm'
-				: 'text-slate-500 hover:text-slate-700'}"
-		>
-			Recent Tasks
-			<span class="ml-0.5 rounded-full bg-slate-300 px-1.5 text-[11px] text-slate-700"
-				>{tasks.length}</span
-			>
-		</button>
-		<button
-			onclick={() => selectTab('events')}
-			class="rounded px-2 py-0.5 font-semibold tracking-wide uppercase {tab === 'events' && openPane
-				? 'bg-white text-slate-700 shadow-sm'
-				: 'text-slate-500 hover:text-slate-700'}"
-		>
-			Events
-		</button>
-		<button
-			onclick={() => selectTab('alarms')}
-			class="rounded px-2 py-0.5 font-semibold tracking-wide uppercase {tab === 'alarms' && openPane
-				? 'bg-white text-slate-700 shadow-sm'
-				: 'text-slate-500 hover:text-slate-700'}"
-		>
-			Alarms
-			{#if alarms > 0}
-				<span class="ml-0.5 rounded-full bg-amber-200 px-1.5 text-[11px] font-medium text-amber-800"
-					>{alarms}</span
-				>
-			{/if}
-		</button>
+		<ListChecks size={14} class="mx-1 text-ink-muted" />
+		<TabBar
+			tabs={[
+				{ id: 'tasks', label: 'Recent Tasks', count: tasks.length },
+				{ id: 'events', label: 'Events' },
+				{
+					id: 'alarms',
+					label: 'Alarms',
+					count: alarms > 0 ? alarms : undefined,
+					countTone: 'warn'
+				}
+			]}
+			active={openPane ? tab : ''}
+			variant="chips"
+			onchange={(t) => selectTab(t as 'tasks' | 'events' | 'alarms')}
+		/>
 		<button
 			onclick={() => {
 				onrefresh?.();
