@@ -46,6 +46,13 @@ type VMEdit struct {
 	RemoveDisks    []string           `json:"removeDisks,omitempty"` // disk names to remove
 	AddNetworks    []model.NetworkAdd `json:"addNetworks,omitempty"`
 	RemoveNetworks []string           `json:"removeNetworks,omitempty"` // network/interface names to remove
+
+	// MigrateVolumes moves disks to other storage classes (storage live
+	// migration): each entry replaces the disk's DataVolume template with a
+	// blank one on the target class, and the edit sets
+	// spec.updateVolumesStrategy: Migration so KubeVirt live-copies the data
+	// on merge. Reverting the commit is the migration cancel.
+	MigrateVolumes []model.VolumeMigration `json:"migrateVolumes,omitempty"`
 }
 
 // Empty reports whether the edit changes nothing.
@@ -55,7 +62,8 @@ func (e VMEdit) Empty() bool {
 		len(e.SetLabels) == 0 && len(e.RemoveLabels) == 0 &&
 		e.DRSExclude == nil && e.EvictionStrategy == nil &&
 		len(e.AddDisks) == 0 && len(e.RemoveDisks) == 0 &&
-		len(e.AddNetworks) == 0 && len(e.RemoveNetworks) == 0
+		len(e.AddNetworks) == 0 && len(e.RemoveNetworks) == 0 &&
+		len(e.MigrateVolumes) == 0
 }
 
 // ApplyEdit edits the VirtualMachine named (namespace, name) within a manifest,
@@ -92,6 +100,7 @@ func ApplyEdit(content []byte, namespace, name string, edit VMEdit) ([]byte, err
 		applyEvictionStrategy(ed, vm, *edit.EvictionStrategy)
 	}
 	applyDisksNetworks(ed, vm, edit)
+	applyVolumeMigrations(ed, vm, edit.MigrateVolumes)
 
 	return ed.bytes(), nil
 }

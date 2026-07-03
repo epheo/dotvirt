@@ -143,6 +143,9 @@ export interface EditRequest {
 	removeDisks?: string[];
 	addNetworks?: { name: string }[];
 	removeNetworks?: string[];
+	// Storage live migration: move each named disk to another storage class
+	// (rewrites its DataVolume template + sets updateVolumesStrategy: Migration).
+	migrateVolumes?: { name: string; storageClass: string }[];
 	message?: string;
 }
 
@@ -602,6 +605,14 @@ export interface NodeInfo {
 	canCordon: boolean; // the caller's token may cordon it
 }
 
+// A virtualization host (KubeVirt-schedulable node) — a candidate
+// live-migration target for the migrate dialog's picker.
+export interface NodeTarget {
+	name: string;
+	ready: boolean;
+	unschedulable?: boolean;
+}
+
 // The caller's effective capabilities in one namespace (the Permissions tab).
 export interface Capability {
 	id: string;
@@ -754,6 +765,7 @@ export const api = {
 		get<VMMetrics>(`/api/metrics/scope${scopeQS(scope, { range })}`),
 	alarms: () => get<Alert[]>('/api/alarms'),
 	// Node maintenance (cluster-scoped; the user's token is the gate).
+	nodes: () => get<NodeTarget[]>('/api/nodes'),
 	nodeInfo: (node: string) => get<NodeInfo>(`/api/nodes/${enc(node)}`),
 	setNodeCordon: (node: string, unschedulable: boolean) =>
 		post<void>(`/api/nodes/${enc(node)}/cordon`, { unschedulable }),
@@ -812,8 +824,9 @@ export const api = {
 	// Imperative runtime ops (RBAC-gated; don't touch the git-managed spec).
 	restart: (namespace: string, name: string) =>
 		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/restart`, {}),
-	migrate: (namespace: string, name: string) =>
-		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/migrate`, {}),
+	// node pins the migration to that host; omitted = the scheduler's choice.
+	migrate: (namespace: string, name: string, node?: string) =>
+		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/migrate`, node ? { node } : {}),
 	pause: (namespace: string, name: string) =>
 		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/pause`, {}),
 	unpause: (namespace: string, name: string) =>

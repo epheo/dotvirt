@@ -10,6 +10,23 @@ import (
 // — the user's own token is the gate (a caller without node RBAC gets 403/404,
 // and the UI hides the action from NodeInfo.CanCordon).
 
+// handleNodes lists the virtualization hosts (KubeVirt-schedulable nodes) as
+// live-migration target candidates. A caller without node-list RBAC gets 403,
+// and the migrate dialog offers only scheduler-picked placement.
+func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
+	_, c, err := s.userCluster(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	nodes, err := c.ListNodes(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), runtimeOpStatus(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, nodes)
+}
+
 // handleNodeInfo returns a node's schedulability + whether the caller may cordon it.
 func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
 	_, c, err := s.userCluster(r)

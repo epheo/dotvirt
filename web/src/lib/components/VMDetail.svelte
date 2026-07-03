@@ -20,10 +20,13 @@
 		type VMEvent
 	} from '$lib/api';
 	import { manifestURL, type VMAction } from '$lib/actions';
+	import type { DetailAction } from '$lib/state/ui.svelte';
 	import { duration } from '$lib/format';
 	import ActionMenu from './ActionMenu.svelte';
 	import ChangeList from './ChangeList.svelte';
 	import CloneModal from './CloneModal.svelte';
+	import MigrateModal from './MigrateModal.svelte';
+	import StorageMigrateModal from './StorageMigrateModal.svelte';
 	import SaveTemplateModal from './SaveTemplateModal.svelte';
 	import ConfirmDelete from './ConfirmDelete.svelte';
 	import CapacityUsage from './CapacityUsage.svelte';
@@ -69,10 +72,7 @@
 		networks?: Network[];
 		// A one-shot request from outside (the context menu) to open a modal/tab
 		// here; seq distinguishes repeated requests for the same id.
-		intent?: {
-			id: 'edit' | 'delete' | 'console' | 'snapshot' | 'clone' | 'template';
-			seq: number;
-		} | null;
+		intent?: { id: DetailAction; seq: number } | null;
 	} = $props();
 
 	type Tab = 'summary' | 'monitor' | 'configure' | 'permissions' | 'snapshots' | 'console';
@@ -97,6 +97,10 @@
 	// Clone name-prompt modal (creates a VirtualMachineClone; imperative).
 	let cloning = $state(false);
 	let templating = $state(false);
+
+	// Live-migration target picker (imperative) and storage migration (PR-gated).
+	let migrating = $state(false);
+	let migratingStorage = $state(false);
 
 	// Drift detail (running vs main) for the selected VM.
 	let driftChanges = $state<Change[] | null>(null);
@@ -194,6 +198,12 @@
 			case 'template':
 				templating = true;
 				break;
+			case 'migrate':
+				migrating = true;
+				break;
+			case 'migrate-storage':
+				migratingStorage = true;
+				break;
 			case 'console':
 				ontab?.('console');
 				break;
@@ -222,6 +232,8 @@
 			deleteErr = '';
 			cloning = false;
 			templating = false;
+			migrating = false;
+			migratingStorage = false;
 			driftChanges = null;
 			showDrift = false;
 			reconcileMsg = '';
@@ -259,6 +271,12 @@
 				break;
 			case 'template':
 				templating = true;
+				break;
+			case 'migrate':
+				migrating = true;
+				break;
+			case 'migrate-storage':
+				migratingStorage = true;
 				break;
 		}
 	});
@@ -674,6 +692,28 @@
 			{vm}
 			onclose={() => (cloning = false)}
 			ondone={(ok) => onaction?.({ verb: 'Clone', namespace: vm.namespace, name: vm.name, ok })}
+		/>
+	{/if}
+
+	{#if migrating}
+		<MigrateModal
+			{vm}
+			onclose={() => (migrating = false)}
+			ondone={(ok) => {
+				if (ok) {
+					runtimeMsg = 'Live-migration requested — watch the Monitor tab for progress.';
+					runtimeOk = true;
+				}
+				onaction?.({ verb: 'Live-migration', namespace: vm.namespace, name: vm.name, ok });
+			}}
+		/>
+	{/if}
+
+	{#if migratingStorage}
+		<StorageMigrateModal
+			{vm}
+			onclose={() => (migratingStorage = false)}
+			onstaged={() => onstaged?.()}
 		/>
 	{/if}
 

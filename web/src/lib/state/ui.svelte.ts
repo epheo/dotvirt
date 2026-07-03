@@ -18,6 +18,11 @@ export type AppModal =
 	| { kind: 'editTemplate'; template: Template } // edit a library item's manifest (Catalog)
 	| { kind: 'staged'; vm: VM }; // the per-VM staged-changes modal (from a Staged badge)
 
+// The host-kind registry actions the VM detail page fulfils with a modal or
+// tab — what a context menu on an unopened VM may request it to open.
+export type DetailAction =
+	'edit' | 'delete' | 'console' | 'snapshot' | 'clone' | 'template' | 'migrate' | 'migrate-storage';
+
 // Right-click context menus — vCenter's signature interaction. The bulk variant
 // (right-click inside a grid multi-selection) renders inside the workspace that
 // owns the selection; the shell renders the other two.
@@ -68,12 +73,9 @@ class Ui {
 
 	// A one-shot request for the VM page to open a modal/tab on arrival (context
 	// menu → "Edit settings" on an unopened VM); seq re-fires repeats.
-	detailIntent = $state<{
-		id: 'edit' | 'delete' | 'console' | 'snapshot' | 'clone' | 'template';
-		seq: number;
-	} | null>(null);
+	detailIntent = $state<{ id: DetailAction; seq: number } | null>(null);
 	#intentSeq = 0;
-	requestDetail(id: 'edit' | 'delete' | 'console' | 'snapshot' | 'clone' | 'template') {
+	requestDetail(id: DetailAction) {
 		this.detailIntent = { id, seq: ++this.#intentSeq };
 	}
 

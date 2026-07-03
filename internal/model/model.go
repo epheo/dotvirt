@@ -163,6 +163,7 @@ type EditRequest struct {
 	RemoveDisks      []string          `json:"removeDisks,omitempty"`
 	AddNetworks      []NetworkAdd      `json:"addNetworks,omitempty"`
 	RemoveNetworks   []string          `json:"removeNetworks,omitempty"`
+	MigrateVolumes   []VolumeMigration `json:"migrateVolumes,omitempty"` // storage live migration
 
 	Message string `json:"message,omitempty"` // optional commit message; auto-generated when empty
 }
@@ -174,6 +175,14 @@ type DiskAdd struct {
 }
 type NetworkAdd struct {
 	Name string `json:"name"`
+}
+
+// VolumeMigration moves one disk to another storage class (storage live
+// migration): Name is the volume name on the VM template, StorageClass the
+// target class its replacement DataVolume is provisioned on.
+type VolumeMigration struct {
+	Name         string `json:"name"`
+	StorageClass string `json:"storageClass"`
 }
 
 // ProposeRequest is the body of a propose: PR title + description.
@@ -447,6 +456,15 @@ type UploadToken struct {
 type UploadTarget struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
+}
+
+// Node is one virtualization host — a node KubeVirt marks schedulable for
+// VMs — as a candidate live-migration target. Ready/Unschedulable let the
+// target picker gray out hosts a migration could not land on.
+type Node struct {
+	Name          string `json:"name"`
+	Ready         bool   `json:"ready"`
+	Unschedulable bool   `json:"unschedulable,omitempty"`
 }
 
 // NodeInfo is a node's maintenance state for the By-Node view: whether it's

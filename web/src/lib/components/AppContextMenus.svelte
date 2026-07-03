@@ -5,7 +5,7 @@
 	import { vmHref } from '$lib/nav';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { ui, type DetailAction } from '$lib/state/ui.svelte';
 	import ActionMenu from './ActionMenu.svelte';
 	import ContextMenu from './ContextMenu.svelte';
 	import MenuItem from './MenuItem.svelte';
@@ -51,7 +51,7 @@
 			}
 			return;
 		}
-		ui.requestDetail(a.id as 'edit' | 'delete' | 'console' | 'snapshot' | 'clone' | 'template');
+		ui.requestDetail(a.id as DetailAction);
 		goto(vmHref(vm.namespace, vm.name));
 	}
 

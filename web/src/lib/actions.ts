@@ -16,6 +16,7 @@ export type ActionId =
 	| 'pause'
 	| 'unpause'
 	| 'migrate'
+	| 'migrate-storage'
 	| 'console'
 	| 'snapshot'
 	| 'clone'
@@ -73,11 +74,19 @@ export const vmActions: VMAction[] = [
 	},
 	{
 		id: 'migrate',
-		label: 'Live-migrate',
-		kind: 'runtime',
-		verb: 'Live-migration',
-		enabled: running,
-		run: (vm) => api.migrate(vm.namespace, vm.name)
+		label: 'Live-migrate…',
+		kind: 'host',
+		title: 'Move the running VM to another host — pick a target or let the scheduler choose',
+		enabled: running
+	},
+	{
+		id: 'migrate-storage',
+		label: 'Migrate storage…',
+		kind: 'host',
+		title: 'Live-copy disks to another storage class — staged as a PR',
+		// Needs a live VMI to copy from, a git manifest to edit, and at least
+		// one DataVolume-backed disk to move.
+		enabled: (vm) => running(vm) && inGit(vm) && !!vm.disks?.some((d) => d.type === 'dataVolume')
 	},
 	{ id: 'console', label: 'Open console', kind: 'host', sep: true, enabled: running },
 	{ id: 'snapshot', label: 'Snapshots', kind: 'host', enabled: always },
