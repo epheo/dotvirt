@@ -21,8 +21,10 @@
 	// Groups compile to. The policy protects the "applied-to" Group and allows ingress
 	// only from the peer Groups in its rules (a NetworkPolicy that selects pods
 	// default-denies all other ingress). One ingress row = one allow-from rule.
-	type Row = { key: string; value: string; proto: 'TCP' | 'UDP' | 'SCTP'; port: string };
-	const blankRow = (): Row => ({ key: '', value: '', proto: 'TCP', port: '' });
+	// port is number | null, not string: <input type="number"> coerces its binding to
+	// a number (or null when cleared), so a string type would make `.trim()` throw.
+	type Row = { key: string; value: string; proto: 'TCP' | 'UDP' | 'SCTP'; port: number | null };
+	const blankRow = (): Row => ({ key: '', value: '', proto: 'TCP', port: null });
 
 	let name = $state('');
 	let namespace = $state('');
@@ -41,9 +43,7 @@
 	// membership" readout, computed live from the inventory.
 	const members = $derived(
 		vms.filter(
-			(v) =>
-				v.namespace === namespace &&
-				(!appliedKey || v.labels?.[appliedKey] === appliedValue)
+			(v) => v.namespace === namespace && (!appliedKey || v.labels?.[appliedKey] === appliedValue)
 		)
 	);
 
@@ -64,7 +64,7 @@
 		for (const r of rows) {
 			const rule: PolicyRule = {};
 			if (r.key.trim()) rule.from = [{ [r.key.trim()]: r.value.trim() }];
-			if (r.port.trim()) rule.ports = [{ protocol: r.proto, port: Number(r.port) }];
+			if (r.port != null) rule.ports = [{ protocol: r.proto, port: r.port }];
 			// Skip wholly-empty rows (they would allow all traffic, defeating the policy).
 			if (rule.from || rule.ports) ingress.push(rule);
 		}
@@ -121,7 +121,10 @@
 			</div>
 
 			<div class="rounded border border-slate-200 p-3">
-				<span class="text-slate-600">Applies to {TERMS.group.nsx} <span class="text-slate-400">(label; blank = whole project)</span></span>
+				<span class="text-slate-600"
+					>Applies to {TERMS.group.nsx}
+					<span class="text-slate-400">(label; blank = whole project)</span></span
+				>
 				<div class="mt-1 flex items-center gap-2">
 					<input
 						bind:value={appliedKey}
@@ -136,10 +139,8 @@
 					/>
 				</div>
 				<div class="mt-1.5 text-[11px] text-slate-500">
-					Effective members: <span class="font-medium text-slate-700">{members.length}</span> VM{members.length ===
-					1
-						? ''
-						: 's'}
+					Effective members: <span class="font-medium text-slate-700">{members.length}</span>
+					VM{members.length === 1 ? '' : 's'}
 					{#if members.length}<span class="text-slate-400"
 							>— {members
 								.slice(0, 6)
@@ -152,7 +153,9 @@
 			<div class="space-y-2">
 				<div class="flex items-center justify-between">
 					<span class="text-slate-600">Allow ingress from</span>
-					<button onclick={addRow} class="flex items-center gap-1 text-xs text-blue-600 hover:underline"
+					<button
+						onclick={addRow}
+						class="flex items-center gap-1 text-xs text-blue-600 hover:underline"
 						><Plus size={12} /> Add source</button
 					>
 				</div>
@@ -171,7 +174,10 @@
 							class="w-24 rounded border border-slate-300 px-2 py-1 text-xs"
 						/>
 						<span class="text-xs text-slate-400">port</span>
-						<select bind:value={row.proto} class="rounded border border-slate-300 px-1.5 py-1 text-xs">
+						<select
+							bind:value={row.proto}
+							class="rounded border border-slate-300 px-1.5 py-1 text-xs"
+						>
 							<option value="TCP">TCP</option>
 							<option value="UDP">UDP</option>
 							<option value="SCTP">SCTP</option>
@@ -205,7 +211,9 @@
 			{/if}
 		</div>
 		<footer class="flex items-center gap-2 border-t border-slate-200 px-5 py-3">
-			<span class="text-xs text-slate-400">Staged into the changeset; open a PR from “Changes”.</span>
+			<span class="text-xs text-slate-400"
+				>Staged into the changeset; open a PR from “Changes”.</span
+			>
 			<button
 				onclick={onclose}
 				class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button

@@ -19,14 +19,16 @@
 	// or a DNS name (exactly one) — optionally narrowed to a single transport port.
 	// (OVN-K rules carry a port list; one port per row covers the common case, and the
 	// user can add more rows.)
+	// port is number | null, not string: <input type="number"> coerces its binding to
+	// a number (or null when cleared), so a string type would make `.trim()` throw.
 	type Row = {
 		action: 'Allow' | 'Deny';
 		dest: 'cidr' | 'dns';
 		value: string;
 		proto: 'TCP' | 'UDP' | 'SCTP';
-		port: string;
+		port: number | null;
 	};
-	const blank = (): Row => ({ action: 'Allow', dest: 'cidr', value: '', proto: 'TCP', port: '' });
+	const blank = (): Row => ({ action: 'Allow', dest: 'cidr', value: '', proto: 'TCP', port: null });
 
 	let namespace = $state('');
 	let rows = $state<Row[]>([blank()]);
@@ -54,7 +56,7 @@
 			const rule: EgressFirewallRule = { action: r.action };
 			if (r.dest === 'cidr') rule.cidr = r.value.trim();
 			else rule.dnsName = r.value.trim();
-			if (r.port.trim()) rule.ports = [{ protocol: r.proto, port: Number(r.port) }];
+			if (r.port != null) rule.ports = [{ protocol: r.proto, port: r.port }];
 			return rule;
 		});
 		const req: EgressFirewallCreate = { namespace, rules };
@@ -99,8 +101,12 @@
 
 			<div class="space-y-2">
 				<div class="flex items-center justify-between">
-					<span class="text-slate-600">Egress rules <span class="text-slate-400">(first match wins)</span></span>
-					<button onclick={addRow} class="flex items-center gap-1 text-xs text-blue-600 hover:underline"
+					<span class="text-slate-600"
+						>Egress rules <span class="text-slate-400">(first match wins)</span></span
+					>
+					<button
+						onclick={addRow}
+						class="flex items-center gap-1 text-xs text-blue-600 hover:underline"
 						><Plus size={12} /> Add rule</button
 					>
 				</div>
@@ -117,7 +123,10 @@
 								<option value="Deny">Deny</option>
 							</select>
 							<span class="text-xs text-slate-400">egress to</span>
-							<select bind:value={row.dest} class="rounded border border-slate-300 px-2 py-1 text-xs">
+							<select
+								bind:value={row.dest}
+								class="rounded border border-slate-300 px-2 py-1 text-xs"
+							>
 								<option value="cidr">CIDR</option>
 								<option value="dns">DNS name</option>
 							</select>
@@ -130,7 +139,8 @@
 								onclick={() => removeRow(i)}
 								disabled={rows.length === 1}
 								aria-label="Remove rule"
-								class="text-slate-300 hover:text-red-600 disabled:opacity-40"><Trash2 size={14} /></button
+								class="text-slate-300 hover:text-red-600 disabled:opacity-40"
+								><Trash2 size={14} /></button
 							>
 						</div>
 						<div class="mt-2 flex items-center gap-2 pl-1 text-xs text-slate-500">
@@ -163,7 +173,9 @@
 			{/if}
 		</div>
 		<footer class="flex items-center gap-2 border-t border-slate-200 px-5 py-3">
-			<span class="text-xs text-slate-400">Staged into the changeset; open a PR from “Changes”.</span>
+			<span class="text-xs text-slate-400"
+				>Staged into the changeset; open a PR from “Changes”.</span
+			>
 			<button
 				onclick={onclose}
 				class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button

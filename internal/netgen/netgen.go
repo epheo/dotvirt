@@ -6,9 +6,53 @@ package netgen
 
 import (
 	"fmt"
+	"net"
+	"regexp"
+	"strings"
 
 	"sigs.k8s.io/yaml"
 )
+
+// dns1123Label matches a Kubernetes DNS-1123 label — lowercase alphanumerics and
+// '-', not leading/trailing '-'. Every name here becomes both a metadata.name and
+// a repo file-path segment, so validName is the one gate against path traversal
+// ("../x"), separators ("a/b"), and names k8s would reject at apply.
+var dns1123Label = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+
+func validName(s string) bool {
+	return len(s) > 0 && len(s) <= 63 && dns1123Label.MatchString(s)
+}
+
+// requireName validates a name meant for both metadata and a path segment.
+func requireName(field, s string) error {
+	if !validName(s) {
+		return fmt.Errorf("%s %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", field, s)
+	}
+	return nil
+}
+
+// validCIDR reports whether s parses as a CIDR (e.g. 10.0.0.0/24). Subnet/egress
+// values only ever land in YAML scalars, so this is correctness, not safety: a bad
+// value would otherwise render a manifest OVN-K rejects at apply time.
+func validCIDR(s string) bool {
+	_, _, err := net.ParseCIDR(strings.TrimSpace(s))
+	return err == nil
+}
+
+// validIP reports whether s parses as a bare IP address.
+func validIP(s string) bool {
+	return net.ParseIP(strings.TrimSpace(s)) != nil
+}
+
+// requireCIDRs validates each subnet as a CIDR.
+func requireCIDRs(cidrs []string) error {
+	for _, c := range cidrs {
+		if !validCIDR(c) {
+			return fmt.Errorf("subnet %q must be a CIDR (e.g. 10.0.0.0/24)", c)
+		}
+	}
+	return nil
+}
 
 // Scope of a port group create.
 const (
@@ -50,8 +94,14 @@ func Manifest(s Spec) (path string, content []byte, err error) {
 
 // projectUDN is an internal (Layer2, secondary) namespace-scoped port group.
 func projectUDN(s Spec) (string, []byte, error) {
-	if s.Name == "" || s.Namespace == "" {
-		return "", nil, fmt.Errorf("name and namespace are required")
+	if err := requireName("network name", s.Name); err != nil {
+		return "", nil, err
+	}
+	if err := requireName("namespace", s.Namespace); err != nil {
+		return "", nil, err
+	}
+	if err := requireCIDRs(s.Subnets); err != nil {
+		return "", nil, err
 	}
 	layer2 := map[string]any{"role": "Secondary"}
 	if len(s.Subnets) > 0 {
@@ -78,11 +128,14 @@ func projectUDN(s Spec) (string, []byte, error) {
 // the selected namespaces — like vlanCUDN but a plain L2 segment with no uplink or
 // VLAN. Cluster-scoped, so it lands under the (platform) repo's networks/ dir.
 func sharedCUDN(s Spec) (string, []byte, error) {
-	switch {
-	case s.Name == "":
-		return "", nil, fmt.Errorf("name is required")
-	case len(s.Namespaces) == 0:
+	if err := requireName("network name", s.Name); err != nil {
+		return "", nil, err
+	}
+	if len(s.Namespaces) == 0 {
 		return "", nil, fmt.Errorf("at least one namespace must be selected")
+	}
+	if err := requireCIDRs(s.Subnets); err != nil {
+		return "", nil, err
 	}
 	layer2 := map[string]any{"role": "Secondary"}
 	if len(s.Subnets) > 0 {
@@ -117,14 +170,17 @@ func sharedCUDN(s Spec) (string, []byte, error) {
 // selected namespaces.
 func vlanCUDN(s Spec) (string, []byte, error) {
 	switch {
-	case s.Name == "":
-		return "", nil, fmt.Errorf("name is required")
+	case !validName(s.Name):
+		return "", nil, fmt.Errorf("network name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", s.Name)
 	case s.PhysicalNetwork == "":
 		return "", nil, fmt.Errorf("an uplink (physical network) is required for a VLAN network")
 	case s.VLAN <= 0 || s.VLAN > 4094:
 		return "", nil, fmt.Errorf("a VLAN id in 1..4094 is required")
 	case len(s.Namespaces) == 0:
 		return "", nil, fmt.Errorf("at least one namespace must be selected")
+	}
+	if err := requireCIDRs(s.Subnets); err != nil {
+		return "", nil, err
 	}
 	localnet := map[string]any{
 		"role":                "Secondary",
@@ -184,8 +240,11 @@ type PrimaryNet struct {
 // UDN needs the namespace label + an empty namespace, both of which hold because
 // the namespace is created in the same change.
 func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error) {
-	if s.Name == "" || s.Project == "" {
-		return "", nil, fmt.Errorf("a namespace name and project are required")
+	if err := requireName("namespace", s.Name); err != nil {
+		return "", nil, err
+	}
+	if s.Project == "" {
+		return "", nil, fmt.Errorf("a project is required")
 	}
 	labels := map[string]any{"dotvirt.io/project": s.Project}
 	if s.VMNetwork != nil {
@@ -205,25 +264,26 @@ func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error)
 	docs := [][]byte{ns}
 
 	if p := s.VMNetwork; p != nil {
-		if p.Name == "" {
-			return "", nil, fmt.Errorf("the VM Network needs a name")
+		if err := requireName("VM Network name", p.Name); err != nil {
+			return "", nil, err
 		}
 		// A primary UDN must do IPAM: OVN-K rejects a subnet-less primary network
 		// and only allows ipam.mode=Disabled on Secondary networks, so unlike the
 		// secondary projectUDN above, a VM Network's subnet is mandatory.
-		if p.Subnet == "" {
-			return "", nil, fmt.Errorf("the VM Network needs a subnet (a primary network must do IPAM)")
+		if !validCIDR(p.Subnet) {
+			return "", nil, fmt.Errorf("the VM Network needs a subnet CIDR (a primary network must do IPAM)")
 		}
 		layer2 := map[string]any{"role": "Primary", "subnets": []any{p.Subnet}}
+		// The UDN and its Namespace commit to the same (platform) Application, so they
+		// share a sync wave: ArgoCD's built-in kind ordering already applies the
+		// Namespace before the UserDefinedNetwork. An explicit sync-wave here would
+		// have to be >= the Namespace's (default 0); a negative wave inverts the order
+		// and wedges the sync on "namespace not found", so we set none.
 		udn, err := yaml.Marshal(map[string]any{
 			"apiVersion": "k8s.ovn.org/v1",
 			"kind":       "UserDefinedNetwork",
-			"metadata": map[string]any{
-				"name": p.Name, "namespace": s.Name,
-				// Apply before any workload in this namespace.
-				"annotations": map[string]any{"argocd.argoproj.io/sync-wave": "-1"},
-			},
-			"spec": map[string]any{"topology": "Layer2", "layer2": layer2},
+			"metadata":   map[string]any{"name": p.Name, "namespace": s.Name},
+			"spec":       map[string]any{"topology": "Layer2", "layer2": layer2},
 		})
 		if err != nil {
 			return "", nil, err
@@ -253,8 +313,8 @@ type RoleBindingSpec struct {
 // given ClusterRole (default "admin" — the built-in namespace-admin role) on the
 // tenant namespace. One subject per owner (kind User).
 func RoleBindingManifest(s RoleBindingSpec) (path string, content []byte, err error) {
-	if s.Namespace == "" {
-		return "", nil, fmt.Errorf("a namespace is required")
+	if err := requireName("namespace", s.Namespace); err != nil {
+		return "", nil, err
 	}
 	if len(s.Owners) == 0 {
 		return "", nil, fmt.Errorf("at least one owner is required")
@@ -303,8 +363,11 @@ type UplinkSpec struct {
 
 // UplinkManifest renders the NNCP YAML plus its repo-relative path.
 func UplinkManifest(s UplinkSpec) (path string, content []byte, err error) {
-	if s.Name == "" || s.NIC == "" {
-		return "", nil, fmt.Errorf("an uplink name and a NIC are required")
+	if err := requireName("uplink name", s.Name); err != nil {
+		return "", nil, err
+	}
+	if s.NIC == "" {
+		return "", nil, fmt.Errorf("a NIC is required")
 	}
 	bridge := s.Bridge
 	if bridge == "" {
@@ -374,8 +437,8 @@ type EgressPort struct {
 // path. The object is always named "default" (OVN-K permits one per namespace); the
 // rules render in order, since an EgressFirewall is first-match.
 func EgressFirewallManifest(s EgressFirewallSpec) (path string, content []byte, err error) {
-	if s.Namespace == "" {
-		return "", nil, fmt.Errorf("a namespace is required")
+	if err := requireName("namespace", s.Namespace); err != nil {
+		return "", nil, err
 	}
 	if len(s.Rules) == 0 {
 		return "", nil, fmt.Errorf("at least one egress rule is required")
@@ -388,6 +451,9 @@ func EgressFirewallManifest(s EgressFirewallSpec) (path string, content []byte, 
 		// Exactly one destination: a CIDR or a DNS name (XOR).
 		if (r.CIDR == "") == (r.DNSName == "") {
 			return "", nil, fmt.Errorf("rule %d: set exactly one of cidr or dnsName", i+1)
+		}
+		if r.CIDR != "" && !validCIDR(r.CIDR) {
+			return "", nil, fmt.Errorf("rule %d: cidr %q must be a CIDR (e.g. 0.0.0.0/0)", i+1, r.CIDR)
 		}
 		to := map[string]any{}
 		if r.CIDR != "" {
@@ -436,12 +502,17 @@ type EgressIPSpec struct {
 // EgressIPManifest renders the EgressIP YAML plus its repo-relative path.
 func EgressIPManifest(s EgressIPSpec) (path string, content []byte, err error) {
 	switch {
-	case s.Name == "":
-		return "", nil, fmt.Errorf("a name is required")
+	case !validName(s.Name):
+		return "", nil, fmt.Errorf("name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", s.Name)
 	case len(s.EgressIPs) == 0:
 		return "", nil, fmt.Errorf("at least one egress IP is required")
 	case len(s.Namespaces) == 0:
 		return "", nil, fmt.Errorf("at least one namespace must be selected")
+	}
+	for _, ip := range s.EgressIPs {
+		if !validIP(ip) {
+			return "", nil, fmt.Errorf("egress IP %q must be an IP address", ip)
+		}
 	}
 	out, err := yaml.Marshal(map[string]any{
 		"apiVersion": "k8s.ovn.org/v1",
@@ -477,8 +548,8 @@ type ExternalRouteSpec struct {
 // repo-relative path.
 func ExternalRouteManifest(s ExternalRouteSpec) (path string, content []byte, err error) {
 	switch {
-	case s.Name == "":
-		return "", nil, fmt.Errorf("a name is required")
+	case !validName(s.Name):
+		return "", nil, fmt.Errorf("name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", s.Name)
 	case len(s.Namespaces) == 0:
 		return "", nil, fmt.Errorf("at least one namespace must be selected")
 	case len(s.NextHops) == 0:
@@ -486,6 +557,9 @@ func ExternalRouteManifest(s ExternalRouteSpec) (path string, content []byte, er
 	}
 	static := make([]any, 0, len(s.NextHops))
 	for _, ip := range s.NextHops {
+		if !validIP(ip) {
+			return "", nil, fmt.Errorf("next-hop %q must be an IP address", ip)
+		}
 		static = append(static, map[string]any{"ip": ip})
 	}
 	out, err := yaml.Marshal(map[string]any{
@@ -540,8 +614,11 @@ type PolicyPort struct {
 
 // NetworkPolicyManifest renders the NetworkPolicy YAML plus its repo-relative path.
 func NetworkPolicyManifest(s NetworkPolicySpec) (path string, content []byte, err error) {
-	if s.Name == "" || s.Namespace == "" {
-		return "", nil, fmt.Errorf("a name and namespace are required")
+	if err := requireName("name", s.Name); err != nil {
+		return "", nil, err
+	}
+	if err := requireName("namespace", s.Namespace); err != nil {
+		return "", nil, err
 	}
 	// An empty podSelector ({}) selects every pod in the namespace — the "applied to
 	// the whole project" case; otherwise scope to the Group's labels.
@@ -620,8 +697,8 @@ func AdminNetworkPolicyManifest(s AdminNetworkPolicySpec) (path string, content 
 	name := s.Name
 	if s.Baseline {
 		name = "default" // BANP is a cluster singleton named default
-	} else if name == "" {
-		return "", nil, fmt.Errorf("a name is required")
+	} else if !validName(name) {
+		return "", nil, fmt.Errorf("name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", name)
 	} else if s.Priority < 0 || s.Priority > 1000 {
 		return "", nil, fmt.Errorf("priority must be 0..1000")
 	}

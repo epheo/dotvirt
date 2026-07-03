@@ -15,19 +15,27 @@
 	// singleton default that backstops everything, Allow/Deny only. Subject and peers
 	// are namespace selectors — Groups of projects. Cluster-scoped + admin-only, so it
 	// is proposed to the platform repo and gated like a CUDN.
-	type Row = { action: 'Allow' | 'Deny' | 'Pass'; key: string; value: string; proto: 'TCP' | 'UDP' | 'SCTP'; port: string };
-	const blankRow = (): Row => ({ action: 'Allow', key: '', value: '', proto: 'TCP', port: '' });
+	// port is number | null, not string: <input type="number"> coerces its binding to
+	// a number (or null when cleared), so a string type would make `.trim()` throw.
+	type Row = {
+		action: 'Allow' | 'Deny' | 'Pass';
+		key: string;
+		value: string;
+		proto: 'TCP' | 'UDP' | 'SCTP';
+		port: number | null;
+	};
+	const blankRow = (): Row => ({ action: 'Allow', key: '', value: '', proto: 'TCP', port: null });
 
 	let baseline = $state(false);
 	let name = $state('');
-	let priority = $state(10);
+	let priority = $state<number | null>(10);
 	let subjKey = $state('');
 	let subjValue = $state('');
 	let rows = $state<Row[]>([blankRow()]);
 	let submitting = $state(false);
 	let error = $state('');
 
-	const valid = $derived(baseline || !!name);
+	const valid = $derived(baseline || (!!name && priority != null));
 
 	function addRow() {
 		rows = [...rows, blankRow()];
@@ -40,18 +48,23 @@
 		if (!valid) return;
 		submitting = true;
 		error = '';
-		const ingress: AdminPolicyRule[] = rows.map((r) => {
+		const ingress: AdminPolicyRule[] = [];
+		for (const r of rows) {
+			// Skip an untouched default row so it can't silently ship an "Allow from all
+			// namespaces" rule; an explicit Deny/Pass or any configured peer/port is kept
+			// (an empty {} peer is a legitimate "all namespaces" selector once intended).
+			if (r.action === 'Allow' && !r.key.trim() && r.port == null) continue;
 			const rule: AdminPolicyRule = {
 				action: r.action,
 				// An empty selector ({}) is a valid "all namespaces" peer.
 				peers: [r.key.trim() ? { [r.key.trim()]: r.value.trim() } : {}]
 			};
-			if (r.port.trim()) rule.ports = [{ protocol: r.proto, port: Number(r.port) }];
-			return rule;
-		});
+			if (r.port != null) rule.ports = [{ protocol: r.proto, port: r.port }];
+			ingress.push(rule);
+		}
 		const req: AdminNetworkPolicyCreate = { name: baseline ? 'default' : name };
 		if (baseline) req.baseline = true;
-		else req.priority = priority;
+		else if (priority != null) req.priority = priority;
 		if (subjKey.trim()) req.subject = { [subjKey.trim()]: subjValue.trim() };
 		if (ingress.length) req.ingress = ingress;
 		try {
@@ -128,7 +141,11 @@
 			</div>
 
 			<div class="rounded border border-slate-200 p-3">
-				<span class="text-slate-600">Applies to project Group <span class="text-slate-400">(namespace label; blank = all)</span></span>
+				<span class="text-slate-600"
+					>Applies to project Group <span class="text-slate-400"
+						>(namespace label; blank = all)</span
+					></span
+				>
 				<div class="mt-1 flex items-center gap-2">
 					<input
 						bind:value={subjKey}
@@ -146,8 +163,12 @@
 
 			<div class="space-y-2">
 				<div class="flex items-center justify-between">
-					<span class="text-slate-600">Ingress rules <span class="text-slate-400">(ordered)</span></span>
-					<button onclick={addRow} class="flex items-center gap-1 text-xs text-blue-600 hover:underline"
+					<span class="text-slate-600"
+						>Ingress rules <span class="text-slate-400">(ordered)</span></span
+					>
+					<button
+						onclick={addRow}
+						class="flex items-center gap-1 text-xs text-blue-600 hover:underline"
 						><Plus size={12} /> Add rule</button
 					>
 				</div>
@@ -178,7 +199,10 @@
 							class="w-20 rounded border border-slate-300 px-2 py-1 text-xs"
 						/>
 						<span class="text-xs text-slate-400">port</span>
-						<select bind:value={row.proto} class="rounded border border-slate-300 px-1.5 py-1 text-xs">
+						<select
+							bind:value={row.proto}
+							class="rounded border border-slate-300 px-1.5 py-1 text-xs"
+						>
 							<option value="TCP">TCP</option>
 							<option value="UDP">UDP</option>
 							<option value="SCTP">SCTP</option>
@@ -204,15 +228,18 @@
 
 			<p class="rounded bg-amber-50 px-3 py-2 text-xs text-amber-700">
 				Cluster-wide and admin-only. {#if baseline}The baseline is the default backstop applied
-					beneath every tenant NetworkPolicy.{:else}An Admin Policy overrides tenant NetworkPolicies —
-					use <strong>Pass</strong> to defer a decision back to them.{/if} Proposed to the platform repository.
+					beneath every tenant NetworkPolicy.{:else}An Admin Policy overrides tenant NetworkPolicies
+					— use <strong>Pass</strong> to defer a decision back to them.{/if} Proposed to the platform
+				repository.
 			</p>
 			{#if error}
 				<pre class="rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
 			{/if}
 		</div>
 		<footer class="flex items-center gap-2 border-t border-slate-200 px-5 py-3">
-			<span class="text-xs text-slate-400">Staged into the changeset; open a PR from “Changes”.</span>
+			<span class="text-xs text-slate-400"
+				>Staged into the changeset; open a PR from “Changes”.</span
+			>
 			<button
 				onclick={onclose}
 				class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button

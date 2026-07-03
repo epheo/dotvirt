@@ -464,6 +464,65 @@ func TestAdminNetworkPolicyManifest(t *testing.T) {
 	}
 }
 
+func TestNameValidationRejectsPathTraversal(t *testing.T) {
+	// Every name becomes both a metadata.name and a repo file-path segment, so a
+	// traversal ("../x"), a separator ("a/b"), or a non-DNS-1123 name must be
+	// rejected before it can escape its intended directory in the staged repo.
+	for _, bad := range []string{"../evil", "a/b", "..", "UPPER", "with space", "under_score", ""} {
+		if _, _, err := Manifest(Spec{Name: bad, Namespace: "tenant-a"}); err == nil {
+			t.Errorf("projectUDN accepted invalid name %q", bad)
+		}
+		if _, _, err := Manifest(Spec{Name: "ok", Namespace: bad}); err == nil {
+			t.Errorf("projectUDN accepted invalid namespace %q", bad)
+		}
+		if _, _, err := EgressIPManifest(EgressIPSpec{Name: bad, EgressIPs: []string{"1.1.1.1"}, Namespaces: []string{"n"}}); err == nil {
+			t.Errorf("EgressIP accepted invalid name %q", bad)
+		}
+		if _, _, err := NetworkPolicyManifest(NetworkPolicySpec{Name: bad, Namespace: "n"}); err == nil {
+			t.Errorf("NetworkPolicy accepted invalid name %q", bad)
+		}
+		if _, _, err := AdminNetworkPolicyManifest(AdminNetworkPolicySpec{Name: bad, Priority: 1}); err == nil {
+			t.Errorf("ANP accepted invalid name %q", bad)
+		}
+		if _, _, err := NamespaceManifest(NamespaceSpec{Name: bad, Project: "p"}); err == nil {
+			t.Errorf("NamespaceManifest accepted invalid namespace %q", bad)
+		}
+	}
+}
+
+func TestCIDRAndIPValidation(t *testing.T) {
+	// Bad CIDRs/IPs render a manifest OVN-K rejects at apply — catch them early.
+	if _, _, err := Manifest(Spec{Name: "n", Namespace: "ns", Subnets: []string{"10.0.0.0"}}); err == nil {
+		t.Error("expected error for a subnet with no mask")
+	}
+	if _, _, err := NamespaceManifest(NamespaceSpec{Name: "n", Project: "p", VMNetwork: &PrimaryNet{Name: "vmnet", Subnet: "not-a-cidr"}}); err == nil {
+		t.Error("expected error for a non-CIDR VM Network subnet")
+	}
+	if _, _, err := EgressFirewallManifest(EgressFirewallSpec{Namespace: "n", Rules: []EgressRule{{Action: "Allow", CIDR: "999.0.0.0/8"}}}); err == nil {
+		t.Error("expected error for an invalid rule CIDR")
+	}
+	if _, _, err := EgressIPManifest(EgressIPSpec{Name: "s", EgressIPs: []string{"not-an-ip"}, Namespaces: []string{"n"}}); err == nil {
+		t.Error("expected error for an invalid egress IP")
+	}
+	if _, _, err := ExternalRouteManifest(ExternalRouteSpec{Name: "r", Namespaces: []string{"n"}, NextHops: []string{"nope"}}); err == nil {
+		t.Error("expected error for an invalid next-hop IP")
+	}
+}
+
+func TestNamespaceManifestVMNetworkNoSyncWave(t *testing.T) {
+	// The UDN and its Namespace share one platform Application; a negative sync-wave
+	// would apply the UDN before its namespace exists and wedge the sync, so none is set.
+	_, content, err := NamespaceManifest(NamespaceSpec{
+		Name: "tenant-c", Project: "team-c", VMNetwork: &PrimaryNet{Name: "n", Subnet: "10.40.0.0/16"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), "sync-wave") {
+		t.Errorf("VM Network UDN must not carry a sync-wave:\n%s", content)
+	}
+}
+
 func TestBaselineAdminNetworkPolicy(t *testing.T) {
 	// A baseline policy is the singleton named "default", carries no priority, and
 	// rejects the Pass action.
