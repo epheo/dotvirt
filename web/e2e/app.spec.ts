@@ -6,7 +6,10 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('shell + container workspace renders after login', async ({ page }) => {
+	// Creation collapses into the "+ New" header menu; its items exist only while open.
+	await page.getByRole('button', { name: /^New$/ }).click();
 	await expect(page.getByRole('button', { name: /New VM/ })).toBeVisible();
+	await page.keyboard.press('Escape');
 	await expect(page.getByRole('button', { name: /Changes/ })).toBeVisible();
 	// The All-VMs landing is a tabbed workspace (Summary / VMs / Monitor).
 	await expect(page.getByRole('button', { name: 'Summary', exact: true })).toBeVisible();

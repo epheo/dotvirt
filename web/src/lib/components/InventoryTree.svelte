@@ -1,7 +1,5 @@
 <script lang="ts">
 	import {
-		ChevronDown,
-		ChevronRight,
 		Database,
 		Folder,
 		Layers,
@@ -24,6 +22,7 @@
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
 	import PowerDot from './PowerDot.svelte';
 	import SyncBadge from './SyncBadge.svelte';
+	import TreeRow from './TreeRow.svelte';
 
 	let {
 		inventory,
@@ -143,20 +142,21 @@
 		(scope.kind === 'storage' && scope.storageClass === key);
 </script>
 
-{#snippet vmRow(vm: VM, pad: string)}
+{#snippet vmRow(vm: VM, indent: 2 | 3)}
 	{@const sc = staged.get(vm.namespace + '/' + vm.name)}
-	<button
-		class="flex w-full items-center gap-2 py-1 pr-2 text-left hover:bg-blue-50 {pad}
-			{isSelected(vm) ? 'bg-blue-100 hover:bg-blue-100' : ''}"
-		onclick={() => onselect(vm)}
+	<TreeRow
+		{indent}
+		active={isSelected(vm)}
+		onactivate={() => onselect(vm)}
 		oncontextmenu={(e) => ctxVM(e, vm)}
 	>
-		<PowerDot power={vm.power} paused={vm.paused} />
-		<span
-			class="truncate {sc?.kind === 'delete' ? 'text-slate-400 line-through' : 'text-slate-700'}"
+		{#snippet icon()}
+			<PowerDot power={vm.power} paused={vm.paused} />
+		{/snippet}
+		<span class="truncate {sc?.kind === 'delete' ? 'text-ink-faint line-through' : 'text-ink-soft'}"
 			>{vm.name}</span
 		>
-		<span class="ml-auto">
+		{#snippet trailing()}
 			{#if sc}
 				<span
 					class="inline-flex items-center rounded px-1 text-[10px] font-medium {sc.kind === 'delete'
@@ -169,8 +169,8 @@
 			{:else}
 				<SyncBadge sync={vm.sync} error={vm.syncError} compact />
 			{/if}
-		</span>
-	</button>
+		{/snippet}
+	</TreeRow>
 {/snippet}
 
 <div class="select-none text-[13px]">
@@ -178,40 +178,44 @@
 	     storage classes) — vCenter parks its Content Libraries in the left nav, above
 	     the inventory lenses. Opens the catalog panel rather than re-scoping the grid. -->
 	{#if oncatalog}
-		<button
-			class="flex w-full items-center gap-1 border-b border-slate-200 px-2 py-1.5 text-left hover:bg-slate-100
-				{catalogActive ? 'bg-blue-50' : ''}"
-			onclick={oncatalog}
+		<TreeRow
+			active={catalogActive}
+			alignChevron
+			border
 			title="Browse the cluster's images, instance types, preferences, networks and storage classes"
+			onactivate={oncatalog}
 		>
-			<span class="w-3"></span>
-			<Library size={14} class="text-slate-400" />
-			<span class="font-semibold text-slate-700">Catalog</span>
-		</button>
+			{#snippet icon()}
+				<Library size={14} class="text-ink-faint" />
+			{/snippet}
+			<span class="truncate font-semibold text-ink-soft">Catalog</span>
+		</TreeRow>
 	{/if}
 
 	<!-- Topology: the network map (Tier-0 → Tier-1 → Segment → VM), a destination like
 	     Catalog rather than a scope. -->
 	{#if ontopology}
-		<button
-			class="flex w-full items-center gap-1 border-b border-slate-200 px-2 py-1.5 text-left hover:bg-slate-100
-				{topologyActive ? 'bg-blue-50' : ''}"
-			onclick={ontopology}
+		<TreeRow
+			active={topologyActive}
+			alignChevron
+			border
 			title="Network Topology — the Tier-0 → Tier-1 → Segment → VM map"
+			onactivate={ontopology}
 		>
-			<span class="w-3"></span>
-			<Workflow size={14} class="text-slate-400" />
-			<span class="font-semibold text-slate-700">Topology</span>
-		</button>
+			{#snippet icon()}
+				<Workflow size={14} class="text-ink-faint" />
+			{/snippet}
+			<span class="truncate font-semibold text-ink-soft">Topology</span>
+		</TreeRow>
 	{/if}
 
 	<!-- Lens switch (one object set, four organizing views). -->
-	<div class="flex flex-wrap gap-1 border-b border-slate-200 px-2 py-1.5">
+	<div class="flex flex-wrap gap-1 border-b border-line px-2 py-1.5">
 		{#each LENSES as l (l.id)}
 			<button
 				class="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs {lens === l.id
-					? 'bg-blue-100 font-medium text-blue-700'
-					: 'text-slate-500 hover:bg-slate-100'}"
+					? 'bg-select font-medium text-accent-ink'
+					: 'text-ink-muted hover:bg-inset'}"
 				onclick={() => setLens(l.id)}
 			>
 				{#if l.id === 'project'}<Folder size={12} />{:else if l.id === 'node'}<Server
@@ -223,55 +227,46 @@
 	</div>
 
 	<!-- All VMs: resets the grid scope to the whole inventory. -->
-	<button
-		class="flex w-full items-center gap-1 px-2 py-1 text-left hover:bg-slate-100
-			{scope.kind === 'all' ? 'bg-blue-50' : ''}"
-		onclick={() => onscope({ kind: 'all' })}
-	>
-		<span class="w-3"></span>
-		<LayoutGrid size={14} class="text-slate-400" />
-		<span class="font-semibold text-slate-700">All VMs</span>
-	</button>
+	<TreeRow active={scope.kind === 'all'} alignChevron onactivate={() => onscope({ kind: 'all' })}>
+		{#snippet icon()}
+			<LayoutGrid size={14} class="text-ink-faint" />
+		{/snippet}
+		<span class="truncate font-semibold text-ink-soft">All VMs</span>
+	</TreeRow>
 
 	{#if lens === 'project'}
 		{#each inventory.projects as project (project.name)}
 			{@const pid = `p:${project.name}`}
 			<div>
 				<!-- Project: chevron toggles collapse, the label sets the grid scope. -->
-				<div
-					class="flex w-full items-center gap-1 px-2 py-1 hover:bg-slate-100
-						{projectScoped(project.name) ? 'bg-blue-50' : ''}"
+				<TreeRow
+					active={projectScoped(project.name)}
+					expanded={!collapsed[pid]}
+					ontoggle={() => toggle(pid)}
+					onactivate={() => onscope({ kind: 'project', project: project.name })}
+					oncontextmenu={(e) =>
+						ctxContainer(e, {
+							project: project.name,
+							repo: project.repo,
+							namespaces: project.namespaces.map((n) => n.namespace)
+						})}
 				>
-					<button
-						class="flex w-3 items-center text-slate-400"
-						onclick={() => toggle(pid)}
-						title="Expand/collapse"
-					>
-						{#if collapsed[pid]}<ChevronRight size={12} />{:else}<ChevronDown size={12} />{/if}
-					</button>
-					<button
-						class="flex min-w-0 flex-1 items-center gap-1 text-left"
-						onclick={() => onscope({ kind: 'project', project: project.name })}
-						oncontextmenu={(e) =>
-							ctxContainer(e, {
-								project: project.name,
-								repo: project.repo,
-								namespaces: project.namespaces.map((n) => n.namespace)
-							})}
-					>
+					{#snippet icon()}
 						<Folder size={14} class="shrink-0 text-blue-500" />
-						<span class="truncate font-semibold text-slate-700">{project.name}</span>
-						{#if project.error}
-							<span
-								class="rounded bg-amber-100 px-1 text-[10px] font-medium text-amber-700"
-								title={project.error}>!</span
-							>
-						{:else if projectDrift(project)}
-							<span class="h-1.5 w-1.5 rounded-full bg-red-500" title="A VM is OutOfSync"></span>
-						{/if}
-						<span class="ml-auto text-xs text-slate-400">{vmCount(project)}</span>
-					</button>
-				</div>
+					{/snippet}
+					<span class="truncate font-semibold text-ink-soft">{project.name}</span>
+					{#if project.error}
+						<span
+							class="rounded bg-amber-100 px-1 text-[10px] font-medium text-amber-700"
+							title={project.error}>!</span
+						>
+					{:else if projectDrift(project)}
+						<span class="h-1.5 w-1.5 rounded-full bg-red-500" title="A VM is OutOfSync"></span>
+					{/if}
+					{#snippet trailing()}
+						<span class="text-xs text-ink-faint">{vmCount(project)}</span>
+					{/snippet}
+				</TreeRow>
 
 				{#if !collapsed[pid]}
 					{#if project.error}
@@ -297,47 +292,40 @@
 					{#each project.namespaces as ns (ns.namespace)}
 						{@const nid = `n:${project.name}/${ns.namespace}`}
 						<div>
-							<div
-								class="flex w-full items-center gap-1 py-1 pr-2 pl-5 hover:bg-slate-100
-									{nsScoped(project.name, ns.namespace) ? 'bg-blue-50' : ''}"
+							<TreeRow
+								indent={1}
+								active={nsScoped(project.name, ns.namespace)}
+								expanded={!collapsed[nid]}
+								ontoggle={() => toggle(nid)}
+								onactivate={() =>
+									onscope({ kind: 'namespace', project: project.name, namespace: ns.namespace })}
+								oncontextmenu={(e) =>
+									ctxContainer(e, {
+										project: project.name,
+										repo: project.repo,
+										namespace: ns.namespace,
+										namespaces: [ns.namespace]
+									})}
 							>
-								<button
-									class="flex w-3 items-center text-slate-400"
-									onclick={() => toggle(nid)}
-									title="Expand/collapse"
-								>
-									{#if collapsed[nid]}<ChevronRight size={12} />{:else}<ChevronDown
-											size={12}
-										/>{/if}
-								</button>
-								<button
-									class="flex min-w-0 flex-1 items-center gap-1 text-left"
-									onclick={() =>
-										onscope({ kind: 'namespace', project: project.name, namespace: ns.namespace })}
-									oncontextmenu={(e) =>
-										ctxContainer(e, {
-											project: project.name,
-											repo: project.repo,
-											namespace: ns.namespace,
-											namespaces: [ns.namespace]
-										})}
-								>
-									<Layers size={13} class="shrink-0 text-slate-400" />
-									<span class="truncate text-slate-600">{ns.namespace}</span>
-									{#if nsDrift(ns)}
-										<span class="h-1.5 w-1.5 rounded-full bg-red-500" title="A VM is OutOfSync"
-										></span>
-									{/if}
-									<span class="ml-auto text-xs text-slate-400">{ns.vms.length}</span>
-								</button>
-							</div>
+								{#snippet icon()}
+									<Layers size={13} class="shrink-0 text-ink-faint" />
+								{/snippet}
+								<span class="truncate text-slate-600">{ns.namespace}</span>
+								{#if nsDrift(ns)}
+									<span class="h-1.5 w-1.5 rounded-full bg-red-500" title="A VM is OutOfSync"
+									></span>
+								{/if}
+								{#snippet trailing()}
+									<span class="text-xs text-ink-faint">{ns.vms.length}</span>
+								{/snippet}
+							</TreeRow>
 
 							{#if !collapsed[nid]}
 								{#each ns.vms as vm (vm.namespace + '/' + vm.name)}
-									{@render vmRow(vm, 'pl-12')}
+									{@render vmRow(vm, 3)}
 								{/each}
 								{#if ns.vms.length === 0}
-									<div class="py-1 pl-12 text-xs text-slate-400 italic">no VMs</div>
+									<div class="py-1 pl-12 text-xs text-ink-faint italic">no VMs</div>
 								{/if}
 							{/if}
 						</div>
@@ -347,7 +335,7 @@
 		{/each}
 
 		{#if inventory.projects.length === 0}
-			<div class="px-2 py-4 text-center text-xs text-slate-400">
+			<div class="px-2 py-4 text-center text-xs text-ink-faint">
 				No projects visible. Ask an admin to label a namespace with
 				<code>dotvirt.io/project</code>.
 			</div>
@@ -358,38 +346,32 @@
 		{#each flatGroups as [key, vms] (key)}
 			{@const gid = `${lens}:${key}`}
 			<div>
-				<div
-					class="flex w-full items-center gap-1 px-2 py-1 hover:bg-slate-100
-						{flatScoped(key) ? 'bg-blue-50' : ''}"
+				<TreeRow
+					active={flatScoped(key)}
+					expanded={!collapsed[gid]}
+					ontoggle={() => toggle(gid)}
+					onactivate={() => onscope(flatScope(key))}
 				>
-					<button
-						class="flex w-3 items-center text-slate-400"
-						onclick={() => toggle(gid)}
-						title="Expand/collapse"
-					>
-						{#if collapsed[gid]}<ChevronRight size={12} />{:else}<ChevronDown size={12} />{/if}
-					</button>
-					<button
-						class="flex min-w-0 flex-1 items-center gap-1 text-left"
-						onclick={() => onscope(flatScope(key))}
-					>
-						{#if lens === 'node'}<Server size={14} class="shrink-0 text-slate-500" />
-						{:else if lens === 'network'}<Network size={14} class="shrink-0 text-slate-500" />
-						{:else}<Database size={14} class="shrink-0 text-slate-500" />{/if}
-						<span class="truncate font-semibold text-slate-700">{key}</span>
-						<span class="ml-auto text-xs text-slate-400">{vms.length}</span>
-					</button>
-				</div>
+					{#snippet icon()}
+						{#if lens === 'node'}<Server size={14} class="shrink-0 text-ink-muted" />
+						{:else if lens === 'network'}<Network size={14} class="shrink-0 text-ink-muted" />
+						{:else}<Database size={14} class="shrink-0 text-ink-muted" />{/if}
+					{/snippet}
+					<span class="truncate font-semibold text-ink-soft">{key}</span>
+					{#snippet trailing()}
+						<span class="text-xs text-ink-faint">{vms.length}</span>
+					{/snippet}
+				</TreeRow>
 				{#if !collapsed[gid]}
 					{#each vms as vm (vm.namespace + '/' + vm.name)}
-						{@render vmRow(vm, 'pl-7')}
+						{@render vmRow(vm, 2)}
 					{/each}
 				{/if}
 			</div>
 		{/each}
 
 		{#if flatGroups.length === 0}
-			<div class="px-2 py-4 text-center text-xs text-slate-400">No VMs in this view.</div>
+			<div class="px-2 py-4 text-center text-xs text-ink-faint">No VMs in this view.</div>
 		{/if}
 	{/if}
 </div>

@@ -9,9 +9,9 @@ export async function login(page: Page) {
 	await page.waitForSelector('textarea');
 	await page.fill('textarea', TOKEN);
 	await page.click('button[type="submit"]');
-	// "New VM" in the header is unambiguous and appears once authenticated ("All VMs"
+	// The "+ New" menu trigger is unambiguous and appears once authenticated ("All VMs"
 	// shows in both the tree and the breadcrumb, so it's not a unique anchor).
-	await expect(page.getByRole('button', { name: /New VM/ })).toBeVisible();
+	await expect(page.getByRole('button', { name: /^New$/ })).toBeVisible();
 }
 
 // openFirstVM switches to the VMs tab and opens the first VM's detail view.
@@ -37,7 +37,11 @@ export async function mergePR(page: Page, repo: string, pr: number) {
 	for (let i = 0; i < 20; i++) {
 		const res = await page.request.post(
 			`${FORGE}/api/v1/repos/${FORGE_OWNER}/${repo}/pulls/${pr}/merge`,
-			{ headers: { Authorization: `token ${FORGE_TOKEN}` }, data: { Do: 'merge' }, failOnStatusCode: false }
+			{
+				headers: { Authorization: `token ${FORGE_TOKEN}` },
+				data: { Do: 'merge' },
+				failOnStatusCode: false
+			}
 		);
 		if (res.status() === 200) return;
 		await page.waitForTimeout(2000);
@@ -59,7 +63,9 @@ export async function proposeAndMerge(page: Page, project: string, title: string
 		.filter({ has: page.getByRole('button', { name: `Create pull request → ${project}` }) });
 	await form.getByPlaceholder('Pull request title').fill(title);
 	const [resp] = await Promise.all([
-		page.waitForResponse((r) => r.url().includes('/api/draft/propose') && r.request().method() === 'POST'),
+		page.waitForResponse(
+			(r) => r.url().includes('/api/draft/propose') && r.request().method() === 'POST'
+		),
 		form.getByRole('button', { name: `Create pull request → ${project}` }).click()
 	]);
 	// prNumber is omitted on the branch-only propose paths (the branch already merged, or a
@@ -91,7 +97,9 @@ async function findOpenPR(page: Page, repo: string, branch: string): Promise<num
 export async function cleanupVM(page: Page, project: string, ns: string, vm: string) {
 	try {
 		const del = await page.request.post(`/api/vms/${ns}/${vm}/delete`, { failOnStatusCode: false });
-		const draft = del.ok() ? ((await del.json().catch(() => null)) as { count?: number } | null) : null;
+		const draft = del.ok()
+			? ((await del.json().catch(() => null)) as { count?: number } | null)
+			: null;
 		if (!draft?.count) return;
 		const resp = await page.request.post(`/api/draft/propose?project=${project}`, {
 			data: { title: `e2e cleanup ${vm}`, message: '' },

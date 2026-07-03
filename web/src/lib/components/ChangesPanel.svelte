@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { ChevronDown, ChevronRight, Folder, History, X } from 'lucide-svelte';
+	import { ChevronDown, ChevronRight, Folder, History } from 'lucide-svelte';
 	import { api, type Commit, type DraftView, type Proposal, type ProposeResult } from '$lib/api';
 	import ChangeList from './ChangeList.svelte';
+	import Drawer from './Drawer.svelte';
 
 	let {
 		drafts,
@@ -127,14 +128,7 @@
 	}
 </script>
 
-<aside class="flex h-full w-[28rem] flex-col border-l border-slate-300 bg-white shadow-xl">
-	<header class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-		<h2 class="text-base font-semibold text-slate-800">
-			Changes <span class="text-slate-400">({total})</span>
-		</h2>
-		<button onclick={onclose} aria-label="Close" class="text-slate-400 hover:text-slate-700"><X size={18} /></button>
-	</header>
-
+<Drawer title="Changes" count={total} {onclose}>
 	<div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
 		<!-- Open PRs (persistent, fetched from Forgejo) — survive closing the panel,
 		     unlike the transient propose response below. -->
@@ -171,8 +165,11 @@
 				</div>
 				{#if r.prURL}
 					<p class="text-slate-700">Pull request opened{r.existing ? ' (existing)' : ''}:</p>
-					<a href={r.prURL} target="_blank" rel="noopener" class="font-medium text-blue-700 underline"
-						>{r.prURL}</a
+					<a
+						href={r.prURL}
+						target="_blank"
+						rel="noopener"
+						class="font-medium text-blue-700 underline">{r.prURL}</a
 					>
 				{:else if r.compareURL}
 					<p class="text-slate-700">Branch <code>{r.branch}</code> pushed. Open a PR:</p>
@@ -209,8 +206,7 @@
 				</div>
 
 				{#if error[project]}
-					<pre
-						class="mb-2 rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error[
+					<pre class="mb-2 rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error[
 							project
 						]}</pre>
 				{/if}
@@ -239,7 +235,9 @@
 									onclick={() => (showYaml[k] = !showYaml[k])}
 									class="mt-2 flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
 								>
-									{#if showYaml[k]}<ChevronDown size={12} /> hide YAML{:else}<ChevronRight size={12} /> view YAML{/if}
+									{#if showYaml[k]}<ChevronDown size={12} /> hide YAML{:else}<ChevronRight
+											size={12}
+										/> view YAML{/if}
 								</button>
 								{#if showYaml[k]}
 									<pre
@@ -260,8 +258,7 @@
 						bind:value={message[project]}
 						placeholder="Description (optional)"
 						rows="2"
-						class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
-					></textarea>
+						class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"></textarea>
 					<button
 						onclick={() => propose(project)}
 						disabled={busy[project]}
@@ -321,7 +318,8 @@
 															<p class="text-[10px] text-slate-400">
 																<code class="text-slate-500">{c.shortHash}</code>
 																· {c.author} ·
-																<span title={c.when}>{fmtWhen(c.when)}</span>{#if c.merge} ·
+																<span title={c.when}>{fmtWhen(c.when)}</span>{#if c.merge}
+																	·
 																	<span class="text-slate-400">merge</span>{/if}
 															</p>
 														</div>
@@ -352,8 +350,11 @@
 																>
 															{:else if rr.compareURL}
 																Branch <code>{rr.branch}</code> pushed —
-																<a href={rr.compareURL} target="_blank" rel="noopener" class="underline"
-																	>open PR</a
+																<a
+																	href={rr.compareURL}
+																	target="_blank"
+																	rel="noopener"
+																	class="underline">open PR</a
 																>
 															{:else}
 																Branch <code>{rr.branch}</code> pushed.
@@ -372,4 +373,4 @@
 			</section>
 		{/if}
 	</div>
-</aside>
+</Drawer>

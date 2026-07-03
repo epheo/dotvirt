@@ -37,6 +37,7 @@
 	import StagedBadge from './StagedBadge.svelte';
 	import Row from './Row.svelte';
 	import SyncBadge from './SyncBadge.svelte';
+	import TabBar from './TabBar.svelte';
 	import VMConfigure from './VMConfigure.svelte';
 
 	let {
@@ -351,18 +352,18 @@
 					</button>
 				</div>
 			</div>
-			<nav class="flex gap-1 text-sm">
-				{#each ['summary', 'monitor', 'configure', 'permissions', 'snapshots', 'console'] as const as t (t)}
-					<button
-						class="border-b-2 px-3 py-1.5 capitalize {tab === t
-							? 'border-blue-600 text-blue-700'
-							: 'border-transparent text-slate-500 hover:text-slate-700'}"
-						onclick={() => (tab = t)}
-					>
-						{t}
-					</button>
-				{/each}
-			</nav>
+			<TabBar
+				tabs={[
+					{ id: 'summary', label: 'Summary' },
+					{ id: 'monitor', label: 'Monitor' },
+					{ id: 'configure', label: 'Configure' },
+					{ id: 'permissions', label: 'Permissions' },
+					{ id: 'snapshots', label: 'Snapshots' },
+					{ id: 'console', label: 'Console' }
+				]}
+				active={tab}
+				onchange={(t) => (tab = t as Tab)}
+			/>
 		</div>
 
 		{#if vm.migration && !vm.migration.completed && !vm.migration.failed}

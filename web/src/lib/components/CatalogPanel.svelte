@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { X } from 'lucide-svelte';
 	import { api, Unauthorized, type Options } from '$lib/api';
+	import Drawer from './Drawer.svelte';
+	import TabBar from './TabBar.svelte';
 
 	// Content-library-lite: a read-only browser over the cluster's catalog —
 	// boot images (DataSources), instance types, preferences, networks (NADs),
@@ -109,26 +110,14 @@
 	const pickedRow = $derived(rows.find((r) => r.key === picked) ?? null);
 </script>
 
-<aside class="flex h-full w-[28rem] flex-col border-l border-slate-300 bg-white shadow-xl">
-	<header class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-		<h2 class="text-base font-semibold text-slate-800">Catalog</h2>
-		<button onclick={onclose} aria-label="Close" class="text-slate-400 hover:text-slate-700"
-			><X size={18} /></button
-		>
-	</header>
-
-	<div class="flex flex-wrap gap-1 border-b border-slate-200 px-3 py-2">
-		{#each KINDS as k (k.id)}
-			<button
-				onclick={() => pick(k.id)}
-				class="rounded px-2 py-0.5 text-xs {kind === k.id
-					? 'bg-blue-100 font-medium text-blue-700'
-					: 'text-slate-500 hover:bg-slate-100'}"
-			>
-				{k.label}
-			</button>
-		{/each}
-	</div>
+<Drawer title="Catalog" {onclose}>
+	<TabBar
+		tabs={KINDS}
+		active={kind}
+		variant="chips"
+		class="border-b border-line px-3 py-2"
+		onchange={(k) => pick(k as Kind)}
+	/>
 
 	<div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
 		{#if error}
@@ -138,18 +127,18 @@
 		{:else if rows.length === 0}
 			<p class="py-6 text-center text-sm text-slate-400">None available on this cluster.</p>
 		{:else}
-			<ul class="divide-y divide-slate-100 rounded border border-slate-200 text-[13px]">
+			<ul class="divide-y divide-slate-100 rounded border border-line text-[13px]">
 				{#each rows as r (r.key)}
 					<li>
 						<button
 							onclick={() => (picked = picked === r.key ? null : r.key)}
-							class="flex w-full items-baseline justify-between gap-3 px-3 py-1.5 text-left hover:bg-blue-50 {picked ===
+							class="flex w-full items-baseline justify-between gap-3 px-3 py-1.5 text-left hover:bg-select-soft {picked ===
 							r.key
-								? 'bg-blue-50'
+								? 'bg-select hover:bg-select'
 								: ''}"
 						>
-							<span class="min-w-0 truncate font-medium text-slate-800">{r.title}</span>
-							<span class="shrink-0 text-xs text-slate-400">{r.fact}</span>
+							<span class="min-w-0 truncate font-medium text-ink">{r.title}</span>
+							<span class="shrink-0 text-xs text-ink-faint">{r.fact}</span>
 						</button>
 					</li>
 				{/each}
@@ -176,7 +165,7 @@
 		{/if}
 	</div>
 
-	<footer class="border-t border-slate-200 px-4 py-2 text-xs text-slate-400">
+	{#snippet footer()}
 		Read-only — these are platform objects; the New VM wizard consumes them.
-	</footer>
-</aside>
+	{/snippet}
+</Drawer>

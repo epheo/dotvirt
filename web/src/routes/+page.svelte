@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import {
-		ArrowLeft,
 		ChevronDown,
 		ClipboardList,
 		FolderPlus,
@@ -32,7 +31,10 @@
 	import { manifestURL, type VMAction } from '$lib/actions';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
 	import ActionMenu from '$lib/components/ActionMenu.svelte';
+	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
 	import BulkActionsBar from '$lib/components/BulkActionsBar.svelte';
+	import MenuItem from '$lib/components/MenuItem.svelte';
+	import TabBar from '$lib/components/TabBar.svelte';
 	import CatalogPanel from '$lib/components/CatalogPanel.svelte';
 	import ChangesPanel from '$lib/components/ChangesPanel.svelte';
 	import ClusterSummary from '$lib/components/ClusterSummary.svelte';
@@ -208,6 +210,23 @@
 	// workspace (Summary/VMs/Monitor/Configure) a VM does — vCenter's "same tabs at
 	// every level".
 	let containerTab = $state<'summary' | 'vms' | 'monitor' | 'configure' | 'permissions'>('summary');
+
+	// Ancestors are clickable, the current scope is the plain last crumb.
+	const containerTrail = $derived.by(() => {
+		const sc = scope;
+		const t: { label: string; onclick?: () => void }[] = [{ label: 'All VMs' }];
+		if (sc.kind !== 'all') t[0].onclick = () => setScope({ kind: 'all' });
+		if (sc.kind === 'project') t.push({ label: sc.project });
+		if (sc.kind === 'namespace') {
+			const proj = sc.project;
+			t.push({ label: proj, onclick: () => setScope({ kind: 'project', project: proj }) });
+			t.push({ label: sc.namespace });
+		}
+		if (sc.kind === 'node') t.push({ label: `Node: ${sc.node}` });
+		if (sc.kind === 'network') t.push({ label: `Network: ${sc.network}` });
+		if (sc.kind === 'storage') t.push({ label: `Storage: ${sc.storageClass}` });
+		return t;
+	});
 
 	// Projects shown on the container Configure tab (the scoped one, or all).
 	const cfgProjects = $derived.by(() => {
@@ -583,9 +602,7 @@
 	<Login onlogin={(u) => (user = u)} />
 {:else}
 	<div class="flex h-screen flex-col">
-		<header
-			class="flex items-center gap-3 border-b border-slate-300 bg-slate-800 px-4 py-2 text-white"
-		>
+		<header class="flex items-center gap-3 border-b border-line-strong bg-bar px-4 py-2 text-white">
 			<span class="font-semibold">dotvirt</span>
 
 			<GlobalSearch bind:this={search} {inventory} onpick={onSearchPick} />
@@ -606,7 +623,7 @@
 					</button>
 				{/snippet}
 				{#snippet children({ close })}
-					<button
+					<MenuItem
 						onclick={() => {
 							close();
 							wizardNamespaces = scopeNamespaces;
@@ -614,34 +631,34 @@
 						}}
 						disabled={!namespaces.length}
 						title={namespaces.length ? '' : 'No project with a backing repo yet'}
-						class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
 					>
-						<Server size={13} /> New VM
-					</button>
-					<button
+						{#snippet icon()}<Server size={13} />{/snippet}
+						New VM
+					</MenuItem>
+					<MenuItem
 						onclick={() => {
 							close();
 							showNetworkWizard = true;
 						}}
 						disabled={!namespaces.length}
 						title="Create a Segment (Port Group) — an overlay or VLAN Layer 2 network VMs attach to"
-						class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
 					>
-						<Network size={13} /> New Segment
-					</button>
-					<button
+						{#snippet icon()}<Network size={13} />{/snippet}
+						New Segment
+					</MenuItem>
+					<MenuItem
 						onclick={() => {
 							close();
 							showUpload = true;
 						}}
 						disabled={!namespaces.length}
 						title="Upload a disk image (qcow2/raw/iso) as a bootable DataVolume"
-						class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
 					>
-						<Upload size={13} /> Upload Image
-					</button>
+						{#snippet icon()}<Upload size={13} />{/snippet}
+						Upload Image
+					</MenuItem>
 					<div class="my-1 border-t border-slate-100"></div>
-					<button
+					<MenuItem
 						onclick={() => {
 							close();
 							showProjectWizard = true;
@@ -650,11 +667,11 @@
 						title={canNamespace
 							? 'Create a new tenant project (repo + first namespace)'
 							: 'Requires permission to create namespaces'}
-						class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
 					>
-						<FolderPlus size={13} /> New Project
-					</button>
-					<button
+						{#snippet icon()}<FolderPlus size={13} />{/snippet}
+						New Project
+					</MenuItem>
+					<MenuItem
 						onclick={() => {
 							close();
 							showTier0 = true;
@@ -663,11 +680,11 @@
 						title={canEgress
 							? 'Add a Tier-0 provider-edge service (Source NAT or external route)'
 							: 'Requires permission to create EgressIPs or external routes'}
-						class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
 					>
-						<Radio size={13} /> New Tier-0 Service
-					</button>
-					<button
+						{#snippet icon()}<Radio size={13} />{/snippet}
+						New Tier-0 Service
+					</MenuItem>
+					<MenuItem
 						onclick={() => {
 							close();
 							showAdminFw = true;
@@ -676,10 +693,10 @@
 						title={canAdminFw
 							? 'Add a cluster-wide admin firewall (AdminNetworkPolicy / Baseline)'
 							: 'Requires permission to create AdminNetworkPolicies'}
-						class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
 					>
-						<Shield size={13} /> New Admin Firewall
-					</button>
+						{#snippet icon()}<Shield size={13} />{/snippet}
+						New Admin Firewall
+					</MenuItem>
 				{/snippet}
 			</HeaderMenu>
 
@@ -726,15 +743,14 @@
 					</div>
 					<div class="px-3 py-1.5 text-slate-500">{vmCount} VMs in view</div>
 					<div class="border-t border-slate-100"></div>
-					<button
+					<MenuItem
 						onclick={() => {
 							close();
 							logout();
 						}}
-						class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50"
 					>
 						Sign out
-					</button>
+					</MenuItem>
 				{/snippet}
 			</HeaderMenu>
 		</header>
@@ -758,7 +774,7 @@
 		{/if}
 
 		<div class="flex min-h-0 flex-1">
-			<aside class="w-72 overflow-y-auto border-r border-slate-300 bg-white">
+			<aside class="w-72 overflow-y-auto border-r border-line-strong bg-panel">
 				{#if !inventory}
 					<div class="space-y-2 p-3">
 						{#each Array(5) as _, i (i)}
@@ -807,7 +823,7 @@
 					/>
 				{/if}
 			</aside>
-			<main class="flex min-w-0 flex-1 flex-col overflow-hidden bg-white">
+			<main class="flex min-w-0 flex-1 flex-col overflow-hidden bg-panel">
 				{#if showTopology}
 					<div class="min-h-0 flex-1 overflow-y-auto">
 						<NetworkTopology
@@ -819,20 +835,13 @@
 						/>
 					</div>
 				{:else if selected}
-					<div
-						class="flex items-center gap-2 border-b border-slate-200 px-4 py-1.5 text-xs text-slate-500"
-					>
-						<button
-							onclick={() => (selected = null)}
-							class="flex items-center gap-1 text-blue-600 hover:underline"
-						>
-							<ArrowLeft size={13} /> All VMs
-						</button>
-						<span class="text-slate-300">/</span>
-						<span>{selected.namespace}</span>
-						<span class="text-slate-300">/</span>
-						<span class="font-medium text-slate-700">{selected.name}</span>
-					</div>
+					<Breadcrumb
+						trail={[
+							{ label: 'All VMs', onclick: () => (selected = null) },
+							{ label: selected.namespace },
+							{ label: selected.name }
+						]}
+					/>
 					<div class="min-h-0 flex-1 overflow-y-auto">
 						<VMDetail
 							vm={selected}
@@ -850,52 +859,20 @@
 				{:else}
 					<!-- Container workspace: breadcrumb + the same Summary/VMs/Monitor tabs
 					     vCenter gives every inventory level. -->
-					<div
-						class="flex items-center gap-2 border-b border-slate-200 px-4 py-1.5 text-xs text-slate-500"
-					>
-						<button onclick={() => setScope({ kind: 'all' })} class="text-blue-600 hover:underline"
-							>All VMs</button
-						>
-						{#if scope.kind === 'project' || scope.kind === 'namespace'}
-							{@const proj = scope.project}
-							<span class="text-slate-300">/</span>
-							<button
-								onclick={() => setScope({ kind: 'project', project: proj })}
-								class="hover:underline {scope.kind === 'project'
-									? 'font-medium text-slate-700'
-									: ''}">{proj}</button
-							>
-						{/if}
-						{#if scope.kind === 'namespace'}
-							<span class="text-slate-300">/</span>
-							<span class="font-medium text-slate-700">{scope.namespace}</span>
-						{/if}
-						{#if scope.kind === 'node'}
-							<span class="text-slate-300">/</span>
-							<span class="font-medium text-slate-700">Node: {scope.node}</span>
-						{/if}
-						{#if scope.kind === 'network'}
-							<span class="text-slate-300">/</span>
-							<span class="font-medium text-slate-700">Network: {scope.network}</span>
-						{/if}
-						{#if scope.kind === 'storage'}
-							<span class="text-slate-300">/</span>
-							<span class="font-medium text-slate-700">Storage: {scope.storageClass}</span>
-						{/if}
-					</div>
+					<Breadcrumb trail={containerTrail} />
 
-					<nav class="flex gap-1 border-b border-slate-200 px-4 text-sm">
-						{#each [['summary', 'Summary'], ['vms', 'VMs'], ['monitor', 'Monitor'], ['configure', 'Configure'], ['permissions', 'Permissions']] as const as [t, label] (t)}
-							<button
-								class="border-b-2 px-3 py-1.5 {containerTab === t
-									? 'border-blue-600 text-blue-700'
-									: 'border-transparent text-slate-500 hover:text-slate-700'}"
-								onclick={() => (containerTab = t)}
-							>
-								{label}
-							</button>
-						{/each}
-					</nav>
+					<TabBar
+						class="border-b border-line px-4"
+						tabs={[
+							{ id: 'summary', label: 'Summary' },
+							{ id: 'vms', label: 'VMs' },
+							{ id: 'monitor', label: 'Monitor' },
+							{ id: 'configure', label: 'Configure' },
+							{ id: 'permissions', label: 'Permissions' }
+						]}
+						active={containerTab}
+						onchange={(t) => (containerTab = t as typeof containerTab)}
+					/>
 
 					{#if containerTab === 'summary'}
 						<div class="min-h-0 flex-1 overflow-y-auto">
@@ -1065,53 +1042,46 @@
 				{#if ctx.kind === 'vm'}
 					<ActionMenu vm={ctx.vm} onpick={onCtxPick} />
 				{:else if ctx.kind === 'bulk'}
-					<div class="w-48 rounded border border-slate-200 bg-white py-1 text-xs shadow-lg">
-						<div class="px-3 py-1 text-[10px] tracking-wide text-slate-400 uppercase">
+					<div class="w-48 rounded border border-line bg-panel py-1 text-xs shadow-lg">
+						<div class="px-3 py-1 text-[10px] tracking-wide text-ink-faint uppercase">
 							{picked.size} VMs selected
 						</div>
-						<button
+						<MenuItem
 							onclick={() => {
 								ctx = null;
 								bulkPower('On');
-							}}
-							class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50"
-							>Power On (staged)</button
+							}}>Power On (staged)</MenuItem
 						>
-						<button
+						<MenuItem
 							onclick={() => {
 								ctx = null;
 								bulkPower('Off');
-							}}
-							class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50"
-							>Power Off (staged)</button
+							}}>Power Off (staged)</MenuItem
 						>
 						<div class="my-1 border-t border-slate-100"></div>
-						<button
+						<MenuItem
+							danger
 							onclick={() => {
 								ctx = null;
 								confirmingBulkDelete = true;
-							}}
-							class="block w-full px-3 py-1.5 text-left text-red-700 hover:bg-red-50"
-							>Delete {picked.size} VMs…</button
+							}}>Delete {picked.size} VMs…</MenuItem
 						>
 						<div class="my-1 border-t border-slate-100"></div>
-						<button
+						<MenuItem
 							onclick={() => {
 								ctx = null;
 								picked = new Set();
-							}}
-							class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50"
-							>Clear selection</button
+							}}>Clear selection</MenuItem
 						>
 					</div>
 				{:else}
 					{@const untracked = untrackedVMs(ctx.namespaces)}
-					<div class="w-48 rounded border border-slate-200 bg-white py-1 text-xs shadow-lg">
-						<div class="truncate px-3 py-1 text-[10px] tracking-wide text-slate-400 uppercase">
+					<div class="w-48 rounded border border-line bg-panel py-1 text-xs shadow-lg">
+						<div class="truncate px-3 py-1 text-[10px] tracking-wide text-ink-faint uppercase">
 							{ctx.namespace ?? ctx.project}
 						</div>
 						{#if !ctx.repo && canManage}
-							<button
+							<MenuItem
 								onclick={() => {
 									adoptProjectTarget =
 										ctx && ctx.kind === 'container'
@@ -1120,35 +1090,31 @@
 									ctx = null;
 								}}
 								title="Create a repo for this project and bring it under GitOps"
-								class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50"
-								>Attach repo…</button
+								>Attach repo…</MenuItem
 							>
 							<div class="my-1 border-t border-slate-100"></div>
 						{/if}
 						{#if ctx.repo && untracked.length}
-							<button
+							<MenuItem
 								onclick={() => {
 									const ns = ctx && ctx.kind === 'container' ? ctx.namespaces : [];
 									ctx = null;
 									bulkAdoptUntracked(ns);
 								}}
 								title="Stage every untracked VM here into one PR"
-								class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50"
-								>Adopt {untracked.length} untracked…</button
+								>Adopt {untracked.length} untracked…</MenuItem
 							>
 						{/if}
-						<button
+						<MenuItem
 							onclick={() => {
 								wizardNamespaces = ctx && ctx.kind === 'container' ? ctx.namespaces : null;
 								ctx = null;
 								showWizard = true;
 							}}
 							disabled={!ctx.repo}
-							title={ctx.repo ? '' : 'Project has no backing repo'}
-							class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
-							>New VM here…</button
+							title={ctx.repo ? '' : 'Project has no backing repo'}>New VM here…</MenuItem
 						>
-						<button
+						<MenuItem
 							onclick={() => {
 								const c = ctx && ctx.kind === 'container' ? ctx : null;
 								ctx = null;
@@ -1157,11 +1123,9 @@
 							disabled={!ctx.repo}
 							title={ctx.repo
 								? 'Add a north-south egress firewall (the Tier-1 gateway firewall)'
-								: 'Project has no backing repo'}
-							class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
-							>New Egress Firewall…</button
+								: 'Project has no backing repo'}>New Egress Firewall…</MenuItem
 						>
-						<button
+						<MenuItem
 							onclick={() => {
 								const c = ctx && ctx.kind === 'container' ? ctx : null;
 								ctx = null;
@@ -1170,40 +1134,32 @@
 							disabled={!ctx.repo}
 							title={ctx.repo
 								? 'Add an east-west Distributed Firewall policy (NetworkPolicy)'
-								: 'Project has no backing repo'}
-							class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
-							>New Security Policy…</button
+								: 'Project has no backing repo'}>New Security Policy…</MenuItem
 						>
 						{#if canNamespace}
-							<button
+							<MenuItem
 								onclick={() => {
 									namespaceWizardProject = ctx && ctx.kind === 'container' ? ctx.project : null;
 									ctx = null;
 									showNamespaceWizard = true;
 								}}
 								disabled={!ctx.repo}
-								title={ctx.repo ? '' : 'Project has no backing repo'}
-								class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
-								>New Namespace here…</button
+								title={ctx.repo ? '' : 'Project has no backing repo'}>New Namespace here…</MenuItem
 							>
 						{/if}
 						<div class="my-1 border-t border-slate-100"></div>
-						<button
+						<MenuItem
 							onclick={() => {
 								if (ctx?.kind === 'container' && ctx.repo) window.open(ctx.repo, '_blank');
 								ctx = null;
 							}}
-							disabled={!ctx.repo}
-							class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
-							>Open repository ↗</button
+							disabled={!ctx.repo}>Open repository ↗</MenuItem
 						>
-						<button
+						<MenuItem
 							onclick={() => {
 								ctx = null;
 								showChanges = true;
-							}}
-							class="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50"
-							>Changes &amp; history</button
+							}}>Changes &amp; history</MenuItem
 						>
 					</div>
 				{/if}
