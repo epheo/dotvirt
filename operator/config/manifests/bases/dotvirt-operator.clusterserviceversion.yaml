@@ -4,7 +4,7 @@ metadata:
   annotations:
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
-    containerImage: quay.io/epheo/dotvirt-operator@sha256:b224c93e38eb56aea048f83f85feca562b0745eded4fdcda7f44c02dc01e9458
+    containerImage: quay.io/epheo/dotvirt-operator@sha256:fcb2d9ef209597485a707a44094d29d18ffac913785c455f7429667867985ad2
     description: Installs dotvirt — a vCenter-like GitOps WebUI for KubeVirt — with
       its platform/tenant tier.
     repository: https://github.com/epheo/dotvirt
