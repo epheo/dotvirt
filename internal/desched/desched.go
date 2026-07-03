@@ -11,6 +11,7 @@ package desched
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -95,9 +96,14 @@ func (s *Snapshot) Live() model.DRSLive {
 	out.Profiles, _, _ = unstructured.NestedStringSlice(u.Object, "spec", "profiles")
 	out.IntervalSeconds, _, _ = unstructured.NestedInt64(u.Object, "spec", "deschedulingIntervalSeconds")
 	conditions, found, _ := unstructured.NestedSlice(u.Object, "status", "conditions")
-	if !found {
+	if !found || len(conditions) == 0 {
 		return out
 	}
+	// The operator reports health as library-go per-controller <Name>Degraded
+	// conditions and sets no Available roll-up on the CR — so available means
+	// "reported, and nothing degraded". An explicit Available condition (a
+	// nonstandard or future operator) still wins when present.
+	explicitAvailable, degraded := false, false
 	for _, raw := range conditions {
 		cond, ok := raw.(map[string]any)
 		if !ok {
@@ -105,14 +111,19 @@ func (s *Snapshot) Live() model.DRSLive {
 		}
 		typ, _ := cond["type"].(string)
 		status, _ := cond["status"].(string)
-		switch typ {
-		case "Available":
+		switch {
+		case typ == "Available":
+			explicitAvailable = true
 			out.Available = status == "True"
-		case "Degraded":
+		case strings.HasSuffix(typ, "Degraded"):
 			if status == "True" {
+				degraded = true
 				out.Degraded, _ = cond["message"].(string)
 			}
 		}
+	}
+	if !explicitAvailable {
+		out.Available = !degraded
 	}
 	return out
 }
