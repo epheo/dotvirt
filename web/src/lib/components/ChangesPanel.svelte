@@ -28,7 +28,8 @@
 
 	// Propose results outlive their lane (a proposed lane empties and unmounts),
 	// so they're held here until the persistent PR banner carries that exact PR.
-	let result = $state<Record<string, ProposeResult>>({});
+	// The lane's typed title rides along for the synthesized banner.
+	let result = $state<Record<string, ProposeResult & { title?: string }>>({});
 
 	// A propose that landed a PR renders through the SAME banner as a live PR
 	// lane, so when the streamed proposal arrives it takes over invisibly —
@@ -41,7 +42,7 @@
 		for (const [project, r] of Object.entries(result)) {
 			if (!r.prURL || !r.prNumber) continue; // push-only outcomes keep their own note below
 			if (seen.has(`${project}#${r.prNumber}`)) continue;
-			out.push({ project, prNumber: r.prNumber, prURL: r.prURL });
+			out.push({ project, prNumber: r.prNumber, prURL: r.prURL, title: r.title });
 		}
 		return out.sort((a, b) => a.project.localeCompare(b.project));
 	});
@@ -227,7 +228,12 @@
 		{/if}
 
 		{#each drafts as { project, draft } (project)}
-			<ChangesLane {project} {draft} {onchanged} onproposed={(r) => (result[project] = r)} />
+			<ChangesLane
+				{project}
+				{draft}
+				{onchanged}
+				onproposed={(r, title) => (result[project] = { ...r, title })}
+			/>
 		{/each}
 
 		<!-- Commit history per repo-backed project, lazy-fetched on expand. Any

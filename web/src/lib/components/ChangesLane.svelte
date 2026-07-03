@@ -17,7 +17,9 @@
 		project: string;
 		draft: DraftView;
 		onchanged: () => void;
-		onproposed: (r: ProposeResult) => void;
+		// The typed title rides along so the panel's synthesized PR banner reads
+		// exactly like the live one that later takes over.
+		onproposed: (r: ProposeResult, title: string) => void;
 	} = $props();
 
 	let title = $state('');
@@ -27,6 +29,16 @@
 	let discarding = $state(false);
 	let unstaging = $state<string | null>(null); // item key, while its unstage is in flight
 	let showYaml = $state<Record<string, boolean>>({});
+
+	// A successful propose consumed this draft server-side; hide the lane at once
+	// instead of showing consumed items under the new PR banner until the summary
+	// round-trips. The next summary clears the flag — if the draft genuinely still
+	// has items (partial failure, or new staging), they come back.
+	let proposed = $state(false);
+	$effect(() => {
+		draft;
+		proposed = false;
+	});
 
 	const itemKey = (ns: string, name: string) => `${ns}/${name}`;
 
@@ -65,19 +77,23 @@
 		error = '';
 		try {
 			const r = await api.propose(project, title, message);
-			onproposed(r);
+			onproposed(r, title);
 			title = '';
 			message = '';
+			proposed = true;
 			onchanged();
 		} catch (e) {
+			// The push may have landed before the error (e.g. a gateway timeout on
+			// the PR step) — re-read the summary so the lane reflects server truth.
 			error = String(e);
+			onchanged();
 		} finally {
 			proposing = false;
 		}
 	}
 </script>
 
-<section class="mb-5">
+<section class="mb-5" hidden={proposed}>
 	<div class="mb-1 flex items-center gap-2">
 		<Folder size={14} class="text-blue-500" />
 		<span class="font-semibold text-slate-700">{project}</span>
