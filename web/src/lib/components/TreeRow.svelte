@@ -5,7 +5,8 @@
 	// One row of the inventory tree. Every row kind — pinned destination, group,
 	// container, VM leaf — renders through this so indentation, hover and the
 	// selection highlight cannot drift apart. The chevron and the label are
-	// separate hit-areas: the chevron only collapses, the label activates.
+	// separate hit-areas: the chevron only collapses, the label activates — as a
+	// real link when `href` is given (deep-linkable, middle-click works).
 	let {
 		indent = 0,
 		active = false,
@@ -13,7 +14,8 @@
 		alignChevron = false,
 		border = false,
 		title = undefined,
-		onactivate,
+		href = undefined,
+		onactivate = undefined,
 		ontoggle = undefined,
 		oncontextmenu = undefined,
 		icon = undefined,
@@ -26,7 +28,8 @@
 		alignChevron?: boolean; // leaf at a chevroned level: renders a spacer
 		border?: boolean; // bottom hairline (pinned destinations)
 		title?: string;
-		onactivate: () => void;
+		href?: string;
+		onactivate?: () => void;
 		ontoggle?: () => void;
 		oncontextmenu?: (e: MouseEvent) => void;
 		icon?: Snippet;
@@ -48,16 +51,26 @@
 	{:else if alignChevron}
 		<span class="w-3"></span>
 	{/if}
-	<button
-		class="flex min-w-0 flex-1 items-center gap-1 text-left"
-		onclick={onactivate}
-		{oncontextmenu}
-		{title}
-	>
-		{#if icon}{@render icon()}{/if}
-		{@render children()}
-		{#if trailing}
-			<span class="ml-auto flex shrink-0 items-center gap-1">{@render trailing()}</span>
-		{/if}
-	</button>
+	{#if href}
+		<a class="flex min-w-0 flex-1 items-center gap-1 text-left" {href} {oncontextmenu} {title}>
+			{#if icon}{@render icon()}{/if}
+			{@render children()}
+			{#if trailing}
+				<span class="ml-auto flex shrink-0 items-center gap-1">{@render trailing()}</span>
+			{/if}
+		</a>
+	{:else}
+		<button
+			class="flex min-w-0 flex-1 items-center gap-1 text-left"
+			onclick={onactivate}
+			{oncontextmenu}
+			{title}
+		>
+			{#if icon}{@render icon()}{/if}
+			{@render children()}
+			{#if trailing}
+				<span class="ml-auto flex shrink-0 items-center gap-1">{@render trailing()}</span>
+			{/if}
+		</button>
+	{/if}
 </div>

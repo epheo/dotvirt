@@ -1,8 +1,80 @@
 <script lang="ts">
+	import { untrack, type Snippet } from 'svelte';
+	import { FolderPlus } from 'lucide-svelte';
 	import '../app.css';
 	import favicon from '$lib/assets/favicon.svg';
+	import { goto } from '$app/navigation';
+	import { api, onUnauthorized, streamInventory } from '$lib/api';
+	import { vmHref } from '$lib/nav';
+	import { drafts, PLATFORM_PROJECT } from '$lib/state/drafts.svelte';
+	import { inventory } from '$lib/state/inventory.svelte';
+	import { session } from '$lib/state/session.svelte';
+	import { ui } from '$lib/state/ui.svelte';
+	import AppContextMenus from '$lib/components/AppContextMenus.svelte';
+	import AppHeader from '$lib/components/AppHeader.svelte';
+	import AppModals from '$lib/components/AppModals.svelte';
+	import ChangesPanel from '$lib/components/ChangesPanel.svelte';
+	import InventoryTree from '$lib/components/InventoryTree.svelte';
+	import Login from '$lib/components/Login.svelte';
+	import TaskDock from '$lib/components/TaskDock.svelte';
+	import ToastHost from '$lib/components/ToastHost.svelte';
 
-	let { children } = $props();
+	let { children }: { children: Snippet } = $props();
+
+	// Drop to the login screen on any 401. Registered as the api layer's one
+	// signed-out sink, so every fetching component is covered without threading
+	// a callback; local Unauthorized catches only suppress their own error UI.
+	onUnauthorized(() => {
+		session.user = null;
+	});
+	$effect(() => {
+		if (!session.user) {
+			inventory.reset();
+			drafts.reset();
+			ui.reset();
+		}
+	});
+
+	$effect(() => {
+		session.check();
+	});
+
+	// Live subscription, established once signed in. The cookie rides the handshake;
+	// a 401 on the upgrade (expired session) drops us back to login.
+	$effect(() => {
+		if (!session.user) return;
+		inventory.inventory = null;
+		const stop = streamInventory(
+			(inv) => inventory.apply(inv),
+			() => (session.user = null)
+		);
+		return stop;
+	});
+
+	// The port-group catalog: fetched once on sign-in. A failure (e.g. the OVN-K
+	// CRDs absent) leaves it empty — NICs then fall back to their raw refs.
+	$effect(() => {
+		if (!session.user) return;
+		api
+			.networks()
+			.then((n) => (inventory.netInv = n))
+			.catch(() => {}); // a failure just leaves the catalog empty; 401 signs out centrally
+	});
+
+	// Recompute the draft summary only when the SET of projects or PR lanes
+	// changes: depend on the stable keys, and read the project list via untrack so
+	// the effect doesn't also subscribe to the per-frame array reference (which
+	// would re-fire on every VM state change). Staging actions call drafts.refresh
+	// directly.
+	$effect(() => {
+		inventory.projectKey;
+		inventory.proposalsKey;
+		untrack(() => {
+			if (session.user && inventory.projectNames.length) drafts.refresh();
+		});
+	});
+
+	const canNamespace = $derived(!!inventory.caps?.namespace);
 </script>
 
 <svelte:head>
@@ -10,4 +82,94 @@
 	<title>dotvirt</title>
 </svelte:head>
 
-{@render children()}
+{#if session.checking}
+	<div class="flex h-screen items-center justify-center text-sm text-ink-faint">Loading…</div>
+{:else if !session.user}
+	<Login onlogin={(u) => (session.user = u)} />
+{:else}
+	<div class="flex h-screen flex-col">
+		<AppHeader />
+
+		{#if inventory.error}
+			<div
+				class="flex items-start gap-2 border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700"
+			>
+				<span class="font-medium">Error:</span>
+				<span class="font-mono text-xs break-all">{inventory.error}</span>
+			</div>
+		{/if}
+
+		{#if inventory.inventory?.warnings?.length}
+			<div
+				class="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800"
+			>
+				<span class="font-medium">⚠</span>
+				<span>{inventory.inventory.warnings.join('; ')}</span>
+			</div>
+		{/if}
+
+		<div class="flex min-h-0 flex-1">
+			<aside class="w-72 overflow-y-auto border-r border-line-strong bg-panel">
+				{#if !inventory.inventory}
+					<div class="space-y-2 p-3">
+						{#each Array(5) as _, i (i)}
+							<div class="h-5 animate-pulse rounded bg-slate-100"></div>
+						{/each}
+					</div>
+				{:else if inventory.inventory.projects.length === 0}
+					<div class="space-y-3 p-6 text-center">
+						<p class="text-xs text-ink-faint">No projects visible.</p>
+						{#if canNamespace}
+							<button
+								onclick={() => (ui.modal = { kind: 'newProject' })}
+								class="inline-flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
+							>
+								<FolderPlus size={14} /> Create your first project
+							</button>
+						{/if}
+					</div>
+				{:else}
+					<InventoryTree
+						inventory={inventory.inventory}
+						networks={inventory.networks}
+						staged={drafts.stagedByKey}
+						canManage={inventory.canManage}
+						oncontextvm={(vm, x, y) => ui.openVMContext(vm, x, y)}
+						oncontextcontainer={(c, x, y) => (ui.ctx = { x, y, kind: 'container', ...c })}
+						onattachrepo={(project, namespaces) =>
+							(ui.modal = { kind: 'adoptProject', project, namespaces })}
+					/>
+				{/if}
+			</aside>
+			<main class="flex min-w-0 flex-1 flex-col overflow-hidden bg-panel">
+				{@render children()}
+			</main>
+
+			{#if ui.changesOpen}
+				<ChangesPanel
+					drafts={drafts.drafts}
+					proposals={inventory.proposals}
+					projects={inventory.canManage
+						? [...inventory.repoProjects, PLATFORM_PROJECT]
+						: inventory.repoProjects}
+					onclose={() => (ui.changesOpen = false)}
+					onchanged={() => drafts.refresh()}
+				/>
+			{/if}
+		</div>
+
+		<TaskDock
+			drafts={drafts.drafts}
+			proposals={inventory.proposals}
+			actions={ui.recentActions}
+			inventory={inventory.inventory}
+			username={session.user.username}
+			onselect={(namespace, name) => goto(vmHref(namespace, name))}
+			onrefresh={() => drafts.refresh()}
+		/>
+
+		<AppModals />
+		<AppContextMenus />
+		<ToastHost />
+	</div>
+{/if}

@@ -14,9 +14,9 @@ export async function login(page: Page) {
 	await expect(page.getByRole('button', { name: /^New$/ })).toBeVisible();
 }
 
-// openFirstVM switches to the VMs tab and opens the first VM's detail view.
+// openFirstVM switches to the VMs tab and opens the first VM's detail route.
 export async function openFirstVM(page: Page) {
-	await page.getByRole('button', { name: 'VMs', exact: true }).click();
+	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
 	const row = page.locator('tbody tr').first();
 	await expect(row).toBeVisible();
 	await row.click();

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import {
 		Database,
 		Folder,
@@ -20,37 +21,24 @@
 		VM
 	} from '$lib/api';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
+	import { hrefForScope, scopeFromPath, sectionOf, vmHref } from '$lib/nav';
 	import PowerDot from './PowerDot.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 	import TreeRow from './TreeRow.svelte';
 
 	let {
 		inventory,
-		selected,
-		scope,
 		staged,
 		networks = [],
 		canManage = false,
-		catalogActive = false,
-		topologyActive = false,
-		onselect,
-		onscope,
 		oncontextvm,
 		oncontextcontainer,
-		onattachrepo,
-		oncatalog,
-		ontopology
+		onattachrepo
 	}: {
 		inventory: Inventory;
-		selected: VM | null;
-		scope: Scope;
 		staged: Map<string, DraftItem>;
 		networks?: PortGroup[]; // port-group catalog, for friendly Segments-lens grouping
 		canManage?: boolean; // gates the platform-tier "Attach repo" CTA on repoless projects
-		catalogActive?: boolean; // highlights the pinned Catalog entry while its panel is open
-		topologyActive?: boolean; // highlights the pinned Topology entry while the map is open
-		onselect: (vm: VM) => void;
-		onscope: (s: Scope) => void;
 		oncontextvm?: (vm: VM, x: number, y: number) => void;
 		oncontextcontainer?: (
 			c: { project: string; repo?: string; namespace?: string; namespaces: string[] },
@@ -58,8 +46,6 @@
 			y: number
 		) => void;
 		onattachrepo?: (project: string, namespaces: string[]) => void;
-		oncatalog?: () => void; // opens the cluster resource catalog (a destination, not a scope)
-		ontopology?: () => void; // opens the network topology map (a destination, not a scope)
 	} = $props();
 
 	function ctxVM(e: MouseEvent, vm: VM) {
@@ -76,21 +62,30 @@
 		oncontextcontainer(c, e.clientX, e.clientY);
 	}
 
+	// Everything the tree highlights derives from the URL: the lens from the
+	// section, the scoped row from the path, the selected VM from the /vm route.
+	const path = $derived(page.url.pathname);
+	const scope = $derived<Scope>(scopeFromPath(path));
+	const section = $derived(sectionOf(path));
+
 	// Inventory lens — vCenter's four organizing views over one object set:
 	// Projects (VMs & Templates), Nodes (Hosts & Clusters), Networks, Storage.
-	// Switching resets the grid scope.
+	// Each lens is a section root; the /vm and /catalog routes keep the Projects tree.
 	type Lens = 'project' | 'node' | 'network' | 'storage';
-	let lens = $state<Lens>('project');
-	function setLens(l: Lens) {
-		if (l === lens) return;
-		lens = l;
-		onscope({ kind: 'all' });
-	}
-	const LENSES: { id: Lens; label: string }[] = [
-		{ id: 'project', label: 'Projects' },
-		{ id: 'node', label: 'Nodes' },
-		{ id: 'network', label: 'Segments' },
-		{ id: 'storage', label: 'Storage' }
+	const lens = $derived<Lens>(
+		section === 'hosts'
+			? 'node'
+			: section === 'networking'
+				? 'network'
+				: section === 'storage'
+					? 'storage'
+					: 'project'
+	);
+	const LENSES: { id: Lens; label: string; href: string }[] = [
+		{ id: 'project', label: 'Projects', href: '/compute' },
+		{ id: 'node', label: 'Nodes', href: '/hosts' },
+		{ id: 'network', label: 'Segments', href: '/networking' },
+		{ id: 'storage', label: 'Storage', href: '/storage' }
 	];
 
 	const projectScoped = (name: string) => scope.kind === 'project' && scope.project === name;
@@ -101,7 +96,13 @@
 	let collapsed = $state<Record<string, boolean>>({});
 	const toggle = (id: string) => (collapsed[id] = !collapsed[id]);
 
-	const isSelected = (vm: VM) => selected?.namespace === vm.namespace && selected?.name === vm.name;
+	const selectedKey = $derived.by(() => {
+		const parts = path.split('/');
+		return parts[1] === 'vm' && parts.length >= 4
+			? `${decodeURIComponent(parts[2])}/${decodeURIComponent(parts[3])}`
+			: '';
+	});
+	const isSelected = (vm: VM) => selectedKey === `${vm.namespace}/${vm.name}`;
 
 	// Drift rolls up: a namespace flags drift if any of its VMs is OutOfSync; a
 	// project flags drift if any of its namespaces does.
@@ -147,7 +148,7 @@
 	<TreeRow
 		{indent}
 		active={isSelected(vm)}
-		onactivate={() => onselect(vm)}
+		href={vmHref(vm.namespace, vm.name)}
 		oncontextmenu={(e) => ctxVM(e, vm)}
 	>
 		{#snippet icon()}
@@ -176,58 +177,58 @@
 <div class="select-none text-[13px]">
 	<!-- Catalog: a pinned destination (cluster images, instance types, networks,
 	     storage classes) — vCenter parks its Content Libraries in the left nav, above
-	     the inventory lenses. Opens the catalog panel rather than re-scoping the grid. -->
-	{#if oncatalog}
-		<TreeRow
-			active={catalogActive}
-			alignChevron
-			border
-			title="Browse the cluster's images, instance types, preferences, networks and storage classes"
-			onactivate={oncatalog}
-		>
-			{#snippet icon()}
-				<Library size={14} class="text-ink-faint" />
-			{/snippet}
-			<span class="truncate font-semibold text-ink-soft">Catalog</span>
-		</TreeRow>
-	{/if}
+	     the inventory lenses. -->
+	<TreeRow
+		active={section === 'catalog'}
+		alignChevron
+		border
+		href="/catalog"
+		title="Browse the cluster's images, instance types, preferences, networks and storage classes"
+	>
+		{#snippet icon()}
+			<Library size={14} class="text-ink-faint" />
+		{/snippet}
+		<span class="truncate font-semibold text-ink-soft">Catalog</span>
+	</TreeRow>
 
-	<!-- Topology: the network map (Tier-0 → Tier-1 → Segment → VM), a destination like
-	     Catalog rather than a scope. -->
-	{#if ontopology}
-		<TreeRow
-			active={topologyActive}
-			alignChevron
-			border
-			title="Network Topology — the Tier-0 → Tier-1 → Segment → VM map"
-			onactivate={ontopology}
-		>
-			{#snippet icon()}
-				<Workflow size={14} class="text-ink-faint" />
-			{/snippet}
-			<span class="truncate font-semibold text-ink-soft">Topology</span>
-		</TreeRow>
-	{/if}
+	<!-- Topology: the network map (Tier-0 → Tier-1 → Segment → VM) — the
+	     Networking section's home. -->
+	<TreeRow
+		active={path === '/networking'}
+		alignChevron
+		border
+		href="/networking"
+		title="Network Topology — the Tier-0 → Tier-1 → Segment → VM map"
+	>
+		{#snippet icon()}
+			<Workflow size={14} class="text-ink-faint" />
+		{/snippet}
+		<span class="truncate font-semibold text-ink-soft">Topology</span>
+	</TreeRow>
 
 	<!-- Lens switch (one object set, four organizing views). -->
 	<div class="flex flex-wrap gap-1 border-b border-line px-2 py-1.5">
 		{#each LENSES as l (l.id)}
-			<button
+			<a
+				href={l.href}
 				class="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs {lens === l.id
 					? 'bg-select font-medium text-accent-ink'
 					: 'text-ink-muted hover:bg-inset'}"
-				onclick={() => setLens(l.id)}
 			>
 				{#if l.id === 'project'}<Folder size={12} />{:else if l.id === 'node'}<Server
 						size={12}
 					/>{:else if l.id === 'network'}<Network size={12} />{:else}<Database size={12} />{/if}
 				{l.label}
-			</button>
+			</a>
 		{/each}
 	</div>
 
-	<!-- All VMs: resets the grid scope to the whole inventory. -->
-	<TreeRow active={scope.kind === 'all'} alignChevron onactivate={() => onscope({ kind: 'all' })}>
+	<!-- All VMs: the whole-inventory grid. -->
+	<TreeRow
+		active={scope.kind === 'all' && section !== 'catalog' && path !== '/networking'}
+		alignChevron
+		href="/compute"
+	>
 		{#snippet icon()}
 			<LayoutGrid size={14} class="text-ink-faint" />
 		{/snippet}
@@ -238,12 +239,12 @@
 		{#each inventory.projects as project (project.name)}
 			{@const pid = `p:${project.name}`}
 			<div>
-				<!-- Project: chevron toggles collapse, the label sets the grid scope. -->
+				<!-- Project: chevron toggles collapse, the label focuses the grid. -->
 				<TreeRow
 					active={projectScoped(project.name)}
 					expanded={!collapsed[pid]}
 					ontoggle={() => toggle(pid)}
-					onactivate={() => onscope({ kind: 'project', project: project.name })}
+					href={hrefForScope({ kind: 'project', project: project.name })}
 					oncontextmenu={(e) =>
 						ctxContainer(e, {
 							project: project.name,
@@ -297,8 +298,11 @@
 								active={nsScoped(project.name, ns.namespace)}
 								expanded={!collapsed[nid]}
 								ontoggle={() => toggle(nid)}
-								onactivate={() =>
-									onscope({ kind: 'namespace', project: project.name, namespace: ns.namespace })}
+								href={hrefForScope({
+									kind: 'namespace',
+									project: project.name,
+									namespace: ns.namespace
+								})}
 								oncontextmenu={(e) =>
 									ctxContainer(e, {
 										project: project.name,
@@ -350,7 +354,7 @@
 					active={flatScoped(key)}
 					expanded={!collapsed[gid]}
 					ontoggle={() => toggle(gid)}
-					onactivate={() => onscope(flatScope(key))}
+					href={hrefForScope(flatScope(key))}
 				>
 					{#snippet icon()}
 						{#if lens === 'node'}<Server size={14} class="shrink-0 text-ink-muted" />
