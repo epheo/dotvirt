@@ -2,6 +2,7 @@
 	import { X } from 'lucide-svelte';
 	import { api, type CreateVMRequest, type Network, type Options } from '$lib/api';
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
+	import Modal from './Modal.svelte';
 	import Wizard from './Wizard.svelte';
 
 	let {
@@ -68,10 +69,13 @@
 				// Sensible defaults from what's available. Guard each list — a source
 				// the backend SA can't read comes back empty (or null on an old build).
 				const osImages = o.osImages ?? [];
-				const fed = osImages.find((i) => i.ready && i.name === 'fedora') ?? osImages.find((i) => i.ready);
+				const fed =
+					osImages.find((i) => i.ready && i.name === 'fedora') ?? osImages.find((i) => i.ready);
 				if (fed) osImage = `${fed.name}|${fed.namespace}`;
 				preference =
-					(o.preferences ?? []).find((p) => p.name === 'fedora')?.name ?? o.preferences?.[0]?.name ?? '';
+					(o.preferences ?? []).find((p) => p.name === 'fedora')?.name ??
+					o.preferences?.[0]?.name ??
+					'';
 				instancetype =
 					(o.instancetypes ?? []).find((i) => i.name === 'u1.medium')?.name ??
 					o.instancetypes?.[0]?.name ??
@@ -114,13 +118,15 @@
 			['Root disk', diskSize || '—'],
 			['Storage class', storageClass || 'cluster default']
 		];
-		if (extraDisks.length) for (const d of extraDisks) rows.push([`Extra disk · ${d.name}`, d.size]);
+		if (extraDisks.length)
+			for (const d of extraDisks) rows.push([`Extra disk · ${d.name}`, d.size]);
 		else rows.push(['Extra disks', 'None']);
 		return rows;
 	});
 	const networkRows = $derived.by(() => {
 		const rows: string[][] = [['Default network', 'attached automatically']];
-		if (selectedNetworkLabels.length) for (const l of selectedNetworkLabels) rows.push(['Adapter', l]);
+		if (selectedNetworkLabels.length)
+			for (const l of selectedNetworkLabels) rows.push(['Adapter', l]);
 		else rows.push(['Additional adapters', 'None']);
 		return rows;
 	});
@@ -171,14 +177,23 @@
      the templates type-clean without re-narrowing inside each snippet. -->
 {#snippet step1()}
 	<div class="space-y-4">
-		<p class="text-xs text-slate-500">Name the virtual machine and choose the project it belongs to.</p>
+		<p class="text-xs text-slate-500">
+			Name the virtual machine and choose the project it belongs to.
+		</p>
 		<label class="block">
 			<span class="text-slate-600">Name</span>
-			<input bind:value={name} placeholder="my-vm" class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5" />
+			<input
+				bind:value={name}
+				placeholder="my-vm"
+				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+			/>
 		</label>
 		<label class="block">
 			<span class="text-slate-600">Project (namespace)</span>
-			<select bind:value={namespace} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
+			<select
+				bind:value={namespace}
+				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+			>
 				{#each namespaces as ns (ns)}<option value={ns}>{ns}</option>{/each}
 			</select>
 		</label>
@@ -187,7 +202,9 @@
 
 {#snippet step2()}
 	<div class="space-y-4">
-		<p class="text-xs text-slate-500">Select the OS image to boot from and a preference that tunes the VM for that guest.</p>
+		<p class="text-xs text-slate-500">
+			Select the OS image to boot from and a preference that tunes the VM for that guest.
+		</p>
 		<label class="block">
 			<span class="text-slate-600">OS image</span>
 			<select bind:value={osImage} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
@@ -198,7 +215,10 @@
 		</label>
 		<label class="block">
 			<span class="text-slate-600">Preference (OS tuning)</span>
-			<select bind:value={preference} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
+			<select
+				bind:value={preference}
+				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+			>
 				{#each options?.preferences ?? [] as p (p.name)}
 					<option value={p.name}>{p.displayName || p.name}</option>
 				{/each}
@@ -209,10 +229,15 @@
 
 {#snippet step3()}
 	<div class="space-y-4">
-		<p class="text-xs text-slate-500">Choose a size (instance type) and whether to power the VM on after creation.</p>
+		<p class="text-xs text-slate-500">
+			Choose a size (instance type) and whether to power the VM on after creation.
+		</p>
 		<label class="block">
 			<span class="text-slate-600">Size (instancetype)</span>
-			<select bind:value={instancetype} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
+			<select
+				bind:value={instancetype}
+				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+			>
 				{#each options?.instancetypes ?? [] as it (it.name)}
 					<option value={it.name}>{it.name} — {it.cpu} CPU / {it.memory}</option>
 				{/each}
@@ -231,11 +256,17 @@
 		<div class="grid grid-cols-2 gap-4">
 			<label class="block">
 				<span class="text-slate-600">Root disk size</span>
-				<input bind:value={diskSize} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5" />
+				<input
+					bind:value={diskSize}
+					class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				/>
 			</label>
 			<label class="block">
 				<span class="text-slate-600">Storage class</span>
-				<select bind:value={storageClass} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
+				<select
+					bind:value={storageClass}
+					class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				>
 					<option value="">cluster default</option>
 					{#each options?.storageClasses ?? [] as sc (sc.name)}
 						<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
@@ -246,13 +277,28 @@
 		<div>
 			<div class="mb-1 flex items-center justify-between">
 				<span class="text-slate-600">Extra disks</span>
-				<button onclick={addDisk} type="button" class="text-xs text-blue-600 hover:underline">+ Add disk</button>
+				<button onclick={addDisk} type="button" class="text-xs text-blue-600 hover:underline"
+					>+ Add disk</button
+				>
 			</div>
 			{#each extraDisks as disk, i (i)}
 				<div class="mb-1 flex gap-2">
-					<input bind:value={disk.name} placeholder="name" class="w-1/2 rounded border border-slate-300 px-2 py-1" />
-					<input bind:value={disk.size} placeholder="10Gi" class="w-1/3 rounded border border-slate-300 px-2 py-1" />
-					<button onclick={() => removeDisk(i)} type="button" aria-label="Remove disk" class="text-red-500 hover:text-red-700"><X size={14} /></button>
+					<input
+						bind:value={disk.name}
+						placeholder="name"
+						class="w-1/2 rounded border border-slate-300 px-2 py-1"
+					/>
+					<input
+						bind:value={disk.size}
+						placeholder="10Gi"
+						class="w-1/3 rounded border border-slate-300 px-2 py-1"
+					/>
+					<button
+						onclick={() => removeDisk(i)}
+						type="button"
+						aria-label="Remove disk"
+						class="text-red-500 hover:text-red-700"><X size={14} /></button
+					>
 				</div>
 			{/each}
 		</div>
@@ -261,7 +307,9 @@
 
 {#snippet step5()}
 	<div class="space-y-2">
-		<p class="text-xs text-slate-500">The project's default network is attached automatically. Add extra network adapters below.</p>
+		<p class="text-xs text-slate-500">
+			The project's default network is attached automatically. Add extra network adapters below.
+		</p>
 		{#if available.length}
 			<div class="mt-1 space-y-1 rounded border border-slate-300 p-2">
 				{#each available as net (net.scope + '/' + (net.namespace ?? '') + '/' + net.name)}
@@ -287,23 +335,43 @@
 
 {#snippet step6()}
 	<div class="space-y-4">
-		<p class="text-xs text-slate-500">Optional cloud-init: a default user and an SSH key injected at first boot.</p>
+		<p class="text-xs text-slate-500">
+			Optional cloud-init: a default user and an SSH key injected at first boot.
+		</p>
 		<label class="block">
-			<span class="text-slate-600">cloud-init user <span class="text-slate-400">(optional)</span></span>
-			<input bind:value={user} placeholder="fedora" class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5" />
+			<span class="text-slate-600"
+				>cloud-init user <span class="text-slate-400">(optional)</span></span
+			>
+			<input
+				bind:value={user}
+				placeholder="fedora"
+				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+			/>
 		</label>
 		<label class="block">
-			<span class="text-slate-600">SSH public key <span class="text-slate-400">(optional)</span></span>
-			<input bind:value={sshKey} placeholder="ssh-ed25519 AAAA…" class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5" />
+			<span class="text-slate-600"
+				>SSH public key <span class="text-slate-400">(optional)</span></span
+			>
+			<input
+				bind:value={sshKey}
+				placeholder="ssh-ed25519 AAAA…"
+				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+			/>
 		</label>
 	</div>
 {/snippet}
 
 {#snippet reviewGroup(title: string, step: number, rows: string[][])}
 	<div class="rounded border border-slate-200">
-		<div class="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-3 py-1.5">
+		<div
+			class="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-3 py-1.5"
+		>
 			<span class="text-xs font-semibold tracking-wide text-slate-500 uppercase">{title}</span>
-			<button type="button" onclick={() => (current = step)} class="text-xs text-blue-600 hover:underline">Edit</button>
+			<button
+				type="button"
+				onclick={() => (current = step)}
+				class="text-xs text-blue-600 hover:underline">Edit</button
+			>
 		</div>
 		<dl class="divide-y divide-slate-100">
 			{#each rows as r (r[0])}
@@ -326,55 +394,51 @@
 					{#each missing as m (m.label)}
 						<li class="flex items-center justify-between gap-2">
 							<span>• {m.label}</span>
-							<button type="button" onclick={() => (current = m.step)} class="text-blue-700 hover:underline">Edit</button>
+							<button
+								type="button"
+								onclick={() => (current = m.step)}
+								class="text-blue-700 hover:underline">Edit</button
+							>
 						</li>
 					{/each}
 				</ul>
 			</div>
 		{/if}
-		{@render reviewGroup('Name and project', 0, [['Name', name || '—'], ['Project', namespace || '—']])}
-		{@render reviewGroup('Guest OS', 1, [['OS image', osImageName || '—'], ['Preference', preferenceLabel || '—']])}
-		{@render reviewGroup('Compute', 2, [['Size', instancetypeLabel || '—'], ['Power', running ? 'Start immediately' : 'Create powered off']])}
+		{@render reviewGroup('Name and project', 0, [
+			['Name', name || '—'],
+			['Project', namespace || '—']
+		])}
+		{@render reviewGroup('Guest OS', 1, [
+			['OS image', osImageName || '—'],
+			['Preference', preferenceLabel || '—']
+		])}
+		{@render reviewGroup('Compute', 2, [
+			['Size', instancetypeLabel || '—'],
+			['Power', running ? 'Start immediately' : 'Create powered off']
+		])}
 		{@render reviewGroup('Storage', 3, storageRows)}
 		{@render reviewGroup('Networks', 4, networkRows)}
-		{@render reviewGroup('Customize', 5, [['cloud-init user', user || 'default'], ['SSH key', sshKey ? 'provided' : 'None']])}
+		{@render reviewGroup('Customize', 5, [
+			['cloud-init user', user || 'default'],
+			['SSH key', sshKey ? 'provided' : 'None']
+		])}
 	</div>
 {/snippet}
 
 {#if loadError}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-		onclick={(e) => e.target === e.currentTarget && onclose()}
-		onkeydown={(e) => e.key === 'Escape' && onclose()}
-		role="presentation"
-	>
-		<div class="w-full max-w-md rounded-lg bg-white shadow-xl">
-			<header class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-				<h2 class="text-base font-semibold text-slate-800">New Virtual Machine</h2>
-				<button onclick={onclose} aria-label="Close" class="text-slate-400 hover:text-slate-700"><X size={18} /></button>
-			</header>
-			<div class="px-5 py-4">
-				<p class="rounded bg-red-50 px-3 py-2 text-sm text-red-700">Failed to load options: {loadError}</p>
-			</div>
+	<Modal title="New Virtual Machine" {onclose}>
+		<div class="px-5 py-4">
+			<p class="rounded bg-red-50 px-3 py-2 text-sm text-red-700">
+				Failed to load options: {loadError}
+			</p>
 		</div>
-	</div>
+	</Modal>
 {:else if !options}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-		onclick={(e) => e.target === e.currentTarget && onclose()}
-		onkeydown={(e) => e.key === 'Escape' && onclose()}
-		role="presentation"
-	>
-		<div class="w-full max-w-md rounded-lg bg-white shadow-xl">
-			<header class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-				<h2 class="text-base font-semibold text-slate-800">New Virtual Machine</h2>
-				<button onclick={onclose} aria-label="Close" class="text-slate-400 hover:text-slate-700"><X size={18} /></button>
-			</header>
-			<div class="px-5 py-4">
-				<p class="text-sm text-slate-400">Loading cluster options…</p>
-			</div>
+	<Modal title="New Virtual Machine" {onclose}>
+		<div class="px-5 py-4">
+			<p class="text-sm text-slate-400">Loading cluster options…</p>
 		</div>
-	</div>
+	</Modal>
 {:else}
 	<Wizard
 		title="New Virtual Machine"

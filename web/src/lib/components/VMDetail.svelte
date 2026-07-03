@@ -1,9 +1,26 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { Activity, ChevronDown, ChevronRight, Cpu, HardDrive, MemoryStick, Pencil, Trash2 } from 'lucide-svelte';
-	import { api, type Change, type DraftItem, type Network, type VM, type VMEvent } from '$lib/api';
+	import {
+		Activity,
+		ChevronDown,
+		ChevronRight,
+		Cpu,
+		HardDrive,
+		MemoryStick,
+		Pencil,
+		Trash2
+	} from 'lucide-svelte';
+	import {
+		api,
+		Unauthorized,
+		type Change,
+		type DraftItem,
+		type Network,
+		type VM,
+		type VMEvent
+	} from '$lib/api';
 	import { manifestURL, type VMAction } from '$lib/actions';
-	import { resolveNIC, kindLabel } from '$lib/networks';
+	import { duration } from '$lib/format';
 	import ActionMenu from './ActionMenu.svelte';
 	import ChangeList from './ChangeList.svelte';
 	import CloneModal from './CloneModal.svelte';
@@ -12,12 +29,15 @@
 	import Console from './Console.svelte';
 	import ConsolePreview from './ConsolePreview.svelte';
 	import EditSettings from './EditSettings.svelte';
-	import Performance from './Performance.svelte';
+	import InfoCard from './InfoCard.svelte';
+	import MetricsPanel from './MetricsPanel.svelte';
 	import Permissions from './Permissions.svelte';
 	import PowerDot from './PowerDot.svelte';
 	import Snapshots from './Snapshots.svelte';
 	import StagedBadge from './StagedBadge.svelte';
+	import Row from './Row.svelte';
 	import SyncBadge from './SyncBadge.svelte';
+	import VMConfigure from './VMConfigure.svelte';
 
 	let {
 		vm,
@@ -47,10 +67,6 @@
 	let tab = $state<Tab>('summary');
 	// Monitor sub-rail (vCenter keeps all time-series under Monitor).
 	let monitorView = $state<'events' | 'performance'>('events');
-	// Configure sub-rail (vCenter's settings verb: read-only sections, each with
-	// an Edit that stages a change through the PR flow).
-	type ConfigSection = 'hardware' | 'storage' | 'network' | 'labels' | 'source';
-	let configView = $state<ConfigSection>('hardware');
 	let editing = $state(false);
 	// Which EditSettings section a Configure "Edit" jumps to (undefined = all).
 	let editSection = $state<'compute' | 'storage' | 'network' | 'labels' | undefined>(undefined);
@@ -101,7 +117,7 @@
 		api
 			.drift(ns, name)
 			.then((d) => (driftChanges = d.drift ? d.changes : []))
-			.catch(() => (driftChanges = null));
+			.catch(() => (driftChanges = null)); // a 401 signs out centrally via the api layer
 	}
 
 	function loadEvents(ns: string, name: string) {
@@ -135,6 +151,7 @@
 				await a.run(target);
 				runtimeMsg = `${a.verb} requested — watch the Monitor tab for progress.`;
 			} catch (e) {
+				if (e instanceof Unauthorized) return; // signed out centrally; skip the error banner
 				ok = false;
 				runtimeMsg = String(e);
 			} finally {
@@ -183,7 +200,6 @@
 		untrack(() => {
 			tab = 'summary';
 			monitorView = 'events';
-			configView = 'hardware';
 			editing = false;
 			editSection = undefined;
 			deleting = false;
@@ -237,6 +253,7 @@
 			reconcileOk = true;
 			onstaged?.();
 		} catch (e) {
+			if (e instanceof Unauthorized) return; // signed out centrally; skip the error banner
 			reconcileMsg = String(e);
 			reconcileOk = false;
 		} finally {
@@ -253,6 +270,7 @@
 			reconcileMsg = `Re-sync triggered on ArgoCD app "${r.application}".`;
 			reconcileOk = true;
 		} catch (e) {
+			if (e instanceof Unauthorized) return; // signed out centrally; skip the error banner
 			reconcileMsg = String(e);
 			reconcileOk = false;
 		} finally {
@@ -269,25 +287,11 @@
 			deleting = false;
 			onstaged?.();
 		} catch (e) {
+			if (e instanceof Unauthorized) return; // signed out centrally; skip the error banner
 			deleteErr = String(e);
 		} finally {
 			deleteBusy = false;
 		}
-	}
-
-	// Elapsed time since an ISO timestamp, compact (e.g. "3d 21h") — VM uptime and
-	// event age both use it.
-	function elapsed(iso?: string): string {
-		if (!iso) return '';
-		const start = new Date(iso).getTime();
-		if (Number.isNaN(start)) return '';
-		let s = Math.max(0, Math.floor((Date.now() - start) / 1000));
-		const d = Math.floor(s / 86400);
-		const h = Math.floor((s % 86400) / 3600);
-		const m = Math.floor((s % 3600) / 60);
-		if (d > 0) return `${d}d ${h}h`;
-		if (h > 0) return `${h}h ${m}m`;
-		return `${m}m`;
 	}
 </script>
 
@@ -297,7 +301,8 @@
 			<div class="mb-3 flex items-center gap-2">
 				<PowerDot power={vm.power} paused={vm.paused} />
 				<h2 class="text-lg font-semibold text-slate-800">{vm.name}</h2>
-				<span class="rounded bg-slate-200 px-1.5 py-0.5 text-xs text-slate-600">{vm.namespace}</span>
+				<span class="rounded bg-slate-200 px-1.5 py-0.5 text-xs text-slate-600">{vm.namespace}</span
+				>
 				<SyncBadge sync={vm.sync} error={vm.syncError} />
 				{#if stagedItem}
 					<StagedBadge item={stagedItem} onopen={() => onstagedopen?.()} />
@@ -366,7 +371,7 @@
 			>
 				<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500"></span>
 				Live-migrating{#if vm.migration.sourceNode}&nbsp;from {vm.migration.sourceNode}{/if}
-				to {vm.migration.targetNode || '…'}{#if elapsed(vm.migration.startedAt)}&nbsp;· started {elapsed(
+				to {vm.migration.targetNode || '…'}{#if duration(vm.migration.startedAt)}&nbsp;· started {duration(
 						vm.migration.startedAt
 					)} ago{/if}
 			</div>
@@ -384,38 +389,51 @@
 
 		<div class="min-h-0 flex-1 overflow-y-auto p-4">
 			{#if tab === 'summary'}
-				{#snippet field(label: string, value: string)}
-					<div class="flex justify-between gap-3 px-3 py-1.5">
-						<dt class="shrink-0 text-slate-500">{label}</dt>
-						<dd class="min-w-0 truncate text-right text-slate-800">{value || '—'}</dd>
-					</div>
-				{/snippet}
-
 				<!-- At-a-glance tiles: the vCenter-style capacity summary. -->
 				<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
 					<div class="rounded border border-slate-200 bg-slate-50 p-3">
-						<div class="flex items-center gap-1.5 text-xs text-slate-500"><Cpu size={13} /> CPU</div>
+						<div class="flex items-center gap-1.5 text-xs text-slate-500">
+							<Cpu size={13} /> CPU
+						</div>
 						<div class="mt-1 text-lg font-semibold text-slate-800">
-							{#if stagedChanges.has('CPU')}<span class="text-slate-400 line-through">{vm.cpuCores ?? '—'} vCPU</span> <span class="text-blue-600">{stagedChanges.get('CPU')?.to}</span>{:else}{vm.cpuCores ?? '—'}<span class="ml-1 text-sm font-normal text-slate-500">vCPU</span>{/if}
+							{#if stagedChanges.has('CPU')}<span class="text-slate-400 line-through"
+									>{vm.cpuCores ?? '—'} vCPU</span
+								>
+								<span class="text-blue-600">{stagedChanges.get('CPU')?.to}</span
+								>{:else}{vm.cpuCores ?? '—'}<span class="ml-1 text-sm font-normal text-slate-500"
+									>vCPU</span
+								>{/if}
 						</div>
 					</div>
 					<div class="rounded border border-slate-200 bg-slate-50 p-3">
-						<div class="flex items-center gap-1.5 text-xs text-slate-500"><MemoryStick size={13} /> Memory</div>
+						<div class="flex items-center gap-1.5 text-xs text-slate-500">
+							<MemoryStick size={13} /> Memory
+						</div>
 						<div class="mt-1 text-lg font-semibold text-slate-800">
-							{#if stagedChanges.has('Memory')}<span class="text-slate-400 line-through">{vm.memory ?? '—'}</span> <span class="text-blue-600">{stagedChanges.get('Memory')?.to}</span>{:else}{vm.memory ?? '—'}{/if}
+							{#if stagedChanges.has('Memory')}<span class="text-slate-400 line-through"
+									>{vm.memory ?? '—'}</span
+								>
+								<span class="text-blue-600">{stagedChanges.get('Memory')?.to}</span
+								>{:else}{vm.memory ?? '—'}{/if}
 						</div>
 						{#if vm.memoryActual && vm.memoryActual !== vm.memory}
 							<div class="text-xs text-slate-400">{vm.memoryActual} live</div>
 						{/if}
 					</div>
 					<div class="rounded border border-slate-200 bg-slate-50 p-3">
-						<div class="flex items-center gap-1.5 text-xs text-slate-500"><HardDrive size={13} /> Disks</div>
+						<div class="flex items-center gap-1.5 text-xs text-slate-500">
+							<HardDrive size={13} /> Disks
+						</div>
 						<div class="mt-1 text-lg font-semibold text-slate-800">{vm.disks?.length ?? 0}</div>
 					</div>
 					<div class="rounded border border-slate-200 bg-slate-50 p-3">
-						<div class="flex items-center gap-1.5 text-xs text-slate-500"><Activity size={13} /> Status</div>
+						<div class="flex items-center gap-1.5 text-xs text-slate-500">
+							<Activity size={13} /> Status
+						</div>
 						<div class="mt-1 text-lg font-semibold text-slate-800">{statusText}</div>
-						{#if elapsed(vm.startedAt)}<div class="text-xs text-slate-400">up {elapsed(vm.startedAt)}</div>{/if}
+						{#if duration(vm.startedAt)}<div class="text-xs text-slate-400">
+								up {duration(vm.startedAt)}
+							</div>{/if}
 					</div>
 				</div>
 
@@ -432,45 +450,37 @@
 
 				<div class="mt-4 grid gap-4 md:grid-cols-2">
 					<!-- Guest & runtime: live identity reported by the guest agent. -->
-					<section class="rounded border border-slate-200">
-						<h3 class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-							Guest &amp; runtime
-						</h3>
+					<InfoCard title="Guest & runtime">
 						<dl class="divide-y divide-slate-100 text-[13px]">
-							{@render field('Operating system', vm.os ?? '')}
-							<div class="flex justify-between gap-3 px-3 py-1.5">
-								<dt class="shrink-0 text-slate-500">Power (desired)</dt>
-								<dd class="min-w-0 text-right">
-									{#if stagedChanges.has('Power')}<span class="text-slate-400 line-through">{vm.power}</span> <span class="text-blue-600">→ {stagedChanges.get('Power')?.to}</span>{:else}<span class="text-slate-800">{vm.power}</span>{/if}
-								</dd>
-							</div>
-							{@render field('Status (actual)', vm.paused ? 'Paused' : (vm.phase ?? ''))}
-							<div class="flex justify-between gap-3 px-3 py-1.5">
-								<dt class="shrink-0 text-slate-500">IP addresses</dt>
-								<dd class="min-w-0 text-right font-mono text-xs text-slate-800">
+							<Row label="Operating system" value={vm.os ?? ''} />
+							<Row label="Power (desired)">
+								{#if stagedChanges.has('Power')}<span class="text-slate-400 line-through"
+										>{vm.power}</span
+									>
+									<span class="text-blue-600">→ {stagedChanges.get('Power')?.to}</span>{:else}<span
+										class="text-slate-800">{vm.power}</span
+									>{/if}
+							</Row>
+							<Row label="Status (actual)" value={vm.paused ? 'Paused' : (vm.phase ?? '')} />
+							<Row label="IP addresses">
+								<div class="font-mono text-xs text-slate-800">
 									{#if vm.ips?.length}
 										{#each vm.ips as ip (ip)}<div>{ip}</div>{/each}
 									{:else}{vm.guestIP || '—'}{/if}
-								</dd>
-							</div>
+								</div>
+							</Row>
 						</dl>
-					</section>
+					</InfoCard>
 
 					<!-- Configuration & placement: desired config + where it runs. -->
-					<section class="rounded border border-slate-200">
-						<h3 class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-							Configuration &amp; placement
-						</h3>
+					<InfoCard title="Configuration & placement">
 						<dl class="divide-y divide-slate-100 text-[13px]">
-							{@render field('Instance type', vm.instancetype ?? '')}
-							{@render field('Preference', vm.preference ?? '')}
-							{@render field('Node', vm.nodeName ?? '')}
-							<div class="flex justify-between gap-3 px-3 py-1.5">
-								<dt class="shrink-0 text-slate-500">Source</dt>
-								<dd class="min-w-0 truncate text-right font-mono text-xs text-slate-600">{vm.sourceFile}</dd>
-							</div>
+							<Row label="Instance type" value={vm.instancetype ?? ''} />
+							<Row label="Preference" value={vm.preference ?? ''} />
+							<Row label="Node" value={vm.nodeName ?? ''} />
+							<Row label="Source" value={vm.sourceFile} mono />
 						</dl>
-					</section>
+					</InfoCard>
 				</div>
 
 				{#if !vm.sourceFile}
@@ -483,8 +493,8 @@
 							Not in git — this VM exists only in the cluster
 						</div>
 						<p class="mt-1 text-xs text-amber-700">
-							A clone target (or out-of-band create) has no manifest on the base branch yet:
-							config edits and ArgoCD sync don't apply. Adopting stages its live manifest into
+							A clone target (or out-of-band create) has no manifest on the base branch yet: config
+							edits and ArgoCD sync don't apply. Adopting stages its live manifest into
 							<strong>Changes</strong>, to propose as a PR.
 						</p>
 						<div class="mt-2">
@@ -513,7 +523,11 @@
 						>
 							<span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
 							Drift — cluster differs from git ({driftChanges.length})
-							<span class="ml-auto text-amber-600">{#if showDrift}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}</span>
+							<span class="ml-auto text-amber-600"
+								>{#if showDrift}<ChevronDown size={14} />{:else}<ChevronRight
+										size={14}
+									/>{/if}</span
+							>
 						</button>
 						{#if showDrift}
 							<div class="border-t border-amber-200 px-3 py-2">
@@ -562,7 +576,7 @@
 				</div>
 				{#if monitorView === 'performance'}
 					{#key `${vm.namespace}/${vm.name}`}
-						<Performance {vm} />
+						<MetricsPanel load={(r) => api.metrics(vm.namespace, vm.name, r)} />
 					{/key}
 				{:else if eventsLoading && !events}
 					<div class="py-8 text-center text-sm text-slate-400">Loading events…</div>
@@ -585,7 +599,9 @@
 									<td class="py-1.5 pr-3">
 										<span class="inline-flex items-center gap-1.5 whitespace-nowrap">
 											<span
-												class="h-1.5 w-1.5 rounded-full {e.type === 'Warning' ? 'bg-amber-500' : 'bg-slate-400'}"
+												class="h-1.5 w-1.5 rounded-full {e.type === 'Warning'
+													? 'bg-amber-500'
+													: 'bg-slate-400'}"
 											></span>
 											{e.type}
 										</span>
@@ -596,7 +612,8 @@
 										{e.object === 'VirtualMachineInstance' ? 'VMI' : 'VM'}
 									</td>
 									<td class="py-1.5 whitespace-nowrap text-slate-500">
-										{elapsed(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-slate-400"> ×{e.count}</span
+										{duration(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-slate-400">
+												×{e.count}</span
 											>{/if}
 									</td>
 								</tr>
@@ -605,158 +622,7 @@
 					</table>
 				{/if}
 			{:else if tab === 'configure'}
-				<!-- vCenter's settings verb: a left sub-rail of read-only sections; every
-				     Edit stages a change through the PR flow (nothing writes the cluster). -->
-				{#snippet cfgField(label: string, value: string)}
-					<div class="flex justify-between gap-3 px-3 py-1.5">
-						<dt class="shrink-0 text-slate-500">{label}</dt>
-						<dd class="min-w-0 truncate text-right text-slate-800">{value || '—'}</dd>
-					</div>
-				{/snippet}
-				{#snippet cfgHeader(title: string, section?: 'compute' | 'storage' | 'network' | 'labels')}
-					<div class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-1.5">
-						<h3 class="text-xs font-semibold tracking-wide text-slate-500 uppercase">{title}</h3>
-						{#if section}
-							<button
-								onclick={() => openEdit(section)}
-								class="flex items-center gap-1 text-xs text-blue-600 hover:underline"
-							>
-								<Pencil size={11} /> Edit
-							</button>
-						{/if}
-					</div>
-				{/snippet}
-				<div class="flex gap-4">
-					<nav class="w-36 shrink-0 text-[13px]">
-						{#each [['hardware', 'VM Hardware'], ['storage', 'Storage'], ['network', 'Network'], ['labels', 'Labels'], ['source', 'Source & sync']] as const as [id, label] (id)}
-							<button
-								onclick={() => (configView = id)}
-								class="block w-full rounded px-2.5 py-1.5 text-left {configView === id
-									? 'bg-blue-50 font-medium text-blue-700'
-									: 'text-slate-600 hover:bg-slate-50'}"
-							>
-								{label}
-							</button>
-						{/each}
-					</nav>
-					<div class="min-w-0 flex-1">
-						{#if configView === 'hardware'}
-							<section class="rounded border border-slate-200">
-								{@render cfgHeader('VM Hardware', 'compute')}
-								<dl class="divide-y divide-slate-100 text-[13px]">
-									{@render cfgField('CPU cores', vm.cpuCores ? String(vm.cpuCores) : '')}
-									{@render cfgField('Memory', vm.memory ?? '')}
-									{@render cfgField('Instance type', vm.instancetype ?? '')}
-									{@render cfgField('Preference', vm.preference ?? '')}
-									{@render cfgField('Power (desired)', vm.power)}
-								</dl>
-							</section>
-						{:else if configView === 'storage'}
-							<section class="rounded border border-slate-200">
-								{@render cfgHeader('Disks', 'storage')}
-								{#if vm.disks?.length}
-									<ul class="divide-y divide-slate-100 px-3 text-[13px]">
-										{#each vm.disks as d (d.name)}
-											<li class="flex justify-between gap-3 py-1.5">
-												<span class="text-slate-800">{d.name}</span>
-												<span class="text-slate-400"
-													>{d.type}{d.size ? ` · ${d.size}` : ''}{d.storageClass
-														? ` · ${d.storageClass}`
-														: ''}</span
-												>
-											</li>
-										{/each}
-									</ul>
-								{:else}
-									<p class="px-3 py-3 text-xs text-slate-400">No disks defined in the manifest.</p>
-								{/if}
-							</section>
-						{:else if configView === 'network'}
-							<section class="rounded border border-slate-200">
-								{@render cfgHeader('Network adapters', 'network')}
-								{#if vm.networks?.length}
-									<ul class="divide-y divide-slate-100 px-3 text-[13px]">
-										{#each vm.networks as n (n.name)}
-											{@const pg = resolveNIC(n, vm.namespace, networks)}
-											{@const detail = [
-												n.ip || null,
-												n.mac || null,
-												pg?.scope === 'shared' ? 'shared' : null,
-												pg?.uplink ? `uplink ${pg.uplink}` : null,
-												pg?.subnets?.length ? pg.subnets.join(', ') : null
-											]
-												.filter(Boolean)
-												.join(' · ')}
-											<li class="py-1.5">
-												<div class="flex items-baseline justify-between gap-3">
-													<span class="text-slate-800">{n.name}</span>
-													<span class="flex items-center gap-2 text-right">
-														<span class="text-slate-700"
-															>{pg ? pg.name : n.network && n.network !== 'pod' ? n.network : 'Pod network'}</span
-														>
-														{#if pg}
-															<span
-																class="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500"
-																>{kindLabel(pg.kind)}{pg.vlan ? ` ${pg.vlan}` : ''}</span
-															>
-														{/if}
-													</span>
-												</div>
-												{#if detail}
-													<div class="mt-0.5 text-right text-[11px] text-slate-400">{detail}</div>
-												{/if}
-											</li>
-										{/each}
-									</ul>
-								{:else}
-									<p class="px-3 py-3 text-xs text-slate-400">No adapters defined in the manifest.</p>
-								{/if}
-							</section>
-						{:else if configView === 'labels'}
-							<section class="rounded border border-slate-200">
-								{@render cfgHeader('Labels', 'labels')}
-								<div class="px-3 py-2">
-									{#if vm.labels && Object.keys(vm.labels).length}
-										{#each Object.entries(vm.labels) as [k, v] (k)}
-											<button
-												onclick={() => onsearchlabel?.(k, v)}
-												title="Find everything labeled {k}={v}"
-												class="mr-1 mb-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600 hover:bg-blue-50 hover:text-blue-700"
-												>{k}={v}</button
-											>
-										{/each}
-									{:else}
-										<p class="py-1 text-xs text-slate-400">No labels.</p>
-									{/if}
-								</div>
-							</section>
-						{:else}
-							<section class="rounded border border-slate-200">
-								{@render cfgHeader('Source & sync')}
-								<dl class="divide-y divide-slate-100 text-[13px]">
-									<div class="flex justify-between gap-3 px-3 py-1.5">
-										<dt class="shrink-0 text-slate-500">Manifest</dt>
-										<dd class="min-w-0 truncate text-right font-mono text-xs text-slate-600">
-											{vm.sourceFile}
-										</dd>
-									</div>
-									{@render cfgField('Namespace', vm.namespace)}
-									{@render cfgField('Sync', vm.sync)}
-								</dl>
-								<div class="border-t border-slate-100 px-3 py-2">
-									<a
-										href={manifestURL(vm)}
-										target="_blank"
-										class="text-xs text-blue-600 hover:underline">Download manifest ↗</a
-									>
-									<p class="mt-1 text-xs text-slate-400">
-										This VM's configuration lives in git; edits become a pull request.
-									</p>
-								</div>
-							</section>
-						{/if}
-					</div>
-				</div>
+				<VMConfigure {vm} {networks} onedit={openEdit} {onsearchlabel} />
 			{:else if tab === 'permissions'}
 				<Permissions namespaces={[vm.namespace]} />
 			{:else if tab === 'snapshots'}

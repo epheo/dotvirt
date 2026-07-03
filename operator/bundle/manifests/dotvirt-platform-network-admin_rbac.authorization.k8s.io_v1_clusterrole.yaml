@@ -11,6 +11,15 @@ rules:
   - k8s.ovn.org
   resources:
   - clusteruserdefinednetworks
+  - egressips
+  - adminpolicybasedexternalroutes
+  verbs:
+  - create
+- apiGroups:
+  - policy.networking.k8s.io
+  resources:
+  - adminnetworkpolicies
+  - baselineadminnetworkpolicies
   verbs:
   - create
 - apiGroups:

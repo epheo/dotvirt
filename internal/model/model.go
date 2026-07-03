@@ -536,8 +536,24 @@ type NetworkInventory struct {
 	PhysicalAdapters []PhysicalAdapter `json:"physicalAdapters"`
 	NMStatePresent   bool              `json:"nmstatePresent"`
 	// CanManage is true when the caller may author platform-tier networking
-	// (cluster-scoped CUDN / uplink / namespace): a platform repo is configured AND
-	// the caller passes the CUDN-create SSAR. The UI shows the authoring actions
-	// (New VLAN Port Group, Add Uplink, New Namespace) only then.
+	// (cluster-scoped CUDN): a platform repo is configured AND the caller passes the
+	// CUDN-create SSAR. The coarse "any platform authoring" signal that gates the
+	// platform-draft view; per-button gating uses Caps.
 	CanManage bool `json:"canManage"`
+	// Caps is the caller's per-action authoring authority — each field the same SSAR
+	// the matching create handler enforces, so a button gated on its field can never
+	// offer an action the backend would 403.
+	Caps NetworkCaps `json:"caps"`
+}
+
+// NetworkCaps mirrors each platform-tier create handler's platformScope SSAR, so the
+// UI can show only the authoring buttons the caller can actually use. All false when
+// no platform repo is configured.
+type NetworkCaps struct {
+	SharedSegment      bool `json:"sharedSegment"`      // shared / VLAN CUDN
+	Uplink             bool `json:"uplink"`             // nmstate NNCP
+	Namespace          bool `json:"namespace"`          // namespaces (New Project / Namespace)
+	EgressIP           bool `json:"egressIP"`           // Tier-0 SNAT
+	ExternalRoute      bool `json:"externalRoute"`      // Tier-0 external route
+	AdminNetworkPolicy bool `json:"adminNetworkPolicy"` // cluster-wide admin DFW (ANP/BANP)
 }

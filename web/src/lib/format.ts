@@ -14,19 +14,33 @@ export function cores(v: number): string {
 	return v < 10 ? v.toFixed(2) : v.toFixed(1);
 }
 
+// compactSpan renders elapsed seconds at two units of precision ("3d 21h",
+// "5m"); sub-minute stays in seconds — events can be seconds old.
+function compactSpan(s: number): string {
+	const d = Math.floor(s / 86400);
+	const h = Math.floor((s % 86400) / 3600);
+	const m = Math.floor((s % 3600) / 60);
+	if (d > 0) return `${d}d ${h}h`;
+	if (h > 0) return `${h}h ${m}m`;
+	if (m > 0) return `${m}m`;
+	return `${s}s`;
+}
+
+// duration renders a compact elapsed time from an ISO timestamp (no "ago"
+// suffix — uptimes, event ages).
+export function duration(iso: string | undefined): string {
+	if (!iso) return '';
+	const start = new Date(iso).getTime();
+	if (Number.isNaN(start)) return '';
+	return compactSpan(Math.max(0, Math.floor((Date.now() - start) / 1000)));
+}
+
 // relativeAge renders a compact "X ago" from an ISO timestamp or unix seconds.
 export function relativeAge(t: string | number | undefined): string {
 	if (t == null || t === '') return '';
 	const ms = typeof t === 'number' ? t * 1000 : new Date(t).getTime();
 	if (Number.isNaN(ms)) return '';
-	const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
-	const d = Math.floor(s / 86400);
-	const h = Math.floor((s % 86400) / 3600);
-	const m = Math.floor((s % 3600) / 60);
-	if (d > 0) return `${d}d ${h}h ago`;
-	if (h > 0) return `${h}h ${m}m ago`;
-	if (m > 0) return `${m}m ago`;
-	return `${s}s ago`;
+	return compactSpan(Math.max(0, Math.floor((Date.now() - ms) / 1000))) + ' ago';
 }
 
 // fmtUsage formats a value by a unit hint used across the usage widgets.

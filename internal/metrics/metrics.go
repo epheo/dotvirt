@@ -9,14 +9,10 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"fmt"
-	"math"
 	"net/http"
-	"net/url"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -83,30 +79,6 @@ func New(baseURL, caPath string, insecure bool) (*Client, error) {
 	}, nil
 }
 
-// rangeSpec maps a UI range to a window + sample step, mirroring vCenter's tiers
-// (real-time / day / week).
-type rangeSpec struct {
-	window time.Duration
-	step   time.Duration
-}
-
-var ranges = map[string]rangeSpec{
-	"1h":  {time.Hour, 30 * time.Second},
-	"1d":  {24 * time.Hour, 5 * time.Minute},
-	"1w":  {7 * 24 * time.Hour, 30 * time.Minute},
-	"1mo": {30 * 24 * time.Hour, 2 * time.Hour}, // bounded by Prometheus retention in practice
-}
-
-const defaultRange = "1h"
-
-// resolveRange maps a UI range to its spec, defaulting unknown ranges.
-func resolveRange(rng string) (string, rangeSpec) {
-	if spec, ok := ranges[rng]; ok {
-		return rng, spec
-	}
-	return defaultRange, ranges[defaultRange]
-}
-
 // scopeSelector scopes a VM metric to the caller's namespaces (+ a node when
 // drilling into one). With no namespaces it matches nothing, so usage reads
 // zero rather than leaking other tenants' data.
@@ -127,203 +99,6 @@ func scopeKey(namespaces []string, extra ...string) string {
 	sorted := append([]string(nil), namespaces...)
 	sort.Strings(sorted)
 	return strings.Join(append([]string{strings.Join(sorted, ",")}, extra...), "|")
-}
-
-// queryJSON performs one query-API GET under the caller's token and decodes
-// the response envelope into out — the single HTTP path under vector,
-// rangeSeries, and friends.
-func (c *Client) queryJSON(ctx context.Context, token, apiPath string, params url.Values, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+apiPath+"?"+params.Encode(), nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("query API status %d", resp.StatusCode)
-	}
-	return json.NewDecoder(resp.Body).Decode(out)
-}
-
-// parseSampleValue decodes one Prometheus sample value; NaN/Inf are dropped as
-// gaps (false).
-func parseSampleValue(raw json.RawMessage) (float64, bool) {
-	var vs string
-	if json.Unmarshal(raw, &vs) != nil {
-		return 0, false
-	}
-	v, err := strconv.ParseFloat(vs, 64)
-	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
-		return 0, false
-	}
-	return v, true
-}
-
-// rateWindow is the lookback for rate(): a couple of steps, floored so even the
-// 30s step spans enough scrapes to be smooth.
-func rateWindow(step time.Duration) time.Duration {
-	if w := 2 * step; w > 2*time.Minute {
-		return w
-	}
-	return 2 * time.Minute
-}
-
-// promDur formats a duration the way PromQL wants it (e.g. "2m", "1h").
-func promDur(d time.Duration) string {
-	switch {
-	case d%time.Hour == 0:
-		return fmt.Sprintf("%dh", d/time.Hour)
-	case d%time.Minute == 0:
-		return fmt.Sprintf("%dm", d/time.Minute)
-	default:
-		return fmt.Sprintf("%ds", d/time.Second)
-	}
-}
-
-type seriesSpec struct {
-	name  string
-	query string
-	// byLabel marks a multi-series query: one chart series per result, named
-	// "<name> <label value>" (per-NIC, per-drive). Empty = one fixed series.
-	byLabel string
-}
-
-type chartSpec struct {
-	key, title, unit string
-	stacked          bool // render as a stacked area (parts of a whole)
-	series           []seriesSpec
-}
-
-// chartSpecs builds the curated Overview charts for one VM — vCenter's CPU /
-// Memory / Network / Disk, plus IOPS and disk latency. Network and disk break
-// out per NIC / per drive. rw is the rate() window.
-func chartSpecs(ns, name, rw string) []chartSpec {
-	s := fmt.Sprintf("{namespace=%q,name=%q}", ns, name)
-	return []chartSpec{
-		{"cpu", "CPU", "%", false, []seriesSpec{
-			{"Usage", fmt.Sprintf("rate(kubevirt_vmi_cpu_usage_seconds_total%s[%s])*100 / on(namespace,name) kubevirt_vmi_vcpu_count%s", s, rw, s), ""},
-			{"Wait", fmt.Sprintf("rate(kubevirt_vmi_vcpu_wait_seconds_total%s[%s])*100", s, rw), ""},
-			{"Steal", fmt.Sprintf("rate(kubevirt_vmi_vcpu_delay_seconds_total%s[%s])*100", s, rw), ""},
-		}},
-		// Used/Cached/Free partition the guest's memory — a stacked area whose
-		// top edge is the domain total, like vCenter's stacked memory chart.
-		{"memory", "Memory", "bytes", true, []seriesSpec{
-			{"Used", fmt.Sprintf("kubevirt_vmi_memory_used_bytes%s", s), ""},
-			{"Cached", fmt.Sprintf("kubevirt_vmi_memory_cached_bytes%s", s), ""},
-			{"Free", fmt.Sprintf("kubevirt_vmi_memory_unused_bytes%s", s), ""},
-		}},
-		{"network", "Network", "Bps", false, []seriesSpec{
-			{"Rx", fmt.Sprintf("sum by(interface)(rate(kubevirt_vmi_network_receive_bytes_total%s[%s]))", s, rw), "interface"},
-			{"Tx", fmt.Sprintf("sum by(interface)(rate(kubevirt_vmi_network_transmit_bytes_total%s[%s]))", s, rw), "interface"},
-		}},
-		{"disk", "Disk throughput", "Bps", false, []seriesSpec{
-			{"Read", fmt.Sprintf("sum by(drive)(rate(kubevirt_vmi_storage_read_traffic_bytes_total%s[%s]))", s, rw), "drive"},
-			{"Write", fmt.Sprintf("sum by(drive)(rate(kubevirt_vmi_storage_write_traffic_bytes_total%s[%s]))", s, rw), "drive"},
-		}},
-		{"iops", "Disk IOPS", "iops", false, []seriesSpec{
-			{"Read", fmt.Sprintf("sum by(drive)(rate(kubevirt_vmi_storage_iops_read_total%s[%s]))", s, rw), "drive"},
-			{"Write", fmt.Sprintf("sum by(drive)(rate(kubevirt_vmi_storage_iops_write_total%s[%s]))", s, rw), "drive"},
-		}},
-		{"latency", "Disk latency", "ms", false, []seriesSpec{
-			{"Read", fmt.Sprintf("sum(rate(kubevirt_vmi_storage_read_times_seconds_total%s[%s])) / sum(rate(kubevirt_vmi_storage_iops_read_total%s[%s])) * 1000", s, rw, s, rw), ""},
-			{"Write", fmt.Sprintf("sum(rate(kubevirt_vmi_storage_write_times_seconds_total%s[%s])) / sum(rate(kubevirt_vmi_storage_iops_write_total%s[%s])) * 1000", s, rw, s, rw), ""},
-		}},
-	}
-}
-
-// labeledValue is one instant-query result series: its labels and current value.
-type labeledValue struct {
-	labels map[string]string
-	value  float64
-}
-
-// vector runs an instant query and returns its result series. A failed/empty query
-// yields an empty slice (callers treat a missing value as zero).
-func (c *Client) vector(ctx context.Context, token, query string) []labeledValue {
-	v := url.Values{}
-	v.Set("query", query)
-	var body struct {
-		Data struct {
-			Result []struct {
-				Metric map[string]string  `json:"metric"`
-				Value  [2]json.RawMessage `json:"value"`
-			} `json:"result"`
-		} `json:"data"`
-	}
-	if c.queryJSON(ctx, token, "/api/v1/query", v, &body) != nil {
-		return nil
-	}
-	out := make([]labeledValue, 0, len(body.Data.Result))
-	for _, r := range body.Data.Result {
-		f, ok := parseSampleValue(r.Value[1])
-		if !ok {
-			continue
-		}
-		out = append(out, labeledValue{labels: r.Metric, value: f})
-	}
-	return out
-}
-
-// scalars runs named instant queries concurrently, returning name→first value (0
-// when a query has no result).
-func (c *Client) scalars(ctx context.Context, token string, queries map[string]string) map[string]float64 {
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	out := make(map[string]float64, len(queries))
-	for k, q := range queries {
-		wg.Add(1)
-		go func(k, q string) {
-			defer wg.Done()
-			var v float64
-			if vec := c.vector(ctx, token, q); len(vec) > 0 {
-				v = vec[0].value
-			}
-			mu.Lock()
-			out[k] = v
-			mu.Unlock()
-		}(k, q)
-	}
-	wg.Wait()
-	return out
-}
-
-type sparkResult struct {
-	vals []float64
-	last float64
-}
-
-// sparklines runs named queries over the last hour concurrently, returning each as
-// a recent-values slice plus its latest value (for an inline sparkline + readout).
-func (c *Client) sparklines(ctx context.Context, token string, queries map[string]string) map[string]sparkResult {
-	end := time.Now().Unix()
-	start := end - 3600
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	out := make(map[string]sparkResult, len(queries))
-	for k, q := range queries {
-		wg.Add(1)
-		go func(k, q string) {
-			defer wg.Done()
-			smp, _ := c.rangeQuery(ctx, token, q, start, end, 120) // 2m step → ~30 points
-			vals := make([]float64, len(smp))
-			for i, s := range smp {
-				vals[i] = s.v
-			}
-			var last float64
-			if len(vals) > 0 {
-				last = vals[len(vals)-1]
-			}
-			mu.Lock()
-			out[k] = sparkResult{vals: vals, last: last}
-			mu.Unlock()
-		}(k, q)
-	}
-	wg.Wait()
-	return out
 }
 
 // VMUsage returns a VM's point-in-time capacity-and-usage for the Summary tab: CPU
@@ -412,29 +187,6 @@ func (c *Client) ClusterSummary(ctx context.Context, token string, namespaces []
 	return out, nil
 }
 
-// scopeChartSpecs builds the per-VM top-consumer charts for a container scope
-// (the whole inventory, a project, a namespace, or a node). Each chart is ONE
-// topk query whose result series are the heaviest VMs, labeled namespace/name.
-// sel is the namespace(+node) selector, rw the rate() window.
-func scopeChartSpecs(sel, rw string) []chartSpec {
-	topk := func(expr string) string { return fmt.Sprintf("topk(5, sum by(namespace,name)(%s))", expr) }
-	rate := func(metric string) string { return fmt.Sprintf("rate(%s%s[%s])", metric, sel, rw) }
-	return []chartSpec{
-		{"cpu", "CPU — top VMs", "cores", false, []seriesSpec{
-			{"", topk(rate("kubevirt_vmi_cpu_usage_seconds_total")), ""},
-		}},
-		{"memory", "Memory — top VMs", "bytes", false, []seriesSpec{
-			{"", topk(fmt.Sprintf("kubevirt_vmi_memory_used_bytes%s", sel)), ""},
-		}},
-		{"network", "Network — top VMs", "Bps", false, []seriesSpec{
-			{"", topk(rate("kubevirt_vmi_network_receive_bytes_total") + " + " + rate("kubevirt_vmi_network_transmit_bytes_total")), ""},
-		}},
-		{"disk", "Disk throughput — top VMs", "Bps", false, []seriesSpec{
-			{"", topk(rate("kubevirt_vmi_storage_read_traffic_bytes_total") + " + " + rate("kubevirt_vmi_storage_write_traffic_bytes_total")), ""},
-		}},
-	}
-}
-
 // ScopeMetrics returns the per-VM top-consumer time-series for a container
 // scope over the given range — the container Monitor's Performance view. Each
 // chart is one topk query; its result series are named namespace/name. Cached
@@ -490,60 +242,6 @@ func (c *Client) ScopeMetrics(ctx context.Context, token string, namespaces []st
 	}
 	c.scope.Put(key, out)
 	return out, nil
-}
-
-// namedFromLabeled names topk result series by their namespace/name labels,
-// sorted so colors stay stable across refreshes (topk order churns per step).
-func namedFromLabeled(series []labeledSeries) []namedSeries {
-	out := make([]namedSeries, 0, len(series))
-	for _, ls := range series {
-		out = append(out, namedSeries{name: seriesName(ls.labels), samples: ls.samples})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
-	return out
-}
-
-// buildChart aligns one chart's series onto a shared time axis (the union of
-// all series' timestamps), with nil gaps where a series has no sample.
-func buildChart(cs chartSpec, series []namedSeries) model.MetricChart {
-	set := map[int64]struct{}{}
-	for _, s := range series {
-		for _, smp := range s.samples {
-			set[smp.t] = struct{}{}
-		}
-	}
-	times := make([]int64, 0, len(set))
-	for t := range set {
-		times = append(times, t)
-	}
-	sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
-	at := make(map[int64]int, len(times))
-	for i, t := range times {
-		at[t] = i
-	}
-	chart := model.MetricChart{Key: cs.key, Title: cs.title, Unit: cs.unit, Stacked: cs.stacked, Times: times, Series: make([]model.MetricSeries, len(series))}
-	for si, s := range series {
-		vals := make([]*float64, len(times))
-		for _, smp := range s.samples {
-			v := smp.v
-			vals[at[smp.t]] = &v
-		}
-		chart.Series[si] = model.MetricSeries{Name: s.name, Values: vals}
-	}
-	return chart
-}
-
-// seriesName labels one scope-chart series by the VM it tracks.
-func seriesName(labels map[string]string) string {
-	ns, name := labels["namespace"], labels["name"]
-	switch {
-	case ns != "" && name != "":
-		return ns + "/" + name
-	case name != "":
-		return name
-	default:
-		return "value"
-	}
 }
 
 // Alerts returns the firing Prometheus alerts in the given namespaces — the
@@ -615,78 +313,6 @@ func consumers(vec []labeledValue) []model.ConsumerVM {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Value > out[j].Value })
 	return out
-}
-
-type sample struct {
-	t int64
-	v float64
-}
-
-// labeledSeries is one query_range result series: its labels and samples.
-type labeledSeries struct {
-	labels  map[string]string
-	samples []sample
-}
-
-// rangeSeries runs one query_range and returns every result series with its
-// labels — the multi-series read behind the scope charts (and the per-NIC/
-// per-drive variants to come). NaN/Inf values are dropped as gaps.
-func (c *Client) rangeSeries(ctx context.Context, token, query string, start, end int64, step int) ([]labeledSeries, error) {
-	q := url.Values{}
-	q.Set("query", query)
-	q.Set("start", strconv.FormatInt(start, 10))
-	q.Set("end", strconv.FormatInt(end, 10))
-	q.Set("step", strconv.Itoa(step))
-	var body struct {
-		Status string `json:"status"`
-		Data   struct {
-			Result []struct {
-				Metric map[string]string    `json:"metric"`
-				Values [][2]json.RawMessage `json:"values"`
-			} `json:"result"`
-		} `json:"data"`
-	}
-	if err := c.queryJSON(ctx, token, "/api/v1/query_range", q, &body); err != nil {
-		return nil, err
-	}
-	if body.Status != "success" {
-		return nil, nil
-	}
-	out := make([]labeledSeries, 0, len(body.Data.Result))
-	for _, r := range body.Data.Result {
-		samples := make([]sample, 0, len(r.Values))
-		for _, pair := range r.Values {
-			var ts float64
-			if json.Unmarshal(pair[0], &ts) != nil {
-				continue
-			}
-			v, ok := parseSampleValue(pair[1])
-			if !ok {
-				continue
-			}
-			samples = append(samples, sample{t: int64(ts), v: v})
-		}
-		out = append(out, labeledSeries{labels: r.Metric, samples: samples})
-	}
-	return out, nil
-}
-
-// rangeQuery runs one query_range and returns the first series' samples (the
-// curated per-VM queries each yield a single series).
-func (c *Client) rangeQuery(ctx context.Context, token, query string, start, end int64, step int) ([]sample, error) {
-	series, err := c.rangeSeries(ctx, token, query, start, end, step)
-	if err != nil || len(series) == 0 {
-		return nil, err
-	}
-	return series[0].samples, nil
-}
-
-// namedSeries is one resolved chart series: its display name and samples. The
-// chart builders consume these whether they came from a fixed spec or were
-// fanned out of a multi-series (byLabel / topk) query.
-type namedSeries struct {
-	name    string
-	samples []sample
 }
 
 // VMMetrics runs the curated charts for one VM over the given range concurrently,
@@ -767,17 +393,4 @@ func (c *Client) VMMetrics(ctx context.Context, token, ns, name, rng string) (mo
 	}
 	c.vmMetrics.Put(key, out)
 	return out, nil
-}
-
-// joinName composes a series display name from its spec prefix and the
-// fanned-out label value ("Rx" + "eth0" → "Rx eth0").
-func joinName(prefix, label string) string {
-	switch {
-	case label == "":
-		return prefix
-	case prefix == "":
-		return label
-	default:
-		return prefix + " " + label
-	}
 }

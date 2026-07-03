@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { Upload, X } from 'lucide-svelte';
+	import { Upload } from 'lucide-svelte';
 	import { api, Unauthorized, type Options } from '$lib/api';
+	import Modal from './Modal.svelte';
 
 	// Image upload (OVF-import analog). dotvirt creates the upload-target
 	// DataVolume + mints a token; the browser then streams the file STRAIGHT to
@@ -46,7 +47,11 @@
 		const f = (e.target as HTMLInputElement).files?.[0] ?? null;
 		file = f;
 		if (f) {
-			if (!name) name = f.name.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9-]/g, '-');
+			if (!name)
+				name = f.name
+					.replace(/\.[^.]+$/, '')
+					.toLowerCase()
+					.replace(/[^a-z0-9-]/g, '-');
 			// Default the PVC a little larger than the file (qcow2 virtual size can
 			// exceed the file); the user can adjust.
 			const gi = Math.max(1, Math.ceil(f.size / 1024 ** 3) + 1);
@@ -119,156 +124,140 @@
 	}
 </script>
 
-<div
-	class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-	onclick={(e) => e.target === e.currentTarget && stage !== 'uploading' && onclose()}
-	onkeydown={(e) => e.key === 'Escape' && stage !== 'uploading' && onclose()}
-	role="presentation"
->
-	<div class="flex max-h-[90vh] w-full max-w-lg flex-col rounded-lg bg-white shadow-xl">
-		<header class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-			<h2 class="flex items-center gap-2 text-base font-semibold text-slate-800">
-				<Upload size={16} /> Upload image
-			</h2>
-			<button onclick={onclose} aria-label="Close" class="text-slate-400 hover:text-slate-700"
-				><X size={18} /></button
-			>
-		</header>
-
-		<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm">
-			{#if stage === 'form' || stage === 'error'}
-				<p class="mb-3 text-xs text-slate-500">
-					Uploads a disk image (qcow2/raw/iso) as a DataVolume your VMs can boot from. The file
-					streams straight from your browser to the cluster's upload proxy.
+<Modal title="Upload image" size="lg" dismissable={stage !== 'uploading'} {onclose}>
+	{#snippet icon()}<Upload size={16} />{/snippet}
+	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm">
+		{#if stage === 'form' || stage === 'error'}
+			<p class="mb-3 text-xs text-slate-500">
+				Uploads a disk image (qcow2/raw/iso) as a DataVolume your VMs can boot from. The file
+				streams straight from your browser to the cluster's upload proxy.
+			</p>
+			<div class="grid grid-cols-2 gap-4">
+				<label class="col-span-2 block">
+					<span class="text-slate-600">Image file</span>
+					<input
+						type="file"
+						onchange={pickFile}
+						accept=".qcow2,.img,.raw,.iso,.gz,.xz"
+						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+					/>
+				</label>
+				<label class="block">
+					<span class="text-slate-600">Disk name</span>
+					<input
+						bind:value={name}
+						placeholder="my-image"
+						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-sm"
+					/>
+				</label>
+				<label class="block">
+					<span class="text-slate-600">Project (namespace)</span>
+					<select
+						bind:value={namespace}
+						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+					>
+						{#each namespaces as ns (ns)}<option value={ns}>{ns}</option>{/each}
+					</select>
+				</label>
+				<label class="block">
+					<span class="text-slate-600">Disk size</span>
+					<input
+						bind:value={size}
+						placeholder="10Gi"
+						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+					/>
+				</label>
+				<label class="block">
+					<span class="text-slate-600">Storage class</span>
+					<select
+						bind:value={storageClass}
+						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+					>
+						<option value="">cluster default</option>
+						{#each options?.storageClasses ?? [] as sc (sc.name)}
+							<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
+						{/each}
+					</select>
+				</label>
+			</div>
+			{#if file}
+				<p class="mt-2 text-xs text-slate-400">
+					{file.name} · {(file.size / 1024 ** 2).toFixed(1)} MiB — ensure the disk size fits the image's
+					virtual size.
 				</p>
-				<div class="grid grid-cols-2 gap-4">
-					<label class="col-span-2 block">
-						<span class="text-slate-600">Image file</span>
-						<input
-							type="file"
-							onchange={pickFile}
-							accept=".qcow2,.img,.raw,.iso,.gz,.xz"
-							class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
-						/>
-					</label>
-					<label class="block">
-						<span class="text-slate-600">Disk name</span>
-						<input
-							bind:value={name}
-							placeholder="my-image"
-							class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-sm"
-						/>
-					</label>
-					<label class="block">
-						<span class="text-slate-600">Project (namespace)</span>
-						<select
-							bind:value={namespace}
-							class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+			{/if}
+			{#if !validName && name}
+				<p class="mt-1 text-xs text-amber-700">
+					Lowercase letters, digits and dashes only (≤63 chars).
+				</p>
+			{/if}
+			{#if error}
+				<pre
+					class="mt-2 rounded bg-red-50 p-2 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+			{/if}
+		{:else}
+			<!-- Progress view. -->
+			<div class="space-y-3 py-2">
+				{#snippet step(label: string, active: boolean, complete: boolean)}
+					<div class="flex items-center gap-2 text-sm">
+						<span
+							class="flex h-4 w-4 items-center justify-center rounded-full text-[10px] {complete
+								? 'bg-green-500 text-white'
+								: active
+									? 'bg-blue-500 text-white'
+									: 'bg-slate-200 text-slate-400'}"
 						>
-							{#each namespaces as ns (ns)}<option value={ns}>{ns}</option>{/each}
-						</select>
-					</label>
-					<label class="block">
-						<span class="text-slate-600">Disk size</span>
-						<input
-							bind:value={size}
-							placeholder="10Gi"
-							class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
-						/>
-					</label>
-					<label class="block">
-						<span class="text-slate-600">Storage class</span>
-						<select
-							bind:value={storageClass}
-							class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
-						>
-							<option value="">cluster default</option>
-							{#each options?.storageClasses ?? [] as sc (sc.name)}
-								<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
-							{/each}
-						</select>
-					</label>
-				</div>
-				{#if file}
-					<p class="mt-2 text-xs text-slate-400">
-						{file.name} · {(file.size / 1024 ** 2).toFixed(1)} MiB — ensure the disk size fits the
-						image's virtual size.
+							{complete ? '✓' : ''}
+						</span>
+						<span class={active || complete ? 'text-slate-800' : 'text-slate-400'}>{label}</span>
+					</div>
+				{/snippet}
+				{@render step('Creating target', stage === 'creating', stageIdx > 0)}
+				{@render step('Preparing storage', stage === 'preparing', stageIdx > 1)}
+				{@render step(
+					`Uploading${stage === 'uploading' ? ` — ${uploadPct}%` : ''}`,
+					stage === 'uploading',
+					stageIdx > 2
+				)}
+				{#if stage === 'uploading'}
+					<div class="ml-6 h-2 overflow-hidden rounded-full bg-slate-100">
+						<div class="h-full rounded-full bg-blue-500" style="width:{uploadPct}%"></div>
+					</div>
+				{/if}
+				{@render step(
+					`Importing${stage === 'importing' && importInfo ? ` — ${importInfo}` : ''}`,
+					stage === 'importing',
+					stageIdx > 3
+				)}
+
+				{#if stage === 'done'}
+					<p class="mt-3 rounded bg-green-50 p-3 text-xs text-green-800">
+						<strong>{name}</strong> is ready in <strong>{namespace}</strong> — use it as a VM's boot disk.
 					</p>
 				{/if}
-				{#if !validName && name}
-					<p class="mt-1 text-xs text-amber-700">
-						Lowercase letters, digits and dashes only (≤63 chars).
-					</p>
-				{/if}
-				{#if error}
-					<pre class="mt-2 rounded bg-red-50 p-2 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
-				{/if}
-			{:else}
-				<!-- Progress view. -->
-				<div class="space-y-3 py-2">
-					{#snippet step(label: string, active: boolean, complete: boolean)}
-						<div class="flex items-center gap-2 text-sm">
-							<span
-								class="flex h-4 w-4 items-center justify-center rounded-full text-[10px] {complete
-									? 'bg-green-500 text-white'
-									: active
-										? 'bg-blue-500 text-white'
-										: 'bg-slate-200 text-slate-400'}"
-							>
-								{complete ? '✓' : ''}
-							</span>
-							<span class={active || complete ? 'text-slate-800' : 'text-slate-400'}>{label}</span>
-						</div>
-					{/snippet}
-					{@render step('Creating target', stage === 'creating', stageIdx > 0)}
-					{@render step('Preparing storage', stage === 'preparing', stageIdx > 1)}
-					{@render step(
-						`Uploading${stage === 'uploading' ? ` — ${uploadPct}%` : ''}`,
-						stage === 'uploading',
-						stageIdx > 2
-					)}
-					{#if stage === 'uploading'}
-						<div class="ml-6 h-2 overflow-hidden rounded-full bg-slate-100">
-							<div class="h-full rounded-full bg-blue-500" style="width:{uploadPct}%"></div>
-						</div>
-					{/if}
-					{@render step(
-						`Importing${stage === 'importing' && importInfo ? ` — ${importInfo}` : ''}`,
-						stage === 'importing',
-						stageIdx > 3
-					)}
-
-					{#if stage === 'done'}
-						<p class="mt-3 rounded bg-green-50 p-3 text-xs text-green-800">
-							<strong>{name}</strong> is ready in <strong>{namespace}</strong> — use it as a VM's
-							boot disk.
-						</p>
-					{/if}
-				</div>
-			{/if}
-		</div>
-
-		<footer class="flex items-center gap-2 border-t border-slate-200 px-5 py-3">
-			{#if stage === 'form' || stage === 'error'}
-				<button
-					onclick={onclose}
-					class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button
-				>
-				<button
-					onclick={start}
-					disabled={!ready}
-					class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
-				>
-					{stage === 'error' ? 'Retry' : 'Upload'}
-				</button>
-			{:else if stage === 'done'}
-				<button
-					onclick={onclose}
-					class="ml-auto rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white">Done</button
-				>
-			{:else}
-				<span class="ml-auto text-xs text-slate-400">Working… keep this tab open.</span>
-			{/if}
-		</footer>
+			</div>
+		{/if}
 	</div>
-</div>
+	{#snippet footer()}
+		{#if stage === 'form' || stage === 'error'}
+			<button
+				onclick={onclose}
+				class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button
+			>
+			<button
+				onclick={start}
+				disabled={!ready}
+				class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
+			>
+				{stage === 'error' ? 'Retry' : 'Upload'}
+			</button>
+		{:else if stage === 'done'}
+			<button
+				onclick={onclose}
+				class="ml-auto rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white">Done</button
+			>
+		{:else}
+			<span class="ml-auto text-xs text-slate-400">Working… keep this tab open.</span>
+		{/if}
+	{/snippet}
+</Modal>

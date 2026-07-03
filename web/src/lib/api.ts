@@ -70,8 +70,8 @@ export interface User {
 	groups: string[];
 }
 
-// Unauthorized is thrown when a call returns 401, so the UI can drop to the login
-// screen from anywhere.
+// Unauthorized is thrown when a call returns 401, so a caller can suppress its
+// own error rendering; the sign-out itself is handled centrally (below).
 export class Unauthorized extends Error {
 	constructor() {
 		super('unauthorized');
@@ -79,9 +79,21 @@ export class Unauthorized extends Error {
 	}
 }
 
+// The one signed-out sink: every 401 funnels through req(), so the page
+// registers a single handler here instead of each fetching component
+// remembering to report it. The WebSocket paths (streamInventory, VNC) don't
+// go through req and take their own onUnauthorized callback.
+let unauthorizedSink: (() => void) | undefined;
+export function onUnauthorized(fn: () => void) {
+	unauthorizedSink = fn;
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
 	const res = await fetch(path, { credentials: 'same-origin', ...init });
-	if (res.status === 401) throw new Unauthorized();
+	if (res.status === 401) {
+		unauthorizedSink?.();
+		throw new Unauthorized();
+	}
 	if (!res.ok) throw new Error(`${path}: ${res.status} ${await res.text()}`);
 	if (res.status === 204) return undefined as T;
 	return res.json() as Promise<T>;
@@ -188,12 +200,21 @@ export interface PhysicalAdapter {
 	mtu?: number;
 	role?: string; // cluster-uplink | enslaved | available
 }
+export interface NetworkCaps {
+	sharedSegment: boolean; // shared / VLAN CUDN
+	uplink: boolean; // nmstate NNCP
+	namespace: boolean; // namespaces (New Project / Namespace)
+	egressIP: boolean; // Tier-0 SNAT
+	externalRoute: boolean; // Tier-0 external route
+	adminNetworkPolicy: boolean; // cluster-wide admin DFW (ANP/BANP)
+}
 export interface NetworkInventory {
 	networks: Network[];
 	uplinks: Uplink[];
 	physicalAdapters: PhysicalAdapter[];
 	nmstatePresent: boolean;
-	canManage: boolean; // caller may author platform-tier networking (CUDN/uplink/namespace)
+	canManage: boolean; // coarse "any platform authoring" (CUDN); gates the platform-draft view
+	caps?: NetworkCaps; // per-action authoring authority for precise button gating
 }
 
 export interface CreateVMRequest {
@@ -242,6 +263,64 @@ export interface UplinkCreate {
 	nic: string; // physical port to enslave
 	bridge?: string; // OVS bridge; default br-<name>
 	nodeSelector?: Record<string, string>; // node labels; omit = all workers, or {kubernetes.io/hostname: <node>}
+}
+// EgressFirewall — a namespace's north-south egress rules (the Tier-1 gateway
+// firewall). One per namespace (named "default" server-side); rules are first-match.
+export interface EgressFirewallPort {
+	protocol: 'TCP' | 'UDP' | 'SCTP';
+	port: number;
+}
+export interface EgressFirewallRule {
+	action: 'Allow' | 'Deny';
+	cidr?: string; // set exactly one of cidr / dnsName
+	dnsName?: string;
+	ports?: EgressFirewallPort[];
+}
+export interface EgressFirewallCreate {
+	namespace: string;
+	rules: EgressFirewallRule[];
+}
+// Tier-0 (provider-edge) services — cluster-scoped, platform-routed.
+export interface EgressIPCreate {
+	name: string;
+	egressIPs: string[]; // the source-NAT pool
+	namespaces: string[]; // projects it pins egress for
+}
+export interface ExternalRouteCreate {
+	name: string;
+	namespaces: string[]; // projects whose egress is steered
+	nextHops: string[]; // static external next-hop IPs
+}
+// Distributed Firewall (east-west) — a NetworkPolicy protecting a Group (a label
+// selector) inside one namespace, allowing ingress only from the named peer Groups.
+export interface PolicyPort {
+	protocol: 'TCP' | 'UDP' | 'SCTP';
+	port: number;
+}
+export interface PolicyRule {
+	from?: Record<string, string>[]; // peer Groups (podSelector matchLabels)
+	ports?: PolicyPort[];
+}
+export interface NetworkPolicyCreate {
+	name: string;
+	namespace: string;
+	appliedTo?: Record<string, string>; // the Group this protects; empty = whole namespace
+	ingress?: PolicyRule[];
+}
+// Cluster-wide admin Distributed Firewall — AdminNetworkPolicy (priority + Pass) or
+// the BaselineAdminNetworkPolicy default (Allow/Deny only). Platform-tier, admin-only.
+export interface AdminPolicyRule {
+	action: 'Allow' | 'Deny' | 'Pass';
+	peers: Record<string, string>[]; // peer Groups (namespaceSelector matchLabels; {} = all)
+	ports?: PolicyPort[];
+}
+export interface AdminNetworkPolicyCreate {
+	name: string;
+	baseline?: boolean; // a BaselineAdminNetworkPolicy (the singleton "default")
+	priority?: number; // 0..1000, lower = higher precedence (ANP only)
+	subject?: Record<string, string>; // namespaceSelector matchLabels; empty = all namespaces
+	ingress?: AdminPolicyRule[];
+	egress?: AdminPolicyRule[];
 }
 export interface NamespaceCreate {
 	name: string;
@@ -476,6 +555,12 @@ export const api = {
 	stageCreate: (req: CreateVMRequest) => post<DraftView>('/api/vms', req),
 	createNetwork: (req: NetworkCreate) => post<DraftView>('/api/networks', req),
 	createUplink: (req: UplinkCreate) => post<DraftView>('/api/uplinks', req),
+	createEgressFirewall: (req: EgressFirewallCreate) => post<DraftView>('/api/egressfirewalls', req),
+	createEgressIP: (req: EgressIPCreate) => post<DraftView>('/api/egressips', req),
+	createExternalRoute: (req: ExternalRouteCreate) => post<DraftView>('/api/externalroutes', req),
+	createNetworkPolicy: (req: NetworkPolicyCreate) => post<DraftView>('/api/networkpolicies', req),
+	createAdminNetworkPolicy: (req: AdminNetworkPolicyCreate) =>
+		post<DraftView>('/api/adminnetworkpolicies', req),
 	createNamespace: (req: NamespaceCreate) => post<DraftView>('/api/namespaces', req),
 	createProject: (req: ProjectCreate) => post<DraftView>('/api/projects', req),
 	stageDelete: (namespace: string, name: string) =>
@@ -587,7 +672,9 @@ export async function draftsByProject(
 			}
 		})
 	);
-	return results.filter((r): r is { project: string; draft: DraftView } => !!r && r.draft.count > 0);
+	return results.filter(
+		(r): r is { project: string; draft: DraftView } => !!r && r.draft.count > 0
+	);
 }
 
 /**

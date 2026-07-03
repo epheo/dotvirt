@@ -65,6 +65,115 @@ func (s *Server) handleCreateUplink(w http.ResponseWriter, r *http.Request) {
 	respond(w, view, err)
 }
 
+// handleCreateAdminNetworkPolicy stages a cluster-wide admin DFW policy
+// (AdminNetworkPolicy or the baseline default) — always platform-tier and admin-only,
+// gated on the caller's authority to create the matching kind.
+func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.Request) {
+	raw, err := readAll(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var peek struct {
+		Baseline bool `json:"baseline"`
+	}
+	_ = json.Unmarshal(raw, &peek)
+	resource := "adminnetworkpolicies"
+	if peek.Baseline {
+		resource = "baselineadminnetworkpolicies"
+	}
+	sc, ok := s.platformScope(w, r, "policy.networking.k8s.io", resource)
+	if !ok {
+		return
+	}
+	view, err := s.draft.StageCreateAdminNetworkPolicy(sc.id, sc.proj, raw)
+	respond(w, view, err)
+}
+
+// handleCreateNetworkPolicy stages a NetworkPolicy (the east-west Distributed
+// Firewall) — namespace-scoped, so it routes to the tenant project owning the
+// namespace; the tenant's Argo app applies it on merge.
+func (s *Server) handleCreateNetworkPolicy(w http.ResponseWriter, r *http.Request) {
+	raw, err := readAll(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var peek struct {
+		Namespace string `json:"namespace"`
+	}
+	_ = json.Unmarshal(raw, &peek)
+	if peek.Namespace == "" {
+		http.Error(w, "a namespace is required for a network policy", http.StatusBadRequest)
+		return
+	}
+	sc, ok := s.resolveProject(w, r, byNamespace(peek.Namespace))
+	if !ok {
+		return
+	}
+	view, err := s.draft.StageCreateNetworkPolicy(sc.id, sc.proj, raw)
+	respond(w, view, err)
+}
+
+// handleCreateEgressIP stages a cluster-scoped EgressIP (the Tier-0 source-NAT pool)
+// — always platform-tier, gated on the caller's authority to create EgressIPs.
+func (s *Server) handleCreateEgressIP(w http.ResponseWriter, r *http.Request) {
+	raw, err := readAll(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	sc, ok := s.platformScope(w, r, "k8s.ovn.org", "egressips")
+	if !ok {
+		return
+	}
+	view, err := s.draft.StageCreateEgressIP(sc.id, sc.proj, raw)
+	respond(w, view, err)
+}
+
+// handleCreateExternalRoute stages a cluster-scoped AdminPolicyBasedExternalRoute (the
+// Tier-0 external next-hop route) — always platform-tier, gated on the caller's
+// authority to create them.
+func (s *Server) handleCreateExternalRoute(w http.ResponseWriter, r *http.Request) {
+	raw, err := readAll(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	sc, ok := s.platformScope(w, r, "k8s.ovn.org", "adminpolicybasedexternalroutes")
+	if !ok {
+		return
+	}
+	view, err := s.draft.StageCreateExternalRoute(sc.id, sc.proj, raw)
+	respond(w, view, err)
+}
+
+// handleCreateEgressFirewall stages a namespace's egress firewall (the Tier-1
+// gateway firewall) — namespace-scoped, so it routes to the tenant project owning
+// the namespace, the same path as a project-scoped UDN. The tenant's Argo app applies
+// it on merge (its AppProject must permit k8s.ovn.org/EgressFirewall).
+func (s *Server) handleCreateEgressFirewall(w http.ResponseWriter, r *http.Request) {
+	raw, err := readAll(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var peek struct {
+		Namespace string `json:"namespace"`
+	}
+	_ = json.Unmarshal(raw, &peek)
+	if peek.Namespace == "" {
+		http.Error(w, "a namespace is required for an egress firewall", http.StatusBadRequest)
+		return
+	}
+	sc, ok := s.resolveProject(w, r, byNamespace(peek.Namespace))
+	if !ok {
+		return
+	}
+	view, err := s.draft.StageCreateEgressFirewall(sc.id, sc.proj, raw)
+	respond(w, view, err)
+}
+
 // handleCreateNamespace stages a new namespace (+ optional primary "VM Network").
 // The Namespace object is cluster-scoped, so it is COMMITTED to the platform repo
 // and gated on namespace-create authority; but it is labeled/annotated to the tenant
@@ -212,7 +321,22 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	// must be able to create cluster-scoped networks (the platform-operator signal,
 	// also satisfied by cluster-admins). Gates the New VLAN / Add Uplink / New
 	// Namespace actions, matching the platformScope gate the create routes enforce.
-	out.CanManage = s.cfg.PlatformRepo != "" && c.CanCreateClusterResource(r.Context(), "k8s.ovn.org", "clusteruserdefinednetworks")
+	// Per-action authoring authority: the same SSARs the create handlers enforce, so
+	// the UI gates each button precisely. CanManage stays the coarse CUDN signal that
+	// gates the platform-draft view. All false when no platform repo is configured.
+	if s.cfg.PlatformRepo != "" {
+		ctx := r.Context()
+		cudn := c.CanCreateClusterResource(ctx, "k8s.ovn.org", "clusteruserdefinednetworks")
+		out.CanManage = cudn
+		out.Caps = model.NetworkCaps{
+			SharedSegment:      cudn,
+			Uplink:             c.CanCreateClusterResource(ctx, "nmstate.io", "nodenetworkconfigurationpolicies"),
+			Namespace:          c.CanCreateClusterResource(ctx, "", "namespaces"),
+			EgressIP:           c.CanCreateClusterResource(ctx, "k8s.ovn.org", "egressips"),
+			ExternalRoute:      c.CanCreateClusterResource(ctx, "k8s.ovn.org", "adminpolicybasedexternalroutes"),
+			AdminNetworkPolicy: c.CanCreateClusterResource(ctx, "policy.networking.k8s.io", "adminnetworkpolicies"),
+		}
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 

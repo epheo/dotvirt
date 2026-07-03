@@ -6,10 +6,12 @@
 		Folder,
 		Layers,
 		LayoutGrid,
+		Library,
 		Network,
 		Pencil,
 		Server,
-		Trash2
+		Trash2,
+		Workflow
 	} from 'lucide-svelte';
 	import type {
 		DraftItem,
@@ -19,17 +21,9 @@
 		ProjectNamespace,
 		VM
 	} from '$lib/api';
-	import { vmNetworkKeys, vmStorageKeys } from '$lib/lenses';
+	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
 	import PowerDot from './PowerDot.svelte';
 	import SyncBadge from './SyncBadge.svelte';
-
-	type Scope =
-		| { kind: 'all' }
-		| { kind: 'project'; project: string }
-		| { kind: 'namespace'; project: string; namespace: string }
-		| { kind: 'node'; node: string }
-		| { kind: 'network'; network: string }
-		| { kind: 'storage'; storageClass: string };
 
 	let {
 		inventory,
@@ -38,18 +32,24 @@
 		staged,
 		networks = [],
 		canManage = false,
+		catalogActive = false,
+		topologyActive = false,
 		onselect,
 		onscope,
 		oncontextvm,
 		oncontextcontainer,
-		onattachrepo
+		onattachrepo,
+		oncatalog,
+		ontopology
 	}: {
 		inventory: Inventory;
 		selected: VM | null;
 		scope: Scope;
 		staged: Map<string, DraftItem>;
-		networks?: PortGroup[]; // port-group catalog, for friendly Networks-lens grouping
+		networks?: PortGroup[]; // port-group catalog, for friendly Segments-lens grouping
 		canManage?: boolean; // gates the platform-tier "Attach repo" CTA on repoless projects
+		catalogActive?: boolean; // highlights the pinned Catalog entry while its panel is open
+		topologyActive?: boolean; // highlights the pinned Topology entry while the map is open
 		onselect: (vm: VM) => void;
 		onscope: (s: Scope) => void;
 		oncontextvm?: (vm: VM, x: number, y: number) => void;
@@ -59,6 +59,8 @@
 			y: number
 		) => void;
 		onattachrepo?: (project: string, namespaces: string[]) => void;
+		oncatalog?: () => void; // opens the cluster resource catalog (a destination, not a scope)
+		ontopology?: () => void; // opens the network topology map (a destination, not a scope)
 	} = $props();
 
 	function ctxVM(e: MouseEvent, vm: VM) {
@@ -88,7 +90,7 @@
 	const LENSES: { id: Lens; label: string }[] = [
 		{ id: 'project', label: 'Projects' },
 		{ id: 'node', label: 'Nodes' },
-		{ id: 'network', label: 'Networks' },
+		{ id: 'network', label: 'Segments' },
 		{ id: 'storage', label: 'Storage' }
 	];
 
@@ -172,6 +174,37 @@
 {/snippet}
 
 <div class="select-none text-[13px]">
+	<!-- Catalog: a pinned destination (cluster images, instance types, networks,
+	     storage classes) — vCenter parks its Content Libraries in the left nav, above
+	     the inventory lenses. Opens the catalog panel rather than re-scoping the grid. -->
+	{#if oncatalog}
+		<button
+			class="flex w-full items-center gap-1 border-b border-slate-200 px-2 py-1.5 text-left hover:bg-slate-100
+				{catalogActive ? 'bg-blue-50' : ''}"
+			onclick={oncatalog}
+			title="Browse the cluster's images, instance types, preferences, networks and storage classes"
+		>
+			<span class="w-3"></span>
+			<Library size={14} class="text-slate-400" />
+			<span class="font-semibold text-slate-700">Catalog</span>
+		</button>
+	{/if}
+
+	<!-- Topology: the network map (Tier-0 → Tier-1 → Segment → VM), a destination like
+	     Catalog rather than a scope. -->
+	{#if ontopology}
+		<button
+			class="flex w-full items-center gap-1 border-b border-slate-200 px-2 py-1.5 text-left hover:bg-slate-100
+				{topologyActive ? 'bg-blue-50' : ''}"
+			onclick={ontopology}
+			title="Network Topology — the Tier-0 → Tier-1 → Segment → VM map"
+		>
+			<span class="w-3"></span>
+			<Workflow size={14} class="text-slate-400" />
+			<span class="font-semibold text-slate-700">Topology</span>
+		</button>
+	{/if}
+
 	<!-- Lens switch (one object set, four organizing views). -->
 	<div class="flex flex-wrap gap-1 border-b border-slate-200 px-2 py-1.5">
 		{#each LENSES as l (l.id)}
@@ -273,7 +306,9 @@
 									onclick={() => toggle(nid)}
 									title="Expand/collapse"
 								>
-									{#if collapsed[nid]}<ChevronRight size={12} />{:else}<ChevronDown size={12} />{/if}
+									{#if collapsed[nid]}<ChevronRight size={12} />{:else}<ChevronDown
+											size={12}
+										/>{/if}
 								</button>
 								<button
 									class="flex min-w-0 flex-1 items-center gap-1 text-left"
@@ -290,7 +325,8 @@
 									<Layers size={13} class="shrink-0 text-slate-400" />
 									<span class="truncate text-slate-600">{ns.namespace}</span>
 									{#if nsDrift(ns)}
-										<span class="h-1.5 w-1.5 rounded-full bg-red-500" title="A VM is OutOfSync"></span>
+										<span class="h-1.5 w-1.5 rounded-full bg-red-500" title="A VM is OutOfSync"
+										></span>
 									{/if}
 									<span class="ml-auto text-xs text-slate-400">{ns.vms.length}</span>
 								</button>
