@@ -70,3 +70,11 @@ runs:
         # test's own CatalogSource needs the node's bandwidth and the resolver's
         # attention, and nothing here subscribes to it.
         kubectl -n olm delete catalogsource operatorhubio-catalog --ignore-not-found
+        # The delete races the catalog-operator's client registration: a client it
+        # already holds outlives the CatalogSource and its service, and one stale
+        # client fails resolver-cache population for EVERY namespace ("failed to
+        # populate resolver cache from source operatorhubio-catalog/olm"), so no
+        # Subscription ever resolves. A restart rebuilds the source store from the
+        # CatalogSources that still exist.
+        kubectl -n olm rollout restart deploy catalog-operator
+        kubectl -n olm rollout status deploy catalog-operator --timeout 2m
