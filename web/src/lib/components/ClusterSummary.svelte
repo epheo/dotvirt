@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { api, Unauthorized, type ClusterSummary } from '$lib/api';
-	import { cores, bytes } from '$lib/format';
 	import { pollWhileVisible } from '$lib/poll';
 	import HostBalance from './HostBalance.svelte';
 	import QuotaBand from './QuotaBand.svelte';
 	import Ring from './Ring.svelte';
+	import TopConsumers from './TopConsumers.svelte';
 
 	let {
 		scope = {},
@@ -133,28 +133,6 @@
 				</div>
 			{/if}
 
-			<!-- Cluster scope only: the worker distribution is one cluster-wide fact;
-			     a project/namespace/node view would repeat it misleadingly. -->
-			{#if !scope.project && !scope.namespace && !scope.node}
-				<HostBalance />
-			{/if}
-
-			<div class="min-w-[12rem] flex-1">
-				<div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Top consumers</div>
-				<ul class="mt-1.5 space-y-0.5 text-xs">
-					{#each data.topCpu.slice(0, 3) as c (c.namespace + '/' + c.name)}
-						<li class="flex items-baseline justify-between gap-2">
-							<button
-								onclick={() => onselect?.(c.namespace, c.name)}
-								class="min-w-0 truncate text-slate-700 hover:text-blue-700 hover:underline">{c.name}</button
-							>
-							<span class="shrink-0 text-slate-400">{cores(c.value)} cores · {bytes(data.topMemory.find((m) => m.name === c.name && m.namespace === c.namespace)?.value ?? 0)}</span>
-						</li>
-					{:else}
-						<li class="text-slate-400">No usage data.</li>
-					{/each}
-				</ul>
-			</div>
 		</div>
 
 		<!-- Quota-aware capacity: ResourceQuota bars at project/namespace scope —
@@ -164,6 +142,17 @@
 				<QuotaBand scope={{ project: scope.project, namespace: scope.namespace }} />
 			</div>
 		{/if}
+	</div>
+
+	<!-- The detail row: full cards below the glance band, using the page's height
+	     instead of cramming everything onto one strip. -->
+	<div class="grid items-start gap-4 p-4 lg:grid-cols-2">
+		<!-- Cluster scope only: the worker distribution is one cluster-wide fact;
+		     a project/namespace/node view would repeat it misleadingly. -->
+		{#if !scope.project && !scope.namespace && !scope.node}
+			<HostBalance />
+		{/if}
+		<TopConsumers topCpu={data.topCpu} topMemory={data.topMemory} {onselect} />
 	</div>
 {:else if loading}
 	<div class="border-b border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-400">
