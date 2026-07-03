@@ -40,6 +40,15 @@ type Client struct {
 	cluster   *ttlcache.Cache[model.ClusterSummary]
 	scope     *ttlcache.Cache[model.VMMetrics]
 	alerts    *ttlcache.Cache[[]model.Alert]
+	hosts     *ttlcache.Cache[hostDistribution]
+}
+
+// hostDistribution caches the shaped HostLoad together with the raw per-worker
+// percentages, so the API layer can fold a DRS band around the mean per request
+// without re-querying.
+type hostDistribution struct {
+	load model.HostLoad
+	pcts []float64
 }
 
 // New builds a Client for the query API at baseURL (e.g. the thanos-querier
@@ -76,6 +85,7 @@ func New(baseURL, caPath string, insecure bool) (*Client, error) {
 		cluster:   ttlcache.New[model.ClusterSummary](clusterTTL),
 		scope:     ttlcache.New[model.VMMetrics](clusterTTL),
 		alerts:    ttlcache.New[[]model.Alert](clusterTTL),
+		hosts:     ttlcache.New[hostDistribution](clusterTTL),
 	}, nil
 }
 
@@ -185,6 +195,76 @@ func (c *Client) ClusterSummary(ctx context.Context, token string, namespaces []
 	}
 	c.cluster.Put(key, out)
 	return out, nil
+}
+
+// HostLoad returns the worker-node CPU-utilization distribution behind the DRS
+// balance card, shaped to stay O(1) in cluster size. Three instant vectors —
+// per-node utilization, the worker role set, and cordon state — are joined
+// here rather than in PromQL (node-exporter labels nodes `instance`,
+// kube-state-metrics labels them `node`; a Go join beats a label_replace).
+// Node-level data, same sensitivity class as the node-allocatable totals
+// ClusterSummary serves. The raw percentages come back alongside the shaped
+// load for the caller's band fold; both are cached once for all users.
+func (c *Client) HostLoad(ctx context.Context, token string) (model.HostLoad, []float64, error) {
+	if v, ok := c.hosts.Get("hosts"); ok {
+		return v.load, v.pcts, nil
+	}
+	util := map[string]float64{}
+	for _, lv := range c.vector(ctx, token, `1 - avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[2m]))`) {
+		if n := lv.labels["instance"]; n != "" {
+			util[n] = lv.value
+		}
+	}
+	unsched := map[string]bool{}
+	for _, lv := range c.vector(ctx, token, `kube_node_spec_unschedulable`) {
+		if n := lv.labels["node"]; n != "" && lv.value > 0 {
+			unsched[n] = true
+		}
+	}
+	var nodes []model.HostOutlier
+	for _, lv := range c.vector(ctx, token, `kube_node_role{role="worker"}`) {
+		n := lv.labels["node"]
+		u, ok := util[n]
+		if n == "" || !ok {
+			continue // no exporter series: absent from the distribution, not a fake 0%
+		}
+		nodes = append(nodes, model.HostOutlier{Node: n, Pct: u * 100, Unschedulable: unsched[n]})
+	}
+	if len(nodes) == 0 {
+		return model.HostLoad{}, nil, fmt.Errorf("%w: no worker utilization series", model.ErrUnavailable)
+	}
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].Pct > nodes[j].Pct }) // hottest first
+
+	load := model.HostLoad{
+		Updated: time.Now().Unix(),
+		Workers: len(nodes),
+		Buckets: make([]int, 10),
+	}
+	pcts := make([]float64, len(nodes))
+	var sum float64
+	for i, n := range nodes {
+		pcts[i] = n.Pct
+		sum += n.Pct
+		b := int(n.Pct / 10)
+		if b < 0 {
+			b = 0
+		}
+		if b > 9 {
+			b = 9
+		}
+		load.Buckets[b]++
+	}
+	load.Mean = sum / float64(len(nodes))
+	top := len(nodes)
+	if top > 5 {
+		top = 5
+	}
+	load.Hottest = append([]model.HostOutlier(nil), nodes[:top]...)
+	for i := len(nodes) - 1; i >= len(nodes)-top; i-- {
+		load.Coldest = append(load.Coldest, nodes[i]) // coldest first
+	}
+	c.hosts.Put("hosts", hostDistribution{load: load, pcts: pcts})
+	return load, pcts, nil
 }
 
 // ScopeMetrics returns the per-VM top-consumer time-series for a container

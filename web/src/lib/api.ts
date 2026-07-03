@@ -492,6 +492,26 @@ export interface ClusterSummary {
 	topCpu: ConsumerVM[];
 	topMemory: ConsumerVM[];
 }
+export interface HostOutlier {
+	node: string;
+	pct: number; // CPU utilization percent
+	unschedulable?: boolean;
+}
+export interface HostBand {
+	low: number; // percent
+	high: number;
+	above: number; // workers over high — migration sources
+	below: number; // workers under low — migration targets
+}
+export interface HostLoad {
+	updated: number;
+	workers: number;
+	mean: number; // percent
+	buckets: number[]; // worker count per 10%-wide utilization bucket
+	hottest: HostOutlier[]; // ≤5, hottest first
+	coldest: HostOutlier[]; // ≤5, coldest first
+	band?: HostBand; // absent until DRS is configured
+}
 export interface Snapshot {
 	name: string;
 	created?: string;
@@ -714,6 +734,7 @@ export const api = {
 		get<VMUsage>(`/api/vms/${enc(namespace)}/${enc(name)}/usage`),
 	clusterSummary: (scope: ScopeQuery = {}) =>
 		get<ClusterSummary>(`/api/metrics/cluster${scopeQS(scope)}`),
+	hostLoad: () => get<HostLoad>('/api/metrics/hosts'),
 	scopeMetrics: (scope: ScopeQuery, range: string) =>
 		get<VMMetrics>(`/api/metrics/scope${scopeQS(scope, { range })}`),
 	alarms: () => get<Alert[]>('/api/alarms'),

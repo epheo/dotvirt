@@ -331,6 +331,39 @@ type ClusterSummary struct {
 	TopMemory []ConsumerVM   `json:"topMemory"`
 }
 
+// HostOutlier is one named worker at an edge of the utilization distribution —
+// the only place the payload carries node names, capped to a handful.
+type HostOutlier struct {
+	Node          string  `json:"node"`
+	Pct           float64 `json:"pct"` // CPU utilization percent
+	Unschedulable bool    `json:"unschedulable,omitempty"`
+}
+
+// HostBand is the DRS action band around the mean utilization — the deviation
+// window KubeVirtRelieveAndMigrate actually triggers on. Workers above it are
+// migration sources, workers below it are targets.
+type HostBand struct {
+	Low   float64 `json:"low"`   // percent
+	High  float64 `json:"high"`  // percent
+	Above int     `json:"above"` // workers over High
+	Below int     `json:"below"` // workers under Low
+}
+
+// HostLoad is GET /api/metrics/hosts: the worker CPU-utilization distribution
+// behind the DRS balance card. Deliberately O(1) in cluster size — a fixed
+// 10-bucket histogram plus only the outliers named — so a hundreds-of-workers
+// platform renders the same card as a three-worker lab. Band is set only when
+// a DRS configuration is committed.
+type HostLoad struct {
+	Updated int64         `json:"updated"`
+	Workers int           `json:"workers"`
+	Mean    float64       `json:"mean"`    // percent
+	Buckets []int         `json:"buckets"` // worker count per 10%-wide bucket, [0-10) … [90-100]
+	Hottest []HostOutlier `json:"hottest"` // ≤5, hottest first
+	Coldest []HostOutlier `json:"coldest"` // ≤5, coldest first
+	Band    *HostBand     `json:"band,omitempty"`
+}
+
 // QuotaItem is one resource row of a ResourceQuota: current usage against the
 // hard cap, pre-parsed for direct charting.
 type QuotaItem struct {

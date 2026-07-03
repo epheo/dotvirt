@@ -246,3 +246,68 @@ func TestVectorAndConsumers(t *testing.T) {
 		t.Errorf("consumers not sorted highest-first: %+v", cons)
 	}
 }
+
+// TestHostLoadDistribution verifies the three-vector Go join and the O(1)
+// shaping: only worker-role nodes count, a node without an exporter series is
+// absent (not 0%), cordon state rides the outlier rows, and the histogram/
+// outlier lists stay fixed-size.
+func TestHostLoadDistribution(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("query")
+		result := `[]`
+		switch {
+		case strings.Contains(q, "node_cpu_seconds_total"):
+			result = `[
+				{"metric":{"instance":"w1"},"value":[100,"0.76"]},
+				{"metric":{"instance":"w2"},"value":[100,"0.07"]},
+				{"metric":{"instance":"w3"},"value":[100,"0.08"]},
+				{"metric":{"instance":"infra1"},"value":[100,"0.50"]}]`
+		case strings.Contains(q, "kube_node_spec_unschedulable"):
+			result = `[
+				{"metric":{"node":"w2"},"value":[100,"1"]},
+				{"metric":{"node":"w1"},"value":[100,"0"]}]`
+		case strings.Contains(q, "kube_node_role"):
+			result = `[
+				{"metric":{"node":"w1"},"value":[100,"1"]},
+				{"metric":{"node":"w2"},"value":[100,"1"]},
+				{"metric":{"node":"w3"},"value":[100,"1"]},
+				{"metric":{"node":"w4-no-exporter"},"value":[100,"1"]}]`
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"status":"success","data":{"resultType":"vector","result":%s}}`, result)
+	}))
+	defer srv.Close()
+
+	load, pcts, err := mustNew(t, srv.URL).HostLoad(context.Background(), "tok")
+	if err != nil {
+		t.Fatalf("HostLoad: %v", err)
+	}
+	if load.Workers != 3 || len(pcts) != 3 {
+		t.Fatalf("workers = %d (pcts %d), want 3: infra excluded, exporter-less skipped", load.Workers, len(pcts))
+	}
+	if want := (76.0 + 7 + 8) / 3; load.Mean < want-0.01 || load.Mean > want+0.01 {
+		t.Errorf("mean = %v, want %v", load.Mean, want)
+	}
+	if len(load.Buckets) != 10 || load.Buckets[0] != 2 || load.Buckets[7] != 1 {
+		t.Errorf("buckets = %v, want 2 in [0-10) and 1 in [70-80)", load.Buckets)
+	}
+	if len(load.Hottest) != 3 || load.Hottest[0].Node != "w1" || load.Hottest[0].Unschedulable {
+		t.Errorf("hottest = %+v, want w1 first, schedulable", load.Hottest)
+	}
+	if load.Coldest[0].Node != "w2" || !load.Coldest[0].Unschedulable {
+		t.Errorf("coldest = %+v, want cordoned w2 first", load.Coldest)
+	}
+}
+
+// TestHostLoadNoWorkers: an empty join (metrics down, or no worker role) is an
+// unavailability error, never a zero-worker "everything is balanced" payload.
+func TestHostLoadNoWorkers(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[]}}`)
+	}))
+	defer srv.Close()
+	if _, _, err := mustNew(t, srv.URL).HostLoad(context.Background(), "tok"); err == nil {
+		t.Fatal("want an error for an empty worker set")
+	}
+}

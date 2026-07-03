@@ -3,6 +3,7 @@
 	import { api, Unauthorized, type ClusterSummary } from '$lib/api';
 	import { cores, bytes } from '$lib/format';
 	import { pollWhileVisible } from '$lib/poll';
+	import HostBalance from './HostBalance.svelte';
 	import QuotaBand from './QuotaBand.svelte';
 	import Ring from './Ring.svelte';
 
@@ -130,6 +131,12 @@
 						{/each}
 					</div>
 				</div>
+			{/if}
+
+			<!-- Cluster scope only: the worker distribution is one cluster-wide fact;
+			     a project/namespace/node view would repeat it misleadingly. -->
+			{#if !scope.project && !scope.namespace && !scope.node}
+				<HostBalance />
 			{/if}
 
 			<div class="min-w-[12rem] flex-1">
