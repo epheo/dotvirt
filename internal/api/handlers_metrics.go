@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/project"
 )
 
 // The Prometheus/Thanos-backed reads (Performance tab, capacity bars, cluster
@@ -96,6 +97,76 @@ func (s *Server) handleClusterSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	cs, err := s.metrics.ClusterSummary(r.Context(), sc.id.Token, nss, r.URL.Query().Get("node"))
 	respond(w, cs, err)
+}
+
+// drsDeviation maps a committed DRS threshold to its (under, over) percent
+// deviation from the mean utilization — KubeVirtRelieveAndMigrate's actual
+// trigger band. AsymmetricLow flags only clearly-hot nodes, so anything below
+// the mean already counts as a migration target (under = 0).
+func drsDeviation(threshold string) (under, over float64, ok bool) {
+	switch threshold {
+	case "AsymmetricLow":
+		return 0, 10, true
+	case "Low":
+		return 10, 10, true
+	case "Medium":
+		return 20, 20, true
+	case "High":
+		return 30, 30, true
+	}
+	return 0, 0, false
+}
+
+// foldDRSBand attaches the DRS action band to a host distribution: the window
+// [mean-under, mean+over] plus exact counts of workers outside it (the
+// histogram's 10%-wide buckets can't count against arbitrary band edges).
+func foldDRSBand(load *model.HostLoad, pcts []float64, threshold string) {
+	under, over, ok := drsDeviation(threshold)
+	if !ok {
+		return
+	}
+	b := model.HostBand{Low: load.Mean - under, High: load.Mean + over}
+	if b.Low < 0 {
+		b.Low = 0
+	}
+	for _, p := range pcts {
+		switch {
+		case p > b.High:
+			b.Above++
+		case p < b.Low:
+			b.Below++
+		}
+	}
+	load.Band = &b
+}
+
+// handleHostLoad returns the worker utilization distribution behind the DRS
+// balance card. Node-level data, the same sensitivity class as the
+// node-allocatable totals ClusterSummary serves; the caller's token still
+// rides to Thanos, so the metrics backend's RBAC stays the gate. The band
+// reflects the platform repo's committed DRS threshold — the configuration
+// merges have made real — and is absent until DRS is configured.
+func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
+	if !s.metricsReady(w) {
+		return
+	}
+	id, _, err := s.userCluster(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	load, pcts, err := s.metrics.HostLoad(r.Context(), id.Token)
+	if err != nil {
+		http.Error(w, err.Error(), statusFor(err))
+		return
+	}
+	if s.cfg.PlatformRepo != "" && s.draft != nil {
+		platform := project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}
+		if st, err := s.draft.DRSState(platform); err == nil && st.Configured && st.Config != nil {
+			foldDRSBand(&load, pcts, st.Config.Threshold)
+		}
+	}
+	writeJSON(w, http.StatusOK, load)
 }
 
 // handleScopeMetrics returns the per-VM top-consumer time-series for a container
