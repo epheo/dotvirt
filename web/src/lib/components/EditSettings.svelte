@@ -36,6 +36,9 @@
 	// svelte-ignore state_referenced_locally
 	let mode = $state<'instancetype' | 'custom'>(seed.instancetype ? 'instancetype' : 'custom');
 	let labelRows = $state(Object.entries(seed.labels ?? {}).map(([key, value]) => ({ key, value })));
+	// Scheduling: the DRS opt-out annotation + the template's eviction strategy.
+	let drsExclude = $state(!!seed.drsExclude);
+	let evictionStrategy = $state(seed.evictionStrategy ?? '');
 
 	// Disks: existing (with a removed flag) + newly added blank disks.
 	let disks = $state((seed.disks ?? []).map((d) => ({ ...d, removed: false, isNew: false })));
@@ -117,6 +120,10 @@
 		}
 		if (preference && preference !== (vm.preference ?? '')) req.preference = preference;
 
+		// Scheduling: send only what changed ('' eviction strategy = cluster default).
+		if (drsExclude !== !!vm.drsExclude) req.drsExclude = drsExclude;
+		if (evictionStrategy !== (vm.evictionStrategy ?? '')) req.evictionStrategy = evictionStrategy;
+
 		// Labels: upsert any changed/new, remove any deleted-from-original.
 		const set: Record<string, string> = {};
 		for (const r of labelRows) if (r.key.trim()) set[r.key.trim()] = r.value;
@@ -163,6 +170,10 @@
 			out.push({ label: 'Sizing', value: `Instance type · ${r.instancetype ?? instancetype}` });
 		if (r.sizing === 'custom') out.push({ label: 'Sizing', value: `Custom · ${r.cpuCores} CPU / ${r.memory}` });
 		if (r.preference) out.push({ label: 'Preference', value: r.preference });
+		if (r.drsExclude !== undefined)
+			out.push({ label: 'DRS', value: r.drsExclude ? 'excluded from rebalancing' : 'rebalanced' });
+		if (r.evictionStrategy !== undefined)
+			out.push({ label: 'Eviction strategy', value: r.evictionStrategy || 'cluster default' });
 		for (const [k, v] of Object.entries(r.setLabels ?? {})) out.push({ label: `Label ${k}`, value: v });
 		for (const k of r.removeLabels ?? []) out.push({ label: `Label ${k}`, value: 'removed' });
 		for (const d of r.addDisks ?? []) out.push({ label: 'Disk added', value: `${d.name} (${d.size})` });
@@ -282,6 +293,30 @@
 				<p class="col-span-2 text-xs text-amber-700">Set both CPU cores and memory to apply custom sizing.</p>
 			{/if}
 		{/if}
+	</div>
+
+	<!-- Scheduling: DRS participation + eviction behavior (vCenter's per-VM
+	     DRS automation override). -->
+	<div class="mt-4 border-t border-slate-100 pt-3">
+		<span class="text-slate-500">Scheduling</span>
+		<label class="mt-1 flex items-start gap-2 text-[13px]">
+			<input type="checkbox" bind:checked={drsExclude} class="mt-0.5" />
+			<span>
+				Exclude from DRS load balancing
+				<span class="block text-xs text-slate-400">
+					Automatic rebalancing skips this VM; node drains still live-migrate it.
+				</span>
+			</span>
+		</label>
+		<label class="mt-2 block">
+			<span class="text-slate-500">Eviction strategy</span>
+			<select bind:value={evictionStrategy} class="mt-1 w-full rounded border border-slate-300 px-2 py-1">
+				<option value="">Cluster default</option>
+				<option value="LiveMigrate">LiveMigrate — evictions live-migrate the VM</option>
+				<option value="LiveMigrateIfPossible">LiveMigrateIfPossible — migrate when possible, else restart</option>
+				<option value="None">None — pinned (blocks node drains)</option>
+			</select>
+		</label>
 	</div>
 {/snippet}
 

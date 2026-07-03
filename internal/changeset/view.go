@@ -44,6 +44,8 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 					field = "Create uplink"
 				case draft.ResourceNamespace:
 					field = "Create namespace"
+				case draft.ResourceDRS:
+					field = "Configure DRS"
 				}
 				if e.Namespace == ClusterScopeNS || e.Resource == draft.ResourceNamespace {
 					to = e.Name // cluster-scoped, or the namespace itself: no prefix

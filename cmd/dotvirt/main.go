@@ -22,6 +22,7 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/config"
+	"github.com/epheo/dotvirt/internal/desched"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/export"
@@ -90,6 +91,12 @@ func run() error {
 	clusterSnapshot := clusterstate.New(saCluster, cfg.ProjectLabel, bus)
 	clusterSnapshot.Run(ctx)
 
+	// DRS status plane: the SA-watched KubeDescheduler snapshot behind GET
+	// /api/drs. Discovery-gated — on a cluster without the descheduler operator
+	// it stays a slow API probe, never an error loop.
+	deschedSnapshot := desched.New(saCluster)
+	deschedSnapshot.Run(ctx)
+
 	var argoSnapshot *argo.Snapshot
 	var resyncer changeset.Resyncer
 	if cfg.ArgoEnabled {
@@ -129,6 +136,7 @@ func run() error {
 		ClusterFactory: clusterFactory,
 		State:          clusterSnapshot,
 		Drift:          argoSnapshot,
+		Desched:        deschedSnapshot,
 		Bus:            bus,
 		Resolver:       resolver,
 		Repos:          repos,

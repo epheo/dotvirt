@@ -22,6 +22,7 @@ import (
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
+	"github.com/epheo/dotvirt/internal/desched"
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/metrics"
@@ -46,6 +47,9 @@ type Draft interface {
 	StageCreateAdminNetworkPolicy(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
 	StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
 	StageCreateProject(id auth.Identity, commitProj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
+	StageEnableDRS(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
+	StageDisableDRS(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
+	DRSState(proj project.ProjectInfo) (model.DRSGitState, error)
 	StageDelete(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
 	Unstage(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) error
 	Get(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
@@ -103,6 +107,7 @@ type Server struct {
 	clusterF  *cluster.Factory
 	state     *clusterstate.State // SA-owned live+topology snapshot; the read path's source
 	drift     *argo.Snapshot      // nil when Argo disabled; SA-owned, watch-fed Application snapshot
+	desched   *desched.Snapshot   // nil disables the DRS live plane; SA-owned KubeDescheduler snapshot
 	bus       *eventbus.Bus       // change-version source for the version-stamped auth caches
 	resolver  *project.Resolver
 	repos     *git.RepoSet
@@ -132,8 +137,9 @@ type Server struct {
 type Deps struct {
 	ClusterFactory *cluster.Factory
 	State          *clusterstate.State
-	Drift          *argo.Snapshot // SA-owned drift snapshot (watch-fed); nil when Argo disabled
-	Bus            *eventbus.Bus  // change-version source for version-stamped caches
+	Drift          *argo.Snapshot    // SA-owned drift snapshot (watch-fed); nil when Argo disabled
+	Desched        *desched.Snapshot // SA-owned KubeDescheduler snapshot; nil disables the DRS live plane
+	Bus            *eventbus.Bus     // change-version source for version-stamped caches
 	Resolver       *project.Resolver
 	Repos          *git.RepoSet
 	Metrics        *metrics.Client // Prometheus/Thanos query client; nil disables the Performance tab
@@ -148,6 +154,7 @@ func NewServer(d Deps) *Server {
 		clusterF:  d.ClusterFactory,
 		state:     d.State,
 		drift:     d.Drift,
+		desched:   d.Desched,
 		bus:       d.Bus,
 		resolver:  d.Resolver,
 		repos:     d.Repos,
@@ -200,6 +207,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/adminnetworkpolicies", s.handleCreateAdminNetworkPolicy)
 	mux.HandleFunc("POST /api/namespaces", s.handleCreateNamespace)
 	mux.HandleFunc("POST /api/projects", s.handleCreateProject)
+	mux.HandleFunc("GET /api/drs", s.handleDRS)
+	mux.HandleFunc("POST /api/drs", s.handleDRSEnable)
+	mux.HandleFunc("DELETE /api/drs", s.handleDRSDisable)
 	// ArgoCD ApplicationSet plugin generator (auth: its own shared token, not a
 	// user session — exempted in auth.isOpenPath). Emits projects from labels.
 	mux.HandleFunc("POST /api/v1/getparams.execute", s.handleAppSetPlugin)

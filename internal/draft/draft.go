@@ -45,6 +45,7 @@ const (
 	ResourceNetworkPolicy              Resource = "networkpolicy"              // a namespace's east-west distributed firewall
 	ResourceAdminNetworkPolicy         Resource = "adminnetworkpolicy"         // cluster-wide admin DFW (ANP)
 	ResourceBaselineAdminNetworkPolicy Resource = "baselineadminnetworkpolicy" // cluster baseline DFW (BANP)
+	ResourceDRS                        Resource = "drs"                        // the cluster DRS (descheduler) install/config file set
 )
 
 // Entry is one pending change, keyed by resource+namespace/name within its

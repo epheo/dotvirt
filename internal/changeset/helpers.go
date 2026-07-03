@@ -63,18 +63,20 @@ func shortHash(user, project string) string {
 // editFromRequest maps a model.EditRequest into a manifest.VMEdit.
 func editFromRequest(req model.EditRequest) manifest.VMEdit {
 	return manifest.VMEdit{
-		Power:          req.Power,
-		CPUCores:       req.CPUCores,
-		Memory:         req.Memory,
-		Instancetype:   req.Instancetype,
-		Preference:     req.Preference,
-		Sizing:         req.Sizing,
-		SetLabels:      req.SetLabels,
-		RemoveLabels:   req.RemoveLabels,
-		AddDisks:       req.AddDisks,
-		RemoveDisks:    req.RemoveDisks,
-		AddNetworks:    req.AddNetworks,
-		RemoveNetworks: req.RemoveNetworks,
+		Power:            req.Power,
+		CPUCores:         req.CPUCores,
+		Memory:           req.Memory,
+		Instancetype:     req.Instancetype,
+		Preference:       req.Preference,
+		Sizing:           req.Sizing,
+		SetLabels:        req.SetLabels,
+		RemoveLabels:     req.RemoveLabels,
+		DRSExclude:       req.DRSExclude,
+		EvictionStrategy: req.EvictionStrategy,
+		AddDisks:         req.AddDisks,
+		RemoveDisks:      req.RemoveDisks,
+		AddNetworks:      req.AddNetworks,
+		RemoveNetworks:   req.RemoveNetworks,
 	}
 }
 

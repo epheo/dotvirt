@@ -63,3 +63,39 @@ func quoteKey(k string) string {
 	}
 	return k
 }
+
+// PreferNoEvictionAnnotation is the descheduler's per-VM opt-out: its PRESENCE
+// (the value is not evaluated) makes the automatic load balancer skip the VM,
+// while a node drain still live-migrates it. Set on the VM TEMPLATE metadata so
+// KubeVirt propagates it to the virt-launcher pod the descheduler inspects.
+const PreferNoEvictionAnnotation = "descheduler.alpha.kubernetes.io/prefer-no-eviction"
+
+// applyTemplateAnnotations upserts/removes annotations under
+// spec.template.metadata — today only the DRS-exclude toggle.
+func applyTemplateAnnotations(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) {
+	if edit.DRSExclude == nil {
+		return
+	}
+	// The value must stay a YAML string ("true" bare would parse as a bool,
+	// which the API rejects for annotations), so it is spliced pre-quoted.
+	set, remove := map[string]string{PreferNoEvictionAnnotation: `"true"`}, []string(nil)
+	if !*edit.DRSExclude {
+		set, remove = nil, []string{PreferNoEvictionAnnotation}
+	}
+	tmpl := get(get(vmRoot, "spec"), "template")
+	if tmpl == nil {
+		return
+	}
+	if meta := get(tmpl, "metadata"); meta != nil {
+		applyMapEdits(ed, meta, "annotations", set, remove)
+		return
+	}
+	if len(set) == 0 {
+		return // nothing to remove from a template without metadata
+	}
+	block := []string{"metadata:", "  annotations:"}
+	for _, k := range sortedKeys(set) {
+		block = append(block, "    "+quoteKey(k)+": "+set[k])
+	}
+	ed.insertBlock(tmpl, block)
+}

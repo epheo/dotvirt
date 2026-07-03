@@ -37,6 +37,18 @@ func ChangesForEdit(current model.VM, edit VMEdit) []model.Change {
 		}
 	}
 
+	if edit.DRSExclude != nil && *edit.DRSExclude != current.DRSExclude {
+		from, to := "rebalanced", "excluded"
+		if !*edit.DRSExclude {
+			from, to = to, from
+		}
+		out = append(out, model.Change{Field: "DRS", Action: "change", From: from, To: to})
+	}
+	if edit.EvictionStrategy != nil && *edit.EvictionStrategy != current.EvictionStrategy {
+		out = append(out, model.Change{Field: "Eviction strategy", Action: "change",
+			From: orClusterDefault(current.EvictionStrategy), To: orClusterDefault(*edit.EvictionStrategy)})
+	}
+
 	for _, d := range edit.AddDisks {
 		out = append(out, model.Change{Field: "Disk", Action: "add", To: fmt.Sprintf("%s (%s)", d.Name, d.Size)})
 	}
@@ -118,6 +130,12 @@ func DiffVMs(a, b model.VM) []model.Change {
 	cmp("Memory", a.Memory, b.Memory)
 	cmp("Instance type", a.Instancetype, b.Instancetype)
 	cmp("Preference", a.Preference, b.Preference)
+	if a.DRSExclude != b.DRSExclude {
+		cmp("DRS", drsLabel(a.DRSExclude), drsLabel(b.DRSExclude))
+	}
+	if a.EvictionStrategy != b.EvictionStrategy {
+		cmp("Eviction strategy", orClusterDefault(a.EvictionStrategy), orClusterDefault(b.EvictionStrategy))
+	}
 
 	// Labels present on one side only or differing.
 	for _, k := range sortedKeys(a.Labels) {
@@ -180,6 +198,22 @@ func toSet(s []string) map[string]bool {
 		m[x] = true
 	}
 	return m
+}
+
+// drsLabel names a VM's DRS participation for the preview.
+func drsLabel(excluded bool) string {
+	if excluded {
+		return "excluded"
+	}
+	return "rebalanced"
+}
+
+// orClusterDefault labels an unset evictionStrategy for the preview.
+func orClusterDefault(s string) string {
+	if s == "" {
+		return "cluster default"
+	}
+	return s
 }
 
 func sortedKeys(m map[string]string) []string {

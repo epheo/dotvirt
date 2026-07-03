@@ -33,6 +33,8 @@ export interface VM {
 	disks?: Disk[];
 	networks?: NIC[];
 	sourceFile: string;
+	drsExclude?: boolean; // prefer-no-eviction annotation: DRS rebalancing skips this VM
+	evictionStrategy?: string; // explicit template evictionStrategy; empty = cluster default
 	phase?: string;
 	paused?: boolean; // VMI Paused condition (phase stays Running)
 	guestIP?: string;
@@ -127,6 +129,8 @@ export interface EditRequest {
 	sizing?: 'instancetype' | 'custom';
 	setLabels?: Record<string, string>;
 	removeLabels?: string[];
+	drsExclude?: boolean; // toggle the DRS opt-out (prefer-no-eviction) annotation
+	evictionStrategy?: string; // '' removes it (cluster default)
 	addDisks?: { name: string; size: string }[];
 	removeDisks?: string[];
 	addNetworks?: { name: string }[];
@@ -215,6 +219,46 @@ export interface NetworkInventory {
 	nmstatePresent: boolean;
 	canManage: boolean; // coarse "any platform authoring" (CUDN); gates the platform-draft view
 	caps?: NetworkCaps; // per-action authoring authority for precise button gating
+}
+
+// --- DRS (descheduler-driven automatic VM rebalancing) ---
+
+export type DRSMode = 'Predictive' | 'Automatic';
+
+export interface DRSConfig {
+	mode: DRSMode;
+	threshold: string; // AsymmetricLow | Low | Medium | High
+	intervalSeconds: number;
+	softTainter: boolean;
+	evictionNodeLimit: number;
+	evictionTotalLimit: number;
+}
+export interface DRSLive {
+	apiPresent: boolean; // the descheduler operator's CRD is served
+	deployed: boolean; // a KubeDescheduler CR exists in the cluster
+	managementState?: string;
+	mode?: string;
+	profiles?: string[];
+	intervalSeconds?: number;
+	available: boolean; // the operator's Available condition
+	degraded?: string; // the Degraded condition's message, when degraded
+}
+export interface DRSView {
+	configured: boolean; // the KubeDescheduler CR is committed on the platform repo
+	config?: DRSConfig; // parsed committed config (absent if hand-edited beyond parse)
+	psiConfigured: boolean; // the PSI MachineConfig is committed
+	live: DRSLive;
+	canManage: boolean; // kubedeschedulers-create SSAR — gates the panel's actions
+	canPSI: boolean; // machineconfigs-create SSAR — gates the PSI checkbox
+}
+export interface DRSEnableRequest {
+	mode: DRSMode;
+	threshold?: string;
+	intervalSeconds?: number;
+	softTainter?: boolean;
+	evictionNodeLimit?: number;
+	evictionTotalLimit?: number;
+	installPSI?: boolean; // also stage the worker PSI MachineConfig (reboots workers on merge)
 }
 
 export interface CreateVMRequest {
@@ -563,6 +607,12 @@ export const api = {
 		post<DraftView>('/api/adminnetworkpolicies', req),
 	createNamespace: (req: NamespaceCreate) => post<DraftView>('/api/namespaces', req),
 	createProject: (req: ProjectCreate) => post<DraftView>('/api/projects', req),
+
+	// DRS (platform tier): read the merged git/live view; enable/reconfigure and
+	// disable stage into the platform draft like every other cluster-scoped kind.
+	drs: () => get<DRSView>('/api/drs'),
+	enableDRS: (r: DRSEnableRequest) => post<DraftView>('/api/drs', r),
+	disableDRS: () => req<DraftView>('/api/drs', { method: 'DELETE' }),
 	stageDelete: (namespace: string, name: string) =>
 		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/delete`, {}),
 	unstage: (namespace: string, name: string, resource?: string, project?: string) => {

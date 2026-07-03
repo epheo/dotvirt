@@ -58,6 +58,13 @@
 					<Row label="Instance type" value={vm.instancetype ?? ''} />
 					<Row label="Preference" value={vm.preference ?? ''} />
 					<Row label="Power (desired)" value={vm.power} />
+					<Row
+						label="DRS"
+						value={vm.drsExclude ? 'Excluded from load balancing' : 'Eligible for load balancing'}
+					/>
+					{#if vm.evictionStrategy}
+						<Row label="Eviction strategy" value={vm.evictionStrategy} />
+					{/if}
 				</dl>
 			</InfoCard>
 		{:else if view === 'storage'}

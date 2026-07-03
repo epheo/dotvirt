@@ -96,3 +96,40 @@ rules:
   - update
   - patch
   - delete
+- apiGroups:
+  - operators.coreos.com
+  resources:
+  - subscriptions
+  - operatorgroups
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - operator.openshift.io
+  resources:
+  - kubedeschedulers
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - machineconfiguration.openshift.io
+  resources:
+  - machineconfigs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete

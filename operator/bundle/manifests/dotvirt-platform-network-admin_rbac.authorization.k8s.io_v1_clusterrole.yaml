@@ -34,3 +34,15 @@ rules:
   - namespaces
   verbs:
   - create
+- apiGroups:
+  - operator.openshift.io
+  resources:
+  - kubedeschedulers
+  verbs:
+  - create
+- apiGroups:
+  - machineconfiguration.openshift.io
+  resources:
+  - machineconfigs
+  verbs:
+  - create

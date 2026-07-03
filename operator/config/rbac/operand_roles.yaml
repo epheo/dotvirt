@@ -50,6 +50,10 @@ rules:
   - apiGroups: ["nmstate.io"]
     resources: ["nodenetworkstates", "nodenetworkconfigurationpolicies"]
     verbs: ["get", "list", "watch"]
+  # Watched for the DRS panel's live descheduler status.
+  - apiGroups: ["operator.openshift.io"]
+    resources: ["kubedeschedulers"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get", "list"]
@@ -88,6 +92,17 @@ rules:
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # DRS: the descheduler operator install + config, and the PSI MachineConfig its
+  # load-aware profile needs — all committed to the platform repo, applied by Argo.
+  - apiGroups: ["operators.coreos.com"]
+    resources: ["subscriptions", "operatorgroups"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["operator.openshift.io"]
+    resources: ["kubedeschedulers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["machineconfiguration.openshift.io"]
+    resources: ["machineconfigs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 # The authoring SIGNAL the UI's SSAR-gate reads (create cudn/nncp/namespaces). The user
 # never creates these — Argo applies them from the platform repo — so it's decoupled from
@@ -112,4 +127,12 @@ rules:
     verbs: ["create"]
   - apiGroups: [""]
     resources: ["namespaces"]
+    verbs: ["create"]
+  # DRS authoring: the panel's SSAR gates (kubedeschedulers always; machineconfigs
+  # only for the PSI opt-in).
+  - apiGroups: ["operator.openshift.io"]
+    resources: ["kubedeschedulers"]
+    verbs: ["create"]
+  - apiGroups: ["machineconfiguration.openshift.io"]
+    resources: ["machineconfigs"]
     verbs: ["create"]
