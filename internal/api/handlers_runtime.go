@@ -2,6 +2,9 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -46,8 +49,20 @@ func runtimeOpStatus(err error) int {
 func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	s.handleRuntimeOp(w, r, func(ctx context.Context, c *cluster.Client, ns, name string) error { return c.Restart(ctx, ns, name) })
 }
+
+// handleMigrate accepts an optional target: {"node": "..."} pins the migration
+// to that host; an empty body (or empty node) leaves placement to the scheduler.
 func (s *Server) handleMigrate(w http.ResponseWriter, r *http.Request) {
-	s.handleRuntimeOp(w, r, func(ctx context.Context, c *cluster.Client, ns, name string) error { return c.Migrate(ctx, ns, name) })
+	var req struct {
+		Node string `json:"node"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.handleRuntimeOp(w, r, func(ctx context.Context, c *cluster.Client, ns, name string) error {
+		return c.Migrate(ctx, ns, name, req.Node)
+	})
 }
 func (s *Server) handlePause(w http.ResponseWriter, r *http.Request) {
 	s.handleRuntimeOp(w, r, func(ctx context.Context, c *cluster.Client, ns, name string) error { return c.Pause(ctx, ns, name) })

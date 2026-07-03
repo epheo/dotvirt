@@ -232,6 +232,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/metrics/hosts", s.handleHostLoad)
 	mux.HandleFunc("GET /api/alarms", s.handleAlarms)
 	mux.HandleFunc("GET /api/quotas", s.handleQuotas)
+	mux.HandleFunc("GET /api/nodes", s.handleNodes)
 	mux.HandleFunc("GET /api/nodes/{node}", s.handleNodeInfo)
 	mux.HandleFunc("POST /api/nodes/{node}/cordon", s.handleNodeCordon)
 	mux.HandleFunc("POST /api/uploads", s.handleCreateUpload)

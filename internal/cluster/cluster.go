@@ -370,8 +370,15 @@ func (c *Client) Restart(ctx context.Context, namespace, name string) error {
 }
 
 // Migrate live-migrates the running VMI to another node (the vMotion analog).
-func (c *Client) Migrate(ctx context.Context, namespace, name string) error {
-	return c.kubevirt.VirtualMachine(namespace).Migrate(ctx, name, &kubevirtcorev1.MigrateOptions{})
+// A non-empty targetNode pins the destination via the migration's added node
+// selector (kubernetes.io/hostname); empty leaves the choice to the scheduler.
+// The selector can only narrow the VM's own constraints, never bypass them.
+func (c *Client) Migrate(ctx context.Context, namespace, name, targetNode string) error {
+	opts := &kubevirtcorev1.MigrateOptions{}
+	if targetNode != "" {
+		opts.AddedNodeSelector = map[string]string{corev1.LabelHostname: targetNode}
+	}
+	return c.kubevirt.VirtualMachine(namespace).Migrate(ctx, name, opts)
 }
 
 // Pause freezes the running VMI (vCPUs stopped, memory retained).
@@ -406,6 +413,33 @@ func (c *Client) SetNodeCordon(ctx context.Context, name string, unschedulable b
 	patch := fmt.Appendf(nil, `{"spec":{"unschedulable":%t}}`, unschedulable)
 	_, err := c.kube.CoreV1().Nodes().Patch(ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
 	return err
+}
+
+// ListNodes returns the cluster's virtualization hosts — nodes KubeVirt marks
+// schedulable for VMs — under the caller's token, as candidate live-migration
+// targets. No node-list RBAC surfaces as an error (→ 403) and the migrate
+// dialog falls back to scheduler-picked placement. Ready + cordon state ride
+// along so the picker can gray out hosts a migration could not land on.
+func (c *Client) ListNodes(ctx context.Context) ([]model.Node, error) {
+	list, err := c.kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: "kubevirt.io/schedulable=true"})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]model.Node, 0, len(list.Items))
+	for _, n := range list.Items {
+		out = append(out, model.Node{Name: n.Name, Ready: nodeReady(n), Unschedulable: n.Spec.Unschedulable})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func nodeReady(n corev1.Node) bool {
+	for _, cond := range n.Status.Conditions {
+		if cond.Type == corev1.NodeReady {
+			return cond.Status == corev1.ConditionTrue
+		}
+	}
+	return false
 }
 
 // CanReadNodes reports whether this token may list nodes (cluster-scoped). It

@@ -61,6 +61,17 @@ func ChangesForEdit(current model.VM, edit VMEdit) []model.Change {
 	for _, name := range edit.RemoveNetworks {
 		out = append(out, model.Change{Field: "Network", Action: "remove", From: name})
 	}
+	for _, mv := range edit.MigrateVolumes {
+		from := ""
+		for _, d := range current.Disks {
+			if d.Name == mv.Name {
+				from = d.StorageClass
+				break
+			}
+		}
+		out = append(out, model.Change{Field: "Disk " + mv.Name + " storage", Action: "change",
+			From: orClusterDefault(from), To: mv.StorageClass})
+	}
 	return out
 }
 
