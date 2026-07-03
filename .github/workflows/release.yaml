@@ -31,6 +31,9 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    outputs:
+      catalog-image: ${{ steps.pins.outputs.catalog-image }}
+      version: ${{ steps.pins.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -70,6 +73,12 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Cut release (build + push + digest-pin)
         run: VERSION="$REL_VERSION" PREV="$REL_PREV" CONTAINER_TOOL=docker ./hack/release.sh
+      - name: Record the pinned catalog image
+        id: pins
+        run: |
+          { echo "catalog-image=$(sed -n 's/^  image: //p' operator/install/catalogsource.yaml)"
+            echo "version=$REL_VERSION"
+          } >> "$GITHUB_OUTPUT"
       - name: Open digest-pin PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -83,3 +92,12 @@ jobs:
           gh pr create --base main --head "$branch" \
             --title "release v$REL_VERSION" \
             --body "Digest-pinned release cut by CI; images already pushed to quay.io/epheo. Merge to record the pins, then apply operator/install/catalogsource.yaml."
+
+  # Prove the just-pushed release actually installs from quay before anyone merges the
+  # pin PR — the same install the daily canary runs, pointed at the fresh catalog digest.
+  verify:
+    needs: [release]
+    uses: ./.github/workflows/verify-published-bundle.yaml
+    with:
+      catalog-image: ${{ needs.release.outputs.catalog-image }}
+      expected-csv: dotvirt-operator.v${{ needs.release.outputs.version }}

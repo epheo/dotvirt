@@ -1,0 +1,76 @@
+# Shared scaffolding for the OLM install jobs (ci bundle-test, verify-published-bundle):
+# a kind cluster with a local registry and pinned OLM. Every third-party image on the
+# install path is pinned in hack/versions.env and preloaded from an Actions cache, so
+# the only network a job depends on is what it deliberately tests.
+name: olm-kind
+description: kind cluster + local registry + pinned OLM, third-party images preloaded
+runs:
+  using: composite
+  steps:
+    - name: Load pinned tool versions
+      shell: bash
+      run: grep -v '^#' hack/versions.env >> "$GITHUB_ENV"
+    - name: Install kind + operator-sdk
+      shell: bash
+      run: |
+        curl -fsSLo ./kind "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64"
+        chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
+        sudo curl -fsSL -o /usr/local/bin/operator-sdk \
+          "https://github.com/operator-framework/operator-sdk/releases/download/$OPERATOR_SDK_VERSION/operator-sdk_linux_amd64"
+        sudo chmod +x /usr/local/bin/operator-sdk
+    - name: Restore preloaded-image cache
+      id: images
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/olm-kind-images.tar
+        key: olm-kind-images-${{ hashFiles('hack/versions.env') }}
+    - name: Pull + save preloaded images (cache miss)
+      if: steps.images.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        mkdir -p ~/.cache
+        images=("$KIND_NODE_IMAGE" registry:2 "$OLM_INIT_IMAGE"
+          "quay.io/operator-framework/opm:$OPM_VERSION"
+          "quay.io/operator-framework/scorecard-test:$OPERATOR_SDK_VERSION")
+        for img in "${images[@]}"; do docker pull "$img"; done
+        docker save -o ~/.cache/olm-kind-images.tar "${images[@]}"
+    - name: Load preloaded images (cache hit)
+      if: steps.images.outputs.cache-hit == 'true'
+      shell: bash
+      run: docker load -i ~/.cache/olm-kind-images.tar
+    - name: kind cluster + local registry
+      shell: bash
+      run: |
+        # The kind node shares the host's (global, non-namespaced) inotify limits.
+        # The runner's default fs.inotify.max_user_instances (~128) is exhausted by
+        # OLM + the operator stack's informers/watches, leaving pods stuck and the
+        # CatalogSource never serving — i.e. a Subscription with no InstallPlan. Raise
+        # the ceiling before the node starts. -w is runtime-only: fine on a throwaway VM.
+        sudo sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576
+        docker run -d --restart=always -p 127.0.0.1:5000:5000 --name kind-registry registry:2
+        cat <<EOF | kind create cluster --image "$KIND_NODE_IMAGE" --wait 5m --config=-
+        kind: Cluster
+        apiVersion: kind.x-k8s.io/v1alpha4
+        containerdConfigPatches:
+        - |-
+          [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5000"]
+            endpoint = ["http://kind-registry:5000"]
+        EOF
+        docker network connect kind kind-registry
+        # The FBC registry pod's opm + ubi images and scorecard's test image are pulled
+        # with IfNotPresent semantics — loading them into the node means those pods
+        # never hit the network.
+        kind load docker-image "$OLM_INIT_IMAGE" \
+          "quay.io/operator-framework/opm:$OPM_VERSION" \
+          "quay.io/operator-framework/scorecard-test:$OPERATOR_SDK_VERSION"
+    - name: Install OLM
+      shell: bash
+      # Pin the OLM version (operator-sdk v1.42.2's default) — unpinned pulls
+      # latest-of-the-day, whose images intermittently fail to come up in kind and
+      # leave `run bundle` with no InstallPlan ("context deadline exceeded").
+      run: |
+        operator-sdk olm install --version "$OLM_VERSION" --timeout 5m
+        # The default operatorhubio catalog is a large pull that lands exactly when the
+        # test's own CatalogSource needs the node's bandwidth and the resolver's
+        # attention, and nothing here subscribes to it.
+        kubectl -n olm delete catalogsource operatorhubio-catalog --ignore-not-found

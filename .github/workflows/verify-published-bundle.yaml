@@ -1,0 +1,68 @@
+# Installs the PUBLISHED operator — the digest-pinned catalog recorded in
+# operator/install/ — on a throwaway kind cluster, the same way a cluster admin would.
+# Its subject is registry state (are the pinned digests still on quay, does the catalog
+# serve, does the channel head install), so it runs where that subject belongs: daily
+# as a canary, from release.yaml against a just-cut catalog, and on PRs that change the
+# pins or this scaffolding — never as a general PR gate, where a red would mean "the
+# registry changed", not "your diff is wrong".
+name: verify-published-bundle
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - operator/install/**
+      - .github/workflows/verify-published-bundle.yaml
+      - .github/actions/olm-kind/**
+  workflow_call:
+    inputs:
+      catalog-image:
+        description: Catalog image ref to verify (defaults to the operator/install/catalogsource.yaml pin)
+        type: string
+        required: false
+        default: ''
+      expected-csv:
+        description: CSV the subscription must resolve to (e.g. dotvirt-operator.v0.0.9)
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/olm-kind
+      - name: Install from the published catalog (operator/install/, as an admin would)
+        run: |
+          # kind has no OperatorHub console; the namespace is just where the committed
+          # CatalogSource expects to live.
+          kubectl create namespace openshift-marketplace
+          if [ -n "${{ inputs.catalog-image }}" ]; then
+            sed -i 's#^  image: .*#  image: ${{ inputs.catalog-image }}#' operator/install/catalogsource.yaml
+          fi
+          kubectl apply -f operator/install/namespace.yaml -f operator/install/catalogsource.yaml
+          kubectl apply -f operator/install/operatorgroup.yaml -f operator/install/subscription.yaml
+      - name: Assert the subscription resolves and the CSV reaches Succeeded
+        run: |
+          csv=""
+          for _ in $(seq 60); do
+            csv="$(kubectl -n dotvirt-operator get subscription dotvirt-operator -o jsonpath='{.status.installedCSV}')"
+            [ -n "$csv" ] && break
+            sleep 10
+          done
+          if [ -z "$csv" ]; then
+            kubectl -n openshift-marketplace get pods
+            kubectl -n dotvirt-operator describe subscription dotvirt-operator
+            kubectl -n olm logs deploy/catalog-operator --tail 50 || true
+            echo "::error::subscription never resolved to a CSV — catalog unreachable or not serving"
+            exit 1
+          fi
+          if [ -n "${{ inputs.expected-csv }}" ] && [ "$csv" != "${{ inputs.expected-csv }}" ]; then
+            echo "::error::subscription resolved to $csv, expected ${{ inputs.expected-csv }}"
+            exit 1
+          fi
+          kubectl -n dotvirt-operator wait "csv/$csv" --for=jsonpath='{.status.phase}'=Succeeded --timeout=10m
+          kubectl -n dotvirt-operator get csv
