@@ -55,14 +55,24 @@ jobs:
           fi
           [ -n "$ver" ] && [ -n "$prev" ] || { echo "::error::could not resolve version/prev (ref=$GITHUB_REF_NAME)"; exit 1; }
           { echo "REL_VERSION=$ver"; echo "REL_PREV=$prev"; } >> "$GITHUB_ENV"
+          # A tag whose commit already records this version's pins is a locally-cut
+          # release (hack/release.sh ran outside CI). Rebuilding would race the same
+          # quay tags onto different digests — the moved-tag/pruned-digest failure
+          # mode — so skip the build and let verify prove the published images instead.
+          if [ "${{ github.event_name }}" = push ] && [ "$(current_stable_head)" = "$ver" ]; then
+            echo "::notice::v$ver is already digest-pinned at this commit — skipping the build; verifying the published release"
+            echo "REL_SKIP=true" >> "$GITHUB_ENV"
+          fi
           echo "Releasing v$ver (replaces v$prev)"
       - name: Install skopeo + operator-sdk
+        if: env.REL_SKIP != 'true'
         run: |
           sudo apt-get update && sudo apt-get install -y skopeo
           sudo curl -fsSL -o /usr/local/bin/operator-sdk \
             "https://github.com/operator-framework/operator-sdk/releases/download/$OPERATOR_SDK_VERSION/operator-sdk_linux_amd64"
           sudo chmod +x /usr/local/bin/operator-sdk
       - name: Registry login (docker + skopeo)
+        if: env.REL_SKIP != 'true'
         env:
           U: ${{ secrets.QUAY_USERNAME }}
           P: ${{ secrets.QUAY_PASSWORD }}
@@ -70,8 +80,11 @@ jobs:
           echo "$P" | docker login quay.io -u "$U" --password-stdin
           echo "$P" | skopeo login quay.io -u "$U" --password-stdin
       - uses: docker/setup-qemu-action@v3   # emulation for the catalog image's arm64 cache-build RUN
+        if: env.REL_SKIP != 'true'
       - uses: docker/setup-buildx-action@v3
+        if: env.REL_SKIP != 'true'
       - name: Cut release (build + push + digest-pin)
+        if: env.REL_SKIP != 'true'
         run: VERSION="$REL_VERSION" PREV="$REL_PREV" CONTAINER_TOOL=docker ./hack/release.sh
       - name: Record the pinned catalog image
         id: pins
@@ -80,6 +93,7 @@ jobs:
             echo "version=$REL_VERSION"
           } >> "$GITHUB_OUTPUT"
       - name: Open digest-pin PR
+        if: env.REL_SKIP != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
