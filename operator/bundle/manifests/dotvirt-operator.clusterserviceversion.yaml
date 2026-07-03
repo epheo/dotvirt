@@ -36,7 +36,7 @@ metadata:
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
     containerImage: quay.io/epheo/dotvirt-operator@sha256:b224c93e38eb56aea048f83f85feca562b0745eded4fdcda7f44c02dc01e9458
-    createdAt: "2026-07-03T20:19:42Z"
+    createdAt: "2026-07-03T20:35:27Z"
     description: Installs dotvirt — a vCenter-like GitOps WebUI for KubeVirt — with its platform/tenant tier.
     operators.operatorframework.io/builder: operator-sdk-v1.42.2
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4

@@ -171,7 +171,7 @@ func (r *Repo) VMManifests(branch string) ([]ManifestFile, error) {
 
 	var out []ManifestFile
 	err = tree.Files().ForEach(func(f *object.File) error {
-		if !isYAML(f.Name) {
+		if !isYAML(f.Name) || inTemplatesDir(f.Name) {
 			return nil
 		}
 		content, err := readFile(f)
@@ -236,4 +236,43 @@ func isYAML(name string) bool {
 // containsVirtualMachine is a cheap pre-filter; full parsing happens later.
 func containsVirtualMachine(content []byte) bool {
 	return strings.Contains(string(content), "kind: VirtualMachine")
+}
+
+// TemplatesDir is the library directory: VirtualMachineTemplate manifests the
+// ArgoCD Applications exclude from the applied path. VMManifests skips it (a
+// template's embedded VM blueprint is not inventory), and TemplatesOnBranch
+// reads only it.
+const TemplatesDir = "templates"
+
+func inTemplatesDir(name string) bool {
+	return strings.HasPrefix(name, TemplatesDir+"/")
+}
+
+// TemplatesOnBranch returns every .yaml file under templates/ on branch — the
+// repo's template library, parsed by the caller.
+func (r *Repo) TemplatesOnBranch(branch string) ([]ManifestFile, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	tree, err := r.treeFor(branch)
+	if err != nil {
+		return nil, err
+	}
+	var out []ManifestFile
+	err = tree.Files().ForEach(func(f *object.File) error {
+		if !isYAML(f.Name) || !inTemplatesDir(f.Name) {
+			return nil
+		}
+		content, err := readFile(f)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", f.Name, err)
+		}
+		out = append(out, ManifestFile{Path: f.Name, Content: content})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out, nil
 }
