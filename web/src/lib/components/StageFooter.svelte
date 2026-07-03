@@ -5,7 +5,7 @@
 	let {
 		label,
 		busyLabel = 'Staging…',
-		hint = 'Staged into the changeset; open a PR from “Changes”.',
+		hint = 'Stages to Changes — applies when the project’s PR merges.',
 		disabled = false,
 		submitting = false,
 		onsubmit,

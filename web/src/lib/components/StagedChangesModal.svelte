@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { DraftItem } from '$lib/api';
 	import ChangeList from './ChangeList.svelte';
+	import GitOpsStepper from './GitOpsStepper.svelte';
 	import Modal from './Modal.svelte';
 
 	// Per-VM view of a staged change: the diff + discard / open-in-Changes.
@@ -23,7 +24,10 @@
 
 <Modal title="Staged changes — {item.name}" {onclose}>
 	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm">
-		<p class="mb-2 text-xs text-slate-500">{item.namespace}/{item.name} · not yet proposed</p>
+		<div class="mb-2 flex items-center justify-between gap-3">
+			<p class="text-xs text-slate-500">{item.namespace}/{item.name} · not yet proposed</p>
+			<GitOpsStepper stage="staged" />
+		</div>
 		{#if isDelete}
 			<p class="text-slate-700">
 				This VM is <strong>staged for removal</strong> — it'll be deleted from the cluster when the pull
