@@ -27,6 +27,7 @@ func TestManifestsDefaults(t *testing.T) {
 		"kind: KubeDescheduler",
 		"name: cluster",
 		"namespace: " + Namespace,
+		"argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true",
 		"managementState: Managed",
 		"mode: Automatic",
 		"deschedulingIntervalSeconds: 60",
