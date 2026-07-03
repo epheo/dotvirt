@@ -27,15 +27,9 @@ runs:
     - name: Pull + save preloaded images (cache miss)
       if: steps.images.outputs.cache-hit != 'true'
       shell: bash
-      # opm must be the literal :latest — operator-sdk only takes the FBC path when
-      # --index-image equals its hardcoded default (quay.io/operator-framework/opm:latest);
-      # any other ref flips `run bundle` into the deprecated SQLite registry path, which
-      # cannot serve the bundle. The cache freezes what :latest resolved to until this
-      # file or versions.env changes, and IfNotPresent keeps the pod off the network.
       run: |
         mkdir -p ~/.cache
-        images=("$KIND_NODE_IMAGE" registry:2 "$OLM_INIT_IMAGE"
-          quay.io/operator-framework/opm:latest
+        images=("$KIND_NODE_IMAGE" registry:2
           "quay.io/operator-framework/scorecard-test:$OPERATOR_SDK_VERSION")
         for img in "${images[@]}"; do docker pull "$img"; done
         docker save -o ~/.cache/olm-kind-images.tar "${images[@]}"
@@ -62,12 +56,9 @@ runs:
             endpoint = ["http://kind-registry:5000"]
         EOF
         docker network connect kind kind-registry
-        # The FBC registry pod's opm + ubi images and scorecard's test image are pulled
-        # with IfNotPresent semantics — loading them into the node means those pods
-        # never hit the network.
-        kind load docker-image "$OLM_INIT_IMAGE" \
-          quay.io/operator-framework/opm:latest \
-          "quay.io/operator-framework/scorecard-test:$OPERATOR_SDK_VERSION"
+        # Scorecard's test pods pull this with IfNotPresent semantics — loading it into
+        # the node means they never hit the network.
+        kind load docker-image "quay.io/operator-framework/scorecard-test:$OPERATOR_SDK_VERSION"
     - name: Install OLM
       shell: bash
       # Pin the OLM version (operator-sdk v1.42.2's default) — unpinned pulls

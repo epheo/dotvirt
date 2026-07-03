@@ -49,23 +49,4 @@ jobs:
           kubectl apply -f operator/install/namespace.yaml -f operator/install/catalogsource.yaml
           kubectl apply -f operator/install/operatorgroup.yaml -f operator/install/subscription.yaml
       - name: Assert the subscription resolves and the CSV reaches Succeeded
-        run: |
-          csv=""
-          for _ in $(seq 60); do
-            csv="$(kubectl -n dotvirt-operator get subscription dotvirt-operator -o jsonpath='{.status.installedCSV}')"
-            [ -n "$csv" ] && break
-            sleep 10
-          done
-          if [ -z "$csv" ]; then
-            kubectl -n olm get pods,catalogsources
-            kubectl -n dotvirt-operator describe subscription dotvirt-operator
-            kubectl -n olm logs deploy/catalog-operator --tail 50 || true
-            echo "::error::subscription never resolved to a CSV — catalog unreachable or not serving"
-            exit 1
-          fi
-          if [ -n "${{ inputs.expected-csv }}" ] && [ "$csv" != "${{ inputs.expected-csv }}" ]; then
-            echo "::error::subscription resolved to $csv, expected ${{ inputs.expected-csv }}"
-            exit 1
-          fi
-          kubectl -n dotvirt-operator wait "csv/$csv" --for=jsonpath='{.status.phase}'=Succeeded --timeout=10m
-          kubectl -n dotvirt-operator get csv
+        run: ./hack/wait-csv.sh dotvirt-operator dotvirt-operator "${{ inputs.expected-csv }}"

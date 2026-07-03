@@ -113,16 +113,69 @@ jobs:
             operator/bundle/manifests/dotvirt-operator.clusterserviceversion.yaml
       - name: Build + push the bundle to the local registry
         run: make -C operator bundle-build bundle-push BUNDLE_IMG=localhost:5000/dotvirt-operator-bundle:ci CONTAINER_TOOL=docker
-      - name: Install the bundle via OLM (assert it reaches Succeeded)
+      - name: Render + push a CI catalog serving that bundle
+        # The same install mechanism as production and the canary — a catalog image
+        # (opm pinned via build-arg, catalog.Dockerfile) behind a CatalogSource — not
+        # operator-sdk's ephemeral `run bundle` registry pod, whose unpinned
+        # opm:latest/ubi machinery is a recurring flake source.
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/opm \
+            "https://github.com/operator-framework/operator-registry/releases/download/$OPM_VERSION/linux-amd64-opm"
+          sudo chmod +x /usr/local/bin/opm
+          CSV_NAME="$(awk '/^  name: dotvirt-operator\.v/{print $2; exit}' operator/bundle/manifests/dotvirt-operator.clusterserviceversion.yaml)"
+          echo "CSV_NAME=$CSV_NAME" >> "$GITHUB_ENV"
+          cat > /tmp/ci-catalog-template.yaml <<EOF
+          schema: olm.template.basic
+          entries:
+            - schema: olm.package
+              name: dotvirt-operator
+              defaultChannel: stable-v0
+            - schema: olm.channel
+              package: dotvirt-operator
+              name: stable-v0
+              entries:
+                - name: $CSV_NAME
+            - schema: olm.bundle
+              image: localhost:5000/dotvirt-operator-bundle:ci
+          EOF
+          opm alpha render-template basic --use-http -o yaml /tmp/ci-catalog-template.yaml \
+            > operator/catalog/dotvirt-operator/catalog.yaml
+          opm validate operator/catalog
+          docker build -f operator/catalog.Dockerfile --build-arg OPM_VERSION="$OPM_VERSION" \
+            -t localhost:5000/dotvirt-operator-catalog:ci operator
+          docker push localhost:5000/dotvirt-operator-catalog:ci
+      - name: Install via OLM from the CI catalog (assert the CSV reaches Succeeded)
         run: |
           kubectl create namespace dotvirt-ci
-          # IfNotPresent (default: Always) so the preloaded opm/ubi images satisfy the
-          # FBC registry pod without any registry round-trip. No --index-image: only
-          # the default (opm:latest, preloaded by olm-kind) selects the FBC path.
-          operator-sdk run bundle localhost:5000/dotvirt-operator-bundle:ci -n dotvirt-ci \
-            --image-pull-policy IfNotPresent \
-            --timeout 10m --use-http
-          kubectl -n dotvirt-ci get csv
+          cat <<EOF | kubectl apply -f -
+          apiVersion: operators.coreos.com/v1alpha1
+          kind: CatalogSource
+          metadata:
+            name: dotvirt-catalog-ci
+            namespace: dotvirt-ci
+          spec:
+            sourceType: grpc
+            image: localhost:5000/dotvirt-operator-catalog:ci
+          ---
+          apiVersion: operators.coreos.com/v1
+          kind: OperatorGroup
+          metadata:
+            name: dotvirt-ci
+            namespace: dotvirt-ci
+          spec: {}
+          ---
+          apiVersion: operators.coreos.com/v1alpha1
+          kind: Subscription
+          metadata:
+            name: dotvirt-operator
+            namespace: dotvirt-ci
+          spec:
+            channel: stable-v0
+            name: dotvirt-operator
+            source: dotvirt-catalog-ci
+            sourceNamespace: dotvirt-ci
+          EOF
+          ./hack/wait-csv.sh dotvirt-ci dotvirt-operator "$CSV_NAME"
       - name: Scorecard (basic + olm)
         run: operator-sdk scorecard ./operator/bundle --wait-time 180s
 
