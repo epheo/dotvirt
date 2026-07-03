@@ -4,8 +4,9 @@
 	import '../app.css';
 	import favicon from '$lib/assets/favicon.svg';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { api, onUnauthorized, streamInventory } from '$lib/api';
-	import { vmHref } from '$lib/nav';
+	import { sectionOf, vmHref, type Section } from '$lib/nav';
 	import { drafts, PLATFORM_PROJECT } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { session } from '$lib/state/session.svelte';
@@ -14,12 +15,23 @@
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import AppModals from '$lib/components/AppModals.svelte';
 	import ChangesPanel from '$lib/components/ChangesPanel.svelte';
-	import InventoryTree from '$lib/components/InventoryTree.svelte';
 	import Login from '$lib/components/Login.svelte';
+	import SectionSwitcher from '$lib/components/SectionSwitcher.svelte';
 	import TaskDock from '$lib/components/TaskDock.svelte';
 	import ToastHost from '$lib/components/ToastHost.svelte';
+	import CatalogTree from '$lib/tree/CatalogTree.svelte';
+	import ComputeTree from '$lib/tree/ComputeTree.svelte';
+	import FlatSectionTree from '$lib/tree/FlatSectionTree.svelte';
 
 	let { children }: { children: Snippet } = $props();
+
+	// The tree follows the section the URL is in, but sticks across the
+	// section-agnostic /vm route — a VM opened from the Hosts tree keeps the
+	// Hosts tree (and its highlighted row), as vCenter does.
+	let treeSection = $state<Section>('compute');
+	$effect(() => {
+		if (page.url.pathname.split('/')[1] !== 'vm') treeSection = sectionOf(page.url.pathname);
+	});
 
 	// Drop to the login screen on any 401. Registered as the api layer's one
 	// signed-out sink, so every fetching component is covered without threading
@@ -109,37 +121,39 @@
 		{/if}
 
 		<div class="flex min-h-0 flex-1">
-			<aside class="w-72 overflow-y-auto border-r border-line-strong bg-panel">
-				{#if !inventory.inventory}
-					<div class="space-y-2 p-3">
-						{#each Array(5) as _, i (i)}
-							<div class="h-5 animate-pulse rounded bg-slate-100"></div>
-						{/each}
-					</div>
-				{:else if inventory.inventory.projects.length === 0}
-					<div class="space-y-3 p-6 text-center">
-						<p class="text-xs text-ink-faint">No projects visible.</p>
-						{#if canNamespace}
-							<button
-								onclick={() => (ui.modal = { kind: 'newProject' })}
-								class="inline-flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
-							>
-								<FolderPlus size={14} /> Create your first project
-							</button>
-						{/if}
-					</div>
-				{:else}
-					<InventoryTree
-						inventory={inventory.inventory}
-						networks={inventory.networks}
-						staged={drafts.stagedByKey}
-						canManage={inventory.canManage}
-						oncontextvm={(vm, x, y) => ui.openVMContext(vm, x, y)}
-						oncontextcontainer={(c, x, y) => (ui.ctx = { x, y, kind: 'container', ...c })}
-						onattachrepo={(project, namespaces) =>
-							(ui.modal = { kind: 'adoptProject', project, namespaces })}
-					/>
-				{/if}
+			<aside class="flex w-72 flex-col border-r border-line-strong bg-panel">
+				<SectionSwitcher active={treeSection} />
+				<div class="min-h-0 flex-1 overflow-y-auto">
+					{#if !inventory.inventory}
+						<div class="space-y-2 p-3">
+							{#each Array(5) as _, i (i)}
+								<div class="h-5 animate-pulse rounded bg-slate-100"></div>
+							{/each}
+						</div>
+					{:else if inventory.inventory.projects.length === 0 && treeSection !== 'catalog'}
+						<div class="space-y-3 p-6 text-center">
+							<p class="text-xs text-ink-faint">No projects visible.</p>
+							{#if canNamespace}
+								<button
+									onclick={() => (ui.modal = { kind: 'newProject' })}
+									class="inline-flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
+								>
+									<FolderPlus size={14} /> Create your first project
+								</button>
+							{/if}
+						</div>
+					{:else if treeSection === 'compute'}
+						<ComputeTree />
+					{:else if treeSection === 'hosts'}
+						<FlatSectionTree kind="node" />
+					{:else if treeSection === 'networking'}
+						<FlatSectionTree kind="network" />
+					{:else if treeSection === 'storage'}
+						<FlatSectionTree kind="storage" />
+					{:else}
+						<CatalogTree />
+					{/if}
+				</div>
 			</aside>
 			<main class="flex min-w-0 flex-1 flex-col overflow-hidden bg-panel">
 				{@render children()}

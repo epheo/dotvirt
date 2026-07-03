@@ -18,10 +18,15 @@
 	import Permissions from '$lib/components/Permissions.svelte';
 	import TabBar from '$lib/components/TabBar.svelte';
 	import VMTable from '$lib/components/VMTable.svelte';
+	import NodeConfigure from './NodeConfigure.svelte';
+	import SegmentSummary from './SegmentSummary.svelte';
+	import StorageClassSummary from './StorageClassSummary.svelte';
 
-	// The container workspace: every inventory level (All/project/namespace/node/
-	// network/storage) gets the same breadcrumb + Summary/VMs/Monitor/Configure/
-	// Permissions tabs — vCenter's "same tabs at every level".
+	// The container workspace: every inventory level gets the same breadcrumb +
+	// tab chrome — vCenter's "same tabs at every level". The tab SET follows the
+	// object kind: compute containers carry the full set, a host drops
+	// Permissions (nodes aren't namespaced), segments and storage classes are
+	// fact sheets (Summary + their VMs).
 	let {
 		scope,
 		trail
@@ -30,16 +35,22 @@
 		trail: { label: string; href?: string }[];
 	} = $props();
 
-	const TABS = [
+	const ALL_TABS = [
 		{ id: 'summary', label: 'Summary' },
 		{ id: 'vms', label: 'VMs' },
 		{ id: 'monitor', label: 'Monitor' },
 		{ id: 'configure', label: 'Configure' },
 		{ id: 'permissions', label: 'Permissions' }
 	];
+	const tabs = $derived.by(() => {
+		if (scope.kind === 'node') return ALL_TABS.filter((t) => t.id !== 'permissions');
+		if (scope.kind === 'network' || scope.kind === 'storage')
+			return ALL_TABS.filter((t) => t.id === 'summary' || t.id === 'vms');
+		return ALL_TABS;
+	});
 	const tab = $derived.by(() => {
 		const t = page.url.searchParams.get('tab');
-		return TABS.some((x) => x.id === t) ? t! : 'summary';
+		return tabs.some((x) => x.id === t) ? t! : 'summary';
 	});
 
 	// VMs in the current scope, feeding the grid. Network/storage membership uses
@@ -171,12 +182,18 @@
 
 <Breadcrumb {trail} />
 
-<TabBar class="border-b border-line px-4" tabs={TABS} active={tab} href={(t) => `?tab=${t}`} />
+<TabBar class="border-b border-line px-4" {tabs} active={tab} href={(t) => `?tab=${t}`} />
 
 {#if tab === 'summary'}
-	<div class="min-h-0 flex-1 overflow-y-auto">
-		<ClusterSummary scope={containerScope} onselect={openVM} />
-	</div>
+	{#if scope.kind === 'network'}
+		<SegmentSummary network={scope.network} vms={scopedVMs} />
+	{:else if scope.kind === 'storage'}
+		<StorageClassSummary storageClass={scope.storageClass} vms={scopedVMs} />
+	{:else}
+		<div class="min-h-0 flex-1 overflow-y-auto">
+			<ClusterSummary scope={containerScope} onselect={openVM} />
+		</div>
+	{/if}
 {:else if tab === 'monitor'}
 	<div class="min-h-0 flex-1 overflow-y-auto">
 		<ContainerMonitor namespaces={scopedNamespaces} scope={containerScope} onselect={openVM} />
@@ -186,18 +203,11 @@
 		<Permissions namespaces={scopedNamespaces} />
 	</div>
 {:else if tab === 'configure'}
-	<ContainerConfigure
-		{scope}
-		vms={scopedVMs}
-		projects={cfgProjects}
-		networks={inventory.networks}
-		uplinks={inventory.uplinks}
-		physicalAdapters={inventory.physicalAdapters}
-		nmstatePresent={inventory.nmstatePresent}
-		canManage={inventory.canManage}
-		onaction={(a) => ui.recordAction(a)}
-		onadduplink={() => (ui.modal = { kind: 'uplink' })}
-	/>
+	{#if scope.kind === 'node'}
+		<NodeConfigure node={scope.node} vms={scopedVMs} />
+	{:else}
+		<ContainerConfigure projects={cfgProjects} />
+	{/if}
 {:else}
 	{#if picked.size > 0}
 		<BulkActionsBar
