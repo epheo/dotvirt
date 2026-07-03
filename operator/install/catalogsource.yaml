@@ -10,6 +10,6 @@ metadata:
   namespace: openshift-marketplace
 spec:
   sourceType: grpc
-  image: quay.io/epheo/dotvirt-operator-catalog@sha256:b43f8c0c306df05835bc8fa3f901f0accc18403fb45a98f9841f6f3adec8d69f
+  image: quay.io/epheo/dotvirt-operator-catalog@sha256:66666060f4494363253285067905f7e1590f8a4a9541f8e82ba9fa0cbf253626
   displayName: dotvirt
   publisher: epheo
