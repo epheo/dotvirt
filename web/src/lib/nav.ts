@@ -42,6 +42,7 @@ export function sectionOf(pathname: string): Section {
 export const sectionRoot = (s: Section): string => `/${s}`;
 
 // The workspace breadcrumb for a scope: ancestors link, the focus is plain.
+// Roots name the section, not "All VMs" everywhere.
 export function trailForScope(s: Scope): { label: string; href?: string }[] {
 	switch (s.kind) {
 		case 'all':
@@ -55,11 +56,11 @@ export function trailForScope(s: Scope): { label: string; href?: string }[] {
 				{ label: s.namespace }
 			];
 		case 'node':
-			return [{ label: 'All VMs', href: '/hosts' }, { label: `Node: ${s.node}` }];
+			return [{ label: 'All Nodes', href: '/hosts' }, { label: `Node: ${s.node}` }];
 		case 'network':
-			return [{ label: 'All VMs', href: '/networking' }, { label: `Network: ${s.network}` }];
+			return [{ label: 'Networking', href: '/networking' }, { label: `Segment: ${s.network}` }];
 		case 'storage':
-			return [{ label: 'All VMs', href: '/storage' }, { label: `Storage: ${s.storageClass}` }];
+			return [{ label: 'All Storage', href: '/storage' }, { label: `Storage: ${s.storageClass}` }];
 	}
 }
 

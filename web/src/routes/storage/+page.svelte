@@ -2,4 +2,4 @@
 	import ContainerWorkspace from '$lib/workspace/ContainerWorkspace.svelte';
 </script>
 
-<ContainerWorkspace scope={{ kind: 'all' }} trail={[{ label: 'All VMs' }]} />
+<ContainerWorkspace scope={{ kind: 'all' }} trail={[{ label: 'All Storage' }]} />

@@ -19,12 +19,16 @@ test('shell + container workspace renders after login', async ({ page }) => {
 	await expect(main.getByRole('link', { name: 'Monitor', exact: true })).toBeVisible();
 });
 
-test('inventory lenses are section routes', async ({ page }) => {
-	await expect(page.getByRole('link', { name: 'Projects' })).toBeVisible();
-	await page.getByRole('link', { name: 'Nodes' }).click();
+test('inventory sections switch tree and workspace', async ({ page }) => {
+	const aside = page.locator('aside');
+	await expect(aside.getByRole('link', { name: 'Compute' })).toBeVisible();
+	await aside.getByRole('link', { name: 'Hosts' }).click();
 	await expect(page).toHaveURL(/\/hosts$/);
-	await expect(page.getByRole('link', { name: 'Nodes' })).toBeVisible();
-	await expect(page.getByText('All VMs').first()).toBeVisible();
+	// The Hosts tree roots at All Nodes and groups VMs by node.
+	await expect(aside.getByText('All Nodes')).toBeVisible();
+	await aside.getByRole('link', { name: 'Storage', exact: true }).click();
+	await expect(page).toHaveURL(/\/storage$/);
+	await expect(aside.getByText('All Storage')).toBeVisible();
 });
 
 test('VMs tab lists VMs and opens a detail route', async ({ page }) => {
@@ -57,7 +61,10 @@ test('views are deep-linkable and refresh-safe', async ({ page }) => {
 	await expect(page.getByText('Read-only — these are platform objects')).toBeVisible();
 	// Topology is the Networking section home.
 	await page.goto('/networking');
-	await expect(page.getByText('Network Topology')).toBeVisible();
+	await expect(page.getByText('provider edge').first()).toBeVisible();
+	// A segment group in the tree opens its object page (Summary fact sheet).
+	await page.locator('aside a[href^="/networking/"]').first().click();
+	await expect(page.locator('main').getByText('VMs attached')).toBeVisible();
 	// A VM URL survives a hard reload (session cookie + fallback routing).
 	await page.goto('/compute');
 	await openFirstVM(page);
