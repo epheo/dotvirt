@@ -103,9 +103,14 @@ jobs:
           git switch -c "$branch"
           git commit -am "release v$REL_VERSION: digest-pinned (replaces v$REL_PREV)"
           git push -u origin "$branch"
+          # PR creation needs the repo setting "Allow GitHub Actions to create and
+          # approve pull requests". Without it the branch is still pushed and the
+          # images are already on quay — failing here would only skip verify, so
+          # warn and leave the PR to be opened by hand.
           gh pr create --base main --head "$branch" \
             --title "release v$REL_VERSION" \
-            --body "Digest-pinned release cut by CI; images already pushed to quay.io/epheo. Merge to record the pins, then apply operator/install/catalogsource.yaml."
+            --body "Digest-pinned release cut by CI; images already pushed to quay.io/epheo. Merge to record the pins, then apply operator/install/catalogsource.yaml." \
+            || echo "::warning::could not open the pin PR — open it manually: https://github.com/$GITHUB_REPOSITORY/compare/main...$branch"
 
   # Prove the just-pushed release actually installs from quay before anyone merges the
   # pin PR — the same install the daily canary runs, pointed at the fresh catalog digest.
