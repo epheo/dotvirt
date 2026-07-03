@@ -1,19 +1,17 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { api, Unauthorized, type Options } from '$lib/api';
-	import Drawer from './Drawer.svelte';
 	import TabBar from './TabBar.svelte';
 
 	// Content-library-lite: a read-only browser over the cluster's catalog —
 	// boot images (DataSources), instance types, preferences, networks (NADs),
 	// storage classes. The data is the wizard's own /api/options; dotvirt never
-	// creates or edits these (platform objects).
-	let { onclose }: { onclose: () => void } = $props();
-
+	// creates or edits these (platform objects). The kind rides ?kind= so a
+	// catalog tab is deep-linkable like every other tab.
 	let options = $state<Options | null>(null);
 	let error = $state('');
 
 	type Kind = 'images' | 'instancetypes' | 'preferences' | 'networks' | 'storage';
-	let kind = $state<Kind>('images');
 	let picked = $state<string | null>(null); // selected item key within the kind
 
 	const KINDS: { id: Kind; label: string }[] = [
@@ -23,6 +21,14 @@
 		{ id: 'networks', label: 'Networks' },
 		{ id: 'storage', label: 'Storage classes' }
 	];
+	const kind = $derived.by<Kind>(() => {
+		const k = page.url.searchParams.get('kind');
+		return KINDS.some((x) => x.id === k) ? (k as Kind) : 'images';
+	});
+	$effect(() => {
+		kind;
+		picked = null;
+	});
 
 	$effect(() => {
 		api
@@ -33,11 +39,6 @@
 				error = String(e);
 			});
 	});
-
-	function pick(k: Kind) {
-		kind = k;
-		picked = null;
-	}
 
 	// One uniform row shape per kind: key, title, a right-aligned fact, and the
 	// detail fields shown when selected.
@@ -110,16 +111,10 @@
 	const pickedRow = $derived(rows.find((r) => r.key === picked) ?? null);
 </script>
 
-<Drawer title="Catalog" {onclose}>
-	<TabBar
-		tabs={KINDS}
-		active={kind}
-		variant="chips"
-		class="border-b border-line px-3 py-2"
-		onchange={(k) => pick(k as Kind)}
-	/>
+<TabBar class="border-b border-line px-4" tabs={KINDS} active={kind} href={(k) => `?kind=${k}`} />
 
-	<div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+<div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+	<div class="max-w-3xl">
 		{#if error}
 			<p class="rounded bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>
 		{:else if !options}
@@ -164,8 +159,8 @@
 			{/if}
 		{/if}
 	</div>
+</div>
 
-	{#snippet footer()}
-		Read-only — these are platform objects; the New VM wizard consumes them.
-	{/snippet}
-</Drawer>
+<footer class="border-t border-line px-4 py-2 text-xs text-ink-faint">
+	Read-only — these are platform objects; the New VM wizard consumes them.
+</footer>
