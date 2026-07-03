@@ -126,12 +126,18 @@ func PlatformAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo string
 			map[string]any{"group": "policy.networking.k8s.io", "kind": "AdminNetworkPolicy"},
 			map[string]any{"group": "policy.networking.k8s.io", "kind": "BaselineAdminNetworkPolicy"},
 			map[string]any{"group": "nmstate.io", "kind": "NodeNetworkConfigurationPolicy"},
+			// DRS: the worker PSI kernel-arg the load-aware descheduler profile needs.
+			map[string]any{"group": "machineconfiguration.openshift.io", "kind": "MachineConfig"},
 		},
 		"namespaceResourceWhitelist": []any{
 			map[string]any{"group": "k8s.ovn.org", "kind": "UserDefinedNetwork"},
 			map[string]any{"group": "k8s.cni.cncf.io", "kind": "NetworkAttachmentDefinition"},
 			// Tenant access delegation: a project's owners → namespace-admin grant.
 			map[string]any{"group": "rbac.authorization.k8s.io", "kind": "RoleBinding"},
+			// DRS: the descheduler operator install + its configuration CR.
+			map[string]any{"group": "operators.coreos.com", "kind": "Subscription"},
+			map[string]any{"group": "operators.coreos.com", "kind": "OperatorGroup"},
+			map[string]any{"group": "operator.openshift.io", "kind": "KubeDescheduler"},
 		},
 	})
 }

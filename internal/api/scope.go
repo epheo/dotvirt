@@ -19,8 +19,8 @@ type visibleSet struct {
 	ver uint64
 }
 
-// platformAuth is a token's platform-author verdict, stamped the same way.
-type platformAuth struct {
+// ssarVerdict is one (token, resource) create-SSAR answer, stamped the same way.
+type ssarVerdict struct {
 	ok  bool
 	ver uint64
 }
@@ -83,23 +83,51 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 	return set, nil
 }
 
-// canAuthorPlatform reports whether id may author platform-tier changes — the same
-// SSAR platformScope gates on (create CUDN), TTL-cached per token so the inventory
-// broadcast path stays free of a per-subscriber cluster call. False when no platform
-// repo is configured. Used to seed the synthetic platform project into the proposals
-// query so a platform PR surfaces on a cold page load, not only right after proposing.
+// canCreateCached is CanCreateClusterResource behind the per-(token, resource),
+// rbacVersion-stamped cache — for authorization signals read on polled or
+// broadcast paths, where an uncached SSAR would post to the apiserver per
+// request. A RoleBinding/namespace move invalidates lazily via the version
+// stamp; the TTL backstops the cluster-scoped RBAC changes the version doesn't
+// observe (see visibleTTL). Mutating routes keep their uncached platformScope
+// SSAR — a write deserves a fresh answer.
+func (s *Server) canCreateCached(ctx context.Context, id auth.Identity, c *cluster.Client, group, resource string) bool {
+	ver := s.rbacVersion()
+	key := restfactory.TokenKey(id.Token) + "\x00" + group + "/" + resource
+	if e, ok := s.ssar.Get(key); ok && e.ver == ver {
+		return e.ok
+	}
+	ok := c.CanCreateClusterResource(ctx, group, resource)
+	s.ssar.Put(key, ssarVerdict{ok: ok, ver: ver})
+	return ok
+}
+
+// platformAuthorResources are the create-SSARs that signal platform-tier
+// authoring — one per family of platform create routes. Holding ANY of them
+// grants access to the caller's OWN platform draft (drafts are per-user: a
+// caller can only view/unstage/propose what their per-route create gates let
+// them stage), so the whole-draft routes OR these rather than demanding one
+// specific verb; the PR merge review remains the apply boundary.
+var platformAuthorResources = []struct{ group, resource string }{
+	{"k8s.ovn.org", "clusteruserdefinednetworks"},
+	{"operator.openshift.io", "kubedeschedulers"},
+}
+
+// canAuthorPlatform reports whether id may author platform-tier changes —
+// any platform authoring signal, TTL-cached per token so the inventory
+// broadcast path stays free of a per-subscriber cluster call. False when no
+// platform repo is configured. Used to seed the synthetic platform project
+// into the proposals query so a platform PR surfaces on a cold page load, not
+// only right after proposing.
 func (s *Server) canAuthorPlatform(ctx context.Context, id auth.Identity, c *cluster.Client) bool {
 	if s.cfg.PlatformRepo == "" {
 		return false
 	}
-	ver := s.rbacVersion()
-	key := restfactory.TokenKey(id.Token)
-	if e, ok := s.platform.Get(key); ok && e.ver == ver {
-		return e.ok
+	for _, r := range platformAuthorResources {
+		if s.canCreateCached(ctx, id, c, r.group, r.resource) {
+			return true
+		}
 	}
-	ok := c.CanCreateClusterResource(ctx, "k8s.ovn.org", "clusteruserdefinednetworks")
-	s.platform.Put(key, platformAuth{ok: ok, ver: ver})
-	return ok
+	return false
 }
 
 func namespaceNames(nss []project.Namespace) []string {
@@ -204,16 +232,41 @@ func (s *Server) draftScope(w http.ResponseWriter, r *http.Request) (scope, bool
 }
 
 // pickProject resolves a project named by a ?project= query or {project} path
-// segment (the whole-project routes: draft, propose, unstage, history, revert). The
-// platform tier resolves ONLY for callers who can author platform changes — gated on
-// the CUDN-create signal (the dotvirt-platform-network-admin role grants it together
-// with NNCP/namespace), so a plain tenant cannot reach the platform repo's draft,
-// history, or revert. Any other name resolves from the caller's visible projects.
+// segment (the whole-project routes: draft, propose, unstage, history, revert).
+// The platform tier resolves ONLY for callers who can author platform changes
+// (any signal in platformAuthorResources — the routes touch the caller's own
+// draft, staged behind those same per-route gates), so a plain tenant cannot
+// reach the platform repo's draft, history, or revert. Any other name resolves
+// from the caller's visible projects.
 func (s *Server) pickProject(w http.ResponseWriter, r *http.Request, want string) (scope, bool) {
 	if want == platformProjectName {
-		return s.platformScope(w, r, "k8s.ovn.org", "clusteruserdefinednetworks")
+		return s.platformScopeAny(w, r)
 	}
 	return s.resolveProject(w, r, byName(want))
+}
+
+// platformScopeAny resolves the platform tier for the whole-draft routes: any
+// platform authoring signal suffices (see platformAuthorResources). The
+// per-kind create routes keep platformScope's exact-resource gate.
+func (s *Server) platformScopeAny(w http.ResponseWriter, r *http.Request) (scope, bool) {
+	id, c, err := s.userCluster(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return scope{}, false
+	}
+	if s.draft == nil {
+		http.Error(w, "changeset/draft not configured", http.StatusServiceUnavailable)
+		return scope{}, false
+	}
+	if s.cfg.PlatformRepo == "" {
+		http.Error(w, "platform repo not configured (set -platform-repo)", http.StatusServiceUnavailable)
+		return scope{}, false
+	}
+	if !s.canAuthorPlatform(r.Context(), id, c) {
+		http.Error(w, "not authorized to author platform changes", http.StatusForbidden)
+		return scope{}, false
+	}
+	return scope{id: id, cluster: c, proj: project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}}, true
 }
 
 // platformProjectName is the synthetic project name for the platform tier — the

@@ -29,6 +29,17 @@ type VMEdit struct {
 	SetLabels    map[string]string `json:"setLabels,omitempty"`
 	RemoveLabels []string          `json:"removeLabels,omitempty"`
 
+	// DRSExclude toggles the descheduler's prefer-no-eviction annotation on the
+	// VM template: true keeps the VM live-migratable for maintenance while the
+	// automatic load balancer (DRS) leaves it alone; false removes the
+	// annotation. Nil leaves it untouched.
+	DRSExclude *bool `json:"drsExclude,omitempty"`
+
+	// EvictionStrategy sets spec.template.spec.evictionStrategy (LiveMigrate,
+	// None, ...); the empty string removes it, falling back to the cluster
+	// default. Nil leaves it untouched.
+	EvictionStrategy *string `json:"evictionStrategy,omitempty"`
+
 	// Disk/network edits on the VM template. The add-entries are model types so
 	// the API request, the persisted draft, and this edit share one definition.
 	AddDisks       []model.DiskAdd    `json:"addDisks,omitempty"`
@@ -42,6 +53,7 @@ func (e VMEdit) Empty() bool {
 	return e.Power == nil && e.CPUCores == nil && e.Memory == nil &&
 		e.Instancetype == nil && e.Preference == nil && e.Sizing == nil &&
 		len(e.SetLabels) == 0 && len(e.RemoveLabels) == 0 &&
+		e.DRSExclude == nil && e.EvictionStrategy == nil &&
 		len(e.AddDisks) == 0 && len(e.RemoveDisks) == 0 &&
 		len(e.AddNetworks) == 0 && len(e.RemoveNetworks) == 0
 }
@@ -75,9 +87,34 @@ func ApplyEdit(content []byte, namespace, name string, edit VMEdit) ([]byte, err
 		applyRef(ed, vm, "preference", *edit.Preference)
 	}
 	applyMetadata(ed, vm, edit)
+	applyTemplateAnnotations(ed, vm, edit)
+	if edit.EvictionStrategy != nil {
+		applyEvictionStrategy(ed, vm, *edit.EvictionStrategy)
+	}
 	applyDisksNetworks(ed, vm, edit)
 
 	return ed.bytes(), nil
+}
+
+// applyEvictionStrategy sets (or, for "", removes) the template's
+// evictionStrategy — whether an eviction live-migrates the VM (LiveMigrate),
+// or is refused outright (None: pinned, blocks node drains too).
+func applyEvictionStrategy(ed *lineEditor, vmRoot *yaml.Node, strategy string) {
+	s := get(get(get(vmRoot, "spec"), "template"), "spec")
+	if s == nil {
+		return
+	}
+	if es := get(s, "evictionStrategy"); es != nil {
+		if strategy == "" {
+			ed.deleteChild(s, "evictionStrategy")
+			return
+		}
+		ed.setScalarAt(es, strategy)
+		return
+	}
+	if strategy != "" {
+		ed.insertChild(s, "evictionStrategy", strategy)
+	}
 }
 
 // applySizing writes the VM's CPU/memory in exactly one representation — an

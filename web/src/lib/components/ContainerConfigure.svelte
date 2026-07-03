@@ -2,6 +2,7 @@
 	import type { Network, PhysicalAdapter, Project, Uplink, VM } from '$lib/api';
 	import { POD_NETWORK, type Scope } from '$lib/lenses';
 	import { networkByRef, kindLabel } from '$lib/networks';
+	import DRSCard from './DRSCard.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import NodeActions from './NodeActions.svelte';
 	import QuotaBand from './QuotaBand.svelte';
@@ -20,7 +21,8 @@
 		nmstatePresent = false,
 		canManage = false,
 		onaction,
-		onadduplink
+		onadduplink,
+		onstaged
 	}: {
 		scope: Scope;
 		vms: VM[]; // the VMs in scope (counts + the node evacuate list)
@@ -32,6 +34,7 @@
 		canManage?: boolean;
 		onaction?: (a: { verb: string; namespace: string; name: string; ok: boolean }) => void;
 		onadduplink?: () => void;
+		onstaged?: () => void; // a DRS change was staged — refresh the drafts badge
 	} = $props();
 </script>
 
@@ -136,6 +139,10 @@
 				</InfoCard>
 			{/if}
 		{:else}
+			{#if scope.kind === 'all'}
+				<!-- Cluster services (vCenter: Cluster → Configure → Services). -->
+				<DRSCard {onstaged} />
+			{/if}
 			{#each projects as p (p.name)}
 				<InfoCard title="Project: {p.name}">
 					<dl class="divide-y divide-slate-100 text-[13px]">

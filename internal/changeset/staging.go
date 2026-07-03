@@ -536,8 +536,14 @@ func (c *Coordinator) StageDelete(id auth.Identity, proj project.ProjectInfo, na
 }
 
 // Unstage removes one pending change (of the given resource — empty means VM)
-// from (id, proj)'s draft.
+// from (id, proj)'s draft. An atomic resource unstages as a whole set: its
+// entries are one logical change, so removing a single file from under it
+// would leave a proposable half-change.
 func (c *Coordinator) Unstage(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) error {
+	if r := draft.Resource(resource); r.Atomic() {
+		_, err := c.unstageResource(id, proj, r)
+		return err
+	}
 	return c.store.Unstage(id.Username, proj.Name, draft.Resource(resource), namespace, name)
 }
 

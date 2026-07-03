@@ -1,12 +1,45 @@
 // Package reflect holds the generic reflector plumbing shared by dotvirt's
-// in-memory snapshots (clusterstate's live VM/VMI/namespace snapshot and argo's
-// drift snapshot). The piece that is genuinely reusable — and subtle enough to be
-// worth defining once — is the store wrapper that turns a stream of watch deltas
-// into a single coalesced "something moved" signal and marks the initial relist
-// complete. Each snapshot composes this and adds its own typed read methods.
+// in-memory snapshots (clusterstate's live VM/VMI/namespace snapshot, argo's
+// drift snapshot, desched's DRS snapshot). The pieces that are genuinely
+// reusable — and subtle enough to be worth defining once — are the store
+// wrapper that turns a stream of watch deltas into a single coalesced
+// "something moved" signal and marks the initial relist complete, and the
+// ListWatch wrapper that turns watch errors into a health signal. Each
+// snapshot composes these and adds its own typed read methods.
 package reflect
 
-import "k8s.io/client-go/tools/cache"
+import (
+	"sync/atomic"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/tools/cache"
+)
+
+// TrackHealth wraps lw so a failed List or Watch flips healthy false and a
+// successful Watch establish flips it true — a deterministic, error-driven
+// staleness signal, not a TTL. The reflector re-lists+re-watches on a drop, so
+// a transient blip that immediately recovers stays healthy; a sustained outage
+// (repeated errors) reads as unhealthy. Callers surface it as a "may be stale"
+// warning while the store keeps serving its last-good contents.
+func TrackHealth(lw *cache.ListWatch, healthy *atomic.Bool) *cache.ListWatch {
+	list, watchFn := lw.ListFunc, lw.WatchFunc
+	return &cache.ListWatch{
+		ListFunc: func(o metav1.ListOptions) (runtime.Object, error) {
+			obj, err := list(o)
+			if err != nil {
+				healthy.Store(false)
+			}
+			return obj, err
+		},
+		WatchFunc: func(o metav1.ListOptions) (watch.Interface, error) {
+			w, err := watchFn(o)
+			healthy.Store(err == nil)
+			return w, err
+		},
+	}
+}
 
 // countingStore wraps a cache.Indexer and fires onChange after any mutation a
 // reflector applies (Add/Update/Delete/Replace), so the read methods never have to

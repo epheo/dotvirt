@@ -2,9 +2,6 @@ package changeset
 
 import (
 	"errors"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -20,45 +17,18 @@ import (
 // clone target).
 func seedBareWithRunning(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	bare := filepath.Join(dir, "remote.git")
-	work := filepath.Join(dir, "work")
-	run := func(wd string, args ...string) {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = wd
-		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@x", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@x")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
-	write := func(path, content string) {
-		full := filepath.Join(work, path)
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
 	vm := func(name, labels string) string {
 		return "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: " + name +
 			"\n  namespace: alpha\n" + labels + "spec:\n  runStrategy: Always\n"
 	}
+	bare, work := seedWork(t, map[string][]byte{"alpha/web.yaml": []byte(vm("web", ""))})
 
-	run(dir, "init", "-q", "--bare", "-b", "main", bare)
-	run(dir, "init", "-q", "-b", "main", work)
-	write("alpha/web.yaml", vm("web", ""))
-	run(work, "add", "-A")
-	run(work, "commit", "-qm", "seed")
-	run(work, "remote", "add", "origin", bare)
-	run(work, "push", "-q", "origin", "main")
-
-	run(work, "checkout", "-qb", "running")
-	write("alpha/web.yaml", vm("web", "  labels:\n    env: prod\n"))
-	write("alpha/copy.yaml", vm("copy", ""))
-	run(work, "add", "-A")
-	run(work, "commit", "-qm", "export live state")
-	run(work, "push", "-q", "origin", "running")
+	gitRun(t, work, "checkout", "-qb", "running")
+	writeWorkFile(t, work, "alpha/web.yaml", []byte(vm("web", "  labels:\n    env: prod\n")))
+	writeWorkFile(t, work, "alpha/copy.yaml", []byte(vm("copy", "")))
+	gitRun(t, work, "add", "-A")
+	gitRun(t, work, "commit", "-qm", "export live state")
+	gitRun(t, work, "push", "-q", "origin", "running")
 	return bare
 }
 

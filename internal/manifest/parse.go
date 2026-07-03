@@ -40,8 +40,12 @@ type vmDoc struct {
 			} `yaml:"spec"`
 		} `yaml:"dataVolumeTemplates"`
 		Template struct {
+			Metadata struct {
+				Annotations map[string]string `yaml:"annotations"`
+			} `yaml:"metadata"`
 			Spec struct {
-				Domain struct {
+				EvictionStrategy string `yaml:"evictionStrategy"`
+				Domain           struct {
 					CPU struct {
 						Cores int `yaml:"cores"`
 					} `yaml:"cpu"`
@@ -110,19 +114,22 @@ func ParseVMs(path string, content []byte, defaultNS string) ([]model.VM, error)
 		if ns == "" {
 			ns = defaultNS
 		}
+		_, drsExclude := doc.Spec.Template.Metadata.Annotations[PreferNoEvictionAnnotation]
 		vms = append(vms, model.VM{
-			Namespace:    ns,
-			Name:         doc.Metadata.Name,
-			Power:        powerFromDoc(doc),
-			CPUCores:     doc.Spec.Template.Spec.Domain.CPU.Cores,
-			Memory:       memoryFromDoc(doc),
-			Instancetype: refName(doc.Spec.Instancetype),
-			Preference:   refName(doc.Spec.Preference),
-			Labels:       doc.Metadata.Labels,
-			Disks:        disksFromDoc(doc),
-			Networks:     networksFromDoc(doc),
-			SourceFile:   path,
-			Sync:         model.SyncUnknown,
+			Namespace:        ns,
+			Name:             doc.Metadata.Name,
+			Power:            powerFromDoc(doc),
+			CPUCores:         doc.Spec.Template.Spec.Domain.CPU.Cores,
+			Memory:           memoryFromDoc(doc),
+			Instancetype:     refName(doc.Spec.Instancetype),
+			Preference:       refName(doc.Spec.Preference),
+			Labels:           doc.Metadata.Labels,
+			DRSExclude:       drsExclude,
+			EvictionStrategy: doc.Spec.Template.Spec.EvictionStrategy,
+			Disks:            disksFromDoc(doc),
+			Networks:         networksFromDoc(doc),
+			SourceFile:       path,
+			Sync:             model.SyncUnknown,
 		})
 	}
 	return vms, nil

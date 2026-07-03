@@ -902,6 +902,7 @@
 							{canManage}
 							onaction={recordAction}
 							onadduplink={() => (showUplinkWizard = true)}
+							onstaged={refreshDrafts}
 						/>
 					{:else}
 						{#if picked.size > 0}

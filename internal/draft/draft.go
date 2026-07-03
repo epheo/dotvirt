@@ -45,7 +45,14 @@ const (
 	ResourceNetworkPolicy              Resource = "networkpolicy"              // a namespace's east-west distributed firewall
 	ResourceAdminNetworkPolicy         Resource = "adminnetworkpolicy"         // cluster-wide admin DFW (ANP)
 	ResourceBaselineAdminNetworkPolicy Resource = "baselineadminnetworkpolicy" // cluster baseline DFW (BANP)
+	ResourceDRS                        Resource = "drs"                        // the cluster DRS (descheduler) install/config file set
 )
+
+// Atomic reports whether entries of this resource form one logical change that
+// stages and unstages as a set — a partial DRS file set (e.g. the operator
+// Subscription unstaged from under its KubeDescheduler CR) is not a meaningful
+// proposal.
+func (r Resource) Atomic() bool { return r == ResourceDRS }
 
 // Entry is one pending change, keyed by resource+namespace/name within its
 // (user,project).
