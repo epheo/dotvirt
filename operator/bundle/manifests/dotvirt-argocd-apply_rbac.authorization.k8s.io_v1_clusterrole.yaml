@@ -36,30 +36,6 @@ rules:
   - patch
   - delete
 - apiGroups:
-  - k8s.cni.cncf.io
-  resources:
-  - network-attachment-definitions
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - update
-  - patch
-  - delete
-- apiGroups:
-  - nmstate.io
-  resources:
-  - nodenetworkconfigurationpolicies
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - update
-  - patch
-  - delete
-- apiGroups:
   - networking.k8s.io
   resources:
   - networkpolicies
@@ -76,6 +52,30 @@ rules:
   resources:
   - adminnetworkpolicies
   - baselineadminnetworkpolicies
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - k8s.cni.cncf.io
+  resources:
+  - network-attachment-definitions
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - nmstate.io
+  resources:
+  - nodenetworkconfigurationpolicies
   verbs:
   - get
   - list
