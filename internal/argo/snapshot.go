@@ -34,10 +34,12 @@ type Snapshot struct {
 
 	// Memoized drift: rebuilt lazily only when the Application store moves
 	// (driftDirty), so one reconcile across N identities parses the apps once, not N
-	// times — the N:1 sharing the read path needs on the hot inventory-build path.
-	driftMu    sync.Mutex
-	driftCache map[string]Drift
-	driftDirty atomic.Bool
+	// times — the N:1 sharing the read path needs on the hot inventory-build path. Both
+	// the per-VM map and the per-project rollup are rebuilt from the same scan.
+	driftMu      sync.Mutex
+	driftCache   map[string]Drift
+	appSyncCache map[string]model.ProjectSync
+	driftDirty   atomic.Bool
 }
 
 // NewSnapshot builds the Application snapshot over the SA argo client. bus may be
@@ -99,14 +101,36 @@ func (s *Snapshot) Drift() map[string]Drift {
 	}
 	s.driftMu.Lock()
 	defer s.driftMu.Unlock()
-	// Rebuild only when the store has moved since the last build, so one reconcile
-	// across N identities shares one parse instead of re-scanning every Application
-	// per identity. The result is read-only to callers; a rebuild swaps in a fresh map
-	// (driftFromApps allocates anew), never mutating one a caller still holds.
-	if s.driftCache == nil || s.driftDirty.Swap(false) {
-		s.driftCache = driftFromApps(s.apps.List())
-	}
+	s.rebuildLocked()
 	return s.driftCache
+}
+
+// ProjectDrift returns each project's overall Application sync/health keyed by
+// canonical repoURL — the rollup covering every object kind the repo declares, not
+// just VMs. Same nil-before-sync contract and one-parse memoization as Drift, so the
+// inventory build can distinguish "Argo disabled/not-yet-synced" (nil) from "tracked"
+// (non-nil, a repo absent from it simply has no managing Application).
+func (s *Snapshot) ProjectDrift() map[string]model.ProjectSync {
+	if !s.synced.Load() {
+		return nil
+	}
+	s.driftMu.Lock()
+	defer s.driftMu.Unlock()
+	s.rebuildLocked()
+	return s.appSyncCache
+}
+
+// rebuildLocked refreshes both memoized maps from a single Application-store scan when
+// the store has moved since the last build (or on first read). Callers hold driftMu.
+// Results are read-only to callers; a rebuild swaps in fresh maps (the extractors
+// allocate anew), never mutating one a caller still holds.
+func (s *Snapshot) rebuildLocked() {
+	if s.driftCache != nil && !s.driftDirty.Swap(false) {
+		return
+	}
+	objs := s.apps.List()
+	s.driftCache = driftFromApps(objs)
+	s.appSyncCache = appSyncFromApps(objs)
 }
 
 // AppRef locates the Application managing a VM: enough to read its sync revision and

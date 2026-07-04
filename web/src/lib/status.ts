@@ -2,7 +2,7 @@
 // and the domain mappers that translate VM power, VMI phase, alert severity,
 // and task-dock rows onto them. Class maps are literal records — Tailwind only
 // sees static strings.
-import type { Power } from '$lib/api';
+import type { Power, ProjectSync } from '$lib/api';
 
 export type Tone = 'ok' | 'warn' | 'danger' | 'info' | 'neutral';
 
@@ -68,4 +68,24 @@ export function taskTone(t: { kind: string; ok?: boolean; active?: boolean }): T
 
 export function severityTone(severity?: string): Tone {
 	return severity === 'critical' ? 'danger' : severity === 'warning' ? 'warn' : 'neutral';
+}
+
+// A project's ArgoCD rollup → one tone + label, most-alarming state first. Returns
+// null for a clean (Synced + Healthy) or not-yet-known project, so a dense tree shows a
+// badge only when something needs attention or is in flight — green stays implicit.
+// pulse marks the actively-applying state (the "pending apply" feedback a merged
+// segment/policy PR produces before it settles).
+export function projectSyncView(
+	g?: ProjectSync,
+): { tone: Tone; label: string; pulse: boolean } | null {
+	if (!g) return null;
+	const op = g.operation;
+	if (op === 'Failed' || op === 'Error')
+		return { tone: 'danger', label: 'Sync failed', pulse: false };
+	if (g.health === 'Degraded' || g.health === 'Missing')
+		return { tone: 'danger', label: g.health, pulse: false };
+	if (op === 'Running' || g.health === 'Progressing')
+		return { tone: 'info', label: 'Applying…', pulse: true };
+	if (g.sync === 'OutOfSync') return { tone: 'warn', label: 'Out of sync', pulse: false };
+	return null; // Synced + Healthy, or unknown — no badge
 }

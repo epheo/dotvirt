@@ -120,6 +120,24 @@ type Project struct {
 	Repo       string             `json:"repo,omitempty"`
 	Namespaces []ProjectNamespace `json:"namespaces"`
 	Error      string             `json:"error,omitempty"`
+	// GitOps is the project's ArgoCD Application rollup — the sync/health Argo already
+	// computes across every object the repo declares, so it reflects segments, network
+	// policies and tenancy, not just VMs. Nil when Argo isn't wired or no Application
+	// tracks this repo.
+	GitOps *ProjectSync `json:"gitOps,omitempty"`
+}
+
+// ProjectSync is a project's overall GitOps state, read straight from its managing
+// ArgoCD Application. Operation is the last sync's phase ("Running" = applying,
+// "Failed"/"Error" = apply failed), the cue for a "pending apply" or an alarm that a
+// per-VM view can't give — a merged segment or policy PR that fails to apply shows
+// here even though no VM moved.
+type ProjectSync struct {
+	Sync      SyncStatus `json:"sync,omitempty"`
+	Health    string     `json:"health,omitempty"`    // Healthy | Degraded | Progressing | Missing | …
+	Operation string     `json:"operation,omitempty"` // operationState.phase: Running | Succeeded | Failed | Error
+	SyncError string     `json:"syncError,omitempty"` // operationState.message when the last sync didn't succeed
+	Revision  string     `json:"revision,omitempty"`  // short applied git revision
 }
 
 // Inventory is the full multi-project tree. Warnings carry non-fatal degradations

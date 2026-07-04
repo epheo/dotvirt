@@ -55,6 +55,9 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		// so there's no window between a readiness check and the read.
 		if d := s.drift.Drift(); d != nil {
 			in.Drift = d
+			// Same snapshot, same readiness gate: the per-project rollup covers every
+			// object kind the repo declares (segments, policies, tenancy), not just VMs.
+			in.ProjectDrift = s.drift.ProjectDrift()
 			// Synced, but the watch is erroring: the drift shown is the last-good store.
 			// Warn so a permanent ArgoCD outage doesn't masquerade as fresh sync state.
 			if !s.drift.Healthy() {

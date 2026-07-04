@@ -54,11 +54,24 @@ export interface ProjectNamespace {
 	vms: VM[];
 }
 
+// ProjectSync is the project's ArgoCD Application rollup — the sync/health ArgoCD
+// already computes across every object the repo declares (segments, policies,
+// tenancy), not just VMs. operation is the last sync's phase ('Running' = applying,
+// 'Failed'/'Error' = apply failed). Absent when Argo isn't wired or no app tracks it.
+export interface ProjectSync {
+	sync?: SyncStatus;
+	health?: string;
+	operation?: string;
+	syncError?: string;
+	revision?: string;
+}
+
 export interface Project {
 	name: string;
 	repo?: string;
 	namespaces: ProjectNamespace[];
 	error?: string;
+	gitOps?: ProjectSync;
 }
 
 export interface Inventory {
