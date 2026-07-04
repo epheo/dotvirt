@@ -7,7 +7,7 @@
 		type DraftView,
 		type Inventory,
 		type Proposal,
-		type VMEvent
+		type VMEvent,
 	} from '$lib/api';
 	import { duration } from '$lib/format';
 	import { pollWhileVisible } from '$lib/poll';
@@ -21,7 +21,7 @@
 		inventory,
 		username,
 		onselect,
-		onrefresh
+		onrefresh,
 	}: {
 		drafts: { project: string; draft: DraftView }[];
 		proposals: Proposal[];
@@ -107,8 +107,8 @@
 						project: p.project,
 						prNumber: p.prNumber,
 						title: p.title ?? '',
-						at: Date.now()
-					}))
+						at: Date.now(),
+					})),
 				].slice(-20);
 			prevProposals = cur;
 		});
@@ -163,7 +163,7 @@
 							project: proj.name,
 							url: '',
 							ok: !m.failed,
-							active
+							active,
 						});
 					}
 		}
@@ -180,7 +180,7 @@
 				project: '',
 				url: '',
 				ok: a.ok,
-				at: a.at
+				at: a.at,
 			});
 		}
 		for (const { project, draft } of drafts) {
@@ -194,7 +194,7 @@
 					status: 'Staged',
 					by: username,
 					project,
-					url: ''
+					url: '',
 				});
 			}
 		}
@@ -208,7 +208,7 @@
 				status: `PR #${p.prNumber} open`,
 				by: username,
 				project: p.project,
-				url: p.prURL
+				url: p.prURL,
 			});
 		}
 		// Freshly merged lanes: "syncing" while their project still drifts.
@@ -217,7 +217,7 @@
 			const drifting = inventory?.projects.some(
 				(p) =>
 					p.name === m.project &&
-					p.namespaces.some((ns) => ns.vms.some((v) => v.sync === 'OutOfSync'))
+					p.namespaces.some((ns) => ns.vms.some((v) => v.sync === 'OutOfSync')),
 			);
 			out.push({
 				kind: 'sync',
@@ -231,7 +231,7 @@
 				url: '',
 				ok: true,
 				active: !!drifting,
-				at: m.at
+				at: m.at,
 			});
 		}
 		if (inventory) {
@@ -248,7 +248,7 @@
 								status: 'Drifted',
 								by: '—',
 								project: proj.name,
-								url: ''
+								url: '',
 							});
 		}
 		return out;
@@ -257,7 +257,7 @@
 	// Drift + failed migrations come from the streamed inventory; firing
 	// Prometheus alerts join them — one amber number for everything wrong.
 	const clientAlarms = $derived(
-		tasks.filter((t) => t.kind === 'drift' || (t.kind === 'migration' && !t.ok))
+		tasks.filter((t) => t.kind === 'drift' || (t.kind === 'migration' && !t.ok)),
 	);
 	const alarms = $derived(clientAlarms.length + (firing?.length ?? 0));
 
@@ -357,8 +357,8 @@
 					id: 'alarms',
 					label: 'Alarms',
 					count: alarms > 0 ? alarms : undefined,
-					countTone: 'warn'
-				}
+					countTone: 'warn',
+				},
 			]}
 			active={openPane ? tab : ''}
 			variant="chips"

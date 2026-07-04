@@ -26,14 +26,16 @@
 		drafts.refresh();
 		ui.showToast('Staged into Changes — applies when the project’s PR merges.', {
 			label: 'Review & propose',
-			run: () => (ui.changesOpen = true)
+			run: () => (ui.changesOpen = true),
 		});
 	};
 
 	// The per-VM staged-changes modal (opened from a Staged badge).
 	let stagedBusy = $state(false);
 	const stagedItem = $derived(
-		m?.kind === 'staged' ? (drafts.stagedByKey.get(`${m.vm.namespace}/${m.vm.name}`) ?? null) : null
+		m?.kind === 'staged'
+			? (drafts.stagedByKey.get(`${m.vm.namespace}/${m.vm.name}`) ?? null)
+			: null,
 	);
 	async function discardStaged() {
 		if (m?.kind !== 'staged') return;

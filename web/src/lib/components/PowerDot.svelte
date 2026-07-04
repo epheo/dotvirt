@@ -10,7 +10,7 @@
 				? 'bg-green-500'
 				: power === 'Off'
 					? 'bg-slate-400'
-					: 'bg-amber-400'
+					: 'bg-amber-400',
 	);
 	const title = $derived(paused ? 'Paused' : `Power: ${power}`);
 </script>

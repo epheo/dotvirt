@@ -8,7 +8,7 @@
 		HardDrive,
 		MemoryStick,
 		Pencil,
-		Trash2
+		Trash2,
 	} from 'lucide-svelte';
 	import {
 		api,
@@ -17,7 +17,7 @@
 		type DraftItem,
 		type Network,
 		type VM,
-		type VMEvent
+		type VMEvent,
 	} from '$lib/api';
 	import { manifestURL, type VMAction } from '$lib/actions';
 	import type { DetailAction } from '$lib/state/ui.svelte';
@@ -55,7 +55,7 @@
 		onstagedopen,
 		onsearchlabel,
 		networks = [],
-		intent = null
+		intent = null,
 	}: {
 		vm: VM | null;
 		// The active tab is owned by the page (?tab=); ontab is the programmatic
@@ -396,7 +396,7 @@
 					{ id: 'configure', label: 'Configure' },
 					{ id: 'permissions', label: 'Permissions' },
 					{ id: 'snapshots', label: 'Snapshots' },
-					{ id: 'console', label: 'Console' }
+					{ id: 'console', label: 'Console' },
 				]}
 				active={tab}
 				href={(t) => `?tab=${t}`}
@@ -410,7 +410,7 @@
 				<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500"></span>
 				Live-migrating{#if vm.migration.sourceNode}&nbsp;from {vm.migration.sourceNode}{/if}
 				to {vm.migration.targetNode || '…'}{#if duration(vm.migration.startedAt)}&nbsp;· started {duration(
-						vm.migration.startedAt
+						vm.migration.startedAt,
 					)} ago{/if}
 			</div>
 		{/if}

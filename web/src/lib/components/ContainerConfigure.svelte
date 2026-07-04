@@ -12,7 +12,7 @@
 	let {
 		projects,
 		cluster = false,
-		onstaged
+		onstaged,
 	}: {
 		projects: Project[];
 		cluster?: boolean;

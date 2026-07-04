@@ -14,7 +14,7 @@
 
 	let {
 		inventory,
-		onpick
+		onpick,
 	}: {
 		inventory: Inventory | null;
 		onpick: (hit: SearchHit) => void;
@@ -48,7 +48,9 @@
 			if (labelQ !== null) {
 				const [k, v] = labelQ.split('=', 2);
 				const m = labels.find(([lk, lv]) =>
-					v === undefined ? lk.toLowerCase().includes(k) : lk.toLowerCase() === k && lv.toLowerCase() === v
+					v === undefined
+						? lk.toLowerCase().includes(k)
+						: lk.toLowerCase() === k && lv.toLowerCase() === v,
 				);
 				if (m) out.push({ kind: 'vm', vm, hint: `${m[0]}=${m[1]}` });
 				continue;
@@ -155,7 +157,7 @@
 		vm: 'VM',
 		project: 'Project',
 		namespace: 'Namespace',
-		node: 'Node'
+		node: 'Node',
 	};
 </script>
 
@@ -173,7 +175,9 @@
 			aria-label="Search inventory"
 			class="w-full bg-transparent text-xs text-white placeholder-slate-400 focus:outline-none"
 		/>
-		<kbd class="shrink-0 rounded border border-slate-600 px-1 text-[10px] text-slate-400">Ctrl K</kbd>
+		<kbd class="shrink-0 rounded border border-slate-600 px-1 text-[10px] text-slate-400"
+			>Ctrl K</kbd
+		>
 	</div>
 
 	{#if open && query.trim()}

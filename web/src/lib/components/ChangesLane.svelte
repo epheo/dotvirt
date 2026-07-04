@@ -12,7 +12,7 @@
 		project,
 		draft,
 		onchanged,
-		onproposed
+		onproposed,
 	}: {
 		project: string;
 		draft: DraftView;

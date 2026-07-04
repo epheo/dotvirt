@@ -11,7 +11,7 @@
 		busy = false,
 		onclose,
 		footer = undefined,
-		children
+		children,
 	}: {
 		title: string;
 		count?: number;

@@ -30,7 +30,7 @@
 	// fact sheets (Summary + their VMs).
 	let {
 		scope,
-		trail
+		trail,
 	}: {
 		scope: Scope;
 		trail: { label: string; href?: string }[];
@@ -41,7 +41,7 @@
 		{ id: 'vms', label: 'VMs' },
 		{ id: 'monitor', label: 'Monitor' },
 		{ id: 'configure', label: 'Configure' },
-		{ id: 'permissions', label: 'Permissions' }
+		{ id: 'permissions', label: 'Permissions' },
 	];
 	const tabs = $derived.by(() => {
 		if (scope.kind === 'node') return ALL_TABS.filter((t) => t.id !== 'permissions');
@@ -71,7 +71,7 @@
 			.flatMap((p) =>
 				p.namespaces
 					.filter((n) => sc.kind !== 'namespace' || n.namespace === sc.namespace)
-					.flatMap((n) => n.vms)
+					.flatMap((n) => n.vms),
 			);
 	});
 
@@ -95,7 +95,7 @@
 				? { project: scope.project, namespace: scope.namespace }
 				: scope.kind === 'node'
 					? { node: scope.node }
-					: {}
+					: {},
 	);
 	const scopedNamespaces = $derived([...new Set(scopedVMs.map((v) => v.namespace))]);
 
@@ -111,7 +111,7 @@
 
 	// The VM objects currently picked (resolve keys against the live inventory).
 	const pickedVMs = $derived(
-		inventory.allVMs.filter((vm) => picked.has(`${vm.namespace}/${vm.name}`))
+		inventory.allVMs.filter((vm) => picked.has(`${vm.namespace}/${vm.name}`)),
 	);
 
 	// Bulk context menu for a right-click inside the multi-selection. Registered
@@ -136,7 +136,7 @@
 		vms: VM[],
 		stage: (vm: VM) => Promise<unknown>,
 		skip: (vm: VM) => boolean,
-		verb: string
+		verb: string,
 	) {
 		if (bulkBusy) return;
 		bulkBusy = true;
@@ -156,7 +156,7 @@
 				.join(', ');
 			ui.showToast(
 				`${verb} ${staged} of ${vms.length}${extra ? ` (${extra})` : ''}.`,
-				staged > 0 ? { label: 'Review & propose', run: () => (ui.changesOpen = true) } : undefined
+				staged > 0 ? { label: 'Review & propose', run: () => (ui.changesOpen = true) } : undefined,
 			);
 		} finally {
 			bulkBusy = false;
@@ -169,7 +169,7 @@
 			(vm) => api.stageEdit(vm.namespace, vm.name, { sourceFile: vm.sourceFile, power: target }),
 			// Already in target state, or not in git (cluster-only) → no-op.
 			(vm) => vm.power === target || !vm.sourceFile,
-			`Powered ${target.toLowerCase()}: staged`
+			`Powered ${target.toLowerCase()}: staged`,
 		);
 	}
 
@@ -179,7 +179,7 @@
 			pickedVMs,
 			(vm) => api.stageDelete(vm.namespace, vm.name),
 			(vm) => !vm.sourceFile, // not in git → nothing to stage a removal of
-			'Deletion staged for'
+			'Deletion staged for',
 		);
 	}
 </script>

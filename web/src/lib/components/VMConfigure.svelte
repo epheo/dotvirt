@@ -12,7 +12,7 @@
 		vm,
 		networks = [],
 		onedit,
-		onsearchlabel
+		onsearchlabel,
 	}: {
 		vm: VM;
 		// The port-group catalog, to resolve raw NIC refs into port groups.
@@ -99,7 +99,7 @@
 								n.mac || null,
 								pg?.scope === 'shared' ? 'shared' : null,
 								pg?.uplink ? `uplink ${pg.uplink}` : null,
-								pg?.subnets?.length ? pg.subnets.join(', ') : null
+								pg?.subnets?.length ? pg.subnets.join(', ') : null,
 							]
 								.filter(Boolean)
 								.join(' · ')}

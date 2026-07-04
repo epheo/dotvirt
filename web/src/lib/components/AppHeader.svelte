@@ -12,7 +12,7 @@
 		Server,
 		Shield,
 		Upload,
-		User as UserIcon
+		User as UserIcon,
 	} from 'lucide-svelte';
 	import { hrefForScope, scopeFromPath, vmHref } from '$lib/nav';
 	import { drafts } from '$lib/state/drafts.svelte';

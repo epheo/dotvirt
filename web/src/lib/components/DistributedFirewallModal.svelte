@@ -8,7 +8,7 @@
 		namespace: initial,
 		vms = [],
 		onclose,
-		onstaged
+		onstaged,
 	}: {
 		namespaces: string[];
 		namespace?: string; // preselected namespace
@@ -43,8 +43,8 @@
 	// membership" readout, computed live from the inventory.
 	const members = $derived(
 		vms.filter(
-			(v) => v.namespace === namespace && (!appliedKey || v.labels?.[appliedKey] === appliedValue)
-		)
+			(v) => v.namespace === namespace && (!appliedKey || v.labels?.[appliedKey] === appliedValue),
+		),
 	);
 
 	const valid = $derived(!!name && !!namespace);

@@ -7,7 +7,7 @@
 	const scope = $derived<Scope>({
 		kind: 'namespace',
 		project: page.params.project!,
-		namespace: page.params.namespace!
+		namespace: page.params.namespace!,
 	});
 </script>
 

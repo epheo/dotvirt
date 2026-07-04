@@ -5,7 +5,7 @@
 
 	let {
 		onclose,
-		onstaged
+		onstaged,
 	}: {
 		onclose: () => void;
 		onstaged: () => void;

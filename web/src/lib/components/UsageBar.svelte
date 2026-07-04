@@ -8,7 +8,7 @@
 		total = 0,
 		unit,
 		color = '#2563eb',
-		spark = []
+		spark = [],
 	}: {
 		label: string;
 		used: number;
@@ -20,7 +20,7 @@
 
 	// Fill fraction: used/total for bytes; used itself (already a %) for pct.
 	const pct = $derived(
-		unit === 'pct' ? Math.min(100, used) : total > 0 ? Math.min(100, (used / total) * 100) : 0
+		unit === 'pct' ? Math.min(100, used) : total > 0 ? Math.min(100, (used / total) * 100) : 0,
 	);
 	// vCenter-style escalation green→amber→red as utilization nears capacity.
 	const barColor = $derived(pct > 90 ? '#dc2626' : pct > 75 ? '#f59e0b' : color);

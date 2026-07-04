@@ -24,14 +24,16 @@ class InventoryStore {
 
 	// All VMs across the 3-level tree (project → namespace → vm).
 	readonly allVMs = $derived(
-		this.inventory ? this.inventory.projects.flatMap((p) => p.namespaces.flatMap((n) => n.vms)) : []
+		this.inventory
+			? this.inventory.projects.flatMap((p) => p.namespaces.flatMap((n) => n.vms))
+			: [],
 	);
 	readonly vmCount = $derived(this.allVMs.length);
 	// Open PRs across the user's projects ride the live inventory stream, so a PR
 	// merged anywhere repaints the dock + Changes pane with no manual refresh.
 	readonly proposals = $derived(this.inventory?.proposals ?? []);
 	readonly projectNames = $derived(
-		this.inventory ? this.inventory.projects.map((p) => p.name) : []
+		this.inventory ? this.inventory.projects.map((p) => p.name) : [],
 	);
 	// A stable primitive key for the SET of project names: $derived arrays are a
 	// new reference every inventory frame, which would re-fire effects on every VM
@@ -43,7 +45,7 @@ class InventoryStore {
 		this.proposals
 			.map((p) => `${p.project}#${p.prNumber}`)
 			.sort()
-			.join('\0')
+			.join('\0'),
 	);
 	// Namespaces a VM can be created in: those in projects that have a repo (no
 	// point staging into a project with no backing repo).
@@ -52,12 +54,12 @@ class InventoryStore {
 			? this.inventory.projects
 					.filter((p) => p.repo)
 					.flatMap((p) => p.namespaces.map((n) => n.namespace))
-			: []
+			: [],
 	);
 	// Projects with a backing repo — the ones with commit history to browse +
 	// revert from (the Changes panel's History section).
 	readonly repoProjects = $derived(
-		this.inventory ? this.inventory.projects.filter((p) => p.repo).map((p) => p.name) : []
+		this.inventory ? this.inventory.projects.filter((p) => p.repo).map((p) => p.name) : [],
 	);
 
 	apply(inv: Inventory) {

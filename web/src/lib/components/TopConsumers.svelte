@@ -8,7 +8,7 @@
 	let {
 		topCpu,
 		topMemory,
-		onselect
+		onselect,
 	}: {
 		topCpu: ConsumerVM[];
 		topMemory: ConsumerVM[];
@@ -25,7 +25,9 @@
 <InfoCard title="Top consumers">
 	<ul class="divide-y divide-slate-100">
 		{#each rows as c (c.namespace + '/' + c.name)}
-			<li class="grid grid-cols-[minmax(8rem,1.4fr)_1fr_1fr] items-center gap-3 px-3 py-1.5 text-xs">
+			<li
+				class="grid grid-cols-[minmax(8rem,1.4fr)_1fr_1fr] items-center gap-3 px-3 py-1.5 text-xs"
+			>
 				<div class="min-w-0">
 					<button
 						onclick={() => onselect?.(c.namespace, c.name)}

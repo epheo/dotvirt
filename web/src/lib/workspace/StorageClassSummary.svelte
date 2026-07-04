@@ -15,10 +15,10 @@
 			(n, vm) =>
 				n +
 				(vm.disks ?? []).filter(
-					(d) => d.type === 'dataVolume' && (d.storageClass || DEFAULT_CLASS) === storageClass
+					(d) => d.type === 'dataVolume' && (d.storageClass || DEFAULT_CLASS) === storageClass,
 				).length,
-			0
-		)
+			0,
+		),
 	);
 </script>
 

@@ -9,7 +9,7 @@
 		networks = [],
 		onclose,
 		onstaged,
-		initialSection
+		initialSection,
 	}: {
 		vm: VM;
 		networks?: Network[]; // port-group catalog (from the page), for the adapter picker
@@ -49,7 +49,9 @@
 
 	// Start on the step the user opened from a Configure section (else Compute).
 	// svelte-ignore state_referenced_locally
-	let current = $state({ compute: 0, storage: 1, network: 2, labels: 3 }[initialSection ?? 'compute'] ?? 0);
+	let current = $state(
+		{ compute: 0, storage: 1, network: 2, labels: 3 }[initialSection ?? 'compute'] ?? 0,
+	);
 
 	let optionsError = $state('');
 	$effect(() => {
@@ -81,10 +83,27 @@
 
 	function addNewDevice(kind: 'disk' | 'network') {
 		if (kind === 'disk') {
-			disks = [...disks, { name: `disk-${disks.length + 1}`, type: 'emptyDisk', size: '10Gi', removed: false, isNew: true }];
+			disks = [
+				...disks,
+				{
+					name: `disk-${disks.length + 1}`,
+					type: 'emptyDisk',
+					size: '10Gi',
+					removed: false,
+					isNew: true,
+				},
+			];
 		} else {
 			const first = available[0];
-			nics = [...nics, { name: first ? first.name : 'net1', network: first ? attachRef(first) : '', removed: false, isNew: true }];
+			nics = [
+				...nics,
+				{
+					name: first ? first.name : 'net1',
+					network: first ? attachRef(first) : '',
+					removed: false,
+					isNew: true,
+				},
+			];
 		}
 	}
 
@@ -136,7 +155,8 @@
 
 		// Disks
 		const addDisks = disks.filter((d) => d.isNew && !d.removed && d.name.trim());
-		if (addDisks.length) req.addDisks = addDisks.map((d) => ({ name: d.name, size: d.size ?? '10Gi' }));
+		if (addDisks.length)
+			req.addDisks = addDisks.map((d) => ({ name: d.name, size: d.size ?? '10Gi' }));
 		const removeDisks = disks.filter((d) => !d.isNew && d.removed).map((d) => d.name);
 		if (removeDisks.length) req.removeDisks = removeDisks;
 
@@ -168,15 +188,18 @@
 		if (r.power) out.push({ label: 'Power', value: `${vm.power} → ${r.power}` });
 		if (r.sizing === 'instancetype')
 			out.push({ label: 'Sizing', value: `Instance type · ${r.instancetype ?? instancetype}` });
-		if (r.sizing === 'custom') out.push({ label: 'Sizing', value: `Custom · ${r.cpuCores} CPU / ${r.memory}` });
+		if (r.sizing === 'custom')
+			out.push({ label: 'Sizing', value: `Custom · ${r.cpuCores} CPU / ${r.memory}` });
 		if (r.preference) out.push({ label: 'Preference', value: r.preference });
 		if (r.drsExclude !== undefined)
 			out.push({ label: 'DRS', value: r.drsExclude ? 'excluded from rebalancing' : 'rebalanced' });
 		if (r.evictionStrategy !== undefined)
 			out.push({ label: 'Eviction strategy', value: r.evictionStrategy || 'cluster default' });
-		for (const [k, v] of Object.entries(r.setLabels ?? {})) out.push({ label: `Label ${k}`, value: v });
+		for (const [k, v] of Object.entries(r.setLabels ?? {}))
+			out.push({ label: `Label ${k}`, value: v });
 		for (const k of r.removeLabels ?? []) out.push({ label: `Label ${k}`, value: 'removed' });
-		for (const d of r.addDisks ?? []) out.push({ label: 'Disk added', value: `${d.name} (${d.size})` });
+		for (const d of r.addDisks ?? [])
+			out.push({ label: 'Disk added', value: `${d.name} (${d.size})` });
 		for (const n of r.removeDisks ?? []) out.push({ label: 'Disk removed', value: n });
 		for (const n of r.addNetworks ?? []) out.push({ label: 'Adapter added', value: n.name });
 		for (const n of r.removeNetworks ?? []) out.push({ label: 'Adapter removed', value: n });
@@ -213,14 +236,18 @@
 			<button
 				type="button"
 				onclick={() => setMode('instancetype')}
-				class="px-3 py-1 text-xs {mode === 'instancetype' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}"
+				class="px-3 py-1 text-xs {mode === 'instancetype'
+					? 'bg-blue-600 text-white'
+					: 'bg-white text-slate-600 hover:bg-slate-50'}"
 			>
 				Instance type
 			</button>
 			<button
 				type="button"
 				onclick={() => setMode('custom')}
-				class="border-l border-slate-300 px-3 py-1 text-xs {mode === 'custom' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}"
+				class="border-l border-slate-300 px-3 py-1 text-xs {mode === 'custom'
+					? 'bg-blue-600 text-white'
+					: 'bg-white text-slate-600 hover:bg-slate-50'}"
 			>
 				Custom CPU/Memory
 			</button>
@@ -247,7 +274,10 @@
 		{#if mode === 'instancetype'}
 			<label class="block">
 				<span class="text-slate-500">Instance type</span>
-				<select bind:value={instancetype} class="mt-1 w-full rounded border border-slate-300 px-2 py-1">
+				<select
+					bind:value={instancetype}
+					class="mt-1 w-full rounded border border-slate-300 px-2 py-1"
+				>
 					<!-- Keep the current value selectable even if it isn't in the cluster
 					     list (orphaned ref, or options still loading) so the binding can't
 					     silently desync to the first option. -->
@@ -261,7 +291,10 @@
 			</label>
 			<label class="block">
 				<span class="text-slate-500">Preference</span>
-				<select bind:value={preference} class="mt-1 w-full rounded border border-slate-300 px-2 py-1">
+				<select
+					bind:value={preference}
+					class="mt-1 w-full rounded border border-slate-300 px-2 py-1"
+				>
 					<option value="">— unchanged —</option>
 					{#each options?.preferences ?? [] as p (p.name)}
 						<option value={p.name}>{p.displayName || p.name}</option>
@@ -269,20 +302,34 @@
 				</select>
 			</label>
 			<p class="col-span-2 text-xs text-slate-400">
-				CPU and memory are provided by the instance type{selectedIT ? `: ${selectedIT.cpu} CPU / ${selectedIT.memory}` : ''}.
+				CPU and memory are provided by the instance type{selectedIT
+					? `: ${selectedIT.cpu} CPU / ${selectedIT.memory}`
+					: ''}.
 			</p>
 		{:else}
 			<label class="block">
 				<span class="text-slate-500">CPU cores</span>
-				<input type="number" min="1" bind:value={cpuCores} class="mt-1 w-full rounded border border-slate-300 px-2 py-1" />
+				<input
+					type="number"
+					min="1"
+					bind:value={cpuCores}
+					class="mt-1 w-full rounded border border-slate-300 px-2 py-1"
+				/>
 			</label>
 			<label class="block">
 				<span class="text-slate-500">Memory</span>
-				<input bind:value={memory} placeholder="2Gi" class="mt-1 w-full rounded border border-slate-300 px-2 py-1" />
+				<input
+					bind:value={memory}
+					placeholder="2Gi"
+					class="mt-1 w-full rounded border border-slate-300 px-2 py-1"
+				/>
 			</label>
 			<label class="block">
 				<span class="text-slate-500">Preference</span>
-				<select bind:value={preference} class="mt-1 w-full rounded border border-slate-300 px-2 py-1">
+				<select
+					bind:value={preference}
+					class="mt-1 w-full rounded border border-slate-300 px-2 py-1"
+				>
 					<option value="">— unchanged —</option>
 					{#each options?.preferences ?? [] as p (p.name)}
 						<option value={p.name}>{p.displayName || p.name}</option>
@@ -290,7 +337,9 @@
 				</select>
 			</label>
 			{#if !(cpuCores && memory)}
-				<p class="col-span-2 text-xs text-amber-700">Set both CPU cores and memory to apply custom sizing.</p>
+				<p class="col-span-2 text-xs text-amber-700">
+					Set both CPU cores and memory to apply custom sizing.
+				</p>
 			{/if}
 		{/if}
 	</div>
@@ -310,10 +359,15 @@
 		</label>
 		<label class="mt-2 block">
 			<span class="text-slate-500">Eviction strategy</span>
-			<select bind:value={evictionStrategy} class="mt-1 w-full rounded border border-slate-300 px-2 py-1">
+			<select
+				bind:value={evictionStrategy}
+				class="mt-1 w-full rounded border border-slate-300 px-2 py-1"
+			>
 				<option value="">Cluster default</option>
 				<option value="LiveMigrate">LiveMigrate — evictions live-migrate the VM</option>
-				<option value="LiveMigrateIfPossible">LiveMigrateIfPossible — migrate when possible, else restart</option>
+				<option value="LiveMigrateIfPossible"
+					>LiveMigrateIfPossible — migrate when possible, else restart</option
+				>
 				<option value="None">None — pinned (blocks node drains)</option>
 			</select>
 		</label>
@@ -323,67 +377,115 @@
 {#snippet stepStorage()}
 	<div class="mb-2 flex items-center justify-between">
 		<span class="text-xs text-slate-400">{disks.filter((d) => !d.removed).length} disk(s)</span>
-		<button onclick={() => addNewDevice('disk')} class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50">+ Add hard disk</button>
+		<button
+			onclick={() => addNewDevice('disk')}
+			class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50"
+			>+ Add hard disk</button
+		>
 	</div>
 	{#each disks as disk, i (i)}
 		<div class="mb-1 flex items-center gap-2 {disk.removed ? 'opacity-40 line-through' : ''}">
 			<span class="w-32 truncate text-slate-700">Hard disk {i + 1}</span>
 			{#if disk.isNew}
-				<input bind:value={disk.name} class="w-28 rounded border border-slate-300 px-2 py-0.5 text-xs" />
-				<input bind:value={disk.size} class="w-20 rounded border border-slate-300 px-2 py-0.5 text-xs" />
+				<input
+					bind:value={disk.name}
+					class="w-28 rounded border border-slate-300 px-2 py-0.5 text-xs"
+				/>
+				<input
+					bind:value={disk.size}
+					class="w-20 rounded border border-slate-300 px-2 py-0.5 text-xs"
+				/>
 			{:else}
-				<span class="text-xs text-slate-500">{disk.name} ({disk.type}{disk.size ? ` · ${disk.size}` : ''})</span>
+				<span class="text-xs text-slate-500"
+					>{disk.name} ({disk.type}{disk.size ? ` · ${disk.size}` : ''})</span
+				>
 			{/if}
-			<button onclick={() => (disk.removed = !disk.removed)} class="ml-auto text-xs {disk.removed ? 'text-blue-600' : 'text-red-500'}">
+			<button
+				onclick={() => (disk.removed = !disk.removed)}
+				class="ml-auto text-xs {disk.removed ? 'text-blue-600' : 'text-red-500'}"
+			>
 				{disk.removed ? 'undo' : 'remove'}
 			</button>
 		</div>
 	{/each}
-	{#if disks.filter((d) => !d.removed).length === 0}<p class="text-xs text-slate-400">No disks.</p>{/if}
+	{#if disks.filter((d) => !d.removed).length === 0}<p class="text-xs text-slate-400">
+			No disks.
+		</p>{/if}
 {/snippet}
 
 {#snippet stepNetworks()}
 	<div class="mb-2 flex items-center justify-between">
 		<span class="text-xs text-slate-400">{nics.filter((n) => !n.removed).length} adapter(s)</span>
-		<button onclick={() => addNewDevice('network')} class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50">+ Add network adapter</button>
+		<button
+			onclick={() => addNewDevice('network')}
+			class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50"
+			>+ Add network adapter</button
+		>
 	</div>
 	{#each nics as nic, i (i)}
 		<div class="mb-1 flex items-center gap-2 {nic.removed ? 'opacity-40 line-through' : ''}">
 			<span class="w-32 truncate text-slate-700">Network adapter {i + 1}</span>
 			{#if nic.isNew}
-				<select bind:value={nic.network} class="w-60 rounded border border-slate-300 px-2 py-0.5 text-xs">
+				<select
+					bind:value={nic.network}
+					class="w-60 rounded border border-slate-300 px-2 py-0.5 text-xs"
+				>
 					{#each available as net (net.scope + (net.namespace ?? '') + net.name)}
-						<option value={attachRef(net)}>{net.name} — {kindLabel(net.kind)}{net.scope === 'shared' ? ' · shared' : ''}</option>
+						<option value={attachRef(net)}
+							>{net.name} — {kindLabel(net.kind)}{net.scope === 'shared' ? ' · shared' : ''}</option
+						>
 					{/each}
 				</select>
 			{:else}
 				<span class="text-xs text-slate-500">{nic.name} ({nic.network})</span>
 			{/if}
-			<button onclick={() => (nic.removed = !nic.removed)} class="ml-auto text-xs {nic.removed ? 'text-blue-600' : 'text-red-500'}">
+			<button
+				onclick={() => (nic.removed = !nic.removed)}
+				class="ml-auto text-xs {nic.removed ? 'text-blue-600' : 'text-red-500'}"
+			>
 				{nic.removed ? 'undo' : 'remove'}
 			</button>
 		</div>
 	{/each}
-	{#if nics.filter((n) => !n.removed).length === 0}<p class="text-xs text-slate-400">No adapters.</p>{/if}
+	{#if nics.filter((n) => !n.removed).length === 0}<p class="text-xs text-slate-400">
+			No adapters.
+		</p>{/if}
 {/snippet}
 
 {#snippet stepLabels()}
 	<div class="mb-2 flex items-center justify-between">
 		<span class="text-xs text-slate-400">Key/value metadata.</span>
-		<button onclick={() => (labelRows = [...labelRows, { key: '', value: '' }])} class="text-xs text-blue-600 hover:underline">+ Add label</button>
+		<button
+			onclick={() => (labelRows = [...labelRows, { key: '', value: '' }])}
+			class="text-xs text-blue-600 hover:underline">+ Add label</button
+		>
 	</div>
 	{#each labelRows as row, i (i)}
 		<div class="mb-1 flex gap-2">
-			<input bind:value={row.key} placeholder="key" class="w-1/2 rounded border border-slate-300 px-2 py-0.5 text-xs" />
-			<input bind:value={row.value} placeholder="value" class="w-1/2 rounded border border-slate-300 px-2 py-0.5 text-xs" />
-			<button onclick={() => (labelRows = labelRows.filter((_, idx) => idx !== i))} aria-label="Remove label" class="text-red-500"><X size={14} /></button>
+			<input
+				bind:value={row.key}
+				placeholder="key"
+				class="w-1/2 rounded border border-slate-300 px-2 py-0.5 text-xs"
+			/>
+			<input
+				bind:value={row.value}
+				placeholder="value"
+				class="w-1/2 rounded border border-slate-300 px-2 py-0.5 text-xs"
+			/>
+			<button
+				onclick={() => (labelRows = labelRows.filter((_, idx) => idx !== i))}
+				aria-label="Remove label"
+				class="text-red-500"><X size={14} /></button
+			>
 		</div>
 	{/each}
 	{#if labelRows.length === 0}<p class="text-xs text-slate-400">No labels.</p>{/if}
 {/snippet}
 
 {#snippet review()}
-	<p class="mb-3 text-xs text-slate-500">Review the staged changes, then stage them into the changeset.</p>
+	<p class="mb-3 text-xs text-slate-500">
+		Review the staged changes, then stage them into the changeset.
+	</p>
 	{#if summary.length === 0}
 		<div class="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
 			No changes yet — adjust a setting in an earlier step.
@@ -408,7 +510,7 @@
 		{ title: 'Storage', body: stepStorage },
 		{ title: 'Networks', body: stepNetworks },
 		{ title: 'Labels', body: stepLabels },
-		{ title: 'Ready to complete', body: review }
+		{ title: 'Ready to complete', body: review },
 	]}
 	canFinish={dirty}
 	submitting={saving}

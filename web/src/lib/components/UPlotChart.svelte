@@ -31,9 +31,7 @@
 			return [c.times, ...c.series.map((s) => s.values)] as unknown as uPlot.AlignedData;
 		}
 		const accum = Array(c.times.length).fill(0);
-		const stacked = c.series.map((s) =>
-			s.values.map((v, i) => (accum[i] += v ?? 0))
-		);
+		const stacked = c.series.map((s) => s.values.map((v, i) => (accum[i] += v ?? 0)));
 		return [c.times, ...stacked] as unknown as uPlot.AlignedData;
 	}
 
@@ -63,8 +61,8 @@
 					value: (_u: uPlot, v: number, si?: number, idx?: number | null) =>
 						c.stacked && si != null && idx != null
 							? fmt(c.unit, c.series[si - 1]?.values[idx] ?? null)
-							: fmt(c.unit, v)
-				}))
+							: fmt(c.unit, v),
+				})),
 			],
 			axes: [
 				{
@@ -72,7 +70,7 @@
 					grid: { stroke: '#f1f5f9', width: 1 },
 					ticks: { stroke: '#e2e8f0', size: 4 },
 					size: 26,
-					font: '11px sans-serif'
+					font: '11px sans-serif',
 				},
 				{
 					stroke: '#94a3b8',
@@ -80,9 +78,9 @@
 					ticks: { stroke: '#e2e8f0', size: 4 },
 					size: 64,
 					font: '11px sans-serif',
-					values: (_u: uPlot, splits: number[]) => splits.map((v) => fmt(c.unit, v))
-				}
-			]
+					values: (_u: uPlot, splits: number[]) => splits.map((v) => fmt(c.unit, v)),
+				},
+			],
 		};
 	}
 

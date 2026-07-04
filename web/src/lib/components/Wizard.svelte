@@ -27,7 +27,7 @@
 		footerHint = '',
 		icon,
 		onfinish,
-		onclose
+		onclose,
 	}: {
 		title: string;
 		steps: WizardStep[];

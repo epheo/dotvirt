@@ -22,8 +22,8 @@
 		{
 			node: { label: 'All Nodes', href: '/hosts' },
 			network: { label: 'Topology', href: '/networking' },
-			storage: { label: 'All Storage', href: '/storage' }
-		}[kind]
+			storage: { label: 'All Storage', href: '/storage' },
+		}[kind],
 	);
 
 	let collapsed = $state<Record<string, boolean>>({});

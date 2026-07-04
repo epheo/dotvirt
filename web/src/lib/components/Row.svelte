@@ -7,7 +7,7 @@
 		label,
 		value = '',
 		mono = false,
-		children
+		children,
 	}: { label: string; value?: string; mono?: boolean; children?: Snippet } = $props();
 </script>
 

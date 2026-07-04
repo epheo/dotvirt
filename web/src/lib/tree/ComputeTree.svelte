@@ -29,7 +29,7 @@
 
 	function ctxContainer(
 		e: MouseEvent,
-		c: { project: string; repo?: string; namespace?: string; namespaces: string[] }
+		c: { project: string; repo?: string; namespace?: string; namespaces: string[] },
 	) {
 		e.preventDefault();
 		ui.ctx = { x: e.clientX, y: e.clientY, kind: 'container', ...c };
@@ -61,7 +61,7 @@
 					ctxContainer(e, {
 						project: project.name,
 						repo: project.repo,
-						namespaces: project.namespaces.map((n) => n.namespace)
+						namespaces: project.namespaces.map((n) => n.namespace),
 					})}
 			>
 				{#snippet icon()}
@@ -91,7 +91,7 @@
 								(ui.modal = {
 									kind: 'adoptProject',
 									project: project.name,
-									namespaces: project.namespaces.map((n) => n.namespace)
+									namespaces: project.namespaces.map((n) => n.namespace),
 								})}
 							title="Create a repo for this project and bring it under GitOps"
 							class="mb-1 ml-7 rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 hover:bg-amber-100"
@@ -113,14 +113,14 @@
 							href={hrefForScope({
 								kind: 'namespace',
 								project: project.name,
-								namespace: ns.namespace
+								namespace: ns.namespace,
 							})}
 							oncontextmenu={(e) =>
 								ctxContainer(e, {
 									project: project.name,
 									repo: project.repo,
 									namespace: ns.namespace,
-									namespaces: [ns.namespace]
+									namespaces: [ns.namespace],
 								})}
 						>
 							{#snippet icon()}

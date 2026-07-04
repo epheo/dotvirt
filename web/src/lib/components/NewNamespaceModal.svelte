@@ -7,7 +7,7 @@
 		projects = [],
 		project: initialProject,
 		onclose,
-		onstaged
+		onstaged,
 	}: {
 		projects?: string[]; // repo-backed projects the namespace can join
 		project?: string; // preselected project (e.g. from a project's context menu)

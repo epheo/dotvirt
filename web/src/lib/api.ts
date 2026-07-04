@@ -109,7 +109,7 @@ function post<T>(path: string, body: unknown): Promise<T> {
 	return req<T>(path, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(body)
+		body: JSON.stringify(body),
 	});
 }
 
@@ -117,7 +117,7 @@ function put<T>(path: string, body: unknown): Promise<T> {
 	return req<T>(path, {
 		method: 'PUT',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(body)
+		body: JSON.stringify(body),
 	});
 }
 
@@ -243,12 +243,12 @@ export const DRS_THRESHOLDS = [
 	{ value: 'AsymmetricLow', label: 'Conservative', detail: 'move only off clearly hot nodes' },
 	{ value: 'Low', label: 'Moderate', detail: '10% deviation from average' },
 	{ value: 'Medium', label: 'Eager', detail: '20% deviation from average' },
-	{ value: 'High', label: 'Aggressive', detail: '30% deviation from average' }
+	{ value: 'High', label: 'Aggressive', detail: '30% deviation from average' },
 ] as const;
 export const DRS_BOUNDS = {
 	intervalSeconds: { min: 10, max: 86400 },
 	evictionNodeLimit: { min: 1, max: 100 },
-	evictionTotalLimit: { min: 1, max: 1000 }
+	evictionTotalLimit: { min: 1, max: 1000 },
 } as const;
 
 export function drsThresholdLabel(value: string): string {
@@ -470,7 +470,7 @@ export const METRIC_RANGES = [
 	{ key: '1h', label: 'Real-time' },
 	{ key: '1d', label: 'Day' },
 	{ key: '1w', label: 'Week' },
-	{ key: '1mo', label: 'Month' }
+	{ key: '1mo', label: 'Month' },
 ] as const;
 export interface UsageMetric {
 	used: number;
@@ -798,7 +798,7 @@ export const api = {
 	resync: (namespace: string, name: string) =>
 		post<{ application: string; revision: string }>(
 			`/api/vms/${enc(namespace)}/${enc(name)}/resync`,
-			{}
+			{},
 		),
 
 	// Clone (imperative create; the target VM lands NotTracked until adopted).
@@ -806,7 +806,7 @@ export const api = {
 		get<Clone[]>(`/api/vms/${enc(namespace)}/${enc(name)}/clones`),
 	createClone: (namespace: string, name: string, target: string) =>
 		post<{ name: string; target: string }>(`/api/vms/${enc(namespace)}/${enc(name)}/clone`, {
-			target
+			target,
 		}),
 
 	// Snapshots (imperative, RBAC-gated; not git-managed).
@@ -814,7 +814,7 @@ export const api = {
 		get<Snapshot[]>(`/api/vms/${enc(namespace)}/${enc(name)}/snapshots`),
 	takeSnapshot: (namespace: string, name: string, snapName?: string) =>
 		post<{ name: string }>(`/api/vms/${enc(namespace)}/${enc(name)}/snapshots`, {
-			name: snapName ?? ''
+			name: snapName ?? '',
 		}),
 	restoreSnapshot: (namespace: string, name: string, snap: string) =>
 		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/snapshots/${enc(snap)}/restore`, {}),
@@ -830,14 +830,14 @@ export const api = {
 	pause: (namespace: string, name: string) =>
 		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/pause`, {}),
 	unpause: (namespace: string, name: string) =>
-		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/unpause`, {})
+		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/unpause`, {}),
 };
 
 // draftsByProject fetches the draft for each named project and returns the
 // non-empty ones, for the Changes panel + header badge. Projects with no repo are
 // skipped (they can't hold a draft).
 export async function draftsByProject(
-	projects: string[]
+	projects: string[],
 ): Promise<{ project: string; draft: DraftView }[]> {
 	const results = await Promise.all(
 		projects.map(async (project) => {
@@ -847,10 +847,10 @@ export async function draftsByProject(
 				if (e instanceof Unauthorized) throw e;
 				return null;
 			}
-		})
+		}),
 	);
 	return results.filter(
-		(r): r is { project: string; draft: DraftView } => !!r && r.draft.count > 0
+		(r): r is { project: string; draft: DraftView } => !!r && r.draft.count > 0,
 	);
 }
 
@@ -863,7 +863,7 @@ export async function draftsByProject(
  */
 export function streamInventory(
 	onInventory: (inv: Inventory) => void,
-	onUnauthorized?: () => void
+	onUnauthorized?: () => void,
 ): () => void {
 	let ws: WebSocket | null = null;
 	let closed = false;

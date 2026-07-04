@@ -12,7 +12,7 @@
 		{ id: 'instancetypes', label: 'Instance types' },
 		{ id: 'preferences', label: 'Preferences' },
 		{ id: 'networks', label: 'Networks' },
-		{ id: 'storage', label: 'Storage classes' }
+		{ id: 'storage', label: 'Storage classes' },
 	];
 	const kind = $derived(page.url.searchParams.get('kind') ?? 'templates');
 	const onCatalog = $derived(page.url.pathname === '/catalog');

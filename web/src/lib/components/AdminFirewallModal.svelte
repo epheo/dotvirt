@@ -4,7 +4,7 @@
 
 	let {
 		onclose,
-		onstaged
+		onstaged,
 	}: {
 		onclose: () => void;
 		onstaged: () => void;
@@ -57,7 +57,7 @@
 			const rule: AdminPolicyRule = {
 				action: r.action,
 				// An empty selector ({}) is a valid "all namespaces" peer.
-				peers: [r.key.trim() ? { [r.key.trim()]: r.value.trim() } : {}]
+				peers: [r.key.trim() ? { [r.key.trim()]: r.value.trim() } : {}],
 			};
 			if (r.port != null) rule.ports = [{ protocol: r.proto, port: r.port }];
 			ingress.push(rule);

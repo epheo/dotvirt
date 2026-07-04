@@ -20,7 +20,7 @@
 		oncontextmenu = undefined,
 		icon = undefined,
 		trailing = undefined,
-		children
+		children,
 	}: {
 		indent?: 0 | 1 | 2 | 3;
 		active?: boolean;

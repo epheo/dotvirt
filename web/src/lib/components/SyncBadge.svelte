@@ -4,7 +4,7 @@
 	let {
 		sync,
 		error = '',
-		compact = false
+		compact = false,
 	}: { sync: SyncStatus; error?: string; compact?: boolean } = $props();
 
 	// vCenter-ish: green = in sync, amber/red = drift, gray = not managed.
@@ -16,10 +16,10 @@
 				bg: 'bg-slate-100',
 				fg: 'text-slate-500',
 				label: 'Not tracked',
-				dot: 'bg-slate-300'
+				dot: 'bg-slate-300',
 			},
-			Unknown: { bg: 'bg-slate-100', fg: 'text-slate-500', label: 'Unknown', dot: 'bg-slate-300' }
-		}[sync]
+			Unknown: { bg: 'bg-slate-100', fg: 'text-slate-500', label: 'Unknown', dot: 'bg-slate-300' },
+		}[sync],
 	);
 
 	// An OutOfSync VM has something to explain (an apply error, or just pending

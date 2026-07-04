@@ -12,7 +12,7 @@
 	let {
 		vm,
 		onclose,
-		ondone
+		ondone,
 	}: {
 		vm: VM;
 		onclose: () => void;

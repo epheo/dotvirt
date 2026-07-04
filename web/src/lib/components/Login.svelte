@@ -30,8 +30,8 @@
 	>
 		<h1 class="mb-1 text-xl font-semibold text-slate-800">Sign in to dotvirt</h1>
 		<p class="mb-4 text-sm text-slate-500">
-			Paste your Kubernetes API token. dotvirt acts as you — you see only the projects your
-			cluster permissions allow.
+			Paste your Kubernetes API token. dotvirt acts as you — you see only the projects your cluster
+			permissions allow.
 		</p>
 
 		<textarea
@@ -59,7 +59,8 @@
 			<p class="mb-1 font-medium text-slate-600">Get a token:</p>
 			<pre class="rounded bg-slate-50 px-2 py-1 text-slate-600">oc whoami -t</pre>
 			<p class="my-1">or for a ServiceAccount:</p>
-			<pre class="rounded bg-slate-50 px-2 py-1 text-slate-600">kubectl create token &lt;sa&gt; -n &lt;namespace&gt;</pre>
+			<pre
+				class="rounded bg-slate-50 px-2 py-1 text-slate-600">kubectl create token &lt;sa&gt; -n &lt;namespace&gt;</pre>
 		</div>
 	</form>
 </div>

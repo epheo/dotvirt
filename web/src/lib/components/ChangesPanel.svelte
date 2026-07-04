@@ -13,7 +13,7 @@
 		loaded = true,
 		refreshing = false,
 		onclose,
-		onchanged
+		onchanged,
 	}: {
 		drafts: { project: string; draft: DraftView }[];
 		proposals: Proposal[];
@@ -36,7 +36,7 @@
 	// never a differently-styled box that swaps to "the definitive one".
 	const banners = $derived.by(() => {
 		const out: { project: string; prNumber: number; prURL: string; title?: string }[] = [
-			...proposals
+			...proposals,
 		];
 		const seen = new Set(out.map((p) => `${p.project}#${p.prNumber}`));
 		for (const [project, r] of Object.entries(result)) {
@@ -119,7 +119,7 @@
 		return new Date(t).toLocaleDateString(undefined, {
 			year: 'numeric',
 			month: 'short',
-			day: 'numeric'
+			day: 'numeric',
 		});
 	}
 </script>

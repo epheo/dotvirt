@@ -10,7 +10,7 @@
 		busy = false,
 		onclose,
 		ondiscard,
-		onreview
+		onreview,
 	}: {
 		item: DraftItem;
 		busy?: boolean;

@@ -9,7 +9,7 @@
 		busy = false,
 		onpower,
 		ondelete,
-		onclear
+		onclear,
 	}: {
 		count: number;
 		busy?: boolean;

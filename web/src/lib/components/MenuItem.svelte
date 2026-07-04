@@ -8,7 +8,7 @@
 		title = undefined,
 		onclick,
 		icon = undefined,
-		children
+		children,
 	}: {
 		danger?: boolean;
 		disabled?: boolean;

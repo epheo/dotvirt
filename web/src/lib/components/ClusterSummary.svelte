@@ -9,7 +9,7 @@
 
 	let {
 		scope = {},
-		onselect
+		onselect,
 	}: {
 		scope?: { project?: string; namespace?: string; node?: string };
 		onselect?: (namespace: string, name: string) => void;
@@ -44,11 +44,19 @@
 
 	// KubeVirt's phase label is lowercase ("running"); order known phases, capitalize
 	// for display, and tolerate any others.
-	const PHASE_ORDER = ['running', 'paused', 'stopped', 'pending', 'scheduling', 'succeeded', 'failed'];
+	const PHASE_ORDER = [
+		'running',
+		'paused',
+		'stopped',
+		'pending',
+		'scheduling',
+		'succeeded',
+		'failed',
+	];
 	const phaseColor: Record<string, string> = {
 		running: 'text-green-600',
 		paused: 'text-amber-600',
-		failed: 'text-red-600'
+		failed: 'text-red-600',
 	};
 	const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -62,7 +70,7 @@
 			m.allocated && m.total > 0 ? m.allocated / m.total : 0;
 		return [
 			{ label: 'vCPU', r: ratio(data.cpu) },
-			{ label: 'Memory', r: ratio(data.memory) }
+			{ label: 'Memory', r: ratio(data.memory) },
 		].filter((x) => x.r > 0);
 	});
 </script>
@@ -126,13 +134,13 @@
 									: 'bg-slate-100 text-slate-600'}"
 								title="{o.label} committed to VMs vs node-allocatable"
 							>
-								{o.label} {o.r.toFixed(1)}:1
+								{o.label}
+								{o.r.toFixed(1)}:1
 							</span>
 						{/each}
 					</div>
 				</div>
 			{/if}
-
 		</div>
 
 		<!-- Quota-aware capacity: ResourceQuota bars at project/namespace scope —
