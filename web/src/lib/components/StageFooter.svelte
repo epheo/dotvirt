@@ -29,7 +29,7 @@
 <button
 	onclick={onsubmit}
 	disabled={disabled || submitting}
-	class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
+	class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 >
 	{submitting ? busyLabel : label}
 </button>

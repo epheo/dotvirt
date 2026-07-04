@@ -77,7 +77,7 @@
 		<fieldset class="space-y-1">
 			<label
 				class="flex cursor-pointer items-center gap-2 rounded border px-3 py-2 {target === ''
-					? 'border-blue-400 bg-blue-50/50'
+					? 'border-accent/60 bg-select-soft/60'
 					: 'border-line hover:bg-inset'}"
 			>
 				<input type="radio" bind:group={target} value="" />
@@ -98,7 +98,7 @@
 						class="flex items-center gap-2 rounded border px-3 py-2 {why
 							? 'cursor-not-allowed border-line-soft text-ink-faint'
 							: target === n.name
-								? 'cursor-pointer border-blue-400 bg-blue-50/50'
+								? 'cursor-pointer border-accent/60 bg-select-soft/60'
 								: 'cursor-pointer border-line hover:bg-inset'}"
 					>
 						<input type="radio" bind:group={target} value={n.name} disabled={!!why} />
@@ -125,7 +125,7 @@
 		<button
 			onclick={migrate}
 			disabled={busy}
-			class="ml-auto flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:bg-line-strong"
+			class="ml-auto flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent disabled:bg-line-strong"
 		>
 			<MoveRight size={14} />
 			{busy ? 'Migrating…' : 'Migrate'}

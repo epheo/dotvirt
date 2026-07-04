@@ -277,7 +277,7 @@
 		<div>
 			<div class="mb-1 flex items-center justify-between">
 				<span class="text-ink-soft">Extra disks</span>
-				<button onclick={addDisk} type="button" class="text-xs text-blue-600 hover:underline"
+				<button onclick={addDisk} type="button" class="text-xs text-accent hover:underline"
 					>+ Add disk</button
 				>
 			</div>
@@ -370,7 +370,7 @@
 			<button
 				type="button"
 				onclick={() => (current = step)}
-				class="text-xs text-blue-600 hover:underline">Edit</button
+				class="text-xs text-accent hover:underline">Edit</button
 			>
 		</div>
 		<dl class="divide-y divide-line-soft">
@@ -397,7 +397,7 @@
 							<button
 								type="button"
 								onclick={() => (current = m.step)}
-								class="text-blue-700 hover:underline">Edit</button
+								class="text-accent-ink hover:underline">Edit</button
 							>
 						</li>
 					{/each}

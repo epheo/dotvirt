@@ -50,7 +50,7 @@
 		<button
 			type="submit"
 			disabled={busy || !token.trim()}
-			class="mt-3 w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40"
+			class="mt-3 w-full rounded bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent disabled:opacity-40"
 		>
 			{busy ? 'Signing in…' : 'Sign in'}
 		</button>

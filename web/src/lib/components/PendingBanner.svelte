@@ -21,7 +21,7 @@
 
 {#if stagedItem || stagedCount}
 	<div
-		class="flex items-center gap-2 border-b border-blue-200 bg-blue-50 px-4 py-1.5 text-xs text-blue-800"
+		class="flex items-center gap-2 border-b border-select bg-select-soft px-4 py-1.5 text-xs text-accent-ink"
 	>
 		<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>
 		{#if stagedItem}

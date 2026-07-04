@@ -396,9 +396,9 @@
 
 		{#if vm.migration && !vm.migration.completed && !vm.migration.failed}
 			<div
-				class="flex items-center gap-2 border-b border-blue-200 bg-blue-50 px-4 py-1.5 text-xs text-blue-700"
+				class="flex items-center gap-2 border-b border-select bg-select-soft px-4 py-1.5 text-xs text-accent-ink"
 			>
-				<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500"></span>
+				<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-accent"></span>
 				Live-migrating{#if vm.migration.sourceNode}&nbsp;from {vm.migration.sourceNode}{/if}
 				to {vm.migration.targetNode || '…'}{#if duration(vm.migration.startedAt)}&nbsp;· started {duration(
 						vm.migration.startedAt,
@@ -420,7 +420,7 @@
 							{#if stagedChanges.has('CPU')}<span class="text-ink-faint line-through"
 									>{vm.cpuCores ?? '—'} vCPU</span
 								>
-								<span class="text-blue-600">{stagedChanges.get('CPU')?.to}</span
+								<span class="text-accent">{stagedChanges.get('CPU')?.to}</span
 								>{:else}{vm.cpuCores ?? '—'}<span class="ml-1 text-sm font-normal text-ink-muted"
 									>vCPU</span
 								>{/if}
@@ -434,7 +434,7 @@
 							{#if stagedChanges.has('Memory')}<span class="text-ink-faint line-through"
 									>{vm.memory ?? '—'}</span
 								>
-								<span class="text-blue-600">{stagedChanges.get('Memory')?.to}</span
+								<span class="text-accent">{stagedChanges.get('Memory')?.to}</span
 								>{:else}{vm.memory ?? '—'}{/if}
 						</div>
 						{#if vm.memoryActual && vm.memoryActual !== vm.memory}
@@ -478,7 +478,7 @@
 								{#if stagedChanges.has('Power')}<span class="text-ink-faint line-through"
 										>{vm.power}</span
 									>
-									<span class="text-blue-600">→ {stagedChanges.get('Power')?.to}</span>{:else}<span
+									<span class="text-accent">→ {stagedChanges.get('Power')?.to}</span>{:else}<span
 										class="text-ink">{vm.power}</span
 									>{/if}
 							</Row>
@@ -577,7 +577,7 @@
 					{#each ['events', 'performance'] as const as v (v)}
 						<button
 							class="border-b-2 px-3 py-1 capitalize {monitorView === v
-								? 'border-blue-600 text-blue-700'
+								? 'border-blue-600 text-accent-ink'
 								: 'border-transparent text-ink-muted hover:text-ink-soft'}"
 							onclick={() => (monitorView = v)}
 						>

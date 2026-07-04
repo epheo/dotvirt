@@ -96,7 +96,7 @@
 						class="text-xs text-red-600 hover:underline disabled:text-ink-faint">Disable…</button
 					>
 				{/if}
-				<button onclick={() => (configuring = true)} class="text-xs text-blue-600 hover:underline"
+				<button onclick={() => (configuring = true)} class="text-xs text-accent hover:underline"
 					>{view.configured ? 'Configure' : 'Enable DRS'}</button
 				>
 			</span>

@@ -141,7 +141,7 @@
 				<span class="text-ink-soft">Allow ingress from</span>
 				<button
 					onclick={addRow}
-					class="flex items-center gap-1 text-xs text-blue-600 hover:underline"
+					class="flex items-center gap-1 text-xs text-accent hover:underline"
 					><Plus size={12} /> Add source</button
 				>
 			</div>
@@ -205,7 +205,7 @@
 		<button
 			onclick={submit}
 			disabled={!valid || submitting}
-			class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
+			class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 		>
 			{submitting ? 'Staging…' : 'Stage policy'}
 		</button>

@@ -48,7 +48,7 @@
 {#if data}
 	<InfoCard title="Host balance">
 		{#snippet action()}
-			<a href="?tab=configure" class="text-xs text-blue-700 hover:underline">
+			<a href="?tab=configure" class="text-xs text-accent-ink hover:underline">
 				{data?.band ? 'DRS settings' : 'Enable DRS'}
 			</a>
 		{/snippet}
@@ -155,7 +155,7 @@
 						<li class="flex items-center gap-2 text-xs">
 							<a
 								href="/hosts/{o.node}"
-								class="w-44 min-w-0 truncate text-ink-soft hover:text-blue-700 hover:underline"
+								class="w-44 min-w-0 truncate text-ink-soft hover:text-accent-ink hover:underline"
 								>{o.node}</a
 							>
 							<span class="h-1.5 flex-1 overflow-hidden rounded bg-inset-strong">

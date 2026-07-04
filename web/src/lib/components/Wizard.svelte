@@ -57,7 +57,7 @@
 	// Rail badge: current = blue number · invalid = amber number · satisfied
 	// required step = green check · optional step = slate number.
 	function railBadge(step: WizardStep, i: number): { cls: string; text: string; done?: boolean } {
-		if (i === current) return { cls: 'bg-blue-500 text-white', text: String(i + 1) };
+		if (i === current) return { cls: 'bg-accent text-white', text: String(i + 1) };
 		if (step.valid === false)
 			return { cls: 'bg-amber-100 text-amber-700 ring-1 ring-amber-300', text: String(i + 1) };
 		if (step.valid === true) return { cls: 'bg-green-500 text-white', text: '', done: true };
@@ -78,7 +78,7 @@
 					onclick={() => go(i)}
 					class="flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-sm {i ===
 					current
-						? 'bg-blue-50 font-medium text-blue-700'
+						? 'bg-select-soft font-medium text-accent-ink'
 						: 'text-ink-soft hover:bg-inset-strong'}"
 				>
 					<span
@@ -116,11 +116,11 @@
 			<button
 				onclick={onfinish}
 				disabled={!canFinish || submitting}
-				class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
+				class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 				>{finishLabel}</button
 			>
 		{:else}
-			<button onclick={next} class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white"
+			<button onclick={next} class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white"
 				>Next</button
 			>
 		{/if}

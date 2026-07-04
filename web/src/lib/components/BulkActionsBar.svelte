@@ -19,7 +19,7 @@
 	} = $props();
 </script>
 
-<div class="flex items-center gap-2 border-b border-line bg-blue-50 px-4 py-1.5 text-sm">
+<div class="flex items-center gap-2 border-b border-line bg-select-soft px-4 py-1.5 text-sm">
 	<span class="font-medium text-ink-soft">{count} selected</span>
 	<span class="text-ink-faint">|</span>
 	<button

@@ -86,7 +86,7 @@
 			<button
 				onclick={() => (baseline = false)}
 				class="flex-1 rounded border px-3 py-2 text-left text-xs {!baseline
-					? 'border-blue-500 bg-blue-50 text-blue-700'
+					? 'border-accent bg-select-soft text-accent-ink'
 					: 'border-line-strong text-ink-soft'}"
 			>
 				<div class="font-medium">Admin Policy</div>
@@ -95,7 +95,7 @@
 			<button
 				onclick={() => (baseline = true)}
 				class="flex-1 rounded border px-3 py-2 text-left text-xs {baseline
-					? 'border-blue-500 bg-blue-50 text-blue-700'
+					? 'border-accent bg-select-soft text-accent-ink'
 					: 'border-line-strong text-ink-soft'}"
 			>
 				<div class="font-medium">Baseline</div>
@@ -153,7 +153,7 @@
 				>
 				<button
 					onclick={addRow}
-					class="flex items-center gap-1 text-xs text-blue-600 hover:underline"
+					class="flex items-center gap-1 text-xs text-accent hover:underline"
 					><Plus size={12} /> Add rule</button
 				>
 			</div>
@@ -229,7 +229,7 @@
 		<button
 			onclick={submit}
 			disabled={!valid || submitting}
-			class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
+			class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 		>
 			{submitting ? 'Staging…' : 'Stage policy'}
 		</button>

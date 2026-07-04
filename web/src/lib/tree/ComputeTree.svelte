@@ -68,7 +68,7 @@
 					})}
 			>
 				{#snippet icon()}
-					<Folder size={14} class="shrink-0 text-blue-500" />
+					<Folder size={14} class="shrink-0 text-accent" />
 				{/snippet}
 				<span class="truncate font-semibold text-ink-soft">{project.name}</span>
 				{#if project.error}

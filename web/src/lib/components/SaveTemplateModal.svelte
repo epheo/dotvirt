@@ -99,7 +99,7 @@
 		<button
 			onclick={save}
 			disabled={!valid || busy}
-			class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
+			class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 			>Stage template</button
 		>
 	{/snippet}

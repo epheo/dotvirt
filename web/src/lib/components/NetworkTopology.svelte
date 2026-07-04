@@ -72,7 +72,7 @@
 	{@const list = vmsFor(net.name)}
 	<button
 		onclick={() => onpick(net.name)}
-		class="flex w-full flex-col gap-1 rounded border border-line bg-panel px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-50"
+		class="flex w-full flex-col gap-1 rounded border border-line bg-panel px-3 py-2 text-left hover:border-accent/60 hover:bg-select-soft"
 	>
 		<div class="flex flex-wrap items-center gap-2">
 			<Network size={13} class="shrink-0 text-ink-faint" />
@@ -146,11 +146,11 @@
 		{@const segs = projSegments(p)}
 		<section class="rounded-lg border border-line p-3">
 			<div class="mb-2 flex items-center gap-2">
-				<Router size={15} class="text-blue-500" />
+				<Router size={15} class="text-accent" />
 				<span class="font-semibold text-ink-soft">{TERMS.tier1.nsx}</span>
 				<span class="text-xs text-ink-faint">· {p.name} ({TERMS.tier1.vsphere})</span>
 			</div>
-			<div class="space-y-1.5 border-l-2 border-blue-200 pl-4">
+			<div class="space-y-1.5 border-l-2 border-select pl-4">
 				{#each segs.primary as net (net.name)}{@render segmentCard(net)}{/each}
 				{#each segs.overlays as net (net.name)}{@render segmentCard(net)}{/each}
 				{#if !segs.primary.length && !segs.overlays.length}

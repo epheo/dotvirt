@@ -88,7 +88,7 @@
 			<button
 				onclick={() => (kind = 'overlay')}
 				class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'overlay'
-					? 'border-blue-500 bg-blue-50 text-blue-700'
+					? 'border-accent bg-select-soft text-accent-ink'
 					: 'border-line-strong text-ink-soft'}"
 			>
 				<div class="font-medium">Overlay Segment</div>
@@ -98,7 +98,7 @@
 				<button
 					onclick={() => (kind = 'vlan')}
 					class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'vlan'
-						? 'border-blue-500 bg-blue-50 text-blue-700'
+						? 'border-accent bg-select-soft text-accent-ink'
 						: 'border-line-strong text-ink-soft'}"
 				>
 					<div class="font-medium">VLAN Segment</div>
@@ -124,7 +124,7 @@
 					<button
 						onclick={() => (shared = false)}
 						class="flex-1 rounded border px-3 py-2 text-left text-xs {!shared
-							? 'border-blue-500 bg-blue-50 text-blue-700'
+							? 'border-accent bg-select-soft text-accent-ink'
 							: 'border-line-strong text-ink-soft'}"
 					>
 						<div class="font-medium">This project</div>
@@ -133,7 +133,7 @@
 					<button
 						onclick={() => (shared = true)}
 						class="flex-1 rounded border px-3 py-2 text-left text-xs {shared
-							? 'border-blue-500 bg-blue-50 text-blue-700'
+							? 'border-accent bg-select-soft text-accent-ink'
 							: 'border-line-strong text-ink-soft'}"
 					>
 						<div class="font-medium">Shared</div>
@@ -170,7 +170,7 @@
 						>Uplink ({TERMS.uplink.nsx}){#if onAddUplink}<button
 								type="button"
 								onclick={onAddUplink}
-								class="text-xs font-normal text-blue-600 hover:underline">+ Add uplink…</button
+								class="text-xs font-normal text-accent hover:underline">+ Add uplink…</button
 							>{/if}</span
 					>
 					<input

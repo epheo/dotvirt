@@ -204,7 +204,7 @@
 							class="flex h-4 w-4 items-center justify-center rounded-full text-[10px] {complete
 								? 'bg-green-500 text-white'
 								: active
-									? 'bg-blue-500 text-white'
+									? 'bg-accent text-white'
 									: 'bg-line text-ink-faint'}"
 						>
 							{#if complete}<Check size={10} />{/if}
@@ -221,7 +221,7 @@
 				)}
 				{#if stage === 'uploading'}
 					<div class="ml-6 h-2 overflow-hidden rounded-full bg-inset-strong">
-						<div class="h-full rounded-full bg-blue-500" style="width:{uploadPct}%"></div>
+						<div class="h-full rounded-full bg-accent" style="width:{uploadPct}%"></div>
 					</div>
 				{/if}
 				{@render step(
@@ -247,14 +247,14 @@
 			<button
 				onclick={start}
 				disabled={!ready}
-				class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
+				class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 			>
 				{stage === 'error' ? 'Retry' : 'Upload'}
 			</button>
 		{:else if stage === 'done'}
 			<button
 				onclick={onclose}
-				class="ml-auto rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white">Done</button
+				class="ml-auto rounded bg-accent px-4 py-1.5 text-sm font-medium text-white">Done</button
 			>
 		{:else}
 			<span class="ml-auto text-xs text-ink-faint">Working… keep this tab open.</span>

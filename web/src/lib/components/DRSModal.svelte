@@ -124,7 +124,7 @@
 		<button
 			type="button"
 			onclick={() => (showAdvanced = !showAdvanced)}
-			class="text-xs text-blue-600 hover:underline"
+			class="text-xs text-accent hover:underline"
 		>
 			{showAdvanced ? '− Hide' : '+ Show'} advanced settings
 		</button>

@@ -64,7 +64,7 @@
 			<button
 				onclick={() => (kind = 'snat')}
 				class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'snat'
-					? 'border-blue-500 bg-blue-50 text-blue-700'
+					? 'border-accent bg-select-soft text-accent-ink'
 					: 'border-line-strong text-ink-soft'}"
 			>
 				<div class="font-medium">{TERMS.snat.nsx}</div>
@@ -73,7 +73,7 @@
 			<button
 				onclick={() => (kind = 'route')}
 				class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'route'
-					? 'border-blue-500 bg-blue-50 text-blue-700'
+					? 'border-accent bg-select-soft text-accent-ink'
 					: 'border-line-strong text-ink-soft'}"
 			>
 				<div class="font-medium">External Route</div>
@@ -141,7 +141,7 @@
 		<button
 			onclick={submit}
 			disabled={!valid || submitting}
-			class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
+			class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 		>
 			{submitting ? 'Staging…' : 'Stage service'}
 		</button>

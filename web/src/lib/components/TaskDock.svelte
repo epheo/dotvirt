@@ -303,7 +303,7 @@
 	{#if openPane}
 		<!-- Drag the top edge to resize the dock. -->
 		<div
-			class="h-1.5 w-full cursor-ns-resize bg-inset-strong hover:bg-blue-300"
+			class="h-1.5 w-full cursor-ns-resize bg-inset-strong hover:bg-accent/40"
 			onpointerdown={onResizeStart}
 			onpointermove={onResizeMove}
 			onpointerup={onResizeEnd}
@@ -361,7 +361,7 @@
 							{#each tasks as t (t.kind + ':' + t.project + ':' + t.namespace + '/' + t.name + ':' + t.url + ':' + (t.at ?? ''))}
 								<tr
 									onclick={() => activate(t)}
-									class="cursor-pointer hover:bg-blue-50 {rowClass(t)}"
+									class="cursor-pointer hover:bg-select-soft {rowClass(t)}"
 								>
 									<td class="px-3 py-1.5 text-ink-soft">{t.verb}</td>
 									<td class="px-3 py-1.5 font-medium text-ink">
@@ -405,7 +405,7 @@
 							{#each firing ?? [] as a (a.name + ':' + (a.namespace ?? '') + '/' + (a.vm ?? '') + ':' + (a.severity ?? ''))}
 								<tr
 									onclick={() => a.namespace && a.vm && onselect(a.namespace, a.vm)}
-									class="cursor-pointer bg-amber-50/40 hover:bg-blue-50"
+									class="cursor-pointer bg-amber-50/40 hover:bg-select-soft"
 								>
 									<td class="px-3 py-1.5 font-medium text-ink-soft">
 										{a.name}{#if (a.count ?? 0) > 1}<span class="text-ink-faint">
@@ -430,7 +430,7 @@
 									onclick={() => activate(t)}
 									class="cursor-pointer {t.kind === 'drift'
 										? 'bg-amber-50/40'
-										: 'bg-red-50/40'} hover:bg-blue-50"
+										: 'bg-red-50/40'} hover:bg-select-soft"
 								>
 									<td class="px-3 py-1.5 font-medium text-ink-soft">{t.verb}</td>
 									<td class="px-3 py-1.5 text-ink">
@@ -459,7 +459,7 @@
 						{#each events as e, i (i)}
 							<tr
 								onclick={() => e.namespace && e.name && onselect(e.namespace, e.name)}
-								class="cursor-pointer hover:bg-blue-50 {e.type === 'Warning'
+								class="cursor-pointer hover:bg-select-soft {e.type === 'Warning'
 									? 'bg-amber-50/40'
 									: ''}"
 							>

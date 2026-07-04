@@ -31,7 +31,7 @@
 				<div class="min-w-0">
 					<button
 						onclick={() => onselect?.(c.namespace, c.name)}
-						class="block max-w-full truncate text-ink-soft hover:text-blue-700 hover:underline"
+						class="block max-w-full truncate text-ink-soft hover:text-accent-ink hover:underline"
 						>{c.name}</button
 					>
 					<div class="truncate text-[11px] text-ink-faint">{c.namespace}</div>
@@ -39,7 +39,7 @@
 				<div class="flex items-center gap-2">
 					<span class="h-1.5 flex-1 overflow-hidden rounded bg-inset-strong">
 						<span
-							class="block h-full rounded bg-blue-500"
+							class="block h-full rounded bg-accent"
 							style="width: {(c.value / maxCpu) * 100}%"
 						></span>
 					</span>

@@ -48,7 +48,7 @@
 		{#each ['events', 'performance'] as const as v (v)}
 			<button
 				class="border-b-2 px-3 py-1 capitalize {view === v
-					? 'border-blue-600 text-blue-700'
+					? 'border-blue-600 text-accent-ink'
 					: 'border-transparent text-ink-muted hover:text-ink-soft'}"
 				onclick={() => (view = v)}
 			>
@@ -99,7 +99,7 @@
 							{#if e.name}
 								<button
 									onclick={() => e.namespace && e.name && onselect?.(e.namespace, e.name)}
-									class="font-medium text-ink-soft hover:text-blue-700 hover:underline"
+									class="font-medium text-ink-soft hover:text-accent-ink hover:underline"
 									>{e.name}</button
 								>
 							{:else}—{/if}

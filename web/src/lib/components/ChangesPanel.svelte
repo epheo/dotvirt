@@ -165,7 +165,7 @@
 						href={p.prURL}
 						target="_blank"
 						rel="noopener"
-						class="ml-auto min-w-0 truncate text-xs text-blue-700 underline">{p.title || p.prURL}</a
+						class="ml-auto min-w-0 truncate text-xs text-accent-ink underline">{p.title || p.prURL}</a
 					>
 				</div>
 				<div class="mt-1.5">
@@ -259,7 +259,7 @@
 									{#if historyOpen[project]}<ChevronDown size={12} />{:else}<ChevronRight
 											size={12}
 										/>{/if}
-									<Folder size={12} class="text-blue-500" />
+									<Folder size={12} class="text-accent" />
 									{project}
 								</button>
 

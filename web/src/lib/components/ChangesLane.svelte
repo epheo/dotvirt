@@ -95,7 +95,7 @@
 
 <section class="mb-5" hidden={proposed}>
 	<div class="mb-1 flex items-center gap-2">
-		<Folder size={14} class="text-blue-500" />
+		<Folder size={14} class="text-accent" />
 		<span class="font-semibold text-ink-soft">{project}</span>
 		<span class="text-xs text-ink-faint">({draft.count})</span>
 		<button
@@ -122,7 +122,7 @@
 						? 'bg-red-100 text-red-700'
 						: item.kind === 'create'
 							? 'bg-green-100 text-green-700'
-							: 'bg-blue-100 text-blue-700'}">{item.kind}</span
+							: 'bg-accent-soft text-accent-ink'}">{item.kind}</span
 				>
 				<span class="font-medium text-ink">{item.namespace}/{item.name}</span>
 				<button

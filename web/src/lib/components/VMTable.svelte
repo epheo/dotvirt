@@ -153,7 +153,7 @@
 		<input
 			bind:value={search}
 			placeholder="Search name, namespace, IP…"
-			class="w-64 rounded border border-line-strong px-2 py-1 text-sm focus:border-blue-400"
+			class="w-64 rounded border border-line-strong px-2 py-1 text-sm focus:border-accent/60"
 		/>
 		<select
 			value={prefs.value.powerFilter}
@@ -232,7 +232,7 @@
 							e.preventDefault();
 							oncontextvm(vm, e.clientX, e.clientY);
 						}}
-						class="cursor-pointer hover:bg-blue-50 {selected.has(vmKey(vm)) ? 'bg-blue-50' : ''}"
+						class="cursor-pointer hover:bg-select-soft {selected.has(vmKey(vm)) ? 'bg-select-soft' : ''}"
 					>
 						<td class="px-3 py-1.5">
 							<input

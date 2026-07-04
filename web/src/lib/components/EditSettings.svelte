@@ -237,7 +237,7 @@
 				type="button"
 				onclick={() => setMode('instancetype')}
 				class="px-3 py-1 text-xs {mode === 'instancetype'
-					? 'bg-blue-600 text-white'
+					? 'bg-accent text-white'
 					: 'bg-panel text-ink-soft hover:bg-inset'}"
 			>
 				Instance type
@@ -246,7 +246,7 @@
 				type="button"
 				onclick={() => setMode('custom')}
 				class="border-l border-line-strong px-3 py-1 text-xs {mode === 'custom'
-					? 'bg-blue-600 text-white'
+					? 'bg-accent text-white'
 					: 'bg-panel text-ink-soft hover:bg-inset'}"
 			>
 				Custom CPU/Memory
@@ -402,7 +402,7 @@
 			{/if}
 			<button
 				onclick={() => (disk.removed = !disk.removed)}
-				class="ml-auto text-xs {disk.removed ? 'text-blue-600' : 'text-red-500'}"
+				class="ml-auto text-xs {disk.removed ? 'text-accent' : 'text-red-500'}"
 			>
 				{disk.removed ? 'undo' : 'remove'}
 			</button>
@@ -441,7 +441,7 @@
 			{/if}
 			<button
 				onclick={() => (nic.removed = !nic.removed)}
-				class="ml-auto text-xs {nic.removed ? 'text-blue-600' : 'text-red-500'}"
+				class="ml-auto text-xs {nic.removed ? 'text-accent' : 'text-red-500'}"
 			>
 				{nic.removed ? 'undo' : 'remove'}
 			</button>
@@ -457,7 +457,7 @@
 		<span class="text-xs text-ink-faint">Key/value metadata.</span>
 		<button
 			onclick={() => (labelRows = [...labelRows, { key: '', value: '' }])}
-			class="text-xs text-blue-600 hover:underline">+ Add label</button
+			class="text-xs text-accent hover:underline">+ Add label</button
 		>
 	</div>
 	{#each labelRows as row, i (i)}

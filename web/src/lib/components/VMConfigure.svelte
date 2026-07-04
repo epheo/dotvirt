@@ -29,7 +29,7 @@
 {#snippet editButton(section: 'compute' | 'storage' | 'network' | 'labels')}
 	<button
 		onclick={() => onedit(section)}
-		class="flex items-center gap-1 text-xs text-blue-600 hover:underline"
+		class="flex items-center gap-1 text-xs text-accent hover:underline"
 	>
 		<Pencil size={11} /> Edit
 	</button>
@@ -41,7 +41,7 @@
 			<button
 				onclick={() => (view = id)}
 				class="block w-full rounded px-2.5 py-1.5 text-left {view === id
-					? 'bg-blue-50 font-medium text-blue-700'
+					? 'bg-select-soft font-medium text-accent-ink'
 					: 'text-ink-soft hover:bg-inset'}"
 			>
 				{label}
@@ -141,7 +141,7 @@
 							<button
 								onclick={() => onsearchlabel?.(k, v)}
 								title="Find everything labeled {k}={v}"
-								class="mr-1 mb-1 inline-block rounded bg-inset-strong px-1.5 py-0.5 text-xs text-ink-soft hover:bg-blue-50 hover:text-blue-700"
+								class="mr-1 mb-1 inline-block rounded bg-inset-strong px-1.5 py-0.5 text-xs text-ink-soft hover:bg-select-soft hover:text-accent-ink"
 								>{k}={v}</button
 							>
 						{/each}
@@ -158,7 +158,7 @@
 					<Row label="Sync" value={vm.sync} />
 				</dl>
 				<div class="border-t border-line-soft px-3 py-2">
-					<a href={manifestURL(vm)} target="_blank" class="text-xs text-blue-600 hover:underline"
+					<a href={manifestURL(vm)} target="_blank" class="text-xs text-accent hover:underline"
 						>Download manifest ↗</a
 					>
 					<p class="mt-1 text-xs text-ink-faint">

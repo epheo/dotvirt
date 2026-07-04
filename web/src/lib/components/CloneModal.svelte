@@ -89,13 +89,13 @@
 				id="clone-target-input"
 				data-autofocus
 				bind:value={target}
-				class="flex-1 rounded border border-line-strong px-2 py-1.5 font-mono text-sm focus:border-blue-400"
+				class="flex-1 rounded border border-line-strong px-2 py-1.5 font-mono text-sm focus:border-accent/60"
 				placeholder="{vm.name}-clone"
 			/>
 			<button
 				onclick={create}
 				disabled={!valid || busy}
-				class="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:bg-line-strong"
+				class="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent disabled:bg-line-strong"
 			>
 				<Copy size={14} />
 				{busy ? 'Cloning…' : 'Clone'}
