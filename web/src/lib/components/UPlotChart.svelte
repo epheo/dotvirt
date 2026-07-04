@@ -4,6 +4,7 @@
 	import type { MetricChart } from '$lib/api';
 	import { chartSeries, chartUI } from '$lib/chart';
 	import { bytes } from '$lib/format';
+	import { theme } from '$lib/state/theme.svelte';
 
 	let { chart }: { chart: MetricChart } = $props();
 
@@ -86,11 +87,14 @@
 		};
 	}
 
-	// Recreate the plot when its data or the container width changes (gated on a
-	// real width so we don't build a zero-width chart on first paint).
+	// Recreate the plot when its data, the container width, or the theme
+	// changes — canvas colors resolve at build time, so a theme flip rebuilds
+	// (`resolved` is a stable string, safe as an effect dep). Gated on a real
+	// width so we don't build a zero-width chart on first paint.
 	$effect(() => {
 		const c = chart;
 		const w = width;
+		theme.resolved;
 		if (!el || w <= 0) return;
 		const plot = new uPlot(makeOpts(c, w), makeData(c), el);
 		return () => plot.destroy();
@@ -120,5 +124,6 @@
 	}
 	:global(.u-legend) {
 		font-size: 11px;
+		color: var(--color-ink-soft);
 	}
 </style>

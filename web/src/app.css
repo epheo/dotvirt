@@ -79,8 +79,78 @@
 	}
 }
 
+/* `dark:` keys on the data-theme attribute (never prefers-color-scheme —
+   app.html resolves "system" to an explicit attribute before first paint).
+   Escape hatch only: the token overrides below carry the theme. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
 :root {
 	color-scheme: light;
+}
+
+/* The dark theme is one override block: same semantic roles, night values.
+   Utilities compile to var() references (plain @theme, not inline), so no
+   component changes are needed — including /NN opacity modifiers, which
+   color-mix the overridden value. */
+:root[data-theme='dark'] {
+	color-scheme: dark;
+
+	/* surfaces */
+	--color-canvas: #0b1120; /* between slate-900 and slate-950 */
+	--color-panel: oklch(20.8% 0.042 265.755); /* slate-900 */
+	--color-inset: oklch(23.9% 0.041 262.5); /* a step above panel */
+	--color-inset-strong: oklch(27.9% 0.041 260.031); /* slate-800 */
+	--color-bar: oklch(12.9% 0.042 264.695); /* slate-950: the header stays darkest */
+
+	/* hairlines */
+	--color-line: oklch(27.9% 0.041 260.031); /* slate-800 */
+	--color-line-strong: oklch(37.2% 0.044 257.287); /* slate-700 */
+	--color-line-soft: oklch(24.5% 0.041 262);
+
+	/* ink */
+	--color-ink: oklch(96.8% 0.007 247.896); /* slate-100 */
+	--color-ink-soft: oklch(86.9% 0.022 252.894); /* slate-300 */
+	--color-ink-muted: oklch(70.4% 0.04 256.788); /* slate-400 */
+	--color-ink-faint: oklch(55.4% 0.046 257.417); /* slate-500 */
+
+	/* accent */
+	--color-accent: oklch(62.3% 0.214 259.815); /* blue-500 */
+	--color-accent-hover: oklch(70.7% 0.165 254.624); /* blue-400 */
+	--color-accent-ink: oklch(70.7% 0.165 254.624); /* blue-400 */
+
+	/* selection */
+	--color-select: oklch(37.9% 0.146 265.522 / 0.45); /* blue-800 @ 45% */
+	--color-select-soft: oklch(37.9% 0.146 265.522 / 0.25);
+
+	/* accent tint for informational badges */
+	--color-accent-soft: oklch(28.2% 0.091 267.935); /* blue-950 */
+
+	/* status */
+	--color-ok: oklch(76.5% 0.177 163.223); /* emerald-400 */
+	--color-warn: oklch(82.8% 0.189 84.429); /* amber-400 */
+	--color-danger: oklch(63.7% 0.237 25.331); /* red-500 */
+	--color-ok-soft: oklch(26.6% 0.065 152.934); /* green-950 */
+	--color-warn-soft: oklch(27.9% 0.077 45.635); /* amber-950 */
+	--color-danger-soft: oklch(25.8% 0.092 26.042); /* red-950 */
+	--color-ok-ink: oklch(87.1% 0.15 154.449); /* green-300 */
+	--color-warn-ink: oklch(87.9% 0.169 91.605); /* amber-300 */
+	--color-danger-ink: oklch(80.8% 0.114 19.571); /* red-300 */
+}
+
+:root[data-theme='dark'] {
+	/* brighter series on a dark canvas, muted furniture */
+	--chart-1: #3b82f6;
+	--chart-2: #14b8a6;
+	--chart-3: #fbbf24;
+	--chart-4: #ef4444;
+	--chart-5: #8b5cf6;
+	--chart-6: #22c55e;
+	--chart-grid: #1e293b;
+	--chart-axis: #64748b;
+	--chart-ticks: #334155;
+	--chart-track: #334155;
+	--chart-track-strong: #475569;
+	--chart-mean: #94a3b8;
 }
 
 html,
