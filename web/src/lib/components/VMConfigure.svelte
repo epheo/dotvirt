@@ -42,7 +42,7 @@
 				onclick={() => (view = id)}
 				class="block w-full rounded px-2.5 py-1.5 text-left {view === id
 					? 'bg-blue-50 font-medium text-blue-700'
-					: 'text-slate-600 hover:bg-slate-50'}"
+					: 'text-ink-soft hover:bg-slate-50'}"
 			>
 				{label}
 			</button>
@@ -74,8 +74,8 @@
 					<ul class="divide-y divide-slate-100 px-3 text-[13px]">
 						{#each vm.disks as d (d.name)}
 							<li class="flex justify-between gap-3 py-1.5">
-								<span class="text-slate-800">{d.name}</span>
-								<span class="text-slate-400"
+								<span class="text-ink">{d.name}</span>
+								<span class="text-ink-faint"
 									>{d.type}{d.size ? ` · ${d.size}` : ''}{d.storageClass
 										? ` · ${d.storageClass}`
 										: ''}</span
@@ -84,7 +84,7 @@
 						{/each}
 					</ul>
 				{:else}
-					<p class="px-3 py-3 text-xs text-slate-400">No disks defined in the manifest.</p>
+					<p class="px-3 py-3 text-xs text-ink-faint">No disks defined in the manifest.</p>
 				{/if}
 			</InfoCard>
 		{:else if view === 'network'}
@@ -105,9 +105,9 @@
 								.join(' · ')}
 							<li class="py-1.5">
 								<div class="flex items-baseline justify-between gap-3">
-									<span class="text-slate-800">{n.name}</span>
+									<span class="text-ink">{n.name}</span>
 									<span class="flex items-center gap-2 text-right">
-										<span class="text-slate-700"
+										<span class="text-ink-soft"
 											>{pg
 												? pg.name
 												: n.network && n.network !== 'pod'
@@ -116,20 +116,20 @@
 										>
 										{#if pg}
 											<span
-												class="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500"
+												class="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-ink-muted"
 												>{kindLabel(pg.kind)}{pg.vlan ? ` ${pg.vlan}` : ''}</span
 											>
 										{/if}
 									</span>
 								</div>
 								{#if detail}
-									<div class="mt-0.5 text-right text-[11px] text-slate-400">{detail}</div>
+									<div class="mt-0.5 text-right text-[11px] text-ink-faint">{detail}</div>
 								{/if}
 							</li>
 						{/each}
 					</ul>
 				{:else}
-					<p class="px-3 py-3 text-xs text-slate-400">No adapters defined in the manifest.</p>
+					<p class="px-3 py-3 text-xs text-ink-faint">No adapters defined in the manifest.</p>
 				{/if}
 			</InfoCard>
 		{:else if view === 'labels'}
@@ -141,12 +141,12 @@
 							<button
 								onclick={() => onsearchlabel?.(k, v)}
 								title="Find everything labeled {k}={v}"
-								class="mr-1 mb-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+								class="mr-1 mb-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-ink-soft hover:bg-blue-50 hover:text-blue-700"
 								>{k}={v}</button
 							>
 						{/each}
 					{:else}
-						<p class="py-1 text-xs text-slate-400">No labels.</p>
+						<p class="py-1 text-xs text-ink-faint">No labels.</p>
 					{/if}
 				</div>
 			</InfoCard>
@@ -161,7 +161,7 @@
 					<a href={manifestURL(vm)} target="_blank" class="text-xs text-blue-600 hover:underline"
 						>Download manifest ↗</a
 					>
-					<p class="mt-1 text-xs text-slate-400">
+					<p class="mt-1 text-xs text-ink-faint">
 						This VM's configuration lives in git; edits become a pull request.
 					</p>
 				</div>

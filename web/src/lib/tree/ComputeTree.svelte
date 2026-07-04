@@ -129,7 +129,7 @@
 							{#snippet icon()}
 								<Layers size={13} class="shrink-0 text-ink-faint" />
 							{/snippet}
-							<span class="truncate text-slate-600">{ns.namespace}</span>
+							<span class="truncate text-ink-soft">{ns.namespace}</span>
 							{#if nsDrift(ns)}
 								<StatusDot tone="danger" size="xs" title="A VM is out of sync" />
 							{/if}

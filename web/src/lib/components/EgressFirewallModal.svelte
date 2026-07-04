@@ -81,7 +81,7 @@
 >
 	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
 		<label class="block">
-			<span class="text-slate-600">Project (namespace)</span>
+			<span class="text-ink-soft">Project (namespace)</span>
 			<select
 				bind:value={namespace}
 				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
@@ -92,8 +92,8 @@
 
 		<div class="space-y-2">
 			<div class="flex items-center justify-between">
-				<span class="text-slate-600"
-					>Egress rules <span class="text-slate-400">(first match wins)</span></span
+				<span class="text-ink-soft"
+					>Egress rules <span class="text-ink-faint">(first match wins)</span></span
 				>
 				<button
 					onclick={addRow}
@@ -113,7 +113,7 @@
 							<option value="Allow">Allow</option>
 							<option value="Deny">Deny</option>
 						</select>
-						<span class="text-xs text-slate-400">egress to</span>
+						<span class="text-xs text-ink-faint">egress to</span>
 						<select bind:value={row.dest} class="rounded border border-slate-300 px-2 py-1 text-xs">
 							<option value="cidr">CIDR</option>
 							<option value="dns">DNS name</option>
@@ -127,11 +127,11 @@
 							onclick={() => removeRow(i)}
 							disabled={rows.length === 1}
 							aria-label="Remove rule"
-							class="text-slate-300 hover:text-red-600 disabled:opacity-40"
+							class="text-ink-faint hover:text-red-600 disabled:opacity-40"
 							><Trash2 size={14} /></button
 						>
 					</div>
-					<div class="mt-2 flex items-center gap-2 pl-1 text-xs text-slate-500">
+					<div class="mt-2 flex items-center gap-2 pl-1 text-xs text-ink-muted">
 						<span>port</span>
 						<select bind:value={row.proto} class="rounded border border-slate-300 px-1.5 py-1">
 							<option value="TCP">TCP</option>
@@ -151,7 +151,7 @@
 			{/each}
 		</div>
 
-		<p class="rounded bg-slate-50 px-3 py-2 text-xs text-slate-500">
+		<p class="rounded bg-slate-50 px-3 py-2 text-xs text-ink-muted">
 			The {TERMS.gatewayFirewall.nsx.toLowerCase()} controls north-south traffic leaving this project's
 			VMs to external destinations (it is not an east-west, VM-to-VM control — that is the Distributed
 			Firewall). One per namespace; staged into the project's repo and applied by its Argo app.
@@ -161,10 +161,10 @@
 		{/if}
 	</div>
 	{#snippet footer()}
-		<span class="text-xs text-slate-400">Staged into the changeset; open a PR from “Changes”.</span>
+		<span class="text-xs text-ink-faint">Staged into the changeset; open a PR from “Changes”.</span>
 		<button
 			onclick={onclose}
-			class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button
+			class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-slate-100">Cancel</button
 		>
 		<button
 			onclick={submit}

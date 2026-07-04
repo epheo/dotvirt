@@ -112,7 +112,7 @@
 			{taking ? 'Taking…' : 'Take snapshot'}
 		</button>
 		{#if running}
-			<span class="text-xs text-slate-400">Online snapshot (VM is running)</span>
+			<span class="text-xs text-ink-faint">Online snapshot (VM is running)</span>
 		{/if}
 	</div>
 
@@ -131,7 +131,7 @@
 
 	{#if snapshots && snapshots.length}
 		<table class="w-full text-[13px]">
-			<thead class="text-left text-xs tracking-wide text-slate-400 uppercase">
+			<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
 				<tr class="border-b border-slate-200">
 					<th class="py-1.5 pr-3 font-medium">Name</th>
 					<th class="py-1.5 pr-3 font-medium">Created</th>
@@ -142,14 +142,14 @@
 			<tbody class="divide-y divide-slate-100">
 				{#each snapshots as s (s.name)}
 					<tr>
-						<td class="py-2 pr-3 font-medium text-slate-800">
+						<td class="py-2 pr-3 font-medium text-ink">
 							{s.name}
 							{#if s.indications?.includes('Online')}
-								<span class="ml-1 rounded bg-slate-100 px-1 text-[10px] text-slate-500">online</span
+								<span class="ml-1 rounded bg-slate-100 px-1 text-[10px] text-ink-muted">online</span
 								>
 							{/if}
 						</td>
-						<td class="py-2 pr-3 whitespace-nowrap text-slate-500">{relativeAge(s.created)}</td>
+						<td class="py-2 pr-3 whitespace-nowrap text-ink-muted">{relativeAge(s.created)}</td>
 						<td class="py-2 pr-3 whitespace-nowrap">
 							{#if s.readyToUse}
 								<span class="inline-flex items-center gap-1.5 text-green-700">
@@ -167,13 +167,13 @@
 						</td>
 						<td class="py-2 text-right whitespace-nowrap">
 							{#if busy === s.name}
-								<span class="text-xs text-slate-400">working…</span>
+								<span class="text-xs text-ink-faint">working…</span>
 							{:else}
 								<button
 									onclick={() => (armedRestore = armedRestore === s.name ? null : s.name)}
 									disabled={!s.readyToUse || running}
 									title={running ? 'Stop the VM to restore' : 'Roll the VM back to this snapshot'}
-									class="mr-2 inline-flex items-center gap-1 text-xs text-amber-700 hover:underline disabled:text-slate-300 disabled:no-underline"
+									class="mr-2 inline-flex items-center gap-1 text-xs text-amber-700 hover:underline disabled:text-ink-faint disabled:no-underline"
 								>
 									<RotateCcw size={12} />
 									{armedRestore === s.name ? 'Confirm restore' : 'Restore'}
@@ -206,9 +206,9 @@
 			</tbody>
 		</table>
 	{:else if loading && !snapshots}
-		<p class="py-6 text-center text-sm text-slate-400">Loading snapshots…</p>
+		<p class="py-6 text-center text-sm text-ink-faint">Loading snapshots…</p>
 	{:else}
-		<p class="py-6 text-center text-sm text-slate-400">
+		<p class="py-6 text-center text-sm text-ink-faint">
 			No snapshots. Take one to capture the VM's current disk (and memory, if running) state —
 			restore rolls it back later.
 		</p>

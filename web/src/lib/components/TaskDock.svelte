@@ -289,7 +289,7 @@
 {#snippet dockHead(cols: string[])}
 	<!-- The one header row all three dock tables share. -->
 	<thead
-		class="sticky top-0 bg-slate-50 text-left text-[11px] tracking-wide text-slate-400 uppercase"
+		class="sticky top-0 bg-slate-50 text-left text-[11px] tracking-wide text-ink-faint uppercase"
 	>
 		<tr class="border-b border-slate-200">
 			{#each cols as c (c)}
@@ -313,7 +313,7 @@
 		></div>
 	{/if}
 	<!-- Tabbed header (vCenter's bottom pane): Recent Tasks | Events + collapse. -->
-	<div class="flex items-center gap-1 bg-slate-100 px-2 py-1 text-slate-600">
+	<div class="flex items-center gap-1 bg-slate-100 px-2 py-1 text-ink-soft">
 		<ListChecks size={14} class="mx-1 text-ink-muted" />
 		<TabBar
 			tabs={[
@@ -335,14 +335,14 @@
 				onrefresh?.();
 				if (tab === 'events') loadEvents();
 			}}
-			class="ml-auto p-1 text-slate-400 hover:text-slate-600"
+			class="ml-auto p-1 text-ink-faint hover:text-ink-soft"
 			title="Refresh"
 		>
 			<RefreshCw size={13} />
 		</button>
 		<button
 			onclick={() => (openPane = !openPane)}
-			class="p-1 text-slate-400 hover:text-slate-600"
+			class="p-1 text-ink-faint hover:text-ink-soft"
 			title="Collapse/expand"
 		>
 			{#if openPane}<ChevronDown size={14} />{:else}<ChevronUp size={14} />{/if}
@@ -353,7 +353,7 @@
 		<div class="overflow-y-auto" style="height: {dockHeight}px">
 			{#if tab === 'tasks'}
 				{#if tasks.length === 0}
-					<div class="px-3 py-5 text-center text-slate-400">No active tasks.</div>
+					<div class="px-3 py-5 text-center text-ink-faint">No active tasks.</div>
 				{:else}
 					<table class="w-full">
 						{@render dockHead(['Task', 'Target', 'Status', 'Initiated by', 'Project'])}
@@ -363,12 +363,12 @@
 									onclick={() => activate(t)}
 									class="cursor-pointer hover:bg-blue-50 {rowClass(t)}"
 								>
-									<td class="px-3 py-1.5 text-slate-700">{t.verb}</td>
-									<td class="px-3 py-1.5 font-medium text-slate-800">
+									<td class="px-3 py-1.5 text-ink-soft">{t.verb}</td>
+									<td class="px-3 py-1.5 font-medium text-ink">
 										{#if t.kind === 'pr' || t.kind === 'sync'}
-											<span class="font-normal text-slate-700">{t.prTitle}</span>
+											<span class="font-normal text-ink-soft">{t.prTitle}</span>
 										{:else}
-											{t.name} <span class="font-normal text-slate-400">· {t.namespace}</span>
+											{t.name} <span class="font-normal text-ink-faint">· {t.namespace}</span>
 										{/if}
 									</td>
 									<td class="px-3 py-1.5">
@@ -384,8 +384,8 @@
 											{/if}
 										</span>
 									</td>
-									<td class="px-3 py-1.5 text-slate-600">{t.by}</td>
-									<td class="px-3 py-1.5 text-slate-500">{t.project}</td>
+									<td class="px-3 py-1.5 text-ink-soft">{t.by}</td>
+									<td class="px-3 py-1.5 text-ink-muted">{t.project}</td>
 								</tr>
 							{/each}
 						</tbody>
@@ -395,7 +395,7 @@
 				<!-- vCenter's Triggered Alarms: firing Prometheus alerts + the
 				     inventory-derived amber set (drift, failed migrations). -->
 				{#if alarms === 0}
-					<div class="px-3 py-5 text-center text-slate-400">
+					<div class="px-3 py-5 text-center text-ink-faint">
 						No triggered alarms{firing === null ? ' (alerts feed unavailable)' : ''}.
 					</div>
 				{:else}
@@ -407,13 +407,13 @@
 									onclick={() => a.namespace && a.vm && onselect(a.namespace, a.vm)}
 									class="cursor-pointer bg-amber-50/40 hover:bg-blue-50"
 								>
-									<td class="px-3 py-1.5 font-medium text-slate-700">
-										{a.name}{#if (a.count ?? 0) > 1}<span class="text-slate-400">
+									<td class="px-3 py-1.5 font-medium text-ink-soft">
+										{a.name}{#if (a.count ?? 0) > 1}<span class="text-ink-faint">
 												×{a.count}</span
 											>{/if}
 									</td>
-									<td class="px-3 py-1.5 text-slate-800">
-										{#if a.vm}{a.vm} <span class="text-slate-400">· {a.namespace}</span>
+									<td class="px-3 py-1.5 text-ink">
+										{#if a.vm}{a.vm} <span class="text-ink-faint">· {a.namespace}</span>
 										{:else}{a.namespace ?? '—'}{/if}
 									</td>
 									<td class="px-3 py-1.5">
@@ -422,7 +422,7 @@
 											{a.severity ?? '—'}
 										</span>
 									</td>
-									<td class="px-3 py-1.5 text-slate-500">Prometheus</td>
+									<td class="px-3 py-1.5 text-ink-muted">Prometheus</td>
 								</tr>
 							{/each}
 							{#each clientAlarms as t (t.kind + ':' + t.namespace + '/' + t.name)}
@@ -432,9 +432,9 @@
 										? 'bg-amber-50/40'
 										: 'bg-red-50/40'} hover:bg-blue-50"
 								>
-									<td class="px-3 py-1.5 font-medium text-slate-700">{t.verb}</td>
-									<td class="px-3 py-1.5 text-slate-800">
-										{t.name} <span class="text-slate-400">· {t.namespace}</span>
+									<td class="px-3 py-1.5 font-medium text-ink-soft">{t.verb}</td>
+									<td class="px-3 py-1.5 text-ink">
+										{t.name} <span class="text-ink-faint">· {t.namespace}</span>
 									</td>
 									<td class="px-3 py-1.5">
 										<span class="inline-flex items-center gap-1.5">
@@ -442,16 +442,16 @@
 											{t.kind === 'drift' ? 'warning' : 'critical'}
 										</span>
 									</td>
-									<td class="px-3 py-1.5 text-slate-500">dotvirt</td>
+									<td class="px-3 py-1.5 text-ink-muted">dotvirt</td>
 								</tr>
 							{/each}
 						</tbody>
 					</table>
 				{/if}
 			{:else if eventsLoading && events === null}
-				<div class="px-3 py-5 text-center text-slate-400">Loading events…</div>
+				<div class="px-3 py-5 text-center text-ink-faint">Loading events…</div>
 			{:else if !events || events.length === 0}
-				<div class="px-3 py-5 text-center text-slate-400">No recent events.</div>
+				<div class="px-3 py-5 text-center text-ink-faint">No recent events.</div>
 			{:else}
 				<table class="w-full">
 					{@render dockHead(['Reason', 'Target', 'Message', 'Type', 'Last seen'])}
@@ -463,19 +463,19 @@
 									? 'bg-amber-50/40'
 									: ''}"
 							>
-								<td class="px-3 py-1.5 font-medium text-slate-700">{e.reason}</td>
-								<td class="px-3 py-1.5 text-slate-800">
-									{e.name} <span class="text-slate-400">· {e.namespace}</span>
+								<td class="px-3 py-1.5 font-medium text-ink-soft">{e.reason}</td>
+								<td class="px-3 py-1.5 text-ink">
+									{e.name} <span class="text-ink-faint">· {e.namespace}</span>
 								</td>
-								<td class="px-3 py-1.5 text-slate-600">{e.message}</td>
+								<td class="px-3 py-1.5 text-ink-soft">{e.message}</td>
 								<td class="px-3 py-1.5">
 									<span class="inline-flex items-center gap-1.5 whitespace-nowrap">
 										<StatusDot tone={e.type === 'Warning' ? 'warn' : 'neutral'} size="xs" />
 										{e.type}
 									</span>
 								</td>
-								<td class="px-3 py-1.5 whitespace-nowrap text-slate-500">
-									{duration(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-slate-400">
+								<td class="px-3 py-1.5 whitespace-nowrap text-ink-muted">
+									{duration(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-ink-faint">
 											×{e.count}</span
 										>{/if}
 								</td>

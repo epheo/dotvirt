@@ -93,7 +93,7 @@
 					<button
 						onclick={disable}
 						disabled={disabling}
-						class="text-xs text-red-600 hover:underline disabled:text-slate-300">Disable…</button
+						class="text-xs text-red-600 hover:underline disabled:text-ink-faint">Disable…</button
 					>
 				{/if}
 				<button onclick={() => (configuring = true)} class="text-xs text-blue-600 hover:underline"
@@ -104,7 +104,7 @@
 	{/snippet}
 
 	{#if !view}
-		<p class="px-3 py-3 text-xs text-slate-400">{error || 'Loading…'}</p>
+		<p class="px-3 py-3 text-xs text-ink-faint">{error || 'Loading…'}</p>
 	{:else}
 		<dl class="divide-y divide-slate-100 text-[13px]">
 			<Row label="Status" value={status} />
@@ -137,7 +137,7 @@
 			</p>
 		{/if}
 		{#if !view.configured}
-			<p class="border-t border-slate-100 px-3 py-2 text-xs text-slate-400">
+			<p class="border-t border-slate-100 px-3 py-2 text-xs text-ink-faint">
 				Without DRS, VMs are placed once at start and stay put. Enabling stages the descheduler
 				operator + configuration into the platform repository — applied when the PR merges.
 			</p>

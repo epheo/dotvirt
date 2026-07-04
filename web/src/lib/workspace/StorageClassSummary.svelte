@@ -40,7 +40,7 @@
 					{#each vms as vm (vm.namespace + '/' + vm.name)}
 						<a
 							href={vmHref(vm.namespace, vm.name)}
-							class="inline-flex items-center gap-1 rounded bg-inset px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-select-soft"
+							class="inline-flex items-center gap-1 rounded bg-inset px-1.5 py-0.5 text-[11px] text-ink-soft hover:bg-select-soft"
 						>
 							<PowerDot power={vm.power} paused={vm.paused} />{vm.name}
 						</a>

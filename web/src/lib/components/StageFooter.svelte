@@ -21,10 +21,10 @@
 	} = $props();
 </script>
 
-<span class="text-xs text-slate-400">{hint}</span>
+<span class="text-xs text-ink-faint">{hint}</span>
 <button
 	onclick={oncancel}
-	class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button
+	class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-slate-100">Cancel</button
 >
 <button
 	onclick={onsubmit}

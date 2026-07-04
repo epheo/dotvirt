@@ -231,14 +231,14 @@
 
 	<!-- Sizing mode: CPU/memory OR an instance type, never both -->
 	<div class="mb-3">
-		<span class="text-slate-500">Sizing</span>
+		<span class="text-ink-muted">Sizing</span>
 		<div class="mt-1 inline-flex overflow-hidden rounded border border-slate-300">
 			<button
 				type="button"
 				onclick={() => setMode('instancetype')}
 				class="px-3 py-1 text-xs {mode === 'instancetype'
 					? 'bg-blue-600 text-white'
-					: 'bg-white text-slate-600 hover:bg-slate-50'}"
+					: 'bg-white text-ink-soft hover:bg-slate-50'}"
 			>
 				Instance type
 			</button>
@@ -247,7 +247,7 @@
 				onclick={() => setMode('custom')}
 				class="border-l border-slate-300 px-3 py-1 text-xs {mode === 'custom'
 					? 'bg-blue-600 text-white'
-					: 'bg-white text-slate-600 hover:bg-slate-50'}"
+					: 'bg-white text-ink-soft hover:bg-slate-50'}"
 			>
 				Custom CPU/Memory
 			</button>
@@ -263,7 +263,7 @@
 
 	<div class="grid grid-cols-2 gap-3">
 		<label class="block">
-			<span class="text-slate-500">Power state</span>
+			<span class="text-ink-muted">Power state</span>
 			<select bind:value={power} class="mt-1 w-full rounded border border-slate-300 px-2 py-1">
 				<option value="On">On</option>
 				<option value="Off">Off</option>
@@ -273,7 +273,7 @@
 
 		{#if mode === 'instancetype'}
 			<label class="block">
-				<span class="text-slate-500">Instance type</span>
+				<span class="text-ink-muted">Instance type</span>
 				<select
 					bind:value={instancetype}
 					class="mt-1 w-full rounded border border-slate-300 px-2 py-1"
@@ -290,7 +290,7 @@
 				</select>
 			</label>
 			<label class="block">
-				<span class="text-slate-500">Preference</span>
+				<span class="text-ink-muted">Preference</span>
 				<select
 					bind:value={preference}
 					class="mt-1 w-full rounded border border-slate-300 px-2 py-1"
@@ -301,14 +301,14 @@
 					{/each}
 				</select>
 			</label>
-			<p class="col-span-2 text-xs text-slate-400">
+			<p class="col-span-2 text-xs text-ink-faint">
 				CPU and memory are provided by the instance type{selectedIT
 					? `: ${selectedIT.cpu} CPU / ${selectedIT.memory}`
 					: ''}.
 			</p>
 		{:else}
 			<label class="block">
-				<span class="text-slate-500">CPU cores</span>
+				<span class="text-ink-muted">CPU cores</span>
 				<input
 					type="number"
 					min="1"
@@ -317,7 +317,7 @@
 				/>
 			</label>
 			<label class="block">
-				<span class="text-slate-500">Memory</span>
+				<span class="text-ink-muted">Memory</span>
 				<input
 					bind:value={memory}
 					placeholder="2Gi"
@@ -325,7 +325,7 @@
 				/>
 			</label>
 			<label class="block">
-				<span class="text-slate-500">Preference</span>
+				<span class="text-ink-muted">Preference</span>
 				<select
 					bind:value={preference}
 					class="mt-1 w-full rounded border border-slate-300 px-2 py-1"
@@ -347,18 +347,18 @@
 	<!-- Scheduling: DRS participation + eviction behavior (vCenter's per-VM
 	     DRS automation override). -->
 	<div class="mt-4 border-t border-slate-100 pt-3">
-		<span class="text-slate-500">Scheduling</span>
+		<span class="text-ink-muted">Scheduling</span>
 		<label class="mt-1 flex items-start gap-2 text-[13px]">
 			<input type="checkbox" bind:checked={drsExclude} class="mt-0.5" />
 			<span>
 				Exclude from DRS load balancing
-				<span class="block text-xs text-slate-400">
+				<span class="block text-xs text-ink-faint">
 					Automatic rebalancing skips this VM; node drains still live-migrate it.
 				</span>
 			</span>
 		</label>
 		<label class="mt-2 block">
-			<span class="text-slate-500">Eviction strategy</span>
+			<span class="text-ink-muted">Eviction strategy</span>
 			<select
 				bind:value={evictionStrategy}
 				class="mt-1 w-full rounded border border-slate-300 px-2 py-1"
@@ -376,7 +376,7 @@
 
 {#snippet stepStorage()}
 	<div class="mb-2 flex items-center justify-between">
-		<span class="text-xs text-slate-400">{disks.filter((d) => !d.removed).length} disk(s)</span>
+		<span class="text-xs text-ink-faint">{disks.filter((d) => !d.removed).length} disk(s)</span>
 		<button
 			onclick={() => addNewDevice('disk')}
 			class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50"
@@ -385,7 +385,7 @@
 	</div>
 	{#each disks as disk, i (i)}
 		<div class="mb-1 flex items-center gap-2 {disk.removed ? 'opacity-40 line-through' : ''}">
-			<span class="w-32 truncate text-slate-700">Hard disk {i + 1}</span>
+			<span class="w-32 truncate text-ink-soft">Hard disk {i + 1}</span>
 			{#if disk.isNew}
 				<input
 					bind:value={disk.name}
@@ -396,7 +396,7 @@
 					class="w-20 rounded border border-slate-300 px-2 py-0.5 text-xs"
 				/>
 			{:else}
-				<span class="text-xs text-slate-500"
+				<span class="text-xs text-ink-muted"
 					>{disk.name} ({disk.type}{disk.size ? ` · ${disk.size}` : ''})</span
 				>
 			{/if}
@@ -408,14 +408,14 @@
 			</button>
 		</div>
 	{/each}
-	{#if disks.filter((d) => !d.removed).length === 0}<p class="text-xs text-slate-400">
+	{#if disks.filter((d) => !d.removed).length === 0}<p class="text-xs text-ink-faint">
 			No disks.
 		</p>{/if}
 {/snippet}
 
 {#snippet stepNetworks()}
 	<div class="mb-2 flex items-center justify-between">
-		<span class="text-xs text-slate-400">{nics.filter((n) => !n.removed).length} adapter(s)</span>
+		<span class="text-xs text-ink-faint">{nics.filter((n) => !n.removed).length} adapter(s)</span>
 		<button
 			onclick={() => addNewDevice('network')}
 			class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50"
@@ -424,7 +424,7 @@
 	</div>
 	{#each nics as nic, i (i)}
 		<div class="mb-1 flex items-center gap-2 {nic.removed ? 'opacity-40 line-through' : ''}">
-			<span class="w-32 truncate text-slate-700">Network adapter {i + 1}</span>
+			<span class="w-32 truncate text-ink-soft">Network adapter {i + 1}</span>
 			{#if nic.isNew}
 				<select
 					bind:value={nic.network}
@@ -437,7 +437,7 @@
 					{/each}
 				</select>
 			{:else}
-				<span class="text-xs text-slate-500">{nic.name} ({nic.network})</span>
+				<span class="text-xs text-ink-muted">{nic.name} ({nic.network})</span>
 			{/if}
 			<button
 				onclick={() => (nic.removed = !nic.removed)}
@@ -447,14 +447,14 @@
 			</button>
 		</div>
 	{/each}
-	{#if nics.filter((n) => !n.removed).length === 0}<p class="text-xs text-slate-400">
+	{#if nics.filter((n) => !n.removed).length === 0}<p class="text-xs text-ink-faint">
 			No adapters.
 		</p>{/if}
 {/snippet}
 
 {#snippet stepLabels()}
 	<div class="mb-2 flex items-center justify-between">
-		<span class="text-xs text-slate-400">Key/value metadata.</span>
+		<span class="text-xs text-ink-faint">Key/value metadata.</span>
 		<button
 			onclick={() => (labelRows = [...labelRows, { key: '', value: '' }])}
 			class="text-xs text-blue-600 hover:underline">+ Add label</button
@@ -479,23 +479,23 @@
 			>
 		</div>
 	{/each}
-	{#if labelRows.length === 0}<p class="text-xs text-slate-400">No labels.</p>{/if}
+	{#if labelRows.length === 0}<p class="text-xs text-ink-faint">No labels.</p>{/if}
 {/snippet}
 
 {#snippet review()}
-	<p class="mb-3 text-xs text-slate-500">
+	<p class="mb-3 text-xs text-ink-muted">
 		Review the staged changes, then stage them into the changeset.
 	</p>
 	{#if summary.length === 0}
-		<div class="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
+		<div class="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-ink-muted">
 			No changes yet — adjust a setting in an earlier step.
 		</div>
 	{:else}
 		<dl class="divide-y divide-slate-100 rounded border border-slate-200 text-[13px]">
 			{#each summary as c, i (i)}
 				<div class="flex justify-between gap-3 px-3 py-1.5">
-					<dt class="shrink-0 text-slate-500">{c.label}</dt>
-					<dd class="min-w-0 truncate text-right text-slate-700">{c.value}</dd>
+					<dt class="shrink-0 text-ink-muted">{c.label}</dt>
+					<dd class="min-w-0 truncate text-right text-ink-soft">{c.value}</dd>
 				</div>
 			{/each}
 		</dl>

@@ -31,10 +31,10 @@
 				<div class="min-w-0">
 					<button
 						onclick={() => onselect?.(c.namespace, c.name)}
-						class="block max-w-full truncate text-slate-700 hover:text-blue-700 hover:underline"
+						class="block max-w-full truncate text-ink-soft hover:text-blue-700 hover:underline"
 						>{c.name}</button
 					>
-					<div class="truncate text-[11px] text-slate-400">{c.namespace}</div>
+					<div class="truncate text-[11px] text-ink-faint">{c.namespace}</div>
 				</div>
 				<div class="flex items-center gap-2">
 					<span class="h-1.5 flex-1 overflow-hidden rounded bg-slate-100">
@@ -43,7 +43,7 @@
 							style="width: {(c.value / maxCpu) * 100}%"
 						></span>
 					</span>
-					<span class="w-16 shrink-0 text-right text-slate-500">{cores(c.value)} cores</span>
+					<span class="w-16 shrink-0 text-right text-ink-muted">{cores(c.value)} cores</span>
 				</div>
 				<div class="flex items-center gap-2">
 					<span class="h-1.5 flex-1 overflow-hidden rounded bg-slate-100">
@@ -52,11 +52,11 @@
 							style="width: {(memOf(c) / maxMem) * 100}%"
 						></span>
 					</span>
-					<span class="w-14 shrink-0 text-right text-slate-500">{bytes(memOf(c))}</span>
+					<span class="w-14 shrink-0 text-right text-ink-muted">{bytes(memOf(c))}</span>
 				</div>
 			</li>
 		{:else}
-			<li class="px-3 py-2 text-xs text-slate-400">No usage data.</li>
+			<li class="px-3 py-2 text-xs text-ink-faint">No usage data.</li>
 		{/each}
 	</ul>
 </InfoCard>

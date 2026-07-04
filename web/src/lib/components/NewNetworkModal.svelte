@@ -89,26 +89,26 @@
 				onclick={() => (kind = 'overlay')}
 				class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'overlay'
 					? 'border-blue-500 bg-blue-50 text-blue-700'
-					: 'border-slate-300 text-slate-600'}"
+					: 'border-slate-300 text-ink-soft'}"
 			>
 				<div class="font-medium">Overlay Segment</div>
-				<div class="text-slate-400">Internal · Geneve (Layer 2)</div>
+				<div class="text-ink-faint">Internal · Geneve (Layer 2)</div>
 			</button>
 			{#if canManage}
 				<button
 					onclick={() => (kind = 'vlan')}
 					class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'vlan'
 						? 'border-blue-500 bg-blue-50 text-blue-700'
-						: 'border-slate-300 text-slate-600'}"
+						: 'border-slate-300 text-ink-soft'}"
 				>
 					<div class="font-medium">VLAN Segment</div>
-					<div class="text-slate-400">Bridged to a Tier-0 uplink</div>
+					<div class="text-ink-faint">Bridged to a Tier-0 uplink</div>
 				</button>
 			{/if}
 		</div>
 
 		<label class="block">
-			<span class="text-slate-600">Name</span>
+			<span class="text-ink-soft">Name</span>
 			<input
 				bind:value={name}
 				placeholder="db-net"
@@ -125,25 +125,25 @@
 						onclick={() => (shared = false)}
 						class="flex-1 rounded border px-3 py-2 text-left text-xs {!shared
 							? 'border-blue-500 bg-blue-50 text-blue-700'
-							: 'border-slate-300 text-slate-600'}"
+							: 'border-slate-300 text-ink-soft'}"
 					>
 						<div class="font-medium">This project</div>
-						<div class="text-slate-400">UDN · one namespace (Tier-1)</div>
+						<div class="text-ink-faint">UDN · one namespace (Tier-1)</div>
 					</button>
 					<button
 						onclick={() => (shared = true)}
 						class="flex-1 rounded border px-3 py-2 text-left text-xs {shared
 							? 'border-blue-500 bg-blue-50 text-blue-700'
-							: 'border-slate-300 text-slate-600'}"
+							: 'border-slate-300 text-ink-soft'}"
 					>
 						<div class="font-medium">Shared</div>
-						<div class="text-slate-400">CUDN · selected projects</div>
+						<div class="text-ink-faint">CUDN · selected projects</div>
 					</button>
 				</div>
 			{/if}
 			{#if !shared}
 				<label class="block">
-					<span class="text-slate-600">Project (namespace)</span>
+					<span class="text-ink-soft">Project (namespace)</span>
 					<select
 						bind:value={namespace}
 						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
@@ -155,7 +155,7 @@
 		{:else}
 			<div class="grid grid-cols-2 gap-3">
 				<label class="block">
-					<span class="text-slate-600">VLAN ID</span>
+					<span class="text-ink-soft">VLAN ID</span>
 					<input
 						type="number"
 						bind:value={vlan}
@@ -166,7 +166,7 @@
 					/>
 				</label>
 				<label class="block">
-					<span class="flex items-center justify-between text-slate-600"
+					<span class="flex items-center justify-between text-ink-soft"
 						>Uplink ({TERMS.uplink.nsx}){#if onAddUplink}<button
 								type="button"
 								onclick={onAddUplink}
@@ -188,7 +188,7 @@
 
 		{#if isShared}
 			<div>
-				<span class="text-slate-600">Published to projects</span>
+				<span class="text-ink-soft">Published to projects</span>
 				<div class="mt-1 max-h-28 space-y-1 overflow-y-auto rounded border border-slate-300 p-2">
 					{#each namespaces as ns (ns)}
 						<label class="flex items-center gap-2 text-xs">
@@ -197,7 +197,7 @@
 								checked={selectedNs.includes(ns)}
 								onchange={(e) => toggleNs(ns, e.currentTarget.checked)}
 							/>
-							<span class="text-slate-700">{ns}</span>
+							<span class="text-ink-soft">{ns}</span>
 						</label>
 					{/each}
 				</div>
@@ -205,8 +205,8 @@
 		{/if}
 
 		<label class="block">
-			<span class="text-slate-600"
-				>Subnet <span class="text-slate-400">(optional CIDR; blank = no IPAM)</span></span
+			<span class="text-ink-soft"
+				>Subnet <span class="text-ink-faint">(optional CIDR; blank = no IPAM)</span></span
 			>
 			<input
 				bind:value={subnet}
@@ -215,7 +215,7 @@
 			/>
 		</label>
 
-		<p class="rounded bg-slate-50 px-3 py-2 text-xs text-slate-500">
+		<p class="rounded bg-slate-50 px-3 py-2 text-xs text-ink-muted">
 			{#if kind === 'overlay'}
 				An isolated overlay segment (Layer 2){shared
 					? ', shared across the selected projects — a cluster-scoped CUDN, proposed to the platform repository'
@@ -226,7 +226,7 @@
 				must already carry that physical network.
 			{/if}
 		</p>
-		<p class="px-1 text-[11px] text-slate-400">
+		<p class="px-1 text-[11px] text-ink-faint">
 			Looking for a project's default network? That is the primary {dual(TERMS.tier1)} segment — create
 			it with a New Namespace or New Project.
 		</p>

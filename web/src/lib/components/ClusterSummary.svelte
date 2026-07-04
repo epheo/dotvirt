@@ -108,7 +108,7 @@
 			</div>
 
 			<div>
-				<div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">
+				<div class="text-xs font-semibold tracking-wide text-ink-muted uppercase">
 					Virtual machines
 				</div>
 				<div class="mt-2 flex gap-4">
@@ -116,8 +116,8 @@
 						.filter(([, n]) => n > 0)
 						.sort(([a], [b]) => PHASE_ORDER.indexOf(a) - PHASE_ORDER.indexOf(b)) as [phase, n] (phase)}
 						<div class="text-center">
-							<div class="text-xl font-semibold {phaseColor[phase] ?? 'text-slate-700'}">{n}</div>
-							<div class="text-[11px] text-slate-500">{cap(phase)}</div>
+							<div class="text-xl font-semibold {phaseColor[phase] ?? 'text-ink-soft'}">{n}</div>
+							<div class="text-[11px] text-ink-muted">{cap(phase)}</div>
 						</div>
 					{/each}
 				</div>
@@ -125,13 +125,13 @@
 
 			{#if overcommit.length}
 				<div>
-					<div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Overcommit</div>
+					<div class="text-xs font-semibold tracking-wide text-ink-muted uppercase">Overcommit</div>
 					<div class="mt-2 flex gap-2">
 						{#each overcommit as o (o.label)}
 							<span
 								class="rounded px-2 py-1 text-sm font-medium {o.r > 1
 									? 'bg-amber-100 text-amber-800'
-									: 'bg-slate-100 text-slate-600'}"
+									: 'bg-slate-100 text-ink-soft'}"
 								title="{o.label} committed to VMs vs node-allocatable"
 							>
 								{o.label}
@@ -163,11 +163,11 @@
 		<TopConsumers topCpu={data.topCpu} topMemory={data.topMemory} {onselect} />
 	</div>
 {:else if loading}
-	<div class="border-b border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-400">
+	<div class="border-b border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-ink-faint">
 		Loading cluster metrics…
 	</div>
 {:else if failed}
-	<div class="border-b border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-400">
+	<div class="border-b border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-ink-faint">
 		Cluster metrics unavailable.
 	</div>
 {/if}

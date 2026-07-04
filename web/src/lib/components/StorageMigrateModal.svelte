@@ -71,8 +71,8 @@
 </script>
 
 <Modal title="Migrate storage — {vm.name}" size="lg" {onclose}>
-	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-slate-700">
-		<p class="mb-3 text-xs text-slate-500">
+	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-ink-soft">
+		<p class="mb-3 text-xs text-ink-muted">
 			Stages a live storage migration into <strong>Changes</strong>. When the pull request merges,
 			KubeVirt copies each disk to a new volume on the target class while the VM keeps running — the
 			VM must still be running then, and the cluster must support volume migration. Reverting the
@@ -80,7 +80,7 @@
 		</p>
 
 		<table class="w-full text-[13px]">
-			<thead class="text-left text-xs tracking-wide text-slate-400 uppercase">
+			<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
 				<tr class="border-b border-slate-200">
 					<th class="py-1.5 pr-3 font-medium">Disk</th>
 					<th class="py-1.5 pr-3 font-medium">Size</th>
@@ -91,9 +91,9 @@
 			<tbody class="divide-y divide-slate-100">
 				{#each disks as d (d.name)}
 					<tr>
-						<td class="py-1.5 pr-3 font-medium text-slate-800">{d.name}</td>
-						<td class="py-1.5 pr-3 whitespace-nowrap text-slate-500">{d.size || '—'}</td>
-						<td class="py-1.5 pr-3 whitespace-nowrap text-slate-500">
+						<td class="py-1.5 pr-3 font-medium text-ink">{d.name}</td>
+						<td class="py-1.5 pr-3 whitespace-nowrap text-ink-muted">{d.size || '—'}</td>
+						<td class="py-1.5 pr-3 whitespace-nowrap text-ink-muted">
 							{d.storageClass || 'cluster default'}
 						</td>
 						<td class="py-1.5">
@@ -122,7 +122,7 @@
 	{#snippet footer()}
 		<button
 			onclick={onclose}
-			class="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+			class="rounded border border-slate-300 px-3 py-1 text-sm text-ink-soft hover:bg-slate-50"
 		>
 			Cancel
 		</button>

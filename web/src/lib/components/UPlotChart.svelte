@@ -107,7 +107,7 @@
 </script>
 
 <div class="rounded border border-slate-200 bg-white p-2">
-	<div class="mb-1 px-1 text-xs font-semibold text-slate-600">{chart.title}</div>
+	<div class="mb-1 px-1 text-xs font-semibold text-ink-soft">{chart.title}</div>
 	<div bind:this={el} class="uplot-host"></div>
 </div>
 

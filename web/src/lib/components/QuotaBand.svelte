@@ -48,19 +48,19 @@
 	<div class="flex flex-wrap gap-x-10 gap-y-3">
 		{#each quotas as q (q.namespace + '/' + q.name)}
 			<div class="min-w-[16rem]">
-				<div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">
+				<div class="text-xs font-semibold tracking-wide text-ink-muted uppercase">
 					Quota — {q.namespace}
-					<span class="font-normal normal-case text-slate-400">({q.name})</span>
+					<span class="font-normal normal-case text-ink-faint">({q.name})</span>
 				</div>
 				<div class="mt-1.5 space-y-1.5">
 					{#each q.items as it (it.resource)}
 						{@const p = pct(it.used, it.hard)}
 						<div>
 							<div class="flex items-baseline justify-between gap-3 text-xs">
-								<span class="font-mono text-[11px] text-slate-500">{it.resource}</span>
-								<span class="text-slate-700"
+								<span class="font-mono text-[11px] text-ink-muted">{it.resource}</span>
+								<span class="text-ink-soft"
 									>{fmt(it.unit, it.used)}
-									<span class="text-slate-400">of {fmt(it.unit, it.hard)}</span></span
+									<span class="text-ink-faint">of {fmt(it.unit, it.hard)}</span></span
 								>
 							</div>
 							<div class="mt-0.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
@@ -76,5 +76,5 @@
 		{/each}
 	</div>
 {:else if showEmpty && quotas}
-	<p class="text-xs text-slate-400">No ResourceQuotas in scope — capacity is unbounded.</p>
+	<p class="text-xs text-ink-faint">No ResourceQuotas in scope — capacity is unbounded.</p>
 {/if}

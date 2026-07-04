@@ -88,7 +88,7 @@
 	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
 		<div class="grid grid-cols-2 gap-3">
 			<label class="block">
-				<span class="text-slate-600">Name</span>
+				<span class="text-ink-soft">Name</span>
 				<input
 					bind:value={name}
 					placeholder="web-allow-db"
@@ -96,7 +96,7 @@
 				/>
 			</label>
 			<label class="block">
-				<span class="text-slate-600">Project (namespace)</span>
+				<span class="text-ink-soft">Project (namespace)</span>
 				<select
 					bind:value={namespace}
 					class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
@@ -107,9 +107,9 @@
 		</div>
 
 		<div class="rounded border border-slate-200 p-3">
-			<span class="text-slate-600"
+			<span class="text-ink-soft"
 				>Applies to {TERMS.group.nsx}
-				<span class="text-slate-400">(label; blank = whole project)</span></span
+				<span class="text-ink-faint">(label; blank = whole project)</span></span
 			>
 			<div class="mt-1 flex items-center gap-2">
 				<input
@@ -117,17 +117,17 @@
 					placeholder="app"
 					class="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
 				/>
-				<span class="text-slate-400">=</span>
+				<span class="text-ink-faint">=</span>
 				<input
 					bind:value={appliedValue}
 					placeholder="db"
 					class="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
 				/>
 			</div>
-			<div class="mt-1.5 text-[11px] text-slate-500">
-				Effective members: <span class="font-medium text-slate-700">{members.length}</span>
+			<div class="mt-1.5 text-[11px] text-ink-muted">
+				Effective members: <span class="font-medium text-ink-soft">{members.length}</span>
 				VM{members.length === 1 ? '' : 's'}
-				{#if members.length}<span class="text-slate-400"
+				{#if members.length}<span class="text-ink-faint"
 						>— {members
 							.slice(0, 6)
 							.map((v) => v.name)
@@ -138,7 +138,7 @@
 
 		<div class="space-y-2">
 			<div class="flex items-center justify-between">
-				<span class="text-slate-600">Allow ingress from</span>
+				<span class="text-ink-soft">Allow ingress from</span>
 				<button
 					onclick={addRow}
 					class="flex items-center gap-1 text-xs text-blue-600 hover:underline"
@@ -147,19 +147,19 @@
 			</div>
 			{#each rows as row, i (i)}
 				<div class="flex flex-wrap items-center gap-2 rounded border border-slate-200 p-2">
-					<span class="text-xs text-slate-400">{TERMS.group.nsx}</span>
+					<span class="text-xs text-ink-faint">{TERMS.group.nsx}</span>
 					<input
 						bind:value={row.key}
 						placeholder="app"
 						class="w-20 rounded border border-slate-300 px-2 py-1 text-xs"
 					/>
-					<span class="text-slate-400">=</span>
+					<span class="text-ink-faint">=</span>
 					<input
 						bind:value={row.value}
 						placeholder="web"
 						class="w-24 rounded border border-slate-300 px-2 py-1 text-xs"
 					/>
-					<span class="text-xs text-slate-400">port</span>
+					<span class="text-xs text-ink-faint">port</span>
 					<select
 						bind:value={row.proto}
 						class="rounded border border-slate-300 px-1.5 py-1 text-xs"
@@ -180,14 +180,14 @@
 						onclick={() => removeRow(i)}
 						disabled={rows.length === 1}
 						aria-label="Remove source"
-						class="ml-auto text-slate-300 hover:text-red-600 disabled:opacity-40"
+						class="ml-auto text-ink-faint hover:text-red-600 disabled:opacity-40"
 						><Trash2 size={14} /></button
 					>
 				</div>
 			{/each}
 		</div>
 
-		<p class="rounded bg-slate-50 px-3 py-2 text-xs text-slate-500">
+		<p class="rounded bg-slate-50 px-3 py-2 text-xs text-ink-muted">
 			The {TERMS.dfw.nsx.toLowerCase()} controls east-west, VM-to-VM traffic. Selecting a {TERMS
 				.group.nsx} default-denies all other ingress to it, so only the sources above may reach it. Staged
 			into the project's repo and applied by its Argo app.
@@ -197,10 +197,10 @@
 		{/if}
 	</div>
 	{#snippet footer()}
-		<span class="text-xs text-slate-400">Staged into the changeset; open a PR from “Changes”.</span>
+		<span class="text-xs text-ink-faint">Staged into the changeset; open a PR from “Changes”.</span>
 		<button
 			onclick={onclose}
-			class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button
+			class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-slate-100">Cancel</button
 		>
 		<button
 			onclick={submit}

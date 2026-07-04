@@ -61,7 +61,7 @@
 		if (step.valid === false)
 			return { cls: 'bg-amber-100 text-amber-700 ring-1 ring-amber-300', text: String(i + 1) };
 		if (step.valid === true) return { cls: 'bg-green-500 text-white', text: '', done: true };
-		return { cls: 'bg-slate-200 text-slate-500', text: String(i + 1) };
+		return { cls: 'bg-slate-200 text-ink-muted', text: String(i + 1) };
 	}
 </script>
 
@@ -79,7 +79,7 @@
 					class="flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-sm {i ===
 					current
 						? 'bg-blue-50 font-medium text-blue-700'
-						: 'text-slate-600 hover:bg-slate-100'}"
+						: 'text-ink-soft hover:bg-slate-100'}"
 				>
 					<span
 						class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] {b.cls}"
@@ -101,15 +101,15 @@
 			class="mx-5 mb-1 rounded bg-red-50 p-2 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
 	{/if}
 	{#snippet footer()}
-		{#if footerHint}<span class="text-xs text-slate-400">{footerHint}</span>{/if}
+		{#if footerHint}<span class="text-xs text-ink-faint">{footerHint}</span>{/if}
 		<button
 			onclick={onclose}
-			class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button
+			class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-slate-100">Cancel</button
 		>
 		<button
 			onclick={back}
 			disabled={current === 0}
-			class="rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100 disabled:text-slate-300"
+			class="rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-slate-100 disabled:text-ink-faint"
 			>Back</button
 		>
 		{#if last}

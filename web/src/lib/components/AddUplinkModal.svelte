@@ -61,7 +61,7 @@
 <Modal title="Add Uplink" {onclose}>
 	<div class="space-y-4 px-5 py-4 text-sm">
 		<label class="block">
-			<span class="text-slate-600">Name (physical network)</span>
+			<span class="text-ink-soft">Name (physical network)</span>
 			<input
 				bind:value={name}
 				placeholder="physnet-prod"
@@ -69,7 +69,7 @@
 			/>
 		</label>
 		<label class="block">
-			<span class="text-slate-600">Nodes</span>
+			<span class="text-ink-soft">Nodes</span>
 			<select bind:value={node} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
 				<option value="">All worker nodes</option>
 				{#each nodes as n (n)}<option value={n}>{n}</option>{/each}
@@ -77,7 +77,7 @@
 		</label>
 		<div class="grid grid-cols-2 gap-3">
 			<label class="block">
-				<span class="text-slate-600">Physical adapter (NIC)</span>
+				<span class="text-ink-soft">Physical adapter (NIC)</span>
 				{#if nics.length}
 					<select bind:value={nic} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
 						{#each nics as n (n)}<option value={n}>{n}</option>{/each}
@@ -91,7 +91,7 @@
 				{/if}
 			</label>
 			<label class="block">
-				<span class="text-slate-600">OVS bridge <span class="text-slate-400">(optional)</span></span
+				<span class="text-ink-soft">OVS bridge <span class="text-ink-faint">(optional)</span></span
 				>
 				<input
 					bind:value={bridge}

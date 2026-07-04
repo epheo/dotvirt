@@ -29,13 +29,13 @@
 		Couldn't read permissions: {error}
 	</div>
 {:else if !data}
-	<div class="py-8 text-center text-sm text-slate-400">Checking your access…</div>
+	<div class="py-8 text-center text-sm text-ink-faint">Checking your access…</div>
 {:else}
 	<div class="space-y-4">
 		{#each data as p (p.namespace)}
 			<section class="max-w-2xl rounded border border-slate-200">
 				<h3
-					class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase"
+					class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
 				>
 					Your access in {p.namespace}
 				</h3>
@@ -45,9 +45,9 @@
 							{#if c.allowed}
 								<Check size={14} class="shrink-0 text-green-600" />
 							{:else}
-								<X size={14} class="shrink-0 text-slate-300" />
+								<X size={14} class="shrink-0 text-ink-faint" />
 							{/if}
-							<span class={c.allowed ? 'text-slate-800' : 'text-slate-400'}>{c.label}</span>
+							<span class={c.allowed ? 'text-ink' : 'text-ink-faint'}>{c.label}</span>
 						</li>
 					{/each}
 				</ul>
@@ -58,7 +58,7 @@
 				{/if}
 			</section>
 		{/each}
-		<p class="max-w-2xl text-xs text-slate-400">
+		<p class="max-w-2xl text-xs text-ink-faint">
 			These reflect your Kubernetes RBAC, evaluated with your own token. Configuration, power, and
 			delete aren't listed: they go through a pull request, where the project's repository decides
 			who merges. Access itself is granted by the platform, not dotvirt.

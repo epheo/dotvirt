@@ -36,7 +36,7 @@
 						onclick={() => (ui.modal = { kind: 'uplink' })}
 						disabled={!inventory.canManage}
 						title={inventory.canManage ? '' : 'Requires platform-network authoring permission'}
-						class="text-xs text-accent hover:underline disabled:text-slate-300">+ Add uplink</button
+						class="text-xs text-accent hover:underline disabled:text-ink-faint">+ Add uplink</button
 					>
 				{/snippet}
 				<ul class="divide-y divide-slate-100 px-3 text-[13px]">

@@ -41,7 +41,7 @@
 					<Row label="Namespaces">
 						{#each p.namespaces as n (n.namespace)}
 							<span
-								class="ml-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600"
+								class="ml-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-ink-soft"
 								>{n.namespace} · {n.vms.length} VMs</span
 							>
 						{/each}

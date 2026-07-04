@@ -329,8 +329,8 @@
 		<div class="border-b border-slate-200 px-4 pt-4">
 			<div class="mb-3 flex items-center gap-2">
 				<PowerDot power={vm.power} paused={vm.paused} />
-				<h2 class="text-lg font-semibold text-slate-800">{vm.name}</h2>
-				<span class="rounded bg-slate-200 px-1.5 py-0.5 text-xs text-slate-600">{vm.namespace}</span
+				<h2 class="text-lg font-semibold text-ink">{vm.name}</h2>
+				<span class="rounded bg-slate-200 px-1.5 py-0.5 text-xs text-ink-soft">{vm.namespace}</span
 				>
 				<SyncBadge sync={vm.sync} error={vm.syncError} />
 				{#if stagedItem}
@@ -342,7 +342,7 @@
 							onclick={() => (actionsOpen = !actionsOpen)}
 							disabled={runtimeBusy}
 							title="All VM actions — runtime ops act immediately; config changes go through a PR"
-							class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+							class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-slate-50 disabled:opacity-50"
 						>
 							Actions <ChevronDown size={13} />
 						</button>
@@ -361,7 +361,7 @@
 						onclick={() => openEdit()}
 						disabled={!vm.sourceFile}
 						title={vm.sourceFile ? 'Edit settings' : 'Not in git — adopt this VM first'}
-						class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-transparent"
+						class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-transparent"
 					>
 						<Pencil size={13} /> Edit Settings
 					</button>
@@ -413,46 +413,46 @@
 				<!-- At-a-glance tiles: the vCenter-style capacity summary. -->
 				<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
 					<div class="rounded border border-slate-200 bg-slate-50 p-3">
-						<div class="flex items-center gap-1.5 text-xs text-slate-500">
+						<div class="flex items-center gap-1.5 text-xs text-ink-muted">
 							<Cpu size={13} /> CPU
 						</div>
-						<div class="mt-1 text-lg font-semibold text-slate-800">
-							{#if stagedChanges.has('CPU')}<span class="text-slate-400 line-through"
+						<div class="mt-1 text-lg font-semibold text-ink">
+							{#if stagedChanges.has('CPU')}<span class="text-ink-faint line-through"
 									>{vm.cpuCores ?? '—'} vCPU</span
 								>
 								<span class="text-blue-600">{stagedChanges.get('CPU')?.to}</span
-								>{:else}{vm.cpuCores ?? '—'}<span class="ml-1 text-sm font-normal text-slate-500"
+								>{:else}{vm.cpuCores ?? '—'}<span class="ml-1 text-sm font-normal text-ink-muted"
 									>vCPU</span
 								>{/if}
 						</div>
 					</div>
 					<div class="rounded border border-slate-200 bg-slate-50 p-3">
-						<div class="flex items-center gap-1.5 text-xs text-slate-500">
+						<div class="flex items-center gap-1.5 text-xs text-ink-muted">
 							<MemoryStick size={13} /> Memory
 						</div>
-						<div class="mt-1 text-lg font-semibold text-slate-800">
-							{#if stagedChanges.has('Memory')}<span class="text-slate-400 line-through"
+						<div class="mt-1 text-lg font-semibold text-ink">
+							{#if stagedChanges.has('Memory')}<span class="text-ink-faint line-through"
 									>{vm.memory ?? '—'}</span
 								>
 								<span class="text-blue-600">{stagedChanges.get('Memory')?.to}</span
 								>{:else}{vm.memory ?? '—'}{/if}
 						</div>
 						{#if vm.memoryActual && vm.memoryActual !== vm.memory}
-							<div class="text-xs text-slate-400">{vm.memoryActual} live</div>
+							<div class="text-xs text-ink-faint">{vm.memoryActual} live</div>
 						{/if}
 					</div>
 					<div class="rounded border border-slate-200 bg-slate-50 p-3">
-						<div class="flex items-center gap-1.5 text-xs text-slate-500">
+						<div class="flex items-center gap-1.5 text-xs text-ink-muted">
 							<HardDrive size={13} /> Disks
 						</div>
-						<div class="mt-1 text-lg font-semibold text-slate-800">{vm.disks?.length ?? 0}</div>
+						<div class="mt-1 text-lg font-semibold text-ink">{vm.disks?.length ?? 0}</div>
 					</div>
 					<div class="rounded border border-slate-200 bg-slate-50 p-3">
-						<div class="flex items-center gap-1.5 text-xs text-slate-500">
+						<div class="flex items-center gap-1.5 text-xs text-ink-muted">
 							<Activity size={13} /> Status
 						</div>
-						<div class="mt-1 text-lg font-semibold text-slate-800">{statusText}</div>
-						{#if duration(vm.startedAt)}<div class="text-xs text-slate-400">
+						<div class="mt-1 text-lg font-semibold text-ink">{statusText}</div>
+						{#if duration(vm.startedAt)}<div class="text-xs text-ink-faint">
 								up {duration(vm.startedAt)}
 							</div>{/if}
 					</div>
@@ -475,16 +475,16 @@
 						<dl class="divide-y divide-slate-100 text-[13px]">
 							<Row label="Operating system" value={vm.os ?? ''} />
 							<Row label="Power (desired)">
-								{#if stagedChanges.has('Power')}<span class="text-slate-400 line-through"
+								{#if stagedChanges.has('Power')}<span class="text-ink-faint line-through"
 										>{vm.power}</span
 									>
 									<span class="text-blue-600">→ {stagedChanges.get('Power')?.to}</span>{:else}<span
-										class="text-slate-800">{vm.power}</span
+										class="text-ink">{vm.power}</span
 									>{/if}
 							</Row>
 							<Row label="Status (actual)" value={vm.paused ? 'Paused' : (vm.phase ?? '')} />
 							<Row label="IP addresses">
-								<div class="font-mono text-xs text-slate-800">
+								<div class="font-mono text-xs text-ink">
 									{#if vm.ips?.length}
 										{#each vm.ips as ip (ip)}<div>{ip}</div>{/each}
 									{:else}{vm.guestIP || '—'}{/if}
@@ -578,7 +578,7 @@
 						<button
 							class="border-b-2 px-3 py-1 capitalize {monitorView === v
 								? 'border-blue-600 text-blue-700'
-								: 'border-transparent text-slate-500 hover:text-slate-700'}"
+								: 'border-transparent text-ink-muted hover:text-ink-soft'}"
 							onclick={() => (monitorView = v)}
 						>
 							{v}
@@ -590,12 +590,12 @@
 						<MetricsPanel load={(r) => api.metrics(vm.namespace, vm.name, r)} />
 					{/key}
 				{:else if eventsLoading && !events}
-					<div class="py-8 text-center text-sm text-slate-400">Loading events…</div>
+					<div class="py-8 text-center text-sm text-ink-faint">Loading events…</div>
 				{:else if !events || events.length === 0}
-					<div class="py-8 text-center text-sm text-slate-400">No recent events.</div>
+					<div class="py-8 text-center text-sm text-ink-faint">No recent events.</div>
 				{:else}
 					<table class="w-full text-[13px]">
-						<thead class="text-left text-xs tracking-wide text-slate-400 uppercase">
+						<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
 							<tr class="border-b border-slate-200">
 								<th class="py-1.5 pr-3 font-medium">Type</th>
 								<th class="py-1.5 pr-3 font-medium">Reason</th>
@@ -617,13 +617,13 @@
 											{e.type}
 										</span>
 									</td>
-									<td class="py-1.5 pr-3 font-medium text-slate-700">{e.reason}</td>
-									<td class="py-1.5 pr-3 text-slate-600">{e.message}</td>
-									<td class="py-1.5 pr-3 whitespace-nowrap text-slate-500">
+									<td class="py-1.5 pr-3 font-medium text-ink-soft">{e.reason}</td>
+									<td class="py-1.5 pr-3 text-ink-soft">{e.message}</td>
+									<td class="py-1.5 pr-3 whitespace-nowrap text-ink-muted">
 										{e.object === 'VirtualMachineInstance' ? 'VMI' : 'VM'}
 									</td>
-									<td class="py-1.5 whitespace-nowrap text-slate-500">
-										{duration(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-slate-400">
+									<td class="py-1.5 whitespace-nowrap text-ink-muted">
+										{duration(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-ink-faint">
 												×{e.count}</span
 											>{/if}
 									</td>
@@ -706,7 +706,7 @@
 		</ConfirmDelete>
 	{/if}
 {:else}
-	<div class="flex h-full items-center justify-center text-sm text-slate-400">
+	<div class="flex h-full items-center justify-center text-sm text-ink-faint">
 		Select a VM from the inventory
 	</div>
 {/if}

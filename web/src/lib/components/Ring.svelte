@@ -59,16 +59,16 @@
 			stroke-dasharray="{usedFrac * C} {C}"
 			transform="rotate(-90 48 48)"
 		/>
-		<text x="48" y="46" text-anchor="middle" class="fill-slate-800 text-[13px] font-semibold"
+		<text x="48" y="46" text-anchor="middle" class="fill-ink text-[13px] font-semibold"
 			>{fmtUsage(unit, used)}</text
 		>
-		<text x="48" y="60" text-anchor="middle" class="fill-slate-400 text-[9px]"
+		<text x="48" y="60" text-anchor="middle" class="fill-ink-faint text-[9px]"
 			>of {fmtUsage(unit, total)}</text
 		>
 	</svg>
-	<div class="mt-0.5 text-xs font-medium text-slate-600">{label}</div>
+	<div class="mt-0.5 text-xs font-medium text-ink-soft">{label}</div>
 	{#if allocated > 0}
-		<div class="text-[10px] text-slate-400">{fmtUsage(unit, allocated)} allocated</div>
+		<div class="text-[10px] text-ink-faint">{fmtUsage(unit, allocated)} allocated</div>
 	{/if}
 	{#if spark.length > 1}<div class="mt-0.5">
 			<Sparkline values={spark} color={ringColor} width={84} height={16} />

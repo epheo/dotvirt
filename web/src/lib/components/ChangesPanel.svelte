@@ -157,7 +157,7 @@
 		{#each banners as p (p.project + '#' + p.prNumber)}
 			<div class="mb-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
 				<div class="flex items-center gap-2">
-					<span class="font-medium text-slate-700">{p.project}</span>
+					<span class="font-medium text-ink-soft">{p.project}</span>
 					<span class="rounded bg-emerald-100 px-1.5 text-xs font-medium text-emerald-700">
 						PR #{p.prNumber} open
 					</span>
@@ -179,26 +179,26 @@
 		{#each Object.entries(result).filter(([, r]) => !r.prURL || !r.prNumber) as [project, r] (project)}
 			<div class="mb-2 rounded border border-green-200 bg-green-50 p-3 text-sm">
 				<div class="mb-1 flex items-center gap-1">
-					<span class="font-medium text-slate-700">{project}</span>
+					<span class="font-medium text-ink-soft">{project}</span>
 					<button
 						onclick={() => delete result[project]}
-						class="ml-auto text-xs text-slate-400 hover:text-slate-600">dismiss</button
+						class="ml-auto text-xs text-ink-faint hover:text-ink-soft">dismiss</button
 					>
 				</div>
-				<p class="text-slate-700">{@render prNote(r, 'Pull request opened')}</p>
+				<p class="text-ink-soft">{@render prNote(r, 'Pull request opened')}</p>
 			</div>
 		{/each}
 
 		{#if loaded && total === 0 && banners.length > 0}
-			<p class="py-4 text-center text-sm text-slate-400">
+			<p class="py-4 text-center text-sm text-ink-faint">
 				Nothing staged — the open pull requests above carry everything proposed.
 			</p>
 		{:else if loaded && total === 0}
 			<!-- The one place the write model is explained: like vCenter's Recent
 			     Tasks, except every config change is a reviewable PR before it applies. -->
 			<div class="py-8 text-center">
-				<p class="mb-4 text-sm text-slate-400">No pending changes.</p>
-				<ol class="mx-auto max-w-[20rem] space-y-2 text-left text-xs text-slate-600">
+				<p class="mb-4 text-sm text-ink-faint">No pending changes.</p>
+				<ol class="mx-auto max-w-[20rem] space-y-2 text-left text-xs text-ink-soft">
 					<li class="flex items-start gap-2">
 						<span
 							class="mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-select text-[10px] font-semibold text-accent-ink"
@@ -221,7 +221,7 @@
 						Merge it — ArgoCD applies the change to the cluster.
 					</li>
 				</ol>
-				<p class="mx-auto mt-4 max-w-[20rem] text-xs text-slate-400">
+				<p class="mx-auto mt-4 max-w-[20rem] text-xs text-ink-faint">
 					Every configuration change is a reviewable pull request before it touches the cluster.
 				</p>
 			</div>
@@ -242,10 +242,10 @@
 			<section class="mt-4 border-t border-slate-200 pt-3">
 				<button
 					onclick={() => (showHistory = !showHistory)}
-					class="flex w-full items-center gap-1.5 text-sm font-semibold text-slate-700"
+					class="flex w-full items-center gap-1.5 text-sm font-semibold text-ink-soft"
 				>
 					{#if showHistory}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}
-					<History size={14} class="text-slate-400" /> History
+					<History size={14} class="text-ink-faint" /> History
 				</button>
 
 				{#if showHistory}
@@ -254,7 +254,7 @@
 							<div>
 								<button
 									onclick={() => toggleHistory(project)}
-									class="flex w-full items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-800"
+									class="flex w-full items-center gap-2 text-xs font-medium text-ink-soft hover:text-ink"
 								>
 									{#if historyOpen[project]}<ChevronDown size={12} />{:else}<ChevronRight
 											size={12}
@@ -265,28 +265,28 @@
 
 								{#if historyOpen[project]}
 									{#if historyBusy[project]}
-										<p class="px-5 py-1.5 text-xs text-slate-400">Loading…</p>
+										<p class="px-5 py-1.5 text-xs text-ink-faint">Loading…</p>
 									{:else if historyError[project]}
 										<p class="px-5 py-1.5 text-xs whitespace-pre-wrap text-red-600">
 											{historyError[project]}
 										</p>
 									{:else if (history[project] ?? []).length === 0}
-										<p class="px-5 py-1.5 text-xs text-slate-400">No commits.</p>
+										<p class="px-5 py-1.5 text-xs text-ink-faint">No commits.</p>
 									{:else}
 										<ul class="mt-1 ml-1.5 border-l border-slate-200">
 											{#each history[project] as c (c.hash)}
 												<li class="group py-1 pl-3">
 													<div class="flex items-start gap-2">
 														<div class="min-w-0 flex-1">
-															<p class="truncate text-xs text-slate-700" title={c.message}>
+															<p class="truncate text-xs text-ink-soft" title={c.message}>
 																{c.message}
 															</p>
-															<p class="text-[10px] text-slate-400">
-																<code class="text-slate-500">{c.shortHash}</code>
+															<p class="text-[10px] text-ink-faint">
+																<code class="text-ink-muted">{c.shortHash}</code>
 																· {c.author} ·
 																<span title={c.when}>{fmtWhen(c.when)}</span>{#if c.merge}
 																	·
-																	<span class="text-slate-400">merge</span>{/if}
+																	<span class="text-ink-faint">merge</span>{/if}
 															</p>
 														</div>
 														{#if !c.merge && !revertResult[c.hash]}

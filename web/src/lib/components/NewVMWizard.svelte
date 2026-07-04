@@ -177,11 +177,11 @@
      the templates type-clean without re-narrowing inside each snippet. -->
 {#snippet step1()}
 	<div class="space-y-4">
-		<p class="text-xs text-slate-500">
+		<p class="text-xs text-ink-muted">
 			Name the virtual machine and choose the project it belongs to.
 		</p>
 		<label class="block">
-			<span class="text-slate-600">Name</span>
+			<span class="text-ink-soft">Name</span>
 			<input
 				bind:value={name}
 				placeholder="my-vm"
@@ -189,7 +189,7 @@
 			/>
 		</label>
 		<label class="block">
-			<span class="text-slate-600">Project (namespace)</span>
+			<span class="text-ink-soft">Project (namespace)</span>
 			<select
 				bind:value={namespace}
 				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
@@ -202,11 +202,11 @@
 
 {#snippet step2()}
 	<div class="space-y-4">
-		<p class="text-xs text-slate-500">
+		<p class="text-xs text-ink-muted">
 			Select the OS image to boot from and a preference that tunes the VM for that guest.
 		</p>
 		<label class="block">
-			<span class="text-slate-600">OS image</span>
+			<span class="text-ink-soft">OS image</span>
 			<select bind:value={osImage} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
 				{#each (options?.osImages ?? []).filter((i) => i.ready) as img (img.namespace + img.name)}
 					<option value={`${img.name}|${img.namespace}`}>{img.name}</option>
@@ -214,7 +214,7 @@
 			</select>
 		</label>
 		<label class="block">
-			<span class="text-slate-600">Preference (OS tuning)</span>
+			<span class="text-ink-soft">Preference (OS tuning)</span>
 			<select
 				bind:value={preference}
 				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
@@ -229,11 +229,11 @@
 
 {#snippet step3()}
 	<div class="space-y-4">
-		<p class="text-xs text-slate-500">
+		<p class="text-xs text-ink-muted">
 			Choose a size (instance type) and whether to power the VM on after creation.
 		</p>
 		<label class="block">
-			<span class="text-slate-600">Size (instancetype)</span>
+			<span class="text-ink-soft">Size (instancetype)</span>
 			<select
 				bind:value={instancetype}
 				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
@@ -245,24 +245,24 @@
 		</label>
 		<label class="flex items-center gap-2">
 			<input type="checkbox" bind:checked={running} />
-			<span class="text-slate-600">Start immediately (runStrategy: Always)</span>
+			<span class="text-ink-soft">Start immediately (runStrategy: Always)</span>
 		</label>
 	</div>
 {/snippet}
 
 {#snippet step4()}
 	<div class="space-y-4">
-		<p class="text-xs text-slate-500">Configure the boot disk and any additional disks.</p>
+		<p class="text-xs text-ink-muted">Configure the boot disk and any additional disks.</p>
 		<div class="grid grid-cols-2 gap-4">
 			<label class="block">
-				<span class="text-slate-600">Root disk size</span>
+				<span class="text-ink-soft">Root disk size</span>
 				<input
 					bind:value={diskSize}
 					class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
 				/>
 			</label>
 			<label class="block">
-				<span class="text-slate-600">Storage class</span>
+				<span class="text-ink-soft">Storage class</span>
 				<select
 					bind:value={storageClass}
 					class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
@@ -276,7 +276,7 @@
 		</div>
 		<div>
 			<div class="mb-1 flex items-center justify-between">
-				<span class="text-slate-600">Extra disks</span>
+				<span class="text-ink-soft">Extra disks</span>
 				<button onclick={addDisk} type="button" class="text-xs text-blue-600 hover:underline"
 					>+ Add disk</button
 				>
@@ -307,7 +307,7 @@
 
 {#snippet step5()}
 	<div class="space-y-2">
-		<p class="text-xs text-slate-500">
+		<p class="text-xs text-ink-muted">
 			The project's default network is attached automatically. Add extra network adapters below.
 		</p>
 		{#if available.length}
@@ -319,28 +319,28 @@
 							checked={selectedNetworks.includes(attachRef(net))}
 							onchange={(e) => toggleNet(net, e.currentTarget.checked)}
 						/>
-						<span class="text-slate-700">{net.name}</span>
-						<span class="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500"
+						<span class="text-ink-soft">{net.name}</span>
+						<span class="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-ink-muted"
 							>{kindLabel(net.kind)}{net.vlan ? ` ${net.vlan}` : ''}</span
 						>
-						{#if net.scope === 'shared'}<span class="text-[11px] text-slate-400">shared</span>{/if}
+						{#if net.scope === 'shared'}<span class="text-[11px] text-ink-faint">shared</span>{/if}
 					</label>
 				{/each}
 			</div>
 		{:else}
-			<p class="mt-1 text-xs text-slate-400">No additional networks available for {namespace}.</p>
+			<p class="mt-1 text-xs text-ink-faint">No additional networks available for {namespace}.</p>
 		{/if}
 	</div>
 {/snippet}
 
 {#snippet step6()}
 	<div class="space-y-4">
-		<p class="text-xs text-slate-500">
+		<p class="text-xs text-ink-muted">
 			Optional cloud-init: a default user and an SSH key injected at first boot.
 		</p>
 		<label class="block">
-			<span class="text-slate-600"
-				>cloud-init user <span class="text-slate-400">(optional)</span></span
+			<span class="text-ink-soft"
+				>cloud-init user <span class="text-ink-faint">(optional)</span></span
 			>
 			<input
 				bind:value={user}
@@ -349,8 +349,8 @@
 			/>
 		</label>
 		<label class="block">
-			<span class="text-slate-600"
-				>SSH public key <span class="text-slate-400">(optional)</span></span
+			<span class="text-ink-soft"
+				>SSH public key <span class="text-ink-faint">(optional)</span></span
 			>
 			<input
 				bind:value={sshKey}
@@ -366,7 +366,7 @@
 		<div
 			class="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-3 py-1.5"
 		>
-			<span class="text-xs font-semibold tracking-wide text-slate-500 uppercase">{title}</span>
+			<span class="text-xs font-semibold tracking-wide text-ink-muted uppercase">{title}</span>
 			<button
 				type="button"
 				onclick={() => (current = step)}
@@ -376,8 +376,8 @@
 		<dl class="divide-y divide-slate-100">
 			{#each rows as r (r[0])}
 				<div class="flex justify-between gap-3 px-3 py-1.5">
-					<dt class="text-slate-500">{r[0]}</dt>
-					<dd class="text-right text-slate-800">{r[1]}</dd>
+					<dt class="text-ink-muted">{r[0]}</dt>
+					<dd class="text-right text-ink">{r[1]}</dd>
 				</div>
 			{/each}
 		</dl>
@@ -386,7 +386,7 @@
 
 {#snippet review()}
 	<div class="space-y-3">
-		<p class="text-xs text-slate-500">Review your selections, then stage the VM.</p>
+		<p class="text-xs text-ink-muted">Review your selections, then stage the VM.</p>
 		{#if missing.length}
 			<div class="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
 				<p class="mb-1 font-medium">Complete the required fields to stage this VM:</p>
@@ -436,7 +436,7 @@
 {:else if !options}
 	<Modal title="New Virtual Machine" {onclose}>
 		<div class="px-5 py-4">
-			<p class="text-sm text-slate-400">Loading cluster options…</p>
+			<p class="text-sm text-ink-faint">Loading cluster options…</p>
 		</div>
 	</Modal>
 {:else}

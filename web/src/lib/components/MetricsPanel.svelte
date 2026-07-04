@@ -59,22 +59,22 @@
 
 <div class="space-y-3">
 	<div class="flex items-center gap-2">
-		<span class="text-xs font-medium text-slate-500">Range</span>
+		<span class="text-xs font-medium text-ink-muted">Range</span>
 		{#each RANGES as r (r.key)}
 			<button
 				onclick={() => (range = r.key)}
 				class="rounded border px-2 py-0.5 text-xs {range === r.key
 					? 'border-blue-500 bg-blue-50 text-blue-700'
-					: 'border-slate-300 text-slate-600 hover:bg-slate-50'}">{r.label}</button
+					: 'border-slate-300 text-ink-soft hover:bg-slate-50'}">{r.label}</button
 			>
 		{/each}
-		{#if loading}<span class="text-xs text-slate-400">updating…</span>{/if}
+		{#if loading}<span class="text-xs text-ink-faint">updating…</span>{/if}
 	</div>
 
 	{#if error}
 		<p class="rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</p>
 	{:else if empty}
-		<p class="py-8 text-center text-sm text-slate-400">{emptyText}</p>
+		<p class="py-8 text-center text-sm text-ink-faint">{emptyText}</p>
 	{:else if metrics}
 		<div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
 			{#each metrics.charts as chart (chart.key)}
@@ -82,6 +82,6 @@
 			{/each}
 		</div>
 	{:else}
-		<p class="py-8 text-center text-sm text-slate-400">Loading metrics…</p>
+		<p class="py-8 text-center text-sm text-ink-faint">Loading metrics…</p>
 	{/if}
 </div>

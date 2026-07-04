@@ -78,12 +78,12 @@
 </script>
 
 <Modal title="Clone — {vm.name}" size="lg" {onclose}>
-	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-slate-700">
-		<p class="mb-3 text-xs text-slate-500">
+	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-ink-soft">
+		<p class="mb-3 text-xs text-ink-muted">
 			Clones via snapshot + restore (the source may stay running). The new VM exists only in the
 			cluster at first — open it and use <strong>Adopt into git</strong> to propose its manifest.
 		</p>
-		<label for="clone-target-input" class="mb-1 block text-xs text-slate-500">New VM name:</label>
+		<label for="clone-target-input" class="mb-1 block text-xs text-ink-muted">New VM name:</label>
 		<div class="flex items-center gap-2">
 			<input
 				id="clone-target-input"
@@ -111,11 +111,11 @@
 		{/if}
 
 		{#if clones && clones.length}
-			<h3 class="mt-4 mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+			<h3 class="mt-4 mb-1 text-xs font-semibold tracking-wide text-ink-muted uppercase">
 				Clones of this VM
 			</h3>
 			<table class="w-full text-[13px]">
-				<thead class="text-left text-xs tracking-wide text-slate-400 uppercase">
+				<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
 					<tr class="border-b border-slate-200">
 						<th class="py-1.5 pr-3 font-medium">Target VM</th>
 						<th class="py-1.5 pr-3 font-medium">Started</th>
@@ -125,8 +125,8 @@
 				<tbody class="divide-y divide-slate-100">
 					{#each clones as c (c.name)}
 						<tr>
-							<td class="py-1.5 pr-3 font-medium text-slate-800">{c.target}</td>
-							<td class="py-1.5 pr-3 whitespace-nowrap text-slate-500">{relativeAge(c.created)}</td>
+							<td class="py-1.5 pr-3 font-medium text-ink">{c.target}</td>
+							<td class="py-1.5 pr-3 whitespace-nowrap text-ink-muted">{relativeAge(c.created)}</td>
 							<td class="py-1.5 whitespace-nowrap">
 								{#if c.phase === 'Succeeded'}
 									<span class="inline-flex items-center gap-1.5 text-green-700">
@@ -152,7 +152,7 @@
 	{#snippet footer()}
 		<button
 			onclick={onclose}
-			class="ml-auto rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+			class="ml-auto rounded border border-slate-300 px-3 py-1 text-sm text-ink-soft hover:bg-slate-50"
 		>
 			Close
 		</button>

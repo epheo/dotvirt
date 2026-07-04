@@ -27,9 +27,9 @@
 </script>
 
 <Modal {title} danger {onclose}>
-	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-slate-700">
+	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-ink-soft">
 		{@render children?.()}
-		<label for="confirm-delete-input" class="mt-3 mb-1 block text-xs text-slate-500">
+		<label for="confirm-delete-input" class="mt-3 mb-1 block text-xs text-ink-muted">
 			Type <span class="font-mono">{confirmWord}</span> to confirm:
 		</label>
 		<input
@@ -46,7 +46,7 @@
 	{#snippet footer()}
 		<button
 			onclick={onclose}
-			class="ml-auto rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+			class="ml-auto rounded border border-slate-300 px-3 py-1 text-sm text-ink-soft hover:bg-slate-50"
 		>
 			Cancel
 		</button>

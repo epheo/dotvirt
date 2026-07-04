@@ -10,7 +10,7 @@
 
 <section class="rounded border border-slate-200">
 	<div class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-1.5">
-		<h3 class="text-xs font-semibold tracking-wide text-slate-500 uppercase">{title}</h3>
+		<h3 class="text-xs font-semibold tracking-wide text-ink-muted uppercase">{title}</h3>
 		{#if action}{@render action()}{/if}
 	</div>
 	{@render children()}

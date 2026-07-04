@@ -98,16 +98,16 @@
 				id={titleId}
 				class="flex items-center gap-2 text-base font-semibold {danger
 					? 'text-red-700'
-					: 'text-slate-800'}"
+					: 'text-ink'}"
 			>
 				{#if icon}{@render icon()}{/if}{title}
-				{#if subtitle}<span class="font-normal text-slate-400">· {subtitle}</span>{/if}
+				{#if subtitle}<span class="font-normal text-ink-faint">· {subtitle}</span>{/if}
 			</h2>
 			<button
 				onclick={dismiss}
 				aria-label="Close"
 				disabled={!dismissable}
-				class="text-slate-400 hover:text-slate-700 disabled:opacity-40"><X size={18} /></button
+				class="text-ink-faint hover:text-ink-soft disabled:opacity-40"><X size={18} /></button
 			>
 		</header>
 		{@render children()}

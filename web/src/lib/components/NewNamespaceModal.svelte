@@ -59,7 +59,7 @@
 <Modal title="New Namespace" {onclose}>
 	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
 		<label class="block">
-			<span class="text-slate-600">Name</span>
+			<span class="text-ink-soft">Name</span>
 			<input
 				bind:value={name}
 				placeholder="tenant-c"
@@ -67,7 +67,7 @@
 			/>
 		</label>
 		<label class="block">
-			<span class="text-slate-600">Project</span>
+			<span class="text-ink-soft">Project</span>
 			<select bind:value={project} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
 				{#each projects as p (p)}<option value={p}>{p}</option>{/each}
 			</select>
@@ -75,14 +75,14 @@
 
 		<label class="flex items-center gap-2">
 			<input type="checkbox" bind:checked={withNetwork} />
-			<span class="text-slate-600">Add a VM Network — the namespace's primary Segment (Tier-1)</span
+			<span class="text-ink-soft">Add a VM Network — the namespace's primary Segment (Tier-1)</span
 			>
 		</label>
 
 		{#if withNetwork}
 			<div class="space-y-3 rounded border border-slate-200 p-3">
 				<label class="block">
-					<span class="text-slate-600">VM Network name</span>
+					<span class="text-ink-soft">VM Network name</span>
 					<input
 						bind:value={netName}
 						oninput={() => (netTouched = true)}
@@ -90,8 +90,8 @@
 					/>
 				</label>
 				<label class="block">
-					<span class="text-slate-600"
-						>Subnet <span class="text-slate-400">(CIDR — required for a primary network)</span
+					<span class="text-ink-soft"
+						>Subnet <span class="text-ink-faint">(CIDR — required for a primary network)</span
 						></span
 					>
 					<input
@@ -100,13 +100,13 @@
 						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
 					/>
 				</label>
-				<p class="text-[11px] text-slate-400">
+				<p class="text-[11px] text-ink-faint">
 					A flat layer-2 network that follows VMs across nodes (keeps their IP on migration).
 				</p>
 			</div>
 		{/if}
 
-		<p class="rounded bg-slate-50 px-3 py-2 text-xs text-slate-500">
+		<p class="rounded bg-slate-50 px-3 py-2 text-xs text-ink-muted">
 			Creates a namespace in this project (labeled so dotvirt adopts it){#if withNetwork}, with a
 				primary "VM Network" its VMs attach to by default{/if}. Applied by the project's Argo app on
 			merge.

@@ -87,48 +87,48 @@
 				onclick={() => (baseline = false)}
 				class="flex-1 rounded border px-3 py-2 text-left text-xs {!baseline
 					? 'border-blue-500 bg-blue-50 text-blue-700'
-					: 'border-slate-300 text-slate-600'}"
+					: 'border-slate-300 text-ink-soft'}"
 			>
 				<div class="font-medium">Admin Policy</div>
-				<div class="text-slate-400">Priority-ordered · overrides tenants</div>
+				<div class="text-ink-faint">Priority-ordered · overrides tenants</div>
 			</button>
 			<button
 				onclick={() => (baseline = true)}
 				class="flex-1 rounded border px-3 py-2 text-left text-xs {baseline
 					? 'border-blue-500 bg-blue-50 text-blue-700'
-					: 'border-slate-300 text-slate-600'}"
+					: 'border-slate-300 text-ink-soft'}"
 			>
 				<div class="font-medium">Baseline</div>
-				<div class="text-slate-400">The cluster default backstop</div>
+				<div class="text-ink-faint">The cluster default backstop</div>
 			</button>
 		</div>
 
 		<div class="grid grid-cols-2 gap-3">
 			<label class="block">
-				<span class="text-slate-600">Name</span>
+				<span class="text-ink-soft">Name</span>
 				<input
 					bind:value={name}
 					disabled={baseline}
 					placeholder={baseline ? 'default' : 'tenant-isolation'}
-					class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 disabled:bg-slate-100 disabled:text-slate-400"
+					class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 disabled:bg-slate-100 disabled:text-ink-faint"
 				/>
 			</label>
 			<label class="block">
-				<span class="text-slate-600">Priority <span class="text-slate-400">(0–1000)</span></span>
+				<span class="text-ink-soft">Priority <span class="text-ink-faint">(0–1000)</span></span>
 				<input
 					type="number"
 					bind:value={priority}
 					disabled={baseline}
 					min="0"
 					max="1000"
-					class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 disabled:bg-slate-100 disabled:text-slate-400"
+					class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 disabled:bg-slate-100 disabled:text-ink-faint"
 				/>
 			</label>
 		</div>
 
 		<div class="rounded border border-slate-200 p-3">
-			<span class="text-slate-600"
-				>Applies to project Group <span class="text-slate-400">(namespace label; blank = all)</span
+			<span class="text-ink-soft"
+				>Applies to project Group <span class="text-ink-faint">(namespace label; blank = all)</span
 				></span
 			>
 			<div class="mt-1 flex items-center gap-2">
@@ -137,7 +137,7 @@
 					placeholder="tier"
 					class="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
 				/>
-				<span class="text-slate-400">=</span>
+				<span class="text-ink-faint">=</span>
 				<input
 					bind:value={subjValue}
 					placeholder="prod"
@@ -148,8 +148,8 @@
 
 		<div class="space-y-2">
 			<div class="flex items-center justify-between">
-				<span class="text-slate-600"
-					>Ingress rules <span class="text-slate-400">(ordered)</span></span
+				<span class="text-ink-soft"
+					>Ingress rules <span class="text-ink-faint">(ordered)</span></span
 				>
 				<button
 					onclick={addRow}
@@ -165,25 +165,25 @@
 							? 'text-red-700'
 							: row.action === 'Allow'
 								? 'text-green-700'
-								: 'text-slate-600'}"
+								: 'text-ink-soft'}"
 					>
 						<option value="Allow">Allow</option>
 						<option value="Deny">Deny</option>
 						{#if !baseline}<option value="Pass">Pass</option>{/if}
 					</select>
-					<span class="text-xs text-slate-400">from project</span>
+					<span class="text-xs text-ink-faint">from project</span>
 					<input
 						bind:value={row.key}
 						placeholder="tier"
 						class="w-20 rounded border border-slate-300 px-2 py-1 text-xs"
 					/>
-					<span class="text-slate-400">=</span>
+					<span class="text-ink-faint">=</span>
 					<input
 						bind:value={row.value}
 						placeholder="web"
 						class="w-20 rounded border border-slate-300 px-2 py-1 text-xs"
 					/>
-					<span class="text-xs text-slate-400">port</span>
+					<span class="text-xs text-ink-faint">port</span>
 					<select
 						bind:value={row.proto}
 						class="rounded border border-slate-300 px-1.5 py-1 text-xs"
@@ -204,7 +204,7 @@
 						onclick={() => removeRow(i)}
 						disabled={rows.length === 1}
 						aria-label="Remove rule"
-						class="ml-auto text-slate-300 hover:text-red-600 disabled:opacity-40"
+						class="ml-auto text-ink-faint hover:text-red-600 disabled:opacity-40"
 						><Trash2 size={14} /></button
 					>
 				</div>
@@ -221,10 +221,10 @@
 		{/if}
 	</div>
 	{#snippet footer()}
-		<span class="text-xs text-slate-400">Staged into the changeset; open a PR from “Changes”.</span>
+		<span class="text-xs text-ink-faint">Staged into the changeset; open a PR from “Changes”.</span>
 		<button
 			onclick={onclose}
-			class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button
+			class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-slate-100">Cancel</button
 		>
 		<button
 			onclick={submit}

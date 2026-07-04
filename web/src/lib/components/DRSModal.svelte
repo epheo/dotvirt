@@ -76,13 +76,13 @@
 <Modal title="Configure DRS" size="lg" {onclose}>
 	<div class="space-y-4 overflow-y-auto px-5 py-4 text-sm">
 		<div>
-			<span class="text-slate-600">Automation level</span>
+			<span class="text-ink-soft">Automation level</span>
 			<div class="mt-1 space-y-1">
 				<label class="flex items-start gap-2">
 					<input type="radio" bind:group={mode} value="Predictive" class="mt-1" />
 					<span>
 						Predictive
-						<span class="block text-xs text-slate-400">
+						<span class="block text-xs text-ink-faint">
 							Dry run: recommendations appear in descheduler logs/metrics, no VM moves.
 						</span>
 					</span>
@@ -91,7 +91,7 @@
 					<input type="radio" bind:group={mode} value="Automatic" class="mt-1" />
 					<span>
 						Automatic
-						<span class="block text-xs text-slate-400">
+						<span class="block text-xs text-ink-faint">
 							Fully automated: VMs live-migrate off hot nodes to keep spare capacity even.
 						</span>
 					</span>
@@ -100,7 +100,7 @@
 		</div>
 
 		<label class="block">
-			<span class="text-slate-600">Migration aggressiveness</span>
+			<span class="text-ink-soft">Migration aggressiveness</span>
 			<select
 				bind:value={threshold}
 				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
@@ -111,7 +111,7 @@
 		</label>
 
 		<label class="block">
-			<span class="text-slate-600">Evaluation interval (seconds)</span>
+			<span class="text-ink-soft">Evaluation interval (seconds)</span>
 			<input
 				type="number"
 				min={DRS_BOUNDS.intervalSeconds.min}
@@ -134,14 +134,14 @@
 					<input type="checkbox" bind:checked={softTainter} class="mt-0.5" />
 					<span>
 						Soft-taint hot nodes
-						<span class="block text-xs text-slate-400">
+						<span class="block text-xs text-ink-faint">
 							Also steer NEW placements away from hot nodes (PreferNoSchedule) until they cool.
 						</span>
 					</span>
 				</label>
 				<div class="grid grid-cols-2 gap-3">
 					<label class="block">
-						<span class="text-slate-600">Max migrations per node</span>
+						<span class="text-ink-soft">Max migrations per node</span>
 						<input
 							type="number"
 							min={DRS_BOUNDS.evictionNodeLimit.min}
@@ -151,7 +151,7 @@
 						/>
 					</label>
 					<label class="block">
-						<span class="text-slate-600">Max migrations cluster-wide</span>
+						<span class="text-ink-soft">Max migrations cluster-wide</span>
 						<input
 							type="number"
 							min={DRS_BOUNDS.evictionTotalLimit.min}
@@ -161,7 +161,7 @@
 						/>
 					</label>
 				</div>
-				<p class="text-xs text-slate-400">
+				<p class="text-xs text-ink-faint">
 					Keep at or below the cluster's live-migration limits so DRS never queues more migrations
 					than the cluster will run.
 				</p>
@@ -178,7 +178,7 @@
 						Skip if PSI (psi=1) is already enabled out-of-band.
 					</span>
 					{#if !view.canPSI}
-						<span class="block text-xs text-slate-400">
+						<span class="block text-xs text-ink-faint">
 							Requires MachineConfig authoring permission.
 						</span>
 					{/if}

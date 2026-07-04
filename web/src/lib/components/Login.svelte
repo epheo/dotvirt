@@ -28,8 +28,8 @@
 		onsubmit={submit}
 		class="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
 	>
-		<h1 class="mb-1 text-xl font-semibold text-slate-800">Sign in to dotvirt</h1>
-		<p class="mb-4 text-sm text-slate-500">
+		<h1 class="mb-1 text-xl font-semibold text-ink">Sign in to dotvirt</h1>
+		<p class="mb-4 text-sm text-ink-muted">
 			Paste your Kubernetes API token. dotvirt acts as you — you see only the projects your cluster
 			permissions allow.
 		</p>
@@ -55,12 +55,12 @@
 			{busy ? 'Signing in…' : 'Sign in'}
 		</button>
 
-		<div class="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-500">
-			<p class="mb-1 font-medium text-slate-600">Get a token:</p>
-			<pre class="rounded bg-slate-50 px-2 py-1 text-slate-600">oc whoami -t</pre>
+		<div class="mt-4 border-t border-slate-100 pt-3 text-xs text-ink-muted">
+			<p class="mb-1 font-medium text-ink-soft">Get a token:</p>
+			<pre class="rounded bg-slate-50 px-2 py-1 text-ink-soft">oc whoami -t</pre>
 			<p class="my-1">or for a ServiceAccount:</p>
 			<pre
-				class="rounded bg-slate-50 px-2 py-1 text-slate-600">kubectl create token &lt;sa&gt; -n &lt;namespace&gt;</pre>
+				class="rounded bg-slate-50 px-2 py-1 text-ink-soft">kubectl create token &lt;sa&gt; -n &lt;namespace&gt;</pre>
 		</div>
 	</form>
 </div>

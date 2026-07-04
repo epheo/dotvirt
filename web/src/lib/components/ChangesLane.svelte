@@ -96,12 +96,12 @@
 <section class="mb-5" hidden={proposed}>
 	<div class="mb-1 flex items-center gap-2">
 		<Folder size={14} class="text-blue-500" />
-		<span class="font-semibold text-slate-700">{project}</span>
-		<span class="text-xs text-slate-400">({draft.count})</span>
+		<span class="font-semibold text-ink-soft">{project}</span>
+		<span class="text-xs text-ink-faint">({draft.count})</span>
 		<button
 			onclick={discardAll}
 			disabled={discarding}
-			class="ml-auto text-xs text-slate-500 hover:text-slate-700 disabled:text-slate-300"
+			class="ml-auto text-xs text-ink-muted hover:text-ink-soft disabled:text-ink-faint"
 			>{discarding ? 'discarding…' : 'discard all'}</button
 		>
 	</div>
@@ -124,11 +124,11 @@
 							? 'bg-green-100 text-green-700'
 							: 'bg-blue-100 text-blue-700'}">{item.kind}</span
 				>
-				<span class="font-medium text-slate-800">{item.namespace}/{item.name}</span>
+				<span class="font-medium text-ink">{item.namespace}/{item.name}</span>
 				<button
 					onclick={() => unstage(item.namespace, item.name, item.resource)}
 					disabled={unstaging !== null}
-					class="ml-auto text-xs text-red-500 hover:text-red-700 disabled:text-slate-300"
+					class="ml-auto text-xs text-red-500 hover:text-red-700 disabled:text-ink-faint"
 					>{unstaging === k ? 'unstaging…' : 'unstage'}</button
 				>
 			</div>
@@ -137,14 +137,14 @@
 				{#if item.yaml}
 					<button
 						onclick={() => (showYaml[k] = !showYaml[k])}
-						class="mt-2 flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
+						class="mt-2 flex items-center gap-1 text-xs text-ink-faint hover:text-ink-soft"
 					>
 						{#if showYaml[k]}<ChevronDown size={12} /> hide YAML{:else}<ChevronRight size={12} /> view
 							YAML{/if}
 					</button>
 					{#if showYaml[k]}
 						<pre
-							class="mt-1 overflow-x-auto rounded bg-slate-50 p-2 font-mono text-[11px] leading-snug text-slate-600">{item.yaml}</pre>
+							class="mt-1 overflow-x-auto rounded bg-slate-50 p-2 font-mono text-[11px] leading-snug text-ink-soft">{item.yaml}</pre>
 					{/if}
 				{/if}
 			</div>

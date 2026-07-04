@@ -25,7 +25,7 @@
 			title={a.title}
 			class="block w-full px-3 py-1.5 text-left {a.danger
 				? 'text-red-700 hover:bg-red-50'
-				: 'text-slate-700 hover:bg-slate-50'} disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+				: 'text-ink-soft hover:bg-slate-50'} disabled:cursor-not-allowed disabled:text-ink-faint disabled:hover:bg-transparent"
 		>
 			{a.label}
 		</button>

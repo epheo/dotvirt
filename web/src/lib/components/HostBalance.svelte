@@ -86,7 +86,7 @@
 							x={i * (W / 10) + W / 20}
 							y={BASE - barH(n) - 3}
 							text-anchor="middle"
-							class="fill-slate-500"
+							class="fill-ink-muted"
 							font-size="8">{n}</text
 						>
 					{/if}
@@ -105,7 +105,7 @@
 						x={px(t)}
 						y="76"
 						text-anchor={t === 0 ? 'start' : t === 100 ? 'end' : 'middle'}
-						class="fill-slate-400"
+						class="fill-ink-faint"
 						font-size="8">{t}%</text
 					>
 				{/each}
@@ -119,7 +119,7 @@
 			</svg>
 
 			<div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
-				<span class="text-slate-600">
+				<span class="text-ink-soft">
 					{data.workers} worker{data.workers === 1 ? '' : 's'}
 				</span>
 				{#if data.band}
@@ -141,11 +141,11 @@
 							>
 						{/if}
 					{/if}
-					<span class="text-slate-400" title="the configured DRS deviation window around the mean">
+					<span class="text-ink-faint" title="the configured DRS deviation window around the mean">
 						band {Math.round(data.band.low)}–{Math.round(data.band.high)}%
 					</span>
 				{:else}
-					<span class="text-slate-400">DRS not configured — no action band.</span>
+					<span class="text-ink-faint">DRS not configured — no action band.</span>
 				{/if}
 			</div>
 
@@ -155,7 +155,7 @@
 						<li class="flex items-center gap-2 text-xs">
 							<a
 								href="/hosts/{o.node}"
-								class="w-44 min-w-0 truncate text-slate-700 hover:text-blue-700 hover:underline"
+								class="w-44 min-w-0 truncate text-ink-soft hover:text-blue-700 hover:underline"
 								>{o.node}</a
 							>
 							<span class="h-1.5 flex-1 overflow-hidden rounded bg-slate-100">
@@ -168,7 +168,7 @@
 								>{Math.round(o.pct)}%</span
 							>
 							{#if o.unschedulable}
-								<span class="shrink-0 text-slate-400" title="cordoned">⊘</span>
+								<span class="shrink-0 text-ink-faint" title="cordoned">⊘</span>
 							{/if}
 						</li>
 					{/each}

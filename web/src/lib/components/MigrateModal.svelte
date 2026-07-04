@@ -68,8 +68,8 @@
 </script>
 
 <Modal title="Live-migrate — {vm.name}" size="lg" {onclose}>
-	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-slate-700">
-		<p class="mb-3 text-xs text-slate-500">
+	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-ink-soft">
+		<p class="mb-3 text-xs text-ink-muted">
 			Moves the running VM to another host with no downtime. Currently on
 			<span class="font-mono">{vm.nodeName || 'unknown host'}</span>.
 		</p>
@@ -82,13 +82,13 @@
 			>
 				<input type="radio" bind:group={target} value="" />
 				<span class="font-medium">Automatic</span>
-				<span class="text-xs text-slate-500">— the scheduler picks the best host</span>
+				<span class="text-xs text-ink-muted">— the scheduler picks the best host</span>
 			</label>
 
 			{#if nodes === null && canPick}
-				<p class="px-3 py-1 text-xs text-slate-400">Loading hosts…</p>
+				<p class="px-3 py-1 text-xs text-ink-faint">Loading hosts…</p>
 			{:else if !canPick}
-				<p class="px-3 py-1 text-xs text-slate-400">
+				<p class="px-3 py-1 text-xs text-ink-faint">
 					Your account can't list hosts — placement stays with the scheduler.
 				</p>
 			{:else}
@@ -96,7 +96,7 @@
 					{@const why = blocked(n)}
 					<label
 						class="flex items-center gap-2 rounded border px-3 py-2 {why
-							? 'cursor-not-allowed border-slate-100 text-slate-400'
+							? 'cursor-not-allowed border-slate-100 text-ink-faint'
 							: target === n.name
 								? 'cursor-pointer border-blue-400 bg-blue-50/50'
 								: 'cursor-pointer border-slate-200 hover:bg-slate-50'}"
@@ -118,7 +118,7 @@
 	{#snippet footer()}
 		<button
 			onclick={onclose}
-			class="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+			class="rounded border border-slate-300 px-3 py-1 text-sm text-ink-soft hover:bg-slate-50"
 		>
 			Cancel
 		</button>

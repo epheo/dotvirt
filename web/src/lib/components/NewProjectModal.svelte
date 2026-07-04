@@ -63,18 +63,18 @@
 <Modal title="New Project" {onclose}>
 	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
 		<label class="block">
-			<span class="text-slate-600">Project name</span>
+			<span class="text-ink-soft">Project name</span>
 			<input
 				bind:value={name}
 				placeholder="team-c"
 				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
 			/>
-			<span class="mt-1 block text-[11px] text-slate-400"
+			<span class="mt-1 block text-[11px] text-ink-faint"
 				>Creates the tenant git repo of the same name.</span
 			>
 		</label>
 		<label class="block">
-			<span class="text-slate-600">First namespace</span>
+			<span class="text-ink-soft">First namespace</span>
 			<input
 				bind:value={namespace}
 				oninput={() => (nsTouched = true)}
@@ -83,27 +83,27 @@
 			/>
 		</label>
 		<label class="block">
-			<span class="text-slate-600">Owners <span class="text-slate-400">(optional)</span></span>
+			<span class="text-ink-soft">Owners <span class="text-ink-faint">(optional)</span></span>
 			<input
 				bind:value={owners}
 				placeholder="alice bob"
 				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
 			/>
-			<span class="mt-1 block text-[11px] text-slate-400"
+			<span class="mt-1 block text-[11px] text-ink-faint"
 				>Usernames granted admin on the namespace (space/comma separated).</span
 			>
 		</label>
 
 		<label class="flex items-center gap-2">
 			<input type="checkbox" bind:checked={withNetwork} />
-			<span class="text-slate-600">Add a VM Network — the namespace's primary Segment (Tier-1)</span
+			<span class="text-ink-soft">Add a VM Network — the namespace's primary Segment (Tier-1)</span
 			>
 		</label>
 
 		{#if withNetwork}
 			<div class="space-y-3 rounded border border-slate-200 p-3">
 				<label class="block">
-					<span class="text-slate-600">VM Network name</span>
+					<span class="text-ink-soft">VM Network name</span>
 					<input
 						bind:value={netName}
 						oninput={() => (netTouched = true)}
@@ -111,8 +111,8 @@
 					/>
 				</label>
 				<label class="block">
-					<span class="text-slate-600"
-						>Subnet <span class="text-slate-400">(CIDR — required for a primary network)</span
+					<span class="text-ink-soft"
+						>Subnet <span class="text-ink-faint">(CIDR — required for a primary network)</span
 						></span
 					>
 					<input
@@ -121,13 +121,13 @@
 						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
 					/>
 				</label>
-				<p class="text-[11px] text-slate-400">
+				<p class="text-[11px] text-ink-faint">
 					A flat layer-2 network that follows VMs across nodes (keeps their IP on migration).
 				</p>
 			</div>
 		{/if}
 
-		<p class="rounded bg-slate-50 px-3 py-2 text-xs text-slate-500">
+		<p class="rounded bg-slate-50 px-3 py-2 text-xs text-ink-muted">
 			Creates the tenant repo now, and stages its first namespace{#if owners.trim()}
 				+ an owners admin grant{/if} into the platform repo. Applied by Argo on merge — open the PR from
 			“Changes”.
