@@ -38,12 +38,12 @@
 	$effect(() => pollWhileVisible(load, 30000));
 </script>
 
-<section class="rounded border border-slate-200">
+<section class="rounded border border-line">
 	<h3
-		class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase"
+		class="flex items-center justify-between border-b border-line bg-inset px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
 	>
 		<span>Capacity &amp; usage</span>
-		{#if usage}<span class="font-normal text-slate-400 normal-case"
+		{#if usage}<span class="font-normal text-ink-faint normal-case"
 				>updated {relativeAge(usage.updated)}</span
 			>{/if}
 	</h3>
@@ -74,9 +74,9 @@
 				spark={usage.storage.spark ?? []}
 			/>
 		{:else if loading}
-			<p class="text-xs text-slate-400">Loading usage…</p>
+			<p class="text-xs text-ink-faint">Loading usage…</p>
 		{:else if failed}
-			<p class="text-xs text-slate-400">Usage metrics unavailable.</p>
+			<p class="text-xs text-ink-faint">Usage metrics unavailable.</p>
 		{/if}
 	</div>
 </section>

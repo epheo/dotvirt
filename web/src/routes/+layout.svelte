@@ -115,7 +115,7 @@
 
 		{#if inventory.error}
 			<div
-				class="flex items-start gap-2 border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700"
+				class="flex items-start gap-2 border-b border-danger-soft bg-danger-soft/60 px-4 py-2 text-sm text-danger-ink"
 			>
 				<span class="font-medium">Error:</span>
 				<span class="font-mono text-xs break-all">{inventory.error}</span>
@@ -124,7 +124,7 @@
 
 		{#if inventory.inventory?.warnings?.length}
 			<div
-				class="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800"
+				class="flex items-start gap-2 border-b border-warn-soft bg-warn-soft/60 px-4 py-2 text-sm text-warn-ink"
 			>
 				<TriangleAlert size={16} class="mt-0.5 shrink-0" />
 				<span>{inventory.inventory.warnings.join('; ')}</span>
@@ -138,7 +138,7 @@
 					{#if !inventory.inventory}
 						<div class="space-y-2 p-3">
 							{#each Array(5) as _, i (i)}
-								<div class="h-5 animate-pulse rounded bg-slate-100"></div>
+								<div class="h-5 animate-pulse rounded bg-inset-strong"></div>
 							{/each}
 						</div>
 					{:else if inventory.inventory.projects.length === 0 && treeSection !== 'catalog'}

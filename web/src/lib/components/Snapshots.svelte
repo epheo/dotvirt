@@ -101,29 +101,30 @@
 		<input
 			bind:value={snapName}
 			placeholder="snapshot name (auto-generated if blank)"
-			class="w-72 rounded border border-slate-300 px-2 py-1.5 text-sm"
+			class="w-72 rounded border border-line-strong px-2 py-1.5 text-sm"
 		/>
 		<button
 			onclick={take}
 			disabled={taking}
-			class="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:bg-slate-300"
+			class="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent disabled:bg-line-strong"
 		>
 			<Camera size={14} />
 			{taking ? 'Taking…' : 'Take snapshot'}
 		</button>
 		{#if running}
-			<span class="text-xs text-slate-400">Online snapshot (VM is running)</span>
+			<span class="text-xs text-ink-faint">Online snapshot (VM is running)</span>
 		{/if}
 	</div>
 
 	{#if error}
-		<pre class="rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+		<pre
+			class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 	{/if}
 
 	<!-- Restore needs a stopped VM (KubeVirt rejects a running target), but power
 	     is PR-gated — so spell out the path rather than just greying the button. -->
 	{#if running && snapshots?.some((s) => s.readyToUse)}
-		<p class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+		<p class="rounded border border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
 			Restore is disabled while the VM is running. Set its power to <strong>Off</strong> (via a pull request
 			from Edit Settings), and once it's stopped you can roll back to a snapshot here.
 		</p>
@@ -131,49 +132,50 @@
 
 	{#if snapshots && snapshots.length}
 		<table class="w-full text-[13px]">
-			<thead class="text-left text-xs tracking-wide text-slate-400 uppercase">
-				<tr class="border-b border-slate-200">
+			<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
+				<tr class="border-b border-line">
 					<th class="py-1.5 pr-3 font-medium">Name</th>
 					<th class="py-1.5 pr-3 font-medium">Created</th>
 					<th class="py-1.5 pr-3 font-medium">Status</th>
 					<th class="py-1.5 font-medium"></th>
 				</tr>
 			</thead>
-			<tbody class="divide-y divide-slate-100">
+			<tbody class="divide-y divide-line-soft">
 				{#each snapshots as s (s.name)}
 					<tr>
-						<td class="py-2 pr-3 font-medium text-slate-800">
+						<td class="py-2 pr-3 font-medium text-ink">
 							{s.name}
 							{#if s.indications?.includes('Online')}
-								<span class="ml-1 rounded bg-slate-100 px-1 text-[10px] text-slate-500">online</span
+								<span class="ml-1 rounded bg-inset-strong px-1 text-[10px] text-ink-muted"
+									>online</span
 								>
 							{/if}
 						</td>
-						<td class="py-2 pr-3 whitespace-nowrap text-slate-500">{relativeAge(s.created)}</td>
+						<td class="py-2 pr-3 whitespace-nowrap text-ink-muted">{relativeAge(s.created)}</td>
 						<td class="py-2 pr-3 whitespace-nowrap">
 							{#if s.readyToUse}
-								<span class="inline-flex items-center gap-1.5 text-green-700">
-									<span class="h-1.5 w-1.5 rounded-full bg-green-500"></span> Ready
+								<span class="inline-flex items-center gap-1.5 text-ok-ink">
+									<span class="h-1.5 w-1.5 rounded-full bg-ok"></span> Ready
 								</span>
 							{:else if s.phase === 'Failed'}
-								<span class="inline-flex items-center gap-1.5 text-red-700" title={s.error}>
-									<span class="h-1.5 w-1.5 rounded-full bg-red-500"></span> Failed
+								<span class="inline-flex items-center gap-1.5 text-danger-ink" title={s.error}>
+									<span class="h-1.5 w-1.5 rounded-full bg-danger"></span> Failed
 								</span>
 							{:else}
-								<span class="inline-flex items-center gap-1.5 text-amber-600">
-									<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500"></span> Creating…
+								<span class="inline-flex items-center gap-1.5 text-warn-ink">
+									<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-warn"></span> Creating…
 								</span>
 							{/if}
 						</td>
 						<td class="py-2 text-right whitespace-nowrap">
 							{#if busy === s.name}
-								<span class="text-xs text-slate-400">working…</span>
+								<span class="text-xs text-ink-faint">working…</span>
 							{:else}
 								<button
 									onclick={() => (armedRestore = armedRestore === s.name ? null : s.name)}
 									disabled={!s.readyToUse || running}
 									title={running ? 'Stop the VM to restore' : 'Roll the VM back to this snapshot'}
-									class="mr-2 inline-flex items-center gap-1 text-xs text-amber-700 hover:underline disabled:text-slate-300 disabled:no-underline"
+									class="mr-2 inline-flex items-center gap-1 text-xs text-warn-ink hover:underline disabled:text-ink-faint disabled:no-underline"
 								>
 									<RotateCcw size={12} />
 									{armedRestore === s.name ? 'Confirm restore' : 'Restore'}
@@ -181,13 +183,13 @@
 								{#if armedRestore === s.name}
 									<button
 										onclick={() => restore(s.name)}
-										class="mr-2 rounded bg-amber-600 px-1.5 py-0.5 text-[11px] font-medium text-white"
+										class="mr-2 rounded bg-warn px-1.5 py-0.5 text-[11px] font-medium text-white"
 										>Yes, restore</button
 									>
 								{/if}
 								<button
 									onclick={() => (armedDelete = armedDelete === s.name ? null : s.name)}
-									class="inline-flex items-center gap-1 text-xs text-red-600 hover:underline"
+									class="inline-flex items-center gap-1 text-xs text-danger hover:underline"
 								>
 									<Trash2 size={12} />
 									{armedDelete === s.name ? 'Confirm delete' : 'Delete'}
@@ -195,7 +197,7 @@
 								{#if armedDelete === s.name}
 									<button
 										onclick={() => remove(s.name)}
-										class="ml-2 rounded bg-red-600 px-1.5 py-0.5 text-[11px] font-medium text-white"
+										class="ml-2 rounded bg-danger px-1.5 py-0.5 text-[11px] font-medium text-white"
 										>Yes, delete</button
 									>
 								{/if}
@@ -206,9 +208,9 @@
 			</tbody>
 		</table>
 	{:else if loading && !snapshots}
-		<p class="py-6 text-center text-sm text-slate-400">Loading snapshots…</p>
+		<p class="py-6 text-center text-sm text-ink-faint">Loading snapshots…</p>
 	{:else}
-		<p class="py-6 text-center text-sm text-slate-400">
+		<p class="py-6 text-center text-sm text-ink-faint">
 			No snapshots. Take one to capture the VM's current disk (and memory, if running) state —
 			restore rolls it back later.
 		</p>

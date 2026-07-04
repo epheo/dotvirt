@@ -326,12 +326,11 @@
 
 {#if vm}
 	<div class="flex h-full flex-col">
-		<div class="border-b border-slate-200 px-4 pt-4">
+		<div class="border-b border-line px-4 pt-4">
 			<div class="mb-3 flex items-center gap-2">
 				<PowerDot power={vm.power} paused={vm.paused} />
-				<h2 class="text-lg font-semibold text-slate-800">{vm.name}</h2>
-				<span class="rounded bg-slate-200 px-1.5 py-0.5 text-xs text-slate-600">{vm.namespace}</span
-				>
+				<h2 class="text-lg font-semibold text-ink">{vm.name}</h2>
+				<span class="rounded bg-line px-1.5 py-0.5 text-xs text-ink-soft">{vm.namespace}</span>
 				<SyncBadge sync={vm.sync} error={vm.syncError} />
 				{#if stagedItem}
 					<StagedBadge item={stagedItem} onopen={() => onstagedopen?.()} />
@@ -342,7 +341,7 @@
 							onclick={() => (actionsOpen = !actionsOpen)}
 							disabled={runtimeBusy}
 							title="All VM actions — runtime ops act immediately; config changes go through a PR"
-							class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+							class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 						>
 							Actions <ChevronDown size={13} />
 						</button>
@@ -361,7 +360,7 @@
 						onclick={() => openEdit()}
 						disabled={!vm.sourceFile}
 						title={vm.sourceFile ? 'Edit settings' : 'Not in git — adopt this VM first'}
-						class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-transparent"
+						class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50 disabled:hover:bg-transparent"
 					>
 						<Pencil size={13} /> Edit Settings
 					</button>
@@ -374,7 +373,7 @@
 						title={vm.sourceFile
 							? 'Delete this VM (stages a removal into Changes)'
 							: 'Not in git — adopt this VM first'}
-						class="flex items-center gap-1.5 rounded border border-red-300 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 disabled:hover:bg-transparent"
+						class="flex items-center gap-1.5 rounded border border-danger/50 px-2.5 py-1 text-xs font-medium text-danger-ink hover:bg-danger-soft/60 disabled:opacity-50 disabled:hover:bg-transparent"
 					>
 						<Trash2 size={13} /> Delete VM
 					</button>
@@ -396,9 +395,9 @@
 
 		{#if vm.migration && !vm.migration.completed && !vm.migration.failed}
 			<div
-				class="flex items-center gap-2 border-b border-blue-200 bg-blue-50 px-4 py-1.5 text-xs text-blue-700"
+				class="flex items-center gap-2 border-b border-select bg-select-soft px-4 py-1.5 text-xs text-accent-ink"
 			>
-				<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500"></span>
+				<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-accent"></span>
 				Live-migrating{#if vm.migration.sourceNode}&nbsp;from {vm.migration.sourceNode}{/if}
 				to {vm.migration.targetNode || '…'}{#if duration(vm.migration.startedAt)}&nbsp;· started {duration(
 						vm.migration.startedAt,
@@ -412,47 +411,47 @@
 			{#if tab === 'summary'}
 				<!-- At-a-glance tiles: the vCenter-style capacity summary. -->
 				<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-					<div class="rounded border border-slate-200 bg-slate-50 p-3">
-						<div class="flex items-center gap-1.5 text-xs text-slate-500">
+					<div class="rounded border border-line bg-inset p-3">
+						<div class="flex items-center gap-1.5 text-xs text-ink-muted">
 							<Cpu size={13} /> CPU
 						</div>
-						<div class="mt-1 text-lg font-semibold text-slate-800">
-							{#if stagedChanges.has('CPU')}<span class="text-slate-400 line-through"
+						<div class="mt-1 text-lg font-semibold text-ink">
+							{#if stagedChanges.has('CPU')}<span class="text-ink-faint line-through"
 									>{vm.cpuCores ?? '—'} vCPU</span
 								>
-								<span class="text-blue-600">{stagedChanges.get('CPU')?.to}</span
-								>{:else}{vm.cpuCores ?? '—'}<span class="ml-1 text-sm font-normal text-slate-500"
+								<span class="text-accent">{stagedChanges.get('CPU')?.to}</span
+								>{:else}{vm.cpuCores ?? '—'}<span class="ml-1 text-sm font-normal text-ink-muted"
 									>vCPU</span
 								>{/if}
 						</div>
 					</div>
-					<div class="rounded border border-slate-200 bg-slate-50 p-3">
-						<div class="flex items-center gap-1.5 text-xs text-slate-500">
+					<div class="rounded border border-line bg-inset p-3">
+						<div class="flex items-center gap-1.5 text-xs text-ink-muted">
 							<MemoryStick size={13} /> Memory
 						</div>
-						<div class="mt-1 text-lg font-semibold text-slate-800">
-							{#if stagedChanges.has('Memory')}<span class="text-slate-400 line-through"
+						<div class="mt-1 text-lg font-semibold text-ink">
+							{#if stagedChanges.has('Memory')}<span class="text-ink-faint line-through"
 									>{vm.memory ?? '—'}</span
 								>
-								<span class="text-blue-600">{stagedChanges.get('Memory')?.to}</span
+								<span class="text-accent">{stagedChanges.get('Memory')?.to}</span
 								>{:else}{vm.memory ?? '—'}{/if}
 						</div>
 						{#if vm.memoryActual && vm.memoryActual !== vm.memory}
-							<div class="text-xs text-slate-400">{vm.memoryActual} live</div>
+							<div class="text-xs text-ink-faint">{vm.memoryActual} live</div>
 						{/if}
 					</div>
-					<div class="rounded border border-slate-200 bg-slate-50 p-3">
-						<div class="flex items-center gap-1.5 text-xs text-slate-500">
+					<div class="rounded border border-line bg-inset p-3">
+						<div class="flex items-center gap-1.5 text-xs text-ink-muted">
 							<HardDrive size={13} /> Disks
 						</div>
-						<div class="mt-1 text-lg font-semibold text-slate-800">{vm.disks?.length ?? 0}</div>
+						<div class="mt-1 text-lg font-semibold text-ink">{vm.disks?.length ?? 0}</div>
 					</div>
-					<div class="rounded border border-slate-200 bg-slate-50 p-3">
-						<div class="flex items-center gap-1.5 text-xs text-slate-500">
+					<div class="rounded border border-line bg-inset p-3">
+						<div class="flex items-center gap-1.5 text-xs text-ink-muted">
 							<Activity size={13} /> Status
 						</div>
-						<div class="mt-1 text-lg font-semibold text-slate-800">{statusText}</div>
-						{#if duration(vm.startedAt)}<div class="text-xs text-slate-400">
+						<div class="mt-1 text-lg font-semibold text-ink">{statusText}</div>
+						{#if duration(vm.startedAt)}<div class="text-xs text-ink-faint">
 								up {duration(vm.startedAt)}
 							</div>{/if}
 					</div>
@@ -472,19 +471,19 @@
 				<div class="mt-4 grid gap-4 md:grid-cols-2">
 					<!-- Guest & runtime: live identity reported by the guest agent. -->
 					<InfoCard title="Guest & runtime">
-						<dl class="divide-y divide-slate-100 text-[13px]">
+						<dl class="divide-y divide-line-soft text-[13px]">
 							<Row label="Operating system" value={vm.os ?? ''} />
 							<Row label="Power (desired)">
-								{#if stagedChanges.has('Power')}<span class="text-slate-400 line-through"
+								{#if stagedChanges.has('Power')}<span class="text-ink-faint line-through"
 										>{vm.power}</span
 									>
-									<span class="text-blue-600">→ {stagedChanges.get('Power')?.to}</span>{:else}<span
-										class="text-slate-800">{vm.power}</span
+									<span class="text-accent">→ {stagedChanges.get('Power')?.to}</span>{:else}<span
+										class="text-ink">{vm.power}</span
 									>{/if}
 							</Row>
 							<Row label="Status (actual)" value={vm.paused ? 'Paused' : (vm.phase ?? '')} />
 							<Row label="IP addresses">
-								<div class="font-mono text-xs text-slate-800">
+								<div class="font-mono text-xs text-ink">
 									{#if vm.ips?.length}
 										{#each vm.ips as ip (ip)}<div>{ip}</div>{/each}
 									{:else}{vm.guestIP || '—'}{/if}
@@ -495,7 +494,7 @@
 
 					<!-- Configuration & placement: desired config + where it runs. -->
 					<InfoCard title="Configuration & placement">
-						<dl class="divide-y divide-slate-100 text-[13px]">
+						<dl class="divide-y divide-line-soft text-[13px]">
 							<Row label="Instance type" value={vm.instancetype ?? ''} />
 							<Row label="Preference" value={vm.preference ?? ''} />
 							<Row label="Node" value={vm.nodeName ?? ''} />
@@ -508,12 +507,12 @@
 					<!-- Cluster-only VM (e.g. a fresh clone target): no manifest on the
 					     base branch, so config stays read-only until adopted. The adopt
 					     stages a CREATE of the running-branch manifest into the PR flow. -->
-					<div class="mt-4 rounded border border-amber-200 bg-amber-50 px-3 py-2">
-						<div class="flex items-center gap-2 text-sm font-medium text-amber-800">
-							<span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
+					<div class="mt-4 rounded border border-warn-soft bg-warn-soft/60 px-3 py-2">
+						<div class="flex items-center gap-2 text-sm font-medium text-warn-ink">
+							<span class="h-1.5 w-1.5 rounded-full bg-warn"></span>
 							Not in git — this VM exists only in the cluster
 						</div>
-						<p class="mt-1 text-xs text-amber-700">
+						<p class="mt-1 text-xs text-warn-ink">
 							A clone target (or out-of-band create) has no manifest on the base branch yet: config
 							edits and ArgoCD sync don't apply. Adopting stages its live manifest into
 							<strong>Changes</strong>, to propose as a PR.
@@ -523,7 +522,7 @@
 								onclick={adopt}
 								disabled={reconciling}
 								title="Stage this VM's live manifest into a PR so git starts tracking it"
-								class="rounded border border-amber-400 bg-white px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+								class="rounded border border-warn/70 bg-panel px-2.5 py-1 text-xs font-medium text-warn-ink hover:bg-warn-soft disabled:opacity-50"
 							>
 								Adopt into git
 							</button>
@@ -532,29 +531,29 @@
 				{/if}
 
 				{#if driftChanges && driftChanges.length > 0}
-					<div class="mt-4 rounded border border-amber-200 bg-amber-50">
+					<div class="mt-4 rounded border border-warn-soft bg-warn-soft/60">
 						<button
 							onclick={() => (showDrift = !showDrift)}
-							class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-amber-800"
+							class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-warn-ink"
 						>
-							<span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
+							<span class="h-1.5 w-1.5 rounded-full bg-warn"></span>
 							Drift — cluster differs from git ({driftChanges.length})
-							<span class="ml-auto text-amber-600"
+							<span class="ml-auto text-warn-ink"
 								>{#if showDrift}<ChevronDown size={14} />{:else}<ChevronRight
 										size={14}
 									/>{/if}</span
 							>
 						</button>
 						{#if showDrift}
-							<div class="border-t border-amber-200 px-3 py-2">
-								<p class="mb-1 text-xs text-amber-700">Desired (main) → Actual (running):</p>
+							<div class="border-t border-warn-soft px-3 py-2">
+								<p class="mb-1 text-xs text-warn-ink">Desired (main) → Actual (running):</p>
 								<ChangeList changes={driftChanges} />
 								<div class="mt-3 flex items-center gap-2">
 									<button
 										onclick={adopt}
 										disabled={reconciling}
 										title="Stage the live state into a PR so git matches the cluster"
-										class="rounded border border-amber-400 bg-white px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+										class="rounded border border-warn/70 bg-panel px-2.5 py-1 text-xs font-medium text-warn-ink hover:bg-warn-soft disabled:opacity-50"
 									>
 										Adopt into PR (running→main)
 									</button>
@@ -562,7 +561,7 @@
 										onclick={resync}
 										disabled={reconciling}
 										title="Trigger ArgoCD to reconcile the cluster back to git"
-										class="rounded border border-amber-400 bg-white px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+										class="rounded border border-warn/70 bg-panel px-2.5 py-1 text-xs font-medium text-warn-ink hover:bg-warn-soft disabled:opacity-50"
 									>
 										Re-sync from git (main→running)
 									</button>
@@ -573,12 +572,12 @@
 				{/if}
 			{:else if tab === 'monitor'}
 				<!-- Monitor sub-rail: events + performance, vCenter's time-series home. -->
-				<div class="mb-3 flex gap-1 border-b border-slate-200 text-sm">
+				<div class="mb-3 flex gap-1 border-b border-line text-sm">
 					{#each ['events', 'performance'] as const as v (v)}
 						<button
 							class="border-b-2 px-3 py-1 capitalize {monitorView === v
-								? 'border-blue-600 text-blue-700'
-								: 'border-transparent text-slate-500 hover:text-slate-700'}"
+								? 'border-accent text-accent-ink'
+								: 'border-transparent text-ink-muted hover:text-ink-soft'}"
 							onclick={() => (monitorView = v)}
 						>
 							{v}
@@ -590,13 +589,13 @@
 						<MetricsPanel load={(r) => api.metrics(vm.namespace, vm.name, r)} />
 					{/key}
 				{:else if eventsLoading && !events}
-					<div class="py-8 text-center text-sm text-slate-400">Loading events…</div>
+					<div class="py-8 text-center text-sm text-ink-faint">Loading events…</div>
 				{:else if !events || events.length === 0}
-					<div class="py-8 text-center text-sm text-slate-400">No recent events.</div>
+					<div class="py-8 text-center text-sm text-ink-faint">No recent events.</div>
 				{:else}
 					<table class="w-full text-[13px]">
-						<thead class="text-left text-xs tracking-wide text-slate-400 uppercase">
-							<tr class="border-b border-slate-200">
+						<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
+							<tr class="border-b border-line">
 								<th class="py-1.5 pr-3 font-medium">Type</th>
 								<th class="py-1.5 pr-3 font-medium">Reason</th>
 								<th class="py-1.5 pr-3 font-medium">Message</th>
@@ -604,26 +603,26 @@
 								<th class="py-1.5 font-medium">Last seen</th>
 							</tr>
 						</thead>
-						<tbody class="divide-y divide-slate-100">
+						<tbody class="divide-y divide-line-soft">
 							{#each events as e, i (i)}
-								<tr class={e.type === 'Warning' ? 'bg-amber-50/40' : ''}>
+								<tr class={e.type === 'Warning' ? 'bg-warn-soft/40' : ''}>
 									<td class="py-1.5 pr-3">
 										<span class="inline-flex items-center gap-1.5 whitespace-nowrap">
 											<span
 												class="h-1.5 w-1.5 rounded-full {e.type === 'Warning'
-													? 'bg-amber-500'
-													: 'bg-slate-400'}"
+													? 'bg-warn'
+													: 'bg-ink-faint'}"
 											></span>
 											{e.type}
 										</span>
 									</td>
-									<td class="py-1.5 pr-3 font-medium text-slate-700">{e.reason}</td>
-									<td class="py-1.5 pr-3 text-slate-600">{e.message}</td>
-									<td class="py-1.5 pr-3 whitespace-nowrap text-slate-500">
+									<td class="py-1.5 pr-3 font-medium text-ink-soft">{e.reason}</td>
+									<td class="py-1.5 pr-3 text-ink-soft">{e.message}</td>
+									<td class="py-1.5 pr-3 whitespace-nowrap text-ink-muted">
 										{e.object === 'VirtualMachineInstance' ? 'VMI' : 'VM'}
 									</td>
-									<td class="py-1.5 whitespace-nowrap text-slate-500">
-										{duration(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-slate-400">
+									<td class="py-1.5 whitespace-nowrap text-ink-muted">
+										{duration(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-ink-faint">
 												×{e.count}</span
 											>{/if}
 									</td>
@@ -706,7 +705,7 @@
 		</ConfirmDelete>
 	{/if}
 {:else}
-	<div class="flex h-full items-center justify-center text-sm text-slate-400">
+	<div class="flex h-full items-center justify-center text-sm text-ink-faint">
 		Select a VM from the inventory
 	</div>
 {/if}

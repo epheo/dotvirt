@@ -156,7 +156,7 @@
 
 {#snippet targetStep()}
 	{#if loadError}
-		<p class="rounded bg-red-50 px-3 py-2 text-xs text-red-700">{loadError}</p>
+		<p class="rounded bg-danger-soft/60 px-3 py-2 text-xs text-danger-ink">{loadError}</p>
 	{:else if !templates}
 		<p class="text-sm text-ink-faint">Loading templates…</p>
 	{:else if !templates.length}
@@ -206,7 +206,7 @@
 							? 'Left empty, a unique name is generated on deploy (the example above is illustrative).'
 							: 'Left empty, the template’s default name is used.'}
 					{:else if !validName(name)}
-						<span class="text-amber-600">Lowercase alphanumeric and “-”, max 63 characters.</span>
+						<span class="text-warn-ink">Lowercase alphanumeric and “-”, max 63 characters.</span>
 					{/if}
 				</p>
 			</label>
@@ -223,7 +223,7 @@
 				<label class="block">
 					<span class="mb-1 block text-xs font-medium text-ink-muted">
 						{p.displayName || p.name}
-						{#if p.required && !p.value && !p.generate}<span class="text-red-600">*</span>{/if}
+						{#if p.required && !p.value && !p.generate}<span class="text-danger">*</span>{/if}
 					</span>
 					{#if long(p.name)}
 						<textarea
@@ -248,7 +248,7 @@
 
 {#snippet reviewStep()}
 	{#if tpl}
-		<dl class="max-w-md divide-y divide-slate-100 text-[13px]">
+		<dl class="max-w-md divide-y divide-line-soft text-[13px]">
 			<div class="flex justify-between gap-3 py-1.5">
 				<dt class="text-ink-muted">Template</dt>
 				<dd class="text-ink">{libraryLabel(tpl.library)} / {tpl.name}</dd>

@@ -57,20 +57,18 @@
 	// Rail badge: current = blue number · invalid = amber number · satisfied
 	// required step = green check · optional step = slate number.
 	function railBadge(step: WizardStep, i: number): { cls: string; text: string; done?: boolean } {
-		if (i === current) return { cls: 'bg-blue-500 text-white', text: String(i + 1) };
+		if (i === current) return { cls: 'bg-accent text-white', text: String(i + 1) };
 		if (step.valid === false)
-			return { cls: 'bg-amber-100 text-amber-700 ring-1 ring-amber-300', text: String(i + 1) };
-		if (step.valid === true) return { cls: 'bg-green-500 text-white', text: '', done: true };
-		return { cls: 'bg-slate-200 text-slate-500', text: String(i + 1) };
+			return { cls: 'bg-warn-soft text-warn-ink ring-1 ring-warn/50', text: String(i + 1) };
+		if (step.valid === true) return { cls: 'bg-ok text-white', text: '', done: true };
+		return { cls: 'bg-line text-ink-muted', text: String(i + 1) };
 	}
 </script>
 
 <Modal {title} size="3xl" {icon} {onclose}>
 	<div class="flex min-h-0 flex-1">
 		<!-- Step rail: every item is clickable (free navigation). -->
-		<nav
-			class="w-52 shrink-0 space-y-0.5 overflow-y-auto border-r border-slate-200 bg-slate-50/60 p-2"
-		>
+		<nav class="w-52 shrink-0 space-y-0.5 overflow-y-auto border-r border-line bg-inset/60 p-2">
 			{#each steps as step, i (i)}
 				{@const b = railBadge(step, i)}
 				<button
@@ -78,8 +76,8 @@
 					onclick={() => go(i)}
 					class="flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-sm {i ===
 					current
-						? 'bg-blue-50 font-medium text-blue-700'
-						: 'text-slate-600 hover:bg-slate-100'}"
+						? 'bg-select-soft font-medium text-accent-ink'
+						: 'text-ink-soft hover:bg-inset-strong'}"
 				>
 					<span
 						class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] {b.cls}"
@@ -98,29 +96,29 @@
 
 	{#if error}
 		<pre
-			class="mx-5 mb-1 rounded bg-red-50 p-2 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+			class="mx-5 mb-1 rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 	{/if}
 	{#snippet footer()}
-		{#if footerHint}<span class="text-xs text-slate-400">{footerHint}</span>{/if}
+		{#if footerHint}<span class="text-xs text-ink-faint">{footerHint}</span>{/if}
 		<button
 			onclick={onclose}
-			class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button
+			class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong">Cancel</button
 		>
 		<button
 			onclick={back}
 			disabled={current === 0}
-			class="rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100 disabled:text-slate-300"
+			class="rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong disabled:text-ink-faint"
 			>Back</button
 		>
 		{#if last}
 			<button
 				onclick={onfinish}
 				disabled={!canFinish || submitting}
-				class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
+				class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 				>{finishLabel}</button
 			>
 		{:else}
-			<button onclick={next} class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white"
+			<button onclick={next} class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white"
 				>Next</button
 			>
 		{/if}

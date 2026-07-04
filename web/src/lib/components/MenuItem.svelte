@@ -24,8 +24,8 @@
 	{disabled}
 	{title}
 	class="flex w-full items-center gap-2 px-3 py-1.5 text-left {danger
-		? 'text-red-700 hover:bg-red-50'
-		: 'text-ink-soft hover:bg-inset'} disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+		? 'text-danger-ink hover:bg-danger-soft/60'
+		: 'text-ink-soft hover:bg-inset'} disabled:cursor-not-allowed disabled:text-ink-faint disabled:hover:bg-transparent"
 >
 	{#if icon}{@render icon()}{/if}
 	{@render children()}

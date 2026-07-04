@@ -157,7 +157,7 @@
 <div class="flex min-h-0 flex-1">
 	<div class="min-h-0 flex-1 overflow-y-auto">
 		{#if error}
-			<p class="m-4 rounded bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>
+			<p class="m-4 rounded bg-danger-soft/60 px-3 py-2 text-xs text-danger-ink">{error}</p>
 		{:else if kind === 'templates' ? !templates : !options}
 			<p class="py-6 text-center text-sm text-ink-faint">Loading catalog…</p>
 		{:else if rows.length === 0}
@@ -178,7 +178,7 @@
 					{#each rows as r (r.key)}
 						<tr
 							onclick={() => (picked = picked === r.key ? null : r.key)}
-							class="cursor-pointer border-b border-slate-100 hover:bg-select-soft {picked === r.key
+							class="cursor-pointer border-b border-line-soft hover:bg-select-soft {picked === r.key
 								? 'bg-select hover:bg-select'
 								: ''}"
 						>
@@ -199,7 +199,7 @@
 			>
 				{pickedRow.title}
 			</h3>
-			<dl class="divide-y divide-slate-100 text-[13px]">
+			<dl class="divide-y divide-line-soft text-[13px]">
 				{#each pickedRow.detail as [label, value] (label)}
 					<div class="flex justify-between gap-3 px-3 py-1.5">
 						<dt class="shrink-0 text-ink-muted">{label}</dt>
@@ -215,7 +215,7 @@
 					>
 						Parameters
 					</h4>
-					<ul class="divide-y divide-slate-100 text-[13px]">
+					<ul class="divide-y divide-line-soft text-[13px]">
 						{#each t.parameters as p (p.name)}
 							<li class="px-3 py-1.5">
 								<div class="flex justify-between gap-3">

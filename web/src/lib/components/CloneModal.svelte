@@ -78,67 +78,68 @@
 </script>
 
 <Modal title="Clone — {vm.name}" size="lg" {onclose}>
-	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-slate-700">
-		<p class="mb-3 text-xs text-slate-500">
+	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-ink-soft">
+		<p class="mb-3 text-xs text-ink-muted">
 			Clones via snapshot + restore (the source may stay running). The new VM exists only in the
 			cluster at first — open it and use <strong>Adopt into git</strong> to propose its manifest.
 		</p>
-		<label for="clone-target-input" class="mb-1 block text-xs text-slate-500">New VM name:</label>
+		<label for="clone-target-input" class="mb-1 block text-xs text-ink-muted">New VM name:</label>
 		<div class="flex items-center gap-2">
 			<input
 				id="clone-target-input"
 				data-autofocus
 				bind:value={target}
-				class="flex-1 rounded border border-slate-300 px-2 py-1.5 font-mono text-sm focus:border-blue-400"
+				class="flex-1 rounded border border-line-strong px-2 py-1.5 font-mono text-sm focus:border-accent/60"
 				placeholder="{vm.name}-clone"
 			/>
 			<button
 				onclick={create}
 				disabled={!valid || busy}
-				class="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:bg-slate-300"
+				class="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent disabled:bg-line-strong"
 			>
 				<Copy size={14} />
 				{busy ? 'Cloning…' : 'Clone'}
 			</button>
 		</div>
 		{#if target && !valid}
-			<p class="mt-1 text-xs text-amber-700">
+			<p class="mt-1 text-xs text-warn-ink">
 				Lowercase letters, digits and dashes only (≤63 chars), and not the source's own name.
 			</p>
 		{/if}
 		{#if error}
-			<pre class="mt-2 rounded bg-red-50 p-2 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+			<pre
+				class="mt-2 rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 
 		{#if clones && clones.length}
-			<h3 class="mt-4 mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+			<h3 class="mt-4 mb-1 text-xs font-semibold tracking-wide text-ink-muted uppercase">
 				Clones of this VM
 			</h3>
 			<table class="w-full text-[13px]">
-				<thead class="text-left text-xs tracking-wide text-slate-400 uppercase">
-					<tr class="border-b border-slate-200">
+				<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
+					<tr class="border-b border-line">
 						<th class="py-1.5 pr-3 font-medium">Target VM</th>
 						<th class="py-1.5 pr-3 font-medium">Started</th>
 						<th class="py-1.5 font-medium">Status</th>
 					</tr>
 				</thead>
-				<tbody class="divide-y divide-slate-100">
+				<tbody class="divide-y divide-line-soft">
 					{#each clones as c (c.name)}
 						<tr>
-							<td class="py-1.5 pr-3 font-medium text-slate-800">{c.target}</td>
-							<td class="py-1.5 pr-3 whitespace-nowrap text-slate-500">{relativeAge(c.created)}</td>
+							<td class="py-1.5 pr-3 font-medium text-ink">{c.target}</td>
+							<td class="py-1.5 pr-3 whitespace-nowrap text-ink-muted">{relativeAge(c.created)}</td>
 							<td class="py-1.5 whitespace-nowrap">
 								{#if c.phase === 'Succeeded'}
-									<span class="inline-flex items-center gap-1.5 text-green-700">
-										<span class="h-1.5 w-1.5 rounded-full bg-green-500"></span> Succeeded
+									<span class="inline-flex items-center gap-1.5 text-ok-ink">
+										<span class="h-1.5 w-1.5 rounded-full bg-ok"></span> Succeeded
 									</span>
 								{:else if c.phase === 'Failed'}
-									<span class="inline-flex items-center gap-1.5 text-red-700">
-										<span class="h-1.5 w-1.5 rounded-full bg-red-500"></span> Failed
+									<span class="inline-flex items-center gap-1.5 text-danger-ink">
+										<span class="h-1.5 w-1.5 rounded-full bg-danger"></span> Failed
 									</span>
 								{:else}
-									<span class="inline-flex items-center gap-1.5 text-amber-600">
-										<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500"></span>
+									<span class="inline-flex items-center gap-1.5 text-warn-ink">
+										<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-warn"></span>
 										{c.phase || 'Starting…'}
 									</span>
 								{/if}
@@ -152,7 +153,7 @@
 	{#snippet footer()}
 		<button
 			onclick={onclose}
-			class="ml-auto rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+			class="ml-auto rounded border border-line-strong px-3 py-1 text-sm text-ink-soft hover:bg-inset"
 		>
 			Close
 		</button>

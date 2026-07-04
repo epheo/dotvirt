@@ -68,11 +68,11 @@
 					})}
 			>
 				{#snippet icon()}
-					<Folder size={14} class="shrink-0 text-blue-500" />
+					<Folder size={14} class="shrink-0 text-accent" />
 				{/snippet}
 				<span class="truncate font-semibold text-ink-soft">{project.name}</span>
 				{#if project.error}
-					<span class="rounded bg-amber-100 p-0.5 text-amber-700" title={project.error}
+					<span class="rounded bg-warn-soft p-0.5 text-warn-ink" title={project.error}
 						><TriangleAlert size={10} /></span
 					>
 				{:else if projectDrift(project)}
@@ -85,7 +85,7 @@
 
 			{#if !collapsed.value[pid]}
 				{#if project.error}
-					<div class="py-1 pr-2 pl-7 text-xs text-amber-600 italic" title={project.error}>
+					<div class="py-1 pr-2 pl-7 text-xs text-warn-ink italic" title={project.error}>
 						{project.error}
 					</div>
 					{#if inventory.canManage}
@@ -97,7 +97,7 @@
 									namespaces: project.namespaces.map((n) => n.namespace),
 								})}
 							title="Create a repo for this project and bring it under GitOps"
-							class="mb-1 ml-7 rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 hover:bg-amber-100"
+							class="mb-1 ml-7 rounded border border-warn/50 bg-warn-soft/60 px-2 py-0.5 text-[11px] font-medium text-warn-ink hover:bg-warn-soft"
 						>
 							Attach repo
 						</button>
@@ -129,7 +129,7 @@
 							{#snippet icon()}
 								<Layers size={13} class="shrink-0 text-ink-faint" />
 							{/snippet}
-							<span class="truncate text-slate-600">{ns.namespace}</span>
+							<span class="truncate text-ink-soft">{ns.namespace}</span>
 							{#if nsDrift(ns)}
 								<StatusDot tone="danger" size="xs" title="A VM is out of sync" />
 							{/if}

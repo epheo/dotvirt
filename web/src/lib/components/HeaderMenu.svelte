@@ -39,7 +39,7 @@
 	{@render trigger({ open, toggle })}
 	{#if open}
 		<div
-			class="absolute z-50 mt-1 min-w-[12rem] rounded border border-slate-200 bg-white py-1 text-xs text-slate-700 shadow-lg {align ===
+			class="absolute z-50 mt-1 min-w-[12rem] rounded border border-line bg-panel py-1 text-xs text-ink-soft shadow-lg {align ===
 			'right'
 				? 'right-0'
 				: 'left-0'}"

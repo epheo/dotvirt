@@ -71,8 +71,8 @@
 </script>
 
 <Modal title="Migrate storage — {vm.name}" size="lg" {onclose}>
-	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-slate-700">
-		<p class="mb-3 text-xs text-slate-500">
+	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-ink-soft">
+		<p class="mb-3 text-xs text-ink-muted">
 			Stages a live storage migration into <strong>Changes</strong>. When the pull request merges,
 			KubeVirt copies each disk to a new volume on the target class while the VM keeps running — the
 			VM must still be running then, and the cluster must support volume migration. Reverting the
@@ -80,27 +80,27 @@
 		</p>
 
 		<table class="w-full text-[13px]">
-			<thead class="text-left text-xs tracking-wide text-slate-400 uppercase">
-				<tr class="border-b border-slate-200">
+			<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
+				<tr class="border-b border-line">
 					<th class="py-1.5 pr-3 font-medium">Disk</th>
 					<th class="py-1.5 pr-3 font-medium">Size</th>
 					<th class="py-1.5 pr-3 font-medium">Current class</th>
 					<th class="py-1.5 font-medium">Target class</th>
 				</tr>
 			</thead>
-			<tbody class="divide-y divide-slate-100">
+			<tbody class="divide-y divide-line-soft">
 				{#each disks as d (d.name)}
 					<tr>
-						<td class="py-1.5 pr-3 font-medium text-slate-800">{d.name}</td>
-						<td class="py-1.5 pr-3 whitespace-nowrap text-slate-500">{d.size || '—'}</td>
-						<td class="py-1.5 pr-3 whitespace-nowrap text-slate-500">
+						<td class="py-1.5 pr-3 font-medium text-ink">{d.name}</td>
+						<td class="py-1.5 pr-3 whitespace-nowrap text-ink-muted">{d.size || '—'}</td>
+						<td class="py-1.5 pr-3 whitespace-nowrap text-ink-muted">
 							{d.storageClass || 'cluster default'}
 						</td>
 						<td class="py-1.5">
 							<select
 								value={targets[d.name] ?? ''}
 								onchange={(e) => (targets = { ...targets, [d.name]: e.currentTarget.value })}
-								class="w-full rounded border border-slate-300 px-2 py-1"
+								class="w-full rounded border border-line-strong px-2 py-1"
 							>
 								<option value="">— keep —</option>
 								{#each options?.storageClasses ?? [] as sc (sc.name)}
@@ -116,20 +116,21 @@
 		</table>
 
 		{#if error}
-			<pre class="mt-3 rounded bg-red-50 p-2 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+			<pre
+				class="mt-3 rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 	</div>
 	{#snippet footer()}
 		<button
 			onclick={onclose}
-			class="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+			class="rounded border border-line-strong px-3 py-1 text-sm text-ink-soft hover:bg-inset"
 		>
 			Cancel
 		</button>
 		<button
 			onclick={stage}
 			disabled={!moves.length || busy}
-			class="ml-auto flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:bg-slate-300"
+			class="ml-auto flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent disabled:bg-line-strong"
 		>
 			<HardDrive size={14} />
 			{busy ? 'Staging…' : moves.length ? `Stage migration (${moves.length})` : 'Stage migration'}

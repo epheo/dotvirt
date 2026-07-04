@@ -20,7 +20,7 @@
 <div class="min-h-0 flex-1 overflow-y-auto p-4">
 	<div class="max-w-2xl space-y-4">
 		<InfoCard title={pg ? pg.name : network}>
-			<dl class="divide-y divide-slate-100 text-[13px]">
+			<dl class="divide-y divide-line-soft text-[13px]">
 				<Row
 					label="Type"
 					value={pg
@@ -51,7 +51,7 @@
 					{#each vms as vm (vm.namespace + '/' + vm.name)}
 						<a
 							href={vmHref(vm.namespace, vm.name)}
-							class="inline-flex items-center gap-1 rounded bg-inset px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-select-soft"
+							class="inline-flex items-center gap-1 rounded bg-inset px-1.5 py-0.5 text-[11px] text-ink-soft hover:bg-select-soft"
 						>
 							<PowerDot power={vm.power} paused={vm.paused} />{vm.name}
 						</a>

@@ -93,10 +93,10 @@
 					<button
 						onclick={disable}
 						disabled={disabling}
-						class="text-xs text-red-600 hover:underline disabled:text-slate-300">Disable…</button
+						class="text-xs text-danger hover:underline disabled:text-ink-faint">Disable…</button
 					>
 				{/if}
-				<button onclick={() => (configuring = true)} class="text-xs text-blue-600 hover:underline"
+				<button onclick={() => (configuring = true)} class="text-xs text-accent hover:underline"
 					>{view.configured ? 'Configure' : 'Enable DRS'}</button
 				>
 			</span>
@@ -104,9 +104,9 @@
 	{/snippet}
 
 	{#if !view}
-		<p class="px-3 py-3 text-xs text-slate-400">{error || 'Loading…'}</p>
+		<p class="px-3 py-3 text-xs text-ink-faint">{error || 'Loading…'}</p>
 	{:else}
-		<dl class="divide-y divide-slate-100 text-[13px]">
+		<dl class="divide-y divide-line-soft text-[13px]">
 			<Row label="Status" value={status} />
 			{#if view.config}
 				<Row label="Aggressiveness" value={drsThresholdLabel(view.config.threshold)} />
@@ -127,23 +127,25 @@
 			<Row label="Live state" value={liveStatus} />
 		</dl>
 		{#if view.warning}
-			<p class="border-t border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+			<p class="border-t border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
 				{view.warning}
 			</p>
 		{/if}
 		{#if view.live.degraded}
-			<p class="border-t border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+			<p class="border-t border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
 				{view.live.degraded}
 			</p>
 		{/if}
 		{#if !view.configured}
-			<p class="border-t border-slate-100 px-3 py-2 text-xs text-slate-400">
+			<p class="border-t border-line-soft px-3 py-2 text-xs text-ink-faint">
 				Without DRS, VMs are placed once at start and stay put. Enabling stages the descheduler
 				operator + configuration into the platform repository — applied when the PR merges.
 			</p>
 		{/if}
 		{#if error}
-			<p class="border-t border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>
+			<p class="border-t border-danger-soft bg-danger-soft/60 px-3 py-2 text-xs text-danger-ink">
+				{error}
+			</p>
 		{/if}
 	{/if}
 </InfoCard>

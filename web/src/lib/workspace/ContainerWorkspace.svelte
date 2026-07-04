@@ -260,7 +260,7 @@
 					bulkPower('Off');
 				}}>Power Off (staged)</MenuItem
 			>
-			<div class="my-1 border-t border-slate-100"></div>
+			<div class="my-1 border-t border-line-soft"></div>
 			<MenuItem
 				danger
 				onclick={() => {
@@ -268,7 +268,7 @@
 					confirmingBulkDelete = true;
 				}}>Delete {picked.size} VMs…</MenuItem
 			>
-			<div class="my-1 border-t border-slate-100"></div>
+			<div class="my-1 border-t border-line-soft"></div>
 			<MenuItem
 				onclick={() => {
 					bulkCtx = null;
@@ -293,7 +293,7 @@
 		</p>
 		<ul class="max-h-40 overflow-y-auto rounded border border-line text-xs">
 			{#each pickedVMs as vm (vm.namespace + '/' + vm.name)}
-				<li class="border-b border-slate-100 px-2 py-1 last:border-0">
+				<li class="border-b border-line-soft px-2 py-1 last:border-0">
 					<span class="font-medium text-ink">{vm.name}</span>
 					<span class="text-ink-faint">· {vm.namespace}</span>
 				</li>

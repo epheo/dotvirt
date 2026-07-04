@@ -27,33 +27,33 @@
 </script>
 
 <Modal {title} danger {onclose}>
-	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-slate-700">
+	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-ink-soft">
 		{@render children?.()}
-		<label for="confirm-delete-input" class="mt-3 mb-1 block text-xs text-slate-500">
+		<label for="confirm-delete-input" class="mt-3 mb-1 block text-xs text-ink-muted">
 			Type <span class="font-mono">{confirmWord}</span> to confirm:
 		</label>
 		<input
 			id="confirm-delete-input"
 			data-autofocus
 			bind:value={text}
-			class="w-full rounded border border-slate-300 px-2 py-1 font-mono text-sm focus:border-red-400"
+			class="w-full rounded border border-line-strong px-2 py-1 font-mono text-sm focus:border-danger/60"
 			placeholder={confirmWord}
 		/>
 		{#if error}
-			<p class="mt-2 text-xs text-red-600">{error}</p>
+			<p class="mt-2 text-xs text-danger">{error}</p>
 		{/if}
 	</div>
 	{#snippet footer()}
 		<button
 			onclick={onclose}
-			class="ml-auto rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+			class="ml-auto rounded border border-line-strong px-3 py-1 text-sm text-ink-soft hover:bg-inset"
 		>
 			Cancel
 		</button>
 		<button
 			onclick={onconfirm}
 			disabled={!ready}
-			class="rounded bg-red-600 px-3 py-1 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+			class="rounded bg-danger px-3 py-1 text-sm font-medium text-white hover:bg-danger-ink disabled:opacity-50"
 		>
 			Delete
 		</button>

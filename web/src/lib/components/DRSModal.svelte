@@ -76,13 +76,13 @@
 <Modal title="Configure DRS" size="lg" {onclose}>
 	<div class="space-y-4 overflow-y-auto px-5 py-4 text-sm">
 		<div>
-			<span class="text-slate-600">Automation level</span>
+			<span class="text-ink-soft">Automation level</span>
 			<div class="mt-1 space-y-1">
 				<label class="flex items-start gap-2">
 					<input type="radio" bind:group={mode} value="Predictive" class="mt-1" />
 					<span>
 						Predictive
-						<span class="block text-xs text-slate-400">
+						<span class="block text-xs text-ink-faint">
 							Dry run: recommendations appear in descheduler logs/metrics, no VM moves.
 						</span>
 					</span>
@@ -91,7 +91,7 @@
 					<input type="radio" bind:group={mode} value="Automatic" class="mt-1" />
 					<span>
 						Automatic
-						<span class="block text-xs text-slate-400">
+						<span class="block text-xs text-ink-faint">
 							Fully automated: VMs live-migrate off hot nodes to keep spare capacity even.
 						</span>
 					</span>
@@ -100,10 +100,10 @@
 		</div>
 
 		<label class="block">
-			<span class="text-slate-600">Migration aggressiveness</span>
+			<span class="text-ink-soft">Migration aggressiveness</span>
 			<select
 				bind:value={threshold}
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			>
 				{#each DRS_THRESHOLDS as t (t.value)}<option value={t.value}>{t.label} — {t.detail}</option
 					>{/each}
@@ -111,57 +111,57 @@
 		</label>
 
 		<label class="block">
-			<span class="text-slate-600">Evaluation interval (seconds)</span>
+			<span class="text-ink-soft">Evaluation interval (seconds)</span>
 			<input
 				type="number"
 				min={DRS_BOUNDS.intervalSeconds.min}
 				max={DRS_BOUNDS.intervalSeconds.max}
 				bind:value={intervalSeconds}
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 		</label>
 
 		<button
 			type="button"
 			onclick={() => (showAdvanced = !showAdvanced)}
-			class="text-xs text-blue-600 hover:underline"
+			class="text-xs text-accent hover:underline"
 		>
 			{showAdvanced ? '− Hide' : '+ Show'} advanced settings
 		</button>
 		{#if showAdvanced}
-			<div class="space-y-3 rounded border border-slate-200 bg-slate-50 p-3">
+			<div class="space-y-3 rounded border border-line bg-inset p-3">
 				<label class="flex items-start gap-2">
 					<input type="checkbox" bind:checked={softTainter} class="mt-0.5" />
 					<span>
 						Soft-taint hot nodes
-						<span class="block text-xs text-slate-400">
+						<span class="block text-xs text-ink-faint">
 							Also steer NEW placements away from hot nodes (PreferNoSchedule) until they cool.
 						</span>
 					</span>
 				</label>
 				<div class="grid grid-cols-2 gap-3">
 					<label class="block">
-						<span class="text-slate-600">Max migrations per node</span>
+						<span class="text-ink-soft">Max migrations per node</span>
 						<input
 							type="number"
 							min={DRS_BOUNDS.evictionNodeLimit.min}
 							max={DRS_BOUNDS.evictionNodeLimit.max}
 							bind:value={evictionNodeLimit}
-							class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+							class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 						/>
 					</label>
 					<label class="block">
-						<span class="text-slate-600">Max migrations cluster-wide</span>
+						<span class="text-ink-soft">Max migrations cluster-wide</span>
 						<input
 							type="number"
 							min={DRS_BOUNDS.evictionTotalLimit.min}
 							max={DRS_BOUNDS.evictionTotalLimit.max}
 							bind:value={evictionTotalLimit}
-							class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+							class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 						/>
 					</label>
 				</div>
-				<p class="text-xs text-slate-400">
+				<p class="text-xs text-ink-faint">
 					Keep at or below the cluster's live-migration limits so DRS never queues more migrations
 					than the cluster will run.
 				</p>
@@ -169,16 +169,16 @@
 		{/if}
 
 		{#if !view.psiConfigured}
-			<label class="flex items-start gap-2 rounded border border-amber-200 bg-amber-50 p-3">
+			<label class="flex items-start gap-2 rounded border border-warn-soft bg-warn-soft/60 p-3">
 				<input type="checkbox" bind:checked={installPSI} disabled={!view.canPSI} class="mt-0.5" />
 				<span class:opacity-50={!view.canPSI}>
 					Enable PSI on worker nodes (required for load-aware rebalancing)
-					<span class="block text-xs text-amber-700">
+					<span class="block text-xs text-warn-ink">
 						Stages a MachineConfig that <strong>reboots every worker node</strong> when the PR merges.
 						Skip if PSI (psi=1) is already enabled out-of-band.
 					</span>
 					{#if !view.canPSI}
-						<span class="block text-xs text-slate-400">
+						<span class="block text-xs text-ink-faint">
 							Requires MachineConfig authoring permission.
 						</span>
 					{/if}
@@ -187,7 +187,8 @@
 		{/if}
 
 		{#if error}
-			<pre class="rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+			<pre
+				class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 	</div>
 

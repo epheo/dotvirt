@@ -66,6 +66,7 @@
 	});
 </script>
 
+<!-- The bar stays dark in both themes, so its chrome uses raw slate, not ink tokens. -->
 <header class="flex items-center gap-3 border-b border-line-strong bg-bar px-4 py-2 text-white">
 	<a href="/compute" class="font-semibold">dotvirt</a>
 
@@ -131,7 +132,7 @@
 				{#snippet icon()}<Upload size={13} />{/snippet}
 				Upload Image
 			</MenuItem>
-			<div class="my-1 border-t border-slate-100"></div>
+			<div class="my-1 border-t border-line-soft"></div>
 			<MenuItem
 				onclick={() => {
 					close();
@@ -204,7 +205,7 @@
 			</button>
 		{/snippet}
 		{#snippet children({ close })}
-			<div class="border-b border-slate-100 px-3 py-2">
+			<div class="border-b border-line-soft px-3 py-2">
 				<div class="font-medium text-ink">{session.user?.username}</div>
 				{#if session.user?.groups.length}
 					<div class="mt-0.5 text-[11px] break-words text-ink-faint">
@@ -213,7 +214,7 @@
 				{/if}
 			</div>
 			<div class="px-3 py-1.5 text-ink-muted">{inventory.vmCount} VMs in view</div>
-			<div class="border-t border-slate-100"></div>
+			<div class="border-t border-line-soft"></div>
 			<MenuItem
 				onclick={() => {
 					close();

@@ -29,7 +29,7 @@
 {#snippet editButton(section: 'compute' | 'storage' | 'network' | 'labels')}
 	<button
 		onclick={() => onedit(section)}
-		class="flex items-center gap-1 text-xs text-blue-600 hover:underline"
+		class="flex items-center gap-1 text-xs text-accent hover:underline"
 	>
 		<Pencil size={11} /> Edit
 	</button>
@@ -41,8 +41,8 @@
 			<button
 				onclick={() => (view = id)}
 				class="block w-full rounded px-2.5 py-1.5 text-left {view === id
-					? 'bg-blue-50 font-medium text-blue-700'
-					: 'text-slate-600 hover:bg-slate-50'}"
+					? 'bg-select-soft font-medium text-accent-ink'
+					: 'text-ink-soft hover:bg-inset'}"
 			>
 				{label}
 			</button>
@@ -52,7 +52,7 @@
 		{#if view === 'hardware'}
 			<InfoCard title="VM Hardware">
 				{#snippet action()}{@render editButton('compute')}{/snippet}
-				<dl class="divide-y divide-slate-100 text-[13px]">
+				<dl class="divide-y divide-line-soft text-[13px]">
 					<Row label="CPU cores" value={vm.cpuCores ? String(vm.cpuCores) : ''} />
 					<Row label="Memory" value={vm.memory ?? ''} />
 					<Row label="Instance type" value={vm.instancetype ?? ''} />
@@ -71,11 +71,11 @@
 			<InfoCard title="Disks">
 				{#snippet action()}{@render editButton('storage')}{/snippet}
 				{#if vm.disks?.length}
-					<ul class="divide-y divide-slate-100 px-3 text-[13px]">
+					<ul class="divide-y divide-line-soft px-3 text-[13px]">
 						{#each vm.disks as d (d.name)}
 							<li class="flex justify-between gap-3 py-1.5">
-								<span class="text-slate-800">{d.name}</span>
-								<span class="text-slate-400"
+								<span class="text-ink">{d.name}</span>
+								<span class="text-ink-faint"
 									>{d.type}{d.size ? ` · ${d.size}` : ''}{d.storageClass
 										? ` · ${d.storageClass}`
 										: ''}</span
@@ -84,14 +84,14 @@
 						{/each}
 					</ul>
 				{:else}
-					<p class="px-3 py-3 text-xs text-slate-400">No disks defined in the manifest.</p>
+					<p class="px-3 py-3 text-xs text-ink-faint">No disks defined in the manifest.</p>
 				{/if}
 			</InfoCard>
 		{:else if view === 'network'}
 			<InfoCard title="Network adapters">
 				{#snippet action()}{@render editButton('network')}{/snippet}
 				{#if vm.networks?.length}
-					<ul class="divide-y divide-slate-100 px-3 text-[13px]">
+					<ul class="divide-y divide-line-soft px-3 text-[13px]">
 						{#each vm.networks as n (n.name)}
 							{@const pg = resolveNIC(n, vm.namespace, networks)}
 							{@const detail = [
@@ -105,9 +105,9 @@
 								.join(' · ')}
 							<li class="py-1.5">
 								<div class="flex items-baseline justify-between gap-3">
-									<span class="text-slate-800">{n.name}</span>
+									<span class="text-ink">{n.name}</span>
 									<span class="flex items-center gap-2 text-right">
-										<span class="text-slate-700"
+										<span class="text-ink-soft"
 											>{pg
 												? pg.name
 												: n.network && n.network !== 'pod'
@@ -116,20 +116,20 @@
 										>
 										{#if pg}
 											<span
-												class="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500"
+												class="shrink-0 rounded bg-inset-strong px-1.5 py-0.5 text-[11px] text-ink-muted"
 												>{kindLabel(pg.kind)}{pg.vlan ? ` ${pg.vlan}` : ''}</span
 											>
 										{/if}
 									</span>
 								</div>
 								{#if detail}
-									<div class="mt-0.5 text-right text-[11px] text-slate-400">{detail}</div>
+									<div class="mt-0.5 text-right text-[11px] text-ink-faint">{detail}</div>
 								{/if}
 							</li>
 						{/each}
 					</ul>
 				{:else}
-					<p class="px-3 py-3 text-xs text-slate-400">No adapters defined in the manifest.</p>
+					<p class="px-3 py-3 text-xs text-ink-faint">No adapters defined in the manifest.</p>
 				{/if}
 			</InfoCard>
 		{:else if view === 'labels'}
@@ -141,27 +141,27 @@
 							<button
 								onclick={() => onsearchlabel?.(k, v)}
 								title="Find everything labeled {k}={v}"
-								class="mr-1 mb-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+								class="mr-1 mb-1 inline-block rounded bg-inset-strong px-1.5 py-0.5 text-xs text-ink-soft hover:bg-select-soft hover:text-accent-ink"
 								>{k}={v}</button
 							>
 						{/each}
 					{:else}
-						<p class="py-1 text-xs text-slate-400">No labels.</p>
+						<p class="py-1 text-xs text-ink-faint">No labels.</p>
 					{/if}
 				</div>
 			</InfoCard>
 		{:else}
 			<InfoCard title="Source & sync">
-				<dl class="divide-y divide-slate-100 text-[13px]">
+				<dl class="divide-y divide-line-soft text-[13px]">
 					<Row label="Manifest" value={vm.sourceFile} mono />
 					<Row label="Namespace" value={vm.namespace} />
 					<Row label="Sync" value={vm.sync} />
 				</dl>
-				<div class="border-t border-slate-100 px-3 py-2">
-					<a href={manifestURL(vm)} target="_blank" class="text-xs text-blue-600 hover:underline"
+				<div class="border-t border-line-soft px-3 py-2">
+					<a href={manifestURL(vm)} target="_blank" class="text-xs text-accent hover:underline"
 						>Download manifest ↗</a
 					>
-					<p class="mt-1 text-xs text-slate-400">
+					<p class="mt-1 text-xs text-ink-faint">
 						This VM's configuration lives in git; edits become a pull request.
 					</p>
 				</div>

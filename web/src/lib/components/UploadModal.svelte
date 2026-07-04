@@ -128,50 +128,50 @@
 	{#snippet icon()}<Upload size={16} />{/snippet}
 	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm">
 		{#if stage === 'form' || stage === 'error'}
-			<p class="mb-3 text-xs text-slate-500">
+			<p class="mb-3 text-xs text-ink-muted">
 				Uploads a disk image (qcow2/raw/iso) as a DataVolume your VMs can boot from. The file
 				streams straight from your browser to the cluster's upload proxy.
 			</p>
 			<div class="grid grid-cols-2 gap-4">
 				<label class="col-span-2 block">
-					<span class="text-slate-600">Image file</span>
+					<span class="text-ink-soft">Image file</span>
 					<input
 						type="file"
 						onchange={pickFile}
 						accept=".qcow2,.img,.raw,.iso,.gz,.xz"
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5 text-xs"
 					/>
 				</label>
 				<label class="block">
-					<span class="text-slate-600">Disk name</span>
+					<span class="text-ink-soft">Disk name</span>
 					<input
 						bind:value={name}
 						placeholder="my-image"
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-sm"
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5 font-mono text-sm"
 					/>
 				</label>
 				<label class="block">
-					<span class="text-slate-600">Project (namespace)</span>
+					<span class="text-ink-soft">Project (namespace)</span>
 					<select
 						bind:value={namespace}
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 					>
 						{#each namespaces as ns (ns)}<option value={ns}>{ns}</option>{/each}
 					</select>
 				</label>
 				<label class="block">
-					<span class="text-slate-600">Disk size</span>
+					<span class="text-ink-soft">Disk size</span>
 					<input
 						bind:value={size}
 						placeholder="10Gi"
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 					/>
 				</label>
 				<label class="block">
-					<span class="text-slate-600">Storage class</span>
+					<span class="text-ink-soft">Storage class</span>
 					<select
 						bind:value={storageClass}
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 					>
 						<option value="">cluster default</option>
 						{#each options?.storageClasses ?? [] as sc (sc.name)}
@@ -181,19 +181,19 @@
 				</label>
 			</div>
 			{#if file}
-				<p class="mt-2 text-xs text-slate-400">
+				<p class="mt-2 text-xs text-ink-faint">
 					{file.name} · {(file.size / 1024 ** 2).toFixed(1)} MiB — ensure the disk size fits the image's
 					virtual size.
 				</p>
 			{/if}
 			{#if !validName && name}
-				<p class="mt-1 text-xs text-amber-700">
+				<p class="mt-1 text-xs text-warn-ink">
 					Lowercase letters, digits and dashes only (≤63 chars).
 				</p>
 			{/if}
 			{#if error}
 				<pre
-					class="mt-2 rounded bg-red-50 p-2 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+					class="mt-2 rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 			{/if}
 		{:else}
 			<!-- Progress view. -->
@@ -202,14 +202,14 @@
 					<div class="flex items-center gap-2 text-sm">
 						<span
 							class="flex h-4 w-4 items-center justify-center rounded-full text-[10px] {complete
-								? 'bg-green-500 text-white'
+								? 'bg-ok text-white'
 								: active
-									? 'bg-blue-500 text-white'
-									: 'bg-slate-200 text-slate-400'}"
+									? 'bg-accent text-white'
+									: 'bg-line text-ink-faint'}"
 						>
 							{#if complete}<Check size={10} />{/if}
 						</span>
-						<span class={active || complete ? 'text-slate-800' : 'text-slate-400'}>{label}</span>
+						<span class={active || complete ? 'text-ink' : 'text-ink-faint'}>{label}</span>
 					</div>
 				{/snippet}
 				{@render step('Creating target', stage === 'creating', stageIdx > 0)}
@@ -220,8 +220,8 @@
 					stageIdx > 2,
 				)}
 				{#if stage === 'uploading'}
-					<div class="ml-6 h-2 overflow-hidden rounded-full bg-slate-100">
-						<div class="h-full rounded-full bg-blue-500" style="width:{uploadPct}%"></div>
+					<div class="ml-6 h-2 overflow-hidden rounded-full bg-inset-strong">
+						<div class="h-full rounded-full bg-accent" style="width:{uploadPct}%"></div>
 					</div>
 				{/if}
 				{@render step(
@@ -231,7 +231,7 @@
 				)}
 
 				{#if stage === 'done'}
-					<p class="mt-3 rounded bg-green-50 p-3 text-xs text-green-800">
+					<p class="mt-3 rounded bg-ok-soft/60 p-3 text-xs text-ok-ink">
 						<strong>{name}</strong> is ready in <strong>{namespace}</strong> — use it as a VM's boot disk.
 					</p>
 				{/if}
@@ -242,22 +242,23 @@
 		{#if stage === 'form' || stage === 'error'}
 			<button
 				onclick={onclose}
-				class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button
+				class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong"
+				>Cancel</button
 			>
 			<button
 				onclick={start}
 				disabled={!ready}
-				class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
+				class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 			>
 				{stage === 'error' ? 'Retry' : 'Upload'}
 			</button>
 		{:else if stage === 'done'}
 			<button
 				onclick={onclose}
-				class="ml-auto rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white">Done</button
+				class="ml-auto rounded bg-accent px-4 py-1.5 text-sm font-medium text-white">Done</button
 			>
 		{:else}
-			<span class="ml-auto text-xs text-slate-400">Working… keep this tab open.</span>
+			<span class="ml-auto text-xs text-ink-faint">Working… keep this tab open.</span>
 		{/if}
 	{/snippet}
 </Modal>

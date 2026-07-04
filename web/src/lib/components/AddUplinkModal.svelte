@@ -61,52 +61,55 @@
 <Modal title="Add Uplink" {onclose}>
 	<div class="space-y-4 px-5 py-4 text-sm">
 		<label class="block">
-			<span class="text-slate-600">Name (physical network)</span>
+			<span class="text-ink-soft">Name (physical network)</span>
 			<input
 				bind:value={name}
 				placeholder="physnet-prod"
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 		</label>
 		<label class="block">
-			<span class="text-slate-600">Nodes</span>
-			<select bind:value={node} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
+			<span class="text-ink-soft">Nodes</span>
+			<select bind:value={node} class="mt-1 w-full rounded border border-line-strong px-2 py-1.5">
 				<option value="">All worker nodes</option>
 				{#each nodes as n (n)}<option value={n}>{n}</option>{/each}
 			</select>
 		</label>
 		<div class="grid grid-cols-2 gap-3">
 			<label class="block">
-				<span class="text-slate-600">Physical adapter (NIC)</span>
+				<span class="text-ink-soft">Physical adapter (NIC)</span>
 				{#if nics.length}
-					<select bind:value={nic} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
+					<select
+						bind:value={nic}
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+					>
 						{#each nics as n (n)}<option value={n}>{n}</option>{/each}
 					</select>
 				{:else}
 					<input
 						bind:value={nic}
 						placeholder="eno2"
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 					/>
 				{/if}
 			</label>
 			<label class="block">
-				<span class="text-slate-600">OVS bridge <span class="text-slate-400">(optional)</span></span
-				>
+				<span class="text-ink-soft">OVS bridge <span class="text-ink-faint">(optional)</span></span>
 				<input
 					bind:value={bridge}
 					placeholder={name ? `br-${name}` : 'br-physnet'}
-					class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+					class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 				/>
 			</label>
 		</div>
-		<p class="rounded bg-amber-50 px-3 py-2 text-xs text-amber-700">
+		<p class="rounded bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
 			Creates an OVS bridge enslaving this NIC on {node || 'all worker nodes'} and maps it to the physical
 			network — it changes node networking, so review the PR carefully. Cluster-scoped — proposed to the
 			platform repository. Requires the NMState operator.
 		</p>
 		{#if error}
-			<pre class="rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+			<pre
+				class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 	</div>
 	{#snippet footer()}

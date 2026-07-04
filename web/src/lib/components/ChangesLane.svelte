@@ -95,13 +95,13 @@
 
 <section class="mb-5" hidden={proposed}>
 	<div class="mb-1 flex items-center gap-2">
-		<Folder size={14} class="text-blue-500" />
-		<span class="font-semibold text-slate-700">{project}</span>
-		<span class="text-xs text-slate-400">({draft.count})</span>
+		<Folder size={14} class="text-accent" />
+		<span class="font-semibold text-ink-soft">{project}</span>
+		<span class="text-xs text-ink-faint">({draft.count})</span>
 		<button
 			onclick={discardAll}
 			disabled={discarding}
-			class="ml-auto text-xs text-slate-500 hover:text-slate-700 disabled:text-slate-300"
+			class="ml-auto text-xs text-ink-muted hover:text-ink-soft disabled:text-ink-faint"
 			>{discarding ? 'discarding…' : 'discard all'}</button
 		>
 	</div>
@@ -110,25 +110,26 @@
 	</div>
 
 	{#if error}
-		<pre class="mb-2 rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+		<pre
+			class="mb-2 rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 	{/if}
 
 	{#each draft.items as item (itemKey(item.namespace, item.name))}
 		{@const k = itemKey(item.namespace, item.name)}
-		<div class="mb-2 rounded border border-slate-200">
-			<div class="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
+		<div class="mb-2 rounded border border-line">
+			<div class="flex items-center gap-2 border-b border-line-soft px-3 py-2">
 				<span
 					class="rounded px-1.5 py-0.5 text-xs {item.kind === 'delete'
-						? 'bg-red-100 text-red-700'
+						? 'bg-danger-soft text-danger-ink'
 						: item.kind === 'create'
-							? 'bg-green-100 text-green-700'
-							: 'bg-blue-100 text-blue-700'}">{item.kind}</span
+							? 'bg-ok-soft text-ok-ink'
+							: 'bg-accent-soft text-accent-ink'}">{item.kind}</span
 				>
-				<span class="font-medium text-slate-800">{item.namespace}/{item.name}</span>
+				<span class="font-medium text-ink">{item.namespace}/{item.name}</span>
 				<button
 					onclick={() => unstage(item.namespace, item.name, item.resource)}
 					disabled={unstaging !== null}
-					class="ml-auto text-xs text-red-500 hover:text-red-700 disabled:text-slate-300"
+					class="ml-auto text-xs text-danger hover:text-danger-ink disabled:text-ink-faint"
 					>{unstaging === k ? 'unstaging…' : 'unstage'}</button
 				>
 			</div>
@@ -137,14 +138,14 @@
 				{#if item.yaml}
 					<button
 						onclick={() => (showYaml[k] = !showYaml[k])}
-						class="mt-2 flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
+						class="mt-2 flex items-center gap-1 text-xs text-ink-faint hover:text-ink-soft"
 					>
 						{#if showYaml[k]}<ChevronDown size={12} /> hide YAML{:else}<ChevronRight size={12} /> view
 							YAML{/if}
 					</button>
 					{#if showYaml[k]}
 						<pre
-							class="mt-1 overflow-x-auto rounded bg-slate-50 p-2 font-mono text-[11px] leading-snug text-slate-600">{item.yaml}</pre>
+							class="mt-1 overflow-x-auto rounded bg-inset p-2 font-mono text-[11px] leading-snug text-ink-soft">{item.yaml}</pre>
 					{/if}
 				{/if}
 			</div>
@@ -155,17 +156,17 @@
 		<input
 			bind:value={title}
 			placeholder="Pull request title"
-			class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+			class="w-full rounded border border-line-strong px-2 py-1.5 text-sm"
 		/>
 		<textarea
 			bind:value={message}
 			placeholder="Description (optional)"
 			rows="2"
-			class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"></textarea>
+			class="w-full rounded border border-line-strong px-2 py-1.5 text-sm"></textarea>
 		<button
 			onclick={propose}
 			disabled={proposing}
-			class="w-full rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
+			class="w-full rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 		>
 			{proposing ? 'Proposing…' : `Propose pull request → ${project}`}
 		</button>

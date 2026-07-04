@@ -79,21 +79,21 @@
 </script>
 
 {#if info?.canCordon}
-	<section class="max-w-2xl rounded border border-slate-200">
+	<section class="max-w-2xl rounded border border-line">
 		<h3
-			class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase"
+			class="border-b border-line bg-inset px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
 		>
 			Maintenance
 		</h3>
 		<div class="space-y-3 p-3">
 			<div class="flex items-center gap-2 text-sm">
-				<span class="text-slate-500">Scheduling:</span>
+				<span class="text-ink-muted">Scheduling:</span>
 				{#if info.unschedulable}
-					<span class="inline-flex items-center gap-1.5 font-medium text-amber-700">
+					<span class="inline-flex items-center gap-1.5 font-medium text-warn-ink">
 						<Ban size={14} /> Cordoned
 					</span>
 				{:else}
-					<span class="inline-flex items-center gap-1.5 font-medium text-green-700">
+					<span class="inline-flex items-center gap-1.5 font-medium text-ok-ink">
 						<CheckCircle2 size={14} /> Schedulable
 					</span>
 				{/if}
@@ -102,7 +102,7 @@
 				<button
 					onclick={toggleCordon}
 					disabled={busy}
-					class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+					class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 				>
 					{#if info.unschedulable}<CheckCircle2 size={13} /> Uncordon{:else}<Ban size={13} /> Cordon{/if}
 				</button>
@@ -112,17 +112,17 @@
 					title={running.length === 0
 						? 'No running VMs to migrate'
 						: 'Live-migrate every running VM off this node'}
-					class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+					class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 				>
 					<MoveRight size={13} /> Evacuate ({running.length})
 				</button>
 			</div>
-			<p class="text-xs text-slate-400">
+			<p class="text-xs text-ink-faint">
 				Cordon stops new VM placements here; running VMs stay until you evacuate. Live-migration
 				needs another schedulable node with capacity.
 			</p>
 			{#if msg}
-				<p class="text-xs {ok ? 'text-slate-600' : 'text-red-700'}">{msg}</p>
+				<p class="text-xs {ok ? 'text-ink-soft' : 'text-danger-ink'}">{msg}</p>
 			{/if}
 		</div>
 	</section>

@@ -48,7 +48,7 @@
 {#if data}
 	<InfoCard title="Host balance">
 		{#snippet action()}
-			<a href="?tab=configure" class="text-xs text-blue-700 hover:underline">
+			<a href="?tab=configure" class="text-xs text-accent-ink hover:underline">
 				{data?.band ? 'DRS settings' : 'Enable DRS'}
 			</a>
 		{/snippet}
@@ -86,7 +86,7 @@
 							x={i * (W / 10) + W / 20}
 							y={BASE - barH(n) - 3}
 							text-anchor="middle"
-							class="fill-slate-500"
+							class="fill-ink-muted"
 							font-size="8">{n}</text
 						>
 					{/if}
@@ -105,47 +105,42 @@
 						x={px(t)}
 						y="76"
 						text-anchor={t === 0 ? 'start' : t === 100 ? 'end' : 'middle'}
-						class="fill-slate-400"
+						class="fill-ink-faint"
 						font-size="8">{t}%</text
 					>
 				{/each}
-				<text
-					x={px(data.mean)}
-					y={TOP - 6}
-					text-anchor="middle"
-					class="fill-slate-600"
-					font-size="8">mean {Math.round(data.mean)}%</text
+				<text x={px(data.mean)} y={TOP - 6} text-anchor="middle" class="fill-ink-soft" font-size="8"
+					>mean {Math.round(data.mean)}%</text
 				>
 			</svg>
 
 			<div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
-				<span class="text-slate-600">
+				<span class="text-ink-soft">
 					{data.workers} worker{data.workers === 1 ? '' : 's'}
 				</span>
 				{#if data.band}
 					{#if data.band.above === 0 && data.band.below === 0}
-						<span class="rounded bg-green-100 px-1.5 py-0.5 font-medium text-green-800"
-							>balanced</span
-						>
+						<span class="rounded bg-ok-soft px-1.5 py-0.5 font-medium text-ok-ink">balanced</span>
 					{:else}
 						{#if data.band.above > 0}
 							<span
-								class="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800"
+								class="rounded bg-warn-soft px-1.5 py-0.5 font-medium text-warn-ink"
 								title="above the DRS band — migration sources">{data.band.above} hot</span
 							>
 						{/if}
 						{#if data.band.below > 0}
+							<!-- Cold chip matches --chart-cold's sky hue; no status token fits. -->
 							<span
 								class="rounded bg-sky-100 px-1.5 py-0.5 font-medium text-sky-800"
 								title="below the DRS band — migration targets">{data.band.below} cold</span
 							>
 						{/if}
 					{/if}
-					<span class="text-slate-400" title="the configured DRS deviation window around the mean">
+					<span class="text-ink-faint" title="the configured DRS deviation window around the mean">
 						band {Math.round(data.band.low)}–{Math.round(data.band.high)}%
 					</span>
 				{:else}
-					<span class="text-slate-400">DRS not configured — no action band.</span>
+					<span class="text-ink-faint">DRS not configured — no action band.</span>
 				{/if}
 			</div>
 
@@ -155,20 +150,18 @@
 						<li class="flex items-center gap-2 text-xs">
 							<a
 								href="/hosts/{o.node}"
-								class="w-44 min-w-0 truncate text-slate-700 hover:text-blue-700 hover:underline"
+								class="w-44 min-w-0 truncate text-ink-soft hover:text-accent-ink hover:underline"
 								>{o.node}</a
 							>
-							<span class="h-1.5 flex-1 overflow-hidden rounded bg-slate-100">
-								<span
-									class="block h-full rounded bg-amber-400"
-									style="width: {Math.min(100, o.pct)}%"
+							<span class="h-1.5 flex-1 overflow-hidden rounded bg-inset-strong">
+								<span class="block h-full rounded bg-warn" style="width: {Math.min(100, o.pct)}%"
 								></span>
 							</span>
-							<span class="w-9 shrink-0 text-right font-medium text-amber-700"
+							<span class="w-9 shrink-0 text-right font-medium text-warn-ink"
 								>{Math.round(o.pct)}%</span
 							>
 							{#if o.unschedulable}
-								<span class="shrink-0 text-slate-400" title="cordoned">⊘</span>
+								<span class="shrink-0 text-ink-faint" title="cordoned">⊘</span>
 							{/if}
 						</li>
 					{/each}

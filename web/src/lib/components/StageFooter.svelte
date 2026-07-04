@@ -21,15 +21,15 @@
 	} = $props();
 </script>
 
-<span class="text-xs text-slate-400">{hint}</span>
+<span class="text-xs text-ink-faint">{hint}</span>
 <button
 	onclick={oncancel}
-	class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button
+	class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong">Cancel</button
 >
 <button
 	onclick={onsubmit}
 	disabled={disabled || submitting}
-	class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
+	class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 >
 	{submitting ? busyLabel : label}
 </button>

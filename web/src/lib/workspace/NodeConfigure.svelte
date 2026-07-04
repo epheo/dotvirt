@@ -17,10 +17,10 @@
 <div class="min-h-0 flex-1 overflow-y-auto p-4">
 	<div class="max-w-2xl space-y-4">
 		<InfoCard title="Node: {node}">
-			<dl class="divide-y divide-slate-100 text-[13px]">
+			<dl class="divide-y divide-line-soft text-[13px]">
 				<Row label="VMs placed here" value={String(vms.length)} />
 			</dl>
-			<p class="border-t border-slate-100 px-3 py-2 text-xs text-ink-faint">
+			<p class="border-t border-line-soft px-3 py-2 text-xs text-ink-faint">
 				Node configuration is managed by the cluster platform, not dotvirt.
 			</p>
 		</InfoCard>
@@ -36,10 +36,10 @@
 						onclick={() => (ui.modal = { kind: 'uplink' })}
 						disabled={!inventory.canManage}
 						title={inventory.canManage ? '' : 'Requires platform-network authoring permission'}
-						class="text-xs text-accent hover:underline disabled:text-slate-300">+ Add uplink</button
+						class="text-xs text-accent hover:underline disabled:text-ink-faint">+ Add uplink</button
 					>
 				{/snippet}
-				<ul class="divide-y divide-slate-100 px-3 text-[13px]">
+				<ul class="divide-y divide-line-soft px-3 text-[13px]">
 					{#each nodeUplinks as u (u.name)}
 						<li class="flex items-baseline justify-between gap-3 py-1.5">
 							<span class="text-ink">{u.name}{u.builtin ? ' · default' : ''}</span>
@@ -58,7 +58,7 @@
 					Install the NMState operator instance to discover physical adapters.
 				</p>
 			{:else if nics.length}
-				<ul class="divide-y divide-slate-100 px-3 text-[13px]">
+				<ul class="divide-y divide-line-soft px-3 text-[13px]">
 					{#each nics as a (a.name)}
 						<li class="flex items-baseline justify-between gap-3 py-1.5">
 							<span class="text-ink">{a.name}</span>

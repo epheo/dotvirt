@@ -72,22 +72,22 @@
 	{@const list = vmsFor(net.name)}
 	<button
 		onclick={() => onpick(net.name)}
-		class="flex w-full flex-col gap-1 rounded border border-slate-200 bg-white px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-50"
+		class="flex w-full flex-col gap-1 rounded border border-line bg-panel px-3 py-2 text-left hover:border-accent/60 hover:bg-select-soft"
 	>
 		<div class="flex flex-wrap items-center gap-2">
-			<Network size={13} class="shrink-0 text-slate-400" />
-			<span class="font-medium text-slate-700">{net.name}</span>
-			<span class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500"
+			<Network size={13} class="shrink-0 text-ink-faint" />
+			<span class="font-medium text-ink-soft">{net.name}</span>
+			<span class="rounded bg-inset-strong px-1.5 py-0.5 text-[10px] text-ink-muted"
 				>{st.nsx} · {st.vsphere}</span
 			>
-			{#if net.vlan}<span class="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700"
+			{#if net.vlan}<span class="rounded bg-warn-soft px-1.5 py-0.5 text-[10px] text-warn-ink"
 					>VLAN {net.vlan}</span
 				>{/if}
-			{#if net.uplink}<span class="text-[10px] text-slate-400">↑ {net.uplink}</span>{/if}
-			{#if net.subnets?.length}<span class="text-[10px] text-slate-400"
+			{#if net.uplink}<span class="text-[10px] text-ink-faint">↑ {net.uplink}</span>{/if}
+			{#if net.subnets?.length}<span class="text-[10px] text-ink-faint"
 					>{net.subnets.join(', ')}</span
 				>{/if}
-			<span class="ml-auto text-xs text-slate-400"
+			<span class="ml-auto text-xs text-ink-faint"
 				>{list.length} VM{list.length === 1 ? '' : 's'}</span
 			>
 		</div>
@@ -95,12 +95,12 @@
 			<div class="flex flex-wrap gap-1 pl-5">
 				{#each list.slice(0, 14) as vm (vm.namespace + '/' + vm.name)}
 					<span
-						class="inline-flex items-center gap-1 rounded bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-600"
+						class="inline-flex items-center gap-1 rounded bg-inset px-1.5 py-0.5 text-[11px] text-ink-soft"
 					>
 						<PowerDot power={vm.power} paused={vm.paused} />{vm.name}
 					</span>
 				{/each}
-				{#if list.length > 14}<span class="px-1 text-[11px] text-slate-400"
+				{#if list.length > 14}<span class="px-1 text-[11px] text-ink-faint"
 						>+{list.length - 14} more</span
 					>{/if}
 			</div>
@@ -116,27 +116,25 @@
 	</p>
 
 	<!-- Tier-0: the platform provider edge — uplinks (transports) and cluster-scoped segments. -->
-	<section class="rounded-lg border border-slate-300 bg-slate-50 p-3">
+	<section class="rounded-lg border border-line-strong bg-inset p-3">
 		<div class="mb-2 flex items-center gap-2">
-			<Radio size={15} class="text-slate-500" />
-			<span class="font-semibold text-slate-700">{TERMS.tier0.nsx}</span>
-			<span class="text-xs text-slate-400">· {TERMS.tier0.vsphere}</span>
+			<Radio size={15} class="text-ink-muted" />
+			<span class="font-semibold text-ink-soft">{TERMS.tier0.nsx}</span>
+			<span class="text-xs text-ink-faint">· {TERMS.tier0.vsphere}</span>
 		</div>
 		{#if uplinks.length}
 			<div class="mb-2 flex flex-wrap gap-1.5 pl-6">
 				{#each uplinks as u (u.name)}
-					<span
-						class="rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600"
-					>
-						{u.name}{u.builtin ? ' · default' : ''} <span class="text-slate-400">({u.bridge})</span>
+					<span class="rounded border border-line bg-panel px-2 py-0.5 text-[11px] text-ink-soft">
+						{u.name}{u.builtin ? ' · default' : ''} <span class="text-ink-faint">({u.bridge})</span>
 					</span>
 				{/each}
 			</div>
 		{/if}
-		<div class="space-y-1.5 border-l-2 border-slate-300 pl-4">
+		<div class="space-y-1.5 border-l-2 border-line-strong pl-4">
 			{#each t0Segments as net (net.name)}{@render segmentCard(net)}{/each}
 			{#if t0Segments.length === 0}
-				<p class="text-xs text-slate-400 italic">No provider-edge segments yet.</p>
+				<p class="text-xs text-ink-faint italic">No provider-edge segments yet.</p>
 			{/if}
 		</div>
 	</section>
@@ -144,17 +142,17 @@
 	<!-- Tier-1: one gateway per project, carrying its primary + overlay segments. -->
 	{#each projects as p (p.name)}
 		{@const segs = projSegments(p)}
-		<section class="rounded-lg border border-slate-200 p-3">
+		<section class="rounded-lg border border-line p-3">
 			<div class="mb-2 flex items-center gap-2">
-				<Router size={15} class="text-blue-500" />
-				<span class="font-semibold text-slate-700">{TERMS.tier1.nsx}</span>
-				<span class="text-xs text-slate-400">· {p.name} ({TERMS.tier1.vsphere})</span>
+				<Router size={15} class="text-accent" />
+				<span class="font-semibold text-ink-soft">{TERMS.tier1.nsx}</span>
+				<span class="text-xs text-ink-faint">· {p.name} ({TERMS.tier1.vsphere})</span>
 			</div>
-			<div class="space-y-1.5 border-l-2 border-blue-200 pl-4">
+			<div class="space-y-1.5 border-l-2 border-select pl-4">
 				{#each segs.primary as net (net.name)}{@render segmentCard(net)}{/each}
 				{#each segs.overlays as net (net.name)}{@render segmentCard(net)}{/each}
 				{#if !segs.primary.length && !segs.overlays.length}
-					<p class="text-xs text-slate-400 italic">No segments — VMs ride the pod network.</p>
+					<p class="text-xs text-ink-faint italic">No segments — VMs ride the pod network.</p>
 				{/if}
 			</div>
 		</section>
@@ -162,16 +160,16 @@
 
 	<!-- VMs with no user-defined segment: the cluster pod network or no NIC at all. -->
 	{#if podVMs.length || noVMs.length}
-		<section class="rounded-lg border border-slate-200 p-3">
+		<section class="rounded-lg border border-line p-3">
 			<div class="mb-2 flex items-center gap-2">
-				<Network size={15} class="text-slate-400" />
-				<span class="font-semibold text-slate-700">Unsegmented</span>
-				<span class="text-xs text-slate-400">· cluster pod network</span>
+				<Network size={15} class="text-ink-faint" />
+				<span class="font-semibold text-ink-soft">Unsegmented</span>
+				<span class="text-xs text-ink-faint">· cluster pod network</span>
 			</div>
 			<div class="flex flex-wrap gap-1 pl-6">
 				{#each [...podVMs, ...noVMs] as vm (vm.namespace + '/' + vm.name)}
 					<span
-						class="inline-flex items-center gap-1 rounded bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-600"
+						class="inline-flex items-center gap-1 rounded bg-inset px-1.5 py-0.5 text-[11px] text-ink-soft"
 					>
 						<PowerDot power={vm.power} paused={vm.paused} />{vm.name}
 					</span>

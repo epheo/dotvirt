@@ -21,7 +21,7 @@
 
 {#if stagedItem || stagedCount}
 	<div
-		class="flex items-center gap-2 border-b border-blue-200 bg-blue-50 px-4 py-1.5 text-xs text-blue-800"
+		class="flex items-center gap-2 border-b border-select bg-select-soft px-4 py-1.5 text-xs text-accent-ink"
 	>
 		<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>
 		{#if stagedItem}
@@ -38,9 +38,9 @@
 	</div>
 {:else if proposal}
 	<div
-		class="flex items-center gap-2 border-b border-emerald-200 bg-emerald-50 px-4 py-1.5 text-xs text-emerald-800"
+		class="flex items-center gap-2 border-b border-ok-soft bg-ok-soft/60 px-4 py-1.5 text-xs text-ok-ink"
 	>
-		<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500"></span>
+		<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-ok"></span>
 		PR #{proposal.prNumber} is open in <strong>{proj}</strong> — its changes apply when it merges.
 		<a href={proposal.prURL} target="_blank" rel="noopener" class="font-medium hover:underline"
 			>View PR ↗</a

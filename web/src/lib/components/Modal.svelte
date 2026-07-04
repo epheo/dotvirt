@@ -91,28 +91,28 @@
 		aria-labelledby={titleId}
 		tabindex="-1"
 		onkeydown={trapTab}
-		class="flex max-h-[90vh] w-full {width} flex-col rounded-lg bg-white shadow-xl outline-none"
+		class="flex max-h-[90vh] w-full {width} flex-col rounded-lg bg-panel shadow-xl outline-none"
 	>
-		<header class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+		<header class="flex items-center justify-between border-b border-line px-5 py-3">
 			<h2
 				id={titleId}
 				class="flex items-center gap-2 text-base font-semibold {danger
-					? 'text-red-700'
-					: 'text-slate-800'}"
+					? 'text-danger-ink'
+					: 'text-ink'}"
 			>
 				{#if icon}{@render icon()}{/if}{title}
-				{#if subtitle}<span class="font-normal text-slate-400">· {subtitle}</span>{/if}
+				{#if subtitle}<span class="font-normal text-ink-faint">· {subtitle}</span>{/if}
 			</h2>
 			<button
 				onclick={dismiss}
 				aria-label="Close"
 				disabled={!dismissable}
-				class="text-slate-400 hover:text-slate-700 disabled:opacity-40"><X size={18} /></button
+				class="text-ink-faint hover:text-ink-soft disabled:opacity-40"><X size={18} /></button
 			>
 		</header>
 		{@render children()}
 		{#if footer}
-			<footer class="flex items-center gap-2 border-t border-slate-200 px-5 py-3">
+			<footer class="flex items-center gap-2 border-t border-line px-5 py-3">
 				{@render footer()}
 			</footer>
 		{/if}

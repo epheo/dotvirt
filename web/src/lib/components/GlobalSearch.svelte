@@ -188,10 +188,10 @@
 			tabindex="-1"
 		></button>
 		<div
-			class="absolute top-full left-0 z-40 mt-1 w-full overflow-hidden rounded border border-slate-200 bg-white shadow-xl"
+			class="absolute top-full left-0 z-40 mt-1 w-full overflow-hidden rounded border border-line bg-panel shadow-xl"
 		>
 			{#if hits.length === 0}
-				<div class="px-3 py-2.5 text-xs text-slate-400">No matches.</div>
+				<div class="px-3 py-2.5 text-xs text-ink-faint">No matches.</div>
 			{:else}
 				<ul class="max-h-96 overflow-y-auto py-1 text-xs">
 					{#each hits as h, i (i)}
@@ -200,16 +200,16 @@
 								onclick={() => pick(h)}
 								onmouseenter={() => (active = i)}
 								class="flex w-full items-center gap-2 px-3 py-1.5 text-left {i === active
-									? 'bg-blue-50'
+									? 'bg-select-soft'
 									: ''}"
 							>
 								<span
-									class="w-20 shrink-0 rounded bg-slate-100 px-1 py-0.5 text-center text-[10px] tracking-wide text-slate-500 uppercase"
+									class="w-20 shrink-0 rounded bg-inset-strong px-1 py-0.5 text-center text-[10px] tracking-wide text-ink-muted uppercase"
 									>{kindBadge[h.kind]}</span
 								>
-								<span class="truncate font-medium text-slate-800">{hitLabel(h)}</span>
+								<span class="truncate font-medium text-ink">{hitLabel(h)}</span>
 								{#if hitHint(h)}
-									<span class="ml-auto truncate text-slate-400">{hitHint(h)}</span>
+									<span class="ml-auto truncate text-ink-faint">{hitHint(h)}</span>
 								{/if}
 							</button>
 						</li>

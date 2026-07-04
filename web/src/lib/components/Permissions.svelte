@@ -25,40 +25,40 @@
 </script>
 
 {#if error}
-	<div class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+	<div class="rounded border border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
 		Couldn't read permissions: {error}
 	</div>
 {:else if !data}
-	<div class="py-8 text-center text-sm text-slate-400">Checking your access…</div>
+	<div class="py-8 text-center text-sm text-ink-faint">Checking your access…</div>
 {:else}
 	<div class="space-y-4">
 		{#each data as p (p.namespace)}
-			<section class="max-w-2xl rounded border border-slate-200">
+			<section class="max-w-2xl rounded border border-line">
 				<h3
-					class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase"
+					class="border-b border-line bg-inset px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
 				>
 					Your access in {p.namespace}
 				</h3>
-				<ul class="divide-y divide-slate-100 text-[13px]">
+				<ul class="divide-y divide-line-soft text-[13px]">
 					{#each p.capabilities as c (c.id)}
 						<li class="flex items-center gap-2 px-3 py-1.5" title={c.detail}>
 							{#if c.allowed}
-								<Check size={14} class="shrink-0 text-green-600" />
+								<Check size={14} class="shrink-0 text-ok-ink" />
 							{:else}
-								<X size={14} class="shrink-0 text-slate-300" />
+								<X size={14} class="shrink-0 text-ink-faint" />
 							{/if}
-							<span class={c.allowed ? 'text-slate-800' : 'text-slate-400'}>{c.label}</span>
+							<span class={c.allowed ? 'text-ink' : 'text-ink-faint'}>{c.label}</span>
 						</li>
 					{/each}
 				</ul>
 				{#if p.incomplete}
-					<p class="border-t border-amber-100 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
+					<p class="border-t border-warn-soft bg-warn-soft/60 px-3 py-1.5 text-xs text-warn-ink">
 						The cluster couldn't enumerate every rule; some allowed actions may show as denied.
 					</p>
 				{/if}
 			</section>
 		{/each}
-		<p class="max-w-2xl text-xs text-slate-400">
+		<p class="max-w-2xl text-xs text-ink-faint">
 			These reflect your Kubernetes RBAC, evaluated with your own token. Configuration, power, and
 			delete aren't listed: they go through a pull request, where the project's repository decides
 			who merges. Access itself is granted by the platform, not dotvirt.

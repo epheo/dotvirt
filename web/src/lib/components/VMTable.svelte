@@ -149,11 +149,11 @@
 </script>
 
 <div class="flex h-full flex-col">
-	<div class="flex items-center gap-2 border-b border-slate-200 px-4 py-2">
+	<div class="flex items-center gap-2 border-b border-line px-4 py-2">
 		<input
 			bind:value={search}
 			placeholder="Search name, namespace, IP…"
-			class="w-64 rounded border border-slate-300 px-2 py-1 text-sm focus:border-blue-400"
+			class="w-64 rounded border border-line-strong px-2 py-1 text-sm focus:border-accent/60"
 		/>
 		<select
 			value={prefs.value.powerFilter}
@@ -162,7 +162,7 @@
 					...prefs.value,
 					powerFilter: e.currentTarget.value as 'all' | Power,
 				})}
-			class="rounded border border-slate-300 px-2 py-1 text-sm text-slate-700"
+			class="rounded border border-line-strong px-2 py-1 text-sm text-ink-soft"
 			title="Filter by power state"
 		>
 			<option value="all">Power: all</option>
@@ -177,7 +177,7 @@
 					...prefs.value,
 					syncFilter: e.currentTarget.value as 'all' | SyncStatus,
 				})}
-			class="rounded border border-slate-300 px-2 py-1 text-sm text-slate-700"
+			class="rounded border border-line-strong px-2 py-1 text-sm text-ink-soft"
 			title="Filter by ArgoCD sync status"
 		>
 			<option value="all">Sync: all</option>
@@ -186,13 +186,13 @@
 			<option value="NotTracked">Not tracked</option>
 			<option value="Unknown">Unknown</option>
 		</select>
-		<span class="ml-auto text-xs text-slate-400">{rows.length} VMs</span>
+		<span class="ml-auto text-xs text-ink-faint">{rows.length} VMs</span>
 	</div>
 
 	<div class="min-h-0 flex-1 overflow-auto">
 		<table class="w-full text-[13px]">
-			<thead class="sticky top-0 bg-slate-50 text-left text-xs text-slate-500">
-				<tr class="border-b border-slate-200">
+			<thead class="sticky top-0 bg-inset text-left text-xs text-ink-muted">
+				<tr class="border-b border-line">
 					<th class="w-8 px-3 py-2">
 						<input
 							type="checkbox"
@@ -207,7 +207,7 @@
 						<th class="px-3 py-2 font-medium {c.class ?? ''}">
 							<button
 								onclick={() => setSort(c.key)}
-								class="inline-flex items-center gap-1 hover:text-slate-800"
+								class="inline-flex items-center gap-1 hover:text-ink"
 							>
 								{c.label}
 								{#if prefs.value.sortKey === c.key}
@@ -222,7 +222,7 @@
 					<th class="px-3 py-2 font-medium">Health</th>
 				</tr>
 			</thead>
-			<tbody class="divide-y divide-slate-100">
+			<tbody class="divide-y divide-line-soft">
 				{#each rows as vm (vm.namespace + '/' + vm.name)}
 					{@const sc = staged.get(vm.namespace + '/' + vm.name)}
 					<tr
@@ -232,7 +232,9 @@
 							e.preventDefault();
 							oncontextvm(vm, e.clientX, e.clientY);
 						}}
-						class="cursor-pointer hover:bg-blue-50 {selected.has(vmKey(vm)) ? 'bg-blue-50' : ''}"
+						class="cursor-pointer hover:bg-select-soft {selected.has(vmKey(vm))
+							? 'bg-select-soft'
+							: ''}"
 					>
 						<td class="px-3 py-1.5">
 							<input
@@ -246,10 +248,10 @@
 						<td class="px-3 py-1.5"><PowerDot power={vm.power} paused={vm.paused} /></td>
 						<td
 							class="px-3 py-1.5 font-medium {sc?.kind === 'delete'
-								? 'text-slate-400 line-through'
-								: 'text-slate-800'}">{vm.name}</td
+								? 'text-ink-faint line-through'
+								: 'text-ink'}">{vm.name}</td
 						>
-						<td class="px-3 py-1.5 text-slate-600">{vm.namespace}</td>
+						<td class="px-3 py-1.5 text-ink-soft">{vm.namespace}</td>
 						<td class="px-3 py-1.5">
 							<StatusPill
 								tone={phaseTone(vm.phase, vm.paused)}
@@ -257,9 +259,9 @@
 								dot={false}
 							/>
 						</td>
-						<td class="px-3 py-1.5 font-mono text-xs text-slate-600">{vm.guestIP ?? '—'}</td>
-						<td class="px-3 py-1.5 text-right text-slate-700">{vm.cpuCores ?? '—'}</td>
-						<td class="px-3 py-1.5 text-right text-slate-700">{vm.memory ?? '—'}</td>
+						<td class="px-3 py-1.5 font-mono text-xs text-ink-soft">{vm.guestIP ?? '—'}</td>
+						<td class="px-3 py-1.5 text-right text-ink-soft">{vm.cpuCores ?? '—'}</td>
+						<td class="px-3 py-1.5 text-right text-ink-soft">{vm.memory ?? '—'}</td>
 						<td class="px-3 py-1.5">
 							{#if sc}
 								<span class="inline-flex items-center gap-1.5">
@@ -270,14 +272,14 @@
 								<SyncBadge sync={vm.sync} />
 							{/if}
 						</td>
-						<td class="px-3 py-1.5 text-slate-600">{vm.health ?? '—'}</td>
+						<td class="px-3 py-1.5 text-ink-soft">{vm.health ?? '—'}</td>
 					</tr>
 				{/each}
 			</tbody>
 		</table>
 
 		{#if rows.length === 0}
-			<div class="p-8 text-center text-sm text-slate-400">
+			<div class="p-8 text-center text-sm text-ink-faint">
 				{vms.length === 0 ? 'No VMs in scope.' : 'No VMs match the current filters.'}
 			</div>
 		{/if}
