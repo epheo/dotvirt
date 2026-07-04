@@ -24,7 +24,7 @@
 			disabled={!a.enabled(vm)}
 			title={a.title}
 			class="block w-full px-3 py-1.5 text-left {a.danger
-				? 'text-red-700 hover:bg-red-50'
+				? 'text-danger-ink hover:bg-danger-soft/60'
 				: 'text-ink-soft hover:bg-inset'} disabled:cursor-not-allowed disabled:text-ink-faint disabled:hover:bg-transparent"
 		>
 			{a.label}

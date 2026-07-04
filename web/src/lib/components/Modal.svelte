@@ -97,7 +97,7 @@
 			<h2
 				id={titleId}
 				class="flex items-center gap-2 text-base font-semibold {danger
-					? 'text-red-700'
+					? 'text-danger-ink'
 					: 'text-ink'}"
 			>
 				{#if icon}{@render icon()}{/if}{title}

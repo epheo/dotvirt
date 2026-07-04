@@ -124,13 +124,13 @@
 				</span>
 				{#if data.band}
 					{#if data.band.above === 0 && data.band.below === 0}
-						<span class="rounded bg-green-100 px-1.5 py-0.5 font-medium text-green-800"
+						<span class="rounded bg-ok-soft px-1.5 py-0.5 font-medium text-green-800"
 							>balanced</span
 						>
 					{:else}
 						{#if data.band.above > 0}
 							<span
-								class="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800"
+								class="rounded bg-warn-soft px-1.5 py-0.5 font-medium text-warn-ink"
 								title="above the DRS band — migration sources">{data.band.above} hot</span
 							>
 						{/if}
@@ -160,11 +160,11 @@
 							>
 							<span class="h-1.5 flex-1 overflow-hidden rounded bg-inset-strong">
 								<span
-									class="block h-full rounded bg-amber-400"
+									class="block h-full rounded bg-warn"
 									style="width: {Math.min(100, o.pct)}%"
 								></span>
 							</span>
-							<span class="w-9 shrink-0 text-right font-medium text-amber-700"
+							<span class="w-9 shrink-0 text-right font-medium text-warn-ink"
 								>{Math.round(o.pct)}%</span
 							>
 							{#if o.unschedulable}

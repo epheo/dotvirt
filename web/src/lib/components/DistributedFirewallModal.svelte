@@ -180,7 +180,7 @@
 						onclick={() => removeRow(i)}
 						disabled={rows.length === 1}
 						aria-label="Remove source"
-						class="ml-auto text-ink-faint hover:text-red-600 disabled:opacity-40"
+						class="ml-auto text-ink-faint hover:text-danger disabled:opacity-40"
 						><Trash2 size={14} /></button
 					>
 				</div>
@@ -193,7 +193,7 @@
 			into the project's repo and applied by its Argo app.
 		</p>
 		{#if error}
-			<pre class="rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+			<pre class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 	</div>
 	{#snippet footer()}

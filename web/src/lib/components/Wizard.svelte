@@ -59,8 +59,8 @@
 	function railBadge(step: WizardStep, i: number): { cls: string; text: string; done?: boolean } {
 		if (i === current) return { cls: 'bg-accent text-white', text: String(i + 1) };
 		if (step.valid === false)
-			return { cls: 'bg-amber-100 text-amber-700 ring-1 ring-amber-300', text: String(i + 1) };
-		if (step.valid === true) return { cls: 'bg-green-500 text-white', text: '', done: true };
+			return { cls: 'bg-warn-soft text-warn-ink ring-1 ring-warn/50', text: String(i + 1) };
+		if (step.valid === true) return { cls: 'bg-ok text-white', text: '', done: true };
 		return { cls: 'bg-line text-ink-muted', text: String(i + 1) };
 	}
 </script>
@@ -98,7 +98,7 @@
 
 	{#if error}
 		<pre
-			class="mx-5 mb-1 rounded bg-red-50 p-2 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+			class="mx-5 mb-1 rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 	{/if}
 	{#snippet footer()}
 		{#if footerHint}<span class="text-xs text-ink-faint">{footerHint}</span>{/if}

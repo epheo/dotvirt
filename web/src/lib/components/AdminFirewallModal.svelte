@@ -162,9 +162,9 @@
 					<select
 						bind:value={row.action}
 						class="rounded border border-line-strong px-2 py-1 text-xs {row.action === 'Deny'
-							? 'text-red-700'
+							? 'text-danger-ink'
 							: row.action === 'Allow'
-								? 'text-green-700'
+								? 'text-ok-ink'
 								: 'text-ink-soft'}"
 					>
 						<option value="Allow">Allow</option>
@@ -204,20 +204,20 @@
 						onclick={() => removeRow(i)}
 						disabled={rows.length === 1}
 						aria-label="Remove rule"
-						class="ml-auto text-ink-faint hover:text-red-600 disabled:opacity-40"
+						class="ml-auto text-ink-faint hover:text-danger disabled:opacity-40"
 						><Trash2 size={14} /></button
 					>
 				</div>
 			{/each}
 		</div>
 
-		<p class="rounded bg-amber-50 px-3 py-2 text-xs text-amber-700">
+		<p class="rounded bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
 			Cluster-wide and admin-only. {#if baseline}The baseline is the default backstop applied
 				beneath every tenant NetworkPolicy.{:else}An Admin Policy overrides tenant NetworkPolicies —
 				use <strong>Pass</strong> to defer a decision back to them.{/if} Proposed to the platform repository.
 		</p>
 		{#if error}
-			<pre class="rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+			<pre class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 	</div>
 	{#snippet footer()}

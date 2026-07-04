@@ -169,11 +169,11 @@
 		{/if}
 
 		{#if !view.psiConfigured}
-			<label class="flex items-start gap-2 rounded border border-amber-200 bg-amber-50 p-3">
+			<label class="flex items-start gap-2 rounded border border-warn-soft bg-warn-soft/60 p-3">
 				<input type="checkbox" bind:checked={installPSI} disabled={!view.canPSI} class="mt-0.5" />
 				<span class:opacity-50={!view.canPSI}>
 					Enable PSI on worker nodes (required for load-aware rebalancing)
-					<span class="block text-xs text-amber-700">
+					<span class="block text-xs text-warn-ink">
 						Stages a MachineConfig that <strong>reboots every worker node</strong> when the PR merges.
 						Skip if PSI (psi=1) is already enabled out-of-band.
 					</span>
@@ -187,7 +187,7 @@
 		{/if}
 
 		{#if error}
-			<pre class="rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+			<pre class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 	</div>
 

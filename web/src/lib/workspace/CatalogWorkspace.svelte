@@ -157,7 +157,7 @@
 <div class="flex min-h-0 flex-1">
 	<div class="min-h-0 flex-1 overflow-y-auto">
 		{#if error}
-			<p class="m-4 rounded bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>
+			<p class="m-4 rounded bg-danger-soft/60 px-3 py-2 text-xs text-danger-ink">{error}</p>
 		{:else if kind === 'templates' ? !templates : !options}
 			<p class="py-6 text-center text-sm text-ink-faint">Loading catalog…</p>
 		{:else if rows.length === 0}

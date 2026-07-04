@@ -25,7 +25,7 @@
 </script>
 
 {#if error}
-	<div class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+	<div class="rounded border border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
 		Couldn't read permissions: {error}
 	</div>
 {:else if !data}
@@ -52,7 +52,7 @@
 					{/each}
 				</ul>
 				{#if p.incomplete}
-					<p class="border-t border-amber-100 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
+					<p class="border-t border-amber-100 bg-warn-soft/60 px-3 py-1.5 text-xs text-warn-ink">
 						The cluster couldn't enumerate every rule; some allowed actions may show as denied.
 					</p>
 				{/if}

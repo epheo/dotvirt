@@ -40,7 +40,7 @@
 	<div
 		class="flex items-center gap-2 border-b border-emerald-200 bg-emerald-50 px-4 py-1.5 text-xs text-emerald-800"
 	>
-		<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500"></span>
+		<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-ok"></span>
 		PR #{proposal.prNumber} is open in <strong>{proj}</strong> — its changes apply when it merges.
 		<a href={proposal.prURL} target="_blank" rel="noopener" class="font-medium hover:underline"
 			>View PR ↗</a

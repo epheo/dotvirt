@@ -187,13 +187,13 @@
 				</p>
 			{/if}
 			{#if !validName && name}
-				<p class="mt-1 text-xs text-amber-700">
+				<p class="mt-1 text-xs text-warn-ink">
 					Lowercase letters, digits and dashes only (≤63 chars).
 				</p>
 			{/if}
 			{#if error}
 				<pre
-					class="mt-2 rounded bg-red-50 p-2 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+					class="mt-2 rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 			{/if}
 		{:else}
 			<!-- Progress view. -->
@@ -202,7 +202,7 @@
 					<div class="flex items-center gap-2 text-sm">
 						<span
 							class="flex h-4 w-4 items-center justify-center rounded-full text-[10px] {complete
-								? 'bg-green-500 text-white'
+								? 'bg-ok text-white'
 								: active
 									? 'bg-accent text-white'
 									: 'bg-line text-ink-faint'}"

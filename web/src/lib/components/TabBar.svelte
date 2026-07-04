@@ -58,7 +58,7 @@
 				{#if t.count !== undefined}
 					<span
 						class="ml-0.5 rounded-full px-1.5 text-[11px] {t.countTone === 'warn'
-							? 'bg-amber-200 font-medium text-amber-800'
+							? 'bg-warn/30 font-medium text-warn-ink'
 							: 'bg-line-strong text-ink-soft'}">{t.count}</span
 					>
 				{/if}

@@ -62,7 +62,7 @@
 				class="w-full rounded border border-line px-2 py-1.5 font-mono text-sm"
 			/>
 			{#if name && !valid}
-				<p class="mt-1 text-xs text-amber-600">
+				<p class="mt-1 text-xs text-warn-ink">
 					Lowercase alphanumeric and “-”, max 63 characters.
 				</p>
 			{/if}
@@ -88,7 +88,7 @@
 			the PR merges.
 		</p>
 		{#if error}
-			<pre class="rounded bg-red-50 p-2 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+			<pre class="rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 	</div>
 	{#snippet footer()}

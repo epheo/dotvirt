@@ -89,11 +89,11 @@
 			<div class="flex items-center gap-2 text-sm">
 				<span class="text-ink-muted">Scheduling:</span>
 				{#if info.unschedulable}
-					<span class="inline-flex items-center gap-1.5 font-medium text-amber-700">
+					<span class="inline-flex items-center gap-1.5 font-medium text-warn-ink">
 						<Ban size={14} /> Cordoned
 					</span>
 				{:else}
-					<span class="inline-flex items-center gap-1.5 font-medium text-green-700">
+					<span class="inline-flex items-center gap-1.5 font-medium text-ok-ink">
 						<CheckCircle2 size={14} /> Schedulable
 					</span>
 				{/if}
@@ -122,7 +122,7 @@
 				needs another schedulable node with capacity.
 			</p>
 			{#if msg}
-				<p class="text-xs {ok ? 'text-ink-soft' : 'text-red-700'}">{msg}</p>
+				<p class="text-xs {ok ? 'text-ink-soft' : 'text-danger-ink'}">{msg}</p>
 			{/if}
 		</div>
 	</section>

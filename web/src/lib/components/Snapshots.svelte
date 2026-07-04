@@ -117,13 +117,13 @@
 	</div>
 
 	{#if error}
-		<pre class="rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+		<pre class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 	{/if}
 
 	<!-- Restore needs a stopped VM (KubeVirt rejects a running target), but power
 	     is PR-gated — so spell out the path rather than just greying the button. -->
 	{#if running && snapshots?.some((s) => s.readyToUse)}
-		<p class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+		<p class="rounded border border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
 			Restore is disabled while the VM is running. Set its power to <strong>Off</strong> (via a pull request
 			from Edit Settings), and once it's stopped you can roll back to a snapshot here.
 		</p>
@@ -152,16 +152,16 @@
 						<td class="py-2 pr-3 whitespace-nowrap text-ink-muted">{relativeAge(s.created)}</td>
 						<td class="py-2 pr-3 whitespace-nowrap">
 							{#if s.readyToUse}
-								<span class="inline-flex items-center gap-1.5 text-green-700">
-									<span class="h-1.5 w-1.5 rounded-full bg-green-500"></span> Ready
+								<span class="inline-flex items-center gap-1.5 text-ok-ink">
+									<span class="h-1.5 w-1.5 rounded-full bg-ok"></span> Ready
 								</span>
 							{:else if s.phase === 'Failed'}
-								<span class="inline-flex items-center gap-1.5 text-red-700" title={s.error}>
-									<span class="h-1.5 w-1.5 rounded-full bg-red-500"></span> Failed
+								<span class="inline-flex items-center gap-1.5 text-danger-ink" title={s.error}>
+									<span class="h-1.5 w-1.5 rounded-full bg-danger"></span> Failed
 								</span>
 							{:else}
-								<span class="inline-flex items-center gap-1.5 text-amber-600">
-									<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500"></span> Creating…
+								<span class="inline-flex items-center gap-1.5 text-warn-ink">
+									<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-warn"></span> Creating…
 								</span>
 							{/if}
 						</td>
@@ -173,7 +173,7 @@
 									onclick={() => (armedRestore = armedRestore === s.name ? null : s.name)}
 									disabled={!s.readyToUse || running}
 									title={running ? 'Stop the VM to restore' : 'Roll the VM back to this snapshot'}
-									class="mr-2 inline-flex items-center gap-1 text-xs text-amber-700 hover:underline disabled:text-ink-faint disabled:no-underline"
+									class="mr-2 inline-flex items-center gap-1 text-xs text-warn-ink hover:underline disabled:text-ink-faint disabled:no-underline"
 								>
 									<RotateCcw size={12} />
 									{armedRestore === s.name ? 'Confirm restore' : 'Restore'}
@@ -187,7 +187,7 @@
 								{/if}
 								<button
 									onclick={() => (armedDelete = armedDelete === s.name ? null : s.name)}
-									class="inline-flex items-center gap-1 text-xs text-red-600 hover:underline"
+									class="inline-flex items-center gap-1 text-xs text-danger hover:underline"
 								>
 									<Trash2 size={12} />
 									{armedDelete === s.name ? 'Confirm delete' : 'Delete'}
@@ -195,7 +195,7 @@
 								{#if armedDelete === s.name}
 									<button
 										onclick={() => remove(s.name)}
-										class="ml-2 rounded bg-red-600 px-1.5 py-0.5 text-[11px] font-medium text-white"
+										class="ml-2 rounded bg-danger px-1.5 py-0.5 text-[11px] font-medium text-white"
 										>Yes, delete</button
 									>
 								{/if}

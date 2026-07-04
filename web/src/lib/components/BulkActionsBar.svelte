@@ -39,7 +39,7 @@
 	<button
 		onclick={ondelete}
 		disabled={busy}
-		class="flex items-center gap-1.5 rounded border border-red-300 bg-panel px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+		class="flex items-center gap-1.5 rounded border border-red-300 bg-panel px-2.5 py-1 text-xs font-medium text-danger-ink hover:bg-danger-soft/60 disabled:opacity-50"
 	>
 		<Trash2 size={13} /> Delete
 	</button>

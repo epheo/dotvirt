@@ -110,7 +110,7 @@
 	</div>
 
 	{#if error}
-		<pre class="mb-2 rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+		<pre class="mb-2 rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 	{/if}
 
 	{#each draft.items as item (itemKey(item.namespace, item.name))}
@@ -119,16 +119,16 @@
 			<div class="flex items-center gap-2 border-b border-line-soft px-3 py-2">
 				<span
 					class="rounded px-1.5 py-0.5 text-xs {item.kind === 'delete'
-						? 'bg-red-100 text-red-700'
+						? 'bg-danger-soft text-danger-ink'
 						: item.kind === 'create'
-							? 'bg-green-100 text-green-700'
+							? 'bg-ok-soft text-ok-ink'
 							: 'bg-accent-soft text-accent-ink'}">{item.kind}</span
 				>
 				<span class="font-medium text-ink">{item.namespace}/{item.name}</span>
 				<button
 					onclick={() => unstage(item.namespace, item.name, item.resource)}
 					disabled={unstaging !== null}
-					class="ml-auto text-xs text-red-500 hover:text-red-700 disabled:text-ink-faint"
+					class="ml-auto text-xs text-red-500 hover:text-danger-ink disabled:text-ink-faint"
 					>{unstaging === k ? 'unstaging…' : 'unstage'}</button
 				>
 			</div>

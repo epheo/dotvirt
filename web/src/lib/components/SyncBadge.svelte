@@ -60,7 +60,7 @@
 			{#if error}
 				<p class="mb-2 text-ink-soft">ArgoCD could not apply this object:</p>
 				<pre
-					class="max-h-72 overflow-auto rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+					class="max-h-72 overflow-auto rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 			{:else}
 				<p class="text-ink-soft">
 					This object differs from git and ArgoCD hasn't applied the latest change yet. No apply

@@ -102,12 +102,12 @@
 			</button>
 		</div>
 		{#if target && !valid}
-			<p class="mt-1 text-xs text-amber-700">
+			<p class="mt-1 text-xs text-warn-ink">
 				Lowercase letters, digits and dashes only (≤63 chars), and not the source's own name.
 			</p>
 		{/if}
 		{#if error}
-			<pre class="mt-2 rounded bg-red-50 p-2 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+			<pre class="mt-2 rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 
 		{#if clones && clones.length}
@@ -129,16 +129,16 @@
 							<td class="py-1.5 pr-3 whitespace-nowrap text-ink-muted">{relativeAge(c.created)}</td>
 							<td class="py-1.5 whitespace-nowrap">
 								{#if c.phase === 'Succeeded'}
-									<span class="inline-flex items-center gap-1.5 text-green-700">
-										<span class="h-1.5 w-1.5 rounded-full bg-green-500"></span> Succeeded
+									<span class="inline-flex items-center gap-1.5 text-ok-ink">
+										<span class="h-1.5 w-1.5 rounded-full bg-ok"></span> Succeeded
 									</span>
 								{:else if c.phase === 'Failed'}
-									<span class="inline-flex items-center gap-1.5 text-red-700">
-										<span class="h-1.5 w-1.5 rounded-full bg-red-500"></span> Failed
+									<span class="inline-flex items-center gap-1.5 text-danger-ink">
+										<span class="h-1.5 w-1.5 rounded-full bg-danger"></span> Failed
 									</span>
 								{:else}
-									<span class="inline-flex items-center gap-1.5 text-amber-600">
-										<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500"></span>
+									<span class="inline-flex items-center gap-1.5 text-warn-ink">
+										<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-warn"></span>
 										{c.phase || 'Starting…'}
 									</span>
 								{/if}

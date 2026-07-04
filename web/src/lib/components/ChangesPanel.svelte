@@ -158,7 +158,7 @@
 			<div class="mb-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
 				<div class="flex items-center gap-2">
 					<span class="font-medium text-ink-soft">{p.project}</span>
-					<span class="rounded bg-emerald-100 px-1.5 text-xs font-medium text-emerald-700">
+					<span class="rounded bg-emerald-100 px-1.5 text-xs font-medium text-ok-ink">
 						PR #{p.prNumber} open
 					</span>
 					<a
@@ -267,7 +267,7 @@
 									{#if historyBusy[project]}
 										<p class="px-5 py-1.5 text-xs text-ink-faint">Loading…</p>
 									{:else if historyError[project]}
-										<p class="px-5 py-1.5 text-xs whitespace-pre-wrap text-red-600">
+										<p class="px-5 py-1.5 text-xs whitespace-pre-wrap text-danger">
 											{historyError[project]}
 										</p>
 									{:else if (history[project] ?? []).length === 0}
@@ -295,8 +295,8 @@
 																disabled={revertBusy === c.hash}
 																class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium {revertArmed ===
 																	c.hash || revertBusy === c.hash
-																	? 'bg-amber-100 text-amber-800'
-																	: 'text-amber-700 opacity-0 hover:bg-amber-50 group-hover:opacity-100'}"
+																	? 'bg-warn-soft text-warn-ink'
+																	: 'text-warn-ink opacity-0 hover:bg-warn-soft/60 group-hover:opacity-100'}"
 															>
 																{revertBusy === c.hash
 																	? 'Reverting…'
@@ -307,7 +307,7 @@
 														{/if}
 													</div>
 													{#if revertResult[c.hash]}
-														<p class="mt-0.5 text-[10px] text-emerald-700">
+														<p class="mt-0.5 text-[10px] text-ok-ink">
 															{@render prNote(revertResult[c.hash], 'Revert PR')}
 														</p>
 													{/if}

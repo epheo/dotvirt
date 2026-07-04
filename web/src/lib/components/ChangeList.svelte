@@ -12,9 +12,9 @@
 				<span class="text-ink-faint">→</span>
 				<span class="font-medium text-ink">{c.to}</span>
 			{:else if c.action === 'add'}
-				<span class="font-medium text-green-700">+ {c.to}</span>
+				<span class="font-medium text-ok-ink">+ {c.to}</span>
 			{:else}
-				<span class="font-medium text-red-700 line-through">− {c.from}</span>
+				<span class="font-medium text-danger-ink line-through">− {c.from}</span>
 			{/if}
 		</li>
 	{/each}

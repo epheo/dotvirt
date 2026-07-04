@@ -100,13 +100,13 @@
 				/>
 			</label>
 		</div>
-		<p class="rounded bg-amber-50 px-3 py-2 text-xs text-amber-700">
+		<p class="rounded bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
 			Creates an OVS bridge enslaving this NIC on {node || 'all worker nodes'} and maps it to the physical
 			network — it changes node networking, so review the PR carefully. Cluster-scoped — proposed to the
 			platform repository. Requires the NMState operator.
 		</p>
 		{#if error}
-			<pre class="rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+			<pre class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 	</div>
 	{#snippet footer()}

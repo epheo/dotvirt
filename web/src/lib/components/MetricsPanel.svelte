@@ -72,7 +72,7 @@
 	</div>
 
 	{#if error}
-		<p class="rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</p>
+		<p class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</p>
 	{:else if empty}
 		<p class="py-8 text-center text-sm text-ink-faint">{emptyText}</p>
 	{:else if metrics}

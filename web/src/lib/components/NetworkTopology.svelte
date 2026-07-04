@@ -80,7 +80,7 @@
 			<span class="rounded bg-inset-strong px-1.5 py-0.5 text-[10px] text-ink-muted"
 				>{st.nsx} · {st.vsphere}</span
 			>
-			{#if net.vlan}<span class="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700"
+			{#if net.vlan}<span class="rounded bg-warn-soft px-1.5 py-0.5 text-[10px] text-warn-ink"
 					>VLAN {net.vlan}</span
 				>{/if}
 			{#if net.uplink}<span class="text-[10px] text-ink-faint">↑ {net.uplink}</span>{/if}

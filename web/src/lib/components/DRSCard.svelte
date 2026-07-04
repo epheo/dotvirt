@@ -93,7 +93,7 @@
 					<button
 						onclick={disable}
 						disabled={disabling}
-						class="text-xs text-red-600 hover:underline disabled:text-ink-faint">Disable…</button
+						class="text-xs text-danger hover:underline disabled:text-ink-faint">Disable…</button
 					>
 				{/if}
 				<button onclick={() => (configuring = true)} class="text-xs text-accent hover:underline"
@@ -127,12 +127,12 @@
 			<Row label="Live state" value={liveStatus} />
 		</dl>
 		{#if view.warning}
-			<p class="border-t border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+			<p class="border-t border-amber-100 bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
 				{view.warning}
 			</p>
 		{/if}
 		{#if view.live.degraded}
-			<p class="border-t border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+			<p class="border-t border-amber-100 bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
 				{view.live.degraded}
 			</p>
 		{/if}
@@ -143,7 +143,7 @@
 			</p>
 		{/if}
 		{#if error}
-			<p class="border-t border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>
+			<p class="border-t border-red-100 bg-danger-soft/60 px-3 py-2 text-xs text-danger-ink">{error}</p>
 		{/if}
 	{/if}
 </InfoCard>

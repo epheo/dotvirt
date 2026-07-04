@@ -297,7 +297,7 @@
 						onclick={() => removeDisk(i)}
 						type="button"
 						aria-label="Remove disk"
-						class="text-red-500 hover:text-red-700"><X size={14} /></button
+						class="text-red-500 hover:text-danger-ink"><X size={14} /></button
 					>
 				</div>
 			{/each}
@@ -388,7 +388,7 @@
 	<div class="space-y-3">
 		<p class="text-xs text-ink-muted">Review your selections, then stage the VM.</p>
 		{#if missing.length}
-			<div class="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+			<div class="rounded border border-warn-soft bg-warn-soft/60 p-3 text-xs text-warn-ink">
 				<p class="mb-1 font-medium">Complete the required fields to stage this VM:</p>
 				<ul class="space-y-0.5">
 					{#each missing as m (m.label)}
@@ -428,7 +428,7 @@
 {#if loadError}
 	<Modal title="New Virtual Machine" {onclose}>
 		<div class="px-5 py-4">
-			<p class="rounded bg-red-50 px-3 py-2 text-sm text-red-700">
+			<p class="rounded bg-danger-soft/60 px-3 py-2 text-sm text-danger-ink">
 				Failed to load options: {loadError}
 			</p>
 		</div>

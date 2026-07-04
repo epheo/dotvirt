@@ -272,11 +272,11 @@
 
 	const rowClass = (t: Task) =>
 		t.kind === 'drift'
-			? 'bg-amber-50/40'
+			? 'bg-warn-soft/40'
 			: t.kind === 'migration' && !t.ok
-				? 'bg-red-50/40'
+				? 'bg-danger-soft/40'
 				: t.kind === 'pr'
-					? 'bg-emerald-50/30'
+					? 'bg-ok-soft/30'
 					: '';
 
 	// Row click: open the PR for proposed rows, else focus the target VM's detail.
@@ -405,7 +405,7 @@
 							{#each firing ?? [] as a (a.name + ':' + (a.namespace ?? '') + '/' + (a.vm ?? '') + ':' + (a.severity ?? ''))}
 								<tr
 									onclick={() => a.namespace && a.vm && onselect(a.namespace, a.vm)}
-									class="cursor-pointer bg-amber-50/40 hover:bg-select-soft"
+									class="cursor-pointer bg-warn-soft/40 hover:bg-select-soft"
 								>
 									<td class="px-3 py-1.5 font-medium text-ink-soft">
 										{a.name}{#if (a.count ?? 0) > 1}<span class="text-ink-faint">
@@ -429,8 +429,8 @@
 								<tr
 									onclick={() => activate(t)}
 									class="cursor-pointer {t.kind === 'drift'
-										? 'bg-amber-50/40'
-										: 'bg-red-50/40'} hover:bg-select-soft"
+										? 'bg-warn-soft/40'
+										: 'bg-danger-soft/40'} hover:bg-select-soft"
 								>
 									<td class="px-3 py-1.5 font-medium text-ink-soft">{t.verb}</td>
 									<td class="px-3 py-1.5 text-ink">
@@ -460,7 +460,7 @@
 							<tr
 								onclick={() => e.namespace && e.name && onselect(e.namespace, e.name)}
 								class="cursor-pointer hover:bg-select-soft {e.type === 'Warning'
-									? 'bg-amber-50/40'
+									? 'bg-warn-soft/40'
 									: ''}"
 							>
 								<td class="px-3 py-1.5 font-medium text-ink-soft">{e.reason}</td>

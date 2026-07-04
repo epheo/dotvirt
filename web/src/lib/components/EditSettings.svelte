@@ -224,7 +224,7 @@
 
 {#snippet stepCompute()}
 	{#if optionsError}
-		<div class="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+		<div class="mb-3 rounded border border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
 			{optionsError} — the instance type / preference dropdowns may be empty.
 		</div>
 	{/if}
@@ -253,7 +253,7 @@
 			</button>
 		</div>
 		{#if mode !== (vm.instancetype ? 'instancetype' : 'custom')}
-			<p class="mt-1 text-xs text-amber-700">
+			<p class="mt-1 text-xs text-warn-ink">
 				{mode === 'custom'
 					? 'Switches to custom CPU/memory and removes the instance type.'
 					: 'Uses the instance type and removes the custom CPU/memory.'}
@@ -337,7 +337,7 @@
 				</select>
 			</label>
 			{#if !(cpuCores && memory)}
-				<p class="col-span-2 text-xs text-amber-700">
+				<p class="col-span-2 text-xs text-warn-ink">
 					Set both CPU cores and memory to apply custom sizing.
 				</p>
 			{/if}

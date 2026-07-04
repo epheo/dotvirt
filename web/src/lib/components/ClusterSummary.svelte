@@ -55,8 +55,8 @@
 	];
 	const phaseColor: Record<string, string> = {
 		running: 'text-green-600',
-		paused: 'text-amber-600',
-		failed: 'text-red-600',
+		paused: 'text-warn-ink',
+		failed: 'text-danger',
 	};
 	const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -130,7 +130,7 @@
 						{#each overcommit as o (o.label)}
 							<span
 								class="rounded px-2 py-1 text-sm font-medium {o.r > 1
-									? 'bg-amber-100 text-amber-800'
+									? 'bg-warn-soft text-warn-ink'
 									: 'bg-inset-strong text-ink-soft'}"
 								title="{o.label} committed to VMs vs node-allocatable"
 							>

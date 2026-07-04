@@ -112,7 +112,7 @@
 		</fieldset>
 
 		{#if error}
-			<pre class="mt-3 rounded bg-red-50 p-2 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+			<pre class="mt-3 rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 	</div>
 	{#snippet footer()}

@@ -40,7 +40,7 @@
 			placeholder={confirmWord}
 		/>
 		{#if error}
-			<p class="mt-2 text-xs text-red-600">{error}</p>
+			<p class="mt-2 text-xs text-danger">{error}</p>
 		{/if}
 	</div>
 	{#snippet footer()}
@@ -53,7 +53,7 @@
 		<button
 			onclick={onconfirm}
 			disabled={!ready}
-			class="rounded bg-red-600 px-3 py-1 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+			class="rounded bg-danger px-3 py-1 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
 		>
 			Delete
 		</button>
