@@ -2,14 +2,13 @@
 	import uPlot from 'uplot';
 	import 'uplot/dist/uPlot.min.css';
 	import type { MetricChart } from '$lib/api';
+	import { chartSeries, chartUI } from '$lib/chart';
 	import { bytes } from '$lib/format';
 
 	let { chart }: { chart: MetricChart } = $props();
 
 	let el: HTMLDivElement;
 	let width = $state(0);
-
-	const palette = ['#2563eb', '#0d9488', '#f59e0b', '#dc2626', '#7c3aed', '#16a34a'];
 
 	// Format a value for the axis/legend by the chart's unit hint.
 	function fmt(unit: string, v: number | null): string {
@@ -36,6 +35,9 @@
 	}
 
 	function makeOpts(c: MetricChart, w: number): uPlot.Options {
+		// Canvas colors resolve at build time from the --chart-* custom properties.
+		const palette = chartSeries();
+		const ui = chartUI();
 		return {
 			width: w,
 			height: 150,
@@ -66,16 +68,16 @@
 			],
 			axes: [
 				{
-					stroke: '#94a3b8',
-					grid: { stroke: '#f1f5f9', width: 1 },
-					ticks: { stroke: '#e2e8f0', size: 4 },
+					stroke: ui.axis,
+					grid: { stroke: ui.grid, width: 1 },
+					ticks: { stroke: ui.ticks, size: 4 },
 					size: 26,
 					font: '11px sans-serif',
 				},
 				{
-					stroke: '#94a3b8',
-					grid: { stroke: '#f1f5f9', width: 1 },
-					ticks: { stroke: '#e2e8f0', size: 4 },
+					stroke: ui.axis,
+					grid: { stroke: ui.grid, width: 1 },
+					ticks: { stroke: ui.ticks, size: 4 },
 					size: 64,
 					font: '11px sans-serif',
 					values: (_u: uPlot, splits: number[]) => splits.map((v) => fmt(c.unit, v)),

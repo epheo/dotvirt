@@ -40,7 +40,8 @@
 	}
 	const pct = (used: number, hard: number) => (hard > 0 ? Math.min(100, (used / hard) * 100) : 0);
 	// vCenter-style escalation as usage nears the cap.
-	const barColor = (p: number) => (p > 90 ? '#dc2626' : p > 75 ? '#f59e0b' : '#2563eb');
+	const barColor = (p: number) =>
+		p > 90 ? 'var(--color-danger)' : p > 75 ? 'var(--color-warn)' : 'var(--chart-1)';
 </script>
 
 {#if quotas && quotas.length}

@@ -2,7 +2,7 @@
 	// A tiny dependency-free inline trend line for the capacity/usage widgets.
 	let {
 		values,
-		color = '#2563eb',
+		color = 'var(--chart-1)',
 		width = 64,
 		height = 18,
 	}: { values: number[]; color?: string; width?: number; height?: number } = $props();
@@ -25,6 +25,6 @@
 
 {#if path}
 	<svg {width} {height} aria-hidden="true" class="shrink-0">
-		<path d={path} fill="none" stroke={color} stroke-width="1" stroke-linejoin="round" />
+		<path d={path} fill="none" style:stroke={color} stroke-width="1" stroke-linejoin="round" />
 	</svg>
 {/if}

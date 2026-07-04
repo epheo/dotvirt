@@ -8,7 +8,7 @@
 		total,
 		allocated = 0,
 		unit,
-		color = '#2563eb',
+		color = 'var(--chart-1)',
 		spark = [],
 	}: {
 		label: string;
@@ -25,13 +25,15 @@
 	const C = 2 * Math.PI * R;
 	const usedFrac = $derived(total > 0 ? Math.min(1, used / total) : 0);
 	const allocFrac = $derived(total > 0 ? Math.min(1, allocated / total) : 0);
-	const ringColor = $derived(usedFrac > 0.9 ? '#dc2626' : usedFrac > 0.75 ? '#f59e0b' : color);
+	const ringColor = $derived(
+		usedFrac > 0.9 ? 'var(--color-danger)' : usedFrac > 0.75 ? 'var(--color-warn)' : color,
+	);
 </script>
 
 <div class="flex flex-col items-center">
 	<svg width="96" height="96" viewBox="0 0 96 96">
-		<!-- capacity track -->
-		<circle cx="48" cy="48" r={R} fill="none" stroke="#e2e8f0" stroke-width={SW} />
+		<!-- capacity track. var() colors need style:, not SVG presentation attrs. -->
+		<circle cx="48" cy="48" r={R} fill="none" style:stroke="var(--chart-track)" stroke-width={SW} />
 		<!-- allocated/committed segment (faint), under the used arc -->
 		{#if allocated > 0}
 			<circle
@@ -39,7 +41,7 @@
 				cy="48"
 				r={R}
 				fill="none"
-				stroke="#cbd5e1"
+				style:stroke="var(--chart-track-strong)"
 				stroke-width={SW}
 				stroke-dasharray="{allocFrac * C} {C}"
 				transform="rotate(-90 48 48)"
@@ -51,7 +53,7 @@
 			cy="48"
 			r={R}
 			fill="none"
-			stroke={ringColor}
+			style:stroke={ringColor}
 			stroke-width={SW}
 			stroke-linecap="round"
 			stroke-dasharray="{usedFrac * C} {C}"

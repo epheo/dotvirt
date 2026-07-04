@@ -32,11 +32,11 @@
 
 	const maxBucket = $derived(data ? Math.max(1, ...data.buckets) : 1);
 	const barColor = (i: number): string => {
-		if (!data?.band) return '#94a3b8';
+		if (!data?.band) return 'var(--chart-axis)';
 		const mid = i * 10 + 5;
-		if (mid > data.band.high) return '#f59e0b';
-		if (mid < data.band.low) return '#38bdf8';
-		return '#94a3b8';
+		if (mid > data.band.high) return 'var(--color-warn)';
+		if (mid < data.band.low) return 'var(--chart-cold)';
+		return 'var(--chart-axis)';
 	};
 	const barH = (n: number) => (n / maxBucket) * (BASE - TOP);
 	// Sources to name: the hottest workers, but only those actually above the band.
@@ -66,7 +66,7 @@
 						y={TOP}
 						width={px(data.band.high) - px(data.band.low)}
 						height={BASE - TOP}
-						fill="#10b981"
+						style:fill="var(--chart-band)"
 						opacity="0.09"
 					/>
 				{/if}
@@ -78,7 +78,7 @@
 							width={W / 10 - 6}
 							height={barH(n)}
 							rx="1.5"
-							fill={barColor(i)}
+							style:fill={barColor(i)}
 						>
 							<title>{i * 10}–{i * 10 + 10}%: {n} worker{n === 1 ? '' : 's'}</title>
 						</rect>
@@ -96,10 +96,10 @@
 					y1={TOP - 4}
 					x2={px(data.mean)}
 					y2={BASE}
-					stroke="#475569"
+					style:stroke="var(--chart-mean)"
 					stroke-dasharray="2 2"
 				/>
-				<line x1="0" y1={BASE} x2={W} y2={BASE} stroke="#cbd5e1" />
+				<line x1="0" y1={BASE} x2={W} y2={BASE} style:stroke="var(--chart-track-strong)" />
 				{#each [0, 25, 50, 75, 100] as t (t)}
 					<text
 						x={px(t)}
