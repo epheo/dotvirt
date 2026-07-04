@@ -22,8 +22,14 @@ type Spec struct {
 	Running      bool              `json:"running"`      // start immediately?
 	CloudInit    *CloudInit        `json:"cloudInit,omitempty"`
 	ExtraDisks   []ExtraDisk       `json:"extraDisks,omitempty"`
-	Networks     []NetworkRef      `json:"networks,omitempty"` // extra NAD-backed networks (besides pod default)
-	Labels       map[string]string `json:"labels,omitempty"`
+	Networks     []NetworkRef      `json:"networks,omitempty"` // secondary NAD-backed networks (UDN/localnet)
+	// PrimaryNetwork attaches the primary (pod-network) NIC: the masquerade
+	// interface backed by the namespace's primary UDN, or the cluster default pod
+	// network when none exists. nil/true attaches it; false omits it, leaving a VM
+	// whose only NICs are the secondary Networks above. Unlike a pod, a VM need not
+	// join the primary network.
+	PrimaryNetwork *bool             `json:"primaryNetwork,omitempty"`
+	Labels         map[string]string `json:"labels,omitempty"`
 }
 
 type OSImageRef struct {
@@ -39,8 +45,9 @@ type CloudInit struct {
 }
 
 type ExtraDisk struct {
-	Name string `json:"name"`
-	Size string `json:"size"` // e.g. "10Gi"
+	Name         string `json:"name"`
+	Size         string `json:"size"`                   // e.g. "10Gi"
+	StorageClass string `json:"storageClass,omitempty"` // empty = cluster default
 }
 
 type NetworkRef struct {
@@ -94,28 +101,25 @@ func metadata(s Spec) map[string]any {
 
 func vmSpec(s Spec) map[string]any {
 	rootVol := s.Name + "-rootdisk"
-	spec := map[string]any{
-		"runStrategy":  runStrategy(s.Running),
-		"instancetype": map[string]any{"name": s.Instancetype},
-		"preference":   map[string]any{"name": s.Preference},
-		"dataVolumeTemplates": []any{
-			dataVolumeTemplate(rootVol, s.OSImage, orDefault(s.DiskSize, "30Gi"), s.StorageClass),
-		},
-		"template": template(s, rootVol),
+	dvTemplates := []any{
+		dataVolumeTemplate(rootVol, s.OSImage, orDefault(s.DiskSize, "30Gi"), s.StorageClass),
 	}
-	return spec
+	// Extra disks are persistent, blank DataVolumes — each on its own (optional)
+	// storage class, so they outlive VM restarts and can be storage-migrated later.
+	for _, d := range s.ExtraDisks {
+		dvTemplates = append(dvTemplates,
+			blankDataVolumeTemplate(extraDiskVol(s.Name, d.Name), orDefault(d.Size, "10Gi"), d.StorageClass))
+	}
+	return map[string]any{
+		"runStrategy":         runStrategy(s.Running),
+		"instancetype":        map[string]any{"name": s.Instancetype},
+		"preference":          map[string]any{"name": s.Preference},
+		"dataVolumeTemplates": dvTemplates,
+		"template":            template(s, rootVol),
+	}
 }
 
 func dataVolumeTemplate(name string, img OSImageRef, size, class string) map[string]any {
-	storage := map[string]any{
-		"resources": map[string]any{
-			"requests": map[string]any{"storage": size},
-		},
-	}
-	// Empty = omit, so the provisioner picks the cluster default class.
-	if class != "" {
-		storage["storageClassName"] = class
-	}
 	return map[string]any{
 		"metadata": map[string]any{"name": name},
 		"spec": map[string]any{
@@ -124,27 +128,58 @@ func dataVolumeTemplate(name string, img OSImageRef, size, class string) map[str
 				"name":      img.Name,
 				"namespace": img.Namespace,
 			},
-			"storage": storage,
+			"storage": storageBlock(size, class),
 		},
 	}
 }
+
+// blankDataVolumeTemplate provisions an empty, formatted-on-first-boot PVC — the
+// backing for an extra data disk.
+func blankDataVolumeTemplate(name, size, class string) map[string]any {
+	return map[string]any{
+		"metadata": map[string]any{"name": name},
+		"spec": map[string]any{
+			"source":  map[string]any{"blank": map[string]any{}},
+			"storage": storageBlock(size, class),
+		},
+	}
+}
+
+// storageBlock is a DataVolume's storage request. An empty class is omitted so
+// the provisioner picks the cluster default.
+func storageBlock(size, class string) map[string]any {
+	storage := map[string]any{
+		"resources": map[string]any{
+			"requests": map[string]any{"storage": size},
+		},
+	}
+	if class != "" {
+		storage["storageClassName"] = class
+	}
+	return storage
+}
+
+// extraDiskVol is the DataVolume/PVC name for an extra disk: the VM name prefix
+// keeps it unique within the namespace (mirrors the "<vm>-rootdisk" root).
+func extraDiskVol(vm, disk string) string { return vm + "-" + disk }
 
 func template(s Spec, rootVol string) map[string]any {
 	disks := []any{namedDisk("rootdisk")}
 	volumes := []any{dataVolumeMount("rootdisk", rootVol)}
 
-	// Extra blank disks become their own dataVolumeTemplates referenced here;
-	// for simplicity in the manifest we add them as volumes with emptyDisk.
+	// Extra disks reference the blank DataVolume templates added in vmSpec.
 	for _, d := range s.ExtraDisks {
 		disks = append(disks, namedDisk(d.Name))
-		volumes = append(volumes, map[string]any{
-			"name":      d.Name,
-			"emptyDisk": map[string]any{"capacity": d.Size},
-		})
+		volumes = append(volumes, dataVolumeMount(d.Name, extraDiskVol(s.Name, d.Name)))
 	}
 
-	networks := []any{podDefaultNetwork()}
-	ifaces := []any{masqueradeIface("default")}
+	// The primary NIC (pod network + masquerade) is attached unless explicitly
+	// declined — a VM, unlike a pod, may live on secondary networks alone.
+	var networks, ifaces []any
+	if s.PrimaryNetwork == nil || *s.PrimaryNetwork {
+		networks = append(networks, podDefaultNetwork())
+		ifaces = append(ifaces, masqueradeIface("default"))
+	}
 	for _, n := range s.Networks {
 		net, iface := multusNetwork(n.Name)
 		networks = append(networks, net)

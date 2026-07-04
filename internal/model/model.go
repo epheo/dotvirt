@@ -170,8 +170,9 @@ type EditRequest struct {
 
 // DiskAdd / NetworkAdd are the add-device entries in an EditRequest body.
 type DiskAdd struct {
-	Name string `json:"name"`
-	Size string `json:"size"`
+	Name         string `json:"name"`
+	Size         string `json:"size"`
+	StorageClass string `json:"storageClass,omitempty"` // blank DataVolume class; empty = cluster default
 }
 type NetworkAdd struct {
 	Name string `json:"name"`

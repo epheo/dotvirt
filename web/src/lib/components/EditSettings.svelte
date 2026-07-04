@@ -87,8 +87,9 @@
 				...disks,
 				{
 					name: `disk-${disks.length + 1}`,
-					type: 'emptyDisk',
+					type: 'dataVolume',
 					size: '10Gi',
+					storageClass: '',
 					removed: false,
 					isNew: true,
 				},
@@ -156,7 +157,11 @@
 		// Disks
 		const addDisks = disks.filter((d) => d.isNew && !d.removed && d.name.trim());
 		if (addDisks.length)
-			req.addDisks = addDisks.map((d) => ({ name: d.name, size: d.size ?? '10Gi' }));
+			req.addDisks = addDisks.map((d) => ({
+				name: d.name,
+				size: d.size ?? '10Gi',
+				storageClass: d.storageClass || undefined,
+			}));
 		const removeDisks = disks.filter((d) => !d.isNew && d.removed).map((d) => d.name);
 		if (removeDisks.length) req.removeDisks = removeDisks;
 
@@ -199,7 +204,10 @@
 			out.push({ label: `Label ${k}`, value: v });
 		for (const k of r.removeLabels ?? []) out.push({ label: `Label ${k}`, value: 'removed' });
 		for (const d of r.addDisks ?? [])
-			out.push({ label: 'Disk added', value: `${d.name} (${d.size})` });
+			out.push({
+				label: 'Disk added',
+				value: `${d.name} (${d.size}${d.storageClass ? `, ${d.storageClass}` : ''})`,
+			});
 		for (const n of r.removeDisks ?? []) out.push({ label: 'Disk removed', value: n });
 		for (const n of r.addNetworks ?? []) out.push({ label: 'Adapter added', value: n.name });
 		for (const n of r.removeNetworks ?? []) out.push({ label: 'Adapter removed', value: n });
@@ -391,15 +399,26 @@
 			{#if disk.isNew}
 				<input
 					bind:value={disk.name}
-					class="w-28 rounded border border-line-strong px-2 py-0.5 text-xs"
+					class="w-24 rounded border border-line-strong px-2 py-0.5 text-xs"
 				/>
 				<input
 					bind:value={disk.size}
-					class="w-20 rounded border border-line-strong px-2 py-0.5 text-xs"
+					class="w-16 rounded border border-line-strong px-2 py-0.5 text-xs"
 				/>
+				<select
+					bind:value={disk.storageClass}
+					class="min-w-0 flex-1 rounded border border-line-strong px-2 py-0.5 text-xs"
+				>
+					<option value="">cluster default</option>
+					{#each options?.storageClasses ?? [] as sc (sc.name)}
+						<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
+					{/each}
+				</select>
 			{:else}
 				<span class="text-xs text-ink-muted"
-					>{disk.name} ({disk.type}{disk.size ? ` · ${disk.size}` : ''})</span
+					>{disk.name} ({disk.type}{disk.size ? ` · ${disk.size}` : ''}{disk.storageClass
+						? ` · ${disk.storageClass}`
+						: ''})</span
 				>
 			{/if}
 			<button

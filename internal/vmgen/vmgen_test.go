@@ -62,12 +62,13 @@ func TestManifestFull(t *testing.T) {
 	}
 	s := string(content)
 	for _, want := range []string{
-		"storage: 50Gi",                   // custom disk size
+		"storage: 50Gi",                   // custom root disk size
 		"runStrategy: Halted",             // not running
 		"#cloud-config",                   // cloud-init
 		"ssh-ed25519",                     // ssh key
-		"emptyDisk",                       // extra disk
-		"capacity: 100Gi",                 // extra disk size
+		"name: full-data",                 // extra disk's blank DataVolume
+		"blank: {}",                       // extra disk is a persistent blank DV, not emptyDisk
+		"storage: 100Gi",                  // extra disk size
 		"networkName: tenant-a/mt-bridge", // multus network
 		"bridge:",                         // bridge iface for the NAD
 		"app: full",                       // label
@@ -75,6 +76,78 @@ func TestManifestFull(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Errorf("manifest missing %q:\n%s", want, s)
 		}
+	}
+}
+
+// A VM may decline the primary NIC and live on secondary networks alone: no pod
+// network, no masquerade, only the requested NAD-backed bridge interfaces.
+func TestManifestSecondaryOnly(t *testing.T) {
+	no := false
+	_, content, err := Manifest(Spec{
+		Name: "edge", Namespace: "team-c",
+		Instancetype: "u1.small", Preference: "fedora",
+		OSImage:        OSImageRef{Name: "fedora", Namespace: "kv"},
+		PrimaryNetwork: &no,
+		Networks:       []NetworkRef{{Name: "team-c/localnet-a"}},
+	})
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+	s := string(content)
+	if strings.Contains(s, "pod:") || strings.Contains(s, "masquerade:") {
+		t.Errorf("primary declined but manifest still attaches the pod network:\n%s", s)
+	}
+	for _, want := range []string{"networkName: team-c/localnet-a", "bridge:"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("manifest missing %q:\n%s", want, s)
+		}
+	}
+}
+
+// nil PrimaryNetwork (the common case and any older stored spec) keeps the primary
+// NIC attached — the default is unchanged.
+func TestManifestPrimaryDefault(t *testing.T) {
+	_, content, err := Manifest(Spec{
+		Name: "web", Namespace: "team-a",
+		Instancetype: "u1.medium", Preference: "fedora",
+		OSImage: OSImageRef{Name: "fedora", Namespace: "kv"},
+	})
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+	if !strings.Contains(string(content), "masquerade:") {
+		t.Errorf("primary NIC should attach by default:\n%s", content)
+	}
+}
+
+// An extra disk is a persistent blank DataVolume; its storage class lands on the
+// disk's own template, while an unset class omits the field (cluster default).
+func TestManifestExtraDiskStorageClass(t *testing.T) {
+	_, content, err := Manifest(Spec{
+		Name: "vm1", Namespace: "ns1",
+		Instancetype: "u1.small", Preference: "fedora",
+		OSImage: OSImageRef{Name: "fedora", Namespace: "kv"},
+		ExtraDisks: []ExtraDisk{
+			{Name: "fast", Size: "20Gi", StorageClass: "lvms-vgfast"},
+			{Name: "bulk", Size: "500Gi"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+	s := string(content)
+	for _, want := range []string{
+		"name: vm1-fast", "storageClassName: lvms-vgfast", // classed extra disk
+		"name: vm1-bulk", "storage: 500Gi", // default-class extra disk
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("manifest missing %q:\n%s", want, s)
+		}
+	}
+	// The default-class disk must not inherit the other's class. Its template is
+	// the last one; assert exactly one storageClassName appears in the document.
+	if n := strings.Count(s, "storageClassName"); n != 1 {
+		t.Errorf("want exactly one storageClassName (only the 'fast' disk), got %d:\n%s", n, s)
 	}
 }
 

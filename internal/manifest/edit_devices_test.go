@@ -24,6 +24,18 @@ spec:
     name: u1.medium
   preference:
     name: fedora
+  dataVolumeTemplates:
+  - metadata:
+      name: web-rootdisk
+    spec:
+      sourceRef:
+        kind: DataSource
+        name: fedora
+        namespace: os-images
+      storage:
+        resources:
+          requests:
+            storage: 30Gi
   template:
     spec:
       domain:
@@ -42,6 +54,29 @@ spec:
       - name: rootdisk
         dataVolume:
           name: web-rootdisk
+`
+
+// vmContainerDisk is a VM with no dataVolumeTemplates (a container-disk import) —
+// adding a persistent disk must create the section from scratch.
+const vmContainerDisk = `apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: ctr
+  namespace: alpha
+spec:
+  runStrategy: Always
+  template:
+    spec:
+      domain:
+        devices:
+          disks:
+          - name: rootdisk
+            disk:
+              bus: virtio
+      volumes:
+      - name: rootdisk
+        containerDisk:
+          image: quay.io/example/fedora:latest
 `
 
 // mustParse asserts the edited manifest is still valid YAML and returns it.
@@ -92,22 +127,48 @@ func TestEditLabelsUpsertAndRemove(t *testing.T) {
 
 func TestAddDisk(t *testing.T) {
 	out, err := ApplyEdit([]byte(vmWithDevices), "alpha", "web", VMEdit{
-		AddDisks: []model.DiskAdd{{Name: "data", Size: "20Gi"}},
+		AddDisks: []model.DiskAdd{{Name: "data", Size: "20Gi", StorageClass: "fast"}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	m := mustParse(t, out)
-	disks := disksOf(t, m)
-	if len(disks) != 2 {
-		t.Fatalf("expected 2 disks, got %d:\n%s", len(disks), out)
+	if got := len(disksOf(t, m)); got != 2 {
+		t.Fatalf("expected 2 disks, got %d:\n%s", got, out)
 	}
-	if !strings.Contains(string(out), "capacity: 20Gi") {
-		t.Errorf("new volume missing:\n%s", out)
+	s := string(out)
+	// The new disk is a persistent, blank DataVolume on the chosen class — not an
+	// emptyDisk — with its own dataVolumeTemplates entry.
+	for _, want := range []string{"name: web-data", "blank: {}", "storage: 20Gi", "storageClassName: fast"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("blank DataVolume missing %q:\n%s", want, s)
+		}
+	}
+	if got := len(dvTemplatesOf(t, m)); got != 2 {
+		t.Fatalf("expected 2 dataVolumeTemplates (rootdisk + data), got %d:\n%s", got, s)
 	}
 	// rootdisk must be untouched.
-	if !strings.Contains(string(out), "name: web-rootdisk") {
+	if !strings.Contains(s, "name: web-rootdisk") {
 		t.Error("existing volume disturbed")
+	}
+}
+
+// A VM without a dataVolumeTemplates section gets one created when a disk is added.
+func TestAddDiskCreatesTemplatesSection(t *testing.T) {
+	out, err := ApplyEdit([]byte(vmContainerDisk), "alpha", "ctr", VMEdit{
+		AddDisks: []model.DiskAdd{{Name: "data", Size: "20Gi", StorageClass: "fast"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := mustParse(t, out)
+	if got := len(dvTemplatesOf(t, m)); got != 1 {
+		t.Fatalf("expected a created dataVolumeTemplates section with 1 entry, got %d:\n%s", got, out)
+	}
+	for _, want := range []string{"name: ctr-data", "blank: {}", "storage: 20Gi", "storageClassName: fast"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
 	}
 }
 
@@ -148,12 +209,17 @@ func TestRemoveDisk(t *testing.T) {
 	if !hasStr(names, "rootdisk") || !hasStr(names, "logs") {
 		t.Errorf("removal took the wrong disks: %v\n%s", names, out)
 	}
-	// The 'data' emptyDisk volume must also be gone.
-	if strings.Contains(string(out), "capacity: 20Gi") {
-		t.Errorf("data volume not removed:\n%s", out)
+	s := string(out)
+	// The 'data' volume AND its dataVolume template must be gone (no orphaned PVC).
+	if strings.Contains(s, "web-data") || strings.Contains(s, "storage: 20Gi") {
+		t.Errorf("data volume/template not fully removed:\n%s", s)
 	}
-	if !strings.Contains(string(out), "capacity: 5Gi") {
-		t.Errorf("logs volume wrongly removed:\n%s", out)
+	if got := len(dvTemplatesOf(t, m)); got != 2 {
+		t.Fatalf("expected 2 dataVolumeTemplates (rootdisk + logs), got %d:\n%s", got, s)
+	}
+	// 'logs' must survive intact.
+	if !strings.Contains(s, "web-logs") || !strings.Contains(s, "storage: 5Gi") {
+		t.Errorf("logs volume wrongly removed:\n%s", s)
 	}
 }
 
@@ -169,6 +235,11 @@ func disksOf(t *testing.T, m map[string]any) []any {
 func ifacesOf(t *testing.T, m map[string]any) []any {
 	t.Helper()
 	return template(m)["domain"].(map[string]any)["devices"].(map[string]any)["interfaces"].([]any)
+}
+func dvTemplatesOf(t *testing.T, m map[string]any) []any {
+	t.Helper()
+	dv, _ := m["spec"].(map[string]any)["dataVolumeTemplates"].([]any)
+	return dv
 }
 func diskNames(t *testing.T, m map[string]any) []string {
 	t.Helper()

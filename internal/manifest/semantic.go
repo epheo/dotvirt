@@ -50,7 +50,11 @@ func ChangesForEdit(current model.VM, edit VMEdit) []model.Change {
 	}
 
 	for _, d := range edit.AddDisks {
-		out = append(out, model.Change{Field: "Disk", Action: "add", To: fmt.Sprintf("%s (%s)", d.Name, d.Size)})
+		to := fmt.Sprintf("%s (%s)", d.Name, d.Size)
+		if d.StorageClass != "" {
+			to = fmt.Sprintf("%s (%s, %s)", d.Name, d.Size, d.StorageClass)
+		}
+		out = append(out, model.Change{Field: "Disk", Action: "add", To: to})
 	}
 	for _, name := range edit.RemoveDisks {
 		out = append(out, model.Change{Field: "Disk", Action: "remove", From: name})
