@@ -154,10 +154,13 @@
 			const extra = [skipped ? `${skipped} skipped` : '', failed ? `${failed} failed` : '']
 				.filter(Boolean)
 				.join(', ');
-			ui.showToast(
-				`${verb} ${staged} of ${vms.length}${extra ? ` (${extra})` : ''}.`,
-				staged > 0 ? { label: 'Review & propose', run: () => (ui.changesOpen = true) } : undefined,
-			);
+			ui.showToast(`${verb} ${staged} of ${vms.length}${extra ? ` (${extra})` : ''}.`, {
+				kind: failed ? 'error' : 'success',
+				action:
+					staged > 0
+						? { label: 'Review & propose', run: () => (ui.changesOpen = true) }
+						: undefined,
+			});
 		} finally {
 			bulkBusy = false;
 		}
