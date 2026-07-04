@@ -33,10 +33,13 @@
 	let running = $state(true);
 	let sshKey = $state('');
 	let user = $state('');
-	let extraDisks = $state<{ name: string; size: string }[]>([]);
+	let extraDisks = $state<{ name: string; size: string; storageClass: string }[]>([]);
 	// Selected secondary networks, held as attach refs ("namespace/nad", or a bare
-	// name for a shared CUDN). The project's default "VM Network" is implicit.
+	// name for a shared CUDN).
 	let selectedNetworks = $state<string[]>([]);
+	// Attach the primary (pod-network) NIC. On by default, but — unlike a pod — a VM
+	// may decline it and run on secondary networks alone.
+	let attachPrimary = $state(true);
 
 	let submitting = $state(false);
 	let error = $state('');
@@ -47,17 +50,25 @@
 
 	// Attachable secondary port groups for the chosen project: shared (CUDN)
 	// networks plus this namespace's own non-default networks. The primary
-	// ("VM Network") is excluded — it backs the default NIC automatically.
+	// ("VM Network") is excluded here — it's offered as its own toggle below.
 	const available = $derived(attachableNetworks(networks, namespace));
+	// The project's primary ("VM Network") UDN, when one exists — else the primary
+	// NIC is the cluster default pod network, shown with a generic label.
+	const primaryNet = $derived(
+		networks.find((n) => n.kind === 'default' && n.namespace === namespace),
+	);
+	const primaryLabel = $derived(primaryNet?.name ?? 'Pod network');
 	function toggleNet(n: Network, on: boolean) {
 		const ref = attachRef(n);
 		selectedNetworks = on ? [...selectedNetworks, ref] : selectedNetworks.filter((r) => r !== ref);
 	}
 	// Project networks are namespace-bound, so clear the selection when the target
-	// project changes (a stale pick from another project mustn't carry over).
+	// project changes (a stale pick from another project mustn't carry over); the
+	// primary NIC resets to its attached default.
 	$effect(() => {
 		namespace;
 		selectedNetworks = [];
+		attachPrimary = true;
 	});
 
 	$effect(() => {
@@ -84,15 +95,22 @@
 			.catch((e) => (loadError = String(e)));
 	});
 
-	// Global gate (unchanged): reused as both the Finish gate and submit()'s guard.
-	const valid = $derived(!!(name && namespace && osImage && instancetype && preference));
+	// A VM needs at least one NIC: the primary, a secondary, or both.
+	const hasNetwork = $derived(attachPrimary || selectedNetworks.length > 0);
+	// Global gate: reused as both the Finish gate and submit()'s guard.
+	const valid = $derived(
+		!!(name && namespace && osImage && instancetype && preference) && hasNetwork,
+	);
 	// Per-step validity — drives only the rail markers, never blocks navigation.
 	const step1Valid = $derived(!!(name && namespace));
 	const step2Valid = $derived(!!(osImage && preference));
 	const step3Valid = $derived(!!instancetype);
 
 	function addDisk() {
-		extraDisks = [...extraDisks, { name: `disk${extraDisks.length + 1}`, size: '10Gi' }];
+		extraDisks = [
+			...extraDisks,
+			{ name: `disk${extraDisks.length + 1}`, size: '10Gi', storageClass: '' },
+		];
 	}
 	function removeDisk(i: number) {
 		extraDisks = extraDisks.filter((_, idx) => idx !== i);
@@ -119,12 +137,15 @@
 			['Storage class', storageClass || 'cluster default'],
 		];
 		if (extraDisks.length)
-			for (const d of extraDisks) rows.push([`Extra disk · ${d.name}`, d.size]);
+			for (const d of extraDisks)
+				rows.push([`Extra disk · ${d.name}`, `${d.size} · ${d.storageClass || 'cluster default'}`]);
 		else rows.push(['Extra disks', 'None']);
 		return rows;
 	});
 	const networkRows = $derived.by(() => {
-		const rows: string[][] = [['Default network', 'attached automatically']];
+		const rows: string[][] = [
+			['Primary network', attachPrimary ? `${primaryLabel} (VM Network)` : 'Not attached'],
+		];
 		if (selectedNetworkLabels.length)
 			for (const l of selectedNetworkLabels) rows.push(['Adapter', l]);
 		else rows.push(['Additional adapters', 'None']);
@@ -139,6 +160,7 @@
 		if (!osImage) m.push({ label: 'OS image is required', step: 1 });
 		if (!preference) m.push({ label: 'Preference is required', step: 1 });
 		if (!instancetype) m.push({ label: 'Size is required', step: 2 });
+		if (!hasNetwork) m.push({ label: 'At least one network is required', step: 4 });
 		return m;
 	});
 
@@ -156,8 +178,15 @@
 			diskSize,
 			storageClass: storageClass || undefined,
 			running,
-			extraDisks: extraDisks.length ? extraDisks : undefined,
+			extraDisks: extraDisks.length
+				? extraDisks.map((d) => ({
+						name: d.name,
+						size: d.size,
+						storageClass: d.storageClass || undefined,
+					}))
+				: undefined,
 			networks: selectedNetworks.length ? selectedNetworks.map((n) => ({ name: n })) : undefined,
+			primaryNetwork: attachPrimary,
 		};
 		if (user || sshKey) req.cloudInit = { user: user || undefined, sshKey: sshKey || undefined };
 		try {
@@ -289,13 +318,22 @@
 					<input
 						bind:value={disk.name}
 						placeholder="name"
-						class="w-1/2 rounded border border-line-strong px-2 py-1"
+						class="min-w-0 flex-1 rounded border border-line-strong px-2 py-1"
 					/>
 					<input
 						bind:value={disk.size}
 						placeholder="10Gi"
-						class="w-1/3 rounded border border-line-strong px-2 py-1"
+						class="w-20 rounded border border-line-strong px-2 py-1"
 					/>
+					<select
+						bind:value={disk.storageClass}
+						class="min-w-0 flex-1 rounded border border-line-strong px-2 py-1"
+					>
+						<option value="">cluster default</option>
+						{#each options?.storageClasses ?? [] as sc (sc.name)}
+							<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
+						{/each}
+					</select>
 					<button
 						onclick={() => removeDisk(i)}
 						type="button"
@@ -311,27 +349,39 @@
 {#snippet step5()}
 	<div class="space-y-2">
 		<p class="text-xs text-ink-muted">
-			The project's default network is attached automatically. Add extra network adapters below.
+			Choose the networks this VM attaches to. The primary is attached by default, but a VM may run
+			on secondary networks alone — at least one is required.
 		</p>
-		{#if available.length}
-			<div class="mt-1 space-y-1 rounded border border-line-strong p-2">
-				{#each available as net (net.scope + '/' + (net.namespace ?? '') + '/' + net.name)}
-					<label class="flex items-center gap-2 text-xs">
-						<input
-							type="checkbox"
-							checked={selectedNetworks.includes(attachRef(net))}
-							onchange={(e) => toggleNet(net, e.currentTarget.checked)}
-						/>
-						<span class="text-ink-soft">{net.name}</span>
-						<span class="rounded bg-inset-strong px-1.5 py-0.5 text-[11px] text-ink-muted"
-							>{kindLabel(net.kind)}{net.vlan ? ` ${net.vlan}` : ''}</span
-						>
-						{#if net.scope === 'shared'}<span class="text-[11px] text-ink-faint">shared</span>{/if}
-					</label>
-				{/each}
-			</div>
-		{:else}
-			<p class="mt-1 text-xs text-ink-faint">No additional networks available for {namespace}.</p>
+		<div class="mt-1 space-y-1 rounded border border-line-strong p-2">
+			<!-- Primary (pod-network) NIC — optional for a VM, unlike a pod. -->
+			<label class="flex items-center gap-2 text-xs">
+				<input type="checkbox" bind:checked={attachPrimary} />
+				<span class="text-ink-soft">{primaryLabel}</span>
+				<span class="rounded bg-inset-strong px-1.5 py-0.5 text-[11px] text-ink-muted"
+					>VM Network</span
+				>
+				<span class="text-[11px] text-ink-faint">primary</span>
+			</label>
+			{#each available as net (net.scope + '/' + (net.namespace ?? '') + '/' + net.name)}
+				<label class="flex items-center gap-2 text-xs">
+					<input
+						type="checkbox"
+						checked={selectedNetworks.includes(attachRef(net))}
+						onchange={(e) => toggleNet(net, e.currentTarget.checked)}
+					/>
+					<span class="text-ink-soft">{net.name}</span>
+					<span class="rounded bg-inset-strong px-1.5 py-0.5 text-[11px] text-ink-muted"
+						>{kindLabel(net.kind)}{net.vlan ? ` ${net.vlan}` : ''}</span
+					>
+					{#if net.scope === 'shared'}<span class="text-[11px] text-ink-faint">shared</span>{/if}
+				</label>
+			{/each}
+		</div>
+		{#if !available.length}
+			<p class="mt-1 text-xs text-ink-faint">No secondary networks available for {namespace}.</p>
+		{/if}
+		{#if !hasNetwork}
+			<p class="text-xs text-warn-ink">Select at least one network — a VM needs a NIC.</p>
 		{/if}
 	</div>
 {/snippet}

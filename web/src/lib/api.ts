@@ -139,7 +139,7 @@ export interface EditRequest {
 	removeLabels?: string[];
 	drsExclude?: boolean; // toggle the DRS opt-out (prefer-no-eviction) annotation
 	evictionStrategy?: string; // '' removes it (cluster default)
-	addDisks?: { name: string; size: string }[];
+	addDisks?: { name: string; size: string; storageClass?: string }[];
 	removeDisks?: string[];
 	addNetworks?: { name: string }[];
 	removeNetworks?: string[];
@@ -310,8 +310,9 @@ export interface CreateVMRequest {
 	storageClass?: string; // root disk class; empty = cluster default
 	running: boolean;
 	cloudInit?: { user?: string; password?: string; sshKey?: string; extraUserData?: string };
-	extraDisks?: { name: string; size: string }[];
-	networks?: { name: string }[];
+	extraDisks?: { name: string; size: string; storageClass?: string }[];
+	networks?: { name: string }[]; // secondary networks (UDN/localnet)
+	primaryNetwork?: boolean; // attach the primary (pod-network) NIC; omitted/true = yes
 	labels?: Record<string, string>;
 }
 

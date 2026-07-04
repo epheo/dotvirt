@@ -97,10 +97,13 @@ func changesForCreate(s vmgen.Spec) []model.Change {
 		out = append(out, model.Change{Field: "Storage class", Action: "add", To: s.StorageClass})
 	}
 	for _, d := range s.ExtraDisks {
-		out = append(out, model.Change{Field: "Disk", Action: "add", To: fmt.Sprintf("%s (%s)", d.Name, d.Size)})
+		out = append(out, model.Change{Field: "Disk", Action: "add", To: diskLabel(d.Name, d.Size, d.StorageClass)})
 	}
 	for _, n := range s.Networks {
 		out = append(out, model.Change{Field: "Network", Action: "add", To: n.Name})
+	}
+	if s.PrimaryNetwork != nil && !*s.PrimaryNetwork {
+		out = append(out, model.Change{Field: "Primary network", Action: "remove", From: "VM Network"})
 	}
 	out = append(out, model.Change{Field: "Power", Action: "add", To: powerWord(s.Running)})
 	return out
@@ -111,6 +114,15 @@ func powerWord(running bool) string {
 		return "On"
 	}
 	return "Off"
+}
+
+// diskLabel renders an added disk for the changeset preview, appending the
+// storage class only when one was chosen (empty = cluster default).
+func diskLabel(name, size, class string) string {
+	if class != "" {
+		return fmt.Sprintf("%s (%s, %s)", name, size, class)
+	}
+	return fmt.Sprintf("%s (%s)", name, size)
 }
 
 // editToMatch builds a VMEdit that transforms `from` (e.g. main/desired) into
