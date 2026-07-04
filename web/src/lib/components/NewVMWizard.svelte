@@ -207,7 +207,10 @@
 		</p>
 		<label class="block">
 			<span class="text-ink-soft">OS image</span>
-			<select bind:value={osImage} class="mt-1 w-full rounded border border-line-strong px-2 py-1.5">
+			<select
+				bind:value={osImage}
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+			>
 				{#each (options?.osImages ?? []).filter((i) => i.ready) as img (img.namespace + img.name)}
 					<option value={`${img.name}|${img.namespace}`}>{img.name}</option>
 				{/each}
@@ -297,7 +300,7 @@
 						onclick={() => removeDisk(i)}
 						type="button"
 						aria-label="Remove disk"
-						class="text-red-500 hover:text-danger-ink"><X size={14} /></button
+						class="text-danger hover:text-danger-ink"><X size={14} /></button
 					>
 				</div>
 			{/each}
@@ -363,9 +366,7 @@
 
 {#snippet reviewGroup(title: string, step: number, rows: string[][])}
 	<div class="rounded border border-line">
-		<div
-			class="flex items-center justify-between border-b border-line-soft bg-inset px-3 py-1.5"
-		>
+		<div class="flex items-center justify-between border-b border-line-soft bg-inset px-3 py-1.5">
 			<span class="text-xs font-semibold tracking-wide text-ink-muted uppercase">{title}</span>
 			<button
 				type="button"

@@ -54,7 +54,7 @@
 		'failed',
 	];
 	const phaseColor: Record<string, string> = {
-		running: 'text-green-600',
+		running: 'text-ok-ink',
 		paused: 'text-warn-ink',
 		failed: 'text-danger',
 	};

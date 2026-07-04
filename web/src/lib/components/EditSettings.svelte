@@ -224,7 +224,9 @@
 
 {#snippet stepCompute()}
 	{#if optionsError}
-		<div class="mb-3 rounded border border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
+		<div
+			class="mb-3 rounded border border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink"
+		>
 			{optionsError} — the instance type / preference dropdowns may be empty.
 		</div>
 	{/if}
@@ -402,7 +404,7 @@
 			{/if}
 			<button
 				onclick={() => (disk.removed = !disk.removed)}
-				class="ml-auto text-xs {disk.removed ? 'text-accent' : 'text-red-500'}"
+				class="ml-auto text-xs {disk.removed ? 'text-accent' : 'text-danger'}"
 			>
 				{disk.removed ? 'undo' : 'remove'}
 			</button>
@@ -441,7 +443,7 @@
 			{/if}
 			<button
 				onclick={() => (nic.removed = !nic.removed)}
-				class="ml-auto text-xs {nic.removed ? 'text-accent' : 'text-red-500'}"
+				class="ml-auto text-xs {nic.removed ? 'text-accent' : 'text-danger'}"
 			>
 				{nic.removed ? 'undo' : 'remove'}
 			</button>
@@ -475,7 +477,7 @@
 			<button
 				onclick={() => (labelRows = labelRows.filter((_, idx) => idx !== i))}
 				aria-label="Remove label"
-				class="text-red-500"><X size={14} /></button
+				class="text-danger"><X size={14} /></button
 			>
 		</div>
 	{/each}

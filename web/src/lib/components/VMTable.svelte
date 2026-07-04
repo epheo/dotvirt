@@ -232,7 +232,9 @@
 							e.preventDefault();
 							oncontextvm(vm, e.clientX, e.clientY);
 						}}
-						class="cursor-pointer hover:bg-select-soft {selected.has(vmKey(vm)) ? 'bg-select-soft' : ''}"
+						class="cursor-pointer hover:bg-select-soft {selected.has(vmKey(vm))
+							? 'bg-select-soft'
+							: ''}"
 					>
 						<td class="px-3 py-1.5">
 							<input

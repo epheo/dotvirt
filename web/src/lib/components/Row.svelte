@@ -16,11 +16,7 @@
 	{#if children}
 		<dd class="min-w-0 text-right">{@render children()}</dd>
 	{:else}
-		<dd
-			class="min-w-0 truncate text-right {mono
-				? 'font-mono text-xs text-ink-soft'
-				: 'text-ink'}"
-		>
+		<dd class="min-w-0 truncate text-right {mono ? 'font-mono text-xs text-ink-soft' : 'text-ink'}">
 			{value || '—'}
 		</dd>
 	{/if}

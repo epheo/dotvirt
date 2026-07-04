@@ -288,9 +288,7 @@
 
 {#snippet dockHead(cols: string[])}
 	<!-- The one header row all three dock tables share. -->
-	<thead
-		class="sticky top-0 bg-inset text-left text-[11px] tracking-wide text-ink-faint uppercase"
-	>
+	<thead class="sticky top-0 bg-inset text-left text-[11px] tracking-wide text-ink-faint uppercase">
 		<tr class="border-b border-line">
 			{#each cols as c (c)}
 				<th class="px-3 py-1.5 font-medium">{c}</th>

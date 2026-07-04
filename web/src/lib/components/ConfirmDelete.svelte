@@ -36,7 +36,7 @@
 			id="confirm-delete-input"
 			data-autofocus
 			bind:value={text}
-			class="w-full rounded border border-line-strong px-2 py-1 font-mono text-sm focus:border-red-400"
+			class="w-full rounded border border-line-strong px-2 py-1 font-mono text-sm focus:border-danger/60"
 			placeholder={confirmWord}
 		/>
 		{#if error}
@@ -53,7 +53,7 @@
 		<button
 			onclick={onconfirm}
 			disabled={!ready}
-			class="rounded bg-danger px-3 py-1 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+			class="rounded bg-danger px-3 py-1 text-sm font-medium text-white hover:bg-danger-ink disabled:opacity-50"
 		>
 			Delete
 		</button>

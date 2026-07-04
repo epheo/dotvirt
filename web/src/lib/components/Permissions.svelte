@@ -43,7 +43,7 @@
 					{#each p.capabilities as c (c.id)}
 						<li class="flex items-center gap-2 px-3 py-1.5" title={c.detail}>
 							{#if c.allowed}
-								<Check size={14} class="shrink-0 text-green-600" />
+								<Check size={14} class="shrink-0 text-ok-ink" />
 							{:else}
 								<X size={14} class="shrink-0 text-ink-faint" />
 							{/if}
@@ -52,7 +52,7 @@
 					{/each}
 				</ul>
 				{#if p.incomplete}
-					<p class="border-t border-amber-100 bg-warn-soft/60 px-3 py-1.5 text-xs text-warn-ink">
+					<p class="border-t border-warn-soft bg-warn-soft/60 px-3 py-1.5 text-xs text-warn-ink">
 						The cluster couldn't enumerate every rule; some allowed actions may show as denied.
 					</p>
 				{/if}

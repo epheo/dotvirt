@@ -110,7 +110,8 @@
 	</div>
 
 	{#if error}
-		<pre class="mb-2 rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
+		<pre
+			class="mb-2 rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 	{/if}
 
 	{#each draft.items as item (itemKey(item.namespace, item.name))}
@@ -128,7 +129,7 @@
 				<button
 					onclick={() => unstage(item.namespace, item.name, item.resource)}
 					disabled={unstaging !== null}
-					class="ml-auto text-xs text-red-500 hover:text-danger-ink disabled:text-ink-faint"
+					class="ml-auto text-xs text-danger hover:text-danger-ink disabled:text-ink-faint"
 					>{unstaging === k ? 'unstaging…' : 'unstage'}</button
 				>
 			</div>

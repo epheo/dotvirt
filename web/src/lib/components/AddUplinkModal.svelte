@@ -79,7 +79,10 @@
 			<label class="block">
 				<span class="text-ink-soft">Physical adapter (NIC)</span>
 				{#if nics.length}
-					<select bind:value={nic} class="mt-1 w-full rounded border border-line-strong px-2 py-1.5">
+					<select
+						bind:value={nic}
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+					>
 						{#each nics as n (n)}<option value={n}>{n}</option>{/each}
 					</select>
 				{:else}
@@ -91,8 +94,7 @@
 				{/if}
 			</label>
 			<label class="block">
-				<span class="text-ink-soft">OVS bridge <span class="text-ink-faint">(optional)</span></span
-				>
+				<span class="text-ink-soft">OVS bridge <span class="text-ink-faint">(optional)</span></span>
 				<input
 					bind:value={bridge}
 					placeholder={name ? `br-${name}` : 'br-physnet'}
@@ -106,7 +108,8 @@
 			platform repository. Requires the NMState operator.
 		</p>
 		{#if error}
-			<pre class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
+			<pre
+				class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 	</div>
 	{#snippet footer()}

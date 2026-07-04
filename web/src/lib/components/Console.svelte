@@ -42,7 +42,7 @@
 </script>
 
 {#if vm.phase !== 'Running'}
-	<div class="flex h-full items-center justify-center text-sm text-slate-400">
+	<div class="flex h-full items-center justify-center text-sm text-ink-faint">
 		Console is available only while the VM is running (status: {vm.phase || 'stopped'}).
 	</div>
 {:else}
@@ -52,8 +52,9 @@
 				tone={status === 'connected' ? 'ok' : status === 'connecting' ? 'warn' : 'danger'}
 				pulse={status === 'connecting'}
 			/>
-			<span class="text-slate-500 capitalize">{status}{detail ? ` — ${detail}` : ''}</span>
+			<span class="text-ink-muted capitalize">{status}{detail ? ` — ${detail}` : ''}</span>
 		</div>
+		<!-- The bezel behind the framebuffer stays dark in both themes (raw slate). -->
 		<div class="relative min-h-0 flex-1 overflow-hidden rounded bg-slate-900">
 			<div bind:this={screen} class="h-full w-full"></div>
 			{#if status === 'disconnected'}

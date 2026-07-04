@@ -125,9 +125,7 @@
 		{#if uplinks.length}
 			<div class="mb-2 flex flex-wrap gap-1.5 pl-6">
 				{#each uplinks as u (u.name)}
-					<span
-						class="rounded border border-line bg-panel px-2 py-0.5 text-[11px] text-ink-soft"
-					>
+					<span class="rounded border border-line bg-panel px-2 py-0.5 text-[11px] text-ink-soft">
 						{u.name}{u.builtin ? ' · default' : ''} <span class="text-ink-faint">({u.bridge})</span>
 					</span>
 				{/each}

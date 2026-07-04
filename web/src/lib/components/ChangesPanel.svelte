@@ -155,17 +155,18 @@
 		     PR straight from its propose response (same markup — the stream takes
 		     over invisibly once it carries the PR). -->
 		{#each banners as p (p.project + '#' + p.prNumber)}
-			<div class="mb-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
+			<div class="mb-2 rounded border border-ok-soft bg-ok-soft/60 px-3 py-2 text-sm">
 				<div class="flex items-center gap-2">
 					<span class="font-medium text-ink-soft">{p.project}</span>
-					<span class="rounded bg-emerald-100 px-1.5 text-xs font-medium text-ok-ink">
+					<span class="rounded bg-ok-soft px-1.5 text-xs font-medium text-ok-ink">
 						PR #{p.prNumber} open
 					</span>
 					<a
 						href={p.prURL}
 						target="_blank"
 						rel="noopener"
-						class="ml-auto min-w-0 truncate text-xs text-accent-ink underline">{p.title || p.prURL}</a
+						class="ml-auto min-w-0 truncate text-xs text-accent-ink underline"
+						>{p.title || p.prURL}</a
 					>
 				</div>
 				<div class="mt-1.5">
@@ -177,7 +178,7 @@
 		<!-- Push-only propose outcomes (no PR to banner): a branch was pushed, or
 		     stayed local — surface the compare link so the user can open the PR. -->
 		{#each Object.entries(result).filter(([, r]) => !r.prURL || !r.prNumber) as [project, r] (project)}
-			<div class="mb-2 rounded border border-green-200 bg-green-50 p-3 text-sm">
+			<div class="mb-2 rounded border border-ok-soft bg-ok-soft/60 p-3 text-sm">
 				<div class="mb-1 flex items-center gap-1">
 					<span class="font-medium text-ink-soft">{project}</span>
 					<button

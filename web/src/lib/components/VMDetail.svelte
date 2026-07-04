@@ -330,8 +330,7 @@
 			<div class="mb-3 flex items-center gap-2">
 				<PowerDot power={vm.power} paused={vm.paused} />
 				<h2 class="text-lg font-semibold text-ink">{vm.name}</h2>
-				<span class="rounded bg-line px-1.5 py-0.5 text-xs text-ink-soft">{vm.namespace}</span
-				>
+				<span class="rounded bg-line px-1.5 py-0.5 text-xs text-ink-soft">{vm.namespace}</span>
 				<SyncBadge sync={vm.sync} error={vm.syncError} />
 				{#if stagedItem}
 					<StagedBadge item={stagedItem} onopen={() => onstagedopen?.()} />
@@ -374,7 +373,7 @@
 						title={vm.sourceFile
 							? 'Delete this VM (stages a removal into Changes)'
 							: 'Not in git — adopt this VM first'}
-						class="flex items-center gap-1.5 rounded border border-red-300 px-2.5 py-1 text-xs font-medium text-danger-ink hover:bg-danger-soft/60 disabled:opacity-50 disabled:hover:bg-transparent"
+						class="flex items-center gap-1.5 rounded border border-danger/50 px-2.5 py-1 text-xs font-medium text-danger-ink hover:bg-danger-soft/60 disabled:opacity-50 disabled:hover:bg-transparent"
 					>
 						<Trash2 size={13} /> Delete VM
 					</button>
@@ -577,7 +576,7 @@
 					{#each ['events', 'performance'] as const as v (v)}
 						<button
 							class="border-b-2 px-3 py-1 capitalize {monitorView === v
-								? 'border-blue-600 text-accent-ink'
+								? 'border-accent text-accent-ink'
 								: 'border-transparent text-ink-muted hover:text-ink-soft'}"
 							onclick={() => (monitorView = v)}
 						>

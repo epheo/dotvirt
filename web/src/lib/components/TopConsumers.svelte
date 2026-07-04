@@ -38,9 +38,7 @@
 				</div>
 				<div class="flex items-center gap-2">
 					<span class="h-1.5 flex-1 overflow-hidden rounded bg-inset-strong">
-						<span
-							class="block h-full rounded bg-accent"
-							style="width: {(c.value / maxCpu) * 100}%"
+						<span class="block h-full rounded bg-accent" style="width: {(c.value / maxCpu) * 100}%"
 						></span>
 					</span>
 					<span class="w-16 shrink-0 text-right text-ink-muted">{cores(c.value)} cores</span>

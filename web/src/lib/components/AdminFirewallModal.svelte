@@ -151,9 +151,7 @@
 				<span class="text-ink-soft"
 					>Ingress rules <span class="text-ink-faint">(ordered)</span></span
 				>
-				<button
-					onclick={addRow}
-					class="flex items-center gap-1 text-xs text-accent hover:underline"
+				<button onclick={addRow} class="flex items-center gap-1 text-xs text-accent hover:underline"
 					><Plus size={12} /> Add rule</button
 				>
 			</div>
@@ -217,7 +215,8 @@
 				use <strong>Pass</strong> to defer a decision back to them.{/if} Proposed to the platform repository.
 		</p>
 		{#if error}
-			<pre class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
+			<pre
+				class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 	</div>
 	{#snippet footer()}

@@ -27,7 +27,7 @@
 		disabled={busy}
 		class="flex items-center gap-1.5 rounded border border-line-strong bg-panel px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 	>
-		<Power size={13} class="text-green-600" /> Power On
+		<Power size={13} class="text-ok-ink" /> Power On
 	</button>
 	<button
 		onclick={() => onpower('Off')}
@@ -39,7 +39,7 @@
 	<button
 		onclick={ondelete}
 		disabled={busy}
-		class="flex items-center gap-1.5 rounded border border-red-300 bg-panel px-2.5 py-1 text-xs font-medium text-danger-ink hover:bg-danger-soft/60 disabled:opacity-50"
+		class="flex items-center gap-1.5 rounded border border-danger/50 bg-panel px-2.5 py-1 text-xs font-medium text-danger-ink hover:bg-danger-soft/60 disabled:opacity-50"
 	>
 		<Trash2 size={13} /> Delete
 	</button>

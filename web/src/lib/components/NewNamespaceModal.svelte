@@ -68,15 +68,17 @@
 		</label>
 		<label class="block">
 			<span class="text-ink-soft">Project</span>
-			<select bind:value={project} class="mt-1 w-full rounded border border-line-strong px-2 py-1.5">
+			<select
+				bind:value={project}
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+			>
 				{#each projects as p (p)}<option value={p}>{p}</option>{/each}
 			</select>
 		</label>
 
 		<label class="flex items-center gap-2">
 			<input type="checkbox" bind:checked={withNetwork} />
-			<span class="text-ink-soft">Add a VM Network — the namespace's primary Segment (Tier-1)</span
-			>
+			<span class="text-ink-soft">Add a VM Network — the namespace's primary Segment (Tier-1)</span>
 		</label>
 
 		{#if withNetwork}
@@ -112,7 +114,8 @@
 			merge.
 		</p>
 		{#if error}
-			<pre class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
+			<pre
+				class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 	</div>
 	{#snippet footer()}

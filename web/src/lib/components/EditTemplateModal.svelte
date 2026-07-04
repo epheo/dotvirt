@@ -60,7 +60,8 @@
 			class="w-full resize-y rounded border border-line bg-inset px-3 py-2 font-mono text-xs leading-relaxed text-ink"
 		></textarea>
 		{#if error}
-			<pre class="rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
+			<pre
+				class="rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 	</div>
 	{#snippet footer()}

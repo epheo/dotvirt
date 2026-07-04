@@ -231,7 +231,7 @@
 				)}
 
 				{#if stage === 'done'}
-					<p class="mt-3 rounded bg-green-50 p-3 text-xs text-green-800">
+					<p class="mt-3 rounded bg-ok-soft/60 p-3 text-xs text-ok-ink">
 						<strong>{name}</strong> is ready in <strong>{namespace}</strong> — use it as a VM's boot disk.
 					</p>
 				{/if}
@@ -242,7 +242,8 @@
 		{#if stage === 'form' || stage === 'error'}
 			<button
 				onclick={onclose}
-				class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong">Cancel</button
+				class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong"
+				>Cancel</button
 			>
 			<button
 				onclick={start}

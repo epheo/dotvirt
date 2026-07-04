@@ -96,8 +96,7 @@
 
 		<label class="flex items-center gap-2">
 			<input type="checkbox" bind:checked={withNetwork} />
-			<span class="text-ink-soft">Add a VM Network — the namespace's primary Segment (Tier-1)</span
-			>
+			<span class="text-ink-soft">Add a VM Network — the namespace's primary Segment (Tier-1)</span>
 		</label>
 
 		{#if withNetwork}
@@ -133,7 +132,8 @@
 			“Changes”.
 		</p>
 		{#if error}
-			<pre class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
+			<pre
+				class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 	</div>
 	{#snippet footer()}

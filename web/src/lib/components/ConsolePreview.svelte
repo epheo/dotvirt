@@ -30,6 +30,7 @@
 </script>
 
 {#if running && !failed}
+	<!-- The bezel behind the framebuffer stays dark in both themes (raw slate). -->
 	<button
 		onclick={onopen}
 		title="Open the live console"

@@ -139,9 +139,7 @@
 		<div class="space-y-2">
 			<div class="flex items-center justify-between">
 				<span class="text-ink-soft">Allow ingress from</span>
-				<button
-					onclick={addRow}
-					class="flex items-center gap-1 text-xs text-accent hover:underline"
+				<button onclick={addRow} class="flex items-center gap-1 text-xs text-accent hover:underline"
 					><Plus size={12} /> Add source</button
 				>
 			</div>
@@ -193,7 +191,8 @@
 			into the project's repo and applied by its Argo app.
 		</p>
 		{#if error}
-			<pre class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
+			<pre
+				class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 	</div>
 	{#snippet footer()}

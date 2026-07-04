@@ -109,12 +109,8 @@
 						font-size="8">{t}%</text
 					>
 				{/each}
-				<text
-					x={px(data.mean)}
-					y={TOP - 6}
-					text-anchor="middle"
-					class="fill-slate-600"
-					font-size="8">mean {Math.round(data.mean)}%</text
+				<text x={px(data.mean)} y={TOP - 6} text-anchor="middle" class="fill-ink-soft" font-size="8"
+					>mean {Math.round(data.mean)}%</text
 				>
 			</svg>
 
@@ -124,9 +120,7 @@
 				</span>
 				{#if data.band}
 					{#if data.band.above === 0 && data.band.below === 0}
-						<span class="rounded bg-ok-soft px-1.5 py-0.5 font-medium text-green-800"
-							>balanced</span
-						>
+						<span class="rounded bg-ok-soft px-1.5 py-0.5 font-medium text-ok-ink">balanced</span>
 					{:else}
 						{#if data.band.above > 0}
 							<span
@@ -135,6 +129,7 @@
 							>
 						{/if}
 						{#if data.band.below > 0}
+							<!-- Cold chip matches --chart-cold's sky hue; no status token fits. -->
 							<span
 								class="rounded bg-sky-100 px-1.5 py-0.5 font-medium text-sky-800"
 								title="below the DRS band — migration targets">{data.band.below} cold</span
@@ -159,9 +154,7 @@
 								>{o.node}</a
 							>
 							<span class="h-1.5 flex-1 overflow-hidden rounded bg-inset-strong">
-								<span
-									class="block h-full rounded bg-warn"
-									style="width: {Math.min(100, o.pct)}%"
+								<span class="block h-full rounded bg-warn" style="width: {Math.min(100, o.pct)}%"
 								></span>
 							</span>
 							<span class="w-9 shrink-0 text-right font-medium text-warn-ink"

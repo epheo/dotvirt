@@ -95,9 +95,7 @@
 				<span class="text-ink-soft"
 					>Egress rules <span class="text-ink-faint">(first match wins)</span></span
 				>
-				<button
-					onclick={addRow}
-					class="flex items-center gap-1 text-xs text-accent hover:underline"
+				<button onclick={addRow} class="flex items-center gap-1 text-xs text-accent hover:underline"
 					><Plus size={12} /> Add rule</button
 				>
 			</div>
@@ -114,7 +112,10 @@
 							<option value="Deny">Deny</option>
 						</select>
 						<span class="text-xs text-ink-faint">egress to</span>
-						<select bind:value={row.dest} class="rounded border border-line-strong px-2 py-1 text-xs">
+						<select
+							bind:value={row.dest}
+							class="rounded border border-line-strong px-2 py-1 text-xs"
+						>
 							<option value="cidr">CIDR</option>
 							<option value="dns">DNS name</option>
 						</select>
@@ -157,7 +158,8 @@
 			Firewall). One per namespace; staged into the project's repo and applied by its Argo app.
 		</p>
 		{#if error}
-			<pre class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
+			<pre
+				class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
 		{/if}
 	</div>
 	{#snippet footer()}

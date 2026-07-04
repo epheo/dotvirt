@@ -127,12 +127,12 @@
 			<Row label="Live state" value={liveStatus} />
 		</dl>
 		{#if view.warning}
-			<p class="border-t border-amber-100 bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
+			<p class="border-t border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
 				{view.warning}
 			</p>
 		{/if}
 		{#if view.live.degraded}
-			<p class="border-t border-amber-100 bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
+			<p class="border-t border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
 				{view.live.degraded}
 			</p>
 		{/if}
@@ -143,7 +143,9 @@
 			</p>
 		{/if}
 		{#if error}
-			<p class="border-t border-red-100 bg-danger-soft/60 px-3 py-2 text-xs text-danger-ink">{error}</p>
+			<p class="border-t border-danger-soft bg-danger-soft/60 px-3 py-2 text-xs text-danger-ink">
+				{error}
+			</p>
 		{/if}
 	{/if}
 </InfoCard>

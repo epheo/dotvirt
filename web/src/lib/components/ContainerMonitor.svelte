@@ -48,7 +48,7 @@
 		{#each ['events', 'performance'] as const as v (v)}
 			<button
 				class="border-b-2 px-3 py-1 capitalize {view === v
-					? 'border-blue-600 text-accent-ink'
+					? 'border-accent text-accent-ink'
 					: 'border-transparent text-ink-muted hover:text-ink-soft'}"
 				onclick={() => (view = v)}
 			>

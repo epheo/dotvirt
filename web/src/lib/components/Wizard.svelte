@@ -68,9 +68,7 @@
 <Modal {title} size="3xl" {icon} {onclose}>
 	<div class="flex min-h-0 flex-1">
 		<!-- Step rail: every item is clickable (free navigation). -->
-		<nav
-			class="w-52 shrink-0 space-y-0.5 overflow-y-auto border-r border-line bg-inset/60 p-2"
-		>
+		<nav class="w-52 shrink-0 space-y-0.5 overflow-y-auto border-r border-line bg-inset/60 p-2">
 			{#each steps as step, i (i)}
 				{@const b = railBadge(step, i)}
 				<button
