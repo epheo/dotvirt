@@ -1,34 +1,34 @@
 <script lang="ts">
 	import type { SyncStatus } from '$lib/api';
+	import { TONE_DOT, type Tone } from '$lib/status';
 	import Modal from './Modal.svelte';
+	import StatusDot from './StatusDot.svelte';
+	import StatusPill from './StatusPill.svelte';
+
 	let {
 		sync,
 		error = '',
 		compact = false,
 	}: { sync: SyncStatus; error?: string; compact?: boolean } = $props();
 
-	// vCenter-ish: green = in sync, amber/red = drift, gray = not managed.
-	const style = $derived(
-		{
-			Synced: { bg: 'bg-green-100', fg: 'text-green-700', label: 'Synced', dot: 'bg-green-500' },
-			OutOfSync: { bg: 'bg-red-100', fg: 'text-red-700', label: 'Out of sync', dot: 'bg-red-500' },
-			NotTracked: {
-				bg: 'bg-slate-100',
-				fg: 'text-slate-500',
-				label: 'Not tracked',
-				dot: 'bg-slate-300',
-			},
-			Unknown: { bg: 'bg-slate-100', fg: 'text-slate-500', label: 'Unknown', dot: 'bg-slate-300' },
-		}[sync],
+	// vCenter-ish: green = in sync, red = drift, gray = not managed.
+	const view = $derived(
+		(
+			{
+				Synced: { tone: 'ok', label: 'Synced' },
+				OutOfSync: { tone: 'danger', label: 'Out of sync' },
+				NotTracked: { tone: 'neutral', label: 'Not tracked' },
+				Unknown: { tone: 'neutral', label: 'Unknown' },
+			} satisfies Record<SyncStatus, { tone: Tone; label: string }>
+		)[sync],
 	);
 
-	// An OutOfSync VM has something to explain (an apply error, or just pending
+	// An out-of-sync VM has something to explain (an apply error, or just pending
 	// drift) — clicking the badge/dot pops up the detail. Other states are inert.
 	const clickable = $derived(sync === 'OutOfSync');
 	let open = $state(false);
 
 	function show(e: MouseEvent) {
-		if (!clickable) return;
 		e.stopPropagation(); // don't also trigger row selection in the inventory tree
 		open = true;
 	}
@@ -41,32 +41,21 @@
 			onclick={show}
 			aria-label="Show sync detail"
 			title={error || 'ArgoCD: out of sync'}
-			class="inline-block h-1.5 w-1.5 rounded-full {style.dot} cursor-pointer align-middle"
+			class="inline-block h-1.5 w-1.5 rounded-full {TONE_DOT.danger} cursor-pointer align-middle"
 		></button>
 	{/if}
-{:else if clickable}
-	<button
-		type="button"
-		onclick={show}
-		title={error || 'ArgoCD sync status'}
-		class="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-xs hover:brightness-95 {style.bg} {style.fg}"
-	>
-		<span class="inline-block h-1.5 w-1.5 rounded-full {style.dot}"></span>
-		{error ? 'Sync failed' : style.label}
-	</button>
 {:else}
-	<span
-		class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs {style.bg} {style.fg}"
-		title="ArgoCD sync status"
-	>
-		<span class="inline-block h-1.5 w-1.5 rounded-full {style.dot}"></span>
-		{style.label}
-	</span>
+	<StatusPill
+		tone={view.tone}
+		label={error && clickable ? 'Sync failed' : view.label}
+		title={error || 'ArgoCD sync status'}
+		onclick={clickable ? show : undefined}
+	/>
 {/if}
 
 {#if open}
-	<Modal title="Sync detail — {style.label}" size="lg" onclose={() => (open = false)}>
-		{#snippet icon()}<span class="inline-block h-2 w-2 rounded-full {style.dot}"></span>{/snippet}
+	<Modal title="Sync detail — {view.label}" size="lg" onclose={() => (open = false)}>
+		{#snippet icon()}<StatusDot tone={view.tone} />{/snippet}
 		<div class="px-4 py-3 text-sm">
 			{#if error}
 				<p class="mb-2 text-slate-600">ArgoCD could not apply this object:</p>

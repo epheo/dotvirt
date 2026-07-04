@@ -11,7 +11,9 @@
 	} from '$lib/api';
 	import { duration } from '$lib/format';
 	import { pollWhileVisible } from '$lib/poll';
+	import { severityTone, taskTone, TONE_TEXT } from '$lib/status';
 	import GitOpsStepper from './GitOpsStepper.svelte';
+	import StatusDot from './StatusDot.svelte';
 	import TabBar from './TabBar.svelte';
 
 	let {
@@ -261,49 +263,6 @@
 	);
 	const alarms = $derived(clientAlarms.length + (firing?.length ?? 0));
 
-	const severityClass = (s?: string) =>
-		s === 'critical' ? 'bg-red-500' : s === 'warning' ? 'bg-amber-500' : 'bg-slate-400';
-
-	const dotClass = (t: Task) =>
-		t.kind === 'drift'
-			? 'bg-amber-500'
-			: t.kind === 'migration'
-				? t.active
-					? 'animate-pulse bg-blue-500'
-					: t.ok
-						? 'bg-emerald-500'
-						: 'bg-red-500'
-				: t.kind === 'pr'
-					? 'bg-emerald-500'
-					: t.kind === 'sync'
-						? t.active
-							? 'animate-pulse bg-blue-500'
-							: 'bg-emerald-500'
-						: t.kind === 'action'
-							? t.ok
-								? 'bg-emerald-500'
-								: 'bg-red-500'
-							: 'bg-blue-500';
-	const textClass = (t: Task) =>
-		t.kind === 'drift'
-			? 'text-amber-700'
-			: t.kind === 'migration'
-				? t.active
-					? 'text-blue-700'
-					: t.ok
-						? 'text-emerald-700'
-						: 'text-red-700'
-				: t.kind === 'pr'
-					? 'text-emerald-700'
-					: t.kind === 'sync'
-						? t.active
-							? 'text-blue-700'
-							: 'text-emerald-700'
-						: t.kind === 'action'
-							? t.ok
-								? 'text-emerald-700'
-								: 'text-red-700'
-							: 'text-slate-600';
 	const rowClass = (t: Task) =>
 		t.kind === 'drift'
 			? 'bg-amber-50/40'
@@ -407,8 +366,8 @@
 									</td>
 									<td class="px-3 py-1.5">
 										<span class="inline-flex items-center gap-1.5">
-											<span class="h-1.5 w-1.5 rounded-full {dotClass(t)}"></span>
-											<span class={textClass(t)}>{t.status}</span>
+											<StatusDot tone={taskTone(t)} size="xs" pulse={!!t.active} />
+											<span class={TONE_TEXT[taskTone(t)]}>{t.status}</span>
 											{#if t.kind === 'staged'}
 												<GitOpsStepper stage="staged" compact />
 											{:else if t.kind === 'pr'}
@@ -452,7 +411,7 @@
 									</td>
 									<td class="px-3 py-1.5">
 										<span class="inline-flex items-center gap-1.5">
-											<span class="h-1.5 w-1.5 rounded-full {severityClass(a.severity)}"></span>
+											<StatusDot tone={severityTone(a.severity)} size="xs" />
 											{a.severity ?? '—'}
 										</span>
 									</td>
@@ -472,11 +431,7 @@
 									</td>
 									<td class="px-3 py-1.5">
 										<span class="inline-flex items-center gap-1.5">
-											<span
-												class="h-1.5 w-1.5 rounded-full {t.kind === 'drift'
-													? 'bg-amber-500'
-													: 'bg-red-500'}"
-											></span>
+											<StatusDot tone={taskTone(t)} size="xs" />
 											{t.kind === 'drift' ? 'warning' : 'critical'}
 										</span>
 									</td>
@@ -508,11 +463,7 @@
 								<td class="px-3 py-1.5 text-slate-600">{e.message}</td>
 								<td class="px-3 py-1.5">
 									<span class="inline-flex items-center gap-1.5 whitespace-nowrap">
-										<span
-											class="h-1.5 w-1.5 rounded-full {e.type === 'Warning'
-												? 'bg-amber-500'
-												: 'bg-slate-400'}"
-										></span>
+										<StatusDot tone={e.type === 'Warning' ? 'warn' : 'neutral'} size="xs" />
 										{e.type}
 									</span>
 								</td>

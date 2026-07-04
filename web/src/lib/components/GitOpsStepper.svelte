@@ -41,7 +41,7 @@
 			>
 				<span
 					class="h-2 w-2 rounded-full {i <= idx ? 'bg-accent' : 'bg-line-strong'} {i === idx
-						? 'ring-2 ring-blue-200'
+						? 'ring-2 ring-select'
 						: ''}"
 				></span>
 				{#if s === 'proposed' && prNumber && prUrl && i <= idx}

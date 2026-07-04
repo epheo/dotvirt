@@ -1,6 +1,7 @@
 <script lang="ts">
 	import RFB from '@novnc/novnc';
 	import type { VM } from '$lib/api';
+	import StatusDot from './StatusDot.svelte';
 
 	let { vm }: { vm: VM } = $props();
 
@@ -47,13 +48,10 @@
 {:else}
 	<div class="flex h-full flex-col">
 		<div class="flex items-center gap-2 px-1 pb-2 text-xs">
-			<span
-				class="inline-block h-2 w-2 rounded-full {status === 'connected'
-					? 'bg-green-500'
-					: status === 'connecting'
-						? 'animate-pulse bg-amber-400'
-						: 'bg-red-500'}"
-			></span>
+			<StatusDot
+				tone={status === 'connected' ? 'ok' : status === 'connecting' ? 'warn' : 'danger'}
+				pulse={status === 'connecting'}
+			/>
 			<span class="text-slate-500 capitalize">{status}{detail ? ` — ${detail}` : ''}</span>
 		</div>
 		<div class="relative min-h-0 flex-1 overflow-hidden rounded bg-slate-900">
