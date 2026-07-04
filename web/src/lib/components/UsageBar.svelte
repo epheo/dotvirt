@@ -7,7 +7,7 @@
 		used,
 		total = 0,
 		unit,
-		color = '#2563eb',
+		color = 'var(--chart-1)',
 		spark = [],
 	}: {
 		label: string;
@@ -23,7 +23,9 @@
 		unit === 'pct' ? Math.min(100, used) : total > 0 ? Math.min(100, (used / total) * 100) : 0,
 	);
 	// vCenter-style escalation green→amber→red as utilization nears capacity.
-	const barColor = $derived(pct > 90 ? '#dc2626' : pct > 75 ? '#f59e0b' : color);
+	const barColor = $derived(
+		pct > 90 ? 'var(--color-danger)' : pct > 75 ? 'var(--color-warn)' : color,
+	);
 </script>
 
 <div>

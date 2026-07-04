@@ -54,7 +54,7 @@
 				used={usage.cpu.used}
 				total={100}
 				unit="pct"
-				color="#2563eb"
+				color="var(--chart-1)"
 				spark={usage.cpu.spark ?? []}
 			/>
 			<UsageBar
@@ -62,7 +62,7 @@
 				used={usage.memory.used}
 				total={usage.memory.total ?? 0}
 				unit="bytes"
-				color="#0d9488"
+				color="var(--chart-2)"
 				spark={usage.memory.spark ?? []}
 			/>
 			<UsageBar
@@ -70,7 +70,7 @@
 				used={usage.storage.used}
 				total={usage.storage.total ?? 0}
 				unit="bytes"
-				color="#7c3aed"
+				color="var(--chart-5)"
 				spark={usage.storage.spark ?? []}
 			/>
 		{:else if loading}

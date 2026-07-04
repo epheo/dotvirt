@@ -85,7 +85,7 @@
 					total={data.cpu.total}
 					allocated={data.cpu.allocated ?? 0}
 					unit="cores"
-					color="#2563eb"
+					color="var(--chart-1)"
 					spark={data.cpu.spark ?? []}
 				/>
 				<Ring
@@ -94,7 +94,7 @@
 					total={data.memory.total}
 					allocated={data.memory.allocated ?? 0}
 					unit="bytes"
-					color="#0d9488"
+					color="var(--chart-2)"
 					spark={data.memory.spark ?? []}
 				/>
 				<Ring
@@ -102,7 +102,7 @@
 					used={data.storage.used}
 					total={data.storage.total}
 					unit="bytes"
-					color="#7c3aed"
+					color="var(--chart-5)"
 					spark={data.storage.spark ?? []}
 				/>
 			</div>

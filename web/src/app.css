@@ -64,6 +64,10 @@
 	--chart-ticks: #e2e8f0;
 	--chart-track: #e2e8f0;
 	--chart-track-strong: #cbd5e1;
+	/* host-balance histogram furniture */
+	--chart-cold: #38bdf8;
+	--chart-band: #10b981;
+	--chart-mean: #475569;
 }
 
 /* Keyboard affordance everywhere: components rely on this instead of per-element
