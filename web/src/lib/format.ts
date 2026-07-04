@@ -49,3 +49,8 @@ export function fmtUsage(unit: 'pct' | 'bytes' | 'cores', v: number): string {
 	if (unit === 'cores') return cores(v);
 	return bytes(v);
 }
+
+// Thrown errors stringify as "Error: <msg>"; toasts show just the message.
+export function friendlyError(e: unknown): string {
+	return (e instanceof Error ? e.message : String(e)).replace(/^Error:\s*/, '');
+}

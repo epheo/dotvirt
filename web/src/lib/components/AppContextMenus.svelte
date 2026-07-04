@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { api, Unauthorized, type VM } from '$lib/api';
 	import { manifestURL, type VMAction } from '$lib/actions';
+	import { friendlyError } from '$lib/format';
 	import { vmHref } from '$lib/nav';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
@@ -25,11 +26,11 @@
 			try {
 				await a.run(vm);
 				ui.recordAction({ verb, namespace: vm.namespace, name: vm.name, ok: true });
-				ui.showToast(`${verb} requested for ${vm.name}.`);
+				ui.showToast(`${verb} requested for ${vm.name}.`, { kind: 'success' });
 			} catch (e) {
 				if (e instanceof Unauthorized) return;
 				ui.recordAction({ verb, namespace: vm.namespace, name: vm.name, ok: false });
-				ui.showToast(String(e));
+				ui.showToast(`${verb} failed for ${vm.name}: ${friendlyError(e)}`, { kind: 'error' });
 			}
 			return;
 		}
@@ -42,12 +43,12 @@
 				await api.adopt(vm.namespace, vm.name);
 				await drafts.refresh();
 				ui.showToast(`${vm.name} staged into Changes — open a PR to adopt it into git.`, {
-					label: 'Review & propose',
-					run: () => (ui.changesOpen = true),
+					kind: 'success',
+					action: { label: 'Review & propose', run: () => (ui.changesOpen = true) },
 				});
 			} catch (e) {
 				if (e instanceof Unauthorized) return;
-				ui.showToast(String(e));
+				ui.showToast(friendlyError(e), { kind: 'error' });
 			}
 			return;
 		}
@@ -69,12 +70,12 @@
 		try {
 			for (const ns of want) await api.adoptNamespace(ns);
 			ui.showToast('Untracked VMs staged into Changes — open a PR to adopt them into git.', {
-				label: 'Review & propose',
-				run: () => (ui.changesOpen = true),
+				kind: 'success',
+				action: { label: 'Review & propose', run: () => (ui.changesOpen = true) },
 			});
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			ui.showToast(String(e));
+			ui.showToast(friendlyError(e), { kind: 'error' });
 		} finally {
 			// Reflect whatever got staged before any failure — a mid-loop error still
 			// leaves the earlier namespaces' adopts in the draft.

@@ -38,14 +38,35 @@ export type CtxState =
 			namespaces: string[];
 	  };
 
+export type ToastKind = 'success' | 'error' | 'info';
+export type Toast = {
+	id: number;
+	kind: ToastKind;
+	msg: string;
+	action?: { label: string; run: () => void };
+};
+
 class Ui {
-	// Transient bottom-center toast; an optional action renders as a button.
-	toast = $state<{ msg: string; action?: { label: string; run: () => void } } | null>(null);
-	#toastTimer: ReturnType<typeof setTimeout> | undefined;
-	showToast(msg: string, action?: { label: string; run: () => void }) {
-		this.toast = { msg, action };
-		clearTimeout(this.#toastTimer);
-		this.#toastTimer = setTimeout(() => (this.toast = null), 5000);
+	// Transient bottom-center toast stack (capped at 3); an optional action
+	// renders as a button. One surfacing policy app-wide: imperative/runtime
+	// results → toast from every entry point; form submit + validation errors →
+	// inline in the modal that owns the form; ambient state (stream errors,
+	// pending banners, live migrations) → banners.
+	toasts = $state<Toast[]>([]);
+	#toastSeq = 0;
+	showToast(msg: string, opts?: { kind?: ToastKind; action?: Toast['action'] }) {
+		const t: Toast = {
+			id: ++this.#toastSeq,
+			kind: opts?.kind ?? 'info',
+			msg,
+			action: opts?.action,
+		};
+		this.toasts = [...this.toasts, t].slice(-3);
+		// Errors linger longer — they carry the "what went wrong" the admin reads.
+		setTimeout(() => this.dismissToast(t.id), t.kind === 'error' ? 8000 : 5000);
+	}
+	dismissToast(id: number) {
+		this.toasts = this.toasts.filter((t) => t.id !== id);
 	}
 
 	// Runtime ops the user just triggered, surfaced in the dock's Recent Tasks.
@@ -83,7 +104,7 @@ class Ui {
 	search: { searchFor: (q: string) => void } | null = null;
 
 	reset() {
-		this.toast = null;
+		this.toasts = [];
 		this.recentActions = [];
 		this.changesOpen = false;
 		this.modal = null;

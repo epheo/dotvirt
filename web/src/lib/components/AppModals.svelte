@@ -25,8 +25,8 @@
 	const staged = () => {
 		drafts.refresh();
 		ui.showToast('Staged into Changes — applies when the project’s PR merges.', {
-			label: 'Review & propose',
-			run: () => (ui.changesOpen = true),
+			kind: 'success',
+			action: { label: 'Review & propose', run: () => (ui.changesOpen = true) },
 		});
 	};
 

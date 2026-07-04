@@ -20,8 +20,8 @@
 		type VMEvent,
 	} from '$lib/api';
 	import { manifestURL, type VMAction } from '$lib/actions';
-	import type { DetailAction } from '$lib/state/ui.svelte';
-	import { duration } from '$lib/format';
+	import { ui, type DetailAction } from '$lib/state/ui.svelte';
+	import { duration, friendlyError } from '$lib/format';
 	import ActionMenu from './ActionMenu.svelte';
 	import ChangeList from './ChangeList.svelte';
 	import CloneModal from './CloneModal.svelte';
@@ -106,18 +106,15 @@
 	let driftChanges = $state<Change[] | null>(null);
 	let showDrift = $state(false);
 	let reconciling = $state(false);
-	let reconcileMsg = $state('');
-	let reconcileOk = $state(true);
 
 	// Monitor tab: lazily-loaded Kubernetes events for the selected VM.
 	let events = $state<VMEvent[] | null>(null);
 	let eventsLoading = $state(false);
 
-	// Imperative runtime ops (restart/pause/unpause/live-migrate).
+	// Imperative runtime ops (restart/pause/unpause/live-migrate). Results
+	// surface as toasts — identical feedback to the right-click context menu.
 	let actionsOpen = $state(false);
 	let runtimeBusy = $state(false);
-	let runtimeMsg = $state('');
-	let runtimeOk = $state(true);
 
 	// A paused VMI keeps phase Running, so the label checks the Paused flag too.
 	// Action enablement lives in the registry ($lib/actions), not here.
@@ -162,20 +159,19 @@
 		const target = vm;
 		if (a.kind === 'runtime' && a.run) {
 			runtimeBusy = true;
-			runtimeMsg = '';
+			const verb = a.verb ?? a.label;
 			let ok = true;
 			try {
 				await a.run(target);
-				runtimeMsg = `${a.verb} requested — watch the Monitor tab for progress.`;
+				ui.showToast(`${verb} requested for ${target.name}.`, { kind: 'success' });
 			} catch (e) {
-				if (e instanceof Unauthorized) return; // signed out centrally; skip the error banner
+				if (e instanceof Unauthorized) return; // signed out centrally; skip the error toast
 				ok = false;
-				runtimeMsg = String(e);
+				ui.showToast(`${verb} failed for ${target.name}: ${friendlyError(e)}`, { kind: 'error' });
 			} finally {
 				runtimeBusy = false;
 			}
-			runtimeOk = ok;
-			onaction?.({ verb: a.verb ?? a.label, namespace: target.namespace, name: target.name, ok });
+			onaction?.({ verb, namespace: target.namespace, name: target.name, ok });
 			return;
 		}
 		switch (a.id) {
@@ -236,11 +232,9 @@
 			migratingStorage = false;
 			driftChanges = null;
 			showDrift = false;
-			reconcileMsg = '';
 			events = null;
 			eventsLoading = false;
 			actionsOpen = false;
-			runtimeMsg = '';
 			if (vm) loadDrift(vm.namespace, vm.name);
 		});
 	});
@@ -284,16 +278,16 @@
 	async function adopt() {
 		if (!vm) return;
 		reconciling = true;
-		reconcileMsg = '';
 		try {
 			await api.adopt(vm.namespace, vm.name);
-			reconcileMsg = 'Live state staged into Changes — open a PR to adopt it into git.';
-			reconcileOk = true;
+			ui.showToast('Live state staged into Changes — open a PR to adopt it into git.', {
+				kind: 'success',
+				action: { label: 'Review & propose', run: () => (ui.changesOpen = true) },
+			});
 			onstaged?.();
 		} catch (e) {
-			if (e instanceof Unauthorized) return; // signed out centrally; skip the error banner
-			reconcileMsg = String(e);
-			reconcileOk = false;
+			if (e instanceof Unauthorized) return; // signed out centrally; skip the error toast
+			ui.showToast(friendlyError(e), { kind: 'error' });
 		} finally {
 			reconciling = false;
 		}
@@ -302,15 +296,12 @@
 	async function resync() {
 		if (!vm) return;
 		reconciling = true;
-		reconcileMsg = '';
 		try {
 			const r = await api.resync(vm.namespace, vm.name);
-			reconcileMsg = `Re-sync triggered on ArgoCD app "${r.application}".`;
-			reconcileOk = true;
+			ui.showToast(`Re-sync triggered on ArgoCD app "${r.application}".`, { kind: 'success' });
 		} catch (e) {
-			if (e instanceof Unauthorized) return; // signed out centrally; skip the error banner
-			reconcileMsg = String(e);
-			reconcileOk = false;
+			if (e instanceof Unauthorized) return; // signed out centrally; skip the error toast
+			ui.showToast(friendlyError(e), { kind: 'error' });
 		} finally {
 			reconciling = false;
 		}
@@ -416,16 +407,6 @@
 		{/if}
 
 		<PendingBanner {vm} />
-
-		{#if runtimeMsg}
-			<div
-				class="border-b px-4 py-1.5 text-xs {runtimeOk
-					? 'border-slate-200 bg-slate-50 text-slate-600'
-					: 'border-red-200 bg-red-50 text-red-700'}"
-			>
-				{runtimeMsg}
-			</div>
-		{/if}
 
 		<div class="min-h-0 flex-1 overflow-y-auto p-4">
 			{#if tab === 'summary'}
@@ -547,11 +528,6 @@
 								Adopt into git
 							</button>
 						</div>
-						{#if reconcileMsg}
-							<p class="mt-2 text-xs {reconcileOk ? 'text-slate-600' : 'text-red-700'}">
-								{reconcileMsg}
-							</p>
-						{/if}
 					</div>
 				{/if}
 
@@ -591,11 +567,6 @@
 										Re-sync from git (main→running)
 									</button>
 								</div>
-								{#if reconcileMsg}
-									<p class="mt-2 text-xs {reconcileOk ? 'text-slate-600' : 'text-red-700'}">
-										{reconcileMsg}
-									</p>
-								{/if}
 							</div>
 						{/if}
 					</div>
@@ -700,10 +671,7 @@
 			{vm}
 			onclose={() => (migrating = false)}
 			ondone={(ok) => {
-				if (ok) {
-					runtimeMsg = 'Live-migration requested — watch the Monitor tab for progress.';
-					runtimeOk = true;
-				}
+				if (ok) ui.showToast(`Live-migration requested for ${vm.name}.`, { kind: 'success' });
 				onaction?.({ verb: 'Live-migration', namespace: vm.namespace, name: vm.name, ok });
 			}}
 		/>
