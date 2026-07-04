@@ -84,13 +84,20 @@ func (c *Client) ApplicationsListWatch() *cache.ListWatch {
 	}
 }
 
-// driftFromApps builds per-VM drift keyed "namespace/name" from a set of ArgoCD
-// Application objects (the reflector store's *unstructured.Unstructured). VMs absent
-// from the result are managed by no Application (caller reports NotTracked). Only
-// scalar fields are read out of each object, so nothing escapes the store to be
-// mutated. Always returns a non-nil map.
-func driftFromApps(objs []any) map[string]Drift {
-	out := map[string]Drift{}
+// resKey identifies one ArgoCD-managed object across kinds — the key of the general
+// per-object drift map that VMs, segments, and any future rendered object share.
+// namespace is "" for cluster-scoped kinds (a CUDN, an EgressIP).
+type resKey struct{ group, kind, namespace, name string }
+
+// resourceDriftFromApps builds per-object drift keyed by identity from a set of ArgoCD
+// Application objects (the reflector store's *unstructured.Unstructured). Un-scoped:
+// EVERY kind an Application manages is kept, so a non-VM object (a segment, a policy)
+// carries the same sync/health VMs always had — the per-VM view (vmView) and the
+// per-segment enrichment both read this one map. Objects absent from the result are
+// managed by no Application. Only scalar fields are read, so nothing escapes the store
+// to be mutated. Always returns a non-nil map.
+func resourceDriftFromApps(objs []any) map[resKey]Drift {
+	out := map[resKey]Drift{}
 	for _, obj := range objs {
 		app, ok := obj.(*unstructured.Unstructured)
 		if !ok {
@@ -103,14 +110,10 @@ func driftFromApps(objs []any) map[string]Drift {
 				if !ok {
 					continue
 				}
-				if asString(res, "group") != "kubevirt.io" || asString(res, "kind") != "VirtualMachine" {
+				if asString(res, "name") == "" {
 					continue
 				}
-				ns, name := asString(res, "namespace"), asString(res, "name")
-				if name == "" {
-					continue
-				}
-				out[ns+"/"+name] = Drift{
+				out[keyOf(res)] = Drift{
 					Sync:   syncStatus(asString(res, "status")),
 					Health: nestedString(res, "health", "status"),
 				}
@@ -121,12 +124,35 @@ func driftFromApps(objs []any) map[string]Drift {
 	return out
 }
 
-// mergeSyncMessages attaches per-VM apply errors onto the drift map. ArgoCD keeps
+// vmView is the VM slice of the general drift map, re-keyed "namespace/name" — the
+// shape the inventory VM enrichment consumes.
+func vmView(all map[resKey]Drift) map[string]Drift {
+	out := make(map[string]Drift, len(all))
+	for k, d := range all {
+		if k.group == "kubevirt.io" && k.kind == "VirtualMachine" {
+			out[k.namespace+"/"+k.name] = d
+		}
+	}
+	return out
+}
+
+// driftFromApps returns the per-VM drift keyed "namespace/name" — the VM view over the
+// general map. VMs absent from the result are managed by no Application (caller reports
+// NotTracked). Always non-nil.
+func driftFromApps(objs []any) map[string]Drift { return vmView(resourceDriftFromApps(objs)) }
+
+// keyOf reads an object's identity out of an ArgoCD status.resources[] /
+// syncResult.resources[] entry.
+func keyOf(res map[string]any) resKey {
+	return resKey{asString(res, "group"), asString(res, "kind"), asString(res, "namespace"), asString(res, "name")}
+}
+
+// mergeSyncMessages attaches per-object apply errors onto the drift map. ArgoCD keeps
 // the live tree in status.resources[] (sync/health, no error text) but the actual
-// apply failure for each object in status.operationState.syncResult.resources[].
-// We surface the latter so the UI can show *why* a VM is OutOfSync. Synced rows
-// carry a benign "unchanged" message, so only non-Synced ones are kept.
-func mergeSyncMessages(out map[string]Drift, app map[string]any) {
+// apply failure for each object in status.operationState.syncResult.resources[]. We
+// surface the latter so the UI can show *why* an object is OutOfSync. Synced rows carry
+// a benign "unchanged" message, so only non-Synced ones are kept.
+func mergeSyncMessages(out map[resKey]Drift, app map[string]any) {
 	results, found, err := unstructured.NestedSlice(app, "status", "operationState", "syncResult", "resources")
 	if err != nil || !found {
 		return
@@ -136,25 +162,21 @@ func mergeSyncMessages(out map[string]Drift, app map[string]any) {
 		if !ok {
 			continue
 		}
-		if asString(res, "group") != "kubevirt.io" || asString(res, "kind") != "VirtualMachine" {
-			continue
-		}
 		msg := asString(res, "message")
 		if msg == "" || asString(res, "status") == "Synced" {
 			continue
 		}
-		key := asString(res, "namespace") + "/" + asString(res, "name")
-		// Only annotate a VM the live tree (status.resources[]) already reported. A VM
-		// present ONLY here — a failed first apply that never entered the live tree —
-		// must NOT be synthesized with a zero Sync ("") : that empty status crashes the
-		// frontend SyncBadge (it indexes its style table by sync). Such a VM stays
+		// Only annotate an object the live tree (status.resources[]) already reported. An
+		// object present ONLY here — a failed first apply that never entered the live tree
+		// — must NOT be synthesized with a zero Sync (""): that empty status crashes the
+		// frontend SyncBadge (it indexes its style table by sync). Such an object stays
 		// absent so the caller reports NotTracked.
-		d, ok := out[key]
+		d, ok := out[keyOf(res)]
 		if !ok {
 			continue
 		}
 		d.Message = msg
-		out[key] = d
+		out[keyOf(res)] = d
 	}
 }
 

@@ -34,12 +34,14 @@ type Snapshot struct {
 
 	// Memoized drift: rebuilt lazily only when the Application store moves
 	// (driftDirty), so one reconcile across N identities parses the apps once, not N
-	// times — the N:1 sharing the read path needs on the hot inventory-build path. Both
-	// the per-VM map and the per-project rollup are rebuilt from the same scan.
-	driftMu      sync.Mutex
-	driftCache   map[string]Drift
-	appSyncCache map[string]model.ProjectSync
-	driftDirty   atomic.Bool
+	// times — the N:1 sharing the read path needs on the hot inventory-build path. The
+	// general per-object map, its per-VM view, and the per-project rollup are all
+	// rebuilt from the same scan.
+	driftMu       sync.Mutex
+	resourceCache map[resKey]Drift
+	driftCache    map[string]Drift
+	appSyncCache  map[string]model.ProjectSync
+	driftDirty    atomic.Bool
 }
 
 // NewSnapshot builds the Application snapshot over the SA argo client. bus may be
@@ -120,16 +122,33 @@ func (s *Snapshot) ProjectDrift() map[string]model.ProjectSync {
 	return s.appSyncCache
 }
 
-// rebuildLocked refreshes both memoized maps from a single Application-store scan when
+// ResourceDrift returns one Argo-managed object's sync/health by identity; ok=false if
+// no Application manages it or the snapshot hasn't synced. General across kinds — the
+// per-object surface VMs and segments (and any future rendered object) share. group/kind
+// are the ArgoCD resource's own (e.g. "k8s.ovn.org","UserDefinedNetwork"); namespace is
+// "" for cluster-scoped kinds.
+func (s *Snapshot) ResourceDrift(group, kind, namespace, name string) (Drift, bool) {
+	if !s.synced.Load() {
+		return Drift{}, false
+	}
+	s.driftMu.Lock()
+	defer s.driftMu.Unlock()
+	s.rebuildLocked()
+	d, ok := s.resourceCache[resKey{group, kind, namespace, name}]
+	return d, ok
+}
+
+// rebuildLocked refreshes the memoized maps from a single Application-store scan when
 // the store has moved since the last build (or on first read). Callers hold driftMu.
 // Results are read-only to callers; a rebuild swaps in fresh maps (the extractors
 // allocate anew), never mutating one a caller still holds.
 func (s *Snapshot) rebuildLocked() {
-	if s.driftCache != nil && !s.driftDirty.Swap(false) {
+	if s.resourceCache != nil && !s.driftDirty.Swap(false) {
 		return
 	}
 	objs := s.apps.List()
-	s.driftCache = driftFromApps(objs)
+	s.resourceCache = resourceDriftFromApps(objs)
+	s.driftCache = vmView(s.resourceCache)
 	s.appSyncCache = appSyncFromApps(objs)
 }
 

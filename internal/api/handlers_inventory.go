@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/inventory"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
@@ -84,6 +85,9 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		propProjects = append(propProjects, project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo})
 	}
 	inv.Proposals = s.proposalsFor(id, propProjects)
+	// Watermark for the out-of-band network catalog: bumps when GitOps state or a repo
+	// head moves, so the client re-pulls /api/networks and a merged segment shows live.
+	inv.NetworksVersion = s.bus.Version(eventbus.DriftChanged, eventbus.GitChanged)
 	return inv, nil
 }
 

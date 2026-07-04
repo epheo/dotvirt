@@ -68,14 +68,18 @@
 		return stop;
 	});
 
-	// The port-group catalog: fetched once on sign-in. A failure (e.g. the OVN-K
-	// CRDs absent) leaves it empty — NICs then fall back to their raw refs.
+	// The port-group catalog is fetched out-of-band (not on the live frame). Re-pull it
+	// on sign-in AND whenever networksVersion bumps (GitOps/git moved), so a merged
+	// segment appears without a reload. Keyed on the stable derived primitive, so it
+	// fires only when networks may have changed — not every VM-state frame. A failure
+	// (e.g. the OVN-K CRDs absent) leaves the catalog empty — NICs fall back to raw refs.
 	$effect(() => {
 		if (!session.user) return;
+		inventory.networksVersion; // subscribe: re-pull when GitOps/git moves
 		api
 			.networks()
 			.then((n) => (inventory.netInv = n))
-			.catch(() => {}); // a failure just leaves the catalog empty; 401 signs out centrally
+			.catch(() => {}); // 401 signs out centrally
 	});
 
 	// Recompute the draft summary only when the SET of projects or PR lanes

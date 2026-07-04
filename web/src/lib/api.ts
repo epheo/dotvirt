@@ -78,6 +78,9 @@ export interface Inventory {
 	projects: Project[];
 	warnings?: string[]; // non-fatal degradations (e.g. live/sync status unavailable)
 	proposals?: Proposal[]; // open PRs across the caller's projects, streamed live
+	// Monotonic watermark that bumps when GitOps state or a repo head moves — the cue
+	// to re-pull the out-of-band /api/networks catalog so a merged segment shows live.
+	networksVersion?: number;
 }
 
 export interface User {
@@ -208,6 +211,11 @@ export interface Network {
 	backing: string; // UserDefinedNetwork | ClusterUserDefinedNetwork | NetworkAttachmentDefinition
 	topology?: string; // raw OVN-K topology, for the detail drawer
 	namespaces?: string[]; // for shared (CUDN) nets: where it's attachable; empty for project nets
+	// ArgoCD per-object drift (same surface VMs carry) — absent when Argo isn't wired
+	// or no Application manages this object.
+	sync?: SyncStatus;
+	health?: string;
+	syncError?: string;
 }
 export interface Uplink {
 	name: string; // physicalNetworkName

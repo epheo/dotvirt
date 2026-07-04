@@ -47,6 +47,11 @@ class InventoryStore {
 			.sort()
 			.join('\0'),
 	);
+	// Watermark for the out-of-band network catalog, off the live frame: bumps when
+	// GitOps state or a repo head moves. A stable primitive (not the per-frame inventory
+	// object), so an effect keyed on it re-pulls /api/networks only when networks may
+	// have changed — not on every VM-state frame.
+	readonly networksVersion = $derived(this.inventory?.networksVersion ?? 0);
 	// Namespaces a VM can be created in: those in projects that have a repo (no
 	// point staging into a project with no backing repo).
 	readonly namespaces = $derived(

@@ -51,6 +51,54 @@ func TestDriftFromApps(t *testing.T) {
 	}
 }
 
+func udnResource(ns, name, status, health string) any {
+	return map[string]any{
+		"group":     "k8s.ovn.org",
+		"kind":      "UserDefinedNetwork",
+		"namespace": ns,
+		"name":      name,
+		"status":    status,
+		"health":    map[string]any{"status": health},
+	}
+}
+
+// TestResourceDriftAllKinds: the general per-object map keeps every kind (so a segment
+// has drift), while the VM view still filters to VirtualMachine only.
+func TestResourceDriftAllKinds(t *testing.T) {
+	objs := []any{app("openshift-gitops", "drs-lab", []any{
+		vmResource("drs-lab", "web", "Synced", "Healthy"),
+		udnResource("drs-lab", "db-net", "OutOfSync", "Progressing"),
+	})}
+
+	all := resourceDriftFromApps(objs)
+	udn, ok := all[resKey{"k8s.ovn.org", "UserDefinedNetwork", "drs-lab", "db-net"}]
+	if !ok || udn.Sync != model.SyncOutOfSync || udn.Health != "Progressing" {
+		t.Errorf("segment drift missing from general map: %+v ok=%v", udn, ok)
+	}
+
+	// The VM view carries the VM and drops the segment (it's keyed ns/name, VM-only).
+	vms := vmView(all)
+	if _, ok := vms["drs-lab/web"]; !ok {
+		t.Error("VM missing from vmView")
+	}
+	if _, ok := vms["drs-lab/db-net"]; ok {
+		t.Error("segment leaked into the VM-only view")
+	}
+}
+
+// A segment apply error (from syncResult) attaches to the general map just like a VM's.
+func TestResourceDriftSegmentSyncMessage(t *testing.T) {
+	all := resourceDriftFromApps([]any{appWithSyncResult("openshift-gitops", "net",
+		[]any{udnResource("drs-lab", "db-net", "OutOfSync", "Degraded")},
+		[]any{map[string]any{"group": "k8s.ovn.org", "kind": "UserDefinedNetwork",
+			"namespace": "drs-lab", "name": "db-net", "status": "SyncFailed",
+			"message": "spec.topology immutable"}},
+	)})
+	if got := all[resKey{"k8s.ovn.org", "UserDefinedNetwork", "drs-lab", "db-net"}].Message; got != "spec.topology immutable" {
+		t.Errorf("segment apply error not surfaced: %q", got)
+	}
+}
+
 // appWithSync builds an Application with a primary repoURL and top-level
 // sync/health/operationState — the fields the per-project rollup reads.
 func appWithSync(name, repo, sync, health, opPhase, opMsg string) *unstructured.Unstructured {

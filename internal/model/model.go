@@ -149,6 +149,12 @@ type Inventory struct {
 	Projects  []Project  `json:"projects"`
 	Warnings  []string   `json:"warnings,omitempty"`
 	Proposals []Proposal `json:"proposals,omitempty"`
+	// NetworksVersion is a monotonic watermark that moves whenever GitOps state or a
+	// repo head moves — the two events that change what networks are declared and
+	// applied. The network catalog is fetched out-of-band (GET /api/networks, not on
+	// this frame), so the frontend re-pulls it when this bumps: a merged segment PR
+	// then appears live instead of only on reload.
+	NetworksVersion uint64 `json:"networksVersion,omitempty"`
 }
 
 // Change is one human-readable, YAML-free change item (a semantic diff entry).
@@ -575,6 +581,13 @@ type Network struct {
 	// where it generated a NAD (its namespaceSelector's effective result). Empty
 	// for project-scoped networks (those attach only in their own Namespace).
 	Namespaces []string `json:"namespaces,omitempty"`
+
+	// From ArgoCD, when enabled — the same per-object drift VMs carry, so a segment
+	// that failed to apply (or is mid-sync) shows its own badge, not just its project's.
+	// Empty when Argo isn't wired or no Application manages this object.
+	Sync      SyncStatus `json:"sync,omitempty"`
+	Health    string     `json:"health,omitempty"`
+	SyncError string     `json:"syncError,omitempty"`
 }
 
 // Uplink is a physical-network attachment point — the vDS uplink analog: an OVN-K

@@ -42,3 +42,21 @@ func TestScopeNetworks(t *testing.T) {
 		t.Errorf("scopeNetworks mutated the cached input slice: %v", in[2].Namespaces)
 	}
 }
+
+// networkGVK maps each backing to the ArgoCD (group, kind) the drift plane keys on;
+// an unknown backing yields an empty kind (no drift lookup). The NAD group in
+// particular is easy to get wrong (k8s.cni.cncf.io, not k8s.ovn.org).
+func TestNetworkGVK(t *testing.T) {
+	cases := map[string]struct{ group, kind string }{
+		"UserDefinedNetwork":          {"k8s.ovn.org", "UserDefinedNetwork"},
+		"ClusterUserDefinedNetwork":   {"k8s.ovn.org", "ClusterUserDefinedNetwork"},
+		"NetworkAttachmentDefinition": {"k8s.cni.cncf.io", "NetworkAttachmentDefinition"},
+		"":                            {"", ""},
+		"SomethingElse":               {"", ""},
+	}
+	for backing, want := range cases {
+		if g, k := networkGVK(backing); g != want.group || k != want.kind {
+			t.Errorf("networkGVK(%q) = (%q,%q), want (%q,%q)", backing, g, k, want.group, want.kind)
+		}
+	}
+}
