@@ -1,6 +1,6 @@
 // The single VM-action registry: every menu that acts on a VM — the detail
-// header's Actions ▾, the (planned) right-click context menu, the bulk bar —
-// renders some projection of this list, so labels, ordering, and above all the
+// header's Actions ▾, the right-click context menu, the bulk bar — renders
+// some projection of this list, so labels, ordering, and above all the
 // enablement gates live exactly once.
 //
 // Two kinds of action:

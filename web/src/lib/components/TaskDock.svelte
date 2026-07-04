@@ -320,6 +320,19 @@
 	}
 </script>
 
+{#snippet dockHead(cols: string[])}
+	<!-- The one header row all three dock tables share. -->
+	<thead
+		class="sticky top-0 bg-slate-50 text-left text-[11px] tracking-wide text-slate-400 uppercase"
+	>
+		<tr class="border-b border-slate-200">
+			{#each cols as c (c)}
+				<th class="px-3 py-1.5 font-medium">{c}</th>
+			{/each}
+		</tr>
+	</thead>
+{/snippet}
+
 <section class="border-t border-line-strong bg-panel text-xs">
 	{#if openPane}
 		<!-- Drag the top edge to resize the dock. -->
@@ -377,17 +390,7 @@
 					<div class="px-3 py-5 text-center text-slate-400">No active tasks.</div>
 				{:else}
 					<table class="w-full">
-						<thead
-							class="sticky top-0 bg-slate-50 text-left text-[11px] tracking-wide text-slate-400 uppercase"
-						>
-							<tr class="border-b border-slate-200">
-								<th class="px-3 py-1.5 font-medium">Task</th>
-								<th class="px-3 py-1.5 font-medium">Target</th>
-								<th class="px-3 py-1.5 font-medium">Status</th>
-								<th class="px-3 py-1.5 font-medium">Initiated by</th>
-								<th class="px-3 py-1.5 font-medium">Project</th>
-							</tr>
-						</thead>
+						{@render dockHead(['Task', 'Target', 'Status', 'Initiated by', 'Project'])}
 						<tbody class="divide-y divide-slate-100">
 							{#each tasks as t (t.kind + ':' + t.project + ':' + t.namespace + '/' + t.name + ':' + t.url + ':' + (t.at ?? ''))}
 								<tr
@@ -431,16 +434,7 @@
 					</div>
 				{:else}
 					<table class="w-full">
-						<thead
-							class="sticky top-0 bg-slate-50 text-left text-[11px] tracking-wide text-slate-400 uppercase"
-						>
-							<tr class="border-b border-slate-200">
-								<th class="px-3 py-1.5 font-medium">Alarm</th>
-								<th class="px-3 py-1.5 font-medium">Target</th>
-								<th class="px-3 py-1.5 font-medium">Severity</th>
-								<th class="px-3 py-1.5 font-medium">Source</th>
-							</tr>
-						</thead>
+						{@render dockHead(['Alarm', 'Target', 'Severity', 'Source'])}
 						<tbody class="divide-y divide-slate-100">
 							{#each firing ?? [] as a (a.name + ':' + (a.namespace ?? '') + '/' + (a.vm ?? '') + ':' + (a.severity ?? ''))}
 								<tr
@@ -498,17 +492,7 @@
 				<div class="px-3 py-5 text-center text-slate-400">No recent events.</div>
 			{:else}
 				<table class="w-full">
-					<thead
-						class="sticky top-0 bg-slate-50 text-left text-[11px] tracking-wide text-slate-400 uppercase"
-					>
-						<tr class="border-b border-slate-200">
-							<th class="px-3 py-1.5 font-medium">Reason</th>
-							<th class="px-3 py-1.5 font-medium">Target</th>
-							<th class="px-3 py-1.5 font-medium">Message</th>
-							<th class="px-3 py-1.5 font-medium">Type</th>
-							<th class="px-3 py-1.5 font-medium">Last seen</th>
-						</tr>
-					</thead>
+					{@render dockHead(['Reason', 'Target', 'Message', 'Type', 'Last seen'])}
 					<tbody class="divide-y divide-slate-100">
 						{#each events as e, i (i)}
 							<tr

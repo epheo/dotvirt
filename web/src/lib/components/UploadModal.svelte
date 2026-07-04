@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Upload } from 'lucide-svelte';
+	import { Check, Upload } from 'lucide-svelte';
 	import { api, Unauthorized, type Options } from '$lib/api';
 	import Modal from './Modal.svelte';
 
@@ -207,7 +207,7 @@
 									? 'bg-blue-500 text-white'
 									: 'bg-slate-200 text-slate-400'}"
 						>
-							{complete ? '✓' : ''}
+							{#if complete}<Check size={10} />{/if}
 						</span>
 						<span class={active || complete ? 'text-slate-800' : 'text-slate-400'}>{label}</span>
 					</div>

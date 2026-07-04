@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack, type Snippet } from 'svelte';
-	import { FolderPlus } from 'lucide-svelte';
+	import { FolderPlus, TriangleAlert } from 'lucide-svelte';
 	import '../app.css';
 	import favicon from '$lib/assets/favicon.svg';
 	import { goto } from '$app/navigation';
@@ -121,7 +121,7 @@
 			<div
 				class="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800"
 			>
-				<span class="font-medium">⚠</span>
+				<TriangleAlert size={16} class="mt-0.5 shrink-0" />
 				<span>{inventory.inventory.warnings.join('; ')}</span>
 			</div>
 		{/if}

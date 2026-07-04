@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Folder, Layers, LayoutGrid } from 'lucide-svelte';
+	import { Folder, Layers, LayoutGrid, TriangleAlert } from 'lucide-svelte';
 	import type { Project, ProjectNamespace } from '$lib/api';
 	import { hrefForScope, scopeFromPath } from '$lib/nav';
 	import { inventory } from '$lib/state/inventory.svelte';
@@ -69,9 +69,8 @@
 				{/snippet}
 				<span class="truncate font-semibold text-ink-soft">{project.name}</span>
 				{#if project.error}
-					<span
-						class="rounded bg-amber-100 px-1 text-[10px] font-medium text-amber-700"
-						title={project.error}>!</span
+					<span class="rounded bg-amber-100 p-0.5 text-amber-700" title={project.error}
+						><TriangleAlert size={10} /></span
 					>
 				{:else if projectDrift(project)}
 					<span class="h-1.5 w-1.5 rounded-full bg-red-500" title="A VM is OutOfSync"></span>
