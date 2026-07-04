@@ -11,7 +11,7 @@
 	const style = $derived(
 		{
 			Synced: { bg: 'bg-green-100', fg: 'text-green-700', label: 'Synced', dot: 'bg-green-500' },
-			OutOfSync: { bg: 'bg-red-100', fg: 'text-red-700', label: 'OutOfSync', dot: 'bg-red-500' },
+			OutOfSync: { bg: 'bg-red-100', fg: 'text-red-700', label: 'Out of sync', dot: 'bg-red-500' },
 			NotTracked: {
 				bg: 'bg-slate-100',
 				fg: 'text-slate-500',
@@ -40,7 +40,7 @@
 			type="button"
 			onclick={show}
 			aria-label="Show sync detail"
-			title={error || 'ArgoCD: OutOfSync'}
+			title={error || 'ArgoCD: out of sync'}
 			class="inline-block h-1.5 w-1.5 rounded-full {style.dot} cursor-pointer align-middle"
 		></button>
 	{/if}

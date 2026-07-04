@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ChevronDown, ChevronUp } from 'lucide-svelte';
 	import type { DraftItem, Power, SyncStatus, VM } from '$lib/api';
 	import PowerDot from './PowerDot.svelte';
 	import StagedBadge from './StagedBadge.svelte';
@@ -156,7 +157,7 @@
 		>
 			<option value="all">Sync: all</option>
 			<option value="Synced">Synced</option>
-			<option value="OutOfSync">OutOfSync</option>
+			<option value="OutOfSync">Out of sync</option>
 			<option value="NotTracked">Not tracked</option>
 			<option value="Unknown">Unknown</option>
 		</select>
@@ -184,7 +185,12 @@
 								class="inline-flex items-center gap-1 hover:text-slate-800"
 							>
 								{c.label}
-								{#if sortKey === c.key}<span class="text-slate-400">{sortDir === 1 ? '▲' : '▼'}</span>{/if}
+								{#if sortKey === c.key}
+									{#if sortDir === 1}<ChevronUp size={12} class="text-ink-faint" />{:else}<ChevronDown
+											size={12}
+											class="text-ink-faint"
+										/>{/if}
+								{/if}
 							</button>
 						</th>
 						{/each}

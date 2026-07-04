@@ -1,6 +1,6 @@
 <script lang="ts">
-	// The workspace breadcrumb strip: ancestors are links (or callbacks until
-	// views are routed), the current object is plain and bold.
+	// The workspace breadcrumb strip: ancestors navigate (href, or a callback
+	// where the host owns the transition), the current object is plain and bold.
 	type Crumb = { label: string; href?: string; onclick?: () => void };
 	let { trail }: { trail: Crumb[] } = $props();
 </script>

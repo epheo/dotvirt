@@ -30,10 +30,49 @@
 	--color-select: oklch(93.2% 0.032 255.585); /* blue-100 */
 	--color-select-soft: oklch(97% 0.014 254.604); /* blue-50 */
 
-	/* status */
+	/* softer hairline + stronger well, for table dividers and card headers */
+	--color-line-soft: oklch(96.8% 0.007 247.896); /* slate-100 */
+	--color-inset-strong: oklch(96.8% 0.007 247.896); /* slate-100 */
+
+	/* accent tint for informational badges — same light value as select, but
+	   badge backgrounds and selection must diverge in a dark theme */
+	--color-accent-soft: oklch(93.2% 0.032 255.585); /* blue-100 */
+
+	/* status: dot/fill, badge tint, badge text */
 	--color-ok: oklch(69.6% 0.17 162.48); /* emerald-500 */
 	--color-warn: oklch(76.9% 0.188 70.08); /* amber-500 */
 	--color-danger: oklch(57.7% 0.245 27.325); /* red-600 */
+	--color-ok-soft: oklch(96.2% 0.044 156.743); /* green-100 */
+	--color-warn-soft: oklch(96.2% 0.059 95.617); /* amber-100 */
+	--color-danger-soft: oklch(93.6% 0.032 17.717); /* red-100 */
+	--color-ok-ink: oklch(52.7% 0.154 150.069); /* green-700 */
+	--color-warn-ink: oklch(55.5% 0.163 48.998); /* amber-700 */
+	--color-danger-ink: oklch(50.5% 0.213 27.518); /* red-700 */
+}
+
+/* Chart series + furniture. Plain :root (no utilities wanted); hex on purpose —
+   the uPlot fill derivation appends an alpha byte to the resolved string. */
+:root {
+	--chart-1: #2563eb;
+	--chart-2: #0d9488;
+	--chart-3: #f59e0b;
+	--chart-4: #dc2626;
+	--chart-5: #7c3aed;
+	--chart-6: #16a34a;
+	--chart-grid: #f1f5f9;
+	--chart-axis: #94a3b8;
+	--chart-ticks: #e2e8f0;
+	--chart-track: #e2e8f0;
+	--chart-track-strong: #cbd5e1;
+}
+
+/* Keyboard affordance everywhere: components rely on this instead of per-element
+   focus classes; pointer clicks stay clean via :focus-visible. */
+@layer base {
+	:where(button, [href], input, select, textarea, [tabindex]):focus-visible {
+		outline: 2px solid var(--color-accent);
+		outline-offset: 1px;
+	}
 }
 
 :root {
@@ -53,6 +92,6 @@ body {
 		-apple-system,
 		sans-serif;
 	font-size: 13px;
-	color: #1f2933;
+	color: var(--color-ink);
 	background: var(--color-canvas);
 }

@@ -1,8 +1,8 @@
 <script lang="ts">
 	// The one tab strip. `underline` is the workspace idiom (container + VM object
 	// pages); `chips` is the compact idiom for drawers and the task dock. Tabs
-	// navigate via onchange today; an `href` builder turns them into links once
-	// views are routed.
+	// render as links when the host passes an `href` builder, else as buttons
+	// driving `onchange`.
 	type Tab = {
 		id: string;
 		label: string;

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { Check } from 'lucide-svelte';
 	import Modal from './Modal.svelte';
 
 	// A vCenter-style wizard scaffold: a left step-rail, one panel at a time, and a
@@ -55,11 +56,11 @@
 
 	// Rail badge: current = blue number · invalid = amber number · satisfied
 	// required step = green check · optional step = slate number.
-	function railBadge(step: WizardStep, i: number): { cls: string; text: string } {
+	function railBadge(step: WizardStep, i: number): { cls: string; text: string; done?: boolean } {
 		if (i === current) return { cls: 'bg-blue-500 text-white', text: String(i + 1) };
 		if (step.valid === false)
 			return { cls: 'bg-amber-100 text-amber-700 ring-1 ring-amber-300', text: String(i + 1) };
-		if (step.valid === true) return { cls: 'bg-green-500 text-white', text: '✓' };
+		if (step.valid === true) return { cls: 'bg-green-500 text-white', text: '', done: true };
 		return { cls: 'bg-slate-200 text-slate-500', text: String(i + 1) };
 	}
 </script>
@@ -82,7 +83,7 @@
 				>
 					<span
 						class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] {b.cls}"
-						>{b.text}</span
+						>{#if b.done}<Check size={12} />{:else}{b.text}{/if}</span
 					>
 					<span class="truncate">{step.title}</span>
 				</button>
