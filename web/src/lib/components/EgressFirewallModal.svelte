@@ -7,7 +7,7 @@
 		namespaces,
 		namespace: initial,
 		onclose,
-		onstaged
+		onstaged,
 	}: {
 		namespaces: string[];
 		namespace?: string; // preselected namespace (e.g. from a namespace context menu)

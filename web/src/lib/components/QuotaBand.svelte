@@ -8,7 +8,7 @@
 	// the cluster Summary and the container Configure both just mount it.
 	let {
 		scope,
-		showEmpty = false
+		showEmpty = false,
 	}: {
 		scope: { project?: string; namespace?: string };
 		showEmpty?: boolean; // render a note when no quotas exist (Configure)
@@ -48,7 +48,8 @@
 		{#each quotas as q (q.namespace + '/' + q.name)}
 			<div class="min-w-[16rem]">
 				<div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">
-					Quota — {q.namespace} <span class="font-normal normal-case text-slate-400">({q.name})</span>
+					Quota — {q.namespace}
+					<span class="font-normal normal-case text-slate-400">({q.name})</span>
 				</div>
 				<div class="mt-1.5 space-y-1.5">
 					{#each q.items as it (it.resource)}
@@ -57,11 +58,15 @@
 							<div class="flex items-baseline justify-between gap-3 text-xs">
 								<span class="font-mono text-[11px] text-slate-500">{it.resource}</span>
 								<span class="text-slate-700"
-									>{fmt(it.unit, it.used)} <span class="text-slate-400">of {fmt(it.unit, it.hard)}</span></span
+									>{fmt(it.unit, it.used)}
+									<span class="text-slate-400">of {fmt(it.unit, it.hard)}</span></span
 								>
 							</div>
 							<div class="mt-0.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
-								<div class="h-full rounded-full" style="width:{p}%;background-color:{barColor(p)}"></div>
+								<div
+									class="h-full rounded-full"
+									style="width:{p}%;background-color:{barColor(p)}"
+								></div>
 							</div>
 						</div>
 					{/each}

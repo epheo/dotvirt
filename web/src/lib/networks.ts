@@ -31,7 +31,11 @@ export function networkByRef(ref: string | undefined, networks: Network[]): Netw
  * in the VM's namespace when one exists — so an admin sees "network-a (VM
  * Network)" rather than the bare "pod".
  */
-export function resolveNIC(nic: NIC, vmNamespace: string, networks: Network[]): Network | undefined {
+export function resolveNIC(
+	nic: NIC,
+	vmNamespace: string,
+	networks: Network[],
+): Network | undefined {
 	if (!nic.network || nic.network === 'pod') {
 		return networks.find((n) => n.kind === 'default' && n.namespace === vmNamespace);
 	}
@@ -49,7 +53,7 @@ export function attachableNetworks(networks: Network[], namespace: string): Netw
 	return networks.filter(
 		(n) =>
 			n.kind !== 'default' &&
-			(n.scope === 'shared' ? (n.namespaces ?? []).includes(namespace) : n.namespace === namespace)
+			(n.scope === 'shared' ? (n.namespaces ?? []).includes(namespace) : n.namespace === namespace),
 	);
 }
 

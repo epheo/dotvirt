@@ -13,7 +13,7 @@
 		library = '',
 		template = '',
 		onclose,
-		onstaged
+		onstaged,
 	}: {
 		namespaces: string[]; // repo-backed target namespaces
 		library?: string; // preselected library (from the Catalog's Deploy button)
@@ -48,7 +48,7 @@
 				.catch((e) => {
 					if (e instanceof Unauthorized) return;
 					loadError = String(e);
-				})
+				}),
 		);
 	});
 
@@ -89,18 +89,18 @@
 		});
 	}
 	const nameExample = $derived(
-		nameParam?.generate && nameParam.from ? exampleFrom(nameParam.from) : ''
+		nameParam?.generate && nameParam.from ? exampleFrom(nameParam.from) : '',
 	);
 
 	const validName = (s: string) => /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(s) && s.length <= 63;
 	const nameOK = $derived(
-		name === '' ? !!(nameParam?.value || nameParam?.generate) : validName(name)
+		name === '' ? !!(nameParam?.value || nameParam?.generate) : validName(name),
 	);
 	const targetOK = $derived(!!tpl && !!namespace && nameOK);
 	// A required parameter is satisfiable empty only when the template generates
 	// or defaults it — mirroring the engine's own enforcement.
 	const missing = $derived(
-		formParams.filter((p) => p.required && !p.value && !p.generate && !params[p.name]?.trim())
+		formParams.filter((p) => p.required && !p.value && !p.generate && !params[p.name]?.trim()),
 	);
 	const secret = (n: string) => /password|secret/i.test(n);
 	const long = (n: string) => /ssh|key|user_data/i.test(n);
@@ -118,7 +118,7 @@
 				namespace,
 				name: name.trim() || undefined,
 				parameters: Object.keys(sent).length ? sent : undefined,
-				powerOn: powerOn || undefined
+				powerOn: powerOn || undefined,
 			});
 			onstaged();
 			onclose();
@@ -146,9 +146,9 @@
 		{
 			title: 'Guest customization',
 			valid: formParams.length ? missing.length === 0 : undefined,
-			body: customizeStep
+			body: customizeStep,
 		},
-		{ title: 'Review', body: reviewStep }
+		{ title: 'Review', body: reviewStep },
 	]}
 >
 	{#snippet icon()}<BookCopy size={16} class="text-ink-muted" />{/snippet}

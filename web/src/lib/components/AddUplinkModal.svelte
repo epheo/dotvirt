@@ -6,7 +6,7 @@
 	let {
 		adapters = [],
 		onclose,
-		onstaged
+		onstaged,
 	}: {
 		adapters?: PhysicalAdapter[]; // node NICs (the port to enslave)
 		onclose: () => void;
@@ -29,8 +29,8 @@
 			[...adapters]
 				.filter((a) => !node || a.node === node)
 				.sort((a, b) => (a.role === 'available' ? -1 : 1))
-				.map((a) => a.name)
-		)
+				.map((a) => a.name),
+		),
 	]);
 
 	$effect(() => {

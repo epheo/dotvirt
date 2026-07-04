@@ -43,12 +43,20 @@
 		class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase"
 	>
 		<span>Capacity &amp; usage</span>
-		{#if usage}<span class="font-normal text-slate-400 normal-case">updated {relativeAge(usage.updated)}</span
+		{#if usage}<span class="font-normal text-slate-400 normal-case"
+				>updated {relativeAge(usage.updated)}</span
 			>{/if}
 	</h3>
 	<div class="space-y-3 p-3">
 		{#if usage}
-			<UsageBar label="CPU" used={usage.cpu.used} total={100} unit="pct" color="#2563eb" spark={usage.cpu.spark ?? []} />
+			<UsageBar
+				label="CPU"
+				used={usage.cpu.used}
+				total={100}
+				unit="pct"
+				color="#2563eb"
+				spark={usage.cpu.spark ?? []}
+			/>
 			<UsageBar
 				label="Memory"
 				used={usage.memory.used}

@@ -4,7 +4,7 @@ declare module '@novnc/novnc' {
 		constructor(
 			target: HTMLElement,
 			url: string,
-			options?: { credentials?: { password?: string } }
+			options?: { credentials?: { password?: string } },
 		);
 		scaleViewport: boolean;
 		background: string;

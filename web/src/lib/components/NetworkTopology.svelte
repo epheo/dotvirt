@@ -15,7 +15,7 @@
 		uplinks = [],
 		vms = [],
 		projects = [],
-		onpick
+		onpick,
 	}: {
 		networks?: PortGroup[];
 		uplinks?: Uplink[];
@@ -43,13 +43,13 @@
 	// duplicate key — two project networks sharing a name across a project's namespaces
 	// otherwise crash the render in Svelte 5.
 	const byName = (nets: PortGroup[]): PortGroup[] => [
-		...new Map(nets.map((n) => [n.name, n])).values()
+		...new Map(nets.map((n) => [n.name, n])).values(),
 	];
 
 	// Provider-edge (Tier-0) segments: cluster-scoped CUDNs — a shared overlay or a
 	// VLAN localnet bridged to an uplink.
 	const t0Segments = $derived(
-		byName(networks.filter((n) => n.scope === 'shared' || n.kind === 'vlan'))
+		byName(networks.filter((n) => n.scope === 'shared' || n.kind === 'vlan')),
 	);
 
 	// A project's (Tier-1's) own segments: its primary "VM Network" and any
@@ -59,7 +59,7 @@
 		const own = networks.filter((n) => n.scope === 'project' && n.namespace && ns.has(n.namespace));
 		return {
 			primary: byName(own.filter((n) => n.kind === 'default')),
-			overlays: byName(own.filter((n) => n.kind !== 'default'))
+			overlays: byName(own.filter((n) => n.kind !== 'default')),
 		};
 	}
 

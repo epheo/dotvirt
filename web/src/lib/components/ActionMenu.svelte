@@ -7,7 +7,7 @@
 
 	let {
 		vm,
-		onpick
+		onpick,
 	}: {
 		vm: VM;
 		onpick: (a: VMAction) => void;

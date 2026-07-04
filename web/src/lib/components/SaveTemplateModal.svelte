@@ -11,7 +11,7 @@
 	let {
 		vm,
 		onclose,
-		onstaged
+		onstaged,
 	}: {
 		vm: VM;
 		onclose: () => void;
@@ -39,7 +39,7 @@
 				name: name.trim(),
 				description: description.trim(),
 				sourceNamespace: vm.namespace,
-				sourceName: vm.name
+				sourceName: vm.name,
 			});
 			onstaged();
 			onclose();

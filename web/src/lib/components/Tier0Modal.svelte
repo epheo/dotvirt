@@ -6,7 +6,7 @@
 	let {
 		namespaces,
 		onclose,
-		onstaged
+		onstaged,
 	}: {
 		namespaces: string[];
 		onclose: () => void;
@@ -28,7 +28,7 @@
 		ips
 			.split(/[\s,]+/)
 			.map((s) => s.trim())
-			.filter(Boolean)
+			.filter(Boolean),
 	);
 	const valid = $derived(!!name && list.length > 0 && selectedNs.length > 0);
 
@@ -148,7 +148,9 @@
 			{/if}
 		</div>
 		<footer class="flex items-center gap-2 border-t border-slate-200 px-5 py-3">
-			<span class="text-xs text-slate-400">Staged into the changeset; open a PR from “Changes”.</span>
+			<span class="text-xs text-slate-400"
+				>Staged into the changeset; open a PR from “Changes”.</span
+			>
 			<button
 				onclick={onclose}
 				class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button

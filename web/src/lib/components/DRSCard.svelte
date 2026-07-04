@@ -60,9 +60,7 @@
 		if (l.deployed) return l.available ? 'Operator running' : 'Operator starting';
 		if (l.apiPresent && !l.synced) return 'Reading descheduler state…';
 		if (view.configured) {
-			return l.apiPresent
-				? 'Waiting for the configuration to sync'
-				: 'Operator installing (OLM)';
+			return l.apiPresent ? 'Waiting for the configuration to sync' : 'Operator installing (OLM)';
 		}
 		return l.apiPresent ? 'Operator installed, no configuration' : 'Operator not installed';
 	});
@@ -95,8 +93,7 @@
 					<button
 						onclick={disable}
 						disabled={disabling}
-						class="text-xs text-red-600 hover:underline disabled:text-slate-300"
-						>Disable…</button
+						class="text-xs text-red-600 hover:underline disabled:text-slate-300">Disable…</button
 					>
 				{/if}
 				<button onclick={() => (configuring = true)} class="text-xs text-blue-600 hover:underline"
@@ -120,7 +117,10 @@
 					value={`${view.config.evictionNodeLimit} per node · ${view.config.evictionTotalLimit} cluster-wide`}
 				/>
 			{/if}
-			<Row label="PSI (load signal)" value={view.psiConfigured ? 'Managed by dotvirt' : 'Not managed'} />
+			<Row
+				label="PSI (load signal)"
+				value={view.psiConfigured ? 'Managed by dotvirt' : 'Not managed'}
+			/>
 			{#if pending}
 				<Row label="Pending" value={pending} />
 			{/if}

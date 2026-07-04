@@ -4,7 +4,7 @@
 		values,
 		color = '#2563eb',
 		width = 64,
-		height = 18
+		height = 18,
 	}: { values: number[]; color?: string; width?: number; height?: number } = $props();
 
 	const path = $derived.by(() => {

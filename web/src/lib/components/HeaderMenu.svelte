@@ -9,7 +9,7 @@
 		align = 'left',
 		class: className = '',
 		trigger,
-		children
+		children,
 	}: {
 		align?: 'left' | 'right';
 		class?: string;

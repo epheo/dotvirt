@@ -11,7 +11,7 @@
 		selected = $bindable(new Set<string>()),
 		staged,
 		onstagedopen,
-		oncontextvm
+		oncontextvm,
 	}: {
 		vms: VM[];
 		onselect: (vm: VM) => void;
@@ -27,7 +27,8 @@
 	let powerFilter = $state<'all' | Power>('all');
 	let syncFilter = $state<'all' | SyncStatus>('all');
 
-	type SortKey = 'power' | 'name' | 'namespace' | 'phase' | 'guestIP' | 'cpuCores' | 'memory' | 'sync';
+	type SortKey =
+		'power' | 'name' | 'namespace' | 'phase' | 'guestIP' | 'cpuCores' | 'memory' | 'sync';
 	let sortKey = $state<SortKey>('name');
 	let sortDir = $state<1 | -1>(1);
 
@@ -52,8 +53,14 @@
 		if (!match) return 0;
 		const n = parseFloat(match[1]);
 		const mult: Record<string, number> = {
-			Ki: 1024, Mi: 1024 ** 2, Gi: 1024 ** 3, Ti: 1024 ** 4,
-			K: 1e3, M: 1e6, G: 1e9, T: 1e12
+			Ki: 1024,
+			Mi: 1024 ** 2,
+			Gi: 1024 ** 3,
+			Ti: 1024 ** 4,
+			K: 1e3,
+			M: 1e6,
+			G: 1e9,
+			T: 1e12,
 		};
 		return n * (mult[match[2] ?? ''] ?? 1);
 	}
@@ -102,7 +109,7 @@
 		{ key: 'guestIP', label: 'IP' },
 		{ key: 'cpuCores', label: 'CPU', class: 'text-right' },
 		{ key: 'memory', label: 'Memory', class: 'text-right' },
-		{ key: 'sync', label: 'Sync' }
+		{ key: 'sync', label: 'Sync' },
 	];
 
 	// --- selection ---
@@ -186,14 +193,14 @@
 							>
 								{c.label}
 								{#if sortKey === c.key}
-									{#if sortDir === 1}<ChevronUp size={12} class="text-ink-faint" />{:else}<ChevronDown
+									{#if sortDir === 1}<ChevronUp
 											size={12}
 											class="text-ink-faint"
-										/>{/if}
+										/>{:else}<ChevronDown size={12} class="text-ink-faint" />{/if}
 								{/if}
 							</button>
 						</th>
-						{/each}
+					{/each}
 					<th class="px-3 py-2 font-medium">Health</th>
 				</tr>
 			</thead>
@@ -219,7 +226,11 @@
 							/>
 						</td>
 						<td class="px-3 py-1.5"><PowerDot power={vm.power} paused={vm.paused} /></td>
-						<td class="px-3 py-1.5 font-medium {sc?.kind === 'delete' ? 'text-slate-400 line-through' : 'text-slate-800'}">{vm.name}</td>
+						<td
+							class="px-3 py-1.5 font-medium {sc?.kind === 'delete'
+								? 'text-slate-400 line-through'
+								: 'text-slate-800'}">{vm.name}</td
+						>
 						<td class="px-3 py-1.5 text-slate-600">{vm.namespace}</td>
 						<td class="px-3 py-1.5 text-slate-600">{vm.paused ? 'Paused' : (vm.phase ?? '—')}</td>
 						<td class="px-3 py-1.5 font-mono text-xs text-slate-600">{vm.guestIP ?? '—'}</td>

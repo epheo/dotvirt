@@ -6,7 +6,7 @@
 	let {
 		namespaces,
 		scope = {},
-		onselect
+		onselect,
 	}: {
 		namespaces: string[];
 		// The backend-resolvable container scope, for the Performance charts.
@@ -62,7 +62,7 @@
 				load={(r) =>
 					api.scopeMetrics(
 						{ project: scope.project, namespace: scope.namespace, node: scope.node },
-						r
+						r,
 					)}
 				emptyText="No VM metrics in this scope yet."
 			/>

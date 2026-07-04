@@ -9,7 +9,7 @@
 		namespaces,
 		networks = [],
 		onclose,
-		onstaged
+		onstaged,
 	}: {
 		namespaces: string[];
 		networks?: Network[]; // port-group catalog (from the page), for the adapter picker
@@ -101,7 +101,7 @@
 	// Review-step display labels (names, not raw refs/ids).
 	const osImageName = $derived(osImage ? osImage.split('|')[0] : '');
 	const preferenceLabel = $derived(
-		(options?.preferences ?? []).find((p) => p.name === preference)?.displayName || preference
+		(options?.preferences ?? []).find((p) => p.name === preference)?.displayName || preference,
 	);
 	const instancetypeLabel = $derived.by(() => {
 		const it = (options?.instancetypes ?? []).find((i) => i.name === instancetype);
@@ -111,12 +111,12 @@
 		selectedNetworks.map((ref) => {
 			const n = networks.find((x) => attachRef(x) === ref);
 			return n ? `${n.name} (${kindLabel(n.kind)})` : ref;
-		})
+		}),
 	);
 	const storageRows = $derived.by(() => {
 		const rows: string[][] = [
 			['Root disk', diskSize || '—'],
-			['Storage class', storageClass || 'cluster default']
+			['Storage class', storageClass || 'cluster default'],
 		];
 		if (extraDisks.length)
 			for (const d of extraDisks) rows.push([`Extra disk · ${d.name}`, d.size]);
@@ -157,7 +157,7 @@
 			storageClass: storageClass || undefined,
 			running,
 			extraDisks: extraDisks.length ? extraDisks : undefined,
-			networks: selectedNetworks.length ? selectedNetworks.map((n) => ({ name: n })) : undefined
+			networks: selectedNetworks.length ? selectedNetworks.map((n) => ({ name: n })) : undefined,
 		};
 		if (user || sshKey) req.cloudInit = { user: user || undefined, sshKey: sshKey || undefined };
 		try {
@@ -406,21 +406,21 @@
 		{/if}
 		{@render reviewGroup('Name and project', 0, [
 			['Name', name || '—'],
-			['Project', namespace || '—']
+			['Project', namespace || '—'],
 		])}
 		{@render reviewGroup('Guest OS', 1, [
 			['OS image', osImageName || '—'],
-			['Preference', preferenceLabel || '—']
+			['Preference', preferenceLabel || '—'],
 		])}
 		{@render reviewGroup('Compute', 2, [
 			['Size', instancetypeLabel || '—'],
-			['Power', running ? 'Start immediately' : 'Create powered off']
+			['Power', running ? 'Start immediately' : 'Create powered off'],
 		])}
 		{@render reviewGroup('Storage', 3, storageRows)}
 		{@render reviewGroup('Networks', 4, networkRows)}
 		{@render reviewGroup('Customize', 5, [
 			['cloud-init user', user || 'default'],
-			['SSH key', sshKey ? 'provided' : 'None']
+			['SSH key', sshKey ? 'provided' : 'None'],
 		])}
 	</div>
 {/snippet}
@@ -457,7 +457,7 @@
 			{ title: 'Storage', body: step4 },
 			{ title: 'Networks', body: step5 },
 			{ title: 'Customize', body: step6 },
-			{ title: 'Ready to complete', body: review }
+			{ title: 'Ready to complete', body: review },
 		]}
 	/>
 {/if}

@@ -11,7 +11,7 @@
 	// target remounts with a fresh range.
 	let {
 		load,
-		emptyText = ''
+		emptyText = '',
 	}: {
 		load: (range: string) => Promise<VMMetrics>;
 		// Non-empty: shown when the query succeeds but every chart came back
@@ -26,7 +26,7 @@
 	let error = $state('');
 
 	const empty = $derived(
-		!!emptyText && !!metrics && metrics.charts.every((c) => c.series.length === 0)
+		!!emptyText && !!metrics && metrics.charts.every((c) => c.series.length === 0),
 	);
 
 	async function refresh() {

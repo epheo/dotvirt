@@ -11,7 +11,7 @@
 		error = '',
 		onconfirm,
 		onclose,
-		children
+		children,
 	}: {
 		title: string;
 		confirmWord: string; // the exact text the user must type to enable Delete

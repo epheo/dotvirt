@@ -17,7 +17,7 @@
 		variant = 'underline',
 		class: cls = '',
 		href = undefined,
-		onchange = undefined
+		onchange = undefined,
 	}: {
 		tabs: Tab[];
 		active: string;

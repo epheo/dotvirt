@@ -16,9 +16,9 @@
 							? `${c.field}: ${c.from ?? '∅'} → ${c.to ?? '∅'}`
 							: c.action === 'add'
 								? `${c.field}: + ${c.to ?? ''}`
-								: `${c.field}: − ${c.from ?? ''}`
+								: `${c.field}: − ${c.from ?? ''}`,
 					)
-					.join('\n') || 'Staged change'
+					.join('\n') || 'Staged change',
 	);
 </script>
 

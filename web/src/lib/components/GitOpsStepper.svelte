@@ -6,7 +6,7 @@
 		stage,
 		prNumber = undefined,
 		prUrl = undefined,
-		compact = false
+		compact = false,
 	}: {
 		stage: 'staged' | 'proposed' | 'merged' | 'synced';
 		prNumber?: number;

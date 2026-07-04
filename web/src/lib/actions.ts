@@ -54,7 +54,7 @@ export const vmActions: VMAction[] = [
 		kind: 'runtime',
 		verb: 'Restart',
 		enabled: running,
-		run: (vm) => api.restart(vm.namespace, vm.name)
+		run: (vm) => api.restart(vm.namespace, vm.name),
 	},
 	{
 		id: 'pause',
@@ -62,7 +62,7 @@ export const vmActions: VMAction[] = [
 		kind: 'runtime',
 		verb: 'Pause',
 		enabled: (vm) => running(vm) && !paused(vm),
-		run: (vm) => api.pause(vm.namespace, vm.name)
+		run: (vm) => api.pause(vm.namespace, vm.name),
 	},
 	{
 		id: 'unpause',
@@ -70,14 +70,14 @@ export const vmActions: VMAction[] = [
 		kind: 'runtime',
 		verb: 'Unpause',
 		enabled: paused,
-		run: (vm) => api.unpause(vm.namespace, vm.name)
+		run: (vm) => api.unpause(vm.namespace, vm.name),
 	},
 	{
 		id: 'migrate',
 		label: 'Live-migrate…',
 		kind: 'host',
 		title: 'Move the running VM to another host — pick a target or let the scheduler choose',
-		enabled: running
+		enabled: running,
 	},
 	{
 		id: 'migrate-storage',
@@ -86,7 +86,7 @@ export const vmActions: VMAction[] = [
 		title: 'Live-copy disks to another storage class — staged as a PR',
 		// Needs a live VMI to copy from, a git manifest to edit, and at least
 		// one DataVolume-backed disk to move.
-		enabled: (vm) => running(vm) && inGit(vm) && !!vm.disks?.some((d) => d.type === 'dataVolume')
+		enabled: (vm) => running(vm) && inGit(vm) && !!vm.disks?.some((d) => d.type === 'dataVolume'),
 	},
 	{ id: 'console', label: 'Open console', kind: 'host', sep: true, enabled: running },
 	{ id: 'snapshot', label: 'Snapshots', kind: 'host', enabled: always },
@@ -95,14 +95,14 @@ export const vmActions: VMAction[] = [
 		label: 'Clone…',
 		kind: 'host',
 		title: 'Copy this VM via snapshot + restore; adopt the result into git after',
-		enabled: always
+		enabled: always,
 	},
 	{
 		id: 'template',
 		label: 'Clone to Template…',
 		kind: 'host',
 		title: 'Derive a reusable template from this VM’s git manifest — staged as a PR',
-		enabled: inGit
+		enabled: inGit,
 	},
 	{
 		id: 'adopt',
@@ -111,21 +111,21 @@ export const vmActions: VMAction[] = [
 		sep: true,
 		title: 'Stage this cluster-only VM into a PR to bring it under GitOps',
 		// The complement of inGit: only a NotTracked (live-but-ungitted) VM can be adopted.
-		enabled: (vm) => vm.sync === 'NotTracked'
+		enabled: (vm) => vm.sync === 'NotTracked',
 	},
 	{
 		id: 'edit',
 		label: 'Edit settings',
 		kind: 'host',
 		title: 'Stages a config change into a PR',
-		enabled: inGit
+		enabled: inGit,
 	},
 	{
 		id: 'manifest',
 		label: 'Download manifest',
 		kind: 'host',
 		title: 'The VM definition as it exists in git',
-		enabled: inGit
+		enabled: inGit,
 	},
 	{
 		id: 'delete',
@@ -134,8 +134,8 @@ export const vmActions: VMAction[] = [
 		danger: true,
 		sep: true,
 		title: 'Stages a removal into a PR',
-		enabled: inGit
-	}
+		enabled: inGit,
+	},
 ];
 
 /** The URL of a VM's manifest on the base branch — navigable (cookie-auth'd). */

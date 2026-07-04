@@ -11,7 +11,7 @@
 	let {
 		template,
 		onclose,
-		onstaged
+		onstaged,
 	}: {
 		template: Template;
 		onclose: () => void;
@@ -26,7 +26,7 @@
 	let error = $state('');
 
 	const libraryLabel = $derived(
-		template.library === 'platform' ? 'Shared library' : template.library
+		template.library === 'platform' ? 'Shared library' : template.library,
 	);
 	const dirty = $derived(yaml !== template.yaml);
 

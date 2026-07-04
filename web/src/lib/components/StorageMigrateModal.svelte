@@ -12,7 +12,7 @@
 	let {
 		vm,
 		onclose,
-		onstaged
+		onstaged,
 	}: {
 		vm: VM;
 		onclose: () => void;
@@ -43,7 +43,7 @@
 	const moves = $derived(
 		disks
 			.map((d) => ({ name: d.name, storageClass: targets[d.name] ?? '' }))
-			.filter((m) => m.storageClass && m.storageClass !== currentClass(m.name))
+			.filter((m) => m.storageClass && m.storageClass !== currentClass(m.name)),
 	);
 
 	function currentClass(disk: string): string {
@@ -57,7 +57,7 @@
 		try {
 			await api.stageEdit(vm.namespace, vm.name, {
 				sourceFile: vm.sourceFile,
-				migrateVolumes: moves
+				migrateVolumes: moves,
 			});
 			onstaged();
 			onclose();

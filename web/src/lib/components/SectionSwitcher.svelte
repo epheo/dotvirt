@@ -11,7 +11,7 @@
 		{ id: 'hosts', label: 'Hosts', href: '/hosts' },
 		{ id: 'networking', label: 'Networking', href: '/networking' },
 		{ id: 'storage', label: 'Storage', href: '/storage' },
-		{ id: 'catalog', label: 'Catalog', href: '/catalog' }
+		{ id: 'catalog', label: 'Catalog', href: '/catalog' },
 	];
 </script>
 

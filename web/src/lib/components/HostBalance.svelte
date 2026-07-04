@@ -41,7 +41,7 @@
 	const barH = (n: number) => (n / maxBucket) * (BASE - TOP);
 	// Sources to name: the hottest workers, but only those actually above the band.
 	const hot = $derived(
-		data?.band ? data.hottest.filter((o) => o.pct > data!.band!.high).slice(0, 5) : []
+		data?.band ? data.hottest.filter((o) => o.pct > data!.band!.high).slice(0, 5) : [],
 	);
 </script>
 
@@ -124,7 +124,9 @@
 				</span>
 				{#if data.band}
 					{#if data.band.above === 0 && data.band.below === 0}
-						<span class="rounded bg-green-100 px-1.5 py-0.5 font-medium text-green-800">balanced</span>
+						<span class="rounded bg-green-100 px-1.5 py-0.5 font-medium text-green-800"
+							>balanced</span
+						>
 					{:else}
 						{#if data.band.above > 0}
 							<span
@@ -157,7 +159,9 @@
 								>{o.node}</a
 							>
 							<span class="h-1.5 flex-1 overflow-hidden rounded bg-slate-100">
-								<span class="block h-full rounded bg-amber-400" style="width: {Math.min(100, o.pct)}%"
+								<span
+									class="block h-full rounded bg-amber-400"
+									style="width: {Math.min(100, o.pct)}%"
 								></span>
 							</span>
 							<span class="w-9 shrink-0 text-right font-medium text-amber-700"

@@ -11,7 +11,7 @@
 	let {
 		node,
 		vms,
-		onaction
+		onaction,
 	}: {
 		node: string;
 		vms: VM[];
@@ -109,7 +109,9 @@
 				<button
 					onclick={evacuate}
 					disabled={busy || running.length === 0}
-					title={running.length === 0 ? 'No running VMs to migrate' : 'Live-migrate every running VM off this node'}
+					title={running.length === 0
+						? 'No running VMs to migrate'
+						: 'Live-migrate every running VM off this node'}
 					class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
 				>
 					<MoveRight size={13} /> Evacuate ({running.length})

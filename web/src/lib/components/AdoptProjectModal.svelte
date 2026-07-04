@@ -11,7 +11,7 @@
 		project,
 		namespaces,
 		onclose,
-		onstaged
+		onstaged,
 	}: {
 		project: string;
 		namespaces: string[];

@@ -11,7 +11,7 @@
 	let {
 		namespaces,
 		onclose,
-		ondone
+		ondone,
 	}: {
 		namespaces: string[];
 		onclose: () => void;
@@ -94,8 +94,8 @@
 			xhr.onerror = () =>
 				reject(
 					new Error(
-						'upload failed — the browser may not trust the cdi-uploadproxy certificate; open it once to accept it.'
-					)
+						'upload failed — the browser may not trust the cdi-uploadproxy certificate; open it once to accept it.',
+					),
 				);
 			xhr.send(file);
 		});
@@ -217,7 +217,7 @@
 				{@render step(
 					`Uploading${stage === 'uploading' ? ` — ${uploadPct}%` : ''}`,
 					stage === 'uploading',
-					stageIdx > 2
+					stageIdx > 2,
 				)}
 				{#if stage === 'uploading'}
 					<div class="ml-6 h-2 overflow-hidden rounded-full bg-slate-100">
@@ -227,7 +227,7 @@
 				{@render step(
 					`Importing${stage === 'importing' && importInfo ? ` — ${importInfo}` : ''}`,
 					stage === 'importing',
-					stageIdx > 3
+					stageIdx > 3,
 				)}
 
 				{#if stage === 'done'}

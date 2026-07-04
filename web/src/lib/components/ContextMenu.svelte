@@ -9,7 +9,7 @@
 		x,
 		y,
 		onclose,
-		children
+		children,
 	}: {
 		x: number;
 		y: number;

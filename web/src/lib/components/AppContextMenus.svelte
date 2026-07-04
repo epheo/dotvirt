@@ -43,7 +43,7 @@
 				await drafts.refresh();
 				ui.showToast(`${vm.name} staged into Changes — open a PR to adopt it into git.`, {
 					label: 'Review & propose',
-					run: () => (ui.changesOpen = true)
+					run: () => (ui.changesOpen = true),
 				});
 			} catch (e) {
 				if (e instanceof Unauthorized) return;
@@ -70,7 +70,7 @@
 			for (const ns of want) await api.adoptNamespace(ns);
 			ui.showToast('Untracked VMs staged into Changes — open a PR to adopt them into git.', {
 				label: 'Review & propose',
-				run: () => (ui.changesOpen = true)
+				run: () => (ui.changesOpen = true),
 			});
 		} catch (e) {
 			if (e instanceof Unauthorized) return;

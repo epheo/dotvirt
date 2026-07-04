@@ -58,7 +58,7 @@
 		inventory.inventory = null;
 		const stop = streamInventory(
 			(inv) => inventory.apply(inv),
-			() => (session.user = null)
+			() => (session.user = null),
 		);
 		return stop;
 	});

@@ -93,7 +93,6 @@
 			busy = null;
 		}
 	}
-
 </script>
 
 <div class="space-y-4 p-1">
@@ -109,7 +108,8 @@
 			disabled={taking}
 			class="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:bg-slate-300"
 		>
-			<Camera size={14} /> {taking ? 'Taking…' : 'Take snapshot'}
+			<Camera size={14} />
+			{taking ? 'Taking…' : 'Take snapshot'}
 		</button>
 		{#if running}
 			<span class="text-xs text-slate-400">Online snapshot (VM is running)</span>
@@ -124,8 +124,8 @@
 	     is PR-gated — so spell out the path rather than just greying the button. -->
 	{#if running && snapshots?.some((s) => s.readyToUse)}
 		<p class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-			Restore is disabled while the VM is running. Set its power to <strong>Off</strong> (via a pull
-			request from Edit Settings), and once it's stopped you can roll back to a snapshot here.
+			Restore is disabled while the VM is running. Set its power to <strong>Off</strong> (via a pull request
+			from Edit Settings), and once it's stopped you can roll back to a snapshot here.
 		</p>
 	{/if}
 
@@ -145,7 +145,8 @@
 						<td class="py-2 pr-3 font-medium text-slate-800">
 							{s.name}
 							{#if s.indications?.includes('Online')}
-								<span class="ml-1 rounded bg-slate-100 px-1 text-[10px] text-slate-500">online</span>
+								<span class="ml-1 rounded bg-slate-100 px-1 text-[10px] text-slate-500">online</span
+								>
 							{/if}
 						</td>
 						<td class="py-2 pr-3 whitespace-nowrap text-slate-500">{relativeAge(s.created)}</td>
@@ -174,7 +175,8 @@
 									title={running ? 'Stop the VM to restore' : 'Roll the VM back to this snapshot'}
 									class="mr-2 inline-flex items-center gap-1 text-xs text-amber-700 hover:underline disabled:text-slate-300 disabled:no-underline"
 								>
-									<RotateCcw size={12} /> {armedRestore === s.name ? 'Confirm restore' : 'Restore'}
+									<RotateCcw size={12} />
+									{armedRestore === s.name ? 'Confirm restore' : 'Restore'}
 								</button>
 								{#if armedRestore === s.name}
 									<button
@@ -187,7 +189,8 @@
 									onclick={() => (armedDelete = armedDelete === s.name ? null : s.name)}
 									class="inline-flex items-center gap-1 text-xs text-red-600 hover:underline"
 								>
-									<Trash2 size={12} /> {armedDelete === s.name ? 'Confirm delete' : 'Delete'}
+									<Trash2 size={12} />
+									{armedDelete === s.name ? 'Confirm delete' : 'Delete'}
 								</button>
 								{#if armedDelete === s.name}
 									<button

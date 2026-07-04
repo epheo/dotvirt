@@ -13,7 +13,7 @@
 	let {
 		vm,
 		onclose,
-		ondone
+		ondone,
 	}: {
 		vm: VM;
 		onclose: () => void;
@@ -31,7 +31,7 @@
 
 	// RFC 1123 label, the same constraint the API server enforces on VM names.
 	const valid = $derived(
-		/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(target) && target.length <= 63 && target !== vm.name
+		/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(target) && target.length <= 63 && target !== vm.name,
 	);
 
 	async function load() {
@@ -53,7 +53,7 @@
 	// Poll while any clone is still progressing so phases settle live (a clone
 	// with no phase yet counts as in progress), paused while backgrounded.
 	const active = $derived(
-		clones?.some((c) => c.phase !== 'Succeeded' && c.phase !== 'Failed') ?? false
+		clones?.some((c) => c.phase !== 'Succeeded' && c.phase !== 'Failed') ?? false,
 	);
 	$effect(() => {
 		if (!active) return;

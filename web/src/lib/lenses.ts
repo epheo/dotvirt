@@ -47,8 +47,8 @@ export function vmStorageKeys(vm: VM): string[] {
 		...new Set(
 			(vm.disks ?? [])
 				.filter((d) => d.type === 'dataVolume')
-				.map((d) => d.storageClass || DEFAULT_CLASS)
-		)
+				.map((d) => d.storageClass || DEFAULT_CLASS),
+		),
 	];
 	return classes.length ? classes : [NO_STORAGE];
 }

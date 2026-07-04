@@ -9,7 +9,7 @@
 		disabled = false,
 		submitting = false,
 		onsubmit,
-		oncancel
+		oncancel,
 	}: {
 		label: string;
 		busyLabel?: string;

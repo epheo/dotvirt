@@ -9,7 +9,7 @@
 		allocated = 0,
 		unit,
 		color = '#2563eb',
-		spark = []
+		spark = [],
 	}: {
 		label: string;
 		used: number;
@@ -68,5 +68,7 @@
 	{#if allocated > 0}
 		<div class="text-[10px] text-slate-400">{fmtUsage(unit, allocated)} allocated</div>
 	{/if}
-	{#if spark.length > 1}<div class="mt-0.5"><Sparkline values={spark} color={ringColor} width={84} height={16} /></div>{/if}
+	{#if spark.length > 1}<div class="mt-0.5">
+			<Sparkline values={spark} color={ringColor} width={84} height={16} />
+		</div>{/if}
 </div>

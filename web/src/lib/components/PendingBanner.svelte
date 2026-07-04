@@ -11,10 +11,10 @@
 
 	const proj = $derived(vm ? inventory.projectOf(vm.namespace) : (project ?? ''));
 	const stagedItem = $derived(
-		vm ? drafts.stagedByKey.get(`${vm.namespace}/${vm.name}`) : undefined
+		vm ? drafts.stagedByKey.get(`${vm.namespace}/${vm.name}`) : undefined,
 	);
 	const stagedCount = $derived(
-		!vm && project ? (drafts.drafts.find((d) => d.project === project)?.draft.count ?? 0) : 0
+		!vm && project ? (drafts.drafts.find((d) => d.project === project)?.draft.count ?? 0) : 0,
 	);
 	const proposal = $derived(proj ? inventory.proposals.find((p) => p.project === proj) : undefined);
 </script>

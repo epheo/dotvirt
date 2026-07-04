@@ -53,7 +53,7 @@ export function trailForScope(s: Scope): { label: string; href?: string }[] {
 			return [
 				{ label: 'All VMs', href: '/compute' },
 				{ label: s.project, href: hrefForScope({ kind: 'project', project: s.project }) },
-				{ label: s.namespace }
+				{ label: s.namespace },
 			];
 		case 'node':
 			return [{ label: 'All Nodes', href: '/hosts' }, { label: `Node: ${s.node}` }];

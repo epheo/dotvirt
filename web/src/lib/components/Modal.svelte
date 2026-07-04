@@ -14,7 +14,7 @@
 		icon,
 		onclose,
 		children,
-		footer
+		footer,
 	}: {
 		title: string;
 		size?: 'md' | 'lg' | '3xl';

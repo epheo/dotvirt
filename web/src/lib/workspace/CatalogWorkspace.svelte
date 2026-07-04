@@ -23,7 +23,7 @@
 		{ id: 'instancetypes', label: 'Instance types' },
 		{ id: 'preferences', label: 'Preferences' },
 		{ id: 'networks', label: 'Networks' },
-		{ id: 'storage', label: 'Storage classes' }
+		{ id: 'storage', label: 'Storage classes' },
 	];
 	const kind = $derived.by<Kind>(() => {
 		const k = page.url.searchParams.get('kind');
@@ -80,9 +80,9 @@
 					['Instance type', t.instancetype || '—'],
 					['Preference', t.preference || '—'],
 					['Source file', t.sourceFile],
-					...(t.error ? ([['Error', t.error]] as [string, string][]) : [])
+					...(t.error ? ([['Error', t.error]] as [string, string][]) : []),
 				],
-				template: t
+				template: t,
 			}));
 		}
 		const o = options;
@@ -97,8 +97,8 @@
 						['Kind', 'DataSource (CDI)'],
 						['Namespace', i.namespace],
 						['Ready', i.ready ? 'Yes' : 'No'],
-						['Used as', 'Root-disk source in the New VM wizard']
-					]
+						['Used as', 'Root-disk source in the New VM wizard'],
+					],
 				}));
 			case 'instancetypes':
 				return (o.instancetypes ?? []).map((it) => ({
@@ -109,8 +109,8 @@
 						['Kind', 'VirtualMachineClusterInstancetype'],
 						['vCPUs', String(it.cpu)],
 						['Memory', it.memory],
-						['Used as', 'VM size (spec.instancetype)']
-					]
+						['Used as', 'VM size (spec.instancetype)'],
+					],
 				}));
 			case 'preferences':
 				return (o.preferences ?? []).map((p) => ({
@@ -121,8 +121,8 @@
 						['Kind', 'VirtualMachineClusterPreference'],
 						['Name', p.name],
 						['Display name', p.displayName || '—'],
-						['Used as', 'OS tuning (spec.preference)']
-					]
+						['Used as', 'OS tuning (spec.preference)'],
+					],
 				}));
 			case 'networks':
 				return (o.networks ?? []).map((n) => ({
@@ -133,8 +133,8 @@
 						['Kind', 'NetworkAttachmentDefinition (Multus)'],
 						['Namespace', n.namespace],
 						['Reference', `${n.namespace}/${n.name}`],
-						['Used as', 'Secondary VM network']
-					]
+						['Used as', 'Secondary VM network'],
+					],
 				}));
 			case 'storage':
 				return (o.storageClasses ?? []).map((sc) => ({
@@ -144,8 +144,8 @@
 					detail: [
 						['Kind', 'StorageClass'],
 						['Cluster default', sc.default ? 'Yes' : 'No'],
-						['Used as', 'dataVolume storage class for provisioned disks']
-					]
+						['Used as', 'dataVolume storage class for provisioned disks'],
+					],
 				}));
 		}
 	});

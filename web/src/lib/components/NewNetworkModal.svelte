@@ -10,7 +10,7 @@
 		canManage = false,
 		onclose,
 		onstaged,
-		onAddUplink
+		onAddUplink,
 	}: {
 		namespaces: string[];
 		uplinks?: Uplink[]; // discovered Tier-0 uplinks (physical-network hints for a VLAN segment)
@@ -50,7 +50,7 @@
 			? !!(name && physnet.trim() && vlan && selectedNs.length)
 			: shared
 				? !!(name && selectedNs.length)
-				: !!(name && namespace)
+				: !!(name && namespace),
 	);
 
 	function toggleNs(ns: string, on: boolean) {

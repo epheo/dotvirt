@@ -22,17 +22,17 @@ export const TERMS = {
 	tier0: {
 		nsx: 'Tier-0 Gateway',
 		vsphere: 'Provider',
-		backing: 'uplink + EgressIP + RouteAdvertisements'
+		backing: 'uplink + EgressIP + RouteAdvertisements',
 	},
 	tier1: {
 		nsx: 'Tier-1 Gateway',
 		vsphere: 'Project Router',
-		backing: 'primary UserDefinedNetwork'
+		backing: 'primary UserDefinedNetwork',
 	},
 	uplink: {
 		nsx: 'Transport / Uplink',
 		vsphere: 'Physical uplink',
-		backing: 'NodeNetworkConfigurationPolicy'
+		backing: 'NodeNetworkConfigurationPolicy',
 	},
 	gatewayFirewall: { nsx: 'Gateway Firewall', vsphere: 'Egress Rules', backing: 'EgressFirewall' },
 	snat: { nsx: 'Source NAT', vsphere: 'Egress SNAT', backing: 'EgressIP' },
@@ -41,26 +41,26 @@ export const TERMS = {
 	dfw: {
 		nsx: 'Distributed Firewall',
 		vsphere: 'Security Policy',
-		backing: 'NetworkPolicy / AdminNetworkPolicy'
+		backing: 'NetworkPolicy / AdminNetworkPolicy',
 	},
 	group: { nsx: 'Group', vsphere: 'Selector', backing: 'label selector' },
 	// Content-library concepts (both idioms already agree on these names).
 	template: {
 		nsx: 'VM Template',
 		vsphere: 'VM Template',
-		backing: 'VirtualMachineTemplate (template.kubevirt.io/v1beta1) in git'
+		backing: 'VirtualMachineTemplate (template.kubevirt.io/v1beta1) in git',
 	},
 	library: {
 		nsx: 'Template Library',
 		vsphere: 'Content Library',
-		backing: 'templates/ in the project or platform repo'
+		backing: 'templates/ in the project or platform repo',
 	},
 	customization: {
 		nsx: 'Customization',
 		vsphere: 'Customization Spec',
-		backing: 'template parameters + cloud-init'
+		backing: 'template parameters + cloud-init',
 	},
-	tag: { nsx: 'Tag', vsphere: 'Custom Attribute', backing: 'label' }
+	tag: { nsx: 'Tag', vsphere: 'Custom Attribute', backing: 'label' },
 } satisfies Record<string, Term>;
 
 // Render a term as "NSX (vSphere)" — the default dual presentation for a heading or
@@ -83,20 +83,20 @@ export function segmentType(n: Network): SegmentType {
 			return {
 				nsx: 'Tier-1 Segment',
 				vsphere: 'VM Network',
-				backing: 'primary UserDefinedNetwork'
+				backing: 'primary UserDefinedNetwork',
 			};
 		case 'vlan':
 			return {
 				nsx: 'VLAN Segment',
 				vsphere: 'VLAN',
-				backing: 'localnet ClusterUserDefinedNetwork'
+				backing: 'localnet ClusterUserDefinedNetwork',
 			};
 		default:
 			return n.scope === 'shared'
 				? {
 						nsx: 'Overlay Segment',
 						vsphere: 'Shared Port Group',
-						backing: 'ClusterUserDefinedNetwork'
+						backing: 'ClusterUserDefinedNetwork',
 					}
 				: { nsx: 'Overlay Segment', vsphere: 'Internal Port Group', backing: 'UserDefinedNetwork' };
 	}

@@ -5,7 +5,7 @@
 		DRS_THRESHOLDS,
 		type DRSEnableRequest,
 		type DRSMode,
-		type DRSView
+		type DRSView,
 	} from '$lib/api';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
@@ -16,7 +16,7 @@
 	let {
 		view,
 		onclose,
-		onstaged
+		onstaged,
 	}: {
 		view: DRSView; // current state, to seed the form
 		onclose: () => void;
@@ -45,7 +45,7 @@
 	const valid = $derived(
 		inBounds(intervalSeconds, DRS_BOUNDS.intervalSeconds) &&
 			inBounds(evictionNodeLimit, DRS_BOUNDS.evictionNodeLimit) &&
-			inBounds(evictionTotalLimit, DRS_BOUNDS.evictionTotalLimit)
+			inBounds(evictionTotalLimit, DRS_BOUNDS.evictionTotalLimit),
 	);
 
 	async function submit() {
@@ -58,7 +58,7 @@
 			intervalSeconds,
 			softTainter,
 			evictionNodeLimit,
-			evictionTotalLimit
+			evictionTotalLimit,
 		};
 		if (installPSI) req.installPSI = true;
 		try {
@@ -101,7 +101,10 @@
 
 		<label class="block">
 			<span class="text-slate-600">Migration aggressiveness</span>
-			<select bind:value={threshold} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
+			<select
+				bind:value={threshold}
+				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+			>
 				{#each DRS_THRESHOLDS as t (t.value)}<option value={t.value}>{t.label} — {t.detail}</option
 					>{/each}
 			</select>
@@ -159,8 +162,8 @@
 					</label>
 				</div>
 				<p class="text-xs text-slate-400">
-					Keep at or below the cluster's live-migration limits so DRS never queues more
-					migrations than the cluster will run.
+					Keep at or below the cluster's live-migration limits so DRS never queues more migrations
+					than the cluster will run.
 				</p>
 			</div>
 		{/if}
@@ -171,8 +174,8 @@
 				<span class:opacity-50={!view.canPSI}>
 					Enable PSI on worker nodes (required for load-aware rebalancing)
 					<span class="block text-xs text-amber-700">
-						Stages a MachineConfig that <strong>reboots every worker node</strong> when the PR
-						merges. Skip if PSI (psi=1) is already enabled out-of-band.
+						Stages a MachineConfig that <strong>reboots every worker node</strong> when the PR merges.
+						Skip if PSI (psi=1) is already enabled out-of-band.
 					</span>
 					{#if !view.canPSI}
 						<span class="block text-xs text-slate-400">
