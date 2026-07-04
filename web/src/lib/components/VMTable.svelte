@@ -2,6 +2,7 @@
 	import { ChevronDown, ChevronUp } from 'lucide-svelte';
 	import type { DraftItem, Power, SyncStatus, VM } from '$lib/api';
 	import { phaseTone } from '$lib/status';
+	import { persisted } from '$lib/state/persisted.svelte';
 	import PowerDot from './PowerDot.svelte';
 	import StagedBadge from './StagedBadge.svelte';
 	import StatusPill from './StatusPill.svelte';
@@ -26,20 +27,23 @@
 	const vmKey = (vm: VM) => `${vm.namespace}/${vm.name}`;
 
 	let search = $state('');
-	let powerFilter = $state<'all' | Power>('all');
-	let syncFilter = $state<'all' | SyncStatus>('all');
 
 	type SortKey =
 		'power' | 'name' | 'namespace' | 'phase' | 'guestIP' | 'cpuCores' | 'memory' | 'sync';
-	let sortKey = $state<SortKey>('name');
-	let sortDir = $state<1 | -1>(1);
+
+	// Sort + filters survive reloads; the search box is transient on purpose.
+	const prefs = persisted<{
+		sortKey: SortKey;
+		sortDir: 1 | -1;
+		powerFilter: 'all' | Power;
+		syncFilter: 'all' | SyncStatus;
+	}>('dotvirt.vmtable', { sortKey: 'name', sortDir: 1, powerFilter: 'all', syncFilter: 'all' });
 
 	function setSort(k: SortKey) {
-		if (sortKey === k) sortDir = sortDir === 1 ? -1 : 1;
-		else {
-			sortKey = k;
-			sortDir = 1;
-		}
+		prefs.value =
+			prefs.value.sortKey === k
+				? { ...prefs.value, sortDir: prefs.value.sortDir === 1 ? -1 : 1 }
+				: { ...prefs.value, sortKey: k, sortDir: 1 };
 	}
 
 	// Rank power/sync so the interesting states sort first (drift/problems at top,
@@ -68,7 +72,8 @@
 	}
 
 	function cmp(a: VM, b: VM): number {
-		switch (sortKey) {
+		const key = prefs.value.sortKey;
+		switch (key) {
 			case 'power':
 				return powerRank(a.power) - powerRank(b.power);
 			case 'sync':
@@ -78,8 +83,8 @@
 			case 'memory':
 				return memBytes(a.memory) - memBytes(b.memory);
 			default: {
-				const av = (a[sortKey] ?? '').toString().toLowerCase();
-				const bv = (b[sortKey] ?? '').toString().toLowerCase();
+				const av = (a[key] ?? '').toString().toLowerCase();
+				const bv = (b[key] ?? '').toString().toLowerCase();
 				return av < bv ? -1 : av > bv ? 1 : 0;
 			}
 		}
@@ -87,6 +92,7 @@
 
 	const rows = $derived.by(() => {
 		const q = search.trim().toLowerCase();
+		const { powerFilter, syncFilter, sortDir } = prefs.value;
 		const filtered = vms.filter((vm) => {
 			if (powerFilter !== 'all' && vm.power !== powerFilter) return false;
 			if (syncFilter !== 'all' && vm.sync !== syncFilter) return false;
@@ -150,7 +156,12 @@
 			class="w-64 rounded border border-slate-300 px-2 py-1 text-sm focus:border-blue-400 focus:outline-none"
 		/>
 		<select
-			bind:value={powerFilter}
+			value={prefs.value.powerFilter}
+			onchange={(e) =>
+				(prefs.value = {
+					...prefs.value,
+					powerFilter: e.currentTarget.value as 'all' | Power,
+				})}
 			class="rounded border border-slate-300 px-2 py-1 text-sm text-slate-700"
 			title="Filter by power state"
 		>
@@ -160,7 +171,12 @@
 			<option value="Unknown">Unknown</option>
 		</select>
 		<select
-			bind:value={syncFilter}
+			value={prefs.value.syncFilter}
+			onchange={(e) =>
+				(prefs.value = {
+					...prefs.value,
+					syncFilter: e.currentTarget.value as 'all' | SyncStatus,
+				})}
 			class="rounded border border-slate-300 px-2 py-1 text-sm text-slate-700"
 			title="Filter by ArgoCD sync status"
 		>
@@ -194,8 +210,8 @@
 								class="inline-flex items-center gap-1 hover:text-slate-800"
 							>
 								{c.label}
-								{#if sortKey === c.key}
-									{#if sortDir === 1}<ChevronUp
+								{#if prefs.value.sortKey === c.key}
+									{#if prefs.value.sortDir === 1}<ChevronUp
 											size={12}
 											class="text-ink-faint"
 										/>{:else}<ChevronDown size={12} class="text-ink-faint" />{/if}

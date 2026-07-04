@@ -11,6 +11,7 @@
 	} from '$lib/api';
 	import { duration } from '$lib/format';
 	import { pollWhileVisible } from '$lib/poll';
+	import { persisted } from '$lib/state/persisted.svelte';
 	import { severityTone, taskTone, TONE_TEXT } from '$lib/status';
 	import GitOpsStepper from './GitOpsStepper.svelte';
 	import StatusDot from './StatusDot.svelte';
@@ -54,8 +55,13 @@
 	}
 	$effect(() => pollWhileVisible(loadAlarms, 30000));
 
-	// Drag-to-resize the dock height (the fixed height was cramped for many rows).
-	let dockHeight = $state(192);
+	// Drag-to-resize the dock height. Persisted on release; restored clamped to
+	// the current viewport so a height stored from a taller window can't swallow
+	// the workspace.
+	const dock = persisted('dotvirt.dock', { height: 192 });
+	let dockHeight = $state(
+		Math.max(80, Math.min(dock.value.height, (globalThis.innerHeight || 800) * 0.7)),
+	);
 	let dragging = false;
 	let dragStartY = 0;
 	let dragStartH = 0;
@@ -72,6 +78,7 @@
 	}
 	function onResizeEnd() {
 		dragging = false;
+		dock.value = { height: dockHeight };
 	}
 
 	function loadEvents() {
