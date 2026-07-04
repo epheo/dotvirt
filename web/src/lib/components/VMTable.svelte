@@ -153,7 +153,7 @@
 		<input
 			bind:value={search}
 			placeholder="Search name, namespace, IP…"
-			class="w-64 rounded border border-slate-300 px-2 py-1 text-sm focus:border-blue-400 focus:outline-none"
+			class="w-64 rounded border border-slate-300 px-2 py-1 text-sm focus:border-blue-400"
 		/>
 		<select
 			value={prefs.value.powerFilter}
