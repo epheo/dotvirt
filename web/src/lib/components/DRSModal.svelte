@@ -103,7 +103,7 @@
 			<span class="text-ink-soft">Migration aggressiveness</span>
 			<select
 				bind:value={threshold}
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			>
 				{#each DRS_THRESHOLDS as t (t.value)}<option value={t.value}>{t.label} — {t.detail}</option
 					>{/each}
@@ -117,7 +117,7 @@
 				min={DRS_BOUNDS.intervalSeconds.min}
 				max={DRS_BOUNDS.intervalSeconds.max}
 				bind:value={intervalSeconds}
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 		</label>
 
@@ -129,7 +129,7 @@
 			{showAdvanced ? '− Hide' : '+ Show'} advanced settings
 		</button>
 		{#if showAdvanced}
-			<div class="space-y-3 rounded border border-slate-200 bg-slate-50 p-3">
+			<div class="space-y-3 rounded border border-line bg-inset p-3">
 				<label class="flex items-start gap-2">
 					<input type="checkbox" bind:checked={softTainter} class="mt-0.5" />
 					<span>
@@ -147,7 +147,7 @@
 							min={DRS_BOUNDS.evictionNodeLimit.min}
 							max={DRS_BOUNDS.evictionNodeLimit.max}
 							bind:value={evictionNodeLimit}
-							class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+							class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 						/>
 					</label>
 					<label class="block">
@@ -157,7 +157,7 @@
 							min={DRS_BOUNDS.evictionTotalLimit.min}
 							max={DRS_BOUNDS.evictionTotalLimit.max}
 							bind:value={evictionTotalLimit}
-							class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+							class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 						/>
 					</label>
 				</div>

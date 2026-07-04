@@ -106,7 +106,7 @@
 	{#if !view}
 		<p class="px-3 py-3 text-xs text-ink-faint">{error || 'Loading…'}</p>
 	{:else}
-		<dl class="divide-y divide-slate-100 text-[13px]">
+		<dl class="divide-y divide-line-soft text-[13px]">
 			<Row label="Status" value={status} />
 			{#if view.config}
 				<Row label="Aggressiveness" value={drsThresholdLabel(view.config.threshold)} />
@@ -137,7 +137,7 @@
 			</p>
 		{/if}
 		{#if !view.configured}
-			<p class="border-t border-slate-100 px-3 py-2 text-xs text-ink-faint">
+			<p class="border-t border-line-soft px-3 py-2 text-xs text-ink-faint">
 				Without DRS, VMs are placed once at start and stay put. Enabling stages the descheduler
 				operator + configuration into the platform repository — applied when the PR merges.
 			</p>

@@ -89,7 +89,7 @@
 				onclick={() => (kind = 'overlay')}
 				class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'overlay'
 					? 'border-blue-500 bg-blue-50 text-blue-700'
-					: 'border-slate-300 text-ink-soft'}"
+					: 'border-line-strong text-ink-soft'}"
 			>
 				<div class="font-medium">Overlay Segment</div>
 				<div class="text-ink-faint">Internal · Geneve (Layer 2)</div>
@@ -99,7 +99,7 @@
 					onclick={() => (kind = 'vlan')}
 					class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'vlan'
 						? 'border-blue-500 bg-blue-50 text-blue-700'
-						: 'border-slate-300 text-ink-soft'}"
+						: 'border-line-strong text-ink-soft'}"
 				>
 					<div class="font-medium">VLAN Segment</div>
 					<div class="text-ink-faint">Bridged to a Tier-0 uplink</div>
@@ -112,7 +112,7 @@
 			<input
 				bind:value={name}
 				placeholder="db-net"
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 		</label>
 
@@ -125,7 +125,7 @@
 						onclick={() => (shared = false)}
 						class="flex-1 rounded border px-3 py-2 text-left text-xs {!shared
 							? 'border-blue-500 bg-blue-50 text-blue-700'
-							: 'border-slate-300 text-ink-soft'}"
+							: 'border-line-strong text-ink-soft'}"
 					>
 						<div class="font-medium">This project</div>
 						<div class="text-ink-faint">UDN · one namespace (Tier-1)</div>
@@ -134,7 +134,7 @@
 						onclick={() => (shared = true)}
 						class="flex-1 rounded border px-3 py-2 text-left text-xs {shared
 							? 'border-blue-500 bg-blue-50 text-blue-700'
-							: 'border-slate-300 text-ink-soft'}"
+							: 'border-line-strong text-ink-soft'}"
 					>
 						<div class="font-medium">Shared</div>
 						<div class="text-ink-faint">CUDN · selected projects</div>
@@ -146,7 +146,7 @@
 					<span class="text-ink-soft">Project (namespace)</span>
 					<select
 						bind:value={namespace}
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 					>
 						{#each namespaces as ns (ns)}<option value={ns}>{ns}</option>{/each}
 					</select>
@@ -162,7 +162,7 @@
 						placeholder="200"
 						min="1"
 						max="4094"
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 					/>
 				</label>
 				<label class="block">
@@ -177,7 +177,7 @@
 						bind:value={physnet}
 						placeholder="physnet-prod"
 						list="uplink-list"
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 					/>
 					<datalist id="uplink-list">
 						{#each uplinks as u (u.name)}<option value={u.name}></option>{/each}
@@ -189,7 +189,7 @@
 		{#if isShared}
 			<div>
 				<span class="text-ink-soft">Published to projects</span>
-				<div class="mt-1 max-h-28 space-y-1 overflow-y-auto rounded border border-slate-300 p-2">
+				<div class="mt-1 max-h-28 space-y-1 overflow-y-auto rounded border border-line-strong p-2">
 					{#each namespaces as ns (ns)}
 						<label class="flex items-center gap-2 text-xs">
 							<input
@@ -211,11 +211,11 @@
 			<input
 				bind:value={subnet}
 				placeholder="10.20.0.0/24"
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 		</label>
 
-		<p class="rounded bg-slate-50 px-3 py-2 text-xs text-ink-muted">
+		<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">
 			{#if kind === 'overlay'}
 				An isolated overlay segment (Layer 2){shared
 					? ', shared across the selected projects — a cluster-scoped CUDN, proposed to the platform repository'

@@ -65,7 +65,7 @@
 				onclick={() => (kind = 'snat')}
 				class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'snat'
 					? 'border-blue-500 bg-blue-50 text-blue-700'
-					: 'border-slate-300 text-ink-soft'}"
+					: 'border-line-strong text-ink-soft'}"
 			>
 				<div class="font-medium">{TERMS.snat.nsx}</div>
 				<div class="text-ink-faint">Pin egress to fixed IPs (EgressIP)</div>
@@ -74,7 +74,7 @@
 				onclick={() => (kind = 'route')}
 				class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'route'
 					? 'border-blue-500 bg-blue-50 text-blue-700'
-					: 'border-slate-300 text-ink-soft'}"
+					: 'border-line-strong text-ink-soft'}"
 			>
 				<div class="font-medium">External Route</div>
 				<div class="text-ink-faint">Steer egress via next-hops</div>
@@ -86,7 +86,7 @@
 			<input
 				bind:value={name}
 				placeholder={kind === 'snat' ? 'team-a-snat' : 'team-a-gw'}
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 		</label>
 
@@ -98,13 +98,13 @@
 			<input
 				bind:value={ips}
 				placeholder={kind === 'snat' ? '192.0.2.10 192.0.2.11' : '10.0.0.1'}
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 		</label>
 
 		<div>
 			<span class="text-ink-soft">Applies to projects</span>
-			<div class="mt-1 max-h-28 space-y-1 overflow-y-auto rounded border border-slate-300 p-2">
+			<div class="mt-1 max-h-28 space-y-1 overflow-y-auto rounded border border-line-strong p-2">
 				{#each namespaces as ns (ns)}
 					<label class="flex items-center gap-2 text-xs">
 						<input
@@ -118,7 +118,7 @@
 			</div>
 		</div>
 
-		<p class="rounded bg-slate-50 px-3 py-2 text-xs text-ink-muted">
+		<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">
 			{#if kind === 'snat'}
 				A {TERMS.snat.nsx} pool ({TERMS.snat.backing}) pins the selected projects' north-south
 				egress to these fixed, routable source IPs.
@@ -136,12 +136,12 @@
 		<span class="text-xs text-ink-faint">Staged into the changeset; open a PR from “Changes”.</span>
 		<button
 			onclick={onclose}
-			class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-slate-100">Cancel</button
+			class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong">Cancel</button
 		>
 		<button
 			onclick={submit}
 			disabled={!valid || submitting}
-			class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
+			class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 		>
 			{submitting ? 'Staging…' : 'Stage service'}
 		</button>

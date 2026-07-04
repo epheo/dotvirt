@@ -38,9 +38,9 @@
 	$effect(() => pollWhileVisible(load, 30000));
 </script>
 
-<section class="rounded border border-slate-200">
+<section class="rounded border border-line">
 	<h3
-		class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
+		class="flex items-center justify-between border-b border-line bg-inset px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
 	>
 		<span>Capacity &amp; usage</span>
 		{#if usage}<span class="font-normal text-ink-faint normal-case"

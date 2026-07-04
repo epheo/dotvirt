@@ -81,14 +81,14 @@
 
 		<table class="w-full text-[13px]">
 			<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
-				<tr class="border-b border-slate-200">
+				<tr class="border-b border-line">
 					<th class="py-1.5 pr-3 font-medium">Disk</th>
 					<th class="py-1.5 pr-3 font-medium">Size</th>
 					<th class="py-1.5 pr-3 font-medium">Current class</th>
 					<th class="py-1.5 font-medium">Target class</th>
 				</tr>
 			</thead>
-			<tbody class="divide-y divide-slate-100">
+			<tbody class="divide-y divide-line-soft">
 				{#each disks as d (d.name)}
 					<tr>
 						<td class="py-1.5 pr-3 font-medium text-ink">{d.name}</td>
@@ -100,7 +100,7 @@
 							<select
 								value={targets[d.name] ?? ''}
 								onchange={(e) => (targets = { ...targets, [d.name]: e.currentTarget.value })}
-								class="w-full rounded border border-slate-300 px-2 py-1"
+								class="w-full rounded border border-line-strong px-2 py-1"
 							>
 								<option value="">— keep —</option>
 								{#each options?.storageClasses ?? [] as sc (sc.name)}
@@ -122,14 +122,14 @@
 	{#snippet footer()}
 		<button
 			onclick={onclose}
-			class="rounded border border-slate-300 px-3 py-1 text-sm text-ink-soft hover:bg-slate-50"
+			class="rounded border border-line-strong px-3 py-1 text-sm text-ink-soft hover:bg-inset"
 		>
 			Cancel
 		</button>
 		<button
 			onclick={stage}
 			disabled={!moves.length || busy}
-			class="ml-auto flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:bg-slate-300"
+			class="ml-auto flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:bg-line-strong"
 		>
 			<HardDrive size={14} />
 			{busy ? 'Staging…' : moves.length ? `Stage migration (${moves.length})` : 'Stage migration'}

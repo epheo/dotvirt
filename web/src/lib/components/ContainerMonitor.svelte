@@ -44,7 +44,7 @@
 </script>
 
 <div class="p-4">
-	<div class="mb-3 flex gap-1 border-b border-slate-200 text-sm">
+	<div class="mb-3 flex gap-1 border-b border-line text-sm">
 		{#each ['events', 'performance'] as const as v (v)}
 			<button
 				class="border-b-2 px-3 py-1 capitalize {view === v
@@ -74,7 +74,7 @@
 	{:else}
 		<table class="w-full text-[13px]">
 			<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
-				<tr class="border-b border-slate-200">
+				<tr class="border-b border-line">
 					<th class="py-1.5 pr-3 font-medium">Type</th>
 					<th class="py-1.5 pr-3 font-medium">VM</th>
 					<th class="py-1.5 pr-3 font-medium">Reason</th>
@@ -82,7 +82,7 @@
 					<th class="py-1.5 font-medium">Last seen</th>
 				</tr>
 			</thead>
-			<tbody class="divide-y divide-slate-100">
+			<tbody class="divide-y divide-line-soft">
 				{#each events as e, i (i)}
 					<tr class={e.type === 'Warning' ? 'bg-amber-50/40' : ''}>
 						<td class="py-1.5 pr-3">
@@ -90,7 +90,7 @@
 								<span
 									class="h-1.5 w-1.5 rounded-full {e.type === 'Warning'
 										? 'bg-amber-500'
-										: 'bg-slate-400'}"
+										: 'bg-ink-faint'}"
 								></span>
 								{e.type}
 							</span>

@@ -63,7 +63,7 @@
 									<span class="text-ink-faint">of {fmt(it.unit, it.hard)}</span></span
 								>
 							</div>
-							<div class="mt-0.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
+							<div class="mt-0.5 h-1.5 overflow-hidden rounded-full bg-inset-strong">
 								<div
 									class="h-full rounded-full"
 									style="width:{p}%;background-color:{barColor(p)}"

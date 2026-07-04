@@ -33,13 +33,13 @@
 {:else}
 	<div class="space-y-4">
 		{#each data as p (p.namespace)}
-			<section class="max-w-2xl rounded border border-slate-200">
+			<section class="max-w-2xl rounded border border-line">
 				<h3
-					class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
+					class="border-b border-line bg-inset px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
 				>
 					Your access in {p.namespace}
 				</h3>
-				<ul class="divide-y divide-slate-100 text-[13px]">
+				<ul class="divide-y divide-line-soft text-[13px]">
 					{#each p.capabilities as c (c.id)}
 						<li class="flex items-center gap-2 px-3 py-1.5" title={c.detail}>
 							{#if c.allowed}

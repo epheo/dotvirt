@@ -14,10 +14,10 @@
 	} = $props();
 </script>
 
-<div class="w-48 rounded border border-slate-200 bg-white py-1 text-xs shadow-lg">
+<div class="w-48 rounded border border-line bg-panel py-1 text-xs shadow-lg">
 	{#each vmActions as a (a.id)}
 		{#if a.sep}
-			<div class="my-1 border-t border-slate-100"></div>
+			<div class="my-1 border-t border-line-soft"></div>
 		{/if}
 		<button
 			onclick={() => onpick(a)}
@@ -25,7 +25,7 @@
 			title={a.title}
 			class="block w-full px-3 py-1.5 text-left {a.danger
 				? 'text-red-700 hover:bg-red-50'
-				: 'text-ink-soft hover:bg-slate-50'} disabled:cursor-not-allowed disabled:text-ink-faint disabled:hover:bg-transparent"
+				: 'text-ink-soft hover:bg-inset'} disabled:cursor-not-allowed disabled:text-ink-faint disabled:hover:bg-transparent"
 		>
 			{a.label}
 		</button>

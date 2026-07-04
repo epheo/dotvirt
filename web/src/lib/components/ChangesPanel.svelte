@@ -147,7 +147,7 @@
 			     "no pending changes". The last good summary renders during refreshes. -->
 			<div class="space-y-2 py-2">
 				{#each Array(3) as _, i (i)}
-					<div class="h-8 animate-pulse rounded bg-slate-100"></div>
+					<div class="h-8 animate-pulse rounded bg-inset-strong"></div>
 				{/each}
 			</div>
 		{/if}
@@ -239,7 +239,7 @@
 		<!-- Commit history per repo-backed project, lazy-fetched on expand. Any
 		     non-merge commit can be reverted as a forward-commit PR (never a rewrite). -->
 		{#if loaded && projects.length > 0}
-			<section class="mt-4 border-t border-slate-200 pt-3">
+			<section class="mt-4 border-t border-line pt-3">
 				<button
 					onclick={() => (showHistory = !showHistory)}
 					class="flex w-full items-center gap-1.5 text-sm font-semibold text-ink-soft"
@@ -273,7 +273,7 @@
 									{:else if (history[project] ?? []).length === 0}
 										<p class="px-5 py-1.5 text-xs text-ink-faint">No commits.</p>
 									{:else}
-										<ul class="mt-1 ml-1.5 border-l border-slate-200">
+										<ul class="mt-1 ml-1.5 border-l border-line">
 											{#each history[project] as c (c.hash)}
 												<li class="group py-1 pl-3">
 													<div class="flex items-start gap-2">

@@ -65,12 +65,12 @@
 			<input
 				bind:value={name}
 				placeholder="physnet-prod"
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 		</label>
 		<label class="block">
 			<span class="text-ink-soft">Nodes</span>
-			<select bind:value={node} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
+			<select bind:value={node} class="mt-1 w-full rounded border border-line-strong px-2 py-1.5">
 				<option value="">All worker nodes</option>
 				{#each nodes as n (n)}<option value={n}>{n}</option>{/each}
 			</select>
@@ -79,14 +79,14 @@
 			<label class="block">
 				<span class="text-ink-soft">Physical adapter (NIC)</span>
 				{#if nics.length}
-					<select bind:value={nic} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
+					<select bind:value={nic} class="mt-1 w-full rounded border border-line-strong px-2 py-1.5">
 						{#each nics as n (n)}<option value={n}>{n}</option>{/each}
 					</select>
 				{:else}
 					<input
 						bind:value={nic}
 						placeholder="eno2"
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 					/>
 				{/if}
 			</label>
@@ -96,7 +96,7 @@
 				<input
 					bind:value={bridge}
 					placeholder={name ? `br-${name}` : 'br-physnet'}
-					class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+					class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 				/>
 			</label>
 		</div>

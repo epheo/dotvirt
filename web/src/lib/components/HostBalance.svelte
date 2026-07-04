@@ -158,7 +158,7 @@
 								class="w-44 min-w-0 truncate text-ink-soft hover:text-blue-700 hover:underline"
 								>{o.node}</a
 							>
-							<span class="h-1.5 flex-1 overflow-hidden rounded bg-slate-100">
+							<span class="h-1.5 flex-1 overflow-hidden rounded bg-inset-strong">
 								<span
 									class="block h-full rounded bg-amber-400"
 									style="width: {Math.min(100, o.pct)}%"

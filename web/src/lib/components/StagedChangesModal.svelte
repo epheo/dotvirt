@@ -41,7 +41,7 @@
 		<button
 			onclick={ondiscard}
 			disabled={busy}
-			class="rounded border border-slate-300 px-3 py-1 text-sm text-ink-soft hover:bg-slate-50 disabled:opacity-50"
+			class="rounded border border-line-strong px-3 py-1 text-sm text-ink-soft hover:bg-inset disabled:opacity-50"
 		>
 			Discard
 		</button>

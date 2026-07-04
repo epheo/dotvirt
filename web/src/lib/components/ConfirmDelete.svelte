@@ -36,7 +36,7 @@
 			id="confirm-delete-input"
 			data-autofocus
 			bind:value={text}
-			class="w-full rounded border border-slate-300 px-2 py-1 font-mono text-sm focus:border-red-400"
+			class="w-full rounded border border-line-strong px-2 py-1 font-mono text-sm focus:border-red-400"
 			placeholder={confirmWord}
 		/>
 		{#if error}
@@ -46,7 +46,7 @@
 	{#snippet footer()}
 		<button
 			onclick={onclose}
-			class="ml-auto rounded border border-slate-300 px-3 py-1 text-sm text-ink-soft hover:bg-slate-50"
+			class="ml-auto rounded border border-line-strong px-3 py-1 text-sm text-ink-soft hover:bg-inset"
 		>
 			Cancel
 		</button>

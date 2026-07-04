@@ -326,11 +326,11 @@
 
 {#if vm}
 	<div class="flex h-full flex-col">
-		<div class="border-b border-slate-200 px-4 pt-4">
+		<div class="border-b border-line px-4 pt-4">
 			<div class="mb-3 flex items-center gap-2">
 				<PowerDot power={vm.power} paused={vm.paused} />
 				<h2 class="text-lg font-semibold text-ink">{vm.name}</h2>
-				<span class="rounded bg-slate-200 px-1.5 py-0.5 text-xs text-ink-soft">{vm.namespace}</span
+				<span class="rounded bg-line px-1.5 py-0.5 text-xs text-ink-soft">{vm.namespace}</span
 				>
 				<SyncBadge sync={vm.sync} error={vm.syncError} />
 				{#if stagedItem}
@@ -342,7 +342,7 @@
 							onclick={() => (actionsOpen = !actionsOpen)}
 							disabled={runtimeBusy}
 							title="All VM actions — runtime ops act immediately; config changes go through a PR"
-							class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-slate-50 disabled:opacity-50"
+							class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 						>
 							Actions <ChevronDown size={13} />
 						</button>
@@ -361,7 +361,7 @@
 						onclick={() => openEdit()}
 						disabled={!vm.sourceFile}
 						title={vm.sourceFile ? 'Edit settings' : 'Not in git — adopt this VM first'}
-						class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-transparent"
+						class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50 disabled:hover:bg-transparent"
 					>
 						<Pencil size={13} /> Edit Settings
 					</button>
@@ -412,7 +412,7 @@
 			{#if tab === 'summary'}
 				<!-- At-a-glance tiles: the vCenter-style capacity summary. -->
 				<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-					<div class="rounded border border-slate-200 bg-slate-50 p-3">
+					<div class="rounded border border-line bg-inset p-3">
 						<div class="flex items-center gap-1.5 text-xs text-ink-muted">
 							<Cpu size={13} /> CPU
 						</div>
@@ -426,7 +426,7 @@
 								>{/if}
 						</div>
 					</div>
-					<div class="rounded border border-slate-200 bg-slate-50 p-3">
+					<div class="rounded border border-line bg-inset p-3">
 						<div class="flex items-center gap-1.5 text-xs text-ink-muted">
 							<MemoryStick size={13} /> Memory
 						</div>
@@ -441,13 +441,13 @@
 							<div class="text-xs text-ink-faint">{vm.memoryActual} live</div>
 						{/if}
 					</div>
-					<div class="rounded border border-slate-200 bg-slate-50 p-3">
+					<div class="rounded border border-line bg-inset p-3">
 						<div class="flex items-center gap-1.5 text-xs text-ink-muted">
 							<HardDrive size={13} /> Disks
 						</div>
 						<div class="mt-1 text-lg font-semibold text-ink">{vm.disks?.length ?? 0}</div>
 					</div>
-					<div class="rounded border border-slate-200 bg-slate-50 p-3">
+					<div class="rounded border border-line bg-inset p-3">
 						<div class="flex items-center gap-1.5 text-xs text-ink-muted">
 							<Activity size={13} /> Status
 						</div>
@@ -472,7 +472,7 @@
 				<div class="mt-4 grid gap-4 md:grid-cols-2">
 					<!-- Guest & runtime: live identity reported by the guest agent. -->
 					<InfoCard title="Guest & runtime">
-						<dl class="divide-y divide-slate-100 text-[13px]">
+						<dl class="divide-y divide-line-soft text-[13px]">
 							<Row label="Operating system" value={vm.os ?? ''} />
 							<Row label="Power (desired)">
 								{#if stagedChanges.has('Power')}<span class="text-ink-faint line-through"
@@ -495,7 +495,7 @@
 
 					<!-- Configuration & placement: desired config + where it runs. -->
 					<InfoCard title="Configuration & placement">
-						<dl class="divide-y divide-slate-100 text-[13px]">
+						<dl class="divide-y divide-line-soft text-[13px]">
 							<Row label="Instance type" value={vm.instancetype ?? ''} />
 							<Row label="Preference" value={vm.preference ?? ''} />
 							<Row label="Node" value={vm.nodeName ?? ''} />
@@ -523,7 +523,7 @@
 								onclick={adopt}
 								disabled={reconciling}
 								title="Stage this VM's live manifest into a PR so git starts tracking it"
-								class="rounded border border-amber-400 bg-white px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+								class="rounded border border-amber-400 bg-panel px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
 							>
 								Adopt into git
 							</button>
@@ -554,7 +554,7 @@
 										onclick={adopt}
 										disabled={reconciling}
 										title="Stage the live state into a PR so git matches the cluster"
-										class="rounded border border-amber-400 bg-white px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+										class="rounded border border-amber-400 bg-panel px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
 									>
 										Adopt into PR (running→main)
 									</button>
@@ -562,7 +562,7 @@
 										onclick={resync}
 										disabled={reconciling}
 										title="Trigger ArgoCD to reconcile the cluster back to git"
-										class="rounded border border-amber-400 bg-white px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+										class="rounded border border-amber-400 bg-panel px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
 									>
 										Re-sync from git (main→running)
 									</button>
@@ -573,7 +573,7 @@
 				{/if}
 			{:else if tab === 'monitor'}
 				<!-- Monitor sub-rail: events + performance, vCenter's time-series home. -->
-				<div class="mb-3 flex gap-1 border-b border-slate-200 text-sm">
+				<div class="mb-3 flex gap-1 border-b border-line text-sm">
 					{#each ['events', 'performance'] as const as v (v)}
 						<button
 							class="border-b-2 px-3 py-1 capitalize {monitorView === v
@@ -596,7 +596,7 @@
 				{:else}
 					<table class="w-full text-[13px]">
 						<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
-							<tr class="border-b border-slate-200">
+							<tr class="border-b border-line">
 								<th class="py-1.5 pr-3 font-medium">Type</th>
 								<th class="py-1.5 pr-3 font-medium">Reason</th>
 								<th class="py-1.5 pr-3 font-medium">Message</th>
@@ -604,7 +604,7 @@
 								<th class="py-1.5 font-medium">Last seen</th>
 							</tr>
 						</thead>
-						<tbody class="divide-y divide-slate-100">
+						<tbody class="divide-y divide-line-soft">
 							{#each events as e, i (i)}
 								<tr class={e.type === 'Warning' ? 'bg-amber-50/40' : ''}>
 									<td class="py-1.5 pr-3">
@@ -612,7 +612,7 @@
 											<span
 												class="h-1.5 w-1.5 rounded-full {e.type === 'Warning'
 													? 'bg-amber-500'
-													: 'bg-slate-400'}"
+													: 'bg-ink-faint'}"
 											></span>
 											{e.type}
 										</span>

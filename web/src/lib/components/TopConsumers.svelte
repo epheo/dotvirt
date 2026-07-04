@@ -23,7 +23,7 @@
 </script>
 
 <InfoCard title="Top consumers">
-	<ul class="divide-y divide-slate-100">
+	<ul class="divide-y divide-line-soft">
 		{#each rows as c (c.namespace + '/' + c.name)}
 			<li
 				class="grid grid-cols-[minmax(8rem,1.4fr)_1fr_1fr] items-center gap-3 px-3 py-1.5 text-xs"
@@ -37,7 +37,7 @@
 					<div class="truncate text-[11px] text-ink-faint">{c.namespace}</div>
 				</div>
 				<div class="flex items-center gap-2">
-					<span class="h-1.5 flex-1 overflow-hidden rounded bg-slate-100">
+					<span class="h-1.5 flex-1 overflow-hidden rounded bg-inset-strong">
 						<span
 							class="block h-full rounded bg-blue-500"
 							style="width: {(c.value / maxCpu) * 100}%"
@@ -46,7 +46,7 @@
 					<span class="w-16 shrink-0 text-right text-ink-muted">{cores(c.value)} cores</span>
 				</div>
 				<div class="flex items-center gap-2">
-					<span class="h-1.5 flex-1 overflow-hidden rounded bg-slate-100">
+					<span class="h-1.5 flex-1 overflow-hidden rounded bg-inset-strong">
 						<span
 							class="block h-full rounded bg-teal-500"
 							style="width: {(memOf(c) / maxMem) * 100}%"

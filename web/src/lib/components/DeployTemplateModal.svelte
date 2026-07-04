@@ -248,7 +248,7 @@
 
 {#snippet reviewStep()}
 	{#if tpl}
-		<dl class="max-w-md divide-y divide-slate-100 text-[13px]">
+		<dl class="max-w-md divide-y divide-line-soft text-[13px]">
 			<div class="flex justify-between gap-3 py-1.5">
 				<dt class="text-ink-muted">Template</dt>
 				<dd class="text-ink">{libraryLabel(tpl.library)} / {tpl.name}</dd>

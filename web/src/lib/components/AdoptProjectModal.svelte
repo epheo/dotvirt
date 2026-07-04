@@ -50,7 +50,7 @@
 			This project's namespaces exist in the cluster but aren't backed by a git repo. Adopting
 			creates the tenant repo and brings the namespaces under GitOps.
 		</p>
-		<div class="rounded border border-slate-200 px-3 py-2 text-xs text-ink-muted">
+		<div class="rounded border border-line px-3 py-2 text-xs text-ink-muted">
 			<div>
 				<span class="text-ink-faint">Repo to create:</span>
 				<code class="text-ink-soft">{project}</code> (sibling of the platform repo)
@@ -65,13 +65,13 @@
 			<input
 				bind:value={owners}
 				placeholder="alice bob"
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 			<span class="mt-1 block text-[11px] text-ink-faint"
 				>Usernames granted admin on the project's namespaces (space/comma separated).</span
 			>
 		</label>
-		<p class="rounded bg-slate-50 px-3 py-2 text-xs text-ink-muted">
+		<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">
 			Creates the tenant repo now, and stages each namespace (with the <code>dotvirt.io/repo</code>
 			annotation){#if owners.trim()}
 				+ an owners admin grant{/if} into the platform repo. After the PR merges, the project's VMs appear

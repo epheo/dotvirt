@@ -76,7 +76,7 @@
 </script>
 
 {#if data}
-	<div class="border-b border-slate-200 bg-slate-50 px-4 py-3">
+	<div class="border-b border-line bg-inset px-4 py-3">
 		<div class="flex flex-wrap items-start gap-x-8 gap-y-3">
 			<div class="flex gap-6">
 				<Ring
@@ -131,7 +131,7 @@
 							<span
 								class="rounded px-2 py-1 text-sm font-medium {o.r > 1
 									? 'bg-amber-100 text-amber-800'
-									: 'bg-slate-100 text-ink-soft'}"
+									: 'bg-inset-strong text-ink-soft'}"
 								title="{o.label} committed to VMs vs node-allocatable"
 							>
 								{o.label}
@@ -163,11 +163,11 @@
 		<TopConsumers topCpu={data.topCpu} topMemory={data.topMemory} {onselect} />
 	</div>
 {:else if loading}
-	<div class="border-b border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-ink-faint">
+	<div class="border-b border-line bg-inset px-4 py-6 text-center text-sm text-ink-faint">
 		Loading cluster metrics…
 	</div>
 {:else if failed}
-	<div class="border-b border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-ink-faint">
+	<div class="border-b border-line bg-inset px-4 py-6 text-center text-sm text-ink-faint">
 		Cluster metrics unavailable.
 	</div>
 {/if}

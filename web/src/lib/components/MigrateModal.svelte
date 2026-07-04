@@ -78,7 +78,7 @@
 			<label
 				class="flex cursor-pointer items-center gap-2 rounded border px-3 py-2 {target === ''
 					? 'border-blue-400 bg-blue-50/50'
-					: 'border-slate-200 hover:bg-slate-50'}"
+					: 'border-line hover:bg-inset'}"
 			>
 				<input type="radio" bind:group={target} value="" />
 				<span class="font-medium">Automatic</span>
@@ -96,10 +96,10 @@
 					{@const why = blocked(n)}
 					<label
 						class="flex items-center gap-2 rounded border px-3 py-2 {why
-							? 'cursor-not-allowed border-slate-100 text-ink-faint'
+							? 'cursor-not-allowed border-line-soft text-ink-faint'
 							: target === n.name
 								? 'cursor-pointer border-blue-400 bg-blue-50/50'
-								: 'cursor-pointer border-slate-200 hover:bg-slate-50'}"
+								: 'cursor-pointer border-line hover:bg-inset'}"
 					>
 						<input type="radio" bind:group={target} value={n.name} disabled={!!why} />
 						<span class="font-mono text-[13px]">{n.name}</span>
@@ -118,14 +118,14 @@
 	{#snippet footer()}
 		<button
 			onclick={onclose}
-			class="rounded border border-slate-300 px-3 py-1 text-sm text-ink-soft hover:bg-slate-50"
+			class="rounded border border-line-strong px-3 py-1 text-sm text-ink-soft hover:bg-inset"
 		>
 			Cancel
 		</button>
 		<button
 			onclick={migrate}
 			disabled={busy}
-			class="ml-auto flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:bg-slate-300"
+			class="ml-auto flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:bg-line-strong"
 		>
 			<MoveRight size={14} />
 			{busy ? 'Migrating…' : 'Migrate'}

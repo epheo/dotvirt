@@ -138,7 +138,7 @@
 					{#if !inventory.inventory}
 						<div class="space-y-2 p-3">
 							{#each Array(5) as _, i (i)}
-								<div class="h-5 animate-pulse rounded bg-slate-100"></div>
+								<div class="h-5 animate-pulse rounded bg-inset-strong"></div>
 							{/each}
 						</div>
 					{:else if inventory.inventory.projects.length === 0 && treeSection !== 'catalog'}

@@ -139,7 +139,7 @@
 						type="file"
 						onchange={pickFile}
 						accept=".qcow2,.img,.raw,.iso,.gz,.xz"
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5 text-xs"
 					/>
 				</label>
 				<label class="block">
@@ -147,14 +147,14 @@
 					<input
 						bind:value={name}
 						placeholder="my-image"
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-sm"
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5 font-mono text-sm"
 					/>
 				</label>
 				<label class="block">
 					<span class="text-ink-soft">Project (namespace)</span>
 					<select
 						bind:value={namespace}
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 					>
 						{#each namespaces as ns (ns)}<option value={ns}>{ns}</option>{/each}
 					</select>
@@ -164,14 +164,14 @@
 					<input
 						bind:value={size}
 						placeholder="10Gi"
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 					/>
 				</label>
 				<label class="block">
 					<span class="text-ink-soft">Storage class</span>
 					<select
 						bind:value={storageClass}
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 					>
 						<option value="">cluster default</option>
 						{#each options?.storageClasses ?? [] as sc (sc.name)}
@@ -205,7 +205,7 @@
 								? 'bg-green-500 text-white'
 								: active
 									? 'bg-blue-500 text-white'
-									: 'bg-slate-200 text-ink-faint'}"
+									: 'bg-line text-ink-faint'}"
 						>
 							{#if complete}<Check size={10} />{/if}
 						</span>
@@ -220,7 +220,7 @@
 					stageIdx > 2,
 				)}
 				{#if stage === 'uploading'}
-					<div class="ml-6 h-2 overflow-hidden rounded-full bg-slate-100">
+					<div class="ml-6 h-2 overflow-hidden rounded-full bg-inset-strong">
 						<div class="h-full rounded-full bg-blue-500" style="width:{uploadPct}%"></div>
 					</div>
 				{/if}
@@ -242,12 +242,12 @@
 		{#if stage === 'form' || stage === 'error'}
 			<button
 				onclick={onclose}
-				class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-slate-100">Cancel</button
+				class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong">Cancel</button
 			>
 			<button
 				onclick={start}
 				disabled={!ready}
-				class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
+				class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 			>
 				{stage === 'error' ? 'Retry' : 'Upload'}
 			</button>

@@ -65,7 +65,7 @@
 				onclick={() => (range = r.key)}
 				class="rounded border px-2 py-0.5 text-xs {range === r.key
 					? 'border-blue-500 bg-blue-50 text-blue-700'
-					: 'border-slate-300 text-ink-soft hover:bg-slate-50'}">{r.label}</button
+					: 'border-line-strong text-ink-soft hover:bg-inset'}">{r.label}</button
 			>
 		{/each}
 		{#if loading}<span class="text-xs text-ink-faint">updating…</span>{/if}

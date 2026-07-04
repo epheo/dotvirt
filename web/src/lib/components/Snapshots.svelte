@@ -101,12 +101,12 @@
 		<input
 			bind:value={snapName}
 			placeholder="snapshot name (auto-generated if blank)"
-			class="w-72 rounded border border-slate-300 px-2 py-1.5 text-sm"
+			class="w-72 rounded border border-line-strong px-2 py-1.5 text-sm"
 		/>
 		<button
 			onclick={take}
 			disabled={taking}
-			class="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:bg-slate-300"
+			class="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:bg-line-strong"
 		>
 			<Camera size={14} />
 			{taking ? 'Taking…' : 'Take snapshot'}
@@ -132,20 +132,20 @@
 	{#if snapshots && snapshots.length}
 		<table class="w-full text-[13px]">
 			<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
-				<tr class="border-b border-slate-200">
+				<tr class="border-b border-line">
 					<th class="py-1.5 pr-3 font-medium">Name</th>
 					<th class="py-1.5 pr-3 font-medium">Created</th>
 					<th class="py-1.5 pr-3 font-medium">Status</th>
 					<th class="py-1.5 font-medium"></th>
 				</tr>
 			</thead>
-			<tbody class="divide-y divide-slate-100">
+			<tbody class="divide-y divide-line-soft">
 				{#each snapshots as s (s.name)}
 					<tr>
 						<td class="py-2 pr-3 font-medium text-ink">
 							{s.name}
 							{#if s.indications?.includes('Online')}
-								<span class="ml-1 rounded bg-slate-100 px-1 text-[10px] text-ink-muted">online</span
+								<span class="ml-1 rounded bg-inset-strong px-1 text-[10px] text-ink-muted">online</span
 								>
 							{/if}
 						</td>

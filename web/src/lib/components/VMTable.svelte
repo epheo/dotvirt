@@ -149,11 +149,11 @@
 </script>
 
 <div class="flex h-full flex-col">
-	<div class="flex items-center gap-2 border-b border-slate-200 px-4 py-2">
+	<div class="flex items-center gap-2 border-b border-line px-4 py-2">
 		<input
 			bind:value={search}
 			placeholder="Search name, namespace, IP…"
-			class="w-64 rounded border border-slate-300 px-2 py-1 text-sm focus:border-blue-400"
+			class="w-64 rounded border border-line-strong px-2 py-1 text-sm focus:border-blue-400"
 		/>
 		<select
 			value={prefs.value.powerFilter}
@@ -162,7 +162,7 @@
 					...prefs.value,
 					powerFilter: e.currentTarget.value as 'all' | Power,
 				})}
-			class="rounded border border-slate-300 px-2 py-1 text-sm text-ink-soft"
+			class="rounded border border-line-strong px-2 py-1 text-sm text-ink-soft"
 			title="Filter by power state"
 		>
 			<option value="all">Power: all</option>
@@ -177,7 +177,7 @@
 					...prefs.value,
 					syncFilter: e.currentTarget.value as 'all' | SyncStatus,
 				})}
-			class="rounded border border-slate-300 px-2 py-1 text-sm text-ink-soft"
+			class="rounded border border-line-strong px-2 py-1 text-sm text-ink-soft"
 			title="Filter by ArgoCD sync status"
 		>
 			<option value="all">Sync: all</option>
@@ -191,8 +191,8 @@
 
 	<div class="min-h-0 flex-1 overflow-auto">
 		<table class="w-full text-[13px]">
-			<thead class="sticky top-0 bg-slate-50 text-left text-xs text-ink-muted">
-				<tr class="border-b border-slate-200">
+			<thead class="sticky top-0 bg-inset text-left text-xs text-ink-muted">
+				<tr class="border-b border-line">
 					<th class="w-8 px-3 py-2">
 						<input
 							type="checkbox"
@@ -222,7 +222,7 @@
 					<th class="px-3 py-2 font-medium">Health</th>
 				</tr>
 			</thead>
-			<tbody class="divide-y divide-slate-100">
+			<tbody class="divide-y divide-line-soft">
 				{#each rows as vm (vm.namespace + '/' + vm.name)}
 					{@const sc = staged.get(vm.namespace + '/' + vm.name)}
 					<tr

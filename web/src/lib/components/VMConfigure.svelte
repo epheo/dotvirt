@@ -42,7 +42,7 @@
 				onclick={() => (view = id)}
 				class="block w-full rounded px-2.5 py-1.5 text-left {view === id
 					? 'bg-blue-50 font-medium text-blue-700'
-					: 'text-ink-soft hover:bg-slate-50'}"
+					: 'text-ink-soft hover:bg-inset'}"
 			>
 				{label}
 			</button>
@@ -52,7 +52,7 @@
 		{#if view === 'hardware'}
 			<InfoCard title="VM Hardware">
 				{#snippet action()}{@render editButton('compute')}{/snippet}
-				<dl class="divide-y divide-slate-100 text-[13px]">
+				<dl class="divide-y divide-line-soft text-[13px]">
 					<Row label="CPU cores" value={vm.cpuCores ? String(vm.cpuCores) : ''} />
 					<Row label="Memory" value={vm.memory ?? ''} />
 					<Row label="Instance type" value={vm.instancetype ?? ''} />
@@ -71,7 +71,7 @@
 			<InfoCard title="Disks">
 				{#snippet action()}{@render editButton('storage')}{/snippet}
 				{#if vm.disks?.length}
-					<ul class="divide-y divide-slate-100 px-3 text-[13px]">
+					<ul class="divide-y divide-line-soft px-3 text-[13px]">
 						{#each vm.disks as d (d.name)}
 							<li class="flex justify-between gap-3 py-1.5">
 								<span class="text-ink">{d.name}</span>
@@ -91,7 +91,7 @@
 			<InfoCard title="Network adapters">
 				{#snippet action()}{@render editButton('network')}{/snippet}
 				{#if vm.networks?.length}
-					<ul class="divide-y divide-slate-100 px-3 text-[13px]">
+					<ul class="divide-y divide-line-soft px-3 text-[13px]">
 						{#each vm.networks as n (n.name)}
 							{@const pg = resolveNIC(n, vm.namespace, networks)}
 							{@const detail = [
@@ -116,7 +116,7 @@
 										>
 										{#if pg}
 											<span
-												class="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-ink-muted"
+												class="shrink-0 rounded bg-inset-strong px-1.5 py-0.5 text-[11px] text-ink-muted"
 												>{kindLabel(pg.kind)}{pg.vlan ? ` ${pg.vlan}` : ''}</span
 											>
 										{/if}
@@ -141,7 +141,7 @@
 							<button
 								onclick={() => onsearchlabel?.(k, v)}
 								title="Find everything labeled {k}={v}"
-								class="mr-1 mb-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-ink-soft hover:bg-blue-50 hover:text-blue-700"
+								class="mr-1 mb-1 inline-block rounded bg-inset-strong px-1.5 py-0.5 text-xs text-ink-soft hover:bg-blue-50 hover:text-blue-700"
 								>{k}={v}</button
 							>
 						{/each}
@@ -152,12 +152,12 @@
 			</InfoCard>
 		{:else}
 			<InfoCard title="Source & sync">
-				<dl class="divide-y divide-slate-100 text-[13px]">
+				<dl class="divide-y divide-line-soft text-[13px]">
 					<Row label="Manifest" value={vm.sourceFile} mono />
 					<Row label="Namespace" value={vm.namespace} />
 					<Row label="Sync" value={vm.sync} />
 				</dl>
-				<div class="border-t border-slate-100 px-3 py-2">
+				<div class="border-t border-line-soft px-3 py-2">
 					<a href={manifestURL(vm)} target="_blank" class="text-xs text-blue-600 hover:underline"
 						>Download manifest ↗</a
 					>

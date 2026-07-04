@@ -67,7 +67,7 @@
 			<input
 				bind:value={name}
 				placeholder="team-c"
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 			<span class="mt-1 block text-[11px] text-ink-faint"
 				>Creates the tenant git repo of the same name.</span
@@ -79,7 +79,7 @@
 				bind:value={namespace}
 				oninput={() => (nsTouched = true)}
 				placeholder="team-c"
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 		</label>
 		<label class="block">
@@ -87,7 +87,7 @@
 			<input
 				bind:value={owners}
 				placeholder="alice bob"
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 			<span class="mt-1 block text-[11px] text-ink-faint"
 				>Usernames granted admin on the namespace (space/comma separated).</span
@@ -101,13 +101,13 @@
 		</label>
 
 		{#if withNetwork}
-			<div class="space-y-3 rounded border border-slate-200 p-3">
+			<div class="space-y-3 rounded border border-line p-3">
 				<label class="block">
 					<span class="text-ink-soft">VM Network name</span>
 					<input
 						bind:value={netName}
 						oninput={() => (netTouched = true)}
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 					/>
 				</label>
 				<label class="block">
@@ -118,7 +118,7 @@
 					<input
 						bind:value={subnet}
 						placeholder="10.40.0.0/16"
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 					/>
 				</label>
 				<p class="text-[11px] text-ink-faint">
@@ -127,7 +127,7 @@
 			</div>
 		{/if}
 
-		<p class="rounded bg-slate-50 px-3 py-2 text-xs text-ink-muted">
+		<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">
 			Creates the tenant repo now, and stages its first namespace{#if owners.trim()}
 				+ an owners admin grant{/if} into the platform repo. Applied by Argo on merge — open the PR from
 			“Changes”.

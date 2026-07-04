@@ -28,7 +28,7 @@
 		{/if}
 		{#each projects as p (p.name)}
 			<InfoCard title="Project: {p.name}">
-				<dl class="divide-y divide-slate-100 text-[13px]">
+				<dl class="divide-y divide-line-soft text-[13px]">
 					<Row label="Repository">
 						{#if p.repo}
 							<a href={p.repo} target="_blank" class="font-mono text-xs text-accent hover:underline"
@@ -41,7 +41,7 @@
 					<Row label="Namespaces">
 						{#each p.namespaces as n (n.namespace)}
 							<span
-								class="ml-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-ink-soft"
+								class="ml-1 inline-block rounded bg-inset-strong px-1.5 py-0.5 text-xs text-ink-soft"
 								>{n.namespace} · {n.vms.length} VMs</span
 							>
 						{/each}
@@ -53,7 +53,7 @@
 					</p>
 				{/if}
 				<!-- Quota-aware capacity: the project's ResourceQuotas. -->
-				<div class="border-t border-slate-100 px-3 py-2">
+				<div class="border-t border-line-soft px-3 py-2">
 					<QuotaBand scope={{ project: p.name }} showEmpty />
 				</div>
 			</InfoCard>

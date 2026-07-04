@@ -84,7 +84,7 @@
 			<span class="text-ink-soft">Project (namespace)</span>
 			<select
 				bind:value={namespace}
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			>
 				{#each namespaces as ns (ns)}<option value={ns}>{ns}</option>{/each}
 			</select>
@@ -102,11 +102,11 @@
 				>
 			</div>
 			{#each rows as row, i (i)}
-				<div class="rounded border border-slate-200 p-2">
+				<div class="rounded border border-line p-2">
 					<div class="flex flex-wrap items-center gap-2">
 						<select
 							bind:value={row.action}
-							class="rounded border border-slate-300 px-2 py-1 text-xs {row.action === 'Deny'
+							class="rounded border border-line-strong px-2 py-1 text-xs {row.action === 'Deny'
 								? 'text-red-700'
 								: 'text-green-700'}"
 						>
@@ -114,14 +114,14 @@
 							<option value="Deny">Deny</option>
 						</select>
 						<span class="text-xs text-ink-faint">egress to</span>
-						<select bind:value={row.dest} class="rounded border border-slate-300 px-2 py-1 text-xs">
+						<select bind:value={row.dest} class="rounded border border-line-strong px-2 py-1 text-xs">
 							<option value="cidr">CIDR</option>
 							<option value="dns">DNS name</option>
 						</select>
 						<input
 							bind:value={row.value}
 							placeholder={row.dest === 'cidr' ? '0.0.0.0/0' : 'api.example.com'}
-							class="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
+							class="min-w-0 flex-1 rounded border border-line-strong px-2 py-1 text-xs"
 						/>
 						<button
 							onclick={() => removeRow(i)}
@@ -133,7 +133,7 @@
 					</div>
 					<div class="mt-2 flex items-center gap-2 pl-1 text-xs text-ink-muted">
 						<span>port</span>
-						<select bind:value={row.proto} class="rounded border border-slate-300 px-1.5 py-1">
+						<select bind:value={row.proto} class="rounded border border-line-strong px-1.5 py-1">
 							<option value="TCP">TCP</option>
 							<option value="UDP">UDP</option>
 							<option value="SCTP">SCTP</option>
@@ -144,14 +144,14 @@
 							placeholder="any"
 							min="1"
 							max="65535"
-							class="w-24 rounded border border-slate-300 px-2 py-1"
+							class="w-24 rounded border border-line-strong px-2 py-1"
 						/>
 					</div>
 				</div>
 			{/each}
 		</div>
 
-		<p class="rounded bg-slate-50 px-3 py-2 text-xs text-ink-muted">
+		<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">
 			The {TERMS.gatewayFirewall.nsx.toLowerCase()} controls north-south traffic leaving this project's
 			VMs to external destinations (it is not an east-west, VM-to-VM control — that is the Distributed
 			Firewall). One per namespace; staged into the project's repo and applied by its Argo app.
@@ -164,12 +164,12 @@
 		<span class="text-xs text-ink-faint">Staged into the changeset; open a PR from “Changes”.</span>
 		<button
 			onclick={onclose}
-			class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-slate-100">Cancel</button
+			class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong">Cancel</button
 		>
 		<button
 			onclick={submit}
 			disabled={!valid || submitting}
-			class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
+			class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 		>
 			{submitting ? 'Staging…' : 'Stage firewall'}
 		</button>

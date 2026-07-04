@@ -289,9 +289,9 @@
 {#snippet dockHead(cols: string[])}
 	<!-- The one header row all three dock tables share. -->
 	<thead
-		class="sticky top-0 bg-slate-50 text-left text-[11px] tracking-wide text-ink-faint uppercase"
+		class="sticky top-0 bg-inset text-left text-[11px] tracking-wide text-ink-faint uppercase"
 	>
-		<tr class="border-b border-slate-200">
+		<tr class="border-b border-line">
 			{#each cols as c (c)}
 				<th class="px-3 py-1.5 font-medium">{c}</th>
 			{/each}
@@ -303,7 +303,7 @@
 	{#if openPane}
 		<!-- Drag the top edge to resize the dock. -->
 		<div
-			class="h-1.5 w-full cursor-ns-resize bg-slate-100 hover:bg-blue-300"
+			class="h-1.5 w-full cursor-ns-resize bg-inset-strong hover:bg-blue-300"
 			onpointerdown={onResizeStart}
 			onpointermove={onResizeMove}
 			onpointerup={onResizeEnd}
@@ -313,7 +313,7 @@
 		></div>
 	{/if}
 	<!-- Tabbed header (vCenter's bottom pane): Recent Tasks | Events + collapse. -->
-	<div class="flex items-center gap-1 bg-slate-100 px-2 py-1 text-ink-soft">
+	<div class="flex items-center gap-1 bg-inset-strong px-2 py-1 text-ink-soft">
 		<ListChecks size={14} class="mx-1 text-ink-muted" />
 		<TabBar
 			tabs={[
@@ -357,7 +357,7 @@
 				{:else}
 					<table class="w-full">
 						{@render dockHead(['Task', 'Target', 'Status', 'Initiated by', 'Project'])}
-						<tbody class="divide-y divide-slate-100">
+						<tbody class="divide-y divide-line-soft">
 							{#each tasks as t (t.kind + ':' + t.project + ':' + t.namespace + '/' + t.name + ':' + t.url + ':' + (t.at ?? ''))}
 								<tr
 									onclick={() => activate(t)}
@@ -401,7 +401,7 @@
 				{:else}
 					<table class="w-full">
 						{@render dockHead(['Alarm', 'Target', 'Severity', 'Source'])}
-						<tbody class="divide-y divide-slate-100">
+						<tbody class="divide-y divide-line-soft">
 							{#each firing ?? [] as a (a.name + ':' + (a.namespace ?? '') + '/' + (a.vm ?? '') + ':' + (a.severity ?? ''))}
 								<tr
 									onclick={() => a.namespace && a.vm && onselect(a.namespace, a.vm)}
@@ -455,7 +455,7 @@
 			{:else}
 				<table class="w-full">
 					{@render dockHead(['Reason', 'Target', 'Message', 'Type', 'Last seen'])}
-					<tbody class="divide-y divide-slate-100">
+					<tbody class="divide-y divide-line-soft">
 						{#each events as e, i (i)}
 							<tr
 								onclick={() => e.namespace && e.name && onselect(e.namespace, e.name)}

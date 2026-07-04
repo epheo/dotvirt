@@ -23,10 +23,10 @@
 	}
 </script>
 
-<div class="flex h-screen items-center justify-center bg-slate-100">
+<div class="flex h-screen items-center justify-center bg-inset-strong">
 	<form
 		onsubmit={submit}
-		class="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
+		class="w-full max-w-md rounded-lg border border-line bg-panel p-6 shadow-sm"
 	>
 		<h1 class="mb-1 text-xl font-semibold text-ink">Sign in to dotvirt</h1>
 		<p class="mb-4 text-sm text-ink-muted">
@@ -40,7 +40,7 @@
 			rows="4"
 			autocomplete="off"
 			spellcheck="false"
-			class="w-full rounded border border-slate-300 px-3 py-2 font-mono text-xs break-all"
+			class="w-full rounded border border-line-strong px-3 py-2 font-mono text-xs break-all"
 		></textarea>
 
 		{#if error}
@@ -55,12 +55,12 @@
 			{busy ? 'Signing in…' : 'Sign in'}
 		</button>
 
-		<div class="mt-4 border-t border-slate-100 pt-3 text-xs text-ink-muted">
+		<div class="mt-4 border-t border-line-soft pt-3 text-xs text-ink-muted">
 			<p class="mb-1 font-medium text-ink-soft">Get a token:</p>
-			<pre class="rounded bg-slate-50 px-2 py-1 text-ink-soft">oc whoami -t</pre>
+			<pre class="rounded bg-inset px-2 py-1 text-ink-soft">oc whoami -t</pre>
 			<p class="my-1">or for a ServiceAccount:</p>
 			<pre
-				class="rounded bg-slate-50 px-2 py-1 text-ink-soft">kubectl create token &lt;sa&gt; -n &lt;namespace&gt;</pre>
+				class="rounded bg-inset px-2 py-1 text-ink-soft">kubectl create token &lt;sa&gt; -n &lt;namespace&gt;</pre>
 		</div>
 	</form>
 </div>

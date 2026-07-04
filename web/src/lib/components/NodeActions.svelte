@@ -79,9 +79,9 @@
 </script>
 
 {#if info?.canCordon}
-	<section class="max-w-2xl rounded border border-slate-200">
+	<section class="max-w-2xl rounded border border-line">
 		<h3
-			class="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
+			class="border-b border-line bg-inset px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
 		>
 			Maintenance
 		</h3>
@@ -102,7 +102,7 @@
 				<button
 					onclick={toggleCordon}
 					disabled={busy}
-					class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-slate-50 disabled:opacity-50"
+					class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 				>
 					{#if info.unschedulable}<CheckCircle2 size={13} /> Uncordon{:else}<Ban size={13} /> Cordon{/if}
 				</button>
@@ -112,7 +112,7 @@
 					title={running.length === 0
 						? 'No running VMs to migrate'
 						: 'Live-migrate every running VM off this node'}
-					class="flex items-center gap-1.5 rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-slate-50 disabled:opacity-50"
+					class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 				>
 					<MoveRight size={13} /> Evacuate ({running.length})
 				</button>

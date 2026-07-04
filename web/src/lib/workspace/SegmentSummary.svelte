@@ -20,7 +20,7 @@
 <div class="min-h-0 flex-1 overflow-y-auto p-4">
 	<div class="max-w-2xl space-y-4">
 		<InfoCard title={pg ? pg.name : network}>
-			<dl class="divide-y divide-slate-100 text-[13px]">
+			<dl class="divide-y divide-line-soft text-[13px]">
 				<Row
 					label="Type"
 					value={pg

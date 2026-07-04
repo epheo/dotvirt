@@ -89,13 +89,13 @@
 				id="clone-target-input"
 				data-autofocus
 				bind:value={target}
-				class="flex-1 rounded border border-slate-300 px-2 py-1.5 font-mono text-sm focus:border-blue-400"
+				class="flex-1 rounded border border-line-strong px-2 py-1.5 font-mono text-sm focus:border-blue-400"
 				placeholder="{vm.name}-clone"
 			/>
 			<button
 				onclick={create}
 				disabled={!valid || busy}
-				class="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:bg-slate-300"
+				class="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:bg-line-strong"
 			>
 				<Copy size={14} />
 				{busy ? 'Cloning…' : 'Clone'}
@@ -116,13 +116,13 @@
 			</h3>
 			<table class="w-full text-[13px]">
 				<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
-					<tr class="border-b border-slate-200">
+					<tr class="border-b border-line">
 						<th class="py-1.5 pr-3 font-medium">Target VM</th>
 						<th class="py-1.5 pr-3 font-medium">Started</th>
 						<th class="py-1.5 font-medium">Status</th>
 					</tr>
 				</thead>
-				<tbody class="divide-y divide-slate-100">
+				<tbody class="divide-y divide-line-soft">
 					{#each clones as c (c.name)}
 						<tr>
 							<td class="py-1.5 pr-3 font-medium text-ink">{c.target}</td>
@@ -152,7 +152,7 @@
 	{#snippet footer()}
 		<button
 			onclick={onclose}
-			class="ml-auto rounded border border-slate-300 px-3 py-1 text-sm text-ink-soft hover:bg-slate-50"
+			class="ml-auto rounded border border-line-strong px-3 py-1 text-sm text-ink-soft hover:bg-inset"
 		>
 			Close
 		</button>

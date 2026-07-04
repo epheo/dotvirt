@@ -105,7 +105,7 @@
 						}}
 						title="Create a repo for this project and bring it under GitOps">Attach repo…</MenuItem
 					>
-					<div class="my-1 border-t border-slate-100"></div>
+					<div class="my-1 border-t border-line-soft"></div>
 				{/if}
 				{#if ctx.repo && untracked.length}
 					<MenuItem
@@ -162,7 +162,7 @@
 						title={ctx.repo ? '' : 'Project has no backing repo'}>New Namespace here…</MenuItem
 					>
 				{/if}
-				<div class="my-1 border-t border-slate-100"></div>
+				<div class="my-1 border-t border-line-soft"></div>
 				<MenuItem
 					onclick={() => {
 						if (ctx.kind === 'container' && ctx.repo) window.open(ctx.repo, '_blank');

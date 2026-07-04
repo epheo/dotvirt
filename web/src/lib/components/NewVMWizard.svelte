@@ -185,14 +185,14 @@
 			<input
 				bind:value={name}
 				placeholder="my-vm"
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 		</label>
 		<label class="block">
 			<span class="text-ink-soft">Project (namespace)</span>
 			<select
 				bind:value={namespace}
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			>
 				{#each namespaces as ns (ns)}<option value={ns}>{ns}</option>{/each}
 			</select>
@@ -207,7 +207,7 @@
 		</p>
 		<label class="block">
 			<span class="text-ink-soft">OS image</span>
-			<select bind:value={osImage} class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
+			<select bind:value={osImage} class="mt-1 w-full rounded border border-line-strong px-2 py-1.5">
 				{#each (options?.osImages ?? []).filter((i) => i.ready) as img (img.namespace + img.name)}
 					<option value={`${img.name}|${img.namespace}`}>{img.name}</option>
 				{/each}
@@ -217,7 +217,7 @@
 			<span class="text-ink-soft">Preference (OS tuning)</span>
 			<select
 				bind:value={preference}
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			>
 				{#each options?.preferences ?? [] as p (p.name)}
 					<option value={p.name}>{p.displayName || p.name}</option>
@@ -236,7 +236,7 @@
 			<span class="text-ink-soft">Size (instancetype)</span>
 			<select
 				bind:value={instancetype}
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			>
 				{#each options?.instancetypes ?? [] as it (it.name)}
 					<option value={it.name}>{it.name} — {it.cpu} CPU / {it.memory}</option>
@@ -258,14 +258,14 @@
 				<span class="text-ink-soft">Root disk size</span>
 				<input
 					bind:value={diskSize}
-					class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+					class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 				/>
 			</label>
 			<label class="block">
 				<span class="text-ink-soft">Storage class</span>
 				<select
 					bind:value={storageClass}
-					class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+					class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 				>
 					<option value="">cluster default</option>
 					{#each options?.storageClasses ?? [] as sc (sc.name)}
@@ -286,12 +286,12 @@
 					<input
 						bind:value={disk.name}
 						placeholder="name"
-						class="w-1/2 rounded border border-slate-300 px-2 py-1"
+						class="w-1/2 rounded border border-line-strong px-2 py-1"
 					/>
 					<input
 						bind:value={disk.size}
 						placeholder="10Gi"
-						class="w-1/3 rounded border border-slate-300 px-2 py-1"
+						class="w-1/3 rounded border border-line-strong px-2 py-1"
 					/>
 					<button
 						onclick={() => removeDisk(i)}
@@ -311,7 +311,7 @@
 			The project's default network is attached automatically. Add extra network adapters below.
 		</p>
 		{#if available.length}
-			<div class="mt-1 space-y-1 rounded border border-slate-300 p-2">
+			<div class="mt-1 space-y-1 rounded border border-line-strong p-2">
 				{#each available as net (net.scope + '/' + (net.namespace ?? '') + '/' + net.name)}
 					<label class="flex items-center gap-2 text-xs">
 						<input
@@ -320,7 +320,7 @@
 							onchange={(e) => toggleNet(net, e.currentTarget.checked)}
 						/>
 						<span class="text-ink-soft">{net.name}</span>
-						<span class="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-ink-muted"
+						<span class="rounded bg-inset-strong px-1.5 py-0.5 text-[11px] text-ink-muted"
 							>{kindLabel(net.kind)}{net.vlan ? ` ${net.vlan}` : ''}</span
 						>
 						{#if net.scope === 'shared'}<span class="text-[11px] text-ink-faint">shared</span>{/if}
@@ -345,7 +345,7 @@
 			<input
 				bind:value={user}
 				placeholder="fedora"
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 		</label>
 		<label class="block">
@@ -355,16 +355,16 @@
 			<input
 				bind:value={sshKey}
 				placeholder="ssh-ed25519 AAAA…"
-				class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
+				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 		</label>
 	</div>
 {/snippet}
 
 {#snippet reviewGroup(title: string, step: number, rows: string[][])}
-	<div class="rounded border border-slate-200">
+	<div class="rounded border border-line">
 		<div
-			class="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-3 py-1.5"
+			class="flex items-center justify-between border-b border-line-soft bg-inset px-3 py-1.5"
 		>
 			<span class="text-xs font-semibold tracking-wide text-ink-muted uppercase">{title}</span>
 			<button
@@ -373,7 +373,7 @@
 				class="text-xs text-blue-600 hover:underline">Edit</button
 			>
 		</div>
-		<dl class="divide-y divide-slate-100">
+		<dl class="divide-y divide-line-soft">
 			{#each rows as r (r[0])}
 				<div class="flex justify-between gap-3 px-3 py-1.5">
 					<dt class="text-ink-muted">{r[0]}</dt>

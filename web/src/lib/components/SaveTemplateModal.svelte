@@ -94,12 +94,12 @@
 	{#snippet footer()}
 		<button
 			onclick={onclose}
-			class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-slate-100">Cancel</button
+			class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong">Cancel</button
 		>
 		<button
 			onclick={save}
 			disabled={!valid || busy}
-			class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
+			class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 			>Stage template</button
 		>
 	{/snippet}
