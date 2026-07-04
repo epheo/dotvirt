@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { Plus, Trash2, X } from 'lucide-svelte';
+	import { Plus, Trash2 } from 'lucide-svelte';
 	import { api, type AdminNetworkPolicyCreate, type AdminPolicyRule } from '$lib/api';
+	import Modal from './Modal.svelte';
 
 	let {
 		onclose,
@@ -79,178 +80,158 @@
 	}
 </script>
 
-<div
-	class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-	onclick={(e) => e.target === e.currentTarget && onclose()}
-	onkeydown={(e) => e.key === 'Escape' && onclose()}
-	role="presentation"
->
-	<div class="flex max-h-[90vh] w-full max-w-lg flex-col rounded-lg bg-white shadow-xl">
-		<header class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-			<h2 class="text-base font-semibold text-slate-800">
-				Admin Distributed Firewall
-				<span class="font-normal text-slate-400">· cluster-wide</span>
-			</h2>
-			<button onclick={onclose} aria-label="Close" class="text-slate-400 hover:text-slate-700"
-				><X size={18} /></button
+<Modal title="Admin Distributed Firewall" subtitle="cluster-wide" size="lg" {onclose}>
+	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
+		<div class="flex gap-2">
+			<button
+				onclick={() => (baseline = false)}
+				class="flex-1 rounded border px-3 py-2 text-left text-xs {!baseline
+					? 'border-blue-500 bg-blue-50 text-blue-700'
+					: 'border-slate-300 text-slate-600'}"
 			>
-		</header>
-		<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
-			<div class="flex gap-2">
-				<button
-					onclick={() => (baseline = false)}
-					class="flex-1 rounded border px-3 py-2 text-left text-xs {!baseline
-						? 'border-blue-500 bg-blue-50 text-blue-700'
-						: 'border-slate-300 text-slate-600'}"
-				>
-					<div class="font-medium">Admin Policy</div>
-					<div class="text-slate-400">Priority-ordered · overrides tenants</div>
-				</button>
-				<button
-					onclick={() => (baseline = true)}
-					class="flex-1 rounded border px-3 py-2 text-left text-xs {baseline
-						? 'border-blue-500 bg-blue-50 text-blue-700'
-						: 'border-slate-300 text-slate-600'}"
-				>
-					<div class="font-medium">Baseline</div>
-					<div class="text-slate-400">The cluster default backstop</div>
-				</button>
-			</div>
+				<div class="font-medium">Admin Policy</div>
+				<div class="text-slate-400">Priority-ordered · overrides tenants</div>
+			</button>
+			<button
+				onclick={() => (baseline = true)}
+				class="flex-1 rounded border px-3 py-2 text-left text-xs {baseline
+					? 'border-blue-500 bg-blue-50 text-blue-700'
+					: 'border-slate-300 text-slate-600'}"
+			>
+				<div class="font-medium">Baseline</div>
+				<div class="text-slate-400">The cluster default backstop</div>
+			</button>
+		</div>
 
-			<div class="grid grid-cols-2 gap-3">
-				<label class="block">
-					<span class="text-slate-600">Name</span>
-					<input
-						bind:value={name}
-						disabled={baseline}
-						placeholder={baseline ? 'default' : 'tenant-isolation'}
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 disabled:bg-slate-100 disabled:text-slate-400"
-					/>
-				</label>
-				<label class="block">
-					<span class="text-slate-600">Priority <span class="text-slate-400">(0–1000)</span></span>
-					<input
-						type="number"
-						bind:value={priority}
-						disabled={baseline}
-						min="0"
-						max="1000"
-						class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 disabled:bg-slate-100 disabled:text-slate-400"
-					/>
-				</label>
-			</div>
+		<div class="grid grid-cols-2 gap-3">
+			<label class="block">
+				<span class="text-slate-600">Name</span>
+				<input
+					bind:value={name}
+					disabled={baseline}
+					placeholder={baseline ? 'default' : 'tenant-isolation'}
+					class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 disabled:bg-slate-100 disabled:text-slate-400"
+				/>
+			</label>
+			<label class="block">
+				<span class="text-slate-600">Priority <span class="text-slate-400">(0–1000)</span></span>
+				<input
+					type="number"
+					bind:value={priority}
+					disabled={baseline}
+					min="0"
+					max="1000"
+					class="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 disabled:bg-slate-100 disabled:text-slate-400"
+				/>
+			</label>
+		</div>
 
-			<div class="rounded border border-slate-200 p-3">
+		<div class="rounded border border-slate-200 p-3">
+			<span class="text-slate-600"
+				>Applies to project Group <span class="text-slate-400">(namespace label; blank = all)</span
+				></span
+			>
+			<div class="mt-1 flex items-center gap-2">
+				<input
+					bind:value={subjKey}
+					placeholder="tier"
+					class="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
+				/>
+				<span class="text-slate-400">=</span>
+				<input
+					bind:value={subjValue}
+					placeholder="prod"
+					class="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
+				/>
+			</div>
+		</div>
+
+		<div class="space-y-2">
+			<div class="flex items-center justify-between">
 				<span class="text-slate-600"
-					>Applies to project Group <span class="text-slate-400"
-						>(namespace label; blank = all)</span
-					></span
+					>Ingress rules <span class="text-slate-400">(ordered)</span></span
 				>
-				<div class="mt-1 flex items-center gap-2">
+				<button
+					onclick={addRow}
+					class="flex items-center gap-1 text-xs text-blue-600 hover:underline"
+					><Plus size={12} /> Add rule</button
+				>
+			</div>
+			{#each rows as row, i (i)}
+				<div class="flex flex-wrap items-center gap-2 rounded border border-slate-200 p-2">
+					<select
+						bind:value={row.action}
+						class="rounded border border-slate-300 px-2 py-1 text-xs {row.action === 'Deny'
+							? 'text-red-700'
+							: row.action === 'Allow'
+								? 'text-green-700'
+								: 'text-slate-600'}"
+					>
+						<option value="Allow">Allow</option>
+						<option value="Deny">Deny</option>
+						{#if !baseline}<option value="Pass">Pass</option>{/if}
+					</select>
+					<span class="text-xs text-slate-400">from project</span>
 					<input
-						bind:value={subjKey}
+						bind:value={row.key}
 						placeholder="tier"
-						class="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
+						class="w-20 rounded border border-slate-300 px-2 py-1 text-xs"
 					/>
 					<span class="text-slate-400">=</span>
 					<input
-						bind:value={subjValue}
-						placeholder="prod"
-						class="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
+						bind:value={row.value}
+						placeholder="web"
+						class="w-20 rounded border border-slate-300 px-2 py-1 text-xs"
 					/>
-				</div>
-			</div>
-
-			<div class="space-y-2">
-				<div class="flex items-center justify-between">
-					<span class="text-slate-600"
-						>Ingress rules <span class="text-slate-400">(ordered)</span></span
+					<span class="text-xs text-slate-400">port</span>
+					<select
+						bind:value={row.proto}
+						class="rounded border border-slate-300 px-1.5 py-1 text-xs"
 					>
+						<option value="TCP">TCP</option>
+						<option value="UDP">UDP</option>
+						<option value="SCTP">SCTP</option>
+					</select>
+					<input
+						type="number"
+						bind:value={row.port}
+						placeholder="any"
+						min="1"
+						max="65535"
+						class="w-16 rounded border border-slate-300 px-2 py-1 text-xs"
+					/>
 					<button
-						onclick={addRow}
-						class="flex items-center gap-1 text-xs text-blue-600 hover:underline"
-						><Plus size={12} /> Add rule</button
+						onclick={() => removeRow(i)}
+						disabled={rows.length === 1}
+						aria-label="Remove rule"
+						class="ml-auto text-slate-300 hover:text-red-600 disabled:opacity-40"
+						><Trash2 size={14} /></button
 					>
 				</div>
-				{#each rows as row, i (i)}
-					<div class="flex flex-wrap items-center gap-2 rounded border border-slate-200 p-2">
-						<select
-							bind:value={row.action}
-							class="rounded border border-slate-300 px-2 py-1 text-xs {row.action === 'Deny'
-								? 'text-red-700'
-								: row.action === 'Allow'
-									? 'text-green-700'
-									: 'text-slate-600'}"
-						>
-							<option value="Allow">Allow</option>
-							<option value="Deny">Deny</option>
-							{#if !baseline}<option value="Pass">Pass</option>{/if}
-						</select>
-						<span class="text-xs text-slate-400">from project</span>
-						<input
-							bind:value={row.key}
-							placeholder="tier"
-							class="w-20 rounded border border-slate-300 px-2 py-1 text-xs"
-						/>
-						<span class="text-slate-400">=</span>
-						<input
-							bind:value={row.value}
-							placeholder="web"
-							class="w-20 rounded border border-slate-300 px-2 py-1 text-xs"
-						/>
-						<span class="text-xs text-slate-400">port</span>
-						<select
-							bind:value={row.proto}
-							class="rounded border border-slate-300 px-1.5 py-1 text-xs"
-						>
-							<option value="TCP">TCP</option>
-							<option value="UDP">UDP</option>
-							<option value="SCTP">SCTP</option>
-						</select>
-						<input
-							type="number"
-							bind:value={row.port}
-							placeholder="any"
-							min="1"
-							max="65535"
-							class="w-16 rounded border border-slate-300 px-2 py-1 text-xs"
-						/>
-						<button
-							onclick={() => removeRow(i)}
-							disabled={rows.length === 1}
-							aria-label="Remove rule"
-							class="ml-auto text-slate-300 hover:text-red-600 disabled:opacity-40"
-							><Trash2 size={14} /></button
-						>
-					</div>
-				{/each}
-			</div>
-
-			<p class="rounded bg-amber-50 px-3 py-2 text-xs text-amber-700">
-				Cluster-wide and admin-only. {#if baseline}The baseline is the default backstop applied
-					beneath every tenant NetworkPolicy.{:else}An Admin Policy overrides tenant NetworkPolicies
-					— use <strong>Pass</strong> to defer a decision back to them.{/if} Proposed to the platform
-				repository.
-			</p>
-			{#if error}
-				<pre class="rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
-			{/if}
+			{/each}
 		</div>
-		<footer class="flex items-center gap-2 border-t border-slate-200 px-5 py-3">
-			<span class="text-xs text-slate-400"
-				>Staged into the changeset; open a PR from “Changes”.</span
-			>
-			<button
-				onclick={onclose}
-				class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button
-			>
-			<button
-				onclick={submit}
-				disabled={!valid || submitting}
-				class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
-			>
-				{submitting ? 'Staging…' : 'Stage policy'}
-			</button>
-		</footer>
+
+		<p class="rounded bg-amber-50 px-3 py-2 text-xs text-amber-700">
+			Cluster-wide and admin-only. {#if baseline}The baseline is the default backstop applied
+				beneath every tenant NetworkPolicy.{:else}An Admin Policy overrides tenant NetworkPolicies —
+				use <strong>Pass</strong> to defer a decision back to them.{/if} Proposed to the platform repository.
+		</p>
+		{#if error}
+			<pre class="rounded bg-red-50 p-3 text-xs whitespace-pre-wrap text-red-700">{error}</pre>
+		{/if}
 	</div>
-</div>
+	{#snippet footer()}
+		<span class="text-xs text-slate-400">Staged into the changeset; open a PR from “Changes”.</span>
+		<button
+			onclick={onclose}
+			class="ml-auto rounded px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-100">Cancel</button
+		>
+		<button
+			onclick={submit}
+			disabled={!valid || submitting}
+			class="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white disabled:bg-slate-300"
+		>
+			{submitting ? 'Staging…' : 'Stage policy'}
+		</button>
+	{/snippet}
+</Modal>

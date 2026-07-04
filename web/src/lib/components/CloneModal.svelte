@@ -87,8 +87,9 @@
 		<div class="flex items-center gap-2">
 			<input
 				id="clone-target-input"
+				data-autofocus
 				bind:value={target}
-				class="flex-1 rounded border border-slate-300 px-2 py-1.5 font-mono text-sm focus:border-blue-400 focus:outline-none"
+				class="flex-1 rounded border border-slate-300 px-2 py-1.5 font-mono text-sm focus:border-blue-400"
 				placeholder="{vm.name}-clone"
 			/>
 			<button

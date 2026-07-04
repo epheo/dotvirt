@@ -34,8 +34,9 @@
 		</label>
 		<input
 			id="confirm-delete-input"
+			data-autofocus
 			bind:value={text}
-			class="w-full rounded border border-slate-300 px-2 py-1 font-mono text-sm focus:border-red-400 focus:outline-none"
+			class="w-full rounded border border-slate-300 px-2 py-1 font-mono text-sm focus:border-red-400"
 			placeholder={confirmWord}
 		/>
 		{#if error}
