@@ -3,14 +3,18 @@
 	import { page } from '$app/state';
 	import {
 		BookCopy,
+		Check,
 		ChevronDown,
 		ClipboardList,
 		FolderPlus,
+		Monitor,
+		Moon,
 		Network,
 		Plus,
 		Radio,
 		Server,
 		Shield,
+		Sun,
 		Upload,
 		User as UserIcon,
 	} from 'lucide-svelte';
@@ -18,6 +22,7 @@
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { session } from '$lib/state/session.svelte';
+	import { theme } from '$lib/state/theme.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import GlobalSearch, { type SearchHit } from './GlobalSearch.svelte';
 	import HeaderMenu from './HeaderMenu.svelte';
@@ -214,6 +219,19 @@
 				{/if}
 			</div>
 			<div class="px-3 py-1.5 text-ink-muted">{inventory.vmCount} VMs in view</div>
+			<div class="border-t border-line-soft"></div>
+			<div class="px-3 pt-1.5 pb-0.5 text-[10px] tracking-wide text-ink-faint uppercase">Theme</div>
+			{#each [{ id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }, { id: 'system', label: 'System' }] as const as opt (opt.id)}
+				<MenuItem onclick={() => (theme.mode = opt.id)}>
+					{#snippet icon()}
+						{#if opt.id === 'light'}<Sun size={13} />{:else if opt.id === 'dark'}<Moon
+								size={13}
+							/>{:else}<Monitor size={13} />{/if}
+					{/snippet}
+					{opt.label}
+					{#if theme.mode === opt.id}<Check size={13} class="ml-auto text-accent-ink" />{/if}
+				</MenuItem>
+			{/each}
 			<div class="border-t border-line-soft"></div>
 			<MenuItem
 				onclick={() => {
