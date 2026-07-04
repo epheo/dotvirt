@@ -41,8 +41,8 @@
 		{#if sc}
 			<span
 				class="inline-flex items-center rounded px-1 text-[10px] font-medium {sc.kind === 'delete'
-					? 'bg-red-100 text-red-700'
-					: 'bg-blue-100 text-blue-700'}"
+					? 'bg-danger-soft text-danger-ink'
+					: 'bg-accent-soft text-accent-ink'}"
 				title="Staged {sc.kind}"
 			>
 				{#if sc.kind === 'delete'}<Trash2 size={10} />{:else}<Pencil size={10} />{/if}

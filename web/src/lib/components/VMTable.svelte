@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { ChevronDown, ChevronUp } from 'lucide-svelte';
 	import type { DraftItem, Power, SyncStatus, VM } from '$lib/api';
+	import { phaseTone } from '$lib/status';
 	import PowerDot from './PowerDot.svelte';
 	import StagedBadge from './StagedBadge.svelte';
+	import StatusPill from './StatusPill.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 
 	let {
@@ -232,7 +234,13 @@
 								: 'text-slate-800'}">{vm.name}</td
 						>
 						<td class="px-3 py-1.5 text-slate-600">{vm.namespace}</td>
-						<td class="px-3 py-1.5 text-slate-600">{vm.paused ? 'Paused' : (vm.phase ?? '—')}</td>
+						<td class="px-3 py-1.5">
+							<StatusPill
+								tone={phaseTone(vm.phase, vm.paused)}
+								label={vm.paused ? 'Paused' : (vm.phase ?? '—')}
+								dot={false}
+							/>
+						</td>
 						<td class="px-3 py-1.5 font-mono text-xs text-slate-600">{vm.guestIP ?? '—'}</td>
 						<td class="px-3 py-1.5 text-right text-slate-700">{vm.cpuCores ?? '—'}</td>
 						<td class="px-3 py-1.5 text-right text-slate-700">{vm.memory ?? '—'}</td>

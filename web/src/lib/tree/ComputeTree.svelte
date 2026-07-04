@@ -5,6 +5,7 @@
 	import { hrefForScope, scopeFromPath } from '$lib/nav';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
+	import StatusDot from '$lib/components/StatusDot.svelte';
 	import TreeRow from '$lib/components/TreeRow.svelte';
 	import TreeVMRow from './TreeVMRow.svelte';
 
@@ -73,7 +74,7 @@
 						><TriangleAlert size={10} /></span
 					>
 				{:else if projectDrift(project)}
-					<span class="h-1.5 w-1.5 rounded-full bg-red-500" title="A VM is OutOfSync"></span>
+					<StatusDot tone="danger" size="xs" title="A VM is out of sync" />
 				{/if}
 				{#snippet trailing()}
 					<span class="text-xs text-ink-faint">{vmCount(project)}</span>
@@ -128,7 +129,7 @@
 							{/snippet}
 							<span class="truncate text-slate-600">{ns.namespace}</span>
 							{#if nsDrift(ns)}
-								<span class="h-1.5 w-1.5 rounded-full bg-red-500" title="A VM is OutOfSync"></span>
+								<StatusDot tone="danger" size="xs" title="A VM is out of sync" />
 							{/if}
 							{#snippet trailing()}
 								<span class="text-xs text-ink-faint">{ns.vms.length}</span>
