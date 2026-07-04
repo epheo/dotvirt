@@ -9,6 +9,7 @@
 	import { sectionOf, vmHref, type Section } from '$lib/nav';
 	import { drafts, PLATFORM_PROJECT } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
+	import { lastSection } from '$lib/state/nav.svelte';
 	import { session } from '$lib/state/session.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import AppContextMenus from '$lib/components/AppContextMenus.svelte';
@@ -27,10 +28,14 @@
 
 	// The tree follows the section the URL is in, but sticks across the
 	// section-agnostic /vm route — a VM opened from the Hosts tree keeps the
-	// Hosts tree (and its highlighted row), as vCenter does.
+	// Hosts tree (and its highlighted row), as vCenter does. The section also
+	// persists as where "/" lands next visit.
 	let treeSection = $state<Section>('compute');
 	$effect(() => {
-		if (page.url.pathname.split('/')[1] !== 'vm') treeSection = sectionOf(page.url.pathname);
+		if (page.url.pathname.split('/')[1] !== 'vm') {
+			treeSection = sectionOf(page.url.pathname);
+			lastSection.value = treeSection;
+		}
 	});
 
 	// Drop to the login screen on any 401. Registered as the api layer's one

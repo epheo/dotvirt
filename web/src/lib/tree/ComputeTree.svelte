@@ -4,6 +4,7 @@
 	import type { Project, ProjectNamespace } from '$lib/api';
 	import { hrefForScope, scopeFromPath } from '$lib/nav';
 	import { inventory } from '$lib/state/inventory.svelte';
+	import { persisted } from '$lib/state/persisted.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import TreeRow from '$lib/components/TreeRow.svelte';
@@ -18,9 +19,10 @@
 	const nsScoped = (project: string, ns: string) =>
 		scope.kind === 'namespace' && scope.project === project && scope.namespace === ns;
 
-	// Collapsed state keyed by node id; default expanded.
-	let collapsed = $state<Record<string, boolean>>({});
-	const toggle = (id: string) => (collapsed[id] = !collapsed[id]);
+	// Collapsed state keyed by node id; default expanded, survives reloads.
+	const collapsed = persisted<Record<string, boolean>>('dotvirt.tree.compute', {});
+	const toggle = (id: string) =>
+		(collapsed.value = { ...collapsed.value, [id]: !collapsed.value[id] });
 
 	// Drift rolls up: a namespace flags drift if any of its VMs is OutOfSync; a
 	// project flags drift if any of its namespaces does.
@@ -55,7 +57,7 @@
 			<!-- Project: chevron toggles collapse, the label focuses the grid. -->
 			<TreeRow
 				active={projectScoped(project.name)}
-				expanded={!collapsed[pid]}
+				expanded={!collapsed.value[pid]}
 				ontoggle={() => toggle(pid)}
 				href={hrefForScope({ kind: 'project', project: project.name })}
 				oncontextmenu={(e) =>
@@ -81,7 +83,7 @@
 				{/snippet}
 			</TreeRow>
 
-			{#if !collapsed[pid]}
+			{#if !collapsed.value[pid]}
 				{#if project.error}
 					<div class="py-1 pr-2 pl-7 text-xs text-amber-600 italic" title={project.error}>
 						{project.error}
@@ -109,7 +111,7 @@
 						<TreeRow
 							indent={1}
 							active={nsScoped(project.name, ns.namespace)}
-							expanded={!collapsed[nid]}
+							expanded={!collapsed.value[nid]}
 							ontoggle={() => toggle(nid)}
 							href={hrefForScope({
 								kind: 'namespace',
@@ -136,7 +138,7 @@
 							{/snippet}
 						</TreeRow>
 
-						{#if !collapsed[nid]}
+						{#if !collapsed.value[nid]}
 							{#each ns.vms as vm (vm.namespace + '/' + vm.name)}
 								<TreeVMRow {vm} indent={3} />
 							{/each}
