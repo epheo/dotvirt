@@ -85,9 +85,10 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		propProjects = append(propProjects, project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo})
 	}
 	inv.Proposals = s.proposalsFor(id, propProjects)
-	// Watermark for the out-of-band network catalog: bumps when GitOps state or a repo
-	// head moves, so the client re-pulls /api/networks and a merged segment shows live.
-	inv.NetworksVersion = s.bus.Version(eventbus.DriftChanged, eventbus.GitChanged)
+	// Watermark for the out-of-band network catalog: bumps when a port group moves
+	// (NetworkChanged) or a segment's sync/health moves (DriftChanged), so the client
+	// re-pulls /api/networks — a merged segment, and its badge, show live.
+	inv.NetworksVersion = s.bus.Version(eventbus.NetworkChanged, eventbus.DriftChanged)
 	return inv, nil
 }
 

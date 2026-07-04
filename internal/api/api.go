@@ -27,6 +27,7 @@ import (
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/metrics"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/netstate"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/ttlcache"
 )
@@ -100,9 +101,10 @@ type Config struct {
 // enough that a cluster-level revocation can't linger.
 const visibleTTL = 30 * time.Second
 
-// optionsTTL caches the wizard catalog (instancetypes/preferences/datasources/
-// networks). It's SA-read, identical for every user, and changes rarely — so one
-// shared cache spares 4 cluster-wide LISTs on each wizard open.
+// optionsTTL caches the wizard catalog (instancetypes/preferences/datasources).
+// It's SA-read, identical for every user, and changes rarely — so one shared cache
+// spares 3 cluster-wide LISTs on each wizard open. (The network catalog is served
+// live from the netstate snapshot instead, so it needs no cache.)
 const optionsTTL = 60 * time.Second
 
 // Server holds the long-lived collaborators and builds per-request, identity-
@@ -112,15 +114,15 @@ type Server struct {
 	state     *clusterstate.State // SA-owned live+topology snapshot; the read path's source
 	drift     *argo.Snapshot      // nil when Argo disabled; SA-owned, watch-fed Application snapshot
 	desched   *desched.Snapshot   // nil disables the DRS live plane; SA-owned KubeDescheduler snapshot
+	netstate  *netstate.Snapshot  // SA-owned, watch-fed networking catalog (port groups + fabric)
 	bus       *eventbus.Bus       // change-version source for the version-stamped auth caches
 	resolver  *project.Resolver
 	repos     *git.RepoSet
-	visible   *ttlcache.Cache[visibleSet]             // per-token visible-namespace set, RBAC-version-stamped
-	ssar      *ttlcache.Cache[ssarVerdict]            // per-(token, resource) create-SSAR, RBAC-version-stamped
-	proposals *ttlcache.Cache[[]model.Proposal]       // per-token open-PR set; written by the refresher, read on broadcast
-	options   *ttlcache.Cache[model.Options]          // shared wizard catalog (SA-read, identical for all)
-	networks  *ttlcache.Cache[model.NetworkInventory] // shared network catalog (SA-read; per-tenant scoping at serve time)
-	metrics   *metrics.Client                         // Prometheus/Thanos for the Performance tab; nil disables it
+	visible   *ttlcache.Cache[visibleSet]       // per-token visible-namespace set, RBAC-version-stamped
+	ssar      *ttlcache.Cache[ssarVerdict]      // per-(token, resource) create-SSAR, RBAC-version-stamped
+	proposals *ttlcache.Cache[[]model.Proposal] // per-token open-PR set; written by the refresher, read on broadcast
+	options   *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
+	metrics   *metrics.Client                   // Prometheus/Thanos for the Performance tab; nil disables it
 	draft     Draft
 	auth      *auth.Authenticator // nil leaves the API open (dev)
 	stream    StreamHandler
@@ -141,9 +143,10 @@ type Server struct {
 type Deps struct {
 	ClusterFactory *cluster.Factory
 	State          *clusterstate.State
-	Drift          *argo.Snapshot    // SA-owned drift snapshot (watch-fed); nil when Argo disabled
-	Desched        *desched.Snapshot // SA-owned KubeDescheduler snapshot; nil disables the DRS live plane
-	Bus            *eventbus.Bus     // change-version source for version-stamped caches
+	Drift          *argo.Snapshot     // SA-owned drift snapshot (watch-fed); nil when Argo disabled
+	Desched        *desched.Snapshot  // SA-owned KubeDescheduler snapshot; nil disables the DRS live plane
+	Netstate       *netstate.Snapshot // SA-owned networking catalog snapshot (watch-fed)
+	Bus            *eventbus.Bus      // change-version source for version-stamped caches
 	Resolver       *project.Resolver
 	Repos          *git.RepoSet
 	Metrics        *metrics.Client // Prometheus/Thanos query client; nil disables the Performance tab
@@ -159,6 +162,7 @@ func NewServer(d Deps) *Server {
 		state:     d.State,
 		drift:     d.Drift,
 		desched:   d.Desched,
+		netstate:  d.Netstate,
 		bus:       d.Bus,
 		resolver:  d.Resolver,
 		repos:     d.Repos,
@@ -166,7 +170,6 @@ func NewServer(d Deps) *Server {
 		ssar:      ttlcache.New[ssarVerdict](visibleTTL),
 		proposals: ttlcache.New[[]model.Proposal](proposalsCacheTTL),
 		options:   ttlcache.New[model.Options](optionsTTL),
-		networks:  ttlcache.New[model.NetworkInventory](optionsTTL),
 		metrics:   d.Metrics,
 		draft:     d.Draft,
 		auth:      d.Auth,

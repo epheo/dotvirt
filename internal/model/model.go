@@ -149,11 +149,11 @@ type Inventory struct {
 	Projects  []Project  `json:"projects"`
 	Warnings  []string   `json:"warnings,omitempty"`
 	Proposals []Proposal `json:"proposals,omitempty"`
-	// NetworksVersion is a monotonic watermark that moves whenever GitOps state or a
-	// repo head moves — the two events that change what networks are declared and
-	// applied. The network catalog is fetched out-of-band (GET /api/networks, not on
-	// this frame), so the frontend re-pulls it when this bumps: a merged segment PR
-	// then appears live instead of only on reload.
+	// NetworksVersion is a monotonic watermark that moves when a port group changes
+	// (NetworkChanged) or a segment's sync/health changes (DriftChanged). The network
+	// catalog is fetched out-of-band (GET /api/networks, not on this frame), so the
+	// frontend re-pulls it when this bumps: a merged segment PR — and its sync badge —
+	// then appear live instead of only on reload.
 	NetworksVersion uint64 `json:"networksVersion,omitempty"`
 }
 

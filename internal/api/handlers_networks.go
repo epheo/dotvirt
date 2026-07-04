@@ -3,9 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
-	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 )
@@ -284,27 +282,10 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The full SA catalog is identical for everyone; cache it to skip the cluster LISTs
-	// per request. Per-tenant scoping (and per-object drift) happen below, off the
-	// cached copy. The cache key carries the GitOps/git watermark: a segment applied
-	// (DriftChanged) or a repo head moving (GitChanged) is an automatic cache miss, so a
-	// merged network PR is picked up at once instead of served up to a TTL stale. Old
-	// keys age out on their own TTL.
-	key := "all@" + strconv.FormatUint(s.bus.Version(eventbus.DriftChanged, eventbus.GitChanged), 10)
-	full, ok := s.networks.Get(key)
-	if !ok {
-		sa, err := s.clusterF.SA()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusServiceUnavailable)
-			return
-		}
-		full, err = sa.NetworkCatalog(r.Context())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		s.networks.Put(key, full)
-	}
+	// The full catalog is a lock-free scan of the SA-maintained netstate snapshot
+	// (watch-fed, identical for everyone) — no per-request cluster LIST. Per-tenant
+	// scoping and per-object drift happen below, off this copy.
+	full := s.netstate.Catalog()
 
 	visible, err := s.visibleFor(r.Context(), id, c)
 	if err != nil {
