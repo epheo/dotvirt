@@ -284,8 +284,12 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 
 	// The full catalog is a lock-free scan of the SA-maintained netstate snapshot
 	// (watch-fed, identical for everyone) — no per-request cluster LIST. Per-tenant
-	// scoping and per-object drift happen below, off this copy.
-	full := s.netstate.Catalog()
+	// scoping and per-object drift happen below, off this copy. Nil netstate (a
+	// stripped-down wiring) degrades to an empty catalog, per the Deps contract.
+	var full model.NetworkInventory
+	if s.netstate != nil {
+		full = s.netstate.Catalog()
+	}
 
 	visible, err := s.visibleFor(r.Context(), id, c)
 	if err != nil {

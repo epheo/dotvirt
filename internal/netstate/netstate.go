@@ -44,6 +44,12 @@ type Snapshot struct {
 	udn, cudn, nad, nns, nncp cache.Indexer
 	nmstatePresent            atomic.Bool // the NNS CRD is served (nmstate installed)
 
+	// One health flag per reflector (reflect.TrackHealth): false while that watch
+	// errors. Healthy ANDs them, so one broken watch can't be masked by another
+	// re-establishing. A CRD still absent (never discovered) stays true — absence is
+	// a feature state, not staleness.
+	healthy [5]atomic.Bool
+
 	nodesMu sync.RWMutex
 	nodes   []cluster.NodeInfo
 }
@@ -52,10 +58,26 @@ type Snapshot struct {
 // tests (Catalog reads the stores directly; only the change signal is suppressed).
 func New(sa *cluster.Client, bus *eventbus.Bus) *Snapshot {
 	idx := func() cache.Indexer { return cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{}) }
-	return &Snapshot{
+	s := &Snapshot{
 		sa: sa, bus: bus,
 		udn: idx(), cudn: idx(), nad: idx(), nns: idx(), nncp: idx(),
 	}
+	for i := range s.healthy {
+		s.healthy[i].Store(true) // optimistic until a list/watch actually errors
+	}
+	return s
+}
+
+// Healthy reports whether every started networking watch is currently established.
+// The catalog keeps serving its last-good stores while unhealthy; the inventory
+// surfaces a "may be stale" warning so a sustained outage isn't silent.
+func (s *Snapshot) Healthy() bool {
+	for i := range s.healthy {
+		if !s.healthy[i].Load() {
+			return false
+		}
+	}
+	return true
 }
 
 // discoveryInterval paces the API probe while a CRD is absent — one lightweight
@@ -70,11 +92,11 @@ const nodeRefreshInterval = 2 * time.Minute
 // returns immediately; everything stops when ctx is cancelled. Port-group kinds signal
 // NetworkChanged; NNS is watched silently.
 func (s *Snapshot) Run(ctx context.Context) {
-	go s.watch(ctx, gvrUDN, s.udn, true)
-	go s.watch(ctx, gvrCUDN, s.cudn, true)
-	go s.watch(ctx, gvrNAD, s.nad, true)
-	go s.watch(ctx, gvrNNCP, s.nncp, true)
-	go s.watch(ctx, gvrNNS, s.nns, false)
+	go s.watch(ctx, gvrUDN, s.udn, &s.healthy[0], true)
+	go s.watch(ctx, gvrCUDN, s.cudn, &s.healthy[1], true)
+	go s.watch(ctx, gvrNAD, s.nad, &s.healthy[2], true)
+	go s.watch(ctx, gvrNNCP, s.nncp, &s.healthy[3], true)
+	go s.watch(ctx, gvrNNS, s.nns, &s.healthy[4], false)
 	go s.refreshNodes(ctx)
 }
 
@@ -82,7 +104,7 @@ func (s *Snapshot) Run(ctx context.Context) {
 // appears, then owns a watch connection for the rest of the process. signal=true fires
 // NetworkChanged on every store move; the NNS reflector passes false (its churn must
 // not repaint). Serving the NNS CRD flips nmstatePresent, which gates the fabric UI.
-func (s *Snapshot) watch(ctx context.Context, gvr schema.GroupVersionResource, idx cache.Indexer, signal bool) {
+func (s *Snapshot) watch(ctx context.Context, gvr schema.GroupVersionResource, idx cache.Indexer, healthy *atomic.Bool, signal bool) {
 	t := time.NewTicker(discoveryInterval)
 	defer t.Stop()
 	for {
@@ -95,7 +117,8 @@ func (s *Snapshot) watch(ctx context.Context, gvr schema.GroupVersionResource, i
 				onChange = func() { s.bus.Publish(eventbus.NetworkChanged) }
 			}
 			store := reflect.NewStore(idx, onChange, nil)
-			r := cache.NewReflector(s.sa.DynamicListWatch(gvr), &unstructured.Unstructured{}, store, 0)
+			lw := reflect.TrackHealth(s.sa.DynamicListWatch(gvr), healthy)
+			r := cache.NewReflector(lw, &unstructured.Unstructured{}, store, 0)
 			r.Run(ctx.Done()) // blocks until shutdown; owns its own relist/backoff
 			return
 		}

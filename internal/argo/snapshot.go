@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -42,6 +43,11 @@ type Snapshot struct {
 	driftCache    map[string]Drift
 	appSyncCache  map[string]model.ProjectSync
 	driftDirty    atomic.Bool
+	// objGen counts CONTENT changes to the non-VM drift entries (VM drift rides the
+	// inventory frame itself). It feeds the catalog watermark, so an Application
+	// object churning without any drift moving (reconciledAt ticks every reconcile)
+	// doesn't defeat the hub's identical-frame suppression or trigger client refetches.
+	objGen atomic.Uint64
 }
 
 // NewSnapshot builds the Application snapshot over the SA argo client. bus may be
@@ -138,18 +144,76 @@ func (s *Snapshot) ResourceDrift(group, kind, namespace, name string) (Drift, bo
 	return d, ok
 }
 
+// ObjectDriftGen returns the generation of the non-VM drift content — a monotonic
+// counter that moves only when a non-VM object's sync/health/error actually changed,
+// not on every Application object churn. Rebuilds like the other readers, so it's
+// current as of this call.
+func (s *Snapshot) ObjectDriftGen() uint64 {
+	if !s.synced.Load() {
+		return 0
+	}
+	s.driftMu.Lock()
+	defer s.driftMu.Unlock()
+	s.rebuildLocked()
+	return s.objGen.Load()
+}
+
 // rebuildLocked refreshes the memoized maps from a single Application-store scan when
 // the store has moved since the last build (or on first read). Callers hold driftMu.
 // Results are read-only to callers; a rebuild swaps in fresh maps (the extractors
-// allocate anew), never mutating one a caller still holds.
+// allocate anew), never mutating one a caller still holds. The store scan is sorted so
+// every rebuild over the same Applications yields identical maps — an unordered scan
+// would let two apps claiming one repo (or one resource) flap between rebuilds and
+// defeat the hub's identical-frame suppression.
 func (s *Snapshot) rebuildLocked() {
 	if s.resourceCache != nil && !s.driftDirty.Swap(false) {
 		return
 	}
 	objs := s.apps.List()
+	sort.Slice(objs, func(i, j int) bool { return appKey(objs[i]) < appKey(objs[j]) })
+	prev := s.resourceCache
 	s.resourceCache = resourceDriftFromApps(objs)
 	s.driftCache = vmView(s.resourceCache)
 	s.appSyncCache = appSyncFromApps(objs)
+	if !nonVMEqual(prev, s.resourceCache) {
+		s.objGen.Add(1)
+	}
+}
+
+// appKey is an Application's stable sort key for the deterministic rebuild scan.
+func appKey(obj any) string {
+	if u, ok := obj.(*unstructured.Unstructured); ok {
+		return u.GetNamespace() + "/" + u.GetName()
+	}
+	return ""
+}
+
+// nonVMEqual reports whether the non-VM drift entries of two builds match. VM entries
+// are excluded because their changes already repaint the frame (per-VM badges), so only
+// other kinds should advance the catalog watermark.
+func nonVMEqual(a, b map[resKey]Drift) bool {
+	isVM := func(k resKey) bool { return k.group == "kubevirt.io" && k.kind == "VirtualMachine" }
+	count := func(m map[resKey]Drift) int {
+		n := 0
+		for k := range m {
+			if !isVM(k) {
+				n++
+			}
+		}
+		return n
+	}
+	if count(a) != count(b) {
+		return false
+	}
+	for k, d := range a {
+		if isVM(k) {
+			continue
+		}
+		if bd, ok := b[k]; !ok || bd != d {
+			return false
+		}
+	}
+	return true
 }
 
 // AppRef locates the Application managing a VM: enough to read its sync revision and

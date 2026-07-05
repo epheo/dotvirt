@@ -150,10 +150,10 @@ type Inventory struct {
 	Warnings  []string   `json:"warnings,omitempty"`
 	Proposals []Proposal `json:"proposals,omitempty"`
 	// NetworksVersion is a monotonic watermark that moves when a port group changes
-	// (NetworkChanged) or a segment's sync/health changes (DriftChanged). The network
-	// catalog is fetched out-of-band (GET /api/networks, not on this frame), so the
-	// frontend re-pulls it when this bumps: a merged segment PR — and its sync badge —
-	// then appear live instead of only on reload.
+	// (NetworkChanged) or a non-VM object's drift content changes (the argo snapshot's
+	// ObjectDriftGen). The network catalog is fetched out-of-band (GET /api/networks,
+	// not on this frame), so the frontend re-pulls it when this bumps: a merged segment
+	// PR — and its sync badge — then appear live instead of only on reload.
 	NetworksVersion uint64 `json:"networksVersion,omitempty"`
 }
 

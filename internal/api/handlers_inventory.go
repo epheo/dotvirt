@@ -68,6 +68,11 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 			warnings = append(warnings, "sync status is temporarily unavailable")
 		}
 	}
+	// Same staleness contract as drift: the network catalog keeps serving its
+	// last-good stores while a watch errors — warn so that isn't silent.
+	if s.netstate != nil && !s.netstate.Healthy() {
+		warnings = append(warnings, "the network catalog may be stale — a networking watch is failing")
+	}
 	// A configured platform repo whose namespaces never appear in the SA snapshot
 	// means the platform Argo app isn't applying them (repo-creds/auth, sync error)
 	// — distinct from a user legitimately scoped to no project. Surfaced cluster-wide
@@ -86,9 +91,16 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	}
 	inv.Proposals = s.proposalsFor(id, propProjects)
 	// Watermark for the out-of-band network catalog: bumps when a port group moves
-	// (NetworkChanged) or a segment's sync/health moves (DriftChanged), so the client
-	// re-pulls /api/networks — a merged segment, and its badge, show live.
-	inv.NetworksVersion = s.bus.Version(eventbus.NetworkChanged, eventbus.DriftChanged)
+	// (NetworkChanged) or a non-VM object's drift content moves (ObjectDriftGen), so
+	// the client re-pulls /api/networks — a merged segment, and its badge, show live.
+	// The drift term is the CONTENT generation, not the raw DriftChanged version:
+	// Application objects churn on every reconcile (reconciledAt), and a version that
+	// counted that would defeat the hub's identical-frame suppression and refetch the
+	// catalog for nothing.
+	inv.NetworksVersion = s.bus.Version(eventbus.NetworkChanged)
+	if s.drift != nil {
+		inv.NetworksVersion += s.drift.ObjectDriftGen()
+	}
 	return inv, nil
 }
 

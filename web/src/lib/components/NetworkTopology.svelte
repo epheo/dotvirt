@@ -4,6 +4,7 @@
 	import { vmNetworkKeys, POD_NETWORK, NO_NETWORK } from '$lib/lenses';
 	import { segmentType, TERMS } from '$lib/vocab';
 	import PowerDot from './PowerDot.svelte';
+	import StatusDot from './StatusDot.svelte';
 
 	// The Network Topology map — NSX-T's signature screen, built entirely from the
 	// catalog dotvirt already returns: the platform provider edge (Tier-0) → each
@@ -80,6 +81,11 @@
 			<span class="rounded bg-inset-strong px-1.5 py-0.5 text-[10px] text-ink-muted"
 				>{st.nsx} · {st.vsphere}</span
 			>
+			<!-- Plain dot, not the clickable SyncBadge: the card is itself a button, and
+			     nesting another would be invalid; the segment page holds the detail. -->
+			{#if net.sync === 'OutOfSync'}
+				<StatusDot tone="danger" size="xs" title={net.syncError || 'ArgoCD: out of sync'} />
+			{/if}
 			{#if net.vlan}<span class="rounded bg-warn-soft px-1.5 py-0.5 text-[10px] text-warn-ink"
 					>VLAN {net.vlan}</span
 				>{/if}
