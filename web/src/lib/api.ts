@@ -54,17 +54,33 @@ export interface ProjectNamespace {
 	vms: VM[];
 }
 
+// ProjectSync is the project's ArgoCD Application rollup — the sync/health ArgoCD
+// already computes across every object the repo declares (segments, policies,
+// tenancy), not just VMs. operation is the last sync's phase ('Running' = applying,
+// 'Failed'/'Error' = apply failed). Absent when Argo isn't wired or no app tracks it.
+export interface ProjectSync {
+	sync?: SyncStatus;
+	health?: string;
+	operation?: string;
+	syncError?: string;
+	revision?: string;
+}
+
 export interface Project {
 	name: string;
 	repo?: string;
 	namespaces: ProjectNamespace[];
 	error?: string;
+	gitOps?: ProjectSync;
 }
 
 export interface Inventory {
 	projects: Project[];
 	warnings?: string[]; // non-fatal degradations (e.g. live/sync status unavailable)
 	proposals?: Proposal[]; // open PRs across the caller's projects, streamed live
+	// Monotonic watermark that bumps when GitOps state or a repo head moves — the cue
+	// to re-pull the out-of-band /api/networks catalog so a merged segment shows live.
+	networksVersion?: number;
 }
 
 export interface User {
@@ -195,6 +211,11 @@ export interface Network {
 	backing: string; // UserDefinedNetwork | ClusterUserDefinedNetwork | NetworkAttachmentDefinition
 	topology?: string; // raw OVN-K topology, for the detail drawer
 	namespaces?: string[]; // for shared (CUDN) nets: where it's attachable; empty for project nets
+	// ArgoCD per-object drift (same surface VMs carry) — absent when Argo isn't wired
+	// or no Application manages this object.
+	sync?: SyncStatus;
+	health?: string;
+	syncError?: string;
 }
 export interface Uplink {
 	name: string; // physicalNetworkName

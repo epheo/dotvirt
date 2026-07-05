@@ -13,6 +13,7 @@ import (
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // seedRepo makes a bare repo on main holding two VMs in different namespaces.
@@ -119,6 +120,37 @@ func TestBuildFiltersAndEnriches(t *testing.T) {
 	broken := inv.Projects[1]
 	if broken.Error == "" || len(broken.Namespaces) != 0 {
 		t.Errorf("broken project should keep its error and no namespaces: %+v", broken)
+	}
+}
+
+// The per-project GitOps rollup attaches to the project whose repo matches the
+// managing Application, keyed by canonical repoURL — and a project with no matching
+// Application (or when Argo is disabled) keeps GitOps nil, so nothing alarms.
+func TestBuildAttachesProjectGitOps(t *testing.T) {
+	bare := seedRepo(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	repos := git.NewRepoSet(ctx, "", nil, false, nil, time.Hour)
+
+	in := Inputs{
+		Branch: "main",
+		Repos:  repos,
+		Projects: []project.ProjectInfo{
+			{Name: "team-a", Repo: bare, Namespaces: []string{"tenant-a"}},
+			{Name: "team-b", Repo: "https://forge.example/other.git", Namespaces: []string{"tenant-b"}},
+		},
+		ProjectDrift: map[string]model.ProjectSync{
+			forge.NormalizeRepoURL(bare): {Sync: model.SyncOutOfSync, Health: "Degraded", Operation: "Failed", SyncError: "boom"},
+		},
+	}
+	inv := Build(in)
+
+	if g := inv.Projects[0].GitOps; g == nil || g.Sync != model.SyncOutOfSync || g.Health != "Degraded" || g.SyncError != "boom" {
+		t.Errorf("team-a GitOps not attached: %+v", g)
+	}
+	// team-b has no managing Application in the map → GitOps stays nil (no false alarm).
+	if g := inv.Projects[1].GitOps; g != nil {
+		t.Errorf("team-b should have nil GitOps, got %+v", g)
 	}
 }
 

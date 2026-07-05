@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/inventory"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
@@ -55,6 +56,9 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		// so there's no window between a readiness check and the read.
 		if d := s.drift.Drift(); d != nil {
 			in.Drift = d
+			// Same snapshot, same readiness gate: the per-project rollup covers every
+			// object kind the repo declares (segments, policies, tenancy), not just VMs.
+			in.ProjectDrift = s.drift.ProjectDrift()
 			// Synced, but the watch is erroring: the drift shown is the last-good store.
 			// Warn so a permanent ArgoCD outage doesn't masquerade as fresh sync state.
 			if !s.drift.Healthy() {
@@ -63,6 +67,11 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		} else {
 			warnings = append(warnings, "sync status is temporarily unavailable")
 		}
+	}
+	// Same staleness contract as drift: the network catalog keeps serving its
+	// last-good stores while a watch errors — warn so that isn't silent.
+	if s.netstate != nil && !s.netstate.Healthy() {
+		warnings = append(warnings, "the network catalog may be stale — a networking watch is failing")
 	}
 	// A configured platform repo whose namespaces never appear in the SA snapshot
 	// means the platform Argo app isn't applying them (repo-creds/auth, sync error)
@@ -81,6 +90,17 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		propProjects = append(propProjects, project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo})
 	}
 	inv.Proposals = s.proposalsFor(id, propProjects)
+	// Watermark for the out-of-band network catalog: bumps when a port group moves
+	// (NetworkChanged) or a non-VM object's drift content moves (ObjectDriftGen), so
+	// the client re-pulls /api/networks — a merged segment, and its badge, show live.
+	// The drift term is the CONTENT generation, not the raw DriftChanged version:
+	// Application objects churn on every reconcile (reconciledAt), and a version that
+	// counted that would defeat the hub's identical-frame suppression and refetch the
+	// catalog for nothing.
+	inv.NetworksVersion = s.bus.Version(eventbus.NetworkChanged)
+	if s.drift != nil {
+		inv.NetworksVersion += s.drift.ObjectDriftGen()
+	}
 	return inv, nil
 }
 

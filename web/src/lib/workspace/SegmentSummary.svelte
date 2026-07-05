@@ -8,6 +8,7 @@
 	import InfoCard from '$lib/components/InfoCard.svelte';
 	import PowerDot from '$lib/components/PowerDot.svelte';
 	import Row from '$lib/components/Row.svelte';
+	import SyncBadge from '$lib/components/SyncBadge.svelte';
 
 	// The segment object page's Summary: the port group's facts (from the
 	// networking read layer) plus the VMs attached to it.
@@ -40,6 +41,11 @@
 					<Row label="Backing">
 						<span class="text-ink-muted">{pg.backing}</span>
 					</Row>
+					{#if pg.sync}
+						<Row label="Sync">
+							<SyncBadge sync={pg.sync} error={pg.syncError} />
+						</Row>
+					{/if}
 				{/if}
 				<Row label="VMs attached" value={String(vms.length)} />
 			</dl>

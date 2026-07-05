@@ -6,6 +6,7 @@
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { persisted } from '$lib/state/persisted.svelte';
 	import { ui } from '$lib/state/ui.svelte';
+	import ProjectSyncBadge from '$lib/components/ProjectSyncBadge.svelte';
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import TreeRow from '$lib/components/TreeRow.svelte';
 	import TreeVMRow from './TreeVMRow.svelte';
@@ -75,8 +76,14 @@
 					<span class="rounded bg-warn-soft p-0.5 text-warn-ink" title={project.error}
 						><TriangleAlert size={10} /></span
 					>
-				{:else if projectDrift(project)}
-					<StatusDot tone="danger" size="xs" title="A VM is out of sync" />
+				{:else}
+					<!-- The Application rollup spans every kind the repo declares (segments,
+					     policies, tenancy). Fall back to the VM-only drift dot only when Argo
+					     isn't wired, so a project never shows two dots. -->
+					<ProjectSyncBadge gitOps={project.gitOps} compact />
+					{#if !project.gitOps && projectDrift(project)}
+						<StatusDot tone="danger" size="xs" title="A VM is out of sync" />
+					{/if}
 				{/if}
 				{#snippet trailing()}
 					<span class="text-xs text-ink-faint">{vmCount(project)}</span>

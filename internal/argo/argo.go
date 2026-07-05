@@ -20,6 +20,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/restfactory"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // applicationsGVR is the ArgoCD Application resource.
@@ -83,13 +84,20 @@ func (c *Client) ApplicationsListWatch() *cache.ListWatch {
 	}
 }
 
-// driftFromApps builds per-VM drift keyed "namespace/name" from a set of ArgoCD
-// Application objects (the reflector store's *unstructured.Unstructured). VMs absent
-// from the result are managed by no Application (caller reports NotTracked). Only
-// scalar fields are read out of each object, so nothing escapes the store to be
-// mutated. Always returns a non-nil map.
-func driftFromApps(objs []any) map[string]Drift {
-	out := map[string]Drift{}
+// resKey identifies one ArgoCD-managed object across kinds — the key of the general
+// per-object drift map that VMs, segments, and any future rendered object share.
+// namespace is "" for cluster-scoped kinds (a CUDN, an EgressIP).
+type resKey struct{ group, kind, namespace, name string }
+
+// resourceDriftFromApps builds per-object drift keyed by identity from a set of ArgoCD
+// Application objects (the reflector store's *unstructured.Unstructured). Un-scoped:
+// EVERY kind an Application manages is kept, so a non-VM object (a segment, a policy)
+// carries the same sync/health VMs always had — the per-VM view (vmView) and the
+// per-segment enrichment both read this one map. Objects absent from the result are
+// managed by no Application. Only scalar fields are read, so nothing escapes the store
+// to be mutated. Always returns a non-nil map.
+func resourceDriftFromApps(objs []any) map[resKey]Drift {
+	out := map[resKey]Drift{}
 	for _, obj := range objs {
 		app, ok := obj.(*unstructured.Unstructured)
 		if !ok {
@@ -102,14 +110,10 @@ func driftFromApps(objs []any) map[string]Drift {
 				if !ok {
 					continue
 				}
-				if asString(res, "group") != "kubevirt.io" || asString(res, "kind") != "VirtualMachine" {
+				if asString(res, "name") == "" {
 					continue
 				}
-				ns, name := asString(res, "namespace"), asString(res, "name")
-				if name == "" {
-					continue
-				}
-				out[ns+"/"+name] = Drift{
+				out[keyOf(res)] = Drift{
 					Sync:   syncStatus(asString(res, "status")),
 					Health: nestedString(res, "health", "status"),
 				}
@@ -120,12 +124,35 @@ func driftFromApps(objs []any) map[string]Drift {
 	return out
 }
 
-// mergeSyncMessages attaches per-VM apply errors onto the drift map. ArgoCD keeps
+// vmView is the VM slice of the general drift map, re-keyed "namespace/name" — the
+// shape the inventory VM enrichment consumes.
+func vmView(all map[resKey]Drift) map[string]Drift {
+	out := make(map[string]Drift, len(all))
+	for k, d := range all {
+		if k.group == "kubevirt.io" && k.kind == "VirtualMachine" {
+			out[k.namespace+"/"+k.name] = d
+		}
+	}
+	return out
+}
+
+// driftFromApps returns the per-VM drift keyed "namespace/name" — the VM view over the
+// general map. VMs absent from the result are managed by no Application (caller reports
+// NotTracked). Always non-nil.
+func driftFromApps(objs []any) map[string]Drift { return vmView(resourceDriftFromApps(objs)) }
+
+// keyOf reads an object's identity out of an ArgoCD status.resources[] /
+// syncResult.resources[] entry.
+func keyOf(res map[string]any) resKey {
+	return resKey{asString(res, "group"), asString(res, "kind"), asString(res, "namespace"), asString(res, "name")}
+}
+
+// mergeSyncMessages attaches per-object apply errors onto the drift map. ArgoCD keeps
 // the live tree in status.resources[] (sync/health, no error text) but the actual
-// apply failure for each object in status.operationState.syncResult.resources[].
-// We surface the latter so the UI can show *why* a VM is OutOfSync. Synced rows
-// carry a benign "unchanged" message, so only non-Synced ones are kept.
-func mergeSyncMessages(out map[string]Drift, app map[string]any) {
+// apply failure for each object in status.operationState.syncResult.resources[]. We
+// surface the latter so the UI can show *why* an object is OutOfSync. Synced rows carry
+// a benign "unchanged" message, so only non-Synced ones are kept.
+func mergeSyncMessages(out map[resKey]Drift, app map[string]any) {
 	results, found, err := unstructured.NestedSlice(app, "status", "operationState", "syncResult", "resources")
 	if err != nil || !found {
 		return
@@ -135,26 +162,132 @@ func mergeSyncMessages(out map[string]Drift, app map[string]any) {
 		if !ok {
 			continue
 		}
-		if asString(res, "group") != "kubevirt.io" || asString(res, "kind") != "VirtualMachine" {
-			continue
-		}
 		msg := asString(res, "message")
 		if msg == "" || asString(res, "status") == "Synced" {
 			continue
 		}
-		key := asString(res, "namespace") + "/" + asString(res, "name")
-		// Only annotate a VM the live tree (status.resources[]) already reported. A VM
-		// present ONLY here — a failed first apply that never entered the live tree —
-		// must NOT be synthesized with a zero Sync ("") : that empty status crashes the
-		// frontend SyncBadge (it indexes its style table by sync). Such a VM stays
+		// Only annotate an object the live tree (status.resources[]) already reported. An
+		// object present ONLY here — a failed first apply that never entered the live tree
+		// — must NOT be synthesized with a zero Sync (""): that empty status crashes the
+		// frontend SyncBadge (it indexes its style table by sync). Such an object stays
 		// absent so the caller reports NotTracked.
-		d, ok := out[key]
+		d, ok := out[keyOf(res)]
 		if !ok {
 			continue
 		}
 		d.Message = msg
-		out[key] = d
+		out[keyOf(res)] = d
 	}
+}
+
+// appSyncFromApps builds each project's overall sync/health keyed by canonical
+// repoURL, read straight from the managing Application's own rollup
+// (status.sync/health/operationState). Unlike driftFromApps, which keeps only VMs,
+// this rollup is exactly what covers every kind the Application manages — segments,
+// network policies, tenancy — so a merged PR that fails to apply for a non-VM object
+// still surfaces. One repo maps to one Application in dotvirt's model; on the rare
+// collision the more severe status wins, so a rollup never hides a degraded app behind
+// a healthy one. Always returns a non-nil map.
+func appSyncFromApps(objs []any) map[string]model.ProjectSync {
+	out := map[string]model.ProjectSync{}
+	for _, obj := range objs {
+		app, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			continue
+		}
+		repo := appRepo(app.Object)
+		if repo == "" {
+			continue
+		}
+		ps := model.ProjectSync{
+			Sync:      syncStatus(nestedString(app.Object, "status", "sync", "status")),
+			Health:    nestedString(app.Object, "status", "health", "status"),
+			Operation: nestedString(app.Object, "status", "operationState", "phase"),
+			Revision:  shortRev(nestedString(app.Object, "status", "sync", "revision")),
+		}
+		// Surface the apply error only when the last operation didn't succeed — a clean
+		// sync leaves a benign "successfully synced" message that isn't an error.
+		if ps.Operation != "" && ps.Operation != "Succeeded" {
+			ps.SyncError = nestedString(app.Object, "status", "operationState", "message")
+		}
+		if prev, exists := out[repo]; !exists || rollupSeverity(ps) >= rollupSeverity(prev) {
+			out[repo] = ps
+		}
+	}
+	return out
+}
+
+// appRepo is the Application's canonical primary repoURL — spec.source.repoURL, or the
+// first spec.sources[] entry for a multi-source app — the key tying an Application to
+// its dotvirt project (matched against a normalized project.Repo).
+func appRepo(app map[string]any) string {
+	if u := nestedString(app, "spec", "source", "repoURL"); u != "" {
+		return forge.NormalizeRepoURL(u)
+	}
+	sources, found, _ := unstructured.NestedSlice(app, "spec", "sources")
+	if found {
+		for _, raw := range sources {
+			if src, ok := raw.(map[string]any); ok {
+				if u := asString(src, "repoURL"); u != "" {
+					return forge.NormalizeRepoURL(u)
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// rollupSeverity ranks a project's sync state so a collision (two apps, one repo)
+// keeps the worst — and so the frontend can pick the single most-alarming signal.
+func rollupSeverity(ps model.ProjectSync) int {
+	return max(syncSeverity(ps.Sync), healthSeverity(ps.Health), opSeverity(ps.Operation))
+}
+
+func syncSeverity(s model.SyncStatus) int {
+	switch s {
+	case model.SyncOutOfSync:
+		return 3
+	case model.SyncUnknown:
+		return 2
+	case model.SyncSynced:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func healthSeverity(h string) int {
+	switch h {
+	case "Degraded", "Missing":
+		return 3
+	case "Unknown", "Progressing":
+		return 2
+	case "Healthy", "Suspended":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func opSeverity(phase string) int {
+	switch phase {
+	case "Failed", "Error":
+		return 3
+	case "Running", "Terminating":
+		return 2
+	case "Succeeded":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// shortRev abbreviates a git revision for display; short or empty values pass through.
+func shortRev(rev string) string {
+	if len(rev) > 7 {
+		return rev[:7]
+	}
+	return rev
 }
 
 func syncStatus(s string) model.SyncStatus {

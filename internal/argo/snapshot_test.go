@@ -122,3 +122,45 @@ func TestSnapshotDriftMemoizedUntilStoreMoves(t *testing.T) {
 		t.Error("Drift() did not rebuild after the store-move signal")
 	}
 }
+
+// ObjectDriftGen must advance only when a NON-VM object's drift content changes:
+// Application churn with identical drift (reconciledAt ticks) and VM-only drift moves
+// must not bump it — it feeds the catalog watermark, and a false bump would send
+// otherwise-suppressed frames and refetch the catalog for nothing.
+func TestObjectDriftGen(t *testing.T) {
+	s := NewSnapshot(&Client{}, nil)
+	a := app("argocd", "net", []any{
+		vmResource("prod", "vm-a", "Synced", "Healthy"),
+		udnResource("prod", "db-net", "Synced", ""),
+	})
+	_ = s.apps.Add(a)
+	s.synced.Store(true)
+
+	gen := s.ObjectDriftGen()
+
+	// Store churn, same content (the reflector marks dirty on ANY object update).
+	s.driftDirty.Store(true)
+	if got := s.ObjectDriftGen(); got != gen {
+		t.Errorf("gen bumped on contentless churn: %d -> %d", gen, got)
+	}
+
+	// A VM-only drift move: rides the frame itself, must not bump the catalog gen.
+	_ = s.apps.Update(app("argocd", "net", []any{
+		vmResource("prod", "vm-a", "OutOfSync", "Degraded"),
+		udnResource("prod", "db-net", "Synced", ""),
+	}))
+	s.driftDirty.Store(true)
+	if got := s.ObjectDriftGen(); got != gen {
+		t.Errorf("gen bumped on a VM-only drift change: %d -> %d", gen, got)
+	}
+
+	// The segment's drift moves: gen must bump.
+	_ = s.apps.Update(app("argocd", "net", []any{
+		vmResource("prod", "vm-a", "OutOfSync", "Degraded"),
+		udnResource("prod", "db-net", "OutOfSync", "Progressing"),
+	}))
+	s.driftDirty.Store(true)
+	if got := s.ObjectDriftGen(); got != gen+1 {
+		t.Errorf("gen did not bump on a segment drift change: %d -> %d", gen, got)
+	}
+}

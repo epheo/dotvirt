@@ -42,6 +42,9 @@ const (
 	GitChanged
 	// ProposalsChanged: a token's open-PR lane changed (the refresher found a diff).
 	ProposalsChanged
+	// NetworkChanged: a port-group CRD (UDN/CUDN/NAD/NNCP) moved — the network catalog,
+	// fetched out-of-band from the inventory frame, needs re-pulling.
+	NetworkChanged
 
 	// kindCount is the number of kinds — keep it last. Sizes the version array.
 	kindCount

@@ -282,21 +282,13 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The full SA catalog is identical for everyone; cache it to skip the cluster
-	// LISTs per request. Per-tenant scoping happens below, off the cached copy.
-	full, ok := s.networks.Get("all")
-	if !ok {
-		sa, err := s.clusterF.SA()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusServiceUnavailable)
-			return
-		}
-		full, err = sa.NetworkCatalog(r.Context())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		s.networks.Put("all", full)
+	// The full catalog is a lock-free scan of the SA-maintained netstate snapshot
+	// (watch-fed, identical for everyone) — no per-request cluster LIST. Per-tenant
+	// scoping and per-object drift happen below, off this copy. Nil netstate (a
+	// stripped-down wiring) degrades to an empty catalog, per the Deps contract.
+	var full model.NetworkInventory
+	if s.netstate != nil {
+		full = s.netstate.Catalog()
 	}
 
 	visible, err := s.visibleFor(r.Context(), id, c)
@@ -311,6 +303,9 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		PhysicalAdapters: []model.PhysicalAdapter{},
 		NMStatePresent:   full.NMStatePresent,
 	}
+	// Per-object drift: attach each segment's own ArgoCD sync/health at serve time
+	// (always fresh, off the cached catalog) — the same surface VMs carry.
+	s.enrichNetworkDrift(out.Networks)
 	// The physical fabric is node-level infrastructure — show it only to callers
 	// who can read nodes (cluster-admins), not every tenant who can attach a NIC.
 	if c.CanReadNodes(r.Context()) {
@@ -357,6 +352,41 @@ func scopeNetworks(nets []model.Network, visible map[string]bool) []model.Networ
 		}
 	}
 	return out
+}
+
+// enrichNetworkDrift attaches each segment's own ArgoCD sync/health/apply-error,
+// looked up from the shared Application snapshot by object identity — the same
+// per-object drift plane VMs use. Mutates the scoped copies in place (never the cached
+// catalog, which scopeNetworks already copied). No-op when Argo isn't wired.
+func (s *Server) enrichNetworkDrift(nets []model.Network) {
+	if s.drift == nil {
+		return
+	}
+	for i := range nets {
+		group, kind := networkGVK(nets[i].Backing)
+		if kind == "" {
+			continue
+		}
+		// UDN/NAD are namespaced; a CUDN is cluster-scoped, so its resource namespace is
+		// empty (Network.Namespace is already "" for shared networks).
+		if d, ok := s.drift.ResourceDrift(group, kind, nets[i].Namespace, nets[i].Name); ok {
+			nets[i].Sync, nets[i].Health, nets[i].SyncError = d.Sync, d.Health, d.Message
+		}
+	}
+}
+
+// networkGVK maps a segment's backing to its ArgoCD (group, kind); empty kind means a
+// backing with no managed object to drift-check.
+func networkGVK(backing string) (group, kind string) {
+	switch backing {
+	case "UserDefinedNetwork":
+		return "k8s.ovn.org", "UserDefinedNetwork"
+	case "ClusterUserDefinedNetwork":
+		return "k8s.ovn.org", "ClusterUserDefinedNetwork"
+	case "NetworkAttachmentDefinition":
+		return "k8s.cni.cncf.io", "NetworkAttachmentDefinition"
+	}
+	return "", ""
 }
 
 // visibleSubset returns the namespaces in nss the caller can see, as a fresh slice

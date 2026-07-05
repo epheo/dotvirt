@@ -4,7 +4,9 @@
 	import type { VM } from '$lib/api';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
 	import { hrefForScope, scopeFromPath } from '$lib/nav';
+	import { networkByRef } from '$lib/networks';
 	import { inventory } from '$lib/state/inventory.svelte';
+	import SyncBadge from '$lib/components/SyncBadge.svelte';
 	import TreeRow from '$lib/components/TreeRow.svelte';
 	import TreeVMRow from './TreeVMRow.svelte';
 
@@ -81,6 +83,10 @@
 				{/snippet}
 				<span class="truncate font-semibold text-ink-soft">{key}</span>
 				{#snippet trailing()}
+					{#if kind === 'network'}
+						{@const net = networkByRef(key, inventory.networks)}
+						{#if net?.sync}<SyncBadge sync={net.sync} error={net.syncError} compact />{/if}
+					{/if}
 					<span class="text-xs text-ink-faint">{vms.length}</span>
 				{/snippet}
 			</TreeRow>

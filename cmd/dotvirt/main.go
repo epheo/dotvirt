@@ -28,6 +28,7 @@ import (
 	"github.com/epheo/dotvirt/internal/export"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/metrics"
+	"github.com/epheo/dotvirt/internal/netstate"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/stream"
 	"github.com/epheo/dotvirt/pkg/forge"
@@ -97,6 +98,13 @@ func run() error {
 	deschedSnapshot := desched.New(saCluster)
 	deschedSnapshot.Run(ctx)
 
+	// Networking read plane: the SA-watched port-group + fabric snapshot behind GET
+	// /api/networks. Reflectors publish NetworkChanged so the catalog refreshes live;
+	// discovery-gated like desched, so a cluster without OVN-K UDN or nmstate degrades
+	// to empty rather than error-looping.
+	netSnapshot := netstate.New(saCluster, bus)
+	netSnapshot.Run(ctx)
+
 	var argoSnapshot *argo.Snapshot
 	var resyncer changeset.Resyncer
 	if cfg.ArgoEnabled {
@@ -137,6 +145,7 @@ func run() error {
 		State:          clusterSnapshot,
 		Drift:          argoSnapshot,
 		Desched:        deschedSnapshot,
+		Netstate:       netSnapshot,
 		Bus:            bus,
 		Resolver:       resolver,
 		Repos:          repos,
@@ -165,6 +174,7 @@ func run() error {
 	inventoryKinds := []eventbus.Kind{
 		eventbus.VMSpecChanged, eventbus.LiveChanged, eventbus.NamespaceChanged,
 		eventbus.RBACChanged, eventbus.DriftChanged, eventbus.GitChanged, eventbus.ProposalsChanged,
+		eventbus.NetworkChanged,
 	}
 	hubWake, _ := bus.Subscribe(inventoryKinds...)
 	hub := stream.NewHub(server.InventoryForIdentity, hubWake, func() uint64 { return bus.Version(inventoryKinds...) })

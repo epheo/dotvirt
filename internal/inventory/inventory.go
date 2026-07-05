@@ -13,6 +13,7 @@ import (
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // Inputs are the facts the build needs. Live and Drift come from the SA-owned
@@ -27,6 +28,10 @@ type Inputs struct {
 
 	Live  map[string]clusterstate.LiveVM
 	Drift map[string]argo.Drift
+	// ProjectDrift is each project's ArgoCD Application rollup keyed by canonical
+	// repoURL. Nil (like Drift) means Argo isn't wired or hasn't synced; non-nil with a
+	// repo absent means no Application manages it (GitOps left nil, no alarm).
+	ProjectDrift map[string]model.ProjectSync
 }
 
 // Build produces the inventory. A project whose repo can't be read (or that has
@@ -42,6 +47,14 @@ func Build(in Inputs) model.Inventory {
 
 func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 	out := model.Project{Name: p.Name, Repo: p.Repo, Error: p.Error, Namespaces: []model.ProjectNamespace{}}
+	// The GitOps rollup is keyed by the Application's repo, independent of whether
+	// dotvirt can read the repo — so it's attached even when the repo read below fails
+	// (that's exactly when a "sync unhealthy" badge matters most).
+	if in.ProjectDrift != nil && p.Repo != "" {
+		if ps, ok := in.ProjectDrift[forge.NormalizeRepoURL(p.Repo)]; ok {
+			out.GitOps = &ps
+		}
+	}
 	if p.Repo == "" {
 		return out // unresolved repo: Error already explains why
 	}

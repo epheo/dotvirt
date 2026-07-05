@@ -120,6 +120,24 @@ type Project struct {
 	Repo       string             `json:"repo,omitempty"`
 	Namespaces []ProjectNamespace `json:"namespaces"`
 	Error      string             `json:"error,omitempty"`
+	// GitOps is the project's ArgoCD Application rollup — the sync/health Argo already
+	// computes across every object the repo declares, so it reflects segments, network
+	// policies and tenancy, not just VMs. Nil when Argo isn't wired or no Application
+	// tracks this repo.
+	GitOps *ProjectSync `json:"gitOps,omitempty"`
+}
+
+// ProjectSync is a project's overall GitOps state, read straight from its managing
+// ArgoCD Application. Operation is the last sync's phase ("Running" = applying,
+// "Failed"/"Error" = apply failed), the cue for a "pending apply" or an alarm that a
+// per-VM view can't give — a merged segment or policy PR that fails to apply shows
+// here even though no VM moved.
+type ProjectSync struct {
+	Sync      SyncStatus `json:"sync,omitempty"`
+	Health    string     `json:"health,omitempty"`    // Healthy | Degraded | Progressing | Missing | …
+	Operation string     `json:"operation,omitempty"` // operationState.phase: Running | Succeeded | Failed | Error
+	SyncError string     `json:"syncError,omitempty"` // operationState.message when the last sync didn't succeed
+	Revision  string     `json:"revision,omitempty"`  // short applied git revision
 }
 
 // Inventory is the full multi-project tree. Warnings carry non-fatal degradations
@@ -131,6 +149,12 @@ type Inventory struct {
 	Projects  []Project  `json:"projects"`
 	Warnings  []string   `json:"warnings,omitempty"`
 	Proposals []Proposal `json:"proposals,omitempty"`
+	// NetworksVersion is a monotonic watermark that moves when a port group changes
+	// (NetworkChanged) or a non-VM object's drift content changes (the argo snapshot's
+	// ObjectDriftGen). The network catalog is fetched out-of-band (GET /api/networks,
+	// not on this frame), so the frontend re-pulls it when this bumps: a merged segment
+	// PR — and its sync badge — then appear live instead of only on reload.
+	NetworksVersion uint64 `json:"networksVersion,omitempty"`
 }
 
 // Change is one human-readable, YAML-free change item (a semantic diff entry).
@@ -558,6 +582,13 @@ type Network struct {
 	// where it generated a NAD (its namespaceSelector's effective result). Empty
 	// for project-scoped networks (those attach only in their own Namespace).
 	Namespaces []string `json:"namespaces,omitempty"`
+
+	// From ArgoCD, when enabled — the same per-object drift VMs carry, so a segment
+	// that failed to apply (or is mid-sync) shows its own badge, not just its project's.
+	// Empty when Argo isn't wired or no Application manages this object.
+	Sync      SyncStatus `json:"sync,omitempty"`
+	Health    string     `json:"health,omitempty"`
+	SyncError string     `json:"syncError,omitempty"`
 }
 
 // Uplink is a physical-network attachment point — the vDS uplink analog: an OVN-K
