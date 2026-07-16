@@ -15,15 +15,21 @@
 		return `${proto}://${location.host}/api/vms/${encodeURIComponent(v.namespace)}/${encodeURIComponent(v.name)}/vnc`;
 	}
 
+	// The live stream hands down a fresh vm object every frame; keying the session
+	// on it would drop and redial the connection each frame, so the connect effect
+	// depends only on these stable primitives.
+	const running = $derived(vm.phase === 'Running');
+	const url = $derived(wsURL(vm));
+
 	$effect(() => {
-		// Re-create the RFB session whenever the VM (or its running state) changes, or
-		// on an explicit reconnect.
+		// Re-create the RFB session when the target or running state changes, or on
+		// an explicit reconnect.
 		reconnectKey;
-		if (!screen || vm.phase !== 'Running') return;
+		if (!screen || !running) return;
 
 		status = 'connecting';
 		detail = '';
-		const rfb = new RFB(screen, wsURL(vm), {});
+		const rfb = new RFB(screen, url, {});
 		rfb.scaleViewport = true;
 		rfb.background = '#0f172a';
 
@@ -41,7 +47,7 @@
 	});
 </script>
 
-{#if vm.phase !== 'Running'}
+{#if !running}
 	<div class="flex h-full items-center justify-center text-sm text-ink-faint">
 		Console is available only while the VM is running (status: {vm.phase || 'stopped'}).
 	</div>
