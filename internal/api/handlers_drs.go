@@ -31,8 +31,8 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.cfg.PlatformRepo != "" && s.draft != nil {
 		ctx := r.Context()
-		view.CanManage = s.canCreateCached(ctx, id, c, "operator.openshift.io", "kubedeschedulers")
-		view.CanPSI = s.canCreateCached(ctx, id, c, "machineconfiguration.openshift.io", "machineconfigs")
+		view.CanManage = s.canCreateCached(ctx, id, c, ssarDescheduler)
+		view.CanPSI = s.canCreateCached(ctx, id, c, ssarMachineCfg)
 		platform := project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}
 		if git, err := s.draft.DRSState(platform); err != nil {
 			view.Warning = "platform repo unavailable — committed DRS state unknown: " + err.Error()
@@ -58,7 +58,7 @@ func (s *Server) handleDRSEnable(w http.ResponseWriter, r *http.Request) {
 		fail(w, invalid(err))
 		return
 	}
-	sc, ok := s.platformScope(w, r, "operator.openshift.io", "kubedeschedulers")
+	sc, ok := s.platformScope(w, r, ssarDescheduler)
 	if !ok {
 		return
 	}
@@ -77,7 +77,7 @@ func (s *Server) handleDRSEnable(w http.ResponseWriter, r *http.Request) {
 // handleDRSDisable stages the removal of the KubeDescheduler CR (the operator
 // install and any PSI MachineConfig stay committed).
 func (s *Server) handleDRSDisable(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.platformScope(w, r, "operator.openshift.io", "kubedeschedulers")
+	sc, ok := s.platformScope(w, r, ssarDescheduler)
 	if !ok {
 		return
 	}
