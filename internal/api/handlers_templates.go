@@ -131,7 +131,7 @@ func (s *Server) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 	var sc scope
 	var ok bool
 	if req.Library == platformProjectName {
-		sc, ok = s.platformScope(w, r, "template.kubevirt.io", "virtualmachinetemplates")
+		sc, ok = s.platformScope(w, r, ssarVMTemplate)
 	} else {
 		sc, ok = s.resolveProject(w, r, byName(req.Library))
 	}
@@ -166,7 +166,7 @@ func (s *Server) handleSaveTemplate(w http.ResponseWriter, r *http.Request) {
 	switch req.Library {
 	case "", sc.proj.Name:
 	case platformProjectName:
-		psc, ok := s.platformScope(w, r, "template.kubevirt.io", "virtualmachinetemplates")
+		psc, ok := s.platformScope(w, r, ssarVMTemplate)
 		if !ok {
 			return
 		}

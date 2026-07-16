@@ -43,7 +43,7 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 		}
 		sc, ok = s.resolveProject(w, r, byNamespace(peek.Namespace))
 	default: // ScopeShared / ScopeVLAN — a cluster-scoped CUDN
-		sc, ok = s.platformScope(w, r, "k8s.ovn.org", "clusteruserdefinednetworks")
+		sc, ok = s.platformScope(w, r, ssarCUDN)
 	}
 	if !ok {
 		return
@@ -60,7 +60,7 @@ func (s *Server) handleCreateUplink(w http.ResponseWriter, r *http.Request) {
 		fail(w, invalid(err))
 		return
 	}
-	sc, ok := s.platformScope(w, r, "nmstate.io", "nodenetworkconfigurationpolicies")
+	sc, ok := s.platformScope(w, r, ssarUplink)
 	if !ok {
 		return
 	}
@@ -84,11 +84,11 @@ func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.R
 		fail(w, invalid(err))
 		return
 	}
-	resource := "adminnetworkpolicies"
+	ref := ssarANP
 	if peek.Baseline {
-		resource = "baselineadminnetworkpolicies"
+		ref = ssarBANP
 	}
-	sc, ok := s.platformScope(w, r, "policy.networking.k8s.io", resource)
+	sc, ok := s.platformScope(w, r, ref)
 	if !ok {
 		return
 	}
@@ -132,7 +132,7 @@ func (s *Server) handleCreateEgressIP(w http.ResponseWriter, r *http.Request) {
 		fail(w, invalid(err))
 		return
 	}
-	sc, ok := s.platformScope(w, r, "k8s.ovn.org", "egressips")
+	sc, ok := s.platformScope(w, r, ssarEgressIP)
 	if !ok {
 		return
 	}
@@ -149,7 +149,7 @@ func (s *Server) handleCreateExternalRoute(w http.ResponseWriter, r *http.Reques
 		fail(w, invalid(err))
 		return
 	}
-	sc, ok := s.platformScope(w, r, "k8s.ovn.org", "adminpolicybasedexternalroutes")
+	sc, ok := s.platformScope(w, r, ssarExtRoute)
 	if !ok {
 		return
 	}
@@ -214,7 +214,7 @@ func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Commit to the platform tier, gated on namespace-create authority.
-	plat, ok := s.platformScope(w, r, "", "namespaces")
+	plat, ok := s.platformScope(w, r, ssarNamespace)
 	if !ok {
 		return
 	}
@@ -245,7 +245,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "a project name is required", http.StatusBadRequest)
 		return
 	}
-	plat, ok := s.platformScope(w, r, "", "namespaces")
+	plat, ok := s.platformScope(w, r, ssarNamespace)
 	if !ok {
 		return
 	}
@@ -271,7 +271,7 @@ func (s *Server) handleAdoptProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	plat, ok := s.platformScope(w, r, "", "namespaces")
+	plat, ok := s.platformScope(w, r, ssarNamespace)
 	if !ok {
 		return
 	}
@@ -323,7 +323,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	s.enrichNetworkDrift(out.Networks)
 	// The physical fabric is node-level infrastructure — show it only to callers
 	// who can read nodes (cluster-admins), not every tenant who can attach a NIC.
-	if c.CanReadNodes(r.Context()) {
+	if s.canReadNodesCached(r.Context(), id, c) {
 		out.Uplinks = full.Uplinks
 		out.PhysicalAdapters = full.PhysicalAdapters
 	}
@@ -336,15 +336,16 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	// gates the platform-draft view. All false when no platform repo is configured.
 	if s.cfg.PlatformRepo != "" {
 		ctx := r.Context()
-		cudn := c.CanCreateClusterResource(ctx, "k8s.ovn.org", "clusteruserdefinednetworks")
+		can := func(ref ssarRef) bool { return s.canCreateCached(ctx, id, c, ref) }
+		cudn := can(ssarCUDN)
 		out.CanManage = cudn
 		out.Caps = model.NetworkCaps{
 			SharedSegment:      cudn,
-			Uplink:             c.CanCreateClusterResource(ctx, "nmstate.io", "nodenetworkconfigurationpolicies"),
-			Namespace:          c.CanCreateClusterResource(ctx, "", "namespaces"),
-			EgressIP:           c.CanCreateClusterResource(ctx, "k8s.ovn.org", "egressips"),
-			ExternalRoute:      c.CanCreateClusterResource(ctx, "k8s.ovn.org", "adminpolicybasedexternalroutes"),
-			AdminNetworkPolicy: c.CanCreateClusterResource(ctx, "policy.networking.k8s.io", "adminnetworkpolicies"),
+			Uplink:             can(ssarUplink),
+			Namespace:          can(ssarNamespace),
+			EgressIP:           can(ssarEgressIP),
+			ExternalRoute:      can(ssarExtRoute),
+			AdminNetworkPolicy: can(ssarANP),
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
