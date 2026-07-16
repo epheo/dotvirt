@@ -6,7 +6,6 @@ import (
 
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
-	"github.com/epheo/dotvirt/internal/vmtemplate"
 )
 
 // Templates are dotvirt's content library: VirtualMachineTemplate manifests
@@ -42,20 +41,11 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, list)
 }
 
-// appendTemplates adds one repo's library to the listing. An unreadable repo
-// degrades to an absent library — the other libraries still list.
+// appendTemplates adds one library to the listing. An unreadable repo degrades
+// to an absent library — the other libraries still list.
 func (s *Server) appendTemplates(list *model.TemplateList, library, repoURL string) {
-	read, _, err := s.repos.Get(repoURL)
-	if err != nil {
-		return
-	}
-	files, err := read.TemplatesOnBranch(s.cfg.BaseBranch)
-	if err != nil {
-		return
-	}
-	for _, f := range files {
-		list.Templates = append(list.Templates, vmtemplate.Parse(f.Path, f.Content, library))
-	}
+	proj := project.ProjectInfo{Name: library, Repo: repoURL}
+	list.Templates = append(list.Templates, s.draft.Templates(proj)...)
 }
 
 // handleDeployTemplate renders a library template and stages the VM into the

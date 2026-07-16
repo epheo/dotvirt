@@ -10,6 +10,7 @@ package changeset
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
@@ -55,7 +56,13 @@ func (c *Coordinator) read(proj project.ProjectInfo) (*git.Repo, error) {
 		return nil, err
 	}
 	read, _, err := c.repos.Get(proj.Repo)
-	return read, err
+	if err != nil {
+		// The raw error can embed the repo URL (credentials included on some
+		// transports); log it, hand the caller only the kind.
+		log.Printf("changeset: project %s repo: %v", proj.Name, err)
+		return nil, fmt.Errorf("%w: project repo unreachable", model.ErrUnavailable)
+	}
+	return read, nil
 }
 
 // requireRepo rejects an action on a project with no usable repo BEFORE any draft
