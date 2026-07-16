@@ -68,38 +68,51 @@ func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, ra
 // + the unstage route are ns/name-shaped, so a sentinel keeps both well-formed.
 const ClusterScopeNS = "cluster"
 
-// StageCreateNetwork records a new Distributed Port Group in (id, proj)'s draft:
-// a namespace-scoped UDN (project scope) or a cluster-scoped CUDN (shared/vlan
-// scope) — for the latter, proj is the platform repo (dotvirt routes cluster-scoped
-// creates there by KIND, not an admin-picked repo). The rendered manifest is staged
-// verbatim (the adopt-create path) so propose commits it and Argo applies it on merge.
-func (c *Coordinator) StageCreateNetwork(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
+// stageRendered is the shared tail of the netgen-backed StageCreateX methods:
+// requireRepo, then one rendered manifest staged verbatim (the adopt-create path)
+// so propose commits it and Argo applies it on merge. requireRepo runs before
+// render so a repoless project fails ErrConflict, never ErrInvalid; any render
+// error (spec decode included) is the caller's input, wrapped as ErrInvalid.
+// render returns the entry minus Kind; the entry's Namespace is the object's own
+// or the ClusterScopeNS sentinel.
+func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, render func() (draft.Entry, error)) (model.DraftView, error) {
 	if err := requireRepo(proj); err != nil {
 		return model.DraftView{}, err
 	}
-	var spec netgen.Spec
-	if err := json.Unmarshal(rawSpec, &spec); err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: invalid network spec: %v", model.ErrInvalid, err)
-	}
-	path, content, err := netgen.Manifest(spec)
+	entry, err := render()
 	if err != nil {
 		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
 	}
-	ns := spec.Namespace
-	if ns == "" {
-		ns = ClusterScopeNS // cluster-scoped CUDN
-	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
-		Kind:       draft.KindCreate,
-		Resource:   draft.ResourceNetwork,
-		Namespace:  ns,
-		Name:       spec.Name,
-		SourceFile: path,
-		Manifest:   string(content),
-	}); err != nil {
+	entry.Kind = draft.KindCreate
+	if err := c.store.Stage(id.Username, proj.Name, entry); err != nil {
 		return model.DraftView{}, err
 	}
 	return c.Get(id, proj)
+}
+
+// StageCreateNetwork records a new Distributed Port Group in (id, proj)'s draft:
+// a namespace-scoped UDN (project scope) or a cluster-scoped CUDN (shared/vlan
+// scope) — for the latter, proj is the platform repo (dotvirt routes cluster-scoped
+// creates there by KIND, not an admin-picked repo).
+func (c *Coordinator) StageCreateNetwork(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
+	return c.stageRendered(id, proj, func() (draft.Entry, error) {
+		var spec netgen.Spec
+		if err := json.Unmarshal(rawSpec, &spec); err != nil {
+			return draft.Entry{}, fmt.Errorf("invalid network spec: %v", err)
+		}
+		path, content, err := netgen.Manifest(spec)
+		ns := spec.Namespace
+		if ns == "" {
+			ns = ClusterScopeNS // cluster-scoped CUDN
+		}
+		return draft.Entry{
+			Resource:   draft.ResourceNetwork,
+			Namespace:  ns,
+			Name:       spec.Name,
+			SourceFile: path,
+			Manifest:   string(content),
+		}, err
+	})
 }
 
 // StageCreateNamespace records a new namespace (with an optional primary "VM
@@ -335,59 +348,41 @@ func siblingRepoURL(ref, name string) string {
 // proj is the platform repo (an uplink is cluster-scoped, so it always routes to the
 // platform tier). Stages under the ClusterScopeNS sentinel.
 func (c *Coordinator) StageCreateUplink(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	if err := requireRepo(proj); err != nil {
-		return model.DraftView{}, err
-	}
-	var spec netgen.UplinkSpec
-	if err := json.Unmarshal(rawSpec, &spec); err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: invalid uplink spec: %v", model.ErrInvalid, err)
-	}
-	path, content, err := netgen.UplinkManifest(spec)
-	if err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
-	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
-		Kind:       draft.KindCreate,
-		Resource:   draft.ResourceUplink,
-		Namespace:  ClusterScopeNS,
-		Name:       spec.Name,
-		SourceFile: path,
-		Manifest:   string(content),
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
+	return c.stageRendered(id, proj, func() (draft.Entry, error) {
+		var spec netgen.UplinkSpec
+		if err := json.Unmarshal(rawSpec, &spec); err != nil {
+			return draft.Entry{}, fmt.Errorf("invalid uplink spec: %v", err)
+		}
+		path, content, err := netgen.UplinkManifest(spec)
+		return draft.Entry{
+			Resource:   draft.ResourceUplink,
+			Namespace:  ClusterScopeNS,
+			Name:       spec.Name,
+			SourceFile: path,
+			Manifest:   string(content),
+		}, err
+	})
 }
 
 // StageCreateEgressFirewall records a new namespace egress firewall (the Tier-1
 // gateway firewall) in (id, proj)'s draft. It is namespace-scoped, so proj is the
 // tenant project owning the namespace (handlers route it via resolveProject, like a
-// project UDN). The object is always named "default" (OVN-K permits one per
-// namespace); the rendered manifest is staged verbatim so propose commits it and
-// Argo applies it on merge.
+// project UDN). The object is always named "default" (OVN-K permits one per namespace).
 func (c *Coordinator) StageCreateEgressFirewall(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	if err := requireRepo(proj); err != nil {
-		return model.DraftView{}, err
-	}
-	var spec netgen.EgressFirewallSpec
-	if err := json.Unmarshal(rawSpec, &spec); err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: invalid egress firewall spec: %v", model.ErrInvalid, err)
-	}
-	path, content, err := netgen.EgressFirewallManifest(spec)
-	if err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
-	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
-		Kind:       draft.KindCreate,
-		Resource:   draft.ResourceEgressFirewall,
-		Namespace:  spec.Namespace,
-		Name:       "default",
-		SourceFile: path,
-		Manifest:   string(content),
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
+	return c.stageRendered(id, proj, func() (draft.Entry, error) {
+		var spec netgen.EgressFirewallSpec
+		if err := json.Unmarshal(rawSpec, &spec); err != nil {
+			return draft.Entry{}, fmt.Errorf("invalid egress firewall spec: %v", err)
+		}
+		path, content, err := netgen.EgressFirewallManifest(spec)
+		return draft.Entry{
+			Resource:   draft.ResourceEgressFirewall,
+			Namespace:  spec.Namespace,
+			Name:       "default",
+			SourceFile: path,
+			Manifest:   string(content),
+		}, err
+	})
 }
 
 // StageCreateEgressIP records a new cluster-scoped EgressIP (the Tier-0 source-NAT
@@ -395,84 +390,60 @@ func (c *Coordinator) StageCreateEgressFirewall(id auth.Identity, proj project.P
 // always routes to the platform tier (handlers gate it on the caller's EgressIP-create
 // authority). Staged under the ClusterScopeNS sentinel.
 func (c *Coordinator) StageCreateEgressIP(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	if err := requireRepo(proj); err != nil {
-		return model.DraftView{}, err
-	}
-	var spec netgen.EgressIPSpec
-	if err := json.Unmarshal(rawSpec, &spec); err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: invalid egress IP spec: %v", model.ErrInvalid, err)
-	}
-	path, content, err := netgen.EgressIPManifest(spec)
-	if err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
-	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
-		Kind:       draft.KindCreate,
-		Resource:   draft.ResourceEgressIP,
-		Namespace:  ClusterScopeNS,
-		Name:       spec.Name,
-		SourceFile: path,
-		Manifest:   string(content),
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
+	return c.stageRendered(id, proj, func() (draft.Entry, error) {
+		var spec netgen.EgressIPSpec
+		if err := json.Unmarshal(rawSpec, &spec); err != nil {
+			return draft.Entry{}, fmt.Errorf("invalid egress IP spec: %v", err)
+		}
+		path, content, err := netgen.EgressIPManifest(spec)
+		return draft.Entry{
+			Resource:   draft.ResourceEgressIP,
+			Namespace:  ClusterScopeNS,
+			Name:       spec.Name,
+			SourceFile: path,
+			Manifest:   string(content),
+		}, err
+	})
 }
 
 // StageCreateExternalRoute records a new cluster-scoped AdminPolicyBasedExternalRoute
 // (the Tier-0 external next-hop route) in (id, proj)'s draft — proj is the platform
 // repo. Staged under the ClusterScopeNS sentinel.
 func (c *Coordinator) StageCreateExternalRoute(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	if err := requireRepo(proj); err != nil {
-		return model.DraftView{}, err
-	}
-	var spec netgen.ExternalRouteSpec
-	if err := json.Unmarshal(rawSpec, &spec); err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: invalid external route spec: %v", model.ErrInvalid, err)
-	}
-	path, content, err := netgen.ExternalRouteManifest(spec)
-	if err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
-	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
-		Kind:       draft.KindCreate,
-		Resource:   draft.ResourceExternalRoute,
-		Namespace:  ClusterScopeNS,
-		Name:       spec.Name,
-		SourceFile: path,
-		Manifest:   string(content),
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
+	return c.stageRendered(id, proj, func() (draft.Entry, error) {
+		var spec netgen.ExternalRouteSpec
+		if err := json.Unmarshal(rawSpec, &spec); err != nil {
+			return draft.Entry{}, fmt.Errorf("invalid external route spec: %v", err)
+		}
+		path, content, err := netgen.ExternalRouteManifest(spec)
+		return draft.Entry{
+			Resource:   draft.ResourceExternalRoute,
+			Namespace:  ClusterScopeNS,
+			Name:       spec.Name,
+			SourceFile: path,
+			Manifest:   string(content),
+		}, err
+	})
 }
 
 // StageCreateNetworkPolicy records a new NetworkPolicy (the east-west Distributed
 // Firewall) in (id, proj)'s draft — namespace-scoped, so proj is the tenant project
-// owning the namespace. Staged verbatim so propose commits it and Argo applies it.
+// owning the namespace.
 func (c *Coordinator) StageCreateNetworkPolicy(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	if err := requireRepo(proj); err != nil {
-		return model.DraftView{}, err
-	}
-	var spec netgen.NetworkPolicySpec
-	if err := json.Unmarshal(rawSpec, &spec); err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: invalid network policy spec: %v", model.ErrInvalid, err)
-	}
-	path, content, err := netgen.NetworkPolicyManifest(spec)
-	if err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
-	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
-		Kind:       draft.KindCreate,
-		Resource:   draft.ResourceNetworkPolicy,
-		Namespace:  spec.Namespace,
-		Name:       spec.Name,
-		SourceFile: path,
-		Manifest:   string(content),
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
+	return c.stageRendered(id, proj, func() (draft.Entry, error) {
+		var spec netgen.NetworkPolicySpec
+		if err := json.Unmarshal(rawSpec, &spec); err != nil {
+			return draft.Entry{}, fmt.Errorf("invalid network policy spec: %v", err)
+		}
+		path, content, err := netgen.NetworkPolicyManifest(spec)
+		return draft.Entry{
+			Resource:   draft.ResourceNetworkPolicy,
+			Namespace:  spec.Namespace,
+			Name:       spec.Name,
+			SourceFile: path,
+			Manifest:   string(content),
+		}, err
+	})
 }
 
 // StageCreateAdminNetworkPolicy records a new cluster-wide admin DFW policy (the
@@ -482,32 +453,24 @@ func (c *Coordinator) StageCreateNetworkPolicy(id auth.Identity, proj project.Pr
 // (handlers gate it on the caller's ANP/BANP-create authority). Staged under the
 // ClusterScopeNS sentinel.
 func (c *Coordinator) StageCreateAdminNetworkPolicy(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	if err := requireRepo(proj); err != nil {
-		return model.DraftView{}, err
-	}
-	var spec netgen.AdminNetworkPolicySpec
-	if err := json.Unmarshal(rawSpec, &spec); err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: invalid admin network policy spec: %v", model.ErrInvalid, err)
-	}
-	path, content, err := netgen.AdminNetworkPolicyManifest(spec)
-	if err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
-	}
-	resource, name := draft.ResourceAdminNetworkPolicy, spec.Name
-	if spec.Baseline {
-		resource, name = draft.ResourceBaselineAdminNetworkPolicy, "default"
-	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
-		Kind:       draft.KindCreate,
-		Resource:   resource,
-		Namespace:  ClusterScopeNS,
-		Name:       name,
-		SourceFile: path,
-		Manifest:   string(content),
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
+	return c.stageRendered(id, proj, func() (draft.Entry, error) {
+		var spec netgen.AdminNetworkPolicySpec
+		if err := json.Unmarshal(rawSpec, &spec); err != nil {
+			return draft.Entry{}, fmt.Errorf("invalid admin network policy spec: %v", err)
+		}
+		path, content, err := netgen.AdminNetworkPolicyManifest(spec)
+		resource, name := draft.ResourceAdminNetworkPolicy, spec.Name
+		if spec.Baseline {
+			resource, name = draft.ResourceBaselineAdminNetworkPolicy, "default"
+		}
+		return draft.Entry{
+			Resource:   resource,
+			Namespace:  ClusterScopeNS,
+			Name:       name,
+			SourceFile: path,
+			Manifest:   string(content),
+		}, err
+	})
 }
 
 // StageDelete records the removal of an existing VM in (id, proj)'s draft. The VM

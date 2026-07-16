@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
+	"github.com/epheo/dotvirt/internal/project"
 )
 
 // The networking create routes resolve their target TIER from the object's SCOPE,
@@ -13,6 +15,63 @@ import (
 // project repo; cluster-scoped objects (CUDN, NNCP uplink, Namespace) go to the
 // platform repo and are SSAR-gated on the caller's authority to create that kind —
 // matching the AppProject boundary that lets only the platform app apply them.
+// The single-scope routes are built by the two factories below and registered in
+// api.go, where each route's authorization rationale lives; only the routes with
+// per-request scope or SSAR switches keep bespoke handlers here.
+
+// stageFunc is a Draft StageCreateX method expression. Passing the receiver per
+// call (platformScope/resolveProject 503 on a nil draft first) keeps a degraded
+// wiring from panicking at route registration.
+type stageFunc func(Draft, auth.Identity, project.ProjectInfo, json.RawMessage) (model.DraftView, error)
+
+// platformCreate builds the handler for a cluster-scoped create: always the
+// platform tier, SSAR-gated on the caller's authority to create ref's kind.
+func (s *Server) platformCreate(ref ssarRef, stage stageFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		raw, err := readAll(r)
+		if err != nil {
+			fail(w, invalid(err))
+			return
+		}
+		sc, ok := s.platformScope(w, r, ref)
+		if !ok {
+			return
+		}
+		view, err := stage(s.draft, sc.id, sc.proj, raw)
+		respond(w, view, err)
+	}
+}
+
+// namespacedCreate builds the handler for a namespace-scoped create: it peeks the
+// spec's namespace and routes to the tenant project owning it (resolveProject is
+// the authorization point — a namespace outside the caller's projects is not
+// found). what names the kind in the missing-namespace error, article included.
+func (s *Server) namespacedCreate(what string, stage stageFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		raw, err := readAll(r)
+		if err != nil {
+			fail(w, invalid(err))
+			return
+		}
+		var peek struct {
+			Namespace string `json:"namespace"`
+		}
+		if err := json.Unmarshal(raw, &peek); err != nil {
+			fail(w, invalid(err))
+			return
+		}
+		if peek.Namespace == "" {
+			http.Error(w, "a namespace is required for "+what, http.StatusBadRequest)
+			return
+		}
+		sc, ok := s.resolveProject(w, r, byNamespace(peek.Namespace))
+		if !ok {
+			return
+		}
+		view, err := stage(s.draft, sc.id, sc.proj, raw)
+		respond(w, view, err)
+	}
+}
 
 // handleCreateNetwork stages a new Distributed Port Group, proposed as a PR (the
 // same owns-nothing path as a VM create). A "project"-scoped Layer2 secondary UDN
@@ -52,22 +111,6 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 	respond(w, view, err)
 }
 
-// handleCreateUplink stages a new Uplink (an nmstate NNCP) — always cluster-scoped,
-// so always the platform tier, gated on the caller's authority to create NNCPs.
-func (s *Server) handleCreateUplink(w http.ResponseWriter, r *http.Request) {
-	raw, err := readAll(r)
-	if err != nil {
-		fail(w, invalid(err))
-		return
-	}
-	sc, ok := s.platformScope(w, r, ssarUplink)
-	if !ok {
-		return
-	}
-	view, err := s.draft.StageCreateUplink(sc.id, sc.proj, raw)
-	respond(w, view, err)
-}
-
 // handleCreateAdminNetworkPolicy stages a cluster-wide admin DFW policy
 // (AdminNetworkPolicy or the baseline default) — always platform-tier and admin-only,
 // gated on the caller's authority to create the matching kind.
@@ -93,96 +136,6 @@ func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.R
 		return
 	}
 	view, err := s.draft.StageCreateAdminNetworkPolicy(sc.id, sc.proj, raw)
-	respond(w, view, err)
-}
-
-// handleCreateNetworkPolicy stages a NetworkPolicy (the east-west Distributed
-// Firewall) — namespace-scoped, so it routes to the tenant project owning the
-// namespace; the tenant's Argo app applies it on merge.
-func (s *Server) handleCreateNetworkPolicy(w http.ResponseWriter, r *http.Request) {
-	raw, err := readAll(r)
-	if err != nil {
-		fail(w, invalid(err))
-		return
-	}
-	var peek struct {
-		Namespace string `json:"namespace"`
-	}
-	if err := json.Unmarshal(raw, &peek); err != nil {
-		fail(w, invalid(err))
-		return
-	}
-	if peek.Namespace == "" {
-		http.Error(w, "a namespace is required for a network policy", http.StatusBadRequest)
-		return
-	}
-	sc, ok := s.resolveProject(w, r, byNamespace(peek.Namespace))
-	if !ok {
-		return
-	}
-	view, err := s.draft.StageCreateNetworkPolicy(sc.id, sc.proj, raw)
-	respond(w, view, err)
-}
-
-// handleCreateEgressIP stages a cluster-scoped EgressIP (the Tier-0 source-NAT pool)
-// — always platform-tier, gated on the caller's authority to create EgressIPs.
-func (s *Server) handleCreateEgressIP(w http.ResponseWriter, r *http.Request) {
-	raw, err := readAll(r)
-	if err != nil {
-		fail(w, invalid(err))
-		return
-	}
-	sc, ok := s.platformScope(w, r, ssarEgressIP)
-	if !ok {
-		return
-	}
-	view, err := s.draft.StageCreateEgressIP(sc.id, sc.proj, raw)
-	respond(w, view, err)
-}
-
-// handleCreateExternalRoute stages a cluster-scoped AdminPolicyBasedExternalRoute (the
-// Tier-0 external next-hop route) — always platform-tier, gated on the caller's
-// authority to create them.
-func (s *Server) handleCreateExternalRoute(w http.ResponseWriter, r *http.Request) {
-	raw, err := readAll(r)
-	if err != nil {
-		fail(w, invalid(err))
-		return
-	}
-	sc, ok := s.platformScope(w, r, ssarExtRoute)
-	if !ok {
-		return
-	}
-	view, err := s.draft.StageCreateExternalRoute(sc.id, sc.proj, raw)
-	respond(w, view, err)
-}
-
-// handleCreateEgressFirewall stages a namespace's egress firewall (the Tier-1
-// gateway firewall) — namespace-scoped, so it routes to the tenant project owning
-// the namespace, the same path as a project-scoped UDN. The tenant's Argo app applies
-// it on merge (its AppProject must permit k8s.ovn.org/EgressFirewall).
-func (s *Server) handleCreateEgressFirewall(w http.ResponseWriter, r *http.Request) {
-	raw, err := readAll(r)
-	if err != nil {
-		fail(w, invalid(err))
-		return
-	}
-	var peek struct {
-		Namespace string `json:"namespace"`
-	}
-	if err := json.Unmarshal(raw, &peek); err != nil {
-		fail(w, invalid(err))
-		return
-	}
-	if peek.Namespace == "" {
-		http.Error(w, "a namespace is required for an egress firewall", http.StatusBadRequest)
-		return
-	}
-	sc, ok := s.resolveProject(w, r, byNamespace(peek.Namespace))
-	if !ok {
-		return
-	}
-	view, err := s.draft.StageCreateEgressFirewall(sc.id, sc.proj, raw)
 	respond(w, view, err)
 }
 
