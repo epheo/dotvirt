@@ -7,28 +7,11 @@ package netgen
 import (
 	"fmt"
 	"net"
-	"regexp"
 
 	"sigs.k8s.io/yaml"
+
+	"github.com/epheo/dotvirt/internal/validate"
 )
-
-// dns1123Label matches a Kubernetes DNS-1123 label — lowercase alphanumerics and
-// '-', not leading/trailing '-'. Every name here becomes both a metadata.name and
-// a repo file-path segment, so validName is the one gate against path traversal
-// ("../x"), separators ("a/b"), and names k8s would reject at apply.
-var dns1123Label = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
-
-func validName(s string) bool {
-	return len(s) > 0 && len(s) <= 63 && dns1123Label.MatchString(s)
-}
-
-// requireName validates a name meant for both metadata and a path segment.
-func requireName(field, s string) error {
-	if !validName(s) {
-		return fmt.Errorf("%s %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", field, s)
-	}
-	return nil
-}
 
 // validCIDR reports whether s parses as a CIDR (e.g. 10.0.0.0/24). Subnet/egress
 // values only ever land in YAML scalars, so this is correctness, not safety: a bad
@@ -94,10 +77,10 @@ func Manifest(s Spec) (path string, content []byte, err error) {
 
 // projectUDN is an internal (Layer2, secondary) namespace-scoped port group.
 func projectUDN(s Spec) (string, []byte, error) {
-	if err := requireName("network name", s.Name); err != nil {
+	if err := validate.RequireDNS1123("network name", s.Name); err != nil {
 		return "", nil, err
 	}
-	if err := requireName("namespace", s.Namespace); err != nil {
+	if err := validate.RequireDNS1123("namespace", s.Namespace); err != nil {
 		return "", nil, err
 	}
 	if err := requireCIDRs(s.Subnets); err != nil {
@@ -128,7 +111,7 @@ func projectUDN(s Spec) (string, []byte, error) {
 // the selected namespaces — like vlanCUDN but a plain L2 segment with no uplink or
 // VLAN. Cluster-scoped, so it lands under the (platform) repo's networks/ dir.
 func sharedCUDN(s Spec) (string, []byte, error) {
-	if err := requireName("network name", s.Name); err != nil {
+	if err := validate.RequireDNS1123("network name", s.Name); err != nil {
 		return "", nil, err
 	}
 	if len(s.Namespaces) == 0 {
@@ -170,7 +153,7 @@ func sharedCUDN(s Spec) (string, []byte, error) {
 // selected namespaces.
 func vlanCUDN(s Spec) (string, []byte, error) {
 	switch {
-	case !validName(s.Name):
+	case !validate.DNS1123Name(s.Name):
 		return "", nil, fmt.Errorf("network name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", s.Name)
 	case s.PhysicalNetwork == "":
 		return "", nil, fmt.Errorf("an uplink (physical network) is required for a VLAN network")
@@ -240,7 +223,7 @@ type PrimaryNet struct {
 // UDN needs the namespace label + an empty namespace, both of which hold because
 // the namespace is created in the same change.
 func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error) {
-	if err := requireName("namespace", s.Name); err != nil {
+	if err := validate.RequireDNS1123("namespace", s.Name); err != nil {
 		return "", nil, err
 	}
 	if s.Project == "" {
@@ -264,7 +247,7 @@ func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error)
 	docs := [][]byte{ns}
 
 	if p := s.VMNetwork; p != nil {
-		if err := requireName("VM Network name", p.Name); err != nil {
+		if err := validate.RequireDNS1123("VM Network name", p.Name); err != nil {
 			return "", nil, err
 		}
 		// A primary UDN must do IPAM: OVN-K rejects a subnet-less primary network
@@ -313,7 +296,7 @@ type RoleBindingSpec struct {
 // given ClusterRole (default "admin" — the built-in namespace-admin role) on the
 // tenant namespace. One subject per owner (kind User).
 func RoleBindingManifest(s RoleBindingSpec) (path string, content []byte, err error) {
-	if err := requireName("namespace", s.Namespace); err != nil {
+	if err := validate.RequireDNS1123("namespace", s.Namespace); err != nil {
 		return "", nil, err
 	}
 	if len(s.Owners) == 0 {
@@ -363,7 +346,7 @@ type UplinkSpec struct {
 
 // UplinkManifest renders the NNCP YAML plus its repo-relative path.
 func UplinkManifest(s UplinkSpec) (path string, content []byte, err error) {
-	if err := requireName("uplink name", s.Name); err != nil {
+	if err := validate.RequireDNS1123("uplink name", s.Name); err != nil {
 		return "", nil, err
 	}
 	if s.NIC == "" {
@@ -437,7 +420,7 @@ type EgressPort struct {
 // path. The object is always named "default" (OVN-K permits one per namespace); the
 // rules render in order, since an EgressFirewall is first-match.
 func EgressFirewallManifest(s EgressFirewallSpec) (path string, content []byte, err error) {
-	if err := requireName("namespace", s.Namespace); err != nil {
+	if err := validate.RequireDNS1123("namespace", s.Namespace); err != nil {
 		return "", nil, err
 	}
 	if len(s.Rules) == 0 {
@@ -502,7 +485,7 @@ type EgressIPSpec struct {
 // EgressIPManifest renders the EgressIP YAML plus its repo-relative path.
 func EgressIPManifest(s EgressIPSpec) (path string, content []byte, err error) {
 	switch {
-	case !validName(s.Name):
+	case !validate.DNS1123Name(s.Name):
 		return "", nil, fmt.Errorf("name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", s.Name)
 	case len(s.EgressIPs) == 0:
 		return "", nil, fmt.Errorf("at least one egress IP is required")
@@ -548,7 +531,7 @@ type ExternalRouteSpec struct {
 // repo-relative path.
 func ExternalRouteManifest(s ExternalRouteSpec) (path string, content []byte, err error) {
 	switch {
-	case !validName(s.Name):
+	case !validate.DNS1123Name(s.Name):
 		return "", nil, fmt.Errorf("name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", s.Name)
 	case len(s.Namespaces) == 0:
 		return "", nil, fmt.Errorf("at least one namespace must be selected")
@@ -614,10 +597,10 @@ type PolicyPort struct {
 
 // NetworkPolicyManifest renders the NetworkPolicy YAML plus its repo-relative path.
 func NetworkPolicyManifest(s NetworkPolicySpec) (path string, content []byte, err error) {
-	if err := requireName("name", s.Name); err != nil {
+	if err := validate.RequireDNS1123("name", s.Name); err != nil {
 		return "", nil, err
 	}
-	if err := requireName("namespace", s.Namespace); err != nil {
+	if err := validate.RequireDNS1123("namespace", s.Namespace); err != nil {
 		return "", nil, err
 	}
 	// An empty podSelector ({}) selects every pod in the namespace — the "applied to
@@ -697,7 +680,7 @@ func AdminNetworkPolicyManifest(s AdminNetworkPolicySpec) (path string, content 
 	name := s.Name
 	if s.Baseline {
 		name = "default" // BANP is a cluster singleton named default
-	} else if !validName(name) {
+	} else if !validate.DNS1123Name(name) {
 		return "", nil, fmt.Errorf("name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", name)
 	} else if s.Priority < 0 || s.Priority > 1000 {
 		return "", nil, fmt.Errorf("priority must be 0..1000")

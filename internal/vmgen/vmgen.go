@@ -8,21 +8,23 @@ import (
 	"strings"
 
 	"sigs.k8s.io/yaml"
+
+	"github.com/epheo/dotvirt/internal/validate"
 )
 
 // Spec is the wizard's input: the choices a user makes for a new VM.
 type Spec struct {
-	Name         string            `json:"name"`
-	Namespace    string            `json:"namespace"`
-	Instancetype string            `json:"instancetype"` // cluster instancetype name (size)
-	Preference   string            `json:"preference"`   // cluster preference name (OS tuning)
-	OSImage      OSImageRef        `json:"osImage"`      // boot DataSource
-	DiskSize     string            `json:"diskSize"`     // root disk size, e.g. "30Gi"
-	StorageClass string            `json:"storageClass"` // root disk class; empty = cluster default
-	Running      bool              `json:"running"`      // start immediately?
-	CloudInit    *CloudInit        `json:"cloudInit,omitempty"`
-	ExtraDisks   []ExtraDisk       `json:"extraDisks,omitempty"`
-	Networks     []NetworkRef      `json:"networks,omitempty"` // secondary NAD-backed networks (UDN/localnet)
+	Name         string       `json:"name"`
+	Namespace    string       `json:"namespace"`
+	Instancetype string       `json:"instancetype"` // cluster instancetype name (size)
+	Preference   string       `json:"preference"`   // cluster preference name (OS tuning)
+	OSImage      OSImageRef   `json:"osImage"`      // boot DataSource
+	DiskSize     string       `json:"diskSize"`     // root disk size, e.g. "30Gi"
+	StorageClass string       `json:"storageClass"` // root disk class; empty = cluster default
+	Running      bool         `json:"running"`      // start immediately?
+	CloudInit    *CloudInit   `json:"cloudInit,omitempty"`
+	ExtraDisks   []ExtraDisk  `json:"extraDisks,omitempty"`
+	Networks     []NetworkRef `json:"networks,omitempty"` // secondary NAD-backed networks (UDN/localnet)
 	// PrimaryNetwork attaches the primary (pod-network) NIC: the masquerade
 	// interface backed by the namespace's primary UDN, or the cluster default pod
 	// network when none exists. nil/true attaches it; false omits it, leaving a VM
@@ -57,7 +59,7 @@ type NetworkRef struct {
 // Manifest builds the VirtualMachine YAML for the spec. It returns the repo path
 // the manifest should live at and its content.
 func Manifest(s Spec) (path string, content []byte, err error) {
-	if err := validate(s); err != nil {
+	if err := validateSpec(s); err != nil {
 		return "", nil, err
 	}
 
@@ -75,12 +77,16 @@ func Manifest(s Spec) (path string, content []byte, err error) {
 	return s.Namespace + "/" + s.Name + ".yaml", out, nil
 }
 
-func validate(s Spec) error {
+func validateSpec(s Spec) error {
+	// Name and namespace become the repo path (ns/name.yaml) as well as metadata,
+	// so they cross the same DNS-1123 gate as every other create path.
+	if err := validate.RequireDNS1123("name", s.Name); err != nil {
+		return err
+	}
+	if err := validate.RequireDNS1123("namespace", s.Namespace); err != nil {
+		return err
+	}
 	switch {
-	case s.Name == "":
-		return fmt.Errorf("name is required")
-	case s.Namespace == "":
-		return fmt.Errorf("namespace is required")
 	case s.Instancetype == "":
 		return fmt.Errorf("instancetype is required")
 	case s.Preference == "":
