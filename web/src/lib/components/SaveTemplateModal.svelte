@@ -2,6 +2,8 @@
 	import { BookCopy } from 'lucide-svelte';
 	import { api, Unauthorized, type VM } from '$lib/api';
 	import { inventory } from '$lib/state/inventory.svelte';
+	import ErrorNote from './ErrorNote.svelte';
+	import FormField from './FormField.svelte';
 	import Modal from './Modal.svelte';
 
 	// Clone to Template: derive a reusable VirtualMachineTemplate from this VM's
@@ -55,40 +57,34 @@
 <Modal title="Clone to Template — {vm.name}" {onclose}>
 	{#snippet icon()}<BookCopy size={16} class="text-ink-muted" />{/snippet}
 	<div class="space-y-3 px-5 py-4 text-sm">
-		<label class="block">
-			<span class="mb-1 block text-xs font-medium text-ink-muted">Template name</span>
+		<FormField
+			label="Template name"
+			error={name && !valid ? 'Lowercase alphanumeric and “-”, max 63 characters.' : ''}
+		>
 			<input
 				bind:value={name}
 				class="w-full rounded border border-line px-2 py-1.5 font-mono text-sm"
 			/>
-			{#if name && !valid}
-				<p class="mt-1 text-xs text-warn-ink">Lowercase alphanumeric and “-”, max 63 characters.</p>
-			{/if}
-		</label>
-		<label class="block">
-			<span class="mb-1 block text-xs font-medium text-ink-muted">Description</span>
+		</FormField>
+		<FormField label="Description">
 			<input
 				bind:value={description}
 				placeholder="What this template provisions"
 				class="w-full rounded border border-line px-2 py-1.5 text-sm"
 			/>
-		</label>
-		<label class="block">
-			<span class="mb-1 block text-xs font-medium text-ink-muted">Library</span>
+		</FormField>
+		<FormField label="Library">
 			<select bind:value={library} class="w-full rounded border border-line px-2 py-1.5 text-sm">
 				<option value="">{project ? `Project library (${project})` : 'Project library'}</option>
 				<option value="platform">Shared library — needs template-curation permission</option>
 			</select>
-		</label>
+		</FormField>
 		<p class="text-xs text-ink-faint">
 			Derived from the VM’s git manifest: the name becomes a generated parameter, disks are
 			re-anchored so every deploy is collision-free. Lands as templates/{name || '<name>'}.yaml when
 			the PR merges.
 		</p>
-		{#if error}
-			<pre
-				class="rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-		{/if}
+		<ErrorNote {error} />
 	</div>
 	{#snippet footer()}
 		<button

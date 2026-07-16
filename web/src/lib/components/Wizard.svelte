@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { Check } from 'lucide-svelte';
+	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 
 	// A vCenter-style wizard scaffold: a left step-rail, one panel at a time, and a
@@ -94,10 +95,7 @@
 		</div>
 	</div>
 
-	{#if error}
-		<pre
-			class="mx-5 mb-1 rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-	{/if}
+	<ErrorNote {error} class="mx-5 mb-1" />
 	{#snippet footer()}
 		{#if footerHint}<span class="text-xs text-ink-faint">{footerHint}</span>{/if}
 		<button

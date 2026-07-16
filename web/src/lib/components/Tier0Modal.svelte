@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api, type EgressIPCreate, type ExternalRouteCreate } from '$lib/api';
 	import { TERMS } from '$lib/vocab';
+	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 
 	let {
@@ -128,10 +129,7 @@
 			{/if}
 			Cluster-scoped — proposed to the platform repository.
 		</p>
-		{#if error}
-			<pre
-				class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-		{/if}
+		<ErrorNote {error} />
 	</div>
 	{#snippet footer()}
 		<span class="text-xs text-ink-faint">Staged into the changeset; open a PR from “Changes”.</span>

@@ -40,6 +40,8 @@
 	import PowerDot from './PowerDot.svelte';
 	import Snapshots from './Snapshots.svelte';
 	import StagedBadge from './StagedBadge.svelte';
+	import StagedDiff from './StagedDiff.svelte';
+	import StatusDot from './StatusDot.svelte';
 	import Row from './Row.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 	import TabBar from './TabBar.svelte';
@@ -416,11 +418,12 @@
 							<Cpu size={13} /> CPU
 						</div>
 						<div class="mt-1 text-lg font-semibold text-ink">
-							{#if stagedChanges.has('CPU')}<span class="text-ink-faint line-through"
-									>{vm.cpuCores ?? '—'} vCPU</span
-								>
-								<span class="text-accent">{stagedChanges.get('CPU')?.to}</span
-								>{:else}{vm.cpuCores ?? '—'}<span class="ml-1 text-sm font-normal text-ink-muted"
+							{#if stagedChanges.has('CPU')}
+								<StagedDiff
+									from={`${vm.cpuCores ?? '—'} vCPU`}
+									to={stagedChanges.get('CPU')?.to ?? ''}
+								/>
+							{:else}{vm.cpuCores ?? '—'}<span class="ml-1 text-sm font-normal text-ink-muted"
 									>vCPU</span
 								>{/if}
 						</div>
@@ -430,11 +433,9 @@
 							<MemoryStick size={13} /> Memory
 						</div>
 						<div class="mt-1 text-lg font-semibold text-ink">
-							{#if stagedChanges.has('Memory')}<span class="text-ink-faint line-through"
-									>{vm.memory ?? '—'}</span
-								>
-								<span class="text-accent">{stagedChanges.get('Memory')?.to}</span
-								>{:else}{vm.memory ?? '—'}{/if}
+							{#if stagedChanges.has('Memory')}
+								<StagedDiff from={vm.memory ?? '—'} to={stagedChanges.get('Memory')?.to ?? ''} />
+							{:else}{vm.memory ?? '—'}{/if}
 						</div>
 						{#if vm.memoryActual && vm.memoryActual !== vm.memory}
 							<div class="text-xs text-ink-faint">{vm.memoryActual} live</div>
@@ -474,12 +475,9 @@
 						<dl class="divide-y divide-line-soft text-[13px]">
 							<Row label="Operating system" value={vm.os ?? ''} />
 							<Row label="Power (desired)">
-								{#if stagedChanges.has('Power')}<span class="text-ink-faint line-through"
-										>{vm.power}</span
-									>
-									<span class="text-accent">→ {stagedChanges.get('Power')?.to}</span>{:else}<span
-										class="text-ink">{vm.power}</span
-									>{/if}
+								{#if stagedChanges.has('Power')}
+									<StagedDiff from={vm.power} to={stagedChanges.get('Power')?.to ?? ''} />
+								{:else}<span class="text-ink">{vm.power}</span>{/if}
 							</Row>
 							<Row label="Status (actual)" value={vm.paused ? 'Paused' : (vm.phase ?? '')} />
 							<Row label="IP addresses">
@@ -608,11 +606,7 @@
 								<tr class={e.type === 'Warning' ? 'bg-warn-soft/40' : ''}>
 									<td class="py-1.5 pr-3">
 										<span class="inline-flex items-center gap-1.5 whitespace-nowrap">
-											<span
-												class="h-1.5 w-1.5 rounded-full {e.type === 'Warning'
-													? 'bg-warn'
-													: 'bg-ink-faint'}"
-											></span>
+											<StatusDot tone={e.type === 'Warning' ? 'warn' : 'neutral'} size="xs" />
 											{e.type}
 										</span>
 									</td>

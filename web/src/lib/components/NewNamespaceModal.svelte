@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api, type NamespaceCreate } from '$lib/api';
+	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 
@@ -113,10 +114,7 @@
 				primary "VM Network" its VMs attach to by default{/if}. Applied by the project's Argo app on
 			merge.
 		</p>
-		{#if error}
-			<pre
-				class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-		{/if}
+		<ErrorNote {error} />
 	</div>
 	{#snippet footer()}
 		<StageFooter

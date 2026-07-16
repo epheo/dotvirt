@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { ProjectSync } from '$lib/api';
 	import { projectSyncView } from '$lib/status';
+	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StatusDot from './StatusDot.svelte';
 	import StatusPill from './StatusPill.svelte';
@@ -57,8 +58,7 @@
 			</dl>
 			{#if gitOps.syncError}
 				<p class="mb-2 text-ink-soft">ArgoCD could not apply this project's manifests:</p>
-				<pre
-					class="max-h-72 overflow-auto rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{gitOps.syncError}</pre>
+				<ErrorNote error={gitOps.syncError} class="max-h-72 overflow-auto" />
 			{:else}
 				<p class="text-ink-soft">
 					Objects in this project's repo differ from the cluster and ArgoCD hasn't finished applying

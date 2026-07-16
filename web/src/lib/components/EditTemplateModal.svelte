@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { BookCopy } from 'lucide-svelte';
 	import { api, Unauthorized, type Template } from '$lib/api';
+	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 
 	// Edit a content-library item: the template is a manifest in the library's
@@ -59,10 +60,7 @@
 			spellcheck="false"
 			class="w-full resize-y rounded border border-line bg-inset px-3 py-2 font-mono text-xs leading-relaxed text-ink"
 		></textarea>
-		{#if error}
-			<pre
-				class="rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-		{/if}
+		<ErrorNote {error} />
 	</div>
 	{#snippet footer()}
 		<button

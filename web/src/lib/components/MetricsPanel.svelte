@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { METRIC_RANGES, Unauthorized, type VMMetrics } from '$lib/api';
 	import { pollWhileVisible } from '$lib/poll';
+	import ErrorNote from './ErrorNote.svelte';
 	import UPlotChart from './UPlotChart.svelte';
 
 	// The one Performance panel — range tiers mirroring vCenter's real-time /
@@ -72,7 +73,7 @@
 	</div>
 
 	{#if error}
-		<p class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</p>
+		<ErrorNote {error} />
 	{:else if empty}
 		<p class="py-8 text-center text-sm text-ink-faint">{emptyText}</p>
 	{:else if metrics}

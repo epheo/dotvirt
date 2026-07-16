@@ -4,6 +4,7 @@
 	import { api, Unauthorized, type Snapshot, type VM } from '$lib/api';
 	import { relativeAge } from '$lib/format';
 	import { pollWhileVisible } from '$lib/poll';
+	import ErrorNote from './ErrorNote.svelte';
 
 	let { vm }: { vm: VM } = $props();
 
@@ -116,10 +117,7 @@
 		{/if}
 	</div>
 
-	{#if error}
-		<pre
-			class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-	{/if}
+	<ErrorNote {error} />
 
 	<!-- Restore needs a stopped VM (KubeVirt rejects a running target), but power
 	     is PR-gated — so spell out the path rather than just greying the button. -->

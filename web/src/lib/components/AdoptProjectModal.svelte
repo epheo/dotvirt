@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '$lib/api';
+	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 
@@ -77,10 +78,7 @@
 				+ an owners admin grant{/if} into the platform repo. After the PR merges, the project's VMs appear
 			as untracked — adopt them with “Adopt N untracked”.
 		</p>
-		{#if error}
-			<pre
-				class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-		{/if}
+		<ErrorNote {error} />
 	</div>
 	{#snippet footer()}
 		<StageFooter label="Attach repo" {submitting} onsubmit={submit} oncancel={onclose} />

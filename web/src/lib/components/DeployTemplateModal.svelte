@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { BookCopy } from 'lucide-svelte';
 	import { api, Unauthorized, type Template } from '$lib/api';
+	import FormField from './FormField.svelte';
 	import Wizard from './Wizard.svelte';
 
 	// Deploy from Template: pick a template + target, fill its parameters (the
@@ -166,8 +167,7 @@
 		</p>
 	{:else}
 		<div class="max-w-md space-y-3">
-			<label class="block">
-				<span class="mb-1 block text-xs font-medium text-ink-muted">Template</span>
+			<FormField label="Template">
 				<select
 					bind:value={pickedKey}
 					class="w-full rounded border border-line px-2 py-1.5 text-sm"
@@ -181,9 +181,8 @@
 					{/each}
 				</select>
 				{#if tpl?.description}<p class="mt-1 text-xs text-ink-faint">{tpl.description}</p>{/if}
-			</label>
-			<label class="block">
-				<span class="mb-1 block text-xs font-medium text-ink-muted">Target namespace</span>
+			</FormField>
+			<FormField label="Target namespace">
 				<select
 					bind:value={namespace}
 					class="w-full rounded border border-line px-2 py-1.5 text-sm"
@@ -192,9 +191,8 @@
 						<option value={ns}>{ns}</option>
 					{/each}
 				</select>
-			</label>
-			<label class="block">
-				<span class="mb-1 block text-xs font-medium text-ink-muted">VM name</span>
+			</FormField>
+			<FormField label="VM name">
 				<input
 					bind:value={name}
 					placeholder={nameExample ? `Auto-generate (e.g. ${nameExample})` : 'Auto-generate'}
@@ -209,7 +207,7 @@
 						<span class="text-warn-ink">Lowercase alphanumeric and “-”, max 63 characters.</span>
 					{/if}
 				</p>
-			</label>
+			</FormField>
 		</div>
 	{/if}
 {/snippet}

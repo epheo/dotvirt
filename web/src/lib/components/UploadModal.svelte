@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Check, Upload } from 'lucide-svelte';
 	import { api, Unauthorized, type Options } from '$lib/api';
+	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 
 	// Image upload (OVF-import analog). dotvirt creates the upload-target
@@ -191,10 +192,7 @@
 					Lowercase letters, digits and dashes only (≤63 chars).
 				</p>
 			{/if}
-			{#if error}
-				<pre
-					class="mt-2 rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-			{/if}
+			<ErrorNote {error} class="mt-2" />
 		{:else}
 			<!-- Progress view. -->
 			<div class="space-y-3 py-2">

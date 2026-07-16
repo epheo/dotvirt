@@ -2,6 +2,7 @@
 	import { ChevronDown, ChevronRight, Folder } from 'lucide-svelte';
 	import { api, type DraftView, type ProposeResult } from '$lib/api';
 	import ChangeList from './ChangeList.svelte';
+	import ErrorNote from './ErrorNote.svelte';
 	import GitOpsStepper from './GitOpsStepper.svelte';
 
 	// One project's staged-changes lane: the items, their diffs, and the propose
@@ -109,10 +110,7 @@
 		<GitOpsStepper stage="staged" />
 	</div>
 
-	{#if error}
-		<pre
-			class="mb-2 rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-	{/if}
+	<ErrorNote {error} class="mb-2" />
 
 	{#each draft.items as item (itemKey(item.namespace, item.name))}
 		{@const k = itemKey(item.namespace, item.name)}

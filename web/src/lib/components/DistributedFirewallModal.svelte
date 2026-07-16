@@ -2,6 +2,7 @@
 	import { Plus, Trash2 } from 'lucide-svelte';
 	import { api, type NetworkPolicyCreate, type PolicyRule, type VM } from '$lib/api';
 	import { TERMS } from '$lib/vocab';
+	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 
 	let {
@@ -190,10 +191,7 @@
 				.group.nsx} default-denies all other ingress to it, so only the sources above may reach it. Staged
 			into the project's repo and applied by its Argo app.
 		</p>
-		{#if error}
-			<pre
-				class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-		{/if}
+		<ErrorNote {error} />
 	</div>
 	{#snippet footer()}
 		<span class="text-xs text-ink-faint">Staged into the changeset; open a PR from “Changes”.</span>
