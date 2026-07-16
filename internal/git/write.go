@@ -273,9 +273,12 @@ func writeWorktreeFile(wt *git.Worktree, f File) error {
 	if err != nil {
 		return fmt.Errorf("create %s: %w", f.Path, err)
 	}
-	defer file.Close()
 	if _, err := file.Write(f.Content); err != nil {
+		_ = file.Close()
 		return fmt.Errorf("write %s: %w", f.Path, err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", f.Path, err)
 	}
 	return nil
 }

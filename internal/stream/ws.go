@@ -99,7 +99,7 @@ func writePump(wsconn *websocket.Conn, c *conn, done <-chan struct{}) {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		wsconn.Close()
+		_ = wsconn.Close()
 	}()
 	for {
 		select {

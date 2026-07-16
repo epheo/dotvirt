@@ -53,13 +53,13 @@ func (p *VNCProxy) Handler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
-	defer ws.Close()
+	defer func() { _ = ws.Close() }()
 
 	// Bridge both directions; when either side ends, tear down both.
 	errc := make(chan error, 2)

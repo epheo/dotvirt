@@ -4,7 +4,7 @@
 # --- Stage 1: build the SPA (adapter-static → /web/build) ---
 # Pinned to the build host's arch (the SPA output is arch-neutral static assets, so there's
 # no point emulating it per target platform).
-FROM --platform=$BUILDPLATFORM docker.io/library/node:22-alpine AS web
+FROM --platform=$BUILDPLATFORM docker.io/library/node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -14,7 +14,7 @@ RUN npm run build
 # --- Stage 2: build the static Go binary ---
 # CGO is disabled, so the Go toolchain cross-compiles for $TARGETARCH on the native build
 # host (no QEMU) — buildx sets TARGETOS/TARGETARCH per target platform.
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26 AS build
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26@sha256:ae5a2316d12f3e78fd99177dad452e6ad4f240af2d71d57b480c3477f250fec6 AS build
 ENV GOTOOLCHAIN=auto CGO_ENABLED=0 GOFLAGS=-buildvcs=false
 ARG TARGETOS TARGETARCH
 WORKDIR /src
@@ -24,7 +24,7 @@ COPY . .
 RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /dotvirt ./cmd/dotvirt
 
 # --- Stage 3: minimal runtime ---
-FROM gcr.io/distroless/static:nonroot
+FROM gcr.io/distroless/static:nonroot@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6
 ARG VERSION=dev
 # OCI + Red Hat/OpenShift image metadata (mirrors the operator image; the
 # name/vendor/version/release/summary/description/maintainer labels + /licenses dir

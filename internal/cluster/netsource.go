@@ -19,11 +19,11 @@ import (
 // netstate reflector over an arbitrary CRD.
 func (c *Client) DynamicListWatch(gvr schema.GroupVersionResource) *cache.ListWatch {
 	return &cache.ListWatch{
-		ListFunc: func(o metav1.ListOptions) (runtime.Object, error) {
-			return c.dyn.Resource(gvr).Namespace(metav1.NamespaceAll).List(context.Background(), o)
+		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
+			return c.dyn.Resource(gvr).Namespace(metav1.NamespaceAll).List(ctx, o)
 		},
-		WatchFunc: func(o metav1.ListOptions) (watch.Interface, error) {
-			return c.dyn.Resource(gvr).Namespace(metav1.NamespaceAll).Watch(context.Background(), o)
+		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
+			return c.dyn.Resource(gvr).Namespace(metav1.NamespaceAll).Watch(ctx, o)
 		},
 	}
 }
