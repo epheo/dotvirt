@@ -38,6 +38,10 @@ type DotvirtReconciler struct {
 	Config   *rest.Config      // for discovery (dependency probe + platform detect)
 	Platform platform.Platform // detected once in SetupWithManager
 	DryRun   bool              // -dry-run: validate via server-side dry-run apply; persist nothing
+
+	// probe is a test seam (not config): deps.Probe needs a live discovery
+	// endpoint, so tests stub it. nil = the real probe.
+	probe func(*rest.Config) (deps.Result, error)
 }
 
 // The operator's OWN least-privilege RBAC (generated into config/rbac/role.yaml). Verbs
@@ -135,7 +139,11 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 // admin may install the prereq operator). OVN-K/NMState/CDI are soft — note them
 // and proceed.
 func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
-	depRes, err := deps.Probe(r.Config)
+	probe := r.probe
+	if probe == nil {
+		probe = deps.Probe
+	}
+	depRes, err := probe(r.Config)
 	if err != nil {
 		logf.FromContext(ctx).Error(err, "dependency probe failed")
 	}
