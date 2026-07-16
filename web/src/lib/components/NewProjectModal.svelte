@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api, type ProjectCreate } from '$lib/api';
+	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 
@@ -131,10 +132,7 @@
 				+ an owners admin grant{/if} into the platform repo. Applied by Argo on merge — open the PR from
 			“Changes”.
 		</p>
-		{#if error}
-			<pre
-				class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-		{/if}
+		<ErrorNote {error} />
 	</div>
 	{#snippet footer()}
 		<StageFooter

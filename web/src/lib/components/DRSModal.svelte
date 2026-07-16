@@ -7,6 +7,7 @@
 		type DRSMode,
 		type DRSView,
 	} from '$lib/api';
+	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 
@@ -186,10 +187,7 @@
 			</label>
 		{/if}
 
-		{#if error}
-			<pre
-				class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-		{/if}
+		<ErrorNote {error} />
 	</div>
 
 	{#snippet footer()}

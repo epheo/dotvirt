@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Plus, Trash2 } from 'lucide-svelte';
 	import { api, type AdminNetworkPolicyCreate, type AdminPolicyRule } from '$lib/api';
+	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 
 	let {
@@ -214,10 +215,7 @@
 				beneath every tenant NetworkPolicy.{:else}An Admin Policy overrides tenant NetworkPolicies —
 				use <strong>Pass</strong> to defer a decision back to them.{/if} Proposed to the platform repository.
 		</p>
-		{#if error}
-			<pre
-				class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-		{/if}
+		<ErrorNote {error} />
 	</div>
 	{#snippet footer()}
 		<span class="text-xs text-ink-faint">Staged into the changeset; open a PR from “Changes”.</span>

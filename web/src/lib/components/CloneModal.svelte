@@ -4,7 +4,10 @@
 	import { api, Unauthorized, type Clone, type VM } from '$lib/api';
 	import { relativeAge } from '$lib/format';
 	import { pollWhileVisible } from '$lib/poll';
+	import ErrorNote from './ErrorNote.svelte';
+	import FormField from './FormField.svelte';
 	import Modal from './Modal.svelte';
+	import StatusDot from './StatusDot.svelte';
 
 	// Clone name-prompt + progress: creating a VirtualMachineClone is imperative
 	// (RBAC-gated, like snapshots), but the resulting target VM is config state
@@ -83,33 +86,30 @@
 			Clones via snapshot + restore (the source may stay running). The new VM exists only in the
 			cluster at first — open it and use <strong>Adopt into git</strong> to propose its manifest.
 		</p>
-		<label for="clone-target-input" class="mb-1 block text-xs text-ink-muted">New VM name:</label>
-		<div class="flex items-center gap-2">
-			<input
-				id="clone-target-input"
-				data-autofocus
-				bind:value={target}
-				class="flex-1 rounded border border-line-strong px-2 py-1.5 font-mono text-sm focus:border-accent/60"
-				placeholder="{vm.name}-clone"
-			/>
-			<button
-				onclick={create}
-				disabled={!valid || busy}
-				class="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent disabled:bg-line-strong"
-			>
-				<Copy size={14} />
-				{busy ? 'Cloning…' : 'Clone'}
-			</button>
-		</div>
-		{#if target && !valid}
-			<p class="mt-1 text-xs text-warn-ink">
-				Lowercase letters, digits and dashes only (≤63 chars), and not the source's own name.
-			</p>
-		{/if}
-		{#if error}
-			<pre
-				class="mt-2 rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-		{/if}
+		<FormField
+			label="New VM name:"
+			error={target && !valid
+				? "Lowercase letters, digits and dashes only (≤63 chars), and not the source's own name."
+				: ''}
+		>
+			<div class="flex items-center gap-2">
+				<input
+					data-autofocus
+					bind:value={target}
+					class="flex-1 rounded border border-line-strong px-2 py-1.5 font-mono text-sm focus:border-accent/60"
+					placeholder="{vm.name}-clone"
+				/>
+				<button
+					onclick={create}
+					disabled={!valid || busy}
+					class="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent disabled:bg-line-strong"
+				>
+					<Copy size={14} />
+					{busy ? 'Cloning…' : 'Clone'}
+				</button>
+			</div>
+		</FormField>
+		<ErrorNote {error} class="mt-2" />
 
 		{#if clones && clones.length}
 			<h3 class="mt-4 mb-1 text-xs font-semibold tracking-wide text-ink-muted uppercase">
@@ -131,15 +131,15 @@
 							<td class="py-1.5 whitespace-nowrap">
 								{#if c.phase === 'Succeeded'}
 									<span class="inline-flex items-center gap-1.5 text-ok-ink">
-										<span class="h-1.5 w-1.5 rounded-full bg-ok"></span> Succeeded
+										<StatusDot tone="ok" size="xs" /> Succeeded
 									</span>
 								{:else if c.phase === 'Failed'}
 									<span class="inline-flex items-center gap-1.5 text-danger-ink">
-										<span class="h-1.5 w-1.5 rounded-full bg-danger"></span> Failed
+										<StatusDot tone="danger" size="xs" /> Failed
 									</span>
 								{:else}
 									<span class="inline-flex items-center gap-1.5 text-warn-ink">
-										<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-warn"></span>
+										<StatusDot tone="warn" size="xs" pulse />
 										{c.phase || 'Starting…'}
 									</span>
 								{/if}

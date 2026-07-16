@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { HardDrive } from 'lucide-svelte';
 	import { api, Unauthorized, type Options, type VM } from '$lib/api';
+	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 
 	// Storage live migration (the Storage vMotion dialog): pick a target class
@@ -115,10 +116,7 @@
 			</tbody>
 		</table>
 
-		{#if error}
-			<pre
-				class="mt-3 rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-		{/if}
+		<ErrorNote {error} class="mt-3" />
 	</div>
 	{#snippet footer()}
 		<button

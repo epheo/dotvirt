@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api, type NetworkCreate, type Uplink } from '$lib/api';
 	import { TERMS, dual } from '$lib/vocab';
+	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 
@@ -230,10 +231,7 @@
 			Looking for a project's default network? That is the primary {dual(TERMS.tier1)} segment — create
 			it with a New Namespace or New Project.
 		</p>
-		{#if error}
-			<pre
-				class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-		{/if}
+		<ErrorNote {error} />
 	</div>
 	{#snippet footer()}
 		<StageFooter

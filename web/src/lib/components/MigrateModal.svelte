@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { MoveRight } from 'lucide-svelte';
 	import { api, Unauthorized, type NodeTarget, type VM } from '$lib/api';
+	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 
 	// Live-migration target picker (the vMotion dialog): Automatic lets the
@@ -111,10 +112,7 @@
 			{/if}
 		</fieldset>
 
-		{#if error}
-			<pre
-				class="mt-3 rounded bg-danger-soft/60 p-2 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-		{/if}
+		<ErrorNote {error} class="mt-3" />
 	</div>
 	{#snippet footer()}
 		<button

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api, type PhysicalAdapter, type UplinkCreate } from '$lib/api';
+	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 
@@ -107,10 +108,7 @@
 			network — it changes node networking, so review the PR carefully. Cluster-scoped — proposed to the
 			platform repository. Requires the NMState operator.
 		</p>
-		{#if error}
-			<pre
-				class="rounded bg-danger-soft/60 p-3 text-xs whitespace-pre-wrap text-danger-ink">{error}</pre>
-		{/if}
+		<ErrorNote {error} />
 	</div>
 	{#snippet footer()}
 		<StageFooter
