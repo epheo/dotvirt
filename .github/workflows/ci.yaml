@@ -90,6 +90,11 @@ jobs:
           make -C operator manifests generate
           git diff --exit-code -- operator/api operator/config/crd operator/config/rbac \
             || { echo "::error::stale generated manifests — run 'make -C operator manifests generate' and commit"; exit 1; }
+      - name: Generated TS model in sync
+        run: |
+          go run "github.com/gzuidhof/tygo@$TYGO_VERSION" generate
+          git diff --exit-code -- web/src/lib/model.gen.ts \
+            || { echo "::error::stale web/src/lib/model.gen.ts — run 'make types' and commit"; exit 1; }
       - name: Validate bundle + catalog
         run: |
           sudo curl -fsSL -o /usr/local/bin/operator-sdk \
