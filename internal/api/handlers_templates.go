@@ -22,12 +22,12 @@ import (
 func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		fail(w, unavailable("cluster access", err))
 		return
 	}
 	projs, err := s.projectsFor(r.Context(), id, c)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		fail(w, unavailable("cluster access", err))
 		return
 	}
 	list := model.TemplateList{Templates: []model.Template{}}
@@ -65,7 +65,7 @@ func (s *Server) appendTemplates(list *model.TemplateList, library, repoURL stri
 func (s *Server) handleDeployTemplate(w http.ResponseWriter, r *http.Request) {
 	raw, err := readAll(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, invalid(err))
 		return
 	}
 	var req model.DeployTemplateRequest
@@ -101,7 +101,7 @@ func (s *Server) libraryFor(w http.ResponseWriter, r *http.Request, sc scope, li
 	}
 	projs, err := s.projectsFor(r.Context(), sc.id, sc.cluster)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		fail(w, unavailable("cluster access", err))
 		return project.ProjectInfo{}, false
 	}
 	for _, p := range projs {
@@ -120,7 +120,7 @@ func (s *Server) libraryFor(w http.ResponseWriter, r *http.Request, sc scope, li
 func (s *Server) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 	raw, err := readAll(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, invalid(err))
 		return
 	}
 	var req model.UpdateTemplateRequest
@@ -150,7 +150,7 @@ func (s *Server) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSaveTemplate(w http.ResponseWriter, r *http.Request) {
 	raw, err := readAll(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, invalid(err))
 		return
 	}
 	var req model.SaveTemplateRequest

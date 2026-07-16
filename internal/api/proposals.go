@@ -190,12 +190,12 @@ func (s *Server) refreshProposals() bool {
 func (s *Server) handleProposals(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		fail(w, unavailable("cluster access", err))
 		return
 	}
 	projects, err := s.projectsFor(r.Context(), id, c)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		fail(w, err)
 		return
 	}
 	out := s.proposalsFor(id, projects)

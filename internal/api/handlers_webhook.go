@@ -26,7 +26,7 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	body, err := readAll(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, invalid(err))
 		return
 	}
 	// Forgejo sends its own header; Gitea-lineage servers send X-Gitea-Signature.

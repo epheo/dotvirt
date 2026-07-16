@@ -21,14 +21,17 @@ import (
 func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 	raw, err := readAll(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, invalid(err))
 		return
 	}
 	var peek struct {
 		Scope     string `json:"scope"`
 		Namespace string `json:"namespace"`
 	}
-	_ = json.Unmarshal(raw, &peek)
+	if err := json.Unmarshal(raw, &peek); err != nil {
+		fail(w, invalid(err))
+		return
+	}
 
 	var sc scope
 	var ok bool
@@ -54,7 +57,7 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateUplink(w http.ResponseWriter, r *http.Request) {
 	raw, err := readAll(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, invalid(err))
 		return
 	}
 	sc, ok := s.platformScope(w, r, "nmstate.io", "nodenetworkconfigurationpolicies")
@@ -71,13 +74,16 @@ func (s *Server) handleCreateUplink(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.Request) {
 	raw, err := readAll(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, invalid(err))
 		return
 	}
 	var peek struct {
 		Baseline bool `json:"baseline"`
 	}
-	_ = json.Unmarshal(raw, &peek)
+	if err := json.Unmarshal(raw, &peek); err != nil {
+		fail(w, invalid(err))
+		return
+	}
 	resource := "adminnetworkpolicies"
 	if peek.Baseline {
 		resource = "baselineadminnetworkpolicies"
@@ -96,13 +102,16 @@ func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.R
 func (s *Server) handleCreateNetworkPolicy(w http.ResponseWriter, r *http.Request) {
 	raw, err := readAll(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, invalid(err))
 		return
 	}
 	var peek struct {
 		Namespace string `json:"namespace"`
 	}
-	_ = json.Unmarshal(raw, &peek)
+	if err := json.Unmarshal(raw, &peek); err != nil {
+		fail(w, invalid(err))
+		return
+	}
 	if peek.Namespace == "" {
 		http.Error(w, "a namespace is required for a network policy", http.StatusBadRequest)
 		return
@@ -120,7 +129,7 @@ func (s *Server) handleCreateNetworkPolicy(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleCreateEgressIP(w http.ResponseWriter, r *http.Request) {
 	raw, err := readAll(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, invalid(err))
 		return
 	}
 	sc, ok := s.platformScope(w, r, "k8s.ovn.org", "egressips")
@@ -137,7 +146,7 @@ func (s *Server) handleCreateEgressIP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateExternalRoute(w http.ResponseWriter, r *http.Request) {
 	raw, err := readAll(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, invalid(err))
 		return
 	}
 	sc, ok := s.platformScope(w, r, "k8s.ovn.org", "adminpolicybasedexternalroutes")
@@ -155,13 +164,16 @@ func (s *Server) handleCreateExternalRoute(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleCreateEgressFirewall(w http.ResponseWriter, r *http.Request) {
 	raw, err := readAll(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, invalid(err))
 		return
 	}
 	var peek struct {
 		Namespace string `json:"namespace"`
 	}
-	_ = json.Unmarshal(raw, &peek)
+	if err := json.Unmarshal(raw, &peek); err != nil {
+		fail(w, invalid(err))
+		return
+	}
 	if peek.Namespace == "" {
 		http.Error(w, "a namespace is required for an egress firewall", http.StatusBadRequest)
 		return
@@ -182,13 +194,16 @@ func (s *Server) handleCreateEgressFirewall(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 	raw, err := readAll(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, invalid(err))
 		return
 	}
 	var peek struct {
 		Project string `json:"project"`
 	}
-	_ = json.Unmarshal(raw, &peek)
+	if err := json.Unmarshal(raw, &peek); err != nil {
+		fail(w, invalid(err))
+		return
+	}
 	if peek.Project == "" {
 		http.Error(w, "the project the namespace joins is required", http.StatusBadRequest)
 		return
@@ -215,7 +230,7 @@ func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	raw, err := readAll(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, invalid(err))
 		return
 	}
 	// Peek the name for an early 400; the Coordinator re-decodes the full spec.
@@ -223,7 +238,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"name"`
 	}
 	if err := json.Unmarshal(raw, &peek); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, invalid(err))
 		return
 	}
 	if peek.Name == "" {
@@ -248,11 +263,11 @@ func (s *Server) handleAdoptProject(w http.ResponseWriter, r *http.Request) {
 		Owners []string `json:"owners,omitempty"`
 	}
 	if raw, err := readAll(r); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, invalid(err))
 		return
 	} else if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &body); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			fail(w, invalid(err))
 			return
 		}
 	}
@@ -278,7 +293,7 @@ func (s *Server) handleAdoptProject(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		fail(w, unavailable("cluster access", err))
 		return
 	}
 
@@ -293,7 +308,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 
 	visible, err := s.visibleFor(r.Context(), id, c)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		fail(w, err)
 		return
 	}
 

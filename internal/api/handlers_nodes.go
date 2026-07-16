@@ -16,7 +16,7 @@ import (
 func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 	_, c, err := s.userCluster(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		fail(w, unavailable("cluster access", err))
 		return
 	}
 	nodes, err := c.ListNodes(r.Context())
@@ -31,7 +31,7 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
 	_, c, err := s.userCluster(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		fail(w, unavailable("cluster access", err))
 		return
 	}
 	info, err := c.NodeInfo(r.Context(), r.PathValue("node"))
@@ -46,7 +46,7 @@ func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleNodeCordon(w http.ResponseWriter, r *http.Request) {
 	_, c, err := s.userCluster(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		fail(w, unavailable("cluster access", err))
 		return
 	}
 	var req struct {

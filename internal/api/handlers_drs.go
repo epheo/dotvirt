@@ -22,7 +22,7 @@ import (
 func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		fail(w, unavailable("cluster access", err))
 		return
 	}
 	var view model.DRSView
@@ -55,7 +55,7 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDRSEnable(w http.ResponseWriter, r *http.Request) {
 	raw, err := readAll(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, invalid(err))
 		return
 	}
 	sc, ok := s.platformScope(w, r, "operator.openshift.io", "kubedeschedulers")
