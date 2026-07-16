@@ -876,6 +876,12 @@ export async function draftsByProject(
 	);
 }
 
+// Reconnect backoff for streamInventory: 0.5s doubling to a 16s cap.
+// retry is the 1-based attempt count since the last successful open.
+export function retryDelay(retry: number): number {
+	return 500 * 2 ** (Math.min(Math.max(retry, 1), 6) - 1);
+}
+
 /**
  * streamInventory subscribes to the caller's live inventory over WebSocket. The
  * session cookie rides the handshake (same-origin), so the server pushes only the
@@ -916,7 +922,7 @@ export function streamInventory(
 		const scheduleReconnect = () => {
 			if (closed) return;
 			retry = Math.min(retry + 1, 6);
-			reconnectTimer = setTimeout(connect, 500 * 2 ** (retry - 1)); // 0.5s..16s backoff
+			reconnectTimer = setTimeout(connect, retryDelay(retry));
 		};
 		ws.onclose = () => {
 			if (closed) return;
