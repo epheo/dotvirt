@@ -63,6 +63,8 @@ jobs:
         working-directory: web
       - run: npm run check
         working-directory: web
+      - run: npm run test:unit
+        working-directory: web
       - run: npm run build
         working-directory: web
 
