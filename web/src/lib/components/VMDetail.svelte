@@ -1,51 +1,29 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import {
-		Activity,
-		ChevronDown,
-		ChevronRight,
-		Cpu,
-		HardDrive,
-		MemoryStick,
-		Pencil,
-		Trash2,
-	} from 'lucide-svelte';
-	import {
-		api,
-		Unauthorized,
-		type Change,
-		type DraftItem,
-		type Network,
-		type VM,
-		type VMEvent,
-	} from '$lib/api';
+	import { ChevronDown, Pencil, Trash2 } from 'lucide-svelte';
+	import { api, Unauthorized, type Change, type DraftItem, type Network, type VM } from '$lib/api';
 	import { manifestURL, type VMAction } from '$lib/actions';
 	import { ui, type DetailAction } from '$lib/state/ui.svelte';
 	import { duration, friendlyError } from '$lib/format';
 	import ActionMenu from './ActionMenu.svelte';
-	import ChangeList from './ChangeList.svelte';
 	import CloneModal from './CloneModal.svelte';
 	import MigrateModal from './MigrateModal.svelte';
 	import StorageMigrateModal from './StorageMigrateModal.svelte';
 	import SaveTemplateModal from './SaveTemplateModal.svelte';
 	import ConfirmDelete from './ConfirmDelete.svelte';
-	import CapacityUsage from './CapacityUsage.svelte';
 	import Console from './Console.svelte';
-	import ConsolePreview from './ConsolePreview.svelte';
 	import EditSettings from './EditSettings.svelte';
-	import InfoCard from './InfoCard.svelte';
 	import MetricsPanel from './MetricsPanel.svelte';
 	import PendingBanner from './PendingBanner.svelte';
 	import Permissions from './Permissions.svelte';
 	import PowerDot from './PowerDot.svelte';
 	import Snapshots from './Snapshots.svelte';
 	import StagedBadge from './StagedBadge.svelte';
-	import StagedDiff from './StagedDiff.svelte';
-	import StatusDot from './StatusDot.svelte';
-	import Row from './Row.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 	import TabBar from './TabBar.svelte';
 	import VMConfigure from './VMConfigure.svelte';
+	import VMEventsTable from './VMEventsTable.svelte';
+	import VMSummary from './VMSummary.svelte';
 
 	let {
 		vm,
@@ -106,28 +84,12 @@
 
 	// Drift detail (running vs main) for the selected VM.
 	let driftChanges = $state<Change[] | null>(null);
-	let showDrift = $state(false);
 	let reconciling = $state(false);
-
-	// Monitor tab: lazily-loaded Kubernetes events for the selected VM.
-	let events = $state<VMEvent[] | null>(null);
-	let eventsLoading = $state(false);
 
 	// Imperative runtime ops (restart/pause/unpause/live-migrate). Results
 	// surface as toasts — identical feedback to the right-click context menu.
 	let actionsOpen = $state(false);
 	let runtimeBusy = $state(false);
-
-	// A paused VMI keeps phase Running, so the label checks the Paused flag too.
-	// Action enablement lives in the registry ($lib/actions), not here.
-	const statusText = $derived(vm ? (vm.paused ? 'Paused' : (vm.phase ?? vm.power)) : '');
-
-	// Staged changes for this VM, keyed by field label (for inline current→future).
-	const stagedChanges = $derived.by(() => {
-		const m = new Map<string, Change>();
-		for (const c of stagedItem?.changes ?? []) m.set(c.field, c);
-		return m;
-	});
 
 	function loadDrift(ns: string, name: string) {
 		api
@@ -135,22 +97,6 @@
 			.then((d) => (driftChanges = d.drift ? d.changes : []))
 			.catch(() => (driftChanges = null)); // a 401 signs out centrally via the api layer
 	}
-
-	function loadEvents(ns: string, name: string) {
-		eventsLoading = true;
-		api
-			.events(ns, name)
-			.then((e) => (events = e))
-			.catch(() => (events = []))
-			.finally(() => (eventsLoading = false));
-	}
-
-	// Lazy-load events the first time the Monitor tab is opened for this VM.
-	$effect(() => {
-		if (vm && tab === 'monitor' && monitorView === 'events' && events === null && !eventsLoading) {
-			loadEvents(vm.namespace, vm.name);
-		}
-	});
 
 	// One handler for every registry action: runtime ops run via the registry's
 	// own run() (with busy/result reporting + the task log), host actions map to
@@ -180,12 +126,30 @@
 			case 'adopt':
 				adopt();
 				break;
+			case 'manifest':
+				// A plain navigation: the route is cookie-auth'd and sets
+				// Content-Disposition, so the browser downloads the YAML.
+				window.open(manifestURL(target), '_blank');
+				break;
+			default:
+				applyAction(a.id);
+		}
+	}
+
+	// Maps a host-level action id onto this view's local UI state — the shared
+	// tail of both entry points: the Actions menu (handleAction) and an outside
+	// intent (context menu on an unselected VM). A new action is added here once.
+	function applyAction(id: string) {
+		switch (id) {
 			case 'edit':
 				openEdit();
 				break;
 			case 'delete':
 				deleting = true;
 				deleteErr = '';
+				break;
+			case 'console':
+				ontab?.('console');
 				break;
 			case 'snapshot':
 				ontab?.('snapshots');
@@ -201,14 +165,6 @@
 				break;
 			case 'migrate-storage':
 				migratingStorage = true;
-				break;
-			case 'console':
-				ontab?.('console');
-				break;
-			case 'manifest':
-				// A plain navigation: the route is cookie-auth'd and sets
-				// Content-Disposition, so the browser downloads the YAML.
-				window.open(manifestURL(target), '_blank');
 				break;
 		}
 	}
@@ -233,9 +189,6 @@
 			migrating = false;
 			migratingStorage = false;
 			driftChanges = null;
-			showDrift = false;
-			events = null;
-			eventsLoading = false;
 			actionsOpen = false;
 			if (vm) loadDrift(vm.namespace, vm.name);
 		});
@@ -248,33 +201,7 @@
 	$effect(() => {
 		const i = intent;
 		if (!i) return;
-		switch (i.id) {
-			case 'edit':
-				openEdit();
-				break;
-			case 'delete':
-				deleting = true;
-				deleteErr = '';
-				break;
-			case 'console':
-				ontab?.('console');
-				break;
-			case 'snapshot':
-				ontab?.('snapshots');
-				break;
-			case 'clone':
-				cloning = true;
-				break;
-			case 'template':
-				templating = true;
-				break;
-			case 'migrate':
-				migrating = true;
-				break;
-			case 'migrate-storage':
-				migratingStorage = true;
-				break;
-		}
+		applyAction(i.id);
 	});
 
 	async function adopt() {
@@ -411,163 +338,15 @@
 
 		<div class="min-h-0 flex-1 overflow-y-auto p-4">
 			{#if tab === 'summary'}
-				<!-- At-a-glance tiles: the vCenter-style capacity summary. -->
-				<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-					<div class="rounded border border-line bg-inset p-3">
-						<div class="flex items-center gap-1.5 text-xs text-ink-muted">
-							<Cpu size={13} /> CPU
-						</div>
-						<div class="mt-1 text-lg font-semibold text-ink">
-							{#if stagedChanges.has('CPU')}
-								<StagedDiff
-									from={`${vm.cpuCores ?? '—'} vCPU`}
-									to={stagedChanges.get('CPU')?.to ?? ''}
-								/>
-							{:else}{vm.cpuCores ?? '—'}<span class="ml-1 text-sm font-normal text-ink-muted"
-									>vCPU</span
-								>{/if}
-						</div>
-					</div>
-					<div class="rounded border border-line bg-inset p-3">
-						<div class="flex items-center gap-1.5 text-xs text-ink-muted">
-							<MemoryStick size={13} /> Memory
-						</div>
-						<div class="mt-1 text-lg font-semibold text-ink">
-							{#if stagedChanges.has('Memory')}
-								<StagedDiff from={vm.memory ?? '—'} to={stagedChanges.get('Memory')?.to ?? ''} />
-							{:else}{vm.memory ?? '—'}{/if}
-						</div>
-						{#if vm.memoryActual && vm.memoryActual !== vm.memory}
-							<div class="text-xs text-ink-faint">{vm.memoryActual} live</div>
-						{/if}
-					</div>
-					<div class="rounded border border-line bg-inset p-3">
-						<div class="flex items-center gap-1.5 text-xs text-ink-muted">
-							<HardDrive size={13} /> Disks
-						</div>
-						<div class="mt-1 text-lg font-semibold text-ink">{vm.disks?.length ?? 0}</div>
-					</div>
-					<div class="rounded border border-line bg-inset p-3">
-						<div class="flex items-center gap-1.5 text-xs text-ink-muted">
-							<Activity size={13} /> Status
-						</div>
-						<div class="mt-1 text-lg font-semibold text-ink">{statusText}</div>
-						{#if duration(vm.startedAt)}<div class="text-xs text-ink-faint">
-								up {duration(vm.startedAt)}
-							</div>{/if}
-					</div>
-				</div>
-
-				<!-- Live usage bars (vCenter "Capacity and Usage") + the console preview
-				     thumbnail (running VMs only). Side by side when there's room, stacked
-				     on narrow; the preview emits no DOM when hidden, so capacity reclaims
-				     the full width. -->
-				<div class="mt-4 flex flex-col gap-4 xl:flex-row xl:items-start">
-					<div class="min-w-0 flex-1">
-						<CapacityUsage {vm} />
-					</div>
-					<ConsolePreview {vm} onopen={() => ontab?.('console')} />
-				</div>
-
-				<div class="mt-4 grid gap-4 md:grid-cols-2">
-					<!-- Guest & runtime: live identity reported by the guest agent. -->
-					<InfoCard title="Guest & runtime">
-						<dl class="divide-y divide-line-soft text-[13px]">
-							<Row label="Operating system" value={vm.os ?? ''} />
-							<Row label="Power (desired)">
-								{#if stagedChanges.has('Power')}
-									<StagedDiff from={vm.power} to={stagedChanges.get('Power')?.to ?? ''} />
-								{:else}<span class="text-ink">{vm.power}</span>{/if}
-							</Row>
-							<Row label="Status (actual)" value={vm.paused ? 'Paused' : (vm.phase ?? '')} />
-							<Row label="IP addresses">
-								<div class="font-mono text-xs text-ink">
-									{#if vm.ips?.length}
-										{#each vm.ips as ip (ip)}<div>{ip}</div>{/each}
-									{:else}{vm.guestIP || '—'}{/if}
-								</div>
-							</Row>
-						</dl>
-					</InfoCard>
-
-					<!-- Configuration & placement: desired config + where it runs. -->
-					<InfoCard title="Configuration & placement">
-						<dl class="divide-y divide-line-soft text-[13px]">
-							<Row label="Instance type" value={vm.instancetype ?? ''} />
-							<Row label="Preference" value={vm.preference ?? ''} />
-							<Row label="Node" value={vm.nodeName ?? ''} />
-							<Row label="Source" value={vm.sourceFile} mono />
-						</dl>
-					</InfoCard>
-				</div>
-
-				{#if !vm.sourceFile}
-					<!-- Cluster-only VM (e.g. a fresh clone target): no manifest on the
-					     base branch, so config stays read-only until adopted. The adopt
-					     stages a CREATE of the running-branch manifest into the PR flow. -->
-					<div class="mt-4 rounded border border-warn-soft bg-warn-soft/60 px-3 py-2">
-						<div class="flex items-center gap-2 text-sm font-medium text-warn-ink">
-							<span class="h-1.5 w-1.5 rounded-full bg-warn"></span>
-							Not in git — this VM exists only in the cluster
-						</div>
-						<p class="mt-1 text-xs text-warn-ink">
-							A clone target (or out-of-band create) has no manifest on the base branch yet: config
-							edits and ArgoCD sync don't apply. Adopting stages its live manifest into
-							<strong>Changes</strong>, to propose as a PR.
-						</p>
-						<div class="mt-2">
-							<button
-								onclick={adopt}
-								disabled={reconciling}
-								title="Stage this VM's live manifest into a PR so git starts tracking it"
-								class="rounded border border-warn/70 bg-panel px-2.5 py-1 text-xs font-medium text-warn-ink hover:bg-warn-soft disabled:opacity-50"
-							>
-								Adopt into git
-							</button>
-						</div>
-					</div>
-				{/if}
-
-				{#if driftChanges && driftChanges.length > 0}
-					<div class="mt-4 rounded border border-warn-soft bg-warn-soft/60">
-						<button
-							onclick={() => (showDrift = !showDrift)}
-							class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-warn-ink"
-						>
-							<span class="h-1.5 w-1.5 rounded-full bg-warn"></span>
-							Drift — cluster differs from git ({driftChanges.length})
-							<span class="ml-auto text-warn-ink"
-								>{#if showDrift}<ChevronDown size={14} />{:else}<ChevronRight
-										size={14}
-									/>{/if}</span
-							>
-						</button>
-						{#if showDrift}
-							<div class="border-t border-warn-soft px-3 py-2">
-								<p class="mb-1 text-xs text-warn-ink">Desired (main) → Actual (running):</p>
-								<ChangeList changes={driftChanges} />
-								<div class="mt-3 flex items-center gap-2">
-									<button
-										onclick={adopt}
-										disabled={reconciling}
-										title="Stage the live state into a PR so git matches the cluster"
-										class="rounded border border-warn/70 bg-panel px-2.5 py-1 text-xs font-medium text-warn-ink hover:bg-warn-soft disabled:opacity-50"
-									>
-										Adopt into PR (running→main)
-									</button>
-									<button
-										onclick={resync}
-										disabled={reconciling}
-										title="Trigger ArgoCD to reconcile the cluster back to git"
-										class="rounded border border-warn/70 bg-panel px-2.5 py-1 text-xs font-medium text-warn-ink hover:bg-warn-soft disabled:opacity-50"
-									>
-										Re-sync from git (main→running)
-									</button>
-								</div>
-							</div>
-						{/if}
-					</div>
-				{/if}
+				<VMSummary
+					{vm}
+					{stagedItem}
+					{driftChanges}
+					{reconciling}
+					onadopt={adopt}
+					onresync={resync}
+					onconsole={() => ontab?.('console')}
+				/>
 			{:else if tab === 'monitor'}
 				<!-- Monitor sub-rail: events + performance, vCenter's time-series home. -->
 				<div class="mb-3 flex gap-1 border-b border-line text-sm">
@@ -586,44 +365,8 @@
 					{#key `${vm.namespace}/${vm.name}`}
 						<MetricsPanel load={(r) => api.metrics(vm.namespace, vm.name, r)} />
 					{/key}
-				{:else if eventsLoading && !events}
-					<div class="py-8 text-center text-sm text-ink-faint">Loading events…</div>
-				{:else if !events || events.length === 0}
-					<div class="py-8 text-center text-sm text-ink-faint">No recent events.</div>
 				{:else}
-					<table class="w-full text-[13px]">
-						<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
-							<tr class="border-b border-line">
-								<th class="py-1.5 pr-3 font-medium">Type</th>
-								<th class="py-1.5 pr-3 font-medium">Reason</th>
-								<th class="py-1.5 pr-3 font-medium">Message</th>
-								<th class="py-1.5 pr-3 font-medium">Object</th>
-								<th class="py-1.5 font-medium">Last seen</th>
-							</tr>
-						</thead>
-						<tbody class="divide-y divide-line-soft">
-							{#each events as e, i (i)}
-								<tr class={e.type === 'Warning' ? 'bg-warn-soft/40' : ''}>
-									<td class="py-1.5 pr-3">
-										<span class="inline-flex items-center gap-1.5 whitespace-nowrap">
-											<StatusDot tone={e.type === 'Warning' ? 'warn' : 'neutral'} size="xs" />
-											{e.type}
-										</span>
-									</td>
-									<td class="py-1.5 pr-3 font-medium text-ink-soft">{e.reason}</td>
-									<td class="py-1.5 pr-3 text-ink-soft">{e.message}</td>
-									<td class="py-1.5 pr-3 whitespace-nowrap text-ink-muted">
-										{e.object === 'VirtualMachineInstance' ? 'VMI' : 'VM'}
-									</td>
-									<td class="py-1.5 whitespace-nowrap text-ink-muted">
-										{duration(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-ink-faint">
-												×{e.count}</span
-											>{/if}
-									</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
+					<VMEventsTable {vm} />
 				{/if}
 			{:else if tab === 'configure'}
 				<VMConfigure {vm} {networks} onedit={openEdit} {onsearchlabel} />

@@ -10,15 +10,14 @@
 	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
 	import BulkActionsBar from '$lib/components/BulkActionsBar.svelte';
 	import ClusterSummary from '$lib/components/ClusterSummary.svelte';
-	import ConfirmDelete from '$lib/components/ConfirmDelete.svelte';
 	import ContainerConfigure from '$lib/components/ContainerConfigure.svelte';
 	import ContainerMonitor from '$lib/components/ContainerMonitor.svelte';
-	import ContextMenu from '$lib/components/ContextMenu.svelte';
-	import MenuItem from '$lib/components/MenuItem.svelte';
 	import PendingBanner from '$lib/components/PendingBanner.svelte';
 	import Permissions from '$lib/components/Permissions.svelte';
 	import TabBar from '$lib/components/TabBar.svelte';
 	import VMTable from '$lib/components/VMTable.svelte';
+	import BulkActionsMenu from './BulkActionsMenu.svelte';
+	import BulkDeleteConfirm from './BulkDeleteConfirm.svelte';
 	import NodeConfigure from './NodeConfigure.svelte';
 	import SegmentSummary from './SegmentSummary.svelte';
 	import StorageClassSummary from './StorageClassSummary.svelte';
@@ -243,61 +242,22 @@
 {/if}
 
 {#if bulkCtx}
-	<ContextMenu x={bulkCtx.x} y={bulkCtx.y} onclose={() => (bulkCtx = null)}>
-		<div class="w-48 rounded border border-line bg-panel py-1 text-xs shadow-lg">
-			<div class="px-3 py-1 text-[10px] tracking-wide text-ink-faint uppercase">
-				{picked.size} VMs selected
-			</div>
-			<MenuItem
-				onclick={() => {
-					bulkCtx = null;
-					bulkPower('On');
-				}}>Power On (staged)</MenuItem
-			>
-			<MenuItem
-				onclick={() => {
-					bulkCtx = null;
-					bulkPower('Off');
-				}}>Power Off (staged)</MenuItem
-			>
-			<div class="my-1 border-t border-line-soft"></div>
-			<MenuItem
-				danger
-				onclick={() => {
-					bulkCtx = null;
-					confirmingBulkDelete = true;
-				}}>Delete {picked.size} VMs…</MenuItem
-			>
-			<div class="my-1 border-t border-line-soft"></div>
-			<MenuItem
-				onclick={() => {
-					bulkCtx = null;
-					picked = new Set();
-				}}>Clear selection</MenuItem
-			>
-		</div>
-	</ContextMenu>
+	<BulkActionsMenu
+		x={bulkCtx.x}
+		y={bulkCtx.y}
+		count={picked.size}
+		onclose={() => (bulkCtx = null)}
+		onpower={bulkPower}
+		ondelete={() => (confirmingBulkDelete = true)}
+		onclear={() => (picked = new Set())}
+	/>
 {/if}
 
 {#if confirmingBulkDelete}
-	<ConfirmDelete
-		title="Delete {pickedVMs.length} VMs"
-		confirmWord="delete"
+	<BulkDeleteConfirm
+		vms={pickedVMs}
 		busy={bulkBusy}
 		onconfirm={bulkDelete}
 		onclose={() => (confirmingBulkDelete = false)}
-	>
-		<p class="mb-3">
-			This stages removal of the following VMs into <strong>Changes</strong>. They are deleted from
-			the cluster only when each project's PR is merged.
-		</p>
-		<ul class="max-h-40 overflow-y-auto rounded border border-line text-xs">
-			{#each pickedVMs as vm (vm.namespace + '/' + vm.name)}
-				<li class="border-b border-line-soft px-2 py-1 last:border-0">
-					<span class="font-medium text-ink">{vm.name}</span>
-					<span class="text-ink-faint">· {vm.namespace}</span>
-				</li>
-			{/each}
-		</ul>
-	</ConfirmDelete>
+	/>
 {/if}
