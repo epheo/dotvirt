@@ -72,6 +72,11 @@ type Draft interface {
 	Resync(ctx context.Context, canUpdateVM func(context.Context, string, string) (bool, error), namespace, name string) (model.ResyncResult, error)
 	OpenProposal(id auth.Identity, proj project.ProjectInfo) (model.Proposal, bool, error)
 	Revert(id auth.Identity, proj project.ProjectInfo, hash string) (model.ProposeResult, error)
+	// Read-only git views: the coordinator owns branch names and source-file
+	// matching, so the transport never reads the repo tree itself.
+	Manifest(proj project.ProjectInfo, namespace, name string) (path string, content []byte, err error)
+	History(proj project.ProjectInfo, limit int) ([]model.Commit, error)
+	Templates(proj project.ProjectInfo) []model.Template
 }
 
 // StreamHandler upgrades a request to a WebSocket that pushes live inventory.

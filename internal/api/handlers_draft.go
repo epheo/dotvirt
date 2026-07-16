@@ -184,38 +184,14 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if sc.proj.Repo == "" {
-		http.Error(w, "project has no repo", http.StatusNotFound)
-		return
-	}
-	read, _, err := s.repos.Get(sc.proj.Repo)
-	if err != nil {
-		fail(w, unavailable("project repo", err))
-		return
-	}
-	vm, found, err := read.FindVMOnBranch(s.cfg.BaseBranch, ns, name)
+	p, content, err := s.draft.Manifest(sc.proj, ns, name)
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	if !found {
-		http.Error(w, "VM is not in git", http.StatusNotFound)
-		return
-	}
-	files, err := read.VMManifests(s.cfg.BaseBranch)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	for _, f := range files {
-		if f.Path == vm.SourceFile {
-			w.Header().Set("Content-Type", "application/yaml")
-			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", path.Base(f.Path)))
-			_, _ = w.Write(f.Content)
-			return
-		}
-	}
-	http.Error(w, "manifest file not found", http.StatusNotFound)
+	w.Header().Set("Content-Type", "application/yaml")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", path.Base(p)))
+	_, _ = w.Write(content)
 }
 
 // handleHistory lists recent commits on the project's base branch — the Changes
@@ -225,16 +201,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if sc.proj.Repo == "" {
-		writeJSON(w, http.StatusOK, []model.Commit{})
-		return
-	}
-	read, _, err := s.repos.Get(sc.proj.Repo)
-	if err != nil {
-		fail(w, unavailable("project repo", err))
-		return
-	}
-	commits, err := read.History(s.cfg.BaseBranch, 25)
+	commits, err := s.draft.History(sc.proj, 25)
 	respond(w, commits, err)
 }
 
