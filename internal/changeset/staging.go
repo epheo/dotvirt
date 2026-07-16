@@ -3,7 +3,6 @@ package changeset
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -11,6 +10,7 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/validate"
 	"github.com/epheo/dotvirt/internal/vmgen"
 )
 
@@ -44,8 +44,13 @@ func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, ra
 	if err := json.Unmarshal(rawSpec, &spec); err != nil {
 		return model.DraftView{}, fmt.Errorf("%w: invalid VM spec: %v", model.ErrInvalid, err)
 	}
-	if spec.Name == "" || spec.Namespace == "" {
-		return model.DraftView{}, fmt.Errorf("%w: name and namespace are required", model.ErrInvalid)
+	// The pair becomes the manifest's repo path (ns/name.yaml); reject traversal
+	// and non-DNS-1123 names at stage time, not at propose.
+	if err := validate.RequireDNS1123("VM name", spec.Name); err != nil {
+		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+	}
+	if err := validate.RequireDNS1123("namespace", spec.Namespace); err != nil {
+		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
 	}
 	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
 		Kind:      draft.KindCreate,
@@ -167,10 +172,10 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	// The name becomes a repo path segment, a Namespace name, a label value, and a
 	// staged manifest path — so it must be a strict DNS-1123 label. This rejects
 	// path-traversal ("../x"), separators ("a/b"), and anything k8s would refuse.
-	if !validName(spec.Name) {
+	if !validate.DNS1123Name(spec.Name) {
 		return model.DraftView{}, fmt.Errorf("%w: project name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, spec.Name)
 	}
-	if !validName(ns) {
+	if !validate.DNS1123Name(ns) {
 		return model.DraftView{}, fmt.Errorf("%w: namespace name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, ns)
 	}
 	// The new tenant repo is a sibling of the platform repo under the same owner.
@@ -243,7 +248,7 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	if target.Repo != "" {
 		return model.DraftView{}, fmt.Errorf("%w: project %q already has a repo (%s)", model.ErrConflict, target.Name, target.Repo)
 	}
-	if !validName(target.Name) {
+	if !validate.DNS1123Name(target.Name) {
 		return model.DraftView{}, fmt.Errorf("%w: project name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, target.Name)
 	}
 	if len(target.Namespaces) == 0 {
@@ -313,17 +318,6 @@ func (c *Coordinator) stageProjectAdoption(username, commitProjName string, targ
 		}
 	}
 	return nil
-}
-
-// dns1123Label matches a single RFC-1123 label: lowercase alphanumeric and '-',
-// starting and ending alphanumeric. Length is checked separately.
-var dns1123Label = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
-
-// validName reports whether s is a safe project/namespace name — a DNS-1123 label.
-// This is the trust boundary for a name that becomes a repo path, a Namespace, a
-// label value, and a git file path, so it rejects traversal and separators.
-func validName(s string) bool {
-	return len(s) > 0 && len(s) <= 63 && dns1123Label.MatchString(s)
 }
 
 // siblingRepoURL derives a repo URL alongside ref under the same owner: it replaces
