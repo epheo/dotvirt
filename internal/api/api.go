@@ -216,11 +216,25 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/options", s.handleOptions)
 	mux.HandleFunc("GET /api/networks", s.handleNetworks)
 	mux.HandleFunc("POST /api/networks", s.handleCreateNetwork)
-	mux.HandleFunc("POST /api/uplinks", s.handleCreateUplink)
-	mux.HandleFunc("POST /api/egressfirewalls", s.handleCreateEgressFirewall)
-	mux.HandleFunc("POST /api/egressips", s.handleCreateEgressIP)
-	mux.HandleFunc("POST /api/externalroutes", s.handleCreateExternalRoute)
-	mux.HandleFunc("POST /api/networkpolicies", s.handleCreateNetworkPolicy)
+	// The single-scope network-family creates, by tier (see handlers_networks.go):
+	// an Uplink (nmstate NNCP) is always cluster-scoped, so always the platform
+	// tier, gated on the caller's authority to create NNCPs.
+	mux.HandleFunc("POST /api/uplinks", s.platformCreate(ssarUplink, Draft.StageCreateUplink))
+	// An egress firewall (the Tier-1 gateway firewall) is namespace-scoped, so it
+	// routes to the tenant project owning the namespace, the same path as a
+	// project-scoped UDN; the tenant's Argo app applies it on merge (its AppProject
+	// must permit k8s.ovn.org/EgressFirewall).
+	mux.HandleFunc("POST /api/egressfirewalls", s.namespacedCreate("an egress firewall", Draft.StageCreateEgressFirewall))
+	// An EgressIP (the Tier-0 source-NAT pool) is always platform-tier, gated on
+	// the caller's authority to create EgressIPs.
+	mux.HandleFunc("POST /api/egressips", s.platformCreate(ssarEgressIP, Draft.StageCreateEgressIP))
+	// An AdminPolicyBasedExternalRoute (the Tier-0 external next-hop route) is
+	// always platform-tier, gated on the caller's authority to create them.
+	mux.HandleFunc("POST /api/externalroutes", s.platformCreate(ssarExtRoute, Draft.StageCreateExternalRoute))
+	// A NetworkPolicy (the east-west Distributed Firewall) is namespace-scoped, so
+	// it routes to the tenant project owning the namespace; the tenant's Argo app
+	// applies it on merge.
+	mux.HandleFunc("POST /api/networkpolicies", s.namespacedCreate("a network policy", Draft.StageCreateNetworkPolicy))
 	mux.HandleFunc("POST /api/adminnetworkpolicies", s.handleCreateAdminNetworkPolicy)
 	mux.HandleFunc("POST /api/namespaces", s.handleCreateNamespace)
 	mux.HandleFunc("POST /api/projects", s.handleCreateProject)
