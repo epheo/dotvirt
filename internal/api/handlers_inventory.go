@@ -107,12 +107,12 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 	id, _, err := s.userCluster(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		fail(w, unavailable("cluster access", err))
 		return
 	}
 	inv, err := s.InventoryForIdentity(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, inv)
@@ -140,12 +140,12 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 	}
 	sa, err := s.clusterF.SA()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		fail(w, unavailable("cluster access", err))
 		return
 	}
 	opts, err := sa.ListOptions(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		fail(w, err)
 		return
 	}
 	s.options.Put("all", opts)

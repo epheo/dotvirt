@@ -36,7 +36,7 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	raw, err := readAll(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, invalid(err))
 		return
 	}
 	var peek struct {
@@ -82,7 +82,7 @@ func (s *Server) handleDraftDiscard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.draft.Discard(sc.id, sc.proj); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		fail(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -102,7 +102,7 @@ func (s *Server) handleUnstage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.draft.Unstage(sc.id, sc.proj, r.URL.Query().Get("resource"), r.PathValue("namespace"), r.PathValue("name")); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		fail(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -190,12 +190,12 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	}
 	read, _, err := s.repos.Get(sc.proj.Repo)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		fail(w, unavailable("project repo", err))
 		return
 	}
 	vm, found, err := read.FindVMOnBranch(s.cfg.BaseBranch, ns, name)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		fail(w, err)
 		return
 	}
 	if !found {
@@ -204,7 +204,7 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	}
 	files, err := read.VMManifests(s.cfg.BaseBranch)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		fail(w, err)
 		return
 	}
 	for _, f := range files {
@@ -231,7 +231,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	read, _, err := s.repos.Get(sc.proj.Repo)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		fail(w, unavailable("project repo", err))
 		return
 	}
 	commits, err := read.History(s.cfg.BaseBranch, 25)

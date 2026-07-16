@@ -10,7 +10,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -349,10 +351,34 @@ func readAll(r *http.Request) ([]byte, error) {
 // respond writes v as JSON, or the error mapped to a status by its kind.
 func respond(w http.ResponseWriter, v any, err error) {
 	if err != nil {
-		http.Error(w, err.Error(), statusFor(err))
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+
+// fail writes err mapped to a status by its model.Err* kind. Errors without a
+// kind are internal: the detail is logged, never echoed — it can carry k8s, git,
+// or forge internals (URLs, credentials, object paths) the caller must not see.
+func fail(w http.ResponseWriter, err error) {
+	status := statusFor(err)
+	msg := err.Error()
+	if status == http.StatusInternalServerError {
+		log.Printf("api: internal error: %v", err)
+		msg = "internal error"
+	}
+	http.Error(w, msg, status)
+}
+
+// invalid wraps a request-parsing error as a 400. The detail is the caller's own
+// malformed input, safe to echo back.
+func invalid(err error) error { return fmt.Errorf("%w: %v", model.ErrInvalid, err) }
+
+// unavailable logs err and returns a 503 kind naming only what failed: transport
+// errors from git/forge/cluster dialing can embed endpoints and tokens.
+func unavailable(what string, err error) error {
+	log.Printf("api: %s unavailable: %v", what, err)
+	return fmt.Errorf("%w: %s", model.ErrUnavailable, what)
 }
 
 // statusFor maps a domain error to an HTTP status by the kind it wraps (see

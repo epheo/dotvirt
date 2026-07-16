@@ -157,7 +157,7 @@ type scope struct {
 func (s *Server) resolveProject(w http.ResponseWriter, r *http.Request, pick projectPicker) (scope, bool) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		fail(w, unavailable("cluster access", err))
 		return scope{}, false
 	}
 	if s.draft == nil {
@@ -166,7 +166,7 @@ func (s *Server) resolveProject(w http.ResponseWriter, r *http.Request, pick pro
 	}
 	projects, err := s.projectsFor(r.Context(), id, c)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		fail(w, err)
 		return scope{}, false
 	}
 	proj, msg, ok := pick(projects)
@@ -252,7 +252,7 @@ func (s *Server) pickProject(w http.ResponseWriter, r *http.Request, want string
 func (s *Server) platformScopeAny(w http.ResponseWriter, r *http.Request) (scope, bool) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		fail(w, unavailable("cluster access", err))
 		return scope{}, false
 	}
 	if s.draft == nil {
@@ -284,7 +284,7 @@ const platformProjectName = "platform"
 func (s *Server) platformScope(w http.ResponseWriter, r *http.Request, group, resource string) (scope, bool) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		fail(w, unavailable("cluster access", err))
 		return scope{}, false
 	}
 	if s.draft == nil {

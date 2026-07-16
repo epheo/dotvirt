@@ -92,7 +92,7 @@ func (s *Server) handleClusterSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	sc, nss, err := s.scopeNamespaces(r)
 	if err != nil {
-		http.Error(w, err.Error(), statusFor(err))
+		fail(w, err)
 		return
 	}
 	cs, err := s.metrics.ClusterSummary(r.Context(), sc.id.Token, nss, r.URL.Query().Get("node"))
@@ -152,12 +152,12 @@ func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
 	}
 	id, _, err := s.userCluster(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		fail(w, unavailable("cluster access", err))
 		return
 	}
 	load, pcts, err := s.metrics.HostLoad(r.Context(), id.Token)
 	if err != nil {
-		http.Error(w, err.Error(), statusFor(err))
+		fail(w, err)
 		return
 	}
 	if s.cfg.PlatformRepo != "" && s.draft != nil {
@@ -177,7 +177,7 @@ func (s *Server) handleScopeMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	sc, nss, err := s.scopeNamespaces(r)
 	if err != nil {
-		http.Error(w, err.Error(), statusFor(err))
+		fail(w, err)
 		return
 	}
 	m, err := s.metrics.ScopeMetrics(r.Context(), sc.id.Token, nss, r.URL.Query().Get("node"), r.URL.Query().Get("range"))
@@ -192,7 +192,7 @@ func (s *Server) handleAlarms(w http.ResponseWriter, r *http.Request) {
 	}
 	sc, nss, err := s.scopeNamespaces(r)
 	if err != nil {
-		http.Error(w, err.Error(), statusFor(err))
+		fail(w, err)
 		return
 	}
 	a, err := s.metrics.Alerts(r.Context(), sc.id.Token, nss)
@@ -205,7 +205,7 @@ func (s *Server) handleAlarms(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleQuotas(w http.ResponseWriter, r *http.Request) {
 	sc, nss, err := s.scopeNamespaces(r)
 	if err != nil {
-		http.Error(w, err.Error(), statusFor(err))
+		fail(w, err)
 		return
 	}
 	q, err := sc.cluster.ListQuotas(r.Context(), nss)

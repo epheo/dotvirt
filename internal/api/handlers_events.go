@@ -24,7 +24,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAllEvents(w http.ResponseWriter, r *http.Request) {
 	sc, nss, err := s.scopeNamespaces(r)
 	if err != nil {
-		http.Error(w, err.Error(), statusFor(err))
+		fail(w, err)
 		return
 	}
 	events, err := sc.cluster.ListVMEvents(r.Context(), nss)
