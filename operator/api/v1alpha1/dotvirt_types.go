@@ -11,6 +11,12 @@ const (
 	// ConditionForgeReady is True when a managed Forgejo is up and bootstrapped (its
 	// admin + scoped token + owner org); irrelevant for a BYO forge.
 	ConditionForgeReady = "ForgeReady"
+	// ConditionWorkloadReady is True when the namespaced workload (ServiceAccount,
+	// PVC, Service, Deployment, exposure) is applied.
+	ConditionWorkloadReady = "WorkloadReady"
+	// ConditionArgoReady is True when the cluster-scoped RBAC bindings and the
+	// AppProject tier (plus the platform Application) are applied.
+	ConditionArgoReady = "ArgoReady"
 	// ConditionForgeRepoReady is True when the platform git repo exists (the
 	// install-time imperative bootstrap a pure-declarative installer can't do).
 	ConditionForgeRepoReady = "ForgeRepoReady"
@@ -19,6 +25,14 @@ const (
 	ConditionArgoWebhook = "ArgoWebhook"
 	// ConditionAvailable is the roll-up: the full install is reconciled and serving.
 	ConditionAvailable = "Available"
+)
+
+// Phase values the controller writes to Status.Phase. Plain string consts (the
+// field stays a string) so the API surface is unchanged.
+const (
+	PhaseReady                 = "Ready"
+	PhaseProvisioning          = "Provisioning"
+	PhaseBlockedOnDependencies = "BlockedOnDependencies"
 )
 
 // IngressType selects how the dotvirt Route is exposed. "auto" picks Route on
