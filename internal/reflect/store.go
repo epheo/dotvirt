@@ -9,6 +9,7 @@
 package reflect
 
 import (
+	"context"
 	"sync/atomic"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,17 +25,19 @@ import (
 // (repeated errors) reads as unhealthy. Callers surface it as a "may be stale"
 // warning while the store keeps serving its last-good contents.
 func TrackHealth(lw *cache.ListWatch, healthy *atomic.Bool) *cache.ListWatch {
-	list, watchFn := lw.ListFunc, lw.WatchFunc
+	// Sources set the WithContext pair (the reflector cancels in-flight calls on
+	// shutdown through it); the deprecated context-free fields stay nil.
+	list, watchFn := lw.ListWithContextFunc, lw.WatchFuncWithContext
 	return &cache.ListWatch{
-		ListFunc: func(o metav1.ListOptions) (runtime.Object, error) {
-			obj, err := list(o)
+		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
+			obj, err := list(ctx, o)
 			if err != nil {
 				healthy.Store(false)
 			}
 			return obj, err
 		},
-		WatchFunc: func(o metav1.ListOptions) (watch.Interface, error) {
-			w, err := watchFn(o)
+		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
+			w, err := watchFn(ctx, o)
 			healthy.Store(err == nil)
 			return w, err
 		},

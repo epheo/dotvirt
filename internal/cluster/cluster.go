@@ -128,11 +128,11 @@ func (c *Client) VisibleNamespaces(ctx context.Context, candidates []string) ([]
 // path never lists VMs itself.
 func (c *Client) VMListWatch() *cache.ListWatch {
 	return &cache.ListWatch{
-		ListFunc: func(o metav1.ListOptions) (runtime.Object, error) {
-			return c.kubevirt.VirtualMachine(metav1.NamespaceAll).List(context.Background(), o)
+		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
+			return c.kubevirt.VirtualMachine(metav1.NamespaceAll).List(ctx, o)
 		},
-		WatchFunc: func(o metav1.ListOptions) (watch.Interface, error) {
-			return c.kubevirt.VirtualMachine(metav1.NamespaceAll).Watch(context.Background(), o)
+		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
+			return c.kubevirt.VirtualMachine(metav1.NamespaceAll).Watch(ctx, o)
 		},
 	}
 }
@@ -141,11 +141,11 @@ func (c *Client) VMListWatch() *cache.ListWatch {
 // VirtualMachineInstance reflector — the running-state half of the snapshot.
 func (c *Client) VMIListWatch() *cache.ListWatch {
 	return &cache.ListWatch{
-		ListFunc: func(o metav1.ListOptions) (runtime.Object, error) {
-			return c.kubevirt.VirtualMachineInstance(metav1.NamespaceAll).List(context.Background(), o)
+		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
+			return c.kubevirt.VirtualMachineInstance(metav1.NamespaceAll).List(ctx, o)
 		},
-		WatchFunc: func(o metav1.ListOptions) (watch.Interface, error) {
-			return c.kubevirt.VirtualMachineInstance(metav1.NamespaceAll).Watch(context.Background(), o)
+		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
+			return c.kubevirt.VirtualMachineInstance(metav1.NamespaceAll).Watch(ctx, o)
 		},
 	}
 }
@@ -159,11 +159,11 @@ func (c *Client) NamespaceListWatch(label string) *cache.ListWatch {
 		return o
 	}
 	return &cache.ListWatch{
-		ListFunc: func(o metav1.ListOptions) (runtime.Object, error) {
-			return c.kube.CoreV1().Namespaces().List(context.Background(), withLabel(o))
+		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
+			return c.kube.CoreV1().Namespaces().List(ctx, withLabel(o))
 		},
-		WatchFunc: func(o metav1.ListOptions) (watch.Interface, error) {
-			return c.kube.CoreV1().Namespaces().Watch(context.Background(), withLabel(o))
+		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
+			return c.kube.CoreV1().Namespaces().Watch(ctx, withLabel(o))
 		},
 	}
 }
@@ -175,11 +175,11 @@ func (c *Client) NamespaceListWatch(label string) *cache.ListWatch {
 // blind TTL.
 func (c *Client) RoleBindingListWatch() *cache.ListWatch {
 	return &cache.ListWatch{
-		ListFunc: func(o metav1.ListOptions) (runtime.Object, error) {
-			return c.kube.RbacV1().RoleBindings(metav1.NamespaceAll).List(context.Background(), o)
+		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
+			return c.kube.RbacV1().RoleBindings(metav1.NamespaceAll).List(ctx, o)
 		},
-		WatchFunc: func(o metav1.ListOptions) (watch.Interface, error) {
-			return c.kube.RbacV1().RoleBindings(metav1.NamespaceAll).Watch(context.Background(), o)
+		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
+			return c.kube.RbacV1().RoleBindings(metav1.NamespaceAll).Watch(ctx, o)
 		},
 	}
 }

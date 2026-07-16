@@ -1,0 +1,21 @@
+# Minimal, curated gate: the v2 defaults (errcheck, govet, ineffassign,
+# staticcheck, unused) plus misspell. No style linters — gofmt and review own
+# style. One config for both modules: golangci-lint resolves it by walking up
+# from operator/.
+version: "2"
+linters:
+  enable:
+    - misspell
+  settings:
+    errcheck:
+      exclude-functions:
+        # Deferred cleanup closes; write paths check Close explicitly.
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+        # httptest handlers in tests.
+        - fmt.Fprint
+        - fmt.Fprintf
+    staticcheck:
+      # Defaults minus QF1008: spelling the embedded TLSClientConfig selector
+      # out in restfactory is deliberate — it is the named security boundary.
+      checks: ["all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022", "-QF1008"]

@@ -3,7 +3,7 @@
 #   docker build -f operator/Dockerfile -t quay.io/epheo/dotvirt-operator:<tag> .
 # CGO is disabled, so the manager cross-compiles for $TARGETARCH on the native build host
 # (no QEMU) — buildx sets TARGETOS/TARGETARCH per target platform.
-FROM --platform=$BUILDPLATFORM golang:1.26 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26@sha256:ae5a2316d12f3e78fd99177dad452e6ad4f240af2d71d57b480c3477f250fec6 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY . .
@@ -11,7 +11,7 @@ COPY . .
 # repo-root go.work is copied in by `COPY . .`, and workspace mode rejects -mod=mod.
 RUN cd operator && CGO_ENABLED=0 GOWORK=off GOFLAGS=-mod=mod GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/manager ./cmd
 
-FROM gcr.io/distroless/static:nonroot
+FROM gcr.io/distroless/static:nonroot@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6
 ARG VERSION=dev
 # OCI + Red Hat/OpenShift image metadata. The name/vendor/version/release/summary/
 # description/maintainer labels plus the /licenses dir are what the certified-operator
