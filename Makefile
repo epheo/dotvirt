@@ -7,7 +7,7 @@ REGISTRY ?= quay.io
 IMAGE    ?= $(REGISTRY)/epheo/dotvirt
 TAG      ?= $(shell git rev-parse --short HEAD)
 
-.PHONY: build test web check e2e image push run release preview
+.PHONY: build test web check e2e image push run release preview types
 
 build:
 	go build -o dotvirt ./cmd/dotvirt
@@ -46,3 +46,8 @@ release:
 #   VERSION=0.0.6-rc.1 make preview
 preview:
 	VERSION=$(VERSION) ./hack/preview.sh
+
+# Regenerate the TS reference of internal/model (web/src/lib/model.gen.ts).
+# CI diffs it, so commit the result whenever model.go changes.
+types:
+	. hack/versions.env && GOTOOLCHAIN=auto go run "github.com/gzuidhof/tygo@$$TYGO_VERSION" generate

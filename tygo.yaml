@@ -1,0 +1,7 @@
+# Generates web/src/lib/model.gen.ts from internal/model — the machine-truth
+# reference for the hand-maintained mirror in web/src/lib/api.ts. CI regenerates
+# and diffs, so a model.go change always surfaces a visible TS diff in review.
+# Regenerate with `make types`.
+packages:
+  - path: "github.com/epheo/dotvirt/internal/model"
+    output_path: "web/src/lib/model.gen.ts"
