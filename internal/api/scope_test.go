@@ -165,13 +165,15 @@ func TestCanCreateCachedVerdicts(t *testing.T) {
 	ctx := context.Background()
 	id := auth.Identity{Token: "tok-admin", Username: "admin"}
 
-	if !s.canCreateCached(ctx, id, c, ssarCUDN) || !s.canCreateCached(ctx, id, c, ssarCUDN) {
+	first, second := s.canCreateCached(ctx, id, c, ssarCUDN), s.canCreateCached(ctx, id, c, ssarCUDN)
+	if !first || !second {
 		t.Fatal("allowed ref should read true")
 	}
 	if *reviews != 1 {
 		t.Fatalf("allowed verdict: %d rounds, want 1", *reviews)
 	}
-	if s.canCreateCached(ctx, id, c, ssarMachineCfg) || s.canCreateCached(ctx, id, c, ssarMachineCfg) {
+	first, second = s.canCreateCached(ctx, id, c, ssarMachineCfg), s.canCreateCached(ctx, id, c, ssarMachineCfg)
+	if first || second {
 		t.Fatal("denied ref should read false")
 	}
 	if *reviews != 2 {
@@ -203,7 +205,8 @@ func TestCanReadNodesCachedKeyIsolation(t *testing.T) {
 	ctx := context.Background()
 	id := auth.Identity{Token: "tok-net", Username: "net"}
 
-	if !s.canReadNodesCached(ctx, id, c) || !s.canReadNodesCached(ctx, id, c) {
+	first, second := s.canReadNodesCached(ctx, id, c), s.canReadNodesCached(ctx, id, c)
+	if !first || !second {
 		t.Fatal("node read should be allowed")
 	}
 	if *reviews != 1 {
