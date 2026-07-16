@@ -90,16 +90,51 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 // stamp; the TTL backstops the cluster-scoped RBAC changes the version doesn't
 // observe (see visibleTTL). Mutating routes keep their uncached platformScope
 // SSAR — a write deserves a fresh answer.
-func (s *Server) canCreateCached(ctx context.Context, id auth.Identity, c *cluster.Client, group, resource string) bool {
+func (s *Server) canCreateCached(ctx context.Context, id auth.Identity, c *cluster.Client, ref ssarRef) bool {
 	ver := s.rbacVersion()
-	key := restfactory.TokenKey(id.Token) + "\x00" + group + "/" + resource
+	key := restfactory.TokenKey(id.Token) + "\x00" + ref.group + "/" + ref.resource
 	if e, ok := s.ssar.Get(key); ok && e.ver == ver {
 		return e.ok
 	}
-	ok := c.CanCreateClusterResource(ctx, group, resource)
+	ok := c.CanCreateClusterResource(ctx, ref.group, ref.resource)
 	s.ssar.Put(key, ssarVerdict{ok: ok, ver: ver})
 	return ok
 }
+
+// canReadNodesCached mirrors canCreateCached for the node-read signal that
+// reveals the physical fabric in the networks catalog — read per poll, so it
+// must not post an SSAR per request. The "\x00read" segment keeps the key out
+// of the create-tuple namespace.
+func (s *Server) canReadNodesCached(ctx context.Context, id auth.Identity, c *cluster.Client) bool {
+	ver := s.rbacVersion()
+	key := restfactory.TokenKey(id.Token) + "\x00read\x00nodes"
+	if e, ok := s.ssar.Get(key); ok && e.ver == ver {
+		return e.ok
+	}
+	ok := c.CanReadNodes(ctx)
+	s.ssar.Put(key, ssarVerdict{ok: ok, ver: ver})
+	return ok
+}
+
+// ssarRef is one create-authority tuple (API group + plural resource).
+type ssarRef struct{ group, resource string }
+
+// The platform-tier create authorities, each spelled exactly once: the create
+// routes gate on them (platformScope), NetworkCaps projects them to the UI, and
+// the authoring signal ORs a subset — adding a platform kind touches only this
+// list and its routes.
+var (
+	ssarCUDN        = ssarRef{"k8s.ovn.org", "clusteruserdefinednetworks"}
+	ssarUplink      = ssarRef{"nmstate.io", "nodenetworkconfigurationpolicies"}
+	ssarNamespace   = ssarRef{"", "namespaces"}
+	ssarEgressIP    = ssarRef{"k8s.ovn.org", "egressips"}
+	ssarExtRoute    = ssarRef{"k8s.ovn.org", "adminpolicybasedexternalroutes"}
+	ssarANP         = ssarRef{"policy.networking.k8s.io", "adminnetworkpolicies"}
+	ssarBANP        = ssarRef{"policy.networking.k8s.io", "baselineadminnetworkpolicies"}
+	ssarDescheduler = ssarRef{"operator.openshift.io", "kubedeschedulers"}
+	ssarMachineCfg  = ssarRef{"machineconfiguration.openshift.io", "machineconfigs"}
+	ssarVMTemplate  = ssarRef{"template.kubevirt.io", "virtualmachinetemplates"}
+)
 
 // platformAuthorResources are the create-SSARs that signal platform-tier
 // authoring — one per family of platform create routes. Holding ANY of them
@@ -107,11 +142,7 @@ func (s *Server) canCreateCached(ctx context.Context, id auth.Identity, c *clust
 // caller can only view/unstage/propose what their per-route create gates let
 // them stage), so the whole-draft routes OR these rather than demanding one
 // specific verb; the PR merge review remains the apply boundary.
-var platformAuthorResources = []struct{ group, resource string }{
-	{"k8s.ovn.org", "clusteruserdefinednetworks"},
-	{"operator.openshift.io", "kubedeschedulers"},
-	{"template.kubevirt.io", "virtualmachinetemplates"},
-}
+var platformAuthorResources = []ssarRef{ssarCUDN, ssarDescheduler, ssarVMTemplate}
 
 // canAuthorPlatform reports whether id may author platform-tier changes —
 // any platform authoring signal, TTL-cached per token so the inventory
@@ -124,7 +155,7 @@ func (s *Server) canAuthorPlatform(ctx context.Context, id auth.Identity, c *clu
 		return false
 	}
 	for _, r := range platformAuthorResources {
-		if s.canCreateCached(ctx, id, c, r.group, r.resource) {
+		if s.canCreateCached(ctx, id, c, r) {
 			return true
 		}
 	}
@@ -277,11 +308,11 @@ const platformProjectName = "platform"
 
 // platformScope resolves the platform tier for a cluster-scoped create: the
 // caller's identity + cluster, and the synthetic platform ProjectInfo from
-// -platform-repo. It SSAR-gates on the caller's authority to create group/resource —
+// -platform-repo. It SSAR-gates on the caller's authority to create ref's kind —
 // the authoring SIGNAL (the user never applies it; Argo does, from the platform
 // repo), so the author-time check matches the apply-time AppProject boundary. Fails
 // closed: 503 if no platform repo is configured, 403 if the caller lacks the verb.
-func (s *Server) platformScope(w http.ResponseWriter, r *http.Request, group, resource string) (scope, bool) {
+func (s *Server) platformScope(w http.ResponseWriter, r *http.Request, ref ssarRef) (scope, bool) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
 		fail(w, unavailable("cluster access", err))
@@ -295,8 +326,8 @@ func (s *Server) platformScope(w http.ResponseWriter, r *http.Request, group, re
 		http.Error(w, "platform repo not configured (set -platform-repo)", http.StatusServiceUnavailable)
 		return scope{}, false
 	}
-	if !c.CanCreateClusterResource(r.Context(), group, resource) {
-		http.Error(w, "not authorized to create "+resource, http.StatusForbidden)
+	if !c.CanCreateClusterResource(r.Context(), ref.group, ref.resource) {
+		http.Error(w, "not authorized to create "+ref.resource, http.StatusForbidden)
 		return scope{}, false
 	}
 	return scope{id: id, cluster: c, proj: project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}}, true
