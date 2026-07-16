@@ -64,7 +64,10 @@ type Draft interface {
 	Adopt(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
 	AdoptNamespace(id auth.Identity, proj project.ProjectInfo, namespace string) (model.DraftView, error)
 	AdoptProject(id auth.Identity, commitProj, target project.ProjectInfo, owners []string) (model.DraftView, error)
-	Resync(ctx context.Context, namespace, name string) (model.ResyncResult, error) // SA-identity; no user/project context
+	// Resync runs with dotvirt's SA (Argo operations carry no user context);
+	// canUpdateVM is the caller-token SSAR the implementation enforces before
+	// escalating, so no future caller can reach the SA-privileged patch unchecked.
+	Resync(ctx context.Context, canUpdateVM func(context.Context, string, string) (bool, error), namespace, name string) (model.ResyncResult, error)
 	OpenProposal(id auth.Identity, proj project.ProjectInfo) (model.Proposal, bool, error)
 	Revert(id auth.Identity, proj project.ProjectInfo, hash string) (model.ProposeResult, error)
 }
@@ -360,6 +363,8 @@ func statusFor(err error) int {
 		return http.StatusBadRequest
 	case errors.Is(err, model.ErrNotFound):
 		return http.StatusNotFound
+	case errors.Is(err, model.ErrForbidden):
+		return http.StatusForbidden
 	case errors.Is(err, model.ErrConflict):
 		return http.StatusConflict
 	case errors.Is(err, model.ErrUnavailable):

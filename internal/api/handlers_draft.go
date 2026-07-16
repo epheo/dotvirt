@@ -161,23 +161,17 @@ func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
-	// Resync runs the reconcile with dotvirt's SA, so gate it on the caller's OWN
+	// Resync runs the reconcile with dotvirt's SA, gated on the caller's OWN
 	// authority over the VM (not just namespace read): they may trigger a sync only
 	// if they could update the VM themselves — otherwise read access would escalate
-	// into an SA-privileged Argo sync.
+	// into an SA-privileged Argo sync. The SSAR runs inside Resync, beside the
+	// escalation, so no other caller can reach it unchecked.
 	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
 	if !ok {
 		return
 	}
 	ns, name := r.PathValue("namespace"), r.PathValue("name")
-	if allowed, err := sc.cluster.CanUpdateVM(r.Context(), ns, name); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	} else if !allowed {
-		http.Error(w, "you don't have permission to sync this VM", http.StatusForbidden)
-		return
-	}
-	result, err := s.draft.Resync(r.Context(), ns, name)
+	result, err := s.draft.Resync(r.Context(), sc.cluster.CanUpdateVM, ns, name)
 	respond(w, result, err)
 }
 
