@@ -8,6 +8,7 @@ import "errors"
 var (
 	ErrInvalid     = errors.New("invalid request")         // → 400: bad/empty input, nothing to do
 	ErrNotFound    = errors.New("not found")               // → 404
+	ErrForbidden   = errors.New("forbidden")               // → 403: caller lacks authority for the operation
 	ErrConflict    = errors.New("conflict")                // → 409: e.g. project not editable
 	ErrUnavailable = errors.New("temporarily unavailable") // → 503: a capability isn't wired/reachable
 )

@@ -125,9 +125,17 @@ func (c *Coordinator) AdoptNamespace(id auth.Identity, proj project.ProjectInfo,
 // cluster back to git (main→running reconcile). Writes nothing to git. It uses the
 // SA-identity resyncer (Argo operations have no user context, but the request's
 // ctx still bounds the call so a hung Argo op doesn't outlive the HTTP request).
-func (c *Coordinator) Resync(ctx context.Context, namespace, name string) (model.ResyncResult, error) {
+// Because this is the one operation that escalates to dotvirt's SA, the caller's
+// own authority over the VM (canUpdateVM, a user-token SSAR) is enforced here,
+// beside the escalation — not only at the transport layer.
+func (c *Coordinator) Resync(ctx context.Context, canUpdateVM func(context.Context, string, string) (bool, error), namespace, name string) (model.ResyncResult, error) {
 	if c.resyncer == nil {
 		return model.ResyncResult{}, fmt.Errorf("%w: re-sync unavailable (ArgoCD not configured)", model.ErrUnavailable)
+	}
+	if allowed, err := canUpdateVM(ctx, namespace, name); err != nil {
+		return model.ResyncResult{}, err
+	} else if !allowed {
+		return model.ResyncResult{}, fmt.Errorf("%w: you don't have permission to sync VM %s/%s", model.ErrForbidden, namespace, name)
 	}
 	return c.resyncer.Resync(ctx, namespace, name)
 }
