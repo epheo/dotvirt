@@ -153,3 +153,44 @@ func TestSafeSegmentNoTraversal(t *testing.T) {
 		t.Errorf("safeSegment(\"v1.2\") = %q, want unchanged", got)
 	}
 }
+
+// A corrupt draft file must not wedge its (user, project) forever: it is
+// quarantined (kept as .corrupt for inspection) and the draft starts fresh.
+func TestCorruptDraftQuarantined(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := s.path("alice", "team-a")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := s.List("alice", "team-a")
+	if err != nil {
+		t.Fatalf("List over corrupt draft: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("want fresh draft, got %+v", entries)
+	}
+	if _, err := os.Stat(p + ".corrupt"); err != nil {
+		t.Fatalf("corrupt file not quarantined: %v", err)
+	}
+
+	// Staging works again and persists over the quarantined file's slot.
+	if err := s.Stage("alice", "team-a", editEntry("tenant-a", "web")); err != nil {
+		t.Fatalf("Stage after quarantine: %v", err)
+	}
+	if entries, err = s.List("alice", "team-a"); err != nil || len(entries) != 1 {
+		t.Fatalf("List after re-stage: %v, %+v", err, entries)
+	}
+	// The quarantined file is not enumerated as a project.
+	projects, err := s.ListProjects("alice")
+	if err != nil || len(projects) != 1 || projects[0] != "team-a" {
+		t.Fatalf("ListProjects = %v, %v", projects, err)
+	}
+}
