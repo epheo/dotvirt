@@ -215,6 +215,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/inventory", s.handleInventory)
 	mux.HandleFunc("GET /api/options", s.handleOptions)
 	mux.HandleFunc("GET /api/networks", s.handleNetworks)
+	mux.HandleFunc("GET /api/policies", s.handlePolicies)
 	mux.HandleFunc("POST /api/networks", s.handleCreateNetwork)
 	// The single-scope network-family creates, by tier (see handlers_networks.go):
 	// an Uplink (nmstate NNCP) is always cluster-scoped, so always the platform

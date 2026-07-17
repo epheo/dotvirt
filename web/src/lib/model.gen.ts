@@ -771,6 +771,55 @@ export interface NetworkCaps {
   adminNetworkPolicy: boolean; // cluster-wide admin DFW (ANP/BANP)
 }
 /**
+ * PolicyKind classifies a firewall/routing policy by the NSX-T tier the UI
+ * presents: the east-west Distributed Firewall (per-project NetworkPolicy and
+ * its cluster-wide admin/baseline overrides), the per-project Gateway Firewall
+ * (EgressFirewall on the Tier-1), and the Tier-0 planes (EgressIP SNAT,
+ * policy-based external routes).
+ */
+export type PolicyKind = string;
+export const PolicyDFW: PolicyKind = "dfw"; // NetworkPolicy — project east-west rules
+export const PolicyAdmin: PolicyKind = "admin"; // AdminNetworkPolicy — cluster-wide, priority-ordered
+export const PolicyBaseline: PolicyKind = "baseline"; // BaselineAdminNetworkPolicy — the cluster default
+export const PolicyGateway: PolicyKind = "gateway"; // EgressFirewall — project north-south egress
+export const PolicyEgressIP: PolicyKind = "egressip"; // EgressIP — Tier-0 source-NAT pool
+export const PolicyRoute: PolicyKind = "route"; // AdminPolicyBasedExternalRoute — Tier-0 next hop
+/**
+ * PolicyRuleView is one rule row as the Security view shows it: direction,
+ * action, a human peer summary, and a compact port list. Summaries, not the
+ * spec — editing goes through git, the view only has to read well.
+ */
+export interface PolicyRuleView {
+  direction: string; // Ingress | Egress
+  action: string; // Allow | Deny | Pass
+  peer?: string; // source/destination summary; empty = any
+  ports?: string; // "TCP/443, UDP/53"; empty = any
+}
+/**
+ * Policy is one live firewall/routing object rendered in security vocabulary,
+ * with the same per-object ArgoCD drift surface networks and VMs carry.
+ */
+export interface Policy {
+  name: string;
+  kind: PolicyKind;
+  namespace?: string; // empty for cluster-scoped kinds
+  backing: string; // the Kubernetes kind behind the row
+  priority?: number /* int */; // ANP precedence (lower wins)
+  target?: string; // what the policy applies to, summarized
+  rules?: PolicyRuleView[];
+  sync?: SyncStatus;
+  health?: string;
+  syncError?: string;
+}
+/**
+ * PolicyInventory is GET /api/policies: the policies the caller may see —
+ * namespace-scoped kinds in visible namespaces, cluster-scoped kinds only for
+ * callers with the matching platform authoring authority.
+ */
+export interface PolicyInventory {
+  policies: Policy[];
+}
+/**
  * Template is one VirtualMachineTemplate manifest in a library repo's
  * templates/ directory — a content-library entry (vSphere: a VM template).
  * Name is the file's basename: the deployable identity the API routes carry.

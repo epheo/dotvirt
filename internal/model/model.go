@@ -715,6 +715,55 @@ type NetworkCaps struct {
 	AdminNetworkPolicy bool `json:"adminNetworkPolicy"` // cluster-wide admin DFW (ANP/BANP)
 }
 
+// PolicyKind classifies a firewall/routing policy by the NSX-T tier the UI
+// presents: the east-west Distributed Firewall (per-project NetworkPolicy and
+// its cluster-wide admin/baseline overrides), the per-project Gateway Firewall
+// (EgressFirewall on the Tier-1), and the Tier-0 planes (EgressIP SNAT,
+// policy-based external routes).
+type PolicyKind string
+
+const (
+	PolicyDFW      PolicyKind = "dfw"      // NetworkPolicy — project east-west rules
+	PolicyAdmin    PolicyKind = "admin"    // AdminNetworkPolicy — cluster-wide, priority-ordered
+	PolicyBaseline PolicyKind = "baseline" // BaselineAdminNetworkPolicy — the cluster default
+	PolicyGateway  PolicyKind = "gateway"  // EgressFirewall — project north-south egress
+	PolicyEgressIP PolicyKind = "egressip" // EgressIP — Tier-0 source-NAT pool
+	PolicyRoute    PolicyKind = "route"    // AdminPolicyBasedExternalRoute — Tier-0 next hop
+)
+
+// PolicyRuleView is one rule row as the Security view shows it: direction,
+// action, a human peer summary, and a compact port list. Summaries, not the
+// spec — editing goes through git, the view only has to read well.
+type PolicyRuleView struct {
+	Direction string `json:"direction"`       // Ingress | Egress
+	Action    string `json:"action"`          // Allow | Deny | Pass
+	Peer      string `json:"peer,omitempty"`  // source/destination summary; empty = any
+	Ports     string `json:"ports,omitempty"` // "TCP/443, UDP/53"; empty = any
+}
+
+// Policy is one live firewall/routing object rendered in security vocabulary,
+// with the same per-object ArgoCD drift surface networks and VMs carry.
+type Policy struct {
+	Name      string           `json:"name"`
+	Kind      PolicyKind       `json:"kind"`
+	Namespace string           `json:"namespace,omitempty"` // empty for cluster-scoped kinds
+	Backing   string           `json:"backing"`             // the Kubernetes kind behind the row
+	Priority  int              `json:"priority,omitempty"`  // ANP precedence (lower wins)
+	Target    string           `json:"target,omitempty"`    // what the policy applies to, summarized
+	Rules     []PolicyRuleView `json:"rules,omitempty"`
+
+	Sync      SyncStatus `json:"sync,omitempty"`
+	Health    string     `json:"health,omitempty"`
+	SyncError string     `json:"syncError,omitempty"`
+}
+
+// PolicyInventory is GET /api/policies: the policies the caller may see —
+// namespace-scoped kinds in visible namespaces, cluster-scoped kinds only for
+// callers with the matching platform authoring authority.
+type PolicyInventory struct {
+	Policies []Policy `json:"policies"`
+}
+
 // Template is one VirtualMachineTemplate manifest in a library repo's
 // templates/ directory — a content-library entry (vSphere: a VM template).
 // Name is the file's basename: the deployable identity the API routes carry.

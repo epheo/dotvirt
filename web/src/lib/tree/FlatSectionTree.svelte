@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Database, LayoutGrid, Network, Server, Workflow } from 'lucide-svelte';
+	import { Database, LayoutGrid, Network, Server, Shield, Workflow } from 'lucide-svelte';
 	import type { VM } from '$lib/api';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
 	import { hrefForScope, scopeFromPath } from '$lib/nav';
@@ -66,6 +66,17 @@
 		{/snippet}
 		<span class="truncate font-semibold text-ink-soft">{ROOT.label}</span>
 	</TreeRow>
+
+	{#if kind === 'network'}
+		<TreeRow
+			active={page.url.pathname === '/networking/security'}
+			alignChevron
+			href="/networking/security"
+		>
+			{#snippet icon()}<Shield size={14} class="text-ink-faint" />{/snippet}
+			<span class="truncate font-semibold text-ink-soft">Security</span>
+		</TreeRow>
+	{/if}
 
 	{#each groups as [key, vms] (key)}
 		{@const gid = `${kind}:${key}`}

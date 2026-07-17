@@ -1,4 +1,4 @@
-import type { Inventory, NetworkInventory, VM } from '$lib/api';
+import type { Inventory, NetworkInventory, PolicyInventory, VM } from '$lib/api';
 
 // The live cluster read layer: the WS inventory snapshot plus the once-per-
 // session networking inventory (GET /api/networks). Everything else the UI
@@ -10,8 +10,12 @@ class InventoryStore {
 	// as vCenter port groups) plus the physical fabric (uplinks + node NICs).
 	// Changes rarely; backend caches 60s.
 	netInv = $state<NetworkInventory | null>(null);
+	// The policy plane behind the Security view; fetched beside netInv (both ride
+	// the networksVersion refetch).
+	polInv = $state<PolicyInventory | null>(null);
 
 	readonly networks = $derived(this.netInv?.networks ?? []);
+	readonly policies = $derived(this.polInv?.policies ?? []);
 	readonly uplinks = $derived(this.netInv?.uplinks ?? []);
 	readonly physicalAdapters = $derived(this.netInv?.physicalAdapters ?? []);
 	readonly nmstatePresent = $derived(this.netInv?.nmstatePresent ?? false);
@@ -75,6 +79,7 @@ class InventoryStore {
 	reset() {
 		this.inventory = null;
 		this.netInv = null;
+		this.polInv = null;
 	}
 
 	findVM(namespace: string, name: string): VM | null {
