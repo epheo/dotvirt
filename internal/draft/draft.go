@@ -7,6 +7,7 @@ package draft
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -118,7 +119,8 @@ func (s *Store) loadLocked(user, project string) (map[string]Entry, error) {
 		return d, nil
 	}
 	d := map[string]Entry{}
-	data, err := os.ReadFile(s.path(user, project))
+	p := s.path(user, project)
+	data, err := os.ReadFile(p)
 	switch {
 	case os.IsNotExist(err):
 		// fresh draft
@@ -127,10 +129,17 @@ func (s *Store) loadLocked(user, project string) (map[string]Entry, error) {
 	default:
 		var list []Entry
 		if err := json.Unmarshal(data, &list); err != nil {
-			return nil, fmt.Errorf("parse draft %s/%s: %w", user, project, err)
-		}
-		for _, e := range list {
-			d[e.Key()] = e
+			// A parse failure must not wedge this (user, project) forever — a draft is
+			// an unproposed shopping cart, not a source of truth. Quarantine the file
+			// (kept for inspection, best-effort) and start fresh.
+			if rerr := os.Rename(p, p+".corrupt"); rerr != nil && !os.IsNotExist(rerr) {
+				return nil, fmt.Errorf("quarantine corrupt draft %s/%s: %w", user, project, rerr)
+			}
+			log.Printf("draft: %s is corrupt (%v); quarantined as .corrupt, starting fresh", p, err)
+		} else {
+			for _, e := range list {
+				d[e.Key()] = e
+			}
 		}
 	}
 	s.drafts[pk] = d
