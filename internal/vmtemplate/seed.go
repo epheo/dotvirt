@@ -19,7 +19,7 @@ kind: VirtualMachineTemplate
 metadata:
   name: fedora-server
   annotations:
-    description: Fedora server with cloud-init guest customization (hostname, user, password, SSH key)
+    description: Fedora server with cloud-init guest customization (hostname, user, SSH key)
 spec:
   parameters:
     - name: NAME
@@ -32,10 +32,6 @@ spec:
     - name: CLOUD_USER
       description: Cloud-init user account
       value: fedora
-    - name: CLOUD_PASSWORD
-      description: Password for the cloud-init user
-      generate: expression
-      from: "[a-zA-Z0-9]{16}"
     - name: SSH_AUTHORIZED_KEY
       description: SSH public key added to the cloud-init user (optional)
     - name: OS_IMAGE_NAMESPACE
@@ -91,8 +87,6 @@ spec:
                   #cloud-config
                   hostname: ${HOSTNAME}
                   user: ${CLOUD_USER}
-                  password: ${CLOUD_PASSWORD}
-                  chpasswd: { expire: false }
                   ssh_authorized_keys:
                     - "${SSH_AUTHORIZED_KEY}"
 `

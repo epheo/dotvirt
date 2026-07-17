@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"golang.org/x/crypto/bcrypt"
 	"sigs.k8s.io/yaml"
 
 	"github.com/epheo/dotvirt/internal/validate"
@@ -61,6 +62,18 @@ type NetworkRef struct {
 func Manifest(s Spec) (path string, content []byte, err error) {
 	if err := validateSpec(s); err != nil {
 		return "", nil, err
+	}
+
+	// The manifest lands in a git repo: only a password hash may enter it. Hash
+	// on a copy so the caller's spec keeps what the user typed.
+	if s.CloudInit != nil && s.CloudInit.Password != "" {
+		ci := *s.CloudInit
+		h, err := hashPassword(ci.Password)
+		if err != nil {
+			return "", nil, err
+		}
+		ci.Password = h
+		s.CloudInit = &ci
 	}
 
 	vm := map[string]any{
@@ -242,6 +255,21 @@ func multusNetwork(ref string) (network map[string]any, iface map[string]any) {
 	}
 	iface = map[string]any{"name": ifaceName, "bridge": map[string]any{}}
 	return network, iface
+}
+
+// hashPassword turns a plaintext password into a bcrypt crypt(3) hash, which
+// cloud-init's hashed-password detection ($1|2a|2y|5|6) applies via chpasswd -e.
+// Values already shaped like a crypt hash pass through, so a caller may supply
+// its own and a re-render never double-hashes.
+func hashPassword(pw string) (string, error) {
+	if strings.HasPrefix(pw, "$") {
+		return pw, nil
+	}
+	h, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
+	if err != nil {
+		return "", fmt.Errorf("hashing cloud-init password: %w", err)
+	}
+	return string(h), nil
 }
 
 // cloudInit builds a cloudInitNoCloud volume from the spec, or nil if no

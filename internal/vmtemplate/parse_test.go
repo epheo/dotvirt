@@ -16,7 +16,7 @@ func TestParseValidTemplate(t *testing.T) {
 	if tpl.Description == "" || tpl.Instancetype != "u1.medium" || tpl.Preference != "fedora" {
 		t.Fatalf("summary wrong: %+v", tpl)
 	}
-	if len(tpl.Parameters) != 6 || tpl.Parameters[0].Name != "NAME" || tpl.Parameters[0].Generate != "expression" {
+	if len(tpl.Parameters) != 5 || tpl.Parameters[0].Name != "NAME" || tpl.Parameters[0].Generate != "expression" {
 		t.Fatalf("parameters wrong: %+v", tpl.Parameters)
 	}
 }
