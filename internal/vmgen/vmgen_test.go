@@ -185,3 +185,38 @@ func TestManifestStorageClass(t *testing.T) {
 		t.Errorf("empty class must omit storageClassName (cluster default):\n%s", content)
 	}
 }
+
+// The manifest lands in git: a typed password must never appear in it, only its
+// crypt(3) hash; an already-hashed value must survive unchanged.
+func TestManifestPasswordHashed(t *testing.T) {
+	spec := Spec{
+		Name: "pw", Namespace: "team-a",
+		Instancetype: "u1.small", Preference: "fedora",
+		OSImage:   OSImageRef{Name: "fedora", Namespace: "kv"},
+		CloudInit: &CloudInit{User: "admin", Password: "hunter2-plaintext"},
+	}
+	_, content, err := Manifest(spec)
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+	s := string(content)
+	if strings.Contains(s, "hunter2-plaintext") {
+		t.Fatalf("plaintext password leaked into the manifest:\n%s", s)
+	}
+	if !strings.Contains(s, "password: $2a$") {
+		t.Errorf("expected a bcrypt hash in the manifest:\n%s", s)
+	}
+	if spec.CloudInit.Password != "hunter2-plaintext" {
+		t.Error("Manifest mutated the caller's spec")
+	}
+
+	const preHashed = "$6$rounds=4096$salt$abcdef"
+	spec.CloudInit = &CloudInit{User: "admin", Password: preHashed}
+	_, content, err = Manifest(spec)
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+	if !strings.Contains(string(content), "password: "+preHashed) {
+		t.Errorf("pre-hashed password must pass through unchanged:\n%s", content)
+	}
+}
