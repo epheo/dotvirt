@@ -86,6 +86,9 @@ func TestPolicies(t *testing.T) {
 	if anp.Priority != 10 || anp.Target != "env=prod" {
 		t.Errorf("anp target/priority wrong: %+v", anp)
 	}
+	if anp.Namespaces != nil {
+		t.Errorf("label-selector anp must not enumerate namespaces: %v", anp.Namespaces)
+	}
 	if len(anp.Rules) != 1 || anp.Rules[0].Action != "Deny" || anp.Rules[0].Peer != "ns env=dev" || anp.Rules[0].Ports != "TCP/5432" {
 		t.Errorf("anp rule wrong: %+v", anp.Rules)
 	}
@@ -107,6 +110,9 @@ func TestPolicies(t *testing.T) {
 	if eip.Target != "team-a, team-b" {
 		t.Errorf("egressip name-In selector should collapse to the namespace list: %q", eip.Target)
 	}
+	if len(eip.Namespaces) != 2 || eip.Namespaces[0] != "team-a" || eip.Namespaces[1] != "team-b" {
+		t.Errorf("egressip name-In selector should enumerate namespaces: %v", eip.Namespaces)
+	}
 	if len(eip.Rules) != 1 || eip.Rules[0].Action != "SNAT" || eip.Rules[0].Peer != "192.0.2.10, 192.0.2.11" {
 		t.Errorf("egressip rule wrong: %+v", eip.Rules)
 	}
@@ -114,6 +120,51 @@ func TestPolicies(t *testing.T) {
 	rt := got[4]
 	if rt.Target != "tier=dmz" || len(rt.Rules) != 1 || rt.Rules[0].Peer != "via 10.0.0.1" {
 		t.Errorf("external route wrong: %+v", rt)
+	}
+	if rt.Namespaces != nil {
+		t.Errorf("label-selector route must not enumerate namespaces: %v", rt.Namespaces)
+	}
+}
+
+// The tenant filter hides a cluster row only when its namespaces are provably
+// enumerated; every ambiguous selector must come out nil so the row stays.
+func TestSelectorNamespaces(t *testing.T) {
+	nameIn := func(vals ...any) map[string]any {
+		return map[string]any{"matchExpressions": []any{map[string]any{
+			"key": "kubernetes.io/metadata.name", "operator": "In", "values": vals,
+		}}}
+	}
+	cases := []struct {
+		name string
+		sel  map[string]any
+		want []string
+	}{
+		{"empty selector", map[string]any{}, nil},
+		{"name-In", nameIn("a", "b"), []string{"a", "b"}},
+		{"name-In empty values", nameIn(), nil},
+		{"name matchLabel", map[string]any{"matchLabels": map[string]any{"kubernetes.io/metadata.name": "a"}}, []string{"a"}},
+		{"other matchLabel", map[string]any{"matchLabels": map[string]any{"env": "prod"}}, nil},
+		{"name-NotIn", map[string]any{"matchExpressions": []any{map[string]any{
+			"key": "kubernetes.io/metadata.name", "operator": "NotIn", "values": []any{"a"},
+		}}}, nil},
+		{"name-In plus label", func() map[string]any {
+			s := nameIn("a")
+			s["matchLabels"] = map[string]any{"env": "prod"}
+			return s
+		}(), nil},
+	}
+	for _, c := range cases {
+		got := selectorNamespaces(c.sel)
+		if len(got) != len(c.want) {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+				break
+			}
+		}
 	}
 }
 

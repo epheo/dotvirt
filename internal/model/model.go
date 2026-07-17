@@ -770,13 +770,17 @@ type PolicyRuleView struct {
 // Policy is one live firewall/routing object rendered in security vocabulary,
 // with the same per-object ArgoCD drift surface networks and VMs carry.
 type Policy struct {
-	Name      string           `json:"name"`
-	Kind      PolicyKind       `json:"kind"`
-	Namespace string           `json:"namespace,omitempty"` // empty for cluster-scoped kinds
-	Backing   string           `json:"backing"`             // the Kubernetes kind behind the row
-	Priority  int              `json:"priority,omitempty"`  // ANP precedence (lower wins)
-	Target    string           `json:"target,omitempty"`    // what the policy applies to, summarized
-	Rules     []PolicyRuleView `json:"rules,omitempty"`
+	Name      string     `json:"name"`
+	Kind      PolicyKind `json:"kind"`
+	Namespace string     `json:"namespace,omitempty"` // empty for cluster-scoped kinds
+	Backing   string     `json:"backing"`             // the Kubernetes kind behind the row
+	Priority  int        `json:"priority,omitempty"`  // ANP precedence (lower wins)
+	Target    string     `json:"target,omitempty"`    // what the policy applies to, summarized
+	// Namespaces a cluster-scoped policy provably pins to (the metadata.name
+	// selector netgen writes). Nil when the selector isn't enumerable — a tenant
+	// filter must then keep the row rather than hide a possibly-applying rule.
+	Namespaces []string         `json:"namespaces,omitempty"`
+	Rules      []PolicyRuleView `json:"rules,omitempty"`
 
 	Sync      SyncStatus `json:"sync,omitempty"`
 	Health    string     `json:"health,omitempty"`

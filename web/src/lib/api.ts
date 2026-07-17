@@ -293,6 +293,9 @@ export interface Policy {
 	backing: string; // the Kubernetes kind behind the row
 	priority?: number; // ANP precedence (lower wins)
 	target?: string; // what the policy applies to, summarized
+	// Namespaces a cluster-scoped policy provably pins to; absent when the
+	// selector isn't enumerable, so a tenant filter must keep the row.
+	namespaces?: string[];
 	rules?: PolicyRuleView[];
 	sync?: SyncStatus;
 	health?: string;
