@@ -87,6 +87,18 @@ type MetricsSpec struct {
 	URL string `json:"url,omitempty"`
 }
 
+// AuthSpec enables OpenShift SSO beside the always-present token login. The
+// admin registers the cluster-scoped OAuthClient (redirect URI
+// https://<ingress.host>/api/auth/callback) — a cluster-admin act the operator
+// deliberately doesn't perform; the operator only wires the credential through.
+type AuthSpec struct {
+	// OAuthClientID is the OAuthClient's name; empty leaves SSO off.
+	OAuthClientID string `json:"oauthClientID,omitempty"`
+	// OAuthSecretRef names a Secret in the install namespace holding the
+	// OAuthClient's secret under key "clientSecret".
+	OAuthSecretRef string `json:"oauthSecretRef,omitempty"`
+}
+
 // DotvirtSpec is the desired dotvirt install.
 type DotvirtSpec struct {
 	// Image is the dotvirt app image to deploy.
@@ -95,6 +107,7 @@ type DotvirtSpec struct {
 	ArgoCD  ArgoCDSpec  `json:"argocd,omitempty"`
 	Ingress IngressSpec `json:"ingress,omitempty"`
 	Metrics MetricsSpec `json:"metrics,omitempty"`
+	Auth    AuthSpec    `json:"auth,omitempty"`
 }
 
 // DotvirtStatus is the observed install state.

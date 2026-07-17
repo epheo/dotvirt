@@ -132,6 +132,26 @@ func run() error {
 	}
 	authenticator := auth.New(saKube, []byte(cfg.SessionSecret))
 
+	// OpenShift SSO (optional): only token acquisition changes — the access token
+	// rides the same TokenReview + cookie + pass-through path as a pasted one.
+	var oauthFlow *auth.OAuth
+	if cfg.OAuthClientID != "" {
+		if cfg.PublicURL == "" {
+			log.Printf("oauth: -oauth-client-id set but -public-url empty; OpenShift SSO disabled")
+		} else {
+			oauthFlow, err = auth.NewOAuth(auth.OAuthConfig{
+				ClientID:     cfg.OAuthClientID,
+				ClientSecret: cfg.OAuthClientSecret,
+				RedirectURL:  strings.TrimRight(cfg.PublicURL, "/") + "/api/auth/callback",
+				CAFile:       cfg.OAuthCA,
+				InsecureTLS:  cfg.InsecureTLS,
+			}, saKube, authenticator)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	coordinator := changeset.New(draftStore, repos, forgeFactory, resyncer,
 		cfg.BaseBranch, cfg.ProposedBranch, cfg.RunningBranch)
 
@@ -152,6 +172,7 @@ func run() error {
 		Metrics:        metricsClient,
 		Draft:          coordinator,
 		Auth:           authenticator,
+		OAuth:          oauthFlow,
 		Config: api.Config{
 			BaseBranch:        cfg.BaseBranch,
 			AllowOrigin:       cfg.UIOrigin,
