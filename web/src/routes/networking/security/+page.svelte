@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { ChevronDown, ChevronRight, Plus } from 'lucide-svelte';
-	import type { Policy } from '$lib/api';
+	import type { Policy, PolicyKind } from '$lib/api';
 	import { TONE_TEXT, type Tone } from '$lib/status';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
@@ -14,10 +14,43 @@
 	const policies = $derived(inventory.policies);
 	const caps = $derived(inventory.caps);
 
-	const admin = $derived(policies.filter((p) => p.kind === 'admin' || p.kind === 'baseline'));
-	const dfw = $derived(policies.filter((p) => p.kind === 'dfw'));
-	const gateway = $derived(policies.filter((p) => p.kind === 'gateway'));
-	const tier0 = $derived(policies.filter((p) => p.kind === 'egressip' || p.kind === 'route'));
+	// Scope filters: a tenant (project) and a free-text query, combined. The
+	// query also matches rule contents (peer, ports, action) so "where is
+	// TCP/22 allowed" is answerable from here.
+	let tenant = $state('');
+	let query = $state('');
+	const q = $derived(query.trim().toLowerCase());
+	const filtered = $derived(tenant !== '' || q !== '');
+
+	const tenantNS = $derived(
+		new Set(
+			(inventory.inventory?.projects ?? [])
+				.find((p) => p.name === tenant)
+				?.namespaces.map((n) => n.namespace) ?? [],
+		),
+	);
+
+	// Cluster-tier rows are hidden only when they provably pin other namespaces
+	// (p.namespaces, from the enumerable selector). A label-selector admin rule
+	// may still apply to the tenant, so it stays — never hide a maybe-applying
+	// firewall rule.
+	const matchesTenant = (p: Policy): boolean => {
+		if (!tenant) return true;
+		if (p.namespace) return inventory.projectOf(p.namespace) === tenant;
+		if (!p.namespaces?.length) return true;
+		return p.namespaces.some((ns) => tenantNS.has(ns));
+	};
+	const matchesQuery = (p: Policy): boolean => {
+		if (!q) return true;
+		return [
+			p.name,
+			p.namespace,
+			p.target,
+			p.backing,
+			...(p.rules ?? []).flatMap((r) => [r.action, r.peer, r.ports]),
+		].some((s) => s?.toLowerCase().includes(q));
+	};
+	const shown = $derived(policies.filter((p) => matchesTenant(p) && matchesQuery(p)));
 
 	let expanded = $state<Record<string, boolean>>({});
 	const keyOf = (p: Policy) => `${p.backing}:${p.namespace ?? ''}:${p.name}`;
@@ -33,14 +66,46 @@
 
 <Breadcrumb trail={[{ label: 'Networking', href: '/networking' }, { label: 'Security' }]} />
 
+<div class="flex flex-wrap items-center gap-2 border-b border-line bg-panel px-4 py-2">
+	<select
+		bind:value={tenant}
+		aria-label="Filter by tenant"
+		class="rounded border border-line-strong px-2 py-1 text-xs"
+	>
+		<option value="">All tenants</option>
+		{#each inventory.projectNames as name (name)}
+			<option value={name}>{name}</option>
+		{/each}
+	</select>
+	<input
+		type="search"
+		bind:value={query}
+		aria-label="Filter policies"
+		placeholder="Filter by name, target, or rule"
+		class="w-64 rounded border border-line-strong px-2 py-1 text-xs"
+	/>
+	{#if filtered}
+		<span class="text-xs text-ink-faint">{shown.length} of {policies.length} policies</span>
+		<button
+			type="button"
+			onclick={() => ((tenant = ''), (query = ''))}
+			class="text-xs text-accent hover:underline">Clear</button
+		>
+	{/if}
+</div>
+
 <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
 	{#snippet policyRows(list: Policy[], emptyHint: string)}
 		{#if list.length === 0}
-			<div class="px-3 py-4 text-center text-xs text-ink-faint">{emptyHint}</div>
+			<div class="px-3 py-4 text-center text-xs text-ink-faint">
+				{filtered ? 'No policies match the filter.' : emptyHint}
+			</div>
 		{:else}
 			<div class="divide-y divide-line-soft">
 				{#each list as p (keyOf(p))}
-					{@const open = expanded[keyOf(p)]}
+					<!-- A text match may live in a collapsed rule row, so searching
+					     auto-opens matches; a click still overrides. -->
+					{@const open = expanded[keyOf(p)] ?? q !== ''}
 					<div>
 						<button
 							type="button"
@@ -115,13 +180,18 @@
 	{#snippet section(
 		title: string,
 		hint: string,
-		list: Policy[],
+		kinds: PolicyKind[],
 		emptyHint: string,
 		onnew: (() => void) | null,
 	)}
+		{@const list = shown.filter((p) => kinds.includes(p.kind))}
+		{@const total = policies.filter((p) => kinds.includes(p.kind)).length}
 		<section class="rounded border border-line bg-panel">
 			<header class="flex items-center gap-2 border-b border-line px-3 py-2">
 				<h2 class="text-sm font-semibold text-ink">{title}</h2>
+				<span class="rounded bg-inset px-1.5 py-0.5 text-xs text-ink-muted">
+					{list.length === total ? total : `${list.length} of ${total}`}
+				</span>
 				<span class="min-w-0 flex-1 truncate text-xs text-ink-faint">{hint}</span>
 				{#if onnew}
 					<button
@@ -140,7 +210,7 @@
 	{@render section(
 		'Distributed Firewall — admin rules',
 		'Cluster-wide, priority-ordered; override or backstop every project policy',
-		admin,
+		['admin', 'baseline'],
 		caps?.adminNetworkPolicy
 			? 'No admin policies.'
 			: 'No admin policies visible (platform authority required).',
@@ -150,7 +220,7 @@
 	{@render section(
 		'Distributed Firewall — project rules',
 		'East-west NetworkPolicies inside each project',
-		dfw,
+		['dfw'],
 		'No project firewall rules.',
 		canProjectRules ? () => (ui.modal = { kind: 'dfw', namespaces: inventory.namespaces }) : null,
 	)}
@@ -158,7 +228,7 @@
 	{@render section(
 		'Gateway Firewall',
 		'North-south egress per project (first match wins)',
-		gateway,
+		['gateway'],
 		'No egress firewalls.',
 		canProjectRules
 			? () => (ui.modal = { kind: 'egressFw', namespaces: inventory.namespaces })
@@ -168,7 +238,7 @@
 	{@render section(
 		'Tier-0',
 		'Egress SNAT pools and policy-based external routes',
-		tier0,
+		['egressip', 'route'],
 		canTier0 ? 'No Tier-0 policies.' : 'No Tier-0 policies visible (platform authority required).',
 		canTier0 ? () => (ui.modal = { kind: 'tier0' }) : null,
 	)}

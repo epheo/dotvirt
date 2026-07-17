@@ -128,10 +128,12 @@ func policyFromANP(u *unstructured.Unstructured, baseline bool) model.Policy {
 	}
 	if sel, found, _ := unstructured.NestedMap(u.Object, "spec", "subject", "namespaces"); found {
 		p.Target = orAny(selectorSummary(sel), "all namespaces")
+		p.Namespaces = selectorNamespaces(sel)
 	} else if pods, found, _ := unstructured.NestedMap(u.Object, "spec", "subject", "pods"); found {
 		ns, _ := pods["namespaceSelector"].(map[string]any)
 		po, _ := pods["podSelector"].(map[string]any)
 		p.Target = strings.TrimSpace(orAny(selectorSummary(ns), "all namespaces") + " " + prefixed("pods ", selectorSummary(po)))
+		p.Namespaces = selectorNamespaces(ns)
 	}
 
 	for _, dir := range []struct{ field, label, peerKey string }{
@@ -199,6 +201,7 @@ func policyFromEgressIP(u *unstructured.Unstructured) model.Policy {
 	}
 	sel, _, _ := unstructured.NestedMap(u.Object, "spec", "namespaceSelector")
 	p.Target = orAny(selectorSummary(sel), "all namespaces")
+	p.Namespaces = selectorNamespaces(sel)
 	ips, _, _ := unstructured.NestedStringSlice(u.Object, "spec", "egressIPs")
 	if len(ips) > 0 {
 		p.Rules = []model.PolicyRuleView{{Direction: "Egress", Action: "SNAT", Peer: strings.Join(ips, ", ")}}
@@ -216,6 +219,7 @@ func policyFromExtRoute(u *unstructured.Unstructured) model.Policy {
 	}
 	sel, _, _ := unstructured.NestedMap(u.Object, "spec", "from", "namespaceSelector")
 	p.Target = orAny(selectorSummary(sel), "all namespaces")
+	p.Namespaces = selectorNamespaces(sel)
 	hops, _, _ := unstructured.NestedSlice(u.Object, "spec", "nextHops", "static")
 	var ips []string
 	for _, raw := range hops {
@@ -341,6 +345,42 @@ func selectorSummary(sel map[string]any) string {
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+// selectorNamespaces enumerates the namespaces a selector provably pins to:
+// the metadata.name In expression netgen writes, or a bare metadata.name
+// matchLabel. Any other selector returns nil — label-based membership can't be
+// evaluated here, and a tenant filter must not hide a possibly-applying row.
+func selectorNamespaces(sel map[string]any) []string {
+	if len(sel) == 0 {
+		return nil
+	}
+	ml, _ := sel["matchLabels"].(map[string]any)
+	mes, _ := sel["matchExpressions"].([]any)
+	if len(ml) == 1 && len(mes) == 0 {
+		if name := str(ml["kubernetes.io/metadata.name"]); name != "" {
+			return []string{name}
+		}
+		return nil
+	}
+	if len(ml) == 0 && len(mes) == 1 {
+		me, ok := mes[0].(map[string]any)
+		if !ok || str(me["key"]) != "kubernetes.io/metadata.name" || str(me["operator"]) != "In" {
+			return nil
+		}
+		vs, _ := me["values"].([]any)
+		out := make([]string, 0, len(vs))
+		for _, v := range vs {
+			if s := str(v); s != "" {
+				out = append(out, s)
+			}
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+	return nil
 }
 
 // portsSummary renders a rule's port list compactly. It reads all three shapes
