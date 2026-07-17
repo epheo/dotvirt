@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { ChevronDown, ChevronRight, Plus } from 'lucide-svelte';
 	import type { Policy, PolicyKind } from '$lib/api';
-	import { TONE_TEXT, type Tone } from '$lib/status';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
+	import PolicyRuleTable from '$lib/components/PolicyRuleTable.svelte';
 	import SyncBadge from '$lib/components/SyncBadge.svelte';
 
 	// The Security view: the live policy plane in NSX-T tiers — cluster admin DFW
@@ -54,9 +54,6 @@
 
 	let expanded = $state<Record<string, boolean>>({});
 	const keyOf = (p: Policy) => `${p.backing}:${p.namespace ?? ''}:${p.name}`;
-
-	const actionTone = (action: string): Tone =>
-		action === 'Deny' ? 'danger' : action === 'Allow' ? 'ok' : 'neutral';
 
 	// New-policy buttons open the same modals the header/context menus do; each is
 	// gated exactly like its entry point there.
@@ -146,28 +143,7 @@
 											: ''}.
 									</p>
 								{:else}
-									<table class="w-full text-xs">
-										<thead class="text-left tracking-wide text-ink-faint uppercase">
-											<tr class="border-b border-line">
-												<th class="py-1.5 pr-3 font-medium">Direction</th>
-												<th class="py-1.5 pr-3 font-medium">Action</th>
-												<th class="py-1.5 pr-3 font-medium">Peer</th>
-												<th class="py-1.5 font-medium">Ports</th>
-											</tr>
-										</thead>
-										<tbody class="divide-y divide-line-soft">
-											{#each p.rules as r, i (i)}
-												<tr>
-													<td class="py-1.5 pr-3 text-ink-muted">{r.direction}</td>
-													<td class="py-1.5 pr-3 font-medium {TONE_TEXT[actionTone(r.action)]}"
-														>{r.action}</td
-													>
-													<td class="py-1.5 pr-3 text-ink-soft">{r.peer || 'any'}</td>
-													<td class="py-1.5 text-ink-soft">{r.ports || 'any'}</td>
-												</tr>
-											{/each}
-										</tbody>
-									</table>
+									<PolicyRuleTable rules={p.rules} />
 								{/if}
 							</div>
 						{/if}
