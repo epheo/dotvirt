@@ -491,14 +491,18 @@ type Node struct {
 	Name          string `json:"name"`
 	Ready         bool   `json:"ready"`
 	Unschedulable bool   `json:"unschedulable,omitempty"`
+	Maintenance   bool   `json:"maintenance,omitempty"`
 }
 
 // NodeInfo is a node's maintenance state for the By-Node view: whether it's
-// cordoned, and whether the caller's token may cordon it (so the UI hides the
-// action for users without node-update RBAC).
+// cordoned, in maintenance mode, and whether the caller's token may cordon it
+// (so the UI hides the actions for users without node-update RBAC).
+// Maintenance is dotvirt's annotation-backed intent marker: it stays set until
+// explicitly exited, even if something else uncordons the node underneath.
 type NodeInfo struct {
 	Name          string `json:"name"`
 	Unschedulable bool   `json:"unschedulable"`
+	Maintenance   bool   `json:"maintenance"`
 	CanCordon     bool   `json:"canCordon"`
 }
 

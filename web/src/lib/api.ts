@@ -620,10 +620,13 @@ export interface UploadToken {
 	uploadUrl: string; // the cdi-uploadproxy endpoint the browser POSTs to
 }
 
-// A node's maintenance state for the By-Node view.
+// A node's maintenance state for the By-Node view. `maintenance` is the
+// annotation-backed intent marker: set until explicitly exited, even if the
+// node gets uncordoned out of band.
 export interface NodeInfo {
 	name: string;
 	unschedulable: boolean;
+	maintenance: boolean;
 	canCordon: boolean; // the caller's token may cordon it
 }
 
@@ -633,6 +636,7 @@ export interface NodeTarget {
 	name: string;
 	ready: boolean;
 	unschedulable?: boolean;
+	maintenance?: boolean;
 }
 
 // The caller's effective capabilities in one namespace (the Permissions tab).
@@ -791,6 +795,8 @@ export const api = {
 	nodeInfo: (node: string) => get<NodeInfo>(`/api/nodes/${enc(node)}`),
 	setNodeCordon: (node: string, unschedulable: boolean) =>
 		post<void>(`/api/nodes/${enc(node)}/cordon`, { unschedulable }),
+	setNodeMaintenance: (node: string, enter: boolean) =>
+		post<void>(`/api/nodes/${enc(node)}/maintenance`, { enter }),
 
 	// Image upload: create the target DataVolume + mint a token; the browser
 	// then streams the file straight to the proxy (uploadUrl from uploadToken).

@@ -529,15 +529,19 @@ export interface Node {
   name: string;
   ready: boolean;
   unschedulable?: boolean;
+  maintenance?: boolean;
 }
 /**
  * NodeInfo is a node's maintenance state for the By-Node view: whether it's
- * cordoned, and whether the caller's token may cordon it (so the UI hides the
- * action for users without node-update RBAC).
+ * cordoned, in maintenance mode, and whether the caller's token may cordon it
+ * (so the UI hides the actions for users without node-update RBAC).
+ * Maintenance is dotvirt's annotation-backed intent marker: it stays set until
+ * explicitly exited, even if something else uncordons the node underneath.
  */
 export interface NodeInfo {
   name: string;
   unschedulable: boolean;
+  maintenance: boolean;
   canCordon: boolean;
 }
 /**

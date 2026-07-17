@@ -262,6 +262,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/nodes", s.handleNodes)
 	mux.HandleFunc("GET /api/nodes/{node}", s.handleNodeInfo)
 	mux.HandleFunc("POST /api/nodes/{node}/cordon", s.handleNodeCordon)
+	mux.HandleFunc("POST /api/nodes/{node}/maintenance", s.handleNodeMaintenance)
 	mux.HandleFunc("POST /api/uploads", s.handleCreateUpload)
 	mux.HandleFunc("GET /api/uploads/{namespace}/{name}", s.handleUploadStatus)
 	mux.HandleFunc("POST /api/uploads/{namespace}/{name}/token", s.handleUploadToken)
