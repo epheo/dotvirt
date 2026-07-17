@@ -34,7 +34,9 @@ func (s *Server) handleTakeSnapshot(w http.ResponseWriter, r *http.Request) {
 	if snapName == "" {
 		snapName = name + "-" + time.Now().UTC().Format("20060102-150405")
 	}
-	if err := sc.cluster.CreateSnapshot(r.Context(), ns, name, snapName); err != nil {
+	err := sc.cluster.CreateSnapshot(r.Context(), ns, name, snapName)
+	s.recordTask("Snapshot", ns, name, sc.id.Username, err == nil)
+	if err != nil {
 		http.Error(w, err.Error(), runtimeOpStatus(err))
 		return
 	}
@@ -47,7 +49,9 @@ func (s *Server) handleRestoreSnapshot(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := sc.cluster.RestoreSnapshot(r.Context(), r.PathValue("namespace"), r.PathValue("name"), r.PathValue("snapshot")); err != nil {
+	err := sc.cluster.RestoreSnapshot(r.Context(), r.PathValue("namespace"), r.PathValue("name"), r.PathValue("snapshot"))
+	s.recordTask("Restore snapshot", r.PathValue("namespace"), r.PathValue("name"), sc.id.Username, err == nil)
+	if err != nil {
 		http.Error(w, err.Error(), runtimeOpStatus(err))
 		return
 	}

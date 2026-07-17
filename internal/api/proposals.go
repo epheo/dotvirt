@@ -11,6 +11,7 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/restfactory"
+	"github.com/epheo/dotvirt/internal/tasks"
 )
 
 // The open-PR lane rides the inventory broadcast, but the forge is too slow for
@@ -138,6 +139,39 @@ func (s *Server) RunProposalsRefresher(ctx context.Context, bus *eventbus.Bus) {
 		}
 		if s.refreshProposals() {
 			bus.Publish(eventbus.ProposalsChanged)
+		}
+		s.refreshMerged()
+	}
+}
+
+// refreshMerged re-derives the merged-PR lane from the forge for every project
+// someone is watching — the poll backstop behind the webhook's instant record,
+// and what reseeds the lane after a restart. Repos are deduped across watchers
+// (the lane is project-scoped, not per-token; visibility applies at read time).
+// The feed publishes only on actual change, so the steady-state pass is silent.
+func (s *Server) refreshMerged() {
+	if s.tasks == nil {
+		return
+	}
+	s.propMu.Lock()
+	byRepo := map[string]project.ProjectInfo{}
+	for _, t := range s.propTargets {
+		for _, p := range t.projects {
+			if p.Repo != "" {
+				byRepo[p.Repo] = p
+			}
+		}
+	}
+	s.propMu.Unlock()
+	since := time.Now().Add(-tasks.MergeRetention)
+	for _, p := range byRepo {
+		merges, err := s.draft.RecentlyMerged(p, since)
+		if err != nil {
+			log.Printf("tasks: merged PRs for %s: %v (skipping)", p.Name, err)
+			continue
+		}
+		for _, m := range merges {
+			s.tasks.RecordMerge(m)
 		}
 	}
 }

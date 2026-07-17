@@ -45,7 +45,7 @@ func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
 
 // handleNodeCordon patches node.spec.unschedulable (cordon/uncordon).
 func (s *Server) handleNodeCordon(w http.ResponseWriter, r *http.Request) {
-	_, c, err := s.userCluster(r)
+	id, c, err := s.userCluster(r)
 	if err != nil {
 		fail(w, unavailable("cluster access", err))
 		return
@@ -57,8 +57,14 @@ func (s *Server) handleNodeCordon(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := c.SetNodeCordon(r.Context(), r.PathValue("node"), req.Unschedulable); err != nil {
-		http.Error(w, err.Error(), runtimeOpStatus(err))
+	verb := "Cordon"
+	if !req.Unschedulable {
+		verb = "Uncordon"
+	}
+	opErr := c.SetNodeCordon(r.Context(), r.PathValue("node"), req.Unschedulable)
+	s.recordTask(verb, "", r.PathValue("node"), id.Username, opErr == nil)
+	if opErr != nil {
+		http.Error(w, opErr.Error(), runtimeOpStatus(opErr))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -69,7 +75,7 @@ func (s *Server) handleNodeCordon(w http.ResponseWriter, r *http.Request) {
 // per-VM migrate calls so each one is gated by that VM's own RBAC and shows up
 // as its own action row.
 func (s *Server) handleNodeMaintenance(w http.ResponseWriter, r *http.Request) {
-	_, c, err := s.userCluster(r)
+	id, c, err := s.userCluster(r)
 	if err != nil {
 		fail(w, unavailable("cluster access", err))
 		return
@@ -81,8 +87,14 @@ func (s *Server) handleNodeMaintenance(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := c.SetNodeMaintenance(r.Context(), r.PathValue("node"), req.Enter); err != nil {
-		http.Error(w, err.Error(), runtimeOpStatus(err))
+	verb := "Enter maintenance"
+	if !req.Enter {
+		verb = "Exit maintenance"
+	}
+	opErr := c.SetNodeMaintenance(r.Context(), r.PathValue("node"), req.Enter)
+	s.recordTask(verb, "", r.PathValue("node"), id.Username, opErr == nil)
+	if opErr != nil {
+		http.Error(w, opErr.Error(), runtimeOpStatus(opErr))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -25,11 +25,9 @@
 			const verb = a.verb ?? a.label;
 			try {
 				await a.run(vm);
-				ui.recordAction({ verb, namespace: vm.namespace, name: vm.name, ok: true });
 				ui.showToast(`${verb} requested for ${vm.name}.`, { kind: 'success' });
 			} catch (e) {
 				if (e instanceof Unauthorized) return;
-				ui.recordAction({ verb, namespace: vm.namespace, name: vm.name, ok: false });
 				ui.showToast(`${verb} failed for ${vm.name}: ${friendlyError(e)}`, { kind: 'error' });
 			}
 			return;

@@ -31,6 +31,7 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netstate"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/internal/ttlcache"
 )
 
@@ -71,6 +72,9 @@ type Draft interface {
 	// escalating, so no future caller can reach the SA-privileged patch unchecked.
 	Resync(ctx context.Context, canUpdateVM func(context.Context, string, string) (bool, error), namespace, name string) (model.ResyncResult, error)
 	OpenProposal(id auth.Identity, proj project.ProjectInfo) (model.Proposal, bool, error)
+	// RecentlyMerged lists PRs merged into proj's base branch since 'since' — the
+	// task feed's poll backstop behind the forge webhook (and its restart reseed).
+	RecentlyMerged(proj project.ProjectInfo, since time.Time) ([]tasks.Merge, error)
 	Revert(id auth.Identity, proj project.ProjectInfo, hash string) (model.ProposeResult, error)
 	// Read-only git views: the coordinator owns branch names and source-file
 	// matching, so the transport never reads the repo tree itself.
@@ -92,6 +96,7 @@ type VNCHandler interface {
 // Config carries the non-collaborator settings the handlers need.
 type Config struct {
 	BaseBranch        string // repo branch the inventory reads + drafts target
+	ProposedBranch    string // proposal-branch prefix; attributes merged PRs to their proposing user
 	AllowOrigin       string // CORS origin for the SvelteKit frontend; empty disables CORS
 	AppSetPluginToken string // bearer for the ArgoCD ApplicationSet plugin endpoint; empty disables it
 	StaticDir         string // built SPA dir to serve at the same origin; empty = dev (SPA on Vite)
@@ -133,6 +138,7 @@ type Server struct {
 	proposals *ttlcache.Cache[[]model.Proposal] // per-token open-PR set; written by the refresher, read on broadcast
 	options   *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
 	metrics   *metrics.Client                   // Prometheus/Thanos for the Performance tab; nil disables it
+	tasks     *tasks.Feed                       // recent-activity feed (ops + merged PRs); nil disables it
 	draft     Draft
 	auth      *auth.Authenticator // nil leaves the API open (dev)
 	oauth     *auth.OAuth         // nil hides the OpenShift SSO login path
@@ -161,6 +167,7 @@ type Deps struct {
 	Resolver       *project.Resolver
 	Repos          *git.RepoSet
 	Metrics        *metrics.Client // Prometheus/Thanos query client; nil disables the Performance tab
+	Tasks          *tasks.Feed     // recent-activity feed; nil disables GET /api/tasks
 	Draft          Draft
 	Auth           *auth.Authenticator
 	OAuth          *auth.OAuth // OpenShift SSO flow; nil hides it
@@ -183,6 +190,7 @@ func NewServer(d Deps) *Server {
 		proposals: ttlcache.New[[]model.Proposal](proposalsCacheTTL),
 		options:   ttlcache.New[model.Options](optionsTTL),
 		metrics:   d.Metrics,
+		tasks:     d.Tasks,
 		draft:     d.Draft,
 		auth:      d.Auth,
 		oauth:     d.OAuth,
@@ -224,6 +232,7 @@ func (s *Server) Handler() http.Handler {
 	}
 
 	mux.HandleFunc("GET /api/inventory", s.handleInventory)
+	mux.HandleFunc("GET /api/tasks", s.handleTasks)
 	mux.HandleFunc("GET /api/options", s.handleOptions)
 	mux.HandleFunc("GET /api/networks", s.handleNetworks)
 	mux.HandleFunc("GET /api/policies", s.handlePolicies)

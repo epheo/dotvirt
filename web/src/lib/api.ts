@@ -81,6 +81,25 @@ export interface Inventory {
 	// Monotonic watermark that bumps when GitOps state or a repo head moves — the cue
 	// to re-pull the out-of-band /api/networks catalog so a merged segment shows live.
 	networksVersion?: number;
+	// Same contract for the recent-tasks feed: re-pull /api/tasks when this bumps.
+	tasksVersion?: number;
+}
+
+// TaskEntry is one Recent Tasks row from the server-side feed: an imperative op
+// dotvirt performed as the caller ('op'), or a PR merged into a project's base
+// branch ('merge') — shared across every browser, with real attribution.
+export interface TaskEntry {
+	kind: 'op' | 'merge';
+	verb: string;
+	namespace?: string; // empty for node-scoped ops
+	name?: string; // VM or node name
+	project?: string;
+	prNumber?: number;
+	prURL?: string;
+	title?: string;
+	by?: string;
+	ok: boolean;
+	at: string; // RFC3339
 }
 
 export interface User {
@@ -757,6 +776,7 @@ export const api = {
 	me: () => get<User>('/api/me'),
 
 	inventory: () => get<Inventory>('/api/inventory'),
+	tasks: () => get<TaskEntry[]>('/api/tasks'),
 	options: () => get<Options>('/api/options'),
 	networks: () => get<NetworkInventory>('/api/networks'),
 	policies: () => get<PolicyInventory>('/api/policies'),

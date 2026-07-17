@@ -172,6 +172,7 @@ func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 	}
 	ns, name := r.PathValue("namespace"), r.PathValue("name")
 	result, err := s.draft.Resync(r.Context(), sc.cluster.CanUpdateVM, ns, name)
+	s.recordTask("Resync", ns, name, sc.id.Username, err == nil)
 	respond(w, result, err)
 }
 

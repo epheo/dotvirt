@@ -168,6 +168,11 @@ export interface Inventory {
    * PR — and its sync badge — then appear live instead of only on reload.
    */
   networksVersion?: number /* uint64 */;
+  /**
+   * TasksVersion is the same contract for the recent-tasks feed (GET /api/tasks,
+   * fetched out-of-band): bumps when an op is recorded or a merged PR lands.
+   */
+  tasksVersion?: number /* uint64 */;
 }
 /**
  * Change is one human-readable, YAML-free change item (a semantic diff entry).
@@ -276,6 +281,26 @@ export interface Proposal {
   prNumber: number /* int */;
   prURL: string;
   title?: string;
+}
+/**
+ * TaskEntry is one Recent Tasks row: an imperative runtime op dotvirt performed
+ * as the caller ("op"), or a PR merged into a project's base branch ("merge").
+ * Server-derived so every browser sees every admin's acts with real attribution;
+ * ops live in memory only (the durable audit trail is the cluster's audit log —
+ * ops run under the caller's own token), merges re-derive from the forge.
+ */
+export interface TaskEntry {
+  kind: string; // "op" | "merge"
+  verb: string;
+  namespace?: string; // empty for node-scoped ops
+  name?: string; // VM or node name
+  project?: string;
+  prNumber?: number /* int */;
+  prURL?: string;
+  title?: string;
+  by?: string;
+  ok: boolean;
+  at: string; // RFC3339
 }
 /**
  * Permissions is the caller's effective capability set in one namespace — the
