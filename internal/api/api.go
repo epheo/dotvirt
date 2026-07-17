@@ -318,7 +318,13 @@ func (s *Server) Handler() http.Handler {
 	if s.cfg.StaticDir == "" {
 		return apiHandler
 	}
-	return spaRouter(s.cfg.StaticDir, apiHandler)
+	var csp string
+	if b, err := os.ReadFile(filepath.Join(s.cfg.StaticDir, "index.html")); err == nil {
+		csp = buildCSP(b, s.cfg.UploadProxyURL)
+	} else {
+		log.Printf("api: no CSP: reading index.html: %v", err)
+	}
+	return withSecurityHeaders(csp, spaRouter(s.cfg.StaticDir, apiHandler))
 }
 
 // spaRouter serves /api/* via the API handler and every other path from the static
