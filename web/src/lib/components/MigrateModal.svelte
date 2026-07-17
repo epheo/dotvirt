@@ -47,6 +47,7 @@
 	function blocked(n: NodeTarget): string {
 		if (n.name === vm.nodeName) return 'current host';
 		if (!n.ready) return 'not ready';
+		if (n.maintenance) return 'maintenance';
 		if (n.unschedulable) return 'cordoned';
 		return '';
 	}

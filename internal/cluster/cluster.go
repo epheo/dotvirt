@@ -391,7 +391,13 @@ func (c *Client) Unpause(ctx context.Context, namespace, name string) error {
 	return c.kubevirt.VirtualMachineInstance(namespace).Unpause(ctx, name, &kubevirtcorev1.UnpauseOptions{})
 }
 
-// --- node maintenance-lite (cordon/uncordon; the By-Node view) ---
+// --- node maintenance (cordon/uncordon + maintenance mode; the By-Node view) ---
+
+// maintenanceAnnotation marks a node the user put in maintenance mode via
+// dotvirt. Cordon alone can't carry that intent: a merely-cordoned node is not
+// in maintenance, and maintenance must survive an out-of-band uncordon until
+// the user explicitly exits it.
+const maintenanceAnnotation = "dotvirt.io/maintenance"
 
 // NodeInfo reads a node's schedulability under the caller's token, plus whether
 // that token may cordon it (an SSAR on node update) so the UI gates the action.
@@ -403,14 +409,35 @@ func (c *Client) NodeInfo(ctx context.Context, name string) (model.NodeInfo, err
 		return model.NodeInfo{}, err
 	}
 	can, _ := c.canPatchNodes(ctx) // best-effort; false on review error
-	return model.NodeInfo{Name: name, Unschedulable: node.Spec.Unschedulable, CanCordon: can}, nil
+	return model.NodeInfo{
+		Name:          name,
+		Unschedulable: node.Spec.Unschedulable,
+		Maintenance:   node.Annotations[maintenanceAnnotation] != "",
+		CanCordon:     can,
+	}, nil
 }
 
 // SetNodeCordon patches node.spec.unschedulable under the caller's token, so
 // cluster RBAC is the sole gate (a user without node-update gets 403). Cordon
-// stops new placements; running VMIs stay until Evacuate live-migrates them.
+// stops new placements; running VMIs stay until an evacuation migrates them.
 func (c *Client) SetNodeCordon(ctx context.Context, name string, unschedulable bool) error {
 	patch := fmt.Appendf(nil, `{"spec":{"unschedulable":%t}}`, unschedulable)
+	_, err := c.kube.CoreV1().Nodes().Patch(ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
+	return err
+}
+
+// SetNodeMaintenance enters or exits maintenance mode: one patch flips the
+// annotation and spec.unschedulable together so the intent marker and its
+// cordon enforcement can't diverge. Same caller-token gate as cordon; the
+// evacuation itself stays with the per-VM Migrate so each move carries its
+// own RBAC check.
+func (c *Client) SetNodeMaintenance(ctx context.Context, name string, enter bool) error {
+	var patch []byte
+	if enter {
+		patch = fmt.Appendf(nil, `{"metadata":{"annotations":{%q:"true"}},"spec":{"unschedulable":true}}`, maintenanceAnnotation)
+	} else {
+		patch = fmt.Appendf(nil, `{"metadata":{"annotations":{%q:null}},"spec":{"unschedulable":false}}`, maintenanceAnnotation)
+	}
 	_, err := c.kube.CoreV1().Nodes().Patch(ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
 	return err
 }
@@ -427,7 +454,12 @@ func (c *Client) ListNodes(ctx context.Context) ([]model.Node, error) {
 	}
 	out := make([]model.Node, 0, len(list.Items))
 	for _, n := range list.Items {
-		out = append(out, model.Node{Name: n.Name, Ready: nodeReady(n), Unschedulable: n.Spec.Unschedulable})
+		out = append(out, model.Node{
+			Name:          n.Name,
+			Ready:         nodeReady(n),
+			Unschedulable: n.Spec.Unschedulable,
+			Maintenance:   n.Annotations[maintenanceAnnotation] != "",
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil

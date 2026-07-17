@@ -25,8 +25,8 @@
 			</p>
 		</InfoCard>
 
-		<!-- Node maintenance-lite: cordon/uncordon + evacuate (shown only when the
-		     caller's token may patch nodes). -->
+		<!-- Host maintenance: Enter/Exit Maintenance Mode + plain cordon (shown
+		     only when the caller's token may patch nodes). -->
 		<NodeActions {node} {vms} onaction={(a) => ui.recordAction(a)} />
 
 		{#if nodeUplinks.length}

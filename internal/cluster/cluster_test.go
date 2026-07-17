@@ -89,3 +89,78 @@ func TestGrantsReadWildcards(t *testing.T) {
 		t.Error("watch-only rule should NOT grant read")
 	}
 }
+
+// TestSetNodeMaintenanceRoundTrip drives enter/exit through the fake's real
+// strategic-merge patching: one patch must flip the annotation and cordon
+// together, and exit must remove the annotation (null value), not blank it.
+func TestSetNodeMaintenanceRoundTrip(t *testing.T) {
+	kube := fake.NewSimpleClientset(
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "w1"}},
+	)
+	c := &Client{kube: kube}
+	ctx := context.Background()
+
+	if err := c.SetNodeMaintenance(ctx, "w1", true); err != nil {
+		t.Fatalf("enter: %v", err)
+	}
+	n, _ := kube.CoreV1().Nodes().Get(ctx, "w1", metav1.GetOptions{})
+	if !n.Spec.Unschedulable {
+		t.Error("enter should cordon the node")
+	}
+	if n.Annotations[maintenanceAnnotation] == "" {
+		t.Error("enter should set the maintenance annotation")
+	}
+
+	if err := c.SetNodeMaintenance(ctx, "w1", false); err != nil {
+		t.Fatalf("exit: %v", err)
+	}
+	n, _ = kube.CoreV1().Nodes().Get(ctx, "w1", metav1.GetOptions{})
+	if n.Spec.Unschedulable {
+		t.Error("exit should uncordon the node")
+	}
+	if _, ok := n.Annotations[maintenanceAnnotation]; ok {
+		t.Error("exit should remove the maintenance annotation")
+	}
+}
+
+// TestNodeInfoMaintenanceSurvivesUncordon: the annotation is the intent marker,
+// so an out-of-band uncordon must not silently end maintenance mode.
+func TestNodeInfoMaintenanceSurvivesUncordon(t *testing.T) {
+	kube := fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:        "w1",
+		Annotations: map[string]string{maintenanceAnnotation: "true"},
+	}})
+	c := &Client{kube: kube}
+
+	info, err := c.NodeInfo(context.Background(), "w1")
+	if err != nil {
+		t.Fatalf("NodeInfo: %v", err)
+	}
+	if !info.Maintenance {
+		t.Error("maintenance should report from the annotation, not cordon state")
+	}
+	if info.Unschedulable {
+		t.Error("unschedulable should reflect the node spec")
+	}
+}
+
+func TestListNodesMaintenance(t *testing.T) {
+	sched := map[string]string{"kubevirt.io/schedulable": "true"}
+	kube := fake.NewSimpleClientset(
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "w1", Labels: sched}},
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:        "w2",
+			Labels:      sched,
+			Annotations: map[string]string{maintenanceAnnotation: "true"},
+		}},
+	)
+	c := &Client{kube: kube}
+
+	nodes, err := c.ListNodes(context.Background())
+	if err != nil {
+		t.Fatalf("ListNodes: %v", err)
+	}
+	if len(nodes) != 2 || nodes[0].Maintenance || !nodes[1].Maintenance {
+		t.Errorf("want w1 not in maintenance, w2 in maintenance; got %+v", nodes)
+	}
+}
