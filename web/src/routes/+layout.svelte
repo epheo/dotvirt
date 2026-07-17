@@ -68,11 +68,13 @@
 		return stop;
 	});
 
-	// The port-group catalog is fetched out-of-band (not on the live frame). Re-pull it
-	// on sign-in AND whenever networksVersion bumps (GitOps/git moved), so a merged
-	// segment appears without a reload. Keyed on the stable derived primitive, so it
-	// fires only when networks may have changed — not every VM-state frame. A failure
-	// (e.g. the OVN-K CRDs absent) leaves the catalog empty — NICs fall back to raw refs.
+	// The port-group catalog and the policy plane are fetched out-of-band (not on the
+	// live frame). Re-pull both on sign-in AND whenever networksVersion bumps
+	// (GitOps/git moved, or a policy reflector fired NetworkChanged), so a merged
+	// segment or firewall rule appears without a reload. Keyed on the stable derived
+	// primitive, so it fires only when networking may have changed — not every
+	// VM-state frame. A failure (e.g. the OVN-K CRDs absent) leaves the catalog
+	// empty — NICs fall back to raw refs, Security shows no rows.
 	$effect(() => {
 		if (!session.user) return;
 		inventory.networksVersion; // subscribe: re-pull when GitOps/git moves
@@ -80,6 +82,10 @@
 			.networks()
 			.then((n) => (inventory.netInv = n))
 			.catch(() => {}); // 401 signs out centrally
+		api
+			.policies()
+			.then((p) => (inventory.polInv = p))
+			.catch(() => {});
 	});
 
 	// Recompute the draft summary only when the SET of projects or PR lanes

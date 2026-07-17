@@ -33,6 +33,15 @@ var (
 	gvrNAD  = schema.GroupVersionResource{Group: "k8s.cni.cncf.io", Version: "v1", Resource: "network-attachment-definitions"}
 	gvrNNS  = schema.GroupVersionResource{Group: "nmstate.io", Version: "v1beta1", Resource: "nodenetworkstates"}
 	gvrNNCP = schema.GroupVersionResource{Group: "nmstate.io", Version: "v1", Resource: "nodenetworkconfigurationpolicies"}
+
+	// The policy plane (see policies.go): the DFW tiers and the Tier-0/Tier-1
+	// firewall + routing objects the Security view reads.
+	gvrNetpol   = schema.GroupVersionResource{Group: "networking.k8s.io", Version: "v1", Resource: "networkpolicies"}
+	gvrANP      = schema.GroupVersionResource{Group: "policy.networking.k8s.io", Version: "v1alpha1", Resource: "adminnetworkpolicies"}
+	gvrBANP     = schema.GroupVersionResource{Group: "policy.networking.k8s.io", Version: "v1alpha1", Resource: "baselineadminnetworkpolicies"}
+	gvrEgressFW = schema.GroupVersionResource{Group: "k8s.ovn.org", Version: "v1", Resource: "egressfirewalls"}
+	gvrEgressIP = schema.GroupVersionResource{Group: "k8s.ovn.org", Version: "v1", Resource: "egressips"}
+	gvrExtRoute = schema.GroupVersionResource{Group: "k8s.ovn.org", Version: "v1", Resource: "adminpolicybasedexternalroutes"}
 )
 
 // Snapshot holds the watch-fed networking stores. Build with New, start with Run;
@@ -44,11 +53,14 @@ type Snapshot struct {
 	udn, cudn, nad, nns, nncp cache.Indexer
 	nmstatePresent            atomic.Bool // the NNS CRD is served (nmstate installed)
 
+	// Policy-plane stores; each empty until its CRD/API is discovered.
+	netpol, anp, banp, egressfw, egressip, extroute cache.Indexer
+
 	// One health flag per reflector (reflect.TrackHealth): false while that watch
 	// errors. Healthy ANDs them, so one broken watch can't be masked by another
 	// re-establishing. A CRD still absent (never discovered) stays true — absence is
 	// a feature state, not staleness.
-	healthy [5]atomic.Bool
+	healthy [11]atomic.Bool
 
 	nodesMu sync.RWMutex
 	nodes   []cluster.NodeInfo
@@ -61,6 +73,7 @@ func New(sa *cluster.Client, bus *eventbus.Bus) *Snapshot {
 	s := &Snapshot{
 		sa: sa, bus: bus,
 		udn: idx(), cudn: idx(), nad: idx(), nns: idx(), nncp: idx(),
+		netpol: idx(), anp: idx(), banp: idx(), egressfw: idx(), egressip: idx(), extroute: idx(),
 	}
 	for i := range s.healthy {
 		s.healthy[i].Store(true) // optimistic until a list/watch actually errors
@@ -89,14 +102,20 @@ const discoveryInterval = time.Minute
 const nodeRefreshInterval = 2 * time.Minute
 
 // Run starts one discovery-gated reflector per CRD plus the node-cache refresher, and
-// returns immediately; everything stops when ctx is cancelled. Port-group kinds signal
-// NetworkChanged; NNS is watched silently.
+// returns immediately; everything stops when ctx is cancelled. Port-group and policy
+// kinds signal NetworkChanged; NNS is watched silently.
 func (s *Snapshot) Run(ctx context.Context) {
 	go s.watch(ctx, gvrUDN, s.udn, &s.healthy[0], true)
 	go s.watch(ctx, gvrCUDN, s.cudn, &s.healthy[1], true)
 	go s.watch(ctx, gvrNAD, s.nad, &s.healthy[2], true)
 	go s.watch(ctx, gvrNNCP, s.nncp, &s.healthy[3], true)
 	go s.watch(ctx, gvrNNS, s.nns, &s.healthy[4], false)
+	go s.watch(ctx, gvrNetpol, s.netpol, &s.healthy[5], true)
+	go s.watch(ctx, gvrANP, s.anp, &s.healthy[6], true)
+	go s.watch(ctx, gvrBANP, s.banp, &s.healthy[7], true)
+	go s.watch(ctx, gvrEgressFW, s.egressfw, &s.healthy[8], true)
+	go s.watch(ctx, gvrEgressIP, s.egressip, &s.healthy[9], true)
+	go s.watch(ctx, gvrExtRoute, s.extroute, &s.healthy[10], true)
 	go s.refreshNodes(ctx)
 }
 

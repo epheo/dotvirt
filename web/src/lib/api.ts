@@ -253,6 +253,37 @@ export interface NetworkInventory {
 	caps?: NetworkCaps; // per-action authoring authority for precise button gating
 }
 
+// --- Security (the policy plane: DFW tiers, gateway firewall, Tier-0) ---
+
+// The NSX-T tier a live policy object presents as. Mirrors model.PolicyKind.
+export type PolicyKind = 'dfw' | 'admin' | 'baseline' | 'gateway' | 'egressip' | 'route';
+
+// Read-plane rule row (display summary). Distinct from PolicyRule below, the
+// NetworkPolicy create-request shape.
+export interface PolicyRuleView {
+	direction: 'Ingress' | 'Egress';
+	action: string; // Allow | Deny | Pass | SNAT | Route
+	peer?: string; // source/destination summary; empty = any
+	ports?: string; // "TCP/443, UDP/53"; empty = any
+}
+
+export interface Policy {
+	name: string;
+	kind: PolicyKind;
+	namespace?: string; // empty for cluster-scoped kinds
+	backing: string; // the Kubernetes kind behind the row
+	priority?: number; // ANP precedence (lower wins)
+	target?: string; // what the policy applies to, summarized
+	rules?: PolicyRuleView[];
+	sync?: SyncStatus;
+	health?: string;
+	syncError?: string;
+}
+
+export interface PolicyInventory {
+	policies: Policy[];
+}
+
 // --- DRS (descheduler-driven automatic VM rebalancing) ---
 
 export type DRSMode = 'Predictive' | 'Automatic';
@@ -728,6 +759,7 @@ export const api = {
 	inventory: () => get<Inventory>('/api/inventory'),
 	options: () => get<Options>('/api/options'),
 	networks: () => get<NetworkInventory>('/api/networks'),
+	policies: () => get<PolicyInventory>('/api/policies'),
 
 	// Commit history + per-commit revert (a forward commit opened as a PR).
 	history: (project: string) => get<Commit[]>(`/api/projects/${enc(project)}/history`),
