@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/epheo/dotvirt/internal/tasks"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // The Forgejo webhook: push/PR events trigger an immediate fetch of that repo
@@ -40,6 +43,23 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var event struct {
+		Action      string `json:"action"`
+		PullRequest struct {
+			Number   int       `json:"number"`
+			Title    string    `json:"title"`
+			HTMLURL  string    `json:"html_url"`
+			Merged   bool      `json:"merged"`
+			MergedAt time.Time `json:"merged_at"`
+			User     struct {
+				Login string `json:"login"`
+			} `json:"user"`
+			Head struct {
+				Ref string `json:"ref"`
+			} `json:"head"`
+			Base struct {
+				Ref string `json:"ref"`
+			} `json:"base"`
+		} `json:"pull_request"`
 		Repository struct {
 			CloneURL string `json:"clone_url"`
 			HTMLURL  string `json:"html_url"`
@@ -54,6 +74,25 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.nudgeProposals()
+	// A PR merged into the trunk lands in the Recent Tasks feed now, in webhook
+	// latency; the proposals refresher's forge poll is the backstop that records
+	// the same (deduped) entry when no webhook arrives.
+	if pr := event.PullRequest; s.tasks != nil && pr.Merged && pr.Base.Ref == s.cfg.BaseBranch {
+		repo := forge.NormalizeRepoURL(event.Repository.CloneURL)
+		if repo == "" {
+			repo = forge.NormalizeRepoURL(event.Repository.HTMLURL)
+		}
+		if repo != "" {
+			s.tasks.RecordMerge(tasks.Merge{
+				RepoURL: repo,
+				Number:  pr.Number,
+				URL:     pr.HTMLURL,
+				Title:   pr.Title,
+				By:      tasks.MergeAuthor(pr.Head.Ref, s.cfg.ProposedBranch, pr.User.Login),
+				At:      pr.MergedAt,
+			})
+		}
+	}
 	// Drive ArgoCD to pick up the push directly: nudge the Application(s) sourcing
 	// this repo to hard-refresh (auto-sync then reconciles), so a merge applies in
 	// webhook latency rather than ArgoCD's poll interval. Fire-and-forget on a

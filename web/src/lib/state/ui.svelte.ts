@@ -69,14 +69,6 @@ class Ui {
 		this.toasts = this.toasts.filter((t) => t.id !== id);
 	}
 
-	// Runtime ops the user just triggered, surfaced in the dock's Recent Tasks.
-	recentActions = $state<
-		{ verb: string; namespace: string; name: string; ok: boolean; at: number }[]
-	>([]);
-	recordAction(a: { verb: string; namespace: string; name: string; ok: boolean }) {
-		this.recentActions = [{ ...a, at: Date.now() }, ...this.recentActions].slice(0, 8);
-	}
-
 	// The Changes drawer — a summon-from-anywhere cart, deliberately not a route.
 	changesOpen = $state(false);
 
@@ -105,7 +97,6 @@ class Ui {
 
 	reset() {
 		this.toasts = [];
-		this.recentActions = [];
 		this.changesOpen = false;
 		this.modal = null;
 		this.ctx = null;

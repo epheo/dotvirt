@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import { ChevronDown, ChevronUp, ListChecks, RefreshCw } from 'lucide-svelte';
 	import {
 		api,
@@ -7,6 +6,7 @@
 		type DraftView,
 		type Inventory,
 		type Proposal,
+		type TaskEntry,
 		type VMEvent,
 	} from '$lib/api';
 	import { duration } from '$lib/format';
@@ -20,7 +20,7 @@
 	let {
 		drafts,
 		proposals,
-		actions,
+		tasks: feed,
 		inventory,
 		username,
 		onselect,
@@ -28,7 +28,7 @@
 	}: {
 		drafts: { project: string; draft: DraftView }[];
 		proposals: Proposal[];
-		actions: { verb: string; namespace: string; name: string; ok: boolean; at: number }[];
+		tasks: TaskEntry[];
 		inventory: Inventory | null;
 		username: string;
 		onselect: (namespace: string, name: string) => void;
@@ -97,32 +97,6 @@
 		if (t === 'alarms') loadAlarms();
 	}
 
-	// A PR lane vanishing from the live stream means it merged (or closed); while
-	// the project still shows OutOfSync VMs, surface it as "ArgoCD syncing" — the
-	// merge→reconcile gap an admin otherwise can't see. Best-effort and purely
-	// client-derived; entries expire after a linger window.
-	const SYNC_LINGER_MS = 5 * 60 * 1000;
-	let merged = $state<{ project: string; prNumber: number; title: string; at: number }[]>([]);
-	let prevProposals: Proposal[] = [];
-	$effect(() => {
-		const cur = proposals;
-		untrack(() => {
-			const keys = new Set(cur.map((p) => `${p.project}#${p.prNumber}`));
-			const gone = prevProposals.filter((p) => !keys.has(`${p.project}#${p.prNumber}`));
-			if (gone.length)
-				merged = [
-					...merged,
-					...gone.map((p) => ({
-						project: p.project,
-						prNumber: p.prNumber,
-						title: p.title ?? '',
-						at: Date.now(),
-					})),
-				].slice(-20);
-			prevProposals = cur;
-		});
-	});
-
 	type Task = {
 		kind: 'staged' | 'pr' | 'sync' | 'drift' | 'action' | 'migration';
 		verb: string;
@@ -176,20 +150,22 @@
 						});
 					}
 		}
-		// Imperative runtime ops the user just triggered (most recent first).
-		for (const a of actions) {
+		// Imperative runtime ops from the server feed (every admin's, not just this
+		// browser's), most recent first with real attribution.
+		for (const t of feed) {
+			if (t.kind !== 'op') continue;
 			out.push({
 				kind: 'action',
-				verb: a.verb,
-				namespace: a.namespace,
-				name: a.name,
+				verb: t.verb,
+				namespace: t.namespace ?? '',
+				name: t.name ?? '',
 				prTitle: '',
-				status: a.ok ? 'Requested' : 'Failed',
-				by: username,
-				project: '',
+				status: t.ok ? 'Requested' : 'Failed',
+				by: t.by ?? '—',
+				project: t.project ?? '',
 				url: '',
-				ok: a.ok,
-				at: a.at,
+				ok: t.ok,
+				at: Date.parse(t.at),
 			});
 		}
 		for (const { project, draft } of drafts) {
@@ -220,12 +196,14 @@
 				url: p.prURL,
 			});
 		}
-		// Freshly merged lanes: "syncing" while their project still drifts.
-		for (const m of merged) {
-			if (Date.now() - m.at > SYNC_LINGER_MS) continue;
+		// Merged PRs from the server feed (webhook-instant, forge-derived, so they
+		// survive reloads and show every admin's merges): "syncing" while their
+		// project still drifts — the merge→reconcile gap an admin can't otherwise see.
+		for (const t of feed) {
+			if (t.kind !== 'merge') continue;
 			const drifting = inventory?.projects.some(
 				(p) =>
-					p.name === m.project &&
+					p.name === t.project &&
 					p.namespaces.some((ns) => ns.vms.some((v) => v.sync === 'OutOfSync')),
 			);
 			out.push({
@@ -233,14 +211,14 @@
 				verb: 'Merged',
 				namespace: '',
 				name: '',
-				prTitle: m.title || `PR #${m.prNumber}`,
+				prTitle: t.title || `PR #${t.prNumber}`,
 				status: drifting ? 'ArgoCD syncing…' : 'Synced',
-				by: username,
-				project: m.project,
-				url: '',
+				by: t.by ?? '—',
+				project: t.project ?? '',
+				url: t.prURL ?? '',
 				ok: true,
 				active: !!drifting,
-				at: m.at,
+				at: Date.parse(t.at),
 			});
 		}
 		if (inventory) {

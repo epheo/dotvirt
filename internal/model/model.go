@@ -156,6 +156,9 @@ type Inventory struct {
 	// not on this frame), so the frontend re-pulls it when this bumps: a merged segment
 	// PR — and its sync badge — then appear live instead of only on reload.
 	NetworksVersion uint64 `json:"networksVersion,omitempty"`
+	// TasksVersion is the same contract for the recent-tasks feed (GET /api/tasks,
+	// fetched out-of-band): bumps when an op is recorded or a merged PR lands.
+	TasksVersion uint64 `json:"tasksVersion,omitempty"`
 }
 
 // Change is one human-readable, YAML-free change item (a semantic diff entry).
@@ -258,6 +261,25 @@ type Proposal struct {
 	PRNumber int    `json:"prNumber"`
 	PRURL    string `json:"prURL"`
 	Title    string `json:"title,omitempty"`
+}
+
+// TaskEntry is one Recent Tasks row: an imperative runtime op dotvirt performed
+// as the caller ("op"), or a PR merged into a project's base branch ("merge").
+// Server-derived so every browser sees every admin's acts with real attribution;
+// ops live in memory only (the durable audit trail is the cluster's audit log —
+// ops run under the caller's own token), merges re-derive from the forge.
+type TaskEntry struct {
+	Kind      string `json:"kind"` // "op" | "merge"
+	Verb      string `json:"verb"`
+	Namespace string `json:"namespace,omitempty"` // empty for node-scoped ops
+	Name      string `json:"name,omitempty"`      // VM or node name
+	Project   string `json:"project,omitempty"`
+	PRNumber  int    `json:"prNumber,omitempty"`
+	PRURL     string `json:"prURL,omitempty"`
+	Title     string `json:"title,omitempty"`
+	By        string `json:"by,omitempty"`
+	OK        bool   `json:"ok"`
+	At        string `json:"at"` // RFC3339
 }
 
 // Permissions is the caller's effective capability set in one namespace — the

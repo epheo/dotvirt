@@ -45,7 +45,9 @@ func (s *Server) handleCreateClone(w http.ResponseWriter, r *http.Request) {
 	// The clone CR's own name just needs uniqueness; the target VM carries the
 	// user-chosen name.
 	cloneName := "clone-" + target + "-" + time.Now().UTC().Format("20060102-150405")
-	if err := sc.cluster.CreateClone(r.Context(), ns, name, cloneName, target); err != nil {
+	err := sc.cluster.CreateClone(r.Context(), ns, name, cloneName, target)
+	s.recordTask("Clone", ns, name, sc.id.Username, err == nil)
+	if err != nil {
 		http.Error(w, err.Error(), runtimeOpStatus(err))
 		return
 	}

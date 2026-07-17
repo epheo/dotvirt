@@ -1,4 +1,4 @@
-import type { Inventory, NetworkInventory, PolicyInventory, VM } from '$lib/api';
+import type { Inventory, NetworkInventory, PolicyInventory, TaskEntry, VM } from '$lib/api';
 
 // The live cluster read layer: the WS inventory snapshot plus the once-per-
 // session networking inventory (GET /api/networks). Everything else the UI
@@ -56,6 +56,10 @@ class InventoryStore {
 	// object), so an effect keyed on it re-pulls /api/networks only when networks may
 	// have changed — not on every VM-state frame.
 	readonly networksVersion = $derived(this.inventory?.networksVersion ?? 0);
+	// The recent-tasks feed (GET /api/tasks), re-pulled when tasksVersion bumps —
+	// every browser sees every admin's ops and merges, with real attribution.
+	taskFeed = $state<TaskEntry[]>([]);
+	readonly tasksVersion = $derived(this.inventory?.tasksVersion ?? 0);
 	// Namespaces a VM can be created in: those in projects that have a repo (no
 	// point staging into a project with no backing repo).
 	readonly namespaces = $derived(
@@ -80,6 +84,7 @@ class InventoryStore {
 		this.inventory = null;
 		this.netInv = null;
 		this.polInv = null;
+		this.taskFeed = [];
 	}
 
 	findVM(namespace: string, name: string): VM | null {

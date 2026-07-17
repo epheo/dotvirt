@@ -109,6 +109,34 @@ func TestFindPRAcrossStates(t *testing.T) {
 	})
 }
 
+// MergedPRs filters the closed-PR list down to merges into base, and a null
+// merged_at (Forgejo's unmerged form) must parse to a zero time, not an error.
+func TestMergedPRs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("state"); got != "closed" {
+			t.Errorf("state = %q, want closed", got)
+		}
+		_, _ = w.Write([]byte(`[
+			{"number": 4, "title": "landed", "merged": true, "merged_at": "2026-07-17T10:00:00Z",
+			 "user": {"login": "dotvirt-bot"}, "head": {"ref": "dotvirt/proposed/alice/team-a-abc"},
+			 "base": {"ref": "main"}},
+			{"number": 5, "title": "abandoned", "merged": false, "merged_at": null,
+			 "base": {"ref": "main"}},
+			{"number": 6, "title": "other base", "merged": true, "merged_at": "2026-07-17T09:00:00Z",
+			 "base": {"ref": "release"}}
+		]`))
+	}))
+	defer srv.Close()
+
+	prs, err := testClient(srv.URL).MergedPRs("main", 20)
+	if err != nil {
+		t.Fatalf("MergedPRs: %v", err)
+	}
+	if len(prs) != 1 || prs[0].Number != 4 || prs[0].User.Login != "dotvirt-bot" || prs[0].MergedAt.IsZero() {
+		t.Fatalf("got %+v, want merged #4 with author and timestamp", prs)
+	}
+}
+
 func TestReopenPR(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPatch {

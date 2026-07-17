@@ -30,7 +30,6 @@
 		tab = 'summary',
 		ontab,
 		onstaged,
-		onaction,
 		stagedItem = null,
 		onstagedopen,
 		onsearchlabel,
@@ -43,7 +42,6 @@
 		tab?: Tab;
 		ontab?: (t: Tab) => void;
 		onstaged?: () => void;
-		onaction?: (a: { verb: string; namespace: string; name: string; ok: boolean }) => void;
 		stagedItem?: DraftItem | null;
 		onstagedopen?: () => void;
 		onsearchlabel?: (key: string, value: string) => void;
@@ -99,8 +97,8 @@
 	}
 
 	// One handler for every registry action: runtime ops run via the registry's
-	// own run() (with busy/result reporting + the task log), host actions map to
-	// this view's modals/tabs.
+	// own run() (with busy/result reporting; the server records the task), host
+	// actions map to this view's modals/tabs.
 	async function handleAction(a: VMAction) {
 		actionsOpen = false;
 		if (!vm) return;
@@ -108,18 +106,15 @@
 		if (a.kind === 'runtime' && a.run) {
 			runtimeBusy = true;
 			const verb = a.verb ?? a.label;
-			let ok = true;
 			try {
 				await a.run(target);
 				ui.showToast(`${verb} requested for ${target.name}.`, { kind: 'success' });
 			} catch (e) {
 				if (e instanceof Unauthorized) return; // signed out centrally; skip the error toast
-				ok = false;
 				ui.showToast(`${verb} failed for ${target.name}: ${friendlyError(e)}`, { kind: 'error' });
 			} finally {
 				runtimeBusy = false;
 			}
-			onaction?.({ verb, namespace: target.namespace, name: target.name, ok });
 			return;
 		}
 		switch (a.id) {
@@ -395,11 +390,7 @@
 	{/if}
 
 	{#if cloning}
-		<CloneModal
-			{vm}
-			onclose={() => (cloning = false)}
-			ondone={(ok) => onaction?.({ verb: 'Clone', namespace: vm.namespace, name: vm.name, ok })}
-		/>
+		<CloneModal {vm} onclose={() => (cloning = false)} />
 	{/if}
 
 	{#if migrating}
@@ -408,7 +399,6 @@
 			onclose={() => (migrating = false)}
 			ondone={(ok) => {
 				if (ok) ui.showToast(`Live-migration requested for ${vm.name}.`, { kind: 'success' });
-				onaction?.({ verb: 'Live-migration', namespace: vm.namespace, name: vm.name, ok });
 			}}
 		/>
 	{/if}

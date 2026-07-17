@@ -13,11 +13,9 @@
 	let {
 		node,
 		vms,
-		onaction,
 	}: {
 		node: string;
 		vms: VM[];
-		onaction?: (a: { verb: string; namespace: string; name: string; ok: boolean }) => void;
 	} = $props();
 
 	let info = $state<NodeInfo | null>(null);
@@ -74,11 +72,9 @@
 			try {
 				await api.migrate(vm.namespace, vm.name);
 				migrated++;
-				onaction?.({ verb: 'Live-migration', namespace: vm.namespace, name: vm.name, ok: true });
 			} catch (e) {
 				if (e instanceof Unauthorized) return '';
 				failed++;
-				onaction?.({ verb: 'Live-migration', namespace: vm.namespace, name: vm.name, ok: false });
 			}
 		}
 		ok = failed === 0;

@@ -88,6 +88,17 @@
 			.catch(() => {});
 	});
 
+	// The recent-tasks feed rides the same out-of-band contract: re-pull when an
+	// op is recorded or a merged PR lands (tasksVersion), not on every VM frame.
+	$effect(() => {
+		if (!session.user) return;
+		inventory.tasksVersion; // subscribe
+		api
+			.tasks()
+			.then((t) => (inventory.taskFeed = t))
+			.catch(() => {});
+	});
+
 	// Recompute the draft summary only when the SET of projects or PR lanes
 	// changes: depend on the stable keys, and read the project list via untrack so
 	// the effect doesn't also subscribe to the per-frame array reference (which
@@ -198,7 +209,7 @@
 		<TaskDock
 			drafts={drafts.drafts}
 			proposals={inventory.proposals}
-			actions={ui.recentActions}
+			tasks={inventory.taskFeed}
 			inventory={inventory.inventory}
 			username={session.user.username}
 			onselect={(namespace, name) => goto(vmHref(namespace, name))}

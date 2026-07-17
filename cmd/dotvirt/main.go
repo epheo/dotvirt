@@ -31,6 +31,7 @@ import (
 	"github.com/epheo/dotvirt/internal/netstate"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/stream"
+	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
@@ -160,6 +161,10 @@ func run() error {
 		return err
 	}
 
+	// Recent-tasks feed: handlers record imperative ops, the webhook + proposals
+	// refresher record merged PRs; in-memory only (merges reseed from the forge).
+	taskFeed := tasks.New(bus)
+
 	server := api.NewServer(api.Deps{
 		ClusterFactory: clusterFactory,
 		State:          clusterSnapshot,
@@ -170,11 +175,13 @@ func run() error {
 		Resolver:       resolver,
 		Repos:          repos,
 		Metrics:        metricsClient,
+		Tasks:          taskFeed,
 		Draft:          coordinator,
 		Auth:           authenticator,
 		OAuth:          oauthFlow,
 		Config: api.Config{
 			BaseBranch:        cfg.BaseBranch,
+			ProposedBranch:    cfg.ProposedBranch,
 			AllowOrigin:       cfg.UIOrigin,
 			AppSetPluginToken: cfg.AppSetPluginToken,
 			StaticDir:         cfg.StaticDir,
@@ -195,7 +202,7 @@ func run() error {
 	inventoryKinds := []eventbus.Kind{
 		eventbus.VMSpecChanged, eventbus.LiveChanged, eventbus.NamespaceChanged,
 		eventbus.RBACChanged, eventbus.DriftChanged, eventbus.GitChanged, eventbus.ProposalsChanged,
-		eventbus.NetworkChanged,
+		eventbus.NetworkChanged, eventbus.TaskChanged,
 	}
 	hubWake, _ := bus.Subscribe(inventoryKinds...)
 	hub := stream.NewHub(server.InventoryForIdentity, hubWake, func() uint64 { return bus.Version(inventoryKinds...) })

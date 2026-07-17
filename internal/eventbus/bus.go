@@ -45,6 +45,9 @@ const (
 	// NetworkChanged: a port-group CRD (UDN/CUDN/NAD/NNCP) moved — the network catalog,
 	// fetched out-of-band from the inventory frame, needs re-pulling.
 	NetworkChanged
+	// TaskChanged: the recent-tasks feed moved — an imperative op was recorded or a
+	// merged PR landed. The feed is fetched out-of-band, like the network catalog.
+	TaskChanged
 
 	// kindCount is the number of kinds — keep it last. Sizes the version array.
 	kindCount

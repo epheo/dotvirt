@@ -3,13 +3,16 @@ package changeset
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/internal/vmgen"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // Propose builds the working branch from (id, proj)'s whole draft, pushes it to
@@ -99,6 +102,40 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	// handler drop the result body).
 	log.Printf("propose %s/%s: branch pushed but PR unavailable: %v", proj.Name, branch, err)
 	out.CompareURL = fc.CompareURL(branch, c.baseBranch)
+	return out, nil
+}
+
+// RecentlyMerged lists PRs merged into proj's base branch since 'since' — the
+// task feed's merged lane (the poll backstop behind the forge webhook, and the
+// reseed after a restart). Attribution comes from the head branch, not the PR
+// poster: dotvirt's bot opens every proposal PR (see tasks.MergeAuthor).
+func (c *Coordinator) RecentlyMerged(proj project.ProjectInfo, since time.Time) ([]tasks.Merge, error) {
+	if proj.Repo == "" {
+		return nil, nil
+	}
+	fc := c.forge.For(proj.Repo) // nil-safe: nil factory / unparsable repo → nil client
+	if fc == nil {
+		return nil, nil
+	}
+	prs, err := fc.MergedPRs(c.baseBranch, 20)
+	if err != nil {
+		return nil, err
+	}
+	repo := forge.NormalizeRepoURL(proj.Repo)
+	var out []tasks.Merge
+	for _, pr := range prs {
+		if pr.MergedAt.Before(since) {
+			continue
+		}
+		out = append(out, tasks.Merge{
+			RepoURL: repo,
+			Number:  pr.Number,
+			URL:     pr.HTMLURL,
+			Title:   pr.Title,
+			By:      tasks.MergeAuthor(pr.Head.Ref, c.proposed, pr.User.Login),
+			At:      pr.MergedAt,
+		})
+	}
 	return out, nil
 }
 

@@ -27,7 +27,7 @@
 
 		<!-- Host maintenance: Enter/Exit Maintenance Mode + plain cordon (shown
 		     only when the caller's token may patch nodes). -->
-		<NodeActions {node} {vms} onaction={(a) => ui.recordAction(a)} />
+		<NodeActions {node} {vms} />
 
 		{#if nodeUplinks.length}
 			<InfoCard title="Uplinks">

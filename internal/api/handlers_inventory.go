@@ -101,6 +101,9 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	if s.drift != nil {
 		inv.NetworksVersion += s.drift.ObjectDriftGen()
 	}
+	// Same contract for the recent-tasks feed: the client re-pulls /api/tasks
+	// when this bumps (an op recorded, a merged PR landed).
+	inv.TasksVersion = s.bus.Version(eventbus.TaskChanged)
 	return inv, nil
 }
 
