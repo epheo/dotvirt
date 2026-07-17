@@ -13,8 +13,17 @@
 	// and a VM deleted mid-view degrades to the empty state instead of crashing.
 	const vm = $derived(inventory.findVM(namespace, name));
 
-	type Tab = 'summary' | 'monitor' | 'configure' | 'permissions' | 'snapshots' | 'console';
-	const TABS: Tab[] = ['summary', 'monitor', 'configure', 'permissions', 'snapshots', 'console'];
+	type Tab =
+		'summary' | 'monitor' | 'configure' | 'security' | 'permissions' | 'snapshots' | 'console';
+	const TABS: Tab[] = [
+		'summary',
+		'monitor',
+		'configure',
+		'security',
+		'permissions',
+		'snapshots',
+		'console',
+	];
 	const tab = $derived.by<Tab>(() => {
 		const t = page.url.searchParams.get('tab') as Tab | null;
 		return t && TABS.includes(t) ? t : 'summary';

@@ -849,6 +849,51 @@ export interface PolicyInventory {
   policies: Policy[];
 }
 /**
+ * PolicyBinding is one policy bound to a workload in the effective-policy
+ * answer: the rendered policy plus how certain the match is.
+ */
+export interface PolicyBinding {
+  policy: Policy;
+  /**
+   * Conditional: a pod-level selector couldn't be resolved (namespace-scoped
+   * query, or an unreadable selector), so the policy applies only to the pods
+   * matching its target — the binding is kept rather than hidden.
+   */
+  conditional?: boolean;
+  /**
+   * Note carries tier semantics the list order alone can't express (e.g. the
+   * baseline tier applies only where nothing above decided).
+   */
+  note?: string;
+}
+/**
+ * EffectivePolicy answers "what governs this workload, in evaluation order":
+ * the east-west chain (admin tiers by precedence, then the project rules that
+ * select it, then baseline) and the egress planes (gateway firewall, SNAT,
+ * external routes). Control-plane binding, not flow simulation: it shows which
+ * policies bind and in what order, it does not verdict a specific connection.
+ */
+export interface EffectivePolicy {
+  namespace: string;
+  vm?: string;
+  /**
+   * Labels pod selectors were matched against. Live: the running VMI's (what
+   * the virt-launcher pod carries); otherwise the manifest template's.
+   */
+  labels?: { [key: string]: string};
+  labelsLive?: boolean;
+  eastWest?: PolicyBinding[];
+  /**
+   * Selected by >=1 NetworkPolicy for the direction, so everything the
+   * project tier doesn't explicitly allow is denied there.
+   */
+  defaultDenyIngress?: boolean;
+  defaultDenyEgress?: boolean;
+  gateway?: PolicyBinding[];
+  snat?: PolicyBinding[];
+  routes?: PolicyBinding[];
+}
+/**
  * Template is one VirtualMachineTemplate manifest in a library repo's
  * templates/ directory — a content-library entry (vSphere: a VM template).
  * Name is the file's basename: the deployable identity the API routes carry.

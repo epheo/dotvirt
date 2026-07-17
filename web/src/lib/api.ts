@@ -303,6 +303,31 @@ export interface PolicyInventory {
 	policies: Policy[];
 }
 
+// One policy bound to a workload in the effective-policy answer. conditional:
+// a pod selector couldn't be resolved (namespace-scoped query), so it applies
+// only to the pods matching its target.
+export interface PolicyBinding {
+	policy: Policy;
+	conditional?: boolean;
+	note?: string; // tier semantics the order can't express (baseline)
+}
+
+// "What governs this workload, in evaluation order" — control-plane binding,
+// not flow simulation. eastWest is already ordered: admin by precedence, then
+// selecting project rules, then baseline.
+export interface EffectivePolicy {
+	namespace: string;
+	vm?: string;
+	labels?: Record<string, string>; // labels pod selectors matched against
+	labelsLive?: boolean; // true = running VMI's labels, false = manifest's
+	eastWest?: PolicyBinding[];
+	defaultDenyIngress?: boolean; // selected by >=1 ingress netpol
+	defaultDenyEgress?: boolean;
+	gateway?: PolicyBinding[];
+	snat?: PolicyBinding[];
+	routes?: PolicyBinding[];
+}
+
 // --- DRS (descheduler-driven automatic VM rebalancing) ---
 
 export type DRSMode = 'Predictive' | 'Automatic';
@@ -780,6 +805,10 @@ export const api = {
 	options: () => get<Options>('/api/options'),
 	networks: () => get<NetworkInventory>('/api/networks'),
 	policies: () => get<PolicyInventory>('/api/policies'),
+	vmPolicy: (namespace: string, name: string) =>
+		get<EffectivePolicy>(`/api/vms/${enc(namespace)}/${enc(name)}/policy`),
+	namespacePolicy: (namespace: string) =>
+		get<EffectivePolicy>(`/api/namespaces/${enc(namespace)}/policy`),
 	// Which sign-in paths exist (shown on the login screen before any session).
 	authMethods: () => get<{ sso: boolean }>('/api/auth/methods'),
 

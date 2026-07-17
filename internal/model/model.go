@@ -790,6 +790,43 @@ type PolicyInventory struct {
 	Policies []Policy `json:"policies"`
 }
 
+// PolicyBinding is one policy bound to a workload in the effective-policy
+// answer: the rendered policy plus how certain the match is.
+type PolicyBinding struct {
+	Policy Policy `json:"policy"`
+	// Conditional: a pod-level selector couldn't be resolved (namespace-scoped
+	// query, or an unreadable selector), so the policy applies only to the pods
+	// matching its target — the binding is kept rather than hidden.
+	Conditional bool `json:"conditional,omitempty"`
+	// Note carries tier semantics the list order alone can't express (e.g. the
+	// baseline tier applies only where nothing above decided).
+	Note string `json:"note,omitempty"`
+}
+
+// EffectivePolicy answers "what governs this workload, in evaluation order":
+// the east-west chain (admin tiers by precedence, then the project rules that
+// select it, then baseline) and the egress planes (gateway firewall, SNAT,
+// external routes). Control-plane binding, not flow simulation: it shows which
+// policies bind and in what order, it does not verdict a specific connection.
+type EffectivePolicy struct {
+	Namespace string `json:"namespace"`
+	VM        string `json:"vm,omitempty"`
+	// Labels pod selectors were matched against. Live: the running VMI's (what
+	// the virt-launcher pod carries); otherwise the manifest template's.
+	Labels     map[string]string `json:"labels,omitempty"`
+	LabelsLive bool              `json:"labelsLive,omitempty"`
+
+	EastWest []PolicyBinding `json:"eastWest,omitempty"`
+	// Selected by >=1 NetworkPolicy for the direction, so everything the
+	// project tier doesn't explicitly allow is denied there.
+	DefaultDenyIngress bool `json:"defaultDenyIngress,omitempty"`
+	DefaultDenyEgress  bool `json:"defaultDenyEgress,omitempty"`
+
+	Gateway []PolicyBinding `json:"gateway,omitempty"`
+	SNAT    []PolicyBinding `json:"snat,omitempty"`
+	Routes  []PolicyBinding `json:"routes,omitempty"`
+}
+
 // Template is one VirtualMachineTemplate manifest in a library repo's
 // templates/ directory — a content-library entry (vSphere: a VM template).
 // Name is the file's basename: the deployable identity the API routes carry.

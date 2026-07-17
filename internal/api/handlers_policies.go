@@ -75,13 +75,17 @@ func (s *Server) enrichPolicyDrift(pols []model.Policy) {
 		return
 	}
 	for i := range pols {
-		group, kind := policyGVK(pols[i].Backing)
-		if kind == "" {
-			continue
-		}
-		if d, ok := s.drift.ResourceDrift(group, kind, pols[i].Namespace, pols[i].Name); ok {
-			pols[i].Sync, pols[i].Health, pols[i].SyncError = d.Sync, d.Health, d.Message
-		}
+		s.policyDrift(&pols[i])
+	}
+}
+
+func (s *Server) policyDrift(p *model.Policy) {
+	group, kind := policyGVK(p.Backing)
+	if kind == "" {
+		return
+	}
+	if d, ok := s.drift.ResourceDrift(group, kind, p.Namespace, p.Name); ok {
+		p.Sync, p.Health, p.SyncError = d.Sync, d.Health, d.Message
 	}
 }
 

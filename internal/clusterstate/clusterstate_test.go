@@ -44,6 +44,35 @@ func TestLiveVMsMergesVMIOntoVM(t *testing.T) {
 	}
 }
 
+// WorkloadLabels prefers the running VMI's labels (what the virt-launcher pod
+// carries) over the manifest template's, and falls back for stopped VMs.
+func TestWorkloadLabels(t *testing.T) {
+	s := stateWithIndexers()
+	tmpl := &kubevirtcorev1.VirtualMachineInstanceTemplateSpec{}
+	tmpl.ObjectMeta.Labels = map[string]string{"app": "authored"}
+	_ = s.vms.Add(&kubevirtcorev1.VirtualMachine{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "vm"},
+		Spec:       kubevirtcorev1.VirtualMachineSpec{Template: tmpl},
+	})
+
+	lbls, live, found := s.WorkloadLabels("ns", "vm")
+	if !found || live || lbls["app"] != "authored" {
+		t.Errorf("stopped VM: want manifest labels, got %v live=%v found=%v", lbls, live, found)
+	}
+
+	_ = s.vmis.Add(&kubevirtcorev1.VirtualMachineInstance{ObjectMeta: metav1.ObjectMeta{
+		Namespace: "ns", Name: "vm", Labels: map[string]string{"app": "live"},
+	}})
+	lbls, live, found = s.WorkloadLabels("ns", "vm")
+	if !found || !live || lbls["app"] != "live" {
+		t.Errorf("running VM: want VMI labels, got %v live=%v found=%v", lbls, live, found)
+	}
+
+	if _, _, found := s.WorkloadLabels("ns", "ghost"); found {
+		t.Errorf("unknown VM must not be found")
+	}
+}
+
 func TestNamespacesExposesLabelsAndAnnotations(t *testing.T) {
 	s := stateWithIndexers()
 	_ = s.nss.Add(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{

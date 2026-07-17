@@ -27,6 +27,7 @@ package clusterstate
 
 import (
 	"context"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -236,6 +237,28 @@ func (s *State) LiveVMs() map[string]LiveVM {
 		out[vmi.Namespace+"/"+vmi.Name] = liveFromVMI(vmi)
 	}
 	return out
+}
+
+// WorkloadLabels returns the labels network policies match for one VM's
+// workload: the running VMI's (what the virt-launcher pod carries), else the
+// manifest template's for a stopped VM. live reports which source answered;
+// found=false when the VM is in neither store. Copies — reflector-owned
+// objects must never escape.
+func (s *State) WorkloadLabels(namespace, name string) (lbls map[string]string, live, found bool) {
+	if obj, ok, _ := s.vmis.GetByKey(namespace + "/" + name); ok {
+		if vmi, ok := obj.(*kubevirtcorev1.VirtualMachineInstance); ok {
+			return maps.Clone(vmi.Labels), true, true
+		}
+	}
+	if obj, ok, _ := s.vms.GetByKey(namespace + "/" + name); ok {
+		if vm, ok := obj.(*kubevirtcorev1.VirtualMachine); ok {
+			if vm.Spec.Template != nil {
+				lbls = maps.Clone(vm.Spec.Template.ObjectMeta.Labels)
+			}
+			return lbls, false, true
+		}
+	}
+	return nil, false, false
 }
 
 // Namespaces returns the project-labeled namespaces in the snapshot as the
