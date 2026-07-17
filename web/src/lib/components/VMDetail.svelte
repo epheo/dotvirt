@@ -13,6 +13,7 @@
 	import ConfirmDelete from './ConfirmDelete.svelte';
 	import Console from './Console.svelte';
 	import EditSettings from './EditSettings.svelte';
+	import EffectivePolicyPanel from './EffectivePolicyPanel.svelte';
 	import MetricsPanel from './MetricsPanel.svelte';
 	import PendingBanner from './PendingBanner.svelte';
 	import Permissions from './Permissions.svelte';
@@ -53,7 +54,8 @@
 		intent?: { id: DetailAction; seq: number } | null;
 	} = $props();
 
-	type Tab = 'summary' | 'monitor' | 'configure' | 'permissions' | 'snapshots' | 'console';
+	type Tab =
+		'summary' | 'monitor' | 'configure' | 'security' | 'permissions' | 'snapshots' | 'console';
 
 	// Monitor sub-rail (vCenter keeps all time-series under Monitor).
 	let monitorView = $state<'events' | 'performance'>('events');
@@ -308,6 +310,7 @@
 					{ id: 'summary', label: 'Summary' },
 					{ id: 'monitor', label: 'Monitor' },
 					{ id: 'configure', label: 'Configure' },
+					{ id: 'security', label: 'Security' },
 					{ id: 'permissions', label: 'Permissions' },
 					{ id: 'snapshots', label: 'Snapshots' },
 					{ id: 'console', label: 'Console' },
@@ -365,6 +368,8 @@
 				{/if}
 			{:else if tab === 'configure'}
 				<VMConfigure {vm} {networks} onedit={openEdit} {onsearchlabel} />
+			{:else if tab === 'security'}
+				<EffectivePolicyPanel namespace={vm.namespace} vm={vm.name} />
 			{:else if tab === 'permissions'}
 				<Permissions namespaces={[vm.namespace]} />
 			{:else if tab === 'snapshots'}

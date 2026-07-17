@@ -12,6 +12,7 @@
 	import ClusterSummary from '$lib/components/ClusterSummary.svelte';
 	import ContainerConfigure from '$lib/components/ContainerConfigure.svelte';
 	import ContainerMonitor from '$lib/components/ContainerMonitor.svelte';
+	import EffectivePolicyPanel from '$lib/components/EffectivePolicyPanel.svelte';
 	import PendingBanner from '$lib/components/PendingBanner.svelte';
 	import Permissions from '$lib/components/Permissions.svelte';
 	import TabBar from '$lib/components/TabBar.svelte';
@@ -40,12 +41,16 @@
 		{ id: 'vms', label: 'VMs' },
 		{ id: 'monitor', label: 'Monitor' },
 		{ id: 'configure', label: 'Configure' },
+		{ id: 'security', label: 'Security' },
 		{ id: 'permissions', label: 'Permissions' },
 	];
 	const tabs = $derived.by(() => {
-		if (scope.kind === 'node') return ALL_TABS.filter((t) => t.id !== 'permissions');
+		if (scope.kind === 'node')
+			return ALL_TABS.filter((t) => t.id !== 'permissions' && t.id !== 'security');
 		if (scope.kind === 'network' || scope.kind === 'storage')
 			return ALL_TABS.filter((t) => t.id === 'summary' || t.id === 'vms');
+		// Effective policy evaluates against exactly one namespace.
+		if (scope.kind !== 'namespace') return ALL_TABS.filter((t) => t.id !== 'security');
 		return ALL_TABS;
 	});
 	const tab = $derived.by(() => {
@@ -220,6 +225,12 @@
 			cluster={scope.kind === 'all'}
 			onstaged={() => drafts.refresh()}
 		/>
+	{/if}
+{:else if tab === 'security'}
+	{#if scope.kind === 'namespace'}
+		<div class="min-h-0 flex-1 overflow-y-auto p-4">
+			<EffectivePolicyPanel namespace={scope.namespace} />
+		</div>
 	{/if}
 {:else}
 	{#if picked.size > 0}
