@@ -91,6 +91,10 @@ func isOpenPath(path string) bool {
 	switch path {
 	case "/api/healthz", "/api/login":
 		return true
+	case "/api/auth/methods", "/api/auth/openshift", "/api/auth/callback":
+		// The SSO surface: all pre-session by nature (methods tells the login
+		// screen what to offer; the redirect/callback pair mint the session).
+		return true
 	case "/api/v1/getparams.execute":
 		// The ArgoCD ApplicationSet plugin generator authenticates with its own
 		// shared token (checked in the handler), not a user session/TokenReview.

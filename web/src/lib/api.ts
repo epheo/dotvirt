@@ -760,6 +760,8 @@ export const api = {
 	options: () => get<Options>('/api/options'),
 	networks: () => get<NetworkInventory>('/api/networks'),
 	policies: () => get<PolicyInventory>('/api/policies'),
+	// Which sign-in paths exist (shown on the login screen before any session).
+	authMethods: () => get<{ sso: boolean }>('/api/auth/methods'),
 
 	// Commit history + per-commit revert (a forward commit opened as a PR).
 	history: (project: string) => get<Commit[]>(`/api/projects/${enc(project)}/history`),

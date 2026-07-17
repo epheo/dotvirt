@@ -72,6 +72,23 @@ spec:
                       its poll).
                     type: string
                 type: object
+              auth:
+                description: |-
+                  AuthSpec enables OpenShift SSO beside the always-present token login. The
+                  admin registers the cluster-scoped OAuthClient (redirect URI
+                  https://<ingress.host>/api/auth/callback) — a cluster-admin act the operator
+                  deliberately doesn't perform; the operator only wires the credential through.
+                properties:
+                  oauthClientID:
+                    description: OAuthClientID is the OAuthClient's name; empty leaves
+                      SSO off.
+                    type: string
+                  oauthSecretRef:
+                    description: |-
+                      OAuthSecretRef names a Secret in the install namespace holding the
+                      OAuthClient's secret under key "clientSecret".
+                    type: string
+                type: object
               forge:
                 description: |-
                   ForgeSpec points dotvirt at its git forge and the platform-tier repo. The forge

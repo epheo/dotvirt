@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { api, type User } from '$lib/api';
 
 	let { onlogin }: { onlogin: (user: User) => void } = $props();
@@ -6,6 +7,18 @@
 	let token = $state('');
 	let busy = $state(false);
 	let error = $state('');
+	// SSO is offered once the backend confirms it's configured; the token form is
+	// always there (vanilla Kubernetes, ServiceAccounts, or an OAuth outage).
+	let sso = $state(false);
+	$effect(() => {
+		api
+			.authMethods()
+			.then((m) => (sso = m.sso))
+			.catch(() => {});
+	});
+	// The OAuth callback bounces here with ?sso_error=1 on any failure (the
+	// detail is server-logged, never shown — it can carry endpoint internals).
+	const ssoError = $derived(page.url.searchParams.get('sso_error') !== null);
 
 	async function submit(e: SubmitEvent) {
 		e.preventDefault();
@@ -30,9 +43,30 @@
 	>
 		<h1 class="mb-1 text-xl font-semibold text-ink">Sign in to dotvirt</h1>
 		<p class="mb-4 text-sm text-ink-muted">
-			Paste your Kubernetes API token. dotvirt acts as you — you see only the projects your cluster
-			permissions allow.
+			dotvirt acts as you — you see only the projects your cluster permissions allow.
 		</p>
+
+		{#if ssoError}
+			<p
+				class="mb-3 rounded border border-danger-soft bg-danger-soft/60 px-3 py-2 text-sm text-danger-ink"
+			>
+				OpenShift sign-in failed. Try again, or paste a token below.
+			</p>
+		{/if}
+
+		{#if sso}
+			<a
+				href="/api/auth/openshift"
+				class="mb-4 block w-full rounded bg-accent px-4 py-2 text-center text-sm font-medium text-white hover:bg-accent-hover"
+			>
+				Sign in with OpenShift
+			</a>
+			<div class="mb-3 flex items-center gap-2 text-xs text-ink-faint">
+				<span class="h-px flex-1 bg-line"></span>
+				or paste a token
+				<span class="h-px flex-1 bg-line"></span>
+			</div>
+		{/if}
 
 		<textarea
 			bind:value={token}
@@ -50,9 +84,11 @@
 		<button
 			type="submit"
 			disabled={busy || !token.trim()}
-			class="mt-3 w-full rounded bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent disabled:opacity-40"
+			class="mt-3 w-full rounded {sso
+				? 'border border-line bg-inset text-ink-soft hover:bg-inset-strong'
+				: 'bg-accent text-white hover:bg-accent'} px-4 py-2 text-sm font-medium disabled:opacity-40"
 		>
-			{busy ? 'Signing in…' : 'Sign in'}
+			{busy ? 'Signing in…' : 'Sign in with token'}
 		</button>
 
 		<div class="mt-4 border-t border-line-soft pt-3 text-xs text-ink-muted">

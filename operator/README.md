@@ -69,6 +69,44 @@ install):
 server validates schema, admission, and RBAC, and nothing is persisted — a spec
 check against a real cluster.
 
+## OpenShift SSO (optional)
+
+dotvirt can offer "Sign in with OpenShift" beside the always-present token login:
+the OAuth access token the cluster hands back is a normal bearer token, so it rides
+the same TokenReview + per-request pass-through path as a pasted one. Registering
+the cluster-scoped `OAuthClient` is a cluster-admin act the operator deliberately
+does not perform — create it and the secret, then point the CR at them:
+
+```yaml
+apiVersion: oauth.openshift.io/v1
+kind: OAuthClient
+metadata:
+  name: dotvirt
+secret: <random>
+redirectURIs:
+  - https://<ingress.host>/api/auth/callback
+grantMethod: auto
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dotvirt-oauth
+  namespace: <install namespace>
+stringData:
+  clientSecret: <the same random>
+```
+
+```yaml
+spec:
+  auth:
+    oauthClientID: dotvirt
+    oauthSecretRef: dotvirt-oauth
+```
+
+The server-side code exchange calls the cluster's oauth Route; if its certificate
+isn't publicly trusted, mount the signing CA into the pod and set
+`DOTVIRT_OAUTH_CA` to its path (CR support for this is not wired yet).
+
 ## Packaging
 
 - **`make run`** — run the controller against the current kubecontext (prepend

@@ -135,6 +135,7 @@ type Server struct {
 	metrics   *metrics.Client                   // Prometheus/Thanos for the Performance tab; nil disables it
 	draft     Draft
 	auth      *auth.Authenticator // nil leaves the API open (dev)
+	oauth     *auth.OAuth         // nil hides the OpenShift SSO login path
 	stream    StreamHandler
 	vnc       VNCHandler
 	cfg       Config
@@ -162,6 +163,7 @@ type Deps struct {
 	Metrics        *metrics.Client // Prometheus/Thanos query client; nil disables the Performance tab
 	Draft          Draft
 	Auth           *auth.Authenticator
+	OAuth          *auth.OAuth // OpenShift SSO flow; nil hides it
 	Config         Config
 }
 
@@ -183,6 +185,7 @@ func NewServer(d Deps) *Server {
 		metrics:   d.Metrics,
 		draft:     d.Draft,
 		auth:      d.Auth,
+		oauth:     d.OAuth,
 		cfg:       d.Config,
 
 		propTargets: map[string]propTarget{},
@@ -210,6 +213,14 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("POST /api/login", s.auth.Login)
 		mux.HandleFunc("POST /api/logout", s.auth.Logout)
 		mux.HandleFunc("GET /api/me", s.auth.Me)
+		// The login screen asks which sign-in paths exist before any session.
+		mux.HandleFunc("GET /api/auth/methods", func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, http.StatusOK, map[string]bool{"sso": s.oauth != nil})
+		})
+		if s.oauth != nil {
+			mux.HandleFunc("GET /api/auth/openshift", s.oauth.LoginRedirect)
+			mux.HandleFunc("GET /api/auth/callback", s.oauth.Callback)
+		}
 	}
 
 	mux.HandleFunc("GET /api/inventory", s.handleInventory)

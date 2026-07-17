@@ -155,6 +155,16 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 	if dv.Spec.Metrics.URL != "" {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: dv.Spec.Metrics.URL})
 	}
+	// OpenShift SSO: the operator only wires the credential of the admin-created
+	// OAuthClient through — registering the client is a cluster-admin act it
+	// deliberately doesn't perform (no oauthclients grant). Optional secret ref: a
+	// CR naming SSO before the secret exists must not wedge the pod.
+	if dv.Spec.Auth.OAuthClientID != "" && dv.Spec.Auth.OAuthSecretRef != "" {
+		env = append(env,
+			corev1.EnvVar{Name: "DOTVIRT_OAUTH_CLIENT_ID", Value: dv.Spec.Auth.OAuthClientID},
+			secretEnv("DOTVIRT_OAUTH_CLIENT_SECRET", dv.Spec.Auth.OAuthSecretRef, "clientSecret", true),
+		)
+	}
 
 	forgeSecret := ForgeSecretName(dv)
 	env = append(env,
