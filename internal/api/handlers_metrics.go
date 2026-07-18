@@ -141,18 +141,23 @@ func foldDRSBand(load *model.HostLoad, pcts []float64, threshold string) {
 }
 
 // handleHostLoad returns the worker utilization distribution behind the DRS
-// balance card. Node-level data, the same sensitivity class as the
-// node-allocatable totals ClusterSummary serves; the caller's token still
-// rides to Thanos, so the metrics backend's RBAC stays the gate. The band
-// reflects the platform repo's committed DRS threshold — the configuration
-// merges have made real — and is absent until DRS is configured.
+// balance card. Node-level data: the distribution is cached once for all
+// callers, so a node-read SSAR must gate it here — on a cache hit the
+// caller's token never reaches Thanos, and without the gate a hit would hand
+// a tenant the node data an admin's token fetched. The band reflects the
+// platform repo's committed DRS threshold — the configuration merges have
+// made real — and is absent until DRS is configured.
 func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
 	if !s.metricsReady(w) {
 		return
 	}
-	id, _, err := s.userCluster(r)
+	id, c, err := s.userCluster(r)
 	if err != nil {
 		fail(w, unavailable("cluster access", err))
+		return
+	}
+	if !s.canReadNodesCached(r.Context(), id, c) {
+		http.Error(w, "node metrics require node read access", http.StatusForbidden)
 		return
 	}
 	load, pcts, err := s.metrics.HostLoad(r.Context(), id.Token)
