@@ -12,9 +12,12 @@
 	import TreeVMRow from './TreeVMRow.svelte';
 
 	// The Compute tree (VMs & Templates analog): All VMs → projects → namespaces
-	// → VMs. Highlights derive from the URL.
+	// → VMs. Highlights derive from the URL. Projects without a repo sink below
+	// the tracked ones so a broken/unadopted project never pushes real work down.
 	const scope = $derived(scopeFromPath(page.url.pathname));
 	const projects = $derived(inventory.inventory?.projects ?? []);
+	const tracked = $derived(projects.filter((p) => !p.error));
+	const untracked = $derived(projects.filter((p) => p.error));
 
 	const projectScoped = (name: string) => scope.kind === 'project' && scope.project === name;
 	const nsScoped = (project: string, ns: string) =>
@@ -24,6 +27,14 @@
 	const collapsed = persisted<Record<string, boolean>>('dotvirt.tree.compute', {});
 	const toggle = (id: string) =>
 		(collapsed.value = { ...collapsed.value, [id]: !collapsed.value[id] });
+	// Untracked projects default collapsed (their warning is noise until acted
+	// on); an explicit toggle is persisted and wins either way.
+	const projectOpen = (p: Project) => {
+		const v = collapsed.value[`p:${p.name}`];
+		return v === undefined ? !p.error : !v;
+	};
+	const toggleProject = (p: Project) =>
+		(collapsed.value = { ...collapsed.value, [`p:${p.name}`]: projectOpen(p) });
 
 	// Drift rolls up: a namespace flags drift if any of its VMs is OutOfSync; a
 	// project flags drift if any of its namespaces does.
@@ -52,14 +63,13 @@
 		<span class="truncate font-semibold text-ink-soft">All VMs</span>
 	</TreeRow>
 
-	{#each projects as project (project.name)}
-		{@const pid = `p:${project.name}`}
+	{#snippet projectNode(project: Project)}
 		<div>
 			<!-- Project: chevron toggles collapse, the label focuses the grid. -->
 			<TreeRow
 				active={projectScoped(project.name)}
-				expanded={!collapsed.value[pid]}
-				ontoggle={() => toggle(pid)}
+				expanded={projectOpen(project)}
+				ontoggle={() => toggleProject(project)}
 				href={hrefForScope({ kind: 'project', project: project.name })}
 				oncontextmenu={(e) =>
 					ctxContainer(e, {
@@ -90,7 +100,7 @@
 				{/snippet}
 			</TreeRow>
 
-			{#if !collapsed.value[pid]}
+			{#if projectOpen(project)}
 				{#if project.error}
 					<div class="py-1 pr-2 pl-7 text-xs text-warn-ink italic" title={project.error}>
 						{project.error}
@@ -157,7 +167,24 @@
 				{/each}
 			{/if}
 		</div>
+	{/snippet}
+
+	{#each tracked as project (project.name)}
+		{@render projectNode(project)}
 	{/each}
+
+	{#if untracked.length > 0}
+		{#if tracked.length > 0}
+			<div
+				class="mt-2 mb-0.5 border-t border-line-soft px-2 pt-1.5 text-[10px] font-semibold tracking-wide text-ink-faint uppercase"
+			>
+				Untracked — no repo
+			</div>
+		{/if}
+		{#each untracked as project (project.name)}
+			{@render projectNode(project)}
+		{/each}
+	{/if}
 
 	{#if projects.length === 0}
 		<div class="px-2 py-4 text-center text-xs text-ink-faint">
