@@ -28,6 +28,7 @@ package clusterstate
 import (
 	"context"
 	"maps"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -259,6 +260,48 @@ func (s *State) WorkloadLabels(namespace, name string) (lbls map[string]string, 
 		}
 	}
 	return nil, false, false
+}
+
+// WorkloadNetworks reports one VM workload's NIC attachments for the trace
+// connectivity check: whether it binds the namespace's primary network (pod
+// binding, or a default multus binding) and its secondary multus refs,
+// namespace-qualified. Live VMI spec first (what actually runs), else the VM
+// template; addresses come from the running VMI's interfaces, nil when stopped.
+func (s *State) WorkloadNetworks(namespace, name string) (podNet bool, nets, ips []string, found bool) {
+	fromSpec := func(spec *kubevirtcorev1.VirtualMachineInstanceSpec) {
+		for _, n := range spec.Networks {
+			switch {
+			case n.Pod != nil:
+				podNet = true
+			case n.Multus != nil && n.Multus.Default:
+				podNet = true
+			case n.Multus != nil:
+				ref := n.Multus.NetworkName
+				if !strings.Contains(ref, "/") {
+					ref = namespace + "/" + ref
+				}
+				nets = append(nets, ref)
+			}
+		}
+	}
+	if obj, ok, _ := s.vmis.GetByKey(namespace + "/" + name); ok {
+		if vmi, ok := obj.(*kubevirtcorev1.VirtualMachineInstance); ok {
+			fromSpec(&vmi.Spec)
+			for _, iface := range vmi.Status.Interfaces {
+				ips = append(ips, iface.IPs...)
+			}
+			return podNet, nets, ips, true
+		}
+	}
+	if obj, ok, _ := s.vms.GetByKey(namespace + "/" + name); ok {
+		if vm, ok := obj.(*kubevirtcorev1.VirtualMachine); ok {
+			if vm.Spec.Template != nil {
+				fromSpec(&vm.Spec.Template.Spec)
+			}
+			return podNet, nets, nil, true
+		}
+	}
+	return false, nil, nil, false
 }
 
 // Namespaces returns the project-labeled namespaces in the snapshot as the

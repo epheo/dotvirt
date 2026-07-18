@@ -14,6 +14,7 @@
 	import Console from './Console.svelte';
 	import EditSettings from './EditSettings.svelte';
 	import EffectivePolicyPanel from './EffectivePolicyPanel.svelte';
+	import TracePanel from './TracePanel.svelte';
 	import MetricsPanel from './MetricsPanel.svelte';
 	import PendingBanner from './PendingBanner.svelte';
 	import Permissions from './Permissions.svelte';
@@ -369,7 +370,15 @@
 			{:else if tab === 'configure'}
 				<VMConfigure {vm} {networks} onedit={openEdit} {onsearchlabel} />
 			{:else if tab === 'security'}
-				<EffectivePolicyPanel namespace={vm.namespace} vm={vm.name} />
+				<div class="max-w-3xl space-y-4">
+					<section class="rounded border border-line bg-panel p-3">
+						<h2 class="mb-2 text-sm font-semibold text-ink">Trace a flow from this VM</h2>
+						{#key `${vm.namespace}/${vm.name}`}
+							<TracePanel source={{ namespace: vm.namespace, vm: vm.name }} />
+						{/key}
+					</section>
+					<EffectivePolicyPanel namespace={vm.namespace} vm={vm.name} />
+				</div>
 			{:else if tab === 'permissions'}
 				<Permissions namespaces={[vm.namespace]} />
 			{:else if tab === 'snapshots'}

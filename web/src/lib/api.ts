@@ -331,6 +331,41 @@ export interface EffectivePolicy {
 	routes?: PolicyBinding[];
 }
 
+// One simulated flow: a source VM, a destination (VM or external IP), and the
+// protocol/port. Control-plane simulation — no packet is injected.
+export interface TraceRequest {
+	source: TraceEndpointRef;
+	destination: TraceEndpointRef;
+	protocol?: string; // TCP (default) | UDP | SCTP
+	port?: number; // 0 = any port
+}
+
+export interface TraceEndpointRef {
+	namespace?: string;
+	vm?: string;
+	ip?: string; // external destination
+}
+
+// The simulation's answer. Deny is only ever certain: an unresolved rule
+// (named port, stopped VM, DNS rule) downgrades the verdict to Conditional.
+export interface TraceResult {
+	verdict: string; // Allow | Deny | Conditional | Unreachable
+	steps: TraceStep[];
+}
+
+// One observation on the path. decisive marks the rule that fixed a
+// direction's verdict; conditional keeps a maybe-matching rule visible.
+export interface TraceStep {
+	stage: string; // connectivity | segment | admin | dfw | baseline | default | gateway | snat | route
+	direction?: string; // Egress (source side) | Ingress (destination side)
+	policy?: Policy;
+	rule?: PolicyRuleView;
+	action: string;
+	conditional?: boolean;
+	decisive?: boolean;
+	note?: string;
+}
+
 // --- DRS (descheduler-driven automatic VM rebalancing) ---
 
 export type DRSMode = 'Predictive' | 'Automatic';
@@ -812,6 +847,7 @@ export const api = {
 		get<EffectivePolicy>(`/api/vms/${enc(namespace)}/${enc(name)}/policy`),
 	namespacePolicy: (namespace: string) =>
 		get<EffectivePolicy>(`/api/namespaces/${enc(namespace)}/policy`),
+	trace: (req: TraceRequest) => post<TraceResult>('/api/networking/trace', req),
 	// Which sign-in paths exist (shown on the login screen before any session).
 	authMethods: () => get<{ sso: boolean }>('/api/auth/methods'),
 

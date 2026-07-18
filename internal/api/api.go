@@ -309,6 +309,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/drift", s.handleDrift)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/policy", s.handleVMPolicy)
 	mux.HandleFunc("GET /api/namespaces/{namespace}/policy", s.handleNamespacePolicy)
+	mux.HandleFunc("POST /api/networking/trace", s.handleTrace)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/manifest", s.handleManifest)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/events", s.handleEvents)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/screenshot", s.handleScreenshot)
