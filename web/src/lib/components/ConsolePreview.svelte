@@ -36,10 +36,13 @@
 		title="Open the live console"
 		class="group relative block w-full overflow-hidden rounded border border-line bg-slate-900 xl:w-80 xl:shrink-0"
 	>
+		<!-- xl: the host row stretches the bezel to the tiles+usage column; the
+		     framebuffer letterboxes inside it instead of capping at thumbnail
+		     height, so the preview reads as one harmonious right column. -->
 		<img
 			src={screenshotURL(vm, tick)}
 			alt="Console preview"
-			class="max-h-64 w-full object-contain"
+			class="max-h-64 w-full object-contain xl:h-full xl:max-h-full"
 			onerror={() => (failed = true)}
 		/>
 		<span

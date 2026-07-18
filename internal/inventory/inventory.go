@@ -142,6 +142,7 @@ func applyLive(vm *model.VM, s clusterstate.LiveVM) {
 	vm.Phase, vm.GuestIP, vm.NodeName = s.Phase, s.GuestIP, s.NodeName
 	vm.Paused = s.Paused
 	vm.IPs, vm.OS, vm.MemoryActual = s.IPs, s.OS, s.MemoryActual
+	vm.VCPUs = s.VCPUs
 	// Merge live per-NIC addresses onto the manifest's adapters (by name). Build a
 	// fresh slice so the cached manifest VM isn't mutated across builds.
 	if len(s.Interfaces) > 0 && len(vm.Networks) > 0 {

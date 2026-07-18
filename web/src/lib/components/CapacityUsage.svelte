@@ -1,41 +1,12 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { api, Unauthorized, type VM, type VMUsage } from '$lib/api';
+	import type { VMUsage } from '$lib/api';
 	import { relativeAge } from '$lib/format';
-	import { pollWhileVisible } from '$lib/poll';
 	import UsageBar from './UsageBar.svelte';
 
-	let { vm }: { vm: VM } = $props();
-
-	let usage = $state<VMUsage | null>(null);
-	let loading = $state(false);
-	let failed = $state(false);
-
-	async function load() {
-		loading = true;
-		try {
-			usage = await api.vmUsage(vm.namespace, vm.name);
-			failed = false;
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			failed = true;
-		} finally {
-			loading = false;
-		}
-	}
-
-	// Reload on selection change only. Key on the VM identity, not the vm object:
-	// the live stream hands down a fresh vm every frame, and load() reads
-	// vm.namespace/name synchronously — untrack keeps those reads from re-firing
-	// this effect each frame.
-	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
-	$effect(() => {
-		vmKey;
-		untrack(load);
-	});
-	// Point-in-time, refreshed on a cadence (vCenter's Summary is a live snapshot),
-	// paused while the tab is backgrounded.
-	$effect(() => pollWhileVisible(load, 30000));
+	// Pure view over the summary's usage snapshot — VMSummary owns the fetch so
+	// the at-a-glance tiles and these bars read one consistent sample.
+	let { usage, loading, failed }: { usage: VMUsage | null; loading: boolean; failed: boolean } =
+		$props();
 </script>
 
 <section class="rounded border border-line">

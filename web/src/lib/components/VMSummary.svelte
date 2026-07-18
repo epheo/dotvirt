@@ -1,12 +1,15 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { Activity, ChevronDown, ChevronRight, Cpu, HardDrive, MemoryStick } from 'lucide-svelte';
-	import type { Change, DraftItem, VM } from '$lib/api';
-	import { duration } from '$lib/format';
+	import { api, Unauthorized, type Change, type DraftItem, type VM, type VMUsage } from '$lib/api';
+	import { duration, fmtUsage } from '$lib/format';
+	import { pollWhileVisible } from '$lib/poll';
 	import CapacityUsage from './CapacityUsage.svelte';
 	import ChangeList from './ChangeList.svelte';
 	import ConsolePreview from './ConsolePreview.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import Row from './Row.svelte';
+	import Sparkline from './Sparkline.svelte';
 	import StagedDiff from './StagedDiff.svelte';
 	import StatusDot from './StatusDot.svelte';
 
@@ -21,6 +24,7 @@
 		onadopt,
 		onresync,
 		onconsole,
+		onmonitor,
 	}: {
 		vm: VM;
 		stagedItem?: DraftItem | null;
@@ -29,10 +33,43 @@
 		onadopt: () => void;
 		onresync: () => void;
 		onconsole: () => void;
+		onmonitor: () => void;
 	} = $props();
 
 	// A paused VMI keeps phase Running, so the label checks the Paused flag too.
 	const statusText = $derived(vm.paused ? 'Paused' : (vm.phase ?? vm.power));
+
+	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
+
+	// One usage snapshot feeds the CPU/Memory tiles and the bars below, so both
+	// always agree. Keyed on identity — the live stream hands down a fresh vm
+	// object every frame; untrack keeps load()'s reads from re-firing.
+	let usage = $state<VMUsage | null>(null);
+	let usageLoading = $state(false);
+	let usageFailed = $state(false);
+	async function loadUsage() {
+		usageLoading = true;
+		try {
+			usage = await api.vmUsage(vm.namespace, vm.name);
+			usageFailed = false;
+		} catch (e) {
+			if (e instanceof Unauthorized) return;
+			usageFailed = true;
+		} finally {
+			usageLoading = false;
+		}
+	}
+	$effect(() => {
+		vmKey;
+		usage = null;
+		untrack(loadUsage);
+	});
+	$effect(() => pollWhileVisible(loadUsage, 30000));
+
+	// The manifest owns sizing when present; an instancetype-sized VM carries no
+	// cpuCores/memory in git, so the tiles fall back to the rendered topology.
+	const cpuVal = $derived(vm.cpuCores ?? (vm.vcpus || undefined));
+	const memVal = $derived(vm.memory ?? vm.memoryActual);
 
 	// Staged changes for this VM, keyed by field label (for inline current→future).
 	const stagedChanges = $derived.by(() => {
@@ -43,63 +80,92 @@
 
 	// Drift detail folds per selection, not per frame: key on identity.
 	let showDrift = $state(false);
-	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
 	$effect(() => {
 		vmKey;
 		showDrift = false;
 	});
 </script>
 
-<!-- At-a-glance tiles: the vCenter-style capacity summary. -->
-<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-	<div class="rounded border border-line bg-inset p-3">
-		<div class="flex items-center gap-1.5 text-xs text-ink-muted">
-			<Cpu size={13} /> CPU
-		</div>
-		<div class="mt-1 text-lg font-semibold text-ink">
-			{#if stagedChanges.has('CPU')}
-				<StagedDiff from={`${vm.cpuCores ?? '—'} vCPU`} to={stagedChanges.get('CPU')?.to ?? ''} />
-			{:else}{vm.cpuCores ?? '—'}<span class="ml-1 text-sm font-normal text-ink-muted">vCPU</span
-				>{/if}
-		</div>
-	</div>
-	<div class="rounded border border-line bg-inset p-3">
-		<div class="flex items-center gap-1.5 text-xs text-ink-muted">
-			<MemoryStick size={13} /> Memory
-		</div>
-		<div class="mt-1 text-lg font-semibold text-ink">
-			{#if stagedChanges.has('Memory')}
-				<StagedDiff from={vm.memory ?? '—'} to={stagedChanges.get('Memory')?.to ?? ''} />
-			{:else}{vm.memory ?? '—'}{/if}
-		</div>
-		{#if vm.memoryActual && vm.memoryActual !== vm.memory}
-			<div class="text-xs text-ink-faint">{vm.memoryActual} live</div>
-		{/if}
-	</div>
-	<div class="rounded border border-line bg-inset p-3">
-		<div class="flex items-center gap-1.5 text-xs text-ink-muted">
-			<HardDrive size={13} /> Disks
-		</div>
-		<div class="mt-1 text-lg font-semibold text-ink">{vm.disks?.length ?? 0}</div>
-	</div>
-	<div class="rounded border border-line bg-inset p-3">
-		<div class="flex items-center gap-1.5 text-xs text-ink-muted">
-			<Activity size={13} /> Status
-		</div>
-		<div class="mt-1 text-lg font-semibold text-ink">{statusText}</div>
-		{#if duration(vm.startedAt)}<div class="text-xs text-ink-faint">
-				up {duration(vm.startedAt)}
-			</div>{/if}
-	</div>
-</div>
-
-<!-- Live usage bars (vCenter "Capacity and Usage") + the console preview
-     thumbnail (running VMs only). Side by side when there's room, stacked
-     on narrow; the preview emits no DOM when hidden, so capacity reclaims
-     the full width. -->
-<div class="mt-4 flex flex-col gap-4 xl:flex-row xl:items-start">
+<!-- At-a-glance tiles + live usage on the left, the console preview spanning
+     both on the right (running VMs only) — the preview emits no DOM when
+     hidden, so the left column reclaims the full width. CPU/Memory tiles
+     carry the live trend and click through to Monitor. -->
+<div class="flex flex-col gap-4 xl:flex-row xl:items-stretch">
 	<div class="min-w-0 flex-1">
-		<CapacityUsage {vm} />
+		<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+			<button
+				onclick={onmonitor}
+				title="Open the Monitor tab"
+				class="rounded border border-line bg-inset p-3 text-left hover:border-line-strong"
+			>
+				<div class="flex items-center gap-1.5 text-xs text-ink-muted">
+					<Cpu size={13} /> CPU
+				</div>
+				<div class="mt-1 text-lg font-semibold text-ink">
+					{#if stagedChanges.has('CPU')}
+						<StagedDiff from={`${cpuVal ?? '—'} vCPU`} to={stagedChanges.get('CPU')?.to ?? ''} />
+					{:else if cpuVal}
+						{cpuVal}<span class="ml-1 text-sm font-normal text-ink-muted">vCPU</span>
+					{:else if vm.instancetype}
+						<span class="text-sm font-medium" title="Sized by the instance type"
+							>{vm.instancetype}</span
+						>
+					{:else}—{/if}
+				</div>
+				{#if usage}
+					<div class="mt-1 flex items-center gap-2 text-xs text-ink-faint">
+						<Sparkline values={usage.cpu.spark ?? []} color="var(--chart-1)" height={14} />
+						{Math.round(usage.cpu.used)}% used
+					</div>
+				{/if}
+			</button>
+			<button
+				onclick={onmonitor}
+				title="Open the Monitor tab"
+				class="rounded border border-line bg-inset p-3 text-left hover:border-line-strong"
+			>
+				<div class="flex items-center gap-1.5 text-xs text-ink-muted">
+					<MemoryStick size={13} /> Memory
+				</div>
+				<div class="mt-1 text-lg font-semibold text-ink">
+					{#if stagedChanges.has('Memory')}
+						<StagedDiff from={memVal ?? '—'} to={stagedChanges.get('Memory')?.to ?? ''} />
+					{:else if memVal}
+						{memVal}
+					{:else if vm.instancetype}
+						<span class="text-sm font-medium" title="Sized by the instance type"
+							>{vm.instancetype}</span
+						>
+					{:else}—{/if}
+				</div>
+				{#if usage && usage.memory.total}
+					<div class="mt-1 flex items-center gap-2 text-xs text-ink-faint">
+						<Sparkline values={usage.memory.spark ?? []} color="var(--chart-2)" height={14} />
+						{fmtUsage('bytes', usage.memory.used)} used
+					</div>
+				{:else if vm.memoryActual && vm.memory && vm.memoryActual !== vm.memory}
+					<div class="mt-1 text-xs text-ink-faint">{vm.memoryActual} live</div>
+				{/if}
+			</button>
+			<div class="rounded border border-line bg-inset p-3">
+				<div class="flex items-center gap-1.5 text-xs text-ink-muted">
+					<HardDrive size={13} /> Disks
+				</div>
+				<div class="mt-1 text-lg font-semibold text-ink">{vm.disks?.length ?? 0}</div>
+			</div>
+			<div class="rounded border border-line bg-inset p-3">
+				<div class="flex items-center gap-1.5 text-xs text-ink-muted">
+					<Activity size={13} /> Status
+				</div>
+				<div class="mt-1 text-lg font-semibold text-ink">{statusText}</div>
+				{#if duration(vm.startedAt)}<div class="text-xs text-ink-faint">
+						up {duration(vm.startedAt)}
+					</div>{/if}
+			</div>
+		</div>
+		<div class="mt-4">
+			<CapacityUsage {usage} loading={usageLoading} failed={usageFailed} />
+		</div>
 	</div>
 	<ConsolePreview {vm} onopen={() => onconsole()} />
 </div>
