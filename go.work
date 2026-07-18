@@ -5,7 +5,7 @@
 // client versions. It imports the app's shared pkg/forge via the replace in
 // operator/go.mod (which also lets the operator build standalone, e.g. in its
 // container image).
-go 1.26.4
+go 1.26.5
 
 use (
 	.
