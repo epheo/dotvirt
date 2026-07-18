@@ -8,6 +8,7 @@
 	import FormField from './FormField.svelte';
 	import Modal from './Modal.svelte';
 	import StatusDot from './StatusDot.svelte';
+	import TextInput from './TextInput.svelte';
 
 	// Clone name-prompt + progress: creating a VirtualMachineClone is imperative
 	// (RBAC-gated, like snapshots), but the resulting target VM is config state
@@ -93,16 +94,17 @@
 				: ''}
 		>
 			<div class="flex items-center gap-2">
-				<input
+				<TextInput
 					data-autofocus
 					bind:value={target}
-					class="flex-1 rounded border border-line-strong px-2 py-1.5 font-mono text-sm focus:border-accent/60"
+					mono
+					class="flex-1"
 					placeholder="{vm.name}-clone"
 				/>
 				<button
 					onclick={create}
 					disabled={!valid || busy}
-					class="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent disabled:bg-line-strong"
+					class="flex shrink-0 items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:bg-line-strong"
 				>
 					<Copy size={14} />
 					{busy ? 'Cloning…' : 'Clone'}
@@ -153,7 +155,7 @@
 	{#snippet footer()}
 		<button
 			onclick={onclose}
-			class="ml-auto rounded border border-line-strong px-3 py-1 text-sm text-ink-soft hover:bg-inset"
+			class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong"
 		>
 			Close
 		</button>

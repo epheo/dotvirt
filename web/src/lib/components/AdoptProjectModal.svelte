@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { api } from '$lib/api';
 	import ErrorNote from './ErrorNote.svelte';
+	import FormField from './FormField.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
+	import TextInput from './TextInput.svelte';
 
 	// Adopt an EXISTING labeled-but-repoless project into GitOps: unlike NewProjectModal
 	// the name and namespaces are fixed (they already exist in the cluster), so this
@@ -61,17 +63,12 @@
 				<span class="text-ink-soft">{namespaces.join(', ')}</span>
 			</div>
 		</div>
-		<label class="block">
-			<span class="text-ink-soft">Owners <span class="text-ink-faint">(optional)</span></span>
-			<input
-				bind:value={owners}
-				placeholder="alice bob"
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-			/>
+		<FormField label="Owners (optional)">
+			<TextInput bind:value={owners} placeholder="alice bob" data-autofocus />
 			<span class="mt-1 block text-[11px] text-ink-faint"
 				>Usernames granted admin on the project's namespaces (space/comma separated).</span
 			>
-		</label>
+		</FormField>
 		<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">
 			Creates the tenant repo now, and stages each namespace (with the <code>dotvirt.io/repo</code>
 			annotation){#if owners.trim()}
@@ -81,6 +78,12 @@
 		<ErrorNote {error} />
 	</div>
 	{#snippet footer()}
-		<StageFooter label="Attach repo" {submitting} onsubmit={submit} oncancel={onclose} />
+		<StageFooter
+			label="Attach repo"
+			summary={`Creates repo “${project}”; stages ${namespaces.length} namespace annotation${namespaces.length === 1 ? '' : 's'} → platform repo`}
+			{submitting}
+			onsubmit={submit}
+			oncancel={onclose}
+		/>
 	{/snippet}
 </Modal>

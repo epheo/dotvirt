@@ -7,10 +7,13 @@
 		type DRSMode,
 		type DRSView,
 	} from '$lib/api';
+	import ChoiceCards from './ChoiceCards.svelte';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 	import FormField from './FormField.svelte';
+	import TextInput from './TextInput.svelte';
+	import SelectInput from './SelectInput.svelte';
 
 	// The vSphere-DRS dialog, GitOps-shaped: every choice renders into the
 	// KubeDescheduler manifest set staged into the platform draft — nothing
@@ -44,10 +47,22 @@
 	let error = $state('');
 
 	const inBounds = (v: number, b: { min: number; max: number }) => v >= b.min && v <= b.max;
-	const valid = $derived(
-		inBounds(intervalSeconds, DRS_BOUNDS.intervalSeconds) &&
-			inBounds(evictionNodeLimit, DRS_BOUNDS.evictionNodeLimit) &&
-			inBounds(evictionTotalLimit, DRS_BOUNDS.evictionTotalLimit),
+	const missing = $derived.by(() => {
+		const m: string[] = [];
+		const b = DRS_BOUNDS;
+		if (!inBounds(intervalSeconds, b.intervalSeconds))
+			m.push(`Interval must be ${b.intervalSeconds.min}-${b.intervalSeconds.max}s`);
+		if (!inBounds(evictionNodeLimit, b.evictionNodeLimit))
+			m.push(`Per-node limit must be ${b.evictionNodeLimit.min}-${b.evictionNodeLimit.max}`);
+		if (!inBounds(evictionTotalLimit, b.evictionTotalLimit))
+			m.push(`Cluster-wide limit must be ${b.evictionTotalLimit.min}-${b.evictionTotalLimit.max}`);
+		return m;
+	});
+	const valid = $derived(missing.length === 0);
+	const summary = $derived(
+		valid
+			? `Stages ${mode} DRS (${threshold}, every ${intervalSeconds}s)${installPSI ? ' + PSI MachineConfig' : ''} → platform repo`
+			: '',
 	);
 
 	async function submit() {
@@ -78,43 +93,37 @@
 <Modal title="Configure DRS" size="lg" {onclose}>
 	<div class="space-y-4 overflow-y-auto px-5 py-4 text-sm">
 		<div>
-			<span class="text-ink-soft">Automation level</span>
-			<div class="mt-1 space-y-1">
-				<label class="flex items-start gap-2">
-					<input type="radio" bind:group={mode} value="Predictive" class="mt-1" />
-					<span>
-						Predictive
-						<span class="block text-xs text-ink-faint">
-							Dry run: recommendations appear in descheduler logs/metrics, no VM moves.
-						</span>
-					</span>
-				</label>
-				<label class="flex items-start gap-2">
-					<input type="radio" bind:group={mode} value="Automatic" class="mt-1" />
-					<span>
-						Automatic
-						<span class="block text-xs text-ink-faint">
-							Fully automated: VMs live-migrate off hot nodes to keep spare capacity even.
-						</span>
-					</span>
-				</label>
-			</div>
+			<span class="mb-1 block text-ink-soft">Automation level</span>
+			<ChoiceCards
+				options={[
+					{
+						value: 'Predictive',
+						label: 'Predictive',
+						hint: 'Dry run: recommendations in logs/metrics, no VM moves',
+					},
+					{
+						value: 'Automatic',
+						label: 'Automatic',
+						hint: 'VMs live-migrate off hot nodes to keep spare capacity even',
+					},
+				]}
+				bind:value={mode}
+			/>
 		</div>
 
 		<FormField label="Migration aggressiveness">
-			<select bind:value={threshold} class="w-full rounded border border-line-strong px-2 py-1.5">
+			<SelectInput bind:value={threshold}>
 				{#each DRS_THRESHOLDS as t (t.value)}<option value={t.value}>{t.label} — {t.detail}</option
 					>{/each}
-			</select>
+			</SelectInput>
 		</FormField>
 
 		<FormField label="Evaluation interval (seconds)">
-			<input
+			<TextInput
 				type="number"
 				min={DRS_BOUNDS.intervalSeconds.min}
 				max={DRS_BOUNDS.intervalSeconds.max}
 				bind:value={intervalSeconds}
-				class="w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 		</FormField>
 
@@ -138,21 +147,19 @@
 				</label>
 				<div class="grid grid-cols-2 gap-3">
 					<FormField label="Max migrations per node">
-						<input
+						<TextInput
 							type="number"
 							min={DRS_BOUNDS.evictionNodeLimit.min}
 							max={DRS_BOUNDS.evictionNodeLimit.max}
 							bind:value={evictionNodeLimit}
-							class="w-full rounded border border-line-strong px-2 py-1.5"
 						/>
 					</FormField>
 					<FormField label="Max migrations cluster-wide">
-						<input
+						<TextInput
 							type="number"
 							min={DRS_BOUNDS.evictionTotalLimit.min}
 							max={DRS_BOUNDS.evictionTotalLimit.max}
 							bind:value={evictionTotalLimit}
-							class="w-full rounded border border-line-strong px-2 py-1.5"
 						/>
 					</FormField>
 				</div>
@@ -188,6 +195,8 @@
 		<StageFooter
 			{submitting}
 			disabled={!valid}
+			{missing}
+			{summary}
 			label={view.configured ? 'Stage changes' : 'Stage DRS enablement'}
 			onsubmit={submit}
 			oncancel={onclose}

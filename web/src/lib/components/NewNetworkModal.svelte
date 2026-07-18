@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api, type NetworkCreate, type Uplink } from '$lib/api';
+	import { validName, NAME_HINT, validCIDR, CIDR_HINT } from '$lib/validate';
 	import { TERMS, dual } from '$lib/vocab';
 	import ChoiceCards from './ChoiceCards.svelte';
 	import CheckGroup from './CheckGroup.svelte';
@@ -56,14 +57,9 @@
 
 	// Same constraint the API server enforces; the server-side netgen validation
 	// stays authoritative.
-	const nameOK = $derived(/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(name) && name.length <= 63);
+	const nameOK = $derived(validName(name));
 	const vlanOK = $derived(vlan !== undefined && vlan >= 1 && vlan <= 4094);
-	const subnetOK = $derived(
-		!subnet.trim() ||
-			(subnet.includes(':')
-				? /^[0-9a-fA-F:]+\/\d{1,3}$/.test(subnet.trim())
-				: /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(subnet.trim())),
-	);
+	const subnetOK = $derived(!subnet.trim() || validCIDR(subnet.trim()));
 
 	// Unmet requirements, in field order; drives both the disabled state and the
 	// footer's explanation of it.
@@ -122,10 +118,7 @@
 			     Tier-0 uplink. -->
 		<ChoiceCards options={kindOptions} bind:value={kind} />
 
-		<FormField
-			label="Name"
-			error={name && !nameOK ? 'Lowercase alphanumeric and "-" only, max 63 characters.' : ''}
-		>
+		<FormField label="Name" error={name && !nameOK ? NAME_HINT : ''}>
 			<TextInput bind:value={name} placeholder="db-net" mono data-autofocus />
 		</FormField>
 
@@ -177,7 +170,7 @@
 
 		<FormField
 			label="Subnet (optional CIDR; blank = no IPAM)"
-			error={subnet && !subnetOK ? 'Expected CIDR notation, e.g. 10.20.0.0/24.' : ''}
+			error={subnet && !subnetOK ? CIDR_HINT : ''}
 		>
 			<TextInput bind:value={subnet} placeholder="10.20.0.0/24" mono />
 		</FormField>

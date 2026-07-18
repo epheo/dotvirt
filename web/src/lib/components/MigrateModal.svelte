@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { MoveRight } from 'lucide-svelte';
 	import { api, Unauthorized, type NodeTarget, type VM } from '$lib/api';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
+	import StageFooter from './StageFooter.svelte';
 
 	// Live-migration target picker (the vMotion dialog): Automatic lets the
 	// scheduler place the VMI; picking a host pins the migration to it via the
@@ -116,19 +116,14 @@
 		<ErrorNote {error} class="mt-3" />
 	</div>
 	{#snippet footer()}
-		<button
-			onclick={onclose}
-			class="rounded border border-line-strong px-3 py-1 text-sm text-ink-soft hover:bg-inset"
-		>
-			Cancel
-		</button>
-		<button
-			onclick={migrate}
-			disabled={busy}
-			class="ml-auto flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent disabled:bg-line-strong"
-		>
-			<MoveRight size={14} />
-			{busy ? 'Migrating…' : 'Migrate'}
-		</button>
+		<StageFooter
+			label="Migrate"
+			busyLabel="Migrating…"
+			hint="Runs now — a live migration, not a git change."
+			summary={target ? `Migrates ${vm.name}: ${vm.nodeName || 'unknown host'} → ${target}` : ''}
+			submitting={busy}
+			onsubmit={migrate}
+			oncancel={onclose}
+		/>
 	{/snippet}
 </Modal>

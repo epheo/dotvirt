@@ -3,6 +3,7 @@
 	import { api, Unauthorized, type Template } from '$lib/api';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
+	import StageFooter from './StageFooter.svelte';
 
 	// Edit a content-library item: the template is a manifest in the library's
 	// git repo, so editing is replacing that file — staged into Changes and
@@ -63,15 +64,14 @@
 		<ErrorNote {error} />
 	</div>
 	{#snippet footer()}
-		<button
-			onclick={onclose}
-			class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong">Cancel</button
-		>
-		<button
-			onclick={save}
-			disabled={!dirty || !yaml.trim() || busy}
-			class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
-			>Stage edit</button
-		>
+		<StageFooter
+			label="Stage edit"
+			disabled={!dirty || !yaml.trim()}
+			missing={[!yaml.trim() ? 'The manifest is empty' : 'No changes yet']}
+			summary={`Replaces ${template.sourceFile} in the ${libraryLabel.toLowerCase()}`}
+			submitting={busy}
+			onsubmit={save}
+			oncancel={onclose}
+		/>
 	{/snippet}
 </Modal>

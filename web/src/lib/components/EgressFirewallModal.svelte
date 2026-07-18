@@ -39,7 +39,19 @@
 	let submitting = $state(false);
 	let error = $state('');
 
-	const valid = $derived(!!namespace && rows.length > 0 && rows.every((r) => r.value.trim()));
+	const missing = $derived.by(() => {
+		const m: string[] = [];
+		if (!namespace) m.push('Project is required');
+		if (!rows.length) m.push('Add at least one rule');
+		else if (rows.some((r) => !r.value.trim())) m.push('Every rule needs a destination');
+		return m;
+	});
+	const valid = $derived(missing.length === 0);
+	const summary = $derived(
+		valid
+			? `Stages egress firewall (${rows.length} rule${rows.length === 1 ? '' : 's'}) → ${namespace}`
+			: '',
+	);
 
 	function addRow() {
 		rows = [...rows, blank()];
@@ -154,6 +166,8 @@
 		<StageFooter
 			label="Stage firewall"
 			disabled={!valid}
+			{missing}
+			{summary}
 			{submitting}
 			onsubmit={submit}
 			oncancel={onclose}

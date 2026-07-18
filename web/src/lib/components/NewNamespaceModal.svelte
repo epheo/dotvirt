@@ -1,9 +1,12 @@
 <script lang="ts">
 	import { api, type NamespaceCreate } from '$lib/api';
+	import { validName, NAME_HINT, validCIDR, CIDR_HINT } from '$lib/validate';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 	import FormField from './FormField.svelte';
+	import TextInput from './TextInput.svelte';
+	import SelectInput from './SelectInput.svelte';
 
 	let {
 		projects = [],
@@ -35,7 +38,24 @@
 		if (!netTouched) netName = name ? `${name}-net` : '';
 	});
 
-	const valid = $derived(!!(name && project) && (!withNetwork || !!(netName && subnet.trim())));
+	const missing = $derived.by(() => {
+		const m: string[] = [];
+		if (!name) m.push('Name is required');
+		else if (!validName(name)) m.push('Name must be lowercase alphanumeric with dashes');
+		if (!project) m.push('Project is required');
+		if (withNetwork) {
+			if (!netName) m.push('VM Network name is required');
+			if (!subnet.trim()) m.push('Subnet is required for a primary network');
+			else if (!validCIDR(subnet.trim())) m.push('Subnet must be a CIDR (e.g. 10.40.0.0/16)');
+		}
+		return m;
+	});
+	const valid = $derived(missing.length === 0);
+	const summary = $derived(
+		valid
+			? `Stages namespace ${name} in ${project}${withNetwork ? ` + VM Network ${netName}` : ''}`
+			: '',
+	);
 
 	async function submit() {
 		if (!valid) return;
@@ -60,17 +80,13 @@
 
 <Modal title="New Namespace" {onclose}>
 	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
-		<FormField label="Name">
-			<input
-				bind:value={name}
-				placeholder="tenant-c"
-				class="w-full rounded border border-line-strong px-2 py-1.5"
-			/>
+		<FormField label="Name" error={name && !validName(name) ? NAME_HINT : ''}>
+			<TextInput bind:value={name} placeholder="tenant-c" mono data-autofocus />
 		</FormField>
 		<FormField label="Project">
-			<select bind:value={project} class="w-full rounded border border-line-strong px-2 py-1.5">
+			<SelectInput bind:value={project}>
 				{#each projects as p (p)}<option value={p}>{p}</option>{/each}
-			</select>
+			</SelectInput>
 		</FormField>
 
 		<label class="flex items-center gap-2">
@@ -81,23 +97,14 @@
 		{#if withNetwork}
 			<div class="space-y-3 rounded border border-line p-3">
 				<FormField label="VM Network name">
-					<input
-						bind:value={netName}
-						oninput={() => (netTouched = true)}
-						class="w-full rounded border border-line-strong px-2 py-1.5"
-					/>
+					<TextInput bind:value={netName} oninput={() => (netTouched = true)} mono />
 				</FormField>
-				<label class="block">
-					<span class="text-ink-soft"
-						>Subnet <span class="text-ink-faint">(CIDR — required for a primary network)</span
-						></span
-					>
-					<input
-						bind:value={subnet}
-						placeholder="10.40.0.0/16"
-						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-					/>
-				</label>
+				<FormField
+					label="Subnet (CIDR — required for a primary network)"
+					error={subnet && !validCIDR(subnet.trim()) ? CIDR_HINT : ''}
+				>
+					<TextInput bind:value={subnet} placeholder="10.40.0.0/16" mono />
+				</FormField>
 				<p class="text-[11px] text-ink-faint">
 					A flat layer-2 network that follows VMs across nodes (keeps their IP on migration).
 				</p>
@@ -115,6 +122,8 @@
 		<StageFooter
 			label="Stage namespace"
 			disabled={!valid}
+			{missing}
+			{summary}
 			{submitting}
 			onsubmit={submit}
 			oncancel={onclose}

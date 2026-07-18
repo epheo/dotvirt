@@ -17,7 +17,7 @@
 
 <select
 	bind:value
-	class="w-full rounded border border-line-strong px-2 py-1.5 text-sm focus:border-accent/60 {cls}"
+	class="w-full rounded border border-line-strong px-2 py-1.5 text-sm focus:border-accent/60 disabled:bg-inset-strong disabled:text-ink-faint {cls}"
 	{...rest}
 >
 	{@render children()}
