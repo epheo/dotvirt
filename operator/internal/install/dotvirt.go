@@ -244,6 +244,7 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 							},
 							InitialDelaySeconds: 5,
 							PeriodSeconds:       10,
+							TimeoutSeconds:      5,
 						},
 						LivenessProbe: &corev1.Probe{
 							ProbeHandler: corev1.ProbeHandler{
@@ -251,6 +252,7 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 							},
 							InitialDelaySeconds: 15,
 							PeriodSeconds:       20,
+							TimeoutSeconds:      5,
 						},
 					}},
 					Volumes: []corev1.Volume{{
