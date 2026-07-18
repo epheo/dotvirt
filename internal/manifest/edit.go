@@ -53,6 +53,16 @@ type VMEdit struct {
 	// spec.updateVolumesStrategy: Migration so KubeVirt live-copies the data
 	// on merge. Reverting the commit is the migration cancel.
 	MigrateVolumes []model.VolumeMigration `json:"migrateVolumes,omitempty"`
+
+	// Pin replaces the VM's host pinning with a required node-affinity In-list
+	// on kubernetes.io/hostname; an empty list removes it. Nil leaves it alone.
+	Pin *[]string `json:"pin,omitempty"`
+	// AddGroups/RemoveGroups edit named placement groups: a membership label
+	// on the template plus a pod (anti-)affinity term against that label
+	// (scheduling.go holds the encoding). AddGroups upserts, so re-adding a
+	// group changes its mode/strictness.
+	AddGroups    []model.PlacementGroup `json:"addGroups,omitempty"`
+	RemoveGroups []string               `json:"removeGroups,omitempty"`
 }
 
 // Empty reports whether the edit changes nothing.
@@ -63,7 +73,8 @@ func (e VMEdit) Empty() bool {
 		e.DRSExclude == nil && e.EvictionStrategy == nil &&
 		len(e.AddDisks) == 0 && len(e.RemoveDisks) == 0 &&
 		len(e.AddNetworks) == 0 && len(e.RemoveNetworks) == 0 &&
-		len(e.MigrateVolumes) == 0
+		len(e.MigrateVolumes) == 0 &&
+		e.Pin == nil && len(e.AddGroups) == 0 && len(e.RemoveGroups) == 0
 }
 
 // ApplyEdit edits the VirtualMachine named (namespace, name) within a manifest,
@@ -95,7 +106,15 @@ func ApplyEdit(content []byte, namespace, name string, edit VMEdit) ([]byte, err
 		applyRef(ed, vm, "preference", *edit.Preference)
 	}
 	applyMetadata(ed, vm, edit)
-	applyTemplateAnnotations(ed, vm, edit)
+	// Scheduling queues its affinity rewrite before applyTemplateMeta: when a
+	// template lacks metadata, both insert blocks anchor on the same last
+	// line, and the affinity lines (inside spec) must land before the new
+	// metadata: sibling.
+	schedSet, schedRemove, err := applySchedulingRules(ed, vm, edit)
+	if err != nil {
+		return nil, err
+	}
+	applyTemplateMeta(ed, vm, schedSet, schedRemove, edit)
 	if edit.EvictionStrategy != nil {
 		applyEvictionStrategy(ed, vm, *edit.EvictionStrategy)
 	}

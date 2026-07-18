@@ -51,6 +51,11 @@ export interface VM {
    */
   evictionStrategy?: string;
   /**
+   * Scheduling is the VM's placement policy (placement groups + host pinning);
+   * nil when the manifest carries none.
+   */
+  scheduling?: VMScheduling;
+  /**
    * From cluster (actual state), when cluster reads are enabled.
    */
   phase?: string; // VMI phase, e.g. Running
@@ -77,6 +82,27 @@ export interface VM {
    * surfaced so the UI can explain an OutOfSync VM instead of just flagging it.
    */
   syncError?: string;
+}
+/**
+ * PlacementGroup is one named scheduling rule: VMs sharing the group are kept
+ * on one host ("together") or spread across hosts ("apart"). Strict renders a
+ * required scheduling term (the scheduler refuses violating placements);
+ * otherwise the term is preferred (best effort).
+ */
+export interface PlacementGroup {
+  name: string;
+  mode: string; // together | apart
+  strict?: boolean;
+}
+/**
+ * VMScheduling is a VM's placement policy as read from its manifest. Custom
+ * flags affinity/node-selection content dotvirt does not own — such VMs are
+ * edited in git, never through the scheduling form.
+ */
+export interface VMScheduling {
+  pin?: string[]; // host names the VM must run on
+  groups?: PlacementGroup[];
+  custom?: boolean;
 }
 /**
  * Migration mirrors the VMI's migration state. Active while neither Completed
@@ -206,6 +232,9 @@ export interface EditRequest {
   addNetworks?: NetworkAdd[];
   removeNetworks?: string[];
   migrateVolumes?: VolumeMigration[]; // storage live migration
+  pin?: string[]; // replace host pinning; empty list removes it
+  addGroups?: PlacementGroup[];
+  removeGroups?: string[];
   message?: string; // optional commit message; auto-generated when empty
 }
 /**

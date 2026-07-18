@@ -78,6 +78,9 @@ func editFromRequest(req model.EditRequest) manifest.VMEdit {
 		AddNetworks:      req.AddNetworks,
 		RemoveNetworks:   req.RemoveNetworks,
 		MigrateVolumes:   req.MigrateVolumes,
+		Pin:              req.Pin,
+		AddGroups:        req.AddGroups,
+		RemoveGroups:     req.RemoveGroups,
 	}
 }
 
