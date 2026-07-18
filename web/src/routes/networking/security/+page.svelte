@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { ChevronDown, ChevronRight, Plus, Route } from 'lucide-svelte';
+	import { replaceState } from '$app/navigation';
+	import { page } from '$app/state';
 	import type { Policy, PolicyKind } from '$lib/api';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
@@ -15,13 +17,28 @@
 	const policies = $derived(inventory.policies);
 	const caps = $derived(inventory.caps);
 
-	// Scope filters: a tenant (project) and a free-text query, combined. The
-	// query also matches rule contents (peer, ports, action) so "where is
-	// TCP/22 allowed" is answerable from here.
-	let tenant = $state('');
+	// Scope filters: a tenant (project), a free-text query, and a drift-only
+	// switch, combined. The query also matches rule contents (peer, ports,
+	// action) so "where is TCP/22 allowed" is answerable from here.
+	//
+	// The tenant filter mirrors ?tenant=, so the scoped view is shareable and
+	// the project context menu can deep-link into it: the select writes the URL,
+	// and navigation (deep link, in-app goto) drives the state back.
+	let tenant = $state(page.url.searchParams.get('tenant') ?? '');
+	$effect(() => {
+		tenant = page.url.searchParams.get('tenant') ?? '';
+	});
+	function setTenant(v: string) {
+		const url = new URL(page.url);
+		if (v) url.searchParams.set('tenant', v);
+		else url.searchParams.delete('tenant');
+		replaceState(url, {});
+		tenant = v;
+	}
 	let query = $state('');
+	let driftOnly = $state(false);
 	const q = $derived(query.trim().toLowerCase());
-	const filtered = $derived(tenant !== '' || q !== '');
+	const filtered = $derived(tenant !== '' || q !== '' || driftOnly);
 
 	const tenantNS = $derived(
 		new Set(
@@ -51,7 +68,12 @@
 			...(p.rules ?? []).flatMap((r) => [r.action, r.peer, r.ports]),
 		].some((s) => s?.toLowerCase().includes(q));
 	};
-	const shown = $derived(policies.filter((p) => matchesTenant(p) && matchesQuery(p)));
+	// Drift-only keeps rows whose own ArgoCD state differs from git; rows
+	// without drift info (Argo off, untracked backing) never match.
+	const drifted = (p: Policy): boolean => !!p.sync && p.sync !== 'Synced';
+	const shown = $derived(
+		policies.filter((p) => matchesTenant(p) && matchesQuery(p) && (!driftOnly || drifted(p))),
+	);
 
 	let expanded = $state<Record<string, boolean>>({});
 	const keyOf = (p: Policy) => `${p.backing}:${p.namespace ?? ''}:${p.name}`;
@@ -70,7 +92,8 @@
 
 <div class="flex flex-wrap items-center gap-2 border-b border-line bg-panel px-4 py-2">
 	<select
-		bind:value={tenant}
+		value={tenant}
+		onchange={(e) => setTenant(e.currentTarget.value)}
 		aria-label="Filter by tenant"
 		class="rounded border border-line-strong px-2 py-1 text-xs"
 	>
@@ -86,11 +109,21 @@
 		placeholder="Filter by name, target, or rule"
 		class="w-64 rounded border border-line-strong px-2 py-1 text-xs"
 	/>
+	<button
+		type="button"
+		onclick={() => (driftOnly = !driftOnly)}
+		title="Only policies whose live state differs from git"
+		class="rounded border border-line px-2 py-1 text-xs font-medium {driftOnly
+			? 'bg-inset text-ink'
+			: 'text-ink-soft hover:bg-inset'}"
+	>
+		Drift only
+	</button>
 	{#if filtered}
 		<span class="text-xs text-ink-faint">{shown.length} of {policies.length} policies</span>
 		<button
 			type="button"
-			onclick={() => ((tenant = ''), (query = ''))}
+			onclick={() => (setTenant(''), (query = ''), (driftOnly = false))}
 			class="text-xs text-accent hover:underline">Clear</button
 		>
 	{/if}
