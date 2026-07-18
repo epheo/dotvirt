@@ -67,8 +67,10 @@ func chartSpecs(ns, name, rw string) []chartSpec {
 	return []chartSpec{
 		{"cpu", "CPU", "%", false, []seriesSpec{
 			{"Usage", fmt.Sprintf("rate(kubevirt_vmi_cpu_usage_seconds_total%s[%s])*100 / on(namespace,name) %s", s, rw, vcpuCount(s)), ""},
-			{"Wait", fmt.Sprintf("rate(kubevirt_vmi_vcpu_wait_seconds_total%s[%s])*100", s, rw), ""},
-			{"Steal", fmt.Sprintf("rate(kubevirt_vmi_vcpu_delay_seconds_total%s[%s])*100", s, rw), ""},
+			// Wait/Steal are exported per vCPU (an id label); without the sum
+			// the chart would plot one arbitrary vCPU's series on SMP VMs.
+			{"Wait", fmt.Sprintf("sum(rate(kubevirt_vmi_vcpu_wait_seconds_total%s[%s]))*100", s, rw), ""},
+			{"Steal", fmt.Sprintf("sum(rate(kubevirt_vmi_vcpu_delay_seconds_total%s[%s]))*100", s, rw), ""},
 		}},
 		// Used/Cached/Free partition the guest's memory — a stacked area whose
 		// top edge is the domain total, like vCenter's stacked memory chart.
