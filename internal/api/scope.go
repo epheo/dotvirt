@@ -281,24 +281,7 @@ func (s *Server) pickProject(w http.ResponseWriter, r *http.Request, want string
 // platform authoring signal suffices (see platformAuthorResources). The
 // per-kind create routes keep platformScope's exact-resource gate.
 func (s *Server) platformScopeAny(w http.ResponseWriter, r *http.Request) (scope, bool) {
-	id, c, err := s.userCluster(r)
-	if err != nil {
-		fail(w, unavailable("cluster access", err))
-		return scope{}, false
-	}
-	if s.draft == nil {
-		http.Error(w, "changeset/draft not configured", http.StatusServiceUnavailable)
-		return scope{}, false
-	}
-	if s.cfg.PlatformRepo == "" {
-		http.Error(w, "platform repo not configured (set -platform-repo)", http.StatusServiceUnavailable)
-		return scope{}, false
-	}
-	if !s.canAuthorPlatform(r.Context(), id, c) {
-		http.Error(w, "not authorized to author platform changes", http.StatusForbidden)
-		return scope{}, false
-	}
-	return scope{id: id, cluster: c, proj: project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}}, true
+	return s.platformScopeWith(w, r, s.canAuthorPlatform, "not authorized to author platform changes")
 }
 
 // platformProjectName is the synthetic project name for the platform tier — the
@@ -306,13 +289,22 @@ func (s *Server) platformScopeAny(w http.ResponseWriter, r *http.Request) (scope
 // never a dotvirt.io/project-labeled namespace, so project discovery never emits it.
 const platformProjectName = "platform"
 
-// platformScope resolves the platform tier for a cluster-scoped create: the
-// caller's identity + cluster, and the synthetic platform ProjectInfo from
-// -platform-repo. It SSAR-gates on the caller's authority to create ref's kind —
-// the authoring SIGNAL (the user never applies it; Argo does, from the platform
-// repo), so the author-time check matches the apply-time AppProject boundary. Fails
-// closed: 503 if no platform repo is configured, 403 if the caller lacks the verb.
+// platformScope resolves the platform tier for a cluster-scoped create. It
+// SSAR-gates on the caller's authority to create ref's kind — the authoring
+// SIGNAL (the user never applies it; Argo does, from the platform repo), so the
+// author-time check matches the apply-time AppProject boundary.
 func (s *Server) platformScope(w http.ResponseWriter, r *http.Request, ref ssarRef) (scope, bool) {
+	return s.platformScopeWith(w, r, func(ctx context.Context, _ auth.Identity, c *cluster.Client) bool {
+		return c.CanCreateClusterResource(ctx, ref.group, ref.resource)
+	}, "not authorized to create "+ref.resource)
+}
+
+// platformScopeWith is the shared platform-tier preamble — the caller's identity
+// + cluster, the draft and -platform-repo availability gates, and the synthetic
+// platform ProjectInfo — parameterized only by the authoring authorization, so
+// the two security gates above cannot drift apart. Fails closed: 503 when the
+// platform tier isn't configured, 403 with deny when the caller lacks authority.
+func (s *Server) platformScopeWith(w http.ResponseWriter, r *http.Request, authorized func(context.Context, auth.Identity, *cluster.Client) bool, deny string) (scope, bool) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
 		fail(w, unavailable("cluster access", err))
@@ -326,8 +318,8 @@ func (s *Server) platformScope(w http.ResponseWriter, r *http.Request, ref ssarR
 		http.Error(w, "platform repo not configured (set -platform-repo)", http.StatusServiceUnavailable)
 		return scope{}, false
 	}
-	if !c.CanCreateClusterResource(r.Context(), ref.group, ref.resource) {
-		http.Error(w, "not authorized to create "+ref.resource, http.StatusForbidden)
+	if !authorized(r.Context(), id, c) {
+		http.Error(w, deny, http.StatusForbidden)
 		return scope{}, false
 	}
 	return scope{id: id, cluster: c, proj: project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}}, true

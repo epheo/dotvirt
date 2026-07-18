@@ -57,13 +57,3 @@ func (c *Cache[V]) Put(key string, val V) {
 	}
 	c.m[key] = entry[V]{val: val, at: now}
 }
-
-// Clear drops every entry, so the next Get recomputes. Used for event-driven
-// invalidation: when RBAC changes (a Namespace or RoleBinding moves), a token's
-// derived visibility may have changed, so the cached set must be discarded rather
-// than waiting out its TTL.
-func (c *Cache[V]) Clear() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	clear(c.m)
-}

@@ -9,6 +9,10 @@ import (
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
+// driftFromApps is the composition the snapshot performs; the VM-view tests
+// exercise it whole.
+func driftFromApps(objs []any) map[string]Drift { return vmView(resourceDriftFromApps(objs)) }
+
 // app builds an unstructured ArgoCD Application with the given status.resources.
 func app(ns, name string, resources []any) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
