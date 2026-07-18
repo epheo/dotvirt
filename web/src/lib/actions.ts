@@ -9,7 +9,9 @@
 //    own busy/result reporting; `verb` is the task-log wording.
 //  - 'host': the embedding view performs it (open a modal, switch a tab,
 //    download a file) — the registry only describes and gates it.
-import { api, type VM } from '$lib/api';
+import { api, Unauthorized, type VM } from '$lib/api';
+import { friendlyError } from '$lib/format';
+import { ui } from '$lib/state/ui.svelte';
 
 export type ActionId =
 	| 'restart'
@@ -38,6 +40,19 @@ export interface VMAction {
 	title?: string;
 	enabled: (vm: VM) => boolean;
 	run?: (vm: VM) => Promise<void>;
+}
+
+// runRuntimeAction runs a registry runtime action with the standard toast
+// feedback, so the wording cannot drift between the menus that trigger it.
+export async function runRuntimeAction(a: VMAction, vm: VM): Promise<void> {
+	const verb = a.verb ?? a.label;
+	try {
+		await a.run!(vm);
+		ui.showToast(`${verb} requested for ${vm.name}.`, { kind: 'success' });
+	} catch (e) {
+		if (e instanceof Unauthorized) return; // signed out centrally; skip the error toast
+		ui.showToast(`${verb} failed for ${vm.name}: ${friendlyError(e)}`, { kind: 'error' });
+	}
 }
 
 const running = (vm: VM) => vm.phase === 'Running';

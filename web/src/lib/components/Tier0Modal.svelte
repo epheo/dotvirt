@@ -3,6 +3,7 @@
 	import { TERMS } from '$lib/vocab';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
+	import StageFooter from './StageFooter.svelte';
 
 	let {
 		namespaces,
@@ -132,17 +133,12 @@
 		<ErrorNote {error} />
 	</div>
 	{#snippet footer()}
-		<span class="text-xs text-ink-faint">Staged into the changeset; open a PR from “Changes”.</span>
-		<button
-			onclick={onclose}
-			class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong">Cancel</button
-		>
-		<button
-			onclick={submit}
-			disabled={!valid || submitting}
-			class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
-		>
-			{submitting ? 'Staging…' : 'Stage service'}
-		</button>
+		<StageFooter
+			label="Stage service"
+			disabled={!valid}
+			{submitting}
+			onsubmit={submit}
+			oncancel={onclose}
+		/>
 	{/snippet}
 </Modal>

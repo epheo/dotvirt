@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api, Unauthorized, type EffectivePolicy, type PolicyBinding } from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import PolicyRuleTable from './PolicyRuleTable.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 
@@ -25,7 +26,7 @@
 			})
 			.catch((e) => {
 				if (e instanceof Unauthorized) return;
-				if (ns === namespace && v === vm) error = e instanceof Error ? e.message : String(e);
+				if (ns === namespace && v === vm) error = friendlyError(e);
 			});
 	});
 

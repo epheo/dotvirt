@@ -4,6 +4,7 @@
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
+	import NamespaceSelect from './NamespaceSelect.svelte';
 
 	let {
 		namespaces,
@@ -36,10 +37,6 @@
 
 	let submitting = $state(false);
 	let error = $state('');
-
-	$effect(() => {
-		if (!namespace) namespace = namespaces[0] ?? '';
-	});
 
 	// A cluster-scoped (platform-tier) segment — a shared overlay or any VLAN — carries
 	// a namespace multiselect: the set of projects it is published to. Mirrors the
@@ -143,15 +140,7 @@
 				</div>
 			{/if}
 			{#if !shared}
-				<label class="block">
-					<span class="text-ink-soft">Project (namespace)</span>
-					<select
-						bind:value={namespace}
-						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-					>
-						{#each namespaces as ns (ns)}<option value={ns}>{ns}</option>{/each}
-					</select>
-				</label>
+				<NamespaceSelect bind:namespace {namespaces} />
 			{/if}
 		{:else}
 			<div class="grid grid-cols-2 gap-3">
