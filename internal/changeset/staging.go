@@ -23,6 +23,11 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 	if edit.Empty() {
 		return model.DraftView{}, fmt.Errorf("%w: no fields to edit", model.ErrInvalid)
 	}
+	// SourceFile addresses a file in the proposal diff — the one repo path a
+	// client supplies directly, so it passes the same gate created names do.
+	if err := validate.RequireRepoPath("source file", req.SourceFile); err != nil {
+		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+	}
 	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
 		Kind:       draft.KindEdit,
 		Namespace:  namespace,

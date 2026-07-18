@@ -33,3 +33,16 @@ func TestRequireDNS1123(t *testing.T) {
 		t.Errorf("RequireDNS1123 invalid: %v", err)
 	}
 }
+
+func TestRepoPath(t *testing.T) {
+	for _, ok := range []string{"vms/web.yaml", "web.yaml", "a/b/c.yaml"} {
+		if !RepoPath(ok) {
+			t.Errorf("RepoPath(%q) = false, want true", ok)
+		}
+	}
+	for _, bad := range []string{"", "/etc/passwd", "../secrets.yaml", "a/../b.yaml", "./a.yaml", "a//b.yaml", "a/b/", `a\b.yaml`, "a/./b.yaml"} {
+		if RepoPath(bad) {
+			t.Errorf("RepoPath(%q) = true, want false", bad)
+		}
+	}
+}
