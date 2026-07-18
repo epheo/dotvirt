@@ -54,7 +54,7 @@ type Feed struct {
 	bus *eventbus.Bus
 
 	mu     sync.Mutex
-	ops    []Op                  // newest first
+	ops    []Op                     // newest first
 	merges map[string]map[int]Merge // repo -> PR number -> merge
 }
 

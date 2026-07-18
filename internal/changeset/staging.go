@@ -127,34 +127,26 @@ func (c *Coordinator) StageCreateNetwork(id auth.Identity, proj project.ProjectI
 // workloads into it once it exists. The namespace + primary UDN land as one
 // multi-doc manifest.
 func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	if err := requireRepo(commitProj); err != nil {
-		return model.DraftView{}, err
-	}
-	if joinProj.Repo == "" {
-		return model.DraftView{}, fmt.Errorf("%w: the joining project has no repo", model.ErrInvalid)
-	}
-	var spec netgen.NamespaceSpec
-	if err := json.Unmarshal(rawSpec, &spec); err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: invalid namespace spec: %v", model.ErrInvalid, err)
-	}
-	// Stamp the namespace's dotvirt.io labels/annotations to the tenant it joins,
-	// not the platform repo it's committed to.
-	spec.Project, spec.Repo = joinProj.Name, joinProj.Repo
-	path, content, err := netgen.NamespaceManifest(spec)
-	if err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
-	}
-	if err := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
-		Kind:       draft.KindCreate,
-		Resource:   draft.ResourceNamespace,
-		Namespace:  spec.Name,
-		Name:       spec.Name,
-		SourceFile: path,
-		Manifest:   string(content),
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, commitProj)
+	return c.stageRendered(id, commitProj, func() (draft.Entry, error) {
+		if joinProj.Repo == "" {
+			return draft.Entry{}, fmt.Errorf("the joining project has no repo")
+		}
+		var spec netgen.NamespaceSpec
+		if err := json.Unmarshal(rawSpec, &spec); err != nil {
+			return draft.Entry{}, fmt.Errorf("invalid namespace spec: %v", err)
+		}
+		// Stamp the namespace's dotvirt.io labels/annotations to the tenant it joins,
+		// not the platform repo it's committed to.
+		spec.Project, spec.Repo = joinProj.Name, joinProj.Repo
+		path, content, err := netgen.NamespaceManifest(spec)
+		return draft.Entry{
+			Resource:   draft.ResourceNamespace,
+			Namespace:  spec.Name,
+			Name:       spec.Name,
+			SourceFile: path,
+			Manifest:   string(content),
+		}, err
+	})
 }
 
 // ProjectSpec describes a new tenant project to bootstrap from the UI: a forge repo,
@@ -196,21 +188,9 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	if !validate.DNS1123Name(ns) {
 		return model.DraftView{}, fmt.Errorf("%w: namespace name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, ns)
 	}
-	// The new tenant repo is a sibling of the platform repo under the same owner.
-	repoURL := siblingRepoURL(commitProj.Repo, spec.Name)
-	if repoURL == "" {
-		return model.DraftView{}, fmt.Errorf("%w: cannot derive a repo URL from the platform repo %q", model.ErrInvalid, commitProj.Repo)
-	}
-	fc := c.forge.For(repoURL)
-	if fc == nil {
-		return model.DraftView{}, fmt.Errorf("%w: forge not configured; cannot create the project repo", model.ErrInvalid)
-	}
-	created, err := fc.EnsureRepo()
+	repoURL, err := c.ensureTenantRepo(commitProj.Repo, spec.Name)
 	if err != nil {
-		return model.DraftView{}, fmt.Errorf("create project repo: %w", err)
-	}
-	if created {
-		c.seedTemplates(repoURL)
+		return model.DraftView{}, err
 	}
 	// First namespace, joined to the new project/repo (stamps its dotvirt.io labels).
 	nsSpec := netgen.NamespaceSpec{Name: ns, Project: spec.Name, Repo: repoURL, VMNetwork: spec.VMNetwork}
@@ -272,26 +252,36 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	if len(target.Namespaces) == 0 {
 		return model.DraftView{}, fmt.Errorf("%w: project %q has no namespaces to adopt", model.ErrInvalid, target.Name)
 	}
-	// The tenant repo is a sibling of the platform repo under the same owner.
-	repoURL := siblingRepoURL(commitProj.Repo, target.Name)
-	if repoURL == "" {
-		return model.DraftView{}, fmt.Errorf("%w: cannot derive a repo URL from the platform repo %q", model.ErrInvalid, commitProj.Repo)
-	}
-	fc := c.forge.For(repoURL)
-	if fc == nil {
-		return model.DraftView{}, fmt.Errorf("%w: forge not configured; cannot create the project repo", model.ErrInvalid)
-	}
-	created, err := fc.EnsureRepo()
+	repoURL, err := c.ensureTenantRepo(commitProj.Repo, target.Name)
 	if err != nil {
-		return model.DraftView{}, fmt.Errorf("create project repo: %w", err)
-	}
-	if created {
-		c.seedTemplates(repoURL)
+		return model.DraftView{}, err
 	}
 	if err := c.stageProjectAdoption(id.Username, commitProj.Name, target, repoURL, owners); err != nil {
 		return model.DraftView{}, err
 	}
 	return c.Get(id, commitProj)
+}
+
+// ensureTenantRepo derives the tenant repo URL — a sibling of the platform repo
+// under the same owner — creates it on the forge when absent, and seeds templates
+// into a freshly created one. Shared by project creation and adoption.
+func (c *Coordinator) ensureTenantRepo(platformRepo, name string) (string, error) {
+	repoURL := siblingRepoURL(platformRepo, name)
+	if repoURL == "" {
+		return "", fmt.Errorf("%w: cannot derive a repo URL from the platform repo %q", model.ErrInvalid, platformRepo)
+	}
+	fc := c.forge.For(repoURL)
+	if fc == nil {
+		return "", fmt.Errorf("%w: forge not configured; cannot create the project repo", model.ErrInvalid)
+	}
+	created, err := fc.EnsureRepo()
+	if err != nil {
+		return "", fmt.Errorf("create project repo: %w", err)
+	}
+	if created {
+		c.seedTemplates(repoURL)
+	}
+	return repoURL, nil
 }
 
 // stageProjectAdoption stages the namespace (+ optional owner RoleBinding) manifests

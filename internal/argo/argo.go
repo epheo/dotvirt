@@ -136,11 +136,6 @@ func vmView(all map[resKey]Drift) map[string]Drift {
 	return out
 }
 
-// driftFromApps returns the per-VM drift keyed "namespace/name" — the VM view over the
-// general map. VMs absent from the result are managed by no Application (caller reports
-// NotTracked). Always non-nil.
-func driftFromApps(objs []any) map[string]Drift { return vmView(resourceDriftFromApps(objs)) }
-
 // keyOf reads an object's identity out of an ArgoCD status.resources[] /
 // syncResult.resources[] entry.
 func keyOf(res map[string]any) resKey {
@@ -182,7 +177,7 @@ func mergeSyncMessages(out map[resKey]Drift, app map[string]any) {
 
 // appSyncFromApps builds each project's overall sync/health keyed by canonical
 // repoURL, read straight from the managing Application's own rollup
-// (status.sync/health/operationState). Unlike driftFromApps, which keeps only VMs,
+// (status.sync/health/operationState). Unlike vmView, which keeps only VMs,
 // this rollup is exactly what covers every kind the Application manages — segments,
 // network policies, tenancy — so a merged PR that fails to apply for a non-VM object
 // still surfaces. One repo maps to one Application in dotvirt's model; on the rare
