@@ -900,6 +900,55 @@ export interface EffectivePolicy {
   routes?: PolicyBinding[];
 }
 /**
+ * TraceRequest simulates one flow: a source VM, a destination (an in-cluster
+ * VM or an external IP), and the protocol/port. Control-plane simulation of
+ * the live policy objects — no packet is injected.
+ */
+export interface TraceRequest {
+  source: TraceEndpointRef;
+  destination: TraceEndpointRef;
+  protocol?: string; // TCP (default) | UDP | SCTP
+  port?: number /* int */; // 0 = any port
+}
+/**
+ * TraceEndpointRef is one end of a simulated flow: a VM, or (destination only)
+ * a bare address outside the cluster.
+ */
+export interface TraceEndpointRef {
+  namespace?: string;
+  vm?: string;
+  ip?: string;
+}
+/**
+ * TraceResult is the simulation's answer: the overall verdict and every
+ * observation on the path, in evaluation order. Deny is only ever certain: an
+ * unresolved rule (named port, a stopped VM's unknown addresses, a DNS rule)
+ * downgrades the verdict to Conditional instead of guessing.
+ */
+export interface TraceResult {
+  verdict: string; // Allow | Deny | Conditional | Unreachable
+  steps: TraceStep[];
+}
+/**
+ * TraceStep is one observation: the stage, the (possibly) deciding policy and
+ * rule, and its outcome. Decisive marks the rule that fixed a direction's
+ * verdict; Conditional keeps a maybe-matching rule visible rather than hidden.
+ */
+export interface TraceStep {
+  stage: string; // connectivity | segment | admin | dfw | baseline | default | gateway | snat | route
+  direction?: string; // Egress (source side) | Ingress (destination side)
+  policy?: Policy;
+  rule?: PolicyRuleView;
+  /**
+   * Action: Allow | Deny | Pass for rule stages; Reachable | Unreachable |
+   * Bypass for connectivity; SNAT | Route for the informational planes.
+   */
+  action: string;
+  conditional?: boolean;
+  decisive?: boolean;
+  note?: string;
+}
+/**
  * Template is one VirtualMachineTemplate manifest in a library repo's
  * templates/ directory — a content-library entry (vSphere: a VM template).
  * Name is the file's basename: the deployable identity the API routes carry.

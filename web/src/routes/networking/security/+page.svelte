@@ -1,11 +1,12 @@
 <script lang="ts">
-	import { ChevronDown, ChevronRight, Plus } from 'lucide-svelte';
+	import { ChevronDown, ChevronRight, Plus, Route } from 'lucide-svelte';
 	import type { Policy, PolicyKind } from '$lib/api';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
 	import PolicyRuleTable from '$lib/components/PolicyRuleTable.svelte';
 	import SyncBadge from '$lib/components/SyncBadge.svelte';
+	import TracePanel from '$lib/components/TracePanel.svelte';
 
 	// The Security view: the live policy plane in NSX-T tiers — cluster admin DFW
 	// rules above, project DFW and gateway-firewall rules per namespace, Tier-0
@@ -55,6 +56,8 @@
 	let expanded = $state<Record<string, boolean>>({});
 	const keyOf = (p: Policy) => `${p.backing}:${p.namespace ?? ''}:${p.name}`;
 
+	let tracing = $state(false);
+
 	// New-policy buttons open the same modals the header/context menus do; each is
 	// gated exactly like its entry point there.
 	const canProjectRules = $derived(inventory.namespaces.length > 0);
@@ -89,9 +92,23 @@
 			class="text-xs text-accent hover:underline">Clear</button
 		>
 	{/if}
+	<button
+		type="button"
+		onclick={() => (tracing = !tracing)}
+		class="ml-auto inline-flex items-center gap-1 rounded border border-line px-2 py-1 text-xs font-medium {tracing
+			? 'bg-inset text-ink'
+			: 'text-ink-soft hover:bg-inset'}"
+	>
+		<Route size={12} /> Trace flow
+	</button>
 </div>
 
 <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+	{#if tracing}
+		<section class="rounded border border-line bg-panel p-3">
+			<TracePanel />
+		</section>
+	{/if}
 	{#snippet policyRows(list: Policy[], emptyHint: string)}
 		{#if list.length === 0}
 			<div class="px-3 py-4 text-center text-xs text-ink-faint">
