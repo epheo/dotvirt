@@ -265,17 +265,23 @@ func (s *State) WorkloadLabels(namespace, name string) (lbls map[string]string, 
 
 // WorkloadNetworks reports one VM workload's NIC attachments for the trace
 // connectivity check: whether it binds the namespace's primary network (pod
-// binding, or a default multus binding) and its secondary multus refs,
-// namespace-qualified. Live VMI spec first (what actually runs), else the VM
-// template; addresses come from the running VMI's interfaces, nil when stopped.
-func (s *State) WorkloadNetworks(namespace, name string) (podNet bool, nets, ips []string, found bool) {
+// binding), the NAD substituted as its default network (a default multus
+// binding replaces the pod network with that NAD's segment — it is NOT the
+// namespace primary), and its secondary multus refs, namespace-qualified.
+// Live VMI spec first (what actually runs), else the VM template; addresses
+// come from the running VMI's interfaces, nil when stopped.
+func (s *State) WorkloadNetworks(namespace, name string) (podNet bool, defaultNet string, nets, ips []string, found bool) {
 	fromSpec := func(spec *kubevirtcorev1.VirtualMachineInstanceSpec) {
 		for _, n := range spec.Networks {
 			switch {
 			case n.Pod != nil:
 				podNet = true
 			case n.Multus != nil && n.Multus.Default:
-				podNet = true
+				ref := n.Multus.NetworkName
+				if !strings.Contains(ref, "/") {
+					ref = namespace + "/" + ref
+				}
+				defaultNet = ref
 			case n.Multus != nil:
 				ref := n.Multus.NetworkName
 				if !strings.Contains(ref, "/") {
@@ -291,18 +297,28 @@ func (s *State) WorkloadNetworks(namespace, name string) (podNet bool, nets, ips
 			for _, iface := range vmi.Status.Interfaces {
 				ips = append(ips, iface.IPs...)
 			}
-			return podNet, nets, ips, true
+			return podNet, defaultNet, nets, ips, true
 		}
 	}
 	if obj, ok, _ := s.vms.GetByKey(namespace + "/" + name); ok {
 		if vm, ok := obj.(*kubevirtcorev1.VirtualMachine); ok {
 			if vm.Spec.Template != nil {
-				fromSpec(&vm.Spec.Template.Spec)
+				spec := &vm.Spec.Template.Spec
+				fromSpec(spec)
+				// KubeVirt autoattaches the pod network when a template names
+				// none; that defaulting lands on the VMI at creation, never on
+				// the stored template, so mirror it here or a stopped minimal
+				// manifest reads as unattached.
+				if len(spec.Networks) == 0 {
+					if auto := spec.Domain.Devices.AutoattachPodInterface; auto == nil || *auto {
+						podNet = true
+					}
+				}
 			}
-			return podNet, nets, nil, true
+			return podNet, defaultNet, nets, nil, true
 		}
 	}
-	return false, nil, nil, false
+	return false, "", nil, nil, false
 }
 
 // Namespaces returns the project-labeled namespaces in the snapshot as the

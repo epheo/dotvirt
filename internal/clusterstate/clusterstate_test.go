@@ -73,6 +73,50 @@ func TestWorkloadLabels(t *testing.T) {
 	}
 }
 
+// WorkloadNetworks must mirror KubeVirt's VMI-creation defaulting for stopped
+// VMs (a template naming no networks gets the pod network autoattached) and
+// must report a default multus binding as a substituted segment, never as the
+// namespace primary.
+func TestWorkloadNetworks(t *testing.T) {
+	s := stateWithIndexers()
+	tmpl := func() *kubevirtcorev1.VirtualMachineInstanceTemplateSpec {
+		return &kubevirtcorev1.VirtualMachineInstanceTemplateSpec{}
+	}
+	addVM := func(name string, t *kubevirtcorev1.VirtualMachineInstanceTemplateSpec) {
+		_ = s.vms.Add(&kubevirtcorev1.VirtualMachine{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: name},
+			Spec:       kubevirtcorev1.VirtualMachineSpec{Template: t},
+		})
+	}
+
+	addVM("minimal", tmpl())
+	podNet, defaultNet, _, _, found := s.WorkloadNetworks("ns", "minimal")
+	if !found || !podNet || defaultNet != "" {
+		t.Errorf("minimal template must autoattach the pod net: podNet=%v defaultNet=%q found=%v", podNet, defaultNet, found)
+	}
+
+	off := false
+	noNet := tmpl()
+	noNet.Spec.Domain.Devices.AutoattachPodInterface = &off
+	addVM("unattached", noNet)
+	if podNet, _, _, _, _ = s.WorkloadNetworks("ns", "unattached"); podNet {
+		t.Error("autoattach off must not report a pod net")
+	}
+
+	sub := tmpl()
+	sub.Spec.Networks = []kubevirtcorev1.Network{{
+		Name: "nic0",
+		NetworkSource: kubevirtcorev1.NetworkSource{
+			Multus: &kubevirtcorev1.MultusNetwork{NetworkName: "vlan", Default: true},
+		},
+	}}
+	addVM("substituted", sub)
+	podNet, defaultNet, _, _, _ = s.WorkloadNetworks("ns", "substituted")
+	if podNet || defaultNet != "ns/vlan" {
+		t.Errorf("default multus binding: podNet=%v defaultNet=%q, want false ns/vlan", podNet, defaultNet)
+	}
+}
+
 func TestNamespacesExposesLabelsAndAnnotations(t *testing.T) {
 	s := stateWithIndexers()
 	_ = s.nss.Add(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{

@@ -181,6 +181,9 @@ func policyFromEgressFirewall(u *unstructured.Unstructured) model.Policy {
 		if peer == "" {
 			peer = str(to["dnsName"])
 		}
+		if peer == "" && to["nodeSelector"] != nil {
+			peer = "cluster nodes"
+		}
 		p.Rules = append(p.Rules, model.PolicyRuleView{
 			Direction: "Egress",
 			Action:    str(r["type"]),
