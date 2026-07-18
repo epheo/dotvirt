@@ -223,3 +223,53 @@ describe('buildEditRequest', () => {
 		expect(buildEditRequest(v, form)).toEqual({ sourceFile: v.sourceFile });
 	});
 });
+
+describe('buildEditRequest placement', () => {
+	const schedVM = () =>
+		vm({
+			scheduling: {
+				pin: ['w1'],
+				groups: [{ name: 'web', mode: 'together', strict: true }],
+			},
+		});
+
+	it('yields only sourceFile for untouched scheduling', () => {
+		const v = schedVM();
+		expect(buildEditRequest(v, seedEditForm(v))).toEqual({ sourceFile: v.sourceFile });
+	});
+
+	it('upserts added and mode-changed groups, removes deleted ones', () => {
+		const v = schedVM();
+		const form = seedEditForm(v);
+		form.groups[0].mode = 'apart';
+		form.groups.push({ name: 'db', mode: 'together', strict: false, removed: false, isNew: true });
+		const req = buildEditRequest(v, form);
+		expect(req.addGroups).toEqual([
+			{ name: 'web', mode: 'apart', strict: true },
+			{ name: 'db', mode: 'together', strict: undefined },
+		]);
+		expect(req.removeGroups).toBeUndefined();
+
+		const gone = seedEditForm(v);
+		gone.groups[0].removed = true;
+		expect(buildEditRequest(v, gone).removeGroups).toEqual(['web']);
+	});
+
+	it('sends pin only when it changed, [] to clear', () => {
+		const v = schedVM();
+		const form = seedEditForm(v);
+		form.pin = ['w2', 'w3'];
+		expect(buildEditRequest(v, form).pin).toEqual(['w2', 'w3']);
+		const clear = seedEditForm(v);
+		clear.pin = [];
+		expect(buildEditRequest(v, clear).pin).toEqual([]);
+	});
+
+	it('never diffs placement on a custom-affinity VM', () => {
+		const v = vm({ scheduling: { custom: true } });
+		const form = seedEditForm(v);
+		form.groups.push({ name: 'db', mode: 'together', strict: true, removed: false, isNew: true });
+		form.pin = ['w9'];
+		expect(buildEditRequest(v, form)).toEqual({ sourceFile: v.sourceFile });
+	});
+});
