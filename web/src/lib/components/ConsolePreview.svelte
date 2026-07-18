@@ -16,10 +16,15 @@
 	// GET is refreshed by changing the query param. Reset per VM.
 	let tick = $state(0);
 	let failed = $state(false);
+	// The bezel takes the framebuffer's own aspect so the preview is shaped
+	// like the console really is — never a letterboxed stretch. 4:3 (the VGA
+	// default) stands in until the first frame reports its true size.
+	let aspect = $state('4 / 3');
 	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
 	$effect(() => {
 		vmKey; // reset state on selection change
 		failed = false;
+		aspect = '4 / 3';
 		tick = Date.now();
 	});
 	// Refresh while running + visible (paused when backgrounded).
@@ -31,18 +36,24 @@
 
 {#if running && !failed}
 	<!-- The bezel behind the framebuffer stays dark in both themes (raw slate). -->
+	<!-- xl: the host row stretches the bezel to the tiles+usage column height
+	     and aspect-ratio derives the width from it, so the preview spans the
+	     column at the console's real proportions (max-w guards against very
+	     wide framebuffers eating the row). -->
 	<button
 		onclick={onopen}
 		title="Open the live console"
-		class="group relative block w-full overflow-hidden rounded border border-line bg-slate-900 xl:w-80 xl:shrink-0"
+		style:aspect-ratio={aspect}
+		class="group relative block w-full max-w-xl overflow-hidden rounded border border-line bg-slate-900 xl:w-auto xl:shrink-0"
 	>
-		<!-- xl: the host row stretches the bezel to the tiles+usage column; the
-		     framebuffer letterboxes inside it instead of capping at thumbnail
-		     height, so the preview reads as one harmonious right column. -->
 		<img
 			src={screenshotURL(vm, tick)}
 			alt="Console preview"
-			class="max-h-64 w-full object-contain xl:h-full xl:max-h-full"
+			class="h-full w-full object-contain"
+			onload={(e) => {
+				const t = e.currentTarget as HTMLImageElement;
+				if (t.naturalWidth && t.naturalHeight) aspect = `${t.naturalWidth} / ${t.naturalHeight}`;
+			}}
 			onerror={() => (failed = true)}
 		/>
 		<span
