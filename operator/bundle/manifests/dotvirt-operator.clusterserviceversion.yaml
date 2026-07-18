@@ -35,8 +35,8 @@ metadata:
       ]
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
-    containerImage: quay.io/epheo/dotvirt-operator@sha256:003842a1569f140dc25e1197a8148d86eaefca77e9f6c540a160cb046d522db7
-    createdAt: "2026-07-18T13:33:13Z"
+    containerImage: quay.io/epheo/dotvirt-operator@sha256:a81829937b0c7598669e0f2aa8f735d1a974c0d19dd869eb8b6920a8801ab6b4
+    createdAt: "2026-07-18T13:52:27Z"
     description: Installs dotvirt — a vCenter-like GitOps WebUI for KubeVirt — with its platform/tenant tier.
     operators.operatorframework.io/builder: operator-sdk-v1.42.2
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
@@ -46,7 +46,7 @@ metadata:
     operatorframework.io/arch.amd64: supported
     operatorframework.io/arch.arm64: supported
     operatorframework.io/os.linux: supported
-  name: dotvirt-operator.v0.0.19
+  name: dotvirt-operator.v0.0.20
 spec:
   apiservicedefinitions: {}
   customresourcedefinitions:
@@ -247,10 +247,10 @@ spec:
                       - --health-probe-bind-address=:8081
                     env:
                       - name: RELATED_IMAGE_DOTVIRT
-                        value: quay.io/epheo/dotvirt@sha256:2b1b5506dec172f98950a29ad213ba46e1223b701294ca042bd72b9ebeef16c1
+                        value: quay.io/epheo/dotvirt@sha256:126c64154fdc90a92566feb8ca93675d57fd5cd2668442282d1628f249d02b4b
                       - name: RELATED_IMAGE_FORGEJO
                         value: codeberg.org/forgejo/forgejo:11-rootless@sha256:5135f11de848bea6d59c0a96688e90c361380ba102bdc08dbd5aa52cca2b179b
-                    image: quay.io/epheo/dotvirt-operator@sha256:003842a1569f140dc25e1197a8148d86eaefca77e9f6c540a160cb046d522db7
+                    image: quay.io/epheo/dotvirt-operator@sha256:a81829937b0c7598669e0f2aa8f735d1a974c0d19dd869eb8b6920a8801ab6b4
                     livenessProbe:
                       httpGet:
                         path: /healthz
@@ -334,12 +334,12 @@ spec:
   provider:
     name: epheo
   relatedImages:
-    - image: quay.io/epheo/dotvirt@sha256:2b1b5506dec172f98950a29ad213ba46e1223b701294ca042bd72b9ebeef16c1
+    - image: quay.io/epheo/dotvirt@sha256:126c64154fdc90a92566feb8ca93675d57fd5cd2668442282d1628f249d02b4b
       name: dotvirt
-    - image: quay.io/epheo/dotvirt-operator@sha256:003842a1569f140dc25e1197a8148d86eaefca77e9f6c540a160cb046d522db7
-      name: dotvirt-operator-003842a1569f140dc25e1197a8148d86eaefca77e9f6c540a160cb046d522db7-annotation
+    - image: quay.io/epheo/dotvirt-operator@sha256:a81829937b0c7598669e0f2aa8f735d1a974c0d19dd869eb8b6920a8801ab6b4
+      name: dotvirt-operator-a81829937b0c7598669e0f2aa8f735d1a974c0d19dd869eb8b6920a8801ab6b4-annotation
     - image: codeberg.org/forgejo/forgejo:11-rootless@sha256:5135f11de848bea6d59c0a96688e90c361380ba102bdc08dbd5aa52cca2b179b
       name: forgejo
-    - image: quay.io/epheo/dotvirt-operator@sha256:003842a1569f140dc25e1197a8148d86eaefca77e9f6c540a160cb046d522db7
+    - image: quay.io/epheo/dotvirt-operator@sha256:a81829937b0c7598669e0f2aa8f735d1a974c0d19dd869eb8b6920a8801ab6b4
       name: manager
-  version: 0.0.19
+  version: 0.0.20
