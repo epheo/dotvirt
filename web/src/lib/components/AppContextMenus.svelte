@@ -156,6 +156,14 @@
 				<div class="my-1 border-t border-line-soft"></div>
 				<MenuItem
 					onclick={() => {
+						const project = ctx.kind === 'container' ? ctx.project : null;
+						ui.ctx = null;
+						goto(`/networking/security${project ? `?tenant=${encodeURIComponent(project)}` : ''}`);
+					}}
+					title="The policy plane scoped to this tenant">Security view</MenuItem
+				>
+				<MenuItem
+					onclick={() => {
 						if (ctx.kind === 'container' && ctx.repo) window.open(ctx.repo, '_blank');
 						ui.ctx = null;
 					}}
