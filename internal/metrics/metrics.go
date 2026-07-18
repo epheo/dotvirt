@@ -121,7 +121,7 @@ func (c *Client) VMUsage(ctx context.Context, token, ns, name string) (model.VMU
 	}
 	s := fmt.Sprintf("{namespace=%q,name=%q}", ns, name)
 	sp := c.sparklines(ctx, token, map[string]string{
-		"cpu":  fmt.Sprintf("rate(kubevirt_vmi_cpu_usage_seconds_total%s[2m])*100 / on(namespace,name) kubevirt_vmi_vcpu_count%s", s, s),
+		"cpu":  fmt.Sprintf("rate(kubevirt_vmi_cpu_usage_seconds_total%s[2m])*100 / on(namespace,name) %s", s, vcpuCount(s)),
 		"mem":  fmt.Sprintf("kubevirt_vmi_memory_used_bytes%s", s),
 		"stor": fmt.Sprintf("sum(kubevirt_vmi_filesystem_used_bytes%s)", s),
 	})
@@ -166,7 +166,7 @@ func (c *Client) ClusterSummary(ctx context.Context, token string, namespaces []
 		"stor": fmt.Sprintf("sum(%s)", vm("kubevirt_vmi_filesystem_used_bytes")),
 	})
 	sc := c.scalars(ctx, token, map[string]string{
-		"cpuAlloc":  fmt.Sprintf("sum(%s)", vm("kubevirt_vmi_vcpu_count")),
+		"cpuAlloc":  vcpuTotal(nsSel),
 		"cpuTotal":  fmt.Sprintf(`sum(kube_node_status_allocatable{resource="cpu"%s})`, nodeFilter),
 		"memAlloc":  fmt.Sprintf("sum(%s)", vm("kubevirt_vmi_memory_domain_bytes")),
 		"memTotal":  fmt.Sprintf(`sum(kube_node_status_allocatable{resource="memory"%s})`, nodeFilter),
