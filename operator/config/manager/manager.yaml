@@ -23,7 +23,7 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
         - name: manager
-          image: quay.io/epheo/dotvirt-operator:v0.0.21
+          image: quay.io/epheo/dotvirt-operator:v0.0.22
           args: ["--leader-elect", "--health-probe-bind-address=:8081"]
           # Operand images, digest-pinned. The operator reads these to decide what to deploy
           # (RELATED_IMAGE_* convention), so an operand is overridable per-install via the
@@ -33,7 +33,7 @@ spec:
           # FORGEJO is static (bumped only when the upstream :11-rootless tag moves).
           env:
             - name: RELATED_IMAGE_DOTVIRT
-              value: quay.io/epheo/dotvirt@sha256:70a22168be9a3b8605d8755459af6420efd39290cdf8ab0e87d9b7ddac6b0eee
+              value: quay.io/epheo/dotvirt@sha256:0ea0b95f64ce581422bc07f1934352a5172efe386b2f9562206e7b95af4bc9c6
             - name: RELATED_IMAGE_FORGEJO
               value: codeberg.org/forgejo/forgejo:11-rootless@sha256:5135f11de848bea6d59c0a96688e90c361380ba102bdc08dbd5aa52cca2b179b
           securityContext:
