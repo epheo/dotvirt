@@ -21,6 +21,7 @@ func TestVisibleNamespacesClusterWide(t *testing.T) {
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "alpha"}},
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "beta"}},
 	)
+	allowSSAR(kube, true)
 	c := &Client{kube: kube}
 
 	got, err := c.VisibleNamespaces(context.Background(), nil)
@@ -30,6 +31,46 @@ func TestVisibleNamespacesClusterWide(t *testing.T) {
 	sort.Strings(got)
 	if want := []string{"alpha", "beta"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func allowSSAR(kube *fake.Clientset, allowed bool) {
+	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		ssar := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview).DeepCopy()
+		ssar.Status.Allowed = allowed
+		return true, ssar, nil
+	})
+}
+
+// TestVisibleNamespacesListWithoutVMRead pins the auditor-role gap: listing
+// namespaces cluster-wide must not stand in for reading VMs in them — without
+// the cluster-wide VM read the candidates are probed like any other token.
+func TestVisibleNamespacesListWithoutVMRead(t *testing.T) {
+	kube := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-a"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-b"}},
+	)
+	allowSSAR(kube, false)
+	kube.PrependReactor("create", "selfsubjectrulesreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		ssrr := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectRulesReview)
+		out := ssrr.DeepCopy()
+		if ssrr.Spec.Namespace == "tenant-a" {
+			out.Status.ResourceRules = []authzv1.ResourceRule{{
+				Verbs:     []string{"get", "list"},
+				APIGroups: []string{"kubevirt.io"},
+				Resources: []string{"virtualmachines"},
+			}}
+		}
+		return true, out, nil
+	})
+
+	c := &Client{kube: kube}
+	got, err := c.VisibleNamespaces(context.Background(), []string{"tenant-a", "tenant-b"})
+	if err != nil {
+		t.Fatalf("VisibleNamespaces: %v", err)
+	}
+	if want := []string{"tenant-a"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v (namespace list alone must not grant visibility)", got, want)
 	}
 }
 
