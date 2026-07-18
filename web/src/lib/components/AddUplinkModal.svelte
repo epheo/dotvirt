@@ -1,9 +1,12 @@
 <script lang="ts">
 	import { api, type PhysicalAdapter, type UplinkCreate } from '$lib/api';
+	import { validName, NAME_HINT } from '$lib/validate';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 	import FormField from './FormField.svelte';
+	import TextInput from './TextInput.svelte';
+	import SelectInput from './SelectInput.svelte';
 
 	let {
 		adapters = [],
@@ -39,7 +42,17 @@
 		if (!nic || !nics.includes(nic)) nic = nics[0] ?? '';
 	});
 
-	const valid = $derived(!!(name && nic));
+	const missing = $derived.by(() => {
+		const m: string[] = [];
+		if (!name) m.push('Name is required');
+		else if (!validName(name)) m.push('Name must be lowercase alphanumeric with dashes');
+		if (!nic) m.push('Physical adapter is required');
+		return m;
+	});
+	const valid = $derived(missing.length === 0);
+	const summary = $derived(
+		valid ? `Stages uplink “${name}” on ${nic} (${node || 'all workers'}) → platform repo` : '',
+	);
 
 	async function submit() {
 		if (!valid) return;
@@ -62,41 +75,28 @@
 
 <Modal title="Add Uplink" {onclose}>
 	<div class="space-y-4 px-5 py-4 text-sm">
-		<FormField label="Name (physical network)">
-			<input
-				bind:value={name}
-				placeholder="physnet-prod"
-				class="w-full rounded border border-line-strong px-2 py-1.5"
-			/>
+		<FormField label="Name (physical network)" error={name && !validName(name) ? NAME_HINT : ''}>
+			<TextInput bind:value={name} placeholder="physnet-prod" mono data-autofocus />
 		</FormField>
 		<FormField label="Nodes">
-			<select bind:value={node} class="w-full rounded border border-line-strong px-2 py-1.5">
+			<SelectInput bind:value={node}>
 				<option value="">All worker nodes</option>
 				{#each nodes as n (n)}<option value={n}>{n}</option>{/each}
-			</select>
+			</SelectInput>
 		</FormField>
 		<div class="grid grid-cols-2 gap-3">
 			<FormField label="Physical adapter (NIC)">
 				{#if nics.length}
-					<select bind:value={nic} class="w-full rounded border border-line-strong px-2 py-1.5">
+					<SelectInput bind:value={nic}>
 						{#each nics as n (n)}<option value={n}>{n}</option>{/each}
-					</select>
+					</SelectInput>
 				{:else}
-					<input
-						bind:value={nic}
-						placeholder="eno2"
-						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-					/>
+					<TextInput bind:value={nic} placeholder="eno2" mono />
 				{/if}
 			</FormField>
-			<label class="block">
-				<span class="text-ink-soft">OVS bridge <span class="text-ink-faint">(optional)</span></span>
-				<input
-					bind:value={bridge}
-					placeholder={name ? `br-${name}` : 'br-physnet'}
-					class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-				/>
-			</label>
+			<FormField label="OVS bridge (optional)">
+				<TextInput bind:value={bridge} placeholder={name ? `br-${name}` : 'br-physnet'} mono />
+			</FormField>
 		</div>
 		<p class="rounded bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
 			Creates an OVS bridge enslaving this NIC on {node || 'all worker nodes'} and maps it to the physical
@@ -109,6 +109,8 @@
 		<StageFooter
 			label="Stage uplink"
 			disabled={!valid}
+			{missing}
+			{summary}
 			{submitting}
 			onsubmit={submit}
 			oncancel={onclose}

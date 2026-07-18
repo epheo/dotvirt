@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { Plus, Trash2 } from 'lucide-svelte';
 	import { api, type AdminNetworkPolicyCreate, type AdminPolicyRule } from '$lib/api';
+	import { validName, NAME_HINT } from '$lib/validate';
+	import ChoiceCards from './ChoiceCards.svelte';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 	import FormField from './FormField.svelte';
+	import TextInput from './TextInput.svelte';
 
 	let {
 		onclose,
@@ -30,7 +33,8 @@
 	};
 	const blankRow = (): Row => ({ action: 'Allow', key: '', value: '', proto: 'TCP', port: null });
 
-	let baseline = $state(false);
+	let tier = $state<'policy' | 'baseline'>('policy');
+	const baseline = $derived(tier === 'baseline');
 	let name = $state('');
 	let priority = $state<number | null>(10);
 	let subjKey = $state('');
@@ -39,7 +43,22 @@
 	let submitting = $state(false);
 	let error = $state('');
 
-	const valid = $derived(baseline || (!!name && priority != null));
+	const missing = $derived.by(() => {
+		if (baseline) return [];
+		const m: string[] = [];
+		if (!name) m.push('Name is required');
+		else if (!validName(name)) m.push('Name must be lowercase alphanumeric with dashes');
+		if (priority == null || priority < 0 || priority > 1000) m.push('Priority must be 0-1000');
+		return m;
+	});
+	const valid = $derived(missing.length === 0);
+	const summary = $derived(
+		!valid
+			? ''
+			: baseline
+				? 'Stages the baseline policy (cluster default backstop) → platform repo'
+				: `Stages admin policy “${name}” (priority ${priority}) → platform repo`,
+	);
 
 	function addRow() {
 		rows = [...rows, blankRow()];
@@ -85,47 +104,26 @@
 
 <Modal title="Admin Distributed Firewall" subtitle="cluster-wide" size="lg" {onclose}>
 	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
-		<div class="flex gap-2">
-			<button
-				onclick={() => (baseline = false)}
-				class="flex-1 rounded border px-3 py-2 text-left text-xs {!baseline
-					? 'border-accent bg-select-soft text-accent-ink'
-					: 'border-line-strong text-ink-soft'}"
-			>
-				<div class="font-medium">Admin Policy</div>
-				<div class="text-ink-faint">Priority-ordered · overrides tenants</div>
-			</button>
-			<button
-				onclick={() => (baseline = true)}
-				class="flex-1 rounded border px-3 py-2 text-left text-xs {baseline
-					? 'border-accent bg-select-soft text-accent-ink'
-					: 'border-line-strong text-ink-soft'}"
-			>
-				<div class="font-medium">Baseline</div>
-				<div class="text-ink-faint">The cluster default backstop</div>
-			</button>
-		</div>
+		<ChoiceCards
+			options={[
+				{ value: 'policy', label: 'Admin Policy', hint: 'Priority-ordered · overrides tenants' },
+				{ value: 'baseline', label: 'Baseline', hint: 'The cluster default backstop' },
+			]}
+			bind:value={tier}
+		/>
 
 		<div class="grid grid-cols-2 gap-3">
-			<FormField label="Name">
-				<input
+			<FormField label="Name" error={!baseline && name && !validName(name) ? NAME_HINT : ''}>
+				<TextInput
 					bind:value={name}
 					disabled={baseline}
 					placeholder={baseline ? 'default' : 'tenant-isolation'}
-					class="w-full rounded border border-line-strong px-2 py-1.5 disabled:bg-inset-strong disabled:text-ink-faint"
+					mono
 				/>
 			</FormField>
-			<label class="block">
-				<span class="text-ink-soft">Priority <span class="text-ink-faint">(0–1000)</span></span>
-				<input
-					type="number"
-					bind:value={priority}
-					disabled={baseline}
-					min="0"
-					max="1000"
-					class="mt-1 w-full rounded border border-line-strong px-2 py-1.5 disabled:bg-inset-strong disabled:text-ink-faint"
-				/>
-			</label>
+			<FormField label="Priority (0–1000)">
+				<TextInput type="number" bind:value={priority} disabled={baseline} min="0" max="1000" />
+			</FormField>
 		</div>
 
 		<div class="rounded border border-line p-3">
@@ -222,6 +220,8 @@
 		<StageFooter
 			label="Stage policy"
 			disabled={!valid}
+			{missing}
+			{summary}
 			{submitting}
 			onsubmit={submit}
 			oncancel={onclose}

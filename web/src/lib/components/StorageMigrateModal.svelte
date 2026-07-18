@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { HardDrive } from 'lucide-svelte';
 	import { api, Unauthorized, type Options, type VM } from '$lib/api';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
+	import StageFooter from './StageFooter.svelte';
+	import SelectInput from './SelectInput.svelte';
 
 	// Storage live migration (the Storage vMotion dialog): pick a target class
 	// per disk; staging rewrites each disk's DataVolume template and sets
@@ -98,10 +99,9 @@
 							{d.storageClass || 'cluster default'}
 						</td>
 						<td class="py-1.5">
-							<select
+							<SelectInput
 								value={targets[d.name] ?? ''}
 								onchange={(e) => (targets = { ...targets, [d.name]: e.currentTarget.value })}
-								class="w-full rounded border border-line-strong px-2 py-1"
 							>
 								<option value="">— keep —</option>
 								{#each options?.storageClasses ?? [] as sc (sc.name)}
@@ -109,7 +109,7 @@
 										<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
 									{/if}
 								{/each}
-							</select>
+							</SelectInput>
 						</td>
 					</tr>
 				{/each}
@@ -119,19 +119,16 @@
 		<ErrorNote {error} class="mt-3" />
 	</div>
 	{#snippet footer()}
-		<button
-			onclick={onclose}
-			class="rounded border border-line-strong px-3 py-1 text-sm text-ink-soft hover:bg-inset"
-		>
-			Cancel
-		</button>
-		<button
-			onclick={stage}
-			disabled={!moves.length || busy}
-			class="ml-auto flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent disabled:bg-line-strong"
-		>
-			<HardDrive size={14} />
-			{busy ? 'Staging…' : moves.length ? `Stage migration (${moves.length})` : 'Stage migration'}
-		</button>
+		<StageFooter
+			label={moves.length ? `Stage migration (${moves.length})` : 'Stage migration'}
+			disabled={!moves.length}
+			missing={['Pick a target class for at least one disk']}
+			summary={moves.length
+				? `Stages ${moves.map((m) => `${m.name} → ${m.storageClass}`).join(', ')}`
+				: ''}
+			submitting={busy}
+			onsubmit={stage}
+			oncancel={onclose}
+		/>
 	{/snippet}
 </Modal>

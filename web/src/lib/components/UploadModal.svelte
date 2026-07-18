@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { Check, Upload } from 'lucide-svelte';
 	import { api, Unauthorized, type Options } from '$lib/api';
+	import { validName, NAME_HINT } from '$lib/validate';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
 	import FormField from './FormField.svelte';
+	import TextInput from './TextInput.svelte';
+	import SelectInput from './SelectInput.svelte';
 
 	// Image upload (OVF-import analog). dotvirt creates the upload-target
 	// DataVolume + mints a token; the browser then streams the file STRAIGHT to
@@ -42,8 +45,18 @@
 	});
 
 	// RFC 1123 label (a PVC/DataVolume name), like the clone target.
-	const validName = $derived(/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(name) && name.length <= 63);
-	const ready = $derived(!!file && validName && !!namespace && /^\d+(Mi|Gi|Ti)$/.test(size));
+	const nameOK = $derived(validName(name));
+	const sizeOK = $derived(/^\d+(Mi|Gi|Ti)$/.test(size));
+	const missing = $derived.by(() => {
+		const m: string[] = [];
+		if (!file) m.push('Pick an image file');
+		if (!name) m.push('Disk name is required');
+		else if (!nameOK) m.push('Disk name must be lowercase alphanumeric with dashes');
+		if (!namespace) m.push('Project is required');
+		if (!sizeOK) m.push('Disk size must be a quantity like 10Gi');
+		return m;
+	});
+	const ready = $derived(missing.length === 0);
 
 	function pickFile(e: Event) {
 		const f = (e.target as HTMLInputElement).files?.[0] ?? null;
@@ -144,42 +157,26 @@
 						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5 text-xs"
 					/>
 				</label>
-				<FormField label="Disk name">
-					<input
-						bind:value={name}
-						placeholder="my-image"
-						class="w-full rounded border border-line-strong px-2 py-1.5 font-mono text-sm"
-					/>
+				<FormField label="Disk name" error={name && !nameOK ? NAME_HINT : ''}>
+					<TextInput bind:value={name} placeholder="my-image" mono />
 				</FormField>
 				<NamespaceSelect bind:namespace {namespaces} />
-				<FormField label="Disk size">
-					<input
-						bind:value={size}
-						placeholder="10Gi"
-						class="w-full rounded border border-line-strong px-2 py-1.5"
-					/>
+				<FormField label="Disk size" error={size && !sizeOK ? 'A quantity like 10Gi.' : ''}>
+					<TextInput bind:value={size} placeholder="10Gi" mono />
 				</FormField>
 				<FormField label="Storage class">
-					<select
-						bind:value={storageClass}
-						class="w-full rounded border border-line-strong px-2 py-1.5"
-					>
+					<SelectInput bind:value={storageClass}>
 						<option value="">cluster default</option>
 						{#each options?.storageClasses ?? [] as sc (sc.name)}
 							<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
 						{/each}
-					</select>
+					</SelectInput>
 				</FormField>
 			</div>
 			{#if file}
 				<p class="mt-2 text-xs text-ink-faint">
 					{file.name} · {(file.size / 1024 ** 2).toFixed(1)} MiB — ensure the disk size fits the image's
 					virtual size.
-				</p>
-			{/if}
-			{#if !validName && name}
-				<p class="mt-1 text-xs text-warn-ink">
-					Lowercase letters, digits and dashes only (≤63 chars).
 				</p>
 			{/if}
 			<ErrorNote {error} class="mt-2" />
@@ -228,6 +225,11 @@
 	</div>
 	{#snippet footer()}
 		{#if stage === 'form' || stage === 'error'}
+			{#if !ready && missing.length}
+				<span class="min-w-0 truncate text-xs text-warn-ink"
+					>{missing[0]}{missing.length > 1 ? ` (+${missing.length - 1} more)` : ''}</span
+				>
+			{/if}
 			<button
 				onclick={onclose}
 				class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong"
@@ -236,6 +238,7 @@
 			<button
 				onclick={start}
 				disabled={!ready}
+				title={ready ? '' : missing[0]}
 				class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 			>
 				{stage === 'error' ? 'Retry' : 'Upload'}

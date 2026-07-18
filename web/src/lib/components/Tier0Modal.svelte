@@ -1,10 +1,14 @@
 <script lang="ts">
 	import { api, type EgressIPCreate, type ExternalRouteCreate } from '$lib/api';
+	import { validName, NAME_HINT, validIP } from '$lib/validate';
 	import { TERMS } from '$lib/vocab';
+	import CheckGroup from './CheckGroup.svelte';
+	import ChoiceCards from './ChoiceCards.svelte';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 	import FormField from './FormField.svelte';
+	import TextInput from './TextInput.svelte';
 
 	let {
 		namespaces,
@@ -33,11 +37,27 @@
 			.map((s) => s.trim())
 			.filter(Boolean),
 	);
-	const valid = $derived(!!name && list.length > 0 && selectedNs.length > 0);
-
-	function toggleNs(ns: string, on: boolean) {
-		selectedNs = on ? [...selectedNs, ns] : selectedNs.filter((n) => n !== ns);
-	}
+	const badIPs = $derived(list.filter((ip) => !validIP(ip)));
+	const missing = $derived.by(() => {
+		const m: string[] = [];
+		if (!name) m.push('Name is required');
+		else if (!validName(name)) m.push('Name must be lowercase alphanumeric with dashes');
+		if (!list.length)
+			m.push(
+				kind === 'snat'
+					? 'At least one egress IP is required'
+					: 'At least one next-hop IP is required',
+			);
+		else if (badIPs.length) m.push(`Not an IP: ${badIPs[0]}`);
+		if (!selectedNs.length) m.push('Select at least one project');
+		return m;
+	});
+	const valid = $derived(missing.length === 0);
+	const summary = $derived(
+		valid
+			? `Stages ${kind === 'snat' ? TERMS.snat.nsx : 'external route'} “${name}” (${list.length} IP${list.length === 1 ? '' : 's'}, ${selectedNs.length} project${selectedNs.length === 1 ? '' : 's'}) → platform repo`
+			: '',
+	);
 
 	async function submit() {
 		if (!valid) return;
@@ -63,61 +83,37 @@
 
 <Modal title={TERMS.tier0.nsx} subtitle={TERMS.tier0.vsphere} {onclose}>
 	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
-		<div class="flex gap-2">
-			<button
-				onclick={() => (kind = 'snat')}
-				class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'snat'
-					? 'border-accent bg-select-soft text-accent-ink'
-					: 'border-line-strong text-ink-soft'}"
-			>
-				<div class="font-medium">{TERMS.snat.nsx}</div>
-				<div class="text-ink-faint">Pin egress to fixed IPs (EgressIP)</div>
-			</button>
-			<button
-				onclick={() => (kind = 'route')}
-				class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'route'
-					? 'border-accent bg-select-soft text-accent-ink'
-					: 'border-line-strong text-ink-soft'}"
-			>
-				<div class="font-medium">External Route</div>
-				<div class="text-ink-faint">Steer egress via next-hops</div>
-			</button>
-		</div>
+		<ChoiceCards
+			options={[
+				{ value: 'snat', label: TERMS.snat.nsx, hint: 'Pin egress to fixed IPs (EgressIP)' },
+				{ value: 'route', label: 'External Route', hint: 'Steer egress via next-hops' },
+			]}
+			bind:value={kind}
+		/>
 
-		<FormField label="Name">
-			<input
+		<FormField label="Name" error={name && !validName(name) ? NAME_HINT : ''}>
+			<TextInput
 				bind:value={name}
 				placeholder={kind === 'snat' ? 'team-a-snat' : 'team-a-gw'}
-				class="w-full rounded border border-line-strong px-2 py-1.5"
+				mono
+				data-autofocus
 			/>
 		</FormField>
 
-		<label class="block">
-			<span class="text-ink-soft"
-				>{kind === 'snat' ? 'Egress IPs' : 'Next-hop IPs'}
-				<span class="text-ink-faint">(space/comma separated)</span></span
-			>
-			<input
+		<FormField
+			label={`${kind === 'snat' ? 'Egress IPs' : 'Next-hop IPs'} (space/comma separated)`}
+			error={badIPs.length ? `Not an IP: ${badIPs[0]}` : ''}
+		>
+			<TextInput
 				bind:value={ips}
 				placeholder={kind === 'snat' ? '192.0.2.10 192.0.2.11' : '10.0.0.1'}
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+				mono
 			/>
-		</label>
+		</FormField>
 
 		<div>
-			<span class="text-ink-soft">Applies to projects</span>
-			<div class="mt-1 max-h-28 space-y-1 overflow-y-auto rounded border border-line-strong p-2">
-				{#each namespaces as ns (ns)}
-					<label class="flex items-center gap-2 text-xs">
-						<input
-							type="checkbox"
-							checked={selectedNs.includes(ns)}
-							onchange={(e) => toggleNs(ns, e.currentTarget.checked)}
-						/>
-						<span class="text-ink-soft">{ns}</span>
-					</label>
-				{/each}
-			</div>
+			<span class="mb-1 block text-ink-soft">Applies to projects</span>
+			<CheckGroup items={namespaces.map((ns) => ({ value: ns }))} bind:selected={selectedNs} />
 		</div>
 
 		<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">
@@ -136,6 +132,8 @@
 		<StageFooter
 			label="Stage service"
 			disabled={!valid}
+			{missing}
+			{summary}
 			{submitting}
 			onsubmit={submit}
 			oncancel={onclose}

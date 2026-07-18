@@ -2,11 +2,13 @@
 	import { Plus, Trash2 } from 'lucide-svelte';
 	import { api, type NetworkPolicyCreate, type PolicyRule, type VM } from '$lib/api';
 	import { TERMS } from '$lib/vocab';
+	import { validName, NAME_HINT } from '$lib/validate';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
 	import FormField from './FormField.svelte';
+	import TextInput from './TextInput.svelte';
 
 	let {
 		namespaces,
@@ -48,7 +50,19 @@
 		),
 	);
 
-	const valid = $derived(!!name && !!namespace);
+	const missing = $derived.by(() => {
+		const m: string[] = [];
+		if (!name) m.push('Name is required');
+		else if (!validName(name)) m.push('Name must be lowercase alphanumeric with dashes');
+		if (!namespace) m.push('Project is required');
+		return m;
+	});
+	const valid = $derived(missing.length === 0);
+	const summary = $derived(
+		valid
+			? `Stages DFW policy “${name}” → ${namespace} (${members.length} member VM${members.length === 1 ? '' : 's'})`
+			: '',
+	);
 
 	function addRow() {
 		rows = [...rows, blankRow()];
@@ -87,12 +101,8 @@
 <Modal title={TERMS.dfw.nsx} subtitle={TERMS.dfw.vsphere} size="lg" {onclose}>
 	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
 		<div class="grid grid-cols-2 gap-3">
-			<FormField label="Name">
-				<input
-					bind:value={name}
-					placeholder="web-allow-db"
-					class="w-full rounded border border-line-strong px-2 py-1.5"
-				/>
+			<FormField label="Name" error={name && !validName(name) ? NAME_HINT : ''}>
+				<TextInput bind:value={name} placeholder="web-allow-db" mono data-autofocus />
 			</FormField>
 			<NamespaceSelect bind:namespace {namespaces} {initial} />
 		</div>
@@ -187,6 +197,8 @@
 		<StageFooter
 			label="Stage policy"
 			disabled={!valid}
+			{missing}
+			{summary}
 			{submitting}
 			onsubmit={submit}
 			oncancel={onclose}
