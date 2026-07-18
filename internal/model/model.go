@@ -54,6 +54,9 @@ type VM struct {
 	// EvictionStrategy is the template's explicit evictionStrategy (LiveMigrate,
 	// None, ...); empty means the cluster default.
 	EvictionStrategy string `json:"evictionStrategy,omitempty"`
+	// Scheduling is the VM's placement policy (placement groups + host pinning);
+	// nil when the manifest carries none.
+	Scheduling *VMScheduling `json:"scheduling,omitempty"`
 
 	// From cluster (actual state), when cluster reads are enabled.
 	Phase        string   `json:"phase,omitempty"`  // VMI phase, e.g. Running
@@ -76,6 +79,25 @@ type VM struct {
 	// SyncError is ArgoCD's apply failure for this VM (e.g. a webhook rejection),
 	// surfaced so the UI can explain an OutOfSync VM instead of just flagging it.
 	SyncError string `json:"syncError,omitempty"`
+}
+
+// PlacementGroup is one named scheduling rule: VMs sharing the group are kept
+// on one host ("together") or spread across hosts ("apart"). Strict renders a
+// required scheduling term (the scheduler refuses violating placements);
+// otherwise the term is preferred (best effort).
+type PlacementGroup struct {
+	Name   string `json:"name"`
+	Mode   string `json:"mode"` // together | apart
+	Strict bool   `json:"strict,omitempty"`
+}
+
+// VMScheduling is a VM's placement policy as read from its manifest. Custom
+// flags affinity/node-selection content dotvirt does not own — such VMs are
+// edited in git, never through the scheduling form.
+type VMScheduling struct {
+	Pin    []string         `json:"pin,omitempty"` // host names the VM must run on
+	Groups []PlacementGroup `json:"groups,omitempty"`
+	Custom bool             `json:"custom,omitempty"`
 }
 
 // Migration mirrors the VMI's migration state. Active while neither Completed
@@ -193,6 +215,10 @@ type EditRequest struct {
 	AddNetworks      []NetworkAdd      `json:"addNetworks,omitempty"`
 	RemoveNetworks   []string          `json:"removeNetworks,omitempty"`
 	MigrateVolumes   []VolumeMigration `json:"migrateVolumes,omitempty"` // storage live migration
+
+	Pin          *[]string        `json:"pin,omitempty"` // replace host pinning; empty list removes it
+	AddGroups    []PlacementGroup `json:"addGroups,omitempty"`
+	RemoveGroups []string         `json:"removeGroups,omitempty"`
 
 	Message string `json:"message,omitempty"` // optional commit message; auto-generated when empty
 }

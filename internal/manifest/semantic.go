@@ -3,6 +3,7 @@ package manifest
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/epheo/dotvirt/internal/model"
 )
@@ -48,6 +49,7 @@ func ChangesForEdit(current model.VM, edit VMEdit) []model.Change {
 		out = append(out, model.Change{Field: "Eviction strategy", Action: "change",
 			From: orClusterDefault(current.EvictionStrategy), To: orClusterDefault(*edit.EvictionStrategy)})
 	}
+	out = append(out, schedulingChanges(current, edit)...)
 
 	for _, d := range edit.AddDisks {
 		to := fmt.Sprintf("%s (%s)", d.Name, d.Size)
@@ -77,6 +79,60 @@ func ChangesForEdit(current model.VM, edit VMEdit) []model.Change {
 			From: orClusterDefault(from), To: mv.StorageClass})
 	}
 	return out
+}
+
+// schedulingChanges renders placement edits against the VM's current policy,
+// skipping no-ops the same way applySchedulingRules' upsert would.
+func schedulingChanges(current model.VM, edit VMEdit) []model.Change {
+	var out []model.Change
+	curGroups := map[string]model.PlacementGroup{}
+	var curPin []string
+	if current.Scheduling != nil {
+		for _, g := range current.Scheduling.Groups {
+			curGroups[g.Name] = g
+		}
+		curPin = current.Scheduling.Pin
+	}
+	for _, g := range edit.AddGroups {
+		to := groupDesc(g)
+		if old, ok := curGroups[g.Name]; ok {
+			if from := groupDesc(old); from != to {
+				out = append(out, model.Change{Field: "Placement group " + g.Name, Action: "change", From: from, To: to})
+			}
+		} else {
+			out = append(out, model.Change{Field: "Placement group " + g.Name, Action: "add", To: to})
+		}
+	}
+	for _, n := range sortedStrings(edit.RemoveGroups) {
+		if old, ok := curGroups[n]; ok {
+			out = append(out, model.Change{Field: "Placement group " + n, Action: "remove", From: groupDesc(old)})
+		}
+	}
+	if edit.Pin != nil {
+		from, to := strings.Join(curPin, ", "), strings.Join(*edit.Pin, ", ")
+		switch {
+		case from == to:
+		case from == "":
+			out = append(out, model.Change{Field: "Host pinning", Action: "add", To: to})
+		case to == "":
+			out = append(out, model.Change{Field: "Host pinning", Action: "remove", From: from})
+		default:
+			out = append(out, model.Change{Field: "Host pinning", Action: "change", From: from, To: to})
+		}
+	}
+	return out
+}
+
+// groupDesc names a placement group's behavior for the preview.
+func groupDesc(g model.PlacementGroup) string {
+	mode := "keep together"
+	if g.Mode == "apart" {
+		mode = "keep apart"
+	}
+	if g.Strict {
+		return mode + ", strict"
+	}
+	return mode + ", preferred"
 }
 
 // sizingChanges renders the CPU/memory/instancetype part of an edit, honoring the
@@ -167,9 +223,30 @@ func DiffVMs(a, b model.VM) []model.Change {
 		}
 	}
 
+	cmp("Host pinning", strings.Join(schedPinOf(a), ", "), strings.Join(schedPinOf(b), ", "))
+	diffNamedSet("Placement group", groupDescsOf(a), groupDescsOf(b), &out)
+
 	diffNamedSet("Disk", diskNamesOf(a), diskNamesOf(b), &out)
 	diffNamedSet("Network", nicNamesOf(a), nicNamesOf(b), &out)
 	return out
+}
+
+func schedPinOf(v model.VM) []string {
+	if v.Scheduling == nil {
+		return nil
+	}
+	return v.Scheduling.Pin
+}
+
+func groupDescsOf(v model.VM) []string {
+	if v.Scheduling == nil {
+		return nil
+	}
+	var n []string
+	for _, g := range v.Scheduling.Groups {
+		n = append(n, fmt.Sprintf("%s (%s)", g.Name, groupDesc(g)))
+	}
+	return n
 }
 
 func diskNamesOf(v model.VM) []string {

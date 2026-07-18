@@ -41,10 +41,13 @@ type vmDoc struct {
 		} `yaml:"dataVolumeTemplates"`
 		Template struct {
 			Metadata struct {
+				Labels      map[string]string `yaml:"labels"`
 				Annotations map[string]string `yaml:"annotations"`
 			} `yaml:"metadata"`
 			Spec struct {
-				EvictionStrategy string `yaml:"evictionStrategy"`
+				EvictionStrategy string            `yaml:"evictionStrategy"`
+				NodeSelector     map[string]string `yaml:"nodeSelector"`
+				Affinity         *affinityDoc      `yaml:"affinity"`
 				Domain           struct {
 					CPU struct {
 						Cores int `yaml:"cores"`
@@ -115,6 +118,11 @@ func ParseVMs(path string, content []byte, defaultNS string) ([]model.VM, error)
 			ns = defaultNS
 		}
 		_, drsExclude := doc.Spec.Template.Metadata.Annotations[PreferNoEvictionAnnotation]
+		scheduling, _ := schedulingFromParts(
+			doc.Spec.Template.Metadata.Labels,
+			doc.Spec.Template.Spec.NodeSelector,
+			doc.Spec.Template.Spec.Affinity,
+		)
 		vms = append(vms, model.VM{
 			Namespace:        ns,
 			Name:             doc.Metadata.Name,
@@ -126,6 +134,7 @@ func ParseVMs(path string, content []byte, defaultNS string) ([]model.VM, error)
 			Labels:           doc.Metadata.Labels,
 			DRSExclude:       drsExclude,
 			EvictionStrategy: doc.Spec.Template.Spec.EvictionStrategy,
+			Scheduling:       scheduling,
 			Disks:            disksFromDoc(doc),
 			Networks:         networksFromDoc(doc),
 			SourceFile:       path,

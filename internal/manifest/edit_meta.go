@@ -108,17 +108,14 @@ func quoteKey(k string) string {
 // KubeVirt propagates it to the virt-launcher pod the descheduler inspects.
 const PreferNoEvictionAnnotation = "descheduler.alpha.kubernetes.io/prefer-no-eviction"
 
-// applyTemplateAnnotations upserts/removes annotations under
-// spec.template.metadata — today only the DRS-exclude toggle.
-func applyTemplateAnnotations(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) {
-	if edit.DRSExclude == nil {
+// applyTemplateMeta upserts/removes spec.template.metadata labels (placement
+// groups) and annotations (the DRS-exclude toggle) in one pass: when the
+// template has no metadata block, both sections must be created inside a
+// single insert — two block inserts would splice duplicate metadata: keys.
+func applyTemplateMeta(ed *lineEditor, vmRoot *yaml.Node, labelSet map[string]string, labelRemove []string, edit VMEdit) {
+	annSet, annRemove := drsAnnotationEdits(edit)
+	if len(labelSet)+len(labelRemove)+len(annSet)+len(annRemove) == 0 {
 		return
-	}
-	// The value must stay a YAML string ("true" bare would parse as a bool,
-	// which the API rejects for annotations), so it is spliced pre-quoted.
-	set, remove := map[string]string{PreferNoEvictionAnnotation: `"true"`}, []string(nil)
-	if !*edit.DRSExclude {
-		set, remove = nil, []string{PreferNoEvictionAnnotation}
 	}
 	tmpl := get(get(vmRoot, "spec"), "template")
 	if tmpl == nil {
@@ -127,15 +124,37 @@ func applyTemplateAnnotations(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) {
 	// mappingField, not get: an empty `metadata: {}` must be recreated as a
 	// block, the same degenerate-shape rule applyMapEdits applies one level down.
 	if meta := mappingField(ed, tmpl, "metadata"); meta != nil {
-		applyMapEdits(ed, meta, "annotations", set, remove)
+		applyMapEdits(ed, meta, "labels", labelSet, labelRemove)
+		applyMapEdits(ed, meta, "annotations", annSet, annRemove)
 		return
 	}
-	if len(set) == 0 {
-		return // nothing to remove from a template without metadata
+	block := []string{"metadata:"}
+	section := func(field string, set map[string]string) {
+		if len(set) == 0 {
+			return
+		}
+		block = append(block, "  "+field+":")
+		for _, k := range sortedKeys(set) {
+			block = append(block, "    "+quoteKey(k)+": "+set[k])
+		}
 	}
-	block := []string{"metadata:", "  annotations:"}
-	for _, k := range sortedKeys(set) {
-		block = append(block, "    "+quoteKey(k)+": "+set[k])
+	section("labels", labelSet)
+	section("annotations", annSet)
+	if len(block) == 1 {
+		return // removals only on a template without metadata
 	}
 	ed.insertBlock(tmpl, block)
+}
+
+// drsAnnotationEdits maps the DRS-exclude toggle to annotation edits. The
+// value must stay a YAML string ("true" bare would parse as a bool, which the
+// API rejects for annotations), so it is spliced pre-quoted.
+func drsAnnotationEdits(edit VMEdit) (map[string]string, []string) {
+	if edit.DRSExclude == nil {
+		return nil, nil
+	}
+	if *edit.DRSExclude {
+		return map[string]string{PreferNoEvictionAnnotation: `"true"`}, nil
+	}
+	return nil, []string{PreferNoEvictionAnnotation}
 }
