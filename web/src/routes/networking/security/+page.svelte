@@ -56,7 +56,9 @@
 	let expanded = $state<Record<string, boolean>>({});
 	const keyOf = (p: Policy) => `${p.backing}:${p.namespace ?? ''}:${p.name}`;
 
-	let tracing = $state(false);
+	// Open by default: the trace tool is the view's centerpiece; the toggle
+	// only reclaims space.
+	let tracing = $state(true);
 
 	// New-policy buttons open the same modals the header/context menus do; each is
 	// gated exactly like its entry point there.
