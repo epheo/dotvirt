@@ -44,7 +44,8 @@ func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, ok := s.resolveProject(w, r, byNamespace(req.Source.Namespace)); !ok {
+	sc, ok := s.resolveProject(w, r, byNamespace(req.Source.Namespace))
+	if !ok {
 		return
 	}
 	if dstVM {
@@ -73,11 +74,13 @@ func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res := s.netstate.Trace(src, dst, req.Destination.IP, req.Protocol, req.Port)
-	if s.drift != nil {
-		for i := range res.Steps {
-			if res.Steps[i].Policy != nil {
-				s.policyDrift(res.Steps[i].Policy)
+	can := s.clusterAuthority(r.Context(), sc.id, sc.cluster)
+	for i := range res.Steps {
+		if p := res.Steps[i].Policy; p != nil {
+			if s.drift != nil {
+				s.policyDrift(p)
 			}
+			redactSubjects(can, p)
 		}
 	}
 	writeJSON(w, http.StatusOK, res)
