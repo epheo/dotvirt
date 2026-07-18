@@ -1,11 +1,14 @@
 <script lang="ts">
 	import { api, type NetworkCreate, type Uplink } from '$lib/api';
 	import { TERMS, dual } from '$lib/vocab';
+	import ChoiceCards from './ChoiceCards.svelte';
+	import CheckGroup from './CheckGroup.svelte';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
 	import FormField from './FormField.svelte';
+	import TextInput from './TextInput.svelte';
 
 	let {
 		namespaces,
@@ -31,7 +34,7 @@
 	let name = $state('');
 	let subnet = $state('');
 	let namespace = $state(''); // overlay · this project (a namespace-scoped UDN)
-	let shared = $state(false); // overlay: false = this project (UDN), true = shared across projects (CUDN)
+	let share = $state<'project' | 'shared'>('project'); // overlay: one namespace (UDN) vs selected projects (CUDN)
 	let vlan = $state<number | undefined>(undefined);
 	let physnet = $state('');
 	let selectedNs = $state<string[]>([]);
@@ -39,22 +42,56 @@
 	let submitting = $state(false);
 	let error = $state('');
 
+	const kindOptions = $derived([
+		{ value: 'overlay' as const, label: 'Overlay Segment', hint: 'Internal · Geneve (Layer 2)' },
+		...(canManage
+			? [{ value: 'vlan' as const, label: 'VLAN Segment', hint: 'Bridged to a Tier-0 uplink' }]
+			: []),
+	]);
+
 	// A cluster-scoped (platform-tier) segment — a shared overlay or any VLAN — carries
 	// a namespace multiselect: the set of projects it is published to. Mirrors the
 	// backend routing cluster-scoped creates to the platform repo.
-	const isShared = $derived(kind === 'vlan' || shared);
+	const isShared = $derived(kind === 'vlan' || share === 'shared');
 
-	const valid = $derived(
-		kind === 'vlan'
-			? !!(name && physnet.trim() && vlan && selectedNs.length)
-			: shared
-				? !!(name && selectedNs.length)
-				: !!(name && namespace),
+	// Same constraint the API server enforces; the server-side netgen validation
+	// stays authoritative.
+	const nameOK = $derived(/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(name) && name.length <= 63);
+	const vlanOK = $derived(vlan !== undefined && vlan >= 1 && vlan <= 4094);
+	const subnetOK = $derived(
+		!subnet.trim() ||
+			(subnet.includes(':')
+				? /^[0-9a-fA-F:]+\/\d{1,3}$/.test(subnet.trim())
+				: /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(subnet.trim())),
 	);
 
-	function toggleNs(ns: string, on: boolean) {
-		selectedNs = on ? [...selectedNs, ns] : selectedNs.filter((n) => n !== ns);
-	}
+	// Unmet requirements, in field order; drives both the disabled state and the
+	// footer's explanation of it.
+	const missing = $derived.by(() => {
+		const m: string[] = [];
+		if (!name) m.push('Name is required');
+		else if (!nameOK) m.push('Name must be lowercase alphanumeric and "-" (max 63 chars)');
+		if (kind === 'vlan') {
+			if (!vlanOK) m.push('VLAN ID (1-4094) is required');
+			if (!physnet.trim()) m.push('Uplink is required');
+		}
+		if (isShared && !selectedNs.length) m.push('Select at least one project');
+		if (kind === 'overlay' && !isShared && !namespace) m.push('Project is required');
+		if (!subnetOK) m.push('Subnet must be a CIDR (e.g. 10.20.0.0/24)');
+		return m;
+	});
+	const valid = $derived(missing.length === 0);
+
+	// What this submission stages, in the footer — the counterpart of the
+	// wizards' review step for a single-pane dialog.
+	const summary = $derived.by(() => {
+		if (!valid) return '';
+		if (kind === 'vlan')
+			return `Stages VLAN ${vlan} segment “${name}” on ${physnet.trim()} → platform repo, published to ${selectedNs.length} project${selectedNs.length === 1 ? '' : 's'}`;
+		if (share === 'shared')
+			return `Stages shared segment “${name}” (CUDN) → platform repo, published to ${selectedNs.length} project${selectedNs.length === 1 ? '' : 's'}`;
+		return `Stages segment “${name}” (UDN) → ${namespace}`;
+	});
 
 	async function submit() {
 		if (!valid) return;
@@ -64,7 +101,7 @@
 			const req: NetworkCreate =
 				kind === 'vlan'
 					? { name, scope: 'vlan', physicalNetwork: physnet.trim(), vlan, namespaces: selectedNs }
-					: shared
+					: share === 'shared'
 						? { name, scope: 'shared', namespaces: selectedNs }
 						: { name, namespace, scope: 'project' };
 			if (subnet.trim()) req.subnets = [subnet.trim()];
@@ -83,91 +120,47 @@
 	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
 		<!-- Segment type: an overlay (Geneve) Layer 2 network, or a VLAN bridged to a
 			     Tier-0 uplink. -->
-		<div class="flex gap-2">
-			<button
-				onclick={() => (kind = 'overlay')}
-				class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'overlay'
-					? 'border-accent bg-select-soft text-accent-ink'
-					: 'border-line-strong text-ink-soft'}"
-			>
-				<div class="font-medium">Overlay Segment</div>
-				<div class="text-ink-faint">Internal · Geneve (Layer 2)</div>
-			</button>
-			{#if canManage}
-				<button
-					onclick={() => (kind = 'vlan')}
-					class="flex-1 rounded border px-3 py-2 text-left text-xs {kind === 'vlan'
-						? 'border-accent bg-select-soft text-accent-ink'
-						: 'border-line-strong text-ink-soft'}"
-				>
-					<div class="font-medium">VLAN Segment</div>
-					<div class="text-ink-faint">Bridged to a Tier-0 uplink</div>
-				</button>
-			{/if}
-		</div>
+		<ChoiceCards options={kindOptions} bind:value={kind} />
 
-		<FormField label="Name">
-			<input
-				bind:value={name}
-				placeholder="db-net"
-				class="w-full rounded border border-line-strong px-2 py-1.5"
-			/>
+		<FormField
+			label="Name"
+			error={name && !nameOK ? 'Lowercase alphanumeric and "-" only, max 63 characters.' : ''}
+		>
+			<TextInput bind:value={name} placeholder="db-net" mono data-autofocus />
 		</FormField>
 
 		{#if kind === 'overlay'}
 			<!-- An overlay segment is a single-project UDN, or a Layer2 CUDN shared across
 				     several projects. -->
 			{#if canManage}
-				<div class="flex gap-2">
-					<button
-						onclick={() => (shared = false)}
-						class="flex-1 rounded border px-3 py-2 text-left text-xs {!shared
-							? 'border-accent bg-select-soft text-accent-ink'
-							: 'border-line-strong text-ink-soft'}"
-					>
-						<div class="font-medium">This project</div>
-						<div class="text-ink-faint">UDN · one namespace (Tier-1)</div>
-					</button>
-					<button
-						onclick={() => (shared = true)}
-						class="flex-1 rounded border px-3 py-2 text-left text-xs {shared
-							? 'border-accent bg-select-soft text-accent-ink'
-							: 'border-line-strong text-ink-soft'}"
-					>
-						<div class="font-medium">Shared</div>
-						<div class="text-ink-faint">CUDN · selected projects</div>
-					</button>
-				</div>
+				<ChoiceCards
+					options={[
+						{ value: 'project', label: 'This project', hint: 'UDN · one namespace (Tier-1)' },
+						{ value: 'shared', label: 'Shared', hint: 'CUDN · selected projects' },
+					]}
+					bind:value={share}
+				/>
 			{/if}
-			{#if !shared}
+			{#if share !== 'shared'}
 				<NamespaceSelect bind:namespace {namespaces} />
 			{/if}
 		{:else}
 			<div class="grid grid-cols-2 gap-3">
-				<FormField label="VLAN ID">
-					<input
-						type="number"
-						bind:value={vlan}
-						placeholder="200"
-						min="1"
-						max="4094"
-						class="w-full rounded border border-line-strong px-2 py-1.5"
-					/>
+				<FormField
+					label="VLAN ID"
+					error={vlan !== undefined && !vlanOK ? 'Between 1 and 4094.' : ''}
+				>
+					<TextInput type="number" bind:value={vlan} placeholder="200" min="1" max="4094" />
 				</FormField>
 				<label class="block">
-					<span class="flex items-center justify-between text-ink-soft"
+					<span class="mb-1 flex items-center justify-between text-ink-soft"
 						>Uplink ({TERMS.uplink.nsx}){#if onAddUplink}<button
 								type="button"
 								onclick={onAddUplink}
 								class="text-xs font-normal text-accent hover:underline">+ Add uplink…</button
 							>{/if}</span
 					>
-					<input
-						bind:value={physnet}
-						placeholder="physnet-prod"
-						list="uplink-list"
-						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-					/>
+					<TextInput bind:value={physnet} placeholder="physnet-prod" mono list="uplink-list" />
 					<datalist id="uplink-list">
 						{#each uplinks as u (u.name)}<option value={u.name}></option>{/each}
 					</datalist>
@@ -177,36 +170,21 @@
 
 		{#if isShared}
 			<div>
-				<span class="text-ink-soft">Published to projects</span>
-				<div class="mt-1 max-h-28 space-y-1 overflow-y-auto rounded border border-line-strong p-2">
-					{#each namespaces as ns (ns)}
-						<label class="flex items-center gap-2 text-xs">
-							<input
-								type="checkbox"
-								checked={selectedNs.includes(ns)}
-								onchange={(e) => toggleNs(ns, e.currentTarget.checked)}
-							/>
-							<span class="text-ink-soft">{ns}</span>
-						</label>
-					{/each}
-				</div>
+				<span class="mb-1 block text-ink-soft">Published to projects</span>
+				<CheckGroup items={namespaces.map((ns) => ({ value: ns }))} bind:selected={selectedNs} />
 			</div>
 		{/if}
 
-		<label class="block">
-			<span class="text-ink-soft"
-				>Subnet <span class="text-ink-faint">(optional CIDR; blank = no IPAM)</span></span
-			>
-			<input
-				bind:value={subnet}
-				placeholder="10.20.0.0/24"
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-			/>
-		</label>
+		<FormField
+			label="Subnet (optional CIDR; blank = no IPAM)"
+			error={subnet && !subnetOK ? 'Expected CIDR notation, e.g. 10.20.0.0/24.' : ''}
+		>
+			<TextInput bind:value={subnet} placeholder="10.20.0.0/24" mono />
+		</FormField>
 
 		<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">
 			{#if kind === 'overlay'}
-				An isolated overlay segment (Layer 2){shared
+				An isolated overlay segment (Layer 2){share === 'shared'
 					? ', shared across the selected projects — a cluster-scoped CUDN, proposed to the platform repository'
 					: ' scoped to this project (a namespace UDN on its Tier-1)'}.
 			{:else}
@@ -225,6 +203,8 @@
 		<StageFooter
 			label="Stage segment"
 			disabled={!valid}
+			{missing}
+			{summary}
 			{submitting}
 			onsubmit={submit}
 			oncancel={onclose}
