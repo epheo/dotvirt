@@ -345,6 +345,7 @@
 					onadopt={adopt}
 					onresync={resync}
 					onconsole={() => ontab?.('console')}
+					onmonitor={() => ontab?.('monitor')}
 				/>
 			{:else if tab === 'monitor'}
 				<!-- Monitor sub-rail: events + performance, vCenter's time-series home. -->

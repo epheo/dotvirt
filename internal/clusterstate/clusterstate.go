@@ -57,6 +57,7 @@ type LiveVM struct {
 	// isn't running or the guest agent isn't reporting.
 	OS           string    // guest OS pretty name, e.g. "Fedora Linux 40 (Cloud Edition)"
 	MemoryActual string    // current guest memory (hotplug-aware), e.g. "1Gi"
+	VCPUs        int       // rendered vCPU topology; instancetype-sized VMs carry no cpuCores in git
 	StartedAt    time.Time // when the VMI entered Running, for uptime
 
 	Paused bool // VMI Paused condition is true (phase stays Running while paused)
@@ -320,6 +321,17 @@ func (s *State) Namespaces() []project.Namespace {
 	return out
 }
 
+// cpuProduct is sockets*cores*threads with KubeVirt's zero-means-one default.
+func cpuProduct(sockets, cores, threads uint32) int {
+	n := func(v uint32) int {
+		if v == 0 {
+			return 1
+		}
+		return int(v)
+	}
+	return n(sockets) * n(cores) * n(threads)
+}
+
 func liveFromVMI(vmi *kubevirtcorev1.VirtualMachineInstance) LiveVM {
 	s := vmi.Status
 	live := LiveVM{
@@ -336,6 +348,12 @@ func liveFromVMI(vmi *kubevirtcorev1.VirtualMachineInstance) LiveVM {
 	}
 	if s.Memory != nil && s.Memory.GuestCurrent != nil {
 		live.MemoryActual = s.Memory.GuestCurrent.String()
+	}
+	// The rendered topology, hotplug-aware when status reports one.
+	if topo := s.CurrentCPUTopology; topo != nil {
+		live.VCPUs = cpuProduct(topo.Sockets, topo.Cores, topo.Threads)
+	} else if cpu := vmi.Spec.Domain.CPU; cpu != nil {
+		live.VCPUs = cpuProduct(cpu.Sockets, cpu.Cores, cpu.Threads)
 	}
 	// Uptime is measured from when the VMI entered Running — not object creation,
 	// which predates boot.

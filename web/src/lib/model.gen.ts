@@ -60,6 +60,7 @@ export interface VM {
   nodeName?: string;
   os?: string; // guest-agent OS pretty name
   memoryActual?: string; // current guest memory (hotplug-aware)
+  vcpus?: number /* int */; // rendered vCPU topology; the summary's value when the manifest delegates sizing to an instancetype
   startedAt?: string; // RFC3339; VMI entered Running (for uptime)
   /**
    * Migration is the live (or last) node-to-node move — vCenter's vMotion

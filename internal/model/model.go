@@ -63,6 +63,7 @@ type VM struct {
 	NodeName     string   `json:"nodeName,omitempty"`
 	OS           string   `json:"os,omitempty"`           // guest-agent OS pretty name
 	MemoryActual string   `json:"memoryActual,omitempty"` // current guest memory (hotplug-aware)
+	VCPUs        int      `json:"vcpus,omitempty"`        // rendered vCPU topology; the summary's value when the manifest delegates sizing to an instancetype
 	StartedAt    string   `json:"startedAt,omitempty"`    // RFC3339; VMI entered Running (for uptime)
 
 	// Migration is the live (or last) node-to-node move — vCenter's vMotion
