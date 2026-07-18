@@ -335,6 +335,11 @@ func (s *Server) Handler() http.Handler {
 	if s.auth != nil {
 		handler = s.auth.Middleware(mux)
 	}
+	// Every API body is small JSON (upload image bytes go straight to
+	// cdi-uploadproxy, never through here), so one cap bounds them all —
+	// including the pre-auth /api/login, which would otherwise buffer an
+	// unbounded body.
+	handler = withBodyLimit(1<<20, handler)
 	apiHandler := withCORS(s.cfg.AllowOrigin, handler)
 
 	// In production the same binary serves the built SPA at the same origin (so
@@ -396,6 +401,17 @@ func withCORS(origin string, next http.Handler) http.Handler {
 // readAll reads a request body with a sane size cap.
 func readAll(r *http.Request) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MiB
+}
+
+// withBodyLimit caps every request body so a decoder errors instead of
+// buffering whatever a client streams.
+func withBodyLimit(n int64, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, n)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // respond writes v as JSON, or the error mapped to a status by its kind.
