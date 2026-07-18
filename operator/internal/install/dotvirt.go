@@ -14,7 +14,7 @@ import (
 )
 
 // DefaultImage is deployed when the Dotvirt spec doesn't pin one.
-const DefaultImage = "quay.io/epheo/dotvirt@sha256:b66c8cc8c41a60d0b1bae36accbf8a0f3533b4af6bde946d9e247d0f373a8f24"
+const DefaultImage = "quay.io/epheo/dotvirt@sha256:2b1b5506dec172f98950a29ad213ba46e1223b701294ca042bd72b9ebeef16c1"
 
 // imageFromEnv returns the operand image pinned in the operator's RELATED_IMAGE_* env (set
 // from the CSV by OLM, and overridable per-install), falling back to the digest compiled in
