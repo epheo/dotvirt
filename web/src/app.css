@@ -48,6 +48,10 @@
 	--color-ok-ink: oklch(52.7% 0.154 150.069); /* green-700 */
 	--color-warn-ink: oklch(55.5% 0.163 48.998); /* amber-700 */
 	--color-danger-ink: oklch(50.5% 0.213 27.518); /* red-700 */
+
+	/* below-band "cold" state (host balance): informational, not a warning */
+	--color-cold-soft: oklch(95.1% 0.026 236.824); /* sky-100 */
+	--color-cold-ink: oklch(44.3% 0.11 240.79); /* sky-800 */
 }
 
 /* Chart series + furniture. Plain :root (no utilities wanted); hex on purpose —
@@ -135,6 +139,8 @@
 	--color-ok-ink: oklch(87.1% 0.15 154.449); /* green-300 */
 	--color-warn-ink: oklch(87.9% 0.169 91.605); /* amber-300 */
 	--color-danger-ink: oklch(80.8% 0.114 19.571); /* red-300 */
+	--color-cold-soft: oklch(29.3% 0.066 243.157); /* sky-950 */
+	--color-cold-ink: oklch(82.8% 0.111 230.318); /* sky-300 */
 }
 
 :root[data-theme='dark'] {
