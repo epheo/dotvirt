@@ -1,6 +1,7 @@
 package api
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -76,5 +77,29 @@ func TestWithSecurityHeaders(t *testing.T) {
 	}
 	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Error("nosniff missing without csp")
+	}
+}
+
+// TestWithBodyLimit pins the request-body cap: an oversized body must error at
+// the decoder instead of being buffered, and a normal body passes untouched.
+func TestWithBodyLimit(t *testing.T) {
+	h := withBodyLimit(64, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.ReadAll(r.Body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(strings.Repeat("A", 1024))))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("oversized body: status = %d, want 400", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"token":"t"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("small body: status = %d, want 200", rec.Code)
 	}
 }
