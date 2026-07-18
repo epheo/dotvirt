@@ -90,10 +90,10 @@ func (s *Server) traceWorkload(ns, name string) (netstate.TraceWorkload, bool) {
 	if !found {
 		return netstate.TraceWorkload{}, false
 	}
-	podNet, nets, ips, _ := s.state.WorkloadNetworks(ns, name)
+	podNet, defaultNet, nets, ips, _ := s.state.WorkloadNetworks(ns, name)
 	wl := netstate.TraceWorkload{
 		Namespace: ns, Name: name,
-		PodLabels: lbls, IPs: ips, PodNet: podNet, Nets: nets,
+		PodLabels: lbls, IPs: ips, PodNet: podNet, DefaultNet: defaultNet, Nets: nets,
 	}
 	for _, n := range s.state.Namespaces() {
 		if n.Name == ns {

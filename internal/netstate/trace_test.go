@@ -340,6 +340,132 @@ func TestTraceConditional(t *testing.T) {
 	}
 }
 
+// A gateway rule whose destination the trace cannot resolve (nodeSelector)
+// must stay visible as Conditional — dropping it would let the catch-all
+// decide with false certainty.
+func TestTraceGatewayNodeSelector(t *testing.T) {
+	s := New(nil, nil)
+	add(t, s.egressfw, map[string]any{
+		"apiVersion": "k8s.ovn.org/v1", "kind": "EgressFirewall",
+		"metadata": map[string]any{"name": "default", "namespace": "team-a"},
+		"spec": map[string]any{"egress": []any{
+			map[string]any{"type": "Deny", "to": map[string]any{"nodeSelector": map[string]any{}}},
+			map[string]any{"type": "Allow", "to": map[string]any{"cidrSelector": "0.0.0.0/0"}},
+		}},
+	})
+	src := wl("team-a", "web", nil, nil, "10.128.2.5")
+
+	res := s.Trace(src, nil, "203.0.113.9", "TCP", 443)
+	if res.Verdict != "Conditional" {
+		t.Fatalf("node-selector deny before catch-all allow: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	var cond bool
+	for _, st := range res.Steps {
+		if st.Stage == "gateway" && st.Conditional && st.Rule != nil && st.Rule.Peer == "cluster nodes" {
+			cond = true
+		}
+	}
+	if !cond {
+		t.Fatalf("want a conditional gateway step for the node rule, got %+v", res.Steps)
+	}
+}
+
+// An ANP nodes-peer can match an external target (the address may be a
+// node's) but never a VM's pod-net address.
+func TestTraceANPNodesPeer(t *testing.T) {
+	s := New(nil, nil)
+	add(t, s.anp, map[string]any{
+		"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "AdminNetworkPolicy",
+		"metadata": map[string]any{"name": "protect-nodes"},
+		"spec": map[string]any{
+			"priority": int64(3),
+			"subject":  map[string]any{"namespaces": map[string]any{}},
+			"egress": []any{map[string]any{
+				"action": "Deny",
+				"to":     []any{map[string]any{"nodes": map[string]any{}}},
+			}},
+		},
+	})
+	src := wl("team-a", "web", nil, nil, "10.128.2.5")
+
+	if res := s.Trace(src, nil, "192.0.2.20", "TCP", 22); res.Verdict != "Conditional" {
+		t.Fatalf("external target may be a node: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	dst := wl("team-b", "db", nil, nil, "10.128.3.7")
+	if res := s.Trace(src, &dst, "", "TCP", 22); res.Verdict != "Allow" {
+		t.Fatalf("nodes peer must not match a VM: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+}
+
+// A maybe-matching Pass converges once the walk leaves the admin tier: both
+// branches continue into the same tiers, so the verdict stays certain.
+func TestTracePassConvergence(t *testing.T) {
+	s := New(nil, nil)
+	add(t, s.anp, map[string]any{
+		"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "AdminNetworkPolicy",
+		"metadata": map[string]any{"name": "maybe-pass"},
+		"spec": map[string]any{
+			"priority": int64(1),
+			"subject":  map[string]any{"namespaces": map[string]any{}},
+			"egress": []any{map[string]any{
+				"action": "Pass",
+				"to":     []any{map[string]any{"networks": []any{"10.0.0.0/8"}}},
+			}},
+		},
+	})
+	src := wl("team-b", "client", nil, nil, "10.128.2.5")
+	dst := wl("team-a", "web", nil, nil) // stopped: the Pass peer can't resolve
+
+	res := s.Trace(src, &dst, "", "TCP", 443)
+	if res.Verdict != "Allow" {
+		t.Fatalf("conditional Pass with converging branches: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	var sawCondPass bool
+	for _, st := range res.Steps {
+		if st.Stage == "admin" && st.Action == "Pass" && st.Conditional {
+			sawCondPass = true
+		}
+	}
+	if !sawCondPass {
+		t.Fatalf("the maybe-matching Pass must stay visible, got %v", stepKinds(t, res))
+	}
+}
+
+// A default multus binding substitutes the NAD's segment for the pod network:
+// it never rides the namespace primary, and two such bindings meet only on
+// the same segment identity.
+func TestTraceDefaultMultusSegment(t *testing.T) {
+	s := New(nil, nil)
+	for _, ns := range []string{"team-a", "team-b"} {
+		add(t, s.nad, map[string]any{
+			"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
+			"metadata": map[string]any{
+				"name": "shared-vlan", "namespace": ns,
+				"ownerReferences": []any{map[string]any{
+					"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork",
+					"name": "shared-vlan", "uid": "x",
+				}},
+			},
+		})
+	}
+
+	onDefault := wl("team-a", "web", nil, nil)
+	onDefault.PodNet = false
+	onDefault.DefaultNet = "team-a/vlan-x"
+	onPod := wl("team-b", "db", nil, nil)
+	if res := s.Trace(onDefault, &onPod, "", "TCP", 5432); res.Verdict != "Unreachable" {
+		t.Fatalf("substituted default vs cluster default: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+
+	a := wl("team-a", "web", nil, nil)
+	a.PodNet, a.DefaultNet = false, "team-a/shared-vlan"
+	b := wl("team-b", "db", nil, nil)
+	b.PodNet, b.DefaultNet = false, "team-b/shared-vlan"
+	if res := s.Trace(a, &b, "", "TCP", 5432); res.Verdict != "Allow" {
+		t.Fatalf("same CUDN segment as default: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+}
+
 // netpol peer semantics: a bare podSelector means the policy's own namespace —
 // the same labels in another namespace must not match.
 func TestTraceNetpolSameNamespacePeer(t *testing.T) {

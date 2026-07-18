@@ -31,13 +31,14 @@ import (
 // clusterstate: the labels selectors match, live addresses, and NIC
 // attachments for the connectivity check.
 type TraceWorkload struct {
-	Namespace string
-	Name      string
-	NSLabels  map[string]string
-	PodLabels map[string]string
-	IPs       []string // live VMI addresses; nil for a stopped VM
-	PodNet    bool     // attaches the namespace's primary network
-	Nets      []string // secondary multus refs, "namespace/name"
+	Namespace  string
+	Name       string
+	NSLabels   map[string]string
+	PodLabels  map[string]string
+	IPs        []string // live VMI addresses; nil for a stopped VM
+	PodNet     bool     // attaches the namespace's primary network
+	DefaultNet string   // NAD ref substituted as the default network, "namespace/name"
+	Nets       []string // secondary multus refs, "namespace/name"
 }
 
 // Trace answers for src → dst (in-cluster) when dst is non-nil, else
@@ -200,6 +201,18 @@ anpTier:
 		}
 	}
 
+	// A maybe-matching Pass converges here: matched or not, evaluation
+	// continues into the tiers below, so it can no longer change the outcome.
+	// (Inside the admin tier it still diverges — a later decisive ANP rule
+	// would have been skipped by a matching Pass.)
+	kept := condActions[:0]
+	for _, a := range condActions {
+		if a != "Pass" {
+			kept = append(kept, a)
+		}
+	}
+	condActions = kept
+
 	// Project tier: rules across every selecting NetworkPolicy are one allow
 	// list. Selection alone isolates the direction — no allowing rule means
 	// the tier default-denies the flow.
@@ -318,8 +331,12 @@ func (s *Snapshot) gatewayWalk(ns, dstIP, protocol string, port int) walkResult 
 				pm, peer = cidrsMatch([]any{c}, peerTarget{ip: dstIP}), c
 			} else if d := str(to["dnsName"]); d != "" {
 				pm, peer = matched{m: matchCond, reason: "DNS-name rule (" + d + ") — resolution unknown here"}, d
+			} else if to["nodeSelector"] != nil {
+				pm, peer = matched{m: matchCond, reason: "node-selector rule — whether this address is a cluster node is unknown here"}, "cluster nodes"
 			} else {
-				continue
+				// An unrecognized destination form still stays visible — a
+				// dropped rule would let a later rule decide with certainty.
+				pm, peer = matched{m: matchCond, reason: "a destination form this trace cannot resolve"}, "unresolved destination"
 			}
 			m := allOf(pm, netpolPortsMatch(r["ports"], protocol, port))
 			if m.m == matchNo {
@@ -442,9 +459,16 @@ func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string) []model
 	return steps
 }
 
-// primaryOf resolves the primary network a workload attaches: none without a
-// pod binding, else the namespace's primary UDN/CUDN, else the cluster default.
+// primaryOf resolves the primary network a workload attaches. A default
+// multus binding substitutes the named NAD's segment for the pod network, so
+// it compares by segment identity, not by the namespace's primary domain;
+// otherwise a pod binding resolves the namespace's primary UDN/CUDN, else the
+// cluster default. No binding at all means no primary path.
 func (s *Snapshot) primaryOf(w TraceWorkload) (key, display string) {
+	if w.DefaultNet != "" {
+		k, name := s.segmentKey(w.DefaultNet)
+		return k, "network " + name
+	}
 	if !w.PodNet {
 		return "", ""
 	}
@@ -576,7 +600,8 @@ func (t peerTarget) addrs() []string {
 }
 
 // anpPeerMatch evaluates an ANP/BANP rule's peer list against the target.
-// Selector peers never match an external address; node peers never match a VM.
+// Selector peers never match an external address; node peers never match a
+// VM's pod-net address, but an external target may itself be a node.
 func anpPeerMatch(v any, t peerTarget) matched {
 	peers, ok := v.([]any)
 	if !ok || len(peers) == 0 {
@@ -609,6 +634,10 @@ func anpPeerMatch(v any, t peerTarget) matched {
 			nets, _ := m["networks"].([]any)
 			parts = append(parts, cidrsMatch(nets, t))
 		case m["nodes"] != nil:
+			if t.w == nil {
+				parts = append(parts, matched{m: matchCond, reason: "node-peer rule — whether this address is a cluster node is unknown here"})
+				continue
+			}
 			parts = append(parts, matched{m: matchNo})
 		}
 	}
