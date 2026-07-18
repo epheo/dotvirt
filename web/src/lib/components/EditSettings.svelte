@@ -4,6 +4,7 @@
 	import { buildEditRequest, seedEditForm } from '$lib/editform';
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
 	import Wizard from './Wizard.svelte';
+	import FormField from './FormField.svelte';
 
 	let {
 		vm,
@@ -196,24 +197,19 @@
 	</div>
 
 	<div class="grid grid-cols-2 gap-3">
-		<label class="block">
-			<span class="text-ink-muted">Power state</span>
-			<select
-				bind:value={form.power}
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1"
-			>
+		<FormField label="Power state">
+			<select bind:value={form.power} class="w-full rounded border border-line-strong px-2 py-1">
 				<option value="On">On</option>
 				<option value="Off">Off</option>
 				{#if form.power === 'Unknown'}<option value="Unknown">Unknown</option>{/if}
 			</select>
-		</label>
+		</FormField>
 
 		{#if form.mode === 'instancetype'}
-			<label class="block">
-				<span class="text-ink-muted">Instance type</span>
+			<FormField label="Instance type">
 				<select
 					bind:value={form.instancetype}
-					class="mt-1 w-full rounded border border-line-strong px-2 py-1"
+					class="w-full rounded border border-line-strong px-2 py-1"
 				>
 					<!-- Keep the current value selectable even if it isn't in the cluster
 					     list (orphaned ref, or options still loading) so the binding can't
@@ -227,54 +223,50 @@
 						<option value={it.name}>{it.name} ({it.cpu} CPU / {it.memory})</option>
 					{/each}
 				</select>
-			</label>
-			<label class="block">
-				<span class="text-ink-muted">Preference</span>
+			</FormField>
+			<FormField label="Preference">
 				<select
 					bind:value={form.preference}
-					class="mt-1 w-full rounded border border-line-strong px-2 py-1"
+					class="w-full rounded border border-line-strong px-2 py-1"
 				>
 					<option value="">— unchanged —</option>
 					{#each options?.preferences ?? [] as p (p.name)}
 						<option value={p.name}>{p.displayName || p.name}</option>
 					{/each}
 				</select>
-			</label>
+			</FormField>
 			<p class="col-span-2 text-xs text-ink-faint">
 				CPU and memory are provided by the instance type{selectedIT
 					? `: ${selectedIT.cpu} CPU / ${selectedIT.memory}`
 					: ''}.
 			</p>
 		{:else}
-			<label class="block">
-				<span class="text-ink-muted">CPU cores</span>
+			<FormField label="CPU cores">
 				<input
 					type="number"
 					min="1"
 					bind:value={form.cpuCores}
-					class="mt-1 w-full rounded border border-line-strong px-2 py-1"
+					class="w-full rounded border border-line-strong px-2 py-1"
 				/>
-			</label>
-			<label class="block">
-				<span class="text-ink-muted">Memory</span>
+			</FormField>
+			<FormField label="Memory">
 				<input
 					bind:value={form.memory}
 					placeholder="2Gi"
-					class="mt-1 w-full rounded border border-line-strong px-2 py-1"
+					class="w-full rounded border border-line-strong px-2 py-1"
 				/>
-			</label>
-			<label class="block">
-				<span class="text-ink-muted">Preference</span>
+			</FormField>
+			<FormField label="Preference">
 				<select
 					bind:value={form.preference}
-					class="mt-1 w-full rounded border border-line-strong px-2 py-1"
+					class="w-full rounded border border-line-strong px-2 py-1"
 				>
 					<option value="">— unchanged —</option>
 					{#each options?.preferences ?? [] as p (p.name)}
 						<option value={p.name}>{p.displayName || p.name}</option>
 					{/each}
 				</select>
-			</label>
+			</FormField>
 			{#if !(form.cpuCores && form.memory)}
 				<p class="col-span-2 text-xs text-warn-ink">
 					Set both CPU cores and memory to apply custom sizing.

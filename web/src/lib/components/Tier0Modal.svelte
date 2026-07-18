@@ -4,6 +4,7 @@
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
+	import FormField from './FormField.svelte';
 
 	let {
 		namespaces,
@@ -83,14 +84,13 @@
 			</button>
 		</div>
 
-		<label class="block">
-			<span class="text-ink-soft">Name</span>
+		<FormField label="Name">
 			<input
 				bind:value={name}
 				placeholder={kind === 'snat' ? 'team-a-snat' : 'team-a-gw'}
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+				class="w-full rounded border border-line-strong px-2 py-1.5"
 			/>
-		</label>
+		</FormField>
 
 		<label class="block">
 			<span class="text-ink-soft"

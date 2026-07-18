@@ -3,6 +3,7 @@
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
+	import FormField from './FormField.svelte';
 
 	let {
 		projects = [],
@@ -59,23 +60,18 @@
 
 <Modal title="New Namespace" {onclose}>
 	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
-		<label class="block">
-			<span class="text-ink-soft">Name</span>
+		<FormField label="Name">
 			<input
 				bind:value={name}
 				placeholder="tenant-c"
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+				class="w-full rounded border border-line-strong px-2 py-1.5"
 			/>
-		</label>
-		<label class="block">
-			<span class="text-ink-soft">Project</span>
-			<select
-				bind:value={project}
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-			>
+		</FormField>
+		<FormField label="Project">
+			<select bind:value={project} class="w-full rounded border border-line-strong px-2 py-1.5">
 				{#each projects as p (p)}<option value={p}>{p}</option>{/each}
 			</select>
-		</label>
+		</FormField>
 
 		<label class="flex items-center gap-2">
 			<input type="checkbox" bind:checked={withNetwork} />
@@ -84,14 +80,13 @@
 
 		{#if withNetwork}
 			<div class="space-y-3 rounded border border-line p-3">
-				<label class="block">
-					<span class="text-ink-soft">VM Network name</span>
+				<FormField label="VM Network name">
 					<input
 						bind:value={netName}
 						oninput={() => (netTouched = true)}
-						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+						class="w-full rounded border border-line-strong px-2 py-1.5"
 					/>
-				</label>
+				</FormField>
 				<label class="block">
 					<span class="text-ink-soft"
 						>Subnet <span class="text-ink-faint">(CIDR — required for a primary network)</span

@@ -3,6 +3,7 @@
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
+	import FormField from './FormField.svelte';
 
 	let {
 		onclose,
@@ -63,26 +64,24 @@
 
 <Modal title="New Project" {onclose}>
 	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
-		<label class="block">
-			<span class="text-ink-soft">Project name</span>
+		<FormField label="Project name">
 			<input
 				bind:value={name}
 				placeholder="team-c"
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+				class="w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 			<span class="mt-1 block text-[11px] text-ink-faint"
 				>Creates the tenant git repo of the same name.</span
 			>
-		</label>
-		<label class="block">
-			<span class="text-ink-soft">First namespace</span>
+		</FormField>
+		<FormField label="First namespace">
 			<input
 				bind:value={namespace}
 				oninput={() => (nsTouched = true)}
 				placeholder="team-c"
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+				class="w-full rounded border border-line-strong px-2 py-1.5"
 			/>
-		</label>
+		</FormField>
 		<label class="block">
 			<span class="text-ink-soft">Owners <span class="text-ink-faint">(optional)</span></span>
 			<input
@@ -102,14 +101,13 @@
 
 		{#if withNetwork}
 			<div class="space-y-3 rounded border border-line p-3">
-				<label class="block">
-					<span class="text-ink-soft">VM Network name</span>
+				<FormField label="VM Network name">
 					<input
 						bind:value={netName}
 						oninput={() => (netTouched = true)}
-						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+						class="w-full rounded border border-line-strong px-2 py-1.5"
 					/>
-				</label>
+				</FormField>
 				<label class="block">
 					<span class="text-ink-soft"
 						>Subnet <span class="text-ink-faint">(CIDR — required for a primary network)</span

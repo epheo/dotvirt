@@ -5,6 +5,7 @@
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
+	import FormField from './FormField.svelte';
 
 	let {
 		namespaces,
@@ -105,14 +106,13 @@
 			{/if}
 		</div>
 
-		<label class="block">
-			<span class="text-ink-soft">Name</span>
+		<FormField label="Name">
 			<input
 				bind:value={name}
 				placeholder="db-net"
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+				class="w-full rounded border border-line-strong px-2 py-1.5"
 			/>
-		</label>
+		</FormField>
 
 		{#if kind === 'overlay'}
 			<!-- An overlay segment is a single-project UDN, or a Layer2 CUDN shared across
@@ -144,17 +144,16 @@
 			{/if}
 		{:else}
 			<div class="grid grid-cols-2 gap-3">
-				<label class="block">
-					<span class="text-ink-soft">VLAN ID</span>
+				<FormField label="VLAN ID">
 					<input
 						type="number"
 						bind:value={vlan}
 						placeholder="200"
 						min="1"
 						max="4094"
-						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+						class="w-full rounded border border-line-strong px-2 py-1.5"
 					/>
-				</label>
+				</FormField>
 				<label class="block">
 					<span class="flex items-center justify-between text-ink-soft"
 						>Uplink ({TERMS.uplink.nsx}){#if onAddUplink}<button

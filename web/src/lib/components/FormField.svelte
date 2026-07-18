@@ -12,7 +12,7 @@
 </script>
 
 <label class="block">
-	<span class="mb-1 block text-xs font-medium text-ink-muted">{label}</span>
+	<span class="mb-1 block text-ink-soft">{label}</span>
 	{@render children()}
 	{#if error}
 		<p class="mt-1 text-xs text-warn-ink">{error}</p>
