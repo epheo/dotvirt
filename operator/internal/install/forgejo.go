@@ -199,15 +199,21 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 						Env:          forgejoEnv(dv, argoWebhookHost),
 						Ports:        []corev1.ContainerPort{{Name: "http", ContainerPort: ForgejoHTTPPort}},
 						VolumeMounts: []corev1.VolumeMount{dataMount, etcMount},
+						// The default 1s probe timeout kills a merely-busy forge: under clone
+						// bursts the SQLite-backed healthz slows past 1s, and restarting it
+						// makes the overload worse. Generous timeouts break that flap loop.
 						ReadinessProbe: &corev1.Probe{
 							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(ForgejoHTTPPort)}},
 							InitialDelaySeconds: 8,
 							PeriodSeconds:       5,
+							TimeoutSeconds:      5,
 						},
 						LivenessProbe: &corev1.Probe{
 							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(ForgejoHTTPPort)}},
 							InitialDelaySeconds: 30,
 							PeriodSeconds:       20,
+							TimeoutSeconds:      5,
+							FailureThreshold:    5,
 						},
 						Resources:       forgejoResources(),
 						SecurityContext: forgejoContainerSecurityContext(),
