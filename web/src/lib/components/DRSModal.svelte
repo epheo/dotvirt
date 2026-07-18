@@ -10,6 +10,7 @@
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
+	import FormField from './FormField.svelte';
 
 	// The vSphere-DRS dialog, GitOps-shaped: every choice renders into the
 	// KubeDescheduler manifest set staged into the platform draft — nothing
@@ -100,27 +101,22 @@
 			</div>
 		</div>
 
-		<label class="block">
-			<span class="text-ink-soft">Migration aggressiveness</span>
-			<select
-				bind:value={threshold}
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-			>
+		<FormField label="Migration aggressiveness">
+			<select bind:value={threshold} class="w-full rounded border border-line-strong px-2 py-1.5">
 				{#each DRS_THRESHOLDS as t (t.value)}<option value={t.value}>{t.label} — {t.detail}</option
 					>{/each}
 			</select>
-		</label>
+		</FormField>
 
-		<label class="block">
-			<span class="text-ink-soft">Evaluation interval (seconds)</span>
+		<FormField label="Evaluation interval (seconds)">
 			<input
 				type="number"
 				min={DRS_BOUNDS.intervalSeconds.min}
 				max={DRS_BOUNDS.intervalSeconds.max}
 				bind:value={intervalSeconds}
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+				class="w-full rounded border border-line-strong px-2 py-1.5"
 			/>
-		</label>
+		</FormField>
 
 		<button
 			type="button"
@@ -141,26 +137,24 @@
 					</span>
 				</label>
 				<div class="grid grid-cols-2 gap-3">
-					<label class="block">
-						<span class="text-ink-soft">Max migrations per node</span>
+					<FormField label="Max migrations per node">
 						<input
 							type="number"
 							min={DRS_BOUNDS.evictionNodeLimit.min}
 							max={DRS_BOUNDS.evictionNodeLimit.max}
 							bind:value={evictionNodeLimit}
-							class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+							class="w-full rounded border border-line-strong px-2 py-1.5"
 						/>
-					</label>
-					<label class="block">
-						<span class="text-ink-soft">Max migrations cluster-wide</span>
+					</FormField>
+					<FormField label="Max migrations cluster-wide">
 						<input
 							type="number"
 							min={DRS_BOUNDS.evictionTotalLimit.min}
 							max={DRS_BOUNDS.evictionTotalLimit.max}
 							bind:value={evictionTotalLimit}
-							class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+							class="w-full rounded border border-line-strong px-2 py-1.5"
 						/>
-					</label>
+					</FormField>
 				</div>
 				<p class="text-xs text-ink-faint">
 					Keep at or below the cluster's live-migration limits so DRS never queues more migrations

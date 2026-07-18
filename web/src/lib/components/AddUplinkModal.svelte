@@ -3,6 +3,7 @@
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
+	import FormField from './FormField.svelte';
 
 	let {
 		adapters = [],
@@ -61,29 +62,23 @@
 
 <Modal title="Add Uplink" {onclose}>
 	<div class="space-y-4 px-5 py-4 text-sm">
-		<label class="block">
-			<span class="text-ink-soft">Name (physical network)</span>
+		<FormField label="Name (physical network)">
 			<input
 				bind:value={name}
 				placeholder="physnet-prod"
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+				class="w-full rounded border border-line-strong px-2 py-1.5"
 			/>
-		</label>
-		<label class="block">
-			<span class="text-ink-soft">Nodes</span>
-			<select bind:value={node} class="mt-1 w-full rounded border border-line-strong px-2 py-1.5">
+		</FormField>
+		<FormField label="Nodes">
+			<select bind:value={node} class="w-full rounded border border-line-strong px-2 py-1.5">
 				<option value="">All worker nodes</option>
 				{#each nodes as n (n)}<option value={n}>{n}</option>{/each}
 			</select>
-		</label>
+		</FormField>
 		<div class="grid grid-cols-2 gap-3">
-			<label class="block">
-				<span class="text-ink-soft">Physical adapter (NIC)</span>
+			<FormField label="Physical adapter (NIC)">
 				{#if nics.length}
-					<select
-						bind:value={nic}
-						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-					>
+					<select bind:value={nic} class="w-full rounded border border-line-strong px-2 py-1.5">
 						{#each nics as n (n)}<option value={n}>{n}</option>{/each}
 					</select>
 				{:else}
@@ -93,7 +88,7 @@
 						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 					/>
 				{/if}
-			</label>
+			</FormField>
 			<label class="block">
 				<span class="text-ink-soft">OVS bridge <span class="text-ink-faint">(optional)</span></span>
 				<input

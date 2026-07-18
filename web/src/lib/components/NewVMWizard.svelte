@@ -5,6 +5,7 @@
 	import Modal from './Modal.svelte';
 	import Wizard from './Wizard.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
+	import FormField from './FormField.svelte';
 
 	let {
 		namespaces,
@@ -209,14 +210,13 @@
 		<p class="text-xs text-ink-muted">
 			Name the virtual machine and choose the project it belongs to.
 		</p>
-		<label class="block">
-			<span class="text-ink-soft">Name</span>
+		<FormField label="Name">
 			<input
 				bind:value={name}
 				placeholder="my-vm"
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+				class="w-full rounded border border-line-strong px-2 py-1.5"
 			/>
-		</label>
+		</FormField>
 		<NamespaceSelect bind:namespace {namespaces} fallback="default" />
 	</div>
 {/snippet}
@@ -226,28 +226,20 @@
 		<p class="text-xs text-ink-muted">
 			Select the OS image to boot from and a preference that tunes the VM for that guest.
 		</p>
-		<label class="block">
-			<span class="text-ink-soft">OS image</span>
-			<select
-				bind:value={osImage}
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-			>
+		<FormField label="OS image">
+			<select bind:value={osImage} class="w-full rounded border border-line-strong px-2 py-1.5">
 				{#each (options?.osImages ?? []).filter((i) => i.ready) as img (img.namespace + img.name)}
 					<option value={`${img.name}|${img.namespace}`}>{img.name}</option>
 				{/each}
 			</select>
-		</label>
-		<label class="block">
-			<span class="text-ink-soft">Preference (OS tuning)</span>
-			<select
-				bind:value={preference}
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-			>
+		</FormField>
+		<FormField label="Preference (OS tuning)">
+			<select bind:value={preference} class="w-full rounded border border-line-strong px-2 py-1.5">
 				{#each options?.preferences ?? [] as p (p.name)}
 					<option value={p.name}>{p.displayName || p.name}</option>
 				{/each}
 			</select>
-		</label>
+		</FormField>
 	</div>
 {/snippet}
 
@@ -256,17 +248,16 @@
 		<p class="text-xs text-ink-muted">
 			Choose a size (instance type) and whether to power the VM on after creation.
 		</p>
-		<label class="block">
-			<span class="text-ink-soft">Size (instancetype)</span>
+		<FormField label="Size (instancetype)">
 			<select
 				bind:value={instancetype}
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+				class="w-full rounded border border-line-strong px-2 py-1.5"
 			>
 				{#each options?.instancetypes ?? [] as it (it.name)}
 					<option value={it.name}>{it.name} — {it.cpu} CPU / {it.memory}</option>
 				{/each}
 			</select>
-		</label>
+		</FormField>
 		<label class="flex items-center gap-2">
 			<input type="checkbox" bind:checked={running} />
 			<span class="text-ink-soft">Start immediately (runStrategy: Always)</span>
@@ -278,25 +269,20 @@
 	<div class="space-y-4">
 		<p class="text-xs text-ink-muted">Configure the boot disk and any additional disks.</p>
 		<div class="grid grid-cols-2 gap-4">
-			<label class="block">
-				<span class="text-ink-soft">Root disk size</span>
-				<input
-					bind:value={diskSize}
-					class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-				/>
-			</label>
-			<label class="block">
-				<span class="text-ink-soft">Storage class</span>
+			<FormField label="Root disk size">
+				<input bind:value={diskSize} class="w-full rounded border border-line-strong px-2 py-1.5" />
+			</FormField>
+			<FormField label="Storage class">
 				<select
 					bind:value={storageClass}
-					class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+					class="w-full rounded border border-line-strong px-2 py-1.5"
 				>
 					<option value="">cluster default</option>
 					{#each options?.storageClasses ?? [] as sc (sc.name)}
 						<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
 					{/each}
 				</select>
-			</label>
+			</FormField>
 		</div>
 		<div>
 			<div class="mb-1 flex items-center justify-between">

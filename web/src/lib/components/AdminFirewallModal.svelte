@@ -4,6 +4,7 @@
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
+	import FormField from './FormField.svelte';
 
 	let {
 		onclose,
@@ -106,15 +107,14 @@
 		</div>
 
 		<div class="grid grid-cols-2 gap-3">
-			<label class="block">
-				<span class="text-ink-soft">Name</span>
+			<FormField label="Name">
 				<input
 					bind:value={name}
 					disabled={baseline}
 					placeholder={baseline ? 'default' : 'tenant-isolation'}
-					class="mt-1 w-full rounded border border-line-strong px-2 py-1.5 disabled:bg-inset-strong disabled:text-ink-faint"
+					class="w-full rounded border border-line-strong px-2 py-1.5 disabled:bg-inset-strong disabled:text-ink-faint"
 				/>
-			</label>
+			</FormField>
 			<label class="block">
 				<span class="text-ink-soft">Priority <span class="text-ink-faint">(0–1000)</span></span>
 				<input

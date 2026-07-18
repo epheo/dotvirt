@@ -4,6 +4,7 @@
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
+	import FormField from './FormField.svelte';
 
 	// Image upload (OVF-import analog). dotvirt creates the upload-target
 	// DataVolume + mints a token; the browser then streams the file STRAIGHT to
@@ -143,35 +144,32 @@
 						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5 text-xs"
 					/>
 				</label>
-				<label class="block">
-					<span class="text-ink-soft">Disk name</span>
+				<FormField label="Disk name">
 					<input
 						bind:value={name}
 						placeholder="my-image"
-						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5 font-mono text-sm"
+						class="w-full rounded border border-line-strong px-2 py-1.5 font-mono text-sm"
 					/>
-				</label>
+				</FormField>
 				<NamespaceSelect bind:namespace {namespaces} />
-				<label class="block">
-					<span class="text-ink-soft">Disk size</span>
+				<FormField label="Disk size">
 					<input
 						bind:value={size}
 						placeholder="10Gi"
-						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+						class="w-full rounded border border-line-strong px-2 py-1.5"
 					/>
-				</label>
-				<label class="block">
-					<span class="text-ink-soft">Storage class</span>
+				</FormField>
+				<FormField label="Storage class">
 					<select
 						bind:value={storageClass}
-						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+						class="w-full rounded border border-line-strong px-2 py-1.5"
 					>
 						<option value="">cluster default</option>
 						{#each options?.storageClasses ?? [] as sc (sc.name)}
 							<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
 						{/each}
 					</select>
-				</label>
+				</FormField>
 			</div>
 			{#if file}
 				<p class="mt-2 text-xs text-ink-faint">

@@ -6,6 +6,7 @@
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
+	import FormField from './FormField.svelte';
 
 	let {
 		namespaces,
@@ -86,14 +87,13 @@
 <Modal title={TERMS.dfw.nsx} subtitle={TERMS.dfw.vsphere} size="lg" {onclose}>
 	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
 		<div class="grid grid-cols-2 gap-3">
-			<label class="block">
-				<span class="text-ink-soft">Name</span>
+			<FormField label="Name">
 				<input
 					bind:value={name}
 					placeholder="web-allow-db"
-					class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
+					class="w-full rounded border border-line-strong px-2 py-1.5"
 				/>
-			</label>
+			</FormField>
 			<NamespaceSelect bind:namespace {namespaces} {initial} />
 		</div>
 
