@@ -30,21 +30,7 @@ func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
 	// Visibility is authority over the kind, not platform authoring: unlike the
 	// caps in /api/networks it doesn't require a platform repo — a cluster-admin
 	// without one still audits the live policy plane.
-	ctx := r.Context()
-	canCluster := func(k model.PolicyKind) bool {
-		switch k {
-		case model.PolicyAdmin:
-			return s.canCreateCached(ctx, id, c, ssarANP)
-		case model.PolicyBaseline:
-			return s.canCreateCached(ctx, id, c, ssarBANP)
-		case model.PolicyEgressIP:
-			return s.canCreateCached(ctx, id, c, ssarEgressIP)
-		case model.PolicyRoute:
-			return s.canCreateCached(ctx, id, c, ssarExtRoute)
-		}
-		return false
-	}
-	out := scopePolicies(all, visible, canCluster)
+	out := scopePolicies(all, visible, s.clusterAuthority(r.Context(), id, c))
 	s.enrichPolicyDrift(out)
 	writeJSON(w, http.StatusOK, model.PolicyInventory{Policies: out})
 }
