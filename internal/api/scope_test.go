@@ -32,7 +32,9 @@ func scopeServer(bus *eventbus.Bus) *Server {
 }
 
 // listCountingClient is a user-identity client over a fake clientset seeded with
-// nss, counting namespace LISTs — "cached" is pinned as "no second round".
+// nss, counting namespace LISTs — "cached" is pinned as "no second round". The
+// modeled token is admin-like: the cluster-wide VM read SSAR that qualifies the
+// namespace-list fast path is allowed.
 func listCountingClient(nss ...string) (*cluster.Client, *int) {
 	objs := make([]runtime.Object, 0, len(nss))
 	for _, ns := range nss {
@@ -43,6 +45,11 @@ func listCountingClient(nss ...string) (*cluster.Client, *int) {
 	kube.PrependReactor("list", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
 		*lists++
 		return false, nil, nil // count only; the tracker still answers
+	})
+	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		ssar := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview).DeepCopy()
+		ssar.Status.Allowed = true
+		return true, ssar, nil
 	})
 	return cluster.NewClient(kube, nil, nil), lists
 }

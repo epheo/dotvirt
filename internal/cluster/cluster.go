@@ -88,25 +88,34 @@ func clientsFor(cfg *rest.Config) (*Client, error) {
 }
 
 // VisibleNamespaces returns the namespaces this client's token may read VMs in.
-// The fast path is a cluster-wide Namespaces().List. A token without that
-// cluster-level permission gets Forbidden; we then fall back to probing each
-// candidate namespace with a SelfSubjectRulesReview and keeping those that grant
-// get/list on virtualmachines or pods. candidates is the SA-discovered project
-// namespace set; without it the fallback has nothing to probe and returns empty.
+// The fast path is a cluster-wide Namespaces().List — but listing namespaces
+// does not imply reading VMs in them (an auditor-style role holds the former
+// without the latter), so it counts only when a cluster-wide VM read SSAR also
+// passes. Anything less falls back to probing each candidate namespace with a
+// SelfSubjectRulesReview and keeping those that grant get/list on
+// virtualmachines. candidates is the SA-discovered project namespace set;
+// without it the fallback has nothing to probe and returns empty.
 func (c *Client) VisibleNamespaces(ctx context.Context, candidates []string) ([]string, error) {
 	nsList, err := c.kube.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err == nil {
-		names := make([]string, 0, len(nsList.Items))
-		for i := range nsList.Items {
-			names = append(names, nsList.Items[i].Name)
+		ok, aerr := c.allowed(ctx, &authzv1.ResourceAttributes{
+			Verb: "list", Group: "kubevirt.io", Resource: "virtualmachines",
+		})
+		if aerr != nil {
+			return nil, fmt.Errorf("cluster-wide vm read review: %w", aerr)
 		}
-		return names, nil
-	}
-	if !apierrors.IsForbidden(err) {
+		if ok {
+			names := make([]string, 0, len(nsList.Items))
+			for i := range nsList.Items {
+				names = append(names, nsList.Items[i].Name)
+			}
+			return names, nil
+		}
+	} else if !apierrors.IsForbidden(err) {
 		return nil, fmt.Errorf("list namespaces: %w", err)
 	}
 
-	// Forbidden to list namespaces cluster-wide: probe the candidate set instead.
+	// No cluster-wide VM read: probe the candidate set instead.
 	// Skip (don't abort) on a per-candidate probe error so one transient/odd
 	// namespace can't blank the whole inventory.
 	var out []string
