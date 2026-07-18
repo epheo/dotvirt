@@ -6,8 +6,9 @@
 
 	// vCenter's Summary console thumbnail: a periodically-refreshed screenshot of
 	// the VM's graphical console (KubeVirt's vnc/screenshot subresource), clicking
-	// through to the live Console tab. Only for running VMs; if the screenshot
-	// 404s (no graphics device / unsupported), it hides itself.
+	// through to the live Console tab. Only for running VMs; while the screenshot
+	// fails (no graphics device, or a restart blip) it hides itself but keeps
+	// probing, so a transient error never hides the preview for the session.
 	let { vm, onopen }: { vm: VM; onopen: () => void } = $props();
 
 	const running = $derived(vm.phase === 'Running');
@@ -34,23 +35,27 @@
 	});
 </script>
 
-{#if running && !failed}
+{#if running}
 	<!-- The bezel behind the framebuffer stays dark in both themes (raw slate). -->
 	<!-- xl: the host row stretches the bezel to the tiles+usage column height
 	     and aspect-ratio derives the width from it, so the preview spans the
 	     column at the console's real proportions (max-w guards against very
 	     wide framebuffers eating the row). -->
+	<!-- Hidden (not unmounted) on failure: the polled img keeps probing, and
+	     the next good frame brings the preview back. -->
 	<button
 		onclick={onopen}
 		title="Open the live console"
 		style:aspect-ratio={aspect}
 		class="group relative block w-full max-w-xl overflow-hidden rounded border border-line bg-slate-900 xl:w-auto xl:shrink-0"
+		class:hidden={failed}
 	>
 		<img
 			src={screenshotURL(vm, tick)}
 			alt="Console preview"
 			class="h-full w-full object-contain"
 			onload={(e) => {
+				failed = false;
 				const t = e.currentTarget as HTMLImageElement;
 				if (t.naturalWidth && t.naturalHeight) aspect = `${t.naturalWidth} / ${t.naturalHeight}`;
 			}}

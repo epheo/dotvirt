@@ -48,20 +48,30 @@
 	let usageLoading = $state(false);
 	let usageFailed = $state(false);
 	async function loadUsage() {
+		// Drop a stale response if the selection moved while it was in flight —
+		// the 30s poll makes an overlap with a VM switch routine, and VM A's
+		// numbers must never render under VM B.
+		const ns = vm.namespace;
+		const name = vm.name;
+		const fresh = () => vm.namespace === ns && vm.name === name;
 		usageLoading = true;
 		try {
-			usage = await api.vmUsage(vm.namespace, vm.name);
+			const u = await api.vmUsage(ns, name);
+			if (!fresh()) return;
+			usage = u;
 			usageFailed = false;
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			usageFailed = true;
+			if (fresh()) usageFailed = true;
 		} finally {
-			usageLoading = false;
+			if (fresh()) usageLoading = false;
 		}
 	}
 	$effect(() => {
 		vmKey;
 		usage = null;
+		usageFailed = false;
+		usageLoading = false;
 		untrack(loadUsage);
 	});
 	$effect(() => pollWhileVisible(loadUsage, 30000));

@@ -37,6 +37,7 @@
 		onsearchlabel,
 		networks = [],
 		intent = null,
+		onintentdone,
 	}: {
 		vm: VM | null;
 		// The active tab is owned by the page (?tab=); ontab is the programmatic
@@ -53,6 +54,10 @@
 		// A one-shot request from outside (the context menu) to open a modal/tab
 		// here; seq distinguishes repeated requests for the same id.
 		intent?: { id: DetailAction; seq: number } | null;
+		// Fired once the intent is applied so the owner clears it — this view
+		// remounts whenever the VM drops out of an inventory frame and returns,
+		// and a kept intent would replay (reopening a dismissed dialog).
+		onintentdone?: () => void;
 	} = $props();
 
 	type Tab =
@@ -93,10 +98,17 @@
 	let runtimeBusy = $state(false);
 
 	function loadDrift(ns: string, name: string) {
+		// Drop a stale response if the selection moved while it was in flight —
+		// VM A's drift must never render under VM B.
+		const fresh = () => vm?.namespace === ns && vm?.name === name;
 		api
 			.drift(ns, name)
-			.then((d) => (driftChanges = d.drift ? d.changes : []))
-			.catch(() => (driftChanges = null)); // a 401 signs out centrally via the api layer
+			.then((d) => {
+				if (fresh()) driftChanges = d.drift ? d.changes : [];
+			})
+			.catch(() => {
+				if (fresh()) driftChanges = null; // a 401 signs out centrally via the api layer
+			});
 	}
 
 	// One handler for every registry action: runtime ops run via the registry's
@@ -200,6 +212,7 @@
 		const i = intent;
 		if (!i) return;
 		applyAction(i.id);
+		onintentdone?.();
 	});
 
 	async function adopt() {

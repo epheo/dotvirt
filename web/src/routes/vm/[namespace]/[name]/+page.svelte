@@ -58,6 +58,7 @@
 			onsearchlabel={(k, v) => ui.search?.searchFor(`label:${k}=${v}`)}
 			networks={inventory.networks}
 			{intent}
+			onintentdone={() => (intent = null)}
 		/>
 	</div>
 {:else if inventory.inventory}
