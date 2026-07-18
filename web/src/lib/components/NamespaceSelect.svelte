@@ -1,4 +1,7 @@
 <script lang="ts">
+	import FormField from './FormField.svelte';
+	import SelectInput from './SelectInput.svelte';
+
 	// The staging modals' "Project (namespace)" row. The default is backfilled by
 	// an effect, not an initializer: namespaces can arrive from the inventory
 	// stream after mount, and an initializer would leave the select empty.
@@ -19,9 +22,8 @@
 	});
 </script>
 
-<label class="block">
-	<span class="text-ink-soft">Project (namespace)</span>
-	<select bind:value={namespace} class="mt-1 w-full rounded border border-line-strong px-2 py-1.5">
+<FormField label="Project (namespace)">
+	<SelectInput bind:value={namespace}>
 		{#each namespaces as ns (ns)}<option value={ns}>{ns}</option>{/each}
-	</select>
-</label>
+	</SelectInput>
+</FormField>
