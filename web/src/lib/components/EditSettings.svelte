@@ -1,10 +1,22 @@
 <script lang="ts">
 	import { X } from 'lucide-svelte';
-	import { api, type Network, type Options, type VM } from '$lib/api';
+	import { untrack } from 'svelte';
+	import {
+		api,
+		Unauthorized,
+		type Network,
+		type NodeTarget,
+		type Options,
+		type VM,
+	} from '$lib/api';
 	import { buildEditRequest, seedEditForm } from '$lib/editform';
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
+	import { validName, NAME_HINT } from '$lib/validate';
+	import CheckGroup from './CheckGroup.svelte';
 	import Wizard from './Wizard.svelte';
 	import FormField from './FormField.svelte';
+	import SelectInput from './SelectInput.svelte';
+	import TextInput from './TextInput.svelte';
 
 	let {
 		vm,
@@ -18,7 +30,7 @@
 		onclose: () => void;
 		onstaged: () => void;
 		// Opened from a Configure section: start the wizard on that step.
-		initialSection?: 'compute' | 'storage' | 'network' | 'labels';
+		initialSection?: 'compute' | 'scheduling' | 'storage' | 'network' | 'labels';
 	} = $props();
 
 	let options = $state<Options | null>(null);
@@ -34,8 +46,60 @@
 	// Start on the step the user opened from a Configure section (else Compute).
 	// svelte-ignore state_referenced_locally
 	let current = $state(
-		{ compute: 0, storage: 1, network: 2, labels: 3 }[initialSection ?? 'compute'] ?? 0,
+		{ compute: 0, scheduling: 1, storage: 2, network: 3, labels: 4 }[initialSection ?? 'compute'] ??
+			0,
 	);
+
+	// Hosts for the pin picker. Listing nodes is cluster-scoped RBAC; without it
+	// the picker degrades to a free-text host list.
+	let nodes = $state<NodeTarget[] | null>(null);
+	let canPickHosts = $state(true);
+	$effect(() => {
+		untrack(() =>
+			api
+				.nodes()
+				.then((n) => (nodes = n))
+				.catch((e) => {
+					if (e instanceof Unauthorized) return;
+					canPickHosts = false;
+					nodes = [];
+				}),
+		);
+	});
+	// Offer every schedulable-ish host, plus any already-pinned name that no
+	// longer exists (so a stale pin can still be unchecked).
+	const hostItems = $derived.by(() => {
+		const names = new Set((nodes ?? []).map((n) => n.name));
+		for (const h of form.pin) names.add(h);
+		return [...names].sort().map((n) => {
+			const node = (nodes ?? []).find((x) => x.name === n);
+			return {
+				value: n,
+				hint: !node
+					? 'unknown'
+					: node.unschedulable
+						? 'cordoned'
+						: node.maintenance
+							? 'maintenance'
+							: '',
+			};
+		});
+	});
+	let pinText = $state('');
+	// svelte-ignore state_referenced_locally
+	pinText = form.pin.join(' ');
+	function syncPinText() {
+		form.pin = pinText.split(/[\s,]+/).filter(Boolean);
+	}
+
+	const customScheduling = $derived(!!vm.scheduling?.custom);
+
+	function addGroup() {
+		form.groups = [
+			...form.groups,
+			{ name: '', mode: 'together', strict: true, removed: false, isNew: true },
+		];
+	}
 
 	let optionsError = $state('');
 	$effect(() => {
@@ -136,6 +200,14 @@
 		for (const n of r.removeDisks ?? []) out.push({ label: 'Disk removed', value: n });
 		for (const n of r.addNetworks ?? []) out.push({ label: 'Adapter added', value: n.name });
 		for (const n of r.removeNetworks ?? []) out.push({ label: 'Adapter removed', value: n });
+		for (const g of r.addGroups ?? [])
+			out.push({
+				label: `Group ${g.name}`,
+				value: `keep ${g.mode}${g.strict ? ', strict' : ', preferred'}`,
+			});
+		for (const n of r.removeGroups ?? []) out.push({ label: `Group ${n}`, value: 'removed' });
+		if (r.pin)
+			out.push({ label: 'Host pinning', value: r.pin.length ? r.pin.join(', ') : 'removed' });
 		return out;
 	});
 
@@ -274,34 +346,120 @@
 			{/if}
 		{/if}
 	</div>
+{/snippet}
 
-	<!-- Scheduling: DRS participation + eviction behavior (vCenter's per-VM
-	     DRS automation override). -->
-	<div class="mt-4 border-t border-line-soft pt-3">
-		<span class="text-ink-muted">Scheduling</span>
-		<label class="mt-1 flex items-start gap-2 text-[13px]">
-			<input type="checkbox" bind:checked={form.drsExclude} class="mt-0.5" />
-			<span>
-				Exclude from DRS load balancing
-				<span class="block text-xs text-ink-faint">
-					Automatic rebalancing skips this VM; node drains still live-migrate it.
+{#snippet stepScheduling()}
+	<div class="space-y-4">
+		<!-- Placement groups: vCenter's DRS rules. Membership + rule are one
+		     encoding on the manifest, so this edits both at once. -->
+		<div>
+			<div class="mb-1 flex items-center justify-between">
+				<span class="text-ink-muted">Placement groups (DRS rules)</span>
+				{#if !customScheduling}
+					<button onclick={addGroup} type="button" class="text-xs text-accent hover:underline"
+						>+ Add group</button
+					>
+				{/if}
+			</div>
+			{#if customScheduling}
+				<p class="rounded border border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
+					This VM carries hand-written affinity or node selection — placement is managed in git, not
+					from this form.
+				</p>
+			{:else}
+				{#each form.groups as group, i (i)}
+					<div
+						class="mb-1 flex flex-wrap items-center gap-2 {group.removed
+							? 'opacity-40 line-through'
+							: ''}"
+					>
+						{#if group.isNew}
+							<TextInput
+								bind:value={group.name}
+								placeholder="web-tier"
+								mono
+								class="w-40 flex-none"
+							/>
+						{:else}
+							<span class="w-40 truncate font-mono text-[13px] text-ink">{group.name}</span>
+						{/if}
+						<SelectInput bind:value={group.mode} class="w-56 flex-none" disabled={group.removed}>
+							<option value="together">Keep together — same host</option>
+							<option value="apart">Keep apart — different hosts</option>
+						</SelectInput>
+						<label class="flex items-center gap-1.5 text-xs text-ink-soft">
+							<input type="checkbox" bind:checked={group.strict} disabled={group.removed} />
+							strict
+						</label>
+						<button
+							onclick={() =>
+								group.isNew
+									? (form.groups = form.groups.filter((_, idx) => idx !== i))
+									: (group.removed = !group.removed)}
+							class="ml-auto text-xs {group.removed ? 'text-accent' : 'text-danger'}"
+						>
+							{group.removed ? 'undo' : 'remove'}
+						</button>
+						{#if group.isNew && group.name && !validName(group.name)}
+							<p class="w-full text-xs text-warn-ink">{NAME_HINT}</p>
+						{/if}
+					</div>
+				{:else}
+					<p class="text-xs text-ink-faint">
+						No groups. VMs sharing a group are kept on one host (together) or spread across hosts
+						(apart) — strict rules bind the scheduler, non-strict are best effort.
+					</p>
+				{/each}
+			{/if}
+		</div>
+
+		<!-- Host pinning: a required node-affinity host list. -->
+		{#if !customScheduling}
+			<div>
+				<span class="mb-1 block text-ink-muted">Pin to hosts</span>
+				{#if nodes === null && canPickHosts}
+					<p class="text-xs text-ink-faint">Loading hosts…</p>
+				{:else if canPickHosts && hostItems.length}
+					<CheckGroup items={hostItems} bind:selected={form.pin} />
+				{:else}
+					<TextInput
+						bind:value={pinText}
+						oninput={syncPinText}
+						placeholder="w1 w2 (space separated; empty = any host)"
+						mono
+					/>
+				{/if}
+				<p class="mt-1 text-xs text-ink-faint">
+					{form.pin.length
+						? 'The scheduler may only place this VM on the checked hosts.'
+						: 'No pinning — the scheduler places this VM on any eligible host.'}
+				</p>
+			</div>
+		{/if}
+
+		<!-- DRS participation + eviction behavior (vCenter's per-VM automation
+		     override). -->
+		<div class="border-t border-line-soft pt-3">
+			<label class="flex items-start gap-2 text-[13px]">
+				<input type="checkbox" bind:checked={form.drsExclude} class="mt-0.5" />
+				<span>
+					Exclude from DRS load balancing
+					<span class="block text-xs text-ink-faint">
+						Automatic rebalancing skips this VM; node drains still live-migrate it.
+					</span>
 				</span>
-			</span>
-		</label>
-		<label class="mt-2 block">
-			<span class="text-ink-muted">Eviction strategy</span>
-			<select
-				bind:value={form.evictionStrategy}
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1"
-			>
-				<option value="">Cluster default</option>
-				<option value="LiveMigrate">LiveMigrate — evictions live-migrate the VM</option>
-				<option value="LiveMigrateIfPossible"
-					>LiveMigrateIfPossible — migrate when possible, else restart</option
-				>
-				<option value="None">None — pinned (blocks node drains)</option>
-			</select>
-		</label>
+			</label>
+			<FormField label="Eviction strategy">
+				<SelectInput bind:value={form.evictionStrategy}>
+					<option value="">Cluster default</option>
+					<option value="LiveMigrate">LiveMigrate — evictions live-migrate the VM</option>
+					<option value="LiveMigrateIfPossible"
+						>LiveMigrateIfPossible — migrate when possible, else restart</option
+					>
+					<option value="None">None — pinned (blocks node drains)</option>
+				</SelectInput>
+			</FormField>
+		</div>
 	</div>
 {/snippet}
 
@@ -452,6 +610,7 @@
 	bind:current
 	steps={[
 		{ title: 'Compute', valid: computeValid, body: stepCompute },
+		{ title: 'Scheduling', body: stepScheduling },
 		{ title: 'Storage', body: stepStorage },
 		{ title: 'Networks', body: stepNetworks },
 		{ title: 'Labels', body: stepLabels },

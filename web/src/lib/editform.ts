@@ -2,7 +2,7 @@
 // from a VM, then diff it back into an EditRequest. No Svelte imports, so the
 // seed/diff behavior is unit-testable.
 
-import type { Disk, EditRequest, NIC, Power, VM } from '$lib/api';
+import type { Disk, EditRequest, NIC, PlacementGroup, Power, VM } from '$lib/api';
 
 // Devices carry a removed flag; rows added in the dialog are marked isNew so
 // the diff can tell additions from removals of pre-existing devices.
@@ -11,6 +11,10 @@ export interface DiskRow extends Disk {
 	isNew: boolean;
 }
 export interface NicRow extends NIC {
+	removed: boolean;
+	isNew: boolean;
+}
+export interface GroupRow extends PlacementGroup {
 	removed: boolean;
 	isNew: boolean;
 }
@@ -29,6 +33,9 @@ export interface EditForm {
 	// Scheduling: the DRS opt-out annotation + the template's eviction strategy.
 	drsExclude: boolean;
 	evictionStrategy: string;
+	// Placement: groups (with a removed flag) + the pinned-host list.
+	groups: GroupRow[];
+	pin: string[];
 	// Disks: existing (with a removed flag) + newly added blank disks.
 	disks: DiskRow[];
 	nics: NicRow[];
@@ -45,6 +52,8 @@ export function seedEditForm(vm: VM): EditForm {
 		labelRows: Object.entries(vm.labels ?? {}).map(([key, value]) => ({ key, value })),
 		drsExclude: !!vm.drsExclude,
 		evictionStrategy: vm.evictionStrategy ?? '',
+		groups: (vm.scheduling?.groups ?? []).map((g) => ({ ...g, removed: false, isNew: false })),
+		pin: [...(vm.scheduling?.pin ?? [])],
 		disks: (vm.disks ?? []).map((d) => ({ ...d, removed: false, isNew: false })),
 		nics: (vm.networks ?? []).map((n) => ({ ...n, removed: false, isNew: false })),
 	};
@@ -90,6 +99,25 @@ export function buildEditRequest(vm: VM, form: EditForm): EditRequest {
 	if (form.drsExclude !== !!vm.drsExclude) req.drsExclude = form.drsExclude;
 	if (form.evictionStrategy !== (vm.evictionStrategy ?? ''))
 		req.evictionStrategy = form.evictionStrategy;
+
+	// Placement — never diffed for a custom-affinity VM (the form is read-only
+	// there; the backend would refuse the edit anyway).
+	if (!vm.scheduling?.custom) {
+		const origGroups = new Map((vm.scheduling?.groups ?? []).map((g) => [g.name, g]));
+		const addGroups = form.groups
+			.filter((g) => !g.removed && g.name.trim())
+			.filter((g) => {
+				const o = origGroups.get(g.name);
+				return !o || o.mode !== g.mode || !!o.strict !== !!g.strict;
+			})
+			.map((g) => ({ name: g.name.trim(), mode: g.mode, strict: g.strict || undefined }));
+		if (addGroups.length) req.addGroups = addGroups;
+		const removeGroups = form.groups.filter((g) => !g.isNew && g.removed).map((g) => g.name);
+		if (removeGroups.length) req.removeGroups = removeGroups;
+		const origPin = vm.scheduling?.pin ?? [];
+		const pin = form.pin.map((h) => h.trim()).filter(Boolean);
+		if (pin.join('\n') !== origPin.join('\n')) req.pin = pin;
+	}
 
 	// Labels: upsert any changed/new, remove any deleted-from-original.
 	const set: Record<string, string> = {};

@@ -35,6 +35,7 @@ export interface VM {
 	sourceFile: string;
 	drsExclude?: boolean; // prefer-no-eviction annotation: DRS rebalancing skips this VM
 	evictionStrategy?: string; // explicit template evictionStrategy; empty = cluster default
+	scheduling?: VMScheduling; // placement policy from the manifest; absent when none
 	phase?: string;
 	paused?: boolean; // VMI Paused condition (phase stays Running)
 	guestIP?: string;
@@ -48,6 +49,23 @@ export interface VM {
 	sync: SyncStatus;
 	health?: string;
 	syncError?: string; // ArgoCD apply failure (e.g. a webhook rejection) when OutOfSync
+}
+
+// One named scheduling rule: VMs sharing the group are kept on one host
+// ("together") or spread across hosts ("apart"); strict = a required
+// scheduling term, else preferred (best effort).
+export interface PlacementGroup {
+	name: string;
+	mode: 'together' | 'apart';
+	strict?: boolean;
+}
+
+// A VM's placement policy. custom flags hand-written affinity dotvirt does
+// not own — such VMs are edited in git, never through the scheduling form.
+export interface VMScheduling {
+	pin?: string[]; // host names the VM must run on
+	groups?: PlacementGroup[];
+	custom?: boolean;
 }
 
 export interface ProjectNamespace {
@@ -182,6 +200,9 @@ export interface EditRequest {
 	// Storage live migration: move each named disk to another storage class
 	// (rewrites its DataVolume template + sets updateVolumesStrategy: Migration).
 	migrateVolumes?: { name: string; storageClass: string }[];
+	pin?: string[]; // replace host pinning; [] removes it
+	addGroups?: PlacementGroup[]; // upsert placement groups
+	removeGroups?: string[];
 	message?: string;
 }
 

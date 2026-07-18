@@ -18,15 +18,18 @@
 		// The port-group catalog, to resolve raw NIC refs into port groups.
 		networks?: Network[];
 		// Opens the edit modal jumped to the given section.
-		onedit: (section: 'compute' | 'storage' | 'network' | 'labels') => void;
+		onedit: (section: 'compute' | 'scheduling' | 'storage' | 'network' | 'labels') => void;
 		onsearchlabel?: (key: string, value: string) => void;
 	} = $props();
 
-	type Section = 'hardware' | 'storage' | 'network' | 'labels' | 'source';
+	type Section = 'hardware' | 'scheduling' | 'storage' | 'network' | 'labels' | 'source';
 	let view = $state<Section>('hardware');
+
+	const groupDesc = (g: { mode: string; strict?: boolean }) =>
+		`${g.mode === 'apart' ? 'keep apart' : 'keep together'}${g.strict ? ', strict' : ', preferred'}`;
 </script>
 
-{#snippet editButton(section: 'compute' | 'storage' | 'network' | 'labels')}
+{#snippet editButton(section: 'compute' | 'scheduling' | 'storage' | 'network' | 'labels')}
 	<button
 		onclick={() => onedit(section)}
 		class="flex items-center gap-1 text-xs text-accent hover:underline"
@@ -37,7 +40,7 @@
 
 <div class="flex gap-4">
 	<nav class="w-36 shrink-0 text-[13px]">
-		{#each [['hardware', 'VM Hardware'], ['storage', 'Storage'], ['network', 'Network'], ['labels', 'Labels'], ['source', 'Source & sync']] as const as [id, label] (id)}
+		{#each [['hardware', 'VM Hardware'], ['scheduling', 'Scheduling'], ['storage', 'Storage'], ['network', 'Network'], ['labels', 'Labels'], ['source', 'Source & sync']] as const as [id, label] (id)}
 			<button
 				onclick={() => (view = id)}
 				class="block w-full rounded px-2.5 py-1.5 text-left {view === id
@@ -58,13 +61,28 @@
 					<Row label="Instance type" value={vm.instancetype ?? ''} />
 					<Row label="Preference" value={vm.preference ?? ''} />
 					<Row label="Power (desired)" value={vm.power} />
+				</dl>
+			</InfoCard>
+		{:else if view === 'scheduling'}
+			<InfoCard title="Scheduling">
+				{#snippet action()}{@render editButton('scheduling')}{/snippet}
+				<dl class="divide-y divide-line-soft text-[13px]">
+					{#if vm.scheduling?.custom}
+						<Row label="Placement" value="Hand-written affinity — managed in git" />
+					{:else}
+						{#each vm.scheduling?.groups ?? [] as g (g.name)}
+							<Row label={`Group ${g.name}`} value={groupDesc(g)} />
+						{/each}
+						<Row
+							label="Host pinning"
+							value={vm.scheduling?.pin?.length ? vm.scheduling.pin.join(', ') : 'Any host'}
+						/>
+					{/if}
 					<Row
 						label="DRS"
 						value={vm.drsExclude ? 'Excluded from load balancing' : 'Eligible for load balancing'}
 					/>
-					{#if vm.evictionStrategy}
-						<Row label="Eviction strategy" value={vm.evictionStrategy} />
-					{/if}
+					<Row label="Eviction strategy" value={vm.evictionStrategy || 'Cluster default'} />
 				</dl>
 			</InfoCard>
 		{:else if view === 'storage'}

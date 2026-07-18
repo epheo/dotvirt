@@ -67,9 +67,11 @@
 	let monitorView = $state<'events' | 'performance'>('events');
 	let editing = $state(false);
 	// Which EditSettings section a Configure "Edit" jumps to (undefined = all).
-	let editSection = $state<'compute' | 'storage' | 'network' | 'labels' | undefined>(undefined);
+	let editSection = $state<'compute' | 'scheduling' | 'storage' | 'network' | 'labels' | undefined>(
+		undefined,
+	);
 
-	function openEdit(section?: 'compute' | 'storage' | 'network' | 'labels') {
+	function openEdit(section?: 'compute' | 'scheduling' | 'storage' | 'network' | 'labels') {
 		editSection = section;
 		editing = true;
 	}
