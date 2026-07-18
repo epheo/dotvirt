@@ -32,6 +32,19 @@ func resolveRange(rng string) (string, rangeSpec) {
 	return defaultRange, ranges[defaultRange]
 }
 
+// vcpuCount is the per-VM vCPU denominator. kubevirt_vmi_vcpu_count only
+// exists on newer KubeVirt; older versions expose one series per vCPU instead,
+// so fall back to counting those — dividing by the absent metric alone would
+// blank every CPU-percentage chart.
+func vcpuCount(sel string) string {
+	return fmt.Sprintf("(kubevirt_vmi_vcpu_count%s or count by(namespace,name)(kubevirt_vmi_vcpu_seconds_total%s))", sel, sel)
+}
+
+// vcpuTotal is the scope-wide allocated-vCPU sum with the same fallback.
+func vcpuTotal(sel string) string {
+	return fmt.Sprintf("(sum(kubevirt_vmi_vcpu_count%s) or sum(count by(namespace,name)(kubevirt_vmi_vcpu_seconds_total%s)))", sel, sel)
+}
+
 type seriesSpec struct {
 	name  string
 	query string
@@ -53,7 +66,7 @@ func chartSpecs(ns, name, rw string) []chartSpec {
 	s := fmt.Sprintf("{namespace=%q,name=%q}", ns, name)
 	return []chartSpec{
 		{"cpu", "CPU", "%", false, []seriesSpec{
-			{"Usage", fmt.Sprintf("rate(kubevirt_vmi_cpu_usage_seconds_total%s[%s])*100 / on(namespace,name) kubevirt_vmi_vcpu_count%s", s, rw, s), ""},
+			{"Usage", fmt.Sprintf("rate(kubevirt_vmi_cpu_usage_seconds_total%s[%s])*100 / on(namespace,name) %s", s, rw, vcpuCount(s)), ""},
 			{"Wait", fmt.Sprintf("rate(kubevirt_vmi_vcpu_wait_seconds_total%s[%s])*100", s, rw), ""},
 			{"Steal", fmt.Sprintf("rate(kubevirt_vmi_vcpu_delay_seconds_total%s[%s])*100", s, rw), ""},
 		}},
