@@ -839,7 +839,6 @@ export const api = {
 	logout: () => post<void>('/api/logout', {}),
 	me: () => get<User>('/api/me'),
 
-	inventory: () => get<Inventory>('/api/inventory'),
 	tasks: () => get<TaskEntry[]>('/api/tasks'),
 	options: () => get<Options>('/api/options'),
 	networks: () => get<NetworkInventory>('/api/networks'),

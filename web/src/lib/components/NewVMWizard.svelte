@@ -4,6 +4,7 @@
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
 	import Modal from './Modal.svelte';
 	import Wizard from './Wizard.svelte';
+	import NamespaceSelect from './NamespaceSelect.svelte';
 
 	let {
 		namespaces,
@@ -72,7 +73,6 @@
 	});
 
 	$effect(() => {
-		if (!namespace) namespace = namespaces[0] ?? 'default';
 		api
 			.options()
 			.then((o) => {
@@ -217,15 +217,7 @@
 				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 			/>
 		</label>
-		<label class="block">
-			<span class="text-ink-soft">Project (namespace)</span>
-			<select
-				bind:value={namespace}
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-			>
-				{#each namespaces as ns (ns)}<option value={ns}>{ns}</option>{/each}
-			</select>
-		</label>
+		<NamespaceSelect bind:namespace {namespaces} fallback="default" />
 	</div>
 {/snippet}
 

@@ -4,6 +4,8 @@
 	import { TERMS } from '$lib/vocab';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
+	import StageFooter from './StageFooter.svelte';
+	import NamespaceSelect from './NamespaceSelect.svelte';
 
 	let {
 		namespaces,
@@ -35,10 +37,6 @@
 	let rows = $state<Row[]>([blankRow()]);
 	let submitting = $state(false);
 	let error = $state('');
-
-	$effect(() => {
-		if (!namespace) namespace = initial ?? namespaces[0] ?? '';
-	});
 
 	// Effective members: VMs in the namespace whose labels match the applied-to Group
 	// (every VM in the namespace when no selector is set) — the NSX-T "effective
@@ -96,15 +94,7 @@
 					class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
 				/>
 			</label>
-			<label class="block">
-				<span class="text-ink-soft">Project (namespace)</span>
-				<select
-					bind:value={namespace}
-					class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-				>
-					{#each namespaces as ns (ns)}<option value={ns}>{ns}</option>{/each}
-				</select>
-			</label>
+			<NamespaceSelect bind:namespace {namespaces} {initial} />
 		</div>
 
 		<div class="rounded border border-line p-3">
@@ -194,17 +184,12 @@
 		<ErrorNote {error} />
 	</div>
 	{#snippet footer()}
-		<span class="text-xs text-ink-faint">Staged into the changeset; open a PR from “Changes”.</span>
-		<button
-			onclick={onclose}
-			class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong">Cancel</button
-		>
-		<button
-			onclick={submit}
-			disabled={!valid || submitting}
-			class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
-		>
-			{submitting ? 'Staging…' : 'Stage policy'}
-		</button>
+		<StageFooter
+			label="Stage policy"
+			disabled={!valid}
+			{submitting}
+			onsubmit={submit}
+			oncancel={onclose}
+		/>
 	{/snippet}
 </Modal>

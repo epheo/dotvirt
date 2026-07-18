@@ -3,6 +3,7 @@
 	import { api, Unauthorized, type Options, type Template } from '$lib/api';
 	import { ui } from '$lib/state/ui.svelte';
 	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
+	import ErrorNote from '$lib/components/ErrorNote.svelte';
 
 	// The Content Library: VM templates (deployable, git-backed) first, then a
 	// read-only browser over the cluster's catalog — boot images (DataSources),
@@ -157,7 +158,7 @@
 <div class="flex min-h-0 flex-1">
 	<div class="min-h-0 flex-1 overflow-y-auto">
 		{#if error}
-			<p class="m-4 rounded bg-danger-soft/60 px-3 py-2 text-xs text-danger-ink">{error}</p>
+			<ErrorNote {error} class="m-4" />
 		{:else if kind === 'templates' ? !templates : !options}
 			<p class="py-6 text-center text-sm text-ink-faint">Loading catalog…</p>
 		{:else if rows.length === 0}

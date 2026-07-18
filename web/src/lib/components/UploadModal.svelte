@@ -3,6 +3,7 @@
 	import { api, Unauthorized, type Options } from '$lib/api';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
+	import NamespaceSelect from './NamespaceSelect.svelte';
 
 	// Image upload (OVF-import analog). dotvirt creates the upload-target
 	// DataVolume + mints a token; the browser then streams the file STRAIGHT to
@@ -27,8 +28,7 @@
 
 	let file = $state<File | null>(null);
 	let name = $state('');
-	// svelte-ignore state_referenced_locally
-	let namespace = $state(namespaces[0] ?? '');
+	let namespace = $state('');
 	let size = $state('10Gi');
 	let storageClass = $state('');
 	let options = $state<Options | null>(null);
@@ -151,15 +151,7 @@
 						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5 font-mono text-sm"
 					/>
 				</label>
-				<label class="block">
-					<span class="text-ink-soft">Project (namespace)</span>
-					<select
-						bind:value={namespace}
-						class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-					>
-						{#each namespaces as ns (ns)}<option value={ns}>{ns}</option>{/each}
-					</select>
-				</label>
+				<NamespaceSelect bind:namespace {namespaces} />
 				<label class="block">
 					<span class="text-ink-soft">Disk size</span>
 					<input

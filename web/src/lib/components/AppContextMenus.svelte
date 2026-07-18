@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { api, Unauthorized, type VM } from '$lib/api';
-	import { manifestURL, type VMAction } from '$lib/actions';
+	import { manifestURL, runRuntimeAction, type VMAction } from '$lib/actions';
 	import { friendlyError } from '$lib/format';
 	import { vmHref } from '$lib/nav';
 	import { drafts } from '$lib/state/drafts.svelte';
@@ -22,14 +22,7 @@
 		const vm = ui.ctx.vm;
 		ui.ctx = null;
 		if (a.kind === 'runtime' && a.run) {
-			const verb = a.verb ?? a.label;
-			try {
-				await a.run(vm);
-				ui.showToast(`${verb} requested for ${vm.name}.`, { kind: 'success' });
-			} catch (e) {
-				if (e instanceof Unauthorized) return;
-				ui.showToast(`${verb} failed for ${vm.name}: ${friendlyError(e)}`, { kind: 'error' });
-			}
+			await runRuntimeAction(a, vm);
 			return;
 		}
 		if (a.id === 'manifest') {

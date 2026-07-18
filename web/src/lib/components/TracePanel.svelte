@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Play } from 'lucide-svelte';
 	import { api, Unauthorized, type TraceResult, type TraceStep } from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { TONE_PILL, TONE_TEXT, type Tone } from '$lib/status';
 	import PolicyRuleTable from './PolicyRuleTable.svelte';
@@ -48,7 +49,7 @@
 			});
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = e instanceof Error ? e.message : String(e);
+			error = friendlyError(e);
 		} finally {
 			running = false;
 		}

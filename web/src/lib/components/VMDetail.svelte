@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { ChevronDown, Pencil, Trash2 } from 'lucide-svelte';
 	import { api, Unauthorized, type Change, type DraftItem, type Network, type VM } from '$lib/api';
-	import { manifestURL, type VMAction } from '$lib/actions';
+	import { manifestURL, runRuntimeAction, type VMAction } from '$lib/actions';
 	import { ui, type DetailAction } from '$lib/state/ui.svelte';
 	import { duration, friendlyError } from '$lib/format';
 	import ActionMenu from './ActionMenu.svelte';
@@ -120,13 +120,8 @@
 		const target = vm;
 		if (a.kind === 'runtime' && a.run) {
 			runtimeBusy = true;
-			const verb = a.verb ?? a.label;
 			try {
-				await a.run(target);
-				ui.showToast(`${verb} requested for ${target.name}.`, { kind: 'success' });
-			} catch (e) {
-				if (e instanceof Unauthorized) return; // signed out centrally; skip the error toast
-				ui.showToast(`${verb} failed for ${target.name}: ${friendlyError(e)}`, { kind: 'error' });
+				await runRuntimeAction(a, target);
 			} finally {
 				runtimeBusy = false;
 			}
