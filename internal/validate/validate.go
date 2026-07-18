@@ -4,7 +4,9 @@ package validate
 
 import (
 	"fmt"
+	"path"
 	"regexp"
+	"strings"
 )
 
 // dns1123Label matches a Kubernetes DNS-1123 label — lowercase alphanumerics and
@@ -22,6 +24,32 @@ func DNS1123Name(s string) bool {
 func RequireDNS1123(field, s string) error {
 	if !DNS1123Name(s) {
 		return fmt.Errorf("%s %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", field, s)
+	}
+	return nil
+}
+
+// RepoPath reports whether s is a clean repo-relative file path: no absolute
+// root, no traversal, no redundant segments, no backslashes. Paths crossing
+// this gate address files in a project repo's proposal diff.
+func RepoPath(s string) bool {
+	if s == "" || strings.HasPrefix(s, "/") || strings.Contains(s, "\\") {
+		return false
+	}
+	if path.Clean(s) != s {
+		return false
+	}
+	for _, seg := range strings.Split(s, "/") {
+		if seg == ".." || seg == "." || seg == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// RequireRepoPath returns a descriptive error naming field when s fails RepoPath.
+func RequireRepoPath(field, s string) error {
+	if !RepoPath(s) {
+		return fmt.Errorf("%s %q must be a clean repo-relative path", field, s)
 	}
 	return nil
 }
