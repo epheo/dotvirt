@@ -118,9 +118,9 @@ func drsDeviation(threshold string) (under, over float64, ok bool) {
 }
 
 // foldDRSBand attaches the DRS action band to a host distribution: the window
-// [mean-under, mean+over] plus exact counts of workers outside it (the
-// histogram's 10%-wide buckets can't count against arbitrary band edges).
-func foldDRSBand(load *model.HostLoad, pcts []float64, threshold string) {
+// [mean-under, mean+over] plus counts of workers outside it, kept server-side
+// beside the threshold mapping so band semantics have one home.
+func foldDRSBand(load *model.HostLoad, threshold string) {
 	under, over, ok := drsDeviation(threshold)
 	if !ok {
 		return
@@ -129,11 +129,11 @@ func foldDRSBand(load *model.HostLoad, pcts []float64, threshold string) {
 	if b.Low < 0 {
 		b.Low = 0
 	}
-	for _, p := range pcts {
+	for _, n := range load.Nodes {
 		switch {
-		case p > b.High:
+		case n.Pct > b.High:
 			b.Above++
-		case p < b.Low:
+		case n.Pct < b.Low:
 			b.Below++
 		}
 	}
@@ -160,7 +160,7 @@ func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "node metrics require node read access", http.StatusForbidden)
 		return
 	}
-	load, pcts, err := s.metrics.HostLoad(r.Context(), id.Token)
+	load, err := s.metrics.HostLoad(r.Context(), id.Token)
 	if err != nil {
 		fail(w, err)
 		return
@@ -168,7 +168,7 @@ func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.PlatformRepo != "" && s.draft != nil {
 		platform := project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}
 		if st, err := s.draft.DRSState(platform); err == nil && st.Configured && st.Config != nil {
-			foldDRSBand(&load, pcts, st.Config.Threshold)
+			foldDRSBand(&load, st.Config.Threshold)
 		}
 	}
 	writeJSON(w, http.StatusOK, load)

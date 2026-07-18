@@ -417,12 +417,14 @@ export interface ClusterSummary {
   topMemory: ConsumerVM[];
 }
 /**
- * HostOutlier is one named worker at an edge of the utilization distribution —
- * the only place the payload carries node names, capped to a handful.
+ * HostWorker is one worker in the utilization distribution. The full roster
+ * ships — bounded by node count, cached once for all callers — so the card
+ * can draw every worker as a point and name outliers client-side.
  */
-export interface HostOutlier {
+export interface HostWorker {
   node: string;
   pct: number /* float64 */; // CPU utilization percent
+  mem?: number /* float64 */; // memory utilization percent; 0 when the series is absent
   unschedulable?: boolean;
 }
 /**
@@ -437,19 +439,15 @@ export interface HostBand {
   below: number /* int */; // workers under Low
 }
 /**
- * HostLoad is GET /api/metrics/hosts: the worker CPU-utilization distribution
- * behind the DRS balance card. Deliberately O(1) in cluster size — a fixed
- * 10-bucket histogram plus only the outliers named — so a hundreds-of-workers
- * platform renders the same card as a three-worker lab. Band is set only when
- * a DRS configuration is committed.
+ * HostLoad is GET /api/metrics/hosts: the worker utilization distribution
+ * behind the DRS balance card — every worker with CPU and memory percent,
+ * hottest first. Band is set only when a DRS configuration is committed.
  */
 export interface HostLoad {
   updated: number /* int64 */;
   workers: number /* int */;
-  mean: number /* float64 */; // percent
-  buckets: number /* int */[]; // worker count per 10%-wide bucket, [0-10) … [90-100]
-  hottest: HostOutlier[]; // ≤5, hottest first
-  coldest: HostOutlier[]; // ≤5, coldest first
+  mean: number /* float64 */; // CPU percent
+  nodes: HostWorker[];
   band?: HostBand;
 }
 /**

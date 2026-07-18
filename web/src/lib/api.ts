@@ -639,9 +639,10 @@ export interface ClusterSummary {
 	topCpu: ConsumerVM[];
 	topMemory: ConsumerVM[];
 }
-export interface HostOutlier {
+export interface HostWorker {
 	node: string;
 	pct: number; // CPU utilization percent
+	mem?: number; // memory utilization percent; absent when the series is missing
 	unschedulable?: boolean;
 }
 export interface HostBand {
@@ -653,10 +654,8 @@ export interface HostBand {
 export interface HostLoad {
 	updated: number;
 	workers: number;
-	mean: number; // percent
-	buckets: number[]; // worker count per 10%-wide utilization bucket
-	hottest: HostOutlier[]; // ≤5, hottest first
-	coldest: HostOutlier[]; // ≤5, coldest first
+	mean: number; // CPU percent
+	nodes: HostWorker[]; // every worker, hottest first
 	band?: HostBand; // absent until DRS is configured
 }
 export interface Snapshot {
