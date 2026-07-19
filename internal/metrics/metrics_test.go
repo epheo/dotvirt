@@ -315,3 +315,60 @@ func TestHostLoadNoWorkers(t *testing.T) {
 		t.Fatal("want an error for an empty worker set")
 	}
 }
+
+// Capacity joins allocatable and VM-committed series by node: workers without
+// an allocatable series are absent (not zero-capacity rows), VMI-less workers
+// show zero committed, and rows sort most-committed-memory first.
+func TestCapacity(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("query")
+		result := `[]`
+		switch {
+		case strings.Contains(q, `kube_node_status_allocatable{resource="cpu"}`):
+			result = `[
+				{"metric":{"node":"w1"},"value":[100,"8"]},
+				{"metric":{"node":"w2"},"value":[100,"8"]}]`
+		case strings.Contains(q, `kube_node_status_allocatable{resource="memory"}`):
+			result = `[
+				{"metric":{"node":"w1"},"value":[100,"1000"]},
+				{"metric":{"node":"w2"},"value":[100,"1000"]}]`
+		case strings.Contains(q, "kubevirt_vmi_vcpu_count"):
+			result = `[{"metric":{"node":"w1"},"value":[100,"12"]}]`
+		case strings.Contains(q, "kubevirt_vmi_memory_domain_bytes"):
+			result = `[
+				{"metric":{"node":"w1"},"value":[100,"500"]},
+				{"metric":{"node":"w2"},"value":[100,"1500"]}]`
+		case strings.Contains(q, "kube_node_role"):
+			result = `[
+				{"metric":{"node":"w1"},"value":[100,"1"]},
+				{"metric":{"node":"w2"},"value":[100,"1"]},
+				{"metric":{"node":"w3-no-ksm"},"value":[100,"1"]}]`
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"status":"success","data":{"resultType":"vector","result":%s}}`, result)
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, "", false)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	cap, err := c.Capacity(context.Background(), "tok")
+	if err != nil {
+		t.Fatalf("Capacity: %v", err)
+	}
+	if len(cap.Nodes) != 2 {
+		t.Fatalf("nodes = %+v, want w1+w2 only (w3 has no allocatable series)", cap.Nodes)
+	}
+	// w2 commits 1.5x its memory, w1 0.5x: overcommitted first.
+	if cap.Nodes[0].Node != "w2" || cap.Nodes[0].MemAllocated != 1500 {
+		t.Errorf("nodes[0] = %+v, want w2 with 1500 committed", cap.Nodes[0])
+	}
+	w1 := cap.Nodes[1]
+	if w1.Node != "w1" || w1.VCPUAllocated != 12 || w1.CPUAllocatable != 8 {
+		t.Errorf("w1 = %+v, want 12 vCPU on 8 cores", w1)
+	}
+	if cap.Nodes[0].VCPUAllocated != 0 {
+		t.Errorf("w2 vCPU = %v, want 0 (no VMI series)", cap.Nodes[0].VCPUAllocated)
+	}
+}

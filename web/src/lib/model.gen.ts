@@ -84,6 +84,25 @@ export interface VM {
   syncError?: string;
 }
 /**
+ * HostCapacityNode is one worker's commitment picture: what is promised to
+ * VMs (vCPUs, guest memory) against what the node can offer.
+ */
+export interface HostCapacityNode {
+  node: string;
+  cpuAllocatable: number /* float64 */; // cores
+  vcpuAllocated?: number /* float64 */; // vCPUs committed to VMs
+  memAllocatable: number /* float64 */; // bytes
+  memAllocated?: number /* float64 */; // bytes committed to guests
+}
+/**
+ * HostCapacity is the per-worker allocation/overcommit breakdown behind the
+ * host capacity card — the cluster overcommit ratios, per host.
+ */
+export interface HostCapacity {
+  updated: number /* int64 */;
+  nodes: HostCapacityNode[];
+}
+/**
  * PlacementGroup is one named scheduling rule: VMs sharing the group are kept
  * on one host ("together") or spread across hosts ("apart"). Strict renders a
  * required scheduling term (the scheduler refuses violating placements);

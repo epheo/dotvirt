@@ -174,6 +174,30 @@ func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, load)
 }
 
+// handleHostCapacity returns each worker's committed-vs-allocatable picture.
+// Node-level data cached once for all callers, so the same node-read SSAR
+// gate as handleHostLoad applies, for the same reason.
+func (s *Server) handleHostCapacity(w http.ResponseWriter, r *http.Request) {
+	if !s.metricsReady(w) {
+		return
+	}
+	id, c, err := s.userCluster(r)
+	if err != nil {
+		fail(w, unavailable("cluster access", err))
+		return
+	}
+	if !s.canReadNodesCached(r.Context(), id, c) {
+		http.Error(w, "node metrics require node read access", http.StatusForbidden)
+		return
+	}
+	cap, err := s.metrics.Capacity(r.Context(), id.Token)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, cap)
+}
+
 // handleScopeMetrics returns the per-VM top-consumer time-series for a container
 // scope — the container Monitor's Performance view.
 func (s *Server) handleScopeMetrics(w http.ResponseWriter, r *http.Request) {
