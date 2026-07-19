@@ -3,6 +3,7 @@
 	import { api, Unauthorized, type ClusterSummary } from '$lib/api';
 	import { pollWhileVisible } from '$lib/poll';
 	import HostBalance from './HostBalance.svelte';
+	import HostCapacityCard from './HostCapacityCard.svelte';
 	import IssuesCard from './IssuesCard.svelte';
 	import QuotaBand from './QuotaBand.svelte';
 	import Ring from './Ring.svelte';
@@ -160,6 +161,7 @@
 		     a project/namespace/node view would repeat it misleadingly. -->
 		{#if !scope.project && !scope.namespace && !scope.node}
 			<HostBalance />
+			<HostCapacityCard />
 		{/if}
 		<IssuesCard scope={{ project: scope.project, namespace: scope.namespace }} />
 		<TopConsumers topCpu={data.topCpu} topMemory={data.topMemory} {onselect} />

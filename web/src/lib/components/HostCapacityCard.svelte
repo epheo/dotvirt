@@ -28,8 +28,7 @@
 		total > 0 ? (alloc ?? 0) / total : 0;
 	const pct = (r: number) => Math.min(100, r * 100);
 
-	const cores = (v: number) =>
-		Number.isInteger(v) ? String(v) : v.toFixed(1);
+	const cores = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
 </script>
 
 {#if data?.nodes.length}
@@ -55,7 +54,10 @@
 							>
 							<span class="text-ink-faint">{rc.toFixed(1)}:1</span>
 						</div>
-						<div class="mt-0.5 h-1.5 overflow-hidden rounded-full" style="background:var(--chart-track)">
+						<div
+							class="mt-0.5 h-1.5 overflow-hidden rounded-full"
+							style="background:var(--chart-track)"
+						>
 							<div
 								class="h-full rounded-full"
 								style="width:{pct(rc)}%;background:var(--chart-1)"
@@ -71,7 +73,10 @@
 								>{rm.toFixed(1)}:1</span
 							>
 						</div>
-						<div class="mt-0.5 h-1.5 overflow-hidden rounded-full" style="background:var(--chart-track)">
+						<div
+							class="mt-0.5 h-1.5 overflow-hidden rounded-full"
+							style="background:var(--chart-track)"
+						>
 							<div
 								class="h-full rounded-full"
 								style="width:{pct(rm)}%;background:{rm > 1
