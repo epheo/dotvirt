@@ -5,6 +5,7 @@
 		BookCopy,
 		Check,
 		ChevronDown,
+		CircleCheck,
 		ClipboardList,
 		FolderPlus,
 		Monitor,
@@ -15,10 +16,13 @@
 		Server,
 		Shield,
 		Sun,
+		TriangleAlert,
 		Upload,
 		User as UserIcon,
 	} from 'lucide-svelte';
+	import { deriveIssues } from '$lib/issues';
 	import { hrefForScope, scopeFromPath, vmHref } from '$lib/nav';
+	import StatusDot from './StatusDot.svelte';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { session } from '$lib/state/session.svelte';
@@ -62,6 +66,11 @@
 				break;
 		}
 	}
+
+	// The issues bell: standing problems derived from the live stream, so the
+	// count moves with the same frames the tree and grid repaint on.
+	const issues = $derived(deriveIssues(inventory.inventory));
+	const worstTone = $derived(issues.some((i) => i.severity === 'danger') ? 'danger' : 'warn');
 
 	// Object pages push label queries into the masthead search via ui.search.
 	let search = $state<GlobalSearch | null>(null);
@@ -177,6 +186,63 @@
 				{#snippet icon()}<Shield size={13} />{/snippet}
 				New Admin Firewall
 			</MenuItem>
+		{/snippet}
+	</HeaderMenu>
+
+	<!-- Issues: the attention bell — standing problems only (never pending
+	     applies), so a lit badge always means something is actually wrong. -->
+	<HeaderMenu>
+		{#snippet trigger({ open, toggle })}
+			<button
+				onclick={toggle}
+				title="Issues — standing problems in the visible inventory"
+				class="relative rounded p-1.5 hover:bg-slate-700 {open
+					? 'bg-slate-700 text-white'
+					: 'text-slate-300'}"
+			>
+				<TriangleAlert size={16} />
+				{#if issues.length > 0}
+					<span
+						class="absolute -top-1 -right-1 rounded-full px-1 text-[10px] font-medium text-white {worstTone ===
+						'danger'
+							? 'bg-danger'
+							: 'bg-warn'}">{issues.length}</span
+					>
+				{/if}
+			</button>
+		{/snippet}
+		{#snippet children({ close })}
+			<div class="w-96 max-w-[90vw]">
+				{#if !issues.length}
+					<p class="flex items-center gap-2 px-3 py-2.5 text-xs text-ink-faint">
+						<CircleCheck size={14} class="text-ok" /> No standing issues.
+					</p>
+				{:else}
+					<ul class="max-h-96 divide-y divide-line-soft overflow-y-auto text-xs">
+						{#each issues.slice(0, 12) as i (i.scope + i.label)}
+							<li>
+								<button
+									onclick={() => {
+										close();
+										goto(i.href);
+									}}
+									class="flex w-full items-baseline gap-2 px-3 py-1.5 text-left hover:bg-inset"
+									title={i.detail ?? ''}
+								>
+									<span class="self-center"><StatusDot tone={i.severity} size="xs" /></span>
+									<span class="shrink-0 font-medium text-ink">{i.scope}</span>
+									<span class="truncate text-ink-soft">{i.label}</span>
+								</button>
+							</li>
+						{/each}
+					</ul>
+					{#if issues.length > 12}
+						<p class="border-t border-line-soft px-3 py-1.5 text-right text-[11px] text-ink-faint">
+							and {issues.length - 12} more
+						</p>
+					{/if}
+				{/if}
+			</div>
 		{/snippet}
 	</HeaderMenu>
 
