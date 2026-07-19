@@ -3,6 +3,7 @@
 	import { api, Unauthorized, type ClusterSummary } from '$lib/api';
 	import { pollWhileVisible } from '$lib/poll';
 	import HostBalance from './HostBalance.svelte';
+	import IssuesCard from './IssuesCard.svelte';
 	import QuotaBand from './QuotaBand.svelte';
 	import Ring from './Ring.svelte';
 	import TopConsumers from './TopConsumers.svelte';
@@ -160,6 +161,7 @@
 		{#if !scope.project && !scope.namespace && !scope.node}
 			<HostBalance />
 		{/if}
+		<IssuesCard scope={{ project: scope.project, namespace: scope.namespace }} />
 		<TopConsumers topCpu={data.topCpu} topMemory={data.topMemory} {onselect} />
 	</div>
 {:else if loading}

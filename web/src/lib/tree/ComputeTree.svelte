@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { Folder, Layers, LayoutGrid, TriangleAlert } from 'lucide-svelte';
 	import type { Project, ProjectNamespace } from '$lib/api';
+	import { deriveIssues, issueCountByProject } from '$lib/issues';
 	import { hrefForScope, scopeFromPath } from '$lib/nav';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { persisted } from '$lib/state/persisted.svelte';
@@ -41,6 +42,9 @@
 	const nsDrift = (ns: ProjectNamespace) => ns.vms.some((v) => v.sync === 'OutOfSync');
 	const projectDrift = (p: Project) => p.namespaces.some(nsDrift);
 	const vmCount = (p: Project) => p.namespaces.reduce((n, ns) => n + ns.vms.length, 0);
+
+	// Standing problems per project, for the attention badge on the row.
+	const issueCounts = $derived(issueCountByProject(deriveIssues(inventory.inventory)));
 
 	function ctxContainer(
 		e: MouseEvent,
@@ -87,6 +91,14 @@
 						><TriangleAlert size={10} /></span
 					>
 				{:else}
+					{@const n = issueCounts.get(project.name) ?? 0}
+					{#if n > 0}
+						<span
+							class="rounded bg-warn-soft p-0.5 text-warn-ink"
+							title="{n} issue{n === 1 ? '' : 's'} in this project"
+							><TriangleAlert size={10} /></span
+						>
+					{/if}
 					<!-- The Application rollup spans every kind the repo declares (segments,
 					     policies, tenancy). Fall back to the VM-only drift dot only when Argo
 					     isn't wired, so a project never shows two dots. -->
