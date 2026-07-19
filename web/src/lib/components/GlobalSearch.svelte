@@ -1,22 +1,29 @@
 <script lang="ts">
 	// vCenter's masthead search: one box over the whole streamed inventory — VMs
-	// (name, IP, labels), projects, namespaces, nodes. Pure frontend: the inventory
-	// is already client-side. `label:key=value` (or `label:key`) narrows to VM
-	// labels — the tags-parity affordance; label chips elsewhere call searchFor().
+	// (name, IP, labels), projects, namespaces, nodes, segments, storage
+	// classes. Pure frontend: everything searched is already client-side (which
+	// is why templates, a fetch away, are not here). `label:key=value` (or
+	// `label:key`) narrows to VM labels — the tags-parity affordance; label
+	// chips elsewhere call searchFor().
 	import { Search } from 'lucide-svelte';
-	import type { Inventory, VM } from '$lib/api';
+	import type { Inventory, Network, VM } from '$lib/api';
+	import { vmStorageKeys, NO_STORAGE } from '$lib/lenses';
 
 	export type SearchHit =
 		| { kind: 'vm'; vm: VM; hint: string }
 		| { kind: 'project'; project: string }
 		| { kind: 'namespace'; project: string; namespace: string }
-		| { kind: 'node'; node: string };
+		| { kind: 'node'; node: string }
+		| { kind: 'network'; network: string; hint: string }
+		| { kind: 'storage'; storageClass: string };
 
 	let {
 		inventory,
+		networks = [],
 		onpick,
 	}: {
 		inventory: Inventory | null;
+		networks?: Network[]; // the port-group catalog (from the session store)
 		onpick: (hit: SearchHit) => void;
 	} = $props();
 
@@ -81,6 +88,16 @@
 			for (const node of nodes) {
 				if (node.toLowerCase().includes(q)) out.push({ kind: 'node', node });
 			}
+			for (const n of networks) {
+				if (n.name.toLowerCase().includes(q))
+					out.push({ kind: 'network', network: n.name, hint: n.kind });
+			}
+			const classes = [...new Set(vms.flatMap((v) => vmStorageKeys(v)))].filter(
+				(c) => c !== NO_STORAGE,
+			);
+			for (const c of classes) {
+				if (c.toLowerCase().includes(q)) out.push({ kind: 'storage', storageClass: c });
+			}
 		}
 		return out.slice(0, 14);
 	});
@@ -141,11 +158,16 @@
 				return h.namespace;
 			case 'node':
 				return h.node;
+			case 'network':
+				return h.network;
+			case 'storage':
+				return h.storageClass;
 		}
 	}
 	function hitHint(h: SearchHit): string {
 		switch (h.kind) {
 			case 'vm':
+			case 'network':
 				return h.hint;
 			case 'namespace':
 				return h.project;
@@ -158,6 +180,8 @@
 		project: 'Project',
 		namespace: 'Namespace',
 		node: 'Node',
+		network: 'Segment',
+		storage: 'Storage',
 	};
 </script>
 
