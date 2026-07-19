@@ -60,6 +60,12 @@
 			case 'node':
 				goto(hrefForScope({ kind: 'node', node: hit.node }));
 				break;
+			case 'network':
+				goto(hrefForScope({ kind: 'network', network: hit.network }));
+				break;
+			case 'storage':
+				goto(hrefForScope({ kind: 'storage', storageClass: hit.storageClass }));
+				break;
 		}
 	}
 
@@ -75,7 +81,12 @@
 <header class="flex items-center gap-3 border-b border-line-strong bg-bar px-4 py-2 text-white">
 	<a href="/compute" class="font-semibold">dotvirt</a>
 
-	<GlobalSearch bind:this={search} inventory={inventory.inventory} onpick={onSearchPick} />
+	<GlobalSearch
+		bind:this={search}
+		inventory={inventory.inventory}
+		networks={inventory.networks}
+		onpick={onSearchPick}
+	/>
 
 	<!-- Create actions collapse into one primary menu (vCenter keeps the global
 	     chrome to identity + search + tasks; creation is otherwise contextual via
