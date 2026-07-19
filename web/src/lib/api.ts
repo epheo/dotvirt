@@ -766,6 +766,19 @@ export interface NodeInfo {
 
 // A virtualization host (KubeVirt-schedulable node) — a candidate
 // live-migration target for the migrate dialog's picker.
+// One worker's commitment picture: promised-to-VMs vs allocatable.
+export interface HostCapacityNode {
+	node: string;
+	cpuAllocatable: number; // cores
+	vcpuAllocated?: number;
+	memAllocatable: number; // bytes
+	memAllocated?: number;
+}
+export interface HostCapacity {
+	updated: number;
+	nodes: HostCapacityNode[];
+}
+
 export interface NodeTarget {
 	name: string;
 	ready: boolean;
@@ -934,6 +947,7 @@ export const api = {
 	alarms: () => get<Alert[]>('/api/alarms'),
 	// Node maintenance (cluster-scoped; the user's token is the gate).
 	nodes: () => get<NodeTarget[]>('/api/nodes'),
+	capacity: () => get<HostCapacity>('/api/metrics/capacity'),
 	nodeInfo: (node: string) => get<NodeInfo>(`/api/nodes/${enc(node)}`),
 	setNodeCordon: (node: string, unschedulable: boolean) =>
 		post<void>(`/api/nodes/${enc(node)}/cordon`, { unschedulable }),

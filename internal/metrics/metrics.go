@@ -41,6 +41,7 @@ type Client struct {
 	scope     *ttlcache.Cache[model.VMMetrics]
 	alerts    *ttlcache.Cache[[]model.Alert]
 	hosts     *ttlcache.Cache[model.HostLoad]
+	capacity  *ttlcache.Cache[model.HostCapacity]
 }
 
 // New builds a Client for the query API at baseURL (e.g. the thanos-querier
@@ -78,6 +79,7 @@ func New(baseURL, caPath string, insecure bool) (*Client, error) {
 		scope:     ttlcache.New[model.VMMetrics](clusterTTL),
 		alerts:    ttlcache.New[[]model.Alert](clusterTTL),
 		hosts:     ttlcache.New[model.HostLoad](clusterTTL),
+		capacity:  ttlcache.New[model.HostCapacity](clusterTTL),
 	}, nil
 }
 
@@ -244,6 +246,63 @@ func (c *Client) HostLoad(ctx context.Context, token string) (model.HostLoad, er
 	load.Mean = sum / float64(len(nodes))
 	c.hosts.Put("hosts", load)
 	return load, nil
+}
+
+// Capacity returns each worker's committed-to-VMs vCPU and guest memory
+// against its allocatable capacity — the per-host breakdown of the cluster
+// overcommit ratios ClusterSummary serves. kube-state-metrics and the KubeVirt
+// VMI series both label nodes `node`, so the join is direct. Node-level data,
+// same sensitivity class as HostLoad; cached once for all users.
+func (c *Client) Capacity(ctx context.Context, token string) (model.HostCapacity, error) {
+	if v, ok := c.capacity.Get("capacity"); ok {
+		return v, nil
+	}
+	byNode := func(q string) map[string]float64 {
+		m := map[string]float64{}
+		for _, lv := range c.vector(ctx, token, q) {
+			if n := lv.labels["node"]; n != "" {
+				m[n] = lv.value
+			}
+		}
+		return m
+	}
+	cpuAlloc := byNode(`kube_node_status_allocatable{resource="cpu"}`)
+	memAlloc := byNode(`kube_node_status_allocatable{resource="memory"}`)
+	// Per-node vCPU sum, with vcpuCount's per-vCPU-series fallback for older KubeVirt.
+	vcpu := byNode(`(sum by(node)(kubevirt_vmi_vcpu_count) or sum by(node)(count by(node,namespace,name)(kubevirt_vmi_vcpu_seconds_total)))`)
+	memVM := byNode(`sum by(node)(kubevirt_vmi_memory_domain_bytes)`)
+
+	var nodes []model.HostCapacityNode
+	for _, lv := range c.vector(ctx, token, `kube_node_role{role="worker"}`) {
+		n := lv.labels["node"]
+		alloc, ok := cpuAlloc[n]
+		if n == "" || !ok {
+			continue // no allocatable series: absent from the list, not a fake zero-capacity row
+		}
+		nodes = append(nodes, model.HostCapacityNode{
+			Node:           n,
+			CPUAllocatable: alloc,
+			VCPUAllocated:  vcpu[n],
+			MemAllocatable: memAlloc[n],
+			MemAllocated:   memVM[n],
+		})
+	}
+	if len(nodes) == 0 {
+		return model.HostCapacity{}, fmt.Errorf("%w: no worker capacity series", model.ErrUnavailable)
+	}
+	// Most-committed memory first: overcommit risk leads, and memory (unlike
+	// time-shared CPU) is the ratio that hurts.
+	ratio := func(n model.HostCapacityNode) float64 {
+		if n.MemAllocatable <= 0 {
+			return 0
+		}
+		return n.MemAllocated / n.MemAllocatable
+	}
+	sort.Slice(nodes, func(i, j int) bool { return ratio(nodes[i]) > ratio(nodes[j]) })
+
+	out := model.HostCapacity{Updated: time.Now().Unix(), Nodes: nodes}
+	c.capacity.Put("capacity", out)
+	return out, nil
 }
 
 // ScopeMetrics returns the per-VM top-consumer time-series for a container

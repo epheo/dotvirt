@@ -81,6 +81,23 @@ type VM struct {
 	SyncError string `json:"syncError,omitempty"`
 }
 
+// HostCapacityNode is one worker's commitment picture: what is promised to
+// VMs (vCPUs, guest memory) against what the node can offer.
+type HostCapacityNode struct {
+	Node           string  `json:"node"`
+	CPUAllocatable float64 `json:"cpuAllocatable"`          // cores
+	VCPUAllocated  float64 `json:"vcpuAllocated,omitempty"` // vCPUs committed to VMs
+	MemAllocatable float64 `json:"memAllocatable"`          // bytes
+	MemAllocated   float64 `json:"memAllocated,omitempty"`  // bytes committed to guests
+}
+
+// HostCapacity is the per-worker allocation/overcommit breakdown behind the
+// host capacity card — the cluster overcommit ratios, per host.
+type HostCapacity struct {
+	Updated int64              `json:"updated"`
+	Nodes   []HostCapacityNode `json:"nodes"`
+}
+
 // PlacementGroup is one named scheduling rule: VMs sharing the group are kept
 // on one host ("together") or spread across hosts ("apart"). Strict renders a
 // required scheduling term (the scheduler refuses violating placements);
