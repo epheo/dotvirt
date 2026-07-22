@@ -6,7 +6,7 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 // roll-up other tooling watches; the rest explain a not-yet-ready install.
 const (
 	// ConditionDependenciesReady is True when the cluster has the operators dotvirt
-	// needs (ArgoCD; KubeVirt; and — for the networking tier — OVN-K + NMState).
+	// needs (ArgoCD; KubeVirt; and, for the networking tier, OVN-K + NMState).
 	ConditionDependenciesReady = "DependenciesReady"
 	// ConditionForgeReady is True when a managed Forgejo is up and bootstrapped (its
 	// admin + scoped token + owner org); irrelevant for a BYO forge.
@@ -20,7 +20,7 @@ const (
 	// ConditionForgeRepoReady is True when the platform git repo exists (the
 	// install-time imperative bootstrap a pure-declarative installer can't do).
 	ConditionForgeRepoReady = "ForgeRepoReady"
-	// ConditionArgoWebhook is True when the forge→ArgoCD instant-sync webhook is
+	// ConditionArgoWebhook is True when the forge-to-ArgoCD instant-sync webhook is
 	// registered (org-level); Unknown when no Argo URL is resolvable (poll fallback).
 	ConditionArgoWebhook = "ArgoWebhook"
 	// ConditionAvailable is the roll-up: the full install is reconciled and serving.
@@ -42,7 +42,7 @@ type IngressType string
 
 // ForgeSpec points dotvirt at its git forge and the platform-tier repo. The forge
 // credential here is the INSTALL-TIME admin token the operator uses to create the
-// platform repo — distinct from (and more privileged than) dotvirt's runtime
+// platform repo, distinct from (and more privileged than) dotvirt's runtime
 // clone/push token, preserving the install-provisioner vs runtime-owns-nothing split.
 type ForgeSpec struct {
 	// URL is the forge base (e.g. https://forgejo.example.com).
@@ -56,7 +56,7 @@ type ForgeSpec struct {
 	// the platform-repo bootstrap (keys: url, username, token).
 	CredentialsSecret string `json:"credentialsSecret,omitempty"`
 	// InsecureTLS skips TLS verification when calling the forge API (a self-signed forge
-	// Route, e.g. the bundled Forgejo). DEV/EVAL ONLY — never enable against a forge with
+	// Route, e.g. the bundled Forgejo). DEV/EVAL ONLY; never enable against a forge with
 	// a trusted certificate.
 	InsecureTLS bool `json:"insecureTLS,omitempty"`
 }
@@ -73,7 +73,7 @@ type ArgoCDSpec struct {
 	// apply RBAC and AppProjects bind to; empty = the platform default.
 	ControllerServiceAccount string `json:"controllerServiceAccount,omitempty"`
 	// ServerURL is the externally reachable ArgoCD base URL the forge posts webhooks
-	// to (…/api/webhook) for instant sync. Empty = discover the OpenShift GitOps
+	// to (.../api/webhook) for instant sync. Empty = discover the OpenShift GitOps
 	// server Route; if neither resolves, the webhook is skipped (Argo falls back to
 	// its poll).
 	ServerURL string `json:"serverURL,omitempty"`
@@ -96,7 +96,7 @@ type MetricsSpec struct {
 
 // AuthSpec enables OpenShift SSO beside the always-present token login. The
 // admin registers the cluster-scoped OAuthClient (redirect URI
-// https://<ingress.host>/api/auth/callback) — a cluster-admin act the operator
+// https://<ingress.host>/api/auth/callback), a cluster-admin act the operator
 // deliberately doesn't perform; the operator only wires the credential through.
 type AuthSpec struct {
 	// OAuthClientID is the OAuthClient's name; empty leaves SSO off.

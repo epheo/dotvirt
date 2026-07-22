@@ -36,8 +36,8 @@ metadata:
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
     containerImage: quay.io/epheo/dotvirt-operator@sha256:75a052db041a9ad1286b015f743288d4a45cf6b4f6530f7b01bc6f765a2d364b
-    createdAt: "2026-07-22T09:50:01Z"
-    description: Installs dotvirt — a vCenter-like GitOps WebUI for KubeVirt — with its platform/tenant tier.
+    createdAt: "2026-07-22T10:04:11Z"
+    description: Installs dotvirt, a vCenter-like GitOps WebUI for KubeVirt, with its platform/tenant tier.
     features.operators.openshift.io/disconnected: "true"
     features.operators.openshift.io/fips-compliant: "false"
     features.operators.openshift.io/proxy-aware: "false"
@@ -59,7 +59,7 @@ spec:
   apiservicedefinitions: {}
   customresourcedefinitions:
     owned:
-      - description: A dotvirt install — the workload + Route/Ingress, RBAC, the ArgoCD AppProject tier + ApplicationSet, the platform git repo, and (optionally) a self-hosted Forgejo.
+      - description: 'A dotvirt install: the workload and Route/Ingress, RBAC, the ArgoCD AppProject tier and ApplicationSet, the platform git repo, and (optionally) a self-hosted Forgejo.'
         displayName: dotvirt
         kind: Dotvirt
         name: dotvirts.dotvirt.io
@@ -79,13 +79,13 @@ spec:
             path: image
             x-descriptors:
               - urn:alm:descriptor:com.tectonic.ui:text
-          - description: Git forge holding the platform repo — its URL and platform repo, the credentials secret, and whether the operator self-hosts a Forgejo.
+          - description: 'Git forge holding the platform repo: its URL and platform repo, the credentials secret, and whether the operator self-hosts a Forgejo.'
             displayName: Forge
             path: forge
-          - description: The ArgoCD (OpenShift GitOps) instance dotvirt drives — its namespace and application-controller service account.
+          - description: 'The ArgoCD (OpenShift GitOps) instance dotvirt drives: its namespace and application-controller service account.'
             displayName: ArgoCD
             path: argocd
-          - description: How the UI is exposed — a Route on OpenShift or an Ingress on vanilla Kubernetes — and at which host.
+          - description: How the UI is exposed (a Route on OpenShift or an Ingress on vanilla Kubernetes) and at which host.
             displayName: Ingress
             path: ingress
           - description: Prometheus/Thanos query API backing the Performance tab.
