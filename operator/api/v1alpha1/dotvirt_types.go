@@ -66,7 +66,11 @@ type ForgeSpec struct {
 // argocd-application-controller). The operator binds the apply RBAC + AppProjects
 // to this controller ServiceAccount.
 type ArgoCDSpec struct {
-	Namespace                string `json:"namespace,omitempty"`
+	// Namespace is where the ArgoCD instance runs; empty = the platform default
+	// (openshift-gitops on OpenShift, argocd elsewhere).
+	Namespace string `json:"namespace,omitempty"`
+	// ControllerServiceAccount is the application-controller ServiceAccount the
+	// apply RBAC and AppProjects bind to; empty = the platform default.
 	ControllerServiceAccount string `json:"controllerServiceAccount,omitempty"`
 	// ServerURL is the externally reachable ArgoCD base URL the forge posts webhooks
 	// to (…/api/webhook) for instant sync. Empty = discover the OpenShift GitOps
@@ -78,12 +82,15 @@ type ArgoCDSpec struct {
 // IngressSpec controls how the UI is exposed.
 type IngressSpec struct {
 	Type IngressType `json:"type,omitempty"`
-	Host string      `json:"host,omitempty"`
+	// Host is the external hostname the UI is served on (the Route/Ingress host).
+	Host string `json:"host,omitempty"`
 }
 
 // MetricsSpec points the Performance tab at a Prometheus/Thanos query API; empty
 // disables it.
 type MetricsSpec struct {
+	// URL is a Prometheus-compatible query API base URL (for OpenShift, the
+	// cluster Thanos querier service).
 	URL string `json:"url,omitempty"`
 }
 

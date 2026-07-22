@@ -103,6 +103,12 @@ jobs:
             "https://github.com/operator-framework/operator-sdk/releases/download/$OPERATOR_SDK_VERSION/operator-sdk_linux_amd64"
           sudo chmod +x /usr/local/bin/operator-sdk
           operator-sdk bundle validate ./operator/bundle --select-optional suite=operatorframework
+          # OperatorHub.io parity: their pipeline validates categories against the repo's
+          # own categories.json, which drifts from operator-framework/api's built-in list.
+          curl -fsSL -o /tmp/categories.json \
+            https://raw.githubusercontent.com/k8s-operatorhub/community-operators/main/categories.json
+          OPERATOR_BUNDLE_CATEGORIES=/tmp/categories.json \
+            operator-sdk bundle validate ./operator/bundle --select-optional suite=operatorframework
           go run "github.com/operator-framework/operator-registry/cmd/opm@$OPM_VERSION" validate operator/catalog
       - name: Committed bundle in sync
         # operator/bundle is generated from operator/config by `make bundle`, and nothing
