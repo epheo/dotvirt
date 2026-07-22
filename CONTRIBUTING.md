@@ -116,28 +116,29 @@ The community catalogs **build their own index** from the per-version bundle
 `operator/install/catalogsource.yaml` is for **self-hosting** and is *not* part of a
 community submission.
 
-Generate the submission tree from the committed, CI-tested bundle:
+Generate both submission trees from the committed, CI-tested bundle:
 
 ```sh
-hack/community-bundle.sh 0.0.6 /tmp/dotvirt-submit
-# -> /tmp/dotvirt-submit/operators/dotvirt-operator/0.0.6/{manifests,metadata}
-#    /tmp/dotvirt-submit/operators/dotvirt-operator/ci.yaml
+hack/community-bundle.sh 0.0.26 /tmp/dotvirt-submit
+# -> /tmp/dotvirt-submit/operatorhub/operators/dotvirt-operator/…  (bundle dirs + ci.yaml)
+#    /tmp/dotvirt-submit/openshift/operators/dotvirt-operator/…    (FBC-native: + catalog-templates/, Makefile, release-config.yaml)
 ```
 
-Then open **two** DCO-signed PRs (same bundle, separate repos):
+Then open **two** PRs (same bundle, separate repos):
 
 | Catalog | Repo | Notes |
 | --- | --- | --- |
-| OperatorHub.io | [`k8s-operatorhub/community-operators`](https://github.com/k8s-operatorhub/community-operators) | Must work on vanilla Kubernetes. The Route/SCC RBAC rules are harmless there (rules for absent API groups are allowed); the reconciler auto-selects Ingress vs Route. `com.redhat.openshift.versions` is ignored. |
-| OpenShift OperatorHub (Community tab) | [`redhat-openshift-ecosystem/community-operators-prod`](https://github.com/redhat-openshift-ecosystem/community-operators-prod) | Honors `com.redhat.openshift.versions: "v4.18"`. This repo is migrating to FBC fragments — re-check its required layout at submission time. |
+| OperatorHub.io | [`k8s-operatorhub/community-operators`](https://github.com/k8s-operatorhub/community-operators) | Must work on vanilla Kubernetes. The Route/SCC RBAC rules are harmless there (rules for absent API groups are allowed); the reconciler auto-selects Ingress vs Route. `com.redhat.openshift.versions` is ignored. **Every commit DCO-signed** (`git commit -s`); green new-operator PRs automerge with no human review. |
+| OpenShift OperatorHub (Community tab) | [`redhat-openshift-ecosystem/community-operators-prod`](https://github.com/redhat-openshift-ecosystem/community-operators-prod) | Honors `com.redhat.openshift.versions: "v4.18"`. FBC-native tree: `ci.yaml` maps `catalog-templates/semver.yaml` onto the OCP catalogs, and the bundle's `release-config.yaml` makes their bot append each merged release to the catalogs. **Squash to ONE signed commit**; a repo maintainer merges the first PR manually (same-day is the norm), later releases automerge via `reviewers`. |
 
 Each repo's CI runs the same `operator-sdk bundle validate` the `bundle` target runs,
-installs the bundle on a throwaway cluster, and runs scorecard. The `ci.yaml` lists
-`reviewers` (for merge) and `updateGraph: semver-mode`: the community pipeline derives
-the upgrade edge from the CSV's `spec.version`, so the **submitted bundle CSV carries no
-`spec.replaces`** (a first submission has no prior version in their catalog to replace).
-The `replaces` edge in our FBC (`operator/catalog-template.yaml`) is for **self-hosting
-only** and is not part of a community submission.
+installs the bundle on a throwaway cluster (kind there; a live OpenShift for the prod
+repo's preflight), and runs scorecard. Pipeline failures are fixed by **pushing to the
+same PR**, never by opening a new one. The **submitted bundle CSV carries no
+`spec.replaces`**: OperatorHub's `updateGraph: semver-mode` derives the edge from
+`spec.version`, and the OpenShift catalogs get their graph from the semver template.
+The `replaces` edges in our FBC (`operator/catalog-template.yaml`) are for
+**self-hosting only** and are not part of a community submission.
 
 ### Notes / future work
 
