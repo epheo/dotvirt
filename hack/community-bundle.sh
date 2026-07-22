@@ -23,11 +23,11 @@ PKG=dotvirt-operator
 BUNDLE=operator/bundle
 CSV="$BUNDLE/manifests/$PKG.clusterserviceversion.yaml"
 
-# The committed bundle's CSV must carry the version we're submitting — otherwise the
+# The committed bundle's CSV must carry the version we're submitting; otherwise the
 # tree would ship a stale bundle. Regenerate first (make bundle / hack/release.sh).
 got="$(awk '/^  version: /{print $2; exit}' "$CSV")"
 if [ "$got" != "$VERSION" ]; then
-	echo "error: bundle CSV is version '$got', not '$VERSION' — run 'make -C operator bundle VERSION=$VERSION' (or hack/release.sh) first" >&2
+	echo "error: bundle CSV is version '$got', not '$VERSION'; run 'make -C operator bundle VERSION=$VERSION' (or hack/release.sh) first" >&2
 	exit 1
 fi
 
@@ -58,7 +58,7 @@ stage "$DEST/openshift"
 # Skeleton on purpose: after each PR merges, their release pipeline republishes the
 # bundle as quay.io/community-operator-pipeline-prod/dotvirt-operator:<version> and a
 # bot PR appends it here, driven by the bundle's release-config.yaml. Major channels
-# only, so the generated channel is "stable-v0" — the same name as the self-hosted
+# only, so the generated channel is "stable-v0", the same name as the self-hosted
 # catalog and the bundle's channel annotation.
 mkdir -p "$DEST/openshift/operators/$PKG/catalog-templates"
 cat > "$DEST/openshift/operators/$PKG/catalog-templates/semver.yaml" <<'EOF'
@@ -103,12 +103,12 @@ curl -fsSL -o "$DEST/openshift/operators/$PKG/Makefile" \
 if command -v operator-sdk >/dev/null 2>&1; then
 	operator-sdk bundle validate "$DEST/operatorhub/operators/$PKG/$VERSION" --select-optional suite=operatorframework
 else
-	echo "note: operator-sdk not on PATH — skipped validation of the staged bundle" >&2
+	echo "note: operator-sdk not on PATH; skipped validation of the staged bundle" >&2
 fi
 
 cat <<EOF
 
-Staged $PKG v$VERSION (LOCAL artifacts — no fork/push/PR):
+Staged $PKG v$VERSION (LOCAL artifacts, no fork/push/PR):
   $DEST/operatorhub/operators/$PKG/   -> k8s-operatorhub/community-operators
   $DEST/openshift/operators/$PKG/     -> redhat-openshift-ecosystem/community-operators-prod
 

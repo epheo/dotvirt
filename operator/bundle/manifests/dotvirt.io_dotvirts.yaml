@@ -73,7 +73,7 @@ spec:
                   serverURL:
                     description: |-
                       ServerURL is the externally reachable ArgoCD base URL the forge posts webhooks
-                      to (…/api/webhook) for instant sync. Empty = discover the OpenShift GitOps
+                      to (.../api/webhook) for instant sync. Empty = discover the OpenShift GitOps
                       server Route; if neither resolves, the webhook is skipped (Argo falls back to
                       its poll).
                     type: string
@@ -82,7 +82,7 @@ spec:
                 description: |-
                   AuthSpec enables OpenShift SSO beside the always-present token login. The
                   admin registers the cluster-scoped OAuthClient (redirect URI
-                  https://<ingress.host>/api/auth/callback) — a cluster-admin act the operator
+                  https://<ingress.host>/api/auth/callback), a cluster-admin act the operator
                   deliberately doesn't perform; the operator only wires the credential through.
                 properties:
                   oauthClientID:
@@ -99,7 +99,7 @@ spec:
                 description: |-
                   ForgeSpec points dotvirt at its git forge and the platform-tier repo. The forge
                   credential here is the INSTALL-TIME admin token the operator uses to create the
-                  platform repo — distinct from (and more privileged than) dotvirt's runtime
+                  platform repo, distinct from (and more privileged than) dotvirt's runtime
                   clone/push token, preserving the install-provisioner vs runtime-owns-nothing split.
                 properties:
                   credentialsSecret:
@@ -110,7 +110,7 @@ spec:
                   insecureTLS:
                     description: |-
                       InsecureTLS skips TLS verification when calling the forge API (a self-signed forge
-                      Route, e.g. the bundled Forgejo). DEV/EVAL ONLY — never enable against a forge with
+                      Route, e.g. the bundled Forgejo). DEV/EVAL ONLY; never enable against a forge with
                       a trusted certificate.
                     type: boolean
                   managed:

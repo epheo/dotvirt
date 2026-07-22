@@ -120,8 +120,8 @@ Generate both submission trees from the committed, CI-tested bundle:
 
 ```sh
 hack/community-bundle.sh 0.0.26 /tmp/dotvirt-submit
-# -> /tmp/dotvirt-submit/operatorhub/operators/dotvirt-operator/…  (bundle dirs + ci.yaml)
-#    /tmp/dotvirt-submit/openshift/operators/dotvirt-operator/…    (FBC-native: + catalog-templates/, Makefile, release-config.yaml)
+# -> /tmp/dotvirt-submit/operatorhub/operators/dotvirt-operator/  (bundle dirs + ci.yaml)
+#    /tmp/dotvirt-submit/openshift/operators/dotvirt-operator/    (FBC-native: + catalog-templates/, Makefile, release-config.yaml)
 ```
 
 Then open **two** PRs (same bundle, separate repos):
