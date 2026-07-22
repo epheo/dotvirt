@@ -34,10 +34,10 @@ detects the distribution and renders accordingly.
 
 ## Install
 
-The operator is published to OperatorHub / OpenShift OperatorHub, or installs from
-plain manifests / Helm on any cluster. See [`operator/README.md`](operator/README.md)
-for both paths and the `Dotvirt` resource reference, and
-[`CONTRIBUTING.md`](CONTRIBUTING.md) for building and releasing.
+OLM from the self-hosted catalog: [`operator/install/README.md`](operator/install/README.md)
+(release and dev-branch preview). Plain manifests / Helm on any cluster:
+`make -C operator deploy`. See [`operator/README.md`](operator/README.md) for the
+`Dotvirt` resource reference and [`CONTRIBUTING.md`](CONTRIBUTING.md) for releasing.
 
 ## License
 
