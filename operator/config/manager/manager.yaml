@@ -20,6 +20,7 @@ spec:
       serviceAccountName: dotvirt-operator-controller
       securityContext:
         runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
       terminationGracePeriodSeconds: 10
       containers:
         - name: manager

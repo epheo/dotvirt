@@ -61,8 +61,14 @@ spec:
                   to this controller ServiceAccount.
                 properties:
                   controllerServiceAccount:
+                    description: |-
+                      ControllerServiceAccount is the application-controller ServiceAccount the
+                      apply RBAC and AppProjects bind to; empty = the platform default.
                     type: string
                   namespace:
+                    description: |-
+                      Namespace is where the ArgoCD instance runs; empty = the platform default
+                      (openshift-gitops on OpenShift, argocd elsewhere).
                     type: string
                   serverURL:
                     description: |-
@@ -127,6 +133,8 @@ spec:
                 description: IngressSpec controls how the UI is exposed.
                 properties:
                   host:
+                    description: Host is the external hostname the UI is served on
+                      (the Route/Ingress host).
                     type: string
                   type:
                     description: |-
@@ -145,6 +153,9 @@ spec:
                   disables it.
                 properties:
                   url:
+                    description: |-
+                      URL is a Prometheus-compatible query API base URL (for OpenShift, the
+                      cluster Thanos querier service).
                     type: string
                 type: object
             type: object
