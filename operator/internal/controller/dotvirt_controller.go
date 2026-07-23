@@ -192,6 +192,19 @@ func (r *DotvirtReconciler) forgeClient(ctx context.Context, dv *dotvirtv1alpha1
 	return c, nil
 }
 
+// routeHost reads the spec.host an OpenShift Route carries: the explicit host, or the
+// one the router assigned to a hostless Route. Empty when the Route is absent or its
+// host isn't assigned yet. Unstructured so the module needs no openshift/api dep.
+func (r *DotvirtReconciler) routeHost(ctx context.Context, ns, name string) string {
+	route := &unstructured.Unstructured{}
+	route.SetGroupVersionKind(schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"})
+	if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, route); err != nil {
+		return ""
+	}
+	host, _, _ := unstructured.NestedString(route.Object, "spec", "host")
+	return host
+}
+
 // argoServerURL resolves the externally reachable ArgoCD base URL: the spec
 // override, else the OpenShift GitOps server Route, else "" (caller falls back to
 // Argo's poll).
@@ -199,16 +212,10 @@ func (r *DotvirtReconciler) argoServerURL(ctx context.Context, dv *dotvirtv1alph
 	if dv.Spec.ArgoCD.ServerURL != "" {
 		return dv.Spec.ArgoCD.ServerURL
 	}
-	route := &unstructured.Unstructured{}
-	route.SetGroupVersionKind(schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"})
-	if err := r.Get(ctx, types.NamespacedName{Namespace: argoNS, Name: "openshift-gitops-server"}, route); err != nil {
-		return ""
+	if host := r.routeHost(ctx, argoNS, "openshift-gitops-server"); host != "" {
+		return "https://" + host
 	}
-	host, _, _ := unstructured.NestedString(route.Object, "spec", "host")
-	if host == "" {
-		return ""
-	}
-	return "https://" + host
+	return ""
 }
 
 // argoTarget resolves the ArgoCD namespace + controller ServiceAccount from the

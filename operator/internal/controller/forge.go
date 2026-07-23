@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -25,13 +26,29 @@ import (
 
 // reconcileForge stands up + bootstraps the managed Forgejo (opt-in, eval-grade)
 // before anything that needs the forge credential. Once dotvirt-forge exists, the
-// rest of the install can't tell it from a BYO forge — for which this phase is a
-// no-op. Requeues while Forgejo is still coming up.
+// rest of the install can't tell it from a BYO forge. For a wholly unconfigured forge
+// it records NotConfigured (push-only) and returns; for a BYO forge it's a no-op.
+// Requeues while Forgejo is coming up or its router host isn't assigned yet.
 func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
 	if !dv.Spec.Forge.Managed {
+		if !install.ForgeConfigured(dv) {
+			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "NotConfigured",
+				"no forge configured; propose pushes a branch but opens no pull request")
+		}
 		return nil, nil
 	}
-	if err := r.applyForgejo(ctx, dv); err != nil {
+	// Apply the base workload (incl. the exposure) first: on OpenShift with no explicit
+	// URL that Route is hostless, so the router assigns a host we read back and fill into
+	// the effective spec — before rendering the Deployment, whose ROOT_URL needs it.
+	if err := r.applyForgejoBase(ctx, dv); err != nil {
+		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "ApplyFailed", err)
+	}
+	forgeURL, res, err := r.resolveForgeURL(ctx, dv)
+	if err != nil || res != nil {
+		return res, err
+	}
+	applyEffectiveForgeSpec(dv, forgeURL)
+	if err := r.applyForgejoDeployment(ctx, dv); err != nil {
 		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "ApplyFailed", err)
 	}
 	if r.DryRun {
@@ -78,6 +95,53 @@ func (r *DotvirtReconciler) managedForgeAPIBase(dv *dotvirtv1alpha1.Dotvirt) str
 	return install.ForgejoServiceURL(dv)
 }
 
+// resolveForgeURL determines the effective external forge URL for a managed install:
+// the explicit spec.forge.url when set, else (OpenShift) the host the router assigned
+// to the hostless Forgejo Route applyForgejoBase just created. It returns a requeue
+// while the host isn't assigned yet, and halts on vanilla Kubernetes with an actionable
+// reason — there is no router to name the forge, so the user must set spec.forge.url.
+func (r *DotvirtReconciler) resolveForgeURL(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (string, *ctrl.Result, error) {
+	if dv.Spec.Forge.URL != "" {
+		return strings.TrimRight(dv.Spec.Forge.URL, "/"), nil, nil
+	}
+	if r.DryRun {
+		// Nothing is persisted, so no Route exists to read; the in-cluster Service URL lets
+		// the render validate.
+		return install.ForgejoServiceURL(dv), nil, nil
+	}
+	if r.Platform != platform.OpenShift {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "ForgeURLRequired",
+			"set spec.forge.url: on vanilla Kubernetes the operator can't assign the managed forge a hostname")
+		dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
+		if err := r.Status().Update(ctx, dv); err != nil {
+			return "", nil, err
+		}
+		return "", &ctrl.Result{}, nil
+	}
+	host := r.routeHost(ctx, dv.Namespace, install.ForgejoServiceName)
+	if host == "" {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "Progressing", "waiting for the router to assign the forge hostname")
+		dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
+		if err := r.Status().Update(ctx, dv); err != nil {
+			return "", nil, err
+		}
+		return "", &ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+	return "https://" + host, nil, nil
+}
+
+// applyEffectiveForgeSpec fills the resolved forge URL (and a default platform repo)
+// into the IN-MEMORY spec, so every later phase and the rendered workload consume it
+// unchanged. Never persisted: the reconcile writes only /status after the finalizer add,
+// so this mutation stays in-process (a regression test pins that the stored spec keeps
+// its empty url).
+func applyEffectiveForgeSpec(dv *dotvirtv1alpha1.Dotvirt, forgeURL string) {
+	dv.Spec.Forge.URL = forgeURL
+	if dv.Spec.Forge.PlatformRepo == "" {
+		dv.Spec.Forge.PlatformRepo = strings.TrimRight(forgeURL, "/") + "/dotvirt/platform.git"
+	}
+}
+
 // reconcilePlatformRepo ensures the platform repo exists — the imperative
 // bootstrap pure declarative installers can't do. Skipped in dry-run (a real forge
 // mutation server-side dry-run can't model). A bootstrap failure is recorded on
@@ -116,23 +180,26 @@ func (r *DotvirtReconciler) ensurePlatformRepo(ctx context.Context, dv *dotvirtv
 	return nil
 }
 
-// forgejoExposure exposes the managed Forgejo on the host derived from
-// spec.forge.url, so its UI + PRs are reviewable off-cluster. nil when no external
-// forge URL is set (internal-only).
+// forgejoExposure exposes the managed Forgejo off-cluster so its UI + PRs are reviewable.
+// With an explicit spec.forge.url it uses that host; with no URL on a Route platform it
+// returns a HOSTLESS Route for the router to name (resolveForgeURL reads that host back).
+// nil only where there's nothing to expose: no URL on vanilla Kubernetes (Ingress needs
+// an explicit host — that path halts with ForgeURLRequired).
 func (r *DotvirtReconciler) forgejoExposure(dv *dotvirtv1alpha1.Dotvirt) client.Object {
 	host := install.ForgejoHost(dv)
-	if host == "" {
+	if host == "" && r.resolveExposureType(dv) != "route" {
 		return nil
 	}
 	return r.exposureFor(dv, install.ForgejoServiceName, install.ForgejoHTTPPort, host)
 }
 
-// applyForgejo renders the managed Forgejo workload (SA, Deployment with the verified
-// bootstrap initContainer, Service) and the data PVC. The rootless image runs under
-// dotvirt's standard non-root securityContext, so no SCC binding is needed. Everything
-// but the PVC is owner-referenced for auto-cleanup; the PVC is orphaned so the git
-// data survives uninstall.
-func (r *DotvirtReconciler) applyForgejo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
+// applyForgejoBase renders everything the managed Forgejo needs BEFORE its URL is known:
+// the admin secret, the data PVC, the ServiceAccount, the Service, and the exposure (a
+// hostless Route on OpenShift when no URL is set). The Deployment is applied separately,
+// after resolveForgeURL, because its ROOT_URL depends on the resolved host. The rootless
+// image runs under dotvirt's non-root securityContext (no SCC binding); the PVC is
+// orphaned (no ownerRef) so the git data survives uninstall.
+func (r *DotvirtReconciler) applyForgejoBase(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
 	if !r.DryRun {
 		if err := r.ensureSecret(ctx, dv, install.ForgejoAdminSecret, "password"); err != nil {
 			return err
@@ -144,20 +211,9 @@ func (r *DotvirtReconciler) applyForgejo(ctx context.Context, dv *dotvirtv1alpha
 	if err := install.Apply(ctx, r.Client, install.ForgejoPVC(dv), r.DryRun); err != nil {
 		return err
 	}
-	// The webhook allowlist needs ArgoCD's externally-visible host (see forgejoEnv),
-	// resolved the same way webhook registration does. Empty (no Argo URL yet)
-	// renders the baseline allowlist; the reconcile that registers the webhook then
-	// re-renders the Deployment with the host in place.
-	argoNS, _ := r.argoTarget(dv)
-	argoHost := ""
-	if u, err := url.Parse(r.argoServerURL(ctx, dv, argoNS)); err == nil {
-		argoHost = u.Hostname()
-	}
 	owned := []client.Object{
 		install.ForgejoServiceAccount(dv),
 		install.ForgejoService(dv),
-		// fsGroup only on vanilla K8s; OpenShift's restricted-v2 injects its own.
-		install.ForgejoDeployment(dv, r.Platform != platform.OpenShift, argoHost),
 	}
 	if exp := r.forgejoExposure(dv); exp != nil {
 		owned = append(owned, exp)
@@ -171,6 +227,27 @@ func (r *DotvirtReconciler) applyForgejo(ctx context.Context, dv *dotvirtv1alpha
 		}
 	}
 	return nil
+}
+
+// applyForgejoDeployment renders the Forgejo Deployment once the effective URL is filled,
+// so its ROOT_URL is the browser-facing host. Kept separate from applyForgejoBase for
+// that ordering.
+func (r *DotvirtReconciler) applyForgejoDeployment(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
+	// The webhook allowlist needs ArgoCD's externally-visible host (see forgejoEnv),
+	// resolved the same way webhook registration does. Empty (no Argo URL yet) renders
+	// the baseline allowlist; the reconcile that registers the webhook then re-renders
+	// the Deployment with the host in place.
+	argoNS, _ := r.argoTarget(dv)
+	argoHost := ""
+	if u, err := url.Parse(r.argoServerURL(ctx, dv, argoNS)); err == nil {
+		argoHost = u.Hostname()
+	}
+	// fsGroup only on vanilla K8s; OpenShift's restricted-v2 injects its own.
+	d := install.ForgejoDeployment(dv, r.Platform != platform.OpenShift, argoHost)
+	if err := controllerutil.SetControllerReference(dv, d, r.Scheme); err != nil {
+		return err
+	}
+	return install.Apply(ctx, r.Client, d, r.DryRun)
 }
 
 // bootstrapForgejo mints the scoped token + ensures the owner org once the managed

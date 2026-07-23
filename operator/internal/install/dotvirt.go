@@ -45,6 +45,14 @@ func ForgeSecretName(dv *dotvirtv1alpha1.Dotvirt) string {
 	return DefaultForgeSecret
 }
 
+// ForgeConfigured reports whether the install has any forge to wire the app to: a
+// managed Forgejo, an explicit URL, or a BYO credentials secret. When false the app
+// runs push-only, and the Deployment omits the forge credential env + mount so the pod
+// doesn't wedge on a dotvirt-forge secret that will never be written.
+func ForgeConfigured(dv *dotvirtv1alpha1.Dotvirt) bool {
+	return dv.Spec.Forge.Managed || dv.Spec.Forge.URL != "" || dv.Spec.Forge.CredentialsSecret != ""
+}
+
 // forgeTokenMountPath is where the forge credential secret's "token" key is
 // projected into the app container (read per call → rotation-safe).
 const forgeTokenMountPath = "/var/run/dotvirt/forge/token"
@@ -166,20 +174,28 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 		)
 	}
 
-	forgeSecret := ForgeSecretName(dv)
 	env = append(env,
 		secretEnv("DOTVIRT_SESSION_SECRET", SessionSecretName, "secret", false),
 		secretEnv("DOTVIRT_APPSET_PLUGIN_TOKEN", AppsetSecretName, "token", true),
-		secretEnv("DOTVIRT_GIT_USERNAME", forgeSecret, "username", false),
-		secretEnv("DOTVIRT_FORGE_URL", forgeSecret, "url", false),
-		// The forge token (git https + API, one credential) is MOUNTED, not injected
-		// as env: kubelet updates the file in place, so an operator re-mint/rotation
-		// reaches the app without a restart (env vars freeze at pod start).
-		corev1.EnvVar{Name: "DOTVIRT_FORGE_TOKEN_FILE", Value: forgeTokenMountPath},
 		// With a public URL + this secret, dotvirt self-registers its webhook on each
 		// project repo (forge -> dotvirt: instant inventory updates vs polling).
 		secretEnv("DOTVIRT_WEBHOOK_SECRET", WebhookSecretName, "secret", true),
 	)
+	forgeSecret := ForgeSecretName(dv)
+	if ForgeConfigured(dv) {
+		// A managed forge's credential secret is operator-written, so emit the resolved URL
+		// as a LITERAL — a URL change (e.g. the first router host assignment) then rolls the
+		// app; a BYO forge reads it from the admin-supplied secret. The token (git https +
+		// API, one credential) is MOUNTED, not env: kubelet updates the file in place, so an
+		// operator re-mint/rotation reaches the app without a restart (env freezes at start).
+		env = append(env, secretEnv("DOTVIRT_GIT_USERNAME", forgeSecret, "username", false))
+		if dv.Spec.Forge.Managed {
+			env = append(env, corev1.EnvVar{Name: "DOTVIRT_FORGE_URL", Value: dv.Spec.Forge.URL})
+		} else {
+			env = append(env, secretEnv("DOTVIRT_FORGE_URL", forgeSecret, "url", false))
+		}
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_FORGE_TOKEN_FILE", Value: forgeTokenMountPath})
+	}
 
 	args := []string{
 		fmt.Sprintf("-addr=:%d", HTTPPort),
@@ -196,6 +212,22 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 		// verification for its forge API calls + git clones — the same flag the
 		// manual deploy carried. Metrics stays verified (its own CA env).
 		args = append(args, "-insecure-tls")
+	}
+
+	volumeMounts := []corev1.VolumeMount{{Name: "drafts", MountPath: "/var/lib/dotvirt/drafts"}}
+	volumes := []corev1.Volume{{
+		Name:         "drafts",
+		VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: AppName + "-drafts"}},
+	}}
+	if ForgeConfigured(dv) {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "forge-token", MountPath: "/var/run/dotvirt/forge", ReadOnly: true})
+		volumes = append(volumes, corev1.Volume{
+			Name: "forge-token",
+			VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+				SecretName: forgeSecret,
+				Items:      []corev1.KeyToPath{{Key: "token", Path: "token"}},
+			}},
+		})
 	}
 
 	replicas := int32(1)
@@ -221,15 +253,12 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 						SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 					},
 					Containers: []corev1.Container{{
-						Name:  AppName,
-						Image: image,
-						Args:  args,
-						Env:   env,
-						Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: HTTPPort}},
-						VolumeMounts: []corev1.VolumeMount{
-							{Name: "drafts", MountPath: "/var/lib/dotvirt/drafts"},
-							{Name: "forge-token", MountPath: "/var/run/dotvirt/forge", ReadOnly: true},
-						},
+						Name:         AppName,
+						Image:        image,
+						Args:         args,
+						Env:          env,
+						Ports:        []corev1.ContainerPort{{Name: "http", ContainerPort: HTTPPort}},
+						VolumeMounts: volumeMounts,
 						SecurityContext: &corev1.SecurityContext{
 							AllowPrivilegeEscalation: &noPrivilegeEscalation,
 							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
@@ -255,20 +284,7 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 							TimeoutSeconds:      5,
 						},
 					}},
-					Volumes: []corev1.Volume{{
-						Name: "drafts",
-						VolumeSource: corev1.VolumeSource{
-							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: AppName + "-drafts"},
-						},
-					}, {
-						Name: "forge-token",
-						VolumeSource: corev1.VolumeSource{
-							Secret: &corev1.SecretVolumeSource{
-								SecretName: forgeSecret,
-								Items:      []corev1.KeyToPath{{Key: "token", Path: "token"}},
-							},
-						},
-					}},
+					Volumes: volumes,
 				},
 			},
 		},

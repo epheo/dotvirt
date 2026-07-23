@@ -46,6 +46,9 @@ func testScheme(t *testing.T) *runtime.Scheme {
 		s.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
 		s.AddKnownTypeWithName(gvk.GroupVersion().WithKind(kind+"List"), &unstructured.UnstructuredList{})
 	}
+	routeGVK := schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"}
+	s.AddKnownTypeWithName(routeGVK, &unstructured.Unstructured{})
+	s.AddKnownTypeWithName(routeGVK.GroupVersion().WithKind("RouteList"), &unstructured.UnstructuredList{})
 	return s
 }
 

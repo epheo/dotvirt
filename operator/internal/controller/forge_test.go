@@ -7,14 +7,18 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
+	"github.com/epheo/dotvirt/operator/internal/platform"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
@@ -160,10 +164,11 @@ func TestBootstrapForgejoAdminMismatchReturnsErrUnauthorized(t *testing.T) {
 	}
 }
 
-// reconcileForge is a no-op for a bring-your-own forge: it must not touch the cluster
-// or the conditions (the BYO path is handled entirely by the later secret/workload phases).
-func TestReconcileForgeSkipsWhenNotManaged(t *testing.T) {
-	dv := testCR() // Forge.Managed == false
+// reconcileForge is a silent no-op for a bring-your-own forge (URL set, not managed):
+// the BYO path is handled entirely by the later secret/workload phases.
+func TestReconcileForgeSilentForBYO(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Forge.URL = "https://byo-forge.example"
 	c := testBuilder(t).WithObjects(dv).Build()
 	r := newReconciler(c, depsOK)
 
@@ -173,5 +178,170 @@ func TestReconcileForgeSkipsWhenNotManaged(t *testing.T) {
 	}
 	if cond(getCR(t, c, dv), dotvirtv1alpha1.ConditionForgeReady) != nil {
 		t.Error("ForgeReady set for a BYO forge; the phase must stay silent")
+	}
+}
+
+// With no forge at all (not managed, no URL, no credentials secret), reconcileForge
+// records NotConfigured (push-only) and proceeds — the workload then renders forge-less.
+func TestReconcileForgeNotConfigured(t *testing.T) {
+	dv := testCR() // wholly unconfigured forge
+	c := testBuilder(t).WithObjects(dv).Build()
+	r := newReconciler(c, depsOK)
+
+	res, err := r.reconcileForge(context.Background(), dv)
+	if err != nil || res != nil {
+		t.Fatalf("reconcileForge = (%+v, %v), want (nil, nil)", res, err)
+	}
+	// NotConfigured is accumulated in-memory; the pipeline's final status write persists it.
+	if fc := cond(dv, dotvirtv1alpha1.ConditionForgeReady); fc == nil || fc.Reason != "NotConfigured" {
+		t.Errorf("ForgeReady = %+v, want False/NotConfigured", fc)
+	}
+}
+
+func forgejoRoute(ns, host string) *unstructured.Unstructured {
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"})
+	u.SetNamespace(ns)
+	u.SetName(install.ForgejoServiceName)
+	_ = unstructured.SetNestedField(u.Object, host, "spec", "host")
+	return u
+}
+
+// End-to-end on OpenShift with no explicit URL: reconcileForge creates a HOSTLESS
+// Forgejo Route (for the router to name) and requeues, waiting for the host — it does
+// not dial anything or bootstrap yet.
+func TestReconcileForgeCreatesHostlessRouteAndWaits(t *testing.T) {
+	dv := managedForgeCR()
+	dv.Spec.Forge.URL = ""
+	c := testBuilder(t).WithObjects(dv).Build()
+	r := newReconciler(c, depsOK)
+	r.Platform = platform.OpenShift
+
+	res, err := r.reconcileForge(context.Background(), dv)
+	if err != nil {
+		t.Fatalf("reconcileForge: %v", err)
+	}
+	if res == nil || res.RequeueAfter != 5*time.Second {
+		t.Fatalf("result = %+v, want requeue 5s (waiting for the router host)", res)
+	}
+	route := &unstructured.Unstructured{}
+	route.SetGroupVersionKind(schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"})
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: dv.Namespace, Name: install.ForgejoServiceName}, route); err != nil {
+		t.Fatalf("hostless Forgejo Route not created: %v", err)
+	}
+	if host, _, _ := unstructured.NestedString(route.Object, "spec", "host"); host != "" {
+		t.Errorf("Route host = %q, want empty (router-assigned)", host)
+	}
+}
+
+// resolveForgeURL: an explicit spec.forge.url wins verbatim (trailing slash trimmed).
+func TestResolveForgeURLExplicit(t *testing.T) {
+	dv := managedForgeCR()
+	dv.Spec.Forge.URL = "https://explicit.example/"
+	r := newReconciler(testBuilder(t).WithObjects(dv).Build(), depsOK)
+
+	got, res, err := r.resolveForgeURL(context.Background(), dv)
+	if err != nil || res != nil {
+		t.Fatalf("resolveForgeURL = (_, %+v, %v), want no halt", res, err)
+	}
+	if got != "https://explicit.example" {
+		t.Errorf("url = %q, want the trimmed explicit url", got)
+	}
+}
+
+// resolveForgeURL on OpenShift with no explicit URL derives it from the host the router
+// assigned to the Forgejo Route.
+func TestResolveForgeURLDerivesFromRouteOnOpenShift(t *testing.T) {
+	dv := managedForgeCR()
+	dv.Spec.Forge.URL = ""
+	route := forgejoRoute(dv.Namespace, "dotvirt-forgejo-dotvirt.apps.cluster.example")
+	r := newReconciler(testBuilder(t).WithObjects(dv, route).Build(), depsOK)
+	r.Platform = platform.OpenShift
+
+	got, res, err := r.resolveForgeURL(context.Background(), dv)
+	if err != nil || res != nil {
+		t.Fatalf("resolveForgeURL = (_, %+v, %v), want no halt", res, err)
+	}
+	if got != "https://dotvirt-forgejo-dotvirt.apps.cluster.example" {
+		t.Errorf("url = %q, want the router-assigned host", got)
+	}
+}
+
+// resolveForgeURL requeues (not halts) while the router hasn't assigned the host yet.
+func TestResolveForgeURLRequeuesWhenHostPending(t *testing.T) {
+	dv := managedForgeCR()
+	dv.Spec.Forge.URL = ""
+	r := newReconciler(testBuilder(t).WithObjects(dv).Build(), depsOK) // no Route object
+	r.Platform = platform.OpenShift
+
+	_, res, err := r.resolveForgeURL(context.Background(), dv)
+	if err != nil {
+		t.Fatalf("resolveForgeURL: %v", err)
+	}
+	if res == nil || res.RequeueAfter != 5*time.Second {
+		t.Fatalf("result = %+v, want requeue 5s while the host is pending", res)
+	}
+}
+
+// resolveForgeURL halts on vanilla Kubernetes with no explicit URL: there's no router to
+// name the forge, so the user must set spec.forge.url.
+func TestResolveForgeURLRequiresURLOnVanilla(t *testing.T) {
+	dv := managedForgeCR()
+	dv.Spec.Forge.URL = ""
+	c := testBuilder(t).WithObjects(dv).Build()
+	r := newReconciler(c, depsOK) // Platform == Kubernetes
+
+	_, res, err := r.resolveForgeURL(context.Background(), dv)
+	if err != nil {
+		t.Fatalf("resolveForgeURL: %v", err)
+	}
+	if res == nil || res.RequeueAfter != 0 {
+		t.Fatalf("result = %+v, want a halt (no requeue)", res)
+	}
+	if fc := cond(getCR(t, c, dv), dotvirtv1alpha1.ConditionForgeReady); fc == nil || fc.Reason != "ForgeURLRequired" {
+		t.Errorf("ForgeReady = %+v, want False/ForgeURLRequired", fc)
+	}
+}
+
+// applyEffectiveForgeSpec fills the resolved URL and defaults the platform repo under it,
+// but never overrides an explicit platformRepo.
+func TestApplyEffectiveForgeSpec(t *testing.T) {
+	dv := managedForgeCR()
+	dv.Spec.Forge.URL = ""
+	dv.Spec.Forge.PlatformRepo = ""
+	applyEffectiveForgeSpec(dv, "https://forge.apps.example/")
+	if dv.Spec.Forge.URL != "https://forge.apps.example/" {
+		t.Errorf("url = %q, want the resolved url", dv.Spec.Forge.URL)
+	}
+	if dv.Spec.Forge.PlatformRepo != "https://forge.apps.example/dotvirt/platform.git" {
+		t.Errorf("platformRepo = %q, want defaulted under the forge url", dv.Spec.Forge.PlatformRepo)
+	}
+
+	explicit := managedForgeCR()
+	explicit.Spec.Forge.PlatformRepo = "https://forge.apps.example/team/custom.git"
+	applyEffectiveForgeSpec(explicit, "https://forge.apps.example")
+	if explicit.Spec.Forge.PlatformRepo != "https://forge.apps.example/team/custom.git" {
+		t.Error("an explicit platformRepo must not be overridden")
+	}
+}
+
+// The derived forge URL is filled in memory only: a status write (as the pipeline does)
+// must never persist the effective spec back onto the stored CR.
+func TestEffectiveForgeSpecNotPersisted(t *testing.T) {
+	dv := managedForgeCR()
+	dv.Spec.Forge.URL = ""
+	dv.Spec.Forge.PlatformRepo = ""
+	c := testBuilder(t).WithObjects(dv).Build()
+	r := newReconciler(c, depsOK)
+
+	applyEffectiveForgeSpec(dv, "https://forge.apps.example")
+	dv.Status.Phase = dotvirtv1alpha1.PhaseReady
+	if err := r.Status().Update(context.Background(), dv); err != nil {
+		t.Fatalf("status update: %v", err)
+	}
+	stored := getCR(t, c, dv)
+	if stored.Spec.Forge.URL != "" || stored.Spec.Forge.PlatformRepo != "" {
+		t.Errorf("stored spec mutated: url=%q platformRepo=%q, both must stay empty",
+			stored.Spec.Forge.URL, stored.Spec.Forge.PlatformRepo)
 	}
 }

@@ -18,22 +18,38 @@ import (
 // resources reconcileArgo applies, which a namespaced CR can't own — those rely
 // on the finalizer).
 func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
-	objs := []client.Object{
+	// Exposure first: on OpenShift an empty ingress.host yields a hostless Route the
+	// router names. Read that host back and fill it in-memory so the Deployment's
+	// DOTVIRT_PUBLIC_URL (OAuth callback + webhook self-registration) is set this same
+	// pass. Not yet assigned: the Deployment renders without it and Owns(Route) re-triggers
+	// once the host lands.
+	base := []client.Object{
 		install.ServiceAccount(dv),
 		install.DraftsPVC(dv),
 		install.Service(dv),
-		install.Deployment(dv),
 	}
 	if exposure := r.exposure(dv); exposure != nil {
-		objs = append(objs, exposure)
+		base = append(base, exposure)
 	}
-	for _, obj := range objs {
+	for _, obj := range base {
 		if err := controllerutil.SetControllerReference(dv, obj, r.Scheme); err != nil {
 			return nil, err
 		}
 		if err := install.Apply(ctx, r.Client, obj, r.DryRun); err != nil {
 			return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionWorkloadReady, "ApplyFailed", err)
 		}
+	}
+	if dv.Spec.Ingress.Host == "" && !r.DryRun && r.Platform == platform.OpenShift {
+		if host := r.routeHost(ctx, dv.Namespace, install.AppName); host != "" {
+			dv.Spec.Ingress.Host = host // in-memory only (never persisted; drives DOTVIRT_PUBLIC_URL)
+		}
+	}
+	deployment := install.Deployment(dv)
+	if err := controllerutil.SetControllerReference(dv, deployment, r.Scheme); err != nil {
+		return nil, err
+	}
+	if err := install.Apply(ctx, r.Client, deployment, r.DryRun); err != nil {
+		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionWorkloadReady, "ApplyFailed", err)
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionWorkloadReady, metav1.ConditionTrue, "Ready", "workload applied")
 	return nil, nil

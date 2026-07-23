@@ -13,10 +13,11 @@ import (
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 )
 
-// Managed (eval) Forgejo: deployed in the dotvirt namespace, reachable in-cluster
-// via its Service (no Route — git + API are cluster-internal; eval-grade, single
-// replica). The bootstrap was verified live against a real Forgejo (see the
-// initContainer below). For production, bring your own forge instead.
+// Managed (eval) Forgejo: deployed in the dotvirt namespace, single-replica, eval-grade.
+// The operator talks to it in-cluster via its Service; on OpenShift it also gets a Route
+// (an explicit spec.forge.url host, or a router-assigned one when the URL is left empty)
+// so its UI and PRs are reviewable off-cluster. The bootstrap was verified live against a
+// real Forgejo (see the initContainer below). For production, bring your own forge instead.
 const (
 	// Pinned by digest (the codeberg.org/forgejo/forgejo:11-rootless tag) so the eval
 	// forge is reproducible and declarable in the CSV's relatedImages. Re-pin manually
@@ -43,9 +44,10 @@ func ForgejoServiceURL(dv *dotvirtv1alpha1.Dotvirt) string {
 	return svcURL(ForgejoServiceName, dv.Namespace, ForgejoHTTPPort)
 }
 
-// ForgejoExternalURL is the browser/clone-facing base URL: the configured
-// spec.forge.url when set (exposed via Route/Ingress, so the forge UI and PRs are
-// reviewable off-cluster), else the in-cluster Service URL (internal-only eval).
+// ForgejoExternalURL is the browser/clone-facing base URL: the effective spec.forge.url
+// (the operator fills a derived one from the router-assigned Route before rendering),
+// else the in-cluster Service URL — the fallback only a dry-run or a still-unresolved
+// host hits, since a real render resolves the URL first.
 func ForgejoExternalURL(dv *dotvirtv1alpha1.Dotvirt) string {
 	if dv.Spec.Forge.URL != "" {
 		return strings.TrimRight(dv.Spec.Forge.URL, "/")
@@ -53,8 +55,9 @@ func ForgejoExternalURL(dv *dotvirtv1alpha1.Dotvirt) string {
 	return ForgejoServiceURL(dv)
 }
 
-// ForgejoHost is the external hostname to expose the managed Forgejo on, derived
-// from spec.forge.url. Empty when no external URL is set (internal-only).
+// ForgejoHost is the hostname to expose the managed Forgejo on, parsed from
+// spec.forge.url. Empty when no URL is set — the caller then creates a hostless Route
+// and the router assigns one.
 func ForgejoHost(dv *dotvirtv1alpha1.Dotvirt) string {
 	if dv.Spec.Forge.URL == "" {
 		return ""

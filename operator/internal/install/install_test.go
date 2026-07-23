@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -39,6 +40,41 @@ func TestWebhookURLGatedOnManagedForge(t *testing.T) {
 	byo := testDotvirt() // Forge.Managed defaults to false
 	if got, ok := envValue(Deployment(byo).Spec.Template.Spec.Containers[0].Env, "DOTVIRT_WEBHOOK_URL"); ok {
 		t.Errorf("BYO forge: DOTVIRT_WEBHOOK_URL must be unset (app falls back to public URL), got %q", got)
+	}
+}
+
+// hasVolume reports whether the pod declares a volume of the given name.
+func hasVolume(d *appsv1.Deployment, name string) bool {
+	for _, v := range d.Spec.Template.Spec.Volumes {
+		if v.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// With no forge configured the app runs push-only: the Deployment must omit the forge
+// credential env AND the forge-token secret mount, or the pod wedges on a dotvirt-forge
+// secret that is never written (the `forge: {}` failure). A managed forge restores both.
+func TestForgelessDeploymentOmitsForgeCredential(t *testing.T) {
+	bare := Deployment(testDotvirt()) // no managed / url / credentialsSecret
+	if _, ok := envValue(bare.Spec.Template.Spec.Containers[0].Env, "DOTVIRT_FORGE_URL"); ok {
+		t.Error("forge-less: DOTVIRT_FORGE_URL must be unset")
+	}
+	if hasVolume(bare, "forge-token") {
+		t.Error("forge-less: the forge-token volume must be omitted (else the pod wedges on a missing secret)")
+	}
+
+	managed := testDotvirt()
+	managed.Spec.Forge.Managed = true
+	managed.Spec.Forge.URL = "https://forgejo.apps.example"
+	d := Deployment(managed)
+	// Managed emits the URL as a literal (a URL change rolls the app), not a secret ref.
+	if got, ok := envValue(d.Spec.Template.Spec.Containers[0].Env, "DOTVIRT_FORGE_URL"); !ok || got != managed.Spec.Forge.URL {
+		t.Errorf("managed: DOTVIRT_FORGE_URL = (%q, ok=%v), want the literal resolved url", got, ok)
+	}
+	if !hasVolume(d, "forge-token") {
+		t.Error("managed: the forge-token volume must be present")
 	}
 }
 
