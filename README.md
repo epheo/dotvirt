@@ -4,8 +4,9 @@
 
 # dotvirt
 
-A vCenter-like WebUI that closes the gap between point-and-click VM operation and
-GitOps. dotvirt **edits git repos** of KubeVirt manifests and **works alongside
+A web console for KubeVirt, familiar to vSphere admins, that closes the gap
+between point-and-click VM operation and GitOps. dotvirt **edits git repos** of
+KubeVirt manifests and **works alongside
 ArgoCD**. Argo stays the only thing that applies state to the cluster; dotvirt is
 the friendly inventory + editor on top of git and Argo's status.
 

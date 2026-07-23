@@ -42,6 +42,11 @@ type DotvirtReconciler struct {
 	// probe is a test seam (not config): deps.Probe needs a live discovery
 	// endpoint, so tests stub it. nil = the real probe.
 	probe func(*rest.Config) (deps.Result, error)
+
+	// forgeAPIBase is a test seam: the managed-Forgejo bootstrap talks to the forge
+	// over its in-cluster Service URL, which a unit test redirects to an httptest
+	// server. nil = the real Service URL.
+	forgeAPIBase func(*dotvirtv1alpha1.Dotvirt) string
 }
 
 // The operator's OWN least-privilege RBAC (generated into config/rbac/role.yaml). Verbs
@@ -173,7 +178,14 @@ func (r *DotvirtReconciler) forgeClient(ctx context.Context, dv *dotvirtv1alpha1
 	if dv.Spec.Forge.URL == "" || token == "" {
 		return nil, fmt.Errorf("forge url (spec.forge.url) and a credential token (%s/token) are required", name)
 	}
-	c := forge.NewFactory(dv.Spec.Forge.URL, token, dv.Spec.Forge.InsecureTLS).For(dv.Spec.Forge.PlatformRepo)
+	// A managed forge is reached over its in-cluster Service (the operator pod may not
+	// route to the external Route); owner/repo still parse from the external platform
+	// repo URL, so only the base is re-homed.
+	base := dv.Spec.Forge.URL
+	if dv.Spec.Forge.Managed {
+		base = r.managedForgeAPIBase(dv)
+	}
+	c := forge.NewFactory(base, token, dv.Spec.Forge.InsecureTLS).For(dv.Spec.Forge.PlatformRepo)
 	if c == nil {
 		return nil, fmt.Errorf("cannot parse platform repo URL %q", dv.Spec.Forge.PlatformRepo)
 	}

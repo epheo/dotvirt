@@ -143,8 +143,9 @@ func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt, argoWebhookHost string) []corev1.En
 }
 
 // ForgejoDeployment runs the rootless Forgejo with a one-shot bootstrap initContainer
-// that, on a fresh volume, migrates the DB and creates the admin service user — the
-// exact sequence verified live as an arbitrary OpenShift-injected UID. The main
+// that migrates the DB and reconciles the admin service user's password to the current
+// secret on every start (create on a fresh volume, change-password on an existing one)
+// — the exact sequence verified live as an arbitrary OpenShift-injected UID. The main
 // container then serves on the prepared data. The operator mints the API token
 // afterward (it can't exec).
 //
@@ -165,12 +166,20 @@ func ForgejoDeployment(dv *dotvirtv1alpha1.Dotvirt, setFSGroup bool, argoWebhook
 	// environment-to-ini renders app.ini from the FORGEJO__* env (the rootless image's
 	// entrypoint normally does this; we override the command, so run it ourselves).
 	// migrate then has a config to load. No chown/su-exec: already the non-root user.
+	//
+	// create-or-reset: on a fresh volume `user create` seeds the admin; on an existing
+	// volume it fails (user exists) and change-password reconciles the DB password to the
+	// current admin secret. So every pod start converges the password, and a regenerated
+	// admin secret (a CR delete/recreate over the retained data PVC, or a manual secret
+	// delete) can never leave the operator's basic-auth mint stuck on a stale password.
+	// The initContainer has local DB access, so it needs no prior password to reset it.
 	bootstrap := `set -e
 mkdir -p "$(dirname "$GITEA_APP_INI")"
 environment-to-ini
 forgejo migrate
 forgejo admin user create --admin --username ` + ForgejoBotUser +
-		` --password "$ADMIN_PW" --email ` + ForgejoBotUser + `@dotvirt.local --must-change-password=false || true`
+		` --password "$ADMIN_PW" --email ` + ForgejoBotUser + `@dotvirt.local --must-change-password=false ` +
+		`|| forgejo admin user change-password --username ` + ForgejoBotUser + ` --password "$ADMIN_PW" --must-change-password=false`
 
 	return &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},

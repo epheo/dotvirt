@@ -104,6 +104,24 @@ func TestForgejoDeploymentBoundedAndPinned(t *testing.T) {
 	}
 }
 
+// The bootstrap reconciles the admin password on every start: `user create` seeds a
+// fresh volume, and a change-password fallback resets it on an existing one. Without
+// the fallback, a regenerated admin secret over a retained data PVC leaves the operator
+// authenticating against a stale password and the mint 401s forever.
+func TestForgejoBootstrapReconcilesAdminPassword(t *testing.T) {
+	cmd := ForgejoDeployment(testDotvirt(), true, "").Spec.Template.Spec.InitContainers[0].Command
+	script := cmd[len(cmd)-1] // sh -c "<script>"
+	if !strings.Contains(script, "user create") {
+		t.Error("bootstrap must create the admin user on a fresh volume")
+	}
+	if !strings.Contains(script, "change-password") {
+		t.Error("bootstrap must reset the admin password on an existing volume (create-or-reset)")
+	}
+	if strings.Contains(script, "|| true") {
+		t.Error("bootstrap still swallows the create failure with `|| true`; the password never reconciles")
+	}
+}
+
 // fsGroup is set on vanilla K8s (PVC writability) but MUST be omitted on OpenShift,
 // where restricted-v2 rejects an out-of-range fsGroup and injects its own.
 func TestForgejoFSGroupIsPlatformConditional(t *testing.T) {

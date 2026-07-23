@@ -1,5 +1,6 @@
-// Command dotvirt serves a vCenter-like WebUI that edits per-project git repos of
-// KubeVirt manifests and reads live state from a cluster and ArgoCD. It is a thin
+// Command dotvirt serves a web console, familiar to vSphere admins, that edits
+// per-project git repos of KubeVirt manifests and reads live state from a cluster
+// and ArgoCD. It is a thin
 // multi-tenant lens: every request runs under the caller's own k8s token, and a
 // project is a set of namespaces (a cluster fact) backed by its own git repo.
 package main

@@ -6,12 +6,18 @@ package forge
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 )
+
+// ErrUnauthorized marks a 401 from the forge admin API: the credential itself was
+// rejected, not the transport. Callers branch on it to surface a password/token
+// mismatch distinctly from a forge outage.
+var ErrUnauthorized = errors.New("401 unauthorized")
 
 // MintToken creates a scoped access token for username via BASIC AUTH (not a
 // bearer token) — the operator authenticates as the admin a managed Forgejo just
@@ -43,6 +49,9 @@ func (f *Factory) MintToken(username, password, tokenName string, scopes []strin
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusUnauthorized {
+		return "", fmt.Errorf("forge mint token: %w", ErrUnauthorized)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("forge mint token: %s: %s", resp.Status, strings.TrimSpace(string(data)))
 	}
@@ -73,6 +82,9 @@ func (f *Factory) deleteToken(username, password, tokenName string) error {
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode == http.StatusNotFound || (resp.StatusCode >= 200 && resp.StatusCode < 300) {
 		return nil
+	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("forge delete token: %w", ErrUnauthorized)
 	}
 	return fmt.Errorf("forge delete token: %s", resp.Status)
 }
