@@ -31,6 +31,7 @@ import (
 // Requeues while Forgejo is coming up or its router host isn't assigned yet.
 func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
 	if !dv.Spec.Forge.Managed {
+		dv.Status.ForgeURL = dv.Spec.Forge.URL
 		if !install.ForgeConfigured(dv) {
 			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "NotConfigured",
 				"no forge configured; propose pushes a branch but opens no pull request")
@@ -48,6 +49,7 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 		return res, err
 	}
 	applyEffectiveForgeSpec(dv, forgeURL)
+	dv.Status.ForgeURL = forgeURL
 	if err := r.applyForgejoDeployment(ctx, dv); err != nil {
 		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "ApplyFailed", err)
 	}

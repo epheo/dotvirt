@@ -63,8 +63,10 @@ type DotvirtReconciler struct {
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=create;patch;deletecollection
 // +kubebuilder:rbac:groups="",resources=services;serviceaccounts;persistentvolumeclaims,verbs=create;patch
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get;list;watch;create;patch
-// routes/custom-host: required to set an explicit spec.host on a Route (the forge + app exposure hosts).
-// +kubebuilder:rbac:groups=route.openshift.io,resources=routes/custom-host,verbs=create
+// routes/custom-host: required to set an explicit spec.host on a Route (the forge + app
+// exposure hosts). `update` on top of `create` so editing spec.ingress.host / spec.forge.url
+// on a live CR re-homes the existing Route instead of being denied ("cannot set host field").
+// +kubebuilder:rbac:groups=route.openshift.io,resources=routes/custom-host,verbs=create;update
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=create;patch
 // +kubebuilder:rbac:groups=argoproj.io,resources=appprojects;applications;applicationsets,verbs=create;patch;deletecollection
 // clusterrolebindings: the operator creates the bindings that wire the static operand roles

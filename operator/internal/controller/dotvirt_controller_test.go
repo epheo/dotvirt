@@ -224,6 +224,22 @@ func TestReconcileMinimalCRToReady(t *testing.T) {
 	}
 }
 
+// reconcileWorkload reports the UI's external URL in status.consoleURL, so an admin
+// can open it straight from `oc get dotvirt` without hunting for the Route.
+func TestReconcileWorkloadSetsConsoleURL(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Ingress.Host = "dotvirt.apps.cluster.example"
+	c := testBuilder(t).WithObjects(dv).Build()
+	r := newReconciler(c, depsOK)
+
+	if res, err := r.reconcileWorkload(context.Background(), dv); err != nil || res != nil {
+		t.Fatalf("reconcileWorkload = (%+v, %v), want (nil, nil)", res, err)
+	}
+	if dv.Status.ConsoleURL != "https://dotvirt.apps.cluster.example" {
+		t.Errorf("status.consoleURL = %q, want https://<ingress host>", dv.Status.ConsoleURL)
+	}
+}
+
 // Generated secrets are create-once: the session key and plugin/webhook tokens
 // must survive re-reconciles and operator restarts (a rotation would invalidate
 // live sessions and registered webhooks), and a secret already on the cluster is

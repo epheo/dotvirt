@@ -179,6 +179,9 @@ func TestReconcileForgeSilentForBYO(t *testing.T) {
 	if cond(getCR(t, c, dv), dotvirtv1alpha1.ConditionForgeReady) != nil {
 		t.Error("ForgeReady set for a BYO forge; the phase must stay silent")
 	}
+	if dv.Status.ForgeURL != dv.Spec.Forge.URL {
+		t.Errorf("status.forgeURL = %q, want the BYO url %q", dv.Status.ForgeURL, dv.Spec.Forge.URL)
+	}
 }
 
 // With no forge at all (not managed, no URL, no credentials secret), reconcileForge

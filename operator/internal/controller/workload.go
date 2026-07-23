@@ -44,6 +44,9 @@ func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1
 			dv.Spec.Ingress.Host = host // in-memory only (never persisted; drives DOTVIRT_PUBLIC_URL)
 		}
 	}
+	if dv.Spec.Ingress.Host != "" {
+		dv.Status.ConsoleURL = "https://" + dv.Spec.Ingress.Host
+	}
 	deployment := install.Deployment(dv)
 	if err := controllerutil.SetControllerReference(dv, deployment, r.Scheme); err != nil {
 		return nil, err

@@ -45,15 +45,19 @@ type IngressType string
 // platform repo, distinct from (and more privileged than) dotvirt's runtime
 // clone/push token, preserving the install-provisioner vs runtime-owns-nothing split.
 type ForgeSpec struct {
-	// URL is the forge base (e.g. https://forgejo.example.com).
+	// URL is the forge base URL. Leave empty with managed on OpenShift: the operator
+	// exposes Forgejo on a router-assigned host and reports it in status.forgeURL. Set it
+	// for a bring-your-own forge, or to pin the managed forge's host.
 	URL string `json:"url,omitempty"`
 	// PlatformRepo is the cluster-scoped + tenancy repo (CUDN/NNCP/Namespace). The
-	// operator ensures it exists; dotvirt routes platform creates here by kind.
+	// operator ensures it exists; dotvirt routes platform creates here by kind. Defaults
+	// to <forge URL>/dotvirt/platform.git for a managed forge.
 	PlatformRepo string `json:"platformRepo,omitempty"`
 	// Managed deploys a self-hosted Forgejo for evaluation; false = bring your own.
 	Managed bool `json:"managed,omitempty"`
-	// CredentialsSecret names a Secret holding the forge-admin credential used for
-	// the platform-repo bootstrap (keys: url, username, token).
+	// CredentialsSecret names a Secret holding the forge-admin credential (keys: url,
+	// username, token). For a managed forge the operator WRITES this secret; point it at
+	// an existing secret only for a bring-your-own forge.
 	CredentialsSecret string `json:"credentialsSecret,omitempty"`
 	// InsecureTLS skips TLS verification when calling the forge API (a self-signed forge
 	// Route, e.g. the bundled Forgejo). DEV/EVAL ONLY; never enable against a forge with
@@ -82,7 +86,9 @@ type ArgoCDSpec struct {
 // IngressSpec controls how the UI is exposed.
 type IngressSpec struct {
 	Type IngressType `json:"type,omitempty"`
-	// Host is the external hostname the UI is served on (the Route/Ingress host).
+	// Host is the external hostname the UI is served on. Leave empty on OpenShift for a
+	// router-assigned host (reported in status.consoleURL); required for an Ingress on
+	// vanilla Kubernetes.
 	Host string `json:"host,omitempty"`
 }
 
@@ -127,6 +133,12 @@ type DotvirtStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// ForgeURL is the effective external forge base URL: the configured spec.forge.url,
+	// or the host the operator assigned to a managed Forgejo when the URL was left empty.
+	ForgeURL string `json:"forgeURL,omitempty"`
+	// ConsoleURL is the external URL the dotvirt UI is served on — assigned by the
+	// operator when spec.ingress.host is left empty on OpenShift.
+	ConsoleURL string `json:"consoleURL,omitempty"`
 }
 
 // Dotvirt is one dotvirt install. Namespaced singleton in the operator's namespace;
@@ -136,6 +148,7 @@ type DotvirtStatus struct {
 // +kubebuilder:resource:scope=Namespaced,shortName=dv
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Available",type=string,JSONPath=`.status.conditions[?(@.type=="Available")].status`
+// +kubebuilder:printcolumn:name="Console",type=string,JSONPath=`.status.consoleURL`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 type Dotvirt struct {
 	metav1.TypeMeta   `json:",inline"`

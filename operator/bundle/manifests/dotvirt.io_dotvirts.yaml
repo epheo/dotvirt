@@ -23,6 +23,9 @@ spec:
     - jsonPath: .status.conditions[?(@.type=="Available")].status
       name: Available
       type: string
+    - jsonPath: .status.consoleURL
+      name: Console
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -104,8 +107,9 @@ spec:
                 properties:
                   credentialsSecret:
                     description: |-
-                      CredentialsSecret names a Secret holding the forge-admin credential used for
-                      the platform-repo bootstrap (keys: url, username, token).
+                      CredentialsSecret names a Secret holding the forge-admin credential (keys: url,
+                      username, token). For a managed forge the operator WRITES this secret; point it at
+                      an existing secret only for a bring-your-own forge.
                     type: string
                   insecureTLS:
                     description: |-
@@ -120,10 +124,14 @@ spec:
                   platformRepo:
                     description: |-
                       PlatformRepo is the cluster-scoped + tenancy repo (CUDN/NNCP/Namespace). The
-                      operator ensures it exists; dotvirt routes platform creates here by kind.
+                      operator ensures it exists; dotvirt routes platform creates here by kind. Defaults
+                      to <forge URL>/dotvirt/platform.git for a managed forge.
                     type: string
                   url:
-                    description: URL is the forge base (e.g. https://forgejo.example.com).
+                    description: |-
+                      URL is the forge base URL. Leave empty with managed on OpenShift: the operator
+                      exposes Forgejo on a router-assigned host and reports it in status.forgeURL. Set it
+                      for a bring-your-own forge, or to pin the managed forge's host.
                     type: string
                 type: object
               image:
@@ -133,8 +141,10 @@ spec:
                 description: IngressSpec controls how the UI is exposed.
                 properties:
                   host:
-                    description: Host is the external hostname the UI is served on
-                      (the Route/Ingress host).
+                    description: |-
+                      Host is the external hostname the UI is served on. Leave empty on OpenShift for a
+                      router-assigned host (reported in status.consoleURL); required for an Ingress on
+                      vanilla Kubernetes.
                     type: string
                   type:
                     description: |-
@@ -223,6 +233,16 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              consoleURL:
+                description: |-
+                  ConsoleURL is the external URL the dotvirt UI is served on — assigned by the
+                  operator when spec.ingress.host is left empty on OpenShift.
+                type: string
+              forgeURL:
+                description: |-
+                  ForgeURL is the effective external forge base URL: the configured spec.forge.url,
+                  or the host the operator assigned to a managed Forgejo when the URL was left empty.
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the .metadata.generation last reconciled.
                 format: int64
