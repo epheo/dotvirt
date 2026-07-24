@@ -2,6 +2,8 @@ package changeset
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -58,6 +60,33 @@ func newProposeFixture(t *testing.T, routes ...route) *proposeFixture {
 		c:    c,
 		proj: project.ProjectInfo{Name: "p", Repo: seedBare(t)},
 		id:   auth.Identity{Username: "alice"},
+	}
+}
+
+// StageCreateProject refuses when the tenant repo already exists on the forge:
+// New Project must not re-manage a tenant that already has a git repo (the mirror
+// of AdoptProject's "already has a repo" guard). The exists probe returns 200, so
+// EnsureRepo reports created=false and the create is rejected as a conflict.
+func TestCreateProjectRefusesExistingRepo(t *testing.T) {
+	f := newProposeFixture(t, when("GET", "team-a", http.StatusOK, "{}"))
+	_, err := f.c.StageCreateProject(f.id, f.proj, json.RawMessage(`{"name":"team-a","namespace":"team-a"}`))
+	if !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("want model.ErrConflict for an existing tenant repo, got %v", err)
+	}
+}
+
+// AdoptProject refuses any project that already carries a repo annotation, and — the
+// safety property — WITHOUT touching the forge. A dangling annotation (repo the forge
+// lost) must NOT be self-healed by re-creating the repo: an empty re-created repo lets
+// the prune+selfHeal tenant app sync an empty main and delete the namespace's live,
+// already-adopted VMs. newProposeFixture with no routes fails the test on any forge
+// call, so this pins that the refusal happens before ensureTenantRepo's EnsureRepo.
+func TestAdoptProjectWithRepoAnnotationRefusedNoForgeMutation(t *testing.T) {
+	f := newProposeFixture(t) // no routes: any forge call is an unhandled-call failure
+	target := project.ProjectInfo{Name: "team-a", Repo: "https://forge.example/dotvirt/team-a.git", Namespaces: []string{"team-a"}}
+	_, err := f.c.AdoptProject(f.id, f.proj, target, nil)
+	if !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("want model.ErrConflict when the project already has a repo annotation, got %v", err)
 	}
 }
 

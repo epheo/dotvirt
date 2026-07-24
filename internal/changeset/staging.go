@@ -188,9 +188,15 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	if !validate.DNS1123Name(ns) {
 		return model.DraftView{}, fmt.Errorf("%w: namespace name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, ns)
 	}
-	repoURL, err := c.ensureTenantRepo(commitProj.Repo, spec.Name)
+	repoURL, created, err := c.ensureTenantRepo(commitProj.Repo, spec.Name)
 	if err != nil {
 		return model.DraftView{}, err
+	}
+	// A pre-existing repo means the tenant is already managed (or a repo of that name
+	// survived a prior deletion). Refuse rather than silently re-home it — the mirror of
+	// AdoptProject's "already has a repo" guard, so New Project can't re-manage a tenant.
+	if !created {
+		return model.DraftView{}, fmt.Errorf("%w: a repo for project %q already exists (%s); pick another name or adopt the existing project", model.ErrConflict, spec.Name, repoURL)
 	}
 	// First namespace, joined to the new project/repo (stamps its dotvirt.io labels).
 	nsSpec := netgen.NamespaceSpec{Name: ns, Project: spec.Name, Repo: repoURL, VMNetwork: spec.VMNetwork}
@@ -243,6 +249,14 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	if err := requireRepo(commitProj); err != nil {
 		return model.DraftView{}, err
 	}
+	// A repo annotation means already-managed — refuse BEFORE any forge mutation. Do NOT
+	// "self-heal" a dangling annotation (repo the forge lost) by re-creating the repo
+	// here: the ApplicationSet generates a prune+selfHeal tenant app for any namespace
+	// whose annotation has a repo (handleAppSetPlugin doesn't check the repo exists), and
+	// while the repo is missing that app can't sync, so live VMs are safe. Re-creating an
+	// EMPTY repo lets the app sync an empty main and prune the namespace's already-adopted
+	// (tracking-id-bearing) VMs — deleting running workloads. Recovering a lost repo must
+	// seed main from live state first; that is not this path. Keep the safe refusal.
 	if target.Repo != "" {
 		return model.DraftView{}, fmt.Errorf("%w: project %q already has a repo (%s)", model.ErrConflict, target.Name, target.Repo)
 	}
@@ -252,7 +266,9 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	if len(target.Namespaces) == 0 {
 		return model.DraftView{}, fmt.Errorf("%w: project %q has no namespaces to adopt", model.ErrInvalid, target.Name)
 	}
-	repoURL, err := c.ensureTenantRepo(commitProj.Repo, target.Name)
+	// target.Repo == "" here, so the project is genuinely repoless; ensureTenantRepo
+	// creates the repo (created is irrelevant on this path).
+	repoURL, _, err := c.ensureTenantRepo(commitProj.Repo, target.Name)
 	if err != nil {
 		return model.DraftView{}, err
 	}
@@ -264,24 +280,25 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 
 // ensureTenantRepo derives the tenant repo URL — a sibling of the platform repo
 // under the same owner — creates it on the forge when absent, and seeds templates
-// into a freshly created one. Shared by project creation and adoption.
-func (c *Coordinator) ensureTenantRepo(platformRepo, name string) (string, error) {
-	repoURL := siblingRepoURL(platformRepo, name)
+// into a freshly created one. Shared by project creation and adoption; created is
+// false when the repo already existed, which the caller uses to guard.
+func (c *Coordinator) ensureTenantRepo(platformRepo, name string) (repoURL string, created bool, err error) {
+	repoURL = siblingRepoURL(platformRepo, name)
 	if repoURL == "" {
-		return "", fmt.Errorf("%w: cannot derive a repo URL from the platform repo %q", model.ErrInvalid, platformRepo)
+		return "", false, fmt.Errorf("%w: cannot derive a repo URL from the platform repo %q", model.ErrInvalid, platformRepo)
 	}
 	fc := c.forge.For(repoURL)
 	if fc == nil {
-		return "", fmt.Errorf("%w: forge not configured; cannot create the project repo", model.ErrInvalid)
+		return "", false, fmt.Errorf("%w: forge not configured; cannot create the project repo", model.ErrInvalid)
 	}
-	created, err := fc.EnsureRepo()
+	created, err = fc.EnsureRepo()
 	if err != nil {
-		return "", fmt.Errorf("create project repo: %w", err)
+		return "", false, fmt.Errorf("create project repo: %w", err)
 	}
 	if created {
 		c.seedTemplates(repoURL)
 	}
-	return repoURL, nil
+	return repoURL, created, nil
 }
 
 // stageProjectAdoption stages the namespace (+ optional owner RoleBinding) manifests
