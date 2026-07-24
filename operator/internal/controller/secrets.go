@@ -14,6 +14,7 @@ import (
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
+	"github.com/epheo/dotvirt/operator/internal/platform"
 )
 
 // reconcileSecrets ensures the generated secrets (create-once — never regenerated
@@ -22,15 +23,26 @@ import (
 // credential is supplied by the admin (spec.forge.credentialsSecret) or, earlier
 // in the pipeline, by the managed-Forgejo bootstrap.
 func (r *DotvirtReconciler) reconcileSecrets(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
+	// SSO is OpenShift-only (the app's oauth flow runs against the cluster oauth server);
+	// gate in-memory so the workload render + status downstream see the effective value.
+	if dv.Spec.Auth.OpenShiftSSO && r.Platform != platform.OpenShift {
+		dv.Spec.Auth.OpenShiftSSO = false
+	}
 	if r.DryRun {
 		return nil, nil
 	}
-	for _, s := range []struct{ name, key string }{
+	secrets := []struct{ name, key string }{
 		{install.SessionSecretName, "secret"},
 		{install.AppsetSecretName, "token"},
 		{install.WebhookSecretName, "secret"},
 		{install.ArgoWebhookSecretName, "secret"},
-	} {
+	}
+	if dv.Spec.Auth.OpenShiftSSO {
+		// The generated OAuth client secret: the app reads it, and the admin copies it into
+		// the OAuthClient via the status.ssoOAuthClient command (so it never lands in status).
+		secrets = append(secrets, struct{ name, key string }{install.OAuthSecretName, "clientSecret"})
+	}
+	for _, s := range secrets {
 		if err := r.ensureSecret(ctx, dv, s.name, s.key); err != nil {
 			return nil, err
 		}

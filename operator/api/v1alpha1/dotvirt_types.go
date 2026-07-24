@@ -103,16 +103,14 @@ type MetricsSpec struct {
 	URL string `json:"url,omitempty"`
 }
 
-// AuthSpec enables OpenShift SSO beside the always-present token login. The
-// admin registers the cluster-scoped OAuthClient (redirect URI
-// https://<ingress.host>/api/auth/callback), a cluster-admin act the operator
-// deliberately doesn't perform; the operator only wires the credential through.
+// AuthSpec enables OpenShift SSO beside the always-present token login.
 type AuthSpec struct {
-	// OAuthClientID is the OAuthClient's name; empty leaves SSO off.
-	OAuthClientID string `json:"oauthClientID,omitempty"`
-	// OAuthSecretRef names a Secret in the install namespace holding the
-	// OAuthClient's secret under key "clientSecret".
-	OAuthSecretRef string `json:"oauthSecretRef,omitempty"`
+	// OpenShiftSSO adds a "Sign in with OpenShift" button beside the token login. The
+	// operator generates the client credential and, once the console host is assigned,
+	// reports the exact OAuthClient to apply (redirect URI filled in) in
+	// status.ssoOAuthClient. Registering that cluster-scoped OAuthClient stays a
+	// cluster-admin act the operator deliberately doesn't perform. OpenShift only.
+	OpenShiftSSO bool `json:"openShiftSSO,omitempty"`
 }
 
 // DotvirtSpec is the desired dotvirt install.
@@ -142,6 +140,10 @@ type DotvirtStatus struct {
 	// ConsoleURL is the external URL the dotvirt UI is served on — assigned by the
 	// operator when spec.ingress.host is left empty on OpenShift.
 	ConsoleURL string `json:"consoleURL,omitempty"`
+	// SSOOAuthClient is a ready-to-apply command that registers the cluster-scoped
+	// OAuthClient SSO needs, with the redirect URI filled from the assigned console host.
+	// Set only while auth.openShiftSSO is on; run it once to finish SSO.
+	SSOOAuthClient string `json:"ssoOAuthClient,omitempty"`
 }
 
 // Dotvirt is one dotvirt install. Namespaced singleton in the operator's namespace;

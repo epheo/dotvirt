@@ -28,7 +28,7 @@ metadata:
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
     containerImage: quay.io/epheo/dotvirt-operator@sha256:73c12ad00a4e47681854aef82af31d32076f8d38ab9885f885ca498c6d55f8a5
-    createdAt: "2026-07-23T20:56:23Z"
+    createdAt: "2026-07-24T10:13:03Z"
     description: Installs dotvirt, a GitOps web console for KubeVirt with a point-and-click workflow familiar to vSphere admins, plus its platform/tenant tier.
     features.operators.openshift.io/disconnected: "true"
     features.operators.openshift.io/fips-compliant: "false"
@@ -83,9 +83,11 @@ spec:
           - description: Prometheus/Thanos query API backing the Performance tab.
             displayName: Metrics
             path: metrics
-          - description: Optional OpenShift SSO beside the always-present token login (the OAuthClient name and its client-secret ref).
-            displayName: Auth
-            path: auth
+          - description: Add "Sign in with OpenShift" beside the token login. The operator publishes the OAuthClient to apply in status.ssoOAuthClient.
+            displayName: OpenShift SSO
+            path: auth.openShiftSSO
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
         statusDescriptors:
           - displayName: Phase
             path: phase
@@ -99,6 +101,10 @@ spec:
             path: forgeURL
             x-descriptors:
               - urn:alm:descriptor:org.w3:link
+          - displayName: SSO OAuthClient (apply to finish SSO)
+            path: ssoOAuthClient
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:text
           - displayName: Conditions
             path: conditions
             x-descriptors:

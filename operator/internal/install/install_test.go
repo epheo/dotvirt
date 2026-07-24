@@ -78,6 +78,29 @@ func TestForgelessDeploymentOmitsForgeCredential(t *testing.T) {
 	}
 }
 
+// OpenShift SSO wiring is gated on auth.openShiftSSO: the OAuth client id is a literal
+// and the client secret refs the operator-generated dotvirt-oauth Secret; both absent otherwise.
+func TestDeploymentSSOEnvGatedOnFlag(t *testing.T) {
+	if _, ok := envValue(Deployment(testDotvirt()).Spec.Template.Spec.Containers[0].Env, "DOTVIRT_OAUTH_CLIENT_ID"); ok {
+		t.Error("SSO off: DOTVIRT_OAUTH_CLIENT_ID must be unset")
+	}
+	sso := testDotvirt()
+	sso.Spec.Auth.OpenShiftSSO = true
+	env := Deployment(sso).Spec.Template.Spec.Containers[0].Env
+	if got, ok := envValue(env, "DOTVIRT_OAUTH_CLIENT_ID"); !ok || got != OAuthClientName {
+		t.Errorf("SSO on: DOTVIRT_OAUTH_CLIENT_ID = (%q, ok=%v), want %q", got, ok, OAuthClientName)
+	}
+	var secretRef *corev1.SecretKeySelector
+	for _, e := range env {
+		if e.Name == "DOTVIRT_OAUTH_CLIENT_SECRET" && e.ValueFrom != nil {
+			secretRef = e.ValueFrom.SecretKeyRef
+		}
+	}
+	if secretRef == nil || secretRef.Name != OAuthSecretName || secretRef.Key != "clientSecret" {
+		t.Errorf("DOTVIRT_OAUTH_CLIENT_SECRET must ref %s/clientSecret, got %+v", OAuthSecretName, secretRef)
+	}
+}
+
 // The operand must render restricted-v2 compatible — non-root, no privilege
 // escalation, all capabilities dropped, bounded resources, and a liveness probe — so
 // OpenShift's restricted SCC admits it WITHOUT the anyuid grant.

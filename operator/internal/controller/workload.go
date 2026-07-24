@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -46,6 +47,9 @@ func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1
 	}
 	if dv.Spec.Ingress.Host != "" {
 		dv.Status.ConsoleURL = "https://" + dv.Spec.Ingress.Host
+		if dv.Spec.Auth.OpenShiftSSO {
+			dv.Status.SSOOAuthClient = ssoApplyCommand(dv.Namespace, dv.Spec.Ingress.Host)
+		}
 	}
 	deployment := install.Deployment(dv)
 	if err := controllerutil.SetControllerReference(dv, deployment, r.Scheme); err != nil {
@@ -89,4 +93,21 @@ func (r *DotvirtReconciler) exposureFor(dv *dotvirtv1alpha1.Dotvirt, name string
 // exposure builds the UI ingress object on spec.ingress.host.
 func (r *DotvirtReconciler) exposure(dv *dotvirtv1alpha1.Dotvirt) client.Object {
 	return r.exposureFor(dv, install.AppName, install.HTTPPort, dv.Spec.Ingress.Host)
+}
+
+// ssoApplyCommand is the one command an admin runs to register the cluster-scoped
+// OAuthClient SSO needs: the redirect URI is filled from the assigned console host, and
+// the client secret is read from the operator-generated Secret at apply time — so it
+// never lands in status. The operator deliberately doesn't create the OAuthClient itself.
+func ssoApplyCommand(ns, host string) string {
+	return fmt.Sprintf(`oc apply -f - <<EOF
+apiVersion: oauth.openshift.io/v1
+kind: OAuthClient
+metadata:
+  name: %s
+secret: $(oc -n %s get secret %s -o jsonpath='{.data.clientSecret}' | base64 -d)
+redirectURIs:
+  - https://%s/api/auth/callback
+grantMethod: auto
+EOF`, install.OAuthClientName, ns, install.OAuthSecretName, host)
 }

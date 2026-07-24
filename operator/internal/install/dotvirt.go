@@ -34,6 +34,10 @@ const (
 	WebhookSecretName     = "dotvirt-webhook"
 	ArgoWebhookSecretName = "dotvirt-argo-webhook"
 	DefaultForgeSecret    = "dotvirt-forge"
+	// OAuthClientName is the OpenShift OAuthClient name SSO registers as; OAuthSecretName
+	// holds the operator-generated client secret (key clientSecret).
+	OAuthClientName = "dotvirt"
+	OAuthSecretName = "dotvirt-oauth"
 )
 
 // ForgeSecretName is the forge-credential Secret for this install: the spec override,
@@ -163,14 +167,14 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 	if dv.Spec.Metrics.URL != "" {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: dv.Spec.Metrics.URL})
 	}
-	// OpenShift SSO: the operator only wires the credential of the admin-created
-	// OAuthClient through — registering the client is a cluster-admin act it
-	// deliberately doesn't perform (no oauthclients grant). Optional secret ref: a
-	// CR naming SSO before the secret exists must not wedge the pod.
-	if dv.Spec.Auth.OAuthClientID != "" && dv.Spec.Auth.OAuthSecretRef != "" {
+	// OpenShift SSO: the operator generates the client secret and wires it here; the admin
+	// applies the OAuthClient (a cluster-admin act it deliberately doesn't perform — no
+	// oauthclients grant), reported in status.ssoOAuthClient. optional=true: enabling SSO
+	// before the OAuthClient is applied must not wedge the pod.
+	if dv.Spec.Auth.OpenShiftSSO {
 		env = append(env,
-			corev1.EnvVar{Name: "DOTVIRT_OAUTH_CLIENT_ID", Value: dv.Spec.Auth.OAuthClientID},
-			secretEnv("DOTVIRT_OAUTH_CLIENT_SECRET", dv.Spec.Auth.OAuthSecretRef, "clientSecret", true),
+			corev1.EnvVar{Name: "DOTVIRT_OAUTH_CLIENT_ID", Value: OAuthClientName},
+			secretEnv("DOTVIRT_OAUTH_CLIENT_SECRET", OAuthSecretName, "clientSecret", true),
 		)
 	}
 

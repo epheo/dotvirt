@@ -64,10 +64,12 @@ spec:
       - description: Prometheus/Thanos query API backing the Performance tab.
         displayName: Metrics
         path: metrics
-      - description: Optional OpenShift SSO beside the always-present token login
-          (the OAuthClient name and its client-secret ref).
-        displayName: Auth
-        path: auth
+      - description: Add "Sign in with OpenShift" beside the token login. The operator
+          publishes the OAuthClient to apply in status.ssoOAuthClient.
+        displayName: OpenShift SSO
+        path: auth.openShiftSSO
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
       statusDescriptors:
       - displayName: Phase
         path: phase
@@ -81,6 +83,10 @@ spec:
         path: forgeURL
         x-descriptors:
         - urn:alm:descriptor:org.w3:link
+      - displayName: SSO OAuthClient (apply to finish SSO)
+        path: ssoOAuthClient
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
       - displayName: Conditions
         path: conditions
         x-descriptors:

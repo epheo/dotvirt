@@ -82,21 +82,17 @@ spec:
                     type: string
                 type: object
               auth:
-                description: |-
-                  AuthSpec enables OpenShift SSO beside the always-present token login. The
-                  admin registers the cluster-scoped OAuthClient (redirect URI
-                  https://<ingress.host>/api/auth/callback), a cluster-admin act the operator
-                  deliberately doesn't perform; the operator only wires the credential through.
+                description: AuthSpec enables OpenShift SSO beside the always-present
+                  token login.
                 properties:
-                  oauthClientID:
-                    description: OAuthClientID is the OAuthClient's name; empty leaves
-                      SSO off.
-                    type: string
-                  oauthSecretRef:
+                  openShiftSSO:
                     description: |-
-                      OAuthSecretRef names a Secret in the install namespace holding the
-                      OAuthClient's secret under key "clientSecret".
-                    type: string
+                      OpenShiftSSO adds a "Sign in with OpenShift" button beside the token login. The
+                      operator generates the client credential and, once the console host is assigned,
+                      reports the exact OAuthClient to apply (redirect URI filled in) in
+                      status.ssoOAuthClient. Registering that cluster-scoped OAuthClient stays a
+                      cluster-admin act the operator deliberately doesn't perform. OpenShift only.
+                    type: boolean
                 type: object
               forge:
                 description: |-
@@ -250,6 +246,12 @@ spec:
               phase:
                 description: Phase is a short human-facing summary (e.g. Pending,
                   Provisioning, Ready).
+                type: string
+              ssoOAuthClient:
+                description: |-
+                  SSOOAuthClient is a ready-to-apply command that registers the cluster-scoped
+                  OAuthClient SSO needs, with the redirect URI filled from the assigned console host.
+                  Set only while auth.openShiftSSO is on; run it once to finish SSO.
                 type: string
             type: object
         type: object
