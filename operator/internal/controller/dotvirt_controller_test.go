@@ -188,8 +188,9 @@ func TestReconcileMinimalCRToReady(t *testing.T) {
 		dotvirtv1alpha1.ConditionWorkloadReady:     metav1.ConditionTrue,
 		dotvirtv1alpha1.ConditionArgoReady:         metav1.ConditionTrue,
 		dotvirtv1alpha1.ConditionAvailable:         metav1.ConditionTrue,
-		// No forge URL: webhook registration is skipped, Argo falls back to its poll.
-		dotvirtv1alpha1.ConditionArgoWebhook: metav1.ConditionUnknown,
+		// No forge URL: both webhook registrations are skipped, updates fall back to polls.
+		dotvirtv1alpha1.ConditionArgoWebhook:    metav1.ConditionUnknown,
+		dotvirtv1alpha1.ConditionDotvirtWebhook: metav1.ConditionUnknown,
 	} {
 		if co := cond(got, ct); co == nil || co.Status != want {
 			t.Errorf("condition %s = %+v, want %s", ct, co, want)

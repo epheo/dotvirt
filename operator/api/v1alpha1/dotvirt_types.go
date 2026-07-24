@@ -23,6 +23,9 @@ const (
 	// ConditionArgoWebhook is True when the forge-to-ArgoCD instant-sync webhook is
 	// registered (org-level); Unknown when no Argo URL is resolvable (poll fallback).
 	ConditionArgoWebhook = "ArgoWebhook"
+	// ConditionDotvirtWebhook is True when the forge-to-dotvirt instant-feedback webhook is
+	// registered (org-level); Unknown when no delivery URL is resolvable (git-poll fallback).
+	ConditionDotvirtWebhook = "DotvirtWebhook"
 	// ConditionAvailable is the roll-up: the full install is reconciled and serving.
 	ConditionAvailable = "Available"
 )

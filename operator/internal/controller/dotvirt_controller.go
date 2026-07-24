@@ -119,6 +119,7 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		r.reconcileArgo,
 		r.reconcilePlatformRepo,
 		r.reconcileArgoWebhook,
+		r.reconcileDotvirtWebhook,
 	} {
 		res, err := phase(ctx, &dv)
 		if err != nil {
