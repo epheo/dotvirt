@@ -37,7 +37,7 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 		if git, err := s.draft.DRSState(platform); err != nil {
 			view.Warning = "platform repo unavailable — committed DRS state unknown: " + err.Error()
 		} else {
-			view.DRSGitState = git
+			view.Configured, view.Config, view.PSIConfigured = git.Configured, git.Config, git.PSIConfigured
 		}
 		if view.CanManage {
 			if d, err := s.draft.DRSDraft(id, platform); err == nil && (d.Config != nil || d.PSI || d.DisableStaged) {

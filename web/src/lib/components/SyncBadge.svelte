@@ -6,23 +6,22 @@
 	import StatusDot from './StatusDot.svelte';
 	import StatusPill from './StatusPill.svelte';
 
+	// string is accepted so generated (non-narrowed) types feed the badge
+	// directly; anything off-vocabulary renders as Unknown.
 	let {
 		sync,
 		error = '',
 		compact = false,
-	}: { sync: SyncStatus; error?: string; compact?: boolean } = $props();
+	}: { sync: SyncStatus | string; error?: string; compact?: boolean } = $props();
 
 	// vCenter-ish: green = in sync, red = drift, gray = not managed.
-	const view = $derived(
-		(
-			{
-				Synced: { tone: 'ok', label: 'Synced' },
-				OutOfSync: { tone: 'danger', label: 'Out of sync' },
-				NotTracked: { tone: 'neutral', label: 'Not tracked' },
-				Unknown: { tone: 'neutral', label: 'Unknown' },
-			} satisfies Record<SyncStatus, { tone: Tone; label: string }>
-		)[sync],
-	);
+	const VIEWS = {
+		Synced: { tone: 'ok', label: 'Synced' },
+		OutOfSync: { tone: 'danger', label: 'Out of sync' },
+		NotTracked: { tone: 'neutral', label: 'Not tracked' },
+		Unknown: { tone: 'neutral', label: 'Unknown' },
+	} satisfies Record<SyncStatus, { tone: Tone; label: string }>;
+	const view = $derived(VIEWS[sync as SyncStatus] ?? VIEWS.Unknown);
 
 	// An out-of-sync VM has something to explain (an apply error, or just pending
 	// drift) — clicking the badge/dot pops up the detail. Other states are inert.

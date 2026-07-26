@@ -887,7 +887,13 @@ export interface DRSLive {
  * unreachable, so the committed state is unknown) instead of failing the view.
  */
 export interface DRSView {
-  DRSGitState: DRSGitState;
+  /**
+   * The committed git plane: DRSGitState's fields spelled out (same json tags)
+   * because tygo renders an embedded struct as a nested field, not flattened.
+   */
+  configured: boolean;
+  config?: DRSConfig;
+  psiConfigured: boolean;
   draft?: DRSDraftState;
   live: DRSLive;
   warning?: string;

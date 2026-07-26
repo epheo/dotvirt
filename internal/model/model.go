@@ -822,7 +822,12 @@ type DRSLive struct {
 // enforce. Warning carries a non-fatal degradation (e.g. the platform repo is
 // unreachable, so the committed state is unknown) instead of failing the view.
 type DRSView struct {
-	DRSGitState
+	// The committed git plane: DRSGitState's fields spelled out (same json tags)
+	// because tygo renders an embedded struct as a nested field, not flattened.
+	Configured    bool       `json:"configured"`
+	Config        *DRSConfig `json:"config,omitempty"`
+	PSIConfigured bool       `json:"psiConfigured"`
+
 	Draft     *DRSDraftState `json:"draft,omitempty"`
 	Live      DRSLive        `json:"live"`
 	Warning   string         `json:"warning,omitempty"`

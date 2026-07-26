@@ -33,7 +33,7 @@
 	// The modal is mounted fresh per open.
 	// svelte-ignore state_referenced_locally
 	const cfg = view.draft?.config ?? view.config;
-	let mode = $state<DRSMode>(cfg?.mode ?? 'Automatic');
+	let mode = $state<DRSMode>((cfg?.mode as DRSMode) ?? 'Automatic');
 	let threshold = $state(cfg?.threshold ?? 'AsymmetricLow');
 	let intervalSeconds = $state(cfg?.intervalSeconds ?? 60);
 	let softTainter = $state(cfg?.softTainter ?? true);
