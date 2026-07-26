@@ -4,6 +4,7 @@
 	import { TERMS } from '$lib/vocab';
 	import StageModal from './StageModal.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
+	import ProtoPortInput from './ProtoPortInput.svelte';
 
 	let {
 		namespaces,
@@ -21,8 +22,6 @@
 	// or a DNS name (exactly one) — optionally narrowed to a single transport port.
 	// (OVN-K rules carry a port list; one port per row covers the common case, and the
 	// user can add more rows.)
-	// port is number | null, not string: <input type="number"> coerces its binding to
-	// a number (or null when cleared), so a string type would make `.trim()` throw.
 	type Row = {
 		action: 'Allow' | 'Deny';
 		dest: 'cidr' | 'dns';
@@ -121,19 +120,11 @@
 					>
 				</div>
 				<div class="mt-2 flex items-center gap-2 pl-1 text-xs text-ink-muted">
-					<span>port</span>
-					<select bind:value={row.proto} class="rounded border border-line-strong px-1.5 py-1">
-						<option value="TCP">TCP</option>
-						<option value="UDP">UDP</option>
-						<option value="SCTP">SCTP</option>
-					</select>
-					<input
-						type="number"
-						bind:value={row.port}
-						placeholder="any"
-						min="1"
-						max="65535"
-						class="w-24 rounded border border-line-strong px-2 py-1"
+					<ProtoPortInput
+						bind:proto={row.proto}
+						bind:port={row.port}
+						portClass="w-24"
+						labelClass=""
 					/>
 				</div>
 			</div>

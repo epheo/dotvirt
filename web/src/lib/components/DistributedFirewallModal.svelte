@@ -7,6 +7,8 @@
 	import NamespaceSelect from './NamespaceSelect.svelte';
 	import FormField from './FormField.svelte';
 	import TextInput from './TextInput.svelte';
+	import PeerSelector from './PeerSelector.svelte';
+	import ProtoPortInput from './ProtoPortInput.svelte';
 
 	let {
 		namespaces,
@@ -26,8 +28,6 @@
 	// Groups compile to. The policy protects the "applied-to" Group and allows ingress
 	// only from the peer Groups in its rules (a NetworkPolicy that selects pods
 	// default-denies all other ingress). One ingress row = one allow-from rule.
-	// port is number | null, not string: <input type="number"> coerces its binding to
-	// a number (or null when cleared), so a string type would make `.trim()` throw.
 	type Row = { key: string; value: string; proto: 'TCP' | 'UDP' | 'SCTP'; port: number | null };
 	const blankRow = (): Row => ({ key: '', value: '', proto: 'TCP', port: null });
 
@@ -106,16 +106,11 @@
 			<span class="text-ink-faint">(label; blank = whole project)</span></span
 		>
 		<div class="mt-1 flex items-center gap-2">
-			<input
-				bind:value={appliedKey}
-				placeholder="app"
-				class="min-w-0 flex-1 rounded border border-line-strong px-2 py-1 text-xs"
-			/>
-			<span class="text-ink-faint">=</span>
-			<input
+			<PeerSelector
+				bind:key={appliedKey}
 				bind:value={appliedValue}
-				placeholder="db"
-				class="min-w-0 flex-1 rounded border border-line-strong px-2 py-1 text-xs"
+				keyPlaceholder="app"
+				valuePlaceholder="db"
 			/>
 		</div>
 		<div class="mt-1.5 text-[11px] text-ink-muted">
@@ -140,34 +135,15 @@
 		{#each rows as row, i (i)}
 			<div class="flex flex-wrap items-center gap-2 rounded border border-line p-2">
 				<span class="text-xs text-ink-faint">{TERMS.group.nsx}</span>
-				<input
-					bind:value={row.key}
-					placeholder="app"
-					class="w-20 rounded border border-line-strong px-2 py-1 text-xs"
-				/>
-				<span class="text-ink-faint">=</span>
-				<input
+				<PeerSelector
+					bind:key={row.key}
 					bind:value={row.value}
-					placeholder="web"
-					class="w-24 rounded border border-line-strong px-2 py-1 text-xs"
+					keyPlaceholder="app"
+					valuePlaceholder="web"
+					keyClass="w-20"
+					valueClass="w-24"
 				/>
-				<span class="text-xs text-ink-faint">port</span>
-				<select
-					bind:value={row.proto}
-					class="rounded border border-line-strong px-1.5 py-1 text-xs"
-				>
-					<option value="TCP">TCP</option>
-					<option value="UDP">UDP</option>
-					<option value="SCTP">SCTP</option>
-				</select>
-				<input
-					type="number"
-					bind:value={row.port}
-					placeholder="any"
-					min="1"
-					max="65535"
-					class="w-20 rounded border border-line-strong px-2 py-1 text-xs"
-				/>
+				<ProtoPortInput bind:proto={row.proto} bind:port={row.port} portClass="w-20" />
 				<button
 					onclick={() => removeRow(i)}
 					disabled={rows.length === 1}

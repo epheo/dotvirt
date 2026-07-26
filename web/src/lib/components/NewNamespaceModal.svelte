@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { api, type NamespaceCreate } from '$lib/api';
-	import { validName, NAME_HINT, validCIDR, CIDR_HINT } from '$lib/validate';
+	import { validName, NAME_HINT, validCIDR } from '$lib/validate';
 	import StageModal from './StageModal.svelte';
 	import FormField from './FormField.svelte';
 	import TextInput from './TextInput.svelte';
 	import SelectInput from './SelectInput.svelte';
+	import VMNetworkFields from './VMNetworkFields.svelte';
 
 	let {
 		projects = [],
@@ -27,11 +28,7 @@
 	$effect(() => {
 		if (!project) project = initialProject ?? projects[0] ?? '';
 	});
-	// Default the VM Network name to "<namespace>-net" until the user overrides it.
 	let netTouched = $state(false);
-	$effect(() => {
-		if (!netTouched) netName = name ? `${name}-net` : '';
-	});
 
 	const missing = $derived.by(() => {
 		const m: string[] = [];
@@ -86,20 +83,7 @@
 	</label>
 
 	{#if withNetwork}
-		<div class="space-y-3 rounded border border-line p-3">
-			<FormField label="VM Network name">
-				<TextInput bind:value={netName} oninput={() => (netTouched = true)} mono />
-			</FormField>
-			<FormField
-				label="Subnet (CIDR — required for a primary network)"
-				error={subnet && !validCIDR(subnet.trim()) ? CIDR_HINT : ''}
-			>
-				<TextInput bind:value={subnet} placeholder="10.40.0.0/16" mono />
-			</FormField>
-			<p class="text-[11px] text-ink-faint">
-				A flat layer-2 network that follows VMs across nodes (keeps their IP on migration).
-			</p>
-		</div>
+		<VMNetworkFields base={name} bind:name={netName} bind:subnet bind:touched={netTouched} />
 	{/if}
 
 	<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">

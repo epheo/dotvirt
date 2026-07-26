@@ -16,6 +16,7 @@
 	import Wizard from './Wizard.svelte';
 	import FormField from './FormField.svelte';
 	import SelectInput from './SelectInput.svelte';
+	import StorageClassSelect from './StorageClassSelect.svelte';
 	import TextInput from './TextInput.svelte';
 
 	let {
@@ -488,15 +489,11 @@
 					bind:value={disk.size}
 					class="w-16 rounded border border-line-strong px-2 py-0.5 text-xs"
 				/>
-				<select
+				<StorageClassSelect
+					options={options?.storageClasses ?? []}
 					bind:value={disk.storageClass}
-					class="min-w-0 flex-1 rounded border border-line-strong px-2 py-0.5 text-xs"
-				>
-					<option value="">cluster default</option>
-					{#each options?.storageClasses ?? [] as sc (sc.name)}
-						<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
-					{/each}
-				</select>
+					class="min-w-0 flex-1 py-0.5! text-xs"
+				/>
 			{:else}
 				<span class="text-xs text-ink-muted"
 					>{disk.name} ({disk.type}{disk.size ? ` · ${disk.size}` : ''}{disk.storageClass

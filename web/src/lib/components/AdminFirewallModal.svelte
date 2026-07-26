@@ -6,6 +6,8 @@
 	import StageModal from './StageModal.svelte';
 	import FormField from './FormField.svelte';
 	import TextInput from './TextInput.svelte';
+	import PeerSelector from './PeerSelector.svelte';
+	import ProtoPortInput from './ProtoPortInput.svelte';
 
 	let {
 		onclose,
@@ -20,8 +22,6 @@
 	// singleton default that backstops everything, Allow/Deny only. Subject and peers
 	// are namespace selectors — Groups of projects. Cluster-scoped + admin-only, so it
 	// is proposed to the platform repo and gated like a CUDN.
-	// port is number | null, not string: <input type="number"> coerces its binding to
-	// a number (or null when cleared), so a string type would make `.trim()` throw.
 	type Row = {
 		action: 'Allow' | 'Deny' | 'Pass';
 		key: string;
@@ -125,16 +125,11 @@
 			></span
 		>
 		<div class="mt-1 flex items-center gap-2">
-			<input
-				bind:value={subjKey}
-				placeholder="tier"
-				class="min-w-0 flex-1 rounded border border-line-strong px-2 py-1 text-xs"
-			/>
-			<span class="text-ink-faint">=</span>
-			<input
+			<PeerSelector
+				bind:key={subjKey}
 				bind:value={subjValue}
-				placeholder="prod"
-				class="min-w-0 flex-1 rounded border border-line-strong px-2 py-1 text-xs"
+				keyPlaceholder="tier"
+				valuePlaceholder="prod"
 			/>
 		</div>
 	</div>
@@ -161,34 +156,15 @@
 					{#if !baseline}<option value="Pass">Pass</option>{/if}
 				</select>
 				<span class="text-xs text-ink-faint">from project</span>
-				<input
-					bind:value={row.key}
-					placeholder="tier"
-					class="w-20 rounded border border-line-strong px-2 py-1 text-xs"
-				/>
-				<span class="text-ink-faint">=</span>
-				<input
+				<PeerSelector
+					bind:key={row.key}
 					bind:value={row.value}
-					placeholder="web"
-					class="w-20 rounded border border-line-strong px-2 py-1 text-xs"
+					keyPlaceholder="tier"
+					valuePlaceholder="web"
+					keyClass="w-20"
+					valueClass="w-20"
 				/>
-				<span class="text-xs text-ink-faint">port</span>
-				<select
-					bind:value={row.proto}
-					class="rounded border border-line-strong px-1.5 py-1 text-xs"
-				>
-					<option value="TCP">TCP</option>
-					<option value="UDP">UDP</option>
-					<option value="SCTP">SCTP</option>
-				</select>
-				<input
-					type="number"
-					bind:value={row.port}
-					placeholder="any"
-					min="1"
-					max="65535"
-					class="w-16 rounded border border-line-strong px-2 py-1 text-xs"
-				/>
+				<ProtoPortInput bind:proto={row.proto} bind:port={row.port} portClass="w-16" />
 				<button
 					onclick={() => removeRow(i)}
 					disabled={rows.length === 1}

@@ -4,7 +4,7 @@
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
-	import SelectInput from './SelectInput.svelte';
+	import StorageClassSelect from './StorageClassSelect.svelte';
 
 	// Storage live migration (the Storage vMotion dialog): pick a target class
 	// per disk; staging rewrites each disk's DataVolume template and sets
@@ -99,17 +99,13 @@
 							{d.storageClass || 'cluster default'}
 						</td>
 						<td class="py-1.5">
-							<SelectInput
+							<StorageClassSelect
+								options={options?.storageClasses ?? []}
 								value={targets[d.name] ?? ''}
 								onchange={(e) => (targets = { ...targets, [d.name]: e.currentTarget.value })}
-							>
-								<option value="">— keep —</option>
-								{#each options?.storageClasses ?? [] as sc (sc.name)}
-									{#if sc.name !== d.storageClass}
-										<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
-									{/if}
-								{/each}
-							</SelectInput>
+								emptyLabel="— keep —"
+								exclude={d.storageClass}
+							/>
 						</td>
 					</tr>
 				{/each}

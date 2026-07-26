@@ -7,7 +7,7 @@
 	import NamespaceSelect from './NamespaceSelect.svelte';
 	import FormField from './FormField.svelte';
 	import TextInput from './TextInput.svelte';
-	import SelectInput from './SelectInput.svelte';
+	import StorageClassSelect from './StorageClassSelect.svelte';
 
 	// Image upload (OVF-import analog). dotvirt creates the upload-target
 	// DataVolume + mints a token; the browser then streams the file STRAIGHT to
@@ -165,12 +165,7 @@
 					<TextInput bind:value={size} placeholder="10Gi" mono />
 				</FormField>
 				<FormField label="Storage class">
-					<SelectInput bind:value={storageClass}>
-						<option value="">cluster default</option>
-						{#each options?.storageClasses ?? [] as sc (sc.name)}
-							<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
-						{/each}
-					</SelectInput>
+					<StorageClassSelect options={options?.storageClasses ?? []} bind:value={storageClass} />
 				</FormField>
 			</div>
 			{#if file}
