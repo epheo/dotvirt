@@ -6,6 +6,7 @@
 	import { Check, X } from 'lucide-svelte';
 	import { api, type Permissions } from '$lib/api';
 	import { resource } from '$lib/resource.svelte';
+	import Note from './Note.svelte';
 
 	let { namespaces }: { namespaces: string[] } = $props();
 
@@ -21,9 +22,7 @@
 </script>
 
 {#if error}
-	<div class="rounded border border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
-		Couldn't read permissions: {error}
-	</div>
+	<Note tone="warn" border>Couldn't read permissions: {error}</Note>
 {:else if !data}
 	<div class="py-8 text-center text-sm text-ink-faint">Checking your access…</div>
 {:else}

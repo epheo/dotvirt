@@ -13,6 +13,7 @@
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
 	import { validName, NAME_HINT } from '$lib/validate';
 	import CheckGroup from './CheckGroup.svelte';
+	import Note from './Note.svelte';
 	import Wizard from './Wizard.svelte';
 	import FormField from './FormField.svelte';
 	import SelectInput from './SelectInput.svelte';
@@ -233,11 +234,9 @@
 
 {#snippet stepCompute()}
 	{#if optionsError}
-		<div
-			class="mb-3 rounded border border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink"
-		>
+		<Note tone="warn" border class="mb-3">
 			{optionsError} — the instance type / preference dropdowns may be empty.
-		</div>
+		</Note>
 	{/if}
 
 	<!-- Sizing mode: CPU/memory OR an instance type, never both -->
@@ -366,10 +365,10 @@
 				{/if}
 			</div>
 			{#if customScheduling}
-				<p class="rounded border border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
+				<Note tone="warn" border>
 					This VM carries hand-written affinity or node selection — placement is managed in git, not
 					from this form.
-				</p>
+				</Note>
 			{:else}
 				{#each form.groups as group, i (i)}
 					<div

@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { ChevronDown, ChevronRight, Folder, TriangleAlert } from 'lucide-svelte';
 	import { api, type DraftView, type ProposeResult } from '$lib/api';
+	import { draftKindTone, TONE_PILL } from '$lib/status';
 	import ChangeList from './ChangeList.svelte';
 	import ErrorNote from './ErrorNote.svelte';
 	import GitOpsStepper from './GitOpsStepper.svelte';
+	import Note from './Note.svelte';
 
 	// One project's staged-changes lane: the items, their diffs, and the propose
 	// form. All form state is lane-local, so a lane that disappears (proposed or
@@ -123,24 +125,18 @@
 	<!-- Recomputed every fetch: what ArgoCD would prune that this draft does not
 	     speak for. Shows on empty drafts so recovery warns BEFORE the first merge. -->
 	{#if draft.warning}
-		<div
-			class="mb-2 flex items-start gap-2 rounded bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink"
-		>
+		<Note tone="warn" class="mb-2 flex items-start gap-2">
 			<TriangleAlert size={14} class="mt-0.5 shrink-0" />
 			<span>{draft.warning}</span>
-		</div>
+		</Note>
 	{/if}
 
 	{#each draft.items as item (itemKey(item.namespace, item.name, item.resource))}
 		{@const k = itemKey(item.namespace, item.name, item.resource)}
 		<div class="mb-2 rounded border border-line">
 			<div class="flex items-center gap-2 border-b border-line-soft px-3 py-2">
-				<span
-					class="rounded px-1.5 py-0.5 text-xs {item.kind === 'delete'
-						? 'bg-danger-soft text-danger-ink'
-						: item.kind === 'create'
-							? 'bg-ok-soft text-ok-ink'
-							: 'bg-accent-soft text-accent-ink'}">{item.kind}</span
+				<span class="rounded px-1.5 py-0.5 text-xs {TONE_PILL[draftKindTone(item.kind)]}"
+					>{item.kind}</span
 				>
 				<span class="font-medium text-ink">{item.namespace}/{item.name}</span>
 				<button

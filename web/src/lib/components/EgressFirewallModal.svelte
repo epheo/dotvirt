@@ -2,6 +2,7 @@
 	import { Plus, Trash2 } from 'lucide-svelte';
 	import { api, type EgressFirewallCreate, type EgressFirewallRule } from '$lib/api';
 	import { TERMS } from '$lib/vocab';
+	import Note from './Note.svelte';
 	import StageModal from './StageModal.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
 	import ProtoPortInput from './ProtoPortInput.svelte';
@@ -131,9 +132,9 @@
 		{/each}
 	</div>
 
-	<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">
+	<Note tone="neutral">
 		The {TERMS.gatewayFirewall.nsx.toLowerCase()} controls north-south traffic leaving this project's
 		VMs to external destinations (it is not an east-west, VM-to-VM control — that is the Distributed Firewall).
 		One per namespace; staged into the project's repo and applied by its Argo app.
-	</p>
+	</Note>
 </StageModal>

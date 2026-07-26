@@ -3,6 +3,7 @@
 	import { api, type AdminNetworkPolicyCreate, type AdminPolicyRule } from '$lib/api';
 	import { validName, NAME_HINT } from '$lib/validate';
 	import ChoiceCards from './ChoiceCards.svelte';
+	import Note from './Note.svelte';
 	import StageModal from './StageModal.svelte';
 	import FormField from './FormField.svelte';
 	import TextInput from './TextInput.svelte';
@@ -176,10 +177,10 @@
 		{/each}
 	</div>
 
-	<p class="rounded bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
+	<Note tone="warn">
 		Cluster-wide and admin-only. {#if baseline}The baseline is the default backstop applied beneath
 			every tenant NetworkPolicy.{:else}An Admin Policy overrides tenant NetworkPolicies — use <strong
 				>Pass</strong
 			> to defer a decision back to them.{/if} Proposed to the platform repository.
-	</p>
+	</Note>
 </StageModal>

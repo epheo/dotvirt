@@ -5,6 +5,8 @@
 	import { resource, type Resource } from '$lib/resource.svelte';
 	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
 	import ErrorNote from './ErrorNote.svelte';
+	import Note from './Note.svelte';
+	import StatusDot from './StatusDot.svelte';
 
 	let { vm }: { vm: VM } = $props();
 
@@ -105,10 +107,10 @@
 	<!-- Restore needs a stopped VM (KubeVirt rejects a running target), but power
 	     is PR-gated — so spell out the path rather than just greying the button. -->
 	{#if running && snapshots?.some((s) => s.readyToUse)}
-		<p class="rounded border border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
+		<Note tone="warn" border>
 			Restore is disabled while the VM is running. Set its power to <strong>Off</strong> (via a pull request
 			from Edit Settings), and once it's stopped you can roll back to a snapshot here.
-		</p>
+		</Note>
 	{/if}
 
 	{#if snapshots && snapshots.length}
@@ -136,15 +138,15 @@
 						<td class="py-2 pr-3 whitespace-nowrap">
 							{#if s.readyToUse}
 								<span class="inline-flex items-center gap-1.5 text-ok-ink">
-									<span class="h-1.5 w-1.5 rounded-full bg-ok"></span> Ready
+									<StatusDot tone="ok" size="xs" /> Ready
 								</span>
 							{:else if s.phase === 'Failed'}
 								<span class="inline-flex items-center gap-1.5 text-danger-ink" title={s.error}>
-									<span class="h-1.5 w-1.5 rounded-full bg-danger"></span> Failed
+									<StatusDot tone="danger" size="xs" /> Failed
 								</span>
 							{:else}
 								<span class="inline-flex items-center gap-1.5 text-warn-ink">
-									<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-warn"></span> Creating…
+									<StatusDot tone="warn" size="xs" pulse /> Creating…
 								</span>
 							{/if}
 						</td>

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api, type PhysicalAdapter, type UplinkCreate } from '$lib/api';
 	import { validName, NAME_HINT } from '$lib/validate';
+	import Note from './Note.svelte';
 	import StageModal from './StageModal.svelte';
 	import FormField from './FormField.svelte';
 	import TextInput from './TextInput.svelte';
@@ -89,9 +90,9 @@
 			<TextInput bind:value={bridge} placeholder={name ? `br-${name}` : 'br-physnet'} mono />
 		</FormField>
 	</div>
-	<p class="rounded bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
+	<Note tone="warn">
 		Creates an OVS bridge enslaving this NIC on {node || 'all worker nodes'} and maps it to the physical
 		network — it changes node networking, so review the PR carefully. Cluster-scoped — proposed to the
 		platform repository. Requires the NMState operator.
-	</p>
+	</Note>
 </StageModal>

@@ -4,6 +4,7 @@
 	import { TERMS } from '$lib/vocab';
 	import CheckGroup from './CheckGroup.svelte';
 	import ChoiceCards from './ChoiceCards.svelte';
+	import Note from './Note.svelte';
 	import StageModal from './StageModal.svelte';
 	import FormField from './FormField.svelte';
 	import TextInput from './TextInput.svelte';
@@ -108,7 +109,7 @@
 		<CheckGroup items={namespaces.map((ns) => ({ value: ns }))} bind:selected={selectedNs} />
 	</div>
 
-	<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">
+	<Note tone="neutral">
 		{#if kind === 'snat'}
 			A {TERMS.snat.nsx} pool ({TERMS.snat.backing}) pins the selected projects' north-south egress
 			to these fixed, routable source IPs.
@@ -117,5 +118,5 @@
 			these static next-hop gateways.
 		{/if}
 		Cluster-scoped — proposed to the platform repository.
-	</p>
+	</Note>
 </StageModal>

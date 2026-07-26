@@ -3,6 +3,7 @@
 	import { api, type NetworkPolicyCreate, type PolicyRule, type VM } from '$lib/api';
 	import { TERMS } from '$lib/vocab';
 	import { validName, NAME_HINT } from '$lib/validate';
+	import Note from './Note.svelte';
 	import StageModal from './StageModal.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
 	import FormField from './FormField.svelte';
@@ -155,9 +156,9 @@
 		{/each}
 	</div>
 
-	<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">
+	<Note tone="neutral">
 		The {TERMS.dfw.nsx.toLowerCase()} controls east-west, VM-to-VM traffic. Selecting a {TERMS.group
 			.nsx} default-denies all other ingress to it, so only the sources above may reach it. Staged into
 		the project's repo and applied by its Argo app.
-	</p>
+	</Note>
 </StageModal>

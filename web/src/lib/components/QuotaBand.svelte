@@ -2,6 +2,7 @@
 	import { api, type NamespaceQuota } from '$lib/api';
 	import { bytes, cores } from '$lib/format';
 	import { resource } from '$lib/resource.svelte';
+	import { usageLevelColor } from '$lib/status';
 
 	// ResourceQuota usage bars for a container scope (project / namespace) —
 	// the quota-aware capacity band. Self-contained: fetches its own data, so
@@ -17,8 +18,9 @@
 	// Parents pass an inline scope literal (recreated each render); key on its
 	// value so refetch fires on real scope changes only, not every parent render.
 	const key = $derived(`${scope.project ?? ''}|${scope.namespace ?? ''}`);
-	const qRes = resource<NamespaceQuota[]>(() => key, () =>
-		api.quotas({ project: scope.project, namespace: scope.namespace }),
+	const qRes = resource<NamespaceQuota[]>(
+		() => key,
+		() => api.quotas({ project: scope.project, namespace: scope.namespace }),
 	);
 	const quotas = $derived(qRes.failed ? [] : qRes.data);
 
@@ -28,9 +30,6 @@
 		return String(v);
 	}
 	const pct = (used: number, hard: number) => (hard > 0 ? Math.min(100, (used / hard) * 100) : 0);
-	// vCenter-style escalation as usage nears the cap.
-	const barColor = (p: number) =>
-		p > 90 ? 'var(--color-danger)' : p > 75 ? 'var(--color-warn)' : 'var(--chart-1)';
 </script>
 
 {#if quotas && quotas.length}
@@ -55,7 +54,7 @@
 							<div class="mt-0.5 h-1.5 overflow-hidden rounded-full bg-inset-strong">
 								<div
 									class="h-full rounded-full"
-									style="width:{p}%;background-color:{barColor(p)}"
+									style="width:{p}%;background-color:{usageLevelColor(p)}"
 								></div>
 							</div>
 						</div>

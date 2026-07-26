@@ -21,6 +21,7 @@
 	import PowerDot from './PowerDot.svelte';
 	import Snapshots from './Snapshots.svelte';
 	import StagedBadge from './StagedBadge.svelte';
+	import StatusDot from './StatusDot.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 	import TabBar from './TabBar.svelte';
 	import VMConfigure from './VMConfigure.svelte';
@@ -335,7 +336,7 @@
 			<div
 				class="flex items-center gap-2 border-b border-select bg-select-soft px-4 py-1.5 text-xs text-accent-ink"
 			>
-				<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-accent"></span>
+				<StatusDot tone="info" size="xs" pulse />
 				Live-migrating{#if vm.migration.sourceNode}&nbsp;from {vm.migration.sourceNode}{/if}
 				to {vm.migration.targetNode || '…'}{#if duration(vm.migration.startedAt)}&nbsp;· started {duration(
 						vm.migration.startedAt,

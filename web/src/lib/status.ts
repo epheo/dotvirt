@@ -70,6 +70,29 @@ export function severityTone(severity?: string): Tone {
 	return severity === 'critical' ? 'danger' : severity === 'warning' ? 'warn' : 'neutral';
 }
 
+// Staged-change kind → tone (Changes lane pills). Compact badges (tree rows,
+// StagedBadge) deliberately collapse create/edit to info: an adopted VM's row
+// reads "staged", not "healthy".
+export function draftKindTone(kind: string): Tone {
+	return kind === 'delete' ? 'danger' : kind === 'create' ? 'ok' : 'info';
+}
+
+const PHASE_TEXT: Record<string, string> = {
+	running: 'text-ok-ink',
+	paused: 'text-warn-ink',
+	failed: 'text-danger',
+};
+
+// VM-count tiles: lowercase phase rollup key → text class; the rest stay soft ink.
+export function phaseTextTone(phase: string): string {
+	return PHASE_TEXT[phase] ?? 'text-ink-soft';
+}
+
+// vCenter-style escalation as utilization nears capacity (pct is 0-100).
+export function usageLevelColor(pct: number, base = 'var(--chart-1)'): string {
+	return pct > 90 ? 'var(--color-danger)' : pct > 75 ? 'var(--color-warn)' : base;
+}
+
 // A project's ArgoCD rollup → one tone + label, most-alarming state first. Returns
 // null for a clean (Synced + Healthy) or not-yet-known project, so a dense tree shows a
 // badge only when something needs attention or is in flight — green stays implicit.

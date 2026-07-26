@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api, type ClusterSummary } from '$lib/api';
 	import { resource } from '$lib/resource.svelte';
+	import { phaseTextTone } from '$lib/status';
 	import HostBalance from './HostBalance.svelte';
 	import HostCapacityCard from './HostCapacityCard.svelte';
 	import IssuesCard from './IssuesCard.svelte';
@@ -18,9 +19,13 @@
 
 	// Keyed on a stable scope string; old data stays up while a scope switch loads.
 	const scopeKey = $derived(`${scope.project ?? ''}|${scope.namespace ?? ''}|${scope.node ?? ''}`);
-	const summary = resource<ClusterSummary>(() => scopeKey, () => api.clusterSummary(scope), {
-		poll: 30000,
-	});
+	const summary = resource<ClusterSummary>(
+		() => scopeKey,
+		() => api.clusterSummary(scope),
+		{
+			poll: 30000,
+		},
+	);
 	const data = $derived(summary.data);
 	const loading = $derived(summary.loading);
 	const failed = $derived(summary.failed);
@@ -36,11 +41,6 @@
 		'succeeded',
 		'failed',
 	];
-	const phaseColor: Record<string, string> = {
-		running: 'text-ok-ink',
-		paused: 'text-warn-ink',
-		failed: 'text-danger',
-	};
 	const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 	// Overcommit ratio = committed-to-VMs : node-allocatable (vCenter's "vCPU
@@ -99,7 +99,7 @@
 						.filter(([, n]) => n > 0)
 						.sort(([a], [b]) => PHASE_ORDER.indexOf(a) - PHASE_ORDER.indexOf(b)) as [phase, n] (phase)}
 						<div class="text-center">
-							<div class="text-xl font-semibold {phaseColor[phase] ?? 'text-ink-soft'}">{n}</div>
+							<div class="text-xl font-semibold {phaseTextTone(phase)}">{n}</div>
 							<div class="text-[11px] text-ink-muted">{cap(phase)}</div>
 						</div>
 					{/each}
