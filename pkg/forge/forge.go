@@ -54,10 +54,9 @@ func FileToken(path string) TokenSource {
 // repo) varies per project, derived from that project's git repo URL, but the
 // forge endpoint + token are shared. Returns nil if the forge isn't configured.
 type Factory struct {
-	baseURL  string
-	tokenFn  TokenSource
-	insecure bool
-	http     *http.Client
+	baseURL string
+	tokenFn TokenSource
+	http    *http.Client
 }
 
 // NewFactory builds a Factory from the shared forge endpoint + a static token.
@@ -85,10 +84,9 @@ func NewFactoryFnCA(baseURL string, tokenFn TokenSource, insecure bool, caFile s
 		return nil
 	}
 	return &Factory{
-		baseURL:  strings.TrimRight(baseURL, "/"),
-		tokenFn:  tokenFn,
-		insecure: insecure,
-		http:     httpClient(insecure, caFile),
+		baseURL: strings.TrimRight(baseURL, "/"),
+		tokenFn: tokenFn,
+		http:    httpClient(insecure, caFile),
 	}
 }
 
