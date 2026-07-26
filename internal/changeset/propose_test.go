@@ -205,6 +205,7 @@ func (f *proposeFixture) draftCount(t *testing.T) int {
 // draft is cleared.
 func TestProposeCreatesPR(t *testing.T) {
 	f := newProposeFixture(t,
+		when("GET", "/pulls", http.StatusOK, "[]"),
 		when("POST", "/pulls", http.StatusCreated, `{"number":1,"state":"open","html_url":"http://forge/pulls/1"}`),
 	)
 	out := f.stageAndPropose(t)
