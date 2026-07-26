@@ -28,7 +28,9 @@ either as **plain manifests / Helm** (any cluster, no OLM) or as an **OLM bundle
 ```
 api/v1alpha1/      Dotvirt CRD types (spec/status + conditions)
 internal/platform/ OpenShift-vs-Kubernetes detection
+internal/deps/     discovery probe for the ArgoCD/KubeVirt prerequisites
 internal/controller/ phased reconcile (deps → render → forge bootstrap)
+internal/install/  typed renderers for every applied resource
 cmd/               manager entrypoint (leader election, health, metrics)
 config/            generated CRD + RBAC (make manifests) + samples
 ```
@@ -57,13 +59,17 @@ install):
 - **Workload** — the ServiceAccount, drafts PVC, Service, and Deployment, plus a
   **Route** (OpenShift) or **Ingress** (vanilla Kubernetes), owner-referenced to the
   CR for automatic cleanup.
-- **GitOps wiring** — the dotvirt read-RBAC, the shared-controller apply role, the
-  authoring-signal role, the `dotvirt-tenants` / `dotvirt-platform` AppProjects, the
-  per-project ApplicationSet, the static platform Application, and the Argo
-  repo-credentials. These are cluster-scoped, so a finalizer reclaims them on delete.
-- **Forge** — bootstraps the platform git repo (`forge.EnsureRepo`, the imperative
-  step a declarative installer can't do) and registers one org-level forge→ArgoCD
-  webhook for instant sync.
+- **GitOps wiring** — bindings of the three static operand ClusterRoles (shipped in
+  `config/rbac/operand_roles.yaml`; the operator only `bind`s them, never authors
+  roles), the `dotvirt-tenants` / `dotvirt-platform` AppProjects, the per-project
+  ApplicationSet, the static platform Application, and the Argo repo-credentials.
+  These are cluster-scoped, so a finalizer reclaims them on delete.
+- **Forge** — optionally stands up a managed Forgejo (`spec.forge.managed`,
+  eval-grade: single pod, SQLite, PVC that survives uninstall), mints its scoped
+  bot token, bootstraps the platform git repo (`forge.EnsureRepo`, the imperative
+  step a declarative installer can't do), and registers one org-level forge→ArgoCD
+  webhook for instant sync. The forge→dotvirt webhook is app-registered; the
+  operator only observes it into the `DotvirtWebhook` condition.
 
 `-dry-run` server-side-applies every rendered resource with `dryRun=All`: the API
 server validates schema, admission, and RBAC, and nothing is persisted — a spec
@@ -106,8 +112,7 @@ isn't publicly trusted, mount the signing CA into the pod and set
 - **`make docker-build`** — build the operator image (from the repo-root context).
 - **`make deploy`** — install the operator in-cluster: `config/default` (CRD + RBAC +
   the manager Deployment) applied with kustomize. Set the image via the `images:`
-  block in `config/default/kustomization.yaml`. Distribution-agnostic — the same tree
-  is Helm-able.
+  block in `config/default/kustomization.yaml`.
 - **`make bundle`** — generate the OLM bundle for OperatorHub (needs `operator-sdk`
   on PATH; merges the CSV base in `config/manifests/bases/` with the generated CRD +
   RBAC + Deployment). Building/pushing the bundle image to a catalog is a release step.

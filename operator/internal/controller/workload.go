@@ -86,8 +86,7 @@ func (r *DotvirtReconciler) resolveExposureType(dv *dotvirtv1alpha1.Dotvirt) str
 
 // exposureFor builds the external exposure of the named Service for the resolved
 // type: a Route on OpenShift (host may be empty — the router then assigns one), an
-// Ingress on vanilla Kubernetes (host required), nil for the not-yet-implemented
-// Gateway type.
+// Ingress on vanilla Kubernetes (host required).
 func (r *DotvirtReconciler) exposureFor(dv *dotvirtv1alpha1.Dotvirt, name string, port int32, host string) client.Object {
 	switch r.resolveExposureType(dv) {
 	case "route":

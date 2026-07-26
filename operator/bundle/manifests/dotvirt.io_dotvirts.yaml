@@ -146,11 +146,12 @@ spec:
                     description: |-
                       IngressType selects how the dotvirt Route is exposed. "auto" picks Route on
                       OpenShift and Ingress on vanilla Kubernetes (the operator detects the platform).
+                      No gateway value: nothing renders it, so admission rejects it instead of a
+                      silent no-exposure install.
                     enum:
                     - auto
                     - route
                     - ingress
-                    - gateway
                     type: string
                 type: object
               metrics:

@@ -40,7 +40,9 @@ const (
 
 // IngressType selects how the dotvirt Route is exposed. "auto" picks Route on
 // OpenShift and Ingress on vanilla Kubernetes (the operator detects the platform).
-// +kubebuilder:validation:Enum=auto;route;ingress;gateway
+// No gateway value: nothing renders it, so admission rejects it instead of a
+// silent no-exposure install.
+// +kubebuilder:validation:Enum=auto;route;ingress
 type IngressType string
 
 // ForgeSpec points dotvirt at its git forge and the platform-tier repo. The forge
