@@ -284,3 +284,20 @@ func TestArgoSourcesExcludeTemplateLibrary(t *testing.T) {
 		t.Fatalf("PlatformApplication exclude = %v", dir["exclude"])
 	}
 }
+
+// spec.forge.insecureTLS must reach ArgoCD's git client: a managed forge on a
+// router-assigned host serves the self-signed ingress wildcard, and without
+// insecure on the repo-creds template every app wedges in ComparisonError, fixable
+// only by hand-trusting the host in argocd-tls-certs-cm.
+func TestRepoCredsCarriesInsecureTLS(t *testing.T) {
+	dv := testDotvirt()
+	dv.Spec.Forge.InsecureTLS = true
+	s := RepoCredsSecret(dv, "openshift-gitops", "https://forge.example/dotvirt", "bot", "tok")
+	if s.StringData["insecure"] != "true" {
+		t.Errorf("insecureTLS not propagated to repo-creds: %v", s.StringData)
+	}
+	dv.Spec.Forge.InsecureTLS = false
+	if _, ok := RepoCredsSecret(dv, "openshift-gitops", "https://forge.example/dotvirt", "bot", "tok").StringData["insecure"]; ok {
+		t.Error("insecure key must be absent for a verified forge")
+	}
+}
