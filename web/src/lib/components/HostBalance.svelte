@@ -13,7 +13,11 @@
 	// and only out-of-band workers stay individually drawn — the hand-off is
 	// geometric (see dotstrip.ts), never a node-count threshold.
 	// metrics off or no worker series: the card simply absents itself
-	const hl = resource<HostLoad>(() => '', () => api.hostLoad(), { poll: 30000 });
+	const hl = resource<HostLoad>(
+		() => '',
+		() => api.hostLoad(),
+		{ poll: 30000 },
+	);
 	const data = $derived(hl.failed ? null : hl.data);
 
 	const W = 640;
