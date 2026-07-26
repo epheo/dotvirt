@@ -6,20 +6,20 @@ import type { Disk, EditRequest, NIC, PlacementGroup, Power, VM } from '$lib/api
 
 // Devices carry a removed flag; rows added in the dialog are marked isNew so
 // the diff can tell additions from removals of pre-existing devices.
-export interface DiskRow extends Disk {
+interface DiskRow extends Disk {
 	removed: boolean;
 	isNew: boolean;
 }
-export interface NicRow extends NIC {
+interface NicRow extends NIC {
 	removed: boolean;
 	isNew: boolean;
 }
-export interface GroupRow extends PlacementGroup {
+interface GroupRow extends PlacementGroup {
 	removed: boolean;
 	isNew: boolean;
 }
 
-export interface EditForm {
+interface EditForm {
 	power: Power;
 	cpuCores?: number;
 	memory: string;

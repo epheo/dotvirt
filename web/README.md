@@ -39,4 +39,6 @@ npm run build
 
 You can preview the production build with `npm run preview`.
 
+Screenshot drives: `node shot.mjs <scene>` (list scenes with `node shot.mjs --list`).
+
 > To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.

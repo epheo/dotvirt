@@ -1,7 +1,7 @@
 import { browser } from '$app/environment';
 import { persisted } from './persisted.svelte';
 
-export type ThemeMode = 'light' | 'dark' | 'system';
+type ThemeMode = 'light' | 'dark' | 'system';
 
 // The persisted preference is the mode; `resolved` is what's on screen.
 // app.html stamps data-theme before first paint (FOUC guard); this store owns

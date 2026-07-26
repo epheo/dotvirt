@@ -2,7 +2,7 @@ import type { Template, VM } from '$lib/api';
 
 // Every modal the shell can show, as one discriminated union — the shell
 // renders exactly one, and opening any modal is a single assignment.
-export type AppModal =
+type AppModal =
 	| { kind: 'newVM'; namespaces: string[] | null } // null = all creatable namespaces
 	| { kind: 'newNetwork' }
 	| { kind: 'uplink' }
@@ -26,7 +26,7 @@ export type DetailAction =
 // Right-click context menus — vCenter's signature interaction. The bulk variant
 // (right-click inside a grid multi-selection) renders inside the workspace that
 // owns the selection; the shell renders the other two.
-export type CtxState =
+type CtxState =
 	| { x: number; y: number; kind: 'vm'; vm: VM }
 	| {
 			x: number;
@@ -39,8 +39,8 @@ export type CtxState =
 	  };
 
 // warning is for an action that did what it could: it succeeded, but not wholly.
-export type ToastKind = 'success' | 'error' | 'warning' | 'info';
-export type Toast = {
+type ToastKind = 'success' | 'error' | 'warning' | 'info';
+type Toast = {
 	id: number;
 	kind: ToastKind;
 	msg: string;

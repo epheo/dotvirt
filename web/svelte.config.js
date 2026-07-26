@@ -1,12 +1,9 @@
-import adapter from '@sveltejs/adapter-static';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
+// Kit options (adapter, SPA fallback) live in vite.config.ts, the copy the
+// build actually reads; only the preprocessor stays here for svelte-check
+// and prettier, which load this file directly.
 /** @type {import('@sveltejs/kit').Config} */
 export default {
-	preprocess: vitePreprocess(),
-	kit: {
-		// SPA: the +layout sets ssr=false / prerender=true, so adapter-static emits a
-		// single index.html (in build/) that the Go binary serves for every route.
-		adapter: adapter({ fallback: 'index.html', strict: false })
-	}
+	preprocess: vitePreprocess()
 };

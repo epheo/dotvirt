@@ -13,7 +13,7 @@ import { api, Unauthorized, type VM } from '$lib/api';
 import { friendlyError } from '$lib/format';
 import { ui } from '$lib/state/ui.svelte';
 
-export type ActionId =
+type ActionId =
 	| 'restart'
 	| 'pause'
 	| 'unpause'

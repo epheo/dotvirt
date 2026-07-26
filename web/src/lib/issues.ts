@@ -5,7 +5,7 @@
 import type { Inventory, VM } from '$lib/api';
 import { hrefForScope, vmHref } from '$lib/nav';
 
-export type Issue = {
+type Issue = {
 	severity: 'danger' | 'warn';
 	// Display identity: the project, or "namespace/vm".
 	scope: string;

@@ -4,20 +4,20 @@
 // outliers keep their dots. The switch is geometric, never a node-count
 // threshold — a spread-out fleet keeps its dots longer than a piled-up one.
 
-export interface Dot {
+interface Dot {
 	i: number; // index into the input array
 	x: number;
 	y: number;
 	r: number;
 }
 
-export interface StripLayout {
+interface StripLayout {
 	dots: Dot[] | null; // null: density mode — draw the silhouette instead
 	bins: number[]; // per-bin counts (density path input; always filled)
 	binPct: number;
 }
 
-export const BIN_PCT = 2;
+const BIN_PCT = 2;
 const R_MAX = 7;
 const R_MIN = 2.4;
 
