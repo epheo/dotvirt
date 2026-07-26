@@ -19,7 +19,7 @@
 // publishes RBACChanged to invalidate the per-token visible-set cache promptly.
 //
 // On any mutation a reflector publishes its kind to the shared event bus, which the
-// hub (and exporter) subscribe to; the read path doesn't diff anything.
+// hub subscribes to; the read path doesn't diff anything.
 //
 // Authorization is unchanged: the snapshot is global truth, but a user only ever
 // sees the namespaces their own RBAC grants — the filter is the security gate.
@@ -106,8 +106,8 @@ type State struct {
 
 	// Per-store readiness: each reflector's initial LIST (first Replace) landing.
 	// Tracked per store (not a single counter) so a consumer gates on exactly the
-	// stores it reads — the exporter must not stall on a failing VMI reflector, and
-	// nobody waits on the signal-only RoleBinding reflector. Lock-free ExportReady
+	// stores it reads: drift must not stall on a failing VMI reflector, and
+	// nobody waits on the signal-only RoleBinding reflector. Lock-free VMSnapshotReady
 	// reads on the hot path.
 	vmsSynced, vmisSynced, nssSynced atomic.Bool
 	// allSynced is closed once the three readable stores have all synced, so
@@ -120,8 +120,8 @@ type State struct {
 
 // New builds the snapshot's reflectors over sa (dotvirt's ServiceAccount client),
 // watching the namespaces labeled projectLabel. Each reflector publishes its kind to
-// bus whenever the snapshot moves, so the inventory hub rebuilds (and the exporter
-// re-exports); bus is optional (nil disables signalling, e.g. in tests).
+// bus whenever the snapshot moves, so the inventory hub rebuilds; bus is optional
+// (nil disables signalling, e.g. in tests).
 func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 	s := &State{bus: bus, allSynced: make(chan struct{})}
 	s.vms = newIndexer()
@@ -134,8 +134,8 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 	rbac := func() { bus.Publish(eventbus.RBACChanged) }
 	s.specs = []reflectorSpec{
 		// vms: VMSpecChanged is gated on metadata.generation by vmSpecStore, so a
-		// status-only VM write fires only LiveChanged — the exporter (which depends on
-		// VMSpecChanged) doesn't wake on VM-status heartbeats.
+		// status-only VM write fires only LiveChanged, so consumers of VMSpecChanged
+		// don't wake on VM-status heartbeats.
 		{newVMSpecStore(s.vms, vmSpec, live, func() { s.vmsSynced.Store(true); s.checkSynced() }), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch()},
 		{reflect.NewStore(s.vmis, live, func() { s.vmisSynced.Store(true); s.checkSynced() }), &kubevirtcorev1.VirtualMachineInstance{}, sa.VMIListWatch()},
 		// A namespace move is both a topology change (inventory) and a visibility
@@ -191,17 +191,17 @@ func (s *State) checkSynced() {
 	}
 }
 
-// ExportReady reports whether the stores the exporter reads — VMs and namespaces —
-// have synced. The exporter prunes manifests absent from the snapshot, so it must
-// see a complete VM+namespace view; but it never reads VMIs, so a permanently
-// failing VMI reflector (e.g. a removed RBAC verb) must NOT wedge export. (Whole-
-// snapshot readiness, incl. VMIs, is what WaitForSync's allSynced channel gates.)
-func (s *State) ExportReady() bool {
+// VMSnapshotReady reports whether the VM and namespace stores have synced. Drift and
+// adoption read absence as meaning: a VM missing from the snapshot reads as not running.
+// They never read VMIs, so a permanently failing VMI reflector (e.g. a removed RBAC
+// verb) must NOT wedge them. (Whole-snapshot readiness, incl. VMIs, is what
+// WaitForSync's allSynced channel gates.)
+func (s *State) VMSnapshotReady() bool {
 	return s.vmsSynced.Load() && s.nssSynced.Load()
 }
 
 // VMObjects returns deep copies of the full VirtualMachine objects in the given
-// namespaces — the exporter's input, replacing a per-tick SA LIST per project.
+// namespaces: what drift and adoption serialize, never a per-request SA LIST.
 // Copies, because reflector-owned objects must never escape to be mutated.
 func (s *State) VMObjects(namespaces []string) []kubevirtcorev1.VirtualMachine {
 	want := make(map[string]bool, len(namespaces))
@@ -322,8 +322,8 @@ func (s *State) WorkloadNetworks(namespace, name string) (podNet bool, defaultNe
 }
 
 // Namespaces returns the project-labeled namespaces in the snapshot as the
-// resolver's input type (Name + labels/annotations), so the read path and the
-// exporter feed project.Resolve directly. Pure in-memory — no cluster call.
+// resolver's input type (Name + labels/annotations), so the read path feeds
+// project.Resolve directly. Pure in-memory, no cluster call.
 func (s *State) Namespaces() []project.Namespace {
 	objs := s.nss.List()
 	out := make([]project.Namespace, 0, len(objs))

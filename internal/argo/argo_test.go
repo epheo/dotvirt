@@ -228,3 +228,45 @@ func TestDriftFromAppsEmptySyncSkipped(t *testing.T) {
 		t.Errorf("a VM present only in syncResult must be absent from drift (NotTracked), got %+v", got)
 	}
 }
+
+// An app that cannot compare its desired state (unclonable repo, a manifest the
+// AppProject forbids, a bad path) never runs an operation, so operationState is absent
+// and the pre-existing message path yields nothing. Without the condition the project
+// shows a bare Unknown with no reason, and its badge isn't even clickable. Non-error
+// conditions must stay out: only an error explains a stuck app.
+func TestAppSyncSurfacesErrorCondition(t *testing.T) {
+	app := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "argoproj.io/v1alpha1",
+		"kind":       "Application",
+		"metadata":   map[string]any{"namespace": "openshift-gitops", "name": "gone"},
+		"spec":       map[string]any{"source": map[string]any{"repoURL": "https://forge.example/dotvirt/gone.git"}},
+		"status": map[string]any{
+			// No operationState at all: nothing ever ran.
+			"sync": map[string]any{"status": "Unknown"},
+			"conditions": []any{
+				map[string]any{"type": "SharedResourceWarning", "message": "ignore me"},
+				map[string]any{"type": "ComparisonError", "message": "repository not found"},
+			},
+		},
+	}}
+
+	got := appSyncFromApps([]any{app})[forge.NormalizeRepoURL("https://forge.example/dotvirt/gone.git")]
+	if got.SyncError != "repository not found" {
+		t.Errorf("ComparisonError not surfaced: %q", got.SyncError)
+	}
+	if got.Sync != model.SyncUnknown {
+		t.Errorf("sync = %v, want Unknown", got.Sync)
+	}
+}
+
+// A healthy app must not pick up stray condition text as an error.
+func TestAppSyncCleanAppHasNoError(t *testing.T) {
+	app := appWithSync("ok", "https://forge.example/dotvirt/ok.git", "Synced", "Healthy", "Succeeded", "successfully synced")
+	app.Object["status"].(map[string]any)["conditions"] = []any{
+		map[string]any{"type": "SharedResourceWarning", "message": "not an error"},
+	}
+	if got := appSyncFromApps([]any{app})[forge.NormalizeRepoURL("https://forge.example/dotvirt/ok.git")]; got.SyncError != "" {
+		t.Errorf("clean app carries SyncError %q", got.SyncError)
+	}
+}
+

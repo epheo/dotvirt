@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"strings"
 
+	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
@@ -147,16 +149,56 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 	respond(w, result, err)
 }
 
-// handleAdoptNamespace stages every untracked (NotTracked) VM in a namespace into the
-// caller's draft in one shot — the "Adopt N untracked" bulk action. Same per-namespace
-// RBAC gate as the per-VM adopt; the result is one draft the caller proposes as one PR.
+// handleAdoptNamespace brings a whole namespace under GitOps in one draft: everything
+// it runs that git does not describe, not only its VMs, so the namespace does not end
+// up half declared. The capture runs under the caller's own token, so a user adopts
+// exactly what their RBAC lets them read. One draft, proposed as one PR.
 func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
 	ns := r.PathValue("namespace")
 	sc, ok := s.resolveProject(w, r, byNamespace(ns))
 	if !ok {
 		return
 	}
-	result, err := s.draft.AdoptNamespace(sc.id, sc.proj, ns)
+	// A claim is an object tracked by an app on ANOTHER source: capturing it here would
+	// give one object two declaring repos. The project's own app is deliberately not a
+	// claim (git decides what its repo declares; the lost-repo recovery depends on
+	// that), and a snapshot that hasn't listed yet would read every tracked object as
+	// unclaimed and re-capture foreign tiers. nil drift is Argo disabled, where no
+	// annotation can be a live claim.
+	var foreignApps map[string]bool
+	if s.drift != nil {
+		if foreignApps = s.drift.ForeignApps(sc.proj.Repo); foreignApps == nil {
+			fail(w, fmt.Errorf("%w: ArgoCD applications not yet loaded", model.ErrUnavailable))
+			return
+		}
+	}
+	objs, unreadable, err := sc.cluster.AdoptableObjects(r.Context(), []string{ns}, foreignApps)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	// "Nothing to adopt" would be a lie when a kind was unreadable, so say what was missed.
+	if len(objs) == 0 && len(unreadable) > 0 {
+		fail(w, fmt.Errorf("%w: cannot read %s in %s, so there is nothing adoptable you have access to",
+			model.ErrForbidden, strings.Join(unreadable, ", "), ns))
+		return
+	}
+	if len(objs) == 0 {
+		fail(w, fmt.Errorf("%w: nothing to adopt in %s: everything running there is declared in git or managed by another Application", model.ErrInvalid, ns))
+		return
+	}
+	adoptable := make([]changeset.Adoptable, 0, len(objs))
+	for _, o := range objs {
+		adoptable = append(adoptable, changeset.Adoptable{
+			Namespace: o.Namespace, Name: o.Name, Kind: o.Kind, Path: o.Path, Manifest: o.Manifest,
+		})
+	}
+	result, err := s.draft.AdoptNamespace(sc.id, sc.proj, ns, adoptable)
+	if err == nil && len(unreadable) > 0 {
+		// Appended, not assigned: the view may already carry the derived prune warning.
+		result.Warning = changeset.JoinWarning(result.Warning, fmt.Sprintf("%s: you cannot read %s, so any of those stay outside git.",
+			ns, strings.Join(unreadable, ", ")))
+	}
 	respond(w, result, err)
 }
 

@@ -20,9 +20,9 @@ var annotationsToStrip = []string{
 }
 
 // ExportManifest serializes a live VM into a clean, deterministic YAML manifest:
-// apiVersion/kind restored, status dropped, and volatile metadata removed. The
-// same cluster state always produces identical bytes, so re-exports don't churn
-// the running branch.
+// apiVersion/kind restored, status dropped, and volatile metadata removed. The same
+// cluster state always produces identical bytes, so an unchanged VM never reads as
+// drift against the manifest git holds.
 func ExportManifest(vm kubevirtcorev1.VirtualMachine) ([]byte, error) {
 	clean := kubevirtcorev1.VirtualMachine{
 		Spec: vm.Spec,
@@ -79,8 +79,9 @@ func stripAnnotations(in map[string]string) map[string]string {
 	return out
 }
 
-// ExportPath is the repo-relative path a VM's manifest is written to on the
-// running branch: one file per VM, grouped by namespace directory.
+// ExportPath is the repo-relative path a serialized VM's manifest lands at when
+// adopted: one file per VM, grouped by namespace directory (the layout the
+// wizard's generator uses too, so adopt-then-edit converges on one file).
 func ExportPath(vm kubevirtcorev1.VirtualMachine) string {
 	return vm.Namespace + "/" + vm.Name + ".yaml"
 }

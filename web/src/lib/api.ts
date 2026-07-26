@@ -578,6 +578,7 @@ export interface DraftView {
 	branch: string;
 	count: number;
 	items: DraftItem[];
+	warning?: string; // non-fatal degradation of the operation that produced it
 }
 export interface ProposeResult {
 	branch: string;
@@ -1033,8 +1034,11 @@ export async function draftsByProject(
 			}
 		}),
 	);
+	// A warning-only draft still renders: an empty draft whose project has objects
+	// ArgoCD would prune must warn BEFORE anything merges, not after.
 	return results.filter(
-		(r): r is { project: string; draft: DraftView } => !!r && r.draft.count > 0,
+		(r): r is { project: string; draft: DraftView } =>
+			!!r && (r.draft.count > 0 || !!r.draft.warning),
 	);
 }
 

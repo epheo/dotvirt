@@ -24,9 +24,8 @@ type Config struct {
 	// The git https token and the Forge API token are ONE credential (the forge bot):
 	// GitToken is a fallback for ForgeToken; both resolve through ForgeTokenSource so
 	// a rotated token is picked up without restart. See ForgeTokenFile / ForgeToken.
-	GitUsername   string // for https auth (the token comes from ForgeTokenSource)
-	GitToken      string // deprecated alias for ForgeToken (kept for BYO flag compat)
-	RunningBranch string // per-project branch dotvirt owns and writes cluster state to
+	GitUsername string // for https auth (the token comes from ForgeTokenSource)
+	GitToken    string // deprecated alias for ForgeToken (kept for BYO flag compat)
 
 	// Cluster read
 	Kubeconfig     string // path; empty = in-cluster
@@ -41,7 +40,6 @@ type Config struct {
 	// app + AppProject; see deploy/appprojects.yaml).
 	PlatformRepo string
 
-	ExportInterval  time.Duration // how often to export live state to each project's running branch
 	GitPollInterval time.Duration // missed-event backstop: fetch each repo this often when no webhook poke arrives
 	Push            bool          // push commits to the remote (disable for local/offline testing)
 
@@ -118,14 +116,12 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.UIOrigin, "ui-origin", envOr("DOTVIRT_UI_ORIGIN", "http://localhost:5173"), "frontend origin allowed via CORS (empty to disable)")
 	fs.StringVar(&c.GitUsername, "git-username", envOr("DOTVIRT_GIT_USERNAME", "dotvirt"), "git https username (clones/pushes every project repo)")
 	fs.StringVar(&c.GitToken, "git-token", os.Getenv("DOTVIRT_GIT_TOKEN"), "git https token/password")
-	fs.StringVar(&c.RunningBranch, "running-branch", envOr("DOTVIRT_RUNNING_BRANCH", "running"), "per-project branch reflecting live cluster state (dotvirt-owned)")
 
 	fs.StringVar(&c.Kubeconfig, "kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig path (empty = in-cluster)")
 	fs.StringVar(&c.ProjectLabel, "project-label", envOr("DOTVIRT_PROJECT_LABEL", "dotvirt.io/project"), "namespace label whose value names the project")
 	fs.StringVar(&c.RepoAnnotation, "repo-annotation", envOr("DOTVIRT_REPO_ANNOTATION", "dotvirt.io/repo"), "namespace annotation holding the project's git repo URL")
 	fs.StringVar(&c.PlatformRepo, "platform-repo", os.Getenv("DOTVIRT_PLATFORM_REPO"), "platform-tier git repo for cluster-scoped + tenancy manifests (CUDN/NNCP/Namespace); empty disables those creates")
 
-	fs.DurationVar(&c.ExportInterval, "export-interval", 30*time.Second, "how often to export live state to each project's running branch")
 	fs.DurationVar(&c.GitPollInterval, "git-poll-interval", 5*time.Minute, "missed-event backstop: how often to fetch each project repo for head changes when no webhook poke arrives (webhooks are the primary trigger)")
 	fs.BoolVar(&c.Push, "push", envBool("DOTVIRT_PUSH", true), "push commits to the remote (disable for local/offline testing)")
 

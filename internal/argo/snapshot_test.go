@@ -164,3 +164,75 @@ func TestObjectDriftGen(t *testing.T) {
 		t.Errorf("gen did not bump on a segment drift change: %d -> %d", gen, got)
 	}
 }
+// The project's own app is not a claim: after the forge loses the repo the app
+// survives while git declares nothing, and counting it would block re-capturing the
+// very objects recovery exists for. Every other app stays one, under each identity a
+// tracking-id can carry.
+func TestForeignAppsExcludesOwnRepo(t *testing.T) {
+	s := NewSnapshot(nil, nil)
+	if s.ForeignApps("https://forge.example/dotvirt/team-a.git") != nil {
+		t.Fatal("must be nil before the initial LIST, so callers refuse rather than misread")
+	}
+	s.synced.Store(true)
+	for _, a := range []*unstructured.Unstructured{
+		appWithSource("openshift-gitops", "dotvirt-team-a", "https://forge.example/dotvirt/team-a.git", nil),
+		appWithSource("openshift-gitops", "dotvirt-platform", "https://forge.example/dotvirt/platform.git", nil),
+	} {
+		if err := s.apps.Add(a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The repo annotation may differ from the app's source in case and .git suffix;
+	// the join normalizes like every other repo-keyed reader.
+	got := s.ForeignApps("https://forge.example/dotvirt/TEAM-A")
+	if got["dotvirt-team-a"] || got["openshift-gitops_dotvirt-team-a"] {
+		t.Errorf("own app must not be a claim: %v", got)
+	}
+	for _, id := range []string{"dotvirt-platform", "openshift-gitops_dotvirt-platform", "openshift-gitops/dotvirt-platform"} {
+		if !got[id] {
+			t.Errorf("foreign app missing identity %q: %v", id, got)
+		}
+	}
+}
+
+// PrunePending relays what ArgoCD itself would prune for the project's app: live and
+// tracked but absent from git (requiresPruning), scoped to the project's namespaces
+// and sorted so the derived warning is stable across rebuilds.
+func TestPrunePendingRelaysArgoComparison(t *testing.T) {
+	s := NewSnapshot(nil, nil)
+	if s.PrunePending("https://forge.example/dotvirt/team-a.git", []string{"team-a"}) != nil {
+		t.Fatal("must be nil before the initial LIST")
+	}
+	s.synced.Store(true)
+	res := func(kind, ns, name string, prune bool) map[string]any {
+		return map[string]any{"kind": kind, "namespace": ns, "name": name, "requiresPruning": prune}
+	}
+	for _, a := range []*unstructured.Unstructured{
+		appWithSource("openshift-gitops", "dotvirt-team-a", "https://forge.example/dotvirt/team-a.git", []any{
+			res("VirtualMachine", "team-a", "web", true),
+			res("UserDefinedNetwork", "team-a", "backend", true),
+			res("VirtualMachine", "team-a", "db", false),      // declared: not at risk
+			res("VirtualMachine", "elsewhere", "other", true), // another project's namespace
+		}),
+		appWithSource("openshift-gitops", "dotvirt-b", "https://forge.example/dotvirt/team-b.git", []any{
+			res("VirtualMachine", "team-a", "foreign", true), // another repo's app
+		}),
+	} {
+		if err := s.apps.Add(a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := s.PrunePending("https://forge.example/dotvirt/team-a.git", []string{"team-a"})
+	want := []model.ObjectRef{
+		{Kind: "UserDefinedNetwork", Namespace: "team-a", Name: "backend"},
+		{Kind: "VirtualMachine", Namespace: "team-a", Name: "web"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}

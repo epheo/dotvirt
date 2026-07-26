@@ -140,7 +140,7 @@ func testVM(gen int64) *kubevirtcorev1.VirtualMachine {
 
 // TestVMSpecStoreGatesOnGeneration is the core of the export-CPU fix: a status-only
 // VM Update (generation unchanged) must fire LiveChanged but NOT VMSpecChanged, so
-// the exporter doesn't wake on KubeVirt's frequent VM.status writes. Add/Delete and a
+// VMSpecChanged consumers don't wake on KubeVirt's frequent VM.status writes. Add/Delete and a
 // real spec change (generation bump) fire both.
 func TestVMSpecStoreGatesOnGeneration(t *testing.T) {
 	var spec, live int

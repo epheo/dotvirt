@@ -269,7 +269,7 @@ func TestProposeCommitsTemplateEntries(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	c := New(store, git.NewRepoSet(ctx, "", nil, true, nil, time.Hour), nil, nil, "main", "dotvirt/proposed", "running")
+	c := New(store, git.NewRepoSet(ctx, "", nil, true, nil, time.Hour), nil, nil, nil, nil, "main", "dotvirt/proposed")
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 

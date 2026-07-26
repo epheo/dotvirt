@@ -128,6 +128,96 @@ func (s *Snapshot) ProjectDrift() map[string]model.ProjectSync {
 	return s.appSyncCache
 }
 
+// ForeignApps returns the set of live Applications EXCEPT those sourcing ownRepo,
+// under every identity a tracking-id may carry: the bare name, and the "ns_name" /
+// "ns/name" forms used for apps outside Argo's control-plane namespace. It answers the
+// only question adoption asks of the drift plane: does the app named in an object's
+// tracking-id still exist as a claim by ANOTHER source? The project's own app is not a
+// claim: after the forge lost the repo, its app survives while git declares nothing, so
+// counting it would block re-capturing the very objects recovery exists for; git
+// (DeclaredOnBranch) is the authority for the project's own tier. An annotation naming
+// a deleted Application is residue, not a claim. nil before the initial LIST, so a
+// caller can tell "no apps" from "not known yet" and refuse rather than read every
+// tracked object as unclaimed.
+func (s *Snapshot) ForeignApps(ownRepo string) map[string]bool {
+	if !s.synced.Load() {
+		return nil
+	}
+	own := forge.NormalizeRepoURL(ownRepo)
+	out := map[string]bool{}
+	for _, obj := range s.apps.List() {
+		u, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			continue
+		}
+		if own != "" && forge.NormalizeRepoURL(nestedString(u.Object, "spec", "source", "repoURL")) == own {
+			continue
+		}
+		out[u.GetName()] = true
+		out[u.GetNamespace()+"_"+u.GetName()] = true
+		out[u.GetNamespace()+"/"+u.GetName()] = true
+	}
+	return out
+}
+
+// PrunePending returns the objects ArgoCD itself reports it would prune for the apps
+// sourcing repo, within namespaces: live and tracked, but absent from git, per Argo's
+// own last comparison (status.resources[].requiresPruning). That comparison is the
+// single authority on what a merge-triggered sync deletes, so no re-derivation from
+// git can drift from it. nil before the initial LIST; empty for a healthy project.
+func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.ObjectRef {
+	want := make(map[string]bool, len(namespaces))
+	for _, ns := range namespaces {
+		want[ns] = true
+	}
+	own := forge.NormalizeRepoURL(repo)
+	if !s.synced.Load() || own == "" {
+		return nil
+	}
+	var out []model.ObjectRef
+	for _, obj := range s.apps.List() {
+		u, ok := obj.(*unstructured.Unstructured)
+		if !ok || forge.NormalizeRepoURL(nestedString(u.Object, "spec", "source", "repoURL")) != own {
+			continue
+		}
+		resources, found, err := unstructured.NestedSlice(u.Object, "status", "resources")
+		if err != nil || !found {
+			continue
+		}
+		for _, raw := range resources {
+			res, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if prune, _ := res["requiresPruning"].(bool); !prune {
+				continue
+			}
+			ref := model.ObjectRef{
+				Kind:      asString(res, "kind"),
+				Namespace: asString(res, "namespace"),
+				Name:      asString(res, "name"),
+			}
+			if ref.Kind == "" || ref.Name == "" || !want[ref.Namespace] {
+				continue
+			}
+			out = append(out, ref)
+		}
+	}
+	// Deterministic across rebuilds: the warning string derived from this must not
+	// flap between identical frames just because the store scan reordered.
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Namespace != b.Namespace {
+			return a.Namespace < b.Namespace
+		}
+		if a.Kind != b.Kind {
+			return a.Kind < b.Kind
+		}
+		return a.Name < b.Name
+	})
+	return out
+}
+
 // ResourceDrift returns one Argo-managed object's sync/health by identity; ok=false if
 // no Application manages it or the snapshot hasn't synced. General across kinds — the
 // per-object surface VMs and segments (and any future rendered object) share. group/kind

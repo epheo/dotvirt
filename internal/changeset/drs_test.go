@@ -248,7 +248,7 @@ func TestProposeDRSCommitsFileSet(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repos := git.NewRepoSet(ctx, "", nil, true, nil, time.Hour)
-	c := New(store, repos, nil, nil, "main", "dotvirt/proposed", "running")
+	c := New(store, repos, nil, nil, nil, nil, "main", "dotvirt/proposed")
 	id := auth.Identity{Username: "admin"}
 	bare := seedBareFiles(t, nil)
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}

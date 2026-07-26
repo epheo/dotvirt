@@ -7,10 +7,10 @@ import (
 
 // vmSpecStore wraps the VirtualMachine indexer and splits its delta stream into two
 // signals: onLive fires on EVERY mutation (VM status/existence — the live tree),
-// while onSpec fires only when the exported manifest set could have moved — a VM was
+// while onSpec fires only when the serialized manifest set could have moved: a VM was
 // added, removed, or its metadata.generation (i.e. its spec) changed. KubeVirt
 // writes VM.status frequently with generation unchanged; gating onSpec on generation
-// is what keeps the exporter from re-running its marshal pipeline on every such
+// is what keeps consumers from re-running their marshal pipeline on every such
 // status heartbeat (it subscribes to VMSpecChanged, not LiveChanged).
 //
 // Single-threaded: a reflector drives one store from one goroutine, so the gen map
@@ -46,7 +46,7 @@ func (c *vmSpecStore) Add(obj any) error {
 	if k, g, ok := keyAndGen(obj); ok {
 		c.gen[k] = g
 	}
-	c.onSpec() // a new VM grows the exported manifest set
+	c.onSpec() // a new VM grows the serialized manifest set
 	c.onLive()
 	return nil
 }
@@ -88,8 +88,8 @@ func (c *vmSpecStore) Replace(list []any, rv string) error {
 		return err
 	}
 	// Rebuild the generation map from the relist. Don't diff across the gap (a relist
-	// is rare — a watch bookmark gap / 410 Gone; a conservative spec signal is correct
-	// and the exporter's content-signature skip makes a spurious wake a no-op).
+	// is rare (a watch bookmark gap / 410 Gone); a conservative spec signal is correct,
+	// and consumers reconcile by content, so a spurious wake is a no-op).
 	c.gen = make(map[string]int64, len(list))
 	for _, obj := range list {
 		if k, g, ok := keyAndGen(obj); ok {

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChevronDown, ChevronRight, Folder } from 'lucide-svelte';
+	import { ChevronDown, ChevronRight, Folder, TriangleAlert } from 'lucide-svelte';
 	import { api, type DraftView, type ProposeResult } from '$lib/api';
 	import ChangeList from './ChangeList.svelte';
 	import ErrorNote from './ErrorNote.svelte';
@@ -41,10 +41,14 @@
 		proposed = false;
 	});
 
-	const itemKey = (ns: string, name: string) => `${ns}/${name}`;
+	// Mirrors the draft store's own key (empty resource == vm): whole-namespace adoption
+	// can stage a VM and a policy of the same ns/name, and a key without the resource
+	// would both collide the unstage spinner and throw each_key_duplicate.
+	const itemKey = (ns: string, name: string, resource?: string) =>
+		`${resource || 'vm'}:${ns}/${name}`;
 
 	async function unstage(ns: string, name: string, resource?: string) {
-		const k = itemKey(ns, name);
+		const k = itemKey(ns, name, resource);
 		if (unstaging) return;
 		unstaging = k;
 		error = '';
@@ -99,21 +103,37 @@
 		<Folder size={14} class="text-accent" />
 		<span class="font-semibold text-ink-soft">{project}</span>
 		<span class="text-xs text-ink-faint">({draft.count})</span>
-		<button
-			onclick={discardAll}
-			disabled={discarding}
-			class="ml-auto text-xs text-ink-muted hover:text-ink-soft disabled:text-ink-faint"
-			>{discarding ? 'discarding…' : 'discard all'}</button
-		>
+		{#if draft.count > 0}
+			<button
+				onclick={discardAll}
+				disabled={discarding}
+				class="ml-auto text-xs text-ink-muted hover:text-ink-soft disabled:text-ink-faint"
+				>{discarding ? 'discarding…' : 'discard all'}</button
+			>
+		{/if}
 	</div>
-	<div class="mb-2">
-		<GitOpsStepper stage="staged" />
-	</div>
+	{#if draft.count > 0}
+		<div class="mb-2">
+			<GitOpsStepper stage="staged" />
+		</div>
+	{/if}
 
 	<ErrorNote {error} class="mb-2" />
 
-	{#each draft.items as item (itemKey(item.namespace, item.name))}
-		{@const k = itemKey(item.namespace, item.name)}
+	<!-- Server-derived, recomputed on every fetch: what ArgoCD would prune that this
+	     draft does not speak for. Shown even with nothing staged, so a project in
+	     recovery warns before the first merge, not after it. -->
+	{#if draft.warning}
+		<div
+			class="mb-2 flex items-start gap-2 rounded bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink"
+		>
+			<TriangleAlert size={14} class="mt-0.5 shrink-0" />
+			<span>{draft.warning}</span>
+		</div>
+	{/if}
+
+	{#each draft.items as item (itemKey(item.namespace, item.name, item.resource))}
+		{@const k = itemKey(item.namespace, item.name, item.resource)}
 		<div class="mb-2 rounded border border-line">
 			<div class="flex items-center gap-2 border-b border-line-soft px-3 py-2">
 				<span
@@ -150,23 +170,25 @@
 		</div>
 	{/each}
 
-	<div class="mt-2 space-y-2">
-		<input
-			bind:value={title}
-			placeholder="Pull request title"
-			class="w-full rounded border border-line-strong px-2 py-1.5 text-sm"
-		/>
-		<textarea
-			bind:value={message}
-			placeholder="Description (optional)"
-			rows="2"
-			class="w-full rounded border border-line-strong px-2 py-1.5 text-sm"></textarea>
-		<button
-			onclick={propose}
-			disabled={proposing}
-			class="w-full rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
-		>
-			{proposing ? 'Proposing…' : `Propose pull request → ${project}`}
-		</button>
-	</div>
+	{#if draft.count > 0}
+		<div class="mt-2 space-y-2">
+			<input
+				bind:value={title}
+				placeholder="Pull request title"
+				class="w-full rounded border border-line-strong px-2 py-1.5 text-sm"
+			/>
+			<textarea
+				bind:value={message}
+				placeholder="Description (optional)"
+				rows="2"
+				class="w-full rounded border border-line-strong px-2 py-1.5 text-sm"></textarea>
+			<button
+				onclick={propose}
+				disabled={proposing}
+				class="w-full rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
+			>
+				{proposing ? 'Proposing…' : `Propose pull request → ${project}`}
+			</button>
+		</div>
+	{/if}
 </section>

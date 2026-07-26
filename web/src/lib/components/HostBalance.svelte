@@ -303,7 +303,10 @@
 							>
 						{/if}
 					{/if}
-					<span class="text-ink-faint" title="the configured rescheduling deviation window around the mean">
+					<span
+						class="text-ink-faint"
+						title="the configured rescheduling deviation window around the mean"
+					>
 						band {Math.round(band.low)}–{Math.round(band.high)}%
 					</span>
 				{:else}

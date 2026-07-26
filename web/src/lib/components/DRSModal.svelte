@@ -164,8 +164,8 @@
 					</FormField>
 				</div>
 				<p class="text-xs text-ink-faint">
-					Keep at or below the cluster's live-migration limits so rescheduling never queues more migrations
-					than the cluster will run.
+					Keep at or below the cluster's live-migration limits so rescheduling never queues more
+					migrations than the cluster will run.
 				</p>
 			</div>
 		{/if}

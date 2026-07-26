@@ -22,6 +22,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/argo"
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/desched"
@@ -65,7 +66,9 @@ type Draft interface {
 	Propose(id auth.Identity, proj project.ProjectInfo, req model.ProposeRequest) (model.ProposeResult, error)
 	VMDrift(proj project.ProjectInfo, namespace, name string) (model.DriftResult, error)
 	Adopt(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
-	AdoptNamespace(id auth.Identity, proj project.ProjectInfo, namespace string) (model.DraftView, error)
+	// AdoptNamespace stages what the caller captured from the cluster; the capture runs
+	// under the caller's own token, so the coordinator stays cluster-free.
+	AdoptNamespace(id auth.Identity, proj project.ProjectInfo, namespace string, objs []changeset.Adoptable) (model.DraftView, error)
 	AdoptProject(id auth.Identity, commitProj, target project.ProjectInfo, owners []string) (model.DraftView, error)
 	// Resync runs with dotvirt's SA (Argo operations carry no user context);
 	// canUpdateVM is the caller-token SSAR the implementation enforces before

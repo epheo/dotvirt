@@ -188,15 +188,13 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	if !validate.DNS1123Name(ns) {
 		return model.DraftView{}, fmt.Errorf("%w: namespace name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, ns)
 	}
+	// Whether the tenant already exists is a CLUSTER fact, checked by the caller before
+	// this runs. Refusing here on a pre-existing repo instead would burn the name: the
+	// repo is created first, so a run that failed or was discarded after that point
+	// could never be retried. ensureTenantRepo is idempotent, so a retry reuses it.
 	repoURL, created, err := c.ensureTenantRepo(commitProj.Repo, spec.Name)
 	if err != nil {
 		return model.DraftView{}, err
-	}
-	// A pre-existing repo means the tenant is already managed (or a repo of that name
-	// survived a prior deletion). Refuse rather than silently re-home it — the mirror of
-	// AdoptProject's "already has a repo" guard, so New Project can't re-manage a tenant.
-	if !created {
-		return model.DraftView{}, fmt.Errorf("%w: a repo for project %q already exists (%s); pick another name or adopt the existing project", model.ErrConflict, spec.Name, repoURL)
 	}
 	// First namespace, joined to the new project/repo (stamps its dotvirt.io labels).
 	nsSpec := netgen.NamespaceSpec{Name: ns, Project: spec.Name, Repo: repoURL, VMNetwork: spec.VMNetwork}
@@ -233,7 +231,19 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 			return model.DraftView{}, err
 		}
 	}
-	return c.Get(id, commitProj)
+	view, err := c.Get(id, commitProj)
+	if err != nil {
+		return view, err
+	}
+	if !created {
+		// The retry path above legitimately reuses the repo, but so would a leftover from
+		// a former install, and THAT repo's current contents deploy the moment this PR
+		// merges and the ApplicationSet wires it, with nothing in the PR showing them.
+		// Only the human can tell the two apart, so say it rather than decide it.
+		view.Warning = JoinWarning(view.Warning,
+			fmt.Sprintf("Reusing the existing repo %s: whatever it currently holds deploys once this project lands.", repoURL))
+	}
+	return view, nil
 }
 
 // AdoptProject wires a repo to an EXISTING labeled-but-repoless project — the
@@ -249,16 +259,26 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	if err := requireRepo(commitProj); err != nil {
 		return model.DraftView{}, err
 	}
-	// A repo annotation means already-managed — refuse BEFORE any forge mutation. Do NOT
-	// "self-heal" a dangling annotation (repo the forge lost) by re-creating the repo
-	// here: the ApplicationSet generates a prune+selfHeal tenant app for any namespace
-	// whose annotation has a repo (handleAppSetPlugin doesn't check the repo exists), and
-	// while the repo is missing that app can't sync, so live VMs are safe. Re-creating an
-	// EMPTY repo lets the app sync an empty main and prune the namespace's already-adopted
-	// (tracking-id-bearing) VMs — deleting running workloads. Recovering a lost repo must
-	// seed main from live state first; that is not this path. Keep the safe refusal.
+	// An annotation that still resolves means the project is already managed. One that
+	// does not is the dead end this recovers: the forge lost the repo, so the project is
+	// unreachable through every other path. Re-creating it cannot endanger the running
+	// workloads, because ArgoCD's automated.allowEmpty defaults to false and refuses to
+	// apply a source that yields no resources.
 	if target.Repo != "" {
-		return model.DraftView{}, fmt.Errorf("%w: project %q already has a repo (%s)", model.ErrConflict, target.Name, target.Repo)
+		fc := c.forge.For(target.Repo)
+		// SameForge because For keeps only the owner/repo: a project hosted on another
+		// forge would be looked up by path here, 404, and be re-homed to a fresh empty
+		// repo. Anything this forge cannot speak for stays a conflict.
+		if fc == nil || !c.forge.SameForge(target.Repo) {
+			return model.DraftView{}, fmt.Errorf("%w: project %q already has a repo (%s)", model.ErrConflict, target.Name, target.Repo)
+		}
+		exists, err := fc.RepoExists()
+		if err != nil {
+			return model.DraftView{}, fmt.Errorf("check project repo: %w", err)
+		}
+		if exists {
+			return model.DraftView{}, fmt.Errorf("%w: project %q already has a repo (%s)", model.ErrConflict, target.Name, target.Repo)
+		}
 	}
 	if !validate.DNS1123Name(target.Name) {
 		return model.DraftView{}, fmt.Errorf("%w: project name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, target.Name)

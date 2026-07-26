@@ -291,6 +291,16 @@ export interface DriftResult {
   changes: Change[];
 }
 /**
+ * ObjectRef identifies one declared object, kind-agnostic. Namespace is empty for
+ * cluster-scoped kinds. The identity git manifests, Argo resource status, and the
+ * draft all share, so coverage can be compared across the three.
+ */
+export interface ObjectRef {
+  kind: string;
+  namespace?: string;
+  name: string;
+}
+/**
  * DraftItem is one pending change rendered for the UI.
  */
 export interface DraftItem {
@@ -302,13 +312,18 @@ export interface DraftItem {
   yaml?: string; // raw/edited manifest for the collapsed view
 }
 /**
- * DraftView is the whole draft changeset as semantic items.
+ * DraftView is the whole draft changeset as semantic items. Warning is DERIVED on
+ * every render, never stored: what ArgoCD would prune for this project that the
+ * draft does not speak for, plus any capture degradation the producing operation
+ * appended. Recomputing it each view is what keeps a partial adoption reading as
+ * partial after the response that staged it is gone.
  */
 export interface DraftView {
   base: string;
   branch: string;
   count: number /* int */;
   items: DraftItem[];
+  warning?: string;
 }
 /**
  * ProposeResult is returned after proposing the draft as a PR.

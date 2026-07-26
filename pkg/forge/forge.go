@@ -87,6 +87,10 @@ func NewFactoryFn(baseURL string, tokenFn TokenSource, insecure bool) *Factory {
 // For returns a Client targeting the repo identified by repoURL (e.g.
 // https://forge/owner/repo.git → owner/repo). Returns nil if the owner/repo can't
 // be parsed, so the caller degrades to a compare link.
+//
+// Only the owner/repo is taken from the URL; every call goes to THIS forge. That is
+// right for dotvirt's own repos, which is all the write paths ever touch. A caller that
+// would read a negative answer as fact must ask SameForge first.
 func (f *Factory) For(repoURL string) *Client {
 	if f == nil {
 		return nil
@@ -96,6 +100,36 @@ func (f *Factory) For(repoURL string) *Client {
 		return nil
 	}
 	return &Client{baseURL: f.baseURL, tokenFn: f.tokenFn, owner: owner, repo: repo, http: f.http}
+}
+
+// SameForge reports whether repoURL names a repo this forge actually serves. For
+// discards the URL's host, so without this a repo hosted elsewhere would be looked up
+// by path on this forge and its 404 read as "the repo is gone". A URL with no host
+// carries no other claim, so it counts as this forge's.
+func (f *Factory) SameForge(repoURL string) bool {
+	if f == nil {
+		return false
+	}
+	host := urlHost(repoURL)
+	return host == "" || host == urlHost(f.baseURL)
+}
+
+// urlHost is repoURL's lowercased host, or "" when it carries no scheme://host.
+func urlHost(repoURL string) string {
+	s := strings.TrimSpace(repoURL)
+	i := strings.Index(s, "://")
+	if i < 0 {
+		return ""
+	}
+	s = s[i+3:]
+	if slash := strings.IndexByte(s, '/'); slash >= 0 {
+		s = s[:slash]
+	}
+	// Credentials in a clone URL are not identity: user@host and host are one forge.
+	if at := strings.LastIndexByte(s, '@'); at >= 0 {
+		s = s[at+1:]
+	}
+	return strings.ToLower(s)
 }
 
 func httpClient(insecure bool) *http.Client {
@@ -132,6 +166,13 @@ func (c *Client) EnsureRepo() (created bool, err error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// RepoExists reports whether the client's repo is present on the forge, so a caller
+// can tell a dotvirt.io/repo annotation that still resolves from one the forge has
+// lost. An error means unreachable, never absent.
+func (c *Client) RepoExists() (bool, error) {
+	return c.exists(fmt.Sprintf("/api/v1/repos/%s/%s", c.owner, c.repo))
 }
 
 // EnsureOrg creates the client's owner organization if it doesn't exist (idempotent).

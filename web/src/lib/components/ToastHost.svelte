@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CircleAlert, CircleCheck, Info, X } from 'lucide-svelte';
+	import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from 'lucide-svelte';
 	import { ui } from '$lib/state/ui.svelte';
 </script>
 
@@ -13,6 +13,7 @@
 			>
 				{#if t.kind === 'success'}<CircleCheck size={15} class="shrink-0 text-emerald-400" />
 				{:else if t.kind === 'error'}<CircleAlert size={15} class="shrink-0 text-red-400" />
+				{:else if t.kind === 'warning'}<TriangleAlert size={15} class="shrink-0 text-amber-400" />
 				{:else}<Info size={15} class="shrink-0 text-slate-400" />{/if}
 				{t.msg}
 				{#if t.action}

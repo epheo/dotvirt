@@ -9,15 +9,20 @@
 	// Adopt an EXISTING labeled-but-repoless project into GitOps: unlike NewProjectModal
 	// the name and namespaces are fixed (they already exist in the cluster), so this
 	// only creates the tenant repo and stamps the dotvirt.io/repo annotation onto the
-	// project's namespaces — optionally granting owners admin.
+	// project's namespaces — optionally granting owners admin. recover reuses the same
+	// flow for a project whose annotated repo the forge has LOST: the backend re-creates
+	// it (and refuses if the repo actually still resolves), so the only difference here
+	// is the wording.
 	let {
 		project,
 		namespaces,
+		recover = false,
 		onclose,
 		onstaged,
 	}: {
 		project: string;
 		namespaces: string[];
+		recover?: boolean;
 		onclose: () => void;
 		onstaged: () => void;
 	} = $props();
@@ -47,12 +52,21 @@
 	}
 </script>
 
-<Modal title="Attach repo to “{project}”" {onclose}>
+<Modal title={recover ? `Recover repo for “${project}”` : `Attach repo to “${project}”`} {onclose}>
 	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
-		<p class="text-ink-soft">
-			This project's namespaces exist in the cluster but aren't backed by a git repo. Adopting
-			creates the tenant repo and brings the namespaces under GitOps.
-		</p>
+		{#if recover}
+			<p class="text-ink-soft">
+				This project points at a repo the forge no longer serves. Recovering re-creates it empty;
+				your workloads keep running, and nothing syncs until something merges. Then use "Adopt into
+				git" on the namespaces so the first merge restores everything that is running (the Changes
+				panel warns while anything is left out). Refused if the repo actually still exists.
+			</p>
+		{:else}
+			<p class="text-ink-soft">
+				This project's namespaces exist in the cluster but aren't backed by a git repo. Adopting
+				creates the tenant repo and brings the namespaces under GitOps.
+			</p>
+		{/if}
 		<div class="rounded border border-line px-3 py-2 text-xs text-ink-muted">
 			<div>
 				<span class="text-ink-faint">Repo to create:</span>

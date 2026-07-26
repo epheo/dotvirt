@@ -33,6 +33,14 @@ func (c *Client) EnsureOrgWebhook(targetURL, secret string) error {
 	return c.ensureHook(fmt.Sprintf("/api/v1/orgs/%s/hooks", c.owner), targetURL, secret)
 }
 
+// OwnerIsOrg reports whether the client's owner is an organization. Only an org has a
+// hooks endpoint, so a user-owned owner must be covered repo by repo instead: asking
+// for its org hooks 404s, which ensureHook reads as a hard error and would retry
+// forever, leaving every repo with no webhook at all.
+func (c *Client) OwnerIsOrg() (bool, error) {
+	return c.exists("/api/v1/orgs/" + c.owner)
+}
+
 // ensureHook converges a single "gitea" (Forgejo-compatible) push+pull_request webhook
 // delivering to targetURL within the given hooks collection (repo- or org-level).
 //
