@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { ChevronDown, Pencil, Trash2 } from 'lucide-svelte';
 	import { api, Unauthorized, type Change, type DraftItem, type Network, type VM } from '$lib/api';
-	import { manifestURL, runRuntimeAction, type VMAction } from '$lib/actions';
+	import { adoptVM, manifestURL, runRuntimeAction, type VMAction } from '$lib/actions';
 	import { ui, type DetailAction } from '$lib/state/ui.svelte';
 	import { duration, friendlyError } from '$lib/format';
 	import ActionMenu from './ActionMenu.svelte';
@@ -14,6 +14,7 @@
 	import Console from './Console.svelte';
 	import EditSettings from './EditSettings.svelte';
 	import EffectivePolicyPanel from './EffectivePolicyPanel.svelte';
+	import HeaderMenu from './HeaderMenu.svelte';
 	import TracePanel from './TracePanel.svelte';
 	import MetricsPanel from './MetricsPanel.svelte';
 	import PendingBanner from './PendingBanner.svelte';
@@ -21,6 +22,7 @@
 	import PowerDot from './PowerDot.svelte';
 	import Snapshots from './Snapshots.svelte';
 	import StagedBadge from './StagedBadge.svelte';
+	import StatusDot from './StatusDot.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 	import TabBar from './TabBar.svelte';
 	import VMConfigure from './VMConfigure.svelte';
@@ -96,7 +98,6 @@
 
 	// Imperative runtime ops (restart/pause/unpause/live-migrate). Results
 	// surface as toasts — identical feedback to the right-click context menu.
-	let actionsOpen = $state(false);
 	let runtimeBusy = $state(false);
 
 	function loadDrift(ns: string, name: string) {
@@ -117,7 +118,6 @@
 	// own run() (with busy/result reporting; the server records the task), host
 	// actions map to this view's modals/tabs.
 	async function handleAction(a: VMAction) {
-		actionsOpen = false;
 		if (!vm) return;
 		const target = vm;
 		if (a.kind === 'runtime' && a.run) {
@@ -196,7 +196,6 @@
 			migrating = false;
 			migratingStorage = false;
 			driftChanges = null;
-			actionsOpen = false;
 			if (vm) loadDrift(vm.namespace, vm.name);
 		});
 	});
@@ -212,19 +211,12 @@
 		onintentdone?.();
 	});
 
+	// adoptVM owns the toasts; this wrapper only feeds the Summary card's busy state.
 	async function adopt() {
 		if (!vm) return;
 		reconciling = true;
 		try {
-			await api.adopt(vm.namespace, vm.name);
-			ui.showToast('Live state staged into Changes — open a PR to adopt it into git.', {
-				kind: 'success',
-				action: { label: 'Review & propose', run: () => (ui.changesOpen = true) },
-			});
-			onstaged?.();
-		} catch (e) {
-			if (e instanceof Unauthorized) return; // signed out centrally; skip the error toast
-			ui.showToast(friendlyError(e), { kind: 'error' });
+			await adoptVM(vm, { onstaged });
 		} finally {
 			reconciling = false;
 		}
@@ -254,7 +246,7 @@
 			onstaged?.();
 		} catch (e) {
 			if (e instanceof Unauthorized) return; // signed out centrally; skip the error banner
-			deleteErr = String(e);
+			deleteErr = friendlyError(e);
 		} finally {
 			deleteBusy = false;
 		}
@@ -273,26 +265,27 @@
 					<StagedBadge item={stagedItem} onopen={() => onstagedopen?.()} />
 				{/if}
 				<div class="ml-auto flex items-center gap-2">
-					<div class="relative">
-						<button
-							onclick={() => (actionsOpen = !actionsOpen)}
-							disabled={runtimeBusy}
-							title="All VM actions — runtime ops act immediately; config changes go through a PR"
-							class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
-						>
-							Actions <ChevronDown size={13} />
-						</button>
-						{#if actionsOpen}
+					<HeaderMenu align="right" panel={false}>
+						{#snippet trigger({ toggle })}
 							<button
-								class="fixed inset-0 z-10 cursor-default"
-								onclick={() => (actionsOpen = false)}
-								aria-label="Close menu"
-							></button>
-							<div class="absolute right-0 z-20 mt-1">
-								<ActionMenu {vm} onpick={handleAction} />
-							</div>
-						{/if}
-					</div>
+								onclick={toggle}
+								disabled={runtimeBusy}
+								title="All VM actions — runtime ops act immediately; config changes go through a PR"
+								class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
+							>
+								Actions <ChevronDown size={13} />
+							</button>
+						{/snippet}
+						{#snippet children({ close })}
+							<ActionMenu
+								{vm}
+								onpick={(a) => {
+									close();
+									handleAction(a);
+								}}
+							/>
+						{/snippet}
+					</HeaderMenu>
 					<button
 						onclick={() => openEdit()}
 						disabled={!vm.sourceFile}
@@ -335,7 +328,7 @@
 			<div
 				class="flex items-center gap-2 border-b border-select bg-select-soft px-4 py-1.5 text-xs text-accent-ink"
 			>
-				<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-accent"></span>
+				<StatusDot tone="info" size="xs" pulse />
 				Live-migrating{#if vm.migration.sourceNode}&nbsp;from {vm.migration.sourceNode}{/if}
 				to {vm.migration.targetNode || '…'}{#if duration(vm.migration.startedAt)}&nbsp;· started {duration(
 						vm.migration.startedAt,
@@ -359,18 +352,15 @@
 				/>
 			{:else if tab === 'monitor'}
 				<!-- Monitor sub-rail: events + performance, vCenter's time-series home. -->
-				<div class="mb-3 flex gap-1 border-b border-line text-sm">
-					{#each ['events', 'performance'] as const as v (v)}
-						<button
-							class="border-b-2 px-3 py-1 capitalize {monitorView === v
-								? 'border-accent text-accent-ink'
-								: 'border-transparent text-ink-muted hover:text-ink-soft'}"
-							onclick={() => (monitorView = v)}
-						>
-							{v}
-						</button>
-					{/each}
-				</div>
+				<TabBar
+					class="mb-3 border-b border-line"
+					tabs={[
+						{ id: 'events', label: 'Events' },
+						{ id: 'performance', label: 'Performance' },
+					]}
+					active={monitorView}
+					onchange={(v) => (monitorView = v as typeof monitorView)}
+				/>
 				{#if monitorView === 'performance'}
 					{#key `${vm.namespace}/${vm.name}`}
 						<MetricsPanel load={(r) => api.metrics(vm.namespace, vm.name, r)} />

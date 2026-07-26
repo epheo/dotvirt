@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { METRIC_RANGES, Unauthorized, type VMMetrics } from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import { pollWhileVisible } from '$lib/poll';
 	import ErrorNote from './ErrorNote.svelte';
 	import UPlotChart from './UPlotChart.svelte';
@@ -37,7 +38,7 @@
 			metrics = await load(range);
 		} catch (e) {
 			if (e instanceof Unauthorized) return; // signed out centrally by the api layer
-			error = String(e);
+			error = friendlyError(e);
 			metrics = null;
 		} finally {
 			loading = false;

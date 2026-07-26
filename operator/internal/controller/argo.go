@@ -12,7 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
@@ -226,13 +225,14 @@ func (r *DotvirtReconciler) ensureForgeTLSTrust(ctx context.Context, dv *dotvirt
 	if ca == "" {
 		return fmt.Errorf("default-ingress-cert has no ca-bundle.crt")
 	}
-	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "argocd-tls-certs-cm", Namespace: argoNS}}
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, cm, func() error {
-		if cm.Data == nil {
-			cm.Data = map[string]string{}
-		}
-		cm.Data[host] = ca
-		return nil
-	})
-	return err
+	// SSA with ONLY our host key: ConfigMap data keys get per-key field
+	// ownership, so the merge cannot clobber the gitops operator's writes the way
+	// a whole-object read-modify-write would race them. No instance labels: the
+	// CM is shared, and labeling it would pull it into finalizer cleanup.
+	cm := &corev1.ConfigMap{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
+		ObjectMeta: metav1.ObjectMeta{Name: "argocd-tls-certs-cm", Namespace: argoNS},
+		Data:       map[string]string{host: ca},
+	}
+	return install.Apply(ctx, r.Client, cm, false)
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { api, Unauthorized, type VM } from '$lib/api';
-	import { manifestURL, runRuntimeAction, type VMAction } from '$lib/actions';
+	import { adoptVM, manifestURL, runRuntimeAction, type VMAction } from '$lib/actions';
 	import { friendlyError } from '$lib/format';
 	import { vmHref } from '$lib/nav';
 	import { drafts } from '$lib/state/drafts.svelte';
@@ -30,17 +30,7 @@
 			return;
 		}
 		if (a.id === 'adopt') {
-			try {
-				await api.adopt(vm.namespace, vm.name);
-				await drafts.refresh();
-				ui.showToast(`${vm.name} staged into Changes — open a PR to adopt it into git.`, {
-					kind: 'success',
-					action: { label: 'Review & propose', run: () => (ui.changesOpen = true) },
-				});
-			} catch (e) {
-				if (e instanceof Unauthorized) return;
-				ui.showToast(friendlyError(e), { kind: 'error' });
-			}
+			await adoptVM(vm, { onstaged: () => drafts.refresh() });
 			return;
 		}
 		ui.requestDetail(a.id as DetailAction);

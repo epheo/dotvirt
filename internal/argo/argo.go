@@ -1,8 +1,8 @@
 // Package argo is dotvirt's drift-read plane: it reads ArgoCD Application CRs and
 // reports each VM's sync/health straight from Argo's own status, so dotvirt never
-// re-implements diffing. Like the cluster plane, identity is per-token: a Factory
-// mints one Client per bearer token (drift is read as the user); the SA client
-// drives background watches + resync, which have no user context.
+// re-implements diffing. One SA client drives the background watch feeding the
+// Snapshot plus the resync patch; per-user filtering happens on the snapshot's
+// in-memory data, never as a per-user Argo read.
 package argo
 
 import (
@@ -46,20 +46,14 @@ type Client struct {
 	dyn dynamic.Interface
 }
 
-// Factory mints per-token Clients, reusing the shared restfactory for the
-// identity machinery (see cluster.Factory). The SA client drives background
-// watches + resync.
-type Factory struct {
-	*restfactory.Factory[*Client]
-}
-
-// NewFactory builds a Factory. kubeconfig empty means in-cluster config.
-func NewFactory(kubeconfig string) (*Factory, error) {
+// NewSAClient builds the one SA-identity Client. kubeconfig empty means
+// in-cluster config.
+func NewSAClient(kubeconfig string) (*Client, error) {
 	base, err := restfactory.New(kubeconfig, clientFor)
 	if err != nil {
 		return nil, err
 	}
-	return &Factory{base}, nil
+	return base.SA()
 }
 
 // clientFor is the restfactory build hook: a token-bearing config → a drift Client.

@@ -46,8 +46,8 @@
 				<div class="flex items-center gap-2">
 					<span class="h-1.5 flex-1 overflow-hidden rounded bg-inset-strong">
 						<span
-							class="block h-full rounded bg-teal-500"
-							style="width: {(memOf(c) / maxMem) * 100}%"
+							class="block h-full rounded"
+							style="width: {(memOf(c) / maxMem) * 100}%; background: var(--chart-2)"
 						></span>
 					</span>
 					<span class="w-14 shrink-0 text-right text-ink-muted">{bytes(memOf(c))}</span>

@@ -279,7 +279,6 @@ func (s *Server) Handler() http.Handler {
 	// Forgejo webhook (auth: HMAC delivery signature, not a user session —
 	// exempted in auth.isOpenPath). Pokes the repo's poller for instant updates.
 	mux.HandleFunc("POST /api/webhooks/forge", s.handleForgeWebhook)
-	mux.HandleFunc("GET /api/proposals", s.handleProposals)
 	mux.HandleFunc("GET /api/events", s.handleAllEvents)
 	mux.HandleFunc("GET /api/permissions", s.handlePermissions)
 	mux.HandleFunc("GET /api/metrics/cluster", s.handleClusterSummary)

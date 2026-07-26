@@ -14,12 +14,12 @@ export interface NicRow extends NIC {
 	removed: boolean;
 	isNew: boolean;
 }
-export interface GroupRow extends PlacementGroup {
+interface GroupRow extends PlacementGroup {
 	removed: boolean;
 	isNew: boolean;
 }
 
-export interface EditForm {
+interface EditForm {
 	power: Power;
 	cpuCores?: number;
 	memory: string;

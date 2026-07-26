@@ -11,7 +11,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -57,6 +56,9 @@ type DotvirtReconciler struct {
 // three static operand roles — so it needs no `escalate` and no ClusterRole/RoleBinding writes.
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts,verbs=get;list;watch;update
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts/status,verbs=get;update;patch
+// dotvirts/finalizers: unused on default clusters (AddFinalizer writes the main
+// resource), but SetControllerReference sets blockOwnerDeletion, which the
+// OwnerReferencesPermissionEnforcement admission plugin checks via this subresource.
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;deletecollection
@@ -120,9 +122,10 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		r.reconcileSecrets,
 		r.reconcileWorkload,
 		r.reconcileArgo,
-		r.reconcilePlatformRepo,
 		r.reconcileArgoWebhook,
 		r.reconcileDotvirtWebhook,
+		// Last: its failure requeues, and nothing above depends on the repo.
+		r.reconcilePlatformRepo,
 	} {
 		res, err := phase(ctx, &dv)
 		if err != nil {
@@ -159,13 +162,9 @@ func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvi
 		logf.FromContext(ctx).Error(err, "dependency probe failed")
 	}
 	if len(depRes.MissingHard) > 0 {
-		r.setCondition(dv, dotvirtv1alpha1.ConditionDependenciesReady, metav1.ConditionFalse, "MissingPrerequisite", depRes.Summary())
-		dv.Status.Phase = dotvirtv1alpha1.PhaseBlockedOnDependencies
 		dv.Status.ObservedGeneration = dv.Generation
-		if uerr := r.writeStatus(ctx, dv); uerr != nil {
-			return nil, uerr
-		}
-		return &ctrl.Result{RequeueAfter: time.Minute}, nil
+		return r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionDependenciesReady, "MissingPrerequisite",
+			depRes.Summary(), dotvirtv1alpha1.PhaseBlockedOnDependencies, time.Minute)
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionDependenciesReady, metav1.ConditionTrue, "Satisfied", depRes.Summary())
 	return nil, nil
@@ -203,7 +202,7 @@ func (r *DotvirtReconciler) forgeClient(ctx context.Context, dv *dotvirtv1alpha1
 // host isn't assigned yet. Unstructured so the module needs no openshift/api dep.
 func (r *DotvirtReconciler) routeHost(ctx context.Context, ns, name string) string {
 	route := &unstructured.Unstructured{}
-	route.SetGroupVersionKind(schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"})
+	route.SetGroupVersionKind(install.RouteGVK)
 	if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, route); err != nil {
 		return ""
 	}
@@ -258,6 +257,21 @@ func (r *DotvirtReconciler) failPhase(ctx context.Context, dv *dotvirtv1alpha1.D
 	return err
 }
 
+// waitPhase is failPhase's no-error twin for EXPECTED waits: record the
+// not-ready condition + phase, persist status, and hand back the halt result.
+// requeue 0 halts without a retry timer (the wait clears via a watch event).
+func (r *DotvirtReconciler) waitPhase(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, condType, reason, msg, phase string, requeue time.Duration) (*ctrl.Result, error) {
+	r.setCondition(dv, condType, metav1.ConditionFalse, reason, msg)
+	dv.Status.Phase = phase
+	if err := r.writeStatus(ctx, dv); err != nil {
+		return nil, err
+	}
+	if requeue == 0 {
+		return &ctrl.Result{}, nil
+	}
+	return &ctrl.Result{RequeueAfter: requeue}, nil
+}
+
 // SetupWithManager detects the platform once and registers the reconciler.
 // Detection FAILS startup rather than defaulting: a wrong platform silently
 // mis-renders every platform-gated resource (most damagingly fsGroup, which an
@@ -285,7 +299,7 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// openshift/api dependency (install renders Routes unstructured too).
 	if plat == platform.OpenShift {
 		route := &unstructured.Unstructured{}
-		route.SetGroupVersionKind(schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"})
+		route.SetGroupVersionKind(install.RouteGVK)
 		b = b.Owns(route)
 	}
 	return b.Complete(r)

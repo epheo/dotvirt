@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { X } from 'lucide-svelte';
 	import { api, type CreateVMRequest, type Network, type Options } from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
 	import Modal from './Modal.svelte';
 	import Wizard from './Wizard.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
 	import FormField from './FormField.svelte';
+	import StorageClassSelect from './StorageClassSelect.svelte';
 
 	let {
 		namespaces,
@@ -93,7 +95,7 @@
 					o.instancetypes?.[0]?.name ??
 					'';
 			})
-			.catch((e) => (loadError = String(e)));
+			.catch((e) => (loadError = friendlyError(e)));
 	});
 
 	// A VM needs at least one NIC: the primary, a secondary, or both.
@@ -195,7 +197,7 @@
 			onstaged();
 			onclose();
 		} catch (e) {
-			error = String(e);
+			error = friendlyError(e);
 		} finally {
 			submitting = false;
 		}
@@ -273,15 +275,7 @@
 				<input bind:value={diskSize} class="w-full rounded border border-line-strong px-2 py-1.5" />
 			</FormField>
 			<FormField label="Storage class">
-				<select
-					bind:value={storageClass}
-					class="w-full rounded border border-line-strong px-2 py-1.5"
-				>
-					<option value="">cluster default</option>
-					{#each options?.storageClasses ?? [] as sc (sc.name)}
-						<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
-					{/each}
-				</select>
+				<StorageClassSelect options={options?.storageClasses ?? []} bind:value={storageClass} />
 			</FormField>
 		</div>
 		<div>
@@ -303,15 +297,11 @@
 						placeholder="10Gi"
 						class="w-20 rounded border border-line-strong px-2 py-1"
 					/>
-					<select
+					<StorageClassSelect
+						options={options?.storageClasses ?? []}
 						bind:value={disk.storageClass}
-						class="min-w-0 flex-1 rounded border border-line-strong px-2 py-1"
-					>
-						<option value="">cluster default</option>
-						{#each options?.storageClasses ?? [] as sc (sc.name)}
-							<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
-						{/each}
-					</select>
+						class="min-w-0 flex-1 py-1!"
+					/>
 					<button
 						onclick={() => removeDisk(i)}
 						type="button"

@@ -181,7 +181,7 @@ func when(method, suffix string, status int, body string) route {
 
 func (f *proposeFixture) stageAndPropose(t *testing.T) model.ProposeResult {
 	t.Helper()
-	req := model.EditRequest{SourceFile: "web.yaml", SetLabels: map[string]string{"env": "prod"}}
+	req := model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{SetLabels: map[string]string{"env": "prod"}}}
 	if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", req); err != nil {
 		t.Fatalf("StageEdit: %v", err)
 	}
@@ -205,6 +205,7 @@ func (f *proposeFixture) draftCount(t *testing.T) int {
 // draft is cleared.
 func TestProposeCreatesPR(t *testing.T) {
 	f := newProposeFixture(t,
+		when("GET", "/pulls", http.StatusOK, "[]"),
 		when("POST", "/pulls", http.StatusCreated, `{"number":1,"state":"open","html_url":"http://forge/pulls/1"}`),
 	)
 	out := f.stageAndPropose(t)

@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"log"
-	"net/http"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -56,10 +55,10 @@ func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo) 
 }
 
 // trackProposals records id as a live refresh target. Called on every inventory
-// build, so the watched set mirrors who is actually looking. The live UI's builds
-// already include the synthetic platform tier (InventoryForIdentity seeds it), but
-// the standalone GET /api/proposals passes only discovered projects — so carry a
-// previously-tracked platform entry forward rather than let that path drop it.
+// build, so the watched set mirrors who is actually looking. Builds include the
+// synthetic platform tier (InventoryForIdentity seeds it), but a build whose
+// platform discovery transiently failed would drop it; carry a previously
+// tracked platform entry forward so the lane survives the blip.
 func (s *Server) trackProposals(id auth.Identity, projects []project.ProjectInfo) {
 	key := restfactory.TokenKey(id.Token)
 	s.propMu.Lock()
@@ -179,7 +178,8 @@ func (s *Server) refreshMerged() {
 // refreshProposals re-queries the forge for every live target, updates the cache,
 // and reports whether any lane changed. Expired targets are dropped. Best-effort
 // per project: a failing forge lookup skips that project rather than failing the
-// pass.
+// pass. The PR branch is per-(user, project), so lookups are memoized on that
+// pair within the pass: N tokens of one user cost one forge round-trip, not N.
 func (s *Server) refreshProposals() bool {
 	now := time.Now()
 	s.propMu.Lock()
@@ -193,17 +193,31 @@ func (s *Server) refreshProposals() bool {
 	}
 	s.propMu.Unlock()
 
+	type lookup struct {
+		pr  model.Proposal
+		ok  bool
+		err error
+	}
+	memo := map[string]lookup{}
+
 	anyChanged := false
 	for key, t := range targets {
 		out := []model.Proposal{}
 		for _, p := range t.projects {
-			pr, ok, err := s.draft.OpenProposal(t.id, p)
-			if err != nil {
-				log.Printf("proposals: %s: %v (skipping)", p.Name, err)
+			mk := t.id.Username + "\x00" + p.Name
+			l, seen := memo[mk]
+			if !seen {
+				l.pr, l.ok, l.err = s.draft.OpenProposal(t.id, p)
+				memo[mk] = l
+			}
+			if l.err != nil {
+				if !seen {
+					log.Printf("proposals: %s: %v (skipping)", p.Name, l.err)
+				}
 				continue
 			}
-			if ok {
-				out = append(out, pr)
+			if l.ok {
+				out = append(out, l.pr)
 			}
 		}
 		if prev, ok := s.proposals.Get(key); ok {
@@ -217,26 +231,6 @@ func (s *Server) refreshProposals() bool {
 		s.proposals.Put(key, out)
 	}
 	return anyChanged
-}
-
-// handleProposals lists the caller's open PRs across their visible projects — the
-// same set the live inventory now carries; kept as a standalone read for parity.
-func (s *Server) handleProposals(w http.ResponseWriter, r *http.Request) {
-	id, c, err := s.userCluster(r)
-	if err != nil {
-		fail(w, unavailable("cluster access", err))
-		return
-	}
-	projects, err := s.projectsFor(r.Context(), id, c)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	out := s.proposalsFor(id, projects)
-	if out == nil {
-		out = []model.Proposal{}
-	}
-	writeJSON(w, http.StatusOK, out)
 }
 
 func proposalsEqual(a, b []model.Proposal) bool {

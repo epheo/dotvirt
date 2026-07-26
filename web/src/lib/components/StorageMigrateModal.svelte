@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { api, Unauthorized, type Options, type VM } from '$lib/api';
+	import { friendlyError } from '$lib/format';
+	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
-	import SelectInput from './SelectInput.svelte';
+	import StorageClassSelect from './StorageClassSelect.svelte';
 
 	// Storage live migration (the Storage vMotion dialog): pick a target class
 	// per disk; staging rewrites each disk's DataVolume template and sets
@@ -35,7 +37,7 @@
 			options = await api.options();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = String(e);
+			error = friendlyError(e);
 		}
 	}
 	$effect(() => {
@@ -65,7 +67,7 @@
 			onclose();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = String(e);
+			error = friendlyError(e);
 		} finally {
 			busy = false;
 		}
@@ -82,15 +84,15 @@
 		</p>
 
 		<table class="w-full text-[13px]">
-			<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
-				<tr class="border-b border-line">
-					<th class="py-1.5 pr-3 font-medium">Disk</th>
-					<th class="py-1.5 pr-3 font-medium">Size</th>
-					<th class="py-1.5 pr-3 font-medium">Current class</th>
-					<th class="py-1.5 font-medium">Target class</th>
+			<thead class={THEAD}>
+				<tr class={THEAD_TR}>
+					<th class={TH}>Disk</th>
+					<th class={TH}>Size</th>
+					<th class={TH}>Current class</th>
+					<th class={TH_LAST}>Target class</th>
 				</tr>
 			</thead>
-			<tbody class="divide-y divide-line-soft">
+			<tbody class={TBODY}>
 				{#each disks as d (d.name)}
 					<tr>
 						<td class="py-1.5 pr-3 font-medium text-ink">{d.name}</td>
@@ -99,17 +101,13 @@
 							{d.storageClass || 'cluster default'}
 						</td>
 						<td class="py-1.5">
-							<SelectInput
+							<StorageClassSelect
+								options={options?.storageClasses ?? []}
 								value={targets[d.name] ?? ''}
 								onchange={(e) => (targets = { ...targets, [d.name]: e.currentTarget.value })}
-							>
-								<option value="">— keep —</option>
-								{#each options?.storageClasses ?? [] as sc (sc.name)}
-									{#if sc.name !== d.storageClass}
-										<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
-									{/if}
-								{/each}
-							</SelectInput>
+								emptyLabel="— keep —"
+								exclude={d.storageClass}
+							/>
 						</td>
 					</tr>
 				{/each}

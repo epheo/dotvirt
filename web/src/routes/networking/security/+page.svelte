@@ -2,7 +2,7 @@
 	import { ChevronDown, ChevronRight, Plus, Route } from 'lucide-svelte';
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
-	import type { Policy, PolicyKind } from '$lib/api';
+	import type { Policy } from '$lib/api';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
@@ -208,7 +208,7 @@
 	{#snippet section(
 		title: string,
 		hint: string,
-		kinds: PolicyKind[],
+		kinds: string[],
 		emptyHint: string,
 		onnew: (() => void) | null,
 	)}

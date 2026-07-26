@@ -42,7 +42,8 @@
 	     column at the console's real proportions (max-w guards against very
 	     wide framebuffers eating the row). -->
 	<!-- Hidden (not unmounted) on failure: the polled img keeps probing, and
-	     the next good frame brings the preview back. -->
+	     the next good frame brings the preview back.
+	     The surround stays dark in both themes (raw slate), matching Console. -->
 	<button
 		onclick={onopen}
 		title="Open the live console"

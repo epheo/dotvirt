@@ -4,6 +4,7 @@
 	import type { VM } from '$lib/api';
 	import { vmHref } from '$lib/nav';
 	import { drafts } from '$lib/state/drafts.svelte';
+	import { TONE_PILL } from '$lib/status';
 	import { ui } from '$lib/state/ui.svelte';
 	import PowerDot from '$lib/components/PowerDot.svelte';
 	import SyncBadge from '$lib/components/SyncBadge.svelte';
@@ -39,10 +40,11 @@
 	>
 	{#snippet trailing()}
 		{#if sc}
+			<!-- Not draftKindTone: a staged create (adoption) reads info here, not ok. -->
 			<span
-				class="inline-flex items-center rounded px-1 text-[10px] font-medium {sc.kind === 'delete'
-					? 'bg-danger-soft text-danger-ink'
-					: 'bg-accent-soft text-accent-ink'}"
+				class="inline-flex items-center rounded px-1 text-[10px] font-medium {TONE_PILL[
+					sc.kind === 'delete' ? 'danger' : 'info'
+				]}"
 				title="Staged {sc.kind}"
 			>
 				{#if sc.kind === 'delete'}<Trash2 size={10} />{:else}<Pencil size={10} />{/if}

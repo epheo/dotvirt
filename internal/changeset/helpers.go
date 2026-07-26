@@ -4,11 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"maps"
-	"slices"
 	"strings"
 
-	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/vmgen"
 )
@@ -60,30 +57,6 @@ func shortHash(user, project string) string {
 	return hex.EncodeToString(sum[:])[:10]
 }
 
-// editFromRequest maps a model.EditRequest into a manifest.VMEdit.
-func editFromRequest(req model.EditRequest) manifest.VMEdit {
-	return manifest.VMEdit{
-		Power:            req.Power,
-		CPUCores:         req.CPUCores,
-		Memory:           req.Memory,
-		Instancetype:     req.Instancetype,
-		Preference:       req.Preference,
-		Sizing:           req.Sizing,
-		SetLabels:        req.SetLabels,
-		RemoveLabels:     req.RemoveLabels,
-		DRSExclude:       req.DRSExclude,
-		EvictionStrategy: req.EvictionStrategy,
-		AddDisks:         req.AddDisks,
-		RemoveDisks:      req.RemoveDisks,
-		AddNetworks:      req.AddNetworks,
-		RemoveNetworks:   req.RemoveNetworks,
-		MigrateVolumes:   req.MigrateVolumes,
-		Pin:              req.Pin,
-		AddGroups:        req.AddGroups,
-		RemoveGroups:     req.RemoveGroups,
-	}
-}
-
 // changesForCreate renders a new-VM spec as "add" semantic items for the draft
 // preview, without showing YAML.
 func changesForCreate(s vmgen.Spec) []model.Change {
@@ -128,96 +101,3 @@ func diskLabel(name, size, class string) string {
 	return fmt.Sprintf("%s (%s)", name, size)
 }
 
-// editToMatch builds a VMEdit that transforms `from` (e.g. main/desired) into
-// `to` (e.g. running/actual) for the scalar + label + disk/network fields dotvirt
-// edits. Used by Adopt to propose the live state into git. Fields derived from
-// map walks are built in sorted key order so the edit — and the YAML it stages —
-// is deterministic.
-func editToMatch(from, to model.VM) manifest.VMEdit {
-	var edit manifest.VMEdit
-	if from.Power != to.Power && to.Power != model.PowerUnknown {
-		p := string(to.Power)
-		edit.Power = &p
-	}
-	if from.CPUCores != to.CPUCores && to.CPUCores != 0 {
-		c := to.CPUCores
-		edit.CPUCores = &c
-	}
-	if from.Memory != to.Memory && to.Memory != "" {
-		m := to.Memory
-		edit.Memory = &m
-	}
-	if from.Instancetype != to.Instancetype && to.Instancetype != "" {
-		it := to.Instancetype
-		edit.Instancetype = &it
-	}
-	if from.Preference != to.Preference && to.Preference != "" {
-		pr := to.Preference
-		edit.Preference = &pr
-	}
-	if from.DRSExclude != to.DRSExclude {
-		v := to.DRSExclude
-		edit.DRSExclude = &v
-	}
-	if from.EvictionStrategy != to.EvictionStrategy {
-		es := to.EvictionStrategy // "" removes the field — the transform-to-actual semantics
-		edit.EvictionStrategy = &es
-	}
-
-	// Labels: set those changed/added in `to`, remove those only in `from`.
-	set := map[string]string{}
-	for k, v := range to.Labels {
-		if from.Labels[k] != v {
-			set[k] = v
-		}
-	}
-	if len(set) > 0 {
-		edit.SetLabels = set
-	}
-	for _, k := range slices.Sorted(maps.Keys(from.Labels)) {
-		if _, ok := to.Labels[k]; !ok {
-			edit.RemoveLabels = append(edit.RemoveLabels, k)
-		}
-	}
-
-	// Disks/networks present only in `to` are added; only in `from` are removed.
-	fromDisks, toDisks := diskNameSet(from), diskNameSet(to)
-	for _, name := range slices.Sorted(maps.Keys(toDisks)) {
-		if _, ok := fromDisks[name]; !ok {
-			edit.AddDisks = append(edit.AddDisks, model.DiskAdd{Name: name, Size: toDisks[name]})
-		}
-	}
-	for _, name := range slices.Sorted(maps.Keys(fromDisks)) {
-		if _, ok := toDisks[name]; !ok {
-			edit.RemoveDisks = append(edit.RemoveDisks, name)
-		}
-	}
-	fromNets, toNets := nicNameSet(from), nicNameSet(to)
-	for _, name := range slices.Sorted(maps.Keys(toNets)) {
-		if _, ok := fromNets[name]; !ok {
-			edit.AddNetworks = append(edit.AddNetworks, model.NetworkAdd{Name: toNets[name]})
-		}
-	}
-	for _, name := range slices.Sorted(maps.Keys(fromNets)) {
-		if _, ok := toNets[name]; !ok {
-			edit.RemoveNetworks = append(edit.RemoveNetworks, name)
-		}
-	}
-	return edit
-}
-
-func diskNameSet(v model.VM) map[string]string {
-	m := map[string]string{}
-	for _, d := range v.Disks {
-		m[d.Name] = d.Size
-	}
-	return m
-}
-
-func nicNameSet(v model.VM) map[string]string {
-	m := map[string]string{}
-	for _, n := range v.Networks {
-		m[n.Name] = n.Network
-	}
-	return m
-}

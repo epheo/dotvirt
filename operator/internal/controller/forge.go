@@ -80,25 +80,17 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 		// reconciles the DB password to the admin secret on every start, so this should
 		// self-clear on the next pod restart; surface a legible reason (not a raw
 		// "mint token: 401") and requeue rather than hot-looping on the error.
-		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "AdminCredentialRejected",
+		return r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "AdminCredentialRejected",
 			fmt.Sprintf("Forgejo rejected the operator's admin credential. Restart the managed forge to reconcile "+
-				"its admin password: oc -n %s rollout restart deployment/%s", dv.Namespace, install.ForgejoServiceName))
-		dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
-		if uerr := r.writeStatus(ctx, dv); uerr != nil {
-			return nil, uerr
-		}
-		return &ctrl.Result{RequeueAfter: time.Minute}, nil
+				"its admin password: oc -n %s rollout restart deployment/%s", dv.Namespace, install.ForgejoServiceName),
+			dotvirtv1alpha1.PhaseProvisioning, time.Minute)
 	}
 	if err != nil {
 		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "Error", err)
 	}
 	if !ready {
-		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "Progressing", "waiting for Forgejo to come up")
-		dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
-		if uerr := r.writeStatus(ctx, dv); uerr != nil {
-			return nil, uerr
-		}
-		return &ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		return r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing",
+			"waiting for Forgejo to come up", dotvirtv1alpha1.PhaseProvisioning, 15*time.Second)
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionTrue, "Ready", "managed Forgejo bootstrapped")
 	return nil, nil
@@ -133,22 +125,16 @@ func (r *DotvirtReconciler) resolveForgeURL(ctx context.Context, dv *dotvirtv1al
 	// Reading routeHost in those cases would wait for a Route nothing creates, requeueing
 	// forever, so halt on the same predicate the exposure uses.
 	if r.Platform != platform.OpenShift || r.resolveExposureType(dv) != "route" {
-		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "ForgeURLRequired",
-			"set spec.forge.url: the operator can only discover a managed forge's hostname from an OpenShift Route, which this install does not create")
-		dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
-		if err := r.writeStatus(ctx, dv); err != nil {
-			return "", nil, err
-		}
-		return "", &ctrl.Result{}, nil
+		res, err := r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "ForgeURLRequired",
+			"set spec.forge.url: the operator can only discover a managed forge's hostname from an OpenShift Route, which this install does not create",
+			dotvirtv1alpha1.PhaseProvisioning, 0)
+		return "", res, err
 	}
 	host := r.routeHost(ctx, dv.Namespace, install.ForgejoServiceName)
 	if host == "" {
-		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "Progressing", "waiting for the router to assign the forge hostname")
-		dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
-		if err := r.writeStatus(ctx, dv); err != nil {
-			return "", nil, err
-		}
-		return "", &ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		res, err := r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing",
+			"waiting for the router to assign the forge hostname", dotvirtv1alpha1.PhaseProvisioning, 5*time.Second)
+		return "", res, err
 	}
 	return "https://" + host, nil, nil
 }
@@ -173,8 +159,11 @@ func forgeAdminHint(ns string) string {
 
 // reconcilePlatformRepo ensures the platform repo exists — the imperative
 // bootstrap pure declarative installers can't do. Skipped in dry-run (a real forge
-// mutation server-side dry-run can't model). A bootstrap failure is recorded on
-// the condition but doesn't halt the pipeline.
+// mutation server-side dry-run can't model). Runs LAST in the pipeline: nothing
+// below it depends on the repo existing, so its retry never delays another phase.
+// A failure keeps Available and Phase untouched (the operand still serves; the
+// condition plus the app's recover-repo UI carry the signal) but requeues, since
+// no watch event fires when the forge comes back.
 func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
 	switch {
 	case dv.Spec.Forge.PlatformRepo == "":
@@ -184,9 +173,12 @@ func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvi
 	default:
 		if err := r.ensurePlatformRepo(ctx, dv); err != nil {
 			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionFalse, "Error", err.Error())
-		} else {
-			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionTrue, "Ready", "platform repo present")
+			if uerr := r.writeStatus(ctx, dv); uerr != nil {
+				return nil, uerr
+			}
+			return &ctrl.Result{RequeueAfter: time.Minute}, nil
 		}
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionTrue, "Ready", "platform repo present")
 	}
 	return nil, nil
 }
@@ -302,7 +294,9 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	// The operator reaches the managed Forgejo over its in-cluster Service, not the
 	// external Route: the Route may be unroutable from the operator pod (hairpin/egress),
 	// and during the placeholder-URL wedge it doesn't resolve at all. The secret's url
-	// stays the EXTERNAL URL (what the app, Argo, and browsers use).
+	// stays the EXTERNAL URL (what the app, Argo, and browsers use). Every factory
+	// below passes insecureTLS=false because this base is plain HTTP; TLS (and so
+	// spec.forge.insecureTLS) never applies to the bootstrap path.
 	apiBase := r.managedForgeAPIBase(dv)
 	// Already bootstrapped AND the stored token still works? Trusting mere existence
 	// leaves a dead token in place forever after a Forgejo data reset or out-of-band
@@ -331,7 +325,8 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	} else if !apierrors.IsNotFound(err) {
 		return false, err
 	}
-	// Forgejo up yet?
+	// Forgejo up yet? Not-found reads as not-ready, not an error: the Deployment
+	// was applied earlier this reconcile, and the cache can lag the apply.
 	var d appsv1.Deployment
 	if err := r.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: install.ForgejoServiceName}, &d); err != nil {
 		return false, client.IgnoreNotFound(err)

@@ -1,13 +1,13 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import { Activity, ChevronDown, ChevronRight, Cpu, HardDrive, MemoryStick } from 'lucide-svelte';
-	import { api, Unauthorized, type Change, type DraftItem, type VM, type VMUsage } from '$lib/api';
+	import { api, type Change, type DraftItem, type VM, type VMUsage } from '$lib/api';
 	import { duration, fmtUsage } from '$lib/format';
-	import { pollWhileVisible } from '$lib/poll';
+	import { resource } from '$lib/resource.svelte';
 	import CapacityUsage from './CapacityUsage.svelte';
 	import ChangeList from './ChangeList.svelte';
 	import ConsolePreview from './ConsolePreview.svelte';
 	import InfoCard from './InfoCard.svelte';
+	import Note from './Note.svelte';
 	import Row from './Row.svelte';
 	import Sparkline from './Sparkline.svelte';
 	import StagedDiff from './StagedDiff.svelte';
@@ -42,39 +42,20 @@
 	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
 
 	// One usage snapshot feeds the CPU/Memory tiles and the bars below, so both
-	// always agree. Keyed on identity — the live stream hands down a fresh vm
-	// object every frame; untrack keeps load()'s reads from re-firing.
-	let usage = $state<VMUsage | null>(null);
-	let usageLoading = $state(false);
-	let usageFailed = $state(false);
-	async function loadUsage() {
-		// Drop a stale response if the selection moved while it was in flight —
-		// the 30s poll makes an overlap with a VM switch routine, and VM A's
-		// numbers must never render under VM B.
-		const ns = vm.namespace;
-		const name = vm.name;
-		const fresh = () => vm.namespace === ns && vm.name === name;
-		usageLoading = true;
-		try {
-			const u = await api.vmUsage(ns, name);
-			if (!fresh()) return;
-			usage = u;
-			usageFailed = false;
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			if (fresh()) usageFailed = true;
-		} finally {
-			if (fresh()) usageLoading = false;
-		}
-	}
-	$effect(() => {
-		vmKey;
-		usage = null;
-		usageFailed = false;
-		usageLoading = false;
-		untrack(loadUsage);
-	});
-	$effect(() => pollWhileVisible(loadUsage, 30000));
+	// always agree. Keyed on identity (the live stream hands down a fresh vm
+	// object every frame); resource's stale guard drops an in-flight response
+	// once the selection moves, so VM A's numbers never render under VM B.
+	const usageRes = resource<VMUsage>(
+		() => vmKey,
+		() => api.vmUsage(vm.namespace, vm.name),
+		{
+			poll: 30000,
+			reset: true,
+		},
+	);
+	const usage = $derived(usageRes.data);
+	const usageLoading = $derived(usageRes.loading);
+	const usageFailed = $derived(usageRes.failed);
 
 	// The manifest owns sizing when present; an instancetype-sized VM carries no
 	// cpuCores/memory in git, so the tiles fall back to the rendered topology.
@@ -216,7 +197,7 @@
 	<!-- Cluster-only VM (e.g. a fresh clone target): no manifest on the
 	     base branch, so config stays read-only until adopted. The adopt
 	     stages a CREATE of the running-branch manifest into the PR flow. -->
-	<div class="mt-4 rounded border border-warn-soft bg-warn-soft/60 px-3 py-2">
+	<Note tone="warn" border class="mt-4">
 		<div class="flex items-center gap-2 text-sm font-medium text-warn-ink">
 			<StatusDot tone="warn" size="xs" />
 			Not in git — this VM exists only in the cluster
@@ -236,7 +217,7 @@
 				Adopt into git
 			</button>
 		</div>
-	</div>
+	</Note>
 {/if}
 
 {#if driftChanges && driftChanges.length > 0}

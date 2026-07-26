@@ -1,459 +1,98 @@
-// Typed client for the dotvirt backend API. Mirrors internal/model.
+// Typed client for the dotvirt backend API.
+//
+// Types come from model.gen.ts (tygo output of internal/model — regenerate with
+// `make types`). The overlays below shadow the star re-export only where the
+// generated shape is too loose (string where the wire carries a closed union)
+// or wrong (Go []*float64 marshals null, not undefined). Request types with no
+// internal/model counterpart (decoded server-side into netgen/vmgen/drsgen
+// specs) stay hand-written.
 //
 // Every request is identity-scoped: a signed session cookie (set by login) is
 // sent with each fetch + on the WebSocket handshake, and the backend resolves the
 // caller's projects from the cluster. credentials:'same-origin' ensures the cookie
 // rides cross-origin in dev (Vite proxy) and same-origin in production.
 
+import type * as gen from './model.gen';
+
+export type * from './model.gen';
+export type { Event as VMEvent, Node as NodeTarget } from './model.gen';
+
+// --- Narrowing overlays (locally declared exports win over the star re-export) ---
+
 export type Power = 'On' | 'Off' | 'Unknown';
 export type SyncStatus = 'Synced' | 'OutOfSync' | 'NotTracked' | 'Unknown';
+export type NetworkKind = 'default' | 'internal' | 'vlan';
+export type NetworkScope = 'project' | 'shared';
+export type PolicyKind = 'dfw' | 'admin' | 'baseline' | 'gateway' | 'egressip' | 'route';
+export type DRSMode = 'Predictive' | 'Automatic';
 
-export interface Disk {
-	name: string;
-	type?: string;
-	size?: string; // emptyDisk capacity or dataVolume requested storage
-	storageClass?: string; // dataVolume storageClassName (empty = cluster default)
-}
-export interface NIC {
-	name: string;
-	network?: string;
-	mac?: string; // live, from VMI status
-	ip?: string; // live, from VMI status
-}
-
-export interface VM {
-	namespace: string;
-	name: string;
-	power: Power;
-	cpuCores?: number;
-	memory?: string;
-	instancetype?: string;
-	preference?: string;
-	labels?: Record<string, string>;
-	disks?: Disk[];
-	networks?: NIC[];
-	sourceFile: string;
-	drsExclude?: boolean; // prefer-no-eviction annotation: DRS rebalancing skips this VM
-	evictionStrategy?: string; // explicit template evictionStrategy; empty = cluster default
-	scheduling?: VMScheduling; // placement policy from the manifest; absent when none
-	phase?: string;
-	paused?: boolean; // VMI Paused condition (phase stays Running)
-	guestIP?: string;
-	ips?: string[]; // every guest-reported IP
-	nodeName?: string;
-	os?: string; // guest-agent OS, e.g. "Fedora Linux 40 (Cloud Edition)"
-	memoryActual?: string; // current guest memory (hotplug-aware)
-	vcpus?: number; // rendered vCPU topology; the value when sizing is instancetype-owned
-	startedAt?: string; // RFC3339; VMI entered Running (for uptime)
-	migration?: Migration; // live (or last) node-to-node move
-	sync: SyncStatus;
-	health?: string;
-	syncError?: string; // ArgoCD apply failure (e.g. a webhook rejection) when OutOfSync
-}
-
-// One named scheduling rule: VMs sharing the group are kept on one host
-// ("together") or spread across hosts ("apart"); strict = a required
-// scheduling term, else preferred (best effort).
-export interface PlacementGroup {
-	name: string;
+export interface PlacementGroup extends Omit<gen.PlacementGroup, 'mode'> {
 	mode: 'together' | 'apart';
-	strict?: boolean;
 }
-
-// A VM's placement policy. custom flags hand-written affinity dotvirt does
-// not own — such VMs are edited in git, never through the scheduling form.
-export interface VMScheduling {
-	pin?: string[]; // host names the VM must run on
+export interface VMScheduling extends Omit<gen.VMScheduling, 'groups'> {
 	groups?: PlacementGroup[];
-	custom?: boolean;
 }
-
-export interface ProjectNamespace {
-	namespace: string;
+export interface VM extends Omit<gen.VM, 'power' | 'sync' | 'scheduling'> {
+	power: Power;
+	sync: SyncStatus;
+	scheduling?: VMScheduling;
+}
+export interface ProjectSync extends Omit<gen.ProjectSync, 'sync'> {
+	sync?: SyncStatus;
+}
+export interface ProjectNamespace extends Omit<gen.ProjectNamespace, 'vms'> {
 	vms: VM[];
 }
-
-// ProjectSync is the project's ArgoCD Application rollup — the sync/health ArgoCD
-// already computes across every object the repo declares (segments, policies,
-// tenancy), not just VMs. operation is the last sync's phase ('Running' = applying,
-// 'Failed'/'Error' = apply failed). Absent when Argo isn't wired or no app tracks it.
-export interface ProjectSync {
-	sync?: SyncStatus;
-	health?: string;
-	operation?: string;
-	syncError?: string;
-	revision?: string;
-}
-
-export interface Project {
-	name: string;
-	repo?: string;
+export interface Project extends Omit<gen.Project, 'namespaces' | 'gitOps'> {
 	namespaces: ProjectNamespace[];
-	error?: string;
 	gitOps?: ProjectSync;
 }
-
-export interface Inventory {
+export interface Inventory extends Omit<gen.Inventory, 'projects'> {
 	projects: Project[];
-	warnings?: string[]; // non-fatal degradations (e.g. live/sync status unavailable)
-	proposals?: Proposal[]; // open PRs across the caller's projects, streamed live
-	// Monotonic watermark that bumps when GitOps state or a repo head moves — the cue
-	// to re-pull the out-of-band /api/networks catalog so a merged segment shows live.
-	networksVersion?: number;
-	// Same contract for the recent-tasks feed: re-pull /api/tasks when this bumps.
-	tasksVersion?: number;
 }
 
-// TaskEntry is one Recent Tasks row from the server-side feed: an imperative op
-// dotvirt performed as the caller ('op'), or a PR merged into a project's base
-// branch ('merge') — shared across every browser, with real attribution.
-export interface TaskEntry {
-	kind: 'op' | 'merge';
-	verb: string;
-	namespace?: string; // empty for node-scoped ops
-	name?: string; // VM or node name
-	project?: string;
-	prNumber?: number;
-	prURL?: string;
-	title?: string;
-	by?: string;
-	ok: boolean;
-	at: string; // RFC3339
+export interface Change extends Omit<gen.Change, 'action'> {
+	action: 'change' | 'add' | 'remove';
 }
+export interface DraftItem extends Omit<gen.DraftItem, 'kind' | 'changes'> {
+	kind: 'edit' | 'create' | 'delete';
+	changes: Change[];
+}
+export interface DraftView extends Omit<gen.DraftView, 'items'> {
+	items: DraftItem[];
+}
+export interface TaskEntry extends Omit<gen.TaskEntry, 'kind'> {
+	kind: 'op' | 'merge';
+}
+export interface DriftResult extends Omit<gen.DriftResult, 'changes'> {
+	changes: Change[];
+}
+
+// Go []*float64 marshals a nil as JSON null; the generated type says undefined.
+export interface MetricSeries extends Omit<gen.MetricSeries, 'values'> {
+	values: (number | null)[]; // aligned to the chart's times; null = gap
+}
+export interface MetricChart extends Omit<gen.MetricChart, 'series'> {
+	series: MetricSeries[];
+}
+export interface VMMetrics extends Omit<gen.VMMetrics, 'charts'> {
+	charts: MetricChart[];
+}
+
+export interface EditRequest extends Omit<gen.VMEdit, 'power' | 'sizing' | 'addGroups'> {
+	sourceFile: string;
+	power?: Power;
+	// Which representation owns CPU/memory. The two are mutually exclusive in
+	// KubeVirt, so the backend strips the other when this is set.
+	sizing?: 'instancetype' | 'custom';
+	addGroups?: PlacementGroup[]; // upsert placement groups
+}
+
+// --- Request types with no internal/model counterpart ---
 
 export interface User {
 	username: string;
 	groups: string[];
-}
-
-// Unauthorized is thrown when a call returns 401, so a caller can suppress its
-// own error rendering; the sign-out itself is handled centrally (below).
-export class Unauthorized extends Error {
-	constructor() {
-		super('unauthorized');
-		this.name = 'Unauthorized';
-	}
-}
-
-// The one signed-out sink: every 401 funnels through req(), so the page
-// registers a single handler here instead of each fetching component
-// remembering to report it. The WebSocket paths (streamInventory, VNC) don't
-// go through req and take their own onUnauthorized callback.
-let unauthorizedSink: (() => void) | undefined;
-export function onUnauthorized(fn: () => void) {
-	unauthorizedSink = fn;
-}
-
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
-	const res = await fetch(path, { credentials: 'same-origin', ...init });
-	if (res.status === 401) {
-		unauthorizedSink?.();
-		throw new Unauthorized();
-	}
-	if (!res.ok) throw new Error(`${path}: ${res.status} ${await res.text()}`);
-	if (res.status === 204) return undefined as T;
-	return res.json() as Promise<T>;
-}
-
-function get<T>(path: string): Promise<T> {
-	return req<T>(path);
-}
-
-function post<T>(path: string, body: unknown): Promise<T> {
-	return req<T>(path, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(body),
-	});
-}
-
-function put<T>(path: string, body: unknown): Promise<T> {
-	return req<T>(path, {
-		method: 'PUT',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(body),
-	});
-}
-
-function del(path: string): Promise<void> {
-	return req<void>(path, { method: 'DELETE' });
-}
-
-export interface EditRequest {
-	sourceFile: string;
-	power?: Power;
-	cpuCores?: number;
-	memory?: string;
-	instancetype?: string;
-	preference?: string;
-	// Which representation owns CPU/memory. The two are mutually exclusive in
-	// KubeVirt, so the backend strips the other when this is set.
-	sizing?: 'instancetype' | 'custom';
-	setLabels?: Record<string, string>;
-	removeLabels?: string[];
-	drsExclude?: boolean; // toggle the DRS opt-out (prefer-no-eviction) annotation
-	evictionStrategy?: string; // '' removes it (cluster default)
-	addDisks?: { name: string; size: string; storageClass?: string }[];
-	removeDisks?: string[];
-	addNetworks?: { name: string }[];
-	removeNetworks?: string[];
-	// Storage live migration: move each named disk to another storage class
-	// (rewrites its DataVolume template + sets updateVolumesStrategy: Migration).
-	migrateVolumes?: { name: string; storageClass: string }[];
-	pin?: string[]; // replace host pinning; [] removes it
-	addGroups?: PlacementGroup[]; // upsert placement groups
-	removeGroups?: string[];
-	message?: string;
-}
-
-export interface Instancetype {
-	name: string;
-	cpu: number;
-	memory: string;
-}
-export interface Preference {
-	name: string;
-	displayName?: string;
-}
-export interface OSImage {
-	name: string;
-	namespace: string;
-	ready: boolean;
-}
-export interface NetworkOption {
-	name: string;
-	namespace: string;
-}
-export interface StorageClass {
-	name: string;
-	default?: boolean; // the cluster's default class
-}
-export interface Options {
-	instancetypes: Instancetype[];
-	preferences: Preference[];
-	osImages: OSImage[];
-	networks: NetworkOption[];
-	storageClasses: StorageClass[];
-}
-
-// --- Networks (the vCenter "Distributed Port Group" abstraction) ---
-export type NetworkKind = 'default' | 'internal' | 'vlan';
-export type NetworkScope = 'project' | 'shared';
-
-export interface Network {
-	name: string; // the port-group name shown to the user
-	kind: NetworkKind; // default ("VM Network") | internal | vlan
-	scope: NetworkScope; // project | shared
-	namespace?: string; // project-scoped (UDN/NAD)
-	vlan?: number;
-	subnets?: string[];
-	uplink?: string; // physicalNetworkName (vlan kind)
-	attachRef?: string; // "namespace/nad" (CUDN: bare name, resolved at attach)
-	backing: string; // UserDefinedNetwork | ClusterUserDefinedNetwork | NetworkAttachmentDefinition
-	topology?: string; // raw OVN-K topology, for the detail drawer
-	namespaces?: string[]; // for shared (CUDN) nets: where it's attachable; empty for project nets
-	// ArgoCD per-object drift (same surface VMs carry) — absent when Argo isn't wired
-	// or no Application manages this object.
-	sync?: SyncStatus;
-	health?: string;
-	syncError?: string;
-}
-export interface Uplink {
-	name: string; // physicalNetworkName
-	bridge: string; // OVS bridge (br-ex, br-physnet…)
-	builtin?: boolean; // the default br-ex uplink
-	nodes?: string[];
-	nodeCount: number;
-	ports?: string[];
-	vlans?: number[];
-	status?: string;
-}
-export interface PhysicalAdapter {
-	name: string;
-	node: string;
-	type?: string; // ethernet | bond
-	mac?: string;
-	state?: string; // up | down
-	mtu?: number;
-	role?: string; // cluster-uplink | enslaved | available
-}
-export interface NetworkCaps {
-	sharedSegment: boolean; // shared / VLAN CUDN
-	uplink: boolean; // nmstate NNCP
-	namespace: boolean; // namespaces (New Project / Namespace)
-	egressIP: boolean; // Tier-0 SNAT
-	externalRoute: boolean; // Tier-0 external route
-	adminNetworkPolicy: boolean; // cluster-wide admin DFW (ANP/BANP)
-}
-export interface NetworkInventory {
-	networks: Network[];
-	uplinks: Uplink[];
-	physicalAdapters: PhysicalAdapter[];
-	nmstatePresent: boolean;
-	canManage: boolean; // coarse "any platform authoring" (CUDN); gates the platform-draft view
-	caps?: NetworkCaps; // per-action authoring authority for precise button gating
-}
-
-// --- Security (the policy plane: DFW tiers, gateway firewall, Tier-0) ---
-
-// The NSX-T tier a live policy object presents as. Mirrors model.PolicyKind.
-export type PolicyKind = 'dfw' | 'admin' | 'baseline' | 'gateway' | 'egressip' | 'route';
-
-// Read-plane rule row (display summary). Distinct from PolicyRule below, the
-// NetworkPolicy create-request shape.
-export interface PolicyRuleView {
-	direction: 'Ingress' | 'Egress';
-	action: string; // Allow | Deny | Pass | SNAT | Route
-	peer?: string; // source/destination summary; empty = any
-	ports?: string; // "TCP/443, UDP/53"; empty = any
-}
-
-export interface Policy {
-	name: string;
-	kind: PolicyKind;
-	namespace?: string; // empty for cluster-scoped kinds
-	backing: string; // the Kubernetes kind behind the row
-	priority?: number; // ANP precedence (lower wins)
-	target?: string; // what the policy applies to, summarized
-	// Namespaces a cluster-scoped policy provably pins to; absent when the
-	// selector isn't enumerable, so a tenant filter must keep the row.
-	namespaces?: string[];
-	rules?: PolicyRuleView[];
-	sync?: SyncStatus;
-	health?: string;
-	syncError?: string;
-}
-
-export interface PolicyInventory {
-	policies: Policy[];
-}
-
-// One policy bound to a workload in the effective-policy answer. conditional:
-// a pod selector couldn't be resolved (namespace-scoped query), so it applies
-// only to the pods matching its target.
-export interface PolicyBinding {
-	policy: Policy;
-	conditional?: boolean;
-	note?: string; // tier semantics the order can't express (baseline)
-}
-
-// "What governs this workload, in evaluation order" — control-plane binding,
-// not flow simulation. eastWest is already ordered: admin by precedence, then
-// selecting project rules, then baseline.
-export interface EffectivePolicy {
-	namespace: string;
-	vm?: string;
-	labels?: Record<string, string>; // labels pod selectors matched against
-	labelsLive?: boolean; // true = running VMI's labels, false = manifest's
-	eastWest?: PolicyBinding[];
-	defaultDenyIngress?: boolean; // selected by >=1 ingress netpol
-	defaultDenyEgress?: boolean;
-	gateway?: PolicyBinding[];
-	snat?: PolicyBinding[];
-	routes?: PolicyBinding[];
-}
-
-// One simulated flow: a source VM, a destination (VM or external IP), and the
-// protocol/port. Control-plane simulation — no packet is injected.
-export interface TraceRequest {
-	source: TraceEndpointRef;
-	destination: TraceEndpointRef;
-	protocol?: string; // TCP (default) | UDP | SCTP
-	port?: number; // 0 = any port
-}
-
-export interface TraceEndpointRef {
-	namespace?: string;
-	vm?: string;
-	ip?: string; // external destination
-}
-
-// The simulation's answer. Deny is only ever certain: an unresolved rule
-// (named port, stopped VM, DNS rule) downgrades the verdict to Conditional.
-export interface TraceResult {
-	verdict: string; // Allow | Deny | Conditional | Unreachable
-	steps: TraceStep[];
-}
-
-// One observation on the path. decisive marks the rule that fixed a
-// direction's verdict; conditional keeps a maybe-matching rule visible.
-export interface TraceStep {
-	stage: string; // connectivity | segment | admin | dfw | baseline | default | gateway | snat | route
-	direction?: string; // Egress (source side) | Ingress (destination side)
-	policy?: Policy;
-	rule?: PolicyRuleView;
-	action: string;
-	conditional?: boolean;
-	decisive?: boolean;
-	note?: string;
-}
-
-// --- DRS (descheduler-driven automatic VM rebalancing) ---
-
-export type DRSMode = 'Predictive' | 'Automatic';
-
-// The DRS vocabulary + bounds, mirrored from internal/drsgen (the backend
-// validator) so the status card, the dialog, and what the server accepts
-// never drift from each other.
-export const DRS_THRESHOLDS = [
-	{ value: 'AsymmetricLow', label: 'Conservative', detail: 'move only off clearly hot nodes' },
-	{ value: 'Low', label: 'Moderate', detail: '10% deviation from average' },
-	{ value: 'Medium', label: 'Eager', detail: '20% deviation from average' },
-	{ value: 'High', label: 'Aggressive', detail: '30% deviation from average' },
-] as const;
-export const DRS_BOUNDS = {
-	intervalSeconds: { min: 10, max: 86400 },
-	evictionNodeLimit: { min: 1, max: 100 },
-	evictionTotalLimit: { min: 1, max: 1000 },
-} as const;
-
-export function drsThresholdLabel(value: string): string {
-	return DRS_THRESHOLDS.find((t) => t.value === value)?.label ?? value;
-}
-
-export interface DRSConfig {
-	mode: DRSMode;
-	threshold: string; // AsymmetricLow | Low | Medium | High
-	intervalSeconds: number;
-	softTainter: boolean;
-	evictionNodeLimit: number;
-	evictionTotalLimit: number;
-}
-export interface DRSLive {
-	apiPresent: boolean; // the descheduler operator's CRD is served
-	synced: boolean; // initial LIST landed; before it, deployed=false means "unknown"
-	stale?: boolean; // the watch is failing — live fields may be missing/outdated
-	deployed: boolean; // a KubeDescheduler CR exists in the cluster
-	managementState?: string;
-	mode?: string;
-	profiles?: string[];
-	intervalSeconds?: number;
-	available: boolean; // the operator's Available condition
-	degraded?: string; // the Degraded condition's message, when degraded
-}
-export interface DRSDraftState {
-	config?: DRSConfig; // the staged (unproposed) KubeDescheduler spec
-	psi?: boolean; // the PSI MachineConfig is staged too
-	disableStaged?: boolean;
-}
-export interface DRSView {
-	configured: boolean; // the KubeDescheduler CR is committed on the platform repo
-	config?: DRSConfig; // parsed committed config (absent if hand-edited beyond parse)
-	psiConfigured: boolean; // the PSI MachineConfig is committed
-	draft?: DRSDraftState; // the caller's pending change — the dialog edits this plane
-	live: DRSLive;
-	warning?: string; // non-fatal degradation (e.g. platform repo unreachable)
-	canManage: boolean; // kubedeschedulers-create SSAR — gates the panel's actions
-	canPSI: boolean; // machineconfigs-create SSAR — gates the PSI checkbox
-}
-export interface DRSEnableRequest {
-	mode: DRSMode;
-	threshold?: string;
-	intervalSeconds?: number;
-	softTainter?: boolean;
-	evictionNodeLimit?: number;
-	evictionTotalLimit?: number;
-	installPSI?: boolean; // also stage the worker PSI MachineConfig (reboots workers on merge)
 }
 
 export interface CreateVMRequest {
@@ -470,23 +109,6 @@ export interface CreateVMRequest {
 	networks?: { name: string }[]; // secondary networks (UDN/localnet)
 	primaryNetwork?: boolean; // attach the primary (pod-network) NIC; omitted/true = yes
 	labels?: Record<string, string>;
-}
-
-// --- Draft changeset types ---
-
-export interface Change {
-	field: string;
-	action: 'change' | 'add' | 'remove';
-	from?: string;
-	to?: string;
-}
-export interface DraftItem {
-	kind: 'edit' | 'create' | 'delete';
-	resource?: string; // '' == vm | network — disambiguates unstage
-	namespace: string;
-	name: string;
-	changes: Change[];
-	yaml?: string;
 }
 
 export interface NetworkCreate {
@@ -573,56 +195,35 @@ export interface ProjectCreate {
 	owners?: string[]; // usernames granted namespace-admin on the first namespace
 	vmNetwork?: { name: string; subnet?: string }; // optional primary (Layer2) UDN on that namespace
 }
-export interface DraftView {
-	base: string;
-	branch: string;
-	count: number;
-	items: DraftItem[];
-	warning?: string; // non-fatal degradation of the operation that produced it
+
+export interface DRSEnableRequest {
+	mode: DRSMode;
+	threshold?: string;
+	intervalSeconds?: number;
+	softTainter?: boolean;
+	evictionNodeLimit?: number;
+	evictionTotalLimit?: number;
+	installPSI?: boolean; // also stage the worker PSI MachineConfig (reboots workers on merge)
 }
-export interface ProposeResult {
-	branch: string;
-	pushed: boolean;
-	prURL?: string;
-	prNumber?: number;
-	compareURL?: string;
-	existing?: boolean;
+
+// --- DRS vocabulary (mirrored from internal/drsgen, the backend validator) ---
+
+export const DRS_THRESHOLDS = [
+	{ value: 'AsymmetricLow', label: 'Conservative', detail: 'move only off clearly hot nodes' },
+	{ value: 'Low', label: 'Moderate', detail: '10% deviation from average' },
+	{ value: 'Medium', label: 'Eager', detail: '20% deviation from average' },
+	{ value: 'High', label: 'Aggressive', detail: '30% deviation from average' },
+] as const;
+export const DRS_BOUNDS = {
+	intervalSeconds: { min: 10, max: 86400 },
+	evictionNodeLimit: { min: 1, max: 100 },
+	evictionTotalLimit: { min: 1, max: 1000 },
+} as const;
+
+export function drsThresholdLabel(value: string): string {
+	return DRS_THRESHOLDS.find((t) => t.value === value)?.label ?? value;
 }
-export interface DriftResult {
-	drift: boolean;
-	changes: Change[];
-}
-export interface Proposal {
-	project: string;
-	prNumber: number;
-	prURL: string;
-	title?: string;
-}
-export interface Commit {
-	hash: string;
-	shortHash: string;
-	message: string;
-	author: string;
-	when: string; // RFC3339
-	merge?: boolean; // a merge commit (not directly revertable)
-}
-export interface MetricSeries {
-	name: string;
-	values: (number | null)[]; // aligned to the chart's times; null = gap
-}
-export interface MetricChart {
-	key: string;
-	title: string;
-	unit: string; // '%' | 'bytes' | 'Bps' | 'iops' | 'ms'
-	stacked?: boolean; // series partition a whole; render as stacked area
-	times: number[]; // unix seconds, shared x-axis
-	series: MetricSeries[];
-}
-export interface VMMetrics {
-	range: string;
-	stepSec: number;
-	charts: MetricChart[];
-}
+
 // The Performance views' range tiers (vCenter's real-time/day/week/month).
 export const METRIC_RANGES = [
 	{ key: '1h', label: 'Real-time' },
@@ -630,174 +231,58 @@ export const METRIC_RANGES = [
 	{ key: '1w', label: 'Week' },
 	{ key: '1mo', label: 'Month' },
 ] as const;
-export interface UsageMetric {
-	used: number;
-	total?: number; // 0/undefined ⇒ no denominator
-	spark?: number[];
-}
-export interface VMUsage {
-	updated: number; // unix seconds
-	cpu: UsageMetric; // used = % of allocated, total = 100
-	memory: UsageMetric; // bytes
-	storage: UsageMetric; // bytes
-}
-export interface ClusterMetric {
-	used: number;
-	allocated?: number; // committed to VMs
-	total: number; // node-allocatable capacity
-	spark?: number[];
-}
-export interface ConsumerVM {
-	namespace: string;
-	name: string;
-	value: number;
-}
-export interface ClusterSummary {
-	updated: number;
-	cpu: ClusterMetric; // cores
-	memory: ClusterMetric; // bytes
-	storage: ClusterMetric; // bytes
-	vms: Record<string, number>; // phase → count
-	topCpu: ConsumerVM[];
-	topMemory: ConsumerVM[];
-}
-export interface HostWorker {
-	node: string;
-	pct: number; // CPU utilization percent
-	mem?: number; // memory utilization percent; absent when the series is missing
-	unschedulable?: boolean;
-}
-export interface HostBand {
-	low: number; // percent
-	high: number;
-	above: number; // workers over high — migration sources
-	below: number; // workers under low — migration targets
-}
-export interface HostLoad {
-	updated: number;
-	workers: number;
-	mean: number; // CPU percent
-	nodes: HostWorker[]; // every worker, hottest first
-	band?: HostBand; // absent until DRS is configured
-}
-export interface Snapshot {
-	name: string;
-	created?: string;
-	phase?: string; // InProgress | Succeeded | Failed
-	readyToUse: boolean;
-	indications?: string[]; // Online | GuestAgent | NoGuestAgent
-	error?: string;
-}
-// A VirtualMachineClone sourced from a VM; the target VM lands cluster-only
-// (NotTracked) until adopted into git.
-export interface Clone {
-	name: string;
-	target: string;
-	phase?: string; // SnapshotInProgress | RestoreInProgress | CreatingTargetVM | Succeeded | Failed
-	created?: string;
-}
-export interface VMEvent {
-	namespace?: string;
-	name?: string;
-	type: string; // Normal | Warning
-	reason: string;
-	message: string;
-	count?: number;
-	object: string; // VirtualMachine | VirtualMachineInstance
-	lastSeen?: string;
+
+// Unauthorized is thrown when a call returns 401, so a caller can suppress its
+// own error rendering; the sign-out itself is handled centrally (below).
+export class Unauthorized extends Error {
+	constructor() {
+		super('unauthorized');
+		this.name = 'Unauthorized';
+	}
 }
 
-// A VM's live (or last) node-to-node move; active while neither flag is set.
-export interface Migration {
-	sourceNode?: string;
-	targetNode?: string;
-	startedAt?: string;
-	endedAt?: string;
-	completed?: boolean;
-	failed?: boolean;
+// The one signed-out sink: every 401 funnels through req(), so the page
+// registers a single handler here instead of each fetching component
+// remembering to report it. The WebSocket paths (streamInventory, VNC) don't
+// go through req and take their own onUnauthorized callback.
+let unauthorizedSink: (() => void) | undefined;
+export function onUnauthorized(fn: () => void) {
+	unauthorizedSink = fn;
 }
 
-// One resource row of a ResourceQuota, pre-parsed for the capacity bars.
-export interface QuotaItem {
-	resource: string; // e.g. requests.cpu, requests.memory
-	used: number;
-	hard: number;
-	unit: 'cores' | 'bytes' | 'count';
-}
-export interface NamespaceQuota {
-	namespace: string;
-	name: string;
-	items: QuotaItem[];
+async function req<T>(path: string, init?: RequestInit): Promise<T> {
+	const res = await fetch(path, { credentials: 'same-origin', ...init });
+	if (res.status === 401) {
+		unauthorizedSink?.();
+		throw new Unauthorized();
+	}
+	if (!res.ok) throw new Error(`${path}: ${res.status} ${await res.text()}`);
+	if (res.status === 204) return undefined as T;
+	return res.json() as Promise<T>;
 }
 
-// One firing Prometheus alert (the dock's Alarms tab).
-export interface Alert {
-	name: string;
-	severity?: string;
-	namespace?: string;
-	vm?: string;
-	count?: number; // collapsed identical series
+function get<T>(path: string): Promise<T> {
+	return req<T>(path);
 }
 
-// Image-upload flow (the OVF-import analog): dotvirt mints the target + token,
-// the browser streams the image straight to cdi-uploadproxy.
-export interface UploadTarget {
-	namespace: string;
-	name: string;
-}
-export interface UploadStatus {
-	phase: string; // Pending | UploadScheduled | UploadReady | Succeeded | Failed | …
-	ready: boolean; // UploadReady — the proxy will accept bytes
-	progress?: string; // CDI import progress, once bytes flow
-}
-export interface UploadToken {
-	token: string;
-	uploadUrl: string; // the cdi-uploadproxy endpoint the browser POSTs to
+function post<T>(path: string, body: unknown): Promise<T> {
+	return req<T>(path, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	});
 }
 
-// A node's maintenance state for the By-Node view. `maintenance` is the
-// annotation-backed intent marker: set until explicitly exited, even if the
-// node gets uncordoned out of band.
-export interface NodeInfo {
-	name: string;
-	unschedulable: boolean;
-	maintenance: boolean;
-	canCordon: boolean; // the caller's token may cordon it
+function put<T>(path: string, body: unknown): Promise<T> {
+	return req<T>(path, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	});
 }
 
-// A virtualization host (KubeVirt-schedulable node) — a candidate
-// live-migration target for the migrate dialog's picker.
-// One worker's commitment picture: promised-to-VMs vs allocatable.
-export interface HostCapacityNode {
-	node: string;
-	cpuAllocatable: number; // cores
-	vcpuAllocated?: number;
-	memAllocatable: number; // bytes
-	memAllocated?: number;
-}
-export interface HostCapacity {
-	updated: number;
-	nodes: HostCapacityNode[];
-}
-
-export interface NodeTarget {
-	name: string;
-	ready: boolean;
-	unschedulable?: boolean;
-	maintenance?: boolean;
-}
-
-// The caller's effective capabilities in one namespace (the Permissions tab).
-export interface Capability {
-	id: string;
-	label: string;
-	allowed: boolean;
-	detail?: string;
-}
-export interface Permissions {
-	namespace: string;
-	capabilities: Capability[];
-	incomplete?: boolean;
+function del(path: string): Promise<void> {
+	return req<void>(path, { method: 'DELETE' });
 }
 
 const enc = encodeURIComponent;
@@ -818,55 +303,6 @@ function scopeQS(scope: ScopeQuery, extra?: Record<string, string>): string {
 	return qs ? `?${qs}` : '';
 }
 
-// The content library: VirtualMachineTemplate manifests stored under templates/
-// in library repos (each project + the shared "platform" library). Parameters
-// mirror template.kubevirt.io/v1beta1 so the form is exactly what the native
-// CRD will accept once the cluster ships it.
-export interface TemplateParameter {
-	name: string;
-	displayName?: string;
-	description?: string;
-	value?: string;
-	generate?: string; // 'expression' — value generated from `from` at deploy time
-	from?: string;
-	required?: boolean;
-}
-
-export interface Template {
-	name: string;
-	library: string; // owning project, or 'platform' (the shared library)
-	description?: string;
-	sourceFile: string;
-	parameters?: TemplateParameter[];
-	instancetype?: string;
-	preference?: string;
-	yaml: string;
-	error?: string; // parse failure — listed, but not deployable
-}
-
-export interface DeployTemplateRequest {
-	library: string;
-	template: string;
-	namespace: string;
-	name?: string; // overrides the NAME parameter; empty → template default (often generated)
-	parameters?: Record<string, string>;
-	powerOn?: boolean; // boot the VM once it syncs (templates blueprint Halted)
-}
-
-export interface UpdateTemplateRequest {
-	library: string;
-	name: string;
-	yaml: string;
-}
-
-export interface SaveTemplateRequest {
-	library: string;
-	name: string;
-	description?: string;
-	sourceNamespace: string;
-	sourceName: string;
-}
-
 export const api = {
 	// Auth
 	login: (token: string) => post<User>('/api/login', { token }),
@@ -874,23 +310,23 @@ export const api = {
 	me: () => get<User>('/api/me'),
 
 	tasks: () => get<TaskEntry[]>('/api/tasks'),
-	options: () => get<Options>('/api/options'),
-	networks: () => get<NetworkInventory>('/api/networks'),
-	policies: () => get<PolicyInventory>('/api/policies'),
+	options: () => get<gen.Options>('/api/options'),
+	networks: () => get<gen.NetworkInventory>('/api/networks'),
+	policies: () => get<gen.PolicyInventory>('/api/policies'),
 	vmPolicy: (namespace: string, name: string) =>
-		get<EffectivePolicy>(`/api/vms/${enc(namespace)}/${enc(name)}/policy`),
+		get<gen.EffectivePolicy>(`/api/vms/${enc(namespace)}/${enc(name)}/policy`),
 	namespacePolicy: (namespace: string) =>
-		get<EffectivePolicy>(`/api/namespaces/${enc(namespace)}/policy`),
-	trace: (req: TraceRequest) => post<TraceResult>('/api/networking/trace', req),
+		get<gen.EffectivePolicy>(`/api/namespaces/${enc(namespace)}/policy`),
+	trace: (req: gen.TraceRequest) => post<gen.TraceResult>('/api/networking/trace', req),
 	// Which sign-in paths exist (shown on the login screen before any session).
 	authMethods: () => get<{ sso: boolean; ssoPending: boolean }>('/api/auth/methods'),
 	// Applies the OAuthClient under the CALLER's token; RBAC is the gate.
 	finishSSO: () => req<void>('/api/auth/oauthclient', { method: 'POST' }),
 
 	// Commit history + per-commit revert (a forward commit opened as a PR).
-	history: (project: string) => get<Commit[]>(`/api/projects/${enc(project)}/history`),
+	history: (project: string) => get<gen.Commit[]>(`/api/projects/${enc(project)}/history`),
 	revert: (project: string, hash: string) =>
-		post<ProposeResult>(`/api/projects/${enc(project)}/revert`, { hash }),
+		post<gen.ProposeResult>(`/api/projects/${enc(project)}/revert`, { hash }),
 
 	// Staging — the backend resolves the project from the VM's namespace, so these
 	// per-VM routes need no project param.
@@ -910,7 +346,7 @@ export const api = {
 
 	// DRS (platform tier): read the merged git/live view; enable/reconfigure and
 	// disable stage into the platform draft like every other cluster-scoped kind.
-	drs: () => get<DRSView>('/api/drs'),
+	drs: () => get<gen.DRSView>('/api/drs'),
 	enableDRS: (r: DRSEnableRequest) => post<DraftView>('/api/drs', r),
 	disableDRS: () => req<DraftView>('/api/drs', { method: 'DELETE' }),
 	stageDelete: (namespace: string, name: string) =>
@@ -928,30 +364,30 @@ export const api = {
 	getDraft: (project: string) => get<DraftView>(`/api/draft?project=${enc(project)}`),
 	discardDraft: (project: string) => del(`/api/draft?project=${enc(project)}`),
 	propose: (project: string, title: string, message: string) =>
-		post<ProposeResult>(`/api/draft/propose?project=${enc(project)}`, { title, message }),
+		post<gen.ProposeResult>(`/api/draft/propose?project=${enc(project)}`, { title, message }),
 
 	// Drift + reconcile for one VM (project resolved from the namespace).
 	drift: (namespace: string, name: string) =>
 		get<DriftResult>(`/api/vms/${enc(namespace)}/${enc(name)}/drift`),
 	events: (namespace: string, name: string) =>
-		get<VMEvent[]>(`/api/vms/${enc(namespace)}/${enc(name)}/events`),
-	allEvents: () => get<VMEvent[]>('/api/events'),
+		get<gen.Event[]>(`/api/vms/${enc(namespace)}/${enc(name)}/events`),
+	allEvents: () => get<gen.Event[]>('/api/events'),
 	permissions: (namespace: string) =>
-		get<Permissions>(`/api/permissions?namespace=${enc(namespace)}`),
+		get<gen.Permissions>(`/api/permissions?namespace=${enc(namespace)}`),
 	metrics: (namespace: string, name: string, range: string) =>
 		get<VMMetrics>(`/api/vms/${enc(namespace)}/${enc(name)}/metrics?range=${enc(range)}`),
 	vmUsage: (namespace: string, name: string) =>
-		get<VMUsage>(`/api/vms/${enc(namespace)}/${enc(name)}/usage`),
+		get<gen.VMUsage>(`/api/vms/${enc(namespace)}/${enc(name)}/usage`),
 	clusterSummary: (scope: ScopeQuery = {}) =>
-		get<ClusterSummary>(`/api/metrics/cluster${scopeQS(scope)}`),
-	hostLoad: () => get<HostLoad>('/api/metrics/hosts'),
+		get<gen.ClusterSummary>(`/api/metrics/cluster${scopeQS(scope)}`),
+	hostLoad: () => get<gen.HostLoad>('/api/metrics/hosts'),
 	scopeMetrics: (scope: ScopeQuery, range: string) =>
 		get<VMMetrics>(`/api/metrics/scope${scopeQS(scope, { range })}`),
-	alarms: () => get<Alert[]>('/api/alarms'),
+	alarms: () => get<gen.Alert[]>('/api/alarms'),
 	// Node maintenance (cluster-scoped; the user's token is the gate).
-	nodes: () => get<NodeTarget[]>('/api/nodes'),
-	capacity: () => get<HostCapacity>('/api/metrics/capacity'),
-	nodeInfo: (node: string) => get<NodeInfo>(`/api/nodes/${enc(node)}`),
+	nodes: () => get<gen.Node[]>('/api/nodes'),
+	capacity: () => get<gen.HostCapacity>('/api/metrics/capacity'),
+	nodeInfo: (node: string) => get<gen.NodeInfo>(`/api/nodes/${enc(node)}`),
 	setNodeCordon: (node: string, unschedulable: boolean) =>
 		post<void>(`/api/nodes/${enc(node)}/cordon`, { unschedulable }),
 	setNodeMaintenance: (node: string, enter: boolean) =>
@@ -960,12 +396,12 @@ export const api = {
 	// Image upload: create the target DataVolume + mint a token; the browser
 	// then streams the file straight to the proxy (uploadUrl from uploadToken).
 	createUpload: (req: { namespace: string; name: string; size: string; storageClass?: string }) =>
-		post<UploadTarget>('/api/uploads', req),
+		post<gen.UploadTarget>('/api/uploads', req),
 	uploadStatus: (namespace: string, name: string) =>
-		get<UploadStatus>(`/api/uploads/${enc(namespace)}/${enc(name)}`),
+		get<gen.UploadStatus>(`/api/uploads/${enc(namespace)}/${enc(name)}`),
 	uploadToken: (namespace: string, name: string) =>
-		post<UploadToken>(`/api/uploads/${enc(namespace)}/${enc(name)}/token`, {}),
-	quotas: (scope: ScopeQuery) => get<NamespaceQuota[]>(`/api/quotas${scopeQS(scope)}`),
+		post<gen.UploadToken>(`/api/uploads/${enc(namespace)}/${enc(name)}/token`, {}),
+	quotas: (scope: ScopeQuery) => get<gen.NamespaceQuota[]>(`/api/quotas${scopeQS(scope)}`),
 	adopt: (namespace: string, name: string) =>
 		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/adopt`, {}),
 	// Bulk: stage every untracked (NotTracked) VM in a namespace into one draft.
@@ -978,10 +414,10 @@ export const api = {
 	// The template library (vSphere: Content Library). Deploy renders server-side
 	// and stages the VM into the draft; save derives a template from a VM's git
 	// manifest ("Clone to Template") — both land as PR-gated changes.
-	templates: () => get<{ templates: Template[] }>('/api/templates'),
-	deployTemplate: (req: DeployTemplateRequest) => post<DraftView>('/api/templates/deploy', req),
-	saveTemplate: (req: SaveTemplateRequest) => post<DraftView>('/api/templates', req),
-	updateTemplate: (req: UpdateTemplateRequest) => put<DraftView>('/api/templates', req),
+	templates: () => get<{ templates: gen.Template[] }>('/api/templates'),
+	deployTemplate: (req: gen.DeployTemplateRequest) => post<DraftView>('/api/templates/deploy', req),
+	saveTemplate: (req: gen.SaveTemplateRequest) => post<DraftView>('/api/templates', req),
+	updateTemplate: (req: gen.UpdateTemplateRequest) => put<DraftView>('/api/templates', req),
 	resync: (namespace: string, name: string) =>
 		post<{ application: string; revision: string }>(
 			`/api/vms/${enc(namespace)}/${enc(name)}/resync`,
@@ -990,7 +426,7 @@ export const api = {
 
 	// Clone (imperative create; the target VM lands NotTracked until adopted).
 	clones: (namespace: string, name: string) =>
-		get<Clone[]>(`/api/vms/${enc(namespace)}/${enc(name)}/clones`),
+		get<gen.Clone[]>(`/api/vms/${enc(namespace)}/${enc(name)}/clones`),
 	createClone: (namespace: string, name: string, target: string) =>
 		post<{ name: string; target: string }>(`/api/vms/${enc(namespace)}/${enc(name)}/clone`, {
 			target,
@@ -998,7 +434,7 @@ export const api = {
 
 	// Snapshots (imperative, RBAC-gated; not git-managed).
 	snapshots: (namespace: string, name: string) =>
-		get<Snapshot[]>(`/api/vms/${enc(namespace)}/${enc(name)}/snapshots`),
+		get<gen.Snapshot[]>(`/api/vms/${enc(namespace)}/${enc(name)}/snapshots`),
 	takeSnapshot: (namespace: string, name: string, snapName?: string) =>
 		post<{ name: string }>(`/api/vms/${enc(namespace)}/${enc(name)}/snapshots`, {
 			name: snapName ?? '',

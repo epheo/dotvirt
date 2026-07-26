@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import ErrorNote from './ErrorNote.svelte';
 	import FormField from './FormField.svelte';
 	import Modal from './Modal.svelte';
@@ -42,7 +43,7 @@
 			onstaged();
 			onclose();
 		} catch (e) {
-			error = String(e);
+			error = friendlyError(e);
 		} finally {
 			submitting = false;
 		}

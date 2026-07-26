@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { api, Unauthorized, type HostLoad, type HostWorker } from '$lib/api';
+	import { api, type HostLoad, type HostWorker } from '$lib/api';
 	import { densityPath, layoutStrip } from '$lib/dotstrip';
 	import { relativeAge } from '$lib/format';
-	import { pollWhileVisible } from '$lib/poll';
+	import { resource } from '$lib/resource.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import InfoCard from './InfoCard.svelte';
 
@@ -12,22 +12,13 @@
 	// When stacks outgrow the strip the dots give way to a density silhouette
 	// and only out-of-band workers stay individually drawn — the hand-off is
 	// geometric (see dotstrip.ts), never a node-count threshold.
-	let data = $state<HostLoad | null>(null);
-
-	async function load() {
-		try {
-			data = await api.hostLoad();
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			data = null; // metrics off or no worker series: the card simply absents itself
-		}
-	}
-	// pollWhileVisible only paces refreshes — the initial load is the caller's,
-	// or the card sits empty until the first 30s tick.
-	$effect(() => {
-		void load();
-		return pollWhileVisible(load, 30000);
-	});
+	// metrics off or no worker series: the card simply absents itself
+	const hl = resource<HostLoad>(
+		() => '',
+		() => api.hostLoad(),
+		{ poll: 30000 },
+	);
+	const data = $derived(hl.failed ? null : hl.data);
 
 	const W = 640;
 	const CPU_H = 102;

@@ -1,13 +1,14 @@
 <script lang="ts">
 	import { Check, Upload } from 'lucide-svelte';
 	import { api, Unauthorized, type Options } from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import { validName, NAME_HINT } from '$lib/validate';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
 	import FormField from './FormField.svelte';
 	import TextInput from './TextInput.svelte';
-	import SelectInput from './SelectInput.svelte';
+	import StorageClassSelect from './StorageClassSelect.svelte';
 
 	// Image upload (OVF-import analog). dotvirt creates the upload-target
 	// DataVolume + mints a token; the browser then streams the file STRAIGHT to
@@ -133,7 +134,7 @@
 			ondone?.();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = String(e);
+			error = friendlyError(e);
 			stage = 'error';
 		}
 	}
@@ -165,12 +166,7 @@
 					<TextInput bind:value={size} placeholder="10Gi" mono />
 				</FormField>
 				<FormField label="Storage class">
-					<SelectInput bind:value={storageClass}>
-						<option value="">cluster default</option>
-						{#each options?.storageClasses ?? [] as sc (sc.name)}
-							<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
-						{/each}
-					</SelectInput>
+					<StorageClassSelect options={options?.storageClasses ?? []} bind:value={storageClass} />
 				</FormField>
 			</div>
 			{#if file}

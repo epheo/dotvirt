@@ -8,9 +8,7 @@
 		type DRSView,
 	} from '$lib/api';
 	import ChoiceCards from './ChoiceCards.svelte';
-	import ErrorNote from './ErrorNote.svelte';
-	import Modal from './Modal.svelte';
-	import StageFooter from './StageFooter.svelte';
+	import StageModal from './StageModal.svelte';
 	import FormField from './FormField.svelte';
 	import TextInput from './TextInput.svelte';
 	import SelectInput from './SelectInput.svelte';
@@ -33,7 +31,7 @@
 	// The modal is mounted fresh per open.
 	// svelte-ignore state_referenced_locally
 	const cfg = view.draft?.config ?? view.config;
-	let mode = $state<DRSMode>(cfg?.mode ?? 'Automatic');
+	let mode = $state<DRSMode>((cfg?.mode as DRSMode) ?? 'Automatic');
 	let threshold = $state(cfg?.threshold ?? 'AsymmetricLow');
 	let intervalSeconds = $state(cfg?.intervalSeconds ?? 60);
 	let softTainter = $state(cfg?.softTainter ?? true);
@@ -42,9 +40,6 @@
 	// svelte-ignore state_referenced_locally
 	let installPSI = $state(view.draft?.psi ?? false);
 	let showAdvanced = $state(false);
-
-	let submitting = $state(false);
-	let error = $state('');
 
 	const inBounds = (v: number, b: { min: number; max: number }) => v >= b.min && v <= b.max;
 	const missing = $derived.by(() => {
@@ -65,10 +60,7 @@
 			: '',
 	);
 
-	async function submit() {
-		if (!valid) return;
-		submitting = true;
-		error = '';
+	async function stage() {
 		const req: DRSEnableRequest = {
 			mode,
 			threshold,
@@ -78,128 +70,113 @@
 			evictionTotalLimit,
 		};
 		if (installPSI) req.installPSI = true;
-		try {
-			await api.enableDRS(req);
-			onstaged();
-			onclose();
-		} catch (e) {
-			error = String(e);
-		} finally {
-			submitting = false;
-		}
+		await api.enableDRS(req);
 	}
 </script>
 
-<Modal title="Configure Dynamic Rescheduling" size="lg" {onclose}>
-	<div class="space-y-4 overflow-y-auto px-5 py-4 text-sm">
-		<div>
-			<span class="mb-1 block text-ink-soft">Automation level</span>
-			<ChoiceCards
-				options={[
-					{
-						value: 'Predictive',
-						label: 'Predictive',
-						hint: 'Dry run: recommendations in logs/metrics, no VM moves',
-					},
-					{
-						value: 'Automatic',
-						label: 'Automatic',
-						hint: 'VMs live-migrate off hot nodes to keep spare capacity even',
-					},
-				]}
-				bind:value={mode}
-			/>
-		</div>
-
-		<FormField label="Migration aggressiveness">
-			<SelectInput bind:value={threshold}>
-				{#each DRS_THRESHOLDS as t (t.value)}<option value={t.value}>{t.label} — {t.detail}</option
-					>{/each}
-			</SelectInput>
-		</FormField>
-
-		<FormField label="Evaluation interval (seconds)">
-			<TextInput
-				type="number"
-				min={DRS_BOUNDS.intervalSeconds.min}
-				max={DRS_BOUNDS.intervalSeconds.max}
-				bind:value={intervalSeconds}
-			/>
-		</FormField>
-
-		<button
-			type="button"
-			onclick={() => (showAdvanced = !showAdvanced)}
-			class="text-xs text-accent hover:underline"
-		>
-			{showAdvanced ? '− Hide' : '+ Show'} advanced settings
-		</button>
-		{#if showAdvanced}
-			<div class="space-y-3 rounded border border-line bg-inset p-3">
-				<label class="flex items-start gap-2">
-					<input type="checkbox" bind:checked={softTainter} class="mt-0.5" />
-					<span>
-						Soft-taint hot nodes
-						<span class="block text-xs text-ink-faint">
-							Also steer NEW placements away from hot nodes (PreferNoSchedule) until they cool.
-						</span>
-					</span>
-				</label>
-				<div class="grid grid-cols-2 gap-3">
-					<FormField label="Max migrations per node">
-						<TextInput
-							type="number"
-							min={DRS_BOUNDS.evictionNodeLimit.min}
-							max={DRS_BOUNDS.evictionNodeLimit.max}
-							bind:value={evictionNodeLimit}
-						/>
-					</FormField>
-					<FormField label="Max migrations cluster-wide">
-						<TextInput
-							type="number"
-							min={DRS_BOUNDS.evictionTotalLimit.min}
-							max={DRS_BOUNDS.evictionTotalLimit.max}
-							bind:value={evictionTotalLimit}
-						/>
-					</FormField>
-				</div>
-				<p class="text-xs text-ink-faint">
-					Keep at or below the cluster's live-migration limits so rescheduling never queues more
-					migrations than the cluster will run.
-				</p>
-			</div>
-		{/if}
-
-		{#if !view.psiConfigured}
-			<label class="flex items-start gap-2 rounded border border-warn-soft bg-warn-soft/60 p-3">
-				<input type="checkbox" bind:checked={installPSI} disabled={!view.canPSI} class="mt-0.5" />
-				<span class:opacity-50={!view.canPSI}>
-					Enable PSI on worker nodes (required for load-aware rebalancing)
-					<span class="block text-xs text-warn-ink">
-						Stages a MachineConfig that <strong>reboots every worker node</strong> when the PR merges.
-						Skip if PSI (psi=1) is already enabled out-of-band.
-					</span>
-					{#if !view.canPSI}
-						<span class="block text-xs text-ink-faint">
-							Requires MachineConfig authoring permission.
-						</span>
-					{/if}
-				</span>
-			</label>
-		{/if}
-
-		<ErrorNote {error} />
+<StageModal
+	title="Configure Dynamic Rescheduling"
+	size="lg"
+	label={view.configured ? 'Stage changes' : 'Stage Dynamic Rescheduling'}
+	{missing}
+	{summary}
+	onsubmit={stage}
+	{onstaged}
+	{onclose}
+>
+	<div>
+		<span class="mb-1 block text-ink-soft">Automation level</span>
+		<ChoiceCards
+			options={[
+				{
+					value: 'Predictive',
+					label: 'Predictive',
+					hint: 'Dry run: recommendations in logs/metrics, no VM moves',
+				},
+				{
+					value: 'Automatic',
+					label: 'Automatic',
+					hint: 'VMs live-migrate off hot nodes to keep spare capacity even',
+				},
+			]}
+			bind:value={mode}
+		/>
 	</div>
 
-	{#snippet footer()}
-		<StageFooter
-			{submitting}
-			disabled={!valid}
-			{missing}
-			{summary}
-			label={view.configured ? 'Stage changes' : 'Stage Dynamic Rescheduling'}
-			onsubmit={submit}
-			oncancel={onclose}
+	<FormField label="Migration aggressiveness">
+		<SelectInput bind:value={threshold}>
+			{#each DRS_THRESHOLDS as t (t.value)}<option value={t.value}>{t.label} — {t.detail}</option
+				>{/each}
+		</SelectInput>
+	</FormField>
+
+	<FormField label="Evaluation interval (seconds)">
+		<TextInput
+			type="number"
+			min={DRS_BOUNDS.intervalSeconds.min}
+			max={DRS_BOUNDS.intervalSeconds.max}
+			bind:value={intervalSeconds}
 		/>
-	{/snippet}
-</Modal>
+	</FormField>
+
+	<button
+		type="button"
+		onclick={() => (showAdvanced = !showAdvanced)}
+		class="text-xs text-accent hover:underline"
+	>
+		{showAdvanced ? '− Hide' : '+ Show'} advanced settings
+	</button>
+	{#if showAdvanced}
+		<div class="space-y-3 rounded border border-line bg-inset p-3">
+			<label class="flex items-start gap-2">
+				<input type="checkbox" bind:checked={softTainter} class="mt-0.5" />
+				<span>
+					Soft-taint hot nodes
+					<span class="block text-xs text-ink-faint">
+						Also steer NEW placements away from hot nodes (PreferNoSchedule) until they cool.
+					</span>
+				</span>
+			</label>
+			<div class="grid grid-cols-2 gap-3">
+				<FormField label="Max migrations per node">
+					<TextInput
+						type="number"
+						min={DRS_BOUNDS.evictionNodeLimit.min}
+						max={DRS_BOUNDS.evictionNodeLimit.max}
+						bind:value={evictionNodeLimit}
+					/>
+				</FormField>
+				<FormField label="Max migrations cluster-wide">
+					<TextInput
+						type="number"
+						min={DRS_BOUNDS.evictionTotalLimit.min}
+						max={DRS_BOUNDS.evictionTotalLimit.max}
+						bind:value={evictionTotalLimit}
+					/>
+				</FormField>
+			</div>
+			<p class="text-xs text-ink-faint">
+				Keep at or below the cluster's live-migration limits so rescheduling never queues more
+				migrations than the cluster will run.
+			</p>
+		</div>
+	{/if}
+
+	{#if !view.psiConfigured}
+		<label class="flex items-start gap-2 rounded border border-warn-soft bg-warn-soft/60 p-3">
+			<input type="checkbox" bind:checked={installPSI} disabled={!view.canPSI} class="mt-0.5" />
+			<span class:opacity-50={!view.canPSI}>
+				Enable PSI on worker nodes (required for load-aware rebalancing)
+				<span class="block text-xs text-warn-ink">
+					Stages a MachineConfig that <strong>reboots every worker node</strong> when the PR merges. Skip
+					if PSI (psi=1) is already enabled out-of-band.
+				</span>
+				{#if !view.canPSI}
+					<span class="block text-xs text-ink-faint">
+						Requires MachineConfig authoring permission.
+					</span>
+				{/if}
+			</span>
+		</label>
+	{/if}
+</StageModal>

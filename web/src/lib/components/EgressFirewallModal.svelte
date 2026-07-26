@@ -2,10 +2,10 @@
 	import { Plus, Trash2 } from 'lucide-svelte';
 	import { api, type EgressFirewallCreate, type EgressFirewallRule } from '$lib/api';
 	import { TERMS } from '$lib/vocab';
-	import ErrorNote from './ErrorNote.svelte';
-	import Modal from './Modal.svelte';
-	import StageFooter from './StageFooter.svelte';
+	import Note from './Note.svelte';
+	import StageModal from './StageModal.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
+	import ProtoPortInput from './ProtoPortInput.svelte';
 
 	let {
 		namespaces,
@@ -23,8 +23,6 @@
 	// or a DNS name (exactly one) — optionally narrowed to a single transport port.
 	// (OVN-K rules carry a port list; one port per row covers the common case, and the
 	// user can add more rows.)
-	// port is number | null, not string: <input type="number"> coerces its binding to
-	// a number (or null when cleared), so a string type would make `.trim()` throw.
 	type Row = {
 		action: 'Allow' | 'Deny';
 		dest: 'cidr' | 'dns';
@@ -36,8 +34,6 @@
 
 	let namespace = $state('');
 	let rows = $state<Row[]>([blank()]);
-	let submitting = $state(false);
-	let error = $state('');
 
 	const missing = $derived.by(() => {
 		const m: string[] = [];
@@ -60,10 +56,7 @@
 		rows = rows.filter((_, j) => j !== i);
 	}
 
-	async function submit() {
-		if (!valid) return;
-		submitting = true;
-		error = '';
+	async function stage() {
 		const rules: EgressFirewallRule[] = rows.map((r) => {
 			const rule: EgressFirewallRule = { action: r.action };
 			if (r.dest === 'cidr') rule.cidr = r.value.trim();
@@ -72,105 +65,76 @@
 			return rule;
 		});
 		const req: EgressFirewallCreate = { namespace, rules };
-		try {
-			await api.createEgressFirewall(req);
-			onstaged();
-			onclose();
-		} catch (e) {
-			error = String(e);
-		} finally {
-			submitting = false;
-		}
+		await api.createEgressFirewall(req);
 	}
 </script>
 
-<Modal
-	title={TERMS.gatewayFirewall.nsx}
-	subtitle={TERMS.gatewayFirewall.vsphere}
+<StageModal
+	title={`${TERMS.gatewayFirewall.nsx} · ${TERMS.gatewayFirewall.vsphere}`}
 	size="lg"
+	label="Stage firewall"
+	{missing}
+	{summary}
+	onsubmit={stage}
+	{onstaged}
 	{onclose}
 >
-	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
-		<NamespaceSelect bind:namespace {namespaces} {initial} />
+	<NamespaceSelect bind:namespace {namespaces} {initial} />
 
-		<div class="space-y-2">
-			<div class="flex items-center justify-between">
-				<span class="text-ink-soft"
-					>Egress rules <span class="text-ink-faint">(first match wins)</span></span
-				>
-				<button onclick={addRow} class="flex items-center gap-1 text-xs text-accent hover:underline"
-					><Plus size={12} /> Add rule</button
-				>
-			</div>
-			{#each rows as row, i (i)}
-				<div class="rounded border border-line p-2">
-					<div class="flex flex-wrap items-center gap-2">
-						<select
-							bind:value={row.action}
-							class="rounded border border-line-strong px-2 py-1 text-xs {row.action === 'Deny'
-								? 'text-danger-ink'
-								: 'text-ok-ink'}"
-						>
-							<option value="Allow">Allow</option>
-							<option value="Deny">Deny</option>
-						</select>
-						<span class="text-xs text-ink-faint">egress to</span>
-						<select
-							bind:value={row.dest}
-							class="rounded border border-line-strong px-2 py-1 text-xs"
-						>
-							<option value="cidr">CIDR</option>
-							<option value="dns">DNS name</option>
-						</select>
-						<input
-							bind:value={row.value}
-							placeholder={row.dest === 'cidr' ? '0.0.0.0/0' : 'api.example.com'}
-							class="min-w-0 flex-1 rounded border border-line-strong px-2 py-1 text-xs"
-						/>
-						<button
-							onclick={() => removeRow(i)}
-							disabled={rows.length === 1}
-							aria-label="Remove rule"
-							class="text-ink-faint hover:text-danger disabled:opacity-40"
-							><Trash2 size={14} /></button
-						>
-					</div>
-					<div class="mt-2 flex items-center gap-2 pl-1 text-xs text-ink-muted">
-						<span>port</span>
-						<select bind:value={row.proto} class="rounded border border-line-strong px-1.5 py-1">
-							<option value="TCP">TCP</option>
-							<option value="UDP">UDP</option>
-							<option value="SCTP">SCTP</option>
-						</select>
-						<input
-							type="number"
-							bind:value={row.port}
-							placeholder="any"
-							min="1"
-							max="65535"
-							class="w-24 rounded border border-line-strong px-2 py-1"
-						/>
-					</div>
-				</div>
-			{/each}
+	<div class="space-y-2">
+		<div class="flex items-center justify-between">
+			<span class="text-ink-soft"
+				>Egress rules <span class="text-ink-faint">(first match wins)</span></span
+			>
+			<button onclick={addRow} class="flex items-center gap-1 text-xs text-accent hover:underline"
+				><Plus size={12} /> Add rule</button
+			>
 		</div>
-
-		<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">
-			The {TERMS.gatewayFirewall.nsx.toLowerCase()} controls north-south traffic leaving this project's
-			VMs to external destinations (it is not an east-west, VM-to-VM control — that is the Distributed
-			Firewall). One per namespace; staged into the project's repo and applied by its Argo app.
-		</p>
-		<ErrorNote {error} />
+		{#each rows as row, i (i)}
+			<div class="rounded border border-line p-2">
+				<div class="flex flex-wrap items-center gap-2">
+					<select
+						bind:value={row.action}
+						class="rounded border border-line-strong px-2 py-1 text-xs {row.action === 'Deny'
+							? 'text-danger-ink'
+							: 'text-ok-ink'}"
+					>
+						<option value="Allow">Allow</option>
+						<option value="Deny">Deny</option>
+					</select>
+					<span class="text-xs text-ink-faint">egress to</span>
+					<select bind:value={row.dest} class="rounded border border-line-strong px-2 py-1 text-xs">
+						<option value="cidr">CIDR</option>
+						<option value="dns">DNS name</option>
+					</select>
+					<input
+						bind:value={row.value}
+						placeholder={row.dest === 'cidr' ? '0.0.0.0/0' : 'api.example.com'}
+						class="min-w-0 flex-1 rounded border border-line-strong px-2 py-1 text-xs"
+					/>
+					<button
+						onclick={() => removeRow(i)}
+						disabled={rows.length === 1}
+						aria-label="Remove rule"
+						class="text-ink-faint hover:text-danger disabled:opacity-40"
+						><Trash2 size={14} /></button
+					>
+				</div>
+				<div class="mt-2 flex items-center gap-2 pl-1 text-xs text-ink-muted">
+					<ProtoPortInput
+						bind:proto={row.proto}
+						bind:port={row.port}
+						portClass="w-24"
+						labelClass=""
+					/>
+				</div>
+			</div>
+		{/each}
 	</div>
-	{#snippet footer()}
-		<StageFooter
-			label="Stage firewall"
-			disabled={!valid}
-			{missing}
-			{summary}
-			{submitting}
-			onsubmit={submit}
-			oncancel={onclose}
-		/>
-	{/snippet}
-</Modal>
+
+	<Note tone="neutral">
+		The {TERMS.gatewayFirewall.nsx.toLowerCase()} controls north-south traffic leaving this project's
+		VMs to external destinations (it is not an east-west, VM-to-VM control — that is the Distributed Firewall).
+		One per namespace; staged into the project's repo and applied by its Argo app.
+	</Note>
+</StageModal>

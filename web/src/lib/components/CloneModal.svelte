@@ -1,9 +1,10 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import { Copy } from 'lucide-svelte';
 	import { api, Unauthorized, type Clone, type VM } from '$lib/api';
-	import { relativeAge } from '$lib/format';
-	import { pollWhileVisible } from '$lib/poll';
+	import { friendlyError, relativeAge } from '$lib/format';
+	import { resource, type Resource } from '$lib/resource.svelte';
+	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
+	import { validName } from '$lib/validate';
 	import ErrorNote from './ErrorNote.svelte';
 	import FormField from './FormField.svelte';
 	import Modal from './Modal.svelte';
@@ -31,38 +32,23 @@
 	let target = $state(vm.name + '-clone');
 	let busy = $state(false);
 	let error = $state('');
-	let clones = $state<Clone[] | null>(null);
 
 	// RFC 1123 label, the same constraint the API server enforces on VM names.
-	const valid = $derived(
-		/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(target) && target.length <= 63 && target !== vm.name,
+	const valid = $derived(validName(target) && target !== vm.name);
+
+	// Constant key: the modal acts on the VM it opened for. Polls only while a
+	// clone is still progressing (no phase yet counts as in progress). Listing
+	// may fail (e.g. RBAC grants create only); failed maps to [] to keep the
+	// form usable. Explicit binding type: the poll gate reads back through it.
+	const clonesRes: Resource<Clone[]> = resource(
+		() => '',
+		() => api.clones(vm.namespace, vm.name),
+		{ poll: () => (active ? 3000 : 0) },
 	);
-
-	async function load() {
-		try {
-			clones = await api.clones(vm.namespace, vm.name);
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			// Listing may fail (e.g. RBAC grants create only); keep the form usable.
-			clones = clones ?? [];
-		}
-	}
-
-	// Load once on mount (untracked: the host hands down a fresh vm each frame,
-	// but this modal acts on the one it opened for).
-	$effect(() => {
-		untrack(load);
-	});
-
-	// Poll while any clone is still progressing so phases settle live (a clone
-	// with no phase yet counts as in progress), paused while backgrounded.
+	const clones = $derived(clonesRes.data ?? (clonesRes.failed ? [] : null));
 	const active = $derived(
 		clones?.some((c) => c.phase !== 'Succeeded' && c.phase !== 'Failed') ?? false,
 	);
-	$effect(() => {
-		if (!active) return;
-		return pollWhileVisible(load, 3000);
-	});
 
 	async function create() {
 		busy = true;
@@ -70,10 +56,10 @@
 		try {
 			await api.createClone(vm.namespace, vm.name, target.trim());
 			ondone?.(true);
-			await load();
+			await clonesRes.refresh();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = String(e);
+			error = friendlyError(e);
 			ondone?.(false);
 		} finally {
 			busy = false;
@@ -118,14 +104,14 @@
 				Clones of this VM
 			</h3>
 			<table class="w-full text-[13px]">
-				<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
-					<tr class="border-b border-line">
-						<th class="py-1.5 pr-3 font-medium">Target VM</th>
-						<th class="py-1.5 pr-3 font-medium">Started</th>
-						<th class="py-1.5 font-medium">Status</th>
+				<thead class={THEAD}>
+					<tr class={THEAD_TR}>
+						<th class={TH}>Target VM</th>
+						<th class={TH}>Started</th>
+						<th class={TH_LAST}>Status</th>
 					</tr>
 				</thead>
-				<tbody class="divide-y divide-line-soft">
+				<tbody class={TBODY}>
 					{#each clones as c (c.name)}
 						<tr>
 							<td class="py-1.5 pr-3 font-medium text-ink">{c.target}</td>

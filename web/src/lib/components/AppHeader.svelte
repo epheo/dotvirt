@@ -20,7 +20,6 @@
 		Upload,
 		User as UserIcon,
 	} from 'lucide-svelte';
-	import { deriveIssues } from '$lib/issues';
 	import { hrefForScope, scopeFromPath, vmHref } from '$lib/nav';
 	import StatusDot from './StatusDot.svelte';
 	import { drafts } from '$lib/state/drafts.svelte';
@@ -75,7 +74,7 @@
 
 	// The issues bell: standing problems derived from the live stream, so the
 	// count moves with the same frames the tree and grid repaint on.
-	const issues = $derived(deriveIssues(inventory.inventory));
+	const issues = $derived(inventory.issues);
 	const worstTone = $derived(issues.some((i) => i.severity === 'danger') ? 'danger' : 'warn');
 
 	// Object pages push label queries into the masthead search via ui.search.

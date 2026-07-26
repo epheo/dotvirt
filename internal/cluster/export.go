@@ -5,6 +5,8 @@ import (
 	"sigs.k8s.io/yaml"
 
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
+
+	"github.com/epheo/dotvirt/internal/vmgen"
 )
 
 // annotationsToStrip are server- or controller-set annotations that would make
@@ -80,8 +82,7 @@ func stripAnnotations(in map[string]string) map[string]string {
 }
 
 // ExportPath is the repo-relative path a serialized VM's manifest lands at when
-// adopted: one file per VM, grouped by namespace directory (the layout the
-// wizard's generator uses too, so adopt-then-edit converges on one file).
+// adopted: the wizard's layout, so adopt-then-edit converges on one file.
 func ExportPath(vm kubevirtcorev1.VirtualMachine) string {
-	return vm.Namespace + "/" + vm.Name + ".yaml"
+	return vmgen.ManifestPath(vm.Namespace, vm.Name)
 }

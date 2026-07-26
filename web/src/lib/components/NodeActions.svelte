@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import { Ban, CheckCircle2, LogOut, MoveRight, Wrench } from 'lucide-svelte';
 	import { api, Unauthorized, type NodeInfo, type VM } from '$lib/api';
+	import { friendlyError } from '$lib/format';
+	import { resource } from '$lib/resource.svelte';
 
 	// Host maintenance (vCenter's Enter/Exit Maintenance Mode): entering flips
 	// the node's maintenance annotation + cordon in one server patch, then this
@@ -18,7 +19,6 @@
 		vms: VM[];
 	} = $props();
 
-	let info = $state<NodeInfo | null>(null);
 	let busy = $state(false);
 	let confirming = $state(false);
 	let msg = $state('');
@@ -29,20 +29,15 @@
 	const pending = $derived(
 		running.filter((v) => !v.migration || v.migration.completed || v.migration.failed),
 	);
-	const entering = $derived(!!info?.maintenance && running.length > 0);
 
-	async function load() {
-		try {
-			info = await api.nodeInfo(node);
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			info = null; // no node-read RBAC → panel stays hidden
-		}
-	}
-	$effect(() => {
-		node;
-		untrack(load);
-	});
+	// no node-read RBAC → panel stays hidden (failed maps to null)
+	const infoRes = resource<NodeInfo>(
+		() => node,
+		() => api.nodeInfo(node),
+		{ reset: true },
+	);
+	const info = $derived(infoRes.failed ? null : infoRes.data);
+	const entering = $derived(!!info?.maintenance && running.length > 0);
 
 	async function toggleCordon() {
 		if (!info) return;
@@ -50,12 +45,12 @@
 		msg = '';
 		try {
 			await api.setNodeCordon(node, !info.unschedulable);
-			await load();
+			await infoRes.refresh();
 			msg = info?.unschedulable ? 'Node cordoned — no new placements.' : 'Node uncordoned.';
 			ok = true;
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			msg = String(e);
+			msg = friendlyError(e);
 			ok = false;
 		} finally {
 			busy = false;
@@ -87,12 +82,12 @@
 		msg = '';
 		try {
 			await api.setNodeMaintenance(node, true);
-			await load();
+			await infoRes.refresh();
 			const sweep = running.length ? ` — ${await evacuate()}` : '';
 			msg = `Entering maintenance mode${sweep}.`;
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			msg = String(e);
+			msg = friendlyError(e);
 			ok = false;
 		} finally {
 			busy = false;
@@ -111,12 +106,12 @@
 		msg = '';
 		try {
 			await api.setNodeMaintenance(node, false);
-			await load();
+			await infoRes.refresh();
 			msg = 'Maintenance mode exited — node is schedulable again.';
 			ok = true;
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			msg = String(e);
+			msg = friendlyError(e);
 			ok = false;
 		} finally {
 			busy = false;

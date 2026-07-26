@@ -10,14 +10,12 @@
 		count = undefined,
 		busy = false,
 		onclose,
-		footer = undefined,
 		children,
 	}: {
 		title: string;
 		count?: number;
 		busy?: boolean;
 		onclose: () => void;
-		footer?: Snippet;
 		children: Snippet;
 	} = $props();
 </script>
@@ -34,9 +32,4 @@
 		</button>
 	</header>
 	{@render children()}
-	{#if footer}
-		<footer class="border-t border-line px-4 py-2 text-xs text-ink-faint">
-			{@render footer()}
-		</footer>
-	{/if}
 </aside>

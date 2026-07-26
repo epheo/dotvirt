@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { fmtUsage } from '$lib/format';
+	import { usageLevelColor } from '$lib/status';
 	import Sparkline from './Sparkline.svelte';
 
 	let {
@@ -25,9 +26,7 @@
 	const C = 2 * Math.PI * R;
 	const usedFrac = $derived(total > 0 ? Math.min(1, used / total) : 0);
 	const allocFrac = $derived(total > 0 ? Math.min(1, allocated / total) : 0);
-	const ringColor = $derived(
-		usedFrac > 0.9 ? 'var(--color-danger)' : usedFrac > 0.75 ? 'var(--color-warn)' : color,
-	);
+	const ringColor = $derived(usageLevelColor(usedFrac * 100, color));
 </script>
 
 <div class="flex flex-col items-center">

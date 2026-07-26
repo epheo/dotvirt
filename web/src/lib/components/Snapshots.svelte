@@ -1,16 +1,16 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import { Camera, RotateCcw, Trash2 } from 'lucide-svelte';
 	import { api, Unauthorized, type Snapshot, type VM } from '$lib/api';
-	import { relativeAge } from '$lib/format';
-	import { pollWhileVisible } from '$lib/poll';
+	import { friendlyError, relativeAge } from '$lib/format';
+	import { resource, type Resource } from '$lib/resource.svelte';
+	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
 	import ErrorNote from './ErrorNote.svelte';
+	import Note from './Note.svelte';
+	import StatusDot from './StatusDot.svelte';
 
 	let { vm }: { vm: VM } = $props();
 
-	let snapshots = $state<Snapshot[] | null>(null);
-	let loading = $state(false);
-	let error = $state('');
+	let actionError = $state(''); // a failed take/restore/delete, distinct from the read
 	let taking = $state(false);
 	let snapName = $state('');
 	let busy = $state<string | null>(null); // snapshot being acted on
@@ -20,46 +20,31 @@
 	// Restore needs a stopped target — KubeVirt rejects a running one.
 	const running = $derived(vm.phase === 'Running');
 
-	async function load() {
-		loading = true;
-		try {
-			snapshots = await api.snapshots(vm.namespace, vm.name);
-			error = '';
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			error = String(e);
-		} finally {
-			loading = false;
-		}
-	}
-
-	// Reload on selection change. Key on the VM identity (the live stream hands
-	// down a fresh vm each frame); untrack the load so its synchronous vm reads
-	// don't re-fire this effect per frame.
+	// Keyed on the VM identity (the live stream hands down a fresh vm each
+	// frame); polls only while a snapshot is still settling.
 	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
-	$effect(() => {
-		vmKey;
-		untrack(load);
-	});
-
-	// Poll while a snapshot is still being created so its status settles, paused
-	// while the tab is backgrounded.
+	// The explicit binding type breaks the inference cycle through the poll
+	// gate (snapRes -> poll -> pending -> snapshots -> snapRes).
+	const snapRes: Resource<Snapshot[]> = resource(
+		() => vmKey,
+		() => api.snapshots(vm.namespace, vm.name),
+		{ reset: true, poll: () => (pending ? 4000 : 0) },
+	);
+	const snapshots = $derived(snapRes.data);
+	const loading = $derived(snapRes.loading);
+	const error = $derived(actionError || snapRes.error);
 	const pending = $derived(snapshots?.some((s) => !s.readyToUse && s.phase !== 'Failed') ?? false);
-	$effect(() => {
-		if (!pending) return;
-		return pollWhileVisible(load, 4000);
-	});
 
 	async function take() {
 		taking = true;
-		error = '';
+		actionError = '';
 		try {
 			await api.takeSnapshot(vm.namespace, vm.name, snapName.trim() || undefined);
 			snapName = '';
-			await load();
+			await snapRes.refresh();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = String(e);
+			actionError = friendlyError(e);
 		} finally {
 			taking = false;
 		}
@@ -68,13 +53,13 @@
 	async function restore(name: string) {
 		armedRestore = null;
 		busy = name;
-		error = '';
+		actionError = '';
 		try {
 			await api.restoreSnapshot(vm.namespace, vm.name, name);
-			await load();
+			await snapRes.refresh();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = String(e);
+			actionError = friendlyError(e);
 		} finally {
 			busy = null;
 		}
@@ -83,13 +68,13 @@
 	async function remove(name: string) {
 		armedDelete = null;
 		busy = name;
-		error = '';
+		actionError = '';
 		try {
 			await api.deleteSnapshot(vm.namespace, vm.name, name);
-			await load();
+			await snapRes.refresh();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = String(e);
+			actionError = friendlyError(e);
 		} finally {
 			busy = null;
 		}
@@ -122,23 +107,23 @@
 	<!-- Restore needs a stopped VM (KubeVirt rejects a running target), but power
 	     is PR-gated — so spell out the path rather than just greying the button. -->
 	{#if running && snapshots?.some((s) => s.readyToUse)}
-		<p class="rounded border border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
+		<Note tone="warn" border>
 			Restore is disabled while the VM is running. Set its power to <strong>Off</strong> (via a pull request
 			from Edit Settings), and once it's stopped you can roll back to a snapshot here.
-		</p>
+		</Note>
 	{/if}
 
 	{#if snapshots && snapshots.length}
 		<table class="w-full text-[13px]">
-			<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
-				<tr class="border-b border-line">
-					<th class="py-1.5 pr-3 font-medium">Name</th>
-					<th class="py-1.5 pr-3 font-medium">Created</th>
-					<th class="py-1.5 pr-3 font-medium">Status</th>
-					<th class="py-1.5 font-medium"></th>
+			<thead class={THEAD}>
+				<tr class={THEAD_TR}>
+					<th class={TH}>Name</th>
+					<th class={TH}>Created</th>
+					<th class={TH}>Status</th>
+					<th class={TH_LAST}></th>
 				</tr>
 			</thead>
-			<tbody class="divide-y divide-line-soft">
+			<tbody class={TBODY}>
 				{#each snapshots as s (s.name)}
 					<tr>
 						<td class="py-2 pr-3 font-medium text-ink">
@@ -153,15 +138,15 @@
 						<td class="py-2 pr-3 whitespace-nowrap">
 							{#if s.readyToUse}
 								<span class="inline-flex items-center gap-1.5 text-ok-ink">
-									<span class="h-1.5 w-1.5 rounded-full bg-ok"></span> Ready
+									<StatusDot tone="ok" size="xs" /> Ready
 								</span>
 							{:else if s.phase === 'Failed'}
 								<span class="inline-flex items-center gap-1.5 text-danger-ink" title={s.error}>
-									<span class="h-1.5 w-1.5 rounded-full bg-danger"></span> Failed
+									<StatusDot tone="danger" size="xs" /> Failed
 								</span>
 							{:else}
 								<span class="inline-flex items-center gap-1.5 text-warn-ink">
-									<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-warn"></span> Creating…
+									<StatusDot tone="warn" size="xs" pulse /> Creating…
 								</span>
 							{/if}
 						</td>

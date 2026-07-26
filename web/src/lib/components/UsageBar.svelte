@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { fmtUsage } from '$lib/format';
+	import { usageLevelColor } from '$lib/status';
 	import Sparkline from './Sparkline.svelte';
 
 	let {
@@ -22,10 +23,7 @@
 	const pct = $derived(
 		unit === 'pct' ? Math.min(100, used) : total > 0 ? Math.min(100, (used / total) * 100) : 0,
 	);
-	// vCenter-style escalation green→amber→red as utilization nears capacity.
-	const barColor = $derived(
-		pct > 90 ? 'var(--color-danger)' : pct > 75 ? 'var(--color-warn)' : color,
-	);
+	const barColor = $derived(usageLevelColor(pct, color));
 </script>
 
 <div>

@@ -95,7 +95,7 @@ func (c *Coordinator) Adopt(id auth.Identity, proj project.ProjectInfo, namespac
 		return c.Get(id, proj)
 	}
 
-	edit := editToMatch(desired, actual.vm)
+	edit := manifest.EditToMatch(desired, actual.vm)
 	if edit.Empty() {
 		return model.DraftView{}, fmt.Errorf("%w: no drift to adopt for %s/%s", model.ErrInvalid, namespace, name)
 	}

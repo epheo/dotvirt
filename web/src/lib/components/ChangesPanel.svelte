@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { ChevronDown, ChevronRight, Folder, History } from 'lucide-svelte';
 	import { api, type Commit, type DraftView, type Proposal, type ProposeResult } from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import ChangesLane from './ChangesLane.svelte';
 	import Drawer from './Drawer.svelte';
 	import GitOpsStepper from './GitOpsStepper.svelte';
@@ -80,7 +81,7 @@
 		try {
 			history[project] = await api.history(project);
 		} catch (e) {
-			historyError[project] = String(e);
+			historyError[project] = friendlyError(e);
 		} finally {
 			historyBusy[project] = false;
 		}
@@ -101,7 +102,7 @@
 			revertResult[c.hash] = await api.revert(project, c.hash);
 			onchanged();
 		} catch (e) {
-			historyError[project] = String(e);
+			historyError[project] = friendlyError(e);
 		} finally {
 			revertBusy = null;
 		}

@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { api, Unauthorized, type ClusterSummary } from '$lib/api';
-	import { pollWhileVisible } from '$lib/poll';
+	import { api, type ClusterSummary } from '$lib/api';
+	import { resource } from '$lib/resource.svelte';
+	import { phaseTextTone } from '$lib/status';
 	import HostBalance from './HostBalance.svelte';
 	import HostCapacityCard from './HostCapacityCard.svelte';
 	import IssuesCard from './IssuesCard.svelte';
@@ -17,32 +17,18 @@
 		onselect?: (namespace: string, name: string) => void;
 	} = $props();
 
-	let data = $state<ClusterSummary | null>(null);
-
-	let loading = $state(false);
-	let failed = $state(false);
-
-	async function load() {
-		if (!data) loading = true; // spinner only on first load, not on a poll refresh
-		try {
-			data = await api.clusterSummary(scope);
-			failed = false;
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			failed = true;
-		} finally {
-			loading = false;
-		}
-	}
-	// Re-fetch when the container scope changes, keyed on a stable string so the
-	// reload fires on real scope changes only (untrack the load's scope reads).
+	// Keyed on a stable scope string; old data stays up while a scope switch loads.
 	const scopeKey = $derived(`${scope.project ?? ''}|${scope.namespace ?? ''}|${scope.node ?? ''}`);
-	$effect(() => {
-		scopeKey;
-		untrack(load);
-	});
-	// Refresh on a cadence, paused while the tab is backgrounded.
-	$effect(() => pollWhileVisible(load, 30000));
+	const summary = resource<ClusterSummary>(
+		() => scopeKey,
+		() => api.clusterSummary(scope),
+		{
+			poll: 30000,
+		},
+	);
+	const data = $derived(summary.data);
+	const loading = $derived(summary.loading);
+	const failed = $derived(summary.failed);
 
 	// KubeVirt's phase label is lowercase ("running"); order known phases, capitalize
 	// for display, and tolerate any others.
@@ -55,11 +41,6 @@
 		'succeeded',
 		'failed',
 	];
-	const phaseColor: Record<string, string> = {
-		running: 'text-ok-ink',
-		paused: 'text-warn-ink',
-		failed: 'text-danger',
-	};
 	const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 	// Overcommit ratio = committed-to-VMs : node-allocatable (vCenter's "vCPU
@@ -118,7 +99,7 @@
 						.filter(([, n]) => n > 0)
 						.sort(([a], [b]) => PHASE_ORDER.indexOf(a) - PHASE_ORDER.indexOf(b)) as [phase, n] (phase)}
 						<div class="text-center">
-							<div class="text-xl font-semibold {phaseColor[phase] ?? 'text-ink-soft'}">{n}</div>
+							<div class="text-xl font-semibold {phaseTextTone(phase)}">{n}</div>
 							<div class="text-[11px] text-ink-muted">{cap(phase)}</div>
 						</div>
 					{/each}

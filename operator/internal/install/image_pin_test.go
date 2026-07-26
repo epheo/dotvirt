@@ -32,7 +32,7 @@ func relatedImageValue(t *testing.T, path, name string) string {
 }
 
 // The release script (hack/release.sh) re-pins the operand digest in three
-// places: this package's DefaultImage, the CSV's RELATED_IMAGE_DOTVIRT, and the
+// places: this package's defaultImage, the CSV's RELATED_IMAGE_DOTVIRT, and the
 // manager manifest. A missed pin makes OLM installs and `make run` deploy
 // DIFFERENT operands for the same operator version: assert all three agree.
 func TestDefaultImagePinConsistency(t *testing.T) {
@@ -40,8 +40,8 @@ func TestDefaultImagePinConsistency(t *testing.T) {
 		"../../bundle/manifests/dotvirt-operator.clusterserviceversion.yaml",
 		"../../config/manager/manager.yaml",
 	} {
-		if got := relatedImageValue(t, path, "RELATED_IMAGE_DOTVIRT"); got != DefaultImage {
-			t.Errorf("%s: RELATED_IMAGE_DOTVIRT = %q, want DefaultImage %q", path, got, DefaultImage)
+		if got := relatedImageValue(t, path, "RELATED_IMAGE_DOTVIRT"); got != defaultImage {
+			t.Errorf("%s: RELATED_IMAGE_DOTVIRT = %q, want defaultImage %q", path, got, defaultImage)
 		}
 	}
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { VMEvent } from '$lib/api';
 	import { duration } from '$lib/format';
+	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
 	import StatusDot from './StatusDot.svelte';
 
 	// The one events table behind every Monitor -> Events lane. Owns the
@@ -90,17 +91,17 @@
 		<div class="py-8 text-center text-sm text-ink-faint">No events match the filters.</div>
 	{:else}
 		<table class="w-full text-[13px]">
-			<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
-				<tr class="border-b border-line">
-					<th class="py-1.5 pr-3 font-medium">Type</th>
-					{#if showVM}<th class="py-1.5 pr-3 font-medium">VM</th>{/if}
-					<th class="py-1.5 pr-3 font-medium">Reason</th>
-					<th class="py-1.5 pr-3 font-medium">Message</th>
-					{#if !showVM}<th class="py-1.5 pr-3 font-medium">Object</th>{/if}
-					<th class="py-1.5 font-medium">Last seen</th>
+			<thead class={THEAD}>
+				<tr class={THEAD_TR}>
+					<th class={TH}>Type</th>
+					{#if showVM}<th class={TH}>VM</th>{/if}
+					<th class={TH}>Reason</th>
+					<th class={TH}>Message</th>
+					{#if !showVM}<th class={TH}>Object</th>{/if}
+					<th class={TH_LAST}>Last seen</th>
 				</tr>
 			</thead>
-			<tbody class="divide-y divide-line-soft">
+			<tbody class={TBODY}>
 				{#each shown as e, i (i)}
 					<tr class={e.type === 'Warning' ? 'bg-warn-soft/40' : ''}>
 						<td class="py-1.5 pr-3">
@@ -117,6 +118,7 @@
 										class="font-medium text-ink-soft hover:text-accent-ink hover:underline"
 										>{e.name}</button
 									>
+									{#if e.namespace}<span class="text-ink-faint">· {e.namespace}</span>{/if}
 								{:else}—{/if}
 							</td>
 						{/if}

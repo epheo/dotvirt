@@ -3,6 +3,7 @@
 	import type { DraftItem, Power, SyncStatus, VM } from '$lib/api';
 	import { phaseTone } from '$lib/status';
 	import { persisted } from '$lib/state/persisted.svelte';
+	import { TBODY, THEAD_TR } from '$lib/table';
 	import PowerDot from './PowerDot.svelte';
 	import StagedBadge from './StagedBadge.svelte';
 	import StatusPill from './StatusPill.svelte';
@@ -192,7 +193,7 @@
 	<div class="min-h-0 flex-1 overflow-auto">
 		<table class="w-full text-[13px]">
 			<thead class="sticky top-0 bg-inset text-left text-xs text-ink-muted">
-				<tr class="border-b border-line">
+				<tr class={THEAD_TR}>
 					<th class="w-8 px-3 py-2">
 						<input
 							type="checkbox"
@@ -222,7 +223,7 @@
 					<th class="px-3 py-2 font-medium">Health</th>
 				</tr>
 			</thead>
-			<tbody class="divide-y divide-line-soft">
+			<tbody class={TBODY}>
 				{#each rows as vm (vm.namespace + '/' + vm.name)}
 					{@const sc = staged.get(vm.namespace + '/' + vm.name)}
 					<tr

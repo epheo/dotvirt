@@ -9,7 +9,7 @@ import type { Network } from '$lib/api';
 
 // A concept named in both idioms, with the OVN-K/Kubernetes object behind it for
 // the detail drawers and tooltips.
-export interface Term {
+interface Term {
 	nsx: string; // the NSX-T-facing name (primary — this is who we're dressing for)
 	vsphere: string; // the vSphere/vCenter synonym shown alongside it
 	backing?: string; // the OVN-K / Kubernetes kind it renders to
@@ -74,7 +74,7 @@ export function dual(t: Term): string {
 // own segment (a primary UDN, born with its namespace); VLAN segments ride the
 // provider edge; everything else is an isolated overlay segment, project- or
 // cluster-scoped.
-export interface SegmentType extends Term {
+interface SegmentType extends Term {
 	backing: string;
 }
 export function segmentType(n: Network): SegmentType {

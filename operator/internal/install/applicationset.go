@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	ApplicationSetName  = "dotvirt-projects"
-	AppsetConfigMapName = "dotvirt-appset-plugin"
+	applicationSetName  = "dotvirt-projects"
+	appsetConfigMapName = "dotvirt-appset-plugin"
 )
 
 // ApplicationSet generates one Argo Application per dotvirt project — in the
@@ -27,10 +27,10 @@ func ApplicationSet(dv *dotvirtv1alpha1.Dotvirt, argoNS string) *unstructured.Un
 			"labels": map[string]any{"dotvirt.io/project": "{{.project}}"},
 		},
 		"spec": map[string]any{
-			"project": ProjectTenants,
+			"project": projectTenants,
 			"source": map[string]any{
 				"repoURL":        "{{.repo}}",
-				"targetRevision": AppTargetRevision,
+				"targetRevision": appTargetRevision,
 				"path":           ".",
 				// templates/ is the repo's VM-template library (VirtualMachineTemplate
 				// manifests dotvirt renders itself) — its CRD need not exist on-cluster,
@@ -46,7 +46,7 @@ func ApplicationSet(dv *dotvirtv1alpha1.Dotvirt, argoNS string) *unstructured.Un
 			},
 		},
 	}
-	return argoObject("ApplicationSet", ApplicationSetName, argoNS, dv.Name, map[string]any{
+	return argoObject("ApplicationSet", applicationSetName, argoNS, dv.Name, map[string]any{
 		"goTemplate":        true,
 		"goTemplateOptions": []any{"missingkey=error"},
 		// Renaming generated apps prunes the old ones; preserve their resources so a
@@ -54,7 +54,7 @@ func ApplicationSet(dv *dotvirtv1alpha1.Dotvirt, argoNS string) *unstructured.Un
 		"syncPolicy": map[string]any{"preserveResourcesOnDeletion": true},
 		"generators": []any{
 			map[string]any{"plugin": map[string]any{
-				"configMapRef":        map[string]any{"name": AppsetConfigMapName},
+				"configMapRef":        map[string]any{"name": appsetConfigMapName},
 				"input":               map[string]any{"parameters": map[string]any{}},
 				"requeueAfterSeconds": int64(60),
 			}},
@@ -69,10 +69,10 @@ func ApplicationSet(dv *dotvirtv1alpha1.Dotvirt, argoNS string) *unstructured.Un
 func AppsetPluginConfigMap(dv *dotvirtv1alpha1.Dotvirt, argoNS, dotvirtNS string) *corev1.ConfigMap {
 	return &corev1.ConfigMap{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
-		ObjectMeta: metav1.ObjectMeta{Name: AppsetConfigMapName, Namespace: argoNS, Labels: Labels(dv.Name)},
+		ObjectMeta: metav1.ObjectMeta{Name: appsetConfigMapName, Namespace: argoNS, Labels: Labels(dv.Name)},
 		Data: map[string]string{
 			"baseUrl": fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", AppName, dotvirtNS, HTTPPort),
-			"token":   "$" + AppsetConfigMapName + ":token",
+			"token":   "$" + appsetConfigMapName + ":token",
 		},
 	}
 }

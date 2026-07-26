@@ -152,8 +152,8 @@ func TestForgejoDeploymentBoundedAndPinned(t *testing.T) {
 	if _, ok := c.Resources.Limits[corev1.ResourceMemory]; !ok {
 		t.Error("forgejo must set a memory limit")
 	}
-	if !strings.Contains(ForgejoImage, "@sha256:") {
-		t.Errorf("ForgejoImage must be digest-pinned, got %q", ForgejoImage)
+	if !strings.Contains(forgejoImage, "@sha256:") {
+		t.Errorf("forgejoImage must be digest-pinned, got %q", forgejoImage)
 	}
 
 	ps := d.Spec.Template.Spec.SecurityContext
@@ -211,7 +211,7 @@ func TestForgejoWebhookAllowlistIncludesArgoHost(t *testing.T) {
 		d.Spec.Template.Spec.Containers[0].Env,
 	} {
 		got, ok := envValue(env, "FORGEJO__webhook__ALLOWED_HOST_LIST")
-		if !ok || got != ServiceHost(testDotvirt())+",external,"+argo {
+		if !ok || got != serviceHost(testDotvirt())+",external,"+argo {
 			t.Errorf("ALLOWED_HOST_LIST = (%q, ok=%v), want service host + external + argo host", got, ok)
 		}
 	}
@@ -219,7 +219,7 @@ func TestForgejoWebhookAllowlistIncludesArgoHost(t *testing.T) {
 	// No Argo URL resolvable yet: the baseline list, no trailing separator.
 	got, _ := envValue(ForgejoDeployment(testDotvirt(), false, "", "h").Spec.Template.Spec.Containers[0].Env,
 		"FORGEJO__webhook__ALLOWED_HOST_LIST")
-	if got != ServiceHost(testDotvirt())+",external" {
+	if got != serviceHost(testDotvirt())+",external" {
 		t.Errorf("ALLOWED_HOST_LIST without an Argo host = %q", got)
 	}
 }
@@ -228,23 +228,23 @@ func TestForgejoWebhookAllowlistIncludesArgoHost(t *testing.T) {
 // OLM operator upgrade must roll the dotvirt app WITHOUT a CR edit. The mechanism is
 // the image precedence here — when the CR doesn't pin spec.image, the operand image
 // comes from RELATED_IMAGE_DOTVIRT (which OLM sets on the manager from the new CSV on
-// every upgrade) and falls back to the compile-time-pinned DefaultImage. So a newer
+// every upgrade) and falls back to the compile-time-pinned defaultImage. So a newer
 // operator (new digest in both) re-reconciles an existing unpinned CR into a rolled
 // operand. The explicit spec.image override must still win for a user who pins.
 func TestOperandImageRollsWithOperatorUpgrade(t *testing.T) {
-	// DefaultImage is the build-time fallback used by `make run` / non-OLM installs;
+	// defaultImage is the build-time fallback used by `make run` / non-OLM installs;
 	// a release repins it (hack/release.sh) so it tracks the operator version.
-	if !strings.Contains(DefaultImage, "@sha256:") {
-		t.Errorf("DefaultImage must be digest-pinned so an upgrade is reproducible, got %q", DefaultImage)
+	if !strings.Contains(defaultImage, "@sha256:") {
+		t.Errorf("defaultImage must be digest-pinned so an upgrade is reproducible, got %q", defaultImage)
 	}
 
-	// Unpinned CR, no env (e.g. `make run`): the operand is the compiled-in DefaultImage.
-	if got := Deployment(testDotvirt()).Spec.Template.Spec.Containers[0].Image; got != DefaultImage {
-		t.Errorf("unpinned CR, no env: operand image = %q, want DefaultImage %q", got, DefaultImage)
+	// Unpinned CR, no env (e.g. `make run`): the operand is the compiled-in defaultImage.
+	if got := Deployment(testDotvirt()).Spec.Template.Spec.Containers[0].Image; got != defaultImage {
+		t.Errorf("unpinned CR, no env: operand image = %q, want defaultImage %q", got, defaultImage)
 	}
 
 	// Unpinned CR under OLM: RELATED_IMAGE_DOTVIRT (set on the manager from the CSV) wins
-	// over DefaultImage — this is the edge OLM bumps on upgrade to roll the operand.
+	// over defaultImage — this is the edge OLM bumps on upgrade to roll the operand.
 	const upgraded = "quay.io/epheo/dotvirt@sha256:" + "0000000000000000000000000000000000000000000000000000000000000000"
 	t.Setenv("RELATED_IMAGE_DOTVIRT", upgraded)
 	if got := Deployment(testDotvirt()).Spec.Template.Spec.Containers[0].Image; got != upgraded {

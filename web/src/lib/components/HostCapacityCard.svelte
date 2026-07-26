@@ -1,34 +1,23 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { api, Unauthorized, type HostCapacity } from '$lib/api';
-	import { bytes } from '$lib/format';
-	import { pollWhileVisible } from '$lib/poll';
+	import { api, type HostCapacity } from '$lib/api';
+	import { bytes, cores } from '$lib/format';
+	import { resource } from '$lib/resource.svelte';
 
 	// Per-host overcommit: the cluster ratios from the summary band, broken
 	// down to the workers that carry them. Server-sorted most-committed-memory
 	// first — memory (unlike time-shared CPU) is the ratio that hurts. The
 	// card absents itself without node-read access, like the balance card.
-	let data = $state<HostCapacity | null>(null);
-
-	async function load() {
-		try {
-			data = await api.capacity();
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			data = null;
-		}
-	}
-	$effect(() => {
-		untrack(load);
-	});
-	$effect(() => pollWhileVisible(load, 30000));
+	const cap = resource<HostCapacity>(
+		() => '',
+		() => api.capacity(),
+		{ poll: 30000 },
+	);
+	const data = $derived(cap.failed ? null : cap.data);
 
 	const MAX = 8;
 	const ratio = (alloc: number | undefined, total: number) =>
 		total > 0 ? (alloc ?? 0) / total : 0;
 	const pct = (r: number) => Math.min(100, r * 100);
-
-	const cores = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
 </script>
 
 {#if data?.nodes.length}

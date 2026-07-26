@@ -212,32 +212,79 @@ type Change struct {
 
 // --- DTOs crossing the API boundary ---
 
-// EditRequest is the body of an edit: which VM source file, and which fields to
-// change. Power is "On"/"Off"; nil fields are left unchanged.
-type EditRequest struct {
-	SourceFile   string  `json:"sourceFile"`
-	Power        *string `json:"power,omitempty"`
+// VMEdit is a set of field changes to apply to a VirtualMachine manifest. Nil/
+// empty fields are left untouched, so the UI can change just one thing. One
+// definition serves the API request body, the persisted draft store, and the
+// manifest editor.
+type VMEdit struct {
+	Power        *string `json:"power,omitempty"` // "On" | "Off" -> runStrategy Always/Halted (or legacy running bool)
 	CPUCores     *int    `json:"cpuCores,omitempty"`
-	Memory       *string `json:"memory,omitempty"`
-	Instancetype *string `json:"instancetype,omitempty"`
-	Preference   *string `json:"preference,omitempty"`
-	Sizing       *string `json:"sizing,omitempty"` // "instancetype" | "custom" — which representation owns CPU/memory
+	Memory       *string `json:"memory,omitempty"`       // e.g. "4Gi"
+	Instancetype *string `json:"instancetype,omitempty"` // spec.instancetype.name
+	Preference   *string `json:"preference,omitempty"`   // spec.preference.name
 
-	SetLabels        map[string]string `json:"setLabels,omitempty"`
-	RemoveLabels     []string          `json:"removeLabels,omitempty"`
-	DRSExclude       *bool             `json:"drsExclude,omitempty"`       // toggle the descheduler prefer-no-eviction annotation
-	EvictionStrategy *string           `json:"evictionStrategy,omitempty"` // "" removes (cluster default)
-	AddDisks         []DiskAdd         `json:"addDisks,omitempty"`
-	RemoveDisks      []string          `json:"removeDisks,omitempty"`
-	AddNetworks      []NetworkAdd      `json:"addNetworks,omitempty"`
-	RemoveNetworks   []string          `json:"removeNetworks,omitempty"`
-	MigrateVolumes   []VolumeMigration `json:"migrateVolumes,omitempty"` // storage live migration
+	// Sizing selects which representation owns CPU/memory: "instancetype" (an
+	// instancetype reference; inline domain.cpu/memory must be absent) or "custom"
+	// (inline domain.cpu/memory; no instancetype). KubeVirt rejects a VM that has
+	// both, so the two are mutually exclusive. Nil leaves the representation as-is.
+	Sizing *string `json:"sizing,omitempty"`
 
-	Pin          *[]string        `json:"pin,omitempty"` // replace host pinning; empty list removes it
+	// Label edits: keys to set (upsert) and keys to remove.
+	SetLabels    map[string]string `json:"setLabels,omitempty"`
+	RemoveLabels []string          `json:"removeLabels,omitempty"`
+
+	// DRSExclude toggles the descheduler's prefer-no-eviction annotation on the
+	// VM template: true keeps the VM live-migratable for maintenance while the
+	// automatic load balancer (DRS) leaves it alone; false removes the
+	// annotation. Nil leaves it untouched.
+	DRSExclude *bool `json:"drsExclude,omitempty"`
+
+	// EvictionStrategy sets spec.template.spec.evictionStrategy (LiveMigrate,
+	// None, ...); the empty string removes it, falling back to the cluster
+	// default. Nil leaves it untouched.
+	EvictionStrategy *string `json:"evictionStrategy,omitempty"`
+
+	// Disk/network edits on the VM template.
+	AddDisks       []DiskAdd    `json:"addDisks,omitempty"`
+	RemoveDisks    []string     `json:"removeDisks,omitempty"` // disk names to remove
+	AddNetworks    []NetworkAdd `json:"addNetworks,omitempty"`
+	RemoveNetworks []string     `json:"removeNetworks,omitempty"` // network/interface names to remove
+
+	// MigrateVolumes moves disks to other storage classes (storage live
+	// migration): each entry replaces the disk's DataVolume template with a
+	// blank one on the target class, and the edit sets
+	// spec.updateVolumesStrategy: Migration so KubeVirt live-copies the data
+	// on merge. Reverting the commit is the migration cancel.
+	MigrateVolumes []VolumeMigration `json:"migrateVolumes,omitempty"`
+
+	// Pin replaces the VM's host pinning with a required node-affinity In-list
+	// on kubernetes.io/hostname; an empty list removes it. Nil leaves it alone.
+	Pin *[]string `json:"pin,omitempty"`
+	// AddGroups/RemoveGroups edit named placement groups: a membership label
+	// on the template plus a pod (anti-)affinity term against that label
+	// (manifest/scheduling.go holds the encoding). AddGroups upserts, so
+	// re-adding a group changes its mode/strictness.
 	AddGroups    []PlacementGroup `json:"addGroups,omitempty"`
 	RemoveGroups []string         `json:"removeGroups,omitempty"`
+}
 
-	Message string `json:"message,omitempty"` // optional commit message; auto-generated when empty
+// Empty reports whether the edit changes nothing.
+func (e VMEdit) Empty() bool {
+	return e.Power == nil && e.CPUCores == nil && e.Memory == nil &&
+		e.Instancetype == nil && e.Preference == nil && e.Sizing == nil &&
+		len(e.SetLabels) == 0 && len(e.RemoveLabels) == 0 &&
+		e.DRSExclude == nil && e.EvictionStrategy == nil &&
+		len(e.AddDisks) == 0 && len(e.RemoveDisks) == 0 &&
+		len(e.AddNetworks) == 0 && len(e.RemoveNetworks) == 0 &&
+		len(e.MigrateVolumes) == 0 &&
+		e.Pin == nil && len(e.AddGroups) == 0 && len(e.RemoveGroups) == 0
+}
+
+// EditRequest is the body of an edit: which VM source file, and which fields to
+// change. Embedding flattens VMEdit's fields into the request body.
+type EditRequest struct {
+	SourceFile string `json:"sourceFile"`
+	VMEdit
 }
 
 // DiskAdd / NetworkAdd are the add-device entries in an EditRequest body.
@@ -775,7 +822,12 @@ type DRSLive struct {
 // enforce. Warning carries a non-fatal degradation (e.g. the platform repo is
 // unreachable, so the committed state is unknown) instead of failing the view.
 type DRSView struct {
-	DRSGitState
+	// The committed git plane: DRSGitState's fields spelled out (same json tags)
+	// because tygo renders an embedded struct as a nested field, not flattened.
+	Configured    bool       `json:"configured"`
+	Config        *DRSConfig `json:"config,omitempty"`
+	PSIConfigured bool       `json:"psiConfigured"`
+
 	Draft     *DRSDraftState `json:"draft,omitempty"`
 	Live      DRSLive        `json:"live"`
 	Warning   string         `json:"warning,omitempty"`

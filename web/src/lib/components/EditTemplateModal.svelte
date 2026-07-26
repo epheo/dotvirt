@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { BookCopy } from 'lucide-svelte';
 	import { api, Unauthorized, type Template } from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
@@ -41,7 +42,7 @@
 			onclose();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = String(e);
+			error = friendlyError(e);
 		} finally {
 			busy = false;
 		}
