@@ -10,13 +10,14 @@
 		type VM,
 	} from '$lib/api';
 	import { friendlyError } from '$lib/format';
-	import { buildEditRequest, seedEditForm } from '$lib/editform';
+	import { buildEditRequest, seedEditForm, type DiskRow, type NicRow } from '$lib/editform';
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
 	import { validName, NAME_HINT } from '$lib/validate';
 	import CheckGroup from './CheckGroup.svelte';
 	import Note from './Note.svelte';
 	import Wizard from './Wizard.svelte';
 	import FormField from './FormField.svelte';
+	import RowListEditor from './RowListEditor.svelte';
 	import SelectInput from './SelectInput.svelte';
 	import StorageClassSelect from './StorageClassSelect.svelte';
 	import TextInput from './TextInput.svelte';
@@ -468,91 +469,68 @@
 {/snippet}
 
 {#snippet stepStorage()}
-	<div class="mb-2 flex items-center justify-between">
-		<span class="text-xs text-ink-faint">{form.disks.filter((d) => !d.removed).length} disk(s)</span
-		>
-		<button
-			onclick={() => addNewDevice('disk')}
-			class="rounded border border-line-strong px-2 py-0.5 text-xs hover:bg-inset"
-			>+ Add hard disk</button
-		>
-	</div>
-	{#each form.disks as disk, i (i)}
-		<div class="mb-1 flex items-center gap-2 {disk.removed ? 'opacity-40 line-through' : ''}">
-			<span class="w-32 truncate text-ink-soft">Hard disk {i + 1}</span>
-			{#if disk.isNew}
-				<input
-					bind:value={disk.name}
-					class="w-24 rounded border border-line-strong px-2 py-0.5 text-xs"
-				/>
-				<input
-					bind:value={disk.size}
-					class="w-16 rounded border border-line-strong px-2 py-0.5 text-xs"
-				/>
-				<StorageClassSelect
-					options={options?.storageClasses ?? []}
-					bind:value={disk.storageClass}
-					class="min-w-0 flex-1 py-0.5! text-xs"
-				/>
-			{:else}
-				<span class="text-xs text-ink-muted"
-					>{disk.name} ({disk.type}{disk.size ? ` · ${disk.size}` : ''}{disk.storageClass
-						? ` · ${disk.storageClass}`
-						: ''})</span
-				>
-			{/if}
-			<button
-				onclick={() => (disk.removed = !disk.removed)}
-				class="ml-auto text-xs {disk.removed ? 'text-accent' : 'text-danger'}"
+	{#snippet diskRow(disk: DiskRow)}
+		{#if disk.isNew}
+			<input
+				bind:value={disk.name}
+				class="w-24 rounded border border-line-strong px-2 py-0.5 text-xs"
+			/>
+			<input
+				bind:value={disk.size}
+				class="w-16 rounded border border-line-strong px-2 py-0.5 text-xs"
+			/>
+			<StorageClassSelect
+				options={options?.storageClasses ?? []}
+				bind:value={disk.storageClass}
+				class="min-w-0 flex-1 py-0.5! text-xs"
+			/>
+		{:else}
+			<span class="text-xs text-ink-muted"
+				>{disk.name} ({disk.type}{disk.size ? ` · ${disk.size}` : ''}{disk.storageClass
+					? ` · ${disk.storageClass}`
+					: ''})</span
 			>
-				{disk.removed ? 'undo' : 'remove'}
-			</button>
-		</div>
-	{/each}
-	{#if form.disks.filter((d) => !d.removed).length === 0}<p class="text-xs text-ink-faint">
-			No disks.
-		</p>{/if}
+		{/if}
+	{/snippet}
+	<RowListEditor
+		items={form.disks}
+		unit="disk(s)"
+		addLabel="+ Add hard disk"
+		rowLabel="Hard disk"
+		empty="No disks."
+		onadd={() => addNewDevice('disk')}
+		ontoggle={(d) => (d.removed = !d.removed)}
+		row={diskRow}
+	/>
 {/snippet}
 
 {#snippet stepNetworks()}
-	<div class="mb-2 flex items-center justify-between">
-		<span class="text-xs text-ink-faint"
-			>{form.nics.filter((n) => !n.removed).length} adapter(s)</span
-		>
-		<button
-			onclick={() => addNewDevice('network')}
-			class="rounded border border-line-strong px-2 py-0.5 text-xs hover:bg-inset"
-			>+ Add network adapter</button
-		>
-	</div>
-	{#each form.nics as nic, i (i)}
-		<div class="mb-1 flex items-center gap-2 {nic.removed ? 'opacity-40 line-through' : ''}">
-			<span class="w-32 truncate text-ink-soft">Network adapter {i + 1}</span>
-			{#if nic.isNew}
-				<select
-					bind:value={nic.network}
-					class="w-60 rounded border border-line-strong px-2 py-0.5 text-xs"
-				>
-					{#each available as net (net.scope + (net.namespace ?? '') + net.name)}
-						<option value={attachRef(net)}
-							>{net.name} — {kindLabel(net.kind)}{net.scope === 'shared' ? ' · shared' : ''}</option
-						>
-					{/each}
-				</select>
-			{:else}
-				<span class="text-xs text-ink-muted">{nic.name} ({nic.network})</span>
-			{/if}
-			<button
-				onclick={() => (nic.removed = !nic.removed)}
-				class="ml-auto text-xs {nic.removed ? 'text-accent' : 'text-danger'}"
+	{#snippet nicRow(nic: NicRow)}
+		{#if nic.isNew}
+			<select
+				bind:value={nic.network}
+				class="w-60 rounded border border-line-strong px-2 py-0.5 text-xs"
 			>
-				{nic.removed ? 'undo' : 'remove'}
-			</button>
-		</div>
-	{/each}
-	{#if form.nics.filter((n) => !n.removed).length === 0}<p class="text-xs text-ink-faint">
-			No adapters.
-		</p>{/if}
+				{#each available as net (net.scope + (net.namespace ?? '') + net.name)}
+					<option value={attachRef(net)}
+						>{net.name} — {kindLabel(net.kind)}{net.scope === 'shared' ? ' · shared' : ''}</option
+					>
+				{/each}
+			</select>
+		{:else}
+			<span class="text-xs text-ink-muted">{nic.name} ({nic.network})</span>
+		{/if}
+	{/snippet}
+	<RowListEditor
+		items={form.nics}
+		unit="adapter(s)"
+		addLabel="+ Add network adapter"
+		rowLabel="Network adapter"
+		empty="No adapters."
+		onadd={() => addNewDevice('network')}
+		ontoggle={(n) => (n.removed = !n.removed)}
+		row={nicRow}
+	/>
 {/snippet}
 
 {#snippet stepLabels()}
