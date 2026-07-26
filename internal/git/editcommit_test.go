@@ -61,7 +61,7 @@ spec:
 // TestCommitChangesetDeleteRemovesFile verifies a Delete item removes that file on
 // the working branch while leaving siblings untouched.
 func TestCommitChangesetDeleteRemovesFile(t *testing.T) {
-	bare := seedRunning(t) // README + tenant-a/web.yaml + tenant-a/db.yaml on main
+	bare := seedMultiRepo(t) // README + tenant-a/web.yaml + tenant-a/db.yaml on main
 	w := OpenWrite(bare, "", nil, true)
 
 	res, err := w.CommitChangeset("main", "dotvirt/proposed", "drop db",

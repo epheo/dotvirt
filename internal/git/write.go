@@ -3,7 +3,6 @@ package git
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -63,13 +62,11 @@ type CommitResult struct {
 	Hash      string // commit hash when Committed
 }
 
-// dotvirtSig is the signature dotvirt commits as for its OWN writes (the running-
-// branch export, legacy single edits) and as the committer of user proposals (the
-// SA that pushes). Built per call so the time is real — git history shows when a
-// change actually landed. Idempotency never depended on a fixed time: the export
-// skips a clean tree (Commit), and a changeset errors on no-op-vs-base
-// (CommitChangeset); a fixed epoch only made identical re-proposes a push no-op,
-// which isn't worth misdating every commit to 1970.
+// dotvirtSig is the signature for dotvirt's own writes (template seeding) and
+// the committer of user proposals (the SA that pushes). Built per call so the
+// time is real: git history shows when a change actually landed. A fixed epoch
+// would only make identical re-proposes a push no-op, not worth misdating
+// every commit.
 func dotvirtSig() *object.Signature {
 	return &object.Signature{Name: "dotvirt", Email: "dotvirt@localhost", When: time.Now().UTC()}
 }
@@ -112,7 +109,8 @@ func (w *WriteRepo) openWorktree() (*git.Repository, *git.Worktree, error) {
 
 // pushBranch force-pushes branch when pushes are enabled (no-op otherwise); an
 // already-up-to-date remote is not an error. Force is correct for both callers:
-// the export owns its branch outright, and a re-propose rebuilds its branch fresh.
+// the template seed lands on a repo dotvirt just created, and a re-propose
+// rebuilds its branch fresh.
 func (w *WriteRepo) pushBranch(repo *git.Repository, branch string) error {
 	if !w.push {
 		return nil
@@ -127,16 +125,12 @@ func (w *WriteRepo) pushBranch(repo *git.Repository, branch string) error {
 	return nil
 }
 
-// Commit writes files onto branch and prunes stale ones: any tracked file under
-// a managedDir that is NOT in files is deleted, so the branch reflects exactly
-// the supplied set within those directories (a VM deleted from the cluster has
-// its manifest removed). Files outside managedDirs (e.g. a README) are left
-// alone. If the resulting tree is identical to the branch head, it commits
-// nothing and returns Committed=false, so a no-op changeset never churns history.
+// Commit writes files onto branch. If the resulting tree is identical to the
+// branch head, it commits nothing and returns Committed=false, so a no-op
+// never churns history.
 //
-// branch is created from the default branch if it doesn't exist yet (the
-// proposed branch on its first use).
-func (w *WriteRepo) Commit(branch, message string, files []File, managedDirs []string) (CommitResult, error) {
+// branch is created from the default branch if it doesn't exist yet.
+func (w *WriteRepo) Commit(branch, message string, files []File) (CommitResult, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -149,9 +143,7 @@ func (w *WriteRepo) Commit(branch, message string, files []File, managedDirs []s
 		return CommitResult{}, err
 	}
 
-	keep := make(map[string]struct{}, len(files))
 	for _, f := range files {
-		keep[f.Path] = struct{}{}
 		if err := writeWorktreeFile(wt, f); err != nil {
 			return CommitResult{}, err
 		}
@@ -160,10 +152,6 @@ func (w *WriteRepo) Commit(branch, message string, files []File, managedDirs []s
 		if _, err := wt.Add(f.Path); err != nil {
 			return CommitResult{}, fmt.Errorf("stage %s: %w", f.Path, err)
 		}
-	}
-
-	if err := pruneStale(repo, wt, keep, managedDirs); err != nil {
-		return CommitResult{}, err
 	}
 
 	status, err := wt.Status()
@@ -187,64 +175,12 @@ func (w *WriteRepo) Commit(branch, message string, files []File, managedDirs []s
 	return CommitResult{Branch: branch, Committed: true, Hash: commit.String()}, nil
 }
 
-// pruneStale removes tracked files that live under a managedDir but are absent
-// from keep — the deletions needed so the branch mirrors exactly the supplied set
-// within those directories. It walks the branch HEAD's tree (not worktree status,
-// which omits unmodified files — a stale VM manifest that isn't being rewritten
-// must still be deleted). A managedDir matches a file if the file equals it or
-// sits beneath it ("ns" matches "ns/vm.yaml"). No managedDirs means no pruning.
-func pruneStale(repo *git.Repository, wt *git.Worktree, keep map[string]struct{}, managedDirs []string) error {
-	if len(managedDirs) == 0 {
-		return nil
-	}
-	head, err := repo.Head()
-	if err != nil {
-		return err
-	}
-	commit, err := repo.CommitObject(head.Hash())
-	if err != nil {
-		return err
-	}
-	tree, err := commit.Tree()
-	if err != nil {
-		return err
-	}
-	var stale []string
-	if err := tree.Files().ForEach(func(f *object.File) error {
-		if _, ok := keep[f.Name]; ok {
-			return nil
-		}
-		if underAny(f.Name, managedDirs) {
-			stale = append(stale, f.Name)
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	for _, path := range stale {
-		if _, err := wt.Remove(path); err != nil {
-			return fmt.Errorf("prune %s: %w", path, err)
-		}
-	}
-	return nil
-}
-
-// underAny reports whether path is one of, or nested under, any dir in dirs.
-func underAny(path string, dirs []string) bool {
-	for _, d := range dirs {
-		if path == d || strings.HasPrefix(path, d+"/") {
-			return true
-		}
-	}
-	return false
-}
-
 // checkoutBranch checks out branch as a local branch tracking the remote. A
 // fresh clone only materializes the default branch locally; every other branch
 // exists only as a remote-tracking ref (refs/remotes/origin/<branch>). So we
 // resolve that remote ref and create the local branch at the same commit,
 // ensuring we build on the branch's real remote state rather than re-forking it
-// from HEAD each time (which would discard prior commits — e.g. running export).
+// from HEAD each time (which would discard the branch's prior commits).
 func checkoutBranch(repo *git.Repository, wt *git.Worktree, branch string) error {
 	local := plumbing.NewBranchReferenceName(branch)
 	if _, err := repo.Reference(local, true); err == nil {

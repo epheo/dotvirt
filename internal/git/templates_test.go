@@ -10,7 +10,7 @@ import (
 // VMManifests must skip it — a template's embedded VM blueprint would otherwise
 // surface as inventory (it passes the cheap kind pre-filter).
 func TestTemplatesDirSplit(t *testing.T) {
-	bare := seedRunning(t)
+	bare := seedMultiRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repos := NewRepoSet(ctx, "", nil, true, nil, time.Hour)
@@ -19,16 +19,16 @@ func TestTemplatesDirSplit(t *testing.T) {
 		t.Fatal(err)
 	}
 	tpl := "apiVersion: template.kubevirt.io/v1beta1\nkind: VirtualMachineTemplate\nmetadata:\n  name: base\nspec:\n  virtualMachine:\n    kind: VirtualMachine\n"
-	if _, err := write.Commit("running", "add template", []File{
+	if _, err := write.Commit("seed", "add template", []File{
 		{Path: "templates/base.yaml", Content: []byte(tpl)},
-	}, nil); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := read.Refresh(); err != nil {
 		t.Fatal(err)
 	}
 
-	tpls, err := read.TemplatesOnBranch("running")
+	tpls, err := read.TemplatesOnBranch("seed")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestTemplatesDirSplit(t *testing.T) {
 		t.Fatalf("TemplatesOnBranch: %+v", tpls)
 	}
 
-	vms, err := read.VMManifests("running")
+	vms, err := read.VMManifests("seed")
 	if err != nil {
 		t.Fatal(err)
 	}

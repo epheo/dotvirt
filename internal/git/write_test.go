@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// seedRunning creates a bare repo with a README + two VM manifests under tenant-a/
-// on a `running` branch, returning the bare path.
-func seedRunning(t *testing.T) string {
+// seedMultiRepo creates a bare repo with a README + two VM manifests under
+// tenant-a/ on main, plus a `seed` branch mirroring it, returning the bare path.
+func seedMultiRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	bare := filepath.Join(dir, "remote.git")
@@ -41,53 +41,43 @@ func seedRunning(t *testing.T) string {
 	run(work, "commit", "-qm", "seed")
 	run(work, "remote", "add", "origin", bare)
 	run(work, "push", "-q", "origin", "main")
-	// running mirrors main initially (as the platform seeds it).
-	run(work, "branch", "running")
-	run(work, "push", "-q", "origin", "running")
+	// A non-default branch: a fresh clone materializes it only as a remote ref,
+	// so committing to it exercises checkoutBranch's remote-ref path.
+	run(work, "branch", "seed")
+	run(work, "push", "-q", "origin", "seed")
 	return bare
 }
 
-// TestCommitPrunesStaleManaged verifies that a managed-dir commit removes files
-// no longer present in the new set (a VM deleted from the cluster), while leaving
-// files outside the managed dirs (README) untouched.
-func TestCommitPrunesStaleManaged(t *testing.T) {
-	bare := seedRunning(t)
+// Commits are additive: files absent from the set survive, and re-committing
+// identical content is a no-op that never churns history.
+func TestCommitAdditiveAndNoOp(t *testing.T) {
+	bare := seedMultiRepo(t)
 	w := OpenWrite(bare, "", nil, true)
 
-	// Export now sees only web (db was deleted from the cluster).
-	files := []File{{Path: "tenant-a/web.yaml", Content: []byte("kind: VirtualMachine\nmetadata: {name: web, namespace: tenant-a}\n")}}
-	res, err := w.Commit("running", "sync", files, []string{"tenant-a"})
+	content := []byte("kind: VirtualMachine\nmetadata: {name: web, namespace: tenant-a}\n")
+	files := []File{{Path: "tenant-a/web.yaml", Content: content}}
+	res, err := w.Commit("seed", "sync", files)
+	if err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if res.Committed {
+		t.Fatal("identical content must not commit")
+	}
+
+	files = []File{{Path: "tenant-a/new.yaml", Content: []byte("kind: VirtualMachine\nmetadata: {name: new, namespace: tenant-a}\n")}}
+	res, err = w.Commit("seed", "sync", files)
 	if err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	if !res.Committed {
-		t.Fatal("expected a commit (db.yaml should have been pruned)")
+		t.Fatal("expected a commit for the new file")
 	}
 
-	tree := lsTree(t, bare, "running")
-	if !contains(tree, "tenant-a/web.yaml") {
-		t.Error("web.yaml should remain")
-	}
-	if contains(tree, "tenant-a/db.yaml") {
-		t.Error("db.yaml should have been pruned (VM deleted from cluster)")
-	}
-	if !contains(tree, "README.md") {
-		t.Error("README.md is outside managed dirs and must be kept")
-	}
-}
-
-// TestCommitNoPruneWithoutManaged keeps the additive behavior when no managed dirs
-// are given: stale files are NOT removed.
-func TestCommitNoPruneWithoutManaged(t *testing.T) {
-	bare := seedRunning(t)
-	w := OpenWrite(bare, "", nil, true)
-
-	files := []File{{Path: "tenant-a/web.yaml", Content: []byte("kind: VirtualMachine\nmetadata: {name: web, namespace: tenant-a}\n")}}
-	if _, err := w.Commit("running", "sync", files, nil); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
-	if tree := lsTree(t, bare, "running"); !contains(tree, "tenant-a/db.yaml") {
-		t.Error("db.yaml must survive when no managed dirs are passed (additive commit)")
+	tree := lsTree(t, bare, "seed")
+	for _, want := range []string{"tenant-a/new.yaml", "tenant-a/web.yaml", "tenant-a/db.yaml", "README.md"} {
+		if !contains(tree, want) {
+			t.Errorf("%s missing after additive commit", want)
+		}
 	}
 }
 
