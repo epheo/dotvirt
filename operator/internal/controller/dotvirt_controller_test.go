@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -285,6 +286,37 @@ func TestReconcileSecretsCreateOnce(t *testing.T) {
 		if got := string(s.Data[key]); got != first[name] {
 			t.Errorf("secret %s rotated across reconciles: %q -> %q", name, first[name], got)
 		}
+	}
+}
+
+// The ArgoCD-namespace appset-token mirror is the one generated secret that must
+// converge: a stale one (an earlier install's token under the same name) 401s the
+// plugin generator, so no tenant Application is ever generated and every VM reads
+// NotTracked.
+func TestReconcileConvergesStaleAppsetMirror(t *testing.T) {
+	dv := testCR()
+	argoNS := platform.Kubernetes.DefaultArgoNamespace()
+	stale := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: install.AppsetSecretName, Namespace: argoNS},
+		Data:       map[string][]byte{"token": []byte("previous-install")},
+	}
+	c := testBuilder(t).WithObjects(dv, stale).Build()
+	r := newReconciler(c, depsOK)
+
+	reconcileOnce(t, r, dv)
+
+	var src, mirror corev1.Secret
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: dv.Namespace, Name: install.AppsetSecretName}, &src); err != nil {
+		t.Fatalf("get source: %v", err)
+	}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: argoNS, Name: install.AppsetSecretName}, &mirror); err != nil {
+		t.Fatalf("get mirror: %v", err)
+	}
+	if !bytes.Equal(mirror.Data["token"], src.Data["token"]) {
+		t.Errorf("mirror token = %q, want the source token %q", mirror.Data["token"], src.Data["token"])
+	}
+	if mirror.Labels["dotvirt.io/instance"] != dv.Name {
+		t.Errorf("adopted mirror not instance-labeled: %v", mirror.Labels)
 	}
 }
 

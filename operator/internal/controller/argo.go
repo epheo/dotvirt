@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -87,8 +88,14 @@ func (r *DotvirtReconciler) reconcileArgoWebhook(ctx context.Context, dv *dotvir
 }
 
 // mirrorAppsetToken copies the generated appset-plugin token into the ArgoCD
-// namespace (create-once), where Argo's plugin generator resolves it via the
-// ConfigMap's $dotvirt-appset-plugin:token reference.
+// namespace, where Argo's plugin generator resolves it via the ConfigMap's
+// $dotvirt-appset-plugin:token reference.
+//
+// The source token is create-once, but the MIRROR must converge: a mirror left
+// behind by an earlier install (same name, different generated token) makes the
+// plugin generator 401 forever. Nothing else fails, so the break is silent: the
+// ApplicationSet generates no parameters, no tenant Application is ever created,
+// every VM reads NotTracked, and merged manifests are never applied.
 func (r *DotvirtReconciler) mirrorAppsetToken(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) error {
 	var src corev1.Secret
 	if err := r.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: install.AppsetSecretName}, &src); err != nil {
@@ -97,7 +104,22 @@ func (r *DotvirtReconciler) mirrorAppsetToken(ctx context.Context, dv *dotvirtv1
 	var existing corev1.Secret
 	err := r.Get(ctx, types.NamespacedName{Namespace: argoNS, Name: install.AppsetSecretName}, &existing)
 	if err == nil {
-		return nil
+		// One mirror name per ArgoCD namespace, so a second install sharing that namespace
+		// would rewrite this one on every reconcile while the first rewrote it back, leaving
+		// both plugin generators intermittently 401ing. Re-stamping the labels would also
+		// pull the other install's Secret into this one's uninstall blast radius. Fail
+		// loudly instead: the topology needs one ArgoCD namespace per install.
+		if owner := existing.Labels[install.InstanceLabel]; owner != "" && owner != dv.Name {
+			return fmt.Errorf("appset token mirror %s/%s belongs to dotvirt install %q; give each install its own ArgoCD namespace",
+				argoNS, install.AppsetSecretName, owner)
+		}
+		if bytes.Equal(existing.Data["token"], src.Data["token"]) {
+			return nil
+		}
+		existing.Data = map[string][]byte{"token": src.Data["token"]}
+		// Stamp an adopted predecessor's mirror so it is cleaned up with this instance.
+		existing.Labels = install.Labels(dv.Name)
+		return r.Update(ctx, &existing)
 	}
 	if !apierrors.IsNotFound(err) {
 		return err

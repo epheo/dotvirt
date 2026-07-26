@@ -47,9 +47,16 @@ func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1
 	}
 	if dv.Spec.Ingress.Host != "" {
 		dv.Status.ConsoleURL = "https://" + dv.Spec.Ingress.Host
-		if dv.Spec.Auth.OpenShiftSSO {
+	}
+	if dv.Spec.Auth.OpenShiftSSO {
+		if dv.Spec.Ingress.Host != "" {
 			dv.Status.SSOOAuthClient = ssoApplyCommand(dv.Namespace, dv.Spec.Ingress.Host)
 		}
+	} else {
+		// Derived status: toggling SSO off (or the vanilla gate zeroing it in-memory)
+		// must retire the stale apply command, not leave it inviting a needless
+		// OAuthClient forever.
+		dv.Status.SSOOAuthClient = ""
 	}
 	deployment := install.Deployment(dv)
 	if err := controllerutil.SetControllerReference(dv, deployment, r.Scheme); err != nil {
@@ -97,7 +104,7 @@ func (r *DotvirtReconciler) exposure(dv *dotvirtv1alpha1.Dotvirt) client.Object 
 
 // ssoApplyCommand is the one command an admin runs to register the cluster-scoped
 // OAuthClient SSO needs: the redirect URI is filled from the assigned console host, and
-// the client secret is read from the operator-generated Secret at apply time — so it
+// the client secret is read from the operator-generated Secret at apply time, so it
 // never lands in status. The operator deliberately doesn't create the OAuthClient itself.
 func ssoApplyCommand(ns, host string) string {
 	return fmt.Sprintf(`oc apply -f - <<EOF
@@ -109,5 +116,5 @@ secret: $(oc -n %s get secret %s -o jsonpath='{.data.clientSecret}' | base64 -d)
 redirectURIs:
   - https://%s/api/auth/callback
 grantMethod: auto
-EOF`, install.OAuthClientName, ns, install.OAuthSecretName, host)
+EOF`, install.OAuthClientName(ns), ns, install.OAuthSecretName, host)
 }

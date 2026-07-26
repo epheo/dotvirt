@@ -34,11 +34,18 @@ const (
 	WebhookSecretName     = "dotvirt-webhook"
 	ArgoWebhookSecretName = "dotvirt-argo-webhook"
 	DefaultForgeSecret    = "dotvirt-forge"
-	// OAuthClientName is the OpenShift OAuthClient name SSO registers as; OAuthSecretName
-	// holds the operator-generated client secret (key clientSecret).
-	OAuthClientName = "dotvirt"
-	OAuthSecretName = "dotvirt-oauth"
+	// OAuthSecretName holds the operator-generated OAuth client secret (key clientSecret).
+	OAuthSecretName   = "dotvirt-oauth"
+	oauthClientPrefix = "dotvirt"
 )
+
+// OAuthClientName is the OpenShift OAuthClient this install registers as. An OAuthClient
+// is CLUSTER-scoped, so the name carries the install's namespace: a shared constant would
+// have a second install overwrite the first's redirect URI and secret, breaking its SSO
+// with nothing to say why.
+func OAuthClientName(namespace string) string {
+	return oauthClientPrefix + "-" + namespace
+}
 
 // ForgeSecretName is the forge-credential Secret for this install: the spec override,
 // else the default the managed-Forgejo bootstrap writes.
@@ -54,7 +61,11 @@ func ForgeSecretName(dv *dotvirtv1alpha1.Dotvirt) string {
 // runs push-only, and the Deployment omits the forge credential env + mount so the pod
 // doesn't wedge on a dotvirt-forge secret that will never be written.
 func ForgeConfigured(dv *dotvirtv1alpha1.Dotvirt) bool {
-	return dv.Spec.Forge.Managed || dv.Spec.Forge.URL != "" || dv.Spec.Forge.CredentialsSecret != ""
+	// A credential, not a URL: the app reads BOTH the forge URL and the token from this
+	// secret for a BYO forge, and only a managed forge or an explicit credentialsSecret
+	// guarantees one exists. Counting a bare spec.forge.url would mount a Secret nothing
+	// writes, wedging the pod in CreateContainerConfigError.
+	return dv.Spec.Forge.Managed || dv.Spec.Forge.CredentialsSecret != ""
 }
 
 // forgeTokenMountPath is where the forge credential secret's "token" key is
@@ -168,12 +179,12 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: dv.Spec.Metrics.URL})
 	}
 	// OpenShift SSO: the operator generates the client secret and wires it here; the admin
-	// applies the OAuthClient (a cluster-admin act it deliberately doesn't perform — no
+	// applies the OAuthClient (a cluster-admin act it deliberately doesn't perform; no
 	// oauthclients grant), reported in status.ssoOAuthClient. optional=true: enabling SSO
 	// before the OAuthClient is applied must not wedge the pod.
 	if dv.Spec.Auth.OpenShiftSSO {
 		env = append(env,
-			corev1.EnvVar{Name: "DOTVIRT_OAUTH_CLIENT_ID", Value: OAuthClientName},
+			corev1.EnvVar{Name: "DOTVIRT_OAUTH_CLIENT_ID", Value: OAuthClientName(dv.Namespace)},
 			secretEnv("DOTVIRT_OAUTH_CLIENT_SECRET", OAuthSecretName, "clientSecret", true),
 		)
 	}
@@ -188,7 +199,7 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 	forgeSecret := ForgeSecretName(dv)
 	if ForgeConfigured(dv) {
 		// A managed forge's credential secret is operator-written, so emit the resolved URL
-		// as a LITERAL — a URL change (e.g. the first router host assignment) then rolls the
+		// as a LITERAL: a URL change (e.g. the first router host assignment) then rolls the
 		// app; a BYO forge reads it from the admin-supplied secret. The token (git https +
 		// API, one credential) is MOUNTED, not env: kubelet updates the file in place, so an
 		// operator re-mint/rotation reaches the app without a restart (env freezes at start).

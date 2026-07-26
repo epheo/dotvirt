@@ -87,6 +87,10 @@ spec:
         path: ssoOAuthClient
         x-descriptors:
         - urn:alm:descriptor:com.tectonic.ui:text
+      - displayName: Forge Admin (reveal bootstrap password)
+        path: forgeAdminHint
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
       - displayName: Conditions
         path: conditions
         x-descriptors:

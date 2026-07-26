@@ -45,7 +45,7 @@ func getSecret(t *testing.T, r *DotvirtReconciler, ns, name string) *corev1.Secr
 }
 
 // The bootstrap mints over the in-cluster Service (the seam), but the credential it
-// writes carries the EXTERNAL forge URL — what the app, Argo, and browsers consume.
+// writes carries the EXTERNAL forge URL: what the app, Argo, and browsers consume.
 func TestBootstrapForgejoMintsViaServiceURLWritesExternalURL(t *testing.T) {
 	dv := managedForgeCR()
 	var sawTokenPOST bool
@@ -169,6 +169,8 @@ func TestBootstrapForgejoAdminMismatchReturnsErrUnauthorized(t *testing.T) {
 func TestReconcileForgeSilentForBYO(t *testing.T) {
 	dv := testCR()
 	dv.Spec.Forge.URL = "https://byo-forge.example"
+	dv.Spec.Forge.CredentialsSecret = "byo-creds"
+	dv.Status.ForgeAdminHint = "stale hint from a managed past"
 	c := testBuilder(t).WithObjects(dv).Build()
 	r := newReconciler(c, depsOK)
 
@@ -182,10 +184,32 @@ func TestReconcileForgeSilentForBYO(t *testing.T) {
 	if dv.Status.ForgeURL != dv.Spec.Forge.URL {
 		t.Errorf("status.forgeURL = %q, want the BYO url %q", dv.Status.ForgeURL, dv.Spec.Forge.URL)
 	}
+	if dv.Status.ForgeAdminHint != "" {
+		t.Errorf("switching off managed must retire the bootstrap hint, got %q", dv.Status.ForgeAdminHint)
+	}
+}
+
+// A URL alone is not a forge: the app reads both the URL and the token from the
+// credentials secret, so the workload renders forge-less. The condition must name the
+// missing credentialsSecret; a generic "no forge configured" beside a plainly set
+// spec.forge.url reads as a lie.
+func TestReconcileForgeURLWithoutCredential(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Forge.URL = "https://byo-forge.example"
+	c := testBuilder(t).WithObjects(dv).Build()
+	r := newReconciler(c, depsOK)
+
+	if _, err := r.reconcileForge(context.Background(), dv); err != nil {
+		t.Fatalf("reconcileForge: %v", err)
+	}
+	fc := cond(dv, dotvirtv1alpha1.ConditionForgeReady)
+	if fc == nil || fc.Reason != "CredentialsRequired" {
+		t.Fatalf("ForgeReady = %+v, want False/CredentialsRequired", fc)
+	}
 }
 
 // With no forge at all (not managed, no URL, no credentials secret), reconcileForge
-// records NotConfigured (push-only) and proceeds — the workload then renders forge-less.
+// records NotConfigured (push-only) and proceeds; the workload then renders forge-less.
 func TestReconcileForgeNotConfigured(t *testing.T) {
 	dv := testCR() // wholly unconfigured forge
 	c := testBuilder(t).WithObjects(dv).Build()
@@ -211,7 +235,7 @@ func forgejoRoute(ns, host string) *unstructured.Unstructured {
 }
 
 // End-to-end on OpenShift with no explicit URL: reconcileForge creates a HOSTLESS
-// Forgejo Route (for the router to name) and requeues, waiting for the host — it does
+// Forgejo Route (for the router to name) and requeues, waiting for the host; it does
 // not dial anything or bootstrap yet.
 func TestReconcileForgeCreatesHostlessRouteAndWaits(t *testing.T) {
 	dv := managedForgeCR()
@@ -234,6 +258,10 @@ func TestReconcileForgeCreatesHostlessRouteAndWaits(t *testing.T) {
 	}
 	if host, _, _ := unstructured.NestedString(route.Object, "spec", "host"); host != "" {
 		t.Errorf("Route host = %q, want empty (router-assigned)", host)
+	}
+	// Set right after the base apply, so it shows while provisioning, not only at Ready.
+	if dv.Status.ForgeAdminHint == "" {
+		t.Error("ForgeAdminHint not set during provisioning")
 	}
 }
 
@@ -325,6 +353,17 @@ func TestApplyEffectiveForgeSpec(t *testing.T) {
 	applyEffectiveForgeSpec(explicit, "https://forge.apps.example")
 	if explicit.Spec.Forge.PlatformRepo != "https://forge.apps.example/team/custom.git" {
 		t.Error("an explicit platformRepo must not be overridden")
+	}
+}
+
+// forgeAdminHint returns a runnable retrieval command (user + secret + namespace),
+// never the credential value: the password leaves only via the Secret it names.
+func TestForgeAdminHint(t *testing.T) {
+	hint := forgeAdminHint("dotvirt")
+	for _, want := range []string{install.ForgejoBotUser, install.ForgejoAdminSecret, "-n dotvirt", "oc extract"} {
+		if !strings.Contains(hint, want) {
+			t.Errorf("hint %q missing %q", hint, want)
+		}
 	}
 }
 

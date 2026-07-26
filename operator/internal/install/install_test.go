@@ -87,8 +87,14 @@ func TestDeploymentSSOEnvGatedOnFlag(t *testing.T) {
 	sso := testDotvirt()
 	sso.Spec.Auth.OpenShiftSSO = true
 	env := Deployment(sso).Spec.Template.Spec.Containers[0].Env
-	if got, ok := envValue(env, "DOTVIRT_OAUTH_CLIENT_ID"); !ok || got != OAuthClientName {
-		t.Errorf("SSO on: DOTVIRT_OAUTH_CLIENT_ID = (%q, ok=%v), want %q", got, ok, OAuthClientName)
+	// The OAuthClient is cluster-scoped, so its name must be per-install: a shared one
+	// lets a second install overwrite the first's redirect URI and secret.
+	want := OAuthClientName(sso.Namespace)
+	if got, ok := envValue(env, "DOTVIRT_OAUTH_CLIENT_ID"); !ok || got != want {
+		t.Errorf("SSO on: DOTVIRT_OAUTH_CLIENT_ID = (%q, ok=%v), want %q", got, ok, want)
+	}
+	if other := OAuthClientName("other-ns"); other == want {
+		t.Errorf("two installs share the cluster-scoped OAuthClient name %q", want)
 	}
 	var secretRef *corev1.SecretKeySelector
 	for _, e := range env {

@@ -231,8 +231,14 @@ spec:
                 x-kubernetes-list-type: map
               consoleURL:
                 description: |-
-                  ConsoleURL is the external URL the dotvirt UI is served on — assigned by the
+                  ConsoleURL is the external URL the dotvirt UI is served on; assigned by the
                   operator when spec.ingress.host is left empty on OpenShift.
+                type: string
+              forgeAdminHint:
+                description: |-
+                  ForgeAdminHint is the command that reveals the managed Forgejo bootstrap admin
+                  password (user dotvirt-bot); the value stays in the Secret, never in status.
+                  Set only for a managed forge.
                 type: string
               forgeURL:
                 description: |-

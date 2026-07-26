@@ -46,7 +46,7 @@ func ForgejoServiceURL(dv *dotvirtv1alpha1.Dotvirt) string {
 
 // ForgejoExternalURL is the browser/clone-facing base URL: the effective spec.forge.url
 // (the operator fills a derived one from the router-assigned Route before rendering),
-// else the in-cluster Service URL — the fallback only a dry-run or a still-unresolved
+// else the in-cluster Service URL, the fallback only a dry-run or a still-unresolved
 // host hits, since a real render resolves the URL first.
 func ForgejoExternalURL(dv *dotvirtv1alpha1.Dotvirt) string {
 	if dv.Spec.Forge.URL != "" {
@@ -56,7 +56,7 @@ func ForgejoExternalURL(dv *dotvirtv1alpha1.Dotvirt) string {
 }
 
 // ForgejoHost is the hostname to expose the managed Forgejo on, parsed from
-// spec.forge.url. Empty when no URL is set — the caller then creates a hostless Route
+// spec.forge.url. Empty when no URL is set; the caller then creates a hostless Route
 // and the router assigns one.
 func ForgejoHost(dv *dotvirtv1alpha1.Dotvirt) string {
 	if dv.Spec.Forge.URL == "" {
@@ -147,8 +147,8 @@ func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt, argoWebhookHost string) []corev1.En
 
 // ForgejoDeployment runs the rootless Forgejo with a one-shot bootstrap initContainer
 // that migrates the DB and reconciles the admin service user's password to the current
-// secret on every start (create on a fresh volume, change-password on an existing one)
-// — the exact sequence verified live as an arbitrary OpenShift-injected UID. The main
+// secret on every start (create on a fresh volume, change-password on an existing one).
+// That sequence was verified live as an arbitrary OpenShift-injected UID. The main
 // container then serves on the prepared data. The operator mints the API token
 // afterward (it can't exec).
 //

@@ -34,11 +34,15 @@ const HTTPPort int32 = 8080
 // Labels are the recommended labels stamped on every rendered resource, plus a
 // per-instance label so cluster-scoped / cross-namespace resources (which can't
 // carry an ownerRef to a namespaced CR) can be found for finalizer cleanup.
+// InstanceLabel ties a cluster-scoped or foreign-namespace object to the install that
+// owns it, which is what the finalizer's cleanup selects on.
+const InstanceLabel = "dotvirt.io/instance"
+
 func Labels(instance string) map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/name":       AppName,
 		"app.kubernetes.io/managed-by": FieldManager,
-		"dotvirt.io/instance":          instance,
+		InstanceLabel:                  instance,
 	}
 }
 

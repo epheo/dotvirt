@@ -61,3 +61,22 @@ func TestReconcileSSOGatedOffVanilla(t *testing.T) {
 		t.Error("no OAuth client secret should be generated off OpenShift")
 	}
 }
+
+// SSOOAuthClient is derived, not stored: toggling openShiftSSO off (or the vanilla
+// gate zeroing it) must retire the stale apply command from status.
+func TestReconcileSSOToggleOffClearsStatus(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Auth.OpenShiftSSO = false
+	dv.Spec.Ingress.Host = "dotvirt.apps.cluster.example"
+	dv.Status.SSOOAuthClient = "oc apply -f - <<EOT ...stale... EOT"
+	c := testBuilder(t).WithObjects(dv).Build()
+	r := newReconciler(c, depsOK)
+	r.Platform = platform.OpenShift
+
+	if _, err := r.reconcileWorkload(context.Background(), dv); err != nil {
+		t.Fatalf("reconcileWorkload: %v", err)
+	}
+	if dv.Status.SSOOAuthClient != "" {
+		t.Errorf("stale ssoOAuthClient must be cleared when SSO is off, got %q", dv.Status.SSOOAuthClient)
+	}
+}

@@ -137,13 +137,17 @@ type DotvirtStatus struct {
 	// ForgeURL is the effective external forge base URL: the configured spec.forge.url,
 	// or the host the operator assigned to a managed Forgejo when the URL was left empty.
 	ForgeURL string `json:"forgeURL,omitempty"`
-	// ConsoleURL is the external URL the dotvirt UI is served on — assigned by the
+	// ConsoleURL is the external URL the dotvirt UI is served on; assigned by the
 	// operator when spec.ingress.host is left empty on OpenShift.
 	ConsoleURL string `json:"consoleURL,omitempty"`
 	// SSOOAuthClient is a ready-to-apply command that registers the cluster-scoped
 	// OAuthClient SSO needs, with the redirect URI filled from the assigned console host.
 	// Set only while auth.openShiftSSO is on; run it once to finish SSO.
 	SSOOAuthClient string `json:"ssoOAuthClient,omitempty"`
+	// ForgeAdminHint is the command that reveals the managed Forgejo bootstrap admin
+	// password (user dotvirt-bot); the value stays in the Secret, never in status.
+	// Set only for a managed forge.
+	ForgeAdminHint string `json:"forgeAdminHint,omitempty"`
 }
 
 // Dotvirt is one dotvirt install. Namespaced singleton in the operator's namespace;

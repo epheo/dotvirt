@@ -31,19 +31,32 @@ import (
 // Requeues while Forgejo is coming up or its router host isn't assigned yet.
 func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
 	if !dv.Spec.Forge.Managed {
+		// Derived status, so a switch off managed retires the stale bootstrap hint too.
 		dv.Status.ForgeURL = dv.Spec.Forge.URL
+		dv.Status.ForgeAdminHint = ""
 		if !install.ForgeConfigured(dv) {
-			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "NotConfigured",
-				"no forge configured; propose pushes a branch but opens no pull request")
+			if dv.Spec.Forge.URL != "" {
+				// A URL alone is not a forge: the app reads BOTH the URL and the token from
+				// the credentials secret. Without the distinct reason this renders as "no
+				// forge configured" while spec.forge.url plainly is, and the user debugs a lie.
+				r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "CredentialsRequired",
+					"spec.forge.url is set but spec.forge.credentialsSecret is not; name a Secret with url/username/token keys (or set forge.managed)")
+			} else {
+				r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "NotConfigured",
+					"no forge configured; propose pushes a branch but opens no pull request")
+			}
 		}
 		return nil, nil
 	}
 	// Apply the base workload (incl. the exposure) first: on OpenShift with no explicit
 	// URL that Route is hostless, so the router assigns a host we read back and fill into
-	// the effective spec — before rendering the Deployment, whose ROOT_URL needs it.
+	// the effective spec, before rendering the Deployment whose ROOT_URL needs it.
 	if err := r.applyForgejoBase(ctx, dv); err != nil {
 		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "ApplyFailed", err)
 	}
+	// Set here, not at Ready: the admin secret exists once the base is applied, so the
+	// hint also shows while provisioning.
+	dv.Status.ForgeAdminHint = forgeAdminHint(dv.Namespace)
 	forgeURL, res, err := r.resolveForgeURL(ctx, dv)
 	if err != nil || res != nil {
 		return res, err
@@ -101,7 +114,7 @@ func (r *DotvirtReconciler) managedForgeAPIBase(dv *dotvirtv1alpha1.Dotvirt) str
 // the explicit spec.forge.url when set, else (OpenShift) the host the router assigned
 // to the hostless Forgejo Route applyForgejoBase just created. It returns a requeue
 // while the host isn't assigned yet, and halts on vanilla Kubernetes with an actionable
-// reason — there is no router to name the forge, so the user must set spec.forge.url.
+// reason: there is no router to name the forge, so the user must set spec.forge.url.
 func (r *DotvirtReconciler) resolveForgeURL(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (string, *ctrl.Result, error) {
 	if dv.Spec.Forge.URL != "" {
 		return strings.TrimRight(dv.Spec.Forge.URL, "/"), nil, nil
@@ -111,9 +124,13 @@ func (r *DotvirtReconciler) resolveForgeURL(ctx context.Context, dv *dotvirtv1al
 		// the render validate.
 		return install.ForgejoServiceURL(dv), nil, nil
 	}
-	if r.Platform != platform.OpenShift {
+	// A router-assigned hostname only exists when forgejoExposure creates a Route, which
+	// it does not on vanilla Kubernetes NOR when spec.ingress.type names another exposure.
+	// Reading routeHost in those cases would wait for a Route nothing creates, requeueing
+	// forever, so halt on the same predicate the exposure uses.
+	if r.Platform != platform.OpenShift || r.resolveExposureType(dv) != "route" {
 		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "ForgeURLRequired",
-			"set spec.forge.url: on vanilla Kubernetes the operator can't assign the managed forge a hostname")
+			"set spec.forge.url: the operator can only discover a managed forge's hostname from an OpenShift Route, which this install does not create")
 		dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
 		if err := r.Status().Update(ctx, dv); err != nil {
 			return "", nil, err
@@ -142,6 +159,12 @@ func applyEffectiveForgeSpec(dv *dotvirtv1alpha1.Dotvirt, forgeURL string) {
 	if dv.Spec.Forge.PlatformRepo == "" {
 		dv.Spec.Forge.PlatformRepo = strings.TrimRight(forgeURL, "/") + "/dotvirt/platform.git"
 	}
+}
+
+func forgeAdminHint(ns string) string {
+	return fmt.Sprintf("Forgejo admin user %q; reveal the password: "+
+		"oc extract secret/%s -n %s --keys=password --to=-",
+		install.ForgejoBotUser, install.ForgejoAdminSecret, ns)
 }
 
 // reconcilePlatformRepo ensures the platform repo exists — the imperative
@@ -186,7 +209,7 @@ func (r *DotvirtReconciler) ensurePlatformRepo(ctx context.Context, dv *dotvirtv
 // With an explicit spec.forge.url it uses that host; with no URL on a Route platform it
 // returns a HOSTLESS Route for the router to name (resolveForgeURL reads that host back).
 // nil only where there's nothing to expose: no URL on vanilla Kubernetes (Ingress needs
-// an explicit host — that path halts with ForgeURLRequired).
+// an explicit host; that path halts with ForgeURLRequired).
 func (r *DotvirtReconciler) forgejoExposure(dv *dotvirtv1alpha1.Dotvirt) client.Object {
 	host := install.ForgejoHost(dv)
 	if host == "" && r.resolveExposureType(dv) != "route" {

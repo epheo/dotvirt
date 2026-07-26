@@ -84,7 +84,7 @@ spec:
 ```
 
 The operator generates the client credential and, once the console host is assigned,
-publishes a ready-to-apply command in `status.ssoOAuthClient` — one `oc apply` that
+publishes a ready-to-apply command in `status.ssoOAuthClient`: one `oc apply` that
 registers the cluster-scoped `OAuthClient` with the right redirect URI. Registering that
 cluster-scoped object stays a cluster-admin act the operator deliberately leaves to you
 (it holds no `oauthclients` grant); the client secret is read from the generated Secret

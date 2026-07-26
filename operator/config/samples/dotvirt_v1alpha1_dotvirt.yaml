@@ -1,8 +1,8 @@
 # A sample Dotvirt install: apply it into the namespace dotvirt runs in and the
-# operator provisions the rest. On OpenShift nothing here needs a hostname — with
+# operator provisions the rest. On OpenShift nothing here needs a hostname; with
 # forge.managed and no forge.url the operator hosts Forgejo and assigns its host
 # (reported in status.forgeURL), and ingress.type: auto assigns the console host too
-# (status.consoleURL). Under `make run ARGS=-dry-run` nothing is persisted — the API
+# (status.consoleURL). Under `make run ARGS=-dry-run` nothing is persisted; the API
 # server just validates the rendered resources.
 apiVersion: dotvirt.io/v1alpha1
 kind: Dotvirt
@@ -16,7 +16,7 @@ spec:
     managed: true # the operator deploys + bootstraps Forgejo and generates its token
     # url + platformRepo left empty: on OpenShift the operator assigns the forge host
     # and defaults the platform repo under it. Set them only for a bring-your-own forge.
-    # DEV/EVAL ONLY — skips forge TLS verification for the bundled self-signed Forgejo
+    # DEV/EVAL ONLY: skips forge TLS verification for the bundled self-signed Forgejo
     # Route. Leave UNSET (defaults false) for a real forge with a trusted certificate.
     insecureTLS: true
   ingress:
