@@ -21,11 +21,10 @@ type Config struct {
 	UIOrigin string // CORS origin for the separate SvelteKit frontend; empty disables CORS
 
 	// Git credential (one cred for every project repo) + the branches dotvirt uses.
-	// The git https token and the Forge API token are ONE credential (the forge bot):
-	// GitToken is a fallback for ForgeToken; both resolve through ForgeTokenSource so
-	// a rotated token is picked up without restart. See ForgeTokenFile / ForgeToken.
+	// The git https token and the Forge API token are ONE credential (the forge
+	// bot), resolved through ForgeTokenSource so a rotated token is picked up
+	// without restart. See ForgeTokenFile / ForgeToken.
 	GitUsername string // for https auth (the token comes from ForgeTokenSource)
-	GitToken    string // deprecated alias for ForgeToken (kept for BYO flag compat)
 	// ForgeCA is a PEM bundle to VERIFY the forge with (API + git https) - the
 	// no-insecure path for a managed forge served by the cluster's ingress CA.
 	ForgeCA string
@@ -44,7 +43,6 @@ type Config struct {
 	PlatformRepo string
 
 	GitPollInterval time.Duration // missed-event backstop: fetch each repo this often when no webhook poke arrives
-	Push            bool          // push commits to the remote (disable for local/offline testing)
 
 	// Changeset / PR workflow
 	BaseBranch     string // branch the inventory reads + PRs target (the GitOps trunk)
@@ -58,7 +56,7 @@ type Config struct {
 	// ForgeTokenFile, when set, is a mounted-secret path read on EVERY forge/git
 	// call (see ForgeTokenSource) — kubelet updates it in place, so an operator
 	// re-mint/rotation takes effect with no pod restart. Takes precedence over the
-	// static ForgeToken/GitToken env values.
+	// static ForgeToken env value.
 	ForgeTokenFile string
 
 	InsecureTLS bool // skip TLS verification for git + forge (dev, e.g. self-signed Route)
@@ -118,7 +116,6 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.Addr, "addr", envOr("DOTVIRT_ADDR", ":8080"), "HTTP listen address")
 	fs.StringVar(&c.UIOrigin, "ui-origin", envOr("DOTVIRT_UI_ORIGIN", "http://localhost:5173"), "frontend origin allowed via CORS (empty to disable)")
 	fs.StringVar(&c.GitUsername, "git-username", envOr("DOTVIRT_GIT_USERNAME", "dotvirt"), "git https username (clones/pushes every project repo)")
-	fs.StringVar(&c.GitToken, "git-token", os.Getenv("DOTVIRT_GIT_TOKEN"), "git https token/password")
 	fs.StringVar(&c.ForgeCA, "forge-ca", os.Getenv("DOTVIRT_FORGE_CA"), "PEM CA bundle path to verify the forge with (API + git https), e.g. the mounted ingress CA")
 
 	fs.StringVar(&c.Kubeconfig, "kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig path (empty = in-cluster)")
@@ -127,7 +124,6 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.PlatformRepo, "platform-repo", os.Getenv("DOTVIRT_PLATFORM_REPO"), "platform-tier git repo for cluster-scoped + tenancy manifests (CUDN/NNCP/Namespace); empty disables those creates")
 
 	fs.DurationVar(&c.GitPollInterval, "git-poll-interval", 5*time.Minute, "missed-event backstop: how often to fetch each project repo for head changes when no webhook poke arrives (webhooks are the primary trigger)")
-	fs.BoolVar(&c.Push, "push", envBool("DOTVIRT_PUSH", true), "push commits to the remote (disable for local/offline testing)")
 
 	fs.StringVar(&c.BaseBranch, "base-branch", envOr("DOTVIRT_BASE_BRANCH", "main"), "branch the inventory reads + PRs target")
 	fs.StringVar(&c.ProposedBranch, "proposed-branch", envOr("DOTVIRT_PROPOSED_BRANCH", "dotvirt/proposed"), "working branch holding the draft changeset")
@@ -178,17 +174,12 @@ func randomSecret() (string, error) {
 
 // ForgeTokenSource is the single resolver for the forge credential, shared by the
 // git RepoSet and the Forge API client so they never diverge. Prefers the mounted
-// file (rotation-safe, re-read per call) and falls back to the static token —
-// itself ForgeToken or, for BYO flag compatibility, GitToken.
+// file (rotation-safe, re-read per call) over the static ForgeToken.
 func (c *Config) ForgeTokenSource() forge.TokenSource {
 	if c.ForgeTokenFile != "" {
 		return forge.FileToken(c.ForgeTokenFile)
 	}
-	tok := c.ForgeToken
-	if tok == "" {
-		tok = c.GitToken
-	}
-	return forge.StaticToken(tok)
+	return forge.StaticToken(c.ForgeToken)
 }
 
 func envOr(key, def string) string {
