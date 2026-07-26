@@ -164,41 +164,56 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 		return walkResult{steps: steps, outcome: action}
 	}
 
+	// adminTier serves both ANP walks: every rule in order, first match decides;
+	// Allow/Deny are final, and (admin tier only) Pass hands the flow down. A
+	// non-nil return is the walk's outcome; nil means evaluation continues into
+	// the tiers below (no decision, or a Pass delegation).
+	adminTier := func(policies []*unstructured.Unstructured, baseline bool) *walkResult {
+		stage := "admin"
+		if baseline {
+			stage = "baseline"
+		}
+		for _, u := range policies {
+			sm := matched{m: anpSubjectMatch(u, subject.NSLabels, subject.PodLabels, true)}
+			if sm.m == matchNo {
+				continue
+			}
+			if sm.m == matchCond {
+				sm.reason = "the policy's subject selector could not be resolved"
+			}
+			rules, _, _ := unstructured.NestedSlice(u.Object, "spec", field)
+			for _, raw := range rules {
+				r, ok := raw.(map[string]any)
+				if !ok {
+					continue
+				}
+				m := allOf(sm, anpPeerMatch(r[peerKey], peer), anpPortsMatch(r["ports"], protocol, port))
+				if m.m == matchNo {
+					continue
+				}
+				action := str(r["action"])
+				rv := &model.PolicyRuleView{Direction: dir, Action: action, Peer: adminPeers(r[peerKey]), Ports: portsSummary(r["ports"])}
+				if m.m == matchCond {
+					addStep(policyFromANP(u, baseline), rv, stage, action, "May match: "+m.reason+".", true, false)
+					condActions = append(condActions, action)
+					continue
+				}
+				if !baseline && action == "Pass" {
+					addStep(policyFromANP(u, false), rv, stage, action, "Delegates this flow to the project tier.", false, true)
+					return nil
+				}
+				addStep(policyFromANP(u, baseline), rv, stage, action, "", false, true)
+				res := decide(action)
+				return &res
+			}
+		}
+		return nil
+	}
+
 	// Admin tier: every ANP rule in (priority, rule) order. The first match
 	// decides — Allow/Deny are final for the flow, Pass hands it down.
-anpTier:
-	for _, u := range s.sortedANPs() {
-		sm := matched{m: anpSubjectMatch(u, subject.NSLabels, subject.PodLabels, true)}
-		if sm.m == matchNo {
-			continue
-		}
-		if sm.m == matchCond {
-			sm.reason = "the policy's subject selector could not be resolved"
-		}
-		rules, _, _ := unstructured.NestedSlice(u.Object, "spec", field)
-		for _, raw := range rules {
-			r, ok := raw.(map[string]any)
-			if !ok {
-				continue
-			}
-			m := allOf(sm, anpPeerMatch(r[peerKey], peer), anpPortsMatch(r["ports"], protocol, port))
-			if m.m == matchNo {
-				continue
-			}
-			action := str(r["action"])
-			rv := &model.PolicyRuleView{Direction: dir, Action: action, Peer: adminPeers(r[peerKey]), Ports: portsSummary(r["ports"])}
-			if m.m == matchCond {
-				addStep(policyFromANP(u, false), rv, "admin", action, "May match: "+m.reason+".", true, false)
-				condActions = append(condActions, action)
-				continue
-			}
-			if action == "Pass" {
-				addStep(policyFromANP(u, false), rv, "admin", action, "Delegates this flow to the project tier.", false, true)
-				break anpTier
-			}
-			addStep(policyFromANP(u, false), rv, "admin", action, "", false, true)
-			return decide(action)
-		}
+	if res := adminTier(s.sortedANPs(), false); res != nil {
+		return *res
 	}
 
 	// A maybe-matching Pass converges here: matched or not, evaluation
@@ -270,34 +285,8 @@ anpTier:
 	}
 
 	// Baseline tier: reached only when nothing above decided.
-	for _, u := range listOf(s.banp) {
-		sm := matched{m: anpSubjectMatch(u, subject.NSLabels, subject.PodLabels, true)}
-		if sm.m == matchNo {
-			continue
-		}
-		if sm.m == matchCond {
-			sm.reason = "the policy's subject selector could not be resolved"
-		}
-		rules, _, _ := unstructured.NestedSlice(u.Object, "spec", field)
-		for _, raw := range rules {
-			r, ok := raw.(map[string]any)
-			if !ok {
-				continue
-			}
-			m := allOf(sm, anpPeerMatch(r[peerKey], peer), anpPortsMatch(r["ports"], protocol, port))
-			if m.m == matchNo {
-				continue
-			}
-			action := str(r["action"])
-			rv := &model.PolicyRuleView{Direction: dir, Action: action, Peer: adminPeers(r[peerKey]), Ports: portsSummary(r["ports"])}
-			if m.m == matchCond {
-				addStep(policyFromANP(u, true), rv, "baseline", action, "May match: "+m.reason+".", true, false)
-				condActions = append(condActions, action)
-				continue
-			}
-			addStep(policyFromANP(u, true), rv, "baseline", action, "", false, true)
-			return decide(action)
-		}
+	if res := adminTier(listOf(s.banp), true); res != nil {
+		return *res
 	}
 
 	steps = append(steps, model.TraceStep{
@@ -694,23 +683,44 @@ func selMatch(sel map[string]any, lbls map[string]string) matched {
 	return matched{m: m}
 }
 
+// Conditional-outcome reasons shared by the port and CIDR matchers; every
+// producer of one of these situations must word it identically or the trace
+// UI shows two phrasings for one condition.
+const (
+	reasonPortNeeded = "the rule restricts ports; give a destination port to resolve it"
+	reasonNamedPort  = "a named port can't be resolved here"
+	reasonNoAddrs    = "the VM reports no addresses (not running), so CIDR rules can't be resolved"
+)
+
+// resolveAddrs returns the target's parseable addresses, or the conditional
+// match when the workload reports none (not running).
+func resolveAddrs(t peerTarget) ([]netip.Addr, *matched) {
+	raw := t.addrs()
+	if len(raw) == 0 || (len(raw) == 1 && raw[0] == "") {
+		return nil, &matched{m: matchCond, reason: reasonNoAddrs}
+	}
+	var addrs []netip.Addr
+	for _, a := range raw {
+		if ad, err := netip.ParseAddr(a); err == nil {
+			addrs = append(addrs, ad)
+		}
+	}
+	return addrs, nil
+}
+
 // cidrsMatch reports whether any target address falls in any CIDR. A workload
 // with no reported addresses can't be resolved — conditional, not dropped.
 func cidrsMatch(cidrs []any, t peerTarget) matched {
-	addrs := t.addrs()
-	if len(addrs) == 0 || (len(addrs) == 1 && addrs[0] == "") {
-		return matched{m: matchCond, reason: "the VM reports no addresses (not running), so CIDR rules can't be resolved"}
+	addrs, cond := resolveAddrs(t)
+	if cond != nil {
+		return *cond
 	}
 	for _, c := range cidrs {
 		pfx, err := netip.ParsePrefix(str(c))
 		if err != nil {
 			continue
 		}
-		for _, a := range addrs {
-			ad, err := netip.ParseAddr(a)
-			if err != nil {
-				continue
-			}
+		for _, ad := range addrs {
 			if pfx.Contains(ad) {
 				return matched{m: matchYes}
 			}
@@ -722,18 +732,17 @@ func cidrsMatch(cidrs []any, t peerTarget) matched {
 // ipBlockMatch is cidrsMatch with the netpol except list: an address inside an
 // except block does not match.
 func ipBlockMatch(ib map[string]any, t peerTarget) matched {
-	addrs := t.addrs()
-	if len(addrs) == 0 || (len(addrs) == 1 && addrs[0] == "") {
-		return matched{m: matchCond, reason: "the VM reports no addresses (not running), so CIDR rules can't be resolved"}
+	addrs, cond := resolveAddrs(t)
+	if cond != nil {
+		return *cond
 	}
 	pfx, err := netip.ParsePrefix(str(ib["cidr"]))
 	if err != nil {
 		return matched{m: matchNo}
 	}
 	excepts, _ := ib["except"].([]any)
-	for _, a := range addrs {
-		ad, err := netip.ParseAddr(a)
-		if err != nil || !pfx.Contains(ad) {
+	for _, ad := range addrs {
+		if !pfx.Contains(ad) {
 			continue
 		}
 		excluded := false
@@ -746,6 +755,21 @@ func ipBlockMatch(ib map[string]any, t peerTarget) matched {
 		if !excluded {
 			return matched{m: matchYes}
 		}
+	}
+	return matched{m: matchNo}
+}
+
+// rangeMatch resolves a numeric proto + inclusive-range port constraint
+// against the queried (protocol, port); port 0 means none was given.
+func rangeMatch(eproto, protocol string, start, end, port int) matched {
+	if !strings.EqualFold(eproto, protocol) {
+		return matched{m: matchNo}
+	}
+	if port == 0 {
+		return matched{m: matchCond, reason: reasonPortNeeded}
+	}
+	if port >= start && port <= end {
+		return matched{m: matchYes}
 	}
 	return matched{m: matchNo}
 }
@@ -778,23 +802,19 @@ func netpolPortsMatch(v any, protocol string, port int) matched {
 			continue
 		}
 		if port == 0 {
-			parts = append(parts, matched{m: matchCond, reason: "the rule restricts ports; give a destination port to resolve it"})
+			parts = append(parts, matched{m: matchCond, reason: reasonPortNeeded})
 			continue
 		}
 		n, isNum := toInt(pv)
 		if !isNum {
-			parts = append(parts, matched{m: matchCond, reason: "a named port can't be resolved here"})
+			parts = append(parts, matched{m: matchCond, reason: reasonNamedPort})
 			continue
 		}
 		end := n
 		if e, ok := toInt(m["endPort"]); ok {
 			end = e
 		}
-		if port >= n && port <= end {
-			parts = append(parts, matched{m: matchYes})
-		} else {
-			parts = append(parts, matched{m: matchNo})
-		}
+		parts = append(parts, rangeMatch(eproto, protocol, n, end, port))
 	}
 	return anyOf(parts...)
 }
@@ -813,41 +833,18 @@ func anpPortsMatch(v any, protocol string, port int) matched {
 			continue
 		}
 		if m["namedPort"] != nil {
-			parts = append(parts, matched{m: matchCond, reason: "a named port can't be resolved here"})
+			parts = append(parts, matched{m: matchCond, reason: reasonNamedPort})
 			continue
 		}
 		if pn, ok := m["portNumber"].(map[string]any); ok {
-			if !strings.EqualFold(str(pn["protocol"]), protocol) {
-				parts = append(parts, matched{m: matchNo})
-				continue
-			}
-			if port == 0 {
-				parts = append(parts, matched{m: matchCond, reason: "the rule restricts ports; give a destination port to resolve it"})
-				continue
-			}
-			if n, ok := toInt(pn["port"]); ok && n == port {
-				parts = append(parts, matched{m: matchYes})
-			} else {
-				parts = append(parts, matched{m: matchNo})
-			}
+			n, _ := toInt(pn["port"])
+			parts = append(parts, rangeMatch(str(pn["protocol"]), protocol, n, n, port))
 			continue
 		}
 		if pr, ok := m["portRange"].(map[string]any); ok {
-			if !strings.EqualFold(str(pr["protocol"]), protocol) {
-				parts = append(parts, matched{m: matchNo})
-				continue
-			}
-			if port == 0 {
-				parts = append(parts, matched{m: matchCond, reason: "the rule restricts ports; give a destination port to resolve it"})
-				continue
-			}
 			start, _ := toInt(pr["start"])
 			end, _ := toInt(pr["end"])
-			if port >= start && port <= end {
-				parts = append(parts, matched{m: matchYes})
-			} else {
-				parts = append(parts, matched{m: matchNo})
-			}
+			parts = append(parts, rangeMatch(str(pr["protocol"]), protocol, start, end, port))
 		}
 	}
 	return anyOf(parts...)
