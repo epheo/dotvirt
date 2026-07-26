@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { api, Unauthorized, type VMEvent } from '$lib/api';
+	import { api, type VMEvent } from '$lib/api';
+	import { resource } from '$lib/resource.svelte';
 	import EventsTable from './EventsTable.svelte';
 	import MetricsPanel from './MetricsPanel.svelte';
 
@@ -17,30 +18,22 @@
 	// Monitor sub-rail: events + performance, mirroring the VM detail's Monitor.
 	let view = $state<'events' | 'performance'>('events');
 
-	let events = $state<VMEvent[] | null>(null);
-	let loading = $state(false);
-
-	async function load() {
-		loading = true;
-		try {
+	// Keyed on the namespace SET, not the array identity: the parent re-derives
+	// the namespaces array every inventory frame, but its CONTENT only changes
+	// on a real scope change — without this the slow /api/events call re-fires
+	// continuously.
+	const key = $derived([...namespaces].sort().join(','));
+	const evRes = resource<VMEvent[]>(
+		() => key,
+		async () => {
 			const all = await api.allEvents();
 			const set = new Set(namespaces);
-			events = all.filter((e) => !e.namespace || set.has(e.namespace));
-		} catch (e) {
-			if (e instanceof Unauthorized) return; // signed out centrally by the api layer
-			events = [];
-		} finally {
-			loading = false;
-		}
-	}
-	// Depend on a stable key, not the array identity: the parent re-derives the
-	// namespaces array every inventory frame, but its CONTENT only changes on a real
-	// scope change — without this the slow /api/events call re-fires continuously.
-	const key = $derived([...namespaces].sort().join(','));
-	$effect(() => {
-		key;
-		load();
-	});
+			return all.filter((e) => !e.namespace || set.has(e.namespace));
+		},
+		{ reset: true },
+	);
+	const events = $derived(evRes.failed ? [] : evRes.data);
+	const loading = $derived(evRes.loading);
 </script>
 
 <div class="p-4">

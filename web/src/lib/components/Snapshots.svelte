@@ -1,16 +1,13 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import { Camera, RotateCcw, Trash2 } from 'lucide-svelte';
 	import { api, Unauthorized, type Snapshot, type VM } from '$lib/api';
 	import { relativeAge } from '$lib/format';
-	import { pollWhileVisible } from '$lib/poll';
+	import { resource, type Resource } from '$lib/resource.svelte';
 	import ErrorNote from './ErrorNote.svelte';
 
 	let { vm }: { vm: VM } = $props();
 
-	let snapshots = $state<Snapshot[] | null>(null);
-	let loading = $state(false);
-	let error = $state('');
+	let actionError = $state(''); // a failed take/restore/delete, distinct from the read
 	let taking = $state(false);
 	let snapName = $state('');
 	let busy = $state<string | null>(null); // snapshot being acted on
@@ -20,46 +17,31 @@
 	// Restore needs a stopped target — KubeVirt rejects a running one.
 	const running = $derived(vm.phase === 'Running');
 
-	async function load() {
-		loading = true;
-		try {
-			snapshots = await api.snapshots(vm.namespace, vm.name);
-			error = '';
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			error = String(e);
-		} finally {
-			loading = false;
-		}
-	}
-
-	// Reload on selection change. Key on the VM identity (the live stream hands
-	// down a fresh vm each frame); untrack the load so its synchronous vm reads
-	// don't re-fire this effect per frame.
+	// Keyed on the VM identity (the live stream hands down a fresh vm each
+	// frame); polls only while a snapshot is still settling.
 	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
-	$effect(() => {
-		vmKey;
-		untrack(load);
-	});
-
-	// Poll while a snapshot is still being created so its status settles, paused
-	// while the tab is backgrounded.
+	// The explicit binding type breaks the inference cycle through the poll
+	// gate (snapRes -> poll -> pending -> snapshots -> snapRes).
+	const snapRes: Resource<Snapshot[]> = resource(
+		() => vmKey,
+		() => api.snapshots(vm.namespace, vm.name),
+		{ reset: true, poll: () => (pending ? 4000 : 0) },
+	);
+	const snapshots = $derived(snapRes.data);
+	const loading = $derived(snapRes.loading);
+	const error = $derived(actionError || snapRes.error);
 	const pending = $derived(snapshots?.some((s) => !s.readyToUse && s.phase !== 'Failed') ?? false);
-	$effect(() => {
-		if (!pending) return;
-		return pollWhileVisible(load, 4000);
-	});
 
 	async function take() {
 		taking = true;
-		error = '';
+		actionError = '';
 		try {
 			await api.takeSnapshot(vm.namespace, vm.name, snapName.trim() || undefined);
 			snapName = '';
-			await load();
+			await snapRes.refresh();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = String(e);
+			actionError = String(e);
 		} finally {
 			taking = false;
 		}
@@ -68,13 +50,13 @@
 	async function restore(name: string) {
 		armedRestore = null;
 		busy = name;
-		error = '';
+		actionError = '';
 		try {
 			await api.restoreSnapshot(vm.namespace, vm.name, name);
-			await load();
+			await snapRes.refresh();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = String(e);
+			actionError = String(e);
 		} finally {
 			busy = null;
 		}
@@ -83,13 +65,13 @@
 	async function remove(name: string) {
 		armedDelete = null;
 		busy = name;
-		error = '';
+		actionError = '';
 		try {
 			await api.deleteSnapshot(vm.namespace, vm.name, name);
-			await load();
+			await snapRes.refresh();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = String(e);
+			actionError = String(e);
 		} finally {
 			busy = null;
 		}

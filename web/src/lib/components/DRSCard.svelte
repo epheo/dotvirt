@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { api, drsThresholdLabel, type DRSView } from '$lib/api';
-	import { pollWhileVisible } from '$lib/poll';
+	import { resource } from '$lib/resource.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import Row from './Row.svelte';
 	import DRSModal from './DRSModal.svelte';
@@ -11,23 +11,13 @@
 	// GET is a pure snapshot read.
 	let { onstaged }: { onstaged?: () => void } = $props();
 
-	let view = $state<DRSView | null>(null);
-	let error = $state('');
 	let configuring = $state(false);
 	let disabling = $state(false);
 
-	async function load() {
-		try {
-			view = await api.drs();
-			error = '';
-		} catch (e) {
-			error = String(e);
-		}
-	}
-	$effect(() => {
-		load();
-		return pollWhileVisible(load, 30_000);
-	});
+	const drs = resource<DRSView>(() => '', () => api.drs(), { poll: 30_000 });
+	const view = $derived(drs.data);
+	let actionError = $state(''); // a failed disable, distinct from the read's failure
+	const error = $derived(actionError || drs.error);
 
 	// One vCenter-style status line for the committed state.
 	const status = $derived.by(() => {
@@ -67,13 +57,13 @@
 
 	async function disable() {
 		disabling = true;
-		error = '';
+		actionError = '';
 		try {
 			await api.disableDRS();
 			onstaged?.();
-			await load();
+			await drs.refresh();
 		} catch (e) {
-			error = String(e);
+			actionError = String(e);
 		} finally {
 			disabling = false;
 		}
@@ -81,7 +71,7 @@
 
 	function staged() {
 		onstaged?.();
-		load();
+		drs.refresh();
 	}
 </script>
 

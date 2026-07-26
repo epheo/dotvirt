@@ -10,7 +10,7 @@
 		type VMEvent,
 	} from '$lib/api';
 	import { duration } from '$lib/format';
-	import { pollWhileVisible } from '$lib/poll';
+	import { resource } from '$lib/resource.svelte';
 	import { persisted } from '$lib/state/persisted.svelte';
 	import { severityTone, taskTone, TONE_TEXT } from '$lib/status';
 	import GitOpsStepper from './GitOpsStepper.svelte';
@@ -43,17 +43,11 @@
 	let events = $state<VMEvent[] | null>(null);
 	let eventsLoading = $state(false);
 
-	// Firing Prometheus alerts (vCenter's Triggered Alarms). Polled slowly even
-	// with the tab closed so the header badge stays honest; the read is one
-	// cached instant query server-side. null = endpoint unavailable (metrics off).
-	let firing = $state<Alert[] | null>(null);
-	function loadAlarms() {
-		api
-			.alarms()
-			.then((a) => (firing = a))
-			.catch(() => (firing = null));
-	}
-	$effect(() => pollWhileVisible(loadAlarms, 30000));
+	// Firing Prometheus alerts (vCenter's Triggered Alarms). Polled slowly; the
+	// read is one cached instant query server-side. null = endpoint unavailable
+	// (metrics off), mapped from the failed flag.
+	const alarmsRes = resource<Alert[]>(() => '', () => api.alarms(), { poll: 30000 });
+	const firing = $derived(alarmsRes.failed ? null : alarmsRes.data);
 
 	// Drag-to-resize the dock height. Persisted on release; restored clamped to
 	// the current viewport so a height stored from a taller window can't swallow
@@ -94,7 +88,7 @@
 		tab = t;
 		openPane = true;
 		if (t === 'events') loadEvents(); // refresh on each open
-		if (t === 'alarms') loadAlarms();
+		if (t === 'alarms') alarmsRes.refresh();
 	}
 
 	type Task = {

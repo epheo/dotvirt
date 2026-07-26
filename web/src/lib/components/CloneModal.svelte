@@ -1,9 +1,8 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import { Copy } from 'lucide-svelte';
 	import { api, Unauthorized, type Clone, type VM } from '$lib/api';
 	import { relativeAge } from '$lib/format';
-	import { pollWhileVisible } from '$lib/poll';
+	import { resource, type Resource } from '$lib/resource.svelte';
 	import ErrorNote from './ErrorNote.svelte';
 	import FormField from './FormField.svelte';
 	import Modal from './Modal.svelte';
@@ -31,38 +30,25 @@
 	let target = $state(vm.name + '-clone');
 	let busy = $state(false);
 	let error = $state('');
-	let clones = $state<Clone[] | null>(null);
 
 	// RFC 1123 label, the same constraint the API server enforces on VM names.
 	const valid = $derived(
 		/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(target) && target.length <= 63 && target !== vm.name,
 	);
 
-	async function load() {
-		try {
-			clones = await api.clones(vm.namespace, vm.name);
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			// Listing may fail (e.g. RBAC grants create only); keep the form usable.
-			clones = clones ?? [];
-		}
-	}
-
-	// Load once on mount (untracked: the host hands down a fresh vm each frame,
-	// but this modal acts on the one it opened for).
-	$effect(() => {
-		untrack(load);
-	});
-
-	// Poll while any clone is still progressing so phases settle live (a clone
-	// with no phase yet counts as in progress), paused while backgrounded.
+	// Constant key: the modal acts on the VM it opened for. Polls only while a
+	// clone is still progressing (no phase yet counts as in progress). Listing
+	// may fail (e.g. RBAC grants create only); failed maps to [] to keep the
+	// form usable. Explicit binding type: the poll gate reads back through it.
+	const clonesRes: Resource<Clone[]> = resource(
+		() => '',
+		() => api.clones(vm.namespace, vm.name),
+		{ poll: () => (active ? 3000 : 0) },
+	);
+	const clones = $derived(clonesRes.data ?? (clonesRes.failed ? [] : null));
 	const active = $derived(
 		clones?.some((c) => c.phase !== 'Succeeded' && c.phase !== 'Failed') ?? false,
 	);
-	$effect(() => {
-		if (!active) return;
-		return pollWhileVisible(load, 3000);
-	});
 
 	async function create() {
 		busy = true;
@@ -70,7 +56,7 @@
 		try {
 			await api.createClone(vm.namespace, vm.name, target.trim());
 			ondone?.(true);
-			await load();
+			await clonesRes.refresh();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
 			error = String(e);

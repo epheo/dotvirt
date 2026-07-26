@@ -1,7 +1,6 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { api, Unauthorized, type ClusterSummary } from '$lib/api';
-	import { pollWhileVisible } from '$lib/poll';
+	import { api, type ClusterSummary } from '$lib/api';
+	import { resource } from '$lib/resource.svelte';
 	import HostBalance from './HostBalance.svelte';
 	import HostCapacityCard from './HostCapacityCard.svelte';
 	import IssuesCard from './IssuesCard.svelte';
@@ -17,32 +16,14 @@
 		onselect?: (namespace: string, name: string) => void;
 	} = $props();
 
-	let data = $state<ClusterSummary | null>(null);
-
-	let loading = $state(false);
-	let failed = $state(false);
-
-	async function load() {
-		if (!data) loading = true; // spinner only on first load, not on a poll refresh
-		try {
-			data = await api.clusterSummary(scope);
-			failed = false;
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			failed = true;
-		} finally {
-			loading = false;
-		}
-	}
-	// Re-fetch when the container scope changes, keyed on a stable string so the
-	// reload fires on real scope changes only (untrack the load's scope reads).
+	// Keyed on a stable scope string; old data stays up while a scope switch loads.
 	const scopeKey = $derived(`${scope.project ?? ''}|${scope.namespace ?? ''}|${scope.node ?? ''}`);
-	$effect(() => {
-		scopeKey;
-		untrack(load);
+	const summary = resource<ClusterSummary>(() => scopeKey, () => api.clusterSummary(scope), {
+		poll: 30000,
 	});
-	// Refresh on a cadence, paused while the tab is backgrounded.
-	$effect(() => pollWhileVisible(load, 30000));
+	const data = $derived(summary.data);
+	const loading = $derived(summary.loading);
+	const failed = $derived(summary.failed);
 
 	// KubeVirt's phase label is lowercase ("running"); order known phases, capitalize
 	// for display, and tolerate any others.

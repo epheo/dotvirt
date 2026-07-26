@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { api, Unauthorized, type EffectivePolicy, type PolicyBinding } from '$lib/api';
+	import { api, type EffectivePolicy, type PolicyBinding } from '$lib/api';
+	import { resource } from '$lib/resource.svelte';
 	import { friendlyError } from '$lib/format';
 	import PolicyRuleTable from './PolicyRuleTable.svelte';
 	import SyncBadge from './SyncBadge.svelte';
@@ -11,24 +12,15 @@
 	// namespace scope can't, so those bindings arrive marked conditional.
 	let { namespace, vm }: { namespace: string; vm?: string } = $props();
 
-	let eff = $state<EffectivePolicy | null>(null);
-	let error = $state('');
-
-	$effect(() => {
-		const ns = namespace;
-		const v = vm;
-		eff = null;
-		error = '';
-		(v ? api.vmPolicy(ns, v) : api.namespacePolicy(ns))
-			.then((e) => {
-				// Drop a stale response if the scope moved while it was in flight.
-				if (ns === namespace && v === vm) eff = e;
-			})
-			.catch((e) => {
-				if (e instanceof Unauthorized) return;
-				if (ns === namespace && v === vm) error = friendlyError(e);
-			});
-	});
+	// Keyed on the scope; resource's stale guard drops a response once it moves.
+	const key = $derived(`${namespace}/${vm ?? ''}`);
+	const effRes = resource<EffectivePolicy>(
+		() => key,
+		() => (vm ? api.vmPolicy(namespace, vm) : api.namespacePolicy(namespace)),
+		{ reset: true },
+	);
+	const eff = $derived(effRes.data);
+	const error = $derived(effRes.failed ? friendlyError(effRes.error) : '');
 
 	const keyOf = (b: PolicyBinding) =>
 		`${b.policy.backing}:${b.policy.namespace ?? ''}:${b.policy.name}`;

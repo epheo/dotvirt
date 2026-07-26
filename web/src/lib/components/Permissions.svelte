@@ -3,25 +3,21 @@
 	// Permissions): the caller's effective capabilities per namespace, from a
 	// SelfSubjectRulesReview under their own token. Read-only — dotvirt grants
 	// nothing; RBAC is managed by the platform.
-	import { untrack } from 'svelte';
 	import { Check, X } from 'lucide-svelte';
 	import { api, type Permissions } from '$lib/api';
+	import { resource } from '$lib/resource.svelte';
 
 	let { namespaces }: { namespaces: string[] } = $props();
 
-	let data = $state<Permissions[] | null>(null);
-	let error = $state('');
-
 	// Key on the namespace SET so per-frame array identities don't refetch.
 	const key = $derived([...namespaces].sort().join(' '));
-	$effect(() => {
-		key;
-		data = null;
-		error = '';
-		Promise.all(untrack(() => [...namespaces]).map((ns) => api.permissions(ns)))
-			.then((d) => (data = d))
-			.catch((e) => (error = String(e)));
-	});
+	const permsRes = resource<Permissions[]>(
+		() => key,
+		() => Promise.all([...namespaces].map((ns) => api.permissions(ns))),
+		{ reset: true },
+	);
+	const data = $derived(permsRes.data);
+	const error = $derived(permsRes.error);
 </script>
 
 {#if error}
