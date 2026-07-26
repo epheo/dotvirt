@@ -17,6 +17,8 @@ import (
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/controller"
+	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var scheme = runtime.NewScheme()
@@ -46,6 +48,13 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "dotvirt-operator.dotvirt.io",
+		// ConfigMaps are read point-wise (the default ingress CA, the Argo TLS trust
+		// merge), never watched: the default cache-backed client would spin a
+		// CLUSTER-WIDE ConfigMap informer on first Get, which both exceeds the
+		// operator's deliberately narrow RBAC (get, no list/watch) and BLOCKS that Get
+		// forever when the informer can't sync — wedging the whole reconcile loop,
+		// including deletion processing.
+		Client: client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}}}},
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
