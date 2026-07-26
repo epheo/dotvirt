@@ -20,7 +20,7 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 	if err := requireRepo(proj); err != nil {
 		return model.DraftView{}, err
 	}
-	edit := editFromRequest(req)
+	edit := req.VMEdit
 	if edit.Empty() {
 		return model.DraftView{}, fmt.Errorf("%w: no fields to edit", model.ErrInvalid)
 	}

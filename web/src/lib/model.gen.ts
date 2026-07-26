@@ -231,30 +231,78 @@ export interface Change {
   to?: string;
 }
 /**
+ * VMEdit is a set of field changes to apply to a VirtualMachine manifest. Nil/
+ * empty fields are left untouched, so the UI can change just one thing. One
+ * definition serves the API request body, the persisted draft store, and the
+ * manifest editor.
+ */
+export interface VMEdit {
+  power?: string; // "On" | "Off" -> runStrategy Always/Halted (or legacy running bool)
+  cpuCores?: number /* int */;
+  memory?: string; // e.g. "4Gi"
+  instancetype?: string; // spec.instancetype.name
+  preference?: string; // spec.preference.name
+  /**
+   * Sizing selects which representation owns CPU/memory: "instancetype" (an
+   * instancetype reference; inline domain.cpu/memory must be absent) or "custom"
+   * (inline domain.cpu/memory; no instancetype). KubeVirt rejects a VM that has
+   * both, so the two are mutually exclusive. Nil leaves the representation as-is.
+   */
+  sizing?: string;
+  /**
+   * Label edits: keys to set (upsert) and keys to remove.
+   */
+  setLabels?: { [key: string]: string};
+  removeLabels?: string[];
+  /**
+   * DRSExclude toggles the descheduler's prefer-no-eviction annotation on the
+   * VM template: true keeps the VM live-migratable for maintenance while the
+   * automatic load balancer (DRS) leaves it alone; false removes the
+   * annotation. Nil leaves it untouched.
+   */
+  drsExclude?: boolean;
+  /**
+   * EvictionStrategy sets spec.template.spec.evictionStrategy (LiveMigrate,
+   * None, ...); the empty string removes it, falling back to the cluster
+   * default. Nil leaves it untouched.
+   */
+  evictionStrategy?: string;
+  /**
+   * Disk/network edits on the VM template.
+   */
+  addDisks?: DiskAdd[];
+  removeDisks?: string[]; // disk names to remove
+  addNetworks?: NetworkAdd[];
+  removeNetworks?: string[]; // network/interface names to remove
+  /**
+   * MigrateVolumes moves disks to other storage classes (storage live
+   * migration): each entry replaces the disk's DataVolume template with a
+   * blank one on the target class, and the edit sets
+   * spec.updateVolumesStrategy: Migration so KubeVirt live-copies the data
+   * on merge. Reverting the commit is the migration cancel.
+   */
+  migrateVolumes?: VolumeMigration[];
+  /**
+   * Pin replaces the VM's host pinning with a required node-affinity In-list
+   * on kubernetes.io/hostname; an empty list removes it. Nil leaves it alone.
+   */
+  pin?: string[];
+  /**
+   * AddGroups/RemoveGroups edit named placement groups: a membership label
+   * on the template plus a pod (anti-)affinity term against that label
+   * (manifest/scheduling.go holds the encoding). AddGroups upserts, so
+   * re-adding a group changes its mode/strictness.
+   */
+  addGroups?: PlacementGroup[];
+  removeGroups?: string[];
+}
+/**
  * EditRequest is the body of an edit: which VM source file, and which fields to
- * change. Power is "On"/"Off"; nil fields are left unchanged.
+ * change. Embedding flattens VMEdit's fields into the request body.
  */
 export interface EditRequest {
   sourceFile: string;
-  power?: string;
-  cpuCores?: number /* int */;
-  memory?: string;
-  instancetype?: string;
-  preference?: string;
-  sizing?: string; // "instancetype" | "custom" — which representation owns CPU/memory
-  setLabels?: { [key: string]: string};
-  removeLabels?: string[];
-  drsExclude?: boolean; // toggle the descheduler prefer-no-eviction annotation
-  evictionStrategy?: string; // "" removes (cluster default)
-  addDisks?: DiskAdd[];
-  removeDisks?: string[];
-  addNetworks?: NetworkAdd[];
-  removeNetworks?: string[];
-  migrateVolumes?: VolumeMigration[]; // storage live migration
-  pin?: string[]; // replace host pinning; empty list removes it
-  addGroups?: PlacementGroup[];
-  removeGroups?: string[];
-  message?: string; // optional commit message; auto-generated when empty
+  VMEdit: VMEdit;
 }
 /**
  * DiskAdd / NetworkAdd are the add-device entries in an EditRequest body.

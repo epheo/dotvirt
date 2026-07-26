@@ -60,30 +60,6 @@ func shortHash(user, project string) string {
 	return hex.EncodeToString(sum[:])[:10]
 }
 
-// editFromRequest maps a model.EditRequest into a manifest.VMEdit.
-func editFromRequest(req model.EditRequest) manifest.VMEdit {
-	return manifest.VMEdit{
-		Power:            req.Power,
-		CPUCores:         req.CPUCores,
-		Memory:           req.Memory,
-		Instancetype:     req.Instancetype,
-		Preference:       req.Preference,
-		Sizing:           req.Sizing,
-		SetLabels:        req.SetLabels,
-		RemoveLabels:     req.RemoveLabels,
-		DRSExclude:       req.DRSExclude,
-		EvictionStrategy: req.EvictionStrategy,
-		AddDisks:         req.AddDisks,
-		RemoveDisks:      req.RemoveDisks,
-		AddNetworks:      req.AddNetworks,
-		RemoveNetworks:   req.RemoveNetworks,
-		MigrateVolumes:   req.MigrateVolumes,
-		Pin:              req.Pin,
-		AddGroups:        req.AddGroups,
-		RemoveGroups:     req.RemoveGroups,
-	}
-}
-
 // changesForCreate renders a new-VM spec as "add" semantic items for the draft
 // preview, without showing YAML.
 func changesForCreate(s vmgen.Spec) []model.Change {
