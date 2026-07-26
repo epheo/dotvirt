@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { X } from 'lucide-svelte';
 	import { api, type CreateVMRequest, type Network, type Options } from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
 	import Modal from './Modal.svelte';
 	import Wizard from './Wizard.svelte';
@@ -94,7 +95,7 @@
 					o.instancetypes?.[0]?.name ??
 					'';
 			})
-			.catch((e) => (loadError = String(e)));
+			.catch((e) => (loadError = friendlyError(e)));
 	});
 
 	// A VM needs at least one NIC: the primary, a secondary, or both.
@@ -196,7 +197,7 @@
 			onstaged();
 			onclose();
 		} catch (e) {
-			error = String(e);
+			error = friendlyError(e);
 		} finally {
 			submitting = false;
 		}

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { api, Unauthorized, type Options, type Template } from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import { ui } from '$lib/state/ui.svelte';
 	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
 	import ErrorNote from '$lib/components/ErrorNote.svelte';
@@ -42,14 +43,14 @@
 			.then((o) => (options = o))
 			.catch((e) => {
 				if (e instanceof Unauthorized) return;
-				error = String(e);
+				error = friendlyError(e);
 			});
 		api
 			.templates()
 			.then((t) => (templates = t.templates))
 			.catch((e) => {
 				if (e instanceof Unauthorized) return;
-				error = String(e);
+				error = friendlyError(e);
 			});
 	});
 

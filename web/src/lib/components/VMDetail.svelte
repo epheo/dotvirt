@@ -246,7 +246,7 @@
 			onstaged?.();
 		} catch (e) {
 			if (e instanceof Unauthorized) return; // signed out centrally; skip the error banner
-			deleteErr = String(e);
+			deleteErr = friendlyError(e);
 		} finally {
 			deleteBusy = false;
 		}

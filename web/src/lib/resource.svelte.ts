@@ -1,5 +1,6 @@
 import { untrack } from 'svelte';
 import { Unauthorized } from './api';
+import { friendlyError } from './format';
 import { pollWhileVisible } from './poll';
 
 // resource owns the keyed-fetch idiom shared by the detail and metrics panels:
@@ -42,7 +43,7 @@ export function resource<T>(
 		} catch (e) {
 			if (e instanceof Unauthorized) return; // signs out centrally via the api layer
 			if (key() !== k) return;
-			error = String(e);
+			error = friendlyError(e);
 		} finally {
 			if (key() === k) loading = false;
 		}

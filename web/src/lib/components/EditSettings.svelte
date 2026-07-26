@@ -9,6 +9,7 @@
 		type Options,
 		type VM,
 	} from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import { buildEditRequest, seedEditForm } from '$lib/editform';
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
 	import { validName, NAME_HINT } from '$lib/validate';
@@ -225,7 +226,7 @@
 			onstaged();
 			onclose();
 		} catch (e) {
-			error = String(e);
+			error = friendlyError(e);
 		} finally {
 			saving = false;
 		}

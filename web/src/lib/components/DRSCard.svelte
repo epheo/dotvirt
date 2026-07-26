@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api, drsThresholdLabel, type DRSView } from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import { resource } from '$lib/resource.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import Row from './Row.svelte';
@@ -14,7 +15,11 @@
 	let configuring = $state(false);
 	let disabling = $state(false);
 
-	const drs = resource<DRSView>(() => '', () => api.drs(), { poll: 30_000 });
+	const drs = resource<DRSView>(
+		() => '',
+		() => api.drs(),
+		{ poll: 30_000 },
+	);
 	const view = $derived(drs.data);
 	let actionError = $state(''); // a failed disable, distinct from the read's failure
 	const error = $derived(actionError || drs.error);
@@ -63,7 +68,7 @@
 			onstaged?.();
 			await drs.refresh();
 		} catch (e) {
-			actionError = String(e);
+			actionError = friendlyError(e);
 		} finally {
 			disabling = false;
 		}

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { CircleCheck } from 'lucide-svelte';
-	import { deriveIssues, issuesInScope } from '$lib/issues';
+	import { issuesInScope } from '$lib/issues';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import StatusDot from './StatusDot.svelte';
 
@@ -10,7 +10,7 @@
 	// clean so "no issues" is a stated fact, not an absence.
 	let { scope = {} }: { scope?: { project?: string; namespace?: string } } = $props();
 
-	const issues = $derived(issuesInScope(deriveIssues(inventory.inventory), scope));
+	const issues = $derived(issuesInScope(inventory.issues, scope));
 	const MAX = 6;
 </script>
 

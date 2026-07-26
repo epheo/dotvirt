@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Ban, CheckCircle2, LogOut, MoveRight, Wrench } from 'lucide-svelte';
 	import { api, Unauthorized, type NodeInfo, type VM } from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import { resource } from '$lib/resource.svelte';
 
 	// Host maintenance (vCenter's Enter/Exit Maintenance Mode): entering flips
@@ -30,7 +31,11 @@
 	);
 
 	// no node-read RBAC → panel stays hidden (failed maps to null)
-	const infoRes = resource<NodeInfo>(() => node, () => api.nodeInfo(node), { reset: true });
+	const infoRes = resource<NodeInfo>(
+		() => node,
+		() => api.nodeInfo(node),
+		{ reset: true },
+	);
 	const info = $derived(infoRes.failed ? null : infoRes.data);
 	const entering = $derived(!!info?.maintenance && running.length > 0);
 
@@ -45,7 +50,7 @@
 			ok = true;
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			msg = String(e);
+			msg = friendlyError(e);
 			ok = false;
 		} finally {
 			busy = false;
@@ -82,7 +87,7 @@
 			msg = `Entering maintenance mode${sweep}.`;
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			msg = String(e);
+			msg = friendlyError(e);
 			ok = false;
 		} finally {
 			busy = false;
@@ -106,7 +111,7 @@
 			ok = true;
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			msg = String(e);
+			msg = friendlyError(e);
 			ok = false;
 		} finally {
 			busy = false;

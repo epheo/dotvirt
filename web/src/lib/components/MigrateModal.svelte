@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { api, Unauthorized, type NodeTarget, type VM } from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
@@ -61,7 +62,7 @@
 			onclose();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = String(e);
+			error = friendlyError(e);
 			ondone?.(false);
 		} finally {
 			busy = false;

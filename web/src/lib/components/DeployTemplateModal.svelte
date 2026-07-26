@@ -2,6 +2,8 @@
 	import { untrack } from 'svelte';
 	import { BookCopy } from 'lucide-svelte';
 	import { api, Unauthorized, type Template } from '$lib/api';
+	import { friendlyError } from '$lib/format';
+	import { validName } from '$lib/validate';
 	import FormField from './FormField.svelte';
 	import Wizard from './Wizard.svelte';
 
@@ -48,7 +50,7 @@
 				})
 				.catch((e) => {
 					if (e instanceof Unauthorized) return;
-					loadError = String(e);
+					loadError = friendlyError(e);
 				}),
 		);
 	});
@@ -93,7 +95,6 @@
 		nameParam?.generate && nameParam.from ? exampleFrom(nameParam.from) : '',
 	);
 
-	const validName = (s: string) => /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(s) && s.length <= 63;
 	const nameOK = $derived(
 		name === '' ? !!(nameParam?.value || nameParam?.generate) : validName(name),
 	);
@@ -125,7 +126,7 @@
 			onclose();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = String(e);
+			error = friendlyError(e);
 		} finally {
 			busy = false;
 		}

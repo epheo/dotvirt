@@ -2,7 +2,7 @@
 	import { page } from '$app/state';
 	import { Folder, Layers, LayoutGrid, TriangleAlert } from 'lucide-svelte';
 	import type { Project, ProjectNamespace } from '$lib/api';
-	import { deriveIssues, issueCountByProject } from '$lib/issues';
+	import { issueCountByProject } from '$lib/issues';
 	import { hrefForScope, scopeFromPath } from '$lib/nav';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { persisted } from '$lib/state/persisted.svelte';
@@ -44,7 +44,7 @@
 	const vmCount = (p: Project) => p.namespaces.reduce((n, ns) => n + ns.vms.length, 0);
 
 	// Standing problems per project, for the attention badge on the row.
-	const issueCounts = $derived(issueCountByProject(deriveIssues(inventory.inventory)));
+	const issueCounts = $derived(issueCountByProject(inventory.issues));
 
 	function ctxContainer(
 		e: MouseEvent,

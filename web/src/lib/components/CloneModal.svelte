@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { Copy } from 'lucide-svelte';
 	import { api, Unauthorized, type Clone, type VM } from '$lib/api';
-	import { relativeAge } from '$lib/format';
+	import { friendlyError, relativeAge } from '$lib/format';
 	import { resource, type Resource } from '$lib/resource.svelte';
 	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
+	import { validName } from '$lib/validate';
 	import ErrorNote from './ErrorNote.svelte';
 	import FormField from './FormField.svelte';
 	import Modal from './Modal.svelte';
@@ -33,9 +34,7 @@
 	let error = $state('');
 
 	// RFC 1123 label, the same constraint the API server enforces on VM names.
-	const valid = $derived(
-		/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(target) && target.length <= 63 && target !== vm.name,
-	);
+	const valid = $derived(validName(target) && target !== vm.name);
 
 	// Constant key: the modal acts on the VM it opened for. Polls only while a
 	// clone is still progressing (no phase yet counts as in progress). Listing
@@ -60,7 +59,7 @@
 			await clonesRes.refresh();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = String(e);
+			error = friendlyError(e);
 			ondone?.(false);
 		} finally {
 			busy = false;

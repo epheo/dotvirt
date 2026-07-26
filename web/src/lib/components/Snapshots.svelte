@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Camera, RotateCcw, Trash2 } from 'lucide-svelte';
 	import { api, Unauthorized, type Snapshot, type VM } from '$lib/api';
-	import { relativeAge } from '$lib/format';
+	import { friendlyError, relativeAge } from '$lib/format';
 	import { resource, type Resource } from '$lib/resource.svelte';
 	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
 	import ErrorNote from './ErrorNote.svelte';
@@ -44,7 +44,7 @@
 			await snapRes.refresh();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			actionError = String(e);
+			actionError = friendlyError(e);
 		} finally {
 			taking = false;
 		}
@@ -59,7 +59,7 @@
 			await snapRes.refresh();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			actionError = String(e);
+			actionError = friendlyError(e);
 		} finally {
 			busy = null;
 		}
@@ -74,7 +74,7 @@
 			await snapRes.refresh();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			actionError = String(e);
+			actionError = friendlyError(e);
 		} finally {
 			busy = null;
 		}

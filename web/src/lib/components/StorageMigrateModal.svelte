@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { api, Unauthorized, type Options, type VM } from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
@@ -36,7 +37,7 @@
 			options = await api.options();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = String(e);
+			error = friendlyError(e);
 		}
 	}
 	$effect(() => {
@@ -66,7 +67,7 @@
 			onclose();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = String(e);
+			error = friendlyError(e);
 		} finally {
 			busy = false;
 		}

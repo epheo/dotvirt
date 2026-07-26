@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { ChevronDown, ChevronRight, Folder, TriangleAlert } from 'lucide-svelte';
 	import { api, type DraftView, type ProposeResult } from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import { draftKindTone, TONE_PILL } from '$lib/status';
 	import ChangeList from './ChangeList.svelte';
 	import ErrorNote from './ErrorNote.svelte';
@@ -58,7 +59,7 @@
 			await api.unstage(ns, name, resource, project);
 			onchanged();
 		} catch (e) {
-			error = String(e);
+			error = friendlyError(e);
 		} finally {
 			unstaging = null;
 		}
@@ -72,7 +73,7 @@
 			await api.discardDraft(project);
 			onchanged();
 		} catch (e) {
-			error = String(e);
+			error = friendlyError(e);
 		} finally {
 			discarding = false;
 		}
@@ -92,7 +93,7 @@
 		} catch (e) {
 			// The push may have landed before the error (e.g. a gateway timeout on
 			// the PR step) — re-read the summary so the lane reflects server truth.
-			error = String(e);
+			error = friendlyError(e);
 			onchanged();
 		} finally {
 			proposing = false;

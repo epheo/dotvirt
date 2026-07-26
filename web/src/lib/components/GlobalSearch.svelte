@@ -8,6 +8,7 @@
 	import { Search } from 'lucide-svelte';
 	import type { Inventory, Network, VM } from '$lib/api';
 	import { vmStorageKeys, NO_STORAGE } from '$lib/lenses';
+	import { inventory as inventoryStore } from '$lib/state/inventory.svelte';
 
 	export type SearchHit =
 		| { kind: 'vm'; vm: VM; hint: string }
@@ -48,7 +49,7 @@
 		// label:key=value / label:key — VM-label search only.
 		const labelQ = q.startsWith('label:') ? q.slice('label:'.length) : null;
 
-		const vms = inventory.projects.flatMap((p) => p.namespaces.flatMap((n) => n.vms));
+		const vms = inventoryStore.allVMs;
 		for (const vm of vms) {
 			if (out.length >= 8) break;
 			const labels = Object.entries(vm.labels ?? {});

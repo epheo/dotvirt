@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Check, Upload } from 'lucide-svelte';
 	import { api, Unauthorized, type Options } from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import { validName, NAME_HINT } from '$lib/validate';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
@@ -133,7 +134,7 @@
 			ondone?.();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = String(e);
+			error = friendlyError(e);
 			stage = 'error';
 		}
 	}

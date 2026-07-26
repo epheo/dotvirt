@@ -1,4 +1,5 @@
 import type { Inventory, NetworkInventory, PolicyInventory, TaskEntry, VM } from '$lib/api';
+import { deriveIssues } from '$lib/issues';
 
 // The live cluster read layer: the WS inventory snapshot plus the once-per-
 // session networking inventory (GET /api/networks). Everything else the UI
@@ -33,6 +34,9 @@ class InventoryStore {
 			: [],
 	);
 	readonly vmCount = $derived(this.allVMs.length);
+	// Standing problems (the issues plane), derived once per frame for the
+	// header bell, the tree badges and the Summary card.
+	readonly issues = $derived(deriveIssues(this.inventory));
 	// Open PRs across the user's projects ride the live inventory stream, so a PR
 	// merged anywhere repaints the dock + Changes pane with no manual refresh.
 	readonly proposals = $derived(this.inventory?.proposals ?? []);
