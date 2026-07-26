@@ -149,7 +149,9 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.OAuthClientSecret, "oauth-client-secret", os.Getenv("DOTVIRT_OAUTH_CLIENT_SECRET"), "secret of the OpenShift OAuthClient")
 	fs.StringVar(&c.OAuthCA, "oauth-ca", os.Getenv("DOTVIRT_OAUTH_CA"), "PEM CA bundle path to trust for the oauth token endpoint (e.g. the ingress CA)")
 
-	fs.BoolVar(&c.ArgoEnabled, "argo", envBool("DOTVIRT_ARGO", false), "enable ArgoCD drift reads")
+	// Default on: ArgoCD is the normal deployment shape. The off switch stays for
+	// dev/BYO runs without Argo, whose Application reflector would error-loop.
+	fs.BoolVar(&c.ArgoEnabled, "argo", envBool("DOTVIRT_ARGO", true), "enable ArgoCD drift reads (set -argo=false on clusters without ArgoCD)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err

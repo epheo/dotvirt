@@ -134,11 +134,7 @@ func run() error {
 	var argoSnapshot *argo.Snapshot
 	var resyncer changeset.Resyncer
 	if cfg.ArgoEnabled {
-		argoFactory, err := argo.NewFactory(cfg.Kubeconfig)
-		if err != nil {
-			return err
-		}
-		saArgo, err := argoFactory.SA()
+		saArgo, err := argo.NewSAClient(cfg.Kubeconfig)
 		if err != nil {
 			return err
 		}
