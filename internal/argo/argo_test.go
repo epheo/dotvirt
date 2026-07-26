@@ -269,4 +269,3 @@ func TestAppSyncCleanAppHasNoError(t *testing.T) {
 		t.Errorf("clean app carries SyncError %q", got.SyncError)
 	}
 }
-

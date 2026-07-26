@@ -164,6 +164,7 @@ func TestObjectDriftGen(t *testing.T) {
 		t.Errorf("gen did not bump on a segment drift change: %d -> %d", gen, got)
 	}
 }
+
 // The own app is not a claim (it survives a lost repo while git declares
 // nothing); every other app is, under each tracking-id identity.
 func TestForeignAppsExcludesOwnRepo(t *testing.T) {

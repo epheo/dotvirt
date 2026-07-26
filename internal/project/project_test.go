@@ -15,7 +15,9 @@ func nsInfo(name, project, repo string) Namespace {
 	return n
 }
 
-func resolver() *Resolver { return NewResolver("dotvirt.io/project", "dotvirt.io/repo", "https://forge.example") }
+func resolver() *Resolver {
+	return NewResolver("dotvirt.io/project", "dotvirt.io/repo", "https://forge.example")
+}
 
 func TestResolveGroupsByProject(t *testing.T) {
 	infos := resolver().Resolve([]Namespace{
