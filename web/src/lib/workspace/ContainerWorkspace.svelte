@@ -14,6 +14,7 @@
 	import ContainerMonitor from '$lib/components/ContainerMonitor.svelte';
 	import EffectivePolicyPanel from '$lib/components/EffectivePolicyPanel.svelte';
 	import PendingBanner from '$lib/components/PendingBanner.svelte';
+	import RepoBanner from '$lib/components/RepoBanner.svelte';
 	import Permissions from '$lib/components/Permissions.svelte';
 	import TabBar from '$lib/components/TabBar.svelte';
 	import VMTable from '$lib/components/VMTable.svelte';
@@ -202,6 +203,7 @@
 		<StorageClassSummary storageClass={scope.storageClass} vms={scopedVMs} />
 	{:else}
 		{#if scope.kind === 'project' || scope.kind === 'namespace'}
+			<RepoBanner project={scope.project} />
 			<PendingBanner project={scope.project} />
 		{/if}
 		<div class="min-h-0 flex-1 overflow-y-auto">
