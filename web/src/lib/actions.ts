@@ -55,6 +55,26 @@ export async function runRuntimeAction(a: VMAction, vm: VM): Promise<void> {
 	}
 }
 
+// adoptVM stages a cluster-only VM's live state into the draft, with the one
+// adopt toast, so wording cannot drift between the menus that trigger it.
+// onstaged runs before the success toast so callers refresh their view first.
+export async function adoptVM(
+	vm: { namespace: string; name: string },
+	opts?: { onstaged?: () => void | Promise<void> },
+): Promise<void> {
+	try {
+		await api.adopt(vm.namespace, vm.name);
+		await opts?.onstaged?.();
+		ui.showToast(`${vm.name} staged into Changes - open a PR to adopt it into git.`, {
+			kind: 'success',
+			action: { label: 'Review & propose', run: () => (ui.changesOpen = true) },
+		});
+	} catch (e) {
+		if (e instanceof Unauthorized) return; // signed out centrally; skip the error toast
+		ui.showToast(friendlyError(e), { kind: 'error' });
+	}
+}
+
 const running = (vm: VM) => vm.phase === 'Running';
 const paused = (vm: VM) => !!vm.paused;
 const always = () => true;

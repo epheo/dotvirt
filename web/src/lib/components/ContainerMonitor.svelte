@@ -3,6 +3,7 @@
 	import { resource } from '$lib/resource.svelte';
 	import EventsTable from './EventsTable.svelte';
 	import MetricsPanel from './MetricsPanel.svelte';
+	import TabBar from './TabBar.svelte';
 
 	let {
 		namespaces,
@@ -37,18 +38,15 @@
 </script>
 
 <div class="p-4">
-	<div class="mb-3 flex gap-1 border-b border-line text-sm">
-		{#each ['events', 'performance'] as const as v (v)}
-			<button
-				class="border-b-2 px-3 py-1 capitalize {view === v
-					? 'border-accent text-accent-ink'
-					: 'border-transparent text-ink-muted hover:text-ink-soft'}"
-				onclick={() => (view = v)}
-			>
-				{v}
-			</button>
-		{/each}
-	</div>
+	<TabBar
+		class="mb-3 border-b border-line"
+		tabs={[
+			{ id: 'events', label: 'Events' },
+			{ id: 'performance', label: 'Performance' },
+		]}
+		active={view}
+		onchange={(v) => (view = v as typeof view)}
+	/>
 	{#if view === 'performance'}
 		{#key `${scope.project ?? ''}|${scope.namespace ?? ''}|${scope.node ?? ''}`}
 			<MetricsPanel
