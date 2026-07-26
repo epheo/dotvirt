@@ -470,3 +470,29 @@ func TestEnsureForgeTLSTrustGates(t *testing.T) {
 		t.Errorf("no ConfigMap should be created for a BYO forge")
 	}
 }
+
+// The trust anchors give a zero-config install VERIFIED TLS: the ingress CA is
+// copied in-namespace (converged; it rotates) and the service-CA ConfigMap carries
+// the injection annotation. Best-effort and OpenShift-only by design.
+func TestEnsureTrustAnchors(t *testing.T) {
+	dv := testCR()
+	src := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "default-ingress-cert", Namespace: "openshift-config-managed"},
+		Data:       map[string]string{"ca-bundle.crt": "PEM"},
+	}
+	c := testBuilder(t).WithObjects(dv, src).Build()
+	r := newReconciler(c, depsOK)
+	r.Platform = platform.OpenShift
+
+	r.ensureTrustAnchors(context.Background(), dv)
+
+	var ca corev1.ConfigMap
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: dv.Namespace, Name: install.IngressCAConfigMap}, &ca); err != nil || ca.Data["ca-bundle.crt"] != "PEM" {
+		t.Fatalf("ingress CA not copied: %v %v", err, ca.Data)
+	}
+	var sc corev1.ConfigMap
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: dv.Namespace, Name: install.ServiceCAConfigMap}, &sc); err != nil ||
+		sc.Annotations["service.beta.openshift.io/inject-cabundle"] != "true" {
+		t.Fatalf("service-CA ConfigMap not requested for injection: %v %v", err, sc.Annotations)
+	}
+}

@@ -50,6 +50,9 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 		}
 		return nil, nil
 	}
+	// Trust anchors before the Deployment that mounts them (optional mounts, so
+	// ordering is comfort not correctness).
+	r.ensureTrustAnchors(ctx, dv)
 	// Apply the base workload (incl. the exposure) first: on OpenShift with no explicit
 	// URL that Route is hostless, so the router assigns a host we read back and fill into
 	// the effective spec, before rendering the Deployment whose ROOT_URL needs it.

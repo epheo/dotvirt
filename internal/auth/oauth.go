@@ -70,15 +70,17 @@ func NewOAuth(cfg OAuthConfig, saKube kubernetes.Interface, auth *Authenticator)
 	if cfg.CAFile != "" || cfg.InsecureTLS {
 		tlsCfg := &tls.Config{InsecureSkipVerify: cfg.InsecureTLS} //nolint:gosec // explicit dev opt-in
 		if cfg.CAFile != "" {
-			pem, err := os.ReadFile(cfg.CAFile)
-			if err != nil {
-				return nil, fmt.Errorf("oauth ca: %w", err)
+			// Tolerant: the CA is usually an operator-mounted ConfigMap that may lag
+			// the pod. Failing startup over it would take the whole console down for an
+			// SSO nicety; the system pool keeps token login working and the SSO leg
+			// fails legibly (sso_error) until the mount lands.
+			if pem, err := os.ReadFile(cfg.CAFile); err != nil {
+				log.Printf("oauth: CA %s unreadable (%v); staying on the system trust pool", cfg.CAFile, err)
+			} else if pool := x509.NewCertPool(); !pool.AppendCertsFromPEM(pem) {
+				log.Printf("oauth: CA %s holds no certificates; staying on the system trust pool", cfg.CAFile)
+			} else {
+				tlsCfg.RootCAs = pool
 			}
-			pool := x509.NewCertPool()
-			if !pool.AppendCertsFromPEM(pem) {
-				return nil, fmt.Errorf("oauth ca: no certificates in %s", cfg.CAFile)
-			}
-			tlsCfg.RootCAs = pool
 		}
 		transport = &http.Transport{TLSClientConfig: tlsCfg}
 	}

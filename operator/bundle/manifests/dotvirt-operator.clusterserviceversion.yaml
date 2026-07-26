@@ -13,7 +13,6 @@ metadata:
           },
           "spec": {
             "forge": {
-              "insecureTLS": true,
               "managed": true
             },
             "ingress": {
@@ -28,7 +27,7 @@ metadata:
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
     containerImage: quay.io/epheo/dotvirt-operator@sha256:73c12ad00a4e47681854aef82af31d32076f8d38ab9885f885ca498c6d55f8a5
-    createdAt: "2026-07-26T13:50:10Z"
+    createdAt: "2026-07-26T13:56:19Z"
     description: Installs dotvirt, a GitOps web console for KubeVirt with a point-and-click workflow familiar to vSphere admins, plus its platform/tenant tier.
     features.operators.openshift.io/disconnected: "true"
     features.operators.openshift.io/fips-compliant: "false"

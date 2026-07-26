@@ -6,9 +6,11 @@ package forge
 import (
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -73,6 +75,12 @@ func NewFactory(baseURL, token string, insecure bool) *Factory {
 // unset (forge disabled); a tokenFn that currently yields "" still builds a
 // Factory (the token may appear once the mounted secret is written).
 func NewFactoryFn(baseURL string, tokenFn TokenSource, insecure bool) *Factory {
+	return NewFactoryFnCA(baseURL, tokenFn, insecure, "")
+}
+
+// NewFactoryFnCA is NewFactoryFn with a PEM CA bundle to verify the forge with —
+// the no-insecure path for a managed forge behind the cluster's ingress CA.
+func NewFactoryFnCA(baseURL string, tokenFn TokenSource, insecure bool, caFile string) *Factory {
 	if baseURL == "" || tokenFn == nil {
 		return nil
 	}
@@ -80,7 +88,7 @@ func NewFactoryFn(baseURL string, tokenFn TokenSource, insecure bool) *Factory {
 		baseURL:  strings.TrimRight(baseURL, "/"),
 		tokenFn:  tokenFn,
 		insecure: insecure,
-		http:     httpClient(insecure),
+		http:     httpClient(insecure, caFile),
 	}
 }
 
@@ -132,11 +140,25 @@ func urlHost(repoURL string) string {
 	return strings.ToLower(s)
 }
 
-func httpClient(insecure bool) *http.Client {
+func httpClient(insecure bool, caFile string) *http.Client {
 	hc := &http.Client{Timeout: 15 * time.Second}
 	if insecure {
 		hc.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec G402 — dev flag
+		}
+		return hc
+	}
+	// A CA bundle (typically the cluster ingress CA serving a managed forge Route)
+	// verifies instead of skipping. Tolerant: an unreadable or empty bundle logs and
+	// stays on the system pool, so a lagging CA mount degrades to a legible TLS error
+	// at the forge rather than a crashing process.
+	if caFile != "" {
+		if pem, err := os.ReadFile(caFile); err != nil {
+			log.Printf("forge: CA %s unreadable (%v); staying on the system trust pool", caFile, err)
+		} else if pool := x509.NewCertPool(); !pool.AppendCertsFromPEM(pem) {
+			log.Printf("forge: CA %s holds no certificates; staying on the system trust pool", caFile)
+		} else {
+			hc.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}
 		}
 	}
 	return hc

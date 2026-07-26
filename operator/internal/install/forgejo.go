@@ -134,16 +134,19 @@ func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt, argoWebhookHost string) []corev1.En
 		{Name: "FORGEJO__database__DB_TYPE", Value: "sqlite3"},
 		{Name: "FORGEJO__server__ROOT_URL", Value: ForgejoExternalURL(dv) + "/"},
 		{Name: "FORGEJO__webhook__ALLOWED_HOST_LIST", Value: allowed},
-		// Skip webhook TLS verification globally for this managed Forgejo. It's required by
-		// the ArgoCD-direct backstop (a fallback to dotvirt's RefreshForRepo), which targets
-		// ArgoCD's EXTERNAL Route — off-cluster, served by an ingress CA Forgejo doesn't
-		// trust. Being global, it also relaxes verification for any tenant-added external
-		// webhook on this forge: an accepted trade-off for the eval-grade managed forge, not
-		// the bounded in-cluster exposure the name might suggest. (dotvirt's own webhook
-		// needs no exemption — it's delivered to the in-cluster Service over plain HTTP.)
-		{Name: "FORGEJO__webhook__SKIP_TLS_VERIFY", Value: "true"},
+		// Forgejo VERIFIES webhook TLS: the ArgoCD-direct delivery targets Argo's
+		// external Route, served by the ingress CA the mounted trust dir supplies. Go
+		// honors a colon-separated SSL_CERT_DIR, so the system pool stays beside the
+		// mounted CA (optional mount: on vanilla the dir is simply empty). This
+		// replaced the old global SKIP_TLS_VERIFY, which also unverified every
+		// tenant-added external webhook.
+		{Name: "SSL_CERT_DIR", Value: "/etc/ssl/certs:" + forgejoCADir},
 	}
 }
+
+// forgejoCADir is where the ingress-CA ConfigMap mounts into both Forgejo
+// containers, joining the system trust via SSL_CERT_DIR.
+const forgejoCADir = "/var/run/dotvirt/ca"
 
 // ForgejoDeployment runs the rootless Forgejo with a one-shot bootstrap initContainer
 // that migrates the DB and reconciles the admin service user's password to the current
@@ -161,6 +164,7 @@ func ForgejoDeployment(dv *dotvirtv1alpha1.Dotvirt, setFSGroup bool, argoWebhook
 	forgejoImg := imageFromEnv("RELATED_IMAGE_FORGEJO", ForgejoImage)
 	dataMount := corev1.VolumeMount{Name: "data", MountPath: "/var/lib/gitea"}
 	etcMount := corev1.VolumeMount{Name: "etc", MountPath: "/etc/gitea"}
+	caMount := corev1.VolumeMount{Name: "ingress-ca", MountPath: forgejoCADir, ReadOnly: true}
 	adminPW := corev1.EnvVar{Name: "ADMIN_PW", ValueFrom: &corev1.EnvVarSource{
 		SecretKeyRef: &corev1.SecretKeySelector{
 			LocalObjectReference: corev1.LocalObjectReference{Name: ForgejoAdminSecret}, Key: "password",
@@ -184,6 +188,7 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 		` --password "$ADMIN_PW" --email ` + ForgejoBotUser + `@dotvirt.local --must-change-password=false ` +
 		`|| forgejo admin user change-password --username ` + ForgejoBotUser + ` --password "$ADMIN_PW" --must-change-password=false`
 
+	caOptional := true
 	return &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: objectMeta(ForgejoServiceName, dv.Namespace, dv.Name),
@@ -209,7 +214,7 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 						Image:           forgejoImg,
 						Command:         []string{"sh", "-c", bootstrap},
 						Env:             append(forgejoEnv(dv, argoWebhookHost), adminPW),
-						VolumeMounts:    []corev1.VolumeMount{dataMount, etcMount},
+						VolumeMounts:    []corev1.VolumeMount{dataMount, etcMount, caMount},
 						Resources:       forgejoResources(),
 						SecurityContext: forgejoContainerSecurityContext(),
 					}},
@@ -218,7 +223,7 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 						Image:        forgejoImg,
 						Env:          forgejoEnv(dv, argoWebhookHost),
 						Ports:        []corev1.ContainerPort{{Name: "http", ContainerPort: ForgejoHTTPPort}},
-						VolumeMounts: []corev1.VolumeMount{dataMount, etcMount},
+						VolumeMounts: []corev1.VolumeMount{dataMount, etcMount, caMount},
 						// The default 1s probe timeout kills a merely-busy forge: under clone
 						// bursts the SQLite-backed healthz slows past 1s, and restarting it
 						// makes the overload worse. Generous timeouts break that flap loop.
@@ -244,6 +249,11 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 							VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: ForgejoPVCName}},
 						},
 						{Name: "etc", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+						// Optional: absent on vanilla Kubernetes (no ingress CA to copy); the
+						// trust dir is then empty and SSL_CERT_DIR still lists the system pool.
+						{Name: "ingress-ca", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+							LocalObjectReference: corev1.LocalObjectReference{Name: IngressCAConfigMap}, Optional: &caOptional,
+						}}},
 					},
 				},
 			},

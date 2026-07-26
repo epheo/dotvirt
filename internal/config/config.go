@@ -26,6 +26,9 @@ type Config struct {
 	// a rotated token is picked up without restart. See ForgeTokenFile / ForgeToken.
 	GitUsername string // for https auth (the token comes from ForgeTokenSource)
 	GitToken    string // deprecated alias for ForgeToken (kept for BYO flag compat)
+	// ForgeCA is a PEM bundle to VERIFY the forge with (API + git https) — the
+	// no-insecure path for a managed forge served by the cluster's ingress CA.
+	ForgeCA string
 
 	// Cluster read
 	Kubeconfig     string // path; empty = in-cluster
@@ -116,6 +119,7 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.UIOrigin, "ui-origin", envOr("DOTVIRT_UI_ORIGIN", "http://localhost:5173"), "frontend origin allowed via CORS (empty to disable)")
 	fs.StringVar(&c.GitUsername, "git-username", envOr("DOTVIRT_GIT_USERNAME", "dotvirt"), "git https username (clones/pushes every project repo)")
 	fs.StringVar(&c.GitToken, "git-token", os.Getenv("DOTVIRT_GIT_TOKEN"), "git https token/password")
+	fs.StringVar(&c.ForgeCA, "forge-ca", os.Getenv("DOTVIRT_FORGE_CA"), "PEM CA bundle path to verify the forge with (API + git https), e.g. the mounted ingress CA")
 
 	fs.StringVar(&c.Kubeconfig, "kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig path (empty = in-cluster)")
 	fs.StringVar(&c.ProjectLabel, "project-label", envOr("DOTVIRT_PROJECT_LABEL", "dotvirt.io/project"), "namespace label whose value names the project")

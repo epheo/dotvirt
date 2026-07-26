@@ -3,6 +3,7 @@ package install
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -37,6 +38,22 @@ const (
 	// OAuthSecretName holds the operator-generated OAuth client secret (key clientSecret).
 	OAuthSecretName   = "dotvirt-oauth"
 	oauthClientPrefix = "dotvirt"
+
+	// IngressCAConfigMap is the operator's in-namespace copy of the cluster's default
+	// ingress CA (openshift-config-managed/default-ingress-cert), mounted so the app
+	// and the managed Forgejo VERIFY router-served TLS instead of skipping it.
+	IngressCAConfigMap = "dotvirt-ingress-ca"
+	// ServiceCAConfigMap is filled by OpenShift's service-ca injection
+	// (service.beta.openshift.io/inject-cabundle) and verifies in-cluster serving
+	// certs, e.g. the thanos-querier the sample points metrics at.
+	ServiceCAConfigMap = "dotvirt-service-ca"
+
+	ingressCAMountPath = "/var/run/dotvirt/tls-ingress"
+	serviceCAMountPath = "/var/run/dotvirt/tls-service"
+	// IngressCAKey mirrors default-ingress-cert's key; ServiceCAKey is what the
+	// injector writes.
+	IngressCAKey = "ca-bundle.crt"
+	ServiceCAKey = "service-ca.crt"
 )
 
 // OAuthClientName is the OpenShift OAuthClient this install registers as. An OAuthClient
@@ -210,6 +227,22 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 			env = append(env, secretEnv("DOTVIRT_FORGE_URL", forgeSecret, "url", false))
 		}
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_FORGE_TOKEN_FILE", Value: forgeTokenMountPath})
+		if dv.Spec.Forge.Managed {
+			// Verify the managed forge's router-served cert with the mounted ingress CA
+			// instead of ever needing insecureTLS. The app's CA loads are tolerant, so a
+			// lagging mount degrades to a legible TLS error, never a crashing pod; an
+			// explicit spec.forge.insecureTLS still wins inside the app.
+			env = append(env, corev1.EnvVar{Name: "DOTVIRT_FORGE_CA", Value: ingressCAMountPath + "/" + IngressCAKey})
+		}
+	}
+	if dv.Spec.Auth.OpenShiftSSO {
+		// The oauth token endpoint is a router-served Route on the same ingress CA.
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_OAUTH_CA", Value: ingressCAMountPath + "/" + IngressCAKey})
+	}
+	if strings.HasPrefix(dv.Spec.Metrics.URL, "https://") && strings.Contains(dv.Spec.Metrics.URL, ".svc") {
+		// In-cluster metrics endpoints (the sample's thanos-querier) serve the
+		// service-CA-signed cert the injected bundle verifies.
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_CA", Value: serviceCAMountPath + "/" + ServiceCAKey})
 	}
 
 	args := []string{
@@ -229,10 +262,28 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 		args = append(args, "-insecure-tls")
 	}
 
-	volumeMounts := []corev1.VolumeMount{{Name: "drafts", MountPath: "/var/lib/dotvirt/drafts"}}
+	// Trust-anchor mounts are ALWAYS rendered and optional: on vanilla Kubernetes
+	// (or before the operator's copy/injection lands) the ConfigMaps simply do not
+	// exist and the pod still starts; the app falls back to the system pool.
+	caOptional := true
+	volumeMounts := []corev1.VolumeMount{
+		{Name: "drafts", MountPath: "/var/lib/dotvirt/drafts"},
+		{Name: "ingress-ca", MountPath: ingressCAMountPath, ReadOnly: true},
+		{Name: "service-ca", MountPath: serviceCAMountPath, ReadOnly: true},
+	}
 	volumes := []corev1.Volume{{
 		Name:         "drafts",
 		VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: AppName + "-drafts"}},
+	}, {
+		Name: "ingress-ca",
+		VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+			LocalObjectReference: corev1.LocalObjectReference{Name: IngressCAConfigMap}, Optional: &caOptional,
+		}},
+	}, {
+		Name: "service-ca",
+		VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+			LocalObjectReference: corev1.LocalObjectReference{Name: ServiceCAConfigMap}, Optional: &caOptional,
+		}},
 	}}
 	if ForgeConfigured(dv) {
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "forge-token", MountPath: "/var/run/dotvirt/forge", ReadOnly: true})

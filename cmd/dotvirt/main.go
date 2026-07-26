@@ -73,6 +73,8 @@ func run() error {
 
 	if cfg.InsecureTLS {
 		git.AllowInsecureTLS() // dev: trust self-signed Forgejo Route cert
+	} else if cfg.ForgeCA != "" {
+		git.AllowCustomCA(cfg.ForgeCA) // verify the managed forge Route (ingress CA)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -94,7 +96,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	forgeFactory := forge.NewFactoryFn(cfg.ForgeURL, tokenSrc, cfg.InsecureTLS)
+	forgeFactory := forge.NewFactoryFnCA(cfg.ForgeURL, tokenSrc, cfg.InsecureTLS, cfg.ForgeCA)
 	if forgeFactory == nil {
 		log.Printf("forge not configured (DOTVIRT_FORGE_URL unset): propose will push-only, no PR will be created")
 	}

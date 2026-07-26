@@ -16,9 +16,9 @@ spec:
     managed: true # the operator deploys + bootstraps Forgejo and generates its token
     # url + platformRepo left empty: on OpenShift the operator assigns the forge host
     # and defaults the platform repo under it. Set them only for a bring-your-own forge.
-    # DEV/EVAL ONLY: skips forge TLS verification for the bundled self-signed Forgejo
-    # Route. Leave UNSET (defaults false) for a real forge with a trusted certificate.
-    insecureTLS: true
+    # No insecureTLS: the operator mounts the cluster's ingress CA, so every TLS hop
+    # (forge, oauth, ArgoCD) is VERIFIED. Set forge.insecureTLS only for a
+    # bring-your-own forge with a certificate nothing on the cluster can trust.
   ingress:
     type: auto # Route on OpenShift (host auto-assigned), Ingress on vanilla Kubernetes
   metrics:

@@ -307,3 +307,44 @@ func TestForgejoRollsOnAdminSecretChange(t *testing.T) {
 		t.Fatalf("pod template must carry the changing admin-secret hash, got %q then %q", a, b)
 	}
 }
+
+// The zero-config posture is VERIFIED TLS, not skipped: the app deployment mounts
+// the trust anchors (optional, so vanilla still schedules) and points each client
+// at its CA; -insecure-tls renders only on an explicit spec opt-in.
+func TestDeploymentVerifiedTLSByDefault(t *testing.T) {
+	dv := testDotvirt()
+	dv.Spec.Forge.Managed = true
+	dv.Spec.Auth.OpenShiftSSO = true
+	dv.Spec.Metrics.URL = "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091"
+	d := Deployment(dv)
+	c := d.Spec.Template.Spec.Containers[0]
+	for _, arg := range c.Args {
+		if arg == "-insecure-tls" {
+			t.Fatal("-insecure-tls must not render without the explicit spec opt-in")
+		}
+	}
+	for _, want := range []string{"DOTVIRT_FORGE_CA", "DOTVIRT_OAUTH_CA", "DOTVIRT_METRICS_CA"} {
+		if _, ok := envValue(c.Env, want); !ok {
+			t.Errorf("%s missing: that client would silently skip CA verification", want)
+		}
+	}
+	if !hasVolume(d, "ingress-ca") || !hasVolume(d, "service-ca") {
+		t.Error("trust-anchor mounts missing")
+	}
+}
+
+// Forgejo verifies webhook TLS via the joined trust dir; the old global
+// SKIP_TLS_VERIFY (which also unverified tenant webhooks) must never come back.
+func TestForgejoVerifiesWebhookTLS(t *testing.T) {
+	d := ForgejoDeployment(testDotvirt(), false, "", "h")
+	env := d.Spec.Template.Spec.Containers[0].Env
+	if _, ok := envValue(env, "FORGEJO__webhook__SKIP_TLS_VERIFY"); ok {
+		t.Fatal("webhook TLS verification must stay ON")
+	}
+	if v, ok := envValue(env, "SSL_CERT_DIR"); !ok || !strings.Contains(v, "/etc/ssl/certs") {
+		t.Errorf("SSL_CERT_DIR must join the system pool with the mounted CA, got %q", v)
+	}
+	if !hasVolume(d, "ingress-ca") {
+		t.Error("forgejo ingress-ca mount missing")
+	}
+}
