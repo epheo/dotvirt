@@ -12,6 +12,7 @@ import (
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/validate"
 	"github.com/epheo/dotvirt/internal/vmgen"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // StageEdit records a VM edit in (id, proj)'s draft.
@@ -136,8 +137,13 @@ func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinPro
 			return draft.Entry{}, fmt.Errorf("invalid namespace spec: %v", err)
 		}
 		// Stamp the namespace's dotvirt.io labels/annotations to the tenant it joins,
-		// not the platform repo it's committed to.
-		spec.Project, spec.Repo = joinProj.Name, joinProj.Repo
+		// not the platform repo it's committed to. Host-free ref ONLY when the repo is
+		// on this forge: stripping a genuinely foreign host would re-point the project.
+		ref := joinProj.Repo
+		if c.forge.SameForge(ref) {
+			ref = forge.PathRef(ref)
+		}
+		spec.Project, spec.Repo = joinProj.Name, ref
 		path, content, err := netgen.NamespaceManifest(spec)
 		return draft.Entry{
 			Resource:   draft.ResourceNamespace,
@@ -197,7 +203,10 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 		return model.DraftView{}, err
 	}
 	// First namespace, joined to the new project/repo (stamps its dotvirt.io labels).
-	nsSpec := netgen.NamespaceSpec{Name: ns, Project: spec.Name, Repo: repoURL, VMNetwork: spec.VMNetwork}
+	// The ref is stamped HOST-FREE (owner/repo.git): the forge's identity lives only
+	// in the install config, so a forge-host change re-resolves every project instead
+	// of stranding them on a dead absolute URL.
+	nsSpec := netgen.NamespaceSpec{Name: ns, Project: spec.Name, Repo: forge.PathRef(repoURL), VMNetwork: spec.VMNetwork}
 	nsPath, nsContent, err := netgen.NamespaceManifest(nsSpec)
 	if err != nil {
 		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
@@ -259,35 +268,48 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	if err := requireRepo(commitProj); err != nil {
 		return model.DraftView{}, err
 	}
-	// An annotation that still resolves means the project is already managed. One that
-	// does not is the dead end this recovers: the forge lost the repo, so the project is
-	// unreachable through every other path. Re-creating it cannot endanger the running
-	// workloads, because ArgoCD's automated.allowEmpty defaults to false and refuses to
-	// apply a source that yields no resources.
-	if target.Repo != "" {
-		fc := c.forge.For(target.Repo)
-		// SameForge because For keeps only the owner/repo: a project hosted on another
-		// forge would be looked up by path here, 404, and be re-homed to a fresh empty
-		// repo. Anything this forge cannot speak for stays a conflict.
-		if fc == nil || !c.forge.SameForge(target.Repo) {
-			return model.DraftView{}, fmt.Errorf("%w: project %q already has a repo (%s)", model.ErrConflict, target.Name, target.Repo)
-		}
-		exists, err := fc.RepoExists()
-		if err != nil {
-			return model.DraftView{}, fmt.Errorf("check project repo: %w", err)
-		}
-		if exists {
-			return model.DraftView{}, fmt.Errorf("%w: project %q already has a repo (%s)", model.ErrConflict, target.Name, target.Repo)
-		}
-	}
 	if !validate.DNS1123Name(target.Name) {
 		return model.DraftView{}, fmt.Errorf("%w: project name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, target.Name)
 	}
 	if len(target.Namespaces) == 0 {
 		return model.DraftView{}, fmt.Errorf("%w: project %q has no namespaces to adopt", model.ErrInvalid, target.Name)
 	}
-	// target.Repo == "" here, so the project is genuinely repoless; ensureTenantRepo
-	// creates the repo (created is irrelevant on this path).
+	// An annotation that still resolves means the project is already managed. One that
+	// does not is a dead end this recovers, in one of two shapes. The forge LOST the
+	// repo: re-create it (safe: ArgoCD's automated.allowEmpty defaults to false, so an
+	// empty source is refused, never applied). The forge HOST changed (a reinstall, an
+	// apps-domain move) while the repo itself survived under the same owner/name:
+	// RE-HOME it by staging the namespace manifests, whose refs are stamped host-free,
+	// so the reviewable platform PR is exactly the re-point. Only a repo this forge
+	// cannot speak for at all stays a conflict.
+	if target.Repo != "" {
+		fc := c.forge.For(target.Repo)
+		if fc == nil {
+			return model.DraftView{}, fmt.Errorf("%w: project %q already has a repo (%s)", model.ErrConflict, target.Name, target.Repo)
+		}
+		exists, err := fc.RepoExists()
+		if err != nil {
+			return model.DraftView{}, fmt.Errorf("check project repo: %w", err)
+		}
+		if !c.forge.SameForge(target.Repo) {
+			if !exists {
+				// For keeps only the owner/repo, so this forge was merely PROBED by path; the
+				// project's real repo lives elsewhere and must not be re-homed to a fresh
+				// empty one here.
+				return model.DraftView{}, fmt.Errorf("%w: project %q's repo (%s) is hosted on another forge", model.ErrConflict, target.Name, target.Repo)
+			}
+			// Re-home: no repo create, no seed; the repo is already here.
+			if err := c.stageProjectAdoption(id.Username, commitProj.Name, target, target.Repo, owners); err != nil {
+				return model.DraftView{}, err
+			}
+			return c.Get(id, commitProj)
+		}
+		if exists {
+			return model.DraftView{}, fmt.Errorf("%w: project %q already has a repo (%s)", model.ErrConflict, target.Name, target.Repo)
+		}
+	}
+	// The project is repoless, or its same-forge repo is genuinely lost;
+	// ensureTenantRepo creates it (created is irrelevant on this path).
 	repoURL, _, err := c.ensureTenantRepo(commitProj.Repo, target.Name)
 	if err != nil {
 		return model.DraftView{}, err
@@ -330,7 +352,9 @@ func (c *Coordinator) ensureTenantRepo(platformRepo, name string) (repoURL strin
 // (e.g. dotvirt-made, annotation later dropped) is corrected rather than duplicated.
 func (c *Coordinator) stageProjectAdoption(username, commitProjName string, target project.ProjectInfo, repoURL string, owners []string) error {
 	for _, ns := range target.Namespaces {
-		nsPath, nsContent, err := netgen.NamespaceManifest(netgen.NamespaceSpec{Name: ns, Project: target.Name, Repo: repoURL})
+		// Host-free ref, like StageCreateProject: this is also what makes the re-home
+		// path work at all — the staged manifest re-points the project by construction.
+		nsPath, nsContent, err := netgen.NamespaceManifest(netgen.NamespaceSpec{Name: ns, Project: target.Name, Repo: forge.PathRef(repoURL)})
 		if err != nil {
 			return fmt.Errorf("%w: %v", model.ErrInvalid, err)
 		}

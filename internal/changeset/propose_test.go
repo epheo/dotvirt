@@ -138,15 +138,40 @@ func TestAdoptProjectRecreatesLostRepo(t *testing.T) {
 	}
 }
 
-// For keeps only the owner/repo, so a project on ANOTHER forge would be probed by path
-// here, 404, and be re-homed to a fresh empty repo while its real one still exists.
+// For keeps only the owner/repo, so a project on ANOTHER forge is probed by path here;
+// when the probe misses, the real repo lives elsewhere and must not be re-homed to a
+// fresh empty one.
 func TestAdoptProjectRefusesRepoOnAnotherForge(t *testing.T) {
-	f := newProposeFixture(t)
+	f := newProposeFixture(t, when("GET", "team-a", http.StatusNotFound, ""))
 	target := project.ProjectInfo{Name: "team-a", Namespaces: []string{"team-a"},
 		Repo: "https://github.example/acme/team-a.git"}
 	_, err := f.c.AdoptProject(f.id, f.proj, target, nil)
 	if !errors.Is(err, model.ErrConflict) {
 		t.Fatalf("want model.ErrConflict for a repo this forge does not serve, got %v", err)
+	}
+}
+
+// A foreign-HOST annotation whose owner/repo exists on THIS forge is the stranded
+// aftermath of a forge-host change (reinstall, apps-domain move). Adoption re-homes
+// it: no repo create, no seed, just the staged namespace manifests whose host-free
+// refs re-point the project — the reviewable platform PR IS the migration.
+func TestAdoptProjectRehomesForeignHostRepo(t *testing.T) {
+	f := newProposeFixture(t, when("GET", "team-a", http.StatusOK, "{}"))
+	target := project.ProjectInfo{Name: "team-a", Namespaces: []string{"team-a"},
+		Repo: "https://old-forge.example/acme/team-a.git"}
+	if _, err := f.c.AdoptProject(f.id, f.proj, target, nil); err != nil {
+		t.Fatalf("a same-owner repo on this forge must re-home, not refuse: %v", err)
+	}
+	entries, err := f.c.store.List(f.id.Username, f.proj.Name)
+	if err != nil {
+		t.Fatalf("store.List: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("want the namespace manifest staged, got %d entries", len(entries))
+	}
+	m := entries[0].Manifest
+	if !strings.Contains(m, "acme/team-a.git") || strings.Contains(m, "old-forge.example") {
+		t.Fatalf("staged ref must be host-free (owner/repo.git), got:\n%s", m)
 	}
 }
 

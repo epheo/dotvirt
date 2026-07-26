@@ -56,10 +56,13 @@
 	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
 		{#if recover}
 			<p class="text-ink-soft">
-				This project points at a repo the forge no longer serves. Recovering re-creates it empty;
-				your workloads keep running, and nothing syncs until something merges. Then use "Adopt into
-				git" on the namespaces so the first merge restores everything that is running (the Changes
-				panel warns while anything is left out). Refused if the repo actually still exists.
+				This project points at a repo the forge no longer serves. If the repo is lost, recovering
+				re-creates it empty; if it actually lives on the current forge under the same name (the
+				forge host changed), recovering stages the manifests that re-point the project instead. Your
+				workloads keep running either way, and nothing syncs until something merges. After a
+				re-create, use "Adopt into git" on the namespaces so the first merge restores everything
+				running (the Changes panel warns while anything is left out). Refused if the repo still
+				resolves as configured.
 			</p>
 		{:else}
 			<p class="text-ink-soft">

@@ -232,8 +232,10 @@ func TestStageProjectAdoptionStampsRepoOnEveryNamespace(t *testing.T) {
 		if e.Kind != draft.KindCreate {
 			t.Errorf("namespace %q: want KindCreate, got %q", ns, e.Kind)
 		}
-		if !strings.Contains(e.Manifest, repoURL) || !strings.Contains(e.Manifest, "dotvirt.io/repo") {
-			t.Errorf("namespace %q manifest must carry the dotvirt.io/repo annotation, got:\n%s", ns, e.Manifest)
+		// Stamped HOST-FREE: the forge's identity lives in the install config, so a
+		// forge-host change re-resolves rather than strands.
+		if !strings.Contains(e.Manifest, "dotvirt.io/repo: acme/team-a.git") {
+			t.Errorf("namespace %q manifest must carry a host-free dotvirt.io/repo ref, got:\n%s", ns, e.Manifest)
 		}
 		if !strings.Contains(e.Manifest, "dotvirt.io/project") || !strings.Contains(e.Manifest, "team-a") {
 			t.Errorf("namespace %q manifest must carry the dotvirt.io/project label, got:\n%s", ns, e.Manifest)
