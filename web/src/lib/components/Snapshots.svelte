@@ -3,6 +3,7 @@
 	import { api, Unauthorized, type Snapshot, type VM } from '$lib/api';
 	import { relativeAge } from '$lib/format';
 	import { resource, type Resource } from '$lib/resource.svelte';
+	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
 	import ErrorNote from './ErrorNote.svelte';
 
 	let { vm }: { vm: VM } = $props();
@@ -112,15 +113,15 @@
 
 	{#if snapshots && snapshots.length}
 		<table class="w-full text-[13px]">
-			<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
-				<tr class="border-b border-line">
-					<th class="py-1.5 pr-3 font-medium">Name</th>
-					<th class="py-1.5 pr-3 font-medium">Created</th>
-					<th class="py-1.5 pr-3 font-medium">Status</th>
-					<th class="py-1.5 font-medium"></th>
+			<thead class={THEAD}>
+				<tr class={THEAD_TR}>
+					<th class={TH}>Name</th>
+					<th class={TH}>Created</th>
+					<th class={TH}>Status</th>
+					<th class={TH_LAST}></th>
 				</tr>
 			</thead>
-			<tbody class="divide-y divide-line-soft">
+			<tbody class={TBODY}>
 				{#each snapshots as s (s.name)}
 					<tr>
 						<td class="py-2 pr-3 font-medium text-ink">

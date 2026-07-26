@@ -3,6 +3,7 @@
 	import { api, Unauthorized, type Clone, type VM } from '$lib/api';
 	import { relativeAge } from '$lib/format';
 	import { resource, type Resource } from '$lib/resource.svelte';
+	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
 	import ErrorNote from './ErrorNote.svelte';
 	import FormField from './FormField.svelte';
 	import Modal from './Modal.svelte';
@@ -104,14 +105,14 @@
 				Clones of this VM
 			</h3>
 			<table class="w-full text-[13px]">
-				<thead class="text-left text-xs tracking-wide text-ink-faint uppercase">
-					<tr class="border-b border-line">
-						<th class="py-1.5 pr-3 font-medium">Target VM</th>
-						<th class="py-1.5 pr-3 font-medium">Started</th>
-						<th class="py-1.5 font-medium">Status</th>
+				<thead class={THEAD}>
+					<tr class={THEAD_TR}>
+						<th class={TH}>Target VM</th>
+						<th class={TH}>Started</th>
+						<th class={TH_LAST}>Status</th>
 					</tr>
 				</thead>
-				<tbody class="divide-y divide-line-soft">
+				<tbody class={TBODY}>
 					{#each clones as c (c.name)}
 						<tr>
 							<td class="py-1.5 pr-3 font-medium text-ink">{c.target}</td>

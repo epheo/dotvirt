@@ -13,6 +13,8 @@
 	import { resource } from '$lib/resource.svelte';
 	import { persisted } from '$lib/state/persisted.svelte';
 	import { severityTone, taskTone, TONE_TEXT } from '$lib/status';
+	import { TBODY, THEAD_TR } from '$lib/table';
+	import EventsTable from './EventsTable.svelte';
 	import GitOpsStepper from './GitOpsStepper.svelte';
 	import StatusDot from './StatusDot.svelte';
 	import TabBar from './TabBar.svelte';
@@ -46,7 +48,11 @@
 	// Firing Prometheus alerts (vCenter's Triggered Alarms). Polled slowly; the
 	// read is one cached instant query server-side. null = endpoint unavailable
 	// (metrics off), mapped from the failed flag.
-	const alarmsRes = resource<Alert[]>(() => '', () => api.alarms(), { poll: 30000 });
+	const alarmsRes = resource<Alert[]>(
+		() => '',
+		() => api.alarms(),
+		{ poll: 30000 },
+	);
 	const firing = $derived(alarmsRes.failed ? null : alarmsRes.data);
 
 	// Drag-to-resize the dock height. Persisted on release; restored clamped to
@@ -259,9 +265,9 @@
 </script>
 
 {#snippet dockHead(cols: string[])}
-	<!-- The one header row all three dock tables share. -->
+	<!-- The one header row the tasks and alarms tables share. -->
 	<thead class="sticky top-0 bg-inset text-left text-[11px] tracking-wide text-ink-faint uppercase">
-		<tr class="border-b border-line">
+		<tr class={THEAD_TR}>
 			{#each cols as c (c)}
 				<th class="px-3 py-1.5 font-medium">{c}</th>
 			{/each}
@@ -327,7 +333,7 @@
 				{:else}
 					<table class="w-full">
 						{@render dockHead(['Task', 'Target', 'Status', 'Initiated by', 'Project'])}
-						<tbody class="divide-y divide-line-soft">
+						<tbody class={TBODY}>
 							{#each tasks as t (t.kind + ':' + t.project + ':' + t.namespace + '/' + t.name + ':' + t.url + ':' + (t.at ?? ''))}
 								<tr
 									onclick={() => activate(t)}
@@ -371,7 +377,7 @@
 				{:else}
 					<table class="w-full">
 						{@render dockHead(['Alarm', 'Target', 'Severity', 'Source'])}
-						<tbody class="divide-y divide-line-soft">
+						<tbody class={TBODY}>
 							{#each firing ?? [] as a (a.name + ':' + (a.namespace ?? '') + '/' + (a.vm ?? '') + ':' + (a.severity ?? ''))}
 								<tr
 									onclick={() => a.namespace && a.vm && onselect(a.namespace, a.vm)}
@@ -418,41 +424,10 @@
 						</tbody>
 					</table>
 				{/if}
-			{:else if eventsLoading && events === null}
-				<div class="px-3 py-5 text-center text-ink-faint">Loading events…</div>
-			{:else if !events || events.length === 0}
-				<div class="px-3 py-5 text-center text-ink-faint">No recent events.</div>
 			{:else}
-				<table class="w-full">
-					{@render dockHead(['Reason', 'Target', 'Message', 'Type', 'Last seen'])}
-					<tbody class="divide-y divide-line-soft">
-						{#each events as e, i (i)}
-							<tr
-								onclick={() => e.namespace && e.name && onselect(e.namespace, e.name)}
-								class="cursor-pointer hover:bg-select-soft {e.type === 'Warning'
-									? 'bg-warn-soft/40'
-									: ''}"
-							>
-								<td class="px-3 py-1.5 font-medium text-ink-soft">{e.reason}</td>
-								<td class="px-3 py-1.5 text-ink">
-									{e.name} <span class="text-ink-faint">· {e.namespace}</span>
-								</td>
-								<td class="px-3 py-1.5 text-ink-soft">{e.message}</td>
-								<td class="px-3 py-1.5">
-									<span class="inline-flex items-center gap-1.5 whitespace-nowrap">
-										<StatusDot tone={e.type === 'Warning' ? 'warn' : 'neutral'} size="xs" />
-										{e.type}
-									</span>
-								</td>
-								<td class="px-3 py-1.5 whitespace-nowrap text-ink-muted">
-									{duration(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-ink-faint">
-											×{e.count}</span
-										>{/if}
-								</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
+				<div class="px-3 py-2">
+					<EventsTable {events} loading={eventsLoading} showVM {onselect} />
+				</div>
 			{/if}
 		</div>
 	{/if}

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { PolicyRuleView } from '$lib/api';
 	import { TONE_TEXT, type Tone } from '$lib/status';
+	import { TBODY, TH, TH_LAST, THEAD_TR } from '$lib/table';
 
 	// A policy's rule summaries in the Security vocabulary: Direction / Action /
 	// Peer / Ports, with the action toned like the Security view rows.
@@ -12,14 +13,14 @@
 
 <table class="w-full text-xs">
 	<thead class="text-left tracking-wide text-ink-faint uppercase">
-		<tr class="border-b border-line">
-			<th class="py-1.5 pr-3 font-medium">Direction</th>
-			<th class="py-1.5 pr-3 font-medium">Action</th>
-			<th class="py-1.5 pr-3 font-medium">Peer</th>
-			<th class="py-1.5 font-medium">Ports</th>
+		<tr class={THEAD_TR}>
+			<th class={TH}>Direction</th>
+			<th class={TH}>Action</th>
+			<th class={TH}>Peer</th>
+			<th class={TH_LAST}>Ports</th>
 		</tr>
 	</thead>
-	<tbody class="divide-y divide-line-soft">
+	<tbody class={TBODY}>
 		{#each rules as r, i (i)}
 			<tr>
 				<td class="py-1.5 pr-3 text-ink-muted">{r.direction}</td>
