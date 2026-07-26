@@ -133,7 +133,18 @@ spec:
       admin password (user `dotvirt-bot`; the secret is `dotvirt-forgejo-admin`
       in the install namespace)
     - `status.ssoOAuthClient`: with `auth.openShiftSSO: true`, the one command
-      to register the OAuthClient that finishes SSO
+      to register the OAuthClient that finishes SSO (or use the one-click
+      "Finish SSO setup" banner in the dotvirt console as a cluster admin)
+
+    ### Uninstalling
+
+    Uninstalling the operator keeps everything running: the install and your
+    workloads stay untouched, and a reinstall picks the `Dotvirt` resource back
+    up. Deleting the `Dotvirt` resource tears down the INSTALL (console, forge,
+    Argo wiring) but never your VMs; the managed forge's git data survives on
+    its PersistentVolumeClaim. If SSO was finished, the cluster-scoped
+    `OAuthClient` is admin-created and stays behind; remove it with
+    `kubectl delete oauthclient <name>` when retiring the install for good.
 
     ### What you get in the UI
 

@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -80,7 +82,7 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 			fmt.Sprintf("Forgejo rejected the operator's admin credential. Restart the managed forge to reconcile "+
 				"its admin password: oc -n %s rollout restart deployment/%s", dv.Namespace, install.ForgejoServiceName))
 		dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
-		if uerr := r.Status().Update(ctx, dv); uerr != nil {
+		if uerr := r.writeStatus(ctx, dv); uerr != nil {
 			return nil, uerr
 		}
 		return &ctrl.Result{RequeueAfter: time.Minute}, nil
@@ -91,7 +93,7 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 	if !ready {
 		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "Progressing", "waiting for Forgejo to come up")
 		dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
-		if uerr := r.Status().Update(ctx, dv); uerr != nil {
+		if uerr := r.writeStatus(ctx, dv); uerr != nil {
 			return nil, uerr
 		}
 		return &ctrl.Result{RequeueAfter: 15 * time.Second}, nil
@@ -132,7 +134,7 @@ func (r *DotvirtReconciler) resolveForgeURL(ctx context.Context, dv *dotvirtv1al
 		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "ForgeURLRequired",
 			"set spec.forge.url: the operator can only discover a managed forge's hostname from an OpenShift Route, which this install does not create")
 		dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
-		if err := r.Status().Update(ctx, dv); err != nil {
+		if err := r.writeStatus(ctx, dv); err != nil {
 			return "", nil, err
 		}
 		return "", &ctrl.Result{}, nil
@@ -141,7 +143,7 @@ func (r *DotvirtReconciler) resolveForgeURL(ctx context.Context, dv *dotvirtv1al
 	if host == "" {
 		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "Progressing", "waiting for the router to assign the forge hostname")
 		dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
-		if err := r.Status().Update(ctx, dv); err != nil {
+		if err := r.writeStatus(ctx, dv); err != nil {
 			return "", nil, err
 		}
 		return "", &ctrl.Result{RequeueAfter: 5 * time.Second}, nil
@@ -268,11 +270,28 @@ func (r *DotvirtReconciler) applyForgejoDeployment(ctx context.Context, dv *dotv
 		argoHost = u.Hostname()
 	}
 	// fsGroup only on vanilla K8s; OpenShift's restricted-v2 injects its own.
-	d := install.ForgejoDeployment(dv, r.Platform != platform.OpenShift, argoHost)
+	d := install.ForgejoDeployment(dv, r.Platform != platform.OpenShift, argoHost, r.adminSecretHash(ctx, dv))
 	if err := controllerutil.SetControllerReference(dv, d, r.Scheme); err != nil {
 		return err
 	}
 	return install.Apply(ctx, r.Client, d, r.DryRun)
+}
+
+// adminSecretHash fingerprints the Forgejo admin secret for the pod-template
+// annotation, so a rotated secret rolls the pod and the initContainer converges the
+// DB password without anyone running the AdminCredentialRejected runbook. Empty in
+// dry-run (nothing persisted, no secret to read) and on a read failure — the render
+// still applies, and the 401 path remains the legible fallback.
+func (r *DotvirtReconciler) adminSecretHash(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) string {
+	if r.DryRun {
+		return ""
+	}
+	var s corev1.Secret
+	if err := r.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: install.ForgejoAdminSecret}, &s); err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(s.Data["password"])
+	return hex.EncodeToString(sum[:8])
 }
 
 // bootstrapForgejo mints the scoped token + ensures the owner org once the managed

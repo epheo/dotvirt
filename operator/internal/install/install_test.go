@@ -144,7 +144,7 @@ func TestDeploymentSecurityHardening(t *testing.T) {
 // (no anyuid): non-root, no privilege escalation, all caps dropped, an fsGroup for
 // PVC writability — plus bounded, probed, and digest-pinned.
 func TestForgejoDeploymentBoundedAndPinned(t *testing.T) {
-	d := ForgejoDeployment(testDotvirt(), true, "")
+	d := ForgejoDeployment(testDotvirt(), true, "", "h")
 	c := d.Spec.Template.Spec.Containers[0]
 	if c.LivenessProbe == nil {
 		t.Error("forgejo must set a liveness probe")
@@ -174,7 +174,7 @@ func TestForgejoDeploymentBoundedAndPinned(t *testing.T) {
 // the fallback, a regenerated admin secret over a retained data PVC leaves the operator
 // authenticating against a stale password and the mint 401s forever.
 func TestForgejoBootstrapReconcilesAdminPassword(t *testing.T) {
-	cmd := ForgejoDeployment(testDotvirt(), true, "").Spec.Template.Spec.InitContainers[0].Command
+	cmd := ForgejoDeployment(testDotvirt(), true, "", "h").Spec.Template.Spec.InitContainers[0].Command
 	script := cmd[len(cmd)-1] // sh -c "<script>"
 	if !strings.Contains(script, "user create") {
 		t.Error("bootstrap must create the admin user on a fresh volume")
@@ -190,10 +190,10 @@ func TestForgejoBootstrapReconcilesAdminPassword(t *testing.T) {
 // fsGroup is set on vanilla K8s (PVC writability) but MUST be omitted on OpenShift,
 // where restricted-v2 rejects an out-of-range fsGroup and injects its own.
 func TestForgejoFSGroupIsPlatformConditional(t *testing.T) {
-	if fg := ForgejoDeployment(testDotvirt(), true, "").Spec.Template.Spec.SecurityContext.FSGroup; fg == nil {
+	if fg := ForgejoDeployment(testDotvirt(), true, "", "h").Spec.Template.Spec.SecurityContext.FSGroup; fg == nil {
 		t.Error("vanilla K8s (setFSGroup=true): fsGroup must be set")
 	}
-	if fg := ForgejoDeployment(testDotvirt(), false, "").Spec.Template.Spec.SecurityContext.FSGroup; fg != nil {
+	if fg := ForgejoDeployment(testDotvirt(), false, "", "h").Spec.Template.Spec.SecurityContext.FSGroup; fg != nil {
 		t.Errorf("OpenShift (setFSGroup=false): fsGroup must be nil, got %d", *fg)
 	}
 }
@@ -205,7 +205,7 @@ func TestForgejoFSGroupIsPlatformConditional(t *testing.T) {
 // renders app.ini from it).
 func TestForgejoWebhookAllowlistIncludesArgoHost(t *testing.T) {
 	const argo = "openshift-gitops-server-openshift-gitops.apps.example.com"
-	d := ForgejoDeployment(testDotvirt(), false, argo)
+	d := ForgejoDeployment(testDotvirt(), false, argo, "h")
 	for _, env := range [][]corev1.EnvVar{
 		d.Spec.Template.Spec.InitContainers[0].Env,
 		d.Spec.Template.Spec.Containers[0].Env,
@@ -217,7 +217,7 @@ func TestForgejoWebhookAllowlistIncludesArgoHost(t *testing.T) {
 	}
 
 	// No Argo URL resolvable yet: the baseline list, no trailing separator.
-	got, _ := envValue(ForgejoDeployment(testDotvirt(), false, "").Spec.Template.Spec.Containers[0].Env,
+	got, _ := envValue(ForgejoDeployment(testDotvirt(), false, "", "h").Spec.Template.Spec.Containers[0].Env,
 		"FORGEJO__webhook__ALLOWED_HOST_LIST")
 	if got != ServiceHost(testDotvirt())+",external" {
 		t.Errorf("ALLOWED_HOST_LIST without an Argo host = %q", got)
@@ -293,5 +293,17 @@ func TestRepoCredsNeverEmitsIgnoredInsecure(t *testing.T) {
 	dv.Spec.Forge.InsecureTLS = true
 	if _, ok := RepoCredsSecret(dv, "openshift-gitops", "https://forge.example/dotvirt", "bot", "tok").StringData["insecure"]; ok {
 		t.Error("insecure is not a repo-creds template field; emitting it masks the real TLS gap")
+	}
+}
+
+// A rotated admin secret must ROLL the forge pod (whose initContainer then
+// reconciles the DB password), not wait for a human to run the
+// AdminCredentialRejected runbook: the hash rides the pod template.
+func TestForgejoRollsOnAdminSecretChange(t *testing.T) {
+	dv := testDotvirt()
+	a := ForgejoDeployment(dv, false, "", "hash-a").Spec.Template.Annotations["dotvirt.io/admin-secret-hash"]
+	b := ForgejoDeployment(dv, false, "", "hash-b").Spec.Template.Annotations["dotvirt.io/admin-secret-hash"]
+	if a == "" || a == b {
+		t.Fatalf("pod template must carry the changing admin-secret hash, got %q then %q", a, b)
 	}
 }

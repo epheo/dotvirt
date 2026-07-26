@@ -156,7 +156,7 @@ func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt, argoWebhookHost string) []corev1.En
 // dir is group-writable (gid 0 on OpenShift via the SCC; fsGroup on vanilla K8s). The
 // PVC mounts at the image's default GITEA_WORK_DIR (/var/lib/gitea); /etc/gitea is the
 // image's other declared volume, backed by an emptyDir.
-func ForgejoDeployment(dv *dotvirtv1alpha1.Dotvirt, setFSGroup bool, argoWebhookHost string) *appsv1.Deployment {
+func ForgejoDeployment(dv *dotvirtv1alpha1.Dotvirt, setFSGroup bool, argoWebhookHost, adminSecretHash string) *appsv1.Deployment {
 	replicas := int32(1)
 	forgejoImg := imageFromEnv("RELATED_IMAGE_FORGEJO", ForgejoImage)
 	dataMount := corev1.VolumeMount{Name: "data", MountPath: "/var/lib/gitea"}
@@ -192,7 +192,15 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}, // RWO data
 			Selector: &metav1.LabelSelector{MatchLabels: forgejoSelector},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: forgejoSelector},
+				// The admin-secret hash makes a ROTATED secret roll the pod, whose
+				// initContainer then reconciles the DB password to it (create-or-reset).
+				// Without this, rotation leaves the running forge on the old password
+				// until someone reads the AdminCredentialRejected runbook — a manual
+				// step lazy users never take.
+				ObjectMeta: metav1.ObjectMeta{
+					Labels:      forgejoSelector,
+					Annotations: map[string]string{"dotvirt.io/admin-secret-hash": adminSecretHash},
+				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: ForgejoSAName,
 					SecurityContext:    forgejoPodSecurityContext(setFSGroup),

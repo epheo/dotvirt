@@ -139,7 +139,7 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	r.setCondition(&dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionTrue, "Reconciled", "install reconciled")
 	dv.Status.Phase = dotvirtv1alpha1.PhaseReady
 	dv.Status.ObservedGeneration = dv.Generation
-	if err := r.Status().Update(ctx, &dv); err != nil {
+	if err := r.writeStatus(ctx, &dv); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
@@ -162,7 +162,7 @@ func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvi
 		r.setCondition(dv, dotvirtv1alpha1.ConditionDependenciesReady, metav1.ConditionFalse, "MissingPrerequisite", depRes.Summary())
 		dv.Status.Phase = dotvirtv1alpha1.PhaseBlockedOnDependencies
 		dv.Status.ObservedGeneration = dv.Generation
-		if uerr := r.Status().Update(ctx, dv); uerr != nil {
+		if uerr := r.writeStatus(ctx, dv); uerr != nil {
 			return nil, uerr
 		}
 		return &ctrl.Result{RequeueAfter: time.Minute}, nil
@@ -252,7 +252,7 @@ func (r *DotvirtReconciler) setCondition(dv *dotvirtv1alpha1.Dotvirt, condType s
 func (r *DotvirtReconciler) failPhase(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, condType, reason string, err error) error {
 	r.setCondition(dv, condType, metav1.ConditionFalse, reason, err.Error())
 	dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
-	if uerr := r.Status().Update(ctx, dv); uerr != nil {
+	if uerr := r.writeStatus(ctx, dv); uerr != nil {
 		logf.FromContext(ctx).Error(uerr, "status update failed", "phase", dotvirtv1alpha1.PhaseProvisioning)
 	}
 	return err
@@ -289,4 +289,14 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		b = b.Owns(route)
 	}
 	return b.Complete(r)
+}
+
+// writeStatus persists the derived status as a MERGE PATCH, not an Update: OLM and
+// the status informer touch the object between our read and write often enough that
+// resourceVersion'd updates spray "object has been modified" requeue noise into the
+// log, which reads as a broken install to anyone skimming it. A merge patch carries
+// no resourceVersion, and every status field (conditions included) is derived and
+// dotvirt-owned, so replace-wholesale semantics are exact.
+func (r *DotvirtReconciler) writeStatus(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
+	return r.Status().Patch(ctx, dv, client.Merge)
 }
