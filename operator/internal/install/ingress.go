@@ -9,9 +9,9 @@ import (
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 )
 
-// routeGVK renders Routes as unstructured so the operator needn't import the
+// RouteGVK renders Routes as unstructured so the operator needn't import the
 // OpenShift API.
-var routeGVK = schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"}
+var RouteGVK = schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"}
 
 // Route exposes the named Service (its "http" port, edge TLS at the router) on
 // OpenShift, as a Route of the same name. host may be empty — the router then
@@ -26,7 +26,7 @@ func Route(dv *dotvirtv1alpha1.Dotvirt, name, host string) *unstructured.Unstruc
 	if host != "" {
 		spec["host"] = host
 	}
-	return unstructuredObject(routeGVK, name, dv.Namespace, dv.Name, spec)
+	return unstructuredObject(RouteGVK, name, dv.Namespace, dv.Name, spec)
 }
 
 // Ingress exposes the named Service on vanilla Kubernetes, as an Ingress of the

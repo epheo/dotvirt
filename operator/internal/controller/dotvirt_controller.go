@@ -11,7 +11,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -57,6 +56,9 @@ type DotvirtReconciler struct {
 // three static operand roles — so it needs no `escalate` and no ClusterRole/RoleBinding writes.
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts,verbs=get;list;watch;update
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts/status,verbs=get;update;patch
+// dotvirts/finalizers: unused on default clusters (AddFinalizer writes the main
+// resource), but SetControllerReference sets blockOwnerDeletion, which the
+// OwnerReferencesPermissionEnforcement admission plugin checks via this subresource.
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;deletecollection
@@ -200,7 +202,7 @@ func (r *DotvirtReconciler) forgeClient(ctx context.Context, dv *dotvirtv1alpha1
 // host isn't assigned yet. Unstructured so the module needs no openshift/api dep.
 func (r *DotvirtReconciler) routeHost(ctx context.Context, ns, name string) string {
 	route := &unstructured.Unstructured{}
-	route.SetGroupVersionKind(schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"})
+	route.SetGroupVersionKind(install.RouteGVK)
 	if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, route); err != nil {
 		return ""
 	}
@@ -297,7 +299,7 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// openshift/api dependency (install renders Routes unstructured too).
 	if plat == platform.OpenShift {
 		route := &unstructured.Unstructured{}
-		route.SetGroupVersionKind(schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"})
+		route.SetGroupVersionKind(install.RouteGVK)
 		b = b.Owns(route)
 	}
 	return b.Complete(r)

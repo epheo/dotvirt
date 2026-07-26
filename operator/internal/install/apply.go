@@ -20,9 +20,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// FieldManager is the server-side-apply field owner for everything the operator
+// fieldManager is the server-side-apply field owner for everything the operator
 // renders.
-const FieldManager = "dotvirt-operator"
+const fieldManager = "dotvirt-operator"
 
 // AppName is the common name/label for the dotvirt workload.
 const AppName = "dotvirt"
@@ -41,7 +41,7 @@ const InstanceLabel = "dotvirt.io/instance"
 func Labels(instance string) map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/name":       AppName,
-		"app.kubernetes.io/managed-by": FieldManager,
+		"app.kubernetes.io/managed-by": fieldManager,
 		InstanceLabel:                  instance,
 	}
 }
@@ -64,7 +64,7 @@ func unstructuredObject(gvk schema.GroupVersionKind, name, namespace, instance s
 // When dryRun is set, the API server validates the object (schema, admission, RBAC)
 // but persists nothing — used to validate the full render against a real cluster.
 func Apply(ctx context.Context, c client.Client, obj client.Object, dryRun bool) error {
-	opts := []client.PatchOption{client.FieldOwner(FieldManager), client.ForceOwnership}
+	opts := []client.PatchOption{client.FieldOwner(fieldManager), client.ForceOwnership}
 	if dryRun {
 		opts = append(opts, client.DryRunAll)
 	}

@@ -25,10 +25,10 @@ const (
 	// admits to OpenShift's restricted-v2 SCC with no anyuid grant (verified live: an
 	// arbitrary injected UID with gid 0 completes migrate + admin-create + serve), so
 	// it carries dotvirt's standard hardened securityContext like the operand does.
-	ForgejoImage       = "codeberg.org/forgejo/forgejo:11-rootless@sha256:5135f11de848bea6d59c0a96688e90c361380ba102bdc08dbd5aa52cca2b179b"
-	ForgejoSAName      = "dotvirt-forgejo"
+	forgejoImage       = "codeberg.org/forgejo/forgejo:11-rootless@sha256:5135f11de848bea6d59c0a96688e90c361380ba102bdc08dbd5aa52cca2b179b"
+	forgejoSAName      = "dotvirt-forgejo"
 	ForgejoAdminSecret = "dotvirt-forgejo-admin" // generated admin password (key "password")
-	ForgejoPVCName     = "dotvirt-forgejo-data"
+	forgejoPVCName     = "dotvirt-forgejo-data"
 	ForgejoServiceName = "dotvirt-forgejo"
 	ForgejoBotUser     = "dotvirt-bot" // the service user the operator mints a token for
 )
@@ -44,11 +44,11 @@ func ForgejoServiceURL(dv *dotvirtv1alpha1.Dotvirt) string {
 	return svcURL(ForgejoServiceName, dv.Namespace, ForgejoHTTPPort)
 }
 
-// ForgejoExternalURL is the browser/clone-facing base URL: the effective spec.forge.url
+// forgejoExternalURL is the browser/clone-facing base URL: the effective spec.forge.url
 // (the operator fills a derived one from the router-assigned Route before rendering),
 // else the in-cluster Service URL, the fallback only a dry-run or a still-unresolved
 // host hits, since a real render resolves the URL first.
-func ForgejoExternalURL(dv *dotvirtv1alpha1.Dotvirt) string {
+func forgejoExternalURL(dv *dotvirtv1alpha1.Dotvirt) string {
 	if dv.Spec.Forge.URL != "" {
 		return strings.TrimRight(dv.Spec.Forge.URL, "/")
 	}
@@ -73,7 +73,7 @@ func ForgejoHost(dv *dotvirtv1alpha1.Dotvirt) string {
 func ForgejoServiceAccount(dv *dotvirtv1alpha1.Dotvirt) *corev1.ServiceAccount {
 	return &corev1.ServiceAccount{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ServiceAccount"},
-		ObjectMeta: objectMeta(ForgejoSAName, dv.Namespace, dv.Name),
+		ObjectMeta: objectMeta(forgejoSAName, dv.Namespace, dv.Name),
 	}
 }
 
@@ -83,7 +83,7 @@ func ForgejoServiceAccount(dv *dotvirtv1alpha1.Dotvirt) *corev1.ServiceAccount {
 func ForgejoPVC(dv *dotvirtv1alpha1.Dotvirt) *corev1.PersistentVolumeClaim {
 	return &corev1.PersistentVolumeClaim{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaim"},
-		ObjectMeta: objectMeta(ForgejoPVCName, dv.Namespace, dv.Name),
+		ObjectMeta: objectMeta(forgejoPVCName, dv.Namespace, dv.Name),
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 			Resources: corev1.VolumeResourceRequirements{
@@ -125,14 +125,14 @@ func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt, argoWebhookHost string) []corev1.En
 	// allowed by NAME on top of `external`: that entry matches only public resolved
 	// IPs, and the Argo Route often resolves to a private ingress VIP (lab/on-prem
 	// clusters), where the SSRF guard would silently drop every forge→Argo delivery.
-	allowed := ServiceHost(dv) + ",external"
+	allowed := serviceHost(dv) + ",external"
 	if argoWebhookHost != "" {
 		allowed += "," + argoWebhookHost
 	}
 	return []corev1.EnvVar{
 		{Name: "FORGEJO__security__INSTALL_LOCK", Value: "true"},
 		{Name: "FORGEJO__database__DB_TYPE", Value: "sqlite3"},
-		{Name: "FORGEJO__server__ROOT_URL", Value: ForgejoExternalURL(dv) + "/"},
+		{Name: "FORGEJO__server__ROOT_URL", Value: forgejoExternalURL(dv) + "/"},
 		{Name: "FORGEJO__webhook__ALLOWED_HOST_LIST", Value: allowed},
 		// Webhook TLS is VERIFIED: the mounted ingress CA joins the system pool via
 		// Go's colon-separated SSL_CERT_DIR (empty dir on vanilla). Replaces the
@@ -158,7 +158,7 @@ const forgejoCADir = "/var/run/dotvirt/ca"
 // image's other declared volume, backed by an emptyDir.
 func ForgejoDeployment(dv *dotvirtv1alpha1.Dotvirt, setFSGroup bool, argoWebhookHost, adminSecretHash string) *appsv1.Deployment {
 	replicas := int32(1)
-	forgejoImg := imageFromEnv("RELATED_IMAGE_FORGEJO", ForgejoImage)
+	forgejoImg := imageFromEnv("RELATED_IMAGE_FORGEJO", forgejoImage)
 	dataMount := corev1.VolumeMount{Name: "data", MountPath: "/var/lib/gitea"}
 	etcMount := corev1.VolumeMount{Name: "etc", MountPath: "/etc/gitea"}
 	caMount := corev1.VolumeMount{Name: "ingress-ca", MountPath: forgejoCADir, ReadOnly: true}
@@ -202,7 +202,7 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 					Annotations: map[string]string{"dotvirt.io/admin-secret-hash": adminSecretHash},
 				},
 				Spec: corev1.PodSpec{
-					ServiceAccountName: ForgejoSAName,
+					ServiceAccountName: forgejoSAName,
 					SecurityContext:    forgejoPodSecurityContext(setFSGroup),
 					InitContainers: []corev1.Container{{
 						Name:            "bootstrap",
@@ -241,7 +241,7 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 					Volumes: []corev1.Volume{
 						{
 							Name:         "data",
-							VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: ForgejoPVCName}},
+							VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: forgejoPVCName}},
 						},
 						{Name: "etc", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 						// Optional: absent on vanilla; the trust dir is then just empty.

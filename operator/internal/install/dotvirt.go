@@ -14,8 +14,8 @@ import (
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 )
 
-// DefaultImage is deployed when the Dotvirt spec doesn't pin one.
-const DefaultImage = "quay.io/epheo/dotvirt@sha256:6df18fdcfb461270a46f7372356f97601f463827d85432bd5a1e5fbdbc02f9b6"
+// defaultImage is deployed when the Dotvirt spec doesn't pin one.
+const defaultImage = "quay.io/epheo/dotvirt@sha256:6df18fdcfb461270a46f7372356f97601f463827d85432bd5a1e5fbdbc02f9b6"
 
 // imageFromEnv returns the operand image pinned in the operator's RELATED_IMAGE_* env (set
 // from the CSV by OLM, and overridable per-install), falling back to the digest compiled in
@@ -34,7 +34,7 @@ const (
 	AppsetSecretName      = "dotvirt-appset-plugin"
 	WebhookSecretName     = "dotvirt-webhook"
 	ArgoWebhookSecretName = "dotvirt-argo-webhook"
-	DefaultForgeSecret    = "dotvirt-forge"
+	defaultForgeSecret    = "dotvirt-forge"
 	// OAuthSecretName holds the operator-generated OAuth client secret (key clientSecret).
 	OAuthSecretName   = "dotvirt-oauth"
 	oauthClientPrefix = "dotvirt"
@@ -67,7 +67,7 @@ func ForgeSecretName(dv *dotvirtv1alpha1.Dotvirt) string {
 	if dv.Spec.Forge.CredentialsSecret != "" {
 		return dv.Spec.Forge.CredentialsSecret
 	}
-	return DefaultForgeSecret
+	return defaultForgeSecret
 }
 
 // ForgeConfigured reports whether the install has any forge to wire the app to: a
@@ -149,11 +149,11 @@ func Service(dv *dotvirtv1alpha1.Dotvirt) *corev1.Service {
 	}
 }
 
-// ServiceHost is dotvirt's in-cluster DNS host and ServiceURL its base URL. A managed
+// serviceHost is dotvirt's in-cluster DNS host and ServiceURL its base URL. A managed
 // forge delivers webhooks here, not to the external Route: an in-cluster Forgejo can't
 // hairpin to the Route and doesn't trust its CA. dotvirt serves plain HTTP; the delivery
 // is still authenticated by HMAC.
-func ServiceHost(dv *dotvirtv1alpha1.Dotvirt) string { return svcHost(AppName, dv.Namespace) }
+func serviceHost(dv *dotvirtv1alpha1.Dotvirt) string { return svcHost(AppName, dv.Namespace) }
 func ServiceURL(dv *dotvirtv1alpha1.Dotvirt) string  { return svcURL(AppName, dv.Namespace, HTTPPort) }
 
 // svcHost and svcURL build the in-cluster DNS host / base URL for a Service —
@@ -170,7 +170,7 @@ func svcURL(name, namespace string, port int32) string {
 func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 	image := dv.Spec.Image
 	if image == "" {
-		image = imageFromEnv("RELATED_IMAGE_DOTVIRT", DefaultImage)
+		image = imageFromEnv("RELATED_IMAGE_DOTVIRT", defaultImage)
 	}
 
 	env := []corev1.EnvVar{}

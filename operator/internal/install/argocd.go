@@ -10,20 +10,20 @@ import (
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
-// RepoCredsName is the Argo repo-credentials template secret (in the ArgoCD ns).
-const RepoCredsName = "dotvirt-repo-creds"
+// repoCredsName is the Argo repo-credentials template secret (in the ArgoCD ns).
+const repoCredsName = "dotvirt-repo-creds"
 
 const (
 	argoGroup   = "argoproj.io"
 	argoVersion = "v1alpha1"
 
-	// ProjectTenants / ProjectPlatform are the two AppProject tiers.
-	ProjectTenants  = "dotvirt-tenants"
-	ProjectPlatform = "dotvirt-platform"
+	// projectTenants / projectPlatform are the two AppProject tiers.
+	projectTenants  = "dotvirt-tenants"
+	projectPlatform = "dotvirt-platform"
 
-	// AppTargetRevision is the branch every dotvirt Application syncs, spelled once so
+	// appTargetRevision is the branch every dotvirt Application syncs, spelled once so
 	// the tenant template and the platform app cannot drift apart.
-	AppTargetRevision = "main"
+	appTargetRevision = "main"
 
 	inClusterServer = "https://kubernetes.default.svc"
 )
@@ -77,7 +77,7 @@ func RepoCredsSecret(dv *dotvirtv1alpha1.Dotvirt, argoNS, urlPrefix, username, t
 	labels["argocd.argoproj.io/secret-type"] = "repo-creds"
 	return &corev1.Secret{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
-		ObjectMeta: metav1.ObjectMeta{Name: RepoCredsName, Namespace: argoNS, Labels: labels},
+		ObjectMeta: metav1.ObjectMeta{Name: repoCredsName, Namespace: argoNS, Labels: labels},
 		StringData: map[string]string{
 			"type":     "git",
 			"url":      urlPrefix,
@@ -92,7 +92,7 @@ func RepoCredsSecret(dv *dotvirtv1alpha1.Dotvirt, argoNS, urlPrefix, username, t
 // shared Argo controller SA could. This is the enforcement boundary. operatorNS +
 // argoNS are denied as destinations so a tenant can't target platform space.
 func TenantsAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo, operatorNS string) *unstructured.Unstructured {
-	return argoObject("AppProject", ProjectTenants, argoNS, dv.Name, map[string]any{
+	return argoObject("AppProject", projectTenants, argoNS, dv.Name, map[string]any{
 		"description": "dotvirt tenant projects — namespaced workloads only.",
 		"sourceRepos": []any{repoPrefix(platformRepo)},
 		"destinations": []any{
@@ -118,7 +118,7 @@ func TenantsAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo, operat
 
 // PlatformAppProject is the only tier allowed cluster-scoped + tenancy objects.
 func PlatformAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo string) *unstructured.Unstructured {
-	return argoObject("AppProject", ProjectPlatform, argoNS, dv.Name, map[string]any{
+	return argoObject("AppProject", projectPlatform, argoNS, dv.Name, map[string]any{
 		"description": "dotvirt platform tier — tenancy + cluster-scoped network infrastructure.",
 		"sourceRepos": []any{platformRepo},
 		"destinations": []any{
@@ -159,10 +159,10 @@ func PlatformAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo string
 // refused rather than applied, so an emptied or unclonable repo cannot wipe the tier.
 func PlatformApplication(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo string) *unstructured.Unstructured {
 	return argoObject("Application", "dotvirt-platform", argoNS, dv.Name, map[string]any{
-		"project": ProjectPlatform,
+		"project": projectPlatform,
 		"source": map[string]any{
 			"repoURL":        platformRepo,
-			"targetRevision": AppTargetRevision,
+			"targetRevision": appTargetRevision,
 			"path":           ".",
 			// templates/ is the repo's VM-template library (VirtualMachineTemplate
 			// manifests dotvirt renders itself) — its CRD need not exist on-cluster,

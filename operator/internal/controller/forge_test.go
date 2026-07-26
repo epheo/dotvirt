@@ -13,7 +13,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
@@ -85,7 +84,7 @@ func TestBootstrapForgejoMintsViaServiceURLWritesExternalURL(t *testing.T) {
 	if !sawTokenPOST {
 		t.Error("token was not minted over the Service URL")
 	}
-	cred := getSecret(t, r, dv.Namespace, install.DefaultForgeSecret)
+	cred := getSecret(t, r, dv.Namespace, install.ForgeSecretName(dv))
 	if got := string(cred.Data["url"]); got != dv.Spec.Forge.URL {
 		t.Errorf("forge secret url = %q, want the external URL %q", got, dv.Spec.Forge.URL)
 	}
@@ -112,7 +111,7 @@ func TestBootstrapForgejoSelfHealsSecretURLWithoutReMint(t *testing.T) {
 	defer srv.Close()
 
 	stale := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: install.DefaultForgeSecret, Namespace: dv.Namespace},
+		ObjectMeta: metav1.ObjectMeta{Name: install.ForgeSecretName(dv), Namespace: dv.Namespace},
 		Data: map[string][]byte{
 			"url":      []byte("https://old-forge.example"),
 			"username": []byte(install.ForgejoBotUser),
@@ -127,7 +126,7 @@ func TestBootstrapForgejoSelfHealsSecretURLWithoutReMint(t *testing.T) {
 	if err != nil || !ready {
 		t.Fatalf("bootstrapForgejo: ready=%v err=%v", ready, err)
 	}
-	cred := getSecret(t, r, dv.Namespace, install.DefaultForgeSecret)
+	cred := getSecret(t, r, dv.Namespace, install.ForgeSecretName(dv))
 	if got := string(cred.Data["url"]); got != dv.Spec.Forge.URL {
 		t.Errorf("forge secret url = %q, want healed to %q", got, dv.Spec.Forge.URL)
 	}
@@ -227,7 +226,7 @@ func TestReconcileForgeNotConfigured(t *testing.T) {
 
 func forgejoRoute(ns, host string) *unstructured.Unstructured {
 	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"})
+	u.SetGroupVersionKind(install.RouteGVK)
 	u.SetNamespace(ns)
 	u.SetName(install.ForgejoServiceName)
 	_ = unstructured.SetNestedField(u.Object, host, "spec", "host")
@@ -252,7 +251,7 @@ func TestReconcileForgeCreatesHostlessRouteAndWaits(t *testing.T) {
 		t.Fatalf("result = %+v, want requeue 5s (waiting for the router host)", res)
 	}
 	route := &unstructured.Unstructured{}
-	route.SetGroupVersionKind(schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"})
+	route.SetGroupVersionKind(install.RouteGVK)
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: dv.Namespace, Name: install.ForgejoServiceName}, route); err != nil {
 		t.Fatalf("hostless Forgejo Route not created: %v", err)
 	}
