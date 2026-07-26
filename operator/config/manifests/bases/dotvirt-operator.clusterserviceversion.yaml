@@ -14,6 +14,26 @@ metadata:
     features.operators.openshift.io/token-auth-aws: "false"
     features.operators.openshift.io/token-auth-azure: "false"
     features.operators.openshift.io/token-auth-gcp: "false"
+    operatorframework.io/initialization-resource: |-
+      {
+        "apiVersion": "dotvirt.io/v1alpha1",
+        "kind": "Dotvirt",
+        "metadata": {
+          "name": "dotvirt",
+          "namespace": "dotvirt-operator"
+        },
+        "spec": {
+          "forge": {
+            "managed": true
+          },
+          "ingress": {
+            "type": "auto"
+          },
+          "metrics": {
+            "url": "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091"
+          }
+        }
+      }
     operatorframework.io/suggested-namespace: dotvirt-operator
     repository: https://github.com/epheo/dotvirt
     support: https://github.com/epheo/dotvirt/issues

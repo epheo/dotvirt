@@ -27,7 +27,7 @@ metadata:
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
     containerImage: quay.io/epheo/dotvirt-operator@sha256:73c12ad00a4e47681854aef82af31d32076f8d38ab9885f885ca498c6d55f8a5
-    createdAt: "2026-07-26T13:56:19Z"
+    createdAt: "2026-07-26T14:08:36Z"
     description: Installs dotvirt, a GitOps web console for KubeVirt with a point-and-click workflow familiar to vSphere admins, plus its platform/tenant tier.
     features.operators.openshift.io/disconnected: "true"
     features.operators.openshift.io/fips-compliant: "false"
@@ -36,6 +36,26 @@ metadata:
     features.operators.openshift.io/token-auth-aws: "false"
     features.operators.openshift.io/token-auth-azure: "false"
     features.operators.openshift.io/token-auth-gcp: "false"
+    operatorframework.io/initialization-resource: |-
+      {
+        "apiVersion": "dotvirt.io/v1alpha1",
+        "kind": "Dotvirt",
+        "metadata": {
+          "name": "dotvirt",
+          "namespace": "dotvirt-operator"
+        },
+        "spec": {
+          "forge": {
+            "managed": true
+          },
+          "ingress": {
+            "type": "auto"
+          },
+          "metrics": {
+            "url": "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091"
+          }
+        }
+      }
     operatorframework.io/suggested-namespace: dotvirt-operator
     operators.operatorframework.io/builder: operator-sdk-v1.42.2
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
