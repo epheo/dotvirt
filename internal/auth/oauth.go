@@ -17,7 +17,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -50,6 +52,11 @@ type OAuth struct {
 
 	mu   sync.Mutex
 	meta *oauthMeta
+	// Probe cache for ClientRegistered: a definitive yes sticks, a definitive no
+	// re-probes after a short TTL.
+	registered    bool
+	probedPending bool
+	probedAt      time.Time
 }
 
 type oauthMeta struct {
@@ -205,4 +212,78 @@ func clearStateCookie(w http.ResponseWriter, r *http.Request) {
 		Name: stateCookie, Value: "", Path: "/api/auth",
 		HttpOnly: true, Secure: isTLS(r), SameSite: http.SameSiteLaxMode, MaxAge: -1,
 	})
+}
+
+// DesiredClient is the OAuthClient this flow was configured for — what the
+// finish-SSO action registers, applied under the CALLER's own token so the
+// operator (and dotvirt's SA) never needs oauthclients RBAC.
+func (o *OAuth) DesiredClient() (id, secret, redirectURL string) {
+	return o.cfg.ClientID, o.cfg.ClientSecret, o.cfg.RedirectURL
+}
+
+// ClientRegistered reports whether the configured OAuthClient is actually
+// registered on the cluster's oauth server, so the login screen can say "SSO is
+// enabled but not finished" instead of letting users click into a failure. The
+// probe is the authorize endpoint with redirects held: a registered client (with a
+// matching redirect URI) answers with a login redirect or page; an unregistered or
+// mismatched one answers 4xx. No credentials travel.
+//
+// Failure posture: a network/5xx probe reads as REGISTERED, so a flaky oauth stack
+// never talks users out of a button that might work. A definitive yes is cached
+// for good; a definitive no is re-probed after a short TTL (the admin may be
+// fixing it right now), and MarkRegistered clears it the moment the finish action
+// applies the client.
+func (o *OAuth) ClientRegistered(ctx context.Context) bool {
+	o.mu.Lock()
+	if o.registered || time.Since(o.probedAt) < 10*time.Second {
+		reg, pending := o.registered, o.probedPending
+		o.mu.Unlock()
+		if reg {
+			return true
+		}
+		return !pending
+	}
+	o.mu.Unlock()
+
+	m, err := o.discover(ctx)
+	if err != nil {
+		return true
+	}
+	u := fmt.Sprintf("%s?response_type=code&client_id=%s&redirect_uri=%s&scope=user:full&state=probe",
+		m.AuthorizationEndpoint, url.QueryEscape(o.cfg.ClientID), url.QueryEscape(o.cfg.RedirectURL))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return true
+	}
+	// Hold redirects: the probe only needs the status class, never the login page.
+	probeClient := &http.Client{
+		Transport: o.client.Transport,
+		Timeout:   o.client.Timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := probeClient.Do(req)
+	if err != nil {
+		return true
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	registered := resp.StatusCode < 400 || resp.StatusCode >= 500
+	o.mu.Lock()
+	o.registered = registered && resp.StatusCode < 500
+	o.probedPending = !registered
+	o.probedAt = time.Now()
+	o.mu.Unlock()
+	return registered
+}
+
+// MarkRegistered records that the finish action just applied the OAuthClient, so
+// the login screen flips to ready without waiting out the probe TTL.
+func (o *OAuth) MarkRegistered() {
+	o.mu.Lock()
+	o.registered = true
+	o.probedPending = false
+	o.mu.Unlock()
 }

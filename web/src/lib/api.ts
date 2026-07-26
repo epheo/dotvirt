@@ -883,7 +883,10 @@ export const api = {
 		get<EffectivePolicy>(`/api/namespaces/${enc(namespace)}/policy`),
 	trace: (req: TraceRequest) => post<TraceResult>('/api/networking/trace', req),
 	// Which sign-in paths exist (shown on the login screen before any session).
-	authMethods: () => get<{ sso: boolean }>('/api/auth/methods'),
+	authMethods: () => get<{ sso: boolean; ssoPending: boolean }>('/api/auth/methods'),
+	// Registers the OAuthClient SSO needs, under the CALLER's own token — the API
+	// server's RBAC is the gate, so only a cluster admin succeeds.
+	finishSSO: () => req<void>('/api/auth/oauthclient', { method: 'POST' }),
 
 	// Commit history + per-commit revert (a forward commit opened as a PR).
 	history: (project: string) => get<Commit[]>(`/api/projects/${enc(project)}/history`),

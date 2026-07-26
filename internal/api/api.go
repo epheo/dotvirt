@@ -225,12 +225,16 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("POST /api/logout", s.auth.Logout)
 		mux.HandleFunc("GET /api/me", s.auth.Me)
 		// The login screen asks which sign-in paths exist before any session.
+		// ssoPending says SSO is configured but its OAuthClient isn't registered yet,
+		// so the screen can say "finish setup" instead of offering a button that fails.
 		mux.HandleFunc("GET /api/auth/methods", func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]bool{"sso": s.oauth != nil})
+			pending := s.oauth != nil && !s.oauth.ClientRegistered(r.Context())
+			writeJSON(w, http.StatusOK, map[string]bool{"sso": s.oauth != nil, "ssoPending": pending})
 		})
 		if s.oauth != nil {
 			mux.HandleFunc("GET /api/auth/openshift", s.oauth.LoginRedirect)
 			mux.HandleFunc("GET /api/auth/callback", s.oauth.Callback)
+			mux.HandleFunc("POST /api/auth/oauthclient", s.handleFinishSSO)
 		}
 	}
 

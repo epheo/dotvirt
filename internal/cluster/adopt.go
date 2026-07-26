@@ -174,3 +174,21 @@ func adoptPath(obj *unstructured.Unstructured) string {
 	}
 	return ns + "/" + name + "." + strings.ToLower(obj.GetKind()) + ".yaml"
 }
+
+// ApplyOAuthClient registers (or converges) the cluster-scoped OAuthClient SSO
+// needs, under THIS client's identity — the finish-SSO action runs it with the
+// caller's own token, so the API server's RBAC is the gate and neither dotvirt's
+// SA nor the operator ever holds oauthclients permissions.
+func (c *Client) ApplyOAuthClient(ctx context.Context, id, secret, redirectURL string) error {
+	gvr := schema.GroupVersionResource{Group: "oauth.openshift.io", Version: "v1", Resource: "oauthclients"}
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion":   "oauth.openshift.io/v1",
+		"kind":         "OAuthClient",
+		"metadata":     map[string]any{"name": id},
+		"secret":       secret,
+		"redirectURIs": []any{redirectURL},
+		"grantMethod":  "auto",
+	}}
+	_, err := c.dyn.Resource(gvr).Apply(ctx, id, obj, metav1.ApplyOptions{FieldManager: "dotvirt", Force: true})
+	return err
+}
