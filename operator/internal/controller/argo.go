@@ -12,10 +12,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
+	"github.com/epheo/dotvirt/operator/internal/platform"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
@@ -32,6 +34,9 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	// mirror the generated one there (create-once).
 	if !r.DryRun {
 		if err := r.mirrorAppsetToken(ctx, dv, argoNS); err != nil {
+			return nil, err
+		}
+		if err := r.ensureForgeTLSTrust(ctx, dv, argoNS); err != nil {
 			return nil, err
 		}
 	}
@@ -195,4 +200,44 @@ func (r *DotvirtReconciler) repoCreds(ctx context.Context, dv *dotvirtv1alpha1.D
 		prefix = forge.OwnerPrefixURL(dv.Spec.Forge.PlatformRepo)
 	}
 	return install.RepoCredsSecret(dv, argoNS, prefix, string(s.Data["username"]), token)
+}
+
+// ensureForgeTLSTrust merges the managed forge's host into argocd-tls-certs-cm with
+// the cluster's default ingress CA, so Argo's repo-server VERIFIES the router-served
+// certificate instead of failing x509 on every repo under the forge. Without this
+// the install only works after an admin hand-adds the host there — the invisible
+// step that masked the gap (`insecure` on the repo-creds template is silently
+// ignored; it is a repository-secret-only field).
+//
+// Managed-on-OpenShift only: a BYO forge's trust is the admin's, and off OpenShift
+// there is no ingress CA to read. MERGE semantics — other hosts' entries (including
+// hand-added ones) are never touched, and the entry is left behind on uninstall: a
+// CA for this cluster's own ingress is not a secret and a dead host key is inert.
+func (r *DotvirtReconciler) ensureForgeTLSTrust(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) error {
+	if !dv.Spec.Forge.Managed || r.Platform != platform.OpenShift {
+		return nil
+	}
+	host := install.ForgejoHost(dv)
+	if host == "" {
+		return nil
+	}
+	var ingressCA corev1.ConfigMap
+	if err := r.Get(ctx, types.NamespacedName{Namespace: "openshift-config-managed", Name: "default-ingress-cert"}, &ingressCA); err != nil {
+		// Legible and blocking: without trust every Application wedges in a
+		// ComparisonError that says x509, three layers away from this cause.
+		return fmt.Errorf("read default ingress CA (needed to trust the managed forge's route in ArgoCD): %w", err)
+	}
+	ca := ingressCA.Data["ca-bundle.crt"]
+	if ca == "" {
+		return fmt.Errorf("default-ingress-cert has no ca-bundle.crt")
+	}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "argocd-tls-certs-cm", Namespace: argoNS}}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, cm, func() error {
+		if cm.Data == nil {
+			cm.Data = map[string]string{}
+		}
+		cm.Data[host] = ca
+		return nil
+	})
+	return err
 }

@@ -69,28 +69,23 @@ func ArgoWebhookSecret(argoNS, value string) *corev1.Secret {
 // repos — including private ones. Lives in the ArgoCD namespace; label-tracked for
 // finalizer cleanup (a namespaced CR can't ownerRef it).
 //
-// spec.forge.insecureTLS carries into the template: a managed forge on a
-// router-assigned host serves the ingress operator's self-signed wildcard, which
-// Argo's repo-server refuses ("x509: certificate signed by unknown authority") and
-// every app wedges in ComparisonError. The app and the forge already honor the
-// flag; without this leg the install only works after an admin hand-trusts the
-// host in argocd-tls-certs-cm, which no one can know to do.
+// No `insecure` key: ArgoCD honors it only on per-URL repository secrets, NEVER on
+// repo-creds templates (verified against the declarative-setup docs), so putting it
+// here silently does nothing while looking like it works. TLS trust for the managed
+// forge's router cert is real instead: the controller merges the cluster's default
+// ingress CA into argocd-tls-certs-cm under the forge host.
 func RepoCredsSecret(dv *dotvirtv1alpha1.Dotvirt, argoNS, urlPrefix, username, token string) *corev1.Secret {
 	labels := Labels(dv.Name)
 	labels["argocd.argoproj.io/secret-type"] = "repo-creds"
-	data := map[string]string{
-		"type":     "git",
-		"url":      urlPrefix,
-		"username": username,
-		"password": token,
-	}
-	if dv.Spec.Forge.InsecureTLS {
-		data["insecure"] = "true"
-	}
 	return &corev1.Secret{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
 		ObjectMeta: metav1.ObjectMeta{Name: RepoCredsName, Namespace: argoNS, Labels: labels},
-		StringData: data,
+		StringData: map[string]string{
+			"type":     "git",
+			"url":      urlPrefix,
+			"username": username,
+			"password": token,
+		},
 	}
 }
 

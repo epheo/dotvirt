@@ -11,7 +11,9 @@ rules:
   verbs:
   - create
   - deletecollection
+  - get
   - patch
+  - update
 - apiGroups:
   - ""
   resources:

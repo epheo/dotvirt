@@ -28,7 +28,7 @@ metadata:
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
     containerImage: quay.io/epheo/dotvirt-operator@sha256:73c12ad00a4e47681854aef82af31d32076f8d38ab9885f885ca498c6d55f8a5
-    createdAt: "2026-07-24T21:59:15Z"
+    createdAt: "2026-07-26T12:27:12Z"
     description: Installs dotvirt, a GitOps web console for KubeVirt with a point-and-click workflow familiar to vSphere admins, plus its platform/tenant tier.
     features.operators.openshift.io/disconnected: "true"
     features.operators.openshift.io/fips-compliant: "false"
@@ -140,6 +140,19 @@ spec:
     Each step records a status condition on the `Dotvirt` resource, so
     `kubectl describe dotvirt` explains a stuck install.
 
+    ### Where everything is reported
+
+    The `Dotvirt` resource's status carries the URLs and credentials pointers a
+    fresh install needs:
+
+    - `status.consoleURL`: the dotvirt console
+    - `status.forgeURL`: the (managed) Forgejo UI
+    - `status.forgeAdminHint`: the command that reveals the managed Forgejo's
+      admin password (user `dotvirt-bot`; the secret is `dotvirt-forgejo-admin`
+      in the install namespace)
+    - `status.ssoOAuthClient`: with `auth.openShiftSSO: true`, the one command
+      to register the OAuthClient that finishes SSO
+
     ### What you get in the UI
 
     - VM inventory and detail views with live power, migrate, and snapshot
@@ -186,7 +199,9 @@ spec:
               verbs:
                 - create
                 - deletecollection
+                - get
                 - patch
+                - update
             - apiGroups:
                 - ""
               resources:

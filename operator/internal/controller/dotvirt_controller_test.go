@@ -418,3 +418,55 @@ func TestFinalizeToleratesNotFoundAndMissingArgoCRD(t *testing.T) {
 		t.Error("CR still present; tolerated errors must not block the finalizer")
 	}
 }
+
+// The managed forge's router cert must be TRUSTED by Argo's repo-server, not
+// insecure-flagged (repo-creds templates ignore `insecure`): the host is merged into
+// argocd-tls-certs-cm with the default ingress CA, preserving every other entry —
+// including hand-added ones from before this existed.
+func TestEnsureForgeTLSTrustMergesHost(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Forge.Managed = true
+	dv.Spec.Forge.URL = "https://forge.apps.cluster.example"
+	ingressCA := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "default-ingress-cert", Namespace: "openshift-config-managed"},
+		Data:       map[string]string{"ca-bundle.crt": "PEM"},
+	}
+	existing := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "argocd-tls-certs-cm", Namespace: "openshift-gitops"},
+		Data:       map[string]string{"hand-added.example": "KEEP"},
+	}
+	c := testBuilder(t).WithObjects(dv, ingressCA, existing).Build()
+	r := newReconciler(c, depsOK)
+	r.Platform = platform.OpenShift
+
+	if err := r.ensureForgeTLSTrust(context.Background(), dv, "openshift-gitops"); err != nil {
+		t.Fatalf("ensureForgeTLSTrust: %v", err)
+	}
+	var cm corev1.ConfigMap
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "openshift-gitops", Name: "argocd-tls-certs-cm"}, &cm); err != nil {
+		t.Fatal(err)
+	}
+	if cm.Data["forge.apps.cluster.example"] != "PEM" {
+		t.Errorf("forge host not trusted: %v", cm.Data)
+	}
+	if cm.Data["hand-added.example"] != "KEEP" {
+		t.Errorf("merge must preserve foreign entries: %v", cm.Data)
+	}
+}
+
+// BYO forges and vanilla Kubernetes are not the operator's TLS business.
+func TestEnsureForgeTLSTrustGates(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Forge.URL = "https://byo.example"
+	dv.Spec.Forge.CredentialsSecret = "byo"
+	c := testBuilder(t).WithObjects(dv).Build()
+	r := newReconciler(c, depsOK)
+	r.Platform = platform.OpenShift
+	if err := r.ensureForgeTLSTrust(context.Background(), dv, "openshift-gitops"); err != nil {
+		t.Fatalf("BYO must be a no-op, got %v", err)
+	}
+	var cm corev1.ConfigMap
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "openshift-gitops", Name: "argocd-tls-certs-cm"}, &cm); err == nil {
+		t.Errorf("no ConfigMap should be created for a BYO forge")
+	}
+}
