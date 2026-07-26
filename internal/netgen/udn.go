@@ -5,14 +5,17 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/validate"
 )
 
-// Scope of a port group create.
+// Scope of a port group create. Project/shared are the read plane's
+// model.NetworkScope values; vlan exists only at create time (a localnet CUDN
+// reads back as shared).
 const (
-	ScopeProject = "project" // namespace-scoped Layer2 UDN — an "Internal" port group
-	ScopeShared  = "shared"  // cluster-scoped Layer2 CUDN — an isolated port group shared across namespaces
-	ScopeVLAN    = "vlan"    // cluster-scoped localnet CUDN — a "VLAN" port group
+	ScopeProject = string(model.ScopeProject) // namespace-scoped Layer2 UDN: an "Internal" port group
+	ScopeShared  = string(model.ScopeShared)  // cluster-scoped Layer2 CUDN: an isolated port group shared across namespaces
+	ScopeVLAN    = "vlan"                     // cluster-scoped localnet CUDN: a "VLAN" port group
 )
 
 // Spec describes a port group to create. Project scope emits a namespace-scoped

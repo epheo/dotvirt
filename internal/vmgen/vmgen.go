@@ -87,7 +87,14 @@ func Manifest(s Spec) (path string, content []byte, err error) {
 	if err != nil {
 		return "", nil, err
 	}
-	return s.Namespace + "/" + s.Name + ".yaml", out, nil
+	return ManifestPath(s.Namespace, s.Name), out, nil
+}
+
+// ManifestPath is the repo-relative path of a VM manifest: one file per VM,
+// grouped by namespace directory. cluster.ExportPath serializes adopted VMs to
+// the same path, so adopt-then-edit converges on one file.
+func ManifestPath(namespace, name string) string {
+	return namespace + "/" + name + ".yaml"
 }
 
 func validateSpec(s Spec) error {
