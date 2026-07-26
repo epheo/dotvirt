@@ -4,9 +4,7 @@
 	import { TERMS, dual } from '$lib/vocab';
 	import ChoiceCards from './ChoiceCards.svelte';
 	import CheckGroup from './CheckGroup.svelte';
-	import ErrorNote from './ErrorNote.svelte';
-	import Modal from './Modal.svelte';
-	import StageFooter from './StageFooter.svelte';
+	import StageModal from './StageModal.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
 	import FormField from './FormField.svelte';
 	import TextInput from './TextInput.svelte';
@@ -39,9 +37,6 @@
 	let vlan = $state<number | undefined>(undefined);
 	let physnet = $state('');
 	let selectedNs = $state<string[]>([]);
-
-	let submitting = $state(false);
-	let error = $state('');
 
 	const kindOptions = $derived([
 		{ value: 'overlay' as const, label: 'Overlay Segment', hint: 'Internal · Geneve (Layer 2)' },
@@ -89,31 +84,27 @@
 		return `Stages segment “${name}” (UDN) → ${namespace}`;
 	});
 
-	async function submit() {
-		if (!valid) return;
-		submitting = true;
-		error = '';
-		try {
-			const req: NetworkCreate =
-				kind === 'vlan'
-					? { name, scope: 'vlan', physicalNetwork: physnet.trim(), vlan, namespaces: selectedNs }
-					: share === 'shared'
-						? { name, scope: 'shared', namespaces: selectedNs }
-						: { name, namespace, scope: 'project' };
-			if (subnet.trim()) req.subnets = [subnet.trim()];
-			await api.createNetwork(req);
-			onstaged();
-			onclose();
-		} catch (e) {
-			error = String(e);
-		} finally {
-			submitting = false;
-		}
+	async function stage() {
+		const req: NetworkCreate =
+			kind === 'vlan'
+				? { name, scope: 'vlan', physicalNetwork: physnet.trim(), vlan, namespaces: selectedNs }
+				: share === 'shared'
+					? { name, scope: 'shared', namespaces: selectedNs }
+					: { name, namespace, scope: 'project' };
+		if (subnet.trim()) req.subnets = [subnet.trim()];
+		await api.createNetwork(req);
 	}
 </script>
 
-<Modal title={`New ${TERMS.segment.nsx} · ${TERMS.segment.vsphere}`} {onclose}>
-	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
+<StageModal
+	title={`New ${TERMS.segment.nsx} · ${TERMS.segment.vsphere}`}
+	label="Stage segment"
+	{missing}
+	{summary}
+	onsubmit={stage}
+	{onstaged}
+	{onclose}
+>
 		<!-- Segment type: an overlay (Geneve) Layer 2 network, or a VLAN bridged to a
 			     Tier-0 uplink. -->
 		<ChoiceCards options={kindOptions} bind:value={kind} />
@@ -190,17 +181,4 @@
 			Looking for a project's default network? That is the primary {dual(TERMS.tier1)} segment — create
 			it with a New Namespace or New Project.
 		</p>
-		<ErrorNote {error} />
-	</div>
-	{#snippet footer()}
-		<StageFooter
-			label="Stage segment"
-			disabled={!valid}
-			{missing}
-			{summary}
-			{submitting}
-			onsubmit={submit}
-			oncancel={onclose}
-		/>
-	{/snippet}
-</Modal>
+</StageModal>
