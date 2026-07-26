@@ -187,6 +187,10 @@ func sizingChanges(current model.VM, edit VMEdit) []model.Change {
 // DiffVMs renders the difference between two parsed VMs (e.g. running vs main)
 // as semantic model.Change items — used for drift detail. "From" is the a side
 // (e.g. main / desired), "To" is the b side (e.g. running / actual).
+//
+// EditToMatch below walks the same fields for adoption; a field added here
+// without an EditToMatch counterpart is drift the UI shows but Adopt cannot
+// converge (TestEditToMatchConverges guards the pairing).
 func DiffVMs(a, b model.VM) []model.Change {
 	var out []model.Change
 	cmp := func(field, av, bv string) {
@@ -321,4 +325,107 @@ func sortedStrings(s []string) []string {
 	out := append([]string(nil), s...)
 	sort.Strings(out)
 	return out
+}
+
+// EditToMatch builds a VMEdit that transforms `from` (e.g. main/desired) into
+// `to` (e.g. running/actual) for the scalar + label + disk/network fields
+// dotvirt edits. Used by Adopt to propose the live state into git.
+//
+// Deliberately NOT derived from DiffVMs: this walk skips values a stopped VM
+// does not report (zero cores, empty memory) so adoption never strips fields,
+// and omits display-only aspects (pinning, groups). Fields derived from map
+// walks are built in sorted key order so the edit, and the YAML it stages, is
+// deterministic.
+func EditToMatch(from, to model.VM) VMEdit {
+	var edit VMEdit
+	if from.Power != to.Power && to.Power != model.PowerUnknown {
+		p := string(to.Power)
+		edit.Power = &p
+	}
+	if from.CPUCores != to.CPUCores && to.CPUCores != 0 {
+		c := to.CPUCores
+		edit.CPUCores = &c
+	}
+	if from.Memory != to.Memory && to.Memory != "" {
+		m := to.Memory
+		edit.Memory = &m
+	}
+	if from.Instancetype != to.Instancetype && to.Instancetype != "" {
+		it := to.Instancetype
+		edit.Instancetype = &it
+	}
+	if from.Preference != to.Preference && to.Preference != "" {
+		pr := to.Preference
+		edit.Preference = &pr
+	}
+	if from.DRSExclude != to.DRSExclude {
+		v := to.DRSExclude
+		edit.DRSExclude = &v
+	}
+	if from.EvictionStrategy != to.EvictionStrategy {
+		es := to.EvictionStrategy // "" removes the field: the transform-to-actual semantics
+		edit.EvictionStrategy = &es
+	}
+
+	// Labels: set those changed/added in `to`, remove those only in `from`.
+	set := map[string]string{}
+	for k, v := range to.Labels {
+		if from.Labels[k] != v {
+			set[k] = v
+		}
+	}
+	if len(set) > 0 {
+		edit.SetLabels = set
+	}
+	for _, k := range sortedKeys(from.Labels) {
+		if _, ok := to.Labels[k]; !ok {
+			edit.RemoveLabels = append(edit.RemoveLabels, k)
+		}
+	}
+
+	// Disks/networks present only in `to` are added; only in `from` are removed.
+	fromDisks, toDisks := diskNameSet(from), diskNameSet(to)
+	added, removed := addedRemoved(fromDisks, toDisks)
+	for _, name := range added {
+		edit.AddDisks = append(edit.AddDisks, model.DiskAdd{Name: name, Size: toDisks[name]})
+	}
+	edit.RemoveDisks = removed
+	fromNets, toNets := nicNameSet(from), nicNameSet(to)
+	added, removed = addedRemoved(fromNets, toNets)
+	for _, name := range added {
+		edit.AddNetworks = append(edit.AddNetworks, model.NetworkAdd{Name: toNets[name]})
+	}
+	edit.RemoveNetworks = removed
+	return edit
+}
+
+// addedRemoved diffs two name-keyed sets, both sides in sorted order.
+func addedRemoved(from, to map[string]string) (added, removed []string) {
+	for _, name := range sortedKeys(to) {
+		if _, ok := from[name]; !ok {
+			added = append(added, name)
+		}
+	}
+	for _, name := range sortedKeys(from) {
+		if _, ok := to[name]; !ok {
+			removed = append(removed, name)
+		}
+	}
+	return added, removed
+}
+
+func diskNameSet(v model.VM) map[string]string {
+	m := map[string]string{}
+	for _, d := range v.Disks {
+		m[d.Name] = d.Size
+	}
+	return m
+}
+
+func nicNameSet(v model.VM) map[string]string {
+	m := map[string]string{}
+	for _, n := range v.Networks {
+		m[n.Name] = n.Network
+	}
+	return m
 }
