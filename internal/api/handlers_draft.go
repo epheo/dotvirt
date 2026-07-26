@@ -159,12 +159,9 @@ func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// A claim is an object tracked by an app on ANOTHER source: capturing it here would
-	// give one object two declaring repos. The project's own app is deliberately not a
-	// claim (git decides what its repo declares; the lost-repo recovery depends on
-	// that), and a snapshot that hasn't listed yet would read every tracked object as
-	// unclaimed and re-capture foreign tiers. nil drift is Argo disabled, where no
-	// annotation can be a live claim.
+	// Foreign-app claims only: the own app is not one (git decides what this repo
+	// declares; recovery depends on that). Pre-sync would misread every claim as
+	// residue, so refuse. nil drift is Argo disabled: no annotation is a live claim.
 	var foreignApps map[string]bool
 	if s.drift != nil {
 		if foreignApps = s.drift.ForeignApps(sc.proj.Repo); foreignApps == nil {

@@ -134,12 +134,9 @@ func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt, argoWebhookHost string) []corev1.En
 		{Name: "FORGEJO__database__DB_TYPE", Value: "sqlite3"},
 		{Name: "FORGEJO__server__ROOT_URL", Value: ForgejoExternalURL(dv) + "/"},
 		{Name: "FORGEJO__webhook__ALLOWED_HOST_LIST", Value: allowed},
-		// Forgejo VERIFIES webhook TLS: the ArgoCD-direct delivery targets Argo's
-		// external Route, served by the ingress CA the mounted trust dir supplies. Go
-		// honors a colon-separated SSL_CERT_DIR, so the system pool stays beside the
-		// mounted CA (optional mount: on vanilla the dir is simply empty). This
-		// replaced the old global SKIP_TLS_VERIFY, which also unverified every
-		// tenant-added external webhook.
+		// Webhook TLS is VERIFIED: the mounted ingress CA joins the system pool via
+		// Go's colon-separated SSL_CERT_DIR (empty dir on vanilla). Replaces the
+		// global SKIP_TLS_VERIFY, which also unverified tenant webhooks.
 		{Name: "SSL_CERT_DIR", Value: "/etc/ssl/certs:" + forgejoCADir},
 	}
 }
@@ -197,11 +194,9 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}, // RWO data
 			Selector: &metav1.LabelSelector{MatchLabels: forgejoSelector},
 			Template: corev1.PodTemplateSpec{
-				// The admin-secret hash makes a ROTATED secret roll the pod, whose
-				// initContainer then reconciles the DB password to it (create-or-reset).
-				// Without this, rotation leaves the running forge on the old password
-				// until someone reads the AdminCredentialRejected runbook — a manual
-				// step lazy users never take.
+				// A rotated admin secret must roll the pod so the initContainer
+				// reconciles the DB password; without this, rotation waits on a
+				// human runbook.
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      forgejoSelector,
 					Annotations: map[string]string{"dotvirt.io/admin-secret-hash": adminSecretHash},
@@ -249,8 +244,7 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 							VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: ForgejoPVCName}},
 						},
 						{Name: "etc", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-						// Optional: absent on vanilla Kubernetes (no ingress CA to copy); the
-						// trust dir is then empty and SSL_CERT_DIR still lists the system pool.
+						// Optional: absent on vanilla; the trust dir is then just empty.
 						{Name: "ingress-ca", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
 							LocalObjectReference: corev1.LocalObjectReference{Name: IngressCAConfigMap}, Optional: &caOptional,
 						}}},

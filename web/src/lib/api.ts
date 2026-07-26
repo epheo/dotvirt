@@ -884,8 +884,7 @@ export const api = {
 	trace: (req: TraceRequest) => post<TraceResult>('/api/networking/trace', req),
 	// Which sign-in paths exist (shown on the login screen before any session).
 	authMethods: () => get<{ sso: boolean; ssoPending: boolean }>('/api/auth/methods'),
-	// Registers the OAuthClient SSO needs, under the CALLER's own token — the API
-	// server's RBAC is the gate, so only a cluster admin succeeds.
+	// Applies the OAuthClient under the CALLER's token; RBAC is the gate.
 	finishSSO: () => req<void>('/api/auth/oauthclient', { method: 'POST' }),
 
 	// Commit history + per-commit revert (a forward commit opened as a PR).
@@ -1037,8 +1036,7 @@ export async function draftsByProject(
 			}
 		}),
 	);
-	// A warning-only draft still renders: an empty draft whose project has objects
-	// ArgoCD would prune must warn BEFORE anything merges, not after.
+	// Warning-only drafts render too: prune risk must warn BEFORE anything merges.
 	return results.filter(
 		(r): r is { project: string; draft: DraftView } =>
 			!!r && (r.draft.count > 0 || !!r.draft.warning),

@@ -61,7 +61,7 @@
 	const valid = $derived(missing.length === 0);
 	const summary = $derived(
 		valid
-			? `Stages ${mode} rescheduling (${threshold}, every ${intervalSeconds}s)${installPSI ? ' + PSI MachineConfig' : ''} → platform repo`
+			? `Stages ${mode} rescheduling (${threshold}, every ${intervalSeconds}s)${installPSI ? ' + PSI MachineConfig' : ''} -> platform repo`
 			: '',
 	);
 

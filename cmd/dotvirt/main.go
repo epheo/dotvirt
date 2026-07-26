@@ -35,10 +35,9 @@ import (
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
-// liveVMs adapts the SA snapshot to the coordinator's actual-state source: the VMs it
-// already holds, serialized with the same writer the repo is fed from, so a diff sees
-// only real drift. A VM that fails to serialize is dropped rather than failing the
-// batch, matching how the read path treats one odd object.
+// liveVMs adapts the SA snapshot to the coordinator's actual-state source,
+// serialized with the repo's own writer so a diff sees only real drift. One
+// unserializable VM drops rather than failing the batch.
 type liveVMs struct{ state *clusterstate.State }
 
 // Ready gates on the stores this reads (VMs + namespaces), not full Synced(): a
@@ -179,8 +178,7 @@ func run() error {
 		}
 	}
 
-	// Typed-nil guard: a nil *argo.Snapshot in the interface field would read as
-	// wired and then panic, so only a real snapshot becomes the prune source.
+	// Typed-nil guard: a nil *argo.Snapshot in the interface would read as wired.
 	var pruneSource changeset.PruneSource
 	if argoSnapshot != nil {
 		pruneSource = argoSnapshot

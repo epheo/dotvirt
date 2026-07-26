@@ -262,11 +262,8 @@ type fakePrune []model.ObjectRef
 
 func (f fakePrune) PrunePending(string, []string) []model.ObjectRef { return f }
 
-// The prune warning is derived on every view from what ArgoCD would delete minus
-// what the draft speaks for. It must show on an EMPTY draft (a recovering project
-// warns before its first merge), and shrink as adoption stages the missing objects.
-// Nothing is stored, so reopening the view can never show a partial capture as
-// complete.
+// The warning derives every view: shows on an EMPTY draft, shrinks as adoption
+// stages. Nothing stored, so reopening never shows partial as complete.
 func TestDraftWarningDerivedNotStored(t *testing.T) {
 	bare, live := seedBareWithLive(t)
 	c := newTestCoordinator(t)
@@ -303,9 +300,8 @@ func TestDraftWarningDerivedNotStored(t *testing.T) {
 	}
 }
 
-// A draft entry speaks for exactly the objects that must not trip the prune warning:
-// a manifest entry for its documents, a wizard create for its VM, a DELETE for the
-// object whose pruning it intends. Kinds with no prunable tenant form map to nothing.
+// Manifest entries speak for their documents; a DELETE for the prune it intends;
+// kinds with no prunable tenant form for nothing.
 func TestEntryRefsSpeakForDraftEntries(t *testing.T) {
 	refs := entryRefs(draft.Entry{Kind: draft.KindCreate, Namespace: "alpha", Name: "web",
 		Manifest: "kind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\n"})

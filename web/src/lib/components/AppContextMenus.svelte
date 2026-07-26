@@ -47,8 +47,7 @@
 		goto(vmHref(vm.namespace, vm.name));
 	}
 
-	// The project's GitOps rollup error, for the recover-repo gate: a repo the forge
-	// lost surfaces here as a comparison error (nothing else in the payload says it).
+	// Recover-repo gate: only the GitOps rollup says the forge lost the repo.
 	function projectSyncError(project: string): string {
 		return inventory.inventory?.projects.find((p) => p.name === project)?.gitOps?.syncError ?? '';
 	}
@@ -61,10 +60,9 @@
 		return inventory.allVMs.filter((v) => want.has(v.namespace) && v.sync === 'NotTracked');
 	}
 
-	// Adopt each namespace whole into one draft. Namespaces showing untracked VMs are
-	// the usual targets; with none (a recovered repo whose objects are all tracked but
-	// no longer declared), every namespace is asked and "nothing to adopt" 400s are
-	// surfaced per namespace rather than silently skipping the lot.
+	// Adopt each namespace whole into one draft. No untracked VMs (recovery: all
+	// tracked, none declared) falls back to every namespace; per-ns 400s surface
+	// rather than silently skipping.
 	async function bulkAdoptUntracked(namespaces: string[]) {
 		let want = new Set(untrackedVMs(namespaces).map((v) => v.namespace));
 		if (want.size === 0) want = new Set(namespaces);
@@ -72,9 +70,8 @@
 		// the caller may not read) must not abandon the rest half-done, with the already
 		// staged ones sitting in the draft unmentioned.
 		const caveats: string[] = [];
-		// The view warning is project-wide and re-derived per call, so each response
-		// restates (a shrinking version of) the same text; keep only the last, freshest
-		// one instead of accumulating near-duplicates.
+		// The warning is project-wide and re-derived per call; keep only the last
+		// instead of accumulating near-duplicates.
 		let warning = '';
 		let staged = 0;
 		try {
@@ -136,10 +133,8 @@
 					>
 					<div class="my-1 border-t border-line-soft"></div>
 				{/if}
-				<!-- A dead repo annotation (the forge lost the repo) is a different dead end from
-				     repoless: recovery re-creates the repo. Gated on the GitOps error, not its text;
-				     the backend refuses when the repo actually resolves, so a transient sync error
-				     ends in a clear conflict rather than a wrong re-create. -->
+				<!-- A dead repo annotation is a different dead end from repoless. Gated on
+				     the GitOps error; the backend refuses when the repo resolves. -->
 				{#if ctx.kind === 'container' && ctx.repo && projectSyncError(ctx.project) && inventory.canManage}
 					<MenuItem
 						onclick={() => {

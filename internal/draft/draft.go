@@ -72,7 +72,7 @@ type Entry struct {
 	Edit *manifest.VMEdit `json:"edit,omitempty"`
 
 	// Create fields (KindCreate): the wizard spec for a new VM, OR — when
-	// adopting an object that exists only in the cluster — its live state
+	// adopting an object that exists only in the cluster - its live state
 	// serialized verbatim (SourceFile then carries the path it lands at).
 	Spec     *vmgen.Spec `json:"spec,omitempty"`
 	Manifest string      `json:"manifest,omitempty"`

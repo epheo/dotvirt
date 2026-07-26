@@ -23,12 +23,10 @@ func AllowInsecureTLS() {
 	gittransport.InstallProtocol("https", githttp.NewClient(client))
 }
 
-// AllowCustomCA makes go-git trust caFile's PEM bundle (typically the cluster's
-// ingress CA serving a managed forge Route) IN ADDITION to nothing else — the pool
-// replaces the system roots for git https, which is correct for the single-forge
-// client this process is. Tolerant: an unreadable or empty bundle logs and leaves
-// the system pool in place, so a lagging CA mount degrades to a TLS error at the
-// forge (legible in every propose) instead of a crashlooping pod.
+// AllowCustomCA: go-git trusts caFile (the ingress CA serving a managed forge
+// Route) as the sole root, right for this single-forge process. Tolerant: a bad
+// bundle logs and keeps the system pool, so a lagging CA mount degrades to a
+// legible TLS error, never a crashlooping pod.
 func AllowCustomCA(caFile string) {
 	pem, err := os.ReadFile(caFile)
 	if err != nil {

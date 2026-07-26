@@ -43,10 +43,8 @@ type LiveManifest struct {
 	Content []byte
 }
 
-// PruneSource reports what ArgoCD would prune for a project's repo: objects live and
-// tracked by its Application but absent from git, per Argo's OWN last comparison. That
-// comparison is the single authority on what a merge-triggered sync deletes, so the
-// draft view relays it rather than re-deriving from git and risking divergence.
+// PruneSource: what ArgoCD would prune for a repo, per Argo's OWN comparison.
+// The draft view relays it; re-deriving from git could diverge.
 type PruneSource interface {
 	PrunePending(repo string, namespaces []string) []model.ObjectRef
 }

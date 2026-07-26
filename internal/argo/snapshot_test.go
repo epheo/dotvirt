@@ -164,10 +164,8 @@ func TestObjectDriftGen(t *testing.T) {
 		t.Errorf("gen did not bump on a segment drift change: %d -> %d", gen, got)
 	}
 }
-// The project's own app is not a claim: after the forge loses the repo the app
-// survives while git declares nothing, and counting it would block re-capturing the
-// very objects recovery exists for. Every other app stays one, under each identity a
-// tracking-id can carry.
+// The own app is not a claim (it survives a lost repo while git declares
+// nothing); every other app is, under each tracking-id identity.
 func TestForeignAppsExcludesOwnRepo(t *testing.T) {
 	s := NewSnapshot(nil, nil)
 	if s.ForeignApps("https://forge.example/dotvirt/team-a.git") != nil {
@@ -195,9 +193,8 @@ func TestForeignAppsExcludesOwnRepo(t *testing.T) {
 	}
 }
 
-// PrunePending relays what ArgoCD itself would prune for the project's app: live and
-// tracked but absent from git (requiresPruning), scoped to the project's namespaces
-// and sorted so the derived warning is stable across rebuilds.
+// PrunePending relays Argo's own requiresPruning, namespace-scoped and sorted
+// for a stable warning.
 func TestPrunePendingRelaysArgoComparison(t *testing.T) {
 	s := NewSnapshot(nil, nil)
 	if s.PrunePending("https://forge.example/dotvirt/team-a.git", []string{"team-a"}) != nil {

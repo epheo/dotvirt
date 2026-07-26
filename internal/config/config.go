@@ -26,7 +26,7 @@ type Config struct {
 	// a rotated token is picked up without restart. See ForgeTokenFile / ForgeToken.
 	GitUsername string // for https auth (the token comes from ForgeTokenSource)
 	GitToken    string // deprecated alias for ForgeToken (kept for BYO flag compat)
-	// ForgeCA is a PEM bundle to VERIFY the forge with (API + git https) — the
+	// ForgeCA is a PEM bundle to VERIFY the forge with (API + git https) - the
 	// no-insecure path for a managed forge served by the cluster's ingress CA.
 	ForgeCA string
 

@@ -128,17 +128,12 @@ func (s *Snapshot) ProjectDrift() map[string]model.ProjectSync {
 	return s.appSyncCache
 }
 
-// ForeignApps returns the set of live Applications EXCEPT those sourcing ownRepo,
-// under every identity a tracking-id may carry: the bare name, and the "ns_name" /
-// "ns/name" forms used for apps outside Argo's control-plane namespace. It answers the
-// only question adoption asks of the drift plane: does the app named in an object's
-// tracking-id still exist as a claim by ANOTHER source? The project's own app is not a
-// claim: after the forge lost the repo, its app survives while git declares nothing, so
-// counting it would block re-capturing the very objects recovery exists for; git
-// (DeclaredOnBranch) is the authority for the project's own tier. An annotation naming
-// a deleted Application is residue, not a claim. nil before the initial LIST, so a
-// caller can tell "no apps" from "not known yet" and refuse rather than read every
-// tracked object as unclaimed.
+// ForeignApps: live apps except those sourcing ownRepo, under every tracking-id
+// identity (name, ns_name, ns/name). Only a FOREIGN app is a claim; the own app
+// survives a lost repo while git declares nothing, and counting it blocked the
+// recovery capture (git is the authority for the own tier). A deleted app's
+// annotation is residue, not a claim. nil before the initial LIST so callers
+// refuse rather than misread.
 func (s *Snapshot) ForeignApps(ownRepo string) map[string]bool {
 	if !s.synced.Load() {
 		return nil
@@ -160,11 +155,10 @@ func (s *Snapshot) ForeignApps(ownRepo string) map[string]bool {
 	return out
 }
 
-// PrunePending returns the objects ArgoCD itself reports it would prune for the apps
-// sourcing repo, within namespaces: live and tracked, but absent from git, per Argo's
-// own last comparison (status.resources[].requiresPruning). That comparison is the
-// single authority on what a merge-triggered sync deletes, so no re-derivation from
-// git can drift from it. nil before the initial LIST; empty for a healthy project.
+// PrunePending: what Argo itself would prune for the apps sourcing repo, within
+// namespaces (status.resources[].requiresPruning). Argo's comparison is the one
+// authority on what a sync deletes; re-deriving from git could drift from it.
+// nil before the initial LIST.
 func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.ObjectRef {
 	want := make(map[string]bool, len(namespaces))
 	for _, ns := range namespaces {
@@ -203,8 +197,7 @@ func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.Object
 			out = append(out, ref)
 		}
 	}
-	// Deterministic across rebuilds: the warning string derived from this must not
-	// flap between identical frames just because the store scan reordered.
+	// Sorted: the derived warning string must not flap on store-scan order.
 	sort.Slice(out, func(i, j int) bool {
 		a, b := out[i], out[j]
 		if a.Namespace != b.Namespace {

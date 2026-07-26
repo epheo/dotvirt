@@ -38,9 +38,8 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 		dv.Status.ForgeAdminHint = ""
 		if !install.ForgeConfigured(dv) {
 			if dv.Spec.Forge.URL != "" {
-				// A URL alone is not a forge: the app reads BOTH the URL and the token from
-				// the credentials secret. Without the distinct reason this renders as "no
-				// forge configured" while spec.forge.url plainly is, and the user debugs a lie.
+				// A URL alone is not a forge: the app reads URL and token from the
+				// credentials secret. A generic reason beside a plainly set url is a lie.
 				r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "CredentialsRequired",
 					"spec.forge.url is set but spec.forge.credentialsSecret is not; name a Secret with url/username/token keys (or set forge.managed)")
 			} else {
@@ -280,11 +279,9 @@ func (r *DotvirtReconciler) applyForgejoDeployment(ctx context.Context, dv *dotv
 	return install.Apply(ctx, r.Client, d, r.DryRun)
 }
 
-// adminSecretHash fingerprints the Forgejo admin secret for the pod-template
-// annotation, so a rotated secret rolls the pod and the initContainer converges the
-// DB password without anyone running the AdminCredentialRejected runbook. Empty in
-// dry-run (nothing persisted, no secret to read) and on a read failure — the render
-// still applies, and the 401 path remains the legible fallback.
+// adminSecretHash rides the pod template so a rotated secret rolls the pod and
+// the initContainer converges the DB password with no human runbook. Empty in
+// dry-run and on read failure; the 401 path stays the legible fallback.
 func (r *DotvirtReconciler) adminSecretHash(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) string {
 	if r.DryRun {
 		return ""

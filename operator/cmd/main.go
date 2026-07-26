@@ -48,12 +48,10 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "dotvirt-operator.dotvirt.io",
-		// ConfigMaps are read point-wise (the default ingress CA, the Argo TLS trust
-		// merge), never watched: the default cache-backed client would spin a
-		// CLUSTER-WIDE ConfigMap informer on first Get, which both exceeds the
-		// operator's deliberately narrow RBAC (get, no list/watch) and BLOCKS that Get
-		// forever when the informer can't sync — wedging the whole reconcile loop,
-		// including deletion processing.
+		// ConfigMaps are read point-wise, never watched: the cached client would
+		// spin a CLUSTER-WIDE informer on first Get, exceeding the narrow RBAC
+		// (get, no list/watch) and blocking that Get forever, wedging reconcile
+		// and deletion alike.
 		Client: client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}}}},
 	})
 	if err != nil {

@@ -62,8 +62,7 @@ func TestReconcileSSOGatedOffVanilla(t *testing.T) {
 	}
 }
 
-// SSOOAuthClient is derived, not stored: toggling openShiftSSO off (or the vanilla
-// gate zeroing it) must retire the stale apply command from status.
+// Derived status: toggling SSO off must retire the stale apply command.
 func TestReconcileSSOToggleOffClearsStatus(t *testing.T) {
 	dv := testCR()
 	dv.Spec.Auth.OpenShiftSSO = false

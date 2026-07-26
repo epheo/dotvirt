@@ -75,12 +75,9 @@ func newProposeFixture(t *testing.T, routes ...route) *proposeFixture {
 	}
 }
 
-// An existing repo must NOT block New Project. The repo is created before the draft is
-// staged, so refusing on it would make a run that failed or was discarded after that
-// point unrepeatable, burning the name for good. Whether the tenant already exists is a
-// cluster fact the handler checks instead. But reuse must SAY so: a leftover repo from
-// a former install deploys its contents the moment the project lands, and only the
-// warning lets a human tell that from a harmless retry.
+// An existing repo must not block New Project: refusing would burn the name for
+// a retried run (the repo is created before the draft). But reuse must SAY so;
+// only the warning tells a former install's leftover from a harmless retry.
 func TestCreateProjectReusesExistingRepoWithWarning(t *testing.T) {
 	f := newProposeFixture(t, when("GET", "team-a", http.StatusOK, "{}"))
 	view, err := f.c.StageCreateProject(f.id, f.proj, json.RawMessage(`{"name":"team-a","namespace":"team-a"}`))
@@ -151,10 +148,8 @@ func TestAdoptProjectRefusesRepoOnAnotherForge(t *testing.T) {
 	}
 }
 
-// A foreign-HOST annotation whose owner/repo exists on THIS forge is the stranded
-// aftermath of a forge-host change (reinstall, apps-domain move). Adoption re-homes
-// it: no repo create, no seed, just the staged namespace manifests whose host-free
-// refs re-point the project — the reviewable platform PR IS the migration.
+// Foreign host, same owner/repo on this forge: the stranded aftermath of a host
+// change. Re-home stages the host-free manifests; the PR is the migration.
 func TestAdoptProjectRehomesForeignHostRepo(t *testing.T) {
 	f := newProposeFixture(t, when("GET", "team-a", http.StatusOK, "{}"))
 	target := project.ProjectInfo{Name: "team-a", Namespaces: []string{"team-a"},

@@ -93,11 +93,10 @@ func urlPath(raw string) string {
 	return raw
 }
 
-// PathRef reduces a repo URL to its host-free path form ("owner/repo.git"), the
-// shape dotvirt stamps into dotvirt.io/repo annotations: the forge's identity then
-// lives ONLY in the install config, so a forge-host change (reinstall, apps-domain
-// move) re-resolves every project instead of stranding them on a dead absolute URL.
-// Already-relative input passes through; a URL with no path is returned unchanged.
+// PathRef: a repo URL's host-free path form ("owner/repo.git"), what annotations
+// carry. The forge identity then lives only in the install config, so a host
+// change re-resolves projects instead of stranding them. Relative input passes
+// through.
 func PathRef(repoURL string) string {
 	s := strings.TrimSpace(repoURL)
 	i := strings.Index(s, "://")
@@ -112,9 +111,8 @@ func PathRef(repoURL string) string {
 	return s[slash+1:]
 }
 
-// ResolveRef joins a PathRef-style relative ref onto a forge base URL; an
-// absolute ref is returned unchanged. Empty base leaves a relative ref
-// unresolvable, signalled by returning "".
+// ResolveRef joins a relative ref onto base; absolute refs pass through.
+// Empty base leaves a relative ref unresolvable: "".
 func ResolveRef(base, ref string) string {
 	if strings.Contains(ref, "://") {
 		return ref

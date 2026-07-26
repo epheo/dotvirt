@@ -6,13 +6,10 @@
 	import StageFooter from './StageFooter.svelte';
 	import TextInput from './TextInput.svelte';
 
-	// Adopt an EXISTING labeled-but-repoless project into GitOps: unlike NewProjectModal
-	// the name and namespaces are fixed (they already exist in the cluster), so this
-	// only creates the tenant repo and stamps the dotvirt.io/repo annotation onto the
-	// project's namespaces — optionally granting owners admin. recover reuses the same
-	// flow for a project whose annotated repo the forge has LOST: the backend re-creates
-	// it (and refuses if the repo actually still resolves), so the only difference here
-	// is the wording.
+	// Adopt an EXISTING labeled-but-repoless project into GitOps: name and
+	// namespaces are cluster facts, so this only creates the repo and stamps the
+	// annotations. recover reuses the flow for a lost/moved repo; the backend
+	// decides, only the wording differs here.
 	let {
 		project,
 		namespaces,
@@ -52,7 +49,7 @@
 	}
 </script>
 
-<Modal title={recover ? `Recover repo for “${project}”` : `Attach repo to “${project}”`} {onclose}>
+<Modal title={recover ? `Recover repo for "${project}"` : `Attach repo to "${project}"`} {onclose}>
 	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
 		{#if recover}
 			<p class="text-ink-soft">

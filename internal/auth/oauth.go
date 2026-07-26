@@ -70,10 +70,8 @@ func NewOAuth(cfg OAuthConfig, saKube kubernetes.Interface, auth *Authenticator)
 	if cfg.CAFile != "" || cfg.InsecureTLS {
 		tlsCfg := &tls.Config{InsecureSkipVerify: cfg.InsecureTLS} //nolint:gosec // explicit dev opt-in
 		if cfg.CAFile != "" {
-			// Tolerant: the CA is usually an operator-mounted ConfigMap that may lag
-			// the pod. Failing startup over it would take the whole console down for an
-			// SSO nicety; the system pool keeps token login working and the SSO leg
-			// fails legibly (sso_error) until the mount lands.
+			// Tolerant: a lagging CA mount must not take the console down for an SSO
+			// nicety; the system pool keeps token login working and SSO fails legibly.
 			if pem, err := os.ReadFile(cfg.CAFile); err != nil {
 				log.Printf("oauth: CA %s unreadable (%v); staying on the system trust pool", cfg.CAFile, err)
 			} else if pool := x509.NewCertPool(); !pool.AppendCertsFromPEM(pem) {
@@ -216,25 +214,17 @@ func clearStateCookie(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// DesiredClient is the OAuthClient this flow was configured for — what the
-// finish-SSO action registers, applied under the CALLER's own token so the
-// operator (and dotvirt's SA) never needs oauthclients RBAC.
+// DesiredClient: what the finish-SSO action registers, under the CALLER's token,
+// so no dotvirt identity ever needs oauthclients RBAC.
 func (o *OAuth) DesiredClient() (id, secret, redirectURL string) {
 	return o.cfg.ClientID, o.cfg.ClientSecret, o.cfg.RedirectURL
 }
 
-// ClientRegistered reports whether the configured OAuthClient is actually
-// registered on the cluster's oauth server, so the login screen can say "SSO is
-// enabled but not finished" instead of letting users click into a failure. The
-// probe is the authorize endpoint with redirects held: a registered client (with a
-// matching redirect URI) answers with a login redirect or page; an unregistered or
-// mismatched one answers 4xx. No credentials travel.
-//
-// Failure posture: a network/5xx probe reads as REGISTERED, so a flaky oauth stack
-// never talks users out of a button that might work. A definitive yes is cached
-// for good; a definitive no is re-probed after a short TTL (the admin may be
-// fixing it right now), and MarkRegistered clears it the moment the finish action
-// applies the client.
+// ClientRegistered probes the authorize endpoint (redirects held; no credentials
+// travel) so the login screen says "not finished" instead of offering a failing
+// button: registered answers <400, unregistered or redirect-mismatched 4xx.
+// Network/5xx reads as registered: a flaky oauth stack must not talk users out
+// of a working button. Yes caches for good; no re-probes after a short TTL.
 func (o *OAuth) ClientRegistered(ctx context.Context) bool {
 	o.mu.Lock()
 	if o.registered || time.Since(o.probedAt) < 10*time.Second {
@@ -281,8 +271,8 @@ func (o *OAuth) ClientRegistered(ctx context.Context) bool {
 	return registered
 }
 
-// MarkRegistered records that the finish action just applied the OAuthClient, so
-// the login screen flips to ready without waiting out the probe TTL.
+// MarkRegistered flips the probe cache so the login screen goes ready without
+// waiting out the TTL.
 func (o *OAuth) MarkRegistered() {
 	o.mu.Lock()
 	o.registered = true

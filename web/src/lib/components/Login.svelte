@@ -7,10 +7,8 @@
 	let token = $state('');
 	let busy = $state(false);
 	let error = $state('');
-	// SSO is offered once the backend confirms it's configured; the token form is
-	// always there (vanilla Kubernetes, ServiceAccounts, or an OAuth outage).
-	// ssoPending: configured but the OAuthClient isn't registered yet — say so
-	// instead of offering a button that bounces through a failure.
+	// SSO is offered once the backend confirms it; the token form always stays.
+	// ssoPending: say "not finished" instead of offering a failing button.
 	let sso = $state(false);
 	let ssoPending = $state(false);
 	$effect(() => {

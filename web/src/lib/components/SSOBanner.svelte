@@ -5,10 +5,8 @@
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 
-	// SSO is enabled but its OAuthClient isn't registered: offer the one-click
-	// finish to admins. The apply runs under the CALLER's own token — the API
-	// server's RBAC is the gate — so this shows only to users who can manage the
-	// platform, and a refusal still surfaces legibly.
+	// One-click SSO finish for admins. The apply runs under the CALLER's token;
+	// the API server's RBAC is the gate, and a refusal surfaces legibly.
 	let pending = $state(false);
 	let busy = $state(false);
 	$effect(() => {

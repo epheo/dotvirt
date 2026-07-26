@@ -59,10 +59,8 @@ func New(baseURL, caPath string, insecure bool) (*Client, error) {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	switch {
 	case caPath != "":
-		// Tolerant: the CA is usually an operator-mounted ConfigMap that may lag the
-		// pod (service-CA injection). Crashing here would wedge the whole console on a
-		// metrics nicety; staying on the system pool degrades to a legible TLS error
-		// in the Performance tab instead.
+		// Tolerant: a lagging CA mount must not wedge the console on a metrics
+		// nicety; the system pool degrades to a legible TLS error in Performance.
 		if pem, err := os.ReadFile(caPath); err != nil {
 			log.Printf("metrics: CA %s unreadable (%v); staying on the system trust pool", caPath, err)
 		} else if pool := x509.NewCertPool(); !pool.AppendCertsFromPEM(pem) {

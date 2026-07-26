@@ -69,11 +69,9 @@ func ArgoWebhookSecret(argoNS, value string) *corev1.Secret {
 // repos — including private ones. Lives in the ArgoCD namespace; label-tracked for
 // finalizer cleanup (a namespaced CR can't ownerRef it).
 //
-// No `insecure` key: ArgoCD honors it only on per-URL repository secrets, NEVER on
-// repo-creds templates (verified against the declarative-setup docs), so putting it
-// here silently does nothing while looking like it works. TLS trust for the managed
-// forge's router cert is real instead: the controller merges the cluster's default
-// ingress CA into argocd-tls-certs-cm under the forge host.
+// No `insecure` key: repo-creds templates silently ignore it (repository-secret-
+// only field, per the declarative-setup docs). Trust is real instead:
+// ensureForgeTLSTrust puts the ingress CA in argocd-tls-certs-cm.
 func RepoCredsSecret(dv *dotvirtv1alpha1.Dotvirt, argoNS, urlPrefix, username, token string) *corev1.Secret {
 	labels := Labels(dv.Name)
 	labels["argocd.argoproj.io/secret-type"] = "repo-creds"

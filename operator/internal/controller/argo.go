@@ -202,17 +202,12 @@ func (r *DotvirtReconciler) repoCreds(ctx context.Context, dv *dotvirtv1alpha1.D
 	return install.RepoCredsSecret(dv, argoNS, prefix, string(s.Data["username"]), token)
 }
 
-// ensureForgeTLSTrust merges the managed forge's host into argocd-tls-certs-cm with
-// the cluster's default ingress CA, so Argo's repo-server VERIFIES the router-served
-// certificate instead of failing x509 on every repo under the forge. Without this
-// the install only works after an admin hand-adds the host there — the invisible
-// step that masked the gap (`insecure` on the repo-creds template is silently
-// ignored; it is a repository-secret-only field).
-//
-// Managed-on-OpenShift only: a BYO forge's trust is the admin's, and off OpenShift
-// there is no ingress CA to read. MERGE semantics — other hosts' entries (including
-// hand-added ones) are never touched, and the entry is left behind on uninstall: a
-// CA for this cluster's own ingress is not a secret and a dead host key is inert.
+// ensureForgeTLSTrust merges the forge host + ingress CA into argocd-tls-certs-cm
+// so repo-server VERIFIES the router cert. repo-creds templates silently ignore
+// `insecure` (repository-secret-only field); without this entry the install only
+// worked after an invisible hand-added cert. Managed-on-OpenShift only. MERGE:
+// never touch other hosts' entries. Left on uninstall: not a secret, and a dead
+// host key is inert.
 func (r *DotvirtReconciler) ensureForgeTLSTrust(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) error {
 	if !dv.Spec.Forge.Managed || r.Platform != platform.OpenShift {
 		return nil

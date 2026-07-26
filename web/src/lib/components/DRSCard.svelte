@@ -85,7 +85,7 @@
 	}
 </script>
 
-<InfoCard title="Dynamic Rescheduling — automatic VM rebalancing">
+<InfoCard title="Dynamic Rescheduling - automatic VM rebalancing">
 	{#snippet action()}
 		{#if view?.canManage}
 			<span class="flex items-center gap-3">

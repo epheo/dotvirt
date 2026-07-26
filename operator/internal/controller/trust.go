@@ -14,22 +14,12 @@ import (
 	"github.com/epheo/dotvirt/operator/internal/platform"
 )
 
-// ensureTrustAnchors materializes the CA ConfigMaps the workload mounts, so a
-// zero-config install VERIFIES every TLS hop instead of shipping insecureTLS:
-//
-//   - dotvirt-ingress-ca: a converged COPY of the cluster's default ingress CA
-//     (openshift-config-managed/default-ingress-cert), which signs every
-//     router-served Route: the managed forge, the oauth endpoints, ArgoCD.
-//     Copied because pods cannot mount ConfigMaps across namespaces, and
-//     converged because the ingress CA rotates.
-//   - dotvirt-service-ca: an empty ConfigMap the service-ca operator fills via
-//     the inject-cabundle annotation, verifying in-cluster serving certs (the
-//     sample's thanos-querier metrics endpoint).
-//
-// OpenShift-only and best-effort: the mounts are optional and every consumer's CA
-// load is tolerant, so a missing anchor degrades to a legible TLS error in the
-// affected feature, never a wedged install. Both are owner-referenced (same
-// namespace), so uninstall garbage-collects them.
+// ensureTrustAnchors: the CA ConfigMaps that let a zero-config install VERIFY
+// every TLS hop. dotvirt-ingress-ca is a COPY (pods cannot mount across
+// namespaces) and CONVERGED (the ingress CA rotates); it signs every
+// router-served Route. dotvirt-service-ca is injector-filled and verifies
+// in-cluster serving certs (thanos). Best-effort: mounts are optional and every
+// CA load is tolerant, so a missing anchor degrades legibly, never wedges.
 func (r *DotvirtReconciler) ensureTrustAnchors(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) {
 	if r.Platform != platform.OpenShift || r.DryRun {
 		return

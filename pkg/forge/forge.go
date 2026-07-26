@@ -78,8 +78,8 @@ func NewFactoryFn(baseURL string, tokenFn TokenSource, insecure bool) *Factory {
 	return NewFactoryFnCA(baseURL, tokenFn, insecure, "")
 }
 
-// NewFactoryFnCA is NewFactoryFn with a PEM CA bundle to verify the forge with —
-// the no-insecure path for a managed forge behind the cluster's ingress CA.
+// NewFactoryFnCA adds a PEM CA bundle: the no-insecure path for a managed forge
+// behind the cluster's ingress CA.
 func NewFactoryFnCA(baseURL string, tokenFn TokenSource, insecure bool, caFile string) *Factory {
 	if baseURL == "" || tokenFn == nil {
 		return nil
@@ -148,10 +148,8 @@ func httpClient(insecure bool, caFile string) *http.Client {
 		}
 		return hc
 	}
-	// A CA bundle (typically the cluster ingress CA serving a managed forge Route)
-	// verifies instead of skipping. Tolerant: an unreadable or empty bundle logs and
-	// stays on the system pool, so a lagging CA mount degrades to a legible TLS error
-	// at the forge rather than a crashing process.
+	// Tolerant: a bad bundle logs and keeps the system pool, so a lagging CA
+	// mount degrades to a legible TLS error, never a crash.
 	if caFile != "" {
 		if pem, err := os.ReadFile(caFile); err != nil {
 			log.Printf("forge: CA %s unreadable (%v); staying on the system trust pool", caFile, err)

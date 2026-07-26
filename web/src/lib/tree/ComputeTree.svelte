@@ -132,10 +132,8 @@
 						</button>
 					{/if}
 				{:else if project.repo && project.gitOps?.syncError && inventory.canManage}
-					<!-- A repo annotation the forge no longer serves: the resolver has no error
-					     (the annotation parses) and only the GitOps rollup says the repo is gone.
-					     Offer recovery here; the backend refuses when the repo still resolves, so
-					     a transient sync error ends in a clear conflict, never a wrong re-create. -->
+					<!-- Only the GitOps rollup says the forge lost this repo (the annotation
+					     still parses). The backend refuses when the repo resolves. -->
 					<div class="py-1 pr-2 pl-7 text-xs text-warn-ink italic" title={project.gitOps.syncError}>
 						{project.gitOps.syncError.slice(0, 120)}
 					</div>

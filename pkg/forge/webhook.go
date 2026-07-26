@@ -138,11 +138,9 @@ func withCreateType(base map[string]any) map[string]any {
 	return out
 }
 
-// HasOrgWebhook reports whether the owner org carries a hook delivering to a URL
-// with targetURL's PATH (the same identity ensureHook converges on, so a host
-// migration still counts as registered). Read-only: the operator observes the hook
-// the APP owns and registers, so there is exactly one writer per hook and no
-// standing two-sides-derive-the-same-target coupling.
+// HasOrgWebhook: does the org carry a hook with targetURL's PATH (ensureHook's
+// identity, so a host migration still counts). Read-only: the operator observes
+// the app-owned hook, keeping one writer per hook.
 func (c *Client) HasOrgWebhook(targetURL string) (bool, error) {
 	var hooks []hook
 	if err := c.do("GET", fmt.Sprintf("/api/v1/orgs/%s/hooks", c.owner), nil, &hooks); err != nil {

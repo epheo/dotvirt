@@ -6,11 +6,10 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
-// handleFinishSSO (POST /api/auth/oauthclient) registers the OAuthClient SSO
-// needs, under the CALLER's own token: the API server's RBAC is the entire gate,
-// so neither dotvirt's SA nor the operator ever holds oauthclients permissions,
-// and a non-admin gets a plain 403. One click replaces the copy-paste command the
-// operator publishes in status.ssoOAuthClient.
+// handleFinishSSO registers the OAuthClient under the CALLER's token: the API
+// server's RBAC is the entire gate, so no dotvirt identity holds oauthclients
+// permissions and a non-admin gets a plain 403. One click replaces the
+// status.ssoOAuthClient copy-paste.
 func (s *Server) handleFinishSSO(w http.ResponseWriter, r *http.Request) {
 	if s.oauth == nil {
 		http.Error(w, "OpenShift SSO is not enabled on this install", http.StatusNotFound)

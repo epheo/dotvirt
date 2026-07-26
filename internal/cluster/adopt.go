@@ -40,31 +40,21 @@ type Adoptable struct {
 	Manifest  []byte
 }
 
-// AdoptableObjects returns everything running in namespaces that git does not describe,
-// serialized for the adoption PR, plus the kinds it could not read. An object is taken
-// when no FOREIGN Application claims it and no controller owns it:
+// AdoptableObjects: everything running in namespaces that git does not describe,
+// plus the kinds the caller could not read.
 //
-// A tracking-id naming a live app on another source (the platform app, an admin's own
-// Argo app) is a real claim: that repo declares the object, and capturing it here would
-// give it two declaring sources. The project's OWN app is not in foreignApps, so its
-// tracking-ids never block capture: whether this repo declares an object is git's call
-// (the coordinator drops what base declares), not the app's. After the forge loses the
-// repo the own app survives while git declares nothing, and that is exactly when its
-// objects must be capturable again. A tracking-id naming a deleted Application is
-// residue: nothing declares the object, and skipping on the bare annotation would
-// strand it outside git with the UI still offering to adopt it. foreignApps is nil when
-// ArgoCD is not wired, where no annotation can be a live claim.
+// Skips foreign-app claims: that repo declares the object; capturing it would give
+// two sources. The OWN app is excluded from foreignApps: whether this repo
+// declares an object is git's call, and after repo loss the own app survives
+// while git declares nothing (the recovery case). A deleted app's annotation is
+// residue; skipping on it would strand the object.
 //
-// An ownerReference means the object is derived, not declared: a DataVolume from a VM's
-// dataVolumeTemplates, or the NetworkAttachmentDefinition a UserDefinedNetwork renders.
-// Declaring it beside its owner would give one object two sources.
+// Skips ownerReferences: derived objects (dataVolumeTemplates DVs, UDN-rendered
+// NADs) must not be declared beside their owner.
 //
-// A kind whose CRD is absent is skipped, since nothing of it can exist. A kind the caller
-// may not list is skipped and NAMED in unreadable, never an error: adoption runs under
-// the caller's own token and is bounded by their RBAC (the standard OpenShift admin role
-// grants no egressfirewalls), so failing hard would put adoption out of reach of the
-// project admins it is for. Reporting the gap keeps the caller from reading a partial
-// capture as the whole namespace.
+// Forbidden kinds are named in unreadable, never an error: capture runs under the
+// caller's token and standard admin roles miss some kinds; failing hard would put
+// adoption out of their reach, silence would read partial as whole.
 func (c *Client) AdoptableObjects(ctx context.Context, namespaces []string, foreignApps map[string]bool) (objs []Adoptable, unreadable []string, err error) {
 	seen := map[string]bool{}
 	for _, ns := range namespaces {
@@ -111,11 +101,8 @@ func (c *Client) AdoptableObjects(ctx context.Context, namespaces []string, fore
 	return objs, unreadable, nil
 }
 
-// claimedByForeignApp reports whether the object's tracking-id names a live
-// Application on another source. ArgoCD leaves the annotation behind when an
-// Application is deleted, so the annotation alone proves only that some app once
-// declared the object; and the project's own app is excluded upstream, so its
-// annotation is never read as a claim.
+// claimedByForeignApp: the tracking-id names a live app on another source. The
+// bare annotation proves only that some app once declared the object.
 func claimedByForeignApp(obj *unstructured.Unstructured, foreignApps map[string]bool) bool {
 	id := obj.GetAnnotations()[trackingIDAnnotation]
 	if id == "" {
@@ -175,10 +162,9 @@ func adoptPath(obj *unstructured.Unstructured) string {
 	return ns + "/" + name + "." + strings.ToLower(obj.GetKind()) + ".yaml"
 }
 
-// ApplyOAuthClient registers (or converges) the cluster-scoped OAuthClient SSO
-// needs, under THIS client's identity — the finish-SSO action runs it with the
-// caller's own token, so the API server's RBAC is the gate and neither dotvirt's
-// SA nor the operator ever holds oauthclients permissions.
+// ApplyOAuthClient converges the OAuthClient SSO needs under THIS client's
+// identity: the caller's RBAC is the gate, so neither dotvirt's SA nor the
+// operator ever holds oauthclients permissions.
 func (c *Client) ApplyOAuthClient(ctx context.Context, id, secret, redirectURL string) error {
 	gvr := schema.GroupVersionResource{Group: "oauth.openshift.io", Version: "v1", Resource: "oauthclients"}
 	obj := &unstructured.Unstructured{Object: map[string]any{

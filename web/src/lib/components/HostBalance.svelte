@@ -293,13 +293,13 @@
 						{#if band.above > 0}
 							<span
 								class="rounded bg-warn-soft px-1.5 py-0.5 font-medium text-warn-ink"
-								title="above the rescheduling band — migration sources">{band.above} hot</span
+								title="above the rescheduling band - migration sources">{band.above} hot</span
 							>
 						{/if}
 						{#if band.below > 0}
 							<span
 								class="rounded bg-cold-soft px-1.5 py-0.5 font-medium text-cold-ink"
-								title="below the rescheduling band — migration targets">{band.below} cold</span
+								title="below the rescheduling band - migration targets">{band.below} cold</span
 							>
 						{/if}
 					{/if}
@@ -310,7 +310,7 @@
 						band {Math.round(band.low)}–{Math.round(band.high)}%
 					</span>
 				{:else}
-					<span class="text-ink-faint">Rescheduling not configured — no action band.</span>
+					<span class="text-ink-faint">Rescheduling not configured - no action band.</span>
 				{/if}
 				{#if memPressure > 0}
 					<span

@@ -39,19 +39,16 @@ const (
 	OAuthSecretName   = "dotvirt-oauth"
 	oauthClientPrefix = "dotvirt"
 
-	// IngressCAConfigMap is the operator's in-namespace copy of the cluster's default
-	// ingress CA (openshift-config-managed/default-ingress-cert), mounted so the app
-	// and the managed Forgejo VERIFY router-served TLS instead of skipping it.
+	// IngressCAConfigMap: in-namespace copy of the default ingress CA, mounted so
+	// the app and the managed Forgejo VERIFY router-served TLS.
 	IngressCAConfigMap = "dotvirt-ingress-ca"
-	// ServiceCAConfigMap is filled by OpenShift's service-ca injection
-	// (service.beta.openshift.io/inject-cabundle) and verifies in-cluster serving
-	// certs, e.g. the thanos-querier the sample points metrics at.
+	// ServiceCAConfigMap is injector-filled (inject-cabundle) and verifies
+	// in-cluster serving certs (the sample's thanos-querier).
 	ServiceCAConfigMap = "dotvirt-service-ca"
 
 	ingressCAMountPath = "/var/run/dotvirt/tls-ingress"
 	serviceCAMountPath = "/var/run/dotvirt/tls-service"
-	// IngressCAKey mirrors default-ingress-cert's key; ServiceCAKey is what the
-	// injector writes.
+	// Keys mirror default-ingress-cert and the injector respectively.
 	IngressCAKey = "ca-bundle.crt"
 	ServiceCAKey = "service-ca.crt"
 )
@@ -228,20 +225,17 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 		}
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_FORGE_TOKEN_FILE", Value: forgeTokenMountPath})
 		if dv.Spec.Forge.Managed {
-			// Verify the managed forge's router-served cert with the mounted ingress CA
-			// instead of ever needing insecureTLS. The app's CA loads are tolerant, so a
-			// lagging mount degrades to a legible TLS error, never a crashing pod; an
-			// explicit spec.forge.insecureTLS still wins inside the app.
+			// Verified TLS instead of insecureTLS; an explicit insecureTLS still wins
+			// inside the app, and CA loads are tolerant of a lagging mount.
 			env = append(env, corev1.EnvVar{Name: "DOTVIRT_FORGE_CA", Value: ingressCAMountPath + "/" + IngressCAKey})
 		}
 	}
 	if dv.Spec.Auth.OpenShiftSSO {
-		// The oauth token endpoint is a router-served Route on the same ingress CA.
+		// The oauth token endpoint is router-served: same ingress CA.
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_OAUTH_CA", Value: ingressCAMountPath + "/" + IngressCAKey})
 	}
 	if strings.HasPrefix(dv.Spec.Metrics.URL, "https://") && strings.Contains(dv.Spec.Metrics.URL, ".svc") {
-		// In-cluster metrics endpoints (the sample's thanos-querier) serve the
-		// service-CA-signed cert the injected bundle verifies.
+		// In-cluster metrics serve the service-CA-signed cert.
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_CA", Value: serviceCAMountPath + "/" + ServiceCAKey})
 	}
 
@@ -262,9 +256,8 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 		args = append(args, "-insecure-tls")
 	}
 
-	// Trust-anchor mounts are ALWAYS rendered and optional: on vanilla Kubernetes
-	// (or before the operator's copy/injection lands) the ConfigMaps simply do not
-	// exist and the pod still starts; the app falls back to the system pool.
+	// Trust-anchor mounts are always rendered and OPTIONAL: absent ConfigMaps
+	// (vanilla, or copy/injection lag) must never block the pod.
 	caOptional := true
 	volumeMounts := []corev1.VolumeMount{
 		{Name: "drafts", MountPath: "/var/lib/dotvirt/drafts"},

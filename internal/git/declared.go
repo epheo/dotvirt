@@ -21,11 +21,9 @@ type declaredDoc struct {
 	} `yaml:"metadata"`
 }
 
-// DeclaredRefs returns the objects the manifest bytes declare, any kind, any number
-// of documents. path supplies the namespace default for a manifest that omits it
-// (the repo layout's <ns>/... convention). A document that does not parse declares
-// nothing this can name: consumers only widen as a result, and the manifest parsers
-// report the syntax error.
+// DeclaredRefs: the objects the manifest bytes declare, any kind, multi-doc.
+// path defaults the namespace (<ns>/... layout). An unparsable document declares
+// nothing; consumers only widen, and the manifest parsers report the syntax.
 func DeclaredRefs(path string, content []byte) []model.ObjectRef {
 	var out []model.ObjectRef
 	dec := yaml.NewDecoder(bytes.NewReader(content))

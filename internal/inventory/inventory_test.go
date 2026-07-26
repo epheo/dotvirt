@@ -205,10 +205,8 @@ func TestBuildDriftEnabledMarksNotTracked(t *testing.T) {
 	}
 }
 
-// A dead repo must not blind the inventory: live objects are cluster facts, so a
-// project whose repo cannot be read still renders its namespaces and running VMs
-// (NotTracked) beside the error badge. Hiding them made a stranded project look
-// empty and invited exactly the wrong recovery actions.
+// A dead repo must not blind the inventory: live VMs render (NotTracked) beside
+// the error badge. Hiding them invited the wrong recovery actions.
 func TestBuildRepoUnavailableStillShowsLiveVMs(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

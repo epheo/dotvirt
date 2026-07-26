@@ -3,18 +3,14 @@
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 
-	// Repo-state awareness on the project's own summary: untracked projects sit
-	// COLLAPSED in the tree by default, so the tree-side "Attach repo"/"Recover
-	// repo" affordances are invisible exactly when someone clicks INTO the project
-	// to see what's wrong. Same gates as the tree: resolver error = attach,
-	// GitOps error on a repo-backed project = recover (the backend still refuses
-	// when the repo resolves, so a transient sync error ends in a clear conflict).
+	// Untracked projects sit collapsed in the tree, hiding its attach/recover
+	// buttons exactly when someone clicks INTO the project to see what is wrong.
+	// Same gates as the tree; the backend still refuses when the repo resolves.
 	let { project }: { project: string } = $props();
 
 	const p = $derived(inventory.inventory?.projects.find((x) => x.name === project));
 	const attach = $derived(!!p?.error && !p?.repo);
-	// A repo-backed project is offered recovery on EITHER error plane: the resolver's
-	// ("repo unavailable", set before any Argo app exists) or the GitOps rollup's.
+	// Recovery offers on either error plane: the resolver's (pre-app) or GitOps'.
 	const recover = $derived(!!p && !!p.repo && (!!p.error || !!p.gitOps?.syncError));
 	const note = $derived(p?.error || p?.gitOps?.syncError || '');
 

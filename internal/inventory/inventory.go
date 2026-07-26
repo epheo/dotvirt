@@ -59,11 +59,10 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 		return out // unresolved repo: Error already explains why
 	}
 
-	// A dead repo must not blind the inventory: live objects are CLUSTER facts, git
-	// only describes desired state. On a repo failure the error is a badge on the
-	// project while its namespaces and running VMs still render below (all
-	// NotTracked, since nothing declared is readable) — hiding them made a stranded
-	// project look empty and invited exactly the wrong recovery actions.
+	// A dead repo must not blind the inventory: live objects are cluster facts.
+	// The error becomes a badge; namespaces and running VMs still render
+	// (NotTracked). Hiding them made stranded projects look empty and invited
+	// the wrong recovery actions.
 	var vms []model.VM
 	read, _, err := in.Repos.Get(p.Repo)
 	if err != nil {

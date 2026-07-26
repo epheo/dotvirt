@@ -191,7 +191,7 @@ func (r *Repo) VMManifests(branch string) ([]ManifestFile, error) {
 	return out, nil
 }
 
-// FileOnBranch returns one file's raw content on branch — e.g. a base-branch
+// FileOnBranch returns one file's raw content on branch - e.g. a base-branch
 // manifest for the raw-YAML view.
 func (r *Repo) FileOnBranch(branch, path string) ([]byte, error) {
 	r.mu.Lock()

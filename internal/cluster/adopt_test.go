@@ -39,12 +39,9 @@ func liveObj(apiVersion, kind, ns, name string, meta map[string]any) *unstructur
 	}}
 }
 
-// Adoption takes what git does not describe, which is exactly the objects no FOREIGN
-// Application claims and no controller owns. A foreign-claimed object is declared by
-// another repo, and re-capturing it here would give it two declaring sources. Owned
-// objects are derived, so declaring them gives one object two sources. (The project's
-// own app never appears in foreignApps: the caller excludes it, so a lost-repo
-// recovery can re-capture the objects it still tracks.)
+// Foreign-claimed objects are declared by another repo; owned ones are derived.
+// Capturing either gives one object two sources. The own app is excluded
+// upstream so recovery can re-capture what it still tracks.
 func TestAdoptableObjectsSkipsClaimedAndOwned(t *testing.T) {
 	dc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), adoptableListKinds(),
 		liveObj("kubevirt.io/v1", "VirtualMachine", "team-a", "web", nil),

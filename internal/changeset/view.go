@@ -83,13 +83,9 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 	return view, nil
 }
 
-// pruneWarning names the objects a merged PR would have ArgoCD delete: live and
-// tracked by the project's app but absent from git (Argo's own requiresPruning),
-// and not spoken for by this draft. Derived on every render, never stored: it
-// survives reopening the view, shrinks as adoption stages the missing objects, and
-// clears once the merge lands or Argo prunes. A stored warning would keep
-// describing a state that no longer exists, which is how a partial capture used to
-// read as complete once the response toast was gone.
+// pruneWarning: what a merge lets ArgoCD delete, from Argo's own requiresPruning
+// minus what the draft speaks for. Derived every render, never stored: a stored
+// warning outlived the state and read partial captures as complete.
 func (c *Coordinator) pruneWarning(proj project.ProjectInfo, entries []draft.Entry) string {
 	if c.prune == nil {
 		return ""
@@ -123,11 +119,9 @@ func (c *Coordinator) pruneWarning(proj project.ProjectInfo, entries []draft.Ent
 		strings.Join(missing, ", "), more)
 }
 
-// entryRefs is the object identity a draft entry speaks for. A manifest-carrying
-// entry declares exactly its documents. A wizard create is a VM. A DELETE also
-// counts: pruning that object is the draft's stated intent, not a loss to warn
-// about. Kinds with no prunable tenant form (uplinks, DRS file sets, templates)
-// map to nothing.
+// entryRefs: what a draft entry speaks for. Manifest entries declare their
+// documents. A delete counts: that prune is intended. Kinds with no prunable
+// tenant form map to nothing.
 func entryRefs(e draft.Entry) []model.ObjectRef {
 	if e.Manifest != "" {
 		return git.DeclaredRefs(e.SourceFile, []byte(e.Manifest))

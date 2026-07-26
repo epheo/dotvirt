@@ -419,10 +419,8 @@ func TestFinalizeToleratesNotFoundAndMissingArgoCRD(t *testing.T) {
 	}
 }
 
-// The managed forge's router cert must be TRUSTED by Argo's repo-server, not
-// insecure-flagged (repo-creds templates ignore `insecure`): the host is merged into
-// argocd-tls-certs-cm with the default ingress CA, preserving every other entry —
-// including hand-added ones from before this existed.
+// The forge host merges into argocd-tls-certs-cm with the ingress CA, preserving
+// every other entry, hand-added ones included.
 func TestEnsureForgeTLSTrustMergesHost(t *testing.T) {
 	dv := testCR()
 	dv.Spec.Forge.Managed = true
@@ -471,9 +469,8 @@ func TestEnsureForgeTLSTrustGates(t *testing.T) {
 	}
 }
 
-// The trust anchors give a zero-config install VERIFIED TLS: the ingress CA is
-// copied in-namespace (converged; it rotates) and the service-CA ConfigMap carries
-// the injection annotation. Best-effort and OpenShift-only by design.
+// Ingress CA copied in-namespace (converged: it rotates); service-CA ConfigMap
+// carries the injection annotation.
 func TestEnsureTrustAnchors(t *testing.T) {
 	dv := testCR()
 	src := &corev1.ConfigMap{

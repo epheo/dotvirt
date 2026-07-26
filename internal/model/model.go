@@ -289,11 +289,9 @@ type DraftItem struct {
 	YAML      string   `json:"yaml,omitempty"` // raw/edited manifest for the collapsed view
 }
 
-// DraftView is the whole draft changeset as semantic items. Warning is DERIVED on
-// every render, never stored: what ArgoCD would prune for this project that the
-// draft does not speak for, plus any capture degradation the producing operation
-// appended. Recomputing it each view is what keeps a partial adoption reading as
-// partial after the response that staged it is gone.
+// DraftView is the whole draft changeset as semantic items. Warning is DERIVED
+// each render (prune risk plus capture caveats), never stored: a stored warning
+// outlives the state it describes.
 type DraftView struct {
 	Base    string      `json:"base"`
 	Branch  string      `json:"branch"`

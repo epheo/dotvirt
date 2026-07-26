@@ -12,15 +12,12 @@ import (
 	"github.com/epheo/dotvirt/operator/internal/install"
 )
 
-// reconcileDotvirtWebhook OBSERVES the forge->dotvirt instant-feedback webhook and
-// reports it on the CR; it never registers it. The APP owns that hook: it re-asserts
-// it on a runtime ticker (self-heal at a cadence the operator's event-driven
-// reconcile can't match), covers user-owned forge owners repo by repo, and keeps
-// working in operator-less deployments. A second writer here would re-create the
-// standing two-sides-must-derive-identical-target coupling this observe-only split
-// removes. (The Argo webhook stays operator-REGISTERED: it requires the privileged
-// argocd-secret write the app must never hold.) Skipped in dry-run. Never halts the
-// pipeline; the app's git poll backstops a missed hook either way.
+// reconcileDotvirtWebhook OBSERVES the app-owned forge->dotvirt hook, never
+// writes it: the app self-heals it on a ticker, covers user-owned forges repo by
+// repo, and works operator-less. A second writer re-creates the both-sides-must-
+// derive-the-same-target coupling. (The Argo hook stays operator-registered: it
+// needs the argocd-secret write the app must never hold.) Never halts; the git
+// poll backstops.
 func (r *DotvirtReconciler) reconcileDotvirtWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
 	if r.DryRun {
 		r.setCondition(dv, dotvirtv1alpha1.ConditionDotvirtWebhook, metav1.ConditionUnknown, "DryRun", "skipped dotvirt webhook in dry-run")
@@ -38,11 +35,9 @@ func (r *DotvirtReconciler) reconcileDotvirtWebhook(ctx context.Context, dv *dot
 	return nil, nil
 }
 
-// observeDotvirtWebhook reports whether an org-level hook delivering to dotvirt's
-// /api/webhooks/forge endpoint exists. Read-only, best-effort: false with no error
-// when there is nothing to observe yet (no forge / platform repo / delivery URL);
-// err only when the forge cannot be asked (credentials, transport), which the
-// condition surfaces as Unobservable rather than failing the install.
+// observeDotvirtWebhook: read-only. false/no-error when there is nothing to
+// observe yet; err only when the forge cannot be asked, surfaced as
+// Unobservable, never an install failure.
 func (r *DotvirtReconciler) observeDotvirtWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (bool, error) {
 	if dv.Spec.Forge.URL == "" || dv.Spec.Forge.PlatformRepo == "" {
 		return false, nil

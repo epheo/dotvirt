@@ -120,9 +120,8 @@
 
 	<ErrorNote {error} class="mb-2" />
 
-	<!-- Server-derived, recomputed on every fetch: what ArgoCD would prune that this
-	     draft does not speak for. Shown even with nothing staged, so a project in
-	     recovery warns before the first merge, not after it. -->
+	<!-- Recomputed every fetch: what ArgoCD would prune that this draft does not
+	     speak for. Shows on empty drafts so recovery warns BEFORE the first merge. -->
 	{#if draft.warning}
 		<div
 			class="mb-2 flex items-start gap-2 rounded bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink"
@@ -187,7 +186,7 @@
 				disabled={proposing}
 				class="w-full rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 			>
-				{proposing ? 'Proposing…' : `Propose pull request → ${project}`}
+				{proposing ? 'Proposing…' : `Propose pull request -> ${project}`}
 			</button>
 		</div>
 	{/if}

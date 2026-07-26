@@ -285,9 +285,8 @@ func TestArgoSourcesExcludeTemplateLibrary(t *testing.T) {
 	}
 }
 
-// ArgoCD honors `insecure` only on per-URL repository secrets, never on repo-creds
-// templates, so emitting it here would silently do nothing while reading as a fix.
-// The managed forge's TLS is trusted for real instead (argocd-tls-certs-cm).
+// repo-creds templates ignore `insecure`; emitting it reads as a fix while doing
+// nothing. Trust is real instead (argocd-tls-certs-cm).
 func TestRepoCredsNeverEmitsIgnoredInsecure(t *testing.T) {
 	dv := testDotvirt()
 	dv.Spec.Forge.InsecureTLS = true
@@ -296,9 +295,8 @@ func TestRepoCredsNeverEmitsIgnoredInsecure(t *testing.T) {
 	}
 }
 
-// A rotated admin secret must ROLL the forge pod (whose initContainer then
-// reconciles the DB password), not wait for a human to run the
-// AdminCredentialRejected runbook: the hash rides the pod template.
+// A rotated admin secret must roll the pod (initContainer reconciles the DB
+// password), never wait on a human runbook.
 func TestForgejoRollsOnAdminSecretChange(t *testing.T) {
 	dv := testDotvirt()
 	a := ForgejoDeployment(dv, false, "", "hash-a").Spec.Template.Annotations["dotvirt.io/admin-secret-hash"]
@@ -308,9 +306,8 @@ func TestForgejoRollsOnAdminSecretChange(t *testing.T) {
 	}
 }
 
-// The zero-config posture is VERIFIED TLS, not skipped: the app deployment mounts
-// the trust anchors (optional, so vanilla still schedules) and points each client
-// at its CA; -insecure-tls renders only on an explicit spec opt-in.
+// Zero-config posture is VERIFIED TLS: optional trust-anchor mounts, one CA env
+// per client, -insecure-tls only on explicit opt-in.
 func TestDeploymentVerifiedTLSByDefault(t *testing.T) {
 	dv := testDotvirt()
 	dv.Spec.Forge.Managed = true
@@ -333,8 +330,8 @@ func TestDeploymentVerifiedTLSByDefault(t *testing.T) {
 	}
 }
 
-// Forgejo verifies webhook TLS via the joined trust dir; the old global
-// SKIP_TLS_VERIFY (which also unverified tenant webhooks) must never come back.
+// Webhook TLS stays verified; the global SKIP_TLS_VERIFY (which also unverified
+// tenant webhooks) must never come back.
 func TestForgejoVerifiesWebhookTLS(t *testing.T) {
 	d := ForgejoDeployment(testDotvirt(), false, "", "h")
 	env := d.Spec.Template.Spec.Containers[0].Env
