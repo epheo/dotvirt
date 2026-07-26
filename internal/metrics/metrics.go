@@ -192,6 +192,19 @@ func (c *Client) ClusterSummary(ctx context.Context, token string, namespaces []
 	return out, nil
 }
 
+// byLabel runs an instant vector and indexes the result by one label's value
+// (node-exporter labels nodes `instance`, kube-state-metrics `node`; the joins
+// happen in Go). Empty-label series are dropped.
+func (c *Client) byLabel(ctx context.Context, token, q, label string) map[string]float64 {
+	m := map[string]float64{}
+	for _, lv := range c.vector(ctx, token, q) {
+		if n := lv.labels[label]; n != "" {
+			m[n] = lv.value
+		}
+	}
+	return m
+}
+
 // HostLoad returns the worker-node utilization distribution behind the DRS
 // balance card: every worker with CPU and memory percent, hottest-CPU first.
 // Four instant vectors — CPU and memory utilization, the worker role set, and
@@ -203,24 +216,9 @@ func (c *Client) HostLoad(ctx context.Context, token string) (model.HostLoad, er
 	if v, ok := c.hosts.Get("hosts"); ok {
 		return v, nil
 	}
-	util := map[string]float64{}
-	for _, lv := range c.vector(ctx, token, `1 - avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[2m]))`) {
-		if n := lv.labels["instance"]; n != "" {
-			util[n] = lv.value
-		}
-	}
-	mem := map[string]float64{}
-	for _, lv := range c.vector(ctx, token, `1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes`) {
-		if n := lv.labels["instance"]; n != "" {
-			mem[n] = lv.value
-		}
-	}
-	unsched := map[string]bool{}
-	for _, lv := range c.vector(ctx, token, `kube_node_spec_unschedulable`) {
-		if n := lv.labels["node"]; n != "" && lv.value > 0 {
-			unsched[n] = true
-		}
-	}
+	util := c.byLabel(ctx, token, `1 - avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[2m]))`, "instance")
+	mem := c.byLabel(ctx, token, `1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes`, "instance")
+	unsched := c.byLabel(ctx, token, `kube_node_spec_unschedulable`, "node")
 	var nodes []model.HostWorker
 	for _, lv := range c.vector(ctx, token, `kube_node_role{role="worker"}`) {
 		n := lv.labels["node"]
@@ -228,7 +226,7 @@ func (c *Client) HostLoad(ctx context.Context, token string) (model.HostLoad, er
 		if n == "" || !ok {
 			continue // no exporter series: absent from the distribution, not a fake 0%
 		}
-		nodes = append(nodes, model.HostWorker{Node: n, Pct: u * 100, Mem: mem[n] * 100, Unschedulable: unsched[n]})
+		nodes = append(nodes, model.HostWorker{Node: n, Pct: u * 100, Mem: mem[n] * 100, Unschedulable: unsched[n] > 0})
 	}
 	if len(nodes) == 0 {
 		return model.HostLoad{}, fmt.Errorf("%w: no worker utilization series", model.ErrUnavailable)
@@ -258,20 +256,11 @@ func (c *Client) Capacity(ctx context.Context, token string) (model.HostCapacity
 	if v, ok := c.capacity.Get("capacity"); ok {
 		return v, nil
 	}
-	byNode := func(q string) map[string]float64 {
-		m := map[string]float64{}
-		for _, lv := range c.vector(ctx, token, q) {
-			if n := lv.labels["node"]; n != "" {
-				m[n] = lv.value
-			}
-		}
-		return m
-	}
-	cpuAlloc := byNode(`kube_node_status_allocatable{resource="cpu"}`)
-	memAlloc := byNode(`kube_node_status_allocatable{resource="memory"}`)
+	cpuAlloc := c.byLabel(ctx, token, `kube_node_status_allocatable{resource="cpu"}`, "node")
+	memAlloc := c.byLabel(ctx, token, `kube_node_status_allocatable{resource="memory"}`, "node")
 	// Per-node vCPU sum, with vcpuCount's per-vCPU-series fallback for older KubeVirt.
-	vcpu := byNode(`(sum by(node)(kubevirt_vmi_vcpu_count) or sum by(node)(count by(node,namespace,name)(kubevirt_vmi_vcpu_seconds_total)))`)
-	memVM := byNode(`sum by(node)(kubevirt_vmi_memory_domain_bytes)`)
+	vcpu := c.byLabel(ctx, token, `(sum by(node)(kubevirt_vmi_vcpu_count) or sum by(node)(count by(node,namespace,name)(kubevirt_vmi_vcpu_seconds_total)))`, "node")
+	memVM := c.byLabel(ctx, token, `sum by(node)(kubevirt_vmi_memory_domain_bytes)`, "node")
 
 	var nodes []model.HostCapacityNode
 	for _, lv := range c.vector(ctx, token, `kube_node_role{role="worker"}`) {
