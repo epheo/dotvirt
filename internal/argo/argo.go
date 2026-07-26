@@ -8,6 +8,7 @@ package argo
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -205,6 +206,11 @@ func appSyncFromApps(objs []any) map[string]model.ProjectSync {
 		if ps.Operation != "" && ps.Operation != "Succeeded" {
 			ps.SyncError = nestedString(app.Object, "status", "operationState", "message")
 		}
+		// A comparison failure (unclonable repo, forbidden or invalid manifest) runs no
+		// operation, so the message above is absent and only the condition says why.
+		if ps.SyncError == "" {
+			ps.SyncError = errorCondition(app.Object)
+		}
 		if prev, exists := out[repo]; !exists || rollupSeverity(ps) >= rollupSeverity(prev) {
 			out[repo] = ps
 		}
@@ -314,6 +320,28 @@ func nestedString(m map[string]any, keys ...string) string {
 			return ""
 		}
 		cur = next
+	}
+	return ""
+}
+
+// errorCondition returns the first error condition's message. Every Application
+// condition ends in "Error" or "Warning", so the suffix beats a list that will grow.
+// ApplicationSet does not follow this (it uses ErrorOccurred).
+func errorCondition(app map[string]any) string {
+	conds, found, err := unstructured.NestedSlice(app, "status", "conditions")
+	if !found || err != nil {
+		return ""
+	}
+	for _, c := range conds {
+		cond, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		if t, _ := cond["type"].(string); strings.HasSuffix(t, "Error") {
+			if msg, _ := cond["message"].(string); msg != "" {
+				return msg
+			}
+		}
 	}
 	return ""
 }

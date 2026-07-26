@@ -47,30 +47,65 @@
 		goto(vmHref(vm.namespace, vm.name));
 	}
 
-	// Untracked (NotTracked) VMs in the given namespaces — the rows a bulk adopt
-	// acts on. Drives both the "Adopt N untracked" label and which namespaces to call.
+	// Recover-repo gate: only the GitOps rollup says the forge lost the repo.
+	function projectSyncError(project: string): string {
+		return inventory.inventory?.projects.find((p) => p.name === project)?.gitOps?.syncError ?? '';
+	}
+
+	// Untracked VMs are what the inventory can see git not describing, so they decide
+	// whether adoption is offered and which namespaces to call. The adopt itself takes
+	// the whole namespace, VMs included, so a namespace never lands half declared.
 	function untrackedVMs(namespaces: string[]): VM[] {
 		const want = new Set(namespaces);
 		return inventory.allVMs.filter((v) => want.has(v.namespace) && v.sync === 'NotTracked');
 	}
 
-	// Bulk-adopt every untracked VM under a container into one draft. Only namespaces
-	// that actually have untracked VMs are called (AdoptNamespace 400s on an empty one).
+	// Adopt each namespace whole into one draft. No untracked VMs (recovery: all
+	// tracked, none declared) falls back to every namespace; per-ns 400s surface
+	// rather than silently skipping.
 	async function bulkAdoptUntracked(namespaces: string[]) {
-		const want = new Set(untrackedVMs(namespaces).map((v) => v.namespace));
+		let want = new Set(untrackedVMs(namespaces).map((v) => v.namespace));
+		if (want.size === 0) want = new Set(namespaces);
+		// Each namespace is adopted on its own: one that has nothing left to adopt (or that
+		// the caller may not read) must not abandon the rest half-done, with the already
+		// staged ones sitting in the draft unmentioned.
+		const caveats: string[] = [];
+		// The warning is project-wide and re-derived per call; keep only the last
+		// instead of accumulating near-duplicates.
+		let warning = '';
+		let staged = 0;
 		try {
-			for (const ns of want) await api.adoptNamespace(ns);
-			ui.showToast('Untracked VMs staged into Changes — open a PR to adopt them into git.', {
-				kind: 'success',
-				action: { label: 'Review & propose', run: () => (ui.changesOpen = true) },
-			});
+			for (const ns of want) {
+				try {
+					const view = await api.adoptNamespace(ns);
+					staged++;
+					// A capture bounded by the caller's RBAC (or by what ArgoCD still tracks) is
+					// worth staging, but saying so matters: silence would read as "the namespace
+					// is now fully described".
+					warning = view.warning ?? '';
+				} catch (e) {
+					if (e instanceof Unauthorized) throw e;
+					caveats.push(`${ns}: ${friendlyError(e)}`);
+				}
+			}
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			ui.showToast(friendlyError(e), { kind: 'error' });
 		} finally {
-			// Reflect whatever got staged before any failure — a mid-loop error still
-			// leaves the earlier namespaces' adopts in the draft.
 			await drafts.refresh();
+		}
+		const notes = [...caveats, warning].filter(Boolean).join(' ');
+		if (!staged) {
+			ui.showToast(notes || 'Nothing to adopt.', { kind: 'error' });
+			return;
+		}
+		const action = { label: 'Review & propose', run: () => (ui.changesOpen = true) };
+		if (notes) {
+			ui.showToast(`Staged, but not everything: ${notes}`, { kind: 'warning', action });
+		} else {
+			ui.showToast('Staged into Changes - open a PR to adopt them into git.', {
+				kind: 'success',
+				action,
+			});
 		}
 	}
 </script>
@@ -98,15 +133,33 @@
 					>
 					<div class="my-1 border-t border-line-soft"></div>
 				{/if}
-				{#if ctx.repo && untracked.length}
+				<!-- A dead repo annotation is a different dead end from repoless. Gated on
+				     the GitOps error; the backend refuses when the repo resolves. -->
+				{#if ctx.kind === 'container' && ctx.repo && projectSyncError(ctx.project) && inventory.canManage}
+					<MenuItem
+						onclick={() => {
+							ui.modal = {
+								kind: 'adoptProject',
+								project: ctx.project,
+								namespaces: ctx.namespaces,
+								recover: true,
+							};
+							ui.ctx = null;
+						}}
+						title="Re-create this project's lost repo and re-adopt what is running"
+						>Recover repo…</MenuItem
+					>
+					<div class="my-1 border-t border-line-soft"></div>
+				{/if}
+				{#if ctx.repo && (untracked.length || projectSyncError(ctx.project))}
 					<MenuItem
 						onclick={() => {
 							const ns = ctx.kind === 'container' ? ctx.namespaces : [];
 							ui.ctx = null;
 							bulkAdoptUntracked(ns);
 						}}
-						title="Stage every untracked VM here into one PR"
-						>Adopt {untracked.length} untracked…</MenuItem
+						title="Stage everything here that git does not describe, into one PR"
+						>Adopt into git</MenuItem
 					>
 				{/if}
 				<MenuItem

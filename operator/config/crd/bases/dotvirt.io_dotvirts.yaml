@@ -23,6 +23,9 @@ spec:
     - jsonPath: .status.conditions[?(@.type=="Available")].status
       name: Available
       type: string
+    - jsonPath: .status.consoleURL
+      name: Console
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -79,21 +82,17 @@ spec:
                     type: string
                 type: object
               auth:
-                description: |-
-                  AuthSpec enables OpenShift SSO beside the always-present token login. The
-                  admin registers the cluster-scoped OAuthClient (redirect URI
-                  https://<ingress.host>/api/auth/callback), a cluster-admin act the operator
-                  deliberately doesn't perform; the operator only wires the credential through.
+                description: AuthSpec enables OpenShift SSO beside the always-present
+                  token login.
                 properties:
-                  oauthClientID:
-                    description: OAuthClientID is the OAuthClient's name; empty leaves
-                      SSO off.
-                    type: string
-                  oauthSecretRef:
+                  openShiftSSO:
                     description: |-
-                      OAuthSecretRef names a Secret in the install namespace holding the
-                      OAuthClient's secret under key "clientSecret".
-                    type: string
+                      OpenShiftSSO adds a "Sign in with OpenShift" button beside the token login. The
+                      operator generates the client credential and, once the console host is assigned,
+                      reports the exact OAuthClient to apply (redirect URI filled in) in
+                      status.ssoOAuthClient. Registering that cluster-scoped OAuthClient stays a
+                      cluster-admin act the operator deliberately doesn't perform. OpenShift only.
+                    type: boolean
                 type: object
               forge:
                 description: |-
@@ -104,8 +103,9 @@ spec:
                 properties:
                   credentialsSecret:
                     description: |-
-                      CredentialsSecret names a Secret holding the forge-admin credential used for
-                      the platform-repo bootstrap (keys: url, username, token).
+                      CredentialsSecret names a Secret holding the forge-admin credential (keys: url,
+                      username, token). For a managed forge the operator WRITES this secret; point it at
+                      an existing secret only for a bring-your-own forge.
                     type: string
                   insecureTLS:
                     description: |-
@@ -120,10 +120,14 @@ spec:
                   platformRepo:
                     description: |-
                       PlatformRepo is the cluster-scoped + tenancy repo (CUDN/NNCP/Namespace). The
-                      operator ensures it exists; dotvirt routes platform creates here by kind.
+                      operator ensures it exists; dotvirt routes platform creates here by kind. Defaults
+                      to <forge URL>/dotvirt/platform.git for a managed forge.
                     type: string
                   url:
-                    description: URL is the forge base (e.g. https://forgejo.example.com).
+                    description: |-
+                      URL is the forge base URL. Leave empty with managed on OpenShift: the operator
+                      exposes Forgejo on a router-assigned host and reports it in status.forgeURL. Set it
+                      for a bring-your-own forge, or to pin the managed forge's host.
                     type: string
                 type: object
               image:
@@ -133,8 +137,10 @@ spec:
                 description: IngressSpec controls how the UI is exposed.
                 properties:
                   host:
-                    description: Host is the external hostname the UI is served on
-                      (the Route/Ingress host).
+                    description: |-
+                      Host is the external hostname the UI is served on. Leave empty on OpenShift for a
+                      router-assigned host (reported in status.consoleURL); required for an Ingress on
+                      vanilla Kubernetes.
                     type: string
                   type:
                     description: |-
@@ -223,6 +229,22 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              consoleURL:
+                description: |-
+                  ConsoleURL is the external URL the dotvirt UI is served on; assigned by the
+                  operator when spec.ingress.host is left empty on OpenShift.
+                type: string
+              forgeAdminHint:
+                description: |-
+                  ForgeAdminHint is the command that reveals the managed Forgejo bootstrap admin
+                  password (user dotvirt-bot); the value stays in the Secret, never in status.
+                  Set only for a managed forge.
+                type: string
+              forgeURL:
+                description: |-
+                  ForgeURL is the effective external forge base URL: the configured spec.forge.url,
+                  or the host the operator assigned to a managed Forgejo when the URL was left empty.
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the .metadata.generation last reconciled.
                 format: int64
@@ -230,6 +252,12 @@ spec:
               phase:
                 description: Phase is a short human-facing summary (e.g. Pending,
                   Provisioning, Ready).
+                type: string
+              ssoOAuthClient:
+                description: |-
+                  SSOOAuthClient is a ready-to-apply command that registers the cluster-scoped
+                  OAuthClient SSO needs, with the redirect URI filled from the assigned console host.
+                  Set only while auth.openShiftSSO is on; run it once to finish SSO.
                 type: string
             type: object
         type: object

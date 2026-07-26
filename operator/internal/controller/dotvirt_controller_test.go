@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -46,6 +47,9 @@ func testScheme(t *testing.T) *runtime.Scheme {
 		s.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
 		s.AddKnownTypeWithName(gvk.GroupVersion().WithKind(kind+"List"), &unstructured.UnstructuredList{})
 	}
+	routeGVK := schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"}
+	s.AddKnownTypeWithName(routeGVK, &unstructured.Unstructured{})
+	s.AddKnownTypeWithName(routeGVK.GroupVersion().WithKind("RouteList"), &unstructured.UnstructuredList{})
 	return s
 }
 
@@ -185,8 +189,9 @@ func TestReconcileMinimalCRToReady(t *testing.T) {
 		dotvirtv1alpha1.ConditionWorkloadReady:     metav1.ConditionTrue,
 		dotvirtv1alpha1.ConditionArgoReady:         metav1.ConditionTrue,
 		dotvirtv1alpha1.ConditionAvailable:         metav1.ConditionTrue,
-		// No forge URL: webhook registration is skipped, Argo falls back to its poll.
-		dotvirtv1alpha1.ConditionArgoWebhook: metav1.ConditionUnknown,
+		// No forge URL: both webhook registrations are skipped, updates fall back to polls.
+		dotvirtv1alpha1.ConditionArgoWebhook:    metav1.ConditionUnknown,
+		dotvirtv1alpha1.ConditionDotvirtWebhook: metav1.ConditionUnknown,
 	} {
 		if co := cond(got, ct); co == nil || co.Status != want {
 			t.Errorf("condition %s = %+v, want %s", ct, co, want)
@@ -218,6 +223,22 @@ func TestReconcileMinimalCRToReady(t *testing.T) {
 	}
 	if len(crbs.Items) != 3 {
 		t.Errorf("instance-labeled ClusterRoleBindings = %d, want 3", len(crbs.Items))
+	}
+}
+
+// reconcileWorkload reports the UI's external URL in status.consoleURL, so an admin
+// can open it straight from `oc get dotvirt` without hunting for the Route.
+func TestReconcileWorkloadSetsConsoleURL(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Ingress.Host = "dotvirt.apps.cluster.example"
+	c := testBuilder(t).WithObjects(dv).Build()
+	r := newReconciler(c, depsOK)
+
+	if res, err := r.reconcileWorkload(context.Background(), dv); err != nil || res != nil {
+		t.Fatalf("reconcileWorkload = (%+v, %v), want (nil, nil)", res, err)
+	}
+	if dv.Status.ConsoleURL != "https://dotvirt.apps.cluster.example" {
+		t.Errorf("status.consoleURL = %q, want https://<ingress host>", dv.Status.ConsoleURL)
 	}
 }
 
@@ -265,6 +286,37 @@ func TestReconcileSecretsCreateOnce(t *testing.T) {
 		if got := string(s.Data[key]); got != first[name] {
 			t.Errorf("secret %s rotated across reconciles: %q -> %q", name, first[name], got)
 		}
+	}
+}
+
+// The ArgoCD-namespace appset-token mirror is the one generated secret that must
+// converge: a stale one (an earlier install's token under the same name) 401s the
+// plugin generator, so no tenant Application is ever generated and every VM reads
+// NotTracked.
+func TestReconcileConvergesStaleAppsetMirror(t *testing.T) {
+	dv := testCR()
+	argoNS := platform.Kubernetes.DefaultArgoNamespace()
+	stale := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: install.AppsetSecretName, Namespace: argoNS},
+		Data:       map[string][]byte{"token": []byte("previous-install")},
+	}
+	c := testBuilder(t).WithObjects(dv, stale).Build()
+	r := newReconciler(c, depsOK)
+
+	reconcileOnce(t, r, dv)
+
+	var src, mirror corev1.Secret
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: dv.Namespace, Name: install.AppsetSecretName}, &src); err != nil {
+		t.Fatalf("get source: %v", err)
+	}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: argoNS, Name: install.AppsetSecretName}, &mirror); err != nil {
+		t.Fatalf("get mirror: %v", err)
+	}
+	if !bytes.Equal(mirror.Data["token"], src.Data["token"]) {
+		t.Errorf("mirror token = %q, want the source token %q", mirror.Data["token"], src.Data["token"])
+	}
+	if mirror.Labels["dotvirt.io/instance"] != dv.Name {
+		t.Errorf("adopted mirror not instance-labeled: %v", mirror.Labels)
 	}
 }
 
@@ -364,5 +416,80 @@ func TestFinalizeToleratesNotFoundAndMissingArgoCRD(t *testing.T) {
 	reconcileOnce(t, r, dv)
 	if exists(t, c, &dotvirtv1alpha1.Dotvirt{}, dv.Namespace, dv.Name) {
 		t.Error("CR still present; tolerated errors must not block the finalizer")
+	}
+}
+
+// The forge host merges into argocd-tls-certs-cm with the ingress CA, preserving
+// every other entry, hand-added ones included.
+func TestEnsureForgeTLSTrustMergesHost(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Forge.Managed = true
+	dv.Spec.Forge.URL = "https://forge.apps.cluster.example"
+	ingressCA := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "default-ingress-cert", Namespace: "openshift-config-managed"},
+		Data:       map[string]string{"ca-bundle.crt": "PEM"},
+	}
+	existing := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "argocd-tls-certs-cm", Namespace: "openshift-gitops"},
+		Data:       map[string]string{"hand-added.example": "KEEP"},
+	}
+	c := testBuilder(t).WithObjects(dv, ingressCA, existing).Build()
+	r := newReconciler(c, depsOK)
+	r.Platform = platform.OpenShift
+
+	if err := r.ensureForgeTLSTrust(context.Background(), dv, "openshift-gitops"); err != nil {
+		t.Fatalf("ensureForgeTLSTrust: %v", err)
+	}
+	var cm corev1.ConfigMap
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "openshift-gitops", Name: "argocd-tls-certs-cm"}, &cm); err != nil {
+		t.Fatal(err)
+	}
+	if cm.Data["forge.apps.cluster.example"] != "PEM" {
+		t.Errorf("forge host not trusted: %v", cm.Data)
+	}
+	if cm.Data["hand-added.example"] != "KEEP" {
+		t.Errorf("merge must preserve foreign entries: %v", cm.Data)
+	}
+}
+
+// BYO forges and vanilla Kubernetes are not the operator's TLS business.
+func TestEnsureForgeTLSTrustGates(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Forge.URL = "https://byo.example"
+	dv.Spec.Forge.CredentialsSecret = "byo"
+	c := testBuilder(t).WithObjects(dv).Build()
+	r := newReconciler(c, depsOK)
+	r.Platform = platform.OpenShift
+	if err := r.ensureForgeTLSTrust(context.Background(), dv, "openshift-gitops"); err != nil {
+		t.Fatalf("BYO must be a no-op, got %v", err)
+	}
+	var cm corev1.ConfigMap
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "openshift-gitops", Name: "argocd-tls-certs-cm"}, &cm); err == nil {
+		t.Errorf("no ConfigMap should be created for a BYO forge")
+	}
+}
+
+// Ingress CA copied in-namespace (converged: it rotates); service-CA ConfigMap
+// carries the injection annotation.
+func TestEnsureTrustAnchors(t *testing.T) {
+	dv := testCR()
+	src := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "default-ingress-cert", Namespace: "openshift-config-managed"},
+		Data:       map[string]string{"ca-bundle.crt": "PEM"},
+	}
+	c := testBuilder(t).WithObjects(dv, src).Build()
+	r := newReconciler(c, depsOK)
+	r.Platform = platform.OpenShift
+
+	r.ensureTrustAnchors(context.Background(), dv)
+
+	var ca corev1.ConfigMap
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: dv.Namespace, Name: install.IngressCAConfigMap}, &ca); err != nil || ca.Data["ca-bundle.crt"] != "PEM" {
+		t.Fatalf("ingress CA not copied: %v %v", err, ca.Data)
+	}
+	var sc corev1.ConfigMap
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: dv.Namespace, Name: install.ServiceCAConfigMap}, &sc); err != nil ||
+		sc.Annotations["service.beta.openshift.io/inject-cabundle"] != "true" {
+		t.Fatalf("service-CA ConfigMap not requested for injection: %v %v", err, sc.Annotations)
 	}
 }

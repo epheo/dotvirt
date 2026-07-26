@@ -87,6 +87,7 @@
 	<AdoptProjectModal
 		project={m.project}
 		namespaces={m.namespaces}
+		recover={m.recover}
 		onclose={close}
 		onstaged={staged}
 	/>

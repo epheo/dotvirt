@@ -17,10 +17,9 @@ import (
 	"github.com/go-git/go-git/v5/storage/memory"
 )
 
-// WriteRepo is a worktree-backed clone used for committing: the running-branch
-// export (export.Exporter) and the proposed-branch changesets (changeset
-// CommitChangeset). Separate from the read-only mirror Repo so writes never
-// disturb inventory reads.
+// WriteRepo is a worktree-backed clone used for committing the proposed-branch
+// changesets (changeset CommitChangeset). Separate from the read-only mirror
+// Repo so writes never disturb inventory reads.
 type WriteRepo struct {
 	url      string
 	username string
@@ -133,10 +132,10 @@ func (w *WriteRepo) pushBranch(repo *git.Repository, branch string) error {
 // the supplied set within those directories (a VM deleted from the cluster has
 // its manifest removed). Files outside managedDirs (e.g. a README) are left
 // alone. If the resulting tree is identical to the branch head, it commits
-// nothing and returns Committed=false — keeping the running branch from churning.
+// nothing and returns Committed=false, so a no-op changeset never churns history.
 //
-// branch is created from the default branch if it doesn't exist yet (needed for
-// feature branches; the running branch is expected to exist).
+// branch is created from the default branch if it doesn't exist yet (the
+// proposed branch on its first use).
 func (w *WriteRepo) Commit(branch, message string, files []File, managedDirs []string) (CommitResult, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

@@ -73,34 +73,26 @@ check against a real cluster.
 
 dotvirt can offer "Sign in with OpenShift" beside the always-present token login:
 the OAuth access token the cluster hands back is a normal bearer token, so it rides
-the same TokenReview + per-request pass-through path as a pasted one. Registering
-the cluster-scoped `OAuthClient` is a cluster-admin act the operator deliberately
-does not perform — create it and the secret, then point the CR at them:
+the same TokenReview + per-request pass-through path as a pasted one.
 
-```yaml
-apiVersion: oauth.openshift.io/v1
-kind: OAuthClient
-metadata:
-  name: dotvirt
-secret: <random>
-redirectURIs:
-  - https://<ingress.host>/api/auth/callback
-grantMethod: auto
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: dotvirt-oauth
-  namespace: <install namespace>
-stringData:
-  clientSecret: <the same random>
-```
+Set `spec.auth.openShiftSSO: true`:
 
 ```yaml
 spec:
   auth:
-    oauthClientID: dotvirt
-    oauthSecretRef: dotvirt-oauth
+    openShiftSSO: true
+```
+
+The operator generates the client credential and, once the console host is assigned,
+publishes a ready-to-apply command in `status.ssoOAuthClient`: one `oc apply` that
+registers the cluster-scoped `OAuthClient` with the right redirect URI. Registering that
+cluster-scoped object stays a cluster-admin act the operator deliberately leaves to you
+(it holds no `oauthclients` grant); the client secret is read from the generated Secret
+at apply time, so it never lands in status:
+
+```console
+$ oc -n <install ns> get dotvirt dotvirt -o jsonpath='{.status.ssoOAuthClient}'
+# copy-paste and run the printed `oc apply` command
 ```
 
 The server-side code exchange calls the cluster's oauth Route; if its certificate

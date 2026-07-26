@@ -2,6 +2,8 @@ package changeset
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,9 +23,20 @@ import (
 // proj.Repo: forge.For parses its last two segments as owner/repo, while the API
 // calls hit srv regardless of host — so routes match on the path suffix.
 type proposeFixture struct {
-	c    *Coordinator
-	proj project.ProjectInfo
-	id   auth.Identity
+	c       *Coordinator
+	proj    project.ProjectInfo
+	id      auth.Identity
+	forgeAt string
+}
+
+// target is a project whose repo lives on the fixture's own forge, which is what the
+// coordinator requires before it will trust a probe of that repo.
+func (f *proposeFixture) target(name string) project.ProjectInfo {
+	return project.ProjectInfo{
+		Name:       name,
+		Repo:       f.forgeAt + "/dotvirt/" + name + ".git",
+		Namespaces: []string{name},
+	}
 }
 
 // route returns the response for a (method, path-suffix) pair, or 0 to fall through.
@@ -52,12 +65,108 @@ func newProposeFixture(t *testing.T, routes ...route) *proposeFixture {
 	t.Cleanup(cancel)
 	repos := git.NewRepoSet(ctx, "", nil, false, nil, time.Hour)
 	ff := forge.NewFactory(srv.URL, "tok", false)
-	c := New(store, repos, ff, nil, "main", "dotvirt/proposed", "running")
+	c := New(store, repos, ff, nil, nil, nil, "main", "dotvirt/proposed")
 
 	return &proposeFixture{
-		c:    c,
-		proj: project.ProjectInfo{Name: "p", Repo: seedBare(t)},
-		id:   auth.Identity{Username: "alice"},
+		c:       c,
+		proj:    project.ProjectInfo{Name: "p", Repo: seedBare(t)},
+		id:      auth.Identity{Username: "alice"},
+		forgeAt: srv.URL,
+	}
+}
+
+// An existing repo must not block New Project: refusing would burn the name for
+// a retried run (the repo is created before the draft). But reuse must SAY so;
+// only the warning tells a former install's leftover from a harmless retry.
+func TestCreateProjectReusesExistingRepoWithWarning(t *testing.T) {
+	f := newProposeFixture(t, when("GET", "team-a", http.StatusOK, "{}"))
+	view, err := f.c.StageCreateProject(f.id, f.proj, json.RawMessage(`{"name":"team-a","namespace":"team-a"}`))
+	if err != nil {
+		t.Fatalf("a pre-existing repo must be reused, not refused: %v", err)
+	}
+	if !strings.Contains(view.Warning, "existing repo") {
+		t.Fatalf("reuse must warn about the existing repo's contents, got %q", view.Warning)
+	}
+}
+
+// A freshly created repo carries no leftover contents, so no reuse warning.
+func TestCreateProjectFreshRepoNoWarning(t *testing.T) {
+	f := newProposeFixture(t,
+		when("GET", "team-a", http.StatusNotFound, ""),
+		func(m, path string) (int, string, bool) {
+			if m == "POST" && strings.HasPrefix(path, "/api/v1/orgs/") && strings.HasSuffix(path, "/repos") {
+				return http.StatusCreated, "{}", true
+			}
+			return 0, "", false
+		})
+	view, err := f.c.StageCreateProject(f.id, f.proj, json.RawMessage(`{"name":"team-a","namespace":"team-a"}`))
+	if err != nil {
+		t.Fatalf("StageCreateProject: %v", err)
+	}
+	if view.Warning != "" {
+		t.Fatalf("fresh repo must not warn, got %q", view.Warning)
+	}
+}
+
+// A repo annotation that still resolves means the project is already managed.
+func TestAdoptProjectRefusesResolvingRepo(t *testing.T) {
+	f := newProposeFixture(t, when("GET", "team-a", http.StatusOK, "{}"))
+	_, err := f.c.AdoptProject(f.id, f.proj, f.target("team-a"), nil)
+	if !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("want model.ErrConflict when the repo still resolves, got %v", err)
+	}
+}
+
+// An annotation the forge no longer resolves is the reported dead end: refusing it left
+// the project unreachable through every path. The probe 404s, so adoption proceeds and
+// re-creates the repo.
+func TestAdoptProjectRecreatesLostRepo(t *testing.T) {
+	f := newProposeFixture(t,
+		when("GET", "team-a", http.StatusNotFound, ""),
+		func(m, path string) (int, string, bool) {
+			// The fixture's owner comes from the seeded bare-repo path, so match the shape.
+			if m == "POST" && strings.HasPrefix(path, "/api/v1/orgs/") && strings.HasSuffix(path, "/repos") {
+				return http.StatusCreated, "{}", true
+			}
+			return 0, "", false
+		})
+	if _, err := f.c.AdoptProject(f.id, f.proj, f.target("team-a"), nil); err != nil {
+		t.Fatalf("a lost repo must be re-created, not refused: %v", err)
+	}
+}
+
+// For keeps only the owner/repo, so a project on ANOTHER forge is probed by path here;
+// when the probe misses, the real repo lives elsewhere and must not be re-homed to a
+// fresh empty one.
+func TestAdoptProjectRefusesRepoOnAnotherForge(t *testing.T) {
+	f := newProposeFixture(t, when("GET", "team-a", http.StatusNotFound, ""))
+	target := project.ProjectInfo{Name: "team-a", Namespaces: []string{"team-a"},
+		Repo: "https://github.example/acme/team-a.git"}
+	_, err := f.c.AdoptProject(f.id, f.proj, target, nil)
+	if !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("want model.ErrConflict for a repo this forge does not serve, got %v", err)
+	}
+}
+
+// Foreign host, same owner/repo on this forge: the stranded aftermath of a host
+// change. Re-home stages the host-free manifests; the PR is the migration.
+func TestAdoptProjectRehomesForeignHostRepo(t *testing.T) {
+	f := newProposeFixture(t, when("GET", "team-a", http.StatusOK, "{}"))
+	target := project.ProjectInfo{Name: "team-a", Namespaces: []string{"team-a"},
+		Repo: "https://old-forge.example/acme/team-a.git"}
+	if _, err := f.c.AdoptProject(f.id, f.proj, target, nil); err != nil {
+		t.Fatalf("a same-owner repo on this forge must re-home, not refuse: %v", err)
+	}
+	entries, err := f.c.store.List(f.id.Username, f.proj.Name)
+	if err != nil {
+		t.Fatalf("store.List: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("want the namespace manifest staged, got %d entries", len(entries))
+	}
+	m := entries[0].Manifest
+	if !strings.Contains(m, "acme/team-a.git") || strings.Contains(m, "old-forge.example") {
+		t.Fatalf("staged ref must be host-free (owner/repo.git), got:\n%s", m)
 	}
 }
 

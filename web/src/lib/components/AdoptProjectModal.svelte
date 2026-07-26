@@ -6,18 +6,20 @@
 	import StageFooter from './StageFooter.svelte';
 	import TextInput from './TextInput.svelte';
 
-	// Adopt an EXISTING labeled-but-repoless project into GitOps: unlike NewProjectModal
-	// the name and namespaces are fixed (they already exist in the cluster), so this
-	// only creates the tenant repo and stamps the dotvirt.io/repo annotation onto the
-	// project's namespaces — optionally granting owners admin.
+	// Adopt an EXISTING labeled-but-repoless project into GitOps: name and
+	// namespaces are cluster facts, so this only creates the repo and stamps the
+	// annotations. recover reuses the flow for a lost/moved repo; the backend
+	// decides, only the wording differs here.
 	let {
 		project,
 		namespaces,
+		recover = false,
 		onclose,
 		onstaged,
 	}: {
 		project: string;
 		namespaces: string[];
+		recover?: boolean;
 		onclose: () => void;
 		onstaged: () => void;
 	} = $props();
@@ -47,12 +49,24 @@
 	}
 </script>
 
-<Modal title="Attach repo to “{project}”" {onclose}>
+<Modal title={recover ? `Recover repo for "${project}"` : `Attach repo to "${project}"`} {onclose}>
 	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
-		<p class="text-ink-soft">
-			This project's namespaces exist in the cluster but aren't backed by a git repo. Adopting
-			creates the tenant repo and brings the namespaces under GitOps.
-		</p>
+		{#if recover}
+			<p class="text-ink-soft">
+				This project points at a repo the forge no longer serves. If the repo is lost, recovering
+				re-creates it empty; if it actually lives on the current forge under the same name (the
+				forge host changed), recovering stages the manifests that re-point the project instead. Your
+				workloads keep running either way, and nothing syncs until something merges. After a
+				re-create, use "Adopt into git" on the namespaces so the first merge restores everything
+				running (the Changes panel warns while anything is left out). Refused if the repo still
+				resolves as configured.
+			</p>
+		{:else}
+			<p class="text-ink-soft">
+				This project's namespaces exist in the cluster but aren't backed by a git repo. Adopting
+				creates the tenant repo and brings the namespaces under GitOps.
+			</p>
+		{/if}
 		<div class="rounded border border-line px-3 py-2 text-xs text-ink-muted">
 			<div>
 				<span class="text-ink-faint">Repo to create:</span>

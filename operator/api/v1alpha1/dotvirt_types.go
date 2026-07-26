@@ -23,6 +23,9 @@ const (
 	// ConditionArgoWebhook is True when the forge-to-ArgoCD instant-sync webhook is
 	// registered (org-level); Unknown when no Argo URL is resolvable (poll fallback).
 	ConditionArgoWebhook = "ArgoWebhook"
+	// ConditionDotvirtWebhook is True when the forge-to-dotvirt instant-feedback webhook is
+	// registered (org-level); Unknown when no delivery URL is resolvable (git-poll fallback).
+	ConditionDotvirtWebhook = "DotvirtWebhook"
 	// ConditionAvailable is the roll-up: the full install is reconciled and serving.
 	ConditionAvailable = "Available"
 )
@@ -45,15 +48,19 @@ type IngressType string
 // platform repo, distinct from (and more privileged than) dotvirt's runtime
 // clone/push token, preserving the install-provisioner vs runtime-owns-nothing split.
 type ForgeSpec struct {
-	// URL is the forge base (e.g. https://forgejo.example.com).
+	// URL is the forge base URL. Leave empty with managed on OpenShift: the operator
+	// exposes Forgejo on a router-assigned host and reports it in status.forgeURL. Set it
+	// for a bring-your-own forge, or to pin the managed forge's host.
 	URL string `json:"url,omitempty"`
 	// PlatformRepo is the cluster-scoped + tenancy repo (CUDN/NNCP/Namespace). The
-	// operator ensures it exists; dotvirt routes platform creates here by kind.
+	// operator ensures it exists; dotvirt routes platform creates here by kind. Defaults
+	// to <forge URL>/dotvirt/platform.git for a managed forge.
 	PlatformRepo string `json:"platformRepo,omitempty"`
 	// Managed deploys a self-hosted Forgejo for evaluation; false = bring your own.
 	Managed bool `json:"managed,omitempty"`
-	// CredentialsSecret names a Secret holding the forge-admin credential used for
-	// the platform-repo bootstrap (keys: url, username, token).
+	// CredentialsSecret names a Secret holding the forge-admin credential (keys: url,
+	// username, token). For a managed forge the operator WRITES this secret; point it at
+	// an existing secret only for a bring-your-own forge.
 	CredentialsSecret string `json:"credentialsSecret,omitempty"`
 	// InsecureTLS skips TLS verification when calling the forge API (a self-signed forge
 	// Route, e.g. the bundled Forgejo). DEV/EVAL ONLY; never enable against a forge with
@@ -82,7 +89,9 @@ type ArgoCDSpec struct {
 // IngressSpec controls how the UI is exposed.
 type IngressSpec struct {
 	Type IngressType `json:"type,omitempty"`
-	// Host is the external hostname the UI is served on (the Route/Ingress host).
+	// Host is the external hostname the UI is served on. Leave empty on OpenShift for a
+	// router-assigned host (reported in status.consoleURL); required for an Ingress on
+	// vanilla Kubernetes.
 	Host string `json:"host,omitempty"`
 }
 
@@ -94,16 +103,14 @@ type MetricsSpec struct {
 	URL string `json:"url,omitempty"`
 }
 
-// AuthSpec enables OpenShift SSO beside the always-present token login. The
-// admin registers the cluster-scoped OAuthClient (redirect URI
-// https://<ingress.host>/api/auth/callback), a cluster-admin act the operator
-// deliberately doesn't perform; the operator only wires the credential through.
+// AuthSpec enables OpenShift SSO beside the always-present token login.
 type AuthSpec struct {
-	// OAuthClientID is the OAuthClient's name; empty leaves SSO off.
-	OAuthClientID string `json:"oauthClientID,omitempty"`
-	// OAuthSecretRef names a Secret in the install namespace holding the
-	// OAuthClient's secret under key "clientSecret".
-	OAuthSecretRef string `json:"oauthSecretRef,omitempty"`
+	// OpenShiftSSO adds a "Sign in with OpenShift" button beside the token login. The
+	// operator generates the client credential and, once the console host is assigned,
+	// reports the exact OAuthClient to apply (redirect URI filled in) in
+	// status.ssoOAuthClient. Registering that cluster-scoped OAuthClient stays a
+	// cluster-admin act the operator deliberately doesn't perform. OpenShift only.
+	OpenShiftSSO bool `json:"openShiftSSO,omitempty"`
 }
 
 // DotvirtSpec is the desired dotvirt install.
@@ -127,6 +134,20 @@ type DotvirtStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// ForgeURL is the effective external forge base URL: the configured spec.forge.url,
+	// or the host the operator assigned to a managed Forgejo when the URL was left empty.
+	ForgeURL string `json:"forgeURL,omitempty"`
+	// ConsoleURL is the external URL the dotvirt UI is served on; assigned by the
+	// operator when spec.ingress.host is left empty on OpenShift.
+	ConsoleURL string `json:"consoleURL,omitempty"`
+	// SSOOAuthClient is a ready-to-apply command that registers the cluster-scoped
+	// OAuthClient SSO needs, with the redirect URI filled from the assigned console host.
+	// Set only while auth.openShiftSSO is on; run it once to finish SSO.
+	SSOOAuthClient string `json:"ssoOAuthClient,omitempty"`
+	// ForgeAdminHint is the command that reveals the managed Forgejo bootstrap admin
+	// password (user dotvirt-bot); the value stays in the Secret, never in status.
+	// Set only for a managed forge.
+	ForgeAdminHint string `json:"forgeAdminHint,omitempty"`
 }
 
 // Dotvirt is one dotvirt install. Namespaced singleton in the operator's namespace;
@@ -136,6 +157,7 @@ type DotvirtStatus struct {
 // +kubebuilder:resource:scope=Namespaced,shortName=dv
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Available",type=string,JSONPath=`.status.conditions[?(@.type=="Available")].status`
+// +kubebuilder:printcolumn:name="Console",type=string,JSONPath=`.status.consoleURL`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 type Dotvirt struct {
 	metav1.TypeMeta   `json:",inline"`

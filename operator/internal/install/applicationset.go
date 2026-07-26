@@ -30,7 +30,7 @@ func ApplicationSet(dv *dotvirtv1alpha1.Dotvirt, argoNS string) *unstructured.Un
 			"project": ProjectTenants,
 			"source": map[string]any{
 				"repoURL":        "{{.repo}}",
-				"targetRevision": "main",
+				"targetRevision": AppTargetRevision,
 				"path":           ".",
 				// templates/ is the repo's VM-template library (VirtualMachineTemplate
 				// manifests dotvirt renders itself) — its CRD need not exist on-cluster,

@@ -153,7 +153,7 @@
 	<InfoCard title="Host balance">
 		{#snippet action()}
 			<a href="?tab=configure" class="text-xs text-accent-ink hover:underline">
-				{band ? 'DRS settings' : 'Enable DRS'}
+				{band ? 'Rescheduling settings' : 'Enable Dynamic Rescheduling'}
 			</a>
 		{/snippet}
 
@@ -293,21 +293,24 @@
 						{#if band.above > 0}
 							<span
 								class="rounded bg-warn-soft px-1.5 py-0.5 font-medium text-warn-ink"
-								title="above the DRS band — migration sources">{band.above} hot</span
+								title="above the rescheduling band - migration sources">{band.above} hot</span
 							>
 						{/if}
 						{#if band.below > 0}
 							<span
 								class="rounded bg-cold-soft px-1.5 py-0.5 font-medium text-cold-ink"
-								title="below the DRS band — migration targets">{band.below} cold</span
+								title="below the rescheduling band - migration targets">{band.below} cold</span
 							>
 						{/if}
 					{/if}
-					<span class="text-ink-faint" title="the configured DRS deviation window around the mean">
+					<span
+						class="text-ink-faint"
+						title="the configured rescheduling deviation window around the mean"
+					>
 						band {Math.round(band.low)}–{Math.round(band.high)}%
 					</span>
 				{:else}
-					<span class="text-ink-faint">DRS not configured — no action band.</span>
+					<span class="text-ink-faint">Rescheduling not configured - no action band.</span>
 				{/if}
 				{#if memPressure > 0}
 					<span

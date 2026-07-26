@@ -33,6 +33,14 @@ func (c *Client) EnsureOrgWebhook(targetURL, secret string) error {
 	return c.ensureHook(fmt.Sprintf("/api/v1/orgs/%s/hooks", c.owner), targetURL, secret)
 }
 
+// OwnerIsOrg reports whether the client's owner is an organization. Only an org has a
+// hooks endpoint, so a user-owned owner must be covered repo by repo instead: asking
+// for its org hooks 404s, which ensureHook reads as a hard error and would retry
+// forever, leaving every repo with no webhook at all.
+func (c *Client) OwnerIsOrg() (bool, error) {
+	return c.exists("/api/v1/orgs/" + c.owner)
+}
+
 // ensureHook converges a single "gitea" (Forgejo-compatible) push+pull_request webhook
 // delivering to targetURL within the given hooks collection (repo- or org-level).
 //
@@ -128,4 +136,21 @@ func withCreateType(base map[string]any) map[string]any {
 	}
 	out["type"] = "gitea"
 	return out
+}
+
+// HasOrgWebhook: does the org carry a hook with targetURL's PATH (ensureHook's
+// identity, so a host migration still counts). Read-only: the operator observes
+// the app-owned hook, keeping one writer per hook.
+func (c *Client) HasOrgWebhook(targetURL string) (bool, error) {
+	var hooks []hook
+	if err := c.do("GET", fmt.Sprintf("/api/v1/orgs/%s/hooks", c.owner), nil, &hooks); err != nil {
+		return false, err
+	}
+	want := urlPath(targetURL)
+	for _, h := range hooks {
+		if urlPath(h.Config["url"]) == want {
+			return true, nil
+		}
+	}
+	return false, nil
 }

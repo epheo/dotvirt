@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -39,6 +40,70 @@ func TestWebhookURLGatedOnManagedForge(t *testing.T) {
 	byo := testDotvirt() // Forge.Managed defaults to false
 	if got, ok := envValue(Deployment(byo).Spec.Template.Spec.Containers[0].Env, "DOTVIRT_WEBHOOK_URL"); ok {
 		t.Errorf("BYO forge: DOTVIRT_WEBHOOK_URL must be unset (app falls back to public URL), got %q", got)
+	}
+}
+
+// hasVolume reports whether the pod declares a volume of the given name.
+func hasVolume(d *appsv1.Deployment, name string) bool {
+	for _, v := range d.Spec.Template.Spec.Volumes {
+		if v.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// With no forge configured the app runs push-only: the Deployment must omit the forge
+// credential env AND the forge-token secret mount, or the pod wedges on a dotvirt-forge
+// secret that is never written (the `forge: {}` failure). A managed forge restores both.
+func TestForgelessDeploymentOmitsForgeCredential(t *testing.T) {
+	bare := Deployment(testDotvirt()) // no managed / url / credentialsSecret
+	if _, ok := envValue(bare.Spec.Template.Spec.Containers[0].Env, "DOTVIRT_FORGE_URL"); ok {
+		t.Error("forge-less: DOTVIRT_FORGE_URL must be unset")
+	}
+	if hasVolume(bare, "forge-token") {
+		t.Error("forge-less: the forge-token volume must be omitted (else the pod wedges on a missing secret)")
+	}
+
+	managed := testDotvirt()
+	managed.Spec.Forge.Managed = true
+	managed.Spec.Forge.URL = "https://forgejo.apps.example"
+	d := Deployment(managed)
+	// Managed emits the URL as a literal (a URL change rolls the app), not a secret ref.
+	if got, ok := envValue(d.Spec.Template.Spec.Containers[0].Env, "DOTVIRT_FORGE_URL"); !ok || got != managed.Spec.Forge.URL {
+		t.Errorf("managed: DOTVIRT_FORGE_URL = (%q, ok=%v), want the literal resolved url", got, ok)
+	}
+	if !hasVolume(d, "forge-token") {
+		t.Error("managed: the forge-token volume must be present")
+	}
+}
+
+// OpenShift SSO wiring is gated on auth.openShiftSSO: the OAuth client id is a literal
+// and the client secret refs the operator-generated dotvirt-oauth Secret; both absent otherwise.
+func TestDeploymentSSOEnvGatedOnFlag(t *testing.T) {
+	if _, ok := envValue(Deployment(testDotvirt()).Spec.Template.Spec.Containers[0].Env, "DOTVIRT_OAUTH_CLIENT_ID"); ok {
+		t.Error("SSO off: DOTVIRT_OAUTH_CLIENT_ID must be unset")
+	}
+	sso := testDotvirt()
+	sso.Spec.Auth.OpenShiftSSO = true
+	env := Deployment(sso).Spec.Template.Spec.Containers[0].Env
+	// The OAuthClient is cluster-scoped, so its name must be per-install: a shared one
+	// lets a second install overwrite the first's redirect URI and secret.
+	want := OAuthClientName(sso.Namespace)
+	if got, ok := envValue(env, "DOTVIRT_OAUTH_CLIENT_ID"); !ok || got != want {
+		t.Errorf("SSO on: DOTVIRT_OAUTH_CLIENT_ID = (%q, ok=%v), want %q", got, ok, want)
+	}
+	if other := OAuthClientName("other-ns"); other == want {
+		t.Errorf("two installs share the cluster-scoped OAuthClient name %q", want)
+	}
+	var secretRef *corev1.SecretKeySelector
+	for _, e := range env {
+		if e.Name == "DOTVIRT_OAUTH_CLIENT_SECRET" && e.ValueFrom != nil {
+			secretRef = e.ValueFrom.SecretKeyRef
+		}
+	}
+	if secretRef == nil || secretRef.Name != OAuthSecretName || secretRef.Key != "clientSecret" {
+		t.Errorf("DOTVIRT_OAUTH_CLIENT_SECRET must ref %s/clientSecret, got %+v", OAuthSecretName, secretRef)
 	}
 }
 
@@ -79,7 +144,7 @@ func TestDeploymentSecurityHardening(t *testing.T) {
 // (no anyuid): non-root, no privilege escalation, all caps dropped, an fsGroup for
 // PVC writability — plus bounded, probed, and digest-pinned.
 func TestForgejoDeploymentBoundedAndPinned(t *testing.T) {
-	d := ForgejoDeployment(testDotvirt(), true, "")
+	d := ForgejoDeployment(testDotvirt(), true, "", "h")
 	c := d.Spec.Template.Spec.Containers[0]
 	if c.LivenessProbe == nil {
 		t.Error("forgejo must set a liveness probe")
@@ -104,13 +169,31 @@ func TestForgejoDeploymentBoundedAndPinned(t *testing.T) {
 	}
 }
 
+// The bootstrap reconciles the admin password on every start: `user create` seeds a
+// fresh volume, and a change-password fallback resets it on an existing one. Without
+// the fallback, a regenerated admin secret over a retained data PVC leaves the operator
+// authenticating against a stale password and the mint 401s forever.
+func TestForgejoBootstrapReconcilesAdminPassword(t *testing.T) {
+	cmd := ForgejoDeployment(testDotvirt(), true, "", "h").Spec.Template.Spec.InitContainers[0].Command
+	script := cmd[len(cmd)-1] // sh -c "<script>"
+	if !strings.Contains(script, "user create") {
+		t.Error("bootstrap must create the admin user on a fresh volume")
+	}
+	if !strings.Contains(script, "change-password") {
+		t.Error("bootstrap must reset the admin password on an existing volume (create-or-reset)")
+	}
+	if strings.Contains(script, "|| true") {
+		t.Error("bootstrap still swallows the create failure with `|| true`; the password never reconciles")
+	}
+}
+
 // fsGroup is set on vanilla K8s (PVC writability) but MUST be omitted on OpenShift,
 // where restricted-v2 rejects an out-of-range fsGroup and injects its own.
 func TestForgejoFSGroupIsPlatformConditional(t *testing.T) {
-	if fg := ForgejoDeployment(testDotvirt(), true, "").Spec.Template.Spec.SecurityContext.FSGroup; fg == nil {
+	if fg := ForgejoDeployment(testDotvirt(), true, "", "h").Spec.Template.Spec.SecurityContext.FSGroup; fg == nil {
 		t.Error("vanilla K8s (setFSGroup=true): fsGroup must be set")
 	}
-	if fg := ForgejoDeployment(testDotvirt(), false, "").Spec.Template.Spec.SecurityContext.FSGroup; fg != nil {
+	if fg := ForgejoDeployment(testDotvirt(), false, "", "h").Spec.Template.Spec.SecurityContext.FSGroup; fg != nil {
 		t.Errorf("OpenShift (setFSGroup=false): fsGroup must be nil, got %d", *fg)
 	}
 }
@@ -122,7 +205,7 @@ func TestForgejoFSGroupIsPlatformConditional(t *testing.T) {
 // renders app.ini from it).
 func TestForgejoWebhookAllowlistIncludesArgoHost(t *testing.T) {
 	const argo = "openshift-gitops-server-openshift-gitops.apps.example.com"
-	d := ForgejoDeployment(testDotvirt(), false, argo)
+	d := ForgejoDeployment(testDotvirt(), false, argo, "h")
 	for _, env := range [][]corev1.EnvVar{
 		d.Spec.Template.Spec.InitContainers[0].Env,
 		d.Spec.Template.Spec.Containers[0].Env,
@@ -134,7 +217,7 @@ func TestForgejoWebhookAllowlistIncludesArgoHost(t *testing.T) {
 	}
 
 	// No Argo URL resolvable yet: the baseline list, no trailing separator.
-	got, _ := envValue(ForgejoDeployment(testDotvirt(), false, "").Spec.Template.Spec.Containers[0].Env,
+	got, _ := envValue(ForgejoDeployment(testDotvirt(), false, "", "h").Spec.Template.Spec.Containers[0].Env,
 		"FORGEJO__webhook__ALLOWED_HOST_LIST")
 	if got != ServiceHost(testDotvirt())+",external" {
 		t.Errorf("ALLOWED_HOST_LIST without an Argo host = %q", got)
@@ -199,5 +282,66 @@ func TestArgoSourcesExcludeTemplateLibrary(t *testing.T) {
 	}
 	if dir["exclude"] != "templates/*" {
 		t.Fatalf("PlatformApplication exclude = %v", dir["exclude"])
+	}
+}
+
+// repo-creds templates ignore `insecure`; emitting it reads as a fix while doing
+// nothing. Trust is real instead (argocd-tls-certs-cm).
+func TestRepoCredsNeverEmitsIgnoredInsecure(t *testing.T) {
+	dv := testDotvirt()
+	dv.Spec.Forge.InsecureTLS = true
+	if _, ok := RepoCredsSecret(dv, "openshift-gitops", "https://forge.example/dotvirt", "bot", "tok").StringData["insecure"]; ok {
+		t.Error("insecure is not a repo-creds template field; emitting it masks the real TLS gap")
+	}
+}
+
+// A rotated admin secret must roll the pod (initContainer reconciles the DB
+// password), never wait on a human runbook.
+func TestForgejoRollsOnAdminSecretChange(t *testing.T) {
+	dv := testDotvirt()
+	a := ForgejoDeployment(dv, false, "", "hash-a").Spec.Template.Annotations["dotvirt.io/admin-secret-hash"]
+	b := ForgejoDeployment(dv, false, "", "hash-b").Spec.Template.Annotations["dotvirt.io/admin-secret-hash"]
+	if a == "" || a == b {
+		t.Fatalf("pod template must carry the changing admin-secret hash, got %q then %q", a, b)
+	}
+}
+
+// Zero-config posture is VERIFIED TLS: optional trust-anchor mounts, one CA env
+// per client, -insecure-tls only on explicit opt-in.
+func TestDeploymentVerifiedTLSByDefault(t *testing.T) {
+	dv := testDotvirt()
+	dv.Spec.Forge.Managed = true
+	dv.Spec.Auth.OpenShiftSSO = true
+	dv.Spec.Metrics.URL = "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091"
+	d := Deployment(dv)
+	c := d.Spec.Template.Spec.Containers[0]
+	for _, arg := range c.Args {
+		if arg == "-insecure-tls" {
+			t.Fatal("-insecure-tls must not render without the explicit spec opt-in")
+		}
+	}
+	for _, want := range []string{"DOTVIRT_FORGE_CA", "DOTVIRT_OAUTH_CA", "DOTVIRT_METRICS_CA"} {
+		if _, ok := envValue(c.Env, want); !ok {
+			t.Errorf("%s missing: that client would silently skip CA verification", want)
+		}
+	}
+	if !hasVolume(d, "ingress-ca") || !hasVolume(d, "service-ca") {
+		t.Error("trust-anchor mounts missing")
+	}
+}
+
+// Webhook TLS stays verified; the global SKIP_TLS_VERIFY (which also unverified
+// tenant webhooks) must never come back.
+func TestForgejoVerifiesWebhookTLS(t *testing.T) {
+	d := ForgejoDeployment(testDotvirt(), false, "", "h")
+	env := d.Spec.Template.Spec.Containers[0].Env
+	if _, ok := envValue(env, "FORGEJO__webhook__SKIP_TLS_VERIFY"); ok {
+		t.Fatal("webhook TLS verification must stay ON")
+	}
+	if v, ok := envValue(env, "SSL_CERT_DIR"); !ok || !strings.Contains(v, "/etc/ssl/certs") {
+		t.Errorf("SSL_CERT_DIR must join the system pool with the mounted CA, got %q", v)
+	}
+	if !hasVolume(d, "ingress-ca") {
+		t.Error("forgejo ingress-ca mount missing")
 	}
 }

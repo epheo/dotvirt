@@ -7,13 +7,17 @@
 	let token = $state('');
 	let busy = $state(false);
 	let error = $state('');
-	// SSO is offered once the backend confirms it's configured; the token form is
-	// always there (vanilla Kubernetes, ServiceAccounts, or an OAuth outage).
+	// SSO is offered once the backend confirms it; the token form always stays.
+	// ssoPending: say "not finished" instead of offering a failing button.
 	let sso = $state(false);
+	let ssoPending = $state(false);
 	$effect(() => {
 		api
 			.authMethods()
-			.then((m) => (sso = m.sso))
+			.then((m) => {
+				sso = m.sso;
+				ssoPending = m.ssoPending;
+			})
 			.catch(() => {});
 	});
 	// The OAuth callback bounces here with ?sso_error=1 on any failure (the
@@ -54,7 +58,12 @@
 			</p>
 		{/if}
 
-		{#if sso}
+		{#if sso && ssoPending}
+			<p class="mb-4 rounded bg-warn-soft/60 px-3 py-2 text-sm text-warn-ink">
+				OpenShift SSO is enabled but not finished: its OAuthClient is not registered yet. A cluster
+				admin can sign in with a token below and complete it in one click.
+			</p>
+		{:else if sso}
 			<a
 				href="/api/auth/openshift"
 				class="mb-4 block w-full rounded bg-accent px-4 py-2 text-center text-sm font-medium text-white hover:bg-accent-hover"

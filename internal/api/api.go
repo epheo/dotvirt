@@ -22,6 +22,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/argo"
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/desched"
@@ -65,7 +66,9 @@ type Draft interface {
 	Propose(id auth.Identity, proj project.ProjectInfo, req model.ProposeRequest) (model.ProposeResult, error)
 	VMDrift(proj project.ProjectInfo, namespace, name string) (model.DriftResult, error)
 	Adopt(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
-	AdoptNamespace(id auth.Identity, proj project.ProjectInfo, namespace string) (model.DraftView, error)
+	// AdoptNamespace stages what the caller captured from the cluster; the capture runs
+	// under the caller's own token, so the coordinator stays cluster-free.
+	AdoptNamespace(id auth.Identity, proj project.ProjectInfo, namespace string, objs []changeset.Adoptable) (model.DraftView, error)
 	AdoptProject(id auth.Identity, commitProj, target project.ProjectInfo, owners []string) (model.DraftView, error)
 	// Resync runs with dotvirt's SA (Argo operations carry no user context);
 	// canUpdateVM is the caller-token SSAR the implementation enforces before
@@ -222,12 +225,16 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("POST /api/logout", s.auth.Logout)
 		mux.HandleFunc("GET /api/me", s.auth.Me)
 		// The login screen asks which sign-in paths exist before any session.
+		// ssoPending says SSO is configured but its OAuthClient isn't registered yet,
+		// so the screen can say "finish setup" instead of offering a button that fails.
 		mux.HandleFunc("GET /api/auth/methods", func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]bool{"sso": s.oauth != nil})
+			pending := s.oauth != nil && !s.oauth.ClientRegistered(r.Context())
+			writeJSON(w, http.StatusOK, map[string]bool{"sso": s.oauth != nil, "ssoPending": pending})
 		})
 		if s.oauth != nil {
 			mux.HandleFunc("GET /api/auth/openshift", s.oauth.LoginRedirect)
 			mux.HandleFunc("GET /api/auth/callback", s.oauth.Callback)
+			mux.HandleFunc("POST /api/auth/oauthclient", s.handleFinishSSO)
 		}
 	}
 

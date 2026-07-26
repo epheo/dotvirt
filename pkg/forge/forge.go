@@ -6,9 +6,11 @@ package forge
 import (
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -52,10 +54,9 @@ func FileToken(path string) TokenSource {
 // repo) varies per project, derived from that project's git repo URL, but the
 // forge endpoint + token are shared. Returns nil if the forge isn't configured.
 type Factory struct {
-	baseURL  string
-	tokenFn  TokenSource
-	insecure bool
-	http     *http.Client
+	baseURL string
+	tokenFn TokenSource
+	http    *http.Client
 }
 
 // NewFactory builds a Factory from the shared forge endpoint + a static token.
@@ -73,20 +74,29 @@ func NewFactory(baseURL, token string, insecure bool) *Factory {
 // unset (forge disabled); a tokenFn that currently yields "" still builds a
 // Factory (the token may appear once the mounted secret is written).
 func NewFactoryFn(baseURL string, tokenFn TokenSource, insecure bool) *Factory {
+	return NewFactoryFnCA(baseURL, tokenFn, insecure, "")
+}
+
+// NewFactoryFnCA adds a PEM CA bundle: the no-insecure path for a managed forge
+// behind the cluster's ingress CA.
+func NewFactoryFnCA(baseURL string, tokenFn TokenSource, insecure bool, caFile string) *Factory {
 	if baseURL == "" || tokenFn == nil {
 		return nil
 	}
 	return &Factory{
-		baseURL:  strings.TrimRight(baseURL, "/"),
-		tokenFn:  tokenFn,
-		insecure: insecure,
-		http:     httpClient(insecure),
+		baseURL: strings.TrimRight(baseURL, "/"),
+		tokenFn: tokenFn,
+		http:    httpClient(insecure, caFile),
 	}
 }
 
 // For returns a Client targeting the repo identified by repoURL (e.g.
 // https://forge/owner/repo.git → owner/repo). Returns nil if the owner/repo can't
 // be parsed, so the caller degrades to a compare link.
+//
+// Only the owner/repo is taken from the URL; every call goes to THIS forge. That is
+// right for dotvirt's own repos, which is all the write paths ever touch. A caller that
+// would read a negative answer as fact must ask SameForge first.
 func (f *Factory) For(repoURL string) *Client {
 	if f == nil {
 		return nil
@@ -98,11 +108,53 @@ func (f *Factory) For(repoURL string) *Client {
 	return &Client{baseURL: f.baseURL, tokenFn: f.tokenFn, owner: owner, repo: repo, http: f.http}
 }
 
-func httpClient(insecure bool) *http.Client {
+// SameForge reports whether repoURL names a repo this forge actually serves. For
+// discards the URL's host, so without this a repo hosted elsewhere would be looked up
+// by path on this forge and its 404 read as "the repo is gone". A URL with no host
+// carries no other claim, so it counts as this forge's.
+func (f *Factory) SameForge(repoURL string) bool {
+	if f == nil {
+		return false
+	}
+	host := urlHost(repoURL)
+	return host == "" || host == urlHost(f.baseURL)
+}
+
+// urlHost is repoURL's lowercased host, or "" when it carries no scheme://host.
+func urlHost(repoURL string) string {
+	s := strings.TrimSpace(repoURL)
+	i := strings.Index(s, "://")
+	if i < 0 {
+		return ""
+	}
+	s = s[i+3:]
+	if slash := strings.IndexByte(s, '/'); slash >= 0 {
+		s = s[:slash]
+	}
+	// Credentials in a clone URL are not identity: user@host and host are one forge.
+	if at := strings.LastIndexByte(s, '@'); at >= 0 {
+		s = s[at+1:]
+	}
+	return strings.ToLower(s)
+}
+
+func httpClient(insecure bool, caFile string) *http.Client {
 	hc := &http.Client{Timeout: 15 * time.Second}
 	if insecure {
 		hc.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec G402 — dev flag
+		}
+		return hc
+	}
+	// Tolerant: a bad bundle logs and keeps the system pool, so a lagging CA
+	// mount degrades to a legible TLS error, never a crash.
+	if caFile != "" {
+		if pem, err := os.ReadFile(caFile); err != nil {
+			log.Printf("forge: CA %s unreadable (%v); staying on the system trust pool", caFile, err)
+		} else if pool := x509.NewCertPool(); !pool.AppendCertsFromPEM(pem) {
+			log.Printf("forge: CA %s holds no certificates; staying on the system trust pool", caFile)
+		} else {
+			hc.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}
 		}
 	}
 	return hc
@@ -132,6 +184,13 @@ func (c *Client) EnsureRepo() (created bool, err error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// RepoExists reports whether the client's repo is present on the forge, so a caller
+// can tell a dotvirt.io/repo annotation that still resolves from one the forge has
+// lost. An error means unreachable, never absent.
+func (c *Client) RepoExists() (bool, error) {
+	return c.exists(fmt.Sprintf("/api/v1/repos/%s/%s", c.owner, c.repo))
 }
 
 // EnsureOrg creates the client's owner organization if it doesn't exist (idempotent).

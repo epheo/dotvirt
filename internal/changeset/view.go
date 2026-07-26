@@ -1,8 +1,12 @@
 package changeset
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
+	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
@@ -16,6 +20,7 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 		return model.DraftView{}, err
 	}
 	view := model.DraftView{Base: c.baseBranch, Branch: c.proposedBranch(id.Username, proj.Name), Count: len(entries), Items: []model.DraftItem{}}
+	view.Warning = c.pruneWarning(proj, entries)
 	if len(entries) == 0 {
 		return view, nil
 	}
@@ -76,4 +81,76 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 		view.Items = append(view.Items, item)
 	}
 	return view, nil
+}
+
+// pruneWarning: what a merge lets ArgoCD delete, from Argo's own requiresPruning
+// minus what the draft speaks for. Derived every render, never stored: a stored
+// warning outlived the state and read partial captures as complete.
+func (c *Coordinator) pruneWarning(proj project.ProjectInfo, entries []draft.Entry) string {
+	if c.prune == nil {
+		return ""
+	}
+	pending := c.prune.PrunePending(proj.Repo, proj.Namespaces)
+	if len(pending) == 0 {
+		return ""
+	}
+	covered := map[model.ObjectRef]bool{}
+	for _, e := range entries {
+		for _, ref := range entryRefs(e) {
+			covered[ref] = true
+		}
+	}
+	var missing []string
+	for _, ref := range pending {
+		if !covered[ref] {
+			missing = append(missing, ref.Kind+" "+ref.Namespace+"/"+ref.Name)
+		}
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	const maxShown = 4
+	more := ""
+	if len(missing) > maxShown {
+		more = fmt.Sprintf(" (+%d more)", len(missing)-maxShown)
+		missing = missing[:maxShown]
+	}
+	return fmt.Sprintf("Running but not in git: %s%s. ArgoCD deletes them on the next merged change unless they are adopted first.",
+		strings.Join(missing, ", "), more)
+}
+
+// entryRefs: what a draft entry speaks for. Manifest entries declare their
+// documents. A delete counts: that prune is intended. Kinds with no prunable
+// tenant form map to nothing.
+func entryRefs(e draft.Entry) []model.ObjectRef {
+	if e.Manifest != "" {
+		return git.DeclaredRefs(e.SourceFile, []byte(e.Manifest))
+	}
+	var kind string
+	switch e.Resource {
+	case "", draft.ResourceVM:
+		kind = "VirtualMachine"
+	case draft.ResourceNetwork:
+		kind = "UserDefinedNetwork"
+	case draft.ResourceEgressFirewall:
+		kind = "EgressFirewall"
+	case draft.ResourceNetworkPolicy:
+		kind = "NetworkPolicy"
+	case draft.ResourceRoleBinding:
+		kind = "RoleBinding"
+	default:
+		return nil
+	}
+	return []model.ObjectRef{{Kind: kind, Namespace: e.Namespace, Name: e.Name}}
+}
+
+// JoinWarning folds non-fatal notes into DraftView's single Warning string.
+func JoinWarning(a, b string) string {
+	if a == "" {
+		return b
+	}
+	if b == "" {
+		return a
+	}
+	return a + " " + b
 }

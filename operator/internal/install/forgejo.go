@@ -13,10 +13,11 @@ import (
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 )
 
-// Managed (eval) Forgejo: deployed in the dotvirt namespace, reachable in-cluster
-// via its Service (no Route — git + API are cluster-internal; eval-grade, single
-// replica). The bootstrap was verified live against a real Forgejo (see the
-// initContainer below). For production, bring your own forge instead.
+// Managed (eval) Forgejo: deployed in the dotvirt namespace, single-replica, eval-grade.
+// The operator talks to it in-cluster via its Service; on OpenShift it also gets a Route
+// (an explicit spec.forge.url host, or a router-assigned one when the URL is left empty)
+// so its UI and PRs are reviewable off-cluster. The bootstrap was verified live against a
+// real Forgejo (see the initContainer below). For production, bring your own forge instead.
 const (
 	// Pinned by digest (the codeberg.org/forgejo/forgejo:11-rootless tag) so the eval
 	// forge is reproducible and declarable in the CSV's relatedImages. Re-pin manually
@@ -43,9 +44,10 @@ func ForgejoServiceURL(dv *dotvirtv1alpha1.Dotvirt) string {
 	return svcURL(ForgejoServiceName, dv.Namespace, ForgejoHTTPPort)
 }
 
-// ForgejoExternalURL is the browser/clone-facing base URL: the configured
-// spec.forge.url when set (exposed via Route/Ingress, so the forge UI and PRs are
-// reviewable off-cluster), else the in-cluster Service URL (internal-only eval).
+// ForgejoExternalURL is the browser/clone-facing base URL: the effective spec.forge.url
+// (the operator fills a derived one from the router-assigned Route before rendering),
+// else the in-cluster Service URL, the fallback only a dry-run or a still-unresolved
+// host hits, since a real render resolves the URL first.
 func ForgejoExternalURL(dv *dotvirtv1alpha1.Dotvirt) string {
 	if dv.Spec.Forge.URL != "" {
 		return strings.TrimRight(dv.Spec.Forge.URL, "/")
@@ -53,8 +55,9 @@ func ForgejoExternalURL(dv *dotvirtv1alpha1.Dotvirt) string {
 	return ForgejoServiceURL(dv)
 }
 
-// ForgejoHost is the external hostname to expose the managed Forgejo on, derived
-// from spec.forge.url. Empty when no external URL is set (internal-only).
+// ForgejoHost is the hostname to expose the managed Forgejo on, parsed from
+// spec.forge.url. Empty when no URL is set; the caller then creates a hostless Route
+// and the router assigns one.
 func ForgejoHost(dv *dotvirtv1alpha1.Dotvirt) string {
 	if dv.Spec.Forge.URL == "" {
 		return ""
@@ -131,20 +134,21 @@ func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt, argoWebhookHost string) []corev1.En
 		{Name: "FORGEJO__database__DB_TYPE", Value: "sqlite3"},
 		{Name: "FORGEJO__server__ROOT_URL", Value: ForgejoExternalURL(dv) + "/"},
 		{Name: "FORGEJO__webhook__ALLOWED_HOST_LIST", Value: allowed},
-		// Skip webhook TLS verification globally for this managed Forgejo. It's required by
-		// the ArgoCD-direct backstop (a fallback to dotvirt's RefreshForRepo), which targets
-		// ArgoCD's EXTERNAL Route — off-cluster, served by an ingress CA Forgejo doesn't
-		// trust. Being global, it also relaxes verification for any tenant-added external
-		// webhook on this forge: an accepted trade-off for the eval-grade managed forge, not
-		// the bounded in-cluster exposure the name might suggest. (dotvirt's own webhook
-		// needs no exemption — it's delivered to the in-cluster Service over plain HTTP.)
-		{Name: "FORGEJO__webhook__SKIP_TLS_VERIFY", Value: "true"},
+		// Webhook TLS is VERIFIED: the mounted ingress CA joins the system pool via
+		// Go's colon-separated SSL_CERT_DIR (empty dir on vanilla). Replaces the
+		// global SKIP_TLS_VERIFY, which also unverified tenant webhooks.
+		{Name: "SSL_CERT_DIR", Value: "/etc/ssl/certs:" + forgejoCADir},
 	}
 }
 
+// forgejoCADir is where the ingress-CA ConfigMap mounts into both Forgejo
+// containers, joining the system trust via SSL_CERT_DIR.
+const forgejoCADir = "/var/run/dotvirt/ca"
+
 // ForgejoDeployment runs the rootless Forgejo with a one-shot bootstrap initContainer
-// that, on a fresh volume, migrates the DB and creates the admin service user — the
-// exact sequence verified live as an arbitrary OpenShift-injected UID. The main
+// that migrates the DB and reconciles the admin service user's password to the current
+// secret on every start (create on a fresh volume, change-password on an existing one).
+// That sequence was verified live as an arbitrary OpenShift-injected UID. The main
 // container then serves on the prepared data. The operator mints the API token
 // afterward (it can't exec).
 //
@@ -152,11 +156,12 @@ func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt, argoWebhookHost string) []corev1.En
 // dir is group-writable (gid 0 on OpenShift via the SCC; fsGroup on vanilla K8s). The
 // PVC mounts at the image's default GITEA_WORK_DIR (/var/lib/gitea); /etc/gitea is the
 // image's other declared volume, backed by an emptyDir.
-func ForgejoDeployment(dv *dotvirtv1alpha1.Dotvirt, setFSGroup bool, argoWebhookHost string) *appsv1.Deployment {
+func ForgejoDeployment(dv *dotvirtv1alpha1.Dotvirt, setFSGroup bool, argoWebhookHost, adminSecretHash string) *appsv1.Deployment {
 	replicas := int32(1)
 	forgejoImg := imageFromEnv("RELATED_IMAGE_FORGEJO", ForgejoImage)
 	dataMount := corev1.VolumeMount{Name: "data", MountPath: "/var/lib/gitea"}
 	etcMount := corev1.VolumeMount{Name: "etc", MountPath: "/etc/gitea"}
+	caMount := corev1.VolumeMount{Name: "ingress-ca", MountPath: forgejoCADir, ReadOnly: true}
 	adminPW := corev1.EnvVar{Name: "ADMIN_PW", ValueFrom: &corev1.EnvVarSource{
 		SecretKeyRef: &corev1.SecretKeySelector{
 			LocalObjectReference: corev1.LocalObjectReference{Name: ForgejoAdminSecret}, Key: "password",
@@ -165,13 +170,22 @@ func ForgejoDeployment(dv *dotvirtv1alpha1.Dotvirt, setFSGroup bool, argoWebhook
 	// environment-to-ini renders app.ini from the FORGEJO__* env (the rootless image's
 	// entrypoint normally does this; we override the command, so run it ourselves).
 	// migrate then has a config to load. No chown/su-exec: already the non-root user.
+	//
+	// create-or-reset: on a fresh volume `user create` seeds the admin; on an existing
+	// volume it fails (user exists) and change-password reconciles the DB password to the
+	// current admin secret. So every pod start converges the password, and a regenerated
+	// admin secret (a CR delete/recreate over the retained data PVC, or a manual secret
+	// delete) can never leave the operator's basic-auth mint stuck on a stale password.
+	// The initContainer has local DB access, so it needs no prior password to reset it.
 	bootstrap := `set -e
 mkdir -p "$(dirname "$GITEA_APP_INI")"
 environment-to-ini
 forgejo migrate
 forgejo admin user create --admin --username ` + ForgejoBotUser +
-		` --password "$ADMIN_PW" --email ` + ForgejoBotUser + `@dotvirt.local --must-change-password=false || true`
+		` --password "$ADMIN_PW" --email ` + ForgejoBotUser + `@dotvirt.local --must-change-password=false ` +
+		`|| forgejo admin user change-password --username ` + ForgejoBotUser + ` --password "$ADMIN_PW" --must-change-password=false`
 
+	caOptional := true
 	return &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: objectMeta(ForgejoServiceName, dv.Namespace, dv.Name),
@@ -180,7 +194,13 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}, // RWO data
 			Selector: &metav1.LabelSelector{MatchLabels: forgejoSelector},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: forgejoSelector},
+				// A rotated admin secret must roll the pod so the initContainer
+				// reconciles the DB password; without this, rotation waits on a
+				// human runbook.
+				ObjectMeta: metav1.ObjectMeta{
+					Labels:      forgejoSelector,
+					Annotations: map[string]string{"dotvirt.io/admin-secret-hash": adminSecretHash},
+				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: ForgejoSAName,
 					SecurityContext:    forgejoPodSecurityContext(setFSGroup),
@@ -189,7 +209,7 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 						Image:           forgejoImg,
 						Command:         []string{"sh", "-c", bootstrap},
 						Env:             append(forgejoEnv(dv, argoWebhookHost), adminPW),
-						VolumeMounts:    []corev1.VolumeMount{dataMount, etcMount},
+						VolumeMounts:    []corev1.VolumeMount{dataMount, etcMount, caMount},
 						Resources:       forgejoResources(),
 						SecurityContext: forgejoContainerSecurityContext(),
 					}},
@@ -198,7 +218,7 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 						Image:        forgejoImg,
 						Env:          forgejoEnv(dv, argoWebhookHost),
 						Ports:        []corev1.ContainerPort{{Name: "http", ContainerPort: ForgejoHTTPPort}},
-						VolumeMounts: []corev1.VolumeMount{dataMount, etcMount},
+						VolumeMounts: []corev1.VolumeMount{dataMount, etcMount, caMount},
 						// The default 1s probe timeout kills a merely-busy forge: under clone
 						// bursts the SQLite-backed healthz slows past 1s, and restarting it
 						// makes the overload worse. Generous timeouts break that flap loop.
@@ -224,6 +244,10 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 							VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: ForgejoPVCName}},
 						},
 						{Name: "etc", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+						// Optional: absent on vanilla; the trust dir is then just empty.
+						{Name: "ingress-ca", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+							LocalObjectReference: corev1.LocalObjectReference{Name: IngressCAConfigMap}, Optional: &caOptional,
+						}}},
 					},
 				},
 			},

@@ -59,15 +59,16 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 		return out // unresolved repo: Error already explains why
 	}
 
+	// A dead repo must not blind the inventory: live objects are cluster facts.
+	// The error becomes a badge; namespaces and running VMs still render
+	// (NotTracked). Hiding them made stranded projects look empty and invited
+	// the wrong recovery actions.
+	var vms []model.VM
 	read, _, err := in.Repos.Get(p.Repo)
 	if err != nil {
 		out.Error = "repo unavailable: " + err.Error()
-		return out
-	}
-	vms, err := read.ParseVMsOnBranch(in.Branch)
-	if err != nil {
+	} else if vms, err = read.ParseVMsOnBranch(in.Branch); err != nil {
 		out.Error = "read repo: " + err.Error()
-		return out
 	}
 
 	allowed := toSet(p.Namespaces)

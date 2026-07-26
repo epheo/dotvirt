@@ -202,6 +202,13 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The cluster is dotvirt's registry, so an existing project is what makes this a
+	// re-manage rather than a create. Checked here, before the coordinator touches the
+	// forge, so a refusal never leaves a repo behind.
+	if _, exists := s.projectByName(peek.Name); exists {
+		http.Error(w, "that project already exists; adopt it instead of creating it", http.StatusConflict)
+		return
+	}
 	view, err := s.draft.StageCreateProject(plat.id, plat.proj, raw)
 	respond(w, view, err)
 }

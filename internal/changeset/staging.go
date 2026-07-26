@@ -12,6 +12,7 @@ import (
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/validate"
 	"github.com/epheo/dotvirt/internal/vmgen"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // StageEdit records a VM edit in (id, proj)'s draft.
@@ -136,8 +137,13 @@ func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinPro
 			return draft.Entry{}, fmt.Errorf("invalid namespace spec: %v", err)
 		}
 		// Stamp the namespace's dotvirt.io labels/annotations to the tenant it joins,
-		// not the platform repo it's committed to.
-		spec.Project, spec.Repo = joinProj.Name, joinProj.Repo
+		// not the platform repo it's committed to. Host-free ref ONLY when the repo is
+		// on this forge: stripping a genuinely foreign host would re-point the project.
+		ref := joinProj.Repo
+		if c.forge.SameForge(ref) {
+			ref = forge.PathRef(ref)
+		}
+		spec.Project, spec.Repo = joinProj.Name, ref
 		path, content, err := netgen.NamespaceManifest(spec)
 		return draft.Entry{
 			Resource:   draft.ResourceNamespace,
@@ -188,12 +194,18 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	if !validate.DNS1123Name(ns) {
 		return model.DraftView{}, fmt.Errorf("%w: namespace name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, ns)
 	}
-	repoURL, err := c.ensureTenantRepo(commitProj.Repo, spec.Name)
+	// Whether the tenant already exists is a CLUSTER fact, checked by the caller before
+	// this runs. Refusing here on a pre-existing repo instead would burn the name: the
+	// repo is created first, so a run that failed or was discarded after that point
+	// could never be retried. ensureTenantRepo is idempotent, so a retry reuses it.
+	repoURL, created, err := c.ensureTenantRepo(commitProj.Repo, spec.Name)
 	if err != nil {
 		return model.DraftView{}, err
 	}
 	// First namespace, joined to the new project/repo (stamps its dotvirt.io labels).
-	nsSpec := netgen.NamespaceSpec{Name: ns, Project: spec.Name, Repo: repoURL, VMNetwork: spec.VMNetwork}
+	// Host-free ref: the forge identity lives only in the install config, so a
+	// host change re-resolves projects instead of stranding them.
+	nsSpec := netgen.NamespaceSpec{Name: ns, Project: spec.Name, Repo: forge.PathRef(repoURL), VMNetwork: spec.VMNetwork}
 	nsPath, nsContent, err := netgen.NamespaceManifest(nsSpec)
 	if err != nil {
 		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
@@ -227,7 +239,18 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 			return model.DraftView{}, err
 		}
 	}
-	return c.Get(id, commitProj)
+	view, err := c.Get(id, commitProj)
+	if err != nil {
+		return view, err
+	}
+	if !created {
+		// A retry reuses its own repo; a former install's leftover deploys its
+		// contents on merge with nothing in the PR showing them. Only the human can
+		// tell the two apart, so say it.
+		view.Warning = JoinWarning(view.Warning,
+			fmt.Sprintf("Reusing the existing repo %s: whatever it currently holds deploys once this project lands.", repoURL))
+	}
+	return view, nil
 }
 
 // AdoptProject wires a repo to an EXISTING labeled-but-repoless project — the
@@ -243,16 +266,45 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	if err := requireRepo(commitProj); err != nil {
 		return model.DraftView{}, err
 	}
-	if target.Repo != "" {
-		return model.DraftView{}, fmt.Errorf("%w: project %q already has a repo (%s)", model.ErrConflict, target.Name, target.Repo)
-	}
 	if !validate.DNS1123Name(target.Name) {
 		return model.DraftView{}, fmt.Errorf("%w: project name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, target.Name)
 	}
 	if len(target.Namespaces) == 0 {
 		return model.DraftView{}, fmt.Errorf("%w: project %q has no namespaces to adopt", model.ErrInvalid, target.Name)
 	}
-	repoURL, err := c.ensureTenantRepo(commitProj.Repo, target.Name)
+	// A resolving annotation means already managed: conflict. Two dead ends recover:
+	// the forge LOST the repo (re-create; safe, allowEmpty refuses an empty source),
+	// or the HOST changed while the repo survived under the same owner/name
+	// (RE-HOME: stage the host-free namespace manifests; the PR is the re-point).
+	// A repo this forge cannot speak for stays a conflict.
+	if target.Repo != "" {
+		fc := c.forge.For(target.Repo)
+		if fc == nil {
+			return model.DraftView{}, fmt.Errorf("%w: project %q already has a repo (%s)", model.ErrConflict, target.Name, target.Repo)
+		}
+		exists, err := fc.RepoExists()
+		if err != nil {
+			return model.DraftView{}, fmt.Errorf("check project repo: %w", err)
+		}
+		if !c.forge.SameForge(target.Repo) {
+			if !exists {
+				// For drops the host: this was a probe by path. The real repo lives
+				// elsewhere; never re-home it to a fresh empty one.
+				return model.DraftView{}, fmt.Errorf("%w: project %q's repo (%s) is hosted on another forge", model.ErrConflict, target.Name, target.Repo)
+			}
+			// Re-home: no repo create, no seed; the repo is already here.
+			if err := c.stageProjectAdoption(id.Username, commitProj.Name, target, target.Repo, owners); err != nil {
+				return model.DraftView{}, err
+			}
+			return c.Get(id, commitProj)
+		}
+		if exists {
+			return model.DraftView{}, fmt.Errorf("%w: project %q already has a repo (%s)", model.ErrConflict, target.Name, target.Repo)
+		}
+	}
+	// The project is repoless, or its same-forge repo is genuinely lost;
+	// ensureTenantRepo creates it (created is irrelevant on this path).
+	repoURL, _, err := c.ensureTenantRepo(commitProj.Repo, target.Name)
 	if err != nil {
 		return model.DraftView{}, err
 	}
@@ -264,24 +316,25 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 
 // ensureTenantRepo derives the tenant repo URL — a sibling of the platform repo
 // under the same owner — creates it on the forge when absent, and seeds templates
-// into a freshly created one. Shared by project creation and adoption.
-func (c *Coordinator) ensureTenantRepo(platformRepo, name string) (string, error) {
-	repoURL := siblingRepoURL(platformRepo, name)
+// into a freshly created one. Shared by project creation and adoption; created is
+// false when the repo already existed, which the caller uses to guard.
+func (c *Coordinator) ensureTenantRepo(platformRepo, name string) (repoURL string, created bool, err error) {
+	repoURL = siblingRepoURL(platformRepo, name)
 	if repoURL == "" {
-		return "", fmt.Errorf("%w: cannot derive a repo URL from the platform repo %q", model.ErrInvalid, platformRepo)
+		return "", false, fmt.Errorf("%w: cannot derive a repo URL from the platform repo %q", model.ErrInvalid, platformRepo)
 	}
 	fc := c.forge.For(repoURL)
 	if fc == nil {
-		return "", fmt.Errorf("%w: forge not configured; cannot create the project repo", model.ErrInvalid)
+		return "", false, fmt.Errorf("%w: forge not configured; cannot create the project repo", model.ErrInvalid)
 	}
-	created, err := fc.EnsureRepo()
+	created, err = fc.EnsureRepo()
 	if err != nil {
-		return "", fmt.Errorf("create project repo: %w", err)
+		return "", false, fmt.Errorf("create project repo: %w", err)
 	}
 	if created {
 		c.seedTemplates(repoURL)
 	}
-	return repoURL, nil
+	return repoURL, created, nil
 }
 
 // stageProjectAdoption stages the namespace (+ optional owner RoleBinding) manifests
@@ -293,7 +346,8 @@ func (c *Coordinator) ensureTenantRepo(platformRepo, name string) (string, error
 // (e.g. dotvirt-made, annotation later dropped) is corrected rather than duplicated.
 func (c *Coordinator) stageProjectAdoption(username, commitProjName string, target project.ProjectInfo, repoURL string, owners []string) error {
 	for _, ns := range target.Namespaces {
-		nsPath, nsContent, err := netgen.NamespaceManifest(netgen.NamespaceSpec{Name: ns, Project: target.Name, Repo: repoURL})
+		// Host-free ref; the re-home path depends on it.
+		nsPath, nsContent, err := netgen.NamespaceManifest(netgen.NamespaceSpec{Name: ns, Project: target.Name, Repo: forge.PathRef(repoURL)})
 		if err != nil {
 			return fmt.Errorf("%w: %v", model.ErrInvalid, err)
 		}

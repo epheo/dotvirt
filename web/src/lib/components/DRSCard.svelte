@@ -85,7 +85,7 @@
 	}
 </script>
 
-<InfoCard title="DRS — automatic VM rebalancing">
+<InfoCard title="Dynamic Rescheduling - automatic VM rebalancing">
 	{#snippet action()}
 		{#if view?.canManage}
 			<span class="flex items-center gap-3">
@@ -97,7 +97,7 @@
 					>
 				{/if}
 				<button onclick={() => (configuring = true)} class="text-xs text-accent hover:underline"
-					>{view.configured ? 'Configure' : 'Enable DRS'}</button
+					>{view.configured ? 'Configure' : 'Enable Dynamic Rescheduling'}</button
 				>
 			</span>
 		{/if}

@@ -79,7 +79,7 @@
 						/>
 					{/if}
 					<Row
-						label="DRS"
+						label="Dynamic Rescheduling"
 						value={vm.drsExclude ? 'Excluded from load balancing' : 'Eligible for load balancing'}
 					/>
 					<Row label="Eviction strategy" value={vm.evictionStrategy || 'Cluster default'} />

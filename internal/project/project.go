@@ -7,6 +7,8 @@ package project
 
 import (
 	"sort"
+
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // ProjectInfo is one resolved tenant: its name, the repo backing it, the
@@ -30,15 +32,22 @@ type Namespace struct {
 }
 
 // Resolver maps namespaces to projects using a label (project name) and an
-// annotation (repo URL).
+// annotation (repo ref). The ref may be host-free ("dotvirt/demo.git"), resolved
+// against forgeBase at read time: the forge's identity then lives only in the
+// install config, so a forge-host change re-points every project instead of
+// stranding them on a dead absolute URL. Absolute refs pass through (BYO forges,
+// pre-existing annotations).
 type Resolver struct {
 	projectLabel string
 	repoAnno     string
+	forgeBase    string
 }
 
-// NewResolver builds a Resolver for the given label/annotation keys.
-func NewResolver(projectLabel, repoAnno string) *Resolver {
-	return &Resolver{projectLabel: projectLabel, repoAnno: repoAnno}
+// NewResolver builds a Resolver for the given label/annotation keys. forgeBase is
+// the effective forge URL relative repo refs resolve against; empty leaves them
+// unresolvable (surfaced as the project's Error).
+func NewResolver(projectLabel, repoAnno, forgeBase string) *Resolver {
+	return &Resolver{projectLabel: projectLabel, repoAnno: repoAnno, forgeBase: forgeBase}
 }
 
 // accum gathers a project's member namespaces and the distinct repo URLs they
@@ -76,8 +85,10 @@ func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []Pr
 			byProject[name] = a
 		}
 		a.namespaces = append(a.namespaces, ns.Name)
+		// Resolve BEFORE deduping, so a relative ref and its absolute form count as
+		// one repo rather than a conflict.
 		if repo := ns.Annotations[r.repoAnno]; repo != "" {
-			a.repos[repo] = struct{}{}
+			a.repos[forge.ResolveRef(r.forgeBase, repo)] = struct{}{}
 		}
 	}
 
@@ -91,6 +102,10 @@ func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []Pr
 		case 1:
 			for repo := range a.repos {
 				info.Repo = repo
+			}
+			if info.Repo == "" {
+				// A relative ref with no forge to resolve against: listed, not editable.
+				info.Error = "repo ref is relative but no forge is configured to resolve it"
 			}
 		default:
 			info.Error = "conflicting dotvirt.io/repo annotations across the project's namespaces"

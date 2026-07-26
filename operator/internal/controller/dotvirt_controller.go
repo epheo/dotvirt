@@ -42,6 +42,11 @@ type DotvirtReconciler struct {
 	// probe is a test seam (not config): deps.Probe needs a live discovery
 	// endpoint, so tests stub it. nil = the real probe.
 	probe func(*rest.Config) (deps.Result, error)
+
+	// forgeAPIBase is a test seam: the managed-Forgejo bootstrap talks to the forge
+	// over its in-cluster Service URL, which a unit test redirects to an httptest
+	// server. nil = the real Service URL.
+	forgeAPIBase func(*dotvirtv1alpha1.Dotvirt) string
 }
 
 // The operator's OWN least-privilege RBAC (generated into config/rbac/role.yaml). Verbs
@@ -55,11 +60,16 @@ type DotvirtReconciler struct {
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;deletecollection
-// +kubebuilder:rbac:groups="",resources=configmaps,verbs=create;patch;deletecollection
+// configmaps get/update: read the default ingress CA (openshift-config-managed) and
+// merge the managed forge's host into argocd-tls-certs-cm, so Argo VERIFIES the
+// router-served cert instead of x509-failing on every repo.
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;create;update;patch;deletecollection
 // +kubebuilder:rbac:groups="",resources=services;serviceaccounts;persistentvolumeclaims,verbs=create;patch
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get;list;watch;create;patch
-// routes/custom-host: required to set an explicit spec.host on a Route (the forge + app exposure hosts).
-// +kubebuilder:rbac:groups=route.openshift.io,resources=routes/custom-host,verbs=create
+// routes/custom-host: required to set an explicit spec.host on a Route (the forge + app
+// exposure hosts). `update` on top of `create` so editing spec.ingress.host / spec.forge.url
+// on a live CR re-homes the existing Route instead of being denied ("cannot set host field").
+// +kubebuilder:rbac:groups=route.openshift.io,resources=routes/custom-host,verbs=create;update
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=create;patch
 // +kubebuilder:rbac:groups=argoproj.io,resources=appprojects;applications;applicationsets,verbs=create;patch;deletecollection
 // clusterrolebindings: the operator creates the bindings that wire the static operand roles
@@ -112,6 +122,7 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		r.reconcileArgo,
 		r.reconcilePlatformRepo,
 		r.reconcileArgoWebhook,
+		r.reconcileDotvirtWebhook,
 	} {
 		res, err := phase(ctx, &dv)
 		if err != nil {
@@ -128,7 +139,7 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	r.setCondition(&dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionTrue, "Reconciled", "install reconciled")
 	dv.Status.Phase = dotvirtv1alpha1.PhaseReady
 	dv.Status.ObservedGeneration = dv.Generation
-	if err := r.Status().Update(ctx, &dv); err != nil {
+	if err := r.writeStatus(ctx, &dv); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
@@ -151,7 +162,7 @@ func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvi
 		r.setCondition(dv, dotvirtv1alpha1.ConditionDependenciesReady, metav1.ConditionFalse, "MissingPrerequisite", depRes.Summary())
 		dv.Status.Phase = dotvirtv1alpha1.PhaseBlockedOnDependencies
 		dv.Status.ObservedGeneration = dv.Generation
-		if uerr := r.Status().Update(ctx, dv); uerr != nil {
+		if uerr := r.writeStatus(ctx, dv); uerr != nil {
 			return nil, uerr
 		}
 		return &ctrl.Result{RequeueAfter: time.Minute}, nil
@@ -173,11 +184,31 @@ func (r *DotvirtReconciler) forgeClient(ctx context.Context, dv *dotvirtv1alpha1
 	if dv.Spec.Forge.URL == "" || token == "" {
 		return nil, fmt.Errorf("forge url (spec.forge.url) and a credential token (%s/token) are required", name)
 	}
-	c := forge.NewFactory(dv.Spec.Forge.URL, token, dv.Spec.Forge.InsecureTLS).For(dv.Spec.Forge.PlatformRepo)
+	// A managed forge is reached over its in-cluster Service (the operator pod may not
+	// route to the external Route); owner/repo still parse from the external platform
+	// repo URL, so only the base is re-homed.
+	base := dv.Spec.Forge.URL
+	if dv.Spec.Forge.Managed {
+		base = r.managedForgeAPIBase(dv)
+	}
+	c := forge.NewFactory(base, token, dv.Spec.Forge.InsecureTLS).For(dv.Spec.Forge.PlatformRepo)
 	if c == nil {
 		return nil, fmt.Errorf("cannot parse platform repo URL %q", dv.Spec.Forge.PlatformRepo)
 	}
 	return c, nil
+}
+
+// routeHost reads the spec.host an OpenShift Route carries: the explicit host, or the
+// one the router assigned to a hostless Route. Empty when the Route is absent or its
+// host isn't assigned yet. Unstructured so the module needs no openshift/api dep.
+func (r *DotvirtReconciler) routeHost(ctx context.Context, ns, name string) string {
+	route := &unstructured.Unstructured{}
+	route.SetGroupVersionKind(schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"})
+	if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, route); err != nil {
+		return ""
+	}
+	host, _, _ := unstructured.NestedString(route.Object, "spec", "host")
+	return host
 }
 
 // argoServerURL resolves the externally reachable ArgoCD base URL: the spec
@@ -187,16 +218,10 @@ func (r *DotvirtReconciler) argoServerURL(ctx context.Context, dv *dotvirtv1alph
 	if dv.Spec.ArgoCD.ServerURL != "" {
 		return dv.Spec.ArgoCD.ServerURL
 	}
-	route := &unstructured.Unstructured{}
-	route.SetGroupVersionKind(schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"})
-	if err := r.Get(ctx, types.NamespacedName{Namespace: argoNS, Name: "openshift-gitops-server"}, route); err != nil {
-		return ""
+	if host := r.routeHost(ctx, argoNS, "openshift-gitops-server"); host != "" {
+		return "https://" + host
 	}
-	host, _, _ := unstructured.NestedString(route.Object, "spec", "host")
-	if host == "" {
-		return ""
-	}
-	return "https://" + host
+	return ""
 }
 
 // argoTarget resolves the ArgoCD namespace + controller ServiceAccount from the
@@ -227,7 +252,7 @@ func (r *DotvirtReconciler) setCondition(dv *dotvirtv1alpha1.Dotvirt, condType s
 func (r *DotvirtReconciler) failPhase(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, condType, reason string, err error) error {
 	r.setCondition(dv, condType, metav1.ConditionFalse, reason, err.Error())
 	dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
-	if uerr := r.Status().Update(ctx, dv); uerr != nil {
+	if uerr := r.writeStatus(ctx, dv); uerr != nil {
 		logf.FromContext(ctx).Error(uerr, "status update failed", "phase", dotvirtv1alpha1.PhaseProvisioning)
 	}
 	return err
@@ -264,4 +289,14 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		b = b.Owns(route)
 	}
 	return b.Complete(r)
+}
+
+// writeStatus persists the derived status as a MERGE PATCH, not an Update: OLM and
+// the status informer touch the object between our read and write often enough that
+// resourceVersion'd updates spray "object has been modified" requeue noise into the
+// log, which reads as a broken install to anyone skimming it. A merge patch carries
+// no resourceVersion, and every status field (conditions included) is derived and
+// dotvirt-owned, so replace-wholesale semantics are exact.
+func (r *DotvirtReconciler) writeStatus(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
+	return r.Status().Patch(ctx, dv, client.Merge)
 }

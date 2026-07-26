@@ -8,7 +8,7 @@ export type AppModal =
 	| { kind: 'uplink' }
 	| { kind: 'namespace'; project: string | null }
 	| { kind: 'newProject' }
-	| { kind: 'adoptProject'; project: string; namespaces: string[] }
+	| { kind: 'adoptProject'; project: string; namespaces: string[]; recover?: boolean }
 	| { kind: 'egressFw'; namespaces: string[]; namespace?: string }
 	| { kind: 'dfw'; namespaces: string[]; namespace?: string }
 	| { kind: 'tier0' }
@@ -38,7 +38,8 @@ export type CtxState =
 			namespaces: string[];
 	  };
 
-export type ToastKind = 'success' | 'error' | 'info';
+// warning is for an action that did what it could: it succeeded, but not wholly.
+export type ToastKind = 'success' | 'error' | 'warning' | 'info';
 export type Toast = {
 	id: number;
 	kind: ToastKind;

@@ -186,7 +186,10 @@
 			out.push({ label: 'Sizing', value: `Custom · ${r.cpuCores} CPU / ${r.memory}` });
 		if (r.preference) out.push({ label: 'Preference', value: r.preference });
 		if (r.drsExclude !== undefined)
-			out.push({ label: 'DRS', value: r.drsExclude ? 'excluded from rebalancing' : 'rebalanced' });
+			out.push({
+				label: 'Dynamic Rescheduling',
+				value: r.drsExclude ? 'excluded from rebalancing' : 'rebalanced',
+			});
 		if (r.evictionStrategy !== undefined)
 			out.push({ label: 'Eviction strategy', value: r.evictionStrategy || 'cluster default' });
 		for (const [k, v] of Object.entries(r.setLabels ?? {}))
@@ -354,7 +357,7 @@
 		     encoding on the manifest, so this edits both at once. -->
 		<div>
 			<div class="mb-1 flex items-center justify-between">
-				<span class="text-ink-muted">Placement groups (DRS rules)</span>
+				<span class="text-ink-muted">Placement groups</span>
 				{#if !customScheduling}
 					<button onclick={addGroup} type="button" class="text-xs text-accent hover:underline"
 						>+ Add group</button
@@ -443,7 +446,7 @@
 			<label class="flex items-start gap-2 text-[13px]">
 				<input type="checkbox" bind:checked={form.drsExclude} class="mt-0.5" />
 				<span>
-					Exclude from DRS load balancing
+					Exclude from load balancing
 					<span class="block text-xs text-ink-faint">
 						Automatic rebalancing skips this VM; node drains still live-migrate it.
 					</span>

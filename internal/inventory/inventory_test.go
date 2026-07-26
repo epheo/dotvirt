@@ -204,3 +204,31 @@ func TestBuildDriftEnabledMarksNotTracked(t *testing.T) {
 		t.Errorf("with drift enabled and no Application, Sync should be NotTracked, got %q", vm.Sync)
 	}
 }
+
+// A dead repo must not blind the inventory: live VMs render (NotTracked) beside
+// the error badge. Hiding them invited the wrong recovery actions.
+func TestBuildRepoUnavailableStillShowsLiveVMs(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	repos := git.NewRepoSet(ctx, "", nil, false, nil, time.Hour)
+
+	in := Inputs{
+		Branch:   "main",
+		Repos:    repos,
+		Projects: []project.ProjectInfo{{Name: "team-a", Repo: "https://dead.example/x/y.git", Namespaces: []string{"tenant-a"}}},
+		Live: map[string]clusterstate.LiveVM{
+			"tenant-a/web": {Phase: "Running"},
+		},
+	}
+	inv := Build(in)
+	p := inv.Projects[0]
+	if p.Error == "" {
+		t.Fatal("repo failure must surface as the project error")
+	}
+	if len(p.Namespaces) != 1 || len(p.Namespaces[0].VMs) != 1 {
+		t.Fatalf("live VM must render despite the dead repo, got %+v", p.Namespaces)
+	}
+	if vm := p.Namespaces[0].VMs[0]; vm.Name != "web" || vm.Sync != model.SyncNotTracked {
+		t.Errorf("live VM should be NotTracked web, got %+v", vm)
+	}
+}

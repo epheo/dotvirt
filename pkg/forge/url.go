@@ -92,3 +92,33 @@ func urlPath(raw string) string {
 	}
 	return raw
 }
+
+// PathRef: a repo URL's host-free path form ("owner/repo.git"), what annotations
+// carry. The forge identity then lives only in the install config, so a host
+// change re-resolves projects instead of stranding them. Relative input passes
+// through.
+func PathRef(repoURL string) string {
+	s := strings.TrimSpace(repoURL)
+	i := strings.Index(s, "://")
+	if i < 0 {
+		return strings.TrimLeft(s, "/")
+	}
+	s = s[i+3:]
+	slash := strings.IndexByte(s, '/')
+	if slash < 0 {
+		return repoURL
+	}
+	return s[slash+1:]
+}
+
+// ResolveRef joins a relative ref onto base; absolute refs pass through.
+// Empty base leaves a relative ref unresolvable: "".
+func ResolveRef(base, ref string) string {
+	if strings.Contains(ref, "://") {
+		return ref
+	}
+	if base == "" {
+		return ""
+	}
+	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(ref, "/")
+}

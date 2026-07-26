@@ -16,8 +16,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -50,6 +52,11 @@ type OAuth struct {
 
 	mu   sync.Mutex
 	meta *oauthMeta
+	// Probe cache for ClientRegistered: a definitive yes sticks, a definitive no
+	// re-probes after a short TTL.
+	registered    bool
+	probedPending bool
+	probedAt      time.Time
 }
 
 type oauthMeta struct {
@@ -63,15 +70,15 @@ func NewOAuth(cfg OAuthConfig, saKube kubernetes.Interface, auth *Authenticator)
 	if cfg.CAFile != "" || cfg.InsecureTLS {
 		tlsCfg := &tls.Config{InsecureSkipVerify: cfg.InsecureTLS} //nolint:gosec // explicit dev opt-in
 		if cfg.CAFile != "" {
-			pem, err := os.ReadFile(cfg.CAFile)
-			if err != nil {
-				return nil, fmt.Errorf("oauth ca: %w", err)
+			// Tolerant: a lagging CA mount must not take the console down for an SSO
+			// nicety; the system pool keeps token login working and SSO fails legibly.
+			if pem, err := os.ReadFile(cfg.CAFile); err != nil {
+				log.Printf("oauth: CA %s unreadable (%v); staying on the system trust pool", cfg.CAFile, err)
+			} else if pool := x509.NewCertPool(); !pool.AppendCertsFromPEM(pem) {
+				log.Printf("oauth: CA %s holds no certificates; staying on the system trust pool", cfg.CAFile)
+			} else {
+				tlsCfg.RootCAs = pool
 			}
-			pool := x509.NewCertPool()
-			if !pool.AppendCertsFromPEM(pem) {
-				return nil, fmt.Errorf("oauth ca: no certificates in %s", cfg.CAFile)
-			}
-			tlsCfg.RootCAs = pool
 		}
 		transport = &http.Transport{TLSClientConfig: tlsCfg}
 	}
@@ -205,4 +212,70 @@ func clearStateCookie(w http.ResponseWriter, r *http.Request) {
 		Name: stateCookie, Value: "", Path: "/api/auth",
 		HttpOnly: true, Secure: isTLS(r), SameSite: http.SameSiteLaxMode, MaxAge: -1,
 	})
+}
+
+// DesiredClient: what the finish-SSO action registers, under the CALLER's token,
+// so no dotvirt identity ever needs oauthclients RBAC.
+func (o *OAuth) DesiredClient() (id, secret, redirectURL string) {
+	return o.cfg.ClientID, o.cfg.ClientSecret, o.cfg.RedirectURL
+}
+
+// ClientRegistered probes the authorize endpoint (redirects held; no credentials
+// travel) so the login screen says "not finished" instead of offering a failing
+// button: registered answers <400, unregistered or redirect-mismatched 4xx.
+// Network/5xx reads as registered: a flaky oauth stack must not talk users out
+// of a working button. Yes caches for good; no re-probes after a short TTL.
+func (o *OAuth) ClientRegistered(ctx context.Context) bool {
+	o.mu.Lock()
+	if o.registered || time.Since(o.probedAt) < 10*time.Second {
+		reg, pending := o.registered, o.probedPending
+		o.mu.Unlock()
+		if reg {
+			return true
+		}
+		return !pending
+	}
+	o.mu.Unlock()
+
+	m, err := o.discover(ctx)
+	if err != nil {
+		return true
+	}
+	u := fmt.Sprintf("%s?response_type=code&client_id=%s&redirect_uri=%s&scope=user:full&state=probe",
+		m.AuthorizationEndpoint, url.QueryEscape(o.cfg.ClientID), url.QueryEscape(o.cfg.RedirectURL))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return true
+	}
+	// Hold redirects: the probe only needs the status class, never the login page.
+	probeClient := &http.Client{
+		Transport: o.client.Transport,
+		Timeout:   o.client.Timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := probeClient.Do(req)
+	if err != nil {
+		return true
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	registered := resp.StatusCode < 400 || resp.StatusCode >= 500
+	o.mu.Lock()
+	o.registered = registered && resp.StatusCode < 500
+	o.probedPending = !registered
+	o.probedAt = time.Now()
+	o.mu.Unlock()
+	return registered
+}
+
+// MarkRegistered flips the probe cache so the login screen goes ready without
+// waiting out the TTL.
+func (o *OAuth) MarkRegistered() {
+	o.mu.Lock()
+	o.registered = true
+	o.probedPending = false
+	o.mu.Unlock()
 }

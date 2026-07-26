@@ -17,6 +17,8 @@ import (
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/controller"
+	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var scheme = runtime.NewScheme()
@@ -46,6 +48,11 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "dotvirt-operator.dotvirt.io",
+		// ConfigMaps are read point-wise, never watched: the cached client would
+		// spin a CLUSTER-WIDE informer on first Get, exceeding the narrow RBAC
+		// (get, no list/watch) and blocking that Get forever, wedging reconcile
+		// and deletion alike.
+		Client: client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}}}},
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")

@@ -270,6 +270,15 @@ type DriftResult struct {
 	Changes []Change `json:"changes"`
 }
 
+// ObjectRef identifies one declared object, kind-agnostic. Namespace is empty for
+// cluster-scoped kinds. The identity git manifests, Argo resource status, and the
+// draft all share, so coverage can be compared across the three.
+type ObjectRef struct {
+	Kind      string `json:"kind"`
+	Namespace string `json:"namespace,omitempty"`
+	Name      string `json:"name"`
+}
+
 // DraftItem is one pending change rendered for the UI.
 type DraftItem struct {
 	Kind      string   `json:"kind"`               // edit | create | delete
@@ -280,12 +289,15 @@ type DraftItem struct {
 	YAML      string   `json:"yaml,omitempty"` // raw/edited manifest for the collapsed view
 }
 
-// DraftView is the whole draft changeset as semantic items.
+// DraftView is the whole draft changeset as semantic items. Warning is DERIVED
+// each render (prune risk plus capture caveats), never stored: a stored warning
+// outlives the state it describes.
 type DraftView struct {
-	Base   string      `json:"base"`
-	Branch string      `json:"branch"`
-	Count  int         `json:"count"`
-	Items  []DraftItem `json:"items"`
+	Base    string      `json:"base"`
+	Branch  string      `json:"branch"`
+	Count   int         `json:"count"`
+	Items   []DraftItem `json:"items"`
+	Warning string      `json:"warning,omitempty"`
 }
 
 // ProposeResult is returned after proposing the draft as a PR.

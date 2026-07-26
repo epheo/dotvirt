@@ -578,6 +578,7 @@ export interface DraftView {
 	branch: string;
 	count: number;
 	items: DraftItem[];
+	warning?: string; // non-fatal degradation of the operation that produced it
 }
 export interface ProposeResult {
 	branch: string;
@@ -882,7 +883,9 @@ export const api = {
 		get<EffectivePolicy>(`/api/namespaces/${enc(namespace)}/policy`),
 	trace: (req: TraceRequest) => post<TraceResult>('/api/networking/trace', req),
 	// Which sign-in paths exist (shown on the login screen before any session).
-	authMethods: () => get<{ sso: boolean }>('/api/auth/methods'),
+	authMethods: () => get<{ sso: boolean; ssoPending: boolean }>('/api/auth/methods'),
+	// Applies the OAuthClient under the CALLER's token; RBAC is the gate.
+	finishSSO: () => req<void>('/api/auth/oauthclient', { method: 'POST' }),
 
 	// Commit history + per-commit revert (a forward commit opened as a PR).
 	history: (project: string) => get<Commit[]>(`/api/projects/${enc(project)}/history`),
@@ -1033,8 +1036,10 @@ export async function draftsByProject(
 			}
 		}),
 	);
+	// Warning-only drafts render too: prune risk must warn BEFORE anything merges.
 	return results.filter(
-		(r): r is { project: string; draft: DraftView } => !!r && r.draft.count > 0,
+		(r): r is { project: string; draft: DraftView } =>
+			!!r && (r.draft.count > 0 || !!r.draft.warning),
 	);
 }
 

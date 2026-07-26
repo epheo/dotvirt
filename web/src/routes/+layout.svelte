@@ -17,6 +17,7 @@
 	import AppModals from '$lib/components/AppModals.svelte';
 	import ChangesPanel from '$lib/components/ChangesPanel.svelte';
 	import Login from '$lib/components/Login.svelte';
+	import SSOBanner from '$lib/components/SSOBanner.svelte';
 	import SectionSwitcher from '$lib/components/SectionSwitcher.svelte';
 	import TaskDock from '$lib/components/TaskDock.svelte';
 	import ToastHost from '$lib/components/ToastHost.svelte';
@@ -142,6 +143,8 @@
 				<span class="font-mono text-xs break-all">{inventory.error}</span>
 			</div>
 		{/if}
+
+		<SSOBanner />
 
 		{#if inventory.inventory?.warnings?.length}
 			<div

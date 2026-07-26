@@ -128,6 +128,89 @@ func (s *Snapshot) ProjectDrift() map[string]model.ProjectSync {
 	return s.appSyncCache
 }
 
+// ForeignApps: live apps except those sourcing ownRepo, under every tracking-id
+// identity (name, ns_name, ns/name). Only a FOREIGN app is a claim; the own app
+// survives a lost repo while git declares nothing, and counting it blocked the
+// recovery capture (git is the authority for the own tier). A deleted app's
+// annotation is residue, not a claim. nil before the initial LIST so callers
+// refuse rather than misread.
+func (s *Snapshot) ForeignApps(ownRepo string) map[string]bool {
+	if !s.synced.Load() {
+		return nil
+	}
+	own := forge.NormalizeRepoURL(ownRepo)
+	out := map[string]bool{}
+	for _, obj := range s.apps.List() {
+		u, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			continue
+		}
+		if own != "" && forge.NormalizeRepoURL(nestedString(u.Object, "spec", "source", "repoURL")) == own {
+			continue
+		}
+		out[u.GetName()] = true
+		out[u.GetNamespace()+"_"+u.GetName()] = true
+		out[u.GetNamespace()+"/"+u.GetName()] = true
+	}
+	return out
+}
+
+// PrunePending: what Argo itself would prune for the apps sourcing repo, within
+// namespaces (status.resources[].requiresPruning). Argo's comparison is the one
+// authority on what a sync deletes; re-deriving from git could drift from it.
+// nil before the initial LIST.
+func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.ObjectRef {
+	want := make(map[string]bool, len(namespaces))
+	for _, ns := range namespaces {
+		want[ns] = true
+	}
+	own := forge.NormalizeRepoURL(repo)
+	if !s.synced.Load() || own == "" {
+		return nil
+	}
+	var out []model.ObjectRef
+	for _, obj := range s.apps.List() {
+		u, ok := obj.(*unstructured.Unstructured)
+		if !ok || forge.NormalizeRepoURL(nestedString(u.Object, "spec", "source", "repoURL")) != own {
+			continue
+		}
+		resources, found, err := unstructured.NestedSlice(u.Object, "status", "resources")
+		if err != nil || !found {
+			continue
+		}
+		for _, raw := range resources {
+			res, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if prune, _ := res["requiresPruning"].(bool); !prune {
+				continue
+			}
+			ref := model.ObjectRef{
+				Kind:      asString(res, "kind"),
+				Namespace: asString(res, "namespace"),
+				Name:      asString(res, "name"),
+			}
+			if ref.Kind == "" || ref.Name == "" || !want[ref.Namespace] {
+				continue
+			}
+			out = append(out, ref)
+		}
+	}
+	// Sorted: the derived warning string must not flap on store-scan order.
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Namespace != b.Namespace {
+			return a.Namespace < b.Namespace
+		}
+		if a.Kind != b.Kind {
+			return a.Kind < b.Kind
+		}
+		return a.Name < b.Name
+	})
+	return out
+}
+
 // ResourceDrift returns one Argo-managed object's sync/health by identity; ok=false if
 // no Application manages it or the snapshot hasn't synced. General across kinds — the
 // per-object surface VMs and segments (and any future rendered object) share. group/kind

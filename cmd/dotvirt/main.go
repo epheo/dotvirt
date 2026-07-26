@@ -1,5 +1,6 @@
-// Command dotvirt serves a vCenter-like WebUI that edits per-project git repos of
-// KubeVirt manifests and reads live state from a cluster and ArgoCD. It is a thin
+// Command dotvirt serves a web console, familiar to vSphere admins, that edits
+// per-project git repos of KubeVirt manifests and reads live state from a cluster
+// and ArgoCD. It is a thin
 // multi-tenant lens: every request runs under the caller's own k8s token, and a
 // project is a set of namespaces (a cluster fact) backed by its own git repo.
 package main
@@ -25,7 +26,6 @@ import (
 	"github.com/epheo/dotvirt/internal/desched"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/eventbus"
-	"github.com/epheo/dotvirt/internal/export"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/metrics"
 	"github.com/epheo/dotvirt/internal/netstate"
@@ -34,6 +34,29 @@ import (
 	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
+
+// liveVMs adapts the SA snapshot to the coordinator's actual-state source,
+// serialized with the repo's own writer so a diff sees only real drift. One
+// unserializable VM drops rather than failing the batch.
+type liveVMs struct{ state *clusterstate.State }
+
+// Ready gates on the stores this reads (VMs + namespaces), not full Synced(): a
+// permanently-failing VMI reflector must not wedge drift and adoption forever.
+func (l liveVMs) Ready() bool { return l.state.VMSnapshotReady() }
+
+func (l liveVMs) VMManifests(namespaces []string) []changeset.LiveManifest {
+	objs := l.state.VMObjects(namespaces)
+	out := make([]changeset.LiveManifest, 0, len(objs))
+	for i := range objs {
+		content, err := cluster.ExportManifest(objs[i])
+		if err != nil {
+			log.Printf("live manifest %s/%s: %v", objs[i].Namespace, objs[i].Name, err)
+			continue
+		}
+		out = append(out, changeset.LiveManifest{Path: cluster.ExportPath(objs[i]), Content: content})
+	}
+	return out
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -49,6 +72,8 @@ func run() error {
 
 	if cfg.InsecureTLS {
 		git.AllowInsecureTLS() // dev: trust self-signed Forgejo Route cert
+	} else if cfg.ForgeCA != "" {
+		git.AllowCustomCA(cfg.ForgeCA) // verify the managed forge Route (ingress CA)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -56,7 +81,7 @@ func run() error {
 
 	// The one change bus: every source (k8s/argo reflectors, the git poll/webhook,
 	// the proposals refresher) publishes a typed event here; every rebuild path (the
-	// hub, the exporter, the proposals refresher, the visibility-cache invalidator)
+	// hub, the proposals refresher, the visibility-cache invalidator)
 	// subscribes to the kinds it needs. One fan-out for all of them — no source-
 	// specific channels, no single-consumer constraint.
 	bus := eventbus.New()
@@ -70,11 +95,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	forgeFactory := forge.NewFactoryFn(cfg.ForgeURL, tokenSrc, cfg.InsecureTLS)
+	forgeFactory := forge.NewFactoryFnCA(cfg.ForgeURL, tokenSrc, cfg.InsecureTLS, cfg.ForgeCA)
 	if forgeFactory == nil {
 		log.Printf("forge not configured (DOTVIRT_FORGE_URL unset): propose will push-only, no PR will be created")
 	}
-	resolver := project.NewResolver(cfg.ProjectLabel, cfg.RepoAnnotation)
+	resolver := project.NewResolver(cfg.ProjectLabel, cfg.RepoAnnotation, cfg.ForgeURL)
 
 	clusterFactory, err := cluster.NewFactory(cfg.Kubeconfig)
 	if err != nil {
@@ -153,8 +178,13 @@ func run() error {
 		}
 	}
 
+	// Typed-nil guard: a nil *argo.Snapshot in the interface would read as wired.
+	var pruneSource changeset.PruneSource
+	if argoSnapshot != nil {
+		pruneSource = argoSnapshot
+	}
 	coordinator := changeset.New(draftStore, repos, forgeFactory, resyncer,
-		cfg.BaseBranch, cfg.ProposedBranch, cfg.RunningBranch)
+		liveVMs{clusterSnapshot}, pruneSource, cfg.BaseBranch, cfg.ProposedBranch)
 
 	metricsClient, err := metrics.New(cfg.MetricsURL, cfg.MetricsCA, cfg.InsecureTLS)
 	if err != nil {
@@ -219,23 +249,24 @@ func run() error {
 		return clusterFactory.For(token)
 	}))
 
-	// Per-project running-branch export, on the SA identity. Topology AND the VM
-	// objects come from the snapshot — an export tick touches the cluster zero times.
-	exporter := export.New(clusterSnapshot, resolver, repos, cfg.RunningBranch)
-	go exporter.Run(ctx, cfg.ExportInterval, bus)
-
-	// Webhook auto-registration: ensure every project repo delivers push/PR events
-	// to dotvirt, so updates arrive in webhook latency rather than the next poll tick.
-	// The forge usually runs in-cluster and can't reach (or TLS-trust) the external
-	// Route, so delivery targets WebhookURL — the in-cluster Service — when set, else
-	// PublicURL. Idempotent per sweep; new projects are picked up by the re-sweep.
+	// Webhook auto-registration: one ORG-level hook so the forge delivers push/PR events
+	// for every repo (the platform repo + all projects, present + future) to dotvirt, so
+	// updates arrive in webhook latency rather than the next poll tick. It converges the
+	// same org hook the operator manages. The forge usually runs in-cluster and can't reach
+	// (or TLS-trust) the external Route, so delivery targets WebhookURL - the in-cluster
+	// Service - when set, else PublicURL.
 	webhookBase := cfg.WebhookURL
 	if webhookBase == "" {
 		webhookBase = cfg.PublicURL
 	}
-	if webhookBase != "" && cfg.WebhookSecret != "" && forgeFactory != nil {
+	switch {
+	case webhookBase != "" && cfg.WebhookSecret != "" && forgeFactory != nil:
 		target := strings.TrimRight(webhookBase, "/") + "/api/webhooks/forge"
-		go ensureWebhooks(ctx, clusterSnapshot, resolver, forgeFactory, target, cfg.WebhookSecret)
+		go ensureWebhooks(ctx, clusterSnapshot, resolver, forgeFactory, target, cfg.WebhookSecret, cfg.PlatformRepo)
+	case forgeFactory != nil:
+		// Forge is wired but there's no way for it to reach back: updates degrade silently
+		// to the poll otherwise, so say so.
+		log.Printf("webhook: no delivery base (set -public-url or -webhook-url) or secret; forge->dotvirt updates fall back to the %s git poll", cfg.GitPollInterval)
 	}
 
 	// Let the snapshot's initial LIST land before serving so the first inventory
@@ -275,28 +306,60 @@ func run() error {
 	return srv.Shutdown(shutdownCtx)
 }
 
-// ensureWebhooks sweeps the resolved projects and registers dotvirt's webhook
-// on each repo, at startup and on a slow ticker (new projects join the next
-// sweep). Failures are logged and retried next sweep — a forge hiccup must not
-// affect serving.
-func ensureWebhooks(ctx context.Context, state *clusterstate.State, resolver *project.Resolver, ff *forge.Factory, target, secret string) {
-	// The first sweep is only useful once the namespace reflector has its
-	// initial LIST — before that the project set reads empty and every hook
-	// would wait for the next ticker.
-	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	_ = state.WaitForSync(syncCtx)
-	cancel()
+// ensureWebhooks registers dotvirt's ORG-level forge webhook at startup and re-asserts it
+// on a slow ticker (self-heal). One org hook covers the platform repo and every project,
+// present and future, so no per-repo sweep is needed - and a from-scratch install with no
+// project namespaces yet still gets its hook. It anchors the org on the platform repo, or on
+// any resolved project when there is none. Failures are logged and retried next tick - a
+// forge hiccup must not affect serving.
+func ensureWebhooks(ctx context.Context, state *clusterstate.State, resolver *project.Resolver, ff *forge.Factory, target, secret, platformRepo string) {
+	// Anchoring on a project needs the namespace reflector's initial LIST; the platform
+	// repo anchors the org hook without it, so only wait when there's no platform repo.
+	if platformRepo == "" {
+		syncCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		_ = state.WaitForSync(syncCtx)
+		cancel()
+	}
 	sweep := func() {
+		repos := []string{}
+		if platformRepo != "" {
+			repos = append(repos, platformRepo)
+		}
 		for _, p := range resolver.Resolve(state.Namespaces(), nil) {
-			if p.Repo == "" {
+			if p.Repo != "" {
+				repos = append(repos, p.Repo)
+			}
+		}
+		if len(repos) == 0 {
+			return // nothing to anchor on yet; the next tick retries
+		}
+		// Any repo anchors the owner: they share it, so one org hook covers them all,
+		// present and future.
+		fc := ff.For(repos[0])
+		if fc == nil {
+			return
+		}
+		isOrg, err := fc.OwnerIsOrg()
+		if err != nil {
+			log.Printf("webhook: resolve owner kind (anchor %s): %v", repos[0], err)
+			return
+		}
+		if isOrg {
+			if err := fc.EnsureOrgWebhook(target, secret); err != nil {
+				log.Printf("webhook: ensure org hook (anchor %s): %v", repos[0], err)
+			}
+			return
+		}
+		// A user account has no hooks endpoint, so nothing can cover every repo at once;
+		// register on each known repo instead. A repo added later is picked up by a
+		// later tick rather than automatically, which is the cost of a user-owned forge.
+		for _, repo := range repos {
+			c := ff.For(repo)
+			if c == nil {
 				continue
 			}
-			fc := ff.For(p.Repo)
-			if fc == nil {
-				continue
-			}
-			if err := fc.EnsureWebhook(target, secret); err != nil {
-				log.Printf("webhook: ensure on %s: %v", p.Repo, err)
+			if err := c.EnsureWebhook(target, secret); err != nil {
+				log.Printf("webhook: ensure repo hook (%s): %v", repo, err)
 			}
 		}
 	}

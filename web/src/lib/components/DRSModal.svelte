@@ -61,7 +61,7 @@
 	const valid = $derived(missing.length === 0);
 	const summary = $derived(
 		valid
-			? `Stages ${mode} DRS (${threshold}, every ${intervalSeconds}s)${installPSI ? ' + PSI MachineConfig' : ''} → platform repo`
+			? `Stages ${mode} rescheduling (${threshold}, every ${intervalSeconds}s)${installPSI ? ' + PSI MachineConfig' : ''} -> platform repo`
 			: '',
 	);
 
@@ -90,7 +90,7 @@
 	}
 </script>
 
-<Modal title="Configure DRS" size="lg" {onclose}>
+<Modal title="Configure Dynamic Rescheduling" size="lg" {onclose}>
 	<div class="space-y-4 overflow-y-auto px-5 py-4 text-sm">
 		<div>
 			<span class="mb-1 block text-ink-soft">Automation level</span>
@@ -164,8 +164,8 @@
 					</FormField>
 				</div>
 				<p class="text-xs text-ink-faint">
-					Keep at or below the cluster's live-migration limits so DRS never queues more migrations
-					than the cluster will run.
+					Keep at or below the cluster's live-migration limits so rescheduling never queues more
+					migrations than the cluster will run.
 				</p>
 			</div>
 		{/if}
@@ -197,7 +197,7 @@
 			disabled={!valid}
 			{missing}
 			{summary}
-			label={view.configured ? 'Stage changes' : 'Stage DRS enablement'}
+			label={view.configured ? 'Stage changes' : 'Stage Dynamic Rescheduling'}
 			onsubmit={submit}
 			oncancel={onclose}
 		/>

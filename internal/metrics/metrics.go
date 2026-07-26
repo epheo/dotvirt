@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"sort"
@@ -58,15 +59,15 @@ func New(baseURL, caPath string, insecure bool) (*Client, error) {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	switch {
 	case caPath != "":
-		pem, err := os.ReadFile(caPath)
-		if err != nil {
-			return nil, fmt.Errorf("metrics CA bundle: %w", err)
+		// Tolerant: a lagging CA mount must not wedge the console on a metrics
+		// nicety; the system pool degrades to a legible TLS error in Performance.
+		if pem, err := os.ReadFile(caPath); err != nil {
+			log.Printf("metrics: CA %s unreadable (%v); staying on the system trust pool", caPath, err)
+		} else if pool := x509.NewCertPool(); !pool.AppendCertsFromPEM(pem) {
+			log.Printf("metrics: CA %s holds no certificates; staying on the system trust pool", caPath)
+		} else {
+			tr.TLSClientConfig = &tls.Config{RootCAs: pool}
 		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("metrics CA bundle %s: no certificates found", caPath)
-		}
-		tr.TLSClientConfig = &tls.Config{RootCAs: pool}
 	case insecure:
 		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -11,10 +12,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
+	"github.com/epheo/dotvirt/operator/internal/platform"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
@@ -31,6 +34,9 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	// mirror the generated one there (create-once).
 	if !r.DryRun {
 		if err := r.mirrorAppsetToken(ctx, dv, argoNS); err != nil {
+			return nil, err
+		}
+		if err := r.ensureForgeTLSTrust(ctx, dv, argoNS); err != nil {
 			return nil, err
 		}
 	}
@@ -87,8 +93,14 @@ func (r *DotvirtReconciler) reconcileArgoWebhook(ctx context.Context, dv *dotvir
 }
 
 // mirrorAppsetToken copies the generated appset-plugin token into the ArgoCD
-// namespace (create-once), where Argo's plugin generator resolves it via the
-// ConfigMap's $dotvirt-appset-plugin:token reference.
+// namespace, where Argo's plugin generator resolves it via the ConfigMap's
+// $dotvirt-appset-plugin:token reference.
+//
+// The source token is create-once, but the MIRROR must converge: a mirror left
+// behind by an earlier install (same name, different generated token) makes the
+// plugin generator 401 forever. Nothing else fails, so the break is silent: the
+// ApplicationSet generates no parameters, no tenant Application is ever created,
+// every VM reads NotTracked, and merged manifests are never applied.
 func (r *DotvirtReconciler) mirrorAppsetToken(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) error {
 	var src corev1.Secret
 	if err := r.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: install.AppsetSecretName}, &src); err != nil {
@@ -97,7 +109,22 @@ func (r *DotvirtReconciler) mirrorAppsetToken(ctx context.Context, dv *dotvirtv1
 	var existing corev1.Secret
 	err := r.Get(ctx, types.NamespacedName{Namespace: argoNS, Name: install.AppsetSecretName}, &existing)
 	if err == nil {
-		return nil
+		// One mirror name per ArgoCD namespace, so a second install sharing that namespace
+		// would rewrite this one on every reconcile while the first rewrote it back, leaving
+		// both plugin generators intermittently 401ing. Re-stamping the labels would also
+		// pull the other install's Secret into this one's uninstall blast radius. Fail
+		// loudly instead: the topology needs one ArgoCD namespace per install.
+		if owner := existing.Labels[install.InstanceLabel]; owner != "" && owner != dv.Name {
+			return fmt.Errorf("appset token mirror %s/%s belongs to dotvirt install %q; give each install its own ArgoCD namespace",
+				argoNS, install.AppsetSecretName, owner)
+		}
+		if bytes.Equal(existing.Data["token"], src.Data["token"]) {
+			return nil
+		}
+		existing.Data = map[string][]byte{"token": src.Data["token"]}
+		// Stamp an adopted predecessor's mirror so it is cleaned up with this instance.
+		existing.Labels = install.Labels(dv.Name)
+		return r.Update(ctx, &existing)
 	}
 	if !apierrors.IsNotFound(err) {
 		return err
@@ -173,4 +200,39 @@ func (r *DotvirtReconciler) repoCreds(ctx context.Context, dv *dotvirtv1alpha1.D
 		prefix = forge.OwnerPrefixURL(dv.Spec.Forge.PlatformRepo)
 	}
 	return install.RepoCredsSecret(dv, argoNS, prefix, string(s.Data["username"]), token)
+}
+
+// ensureForgeTLSTrust merges the forge host + ingress CA into argocd-tls-certs-cm
+// so repo-server VERIFIES the router cert. repo-creds templates silently ignore
+// `insecure` (repository-secret-only field); without this entry the install only
+// worked after an invisible hand-added cert. Managed-on-OpenShift only. MERGE:
+// never touch other hosts' entries. Left on uninstall: not a secret, and a dead
+// host key is inert.
+func (r *DotvirtReconciler) ensureForgeTLSTrust(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) error {
+	if !dv.Spec.Forge.Managed || r.Platform != platform.OpenShift {
+		return nil
+	}
+	host := install.ForgejoHost(dv)
+	if host == "" {
+		return nil
+	}
+	var ingressCA corev1.ConfigMap
+	if err := r.Get(ctx, types.NamespacedName{Namespace: "openshift-config-managed", Name: "default-ingress-cert"}, &ingressCA); err != nil {
+		// Legible and blocking: without trust every Application wedges in a
+		// ComparisonError that says x509, three layers away from this cause.
+		return fmt.Errorf("read default ingress CA (needed to trust the managed forge's route in ArgoCD): %w", err)
+	}
+	ca := ingressCA.Data["ca-bundle.crt"]
+	if ca == "" {
+		return fmt.Errorf("default-ingress-cert has no ca-bundle.crt")
+	}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "argocd-tls-certs-cm", Namespace: argoNS}}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, cm, func() error {
+		if cm.Data == nil {
+			cm.Data = map[string]string{}
+		}
+		cm.Data[host] = ca
+		return nil
+	})
+	return err
 }

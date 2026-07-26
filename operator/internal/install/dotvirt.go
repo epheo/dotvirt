@@ -3,6 +3,7 @@ package install
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -34,7 +35,31 @@ const (
 	WebhookSecretName     = "dotvirt-webhook"
 	ArgoWebhookSecretName = "dotvirt-argo-webhook"
 	DefaultForgeSecret    = "dotvirt-forge"
+	// OAuthSecretName holds the operator-generated OAuth client secret (key clientSecret).
+	OAuthSecretName   = "dotvirt-oauth"
+	oauthClientPrefix = "dotvirt"
+
+	// IngressCAConfigMap: in-namespace copy of the default ingress CA, mounted so
+	// the app and the managed Forgejo VERIFY router-served TLS.
+	IngressCAConfigMap = "dotvirt-ingress-ca"
+	// ServiceCAConfigMap is injector-filled (inject-cabundle) and verifies
+	// in-cluster serving certs (the sample's thanos-querier).
+	ServiceCAConfigMap = "dotvirt-service-ca"
+
+	ingressCAMountPath = "/var/run/dotvirt/tls-ingress"
+	serviceCAMountPath = "/var/run/dotvirt/tls-service"
+	// Keys mirror default-ingress-cert and the injector respectively.
+	IngressCAKey = "ca-bundle.crt"
+	ServiceCAKey = "service-ca.crt"
 )
+
+// OAuthClientName is the OpenShift OAuthClient this install registers as. An OAuthClient
+// is CLUSTER-scoped, so the name carries the install's namespace: a shared constant would
+// have a second install overwrite the first's redirect URI and secret, breaking its SSO
+// with nothing to say why.
+func OAuthClientName(namespace string) string {
+	return oauthClientPrefix + "-" + namespace
+}
 
 // ForgeSecretName is the forge-credential Secret for this install: the spec override,
 // else the default the managed-Forgejo bootstrap writes.
@@ -43,6 +68,18 @@ func ForgeSecretName(dv *dotvirtv1alpha1.Dotvirt) string {
 		return dv.Spec.Forge.CredentialsSecret
 	}
 	return DefaultForgeSecret
+}
+
+// ForgeConfigured reports whether the install has any forge to wire the app to: a
+// managed Forgejo, an explicit URL, or a BYO credentials secret. When false the app
+// runs push-only, and the Deployment omits the forge credential env + mount so the pod
+// doesn't wedge on a dotvirt-forge secret that will never be written.
+func ForgeConfigured(dv *dotvirtv1alpha1.Dotvirt) bool {
+	// A credential, not a URL: the app reads BOTH the forge URL and the token from this
+	// secret for a BYO forge, and only a managed forge or an explicit credentialsSecret
+	// guarantees one exists. Counting a bare spec.forge.url would mount a Secret nothing
+	// writes, wedging the pod in CreateContainerConfigError.
+	return dv.Spec.Forge.Managed || dv.Spec.Forge.CredentialsSecret != ""
 }
 
 // forgeTokenMountPath is where the forge credential secret's "token" key is
@@ -155,31 +192,52 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 	if dv.Spec.Metrics.URL != "" {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: dv.Spec.Metrics.URL})
 	}
-	// OpenShift SSO: the operator only wires the credential of the admin-created
-	// OAuthClient through — registering the client is a cluster-admin act it
-	// deliberately doesn't perform (no oauthclients grant). Optional secret ref: a
-	// CR naming SSO before the secret exists must not wedge the pod.
-	if dv.Spec.Auth.OAuthClientID != "" && dv.Spec.Auth.OAuthSecretRef != "" {
+	// OpenShift SSO: the operator generates the client secret and wires it here; the admin
+	// applies the OAuthClient (a cluster-admin act it deliberately doesn't perform; no
+	// oauthclients grant), reported in status.ssoOAuthClient. optional=true: enabling SSO
+	// before the OAuthClient is applied must not wedge the pod.
+	if dv.Spec.Auth.OpenShiftSSO {
 		env = append(env,
-			corev1.EnvVar{Name: "DOTVIRT_OAUTH_CLIENT_ID", Value: dv.Spec.Auth.OAuthClientID},
-			secretEnv("DOTVIRT_OAUTH_CLIENT_SECRET", dv.Spec.Auth.OAuthSecretRef, "clientSecret", true),
+			corev1.EnvVar{Name: "DOTVIRT_OAUTH_CLIENT_ID", Value: OAuthClientName(dv.Namespace)},
+			secretEnv("DOTVIRT_OAUTH_CLIENT_SECRET", OAuthSecretName, "clientSecret", true),
 		)
 	}
 
-	forgeSecret := ForgeSecretName(dv)
 	env = append(env,
 		secretEnv("DOTVIRT_SESSION_SECRET", SessionSecretName, "secret", false),
 		secretEnv("DOTVIRT_APPSET_PLUGIN_TOKEN", AppsetSecretName, "token", true),
-		secretEnv("DOTVIRT_GIT_USERNAME", forgeSecret, "username", false),
-		secretEnv("DOTVIRT_FORGE_URL", forgeSecret, "url", false),
-		// The forge token (git https + API, one credential) is MOUNTED, not injected
-		// as env: kubelet updates the file in place, so an operator re-mint/rotation
-		// reaches the app without a restart (env vars freeze at pod start).
-		corev1.EnvVar{Name: "DOTVIRT_FORGE_TOKEN_FILE", Value: forgeTokenMountPath},
 		// With a public URL + this secret, dotvirt self-registers its webhook on each
 		// project repo (forge -> dotvirt: instant inventory updates vs polling).
 		secretEnv("DOTVIRT_WEBHOOK_SECRET", WebhookSecretName, "secret", true),
 	)
+	forgeSecret := ForgeSecretName(dv)
+	if ForgeConfigured(dv) {
+		// A managed forge's credential secret is operator-written, so emit the resolved URL
+		// as a LITERAL: a URL change (e.g. the first router host assignment) then rolls the
+		// app; a BYO forge reads it from the admin-supplied secret. The token (git https +
+		// API, one credential) is MOUNTED, not env: kubelet updates the file in place, so an
+		// operator re-mint/rotation reaches the app without a restart (env freezes at start).
+		env = append(env, secretEnv("DOTVIRT_GIT_USERNAME", forgeSecret, "username", false))
+		if dv.Spec.Forge.Managed {
+			env = append(env, corev1.EnvVar{Name: "DOTVIRT_FORGE_URL", Value: dv.Spec.Forge.URL})
+		} else {
+			env = append(env, secretEnv("DOTVIRT_FORGE_URL", forgeSecret, "url", false))
+		}
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_FORGE_TOKEN_FILE", Value: forgeTokenMountPath})
+		if dv.Spec.Forge.Managed {
+			// Verified TLS instead of insecureTLS; an explicit insecureTLS still wins
+			// inside the app, and CA loads are tolerant of a lagging mount.
+			env = append(env, corev1.EnvVar{Name: "DOTVIRT_FORGE_CA", Value: ingressCAMountPath + "/" + IngressCAKey})
+		}
+	}
+	if dv.Spec.Auth.OpenShiftSSO {
+		// The oauth token endpoint is router-served: same ingress CA.
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_OAUTH_CA", Value: ingressCAMountPath + "/" + IngressCAKey})
+	}
+	if strings.HasPrefix(dv.Spec.Metrics.URL, "https://") && strings.Contains(dv.Spec.Metrics.URL, ".svc") {
+		// In-cluster metrics serve the service-CA-signed cert.
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_CA", Value: serviceCAMountPath + "/" + ServiceCAKey})
+	}
 
 	args := []string{
 		fmt.Sprintf("-addr=:%d", HTTPPort),
@@ -196,6 +254,39 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 		// verification for its forge API calls + git clones — the same flag the
 		// manual deploy carried. Metrics stays verified (its own CA env).
 		args = append(args, "-insecure-tls")
+	}
+
+	// Trust-anchor mounts are always rendered and OPTIONAL: absent ConfigMaps
+	// (vanilla, or copy/injection lag) must never block the pod.
+	caOptional := true
+	volumeMounts := []corev1.VolumeMount{
+		{Name: "drafts", MountPath: "/var/lib/dotvirt/drafts"},
+		{Name: "ingress-ca", MountPath: ingressCAMountPath, ReadOnly: true},
+		{Name: "service-ca", MountPath: serviceCAMountPath, ReadOnly: true},
+	}
+	volumes := []corev1.Volume{{
+		Name:         "drafts",
+		VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: AppName + "-drafts"}},
+	}, {
+		Name: "ingress-ca",
+		VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+			LocalObjectReference: corev1.LocalObjectReference{Name: IngressCAConfigMap}, Optional: &caOptional,
+		}},
+	}, {
+		Name: "service-ca",
+		VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+			LocalObjectReference: corev1.LocalObjectReference{Name: ServiceCAConfigMap}, Optional: &caOptional,
+		}},
+	}}
+	if ForgeConfigured(dv) {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "forge-token", MountPath: "/var/run/dotvirt/forge", ReadOnly: true})
+		volumes = append(volumes, corev1.Volume{
+			Name: "forge-token",
+			VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+				SecretName: forgeSecret,
+				Items:      []corev1.KeyToPath{{Key: "token", Path: "token"}},
+			}},
+		})
 	}
 
 	replicas := int32(1)
@@ -221,15 +312,12 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 						SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 					},
 					Containers: []corev1.Container{{
-						Name:  AppName,
-						Image: image,
-						Args:  args,
-						Env:   env,
-						Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: HTTPPort}},
-						VolumeMounts: []corev1.VolumeMount{
-							{Name: "drafts", MountPath: "/var/lib/dotvirt/drafts"},
-							{Name: "forge-token", MountPath: "/var/run/dotvirt/forge", ReadOnly: true},
-						},
+						Name:         AppName,
+						Image:        image,
+						Args:         args,
+						Env:          env,
+						Ports:        []corev1.ContainerPort{{Name: "http", ContainerPort: HTTPPort}},
+						VolumeMounts: volumeMounts,
 						SecurityContext: &corev1.SecurityContext{
 							AllowPrivilegeEscalation: &noPrivilegeEscalation,
 							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
@@ -255,20 +343,7 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 							TimeoutSeconds:      5,
 						},
 					}},
-					Volumes: []corev1.Volume{{
-						Name: "drafts",
-						VolumeSource: corev1.VolumeSource{
-							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: AppName + "-drafts"},
-						},
-					}, {
-						Name: "forge-token",
-						VolumeSource: corev1.VolumeSource{
-							Secret: &corev1.SecretVolumeSource{
-								SecretName: forgeSecret,
-								Items:      []corev1.KeyToPath{{Key: "token", Path: "token"}},
-							},
-						},
-					}},
+					Volumes: volumes,
 				},
 			},
 		},

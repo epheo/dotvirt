@@ -164,7 +164,7 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) ([]git.ChangesetIt
 				Path: e.SourceFile, Namespace: e.Namespace, Name: e.Name, Edit: e.Edit,
 			})
 		case draft.KindCreate:
-			// An adopt-create carries the running-branch manifest verbatim; a
+			// An adopt-create carries the live manifest verbatim; a
 			// wizard create generates one from its spec.
 			if e.Manifest != "" {
 				items = append(items, git.ChangesetItem{Path: e.SourceFile, Namespace: e.Namespace, Name: e.Name, NewContent: []byte(e.Manifest)})

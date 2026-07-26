@@ -26,6 +26,29 @@ type Resyncer interface {
 	Resync(ctx context.Context, namespace, name string) (model.ResyncResult, error)
 }
 
+// LiveSource supplies the cluster's current VM manifests, serialized exactly as git
+// holds them. It is the "actual" side of drift and what adoption captures. Reading the
+// in-memory snapshot keeps live state out of git entirely: no write per tick to every
+// tenant repo, nothing to lag behind the cluster, and nothing lost with the repo.
+type LiveSource interface {
+	VMManifests(namespaces []string) []LiveManifest
+	// Ready is false while the backing reflector is still on its initial LIST, when a
+	// partial answer would read as "these VMs are gone".
+	Ready() bool
+}
+
+// LiveManifest is one running VM as the repo path and bytes it would occupy.
+type LiveManifest struct {
+	Path    string
+	Content []byte
+}
+
+// PruneSource: what ArgoCD would prune for a repo, per Argo's OWN comparison.
+// The draft view relays it; re-deriving from git could diverge.
+type PruneSource interface {
+	PrunePending(repo string, namespaces []string) []model.ObjectRef
+}
+
 // Coordinator implements api.Draft. It owns no single repo/identity: each method
 // receives the caller's Identity and the target ProjectInfo and resolves the
 // repo + branches from there.
@@ -36,17 +59,19 @@ type Coordinator struct {
 	resyncer Resyncer            // may be nil → re-sync unavailable
 	renderer vmtemplate.Renderer // processes library templates into VM manifests
 
-	baseBranch    string
-	proposed      string // working branch name, e.g. dotvirt/proposed
-	runningBranch string // dotvirt-owned branch reflecting live state
+	live  LiveSource  // may be nil -> adoption and drift unavailable
+	prune PruneSource // may be nil -> the draft view carries no prune warning
+
+	baseBranch string
+	proposed   string // working branch name, e.g. dotvirt/proposed
 }
 
 // New builds a Coordinator. forge and resyncer may be nil (PR creation degrades
 // to a compare link; re-sync becomes unavailable).
-func New(store *draft.Store, repos *git.RepoSet, ff *forge.Factory, rs Resyncer, baseBranch, proposedBranch, runningBranch string) *Coordinator {
+func New(store *draft.Store, repos *git.RepoSet, ff *forge.Factory, rs Resyncer, live LiveSource, prune PruneSource, baseBranch, proposedBranch string) *Coordinator {
 	return &Coordinator{
-		store: store, repos: repos, forge: ff, resyncer: rs, renderer: vmtemplate.EngineRenderer{},
-		baseBranch: baseBranch, proposed: proposedBranch, runningBranch: runningBranch,
+		store: store, repos: repos, forge: ff, resyncer: rs, live: live, prune: prune, renderer: vmtemplate.EngineRenderer{},
+		baseBranch: baseBranch, proposed: proposedBranch,
 	}
 }
 
