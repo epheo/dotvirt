@@ -11,7 +11,6 @@ import (
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
-	"github.com/epheo/dotvirt/internal/validate"
 	"github.com/epheo/dotvirt/internal/vmtemplate"
 )
 
@@ -29,8 +28,8 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 	}
 	// The template name becomes a repo path segment — same trust boundary as
 	// project/namespace names.
-	if !validate.DNS1123Name(req.Template) {
-		return model.DraftView{}, fmt.Errorf("%w: template name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, req.Template)
+	if err := requireDNS1123("template name", req.Template); err != nil {
+		return model.DraftView{}, err
 	}
 	libRead, err := c.read(libraryProj)
 	if err != nil {
@@ -52,8 +51,8 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if !validate.DNS1123Name(rendered.Name) {
-		return model.DraftView{}, fmt.Errorf("%w: rendered VM name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, rendered.Name)
+	if err := requireDNS1123("rendered VM name", rendered.Name); err != nil {
+		return model.DraftView{}, err
 	}
 	// Templates blueprint their VMs Halted; "Power on after deployment" flips
 	// the rendered manifest so the VM boots as soon as the merge syncs.
@@ -99,8 +98,8 @@ func (c *Coordinator) StageSaveTemplate(id auth.Identity, commitProj, sourceProj
 	if err := requireRepo(commitProj); err != nil {
 		return model.DraftView{}, err
 	}
-	if !validate.DNS1123Name(req.Name) {
-		return model.DraftView{}, fmt.Errorf("%w: template name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, req.Name)
+	if err := requireDNS1123("template name", req.Name); err != nil {
+		return model.DraftView{}, err
 	}
 	srcRead, err := c.read(sourceProj)
 	if err != nil {
@@ -153,8 +152,8 @@ func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.P
 	if err := requireRepo(commitProj); err != nil {
 		return model.DraftView{}, err
 	}
-	if !validate.DNS1123Name(req.Name) {
-		return model.DraftView{}, fmt.Errorf("%w: template name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, req.Name)
+	if err := requireDNS1123("template name", req.Name); err != nil {
+		return model.DraftView{}, err
 	}
 	path := git.TemplatesDir + "/" + req.Name + ".yaml"
 	if t := vmtemplate.Parse(path, []byte(req.YAML), commitProj.Name); t.Error != "" {

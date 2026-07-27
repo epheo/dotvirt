@@ -126,6 +126,9 @@ func (c *Coordinator) stageAdoptCreate(username, projName string, l liveVM) erro
 }
 
 // Adoptable is one object the caller captured from the cluster, ready to stage.
+// Deliberately mirrors cluster.Adoptable field for field: the coordinator stays
+// cluster-free (the capture runs under the caller's token in the transport), so
+// do not "deduplicate" the two types into a shared import.
 type Adoptable struct {
 	Namespace string
 	Name      string

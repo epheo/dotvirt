@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/validate"
 	"github.com/epheo/dotvirt/internal/vmgen"
 )
 
@@ -73,7 +75,7 @@ func changesForCreate(s vmgen.Spec) []model.Change {
 		out = append(out, model.Change{Field: "Storage class", Action: "add", To: s.StorageClass})
 	}
 	for _, d := range s.ExtraDisks {
-		out = append(out, model.Change{Field: "Disk", Action: "add", To: diskLabel(d.Name, d.Size, d.StorageClass)})
+		out = append(out, model.Change{Field: "Disk", Action: "add", To: manifest.DiskLabel(d.Name, d.Size, d.StorageClass)})
 	}
 	for _, n := range s.Networks {
 		out = append(out, model.Change{Field: "Network", Action: "add", To: n.Name})
@@ -92,11 +94,11 @@ func powerWord(running bool) string {
 	return "Off"
 }
 
-// diskLabel renders an added disk for the changeset preview, appending the
-// storage class only when one was chosen (empty = cluster default).
-func diskLabel(name, size, class string) string {
-	if class != "" {
-		return fmt.Sprintf("%s (%s, %s)", name, size, class)
+// requireDNS1123 is validate.RequireDNS1123 wrapped with ErrInvalid so the
+// transport maps a bad name to a 400.
+func requireDNS1123(field, s string) error {
+	if err := validate.RequireDNS1123(field, s); err != nil {
+		return fmt.Errorf("%w: %s", model.ErrInvalid, err)
 	}
-	return fmt.Sprintf("%s (%s)", name, size)
+	return nil
 }

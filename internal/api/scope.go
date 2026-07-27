@@ -83,41 +83,51 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 	return set, nil
 }
 
-// canCreateCached is CanCreateClusterResource behind the per-(token, resource),
-// rbacVersion-stamped cache — for authorization signals read on polled or
-// broadcast paths, where an uncached SSAR would post to the apiserver per
-// request. A RoleBinding/namespace move invalidates lazily via the version
-// stamp; the TTL backstops the cluster-scoped RBAC changes the version doesn't
-// observe (see visibleTTL). Mutating routes keep their uncached platformScope
-// SSAR — a write deserves a fresh answer.
-func (s *Server) canCreateCached(ctx context.Context, id auth.Identity, c *cluster.Client, ref ssarRef) bool {
+// ssarCached answers one authorization probe behind the per-(token, key),
+// rbacVersion-stamped cache — for signals read on polled or broadcast paths,
+// where an uncached SSAR would post to the apiserver per request. A
+// RoleBinding/namespace move invalidates lazily via the version stamp; the TTL
+// backstops the cluster-scoped RBAC changes the version doesn't observe (see
+// visibleTTL). Mutating routes keep their uncached platformScope SSAR — a
+// write deserves a fresh answer.
+func (s *Server) ssarCached(id auth.Identity, key string, probe func() bool) bool {
 	ver := s.rbacVersion()
-	key := restfactory.TokenKey(id.Token) + "\x00" + ref.group + "/" + ref.resource
-	if e, ok := s.ssar.Get(key); ok && e.ver == ver {
+	k := restfactory.TokenKey(id.Token) + "\x00" + key
+	if e, ok := s.ssar.Get(k); ok && e.ver == ver {
 		return e.ok
 	}
-	ok := c.CanCreateClusterResource(ctx, ref.group, ref.resource)
-	s.ssar.Put(key, ssarVerdict{ok: ok, ver: ver})
+	ok := probe()
+	s.ssar.Put(k, ssarVerdict{ok: ok, ver: ver})
 	return ok
 }
 
-// canReadNodesCached mirrors canCreateCached for the node-read signal that
-// reveals the physical fabric in the networks catalog — read per poll, so it
-// must not post an SSAR per request. The "\x00read" segment keeps the key out
-// of the create-tuple namespace.
+func (s *Server) canCreateCached(ctx context.Context, id auth.Identity, c *cluster.Client, ref ssarRef) bool {
+	return s.ssarCached(id, ref.group+"/"+ref.resource, func() bool {
+		return c.CanCreateClusterResource(ctx, ref.group, ref.resource)
+	})
+}
+
+// canReadNodesCached gates the node-data reads (physical fabric, host metrics).
+// The "read\x00" segment keeps the key out of the create-tuple namespace.
 func (s *Server) canReadNodesCached(ctx context.Context, id auth.Identity, c *cluster.Client) bool {
-	ver := s.rbacVersion()
-	key := restfactory.TokenKey(id.Token) + "\x00read\x00nodes"
-	if e, ok := s.ssar.Get(key); ok && e.ver == ver {
-		return e.ok
-	}
-	ok := c.CanReadNodes(ctx)
-	s.ssar.Put(key, ssarVerdict{ok: ok, ver: ver})
-	return ok
+	return s.ssarCached(id, "read\x00nodes", func() bool { return c.CanReadNodes(ctx) })
 }
 
 // ssarRef is one create-authority tuple (API group + plural resource).
 type ssarRef struct{ group, resource string }
+
+// platformProject is the synthetic platform-tier project over the platform repo.
+func (s *Server) platformProject() project.ProjectInfo {
+	return project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}
+}
+
+// vmScope is the preamble of every /api/vms/{namespace}/{name} route: resolve
+// the tenant project owning the path's namespace (the authorization point) and
+// hand back the path pair.
+func (s *Server) vmScope(w http.ResponseWriter, r *http.Request) (sc scope, ns, name string, ok bool) {
+	sc, ok = s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	return sc, r.PathValue("namespace"), r.PathValue("name"), ok
+}
 
 // The platform-tier create authorities, each spelled exactly once: the create
 // routes gate on them (platformScope), NetworkCaps projects them to the UI, and
@@ -322,5 +332,5 @@ func (s *Server) platformScopeWith(w http.ResponseWriter, r *http.Request, autho
 		http.Error(w, deny, http.StatusForbidden)
 		return scope{}, false
 	}
-	return scope{id: id, cluster: c, proj: project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}}, true
+	return scope{id: id, cluster: c, proj: s.platformProject()}, true
 }

@@ -2,13 +2,13 @@ package manifest
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/validate"
 )
 
 // GroupLabelPrefix marks a placement-group membership label on the VM
@@ -187,8 +187,6 @@ func decodeStringMap(n *yaml.Node) map[string]string {
 	return m
 }
 
-var groupNameRe = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
-
 // applySchedulingRules rewrites the VM's placement policy: it queues the
 // affinity-block replacement and returns the template-label edits for the
 // caller to fold into the one applyTemplateMeta pass. Must run BEFORE
@@ -219,8 +217,8 @@ func applySchedulingRules(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) (map[s
 	set := map[string]string{}
 	var remove []string
 	for _, g := range edit.AddGroups {
-		if !groupNameRe.MatchString(g.Name) || len(g.Name) > 63 {
-			return nil, nil, fmt.Errorf("%w: group name %q must be lowercase alphanumeric with dashes (max 63 chars)", model.ErrInvalid, g.Name)
+		if err := validate.RequireDNS1123("group name", g.Name); err != nil {
+			return nil, nil, fmt.Errorf("%w: %s", model.ErrInvalid, err)
 		}
 		if g.Mode != "together" && g.Mode != "apart" {
 			return nil, nil, fmt.Errorf("%w: group mode %q must be together or apart", model.ErrInvalid, g.Mode)

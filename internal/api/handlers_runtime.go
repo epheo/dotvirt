@@ -20,11 +20,10 @@ type runtimeOp func(ctx context.Context, c *cluster.Client, namespace, name stri
 // These don't mutate the git-managed spec, so ArgoCD self-heal won't revert them.
 // verb labels the act in the shared Recent Tasks feed.
 func (s *Server) handleRuntimeOp(w http.ResponseWriter, r *http.Request, verb string, op runtimeOp) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	ns, name := r.PathValue("namespace"), r.PathValue("name")
 	err := op(r.Context(), sc.cluster, ns, name)
 	s.recordTask(verb, ns, name, sc.id.Username, err == nil)
 	if err != nil {

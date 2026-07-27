@@ -10,22 +10,21 @@ import (
 // not git-managed, so ArgoCD never reverts them.
 
 func (s *Server) handleSnapshots(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	snaps, err := sc.cluster.ListSnapshots(r.Context(), r.PathValue("namespace"), r.PathValue("name"))
+	snaps, err := sc.cluster.ListSnapshots(r.Context(), ns, name)
 	respond(w, snaps, err)
 }
 
 // handleTakeSnapshot creates a point-in-time snapshot; a name may be supplied, else
 // one is derived from the VM name + timestamp.
 func (s *Server) handleTakeSnapshot(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	ns, name := r.PathValue("namespace"), r.PathValue("name")
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -45,12 +44,12 @@ func (s *Server) handleTakeSnapshot(w http.ResponseWriter, r *http.Request) {
 
 // handleRestoreSnapshot rolls the VM back to a snapshot (the VM must be stopped).
 func (s *Server) handleRestoreSnapshot(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	err := sc.cluster.RestoreSnapshot(r.Context(), r.PathValue("namespace"), r.PathValue("name"), r.PathValue("snapshot"))
-	s.recordTask("Restore snapshot", r.PathValue("namespace"), r.PathValue("name"), sc.id.Username, err == nil)
+	err := sc.cluster.RestoreSnapshot(r.Context(), ns, name, r.PathValue("snapshot"))
+	s.recordTask("Restore snapshot", ns, name, sc.id.Username, err == nil)
 	if err != nil {
 		http.Error(w, err.Error(), runtimeOpStatus(err))
 		return
@@ -59,11 +58,11 @@ func (s *Server) handleRestoreSnapshot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteSnapshot(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, _, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	if err := sc.cluster.DeleteSnapshot(r.Context(), r.PathValue("namespace"), r.PathValue("snapshot")); err != nil {
+	if err := sc.cluster.DeleteSnapshot(r.Context(), ns, r.PathValue("snapshot")); err != nil {
 		http.Error(w, err.Error(), runtimeOpStatus(err))
 		return
 	}

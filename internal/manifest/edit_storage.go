@@ -102,29 +102,34 @@ func nextDVName(old string, templates *yaml.Node) string {
 	}
 }
 
-// namedItem returns the sequence item whose `name:` equals name, or nil.
-func namedItem(seq *yaml.Node, name string) *yaml.Node {
+// findNamed locates the sequence item whose identity equals name: the top-level
+// `name:` of disks and volumes, or (viaMeta) metadata.name — the identity of
+// dataVolumeTemplates. idx is -1 when absent.
+func findNamed(seq *yaml.Node, name string, viaMeta bool) (idx int, item *yaml.Node) {
 	if seq == nil || seq.Kind != yaml.SequenceNode {
-		return nil
+		return -1, nil
 	}
-	for _, item := range seq.Content {
-		if nodeValue(get(item, "name")) == name {
-			return item
+	for i, it := range seq.Content {
+		id := get(it, "name")
+		if viaMeta {
+			id = get(get(it, "metadata"), "name")
+		}
+		if nodeValue(id) == name {
+			return i, it
 		}
 	}
-	return nil
+	return -1, nil
+}
+
+// namedItem returns the sequence item whose `name:` equals name, or nil.
+func namedItem(seq *yaml.Node, name string) *yaml.Node {
+	_, item := findNamed(seq, name, false)
+	return item
 }
 
 // templateNamed returns the dataVolumeTemplates item whose metadata.name
 // equals name, or nil.
 func templateNamed(seq *yaml.Node, name string) *yaml.Node {
-	if seq == nil || seq.Kind != yaml.SequenceNode {
-		return nil
-	}
-	for _, item := range seq.Content {
-		if nodeValue(get(get(item, "metadata"), "name")) == name {
-			return item
-		}
-	}
-	return nil
+	_, item := findNamed(seq, name, true)
+	return item
 }

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/model"
@@ -53,13 +52,11 @@ func (s *Server) appendTemplates(list *model.TemplateList, library, repoURL stri
 // there (same authorization as POST /api/vms); the library only needs to be
 // readable — the caller's own projects or the shared platform library.
 func (s *Server) handleDeployTemplate(w http.ResponseWriter, r *http.Request) {
-	raw, err := readAll(r)
-	if err != nil {
-		fail(w, invalid(err))
+	_, req, ok := peek[model.DeployTemplateRequest](w, r)
+	if !ok {
 		return
 	}
-	var req model.DeployTemplateRequest
-	if err := json.Unmarshal(raw, &req); err != nil || req.Namespace == "" {
+	if req.Namespace == "" {
 		http.Error(w, "a target namespace is required", http.StatusBadRequest)
 		return
 	}
@@ -87,7 +84,7 @@ func (s *Server) libraryFor(w http.ResponseWriter, r *http.Request, sc scope, li
 			http.Error(w, "platform repo not configured (set -platform-repo)", http.StatusServiceUnavailable)
 			return project.ProjectInfo{}, false
 		}
-		return project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}, true
+		return s.platformProject(), true
 	}
 	projs, err := s.projectsFor(r.Context(), sc.id, sc.cluster)
 	if err != nil {
@@ -108,18 +105,15 @@ func (s *Server) libraryFor(w http.ResponseWriter, r *http.Request, sc scope, li
 // saving into it: project membership for a project library, the
 // virtualmachinetemplates create SSAR for the shared one.
 func (s *Server) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
-	raw, err := readAll(r)
-	if err != nil {
-		fail(w, invalid(err))
+	_, req, ok := peek[model.UpdateTemplateRequest](w, r)
+	if !ok {
 		return
 	}
-	var req model.UpdateTemplateRequest
-	if err := json.Unmarshal(raw, &req); err != nil || req.Library == "" || req.Name == "" || req.YAML == "" {
+	if req.Library == "" || req.Name == "" || req.YAML == "" {
 		http.Error(w, "library, name, and yaml are required", http.StatusBadRequest)
 		return
 	}
 	var sc scope
-	var ok bool
 	if req.Library == platformProjectName {
 		sc, ok = s.platformScope(w, r, ssarVMTemplate)
 	} else {
@@ -138,13 +132,11 @@ func (s *Server) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 // virtualmachinetemplates create SSAR (rule-based, so it works before the CRD
 // exists on-cluster), like every platform-tier create.
 func (s *Server) handleSaveTemplate(w http.ResponseWriter, r *http.Request) {
-	raw, err := readAll(r)
-	if err != nil {
-		fail(w, invalid(err))
+	_, req, ok := peek[model.SaveTemplateRequest](w, r)
+	if !ok {
 		return
 	}
-	var req model.SaveTemplateRequest
-	if err := json.Unmarshal(raw, &req); err != nil || req.SourceNamespace == "" || req.SourceName == "" {
+	if req.SourceNamespace == "" || req.SourceName == "" {
 		http.Error(w, "a source VM is required", http.StatusBadRequest)
 		return
 	}

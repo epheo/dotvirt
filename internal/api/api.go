@@ -126,7 +126,7 @@ const visibleTTL = 30 * time.Second
 const optionsTTL = 60 * time.Second
 
 // Server holds the long-lived collaborators and builds per-request, identity-
-// scoped state. It replaces the old interface-bundle Deps.
+// scoped state.
 type Server struct {
 	clusterF  *cluster.Factory
 	state     *clusterstate.State // SA-owned live+topology snapshot; the read path's source
@@ -409,6 +409,21 @@ func withCORS(origin string, next http.Handler) http.Handler {
 // truncate silently instead of letting MaxBytesReader error.
 func readAll(r *http.Request) ([]byte, error) {
 	return io.ReadAll(r.Body)
+}
+
+// peek reads the body and decodes just the routing fields T names; the staging
+// layer re-decodes the raw body in full. ok=false means the response is written.
+func peek[T any](w http.ResponseWriter, r *http.Request) (raw []byte, p T, ok bool) {
+	raw, err := readAll(r)
+	if err != nil {
+		fail(w, invalid(err))
+		return nil, p, false
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		fail(w, invalid(err))
+		return nil, p, false
+	}
+	return raw, p, true
 }
 
 // withBodyLimit caps every request body so a decoder errors instead of

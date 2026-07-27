@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/model"
-	"github.com/epheo/dotvirt/internal/project"
 )
 
 // The Prometheus/Thanos-backed reads (Performance tab, capacity bars, cluster
@@ -148,16 +148,8 @@ func foldDRSBand(load *model.HostLoad, threshold string) {
 // platform repo's committed DRS threshold — the configuration merges have
 // made real — and is absent until DRS is configured.
 func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
-	if !s.metricsReady(w) {
-		return
-	}
-	id, c, err := s.userCluster(r)
-	if err != nil {
-		fail(w, unavailable("cluster access", err))
-		return
-	}
-	if !s.canReadNodesCached(r.Context(), id, c) {
-		http.Error(w, "node metrics require node read access", http.StatusForbidden)
+	id, ok := s.nodeMetricsScope(w, r)
+	if !ok {
 		return
 	}
 	load, err := s.metrics.HostLoad(r.Context(), id.Token)
@@ -166,7 +158,7 @@ func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.cfg.PlatformRepo != "" && s.draft != nil {
-		platform := project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}
+		platform := s.platformProject()
 		if st, err := s.draft.DRSState(platform); err == nil && st.Configured && st.Config != nil {
 			foldDRSBand(&load, st.Config.Threshold)
 		}
@@ -178,24 +170,36 @@ func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
 // Node-level data cached once for all callers, so the same node-read SSAR
 // gate as handleHostLoad applies, for the same reason.
 func (s *Server) handleHostCapacity(w http.ResponseWriter, r *http.Request) {
-	if !s.metricsReady(w) {
+	id, ok := s.nodeMetricsScope(w, r)
+	if !ok {
 		return
 	}
-	id, c, err := s.userCluster(r)
-	if err != nil {
-		fail(w, unavailable("cluster access", err))
-		return
-	}
-	if !s.canReadNodesCached(r.Context(), id, c) {
-		http.Error(w, "node metrics require node read access", http.StatusForbidden)
-		return
-	}
-	cap, err := s.metrics.Capacity(r.Context(), id.Token)
+	hc, err := s.metrics.Capacity(r.Context(), id.Token)
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, cap)
+	writeJSON(w, http.StatusOK, hc)
+}
+
+// nodeMetricsScope is the shared gate of the node-data handlers: metrics wired,
+// caller resolvable, and a node-read SSAR — required because these responses are
+// cached once for ALL callers, so on a cache hit the caller's token never
+// reaches Thanos and RBAC must be enforced here.
+func (s *Server) nodeMetricsScope(w http.ResponseWriter, r *http.Request) (auth.Identity, bool) {
+	if !s.metricsReady(w) {
+		return auth.Identity{}, false
+	}
+	id, c, err := s.userCluster(r)
+	if err != nil {
+		fail(w, unavailable("cluster access", err))
+		return auth.Identity{}, false
+	}
+	if !s.canReadNodesCached(r.Context(), id, c) {
+		http.Error(w, "node metrics require node read access", http.StatusForbidden)
+		return auth.Identity{}, false
+	}
+	return id, true
 }
 
 // handleScopeMetrics returns the per-VM top-consumer time-series for a container

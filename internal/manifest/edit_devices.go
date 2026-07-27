@@ -124,15 +124,8 @@ func removeDisk(ed *lineEditor, spec, tmplSpec, devices *yaml.Node, name string)
 // removeTemplateNamed deletes the dataVolumeTemplates item whose metadata.name
 // equals name — their identity, unlike the top-level name: of disks and volumes.
 func removeTemplateNamed(ed *lineEditor, seq *yaml.Node, name string) {
-	if seq == nil || seq.Kind != yaml.SequenceNode {
-		return
-	}
-	for i, item := range seq.Content {
-		if nodeValue(get(get(item, "metadata"), "name")) != name {
-			continue
-		}
+	if i, item := findNamed(seq, name, true); item != nil {
 		ed.removeRange(item.Line-1, itemEndLine(ed, seq, i))
-		return
 	}
 }
 
@@ -174,17 +167,8 @@ func appendItem(ed *lineEditor, seq *yaml.Node, itemLines []string) {
 
 // removeNamedItem deletes the sequence item whose `name:` equals name.
 func removeNamedItem(ed *lineEditor, seq *yaml.Node, name string) {
-	if seq == nil || seq.Kind != yaml.SequenceNode {
-		return
-	}
-	for i, item := range seq.Content {
-		if nodeValue(get(item, "name")) != name {
-			continue
-		}
-		start := item.Line - 1
-		end := itemEndLine(ed, seq, i)
-		ed.removeRange(start, end)
-		return
+	if i, item := findNamed(seq, name, false); item != nil {
+		ed.removeRange(item.Line-1, itemEndLine(ed, seq, i))
 	}
 }
 

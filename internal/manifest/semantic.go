@@ -52,11 +52,7 @@ func ChangesForEdit(current model.VM, edit VMEdit) []model.Change {
 	out = append(out, schedulingChanges(current, edit)...)
 
 	for _, d := range edit.AddDisks {
-		to := fmt.Sprintf("%s (%s)", d.Name, d.Size)
-		if d.StorageClass != "" {
-			to = fmt.Sprintf("%s (%s, %s)", d.Name, d.Size, d.StorageClass)
-		}
-		out = append(out, model.Change{Field: "Disk", Action: "add", To: to})
+		out = append(out, model.Change{Field: "Disk", Action: "add", To: DiskLabel(d.Name, d.Size, d.StorageClass)})
 	}
 	for _, name := range edit.RemoveDisks {
 		out = append(out, model.Change{Field: "Disk", Action: "remove", From: name})
@@ -428,4 +424,14 @@ func nicNameSet(v model.VM) map[string]string {
 		m[n.Name] = n.Network
 	}
 	return m
+}
+
+// DiskLabel renders an added disk for the change previews, appending the
+// storage class only when one was chosen (empty = cluster default). Shared with
+// the changeset preview so the two renderings cannot drift.
+func DiskLabel(name, size, class string) string {
+	if class != "" {
+		return fmt.Sprintf("%s (%s, %s)", name, size, class)
+	}
+	return fmt.Sprintf("%s (%s)", name, size)
 }

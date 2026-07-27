@@ -9,7 +9,6 @@ import (
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/inventory"
 	"github.com/epheo/dotvirt/internal/model"
-	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
@@ -32,11 +31,10 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		return model.Inventory{}, err
 	}
 
-	// Live state + topology come from the SA-owned snapshot (in-memory, no cluster
-	// call), so a broadcast to N subscribers no longer issues N×(LIST+GET) — the
-	// throttling that wedged the server is gone. enrich() applies live/drift only to
-	// VMs already in the user's resolved projects, so the shared snapshot leaks
-	// nothing across tenants.
+	// Live state + topology come from the SA-owned snapshot: the hot path reads
+	// in-memory state, never the cluster, however many subscribers a broadcast
+	// fans out to. enrich() applies live/drift only to VMs already in the user's
+	// resolved projects, so the shared snapshot leaks nothing across tenants.
 	in := inventory.Inputs{
 		Projects: projects,
 		Branch:   s.cfg.BaseBranch,
@@ -92,7 +90,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	// load, not just right after a propose tracks it.
 	propProjects := projects
 	if s.canAuthorPlatform(ctx, id, userCluster) {
-		propProjects = append(propProjects, project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo})
+		propProjects = append(propProjects, s.platformProject())
 	}
 	inv.Proposals = s.proposalsFor(id, propProjects)
 	// Watermark for the out-of-band network catalog: bumps when a port group moves

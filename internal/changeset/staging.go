@@ -203,11 +203,11 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	// The name becomes a repo path segment, a Namespace name, a label value, and a
 	// staged manifest path — so it must be a strict DNS-1123 label. This rejects
 	// path-traversal ("../x"), separators ("a/b"), and anything k8s would refuse.
-	if !validate.DNS1123Name(spec.Name) {
-		return model.DraftView{}, fmt.Errorf("%w: project name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, spec.Name)
+	if err := requireDNS1123("project name", spec.Name); err != nil {
+		return model.DraftView{}, err
 	}
-	if !validate.DNS1123Name(ns) {
-		return model.DraftView{}, fmt.Errorf("%w: namespace name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, ns)
+	if err := requireDNS1123("namespace name", ns); err != nil {
+		return model.DraftView{}, err
 	}
 	// Whether the tenant already exists is a CLUSTER fact, checked by the caller before
 	// this runs. Refusing here on a pre-existing repo instead would burn the name: the
@@ -281,8 +281,8 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	if err := requireRepo(commitProj); err != nil {
 		return model.DraftView{}, err
 	}
-	if !validate.DNS1123Name(target.Name) {
-		return model.DraftView{}, fmt.Errorf("%w: project name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, target.Name)
+	if err := requireDNS1123("project name", target.Name); err != nil {
+		return model.DraftView{}, err
 	}
 	if len(target.Namespaces) == 0 {
 		return model.DraftView{}, fmt.Errorf("%w: project %q has no namespaces to adopt", model.ErrInvalid, target.Name)

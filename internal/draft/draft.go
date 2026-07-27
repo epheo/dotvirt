@@ -14,7 +14,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/epheo/dotvirt/internal/manifest"
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/vmgen"
 )
 
@@ -102,7 +102,7 @@ type Entry struct {
 	SourceFile string `json:"sourceFile,omitempty"`
 
 	// Edit fields (KindEdit): the change to apply to an existing manifest.
-	Edit *manifest.VMEdit `json:"edit,omitempty"`
+	Edit *model.VMEdit `json:"edit,omitempty"`
 
 	// Create fields (KindCreate): the wizard spec for a new VM, OR — when
 	// adopting an object that exists only in the cluster - its live state

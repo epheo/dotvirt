@@ -1,11 +1,9 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/model"
-	"github.com/epheo/dotvirt/internal/project"
 )
 
 // The DRS routes are platform-tier: the descheduler rebalances every node, so
@@ -33,7 +31,7 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		view.CanManage = s.canCreateCached(ctx, id, c, ssarDescheduler)
 		view.CanPSI = s.canCreateCached(ctx, id, c, ssarMachineCfg)
-		platform := project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}
+		platform := s.platformProject()
 		if git, err := s.draft.DRSState(platform); err != nil {
 			view.Warning = "platform repo unavailable — committed DRS state unknown: " + err.Error()
 		} else {
@@ -53,20 +51,17 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 // draft. The PSI file reboots the worker pool when merged, so it carries its
 // own machineconfigs-create SSAR on top of the kubedeschedulers gate.
 func (s *Server) handleDRSEnable(w http.ResponseWriter, r *http.Request) {
-	raw, err := readAll(r)
-	if err != nil {
-		fail(w, invalid(err))
+	raw, p, ok := peek[struct {
+		InstallPSI bool `json:"installPSI"`
+	}](w, r)
+	if !ok {
 		return
 	}
 	sc, ok := s.platformScope(w, r, ssarDescheduler)
 	if !ok {
 		return
 	}
-	var peek struct {
-		InstallPSI bool `json:"installPSI"`
-	}
-	_ = json.Unmarshal(raw, &peek)
-	if peek.InstallPSI && !sc.cluster.CanCreateClusterResource(r.Context(), ssarMachineCfg.group, ssarMachineCfg.resource) {
+	if p.InstallPSI && !sc.cluster.CanCreateClusterResource(r.Context(), ssarMachineCfg.group, ssarMachineCfg.resource) {
 		http.Error(w, "not authorized to create machineconfigs", http.StatusForbidden)
 		return
 	}

@@ -16,7 +16,7 @@ import (
 // complete the changeset lifecycle. All are project-scoped via resolveProject.
 
 func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
@@ -29,26 +29,22 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "sourceFile is required", http.StatusBadRequest)
 		return
 	}
-	result, err := s.draft.StageEdit(sc.id, sc.proj, r.PathValue("namespace"), r.PathValue("name"), req)
+	result, err := s.draft.StageEdit(sc.id, sc.proj, ns, name, req)
 	respond(w, result, err)
 }
 
 // handleCreate stages a new VM. The path carries no namespace, so we peek the
 // spec's namespace to pick the target project.
 func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
-	raw, err := readAll(r)
-	if err != nil {
-		fail(w, invalid(err))
+	raw, p, ok := peek[nsPeek](w, r)
+	if !ok {
 		return
 	}
-	var peek struct {
-		Namespace string `json:"namespace"`
-	}
-	if err := json.Unmarshal(raw, &peek); err != nil || peek.Namespace == "" {
+	if p.Namespace == "" {
 		http.Error(w, "spec namespace is required", http.StatusBadRequest)
 		return
 	}
-	sc, ok := s.resolveProject(w, r, byNamespace(peek.Namespace))
+	sc, ok := s.resolveProject(w, r, byNamespace(p.Namespace))
 	if !ok {
 		return
 	}
@@ -61,11 +57,11 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 // escalation — Argo prunes the VM on merge under its own RBAC), so namespace
 // membership via resolveProject is the right gate, not resync's CanUpdateVM check.
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	result, err := s.draft.StageDelete(sc.id, sc.proj, r.PathValue("namespace"), r.PathValue("name"))
+	result, err := s.draft.StageDelete(sc.id, sc.proj, ns, name)
 	respond(w, result, err)
 }
 
@@ -132,20 +128,20 @@ func (s *Server) handlePropose(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDrift(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	result, err := s.draft.VMDrift(sc.proj, r.PathValue("namespace"), r.PathValue("name"))
+	result, err := s.draft.VMDrift(sc.proj, ns, name)
 	respond(w, result, err)
 }
 
 func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	result, err := s.draft.Adopt(sc.id, sc.proj, r.PathValue("namespace"), r.PathValue("name"))
+	result, err := s.draft.Adopt(sc.id, sc.proj, ns, name)
 	respond(w, result, err)
 }
 
@@ -205,11 +201,10 @@ func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 	// if they could update the VM themselves — otherwise read access would escalate
 	// into an SA-privileged Argo sync. The SSAR runs inside Resync, beside the
 	// escalation, so no other caller can reach it unchecked.
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	ns, name := r.PathValue("namespace"), r.PathValue("name")
 	result, err := s.draft.Resync(r.Context(), sc.cluster.CanUpdateVM, ns, name)
 	s.recordTask("Resync", ns, name, sc.id.Username, err == nil)
 	respond(w, result, err)

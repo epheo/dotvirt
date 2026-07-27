@@ -17,11 +17,10 @@ import (
 // handleVMPolicy answers for one VM, matching pod selectors against the labels
 // its virt-launcher pod carries (live VMI, else the manifest template's).
 func (s *Server) handleVMPolicy(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	ns, name := r.PathValue("namespace"), r.PathValue("name")
 	lbls, live, found := s.state.WorkloadLabels(ns, name)
 	if !found {
 		http.Error(w, "vm not found", http.StatusNotFound)
@@ -101,16 +100,9 @@ func (s *Server) effectivePolicy(ns string, podLabels map[string]string, podScop
 	}
 	eff := s.netstate.Effective(ns, nsLabels, podLabels, podScoped)
 	for _, bs := range [][]model.PolicyBinding{eff.EastWest, eff.Gateway, eff.SNAT, eff.Routes} {
-		s.enrichBindingDrift(bs)
+		for i := range bs {
+			s.policyDrift(&bs[i].Policy)
+		}
 	}
 	return eff
-}
-
-func (s *Server) enrichBindingDrift(bs []model.PolicyBinding) {
-	if s.drift == nil {
-		return
-	}
-	for i := range bs {
-		s.policyDrift(&bs[i].Policy)
-	}
 }

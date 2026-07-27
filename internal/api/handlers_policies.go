@@ -54,36 +54,35 @@ func scopePolicies(all []model.Policy, visible map[string]bool, canCluster func(
 	return out
 }
 
+// backingGroup maps every managed object's Backing (also its kind) to its API
+// group — the one vocabulary the per-object drift lookups key on.
+var backingGroup = map[string]string{
+	"UserDefinedNetwork":            "k8s.ovn.org",
+	"ClusterUserDefinedNetwork":     "k8s.ovn.org",
+	"NetworkAttachmentDefinition":   "k8s.cni.cncf.io",
+	"NetworkPolicy":                 "networking.k8s.io",
+	"AdminNetworkPolicy":            "policy.networking.k8s.io",
+	"BaselineAdminNetworkPolicy":    "policy.networking.k8s.io",
+	"EgressFirewall":                "k8s.ovn.org",
+	"EgressIP":                      "k8s.ovn.org",
+	"AdminPolicyBasedExternalRoute": "k8s.ovn.org",
+}
+
 // enrichPolicyDrift attaches each policy's own ArgoCD sync/health from the shared
 // Application snapshot — the same per-object drift plane VMs and networks use.
 func (s *Server) enrichPolicyDrift(pols []model.Policy) {
-	if s.drift == nil {
-		return
-	}
 	for i := range pols {
 		s.policyDrift(&pols[i])
 	}
 }
 
+// policyDrift is a no-op when Argo isn't wired or the backing is unmanaged.
 func (s *Server) policyDrift(p *model.Policy) {
-	group, kind := policyGVK(p.Backing)
-	if kind == "" {
+	group, ok := backingGroup[p.Backing]
+	if s.drift == nil || !ok {
 		return
 	}
-	if d, ok := s.drift.ResourceDrift(group, kind, p.Namespace, p.Name); ok {
+	if d, ok := s.drift.ResourceDrift(group, p.Backing, p.Namespace, p.Name); ok {
 		p.Sync, p.Health, p.SyncError = d.Sync, d.Health, d.Message
 	}
-}
-
-// policyGVK maps a policy's backing to its ArgoCD (group, kind).
-func policyGVK(backing string) (group, kind string) {
-	switch backing {
-	case "NetworkPolicy":
-		return "networking.k8s.io", backing
-	case "AdminNetworkPolicy", "BaselineAdminNetworkPolicy":
-		return "policy.networking.k8s.io", backing
-	case "EgressFirewall", "EgressIP", "AdminPolicyBasedExternalRoute":
-		return "k8s.ovn.org", backing
-	}
-	return "", ""
 }

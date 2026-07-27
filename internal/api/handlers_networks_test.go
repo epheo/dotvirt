@@ -43,20 +43,29 @@ func TestScopeNetworks(t *testing.T) {
 	}
 }
 
-// networkGVK maps each backing to the ArgoCD (group, kind) the drift plane keys on;
-// an unknown backing yields an empty kind (no drift lookup). The NAD group in
-// particular is easy to get wrong (k8s.cni.cncf.io, not k8s.ovn.org).
-func TestNetworkGVK(t *testing.T) {
-	cases := map[string]struct{ group, kind string }{
-		"UserDefinedNetwork":          {"k8s.ovn.org", "UserDefinedNetwork"},
-		"ClusterUserDefinedNetwork":   {"k8s.ovn.org", "ClusterUserDefinedNetwork"},
-		"NetworkAttachmentDefinition": {"k8s.cni.cncf.io", "NetworkAttachmentDefinition"},
-		"":                            {"", ""},
-		"SomethingElse":               {"", ""},
+// backingGroup keys the drift plane's per-object lookups; an absent backing
+// means no drift lookup. The NAD group in particular is easy to get wrong
+// (k8s.cni.cncf.io, not k8s.ovn.org).
+func TestBackingGroup(t *testing.T) {
+	cases := map[string]string{
+		"UserDefinedNetwork":            "k8s.ovn.org",
+		"ClusterUserDefinedNetwork":     "k8s.ovn.org",
+		"NetworkAttachmentDefinition":   "k8s.cni.cncf.io",
+		"NetworkPolicy":                 "networking.k8s.io",
+		"AdminNetworkPolicy":            "policy.networking.k8s.io",
+		"BaselineAdminNetworkPolicy":    "policy.networking.k8s.io",
+		"EgressFirewall":                "k8s.ovn.org",
+		"EgressIP":                      "k8s.ovn.org",
+		"AdminPolicyBasedExternalRoute": "k8s.ovn.org",
 	}
 	for backing, want := range cases {
-		if g, k := networkGVK(backing); g != want.group || k != want.kind {
-			t.Errorf("networkGVK(%q) = (%q,%q), want (%q,%q)", backing, g, k, want.group, want.kind)
+		if got := backingGroup[backing]; got != want {
+			t.Errorf("backingGroup[%q] = %q, want %q", backing, got, want)
+		}
+	}
+	for _, absent := range []string{"", "SomethingElse"} {
+		if _, ok := backingGroup[absent]; ok {
+			t.Errorf("backingGroup[%q] must be absent", absent)
 		}
 	}
 }

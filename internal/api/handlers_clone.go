@@ -14,21 +14,20 @@ import (
 // handleClones lists the VirtualMachineClones whose source is this VM, for the
 // Clone modal's progress rows.
 func (s *Server) handleClones(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	clones, err := sc.cluster.ListClones(r.Context(), r.PathValue("namespace"), r.PathValue("name"))
+	clones, err := sc.cluster.ListClones(r.Context(), ns, name)
 	respond(w, clones, err)
 }
 
 // handleCreateClone clones this VM into a new VM named by the request body.
 func (s *Server) handleCreateClone(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	ns, name := r.PathValue("namespace"), r.PathValue("name")
 	var req struct {
 		Target string `json:"target"`
 	}
