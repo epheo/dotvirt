@@ -15,7 +15,7 @@
 
 	// The Summary tab body: at-a-glance tiles, live usage, guest/runtime cards,
 	// and the two git-reconcile callouts (Not in git, Drift). Pure view over the
-	// selected VM — adopt/resync/console stay the host's verbs.
+	// selected VM - adopt/resync/console stay the host's verbs.
 	let {
 		vm,
 		stagedItem = null,
@@ -62,7 +62,7 @@
 	const cpuVal = $derived(vm.cpuCores ?? (vm.vcpus || undefined));
 	const memVal = $derived(vm.memory ?? vm.memoryActual);
 
-	// Staged changes for this VM, keyed by field label (for inline current→future).
+	// Staged changes for this VM, keyed by field label (for inline current->future).
 	const stagedChanges = $derived.by(() => {
 		const m = new Map<string, Change>();
 		for (const c of stagedItem?.changes ?? []) m.set(c.field, c);
@@ -78,7 +78,7 @@
 </script>
 
 <!-- At-a-glance tiles + live usage on the left, the console preview spanning
-     both on the right (running VMs only) — the preview emits no DOM when
+     both on the right (running VMs only) - the preview emits no DOM when
      hidden, so the left column reclaims the full width. CPU/Memory tiles
      carry the live trend and click through to Monitor. -->
 <div class="flex flex-col gap-4 xl:flex-row xl:items-stretch">

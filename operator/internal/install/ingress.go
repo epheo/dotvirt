@@ -14,7 +14,7 @@ import (
 var RouteGVK = schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"}
 
 // Route exposes the named Service (its "http" port, edge TLS at the router) on
-// OpenShift, as a Route of the same name. host may be empty — the router then
+// OpenShift, as a Route of the same name. host may be empty - the router then
 // assigns one. In the dotvirt namespace, so it's owner-referenced like the other
 // namespaced resources.
 func Route(dv *dotvirtv1alpha1.Dotvirt, name, host string) *unstructured.Unstructured {

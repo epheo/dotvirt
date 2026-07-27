@@ -1,23 +1,26 @@
 <script lang="ts">
 	import { Camera, RotateCcw, Trash2 } from 'lucide-svelte';
-	import { api, Unauthorized, type Snapshot, type VM } from '$lib/api';
-	import { friendlyError, relativeAge } from '$lib/format';
-	import { resource, type Resource } from '$lib/resource.svelte';
+	import { api, type Snapshot, type VM } from '$lib/api';
+	import { relativeAge } from '$lib/format';
+	import { action, resource, type Resource } from '$lib/resource.svelte';
 	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
 	import ErrorNote from './ErrorNote.svelte';
 	import Note from './Note.svelte';
 	import StatusDot from './StatusDot.svelte';
+	import TextInput from './TextInput.svelte';
 
 	let { vm }: { vm: VM } = $props();
 
-	let actionError = $state(''); // a failed take/restore/delete, distinct from the read
-	let taking = $state(false);
+	// Two actions because two busy displays run independently: the Take button's
+	// label and the per-row "working..." (identified by busyName).
+	const takeOp = action();
+	const rowOp = action();
 	let snapName = $state('');
-	let busy = $state<string | null>(null); // snapshot being acted on
+	let busyName = $state<string | null>(null); // snapshot being acted on
 	let armedRestore = $state<string | null>(null);
 	let armedDelete = $state<string | null>(null);
 
-	// Restore needs a stopped target — KubeVirt rejects a running one.
+	// Restore needs a stopped target - KubeVirt rejects a running one.
 	const running = $derived(vm.phase === 'Running');
 
 	// Keyed on the VM identity (the live stream hands down a fresh vm each
@@ -32,70 +35,54 @@
 	);
 	const snapshots = $derived(snapRes.data);
 	const loading = $derived(snapRes.loading);
-	const error = $derived(actionError || snapRes.error);
+	const error = $derived(takeOp.error || rowOp.error || snapRes.error);
 	const pending = $derived(snapshots?.some((s) => !s.readyToUse && s.phase !== 'Failed') ?? false);
 
 	async function take() {
-		taking = true;
-		actionError = '';
-		try {
+		rowOp.clear(); // one error slot: a new op supersedes the other's failure
+		await takeOp.run(async () => {
 			await api.takeSnapshot(vm.namespace, vm.name, snapName.trim() || undefined);
 			snapName = '';
 			await snapRes.refresh();
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			actionError = friendlyError(e);
-		} finally {
-			taking = false;
-		}
+		});
 	}
 
-	async function restore(name: string) {
+	async function rowAction(name: string, fn: () => Promise<unknown>) {
+		takeOp.clear();
+		busyName = name;
+		await rowOp.run(async () => {
+			await fn();
+			await snapRes.refresh();
+		});
+		busyName = null;
+	}
+
+	function restore(name: string) {
 		armedRestore = null;
-		busy = name;
-		actionError = '';
-		try {
-			await api.restoreSnapshot(vm.namespace, vm.name, name);
-			await snapRes.refresh();
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			actionError = friendlyError(e);
-		} finally {
-			busy = null;
-		}
+		return rowAction(name, () => api.restoreSnapshot(vm.namespace, vm.name, name));
 	}
 
-	async function remove(name: string) {
+	function remove(name: string) {
 		armedDelete = null;
-		busy = name;
-		actionError = '';
-		try {
-			await api.deleteSnapshot(vm.namespace, vm.name, name);
-			await snapRes.refresh();
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			actionError = friendlyError(e);
-		} finally {
-			busy = null;
-		}
+		return rowAction(name, () => api.deleteSnapshot(vm.namespace, vm.name, name));
 	}
 </script>
 
 <div class="space-y-4 p-1">
 	<!-- Take a snapshot -->
 	<div class="flex items-center gap-2">
-		<input
+		<TextInput
 			bind:value={snapName}
 			placeholder="snapshot name (auto-generated if blank)"
-			class="w-72 rounded border border-line-strong px-2 py-1.5 text-sm"
+			class="w-72!"
 		/>
 		<button
 			onclick={take}
-			disabled={taking}
-			class="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent disabled:bg-line-strong"
+			disabled={takeOp.busy}
+			class="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:bg-line-strong"
 		>
 			<Camera size={14} />
-			{taking ? 'Taking…' : 'Take snapshot'}
+			{takeOp.busy ? 'Taking…' : 'Take snapshot'}
 		</button>
 		{#if running}
 			<span class="text-xs text-ink-faint">Online snapshot (VM is running)</span>
@@ -105,7 +92,7 @@
 	<ErrorNote {error} />
 
 	<!-- Restore needs a stopped VM (KubeVirt rejects a running target), but power
-	     is PR-gated — so spell out the path rather than just greying the button. -->
+	     is PR-gated - so spell out the path rather than just greying the button. -->
 	{#if running && snapshots?.some((s) => s.readyToUse)}
 		<Note tone="warn" border>
 			Restore is disabled while the VM is running. Set its power to <strong>Off</strong> (via a pull request
@@ -151,7 +138,7 @@
 							{/if}
 						</td>
 						<td class="py-2 text-right whitespace-nowrap">
-							{#if busy === s.name}
+							{#if busyName === s.name}
 								<span class="text-xs text-ink-faint">working…</span>
 							{:else}
 								<button

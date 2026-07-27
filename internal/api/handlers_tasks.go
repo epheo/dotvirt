@@ -32,7 +32,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.canAuthorPlatform(r.Context(), id, c) {
-		projects = append(projects, project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo})
+		projects = append(projects, s.platformProject())
 	}
 	canNodes := s.canReadNodesCached(r.Context(), id, c)
 	writeJSON(w, http.StatusOK, scopeTasks(s.tasks.Ops(), s.tasks.Merges(), projects, canNodes))

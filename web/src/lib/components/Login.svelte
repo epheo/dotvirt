@@ -21,7 +21,7 @@
 			.catch(() => {});
 	});
 	// The OAuth callback bounces here with ?sso_error=1 on any failure (the
-	// detail is server-logged, never shown — it can carry endpoint internals).
+	// detail is server-logged, never shown - it can carry endpoint internals).
 	const ssoError = $derived(page.url.searchParams.get('sso_error') !== null);
 
 	async function submit(e: SubmitEvent) {
@@ -95,7 +95,7 @@
 			disabled={busy || !token.trim()}
 			class="mt-3 w-full rounded {sso
 				? 'border border-line bg-inset text-ink-soft hover:bg-inset-strong'
-				: 'bg-accent text-white hover:bg-accent'} px-4 py-2 text-sm font-medium disabled:opacity-40"
+				: 'bg-accent text-white hover:bg-accent-hover'} px-4 py-2 text-sm font-medium disabled:opacity-40"
 		>
 			{busy ? 'Signing in…' : 'Sign in with token'}
 		</button>

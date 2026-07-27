@@ -10,7 +10,7 @@ import (
 
 // ChangesForEdit renders a VMEdit as semantic model.Change items, relative to the VM's
 // current state (parsed from its source manifest). It mirrors what ApplyEdit
-// will do, so the preview matches the eventual diff — without showing YAML.
+// will do, so the preview matches the eventual diff - without showing YAML.
 func ChangesForEdit(current model.VM, edit VMEdit) []model.Change {
 	var out []model.Change
 
@@ -52,11 +52,7 @@ func ChangesForEdit(current model.VM, edit VMEdit) []model.Change {
 	out = append(out, schedulingChanges(current, edit)...)
 
 	for _, d := range edit.AddDisks {
-		to := fmt.Sprintf("%s (%s)", d.Name, d.Size)
-		if d.StorageClass != "" {
-			to = fmt.Sprintf("%s (%s, %s)", d.Name, d.Size, d.StorageClass)
-		}
-		out = append(out, model.Change{Field: "Disk", Action: "add", To: to})
+		out = append(out, model.Change{Field: "Disk", Action: "add", To: DiskLabel(d.Name, d.Size, d.StorageClass)})
 	}
 	for _, name := range edit.RemoveDisks {
 		out = append(out, model.Change{Field: "Disk", Action: "remove", From: name})
@@ -136,7 +132,7 @@ func groupDesc(g model.PlacementGroup) string {
 }
 
 // sizingChanges renders the CPU/memory/instancetype part of an edit, honoring the
-// instancetype⇄inline mutual exclusion that applySizing enforces — so the preview
+// instancetype<->inline mutual exclusion that applySizing enforces - so the preview
 // never shows an inline cpu/memory change that will actually be stripped, nor
 // hides the removal of the representation being replaced (e.g. a heal that only
 // strips a stray inline block, or a mode switch). Mirrors applySizing's outcome.
@@ -185,7 +181,7 @@ func sizingChanges(current model.VM, edit VMEdit) []model.Change {
 }
 
 // DiffVMs renders the difference between two parsed VMs (e.g. running vs main)
-// as semantic model.Change items — used for drift detail. "From" is the a side
+// as semantic model.Change items - used for drift detail. "From" is the a side
 // (e.g. main / desired), "To" is the b side (e.g. running / actual).
 //
 // EditToMatch below walks the same fields for adoption; a field added here
@@ -428,4 +424,14 @@ func nicNameSet(v model.VM) map[string]string {
 		m[n.Name] = n.Network
 	}
 	return m
+}
+
+// DiskLabel renders an added disk for the change previews, appending the
+// storage class only when one was chosen (empty = cluster default). Shared with
+// the changeset preview so the two renderings cannot drift.
+func DiskLabel(name, size, class string) string {
+	if class != "" {
+		return fmt.Sprintf("%s (%s, %s)", name, size, class)
+	}
+	return fmt.Sprintf("%s (%s)", name, size)
 }

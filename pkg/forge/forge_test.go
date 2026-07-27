@@ -25,7 +25,7 @@ func TestOwnerRepo(t *testing.T) {
 		{"https://forge.example/dotvirt/team-a?x=1#frag", "dotvirt", "team-a", true},
 		// Nested groups: last two segments win.
 		{"https://forge.example/org/sub/team-a.git", "sub", "team-a", true},
-		// Unparseable → fail closed.
+		// Unparseable -> fail closed.
 		{"https://forge.example/onlyone", "", "", false},
 		{"not-a-url", "", "", false},
 		{"", "", "", false},
@@ -42,7 +42,7 @@ func TestOwnerPrefixURL(t *testing.T) {
 	cases := []struct {
 		url, want string
 	}{
-		// The scheme's "//" must survive — path.Dir would collapse it to "https:/",
+		// The scheme's "//" must survive - path.Dir would collapse it to "https:/",
 		// yielding a prefix Argo never longest-prefix-matches (the original bug).
 		{"https://forge.example/dotvirt/platform.git", "https://forge.example/dotvirt"},
 		{"https://forge.example/dotvirt/platform", "https://forge.example/dotvirt"},
@@ -50,7 +50,7 @@ func TestOwnerPrefixURL(t *testing.T) {
 		{"http://forgejo-http.forgejo.svc:3000/dotvirt/platform.git", "http://forgejo-http.forgejo.svc:3000/dotvirt"},
 		// Nested groups: only the last segment is stripped.
 		{"https://forge.example/org/sub/platform.git", "https://forge.example/org/sub"},
-		// No repo segment to strip → returned unchanged.
+		// No repo segment to strip -> returned unchanged.
 		{"https://forge.example", "https://forge.example"},
 		{"https://forge.example/", "https://forge.example/"},
 	}
@@ -206,7 +206,7 @@ func resetHookCache() {
 
 // EnsureWebhook creates the hook when absent, then re-asserts the secret in place at
 // most once per process: a converged hook (Forgejo never echoes the stored secret back,
-// so the first sight re-asserts it) is left untouched on later sweeps — no write churn.
+// so the first sight re-asserts it) is left untouched on later sweeps - no write churn.
 func TestEnsureWebhookReconcilesOnce(t *testing.T) {
 	resetHookCache()
 	posts, patches := 0, 0
@@ -232,7 +232,7 @@ func TestEnsureWebhookReconcilesOnce(t *testing.T) {
 	c := NewFactory(srv.URL, "tok", false).For("https://forge/o/r.git")
 	const target = "https://dotvirt/api/webhooks/forge"
 
-	// Absent → created once.
+	// Absent -> created once.
 	if err := c.EnsureWebhook(target, "s3cret"); err != nil {
 		t.Fatalf("EnsureWebhook (create): %v", err)
 	}
@@ -255,7 +255,7 @@ func TestEnsureWebhookReconcilesOnce(t *testing.T) {
 	}
 }
 
-// EnsureWebhook migrates a hook in place when only its host changed (external Route →
+// EnsureWebhook migrates a hook in place when only its host changed (external Route ->
 // in-cluster Service): the existing hook is matched by URL PATH and PATCHed to the new
 // target, never duplicated.
 func TestEnsureWebhookMigratesInPlace(t *testing.T) {

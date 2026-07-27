@@ -2,8 +2,8 @@
 	import { ChevronDown, ChevronRight } from 'lucide-svelte';
 	import type { Snippet } from 'svelte';
 
-	// One row of the inventory tree. Every row kind — pinned destination, group,
-	// container, VM leaf — renders through this so indentation, hover and the
+	// One row of the inventory tree. Every row kind - pinned destination, group,
+	// container, VM leaf - renders through this so indentation, hover and the
 	// selection highlight cannot drift apart. The chevron and the label are
 	// separate hit-areas: the chevron only collapses, the label is a real link
 	// (deep-linkable, middle-click works).
@@ -12,8 +12,6 @@
 		active = false,
 		expanded = undefined,
 		alignChevron = false,
-		border = false,
-		title = undefined,
 		href,
 		ontoggle = undefined,
 		oncontextmenu = undefined,
@@ -25,8 +23,6 @@
 		active?: boolean;
 		expanded?: boolean; // undefined = leaf (no chevron)
 		alignChevron?: boolean; // leaf at a chevroned level: renders a spacer
-		border?: boolean; // bottom hairline (pinned destinations)
-		title?: string;
 		href: string;
 		ontoggle?: () => void;
 		oncontextmenu?: (e: MouseEvent) => void;
@@ -40,7 +36,7 @@
 
 <div
 	class="flex w-full items-center gap-1 py-1 pr-2 hover:bg-select-soft {INDENT[indent]}
-		{active ? 'bg-select hover:bg-select' : ''} {border ? 'border-b border-line' : ''}"
+		{active ? 'bg-select hover:bg-select' : ''}"
 >
 	{#if expanded !== undefined}
 		<button class="flex w-3 items-center text-ink-faint" onclick={ontoggle} title="Expand/collapse">
@@ -49,7 +45,7 @@
 	{:else if alignChevron}
 		<span class="w-3"></span>
 	{/if}
-	<a class="flex min-w-0 flex-1 items-center gap-1 text-left" {href} {oncontextmenu} {title}>
+	<a class="flex min-w-0 flex-1 items-center gap-1 text-left" {href} {oncontextmenu}>
 		{#if icon}{@render icon()}{/if}
 		{@render children()}
 		{#if trailing}

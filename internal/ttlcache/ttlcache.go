@@ -2,7 +2,7 @@
 // identity layers (per-token Kubernetes clients, TokenReview results, per-token
 // visible-namespace sets). All three want the same thing: memoize a value by a
 // token hash for a short window so a request burst doesn't re-do expensive work,
-// and never grow without bound — entries past their TTL are evicted on the next
+// and never grow without bound - entries past their TTL are evicted on the next
 // write, so the map is sized by distinct keys seen within one window, not the
 // process lifetime.
 package ttlcache

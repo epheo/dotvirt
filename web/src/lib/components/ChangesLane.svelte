@@ -1,16 +1,17 @@
 <script lang="ts">
 	import { ChevronDown, ChevronRight, Folder, TriangleAlert } from 'lucide-svelte';
 	import { api, type DraftView, type ProposeResult } from '$lib/api';
-	import { friendlyError } from '$lib/format';
+	import { action } from '$lib/resource.svelte';
 	import { draftKindTone, TONE_PILL } from '$lib/status';
 	import ChangeList from './ChangeList.svelte';
 	import ErrorNote from './ErrorNote.svelte';
 	import GitOpsStepper from './GitOpsStepper.svelte';
 	import Note from './Note.svelte';
+	import TextInput from './TextInput.svelte';
 
 	// One project's staged-changes lane: the items, their diffs, and the propose
 	// form. All form state is lane-local, so a lane that disappears (proposed or
-	// discarded) takes its state with it. The propose result outlives the lane —
+	// discarded) takes its state with it. The propose result outlives the lane -
 	// it's handed up to the panel, which renders it until the PR banner lands.
 	let {
 		project,
@@ -28,15 +29,19 @@
 
 	let title = $state('');
 	let message = $state('');
-	let error = $state('');
-	let proposing = $state(false);
-	let discarding = $state(false);
+	// Three actions because three busy labels show independently (Propose button,
+	// discard-all link, per-item unstage); they share one ErrorNote below.
+	const proposeOp = action();
+	const discardOp = action();
+	const unstageOp = action();
+	const error = $derived(proposeOp.error || discardOp.error || unstageOp.error);
+	const clearErrors = () => (proposeOp.clear(), discardOp.clear(), unstageOp.clear());
 	let unstaging = $state<string | null>(null); // item key, while its unstage is in flight
 	let showYaml = $state<Record<string, boolean>>({});
 
 	// A successful propose consumed this draft server-side; hide the lane at once
 	// instead of showing consumed items under the new PR banner until the summary
-	// round-trips. The next summary clears the flag — if the draft genuinely still
+	// round-trips. The next summary clears the flag - if the draft genuinely still
 	// has items (partial failure, or new staging), they come back.
 	let proposed = $state(false);
 	$effect(() => {
@@ -54,50 +59,31 @@
 		const k = itemKey(ns, name, resource);
 		if (unstaging) return;
 		unstaging = k;
-		error = '';
-		try {
-			await api.unstage(ns, name, resource, project);
-			onchanged();
-		} catch (e) {
-			error = friendlyError(e);
-		} finally {
-			unstaging = null;
-		}
+		clearErrors();
+		if (await unstageOp.run(() => api.unstage(ns, name, resource, project))) onchanged();
+		unstaging = null;
 	}
 
 	async function discardAll() {
-		if (discarding) return;
-		discarding = true;
-		error = '';
-		try {
-			await api.discardDraft(project);
-			onchanged();
-		} catch (e) {
-			error = friendlyError(e);
-		} finally {
-			discarding = false;
-		}
+		if (discardOp.busy) return;
+		clearErrors();
+		if (await discardOp.run(() => api.discardDraft(project))) onchanged();
 	}
 
 	async function propose() {
-		if (proposing) return;
-		proposing = true;
-		error = '';
-		try {
+		if (proposeOp.busy) return;
+		clearErrors();
+		await proposeOp.run(async () => {
 			const r = await api.propose(project, title, message);
 			onproposed(r, title);
 			title = '';
 			message = '';
 			proposed = true;
-			onchanged();
-		} catch (e) {
-			// The push may have landed before the error (e.g. a gateway timeout on
-			// the PR step) — re-read the summary so the lane reflects server truth.
-			error = friendlyError(e);
-			onchanged();
-		} finally {
-			proposing = false;
-		}
+		});
+		// On success AND on failure: the push may have landed before the error
+		// (e.g. a gateway timeout on the PR step) - re-read the summary so the
+		// lane reflects server truth.
+		onchanged();
 	}
 </script>
 
@@ -109,9 +95,9 @@
 		{#if draft.count > 0}
 			<button
 				onclick={discardAll}
-				disabled={discarding}
+				disabled={discardOp.busy}
 				class="ml-auto text-xs text-ink-muted hover:text-ink-soft disabled:text-ink-faint"
-				>{discarding ? 'discarding…' : 'discard all'}</button
+				>{discardOp.busy ? 'discarding…' : 'discard all'}</button
 			>
 		{/if}
 	</div>
@@ -168,11 +154,7 @@
 
 	{#if draft.count > 0}
 		<div class="mt-2 space-y-2">
-			<input
-				bind:value={title}
-				placeholder="Pull request title"
-				class="w-full rounded border border-line-strong px-2 py-1.5 text-sm"
-			/>
+			<TextInput bind:value={title} placeholder="Pull request title" />
 			<textarea
 				bind:value={message}
 				placeholder="Description (optional)"
@@ -180,10 +162,10 @@
 				class="w-full rounded border border-line-strong px-2 py-1.5 text-sm"></textarea>
 			<button
 				onclick={propose}
-				disabled={proposing}
+				disabled={proposeOp.busy}
 				class="w-full rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 			>
-				{proposing ? 'Proposing…' : `Propose pull request -> ${project}`}
+				{proposeOp.busy ? 'Proposing…' : `Propose pull request -> ${project}`}
 			</button>
 		</div>
 	{/if}

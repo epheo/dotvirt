@@ -8,7 +8,6 @@
 	// content into the standard bottom bar.
 	let {
 		title,
-		subtitle = '',
 		size = 'md',
 		danger = false,
 		dismissable = true,
@@ -18,12 +17,10 @@
 		footer,
 	}: {
 		title: string;
-		// Muted suffix after the title (the NSX · vSphere vocabulary pairs).
-		subtitle?: string;
 		size?: 'md' | 'lg' | '3xl';
 		// Destructive dialogs render the title in red.
 		danger?: boolean;
-		// false pins the dialog open — backdrop, Escape, and the X button all
+		// false pins the dialog open - backdrop, Escape, and the X button all
 		// refuse to close (e.g. mid-upload, where closing would kill the stream).
 		dismissable?: boolean;
 		icon?: Snippet;
@@ -43,7 +40,7 @@
 	const FOCUSABLE =
 		'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-	// Focus lands inside on open ([data-autofocus] → first focusable → the
+	// Focus lands inside on open ([data-autofocus] -> first focusable -> the
 	// panel itself) and returns to the opener on close.
 	$effect(() => {
 		if (!panel) return;
@@ -101,7 +98,6 @@
 					: 'text-ink'}"
 			>
 				{#if icon}{@render icon()}{/if}{title}
-				{#if subtitle}<span class="font-normal text-ink-faint">· {subtitle}</span>{/if}
 			</h2>
 			<button
 				onclick={dismiss}

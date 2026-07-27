@@ -8,7 +8,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 )
@@ -33,7 +32,7 @@ const (
 	ForgejoBotUser     = "dotvirt-bot" // the service user the operator mints a token for
 )
 
-// ForgejoHTTPPort is the managed Forgejo's single HTTP port — the one source for
+// ForgejoHTTPPort is the managed Forgejo's single HTTP port - the one source for
 // its Service, the container port and probes, and every URL/exposure built to it.
 const ForgejoHTTPPort int32 = 3000
 
@@ -69,43 +68,24 @@ func ForgejoHost(dv *dotvirtv1alpha1.Dotvirt) string {
 }
 
 // ForgejoServiceAccount runs the Forgejo pod under dotvirt's hardened, non-root
-// securityContext — no SCC grant required (the rootless image needs none).
+// securityContext - no SCC grant required (the rootless image needs none).
 func ForgejoServiceAccount(dv *dotvirtv1alpha1.Dotvirt) *corev1.ServiceAccount {
-	return &corev1.ServiceAccount{
-		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ServiceAccount"},
-		ObjectMeta: objectMeta(forgejoSAName, dv.Namespace, dv.Name),
-	}
+	return serviceAccount(forgejoSAName, dv)
 }
 
-// ForgejoPVC holds Forgejo's data. NOT owner-referenced by the caller — orphaned on
+// ForgejoPVC holds Forgejo's data. NOT owner-referenced by the caller - orphaned on
 // uninstall so the platform repo's git data survives (the operator owns Forgejo's
 // lifecycle, not its data).
 func ForgejoPVC(dv *dotvirtv1alpha1.Dotvirt) *corev1.PersistentVolumeClaim {
-	return &corev1.PersistentVolumeClaim{
-		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaim"},
-		ObjectMeta: objectMeta(forgejoPVCName, dv.Namespace, dv.Name),
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("5Gi")},
-			},
-		},
-	}
+	return pvc(forgejoPVCName, dv, "5Gi")
 }
 
 // ForgejoService exposes Forgejo's HTTP port in-cluster.
 func ForgejoService(dv *dotvirtv1alpha1.Dotvirt) *corev1.Service {
-	return &corev1.Service{
-		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
-		ObjectMeta: objectMeta(ForgejoServiceName, dv.Namespace, dv.Name),
-		Spec: corev1.ServiceSpec{
-			Selector: forgejoSelector,
-			Ports:    []corev1.ServicePort{{Name: "http", Port: ForgejoHTTPPort, TargetPort: intstr.FromInt32(ForgejoHTTPPort)}},
-		},
-	}
+	return service(ForgejoServiceName, dv, forgejoSelector, ForgejoHTTPPort)
 }
 
-// forgejoResources bounds the eval forge — modest single-replica sizing, shared by
+// forgejoResources bounds the eval forge - modest single-replica sizing, shared by
 // the bootstrap init and main containers.
 func forgejoResources() corev1.ResourceRequirements {
 	return corev1.ResourceRequirements{
@@ -117,14 +97,14 @@ func forgejoResources() corev1.ResourceRequirements {
 // forgejoEnv is the config shared by the init + main containers. It does NOT override
 // GITEA_CUSTOM/GITEA_WORK_DIR: the rootless image's defaults all live under
 // /var/lib/gitea (the one PVC mount). Overriding to a custom path is what breaks the
-// rootless image's arbitrary-UID writability — keep the defaults.
+// rootless image's arbitrary-UID writability - keep the defaults.
 func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt, argoWebhookHost string) []corev1.EnvVar {
 	// dotvirt's webhook is delivered to its in-cluster Service; Forgejo's SSRF guard
-	// blocks private targets by default, so allow that host — keeping `external` so
+	// blocks private targets by default, so allow that host - keeping `external` so
 	// delivery to any public webhook still works. The ArgoCD webhook host must be
 	// allowed by NAME on top of `external`: that entry matches only public resolved
 	// IPs, and the Argo Route often resolves to a private ingress VIP (lab/on-prem
-	// clusters), where the SSRF guard would silently drop every forge→Argo delivery.
+	// clusters), where the SSRF guard would silently drop every forge->Argo delivery.
 	allowed := serviceHost(dv) + ",external"
 	if argoWebhookHost != "" {
 		allowed += "," + argoWebhookHost
@@ -135,8 +115,7 @@ func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt, argoWebhookHost string) []corev1.En
 		{Name: "FORGEJO__server__ROOT_URL", Value: forgejoExternalURL(dv) + "/"},
 		{Name: "FORGEJO__webhook__ALLOWED_HOST_LIST", Value: allowed},
 		// Webhook TLS is VERIFIED: the mounted ingress CA joins the system pool via
-		// Go's colon-separated SSL_CERT_DIR (empty dir on vanilla). Replaces the
-		// global SKIP_TLS_VERIFY, which also unverified tenant webhooks.
+		// Go's colon-separated SSL_CERT_DIR (empty dir on vanilla).
 		{Name: "SSL_CERT_DIR", Value: "/etc/ssl/certs:" + forgejoCADir},
 	}
 }
@@ -203,7 +182,7 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: forgejoSAName,
-					SecurityContext:    forgejoPodSecurityContext(setFSGroup),
+					SecurityContext:    hardenedPodSecurityContext(setFSGroup),
 					InitContainers: []corev1.Container{{
 						Name:            "bootstrap",
 						Image:           forgejoImg,
@@ -211,32 +190,18 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 						Env:             append(forgejoEnv(dv, argoWebhookHost), adminPW),
 						VolumeMounts:    []corev1.VolumeMount{dataMount, etcMount, caMount},
 						Resources:       forgejoResources(),
-						SecurityContext: forgejoContainerSecurityContext(),
+						SecurityContext: hardenedContainerSecurityContext(),
 					}},
 					Containers: []corev1.Container{{
-						Name:         "forgejo",
-						Image:        forgejoImg,
-						Env:          forgejoEnv(dv, argoWebhookHost),
-						Ports:        []corev1.ContainerPort{{Name: "http", ContainerPort: ForgejoHTTPPort}},
-						VolumeMounts: []corev1.VolumeMount{dataMount, etcMount, caMount},
-						// The default 1s probe timeout kills a merely-busy forge: under clone
-						// bursts the SQLite-backed healthz slows past 1s, and restarting it
-						// makes the overload worse. Generous timeouts break that flap loop.
-						ReadinessProbe: &corev1.Probe{
-							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(ForgejoHTTPPort)}},
-							InitialDelaySeconds: 8,
-							PeriodSeconds:       5,
-							TimeoutSeconds:      5,
-						},
-						LivenessProbe: &corev1.Probe{
-							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(ForgejoHTTPPort)}},
-							InitialDelaySeconds: 30,
-							PeriodSeconds:       20,
-							TimeoutSeconds:      5,
-							FailureThreshold:    5,
-						},
+						Name:            "forgejo",
+						Image:           forgejoImg,
+						Env:             forgejoEnv(dv, argoWebhookHost),
+						Ports:           []corev1.ContainerPort{{Name: "http", ContainerPort: ForgejoHTTPPort}},
+						VolumeMounts:    []corev1.VolumeMount{dataMount, etcMount, caMount},
+						ReadinessProbe:  healthProbe(ForgejoHTTPPort, 8, 5, 0),
+						LivenessProbe:   healthProbe(ForgejoHTTPPort, 30, 20, 5),
 						Resources:       forgejoResources(),
-						SecurityContext: forgejoContainerSecurityContext(),
+						SecurityContext: hardenedContainerSecurityContext(),
 					}},
 					Volumes: []corev1.Volume{
 						{
@@ -252,34 +217,5 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 				},
 			},
 		},
-	}
-}
-
-// forgejoPodSecurityContext is dotvirt's standard restricted-v2-compatible pod
-// context. On vanilla Kubernetes a fixed fsGroup makes the PVC group-writable for the
-// image's non-root UID. On OpenShift fsGroup MUST be omitted — restricted-v2 rejects
-// any fsGroup outside the namespace's assigned range and injects its own, so the
-// caller passes setFSGroup=false there (verified live: fsGroup:1000 → admission
-// "1000 is not an allowed group").
-func forgejoPodSecurityContext(setFSGroup bool) *corev1.PodSecurityContext {
-	runAsNonRoot := true
-	sc := &corev1.PodSecurityContext{
-		RunAsNonRoot:   &runAsNonRoot,
-		SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
-	}
-	if setFSGroup {
-		fsGroup := int64(1000)
-		sc.FSGroup = &fsGroup
-	}
-	return sc
-}
-
-// forgejoContainerSecurityContext drops all capabilities and forbids privilege
-// escalation — the operand's posture, now shared by the rootless forge.
-func forgejoContainerSecurityContext() *corev1.SecurityContext {
-	noPrivilegeEscalation := false
-	return &corev1.SecurityContext{
-		AllowPrivilegeEscalation: &noPrivilegeEscalation,
-		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 	}
 }

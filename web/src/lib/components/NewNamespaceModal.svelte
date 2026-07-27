@@ -52,7 +52,7 @@
 	async function stage() {
 		const req: NamespaceCreate = { name, project };
 		if (withNetwork) {
-			// A VM Network is a primary UDN, which must do IPAM — the subnet is required.
+			// A VM Network is a primary UDN, which must do IPAM - the subnet is required.
 			req.vmNetwork = { name: netName, subnet: subnet.trim() };
 		}
 		await api.createNamespace(req);

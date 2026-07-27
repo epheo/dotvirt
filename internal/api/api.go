@@ -75,7 +75,7 @@ type Draft interface {
 	// escalating, so no future caller can reach the SA-privileged patch unchecked.
 	Resync(ctx context.Context, canUpdateVM func(context.Context, string, string) (bool, error), namespace, name string) (model.ResyncResult, error)
 	OpenProposal(id auth.Identity, proj project.ProjectInfo) (model.Proposal, bool, error)
-	// RecentlyMerged lists PRs merged into proj's base branch since 'since' — the
+	// RecentlyMerged lists PRs merged into proj's base branch since 'since' - the
 	// task feed's poll backstop behind the forge webhook (and its restart reseed).
 	RecentlyMerged(proj project.ProjectInfo, since time.Time) ([]tasks.Merge, error)
 	Revert(id auth.Identity, proj project.ProjectInfo, hash string) (model.ProposeResult, error)
@@ -111,22 +111,22 @@ type Config struct {
 // visibleTTL bounds a token's cached visible-namespace set. The RBAC version stamp
 // (bus.Version(RBACChanged, NamespaceChanged)) makes the common case instant: a
 // RoleBinding or project-namespace change invalidates the entry immediately, lazily,
-// that token only — no all-token herd. But the version watches only namespaced
+// that token only - no all-token herd. But the version watches only namespaced
 // RoleBindings + namespaces; a token's visibility can ALSO change via a
 // ClusterRoleBinding/ClusterRole, which the version does NOT observe. The TTL is the
 // backstop that bounds staleness for those un-watched RBAC sources, so it stays short
-// — long enough to spare the periodic SelfSubjectRulesReview on quiet tokens, short
+// - long enough to spare the periodic SelfSubjectRulesReview on quiet tokens, short
 // enough that a cluster-level revocation can't linger.
 const visibleTTL = 30 * time.Second
 
 // optionsTTL caches the wizard catalog (instancetypes/preferences/datasources).
-// It's SA-read, identical for every user, and changes rarely — so one shared cache
+// It's SA-read, identical for every user, and changes rarely - so one shared cache
 // spares 3 cluster-wide LISTs on each wizard open. (The network catalog is served
 // live from the netstate snapshot instead, so it needs no cache.)
 const optionsTTL = 60 * time.Second
 
 // Server holds the long-lived collaborators and builds per-request, identity-
-// scoped state. It replaces the old interface-bundle Deps.
+// scoped state.
 type Server struct {
 	clusterF  *cluster.Factory
 	state     *clusterstate.State // SA-owned live+topology snapshot; the read path's source
@@ -274,9 +274,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/drs", s.handleDRSEnable)
 	mux.HandleFunc("DELETE /api/drs", s.handleDRSDisable)
 	// ArgoCD ApplicationSet plugin generator (auth: its own shared token, not a
-	// user session — exempted in auth.isOpenPath). Emits projects from labels.
+	// user session - exempted in auth.isOpenPath). Emits projects from labels.
 	mux.HandleFunc("POST /api/v1/getparams.execute", s.handleAppSetPlugin)
-	// Forgejo webhook (auth: HMAC delivery signature, not a user session —
+	// Forgejo webhook (auth: HMAC delivery signature, not a user session -
 	// exempted in auth.isOpenPath). Pokes the repo's poller for instant updates.
 	mux.HandleFunc("POST /api/webhooks/forge", s.handleForgeWebhook)
 	mux.HandleFunc("GET /api/events", s.handleAllEvents)
@@ -343,7 +343,7 @@ func (s *Server) Handler() http.Handler {
 		handler = s.auth.Middleware(mux)
 	}
 	// Every API body is small JSON (upload image bytes go straight to
-	// cdi-uploadproxy, never through here), so one cap bounds them all —
+	// cdi-uploadproxy, never through here), so one cap bounds them all -
 	// including the pre-auth /api/login, which would otherwise buffer an
 	// unbounded body.
 	handler = withBodyLimit(1<<20, handler)
@@ -365,7 +365,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 // spaRouter serves /api/* via the API handler and every other path from the static
-// SPA build dir — a real file when one exists, else index.html so client-side
+// SPA build dir - a real file when one exists, else index.html so client-side
 // routes resolve. Static assets bypass auth (the SPA authenticates via /api/login).
 func spaRouter(dir string, apiHandler http.Handler) http.Handler {
 	fileServer := http.FileServer(http.Dir(dir))
@@ -386,7 +386,7 @@ func spaRouter(dir string, apiHandler http.Handler) http.Handler {
 
 // withCORS adds CORS headers for the configured UI origin and answers preflight
 // OPTIONS requests. Credentials are allowed (the session cookie is sent
-// cross-origin in dev), which requires echoing a specific origin — never "*".
+// cross-origin in dev), which requires echoing a specific origin - never "*".
 func withCORS(origin string, next http.Handler) http.Handler {
 	if origin == "" {
 		return next
@@ -405,9 +405,25 @@ func withCORS(origin string, next http.Handler) http.Handler {
 	})
 }
 
-// readAll reads a request body with a sane size cap.
+// readAll reads a request body. withBodyLimit caps it; a second cap here would
+// truncate silently instead of letting MaxBytesReader error.
 func readAll(r *http.Request) ([]byte, error) {
-	return io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MiB
+	return io.ReadAll(r.Body)
+}
+
+// peek reads the body and decodes just the routing fields T names; the staging
+// layer re-decodes the raw body in full. ok=false means the response is written.
+func peek[T any](w http.ResponseWriter, r *http.Request) (raw []byte, p T, ok bool) {
+	raw, err := readAll(r)
+	if err != nil {
+		fail(w, invalid(err))
+		return nil, p, false
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		fail(w, invalid(err))
+		return nil, p, false
+	}
+	return raw, p, true
 }
 
 // withBodyLimit caps every request body so a decoder errors instead of
@@ -431,7 +447,7 @@ func respond(w http.ResponseWriter, v any, err error) {
 }
 
 // fail writes err mapped to a status by its model.Err* kind. Errors without a
-// kind are internal: the detail is logged, never echoed — it can carry k8s, git,
+// kind are internal: the detail is logged, never echoed - it can carry k8s, git,
 // or forge internals (URLs, credentials, object paths) the caller must not see.
 func fail(w http.ResponseWriter, err error) {
 	status := statusFor(err)

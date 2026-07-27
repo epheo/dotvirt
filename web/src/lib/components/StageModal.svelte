@@ -1,21 +1,19 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { friendlyError } from '$lib/format';
+	import { action } from '$lib/resource.svelte';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 
 	// The staging dialogs' shared shell: Modal + scrollable body + ErrorNote +
-	// StageFooter, owning the submit try/catch every dialog repeated. The
-	// form-specific missing/summary derivations stay in each dialog — they ARE
+	// StageFooter, owning the submit action() every dialog repeated. The
+	// form-specific missing/summary derivations stay in each dialog - they ARE
 	// the form; this owns only what happens around them. onsubmit stages the
 	// request; success reports to onstaged then closes.
 	let {
 		title,
 		size = 'md',
 		label,
-		busyLabel,
-		hint,
 		missing = [],
 		summary = '',
 		onsubmit,
@@ -27,32 +25,23 @@
 		title: string;
 		size?: 'md' | 'lg' | '3xl';
 		label: string;
-		busyLabel?: string;
-		hint?: string;
 		missing?: string[];
 		summary?: string;
-		onsubmit: () => Promise<void>;
+		// The staging call's response is irrelevant here: success means "staged".
+		onsubmit: () => Promise<unknown>;
 		onstaged: () => void;
 		onclose: () => void;
 		icon?: Snippet;
 		children: Snippet;
 	} = $props();
 
-	let submitting = $state(false);
-	let error = $state('');
+	const op = action();
 
 	async function submit() {
 		if (missing.length) return;
-		submitting = true;
-		error = '';
-		try {
-			await onsubmit();
+		if (await op.run(onsubmit)) {
 			onstaged();
 			onclose();
-		} catch (e) {
-			error = friendlyError(e);
-		} finally {
-			submitting = false;
 		}
 	}
 </script>
@@ -60,17 +49,15 @@
 <Modal {title} {size} {onclose} {icon}>
 	<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
 		{@render children()}
-		<ErrorNote {error} />
+		<ErrorNote error={op.error} />
 	</div>
 	{#snippet footer()}
 		<StageFooter
 			{label}
-			{busyLabel}
-			{hint}
 			{summary}
 			{missing}
 			disabled={missing.length > 0}
-			{submitting}
+			submitting={op.busy}
 			onsubmit={submit}
 			oncancel={onclose}
 		/>

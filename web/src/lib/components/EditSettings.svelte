@@ -9,8 +9,15 @@
 		type Options,
 		type VM,
 	} from '$lib/api';
-	import { friendlyError } from '$lib/format';
-	import { buildEditRequest, seedEditForm, type DiskRow, type NicRow } from '$lib/editform';
+	import {
+		buildEditRequest,
+		seedEditForm,
+		summarize,
+		type DiskRow,
+		type EditSection,
+		type NicRow,
+	} from '$lib/editform';
+	import { action } from '$lib/resource.svelte';
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
 	import { validName, NAME_HINT } from '$lib/validate';
 	import CheckGroup from './CheckGroup.svelte';
@@ -34,7 +41,7 @@
 		onclose: () => void;
 		onstaged: () => void;
 		// Opened from a Configure section: start the wizard on that step.
-		initialSection?: 'compute' | 'scheduling' | 'storage' | 'network' | 'labels';
+		initialSection?: EditSection;
 	} = $props();
 
 	let options = $state<Options | null>(null);
@@ -44,8 +51,7 @@
 	// svelte-ignore state_referenced_locally
 	let form = $state(seedEditForm(vm));
 
-	let saving = $state(false);
-	let error = $state('');
+	const op = action();
 
 	// Start on the step the user opened from a Configure section (else Compute).
 	// svelte-ignore state_referenced_locally
@@ -118,7 +124,7 @@
 	// default NIC, so it isn't an add-able adapter).
 	const available = $derived(attachableNetworks(networks, vm.namespace));
 
-	// The selected instancetype's own CPU/memory — for the read-only hint and to
+	// The selected instancetype's own CPU/memory - for the read-only hint and to
 	// seed the custom inputs when converting an instancetype VM to custom sizing.
 	const selectedIT = $derived(
 		(options?.instancetypes ?? []).find((i) => i.name === form.instancetype),
@@ -175,64 +181,30 @@
 		form.mode === 'custom' && !(form.cpuCores && form.memory) ? false : undefined,
 	);
 
-	// Human-readable summary of exactly what will be staged, derived from the same
-	// request the backend receives — so the review never diverges from the commit.
-	const summary = $derived.by(() => {
-		const r = buildEditRequest(vm, form);
-		const out: { label: string; value: string }[] = [];
-		if (r.power) out.push({ label: 'Power', value: `${vm.power} → ${r.power}` });
-		if (r.sizing === 'instancetype')
-			out.push({
-				label: 'Sizing',
-				value: `Instance type · ${r.instancetype ?? form.instancetype}`,
-			});
-		if (r.sizing === 'custom')
-			out.push({ label: 'Sizing', value: `Custom · ${r.cpuCores} CPU / ${r.memory}` });
-		if (r.preference) out.push({ label: 'Preference', value: r.preference });
-		if (r.drsExclude !== undefined)
-			out.push({
-				label: 'Dynamic Rescheduling',
-				value: r.drsExclude ? 'excluded from rebalancing' : 'rebalanced',
-			});
-		if (r.evictionStrategy !== undefined)
-			out.push({ label: 'Eviction strategy', value: r.evictionStrategy || 'cluster default' });
-		for (const [k, v] of Object.entries(r.setLabels ?? {}))
-			out.push({ label: `Label ${k}`, value: v });
-		for (const k of r.removeLabels ?? []) out.push({ label: `Label ${k}`, value: 'removed' });
-		for (const d of r.addDisks ?? [])
-			out.push({
-				label: 'Disk added',
-				value: `${d.name} (${d.size}${d.storageClass ? `, ${d.storageClass}` : ''})`,
-			});
-		for (const n of r.removeDisks ?? []) out.push({ label: 'Disk removed', value: n });
-		for (const n of r.addNetworks ?? []) out.push({ label: 'Adapter added', value: n.name });
-		for (const n of r.removeNetworks ?? []) out.push({ label: 'Adapter removed', value: n });
-		for (const g of r.addGroups ?? [])
-			out.push({
-				label: `Group ${g.name}`,
-				value: `keep ${g.mode}${g.strict ? ', strict' : ', preferred'}`,
-			});
-		for (const n of r.removeGroups ?? []) out.push({ label: `Group ${n}`, value: 'removed' });
-		if (r.pin)
-			out.push({ label: 'Host pinning', value: r.pin.length ? r.pin.join(', ') : 'removed' });
-		return out;
-	});
+	// What will be staged, derived from the same request the backend receives -
+	// so the review never diverges from the commit.
+	const summary = $derived(summarize(vm, form));
 
 	async function stage() {
 		if (!dirty) return;
-		saving = true;
-		error = '';
-		try {
-			await api.stageEdit(vm.namespace, vm.name, buildEditRequest(vm, form));
+		if (await op.run(() => api.stageEdit(vm.namespace, vm.name, buildEditRequest(vm, form)))) {
 			onstaged();
 			onclose();
-		} catch (e) {
-			error = friendlyError(e);
-		} finally {
-			saving = false;
 		}
 	}
 </script>
+
+{#snippet preferenceField()}
+	<!-- Rendered once per sizing branch: the field is identical in both. -->
+	<FormField label="Preference">
+		<SelectInput bind:value={form.preference}>
+			<option value="">— unchanged —</option>
+			{#each options?.preferences ?? [] as p (p.name)}
+				<option value={p.name}>{p.displayName || p.name}</option>
+			{/each}
+		</SelectInput>
+	</FormField>
+{/snippet}
 
 {#snippet stepCompute()}
 	{#if optionsError}
@@ -275,19 +247,16 @@
 
 	<div class="grid grid-cols-2 gap-3">
 		<FormField label="Power state">
-			<select bind:value={form.power} class="w-full rounded border border-line-strong px-2 py-1">
+			<SelectInput bind:value={form.power}>
 				<option value="On">On</option>
 				<option value="Off">Off</option>
 				{#if form.power === 'Unknown'}<option value="Unknown">Unknown</option>{/if}
-			</select>
+			</SelectInput>
 		</FormField>
 
 		{#if form.mode === 'instancetype'}
 			<FormField label="Instance type">
-				<select
-					bind:value={form.instancetype}
-					class="w-full rounded border border-line-strong px-2 py-1"
-				>
+				<SelectInput bind:value={form.instancetype}>
 					<!-- Keep the current value selectable even if it isn't in the cluster
 					     list (orphaned ref, or options still loading) so the binding can't
 					     silently desync to the first option. -->
@@ -299,19 +268,9 @@
 					{#each options?.instancetypes ?? [] as it (it.name)}
 						<option value={it.name}>{it.name} ({it.cpu} CPU / {it.memory})</option>
 					{/each}
-				</select>
+				</SelectInput>
 			</FormField>
-			<FormField label="Preference">
-				<select
-					bind:value={form.preference}
-					class="w-full rounded border border-line-strong px-2 py-1"
-				>
-					<option value="">— unchanged —</option>
-					{#each options?.preferences ?? [] as p (p.name)}
-						<option value={p.name}>{p.displayName || p.name}</option>
-					{/each}
-				</select>
-			</FormField>
+			{@render preferenceField()}
 			<p class="col-span-2 text-xs text-ink-faint">
 				CPU and memory are provided by the instance type{selectedIT
 					? `: ${selectedIT.cpu} CPU / ${selectedIT.memory}`
@@ -319,31 +278,12 @@
 			</p>
 		{:else}
 			<FormField label="CPU cores">
-				<input
-					type="number"
-					min="1"
-					bind:value={form.cpuCores}
-					class="w-full rounded border border-line-strong px-2 py-1"
-				/>
+				<TextInput type="number" min="1" bind:value={form.cpuCores} />
 			</FormField>
 			<FormField label="Memory">
-				<input
-					bind:value={form.memory}
-					placeholder="2Gi"
-					class="w-full rounded border border-line-strong px-2 py-1"
-				/>
+				<TextInput bind:value={form.memory} placeholder="2Gi" />
 			</FormField>
-			<FormField label="Preference">
-				<select
-					bind:value={form.preference}
-					class="w-full rounded border border-line-strong px-2 py-1"
-				>
-					<option value="">— unchanged —</option>
-					{#each options?.preferences ?? [] as p (p.name)}
-						<option value={p.name}>{p.displayName || p.name}</option>
-					{/each}
-				</select>
-			</FormField>
+			{@render preferenceField()}
 			{#if !(form.cpuCores && form.memory)}
 				<p class="col-span-2 text-xs text-warn-ink">
 					Set both CPU cores and memory to apply custom sizing.
@@ -471,18 +411,12 @@
 {#snippet stepStorage()}
 	{#snippet diskRow(disk: DiskRow)}
 		{#if disk.isNew}
-			<input
-				bind:value={disk.name}
-				class="w-24 rounded border border-line-strong px-2 py-0.5 text-xs"
-			/>
-			<input
-				bind:value={disk.size}
-				class="w-16 rounded border border-line-strong px-2 py-0.5 text-xs"
-			/>
+			<TextInput bind:value={disk.name} size="sm" class="w-24!" />
+			<TextInput bind:value={disk.size} size="sm" class="w-16!" />
 			<StorageClassSelect
 				options={options?.storageClasses ?? []}
 				bind:value={disk.storageClass}
-				class="min-w-0 flex-1 py-0.5! text-xs"
+				class="min-w-0 flex-1 py-1! text-xs"
 			/>
 		{:else}
 			<span class="text-xs text-ink-muted"
@@ -507,16 +441,13 @@
 {#snippet stepNetworks()}
 	{#snippet nicRow(nic: NicRow)}
 		{#if nic.isNew}
-			<select
-				bind:value={nic.network}
-				class="w-60 rounded border border-line-strong px-2 py-0.5 text-xs"
-			>
+			<SelectInput bind:value={nic.network} size="sm" class="w-60!">
 				{#each available as net (net.scope + (net.namespace ?? '') + net.name)}
 					<option value={attachRef(net)}
 						>{net.name} — {kindLabel(net.kind)}{net.scope === 'shared' ? ' · shared' : ''}</option
 					>
 				{/each}
-			</select>
+			</SelectInput>
 		{:else}
 			<span class="text-xs text-ink-muted">{nic.name} ({nic.network})</span>
 		{/if}
@@ -543,16 +474,8 @@
 	</div>
 	{#each form.labelRows as row, i (i)}
 		<div class="mb-1 flex gap-2">
-			<input
-				bind:value={row.key}
-				placeholder="key"
-				class="w-1/2 rounded border border-line-strong px-2 py-0.5 text-xs"
-			/>
-			<input
-				bind:value={row.value}
-				placeholder="value"
-				class="w-1/2 rounded border border-line-strong px-2 py-0.5 text-xs"
-			/>
+			<TextInput bind:value={row.key} size="sm" class="w-1/2!" placeholder="key" />
+			<TextInput bind:value={row.value} size="sm" class="w-1/2!" placeholder="value" />
 			<button
 				onclick={() => (form.labelRows = form.labelRows.filter((_, idx) => idx !== i))}
 				aria-label="Remove label"
@@ -595,8 +518,8 @@
 		{ title: 'Ready to complete', body: review },
 	]}
 	canFinish={dirty}
-	submitting={saving}
-	{error}
+	submitting={op.busy}
+	error={op.error}
 	finishLabel="Stage change"
 	footerHint="Changes are staged into the changeset; review &amp; open a PR from “Changes”."
 	onfinish={stage}

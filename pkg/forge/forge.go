@@ -1,20 +1,20 @@
 // Package forge talks to a Forgejo (Gitea-compatible) server to open and query
 // pull requests. Only the small REST surface dotvirt needs is implemented, over
-// plain net/http — no SDK.
+// plain net/http - no SDK.
 package forge
 
 import (
 	"bytes"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/epheo/dotvirt/internal/tlsconf"
 )
 
 // Client is a Forgejo API client scoped to one repository.
@@ -27,8 +27,8 @@ type Client struct {
 }
 
 // TokenSource yields the CURRENT forge token on each call. Resolving per-call
-// (rather than capturing a string once) lets a re-minted/rotated token — written
-// to a mounted secret file by the operator — take effect without a process
+// (rather than capturing a string once) lets a re-minted/rotated token - written
+// to a mounted secret file by the operator - take effect without a process
 // restart. StaticToken wraps a fixed value (BYO/dev); FileToken reads a mounted
 // secret key on each call.
 type TokenSource func() string
@@ -36,7 +36,7 @@ type TokenSource func() string
 // StaticToken is a TokenSource that always returns tok (a fixed credential).
 func StaticToken(tok string) TokenSource { return func() string { return tok } }
 
-// FileToken is a TokenSource reading path on each call — the projected-secret
+// FileToken is a TokenSource reading path on each call - the projected-secret
 // volume the operator mounts. kubelet updates that file in place on rotation, so
 // each forge call picks up the current token. A read error yields "" (the caller
 // then behaves as unconfigured/unauthenticated rather than using a stale value).
@@ -61,24 +61,20 @@ type Factory struct {
 
 // NewFactory builds a Factory from the shared forge endpoint + a static token.
 // Returns nil when unconfigured so callers degrade to push-only. For a rotating
-// token (mounted file), use NewFactoryFn.
+// token (mounted file), use NewFactoryFnCA.
 func NewFactory(baseURL, token string, insecure bool) *Factory {
 	if token == "" {
 		return nil
 	}
-	return NewFactoryFn(baseURL, StaticToken(token), insecure)
+	return NewFactoryFnCA(baseURL, StaticToken(token), insecure, "")
 }
 
-// NewFactoryFn is NewFactory with a TokenSource resolved per request — so a
-// rotated token takes effect without restart. Returns nil when the base URL is
-// unset (forge disabled); a tokenFn that currently yields "" still builds a
-// Factory (the token may appear once the mounted secret is written).
-func NewFactoryFn(baseURL string, tokenFn TokenSource, insecure bool) *Factory {
-	return NewFactoryFnCA(baseURL, tokenFn, insecure, "")
-}
-
-// NewFactoryFnCA adds a PEM CA bundle: the no-insecure path for a managed forge
-// behind the cluster's ingress CA.
+// NewFactoryFnCA is NewFactory with a TokenSource resolved per request (so a
+// rotated token takes effect without restart) and an optional PEM CA bundle:
+// the no-insecure path for a managed forge behind the cluster's ingress CA.
+// Returns nil when the base URL is unset (forge disabled); a tokenFn that
+// currently yields "" still builds a Factory (the token may appear once the
+// mounted secret is written).
 func NewFactoryFnCA(baseURL string, tokenFn TokenSource, insecure bool, caFile string) *Factory {
 	if baseURL == "" || tokenFn == nil {
 		return nil
@@ -91,7 +87,7 @@ func NewFactoryFnCA(baseURL string, tokenFn TokenSource, insecure bool, caFile s
 }
 
 // For returns a Client targeting the repo identified by repoURL (e.g.
-// https://forge/owner/repo.git → owner/repo). Returns nil if the owner/repo can't
+// https://forge/owner/repo.git -> owner/repo). Returns nil if the owner/repo can't
 // be parsed, so the caller degrades to a compare link.
 //
 // Only the owner/repo is taken from the URL; every call goes to THIS forge. That is
@@ -142,25 +138,19 @@ func httpClient(insecure bool, caFile string) *http.Client {
 	hc := &http.Client{Timeout: 15 * time.Second}
 	if insecure {
 		hc.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec G402 — dev flag
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec G402 - dev flag
 		}
 		return hc
 	}
-	// Tolerant: a bad bundle logs and keeps the system pool, so a lagging CA
-	// mount degrades to a legible TLS error, never a crash.
 	if caFile != "" {
-		if pem, err := os.ReadFile(caFile); err != nil {
-			log.Printf("forge: CA %s unreadable (%v); staying on the system trust pool", caFile, err)
-		} else if pool := x509.NewCertPool(); !pool.AppendCertsFromPEM(pem) {
-			log.Printf("forge: CA %s holds no certificates; staying on the system trust pool", caFile)
-		} else {
+		if pool := tlsconf.RootCAs("forge", caFile); pool != nil {
 			hc.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}
 		}
 	}
 	return hc
 }
 
-// EnsureRepo creates the client's repo if it doesn't already exist — under its
+// EnsureRepo creates the client's repo if it doesn't already exist - under its
 // owner organization, auto-initialised so a `main` branch exists for Argo to sync.
 // Idempotent; created=true only when it had to create it. This is the one
 // imperative bootstrap step a declarative installer can't do (a forge API call, not

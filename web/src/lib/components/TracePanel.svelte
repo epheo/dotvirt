@@ -1,14 +1,16 @@
 <script lang="ts">
 	import { Play } from 'lucide-svelte';
-	import { api, Unauthorized, type TraceResult, type TraceStep } from '$lib/api';
-	import { friendlyError } from '$lib/format';
+	import { api, type TraceResult, type TraceStep } from '$lib/api';
+	import { action } from '$lib/resource.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { TONE_PILL, TONE_TEXT, type Tone } from '$lib/status';
 	import PolicyRuleTable from './PolicyRuleTable.svelte';
+	import SelectInput from './SelectInput.svelte';
 	import SyncBadge from './SyncBadge.svelte';
+	import TextInput from './TextInput.svelte';
 
 	// Trace a flow: NSX Traceflow's question answered as a control-plane
-	// simulation — walk the evaluation order for one concrete source,
+	// simulation - walk the evaluation order for one concrete source,
 	// destination and protocol/port, and show each step's verdict with the
 	// deciding rule. No packet is injected; the panel says so.
 	// source pins the panel to one VM (the VM Security tab); without it the
@@ -26,9 +28,8 @@
 	let protocol = $state('TCP');
 	let port = $state(''); // empty = any port
 
-	let running = $state(false);
+	const op = action();
 	let result = $state<TraceResult | null>(null);
-	let error = $state('');
 
 	const vmsIn = (ns: string) => inventory.allVMs.filter((v) => v.namespace === ns);
 	const ready = $derived(
@@ -36,23 +37,16 @@
 	);
 
 	async function run() {
-		if (!ready || running) return;
-		running = true;
-		error = '';
+		if (!ready || op.busy) return;
 		result = null;
-		try {
+		await op.run(async () => {
 			result = await api.trace({
 				source: { namespace: srcNS, vm: srcVM },
 				destination: dstMode === 'vm' ? { namespace: dstNS, vm: dstVM } : { ip: dstIP.trim() },
 				protocol,
 				port: port === '' ? 0 : Number(port),
 			});
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			error = friendlyError(e);
-		} finally {
-			running = false;
-		}
+		});
 	}
 
 	const VERDICT_TONE: Record<string, Tone> = {
@@ -95,85 +89,74 @@
 			<label class="flex flex-col gap-1">
 				<span class="text-ink-faint">Source VM</span>
 				<span class="flex gap-1">
-					<select
-						bind:value={pickNS}
-						onchange={() => (pickVM = '')}
-						class="rounded border border-line-strong px-2 py-1"
-					>
+					<SelectInput bind:value={pickNS} size="sm" class="w-auto!" onchange={() => (pickVM = '')}>
 						<option value="" disabled>namespace</option>
 						{#each inventory.namespaces as ns (ns)}
 							<option value={ns}>{ns}</option>
 						{/each}
-					</select>
-					<select bind:value={pickVM} class="rounded border border-line-strong px-2 py-1">
+					</SelectInput>
+					<SelectInput bind:value={pickVM} size="sm" class="w-auto!">
 						<option value="" disabled>vm</option>
 						{#each vmsIn(pickNS) as v (v.name)}
 							<option value={v.name}>{v.name}</option>
 						{/each}
-					</select>
+					</SelectInput>
 				</span>
 			</label>
 		{/if}
 		<label class="flex flex-col gap-1">
 			<span class="text-ink-faint">Destination</span>
 			<span class="flex items-center gap-1">
-				<select bind:value={dstMode} class="rounded border border-line-strong px-2 py-1">
+				<SelectInput bind:value={dstMode} size="sm" class="w-auto!">
 					<option value="vm">VM</option>
 					<option value="ip">External IP</option>
-				</select>
+				</SelectInput>
 				{#if dstMode === 'vm'}
-					<select
-						bind:value={dstNS}
-						onchange={() => (dstVM = '')}
-						class="rounded border border-line-strong px-2 py-1"
-					>
+					<SelectInput bind:value={dstNS} size="sm" class="w-auto!" onchange={() => (dstVM = '')}>
 						<option value="" disabled>namespace</option>
 						{#each inventory.namespaces as ns (ns)}
 							<option value={ns}>{ns}</option>
 						{/each}
-					</select>
-					<select bind:value={dstVM} class="rounded border border-line-strong px-2 py-1">
+					</SelectInput>
+					<SelectInput bind:value={dstVM} size="sm" class="w-auto!">
 						<option value="" disabled>vm</option>
 						{#each vmsIn(dstNS) as v (v.name)}
 							<option value={v.name}>{v.name}</option>
 						{/each}
-					</select>
+					</SelectInput>
 				{:else}
-					<input
-						bind:value={dstIP}
-						placeholder="203.0.113.9"
-						class="w-36 rounded border border-line-strong px-2 py-1"
-					/>
+					<TextInput bind:value={dstIP} size="sm" class="w-36!" placeholder="203.0.113.9" />
 				{/if}
 			</span>
 		</label>
 		<label class="flex flex-col gap-1">
 			<span class="text-ink-faint">Protocol</span>
-			<select bind:value={protocol} class="rounded border border-line-strong px-2 py-1">
+			<SelectInput bind:value={protocol} size="sm" class="w-auto!">
 				<option>TCP</option>
 				<option>UDP</option>
 				<option>SCTP</option>
-			</select>
+			</SelectInput>
 		</label>
 		<label class="flex flex-col gap-1">
 			<span class="text-ink-faint">Port</span>
-			<input
+			<TextInput
 				bind:value={port}
+				size="sm"
+				class="w-20!"
 				type="number"
 				min="1"
 				max="65535"
 				placeholder="any"
-				class="w-20 rounded border border-line-strong px-2 py-1"
 			/>
 		</label>
 		<button
 			type="button"
 			onclick={run}
-			disabled={!ready || running}
+			disabled={!ready || op.busy}
 			class="inline-flex items-center gap-1 rounded bg-accent px-2.5 py-1.5 font-medium text-white hover:bg-accent-hover disabled:bg-line-strong"
 		>
 			<Play size={12} />
-			{running ? 'Tracing…' : 'Trace'}
+			{op.busy ? 'Tracing…' : 'Trace'}
 		</button>
 	</div>
 	<p class="text-xs text-ink-faint">
@@ -181,8 +164,8 @@
 		it.
 	</p>
 
-	{#if error}
-		<p class="text-xs text-danger-ink">Trace failed: {error}</p>
+	{#if op.error}
+		<p class="text-xs text-danger-ink">Trace failed: {op.error}</p>
 	{:else if result}
 		<div class="rounded border border-line bg-panel">
 			<div class="flex items-center gap-2 border-b border-line px-3 py-2">

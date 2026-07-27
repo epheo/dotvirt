@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/model"
-	"github.com/epheo/dotvirt/internal/project"
 )
 
 // The Prometheus/Thanos-backed reads (Performance tab, capacity bars, cluster
@@ -14,7 +14,7 @@ import (
 // feature is off (-metrics-url unset).
 
 // metricsReady 503s (and reports false) when the metrics backend isn't
-// configured — the shared preamble of every Thanos-backed handler.
+// configured - the shared preamble of every Thanos-backed handler.
 func (s *Server) metricsReady(w http.ResponseWriter) bool {
 	if s.metrics == nil {
 		http.Error(w, "metrics not configured", http.StatusServiceUnavailable)
@@ -53,8 +53,8 @@ func (s *Server) handleVMUsage(w http.ResponseWriter, r *http.Request) {
 }
 
 // scopeNamespaces resolves a container-scope read's preamble: the caller's
-// identity + cluster client, and the repo-backed projects' namespaces — the
-// same VMs the inventory grid shows — optionally narrowed by ?project= /
+// identity + cluster client, and the repo-backed projects' namespaces - the
+// same VMs the inventory grid shows - optionally narrowed by ?project= /
 // ?namespace= so every container level (all, project, namespace, node) gets
 // its own view.
 func (s *Server) scopeNamespaces(r *http.Request) (scope, []string, error) {
@@ -100,7 +100,7 @@ func (s *Server) handleClusterSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 // drsDeviation maps a committed DRS threshold to its (under, over) percent
-// deviation from the mean utilization — KubeVirtRelieveAndMigrate's actual
+// deviation from the mean utilization - KubeVirtRelieveAndMigrate's actual
 // trigger band. AsymmetricLow flags only clearly-hot nodes, so anything below
 // the mean already counts as a migration target (under = 0).
 func drsDeviation(threshold string) (under, over float64, ok bool) {
@@ -142,22 +142,14 @@ func foldDRSBand(load *model.HostLoad, threshold string) {
 
 // handleHostLoad returns the worker utilization distribution behind the DRS
 // balance card. Node-level data: the distribution is cached once for all
-// callers, so a node-read SSAR must gate it here — on a cache hit the
+// callers, so a node-read SSAR must gate it here - on a cache hit the
 // caller's token never reaches Thanos, and without the gate a hit would hand
 // a tenant the node data an admin's token fetched. The band reflects the
-// platform repo's committed DRS threshold — the configuration merges have
-// made real — and is absent until DRS is configured.
+// platform repo's committed DRS threshold - the configuration merges have
+// made real - and is absent until DRS is configured.
 func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
-	if !s.metricsReady(w) {
-		return
-	}
-	id, c, err := s.userCluster(r)
-	if err != nil {
-		fail(w, unavailable("cluster access", err))
-		return
-	}
-	if !s.canReadNodesCached(r.Context(), id, c) {
-		http.Error(w, "node metrics require node read access", http.StatusForbidden)
+	id, ok := s.nodeMetricsScope(w, r)
+	if !ok {
 		return
 	}
 	load, err := s.metrics.HostLoad(r.Context(), id.Token)
@@ -166,7 +158,7 @@ func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.cfg.PlatformRepo != "" && s.draft != nil {
-		platform := project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}
+		platform := s.platformProject()
 		if st, err := s.draft.DRSState(platform); err == nil && st.Configured && st.Config != nil {
 			foldDRSBand(&load, st.Config.Threshold)
 		}
@@ -178,28 +170,40 @@ func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
 // Node-level data cached once for all callers, so the same node-read SSAR
 // gate as handleHostLoad applies, for the same reason.
 func (s *Server) handleHostCapacity(w http.ResponseWriter, r *http.Request) {
-	if !s.metricsReady(w) {
+	id, ok := s.nodeMetricsScope(w, r)
+	if !ok {
 		return
 	}
-	id, c, err := s.userCluster(r)
-	if err != nil {
-		fail(w, unavailable("cluster access", err))
-		return
-	}
-	if !s.canReadNodesCached(r.Context(), id, c) {
-		http.Error(w, "node metrics require node read access", http.StatusForbidden)
-		return
-	}
-	cap, err := s.metrics.Capacity(r.Context(), id.Token)
+	hc, err := s.metrics.Capacity(r.Context(), id.Token)
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, cap)
+	writeJSON(w, http.StatusOK, hc)
+}
+
+// nodeMetricsScope is the shared gate of the node-data handlers: metrics wired,
+// caller resolvable, and a node-read SSAR - required because these responses are
+// cached once for ALL callers, so on a cache hit the caller's token never
+// reaches Thanos and RBAC must be enforced here.
+func (s *Server) nodeMetricsScope(w http.ResponseWriter, r *http.Request) (auth.Identity, bool) {
+	if !s.metricsReady(w) {
+		return auth.Identity{}, false
+	}
+	id, c, err := s.userCluster(r)
+	if err != nil {
+		fail(w, unavailable("cluster access", err))
+		return auth.Identity{}, false
+	}
+	if !s.canReadNodesCached(r.Context(), id, c) {
+		http.Error(w, "node metrics require node read access", http.StatusForbidden)
+		return auth.Identity{}, false
+	}
+	return id, true
 }
 
 // handleScopeMetrics returns the per-VM top-consumer time-series for a container
-// scope — the container Monitor's Performance view.
+// scope - the container Monitor's Performance view.
 func (s *Server) handleScopeMetrics(w http.ResponseWriter, r *http.Request) {
 	if !s.metricsReady(w) {
 		return
@@ -213,7 +217,7 @@ func (s *Server) handleScopeMetrics(w http.ResponseWriter, r *http.Request) {
 	respond(w, m, err)
 }
 
-// handleAlarms returns the firing Prometheus alerts across the caller's scope —
+// handleAlarms returns the firing Prometheus alerts across the caller's scope -
 // the dock's Alarms tab + header badge.
 func (s *Server) handleAlarms(w http.ResponseWriter, r *http.Request) {
 	if !s.metricsReady(w) {
@@ -229,7 +233,7 @@ func (s *Server) handleAlarms(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleQuotas returns the ResourceQuotas across a container scope's
-// namespaces — the project capacity band + container Configure. Read under the
+// namespaces - the project capacity band + container Configure. Read under the
 // caller's token, so RBAC gates which namespaces' quotas are visible.
 func (s *Server) handleQuotas(w http.ResponseWriter, r *http.Request) {
 	sc, nss, err := s.scopeNamespaces(r)

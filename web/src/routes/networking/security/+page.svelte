@@ -7,15 +7,16 @@
 	import { ui } from '$lib/state/ui.svelte';
 	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
 	import PolicyRuleTable from '$lib/components/PolicyRuleTable.svelte';
+	import SelectInput from '$lib/components/SelectInput.svelte';
 	import SyncBadge from '$lib/components/SyncBadge.svelte';
+	import TextInput from '$lib/components/TextInput.svelte';
 	import TracePanel from '$lib/components/TracePanel.svelte';
 
-	// The Security view: the live policy plane in NSX-T tiers — cluster admin DFW
+	// The Security view: the live policy plane in NSX-T tiers - cluster admin DFW
 	// rules above, project DFW and gateway-firewall rules per namespace, Tier-0
 	// (SNAT + external routes) below. Read plane only: every row is a live object;
 	// authoring goes through the same modals (and PRs) as everywhere else.
 	const policies = $derived(inventory.policies);
-	const caps = $derived(inventory.caps);
 
 	// Scope filters: a tenant (project), a free-text query, and a drift-only
 	// switch, combined. The query also matches rule contents (peer, ports,
@@ -50,7 +51,7 @@
 
 	// Cluster-tier rows are hidden only when they provably pin other namespaces
 	// (p.namespaces, from the enumerable selector). A label-selector admin rule
-	// may still apply to the tenant, so it stays — never hide a maybe-applying
+	// may still apply to the tenant, so it stays - never hide a maybe-applying
 	// firewall rule.
 	const matchesTenant = (p: Policy): boolean => {
 		if (!tenant) return true;
@@ -85,29 +86,30 @@
 	// New-policy buttons open the same modals the header/context menus do; each is
 	// gated exactly like its entry point there.
 	const canProjectRules = $derived(inventory.namespaces.length > 0);
-	const canTier0 = $derived(!!caps?.egressIP || !!caps?.externalRoute);
 </script>
 
 <Breadcrumb trail={[{ label: 'Networking', href: '/networking' }, { label: 'Security' }]} />
 
 <div class="flex flex-wrap items-center gap-2 border-b border-line bg-panel px-4 py-2">
-	<select
+	<SelectInput
 		value={tenant}
+		size="sm"
+		class="w-auto!"
 		onchange={(e) => setTenant(e.currentTarget.value)}
 		aria-label="Filter by tenant"
-		class="rounded border border-line-strong px-2 py-1 text-xs"
 	>
 		<option value="">All tenants</option>
 		{#each inventory.projectNames as name (name)}
 			<option value={name}>{name}</option>
 		{/each}
-	</select>
-	<input
+	</SelectInput>
+	<TextInput
 		type="search"
 		bind:value={query}
+		size="sm"
+		class="w-64!"
 		aria-label="Filter policies"
 		placeholder="Filter by name, target, or rule"
-		class="w-64 rounded border border-line-strong px-2 py-1 text-xs"
 	/>
 	<button
 		type="button"
@@ -239,10 +241,10 @@
 		'Distributed Firewall — admin rules',
 		'Cluster-wide, priority-ordered; override or backstop every project policy',
 		['admin', 'baseline'],
-		caps?.adminNetworkPolicy
+		inventory.canAdminFw
 			? 'No admin policies.'
 			: 'No admin policies visible (platform authority required).',
-		caps?.adminNetworkPolicy ? () => (ui.modal = { kind: 'adminFw' }) : null,
+		inventory.canAdminFw ? () => (ui.modal = { kind: 'adminFw' }) : null,
 	)}
 
 	{@render section(
@@ -267,7 +269,9 @@
 		'Tier-0',
 		'Egress SNAT pools and policy-based external routes',
 		['egressip', 'route'],
-		canTier0 ? 'No Tier-0 policies.' : 'No Tier-0 policies visible (platform authority required).',
-		canTier0 ? () => (ui.modal = { kind: 'tier0' }) : null,
+		inventory.canEgress
+			? 'No Tier-0 policies.'
+			: 'No Tier-0 policies visible (platform authority required).',
+		inventory.canEgress ? () => (ui.modal = { kind: 'tier0' }) : null,
 	)}
 </div>

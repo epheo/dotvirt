@@ -8,7 +8,7 @@ import (
 )
 
 // drsVM has a template WITH metadata (the demo-repo shape); realisticVM (in
-// edit_test.go) has a template WITHOUT one — the two shapes the annotation
+// edit_test.go) has a template WITHOUT one - the two shapes the annotation
 // edit must handle.
 const drsVM = `apiVersion: kubevirt.io/v1
 kind: VirtualMachine
@@ -73,7 +73,7 @@ func TestApplyEditDRSExcludeRemovesAnnotation(t *testing.T) {
 	if strings.Contains(string(out), PreferNoEvictionAnnotation) {
 		t.Fatalf("annotation not removed:\n%s", out)
 	}
-	// Removing the map's last entry must drop the whole field — a dangling
+	// Removing the map's last entry must drop the whole field - a dangling
 	// `annotations:` with a null value is degenerate YAML a later edit could
 	// not extend in place.
 	if strings.Contains(string(out), "annotations:") {
@@ -93,7 +93,7 @@ func excluded(t *testing.T, content []byte) bool {
 
 func TestApplyEditDRSExcludeRemoveThenReAdd(t *testing.T) {
 	// The full lifecycle on a VM whose template metadata holds ONLY the
-	// annotation: exclude → include → exclude must round-trip, including the
+	// annotation: exclude -> include -> exclude must round-trip, including the
 	// shapes the intermediate edits produce.
 	const bare = `apiVersion: kubevirt.io/v1
 kind: VirtualMachine
@@ -129,7 +129,7 @@ spec:
 
 func TestApplyEditDRSExcludeDegenerateShapes(t *testing.T) {
 	// Hand-written manifests can carry shapes the line editor can't extend in
-	// place — an empty flow mapping or a null-valued key. Both must be
+	// place - an empty flow mapping or a null-valued key. Both must be
 	// replaced wholesale, never silently skipped.
 	for name, tmpl := range map[string]string{
 		"empty flow metadata":    "  template:\n    metadata: {}\n",

@@ -3,7 +3,7 @@
 
 	// The read-only info card: bordered section, uppercase header, optional
 	// header action (e.g. a configure tab's Edit link). The body is the
-	// caller's — typically a <dl> of <Row>s, or a list.
+	// caller's - typically a <dl> of <Row>s, or a list.
 	let { title, action, children }: { title: string; action?: Snippet; children: Snippet } =
 		$props();
 </script>

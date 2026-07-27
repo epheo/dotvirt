@@ -21,7 +21,7 @@ import (
 // proposeFixture wires a Coordinator over a seeded bare repo and a forge Factory
 // pointed at an httptest server scripted by routes. The bare repo path doubles as
 // proj.Repo: forge.For parses its last two segments as owner/repo, while the API
-// calls hit srv regardless of host — so routes match on the path suffix.
+// calls hit srv regardless of host - so routes match on the path suffix.
 type proposeFixture struct {
 	c       *Coordinator
 	proj    project.ProjectInfo
@@ -221,7 +221,7 @@ func TestProposeCreatesPR(t *testing.T) {
 func TestProposeReopensClosedPR(t *testing.T) {
 	f := newProposeFixture(t,
 		when("POST", "/pulls", http.StatusConflict, "pull request already exists"),
-		// GET /pulls?... → the branch's closed PR. Head ref must match the
+		// GET /pulls?... -> the branch's closed PR. Head ref must match the
 		// per-(user,project) branch the coordinator builds.
 		whenList("GET", "/pulls", http.StatusOK, "closed", false),
 		when("PATCH", "/pulls/4", http.StatusOK, `{"number":4,"state":"open","html_url":"http://forge/pulls/4"}`),

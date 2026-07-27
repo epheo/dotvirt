@@ -43,7 +43,7 @@ func allowSSAR(kube *fake.Clientset, allowed bool) {
 }
 
 // TestVisibleNamespacesListWithoutVMRead pins the auditor-role gap: listing
-// namespaces cluster-wide must not stand in for reading VMs in them — without
+// namespaces cluster-wide must not stand in for reading VMs in them - without
 // the cluster-wide VM read the candidates are probed like any other token.
 func TestVisibleNamespacesListWithoutVMRead(t *testing.T) {
 	kube := fake.NewSimpleClientset(

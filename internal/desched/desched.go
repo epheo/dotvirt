@@ -1,6 +1,6 @@
 // Package desched is dotvirt's DRS status plane: an SA-maintained, watch-fed
 // snapshot of the KubeDescheduler CR, following the clusterstate/argo reflector
-// model — the read (Live) is a pure in-memory scan, never a cluster call.
+// model - the read (Live) is a pure in-memory scan, never a cluster call.
 //
 // Unlike those planes, this API may be legitimately absent: installing the
 // descheduler operator is exactly what the DRS panel proposes. Run therefore
@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/epheo/dotvirt/internal/cluster"
@@ -24,6 +25,16 @@ import (
 	"github.com/epheo/dotvirt/internal/reflect"
 )
 
+// kubedeschedulersGVR is the Kube Descheduler Operator's configuration CR, the
+// object behind dotvirt's DRS status plane. The CR is namespaced (to the
+// operator's install namespace) but watched across all namespaces so a
+// nonstandard install still surfaces.
+var kubedeschedulersGVR = schema.GroupVersionResource{
+	Group:    "operator.openshift.io",
+	Version:  "v1",
+	Resource: "kubedeschedulers",
+}
+
 // Snapshot holds the watched KubeDescheduler state. Build with New, start with
 // Run; Live is safe for concurrent callers.
 type Snapshot struct {
@@ -31,9 +42,9 @@ type Snapshot struct {
 	store cache.Indexer
 
 	// The three signals Live folds into the status so the panel never lies:
-	// apiPresent (the CRD is served), synced (the initial LIST landed — before
+	// apiPresent (the CRD is served), synced (the initial LIST landed - before
 	// that an empty store means "unknown", not "absent"), healthy (the watch is
-	// currently established — false means the store may be stale, e.g. the
+	// currently established - false means the store may be stale, e.g. the
 	// SA's RBAC hasn't reconciled yet or the apiserver is failing).
 	apiPresent atomic.Bool
 	synced     atomic.Bool
@@ -45,7 +56,7 @@ func New(sa *cluster.Client) *Snapshot {
 	return &Snapshot{sa: sa, store: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})}
 }
 
-// discoveryInterval paces the API probe while the descheduler CRD is absent —
+// discoveryInterval paces the API probe while the descheduler CRD is absent -
 // one lightweight discovery GET per tick, ending once the API appears (the
 // reflector then owns a watch connection). CRD removal afterwards is not
 // re-probed: the watch goes quiet on a last-known state, and a full uninstall
@@ -59,11 +70,11 @@ func (s *Snapshot) Run(ctx context.Context) {
 		t := time.NewTicker(discoveryInterval)
 		defer t.Stop()
 		for {
-			if s.sa.HasKubeDeschedulerAPI() {
+			if s.sa.HasAPIResource(kubedeschedulersGVR) {
 				s.apiPresent.Store(true)
 				s.healthy.Store(true) // optimistic until a list/watch actually errors
 				store := reflect.NewStore(s.store, func() {}, func() { s.synced.Store(true) })
-				lw := reflect.TrackHealth(s.sa.KubeDeschedulerListWatch(), &s.healthy)
+				lw := reflect.TrackHealth(s.sa.DynamicListWatch(kubedeschedulersGVR), &s.healthy)
 				r := cache.NewReflector(lw, &unstructured.Unstructured{}, store, 0)
 				r.Run(ctx.Done()) // blocks until shutdown; owns its own relist/backoff
 				return
@@ -100,7 +111,7 @@ func (s *Snapshot) Live() model.DRSLive {
 		return out
 	}
 	// The operator reports health as library-go per-controller <Name>Degraded
-	// conditions and sets no Available roll-up on the CR — so available means
+	// conditions and sets no Available roll-up on the CR - so available means
 	// "reported, and nothing degraded". An explicit Available condition (a
 	// nonstandard or future operator) still wins when present.
 	explicitAvailable, degraded := false, false
@@ -130,22 +141,16 @@ func (s *Snapshot) Live() model.DRSLive {
 
 // managedCR picks ONE KubeDescheduler to report: the CR dotvirt itself
 // proposes (drsgen's namespace, name "cluster") when present, else the first
-// sorted key so a nonstandard install still surfaces — deterministically,
+// sorted key so a nonstandard install still surfaces - deterministically,
 // never mixing fields across objects.
 func (s *Snapshot) managedCR() (*unstructured.Unstructured, bool) {
-	if obj, ok, _ := s.store.GetByKey(drsgen.Namespace + "/cluster"); ok {
-		u, uok := obj.(*unstructured.Unstructured)
-		return u, uok
+	if u, ok := reflect.Get(s.store, drsgen.Namespace+"/cluster"); ok {
+		return u, true
 	}
 	keys := s.store.ListKeys()
 	if len(keys) == 0 {
 		return nil, false
 	}
 	sort.Strings(keys)
-	obj, ok, _ := s.store.GetByKey(keys[0])
-	if !ok {
-		return nil, false
-	}
-	u, uok := obj.(*unstructured.Unstructured)
-	return u, uok
+	return reflect.Get(s.store, keys[0])
 }

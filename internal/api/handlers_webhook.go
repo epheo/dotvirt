@@ -16,7 +16,7 @@ import (
 // The Forgejo webhook: push/PR events trigger an immediate fetch of that repo
 // plus a proposals refresh, so the UI repaints in webhook latency instead of
 // the next poll tick (and the poll interval can stretch to minutes). The
-// endpoint authenticates by HMAC signature, not a user session — it's exempted
+// endpoint authenticates by HMAC signature, not a user session - it's exempted
 // in auth.isOpenPath and disabled entirely when no secret is configured.
 
 // handleForgeWebhook validates the HMAC-SHA256 signature Forgejo puts on every
@@ -96,7 +96,7 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 	// Drive ArgoCD to pick up the push directly: nudge the Application(s) sourcing
 	// this repo to hard-refresh (auto-sync then reconciles), so a merge applies in
 	// webhook latency rather than ArgoCD's poll interval. Fire-and-forget on a
-	// detached, bounded context — the handler returns 204 now; best-effort, since
+	// detached, bounded context - the handler returns 204 now; best-effort, since
 	// Argo's own webhook + poll remain as backstops. Only when Argo is wired.
 	if s.drift != nil {
 		clone, html := event.Repository.CloneURL, event.Repository.HTMLURL

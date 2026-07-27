@@ -2,17 +2,17 @@
 //
 // The read path used to fetch this per request, per subscriber: every inventory
 // build issued a namespace LIST, a GET per namespace, and a VM+VMI LIST per
-// namespace — all under the user's token, all repeated on every change. A handful
+// namespace - all under the user's token, all repeated on every change. A handful
 // of viewers plus a burst of VM events exhausted client-go's per-client rate
 // limiter and wedged the server for minutes.
 //
 // Instead, reflectors run ONCE under dotvirt's ServiceAccount and keep in-memory
 // indexers of VirtualMachines, VirtualMachineInstances, and the project-labeled
-// Namespaces — the data is identical for every tenant, so it belongs in one shared
+// Namespaces - the data is identical for every tenant, so it belongs in one shared
 // snapshot, not in N per-user fetches. A read becomes a pure in-memory filter of
 // this snapshot through the caller's visible-namespace set (computed elsewhere, per
 // token): the cluster is never touched on the read path. This is the reflector
-// model the argo drift snapshot also follows — fed by watches, not polled.
+// model the argo drift snapshot also follows - fed by watches, not polled.
 //
 // A fourth, signal-only reflector watches RoleBindings: dotvirt never reads them,
 // but a RoleBinding move can change which namespaces a token may see, so it
@@ -22,7 +22,7 @@
 // hub subscribes to; the read path doesn't diff anything.
 //
 // Authorization is unchanged: the snapshot is global truth, but a user only ever
-// sees the namespaces their own RBAC grants — the filter is the security gate.
+// sees the namespaces their own RBAC grants - the filter is the security gate.
 package clusterstate
 
 import (
@@ -45,7 +45,7 @@ import (
 )
 
 // LiveVM is one VM's actual state, keyed by "namespace/name" for merging into the
-// git-derived inventory — clusterstate's own read DTO, derived from the watched
+// git-derived inventory - clusterstate's own read DTO, derived from the watched
 // VMI objects (inventory.applyLive copies it onto each model.VM).
 type LiveVM struct {
 	Phase    string
@@ -82,7 +82,7 @@ type LiveNIC struct {
 	IP   string
 }
 
-// Migration is a VM's node-to-node move — vCenter's vMotion progress. Active
+// Migration is a VM's node-to-node move - vCenter's vMotion progress. Active
 // while neither Completed nor Failed is set.
 type Migration struct {
 	SourceNode string
@@ -99,7 +99,7 @@ type State struct {
 	vms  cache.Indexer
 	vmis cache.Indexer
 	nss  cache.Indexer
-	// RoleBindings are watched too, but only as an RBACChanged signal — via a
+	// RoleBindings are watched too, but only as an RBACChanged signal - via a
 	// retain-nothing signal store, so there's no indexer for them here.
 
 	specs []reflectorSpec // reflector wiring, built in New, started in Run
@@ -142,7 +142,7 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 		// change; NamespaceChanged is summed into both the inventory and RBAC versions.
 		{reflect.NewStore(s.nss, namespace, func() { s.nssSynced.Store(true); s.checkSynced() }), &corev1.Namespace{}, sa.NamespaceListWatch(projectLabel)},
 		// Signal-only: a retain-nothing store (never read), so the cluster-wide
-		// RoleBinding watch costs no per-object memory — it only nudges visibility.
+		// RoleBinding watch costs no per-object memory - it only nudges visibility.
 		{reflect.NewSignalStore(rbac, nil), &rbacv1.RoleBinding{}, sa.RoleBindingListWatch()},
 	}
 	return s
@@ -155,7 +155,7 @@ type reflectorSpec struct {
 }
 
 // Run starts one reflector per resource; each owns its own relist/backoff and
-// stops when ctx is cancelled. Returns immediately — call WaitForSync to block
+// stops when ctx is cancelled. Returns immediately - call WaitForSync to block
 // until the initial LIST has populated the snapshot.
 func (s *State) Run(ctx context.Context) {
 	for _, spec := range s.specs {
@@ -170,7 +170,7 @@ func newIndexer() cache.Indexer {
 }
 
 // WaitForSync blocks until every READABLE reflector's initial LIST has landed (the
-// VM, VMI and namespace stores — not the signal-only RoleBinding watch), or ctx is
+// VM, VMI and namespace stores - not the signal-only RoleBinding watch), or ctx is
 // done. Deterministic: it waits on a channel closed by the last store to sync, not a
 // poll. Returns ctx.Err() on cancellation, nil once synced.
 func (s *State) WaitForSync(ctx context.Context) error {
@@ -221,7 +221,7 @@ func (s *State) VMObjects(namespaces []string) []kubevirtcorev1.VirtualMachine {
 
 // LiveVMs returns the current live state of every VM in the snapshot, keyed by
 // "namespace/name". A VM with no running VMI is present with a zero (stopped)
-// LiveVM; a VMI supplies phase/IP/node. Pure in-memory — no cluster call.
+// LiveVM; a VMI supplies phase/IP/node. Pure in-memory - no cluster call.
 func (s *State) LiveVMs() map[string]LiveVM {
 	out := map[string]LiveVM{}
 	for _, obj := range s.vms.List() {
@@ -244,7 +244,7 @@ func (s *State) LiveVMs() map[string]LiveVM {
 // WorkloadLabels returns the labels network policies match for one VM's
 // workload: the running VMI's (what the virt-launcher pod carries), else the
 // manifest template's for a stopped VM. live reports which source answered;
-// found=false when the VM is in neither store. Copies — reflector-owned
+// found=false when the VM is in neither store. Copies - reflector-owned
 // objects must never escape.
 func (s *State) WorkloadLabels(namespace, name string) (lbls map[string]string, live, found bool) {
 	if obj, ok, _ := s.vmis.GetByKey(namespace + "/" + name); ok {
@@ -266,7 +266,7 @@ func (s *State) WorkloadLabels(namespace, name string) (lbls map[string]string, 
 // WorkloadNetworks reports one VM workload's NIC attachments for the trace
 // connectivity check: whether it binds the namespace's primary network (pod
 // binding), the NAD substituted as its default network (a default multus
-// binding replaces the pod network with that NAD's segment — it is NOT the
+// binding replaces the pod network with that NAD's segment - it is NOT the
 // namespace primary), and its secondary multus refs, namespace-qualified.
 // Live VMI spec first (what actually runs), else the VM template; addresses
 // come from the running VMI's interfaces, nil when stopped.
@@ -371,7 +371,7 @@ func liveFromVMI(vmi *kubevirtcorev1.VirtualMachineInstance) LiveVM {
 	} else if cpu := vmi.Spec.Domain.CPU; cpu != nil {
 		live.VCPUs = cpuProduct(cpu.Sockets, cpu.Cores, cpu.Threads)
 	}
-	// Uptime is measured from when the VMI entered Running — not object creation,
+	// Uptime is measured from when the VMI entered Running - not object creation,
 	// which predates boot.
 	for _, t := range s.PhaseTransitionTimestamps {
 		if t.Phase == kubevirtcorev1.Running {

@@ -26,8 +26,15 @@ class InventoryStore {
 	// Per-action authoring authority (each the same SSAR the backend create
 	// enforces). Undefined caps (older backend) read as false.
 	readonly caps = $derived(this.netInv?.caps);
+	// The creation gates every surface (header menu, context menus, Security
+	// page) shares - one predicate per verb, never re-derived locally.
+	readonly canNamespace = $derived(!!this.netInv?.caps?.namespace);
+	readonly canEgress = $derived(
+		!!(this.netInv?.caps?.egressIP || this.netInv?.caps?.externalRoute),
+	);
+	readonly canAdminFw = $derived(!!this.netInv?.caps?.adminNetworkPolicy);
 
-	// All VMs across the 3-level tree (project → namespace → vm).
+	// All VMs across the 3-level tree (project -> namespace -> vm).
 	readonly allVMs = $derived(
 		this.inventory
 			? this.inventory.projects.flatMap((p) => p.namespaces.flatMap((n) => n.vms))
@@ -48,7 +55,7 @@ class InventoryStore {
 	// state change. Keying on this string fires them only when the set changes.
 	readonly projectKey = $derived([...this.projectNames].sort().join('\0'));
 	// The same trick for the SET of open PR lanes: a propose moves staged items
-	// into a PR and a merge/close clears the lane — possibly from another tab.
+	// into a PR and a merge/close clears the lane - possibly from another tab.
 	readonly proposalsKey = $derived(
 		this.proposals
 			.map((p) => `${p.project}#${p.prNumber}`)
@@ -58,9 +65,9 @@ class InventoryStore {
 	// Watermark for the out-of-band network catalog, off the live frame: bumps when
 	// GitOps state or a repo head moves. A stable primitive (not the per-frame inventory
 	// object), so an effect keyed on it re-pulls /api/networks only when networks may
-	// have changed — not on every VM-state frame.
+	// have changed - not on every VM-state frame.
 	readonly networksVersion = $derived(this.inventory?.networksVersion ?? 0);
-	// The recent-tasks feed (GET /api/tasks), re-pulled when tasksVersion bumps —
+	// The recent-tasks feed (GET /api/tasks), re-pulled when tasksVersion bumps -
 	// every browser sees every admin's ops and merges, with real attribution.
 	taskFeed = $state<TaskEntry[]>([]);
 	readonly tasksVersion = $derived(this.inventory?.tasksVersion ?? 0);
@@ -73,7 +80,7 @@ class InventoryStore {
 					.flatMap((p) => p.namespaces.map((n) => n.namespace))
 			: [],
 	);
-	// Projects with a backing repo — the ones with commit history to browse +
+	// Projects with a backing repo - the ones with commit history to browse +
 	// revert from (the Changes panel's History section).
 	readonly repoProjects = $derived(
 		this.inventory ? this.inventory.projects.filter((p) => p.repo).map((p) => p.name) : [],

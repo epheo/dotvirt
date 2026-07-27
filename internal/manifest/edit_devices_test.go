@@ -10,7 +10,7 @@ import (
 )
 
 // vmWithDevices mirrors a real VM manifest with disks, volumes, networks, and
-// interfaces — the shape device edits operate on.
+// interfaces - the shape device edits operate on.
 const vmWithDevices = `apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
@@ -56,7 +56,7 @@ spec:
           name: web-rootdisk
 `
 
-// vmContainerDisk is a VM with no dataVolumeTemplates (a container-disk import) —
+// vmContainerDisk is a VM with no dataVolumeTemplates (a container-disk import) -
 // adding a persistent disk must create the section from scratch.
 const vmContainerDisk = `apiVersion: kubevirt.io/v1
 kind: VirtualMachine
@@ -137,8 +137,8 @@ func TestAddDisk(t *testing.T) {
 		t.Fatalf("expected 2 disks, got %d:\n%s", got, out)
 	}
 	s := string(out)
-	// The new disk is a persistent, blank DataVolume on the chosen class — not an
-	// emptyDisk — with its own dataVolumeTemplates entry.
+	// The new disk is a persistent, blank DataVolume on the chosen class - not an
+	// emptyDisk - with its own dataVolumeTemplates entry.
 	for _, want := range []string{"name: web-data", "blank: {}", "storage: 20Gi", "storageClassName: fast"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("blank DataVolume missing %q:\n%s", want, s)

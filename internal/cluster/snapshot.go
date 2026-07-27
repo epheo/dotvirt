@@ -14,8 +14,8 @@ import (
 
 // VirtualMachineSnapshot/Restore are CRDs without a typed client method here, so
 // they go through the dynamic client (like the wizard catalog). Snapshots are an
-// imperative, RBAC-gated operation (the user's token is the gate) — not git-managed
-// state — so ArgoCD never reverts them.
+// imperative, RBAC-gated operation (the user's token is the gate) - not git-managed
+// state - so ArgoCD never reverts them.
 var (
 	gvrSnapshots = schema.GroupVersionResource{Group: "snapshot.kubevirt.io", Version: "v1beta1", Resource: "virtualmachinesnapshots"}
 	gvrRestores  = schema.GroupVersionResource{Group: "snapshot.kubevirt.io", Version: "v1beta1", Resource: "virtualmachinerestores"}
@@ -85,7 +85,7 @@ func (c *Client) DeleteSnapshot(ctx context.Context, namespace, snapName string)
 }
 
 // RestoreSnapshot rolls the VM back to a snapshot via a VirtualMachineRestore. The
-// VM must be stopped — the snapshot controller rejects a running target.
+// VM must be stopped - the snapshot controller rejects a running target.
 func (c *Client) RestoreSnapshot(ctx context.Context, namespace, vmName, snapName string) error {
 	dyn, err := c.dynamic()
 	if err != nil {

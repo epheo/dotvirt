@@ -8,7 +8,7 @@ import (
 )
 
 // vmWithDataVolumes mirrors a wizard-generated VM: two disks backed by
-// dataVolumeTemplates — the root disk imported from a registry image on an
+// dataVolumeTemplates - the root disk imported from a registry image on an
 // explicit class, the data disk blank on the cluster default.
 const vmWithDataVolumes = `apiVersion: kubevirt.io/v1
 kind: VirtualMachine
@@ -106,7 +106,7 @@ func TestMigrateVolume(t *testing.T) {
 	if storage["resources"].(map[string]any)["requests"].(map[string]any)["storage"] != "30Gi" {
 		t.Errorf("size disturbed:\n%s", out)
 	}
-	// The destination provisions blank — the registry source must be gone.
+	// The destination provisions blank - the registry source must be gone.
 	if _, ok := spec["source"].(map[string]any)["blank"]; !ok {
 		t.Errorf("source not replaced with blank:\n%s", out)
 	}
@@ -128,7 +128,7 @@ func TestMigrateVolume(t *testing.T) {
 	}
 }
 
-// A disk on the cluster default class has no storageClassName — the edit must
+// A disk on the cluster default class has no storageClassName - the edit must
 // insert one. Its source is already blank and must be kept as-is.
 func TestMigrateVolumeInsertsClass(t *testing.T) {
 	out, err := ApplyEdit([]byte(vmWithDataVolumes), "alpha", "web", VMEdit{
@@ -186,7 +186,7 @@ func TestMigrateVolumeRepeated(t *testing.T) {
 }
 
 // Volumes that aren't DataVolume-backed (or reference no template) are left
-// alone entirely — including the updateVolumesStrategy marker.
+// alone entirely - including the updateVolumesStrategy marker.
 func TestMigrateVolumeNonDataVolume(t *testing.T) {
 	out, err := ApplyEdit([]byte(vmWithDataVolumes), "alpha", "web", VMEdit{
 		MigrateVolumes: []model.VolumeMigration{{Name: "cloudinit", StorageClass: "fast"}},

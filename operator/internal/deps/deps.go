@@ -5,7 +5,7 @@
 // ArgoCD (OpenShift GitOps or community Argo CD) is a hard PREREQUISITE the dotvirt
 // operator never installs: it's a cluster-singleton orgs run and manage centrally,
 // and dotvirt's whole apply path rides it. KubeVirt is hard too (no VMs without it).
-// The networking tier's OVN-K + NMState — and CDI for disk import — are SOFT: when
+// The networking tier's OVN-K + NMState - and CDI for disk import - are SOFT: when
 // absent, dotvirt simply hides those affordances (it already degrades at runtime).
 package deps
 
@@ -38,13 +38,12 @@ var Required = []Dependency{
 
 // Result is the probe outcome.
 type Result struct {
-	Present     map[string]bool // Dependency.Label -> present
 	MissingHard []string
 	MissingSoft []string
 }
 
 // Probe reports which dependencies' CRDs the cluster currently serves. A partial
-// discovery error (one unavailable aggregated apiservice) is tolerated — we
+// discovery error (one unavailable aggregated apiservice) is tolerated - we
 // classify from whatever the API server did return.
 func Probe(cfg *rest.Config) (Result, error) {
 	dc, err := discovery.NewDiscoveryClientForConfig(cfg)
@@ -69,10 +68,9 @@ func Probe(cfg *rest.Config) (Result, error) {
 		}
 	}
 
-	res := Result{Present: map[string]bool{}}
+	var res Result
 	for _, d := range Required {
 		ok := served[d.Group+"/"+d.Resource]
-		res.Present[d.Label] = ok
 		switch {
 		case ok:
 		case d.Hard:

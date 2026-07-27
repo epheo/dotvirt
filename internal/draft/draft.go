@@ -1,6 +1,6 @@
 // Package draft holds dotvirt's pending changesets: VM edits and new-VM specs
-// staged by a user but not yet committed. Drafts are keyed by (user, project) —
-// each tenant gets an independent changeset per user — and persisted one JSON
+// staged by a user but not yet committed. Drafts are keyed by (user, project) -
+// each tenant gets an independent changeset per user - and persisted one JSON
 // file per pair (<dir>/<user>/<project>.json) so they survive backend restarts.
 package draft
 
@@ -14,7 +14,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/epheo/dotvirt/internal/manifest"
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/vmgen"
 )
 
@@ -39,7 +39,7 @@ const (
 	ResourceNetwork                    Resource = "network"                    // a Distributed Port Group (UDN/CUDN)
 	ResourceUplink                     Resource = "uplink"                     // a physical-network attachment (nmstate NNCP)
 	ResourceNamespace                  Resource = "namespace"                  // a namespace (+ optional primary "VM Network")
-	ResourceRoleBinding                Resource = "rolebinding"                // a tenant owners → namespace-admin grant
+	ResourceRoleBinding                Resource = "rolebinding"                // a tenant owners -> namespace-admin grant
 	ResourceEgressFirewall             Resource = "egressfirewall"             // a namespace's north-south egress firewall (Tier-1)
 	ResourceEgressIP                   Resource = "egressip"                   // a cluster-scoped SNAT pool (Tier-0)
 	ResourceExternalRoute              Resource = "externalroute"              // a cluster-scoped external next-hop route (Tier-0)
@@ -51,10 +51,43 @@ const (
 )
 
 // Atomic reports whether entries of this resource form one logical change that
-// stages and unstages as a set — a partial DRS file set (e.g. the operator
+// stages and unstages as a set - a partial DRS file set (e.g. the operator
 // Subscription unstaged from under its KubeDescheduler CR) is not a meaningful
 // proposal.
 func (r Resource) Atomic() bool { return r == ResourceDRS }
+
+// CreateLabel names a create of this resource in the Changes pane. Lives beside
+// the consts so a new resource cannot ship rendering under the VM-adoption default.
+func (r Resource) CreateLabel() string {
+	switch r {
+	case ResourceNetwork:
+		return "Create network"
+	case ResourceUplink:
+		return "Create uplink"
+	case ResourceNamespace:
+		return "Create namespace"
+	case ResourceRoleBinding:
+		return "Grant tenant access"
+	case ResourceEgressFirewall:
+		return "Create gateway firewall"
+	case ResourceEgressIP:
+		return "Create SNAT pool"
+	case ResourceExternalRoute:
+		return "Create external route"
+	case ResourceNetworkPolicy:
+		return "Create distributed firewall policy"
+	case ResourceAdminNetworkPolicy:
+		return "Create admin firewall policy"
+	case ResourceBaselineAdminNetworkPolicy:
+		return "Create baseline firewall policy"
+	case ResourceDRS:
+		return "Configure DRS"
+	case ResourceTemplate:
+		return "Save as template"
+	default:
+		return "Adopt VM from cluster"
+	}
+}
 
 // Entry is one pending change, keyed by resource+namespace/name within its
 // (user,project).
@@ -69,9 +102,9 @@ type Entry struct {
 	SourceFile string `json:"sourceFile,omitempty"`
 
 	// Edit fields (KindEdit): the change to apply to an existing manifest.
-	Edit *manifest.VMEdit `json:"edit,omitempty"`
+	Edit *model.VMEdit `json:"edit,omitempty"`
 
-	// Create fields (KindCreate): the wizard spec for a new VM, OR — when
+	// Create fields (KindCreate): the wizard spec for a new VM, OR - when
 	// adopting an object that exists only in the cluster - its live state
 	// serialized verbatim (SourceFile then carries the path it lands at).
 	Spec     *vmgen.Spec `json:"spec,omitempty"`
@@ -129,7 +162,7 @@ func (s *Store) loadLocked(user, project string) (map[string]Entry, error) {
 	default:
 		var list []Entry
 		if err := json.Unmarshal(data, &list); err != nil {
-			// A parse failure must not wedge this (user, project) forever — a draft is
+			// A parse failure must not wedge this (user, project) forever - a draft is
 			// an unproposed shopping cart, not a source of truth. Quarantine the file
 			// (kept for inspection, best-effort) and start fresh.
 			if rerr := os.Rename(p, p+".corrupt"); rerr != nil && !os.IsNotExist(rerr) {
@@ -155,9 +188,8 @@ func (s *Store) path(user, project string) string {
 
 // safeSegment turns a user/project name into one safe path segment. url.PathEscape
 // handles '/' and ':' but NOT '.', so a name of "." or ".." would traverse out of
-// the draft dir; percent-encode leading dots to neutralize that (PathUnescape in
-// ListProjects reverses it). The replace is anchored so only a segment that IS
-// "."/".."(escaped) is rewritten, keeping normal names like "v1.2" intact.
+// the draft dir; percent-encode those two to neutralize that. Normal names like
+// "v1.2" stay intact.
 func safeSegment(s string) string {
 	switch s {
 	case ".":
@@ -218,7 +250,7 @@ func (s *Store) Unstage(user, project string, resource Resource, namespace, name
 }
 
 // Clear empties (user,project)'s draft; persistLocked removes the now-empty file
-// so ListProjects/Count don't keep enumerating emptied projects forever.
+// so emptied projects don't linger on disk.
 func (s *Store) Clear(user, project string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -235,51 +267,6 @@ func (s *Store) List(user, project string) ([]Entry, error) {
 		return nil, err
 	}
 	return sortedEntries(d), nil
-}
-
-// Count reports the total pending entries across all of a user's projects (for
-// the global "Changes" badge). It reads the user's directory from disk so it
-// reflects projects not yet loaded this session.
-func (s *Store) Count(user string) (int, error) {
-	projects, err := s.ListProjects(user)
-	if err != nil {
-		return 0, err
-	}
-	total := 0
-	for _, p := range projects {
-		entries, err := s.List(user, p)
-		if err != nil {
-			return 0, err
-		}
-		total += len(entries)
-	}
-	return total, nil
-}
-
-// ListProjects returns the projects a user has a draft for (by scanning their
-// directory). Names are unescaped back to their original form.
-func (s *Store) ListProjects(user string) ([]string, error) {
-	ents, err := os.ReadDir(filepath.Join(s.dir, safeSegment(user)))
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var out []string
-	for _, e := range ents {
-		name := e.Name()
-		if e.IsDir() || filepath.Ext(name) != ".json" {
-			continue
-		}
-		project, err := url.PathUnescape(name[:len(name)-len(".json")])
-		if err != nil {
-			continue
-		}
-		out = append(out, project)
-	}
-	sort.Strings(out)
-	return out, nil
 }
 
 func sortedEntries(d map[string]Entry) []Entry {

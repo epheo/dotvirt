@@ -11,7 +11,7 @@ import (
 // Read-only git views served over the API. They live here, not in the transport
 // layer, so branch names and source-file matching stay behind the coordinator.
 
-// Manifest returns a VM's manifest file as committed on the base branch — the
+// Manifest returns a VM's manifest file as committed on the base branch - the
 // raw bytes plus its repo path (the download filename). The git file IS the
 // VM's full definition, so this is dotvirt's OVF-export analog.
 func (c *Coordinator) Manifest(proj project.ProjectInfo, namespace, name string) (path string, content []byte, err error) {
@@ -38,7 +38,7 @@ func (c *Coordinator) Manifest(proj project.ProjectInfo, namespace, name string)
 	return "", nil, fmt.Errorf("%w: manifest file %s", model.ErrNotFound, vm.SourceFile)
 }
 
-// History lists recent commits on the project's base branch — the Changes
+// History lists recent commits on the project's base branch - the Changes
 // pane's history view. A repoless project has no history, not an error.
 func (c *Coordinator) History(proj project.ProjectInfo, limit int) ([]model.Commit, error) {
 	if proj.Repo == "" {
@@ -52,7 +52,7 @@ func (c *Coordinator) History(proj project.ProjectInfo, limit int) ([]model.Comm
 }
 
 // Templates lists proj's library as committed on the base branch. An unreadable
-// repo degrades to an empty library — the caller's other libraries still list.
+// repo degrades to an empty library - the caller's other libraries still list.
 func (c *Coordinator) Templates(proj project.ProjectInfo) []model.Template {
 	read, err := c.read(proj)
 	if err != nil {

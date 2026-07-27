@@ -14,7 +14,7 @@
 		onstaged: () => void;
 	} = $props();
 
-	let name = $state(''); // project name → tenant repo + dotvirt.io/project
+	let name = $state(''); // project name -> tenant repo + dotvirt.io/project
 	let namespace = $state(''); // first namespace
 	let owners = $state(''); // space/comma-separated usernames
 	let withNetwork = $state(true);

@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -115,6 +116,33 @@ func argoObj(kind, ns, name string, labels map[string]string) *unstructured.Unst
 	return u
 }
 
+// A failed probe proves nothing about the prerequisites: the pipeline must halt
+// and retry, not read the zero result as "all dependencies present" and install.
+func TestReconcileHaltsOnProbeFailure(t *testing.T) {
+	dv := testCR()
+	c := testBuilder(t).WithObjects(dv).Build()
+	r := newReconciler(c, func(*rest.Config) (deps.Result, error) {
+		return deps.Result{}, errors.New("discovery unavailable")
+	})
+
+	res := reconcileOnce(t, r, dv)
+	if res.RequeueAfter != time.Minute {
+		t.Fatalf("RequeueAfter = %v, want 1m", res.RequeueAfter)
+	}
+
+	got := getCR(t, c, dv)
+	if got.Status.Phase != dotvirtv1alpha1.PhaseBlockedOnDependencies {
+		t.Errorf("phase = %q, want %q", got.Status.Phase, dotvirtv1alpha1.PhaseBlockedOnDependencies)
+	}
+	dep := cond(got, dotvirtv1alpha1.ConditionDependenciesReady)
+	if dep == nil || dep.Status != metav1.ConditionFalse || dep.Reason != "ProbeFailed" {
+		t.Errorf("DependenciesReady = %+v, want False/ProbeFailed", dep)
+	}
+	if exists(t, c, &appsv1.Deployment{}, dv.Namespace, install.AppName) {
+		t.Error("failed probe deployed the workload")
+	}
+}
+
 // A missing hard prerequisite must halt the pipeline at the FIRST phase: the CR
 // reports BlockedOnDependencies with a requeue, and no later phase runs: nothing
 // (secrets, workload, argo resources) gets provisioned on a cluster that can't
@@ -197,7 +225,7 @@ func TestReconcileMinimalCRToReady(t *testing.T) {
 		}
 	}
 
-	argoNS := platform.Kubernetes.DefaultArgoNamespace()
+	argoNS := "argocd" // the vanilla-Kubernetes default argoTarget resolves
 	if !exists(t, c, &appsv1.Deployment{}, dv.Namespace, install.AppName) {
 		t.Error("workload Deployment not applied")
 	}
@@ -294,7 +322,7 @@ func TestReconcileSecretsCreateOnce(t *testing.T) {
 // NotTracked.
 func TestReconcileConvergesStaleAppsetMirror(t *testing.T) {
 	dv := testCR()
-	argoNS := platform.Kubernetes.DefaultArgoNamespace()
+	argoNS := "argocd" // the vanilla-Kubernetes default argoTarget resolves
 	stale := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: install.AppsetSecretName, Namespace: argoNS},
 		Data:       map[string][]byte{"token": []byte("previous-install")},
@@ -330,7 +358,7 @@ func TestFinalizeDeletesOnlyThisInstance(t *testing.T) {
 	dv.Finalizers = []string{dotvirtFinalizer}
 	dv.DeletionTimestamp = &now
 
-	argoNS := platform.Kubernetes.DefaultArgoNamespace()
+	argoNS := "argocd" // the vanilla-Kubernetes default argoTarget resolves
 	mine := install.Labels(dv.Name)
 	other := map[string]string{"dotvirt.io/instance": "other"}
 

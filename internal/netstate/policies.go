@@ -8,9 +8,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/reflect"
 )
 
-// Policies renders the policy plane from the watch-fed stores — the same pure
+// Policies renders the policy plane from the watch-fed stores - the same pure
 // in-memory scan Catalog does for port groups: the DFW tiers (NetworkPolicy,
 // AdminNetworkPolicy/Baseline), the per-project Gateway Firewall (EgressFirewall)
 // and the Tier-0 planes (EgressIP, external routes). Rules come out as display
@@ -19,26 +20,26 @@ import (
 // cluster-tier rows on authoring authority.
 func (s *Snapshot) Policies() []model.Policy {
 	out := []model.Policy{}
-	for _, u := range listOf(s.netpol) {
+	for _, u := range reflect.List(s.netpol) {
 		out = append(out, policyFromNetpol(u))
 	}
-	for _, u := range listOf(s.anp) {
+	for _, u := range reflect.List(s.anp) {
 		out = append(out, policyFromANP(u, false))
 	}
-	for _, u := range listOf(s.banp) {
+	for _, u := range reflect.List(s.banp) {
 		out = append(out, policyFromANP(u, true))
 	}
-	for _, u := range listOf(s.egressfw) {
+	for _, u := range reflect.List(s.egressfw) {
 		out = append(out, policyFromEgressFirewall(u))
 	}
-	for _, u := range listOf(s.egressip) {
+	for _, u := range reflect.List(s.egressip) {
 		out = append(out, policyFromEgressIP(u))
 	}
-	for _, u := range listOf(s.extroute) {
+	for _, u := range reflect.List(s.extroute) {
 		out = append(out, policyFromExtRoute(u))
 	}
 	// One deterministic order for every consumer: tier (kind), then ANP
-	// precedence, then identity — so the view needs no re-sort and repaints are
+	// precedence, then identity - so the view needs no re-sort and repaints are
 	// stable across watch churn.
 	sort.Slice(out, func(i, j int) bool {
 		a, b := out[i], out[j]
@@ -74,19 +75,10 @@ func kindRank(k model.PolicyKind) int {
 	return 6
 }
 
-// policyFromNetpol decodes a NetworkPolicy: the project east-west DFW rules. A
-// policy with no rules for a declared direction default-denies it — the view
-// derives that hint from kind + empty rules, so nothing is synthesized here.
-func policyFromNetpol(u *unstructured.Unstructured) model.Policy {
-	p := model.Policy{
-		Name:      u.GetName(),
-		Kind:      model.PolicyDFW,
-		Namespace: u.GetNamespace(),
-		Backing:   "NetworkPolicy",
-	}
-	sel, _, _ := unstructured.NestedMap(u.Object, "spec", "podSelector")
-	p.Target = orAny(selectorSummary(sel), "all pods")
-
+// appendRules folds a policy object's ingress+egress rule slices into p, with
+// action and peer supplied per backing (the one shape NetworkPolicy and the
+// admin tiers share).
+func appendRules(u *unstructured.Unstructured, p *model.Policy, action func(map[string]any) string, peer func(any) string) {
 	for _, dir := range []struct{ field, label, peerKey string }{
 		{"ingress", "Ingress", "from"},
 		{"egress", "Egress", "to"},
@@ -102,17 +94,33 @@ func policyFromNetpol(u *unstructured.Unstructured) model.Policy {
 			}
 			p.Rules = append(p.Rules, model.PolicyRuleView{
 				Direction: dir.label,
-				Action:    "Allow",
-				Peer:      netpolPeers(r[dir.peerKey]),
+				Action:    action(r),
+				Peer:      peer(r[dir.peerKey]),
 				Ports:     portsSummary(r["ports"]),
 			})
 		}
 	}
+}
+
+// policyFromNetpol decodes a NetworkPolicy: the project east-west DFW rules. A
+// policy with no rules for a declared direction default-denies it - the view
+// derives that hint from kind + empty rules, so nothing is synthesized here.
+func policyFromNetpol(u *unstructured.Unstructured) model.Policy {
+	p := model.Policy{
+		Name:      u.GetName(),
+		Kind:      model.PolicyDFW,
+		Namespace: u.GetNamespace(),
+		Backing:   "NetworkPolicy",
+	}
+	sel, _, _ := unstructured.NestedMap(u.Object, "spec", "podSelector")
+	p.Target = orAny(selectorSummary(sel), "all pods")
+
+	appendRules(u, &p, func(map[string]any) string { return "Allow" }, netpolPeers)
 	return p
 }
 
 // policyFromANP decodes an AdminNetworkPolicy or (baseline=true) the
-// BaselineAdminNetworkPolicy — the cluster-wide DFW tiers above/below tenant
+// BaselineAdminNetworkPolicy - the cluster-wide DFW tiers above/below tenant
 // NetworkPolicies.
 func policyFromANP(u *unstructured.Unstructured, baseline bool) model.Policy {
 	p := model.Policy{
@@ -136,31 +144,11 @@ func policyFromANP(u *unstructured.Unstructured, baseline bool) model.Policy {
 		p.Namespaces = selectorNamespaces(ns)
 	}
 
-	for _, dir := range []struct{ field, label, peerKey string }{
-		{"ingress", "Ingress", "from"},
-		{"egress", "Egress", "to"},
-	} {
-		rules, found, _ := unstructured.NestedSlice(u.Object, "spec", dir.field)
-		if !found {
-			continue
-		}
-		for _, raw := range rules {
-			r, ok := raw.(map[string]any)
-			if !ok {
-				continue
-			}
-			p.Rules = append(p.Rules, model.PolicyRuleView{
-				Direction: dir.label,
-				Action:    str(r["action"]),
-				Peer:      adminPeers(r[dir.peerKey]),
-				Ports:     portsSummary(r["ports"]),
-			})
-		}
-	}
+	appendRules(u, &p, func(r map[string]any) string { return str(r["action"]) }, adminPeers)
 	return p
 }
 
-// policyFromEgressFirewall decodes a namespace's EgressFirewall — the Tier-1
+// policyFromEgressFirewall decodes a namespace's EgressFirewall - the Tier-1
 // gateway firewall: ordered first-match allow/deny against external destinations.
 func policyFromEgressFirewall(u *unstructured.Unstructured) model.Policy {
 	p := model.Policy{
@@ -194,7 +182,7 @@ func policyFromEgressFirewall(u *unstructured.Unstructured) model.Policy {
 	return p
 }
 
-// policyFromEgressIP decodes a cluster-scoped EgressIP — the Tier-0 SNAT pool.
+// policyFromEgressIP decodes a cluster-scoped EgressIP - the Tier-0 SNAT pool.
 // The one rule row carries the pool; Target is the namespaces it pins.
 func policyFromEgressIP(u *unstructured.Unstructured) model.Policy {
 	p := model.Policy{
@@ -212,7 +200,7 @@ func policyFromEgressIP(u *unstructured.Unstructured) model.Policy {
 	return p
 }
 
-// policyFromExtRoute decodes a cluster-scoped AdminPolicyBasedExternalRoute —
+// policyFromExtRoute decodes a cluster-scoped AdminPolicyBasedExternalRoute -
 // the Tier-0 static next-hop route for the selected projects' egress.
 func policyFromExtRoute(u *unstructured.Unstructured) model.Policy {
 	p := model.Policy{
@@ -352,7 +340,7 @@ func selectorSummary(sel map[string]any) string {
 
 // selectorNamespaces enumerates the namespaces a selector provably pins to:
 // the metadata.name In expression netgen writes, or a bare metadata.name
-// matchLabel. Any other selector returns nil — label-based membership can't be
+// matchLabel. Any other selector returns nil - label-based membership can't be
 // evaluated here, and a tenant filter must not hide a possibly-applying row.
 func selectorNamespaces(sel map[string]any) []string {
 	if len(sel) == 0 {
@@ -430,7 +418,7 @@ func orAny(s, fallback string) string {
 	return s
 }
 
-// prefixed returns prefix+s, or "" when s is empty — for optional summary parts.
+// prefixed returns prefix+s, or "" when s is empty - for optional summary parts.
 func prefixed(prefix, s string) string {
 	if s == "" {
 		return ""

@@ -256,7 +256,7 @@ func TestStageSaveTemplateErrors(t *testing.T) {
 }
 
 // Proposing a draft holding a deploy + a saved template must commit both files
-// verbatim — templates ride the same changeset path as every other manifest.
+// verbatim - templates ride the same changeset path as every other manifest.
 func TestProposeCommitsTemplateEntries(t *testing.T) {
 	bare := seedBareFiles(t, map[string][]byte{
 		"templates/base.yaml": []byte(libraryTemplate),

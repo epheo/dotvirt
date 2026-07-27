@@ -112,7 +112,7 @@ func TestBuildFiltersAndEnriches(t *testing.T) {
 	if vms[0].Phase != "Running" || vms[0].GuestIP != "10.0.0.1" {
 		t.Errorf("live state not merged: %+v", vms[0])
 	}
-	// Drift not enabled → Sync stays unset (not NotTracked).
+	// Drift not enabled -> Sync stays unset (not NotTracked).
 	if vms[0].Sync == model.SyncNotTracked {
 		t.Error("Sync should be unset when drift is disabled")
 	}
@@ -124,7 +124,7 @@ func TestBuildFiltersAndEnriches(t *testing.T) {
 }
 
 // The per-project GitOps rollup attaches to the project whose repo matches the
-// managing Application, keyed by canonical repoURL — and a project with no matching
+// managing Application, keyed by canonical repoURL - and a project with no matching
 // Application (or when Argo is disabled) keeps GitOps nil, so nothing alarms.
 func TestBuildAttachesProjectGitOps(t *testing.T) {
 	bare := seedRepo(t)
@@ -148,15 +148,15 @@ func TestBuildAttachesProjectGitOps(t *testing.T) {
 	if g := inv.Projects[0].GitOps; g == nil || g.Sync != model.SyncOutOfSync || g.Health != "Degraded" || g.SyncError != "boom" {
 		t.Errorf("team-a GitOps not attached: %+v", g)
 	}
-	// team-b has no managing Application in the map → GitOps stays nil (no false alarm).
+	// team-b has no managing Application in the map -> GitOps stays nil (no false alarm).
 	if g := inv.Projects[1].GitOps; g != nil {
 		t.Errorf("team-b should have nil GitOps, got %+v", g)
 	}
 }
 
 // A VM present in the live snapshot but absent from git (a fresh clone target,
-// an out-of-band create) is surfaced as a NotTracked row — empty SourceFile,
-// Power Unknown — so "Adopt into git" has something to act on. VMs outside the
+// an out-of-band create) is surfaced as a NotTracked row - empty SourceFile,
+// Power Unknown - so "Adopt into git" has something to act on. VMs outside the
 // project's namespaces stay invisible.
 func TestBuildSurfacesClusterOnlyVMs(t *testing.T) {
 	bare := seedRepo(t)
@@ -171,7 +171,7 @@ func TestBuildSurfacesClusterOnlyVMs(t *testing.T) {
 		Live: map[string]clusterstate.LiveVM{
 			"tenant-a/web":       {Phase: "Running"},
 			"tenant-a/web-clone": {},                 // cluster-only: halted clone target
-			"tenant-b/other":     {Phase: "Running"}, // outside the project → ignored
+			"tenant-b/other":     {Phase: "Running"}, // outside the project -> ignored
 		},
 	}
 	inv := Build(in)
@@ -194,7 +194,7 @@ func TestBuildDriftEnabledMarksNotTracked(t *testing.T) {
 	in := Inputs{
 		Branch: "main",
 		Repos:  repos,
-		// Non-nil (but empty) Drift ⇒ Argo is wired; no entry for web ⇒ NotTracked.
+		// Non-nil (but empty) Drift => Argo is wired; no entry for web => NotTracked.
 		Drift:    map[string]argo.Drift{},
 		Projects: []project.ProjectInfo{{Name: "team-a", Repo: bare, Namespaces: []string{"tenant-a"}}},
 	}

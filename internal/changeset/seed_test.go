@@ -35,7 +35,7 @@ func writeWorkFile(t *testing.T, work, path string, content []byte) {
 }
 
 // seedWork creates a bare repo plus its work clone and commits files to main,
-// returning both — bare doubles as the repo URL, work lets a caller layer
+// returning both - bare doubles as the repo URL, work lets a caller layer
 // further branches on top.
 func seedWork(t *testing.T, files map[string][]byte) (bare, work string) {
 	t.Helper()
@@ -57,7 +57,7 @@ func seedWork(t *testing.T, files map[string][]byte) (bare, work string) {
 	return bare, work
 }
 
-// seedBareFiles creates a bare repo with the given files on main — a platform
+// seedBareFiles creates a bare repo with the given files on main - a platform
 // repo in whatever state a test needs.
 func seedBareFiles(t *testing.T, files map[string][]byte) string {
 	bare, _ := seedWork(t, files)

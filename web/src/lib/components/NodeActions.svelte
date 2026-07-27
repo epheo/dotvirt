@@ -1,12 +1,11 @@
 <script lang="ts">
 	import { Ban, CheckCircle2, LogOut, MoveRight, Wrench } from 'lucide-svelte';
 	import { api, Unauthorized, type NodeInfo, type VM } from '$lib/api';
-	import { friendlyError } from '$lib/format';
-	import { resource } from '$lib/resource.svelte';
+	import { action, resource } from '$lib/resource.svelte';
 
 	// Host maintenance (vCenter's Enter/Exit Maintenance Mode): entering flips
 	// the node's maintenance annotation + cordon in one server patch, then this
-	// client drives one migrate call per running VM — so each move is gated by
+	// client drives one migrate call per running VM - so each move is gated by
 	// that VM's own RBAC and lands in the action dock. Progress needs no
 	// polling: `vms` is the live inventory stream, so the remaining count
 	// drains as migrations complete. Plain cordon stays as the lighter verb.
@@ -19,10 +18,10 @@
 		vms: VM[];
 	} = $props();
 
-	let busy = $state(false);
+	const op = action(); // one busy/error pair drives every maintenance verb
 	let confirming = $state(false);
-	let msg = $state('');
-	let ok = $state(true);
+	let msg = $state(''); // success/summary line; op.error carries failures
+	let ok = $state(true); // false when an evacuation sweep had failures
 
 	const running = $derived(vms.filter((v) => v.phase === 'Running'));
 	// Not yet on the move: retry targets. An active migration would 409 a second one.
@@ -30,7 +29,7 @@
 		running.filter((v) => !v.migration || v.migration.completed || v.migration.failed),
 	);
 
-	// no node-read RBAC → panel stays hidden (failed maps to null)
+	// no node-read RBAC -> panel stays hidden (failed maps to null)
 	const infoRes = resource<NodeInfo>(
 		() => node,
 		() => api.nodeInfo(node),
@@ -41,25 +40,22 @@
 
 	async function toggleCordon() {
 		if (!info) return;
-		busy = true;
+		const cordon = !info.unschedulable;
 		msg = '';
-		try {
-			await api.setNodeCordon(node, !info.unschedulable);
-			await infoRes.refresh();
+		if (
+			await op.run(async () => {
+				await api.setNodeCordon(node, cordon);
+				await infoRes.refresh();
+			})
+		) {
 			msg = info?.unschedulable ? 'Node cordoned — no new placements.' : 'Node uncordoned.';
 			ok = true;
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			msg = friendlyError(e);
-			ok = false;
-		} finally {
-			busy = false;
 		}
 	}
 
 	// One migrate call per pending VM; failures are tallied, never aborting the
 	// sweep. Cordon already blocks new placements, so one sweep per click is
-	// enough — stragglers get the Retry button.
+	// enough - stragglers get the Retry button.
 	async function evacuate(): Promise<string> {
 		let migrated = 0;
 		let failed = 0;
@@ -78,43 +74,32 @@
 
 	async function enterMaintenance() {
 		confirming = false;
-		busy = true;
 		msg = '';
-		try {
+		await op.run(async () => {
 			await api.setNodeMaintenance(node, true);
 			await infoRes.refresh();
 			const sweep = running.length ? ` — ${await evacuate()}` : '';
 			msg = `Entering maintenance mode${sweep}.`;
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			msg = friendlyError(e);
-			ok = false;
-		} finally {
-			busy = false;
-		}
+		});
 	}
 
 	async function retryEvacuation() {
-		busy = true;
 		msg = '';
-		msg = `Evacuation ${await evacuate()} — watch the migrations in the dock.`;
-		busy = false;
+		await op.run(async () => {
+			msg = `Evacuation ${await evacuate()} — watch the migrations in the dock.`;
+		});
 	}
 
 	async function exitMaintenance() {
-		busy = true;
 		msg = '';
-		try {
-			await api.setNodeMaintenance(node, false);
-			await infoRes.refresh();
+		if (
+			await op.run(async () => {
+				await api.setNodeMaintenance(node, false);
+				await infoRes.refresh();
+			})
+		) {
 			msg = 'Maintenance mode exited — node is schedulable again.';
 			ok = true;
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			msg = friendlyError(e);
-			ok = false;
-		} finally {
-			busy = false;
 		}
 	}
 </script>
@@ -163,14 +148,14 @@
 					<div class="flex items-center gap-2">
 						<button
 							onclick={enterMaintenance}
-							disabled={busy}
+							disabled={op.busy}
 							class="rounded bg-accent px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
 						>
 							Enter Maintenance Mode
 						</button>
 						<button
 							onclick={() => (confirming = false)}
-							disabled={busy}
+							disabled={op.busy}
 							class="rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 						>
 							Cancel
@@ -182,7 +167,7 @@
 					{#if info.maintenance}
 						<button
 							onclick={exitMaintenance}
-							disabled={busy}
+							disabled={op.busy}
 							class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 						>
 							<LogOut size={13} /> Exit Maintenance Mode
@@ -190,7 +175,7 @@
 						{#if pending.length}
 							<button
 								onclick={retryEvacuation}
-								disabled={busy}
+								disabled={op.busy}
 								title="Live-migrate the VMs still on this node"
 								class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 							>
@@ -200,7 +185,7 @@
 					{:else}
 						<button
 							onclick={() => (confirming = true)}
-							disabled={busy}
+							disabled={op.busy}
 							title="Cordon this node and live-migrate every running VM away"
 							class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 						>
@@ -208,7 +193,7 @@
 						</button>
 						<button
 							onclick={toggleCordon}
-							disabled={busy}
+							disabled={op.busy}
 							class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 						>
 							{#if info.unschedulable}<CheckCircle2 size={13} /> Uncordon{:else}<Ban size={13} /> Cordon{/if}
@@ -225,7 +210,9 @@
 					stops new placements; running VMs stay.
 				{/if}
 			</p>
-			{#if msg}
+			{#if op.error}
+				<p class="text-xs text-danger-ink">{op.error}</p>
+			{:else if msg}
 				<p class="text-xs {ok ? 'text-ink-soft' : 'text-danger-ink'}">{msg}</p>
 			{/if}
 		</div>

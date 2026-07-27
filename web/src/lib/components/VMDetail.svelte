@@ -1,11 +1,29 @@
+<script module lang="ts">
+	// The detail view's tab ids, exported so the route guard validates ?tab=
+	// against the same list the TabBar renders.
+	export const VM_TABS = [
+		'summary',
+		'monitor',
+		'configure',
+		'security',
+		'permissions',
+		'snapshots',
+		'console',
+	] as const;
+	export type VMTab = (typeof VM_TABS)[number];
+</script>
+
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { ChevronDown, Pencil, Trash2 } from 'lucide-svelte';
 	import { api, Unauthorized, type Change, type DraftItem, type Network, type VM } from '$lib/api';
 	import { adoptVM, manifestURL, runRuntimeAction, type VMAction } from '$lib/actions';
+	import { type EditSection } from '$lib/editform';
+	import { action } from '$lib/resource.svelte';
 	import { ui, type DetailAction } from '$lib/state/ui.svelte';
 	import { duration, friendlyError } from '$lib/format';
 	import ActionMenu from './ActionMenu.svelte';
+	import Banner from './Banner.svelte';
 	import CloneModal from './CloneModal.svelte';
 	import MigrateModal from './MigrateModal.svelte';
 	import StorageMigrateModal from './StorageMigrateModal.svelte';
@@ -44,8 +62,8 @@
 		vm: VM | null;
 		// The active tab is owned by the page (?tab=); ontab is the programmatic
 		// switch (an action or intent jumping to Snapshots/Console).
-		tab?: Tab;
-		ontab?: (t: Tab) => void;
+		tab?: VMTab;
+		ontab?: (t: VMTab) => void;
 		onstaged?: () => void;
 		stagedItem?: DraftItem | null;
 		onstagedopen?: () => void;
@@ -56,24 +74,19 @@
 		// A one-shot request from outside (the context menu) to open a modal/tab
 		// here; seq distinguishes repeated requests for the same id.
 		intent?: { id: DetailAction; seq: number } | null;
-		// Fired once the intent is applied so the owner clears it — this view
+		// Fired once the intent is applied so the owner clears it - this view
 		// remounts whenever the VM drops out of an inventory frame and returns,
 		// and a kept intent would replay (reopening a dismissed dialog).
 		onintentdone?: () => void;
 	} = $props();
 
-	type Tab =
-		'summary' | 'monitor' | 'configure' | 'security' | 'permissions' | 'snapshots' | 'console';
-
 	// Monitor sub-rail (vCenter keeps all time-series under Monitor).
 	let monitorView = $state<'events' | 'performance'>('events');
 	let editing = $state(false);
 	// Which EditSettings section a Configure "Edit" jumps to (undefined = all).
-	let editSection = $state<'compute' | 'scheduling' | 'storage' | 'network' | 'labels' | undefined>(
-		undefined,
-	);
+	let editSection = $state<EditSection | undefined>(undefined);
 
-	function openEdit(section?: 'compute' | 'scheduling' | 'storage' | 'network' | 'labels') {
+	function openEdit(section?: EditSection) {
 		editSection = section;
 		editing = true;
 	}
@@ -81,8 +94,7 @@
 	// Delete is destructive once the PR merges, so it's gated behind a confirm
 	// dialog that requires typing the VM name (handled by ConfirmDelete).
 	let deleting = $state(false);
-	let deleteBusy = $state(false);
-	let deleteErr = $state('');
+	const delOp = action();
 
 	// Clone name-prompt modal (creates a VirtualMachineClone; imperative).
 	let cloning = $state(false);
@@ -97,11 +109,11 @@
 	let reconciling = $state(false);
 
 	// Imperative runtime ops (restart/pause/unpause/live-migrate). Results
-	// surface as toasts — identical feedback to the right-click context menu.
+	// surface as toasts - identical feedback to the right-click context menu.
 	let runtimeBusy = $state(false);
 
 	function loadDrift(ns: string, name: string) {
-		// Drop a stale response if the selection moved while it was in flight —
+		// Drop a stale response if the selection moved while it was in flight -
 		// VM A's drift must never render under VM B.
 		const fresh = () => vm?.namespace === ns && vm?.name === name;
 		api
@@ -143,7 +155,7 @@
 		}
 	}
 
-	// Maps a host-level action id onto this view's local UI state — the shared
+	// Maps a host-level action id onto this view's local UI state - the shared
 	// tail of both entry points: the Actions menu (handleAction) and an outside
 	// intent (context menu on an unselected VM). A new action is added here once.
 	function applyAction(id: string) {
@@ -153,7 +165,7 @@
 				break;
 			case 'delete':
 				deleting = true;
-				deleteErr = '';
+				delOp.clear();
 				break;
 			case 'console':
 				ontab?.('console');
@@ -183,14 +195,14 @@
 	const vmKey = $derived(vm ? `${vm.namespace}/${vm.name}` : '');
 	$effect(() => {
 		// Reset when the selection changes, and (re)load drift for this VM. The
-		// tab itself is URL state — a fresh VM route arrives without ?tab=.
+		// tab itself is URL state - a fresh VM route arrives without ?tab=.
 		vmKey;
 		untrack(() => {
 			monitorView = 'events';
 			editing = false;
 			editSection = undefined;
 			deleting = false;
-			deleteErr = '';
+			delOp.clear();
 			cloning = false;
 			templating = false;
 			migrating = false;
@@ -200,7 +212,7 @@
 		});
 	});
 
-	// Apply an outside intent (context menu → "Edit settings" on an unselected
+	// Apply an outside intent (context menu -> "Edit settings" on an unselected
 	// VM). Declared AFTER the reset effect above: when a selection change and an
 	// intent arrive in the same flush, effects run in declaration order, so the
 	// intent survives the reset.
@@ -238,17 +250,10 @@
 
 	async function confirmDelete() {
 		if (!vm) return;
-		deleteBusy = true;
-		deleteErr = '';
-		try {
-			await api.stageDelete(vm.namespace, vm.name);
+		const target = vm;
+		if (await delOp.run(() => api.stageDelete(target.namespace, target.name))) {
 			deleting = false;
 			onstaged?.();
-		} catch (e) {
-			if (e instanceof Unauthorized) return; // signed out centrally; skip the error banner
-			deleteErr = friendlyError(e);
-		} finally {
-			deleteBusy = false;
 		}
 	}
 </script>
@@ -297,7 +302,7 @@
 					<button
 						onclick={() => {
 							deleting = true;
-							deleteErr = '';
+							delOp.clear();
 						}}
 						disabled={!vm.sourceFile}
 						title={vm.sourceFile
@@ -325,15 +330,13 @@
 		</div>
 
 		{#if vm.migration && !vm.migration.completed && !vm.migration.failed}
-			<div
-				class="flex items-center gap-2 border-b border-select bg-select-soft px-4 py-1.5 text-xs text-accent-ink"
-			>
+			<Banner tone="accent">
 				<StatusDot tone="info" size="xs" pulse />
 				Live-migrating{#if vm.migration.sourceNode}&nbsp;from {vm.migration.sourceNode}{/if}
 				to {vm.migration.targetNode || '…'}{#if duration(vm.migration.startedAt)}&nbsp;· started {duration(
 						vm.migration.startedAt,
 					)} ago{/if}
-			</div>
+			</Banner>
 		{/if}
 
 		<PendingBanner {vm} />
@@ -362,7 +365,7 @@
 					onchange={(v) => (monitorView = v as typeof monitorView)}
 				/>
 				{#if monitorView === 'performance'}
-					{#key `${vm.namespace}/${vm.name}`}
+					{#key vmKey}
 						<MetricsPanel load={(r) => api.metrics(vm.namespace, vm.name, r)} />
 					{/key}
 				{:else}
@@ -374,7 +377,7 @@
 				<div class="max-w-3xl space-y-4">
 					<section class="rounded border border-line bg-panel p-3">
 						<h2 class="mb-2 text-sm font-semibold text-ink">Trace a flow from this VM</h2>
-						{#key `${vm.namespace}/${vm.name}`}
+						{#key vmKey}
 							<TracePanel source={{ namespace: vm.namespace, vm: vm.name }} />
 						{/key}
 					</section>
@@ -383,11 +386,11 @@
 			{:else if tab === 'permissions'}
 				<Permissions namespaces={[vm.namespace]} />
 			{:else if tab === 'snapshots'}
-				{#key `${vm.namespace}/${vm.name}`}
+				{#key vmKey}
 					<Snapshots {vm} />
 				{/key}
 			{:else}
-				{#key `${vm.namespace}/${vm.name}`}
+				{#key vmKey}
 					<Console {vm} />
 				{/key}
 			{/if}
@@ -434,8 +437,8 @@
 		<ConfirmDelete
 			title="Delete VM — {vm.name}"
 			confirmWord={vm.name}
-			busy={deleteBusy}
-			error={deleteErr}
+			busy={delOp.busy}
+			error={delOp.error}
 			onconfirm={confirmDelete}
 			onclose={() => (deleting = false)}
 		>

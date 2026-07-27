@@ -11,12 +11,11 @@ import (
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
-	"github.com/epheo/dotvirt/internal/validate"
 	"github.com/epheo/dotvirt/internal/vmtemplate"
 )
 
 // StageDeployFromTemplate renders a library template and stages the resulting
-// VM manifest into (id, targetProj)'s draft — "Deploy from Template". The
+// VM manifest into (id, targetProj)'s draft - "Deploy from Template". The
 // library may be the target project itself or another readable one (the shared
 // platform library); the render is pure computation, so deploying needs only
 // the authority to stage into the target project.
@@ -27,10 +26,10 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 	if req.Template == "" || req.Namespace == "" {
 		return model.DraftView{}, fmt.Errorf("%w: template and namespace are required", model.ErrInvalid)
 	}
-	// The template name becomes a repo path segment — same trust boundary as
+	// The template name becomes a repo path segment - same trust boundary as
 	// project/namespace names.
-	if !validate.DNS1123Name(req.Template) {
-		return model.DraftView{}, fmt.Errorf("%w: template name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, req.Template)
+	if err := requireDNS1123("template name", req.Template); err != nil {
+		return model.DraftView{}, err
 	}
 	libRead, err := c.read(libraryProj)
 	if err != nil {
@@ -52,8 +51,8 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if !validate.DNS1123Name(rendered.Name) {
-		return model.DraftView{}, fmt.Errorf("%w: rendered VM name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, rendered.Name)
+	if err := requireDNS1123("rendered VM name", rendered.Name); err != nil {
+		return model.DraftView{}, err
 	}
 	// Templates blueprint their VMs Halted; "Power on after deployment" flips
 	// the rendered manifest so the VM boots as soon as the merge syncs.
@@ -72,7 +71,7 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 	}
 	path := req.Namespace + "/" + rendered.Name + ".yaml"
 	// A deploy must never silently overwrite a committed VM (a duplicate deploy
-	// or a generated-name collision) — merging would replace it.
+	// or a generated-name collision) - merging would replace it.
 	if _, err := targetRead.FileOnBranch(c.baseBranch, path); err == nil {
 		return model.DraftView{}, fmt.Errorf("%w: %s/%s already exists in git", model.ErrConflict, req.Namespace, rendered.Name)
 	}
@@ -91,7 +90,7 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 }
 
 // StageSaveTemplate derives a template from an existing VM's git manifest and
-// stages it into (id, commitProj)'s draft as templates/<name>.yaml — "Clone to
+// stages it into (id, commitProj)'s draft as templates/<name>.yaml - "Clone to
 // Template". commitProj is the library the template lands in (the VM's own
 // project, or the platform repo for the shared library); sourceProj owns the
 // VM being templated.
@@ -99,8 +98,8 @@ func (c *Coordinator) StageSaveTemplate(id auth.Identity, commitProj, sourceProj
 	if err := requireRepo(commitProj); err != nil {
 		return model.DraftView{}, err
 	}
-	if !validate.DNS1123Name(req.Name) {
-		return model.DraftView{}, fmt.Errorf("%w: template name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, req.Name)
+	if err := requireDNS1123("template name", req.Name); err != nil {
+		return model.DraftView{}, err
 	}
 	srcRead, err := c.read(sourceProj)
 	if err != nil {
@@ -144,7 +143,7 @@ func (c *Coordinator) StageSaveTemplate(id auth.Identity, commitProj, sourceProj
 	return c.Get(id, commitProj)
 }
 
-// StageUpdateTemplate replaces a library template's manifest — editing a
+// StageUpdateTemplate replaces a library template's manifest - editing a
 // content-library item in place. The new content must still parse as a
 // VirtualMachineTemplate (an edit must never break the catalog), and the
 // template must already exist on the base branch: a merely-staged save is
@@ -153,8 +152,8 @@ func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.P
 	if err := requireRepo(commitProj); err != nil {
 		return model.DraftView{}, err
 	}
-	if !validate.DNS1123Name(req.Name) {
-		return model.DraftView{}, fmt.Errorf("%w: template name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, req.Name)
+	if err := requireDNS1123("template name", req.Name); err != nil {
+		return model.DraftView{}, err
 	}
 	path := git.TemplatesDir + "/" + req.Name + ".yaml"
 	if t := vmtemplate.Parse(path, []byte(req.YAML), commitProj.Name); t.Error != "" {
@@ -184,7 +183,7 @@ func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.P
 // seedTemplates pushes the starter library onto a repo dotvirt just created.
 // A git-plane write by dotvirt's own credentials: templates sit outside the
 // ArgoCD-applied path, so the seed changes nothing on the cluster, and a
-// failure only leaves the new library empty — never fails project creation.
+// failure only leaves the new library empty - never fails project creation.
 func (c *Coordinator) seedTemplates(repoURL string) {
 	_, write, err := c.repos.Get(repoURL)
 	if err != nil {

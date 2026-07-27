@@ -12,8 +12,8 @@ func nameInSelector(vals ...any) map[string]any {
 	}}}
 }
 
-// The east-west chain must come out in evaluation order — admin ANPs by
-// precedence, then the selecting NetworkPolicies, then baseline — with
+// The east-west chain must come out in evaluation order - admin ANPs by
+// precedence, then the selecting NetworkPolicies, then baseline - with
 // non-binding policies absent and a definite netpol selection flipping the
 // default-deny flags per declared direction.
 func TestEffectiveEastWestOrder(t *testing.T) {
@@ -100,7 +100,7 @@ func TestEffectiveEastWestOrder(t *testing.T) {
 }
 
 // policyTypes defaulting: absent means Ingress, plus Egress when egress rules
-// exist — a netpol with egress rules and no policyTypes default-denies both.
+// exist - a netpol with egress rules and no policyTypes default-denies both.
 func TestEffectiveNetpolTypeDefaulting(t *testing.T) {
 	s := New(nil, nil)
 	add(t, s.netpol, map[string]any{

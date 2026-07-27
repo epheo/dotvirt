@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Plus, Trash2 } from 'lucide-svelte';
 	import { api, type NetworkPolicyCreate, type PolicyRule, type VM } from '$lib/api';
+	import { rowList } from '$lib/rowlist.svelte';
 	import { TERMS } from '$lib/vocab';
 	import { validName, NAME_HINT } from '$lib/validate';
 	import Note from './Note.svelte';
@@ -25,7 +26,7 @@
 		onstaged: () => void;
 	} = $props();
 
-	// A Group is a label selector (key=value) — the same primitive NSX-T's dynamic
+	// A Group is a label selector (key=value) - the same primitive NSX-T's dynamic
 	// Groups compile to. The policy protects the "applied-to" Group and allows ingress
 	// only from the peer Groups in its rules (a NetworkPolicy that selects pods
 	// default-denies all other ingress). One ingress row = one allow-from rule.
@@ -36,10 +37,11 @@
 	let namespace = $state('');
 	let appliedKey = $state(''); // applied-to Group; empty = the whole namespace
 	let appliedValue = $state('');
-	let rows = $state<Row[]>([blankRow()]);
+	const rules = rowList(blankRow);
+	const rows = $derived(rules.rows);
 
 	// Effective members: VMs in the namespace whose labels match the applied-to Group
-	// (every VM in the namespace when no selector is set) — the NSX-T "effective
+	// (every VM in the namespace when no selector is set) - the NSX-T "effective
 	// membership" readout, computed live from the inventory.
 	const members = $derived(
 		vms.filter(
@@ -60,13 +62,6 @@
 			? `Stages DFW policy “${name}” → ${namespace} (${members.length} member VM${members.length === 1 ? '' : 's'})`
 			: '',
 	);
-
-	function addRow() {
-		rows = [...rows, blankRow()];
-	}
-	function removeRow(i: number) {
-		rows = rows.filter((_, j) => j !== i);
-	}
 
 	async function stage() {
 		const ingress: PolicyRule[] = [];
@@ -129,7 +124,9 @@
 	<div class="space-y-2">
 		<div class="flex items-center justify-between">
 			<span class="text-ink-soft">Allow ingress from</span>
-			<button onclick={addRow} class="flex items-center gap-1 text-xs text-accent hover:underline"
+			<button
+				onclick={rules.add}
+				class="flex items-center gap-1 text-xs text-accent hover:underline"
 				><Plus size={12} /> Add source</button
 			>
 		</div>
@@ -146,7 +143,7 @@
 				/>
 				<ProtoPortInput bind:proto={row.proto} bind:port={row.port} portClass="w-20" />
 				<button
-					onclick={() => removeRow(i)}
+					onclick={() => rules.remove(i)}
 					disabled={rows.length === 1}
 					aria-label="Remove source"
 					class="ml-auto text-ink-faint hover:text-danger disabled:opacity-40"

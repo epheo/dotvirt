@@ -1,7 +1,7 @@
 // Package project resolves dotvirt's tenants from live cluster facts: a project
 // is a set of namespaces that share a label (dotvirt.io/project=<name>) and point
 // at one git repo via an annotation (dotvirt.io/repo=<url>). There is no dotvirt
-// registry — the cluster IS the registry, read with the caller's own token, so a
+// registry - the cluster IS the registry, read with the caller's own token, so a
 // user only ever learns the repos of namespaces their RBAC already lets them see.
 package project
 
@@ -23,8 +23,8 @@ type ProjectInfo struct {
 
 // Namespace is the input to resolution: a project-labeled namespace's name plus
 // the label/annotation maps the resolver reads. It is supplied from the SA-owned
-// cluster snapshot (clusterstate), not fetched per request — the resolver itself
-// is now a pure function over this set.
+// cluster snapshot (clusterstate), not fetched per request - the resolver is a
+// pure function over this set.
 type Namespace struct {
 	Name        string
 	Labels      map[string]string
@@ -60,13 +60,13 @@ type accum struct {
 // Resolve groups the project-labeled namespaces into projects, keeping only those
 // the caller may see. namespaces is the SA-owned snapshot of every labeled
 // namespace (clusterstate); visible is the set the caller's token can read VMs in
-// (nil means "no filter" — the SA/background path, which sees all). A namespace
+// (nil means "no filter" - the SA/background path, which sees all). A namespace
 // not in visible is dropped, so a user never learns a project (or its repo URL)
-// outside their RBAC: this filter is the authorization gate, replacing the former
-// per-token namespace GETs. A project whose namespaces set no repo, or disagree on
-// it, is returned with Error set and Repo empty.
+// outside their RBAC: this filter is the authorization gate. A project whose
+// namespaces set no repo, or disagree on it, is returned with Error set and
+// Repo empty.
 //
-// Pure function — no cluster calls. The expensive parts (which namespaces exist,
+// Pure function - no cluster calls. The expensive parts (which namespaces exist,
 // what they're labeled) come from the shared snapshot; the only per-user input is
 // the visible set, computed once per token and cached by the caller.
 func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []ProjectInfo {

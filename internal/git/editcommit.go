@@ -32,12 +32,12 @@ type ChangesetItem struct {
 }
 
 // CommitChangeset applies every item to one branch created off base and commits
-// them together — the propose step of the draft workflow. Edits re-read the
+// them together - the propose step of the draft workflow. Edits re-read the
 // current source on base (so the proposal is against current trunk) and apply
 // via manifest.ApplyEdit (minimal diff); creates write a new file. Pushes when enabled.
 //
 // The branch is force-updated, so re-proposing replaces its contents rather than
-// stacking commits — keeping one PR per draft.
+// stacking commits - keeping one PR per draft.
 func (w *WriteRepo) CommitChangeset(base, branch, message string, items []ChangesetItem, by Author) (EditResult, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

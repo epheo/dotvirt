@@ -14,15 +14,15 @@ import (
 
 // DRS (the descheduler tier) follows the platform-repo staging model: enabling
 // or re-configuring stages the drsgen file set into the platform draft, and the
-// committed state is read back off the base branch — the same
-// stage → propose → merge → Argo-applies path as every other platform kind.
+// committed state is read back off the base branch - the same
+// stage -> propose -> merge -> Argo-applies path as every other platform kind.
 
-// StageEnableDRS makes (id, proj)'s draft represent exactly the base→spec
-// delta — proj is the platform repo (DRS is cluster infrastructure, so it
+// StageEnableDRS makes (id, proj)'s draft represent exactly the base->spec
+// delta - proj is the platform repo (DRS is cluster infrastructure, so it
 // always routes to the platform tier). Declarative: the previous DRS entries
 // are replaced wholesale (a re-configure never leaves a stale sibling like a
 // dropped PSI opt-in behind), files already identical on the base branch are
-// skipped, and a spec matching the base resolves to an empty delta — a clean
+// skipped, and a spec matching the base resolves to an empty delta - a clean
 // draft, not an error. That empty case is also how a pending change is
 // cancelled: re-submitting the committed configuration.
 func (c *Coordinator) StageEnableDRS(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
@@ -62,7 +62,7 @@ func (c *Coordinator) StageEnableDRS(id auth.Identity, proj project.ProjectInfo,
 // StageDisableDRS stages the removal of the KubeDescheduler CR: rebalancing
 // stops on merge, while the operator install (and any PSI MachineConfig) stays.
 // When the CR was never committed, a pending enable in the draft is cleared
-// instead — a cancel, not a delete.
+// instead - a cancel, not a delete.
 func (c *Coordinator) StageDisableDRS(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error) {
 	read, err := c.read(proj)
 	if err != nil {
@@ -126,7 +126,7 @@ func (c *Coordinator) DRSState(proj project.ProjectInfo) (model.DRSGitState, err
 		return out, nil
 	}
 	out.Configured = true
-	// A hand-edited CR that no longer parses still reads as configured — the
+	// A hand-edited CR that no longer parses still reads as configured - the
 	// panel then shows the raw state without a config form prefill.
 	if spec, err := drsgen.Parse(content); err == nil {
 		out.Config = configFromSpec(spec)
@@ -137,7 +137,7 @@ func (c *Coordinator) DRSState(proj project.ProjectInfo) (model.DRSGitState, err
 	return out, nil
 }
 
-// DRSDraft reads (id, proj)'s pending DRS entries back as configuration — the
+// DRSDraft reads (id, proj)'s pending DRS entries back as configuration - the
 // staged plane between committed and live. The panel seeds its dialog from
 // this when present, so editing a not-yet-proposed change continues it (PSI
 // opt-in included) instead of silently resetting to the committed state.

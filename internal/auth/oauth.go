@@ -1,9 +1,10 @@
 // OpenShift SSO: the authorization-code flow against the cluster's OAuth server.
-// Only token ACQUISITION changes — the access token OpenShift returns is a normal
+// Only token ACQUISITION changes - the access token OpenShift returns is a normal
 // bearer token for the API server, so it lands in the exact same TokenReview +
 // signed-cookie + per-request pass-through path as a pasted token, and cluster
 // RBAC stays the sole authority. Token paste remains for vanilla Kubernetes and
 // ServiceAccounts.
+
 package auth
 
 import (
@@ -11,7 +12,6 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -20,20 +20,21 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/epheo/dotvirt/internal/tlsconf"
 )
 
 // OAuthConfig wires the OpenShift OAuthClient dotvirt was registered as.
 type OAuthConfig struct {
 	ClientID     string
 	ClientSecret string
-	RedirectURL  string // {public-url}/api/auth/callback — must match the OAuthClient's redirectURIs
+	RedirectURL  string // {public-url}/api/auth/callback - must match the OAuthClient's redirectURIs
 	// CAFile is a PEM bundle to trust for the token endpoint (the oauth Route is
 	// usually signed by the ingress CA, not in the pod's system pool). Empty =
 	// system pool; InsecureTLS covers dev.
@@ -42,7 +43,7 @@ type OAuthConfig struct {
 }
 
 // OAuth drives the login redirect and the code-exchange callback. Endpoints come
-// from the API server's /.well-known/oauth-authorization-server document —
+// from the API server's /.well-known/oauth-authorization-server document -
 // discovered lazily and cached, so a slow OAuth stack never blocks startup and a
 // vanilla-Kubernetes cluster simply 503s the (unreachable) SSO route.
 type OAuth struct {
@@ -65,19 +66,13 @@ type oauthMeta struct {
 	TokenEndpoint         string `json:"token_endpoint"`
 }
 
-// NewOAuth builds the flow. It never probes the cluster here — see discover.
+// NewOAuth builds the flow. It never probes the cluster here - see discover.
 func NewOAuth(cfg OAuthConfig, saKube kubernetes.Interface, auth *Authenticator) (*OAuth, error) {
 	transport := http.DefaultTransport
 	if cfg.CAFile != "" || cfg.InsecureTLS {
 		tlsCfg := &tls.Config{InsecureSkipVerify: cfg.InsecureTLS} //nolint:gosec // explicit dev opt-in
 		if cfg.CAFile != "" {
-			// Tolerant: a lagging CA mount must not take the console down for an SSO
-			// nicety; the system pool keeps token login working and SSO fails legibly.
-			if pem, err := os.ReadFile(cfg.CAFile); err != nil {
-				log.Printf("oauth: CA %s unreadable (%v); staying on the system trust pool", cfg.CAFile, err)
-			} else if pool := x509.NewCertPool(); !pool.AppendCertsFromPEM(pem) {
-				log.Printf("oauth: CA %s holds no certificates; staying on the system trust pool", cfg.CAFile)
-			} else {
+			if pool := tlsconf.RootCAs("oauth", cfg.CAFile); pool != nil {
 				tlsCfg.RootCAs = pool
 			}
 		}
@@ -161,7 +156,7 @@ func (o *OAuth) LoginRedirect(w http.ResponseWriter, r *http.Request) {
 // Callback (GET /api/auth/callback) verifies the state, exchanges the code for
 // the user's access token, validates it exactly like a pasted token, and sets the
 // same session cookie. Failures land back on the login screen with a generic
-// sso_error flag — the detail is logged, not shown (it can carry endpoint URLs).
+// sso_error flag - the detail is logged, not shown (it can carry endpoint URLs).
 func (o *OAuth) Callback(w http.ResponseWriter, r *http.Request) {
 	failLogin := func(why string, err error) {
 		log.Printf("oauth callback: %s: %v", why, err)
@@ -189,7 +184,7 @@ func (o *OAuth) Callback(w http.ResponseWriter, r *http.Request) {
 		failLogin("discovery", err)
 		return
 	}
-	// The exchange must use the CA-aware client — the token endpoint is the
+	// The exchange must use the CA-aware client - the token endpoint is the
 	// external oauth Route, not the API server.
 	ctx := context.WithValue(r.Context(), oauth2.HTTPClient, o.client)
 	tok, err := o.oauth2Config(m).Exchange(ctx, code)
@@ -232,7 +227,7 @@ func (o *OAuth) DesiredClient() (id, secret, redirectURL string) {
 // screen says "not finished" instead of offering a failing button. Two checks:
 // the authorize endpoint (registered answers <400, unregistered or
 // redirect-mismatched 4xx; redirects held, no credentials travel), then a
-// bogus-code token exchange proving the registered secret still matches ours —
+// bogus-code token exchange proving the registered secret still matches ours -
 // a reinstall regenerates the Secret while the cluster-scoped OAuthClient
 // survives with the old one, which the authorize endpoint can't see.
 // Network/5xx reads as registered: a flaky oauth stack must not talk users out

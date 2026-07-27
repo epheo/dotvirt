@@ -6,9 +6,11 @@
 	import { persisted } from '$lib/state/persisted.svelte';
 	import { TBODY, THEAD_TR } from '$lib/table';
 	import PowerDot from './PowerDot.svelte';
+	import SelectInput from './SelectInput.svelte';
 	import StagedBadge from './StagedBadge.svelte';
 	import StatusPill from './StatusPill.svelte';
 	import SyncBadge from './SyncBadge.svelte';
+	import TextInput from './TextInput.svelte';
 
 	let {
 		vms,
@@ -76,7 +78,7 @@
 	const syncRank = (s: SyncStatus) =>
 		s === 'OutOfSync' ? 3 : s === 'Unknown' ? 2 : s === 'NotTracked' ? 1 : 0;
 
-	// Memory like "2Gi"/"512Mi" → bytes, so the column sorts numerically not lexically.
+	// Memory like "2Gi"/"512Mi" -> bytes, so the column sorts numerically not lexically.
 	function memBytes(m?: string): number {
 		if (!m) return 0;
 		const match = /^(\d+(?:\.\d+)?)\s*([KMGT]i?)?B?$/.exec(m.trim());
@@ -133,6 +135,32 @@
 		});
 	});
 
+	// The two toolbar filters are structurally identical: one spec each, one
+	// rendering below.
+	const FILTERS: { key: 'powerFilter' | 'syncFilter'; title: string; options: string[][] }[] = [
+		{
+			key: 'powerFilter',
+			title: 'Filter by power state',
+			options: [
+				['all', 'Power: all'],
+				['On', 'On'],
+				['Off', 'Off'],
+				['Unknown', 'Unknown'],
+			],
+		},
+		{
+			key: 'syncFilter',
+			title: 'Filter by ArgoCD sync status',
+			options: [
+				['all', 'Sync: all'],
+				['Synced', 'Synced'],
+				['OutOfSync', 'Out of sync'],
+				['NotTracked', 'Not tracked'],
+				['Unknown', 'Unknown'],
+			],
+		},
+	];
+
 	const cols: { key: SortKey; label: string; class?: string }[] = [
 		{ key: 'power', label: '', class: 'w-8' },
 		{ key: 'name', label: 'Name' },
@@ -174,42 +202,23 @@
 
 <div class="flex h-full flex-col">
 	<div class="flex items-center gap-2 border-b border-line px-4 py-2">
-		<input
-			bind:value={search}
-			placeholder="Search name, namespace, IP…"
-			class="w-64 rounded border border-line-strong px-2 py-1 text-sm focus:border-accent/60"
-		/>
-		<select
-			value={prefs.value.powerFilter}
-			onchange={(e) =>
-				(prefs.value = {
-					...prefs.value,
-					powerFilter: e.currentTarget.value as 'all' | Power,
-				})}
-			class="rounded border border-line-strong px-2 py-1 text-sm text-ink-soft"
-			title="Filter by power state"
-		>
-			<option value="all">Power: all</option>
-			<option value="On">On</option>
-			<option value="Off">Off</option>
-			<option value="Unknown">Unknown</option>
-		</select>
-		<select
-			value={prefs.value.syncFilter}
-			onchange={(e) =>
-				(prefs.value = {
-					...prefs.value,
-					syncFilter: e.currentTarget.value as 'all' | SyncStatus,
-				})}
-			class="rounded border border-line-strong px-2 py-1 text-sm text-ink-soft"
-			title="Filter by ArgoCD sync status"
-		>
-			<option value="all">Sync: all</option>
-			<option value="Synced">Synced</option>
-			<option value="OutOfSync">Out of sync</option>
-			<option value="NotTracked">Not tracked</option>
-			<option value="Unknown">Unknown</option>
-		</select>
+		<TextInput bind:value={search} placeholder="Search name, namespace, IP…" class="w-64!" />
+		{#each FILTERS as f (f.key)}
+			<SelectInput
+				value={prefs.value[f.key]}
+				onchange={(e) =>
+					(prefs.value = {
+						...prefs.value,
+						[f.key]: e.currentTarget.value as 'all' | Power | SyncStatus,
+					} as typeof prefs.value)}
+				class="w-auto! text-ink-soft"
+				title={f.title}
+			>
+				{#each f.options as [value, label] (value)}
+					<option {value}>{label}</option>
+				{/each}
+			</SelectInput>
+		{/each}
 		<span class="ml-auto text-xs text-ink-faint">{rows.length} VMs</span>
 	</div>
 

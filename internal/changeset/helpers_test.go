@@ -59,7 +59,7 @@ func TestProposedBranchNoCollision(t *testing.T) {
 		t.Errorf("proposedBranch not stable for same identity: %q vs %q", a, b)
 	}
 
-	// Different project → different branch.
+	// Different project -> different branch.
 	if a, b := c.proposedBranch("alice", "p1"), c.proposedBranch("alice", "p2"); a == b {
 		t.Errorf("same user, different project share branch %q", a)
 	}

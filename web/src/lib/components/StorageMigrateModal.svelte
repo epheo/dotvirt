@@ -4,13 +4,12 @@
 	import { friendlyError } from '$lib/format';
 	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
 	import ErrorNote from './ErrorNote.svelte';
-	import Modal from './Modal.svelte';
-	import StageFooter from './StageFooter.svelte';
+	import StageModal from './StageModal.svelte';
 	import StorageClassSelect from './StorageClassSelect.svelte';
 
 	// Storage live migration (the Storage vMotion dialog): pick a target class
 	// per disk; staging rewrites each disk's DataVolume template and sets
-	// updateVolumesStrategy: Migration — all through the normal PR lane. On
+	// updateVolumesStrategy: Migration - all through the normal PR lane. On
 	// merge KubeVirt copies each disk to a fresh volume on the target class
 	// while the VM keeps running; reverting the commit cancels the migration.
 	let {
@@ -28,16 +27,15 @@
 	const disks = $derived((vm.disks ?? []).filter((d) => d.type === 'dataVolume'));
 
 	let options = $state<Options | null>(null);
-	let targets = $state<Record<string, string>>({}); // disk name → target class ('' = keep)
-	let busy = $state(false);
-	let error = $state('');
+	let targets = $state<Record<string, string>>({}); // disk name -> target class ('' = keep)
+	let loadError = $state(''); // the class-list fetch, distinct from the submit
 
 	async function load() {
 		try {
 			options = await api.options();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			error = friendlyError(e);
+			loadError = friendlyError(e);
 		}
 	}
 	$effect(() => {
@@ -54,79 +52,63 @@
 		return disks.find((d) => d.name === disk)?.storageClass ?? '';
 	}
 
-	async function stage() {
-		if (!moves.length) return;
-		busy = true;
-		error = '';
-		try {
-			await api.stageEdit(vm.namespace, vm.name, {
-				sourceFile: vm.sourceFile,
-				migrateVolumes: moves,
-			});
-			onstaged();
-			onclose();
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			error = friendlyError(e);
-		} finally {
-			busy = false;
-		}
+	function stage() {
+		return api.stageEdit(vm.namespace, vm.name, {
+			sourceFile: vm.sourceFile,
+			migrateVolumes: moves,
+		});
 	}
 </script>
 
-<Modal title="Migrate storage — {vm.name}" size="lg" {onclose}>
-	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm text-ink-soft">
-		<p class="mb-3 text-xs text-ink-muted">
-			Stages a live storage migration into <strong>Changes</strong>. When the pull request merges,
-			KubeVirt copies each disk to a new volume on the target class while the VM keeps running — the
-			VM must still be running then, and the cluster must support volume migration. Reverting the
-			merged change cancels an in-flight migration.
-		</p>
+<StageModal
+	title="Migrate storage — {vm.name}"
+	size="lg"
+	label={moves.length ? `Stage migration (${moves.length})` : 'Stage migration'}
+	missing={moves.length ? [] : ['Pick a target class for at least one disk']}
+	summary={moves.length
+		? `Stages ${moves.map((m) => `${m.name} → ${m.storageClass}`).join(', ')}`
+		: ''}
+	onsubmit={stage}
+	{onstaged}
+	{onclose}
+>
+	<p class="text-xs text-ink-muted">
+		Stages a live storage migration into <strong>Changes</strong>. When the pull request merges,
+		KubeVirt copies each disk to a new volume on the target class while the VM keeps running — the
+		VM must still be running then, and the cluster must support volume migration. Reverting the
+		merged change cancels an in-flight migration.
+	</p>
 
-		<table class="w-full text-[13px]">
-			<thead class={THEAD}>
-				<tr class={THEAD_TR}>
-					<th class={TH}>Disk</th>
-					<th class={TH}>Size</th>
-					<th class={TH}>Current class</th>
-					<th class={TH_LAST}>Target class</th>
+	<table class="w-full text-[13px]">
+		<thead class={THEAD}>
+			<tr class={THEAD_TR}>
+				<th class={TH}>Disk</th>
+				<th class={TH}>Size</th>
+				<th class={TH}>Current class</th>
+				<th class={TH_LAST}>Target class</th>
+			</tr>
+		</thead>
+		<tbody class={TBODY}>
+			{#each disks as d (d.name)}
+				<tr>
+					<td class="py-1.5 pr-3 font-medium text-ink">{d.name}</td>
+					<td class="py-1.5 pr-3 whitespace-nowrap text-ink-muted">{d.size || '—'}</td>
+					<td class="py-1.5 pr-3 whitespace-nowrap text-ink-muted">
+						{d.storageClass || 'cluster default'}
+					</td>
+					<td class="py-1.5">
+						<StorageClassSelect
+							options={options?.storageClasses ?? []}
+							value={targets[d.name] ?? ''}
+							onchange={(e) => (targets = { ...targets, [d.name]: e.currentTarget.value })}
+							emptyLabel="— keep —"
+							exclude={d.storageClass}
+						/>
+					</td>
 				</tr>
-			</thead>
-			<tbody class={TBODY}>
-				{#each disks as d (d.name)}
-					<tr>
-						<td class="py-1.5 pr-3 font-medium text-ink">{d.name}</td>
-						<td class="py-1.5 pr-3 whitespace-nowrap text-ink-muted">{d.size || '—'}</td>
-						<td class="py-1.5 pr-3 whitespace-nowrap text-ink-muted">
-							{d.storageClass || 'cluster default'}
-						</td>
-						<td class="py-1.5">
-							<StorageClassSelect
-								options={options?.storageClasses ?? []}
-								value={targets[d.name] ?? ''}
-								onchange={(e) => (targets = { ...targets, [d.name]: e.currentTarget.value })}
-								emptyLabel="— keep —"
-								exclude={d.storageClass}
-							/>
-						</td>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
+			{/each}
+		</tbody>
+	</table>
 
-		<ErrorNote {error} class="mt-3" />
-	</div>
-	{#snippet footer()}
-		<StageFooter
-			label={moves.length ? `Stage migration (${moves.length})` : 'Stage migration'}
-			disabled={!moves.length}
-			missing={['Pick a target class for at least one disk']}
-			summary={moves.length
-				? `Stages ${moves.map((m) => `${m.name} → ${m.storageClass}`).join(', ')}`
-				: ''}
-			submitting={busy}
-			onsubmit={stage}
-			oncancel={onclose}
-		/>
-	{/snippet}
-</Modal>
+	<ErrorNote error={loadError} />
+</StageModal>

@@ -1,6 +1,5 @@
-// Command manager runs the dotvirt installer operator: it reconciles Dotvirt
-// resources into a full install (RBAC, Deployment, Route/Ingress, the AppProject
-// tier + platform Argo app) and bootstraps the platform git repo.
+// Command manager runs the dotvirt installer operator (see api/v1alpha1 for
+// what an install comprises).
 package main
 
 import (
@@ -17,6 +16,7 @@ import (
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/controller"
+	"github.com/epheo/dotvirt/operator/internal/platform"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -59,11 +59,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Detection FAILS startup rather than defaulting: a wrong platform silently
+	// mis-renders every platform-gated resource (most damagingly fsGroup, which an
+	// OpenShift SCC then rejects, bricking Forgejo). Failing loud turns a transient
+	// discovery-API blip at boot into a quick pod restart that retries, instead of
+	// a permanent mis-render from an empty or guessed platform.
+	plat, err := platform.Detect(mgr.GetConfig())
+	if err != nil {
+		setupLog.Error(err, "unable to detect platform")
+		os.Exit(1)
+	}
+
 	if err := (&controller.DotvirtReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Config: mgr.GetConfig(),
-		DryRun: dryRun,
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Config:   mgr.GetConfig(),
+		Platform: plat,
+		DryRun:   dryRun,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Dotvirt")
 		os.Exit(1)

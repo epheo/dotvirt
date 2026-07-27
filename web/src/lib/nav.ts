@@ -1,6 +1,6 @@
 // URL scheme: every view is a route, so views are deep-linkable and the back
 // button walks objects. Tabs ride ?tab= with replaceState (back never walks
-// tab flips). The VM route is section-agnostic — every section's tree opens VMs.
+// tab flips). The VM route is section-agnostic - every section's tree opens VMs.
 import type { Scope } from './lenses';
 
 export type Section = 'compute' | 'hosts' | 'networking' | 'storage' | 'catalog';
@@ -18,7 +18,7 @@ export function hrefForScope(s: Scope): string {
 		case 'node':
 			return `/hosts/${enc(s.node)}`;
 		case 'network':
-			// Network keys may carry a raw "ns/name" NAD ref — the route is a rest
+			// Network keys may carry a raw "ns/name" NAD ref - the route is a rest
 			// param, so the slash stays a slash.
 			return `/networking/${s.network.split('/').map(enc).join('/')}`;
 		case 'storage':
@@ -30,7 +30,7 @@ export function vmHref(namespace: string, name: string, tab?: string): string {
 	return `/vm/${enc(namespace)}/${enc(name)}${tab ? `?tab=${tab}` : ''}`;
 }
 
-// The inventory section a path belongs to — drives the tree's lens and the
+// The inventory section a path belongs to - drives the tree's lens and the
 // section highlight. The VM route keeps the Compute tree.
 export function sectionOf(pathname: string): Section {
 	const head = pathname.split('/')[1];
@@ -65,7 +65,7 @@ export function trailForScope(s: Scope): { label: string; href?: string }[] {
 }
 
 // The inverse of hrefForScope: the Scope a path focuses (the section roots and
-// non-scope routes — /vm, /catalog — read as 'all').
+// non-scope routes - /vm, /catalog - read as 'all').
 export function scopeFromPath(pathname: string): Scope {
 	const parts = pathname.split('/').slice(1).map(decodeURIComponent);
 	switch (parts[0]) {

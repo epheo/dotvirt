@@ -8,7 +8,7 @@ import (
 	"github.com/epheo/dotvirt/internal/validate"
 )
 
-// EgressFirewallSpec describes a namespace's north-south egress firewall — the
+// EgressFirewallSpec describes a namespace's north-south egress firewall - the
 // gateway-firewall analog on a project's Tier-1. OVN-K allows exactly one
 // EgressFirewall per namespace and it must be named "default"; its ordered rules
 // permit or deny egress from the namespace's pods (and VMs) to external CIDRs or DNS
@@ -25,13 +25,7 @@ type EgressRule struct {
 	Action  string       `json:"action"`            // Allow | Deny
 	CIDR    string       `json:"cidr,omitempty"`    // cidrSelector destination
 	DNSName string       `json:"dnsName,omitempty"` // dnsName destination
-	Ports   []EgressPort `json:"ports,omitempty"`
-}
-
-// EgressPort narrows a rule to a transport port.
-type EgressPort struct {
-	Protocol string `json:"protocol"` // TCP | UDP | SCTP
-	Port     int    `json:"port"`
+	Ports   []PolicyPort `json:"ports,omitempty"`
 }
 
 // EgressFirewallManifest renders the EgressFirewall YAML plus its repo-relative
@@ -64,15 +58,9 @@ func EgressFirewallManifest(s EgressFirewallSpec) (path string, content []byte, 
 		}
 		rule := map[string]any{"type": r.Action, "to": to}
 		if len(r.Ports) > 0 {
-			ports := make([]any, 0, len(r.Ports))
-			for j, p := range r.Ports {
-				if p.Protocol != "TCP" && p.Protocol != "UDP" && p.Protocol != "SCTP" {
-					return "", nil, fmt.Errorf("rule %d port %d: protocol must be TCP, UDP or SCTP", i+1, j+1)
-				}
-				if p.Port <= 0 || p.Port > 65535 {
-					return "", nil, fmt.Errorf("rule %d port %d: port must be 1..65535", i+1, j+1)
-				}
-				ports = append(ports, map[string]any{"protocol": p.Protocol, "port": p.Port})
+			ports, err := portEntries(fmt.Sprintf("rule %d", i+1), r.Ports, false)
+			if err != nil {
+				return "", nil, err
 			}
 			rule["ports"] = ports
 		}
@@ -90,7 +78,7 @@ func EgressFirewallManifest(s EgressFirewallSpec) (path string, content []byte, 
 	return s.Namespace + "/egressfirewalls/default.yaml", out, nil
 }
 
-// EgressIPSpec describes a cluster-scoped EgressIP — the Tier-0 source-NAT pool that
+// EgressIPSpec describes a cluster-scoped EgressIP - the Tier-0 source-NAT pool that
 // pins a project's egress to fixed, routable IPs. OVN-K applies it to the namespaces
 // its selector matches; we render a namespaceSelector matching the chosen namespaces
 // by name. Cluster-scoped, so it lands in the platform repo.
@@ -102,9 +90,10 @@ type EgressIPSpec struct {
 
 // EgressIPManifest renders the EgressIP YAML plus its repo-relative path.
 func EgressIPManifest(s EgressIPSpec) (path string, content []byte, err error) {
+	if err := validate.RequireDNS1123("name", s.Name); err != nil {
+		return "", nil, err
+	}
 	switch {
-	case !validate.DNS1123Name(s.Name):
-		return "", nil, fmt.Errorf("name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", s.Name)
 	case len(s.EgressIPs) == 0:
 		return "", nil, fmt.Errorf("at least one egress IP is required")
 	case len(s.Namespaces) == 0:
@@ -120,14 +109,8 @@ func EgressIPManifest(s EgressIPSpec) (path string, content []byte, err error) {
 		"kind":       "EgressIP",
 		"metadata":   map[string]any{"name": s.Name},
 		"spec": map[string]any{
-			"egressIPs": toAny(s.EgressIPs),
-			"namespaceSelector": map[string]any{
-				"matchExpressions": []any{map[string]any{
-					"key":      "kubernetes.io/metadata.name",
-					"operator": "In",
-					"values":   toAny(s.Namespaces),
-				}},
-			},
+			"egressIPs":         toAny(s.EgressIPs),
+			"namespaceSelector": nsNameSelector(s.Namespaces),
 		},
 	})
 	if err != nil {
@@ -136,7 +119,7 @@ func EgressIPManifest(s EgressIPSpec) (path string, content []byte, err error) {
 	return "egressips/" + s.Name + ".yaml", out, nil
 }
 
-// ExternalRouteSpec describes a cluster-scoped AdminPolicyBasedExternalRoute — the
+// ExternalRouteSpec describes a cluster-scoped AdminPolicyBasedExternalRoute - the
 // Tier-0 static route that steers a project's egress through external next-hop
 // gateways. Cluster-scoped, so it lands in the platform repo.
 type ExternalRouteSpec struct {
@@ -148,9 +131,10 @@ type ExternalRouteSpec struct {
 // ExternalRouteManifest renders the AdminPolicyBasedExternalRoute YAML plus its
 // repo-relative path.
 func ExternalRouteManifest(s ExternalRouteSpec) (path string, content []byte, err error) {
+	if err := validate.RequireDNS1123("name", s.Name); err != nil {
+		return "", nil, err
+	}
 	switch {
-	case !validate.DNS1123Name(s.Name):
-		return "", nil, fmt.Errorf("name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", s.Name)
 	case len(s.Namespaces) == 0:
 		return "", nil, fmt.Errorf("at least one namespace must be selected")
 	case len(s.NextHops) == 0:
@@ -168,15 +152,7 @@ func ExternalRouteManifest(s ExternalRouteSpec) (path string, content []byte, er
 		"kind":       "AdminPolicyBasedExternalRoute",
 		"metadata":   map[string]any{"name": s.Name},
 		"spec": map[string]any{
-			"from": map[string]any{
-				"namespaceSelector": map[string]any{
-					"matchExpressions": []any{map[string]any{
-						"key":      "kubernetes.io/metadata.name",
-						"operator": "In",
-						"values":   toAny(s.Namespaces),
-					}},
-				},
-			},
+			"from":     map[string]any{"namespaceSelector": nsNameSelector(s.Namespaces)},
 			"nextHops": map[string]any{"static": static},
 		},
 	})

@@ -33,7 +33,7 @@
 	let result = $state<Record<string, ProposeResult & { title?: string }>>({});
 
 	// A propose that landed a PR renders through the SAME banner as a live PR
-	// lane, so when the streamed proposal arrives it takes over invisibly —
+	// lane, so when the streamed proposal arrives it takes over invisibly -
 	// never a differently-styled box that swaps to "the definitive one".
 	const banners = $derived.by(() => {
 		const out: { project: string; prNumber: number; prURL: string; title?: string }[] = [
@@ -48,7 +48,7 @@
 		return out.sort((a, b) => a.project.localeCompare(b.project));
 	});
 
-	// Once the live stream carries a proposed PR, its transient result is spent —
+	// Once the live stream carries a proposed PR, its transient result is spent -
 	// kept around it would resurface as a ghost banner after the PR merges.
 	$effect(() => {
 		for (const p of proposals) {
@@ -57,7 +57,7 @@
 	});
 
 	// Commit history: per-project, re-fetched on every expand (a merge or revert
-	// changes it). Revert state is keyed by commit hash — armed (awaiting a
+	// changes it). Revert state is keyed by commit hash - armed (awaiting a
 	// confirm click), busy (in flight), and result.
 	let showHistory = $state(false);
 	let historyOpen = $state<Record<string, boolean>>({});
@@ -108,9 +108,8 @@
 		}
 	}
 
-	// Commits dotvirt wrote before mid-2026 carried the Unix epoch as their date (a
-	// since-fixed byte-stable-re-propose hack); floor guards those so they read "—"
-	// rather than a misleading "56 years ago".
+	// Commits dotvirt wrote before mid-2026 carried the Unix epoch as their date;
+	// floor guards those so they read "-" rather than a misleading "56 years ago".
 	const EPOCH_FLOOR = Date.UTC(2020, 0, 1);
 
 	// fmtWhen renders a commit's author date as a compact absolute date.
@@ -153,7 +152,7 @@
 			</div>
 		{/if}
 		<!-- Open PRs: the live lanes off the inventory stream, plus any just-proposed
-		     PR straight from its propose response (same markup — the stream takes
+		     PR straight from its propose response (same markup - the stream takes
 		     over invisibly once it carries the PR). -->
 		{#each banners as p (p.project + '#' + p.prNumber)}
 			<div class="mb-2 rounded border border-ok-soft bg-ok-soft/60 px-3 py-2 text-sm">
@@ -177,7 +176,7 @@
 		{/each}
 
 		<!-- Push-only propose outcomes (no PR to banner): a branch was pushed, or
-		     stayed local — surface the compare link so the user can open the PR. -->
+		     stayed local - surface the compare link so the user can open the PR. -->
 		{#each Object.entries(result).filter(([, r]) => !r.prURL || !r.prNumber) as [project, r] (project)}
 			<div class="mb-2 rounded border border-ok-soft bg-ok-soft/60 p-3 text-sm">
 				<div class="mb-1 flex items-center gap-1">

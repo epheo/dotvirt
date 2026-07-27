@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { api, Unauthorized, type NodeTarget, type VM } from '$lib/api';
-	import { friendlyError } from '$lib/format';
+	import { action } from '$lib/resource.svelte';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 
 	// Live-migration target picker (the vMotion dialog): Automatic lets the
 	// scheduler place the VMI; picking a host pins the migration to it via the
-	// migration's added node selector — which can only narrow the VM's own
+	// migration's added node selector - which can only narrow the VM's own
 	// scheduling constraints, never bypass them. Listing hosts is cluster-scoped
 	// RBAC; a caller without it keeps Automatic.
 	let {
@@ -25,15 +25,14 @@
 	let nodes = $state<NodeTarget[] | null>(null);
 	let canPick = $state(true);
 	let target = $state(''); // '' = automatic
-	let busy = $state(false);
-	let error = $state('');
+	const op = action();
 
 	async function load() {
 		try {
 			nodes = await api.nodes();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			canPick = false; // no node-list RBAC — the scheduler's choice only
+			canPick = false; // no node-list RBAC - the scheduler's choice only
 			nodes = [];
 		}
 	}
@@ -54,18 +53,11 @@
 	}
 
 	async function migrate() {
-		busy = true;
-		error = '';
-		try {
-			await api.migrate(vm.namespace, vm.name, target || undefined);
+		if (await op.run(() => api.migrate(vm.namespace, vm.name, target || undefined))) {
 			ondone?.(true);
 			onclose();
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			error = friendlyError(e);
+		} else {
 			ondone?.(false);
-		} finally {
-			busy = false;
 		}
 	}
 </script>
@@ -114,7 +106,7 @@
 			{/if}
 		</fieldset>
 
-		<ErrorNote {error} class="mt-3" />
+		<ErrorNote error={op.error} class="mt-3" />
 	</div>
 	{#snippet footer()}
 		<StageFooter
@@ -122,7 +114,7 @@
 			busyLabel="Migrating…"
 			hint="Runs now — a live migration, not a git change."
 			summary={target ? `Migrates ${vm.name}: ${vm.nodeName || 'unknown host'} → ${target}` : ''}
-			submitting={busy}
+			submitting={op.busy}
 			onsubmit={migrate}
 			oncancel={onclose}
 		/>

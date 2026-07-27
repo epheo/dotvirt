@@ -15,7 +15,7 @@ export function cores(v: number): string {
 }
 
 // compactSpan renders elapsed seconds at two units of precision ("3d 21h",
-// "5m"); sub-minute stays in seconds — events can be seconds old.
+// "5m"); sub-minute stays in seconds - events can be seconds old.
 function compactSpan(s: number): string {
 	const d = Math.floor(s / 86400);
 	const h = Math.floor((s % 86400) / 3600);
@@ -27,7 +27,7 @@ function compactSpan(s: number): string {
 }
 
 // duration renders a compact elapsed time from an ISO timestamp (no "ago"
-// suffix — uptimes, event ages).
+// suffix - uptimes, event ages).
 export function duration(iso: string | undefined): string {
 	if (!iso) return '';
 	const start = new Date(iso).getTime();

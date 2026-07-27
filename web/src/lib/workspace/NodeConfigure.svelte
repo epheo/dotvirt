@@ -7,7 +7,7 @@
 	import Row from '$lib/components/Row.svelte';
 
 	// The host's Configure tab: maintenance verbs plus the physical fabric.
-	// dotvirt owns nothing here — node configuration is the cluster platform's.
+	// dotvirt owns nothing here - node configuration is the cluster platform's.
 	let { node, vms }: { node: string; vms: VM[] } = $props();
 
 	const nodeUplinks = $derived(inventory.uplinks.filter((u) => !u.nodes || u.nodes.includes(node)));

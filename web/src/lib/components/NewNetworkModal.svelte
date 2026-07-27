@@ -26,14 +26,14 @@
 		onAddUplink?: () => void; // open the Add Uplink (Tier-0 transport) wizard from the VLAN flow
 	} = $props();
 
-	// A segment is either an overlay (Geneve) Layer2 network — project-scoped (UDN) or
-	// shared across projects (CUDN) — or a VLAN segment bridged to a Tier-0 uplink
+	// A segment is either an overlay (Geneve) Layer2 network - project-scoped (UDN) or
+	// shared across projects (CUDN) - or a VLAN segment bridged to a Tier-0 uplink
 	// (localnet CUDN). The primary "VM Network" is NOT created here: it is a Tier-1
 	// segment born with its namespace, so it lives in New Namespace / New Project.
 	let kind = $state<'overlay' | 'vlan'>('overlay');
 	let name = $state('');
 	let subnet = $state('');
-	let namespace = $state(''); // overlay · this project (a namespace-scoped UDN)
+	let namespace = $state(''); // overlay / this project (a namespace-scoped UDN)
 	let share = $state<'project' | 'shared'>('project'); // overlay: one namespace (UDN) vs selected projects (CUDN)
 	let vlan = $state<number | undefined>(undefined);
 	let physnet = $state('');
@@ -46,7 +46,7 @@
 			: []),
 	]);
 
-	// A cluster-scoped (platform-tier) segment — a shared overlay or any VLAN — carries
+	// A cluster-scoped (platform-tier) segment - a shared overlay or any VLAN - carries
 	// a namespace multiselect: the set of projects it is published to. Mirrors the
 	// backend routing cluster-scoped creates to the platform repo.
 	const isShared = $derived(kind === 'vlan' || share === 'shared');
@@ -74,7 +74,7 @@
 	});
 	const valid = $derived(missing.length === 0);
 
-	// What this submission stages, in the footer — the counterpart of the
+	// What this submission stages, in the footer - the counterpart of the
 	// wizards' review step for a single-pane dialog.
 	const summary = $derived.by(() => {
 		if (!valid) return '';

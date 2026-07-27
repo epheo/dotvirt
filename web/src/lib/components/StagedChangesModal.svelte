@@ -47,7 +47,7 @@
 		</button>
 		<button
 			onclick={onreview}
-			class="ml-auto rounded bg-accent px-3 py-1 text-sm font-medium text-white hover:bg-accent"
+			class="ml-auto rounded bg-accent px-3 py-1 text-sm font-medium text-white hover:bg-accent-hover"
 		>
 			Review &amp; propose →
 		</button>

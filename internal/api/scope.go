@@ -31,12 +31,12 @@ func (s *Server) rbacVersion() uint64 {
 	return s.bus.Version(eventbus.RBACChanged, eventbus.NamespaceChanged)
 }
 
-// This file is every handler's shared preamble: who is calling (identity →
-// cluster client), what they may see (visible namespaces → projects), and which
+// This file is every handler's shared preamble: who is calling (identity ->
+// cluster client), what they may see (visible namespaces -> projects), and which
 // project a request targets (the pickers).
 
 // userCluster builds the caller's cluster client (identity from context). It
-// fails closed: no identity or no factory → an error the caller turns into 401/503.
+// fails closed: no identity or no factory -> an error the caller turns into 401/503.
 func (s *Server) userCluster(r *http.Request) (auth.Identity, *cluster.Client, error) {
 	id, ok := auth.FromContext(r.Context())
 	if !ok {
@@ -52,7 +52,7 @@ func (s *Server) userCluster(r *http.Request) (auth.Identity, *cluster.Client, e
 // projectsFor resolves the caller's projects: the project topology comes from the
 // SA-owned snapshot (shared, no per-request fetch), filtered to the namespaces the
 // caller's token may see (TTL-cached per token). The visible set is the sole
-// per-user authorization input — a user never learns a project outside their RBAC.
+// per-user authorization input - a user never learns a project outside their RBAC.
 func (s *Server) projectsFor(ctx context.Context, id auth.Identity, c *cluster.Client) ([]project.ProjectInfo, error) {
 	visible, err := s.visibleFor(ctx, id, c)
 	if err != nil {
@@ -62,7 +62,7 @@ func (s *Server) projectsFor(ctx context.Context, id auth.Identity, c *cluster.C
 }
 
 // visibleFor returns the set of namespaces id's token may read VMs in, cached by
-// token for visibleTTL. The snapshot's project namespaces feed the Forbidden→SSRR
+// token for visibleTTL. The snapshot's project namespaces feed the Forbidden->SSRR
 // fallback inside VisibleNamespaces.
 func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Client) (map[string]bool, error) {
 	ver := s.rbacVersion()
@@ -83,45 +83,55 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 	return set, nil
 }
 
-// canCreateCached is CanCreateClusterResource behind the per-(token, resource),
-// rbacVersion-stamped cache — for authorization signals read on polled or
-// broadcast paths, where an uncached SSAR would post to the apiserver per
-// request. A RoleBinding/namespace move invalidates lazily via the version
-// stamp; the TTL backstops the cluster-scoped RBAC changes the version doesn't
-// observe (see visibleTTL). Mutating routes keep their uncached platformScope
-// SSAR — a write deserves a fresh answer.
-func (s *Server) canCreateCached(ctx context.Context, id auth.Identity, c *cluster.Client, ref ssarRef) bool {
+// ssarCached answers one authorization probe behind the per-(token, key),
+// rbacVersion-stamped cache - for signals read on polled or broadcast paths,
+// where an uncached SSAR would post to the apiserver per request. A
+// RoleBinding/namespace move invalidates lazily via the version stamp; the TTL
+// backstops the cluster-scoped RBAC changes the version doesn't observe (see
+// visibleTTL). Mutating routes keep their uncached platformScope SSAR - a
+// write deserves a fresh answer.
+func (s *Server) ssarCached(id auth.Identity, key string, probe func() bool) bool {
 	ver := s.rbacVersion()
-	key := restfactory.TokenKey(id.Token) + "\x00" + ref.group + "/" + ref.resource
-	if e, ok := s.ssar.Get(key); ok && e.ver == ver {
+	k := restfactory.TokenKey(id.Token) + "\x00" + key
+	if e, ok := s.ssar.Get(k); ok && e.ver == ver {
 		return e.ok
 	}
-	ok := c.CanCreateClusterResource(ctx, ref.group, ref.resource)
-	s.ssar.Put(key, ssarVerdict{ok: ok, ver: ver})
+	ok := probe()
+	s.ssar.Put(k, ssarVerdict{ok: ok, ver: ver})
 	return ok
 }
 
-// canReadNodesCached mirrors canCreateCached for the node-read signal that
-// reveals the physical fabric in the networks catalog — read per poll, so it
-// must not post an SSAR per request. The "\x00read" segment keeps the key out
-// of the create-tuple namespace.
+func (s *Server) canCreateCached(ctx context.Context, id auth.Identity, c *cluster.Client, ref ssarRef) bool {
+	return s.ssarCached(id, ref.group+"/"+ref.resource, func() bool {
+		return c.CanCreateClusterResource(ctx, ref.group, ref.resource)
+	})
+}
+
+// canReadNodesCached gates the node-data reads (physical fabric, host metrics).
+// The "read\x00" segment keeps the key out of the create-tuple namespace.
 func (s *Server) canReadNodesCached(ctx context.Context, id auth.Identity, c *cluster.Client) bool {
-	ver := s.rbacVersion()
-	key := restfactory.TokenKey(id.Token) + "\x00read\x00nodes"
-	if e, ok := s.ssar.Get(key); ok && e.ver == ver {
-		return e.ok
-	}
-	ok := c.CanReadNodes(ctx)
-	s.ssar.Put(key, ssarVerdict{ok: ok, ver: ver})
-	return ok
+	return s.ssarCached(id, "read\x00nodes", func() bool { return c.CanReadNodes(ctx) })
 }
 
 // ssarRef is one create-authority tuple (API group + plural resource).
 type ssarRef struct{ group, resource string }
 
+// platformProject is the synthetic platform-tier project over the platform repo.
+func (s *Server) platformProject() project.ProjectInfo {
+	return project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}
+}
+
+// vmScope is the preamble of every /api/vms/{namespace}/{name} route: resolve
+// the tenant project owning the path's namespace (the authorization point) and
+// hand back the path pair.
+func (s *Server) vmScope(w http.ResponseWriter, r *http.Request) (sc scope, ns, name string, ok bool) {
+	sc, ok = s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	return sc, r.PathValue("namespace"), r.PathValue("name"), ok
+}
+
 // The platform-tier create authorities, each spelled exactly once: the create
 // routes gate on them (platformScope), NetworkCaps projects them to the UI, and
-// the authoring signal ORs a subset — adding a platform kind touches only this
+// the authoring signal ORs a subset - adding a platform kind touches only this
 // list and its routes.
 var (
 	ssarCUDN        = ssarRef{"k8s.ovn.org", "clusteruserdefinednetworks"}
@@ -137,14 +147,14 @@ var (
 )
 
 // platformAuthorResources are the create-SSARs that signal platform-tier
-// authoring — one per family of platform create routes. Holding ANY of them
+// authoring - one per family of platform create routes. Holding ANY of them
 // grants access to the caller's OWN platform draft (drafts are per-user: a
 // caller can only view/unstage/propose what their per-route create gates let
 // them stage), so the whole-draft routes OR these rather than demanding one
 // specific verb; the PR merge review remains the apply boundary.
 var platformAuthorResources = []ssarRef{ssarCUDN, ssarDescheduler, ssarVMTemplate}
 
-// canAuthorPlatform reports whether id may author platform-tier changes —
+// canAuthorPlatform reports whether id may author platform-tier changes -
 // any platform authoring signal, TTL-cached per token so the inventory
 // broadcast path stays free of a per-subscriber cluster call. False when no
 // platform repo is configured. Used to seed the synthetic platform project
@@ -178,8 +188,8 @@ type scope struct {
 	proj    project.ProjectInfo
 }
 
-// resolveProject is the shared preamble for every draft/VM route: identity → user
-// cluster → the caller's projects → pick(projects). pick selects the target
+// resolveProject is the shared preamble for every draft/VM route: identity -> user
+// cluster -> the caller's projects -> pick(projects). pick selects the target
 // project (by path namespace, ?project=, or spec namespace) and, when it can't,
 // supplies the not-found message. It writes the error status and returns ok=false
 // on any failure; handlers just `if !ok { return }`. The returned scope carries the
@@ -212,7 +222,7 @@ func (s *Server) resolveProject(w http.ResponseWriter, r *http.Request, pick pro
 // returning a not-found message when none matches.
 type projectPicker func([]project.ProjectInfo) (project.ProjectInfo, string, bool)
 
-// byNamespace picks the project owning ns — the per-request authorization point
+// byNamespace picks the project owning ns - the per-request authorization point
 // for VM routes (a VM in a namespace outside the caller's projects is not found).
 func byNamespace(ns string) projectPicker {
 	return func(projects []project.ProjectInfo) (project.ProjectInfo, string, bool) {
@@ -266,7 +276,7 @@ func (s *Server) draftScope(w http.ResponseWriter, r *http.Request) (scope, bool
 // pickProject resolves a project named by a ?project= query or {project} path
 // segment (the whole-project routes: draft, propose, unstage, history, revert).
 // The platform tier resolves ONLY for callers who can author platform changes
-// (any signal in platformAuthorResources — the routes touch the caller's own
+// (any signal in platformAuthorResources - the routes touch the caller's own
 // draft, staged behind those same per-route gates), so a plain tenant cannot
 // reach the platform repo's draft, history, or revert. Any other name resolves
 // from the caller's visible projects.
@@ -284,13 +294,13 @@ func (s *Server) platformScopeAny(w http.ResponseWriter, r *http.Request) (scope
 	return s.platformScopeWith(w, r, s.canAuthorPlatform, "not authorized to author platform changes")
 }
 
-// platformProjectName is the synthetic project name for the platform tier — the
+// platformProjectName is the synthetic project name for the platform tier - the
 // repo holding cluster-scoped + tenancy manifests. It is config-only (-platform-repo),
 // never a dotvirt.io/project-labeled namespace, so project discovery never emits it.
 const platformProjectName = "platform"
 
 // platformScope resolves the platform tier for a cluster-scoped create. It
-// SSAR-gates on the caller's authority to create ref's kind — the authoring
+// SSAR-gates on the caller's authority to create ref's kind - the authoring
 // SIGNAL (the user never applies it; Argo does, from the platform repo), so the
 // author-time check matches the apply-time AppProject boundary.
 func (s *Server) platformScope(w http.ResponseWriter, r *http.Request, ref ssarRef) (scope, bool) {
@@ -299,9 +309,9 @@ func (s *Server) platformScope(w http.ResponseWriter, r *http.Request, ref ssarR
 	}, "not authorized to create "+ref.resource)
 }
 
-// platformScopeWith is the shared platform-tier preamble — the caller's identity
+// platformScopeWith is the shared platform-tier preamble - the caller's identity
 // + cluster, the draft and -platform-repo availability gates, and the synthetic
-// platform ProjectInfo — parameterized only by the authoring authorization, so
+// platform ProjectInfo - parameterized only by the authoring authorization, so
 // the two security gates above cannot drift apart. Fails closed: 503 when the
 // platform tier isn't configured, 403 with deny when the caller lacks authority.
 func (s *Server) platformScopeWith(w http.ResponseWriter, r *http.Request, authorized func(context.Context, auth.Identity, *cluster.Client) bool, deny string) (scope, bool) {
@@ -322,5 +332,5 @@ func (s *Server) platformScopeWith(w http.ResponseWriter, r *http.Request, autho
 		http.Error(w, deny, http.StatusForbidden)
 		return scope{}, false
 	}
-	return scope{id: id, cluster: c, proj: project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}}, true
+	return scope{id: id, cluster: c, proj: s.platformProject()}, true
 }

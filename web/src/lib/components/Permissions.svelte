@@ -1,7 +1,7 @@
 <script lang="ts">
-	// The Permissions tab (vCenter quartet: Summary · Monitor · Configure ·
+	// The Permissions tab (vCenter quartet: Summary / Monitor / Configure /
 	// Permissions): the caller's effective capabilities per namespace, from a
-	// SelfSubjectRulesReview under their own token. Read-only — dotvirt grants
+	// SelfSubjectRulesReview under their own token. Read-only - dotvirt grants
 	// nothing; RBAC is managed by the platform.
 	import { Check, X } from 'lucide-svelte';
 	import { api, type Permissions } from '$lib/api';

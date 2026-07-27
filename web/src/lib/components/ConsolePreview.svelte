@@ -18,7 +18,7 @@
 	let tick = $state(0);
 	let failed = $state(false);
 	// The bezel takes the framebuffer's own aspect so the preview is shaped
-	// like the console really is — never a letterboxed stretch. 4:3 (the VGA
+	// like the console really is - never a letterboxed stretch. 4:3 (the VGA
 	// default) stands in until the first frame reports its true size.
 	let aspect = $state('4 / 3');
 	const vmKey = $derived(`${vm.namespace}/${vm.name}`);

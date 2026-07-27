@@ -11,7 +11,7 @@ import (
 
 // Revert proposes a forward commit that undoes `hash` in proj's repo, opening (or
 // recovering) a PR. The revert restores every file the commit changed to its
-// pre-commit state — a new commit reviewable as an ordinary PR, never a history
+// pre-commit state - a new commit reviewable as an ordinary PR, never a history
 // rewrite. A revert whose restored files were since changed by a later commit
 // will show those as part of the PR diff, which the reviewer catches.
 func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash string) (model.ProposeResult, error) {

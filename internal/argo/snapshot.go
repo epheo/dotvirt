@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -20,9 +21,9 @@ import (
 )
 
 // Snapshot is the SA-maintained, watch-fed in-memory view of every ArgoCD
-// Application — the drift plane's equivalent of clusterstate.State. A single
+// Application - the drift plane's equivalent of clusterstate.State. A single
 // reflector keeps the store current and publishes DriftChanged on the shared bus so
-// the hub rebroadcasts; reads (Drift, ManagingApp) are lock-free store scans, never
+// the hub rebroadcasts; reads (Drift, managingApp) are lock-free store scans, never
 // a cluster LIST. The store is always current post-sync, so drift is never staler
 // than the watch delivers.
 type Snapshot struct {
@@ -35,7 +36,7 @@ type Snapshot struct {
 
 	// Memoized drift: rebuilt lazily only when the Application store moves
 	// (driftDirty), so one reconcile across N identities parses the apps once, not N
-	// times — the N:1 sharing the read path needs on the hot inventory-build path. The
+	// times - the N:1 sharing the read path needs on the hot inventory-build path. The
 	// general per-object map, its per-VM view, and the per-project rollup are all
 	// rebuilt from the same scan.
 	driftMu       sync.Mutex
@@ -64,14 +65,14 @@ func NewSnapshot(sa *Client, bus *eventbus.Bus) *Snapshot {
 }
 
 // Run starts the Applications reflector; it owns its own relist/backoff and stops
-// when ctx is cancelled. Returns immediately — call WaitForSync to block until the
+// when ctx is cancelled. Returns immediately - call WaitForSync to block until the
 // initial LIST has populated the snapshot.
 func (s *Snapshot) Run(ctx context.Context) {
 	store := reflect.NewStore(s.apps,
 		func() { s.driftDirty.Store(true); s.bus.Publish(eventbus.DriftChanged) },
-		func() { s.synced.Store(true); close(s.syncedCh) }, // onSynced fires once → close is safe
+		func() { s.synced.Store(true); close(s.syncedCh) }, // onSynced fires once -> close is safe
 	)
-	lw := reflect.TrackHealth(s.sa.ApplicationsListWatch(), &s.healthy)
+	lw := reflect.TrackHealth(s.sa.applicationsListWatch(), &s.healthy)
 	r := cache.NewReflector(lw, &unstructured.Unstructured{}, store, 0)
 	go r.Run(ctx.Done())
 }
@@ -83,7 +84,7 @@ func (s *Snapshot) Run(ctx context.Context) {
 func (s *Snapshot) Healthy() bool { return s.healthy.Load() }
 
 // WaitForSync blocks until the initial Applications LIST has landed or ctx is done.
-// Deterministic — waits on the channel closed by the initial Replace, not a poll.
+// Deterministic - waits on the channel closed by the initial Replace, not a poll.
 func (s *Snapshot) WaitForSync(ctx context.Context) error {
 	select {
 	case <-s.syncedCh:
@@ -99,7 +100,7 @@ func (s *Snapshot) Synced() bool { return s.synced.Load() }
 // Drift returns per-VM drift keyed "namespace/name", computed from the in-memory
 // Application store. It returns nil UNTIL the initial LIST has landed: inventory
 // treats a non-nil (even empty) Drift map as "Argo is configured, so a VM absent
-// from it is NotTracked" — returning an empty map pre-sync would flash every VM to
+// from it is NotTracked" - returning an empty map pre-sync would flash every VM to
 // NotTracked. nil instead leaves Sync unset (the benign not-yet-known state), which
 // the caller distinguishes from "Argo disabled" via Synced(). Always non-nil once
 // synced.
@@ -114,7 +115,7 @@ func (s *Snapshot) Drift() map[string]Drift {
 }
 
 // ProjectDrift returns each project's overall Application sync/health keyed by
-// canonical repoURL — the rollup covering every object kind the repo declares, not
+// canonical repoURL - the rollup covering every object kind the repo declares, not
 // just VMs. Same nil-before-sync contract and one-parse memoization as Drift, so the
 // inventory build can distinguish "Argo disabled/not-yet-synced" (nil) from "tracked"
 // (non-nil, a repo absent from it simply has no managing Application).
@@ -140,12 +141,8 @@ func (s *Snapshot) ForeignApps(ownRepo string) map[string]bool {
 	}
 	own := forge.NormalizeRepoURL(ownRepo)
 	out := map[string]bool{}
-	for _, obj := range s.apps.List() {
-		u, ok := obj.(*unstructured.Unstructured)
-		if !ok {
-			continue
-		}
-		if own != "" && forge.NormalizeRepoURL(nestedString(u.Object, "spec", "source", "repoURL")) == own {
+	for _, u := range reflect.List(s.apps) {
+		if own != "" && slices.Contains(appRepos(u.Object), own) {
 			continue
 		}
 		out[u.GetName()] = true
@@ -169,9 +166,8 @@ func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.Object
 		return nil
 	}
 	var out []model.ObjectRef
-	for _, obj := range s.apps.List() {
-		u, ok := obj.(*unstructured.Unstructured)
-		if !ok || forge.NormalizeRepoURL(nestedString(u.Object, "spec", "source", "repoURL")) != own {
+	for _, u := range reflect.List(s.apps) {
+		if !slices.Contains(appRepos(u.Object), own) {
 			continue
 		}
 		resources, found, err := unstructured.NestedSlice(u.Object, "status", "resources")
@@ -212,7 +208,7 @@ func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.Object
 }
 
 // ResourceDrift returns one Argo-managed object's sync/health by identity; ok=false if
-// no Application manages it or the snapshot hasn't synced. General across kinds — the
+// no Application manages it or the snapshot hasn't synced. General across kinds - the
 // per-object surface VMs and segments (and any future rendered object) share. group/kind
 // are the ArgoCD resource's own (e.g. "k8s.ovn.org","UserDefinedNetwork"); namespace is
 // "" for cluster-scoped kinds.
@@ -227,7 +223,7 @@ func (s *Snapshot) ResourceDrift(group, kind, namespace, name string) (Drift, bo
 	return d, ok
 }
 
-// ObjectDriftGen returns the generation of the non-VM drift content — a monotonic
+// ObjectDriftGen returns the generation of the non-VM drift content - a monotonic
 // counter that moves only when a non-VM object's sync/health/error actually changed,
 // not on every Application object churn. Rebuilds like the other readers, so it's
 // current as of this call.
@@ -245,14 +241,14 @@ func (s *Snapshot) ObjectDriftGen() uint64 {
 // the store has moved since the last build (or on first read). Callers hold driftMu.
 // Results are read-only to callers; a rebuild swaps in fresh maps (the extractors
 // allocate anew), never mutating one a caller still holds. The store scan is sorted so
-// every rebuild over the same Applications yields identical maps — an unordered scan
+// every rebuild over the same Applications yields identical maps - an unordered scan
 // would let two apps claiming one repo (or one resource) flap between rebuilds and
 // defeat the hub's identical-frame suppression.
 func (s *Snapshot) rebuildLocked() {
 	if s.resourceCache != nil && !s.driftDirty.Swap(false) {
 		return
 	}
-	objs := s.apps.List()
+	objs := reflect.List(s.apps)
 	sort.Slice(objs, func(i, j int) bool { return appKey(objs[i]) < appKey(objs[j]) })
 	prev := s.resourceCache
 	s.resourceCache = resourceDriftFromApps(objs)
@@ -264,11 +260,8 @@ func (s *Snapshot) rebuildLocked() {
 }
 
 // appKey is an Application's stable sort key for the deterministic rebuild scan.
-func appKey(obj any) string {
-	if u, ok := obj.(*unstructured.Unstructured); ok {
-		return u.GetNamespace() + "/" + u.GetName()
-	}
-	return ""
+func appKey(u *unstructured.Unstructured) string {
+	return u.GetNamespace() + "/" + u.GetName()
 }
 
 // nonVMEqual reports whether the non-VM drift entries of two builds match. VM entries
@@ -307,19 +300,15 @@ type AppRef struct {
 	TargetRevision string
 }
 
-// ManagingApp returns the Application whose status.resources[] includes the
+// managingApp returns the Application whose status.resources[] includes the
 // VirtualMachine namespace/name, read from the in-memory store (no cluster call).
-// ok=false if the snapshot hasn't synced or no Application manages the VM — the
+// ok=false if the snapshot hasn't synced or no Application manages the VM - the
 // caller (Resync) then falls back to a live lookup.
-func (s *Snapshot) ManagingApp(namespace, name string) (AppRef, bool) {
+func (s *Snapshot) managingApp(namespace, name string) (AppRef, bool) {
 	if !s.synced.Load() {
 		return AppRef{}, false
 	}
-	for _, obj := range s.apps.List() {
-		app, ok := obj.(*unstructured.Unstructured)
-		if !ok {
-			continue
-		}
+	for _, app := range reflect.List(s.apps) {
 		if appManagesVM(app.Object, namespace, name) {
 			return appRefOf(app), true
 		}
@@ -331,13 +320,13 @@ func (s *Snapshot) ManagingApp(namespace, name string) (AppRef, bool) {
 // cluster is reconciled back to git. It finds the managing Application from the
 // in-memory snapshot (falling back to a live LIST when the snapshot hasn't synced,
 // so a resync right after startup doesn't spuriously 404), then requests a sync via
-// the Application's operation field — the k8s API dotvirt already has, no separate
+// the Application's operation field - the k8s API dotvirt already has, no separate
 // Argo API token. (Distinct from RefreshForRepo: this is the user's explicit
 // per-VM "sync now", which must work even when auto-sync is off.)
 func (s *Snapshot) Resync(ctx context.Context, namespace, name string) (model.ResyncResult, error) {
-	ref, ok := s.ManagingApp(namespace, name)
+	ref, ok := s.managingApp(namespace, name)
 	if !ok {
-		ref, ok = s.sa.findManagingAppLive(ctx, namespace, name)
+		ref, ok = s.sa.findmanagingAppLive(ctx, namespace, name)
 		if !ok {
 			return model.ResyncResult{}, fmt.Errorf("no ArgoCD Application manages %s/%s", namespace, name)
 		}
@@ -357,12 +346,12 @@ func (s *Snapshot) Resync(ctx context.Context, namespace, name string) (model.Re
 }
 
 // RefreshForRepo asks ArgoCD to re-pull git and re-sync every Application sourcing
-// any of repoURLs — the deterministic "pick up on push" path, driven by the forge
+// any of repoURLs - the deterministic "pick up on push" path, driven by the forge
 // webhook dotvirt already receives and HMAC-verifies. It matches spec.source.repoURL
 // (and any spec.sources[]) against the pushed URLs by canonical form, then sets the
 // argocd.argoproj.io/refresh=hard annotation: a hard refresh re-pulls git, and with
 // auto-sync (every dotvirt-generated app) the resulting OutOfSync syncs itself.
-// Best-effort: errors are logged, never returned — ArgoCD's own webhook + poll
+// Best-effort: errors are logged, never returned - ArgoCD's own webhook + poll
 // remain as backstops. No-op until the snapshot has synced.
 func (s *Snapshot) RefreshForRepo(ctx context.Context, repoURLs ...string) {
 	if !s.synced.Load() {
@@ -377,9 +366,8 @@ func (s *Snapshot) RefreshForRepo(ctx context.Context, repoURLs ...string) {
 	if len(want) == 0 {
 		return
 	}
-	for _, obj := range s.apps.List() {
-		app, ok := obj.(*unstructured.Unstructured)
-		if !ok || !appSourcesAny(app.Object, want) {
+	for _, app := range reflect.List(s.apps) {
+		if !appSourcesAny(app.Object, want) {
 			continue
 		}
 		patch := []byte(`{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}`)
@@ -389,15 +377,15 @@ func (s *Snapshot) RefreshForRepo(ctx context.Context, repoURLs ...string) {
 	}
 }
 
-// patchApp merge-patches the named Application — the single write the drift plane
+// patchApp merge-patches the named Application - the single write the drift plane
 // makes (operation for Resync, refresh annotation for RefreshForRepo).
 func (c *Client) patchApp(ctx context.Context, namespace, name string, patch []byte) (*unstructured.Unstructured, error) {
 	return c.dyn.Resource(applicationsGVR).Namespace(namespace).Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
 }
 
-// findManagingAppLive is ManagingApp's cluster fallback: a one-shot LIST used only
+// findmanagingAppLive is managingApp's cluster fallback: a one-shot LIST used only
 // when the snapshot hasn't synced yet, so an early resync still resolves its app.
-func (c *Client) findManagingAppLive(ctx context.Context, namespace, name string) (AppRef, bool) {
+func (c *Client) findmanagingAppLive(ctx context.Context, namespace, name string) (AppRef, bool) {
 	apps, err := c.dyn.Resource(applicationsGVR).Namespace(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return AppRef{}, false
@@ -437,19 +425,10 @@ func appManagesVM(app map[string]any, namespace, name string) bool {
 	return false
 }
 
-// appSourcesAny reports whether app's source(s) reference any repo in want (keyed by
-// canonical URL). Handles both single-source (spec.source) and multi-source
-// (spec.sources[]) Applications.
+// appSourcesAny reports whether the app sources any repo in want (canonical URLs).
 func appSourcesAny(app map[string]any, want map[string]bool) bool {
-	if u, found, _ := unstructured.NestedString(app, "spec", "source", "repoURL"); found && want[forge.NormalizeRepoURL(u)] {
-		return true
-	}
-	sources, found, _ := unstructured.NestedSlice(app, "spec", "sources")
-	if !found {
-		return false
-	}
-	for _, raw := range sources {
-		if src, ok := raw.(map[string]any); ok && want[forge.NormalizeRepoURL(asString(src, "repoURL"))] {
+	for _, r := range appRepos(app) {
+		if want[r] {
 			return true
 		}
 	}

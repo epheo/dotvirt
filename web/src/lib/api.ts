@@ -1,6 +1,6 @@
 // Typed client for the dotvirt backend API.
 //
-// Types come from model.gen.ts (tygo output of internal/model — regenerate with
+// Types come from model.gen.ts (tygo output of internal/model - regenerate with
 // `make types`). The overlays below shadow the star re-export only where the
 // generated shape is too loose (string where the wire carries a closed union)
 // or wrong (Go []*float64 marshals null, not undefined). Request types with no
@@ -126,7 +126,7 @@ export interface UplinkCreate {
 	bridge?: string; // OVS bridge; default br-<name>
 	nodeSelector?: Record<string, string>; // node labels; omit = all workers, or {kubernetes.io/hostname: <node>}
 }
-// EgressFirewall — a namespace's north-south egress rules (the Tier-1 gateway
+// EgressFirewall - a namespace's north-south egress rules (the Tier-1 gateway
 // firewall). One per namespace (named "default" server-side); rules are first-match.
 export interface EgressFirewallPort {
 	protocol: 'TCP' | 'UDP' | 'SCTP';
@@ -142,7 +142,7 @@ export interface EgressFirewallCreate {
 	namespace: string;
 	rules: EgressFirewallRule[];
 }
-// Tier-0 (provider-edge) services — cluster-scoped, platform-routed.
+// Tier-0 (provider-edge) services - cluster-scoped, platform-routed.
 export interface EgressIPCreate {
 	name: string;
 	egressIPs: string[]; // the source-NAT pool
@@ -153,7 +153,7 @@ export interface ExternalRouteCreate {
 	namespaces: string[]; // projects whose egress is steered
 	nextHops: string[]; // static external next-hop IPs
 }
-// Distributed Firewall (east-west) — a NetworkPolicy protecting a Group (a label
+// Distributed Firewall (east-west) - a NetworkPolicy protecting a Group (a label
 // selector) inside one namespace, allowing ingress only from the named peer Groups.
 export interface PolicyPort {
 	protocol: 'TCP' | 'UDP' | 'SCTP';
@@ -169,7 +169,7 @@ export interface NetworkPolicyCreate {
 	appliedTo?: Record<string, string>; // the Group this protects; empty = whole namespace
 	ingress?: PolicyRule[];
 }
-// Cluster-wide admin Distributed Firewall — AdminNetworkPolicy (priority + Pass) or
+// Cluster-wide admin Distributed Firewall - AdminNetworkPolicy (priority + Pass) or
 // the BaselineAdminNetworkPolicy default (Allow/Deny only). Platform-tier, admin-only.
 export interface AdminPolicyRule {
 	action: 'Allow' | 'Deny' | 'Pass';
@@ -190,7 +190,7 @@ export interface NamespaceCreate {
 	vmNetwork?: { name: string; subnet?: string }; // optional primary (Layer2) UDN; subnet required server-side (primary = IPAM)
 }
 export interface ProjectCreate {
-	name: string; // project name → tenant repo + dotvirt.io/project label
+	name: string; // project name -> tenant repo + dotvirt.io/project label
 	namespace?: string; // first namespace; defaults to name
 	owners?: string[]; // usernames granted namespace-admin on the first namespace
 	vmNetwork?: { name: string; subnet?: string }; // optional primary (Layer2) UDN on that namespace
@@ -265,20 +265,20 @@ function get<T>(path: string): Promise<T> {
 	return req<T>(path);
 }
 
-function post<T>(path: string, body: unknown): Promise<T> {
+function send<T>(method: 'POST' | 'PUT', path: string, body: unknown): Promise<T> {
 	return req<T>(path, {
-		method: 'POST',
+		method,
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(body),
 	});
 }
 
+function post<T>(path: string, body: unknown): Promise<T> {
+	return send<T>('POST', path, body);
+}
+
 function put<T>(path: string, body: unknown): Promise<T> {
-	return req<T>(path, {
-		method: 'PUT',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(body),
-	});
+	return send<T>('PUT', path, body);
 }
 
 function del(path: string): Promise<void> {
@@ -287,20 +287,25 @@ function del(path: string): Promise<void> {
 
 const enc = encodeURIComponent;
 
+// vmPath is the one spelling of a VM route's prefix; actions.ts builds its
+// manifest/screenshot URLs from it too.
+export const vmPath = (namespace: string, name: string) =>
+	`/api/vms/${enc(namespace)}/${enc(name)}`;
+
+// qs builds a query-string suffix, omitting empty values; '' when nothing set.
+function qs(params: Record<string, string | undefined>): string {
+	const q = new URLSearchParams();
+	for (const [k, v] of Object.entries(params)) if (v) q.set(k, v);
+	const out = q.toString();
+	return out ? `?${out}` : '';
+}
+
 // A container-scope read's query params (the project/namespace/node levels).
 export type ScopeQuery = { project?: string; namespace?: string; node?: string };
 
-// scopeQS builds the `?project=&namespace=&node=` suffix for a scope read,
-// omitting empty levels; returns '' when nothing is set. extra appends
-// additional params (e.g. range).
+// scopeQS is qs over a scope read's levels; extra appends params (e.g. range).
 function scopeQS(scope: ScopeQuery, extra?: Record<string, string>): string {
-	const q = new URLSearchParams();
-	if (scope.project) q.set('project', scope.project);
-	if (scope.namespace) q.set('namespace', scope.namespace);
-	if (scope.node) q.set('node', scope.node);
-	for (const [k, v] of Object.entries(extra ?? {})) q.set(k, v);
-	const qs = q.toString();
-	return qs ? `?${qs}` : '';
+	return qs({ project: scope.project, namespace: scope.namespace, node: scope.node, ...extra });
 }
 
 export const api = {
@@ -314,7 +319,7 @@ export const api = {
 	networks: () => get<gen.NetworkInventory>('/api/networks'),
 	policies: () => get<gen.PolicyInventory>('/api/policies'),
 	vmPolicy: (namespace: string, name: string) =>
-		get<gen.EffectivePolicy>(`/api/vms/${enc(namespace)}/${enc(name)}/policy`),
+		get<gen.EffectivePolicy>(`${vmPath(namespace, name)}/policy`),
 	namespacePolicy: (namespace: string) =>
 		get<gen.EffectivePolicy>(`/api/namespaces/${enc(namespace)}/policy`),
 	trace: (req: gen.TraceRequest) => post<gen.TraceResult>('/api/networking/trace', req),
@@ -328,10 +333,10 @@ export const api = {
 	revert: (project: string, hash: string) =>
 		post<gen.ProposeResult>(`/api/projects/${enc(project)}/revert`, { hash }),
 
-	// Staging — the backend resolves the project from the VM's namespace, so these
+	// Staging - the backend resolves the project from the VM's namespace, so these
 	// per-VM routes need no project param.
 	stageEdit: (namespace: string, name: string, req: EditRequest) =>
-		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/edit`, req),
+		post<DraftView>(`${vmPath(namespace, name)}/edit`, req),
 	stageCreate: (req: CreateVMRequest) => post<DraftView>('/api/vms', req),
 	createNetwork: (req: NetworkCreate) => post<DraftView>('/api/networks', req),
 	createUplink: (req: UplinkCreate) => post<DraftView>('/api/uplinks', req),
@@ -350,14 +355,10 @@ export const api = {
 	enableDRS: (r: DRSEnableRequest) => post<DraftView>('/api/drs', r),
 	disableDRS: () => req<DraftView>('/api/drs', { method: 'DELETE' }),
 	stageDelete: (namespace: string, name: string) =>
-		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/delete`, {}),
-	unstage: (namespace: string, name: string, resource?: string, project?: string) => {
-		const q = new URLSearchParams();
-		if (resource) q.set('resource', resource);
-		if (project) q.set('project', project); // cluster-scoped entries resolve by project
-		const qs = q.toString();
-		return del(`/api/draft/${enc(namespace)}/${enc(name)}${qs ? `?${qs}` : ''}`);
-	},
+		post<DraftView>(`${vmPath(namespace, name)}/delete`, {}),
+	// project: cluster-scoped entries resolve by project.
+	unstage: (namespace: string, name: string, resource?: string, project?: string) =>
+		del(`/api/draft/${enc(namespace)}/${enc(name)}${qs({ resource, project })}`),
 
 	// Whole-draft ops are scoped to a project (?project=), since they aren't tied
 	// to one VM namespace.
@@ -367,17 +368,16 @@ export const api = {
 		post<gen.ProposeResult>(`/api/draft/propose?project=${enc(project)}`, { title, message }),
 
 	// Drift + reconcile for one VM (project resolved from the namespace).
-	drift: (namespace: string, name: string) =>
-		get<DriftResult>(`/api/vms/${enc(namespace)}/${enc(name)}/drift`),
+	drift: (namespace: string, name: string) => get<DriftResult>(`${vmPath(namespace, name)}/drift`),
 	events: (namespace: string, name: string) =>
-		get<gen.Event[]>(`/api/vms/${enc(namespace)}/${enc(name)}/events`),
+		get<gen.Event[]>(`${vmPath(namespace, name)}/events`),
 	allEvents: () => get<gen.Event[]>('/api/events'),
 	permissions: (namespace: string) =>
 		get<gen.Permissions>(`/api/permissions?namespace=${enc(namespace)}`),
 	metrics: (namespace: string, name: string, range: string) =>
-		get<VMMetrics>(`/api/vms/${enc(namespace)}/${enc(name)}/metrics?range=${enc(range)}`),
+		get<VMMetrics>(`${vmPath(namespace, name)}/metrics?range=${enc(range)}`),
 	vmUsage: (namespace: string, name: string) =>
-		get<gen.VMUsage>(`/api/vms/${enc(namespace)}/${enc(name)}/usage`),
+		get<gen.VMUsage>(`${vmPath(namespace, name)}/usage`),
 	clusterSummary: (scope: ScopeQuery = {}) =>
 		get<gen.ClusterSummary>(`/api/metrics/cluster${scopeQS(scope)}`),
 	hostLoad: () => get<gen.HostLoad>('/api/metrics/hosts'),
@@ -403,7 +403,7 @@ export const api = {
 		post<gen.UploadToken>(`/api/uploads/${enc(namespace)}/${enc(name)}/token`, {}),
 	quotas: (scope: ScopeQuery) => get<gen.NamespaceQuota[]>(`/api/quotas${scopeQS(scope)}`),
 	adopt: (namespace: string, name: string) =>
-		post<DraftView>(`/api/vms/${enc(namespace)}/${enc(name)}/adopt`, {}),
+		post<DraftView>(`${vmPath(namespace, name)}/adopt`, {}),
 	// Bulk: stage every untracked (NotTracked) VM in a namespace into one draft.
 	adoptNamespace: (namespace: string) =>
 		post<DraftView>(`/api/namespaces/${enc(namespace)}/adopt`, {}),
@@ -413,47 +413,43 @@ export const api = {
 
 	// The template library (vSphere: Content Library). Deploy renders server-side
 	// and stages the VM into the draft; save derives a template from a VM's git
-	// manifest ("Clone to Template") — both land as PR-gated changes.
+	// manifest ("Clone to Template") - both land as PR-gated changes.
 	templates: () => get<{ templates: gen.Template[] }>('/api/templates'),
 	deployTemplate: (req: gen.DeployTemplateRequest) => post<DraftView>('/api/templates/deploy', req),
 	saveTemplate: (req: gen.SaveTemplateRequest) => post<DraftView>('/api/templates', req),
 	updateTemplate: (req: gen.UpdateTemplateRequest) => put<DraftView>('/api/templates', req),
 	resync: (namespace: string, name: string) =>
-		post<{ application: string; revision: string }>(
-			`/api/vms/${enc(namespace)}/${enc(name)}/resync`,
-			{},
-		),
+		post<{ application: string; revision: string }>(`${vmPath(namespace, name)}/resync`, {}),
 
 	// Clone (imperative create; the target VM lands NotTracked until adopted).
 	clones: (namespace: string, name: string) =>
-		get<gen.Clone[]>(`/api/vms/${enc(namespace)}/${enc(name)}/clones`),
+		get<gen.Clone[]>(`${vmPath(namespace, name)}/clones`),
 	createClone: (namespace: string, name: string, target: string) =>
-		post<{ name: string; target: string }>(`/api/vms/${enc(namespace)}/${enc(name)}/clone`, {
+		post<{ name: string; target: string }>(`${vmPath(namespace, name)}/clone`, {
 			target,
 		}),
 
 	// Snapshots (imperative, RBAC-gated; not git-managed).
 	snapshots: (namespace: string, name: string) =>
-		get<gen.Snapshot[]>(`/api/vms/${enc(namespace)}/${enc(name)}/snapshots`),
+		get<gen.Snapshot[]>(`${vmPath(namespace, name)}/snapshots`),
 	takeSnapshot: (namespace: string, name: string, snapName?: string) =>
-		post<{ name: string }>(`/api/vms/${enc(namespace)}/${enc(name)}/snapshots`, {
+		post<{ name: string }>(`${vmPath(namespace, name)}/snapshots`, {
 			name: snapName ?? '',
 		}),
 	restoreSnapshot: (namespace: string, name: string, snap: string) =>
-		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/snapshots/${enc(snap)}/restore`, {}),
+		post<void>(`${vmPath(namespace, name)}/snapshots/${enc(snap)}/restore`, {}),
 	deleteSnapshot: (namespace: string, name: string, snap: string) =>
-		del(`/api/vms/${enc(namespace)}/${enc(name)}/snapshots/${enc(snap)}`),
+		del(`${vmPath(namespace, name)}/snapshots/${enc(snap)}`),
 
 	// Imperative runtime ops (RBAC-gated; don't touch the git-managed spec).
 	restart: (namespace: string, name: string) =>
-		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/restart`, {}),
+		post<void>(`${vmPath(namespace, name)}/restart`, {}),
 	// node pins the migration to that host; omitted = the scheduler's choice.
 	migrate: (namespace: string, name: string, node?: string) =>
-		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/migrate`, node ? { node } : {}),
-	pause: (namespace: string, name: string) =>
-		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/pause`, {}),
+		post<void>(`${vmPath(namespace, name)}/migrate`, node ? { node } : {}),
+	pause: (namespace: string, name: string) => post<void>(`${vmPath(namespace, name)}/pause`, {}),
 	unpause: (namespace: string, name: string) =>
-		post<void>(`/api/vms/${enc(namespace)}/${enc(name)}/unpause`, {}),
+		post<void>(`${vmPath(namespace, name)}/unpause`, {}),
 };
 
 // draftsByProject fetches the draft for each named project and returns the
@@ -535,17 +531,17 @@ export function streamInventory(
 			}
 			// A close before the socket ever opened can't expose the handshake status
 			// (the WS API hides it). It's EITHER an expired session (401 on upgrade) OR
-			// a transient failure (backend restart, blip). Don't assume 401 — probe the
+			// a transient failure (backend restart, blip). Don't assume 401 - probe the
 			// session: only sign out if it's genuinely gone, otherwise reconnect. This
 			// stops every deploy/blip from bouncing valid users to login.
 			api
 				.me()
 				.then(() => {
-					if (closed) return; // torn down while probing → do nothing
-					scheduleReconnect(); // session still valid → it was transient
+					if (closed) return; // torn down while probing -> do nothing
+					scheduleReconnect(); // session still valid -> it was transient
 				})
 				.catch((e) => {
-					if (closed) return; // torn down while probing → don't sign out a dead subscription
+					if (closed) return; // torn down while probing -> don't sign out a dead subscription
 					if (e instanceof Unauthorized) onUnauthorized?.();
 					else scheduleReconnect();
 				});

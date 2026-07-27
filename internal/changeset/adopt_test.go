@@ -197,7 +197,7 @@ func TestAdoptNamespaceAllDeclaredIsInvalid(t *testing.T) {
 }
 
 // stageProjectAdoption stamps each of a project's namespaces with the dotvirt.io/repo
-// annotation (+ an owners RoleBinding) into the platform draft — the staging core of
+// annotation (+ an owners RoleBinding) into the platform draft - the staging core of
 // AdoptProject, exercised without a forge.
 func TestStageProjectAdoptionStampsRepoOnEveryNamespace(t *testing.T) {
 	c := newTestCoordinator(t)
@@ -300,17 +300,17 @@ func TestDraftWarningDerivedNotStored(t *testing.T) {
 	}
 }
 
-// Manifest entries speak for their documents; a DELETE for the prune it intends;
-// kinds with no prunable tenant form for nothing.
+// Manifest entries speak for their documents; a VM delete for the prune it
+// intends; every other resource carries a manifest and never hits the fallback.
 func TestEntryRefsSpeakForDraftEntries(t *testing.T) {
 	refs := entryRefs(draft.Entry{Kind: draft.KindCreate, Namespace: "alpha", Name: "web",
 		Manifest: "kind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\n"})
 	if len(refs) != 1 || refs[0] != (model.ObjectRef{Kind: "VirtualMachine", Namespace: "alpha", Name: "web"}) {
 		t.Fatalf("manifest entry: %v", refs)
 	}
-	refs = entryRefs(draft.Entry{Kind: draft.KindDelete, Resource: draft.ResourceNetwork, Namespace: "alpha", Name: "backend"})
-	if len(refs) != 1 || refs[0] != (model.ObjectRef{Kind: "UserDefinedNetwork", Namespace: "alpha", Name: "backend"}) {
-		t.Fatalf("network delete entry: %v", refs)
+	refs = entryRefs(draft.Entry{Kind: draft.KindDelete, Namespace: "alpha", Name: "web"})
+	if len(refs) != 1 || refs[0] != (model.ObjectRef{Kind: "VirtualMachine", Namespace: "alpha", Name: "web"}) {
+		t.Fatalf("vm delete entry: %v", refs)
 	}
 	if refs = entryRefs(draft.Entry{Kind: draft.KindCreate, Resource: draft.ResourceTemplate, Name: "gold"}); refs != nil {
 		t.Fatalf("a template speaks for no prunable object, got %v", refs)

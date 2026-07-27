@@ -73,7 +73,7 @@ func TestReconcileDedupAndFreshConn(t *testing.T) {
 	h.reconcile(context.Background())
 	_ = frameProject(t, a) // drain the first frame
 
-	// No change → reconcile again delivers no duplicate for a.
+	// No change -> reconcile again delivers no duplicate for a.
 	h.reconcile(context.Background())
 	select {
 	case <-a.out:
@@ -91,7 +91,7 @@ func TestReconcileDedupAndFreshConn(t *testing.T) {
 }
 
 // TestDeliverConflatesToLatest: when the writer is slow (mailbox already full), a
-// newer frame replaces the pending one — the client converges to latest, never sends
+// newer frame replaces the pending one - the client converges to latest, never sends
 // a stale backlog.
 func TestDeliverConflatesToLatest(t *testing.T) {
 	c := testConn("x")

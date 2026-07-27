@@ -20,7 +20,7 @@ func TestStoreIsolatesByUserAndProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Same VM name, different (user, project) tuples — must not collide.
+	// Same VM name, different (user, project) tuples - must not collide.
 	if err := s.Stage("alice", "team-a", editEntry("tenant-a", "web")); err != nil {
 		t.Fatal(err)
 	}
@@ -50,14 +50,6 @@ func TestStoreIsolatesByUserAndProject(t *testing.T) {
 		t.Errorf("expected draft file at alice/team-a.json: %v", err)
 	}
 
-	// Count aggregates across a user's projects.
-	if n, err := s.Count("alice"); err != nil || n != 2 {
-		t.Errorf("Count(alice) = %d (err %v), want 2", n, err)
-	}
-	if n, err := s.Count("bob"); err != nil || n != 1 {
-		t.Errorf("Count(bob) = %d (err %v), want 1", n, err)
-	}
-
 	// Clearing one pair leaves the others intact.
 	if err := s.Clear("alice", "team-a"); err != nil {
 		t.Fatal(err)
@@ -83,9 +75,6 @@ func TestStorePersistsAcrossReopen(t *testing.T) {
 	if len(got) != 1 || got[0].Name != "web" {
 		t.Errorf("reopened store lost the draft: %+v", got)
 	}
-	if projects, err := s2.ListProjects("alice"); err != nil || len(projects) != 1 || projects[0] != "team-a" {
-		t.Errorf("ListProjects(alice) = %v (err %v), want [team-a]", projects, err)
-	}
 }
 
 // TestStoreSafeSegments verifies identities with '/' or ':' map to one safe path
@@ -100,14 +89,10 @@ func TestStoreSafeSegments(t *testing.T) {
 	if err != nil || len(got) != 1 {
 		t.Fatalf("round-trip through escaped segments failed: %+v err=%v", got, err)
 	}
-	if projects, _ := s.ListProjects("system:admin"); len(projects) != 1 || projects[0] != "team/with/slashes" {
-		t.Errorf("ListProjects didn't unescape: %v", projects)
-	}
 }
 
 // TestClearRemovesFile checks Clear (and an Unstage that empties) deletes the
-// on-disk file rather than leaving an empty [], so ListProjects doesn't keep
-// reporting emptied projects.
+// on-disk file rather than leaving an empty [] behind.
 func TestClearRemovesFile(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := Open(dir)
@@ -123,9 +108,6 @@ func TestClearRemovesFile(t *testing.T) {
 	}
 	if _, err := os.Stat(file); !os.IsNotExist(err) {
 		t.Errorf("Clear should remove the draft file, stat err = %v", err)
-	}
-	if projects, _ := s.ListProjects("alice"); len(projects) != 0 {
-		t.Errorf("ListProjects should be empty after Clear, got %v", projects)
 	}
 
 	// Unstaging the last entry should likewise remove the file.
@@ -187,10 +169,5 @@ func TestCorruptDraftQuarantined(t *testing.T) {
 	}
 	if entries, err = s.List("alice", "team-a"); err != nil || len(entries) != 1 {
 		t.Fatalf("List after re-stage: %v, %+v", err, entries)
-	}
-	// The quarantined file is not enumerated as a project.
-	projects, err := s.ListProjects("alice")
-	if err != nil || len(projects) != 1 || projects[0] != "team-a" {
-		t.Fatalf("ListProjects = %v, %v", projects, err)
 	}
 }

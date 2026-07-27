@@ -13,7 +13,7 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 )
 
-// History returns up to limit recent commits on branch, newest first — the
+// History returns up to limit recent commits on branch, newest first - the
 // Changes-pane commit/merge log.
 func (r *Repo) History(branch string, limit int) ([]model.Commit, error) {
 	r.mu.Lock()
@@ -53,7 +53,7 @@ func (r *Repo) History(branch string, limit int) ([]model.Commit, error) {
 
 // RevertItems computes the changeset that undoes commit hash: every file the
 // commit changed is restored to its first-parent (pre-commit) content, and files
-// it added are deleted. The result feeds CommitChangeset as a forward revert — a
+// it added are deleted. The result feeds CommitChangeset as a forward revert - a
 // new commit, never a history rewrite. Root and merge commits are rejected (no
 // single parent to restore to).
 func (r *Repo) RevertItems(hash string) ([]ChangesetItem, error) {
@@ -97,7 +97,7 @@ func (r *Repo) RevertItems(hash string) ([]ChangesetItem, error) {
 		}
 		f, ferr := parentTree.File(path)
 		if ferr != nil {
-			// Absent in the parent → the commit added it → revert removes it.
+			// Absent in the parent -> the commit added it -> revert removes it.
 			items = append(items, ChangesetItem{Path: path, Delete: true})
 			continue
 		}

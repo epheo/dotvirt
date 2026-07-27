@@ -28,7 +28,7 @@
 	const close = () => (open = false);
 
 	// Bubble-phase window handlers: the trigger's own onclick runs first (so toggling
-	// shut stays shut), then this fires — a click landing outside `root` dismisses.
+	// shut stays shut), then this fires - a click landing outside `root` dismisses.
 	function onWindowClick(e: MouseEvent) {
 		if (open && root && !root.contains(e.target as Node)) close();
 	}

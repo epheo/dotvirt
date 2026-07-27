@@ -20,7 +20,7 @@ import (
 var ErrUnauthorized = errors.New("401 unauthorized")
 
 // MintToken creates a scoped access token for username via BASIC AUTH (not a
-// bearer token) — the operator authenticates as the admin a managed Forgejo just
+// bearer token) - the operator authenticates as the admin a managed Forgejo just
 // created and mints the narrow token dotvirt's runtime then uses. Returns the token.
 func (f *Factory) MintToken(username, password, tokenName string, scopes []string) (string, error) {
 	if f == nil {
@@ -65,7 +65,7 @@ func (f *Factory) MintToken(username, password, tokenName string, scopes []strin
 }
 
 // deleteToken removes a named access token via basic auth (Forgejo accepts the
-// token NAME as the path id). A 404 (no such token) is success — the goal state is
+// token NAME as the path id). A 404 (no such token) is success - the goal state is
 // "no token of this name", so MintToken can recreate it cleanly on re-mint.
 func (f *Factory) deleteToken(username, password, tokenName string) error {
 	req, err := http.NewRequest("DELETE", f.baseURL+"/api/v1/users/"+username+"/tokens/"+url.PathEscape(tokenName), nil)
@@ -90,8 +90,8 @@ func (f *Factory) deleteToken(username, password, tokenName string) error {
 }
 
 // ValidateToken reports whether token authenticates against the forge, via a GET of
-// the current-user endpoint. Only 401 means invalid (so the caller re-mints). A 2xx —
-// or a 403 — means valid: under Forgejo's granular token scopes a 403 is the token
+// the current-user endpoint. Only 401 means invalid (so the caller re-mints). A 2xx -
+// or a 403 - means valid: under Forgejo's granular token scopes a 403 is the token
 // authenticating but lacking the read:user scope this endpoint needs, which proves the
 // credential is good (treating it as invalid re-mints on every reconcile forever).
 // Transport/other errors surface as err so a forge blip isn't mistaken for a bad token.
@@ -117,7 +117,7 @@ func (f *Factory) ValidateToken(token string) (valid bool, err error) {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return true, nil
 	case resp.StatusCode == http.StatusForbidden:
-		// Authenticated but forbidden (scope) — a valid credential, not a bad token.
+		// Authenticated but forbidden (scope) - a valid credential, not a bad token.
 		return true, nil
 	case resp.StatusCode == http.StatusUnauthorized:
 		return false, nil

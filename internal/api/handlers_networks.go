@@ -13,7 +13,7 @@ import (
 // The networking create routes resolve their target TIER from the object's SCOPE,
 // never from a client-supplied repo: a namespace-scoped UDN goes to the tenant's own
 // project repo; cluster-scoped objects (CUDN, NNCP uplink, Namespace) go to the
-// platform repo and are SSAR-gated on the caller's authority to create that kind —
+// platform repo and are SSAR-gated on the caller's authority to create that kind -
 // matching the AppProject boundary that lets only the platform app apply them.
 // The single-scope routes are built by the two factories below and registered in
 // api.go, where each route's authorization rationale lives; only the routes with
@@ -23,6 +23,11 @@ import (
 // call (platformScope/resolveProject 503 on a nil draft first) keeps a degraded
 // wiring from panicking at route registration.
 type stageFunc func(Draft, auth.Identity, project.ProjectInfo, json.RawMessage) (model.DraftView, error)
+
+// nsPeek is the routing field of a namespace-scoped create body.
+type nsPeek struct {
+	Namespace string `json:"namespace"`
+}
 
 // platformCreate builds the handler for a cluster-scoped create: always the
 // platform tier, SSAR-gated on the caller's authority to create ref's kind.
@@ -44,27 +49,19 @@ func (s *Server) platformCreate(ref ssarRef, stage stageFunc) http.HandlerFunc {
 
 // namespacedCreate builds the handler for a namespace-scoped create: it peeks the
 // spec's namespace and routes to the tenant project owning it (resolveProject is
-// the authorization point — a namespace outside the caller's projects is not
+// the authorization point - a namespace outside the caller's projects is not
 // found). what names the kind in the missing-namespace error, article included.
 func (s *Server) namespacedCreate(what string, stage stageFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		raw, err := readAll(r)
-		if err != nil {
-			fail(w, invalid(err))
+		raw, p, ok := peek[nsPeek](w, r)
+		if !ok {
 			return
 		}
-		var peek struct {
-			Namespace string `json:"namespace"`
-		}
-		if err := json.Unmarshal(raw, &peek); err != nil {
-			fail(w, invalid(err))
-			return
-		}
-		if peek.Namespace == "" {
+		if p.Namespace == "" {
 			http.Error(w, "a namespace is required for "+what, http.StatusBadRequest)
 			return
 		}
-		sc, ok := s.resolveProject(w, r, byNamespace(peek.Namespace))
+		sc, ok := s.resolveProject(w, r, byNamespace(p.Namespace))
 		if !ok {
 			return
 		}
@@ -78,30 +75,22 @@ func (s *Server) namespacedCreate(what string, stage stageFunc) http.HandlerFunc
 // lands in the tenant repo owning its namespace; a shared/VLAN CUDN is
 // cluster-scoped, so it routes to the platform tier.
 func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
-	raw, err := readAll(r)
-	if err != nil {
-		fail(w, invalid(err))
-		return
-	}
-	var peek struct {
+	raw, p, ok := peek[struct {
 		Scope     string `json:"scope"`
 		Namespace string `json:"namespace"`
-	}
-	if err := json.Unmarshal(raw, &peek); err != nil {
-		fail(w, invalid(err))
+	}](w, r)
+	if !ok {
 		return
 	}
-
 	var sc scope
-	var ok bool
-	switch peek.Scope {
+	switch p.Scope {
 	case "", netgen.ScopeProject:
-		if peek.Namespace == "" {
+		if p.Namespace == "" {
 			http.Error(w, "a namespace is required for a project-scoped network", http.StatusBadRequest)
 			return
 		}
-		sc, ok = s.resolveProject(w, r, byNamespace(peek.Namespace))
-	default: // ScopeShared / ScopeVLAN — a cluster-scoped CUDN
+		sc, ok = s.resolveProject(w, r, byNamespace(p.Namespace))
+	default: // ScopeShared / ScopeVLAN - a cluster-scoped CUDN
 		sc, ok = s.platformScope(w, r, ssarCUDN)
 	}
 	if !ok {
@@ -112,23 +101,17 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleCreateAdminNetworkPolicy stages a cluster-wide admin DFW policy
-// (AdminNetworkPolicy or the baseline default) — always platform-tier and admin-only,
+// (AdminNetworkPolicy or the baseline default) - always platform-tier and admin-only,
 // gated on the caller's authority to create the matching kind.
 func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.Request) {
-	raw, err := readAll(r)
-	if err != nil {
-		fail(w, invalid(err))
-		return
-	}
-	var peek struct {
+	raw, p, ok := peek[struct {
 		Baseline bool `json:"baseline"`
-	}
-	if err := json.Unmarshal(raw, &peek); err != nil {
-		fail(w, invalid(err))
+	}](w, r)
+	if !ok {
 		return
 	}
 	ref := ssarANP
-	if peek.Baseline {
+	if p.Baseline {
 		ref = ssarBANP
 	}
 	sc, ok := s.platformScope(w, r, ref)
@@ -139,116 +122,11 @@ func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.R
 	respond(w, view, err)
 }
 
-// handleCreateNamespace stages a new namespace (+ optional primary "VM Network").
-// The Namespace object is cluster-scoped, so it is COMMITTED to the platform repo
-// and gated on namespace-create authority; but it is labeled/annotated to the tenant
-// project it JOINS (carried as "project"), so that project's Argo app syncs
-// workloads into it once the platform app creates it.
-func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
-	raw, err := readAll(r)
-	if err != nil {
-		fail(w, invalid(err))
-		return
-	}
-	var peek struct {
-		Project string `json:"project"`
-	}
-	if err := json.Unmarshal(raw, &peek); err != nil {
-		fail(w, invalid(err))
-		return
-	}
-	if peek.Project == "" {
-		http.Error(w, "the project the namespace joins is required", http.StatusBadRequest)
-		return
-	}
-	// The tenant project it joins: annotation source + authz (the caller must see it).
-	join, ok := s.resolveProject(w, r, byName(peek.Project))
-	if !ok {
-		return
-	}
-	// Commit to the platform tier, gated on namespace-create authority.
-	plat, ok := s.platformScope(w, r, ssarNamespace)
-	if !ok {
-		return
-	}
-	view, err := s.draft.StageCreateNamespace(join.id, plat.proj, join.proj, raw)
-	respond(w, view, err)
-}
-
-// handleCreateProject bootstraps a new tenant project from the UI — the "New
-// Project" flow. It creates the project's forge repo and stages its first namespace
-// (+ an optional owners RoleBinding) into the platform repo. Gated on the same
-// namespace-create authority as handleCreateNamespace: creating a tenant is a
-// platform-admin act (it lands a Namespace + RBAC in the platform tier).
-func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
-	raw, err := readAll(r)
-	if err != nil {
-		fail(w, invalid(err))
-		return
-	}
-	// Peek the name for an early 400; the Coordinator re-decodes the full spec.
-	var peek struct {
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal(raw, &peek); err != nil {
-		fail(w, invalid(err))
-		return
-	}
-	if peek.Name == "" {
-		http.Error(w, "a project name is required", http.StatusBadRequest)
-		return
-	}
-	plat, ok := s.platformScope(w, r, ssarNamespace)
-	if !ok {
-		return
-	}
-	// The cluster is dotvirt's registry, so an existing project is what makes this a
-	// re-manage rather than a create. Checked here, before the coordinator touches the
-	// forge, so a refusal never leaves a repo behind.
-	if _, exists := s.projectByName(peek.Name); exists {
-		http.Error(w, "that project already exists; adopt it instead of creating it", http.StatusConflict)
-		return
-	}
-	view, err := s.draft.StageCreateProject(plat.id, plat.proj, raw)
-	respond(w, view, err)
-}
-
-// handleAdoptProject wires a repo to an existing labeled-but-repoless project — the
-// "Attach repo" action on the inventory's no-repo dead-end. Like handleCreateProject
-// it's a platform-admin act (it lands a Namespace + repo annotation in the platform
-// tier), so it's gated on namespace-create authority; the target tenant is resolved
-// from the SA snapshot (the caller is a platform admin) and must currently be repoless.
-func (s *Server) handleAdoptProject(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Owners []string `json:"owners,omitempty"`
-	}
-	if raw, err := readAll(r); err != nil {
-		fail(w, invalid(err))
-		return
-	} else if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &body); err != nil {
-			fail(w, invalid(err))
-			return
-		}
-	}
-	plat, ok := s.platformScope(w, r, ssarNamespace)
-	if !ok {
-		return
-	}
-	target, ok := s.projectByName(r.PathValue("project"))
-	if !ok {
-		http.Error(w, "project not found", http.StatusNotFound)
-		return
-	}
-	view, err := s.draft.AdoptProject(plat.id, plat.proj, target, body.Owners)
-	respond(w, view, err)
-}
-
 // handleNetworks lists the networks (Distributed Port Groups) the caller may
 // attach a VM to, plus the physical fabric (Uplinks + Physical adapters) for
-// callers who can read nodes. The port-group catalog is read with dotvirt's SA —
+// callers who can read nodes. The port-group catalog is read with dotvirt's SA -
 // a scoped tenant usually can't list these cluster CRDs, which would yield a
-// silently-empty picker — then project-scoped networks are filtered to the
+// silently-empty picker - then project-scoped networks are filtered to the
 // caller's visible namespaces so nothing leaks across tenants.
 func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
@@ -258,7 +136,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The full catalog is a lock-free scan of the SA-maintained netstate snapshot
-	// (watch-fed, identical for everyone) — no per-request cluster LIST. Per-tenant
+	// (watch-fed, identical for everyone) - no per-request cluster LIST. Per-tenant
 	// scoping and per-object drift happen below, off this copy. Nil netstate (a
 	// stripped-down wiring) degrades to an empty catalog, per the Deps contract.
 	var full model.NetworkInventory
@@ -279,9 +157,9 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		NMStatePresent:   full.NMStatePresent,
 	}
 	// Per-object drift: attach each segment's own ArgoCD sync/health at serve time
-	// (always fresh, off the cached catalog) — the same surface VMs carry.
+	// (always fresh, off the cached catalog) - the same surface VMs carry.
 	s.enrichNetworkDrift(out.Networks)
-	// The physical fabric is node-level infrastructure — show it only to callers
+	// The physical fabric is node-level infrastructure - show it only to callers
 	// who can read nodes (cluster-admins), not every tenant who can attach a NIC.
 	if s.canReadNodesCached(r.Context(), id, c) {
 		out.Uplinks = full.Uplinks
@@ -313,7 +191,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 
 // scopeNetworks keeps shared (cluster) networks and only the project networks in
 // namespaces the caller can see. A shared network publishes cluster-wide, so its
-// own Namespaces list can name other tenants' namespaces — filter it to the
+// own Namespaces list can name other tenants' namespaces - filter it to the
 // caller's visible set so the port group stays discoverable (name/kind/VLAN, like
 // a StorageClass) without ever revealing a namespace outside the caller's RBAC.
 func scopeNetworks(nets []model.Network, visible map[string]bool) []model.Network {
@@ -331,7 +209,7 @@ func scopeNetworks(nets []model.Network, visible map[string]bool) []model.Networ
 }
 
 // enrichNetworkDrift attaches each segment's own ArgoCD sync/health/apply-error,
-// looked up from the shared Application snapshot by object identity — the same
+// looked up from the shared Application snapshot by object identity - the same
 // per-object drift plane VMs use. Mutates the scoped copies in place (never the cached
 // catalog, which scopeNetworks already copied). No-op when Argo isn't wired.
 func (s *Server) enrichNetworkDrift(nets []model.Network) {
@@ -339,30 +217,16 @@ func (s *Server) enrichNetworkDrift(nets []model.Network) {
 		return
 	}
 	for i := range nets {
-		group, kind := networkGVK(nets[i].Backing)
-		if kind == "" {
+		group, ok := backingGroup[nets[i].Backing]
+		if !ok {
 			continue
 		}
 		// UDN/NAD are namespaced; a CUDN is cluster-scoped, so its resource namespace is
 		// empty (Network.Namespace is already "" for shared networks).
-		if d, ok := s.drift.ResourceDrift(group, kind, nets[i].Namespace, nets[i].Name); ok {
+		if d, ok := s.drift.ResourceDrift(group, nets[i].Backing, nets[i].Namespace, nets[i].Name); ok {
 			nets[i].Sync, nets[i].Health, nets[i].SyncError = d.Sync, d.Health, d.Message
 		}
 	}
-}
-
-// networkGVK maps a segment's backing to its ArgoCD (group, kind); empty kind means a
-// backing with no managed object to drift-check.
-func networkGVK(backing string) (group, kind string) {
-	switch backing {
-	case "UserDefinedNetwork":
-		return "k8s.ovn.org", "UserDefinedNetwork"
-	case "ClusterUserDefinedNetwork":
-		return "k8s.ovn.org", "ClusterUserDefinedNetwork"
-	case "NetworkAttachmentDefinition":
-		return "k8s.cni.cncf.io", "NetworkAttachmentDefinition"
-	}
-	return "", ""
 }
 
 // visibleSubset returns the namespaces in nss the caller can see, as a fresh slice

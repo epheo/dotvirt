@@ -9,8 +9,8 @@
 		type TaskEntry,
 		type VMEvent,
 	} from '$lib/api';
-	import { duration } from '$lib/format';
 	import { resource } from '$lib/resource.svelte';
+	import { buildTasks, type Task } from '$lib/tasks';
 	import { persisted } from '$lib/state/persisted.svelte';
 	import { severityTone, taskTone, TONE_TEXT } from '$lib/status';
 	import { TBODY, THEAD_TR } from '$lib/table';
@@ -37,8 +37,10 @@
 		onrefresh?: () => void;
 	} = $props();
 
+	type DockTab = 'tasks' | 'events' | 'alarms';
+
 	let openPane = $state(true);
-	let tab = $state<'tasks' | 'events' | 'alarms'>('tasks');
+	let tab = $state<DockTab>('tasks');
 
 	// Events lane: fetched on demand when the Events tab is opened (not on the
 	// broadcast hot path), so a busy cluster's event churn can't spam the UI.
@@ -73,7 +75,7 @@
 	}
 	function onResizeMove(e: PointerEvent) {
 		if (!dragging) return;
-		const next = dragStartH + (dragStartY - e.clientY); // drag up → taller
+		const next = dragStartH + (dragStartY - e.clientY); // drag up -> taller
 		dockHeight = Math.max(80, Math.min(next, window.innerHeight * 0.7));
 	}
 	function onResizeEnd() {
@@ -90,163 +92,63 @@
 			.finally(() => (eventsLoading = false));
 	}
 
-	function selectTab(t: 'tasks' | 'events' | 'alarms') {
+	function selectTab(t: DockTab) {
 		tab = t;
 		openPane = true;
 		if (t === 'events') loadEvents(); // refresh on each open
 		if (t === 'alarms') alarmsRes.refresh();
 	}
 
-	type Task = {
-		kind: 'staged' | 'pr' | 'sync' | 'drift' | 'action' | 'migration';
-		verb: string;
-		namespace: string;
-		name: string;
-		prTitle: string;
-		status: string;
-		by: string;
-		project: string;
-		url: string;
-		ok?: boolean; // for 'action'/'migration' rows: success
-		at?: number; // for 'action' rows: timestamp (keeps keys unique)
-		active?: boolean; // for 'migration' rows: still moving
-	};
-
-	// One unified feed ordered by lifecycle stage, not timestamp: live migrations →
-	// runtime ops → staged changes (the draft) → open PRs (proposed) → standing
-	// drift (cluster ≠ git).
-	const tasks = $derived.by<Task[]>(() => {
-		const out: Task[] = [];
-		// Live node-to-node moves (vCenter's vMotion rows) — streamed off the VMI's
-		// migration state; finished ones linger for a short window.
-		const migrationLingerMs = 15 * 60 * 1000;
-		if (inventory) {
-			for (const proj of inventory.projects)
-				for (const ns of proj.namespaces)
-					for (const vm of ns.vms) {
-						const m = vm.migration;
-						if (!m) continue;
-						const active = !m.completed && !m.failed;
-						const endedRecently = m.endedAt
-							? Date.now() - new Date(m.endedAt).getTime() < migrationLingerMs
-							: false;
-						if (!active && !endedRecently) continue;
-						out.push({
-							kind: 'migration',
-							verb: 'Live-migration',
-							namespace: vm.namespace,
-							name: vm.name,
-							prTitle: '',
-							status: active
-								? `${m.sourceNode ?? '?'} → ${m.targetNode ?? '?'}${m.startedAt ? ` · ${duration(m.startedAt)}` : ''}`
-								: m.failed
-									? 'Failed'
-									: `Migrated to ${m.targetNode ?? '?'}`,
-							by: '—',
-							project: proj.name,
-							url: '',
-							ok: !m.failed,
-							active,
-						});
-					}
-		}
-		// Imperative runtime ops from the server feed (every admin's, not just this
-		// browser's), most recent first with real attribution.
-		for (const t of feed) {
-			if (t.kind !== 'op') continue;
-			out.push({
-				kind: 'action',
-				verb: t.verb,
-				namespace: t.namespace ?? '',
-				name: t.name ?? '',
-				prTitle: '',
-				status: t.ok ? 'Requested' : 'Failed',
-				by: t.by ?? '—',
-				project: t.project ?? '',
-				url: '',
-				ok: t.ok,
-				at: Date.parse(t.at),
-			});
-		}
-		for (const { project, draft } of drafts) {
-			for (const it of draft.items) {
-				out.push({
-					kind: 'staged',
-					verb: it.kind === 'edit' ? 'Reconfigure' : it.kind === 'create' ? 'Create' : 'Delete',
-					namespace: it.namespace,
-					name: it.name,
-					prTitle: '',
-					status: 'Staged',
-					by: username,
-					project,
-					url: '',
-				});
-			}
-		}
-		for (const p of proposals) {
-			out.push({
-				kind: 'pr',
-				verb: 'Proposed',
-				namespace: '',
-				name: '',
-				prTitle: p.title || `PR #${p.prNumber}`,
-				status: `PR #${p.prNumber} open`,
-				by: username,
-				project: p.project,
-				url: p.prURL,
-			});
-		}
-		// Merged PRs from the server feed (webhook-instant, forge-derived, so they
-		// survive reloads and show every admin's merges): "syncing" while their
-		// project still drifts — the merge→reconcile gap an admin can't otherwise see.
-		for (const t of feed) {
-			if (t.kind !== 'merge') continue;
-			const drifting = inventory?.projects.some(
-				(p) =>
-					p.name === t.project &&
-					p.namespaces.some((ns) => ns.vms.some((v) => v.sync === 'OutOfSync')),
-			);
-			out.push({
-				kind: 'sync',
-				verb: 'Merged',
-				namespace: '',
-				name: '',
-				prTitle: t.title || `PR #${t.prNumber}`,
-				status: drifting ? 'ArgoCD syncing…' : 'Synced',
-				by: t.by ?? '—',
-				project: t.project ?? '',
-				url: t.prURL ?? '',
-				ok: true,
-				active: !!drifting,
-				at: Date.parse(t.at),
-			});
-		}
-		if (inventory) {
-			for (const proj of inventory.projects)
-				for (const ns of proj.namespaces)
-					for (const vm of ns.vms)
-						if (vm.sync === 'OutOfSync')
-							out.push({
-								kind: 'drift',
-								verb: 'Configuration drift',
-								namespace: vm.namespace,
-								name: vm.name,
-								prTitle: '',
-								status: 'Drifted',
-								by: '—',
-								project: proj.name,
-								url: '',
-							});
-		}
-		return out;
-	});
+	const tasks = $derived(buildTasks({ inventory, feed, drafts, proposals, username }));
 
 	// Drift + failed migrations come from the streamed inventory; firing
-	// Prometheus alerts join them — one amber number for everything wrong.
+	// Prometheus alerts join them - one amber number for everything wrong.
 	const clientAlarms = $derived(
 		tasks.filter((t) => t.kind === 'drift' || (t.kind === 'migration' && !t.ok)),
 	);
 	const alarms = $derived(clientAlarms.length + (firing?.length ?? 0));
+
+	// Both alarm sources projected into one row shape, so the table renders a
+	// single {#each} whatever the origin.
+	type AlarmRow = {
+		key: string;
+		name: string;
+		count?: number;
+		target: string;
+		targetSub: string; // faint suffix ('' = none)
+		severity: string;
+		tone: ReturnType<typeof severityTone>;
+		bg: string;
+		source: 'Prometheus' | 'dotvirt';
+		onclick: () => void;
+	};
+	const alarmRows = $derived.by((): AlarmRow[] => [
+		...(firing ?? []).map((a): AlarmRow => ({
+			key: `prom:${a.name}:${a.namespace ?? ''}/${a.vm ?? ''}:${a.severity ?? ''}`,
+			name: a.name,
+			count: (a.count ?? 0) > 1 ? a.count : undefined,
+			target: a.vm || (a.namespace ?? '—'),
+			targetSub: a.vm ? (a.namespace ?? '') : '',
+			severity: a.severity ?? '—',
+			tone: severityTone(a.severity),
+			bg: 'bg-warn-soft/40',
+			source: 'Prometheus',
+			onclick: () => {
+				if (a.namespace && a.vm) onselect(a.namespace, a.vm);
+			},
+		})),
+		...clientAlarms.map((t): AlarmRow => ({
+			key: `dotvirt:${t.kind}:${t.namespace}/${t.name}`,
+			name: t.verb,
+			target: t.name,
+			targetSub: t.namespace,
+			severity: t.kind === 'drift' ? 'warning' : 'critical',
+			tone: taskTone(t),
+			bg: t.kind === 'drift' ? 'bg-warn-soft/40' : 'bg-danger-soft/40',
+			source: 'dotvirt',
+			onclick: () => activate(t),
+		})),
+	]);
 
 	const rowClass = (t: Task) =>
 		t.kind === 'drift'
@@ -304,7 +206,7 @@
 			]}
 			active={openPane ? tab : ''}
 			variant="chips"
-			onchange={(t) => selectTab(t as 'tasks' | 'events' | 'alarms')}
+			onchange={(t) => selectTab(t as DockTab)}
 		/>
 		<button
 			onclick={() => {
@@ -378,47 +280,22 @@
 					<table class="w-full">
 						{@render dockHead(['Alarm', 'Target', 'Severity', 'Source'])}
 						<tbody class={TBODY}>
-							{#each firing ?? [] as a (a.name + ':' + (a.namespace ?? '') + '/' + (a.vm ?? '') + ':' + (a.severity ?? ''))}
-								<tr
-									onclick={() => a.namespace && a.vm && onselect(a.namespace, a.vm)}
-									class="cursor-pointer bg-warn-soft/40 hover:bg-select-soft"
-								>
+							{#each alarmRows as r (r.key)}
+								<tr onclick={r.onclick} class="cursor-pointer {r.bg} hover:bg-select-soft">
 									<td class="px-3 py-1.5 font-medium text-ink-soft">
-										{a.name}{#if (a.count ?? 0) > 1}<span class="text-ink-faint">
-												×{a.count}</span
-											>{/if}
+										{r.name}{#if r.count}<span class="text-ink-faint"> ×{r.count}</span>{/if}
 									</td>
 									<td class="px-3 py-1.5 text-ink">
-										{#if a.vm}{a.vm} <span class="text-ink-faint">· {a.namespace}</span>
-										{:else}{a.namespace ?? '—'}{/if}
+										{r.target}{#if r.targetSub}
+											<span class="text-ink-faint">· {r.targetSub}</span>{/if}
 									</td>
 									<td class="px-3 py-1.5">
 										<span class="inline-flex items-center gap-1.5">
-											<StatusDot tone={severityTone(a.severity)} size="xs" />
-											{a.severity ?? '—'}
+											<StatusDot tone={r.tone} size="xs" />
+											{r.severity}
 										</span>
 									</td>
-									<td class="px-3 py-1.5 text-ink-muted">Prometheus</td>
-								</tr>
-							{/each}
-							{#each clientAlarms as t (t.kind + ':' + t.namespace + '/' + t.name)}
-								<tr
-									onclick={() => activate(t)}
-									class="cursor-pointer {t.kind === 'drift'
-										? 'bg-warn-soft/40'
-										: 'bg-danger-soft/40'} hover:bg-select-soft"
-								>
-									<td class="px-3 py-1.5 font-medium text-ink-soft">{t.verb}</td>
-									<td class="px-3 py-1.5 text-ink">
-										{t.name} <span class="text-ink-faint">· {t.namespace}</span>
-									</td>
-									<td class="px-3 py-1.5">
-										<span class="inline-flex items-center gap-1.5">
-											<StatusDot tone={taskTone(t)} size="xs" />
-											{t.kind === 'drift' ? 'warning' : 'critical'}
-										</span>
-									</td>
-									<td class="px-3 py-1.5 text-ink-muted">dotvirt</td>
+									<td class="px-3 py-1.5 text-ink-muted">{r.source}</td>
 								</tr>
 							{/each}
 						</tbody>

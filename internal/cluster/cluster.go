@@ -1,6 +1,6 @@
 // Package cluster is dotvirt's live-read plane: it lists VirtualMachines and
 // their running VirtualMachineInstances from the cluster. Identity is per-token:
-// a Factory mints one Client per bearer token, so cluster RBAC — not dotvirt — is
+// a Factory mints one Client per bearer token, so cluster RBAC - not dotvirt - is
 // the sole authority on what a caller may read. It never writes; Argo owns apply.
 package cluster
 
@@ -70,7 +70,7 @@ func NewClient(kube kubernetes.Interface, kubevirt kubecli.KubevirtClient, dyn d
 	return &Client{kubevirt: kubevirt, kube: kube, dyn: dyn}
 }
 
-// clientsFor is the restfactory build hook: a token-bearing config → a full Client.
+// clientsFor is the restfactory build hook: a token-bearing config -> a full Client.
 func clientsFor(cfg *rest.Config) (*Client, error) {
 	kv, err := kubecli.GetKubevirtClientFromRESTConfig(cfg)
 	if err != nil {
@@ -88,7 +88,7 @@ func clientsFor(cfg *rest.Config) (*Client, error) {
 }
 
 // VisibleNamespaces returns the namespaces this client's token may read VMs in.
-// The fast path is a cluster-wide Namespaces().List — but listing namespaces
+// The fast path is a cluster-wide Namespaces().List - but listing namespaces
 // does not imply reading VMs in them (an auditor-style role holds the former
 // without the latter), so it counts only when a cluster-wide VM read SSAR also
 // passes. Anything less falls back to probing each candidate namespace with a
@@ -147,7 +147,7 @@ func (c *Client) VMListWatch() *cache.ListWatch {
 }
 
 // VMIListWatch is the List+Watch source for a cluster-wide
-// VirtualMachineInstance reflector — the running-state half of the snapshot.
+// VirtualMachineInstance reflector - the running-state half of the snapshot.
 func (c *Client) VMIListWatch() *cache.ListWatch {
 	return &cache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
@@ -212,7 +212,7 @@ func (c *Client) canReadVMs(ctx context.Context, ns string) (bool, error) {
 }
 
 // allowed reports whether this token may perform the action described by attrs, via
-// a SelfSubjectAccessReview — the single SSAR primitive the capability checks share.
+// a SelfSubjectAccessReview - the single SSAR primitive the capability checks share.
 func (c *Client) allowed(ctx context.Context, attrs *authzv1.ResourceAttributes) (bool, error) {
 	review := &authzv1.SelfSubjectAccessReview{Spec: authzv1.SelfSubjectAccessReviewSpec{ResourceAttributes: attrs}}
 	res, err := c.kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, review, metav1.CreateOptions{})
@@ -224,7 +224,7 @@ func (c *Client) allowed(ctx context.Context, attrs *authzv1.ResourceAttributes)
 
 // CanUpdateVM reports whether this token may update the VirtualMachine ns/name. It
 // gates the re-sync action: a user may drive an Argo reconcile of a VM (run with
-// dotvirt's SA) only if they could modify that VM themselves — so read-only callers
+// dotvirt's SA) only if they could modify that VM themselves - so read-only callers
 // can't escalate into an SA-privileged sync.
 func (c *Client) CanUpdateVM(ctx context.Context, namespace, name string) (bool, error) {
 	ok, err := c.allowed(ctx, &authzv1.ResourceAttributes{
@@ -278,7 +278,7 @@ func (c *Client) Screenshot(ctx context.Context, namespace, name string) ([]byte
 }
 
 // ListEvents returns recent Kubernetes Events for the VM ns/name and its VMI
-// (which shares the name), newest-first — the per-VM Monitor tab. Read with this
+// (which shares the name), newest-first - the per-VM Monitor tab. Read with this
 // client's token, so cluster RBAC gates it like every other read.
 func (c *Client) ListEvents(ctx context.Context, namespace, name string) ([]model.Event, error) {
 	list, err := c.kube.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{
@@ -298,10 +298,10 @@ func (c *Client) ListEvents(ctx context.Context, namespace, name string) ([]mode
 }
 
 // ListVMEvents returns recent VM/VMI Events across the given namespaces (the set
-// the caller may see), newest-first and capped — the dock's Events lane. Listed
+// the caller may see), newest-first and capped - the dock's Events lane. Listed
 // per-namespace with this client's token, so cluster RBAC gates it and nothing
 // leaks across tenants. Field selectors can't OR, so it's one selected LIST per
-// kind — still far cheaper than listing every event in a busy namespace (pod
+// kind - still far cheaper than listing every event in a busy namespace (pod
 // churn dominates) and filtering here.
 func (c *Client) ListVMEvents(ctx context.Context, namespaces []string) ([]model.Event, error) {
 	out := []model.Event{}
@@ -370,7 +370,7 @@ func sortEventsDesc(events []model.Event) {
 // --- runtime ops (imperative, RBAC-gated) ---
 //
 // These run under the caller's token and act on the live VMI without touching
-// the git-managed VM spec, so ArgoCD self-heal leaves them alone — unlike power,
+// the git-managed VM spec, so ArgoCD self-heal leaves them alone - unlike power,
 // which is a spec edit and stays in the PR lane.
 
 // Restart restarts the VM: the running VMI is recreated per its run strategy.
@@ -411,7 +411,7 @@ const maintenanceAnnotation = "dotvirt.io/maintenance"
 // NodeInfo reads a node's schedulability under the caller's token, plus whether
 // that token may cordon it (an SSAR on node update) so the UI gates the action.
 // A read failure (no node-get RBAC) surfaces as an error the handler maps to
-// 403/404 — the action stays hidden for users who can't see nodes.
+// 403/404 - the action stays hidden for users who can't see nodes.
 func (c *Client) NodeInfo(ctx context.Context, name string) (model.NodeInfo, error) {
 	node, err := c.kube.CoreV1().Nodes().Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
@@ -451,9 +451,9 @@ func (c *Client) SetNodeMaintenance(ctx context.Context, name string, enter bool
 	return err
 }
 
-// ListNodes returns the cluster's virtualization hosts — nodes KubeVirt marks
-// schedulable for VMs — under the caller's token, as candidate live-migration
-// targets. No node-list RBAC surfaces as an error (→ 403) and the migrate
+// ListNodes returns the cluster's virtualization hosts - nodes KubeVirt marks
+// schedulable for VMs - under the caller's token, as candidate live-migration
+// targets. No node-list RBAC surfaces as an error (-> 403) and the migrate
 // dialog falls back to scheduler-picked placement. Ready + cordon state ride
 // along so the picker can gray out hosts a migration could not land on.
 func (c *Client) ListNodes(ctx context.Context) ([]model.Node, error) {
@@ -486,7 +486,7 @@ func nodeReady(n corev1.Node) bool {
 // CanReadNodes reports whether this token may list nodes (cluster-scoped). It
 // gates the networking read's physical fabric (Uplinks + Physical adapters):
 // those are node-level infrastructure, so a plain tenant who can't see nodes
-// doesn't see node NICs either. Best-effort — a review error reads as "no".
+// doesn't see node NICs either. Best-effort - a review error reads as "no".
 func (c *Client) CanReadNodes(ctx context.Context) bool {
 	ok, _ := c.allowed(ctx, &authzv1.ResourceAttributes{Verb: "list", Resource: "nodes"})
 	return ok
@@ -499,10 +499,10 @@ func (c *Client) canPatchNodes(ctx context.Context) (bool, error) {
 
 // CanCreateClusterResource reports whether this token may create the cluster-scoped
 // group/resource. It gates dotvirt's platform/Infrastructure authoring actions
-// (CUDN, NNCP, Namespace): the user never creates these — Argo applies them from the
-// platform repo — so can-i-create is the authorization SIGNAL standing in for "is a
+// (CUDN, NNCP, Namespace): the user never creates these - Argo applies them from the
+// platform repo - so can-i-create is the authorization SIGNAL standing in for "is a
 // platform operator" (matching the dotvirt-platform-network-admin role). Best-effort
-// like CanReadNodes — a review error reads as "no".
+// like CanReadNodes - a review error reads as "no".
 func (c *Client) CanCreateClusterResource(ctx context.Context, group, resource string) bool {
 	ok, _ := c.allowed(ctx, &authzv1.ResourceAttributes{Verb: "create", Group: group, Resource: resource})
 	return ok

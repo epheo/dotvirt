@@ -1,6 +1,6 @@
 <script lang="ts">
-	// The pipeline every config change rides: staged in a draft → proposed as a
-	// pull request → merged to main → synced onto the cluster by ArgoCD. The one
+	// The pipeline every config change rides: staged in a draft -> proposed as a
+	// pull request -> merged to main -> synced onto the cluster by ArgoCD. The one
 	// drawing of the write model, reused anywhere a change's position is shown.
 	let {
 		stage,

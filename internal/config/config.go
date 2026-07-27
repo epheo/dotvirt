@@ -14,7 +14,7 @@ import (
 )
 
 // Config holds everything dotvirt needs. Per-project git repos come from cluster
-// annotations, not config — the only git input here is the one credential used to
+// annotations, not config - the only git input here is the one credential used to
 // clone/push every project repo.
 type Config struct {
 	Addr     string // HTTP listen address
@@ -38,7 +38,7 @@ type Config struct {
 	// manifests (Namespaces, CUDNs, NNCP uplinks, primary VM networks). dotvirt
 	// routes every cluster-scoped create here by KIND (never a tenant repo) and
 	// SSAR-gates it; empty disables those create flows. It is NOT a
-	// dotvirt.io/project-labeled project — it's platform-provisioned (its own Argo
+	// dotvirt.io/project-labeled project - it's platform-provisioned (its own Argo
 	// app + AppProject; see deploy/appprojects.yaml).
 	PlatformRepo string
 
@@ -54,7 +54,7 @@ type Config struct {
 	ForgeURL   string
 	ForgeToken string
 	// ForgeTokenFile, when set, is a mounted-secret path read on EVERY forge/git
-	// call (see ForgeTokenSource) — kubelet updates it in place, so an operator
+	// call (see ForgeTokenSource) - kubelet updates it in place, so an operator
 	// re-mint/rotation takes effect with no pod restart. Takes precedence over the
 	// static ForgeToken env value.
 	ForgeTokenFile string
@@ -64,19 +64,19 @@ type Config struct {
 	// MetricsURL is the Prometheus/Thanos query API base URL backing the per-VM
 	// Performance tab; empty disables the tab. InsecureTLS also covers this client.
 	MetricsURL string
-	// MetricsCA is a PEM bundle to trust for MetricsURL — in-cluster, the mounted
+	// MetricsCA is a PEM bundle to trust for MetricsURL - in-cluster, the mounted
 	// service-CA that signs thanos-querier's serving cert (so no -insecure-tls).
 	MetricsCA string
 
 	// UploadProxyURL is the cdi-uploadproxy base the browser streams uploaded
-	// images to (e.g. https://cdi-uploadproxy-…apps.example/); from
+	// images to (e.g. https://cdi-uploadproxy-...apps.example/); from
 	// cdiconfig.status.uploadProxyURL. Empty disables the image-upload feature.
 	UploadProxyURL string
 
 	// Webhook: Forgejo pushes/PR events hit POST /api/webhooks/forge (HMAC-signed
 	// with WebhookSecret; empty disables the endpoint). PublicURL is dotvirt's
 	// externally reachable base (the Route). WebhookURL is the base the forge DELIVERS
-	// to when registering the hook — distinct because an in-cluster forge typically
+	// to when registering the hook - distinct because an in-cluster forge typically
 	// can't reach or TLS-trust the external Route, so it points at the in-cluster
 	// Service (e.g. http://dotvirt.<ns>.svc:8080). Empty falls back to PublicURL;
 	// auto-registration runs when either base and WebhookSecret are set.

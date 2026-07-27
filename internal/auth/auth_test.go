@@ -125,7 +125,7 @@ func TestMiddlewareInjectsIdentity(t *testing.T) {
 	}
 	h := a.Middleware(http.HandlerFunc(next))
 
-	// No credential → 401, next not called.
+	// No credential -> 401, next not called.
 	req := httptest.NewRequest("GET", "/api/inventory", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -136,7 +136,7 @@ func TestMiddlewareInjectsIdentity(t *testing.T) {
 		t.Error("next handler ran for an unauthenticated request")
 	}
 
-	// Bearer header → 200, identity injected.
+	// Bearer header -> 200, identity injected.
 	req = httptest.NewRequest("GET", "/api/inventory", nil)
 	req.Header.Set("Authorization", "Bearer good")
 	rec = httptest.NewRecorder()
@@ -145,7 +145,7 @@ func TestMiddlewareInjectsIdentity(t *testing.T) {
 		t.Errorf("expected injected identity for alice, got %+v (saw=%v)", seen, sawIdentity)
 	}
 
-	// Open path → passes through without a credential.
+	// Open path -> passes through without a credential.
 	sawIdentity = false
 	req = httptest.NewRequest("GET", "/api/healthz", nil)
 	rec = httptest.NewRecorder()
@@ -154,7 +154,7 @@ func TestMiddlewareInjectsIdentity(t *testing.T) {
 		t.Error("health endpoint should bypass auth")
 	}
 
-	// Rejected token → 401 (definitive).
+	// Rejected token -> 401 (definitive).
 	req = httptest.NewRequest("GET", "/api/inventory", nil)
 	req.Header.Set("Authorization", "Bearer bad")
 	rec = httptest.NewRecorder()
@@ -165,7 +165,7 @@ func TestMiddlewareInjectsIdentity(t *testing.T) {
 }
 
 // TestMiddlewareTransientErrorIs503 ensures an API-server failure to validate is a
-// 503, not a 401 — so a blip doesn't sign valid users out.
+// 503, not a 401 - so a blip doesn't sign valid users out.
 func TestMiddlewareTransientErrorIs503(t *testing.T) {
 	kube := fake.NewSimpleClientset()
 	kube.PrependReactor("create", "tokenreviews", func(k8stesting.Action) (bool, runtime.Object, error) {

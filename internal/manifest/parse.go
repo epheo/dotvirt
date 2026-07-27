@@ -168,7 +168,7 @@ type dvStorageSpec struct {
 // the type, and dataVolume volumes with their dataVolumeTemplates for the
 // provisioned size + storage class.
 func disksFromDoc(d vmDoc) []model.Disk {
-	// DV template name → (size, class), from whichever spec form is present.
+	// DV template name -> (size, class), from whichever spec form is present.
 	type dvInfo struct{ size, class string }
 	dvs := map[string]dvInfo{}
 	for _, t := range d.Spec.DataVolumeTemplates {

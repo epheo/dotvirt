@@ -9,7 +9,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 )
@@ -28,7 +27,7 @@ func imageFromEnv(key, fallback string) string {
 }
 
 // Secret names the operator generates (session, appset) or expects (the forge
-// credential — overridable via spec.forge.credentialsSecret).
+// credential - overridable via spec.forge.credentialsSecret).
 const (
 	SessionSecretName     = "dotvirt-session"
 	AppsetSecretName      = "dotvirt-appset-plugin"
@@ -83,7 +82,7 @@ func ForgeConfigured(dv *dotvirtv1alpha1.Dotvirt) bool {
 }
 
 // forgeTokenMountPath is where the forge credential secret's "token" key is
-// projected into the app container (read per call → rotation-safe).
+// projected into the app container (read per call -> rotation-safe).
 const forgeTokenMountPath = "/var/run/dotvirt/forge/token"
 
 func secretEnv(name, secret, key string, optional bool) corev1.EnvVar {
@@ -117,36 +116,17 @@ func podLabels(instance string) map[string]string {
 
 // ServiceAccount is dotvirt's runtime identity (TokenReview, SA reads, Argo re-sync).
 func ServiceAccount(dv *dotvirtv1alpha1.Dotvirt) *corev1.ServiceAccount {
-	return &corev1.ServiceAccount{
-		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ServiceAccount"},
-		ObjectMeta: objectMeta(AppName, dv.Namespace, dv.Name),
-	}
+	return serviceAccount(AppName, dv)
 }
 
 // DraftsPVC persists per-(user,project) drafts across restarts (single replica).
 func DraftsPVC(dv *dotvirtv1alpha1.Dotvirt) *corev1.PersistentVolumeClaim {
-	return &corev1.PersistentVolumeClaim{
-		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaim"},
-		ObjectMeta: objectMeta(AppName+"-drafts", dv.Namespace, dv.Name),
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
-			},
-		},
-	}
+	return pvc(AppName+"-drafts", dv, "1Gi")
 }
 
 // Service exposes dotvirt's HTTP port (the UI + API at one origin).
 func Service(dv *dotvirtv1alpha1.Dotvirt) *corev1.Service {
-	return &corev1.Service{
-		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
-		ObjectMeta: objectMeta(AppName, dv.Namespace, dv.Name),
-		Spec: corev1.ServiceSpec{
-			Selector: selectorLabels,
-			Ports:    []corev1.ServicePort{{Name: "http", Port: HTTPPort, TargetPort: intstr.FromInt32(HTTPPort)}},
-		},
-	}
+	return service(AppName, dv, selectorLabels, HTTPPort)
 }
 
 // serviceHost is dotvirt's in-cluster DNS host and ServiceURL its base URL. A managed
@@ -156,23 +136,16 @@ func Service(dv *dotvirtv1alpha1.Dotvirt) *corev1.Service {
 func serviceHost(dv *dotvirtv1alpha1.Dotvirt) string { return svcHost(AppName, dv.Namespace) }
 func ServiceURL(dv *dotvirtv1alpha1.Dotvirt) string  { return svcURL(AppName, dv.Namespace, HTTPPort) }
 
-// svcHost and svcURL build the in-cluster DNS host / base URL for a Service —
-// `<name>.<ns>.svc[:port]` — so the template lives in one place.
+// svcHost and svcURL build the in-cluster DNS host / base URL for a Service -
+// `<name>.<ns>.svc[:port]` - so the template lives in one place.
 func svcHost(name, namespace string) string { return name + "." + namespace + ".svc" }
 func svcURL(name, namespace string, port int32) string {
 	return fmt.Sprintf("http://%s:%d", svcHost(name, namespace), port)
 }
 
-// Deployment runs the dotvirt binary (which also serves the SPA): the image, args,
-// platform-repo + metrics config, the drafts volume, and the secret-backed env
-// (git/forge/session/appset credentials, with the forge token mounted so a re-mint
-// reaches the app without a restart).
-func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
-	image := dv.Spec.Image
-	if image == "" {
-		image = imageFromEnv("RELATED_IMAGE_DOTVIRT", defaultImage)
-	}
-
+// dotvirtEnv assembles the app container's env from the effective spec: the
+// platform-repo + metrics config and the secret-backed credentials.
+func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt) []corev1.EnvVar {
 	env := []corev1.EnvVar{}
 	if dv.Spec.Forge.PlatformRepo != "" {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_PLATFORM_REPO", Value: dv.Spec.Forge.PlatformRepo})
@@ -183,7 +156,7 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 	// A managed (in-cluster) Forgejo delivers webhooks to dotvirt's in-cluster Service,
 	// not the external Route (which it can't hairpin to and whose CA it doesn't trust).
 	// A bring-your-own forge is typically off-cluster and can't reach that Service URL, so
-	// leave this unset for it — the app then falls back to DOTVIRT_PUBLIC_URL (the
+	// leave this unset for it - the app then falls back to DOTVIRT_PUBLIC_URL (the
 	// external host the forge can reach), or skips self-registration if there's no public
 	// URL either.
 	if dv.Spec.Forge.Managed {
@@ -238,7 +211,10 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 		// In-cluster metrics serve the service-CA-signed cert.
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_CA", Value: serviceCAMountPath + "/" + ServiceCAKey})
 	}
+	return env
+}
 
+func dotvirtArgs(dv *dotvirtv1alpha1.Dotvirt) []string {
 	args := []string{
 		fmt.Sprintf("-addr=:%d", HTTPPort),
 		"-ui-origin=", // same-origin: the binary serves the SPA
@@ -246,18 +222,21 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 		"-draft-dir=/var/lib/dotvirt/drafts",
 		// Webhooks (self-registered above) are the primary trigger for inventory
 		// updates; the git poll is only the missed-event backstop, so keep it slow
-		// to spare the forge — the managed Forgejo is a single SQLite-backed pod.
+		// to spare the forge - the managed Forgejo is a single SQLite-backed pod.
 		"-git-poll-interval=5m",
 	}
 	if dv.Spec.Forge.InsecureTLS {
-		// The managed/eval forge Route is self-signed, so the app must skip TLS
-		// verification for its forge API calls + git clones — the same flag the
-		// manual deploy carried. Metrics stays verified (its own CA env).
+		// A self-signed forge Route: skip TLS verification for forge API calls +
+		// git clones. Metrics stays verified (its own CA env).
 		args = append(args, "-insecure-tls")
 	}
+	return args
+}
 
-	// Trust-anchor mounts are always rendered and OPTIONAL: absent ConfigMaps
-	// (vanilla, or copy/injection lag) must never block the pod.
+// dotvirtVolumes: the drafts PVC, the trust anchors, and (forge-configured) the
+// mounted forge token. Trust-anchor mounts are always rendered and OPTIONAL:
+// absent ConfigMaps (vanilla, or copy/injection lag) must never block the pod.
+func dotvirtVolumes(dv *dotvirtv1alpha1.Dotvirt) ([]corev1.VolumeMount, []corev1.Volume) {
 	caOptional := true
 	volumeMounts := []corev1.VolumeMount{
 		{Name: "drafts", MountPath: "/var/lib/dotvirt/drafts"},
@@ -283,15 +262,23 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 		volumes = append(volumes, corev1.Volume{
 			Name: "forge-token",
 			VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
-				SecretName: forgeSecret,
+				SecretName: ForgeSecretName(dv),
 				Items:      []corev1.KeyToPath{{Key: "token", Path: "token"}},
 			}},
 		})
 	}
+	return volumeMounts, volumes
+}
 
+// Deployment runs the dotvirt binary (which also serves the SPA), with the forge
+// token mounted so a re-mint reaches the app without a restart.
+func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
+	image := dv.Spec.Image
+	if image == "" {
+		image = imageFromEnv("RELATED_IMAGE_DOTVIRT", defaultImage)
+	}
+	volumeMounts, volumes := dotvirtVolumes(dv)
 	replicas := int32(1)
-	runAsNonRoot := true
-	noPrivilegeEscalation := false
 	return &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: objectMeta(AppName, dv.Namespace, dv.Name),
@@ -307,41 +294,21 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 					// Restricted-v2 compatible (the app image is distroless-nonroot). No
 					// readOnlyRootFilesystem: the app writes git clones + temp under $HOME,
 					// and restricted-v2 doesn't require a read-only root.
-					SecurityContext: &corev1.PodSecurityContext{
-						RunAsNonRoot:   &runAsNonRoot,
-						SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
-					},
+					SecurityContext: hardenedPodSecurityContext(false),
 					Containers: []corev1.Container{{
-						Name:         AppName,
-						Image:        image,
-						Args:         args,
-						Env:          env,
-						Ports:        []corev1.ContainerPort{{Name: "http", ContainerPort: HTTPPort}},
-						VolumeMounts: volumeMounts,
-						SecurityContext: &corev1.SecurityContext{
-							AllowPrivilegeEscalation: &noPrivilegeEscalation,
-							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
-						},
+						Name:            AppName,
+						Image:           image,
+						Args:            dotvirtArgs(dv),
+						Env:             dotvirtEnv(dv),
+						Ports:           []corev1.ContainerPort{{Name: "http", ContainerPort: HTTPPort}},
+						VolumeMounts:    volumeMounts,
+						SecurityContext: hardenedContainerSecurityContext(),
 						Resources: corev1.ResourceRequirements{
 							Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("50m"), corev1.ResourceMemory: resource.MustParse("128Mi")},
 							Limits:   corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("512Mi")},
 						},
-						ReadinessProbe: &corev1.Probe{
-							ProbeHandler: corev1.ProbeHandler{
-								HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(HTTPPort)},
-							},
-							InitialDelaySeconds: 5,
-							PeriodSeconds:       10,
-							TimeoutSeconds:      5,
-						},
-						LivenessProbe: &corev1.Probe{
-							ProbeHandler: corev1.ProbeHandler{
-								HTTPGet: &corev1.HTTPGetAction{Path: "/api/healthz", Port: intstr.FromInt32(HTTPPort)},
-							},
-							InitialDelaySeconds: 15,
-							PeriodSeconds:       20,
-							TimeoutSeconds:      5,
-						},
+						ReadinessProbe: healthProbe(HTTPPort, 5, 10, 0),
+						LivenessProbe:  healthProbe(HTTPPort, 15, 20, 0),
 					}},
 					Volumes: volumes,
 				},

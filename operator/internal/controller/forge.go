@@ -17,7 +17,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
@@ -71,7 +70,7 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "ApplyFailed", err)
 	}
 	if r.DryRun {
-		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionUnknown, "DryRun", "skipped Forgejo bootstrap in dry-run")
+		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionForgeReady, "Forgejo bootstrap")
 		return nil, nil
 	}
 	ready, err := r.bootstrapForgejo(ctx, dv)
@@ -157,7 +156,7 @@ func forgeAdminHint(ns string) string {
 		install.ForgejoBotUser, install.ForgejoAdminSecret, ns)
 }
 
-// reconcilePlatformRepo ensures the platform repo exists — the imperative
+// reconcilePlatformRepo ensures the platform repo exists - the imperative
 // bootstrap pure declarative installers can't do. Skipped in dry-run (a real forge
 // mutation server-side dry-run can't model). Runs LAST in the pipeline: nothing
 // below it depends on the repo existing, so its retry never delays another phase.
@@ -169,21 +168,20 @@ func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvi
 	case dv.Spec.Forge.PlatformRepo == "":
 		// No platform tier configured; nothing to bootstrap.
 	case r.DryRun:
-		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionUnknown, "DryRun", "skipped platform-repo bootstrap in dry-run")
+		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionForgeRepoReady, "platform-repo bootstrap")
 	default:
 		if err := r.ensurePlatformRepo(ctx, dv); err != nil {
-			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionFalse, "Error", err.Error())
-			if uerr := r.writeStatus(ctx, dv); uerr != nil {
-				return nil, uerr
-			}
-			return &ctrl.Result{RequeueAfter: time.Minute}, nil
+			// phase "": the operand still serves, so the retry must not regress
+			// a Ready install.
+			return r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeRepoReady, "Error",
+				err.Error(), "", time.Minute)
 		}
 		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionTrue, "Ready", "platform repo present")
 	}
 	return nil, nil
 }
 
-// ensurePlatformRepo creates the platform repo on the forge if absent — the
+// ensurePlatformRepo creates the platform repo on the forge if absent - the
 // install-time step a Helm/Kustomize/ArgoCD-app installer structurally can't do
 // (it's a forge API call, not a kubectl apply).
 func (r *DotvirtReconciler) ensurePlatformRepo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
@@ -202,16 +200,12 @@ func (r *DotvirtReconciler) ensurePlatformRepo(ctx context.Context, dv *dotvirtv
 }
 
 // forgejoExposure exposes the managed Forgejo off-cluster so its UI + PRs are reviewable.
-// With an explicit spec.forge.url it uses that host; with no URL on a Route platform it
-// returns a HOSTLESS Route for the router to name (resolveForgeURL reads that host back).
-// nil only where there's nothing to expose: no URL on vanilla Kubernetes (Ingress needs
-// an explicit host; that path halts with ForgeURLRequired).
+// With an explicit spec.forge.url it uses that host; with no URL on a Route platform,
+// exposureFor returns a HOSTLESS Route for the router to name (resolveForgeURL reads
+// that host back). nil only where there's nothing to expose: no URL on vanilla
+// Kubernetes (Ingress needs an explicit host; that path halts with ForgeURLRequired).
 func (r *DotvirtReconciler) forgejoExposure(dv *dotvirtv1alpha1.Dotvirt) client.Object {
-	host := install.ForgejoHost(dv)
-	if host == "" && r.resolveExposureType(dv) != "route" {
-		return nil
-	}
-	return r.exposureFor(dv, install.ForgejoServiceName, install.ForgejoHTTPPort, host)
+	return r.exposureFor(dv, install.ForgejoServiceName, install.ForgejoHTTPPort, install.ForgejoHost(dv))
 }
 
 // applyForgejoBase renders everything the managed Forgejo needs BEFORE its URL is known:
@@ -226,10 +220,10 @@ func (r *DotvirtReconciler) applyForgejoBase(ctx context.Context, dv *dotvirtv1a
 			return err
 		}
 	}
-	// PVC first (orphan: no ownerRef, so the git data survives uninstall) — applied
+	// PVC first (orphan: no ownerRef, so the git data survives uninstall) - applied
 	// before the Deployment that mounts it, so a retry of any later resource can't
 	// strand the pod Pending on a missing volume.
-	if err := install.Apply(ctx, r.Client, install.ForgejoPVC(dv), r.DryRun); err != nil {
+	if err := r.apply(ctx, install.ForgejoPVC(dv)); err != nil {
 		return err
 	}
 	owned := []client.Object{
@@ -239,15 +233,7 @@ func (r *DotvirtReconciler) applyForgejoBase(ctx context.Context, dv *dotvirtv1a
 	if exp := r.forgejoExposure(dv); exp != nil {
 		owned = append(owned, exp)
 	}
-	for _, o := range owned {
-		if err := controllerutil.SetControllerReference(dv, o, r.Scheme); err != nil {
-			return err
-		}
-		if err := install.Apply(ctx, r.Client, o, r.DryRun); err != nil {
-			return err
-		}
-	}
-	return nil
+	return r.applyOwned(ctx, dv, owned...)
 }
 
 // applyForgejoDeployment renders the Forgejo Deployment once the effective URL is filled,
@@ -264,11 +250,7 @@ func (r *DotvirtReconciler) applyForgejoDeployment(ctx context.Context, dv *dotv
 		argoHost = u.Hostname()
 	}
 	// fsGroup only on vanilla K8s; OpenShift's restricted-v2 injects its own.
-	d := install.ForgejoDeployment(dv, r.Platform != platform.OpenShift, argoHost, r.adminSecretHash(ctx, dv))
-	if err := controllerutil.SetControllerReference(dv, d, r.Scheme); err != nil {
-		return err
-	}
-	return install.Apply(ctx, r.Client, d, r.DryRun)
+	return r.applyOwned(ctx, dv, install.ForgejoDeployment(dv, r.Platform != platform.OpenShift, argoHost, r.adminSecretHash(ctx, dv)))
 }
 
 // adminSecretHash rides the pod template so a rotated secret rolls the pod and
@@ -278,8 +260,8 @@ func (r *DotvirtReconciler) adminSecretHash(ctx context.Context, dv *dotvirtv1al
 	if r.DryRun {
 		return ""
 	}
-	var s corev1.Secret
-	if err := r.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: install.ForgejoAdminSecret}, &s); err != nil {
+	s, err := r.secret(ctx, dv.Namespace, install.ForgejoAdminSecret)
+	if err != nil {
 		return ""
 	}
 	sum := sha256.Sum256(s.Data["password"])
@@ -335,11 +317,11 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 		return false, nil
 	}
 	// Mint the scoped token via basic auth as the bootstrapped admin.
-	var admin corev1.Secret
-	if err := r.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: install.ForgejoAdminSecret}, &admin); err != nil {
+	admin, err := r.secret(ctx, dv.Namespace, install.ForgejoAdminSecret)
+	if err != nil {
 		return false, err
 	}
-	// read:user lets the token read /api/v1/user — which is what ValidateToken probes.
+	// read:user lets the token read /api/v1/user - which is what ValidateToken probes.
 	// Under Forgejo's granular token scopes a write:* token can't reach /api/v1/user, so
 	// without this the freshly minted token validates as "rejected" and the operator
 	// re-mints every reconcile forever. write:organization/write:repository cover the org
@@ -364,16 +346,15 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 }
 
 // writeForgeSecret upserts the dotvirt-forge credential from the managed Forgejo's
-// minted token, so the rest of the install treats it like a BYO forge. Upsert (not
+// minted token, so the rest of the install treats it like a BYO forge. Applied (not
 // create-once) so a re-mint of a rejected token overwrites the stale value in place.
 func (r *DotvirtReconciler) writeForgeSecret(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, name, url, username, token string) error {
-	s := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: dv.Namespace}}
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, s, func() error {
-		s.Labels = install.Labels(dv.Name)
+	s := &corev1.Secret{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: dv.Namespace, Labels: install.Labels(dv.Name)},
 		// Data (not StringData): all three keys are rewritten every time, so no stale key
 		// lingers, and the value is readable without the API server's StringData merge.
-		s.Data = map[string][]byte{"url": []byte(url), "username": []byte(username), "token": []byte(token)}
-		return controllerutil.SetControllerReference(dv, s, r.Scheme)
-	})
-	return err
+		Data: map[string][]byte{"url": []byte(url), "username": []byte(username), "token": []byte(token)},
+	}
+	return r.applyOwned(ctx, dv, s)
 }

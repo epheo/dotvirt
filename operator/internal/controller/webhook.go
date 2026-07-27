@@ -20,7 +20,7 @@ import (
 // poll backstops.
 func (r *DotvirtReconciler) reconcileDotvirtWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
 	if r.DryRun {
-		r.setCondition(dv, dotvirtv1alpha1.ConditionDotvirtWebhook, metav1.ConditionUnknown, "DryRun", "skipped dotvirt webhook in dry-run")
+		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionDotvirtWebhook, "dotvirt webhook")
 		return nil, nil
 	}
 	if registered, err := r.observeDotvirtWebhook(ctx, dv); err != nil {

@@ -80,10 +80,10 @@ func run() error {
 	defer stop()
 
 	// The one change bus: every source (k8s/argo reflectors, the git poll/webhook,
-	// the proposals refresher) publishes a typed event here; every rebuild path (the
-	// hub, the proposals refresher, the visibility-cache invalidator)
-	// subscribes to the kinds it needs. One fan-out for all of them — no source-
-	// specific channels, no single-consumer constraint.
+	// the proposals refresher) publishes a typed event here; every rebuild path
+	// (the hub, the proposals refresher) subscribes to the kinds it needs. One
+	// fan-out for all of them, no source-specific channels, no single-consumer
+	// constraint.
 	bus := eventbus.New()
 
 	// Per-project git + the Forge API share ONE token source (resolved per call, so
@@ -119,7 +119,7 @@ func run() error {
 	clusterSnapshot.Run(ctx)
 
 	// DRS status plane: the SA-watched KubeDescheduler snapshot behind GET
-	// /api/drs. Discovery-gated — on a cluster without the descheduler operator
+	// /api/drs. Discovery-gated - on a cluster without the descheduler operator
 	// it stays a slow API probe, never an error loop.
 	deschedSnapshot := desched.New(saCluster)
 	deschedSnapshot.Run(ctx)
@@ -140,7 +140,7 @@ func run() error {
 		}
 		// The Application snapshot is the drift plane: a reflector feeds an in-memory
 		// store and publishes DriftChanged, so reads are lock-free and the hub
-		// rebroadcasts on every Application move. It is also the resyncer — it owns the
+		// rebroadcasts on every Application move. It is also the resyncer - it owns the
 		// app index the per-VM re-sync resolves.
 		argoSnapshot = argo.NewSnapshot(saArgo, bus)
 		argoSnapshot.Run(ctx)
@@ -154,7 +154,7 @@ func run() error {
 	}
 	authenticator := auth.New(saKube, []byte(cfg.SessionSecret))
 
-	// OpenShift SSO (optional): only token acquisition changes — the access token
+	// OpenShift SSO (optional): only token acquisition changes - the access token
 	// rides the same TokenReview + cookie + pass-through path as a pasted one.
 	var oauthFlow *auth.OAuth
 	if cfg.OAuthClientID != "" {
@@ -223,7 +223,7 @@ func run() error {
 
 	// Live inventory hub: each connection's frame is built under its identity (same
 	// path as GET /api/inventory). It wakes on every kind that can alter a frame and
-	// reconciles to the summed version of those kinds — so it coalesces by build
+	// reconciles to the summed version of those kinds - so it coalesces by build
 	// duration (no debounce) and never recomputes when nothing it depends on moved.
 	inventoryKinds := []eventbus.Kind{
 		eventbus.VMSpecChanged, eventbus.LiveChanged, eventbus.NamespaceChanged,
@@ -235,8 +235,8 @@ func run() error {
 	go hub.Run(ctx)
 	server.UseStream(hub)
 
-	// Open-PR lanes refresh in the background — on git head moves (GitChanged),
-	// handler nudges, and a slow backstop — so the broadcast path never calls the
+	// Open-PR lanes refresh in the background - on git head moves (GitChanged),
+	// handler nudges, and a slow backstop - so the broadcast path never calls the
 	// forge; a changed lane publishes ProposalsChanged.
 	go server.RunProposalsRefresher(ctx, bus)
 
@@ -266,13 +266,13 @@ func run() error {
 	}
 
 	// Let the snapshot's initial LIST land before serving so the first inventory
-	// isn't empty — but bound the wait: a degraded cluster must not block startup,
+	// isn't empty - but bound the wait: a degraded cluster must not block startup,
 	// the snapshot fills in as reflectors sync and the hub pushes the update.
 	syncCtx, cancelSync := context.WithTimeout(ctx, 10*time.Second)
 	if err := clusterSnapshot.WaitForSync(syncCtx); err != nil && ctx.Err() == nil {
 		log.Printf("cluster snapshot not synced yet (%v); serving and filling in as watches catch up", err)
 	}
-	// Let the drift snapshot's initial LIST land too, in the same bounded budget —
+	// Let the drift snapshot's initial LIST land too, in the same bounded budget -
 	// best-effort, so a slow/absent Argo never blocks startup (the hub re-pushes once
 	// it syncs, and the inventory shows "sync temporarily unavailable" until then).
 	if argoSnapshot != nil {

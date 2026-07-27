@@ -10,7 +10,7 @@
 	// 0-100% axis (CPU, plus a slim memory strip), so a two-worker lab reads as
 	// a labeled comparison while a spread-out fleet reads as a distribution.
 	// When stacks outgrow the strip the dots give way to a density silhouette
-	// and only out-of-band workers stay individually drawn — the hand-off is
+	// and only out-of-band workers stay individually drawn - the hand-off is
 	// geometric (see dotstrip.ts), never a node-count threshold.
 	// metrics off or no worker series: the card simply absents itself
 	const hl = resource<HostLoad>(
@@ -106,7 +106,7 @@
 	});
 
 	// The roster: everyone for small fleets, out-of-band workers for large
-	// ones — a balanced 500-node fleet needs no rows at all.
+	// ones - a balanced 500-node fleet needs no rows at all.
 	const rows = $derived.by(() => {
 		if (!data) return [];
 		if (data.workers <= 10) return data.nodes;

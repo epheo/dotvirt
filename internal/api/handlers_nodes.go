@@ -7,7 +7,7 @@ import (
 
 // Node maintenance (the By-Node view): read a node's cordon/maintenance state,
 // toggle cordon, enter/exit maintenance mode. Nodes are cluster-scoped, so
-// these don't go through resolveProject — the user's own token is the gate (a
+// these don't go through resolveProject - the user's own token is the gate (a
 // caller without node RBAC gets 403/404, and the UI hides the actions from
 // NodeInfo.CanCordon).
 

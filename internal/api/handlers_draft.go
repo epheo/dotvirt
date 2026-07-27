@@ -16,7 +16,7 @@ import (
 // complete the changeset lifecycle. All are project-scoped via resolveProject.
 
 func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
@@ -29,26 +29,22 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "sourceFile is required", http.StatusBadRequest)
 		return
 	}
-	result, err := s.draft.StageEdit(sc.id, sc.proj, r.PathValue("namespace"), r.PathValue("name"), req)
+	result, err := s.draft.StageEdit(sc.id, sc.proj, ns, name, req)
 	respond(w, result, err)
 }
 
 // handleCreate stages a new VM. The path carries no namespace, so we peek the
 // spec's namespace to pick the target project.
 func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
-	raw, err := readAll(r)
-	if err != nil {
-		fail(w, invalid(err))
+	raw, p, ok := peek[nsPeek](w, r)
+	if !ok {
 		return
 	}
-	var peek struct {
-		Namespace string `json:"namespace"`
-	}
-	if err := json.Unmarshal(raw, &peek); err != nil || peek.Namespace == "" {
+	if p.Namespace == "" {
 		http.Error(w, "spec namespace is required", http.StatusBadRequest)
 		return
 	}
-	sc, ok := s.resolveProject(w, r, byNamespace(peek.Namespace))
+	sc, ok := s.resolveProject(w, r, byNamespace(p.Namespace))
 	if !ok {
 		return
 	}
@@ -58,14 +54,14 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 // handleDelete stages the removal of a VM's manifest into the caller's draft. Like
 // edit/adopt it only mutates the user's own draft (no cluster write, no SA
-// escalation — Argo prunes the VM on merge under its own RBAC), so namespace
+// escalation - Argo prunes the VM on merge under its own RBAC), so namespace
 // membership via resolveProject is the right gate, not resync's CanUpdateVM check.
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	result, err := s.draft.StageDelete(sc.id, sc.proj, r.PathValue("namespace"), r.PathValue("name"))
+	result, err := s.draft.StageDelete(sc.id, sc.proj, ns, name)
 	respond(w, result, err)
 }
 
@@ -123,7 +119,7 @@ func (s *Server) handlePropose(w http.ResponseWriter, r *http.Request) {
 	result, err := s.draft.Propose(sc.id, sc.proj, req)
 	if err == nil {
 		// Track this project first: the nudge below only refreshes tokens already in
-		// the watch set, and a token that hasn't built an inventory yet isn't in it —
+		// the watch set, and a token that hasn't built an inventory yet isn't in it -
 		// so without this its new PR would wait for a later inventory build.
 		s.trackProposalsProject(sc.id, sc.proj)
 		s.nudgeProposals() // the new PR reaches every lane before the git poll notices
@@ -132,20 +128,20 @@ func (s *Server) handlePropose(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDrift(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	result, err := s.draft.VMDrift(sc.proj, r.PathValue("namespace"), r.PathValue("name"))
+	result, err := s.draft.VMDrift(sc.proj, ns, name)
 	respond(w, result, err)
 }
 
 func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	result, err := s.draft.Adopt(sc.id, sc.proj, r.PathValue("namespace"), r.PathValue("name"))
+	result, err := s.draft.Adopt(sc.id, sc.proj, ns, name)
 	respond(w, result, err)
 }
 
@@ -202,20 +198,19 @@ func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 	// Resync runs the reconcile with dotvirt's SA, gated on the caller's OWN
 	// authority over the VM (not just namespace read): they may trigger a sync only
-	// if they could update the VM themselves — otherwise read access would escalate
+	// if they could update the VM themselves - otherwise read access would escalate
 	// into an SA-privileged Argo sync. The SSAR runs inside Resync, beside the
 	// escalation, so no other caller can reach it unchecked.
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	ns, name := r.PathValue("namespace"), r.PathValue("name")
 	result, err := s.draft.Resync(r.Context(), sc.cluster.CanUpdateVM, ns, name)
 	s.recordTask("Resync", ns, name, sc.id.Username, err == nil)
 	respond(w, result, err)
 }
 
-// handleManifest returns the VM's manifest file as it exists on the base branch —
+// handleManifest returns the VM's manifest file as it exists on the base branch -
 // the "Download manifest" action. The git file IS the VM's full definition, so
 // this is dotvirt's OVF-export analog.
 func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
@@ -234,7 +229,7 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(content)
 }
 
-// handleHistory lists recent commits on the project's base branch — the Changes
+// handleHistory lists recent commits on the project's base branch - the Changes
 // pane's history view.
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.pickProject(w, r, r.PathValue("project"))
@@ -246,7 +241,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleRevert proposes a forward commit reverting one commit in the project's
-// repo — a new PR, never a history rewrite.
+// repo - a new PR, never a history rewrite.
 func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.pickProject(w, r, r.PathValue("project"))
 	if !ok {

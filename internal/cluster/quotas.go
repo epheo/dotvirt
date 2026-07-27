@@ -12,7 +12,7 @@ import (
 )
 
 // ListQuotas returns every ResourceQuota in the given namespaces under the
-// caller's token — the project capacity band's read. A namespace whose quotas
+// caller's token - the project capacity band's read. A namespace whose quotas
 // the token can't read contributes nothing (quota reads may be denied where VM
 // reads are allowed); usage/caps are pre-parsed to floats for the UI's bars.
 func (c *Client) ListQuotas(ctx context.Context, namespaces []string) ([]model.NamespaceQuota, error) {

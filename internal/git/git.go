@@ -1,6 +1,6 @@
 // Package git is dotvirt's git plane: it clones a repo once into memory and
 // reads VM manifests from any branch's tree without checking it out. Reads never
-// touch the network — a single background fetcher (driven by the git poll, and
+// touch the network - a single background fetcher (driven by the git poll, and
 // nudged after dotvirt's own pushes) owns freshness by calling Refresh.
 package git
 
@@ -24,11 +24,29 @@ import (
 	"github.com/go-git/go-git/v5/storage/memory"
 )
 
-// Repo is a cached clone of the manifest repository. Reads are concurrency-safe.
-type Repo struct {
+// creds is the shared https identity of the read and write repos. auth is
+// rebuilt per call so a rotated token takes effect without restart; nil when no
+// token yet, so go-git treats the remote as public.
+type creds struct {
 	url      string
 	username string
-	tokenFn  forge.TokenSource // resolved per fetch so a rotated token is picked up
+	tokenFn  forge.TokenSource
+}
+
+func (c creds) auth() *http.BasicAuth {
+	if c.tokenFn == nil {
+		return nil
+	}
+	tok := c.tokenFn()
+	if tok == "" {
+		return nil
+	}
+	return &http.BasicAuth{Username: c.username, Password: tok}
+}
+
+// Repo is a cached clone of the manifest repository. Reads are concurrency-safe.
+type Repo struct {
+	creds
 
 	mu   sync.Mutex
 	repo *git.Repository
@@ -37,7 +55,7 @@ type Repo struct {
 	// whole-tree walk+parse runs once per branch per actual content change instead of
 	// once per project per identity per inventory build. Self-invalidating: when the
 	// fetcher advances the mirror the branch hash moves, so the next read misses. The
-	// hash is read from the local mirror (no network), unlike HeadsSignature.
+	// hash is read from the local mirror (no network), unlike headsSignature.
 	parseMu    sync.Mutex
 	parseCache map[string]branchParse
 }
@@ -52,7 +70,7 @@ type branchParse struct {
 // tokenFn provide https basic auth, resolved on each fetch (pass a nil/empty
 // source for public/local).
 func Open(url, username string, tokenFn forge.TokenSource) (*Repo, error) {
-	r := &Repo{url: url, username: username, tokenFn: tokenFn, parseCache: map[string]branchParse{}}
+	r := &Repo{creds: creds{url: url, username: username, tokenFn: tokenFn}, parseCache: map[string]branchParse{}}
 	if err := r.clone(); err != nil {
 		return nil, err
 	}
@@ -60,7 +78,7 @@ func Open(url, username string, tokenFn forge.TokenSource) (*Repo, error) {
 }
 
 // branchHash returns branch's current commit hash from the local mirror (no fetch),
-// or "" if the branch can't be resolved — the parse-cache invalidation key.
+// or "" if the branch can't be resolved - the parse-cache invalidation key.
 func (r *Repo) branchHash(branch string) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -69,19 +87,6 @@ func (r *Repo) branchHash(branch string) string {
 		return ""
 	}
 	return ref.Hash().String()
-}
-
-// auth builds a fresh BasicAuth from the current token (nil when no token yet, so
-// go-git treats the remote as public). Rebuilt per call so rotation takes effect.
-func (r *Repo) auth() *http.BasicAuth {
-	if r.tokenFn == nil {
-		return nil
-	}
-	tok := r.tokenFn()
-	if tok == "" {
-		return nil
-	}
-	return &http.BasicAuth{Username: r.username, Password: tok}
 }
 
 func (r *Repo) clone() error {
@@ -99,7 +104,7 @@ func (r *Repo) clone() error {
 }
 
 // fetchTimeout bounds a single background fetch. Without it a stalled connection
-// to the remote (common over a flaky/self-signed Route) would hold r.mu forever —
+// to the remote (common over a flaky/self-signed Route) would hold r.mu forever -
 // and since reads (VMManifests) also take r.mu, every inventory read for that repo
 // would deadlock. Capping the fetch lets it fail and release the lock; the poll
 // retries on the next tick.
@@ -108,7 +113,7 @@ const fetchTimeout = 30 * time.Second
 // Refresh updates the cached clone's branch refs from the remote. This is the
 // single point of network freshness: the background fetcher calls it on a
 // schedule, and it's nudged after dotvirt's own pushes. Reads never call it.
-func (r *Repo) Refresh() error {
+func (r *Repo) refresh() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
@@ -124,13 +129,13 @@ func (r *Repo) Refresh() error {
 	return nil
 }
 
-// HeadsSignature refreshes from the remote and returns a stable string
+// headsSignature refreshes from the remote and returns a stable string
 // summarizing all branch heads (name+hash). A change means some branch moved.
 // This is the background fetcher's entry point: it both fetches (the single
 // network refresh) and reports whether anything changed, so the poll loop can
 // push fresh inventory to subscribers.
-func (r *Repo) HeadsSignature() (string, error) {
-	if err := r.Refresh(); err != nil {
+func (r *Repo) headsSignature() (string, error) {
+	if err := r.refresh(); err != nil {
 		return "", err
 	}
 	r.mu.Lock()
@@ -157,33 +162,41 @@ type ManifestFile struct {
 	Content []byte
 }
 
-// VMManifests returns every file on branch that contains a VirtualMachine doc.
-// Files are matched by .yaml/.yml extension then filtered by content, so a
-// single file with multiple docs is still found.
-func (r *Repo) VMManifests(branch string) ([]ManifestFile, error) {
+// walkYAML visits branch's .yaml/.yml files passing include, under the repo
+// lock - the one tree-walk behind VMManifests, TemplatesOnBranch and
+// DeclaredOnBranch.
+func (r *Repo) walkYAML(branch string, include func(path string) bool, visit func(path string, content []byte) error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
 	tree, err := r.treeFor(branch)
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	var out []ManifestFile
-	err = tree.Files().ForEach(func(f *object.File) error {
-		if !isYAML(f.Name) || inTemplatesDir(f.Name) {
+	return tree.Files().ForEach(func(f *object.File) error {
+		if !isYAML(f.Name) || !include(f.Name) {
 			return nil
 		}
 		content, err := readFile(f)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", f.Name, err)
 		}
-		if !containsVirtualMachine(content) {
-			return nil
-		}
-		out = append(out, ManifestFile{Path: f.Name, Content: content})
-		return nil
+		return visit(f.Name, content)
 	})
+}
+
+// VMManifests returns every file on branch that contains a VirtualMachine doc.
+// Files are matched by .yaml/.yml extension then filtered by content, so a
+// single file with multiple docs is still found.
+func (r *Repo) VMManifests(branch string) ([]ManifestFile, error) {
+	var out []ManifestFile
+	err := r.walkYAML(branch,
+		func(path string) bool { return !inTemplatesDir(path) },
+		func(path string, content []byte) error {
+			if containsVirtualMachine(content) {
+				out = append(out, ManifestFile{Path: path, Content: content})
+			}
+			return nil
+		})
 	if err != nil {
 		return nil, err
 	}
@@ -248,26 +261,12 @@ func inTemplatesDir(name string) bool {
 	return strings.HasPrefix(name, TemplatesDir+"/")
 }
 
-// TemplatesOnBranch returns every .yaml file under templates/ on branch — the
+// TemplatesOnBranch returns every .yaml file under templates/ on branch - the
 // repo's template library, parsed by the caller.
 func (r *Repo) TemplatesOnBranch(branch string) ([]ManifestFile, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	tree, err := r.treeFor(branch)
-	if err != nil {
-		return nil, err
-	}
 	var out []ManifestFile
-	err = tree.Files().ForEach(func(f *object.File) error {
-		if !isYAML(f.Name) || !inTemplatesDir(f.Name) {
-			return nil
-		}
-		content, err := readFile(f)
-		if err != nil {
-			return fmt.Errorf("read %s: %w", f.Name, err)
-		}
-		out = append(out, ManifestFile{Path: f.Name, Content: content})
+	err := r.walkYAML(branch, inTemplatesDir, func(path string, content []byte) error {
+		out = append(out, ManifestFile{Path: path, Content: content})
 		return nil
 	})
 	if err != nil {

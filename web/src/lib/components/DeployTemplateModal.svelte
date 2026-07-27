@@ -3,8 +3,11 @@
 	import { BookCopy } from 'lucide-svelte';
 	import { api, Unauthorized, type Template } from '$lib/api';
 	import { friendlyError } from '$lib/format';
+	import { action } from '$lib/resource.svelte';
 	import { validName } from '$lib/validate';
 	import FormField from './FormField.svelte';
+	import SelectInput from './SelectInput.svelte';
+	import TextInput from './TextInput.svelte';
 	import Wizard from './Wizard.svelte';
 
 	// Deploy from Template: pick a template + target, fill its parameters (the
@@ -36,8 +39,7 @@
 	let powerOn = $state(false); // templates blueprint Halted; this boots the VM on sync
 	let params = $state<Record<string, string>>({});
 	let step = $state(0);
-	let busy = $state(false);
-	let error = $state('');
+	const op = action();
 
 	$effect(() => {
 		if (!namespace) namespace = namespaces[0] ?? '';
@@ -69,7 +71,7 @@
 	const formParams = $derived((tpl?.parameters ?? []).filter((p) => p.name !== 'NAME'));
 	const nameParam = $derived(tpl?.parameters?.find((p) => p.name === 'NAME') ?? null);
 
-	// A client-side EXAMPLE of a generate-expression value — presentation only,
+	// A client-side EXAMPLE of a generate-expression value - presentation only,
 	// the server mints the real one at deploy time. Supports the documented
 	// "[class]{n}" grammar; anything fancier just shows the raw pattern.
 	function exampleFrom(pattern: string): string {
@@ -100,7 +102,7 @@
 	);
 	const targetOK = $derived(!!tpl && !!namespace && nameOK);
 	// A required parameter is satisfiable empty only when the template generates
-	// or defaults it — mirroring the engine's own enforcement.
+	// or defaults it - mirroring the engine's own enforcement.
 	const missing = $derived(
 		formParams.filter((p) => p.required && !p.value && !p.generate && !params[p.name]?.trim()),
 	);
@@ -109,26 +111,23 @@
 
 	async function deploy() {
 		if (!tpl) return;
-		busy = true;
-		error = '';
-		try {
-			const sent: Record<string, string> = {};
-			for (const [k, v] of Object.entries(params)) if (v.trim() !== '') sent[k] = v;
-			await api.deployTemplate({
-				library: tpl.library,
-				template: tpl.name,
-				namespace,
-				name: name.trim() || undefined,
-				parameters: Object.keys(sent).length ? sent : undefined,
-				powerOn: powerOn || undefined,
-			});
+		const t = tpl;
+		if (
+			await op.run(() => {
+				const sent: Record<string, string> = {};
+				for (const [k, v] of Object.entries(params)) if (v.trim() !== '') sent[k] = v;
+				return api.deployTemplate({
+					library: t.library,
+					template: t.name,
+					namespace,
+					name: name.trim() || undefined,
+					parameters: Object.keys(sent).length ? sent : undefined,
+					powerOn: powerOn || undefined,
+				});
+			})
+		) {
 			onstaged();
 			onclose();
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			error = friendlyError(e);
-		} finally {
-			busy = false;
 		}
 	}
 </script>
@@ -137,8 +136,8 @@
 	title="Deploy from Template"
 	bind:current={step}
 	canFinish={targetOK && missing.length === 0}
-	submitting={busy}
-	{error}
+	submitting={op.busy}
+	error={op.error}
 	finishLabel="Stage deploy"
 	footerHint="Stages into Changes — the VM is created when the project’s PR merges."
 	{onclose}
@@ -169,10 +168,7 @@
 	{:else}
 		<div class="max-w-md space-y-3">
 			<FormField label="Template">
-				<select
-					bind:value={pickedKey}
-					class="w-full rounded border border-line px-2 py-1.5 text-sm"
-				>
+				<SelectInput bind:value={pickedKey}>
 					{#each libraries as lib (lib)}
 						<optgroup label={libraryLabel(lib)}>
 							{#each templates.filter((t) => t.library === lib) as t (key(t))}
@@ -180,24 +176,21 @@
 							{/each}
 						</optgroup>
 					{/each}
-				</select>
+				</SelectInput>
 				{#if tpl?.description}<p class="mt-1 text-xs text-ink-faint">{tpl.description}</p>{/if}
 			</FormField>
 			<FormField label="Target namespace">
-				<select
-					bind:value={namespace}
-					class="w-full rounded border border-line px-2 py-1.5 text-sm"
-				>
+				<SelectInput bind:value={namespace}>
 					{#each namespaces as ns (ns)}
 						<option value={ns}>{ns}</option>
 					{/each}
-				</select>
+				</SelectInput>
 			</FormField>
 			<FormField label="VM name">
-				<input
+				<TextInput
 					bind:value={name}
+					mono
 					placeholder={nameExample ? `Auto-generate (e.g. ${nameExample})` : 'Auto-generate'}
-					class="w-full rounded border border-line px-2 py-1.5 font-mono text-sm"
 				/>
 				<p class="mt-1 text-xs text-ink-faint">
 					{#if name === ''}
@@ -231,11 +224,10 @@
 							placeholder={p.value || (p.generate ? 'generated on deploy' : '')}
 							class="w-full rounded border border-line px-2 py-1.5 font-mono text-xs"></textarea>
 					{:else}
-						<input
+						<TextInput
 							type={secret(p.name) ? 'password' : 'text'}
 							bind:value={params[p.name]}
 							placeholder={p.value || (p.generate ? 'generated on deploy' : '')}
-							class="w-full rounded border border-line px-2 py-1.5 text-sm"
 						/>
 					{/if}
 					{#if p.description}<p class="mt-1 text-xs text-ink-faint">{p.description}</p>{/if}

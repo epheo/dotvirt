@@ -16,7 +16,7 @@ import (
 )
 
 // queryJSON performs one query-API GET under the caller's token and decodes
-// the response envelope into out — the single HTTP path under vector,
+// the response envelope into out - the single HTTP path under vector,
 // rangeSeries, and friends.
 func (c *Client) queryJSON(ctx context.Context, token, apiPath string, params url.Values, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+apiPath+"?"+params.Encode(), nil)
@@ -82,20 +82,16 @@ func (c *Client) vector(ctx context.Context, token, query string) []labeledValue
 	return out
 }
 
-// scalars runs named instant queries concurrently, returning name→first value (0
-// when a query has no result).
-func (c *Client) scalars(ctx context.Context, token string, queries map[string]string) map[string]float64 {
+// fanOut runs one query per name concurrently, collecting run's result per name.
+func fanOut[T any](queries map[string]string, run func(q string) T) map[string]T {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	out := make(map[string]float64, len(queries))
+	out := make(map[string]T, len(queries))
 	for k, q := range queries {
 		wg.Add(1)
 		go func(k, q string) {
 			defer wg.Done()
-			var v float64
-			if vec := c.vector(ctx, token, q); len(vec) > 0 {
-				v = vec[0].value
-			}
+			v := run(q)
 			mu.Lock()
 			out[k] = v
 			mu.Unlock()
@@ -103,6 +99,57 @@ func (c *Client) scalars(ctx context.Context, token string, queries map[string]s
 	}
 	wg.Wait()
 	return out
+}
+
+// gather runs chart queries concurrently under the shared partial-failure rule:
+// a failure with SOME data still renders (missing series stay empty); only a
+// total failure surfaces to the caller.
+type gather struct {
+	wg       sync.WaitGroup
+	mu       sync.Mutex
+	firstErr error
+	anyData  bool
+}
+
+// run launches fn; fn writes its own result slot and reports whether it got data.
+func (g *gather) run(fn func() (hasData bool, err error)) {
+	g.wg.Add(1)
+	go func() {
+		defer g.wg.Done()
+		hasData, err := fn()
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		if err != nil {
+			if g.firstErr == nil {
+				g.firstErr = err
+			}
+			return
+		}
+		if hasData {
+			g.anyData = true
+		}
+	}()
+}
+
+// wait blocks for every run and returns the first error only when NO query
+// produced data.
+func (g *gather) wait() error {
+	g.wg.Wait()
+	if g.firstErr != nil && !g.anyData {
+		return g.firstErr
+	}
+	return nil
+}
+
+// scalars runs named instant queries concurrently, returning name->first value (0
+// when a query has no result).
+func (c *Client) scalars(ctx context.Context, token string, queries map[string]string) map[string]float64 {
+	return fanOut(queries, func(q string) float64 {
+		if vec := c.vector(ctx, token, q); len(vec) > 0 {
+			return vec[0].value
+		}
+		return 0
+	})
 }
 
 type sample struct {
@@ -117,7 +164,7 @@ type labeledSeries struct {
 }
 
 // rangeSeries runs one query_range and returns every result series with its
-// labels — the multi-series read behind the scope charts (and the per-NIC/
+// labels - the multi-series read behind the scope charts (and the per-NIC/
 // per-drive variants to come). NaN/Inf values are dropped as gaps.
 func (c *Client) rangeSeries(ctx context.Context, token, query string, start, end int64, step int) ([]labeledSeries, error) {
 	q := url.Values{}
@@ -179,29 +226,18 @@ type sparkResult struct {
 func (c *Client) sparklines(ctx context.Context, token string, queries map[string]string) map[string]sparkResult {
 	end := time.Now().Unix()
 	start := end - 3600
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	out := make(map[string]sparkResult, len(queries))
-	for k, q := range queries {
-		wg.Add(1)
-		go func(k, q string) {
-			defer wg.Done()
-			smp, _ := c.rangeQuery(ctx, token, q, start, end, 120) // 2m step → ~30 points
-			vals := make([]float64, len(smp))
-			for i, s := range smp {
-				vals[i] = s.v
-			}
-			var last float64
-			if len(vals) > 0 {
-				last = vals[len(vals)-1]
-			}
-			mu.Lock()
-			out[k] = sparkResult{vals: vals, last: last}
-			mu.Unlock()
-		}(k, q)
-	}
-	wg.Wait()
-	return out
+	return fanOut(queries, func(q string) sparkResult {
+		smp, _ := c.rangeQuery(ctx, token, q, start, end, 120) // 2m step -> ~30 points
+		vals := make([]float64, len(smp))
+		for i, s := range smp {
+			vals[i] = s.v
+		}
+		var last float64
+		if len(vals) > 0 {
+			last = vals[len(vals)-1]
+		}
+		return sparkResult{vals: vals, last: last}
+	})
 }
 
 // rateWindow is the lookback for rate(): a couple of steps, floored so even the

@@ -65,7 +65,7 @@ func (h *Hub) Handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Group connections by the token's hash (same key the API caches use), so two
-	// tabs of one user share a build — and the raw bearer never becomes a map key.
+	// tabs of one user share a build - and the raw bearer never becomes a map key.
 	c := &conn{id: id, key: restfactory.TokenKey(id.Token), out: make(chan []byte, 1), quit: make(chan struct{})}
 	h.add(c)
 	defer h.remove(c)
@@ -94,7 +94,7 @@ func readPump(wsconn *websocket.Conn, done chan<- struct{}) {
 // writePump is the level-triggered writer: it drains the connection's conflating
 // mailbox (always the latest frame the reconciler delivered) and writes it, so a
 // slow client converges to current state without dropped frames. The ping keeps the
-// TCP connection alive (it is NOT a content heartbeat — content arrives on change).
+// TCP connection alive (it is NOT a content heartbeat - content arrives on change).
 func writePump(wsconn *websocket.Conn, c *conn, done <-chan struct{}) {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {

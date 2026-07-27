@@ -2,10 +2,8 @@ package git
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"gopkg.in/yaml.v3"
 
 	"github.com/epheo/dotvirt/internal/model"
@@ -57,27 +55,15 @@ func DeclaredRefs(path string, content []byte) []model.ObjectRef {
 // templates/ is excluded to match the Application's own source exclusion: a template
 // is a blueprint the repo stores, not an object it declares.
 func (r *Repo) DeclaredOnBranch(branch string) (map[model.ObjectRef]bool, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	tree, err := r.treeFor(branch)
-	if err != nil {
-		return nil, err
-	}
 	out := map[model.ObjectRef]bool{}
-	err = tree.Files().ForEach(func(f *object.File) error {
-		if !isYAML(f.Name) || inTemplatesDir(f.Name) {
+	err := r.walkYAML(branch,
+		func(path string) bool { return !inTemplatesDir(path) },
+		func(path string, content []byte) error {
+			for _, ref := range DeclaredRefs(path, content) {
+				out[ref] = true
+			}
 			return nil
-		}
-		content, err := readFile(f)
-		if err != nil {
-			return fmt.Errorf("read %s: %w", f.Name, err)
-		}
-		for _, ref := range DeclaredRefs(f.Name, content) {
-			out[ref] = true
-		}
-		return nil
-	})
+		})
 	if err != nil {
 		return nil, err
 	}

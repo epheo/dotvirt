@@ -7,7 +7,7 @@
 	import ErrorNote from '$lib/components/ErrorNote.svelte';
 
 	// The Content Library: VM templates (deployable, git-backed) first, then a
-	// read-only browser over the cluster's catalog — boot images (DataSources),
+	// read-only browser over the cluster's catalog - boot images (DataSources),
 	// instance types, preferences, networks (NADs), storage classes. Catalog
 	// kinds are the wizard's own /api/options; templates come from the library
 	// repos via /api/templates. The kind rides ?kind= so a catalog tab is

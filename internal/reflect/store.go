@@ -1,7 +1,7 @@
 // Package reflect holds the generic reflector plumbing shared by dotvirt's
 // in-memory snapshots (clusterstate's live VM/VMI/namespace snapshot, argo's
 // drift snapshot, desched's DRS snapshot). The pieces that are genuinely
-// reusable — and subtle enough to be worth defining once — are the store
+// reusable - and subtle enough to be worth defining once - are the store
 // wrapper that turns a stream of watch deltas into a single coalesced
 // "something moved" signal and marks the initial relist complete, and the
 // ListWatch wrapper that turns watch errors into a health signal. Each
@@ -13,13 +13,14 @@ import (
 	"sync/atomic"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 )
 
 // TrackHealth wraps lw so a failed List or Watch flips healthy false and a
-// successful Watch establish flips it true — a deterministic, error-driven
+// successful Watch establish flips it true - a deterministic, error-driven
 // staleness signal, not a TTL. The reflector re-lists+re-watches on a drop, so
 // a transient blip that immediately recovers stays healthy; a sustained outage
 // (repeated errors) reads as unhealthy. Callers surface it as a "may be stale"
@@ -47,7 +48,7 @@ func TrackHealth(lw *cache.ListWatch, healthy *atomic.Bool) *cache.ListWatch {
 // countingStore wraps a cache.Indexer and fires onChange after any mutation a
 // reflector applies (Add/Update/Delete/Replace), so the read methods never have to
 // diff anything. Replace fires onChange once for a whole relist rather than per
-// item — exactly the coarse signal we want — and also fires onSynced the first
+// item - exactly the coarse signal we want - and also fires onSynced the first
 // time (the initial LIST landed), for readiness gating.
 type countingStore struct {
 	cache.Indexer
@@ -102,7 +103,7 @@ func (c *countingStore) Replace(list []any, rv string) error {
 	return nil
 }
 
-// signalStore is a cache.Store that retains NOTHING — it only fires onChange on each
+// signalStore is a cache.Store that retains NOTHING - it only fires onChange on each
 // reflector mutation and onSynced once on the first Replace. For a watch kept purely
 // as a change signal (e.g. RoleBindings, watched only to invalidate the per-token
 // visibility cache and never read), this avoids holding every object cluster-wide in
@@ -134,10 +135,33 @@ func (s *signalStore) Replace(_ []any, _ string) error {
 	return nil
 }
 
-// The read half is unused (the reflector never reads its store back) — satisfy
+// The read half is unused (the reflector never reads its store back) - satisfy
 // cache.Store with empty results.
 func (s *signalStore) List() []any                        { return nil }
 func (s *signalStore) ListKeys() []string                 { return nil }
 func (s *signalStore) Get(any) (any, bool, error)         { return nil, false, nil }
 func (s *signalStore) GetByKey(string) (any, bool, error) { return nil, false, nil }
 func (s *signalStore) Resync() error                      { return nil }
+
+// List returns idx's objects as typed unstructured pointers; non-unstructured
+// entries (there are none in practice) are skipped.
+func List(idx cache.Indexer) []*unstructured.Unstructured {
+	all := idx.List()
+	out := make([]*unstructured.Unstructured, 0, len(all))
+	for _, obj := range all {
+		if u, ok := obj.(*unstructured.Unstructured); ok {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// Get returns the unstructured object stored under key ("ns/name" or "name").
+func Get(idx cache.Indexer, key string) (*unstructured.Unstructured, bool) {
+	obj, ok, err := idx.GetByKey(key)
+	if err != nil || !ok {
+		return nil, false
+	}
+	u, ok := obj.(*unstructured.Unstructured)
+	return u, ok
+}

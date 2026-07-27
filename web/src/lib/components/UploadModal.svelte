@@ -13,16 +13,14 @@
 	// Image upload (OVF-import analog). dotvirt creates the upload-target
 	// DataVolume + mints a token; the browser then streams the file STRAIGHT to
 	// cdi-uploadproxy (open CORS), so multi-GB images never pass through dotvirt.
-	// The proxy's cert is the cluster ingress CA — the same one serving this app,
+	// The proxy's cert is the cluster ingress CA - the same one serving this app,
 	// so the browser already trusts it.
 	let {
 		namespaces,
 		onclose,
-		ondone,
 	}: {
 		namespaces: string[];
 		onclose: () => void;
-		ondone?: () => void;
 	} = $props();
 
 	type Stage = 'form' | 'creating' | 'preparing' | 'uploading' | 'importing' | 'done' | 'error';
@@ -131,7 +129,6 @@
 			stage = 'importing';
 			await pollUntil((p) => p === 'Succeeded', 'CDI to finish importing');
 			stage = 'done';
-			ondone?.();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
 			error = friendlyError(e);

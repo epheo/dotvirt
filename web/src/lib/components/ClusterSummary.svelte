@@ -44,7 +44,7 @@
 	const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 	// Overcommit ratio = committed-to-VMs : node-allocatable (vCenter's "vCPU
-	// 3.2:1"). >1 means more is promised to VMs than the nodes physically have —
+	// 3.2:1"). >1 means more is promised to VMs than the nodes physically have -
 	// fine for CPU (time-shared), a memory warning. Only meaningful with both a
 	// committed amount and a capacity denominator.
 	const overcommit = $derived.by(() => {
@@ -126,7 +126,7 @@
 			{/if}
 		</div>
 
-		<!-- Quota-aware capacity: ResourceQuota bars at project/namespace scope —
+		<!-- Quota-aware capacity: ResourceQuota bars at project/namespace scope -
 		     the tenant's real boundary, where node-allocatable is the cluster's. -->
 		{#if scope.project || scope.namespace}
 			<div class="mt-3">

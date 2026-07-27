@@ -11,7 +11,7 @@ import (
 
 // ownerRepo extracts the owner and repo from a Forgejo/Gitea repo URL. It takes
 // the last two path segments and strips a trailing ".git", so
-// https://forge.example/dotvirt/team-a.git → ("dotvirt", "team-a"). It fails
+// https://forge.example/dotvirt/team-a.git -> ("dotvirt", "team-a"). It fails
 // closed (ok=false) on anything it can't parse cleanly, so the caller degrades to
 // a compare link rather than building a malformed API path.
 func ownerRepo(repoURL string) (owner, repo string, ok bool) {
@@ -43,8 +43,8 @@ func ownerRepo(repoURL string) (owner, repo string, ok bool) {
 
 // NormalizeRepoURL canonicalizes a git repo URL for equality comparison: trimmed,
 // no trailing slash, a single trailing ".git" stripped, lowercased. It lets the
-// same repo written three ways — the forge clone_url (…​.git), the html_url (no
-// .git), and a trailing-slash annotation — resolve to one key, so a push webhook
+// same repo written three ways - the forge clone_url (....git), the html_url (no
+// .git), and a trailing-slash annotation - resolve to one key, so a push webhook
 // reliably finds the repo's poller (RepoSet) and its managing ArgoCD Application
 // (argo.Snapshot.RefreshForRepo). Returns "" for an empty/blank input.
 func NormalizeRepoURL(u string) string {
@@ -60,7 +60,7 @@ func NormalizeRepoURL(u string) string {
 }
 
 // OwnerPrefixURL is the forge owner URL ("scheme://host/.../<owner>") of a repo
-// URL — the prefix Argo longest-prefix-matches to attach one repo-credential to
+// URL - the prefix Argo longest-prefix-matches to attach one repo-credential to
 // every repo under that owner. Unlike path.Dir, it preserves the "://" in the
 // scheme (path.Dir collapses it to ":/", yielding a prefix Argo never matches).
 // Returns the input unchanged when there's no repo segment to strip.
@@ -78,13 +78,13 @@ func OwnerPrefixURL(repoURL string) string {
 	return s[:pathStart+slash]
 }
 
-// CompareURL is the browser URL to manually open a PR for head→base, used when
+// CompareURL is the browser URL to manually open a PR for head->base, used when
 // the forge API isn't configured.
 func (c *Client) CompareURL(head, base string) string {
 	return fmt.Sprintf("%s/%s/%s/compare/%s...%s", c.baseURL, c.owner, c.repo, base, head)
 }
 
-// urlPath returns the path component of a URL, or raw unchanged if it doesn't parse —
+// urlPath returns the path component of a URL, or raw unchanged if it doesn't parse -
 // enough to identify a webhook across a host change without binding to scheme/host/port.
 func urlPath(raw string) string {
 	if u, err := url.Parse(raw); err == nil && u.Path != "" {

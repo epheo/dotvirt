@@ -11,17 +11,16 @@ import (
 
 // The effective-policy answer: what governs one workload, in evaluation order.
 // Served entirely from the SA snapshots (netstate policies + clusterstate
-// labels) — no per-request cluster read; resolveProject gates the namespace
+// labels) - no per-request cluster read; resolveProject gates the namespace
 // exactly like the other detail views.
 
 // handleVMPolicy answers for one VM, matching pod selectors against the labels
 // its virt-launcher pod carries (live VMI, else the manifest template's).
 func (s *Server) handleVMPolicy(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	ns, name := r.PathValue("namespace"), r.PathValue("name")
 	lbls, live, found := s.state.WorkloadLabels(ns, name)
 	if !found {
 		http.Error(w, "vm not found", http.StatusNotFound)
@@ -47,7 +46,7 @@ func (s *Server) handleNamespacePolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 // clusterAuthority reports per kind whether the caller may read the
-// cluster-tier rollup — the same create-SSAR /api/policies and the create
+// cluster-tier rollup - the same create-SSAR /api/policies and the create
 // routes enforce, cached per (token, kind).
 func (s *Server) clusterAuthority(ctx context.Context, id auth.Identity, c *cluster.Client) func(model.PolicyKind) bool {
 	return func(k model.PolicyKind) bool {
@@ -66,8 +65,8 @@ func (s *Server) clusterAuthority(ctx context.Context, id auth.Identity, c *clus
 }
 
 // redactSubjects strips a cluster-tier policy's enumerated subject namespaces
-// for callers without authority over the kind. The rules stay — a rule that
-// governs the caller's workload is never hidden — but where else an admin
+// for callers without authority over the kind. The rules stay - a rule that
+// governs the caller's workload is never hidden - but where else an admin
 // policy applies (namespaces across other tenants) is the rollup-tier
 // information /api/policies gates, so the same authority gates it here.
 func redactSubjects(can func(model.PolicyKind) bool, p *model.Policy) {
@@ -101,16 +100,9 @@ func (s *Server) effectivePolicy(ns string, podLabels map[string]string, podScop
 	}
 	eff := s.netstate.Effective(ns, nsLabels, podLabels, podScoped)
 	for _, bs := range [][]model.PolicyBinding{eff.EastWest, eff.Gateway, eff.SNAT, eff.Routes} {
-		s.enrichBindingDrift(bs)
+		for i := range bs {
+			s.policyDrift(&bs[i].Policy)
+		}
 	}
 	return eff
-}
-
-func (s *Server) enrichBindingDrift(bs []model.PolicyBinding) {
-	if s.drift == nil {
-		return
-	}
-	for i := range bs {
-		s.policyDrift(&bs[i].Policy)
-	}
 }

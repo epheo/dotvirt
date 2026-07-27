@@ -6,7 +6,7 @@
 // GC has two regimes, because a namespaced Dotvirt CR cannot own cluster-scoped or
 // cross-namespace resources via ownerReferences (k8s forbids it):
 //   - dotvirt-namespace resources (Deployment, Service, SA, PVC) get an ownerRef to
-//     the CR — automatic garbage collection.
+//     the CR - automatic garbage collection.
 //   - cluster-scoped + ArgoCD-namespace resources (ClusterRoles, AppProjects, the
 //     ApplicationSet/Application) carry the managed-by labels below and are cleaned
 //     up by the CR's finalizer on delete (added with those resources).
@@ -27,17 +27,17 @@ const fieldManager = "dotvirt-operator"
 // AppName is the common name/label for the dotvirt workload.
 const AppName = "dotvirt"
 
-// HTTPPort is dotvirt's single HTTP port — the one source for the Service, the
+// HTTPPort is dotvirt's single HTTP port - the one source for the Service, the
 // container port and probes, the `-addr` flag, and every in-cluster URL built to it.
 const HTTPPort int32 = 8080
 
-// Labels are the recommended labels stamped on every rendered resource, plus a
-// per-instance label so cluster-scoped / cross-namespace resources (which can't
-// carry an ownerRef to a namespaced CR) can be found for finalizer cleanup.
-// InstanceLabel ties a cluster-scoped or foreign-namespace object to the install that
-// owns it, which is what the finalizer's cleanup selects on.
+// InstanceLabel ties a cluster-scoped or foreign-namespace object (which can't
+// carry an ownerRef to a namespaced CR) to the install that owns it; the
+// finalizer's cleanup selects on it.
 const InstanceLabel = "dotvirt.io/instance"
 
+// Labels are the recommended labels plus InstanceLabel, stamped on every
+// rendered resource.
 func Labels(instance string) map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/name":       AppName,
@@ -46,7 +46,7 @@ func Labels(instance string) map[string]string {
 	}
 }
 
-// unstructuredObject renders a labeled unstructured object with the given spec —
+// unstructuredObject renders a labeled unstructured object with the given spec -
 // the shared shape for the kinds the operator applies without importing their API
 // module (the argoproj.io resources, the OpenShift Route).
 func unstructuredObject(gvk schema.GroupVersionKind, name, namespace, instance string, spec map[string]any) *unstructured.Unstructured {
@@ -62,7 +62,7 @@ func unstructuredObject(gvk schema.GroupVersionKind, name, namespace, instance s
 // Apply server-side-applies obj with the operator's field manager, force-owning the
 // fields it sets. Typed objects must carry their GVK (the builders set TypeMeta).
 // When dryRun is set, the API server validates the object (schema, admission, RBAC)
-// but persists nothing — used to validate the full render against a real cluster.
+// but persists nothing - used to validate the full render against a real cluster.
 func Apply(ctx context.Context, c client.Client, obj client.Object, dryRun bool) error {
 	opts := []client.PatchOption{client.FieldOwner(fieldManager), client.ForceOwnership}
 	if dryRun {

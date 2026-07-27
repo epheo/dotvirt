@@ -9,15 +9,16 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/reflect"
 )
 
-// Effective computes the policy chain governing one workload — the same pure
+// Effective computes the policy chain governing one workload - the same pure
 // in-memory scan Policies does, but filtered to what binds the given
 // namespace/pod labels and ordered by evaluation: admin ANPs by precedence,
 // then the project NetworkPolicies that select the pod, then baseline; plus
 // the egress planes. podScoped=false is a namespace-level query: pod selectors
 // can't resolve there, so those bindings come back Conditional instead of
-// being dropped — a maybe-applying firewall rule is never hidden.
+// being dropped - a maybe-applying firewall rule is never hidden.
 //
 // Control-plane binding only: which policies apply and in what order, not a
 // per-connection verdict.
@@ -26,7 +27,7 @@ func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, p
 
 	// Admin tier, evaluated first, precedence-ordered (lower priority wins).
 	var admins []model.PolicyBinding
-	for _, u := range listOf(s.anp) {
+	for _, u := range reflect.List(s.anp) {
 		if m := anpSubjectMatch(u, nsLabels, podLabels, podScoped); m != matchNo {
 			admins = append(admins, model.PolicyBinding{Policy: policyFromANP(u, false), Conditional: m == matchCond})
 		}
@@ -41,10 +42,10 @@ func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, p
 
 	// Project tier: NetworkPolicies in the namespace whose podSelector selects
 	// the workload. A definite selection default-denies the directions the
-	// policy declares — the fact the panel must surface, since it flips the
+	// policy declares - the fact the panel must surface, since it flips the
 	// namespace from open to allowlist.
 	var project []model.PolicyBinding
-	for _, u := range listOf(s.netpol) {
+	for _, u := range reflect.List(s.netpol) {
 		if u.GetNamespace() != ns {
 			continue
 		}
@@ -64,7 +65,7 @@ func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, p
 
 	// Baseline tier, evaluated last.
 	var base []model.PolicyBinding
-	for _, u := range listOf(s.banp) {
+	for _, u := range reflect.List(s.banp) {
 		if m := anpSubjectMatch(u, nsLabels, podLabels, podScoped); m != matchNo {
 			base = append(base, model.PolicyBinding{
 				Policy:      policyFromANP(u, true),
@@ -77,36 +78,51 @@ func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, p
 	eff.EastWest = append(append(admins, project...), base...)
 
 	// Gateway firewall: the namespace's EgressFirewall (rules are first-match).
-	for _, u := range listOf(s.egressfw) {
+	for _, u := range reflect.List(s.egressfw) {
 		if u.GetNamespace() == ns {
 			eff.Gateway = append(eff.Gateway, model.PolicyBinding{Policy: policyFromEgressFirewall(u)})
 		}
 	}
 
-	// Tier-0 SNAT: EgressIPs pinning this namespace; an optional podSelector
-	// narrows within it.
-	for _, u := range listOf(s.egressip) {
-		nsSel, _, _ := unstructured.NestedMap(u.Object, "spec", "namespaceSelector")
-		podSel, _, _ := unstructured.NestedMap(u.Object, "spec", "podSelector")
-		m := combineMatch(matchSelector(nsSel, nsLabels), podMatch(podSel, podLabels, podScoped))
-		if m != matchNo {
-			eff.SNAT = append(eff.SNAT, model.PolicyBinding{Policy: policyFromEgressIP(u), Conditional: m == matchCond})
-		}
+	// Tier-0: the SNAT pools and external routes binding this namespace.
+	snat, routes := s.egressBindings(nsLabels, podLabels, podScoped)
+	for _, b := range snat {
+		eff.SNAT = append(eff.SNAT, model.PolicyBinding{Policy: b.pol, Conditional: b.m == matchCond})
 	}
-
-	// Tier-0 routes: external routes steering this namespace's egress.
-	for _, u := range listOf(s.extroute) {
-		sel, _, _ := unstructured.NestedMap(u.Object, "spec", "from", "namespaceSelector")
-		if m := matchSelector(sel, nsLabels); m != matchNo {
-			eff.Routes = append(eff.Routes, model.PolicyBinding{Policy: policyFromExtRoute(u), Conditional: m == matchCond})
-		}
+	for _, b := range routes {
+		eff.Routes = append(eff.Routes, model.PolicyBinding{Policy: b.pol, Conditional: b.m == matchCond})
 	}
-
 	return eff
 }
 
+// egressBinding pairs an egress-plane policy with its selector verdict.
+type egressBinding struct {
+	pol model.Policy
+	m   match
+}
+
+// egressBindings resolves which SNAT pools (EgressIP: namespaceSelector plus an
+// optional podSelector narrowing within it) and external routes bind a workload
+// - the one query behind the Effective view and the trace's egress planes.
+func (s *Snapshot) egressBindings(nsLabels, podLabels map[string]string, podScoped bool) (snat, routes []egressBinding) {
+	for _, u := range reflect.List(s.egressip) {
+		nsSel, _, _ := unstructured.NestedMap(u.Object, "spec", "namespaceSelector")
+		podSel, _, _ := unstructured.NestedMap(u.Object, "spec", "podSelector")
+		if m := combineMatch(matchSelector(nsSel, nsLabels), podMatch(podSel, podLabels, podScoped)); m != matchNo {
+			snat = append(snat, egressBinding{policyFromEgressIP(u), m})
+		}
+	}
+	for _, u := range reflect.List(s.extroute) {
+		sel, _, _ := unstructured.NestedMap(u.Object, "spec", "from", "namespaceSelector")
+		if m := matchSelector(sel, nsLabels); m != matchNo {
+			routes = append(routes, egressBinding{policyFromExtRoute(u), m})
+		}
+	}
+	return snat, routes
+}
+
 // match is a selector's verdict against known labels. matchCond means the
-// selector couldn't be resolved here — the caller keeps the binding and marks
+// selector couldn't be resolved here - the caller keeps the binding and marks
 // it conditional, because hiding it would misstate the firewall.
 type match int
 
@@ -127,7 +143,7 @@ func combineMatch(a, b match) match {
 }
 
 // matchSelector evaluates a LabelSelector (as stored in an unstructured spec)
-// against known labels. Absent/empty selects everything — the API convention
+// against known labels. Absent/empty selects everything - the API convention
 // every kind here shares. Undecodable selectors come back matchCond, not
 // matchNo: live objects are apiserver-validated so this is near-impossible,
 // but the conservative direction is to keep the row.

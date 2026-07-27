@@ -105,7 +105,7 @@ func TestManifestSecondaryOnly(t *testing.T) {
 }
 
 // nil PrimaryNetwork (the common case and any older stored spec) keeps the primary
-// NIC attached — the default is unchanged.
+// NIC attached - the default is unchanged.
 func TestManifestPrimaryDefault(t *testing.T) {
 	_, content, err := Manifest(Spec{
 		Name: "web", Namespace: "team-a",

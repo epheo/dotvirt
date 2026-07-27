@@ -126,7 +126,7 @@ func TestOAuthFlow(t *testing.T) {
 }
 
 // A callback whose state doesn't match the signed cookie must never exchange the
-// code — it bounces to the login screen with the generic sso_error flag.
+// code - it bounces to the login screen with the generic sso_error flag.
 func TestOAuthCallbackStateMismatch(t *testing.T) {
 	a, _ := fakeAuth(nil)
 	o := fakeOAuth(t, "whatever", a)

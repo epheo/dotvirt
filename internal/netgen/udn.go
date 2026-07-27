@@ -60,20 +60,11 @@ func projectUDN(s Spec) (string, []byte, error) {
 	if err := requireCIDRs(s.Subnets); err != nil {
 		return "", nil, err
 	}
-	layer2 := map[string]any{"role": "Secondary"}
-	if len(s.Subnets) > 0 {
-		layer2["subnets"] = toAny(s.Subnets)
-	} else {
-		// A subnet-less L2 network is a pure switch (no IPAM). OVN-K defaults
-		// ipam.mode to Enabled (which then requires subnets), so we must set it
-		// Disabled explicitly — valid here because this network is Secondary.
-		layer2["ipam"] = map[string]any{"mode": "Disabled"}
-	}
 	out, err := yaml.Marshal(map[string]any{
 		"apiVersion": "k8s.ovn.org/v1",
 		"kind":       "UserDefinedNetwork",
 		"metadata":   map[string]any{"name": s.Name, "namespace": s.Namespace},
-		"spec":       map[string]any{"topology": "Layer2", "layer2": layer2},
+		"spec":       map[string]any{"topology": "Layer2", "layer2": layer2Spec(s.Subnets)},
 	})
 	if err != nil {
 		return "", nil, err
@@ -82,7 +73,7 @@ func projectUDN(s Spec) (string, []byte, error) {
 }
 
 // sharedCUDN is an isolated (Layer2, secondary) cluster-scoped port group spanning
-// the selected namespaces — like vlanCUDN but a plain L2 segment with no uplink or
+// the selected namespaces - like vlanCUDN but a plain L2 segment with no uplink or
 // VLAN. Cluster-scoped, so it lands under the (platform) repo's networks/ dir.
 func sharedCUDN(s Spec) (string, []byte, error) {
 	if err := validate.RequireDNS1123("network name", s.Name); err != nil {
@@ -94,26 +85,13 @@ func sharedCUDN(s Spec) (string, []byte, error) {
 	if err := requireCIDRs(s.Subnets); err != nil {
 		return "", nil, err
 	}
-	layer2 := map[string]any{"role": "Secondary"}
-	if len(s.Subnets) > 0 {
-		layer2["subnets"] = toAny(s.Subnets)
-	} else {
-		// Secondary networks may disable IPAM; OVN-K otherwise defaults it on.
-		layer2["ipam"] = map[string]any{"mode": "Disabled"}
-	}
 	out, err := yaml.Marshal(map[string]any{
 		"apiVersion": "k8s.ovn.org/v1",
 		"kind":       "ClusterUserDefinedNetwork",
 		"metadata":   map[string]any{"name": s.Name},
 		"spec": map[string]any{
-			"namespaceSelector": map[string]any{
-				"matchExpressions": []any{map[string]any{
-					"key":      "kubernetes.io/metadata.name",
-					"operator": "In",
-					"values":   toAny(s.Namespaces),
-				}},
-			},
-			"network": map[string]any{"topology": "Layer2", "layer2": layer2},
+			"namespaceSelector": nsNameSelector(s.Namespaces),
+			"network":           map[string]any{"topology": "Layer2", "layer2": layer2Spec(s.Subnets)},
 		},
 	})
 	if err != nil {
@@ -126,9 +104,10 @@ func sharedCUDN(s Spec) (string, []byte, error) {
 // rides an uplink (physicalNetworkName) on an access VLAN, published to the
 // selected namespaces.
 func vlanCUDN(s Spec) (string, []byte, error) {
+	if err := validate.RequireDNS1123("network name", s.Name); err != nil {
+		return "", nil, err
+	}
 	switch {
-	case !validate.DNS1123Name(s.Name):
-		return "", nil, fmt.Errorf("network name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", s.Name)
 	case s.PhysicalNetwork == "":
 		return "", nil, fmt.Errorf("an uplink (physical network) is required for a VLAN network")
 	case s.VLAN <= 0 || s.VLAN > 4094:
@@ -157,14 +136,8 @@ func vlanCUDN(s Spec) (string, []byte, error) {
 		"kind":       "ClusterUserDefinedNetwork",
 		"metadata":   map[string]any{"name": s.Name},
 		"spec": map[string]any{
-			"namespaceSelector": map[string]any{
-				"matchExpressions": []any{map[string]any{
-					"key":      "kubernetes.io/metadata.name",
-					"operator": "In",
-					"values":   toAny(s.Namespaces),
-				}},
-			},
-			"network": map[string]any{"topology": "Localnet", "localnet": localnet},
+			"namespaceSelector": nsNameSelector(s.Namespaces),
+			"network":           map[string]any{"topology": "Localnet", "localnet": localnet},
 		},
 	})
 	if err != nil {

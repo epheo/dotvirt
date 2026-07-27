@@ -1,12 +1,12 @@
 <script lang="ts">
-	// vCenter's masthead search: one box over the whole streamed inventory — VMs
+	// vCenter's masthead search: one box over the whole streamed inventory - VMs
 	// (name, IP, labels), projects, namespaces, nodes, segments, storage
 	// classes. Pure frontend: everything searched is already client-side (which
 	// is why templates, a fetch away, are not here). `label:key=value` (or
-	// `label:key`) narrows to VM labels — the tags-parity affordance; label
+	// `label:key`) narrows to VM labels - the tags-parity affordance; label
 	// chips elsewhere call searchFor().
 	import { Search } from 'lucide-svelte';
-	import type { Inventory, Network, VM } from '$lib/api';
+	import type { VM } from '$lib/api';
 	import { vmStorageKeys, NO_STORAGE } from '$lib/lenses';
 	import { inventory as inventoryStore } from '$lib/state/inventory.svelte';
 
@@ -18,22 +18,19 @@
 		| { kind: 'network'; network: string; hint: string }
 		| { kind: 'storage'; storageClass: string };
 
-	let {
-		inventory,
-		networks = [],
-		onpick,
-	}: {
-		inventory: Inventory | null;
-		networks?: Network[]; // the port-group catalog (from the session store)
-		onpick: (hit: SearchHit) => void;
-	} = $props();
+	let { onpick }: { onpick: (hit: SearchHit) => void } = $props();
+
+	// Everything searched reads straight off the inventory store - the search is
+	// global by nature, so no scope-narrowing props to thread.
+	const inventory = $derived(inventoryStore.inventory);
+	const networks = $derived(inventoryStore.networks);
 
 	let query = $state('');
 	let open = $state(false);
 	let active = $state(0);
 	let input = $state<HTMLInputElement | null>(null);
 
-	// Focus + prefill from outside (label chips → `label:k=v`).
+	// Focus + prefill from outside (label chips -> `label:k=v`).
 	export function searchFor(q: string) {
 		query = q;
 		open = true;
@@ -46,7 +43,7 @@
 		if (!inventory || !q) return [];
 		const out: SearchHit[] = [];
 
-		// label:key=value / label:key — VM-label search only.
+		// label:key=value / label:key - VM-label search only.
 		const labelQ = q.startsWith('label:') ? q.slice('label:'.length) : null;
 
 		const vms = inventoryStore.allVMs;

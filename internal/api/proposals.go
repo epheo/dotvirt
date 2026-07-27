@@ -17,7 +17,7 @@ import (
 // the broadcast hot path. So reads are pure cache hits, and a background
 // refresher owns freshness: it re-queries the forge per watched token when git
 // heads move (a propose/merge), when a handler nudges it, and on a slow backstop
-// tick — then wakes the hub only when some lane actually changed.
+// tick - then wakes the hub only when some lane actually changed.
 const (
 	// proposalsRefreshEvery is the backstop cadence; real freshness comes from the
 	// git-change signal and explicit nudges.
@@ -38,7 +38,7 @@ type propTarget struct {
 	lastSeen time.Time
 }
 
-// proposalsFor returns id's open PRs across its projects — a pure cache read on
+// proposalsFor returns id's open PRs across its projects - a pure cache read on
 // the broadcast hot path. It registers id as a refresh target; on a cold cache it
 // nudges the refresher and ships this frame without the lane (the refresher wakes
 // the hub when the lane lands).
@@ -74,7 +74,7 @@ func (s *Server) trackProposals(id auth.Identity, projects []project.ProjectInfo
 // trackProposalsProject ensures proj is in id's refresh target before a propose
 // nudges the refresher: the nudged pass only queries already-tracked projects, and a
 // token that hasn't built an inventory yet (or whose platform tier discovery never
-// lists) wouldn't be — so without this the new PR would wait for a later build.
+// lists) wouldn't be - so without this the new PR would wait for a later build.
 func (s *Server) trackProposalsProject(id auth.Identity, proj project.ProjectInfo) {
 	key := restfactory.TokenKey(id.Token)
 	s.propMu.Lock()
@@ -117,7 +117,7 @@ func (s *Server) nudgeProposals() {
 // RunProposalsRefresher drives the lane's freshness off the hot path: it blocks on
 // {GitChanged from the bus, a handler nudge, the backstop tick}, re-queries the
 // forge for every watched token, and publishes ProposalsChanged when a lane differs
-// from the cache — so subscribers repaint within a debounce, not a heartbeat. It
+// from the cache - so subscribers repaint within a debounce, not a heartbeat. It
 // subscribes to GitChanged ONLY (not the cluster/live kinds), so a VM phase change
 // never triggers a forge re-query.
 func (s *Server) RunProposalsRefresher(ctx context.Context, bus *eventbus.Bus) {
@@ -144,7 +144,7 @@ func (s *Server) RunProposalsRefresher(ctx context.Context, bus *eventbus.Bus) {
 }
 
 // refreshMerged re-derives the merged-PR lane from the forge for every project
-// someone is watching — the poll backstop behind the webhook's instant record,
+// someone is watching - the poll backstop behind the webhook's instant record,
 // and what reseeds the lane after a restart. Repos are deduped across watchers
 // (the lane is project-scoped, not per-token; visibility applies at read time).
 // The feed publishes only on actual change, so the steady-state pass is silent.
@@ -225,7 +225,7 @@ func (s *Server) refreshProposals() bool {
 				anyChanged = true
 			}
 		} else if len(out) > 0 {
-			// A cold lane that stays empty isn't a visible change — don't wake the hub.
+			// A cold lane that stays empty isn't a visible change - don't wake the hub.
 			anyChanged = true
 		}
 		s.proposals.Put(key, out)

@@ -72,7 +72,7 @@ func seriesName(labels map[string]string) string {
 }
 
 // joinName composes a series display name from its spec prefix and the
-// fanned-out label value ("Rx" + "eth0" → "Rx eth0").
+// fanned-out label value ("Rx" + "eth0" -> "Rx eth0").
 func joinName(prefix, label string) string {
 	switch {
 	case label == "":

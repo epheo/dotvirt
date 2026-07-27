@@ -34,7 +34,7 @@ func TestStatusFor(t *testing.T) {
 	}
 }
 
-// fail must echo a classified error's message but MASK an unclassified one —
+// fail must echo a classified error's message but MASK an unclassified one -
 // internal errors can carry k8s/git/forge internals the caller must not see.
 func TestFailMasksInternalDetail(t *testing.T) {
 	rec := httptest.NewRecorder()
@@ -73,7 +73,7 @@ func TestRespond(t *testing.T) {
 	}
 }
 
-// unavailable's public message must name only WHAT failed — transport errors
+// unavailable's public message must name only WHAT failed - transport errors
 // embed endpoints and credentials that stay in the log.
 func TestUnavailableNamesOnlyTheSubsystem(t *testing.T) {
 	err := unavailable("cluster access", errors.New("dial tcp 10.0.0.1:6443: token=abc"))
@@ -134,7 +134,7 @@ func TestWithCORS(t *testing.T) {
 		t.Error("headers set without a configured origin")
 	}
 
-	// Credentials mode requires echoing the specific origin — never "*".
+	// Credentials mode requires echoing the specific origin - never "*".
 	rec = httptest.NewRecorder()
 	withCORS("http://localhost:5173", next).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/me", nil))
 	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {

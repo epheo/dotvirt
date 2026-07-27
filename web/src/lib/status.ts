@@ -1,6 +1,6 @@
 // The one status vocabulary: five tones, two shapes (StatusDot / StatusPill),
 // and the domain mappers that translate VM power, VMI phase, alert severity,
-// and task-dock rows onto them. Class maps are literal records — Tailwind only
+// and task-dock rows onto them. Class maps are literal records - Tailwind only
 // sees static strings.
 import type { Power, ProjectSync } from '$lib/api';
 
@@ -36,7 +36,7 @@ export function powerTone(power: Power, paused = false): Tone {
 	return power === 'On' ? 'ok' : power === 'Off' ? 'neutral' : 'warn';
 }
 
-// KubeVirt printable status → tone. Pattern-matched rather than enumerated:
+// KubeVirt printable status -> tone. Pattern-matched rather than enumerated:
 // the error family keeps growing, transitional states all read as activity.
 export function phaseTone(phase?: string, paused = false): Tone {
 	if (paused) return 'warn';
@@ -44,7 +44,7 @@ export function phaseTone(phase?: string, paused = false): Tone {
 	if (phase === 'Running') return 'ok';
 	if (/Err|CrashLoop|Unschedulable/.test(phase)) return 'danger';
 	if (phase === 'Unknown') return 'warn';
-	return 'info'; // Provisioning, Starting, Stopping, Migrating, WaitingFor…
+	return 'info'; // Provisioning, Starting, Stopping, Migrating, WaitingFor...
 }
 
 // Task-dock rows: anything still moving is info (hosts pulse the dot),
@@ -70,7 +70,7 @@ export function severityTone(severity?: string): Tone {
 	return severity === 'critical' ? 'danger' : severity === 'warning' ? 'warn' : 'neutral';
 }
 
-// Staged-change kind → tone (Changes lane pills). Compact badges (tree rows,
+// Staged-change kind -> tone (Changes lane pills). Compact badges (tree rows,
 // StagedBadge) deliberately collapse create/edit to info: an adopted VM's row
 // reads "staged", not "healthy".
 export function draftKindTone(kind: string): Tone {
@@ -83,7 +83,7 @@ const PHASE_TEXT: Record<string, string> = {
 	failed: 'text-danger',
 };
 
-// VM-count tiles: lowercase phase rollup key → text class; the rest stay soft ink.
+// VM-count tiles: lowercase phase rollup key -> text class; the rest stay soft ink.
 export function phaseTextTone(phase: string): string {
 	return PHASE_TEXT[phase] ?? 'text-ink-soft';
 }
@@ -93,9 +93,9 @@ export function usageLevelColor(pct: number, base = 'var(--chart-1)'): string {
 	return pct > 90 ? 'var(--color-danger)' : pct > 75 ? 'var(--color-warn)' : base;
 }
 
-// A project's ArgoCD rollup → one tone + label, most-alarming state first. Returns
+// A project's ArgoCD rollup -> one tone + label, most-alarming state first. Returns
 // null for a clean (Synced + Healthy) or not-yet-known project, so a dense tree shows a
-// badge only when something needs attention or is in flight — green stays implicit.
+// badge only when something needs attention or is in flight - green stays implicit.
 // pulse marks the actively-applying state (the "pending apply" feedback a merged
 // segment/policy PR produces before it settles).
 export function projectSyncView(
@@ -110,5 +110,5 @@ export function projectSyncView(
 	if (op === 'Running' || g.health === 'Progressing')
 		return { tone: 'info', label: 'Applying…', pulse: true };
 	if (g.sync === 'OutOfSync') return { tone: 'warn', label: 'Out of sync', pulse: false };
-	return null; // Synced + Healthy, or unknown — no badge
+	return null; // Synced + Healthy, or unknown - no badge
 }

@@ -3,14 +3,14 @@
 // Gateway, Distributed Firewall) and the vSphere/vCenter terms the rest of the UI
 // already speaks (Port Group, VM Network, uplink). Every networking label flows
 // through here so the two idioms never drift and a reader from either world can
-// self-orient. The backend model keeps neutral field names — this is presentation
+// self-orient. The backend model keeps neutral field names - this is presentation
 // only, the networking analog of $lib/networks' port-group helpers.
 import type { Network } from '$lib/api';
 
 // A concept named in both idioms, with the OVN-K/Kubernetes object behind it for
 // the detail drawers and tooltips.
 interface Term {
-	nsx: string; // the NSX-T-facing name (primary — this is who we're dressing for)
+	nsx: string; // the NSX-T-facing name (primary - this is who we're dressing for)
 	vsphere: string; // the vSphere/vCenter synonym shown alongside it
 	backing?: string; // the OVN-K / Kubernetes kind it renders to
 }
@@ -63,13 +63,13 @@ export const TERMS = {
 	tag: { nsx: 'Tag', vsphere: 'Custom Attribute', backing: 'label' },
 } satisfies Record<string, Term>;
 
-// Render a term as "NSX (vSphere)" — the default dual presentation for a heading or
+// Render a term as "NSX (vSphere)" - the default dual presentation for a heading or
 // chip. Components that have room for two lines can read t.nsx / t.vsphere directly.
 export function dual(t: Term): string {
 	return `${t.nsx} (${t.vsphere})`;
 }
 
-// A segment kind named in both idioms plus its OVN-K backing — the dual-vocabulary
+// A segment kind named in both idioms plus its OVN-K backing - the dual-vocabulary
 // successor to $lib/networks' kindLabel. The primary "VM Network" is the Tier-1's
 // own segment (a primary UDN, born with its namespace); VLAN segments ride the
 // provider edge; everything else is an isolated overlay segment, project- or

@@ -19,7 +19,7 @@
 		emptyLabel?: string;
 		exclude?: string;
 		class?: string;
-	} & Omit<HTMLSelectAttributes, 'value' | 'class'> = $props();
+	} & Omit<HTMLSelectAttributes, 'value' | 'class' | 'size'> = $props();
 </script>
 
 <SelectInput bind:value class={cls} {...rest}>

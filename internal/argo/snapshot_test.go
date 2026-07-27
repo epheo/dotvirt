@@ -41,18 +41,18 @@ func TestSnapshotDriftNilUntilSynced(t *testing.T) {
 	}
 }
 
-func TestSnapshotManagingApp(t *testing.T) {
+func TestSnapshotmanagingApp(t *testing.T) {
 	s := NewSnapshot(&Client{}, nil)
 	_ = s.apps.Add(appWithSource("argocd", "team-a", "https://forge/team-a.git",
 		[]any{vmResource("prod", "vm-a", "Synced", "Healthy")}))
 	s.synced.Store(true)
 
-	ref, ok := s.ManagingApp("prod", "vm-a")
+	ref, ok := s.managingApp("prod", "vm-a")
 	if !ok || ref.Name != "team-a" || ref.Namespace != "argocd" || ref.TargetRevision != "main" {
-		t.Fatalf("ManagingApp wrong: %+v ok=%v", ref, ok)
+		t.Fatalf("managingApp wrong: %+v ok=%v", ref, ok)
 	}
-	if _, ok := s.ManagingApp("prod", "ghost"); ok {
-		t.Error("ManagingApp should miss an unmanaged VM")
+	if _, ok := s.managingApp("prod", "ghost"); ok {
+		t.Error("managingApp should miss an unmanaged VM")
 	}
 }
 
@@ -67,7 +67,7 @@ func TestSnapshotRefreshForRepoMatchesByCanonicalURL(t *testing.T) {
 	_ = s.apps.Add(other)
 	s.synced.Store(true)
 
-	// Pushed as the html_url form (no .git, lowercase host) — must still match the
+	// Pushed as the html_url form (no .git, lowercase host) - must still match the
 	// annotated clone_url form (.git, mixed case) via canonical normalization.
 	s.RefreshForRepo(context.Background(), "https://forge/team-a")
 
@@ -92,7 +92,7 @@ func TestSnapshotRefreshForRepoNoopUntilSynced(t *testing.T) {
 	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), a)
 	s := NewSnapshot(&Client{dyn: dyn}, nil)
 	_ = s.apps.Add(a)
-	// synced is false — RefreshForRepo must be a no-op (no patch).
+	// synced is false - RefreshForRepo must be a no-op (no patch).
 	s.RefreshForRepo(context.Background(), "https://forge/team-a")
 
 	got, _ := dyn.Resource(applicationsGVR).Namespace("argocd").Get(context.Background(), "team-a", metav1.GetOptions{})
@@ -125,7 +125,7 @@ func TestSnapshotDriftMemoizedUntilStoreMoves(t *testing.T) {
 
 // ObjectDriftGen must advance only when a NON-VM object's drift content changes:
 // Application churn with identical drift (reconciledAt ticks) and VM-only drift moves
-// must not bump it — it feeds the catalog watermark, and a false bump would send
+// must not bump it - it feeds the catalog watermark, and a false bump would send
 // otherwise-suppressed frames and refetch the catalog for nothing.
 func TestObjectDriftGen(t *testing.T) {
 	s := NewSnapshot(&Client{}, nil)

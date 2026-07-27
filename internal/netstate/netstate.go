@@ -1,10 +1,10 @@
 // Package netstate is dotvirt's networking read plane: an SA-maintained, watch-fed
 // snapshot of the port-group CRDs (UDN/CUDN/NAD) and the physical fabric (nmstate
-// NNS/NNCP), following the clusterstate/argo/desched reflector model — Catalog() is a
+// NNS/NNCP), following the clusterstate/argo/desched reflector model - Catalog() is a
 // pure in-memory scan, never a per-request cluster call.
 //
 // Port-group moves publish NetworkChanged so the hub re-broadcasts and the client
-// re-pulls the out-of-band catalog; NNS (node-state) is watched but does NOT signal —
+// re-pulls the out-of-band catalog; NNS (node-state) is watched but does NOT signal -
 // its status churns and adapters need no live repaint. Each reflector is discovery-
 // gated (like desched): a cluster without OVN-K UDN or nmstate simply serves an empty
 // slice for that source, never an error loop. Node names come from a background-
@@ -56,14 +56,17 @@ type Snapshot struct {
 	// Policy-plane stores; each empty until its CRD/API is discovered.
 	netpol, anp, banp, egressfw, egressip, extroute cache.Indexer
 
-	// One health flag per reflector (reflect.TrackHealth): false while that watch
-	// errors. Healthy ANDs them, so one broken watch can't be masked by another
-	// re-establishing. A CRD still absent (never discovered) stays true — absence is
-	// a feature state, not staleness.
-	healthy [11]atomic.Bool
+	// watches pairs each store with its GVR, built once in New so Run and the
+	// health flags cannot drift out of step when a kind is added.
+	watches []watchSpec
+	// One health flag per watches entry (reflect.TrackHealth): false while that
+	// watch errors. Healthy ANDs them, so one broken watch can't be masked by
+	// another re-establishing. A CRD still absent (never discovered) stays true -
+	// absence is a feature state, not staleness.
+	healthy []atomic.Bool
 
 	nodesMu sync.RWMutex
-	nodes   []cluster.NodeInfo
+	nodes   []cluster.NodeLabels
 }
 
 // New builds the snapshot over sa (dotvirt's ServiceAccount client). bus may be nil in
@@ -75,10 +78,32 @@ func New(sa *cluster.Client, bus *eventbus.Bus) *Snapshot {
 		udn: idx(), cudn: idx(), nad: idx(), nns: idx(), nncp: idx(),
 		netpol: idx(), anp: idx(), banp: idx(), egressfw: idx(), egressip: idx(), extroute: idx(),
 	}
+	s.watches = []watchSpec{
+		{gvrUDN, s.udn, true},
+		{gvrCUDN, s.cudn, true},
+		{gvrNAD, s.nad, true},
+		{gvrNNCP, s.nncp, true},
+		{gvrNNS, s.nns, false}, // NNS churn must not repaint the catalog
+		{gvrNetpol, s.netpol, true},
+		{gvrANP, s.anp, true},
+		{gvrBANP, s.banp, true},
+		{gvrEgressFW, s.egressfw, true},
+		{gvrEgressIP, s.egressip, true},
+		{gvrExtRoute, s.extroute, true},
+	}
+	s.healthy = make([]atomic.Bool, len(s.watches))
 	for i := range s.healthy {
 		s.healthy[i].Store(true) // optimistic until a list/watch actually errors
 	}
 	return s
+}
+
+// watchSpec is one reflector's wiring: its GVR, target store, and whether store
+// moves signal NetworkChanged.
+type watchSpec struct {
+	gvr    schema.GroupVersionResource
+	idx    cache.Indexer
+	signal bool
 }
 
 // Healthy reports whether every started networking watch is currently established.
@@ -93,7 +118,7 @@ func (s *Snapshot) Healthy() bool {
 	return true
 }
 
-// discoveryInterval paces the API probe while a CRD is absent — one lightweight
+// discoveryInterval paces the API probe while a CRD is absent - one lightweight
 // discovery GET per tick, ending once the reflector owns a watch connection.
 const discoveryInterval = time.Minute
 
@@ -105,38 +130,29 @@ const nodeRefreshInterval = 2 * time.Minute
 // returns immediately; everything stops when ctx is cancelled. Port-group and policy
 // kinds signal NetworkChanged; NNS is watched silently.
 func (s *Snapshot) Run(ctx context.Context) {
-	go s.watch(ctx, gvrUDN, s.udn, &s.healthy[0], true)
-	go s.watch(ctx, gvrCUDN, s.cudn, &s.healthy[1], true)
-	go s.watch(ctx, gvrNAD, s.nad, &s.healthy[2], true)
-	go s.watch(ctx, gvrNNCP, s.nncp, &s.healthy[3], true)
-	go s.watch(ctx, gvrNNS, s.nns, &s.healthy[4], false)
-	go s.watch(ctx, gvrNetpol, s.netpol, &s.healthy[5], true)
-	go s.watch(ctx, gvrANP, s.anp, &s.healthy[6], true)
-	go s.watch(ctx, gvrBANP, s.banp, &s.healthy[7], true)
-	go s.watch(ctx, gvrEgressFW, s.egressfw, &s.healthy[8], true)
-	go s.watch(ctx, gvrEgressIP, s.egressip, &s.healthy[9], true)
-	go s.watch(ctx, gvrExtRoute, s.extroute, &s.healthy[10], true)
+	for i := range s.watches {
+		go s.watch(ctx, s.watches[i], &s.healthy[i])
+	}
 	go s.refreshNodes(ctx)
 }
 
-// watch runs a discovery-gated reflector for one GVR: it re-probes slowly until the API
-// appears, then owns a watch connection for the rest of the process. signal=true fires
-// NetworkChanged on every store move; the NNS reflector passes false (its churn must
-// not repaint). Serving the NNS CRD flips nmstatePresent, which gates the fabric UI.
-func (s *Snapshot) watch(ctx context.Context, gvr schema.GroupVersionResource, idx cache.Indexer, healthy *atomic.Bool, signal bool) {
+// watch runs a discovery-gated reflector for one spec: it re-probes slowly until the
+// API appears, then owns a watch connection for the rest of the process. Serving the
+// NNS CRD flips nmstatePresent, which gates the fabric UI.
+func (s *Snapshot) watch(ctx context.Context, w watchSpec, healthy *atomic.Bool) {
 	t := time.NewTicker(discoveryInterval)
 	defer t.Stop()
 	for {
-		if s.sa.HasAPIResource(gvr) {
-			if gvr == gvrNNS {
+		if s.sa.HasAPIResource(w.gvr) {
+			if w.gvr == gvrNNS {
 				s.nmstatePresent.Store(true)
 			}
 			onChange := func() {}
-			if signal && s.bus != nil {
+			if w.signal && s.bus != nil {
 				onChange = func() { s.bus.Publish(eventbus.NetworkChanged) }
 			}
-			store := reflect.NewStore(idx, onChange, nil)
-			lw := reflect.TrackHealth(s.sa.DynamicListWatch(gvr), healthy)
+			store := reflect.NewStore(w.idx, onChange, nil)
+			lw := reflect.TrackHealth(s.sa.DynamicListWatch(w.gvr), healthy)
 			r := cache.NewReflector(lw, &unstructured.Unstructured{}, store, 0)
 			r.Run(ctx.Done()) // blocks until shutdown; owns its own relist/backoff
 			return
@@ -155,7 +171,7 @@ func (s *Snapshot) refreshNodes(ctx context.Context) {
 	t := time.NewTicker(nodeRefreshInterval)
 	defer t.Stop()
 	for {
-		if infos, err := s.sa.NodeInfos(ctx); err == nil {
+		if infos, err := s.sa.ListNodeLabels(ctx); err == nil {
 			s.nodesMu.Lock()
 			s.nodes = infos
 			s.nodesMu.Unlock()
@@ -166,17 +182,4 @@ func (s *Snapshot) refreshNodes(ctx context.Context) {
 		case <-t.C:
 		}
 	}
-}
-
-// listOf returns the store's objects as typed unstructured pointers; non-unstructured
-// entries (there are none in practice) are skipped.
-func listOf(idx cache.Indexer) []*unstructured.Unstructured {
-	all := idx.List()
-	out := make([]*unstructured.Unstructured, 0, len(all))
-	for _, obj := range all {
-		if u, ok := obj.(*unstructured.Unstructured); ok {
-			out = append(out, u)
-		}
-	}
-	return out
 }
