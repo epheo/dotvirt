@@ -12,7 +12,6 @@ import (
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage/memory"
 )
 
@@ -20,10 +19,8 @@ import (
 // changesets (changeset CommitChangeset). Separate from the read-only mirror
 // Repo so writes never disturb inventory reads.
 type WriteRepo struct {
-	url      string
-	username string
-	tokenFn  forge.TokenSource // resolved per clone/push so a rotated token is picked up
-	push     bool              // push commits to the remote (false for local/offline testing)
+	creds
+	push bool // push commits to the remote (false for local/offline testing)
 
 	mu sync.Mutex
 }
@@ -33,20 +30,7 @@ type WriteRepo struct {
 // auth, resolved on each clone/push. push controls whether commits are pushed back
 // (set false when there's no writable remote, e.g. tests).
 func OpenWrite(url, username string, tokenFn forge.TokenSource, push bool) *WriteRepo {
-	return &WriteRepo{url: url, username: username, tokenFn: tokenFn, push: push}
-}
-
-// auth builds a fresh BasicAuth from the current token (nil when no token yet).
-// Rebuilt per call so a rotated token takes effect without restart.
-func (w *WriteRepo) auth() *http.BasicAuth {
-	if w.tokenFn == nil {
-		return nil
-	}
-	tok := w.tokenFn()
-	if tok == "" {
-		return nil
-	}
-	return &http.BasicAuth{Username: w.username, Password: tok}
+	return &WriteRepo{creds: creds{url: url, username: username, tokenFn: tokenFn}, push: push}
 }
 
 // File is a path/content pair to write into the repo.

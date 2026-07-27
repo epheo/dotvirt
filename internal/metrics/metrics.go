@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/tlsconf"
@@ -306,35 +305,21 @@ func (c *Client) ScopeMetrics(ctx context.Context, token string, namespaces []st
 	step := int(spec.step.Seconds())
 	specs := scopeChartSpecs(sel, promDur(rateWindow(spec.step)))
 
-	var (
-		wg       sync.WaitGroup
-		mu       sync.Mutex
-		firstErr error
-		anyData  bool
-	)
+	var g gather
 	results := make([][]labeledSeries, len(specs))
 	for ci, cs := range specs {
-		wg.Add(1)
-		go func(ci int, query string) {
-			defer wg.Done()
+		query := cs.series[0].query
+		g.run(func() (bool, error) {
 			series, err := c.rangeSeries(ctx, token, query, start, end, step)
-			mu.Lock()
-			defer mu.Unlock()
 			if err != nil {
-				if firstErr == nil {
-					firstErr = err
-				}
-				return
-			}
-			if len(series) > 0 {
-				anyData = true
+				return false, err
 			}
 			results[ci] = series
-		}(ci, cs.series[0].query)
+			return len(series) > 0, nil
+		})
 	}
-	wg.Wait()
-	if firstErr != nil && !anyData {
-		return model.VMMetrics{}, fmt.Errorf("%w: %v", model.ErrUnavailable, firstErr)
+	if err := g.wait(); err != nil {
+		return model.VMMetrics{}, fmt.Errorf("%w: %v", model.ErrUnavailable, err)
 	}
 
 	out := model.VMMetrics{Range: rng, StepSec: step, Charts: make([]model.MetricChart, len(specs))}
@@ -433,19 +418,12 @@ func (c *Client) VMMetrics(ctx context.Context, token, ns, name, rng string) (mo
 	step := int(spec.step.Seconds())
 	specs := chartSpecs(ns, name, promDur(rateWindow(spec.step)))
 
-	var (
-		wg       sync.WaitGroup
-		mu       sync.Mutex
-		firstErr error
-		anyData  bool
-	)
+	var g gather
 	results := make([][][]namedSeries, len(specs)) // results[chart][spec] = its series
 	for ci, cs := range specs {
 		results[ci] = make([][]namedSeries, len(cs.series))
 		for si, ss := range cs.series {
-			wg.Add(1)
-			go func(ci, si int, ss seriesSpec) {
-				defer wg.Done()
+			g.run(func() (bool, error) {
 				var got []namedSeries
 				var err error
 				if ss.byLabel == "" {
@@ -461,27 +439,21 @@ func (c *Client) VMMetrics(ctx context.Context, token, ns, name, rng string) (mo
 					}
 					sort.Slice(got, func(i, j int) bool { return got[i].name < got[j].name })
 				}
-				mu.Lock()
-				defer mu.Unlock()
 				if err != nil {
-					if firstErr == nil {
-						firstErr = err
-					}
-					return
-				}
-				for _, s := range got {
-					if len(s.samples) > 0 {
-						anyData = true
-						break
-					}
+					return false, err
 				}
 				results[ci][si] = got
-			}(ci, si, ss)
+				for _, s := range got {
+					if len(s.samples) > 0 {
+						return true, nil
+					}
+				}
+				return false, nil
+			})
 		}
 	}
-	wg.Wait()
-	if firstErr != nil && !anyData {
-		return model.VMMetrics{}, fmt.Errorf("%w: %v", model.ErrUnavailable, firstErr)
+	if err := g.wait(); err != nil {
+		return model.VMMetrics{}, fmt.Errorf("%w: %v", model.ErrUnavailable, err)
 	}
 
 	out := model.VMMetrics{Range: rng, StepSec: step, Charts: make([]model.MetricChart, len(specs))}

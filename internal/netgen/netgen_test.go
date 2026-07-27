@@ -267,7 +267,7 @@ func TestEgressFirewallManifest(t *testing.T) {
 		Namespace: "tenant-a",
 		Rules: []EgressRule{
 			{Action: "Allow", CIDR: "10.0.0.0/8"},
-			{Action: "Allow", DNSName: "registry.example.com", Ports: []EgressPort{{Protocol: "TCP", Port: 443}}},
+			{Action: "Allow", DNSName: "registry.example.com", Ports: []PolicyPort{{Protocol: "TCP", Port: 443}}},
 			{Action: "Deny", CIDR: "0.0.0.0/0"},
 		},
 	})

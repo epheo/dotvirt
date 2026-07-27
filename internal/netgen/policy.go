@@ -62,15 +62,9 @@ func NetworkPolicyManifest(s NetworkPolicySpec) (path string, content []byte, er
 				rule["from"] = from
 			}
 			if len(r.Ports) > 0 {
-				ports := make([]any, 0, len(r.Ports))
-				for i, p := range r.Ports {
-					if p.Protocol != "TCP" && p.Protocol != "UDP" && p.Protocol != "SCTP" {
-						return "", nil, fmt.Errorf("rule port %d: protocol must be TCP, UDP or SCTP", i+1)
-					}
-					if p.Port <= 0 || p.Port > 65535 {
-						return "", nil, fmt.Errorf("rule port %d: port must be 1..65535", i+1)
-					}
-					ports = append(ports, map[string]any{"protocol": p.Protocol, "port": p.Port})
+				ports, err := portEntries("rule", r.Ports, false)
+				if err != nil {
+					return "", nil, err
 				}
 				rule["ports"] = ports
 			}
@@ -120,10 +114,13 @@ func AdminNetworkPolicyManifest(s AdminNetworkPolicySpec) (path string, content 
 	name := s.Name
 	if s.Baseline {
 		name = "default" // BANP is a cluster singleton named default
-	} else if !validate.DNS1123Name(name) {
-		return "", nil, fmt.Errorf("name %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", name)
-	} else if s.Priority < 0 || s.Priority > 1000 {
-		return "", nil, fmt.Errorf("priority must be 0..1000")
+	} else {
+		if err := validate.RequireDNS1123("name", name); err != nil {
+			return "", nil, err
+		}
+		if s.Priority < 0 || s.Priority > 1000 {
+			return "", nil, fmt.Errorf("priority must be 0..1000")
+		}
 	}
 	subjectSel := map[string]any{}
 	if len(s.Subject) > 0 {
@@ -159,15 +156,9 @@ func AdminNetworkPolicyManifest(s AdminNetworkPolicySpec) (path string, content 
 			}
 			rule := map[string]any{"action": r.Action, peerKey: peers}
 			if len(r.Ports) > 0 {
-				ports := make([]any, 0, len(r.Ports))
-				for j, pt := range r.Ports {
-					if pt.Protocol != "TCP" && pt.Protocol != "UDP" && pt.Protocol != "SCTP" {
-						return nil, fmt.Errorf("rule %d port %d: protocol must be TCP, UDP or SCTP", i+1, j+1)
-					}
-					if pt.Port <= 0 || pt.Port > 65535 {
-						return nil, fmt.Errorf("rule %d port %d: port must be 1..65535", i+1, j+1)
-					}
-					ports = append(ports, map[string]any{"portNumber": map[string]any{"protocol": pt.Protocol, "port": pt.Port}})
+				ports, err := portEntries(fmt.Sprintf("rule %d", i+1), r.Ports, true)
+				if err != nil {
+					return nil, err
 				}
 				rule["ports"] = ports
 			}

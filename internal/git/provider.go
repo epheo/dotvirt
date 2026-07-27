@@ -2,6 +2,7 @@ package git
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
@@ -77,10 +78,8 @@ func GroupNamespaces(byNS map[string][]model.VM) []model.ProjectNamespace {
 // layout: one directory per namespace). Files at the repo root fall back to
 // "default".
 func defaultNamespace(path string) string {
-	for i := 0; i < len(path); i++ {
-		if path[i] == '/' {
-			return path[:i]
-		}
+	if dir, _, ok := strings.Cut(path, "/"); ok {
+		return dir
 	}
 	return "default"
 }

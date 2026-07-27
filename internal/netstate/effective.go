@@ -84,26 +84,41 @@ func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, p
 		}
 	}
 
-	// Tier-0 SNAT: EgressIPs pinning this namespace; an optional podSelector
-	// narrows within it.
+	// Tier-0: the SNAT pools and external routes binding this namespace.
+	snat, routes := s.egressBindings(nsLabels, podLabels, podScoped)
+	for _, b := range snat {
+		eff.SNAT = append(eff.SNAT, model.PolicyBinding{Policy: b.pol, Conditional: b.m == matchCond})
+	}
+	for _, b := range routes {
+		eff.Routes = append(eff.Routes, model.PolicyBinding{Policy: b.pol, Conditional: b.m == matchCond})
+	}
+	return eff
+}
+
+// egressBinding pairs an egress-plane policy with its selector verdict.
+type egressBinding struct {
+	pol model.Policy
+	m   match
+}
+
+// egressBindings resolves which SNAT pools (EgressIP: namespaceSelector plus an
+// optional podSelector narrowing within it) and external routes bind a workload
+// — the one query behind the Effective view and the trace's egress planes.
+func (s *Snapshot) egressBindings(nsLabels, podLabels map[string]string, podScoped bool) (snat, routes []egressBinding) {
 	for _, u := range reflect.List(s.egressip) {
 		nsSel, _, _ := unstructured.NestedMap(u.Object, "spec", "namespaceSelector")
 		podSel, _, _ := unstructured.NestedMap(u.Object, "spec", "podSelector")
-		m := combineMatch(matchSelector(nsSel, nsLabels), podMatch(podSel, podLabels, podScoped))
-		if m != matchNo {
-			eff.SNAT = append(eff.SNAT, model.PolicyBinding{Policy: policyFromEgressIP(u), Conditional: m == matchCond})
+		if m := combineMatch(matchSelector(nsSel, nsLabels), podMatch(podSel, podLabels, podScoped)); m != matchNo {
+			snat = append(snat, egressBinding{policyFromEgressIP(u), m})
 		}
 	}
-
-	// Tier-0 routes: external routes steering this namespace's egress.
 	for _, u := range reflect.List(s.extroute) {
 		sel, _, _ := unstructured.NestedMap(u.Object, "spec", "from", "namespaceSelector")
 		if m := matchSelector(sel, nsLabels); m != matchNo {
-			eff.Routes = append(eff.Routes, model.PolicyBinding{Policy: policyFromExtRoute(u), Conditional: m == matchCond})
+			routes = append(routes, egressBinding{policyFromExtRoute(u), m})
 		}
 	}
-
-	return eff
+	return snat, routes
 }
 
 // match is a selector's verdict against known labels. matchCond means the

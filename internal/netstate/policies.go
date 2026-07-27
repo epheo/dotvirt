@@ -75,19 +75,10 @@ func kindRank(k model.PolicyKind) int {
 	return 6
 }
 
-// policyFromNetpol decodes a NetworkPolicy: the project east-west DFW rules. A
-// policy with no rules for a declared direction default-denies it — the view
-// derives that hint from kind + empty rules, so nothing is synthesized here.
-func policyFromNetpol(u *unstructured.Unstructured) model.Policy {
-	p := model.Policy{
-		Name:      u.GetName(),
-		Kind:      model.PolicyDFW,
-		Namespace: u.GetNamespace(),
-		Backing:   "NetworkPolicy",
-	}
-	sel, _, _ := unstructured.NestedMap(u.Object, "spec", "podSelector")
-	p.Target = orAny(selectorSummary(sel), "all pods")
-
+// appendRules folds a policy object's ingress+egress rule slices into p, with
+// action and peer supplied per backing (the one shape NetworkPolicy and the
+// admin tiers share).
+func appendRules(u *unstructured.Unstructured, p *model.Policy, action func(map[string]any) string, peer func(any) string) {
 	for _, dir := range []struct{ field, label, peerKey string }{
 		{"ingress", "Ingress", "from"},
 		{"egress", "Egress", "to"},
@@ -103,12 +94,28 @@ func policyFromNetpol(u *unstructured.Unstructured) model.Policy {
 			}
 			p.Rules = append(p.Rules, model.PolicyRuleView{
 				Direction: dir.label,
-				Action:    "Allow",
-				Peer:      netpolPeers(r[dir.peerKey]),
+				Action:    action(r),
+				Peer:      peer(r[dir.peerKey]),
 				Ports:     portsSummary(r["ports"]),
 			})
 		}
 	}
+}
+
+// policyFromNetpol decodes a NetworkPolicy: the project east-west DFW rules. A
+// policy with no rules for a declared direction default-denies it — the view
+// derives that hint from kind + empty rules, so nothing is synthesized here.
+func policyFromNetpol(u *unstructured.Unstructured) model.Policy {
+	p := model.Policy{
+		Name:      u.GetName(),
+		Kind:      model.PolicyDFW,
+		Namespace: u.GetNamespace(),
+		Backing:   "NetworkPolicy",
+	}
+	sel, _, _ := unstructured.NestedMap(u.Object, "spec", "podSelector")
+	p.Target = orAny(selectorSummary(sel), "all pods")
+
+	appendRules(u, &p, func(map[string]any) string { return "Allow" }, netpolPeers)
 	return p
 }
 
@@ -137,27 +144,7 @@ func policyFromANP(u *unstructured.Unstructured, baseline bool) model.Policy {
 		p.Namespaces = selectorNamespaces(ns)
 	}
 
-	for _, dir := range []struct{ field, label, peerKey string }{
-		{"ingress", "Ingress", "from"},
-		{"egress", "Egress", "to"},
-	} {
-		rules, found, _ := unstructured.NestedSlice(u.Object, "spec", dir.field)
-		if !found {
-			continue
-		}
-		for _, raw := range rules {
-			r, ok := raw.(map[string]any)
-			if !ok {
-				continue
-			}
-			p.Rules = append(p.Rules, model.PolicyRuleView{
-				Direction: dir.label,
-				Action:    str(r["action"]),
-				Peer:      adminPeers(r[dir.peerKey]),
-				Ports:     portsSummary(r["ports"]),
-			})
-		}
-	}
+	appendRules(u, &p, func(r map[string]any) string { return str(r["action"]) }, adminPeers)
 	return p
 }
 

@@ -6,6 +6,7 @@
 package inventory
 
 import (
+	"strings"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/argo"
@@ -116,12 +117,7 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 
 // splitKey splits a "namespace/name" snapshot key.
 func splitKey(k string) (ns, name string, ok bool) {
-	for i := 0; i < len(k); i++ {
-		if k[i] == '/' {
-			return k[:i], k[i+1:], true
-		}
-	}
-	return "", "", false
+	return strings.Cut(k, "/")
 }
 
 func enrich(vm *model.VM, in Inputs) {

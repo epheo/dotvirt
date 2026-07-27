@@ -4,6 +4,7 @@
 // signed-cookie + per-request pass-through path as a pasted token, and cluster
 // RBAC stays the sole authority. Token paste remains for vanilla Kubernetes and
 // ServiceAccounts.
+
 package auth
 
 import (

@@ -124,12 +124,41 @@ func matchesLabels(have, want map[string]string) bool {
 	return true
 }
 
-// networkFromUDN decodes a namespace-scoped UserDefinedNetwork. Its network config
-// sits directly under spec (spec.topology, spec.<topology>.role/subnets).
+// udnNetwork reads a UserDefinedNetwork's topology + role. Its network config
+// sits directly under spec (spec.topology, spec.<topology>.role) — the one
+// decoder for OVN-K's role-under-lowercased-topology shape.
+func udnNetwork(u *unstructured.Unstructured) (topology, role string) {
+	topology, _, _ = unstructured.NestedString(u.Object, "spec", "topology")
+	role, _, _ = unstructured.NestedString(u.Object, "spec", strings.ToLower(topology), "role")
+	return topology, role
+}
+
+// cudnNetwork is udnNetwork for a ClusterUserDefinedNetwork, whose config nests
+// one level deeper under spec.network.
+func cudnNetwork(u *unstructured.Unstructured) (topology, role string) {
+	topology, _, _ = unstructured.NestedString(u.Object, "spec", "network", "topology")
+	role, _, _ = unstructured.NestedString(u.Object, "spec", "network", strings.ToLower(topology), "role")
+	return topology, role
+}
+
+// nadConfig decodes a NAD's spec.config CNI JSON blob; ok is false when absent
+// or unparsable.
+func nadConfig(u *unstructured.Unstructured) (cfg struct {
+	Topology string `json:"topology"`
+	VLANID   int    `json:"vlanID"`
+	Subnets  string `json:"subnets"`
+}, ok bool) {
+	raw, _, _ := unstructured.NestedString(u.Object, "spec", "config")
+	if raw == "" || json.Unmarshal([]byte(raw), &cfg) != nil {
+		return cfg, false
+	}
+	return cfg, true
+}
+
+// networkFromUDN decodes a namespace-scoped UserDefinedNetwork.
 func networkFromUDN(u *unstructured.Unstructured) model.Network {
-	topology, _, _ := unstructured.NestedString(u.Object, "spec", "topology")
+	topology, role := udnNetwork(u)
 	key := strings.ToLower(topology)
-	role, _, _ := unstructured.NestedString(u.Object, "spec", key, "role")
 	return model.Network{
 		Name:      u.GetName(),
 		Kind:      kindFor(topology, role),
@@ -142,12 +171,10 @@ func networkFromUDN(u *unstructured.Unstructured) model.Network {
 	}
 }
 
-// networkFromCUDN decodes a cluster-scoped ClusterUserDefinedNetwork. Unlike UDN,
-// its config is nested under spec.network (spec.network.topology, …).
+// networkFromCUDN decodes a cluster-scoped ClusterUserDefinedNetwork.
 func networkFromCUDN(u *unstructured.Unstructured) model.Network {
-	topology, _, _ := unstructured.NestedString(u.Object, "spec", "network", "topology")
+	topology, role := cudnNetwork(u)
 	key := strings.ToLower(topology)
-	role, _, _ := unstructured.NestedString(u.Object, "spec", "network", key, "role")
 	n := model.Network{
 		Name:      u.GetName(),
 		Kind:      kindFor(topology, role),
@@ -176,16 +203,8 @@ func networkFromNAD(u *unstructured.Unstructured) model.Network {
 		Backing:   "NetworkAttachmentDefinition",
 		AttachRef: u.GetNamespace() + "/" + u.GetName(),
 	}
-	cfg, _, _ := unstructured.NestedString(u.Object, "spec", "config")
-	if cfg == "" {
-		return n
-	}
-	var c struct {
-		Topology string `json:"topology"`
-		VLANID   int    `json:"vlanID"`
-		Subnets  string `json:"subnets"`
-	}
-	if json.Unmarshal([]byte(cfg), &c) != nil {
+	c, ok := nadConfig(u)
+	if !ok {
 		return n
 	}
 	n.Topology = c.Topology

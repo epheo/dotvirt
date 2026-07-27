@@ -51,3 +51,50 @@ func toStrAny(m map[string]string) map[string]any {
 	}
 	return out
 }
+
+// nsNameSelector selects namespaces by their metadata.name — the one selector
+// shape every cluster-scoped manifest (CUDN, EgressIP, external route) uses to
+// publish to a chosen set of projects.
+func nsNameSelector(namespaces []string) map[string]any {
+	return map[string]any{
+		"matchExpressions": []any{map[string]any{
+			"key":      "kubernetes.io/metadata.name",
+			"operator": "In",
+			"values":   toAny(namespaces),
+		}},
+	}
+}
+
+// layer2Spec is the shared Layer2 body. A subnet-less L2 network is a pure
+// switch (no IPAM); OVN-K defaults ipam.mode to Enabled (which then requires
+// subnets), so Disabled must be set explicitly — valid because these networks
+// are Secondary.
+func layer2Spec(subnets []string) map[string]any {
+	layer2 := map[string]any{"role": "Secondary"}
+	if len(subnets) > 0 {
+		layer2["subnets"] = toAny(subnets)
+	} else {
+		layer2["ipam"] = map[string]any{"mode": "Disabled"}
+	}
+	return layer2
+}
+
+// portEntries validates ports (TCP/UDP/SCTP, 1..65535) and renders them; the
+// admin tiers wrap each entry in portNumber. where prefixes errors ("rule 2").
+func portEntries(where string, ports []PolicyPort, wrapPortNumber bool) ([]any, error) {
+	out := make([]any, 0, len(ports))
+	for i, p := range ports {
+		if p.Protocol != "TCP" && p.Protocol != "UDP" && p.Protocol != "SCTP" {
+			return nil, fmt.Errorf("%s port %d: protocol must be TCP, UDP or SCTP", where, i+1)
+		}
+		if p.Port <= 0 || p.Port > 65535 {
+			return nil, fmt.Errorf("%s port %d: port must be 1..65535", where, i+1)
+		}
+		entry := map[string]any{"protocol": p.Protocol, "port": p.Port}
+		if wrapPortNumber {
+			entry = map[string]any{"portNumber": entry}
+		}
+		out = append(out, entry)
+	}
+	return out, nil
+}
