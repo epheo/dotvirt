@@ -289,7 +289,8 @@ const enc = encodeURIComponent;
 
 // vmPath is the one spelling of a VM route's prefix; actions.ts builds its
 // manifest/screenshot URLs from it too.
-export const vmPath = (namespace: string, name: string) => `/api/vms/${enc(namespace)}/${enc(name)}`;
+export const vmPath = (namespace: string, name: string) =>
+	`/api/vms/${enc(namespace)}/${enc(name)}`;
 
 // qs builds a query-string suffix, omitting empty values; '' when nothing set.
 function qs(params: Record<string, string | undefined>): string {
