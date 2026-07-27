@@ -37,7 +37,7 @@
 		class="flex items-center gap-2 border-b border-warn-soft bg-warn-soft/60 px-4 py-2 text-sm text-warn-ink"
 	>
 		<TriangleAlert size={16} class="shrink-0" />
-		<span>OpenShift SSO is enabled but its OAuthClient is not registered yet.</span>
+		<span>OpenShift SSO is not ready: its OAuthClient is missing or holds an outdated secret.</span>
 		<button
 			onclick={finish}
 			disabled={busy}

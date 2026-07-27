@@ -60,8 +60,8 @@
 
 		{#if sso && ssoPending}
 			<p class="mb-4 rounded bg-warn-soft/60 px-3 py-2 text-sm text-warn-ink">
-				OpenShift SSO is enabled but not finished: its OAuthClient is not registered yet. A cluster
-				admin can sign in with a token below and complete it in one click.
+				OpenShift SSO is enabled but not ready: its OAuthClient is missing or holds an outdated
+				secret. A cluster admin can sign in with a token below and fix it in one click.
 			</p>
 		{:else if sso}
 			<a
