@@ -1,18 +1,17 @@
 <script lang="ts">
 	// Multi-select well: checkbox rows in a bounded scroll area. The filter box
 	// appears only past the size where scanning beats typing.
-	type Item = { value: string; label?: string; hint?: string };
+	type Item = { value: string; hint?: string };
 
 	let {
 		items,
 		selected = $bindable([]),
-		filterAt = 8,
-	}: { items: Item[]; selected?: string[]; filterAt?: number } = $props();
+	}: { items: Item[]; selected?: string[] } = $props();
 
 	let query = $state('');
 	const shown = $derived(
 		query
-			? items.filter((i) => (i.label ?? i.value).toLowerCase().includes(query.toLowerCase()))
+			? items.filter((i) => i.value.toLowerCase().includes(query.toLowerCase()))
 			: items,
 	);
 
@@ -22,7 +21,7 @@
 </script>
 
 <div class="space-y-1">
-	{#if items.length > filterAt}
+	{#if items.length > 8}
 		<input
 			bind:value={query}
 			placeholder="Filter…"
@@ -37,7 +36,7 @@
 					checked={selected.includes(item.value)}
 					onchange={(e) => toggle(item.value, e.currentTarget.checked)}
 				/>
-				<span class="text-ink-soft">{item.label ?? item.value}</span>
+				<span class="text-ink-soft">{item.value}</span>
 				{#if item.hint}
 					<span class="rounded bg-inset-strong px-1.5 py-0.5 text-[11px] text-ink-muted"
 						>{item.hint}</span

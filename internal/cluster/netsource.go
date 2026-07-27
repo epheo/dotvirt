@@ -10,9 +10,9 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// The raw access the netstate snapshot builds its reflectors on, kept here so the
-// dynamic client and discovery stay behind cluster.Client (netstate never touches a
-// clientset directly). Mirrors the typed VMListWatch/HasKubeDeschedulerAPI helpers.
+// The raw access the netstate and desched snapshots build their reflectors on, kept
+// here so the dynamic client and discovery stay behind cluster.Client (no snapshot
+// touches a clientset directly).
 
 // DynamicListWatch is a List+Watch over gvr across all namespaces — cluster-scoped
 // kinds included (NamespaceAll addresses the whole cluster for them). The source for a
@@ -30,7 +30,7 @@ func (c *Client) DynamicListWatch(gvr schema.GroupVersionResource) *cache.ListWa
 
 // HasAPIResource reports whether gvr is served by the cluster — the discovery gate a
 // snapshot uses to stay a slow probe where a CRD is absent (OVN-K UDN or nmstate not
-// installed), never a reflector error loop. Mirrors HasKubeDeschedulerAPI.
+// installed), never a reflector error loop.
 func (c *Client) HasAPIResource(gvr schema.GroupVersionResource) bool {
 	rls, err := c.kube.Discovery().ServerResourcesForGroupVersion(gvr.GroupVersion().String())
 	if err != nil {

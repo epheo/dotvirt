@@ -188,9 +188,8 @@ func (s *Store) path(user, project string) string {
 
 // safeSegment turns a user/project name into one safe path segment. url.PathEscape
 // handles '/' and ':' but NOT '.', so a name of "." or ".." would traverse out of
-// the draft dir; percent-encode leading dots to neutralize that (PathUnescape in
-// ListProjects reverses it). The replace is anchored so only a segment that IS
-// "."/".."(escaped) is rewritten, keeping normal names like "v1.2" intact.
+// the draft dir; percent-encode those two to neutralize that. Normal names like
+// "v1.2" stay intact.
 func safeSegment(s string) string {
 	switch s {
 	case ".":
@@ -251,7 +250,7 @@ func (s *Store) Unstage(user, project string, resource Resource, namespace, name
 }
 
 // Clear empties (user,project)'s draft; persistLocked removes the now-empty file
-// so ListProjects/Count don't keep enumerating emptied projects forever.
+// so emptied projects don't linger on disk.
 func (s *Store) Clear(user, project string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -268,51 +267,6 @@ func (s *Store) List(user, project string) ([]Entry, error) {
 		return nil, err
 	}
 	return sortedEntries(d), nil
-}
-
-// Count reports the total pending entries across all of a user's projects (for
-// the global "Changes" badge). It reads the user's directory from disk so it
-// reflects projects not yet loaded this session.
-func (s *Store) Count(user string) (int, error) {
-	projects, err := s.ListProjects(user)
-	if err != nil {
-		return 0, err
-	}
-	total := 0
-	for _, p := range projects {
-		entries, err := s.List(user, p)
-		if err != nil {
-			return 0, err
-		}
-		total += len(entries)
-	}
-	return total, nil
-}
-
-// ListProjects returns the projects a user has a draft for (by scanning their
-// directory). Names are unescaped back to their original form.
-func (s *Store) ListProjects(user string) ([]string, error) {
-	ents, err := os.ReadDir(filepath.Join(s.dir, safeSegment(user)))
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var out []string
-	for _, e := range ents {
-		name := e.Name()
-		if e.IsDir() || filepath.Ext(name) != ".json" {
-			continue
-		}
-		project, err := url.PathUnescape(name[:len(name)-len(".json")])
-		if err != nil {
-			continue
-		}
-		out = append(out, project)
-	}
-	sort.Strings(out)
-	return out, nil
 }
 
 func sortedEntries(d map[string]Entry) []Entry {

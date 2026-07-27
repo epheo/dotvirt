@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/epheo/dotvirt/internal/cluster"
@@ -23,6 +24,16 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/reflect"
 )
+
+// kubedeschedulersGVR is the Kube Descheduler Operator's configuration CR, the
+// object behind dotvirt's DRS status plane. The CR is namespaced (to the
+// operator's install namespace) but watched across all namespaces so a
+// nonstandard install still surfaces.
+var kubedeschedulersGVR = schema.GroupVersionResource{
+	Group:    "operator.openshift.io",
+	Version:  "v1",
+	Resource: "kubedeschedulers",
+}
 
 // Snapshot holds the watched KubeDescheduler state. Build with New, start with
 // Run; Live is safe for concurrent callers.
@@ -59,11 +70,11 @@ func (s *Snapshot) Run(ctx context.Context) {
 		t := time.NewTicker(discoveryInterval)
 		defer t.Stop()
 		for {
-			if s.sa.HasKubeDeschedulerAPI() {
+			if s.sa.HasAPIResource(kubedeschedulersGVR) {
 				s.apiPresent.Store(true)
 				s.healthy.Store(true) // optimistic until a list/watch actually errors
 				store := reflect.NewStore(s.store, func() {}, func() { s.synced.Store(true) })
-				lw := reflect.TrackHealth(s.sa.KubeDeschedulerListWatch(), &s.healthy)
+				lw := reflect.TrackHealth(s.sa.DynamicListWatch(kubedeschedulersGVR), &s.healthy)
 				r := cache.NewReflector(lw, &unstructured.Unstructured{}, store, 0)
 				r.Run(ctx.Done()) // blocks until shutdown; owns its own relist/backoff
 				return

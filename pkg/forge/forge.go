@@ -61,24 +61,20 @@ type Factory struct {
 
 // NewFactory builds a Factory from the shared forge endpoint + a static token.
 // Returns nil when unconfigured so callers degrade to push-only. For a rotating
-// token (mounted file), use NewFactoryFn.
+// token (mounted file), use NewFactoryFnCA.
 func NewFactory(baseURL, token string, insecure bool) *Factory {
 	if token == "" {
 		return nil
 	}
-	return NewFactoryFn(baseURL, StaticToken(token), insecure)
+	return NewFactoryFnCA(baseURL, StaticToken(token), insecure, "")
 }
 
-// NewFactoryFn is NewFactory with a TokenSource resolved per request — so a
-// rotated token takes effect without restart. Returns nil when the base URL is
-// unset (forge disabled); a tokenFn that currently yields "" still builds a
-// Factory (the token may appear once the mounted secret is written).
-func NewFactoryFn(baseURL string, tokenFn TokenSource, insecure bool) *Factory {
-	return NewFactoryFnCA(baseURL, tokenFn, insecure, "")
-}
-
-// NewFactoryFnCA adds a PEM CA bundle: the no-insecure path for a managed forge
-// behind the cluster's ingress CA.
+// NewFactoryFnCA is NewFactory with a TokenSource resolved per request (so a
+// rotated token takes effect without restart) and an optional PEM CA bundle:
+// the no-insecure path for a managed forge behind the cluster's ingress CA.
+// Returns nil when the base URL is unset (forge disabled); a tokenFn that
+// currently yields "" still builds a Factory (the token may appear once the
+// mounted secret is written).
 func NewFactoryFnCA(baseURL string, tokenFn TokenSource, insecure bool, caFile string) *Factory {
 	if baseURL == "" || tokenFn == nil {
 		return nil

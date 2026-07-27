@@ -8,7 +8,6 @@
 	// content into the standard bottom bar.
 	let {
 		title,
-		subtitle = '',
 		size = 'md',
 		danger = false,
 		dismissable = true,
@@ -18,8 +17,6 @@
 		footer,
 	}: {
 		title: string;
-		// Muted suffix after the title (the NSX · vSphere vocabulary pairs).
-		subtitle?: string;
 		size?: 'md' | 'lg' | '3xl';
 		// Destructive dialogs render the title in red.
 		danger?: boolean;
@@ -101,7 +98,6 @@
 					: 'text-ink'}"
 			>
 				{#if icon}{@render icon()}{/if}{title}
-				{#if subtitle}<span class="font-normal text-ink-faint">· {subtitle}</span>{/if}
 			</h2>
 			<button
 				onclick={dismiss}

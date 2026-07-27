@@ -14,8 +14,6 @@
 		title,
 		size = 'md',
 		label,
-		busyLabel,
-		hint,
 		missing = [],
 		summary = '',
 		onsubmit,
@@ -27,8 +25,6 @@
 		title: string;
 		size?: 'md' | 'lg' | '3xl';
 		label: string;
-		busyLabel?: string;
-		hint?: string;
 		missing?: string[];
 		summary?: string;
 		onsubmit: () => Promise<void>;
@@ -65,8 +61,6 @@
 	{#snippet footer()}
 		<StageFooter
 			{label}
-			{busyLabel}
-			{hint}
 			{summary}
 			{missing}
 			disabled={missing.length > 0}

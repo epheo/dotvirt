@@ -18,11 +18,9 @@
 	let {
 		namespaces,
 		onclose,
-		ondone,
 	}: {
 		namespaces: string[];
 		onclose: () => void;
-		ondone?: () => void;
 	} = $props();
 
 	type Stage = 'form' | 'creating' | 'preparing' | 'uploading' | 'importing' | 'done' | 'error';
@@ -131,7 +129,6 @@
 			stage = 'importing';
 			await pollUntil((p) => p === 'Succeeded', 'CDI to finish importing');
 			stage = 'done';
-			ondone?.();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
 			error = friendlyError(e);

@@ -38,7 +38,6 @@ var Required = []Dependency{
 
 // Result is the probe outcome.
 type Result struct {
-	Present     map[string]bool // Dependency.Label -> present
 	MissingHard []string
 	MissingSoft []string
 }
@@ -69,10 +68,9 @@ func Probe(cfg *rest.Config) (Result, error) {
 		}
 	}
 
-	res := Result{Present: map[string]bool{}}
+	var res Result
 	for _, d := range Required {
 		ok := served[d.Group+"/"+d.Resource]
-		res.Present[d.Label] = ok
 		switch {
 		case ok:
 		case d.Hard:

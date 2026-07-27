@@ -6,8 +6,6 @@
 	type Tab = {
 		id: string;
 		label: string;
-		title?: string;
-		disabled?: boolean;
 		count?: number;
 		countTone?: 'neutral' | 'warn';
 	};
@@ -43,17 +41,12 @@
 
 <nav class="flex {variant === 'underline' ? 'gap-1 text-sm' : 'flex-wrap gap-1'} {cls}">
 	{#each tabs as t (t.id)}
-		{#if href && !t.disabled}
-			<a href={href(t.id)} data-sveltekit-replacestate title={t.title} class={itemClass(t)}>
+		{#if href}
+			<a href={href(t.id)} data-sveltekit-replacestate class={itemClass(t)}>
 				{t.label}
 			</a>
 		{:else}
-			<button
-				onclick={() => onchange?.(t.id)}
-				disabled={t.disabled}
-				title={t.title}
-				class="{itemClass(t)} disabled:cursor-not-allowed disabled:text-ink-faint"
-			>
+			<button onclick={() => onchange?.(t.id)} class={itemClass(t)}>
 				{t.label}
 				{#if t.count !== undefined}
 					<span
