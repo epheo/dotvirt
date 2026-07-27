@@ -405,9 +405,10 @@ func withCORS(origin string, next http.Handler) http.Handler {
 	})
 }
 
-// readAll reads a request body with a sane size cap.
+// readAll reads a request body. withBodyLimit caps it; a second cap here would
+// truncate silently instead of letting MaxBytesReader error.
 func readAll(r *http.Request) ([]byte, error) {
-	return io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MiB
+	return io.ReadAll(r.Body)
 }
 
 // withBodyLimit caps every request body so a decoder errors instead of

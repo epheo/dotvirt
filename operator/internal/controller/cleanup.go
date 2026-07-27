@@ -32,7 +32,7 @@ func (r *DotvirtReconciler) finalize(ctx context.Context, dv *dotvirtv1alpha1.Do
 // namespace resources provisioned for this instance (the ones a namespaced CR
 // can't ownerRef). Not-found and missing-CRD are tolerated so cleanup is idempotent.
 func (r *DotvirtReconciler) cleanupClusterResources(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
-	sel := client.MatchingLabels{"dotvirt.io/instance": dv.Name}
+	sel := client.MatchingLabels{install.InstanceLabel: dv.Name}
 	// Only the ClusterRoleBindings are ours to delete — the operand ClusterRoles are
 	// static, OLM/kustomize-owned (config/rbac/operand_roles.yaml) and shared.
 	if err := r.DeleteAllOf(ctx, &rbacv1.ClusterRoleBinding{}, sel); err != nil && !apierrors.IsNotFound(err) {

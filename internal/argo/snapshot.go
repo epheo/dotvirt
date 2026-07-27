@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -145,7 +146,7 @@ func (s *Snapshot) ForeignApps(ownRepo string) map[string]bool {
 		if !ok {
 			continue
 		}
-		if own != "" && forge.NormalizeRepoURL(nestedString(u.Object, "spec", "source", "repoURL")) == own {
+		if own != "" && slices.Contains(appRepos(u.Object), own) {
 			continue
 		}
 		out[u.GetName()] = true
@@ -171,7 +172,7 @@ func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.Object
 	var out []model.ObjectRef
 	for _, obj := range s.apps.List() {
 		u, ok := obj.(*unstructured.Unstructured)
-		if !ok || forge.NormalizeRepoURL(nestedString(u.Object, "spec", "source", "repoURL")) != own {
+		if !ok || !slices.Contains(appRepos(u.Object), own) {
 			continue
 		}
 		resources, found, err := unstructured.NestedSlice(u.Object, "status", "resources")
@@ -437,19 +438,10 @@ func appManagesVM(app map[string]any, namespace, name string) bool {
 	return false
 }
 
-// appSourcesAny reports whether app's source(s) reference any repo in want (keyed by
-// canonical URL). Handles both single-source (spec.source) and multi-source
-// (spec.sources[]) Applications.
+// appSourcesAny reports whether the app sources any repo in want (canonical URLs).
 func appSourcesAny(app map[string]any, want map[string]bool) bool {
-	if u, found, _ := unstructured.NestedString(app, "spec", "source", "repoURL"); found && want[forge.NormalizeRepoURL(u)] {
-		return true
-	}
-	sources, found, _ := unstructured.NestedSlice(app, "spec", "sources")
-	if !found {
-		return false
-	}
-	for _, raw := range sources {
-		if src, ok := raw.(map[string]any); ok && want[forge.NormalizeRepoURL(asString(src, "repoURL"))] {
+	for _, r := range appRepos(app) {
+		if want[r] {
 			return true
 		}
 	}

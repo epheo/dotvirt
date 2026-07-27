@@ -80,10 +80,10 @@ func run() error {
 	defer stop()
 
 	// The one change bus: every source (k8s/argo reflectors, the git poll/webhook,
-	// the proposals refresher) publishes a typed event here; every rebuild path (the
-	// hub, the proposals refresher, the visibility-cache invalidator)
-	// subscribes to the kinds it needs. One fan-out for all of them — no source-
-	// specific channels, no single-consumer constraint.
+	// the proposals refresher) publishes a typed event here; every rebuild path
+	// (the hub, the proposals refresher) subscribes to the kinds it needs. One
+	// fan-out for all of them, no source-specific channels, no single-consumer
+	// constraint.
 	bus := eventbus.New()
 
 	// Per-project git + the Forge API share ONE token source (resolved per call, so

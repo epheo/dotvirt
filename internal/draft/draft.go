@@ -56,6 +56,39 @@ const (
 // proposal.
 func (r Resource) Atomic() bool { return r == ResourceDRS }
 
+// CreateLabel names a create of this resource in the Changes pane. Lives beside
+// the consts so a new resource cannot ship rendering under the VM-adoption default.
+func (r Resource) CreateLabel() string {
+	switch r {
+	case ResourceNetwork:
+		return "Create network"
+	case ResourceUplink:
+		return "Create uplink"
+	case ResourceNamespace:
+		return "Create namespace"
+	case ResourceRoleBinding:
+		return "Grant tenant access"
+	case ResourceEgressFirewall:
+		return "Create gateway firewall"
+	case ResourceEgressIP:
+		return "Create SNAT pool"
+	case ResourceExternalRoute:
+		return "Create external route"
+	case ResourceNetworkPolicy:
+		return "Create distributed firewall policy"
+	case ResourceAdminNetworkPolicy:
+		return "Create admin firewall policy"
+	case ResourceBaselineAdminNetworkPolicy:
+		return "Create baseline firewall policy"
+	case ResourceDRS:
+		return "Configure DRS"
+	case ResourceTemplate:
+		return "Save as template"
+	default:
+		return "Adopt VM from cluster"
+	}
+}
+
 // Entry is one pending change, keyed by resource+namespace/name within its
 // (user,project).
 type Entry struct {

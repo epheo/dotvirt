@@ -45,22 +45,8 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 			item.Changes = manifest.ChangesForEdit(current, *e.Edit)
 		case draft.KindCreate:
 			if e.Manifest != "" {
-				// A verbatim-manifest create: a network (UDN/CUDN), an uplink (NNCP),
-				// a saved template, a VM rendered from a template, or a VM adopted
-				// from the cluster. The manifest IS the change.
-				field, to := "Adopt VM from cluster", e.Namespace+"/"+e.Name
-				switch e.Resource {
-				case draft.ResourceNetwork:
-					field = "Create network"
-				case draft.ResourceUplink:
-					field = "Create uplink"
-				case draft.ResourceNamespace:
-					field = "Create namespace"
-				case draft.ResourceDRS:
-					field = "Configure DRS"
-				case draft.ResourceTemplate:
-					field = "Save as template"
-				}
+				// A verbatim-manifest create: the manifest IS the change.
+				field, to := e.Resource.CreateLabel(), e.Namespace+"/"+e.Name
 				if e.FromTemplate != "" {
 					field = "Deploy from template " + e.FromTemplate
 				}
@@ -120,28 +106,17 @@ func (c *Coordinator) pruneWarning(proj project.ProjectInfo, entries []draft.Ent
 }
 
 // entryRefs: what a draft entry speaks for. Manifest entries declare their
-// documents. A delete counts: that prune is intended. Kinds with no prunable
-// tenant form map to nothing.
+// documents. A delete counts: that prune is intended. Only VM entries exist
+// without a manifest (network and policy changes always carry one), so anything
+// else maps to nothing.
 func entryRefs(e draft.Entry) []model.ObjectRef {
 	if e.Manifest != "" {
 		return git.DeclaredRefs(e.SourceFile, []byte(e.Manifest))
 	}
-	var kind string
-	switch e.Resource {
-	case "", draft.ResourceVM:
-		kind = "VirtualMachine"
-	case draft.ResourceNetwork:
-		kind = "UserDefinedNetwork"
-	case draft.ResourceEgressFirewall:
-		kind = "EgressFirewall"
-	case draft.ResourceNetworkPolicy:
-		kind = "NetworkPolicy"
-	case draft.ResourceRoleBinding:
-		kind = "RoleBinding"
-	default:
-		return nil
+	if e.Resource == "" || e.Resource == draft.ResourceVM {
+		return []model.ObjectRef{{Kind: "VirtualMachine", Namespace: e.Namespace, Name: e.Name}}
 	}
-	return []model.ObjectRef{{Kind: kind, Namespace: e.Namespace, Name: e.Name}}
+	return nil
 }
 
 // JoinWarning folds non-fatal notes into DraftView's single Warning string.

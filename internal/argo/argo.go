@@ -212,22 +212,30 @@ func appSyncFromApps(objs []any) map[string]model.ProjectSync {
 	return out
 }
 
-// appRepo is the Application's canonical primary repoURL — spec.source.repoURL, or the
-// first spec.sources[] entry for a multi-source app — the key tying an Application to
-// its dotvirt project (matched against a normalized project.Repo).
-func appRepo(app map[string]any) string {
+// appRepos lists the Application's canonical source repo URLs: spec.source.repoURL
+// plus every spec.sources[] entry. Every "does this app source repo X" question must
+// go through this list, or multi-source Applications fall out of the answer.
+func appRepos(app map[string]any) []string {
+	var out []string
 	if u := nestedString(app, "spec", "source", "repoURL"); u != "" {
-		return forge.NormalizeRepoURL(u)
+		out = append(out, forge.NormalizeRepoURL(u))
 	}
-	sources, found, _ := unstructured.NestedSlice(app, "spec", "sources")
-	if found {
-		for _, raw := range sources {
-			if src, ok := raw.(map[string]any); ok {
-				if u := asString(src, "repoURL"); u != "" {
-					return forge.NormalizeRepoURL(u)
-				}
+	sources, _, _ := unstructured.NestedSlice(app, "spec", "sources")
+	for _, raw := range sources {
+		if src, ok := raw.(map[string]any); ok {
+			if u := asString(src, "repoURL"); u != "" {
+				out = append(out, forge.NormalizeRepoURL(u))
 			}
 		}
+	}
+	return out
+}
+
+// appRepo is the Application's canonical primary repoURL, the key tying an
+// Application to its dotvirt project (matched against a normalized project.Repo).
+func appRepo(app map[string]any) string {
+	if rs := appRepos(app); len(rs) > 0 {
+		return rs[0]
 	}
 	return ""
 }

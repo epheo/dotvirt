@@ -159,7 +159,12 @@ func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvi
 	}
 	depRes, err := probe(r.Config)
 	if err != nil {
+		// A failed probe proves nothing about the prerequisites; proceeding would
+		// report "all dependencies present" from the zero result.
 		logf.FromContext(ctx).Error(err, "dependency probe failed")
+		dv.Status.ObservedGeneration = dv.Generation
+		return r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionDependenciesReady, "ProbeFailed",
+			err.Error(), dotvirtv1alpha1.PhaseBlockedOnDependencies, time.Minute)
 	}
 	if len(depRes.MissingHard) > 0 {
 		dv.Status.ObservedGeneration = dv.Generation

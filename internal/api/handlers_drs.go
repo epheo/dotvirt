@@ -66,7 +66,7 @@ func (s *Server) handleDRSEnable(w http.ResponseWriter, r *http.Request) {
 		InstallPSI bool `json:"installPSI"`
 	}
 	_ = json.Unmarshal(raw, &peek)
-	if peek.InstallPSI && !sc.cluster.CanCreateClusterResource(r.Context(), "machineconfiguration.openshift.io", "machineconfigs") {
+	if peek.InstallPSI && !sc.cluster.CanCreateClusterResource(r.Context(), ssarMachineCfg.group, ssarMachineCfg.resource) {
 		http.Error(w, "not authorized to create machineconfigs", http.StatusForbidden)
 		return
 	}
