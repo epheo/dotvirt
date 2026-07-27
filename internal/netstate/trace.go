@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/reflect"
 )
 
 // Trace simulates one flow through the policy planes: the same pure in-memory
@@ -233,7 +234,7 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 	// the tier default-denies the flow.
 	var selecting []*unstructured.Unstructured
 	definiteSel := 0
-	for _, u := range listOf(s.netpol) {
+	for _, u := range reflect.List(s.netpol) {
 		if u.GetNamespace() != subject.Namespace {
 			continue
 		}
@@ -285,7 +286,7 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 	}
 
 	// Baseline tier: reached only when nothing above decided.
-	if res := adminTier(listOf(s.banp), true); res != nil {
+	if res := adminTier(reflect.List(s.banp), true); res != nil {
 		return *res
 	}
 
@@ -302,7 +303,7 @@ func (s *Snapshot) gatewayWalk(ns, dstIP, protocol string, port int) walkResult 
 	var steps []model.TraceStep
 	var condActions []string
 	var fw *unstructured.Unstructured
-	for _, u := range listOf(s.egressfw) {
+	for _, u := range reflect.List(s.egressfw) {
 		if u.GetNamespace() != ns {
 			continue
 		}
@@ -368,7 +369,7 @@ func (s *Snapshot) gatewayWalk(ns, dstIP, protocol string, port int) walkResult 
 // never gate the verdict.
 func (s *Snapshot) egressPlaneSteps(src TraceWorkload) []model.TraceStep {
 	var steps []model.TraceStep
-	for _, u := range listOf(s.egressip) {
+	for _, u := range reflect.List(s.egressip) {
 		nsSel, _, _ := unstructured.NestedMap(u.Object, "spec", "namespaceSelector")
 		podSel, _, _ := unstructured.NestedMap(u.Object, "spec", "podSelector")
 		m := combineMatch(matchSelector(nsSel, src.NSLabels), podMatch(podSel, src.PodLabels, true))
@@ -384,7 +385,7 @@ func (s *Snapshot) egressPlaneSteps(src TraceWorkload) []model.TraceStep {
 		steps = append(steps, model.TraceStep{Stage: "snat", Policy: &pol, Rule: rv, Action: "SNAT",
 			Conditional: m == matchCond, Note: "Egress leaves source-NATed to this pool."})
 	}
-	for _, u := range listOf(s.extroute) {
+	for _, u := range reflect.List(s.extroute) {
 		sel, _, _ := unstructured.NestedMap(u.Object, "spec", "from", "namespaceSelector")
 		m := matchSelector(sel, src.NSLabels)
 		if m == matchNo {
@@ -468,7 +469,7 @@ func (s *Snapshot) primaryOf(w TraceWorkload) (key, display string) {
 // the namespace, a Primary-role CUDN whose generated NAD sits there, else the
 // cluster default network.
 func (s *Snapshot) primaryDomain(ns string) (key, display string) {
-	for _, u := range listOf(s.udn) {
+	for _, u := range reflect.List(s.udn) {
 		if u.GetNamespace() != ns {
 			continue
 		}
@@ -478,13 +479,13 @@ func (s *Snapshot) primaryDomain(ns string) (key, display string) {
 			return "udn:" + ns + "/" + u.GetName(), "network " + u.GetName()
 		}
 	}
-	for _, u := range listOf(s.cudn) {
+	for _, u := range reflect.List(s.cudn) {
 		topology, _, _ := unstructured.NestedString(u.Object, "spec", "network", "topology")
 		role, _, _ := unstructured.NestedString(u.Object, "spec", "network", strings.ToLower(topology), "role")
 		if !strings.EqualFold(role, "Primary") {
 			continue
 		}
-		for _, nad := range listOf(s.nad) {
+		for _, nad := range reflect.List(s.nad) {
 			if nad.GetNamespace() != ns {
 				continue
 			}
@@ -562,7 +563,7 @@ func (s *Snapshot) isLocalnet(ref string) bool {
 // sortedANPs returns the admin policies in precedence order (priority, name) —
 // the order their rules are evaluated in.
 func (s *Snapshot) sortedANPs() []*unstructured.Unstructured {
-	anps := listOf(s.anp)
+	anps := reflect.List(s.anp)
 	sort.Slice(anps, func(i, j int) bool {
 		pi, _, _ := unstructured.NestedInt64(anps[i].Object, "spec", "priority")
 		pj, _, _ := unstructured.NestedInt64(anps[j].Object, "spec", "priority")

@@ -11,7 +11,6 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -20,13 +19,14 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/epheo/dotvirt/internal/tlsconf"
 )
 
 // OAuthConfig wires the OpenShift OAuthClient dotvirt was registered as.
@@ -71,13 +71,7 @@ func NewOAuth(cfg OAuthConfig, saKube kubernetes.Interface, auth *Authenticator)
 	if cfg.CAFile != "" || cfg.InsecureTLS {
 		tlsCfg := &tls.Config{InsecureSkipVerify: cfg.InsecureTLS} //nolint:gosec // explicit dev opt-in
 		if cfg.CAFile != "" {
-			// Tolerant: a lagging CA mount must not take the console down for an SSO
-			// nicety; the system pool keeps token login working and SSO fails legibly.
-			if pem, err := os.ReadFile(cfg.CAFile); err != nil {
-				log.Printf("oauth: CA %s unreadable (%v); staying on the system trust pool", cfg.CAFile, err)
-			} else if pool := x509.NewCertPool(); !pool.AppendCertsFromPEM(pem) {
-				log.Printf("oauth: CA %s holds no certificates; staying on the system trust pool", cfg.CAFile)
-			} else {
+			if pool := tlsconf.RootCAs("oauth", cfg.CAFile); pool != nil {
 				tlsCfg.RootCAs = pool
 			}
 		}

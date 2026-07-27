@@ -6,15 +6,15 @@ package forge
 import (
 	"bytes"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/epheo/dotvirt/internal/tlsconf"
 )
 
 // Client is a Forgejo API client scoped to one repository.
@@ -142,14 +142,8 @@ func httpClient(insecure bool, caFile string) *http.Client {
 		}
 		return hc
 	}
-	// Tolerant: a bad bundle logs and keeps the system pool, so a lagging CA
-	// mount degrades to a legible TLS error, never a crash.
 	if caFile != "" {
-		if pem, err := os.ReadFile(caFile); err != nil {
-			log.Printf("forge: CA %s unreadable (%v); staying on the system trust pool", caFile, err)
-		} else if pool := x509.NewCertPool(); !pool.AppendCertsFromPEM(pem) {
-			log.Printf("forge: CA %s holds no certificates; staying on the system trust pool", caFile)
-		} else {
+		if pool := tlsconf.RootCAs("forge", caFile); pool != nil {
 			hc.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}
 		}
 	}

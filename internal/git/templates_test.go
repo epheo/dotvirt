@@ -24,7 +24,7 @@ func TestTemplatesDirSplit(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := read.Refresh(); err != nil {
+	if err := read.refresh(); err != nil {
 		t.Fatal(err)
 	}
 

@@ -37,7 +37,7 @@ type Repo struct {
 	// whole-tree walk+parse runs once per branch per actual content change instead of
 	// once per project per identity per inventory build. Self-invalidating: when the
 	// fetcher advances the mirror the branch hash moves, so the next read misses. The
-	// hash is read from the local mirror (no network), unlike HeadsSignature.
+	// hash is read from the local mirror (no network), unlike headsSignature.
 	parseMu    sync.Mutex
 	parseCache map[string]branchParse
 }
@@ -108,7 +108,7 @@ const fetchTimeout = 30 * time.Second
 // Refresh updates the cached clone's branch refs from the remote. This is the
 // single point of network freshness: the background fetcher calls it on a
 // schedule, and it's nudged after dotvirt's own pushes. Reads never call it.
-func (r *Repo) Refresh() error {
+func (r *Repo) refresh() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
@@ -124,13 +124,13 @@ func (r *Repo) Refresh() error {
 	return nil
 }
 
-// HeadsSignature refreshes from the remote and returns a stable string
+// headsSignature refreshes from the remote and returns a stable string
 // summarizing all branch heads (name+hash). A change means some branch moved.
 // This is the background fetcher's entry point: it both fetches (the single
 // network refresh) and reports whether anything changed, so the poll loop can
 // push fresh inventory to subscribers.
-func (r *Repo) HeadsSignature() (string, error) {
-	if err := r.Refresh(); err != nil {
+func (r *Repo) headsSignature() (string, error) {
+	if err := r.refresh(); err != nil {
 		return "", err
 	}
 	r.mu.Lock()

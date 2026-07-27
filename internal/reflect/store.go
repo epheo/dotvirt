@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
@@ -141,3 +142,26 @@ func (s *signalStore) ListKeys() []string                 { return nil }
 func (s *signalStore) Get(any) (any, bool, error)         { return nil, false, nil }
 func (s *signalStore) GetByKey(string) (any, bool, error) { return nil, false, nil }
 func (s *signalStore) Resync() error                      { return nil }
+
+// List returns idx's objects as typed unstructured pointers; non-unstructured
+// entries (there are none in practice) are skipped.
+func List(idx cache.Indexer) []*unstructured.Unstructured {
+	all := idx.List()
+	out := make([]*unstructured.Unstructured, 0, len(all))
+	for _, obj := range all {
+		if u, ok := obj.(*unstructured.Unstructured); ok {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// Get returns the unstructured object stored under key ("ns/name" or "name").
+func Get(idx cache.Indexer, key string) (*unstructured.Unstructured, bool) {
+	obj, ok, err := idx.GetByKey(key)
+	if err != nil || !ok {
+		return nil, false
+	}
+	u, ok := obj.(*unstructured.Unstructured)
+	return u, ok
+}

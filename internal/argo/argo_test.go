@@ -11,7 +11,7 @@ import (
 
 // driftFromApps is the composition the snapshot performs; the VM-view tests
 // exercise it whole.
-func driftFromApps(objs []any) map[string]Drift { return vmView(resourceDriftFromApps(objs)) }
+func driftFromApps(objs []*unstructured.Unstructured) map[string]Drift { return vmView(resourceDriftFromApps(objs)) }
 
 // app builds an unstructured ArgoCD Application with the given status.resources.
 func app(ns, name string, resources []any) *unstructured.Unstructured {
@@ -35,7 +35,7 @@ func vmResource(ns, name, status, health string) any {
 }
 
 func TestDriftFromApps(t *testing.T) {
-	drift := driftFromApps([]any{
+	drift := driftFromApps([]*unstructured.Unstructured{
 		app("openshift-gitops", "managed", []any{
 			vmResource("prod", "synced-vm", "Synced", "Healthy"),
 			vmResource("prod", "drifted-vm", "OutOfSync", "Degraded"),
@@ -69,7 +69,7 @@ func udnResource(ns, name, status, health string) any {
 // TestResourceDriftAllKinds: the general per-object map keeps every kind (so a segment
 // has drift), while the VM view still filters to VirtualMachine only.
 func TestResourceDriftAllKinds(t *testing.T) {
-	objs := []any{app("openshift-gitops", "drs-lab", []any{
+	objs := []*unstructured.Unstructured{app("openshift-gitops", "drs-lab", []any{
 		vmResource("drs-lab", "web", "Synced", "Healthy"),
 		udnResource("drs-lab", "db-net", "OutOfSync", "Progressing"),
 	})}
@@ -92,7 +92,7 @@ func TestResourceDriftAllKinds(t *testing.T) {
 
 // A segment apply error (from syncResult) attaches to the general map just like a VM's.
 func TestResourceDriftSegmentSyncMessage(t *testing.T) {
-	all := resourceDriftFromApps([]any{appWithSyncResult("openshift-gitops", "net",
+	all := resourceDriftFromApps([]*unstructured.Unstructured{appWithSyncResult("openshift-gitops", "net",
 		[]any{udnResource("drs-lab", "db-net", "OutOfSync", "Degraded")},
 		[]any{map[string]any{"group": "k8s.ovn.org", "kind": "UserDefinedNetwork",
 			"namespace": "drs-lab", "name": "db-net", "status": "SyncFailed",
@@ -120,7 +120,7 @@ func appWithSync(name, repo, sync, health, opPhase, opMsg string) *unstructured.
 }
 
 func TestAppSyncFromApps(t *testing.T) {
-	sync := appSyncFromApps([]any{
+	sync := appSyncFromApps([]*unstructured.Unstructured{
 		appWithSync("drs-lab", "https://forge.example/dotvirt/drs-lab.git",
 			"Synced", "Healthy", "Succeeded", "successfully synced (all tasks run)"),
 		appWithSync("fewa", "https://forge.example/dotvirt/fewa.git",
@@ -161,10 +161,10 @@ func TestAppSyncRollupCoversNonVMKinds(t *testing.T) {
 			"namespace": "drs-lab", "name": "db-net", "status": "OutOfSync"},
 	}
 
-	if d := driftFromApps([]any{a}); len(d) != 0 {
+	if d := driftFromApps([]*unstructured.Unstructured{a}); len(d) != 0 {
 		t.Fatalf("per-VM drift should be empty for a VM-less app, got %v", d)
 	}
-	sync := appSyncFromApps([]any{a})
+	sync := appSyncFromApps([]*unstructured.Unstructured{a})
 	got := sync[forge.NormalizeRepoURL("https://forge.example/dotvirt/net.git")]
 	if got.Sync != model.SyncOutOfSync || got.Operation != "Running" {
 		t.Errorf("segment-only app must roll up OutOfSync/Running at the project level, got %+v", got)
@@ -186,7 +186,7 @@ func appWithSyncResult(ns, name string, resources, syncResult []any) *unstructur
 }
 
 func TestDriftFromAppsSyncMessage(t *testing.T) {
-	drift := driftFromApps([]any{appWithSyncResult("openshift-gitops", "managed",
+	drift := driftFromApps([]*unstructured.Unstructured{appWithSyncResult("openshift-gitops", "managed",
 		[]any{
 			vmResource("prod", "bad-vm", "OutOfSync", "Healthy"),
 			vmResource("prod", "ok-vm", "Synced", "Healthy"),
@@ -215,7 +215,7 @@ func TestDriftFromAppsSyncMessage(t *testing.T) {
 // synthesized into the drift map with a zero Sync — it stays absent, so the caller
 // reports NotTracked rather than handing the frontend an empty sync status.
 func TestDriftFromAppsEmptySyncSkipped(t *testing.T) {
-	drift := driftFromApps([]any{appWithSyncResult("openshift-gitops", "managed",
+	drift := driftFromApps([]*unstructured.Unstructured{appWithSyncResult("openshift-gitops", "managed",
 		// Live tree is empty — the object never got created.
 		[]any{},
 		[]any{
@@ -250,7 +250,7 @@ func TestAppSyncSurfacesErrorCondition(t *testing.T) {
 		},
 	}}
 
-	got := appSyncFromApps([]any{app})[forge.NormalizeRepoURL("https://forge.example/dotvirt/gone.git")]
+	got := appSyncFromApps([]*unstructured.Unstructured{app})[forge.NormalizeRepoURL("https://forge.example/dotvirt/gone.git")]
 	if got.SyncError != "repository not found" {
 		t.Errorf("ComparisonError not surfaced: %q", got.SyncError)
 	}
@@ -265,7 +265,7 @@ func TestAppSyncCleanAppHasNoError(t *testing.T) {
 	app.Object["status"].(map[string]any)["conditions"] = []any{
 		map[string]any{"type": "SharedResourceWarning", "message": "not an error"},
 	}
-	if got := appSyncFromApps([]any{app})[forge.NormalizeRepoURL("https://forge.example/dotvirt/ok.git")]; got.SyncError != "" {
+	if got := appSyncFromApps([]*unstructured.Unstructured{app})[forge.NormalizeRepoURL("https://forge.example/dotvirt/ok.git")]; got.SyncError != "" {
 		t.Errorf("clean app carries SyncError %q", got.SyncError)
 	}
 }

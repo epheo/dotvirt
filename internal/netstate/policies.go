@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/reflect"
 )
 
 // Policies renders the policy plane from the watch-fed stores — the same pure
@@ -19,22 +20,22 @@ import (
 // cluster-tier rows on authoring authority.
 func (s *Snapshot) Policies() []model.Policy {
 	out := []model.Policy{}
-	for _, u := range listOf(s.netpol) {
+	for _, u := range reflect.List(s.netpol) {
 		out = append(out, policyFromNetpol(u))
 	}
-	for _, u := range listOf(s.anp) {
+	for _, u := range reflect.List(s.anp) {
 		out = append(out, policyFromANP(u, false))
 	}
-	for _, u := range listOf(s.banp) {
+	for _, u := range reflect.List(s.banp) {
 		out = append(out, policyFromANP(u, true))
 	}
-	for _, u := range listOf(s.egressfw) {
+	for _, u := range reflect.List(s.egressfw) {
 		out = append(out, policyFromEgressFirewall(u))
 	}
-	for _, u := range listOf(s.egressip) {
+	for _, u := range reflect.List(s.egressip) {
 		out = append(out, policyFromEgressIP(u))
 	}
-	for _, u := range listOf(s.extroute) {
+	for _, u := range reflect.List(s.extroute) {
 		out = append(out, policyFromExtRoute(u))
 	}
 	// One deterministic order for every consumer: tier (kind), then ANP

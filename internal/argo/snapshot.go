@@ -23,7 +23,7 @@ import (
 // Snapshot is the SA-maintained, watch-fed in-memory view of every ArgoCD
 // Application — the drift plane's equivalent of clusterstate.State. A single
 // reflector keeps the store current and publishes DriftChanged on the shared bus so
-// the hub rebroadcasts; reads (Drift, ManagingApp) are lock-free store scans, never
+// the hub rebroadcasts; reads (Drift, managingApp) are lock-free store scans, never
 // a cluster LIST. The store is always current post-sync, so drift is never staler
 // than the watch delivers.
 type Snapshot struct {
@@ -72,7 +72,7 @@ func (s *Snapshot) Run(ctx context.Context) {
 		func() { s.driftDirty.Store(true); s.bus.Publish(eventbus.DriftChanged) },
 		func() { s.synced.Store(true); close(s.syncedCh) }, // onSynced fires once → close is safe
 	)
-	lw := reflect.TrackHealth(s.sa.ApplicationsListWatch(), &s.healthy)
+	lw := reflect.TrackHealth(s.sa.applicationsListWatch(), &s.healthy)
 	r := cache.NewReflector(lw, &unstructured.Unstructured{}, store, 0)
 	go r.Run(ctx.Done())
 }
@@ -141,11 +141,7 @@ func (s *Snapshot) ForeignApps(ownRepo string) map[string]bool {
 	}
 	own := forge.NormalizeRepoURL(ownRepo)
 	out := map[string]bool{}
-	for _, obj := range s.apps.List() {
-		u, ok := obj.(*unstructured.Unstructured)
-		if !ok {
-			continue
-		}
+	for _, u := range reflect.List(s.apps) {
 		if own != "" && slices.Contains(appRepos(u.Object), own) {
 			continue
 		}
@@ -170,9 +166,8 @@ func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.Object
 		return nil
 	}
 	var out []model.ObjectRef
-	for _, obj := range s.apps.List() {
-		u, ok := obj.(*unstructured.Unstructured)
-		if !ok || !slices.Contains(appRepos(u.Object), own) {
+	for _, u := range reflect.List(s.apps) {
+		if !slices.Contains(appRepos(u.Object), own) {
 			continue
 		}
 		resources, found, err := unstructured.NestedSlice(u.Object, "status", "resources")
@@ -253,7 +248,7 @@ func (s *Snapshot) rebuildLocked() {
 	if s.resourceCache != nil && !s.driftDirty.Swap(false) {
 		return
 	}
-	objs := s.apps.List()
+	objs := reflect.List(s.apps)
 	sort.Slice(objs, func(i, j int) bool { return appKey(objs[i]) < appKey(objs[j]) })
 	prev := s.resourceCache
 	s.resourceCache = resourceDriftFromApps(objs)
@@ -265,11 +260,8 @@ func (s *Snapshot) rebuildLocked() {
 }
 
 // appKey is an Application's stable sort key for the deterministic rebuild scan.
-func appKey(obj any) string {
-	if u, ok := obj.(*unstructured.Unstructured); ok {
-		return u.GetNamespace() + "/" + u.GetName()
-	}
-	return ""
+func appKey(u *unstructured.Unstructured) string {
+	return u.GetNamespace() + "/" + u.GetName()
 }
 
 // nonVMEqual reports whether the non-VM drift entries of two builds match. VM entries
@@ -308,19 +300,15 @@ type AppRef struct {
 	TargetRevision string
 }
 
-// ManagingApp returns the Application whose status.resources[] includes the
+// managingApp returns the Application whose status.resources[] includes the
 // VirtualMachine namespace/name, read from the in-memory store (no cluster call).
 // ok=false if the snapshot hasn't synced or no Application manages the VM — the
 // caller (Resync) then falls back to a live lookup.
-func (s *Snapshot) ManagingApp(namespace, name string) (AppRef, bool) {
+func (s *Snapshot) managingApp(namespace, name string) (AppRef, bool) {
 	if !s.synced.Load() {
 		return AppRef{}, false
 	}
-	for _, obj := range s.apps.List() {
-		app, ok := obj.(*unstructured.Unstructured)
-		if !ok {
-			continue
-		}
+	for _, app := range reflect.List(s.apps) {
 		if appManagesVM(app.Object, namespace, name) {
 			return appRefOf(app), true
 		}
@@ -336,9 +324,9 @@ func (s *Snapshot) ManagingApp(namespace, name string) (AppRef, bool) {
 // Argo API token. (Distinct from RefreshForRepo: this is the user's explicit
 // per-VM "sync now", which must work even when auto-sync is off.)
 func (s *Snapshot) Resync(ctx context.Context, namespace, name string) (model.ResyncResult, error) {
-	ref, ok := s.ManagingApp(namespace, name)
+	ref, ok := s.managingApp(namespace, name)
 	if !ok {
-		ref, ok = s.sa.findManagingAppLive(ctx, namespace, name)
+		ref, ok = s.sa.findmanagingAppLive(ctx, namespace, name)
 		if !ok {
 			return model.ResyncResult{}, fmt.Errorf("no ArgoCD Application manages %s/%s", namespace, name)
 		}
@@ -378,9 +366,8 @@ func (s *Snapshot) RefreshForRepo(ctx context.Context, repoURLs ...string) {
 	if len(want) == 0 {
 		return
 	}
-	for _, obj := range s.apps.List() {
-		app, ok := obj.(*unstructured.Unstructured)
-		if !ok || !appSourcesAny(app.Object, want) {
+	for _, app := range reflect.List(s.apps) {
+		if !appSourcesAny(app.Object, want) {
 			continue
 		}
 		patch := []byte(`{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}`)
@@ -396,9 +383,9 @@ func (c *Client) patchApp(ctx context.Context, namespace, name string, patch []b
 	return c.dyn.Resource(applicationsGVR).Namespace(namespace).Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
 }
 
-// findManagingAppLive is ManagingApp's cluster fallback: a one-shot LIST used only
+// findmanagingAppLive is managingApp's cluster fallback: a one-shot LIST used only
 // when the snapshot hasn't synced yet, so an early resync still resolves its app.
-func (c *Client) findManagingAppLive(ctx context.Context, namespace, name string) (AppRef, bool) {
+func (c *Client) findmanagingAppLive(ctx context.Context, namespace, name string) (AppRef, bool) {
 	apps, err := c.dyn.Resource(applicationsGVR).Namespace(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return AppRef{}, false

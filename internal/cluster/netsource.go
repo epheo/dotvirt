@@ -44,24 +44,25 @@ func (c *Client) HasAPIResource(gvr schema.GroupVersionResource) bool {
 	return false
 }
 
-// NodeInfo is a node's name + labels — enough for netstate to compute which nodes an
-// uplink (an NNCP nodeSelector, or all of them for br-ex) covers.
-type NodeInfo struct {
+// NodeLabels is a node's name + labels — enough for netstate to compute which nodes
+// an uplink (an NNCP nodeSelector, or all of them for br-ex) covers. Distinct from
+// model.NodeInfo (the UI's node detail) and model.Node (the inventory row).
+type NodeLabels struct {
 	Name   string
 	Labels map[string]string
 }
 
-// NodeInfos lists every node's name+labels under this client (nodes:list — no watch).
-// netstate refreshes a cache from this off the request path, so uplink node membership
-// needs neither a per-request node LIST nor a nodes:watch grant.
-func (c *Client) NodeInfos(ctx context.Context) ([]NodeInfo, error) {
+// ListNodeLabels lists every node's name+labels under this client (nodes:list — no
+// watch). netstate refreshes a cache from this off the request path, so uplink node
+// membership needs neither a per-request node LIST nor a nodes:watch grant.
+func (c *Client) ListNodeLabels(ctx context.Context) ([]NodeLabels, error) {
 	list, err := c.kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]NodeInfo, 0, len(list.Items))
+	out := make([]NodeLabels, 0, len(list.Items))
 	for i := range list.Items {
-		out = append(out, NodeInfo{Name: list.Items[i].Name, Labels: list.Items[i].Labels})
+		out = append(out, NodeLabels{Name: list.Items[i].Name, Labels: list.Items[i].Labels})
 	}
 	return out, nil
 }

@@ -100,4 +100,3 @@ func diskLabel(name, size, class string) string {
 	}
 	return fmt.Sprintf("%s (%s)", name, size)
 }
-

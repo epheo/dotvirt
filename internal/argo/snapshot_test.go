@@ -41,18 +41,18 @@ func TestSnapshotDriftNilUntilSynced(t *testing.T) {
 	}
 }
 
-func TestSnapshotManagingApp(t *testing.T) {
+func TestSnapshotmanagingApp(t *testing.T) {
 	s := NewSnapshot(&Client{}, nil)
 	_ = s.apps.Add(appWithSource("argocd", "team-a", "https://forge/team-a.git",
 		[]any{vmResource("prod", "vm-a", "Synced", "Healthy")}))
 	s.synced.Store(true)
 
-	ref, ok := s.ManagingApp("prod", "vm-a")
+	ref, ok := s.managingApp("prod", "vm-a")
 	if !ok || ref.Name != "team-a" || ref.Namespace != "argocd" || ref.TargetRevision != "main" {
-		t.Fatalf("ManagingApp wrong: %+v ok=%v", ref, ok)
+		t.Fatalf("managingApp wrong: %+v ok=%v", ref, ok)
 	}
-	if _, ok := s.ManagingApp("prod", "ghost"); ok {
-		t.Error("ManagingApp should miss an unmanaged VM")
+	if _, ok := s.managingApp("prod", "ghost"); ok {
+		t.Error("managingApp should miss an unmanaged VM")
 	}
 }
 

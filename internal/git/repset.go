@@ -15,7 +15,7 @@ import (
 // caller may touch is gated upstream by the project resolver, not here.
 //
 // Each opened repo gets one background poll goroutine that drives the
-// single-fetcher freshness model (Repo.HeadsSignature does the only network
+// single-fetcher freshness model (Repo.headsSignature does the only network
 // fetch) and publishes GitChanged on the shared event bus when that repo's heads
 // move — so the inventory hub recomputes and the proposals refresher re-queries the
 // forge. The poll is the missed-event backstop; the forge webhook (via Poke) is the
@@ -120,13 +120,13 @@ func (s *RepoSet) Poke(repoURL string) {
 }
 
 // poll fetches repo on an interval — or immediately on a poke — and publishes
-// GitChanged when its heads move. One goroutine per open repo; HeadsSignature is
+// GitChanged when its heads move. One goroutine per open repo; headsSignature is
 // the single network fetch (reads never fetch). The ticker is the missed-event
 // backstop; the poke (webhook) is the primary trigger.
 func (s *RepoSet) poll(p *repoPair) {
 	last := ""
 	check := func() {
-		sig, err := p.read.HeadsSignature()
+		sig, err := p.read.headsSignature()
 		if err != nil || sig == last {
 			return
 		}

@@ -65,10 +65,10 @@ func clientFor(cfg *rest.Config) (*Client, error) {
 	return &Client{dyn: dyn}, nil
 }
 
-// ApplicationsListWatch is the List+Watch source for the cluster-wide ArgoCD
+// applicationsListWatch is the List+Watch source for the cluster-wide ArgoCD
 // Application reflector that backs Snapshot — the drift plane's equivalent of
 // cluster.VMListWatch.
-func (c *Client) ApplicationsListWatch() *cache.ListWatch {
+func (c *Client) applicationsListWatch() *cache.ListWatch {
 	return &cache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
 			return c.dyn.Resource(applicationsGVR).Namespace(metav1.NamespaceAll).List(ctx, o)
@@ -91,13 +91,9 @@ type resKey struct{ group, kind, namespace, name string }
 // per-segment enrichment both read this one map. Objects absent from the result are
 // managed by no Application. Only scalar fields are read, so nothing escapes the store
 // to be mutated. Always returns a non-nil map.
-func resourceDriftFromApps(objs []any) map[resKey]Drift {
+func resourceDriftFromApps(objs []*unstructured.Unstructured) map[resKey]Drift {
 	out := map[resKey]Drift{}
-	for _, obj := range objs {
-		app, ok := obj.(*unstructured.Unstructured)
-		if !ok {
-			continue
-		}
+	for _, app := range objs {
 		resources, found, err := unstructured.NestedSlice(app.Object, "status", "resources")
 		if err == nil && found {
 			for _, raw := range resources {
@@ -178,13 +174,9 @@ func mergeSyncMessages(out map[resKey]Drift, app map[string]any) {
 // still surfaces. One repo maps to one Application in dotvirt's model; on the rare
 // collision the more severe status wins, so a rollup never hides a degraded app behind
 // a healthy one. Always returns a non-nil map.
-func appSyncFromApps(objs []any) map[string]model.ProjectSync {
+func appSyncFromApps(objs []*unstructured.Unstructured) map[string]model.ProjectSync {
 	out := map[string]model.ProjectSync{}
-	for _, obj := range objs {
-		app, ok := obj.(*unstructured.Unstructured)
-		if !ok {
-			continue
-		}
+	for _, app := range objs {
 		repo := appRepo(app.Object)
 		if repo == "" {
 			continue
@@ -312,18 +304,8 @@ func asString(m map[string]any, key string) string {
 }
 
 func nestedString(m map[string]any, keys ...string) string {
-	cur := m
-	for i, k := range keys {
-		if i == len(keys)-1 {
-			return asString(cur, k)
-		}
-		next, ok := cur[k].(map[string]any)
-		if !ok {
-			return ""
-		}
-		cur = next
-	}
-	return ""
+	s, _, _ := unstructured.NestedString(m, keys...)
+	return s
 }
 
 // errorCondition returns the first error condition's message. Every Application

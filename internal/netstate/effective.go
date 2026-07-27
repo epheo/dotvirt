@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/reflect"
 )
 
 // Effective computes the policy chain governing one workload — the same pure
@@ -26,7 +27,7 @@ func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, p
 
 	// Admin tier, evaluated first, precedence-ordered (lower priority wins).
 	var admins []model.PolicyBinding
-	for _, u := range listOf(s.anp) {
+	for _, u := range reflect.List(s.anp) {
 		if m := anpSubjectMatch(u, nsLabels, podLabels, podScoped); m != matchNo {
 			admins = append(admins, model.PolicyBinding{Policy: policyFromANP(u, false), Conditional: m == matchCond})
 		}
@@ -44,7 +45,7 @@ func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, p
 	// policy declares — the fact the panel must surface, since it flips the
 	// namespace from open to allowlist.
 	var project []model.PolicyBinding
-	for _, u := range listOf(s.netpol) {
+	for _, u := range reflect.List(s.netpol) {
 		if u.GetNamespace() != ns {
 			continue
 		}
@@ -64,7 +65,7 @@ func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, p
 
 	// Baseline tier, evaluated last.
 	var base []model.PolicyBinding
-	for _, u := range listOf(s.banp) {
+	for _, u := range reflect.List(s.banp) {
 		if m := anpSubjectMatch(u, nsLabels, podLabels, podScoped); m != matchNo {
 			base = append(base, model.PolicyBinding{
 				Policy:      policyFromANP(u, true),
@@ -77,7 +78,7 @@ func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, p
 	eff.EastWest = append(append(admins, project...), base...)
 
 	// Gateway firewall: the namespace's EgressFirewall (rules are first-match).
-	for _, u := range listOf(s.egressfw) {
+	for _, u := range reflect.List(s.egressfw) {
 		if u.GetNamespace() == ns {
 			eff.Gateway = append(eff.Gateway, model.PolicyBinding{Policy: policyFromEgressFirewall(u)})
 		}
@@ -85,7 +86,7 @@ func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, p
 
 	// Tier-0 SNAT: EgressIPs pinning this namespace; an optional podSelector
 	// narrows within it.
-	for _, u := range listOf(s.egressip) {
+	for _, u := range reflect.List(s.egressip) {
 		nsSel, _, _ := unstructured.NestedMap(u.Object, "spec", "namespaceSelector")
 		podSel, _, _ := unstructured.NestedMap(u.Object, "spec", "podSelector")
 		m := combineMatch(matchSelector(nsSel, nsLabels), podMatch(podSel, podLabels, podScoped))
@@ -95,7 +96,7 @@ func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, p
 	}
 
 	// Tier-0 routes: external routes steering this namespace's egress.
-	for _, u := range listOf(s.extroute) {
+	for _, u := range reflect.List(s.extroute) {
 		sel, _, _ := unstructured.NestedMap(u.Object, "spec", "from", "namespaceSelector")
 		if m := matchSelector(sel, nsLabels); m != matchNo {
 			eff.Routes = append(eff.Routes, model.PolicyBinding{Policy: policyFromExtRoute(u), Conditional: m == matchCond})

@@ -8,15 +8,14 @@ package metrics
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"fmt"
-	"log"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/epheo/dotvirt/internal/tlsconf"
 
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/ttlcache"
@@ -59,13 +58,7 @@ func New(baseURL, caPath string, insecure bool) (*Client, error) {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	switch {
 	case caPath != "":
-		// Tolerant: a lagging CA mount must not wedge the console on a metrics
-		// nicety; the system pool degrades to a legible TLS error in Performance.
-		if pem, err := os.ReadFile(caPath); err != nil {
-			log.Printf("metrics: CA %s unreadable (%v); staying on the system trust pool", caPath, err)
-		} else if pool := x509.NewCertPool(); !pool.AppendCertsFromPEM(pem) {
-			log.Printf("metrics: CA %s holds no certificates; staying on the system trust pool", caPath)
-		} else {
+		if pool := tlsconf.RootCAs("metrics", caPath); pool != nil {
 			tr.TLSClientConfig = &tls.Config{RootCAs: pool}
 		}
 	case insecure:

@@ -144,19 +144,13 @@ func (s *Snapshot) Live() model.DRSLive {
 // sorted key so a nonstandard install still surfaces — deterministically,
 // never mixing fields across objects.
 func (s *Snapshot) managedCR() (*unstructured.Unstructured, bool) {
-	if obj, ok, _ := s.store.GetByKey(drsgen.Namespace + "/cluster"); ok {
-		u, uok := obj.(*unstructured.Unstructured)
-		return u, uok
+	if u, ok := reflect.Get(s.store, drsgen.Namespace+"/cluster"); ok {
+		return u, true
 	}
 	keys := s.store.ListKeys()
 	if len(keys) == 0 {
 		return nil, false
 	}
 	sort.Strings(keys)
-	obj, ok, _ := s.store.GetByKey(keys[0])
-	if !ok {
-		return nil, false
-	}
-	u, uok := obj.(*unstructured.Unstructured)
-	return u, uok
+	return reflect.Get(s.store, keys[0])
 }

@@ -63,7 +63,7 @@ type Snapshot struct {
 	healthy [11]atomic.Bool
 
 	nodesMu sync.RWMutex
-	nodes   []cluster.NodeInfo
+	nodes   []cluster.NodeLabels
 }
 
 // New builds the snapshot over sa (dotvirt's ServiceAccount client). bus may be nil in
@@ -155,7 +155,7 @@ func (s *Snapshot) refreshNodes(ctx context.Context) {
 	t := time.NewTicker(nodeRefreshInterval)
 	defer t.Stop()
 	for {
-		if infos, err := s.sa.NodeInfos(ctx); err == nil {
+		if infos, err := s.sa.ListNodeLabels(ctx); err == nil {
 			s.nodesMu.Lock()
 			s.nodes = infos
 			s.nodesMu.Unlock()
@@ -166,17 +166,4 @@ func (s *Snapshot) refreshNodes(ctx context.Context) {
 		case <-t.C:
 		}
 	}
-}
-
-// listOf returns the store's objects as typed unstructured pointers; non-unstructured
-// entries (there are none in practice) are skipped.
-func listOf(idx cache.Indexer) []*unstructured.Unstructured {
-	all := idx.List()
-	out := make([]*unstructured.Unstructured, 0, len(all))
-	for _, obj := range all {
-		if u, ok := obj.(*unstructured.Unstructured); ok {
-			out = append(out, u)
-		}
-	}
-	return out
 }

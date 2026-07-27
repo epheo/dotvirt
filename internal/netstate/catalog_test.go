@@ -105,7 +105,7 @@ func TestAdaptersFromNNS(t *testing.T) {
 // double-listed), and uplink node membership filters the node cache by nodeSelector.
 func TestCatalogFromStores(t *testing.T) {
 	s := New(nil, nil)
-	s.nodes = []cluster.NodeInfo{
+	s.nodes = []cluster.NodeLabels{
 		{Name: "w1", Labels: map[string]string{"zone": "a"}},
 		{Name: "w2", Labels: map[string]string{"zone": "b"}},
 	}
