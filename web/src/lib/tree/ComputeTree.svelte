@@ -67,6 +67,26 @@
 		<span class="truncate font-semibold text-ink-soft">All VMs</span>
 	</TreeRow>
 
+	<!-- Attach and Recover share one button: same modal, recover only flips the
+	     backend path and the wording. -->
+	{#snippet repoAction(project: Project, recover: boolean)}
+		<button
+			onclick={() =>
+				(ui.modal = {
+					kind: 'adoptProject',
+					project: project.name,
+					namespaces: project.namespaces.map((n) => n.namespace),
+					recover,
+				})}
+			title={recover
+				? "Re-create this project's lost repo and re-adopt what is running"
+				: 'Create a repo for this project and bring it under GitOps'}
+			class="mb-1 ml-7 rounded border border-warn/50 bg-warn-soft/60 px-2 py-0.5 text-[11px] font-medium text-warn-ink hover:bg-warn-soft"
+		>
+			{recover ? 'Recover repo' : 'Attach repo'}
+		</button>
+	{/snippet}
+
 	{#snippet projectNode(project: Project)}
 		<div>
 			<!-- Project: chevron toggles collapse, the label focuses the grid. -->
@@ -118,18 +138,7 @@
 						{project.error}
 					</div>
 					{#if inventory.canManage}
-						<button
-							onclick={() =>
-								(ui.modal = {
-									kind: 'adoptProject',
-									project: project.name,
-									namespaces: project.namespaces.map((n) => n.namespace),
-								})}
-							title="Create a repo for this project and bring it under GitOps"
-							class="mb-1 ml-7 rounded border border-warn/50 bg-warn-soft/60 px-2 py-0.5 text-[11px] font-medium text-warn-ink hover:bg-warn-soft"
-						>
-							Attach repo
-						</button>
+						{@render repoAction(project, false)}
 					{/if}
 				{:else if project.repo && project.gitOps?.syncError && inventory.canManage}
 					<!-- Only the GitOps rollup says the forge lost this repo (the annotation
@@ -137,19 +146,7 @@
 					<div class="py-1 pr-2 pl-7 text-xs text-warn-ink italic" title={project.gitOps.syncError}>
 						{project.gitOps.syncError.slice(0, 120)}
 					</div>
-					<button
-						onclick={() =>
-							(ui.modal = {
-								kind: 'adoptProject',
-								project: project.name,
-								namespaces: project.namespaces.map((n) => n.namespace),
-								recover: true,
-							})}
-						title="Re-create this project's lost repo and re-adopt what is running"
-						class="mb-1 ml-7 rounded border border-warn/50 bg-warn-soft/60 px-2 py-0.5 text-[11px] font-medium text-warn-ink hover:bg-warn-soft"
-					>
-						Recover repo
-					</button>
+					{@render repoAction(project, true)}
 				{/if}
 
 				<!-- Namespaces -->

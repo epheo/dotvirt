@@ -6,22 +6,26 @@
 
 	// The canonical modal text/number field: one home for the border, padding
 	// and focus treatment, so dialogs stop hand-rolling drifting class strings.
-	// Everything else (type, min/max, list, placeholder, data-autofocus) passes
-	// through as native attributes.
+	// size 'sm' is the compact table/toolbar variant. Everything else (type,
+	// min/max, list, placeholder, data-autofocus) passes through as native
+	// attributes.
 	let {
 		value = $bindable(),
 		mono = false,
+		size = 'md',
 		class: cls = '',
 		...rest
-	}: { value?: V; mono?: boolean; class?: string } & Omit<
+	}: { value?: V; mono?: boolean; size?: 'md' | 'sm'; class?: string } & Omit<
 		HTMLInputAttributes,
-		'value' | 'class'
+		'value' | 'class' | 'size'
 	> = $props();
 </script>
 
 <input
 	bind:value
-	class="w-full rounded border border-line-strong px-2 py-1.5 text-sm focus:border-accent/60 disabled:bg-inset-strong disabled:text-ink-faint {mono
+	class="w-full rounded border border-line-strong {size === 'sm'
+		? 'px-2 py-1 text-xs'
+		: 'px-2 py-1.5 text-sm'} focus:border-accent/60 disabled:bg-inset-strong disabled:text-ink-faint {mono
 		? 'font-mono'
 		: ''} {cls}"
 	{...rest}

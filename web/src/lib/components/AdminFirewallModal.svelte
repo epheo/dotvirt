@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Plus, Trash2 } from 'lucide-svelte';
 	import { api, type AdminNetworkPolicyCreate, type AdminPolicyRule } from '$lib/api';
+	import { rowList } from '$lib/rowlist.svelte';
 	import { validName, NAME_HINT } from '$lib/validate';
 	import ChoiceCards from './ChoiceCards.svelte';
 	import Note from './Note.svelte';
@@ -38,7 +39,8 @@
 	let priority = $state<number | null>(10);
 	let subjKey = $state('');
 	let subjValue = $state('');
-	let rows = $state<Row[]>([blankRow()]);
+	const rules = rowList(blankRow);
+	const rows = $derived(rules.rows);
 
 	const missing = $derived.by(() => {
 		if (baseline) return [];
@@ -56,13 +58,6 @@
 				? 'Stages the baseline policy (cluster default backstop) → platform repo'
 				: `Stages admin policy “${name}” (priority ${priority}) → platform repo`,
 	);
-
-	function addRow() {
-		rows = [...rows, blankRow()];
-	}
-	function removeRow(i: number) {
-		rows = rows.filter((_, j) => j !== i);
-	}
 
 	async function stage() {
 		const ingress: AdminPolicyRule[] = [];
@@ -138,7 +133,9 @@
 	<div class="space-y-2">
 		<div class="flex items-center justify-between">
 			<span class="text-ink-soft">Ingress rules <span class="text-ink-faint">(ordered)</span></span>
-			<button onclick={addRow} class="flex items-center gap-1 text-xs text-accent hover:underline"
+			<button
+				onclick={rules.add}
+				class="flex items-center gap-1 text-xs text-accent hover:underline"
 				><Plus size={12} /> Add rule</button
 			>
 		</div>
@@ -167,7 +164,7 @@
 				/>
 				<ProtoPortInput bind:proto={row.proto} bind:port={row.port} portClass="w-16" />
 				<button
-					onclick={() => removeRow(i)}
+					onclick={() => rules.remove(i)}
 					disabled={rows.length === 1}
 					aria-label="Remove rule"
 					class="ml-auto text-ink-faint hover:text-danger disabled:opacity-40"

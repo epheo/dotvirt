@@ -2,6 +2,7 @@
 	import { TriangleAlert } from 'lucide-svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
+	import Banner from './Banner.svelte';
 
 	// Untracked projects sit collapsed in the tree, hiding its attach/recover
 	// buttons exactly when someone clicks INTO the project to see what is wrong.
@@ -26,9 +27,7 @@
 </script>
 
 {#if (attach || recover) && inventory.canManage}
-	<div
-		class="flex items-center gap-2 border-b border-warn-soft bg-warn-soft/60 px-4 py-1.5 text-xs text-warn-ink"
-	>
+	<Banner tone="warn">
 		<TriangleAlert size={14} class="shrink-0" />
 		<span class="truncate" title={note}>
 			{#if attach}
@@ -43,5 +42,5 @@
 		>
 			{attach ? 'Attach repo' : 'Recover repo'}
 		</button>
-	</div>
+	</Banner>
 {/if}

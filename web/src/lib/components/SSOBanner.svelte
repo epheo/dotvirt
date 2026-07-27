@@ -4,6 +4,7 @@
 	import { friendlyError } from '$lib/format';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
+	import Banner from './Banner.svelte';
 
 	// One-click SSO finish for admins. The apply runs under the CALLER's token;
 	// the API server's RBAC is the gate, and a refusal surfaces legibly.
@@ -33,9 +34,7 @@
 </script>
 
 {#if pending && inventory.canManage}
-	<div
-		class="flex items-center gap-2 border-b border-warn-soft bg-warn-soft/60 px-4 py-2 text-sm text-warn-ink"
-	>
+	<Banner tone="warn" size="md">
 		<TriangleAlert size={16} class="shrink-0" />
 		<span>OpenShift SSO is not ready: its OAuthClient is missing or holds an outdated secret.</span>
 		<button
@@ -45,5 +44,5 @@
 		>
 			{busy ? 'Finishing…' : 'Finish SSO setup'}
 		</button>
-	</div>
+	</Banner>
 {/if}

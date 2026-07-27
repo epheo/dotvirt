@@ -15,7 +15,6 @@
 	// project/namespace row (container verbs). The bulk variant renders inside
 	// the workspace that owns the grid selection.
 	const ctx = $derived(ui.ctx);
-	const canNamespace = $derived(!!inventory.caps?.namespace);
 
 	async function onCtxPick(a: VMAction) {
 		if (ui.ctx?.kind !== 'vm') return;
@@ -185,7 +184,7 @@
 						? 'Add an east-west Distributed Firewall policy (NetworkPolicy)'
 						: 'Project has no backing repo'}>New Security Policy…</MenuItem
 				>
-				{#if canNamespace}
+				{#if inventory.canNamespace}
 					<MenuItem
 						onclick={() => {
 							const project = ctx.kind === 'container' ? ctx.project : null;

@@ -31,10 +31,6 @@
 	import HeaderMenu from './HeaderMenu.svelte';
 	import MenuItem from './MenuItem.svelte';
 
-	const canNamespace = $derived(!!inventory.caps?.namespace);
-	const canEgress = $derived(!!(inventory.caps?.egressIP || inventory.caps?.externalRoute));
-	const canAdminFw = $derived(!!inventory.caps?.adminNetworkPolicy);
-
 	// Repo-backed namespaces under the current URL's scope — what "New VM"
 	// pre-targets, mirroring the tree context menu's "New VM here". null = no
 	// scope narrowing, so the wizard offers every creatable namespace.
@@ -83,18 +79,87 @@
 		ui.search = search;
 		return () => (ui.search = null);
 	});
+
+	// The "New" menu, one row per creatable kind. divider starts the
+	// platform-tier section. newVM's payload alone carries extra state
+	// (scopeNamespaces), added at dispatch.
+	type NewItem = {
+		icon: typeof Server;
+		label: string;
+		kind: 'newVM' | 'deployTemplate' | 'newNetwork' | 'upload' | 'newProject' | 'tier0' | 'adminFw';
+		enabled: boolean;
+		title: string;
+		divider?: boolean;
+	};
+	const NEW_ITEMS = $derived.by((): NewItem[] => {
+		const noRepo = !inventory.namespaces.length;
+		const repoTitle = noRepo ? 'No project with a backing repo yet' : '';
+		return [
+			{
+				icon: Server,
+				label: 'New VM',
+				kind: 'newVM',
+				enabled: !noRepo,
+				title: repoTitle,
+			},
+			{
+				icon: BookCopy,
+				label: 'New VM from Template',
+				kind: 'deployTemplate',
+				enabled: !noRepo,
+				title: repoTitle,
+			},
+			{
+				icon: Network,
+				label: 'New Segment',
+				kind: 'newNetwork',
+				enabled: !noRepo,
+				title: 'Create a Segment (Port Group) — an overlay or VLAN Layer 2 network VMs attach to',
+			},
+			{
+				icon: Upload,
+				label: 'Upload Image',
+				kind: 'upload',
+				enabled: !noRepo,
+				title: 'Upload a disk image (qcow2/raw/iso) as a bootable DataVolume',
+			},
+			{
+				icon: FolderPlus,
+				label: 'New Project',
+				kind: 'newProject',
+				enabled: inventory.canNamespace,
+				title: inventory.canNamespace
+					? 'Create a new tenant project (repo + first namespace)'
+					: 'Requires permission to create namespaces',
+				divider: true,
+			},
+			{
+				icon: Radio,
+				label: 'New Tier-0 Service',
+				kind: 'tier0',
+				enabled: inventory.canEgress,
+				title: inventory.canEgress
+					? 'Add a Tier-0 provider-edge service (Source NAT or external route)'
+					: 'Requires permission to create EgressIPs or external routes',
+			},
+			{
+				icon: Shield,
+				label: 'New Admin Firewall',
+				kind: 'adminFw',
+				enabled: inventory.canAdminFw,
+				title: inventory.canAdminFw
+					? 'Add a cluster-wide admin firewall (AdminNetworkPolicy / Baseline)'
+					: 'Requires permission to create AdminNetworkPolicies',
+			},
+		];
+	});
 </script>
 
 <!-- The bar stays dark in both themes, so its chrome uses raw slate, not ink tokens. -->
 <header class="flex items-center gap-3 border-b border-line-strong bg-bar px-4 py-2 text-white">
 	<a href="/compute" class="font-semibold">dotvirt</a>
 
-	<GlobalSearch
-		bind:this={search}
-		inventory={inventory.inventory}
-		networks={inventory.networks}
-		onpick={onSearchPick}
-	/>
+	<GlobalSearch bind:this={search} onpick={onSearchPick} />
 
 	<!-- Create actions collapse into one primary menu (vCenter keeps the global
 	     chrome to identity + search + tasks; creation is otherwise contextual via
@@ -112,90 +177,26 @@
 			</button>
 		{/snippet}
 		{#snippet children({ close })}
-			<MenuItem
-				onclick={() => {
-					close();
-					ui.modal = { kind: 'newVM', namespaces: scopeNamespaces };
-				}}
-				disabled={!inventory.namespaces.length}
-				title={inventory.namespaces.length ? '' : 'No project with a backing repo yet'}
-			>
-				{#snippet icon()}<Server size={13} />{/snippet}
-				New VM
-			</MenuItem>
-			<MenuItem
-				onclick={() => {
-					close();
-					ui.modal = { kind: 'deployTemplate' };
-				}}
-				disabled={!inventory.namespaces.length}
-				title={inventory.namespaces.length ? '' : 'No project with a backing repo yet'}
-			>
-				{#snippet icon()}<BookCopy size={13} />{/snippet}
-				New VM from Template
-			</MenuItem>
-			<MenuItem
-				onclick={() => {
-					close();
-					ui.modal = { kind: 'newNetwork' };
-				}}
-				disabled={!inventory.namespaces.length}
-				title="Create a Segment (Port Group) — an overlay or VLAN Layer 2 network VMs attach to"
-			>
-				{#snippet icon()}<Network size={13} />{/snippet}
-				New Segment
-			</MenuItem>
-			<MenuItem
-				onclick={() => {
-					close();
-					ui.modal = { kind: 'upload' };
-				}}
-				disabled={!inventory.namespaces.length}
-				title="Upload a disk image (qcow2/raw/iso) as a bootable DataVolume"
-			>
-				{#snippet icon()}<Upload size={13} />{/snippet}
-				Upload Image
-			</MenuItem>
-			<div class="my-1 border-t border-line-soft"></div>
-			<MenuItem
-				onclick={() => {
-					close();
-					ui.modal = { kind: 'newProject' };
-				}}
-				disabled={!canNamespace}
-				title={canNamespace
-					? 'Create a new tenant project (repo + first namespace)'
-					: 'Requires permission to create namespaces'}
-			>
-				{#snippet icon()}<FolderPlus size={13} />{/snippet}
-				New Project
-			</MenuItem>
-			<MenuItem
-				onclick={() => {
-					close();
-					ui.modal = { kind: 'tier0' };
-				}}
-				disabled={!canEgress}
-				title={canEgress
-					? 'Add a Tier-0 provider-edge service (Source NAT or external route)'
-					: 'Requires permission to create EgressIPs or external routes'}
-			>
-				{#snippet icon()}<Radio size={13} />{/snippet}
-				New Tier-0 Service
-			</MenuItem>
-			<MenuItem
-				onclick={() => {
-					close();
-					ui.modal = { kind: 'adminFw' };
-				}}
-				disabled={!canAdminFw}
-				title={canAdminFw
-					? 'Add a cluster-wide admin firewall (AdminNetworkPolicy / Baseline)'
-					: 'Requires permission to create AdminNetworkPolicies'}
-			>
-				{#snippet icon()}<Shield size={13} />{/snippet}
-				New Admin Firewall
-			</MenuItem>
+			{#each NEW_ITEMS as item (item.kind)}
+				{@const Icon = item.icon}
+				{#if item.divider}
+					<div class="my-1 border-t border-line-soft"></div>
+				{/if}
+				<MenuItem
+					onclick={() => {
+						close();
+						ui.modal =
+							item.kind === 'newVM'
+								? { kind: 'newVM', namespaces: scopeNamespaces }
+								: { kind: item.kind };
+					}}
+					disabled={!item.enabled}
+					title={item.title}
+				>
+					{#snippet icon()}<Icon size={13} />{/snippet}
+					{item.label}
+				</MenuItem>
+			{/each}
 		{/snippet}
 	</HeaderMenu>
 

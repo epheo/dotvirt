@@ -1,18 +1,15 @@
 <script lang="ts">
+	import TextInput from './TextInput.svelte';
+
 	// Multi-select well: checkbox rows in a bounded scroll area. The filter box
 	// appears only past the size where scanning beats typing.
 	type Item = { value: string; hint?: string };
 
-	let {
-		items,
-		selected = $bindable([]),
-	}: { items: Item[]; selected?: string[] } = $props();
+	let { items, selected = $bindable([]) }: { items: Item[]; selected?: string[] } = $props();
 
 	let query = $state('');
 	const shown = $derived(
-		query
-			? items.filter((i) => i.value.toLowerCase().includes(query.toLowerCase()))
-			: items,
+		query ? items.filter((i) => i.value.toLowerCase().includes(query.toLowerCase())) : items,
 	);
 
 	function toggle(v: string, on: boolean) {
@@ -22,11 +19,7 @@
 
 <div class="space-y-1">
 	{#if items.length > 8}
-		<input
-			bind:value={query}
-			placeholder="Filter…"
-			class="w-full rounded border border-line-strong px-2 py-1 text-xs focus:border-accent/60"
-		/>
+		<TextInput bind:value={query} size="sm" placeholder="Filter…" />
 	{/if}
 	<div class="max-h-40 space-y-1 overflow-y-auto rounded border border-line-strong p-2">
 		{#each shown as item (item.value)}

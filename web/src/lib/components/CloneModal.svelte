@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { Copy } from 'lucide-svelte';
-	import { api, Unauthorized, type Clone, type VM } from '$lib/api';
-	import { friendlyError, relativeAge } from '$lib/format';
-	import { resource, type Resource } from '$lib/resource.svelte';
+	import { api, type Clone, type VM } from '$lib/api';
+	import { relativeAge } from '$lib/format';
+	import { action, resource, type Resource } from '$lib/resource.svelte';
 	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
 	import { validName } from '$lib/validate';
 	import ErrorNote from './ErrorNote.svelte';
@@ -30,8 +30,7 @@
 	// modal on selection change, so the initial capture is the intent.
 	// svelte-ignore state_referenced_locally
 	let target = $state(vm.name + '-clone');
-	let busy = $state(false);
-	let error = $state('');
+	const op = action();
 
 	// RFC 1123 label, the same constraint the API server enforces on VM names.
 	const valid = $derived(validName(target) && target !== vm.name);
@@ -51,19 +50,12 @@
 	);
 
 	async function create() {
-		busy = true;
-		error = '';
-		try {
+		const done = await op.run(async () => {
 			await api.createClone(vm.namespace, vm.name, target.trim());
 			ondone?.(true);
 			await clonesRes.refresh();
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			error = friendlyError(e);
-			ondone?.(false);
-		} finally {
-			busy = false;
-		}
+		});
+		if (!done) ondone?.(false);
 	}
 </script>
 
@@ -89,15 +81,15 @@
 				/>
 				<button
 					onclick={create}
-					disabled={!valid || busy}
+					disabled={!valid || op.busy}
 					class="flex shrink-0 items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:bg-line-strong"
 				>
 					<Copy size={14} />
-					{busy ? 'Cloning…' : 'Clone'}
+					{op.busy ? 'Cloning…' : 'Clone'}
 				</button>
 			</div>
 		</FormField>
-		<ErrorNote {error} class="mt-2" />
+		<ErrorNote error={op.error} class="mt-2" />
 
 		{#if clones && clones.length}
 			<h3 class="mt-4 mb-1 text-xs font-semibold tracking-wide text-ink-muted uppercase">

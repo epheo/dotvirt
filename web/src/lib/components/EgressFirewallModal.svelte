@@ -1,11 +1,14 @@
 <script lang="ts">
 	import { Plus, Trash2 } from 'lucide-svelte';
 	import { api, type EgressFirewallCreate, type EgressFirewallRule } from '$lib/api';
+	import { rowList } from '$lib/rowlist.svelte';
 	import { TERMS } from '$lib/vocab';
 	import Note from './Note.svelte';
 	import StageModal from './StageModal.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
 	import ProtoPortInput from './ProtoPortInput.svelte';
+	import SelectInput from './SelectInput.svelte';
+	import TextInput from './TextInput.svelte';
 
 	let {
 		namespaces,
@@ -33,7 +36,8 @@
 	const blank = (): Row => ({ action: 'Allow', dest: 'cidr', value: '', proto: 'TCP', port: null });
 
 	let namespace = $state('');
-	let rows = $state<Row[]>([blank()]);
+	const rules = rowList(blank);
+	const rows = $derived(rules.rows);
 
 	const missing = $derived.by(() => {
 		const m: string[] = [];
@@ -49,22 +53,15 @@
 			: '',
 	);
 
-	function addRow() {
-		rows = [...rows, blank()];
-	}
-	function removeRow(i: number) {
-		rows = rows.filter((_, j) => j !== i);
-	}
-
 	async function stage() {
-		const rules: EgressFirewallRule[] = rows.map((r) => {
+		const ruleSpecs: EgressFirewallRule[] = rows.map((r) => {
 			const rule: EgressFirewallRule = { action: r.action };
 			if (r.dest === 'cidr') rule.cidr = r.value.trim();
 			else rule.dnsName = r.value.trim();
 			if (r.port != null) rule.ports = [{ protocol: r.proto, port: r.port }];
 			return rule;
 		});
-		const req: EgressFirewallCreate = { namespace, rules };
+		const req: EgressFirewallCreate = { namespace, rules: ruleSpecs };
 		await api.createEgressFirewall(req);
 	}
 </script>
@@ -86,34 +83,36 @@
 			<span class="text-ink-soft"
 				>Egress rules <span class="text-ink-faint">(first match wins)</span></span
 			>
-			<button onclick={addRow} class="flex items-center gap-1 text-xs text-accent hover:underline"
+			<button
+				onclick={rules.add}
+				class="flex items-center gap-1 text-xs text-accent hover:underline"
 				><Plus size={12} /> Add rule</button
 			>
 		</div>
 		{#each rows as row, i (i)}
 			<div class="rounded border border-line p-2">
 				<div class="flex flex-wrap items-center gap-2">
-					<select
+					<SelectInput
 						bind:value={row.action}
-						class="rounded border border-line-strong px-2 py-1 text-xs {row.action === 'Deny'
-							? 'text-danger-ink'
-							: 'text-ok-ink'}"
+						size="sm"
+						class="w-auto! {row.action === 'Deny' ? 'text-danger-ink' : 'text-ok-ink'}"
 					>
 						<option value="Allow">Allow</option>
 						<option value="Deny">Deny</option>
-					</select>
+					</SelectInput>
 					<span class="text-xs text-ink-faint">egress to</span>
-					<select bind:value={row.dest} class="rounded border border-line-strong px-2 py-1 text-xs">
+					<SelectInput bind:value={row.dest} size="sm" class="w-auto!">
 						<option value="cidr">CIDR</option>
 						<option value="dns">DNS name</option>
-					</select>
-					<input
+					</SelectInput>
+					<TextInput
 						bind:value={row.value}
+						size="sm"
 						placeholder={row.dest === 'cidr' ? '0.0.0.0/0' : 'api.example.com'}
-						class="min-w-0 flex-1 rounded border border-line-strong px-2 py-1 text-xs"
+						class="min-w-0 flex-1"
 					/>
 					<button
-						onclick={() => removeRow(i)}
+						onclick={() => rules.remove(i)}
 						disabled={rows.length === 1}
 						aria-label="Remove rule"
 						class="text-ink-faint hover:text-danger disabled:opacity-40"

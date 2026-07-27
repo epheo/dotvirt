@@ -26,6 +26,13 @@ class InventoryStore {
 	// Per-action authoring authority (each the same SSAR the backend create
 	// enforces). Undefined caps (older backend) read as false.
 	readonly caps = $derived(this.netInv?.caps);
+	// The creation gates every surface (header menu, context menus, Security
+	// page) shares — one predicate per verb, never re-derived locally.
+	readonly canNamespace = $derived(!!this.netInv?.caps?.namespace);
+	readonly canEgress = $derived(
+		!!(this.netInv?.caps?.egressIP || this.netInv?.caps?.externalRoute),
+	);
+	readonly canAdminFw = $derived(!!this.netInv?.caps?.adminNetworkPolicy);
 
 	// All VMs across the 3-level tree (project → namespace → vm).
 	readonly allVMs = $derived(

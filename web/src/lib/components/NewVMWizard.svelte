@@ -3,11 +3,14 @@
 	import { api, type CreateVMRequest, type Network, type Options } from '$lib/api';
 	import { friendlyError } from '$lib/format';
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
+	import { action } from '$lib/resource.svelte';
 	import Modal from './Modal.svelte';
 	import Wizard from './Wizard.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
 	import FormField from './FormField.svelte';
+	import SelectInput from './SelectInput.svelte';
 	import StorageClassSelect from './StorageClassSelect.svelte';
+	import TextInput from './TextInput.svelte';
 
 	let {
 		namespaces,
@@ -45,8 +48,7 @@
 	// may decline it and run on secondary networks alone.
 	let attachPrimary = $state(true);
 
-	let submitting = $state(false);
-	let error = $state('');
+	const op = action();
 
 	// The active wizard step (bound into <Wizard>); the review step's Edit links
 	// seek it back to a specific step.
@@ -169,8 +171,6 @@
 
 	async function submit() {
 		if (!valid) return;
-		submitting = true;
-		error = '';
 		const [imgName, imgNs] = osImage.split('|');
 		const req: CreateVMRequest = {
 			name,
@@ -192,14 +192,9 @@
 			primaryNetwork: attachPrimary,
 		};
 		if (user || sshKey) req.cloudInit = { user: user || undefined, sshKey: sshKey || undefined };
-		try {
-			await api.stageCreate(req);
+		if (await op.run(() => api.stageCreate(req))) {
 			onstaged();
 			onclose();
-		} catch (e) {
-			error = friendlyError(e);
-		} finally {
-			submitting = false;
 		}
 	}
 </script>
@@ -213,11 +208,7 @@
 			Name the virtual machine and choose the project it belongs to.
 		</p>
 		<FormField label="Name">
-			<input
-				bind:value={name}
-				placeholder="my-vm"
-				class="w-full rounded border border-line-strong px-2 py-1.5"
-			/>
+			<TextInput bind:value={name} placeholder="my-vm" />
 		</FormField>
 		<NamespaceSelect bind:namespace {namespaces} fallback="default" />
 	</div>
@@ -229,18 +220,18 @@
 			Select the OS image to boot from and a preference that tunes the VM for that guest.
 		</p>
 		<FormField label="OS image">
-			<select bind:value={osImage} class="w-full rounded border border-line-strong px-2 py-1.5">
+			<SelectInput bind:value={osImage}>
 				{#each (options?.osImages ?? []).filter((i) => i.ready) as img (img.namespace + img.name)}
 					<option value={`${img.name}|${img.namespace}`}>{img.name}</option>
 				{/each}
-			</select>
+			</SelectInput>
 		</FormField>
 		<FormField label="Preference (OS tuning)">
-			<select bind:value={preference} class="w-full rounded border border-line-strong px-2 py-1.5">
+			<SelectInput bind:value={preference}>
 				{#each options?.preferences ?? [] as p (p.name)}
 					<option value={p.name}>{p.displayName || p.name}</option>
 				{/each}
-			</select>
+			</SelectInput>
 		</FormField>
 	</div>
 {/snippet}
@@ -251,14 +242,11 @@
 			Choose a size (instance type) and whether to power the VM on after creation.
 		</p>
 		<FormField label="Size (instancetype)">
-			<select
-				bind:value={instancetype}
-				class="w-full rounded border border-line-strong px-2 py-1.5"
-			>
+			<SelectInput bind:value={instancetype}>
 				{#each options?.instancetypes ?? [] as it (it.name)}
 					<option value={it.name}>{it.name} — {it.cpu} CPU / {it.memory}</option>
 				{/each}
-			</select>
+			</SelectInput>
 		</FormField>
 		<label class="flex items-center gap-2">
 			<input type="checkbox" bind:checked={running} />
@@ -272,7 +260,7 @@
 		<p class="text-xs text-ink-muted">Configure the boot disk and any additional disks.</p>
 		<div class="grid grid-cols-2 gap-4">
 			<FormField label="Root disk size">
-				<input bind:value={diskSize} class="w-full rounded border border-line-strong px-2 py-1.5" />
+				<TextInput bind:value={diskSize} />
 			</FormField>
 			<FormField label="Storage class">
 				<StorageClassSelect options={options?.storageClasses ?? []} bind:value={storageClass} />
@@ -287,20 +275,12 @@
 			</div>
 			{#each extraDisks as disk, i (i)}
 				<div class="mb-1 flex gap-2">
-					<input
-						bind:value={disk.name}
-						placeholder="name"
-						class="min-w-0 flex-1 rounded border border-line-strong px-2 py-1"
-					/>
-					<input
-						bind:value={disk.size}
-						placeholder="10Gi"
-						class="w-20 rounded border border-line-strong px-2 py-1"
-					/>
+					<TextInput bind:value={disk.name} placeholder="name" class="min-w-0 flex-1" />
+					<TextInput bind:value={disk.size} placeholder="10Gi" class="w-20!" />
 					<StorageClassSelect
 						options={options?.storageClasses ?? []}
 						bind:value={disk.storageClass}
-						class="min-w-0 flex-1 py-1!"
+						class="min-w-0 flex-1"
 					/>
 					<button
 						onclick={() => removeDisk(i)}
@@ -363,21 +343,13 @@
 			<span class="text-ink-soft"
 				>cloud-init user <span class="text-ink-faint">(optional)</span></span
 			>
-			<input
-				bind:value={user}
-				placeholder="fedora"
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-			/>
+			<TextInput bind:value={user} placeholder="fedora" class="mt-1" />
 		</label>
 		<label class="block">
 			<span class="text-ink-soft"
 				>SSH public key <span class="text-ink-faint">(optional)</span></span
 			>
-			<input
-				bind:value={sshKey}
-				placeholder="ssh-ed25519 AAAA…"
-				class="mt-1 w-full rounded border border-line-strong px-2 py-1.5"
-			/>
+			<TextInput bind:value={sshKey} placeholder="ssh-ed25519 AAAA…" class="mt-1" />
 		</label>
 	</div>
 {/snippet}
@@ -462,10 +434,10 @@
 	<Wizard
 		title="New Virtual Machine"
 		footerHint="Staged into the changeset; open a PR from “Changes”."
-		finishLabel={submitting ? 'Staging…' : 'Stage VM'}
+		finishLabel={op.busy ? 'Staging…' : 'Stage VM'}
 		canFinish={valid}
-		{submitting}
-		{error}
+		submitting={op.busy}
+		error={op.error}
 		bind:current
 		onfinish={submit}
 		{onclose}

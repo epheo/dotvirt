@@ -108,9 +108,8 @@
 		}
 	}
 
-	// Commits dotvirt wrote before mid-2026 carried the Unix epoch as their date (a
-	// since-fixed byte-stable-re-propose hack); floor guards those so they read "—"
-	// rather than a misleading "56 years ago".
+	// Commits dotvirt wrote before mid-2026 carried the Unix epoch as their date;
+	// floor guards those so they read "—" rather than a misleading "56 years ago".
 	const EPOCH_FLOOR = Date.UTC(2020, 0, 1);
 
 	// fmtWhen renders a commit's author date as a compact absolute date.

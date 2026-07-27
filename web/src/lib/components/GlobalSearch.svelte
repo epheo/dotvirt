@@ -6,7 +6,7 @@
 	// `label:key`) narrows to VM labels — the tags-parity affordance; label
 	// chips elsewhere call searchFor().
 	import { Search } from 'lucide-svelte';
-	import type { Inventory, Network, VM } from '$lib/api';
+	import type { VM } from '$lib/api';
 	import { vmStorageKeys, NO_STORAGE } from '$lib/lenses';
 	import { inventory as inventoryStore } from '$lib/state/inventory.svelte';
 
@@ -18,15 +18,12 @@
 		| { kind: 'network'; network: string; hint: string }
 		| { kind: 'storage'; storageClass: string };
 
-	let {
-		inventory,
-		networks = [],
-		onpick,
-	}: {
-		inventory: Inventory | null;
-		networks?: Network[]; // the port-group catalog (from the session store)
-		onpick: (hit: SearchHit) => void;
-	} = $props();
+	let { onpick }: { onpick: (hit: SearchHit) => void } = $props();
+
+	// Everything searched reads straight off the inventory store — the search is
+	// global by nature, so no scope-narrowing props to thread.
+	const inventory = $derived(inventoryStore.inventory);
+	const networks = $derived(inventoryStore.networks);
 
 	let query = $state('');
 	let open = $state(false);

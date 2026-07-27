@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { api, drsThresholdLabel, type DRSView } from '$lib/api';
-	import { friendlyError } from '$lib/format';
-	import { resource } from '$lib/resource.svelte';
+	import { action, resource } from '$lib/resource.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import Row from './Row.svelte';
 	import DRSModal from './DRSModal.svelte';
@@ -13,7 +12,7 @@
 	let { onstaged }: { onstaged?: () => void } = $props();
 
 	let configuring = $state(false);
-	let disabling = $state(false);
+	const disableOp = action(); // a failed disable, distinct from the read's failure
 
 	const drs = resource<DRSView>(
 		() => '',
@@ -21,8 +20,7 @@
 		{ poll: 30_000 },
 	);
 	const view = $derived(drs.data);
-	let actionError = $state(''); // a failed disable, distinct from the read's failure
-	const error = $derived(actionError || drs.error);
+	const error = $derived(disableOp.error || drs.error);
 
 	// One vCenter-style status line for the committed state.
 	const status = $derived.by(() => {
@@ -60,18 +58,12 @@
 		return l.apiPresent ? 'Operator installed, no configuration' : 'Operator not installed';
 	});
 
-	async function disable() {
-		disabling = true;
-		actionError = '';
-		try {
+	function disable() {
+		return disableOp.run(async () => {
 			await api.disableDRS();
 			onstaged?.();
 			await drs.refresh();
-		} catch (e) {
-			actionError = friendlyError(e);
-		} finally {
-			disabling = false;
-		}
+		});
 	}
 
 	function staged() {
@@ -87,7 +79,7 @@
 				{#if view.configured}
 					<button
 						onclick={disable}
-						disabled={disabling}
+						disabled={disableOp.busy}
 						class="text-xs text-danger hover:underline disabled:text-ink-faint">Disable…</button
 					>
 				{/if}

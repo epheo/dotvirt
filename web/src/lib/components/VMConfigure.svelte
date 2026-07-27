@@ -2,6 +2,7 @@
 	import { Pencil } from 'lucide-svelte';
 	import type { Network, VM } from '$lib/api';
 	import { manifestURL } from '$lib/actions';
+	import type { EditSection } from '$lib/editform';
 	import { resolveNIC, kindLabel } from '$lib/networks';
 	import InfoCard from './InfoCard.svelte';
 	import Row from './Row.svelte';
@@ -18,7 +19,7 @@
 		// The port-group catalog, to resolve raw NIC refs into port groups.
 		networks?: Network[];
 		// Opens the edit modal jumped to the given section.
-		onedit: (section: 'compute' | 'scheduling' | 'storage' | 'network' | 'labels') => void;
+		onedit: (section: EditSection) => void;
 		onsearchlabel?: (key: string, value: string) => void;
 	} = $props();
 
@@ -29,7 +30,7 @@
 		`${g.mode === 'apart' ? 'keep apart' : 'keep together'}${g.strict ? ', strict' : ', preferred'}`;
 </script>
 
-{#snippet editButton(section: 'compute' | 'scheduling' | 'storage' | 'network' | 'labels')}
+{#snippet editButton(section: EditSection)}
 	<button
 		onclick={() => onedit(section)}
 		class="flex items-center gap-1 text-xs text-accent hover:underline"

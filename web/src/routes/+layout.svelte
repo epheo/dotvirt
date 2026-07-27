@@ -15,6 +15,7 @@
 	import AppContextMenus from '$lib/components/AppContextMenus.svelte';
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import AppModals from '$lib/components/AppModals.svelte';
+	import Banner from '$lib/components/Banner.svelte';
 	import ChangesPanel from '$lib/components/ChangesPanel.svelte';
 	import Login from '$lib/components/Login.svelte';
 	import SSOBanner from '$lib/components/SSOBanner.svelte';
@@ -118,8 +119,6 @@
 	$effect(() => {
 		if (ui.changesOpen) untrack(() => drafts.refresh());
 	});
-
-	const canNamespace = $derived(!!inventory.caps?.namespace);
 </script>
 
 <svelte:head>
@@ -136,23 +135,19 @@
 		<AppHeader />
 
 		{#if inventory.error}
-			<div
-				class="flex items-start gap-2 border-b border-danger-soft bg-danger-soft/60 px-4 py-2 text-sm text-danger-ink"
-			>
+			<Banner tone="danger" size="md" class="items-start">
 				<span class="font-medium">Error:</span>
 				<span class="font-mono text-xs break-all">{inventory.error}</span>
-			</div>
+			</Banner>
 		{/if}
 
 		<SSOBanner />
 
 		{#if inventory.inventory?.warnings?.length}
-			<div
-				class="flex items-start gap-2 border-b border-warn-soft bg-warn-soft/60 px-4 py-2 text-sm text-warn-ink"
-			>
+			<Banner tone="warn" size="md" class="items-start">
 				<TriangleAlert size={16} class="mt-0.5 shrink-0" />
 				<span>{inventory.inventory.warnings.join('; ')}</span>
-			</div>
+			</Banner>
 		{/if}
 
 		<div class="flex min-h-0 flex-1">
@@ -168,7 +163,7 @@
 					{:else if inventory.inventory.projects.length === 0 && treeSection !== 'catalog'}
 						<div class="space-y-3 p-6 text-center">
 							<p class="text-xs text-ink-faint">No projects visible.</p>
-							{#if canNamespace}
+							{#if inventory.canNamespace}
 								<button
 									onclick={() => (ui.modal = { kind: 'newProject' })}
 									class="inline-flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"

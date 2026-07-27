@@ -3,6 +3,7 @@
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
+	import Banner from './Banner.svelte';
 	import StatusDot from './StatusDot.svelte';
 
 	// Pending-change awareness on object pages: an unproposed staged change (this
@@ -21,9 +22,7 @@
 </script>
 
 {#if stagedItem || stagedCount}
-	<div
-		class="flex items-center gap-2 border-b border-select bg-select-soft px-4 py-1.5 text-xs text-accent-ink"
-	>
+	<Banner tone="accent">
 		<StatusDot tone="info" size="xs" />
 		{#if stagedItem}
 			A staged <strong>{stagedItem.kind}</strong> for this VM is waiting in Changes — not yet proposed.
@@ -36,15 +35,13 @@
 		>
 			Review &amp; propose
 		</button>
-	</div>
+	</Banner>
 {:else if proposal}
-	<div
-		class="flex items-center gap-2 border-b border-ok-soft bg-ok-soft/60 px-4 py-1.5 text-xs text-ok-ink"
-	>
+	<Banner tone="ok">
 		<StatusDot tone="ok" size="xs" />
 		PR #{proposal.prNumber} is open in <strong>{proj}</strong> — its changes apply when it merges.
 		<a href={proposal.prURL} target="_blank" rel="noopener" class="font-medium hover:underline"
 			>View PR ↗</a
 		>
-	</div>
+	</Banner>
 {/if}

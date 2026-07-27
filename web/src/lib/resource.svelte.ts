@@ -82,3 +82,44 @@ export function resource<T>(
 		refresh: run,
 	};
 }
+
+// action owns resource()'s write-side idiom: one busy flag, one error slot, and
+// the central-401 swallow — so no dialog hand-rolls the sequence or forgets the
+// Unauthorized branch and paints an error banner over the login redirect.
+// run resolves true on success, so call sites close on `if (await op.run(...))`.
+export interface Action {
+	readonly busy: boolean;
+	readonly error: string;
+	clear(): void;
+	run(fn: () => Promise<unknown>): Promise<boolean>;
+}
+
+export function action(): Action {
+	let busy = $state(false);
+	let error = $state('');
+	return {
+		get busy() {
+			return busy;
+		},
+		get error() {
+			return error;
+		},
+		clear() {
+			error = '';
+		},
+		async run(fn) {
+			busy = true;
+			error = '';
+			try {
+				await fn();
+				return true;
+			} catch (e) {
+				if (e instanceof Unauthorized) return false;
+				error = friendlyError(e);
+				return false;
+			} finally {
+				busy = false;
+			}
+		},
+	};
+}

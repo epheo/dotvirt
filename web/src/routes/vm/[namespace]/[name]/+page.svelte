@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
-	import VMDetail from '$lib/components/VMDetail.svelte';
+	import VMDetail, { VM_TABS, type VMTab } from '$lib/components/VMDetail.svelte';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
@@ -13,22 +13,11 @@
 	// and a VM deleted mid-view degrades to the empty state instead of crashing.
 	const vm = $derived(inventory.findVM(namespace, name));
 
-	type Tab =
-		'summary' | 'monitor' | 'configure' | 'security' | 'permissions' | 'snapshots' | 'console';
-	const TABS: Tab[] = [
-		'summary',
-		'monitor',
-		'configure',
-		'security',
-		'permissions',
-		'snapshots',
-		'console',
-	];
-	const tab = $derived.by<Tab>(() => {
-		const t = page.url.searchParams.get('tab') as Tab | null;
-		return t && TABS.includes(t) ? t : 'summary';
+	const tab = $derived.by<VMTab>(() => {
+		const t = page.url.searchParams.get('tab') as VMTab | null;
+		return t && VM_TABS.includes(t) ? t : 'summary';
 	});
-	const setTab = (t: Tab) =>
+	const setTab = (t: VMTab) =>
 		goto(`?tab=${t}`, { replaceState: true, noScroll: true, keepFocus: true });
 
 	// One-shot handoff of a pending intent (context menu → "Edit settings" on an

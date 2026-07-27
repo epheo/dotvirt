@@ -37,8 +37,10 @@
 		onrefresh?: () => void;
 	} = $props();
 
+	type DockTab = 'tasks' | 'events' | 'alarms';
+
 	let openPane = $state(true);
-	let tab = $state<'tasks' | 'events' | 'alarms'>('tasks');
+	let tab = $state<DockTab>('tasks');
 
 	// Events lane: fetched on demand when the Events tab is opened (not on the
 	// broadcast hot path), so a busy cluster's event churn can't spam the UI.
@@ -90,7 +92,7 @@
 			.finally(() => (eventsLoading = false));
 	}
 
-	function selectTab(t: 'tasks' | 'events' | 'alarms') {
+	function selectTab(t: DockTab) {
 		tab = t;
 		openPane = true;
 		if (t === 'events') loadEvents(); // refresh on each open
@@ -248,6 +250,48 @@
 	);
 	const alarms = $derived(clientAlarms.length + (firing?.length ?? 0));
 
+	// Both alarm sources projected into one row shape, so the table renders a
+	// single {#each} whatever the origin.
+	type AlarmRow = {
+		key: string;
+		name: string;
+		count?: number;
+		target: string;
+		targetSub: string; // faint suffix ('' = none)
+		severity: string;
+		tone: ReturnType<typeof severityTone>;
+		bg: string;
+		source: 'Prometheus' | 'dotvirt';
+		onclick: () => void;
+	};
+	const alarmRows = $derived.by((): AlarmRow[] => [
+		...(firing ?? []).map((a): AlarmRow => ({
+			key: `prom:${a.name}:${a.namespace ?? ''}/${a.vm ?? ''}:${a.severity ?? ''}`,
+			name: a.name,
+			count: (a.count ?? 0) > 1 ? a.count : undefined,
+			target: a.vm || (a.namespace ?? '—'),
+			targetSub: a.vm ? (a.namespace ?? '') : '',
+			severity: a.severity ?? '—',
+			tone: severityTone(a.severity),
+			bg: 'bg-warn-soft/40',
+			source: 'Prometheus',
+			onclick: () => {
+				if (a.namespace && a.vm) onselect(a.namespace, a.vm);
+			},
+		})),
+		...clientAlarms.map((t): AlarmRow => ({
+			key: `dotvirt:${t.kind}:${t.namespace}/${t.name}`,
+			name: t.verb,
+			target: t.name,
+			targetSub: t.namespace,
+			severity: t.kind === 'drift' ? 'warning' : 'critical',
+			tone: taskTone(t),
+			bg: t.kind === 'drift' ? 'bg-warn-soft/40' : 'bg-danger-soft/40',
+			source: 'dotvirt',
+			onclick: () => activate(t),
+		})),
+	]);
+
 	const rowClass = (t: Task) =>
 		t.kind === 'drift'
 			? 'bg-warn-soft/40'
@@ -304,7 +348,7 @@
 			]}
 			active={openPane ? tab : ''}
 			variant="chips"
-			onchange={(t) => selectTab(t as 'tasks' | 'events' | 'alarms')}
+			onchange={(t) => selectTab(t as DockTab)}
 		/>
 		<button
 			onclick={() => {
@@ -378,47 +422,22 @@
 					<table class="w-full">
 						{@render dockHead(['Alarm', 'Target', 'Severity', 'Source'])}
 						<tbody class={TBODY}>
-							{#each firing ?? [] as a (a.name + ':' + (a.namespace ?? '') + '/' + (a.vm ?? '') + ':' + (a.severity ?? ''))}
-								<tr
-									onclick={() => a.namespace && a.vm && onselect(a.namespace, a.vm)}
-									class="cursor-pointer bg-warn-soft/40 hover:bg-select-soft"
-								>
+							{#each alarmRows as r (r.key)}
+								<tr onclick={r.onclick} class="cursor-pointer {r.bg} hover:bg-select-soft">
 									<td class="px-3 py-1.5 font-medium text-ink-soft">
-										{a.name}{#if (a.count ?? 0) > 1}<span class="text-ink-faint">
-												×{a.count}</span
-											>{/if}
+										{r.name}{#if r.count}<span class="text-ink-faint"> ×{r.count}</span>{/if}
 									</td>
 									<td class="px-3 py-1.5 text-ink">
-										{#if a.vm}{a.vm} <span class="text-ink-faint">· {a.namespace}</span>
-										{:else}{a.namespace ?? '—'}{/if}
+										{r.target}{#if r.targetSub}
+											<span class="text-ink-faint">· {r.targetSub}</span>{/if}
 									</td>
 									<td class="px-3 py-1.5">
 										<span class="inline-flex items-center gap-1.5">
-											<StatusDot tone={severityTone(a.severity)} size="xs" />
-											{a.severity ?? '—'}
+											<StatusDot tone={r.tone} size="xs" />
+											{r.severity}
 										</span>
 									</td>
-									<td class="px-3 py-1.5 text-ink-muted">Prometheus</td>
-								</tr>
-							{/each}
-							{#each clientAlarms as t (t.kind + ':' + t.namespace + '/' + t.name)}
-								<tr
-									onclick={() => activate(t)}
-									class="cursor-pointer {t.kind === 'drift'
-										? 'bg-warn-soft/40'
-										: 'bg-danger-soft/40'} hover:bg-select-soft"
-								>
-									<td class="px-3 py-1.5 font-medium text-ink-soft">{t.verb}</td>
-									<td class="px-3 py-1.5 text-ink">
-										{t.name} <span class="text-ink-faint">· {t.namespace}</span>
-									</td>
-									<td class="px-3 py-1.5">
-										<span class="inline-flex items-center gap-1.5">
-											<StatusDot tone={taskTone(t)} size="xs" />
-											{t.kind === 'drift' ? 'warning' : 'critical'}
-										</span>
-									</td>
-									<td class="px-3 py-1.5 text-ink-muted">dotvirt</td>
+									<td class="px-3 py-1.5 text-ink-muted">{r.source}</td>
 								</tr>
 							{/each}
 						</tbody>

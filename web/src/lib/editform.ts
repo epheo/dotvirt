@@ -4,6 +4,10 @@
 
 import type { Disk, EditRequest, NIC, PlacementGroup, Power, VM } from '$lib/api';
 
+// The Edit Settings sections a Configure card (or context menu) can deep-link
+// to — one vocabulary for the dialog, its openers, and the wizard step map.
+export type EditSection = 'compute' | 'scheduling' | 'storage' | 'network' | 'labels';
+
 // Devices carry a removed flag; rows added in the dialog are marked isNew so
 // the diff can tell additions from removals of pre-existing devices.
 export interface DiskRow extends Disk {
@@ -147,4 +151,47 @@ export function buildEditRequest(vm: VM, form: EditForm): EditRequest {
 	if (removeNetworks.length) req.removeNetworks = removeNetworks;
 
 	return req;
+}
+
+// Human-readable summary of exactly what will be staged, derived from the same
+// request the backend receives — so the review never diverges from the commit.
+export function summarize(vm: VM, form: EditForm): { label: string; value: string }[] {
+	const r = buildEditRequest(vm, form);
+	const out: { label: string; value: string }[] = [];
+	if (r.power) out.push({ label: 'Power', value: `${vm.power} → ${r.power}` });
+	if (r.sizing === 'instancetype')
+		out.push({
+			label: 'Sizing',
+			value: `Instance type · ${r.instancetype ?? form.instancetype}`,
+		});
+	if (r.sizing === 'custom')
+		out.push({ label: 'Sizing', value: `Custom · ${r.cpuCores} CPU / ${r.memory}` });
+	if (r.preference) out.push({ label: 'Preference', value: r.preference });
+	if (r.drsExclude !== undefined)
+		out.push({
+			label: 'Dynamic Rescheduling',
+			value: r.drsExclude ? 'excluded from rebalancing' : 'rebalanced',
+		});
+	if (r.evictionStrategy !== undefined)
+		out.push({ label: 'Eviction strategy', value: r.evictionStrategy || 'cluster default' });
+	for (const [k, v] of Object.entries(r.setLabels ?? {}))
+		out.push({ label: `Label ${k}`, value: v });
+	for (const k of r.removeLabels ?? []) out.push({ label: `Label ${k}`, value: 'removed' });
+	for (const d of r.addDisks ?? [])
+		out.push({
+			label: 'Disk added',
+			value: `${d.name} (${d.size}${d.storageClass ? `, ${d.storageClass}` : ''})`,
+		});
+	for (const n of r.removeDisks ?? []) out.push({ label: 'Disk removed', value: n });
+	for (const n of r.addNetworks ?? []) out.push({ label: 'Adapter added', value: n.name });
+	for (const n of r.removeNetworks ?? []) out.push({ label: 'Adapter removed', value: n });
+	for (const g of r.addGroups ?? [])
+		out.push({
+			label: `Group ${g.name}`,
+			value: `keep ${g.mode}${g.strict ? ', strict' : ', preferred'}`,
+		});
+	for (const n of r.removeGroups ?? []) out.push({ label: `Group ${n}`, value: 'removed' });
+	if (r.pin)
+		out.push({ label: 'Host pinning', value: r.pin.length ? r.pin.join(', ') : 'removed' });
+	return out;
 }
