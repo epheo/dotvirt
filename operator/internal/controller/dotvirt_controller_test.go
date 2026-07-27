@@ -225,7 +225,7 @@ func TestReconcileMinimalCRToReady(t *testing.T) {
 		}
 	}
 
-	argoNS := platform.Kubernetes.DefaultArgoNamespace()
+	argoNS := "argocd" // the vanilla-Kubernetes default argoTarget resolves
 	if !exists(t, c, &appsv1.Deployment{}, dv.Namespace, install.AppName) {
 		t.Error("workload Deployment not applied")
 	}
@@ -322,7 +322,7 @@ func TestReconcileSecretsCreateOnce(t *testing.T) {
 // NotTracked.
 func TestReconcileConvergesStaleAppsetMirror(t *testing.T) {
 	dv := testCR()
-	argoNS := platform.Kubernetes.DefaultArgoNamespace()
+	argoNS := "argocd" // the vanilla-Kubernetes default argoTarget resolves
 	stale := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: install.AppsetSecretName, Namespace: argoNS},
 		Data:       map[string][]byte{"token": []byte("previous-install")},
@@ -358,7 +358,7 @@ func TestFinalizeDeletesOnlyThisInstance(t *testing.T) {
 	dv.Finalizers = []string{dotvirtFinalizer}
 	dv.DeletionTimestamp = &now
 
-	argoNS := platform.Kubernetes.DefaultArgoNamespace()
+	argoNS := "argocd" // the vanilla-Kubernetes default argoTarget resolves
 	mine := install.Labels(dv.Name)
 	other := map[string]string{"dotvirt.io/instance": "other"}
 

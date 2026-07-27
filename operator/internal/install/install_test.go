@@ -260,28 +260,18 @@ func TestOperandImageRollsWithOperatorUpgrade(t *testing.T) {
 	}
 }
 
-// Both Argo source definitions must exclude templates/ — the repo's VM-template
-// library. Its manifests' CRD (template.kubevirt.io) need not exist on-cluster;
-// a missing exclude makes every generated app degrade on unknown kinds.
+// Every Argo source (argoAppSpec is the one shared definition) must exclude
+// templates/ — the repo's VM-template library. Its manifests' CRD
+// (template.kubevirt.io) need not exist on-cluster; a missing exclude makes
+// every generated app degrade on unknown kinds.
 func TestArgoSourcesExcludeTemplateLibrary(t *testing.T) {
-	dv := testDotvirt()
-
-	appset := ApplicationSet(dv, "argocd")
-	dir, ok, _ := unstructured.NestedMap(appset.Object, "spec", "template", "spec", "source", "directory")
-	if !ok {
-		t.Fatal("ApplicationSet template has no source.directory")
-	}
-	if dir["exclude"] != "templates/*" {
-		t.Fatalf("ApplicationSet exclude = %v", dir["exclude"])
-	}
-
-	app := PlatformApplication(dv, "argocd", "https://forge/x/platform.git")
-	dir, ok, _ = unstructured.NestedMap(app.Object, "spec", "source", "directory")
+	app := PlatformApplication(testDotvirt(), "argocd", "https://forge/x/platform.git")
+	dir, ok, _ := unstructured.NestedMap(app.Object, "spec", "source", "directory")
 	if !ok {
 		t.Fatal("PlatformApplication has no source.directory")
 	}
 	if dir["exclude"] != "templates/*" {
-		t.Fatalf("PlatformApplication exclude = %v", dir["exclude"])
+		t.Fatalf("exclude = %v", dir["exclude"])
 	}
 }
 

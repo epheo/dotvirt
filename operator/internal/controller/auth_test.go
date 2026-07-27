@@ -51,13 +51,14 @@ func TestReconcileSSOOpenShiftWiring(t *testing.T) {
 }
 
 // Off OpenShift, SSO is silently disabled (the app's oauth flow needs the cluster oauth
-// server): no client secret is generated and the flag is cleared in-memory.
+// server): normalizeSpec clears the flag in-memory and no client secret is generated.
 func TestReconcileSSOGatedOffVanilla(t *testing.T) {
 	dv := testCR()
 	dv.Spec.Auth.OpenShiftSSO = true
 	c := testBuilder(t).WithObjects(dv).Build()
 	r := newReconciler(c, depsOK) // Platform == Kubernetes
 
+	r.normalizeSpec(dv)
 	if _, err := r.reconcileSecrets(context.Background(), dv); err != nil {
 		t.Fatalf("reconcileSecrets: %v", err)
 	}

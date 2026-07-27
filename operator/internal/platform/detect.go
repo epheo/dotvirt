@@ -1,6 +1,6 @@
 // Package platform detects the Kubernetes distribution so the operator can render
-// distribution-specific resources (Route vs Ingress) and pick sane ArgoCD defaults
-// — keeping dotvirt platform-agnostic with OpenShift as a first-class profile.
+// distribution-specific resources (Route vs Ingress) — keeping dotvirt
+// platform-agnostic with OpenShift as a first-class profile.
 package platform
 
 import (
@@ -35,20 +35,4 @@ func Detect(cfg *rest.Config) (Platform, error) {
 		}
 	}
 	return Kubernetes, nil
-}
-
-// DefaultArgoNamespace / DefaultArgoController return the conventional ArgoCD
-// locations for the platform, used when the Dotvirt spec doesn't override them.
-func (p Platform) DefaultArgoNamespace() string {
-	if p == OpenShift {
-		return "openshift-gitops"
-	}
-	return "argocd"
-}
-
-func (p Platform) DefaultArgoController() string {
-	if p == OpenShift {
-		return "openshift-gitops-argocd-application-controller"
-	}
-	return "argocd-application-controller"
 }

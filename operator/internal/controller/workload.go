@@ -7,7 +7,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
@@ -35,13 +34,8 @@ func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1
 	if exposure := r.exposure(dv); exposure != nil {
 		base = append(base, exposure)
 	}
-	for _, obj := range base {
-		if err := controllerutil.SetControllerReference(dv, obj, r.Scheme); err != nil {
-			return nil, err
-		}
-		if err := install.Apply(ctx, r.Client, obj, r.DryRun); err != nil {
-			return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionWorkloadReady, "ApplyFailed", err)
-		}
+	if err := r.applyOwned(ctx, dv, base...); err != nil {
+		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionWorkloadReady, "ApplyFailed", err)
 	}
 	if dv.Spec.Ingress.Host == "" && !r.DryRun && r.Platform == platform.OpenShift {
 		if host := r.routeHost(ctx, dv.Namespace, install.AppName); host != "" {
@@ -61,11 +55,7 @@ func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1
 		// OAuthClient forever.
 		dv.Status.SSOOAuthClient = ""
 	}
-	deployment := install.Deployment(dv)
-	if err := controllerutil.SetControllerReference(dv, deployment, r.Scheme); err != nil {
-		return nil, err
-	}
-	if err := install.Apply(ctx, r.Client, deployment, r.DryRun); err != nil {
+	if err := r.applyOwned(ctx, dv, install.Deployment(dv)); err != nil {
 		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionWorkloadReady, "ApplyFailed", err)
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionWorkloadReady, metav1.ConditionTrue, "Ready", "workload applied")

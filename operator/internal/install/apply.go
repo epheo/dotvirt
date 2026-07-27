@@ -31,13 +31,13 @@ const AppName = "dotvirt"
 // container port and probes, the `-addr` flag, and every in-cluster URL built to it.
 const HTTPPort int32 = 8080
 
-// Labels are the recommended labels stamped on every rendered resource, plus a
-// per-instance label so cluster-scoped / cross-namespace resources (which can't
-// carry an ownerRef to a namespaced CR) can be found for finalizer cleanup.
-// InstanceLabel ties a cluster-scoped or foreign-namespace object to the install that
-// owns it, which is what the finalizer's cleanup selects on.
+// InstanceLabel ties a cluster-scoped or foreign-namespace object (which can't
+// carry an ownerRef to a namespaced CR) to the install that owns it; the
+// finalizer's cleanup selects on it.
 const InstanceLabel = "dotvirt.io/instance"
 
+// Labels are the recommended labels plus InstanceLabel, stamped on every
+// rendered resource.
 func Labels(instance string) map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/name":       AppName,

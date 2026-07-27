@@ -26,25 +26,7 @@ func ApplicationSet(dv *dotvirtv1alpha1.Dotvirt, argoNS string) *unstructured.Un
 			"name":   "dotvirt-{{.project}}",
 			"labels": map[string]any{"dotvirt.io/project": "{{.project}}"},
 		},
-		"spec": map[string]any{
-			"project": projectTenants,
-			"source": map[string]any{
-				"repoURL":        "{{.repo}}",
-				"targetRevision": appTargetRevision,
-				"path":           ".",
-				// templates/ is the repo's VM-template library (VirtualMachineTemplate
-				// manifests dotvirt renders itself) — its CRD need not exist on-cluster,
-				// so Argo must never try to apply it. Argo compiles these globs without
-				// a separator, so the * crosses "/" (the same reason include matches
-				// nested <ns>/<vm>.yaml).
-				"directory": map[string]any{"recurse": true, "include": "*.yaml", "exclude": "templates/*"},
-			},
-			"destination": map[string]any{"server": inClusterServer, "namespace": "default"},
-			"syncPolicy": map[string]any{
-				"automated":   map[string]any{"prune": true, "selfHeal": true},
-				"syncOptions": []any{"CreateNamespace=false"},
-			},
-		},
+		"spec": argoAppSpec(projectTenants, "{{.repo}}"),
 	}
 	return argoObject("ApplicationSet", applicationSetName, argoNS, dv.Name, map[string]any{
 		"goTemplate":        true,
