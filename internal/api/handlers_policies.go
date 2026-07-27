@@ -9,7 +9,7 @@ import (
 // handlePolicies lists the policy plane (the Security view): namespace-tier rows
 // (NetworkPolicy, EgressFirewall) scoped to the caller's visible namespaces, and
 // cluster-tier rows gated per kind on the same create-SSAR the matching modal and
-// create route enforce — an admin policy's rules name namespaces across tenants,
+// create route enforce - an admin policy's rules name namespaces across tenants,
 // so only a caller with authority over that kind may read the rollup. The catalog
 // is the SA-maintained netstate snapshot; per-object drift attaches at serve time.
 func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
@@ -28,7 +28,7 @@ func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Visibility is authority over the kind, not platform authoring: unlike the
-	// caps in /api/networks it doesn't require a platform repo — a cluster-admin
+	// caps in /api/networks it doesn't require a platform repo - a cluster-admin
 	// without one still audits the live policy plane.
 	out := scopePolicies(all, visible, s.clusterAuthority(r.Context(), id, c))
 	s.enrichPolicyDrift(out)
@@ -37,7 +37,7 @@ func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
 
 // scopePolicies keeps namespace-tier policies in visible namespaces and
 // cluster-tier policies the caller has authority over. Returns fresh slices only
-// by construction — the netstate catalog built each row per call, so mutating the
+// by construction - the netstate catalog built each row per call, so mutating the
 // kept rows (drift enrichment) is safe.
 func scopePolicies(all []model.Policy, visible map[string]bool, canCluster func(model.PolicyKind) bool) []model.Policy {
 	out := make([]model.Policy, 0, len(all))
@@ -55,7 +55,7 @@ func scopePolicies(all []model.Policy, visible map[string]bool, canCluster func(
 }
 
 // backingGroup maps every managed object's Backing (also its kind) to its API
-// group — the one vocabulary the per-object drift lookups key on.
+// group - the one vocabulary the per-object drift lookups key on.
 var backingGroup = map[string]string{
 	"UserDefinedNetwork":            "k8s.ovn.org",
 	"ClusterUserDefinedNetwork":     "k8s.ovn.org",
@@ -69,7 +69,7 @@ var backingGroup = map[string]string{
 }
 
 // enrichPolicyDrift attaches each policy's own ArgoCD sync/health from the shared
-// Application snapshot — the same per-object drift plane VMs and networks use.
+// Application snapshot - the same per-object drift plane VMs and networks use.
 func (s *Server) enrichPolicyDrift(pols []model.Policy) {
 	for i := range pols {
 		s.policyDrift(&pols[i])

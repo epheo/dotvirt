@@ -205,7 +205,7 @@ func adoptResource(kind string) draft.Resource {
 // ctx still bounds the call so a hung Argo op doesn't outlive the HTTP request).
 // Because this is the one operation that escalates to dotvirt's SA, the caller's
 // own authority over the VM (canUpdateVM, a user-token SSAR) is enforced here,
-// beside the escalation — not only at the transport layer.
+// beside the escalation - not only at the transport layer.
 func (c *Coordinator) Resync(ctx context.Context, canUpdateVM func(context.Context, string, string) (bool, error), namespace, name string) (model.ResyncResult, error) {
 	if c.resyncer == nil {
 		return model.ResyncResult{}, fmt.Errorf("%w: re-sync unavailable (ArgoCD not configured)", model.ErrUnavailable)

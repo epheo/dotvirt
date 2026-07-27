@@ -8,7 +8,7 @@
 
 	// Live-migration target picker (the vMotion dialog): Automatic lets the
 	// scheduler place the VMI; picking a host pins the migration to it via the
-	// migration's added node selector — which can only narrow the VM's own
+	// migration's added node selector - which can only narrow the VM's own
 	// scheduling constraints, never bypass them. Listing hosts is cluster-scoped
 	// RBAC; a caller without it keeps Automatic.
 	let {
@@ -32,7 +32,7 @@
 			nodes = await api.nodes();
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
-			canPick = false; // no node-list RBAC — the scheduler's choice only
+			canPick = false; // no node-list RBAC - the scheduler's choice only
 			nodes = [];
 		}
 	}

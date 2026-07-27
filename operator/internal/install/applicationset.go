@@ -15,8 +15,8 @@ const (
 	appsetConfigMapName = "dotvirt-appset-plugin"
 )
 
-// ApplicationSet generates one Argo Application per dotvirt project — in the
-// dotvirt-tenants AppProject (restricted), from dotvirt's plugin generator — so
+// ApplicationSet generates one Argo Application per dotvirt project - in the
+// dotvirt-tenants AppProject (restricted), from dotvirt's plugin generator - so
 // labeling a namespace provisions its tenant app. Unstructured (no argo-cd module
 // dep). The {{.project}}/{{.repo}} templates are evaluated by Argo, so they stay
 // literal strings here.

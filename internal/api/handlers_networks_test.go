@@ -7,7 +7,7 @@ import (
 )
 
 // scopeNetworks must keep shared (cluster) networks discoverable to every tenant
-// but never reveal a namespace the caller can't already see — neither a project
+// but never reveal a namespace the caller can't already see - neither a project
 // network in a foreign namespace nor, on a shared network, the foreign entries of
 // its own Namespaces list (a CUDN publishes cluster-wide, so that list can name
 // other tenants' namespaces).

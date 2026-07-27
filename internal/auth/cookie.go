@@ -14,7 +14,7 @@ const cookieName = "dotvirt_session"
 
 // cookieValue encodes the token as base64(token)."."hex(HMAC-SHA256(token)). The
 // HMAC binds the value to dotvirt's secret so a client can't forge a cookie for
-// an arbitrary token — though the token itself is the real credential; the MAC
+// an arbitrary token - though the token itself is the real credential; the MAC
 // just lets us reject tampering cheaply before spending a TokenReview.
 func cookieValue(token string, secret []byte) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(token)) + "." + sign(token, secret)

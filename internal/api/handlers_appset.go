@@ -11,9 +11,9 @@ import (
 // labeled namespaces), derived from the dotvirt.io/project labels (read from the SA
 // snapshot). Every emitted app lands in the dotvirt-tenants AppProject (the template
 // in deploy/applicationset.yaml), so this list can only ever mint RESTRICTED tenant
-// apps (namespaced workloads, no cluster-scoped infra) — the privileged platform app
+// apps (namespaced workloads, no cluster-scoped infra) - the privileged platform app
 // is static and platform-owned, never generated from here. Labeling a namespace
-// folds it into its project's existing app — dotvirt supplies the list but never
+// folds it into its project's existing app - dotvirt supplies the list but never
 // creates the App, so "owns nothing" holds. Authenticated by a shared token (not a
 // user session); the path is exempted from user-auth in auth.isOpenPath.
 func (s *Server) handleAppSetPlugin(w http.ResponseWriter, r *http.Request) {

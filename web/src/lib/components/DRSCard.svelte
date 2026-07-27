@@ -5,9 +5,9 @@
 	import Row from './Row.svelte';
 	import DRSModal from './DRSModal.svelte';
 
-	// The cluster's DRS panel (vCenter: Cluster → Configure → vSphere DRS):
+	// The cluster's DRS panel (vCenter: Cluster -> Configure -> vSphere DRS):
 	// committed configuration from the platform repo, live operator state from
-	// the backend's KubeDescheduler snapshot. Polls like the metrics cards — the
+	// the backend's KubeDescheduler snapshot. Polls like the metrics cards - the
 	// GET is a pure snapshot read.
 	let { onstaged }: { onstaged?: () => void } = $props();
 
@@ -44,7 +44,7 @@
 	});
 
 	// The live plane, relative to what's committed: installing / running /
-	// degraded — or explicitly unknown while the watch is stale or pre-sync.
+	// degraded - or explicitly unknown while the watch is stale or pre-sync.
 	const liveStatus = $derived.by(() => {
 		if (!view) return '';
 		const l = view.live;

@@ -77,7 +77,7 @@ func TestStageEnableDRSStagesOnlyChangedFiles(t *testing.T) {
 }
 
 func TestStageEnableDRSUnchangedIsCleanDraft(t *testing.T) {
-	// Declarative: a spec matching the base branch is an empty delta — a clean
+	// Declarative: a spec matching the base branch is an empty delta - a clean
 	// draft, not an error. With a pending change staged first, the same submit
 	// is the cancel gesture (revert to the committed configuration).
 	spec := drsgen.Spec{Mode: drsgen.ModeAutomatic}
@@ -108,7 +108,7 @@ func TestStageEnableDRSUnchangedIsCleanDraft(t *testing.T) {
 
 func TestStageEnableDRSReconfigureDropsStaleSiblings(t *testing.T) {
 	// A re-configure without the PSI opt-in must not leave the previously
-	// staged MachineConfig behind — the draft is replaced wholesale.
+	// staged MachineConfig behind - the draft is replaced wholesale.
 	bare := seedBareFiles(t, nil)
 	c := newTestCoordinator(t)
 	id := auth.Identity{Username: "admin"}
@@ -236,10 +236,10 @@ func TestStageDisableDRSCancelsPendingEnable(t *testing.T) {
 	}
 }
 
-// The full draft → branch → remote flow: an enable proposes exactly the drsgen
+// The full draft -> branch -> remote flow: an enable proposes exactly the drsgen
 // file set onto the pushed working branch, and the content round-trips through
 // Parse. Push is enabled (unlike newProposeFixture) so the bare remote is the
-// thing asserted on — what the forge PR would actually contain.
+// thing asserted on - what the forge PR would actually contain.
 func TestProposeDRSCommitsFileSet(t *testing.T) {
 	store, err := draft.Open(t.TempDir())
 	if err != nil {

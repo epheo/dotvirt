@@ -14,7 +14,7 @@ import (
 // here so the dynamic client and discovery stay behind cluster.Client (no snapshot
 // touches a clientset directly).
 
-// DynamicListWatch is a List+Watch over gvr across all namespaces — cluster-scoped
+// DynamicListWatch is a List+Watch over gvr across all namespaces - cluster-scoped
 // kinds included (NamespaceAll addresses the whole cluster for them). The source for a
 // netstate reflector over an arbitrary CRD.
 func (c *Client) DynamicListWatch(gvr schema.GroupVersionResource) *cache.ListWatch {
@@ -28,7 +28,7 @@ func (c *Client) DynamicListWatch(gvr schema.GroupVersionResource) *cache.ListWa
 	}
 }
 
-// HasAPIResource reports whether gvr is served by the cluster — the discovery gate a
+// HasAPIResource reports whether gvr is served by the cluster - the discovery gate a
 // snapshot uses to stay a slow probe where a CRD is absent (OVN-K UDN or nmstate not
 // installed), never a reflector error loop.
 func (c *Client) HasAPIResource(gvr schema.GroupVersionResource) bool {
@@ -44,7 +44,7 @@ func (c *Client) HasAPIResource(gvr schema.GroupVersionResource) bool {
 	return false
 }
 
-// NodeLabels is a node's name + labels — enough for netstate to compute which nodes
+// NodeLabels is a node's name + labels - enough for netstate to compute which nodes
 // an uplink (an NNCP nodeSelector, or all of them for br-ex) covers. Distinct from
 // model.NodeInfo (the UI's node detail) and model.Node (the inventory row).
 type NodeLabels struct {
@@ -52,7 +52,7 @@ type NodeLabels struct {
 	Labels map[string]string
 }
 
-// ListNodeLabels lists every node's name+labels under this client (nodes:list — no
+// ListNodeLabels lists every node's name+labels under this client (nodes:list - no
 // watch). netstate refreshes a cache from this off the request path, so uplink node
 // membership needs neither a per-request node LIST nor a nodes:watch grant.
 func (c *Client) ListNodeLabels(ctx context.Context) ([]NodeLabels, error) {

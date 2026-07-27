@@ -25,7 +25,7 @@ func (c *Client) EnsureWebhook(targetURL, secret string) error {
 }
 
 // EnsureOrgWebhook registers the same push+pull_request webhook on the client's
-// ORGANIZATION rather than a single repo, so one hook covers every repo in the org —
+// ORGANIZATION rather than a single repo, so one hook covers every repo in the org -
 // present and future. Used to point ArgoCD at all project repos with a single
 // registration, with no per-repo enumeration. Same reconcile semantics as
 // EnsureWebhook (see ensureHook).
@@ -45,7 +45,7 @@ func (c *Client) OwnerIsOrg() (bool, error) {
 // delivering to targetURL within the given hooks collection (repo- or org-level).
 //
 // The hook is identified by its URL PATH, not its full URL. The host legitimately
-// changes — an external Route giving way to the in-cluster Service — and matching on the
+// changes - an external Route giving way to the in-cluster Service - and matching on the
 // path migrates that one hook in place rather than orphaning the old hook and POSTing a
 // duplicate that double-delivers. Extra hooks sharing the path (from an earlier
 // migration or a manual add) are deleted, so deliveries never split across a
@@ -54,7 +54,7 @@ func (c *Client) OwnerIsOrg() (bool, error) {
 // Forgejo never echoes a hook's stored secret, so a converged hook is indistinguishable
 // from one carrying a stale/rotated secret that 403s every delivery. The fingerprint
 // cache (hookSecrets) records the secret last written per hook, so the secret is
-// re-asserted at most once per process — on first sight or after a rotation — not on
+// re-asserted at most once per process - on first sight or after a rotation - not on
 // every sweep. That keeps steady-state sweeps write-free against Forgejo's single-replica
 // sqlite, and leaves a converged hook exactly as the forge has it (active or not) instead
 // of fighting its failure-driven auto-disable.
@@ -79,8 +79,8 @@ func (c *Client) ensureHook(hooksPath, targetURL, secret string) error {
 		return c.do("POST", hooksPath, withCreateType(desired), nil)
 	}
 
-	// Reconcile the first match in place; PATCH only on a real change — a host migration
-	// or a secret the cache hasn't seen this process — so a re-enable (active:true) and a
+	// Reconcile the first match in place; PATCH only on a real change - a host migration
+	// or a secret the cache hasn't seen this process - so a re-enable (active:true) and a
 	// secret rewrite happen exactly when they recover something, not every sweep. Record
 	// only after the write lands, or a failed PATCH would falsely mark the hook converged.
 	primary := ours[0]
@@ -102,7 +102,7 @@ func (c *Client) ensureHook(hooksPath, targetURL, secret string) error {
 // hookSecrets fingerprints the secret last written to each reconciled hook, keyed by
 // "{collection}#{id}". It exists because Forgejo never echoes a hook's stored secret:
 // without it ensureHook could not tell a converged hook from one needing its secret
-// re-asserted, and would PATCH on every sweep. Process-lifetime state — a restart
+// re-asserted, and would PATCH on every sweep. Process-lifetime state - a restart
 // re-asserts once, which is the intended recovery.
 var (
 	hookSecretsMu sync.Mutex

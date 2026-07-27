@@ -9,7 +9,7 @@
 
 	const namespace = $derived(page.params.namespace!);
 	const name = $derived(page.params.name!);
-	// Derived from the live inventory by identity — every WS frame re-resolves it,
+	// Derived from the live inventory by identity - every WS frame re-resolves it,
 	// and a VM deleted mid-view degrades to the empty state instead of crashing.
 	const vm = $derived(inventory.findVM(namespace, name));
 
@@ -20,7 +20,7 @@
 	const setTab = (t: VMTab) =>
 		goto(`?tab=${t}`, { replaceState: true, noScroll: true, keepFocus: true });
 
-	// One-shot handoff of a pending intent (context menu → "Edit settings" on an
+	// One-shot handoff of a pending intent (context menu -> "Edit settings" on an
 	// unopened VM): consume and clear it, so a later visit doesn't replay it.
 	let intent = $state<typeof ui.detailIntent>(null);
 	$effect(() => {

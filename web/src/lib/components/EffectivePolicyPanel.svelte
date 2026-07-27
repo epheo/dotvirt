@@ -6,8 +6,8 @@
 	import SyncBadge from './SyncBadge.svelte';
 
 	// The "what governs this workload" panel: GET .../policy returns the policy
-	// chain already in evaluation order — admin tiers by precedence, then the
-	// project rules that select the workload, then baseline — plus the egress
+	// chain already in evaluation order - admin tiers by precedence, then the
+	// project rules that select the workload, then baseline - plus the egress
 	// planes. VM scope resolves pod selectors against the workload's labels; a
 	// namespace scope can't, so those bindings arrive marked conditional.
 	let { namespace, vm }: { namespace: string; vm?: string } = $props();

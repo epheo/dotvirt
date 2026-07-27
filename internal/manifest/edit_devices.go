@@ -51,7 +51,7 @@ func applyDisksNetworks(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) {
 // device, a dataVolume-backed volume, and a spec.dataVolumeTemplates entry that
 // provisions the PVC (on d.StorageClass, or the cluster default when empty). The
 // templates section is created when the VM lacks one (e.g. a container-disk
-// import); when it already exists — every wizard-built VM — entries are appended.
+// import); when it already exists - every wizard-built VM - entries are appended.
 func applyAddDisks(ed *lineEditor, spec, tmplSpec, devices *yaml.Node, vm string, adds []model.DiskAdd) {
 	if len(adds) == 0 {
 		return
@@ -107,8 +107,8 @@ func blankDVTemplate(dv, size, class string) []string {
 	return lines
 }
 
-// removeDisk deletes a disk device and its volume, plus — when the volume was
-// DataVolume-backed — the dataVolumeTemplates entry that provisioned it, so no
+// removeDisk deletes a disk device and its volume, plus - when the volume was
+// DataVolume-backed - the dataVolumeTemplates entry that provisioned it, so no
 // orphaned PVC template is left behind.
 func removeDisk(ed *lineEditor, spec, tmplSpec, devices *yaml.Node, name string) {
 	volumes := get(tmplSpec, "volumes")
@@ -122,7 +122,7 @@ func removeDisk(ed *lineEditor, spec, tmplSpec, devices *yaml.Node, name string)
 }
 
 // removeTemplateNamed deletes the dataVolumeTemplates item whose metadata.name
-// equals name — their identity, unlike the top-level name: of disks and volumes.
+// equals name - their identity, unlike the top-level name: of disks and volumes.
 func removeTemplateNamed(ed *lineEditor, seq *yaml.Node, name string) {
 	if i, item := findNamed(seq, name, true); item != nil {
 		ed.removeRange(item.Line-1, itemEndLine(ed, seq, i))

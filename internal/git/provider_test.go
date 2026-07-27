@@ -7,7 +7,7 @@ import (
 )
 
 // TestParseVMsOnBranchMemoizes proves the parse is served from cache while the branch
-// hash is unchanged, and re-parsed when it differs — so the whole-tree walk runs once
+// hash is unchanged, and re-parsed when it differs - so the whole-tree walk runs once
 // per content change, not once per inventory build.
 func TestParseVMsOnBranchMemoizes(t *testing.T) {
 	bare := seedRepo(t) // one VirtualMachine (web) on main

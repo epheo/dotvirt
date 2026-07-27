@@ -75,7 +75,7 @@
 	}
 	function onResizeMove(e: PointerEvent) {
 		if (!dragging) return;
-		const next = dragStartH + (dragStartY - e.clientY); // drag up → taller
+		const next = dragStartH + (dragStartY - e.clientY); // drag up -> taller
 		dockHeight = Math.max(80, Math.min(next, window.innerHeight * 0.7));
 	}
 	function onResizeEnd() {
@@ -102,7 +102,7 @@
 	const tasks = $derived(buildTasks({ inventory, feed, drafts, proposals, username }));
 
 	// Drift + failed migrations come from the streamed inventory; firing
-	// Prometheus alerts join them — one amber number for everything wrong.
+	// Prometheus alerts join them - one amber number for everything wrong.
 	const clientAlarms = $derived(
 		tasks.filter((t) => t.kind === 'drift' || (t.kind === 'migration' && !t.ok)),
 	);

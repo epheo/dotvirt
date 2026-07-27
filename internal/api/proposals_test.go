@@ -16,7 +16,7 @@ import (
 type fakeDraft struct {
 	Draft
 	mu    sync.Mutex
-	prs   map[string]model.Proposal // project name → its open PR
+	prs   map[string]model.Proposal // project name -> its open PR
 	calls int
 }
 
@@ -35,7 +35,7 @@ func (f *fakeDraft) forgeCalls() int {
 }
 
 // TestProposalsHotPathNeverCallsForge pins the refresher contract: proposalsFor
-// (the broadcast hot path) is a pure cache read — all forge traffic happens in
+// (the broadcast hot path) is a pure cache read - all forge traffic happens in
 // refreshProposals, and the hub is woken only when a lane visibly changes.
 func TestProposalsHotPathNeverCallsForge(t *testing.T) {
 	fd := &fakeDraft{prs: map[string]model.Proposal{}}
@@ -94,7 +94,7 @@ func TestProposalsHotPathNeverCallsForge(t *testing.T) {
 
 // TestProposalsPlatformProjectSticky pins the platform-PR fix: the synthetic
 // "platform" project is config-only and never in discovery, so a propose into it
-// must track it explicitly, and a later inventory build must NOT drop it — else its
+// must track it explicitly, and a later inventory build must NOT drop it - else its
 // PR shows briefly then vanishes.
 func TestProposalsPlatformProjectSticky(t *testing.T) {
 	fd := &fakeDraft{prs: map[string]model.Proposal{

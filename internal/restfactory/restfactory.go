@@ -1,5 +1,5 @@
 // Package restfactory mints per-bearer-token Kubernetes clients off a single,
-// credential-less base config — the shared identity machinery behind both the
+// credential-less base config - the shared identity machinery behind both the
 // cluster and argo planes. A per-user token fully determines identity (cluster
 // RBAC is the sole authority); dotvirt's own ServiceAccount token drives
 // background work. What kind of client each token yields is the caller's concern,
@@ -43,7 +43,7 @@ type Factory[T any] struct {
 
 // New builds a Factory. kubeconfig empty means in-cluster config. build turns a
 // token-bearing rest.Config into the concrete client (kubevirt+kube+dyn, dynamic,
-// …). The per-user path rides a credential-less base; the SA path keeps the
+// ...). The per-user path rides a credential-less base; the SA path keeps the
 // resolved config's own credentials (crucially its BearerTokenFile) so client-go
 // auto-refreshes the rotating projected SA token.
 func New[T any](kubeconfig string, build func(*rest.Config) (T, error)) (*Factory[T], error) {
@@ -82,7 +82,7 @@ func (f *Factory[T]) For(token string) (T, error) {
 // SA returns the client for dotvirt's own ServiceAccount (background identity).
 // Built once from saConfig and reused: the SA identity is stable, and keeping the
 // BearerTokenFile on saConfig lets client-go transparently re-read the token when
-// the projected (rotating, ~1h) SA token is refreshed — so SA-identity work
+// the projected (rotating, ~1h) SA token is refreshed - so SA-identity work
 // doesn't 401 an hour after startup. A static-token kubeconfig (no file) is reused
 // as-is, which the user accepts by supplying a non-refreshing token.
 func (f *Factory[T]) SA() (T, error) {
@@ -133,7 +133,7 @@ func clearCredentials(full *rest.Config) *rest.Config {
 // saConfig returns the config dotvirt uses as its own ServiceAccount, keeping the
 // resolved config's credentials so they stay live. It prefers a token FILE
 // (BearerTokenFile, or the conventional in-cluster mount) over an inline token,
-// because client-go re-reads the file each request — the projected SA token
+// because client-go re-reads the file each request - the projected SA token
 // rotates. Returns nil only when no SA credential exists at all (no token, no
 // file, no client cert).
 func saConfig(full *rest.Config) *rest.Config {

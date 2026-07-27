@@ -11,7 +11,7 @@ import (
 
 // Derive builds a VirtualMachineTemplate from an existing VM's git manifest
 // ("Clone to Template"): the VM becomes the blueprint with its identity
-// parameterized — metadata.name turns into ${NAME} backed by a
+// parameterized - metadata.name turns into ${NAME} backed by a
 // generate-expression default derived from the source name. DataVolume names
 // prefixed with the VM's name are re-anchored to ${NAME} too: DataVolumes are
 // namespace-unique, so a second deploy of the template must not collide with

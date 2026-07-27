@@ -1,6 +1,6 @@
 import { vmPath } from './api';
-// The single VM-action registry: every menu that acts on a VM — the detail
-// header's Actions ▾, the right-click context menu, the bulk bar — renders
+// The single VM-action registry: every menu that acts on a VM - the detail
+// header's Actions ▾, the right-click context menu, the bulk bar - renders
 // some projection of this list, so labels, ordering, and above all the
 // enablement gates live exactly once.
 //
@@ -9,7 +9,7 @@ import { vmPath } from './api';
 //    doesn't touch git, so Argo never reverts it). Hosts wrap run() with their
 //    own busy/result reporting; `verb` is the task-log wording.
 //  - 'host': the embedding view performs it (open a modal, switch a tab,
-//    download a file) — the registry only describes and gates it.
+//    download a file) - the registry only describes and gates it.
 import { api, Unauthorized, type VM } from '$lib/api';
 import { friendlyError } from '$lib/format';
 import { ui } from '$lib/state/ui.svelte';

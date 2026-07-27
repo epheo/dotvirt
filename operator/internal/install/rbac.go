@@ -8,7 +8,7 @@ import (
 )
 
 // The ClusterRoles these bindings reference are shipped as STATIC manifests
-// (config/rbac/operand_roles.yaml), created + owned by OLM/kustomize — not authored by
+// (config/rbac/operand_roles.yaml), created + owned by OLM/kustomize - not authored by
 // the operator. The operator only binds them per-install, which needs just `bind` on the
 // named roles (no `escalate`, no ClusterRole writes). Keep the role names below in sync
 // with operand_roles.yaml.

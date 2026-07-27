@@ -21,7 +21,7 @@
 
 	// Keyed on the namespace SET, not the array identity: the parent re-derives
 	// the namespaces array every inventory frame, but its CONTENT only changes
-	// on a real scope change — without this the slow /api/events call re-fires
+	// on a real scope change - without this the slow /api/events call re-fires
 	// continuously.
 	const key = $derived([...namespaces].sort().join(','));
 	const evRes = resource<VMEvent[]>(

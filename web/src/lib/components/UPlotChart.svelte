@@ -88,7 +88,7 @@
 	}
 
 	// Recreate the plot when its data, the container width, or the theme
-	// changes — canvas colors resolve at build time, so a theme flip rebuilds
+	// changes - canvas colors resolve at build time, so a theme flip rebuilds
 	// (`resolved` is a stable string, safe as an effect dep). Gated on a real
 	// width so we don't build a zero-width chart on first paint.
 	$effect(() => {

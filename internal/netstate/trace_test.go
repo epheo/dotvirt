@@ -29,7 +29,7 @@ func stepKinds(t *testing.T, res model.TraceResult) []string {
 }
 
 // A netpol allowing team-b on TCP/443 into team-a's web pods: the traced port
-// decides — 443 allowed by the rule, 22 default-denied by the same selection.
+// decides - 443 allowed by the rule, 22 default-denied by the same selection.
 func TestTraceEastWestNetpol(t *testing.T) {
 	s := New(nil, nil)
 	add(t, s.netpol, map[string]any{
@@ -341,7 +341,7 @@ func TestTraceConditional(t *testing.T) {
 }
 
 // A gateway rule whose destination the trace cannot resolve (nodeSelector)
-// must stay visible as Conditional — dropping it would let the catch-all
+// must stay visible as Conditional - dropping it would let the catch-all
 // decide with false certainty.
 func TestTraceGatewayNodeSelector(t *testing.T) {
 	s := New(nil, nil)
@@ -466,7 +466,7 @@ func TestTraceDefaultMultusSegment(t *testing.T) {
 	}
 }
 
-// netpol peer semantics: a bare podSelector means the policy's own namespace —
+// netpol peer semantics: a bare podSelector means the policy's own namespace -
 // the same labels in another namespace must not match.
 func TestTraceNetpolSameNamespacePeer(t *testing.T) {
 	s := New(nil, nil)

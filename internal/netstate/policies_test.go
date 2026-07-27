@@ -169,7 +169,7 @@ func TestSelectorNamespaces(t *testing.T) {
 }
 
 // An empty-podSelector NetworkPolicy with a declared direction and no rules is
-// the default-deny idiom — it must come out as "all pods" with zero rule rows,
+// the default-deny idiom - it must come out as "all pods" with zero rule rows,
 // never invent a rule.
 func TestPoliciesDefaultDeny(t *testing.T) {
 	s := New(nil, nil)

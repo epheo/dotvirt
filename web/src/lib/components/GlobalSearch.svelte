@@ -1,9 +1,9 @@
 <script lang="ts">
-	// vCenter's masthead search: one box over the whole streamed inventory — VMs
+	// vCenter's masthead search: one box over the whole streamed inventory - VMs
 	// (name, IP, labels), projects, namespaces, nodes, segments, storage
 	// classes. Pure frontend: everything searched is already client-side (which
 	// is why templates, a fetch away, are not here). `label:key=value` (or
-	// `label:key`) narrows to VM labels — the tags-parity affordance; label
+	// `label:key`) narrows to VM labels - the tags-parity affordance; label
 	// chips elsewhere call searchFor().
 	import { Search } from 'lucide-svelte';
 	import type { VM } from '$lib/api';
@@ -20,7 +20,7 @@
 
 	let { onpick }: { onpick: (hit: SearchHit) => void } = $props();
 
-	// Everything searched reads straight off the inventory store — the search is
+	// Everything searched reads straight off the inventory store - the search is
 	// global by nature, so no scope-narrowing props to thread.
 	const inventory = $derived(inventoryStore.inventory);
 	const networks = $derived(inventoryStore.networks);
@@ -30,7 +30,7 @@
 	let active = $state(0);
 	let input = $state<HTMLInputElement | null>(null);
 
-	// Focus + prefill from outside (label chips → `label:k=v`).
+	// Focus + prefill from outside (label chips -> `label:k=v`).
 	export function searchFor(q: string) {
 		query = q;
 		open = true;
@@ -43,7 +43,7 @@
 		if (!inventory || !q) return [];
 		const out: SearchHit[] = [];
 
-		// label:key=value / label:key — VM-label search only.
+		// label:key=value / label:key - VM-label search only.
 		const labelQ = q.startsWith('label:') ? q.slice('label:'.length) : null;
 
 		const vms = inventoryStore.allVMs;

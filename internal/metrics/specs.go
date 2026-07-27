@@ -34,7 +34,7 @@ func resolveRange(rng string) (string, rangeSpec) {
 
 // vcpuCount is the per-VM vCPU denominator. kubevirt_vmi_vcpu_count only
 // exists on newer KubeVirt; older versions expose one series per vCPU instead,
-// so fall back to counting those — dividing by the absent metric alone would
+// so fall back to counting those - dividing by the absent metric alone would
 // blank every CPU-percentage chart.
 func vcpuCount(sel string) string {
 	return fmt.Sprintf("(kubevirt_vmi_vcpu_count%s or count by(namespace,name)(kubevirt_vmi_vcpu_seconds_total%s))", sel, sel)
@@ -59,7 +59,7 @@ type chartSpec struct {
 	series           []seriesSpec
 }
 
-// chartSpecs builds the curated Overview charts for one VM — vCenter's CPU /
+// chartSpecs builds the curated Overview charts for one VM - vCenter's CPU /
 // Memory / Network / Disk, plus IOPS and disk latency. Network and disk break
 // out per NIC / per drive. rw is the rate() window.
 func chartSpecs(ns, name, rw string) []chartSpec {
@@ -72,7 +72,7 @@ func chartSpecs(ns, name, rw string) []chartSpec {
 			{"Wait", fmt.Sprintf("sum(rate(kubevirt_vmi_vcpu_wait_seconds_total%s[%s]))*100", s, rw), ""},
 			{"Steal", fmt.Sprintf("sum(rate(kubevirt_vmi_vcpu_delay_seconds_total%s[%s]))*100", s, rw), ""},
 		}},
-		// Used/Cached/Free partition the guest's memory — a stacked area whose
+		// Used/Cached/Free partition the guest's memory - a stacked area whose
 		// top edge is the domain total, like vCenter's stacked memory chart.
 		{"memory", "Memory", "bytes", true, []seriesSpec{
 			{"Used", fmt.Sprintf("kubevirt_vmi_memory_used_bytes%s", s), ""},

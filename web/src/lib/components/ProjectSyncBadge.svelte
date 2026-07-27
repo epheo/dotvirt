@@ -9,7 +9,7 @@
 	let { gitOps, compact = false }: { gitOps?: ProjectSync; compact?: boolean } = $props();
 
 	// Null view = Synced+Healthy (or not-yet-known): the project needs no badge, so
-	// green stays implicit and the tree isn't cluttered — the same rule as SyncBadge.
+	// green stays implicit and the tree isn't cluttered - the same rule as SyncBadge.
 	const view = $derived(projectSyncView(gitOps));
 	// Only a project ArgoCD couldn't apply has an error worth expanding.
 	const clickable = $derived(!!gitOps?.syncError);

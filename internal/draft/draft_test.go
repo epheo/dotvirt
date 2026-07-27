@@ -20,7 +20,7 @@ func TestStoreIsolatesByUserAndProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Same VM name, different (user, project) tuples — must not collide.
+	// Same VM name, different (user, project) tuples - must not collide.
 	if err := s.Stage("alice", "team-a", editEntry("tenant-a", "web")); err != nil {
 		t.Fatal(err)
 	}

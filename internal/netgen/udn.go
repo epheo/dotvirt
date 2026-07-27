@@ -73,7 +73,7 @@ func projectUDN(s Spec) (string, []byte, error) {
 }
 
 // sharedCUDN is an isolated (Layer2, secondary) cluster-scoped port group spanning
-// the selected namespaces — like vlanCUDN but a plain L2 segment with no uplink or
+// the selected namespaces - like vlanCUDN but a plain L2 segment with no uplink or
 // VLAN. Cluster-scoped, so it lands under the (platform) repo's networks/ dir.
 func sharedCUDN(s Spec) (string, []byte, error) {
 	if err := validate.RequireDNS1123("network name", s.Name); err != nil {

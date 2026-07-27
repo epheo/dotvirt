@@ -74,7 +74,7 @@ func (a Author) signature() *object.Signature {
 	return &object.Signature{Name: a.Name, Email: email, When: time.Now().UTC()}
 }
 
-// openWorktree clones the repo into memory and returns it with its worktree —
+// openWorktree clones the repo into memory and returns it with its worktree -
 // every write operation starts from fresh remote state. Callers hold w.mu.
 func (w *WriteRepo) openWorktree() (*git.Repository, *git.Worktree, error) {
 	repo, err := git.Clone(memory.NewStorage(), memfs.New(), &git.CloneOptions{

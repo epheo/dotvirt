@@ -40,7 +40,7 @@ func liveFor(t *testing.T, u *unstructured.Unstructured) (out struct {
 	return out
 }
 
-// The operator reports only per-controller <Name>Degraded conditions — no
+// The operator reports only per-controller <Name>Degraded conditions - no
 // Available roll-up exists on the CR, so available must mean "reported with
 // nothing degraded", not the presence of a condition type that never occurs.
 func TestLiveAvailabilityFromDegradedConditions(t *testing.T) {

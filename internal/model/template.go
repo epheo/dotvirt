@@ -3,7 +3,7 @@ package model
 // The template library (Content Library).
 
 // Template is one VirtualMachineTemplate manifest in a library repo's
-// templates/ directory — a content-library entry (vSphere: a VM template).
+// templates/ directory - a content-library entry (vSphere: a VM template).
 // Name is the file's basename: the deployable identity the API routes carry.
 type Template struct {
 	Name         string              `json:"name"`
@@ -14,7 +14,7 @@ type Template struct {
 	Instancetype string              `json:"instancetype,omitempty"` // blueprint summary, best-effort
 	Preference   string              `json:"preference,omitempty"`
 	YAML         string              `json:"yaml"`
-	Error        string              `json:"error,omitempty"` // parse failure — listed, but not deployable
+	Error        string              `json:"error,omitempty"` // parse failure - listed, but not deployable
 }
 
 // TemplateParameter mirrors template.kubevirt.io/v1beta1 Parameter, so the
@@ -24,7 +24,7 @@ type TemplateParameter struct {
 	DisplayName string `json:"displayName,omitempty"`
 	Description string `json:"description,omitempty"`
 	Value       string `json:"value,omitempty"`
-	Generate    string `json:"generate,omitempty"` // "expression" — value generated from From
+	Generate    string `json:"generate,omitempty"` // "expression" - value generated from From
 	From        string `json:"from,omitempty"`     // the generator's input pattern
 	Required    bool   `json:"required,omitempty"`
 }
@@ -40,12 +40,12 @@ type DeployTemplateRequest struct {
 	Library    string            `json:"library"`
 	Template   string            `json:"template"`
 	Namespace  string            `json:"namespace"`
-	Name       string            `json:"name,omitempty"` // overrides the NAME parameter; empty → template default (often generated)
+	Name       string            `json:"name,omitempty"` // overrides the NAME parameter; empty -> template default (often generated)
 	Parameters map[string]string `json:"parameters,omitempty"`
 	PowerOn    bool              `json:"powerOn,omitempty"` // boot the VM once it syncs (templates blueprint Halted)
 }
 
-// UpdateTemplateRequest replaces a library template's manifest — editing a
+// UpdateTemplateRequest replaces a library template's manifest - editing a
 // content-library item. The file updates when the library's PR merges.
 type UpdateTemplateRequest struct {
 	Library string `json:"library"`

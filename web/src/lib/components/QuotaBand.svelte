@@ -4,7 +4,7 @@
 	import { resource } from '$lib/resource.svelte';
 	import { usageLevelColor } from '$lib/status';
 
-	// ResourceQuota usage bars for a container scope (project / namespace) —
+	// ResourceQuota usage bars for a container scope (project / namespace) -
 	// the quota-aware capacity band. Self-contained: fetches its own data, so
 	// the cluster Summary and the container Configure both just mount it.
 	let {

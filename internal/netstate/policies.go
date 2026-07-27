@@ -11,7 +11,7 @@ import (
 	"github.com/epheo/dotvirt/internal/reflect"
 )
 
-// Policies renders the policy plane from the watch-fed stores — the same pure
+// Policies renders the policy plane from the watch-fed stores - the same pure
 // in-memory scan Catalog does for port groups: the DFW tiers (NetworkPolicy,
 // AdminNetworkPolicy/Baseline), the per-project Gateway Firewall (EgressFirewall)
 // and the Tier-0 planes (EgressIP, external routes). Rules come out as display
@@ -39,7 +39,7 @@ func (s *Snapshot) Policies() []model.Policy {
 		out = append(out, policyFromExtRoute(u))
 	}
 	// One deterministic order for every consumer: tier (kind), then ANP
-	// precedence, then identity — so the view needs no re-sort and repaints are
+	// precedence, then identity - so the view needs no re-sort and repaints are
 	// stable across watch churn.
 	sort.Slice(out, func(i, j int) bool {
 		a, b := out[i], out[j]
@@ -103,7 +103,7 @@ func appendRules(u *unstructured.Unstructured, p *model.Policy, action func(map[
 }
 
 // policyFromNetpol decodes a NetworkPolicy: the project east-west DFW rules. A
-// policy with no rules for a declared direction default-denies it — the view
+// policy with no rules for a declared direction default-denies it - the view
 // derives that hint from kind + empty rules, so nothing is synthesized here.
 func policyFromNetpol(u *unstructured.Unstructured) model.Policy {
 	p := model.Policy{
@@ -120,7 +120,7 @@ func policyFromNetpol(u *unstructured.Unstructured) model.Policy {
 }
 
 // policyFromANP decodes an AdminNetworkPolicy or (baseline=true) the
-// BaselineAdminNetworkPolicy — the cluster-wide DFW tiers above/below tenant
+// BaselineAdminNetworkPolicy - the cluster-wide DFW tiers above/below tenant
 // NetworkPolicies.
 func policyFromANP(u *unstructured.Unstructured, baseline bool) model.Policy {
 	p := model.Policy{
@@ -148,7 +148,7 @@ func policyFromANP(u *unstructured.Unstructured, baseline bool) model.Policy {
 	return p
 }
 
-// policyFromEgressFirewall decodes a namespace's EgressFirewall — the Tier-1
+// policyFromEgressFirewall decodes a namespace's EgressFirewall - the Tier-1
 // gateway firewall: ordered first-match allow/deny against external destinations.
 func policyFromEgressFirewall(u *unstructured.Unstructured) model.Policy {
 	p := model.Policy{
@@ -182,7 +182,7 @@ func policyFromEgressFirewall(u *unstructured.Unstructured) model.Policy {
 	return p
 }
 
-// policyFromEgressIP decodes a cluster-scoped EgressIP — the Tier-0 SNAT pool.
+// policyFromEgressIP decodes a cluster-scoped EgressIP - the Tier-0 SNAT pool.
 // The one rule row carries the pool; Target is the namespaces it pins.
 func policyFromEgressIP(u *unstructured.Unstructured) model.Policy {
 	p := model.Policy{
@@ -200,7 +200,7 @@ func policyFromEgressIP(u *unstructured.Unstructured) model.Policy {
 	return p
 }
 
-// policyFromExtRoute decodes a cluster-scoped AdminPolicyBasedExternalRoute —
+// policyFromExtRoute decodes a cluster-scoped AdminPolicyBasedExternalRoute -
 // the Tier-0 static next-hop route for the selected projects' egress.
 func policyFromExtRoute(u *unstructured.Unstructured) model.Policy {
 	p := model.Policy{
@@ -340,7 +340,7 @@ func selectorSummary(sel map[string]any) string {
 
 // selectorNamespaces enumerates the namespaces a selector provably pins to:
 // the metadata.name In expression netgen writes, or a bare metadata.name
-// matchLabel. Any other selector returns nil — label-based membership can't be
+// matchLabel. Any other selector returns nil - label-based membership can't be
 // evaluated here, and a tenant filter must not hide a possibly-applying row.
 func selectorNamespaces(sel map[string]any) []string {
 	if len(sel) == 0 {
@@ -418,7 +418,7 @@ func orAny(s, fallback string) string {
 	return s
 }
 
-// prefixed returns prefix+s, or "" when s is empty — for optional summary parts.
+// prefixed returns prefix+s, or "" when s is empty - for optional summary parts.
 func prefixed(prefix, s string) string {
 	if s == "" {
 		return ""

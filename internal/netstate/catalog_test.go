@@ -131,7 +131,7 @@ func TestCatalogFromStores(t *testing.T) {
 	add(s.nad, &unstructured.Unstructured{Object: map[string]any{
 		"metadata": map[string]any{"name": "legacy", "namespace": "tenant-b"},
 	}})
-	// An NNCP uplink scoped to zone=a → one node.
+	// An NNCP uplink scoped to zone=a -> one node.
 	add(s.nncp, &unstructured.Unstructured{Object: map[string]any{
 		"metadata": map[string]any{"name": "physnet"},
 		"spec": map[string]any{
@@ -148,7 +148,7 @@ func TestCatalogFromStores(t *testing.T) {
 	for _, n := range inv.Networks {
 		byName[n.Name] = n
 	}
-	if len(inv.Networks) != 3 { // vm-net, shared, legacy — the generated NAD is not double-listed
+	if len(inv.Networks) != 3 { // vm-net, shared, legacy - the generated NAD is not double-listed
 		t.Fatalf("want 3 networks, got %d: %v", len(inv.Networks), inv.Networks)
 	}
 	if got := byName["shared"].Namespaces; len(got) != 1 || got[0] != "tenant-a" {
@@ -157,7 +157,7 @@ func TestCatalogFromStores(t *testing.T) {
 	if _, ok := byName["legacy"]; !ok {
 		t.Error("raw NAD should surface")
 	}
-	// br-ex (all nodes) + the physnet uplink (zone=a → w1 only).
+	// br-ex (all nodes) + the physnet uplink (zone=a -> w1 only).
 	var physnet *model.Uplink
 	for i := range inv.Uplinks {
 		if inv.Uplinks[i].Name == "physnet-a" {

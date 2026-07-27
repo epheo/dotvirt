@@ -7,7 +7,7 @@
 
 	// The staging dialogs' shared shell: Modal + scrollable body + ErrorNote +
 	// StageFooter, owning the submit action() every dialog repeated. The
-	// form-specific missing/summary derivations stay in each dialog — they ARE
+	// form-specific missing/summary derivations stay in each dialog - they ARE
 	// the form; this owns only what happens around them. onsubmit stages the
 	// request; success reports to onstaged then closes.
 	let {

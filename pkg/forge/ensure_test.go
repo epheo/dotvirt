@@ -160,7 +160,7 @@ func TestValidateToken(t *testing.T) {
 	if valid, err := f.ValidateToken("good"); err != nil || !valid {
 		t.Errorf("ValidateToken(good) = (%v,%v), want (true,nil)", valid, err)
 	}
-	// A 403 is a VALID credential lacking scope — not a bad token. Treating it as invalid
+	// A 403 is a VALID credential lacking scope - not a bad token. Treating it as invalid
 	// is what made the operator re-mint every reconcile forever.
 	if valid, err := f.ValidateToken("scoped"); err != nil || !valid {
 		t.Errorf("ValidateToken(scoped/403) = (%v,%v), want (true,nil)", valid, err)

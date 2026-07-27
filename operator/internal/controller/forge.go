@@ -156,7 +156,7 @@ func forgeAdminHint(ns string) string {
 		install.ForgejoBotUser, install.ForgejoAdminSecret, ns)
 }
 
-// reconcilePlatformRepo ensures the platform repo exists — the imperative
+// reconcilePlatformRepo ensures the platform repo exists - the imperative
 // bootstrap pure declarative installers can't do. Skipped in dry-run (a real forge
 // mutation server-side dry-run can't model). Runs LAST in the pipeline: nothing
 // below it depends on the repo existing, so its retry never delays another phase.
@@ -181,7 +181,7 @@ func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvi
 	return nil, nil
 }
 
-// ensurePlatformRepo creates the platform repo on the forge if absent — the
+// ensurePlatformRepo creates the platform repo on the forge if absent - the
 // install-time step a Helm/Kustomize/ArgoCD-app installer structurally can't do
 // (it's a forge API call, not a kubectl apply).
 func (r *DotvirtReconciler) ensurePlatformRepo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
@@ -220,7 +220,7 @@ func (r *DotvirtReconciler) applyForgejoBase(ctx context.Context, dv *dotvirtv1a
 			return err
 		}
 	}
-	// PVC first (orphan: no ownerRef, so the git data survives uninstall) — applied
+	// PVC first (orphan: no ownerRef, so the git data survives uninstall) - applied
 	// before the Deployment that mounts it, so a retry of any later resource can't
 	// strand the pod Pending on a missing volume.
 	if err := r.apply(ctx, install.ForgejoPVC(dv)); err != nil {
@@ -321,7 +321,7 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	if err != nil {
 		return false, err
 	}
-	// read:user lets the token read /api/v1/user — which is what ValidateToken probes.
+	// read:user lets the token read /api/v1/user - which is what ValidateToken probes.
 	// Under Forgejo's granular token scopes a write:* token can't reach /api/v1/user, so
 	// without this the freshly minted token validates as "rejected" and the operator
 	// re-mints every reconcile forever. write:organization/write:repository cover the org

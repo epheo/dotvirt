@@ -32,7 +32,7 @@ func sign(body []byte, secret string) string {
 }
 
 // A correctly signed delivery is accepted; the repo named in the payload may be
-// unknown (not yet opened) — that must not error.
+// unknown (not yet opened) - that must not error.
 func TestWebhookValidSignature(t *testing.T) {
 	s := webhookServer("hooksecret")
 	body := []byte(`{"repository":{"clone_url":"https://forge/o/r.git","html_url":"https://forge/o/r"}}`)

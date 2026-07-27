@@ -8,15 +8,15 @@ import (
 )
 
 // Templates are dotvirt's content library: VirtualMachineTemplate manifests
-// under templates/ in library repos — every project repo plus the shared
+// under templates/ in library repos - every project repo plus the shared
 // platform repo. The directory sits outside the ArgoCD-applied path (the CRD
 // need not exist on-cluster), so the library is purely a git-plane surface:
 // listing parses the SA mirrors, deploying renders in-process and stages the
-// VM into the caller's draft — the PR merge stays the apply boundary.
+// VM into the caller's draft - the PR merge stays the apply boundary.
 
 // handleTemplates lists the caller's libraries: their RBAC-visible projects
 // plus the shared platform library. The shared library lists for every
-// authenticated caller — catalog stance, like /api/options.
+// authenticated caller - catalog stance, like /api/options.
 func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
@@ -41,7 +41,7 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 }
 
 // appendTemplates adds one library to the listing. An unreadable repo degrades
-// to an absent library — the other libraries still list.
+// to an absent library - the other libraries still list.
 func (s *Server) appendTemplates(list *model.TemplateList, library, repoURL string) {
 	proj := project.ProjectInfo{Name: library, Repo: repoURL}
 	list.Templates = append(list.Templates, s.draft.Templates(proj)...)
@@ -50,7 +50,7 @@ func (s *Server) appendTemplates(list *model.TemplateList, library, repoURL stri
 // handleDeployTemplate renders a library template and stages the VM into the
 // target namespace's draft. The gate is the target: deploying is creating a VM
 // there (same authorization as POST /api/vms); the library only needs to be
-// readable — the caller's own projects or the shared platform library.
+// readable - the caller's own projects or the shared platform library.
 func (s *Server) handleDeployTemplate(w http.ResponseWriter, r *http.Request) {
 	_, req, ok := peek[model.DeployTemplateRequest](w, r)
 	if !ok {
@@ -73,7 +73,7 @@ func (s *Server) handleDeployTemplate(w http.ResponseWriter, r *http.Request) {
 }
 
 // libraryFor resolves the library a request names: empty or the target's own
-// name → the target project; "platform" → the shared library; any other name →
+// name -> the target project; "platform" -> the shared library; any other name ->
 // one of the caller's visible projects (never a repo the caller can't read).
 func (s *Server) libraryFor(w http.ResponseWriter, r *http.Request, sc scope, library string) (project.ProjectInfo, bool) {
 	switch library {
@@ -100,7 +100,7 @@ func (s *Server) libraryFor(w http.ResponseWriter, r *http.Request, sc scope, li
 	return project.ProjectInfo{}, false
 }
 
-// handleUpdateTemplate replaces a library template's manifest — editing a
+// handleUpdateTemplate replaces a library template's manifest - editing a
 // content-library item. Editing IS writing to the library, so the gate matches
 // saving into it: project membership for a project library, the
 // virtualmachinetemplates create SSAR for the shared one.
@@ -127,7 +127,7 @@ func (s *Server) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSaveTemplate derives a template from a VM's git manifest and stages it
-// into a library — "Clone to Template". Saving into the VM's own project needs
+// into a library - "Clone to Template". Saving into the VM's own project needs
 // only that project's membership; saving into the shared library gates on the
 // virtualmachinetemplates create SSAR (rule-based, so it works before the CRD
 // exists on-cluster), like every platform-tier create.

@@ -31,7 +31,7 @@ var inlineScriptRe = regexp.MustCompile(`(?s)<script>(.*?)</script>`)
 
 // buildCSP derives the policy from the index.html actually served: the SvelteKit
 // bootstrap script is inlined with per-build asset paths, so its hash cannot be a
-// constant here — it is computed at startup instead. style 'unsafe-inline' is for
+// constant here - it is computed at startup instead. style 'unsafe-inline' is for
 // Svelte's style: attribute directives; connect-src gains the cdi-uploadproxy
 // origin because image uploads stream from the browser straight to it.
 func buildCSP(indexHTML []byte, uploadProxyURL string) string {

@@ -8,7 +8,7 @@ import (
 	"github.com/epheo/dotvirt/internal/validate"
 )
 
-// EgressFirewallSpec describes a namespace's north-south egress firewall — the
+// EgressFirewallSpec describes a namespace's north-south egress firewall - the
 // gateway-firewall analog on a project's Tier-1. OVN-K allows exactly one
 // EgressFirewall per namespace and it must be named "default"; its ordered rules
 // permit or deny egress from the namespace's pods (and VMs) to external CIDRs or DNS
@@ -78,7 +78,7 @@ func EgressFirewallManifest(s EgressFirewallSpec) (path string, content []byte, 
 	return s.Namespace + "/egressfirewalls/default.yaml", out, nil
 }
 
-// EgressIPSpec describes a cluster-scoped EgressIP — the Tier-0 source-NAT pool that
+// EgressIPSpec describes a cluster-scoped EgressIP - the Tier-0 source-NAT pool that
 // pins a project's egress to fixed, routable IPs. OVN-K applies it to the namespaces
 // its selector matches; we render a namespaceSelector matching the chosen namespaces
 // by name. Cluster-scoped, so it lands in the platform repo.
@@ -119,7 +119,7 @@ func EgressIPManifest(s EgressIPSpec) (path string, content []byte, err error) {
 	return "egressips/" + s.Name + ".yaml", out, nil
 }
 
-// ExternalRouteSpec describes a cluster-scoped AdminPolicyBasedExternalRoute — the
+// ExternalRouteSpec describes a cluster-scoped AdminPolicyBasedExternalRoute - the
 // Tier-0 static route that steers a project's egress through external next-hop
 // gateways. Cluster-scoped, so it lands in the platform repo.
 type ExternalRouteSpec struct {

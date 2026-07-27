@@ -40,7 +40,7 @@ type Drift struct {
 	Message string
 }
 
-// Client reads Application status via the dynamic client — no heavy argo-cd
+// Client reads Application status via the dynamic client - no heavy argo-cd
 // module, just the handful of status fields dotvirt needs. One identity.
 type Client struct {
 	dyn dynamic.Interface
@@ -56,7 +56,7 @@ func NewSAClient(kubeconfig string) (*Client, error) {
 	return base.SA()
 }
 
-// clientFor is the restfactory build hook: a token-bearing config → a drift Client.
+// clientFor is the restfactory build hook: a token-bearing config -> a drift Client.
 func clientFor(cfg *rest.Config) (*Client, error) {
 	dyn, err := dynamic.NewForConfig(cfg)
 	if err != nil {
@@ -66,7 +66,7 @@ func clientFor(cfg *rest.Config) (*Client, error) {
 }
 
 // applicationsListWatch is the List+Watch source for the cluster-wide ArgoCD
-// Application reflector that backs Snapshot — the drift plane's equivalent of
+// Application reflector that backs Snapshot - the drift plane's equivalent of
 // cluster.VMListWatch.
 func (c *Client) applicationsListWatch() *cache.ListWatch {
 	return &cache.ListWatch{
@@ -79,7 +79,7 @@ func (c *Client) applicationsListWatch() *cache.ListWatch {
 	}
 }
 
-// resKey identifies one ArgoCD-managed object across kinds — the key of the general
+// resKey identifies one ArgoCD-managed object across kinds - the key of the general
 // per-object drift map that VMs, segments, and any future rendered object share.
 // namespace is "" for cluster-scoped kinds (a CUDN, an EgressIP).
 type resKey struct{ group, kind, namespace, name string }
@@ -87,7 +87,7 @@ type resKey struct{ group, kind, namespace, name string }
 // resourceDriftFromApps builds per-object drift keyed by identity from a set of ArgoCD
 // Application objects (the reflector store's *unstructured.Unstructured). Un-scoped:
 // EVERY kind an Application manages is kept, so a non-VM object (a segment, a policy)
-// carries the same sync/health VMs always had — the per-VM view (vmView) and the
+// carries the same sync/health VMs always had - the per-VM view (vmView) and the
 // per-segment enrichment both read this one map. Objects absent from the result are
 // managed by no Application. Only scalar fields are read, so nothing escapes the store
 // to be mutated. Always returns a non-nil map.
@@ -115,7 +115,7 @@ func resourceDriftFromApps(objs []*unstructured.Unstructured) map[resKey]Drift {
 	return out
 }
 
-// vmView is the VM slice of the general drift map, re-keyed "namespace/name" — the
+// vmView is the VM slice of the general drift map, re-keyed "namespace/name" - the
 // shape the inventory VM enrichment consumes.
 func vmView(all map[resKey]Drift) map[string]Drift {
 	out := make(map[string]Drift, len(all))
@@ -153,8 +153,8 @@ func mergeSyncMessages(out map[resKey]Drift, app map[string]any) {
 			continue
 		}
 		// Only annotate an object the live tree (status.resources[]) already reported. An
-		// object present ONLY here — a failed first apply that never entered the live tree
-		// — must NOT be synthesized with a zero Sync (""): that empty status crashes the
+		// object present ONLY here - a failed first apply that never entered the live tree
+		// - must NOT be synthesized with a zero Sync (""): that empty status crashes the
 		// frontend SyncBadge (it indexes its style table by sync). Such an object stays
 		// absent so the caller reports NotTracked.
 		d, ok := out[keyOf(res)]
@@ -169,8 +169,8 @@ func mergeSyncMessages(out map[resKey]Drift, app map[string]any) {
 // appSyncFromApps builds each project's overall sync/health keyed by canonical
 // repoURL, read straight from the managing Application's own rollup
 // (status.sync/health/operationState). Unlike vmView, which keeps only VMs,
-// this rollup is exactly what covers every kind the Application manages — segments,
-// network policies, tenancy — so a merged PR that fails to apply for a non-VM object
+// this rollup is exactly what covers every kind the Application manages - segments,
+// network policies, tenancy - so a merged PR that fails to apply for a non-VM object
 // still surfaces. One repo maps to one Application in dotvirt's model; on the rare
 // collision the more severe status wins, so a rollup never hides a degraded app behind
 // a healthy one. Always returns a non-nil map.
@@ -187,7 +187,7 @@ func appSyncFromApps(objs []*unstructured.Unstructured) map[string]model.Project
 			Operation: nestedString(app.Object, "status", "operationState", "phase"),
 			Revision:  shortRev(nestedString(app.Object, "status", "sync", "revision")),
 		}
-		// Surface the apply error only when the last operation didn't succeed — a clean
+		// Surface the apply error only when the last operation didn't succeed - a clean
 		// sync leaves a benign "successfully synced" message that isn't an error.
 		if ps.Operation != "" && ps.Operation != "Succeeded" {
 			ps.SyncError = nestedString(app.Object, "status", "operationState", "message")
@@ -233,7 +233,7 @@ func appRepo(app map[string]any) string {
 }
 
 // rollupSeverity ranks a project's sync state so a collision (two apps, one repo)
-// keeps the worst — and so the frontend can pick the single most-alarming signal.
+// keeps the worst - and so the frontend can pick the single most-alarming signal.
 func rollupSeverity(ps model.ProjectSync) int {
 	return max(syncSeverity(ps.Sync), healthSeverity(ps.Health), opSeverity(ps.Operation))
 }

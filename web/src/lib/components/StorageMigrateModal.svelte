@@ -9,7 +9,7 @@
 
 	// Storage live migration (the Storage vMotion dialog): pick a target class
 	// per disk; staging rewrites each disk's DataVolume template and sets
-	// updateVolumesStrategy: Migration — all through the normal PR lane. On
+	// updateVolumesStrategy: Migration - all through the normal PR lane. On
 	// merge KubeVirt copies each disk to a fresh volume on the target class
 	// while the VM keeps running; reverting the commit cancels the migration.
 	let {
@@ -27,7 +27,7 @@
 	const disks = $derived((vm.disks ?? []).filter((d) => d.type === 'dataVolume'));
 
 	let options = $state<Options | null>(null);
-	let targets = $state<Record<string, string>>({}); // disk name → target class ('' = keep)
+	let targets = $state<Record<string, string>>({}); // disk name -> target class ('' = keep)
 	let loadError = $state(''); // the class-list fetch, distinct from the submit
 
 	async function load() {

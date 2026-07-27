@@ -13,7 +13,7 @@ import (
 // The networking create routes resolve their target TIER from the object's SCOPE,
 // never from a client-supplied repo: a namespace-scoped UDN goes to the tenant's own
 // project repo; cluster-scoped objects (CUDN, NNCP uplink, Namespace) go to the
-// platform repo and are SSAR-gated on the caller's authority to create that kind —
+// platform repo and are SSAR-gated on the caller's authority to create that kind -
 // matching the AppProject boundary that lets only the platform app apply them.
 // The single-scope routes are built by the two factories below and registered in
 // api.go, where each route's authorization rationale lives; only the routes with
@@ -49,7 +49,7 @@ func (s *Server) platformCreate(ref ssarRef, stage stageFunc) http.HandlerFunc {
 
 // namespacedCreate builds the handler for a namespace-scoped create: it peeks the
 // spec's namespace and routes to the tenant project owning it (resolveProject is
-// the authorization point — a namespace outside the caller's projects is not
+// the authorization point - a namespace outside the caller's projects is not
 // found). what names the kind in the missing-namespace error, article included.
 func (s *Server) namespacedCreate(what string, stage stageFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +90,7 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sc, ok = s.resolveProject(w, r, byNamespace(p.Namespace))
-	default: // ScopeShared / ScopeVLAN — a cluster-scoped CUDN
+	default: // ScopeShared / ScopeVLAN - a cluster-scoped CUDN
 		sc, ok = s.platformScope(w, r, ssarCUDN)
 	}
 	if !ok {
@@ -101,7 +101,7 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleCreateAdminNetworkPolicy stages a cluster-wide admin DFW policy
-// (AdminNetworkPolicy or the baseline default) — always platform-tier and admin-only,
+// (AdminNetworkPolicy or the baseline default) - always platform-tier and admin-only,
 // gated on the caller's authority to create the matching kind.
 func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.Request) {
 	raw, p, ok := peek[struct {
@@ -124,9 +124,9 @@ func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.R
 
 // handleNetworks lists the networks (Distributed Port Groups) the caller may
 // attach a VM to, plus the physical fabric (Uplinks + Physical adapters) for
-// callers who can read nodes. The port-group catalog is read with dotvirt's SA —
+// callers who can read nodes. The port-group catalog is read with dotvirt's SA -
 // a scoped tenant usually can't list these cluster CRDs, which would yield a
-// silently-empty picker — then project-scoped networks are filtered to the
+// silently-empty picker - then project-scoped networks are filtered to the
 // caller's visible namespaces so nothing leaks across tenants.
 func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
@@ -136,7 +136,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The full catalog is a lock-free scan of the SA-maintained netstate snapshot
-	// (watch-fed, identical for everyone) — no per-request cluster LIST. Per-tenant
+	// (watch-fed, identical for everyone) - no per-request cluster LIST. Per-tenant
 	// scoping and per-object drift happen below, off this copy. Nil netstate (a
 	// stripped-down wiring) degrades to an empty catalog, per the Deps contract.
 	var full model.NetworkInventory
@@ -157,9 +157,9 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		NMStatePresent:   full.NMStatePresent,
 	}
 	// Per-object drift: attach each segment's own ArgoCD sync/health at serve time
-	// (always fresh, off the cached catalog) — the same surface VMs carry.
+	// (always fresh, off the cached catalog) - the same surface VMs carry.
 	s.enrichNetworkDrift(out.Networks)
-	// The physical fabric is node-level infrastructure — show it only to callers
+	// The physical fabric is node-level infrastructure - show it only to callers
 	// who can read nodes (cluster-admins), not every tenant who can attach a NIC.
 	if s.canReadNodesCached(r.Context(), id, c) {
 		out.Uplinks = full.Uplinks
@@ -191,7 +191,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 
 // scopeNetworks keeps shared (cluster) networks and only the project networks in
 // namespaces the caller can see. A shared network publishes cluster-wide, so its
-// own Namespaces list can name other tenants' namespaces — filter it to the
+// own Namespaces list can name other tenants' namespaces - filter it to the
 // caller's visible set so the port group stays discoverable (name/kind/VLAN, like
 // a StorageClass) without ever revealing a namespace outside the caller's RBAC.
 func scopeNetworks(nets []model.Network, visible map[string]bool) []model.Network {
@@ -209,7 +209,7 @@ func scopeNetworks(nets []model.Network, visible map[string]bool) []model.Networ
 }
 
 // enrichNetworkDrift attaches each segment's own ArgoCD sync/health/apply-error,
-// looked up from the shared Application snapshot by object identity — the same
+// looked up from the shared Application snapshot by object identity - the same
 // per-object drift plane VMs use. Mutates the scoped copies in place (never the cached
 // catalog, which scopeNetworks already copied). No-op when Argo isn't wired.
 func (s *Server) enrichNetworkDrift(nets []model.Network) {

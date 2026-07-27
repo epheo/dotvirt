@@ -12,7 +12,7 @@
 	let { vm }: { vm: VM } = $props();
 
 	// Two actions because two busy displays run independently: the Take button's
-	// label and the per-row "working…" (identified by busyName).
+	// label and the per-row "working..." (identified by busyName).
 	const takeOp = action();
 	const rowOp = action();
 	let snapName = $state('');
@@ -20,7 +20,7 @@
 	let armedRestore = $state<string | null>(null);
 	let armedDelete = $state<string | null>(null);
 
-	// Restore needs a stopped target — KubeVirt rejects a running one.
+	// Restore needs a stopped target - KubeVirt rejects a running one.
 	const running = $derived(vm.phase === 'Running');
 
 	// Keyed on the VM identity (the live stream hands down a fresh vm each
@@ -92,7 +92,7 @@
 	<ErrorNote {error} />
 
 	<!-- Restore needs a stopped VM (KubeVirt rejects a running target), but power
-	     is PR-gated — so spell out the path rather than just greying the button. -->
+	     is PR-gated - so spell out the path rather than just greying the button. -->
 	{#if running && snapshots?.some((s) => s.readyToUse)}
 		<Note tone="warn" border>
 			Restore is disabled while the VM is running. Set its power to <strong>Off</strong> (via a pull request

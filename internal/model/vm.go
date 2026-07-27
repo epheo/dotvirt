@@ -39,7 +39,7 @@ type VM struct {
 	VCPUs        int      `json:"vcpus,omitempty"`        // rendered vCPU topology; the summary's value when the manifest delegates sizing to an instancetype
 	StartedAt    string   `json:"startedAt,omitempty"`    // RFC3339; VMI entered Running (for uptime)
 
-	// Migration is the live (or last) node-to-node move — vCenter's vMotion
+	// Migration is the live (or last) node-to-node move - vCenter's vMotion
 	// progress, read from the VMI's migration state. Nil when never migrated.
 	Migration *Migration `json:"migration,omitempty"`
 
@@ -62,7 +62,7 @@ type PlacementGroup struct {
 }
 
 // VMScheduling is a VM's placement policy as read from its manifest. Custom
-// flags affinity/node-selection content dotvirt does not own — such VMs are
+// flags affinity/node-selection content dotvirt does not own - such VMs are
 // edited in git, never through the scheduling form.
 type VMScheduling struct {
 	Pin    []string         `json:"pin,omitempty"` // host names the VM must run on
@@ -84,7 +84,7 @@ type Migration struct {
 // Disk is a disk device on the VM (from the template).
 type Disk struct {
 	Name         string `json:"name"`
-	Type         string `json:"type,omitempty"`         // dataVolume | emptyDisk | containerDisk | cloudInitNoCloud | …
+	Type         string `json:"type,omitempty"`         // dataVolume | emptyDisk | containerDisk | cloudInitNoCloud | ...
 	Size         string `json:"size,omitempty"`         // emptyDisk capacity or dataVolume requested storage
 	StorageClass string `json:"storageClass,omitempty"` // dataVolume storageClassName (empty = cluster default)
 }
@@ -107,14 +107,14 @@ type ProjectNamespace struct {
 // Project is a tenant in the vCenter-style inventory tree: a named set of
 // namespaces backed by one git repo. Name + Repo come from namespace
 // label/annotation (dotvirt.io/project, dotvirt.io/repo). Error is set (and Repo
-// left empty) when a project's namespaces are labeled but have no usable repo —
+// left empty) when a project's namespaces are labeled but have no usable repo -
 // surfaced as a warning in the UI rather than failing the whole inventory.
 type Project struct {
 	Name       string             `json:"name"`
 	Repo       string             `json:"repo,omitempty"`
 	Namespaces []ProjectNamespace `json:"namespaces"`
 	Error      string             `json:"error,omitempty"`
-	// GitOps is the project's ArgoCD Application rollup — the sync/health Argo already
+	// GitOps is the project's ArgoCD Application rollup - the sync/health Argo already
 	// computes across every object the repo declares, so it reflects segments, network
 	// policies and tenancy, not just VMs. Nil when Argo isn't wired or no Application
 	// tracks this repo.
@@ -124,11 +124,11 @@ type Project struct {
 // ProjectSync is a project's overall GitOps state, read straight from its managing
 // ArgoCD Application. Operation is the last sync's phase ("Running" = applying,
 // "Failed"/"Error" = apply failed), the cue for a "pending apply" or an alarm that a
-// per-VM view can't give — a merged segment or policy PR that fails to apply shows
+// per-VM view can't give - a merged segment or policy PR that fails to apply shows
 // here even though no VM moved.
 type ProjectSync struct {
 	Sync      SyncStatus `json:"sync,omitempty"`
-	Health    string     `json:"health,omitempty"`    // Healthy | Degraded | Progressing | Missing | …
+	Health    string     `json:"health,omitempty"`    // Healthy | Degraded | Progressing | Missing | ...
 	Operation string     `json:"operation,omitempty"` // operationState.phase: Running | Succeeded | Failed | Error
 	SyncError string     `json:"syncError,omitempty"` // operationState.message when the last sync didn't succeed
 	Revision  string     `json:"revision,omitempty"`  // short applied git revision
@@ -137,7 +137,7 @@ type ProjectSync struct {
 // Inventory is the full multi-project tree. Warnings carry non-fatal degradations
 // (e.g. live or drift state couldn't be read) so the UI can say "status
 // unavailable" instead of silently rendering every VM as stopped / not-tracked.
-// Proposals rides along so the open-PR lane updates over the live stream — a PR
+// Proposals rides along so the open-PR lane updates over the live stream - a PR
 // merged anywhere (the git poll sees main move) repaints it with no client poll.
 type Inventory struct {
 	Projects  []Project  `json:"projects"`
@@ -147,7 +147,7 @@ type Inventory struct {
 	// (NetworkChanged) or a non-VM object's drift content changes (the argo snapshot's
 	// ObjectDriftGen). The network catalog is fetched out-of-band (GET /api/networks,
 	// not on this frame), so the frontend re-pulls it when this bumps: a merged segment
-	// PR — and its sync badge — then appear live instead of only on reload.
+	// PR - and its sync badge - then appear live instead of only on reload.
 	NetworksVersion uint64 `json:"networksVersion,omitempty"`
 	// TasksVersion is the same contract for the recent-tasks feed (GET /api/tasks,
 	// fetched out-of-band): bumps when an op is recorded or a merged PR lands.

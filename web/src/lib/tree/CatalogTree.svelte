@@ -3,8 +3,8 @@
 	import { BookCopy, Cpu, Database, HardDrive, Network, SlidersHorizontal } from 'lucide-svelte';
 	import TreeRow from '$lib/components/TreeRow.svelte';
 
-	// The Catalog tree (Content Libraries analog): the template library first —
-	// the deployable content — then the read-only platform object kinds the New
+	// The Catalog tree (Content Libraries analog): the template library first -
+	// the deployable content - then the read-only platform object kinds the New
 	// VM wizard consumes.
 	const KINDS = [
 		{ id: 'templates', label: 'VM Templates' },

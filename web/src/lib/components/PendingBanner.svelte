@@ -8,7 +8,7 @@
 
 	// Pending-change awareness on object pages: an unproposed staged change (this
 	// user's draft) or an open PR in the object's project. Purely derived from
-	// the drafts summary + the live proposals — no extra fetch.
+	// the drafts summary + the live proposals - no extra fetch.
 	let { vm = undefined, project = undefined }: { vm?: VM; project?: string } = $props();
 
 	const proj = $derived(vm ? inventory.projectOf(vm.namespace) : (project ?? ''));

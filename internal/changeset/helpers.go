@@ -32,7 +32,7 @@ func authorEmail(username string) string {
 // refSegment sanitizes a string into one valid git branch-ref path segment: git
 // refs forbid ':', '~', '^', spaces, '?', '*', '[', '\\', and the sequences '..'
 // and '@{'; a component also may not end in '.lock' nor be the single char '@'.
-// This is for HUMAN READABILITY of the branch only — uniqueness comes from the
+// This is for HUMAN READABILITY of the branch only - uniqueness comes from the
 // hash proposedBranch appends, so the lossy mapping here can't cause collisions.
 func refSegment(s string) string {
 	out := strings.Map(func(r rune) rune {

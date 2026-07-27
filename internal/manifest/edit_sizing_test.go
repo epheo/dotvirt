@@ -34,7 +34,7 @@ spec:
 `
 
 // assertNotBoth fails if the manifest carries both an instancetype and inline
-// cpu/memory — the mutually-exclusive sizing the webhook rejects.
+// cpu/memory - the mutually-exclusive sizing the webhook rejects.
 func assertNotBoth(t *testing.T, out []byte) {
 	t.Helper()
 	m := mustParse(t, out)
@@ -69,7 +69,7 @@ func assertNotBoth(t *testing.T, out []byte) {
 }
 
 // Switching an instancetype VM to custom sizing drops the instancetype and writes
-// inline cpu/memory — never leaving both. Preference is independent and stays.
+// inline cpu/memory - never leaving both. Preference is independent and stays.
 func TestSizingInstancetypeToCustom(t *testing.T) {
 	out, err := ApplyEdit([]byte(vmWithDevices), "alpha", "web", VMEdit{
 		Sizing:   ptr("custom"),
@@ -113,7 +113,7 @@ func TestSizingCustomToInstancetype(t *testing.T) {
 }
 
 // Re-staging the sizing of a broken VM (instancetype mode, name unchanged so no
-// Instancetype field) strips the stray inline block — healing shdg in place.
+// Instancetype field) strips the stray inline block - healing shdg in place.
 func TestSizingHealsConflictingVM(t *testing.T) {
 	out, err := ApplyEdit([]byte(shdgVM), "tenant-a", "shdg", VMEdit{
 		Sizing: ptr("instancetype"),

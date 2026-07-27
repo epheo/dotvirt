@@ -9,7 +9,7 @@ import (
 
 // vmSpecStore layers the spec-change signal onto the shared counting store: the
 // embedded reflect.NewStore fires onLive on EVERY mutation (VM status/existence
-// — the live tree) and onSynced once, while onSpec here fires only when the
+// - the live tree) and onSynced once, while onSpec here fires only when the
 // serialized manifest set could have moved: a VM was added, removed, or its
 // metadata.generation (i.e. its spec) changed. KubeVirt writes VM.status
 // frequently with generation unchanged; gating onSpec on generation is what
@@ -17,7 +17,7 @@ import (
 // heartbeat (they subscribe to VMSpecChanged, not LiveChanged).
 //
 // Single-threaded: a reflector drives one store from one goroutine, so the gen
-// map is written here and read nowhere else — no lock needed.
+// map is written here and read nowhere else - no lock needed.
 type vmSpecStore struct {
 	cache.Indexer                  // the shared counting store (onLive + onSynced)
 	gen           map[string]int64 // key -> last-seen metadata.generation

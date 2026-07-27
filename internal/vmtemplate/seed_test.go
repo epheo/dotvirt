@@ -6,7 +6,7 @@ import (
 )
 
 // Every seed must parse cleanly and render a valid VirtualMachine with its
-// defaults alone — a fresh project's library works before any editing.
+// defaults alone - a fresh project's library works before any editing.
 func TestSeedsParseAndRenderWithDefaults(t *testing.T) {
 	for _, f := range SeedFiles() {
 		t.Run(f.Path, func(t *testing.T) {

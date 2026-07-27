@@ -61,7 +61,7 @@ func (r *Repo) FindVMOnBranch(branch, namespace, name string) (model.VM, bool, e
 	return model.VM{}, false, nil
 }
 
-// GroupNamespaces turns a namespace→VMs map into sorted ProjectNamespace buckets
+// GroupNamespaces turns a namespace->VMs map into sorted ProjectNamespace buckets
 // (VMs sorted by name, namespaces by name), for the inventory builder.
 func GroupNamespaces(byNS map[string][]model.VM) []model.ProjectNamespace {
 	out := make([]model.ProjectNamespace, 0, len(byNS))

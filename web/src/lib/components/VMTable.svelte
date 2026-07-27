@@ -78,7 +78,7 @@
 	const syncRank = (s: SyncStatus) =>
 		s === 'OutOfSync' ? 3 : s === 'Unknown' ? 2 : s === 'NotTracked' ? 1 : 0;
 
-	// Memory like "2Gi"/"512Mi" → bytes, so the column sorts numerically not lexically.
+	// Memory like "2Gi"/"512Mi" -> bytes, so the column sorts numerically not lexically.
 	function memBytes(m?: string): number {
 		if (!m) return 0;
 		const match = /^(\d+(?:\.\d+)?)\s*([KMGT]i?)?B?$/.exec(m.trim());

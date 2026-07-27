@@ -1,6 +1,6 @@
 <script lang="ts">
 	// Staged "current -> future" readout: the committed value struck through,
-	// the staged value in accent — the one rendering of a pending edit.
+	// the staged value in accent - the one rendering of a pending edit.
 	let { from, to }: { from: string; to: string } = $props();
 </script>
 

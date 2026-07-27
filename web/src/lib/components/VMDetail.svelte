@@ -74,7 +74,7 @@
 		// A one-shot request from outside (the context menu) to open a modal/tab
 		// here; seq distinguishes repeated requests for the same id.
 		intent?: { id: DetailAction; seq: number } | null;
-		// Fired once the intent is applied so the owner clears it — this view
+		// Fired once the intent is applied so the owner clears it - this view
 		// remounts whenever the VM drops out of an inventory frame and returns,
 		// and a kept intent would replay (reopening a dismissed dialog).
 		onintentdone?: () => void;
@@ -109,11 +109,11 @@
 	let reconciling = $state(false);
 
 	// Imperative runtime ops (restart/pause/unpause/live-migrate). Results
-	// surface as toasts — identical feedback to the right-click context menu.
+	// surface as toasts - identical feedback to the right-click context menu.
 	let runtimeBusy = $state(false);
 
 	function loadDrift(ns: string, name: string) {
-		// Drop a stale response if the selection moved while it was in flight —
+		// Drop a stale response if the selection moved while it was in flight -
 		// VM A's drift must never render under VM B.
 		const fresh = () => vm?.namespace === ns && vm?.name === name;
 		api
@@ -155,7 +155,7 @@
 		}
 	}
 
-	// Maps a host-level action id onto this view's local UI state — the shared
+	// Maps a host-level action id onto this view's local UI state - the shared
 	// tail of both entry points: the Actions menu (handleAction) and an outside
 	// intent (context menu on an unselected VM). A new action is added here once.
 	function applyAction(id: string) {
@@ -195,7 +195,7 @@
 	const vmKey = $derived(vm ? `${vm.namespace}/${vm.name}` : '');
 	$effect(() => {
 		// Reset when the selection changes, and (re)load drift for this VM. The
-		// tab itself is URL state — a fresh VM route arrives without ?tab=.
+		// tab itself is URL state - a fresh VM route arrives without ?tab=.
 		vmKey;
 		untrack(() => {
 			monitorView = 'events';
@@ -212,7 +212,7 @@
 		});
 	});
 
-	// Apply an outside intent (context menu → "Edit settings" on an unselected
+	// Apply an outside intent (context menu -> "Edit settings" on an unselected
 	// VM). Declared AFTER the reset effect above: when a selection change and an
 	// intent arrive in the same flush, effects run in declaration order, so the
 	// intent survives the reset.

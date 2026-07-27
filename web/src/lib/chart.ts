@@ -1,4 +1,4 @@
-// The chart palette lives in app.css as --chart-* custom properties — one
+// The chart palette lives in app.css as --chart-* custom properties - one
 // source of truth for SVG and canvas, and the surface a dark theme overrides.
 // SVG components consume 'var(--chart-N)' strings directly in inline styles;
 // canvas (uPlot) cannot, so it resolves the current values here at draw time.
@@ -9,7 +9,7 @@ function resolve(name: string): string {
 }
 
 // Resolved hex strings, in series order. Hex by construction (app.css authors
-// them so) — UPlotChart derives its stacked-fill alpha by appending a byte.
+// them so) - UPlotChart derives its stacked-fill alpha by appending a byte.
 export function chartSeries(): string[] {
 	return SERIES.map(resolve);
 }

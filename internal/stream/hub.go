@@ -2,7 +2,7 @@
 // reconciles each connected identity's inventory frame to the latest change-version
 // and hands every connection the freshest frame; connections are level-triggered
 // writers that always send the latest. There is no debounce (coalescing falls out of
-// the build duration — see Run), no heartbeat broadcast (a fresh connection is built
+// the build duration - see Run), no heartbeat broadcast (a fresh connection is built
 // on connect; a quiet one needs no resend), and no send-buffer overflow (each
 // connection's mailbox conflates to the latest frame, so a slow client converges
 // instead of dropping frames). The UI never polls, and one user never receives
@@ -29,7 +29,7 @@ type Hub struct {
 	inventory InventoryFunc
 	wake      <-chan struct{} // bus subscription over the inventory kinds (the edge)
 	version   func() uint64   // summed version of those kinds (the level)
-	kick      chan struct{}   // a connection was added — rebuild so it gets a first frame
+	kick      chan struct{}   // a connection was added - rebuild so it gets a first frame
 
 	mu    sync.Mutex
 	conns map[*conn]struct{}
@@ -37,7 +37,7 @@ type Hub struct {
 
 // NewHub builds the hub over a bus subscription (wake) and a reader for the summed
 // version of the kinds that subscription covers. Passing both keeps this package
-// decoupled from the specific kind set — the caller (main) owns it.
+// decoupled from the specific kind set - the caller (main) owns it.
 func NewHub(inventory InventoryFunc, wake <-chan struct{}, version func() uint64) *Hub {
 	return &Hub{
 		inventory: inventory,
@@ -53,7 +53,7 @@ func NewHub(inventory InventoryFunc, wake <-chan struct{}, version func() uint64
 // writePump drains out and writes the latest frame. quit is closed on teardown.
 type conn struct {
 	id     auth.Identity
-	key    string // groups connections of the same identity (same token → one build)
+	key    string // groups connections of the same identity (same token -> one build)
 	out    chan []byte
 	quit   chan struct{}
 	lastJS string // last frame delivered to THIS conn; owned by the Run goroutine
@@ -79,7 +79,7 @@ func (h *Hub) remove(c *conn) {
 
 // Run reconciles every connected identity's frame to the current change-version.
 // Self-clocking: on a wake it rebuilds toward the latest version, then re-checks; if
-// the version moved while it built (a burst), it loops immediately — the coalescing
+// the version moved while it built (a burst), it loops immediately - the coalescing
 // window is the build duration, not a constant, so it batches exactly as much as the
 // load demands and adds no latency floor. Each pass emits the freshest frame to every
 // connection that hasn't seen it, so clients keep converging under sustained churn
@@ -96,7 +96,7 @@ func (h *Hub) Run(ctx context.Context) {
 			target := h.version()
 			h.reconcile(ctx)
 			if h.version() == target {
-				break // nothing moved while we built — caught up
+				break // nothing moved while we built - caught up
 			}
 		}
 	}

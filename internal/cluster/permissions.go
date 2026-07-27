@@ -11,10 +11,10 @@ import (
 )
 
 // Permissions evaluates the caller's effective capabilities in namespace with one
-// SelfSubjectRulesReview — the Permissions tab's read. The list is curated to the
+// SelfSubjectRulesReview - the Permissions tab's read. The list is curated to the
 // actions the UI performs under the user's own token; it checks the
 // subresources.kubevirt.io group for console/restart/pause/migrate, because
-// that — not kubevirt.io — is what actually gates those calls (a tab that checked
+// that - not kubevirt.io - is what actually gates those calls (a tab that checked
 // the wrong group would contradict what the Actions menu can do). Config, power,
 // and delete go through the PR flow: the forge gates them, not cluster RBAC.
 func (c *Client) Permissions(ctx context.Context, namespace string) (model.Permissions, error) {

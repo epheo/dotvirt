@@ -67,7 +67,7 @@ func TestSnapshotRefreshForRepoMatchesByCanonicalURL(t *testing.T) {
 	_ = s.apps.Add(other)
 	s.synced.Store(true)
 
-	// Pushed as the html_url form (no .git, lowercase host) — must still match the
+	// Pushed as the html_url form (no .git, lowercase host) - must still match the
 	// annotated clone_url form (.git, mixed case) via canonical normalization.
 	s.RefreshForRepo(context.Background(), "https://forge/team-a")
 
@@ -92,7 +92,7 @@ func TestSnapshotRefreshForRepoNoopUntilSynced(t *testing.T) {
 	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), a)
 	s := NewSnapshot(&Client{dyn: dyn}, nil)
 	_ = s.apps.Add(a)
-	// synced is false — RefreshForRepo must be a no-op (no patch).
+	// synced is false - RefreshForRepo must be a no-op (no patch).
 	s.RefreshForRepo(context.Background(), "https://forge/team-a")
 
 	got, _ := dyn.Resource(applicationsGVR).Namespace("argocd").Get(context.Background(), "team-a", metav1.GetOptions{})
@@ -125,7 +125,7 @@ func TestSnapshotDriftMemoizedUntilStoreMoves(t *testing.T) {
 
 // ObjectDriftGen must advance only when a NON-VM object's drift content changes:
 // Application churn with identical drift (reconciledAt ticks) and VM-only drift moves
-// must not bump it — it feeds the catalog watermark, and a false bump would send
+// must not bump it - it feeds the catalog watermark, and a false bump would send
 // otherwise-suppressed frames and refetch the catalog for nothing.
 func TestObjectDriftGen(t *testing.T) {
 	s := NewSnapshot(&Client{}, nil)

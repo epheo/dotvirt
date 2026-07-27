@@ -1,6 +1,6 @@
 // Package eventbus is dotvirt's change-propagation primitive: a typed pub/sub that
 // carries both an EDGE (a coalesced wake when a kind moves) and a LEVEL (a monotonic
-// per-kind version). Consumers reconcile to the level — they wake on the edge, read
+// per-kind version). Consumers reconcile to the level - they wake on the edge, read
 // the current Version of the kinds they depend on, do their work, and re-check the
 // Version; if it hasn't moved they're caught up. This is what lets every rebuild
 // path stay current without a debounce (coalescing falls out of the work duration)
@@ -8,7 +8,7 @@
 //
 // A single channel can only notify ONE consumer; the fan-out is what lets the
 // exporter, the proposals refresher, and the inventory hub ride the same events.
-// Typed kinds keep a consumer from waking on churn it doesn't care about — the
+// Typed kinds keep a consumer from waking on churn it doesn't care about - the
 // exporter depends on VMSpecChanged + NamespaceChanged, so a VMI status heartbeat
 // (LiveChanged) never wakes it.
 package eventbus
@@ -24,32 +24,32 @@ type Kind int
 
 const (
 	// VMSpecChanged: a VirtualMachine's spec/generation changed, or a VM was added or
-	// removed — the exported manifest set moved. (NOT fired on VM status churn.)
+	// removed - the exported manifest set moved. (NOT fired on VM status churn.)
 	VMSpecChanged Kind = iota
-	// LiveChanged: runtime state moved — a VMI status change, or a VM status/existence
+	// LiveChanged: runtime state moved - a VMI status change, or a VM status/existence
 	// change. The live inventory tree's per-VM phase/IP/node.
 	LiveChanged
-	// NamespaceChanged: a project namespace was added, removed, or relabeled — both an
+	// NamespaceChanged: a project namespace was added, removed, or relabeled - both an
 	// inventory topology change AND a visibility (RBAC) change.
 	NamespaceChanged
 	// RBACChanged: a RoleBinding moved, so a token's visible-namespace set may have
-	// changed — the cue to revalidate the per-token visibility cache.
+	// changed - the cue to revalidate the per-token visibility cache.
 	RBACChanged
-	// DriftChanged: an ArgoCD Application moved — sync/health drift.
+	// DriftChanged: an ArgoCD Application moved - sync/health drift.
 	DriftChanged
 	// GitChanged: a project repo's branch heads moved (a push/merge, seen via the
 	// forge webhook or the backstop poll).
 	GitChanged
 	// ProposalsChanged: a token's open-PR lane changed (the refresher found a diff).
 	ProposalsChanged
-	// NetworkChanged: a port-group CRD (UDN/CUDN/NAD/NNCP) moved — the network catalog,
+	// NetworkChanged: a port-group CRD (UDN/CUDN/NAD/NNCP) moved - the network catalog,
 	// fetched out-of-band from the inventory frame, needs re-pulling.
 	NetworkChanged
-	// TaskChanged: the recent-tasks feed moved — an imperative op was recorded or a
+	// TaskChanged: the recent-tasks feed moved - an imperative op was recorded or a
 	// merged PR landed. The feed is fetched out-of-band, like the network catalog.
 	TaskChanged
 
-	// kindCount is the number of kinds — keep it last. Sizes the version array.
+	// kindCount is the number of kinds - keep it last. Sizes the version array.
 	kindCount
 )
 
@@ -58,7 +58,7 @@ const (
 // Safe for concurrent Publish/Subscribe/Version.
 type Bus struct {
 	// versions[k] increments on each Publish(k). Read via Version (lock-free atomics);
-	// it is the LEVEL consumers reconcile against. Monotonic PER KIND — use it for
+	// it is the LEVEL consumers reconcile against. Monotonic PER KIND - use it for
 	// equality only (t := Version(); work(); Version() == t), never to diff magnitudes
 	// (the sum of independent atomics is not a serializable global clock).
 	versions [kindCount]atomic.Uint64
@@ -100,7 +100,7 @@ func (b *Bus) Publish(k Kind) {
 	}
 }
 
-// Version returns the summed version of the named kinds — the watermark a consumer
+// Version returns the summed version of the named kinds - the watermark a consumer
 // reconciles against. Strictly increases whenever ANY of those kinds is published,
 // so `t := Version(ks...); work(); Version(ks...) == t` reliably means "nothing I
 // depend on moved while I worked." Lock-free. Nil-safe (returns 0). Equality-only:
@@ -119,7 +119,7 @@ func (b *Bus) Version(kinds ...Kind) uint64 {
 // Subscribe registers interest in the given kinds and returns a 1-buffered wake
 // channel plus a cancel func that unsubscribes (and is safe to call more than
 // once). Subscribing to no kinds yields a channel that never fires. The channel is
-// never closed by the bus — consumers select on it alongside their ctx.Done. A nil
+// never closed by the bus - consumers select on it alongside their ctx.Done. A nil
 // Bus yields a nil channel (which never fires) and a no-op cancel, so a consumer
 // with signalling disabled (e.g. in tests) falls back to its own backstop tick.
 func (b *Bus) Subscribe(kinds ...Kind) (<-chan struct{}, func()) {

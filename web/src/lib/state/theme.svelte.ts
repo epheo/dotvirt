@@ -5,8 +5,8 @@ type ThemeMode = 'light' | 'dark' | 'system';
 
 // The persisted preference is the mode; `resolved` is what's on screen.
 // app.html stamps data-theme before first paint (FOUC guard); this store owns
-// it from then on. The stamp happens synchronously in the setter/listener —
-// before any effect flush — so canvas code that getComputedStyle()s the chart
+// it from then on. The stamp happens synchronously in the setter/listener -
+// before any effect flush - so canvas code that getComputedStyle()s the chart
 // vars inside an effect keyed on `resolved` reads post-flip values.
 const mode = persisted<ThemeMode>('dotvirt.theme', 'system');
 const media = browser ? matchMedia('(prefers-color-scheme: dark)') : null;

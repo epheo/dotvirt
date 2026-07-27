@@ -152,17 +152,17 @@ func TestVMSpecStoreGatesOnGeneration(t *testing.T) {
 	if spec != 1 || live != 1 {
 		t.Fatalf("after Add: spec=%d live=%d, want 1,1", spec, live)
 	}
-	// Status-only Update (same generation) → LiveChanged only.
+	// Status-only Update (same generation) -> LiveChanged only.
 	_ = store.Update(testVM(1))
 	if spec != 1 || live != 2 {
 		t.Errorf("after status-only Update: spec=%d live=%d, want 1,2", spec, live)
 	}
-	// Spec change (generation bump) → both.
+	// Spec change (generation bump) -> both.
 	_ = store.Update(testVM(2))
 	if spec != 2 || live != 3 {
 		t.Errorf("after spec Update: spec=%d live=%d, want 2,3", spec, live)
 	}
-	// Delete → both (prunes the manifest).
+	// Delete -> both (prunes the manifest).
 	_ = store.Delete(testVM(2))
 	if spec != 3 || live != 4 {
 		t.Errorf("after Delete: spec=%d live=%d, want 3,4", spec, live)

@@ -73,8 +73,8 @@ func New(saKube kubernetes.Interface, secret []byte) *Authenticator {
 
 // ErrRejected wraps a definitive authentication failure (the token is empty or the
 // cluster says it's invalid), as opposed to a transient inability to validate (e.g.
-// the API server is unreachable). Callers map ErrRejected → 401 and everything else
-// → 503, so an API-server blip doesn't sign valid users out.
+// the API server is unreachable). Callers map ErrRejected -> 401 and everything else
+// -> 503, so an API-server blip doesn't sign valid users out.
 var ErrRejected = errors.New("token rejected")
 
 // Validate checks token via TokenReview and returns the attributed Identity.

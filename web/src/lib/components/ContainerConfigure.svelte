@@ -6,7 +6,7 @@
 	import Row from './Row.svelte';
 
 	// The compute container's Configure tab: read-only project settings, plus
-	// cluster services (DRS) at the cluster scope. dotvirt owns nothing here —
+	// cluster services (DRS) at the cluster scope. dotvirt owns nothing here -
 	// projects are namespace labels, config is the repo. Node and segment facts
 	// live on their own object pages.
 	let {
@@ -16,14 +16,14 @@
 	}: {
 		projects: Project[];
 		cluster?: boolean;
-		onstaged?: () => void; // a DRS change was staged — refresh the drafts badge
+		onstaged?: () => void; // a DRS change was staged - refresh the drafts badge
 	} = $props();
 </script>
 
 <div class="min-h-0 flex-1 overflow-y-auto p-4">
 	<div class="max-w-2xl space-y-4">
 		{#if cluster}
-			<!-- Cluster services (vCenter: Cluster → Configure → Services). -->
+			<!-- Cluster services (vCenter: Cluster -> Configure -> Services). -->
 			<DRSCard {onstaged} />
 		{/if}
 		{#each projects as p (p.name)}

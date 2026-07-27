@@ -7,7 +7,7 @@ import (
 )
 
 // The templates/ dir is the library: TemplatesOnBranch reads exactly it, and
-// VMManifests must skip it — a template's embedded VM blueprint would otherwise
+// VMManifests must skip it - a template's embedded VM blueprint would otherwise
 // surface as inventory (it passes the cheap kind pre-filter).
 func TestTemplatesDirSplit(t *testing.T) {
 	bare := seedMultiRepo(t)

@@ -1,6 +1,6 @@
 import type { Template, VM } from '$lib/api';
 
-// Every modal the shell can show, as one discriminated union — the shell
+// Every modal the shell can show, as one discriminated union - the shell
 // renders exactly one, and opening any modal is a single assignment.
 type AppModal =
 	| { kind: 'newVM'; namespaces: string[] | null } // null = all creatable namespaces
@@ -19,11 +19,11 @@ type AppModal =
 	| { kind: 'staged'; vm: VM }; // the per-VM staged-changes modal (from a Staged badge)
 
 // The host-kind registry actions the VM detail page fulfils with a modal or
-// tab — what a context menu on an unopened VM may request it to open.
+// tab - what a context menu on an unopened VM may request it to open.
 export type DetailAction =
 	'edit' | 'delete' | 'console' | 'snapshot' | 'clone' | 'template' | 'migrate' | 'migrate-storage';
 
-// Right-click context menus — vCenter's signature interaction. The bulk variant
+// Right-click context menus - vCenter's signature interaction. The bulk variant
 // (right-click inside a grid multi-selection) renders inside the workspace that
 // owns the selection; the shell renders the other two.
 type CtxState =
@@ -50,9 +50,9 @@ type Toast = {
 class Ui {
 	// Transient bottom-center toast stack (capped at 3); an optional action
 	// renders as a button. One surfacing policy app-wide: imperative/runtime
-	// results → toast from every entry point; form submit + validation errors →
+	// results -> toast from every entry point; form submit + validation errors ->
 	// inline in the modal that owns the form; ambient state (stream errors,
-	// pending banners, live migrations) → banners.
+	// pending banners, live migrations) -> banners.
 	toasts = $state<Toast[]>([]);
 	#toastSeq = 0;
 	showToast(msg: string, opts?: { kind?: ToastKind; action?: Toast['action'] }) {
@@ -63,14 +63,14 @@ class Ui {
 			action: opts?.action,
 		};
 		this.toasts = [...this.toasts, t].slice(-3);
-		// Errors linger longer — they carry the "what went wrong" the admin reads.
+		// Errors linger longer - they carry the "what went wrong" the admin reads.
 		setTimeout(() => this.dismissToast(t.id), t.kind === 'error' ? 8000 : 5000);
 	}
 	dismissToast(id: number) {
 		this.toasts = this.toasts.filter((t) => t.id !== id);
 	}
 
-	// The Changes drawer — a summon-from-anywhere cart, deliberately not a route.
+	// The Changes drawer - a summon-from-anywhere cart, deliberately not a route.
 	changesOpen = $state(false);
 
 	modal = $state<AppModal | null>(null);
@@ -86,7 +86,7 @@ class Ui {
 	}
 
 	// A one-shot request for the VM page to open a modal/tab on arrival (context
-	// menu → "Edit settings" on an unopened VM); seq re-fires repeats.
+	// menu -> "Edit settings" on an unopened VM); seq re-fires repeats.
 	detailIntent = $state<{ id: DetailAction; seq: number } | null>(null);
 	#intentSeq = 0;
 	requestDetail(id: DetailAction) {

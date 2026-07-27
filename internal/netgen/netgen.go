@@ -1,6 +1,6 @@
 // Package netgen renders OVN-K user-defined networks and nmstate uplink policies
-// — the manifests behind dotvirt's "Distributed Port Group" and "Uplink" creates
-// — from small specs, the way vmgen renders VirtualMachines. Owns-nothing: the
+// - the manifests behind dotvirt's "Distributed Port Group" and "Uplink" creates
+// - from small specs, the way vmgen renders VirtualMachines. Owns-nothing: the
 // output is proposed via PR and applied by Argo, never written to the cluster.
 // One file per kind family: udn.go (port groups), namespace.go (namespace +
 // tenant RBAC), uplink.go (NNCP), egress.go (Tier-0/Tier-1 egress), policy.go
@@ -52,7 +52,7 @@ func toStrAny(m map[string]string) map[string]any {
 	return out
 }
 
-// nsNameSelector selects namespaces by their metadata.name — the one selector
+// nsNameSelector selects namespaces by their metadata.name - the one selector
 // shape every cluster-scoped manifest (CUDN, EgressIP, external route) uses to
 // publish to a chosen set of projects.
 func nsNameSelector(namespaces []string) map[string]any {
@@ -67,7 +67,7 @@ func nsNameSelector(namespaces []string) map[string]any {
 
 // layer2Spec is the shared Layer2 body. A subnet-less L2 network is a pure
 // switch (no IPAM); OVN-K defaults ipam.mode to Enabled (which then requires
-// subnets), so Disabled must be set explicitly — valid because these networks
+// subnets), so Disabled must be set explicitly - valid because these networks
 // are Secondary.
 func layer2Spec(subnets []string) map[string]any {
 	layer2 := map[string]any{"role": "Secondary"}

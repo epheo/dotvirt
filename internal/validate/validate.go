@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// dns1123Label matches a Kubernetes DNS-1123 label — lowercase alphanumerics and
+// dns1123Label matches a Kubernetes DNS-1123 label - lowercase alphanumerics and
 // '-', not leading or trailing. Names crossing this gate become metadata.name,
 // label values, and git file paths, so it is the one defense against path
 // traversal ("../x"), separators ("a/b"), and names k8s would reject at apply.

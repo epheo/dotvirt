@@ -1,4 +1,4 @@
-// Client-side mirrors of the server's authoritative validation — for
+// Client-side mirrors of the server's authoritative validation - for
 // per-field hints only, never enforcement.
 
 // RFC 1123 label: what the API server enforces on resource names.
@@ -6,7 +6,7 @@ export const validName = (s: string) => /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(s
 
 export const NAME_HINT = 'Lowercase alphanumeric and "-" only, max 63 characters.';
 
-// Shape check only (v4 or v6) — octet ranges and mask width stay server-side.
+// Shape check only (v4 or v6) - octet ranges and mask width stay server-side.
 export const validCIDR = (s: string) =>
 	s.includes(':') ? /^[0-9a-fA-F:]+\/\d{1,3}$/.test(s) : /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(s);
 

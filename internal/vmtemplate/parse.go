@@ -1,5 +1,5 @@
 // Package vmtemplate reads, renders, and derives template.kubevirt.io
-// VirtualMachineTemplate manifests — dotvirt's content library. Templates live
+// VirtualMachineTemplate manifests - dotvirt's content library. Templates live
 // in git under templates/ (a path the ArgoCD Applications exclude, so no
 // cluster-side CRD is needed); rendering runs in-process with the upstream
 // engine, giving byte-identical semantics to the future in-cluster process
@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	// APIVersion and Kind of the manifests a library holds — the native
+	// APIVersion and Kind of the manifests a library holds - the native
 	// virt-template schema, stored verbatim.
 	APIVersion = "template.kubevirt.io/v1beta1"
 	Kind       = "VirtualMachineTemplate"

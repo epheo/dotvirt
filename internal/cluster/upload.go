@@ -14,7 +14,7 @@ import (
 // Image upload (the OVF-import analog): a CDI upload-source DataVolume is the
 // target PVC, and an UploadTokenRequest mints the bearer the browser presents
 // to cdi-uploadproxy when it streams the image bytes directly. Both go through
-// the dynamic client under the user's token — uploading a golden image is an
+// the dynamic client under the user's token - uploading a golden image is an
 // imperative, RBAC-gated op (like snapshots/clones), not git-managed state.
 var (
 	gvrDataVolumes  = schema.GroupVersionResource{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datavolumes"}

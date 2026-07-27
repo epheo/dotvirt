@@ -15,7 +15,7 @@ import (
 // runtimeOp is one imperative VMI action (restart/migrate/pause/unpause).
 type runtimeOp func(ctx context.Context, c *cluster.Client, namespace, name string) error
 
-// handleRuntimeOp runs an imperative VMI action under the caller's token — the
+// handleRuntimeOp runs an imperative VMI action under the caller's token - the
 // subresource's own RBAC is the sole gate (no SA escalation, unlike resync).
 // These don't mutate the git-managed spec, so ArgoCD self-heal won't revert them.
 // verb labels the act in the shared Recent Tasks feed.
@@ -34,8 +34,8 @@ func (s *Server) handleRuntimeOp(w http.ResponseWriter, r *http.Request, verb st
 }
 
 // runtimeOpStatus maps a KubeVirt subresource error to an HTTP status: Forbidden
-// (RBAC) → 403, NotFound → 404, Conflict/BadRequest (e.g. pause a stopped VM,
-// migrate a non-migratable one) → 409.
+// (RBAC) -> 403, NotFound -> 404, Conflict/BadRequest (e.g. pause a stopped VM,
+// migrate a non-migratable one) -> 409.
 func runtimeOpStatus(err error) int {
 	switch {
 	case apierrors.IsForbidden(err):

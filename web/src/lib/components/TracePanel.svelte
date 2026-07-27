@@ -10,7 +10,7 @@
 	import TextInput from './TextInput.svelte';
 
 	// Trace a flow: NSX Traceflow's question answered as a control-plane
-	// simulation — walk the evaluation order for one concrete source,
+	// simulation - walk the evaluation order for one concrete source,
 	// destination and protocol/port, and show each step's verdict with the
 	// deciding rule. No packet is injected; the panel says so.
 	// source pins the panel to one VM (the VM Security tab); without it the

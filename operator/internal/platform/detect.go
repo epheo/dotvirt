@@ -1,5 +1,5 @@
 // Package platform detects the Kubernetes distribution so the operator can render
-// distribution-specific resources (Route vs Ingress) — keeping dotvirt
+// distribution-specific resources (Route vs Ingress) - keeping dotvirt
 // platform-agnostic with OpenShift as a first-class profile.
 package platform
 

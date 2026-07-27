@@ -18,17 +18,17 @@ type NamespaceSpec struct {
 	VMNetwork *PrimaryNet `json:"vmNetwork,omitempty"`
 }
 
-// PrimaryNet is the namespace's default "VM Network" — a primary Layer2 UDN. It's
+// PrimaryNet is the namespace's default "VM Network" - a primary Layer2 UDN. It's
 // always Layer2 on purpose: a flat L2 segment follows a VM across nodes on live
 // migration (the VM keeps its IP), whereas Layer3's per-node subnets don't suit
-// VMs — so topology isn't a user choice here.
+// VMs - so topology isn't a user choice here.
 type PrimaryNet struct {
 	Name   string `json:"name"`
-	Subnet string `json:"subnet"` // required CIDR — a primary UDN must do IPAM (see below)
+	Subnet string `json:"subnet"` // required CIDR - a primary UDN must do IPAM (see below)
 }
 
 // NamespaceManifest renders the Namespace (labeled into the project) plus, when a
-// VM Network is requested, its primary UDN — as one multi-document file. A primary
+// VM Network is requested, its primary UDN - as one multi-document file. A primary
 // UDN needs the namespace label + an empty namespace, both of which hold because
 // the namespace is created in the same change.
 func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error) {
@@ -90,7 +90,7 @@ func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error)
 	return "namespaces/" + s.Name + ".yaml", out, nil
 }
 
-// RoleBindingSpec grants a tenant's owners admin on one of its namespaces — the
+// RoleBindingSpec grants a tenant's owners admin on one of its namespaces - the
 // RBAC delegation that turns a project from a folder into a real tenant. The
 // RoleBinding is cluster-tenancy, so it is committed to the PLATFORM repo (granting
 // access is an admin op) and applied by the platform Application, never a tenant.
@@ -102,7 +102,7 @@ type RoleBindingSpec struct {
 }
 
 // RoleBindingManifest renders a namespace-scoped RoleBinding granting each owner the
-// given ClusterRole (default "admin" — the built-in namespace-admin role) on the
+// given ClusterRole (default "admin" - the built-in namespace-admin role) on the
 // tenant namespace. One subject per owner (kind User).
 func RoleBindingManifest(s RoleBindingSpec) (path string, content []byte, err error) {
 	if err := validate.RequireDNS1123("namespace", s.Namespace); err != nil {

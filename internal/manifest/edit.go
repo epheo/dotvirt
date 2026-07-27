@@ -14,8 +14,8 @@ type VMEdit = model.VMEdit
 
 // ApplyEdit edits the VirtualMachine named (namespace, name) within a manifest,
 // changing only the targeted fields. It works by splicing new values into the
-// original text at the exact lines of the target scalars — never re-serializing
-// the document — so the resulting diff touches only the changed lines and all
+// original text at the exact lines of the target scalars - never re-serializing
+// the document - so the resulting diff touches only the changed lines and all
 // formatting, comments, and key order are preserved byte-for-byte elsewhere.
 //
 // yaml.v3's encoder reformats sequences on round-trip, so a node-tree re-marshal
@@ -60,7 +60,7 @@ func ApplyEdit(content []byte, namespace, name string, edit VMEdit) ([]byte, err
 }
 
 // applyEvictionStrategy sets (or, for "", removes) the template's
-// evictionStrategy — whether an eviction live-migrates the VM (LiveMigrate),
+// evictionStrategy - whether an eviction live-migrates the VM (LiveMigrate),
 // or is refused outright (None: pinned, blocks node drains too).
 func applyEvictionStrategy(ed *lineEditor, vmRoot *yaml.Node, strategy string) {
 	s := get(get(get(vmRoot, "spec"), "template"), "spec")
@@ -80,15 +80,15 @@ func applyEvictionStrategy(ed *lineEditor, vmRoot *yaml.Node, strategy string) {
 	}
 }
 
-// applySizing writes the VM's CPU/memory in exactly one representation — an
-// instancetype reference or inline domain.cpu/domain.memory — never both, which
+// applySizing writes the VM's CPU/memory in exactly one representation - an
+// instancetype reference or inline domain.cpu/domain.memory - never both, which
 // KubeVirt's webhook rejects. The Sizing mode picks which:
 //
 //   - "custom": drop spec.instancetype, then apply inline cpu/memory.
 //   - "instancetype": apply the instancetype ref, then strip any inline cpu/memory.
 //   - "" (mode unset, e.g. power/label/device-only edits or older clients): apply
 //     fields field-by-field, but if the VM carries an instancetype, never write
-//     inline cpu/memory — strip any that slipped in. This normalizes a VM that was
+//     inline cpu/memory - strip any that slipped in. This normalizes a VM that was
 //     wrongly given both (the conflict that fails the webhook) on any later edit.
 //
 // Preference is independent (it never defines cpu/memory) and is applied by the
@@ -114,7 +114,7 @@ func applySizing(ed *lineEditor, vm *yaml.Node, edit VMEdit) {
 			applyRef(ed, vm, "instancetype", *edit.Instancetype)
 		}
 		if hasIT || setsIT {
-			stripInlineSizing(ed, vm) // never both — instancetype wins
+			stripInlineSizing(ed, vm) // never both - instancetype wins
 		} else {
 			applyInline(ed, vm, edit)
 		}

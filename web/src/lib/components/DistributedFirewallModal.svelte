@@ -26,7 +26,7 @@
 		onstaged: () => void;
 	} = $props();
 
-	// A Group is a label selector (key=value) — the same primitive NSX-T's dynamic
+	// A Group is a label selector (key=value) - the same primitive NSX-T's dynamic
 	// Groups compile to. The policy protects the "applied-to" Group and allows ingress
 	// only from the peer Groups in its rules (a NetworkPolicy that selects pods
 	// default-denies all other ingress). One ingress row = one allow-from rule.
@@ -41,7 +41,7 @@
 	const rows = $derived(rules.rows);
 
 	// Effective members: VMs in the namespace whose labels match the applied-to Group
-	// (every VM in the namespace when no selector is set) — the NSX-T "effective
+	// (every VM in the namespace when no selector is set) - the NSX-T "effective
 	// membership" readout, computed live from the inventory.
 	const members = $derived(
 		vms.filter(

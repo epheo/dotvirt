@@ -12,7 +12,7 @@
 	import TextInput from '$lib/components/TextInput.svelte';
 	import TracePanel from '$lib/components/TracePanel.svelte';
 
-	// The Security view: the live policy plane in NSX-T tiers — cluster admin DFW
+	// The Security view: the live policy plane in NSX-T tiers - cluster admin DFW
 	// rules above, project DFW and gateway-firewall rules per namespace, Tier-0
 	// (SNAT + external routes) below. Read plane only: every row is a live object;
 	// authoring goes through the same modals (and PRs) as everywhere else.
@@ -51,7 +51,7 @@
 
 	// Cluster-tier rows are hidden only when they provably pin other namespaces
 	// (p.namespaces, from the enumerable selector). A label-selector admin rule
-	// may still apply to the tenant, so it stays — never hide a maybe-applying
+	// may still apply to the tenant, so it stays - never hide a maybe-applying
 	// firewall rule.
 	const matchesTenant = (p: Policy): boolean => {
 		if (!tenant) return true;

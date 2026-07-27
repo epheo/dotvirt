@@ -43,14 +43,14 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	}
 	// Drift comes from the SA-owned Application snapshot (lock-free, watch-fed).
 	// Distinguish three states the inventory must NOT conflate: Argo off (s.drift
-	// nil → no warning, Sync left unset); Argo configured but the reflector hasn't
-	// completed its initial LIST (s.drift.Drift() is nil → surface a warning, still
+	// nil -> no warning, Sync left unset); Argo configured but the reflector hasn't
+	// completed its initial LIST (s.drift.Drift() is nil -> surface a warning, still
 	// leave Sync unset rather than flashing every VM to NotTracked); and synced
 	// (apply the always-non-nil drift map).
 	var warnings []string
 	if s.drift != nil {
 		// Drift() is nil exactly while Argo is configured but its reflector hasn't
-		// finished the initial LIST — surface that as a degradation (Sync left unset,
+		// finished the initial LIST - surface that as a degradation (Sync left unset,
 		// not a flash of NotTracked); once synced it's an always-non-nil map. One call,
 		// so there's no window between a readiness check and the read.
 		if d := s.drift.Drift(); d != nil {
@@ -68,14 +68,14 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		}
 	}
 	// Same staleness contract as drift: the network catalog keeps serving its
-	// last-good stores while a watch errors — warn so that isn't silent.
+	// last-good stores while a watch errors - warn so that isn't silent.
 	if s.netstate != nil && !s.netstate.Healthy() {
 		warnings = append(warnings, "the network catalog may be stale — a networking watch is failing")
 	}
 	// Zero project namespaces with a platform repo configured is either a pristine
 	// install (fine, the empty state is correct) or a platform app that stopped
-	// applying (broken). The platform Application's own rollup — already in the
-	// drift snapshot — tells them apart, so warn only on actual breakage and name
+	// applying (broken). The platform Application's own rollup - already in the
+	// drift snapshot - tells them apart, so warn only on actual breakage and name
 	// it. Surfaced cluster-wide (the snapshot is unfiltered) so a user legitimately
 	// scoped to no project can't mask a broken sync.
 	if s.cfg.PlatformRepo != "" && len(s.state.Namespaces()) == 0 {
@@ -86,7 +86,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	inv := inventory.Build(in)
 	inv.Warnings = warnings
 	// The platform tier is config-only (never a labeled namespace), so it's absent
-	// from `projects` — seed it for platform authors so its open PR shows on a cold
+	// from `projects` - seed it for platform authors so its open PR shows on a cold
 	// load, not just right after a propose tracks it.
 	propProjects := projects
 	if s.canAuthorPlatform(ctx, id, userCluster) {
@@ -95,7 +95,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	inv.Proposals = s.proposalsFor(id, propProjects)
 	// Watermark for the out-of-band network catalog: bumps when a port group moves
 	// (NetworkChanged) or a non-VM object's drift content moves (ObjectDriftGen), so
-	// the client re-pulls /api/networks — a merged segment, and its badge, show live.
+	// the client re-pulls /api/networks - a merged segment, and its badge, show live.
 	// The drift term is the CONTENT generation, not the raw DriftChanged version:
 	// Application objects churn on every reconcile (reconciledAt), and a version that
 	// counted that would defeat the hub's identical-frame suppression and refetch the
@@ -112,7 +112,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 
 // platformSyncWarning decides what "zero project namespaces" means from the
 // platform Application's rollup. drift is ProjectDrift(): nil while Argo is off
-// or pre-sync — stay quiet; off means there is no platform sync to be unhealthy,
+// or pre-sync - stay quiet; off means there is no platform sync to be unhealthy,
 // pre-sync already carries its own warning. Progressing/Running are quiet too:
 // the first sync after an install is not a degradation.
 func platformSyncWarning(drift map[string]model.ProjectSync, platformRepo string) string {
@@ -151,7 +151,7 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 
 // handleOptions lists the wizard/editor choices (instancetypes, preferences, OS
 // images, networks). These are cluster catalog data, the same for every tenant, so
-// they're read with dotvirt's SA — a scoped tenant usually lacks cluster-scoped
+// they're read with dotvirt's SA - a scoped tenant usually lacks cluster-scoped
 // list on these CRDs, which would otherwise yield silently-empty dropdowns. The
 // caller must still be authenticated (middleware) to reach here.
 func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {

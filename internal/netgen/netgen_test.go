@@ -232,7 +232,7 @@ func TestUplinkManifest(t *testing.T) {
 
 func TestSharedCUDN(t *testing.T) {
 	// An isolated shared network is a Layer2 (not localnet) secondary CUDN spanning
-	// the selected namespaces — no uplink, no VLAN.
+	// the selected namespaces - no uplink, no VLAN.
 	path, content, err := Manifest(Spec{Name: "db-shared", Scope: ScopeShared, Namespaces: []string{"tenant-a", "tenant-b"}})
 	if err != nil {
 		t.Fatal(err)
@@ -245,7 +245,7 @@ func TestSharedCUDN(t *testing.T) {
 		"kind: ClusterUserDefinedNetwork",
 		"topology: Layer2",
 		"role: Secondary",
-		"mode: Disabled", // no subnet → IPAM disabled
+		"mode: Disabled", // no subnet -> IPAM disabled
 		"kubernetes.io/metadata.name",
 		"tenant-a",
 		"tenant-b",
@@ -416,7 +416,7 @@ func TestNetworkPolicyManifest(t *testing.T) {
 }
 
 func TestNetworkPolicyWholeNamespace(t *testing.T) {
-	// No AppliedTo → an empty podSelector ({}) that selects every pod in the namespace.
+	// No AppliedTo -> an empty podSelector ({}) that selects every pod in the namespace.
 	_, content, err := NetworkPolicyManifest(NetworkPolicySpec{Name: "default-deny", Namespace: "team-a"})
 	if err != nil {
 		t.Fatal(err)
@@ -491,7 +491,7 @@ func TestNameValidationRejectsPathTraversal(t *testing.T) {
 }
 
 func TestCIDRAndIPValidation(t *testing.T) {
-	// Bad CIDRs/IPs render a manifest OVN-K rejects at apply — catch them early.
+	// Bad CIDRs/IPs render a manifest OVN-K rejects at apply - catch them early.
 	if _, _, err := Manifest(Spec{Name: "n", Namespace: "ns", Subnets: []string{"10.0.0.0"}}); err == nil {
 		t.Error("expected error for a subnet with no mask")
 	}

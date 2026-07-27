@@ -5,7 +5,7 @@
 
 	// Host maintenance (vCenter's Enter/Exit Maintenance Mode): entering flips
 	// the node's maintenance annotation + cordon in one server patch, then this
-	// client drives one migrate call per running VM — so each move is gated by
+	// client drives one migrate call per running VM - so each move is gated by
 	// that VM's own RBAC and lands in the action dock. Progress needs no
 	// polling: `vms` is the live inventory stream, so the remaining count
 	// drains as migrations complete. Plain cordon stays as the lighter verb.
@@ -29,7 +29,7 @@
 		running.filter((v) => !v.migration || v.migration.completed || v.migration.failed),
 	);
 
-	// no node-read RBAC → panel stays hidden (failed maps to null)
+	// no node-read RBAC -> panel stays hidden (failed maps to null)
 	const infoRes = resource<NodeInfo>(
 		() => node,
 		() => api.nodeInfo(node),
@@ -55,7 +55,7 @@
 
 	// One migrate call per pending VM; failures are tallied, never aborting the
 	// sweep. Cordon already blocks new placements, so one sweep per click is
-	// enough — stragglers get the Retry button.
+	// enough - stragglers get the Retry button.
 	async function evacuate(): Promise<string> {
 		let migrated = 0;
 		let failed = 0;

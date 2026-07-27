@@ -4,13 +4,13 @@ package model
 import "errors"
 
 // Error kinds the domain (e.g. changeset) can wrap so the HTTP layer maps them to
-// the right status instead of a blanket 500. Wrap with fmt.Errorf("%w: …", kind).
+// the right status instead of a blanket 500. Wrap with fmt.Errorf("%w: ...", kind).
 var (
-	ErrInvalid     = errors.New("invalid request")         // → 400: bad/empty input, nothing to do
-	ErrNotFound    = errors.New("not found")               // → 404
-	ErrForbidden   = errors.New("forbidden")               // → 403: caller lacks authority for the operation
-	ErrConflict    = errors.New("conflict")                // → 409: e.g. project not editable
-	ErrUnavailable = errors.New("temporarily unavailable") // → 503: a capability isn't wired/reachable
+	ErrInvalid     = errors.New("invalid request")         // -> 400: bad/empty input, nothing to do
+	ErrNotFound    = errors.New("not found")               // -> 404
+	ErrForbidden   = errors.New("forbidden")               // -> 403: caller lacks authority for the operation
+	ErrConflict    = errors.New("conflict")                // -> 409: e.g. project not editable
+	ErrUnavailable = errors.New("temporarily unavailable") // -> 503: a capability isn't wired/reachable
 )
 
 // Power is the desired run state derived from a VM manifest's runStrategy.

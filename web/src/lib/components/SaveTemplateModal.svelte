@@ -9,7 +9,7 @@
 	import SelectInput from './SelectInput.svelte';
 
 	// Clone to Template: derive a reusable VirtualMachineTemplate from this VM's
-	// git manifest and stage it into a library — the VM's own project, or the
+	// git manifest and stage it into a library - the VM's own project, or the
 	// shared (platform) library for curated golden templates. Both land as
 	// templates/<name>.yaml behind the PR gate.
 	let {

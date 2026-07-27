@@ -44,7 +44,7 @@
 	// Selected secondary networks, held as attach refs ("namespace/nad", or a bare
 	// name for a shared CUDN).
 	let selectedNetworks = $state<string[]>([]);
-	// Attach the primary (pod-network) NIC. On by default, but — unlike a pod — a VM
+	// Attach the primary (pod-network) NIC. On by default, but - unlike a pod - a VM
 	// may decline it and run on secondary networks alone.
 	let attachPrimary = $state(true);
 
@@ -56,9 +56,9 @@
 
 	// Attachable secondary port groups for the chosen project: shared (CUDN)
 	// networks plus this namespace's own non-default networks. The primary
-	// ("VM Network") is excluded here — it's offered as its own toggle below.
+	// ("VM Network") is excluded here - it's offered as its own toggle below.
 	const available = $derived(attachableNetworks(networks, namespace));
-	// The project's primary ("VM Network") UDN, when one exists — else the primary
+	// The project's primary ("VM Network") UDN, when one exists - else the primary
 	// NIC is the cluster default pod network, shown with a generic label.
 	const primaryNet = $derived(
 		networks.find((n) => n.kind === 'default' && n.namespace === namespace),
@@ -82,7 +82,7 @@
 			.options()
 			.then((o) => {
 				options = o;
-				// Sensible defaults from what's available. Guard each list — a source
+				// Sensible defaults from what's available. Guard each list - a source
 				// the backend SA can't read comes back empty (or null on an old build).
 				const osImages = o.osImages ?? [];
 				const fed =
@@ -106,7 +106,7 @@
 	const valid = $derived(
 		!!(name && namespace && osImage && instancetype && preference) && hasNetwork,
 	);
-	// Per-step validity — drives only the rail markers, never blocks navigation.
+	// Per-step validity - drives only the rail markers, never blocks navigation.
 	const step1Valid = $derived(!!(name && namespace));
 	const step2Valid = $derived(!!(osImage && preference));
 	const step3Valid = $derived(!!instancetype);
@@ -156,7 +156,7 @@
 		else rows.push(['Additional adapters', 'None']);
 		return rows;
 	});
-	// Unmet required fields, with the step to jump to — surfaced on the review step
+	// Unmet required fields, with the step to jump to - surfaced on the review step
 	// so a disabled Finish is always self-explanatory.
 	const missing = $derived.by(() => {
 		const m: { label: string; step: number }[] = [];
@@ -301,7 +301,7 @@
 			on secondary networks alone — at least one is required.
 		</p>
 		<div class="mt-1 space-y-1 rounded border border-line-strong p-2">
-			<!-- Primary (pod-network) NIC — optional for a VM, unlike a pod. -->
+			<!-- Primary (pod-network) NIC - optional for a VM, unlike a pod. -->
 			<label class="flex items-center gap-2 text-xs">
 				<input type="checkbox" bind:checked={attachPrimary} />
 				<span class="text-ink-soft">{primaryLabel}</span>

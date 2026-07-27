@@ -15,9 +15,9 @@ func TestChangesForEdit(t *testing.T) {
 	}
 	changes := ChangesForEdit(current, VMEdit{
 		Memory:         ptr("2Gi"),
-		CPUCores:       ptr(1), // unchanged — must NOT appear
+		CPUCores:       ptr(1), // unchanged - must NOT appear
 		SetLabels:      map[string]string{"app": "web2", "tier": "front"},
-		RemoveLabels:   []string{"gone"}, // not present — must NOT appear
+		RemoveLabels:   []string{"gone"}, // not present - must NOT appear
 		AddDisks:       []model.DiskAdd{{Name: "data", Size: "20Gi"}},
 		RemoveNetworks: []string{"old"},
 	})

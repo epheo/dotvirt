@@ -42,7 +42,7 @@ func applyMapEdits(ed *lineEditor, parent *yaml.Node, field string, set map[stri
 
 	// If the edit empties the map, drop the whole field: a dangling `field:`
 	// key with a null value is the degenerate shape mappingField guards
-	// against — never leave one behind.
+	// against - never leave one behind.
 	if len(set) == 0 && emptiesMap(m, remove) {
 		ed.deleteChild(parent, field)
 		return
@@ -63,8 +63,8 @@ func applyMapEdits(ed *lineEditor, parent *yaml.Node, field string, set map[stri
 }
 
 // mappingField returns parent's field as an extendable block mapping. A
-// degenerate value — null (e.g. a map an earlier edit fully emptied) or an
-// empty {} — has no child line to anchor an insert on, so it is deleted here
+// degenerate value - null (e.g. a map an earlier edit fully emptied) or an
+// empty {} - has no child line to anchor an insert on, so it is deleted here
 // and nil returned: the caller recreates the field wholesale.
 func mappingField(ed *lineEditor, parent *yaml.Node, field string) *yaml.Node {
 	m := get(parent, field)
@@ -111,7 +111,7 @@ const PreferNoEvictionAnnotation = "descheduler.alpha.kubernetes.io/prefer-no-ev
 // applyTemplateMeta upserts/removes spec.template.metadata labels (placement
 // groups) and annotations (the DRS-exclude toggle) in one pass: when the
 // template has no metadata block, both sections must be created inside a
-// single insert — two block inserts would splice duplicate metadata: keys.
+// single insert - two block inserts would splice duplicate metadata: keys.
 func applyTemplateMeta(ed *lineEditor, vmRoot *yaml.Node, labelSet map[string]string, labelRemove []string, edit VMEdit) {
 	annSet, annRemove := drsAnnotationEdits(edit)
 	if len(labelSet)+len(labelRemove)+len(annSet)+len(annRemove) == 0 {

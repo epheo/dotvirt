@@ -1,10 +1,10 @@
-// Package changeset coordinates dotvirt's draft → propose → PR workflow. It stages
+// Package changeset coordinates dotvirt's draft -> propose -> PR workflow. It stages
 // edits/creates into per-(user,project) drafts (staging.go), renders a draft as a
 // semantic YAML-free diff (view.go), proposes it as one branch + commit + Forgejo
 // PR against that project's repo (propose.go, revert.go), and reconciles the two
 // directions of drift (drift.go). Identity and project are passed per call:
 // reads/writes target the project's repo, drafts are keyed by the user. It
-// satisfies api.Draft without importing api — request/result DTOs live in model.
+// satisfies api.Draft without importing api - request/result DTOs live in model.
 package changeset
 
 import (
@@ -21,7 +21,7 @@ import (
 )
 
 // Resyncer triggers an ArgoCD sync of the Application managing a VM, for the
-// main→running drift reconcile. Implemented by the argo client. May be nil.
+// main->running drift reconcile. Implemented by the argo client. May be nil.
 type Resyncer interface {
 	Resync(ctx context.Context, namespace, name string) (model.ResyncResult, error)
 }
@@ -55,8 +55,8 @@ type PruneSource interface {
 type Coordinator struct {
 	store    *draft.Store
 	repos    *git.RepoSet
-	forge    *forge.Factory      // may be nil → degrade to compare URL
-	resyncer Resyncer            // may be nil → re-sync unavailable
+	forge    *forge.Factory      // may be nil -> degrade to compare URL
+	resyncer Resyncer            // may be nil -> re-sync unavailable
 	renderer vmtemplate.Renderer // processes library templates into VM manifests
 
 	live  LiveSource  // may be nil -> adoption and drift unavailable

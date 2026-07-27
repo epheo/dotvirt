@@ -27,7 +27,7 @@ import (
 
 // DotvirtReconciler provisions a dotvirt install from a Dotvirt resource (see the
 // api package doc for what an install comprises). dotvirt's RUNTIME still owns
-// nothing — this operator is the install-time provisioner, so it holds the
+// nothing - this operator is the install-time provisioner, so it holds the
 // privileged install RBAC and forge-admin credential the app never touches.
 // Its RBAC markers live in rbac_markers.go.
 type DotvirtReconciler struct {
@@ -128,7 +128,7 @@ func (r *DotvirtReconciler) normalizeSpec(dv *dotvirtv1alpha1.Dotvirt) {
 
 // reconcileDependencies gates on the hard prerequisites: ArgoCD + KubeVirt are
 // PREREQUISITES we never install; if either is absent, record why and requeue (the
-// admin may install the prereq operator). OVN-K/NMState/CDI are soft — note them
+// admin may install the prereq operator). OVN-K/NMState/CDI are soft - note them
 // and proceed.
 func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
 	probe := r.probe
@@ -194,7 +194,7 @@ func (r *DotvirtReconciler) dryRunSkip(dv *dotvirtv1alpha1.Dotvirt, condType, wh
 	r.setCondition(dv, condType, metav1.ConditionUnknown, "DryRun", "skipped "+what+" in dry-run")
 }
 
-// forgeClient reads the install's forge credential (ForgeSecretName — the
+// forgeClient reads the install's forge credential (ForgeSecretName - the
 // admin-supplied BYO secret, or the one the managed-Forgejo bootstrap minted) and
 // builds the app's shared forge client (pkg/forge) scoped to the platform repo.
 func (r *DotvirtReconciler) forgeClient(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*forge.Client, error) {

@@ -24,7 +24,7 @@ import (
 )
 
 // scopeServer builds a Server with only what the scope caches read: the version
-// bus and an unsynced snapshot (empty topology is fine — the fake user client's
+// bus and an unsynced snapshot (empty topology is fine - the fake user client's
 // cluster-wide namespace list is the visibility source, not the candidates).
 func scopeServer(bus *eventbus.Bus) *Server {
 	sa := cluster.NewClient(fake.NewSimpleClientset(), nil, nil)
@@ -32,7 +32,7 @@ func scopeServer(bus *eventbus.Bus) *Server {
 }
 
 // listCountingClient is a user-identity client over a fake clientset seeded with
-// nss, counting namespace LISTs — "cached" is pinned as "no second round". The
+// nss, counting namespace LISTs - "cached" is pinned as "no second round". The
 // modeled token is admin-like: the cluster-wide VM read SSAR that qualifies the
 // namespace-list fast path is allowed.
 func listCountingClient(nss ...string) (*cluster.Client, *int) {
@@ -69,7 +69,7 @@ func ssarCountingClient(allow func(*authzv1.ResourceAttributes) bool) (*cluster.
 
 // TestVisibleForCachesPerToken pins the hot-path contract: a token's visible set
 // is computed against the cluster once and every same-version read after that is
-// a pure cache hit — a request burst must not fan out into per-request LISTs.
+// a pure cache hit - a request burst must not fan out into per-request LISTs.
 func TestVisibleForCachesPerToken(t *testing.T) {
 	s := scopeServer(eventbus.New())
 	c, lists := listCountingClient("tenant-a", "tenant-b")
@@ -96,7 +96,7 @@ func TestVisibleForCachesPerToken(t *testing.T) {
 
 // TestVisibleForRBACVersionInvalidates pins the invalidation lever: the cached
 // set survives only while bus.Version(RBACChanged, NamespaceChanged) is
-// unchanged — either kind moving (a RoleBinding OR a project namespace) must
+// unchanged - either kind moving (a RoleBinding OR a project namespace) must
 // force a fresh cluster round, because both can change what a token may see.
 func TestVisibleForRBACVersionInvalidates(t *testing.T) {
 	bus := eventbus.New()
@@ -128,7 +128,7 @@ func TestVisibleForRBACVersionInvalidates(t *testing.T) {
 
 // TestVisibleForNoCrossTokenLeak pins tenant isolation inside the cache itself:
 // entries are keyed by token, so one caller's visibility can never answer for
-// another — and a second caller filling the cache must not evict the first.
+// another - and a second caller filling the cache must not evict the first.
 func TestVisibleForNoCrossTokenLeak(t *testing.T) {
 	s := scopeServer(eventbus.New())
 	cAlice, aliceLists := listCountingClient("tenant-a")
@@ -160,7 +160,7 @@ func TestVisibleForNoCrossTokenLeak(t *testing.T) {
 }
 
 // TestCanCreateCachedVerdicts pins the SSAR cache: one round per (token, ref) at
-// a given RBAC version — a DENIED verdict is cached exactly like an allowed one
+// a given RBAC version - a DENIED verdict is cached exactly like an allowed one
 // (else every unauthorized poll re-posts an SSAR), a version bump re-asks, and a
 // different token never reuses another's verdict.
 func TestCanCreateCachedVerdicts(t *testing.T) {
@@ -202,7 +202,7 @@ func TestCanCreateCachedVerdicts(t *testing.T) {
 
 // TestCanReadNodesCachedKeyIsolation pins two things: the node-read signal is
 // cached like the create verdicts, and its cache key lives outside the create
-// tuple namespace — a crafted create ref spelling "read"/"nodes" must neither
+// tuple namespace - a crafted create ref spelling "read"/"nodes" must neither
 // read nor overwrite the node-read verdict.
 func TestCanReadNodesCachedKeyIsolation(t *testing.T) {
 	s := scopeServer(eventbus.New())
@@ -281,7 +281,7 @@ users:
 
 // TestPlatformScope pins the platform-tier gate end to end: no configured repo
 // fails closed as 503 before any SSAR, a token the cluster denies gets 403, and
-// an allowed token gets the synthetic platform project (config-only — never a
+// an allowed token gets the synthetic platform project (config-only - never a
 // discovered namespace).
 func TestPlatformScope(t *testing.T) {
 	f := platformFactory(t)

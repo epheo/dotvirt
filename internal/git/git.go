@@ -1,6 +1,6 @@
 // Package git is dotvirt's git plane: it clones a repo once into memory and
 // reads VM manifests from any branch's tree without checking it out. Reads never
-// touch the network — a single background fetcher (driven by the git poll, and
+// touch the network - a single background fetcher (driven by the git poll, and
 // nudged after dotvirt's own pushes) owns freshness by calling Refresh.
 package git
 
@@ -78,7 +78,7 @@ func Open(url, username string, tokenFn forge.TokenSource) (*Repo, error) {
 }
 
 // branchHash returns branch's current commit hash from the local mirror (no fetch),
-// or "" if the branch can't be resolved — the parse-cache invalidation key.
+// or "" if the branch can't be resolved - the parse-cache invalidation key.
 func (r *Repo) branchHash(branch string) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -104,7 +104,7 @@ func (r *Repo) clone() error {
 }
 
 // fetchTimeout bounds a single background fetch. Without it a stalled connection
-// to the remote (common over a flaky/self-signed Route) would hold r.mu forever —
+// to the remote (common over a flaky/self-signed Route) would hold r.mu forever -
 // and since reads (VMManifests) also take r.mu, every inventory read for that repo
 // would deadlock. Capping the fetch lets it fail and release the lock; the poll
 // retries on the next tick.
@@ -163,7 +163,7 @@ type ManifestFile struct {
 }
 
 // walkYAML visits branch's .yaml/.yml files passing include, under the repo
-// lock — the one tree-walk behind VMManifests, TemplatesOnBranch and
+// lock - the one tree-walk behind VMManifests, TemplatesOnBranch and
 // DeclaredOnBranch.
 func (r *Repo) walkYAML(branch string, include func(path string) bool, visit func(path string, content []byte) error) error {
 	r.mu.Lock()
@@ -261,7 +261,7 @@ func inTemplatesDir(name string) bool {
 	return strings.HasPrefix(name, TemplatesDir+"/")
 }
 
-// TemplatesOnBranch returns every .yaml file under templates/ on branch — the
+// TemplatesOnBranch returns every .yaml file under templates/ on branch - the
 // repo's template library, parsed by the caller.
 func (r *Repo) TemplatesOnBranch(branch string) ([]ManifestFile, error) {
 	var out []ManifestFile

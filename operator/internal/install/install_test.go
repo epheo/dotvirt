@@ -29,7 +29,7 @@ func envValue(env []corev1.EnvVar, name string) (string, bool) {
 // DOTVIRT_WEBHOOK_URL points the forge at dotvirt's in-cluster Service ONLY for a managed
 // (in-cluster) Forgejo, which can't hairpin to the external Route. A bring-your-own forge
 // is typically off-cluster and can't reach that Service URL, so the var is left unset and
-// the app falls back to its public URL — otherwise dotvirt registers an unreachable hook.
+// the app falls back to its public URL - otherwise dotvirt registers an unreachable hook.
 func TestWebhookURLGatedOnManagedForge(t *testing.T) {
 	managed := testDotvirt()
 	managed.Spec.Forge.Managed = true
@@ -107,8 +107,8 @@ func TestDeploymentSSOEnvGatedOnFlag(t *testing.T) {
 	}
 }
 
-// The operand must render restricted-v2 compatible — non-root, no privilege
-// escalation, all capabilities dropped, bounded resources, and a liveness probe — so
+// The operand must render restricted-v2 compatible - non-root, no privilege
+// escalation, all capabilities dropped, bounded resources, and a liveness probe - so
 // OpenShift's restricted SCC admits it WITHOUT the anyuid grant.
 func TestDeploymentSecurityHardening(t *testing.T) {
 	d := Deployment(testDotvirt())
@@ -142,7 +142,7 @@ func TestDeploymentSecurityHardening(t *testing.T) {
 
 // The managed Forgejo uses the rootless image under dotvirt's restricted-v2 posture
 // (no anyuid): non-root, no privilege escalation, all caps dropped, an fsGroup for
-// PVC writability — plus bounded, probed, and digest-pinned.
+// PVC writability - plus bounded, probed, and digest-pinned.
 func TestForgejoDeploymentBoundedAndPinned(t *testing.T) {
 	d := ForgejoDeployment(testDotvirt(), true, "", "h")
 	c := d.Spec.Template.Spec.Containers[0]
@@ -198,7 +198,7 @@ func TestForgejoFSGroupIsPlatformConditional(t *testing.T) {
 	}
 }
 
-// The forge→ArgoCD webhook targets the Argo Route by name, which often resolves
+// The forge->ArgoCD webhook targets the Argo Route by name, which often resolves
 // to a PRIVATE ingress VIP; Forgejo's `external` allowlist entry matches public
 // resolved IPs only, so the host must be allowed by name or every delivery is
 // silently denied by the SSRF guard. Both containers share the env (the init
@@ -226,7 +226,7 @@ func TestForgejoWebhookAllowlistIncludesArgoHost(t *testing.T) {
 
 // This is the operand half of the CSV's `capabilities: Seamless Upgrades` claim: an
 // OLM operator upgrade must roll the dotvirt app WITHOUT a CR edit. The mechanism is
-// the image precedence here — when the CR doesn't pin spec.image, the operand image
+// the image precedence here - when the CR doesn't pin spec.image, the operand image
 // comes from RELATED_IMAGE_DOTVIRT (which OLM sets on the manager from the new CSV on
 // every upgrade) and falls back to the compile-time-pinned defaultImage. So a newer
 // operator (new digest in both) re-reconciles an existing unpinned CR into a rolled
@@ -244,14 +244,14 @@ func TestOperandImageRollsWithOperatorUpgrade(t *testing.T) {
 	}
 
 	// Unpinned CR under OLM: RELATED_IMAGE_DOTVIRT (set on the manager from the CSV) wins
-	// over defaultImage — this is the edge OLM bumps on upgrade to roll the operand.
+	// over defaultImage - this is the edge OLM bumps on upgrade to roll the operand.
 	const upgraded = "quay.io/epheo/dotvirt@sha256:" + "0000000000000000000000000000000000000000000000000000000000000000"
 	t.Setenv("RELATED_IMAGE_DOTVIRT", upgraded)
 	if got := Deployment(testDotvirt()).Spec.Template.Spec.Containers[0].Image; got != upgraded {
 		t.Errorf("unpinned CR + RELATED_IMAGE_DOTVIRT: operand image = %q, want %q (operand must follow the operator's pinned env)", got, upgraded)
 	}
 
-	// An explicit spec.image pin always wins, even over the upgraded env — a user who
+	// An explicit spec.image pin always wins, even over the upgraded env - a user who
 	// pins opts out of the auto-roll.
 	pinned := testDotvirt()
 	pinned.Spec.Image = "quay.io/example/custom@sha256:" + strings.Repeat("a", 64)
@@ -261,7 +261,7 @@ func TestOperandImageRollsWithOperatorUpgrade(t *testing.T) {
 }
 
 // Every Argo source (argoAppSpec is the one shared definition) must exclude
-// templates/ — the repo's VM-template library. Its manifests' CRD
+// templates/ - the repo's VM-template library. Its manifests' CRD
 // (template.kubevirt.io) need not exist on-cluster; a missing exclude makes
 // every generated app degrade on unknown kinds.
 func TestArgoSourcesExcludeTemplateLibrary(t *testing.T) {

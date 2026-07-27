@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Snapshots (the Snapshots tab) — imperative + RBAC-gated like the runtime ops,
+// Snapshots (the Snapshots tab) - imperative + RBAC-gated like the runtime ops,
 // not git-managed, so ArgoCD never reverts them.
 
 func (s *Server) handleSnapshots(w http.ResponseWriter, r *http.Request) {

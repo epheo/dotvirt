@@ -32,8 +32,8 @@ const migrationLingerMs = 15 * 60 * 1000;
 // buildTasks folds the five sources into one feed ordered by lifecycle stage,
 // not timestamp: live migrations, runtime ops, staged changes (the draft), open
 // PRs (proposed), merged PRs, then standing drift (cluster differs from git).
-// Pure over its inputs (now is injectable) so the trickiest frontend logic —
-// the migration linger and the merge-to-reconcile "syncing" window — is
+// Pure over its inputs (now is injectable) so the trickiest frontend logic -
+// the migration linger and the merge-to-reconcile "syncing" window - is
 // unit-testable.
 export function buildTasks(
 	{ inventory, feed, drafts, proposals, username }: TaskSources,
@@ -120,7 +120,7 @@ export function buildTasks(
 	}
 	// Merged PRs from the server feed (webhook-instant, forge-derived, so they
 	// survive reloads and show every admin's merges): "syncing" while their
-	// project still drifts — the merge-to-reconcile gap an admin can't
+	// project still drifts - the merge-to-reconcile gap an admin can't
 	// otherwise see.
 	for (const t of feed) {
 		if (t.kind !== 'merge') continue;

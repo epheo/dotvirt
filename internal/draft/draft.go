@@ -1,6 +1,6 @@
 // Package draft holds dotvirt's pending changesets: VM edits and new-VM specs
-// staged by a user but not yet committed. Drafts are keyed by (user, project) —
-// each tenant gets an independent changeset per user — and persisted one JSON
+// staged by a user but not yet committed. Drafts are keyed by (user, project) -
+// each tenant gets an independent changeset per user - and persisted one JSON
 // file per pair (<dir>/<user>/<project>.json) so they survive backend restarts.
 package draft
 
@@ -39,7 +39,7 @@ const (
 	ResourceNetwork                    Resource = "network"                    // a Distributed Port Group (UDN/CUDN)
 	ResourceUplink                     Resource = "uplink"                     // a physical-network attachment (nmstate NNCP)
 	ResourceNamespace                  Resource = "namespace"                  // a namespace (+ optional primary "VM Network")
-	ResourceRoleBinding                Resource = "rolebinding"                // a tenant owners → namespace-admin grant
+	ResourceRoleBinding                Resource = "rolebinding"                // a tenant owners -> namespace-admin grant
 	ResourceEgressFirewall             Resource = "egressfirewall"             // a namespace's north-south egress firewall (Tier-1)
 	ResourceEgressIP                   Resource = "egressip"                   // a cluster-scoped SNAT pool (Tier-0)
 	ResourceExternalRoute              Resource = "externalroute"              // a cluster-scoped external next-hop route (Tier-0)
@@ -51,7 +51,7 @@ const (
 )
 
 // Atomic reports whether entries of this resource form one logical change that
-// stages and unstages as a set — a partial DRS file set (e.g. the operator
+// stages and unstages as a set - a partial DRS file set (e.g. the operator
 // Subscription unstaged from under its KubeDescheduler CR) is not a meaningful
 // proposal.
 func (r Resource) Atomic() bool { return r == ResourceDRS }
@@ -104,7 +104,7 @@ type Entry struct {
 	// Edit fields (KindEdit): the change to apply to an existing manifest.
 	Edit *model.VMEdit `json:"edit,omitempty"`
 
-	// Create fields (KindCreate): the wizard spec for a new VM, OR — when
+	// Create fields (KindCreate): the wizard spec for a new VM, OR - when
 	// adopting an object that exists only in the cluster - its live state
 	// serialized verbatim (SourceFile then carries the path it lands at).
 	Spec     *vmgen.Spec `json:"spec,omitempty"`
@@ -162,7 +162,7 @@ func (s *Store) loadLocked(user, project string) (map[string]Entry, error) {
 	default:
 		var list []Entry
 		if err := json.Unmarshal(data, &list); err != nil {
-			// A parse failure must not wedge this (user, project) forever — a draft is
+			// A parse failure must not wedge this (user, project) forever - a draft is
 			// an unproposed shopping cart, not a source of truth. Quarantine the file
 			// (kept for inspection, best-effort) and start fresh.
 			if rerr := os.Rename(p, p+".corrupt"); rerr != nil && !os.IsNotExist(rerr) {

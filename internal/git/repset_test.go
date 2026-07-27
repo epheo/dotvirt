@@ -22,7 +22,7 @@ func TestRepoSetCachesByURL(t *testing.T) {
 		t.Fatal("Get returned nil read/write")
 	}
 
-	// Same URL → same cached instances.
+	// Same URL -> same cached instances.
 	read2, write2, err := rs.Get(bareA)
 	if err != nil {
 		t.Fatalf("Get(A) again: %v", err)
@@ -31,7 +31,7 @@ func TestRepoSetCachesByURL(t *testing.T) {
 		t.Error("RepoSet did not cache: same URL returned different instances")
 	}
 
-	// Different URL → different instances.
+	// Different URL -> different instances.
 	readB, _, err := rs.Get(bareB)
 	if err != nil {
 		t.Fatalf("Get(B): %v", err)

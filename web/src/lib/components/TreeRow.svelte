@@ -2,8 +2,8 @@
 	import { ChevronDown, ChevronRight } from 'lucide-svelte';
 	import type { Snippet } from 'svelte';
 
-	// One row of the inventory tree. Every row kind — pinned destination, group,
-	// container, VM leaf — renders through this so indentation, hover and the
+	// One row of the inventory tree. Every row kind - pinned destination, group,
+	// container, VM leaf - renders through this so indentation, hover and the
 	// selection highlight cannot drift apart. The chevron and the label are
 	// separate hit-areas: the chevron only collapses, the label is a real link
 	// (deep-linkable, middle-click works).

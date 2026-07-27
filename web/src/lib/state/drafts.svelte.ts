@@ -8,7 +8,7 @@ export const PLATFORM_PROJECT = 'platform';
 // Per-project drafts (the Changes panel + header badge). Refreshed when the set
 // of projects or PR lanes changes (the layout's keyed effect), when the Changes
 // drawer opens, and directly after every staging action. `loaded`/`refreshing`
-// let the drawer distinguish "no changes" from "haven't looked yet" — it must
+// let the drawer distinguish "no changes" from "haven't looked yet" - it must
 // never flash the empty state over a summary that simply hasn't landed.
 class DraftsStore {
 	drafts = $state<{ project: string; draft: DraftView }[]>([]);
@@ -28,13 +28,13 @@ class DraftsStore {
 
 	async refresh() {
 		// Platform authors also carry a platform-tier draft (cluster-scoped network +
-		// namespace changes); draftsByProject drops it for non-authors (403 → skipped).
+		// namespace changes); draftsByProject drops it for non-authors (403 -> skipped).
 		const names = inventory.canManage
 			? [...inventory.projectNames, PLATFORM_PROJECT]
 			: inventory.projectNames;
 		if (!names.length) {
 			this.drafts = [];
-			// An empty project set is a real answer once the inventory has landed —
+			// An empty project set is a real answer once the inventory has landed -
 			// only "inventory not streamed yet" still counts as not-looked.
 			if (inventory.inventory) this.loaded = true;
 			return;

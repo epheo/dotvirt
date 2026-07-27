@@ -12,13 +12,13 @@ import (
 	"github.com/epheo/dotvirt/internal/reflect"
 )
 
-// Effective computes the policy chain governing one workload — the same pure
+// Effective computes the policy chain governing one workload - the same pure
 // in-memory scan Policies does, but filtered to what binds the given
 // namespace/pod labels and ordered by evaluation: admin ANPs by precedence,
 // then the project NetworkPolicies that select the pod, then baseline; plus
 // the egress planes. podScoped=false is a namespace-level query: pod selectors
 // can't resolve there, so those bindings come back Conditional instead of
-// being dropped — a maybe-applying firewall rule is never hidden.
+// being dropped - a maybe-applying firewall rule is never hidden.
 //
 // Control-plane binding only: which policies apply and in what order, not a
 // per-connection verdict.
@@ -42,7 +42,7 @@ func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, p
 
 	// Project tier: NetworkPolicies in the namespace whose podSelector selects
 	// the workload. A definite selection default-denies the directions the
-	// policy declares — the fact the panel must surface, since it flips the
+	// policy declares - the fact the panel must surface, since it flips the
 	// namespace from open to allowlist.
 	var project []model.PolicyBinding
 	for _, u := range reflect.List(s.netpol) {
@@ -103,7 +103,7 @@ type egressBinding struct {
 
 // egressBindings resolves which SNAT pools (EgressIP: namespaceSelector plus an
 // optional podSelector narrowing within it) and external routes bind a workload
-// — the one query behind the Effective view and the trace's egress planes.
+// - the one query behind the Effective view and the trace's egress planes.
 func (s *Snapshot) egressBindings(nsLabels, podLabels map[string]string, podScoped bool) (snat, routes []egressBinding) {
 	for _, u := range reflect.List(s.egressip) {
 		nsSel, _, _ := unstructured.NestedMap(u.Object, "spec", "namespaceSelector")
@@ -122,7 +122,7 @@ func (s *Snapshot) egressBindings(nsLabels, podLabels map[string]string, podScop
 }
 
 // match is a selector's verdict against known labels. matchCond means the
-// selector couldn't be resolved here — the caller keeps the binding and marks
+// selector couldn't be resolved here - the caller keeps the binding and marks
 // it conditional, because hiding it would misstate the firewall.
 type match int
 
@@ -143,7 +143,7 @@ func combineMatch(a, b match) match {
 }
 
 // matchSelector evaluates a LabelSelector (as stored in an unstructured spec)
-// against known labels. Absent/empty selects everything — the API convention
+// against known labels. Absent/empty selects everything - the API convention
 // every kind here shares. Undecodable selectors come back matchCond, not
 // matchNo: live objects are apiserver-validated so this is near-impossible,
 // but the conservative direction is to keep the row.

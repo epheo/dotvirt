@@ -6,9 +6,9 @@
 	import PowerDot from './PowerDot.svelte';
 	import StatusDot from './StatusDot.svelte';
 
-	// The Network Topology map — NSX-T's signature screen, built entirely from the
-	// catalog dotvirt already returns: the platform provider edge (Tier-0) → each
-	// project's router (Tier-1, its primary segment) → segments → VMs. It owns no new
+	// The Network Topology map - NSX-T's signature screen, built entirely from the
+	// catalog dotvirt already returns: the platform provider edge (Tier-0) -> each
+	// project's router (Tier-1, its primary segment) -> segments -> VMs. It owns no new
 	// data; segment membership reuses the same vmNetworkKeys the Segments lens groups
 	// by, so the map and the tree can never disagree.
 	let {
@@ -41,13 +41,13 @@
 	// The Segments lens (and grid scope) identify a port group by name, so the map
 	// collapses same-named networks to one card too. This keeps the map and the tree
 	// in agreement (a click scopes the grid by name), and avoids handing an {#each} a
-	// duplicate key — two project networks sharing a name across a project's namespaces
+	// duplicate key - two project networks sharing a name across a project's namespaces
 	// otherwise crash the render in Svelte 5.
 	const byName = (nets: PortGroup[]): PortGroup[] => [
 		...new Map(nets.map((n) => [n.name, n])).values(),
 	];
 
-	// Provider-edge (Tier-0) segments: cluster-scoped CUDNs — a shared overlay or a
+	// Provider-edge (Tier-0) segments: cluster-scoped CUDNs - a shared overlay or a
 	// VLAN localnet bridged to an uplink.
 	const t0Segments = $derived(
 		byName(networks.filter((n) => n.scope === 'shared' || n.kind === 'vlan')),
@@ -121,7 +121,7 @@
 		router between them yet, so cross-segment traffic exits to the fabric.
 	</p>
 
-	<!-- Tier-0: the platform provider edge — uplinks (transports) and cluster-scoped segments. -->
+	<!-- Tier-0: the platform provider edge - uplinks (transports) and cluster-scoped segments. -->
 	<section class="rounded-lg border border-line-strong bg-inset p-3">
 		<div class="mb-2 flex items-center gap-2">
 			<Radio size={15} class="text-ink-muted" />

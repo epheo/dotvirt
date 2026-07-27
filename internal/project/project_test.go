@@ -47,7 +47,7 @@ func TestResolveNoRepo(t *testing.T) {
 }
 
 // TestResolveVisibleFilter is the isolation guard: a namespace the caller can't
-// see (absent from visible) must never surface — not even to leak its project's
+// see (absent from visible) must never surface - not even to leak its project's
 // repo URL. With visible listing only team-a's namespace, team-b disappears
 // entirely. A nil visible means "no filter" (the SA/background path).
 func TestResolveVisibleFilter(t *testing.T) {

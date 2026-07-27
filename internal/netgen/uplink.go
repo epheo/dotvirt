@@ -10,7 +10,7 @@ import (
 
 // UplinkSpec describes a physical-network attachment to create: an OVS bridge
 // enslaving a NIC, mapped to a localnet physical-network name, across a set of
-// nodes — the vDS-uplink analog, as an nmstate NodeNetworkConfigurationPolicy.
+// nodes - the vDS-uplink analog, as an nmstate NodeNetworkConfigurationPolicy.
 type UplinkSpec struct {
 	Name         string            `json:"name"`                   // physical-network name (the localnet mapping)
 	Bridge       string            `json:"bridge,omitempty"`       // OVS bridge to create; default br-<name>

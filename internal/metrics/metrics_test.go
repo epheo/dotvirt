@@ -101,7 +101,7 @@ func p(f *float64) string {
 
 // TestVMMetricsFansOutPerLabel verifies a byLabel spec turns one query into one
 // chart series per label value ("Rx eth0", "Rx eth1"), sorted, while fixed
-// specs keep their single named series — and that memory carries the stacked
+// specs keep their single named series - and that memory carries the stacked
 // flag.
 func TestVMMetricsFansOutPerLabel(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

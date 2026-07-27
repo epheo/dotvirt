@@ -16,7 +16,7 @@ import (
 func AllowInsecureTLS() {
 	client := &http.Client{
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec G402 — dev flag
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec G402 - dev flag
 		},
 	}
 	gittransport.InstallProtocol("https", githttp.NewClient(client))

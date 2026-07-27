@@ -13,7 +13,7 @@ type HostCapacityNode struct {
 }
 
 // HostCapacity is the per-worker allocation/overcommit breakdown behind the
-// host capacity card — the cluster overcommit ratios, per host.
+// host capacity card - the cluster overcommit ratios, per host.
 type HostCapacity struct {
 	Updated int64              `json:"updated"`
 	Nodes   []HostCapacityNode `json:"nodes"`
@@ -37,7 +37,7 @@ type MetricChart struct {
 	Series  []MetricSeries `json:"series"`
 }
 
-// VMMetrics is a VM's performance time-series for one range — several charts built
+// VMMetrics is a VM's performance time-series for one range - several charts built
 // from KubeVirt's kubevirt_vmi_* Prometheus metrics, shaped for direct charting.
 type VMMetrics struct {
 	Range   string        `json:"range"`
@@ -45,11 +45,11 @@ type VMMetrics struct {
 	Charts  []MetricChart `json:"charts"`
 }
 
-// UsageMetric is one resource's point-in-time usage for a VM Summary bar — Used of
+// UsageMetric is one resource's point-in-time usage for a VM Summary bar - Used of
 // Total in the same unit, with a short recent history for an inline sparkline.
 type UsageMetric struct {
 	Used  float64   `json:"used"`
-	Total float64   `json:"total,omitempty"` // 0 ⇒ no known denominator (show the value alone)
+	Total float64   `json:"total,omitempty"` // 0 => no known denominator (show the value alone)
 	Spark []float64 `json:"spark,omitempty"`
 }
 
@@ -79,7 +79,7 @@ type ConsumerVM struct {
 	Value     float64 `json:"value"`
 }
 
-// ClusterSummary is the aggregate capacity view for the "All VMs" landing — the
+// ClusterSummary is the aggregate capacity view for the "All VMs" landing - the
 // vCenter cluster-Summary analog: rings (used vs node-allocatable) + VM counts by
 // phase + top-consumer VMs. VM-scoped sums are limited to the caller's namespaces;
 // node capacity is the cluster-wide boundary.
@@ -88,13 +88,13 @@ type ClusterSummary struct {
 	CPU       ClusterMetric  `json:"cpu"`     // cores
 	Memory    ClusterMetric  `json:"memory"`  // bytes
 	Storage   ClusterMetric  `json:"storage"` // bytes
-	VMs       map[string]int `json:"vms"`     // phase → count
+	VMs       map[string]int `json:"vms"`     // phase -> count
 	TopCPU    []ConsumerVM   `json:"topCpu"`
 	TopMemory []ConsumerVM   `json:"topMemory"`
 }
 
 // HostWorker is one worker in the utilization distribution. The full roster
-// ships — bounded by node count, cached once for all callers — so the card
+// ships - bounded by node count, cached once for all callers - so the card
 // can draw every worker as a point and name outliers client-side.
 type HostWorker struct {
 	Node          string  `json:"node"`
@@ -103,7 +103,7 @@ type HostWorker struct {
 	Unschedulable bool    `json:"unschedulable,omitempty"`
 }
 
-// HostBand is the DRS action band around the mean utilization — the deviation
+// HostBand is the DRS action band around the mean utilization - the deviation
 // window KubeVirtRelieveAndMigrate actually triggers on. Workers above it are
 // migration sources, workers below it are targets.
 type HostBand struct {
@@ -114,7 +114,7 @@ type HostBand struct {
 }
 
 // HostLoad is GET /api/metrics/hosts: the worker utilization distribution
-// behind the DRS balance card — every worker with CPU and memory percent,
+// behind the DRS balance card - every worker with CPU and memory percent,
 // hottest first. Band is set only when a DRS configuration is committed.
 type HostLoad struct {
 	Updated int64        `json:"updated"`
@@ -133,7 +133,7 @@ type QuotaItem struct {
 	Unit     string  `json:"unit"` // cores | bytes | count
 }
 
-// NamespaceQuota is one ResourceQuota in one namespace — the project capacity
+// NamespaceQuota is one ResourceQuota in one namespace - the project capacity
 // band's input. A namespace may carry several (scoped) quotas.
 type NamespaceQuota struct {
 	Namespace string      `json:"namespace"`

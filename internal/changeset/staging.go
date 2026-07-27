@@ -23,7 +23,7 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 	if edit.Empty() {
 		return model.DraftView{}, fmt.Errorf("%w: no fields to edit", model.ErrInvalid)
 	}
-	// SourceFile addresses a file in the proposal diff — the one repo path a
+	// SourceFile addresses a file in the proposal diff - the one repo path a
 	// client supplies directly, so it passes the same gate created names do.
 	if err := validate.RequireRepoPath("source file", req.SourceFile); err != nil {
 		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
@@ -69,7 +69,7 @@ func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, ra
 }
 
 // ClusterScopeNS is the placeholder "namespace" for cluster-scoped draft entries
-// (CUDN networks, NNCP uplinks) — they have no real namespace, but the draft keys
+// (CUDN networks, NNCP uplinks) - they have no real namespace, but the draft keys
 // + the unstage route are ns/name-shaped, so a sentinel keeps both well-formed.
 const ClusterScopeNS = "cluster"
 
@@ -122,7 +122,7 @@ func stageSpec[S any](c *Coordinator, id auth.Identity, proj project.ProjectInfo
 
 // StageCreateNetwork records a new Distributed Port Group in (id, proj)'s draft:
 // a namespace-scoped UDN (project scope) or a cluster-scoped CUDN (shared/vlan
-// scope) — for the latter, proj is the platform repo (dotvirt routes cluster-scoped
+// scope) - for the latter, proj is the platform repo (dotvirt routes cluster-scoped
 // creates there by KIND, not an admin-picked repo).
 func (c *Coordinator) StageCreateNetwork(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
 	return stageSpec(c, id, proj, rawSpec, "network", netgen.Manifest,
@@ -137,7 +137,7 @@ func (c *Coordinator) StageCreateNetwork(id auth.Identity, proj project.ProjectI
 
 // StageCreateNamespace records a new namespace (with an optional primary "VM
 // Network"). A Namespace is cluster-scoped, so it is COMMITTED to commitProj (the
-// platform repo) and applied by the platform Argo app — but it is labeled/annotated
+// platform repo) and applied by the platform Argo app - but it is labeled/annotated
 // to joinProj, the tenant project it JOINS, so that project's per-project app syncs
 // workloads into it once it exists. The namespace + primary UDN land as one
 // multi-doc manifest.
@@ -169,7 +169,7 @@ func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinPro
 	})
 }
 
-// StageCreateUplink records a new Uplink (an nmstate NNCP) in (id, proj)'s draft —
+// StageCreateUplink records a new Uplink (an nmstate NNCP) in (id, proj)'s draft -
 // proj is the platform repo (an uplink is cluster-scoped, so it always routes to the
 // platform tier). Stages under the ClusterScopeNS sentinel.
 func (c *Coordinator) StageCreateUplink(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
@@ -191,7 +191,7 @@ func (c *Coordinator) StageCreateEgressFirewall(id auth.Identity, proj project.P
 }
 
 // StageCreateEgressIP records a new cluster-scoped EgressIP (the Tier-0 source-NAT
-// pool) in (id, proj)'s draft. proj is the platform repo — cluster-scoped, so it
+// pool) in (id, proj)'s draft. proj is the platform repo - cluster-scoped, so it
 // always routes to the platform tier (handlers gate it on the caller's EgressIP-create
 // authority). Staged under the ClusterScopeNS sentinel.
 func (c *Coordinator) StageCreateEgressIP(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
@@ -202,7 +202,7 @@ func (c *Coordinator) StageCreateEgressIP(id auth.Identity, proj project.Project
 }
 
 // StageCreateExternalRoute records a new cluster-scoped AdminPolicyBasedExternalRoute
-// (the Tier-0 external next-hop route) in (id, proj)'s draft — proj is the platform
+// (the Tier-0 external next-hop route) in (id, proj)'s draft - proj is the platform
 // repo. Staged under the ClusterScopeNS sentinel.
 func (c *Coordinator) StageCreateExternalRoute(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
 	return stageSpec(c, id, proj, rawSpec, "external route", netgen.ExternalRouteManifest,
@@ -212,7 +212,7 @@ func (c *Coordinator) StageCreateExternalRoute(id auth.Identity, proj project.Pr
 }
 
 // StageCreateNetworkPolicy records a new NetworkPolicy (the east-west Distributed
-// Firewall) in (id, proj)'s draft — namespace-scoped, so proj is the tenant project
+// Firewall) in (id, proj)'s draft - namespace-scoped, so proj is the tenant project
 // owning the namespace.
 func (c *Coordinator) StageCreateNetworkPolicy(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
 	return stageSpec(c, id, proj, rawSpec, "network policy", netgen.NetworkPolicyManifest,
@@ -224,7 +224,7 @@ func (c *Coordinator) StageCreateNetworkPolicy(id auth.Identity, proj project.Pr
 // StageCreateAdminNetworkPolicy records a new cluster-wide admin DFW policy (the
 // AdminNetworkPolicy that overrides tenant NetworkPolicies, or the singleton
 // BaselineAdminNetworkPolicy default) in (id, proj)'s draft. proj is the platform
-// repo — cluster-scoped + admin-only, so it always routes to the platform tier
+// repo - cluster-scoped + admin-only, so it always routes to the platform tier
 // (handlers gate it on the caller's ANP/BANP-create authority). Staged under the
 // ClusterScopeNS sentinel.
 func (c *Coordinator) StageCreateAdminNetworkPolicy(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
@@ -238,7 +238,7 @@ func (c *Coordinator) StageCreateAdminNetworkPolicy(id auth.Identity, proj proje
 }
 
 // StageDelete records the removal of an existing VM in (id, proj)'s draft. The VM
-// must exist on the base branch (you can't delete what isn't in git — an unstaged
+// must exist on the base branch (you can't delete what isn't in git - an unstaged
 // create should be unstaged, not deleted); its manifest path is captured so the
 // propose step removes that file and Argo prunes the VM on merge.
 func (c *Coordinator) StageDelete(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error) {
@@ -264,7 +264,7 @@ func (c *Coordinator) StageDelete(id auth.Identity, proj project.ProjectInfo, na
 	return c.Get(id, proj)
 }
 
-// Unstage removes one pending change (of the given resource — empty means VM)
+// Unstage removes one pending change (of the given resource - empty means VM)
 // from (id, proj)'s draft. An atomic resource unstages as a whole set: its
 // entries are one logical change, so removing a single file from under it
 // would leave a proposable half-change.

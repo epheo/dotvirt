@@ -12,7 +12,7 @@ func newIndexer() cache.Indexer {
 	return cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
 }
 
-// TestStoreFiresOnChangeAndSyncs checks the watch→signal plumbing: each mutation
+// TestStoreFiresOnChangeAndSyncs checks the watch->signal plumbing: each mutation
 // fires onChange; the first Replace (initial relist) additionally fires onSynced
 // exactly once, and a later relist must NOT re-fire it.
 func TestStoreFiresOnChangeAndSyncs(t *testing.T) {

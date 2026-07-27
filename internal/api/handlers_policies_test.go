@@ -7,7 +7,7 @@ import (
 )
 
 // scopePolicies must keep namespace-tier rows only in visible namespaces and
-// cluster-tier rows only for callers with authority over that specific kind —
+// cluster-tier rows only for callers with authority over that specific kind -
 // an admin policy's rules name namespaces across tenants.
 func TestScopePolicies(t *testing.T) {
 	all := []model.Policy{
@@ -36,7 +36,7 @@ func TestScopePolicies(t *testing.T) {
 
 // TestRedactSubjects pins the effective/trace disclosure rule: the enumerated
 // subject namespaces of a cluster-tier policy are authoring-tier information,
-// stripped without authority over the kind — while the binding itself (and a
+// stripped without authority over the kind - while the binding itself (and a
 // namespace-tier policy) is untouched.
 func TestRedactSubjects(t *testing.T) {
 	none := func(model.PolicyKind) bool { return false }

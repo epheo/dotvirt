@@ -6,7 +6,7 @@
 	import StatusDot from './StatusDot.svelte';
 
 	// The Summary lane of the issues plane: standing problems in this scope,
-	// derived from the live stream — no fetch of its own. Rendered even when
+	// derived from the live stream - no fetch of its own. Rendered even when
 	// clean so "no issues" is a stated fact, not an absence.
 	let { scope = {} }: { scope?: { project?: string; namespace?: string } } = $props();
 

@@ -1,5 +1,5 @@
 // The issues plane: one derivation from the streamed inventory to "what needs
-// attention right now" — vCenter's Issues & Alarms, derive-not-persist. Only
+// attention right now" - vCenter's Issues & Alarms, derive-not-persist. Only
 // standing problems qualify; transitional states (applying, progressing,
 // plain OutOfSync = a pending apply) are deliberately not issues.
 import type { Inventory, VM } from '$lib/api';
@@ -53,7 +53,7 @@ export function deriveIssues(inv: Inventory | null): Issue[] {
 	);
 }
 
-// One row per VM, highest severity, every reason folded into the label — a
+// One row per VM, highest severity, every reason folded into the label - a
 // broken VM should read as one problem, not three.
 function vmIssue(project: string, vm: VM): Issue | null {
 	const danger: string[] = [];

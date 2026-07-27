@@ -31,7 +31,7 @@
 	import HeaderMenu from './HeaderMenu.svelte';
 	import MenuItem from './MenuItem.svelte';
 
-	// Repo-backed namespaces under the current URL's scope — what "New VM"
+	// Repo-backed namespaces under the current URL's scope - what "New VM"
 	// pre-targets, mirroring the tree context menu's "New VM here". null = no
 	// scope narrowing, so the wizard offers every creatable namespace.
 	const scopeNamespaces = $derived.by(() => {
@@ -200,7 +200,7 @@
 		{/snippet}
 	</HeaderMenu>
 
-	<!-- Issues: the attention bell — standing problems only (never pending
+	<!-- Issues: the attention bell - standing problems only (never pending
 	     applies), so a lit badge always means something is actually wrong. -->
 	<HeaderMenu>
 		{#snippet trigger({ open, toggle })}
@@ -257,7 +257,7 @@
 		{/snippet}
 	</HeaderMenu>
 
-	<!-- Changes: the GitOps staging cart — a notification-style indicator (badge =
+	<!-- Changes: the GitOps staging cart - a notification-style indicator (badge =
 	     pending staged edits), not a peer of New, so it reads as an icon. -->
 	<button
 		onclick={() => (ui.changesOpen = !ui.changesOpen)}

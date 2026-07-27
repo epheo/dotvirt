@@ -124,7 +124,7 @@
 	// default NIC, so it isn't an add-able adapter).
 	const available = $derived(attachableNetworks(networks, vm.namespace));
 
-	// The selected instancetype's own CPU/memory — for the read-only hint and to
+	// The selected instancetype's own CPU/memory - for the read-only hint and to
 	// seed the custom inputs when converting an instancetype VM to custom sizing.
 	const selectedIT = $derived(
 		(options?.instancetypes ?? []).find((i) => i.name === form.instancetype),
@@ -181,7 +181,7 @@
 		form.mode === 'custom' && !(form.cpuCores && form.memory) ? false : undefined,
 	);
 
-	// What will be staged, derived from the same request the backend receives —
+	// What will be staged, derived from the same request the backend receives -
 	// so the review never diverges from the commit.
 	const summary = $derived(summarize(vm, form));
 

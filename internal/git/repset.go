@@ -17,7 +17,7 @@ import (
 // Each opened repo gets one background poll goroutine that drives the
 // single-fetcher freshness model (Repo.headsSignature does the only network
 // fetch) and publishes GitChanged on the shared event bus when that repo's heads
-// move — so the inventory hub recomputes and the proposals refresher re-queries the
+// move - so the inventory hub recomputes and the proposals refresher re-queries the
 // forge. The poll is the missed-event backstop; the forge webhook (via Poke) is the
 // primary, near-instant trigger.
 type RepoSet struct {
@@ -33,7 +33,7 @@ type RepoSet struct {
 	mu sync.Mutex
 	// cache is keyed by the CANONICAL repo URL (forge.NormalizeRepoURL), so the same
 	// repo written three ways (clone_url with .git, html_url without, a trailing-slash
-	// annotation) resolves to one entry — a webhook Poke can't miss it on a spelling
+	// annotation) resolves to one entry - a webhook Poke can't miss it on a spelling
 	// difference. The raw URL each entry was opened with is used for the clone.
 	cache map[string]*repoPair
 }
@@ -97,10 +97,10 @@ func (s *RepoSet) Get(repoURL string) (*Repo, *WriteRepo, error) {
 	return pair.read, pair.write, nil
 }
 
-// Poke fetches repoURL's heads now instead of waiting for the next poll tick —
+// Poke fetches repoURL's heads now instead of waiting for the next poll tick -
 // the webhook's instant-update path. Matched by canonical URL, so a webhook
 // payload's clone_url/html_url form finds the entry the project annotation opened.
-// A repo not opened yet is ignored (the regular resolve→Get path will open and poll
+// A repo not opened yet is ignored (the regular resolve->Get path will open and poll
 // it). Nil-safe like the other optional collaborators.
 func (s *RepoSet) Poke(repoURL string) {
 	if s == nil {
@@ -119,7 +119,7 @@ func (s *RepoSet) Poke(repoURL string) {
 	}
 }
 
-// poll fetches repo on an interval — or immediately on a poke — and publishes
+// poll fetches repo on an interval - or immediately on a poke - and publishes
 // GitChanged when its heads move. One goroutine per open repo; headsSignature is
 // the single network fetch (reads never fetch). The ticker is the missed-event
 // backstop; the poke (webhook) is the primary trigger.

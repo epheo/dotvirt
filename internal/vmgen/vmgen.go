@@ -130,7 +130,7 @@ func vmSpec(s Spec) map[string]any {
 	dvTemplates := []any{
 		dataVolumeTemplate(rootVol, s.OSImage, orDefault(s.DiskSize, "30Gi"), s.StorageClass),
 	}
-	// Extra disks are persistent, blank DataVolumes — each on its own (optional)
+	// Extra disks are persistent, blank DataVolumes - each on its own (optional)
 	// storage class, so they outlive VM restarts and can be storage-migrated later.
 	for _, d := range s.ExtraDisks {
 		dvTemplates = append(dvTemplates,
@@ -159,7 +159,7 @@ func dataVolumeTemplate(name string, img OSImageRef, size, class string) map[str
 	}
 }
 
-// blankDataVolumeTemplate provisions an empty, formatted-on-first-boot PVC — the
+// blankDataVolumeTemplate provisions an empty, formatted-on-first-boot PVC - the
 // backing for an extra data disk.
 func blankDataVolumeTemplate(name, size, class string) map[string]any {
 	return map[string]any{
@@ -200,7 +200,7 @@ func template(s Spec, rootVol string) map[string]any {
 	}
 
 	// The primary NIC (pod network + masquerade) is attached unless explicitly
-	// declined — a VM, unlike a pod, may live on secondary networks alone.
+	// declined - a VM, unlike a pod, may live on secondary networks alone.
 	var networks, ifaces []any
 	if s.PrimaryNetwork == nil || *s.PrimaryNetwork {
 		networks = append(networks, podDefaultNetwork())

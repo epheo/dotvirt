@@ -54,7 +54,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 // handleDelete stages the removal of a VM's manifest into the caller's draft. Like
 // edit/adopt it only mutates the user's own draft (no cluster write, no SA
-// escalation — Argo prunes the VM on merge under its own RBAC), so namespace
+// escalation - Argo prunes the VM on merge under its own RBAC), so namespace
 // membership via resolveProject is the right gate, not resync's CanUpdateVM check.
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)
@@ -119,7 +119,7 @@ func (s *Server) handlePropose(w http.ResponseWriter, r *http.Request) {
 	result, err := s.draft.Propose(sc.id, sc.proj, req)
 	if err == nil {
 		// Track this project first: the nudge below only refreshes tokens already in
-		// the watch set, and a token that hasn't built an inventory yet isn't in it —
+		// the watch set, and a token that hasn't built an inventory yet isn't in it -
 		// so without this its new PR would wait for a later inventory build.
 		s.trackProposalsProject(sc.id, sc.proj)
 		s.nudgeProposals() // the new PR reaches every lane before the git poll notices
@@ -198,7 +198,7 @@ func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 	// Resync runs the reconcile with dotvirt's SA, gated on the caller's OWN
 	// authority over the VM (not just namespace read): they may trigger a sync only
-	// if they could update the VM themselves — otherwise read access would escalate
+	// if they could update the VM themselves - otherwise read access would escalate
 	// into an SA-privileged Argo sync. The SSAR runs inside Resync, beside the
 	// escalation, so no other caller can reach it unchecked.
 	sc, ns, name, ok := s.vmScope(w, r)
@@ -210,7 +210,7 @@ func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 	respond(w, result, err)
 }
 
-// handleManifest returns the VM's manifest file as it exists on the base branch —
+// handleManifest returns the VM's manifest file as it exists on the base branch -
 // the "Download manifest" action. The git file IS the VM's full definition, so
 // this is dotvirt's OVF-export analog.
 func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
@@ -229,7 +229,7 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(content)
 }
 
-// handleHistory lists recent commits on the project's base branch — the Changes
+// handleHistory lists recent commits on the project's base branch - the Changes
 // pane's history view.
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.pickProject(w, r, r.PathValue("project"))
@@ -241,7 +241,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleRevert proposes a forward commit reverting one commit in the project's
-// repo — a new PR, never a history rewrite.
+// repo - a new PR, never a history rewrite.
 func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.pickProject(w, r, r.PathValue("project"))
 	if !ok {

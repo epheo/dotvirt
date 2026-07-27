@@ -67,7 +67,7 @@ func TestSAConfig(t *testing.T) {
 	if cfg := saConfig(&rest.Config{TLSClientConfig: rest.TLSClientConfig{CertData: []byte("c"), KeyData: []byte("k")}}); cfg == nil {
 		t.Error("client-cert SA config should be valid (non-nil)")
 	}
-	// No credential of any kind and no mounted token file → nil.
+	// No credential of any kind and no mounted token file -> nil.
 	if cfg := saConfig(&rest.Config{}); cfg != nil {
 		// In CI there's normally no /var/run/secrets mount, so this should be nil;
 		// guard against a host that happens to have one.

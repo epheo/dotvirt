@@ -8,11 +8,11 @@ import (
 	"github.com/epheo/dotvirt/internal/validate"
 )
 
-// NetworkPolicySpec describes a NetworkPolicy — the east-west Distributed Firewall.
+// NetworkPolicySpec describes a NetworkPolicy - the east-west Distributed Firewall.
 // It protects a Group (AppliedTo: a podSelector) inside one namespace, allowing
 // ingress only from the peer Groups named in its rules (a NetworkPolicy that selects
 // pods default-denies all other ingress). Namespace-scoped, so it rides the tenant's
-// own repo. Groups are label selectors — the same primitive NSX-T's dynamic Groups
+// own repo. Groups are label selectors - the same primitive NSX-T's dynamic Groups
 // compile to.
 type NetworkPolicySpec struct {
 	Name      string            `json:"name"`
@@ -43,7 +43,7 @@ func NetworkPolicyManifest(s NetworkPolicySpec) (path string, content []byte, er
 	if err := validate.RequireDNS1123("namespace", s.Namespace); err != nil {
 		return "", nil, err
 	}
-	// An empty podSelector ({}) selects every pod in the namespace — the "applied to
+	// An empty podSelector ({}) selects every pod in the namespace - the "applied to
 	// the whole project" case; otherwise scope to the Group's labels.
 	podSelector := map[string]any{}
 	if len(s.AppliedTo) > 0 {
@@ -84,12 +84,12 @@ func NetworkPolicyManifest(s NetworkPolicySpec) (path string, content []byte, er
 	return s.Namespace + "/networkpolicies/" + s.Name + ".yaml", out, nil
 }
 
-// AdminNetworkPolicySpec describes the cluster-wide admin DFW tier —
+// AdminNetworkPolicySpec describes the cluster-wide admin DFW tier -
 // AdminNetworkPolicy (priority-ordered, actions Allow/Deny/Pass) or, when Baseline,
 // BaselineAdminNetworkPolicy (the cluster default: a singleton named "default", no
 // priority, actions Allow/Deny only). Both override or backstop tenant
 // NetworkPolicies, so they are cluster-scoped, platform-tier, and admin-only. Subject
-// and peers are namespace selectors — Groups of projects.
+// and peers are namespace selectors - Groups of projects.
 type AdminNetworkPolicySpec struct {
 	Name     string            `json:"name"`
 	Baseline bool              `json:"baseline,omitempty"` // render a BaselineAdminNetworkPolicy
@@ -103,12 +103,12 @@ type AdminNetworkPolicySpec struct {
 // (namespace selectors), optionally narrowed to ports.
 type AdminPolicyRule struct {
 	Action string              `json:"action"`          // Allow | Deny | Pass (Pass is ANP-only)
-	Peers  []map[string]string `json:"peers,omitempty"` // namespaceSelector matchLabels — the from/to Groups
+	Peers  []map[string]string `json:"peers,omitempty"` // namespaceSelector matchLabels - the from/to Groups
 	Ports  []PolicyPort        `json:"ports,omitempty"`
 }
 
 // AdminNetworkPolicyManifest renders the (Baseline)AdminNetworkPolicy YAML plus its
-// repo-relative path. A baseline policy is the cluster singleton "default" — no
+// repo-relative path. A baseline policy is the cluster singleton "default" - no
 // priority, and Pass is not a valid action.
 func AdminNetworkPolicyManifest(s AdminNetworkPolicySpec) (path string, content []byte, err error) {
 	name := s.Name

@@ -24,7 +24,7 @@ import (
 // it is, so a VM absent from the map is NotTracked.
 type Inputs struct {
 	Projects []project.ProjectInfo
-	Branch   string // repo branch to read (e.g. base/main); empty → repo default
+	Branch   string // repo branch to read (e.g. base/main); empty -> repo default
 	Repos    *git.RepoSet
 
 	Live  map[string]clusterstate.LiveVM
@@ -49,7 +49,7 @@ func Build(in Inputs) model.Inventory {
 func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 	out := model.Project{Name: p.Name, Repo: p.Repo, Error: p.Error, Namespaces: []model.ProjectNamespace{}}
 	// The GitOps rollup is keyed by the Application's repo, independent of whether
-	// dotvirt can read the repo — so it's attached even when the repo read below fails
+	// dotvirt can read the repo - so it's attached even when the repo read below fails
 	// (that's exactly when a "sync unhealthy" badge matters most).
 	if in.ProjectDrift != nil && p.Repo != "" {
 		if ps, ok := in.ProjectDrift[forge.NormalizeRepoURL(p.Repo)]; ok {
@@ -75,7 +75,7 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 	allowed := toSet(p.Namespaces)
 	byNS := map[string][]model.VM{}
 	// Pre-seed the project's namespaces so an empty one still shows as a node
-	// (non-nil slice → serializes as [] not null).
+	// (non-nil slice -> serializes as [] not null).
 	for _, ns := range p.Namespaces {
 		byNS[ns] = []model.VM{}
 	}
@@ -93,7 +93,7 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 	// base branch (a fresh clone target, an out-of-band create). Shown so the
 	// inventory matches the cluster and "Adopt into git" has a row to act on.
 	// NotTracked by definition (nothing on main for Argo to manage); desired
-	// state doesn't exist, so Power is Unknown and config fields stay empty —
+	// state doesn't exist, so Power is Unknown and config fields stay empty -
 	// an empty SourceFile is the UI's "not in git" marker.
 	for k, live := range in.Live {
 		ns, name, ok := splitKey(k)

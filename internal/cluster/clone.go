@@ -52,7 +52,7 @@ func cloneFrom(item unstructured.Unstructured) model.Clone {
 
 // CreateClone clones vmName into a new VM named target via a
 // VirtualMachineClone (snapshot + restore under the hood; the source may be
-// running). The target VM is created by the clone controller — dotvirt writes
+// running). The target VM is created by the clone controller - dotvirt writes
 // no config state here.
 func (c *Client) CreateClone(ctx context.Context, namespace, vmName, cloneName, target string) error {
 	dyn, err := c.dynamic()

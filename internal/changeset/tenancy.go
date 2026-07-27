@@ -22,14 +22,14 @@ import (
 // a first namespace (optionally with a primary VM Network), and the owners granted
 // admin on it. This is what fills the "no New Project button" gap.
 type ProjectSpec struct {
-	Name      string             `json:"name"`      // project name → repo name + dotvirt.io/project
+	Name      string             `json:"name"`      // project name -> repo name + dotvirt.io/project
 	Namespace string             `json:"namespace"` // first namespace; defaults to Name
 	Owners    []string           `json:"owners,omitempty"`
 	VMNetwork *netgen.PrimaryNet `json:"vmNetwork,omitempty"`
 }
 
 // StageCreateProject bootstraps a new tenant. The repo is created imperatively (a
-// repo isn't a manifest), then the first namespace and — when owners are given — a
+// repo isn't a manifest), then the first namespace and - when owners are given - a
 // RoleBinding granting them namespace-admin are staged into the PLATFORM repo
 // (cluster-tenancy is admin-tier; a tenant repo couldn't carry either). commitProj
 // is the platform project.
@@ -49,7 +49,7 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 		ns = spec.Name
 	}
 	// The name becomes a repo path segment, a Namespace name, a label value, and a
-	// staged manifest path — so it must be a strict DNS-1123 label. This rejects
+	// staged manifest path - so it must be a strict DNS-1123 label. This rejects
 	// path-traversal ("../x"), separators ("a/b"), and anything k8s would refuse.
 	if err := requireDNS1123("project name", spec.Name); err != nil {
 		return model.DraftView{}, err
@@ -83,7 +83,7 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	}); err != nil {
 		return model.DraftView{}, err
 	}
-	// Owners → a namespace-admin RoleBinding (the delegation that makes it a tenant).
+	// Owners -> a namespace-admin RoleBinding (the delegation that makes it a tenant).
 	if len(spec.Owners) > 0 {
 		rbPath, rbContent, err := netgen.RoleBindingManifest(netgen.RoleBindingSpec{
 			Namespace: ns, Project: spec.Name, Owners: spec.Owners,
@@ -116,14 +116,14 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	return view, nil
 }
 
-// AdoptProject wires a repo to an EXISTING labeled-but-repoless project — the
+// AdoptProject wires a repo to an EXISTING labeled-but-repoless project - the
 // read-only "no repo configured" dead-end the inventory shows. It mirrors
 // StageCreateProject but targets a project that already exists in the cluster: the
 // tenant repo is created imperatively, then each of the project's namespaces is
 // (re-)staged into the PLATFORM repo carrying the dotvirt.io/repo annotation. On
 // merge the namespaces come under Argo and the ApplicationSet generates the project's
 // app (it skips repoless projects). VMs in those namespaces then surface as
-// NotTracked and are brought in via AdoptNamespace — still PR-gated. commitProj is
+// NotTracked and are brought in via AdoptNamespace - still PR-gated. commitProj is
 // the platform project; target is the project being adopted.
 func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.ProjectInfo, owners []string) (model.DraftView, error) {
 	if err := requireRepo(commitProj); err != nil {
@@ -177,8 +177,8 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	return c.Get(id, commitProj)
 }
 
-// ensureTenantRepo derives the tenant repo URL — a sibling of the platform repo
-// under the same owner — creates it on the forge when absent, and seeds templates
+// ensureTenantRepo derives the tenant repo URL - a sibling of the platform repo
+// under the same owner - creates it on the forge when absent, and seeds templates
 // into a freshly created one. Shared by project creation and adoption; created is
 // false when the repo already existed, which the caller uses to guard.
 func (c *Coordinator) ensureTenantRepo(platformRepo, name string) (repoURL string, created bool, err error) {
@@ -205,7 +205,7 @@ func (c *Coordinator) ensureTenantRepo(platformRepo, name string) (repoURL strin
 // AdoptProject so the staging is unit-testable without a forge. Each namespace
 // manifest is stamped with target's dotvirt.io/project label and dotvirt.io/repo
 // annotation (netgen.NamespaceManifest), staged as a create that the propose step
-// writes by path — create-or-overwrite — so a namespace already in the platform repo
+// writes by path - create-or-overwrite - so a namespace already in the platform repo
 // (e.g. dotvirt-made, annotation later dropped) is corrected rather than duplicated.
 func (c *Coordinator) stageProjectAdoption(username, commitProjName string, target project.ProjectInfo, repoURL string, owners []string) error {
 	for _, ns := range target.Namespaces {
@@ -246,7 +246,7 @@ func (c *Coordinator) stageProjectAdoption(username, commitProjName string, targ
 }
 
 // siblingRepoURL derives a repo URL alongside ref under the same owner: it replaces
-// ref's last path segment with name (…/<owner>/<ref>.git → …/<owner>/<name>.git).
+// ref's last path segment with name (.../<owner>/<ref>.git -> .../<owner>/<name>.git).
 func siblingRepoURL(ref, name string) string {
 	s := strings.TrimSuffix(strings.TrimRight(ref, "/"), ".git")
 	i := strings.LastIndexByte(s, '/')

@@ -13,7 +13,7 @@
 	// Image upload (OVF-import analog). dotvirt creates the upload-target
 	// DataVolume + mints a token; the browser then streams the file STRAIGHT to
 	// cdi-uploadproxy (open CORS), so multi-GB images never pass through dotvirt.
-	// The proxy's cert is the cluster ingress CA — the same one serving this app,
+	// The proxy's cert is the cluster ingress CA - the same one serving this app,
 	// so the browser already trusts it.
 	let {
 		namespaces,

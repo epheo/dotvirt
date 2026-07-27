@@ -22,7 +22,7 @@
 	// The cluster-wide admin DFW tier. An AdminNetworkPolicy is priority-ordered and
 	// can Allow/Deny/Pass (Pass defers to tenant NetworkPolicies); the baseline is the
 	// singleton default that backstops everything, Allow/Deny only. Subject and peers
-	// are namespace selectors — Groups of projects. Cluster-scoped + admin-only, so it
+	// are namespace selectors - Groups of projects. Cluster-scoped + admin-only, so it
 	// is proposed to the platform repo and gated like a CUDN.
 	type Row = {
 		action: 'Allow' | 'Deny' | 'Pass';

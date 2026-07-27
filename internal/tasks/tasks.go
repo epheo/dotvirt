@@ -1,10 +1,10 @@
 // Package tasks is the recent-activity feed behind the dock's Recent Tasks lane:
 // the discrete acts every browser should see, not just the one that clicked. It
-// holds two lanes in memory only — imperative runtime ops (recorded by the API
+// holds two lanes in memory only - imperative runtime ops (recorded by the API
 // handlers with the caller's identity) and PRs merged into a project's base
 // branch (recorded by the forge webhook, re-derived by the refresher's poll).
 // Deliberately no persistence: merges reseed from the forge after a restart, and
-// the durable audit trail for ops is the cluster's own audit log — every op runs
+// the durable audit trail for ops is the cluster's own audit log - every op runs
 // under the caller's token. Consumers ride TaskChanged on the bus and re-pull
 // out-of-band, like the network catalog.
 package tasks
@@ -27,7 +27,7 @@ const opsCap = 100
 const MergeRetention = time.Hour
 
 // Op is one imperative act performed through dotvirt as the caller (restart,
-// migrate, snapshot, cordon…). Namespace is empty for node-scoped ops.
+// migrate, snapshot, cordon...). Namespace is empty for node-scoped ops.
 type Op struct {
 	Verb      string
 	Namespace string
@@ -38,7 +38,7 @@ type Op struct {
 }
 
 // Merge is one PR merged into a project's base branch. RepoURL is the normalized
-// clone URL — mapped to a project name at read time, under the reader's own
+// clone URL - mapped to a project name at read time, under the reader's own
 // visibility, so recording needs no project resolution.
 type Merge struct {
 	RepoURL string
@@ -133,7 +133,7 @@ func (f *Feed) Merges() []Merge {
 }
 
 // MergeAuthor resolves who a merged PR belongs to. dotvirt's bot opens every
-// proposal PR, so the poster is always the bot — the proposing user is encoded
+// proposal PR, so the poster is always the bot - the proposing user is encoded
 // (sanitized) as the first head-branch segment under the proposed prefix. A head
 // outside that prefix is a human PR, attributed to its real poster.
 func MergeAuthor(headRef, proposedPrefix, poster string) string {

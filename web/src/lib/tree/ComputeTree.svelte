@@ -12,8 +12,8 @@
 	import TreeRow from '$lib/components/TreeRow.svelte';
 	import TreeVMRow from './TreeVMRow.svelte';
 
-	// The Compute tree (VMs & Templates analog): All VMs → projects → namespaces
-	// → VMs. Highlights derive from the URL. Projects without a repo sink below
+	// The Compute tree (VMs & Templates analog): All VMs -> projects -> namespaces
+	// -> VMs. Highlights derive from the URL. Projects without a repo sink below
 	// the tracked ones so a broken/unadopted project never pushes real work down.
 	const scope = $derived(scopeFromPath(page.url.pathname));
 	const projects = $derived(inventory.inventory?.projects ?? []);

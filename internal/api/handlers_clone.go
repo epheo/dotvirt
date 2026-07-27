@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Clone (the Clone action) — the create is imperative + RBAC-gated like
+// Clone (the Clone action) - the create is imperative + RBAC-gated like
 // snapshots, but its outcome is config state: the target VM lands in the
 // cluster only, surfacing as NotTracked until adopted into git.
 

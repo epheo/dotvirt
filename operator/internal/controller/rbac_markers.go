@@ -4,8 +4,8 @@ package controller
 // are exactly what the controller's client does: install.Apply is server-side-apply, i.e.
 // create+patch (never update); only the kinds it actually reads (dotvirts, secrets,
 // deployments, routes) get list+watch (the cache); cleanup's DeleteAllOf is the
-// `deletecollection` verb. The operator does NOT author ClusterRoles — it only `bind`s the
-// three static operand roles — so it needs no `escalate` and no ClusterRole/RoleBinding writes.
+// `deletecollection` verb. The operator does NOT author ClusterRoles - it only `bind`s the
+// three static operand roles - so it needs no `escalate` and no ClusterRole/RoleBinding writes.
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts,verbs=get;list;watch;update
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts/status,verbs=get;update;patch
 // dotvirts/finalizers: unused on default clusters (AddFinalizer writes the main
@@ -29,6 +29,6 @@ package controller
 // clusterrolebindings: the operator creates the bindings that wire the static operand roles
 // to the dotvirt SA / Argo controller / platform-admins, and DeleteAllOf-cleans them up.
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=create;patch;deletecollection
-// clusterroles `bind`: the operator's ONLY rbac-authoring right — bind these three named
+// clusterroles `bind`: the operator's ONLY rbac-authoring right - bind these three named
 // static roles into the bindings above. No escalate, no role create/update/delete.
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=dotvirt;dotvirt-argocd-apply;dotvirt-platform-network-admin,verbs=bind

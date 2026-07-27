@@ -9,7 +9,7 @@ import (
 	"github.com/epheo/dotvirt/internal/netstate"
 )
 
-// handleTrace simulates one flow through the policy planes — served entirely
+// handleTrace simulates one flow through the policy planes - served entirely
 // from the SA snapshots, like the effective-policy answer. The caller must be
 // able to see both in-cluster ends; resolveProject gates each namespace.
 func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {

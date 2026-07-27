@@ -7,8 +7,8 @@ import (
 )
 
 // The byte-stable line editor: a generic text splicer over the manifest's
-// original lines, steered by yaml.Node positions. It knows nothing about VMs —
-// the apply* functions in the edit files own that — and exists so an edit
+// original lines, steered by yaml.Node positions. It knows nothing about VMs -
+// the apply* functions in the edit files own that - and exists so an edit
 // rewrites only the touched lines, keeping diffs reviewable and every
 // untouched byte (comments, ordering, quoting) intact.
 

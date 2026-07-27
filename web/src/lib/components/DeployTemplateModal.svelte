@@ -71,7 +71,7 @@
 	const formParams = $derived((tpl?.parameters ?? []).filter((p) => p.name !== 'NAME'));
 	const nameParam = $derived(tpl?.parameters?.find((p) => p.name === 'NAME') ?? null);
 
-	// A client-side EXAMPLE of a generate-expression value — presentation only,
+	// A client-side EXAMPLE of a generate-expression value - presentation only,
 	// the server mints the real one at deploy time. Supports the documented
 	// "[class]{n}" grammar; anything fancier just shows the raw pattern.
 	function exampleFrom(pattern: string): string {
@@ -102,7 +102,7 @@
 	);
 	const targetOK = $derived(!!tpl && !!namespace && nameOK);
 	// A required parameter is satisfiable empty only when the template generates
-	// or defaults it — mirroring the engine's own enforcement.
+	// or defaults it - mirroring the engine's own enforcement.
 	const missing = $derived(
 		formParams.filter((p) => p.required && !p.value && !p.generate && !params[p.name]?.trim()),
 	);

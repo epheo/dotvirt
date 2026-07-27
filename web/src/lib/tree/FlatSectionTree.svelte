@@ -10,7 +10,7 @@
 	import TreeRow from '$lib/components/TreeRow.svelte';
 	import TreeVMRow from './TreeVMRow.svelte';
 
-	// The flat section trees — Hosts (physical placement), Networking (by NIC
+	// The flat section trees - Hosts (physical placement), Networking (by NIC
 	// segment), Storage (by dataVolume class): one group per key, a VM under
 	// every key it matches (a VM with two NICs shows under both segments, as
 	// vCenter does). Keys come from $lib/lenses so the grid filter agrees.

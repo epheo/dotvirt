@@ -197,7 +197,7 @@ func TestAdoptNamespaceAllDeclaredIsInvalid(t *testing.T) {
 }
 
 // stageProjectAdoption stamps each of a project's namespaces with the dotvirt.io/repo
-// annotation (+ an owners RoleBinding) into the platform draft — the staging core of
+// annotation (+ an owners RoleBinding) into the platform draft - the staging core of
 // AdoptProject, exercised without a forge.
 func TestStageProjectAdoptionStampsRepoOnEveryNamespace(t *testing.T) {
 	c := newTestCoordinator(t)

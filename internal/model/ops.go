@@ -27,7 +27,7 @@ type Event struct {
 	LastSeen  string `json:"lastSeen,omitempty"` // RFC3339
 }
 
-// Snapshot is a VirtualMachineSnapshot for a VM — the Snapshots tab. KubeVirt
+// Snapshot is a VirtualMachineSnapshot for a VM - the Snapshots tab. KubeVirt
 // snapshots are a flat list (no vCenter-style parent/child tree).
 type Snapshot struct {
 	Name        string   `json:"name"`
@@ -38,14 +38,14 @@ type Snapshot struct {
 	Error       string   `json:"error,omitempty"`
 }
 
-// Clone is a VirtualMachineClone whose source is a VM — one row in the Clone
+// Clone is a VirtualMachineClone whose source is a VM - one row in the Clone
 // flow's progress list. The clone controller snapshots the source and restores
 // it into the target VM; the target exists only in the cluster (NotTracked)
 // until adopted into git.
 type Clone struct {
 	Name    string `json:"name"`
 	Target  string `json:"target"`
-	Phase   string `json:"phase,omitempty"`   // SnapshotInProgress | RestoreInProgress | CreatingTargetVM | Succeeded | Failed | …
+	Phase   string `json:"phase,omitempty"`   // SnapshotInProgress | RestoreInProgress | CreatingTargetVM | Succeeded | Failed | ...
 	Created string `json:"created,omitempty"` // RFC3339
 }
 
@@ -71,8 +71,8 @@ type UploadTarget struct {
 	Name      string `json:"name"`
 }
 
-// Node is one virtualization host — a node KubeVirt marks schedulable for
-// VMs — as a candidate live-migration target. Ready/Unschedulable let the
+// Node is one virtualization host - a node KubeVirt marks schedulable for
+// VMs - as a candidate live-migration target. Ready/Unschedulable let the
 // target picker gray out hosts a migration could not land on.
 type Node struct {
 	Name          string `json:"name"`

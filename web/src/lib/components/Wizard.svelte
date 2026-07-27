@@ -5,7 +5,7 @@
 	import Modal from './Modal.svelte';
 
 	// A vCenter-style wizard scaffold: a left step-rail, one panel at a time, and a
-	// Back/Next/Finish footer. Navigation is deliberately *free* — every step is
+	// Back/Next/Finish footer. Navigation is deliberately *free* - every step is
 	// reachable at any time (click the rail, or Back/Next as a convenience); the
 	// per-step `valid` flag only drives the rail marker, it never traps the user.
 	// The single hard gate is `canFinish`, which disables Finish on the last step.
@@ -13,7 +13,7 @@
 	// owns only navigation + chrome, so it stays reusable by other create flows.
 	type WizardStep = {
 		title: string;
-		valid?: boolean; // undefined ⇒ optional step (no required fields)
+		valid?: boolean; // undefined => optional step (no required fields)
 		body: Snippet;
 	};
 
@@ -55,8 +55,8 @@
 		if (current > 0) current--;
 	}
 
-	// Rail badge: current = blue number · invalid = amber number · satisfied
-	// required step = green check · optional step = slate number.
+	// Rail badge: current = blue number / invalid = amber number / satisfied
+	// required step = green check / optional step = slate number.
 	function railBadge(step: WizardStep, i: number): { cls: string; text: string; done?: boolean } {
 		if (i === current) return { cls: 'bg-accent text-white', text: String(i + 1) };
 		if (step.valid === false)

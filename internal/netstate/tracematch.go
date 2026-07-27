@@ -14,14 +14,14 @@ import (
 )
 
 // matched is a rule-component verdict plus why it couldn't be resolved when
-// conditional — the reason surfaces on the step so the viewer knows what to
+// conditional - the reason surfaces on the step so the viewer knows what to
 // check, not just that something is uncertain.
 type matched struct {
 	m      match
 	reason string
 }
 
-// allOf ANDs components (subject × peer × ports): any miss is a miss, any
+// allOf ANDs components (subject x peer x ports): any miss is a miss, any
 // unresolved part makes the whole rule conditional.
 func allOf(parts ...matched) matched {
 	out := matched{m: matchYes}
@@ -54,7 +54,7 @@ func anyOf(parts ...matched) matched {
 	return out
 }
 
-// sortedANPs returns the admin policies in precedence order (priority, name) —
+// sortedANPs returns the admin policies in precedence order (priority, name) -
 // the order their rules are evaluated in.
 func (s *Snapshot) sortedANPs() []*unstructured.Unstructured {
 	anps := reflect.List(s.anp)
@@ -69,7 +69,7 @@ func (s *Snapshot) sortedANPs() []*unstructured.Unstructured {
 	return anps
 }
 
-// peerTarget is what rule peers are matched against: the flow's other end —
+// peerTarget is what rule peers are matched against: the flow's other end -
 // an in-cluster workload, or a bare external address.
 type peerTarget struct {
 	w  *TraceWorkload
@@ -204,7 +204,7 @@ func resolveAddrs(t peerTarget) ([]netip.Addr, *matched) {
 }
 
 // cidrsMatch reports whether any target address falls in any CIDR. A workload
-// with no reported addresses can't be resolved — conditional, not dropped.
+// with no reported addresses can't be resolved - conditional, not dropped.
 func cidrsMatch(cidrs []any, t peerTarget) matched {
 	addrs, cond := resolveAddrs(t)
 	if cond != nil {

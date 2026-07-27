@@ -4,14 +4,14 @@ import { friendlyError } from './format';
 import { pollWhileVisible } from './poll';
 
 // resource owns the keyed-fetch idiom shared by the detail and metrics panels:
-// a load keyed on a STABLE identity string (never a per-frame object — the live
+// a load keyed on a STABLE identity string (never a per-frame object - the live
 // stream hands down fresh objects every frame), a stale-response guard for fast
 // key switches, the central-401 swallow, and an optional poll paused while the
 // tab is backgrounded. Call during component init (it registers $effects).
 //
 // loading is true only before the first data for the current key, so a poll
 // refresh never blanks the view. reset controls what a key change shows while
-// the new load is in flight: true blanks (detail panels — the old object is
+// the new load is in flight: true blanks (detail panels - the old object is
 // another identity's), false keeps the old data (scope dashboards avoid a
 // flash).
 export interface Resource<T> {
@@ -84,7 +84,7 @@ export function resource<T>(
 }
 
 // action owns resource()'s write-side idiom: one busy flag, one error slot, and
-// the central-401 swallow — so no dialog hand-rolls the sequence or forgets the
+// the central-401 swallow - so no dialog hand-rolls the sequence or forgets the
 // Unauthorized branch and paints an error banner over the login redirect.
 // run resolves true on success, so call sites close on `if (await op.run(...))`.
 export interface Action {

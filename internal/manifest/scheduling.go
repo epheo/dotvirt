@@ -19,7 +19,7 @@ const GroupLabelPrefix = "group.scheduling.dotvirt.io/"
 
 const hostnameLabel = "kubernetes.io/hostname"
 
-// affinityDoc is the decoded shape of spec.template.spec.affinity — only what
+// affinityDoc is the decoded shape of spec.template.spec.affinity - only what
 // is needed to recognize dotvirt's own terms; anything beyond them flags the
 // VM as hand-tuned (Custom) and the scheduling editor refuses to touch it.
 type affinityDoc struct {
@@ -62,7 +62,7 @@ type affinityTermDoc struct {
 
 // schedulingFromParts derives a VM's placement policy from its template
 // labels, nodeSelector and affinity. pinViaSelector reports that the pin came
-// from the hostname nodeSelector rather than a node-affinity term — the
+// from the hostname nodeSelector rather than a node-affinity term - the
 // editor must not duplicate such a pin into a regenerated affinity block.
 // Returns nil when the VM carries no placement content at all.
 func schedulingFromParts(labels, nodeSelector map[string]string, aff *affinityDoc) (s *model.VMScheduling, pinViaSelector bool) {
@@ -86,7 +86,7 @@ func schedulingFromParts(labels, nodeSelector map[string]string, aff *affinityDo
 			if na.Required != nil {
 				if pin, ok := pinFromTerms(na.Required.Terms); ok {
 					if pinViaSelector {
-						// Two competing host constraints — not a shape the editor writes.
+						// Two competing host constraints - not a shape the editor writes.
 						out.Custom = true
 					}
 					out.Pin = pin
@@ -256,7 +256,7 @@ func applySchedulingRules(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) (map[s
 	return set, remove, nil
 }
 
-// affinityBlock renders the full affinity section for the desired policy —
+// affinityBlock renders the full affinity section for the desired policy -
 // the editor always rewrites it wholesale (it refuses hand-written content),
 // so rendering stays deterministic: pin, then together, then apart, groups
 // sorted by name.

@@ -29,7 +29,7 @@
 	let { children }: { children: Snippet } = $props();
 
 	// The tree follows the section the URL is in, but sticks across the
-	// section-agnostic /vm route — a VM opened from the Hosts tree keeps the
+	// section-agnostic /vm route - a VM opened from the Hosts tree keeps the
 	// Hosts tree (and its highlighted row), as vCenter does. The section also
 	// persists as where "/" lands next visit.
 	let treeSection = $state<Section>('compute');
@@ -74,9 +74,9 @@
 	// live frame). Re-pull both on sign-in AND whenever networksVersion bumps
 	// (GitOps/git moved, or a policy reflector fired NetworkChanged), so a merged
 	// segment or firewall rule appears without a reload. Keyed on the stable derived
-	// primitive, so it fires only when networking may have changed — not every
+	// primitive, so it fires only when networking may have changed - not every
 	// VM-state frame. A failure (e.g. the OVN-K CRDs absent) leaves the catalog
-	// empty — NICs fall back to raw refs, Security shows no rows.
+	// empty - NICs fall back to raw refs, Security shows no rows.
 	$effect(() => {
 		if (!session.user) return;
 		inventory.networksVersion; // subscribe: re-pull when GitOps/git moves
@@ -115,7 +115,7 @@
 	});
 
 	// Opening the Changes drawer re-reads the draft summary, so what it shows is
-	// current at open — the keyed effect above only makes it eventually current.
+	// current at open - the keyed effect above only makes it eventually current.
 	$effect(() => {
 		if (ui.changesOpen) untrack(() => drafts.refresh());
 	});

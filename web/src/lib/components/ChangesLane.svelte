@@ -11,7 +11,7 @@
 
 	// One project's staged-changes lane: the items, their diffs, and the propose
 	// form. All form state is lane-local, so a lane that disappears (proposed or
-	// discarded) takes its state with it. The propose result outlives the lane —
+	// discarded) takes its state with it. The propose result outlives the lane -
 	// it's handed up to the panel, which renders it until the PR banner lands.
 	let {
 		project,
@@ -41,7 +41,7 @@
 
 	// A successful propose consumed this draft server-side; hide the lane at once
 	// instead of showing consumed items under the new PR banner until the summary
-	// round-trips. The next summary clears the flag — if the draft genuinely still
+	// round-trips. The next summary clears the flag - if the draft genuinely still
 	// has items (partial failure, or new staging), they come back.
 	let proposed = $state(false);
 	$effect(() => {
@@ -81,7 +81,7 @@
 			proposed = true;
 		});
 		// On success AND on failure: the push may have landed before the error
-		// (e.g. a gateway timeout on the PR step) — re-read the summary so the
+		// (e.g. a gateway timeout on the PR step) - re-read the summary so the
 		// lane reflects server truth.
 		onchanged();
 	}

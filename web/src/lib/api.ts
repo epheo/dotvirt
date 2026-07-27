@@ -1,6 +1,6 @@
 // Typed client for the dotvirt backend API.
 //
-// Types come from model.gen.ts (tygo output of internal/model — regenerate with
+// Types come from model.gen.ts (tygo output of internal/model - regenerate with
 // `make types`). The overlays below shadow the star re-export only where the
 // generated shape is too loose (string where the wire carries a closed union)
 // or wrong (Go []*float64 marshals null, not undefined). Request types with no
@@ -126,7 +126,7 @@ export interface UplinkCreate {
 	bridge?: string; // OVS bridge; default br-<name>
 	nodeSelector?: Record<string, string>; // node labels; omit = all workers, or {kubernetes.io/hostname: <node>}
 }
-// EgressFirewall — a namespace's north-south egress rules (the Tier-1 gateway
+// EgressFirewall - a namespace's north-south egress rules (the Tier-1 gateway
 // firewall). One per namespace (named "default" server-side); rules are first-match.
 export interface EgressFirewallPort {
 	protocol: 'TCP' | 'UDP' | 'SCTP';
@@ -142,7 +142,7 @@ export interface EgressFirewallCreate {
 	namespace: string;
 	rules: EgressFirewallRule[];
 }
-// Tier-0 (provider-edge) services — cluster-scoped, platform-routed.
+// Tier-0 (provider-edge) services - cluster-scoped, platform-routed.
 export interface EgressIPCreate {
 	name: string;
 	egressIPs: string[]; // the source-NAT pool
@@ -153,7 +153,7 @@ export interface ExternalRouteCreate {
 	namespaces: string[]; // projects whose egress is steered
 	nextHops: string[]; // static external next-hop IPs
 }
-// Distributed Firewall (east-west) — a NetworkPolicy protecting a Group (a label
+// Distributed Firewall (east-west) - a NetworkPolicy protecting a Group (a label
 // selector) inside one namespace, allowing ingress only from the named peer Groups.
 export interface PolicyPort {
 	protocol: 'TCP' | 'UDP' | 'SCTP';
@@ -169,7 +169,7 @@ export interface NetworkPolicyCreate {
 	appliedTo?: Record<string, string>; // the Group this protects; empty = whole namespace
 	ingress?: PolicyRule[];
 }
-// Cluster-wide admin Distributed Firewall — AdminNetworkPolicy (priority + Pass) or
+// Cluster-wide admin Distributed Firewall - AdminNetworkPolicy (priority + Pass) or
 // the BaselineAdminNetworkPolicy default (Allow/Deny only). Platform-tier, admin-only.
 export interface AdminPolicyRule {
 	action: 'Allow' | 'Deny' | 'Pass';
@@ -190,7 +190,7 @@ export interface NamespaceCreate {
 	vmNetwork?: { name: string; subnet?: string }; // optional primary (Layer2) UDN; subnet required server-side (primary = IPAM)
 }
 export interface ProjectCreate {
-	name: string; // project name → tenant repo + dotvirt.io/project label
+	name: string; // project name -> tenant repo + dotvirt.io/project label
 	namespace?: string; // first namespace; defaults to name
 	owners?: string[]; // usernames granted namespace-admin on the first namespace
 	vmNetwork?: { name: string; subnet?: string }; // optional primary (Layer2) UDN on that namespace
@@ -332,7 +332,7 @@ export const api = {
 	revert: (project: string, hash: string) =>
 		post<gen.ProposeResult>(`/api/projects/${enc(project)}/revert`, { hash }),
 
-	// Staging — the backend resolves the project from the VM's namespace, so these
+	// Staging - the backend resolves the project from the VM's namespace, so these
 	// per-VM routes need no project param.
 	stageEdit: (namespace: string, name: string, req: EditRequest) =>
 		post<DraftView>(`${vmPath(namespace, name)}/edit`, req),
@@ -412,7 +412,7 @@ export const api = {
 
 	// The template library (vSphere: Content Library). Deploy renders server-side
 	// and stages the VM into the draft; save derives a template from a VM's git
-	// manifest ("Clone to Template") — both land as PR-gated changes.
+	// manifest ("Clone to Template") - both land as PR-gated changes.
 	templates: () => get<{ templates: gen.Template[] }>('/api/templates'),
 	deployTemplate: (req: gen.DeployTemplateRequest) => post<DraftView>('/api/templates/deploy', req),
 	saveTemplate: (req: gen.SaveTemplateRequest) => post<DraftView>('/api/templates', req),
@@ -530,17 +530,17 @@ export function streamInventory(
 			}
 			// A close before the socket ever opened can't expose the handshake status
 			// (the WS API hides it). It's EITHER an expired session (401 on upgrade) OR
-			// a transient failure (backend restart, blip). Don't assume 401 — probe the
+			// a transient failure (backend restart, blip). Don't assume 401 - probe the
 			// session: only sign out if it's genuinely gone, otherwise reconnect. This
 			// stops every deploy/blip from bouncing valid users to login.
 			api
 				.me()
 				.then(() => {
-					if (closed) return; // torn down while probing → do nothing
-					scheduleReconnect(); // session still valid → it was transient
+					if (closed) return; // torn down while probing -> do nothing
+					scheduleReconnect(); // session still valid -> it was transient
 				})
 				.catch((e) => {
-					if (closed) return; // torn down while probing → don't sign out a dead subscription
+					if (closed) return; // torn down while probing -> don't sign out a dead subscription
 					if (e instanceof Unauthorized) onUnauthorized?.();
 					else scheduleReconnect();
 				});

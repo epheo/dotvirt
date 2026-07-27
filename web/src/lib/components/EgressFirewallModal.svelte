@@ -22,8 +22,8 @@
 		onstaged: () => void;
 	} = $props();
 
-	// One editable rule row. A rule allows or denies egress to a destination — a CIDR
-	// or a DNS name (exactly one) — optionally narrowed to a single transport port.
+	// One editable rule row. A rule allows or denies egress to a destination - a CIDR
+	// or a DNS name (exactly one) - optionally narrowed to a single transport port.
 	// (OVN-K rules carry a port list; one port per row covers the common case, and the
 	// user can add more rows.)
 	type Row = {

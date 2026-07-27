@@ -1,6 +1,6 @@
 // Package drsgen renders the Kube Descheduler Operator manifests behind
-// dotvirt's "DRS" panel — cluster-wide automatic VM rebalancing, the vSphere
-// DRS analog — from a small spec, the way netgen renders networks. Owns-nothing:
+// dotvirt's "DRS" panel - cluster-wide automatic VM rebalancing, the vSphere
+// DRS analog - from a small spec, the way netgen renders networks. Owns-nothing:
 // the output is proposed via PR into the platform repo and applied by Argo,
 // never written to the cluster. All output paths are constants (no user input
 // ever becomes a path segment) and every field is enum/range-validated.
@@ -12,14 +12,14 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// Namespace is the operator's install namespace — fixed by the Kube Descheduler
+// Namespace is the operator's install namespace - fixed by the Kube Descheduler
 // Operator (its CSV only supports own-namespace install there).
 const Namespace = "openshift-kube-descheduler-operator"
 
 // Platform-repo paths. CRPath is the KubeDescheduler CR: its presence on the
 // base branch is what "DRS is configured" means, and it is the one file a
 // disable removes (the operator install stays). PSIPath is the worker PSI
-// kernel-arg MachineConfig the load-aware profile needs — staged only on
+// kernel-arg MachineConfig the load-aware profile needs - staged only on
 // explicit request because applying it reboots the worker pool.
 const (
 	NamespacePath     = "descheduler/namespace.yaml"
@@ -29,13 +29,13 @@ const (
 	PSIPath           = "machineconfigs/99-worker-psi.yaml"
 )
 
-// Automation modes — vSphere DRS "Manual" vs "Fully Automated".
+// Automation modes - vSphere DRS "Manual" vs "Fully Automated".
 const (
 	ModePredictive = "Predictive" // dry-run: logs/metrics what would migrate, moves nothing
 	ModeAutomatic  = "Automatic"  // evicts, so VMs live-migrate to rebalance
 )
 
-// Deviation thresholds — the DRS migration-aggressiveness slider. AsymmetricLow
+// Deviation thresholds - the DRS migration-aggressiveness slider. AsymmetricLow
 // (0%:10%) only flags clearly-hot nodes and never over-drains an idle one;
 // Low/Medium/High (10/20/30% both ways) are progressively more eager to move VMs.
 var validThresholds = map[string]bool{
@@ -132,8 +132,8 @@ func withDefaults(s Spec) (Spec, error) {
 
 // Manifests renders the full DRS file set for the platform repo: the operator's
 // namespace, OperatorGroup and Subscription (idempotent install scaffolding),
-// the KubeDescheduler CR carrying the configuration, and — only when InstallPSI
-// — the worker PSI MachineConfig.
+// the KubeDescheduler CR carrying the configuration, and - only when InstallPSI
+// - the worker PSI MachineConfig.
 func Manifests(s Spec) ([]File, error) {
 	s, err := withDefaults(s)
 	if err != nil {
@@ -206,14 +206,14 @@ func subscription() map[string]any {
 	}
 }
 
-// kubeDescheduler is the configuration CR — a singleton named "cluster". The
+// kubeDescheduler is the configuration CR - a singleton named "cluster". The
 // KubeVirtRelieveAndMigrate profile is the virt-specific load-aware rebalancer;
 // PrometheusCPUCombined makes it decide on real measured load (PSI) rather than
 // pod resource requests.
 //
 // The CR ships in the same sync as the Subscription that provides its CRD, and
-// Argo's dry-run of a missing kind invalidates the whole operation — including
-// that Subscription — deadlocking the enable. SkipDryRunOnMissingResource lets
+// Argo's dry-run of a missing kind invalidates the whole operation - including
+// that Subscription - deadlocking the enable. SkipDryRunOnMissingResource lets
 // the install scaffolding apply; Argo then retries the CR until OLM registers
 // the API.
 func kubeDescheduler(s Spec) map[string]any {
@@ -246,7 +246,7 @@ func kubeDescheduler(s Spec) map[string]any {
 }
 
 // psiMachineConfig enables the PSI (Pressure Stall Information) kernel argument
-// on workers — the load signal KubeVirtRelieveAndMigrate reads. The 99- prefix
+// on workers - the load signal KubeVirtRelieveAndMigrate reads. The 99- prefix
 // must sort after any 98-* MachineConfig so psi=1 wins.
 func psiMachineConfig() map[string]any {
 	return map[string]any{
@@ -261,7 +261,7 @@ func psiMachineConfig() map[string]any {
 }
 
 // Parse reads a KubeDescheduler manifest (as committed by Manifests) back into
-// the Spec it renders from — the GET view of the repo's current DRS config.
+// the Spec it renders from - the GET view of the repo's current DRS config.
 // Unknown or hand-edited fields outside the Spec surface are ignored.
 func Parse(content []byte) (Spec, error) {
 	var doc struct {

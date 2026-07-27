@@ -25,7 +25,7 @@ type TraceWorkload struct {
 }
 
 // Trace simulates one flow through the policy planes: the same pure in-memory
-// scan Effective does, but rule-level — given a concrete source, destination
+// scan Effective does, but rule-level - given a concrete source, destination
 // and protocol/port, walk the evaluation order and report each step's verdict
 // with the deciding rule.
 //
@@ -37,7 +37,7 @@ type TraceWorkload struct {
 //
 // Deny is only ever certain. A rule that cannot be resolved here (named port,
 // a stopped VM's unknown addresses, a DNS rule) stays visible as a
-// Conditional step and downgrades the verdict — never silently dropped.
+// Conditional step and downgrades the verdict - never silently dropped.
 func (s *Snapshot) Trace(src TraceWorkload, dst *TraceWorkload, dstIP, protocol string, port int) model.TraceResult {
 	res := model.TraceResult{Steps: []model.TraceStep{}}
 	if protocol == "" {
@@ -165,14 +165,14 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 	}
 
 	// Admin tier: every ANP rule in (priority, rule) order. The first match
-	// decides — Allow/Deny are final for the flow, Pass hands it down.
+	// decides - Allow/Deny are final for the flow, Pass hands it down.
 	if res := adminTier(s.sortedANPs(), false); res != nil {
 		return *res
 	}
 
 	// A maybe-matching Pass converges here: matched or not, evaluation
 	// continues into the tiers below, so it can no longer change the outcome.
-	// (Inside the admin tier it still diverges — a later decisive ANP rule
+	// (Inside the admin tier it still diverges - a later decisive ANP rule
 	// would have been skipped by a matching Pass.)
 	kept := condActions[:0]
 	for _, a := range condActions {
@@ -183,7 +183,7 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 	condActions = kept
 
 	// Project tier: rules across every selecting NetworkPolicy are one allow
-	// list. Selection alone isolates the direction — no allowing rule means
+	// list. Selection alone isolates the direction - no allowing rule means
 	// the tier default-denies the flow.
 	var selecting []*unstructured.Unstructured
 	definiteSel := 0
@@ -250,7 +250,7 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 	return decide("Allow")
 }
 
-// gatewayWalk runs the namespace's EgressFirewall rules in order — the
+// gatewayWalk runs the namespace's EgressFirewall rules in order - the
 // gateway tier is first-match, default allow.
 func (s *Snapshot) gatewayWalk(ns, dstIP, protocol string, port int) walkResult {
 	var steps []model.TraceStep
@@ -277,7 +277,7 @@ func (s *Snapshot) gatewayWalk(ns, dstIP, protocol string, port int) walkResult 
 			} else if to["nodeSelector"] != nil {
 				pm, peer = matched{m: matchCond, reason: "node-selector rule — whether this address is a cluster node is unknown here"}, "cluster nodes"
 			} else {
-				// An unrecognized destination form still stays visible — a
+				// An unrecognized destination form still stays visible - a
 				// dropped rule would let a later rule decide with certainty.
 				pm, peer = matched{m: matchCond, reason: "a destination form this trace cannot resolve"}, "unresolved destination"
 			}
@@ -346,7 +346,7 @@ func planeStep(b egressBinding, stage, action, note string) model.TraceStep {
 }
 
 // connectivity decides whether an east-west path exists at all: both ends
-// must sit on the same primary network — isolated primaries drop the flow
+// must sit on the same primary network - isolated primaries drop the flow
 // before any policy runs. A shared secondary segment is surfaced as an
 // unfiltered bypass either way.
 func (s *Snapshot) connectivity(src, dst TraceWorkload) (bool, []model.TraceStep) {

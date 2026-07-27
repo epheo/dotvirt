@@ -5,7 +5,7 @@
 import type { Disk, EditRequest, NIC, PlacementGroup, Power, VM } from '$lib/api';
 
 // The Edit Settings sections a Configure card (or context menu) can deep-link
-// to — one vocabulary for the dialog, its openers, and the wizard step map.
+// to - one vocabulary for the dialog, its openers, and the wizard step map.
 export type EditSection = 'compute' | 'scheduling' | 'storage' | 'network' | 'labels';
 
 // Devices carry a removed flag; rows added in the dialog are marked isNew so
@@ -29,7 +29,7 @@ interface EditForm {
 	memory: string;
 	instancetype: string;
 	preference: string;
-	// Sizing is one of two mutually-exclusive modes — KubeVirt forbids a VM from
+	// Sizing is one of two mutually-exclusive modes - KubeVirt forbids a VM from
 	// carrying both an instancetype and inline cpu/memory. Seeded from how the VM
 	// is sized today; the dialog's toggle lets the user convert between them.
 	mode: 'instancetype' | 'custom';
@@ -78,7 +78,7 @@ export function buildEditRequest(vm: VM, form: EditForm): EditRequest {
 			(form.cpuCores !== vm.cpuCores || form.memory !== (vm.memory ?? ''))) ||
 		(form.mode === 'instancetype' && form.instancetype !== (vm.instancetype ?? ''));
 	// A VM wrongly carrying inline cpu/memory under an instancetype must be
-	// normalized even when nothing visibly changed — this heals a SyncFailed VM.
+	// normalized even when nothing visibly changed - this heals a SyncFailed VM.
 	const needsHeal = form.mode === 'instancetype' && (!!vm.cpuCores || !!vm.memory);
 	if (sizingChanged || needsHeal) {
 		if (form.mode === 'custom') {
@@ -104,7 +104,7 @@ export function buildEditRequest(vm: VM, form: EditForm): EditRequest {
 	if (form.evictionStrategy !== (vm.evictionStrategy ?? ''))
 		req.evictionStrategy = form.evictionStrategy;
 
-	// Placement — never diffed for a custom-affinity VM (the form is read-only
+	// Placement - never diffed for a custom-affinity VM (the form is read-only
 	// there; the backend would refuse the edit anyway).
 	if (!vm.scheduling?.custom) {
 		const origGroups = new Map((vm.scheduling?.groups ?? []).map((g) => [g.name, g]));
@@ -154,7 +154,7 @@ export function buildEditRequest(vm: VM, form: EditForm): EditRequest {
 }
 
 // Human-readable summary of exactly what will be staged, derived from the same
-// request the backend receives — so the review never diverges from the commit.
+// request the backend receives - so the review never diverges from the commit.
 export function summarize(vm: VM, form: EditForm): { label: string; value: string }[] {
 	const r = buildEditRequest(vm, form);
 	const out: { label: string; value: string }[] = [];

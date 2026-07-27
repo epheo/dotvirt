@@ -95,7 +95,7 @@ func (s *Snapshot) segmentKey(ref string) (key, display string) {
 	return "nad:" + ref, ref
 }
 
-// isLocalnet reports whether a NAD's CNI config declares localnet topology —
+// isLocalnet reports whether a NAD's CNI config declares localnet topology -
 // the segment kind with its own path to the physical fabric.
 func (s *Snapshot) isLocalnet(ref string) bool {
 	u, ok := reflect.Get(s.nad, ref)

@@ -56,7 +56,7 @@ func (a *Authenticator) Me(w http.ResponseWriter, r *http.Request) {
 // Middleware authenticates every request except the open endpoints (health and
 // login), injecting the Identity into the request context. The token is taken
 // from the session cookie or an Authorization: Bearer header (so API clients and
-// WebSocket handshakes both work — the cookie rides the WS upgrade request).
+// WebSocket handshakes both work - the cookie rides the WS upgrade request).
 func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isOpenPath(r.URL.Path) {

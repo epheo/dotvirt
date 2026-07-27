@@ -24,7 +24,7 @@
 	const view = $derived(VIEWS[sync as SyncStatus] ?? VIEWS.Unknown);
 
 	// An out-of-sync VM has something to explain (an apply error, or just pending
-	// drift) — clicking the badge/dot pops up the detail. Other states are inert.
+	// drift) - clicking the badge/dot pops up the detail. Other states are inert.
 	const clickable = $derived(sync === 'OutOfSync');
 	let open = $state(false);
 

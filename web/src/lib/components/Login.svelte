@@ -21,7 +21,7 @@
 			.catch(() => {});
 	});
 	// The OAuth callback bounces here with ?sso_error=1 on any failure (the
-	// detail is server-logged, never shown — it can carry endpoint internals).
+	// detail is server-logged, never shown - it can carry endpoint internals).
 	const ssoError = $derived(page.url.searchParams.get('sso_error') !== null);
 
 	async function submit(e: SubmitEvent) {

@@ -20,7 +20,7 @@
 		size?: 'md' | 'lg' | '3xl';
 		// Destructive dialogs render the title in red.
 		danger?: boolean;
-		// false pins the dialog open — backdrop, Escape, and the X button all
+		// false pins the dialog open - backdrop, Escape, and the X button all
 		// refuse to close (e.g. mid-upload, where closing would kill the stream).
 		dismissable?: boolean;
 		icon?: Snippet;
@@ -40,7 +40,7 @@
 	const FOCUSABLE =
 		'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-	// Focus lands inside on open ([data-autofocus] → first focusable → the
+	// Focus lands inside on open ([data-autofocus] -> first focusable -> the
 	// panel itself) and returns to the opener on close.
 	$effect(() => {
 		if (!panel) return;

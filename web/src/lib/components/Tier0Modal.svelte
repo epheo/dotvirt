@@ -22,7 +22,7 @@
 	// A Tier-0 (provider-edge) service: a source-NAT pool (EgressIP) pinning a
 	// project's egress to fixed, routable IPs, or an external route steering its egress
 	// through static next-hop gateways (AdminPolicyBasedExternalRoute). Both are
-	// cluster-scoped — proposed to the platform repo.
+	// cluster-scoped - proposed to the platform repo.
 	let kind = $state<'snat' | 'route'>('snat');
 	let name = $state('');
 	let ips = $state(''); // egress IPs (snat) or next-hop IPs (route), space/comma separated

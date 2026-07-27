@@ -3,7 +3,7 @@
 	import { relativeAge } from '$lib/format';
 	import UsageBar from './UsageBar.svelte';
 
-	// Pure view over the summary's usage snapshot — VMSummary owns the fetch so
+	// Pure view over the summary's usage snapshot - VMSummary owns the fetch so
 	// the at-a-glance tiles and these bars read one consistent sample.
 	let { usage, loading, failed }: { usage: VMUsage | null; loading: boolean; failed: boolean } =
 		$props();

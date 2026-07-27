@@ -106,7 +106,7 @@ func TestResourceDriftSegmentSyncMessage(t *testing.T) {
 }
 
 // appWithSync builds an Application with a primary repoURL and top-level
-// sync/health/operationState — the fields the per-project rollup reads.
+// sync/health/operationState - the fields the per-project rollup reads.
 func appWithSync(name, repo, sync, health, opPhase, opMsg string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "argoproj.io/v1alpha1",
@@ -157,7 +157,7 @@ func TestAppSyncFromApps(t *testing.T) {
 func TestAppSyncRollupCoversNonVMKinds(t *testing.T) {
 	a := appWithSync("net", "https://forge.example/dotvirt/net.git",
 		"OutOfSync", "Progressing", "Running", "")
-	// Its live tree holds only a UserDefinedNetwork — no VM.
+	// Its live tree holds only a UserDefinedNetwork - no VM.
 	a.Object["status"].(map[string]any)["resources"] = []any{
 		map[string]any{"group": "k8s.ovn.org", "kind": "UserDefinedNetwork",
 			"namespace": "drs-lab", "name": "db-net", "status": "OutOfSync"},
@@ -214,11 +214,11 @@ func TestDriftFromAppsSyncMessage(t *testing.T) {
 // TestDriftFromAppsEmptySyncSkipped is the regression for the empty-Sync badge
 // crash: a VM that appears ONLY in operationState.syncResult.resources (a failed
 // first apply that never entered the live status.resources tree) must NOT be
-// synthesized into the drift map with a zero Sync — it stays absent, so the caller
+// synthesized into the drift map with a zero Sync - it stays absent, so the caller
 // reports NotTracked rather than handing the frontend an empty sync status.
 func TestDriftFromAppsEmptySyncSkipped(t *testing.T) {
 	drift := driftFromApps([]*unstructured.Unstructured{appWithSyncResult("openshift-gitops", "managed",
-		// Live tree is empty — the object never got created.
+		// Live tree is empty - the object never got created.
 		[]any{},
 		[]any{
 			map[string]any{"group": "kubevirt.io", "kind": "VirtualMachine", "namespace": "prod",

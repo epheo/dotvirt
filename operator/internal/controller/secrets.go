@@ -16,7 +16,7 @@ import (
 	"github.com/epheo/dotvirt/operator/internal/install"
 )
 
-// reconcileSecrets ensures the generated secrets (create-once — never regenerated
+// reconcileSecrets ensures the generated secrets (create-once - never regenerated
 // on re-reconcile, so the cookie key + plugin token survive restarts): the session
 // key, the ApplicationSet plugin token, and the webhook secrets. The forge
 // credential is supplied by the admin (spec.forge.credentialsSecret) or, earlier

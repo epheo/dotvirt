@@ -25,7 +25,7 @@
 	import StorageClassSummary from './StorageClassSummary.svelte';
 
 	// The container workspace: every inventory level gets the same breadcrumb +
-	// tab chrome — vCenter's "same tabs at every level". The tab SET follows the
+	// tab chrome - vCenter's "same tabs at every level". The tab SET follows the
 	// object kind: compute containers carry the full set, a host drops
 	// Permissions (nodes aren't namespaced), segments and storage classes are
 	// fact sheets (Summary + their VMs).
@@ -91,7 +91,7 @@
 		return inv.projects;
 	});
 	// The metrics-backend scope. Network/storage lenses are navigation groupings,
-	// not metrics boundaries — their Summary/Monitor aggregate the whole
+	// not metrics boundaries - their Summary/Monitor aggregate the whole
 	// inventory, like 'all'.
 	const containerScope = $derived(
 		scope.kind === 'project'
@@ -175,7 +175,7 @@
 		runBulk(
 			pickedVMs,
 			(vm) => api.stageEdit(vm.namespace, vm.name, { sourceFile: vm.sourceFile, power: target }),
-			// Already in target state, or not in git (cluster-only) → no-op.
+			// Already in target state, or not in git (cluster-only) -> no-op.
 			(vm) => vm.power === target || !vm.sourceFile,
 			`Powered ${target.toLowerCase()}: staged`,
 		);
@@ -186,7 +186,7 @@
 		await runBulk(
 			pickedVMs,
 			(vm) => api.stageDelete(vm.namespace, vm.name),
-			(vm) => !vm.sourceFile, // not in git → nothing to stage a removal of
+			(vm) => !vm.sourceFile, // not in git -> nothing to stage a removal of
 			'Deletion staged for',
 		);
 	}

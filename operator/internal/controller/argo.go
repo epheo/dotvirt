@@ -56,7 +56,7 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 		)
 	}
 	// Argo repo-creds (from the forge credential) so Argo can clone the tenant +
-	// platform repos, including private ones. Best-effort — nil if the forge URL or
+	// platform repos, including private ones. Best-effort - nil if the forge URL or
 	// secret is absent.
 	if rc := r.repoCreds(ctx, dv, argoNS); rc != nil {
 		objs = append(objs, rc)
@@ -70,11 +70,11 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	return nil, nil
 }
 
-// reconcileArgoWebhook sets up forge→ArgoCD instant sync: one ORG-level webhook
+// reconcileArgoWebhook sets up forge->ArgoCD instant sync: one ORG-level webhook
 // covers every repo (present + future) with no per-repo registration. Skipped in
 // dry-run (it mutates the forge + argocd-secret, which server-side dry-run can't
 // model). A registration failure is recorded on the condition but doesn't halt
-// the pipeline — Argo falls back to its poll.
+// the pipeline - Argo falls back to its poll.
 func (r *DotvirtReconciler) reconcileArgoWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
 	if r.DryRun {
 		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionArgoWebhook, "argo webhook")
@@ -84,7 +84,7 @@ func (r *DotvirtReconciler) reconcileArgoWebhook(ctx context.Context, dv *dotvir
 	if configured, err := r.ensureArgoWebhook(ctx, dv, argoNS); err != nil {
 		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionFalse, "Error", err.Error())
 	} else if configured {
-		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionTrue, "Registered", "org webhook → ArgoCD")
+		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionTrue, "Registered", "org webhook -> ArgoCD")
 	} else {
 		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionUnknown, "NotRegistered", "ArgoCD webhook not registered (no Argo URL, or registration deferred); Argo falls back to its poll")
 	}
@@ -135,14 +135,14 @@ func (r *DotvirtReconciler) mirrorAppsetToken(ctx context.Context, dv *dotvirtv1
 	return r.Create(ctx, mirror)
 }
 
-// ensureArgoWebhook registers one ORG-level forge webhook → ArgoCD and sets the
+// ensureArgoWebhook registers one ORG-level forge webhook -> ArgoCD and sets the
 // matching webhook secret in argocd-secret, so a merge triggers an immediate sync
 // instead of waiting for Argo's poll. Best-effort: returns configured=false (no error)
 // when no Argo URL is resolvable, no platform repo names the org, or the forge
-// registration itself transiently fails (logged) — Argo's poll backstops a missed nudge,
+// registration itself transiently fails (logged) - Argo's poll backstops a missed nudge,
 // so none of those should fail the install. err is reserved for operator-internal
 // failures (reading the webhook secret / forge credentials, applying argocd-secret).
-// Real-only (the caller skips it in dry-run) — it mutates the forge + argocd-secret.
+// Real-only (the caller skips it in dry-run) - it mutates the forge + argocd-secret.
 func (r *DotvirtReconciler) ensureArgoWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) (configured bool, err error) {
 	if dv.Spec.Forge.URL == "" || dv.Spec.Forge.PlatformRepo == "" {
 		return false, nil
@@ -170,7 +170,7 @@ func (r *DotvirtReconciler) ensureArgoWebhook(ctx context.Context, dv *dotvirtv1
 	// (cmd/dotvirt logs and moves on): a transient forge hiccup here must not read as a
 	// hard install error, because ArgoCD's poll already backstops a missed nudge. Log it
 	// and report unconfigured so the next reconcile retries. The secret/credential steps
-	// above stay hard errors — those are operator-internal, not forge-transient.
+	// above stay hard errors - those are operator-internal, not forge-transient.
 	if err := client.EnsureOrgWebhook(strings.TrimRight(argoURL, "/")+"/api/webhook", value); err != nil {
 		logf.FromContext(ctx).Info("argo webhook registration deferred; ArgoCD poll backstops", "error", err.Error())
 		return false, nil
@@ -179,7 +179,7 @@ func (r *DotvirtReconciler) ensureArgoWebhook(ctx context.Context, dv *dotvirtv1
 }
 
 // repoCreds builds the Argo repo-credentials Secret from the forge credential, or
-// nil when the forge URL/secret is unavailable (best-effort — Argo then relies on
+// nil when the forge URL/secret is unavailable (best-effort - Argo then relies on
 // anonymous read for public repos).
 func (r *DotvirtReconciler) repoCreds(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) client.Object {
 	if dv.Spec.Forge.URL == "" {

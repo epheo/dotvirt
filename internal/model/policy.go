@@ -10,17 +10,17 @@ package model
 type PolicyKind string
 
 const (
-	PolicyDFW      PolicyKind = "dfw"      // NetworkPolicy — project east-west rules
-	PolicyAdmin    PolicyKind = "admin"    // AdminNetworkPolicy — cluster-wide, priority-ordered
-	PolicyBaseline PolicyKind = "baseline" // BaselineAdminNetworkPolicy — the cluster default
-	PolicyGateway  PolicyKind = "gateway"  // EgressFirewall — project north-south egress
-	PolicyEgressIP PolicyKind = "egressip" // EgressIP — Tier-0 source-NAT pool
-	PolicyRoute    PolicyKind = "route"    // AdminPolicyBasedExternalRoute — Tier-0 next hop
+	PolicyDFW      PolicyKind = "dfw"      // NetworkPolicy - project east-west rules
+	PolicyAdmin    PolicyKind = "admin"    // AdminNetworkPolicy - cluster-wide, priority-ordered
+	PolicyBaseline PolicyKind = "baseline" // BaselineAdminNetworkPolicy - the cluster default
+	PolicyGateway  PolicyKind = "gateway"  // EgressFirewall - project north-south egress
+	PolicyEgressIP PolicyKind = "egressip" // EgressIP - Tier-0 source-NAT pool
+	PolicyRoute    PolicyKind = "route"    // AdminPolicyBasedExternalRoute - Tier-0 next hop
 )
 
 // PolicyRuleView is one rule row as the Security view shows it: direction,
 // action, a human peer summary, and a compact port list. Summaries, not the
-// spec — editing goes through git, the view only has to read well.
+// spec - editing goes through git, the view only has to read well.
 type PolicyRuleView struct {
 	Direction string `json:"direction"`       // Ingress | Egress
 	Action    string `json:"action"`          // Allow | Deny | Pass
@@ -38,7 +38,7 @@ type Policy struct {
 	Priority  int        `json:"priority,omitempty"`  // ANP precedence (lower wins)
 	Target    string     `json:"target,omitempty"`    // what the policy applies to, summarized
 	// Namespaces a cluster-scoped policy provably pins to (the metadata.name
-	// selector netgen writes). Nil when the selector isn't enumerable — a tenant
+	// selector netgen writes). Nil when the selector isn't enumerable - a tenant
 	// filter must then keep the row rather than hide a possibly-applying rule.
 	Namespaces []string         `json:"namespaces,omitempty"`
 	Rules      []PolicyRuleView `json:"rules,omitempty"`
@@ -48,7 +48,7 @@ type Policy struct {
 	SyncError string     `json:"syncError,omitempty"`
 }
 
-// PolicyInventory is GET /api/policies: the policies the caller may see —
+// PolicyInventory is GET /api/policies: the policies the caller may see -
 // namespace-scoped kinds in visible namespaces, cluster-scoped kinds only for
 // callers with the matching platform authoring authority.
 type PolicyInventory struct {
@@ -61,7 +61,7 @@ type PolicyBinding struct {
 	Policy Policy `json:"policy"`
 	// Conditional: a pod-level selector couldn't be resolved (namespace-scoped
 	// query, or an unreadable selector), so the policy applies only to the pods
-	// matching its target — the binding is kept rather than hidden.
+	// matching its target - the binding is kept rather than hidden.
 	Conditional bool `json:"conditional,omitempty"`
 	// Note carries tier semantics the list order alone can't express (e.g. the
 	// baseline tier applies only where nothing above decided).
@@ -94,7 +94,7 @@ type EffectivePolicy struct {
 
 // TraceRequest simulates one flow: a source VM, a destination (an in-cluster
 // VM or an external IP), and the protocol/port. Control-plane simulation of
-// the live policy objects — no packet is injected.
+// the live policy objects - no packet is injected.
 type TraceRequest struct {
 	Source      TraceEndpointRef `json:"source"`
 	Destination TraceEndpointRef `json:"destination"`

@@ -1,5 +1,5 @@
 // Package metrics queries a Prometheus-compatible endpoint (OpenShift's Thanos
-// querier) for a VM's performance time-series — the data behind the Performance
+// querier) for a VM's performance time-series - the data behind the Performance
 // tab. It runs a fixed, curated set of range queries per VM under the caller's
 // token (so the metrics backend's own RBAC is the access gate) and shapes the
 // results into chart-ready series aligned on a shared time axis.
@@ -45,10 +45,10 @@ type Client struct {
 
 // New builds a Client for the query API at baseURL (e.g. the thanos-querier
 // Route, or the in-cluster service). caPath, when set, is a PEM bundle to trust
-// for that endpoint — in-cluster, the mounted service-CA that signs
+// for that endpoint - in-cluster, the mounted service-CA that signs
 // thanos-querier's serving cert, so the connection needn't be insecure.
 // insecure skips TLS verification instead (self-signed dev Route). Returns
-// (nil, nil) when baseURL is empty — the API treats a nil client as
+// (nil, nil) when baseURL is empty - the API treats a nil client as
 // "Performance disabled".
 func New(baseURL, caPath string, insecure bool) (*Client, error) {
 	if baseURL == "" {
@@ -90,7 +90,7 @@ func scopeSelector(namespaces []string, node string) string {
 	return "{" + inner + "}"
 }
 
-// scopeKey is the canonical cache key for a namespace scope plus extras —
+// scopeKey is the canonical cache key for a namespace scope plus extras -
 // sorted, so equal sets share one cache entry regardless of order.
 func scopeKey(namespaces []string, extra ...string) string {
 	sorted := append([]string(nil), namespaces...)
@@ -99,7 +99,7 @@ func scopeKey(namespaces []string, extra ...string) string {
 }
 
 // VMUsage returns a VM's point-in-time capacity-and-usage for the Summary tab: CPU
-// % of allocated, memory used of allocated, guest-FS used of provisioned — each
+// % of allocated, memory used of allocated, guest-FS used of provisioned - each
 // with a short sparkline.
 func (c *Client) VMUsage(ctx context.Context, token, ns, name string) (model.VMUsage, error) {
 	key := ns + "/" + name
@@ -199,8 +199,8 @@ func (c *Client) byLabel(ctx context.Context, token, q, label string) map[string
 
 // HostLoad returns the worker-node utilization distribution behind the DRS
 // balance card: every worker with CPU and memory percent, hottest-CPU first.
-// Four instant vectors — CPU and memory utilization, the worker role set, and
-// cordon state — are joined here rather than in PromQL (node-exporter labels
+// Four instant vectors - CPU and memory utilization, the worker role set, and
+// cordon state - are joined here rather than in PromQL (node-exporter labels
 // nodes `instance`, kube-state-metrics labels them `node`; a Go join beats a
 // label_replace). Node-level data, same sensitivity class as the
 // node-allocatable totals ClusterSummary serves; cached once for all users.
@@ -240,7 +240,7 @@ func (c *Client) HostLoad(ctx context.Context, token string) (model.HostLoad, er
 }
 
 // Capacity returns each worker's committed-to-VMs vCPU and guest memory
-// against its allocatable capacity — the per-host breakdown of the cluster
+// against its allocatable capacity - the per-host breakdown of the cluster
 // overcommit ratios ClusterSummary serves. kube-state-metrics and the KubeVirt
 // VMI series both label nodes `node`, so the join is direct. Node-level data,
 // same sensitivity class as HostLoad; cached once for all users.
@@ -288,7 +288,7 @@ func (c *Client) Capacity(ctx context.Context, token string) (model.HostCapacity
 }
 
 // ScopeMetrics returns the per-VM top-consumer time-series for a container
-// scope over the given range — the container Monitor's Performance view. Each
+// scope over the given range - the container Monitor's Performance view. Each
 // chart is one topk query; its result series are named namespace/name. Cached
 // by scope (not token), like ClusterSummary: any user authorized for this
 // namespace set gets identical data.
@@ -330,7 +330,7 @@ func (c *Client) ScopeMetrics(ctx context.Context, token string, namespaces []st
 	return out, nil
 }
 
-// Alerts returns the firing Prometheus alerts in the given namespaces — the
+// Alerts returns the firing Prometheus alerts in the given namespaces - the
 // dock's Alarms tab and badge. It reads the ALERTS series directly (no
 // Alertmanager dependency); identical (name, severity, namespace, vm) series
 // collapse into one row with a count. Cached by scope like ClusterSummary.
@@ -403,7 +403,7 @@ func consumers(vec []labeledValue) []model.ConsumerVM {
 
 // VMMetrics runs the curated charts for one VM over the given range concurrently,
 // then aligns each chart's series onto a shared time axis (one x-array + per-series
-// value arrays, gaps as nil — directly chartable). A fixed spec yields one series;
+// value arrays, gaps as nil - directly chartable). A fixed spec yields one series;
 // a byLabel spec yields one per label value (per NIC, per drive). A per-series
 // failure degrades to gaps; a dead endpoint (every query errors with no data)
 // returns ErrUnavailable.

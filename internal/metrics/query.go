@@ -16,7 +16,7 @@ import (
 )
 
 // queryJSON performs one query-API GET under the caller's token and decodes
-// the response envelope into out — the single HTTP path under vector,
+// the response envelope into out - the single HTTP path under vector,
 // rangeSeries, and friends.
 func (c *Client) queryJSON(ctx context.Context, token, apiPath string, params url.Values, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+apiPath+"?"+params.Encode(), nil)
@@ -141,7 +141,7 @@ func (g *gather) wait() error {
 	return nil
 }
 
-// scalars runs named instant queries concurrently, returning name→first value (0
+// scalars runs named instant queries concurrently, returning name->first value (0
 // when a query has no result).
 func (c *Client) scalars(ctx context.Context, token string, queries map[string]string) map[string]float64 {
 	return fanOut(queries, func(q string) float64 {
@@ -164,7 +164,7 @@ type labeledSeries struct {
 }
 
 // rangeSeries runs one query_range and returns every result series with its
-// labels — the multi-series read behind the scope charts (and the per-NIC/
+// labels - the multi-series read behind the scope charts (and the per-NIC/
 // per-drive variants to come). NaN/Inf values are dropped as gaps.
 func (c *Client) rangeSeries(ctx context.Context, token, query string, start, end int64, step int) ([]labeledSeries, error) {
 	q := url.Values{}
@@ -227,7 +227,7 @@ func (c *Client) sparklines(ctx context.Context, token string, queries map[strin
 	end := time.Now().Unix()
 	start := end - 3600
 	return fanOut(queries, func(q string) sparkResult {
-		smp, _ := c.rangeQuery(ctx, token, q, start, end, 120) // 2m step → ~30 points
+		smp, _ := c.rangeQuery(ctx, token, q, start, end, 120) // 2m step -> ~30 points
 		vals := make([]float64, len(smp))
 		for i, s := range smp {
 			vals[i] = s.v

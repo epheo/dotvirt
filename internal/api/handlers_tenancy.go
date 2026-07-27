@@ -39,7 +39,7 @@ func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 	respond(w, view, err)
 }
 
-// handleCreateProject bootstraps a new tenant project from the UI — the "New
+// handleCreateProject bootstraps a new tenant project from the UI - the "New
 // Project" flow. It creates the project's forge repo and stages its first namespace
 // (+ an optional owners RoleBinding) into the platform repo. Gated on the same
 // namespace-create authority as handleCreateNamespace: creating a tenant is a
@@ -71,7 +71,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	respond(w, view, err)
 }
 
-// handleAdoptProject wires a repo to an existing labeled-but-repoless project — the
+// handleAdoptProject wires a repo to an existing labeled-but-repoless project - the
 // "Attach repo" action on the inventory's no-repo dead-end. Like handleCreateProject
 // it's a platform-admin act (it lands a Namespace + repo annotation in the platform
 // tier), so it's gated on namespace-create authority; the target tenant is resolved

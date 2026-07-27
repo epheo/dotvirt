@@ -2,7 +2,7 @@
 // stacked into fine bins; when the tallest stack cannot fit the strip height
 // at a readable radius, the strip degrades to a density silhouette and only
 // outliers keep their dots. The switch is geometric, never a node-count
-// threshold — a spread-out fleet keeps its dots longer than a piled-up one.
+// threshold - a spread-out fleet keeps its dots longer than a piled-up one.
 
 interface Dot {
 	i: number; // index into the input array
@@ -12,7 +12,7 @@ interface Dot {
 }
 
 interface StripLayout {
-	dots: Dot[] | null; // null: density mode — draw the silhouette instead
+	dots: Dot[] | null; // null: density mode - draw the silhouette instead
 	bins: number[]; // per-bin counts (density path input; always filled)
 	binPct: number;
 }
@@ -55,7 +55,7 @@ export function layoutStrip(pcts: number[], w: number, h: number): StripLayout {
 }
 
 // The silhouette: a smoothed area over the bin counts, closed to the baseline.
-// Quadratic segments through bin-center midpoints — enough smoothing to read
+// Quadratic segments through bin-center midpoints - enough smoothing to read
 // as a distribution, cheap enough to rebuild every poll.
 export function densityPath(bins: number[], w: number, h: number, baseY: number): string {
 	const max = Math.max(1, ...bins);

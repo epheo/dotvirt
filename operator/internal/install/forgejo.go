@@ -32,7 +32,7 @@ const (
 	ForgejoBotUser     = "dotvirt-bot" // the service user the operator mints a token for
 )
 
-// ForgejoHTTPPort is the managed Forgejo's single HTTP port — the one source for
+// ForgejoHTTPPort is the managed Forgejo's single HTTP port - the one source for
 // its Service, the container port and probes, and every URL/exposure built to it.
 const ForgejoHTTPPort int32 = 3000
 
@@ -68,12 +68,12 @@ func ForgejoHost(dv *dotvirtv1alpha1.Dotvirt) string {
 }
 
 // ForgejoServiceAccount runs the Forgejo pod under dotvirt's hardened, non-root
-// securityContext — no SCC grant required (the rootless image needs none).
+// securityContext - no SCC grant required (the rootless image needs none).
 func ForgejoServiceAccount(dv *dotvirtv1alpha1.Dotvirt) *corev1.ServiceAccount {
 	return serviceAccount(forgejoSAName, dv)
 }
 
-// ForgejoPVC holds Forgejo's data. NOT owner-referenced by the caller — orphaned on
+// ForgejoPVC holds Forgejo's data. NOT owner-referenced by the caller - orphaned on
 // uninstall so the platform repo's git data survives (the operator owns Forgejo's
 // lifecycle, not its data).
 func ForgejoPVC(dv *dotvirtv1alpha1.Dotvirt) *corev1.PersistentVolumeClaim {
@@ -85,7 +85,7 @@ func ForgejoService(dv *dotvirtv1alpha1.Dotvirt) *corev1.Service {
 	return service(ForgejoServiceName, dv, forgejoSelector, ForgejoHTTPPort)
 }
 
-// forgejoResources bounds the eval forge — modest single-replica sizing, shared by
+// forgejoResources bounds the eval forge - modest single-replica sizing, shared by
 // the bootstrap init and main containers.
 func forgejoResources() corev1.ResourceRequirements {
 	return corev1.ResourceRequirements{
@@ -97,14 +97,14 @@ func forgejoResources() corev1.ResourceRequirements {
 // forgejoEnv is the config shared by the init + main containers. It does NOT override
 // GITEA_CUSTOM/GITEA_WORK_DIR: the rootless image's defaults all live under
 // /var/lib/gitea (the one PVC mount). Overriding to a custom path is what breaks the
-// rootless image's arbitrary-UID writability — keep the defaults.
+// rootless image's arbitrary-UID writability - keep the defaults.
 func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt, argoWebhookHost string) []corev1.EnvVar {
 	// dotvirt's webhook is delivered to its in-cluster Service; Forgejo's SSRF guard
-	// blocks private targets by default, so allow that host — keeping `external` so
+	// blocks private targets by default, so allow that host - keeping `external` so
 	// delivery to any public webhook still works. The ArgoCD webhook host must be
 	// allowed by NAME on top of `external`: that entry matches only public resolved
 	// IPs, and the Argo Route often resolves to a private ingress VIP (lab/on-prem
-	// clusters), where the SSRF guard would silently drop every forge→Argo delivery.
+	// clusters), where the SSRF guard would silently drop every forge->Argo delivery.
 	allowed := serviceHost(dv) + ",external"
 	if argoWebhookHost != "" {
 		allowed += "," + argoWebhookHost

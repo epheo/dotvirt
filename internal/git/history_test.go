@@ -16,7 +16,7 @@ func webYAML(cores int) string {
 }
 
 // seedHistory builds a bare repo on main with three commits: seed (adds
-// web.yaml), bump (edits web.yaml), add-db (adds db.yaml) — enough to exercise
+// web.yaml), bump (edits web.yaml), add-db (adds db.yaml) - enough to exercise
 // History ordering and both RevertItems modes (restore an edit, delete an add).
 func seedHistory(t *testing.T) string {
 	t.Helper()
@@ -119,7 +119,7 @@ func TestRevertItemsRestoresEditedFile(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	commits, _ := r.History("main", 25)
-	bump := commits[1] // "bump web to 4 cpu" — edits web.yaml from 2 to 4 cpu
+	bump := commits[1] // "bump web to 4 cpu" - edits web.yaml from 2 to 4 cpu
 	items, err := r.RevertItems(bump.Hash)
 	if err != nil {
 		t.Fatalf("RevertItems: %v", err)
@@ -142,7 +142,7 @@ func TestRevertItemsDeletesAddedFile(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	commits, _ := r.History("main", 25)
-	addDB := commits[0] // "add db" — introduced db.yaml, so reverting deletes it
+	addDB := commits[0] // "add db" - introduced db.yaml, so reverting deletes it
 	items, err := r.RevertItems(addDB.Hash)
 	if err != nil {
 		t.Fatalf("RevertItems: %v", err)
@@ -161,7 +161,7 @@ func TestRevertItemsRejectsRoot(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	commits, _ := r.History("main", 25)
-	root := commits[len(commits)-1] // "seed tenant-a" — no parent to restore to
+	root := commits[len(commits)-1] // "seed tenant-a" - no parent to restore to
 	if _, err := r.RevertItems(root.Hash); err == nil {
 		t.Fatal("expected an error reverting the root commit, got nil")
 	}

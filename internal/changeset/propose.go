@@ -101,7 +101,7 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	return out, nil
 }
 
-// RecentlyMerged lists PRs merged into proj's base branch since 'since' — the
+// RecentlyMerged lists PRs merged into proj's base branch since 'since' - the
 // task feed's merged lane (the poll backstop behind the forge webhook, and the
 // reseed after a restart). Attribution comes from the head branch, not the PR
 // poster: dotvirt's bot opens every proposal PR (see tasks.MergeAuthor).
@@ -109,7 +109,7 @@ func (c *Coordinator) RecentlyMerged(proj project.ProjectInfo, since time.Time) 
 	if proj.Repo == "" {
 		return nil, nil
 	}
-	fc := c.forge.For(proj.Repo) // nil-safe: nil factory / unparsable repo → nil client
+	fc := c.forge.For(proj.Repo) // nil-safe: nil factory / unparsable repo -> nil client
 	if fc == nil {
 		return nil, nil
 	}
@@ -139,7 +139,7 @@ func (c *Coordinator) RecentlyMerged(proj project.ProjectInfo, since time.Time) 
 // configured prefix, e.g. dotvirt/proposed/<user>/<project>-<hash>. The readable
 // segments are sanitized to valid git refs (refSegment is lossy), so a short hash
 // of the RAW (user, project) is appended to guarantee distinct identities never
-// share a branch — without it, two usernames that sanitize to the same string
+// share a branch - without it, two usernames that sanitize to the same string
 // would force-push over each other's PR.
 func (c *Coordinator) proposedBranch(user, project string) string {
 	return c.proposed + "/" + refSegment(user) + "/" + refSegment(project) + "-" + shortHash(user, project)
@@ -178,14 +178,14 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) ([]git.ChangesetIt
 	return items, nil
 }
 
-// OpenProposal returns the open PR backing (id, proj)'s proposed branch, if any —
-// the staged→PR→synced lifecycle's middle state for the Recent Tasks feed. Returns
+// OpenProposal returns the open PR backing (id, proj)'s proposed branch, if any -
+// the staged->PR->synced lifecycle's middle state for the Recent Tasks feed. Returns
 // ok=false (nil error) when the project has no repo/forge or no open PR.
 func (c *Coordinator) OpenProposal(id auth.Identity, proj project.ProjectInfo) (model.Proposal, bool, error) {
 	if proj.Repo == "" {
 		return model.Proposal{}, false, nil
 	}
-	fc := c.forge.For(proj.Repo) // nil-safe: nil factory / unparsable repo → nil client
+	fc := c.forge.For(proj.Repo) // nil-safe: nil factory / unparsable repo -> nil client
 	if fc == nil {
 		return model.Proposal{}, false, nil
 	}

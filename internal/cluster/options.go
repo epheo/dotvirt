@@ -23,7 +23,7 @@ var (
 )
 
 // dynamic returns the client's dynamic interface, or a uniform error when it's
-// unavailable (degraded mode) — the single home for that guard, shared by every
+// unavailable (degraded mode) - the single home for that guard, shared by every
 // CRD-backed method (options, snapshots, clones).
 func (c *Client) dynamic() (dynamic.Interface, error) {
 	if c.dyn == nil {
@@ -40,7 +40,7 @@ func (c *Client) ListOptions(ctx context.Context) (model.Options, error) {
 		return model.Options{}, err
 	}
 	// Non-nil slices so a source the SA can't list (RBAC) serializes as [] not
-	// null — the frontend treats each list as iterable unconditionally.
+	// null - the frontend treats each list as iterable unconditionally.
 	opts := model.Options{
 		Instancetypes:  []model.Instancetype{},
 		Preferences:    []model.Preference{},

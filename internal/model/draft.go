@@ -3,7 +3,7 @@ package model
 // DTOs crossing the API boundary: the draft/changeset request and view types.
 
 // Change is one human-readable, YAML-free change item (a semantic diff entry).
-// Action is "change" (From→To), "add" (To), or "remove" (From).
+// Action is "change" (From->To), "add" (To), or "remove" (From).
 type Change struct {
 	Field  string `json:"field"`
 	Action string `json:"action"` // change | add | remove
@@ -129,7 +129,7 @@ type ObjectRef struct {
 // DraftItem is one pending change rendered for the UI.
 type DraftItem struct {
 	Kind      string   `json:"kind"`               // edit | create | delete
-	Resource  string   `json:"resource,omitempty"` // "" == vm | network — disambiguates unstage
+	Resource  string   `json:"resource,omitempty"` // "" == vm | network - disambiguates unstage
 	Namespace string   `json:"namespace"`
 	Name      string   `json:"name"`
 	Changes   []Change `json:"changes"`
@@ -157,7 +157,7 @@ type ProposeResult struct {
 	Existing   bool   `json:"existing,omitempty"`
 }
 
-// Proposal is an open pull request backing a project's draft — the staged→PR→
+// Proposal is an open pull request backing a project's draft - the staged->PR->
 // synced lifecycle's middle state, surfaced as a Recent Tasks row.
 type Proposal struct {
 	Project  string `json:"project"`
@@ -169,7 +169,7 @@ type Proposal struct {
 // TaskEntry is one Recent Tasks row: an imperative runtime op dotvirt performed
 // as the caller ("op"), or a PR merged into a project's base branch ("merge").
 // Server-derived so every browser sees every admin's acts with real attribution;
-// ops live in memory only (the durable audit trail is the cluster's audit log —
+// ops live in memory only (the durable audit trail is the cluster's audit log -
 // ops run under the caller's own token), merges re-derive from the forge.
 type TaskEntry struct {
 	Kind      string `json:"kind"` // "op" | "merge"
@@ -185,7 +185,7 @@ type TaskEntry struct {
 	At        string `json:"at"` // RFC3339
 }
 
-// Permissions is the caller's effective capability set in one namespace — the
+// Permissions is the caller's effective capability set in one namespace - the
 // Permissions tab. Curated to what the UI does under the user's token; config/
 // power/delete are PR-gated (the forge decides), so they aren't rows here.
 type Permissions struct {

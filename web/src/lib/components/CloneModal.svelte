@@ -13,7 +13,7 @@
 
 	// Clone name-prompt + progress: creating a VirtualMachineClone is imperative
 	// (RBAC-gated, like snapshots), but the resulting target VM is config state
-	// that exists only in the cluster — it appears in the inventory as "Not in
+	// that exists only in the cluster - it appears in the inventory as "Not in
 	// git" until adopted, which the hint below points at.
 	let {
 		vm,

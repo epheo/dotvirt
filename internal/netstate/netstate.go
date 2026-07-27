@@ -1,10 +1,10 @@
 // Package netstate is dotvirt's networking read plane: an SA-maintained, watch-fed
 // snapshot of the port-group CRDs (UDN/CUDN/NAD) and the physical fabric (nmstate
-// NNS/NNCP), following the clusterstate/argo/desched reflector model — Catalog() is a
+// NNS/NNCP), following the clusterstate/argo/desched reflector model - Catalog() is a
 // pure in-memory scan, never a per-request cluster call.
 //
 // Port-group moves publish NetworkChanged so the hub re-broadcasts and the client
-// re-pulls the out-of-band catalog; NNS (node-state) is watched but does NOT signal —
+// re-pulls the out-of-band catalog; NNS (node-state) is watched but does NOT signal -
 // its status churns and adapters need no live repaint. Each reflector is discovery-
 // gated (like desched): a cluster without OVN-K UDN or nmstate simply serves an empty
 // slice for that source, never an error loop. Node names come from a background-
@@ -61,7 +61,7 @@ type Snapshot struct {
 	watches []watchSpec
 	// One health flag per watches entry (reflect.TrackHealth): false while that
 	// watch errors. Healthy ANDs them, so one broken watch can't be masked by
-	// another re-establishing. A CRD still absent (never discovered) stays true —
+	// another re-establishing. A CRD still absent (never discovered) stays true -
 	// absence is a feature state, not staleness.
 	healthy []atomic.Bool
 
@@ -118,7 +118,7 @@ func (s *Snapshot) Healthy() bool {
 	return true
 }
 
-// discoveryInterval paces the API probe while a CRD is absent — one lightweight
+// discoveryInterval paces the API probe while a CRD is absent - one lightweight
 // discovery GET per tick, ending once the reflector owns a watch connection.
 const discoveryInterval = time.Minute
 

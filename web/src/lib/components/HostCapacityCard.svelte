@@ -5,7 +5,7 @@
 
 	// Per-host overcommit: the cluster ratios from the summary band, broken
 	// down to the workers that carry them. Server-sorted most-committed-memory
-	// first — memory (unlike time-shared CPU) is the ratio that hurts. The
+	// first - memory (unlike time-shared CPU) is the ratio that hurts. The
 	// card absents itself without node-read access, like the balance card.
 	const cap = resource<HostCapacity>(
 		() => '',

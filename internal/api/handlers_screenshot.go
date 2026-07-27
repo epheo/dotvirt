@@ -5,7 +5,7 @@ import "net/http"
 // handleScreenshot serves a PNG of the VM's graphical console (the Summary's
 // console preview), via KubeVirt's vnc/screenshot subresource under the caller's
 // token. A non-running VM (or one without a graphics device, or a KubeVirt that
-// doesn't expose the subresource) errors — the UI hides the thumbnail then.
+// doesn't expose the subresource) errors - the UI hides the thumbnail then.
 func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 	ns, name := r.PathValue("namespace"), r.PathValue("name")
 	sc, ok := s.resolveProject(w, r, byNamespace(ns))

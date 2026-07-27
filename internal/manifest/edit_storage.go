@@ -9,16 +9,16 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 )
 
-// applyVolumeMigrations rewrites each migrated disk's backing DataVolume — a
-// fresh name on the target storage class, provisioned blank — repoints the
+// applyVolumeMigrations rewrites each migrated disk's backing DataVolume - a
+// fresh name on the target storage class, provisioned blank - repoints the
 // template volume at it, and sets spec.updateVolumesStrategy: Migration so
 // KubeVirt live-copies a running disk instead of requiring a restart.
 // Reverting the commit restores the previous volume set, which KubeVirt reads
-// as a migration cancel — the GitOps rollback IS the cancellation.
+// as a migration cancel - the GitOps rollback IS the cancellation.
 //
 // Only DataVolume-backed volumes with a dataVolumeTemplates entry qualify;
 // anything else is left untouched (same silent-no-op convention as the other
-// appliers — the UI only offers eligible disks).
+// appliers - the UI only offers eligible disks).
 func applyVolumeMigrations(ed *lineEditor, vmRoot *yaml.Node, migrations []model.VolumeMigration) {
 	if len(migrations) == 0 {
 		return
@@ -85,7 +85,7 @@ var migSuffix = regexp.MustCompile(`-mig-\d+$`)
 
 // nextDVName derives the replacement DataVolume's name: the old name with any
 // prior -mig-N suffix stripped, then the first -mig-N not already taken by a
-// template — so repeated migrations cycle x → x-mig-1 → x-mig-2 rather than
+// template - so repeated migrations cycle x -> x-mig-1 -> x-mig-2 rather than
 // accreting suffixes. The name must change: KubeVirt identifies the migration
 // destination as a different volume.
 func nextDVName(old string, templates *yaml.Node) string {
@@ -103,7 +103,7 @@ func nextDVName(old string, templates *yaml.Node) string {
 }
 
 // findNamed locates the sequence item whose identity equals name: the top-level
-// `name:` of disks and volumes, or (viaMeta) metadata.name — the identity of
+// `name:` of disks and volumes, or (viaMeta) metadata.name - the identity of
 // dataVolumeTemplates. idx is -1 when absent.
 func findNamed(seq *yaml.Node, name string, viaMeta bool) (idx int, item *yaml.Node) {
 	if seq == nil || seq.Kind != yaml.SequenceNode {

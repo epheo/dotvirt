@@ -1,6 +1,6 @@
 // Package forge talks to a Forgejo (Gitea-compatible) server to open and query
 // pull requests. Only the small REST surface dotvirt needs is implemented, over
-// plain net/http — no SDK.
+// plain net/http - no SDK.
 package forge
 
 import (
@@ -27,8 +27,8 @@ type Client struct {
 }
 
 // TokenSource yields the CURRENT forge token on each call. Resolving per-call
-// (rather than capturing a string once) lets a re-minted/rotated token — written
-// to a mounted secret file by the operator — take effect without a process
+// (rather than capturing a string once) lets a re-minted/rotated token - written
+// to a mounted secret file by the operator - take effect without a process
 // restart. StaticToken wraps a fixed value (BYO/dev); FileToken reads a mounted
 // secret key on each call.
 type TokenSource func() string
@@ -36,7 +36,7 @@ type TokenSource func() string
 // StaticToken is a TokenSource that always returns tok (a fixed credential).
 func StaticToken(tok string) TokenSource { return func() string { return tok } }
 
-// FileToken is a TokenSource reading path on each call — the projected-secret
+// FileToken is a TokenSource reading path on each call - the projected-secret
 // volume the operator mounts. kubelet updates that file in place on rotation, so
 // each forge call picks up the current token. A read error yields "" (the caller
 // then behaves as unconfigured/unauthenticated rather than using a stale value).
@@ -87,7 +87,7 @@ func NewFactoryFnCA(baseURL string, tokenFn TokenSource, insecure bool, caFile s
 }
 
 // For returns a Client targeting the repo identified by repoURL (e.g.
-// https://forge/owner/repo.git → owner/repo). Returns nil if the owner/repo can't
+// https://forge/owner/repo.git -> owner/repo). Returns nil if the owner/repo can't
 // be parsed, so the caller degrades to a compare link.
 //
 // Only the owner/repo is taken from the URL; every call goes to THIS forge. That is
@@ -138,7 +138,7 @@ func httpClient(insecure bool, caFile string) *http.Client {
 	hc := &http.Client{Timeout: 15 * time.Second}
 	if insecure {
 		hc.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec G402 — dev flag
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec G402 - dev flag
 		}
 		return hc
 	}
@@ -150,7 +150,7 @@ func httpClient(insecure bool, caFile string) *http.Client {
 	return hc
 }
 
-// EnsureRepo creates the client's repo if it doesn't already exist — under its
+// EnsureRepo creates the client's repo if it doesn't already exist - under its
 // owner organization, auto-initialised so a `main` branch exists for Argo to sync.
 // Idempotent; created=true only when it had to create it. This is the one
 // imperative bootstrap step a declarative installer can't do (a forge API call, not
