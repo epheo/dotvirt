@@ -107,16 +107,12 @@ func (r *DotvirtReconciler) exposure(dv *dotvirtv1alpha1.Dotvirt) client.Object 
 // ssoApplyCommand is the one command an admin runs to register the cluster-scoped
 // OAuthClient SSO needs: the redirect URI is filled from the assigned console host, and
 // the client secret is read from the operator-generated Secret at apply time, so it
-// never lands in status. The operator deliberately doesn't create the OAuthClient itself.
+// never lands in status. One line by design: the console status view flattens
+// newlines, so a heredoc dies on copy-paste. The operator deliberately doesn't
+// create the OAuthClient itself.
 func ssoApplyCommand(ns, host string) string {
-	return fmt.Sprintf(`oc apply -f - <<EOF
-apiVersion: oauth.openshift.io/v1
-kind: OAuthClient
-metadata:
-  name: %s
-secret: $(oc -n %s get secret %s -o jsonpath='{.data.clientSecret}' | base64 -d)
-redirectURIs:
-  - https://%s/api/auth/callback
-grantMethod: auto
-EOF`, install.OAuthClientName(ns), ns, install.OAuthSecretName, host)
+	secret := fmt.Sprintf(`$(oc -n %s get secret %s -o jsonpath='{.data.clientSecret}' | base64 -d)`,
+		ns, install.OAuthSecretName)
+	return fmt.Sprintf(`echo "{\"apiVersion\":\"oauth.openshift.io/v1\",\"kind\":\"OAuthClient\",\"metadata\":{\"name\":\"%s\"},\"secret\":\"%s\",\"redirectURIs\":[\"https://%s/api/auth/callback\"],\"grantMethod\":\"auto\"}" | oc apply -f -`,
+		install.OAuthClientName(ns), secret, host)
 }

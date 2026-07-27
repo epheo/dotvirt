@@ -34,8 +34,15 @@ func TestReconcileSSOOpenShiftWiring(t *testing.T) {
 		t.Fatalf("reconcileWorkload: %v", err)
 	}
 	cmd := dv.Status.SSOOAuthClient
-	if !strings.Contains(cmd, "kind: OAuthClient") || !strings.Contains(cmd, "dotvirt.apps.cluster.example/api/auth/callback") {
+	// One line: the console status view flattens newlines, so a heredoc dies on copy-paste.
+	if strings.Contains(cmd, "\n") {
+		t.Errorf("status.ssoOAuthClient must be a single line: %q", cmd)
+	}
+	if !strings.Contains(cmd, "OAuthClient") || !strings.Contains(cmd, "dotvirt.apps.cluster.example/api/auth/callback") {
 		t.Errorf("status.ssoOAuthClient missing OAuthClient/redirect URI: %q", cmd)
+	}
+	if !strings.Contains(cmd, "oc apply") {
+		t.Errorf("status.ssoOAuthClient must apply (create or repair) the OAuthClient: %q", cmd)
 	}
 	// The secret is read at apply time, never inlined into status.
 	if !strings.Contains(cmd, "get secret "+install.OAuthSecretName) {

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,21 +12,11 @@ import (
 	authnv1 "k8s.io/api/authentication/v1"
 )
 
-// fakeOAuth wires the flow over a stub token endpoint and a pre-seeded
+// fakeOAuthAt wires the flow over a stub oauth server and a pre-seeded
 // discovery document (the fake clientset cannot serve the well-known path).
-// The stub returns accessToken for any code, mirroring osin's happy path.
-func fakeOAuth(t *testing.T, accessToken string, a *Authenticator) *OAuth {
+func fakeOAuthAt(t *testing.T, a *Authenticator, h http.HandlerFunc) *OAuth {
 	t.Helper()
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/oauth/token" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"access_token": accessToken, "token_type": "Bearer",
-		})
-	}))
+	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
 	return &OAuth{
 		cfg: OAuthConfig{
@@ -38,6 +29,38 @@ func fakeOAuth(t *testing.T, accessToken string, a *Authenticator) *OAuth {
 			AuthorizationEndpoint: ts.URL + "/oauth/authorize",
 			TokenEndpoint:         ts.URL + "/oauth/token",
 		},
+	}
+}
+
+// fakeOAuth returns accessToken for any code, mirroring osin's happy path.
+func fakeOAuth(t *testing.T, accessToken string, a *Authenticator) *OAuth {
+	t.Helper()
+	return fakeOAuthAt(t, a, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/token" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"access_token": accessToken, "token_type": "Bearer",
+		})
+	})
+}
+
+// oauthErrorStub answers the authorize probe OK and every token exchange with
+// the given RFC 6749 error code.
+func oauthErrorStub(code string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/authorize":
+			w.WriteHeader(http.StatusOK)
+		case "/oauth/token":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
+		default:
+			http.NotFound(w, r)
+		}
 	}
 }
 
@@ -121,6 +144,49 @@ func TestOAuthCallbackStateMismatch(t *testing.T) {
 		if c.Name == cookieName && c.Value != "" {
 			t.Error("a session cookie was set despite the state mismatch")
 		}
+	}
+}
+
+// A surviving OAuthClient whose secret predates a reinstall passes the
+// authorize probe (it never sees the secret), so ClientRegistered must prove
+// the secret at the token endpoint and report the finish-SSO state.
+func TestClientRegisteredStaleSecret(t *testing.T) {
+	a, _ := fakeAuth(nil)
+	o := fakeOAuthAt(t, a, oauthErrorStub("unauthorized_client"))
+	if o.ClientRegistered(context.Background()) {
+		t.Fatal("stale client secret must read as not registered")
+	}
+}
+
+// invalid_grant blames only the bogus probe code: the secret matched, the
+// client is registered.
+func TestClientRegisteredSecretOK(t *testing.T) {
+	a, _ := fakeAuth(nil)
+	o := fakeOAuthAt(t, a, oauthErrorStub("invalid_grant"))
+	if !o.ClientRegistered(context.Background()) {
+		t.Fatal("a client the token endpoint authenticates must read as registered")
+	}
+}
+
+// A real login failing the exchange with unauthorized_client is proof the
+// registered secret is stale: the cached yes must drop so finish-SSO resurfaces
+// without waiting out the probe TTL.
+func TestOAuthCallbackStaleSecretResurfaces(t *testing.T) {
+	a, _ := fakeAuth(nil)
+	o := fakeOAuthAt(t, a, oauthErrorStub("unauthorized_client"))
+	o.MarkRegistered()
+
+	state, stateC := stateFromRedirect(t, o)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/callback?code=abc&state="+url.QueryEscape(state), nil)
+	req.AddCookie(stateC)
+	rec := httptest.NewRecorder()
+	o.Callback(rec, req)
+
+	if !strings.Contains(rec.Header().Get("Location"), "sso_error") {
+		t.Fatalf("failed exchange should bounce to the login screen, got %q", rec.Header().Get("Location"))
+	}
+	if o.ClientRegistered(context.Background()) {
+		t.Error("stale-secret proof must resurface the finish-SSO state")
 	}
 }
 

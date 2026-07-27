@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -193,6 +194,13 @@ func (o *OAuth) Callback(w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithValue(r.Context(), oauth2.HTTPClient, o.client)
 	tok, err := o.oauth2Config(m).Exchange(ctx, code)
 	if err != nil {
+		// unauthorized_client here rejects OUR credentials, not the user: the
+		// cluster-scoped OAuthClient survived a reinstall with the old secret.
+		// Drop the cached yes so the login screen resurfaces finish-SSO.
+		var rerr *oauth2.RetrieveError
+		if errors.As(err, &rerr) && staleClientError(rerr.ErrorCode) {
+			o.markStale()
+		}
 		failLogin("code exchange", err)
 		return
 	}
@@ -220,11 +228,16 @@ func (o *OAuth) DesiredClient() (id, secret, redirectURL string) {
 	return o.cfg.ClientID, o.cfg.ClientSecret, o.cfg.RedirectURL
 }
 
-// ClientRegistered probes the authorize endpoint (redirects held; no credentials
-// travel) so the login screen says "not finished" instead of offering a failing
-// button: registered answers <400, unregistered or redirect-mismatched 4xx.
+// ClientRegistered probes whether SSO login can actually succeed, so the login
+// screen says "not finished" instead of offering a failing button. Two checks:
+// the authorize endpoint (registered answers <400, unregistered or
+// redirect-mismatched 4xx; redirects held, no credentials travel), then a
+// bogus-code token exchange proving the registered secret still matches ours —
+// a reinstall regenerates the Secret while the cluster-scoped OAuthClient
+// survives with the old one, which the authorize endpoint can't see.
 // Network/5xx reads as registered: a flaky oauth stack must not talk users out
-// of a working button. Yes caches for good; no re-probes after a short TTL.
+// of a working button. Yes caches for good; no re-probes after a short TTL, so
+// an out-of-band CLI fix clears the state on its own.
 func (o *OAuth) ClientRegistered(ctx context.Context) bool {
 	o.mu.Lock()
 	if o.registered || time.Since(o.probedAt) < 10*time.Second {
@@ -263,12 +276,64 @@ func (o *OAuth) ClientRegistered(ctx context.Context) bool {
 	_, _ = io.Copy(io.Discard, resp.Body)
 
 	registered := resp.StatusCode < 400 || resp.StatusCode >= 500
+	definitive := resp.StatusCode < 400
+	if definitive && o.secretStale(ctx, m) {
+		registered, definitive = false, false
+	}
 	o.mu.Lock()
-	o.registered = registered && resp.StatusCode < 500
+	o.registered = registered && definitive
 	o.probedPending = !registered
 	o.probedAt = time.Now()
 	o.mu.Unlock()
 	return registered
+}
+
+// secretStale authenticates the client at the token endpoint with a bogus code:
+// invalid_grant means client+secret passed and only the code was wrong;
+// unauthorized_client/invalid_client means the OAuthClient carries a secret
+// other than ours. Anything else (network, 5xx, unexpected shape) reads as fine.
+func (o *OAuth) secretStale(ctx context.Context, m *oauthMeta) bool {
+	form := url.Values{
+		"grant_type":   {"authorization_code"},
+		"code":         {"probe"},
+		"redirect_uri": {o.cfg.RedirectURL},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.TokenEndpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth(url.QueryEscape(o.cfg.ClientID), url.QueryEscape(o.cfg.ClientSecret))
+	resp, err := o.client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+	if resp.StatusCode < 400 || resp.StatusCode >= 500 {
+		return false
+	}
+	var e struct {
+		Code string `json:"error"`
+	}
+	_ = json.Unmarshal(body, &e)
+	return staleClientError(e.Code)
+}
+
+// staleClientError: the RFC 6749 codes the oauth server answers when client
+// authentication itself failed (OpenShift's osin says unauthorized_client).
+func staleClientError(code string) bool {
+	return code == "unauthorized_client" || code == "invalid_client"
+}
+
+// markStale drops a cached yes after proof the registered secret is wrong, so
+// the very next /api/auth/methods flips back to the finish-SSO state.
+func (o *OAuth) markStale() {
+	o.mu.Lock()
+	o.registered = false
+	o.probedPending = true
+	o.probedAt = time.Now()
+	o.mu.Unlock()
 }
 
 // MarkRegistered flips the probe cache so the login screen goes ready without

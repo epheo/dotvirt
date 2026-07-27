@@ -175,3 +175,12 @@ body {
 	color: var(--color-ink);
 	background: var(--color-canvas);
 }
+
+/* Native select popups: some engines (notably Firefox on Linux) paint the
+   popup with the OS widget theme instead of color-scheme, while the options
+   inherit the page ink — white-on-white in dark mode. Explicit token colors
+   keep the popup theme-correct everywhere. */
+option {
+	background: var(--color-panel);
+	color: var(--color-ink);
+}

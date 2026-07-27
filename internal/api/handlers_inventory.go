@@ -10,6 +10,7 @@ import (
 	"github.com/epheo/dotvirt/internal/inventory"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // InventoryForIdentity builds the multi-tenant inventory visible to id: resolve
@@ -73,12 +74,16 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	if s.netstate != nil && !s.netstate.Healthy() {
 		warnings = append(warnings, "the network catalog may be stale — a networking watch is failing")
 	}
-	// A configured platform repo whose namespaces never appear in the SA snapshot
-	// means the platform Argo app isn't applying them (repo-creds/auth, sync error)
-	// — distinct from a user legitimately scoped to no project. Surfaced cluster-wide
-	// (the snapshot is unfiltered) so "no projects" can't masquerade as a broken sync.
+	// Zero project namespaces with a platform repo configured is either a pristine
+	// install (fine, the empty state is correct) or a platform app that stopped
+	// applying (broken). The platform Application's own rollup — already in the
+	// drift snapshot — tells them apart, so warn only on actual breakage and name
+	// it. Surfaced cluster-wide (the snapshot is unfiltered) so a user legitimately
+	// scoped to no project can't mask a broken sync.
 	if s.cfg.PlatformRepo != "" && len(s.state.Namespaces()) == 0 {
-		warnings = append(warnings, "no projects found — the platform GitOps sync may be unhealthy (check the dotvirt-platform Application)")
+		if w := platformSyncWarning(in.ProjectDrift, s.cfg.PlatformRepo); w != "" {
+			warnings = append(warnings, w)
+		}
 	}
 	inv := inventory.Build(in)
 	inv.Warnings = warnings
@@ -105,6 +110,31 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	// when this bumps (an op recorded, a merged PR landed).
 	inv.TasksVersion = s.bus.Version(eventbus.TaskChanged)
 	return inv, nil
+}
+
+// platformSyncWarning decides what "zero project namespaces" means from the
+// platform Application's rollup. drift is ProjectDrift(): nil while Argo is off
+// or pre-sync — stay quiet; off means there is no platform sync to be unhealthy,
+// pre-sync already carries its own warning. Progressing/Running are quiet too:
+// the first sync after an install is not a degradation.
+func platformSyncWarning(drift map[string]model.ProjectSync, platformRepo string) string {
+	if drift == nil {
+		return ""
+	}
+	ps, ok := drift[forge.NormalizeRepoURL(platformRepo)]
+	if !ok {
+		return "no projects found and no ArgoCD Application sources the platform repo — the dotvirt-platform Application is missing"
+	}
+	okHealth := ps.Health == "" || ps.Health == "Healthy" || ps.Health == "Progressing"
+	failedOp := ps.Operation == "Failed" || ps.Operation == "Error"
+	if okHealth && !failedOp && ps.SyncError == "" {
+		return "" // genuinely no projects yet
+	}
+	msg := "the platform GitOps sync is unhealthy (dotvirt-platform Application)"
+	if ps.SyncError != "" {
+		msg += ": " + ps.SyncError
+	}
+	return msg
 }
 
 func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
