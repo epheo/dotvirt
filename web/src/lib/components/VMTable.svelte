@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { ChevronDown, ChevronUp } from 'lucide-svelte';
+	import { api } from '$lib/api';
 	import type { DraftItem, Power, SyncStatus, VM } from '$lib/api';
 	import { phaseTone } from '$lib/status';
 	import { persisted } from '$lib/state/persisted.svelte';
@@ -26,6 +27,28 @@
 	} = $props();
 
 	const vmKey = (vm: VM) => `${vm.namespace}/${vm.name}`;
+
+	// An instancetype-sized VM carries no inline domain.cpu/memory in git, so the
+	// manifest fields are legitimately empty. Resolve sizing for display: manifest
+	// first (custom-sized), then the instancetype catalog (covers stopped VMs),
+	// then the live VMI (running VM whose flavor isn't in the cluster catalog).
+	let flavorSizing = $state(new Map<string, { cpu: number; memory: string }>());
+	$effect(() => {
+		api
+			.options()
+			.then((o) => {
+				flavorSizing = new Map(o.instancetypes.map((it) => [it.name, it]));
+			})
+			.catch(() => {});
+	});
+	const cpuOf = (vm: VM) =>
+		vm.cpuCores ??
+		(vm.instancetype ? flavorSizing.get(vm.instancetype)?.cpu : undefined) ??
+		(vm.vcpus || undefined);
+	const memOf = (vm: VM) =>
+		vm.memory ??
+		(vm.instancetype ? flavorSizing.get(vm.instancetype)?.memory : undefined) ??
+		vm.memoryActual;
 
 	let search = $state('');
 
@@ -80,9 +103,9 @@
 			case 'sync':
 				return syncRank(a.sync) - syncRank(b.sync);
 			case 'cpuCores':
-				return (a.cpuCores ?? 0) - (b.cpuCores ?? 0);
+				return (cpuOf(a) ?? 0) - (cpuOf(b) ?? 0);
 			case 'memory':
-				return memBytes(a.memory) - memBytes(b.memory);
+				return memBytes(memOf(a)) - memBytes(memOf(b));
 			default: {
 				const av = (a[key] ?? '').toString().toLowerCase();
 				const bv = (b[key] ?? '').toString().toLowerCase();
@@ -261,8 +284,12 @@
 							/>
 						</td>
 						<td class="px-3 py-1.5 font-mono text-xs text-ink-soft">{vm.guestIP ?? '—'}</td>
-						<td class="px-3 py-1.5 text-right text-ink-soft">{vm.cpuCores ?? '—'}</td>
-						<td class="px-3 py-1.5 text-right text-ink-soft">{vm.memory ?? '—'}</td>
+						<td class="px-3 py-1.5 text-right text-ink-soft" title={vm.instancetype}
+							>{cpuOf(vm) ?? '—'}</td
+						>
+						<td class="px-3 py-1.5 text-right text-ink-soft" title={vm.instancetype}
+							>{memOf(vm) ?? '—'}</td
+						>
 						<td class="px-3 py-1.5">
 							{#if sc}
 								<span class="inline-flex items-center gap-1.5">
