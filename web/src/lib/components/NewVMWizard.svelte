@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { X } from 'lucide-svelte';
+	import { untrack } from 'svelte';
+	import { Check, Copy, X } from 'lucide-svelte';
 	import { api, type CreateVMRequest, type Network, type Options } from '$lib/api';
 	import { friendlyError } from '$lib/format';
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
@@ -40,6 +41,14 @@
 	let running = $state(true);
 	let sshKey = $state('');
 	let user = $state('');
+	// Generated up front so every VM boots console-reachable (cloud images ship
+	// with locked passwords). Git keeps only a bcrypt hash: the plaintext exists
+	// here and in the post-stage reveal, then nowhere.
+	let password = $state(generatePassword());
+	// A successful stage with a password swaps the wizard for the one-time
+	// credentials reveal instead of closing.
+	let revealed = $state(false);
+	let copied = $state('');
 	let extraDisks = $state<{ name: string; size: string; storageClass: string }[]>([]);
 	// Selected secondary networks, held as attach refs ("namespace/nad", or a bare
 	// name for a shared CUDN).
@@ -76,6 +85,39 @@
 		selectedNetworks = [];
 		attachPrimary = true;
 	});
+
+	function generatePassword(): string {
+		// Unambiguous alphanumerics, 16 chars (about 92 bits): strong enough that
+		// the bcrypt hash committed to git is useless to an offline attacker.
+		const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+		const buf = new Uint32Array(16);
+		crypto.getRandomValues(buf);
+		return Array.from(buf, (n) => chars[n % chars.length]).join('');
+	}
+
+	// Conventional first-boot login per image family; a prefill, freely editable.
+	function defaultUser(image: string): string {
+		if (image.includes('fedora')) return 'fedora';
+		if (image.includes('ubuntu')) return 'ubuntu';
+		if (image.includes('debian')) return 'debian';
+		return 'cloud-user';
+	}
+
+	// Follow the image's conventional user until the field is hand-edited.
+	let userAuto = '';
+	$effect(() => {
+		const auto = defaultUser(osImage.split('|')[0].toLowerCase());
+		untrack(() => {
+			if (user === '' || user === userAuto) user = auto;
+			userAuto = auto;
+		});
+	});
+
+	function copy(label: string, value: string) {
+		navigator.clipboard.writeText(value);
+		copied = label;
+		setTimeout(() => (copied = ''), 1500);
+	}
 
 	$effect(() => {
 		api
@@ -191,10 +233,16 @@
 			networks: selectedNetworks.length ? selectedNetworks.map((n) => ({ name: n })) : undefined,
 			primaryNetwork: attachPrimary,
 		};
-		if (user || sshKey) req.cloudInit = { user: user || undefined, sshKey: sshKey || undefined };
+		if (user || sshKey || password)
+			req.cloudInit = {
+				user: user || undefined,
+				sshKey: sshKey || undefined,
+				password: password || undefined,
+			};
 		if (await op.run(() => api.stageCreate(req))) {
 			onstaged();
-			onclose();
+			if (password) revealed = true;
+			else onclose();
 		}
 	}
 </script>
@@ -337,19 +385,37 @@
 {#snippet step6()}
 	<div class="space-y-4">
 		<p class="text-xs text-ink-muted">
-			Optional cloud-init: a default user and an SSH key injected at first boot.
+			Guest login, injected at first boot. Cloud images ship with locked passwords, so one is
+			generated for console access.
 		</p>
 		<label class="block">
-			<span class="text-ink-soft"
-				>cloud-init user <span class="text-ink-faint">(optional)</span></span
-			>
-			<TextInput bind:value={user} placeholder="fedora" class="mt-1" />
+			<span class="text-ink-soft">cloud-init user</span>
+			<TextInput bind:value={user} placeholder="cloud-user" class="mt-1" />
+		</label>
+		<label class="block">
+			<span class="text-ink-soft">Console password</span>
+			<div class="mt-1 flex gap-2">
+				<TextInput bind:value={password} class="min-w-0 flex-1 font-mono" />
+				<button
+					type="button"
+					onclick={() => (password = generatePassword())}
+					class="rounded border border-line px-2.5 text-xs text-ink-soft hover:bg-inset-strong"
+					>Regenerate</button
+				>
+			</div>
+			<p class="mt-1 text-xs text-ink-faint">
+				Git stores only a hash. The password is shown once after staging and can never be displayed
+				again. Clear the field to disable password login.
+			</p>
 		</label>
 		<label class="block">
 			<span class="text-ink-soft"
 				>SSH public key <span class="text-ink-faint">(optional)</span></span
 			>
 			<TextInput bind:value={sshKey} placeholder="ssh-ed25519 AAAA…" class="mt-1" />
+			<p class="mt-1 text-xs text-ink-faint">
+				With a key set, the password works on the console only; SSH password login stays off.
+			</p>
 		</label>
 	</div>
 {/snippet}
@@ -410,13 +476,64 @@
 		{@render reviewGroup('Storage', 3, storageRows)}
 		{@render reviewGroup('Networks', 4, networkRows)}
 		{@render reviewGroup('Customize', 5, [
-			['cloud-init user', user || 'default'],
+			['cloud-init user', user || 'image default'],
+			['Console password', password ? 'generated, shown once after staging' : 'disabled'],
 			['SSH key', sshKey ? 'provided' : 'None'],
 		])}
 	</div>
 {/snippet}
 
-{#if loadError}
+{#if revealed}
+	<!-- Pinned open (no Escape/backdrop/X): the password exists only on this
+	     screen, so the sole way out is the explicit Done. -->
+	<Modal title="Guest credentials" dismissable={false} {onclose}>
+		<div class="space-y-3 px-5 py-4 text-sm">
+			<p class="text-ink-soft">
+				{name} is staged; open a PR from “Changes” to create it. Copy the console password now.
+			</p>
+			<dl class="divide-y divide-line-soft rounded border border-line">
+				<div class="flex items-center justify-between gap-3 px-3 py-2">
+					<dt class="text-ink-muted">User</dt>
+					<dd class="flex items-center gap-2 font-mono text-ink">
+						{user || 'image default'}
+						{#if user}
+							<button
+								type="button"
+								onclick={() => copy('user', user)}
+								aria-label="Copy user"
+								class="text-ink-faint hover:text-ink-soft"
+								>{#if copied === 'user'}<Check size={13} />{:else}<Copy size={13} />{/if}</button
+							>
+						{/if}
+					</dd>
+				</div>
+				<div class="flex items-center justify-between gap-3 px-3 py-2">
+					<dt class="text-ink-muted">Password</dt>
+					<dd class="flex items-center gap-2 font-mono text-ink">
+						{password}
+						<button
+							type="button"
+							onclick={() => copy('password', password)}
+							aria-label="Copy password"
+							class="text-ink-faint hover:text-ink-soft"
+							>{#if copied === 'password'}<Check size={13} />{:else}<Copy size={13} />{/if}</button
+						>
+					</dd>
+				</div>
+			</dl>
+			<p class="rounded border border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
+				This is the only time the password is shown. Git keeps a hash, so it cannot be recovered or
+				displayed again; if it is lost, stage a new one.
+			</p>
+		</div>
+		{#snippet footer()}
+			<button
+				onclick={onclose}
+				class="ml-auto rounded bg-accent px-4 py-1.5 text-sm font-medium text-white">Done</button
+			>
+		{/snippet}
+	</Modal>
+{:else if loadError}
 	<Modal title="New Virtual Machine" {onclose}>
 		<div class="px-5 py-4">
 			<p class="rounded bg-danger-soft/60 px-3 py-2 text-sm text-danger-ink">

@@ -294,7 +294,12 @@ func cloudInit(s Spec) map[string]any {
 	if ci.Password != "" {
 		b.WriteString("password: " + ci.Password + "\n")
 		b.WriteString("chpasswd: { expire: False }\n")
-		b.WriteString("ssh_pwauth: True\n")
+		// With an SSH key present the password is for console login only;
+		// leaving password SSH off keeps the generated-by-default password
+		// from widening every VM's SSH surface.
+		if ci.SSHKey == "" {
+			b.WriteString("ssh_pwauth: True\n")
+		}
 	}
 	if ci.SSHKey != "" {
 		b.WriteString("ssh_authorized_keys:\n  - " + ci.SSHKey + "\n")
