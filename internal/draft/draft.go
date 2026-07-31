@@ -47,6 +47,7 @@ const (
 	ResourceAdminNetworkPolicy         Resource = "adminnetworkpolicy"         // cluster-wide admin DFW (ANP)
 	ResourceBaselineAdminNetworkPolicy Resource = "baselineadminnetworkpolicy" // cluster baseline DFW (BANP)
 	ResourceDRS                        Resource = "drs"                        // the cluster DRS (descheduler) install/config file set
+	ResourceHA                         Resource = "ha"                         // the cluster HA (node-remediation) install/config file set
 	ResourceTemplate                   Resource = "template"                   // a VM template saved into a library's templates/ dir
 )
 
@@ -54,7 +55,7 @@ const (
 // stages and unstages as a set - a partial DRS file set (e.g. the operator
 // Subscription unstaged from under its KubeDescheduler CR) is not a meaningful
 // proposal.
-func (r Resource) Atomic() bool { return r == ResourceDRS }
+func (r Resource) Atomic() bool { return r == ResourceDRS || r == ResourceHA }
 
 // CreateLabel names a create of this resource in the Changes pane. Lives beside
 // the consts so a new resource cannot ship rendering under the VM-adoption default.
@@ -82,6 +83,8 @@ func (r Resource) CreateLabel() string {
 		return "Create baseline firewall policy"
 	case ResourceDRS:
 		return "Configure DRS"
+	case ResourceHA:
+		return "Configure HA"
 	case ResourceTemplate:
 		return "Save as template"
 	default:

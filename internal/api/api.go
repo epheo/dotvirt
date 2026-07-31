@@ -31,6 +31,7 @@ import (
 	"github.com/epheo/dotvirt/internal/metrics"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netstate"
+	"github.com/epheo/dotvirt/internal/nodehealth"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/internal/ttlcache"
@@ -59,6 +60,10 @@ type Draft interface {
 	StageDisableDRS(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
 	DRSState(proj project.ProjectInfo) (model.DRSGitState, error)
 	DRSDraft(id auth.Identity, proj project.ProjectInfo) (model.DRSDraftState, error)
+	StageEnableHA(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
+	StageDisableHA(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
+	HAState(proj project.ProjectInfo) (model.HAGitState, error)
+	HADraft(id auth.Identity, proj project.ProjectInfo) (model.HADraftState, error)
 	StageDelete(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
 	Unstage(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) error
 	Get(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
@@ -128,26 +133,27 @@ const optionsTTL = 60 * time.Second
 // Server holds the long-lived collaborators and builds per-request, identity-
 // scoped state.
 type Server struct {
-	clusterF  *cluster.Factory
-	state     *clusterstate.State // SA-owned live+topology snapshot; the read path's source
-	drift     *argo.Snapshot      // nil when Argo disabled; SA-owned, watch-fed Application snapshot
-	desched   *desched.Snapshot   // nil disables the DRS live plane; SA-owned KubeDescheduler snapshot
-	netstate  *netstate.Snapshot  // SA-owned, watch-fed networking catalog (port groups + fabric)
-	bus       *eventbus.Bus       // change-version source for the version-stamped auth caches
-	resolver  *project.Resolver
-	repos     *git.RepoSet
-	visible   *ttlcache.Cache[visibleSet]       // per-token visible-namespace set, RBAC-version-stamped
-	ssar      *ttlcache.Cache[ssarVerdict]      // per-(token, resource) create-SSAR, RBAC-version-stamped
-	proposals *ttlcache.Cache[[]model.Proposal] // per-token open-PR set; written by the refresher, read on broadcast
-	options   *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
-	metrics   *metrics.Client                   // Prometheus/Thanos for the Performance tab; nil disables it
-	tasks     *tasks.Feed                       // recent-activity feed (ops + merged PRs); nil disables it
-	draft     Draft
-	auth      *auth.Authenticator // nil leaves the API open (dev)
-	oauth     *auth.OAuth         // nil hides the OpenShift SSO login path
-	stream    StreamHandler
-	vnc       VNCHandler
-	cfg       Config
+	clusterF   *cluster.Factory
+	state      *clusterstate.State  // SA-owned live+topology snapshot; the read path's source
+	drift      *argo.Snapshot       // nil when Argo disabled; SA-owned, watch-fed Application snapshot
+	desched    *desched.Snapshot    // nil disables the DRS live plane; SA-owned KubeDescheduler snapshot
+	nodehealth *nodehealth.Snapshot // nil disables the HA live plane; SA-owned NodeHealthCheck snapshot
+	netstate   *netstate.Snapshot   // SA-owned, watch-fed networking catalog (port groups + fabric)
+	bus        *eventbus.Bus        // change-version source for the version-stamped auth caches
+	resolver   *project.Resolver
+	repos      *git.RepoSet
+	visible    *ttlcache.Cache[visibleSet]       // per-token visible-namespace set, RBAC-version-stamped
+	ssar       *ttlcache.Cache[ssarVerdict]      // per-(token, resource) create-SSAR, RBAC-version-stamped
+	proposals  *ttlcache.Cache[[]model.Proposal] // per-token open-PR set; written by the refresher, read on broadcast
+	options    *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
+	metrics    *metrics.Client                   // Prometheus/Thanos for the Performance tab; nil disables it
+	tasks      *tasks.Feed                       // recent-activity feed (ops + merged PRs); nil disables it
+	draft      Draft
+	auth       *auth.Authenticator // nil leaves the API open (dev)
+	oauth      *auth.OAuth         // nil hides the OpenShift SSO login path
+	stream     StreamHandler
+	vnc        VNCHandler
+	cfg        Config
 
 	// Proposals-refresher state (see proposals.go): who to refresh, and the
 	// coalesced out-of-cycle trigger.
@@ -163,10 +169,11 @@ type Server struct {
 type Deps struct {
 	ClusterFactory *cluster.Factory
 	State          *clusterstate.State
-	Drift          *argo.Snapshot     // SA-owned drift snapshot (watch-fed); nil when Argo disabled
-	Desched        *desched.Snapshot  // SA-owned KubeDescheduler snapshot; nil disables the DRS live plane
-	Netstate       *netstate.Snapshot // SA-owned networking catalog snapshot (watch-fed)
-	Bus            *eventbus.Bus      // change-version source for version-stamped caches
+	Drift          *argo.Snapshot       // SA-owned drift snapshot (watch-fed); nil when Argo disabled
+	Desched        *desched.Snapshot    // SA-owned KubeDescheduler snapshot; nil disables the DRS live plane
+	NodeHealth     *nodehealth.Snapshot // SA-owned NodeHealthCheck snapshot; nil disables the HA live plane
+	Netstate       *netstate.Snapshot   // SA-owned networking catalog snapshot (watch-fed)
+	Bus            *eventbus.Bus        // change-version source for version-stamped caches
 	Resolver       *project.Resolver
 	Repos          *git.RepoSet
 	Metrics        *metrics.Client // Prometheus/Thanos query client; nil disables the Performance tab
@@ -180,24 +187,25 @@ type Deps struct {
 // NewServer builds the API server from its collaborators.
 func NewServer(d Deps) *Server {
 	return &Server{
-		clusterF:  d.ClusterFactory,
-		state:     d.State,
-		drift:     d.Drift,
-		desched:   d.Desched,
-		netstate:  d.Netstate,
-		bus:       d.Bus,
-		resolver:  d.Resolver,
-		repos:     d.Repos,
-		visible:   ttlcache.New[visibleSet](visibleTTL),
-		ssar:      ttlcache.New[ssarVerdict](visibleTTL),
-		proposals: ttlcache.New[[]model.Proposal](proposalsCacheTTL),
-		options:   ttlcache.New[model.Options](optionsTTL),
-		metrics:   d.Metrics,
-		tasks:     d.Tasks,
-		draft:     d.Draft,
-		auth:      d.Auth,
-		oauth:     d.OAuth,
-		cfg:       d.Config,
+		clusterF:   d.ClusterFactory,
+		state:      d.State,
+		drift:      d.Drift,
+		desched:    d.Desched,
+		nodehealth: d.NodeHealth,
+		netstate:   d.Netstate,
+		bus:        d.Bus,
+		resolver:   d.Resolver,
+		repos:      d.Repos,
+		visible:    ttlcache.New[visibleSet](visibleTTL),
+		ssar:       ttlcache.New[ssarVerdict](visibleTTL),
+		proposals:  ttlcache.New[[]model.Proposal](proposalsCacheTTL),
+		options:    ttlcache.New[model.Options](optionsTTL),
+		metrics:    d.Metrics,
+		tasks:      d.Tasks,
+		draft:      d.Draft,
+		auth:       d.Auth,
+		oauth:      d.OAuth,
+		cfg:        d.Config,
 
 		propTargets: map[string]propTarget{},
 		propNudge:   make(chan struct{}, 1),
@@ -273,6 +281,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/drs", s.handleDRS)
 	mux.HandleFunc("POST /api/drs", s.handleDRSEnable)
 	mux.HandleFunc("DELETE /api/drs", s.handleDRSDisable)
+	mux.HandleFunc("GET /api/ha", s.handleHA)
+	mux.HandleFunc("POST /api/ha", s.handleHAEnable)
+	mux.HandleFunc("DELETE /api/ha", s.handleHADisable)
 	// ArgoCD ApplicationSet plugin generator (auth: its own shared token, not a
 	// user session - exempted in auth.isOpenPath). Emits projects from labels.
 	mux.HandleFunc("POST /api/v1/getparams.execute", s.handleAppSetPlugin)
