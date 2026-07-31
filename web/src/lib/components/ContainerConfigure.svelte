@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Project } from '$lib/api';
 	import DRSCard from './DRSCard.svelte';
+	import HACard from './HACard.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import QuotaBand from './QuotaBand.svelte';
 	import Row from './Row.svelte';
@@ -24,6 +25,7 @@
 	<div class="max-w-2xl space-y-4">
 		{#if cluster}
 			<!-- Cluster services (vCenter: Cluster -> Configure -> Services). -->
+			<HACard {onstaged} />
 			<DRSCard {onstaged} />
 		{/if}
 		{#each projects as p (p.name)}
