@@ -10,14 +10,14 @@ func TestManifestsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 4 {
-		t.Fatalf("expected 4 files, got %d", len(files))
+	if len(files) != 5 {
+		t.Fatalf("expected 5 files, got %d", len(files))
 	}
 	byPath := map[string]string{}
 	for _, f := range files {
 		byPath[f.Path] = string(f.Content)
 	}
-	for _, path := range []string{NamespacePath, OperatorGroupPath, SubscriptionPath, CRPath} {
+	for _, path := range []string{NamespacePath, OperatorGroupPath, SubscriptionPath, SNRSubscriptionPath, CRPath} {
 		if byPath[path] == "" {
 			t.Errorf("missing file %s", path)
 		}
@@ -56,6 +56,13 @@ func TestManifestsDefaults(t *testing.T) {
 		if !strings.Contains(sub, want) {
 			t.Errorf("Subscription missing %q:\n%s", want, sub)
 		}
+	}
+	// SNR is subscribed explicitly - its OLM dependency from NHC does not
+	// resolve on every catalog, and the NodeHealthCheck is dead weight without
+	// the SelfNodeRemediationTemplate CRD.
+	snr := byPath[SNRSubscriptionPath]
+	if !strings.Contains(snr, "name: self-node-remediation") {
+		t.Errorf("SNR Subscription missing package name:\n%s", snr)
 	}
 	// All-namespaces install mode: an OperatorGroup with no targetNamespaces.
 	if og := byPath[OperatorGroupPath]; strings.Contains(og, "targetNamespaces") {

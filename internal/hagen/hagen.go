@@ -28,10 +28,11 @@ const CRName = "workers"
 // base branch is what "HA is configured" means, and it is the one file a
 // disable removes (the operator install stays).
 const (
-	NamespacePath     = "ha/namespace.yaml"
-	OperatorGroupPath = "ha/operatorgroup.yaml"
-	SubscriptionPath  = "ha/subscription.yaml"
-	CRPath            = "ha/nodehealthcheck.yaml"
+	NamespacePath       = "ha/namespace.yaml"
+	OperatorGroupPath   = "ha/operatorgroup.yaml"
+	SubscriptionPath    = "ha/subscription.yaml"
+	SNRSubscriptionPath = "ha/subscription-snr.yaml"
+	CRPath              = "ha/nodehealthcheck.yaml"
 )
 
 // Defaults applied when a field is zero: the operator's own stock values -
@@ -87,14 +88,15 @@ func Manifests(s Spec) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
-	files := make([]File, 0, 4)
+	files := make([]File, 0, 5)
 	for _, f := range []struct {
 		name, path string
 		obj        map[string]any
 	}{
 		{"namespace", NamespacePath, operatorNamespace()},
 		{"operatorgroup", OperatorGroupPath, operatorGroup()},
-		{"subscription", SubscriptionPath, subscription()},
+		{"subscription", SubscriptionPath, subscription("node-healthcheck-operator")},
+		{"subscription-snr", SNRSubscriptionPath, subscription("self-node-remediation")},
 		{"nodehealthcheck", CRPath, nodeHealthCheck(s)},
 	} {
 		out, err := yaml.Marshal(f.obj)
@@ -124,18 +126,20 @@ func operatorGroup() map[string]any {
 	}
 }
 
-// subscription installs the Node Health Check Operator. There is deliberately
-// no Self Node Remediation subscription beside it: NHC's CSV declares the SNR
-// template API as an OLM dependency, so OLM installs SNR alongside - one
-// Subscription keeps the file set minimal and lets OLM own the pairing.
-func subscription() map[string]any {
+// subscription installs one Medik8s operator. Node Health Check and Self Node
+// Remediation each get an explicit Subscription: NHC's OLM dependency on the
+// SNR template API does not resolve on every catalog (observed live - the
+// NodeHealthCheck then sits on a missing SelfNodeRemediationTemplate CRD), and
+// an explicit pair is deterministic everywhere while staying a no-op where the
+// dependency would have resolved.
+func subscription(pkg string) map[string]any {
 	return map[string]any{
 		"apiVersion": "operators.coreos.com/v1alpha1",
 		"kind":       "Subscription",
-		"metadata":   map[string]any{"name": "node-healthcheck-operator", "namespace": Namespace},
+		"metadata":   map[string]any{"name": pkg, "namespace": Namespace},
 		"spec": map[string]any{
 			"channel":             "stable",
-			"name":                "node-healthcheck-operator",
+			"name":                pkg,
 			"source":              "redhat-operators",
 			"sourceNamespace":     "openshift-marketplace",
 			"installPlanApproval": "Automatic",

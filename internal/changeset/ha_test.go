@@ -35,8 +35,8 @@ func TestStageEnableHAStagesFileSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StageEnableHA: %v", err)
 	}
-	if view.Count != 4 {
-		t.Fatalf("want 4 staged items (install + CR), got %d", view.Count)
+	if view.Count != 5 {
+		t.Fatalf("want 5 staged items (install + CR), got %d", view.Count)
 	}
 	for _, it := range view.Items {
 		if it.Resource != string(draft.ResourceHA) || it.Kind != string(draft.KindCreate) {
