@@ -224,6 +224,18 @@ export function drsThresholdLabel(value: string): string {
 	return DRS_THRESHOLDS.find((t) => t.value === value)?.label ?? value;
 }
 
+export interface HAEnableRequest {
+	unhealthySeconds?: number;
+	minHealthyPercent?: number;
+}
+
+// --- HA vocabulary (mirrored from internal/hagen, the backend validator) ---
+
+export const HA_BOUNDS = {
+	unhealthySeconds: { min: 60, max: 3600 },
+	minHealthyPercent: { min: 1, max: 100 },
+} as const;
+
 // The Performance views' range tiers (vCenter's real-time/day/week/month).
 export const METRIC_RANGES = [
 	{ key: '1h', label: 'Real-time' },
@@ -354,6 +366,11 @@ export const api = {
 	drs: () => get<gen.DRSView>('/api/drs'),
 	enableDRS: (r: DRSEnableRequest) => post<DraftView>('/api/drs', r),
 	disableDRS: () => req<DraftView>('/api/drs', { method: 'DELETE' }),
+
+	// HA (platform tier): same shape as DRS over the node-remediation file set.
+	ha: () => get<gen.HAView>('/api/ha'),
+	enableHA: (r: HAEnableRequest) => post<DraftView>('/api/ha', r),
+	disableHA: () => req<DraftView>('/api/ha', { method: 'DELETE' }),
 	stageDelete: (namespace: string, name: string) =>
 		post<DraftView>(`${vmPath(namespace, name)}/delete`, {}),
 	// project: cluster-scoped entries resolve by project.

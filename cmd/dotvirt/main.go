@@ -29,6 +29,7 @@ import (
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/metrics"
 	"github.com/epheo/dotvirt/internal/netstate"
+	"github.com/epheo/dotvirt/internal/nodehealth"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/stream"
 	"github.com/epheo/dotvirt/internal/tasks"
@@ -124,6 +125,11 @@ func run() error {
 	deschedSnapshot := desched.New(saCluster)
 	deschedSnapshot.Run(ctx)
 
+	// HA status plane: the SA-watched NodeHealthCheck snapshot behind GET
+	// /api/ha. Discovery-gated the same way.
+	nodehealthSnapshot := nodehealth.New(saCluster)
+	nodehealthSnapshot.Run(ctx)
+
 	// Networking read plane: the SA-watched port-group + fabric snapshot behind GET
 	// /api/networks. Reflectors publish NetworkChanged so the catalog refreshes live;
 	// discovery-gated like desched, so a cluster without OVN-K UDN or nmstate degrades
@@ -196,6 +202,7 @@ func run() error {
 		State:          clusterSnapshot,
 		Drift:          argoSnapshot,
 		Desched:        deschedSnapshot,
+		NodeHealth:     nodehealthSnapshot,
 		Netstate:       netSnapshot,
 		Bus:            bus,
 		Resolver:       resolver,

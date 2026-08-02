@@ -134,16 +134,17 @@ func (s *Server) vmScope(w http.ResponseWriter, r *http.Request) (sc scope, ns, 
 // the authoring signal ORs a subset - adding a platform kind touches only this
 // list and its routes.
 var (
-	ssarCUDN        = ssarRef{"k8s.ovn.org", "clusteruserdefinednetworks"}
-	ssarUplink      = ssarRef{"nmstate.io", "nodenetworkconfigurationpolicies"}
-	ssarNamespace   = ssarRef{"", "namespaces"}
-	ssarEgressIP    = ssarRef{"k8s.ovn.org", "egressips"}
-	ssarExtRoute    = ssarRef{"k8s.ovn.org", "adminpolicybasedexternalroutes"}
-	ssarANP         = ssarRef{"policy.networking.k8s.io", "adminnetworkpolicies"}
-	ssarBANP        = ssarRef{"policy.networking.k8s.io", "baselineadminnetworkpolicies"}
-	ssarDescheduler = ssarRef{"operator.openshift.io", "kubedeschedulers"}
-	ssarMachineCfg  = ssarRef{"machineconfiguration.openshift.io", "machineconfigs"}
-	ssarVMTemplate  = ssarRef{"template.kubevirt.io", "virtualmachinetemplates"}
+	ssarCUDN            = ssarRef{"k8s.ovn.org", "clusteruserdefinednetworks"}
+	ssarUplink          = ssarRef{"nmstate.io", "nodenetworkconfigurationpolicies"}
+	ssarNamespace       = ssarRef{"", "namespaces"}
+	ssarEgressIP        = ssarRef{"k8s.ovn.org", "egressips"}
+	ssarExtRoute        = ssarRef{"k8s.ovn.org", "adminpolicybasedexternalroutes"}
+	ssarANP             = ssarRef{"policy.networking.k8s.io", "adminnetworkpolicies"}
+	ssarBANP            = ssarRef{"policy.networking.k8s.io", "baselineadminnetworkpolicies"}
+	ssarDescheduler     = ssarRef{"operator.openshift.io", "kubedeschedulers"}
+	ssarNodeHealthCheck = ssarRef{"remediation.medik8s.io", "nodehealthchecks"}
+	ssarMachineCfg      = ssarRef{"machineconfiguration.openshift.io", "machineconfigs"}
+	ssarVMTemplate      = ssarRef{"template.kubevirt.io", "virtualmachinetemplates"}
 )
 
 // platformAuthorResources are the create-SSARs that signal platform-tier
@@ -152,7 +153,7 @@ var (
 // caller can only view/unstage/propose what their per-route create gates let
 // them stage), so the whole-draft routes OR these rather than demanding one
 // specific verb; the PR merge review remains the apply boundary.
-var platformAuthorResources = []ssarRef{ssarCUDN, ssarDescheduler, ssarVMTemplate}
+var platformAuthorResources = []ssarRef{ssarCUDN, ssarDescheduler, ssarNodeHealthCheck, ssarVMTemplate}
 
 // canAuthorPlatform reports whether id may author platform-tier changes -
 // any platform authoring signal, TTL-cached per token so the inventory

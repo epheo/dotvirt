@@ -316,6 +316,91 @@ export interface DRSView {
 }
 
 //////////
+// source: ha.go
+
+/**
+ * HAConfig is the committed HA configuration, parsed back from the platform
+ * repo's NodeHealthCheck manifest (defaults resolved).
+ */
+export interface HAConfig {
+  unhealthySeconds: number /* int */; // detection patience before fencing
+  minHealthyPercent: number /* int */; // remediation storm brake
+}
+/**
+ * HAGitState is the platform repo's committed HA state on the base branch.
+ */
+export interface HAGitState {
+  configured: boolean; // the NodeHealthCheck CR is committed
+  config?: HAConfig; // nil when the committed CR doesn't parse (hand-edited)
+}
+/**
+ * HADraftState is the caller's pending (staged, not yet proposed) HA change -
+ * the plane between committed and live that the panel's dialog edits.
+ */
+export interface HADraftState {
+  config?: HAConfig; // the staged NodeHealthCheck spec
+  disableStaged?: boolean;
+}
+/**
+ * HALive is the Node Health Check operator's live state, read from the
+ * SA-watched NodeHealthCheck snapshot - never the cluster per-request.
+ */
+export interface HALive {
+  /**
+   * APIPresent: the NodeHealthCheck CRD is served. False on a cluster where
+   * the operator was never installed - the "not installed" state the panel
+   * shows until the first enable-PR merges and OLM installs it.
+   */
+  apiPresent: boolean;
+  /**
+   * Synced: the initial LIST landed; until then Deployed=false means
+   * "unknown", not "absent". Stale: the API is served but the watch is
+   * currently failing - the live fields may be missing or outdated.
+   */
+  synced: boolean;
+  stale?: boolean;
+  /**
+   * Deployed: a NodeHealthCheck CR exists in the cluster.
+   */
+  deployed: boolean;
+  /**
+   * Phase is the operator's own rollup (Enabled | Disabled | Paused |
+   * Remediating); Reason says why when it disables itself (e.g. a
+   * conflicting machine-api MachineHealthCheck).
+   */
+  phase?: string;
+  reason?: string;
+  /**
+   * Healthy/observed worker counts; 0/0 until the operator reports.
+   */
+  observedNodes: number /* int64 */;
+  healthyNodes: number /* int64 */;
+  /**
+   * Remediating lists the hosts being fenced right now, sorted.
+   */
+  remediating?: string[];
+}
+/**
+ * HAView is GET /api/ha: the HA tier across its planes - the committed git
+ * state (flattened), the caller's staged draft, the live operator state - plus
+ * the caller's authoring capability, the same SSAR the POST/DELETE handlers
+ * enforce. Warning carries a non-fatal degradation (e.g. the platform repo is
+ * unreachable, so the committed state is unknown) instead of failing the view.
+ */
+export interface HAView {
+  /**
+   * The committed git plane: HAGitState's fields spelled out (same json tags)
+   * because tygo renders an embedded struct as a nested field, not flattened.
+   */
+  configured: boolean;
+  config?: HAConfig;
+  draft?: HADraftState;
+  live: HALive;
+  warning?: string;
+  canManage: boolean; // nodehealthchecks-create - gates the panel's actions
+}
+
+//////////
 // source: metrics.go
 
 /**
