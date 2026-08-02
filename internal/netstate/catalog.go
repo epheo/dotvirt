@@ -2,6 +2,7 @@ package netstate
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -75,6 +76,52 @@ func (s *Snapshot) uplinks() []model.Uplink {
 	for _, u := range reflect.List(s.nncp) {
 		out = append(out, s.uplinksFromNNCP(u)...)
 	}
+	return mergeUplinks(out)
+}
+
+// mergeUplinks folds rows sharing a physical-network name into one uplink over the
+// union of their nodes. A localnet declared by several NNCPs is the normal way to
+// cover nodes whose NIC names differ, and it may also restate the builtin br-ex -
+// one physical network is one uplink, so the name is the identity the whole UI
+// keys on.
+func mergeUplinks(in []model.Uplink) []model.Uplink {
+	out := make([]model.Uplink, 0, len(in))
+	at := make(map[string]int, len(in))
+	for _, u := range in {
+		i, seen := at[u.Name]
+		if !seen {
+			u.Nodes = sortedSet(u.Nodes)
+			u.NodeCount = len(u.Nodes)
+			at[u.Name] = len(out)
+			out = append(out, u)
+			continue
+		}
+		m := &out[i]
+		m.Nodes = sortedSet(append(m.Nodes, u.Nodes...))
+		m.NodeCount = len(m.Nodes)
+		if m.Bridge == "" {
+			m.Bridge = u.Bridge
+		}
+	}
+	return out
+}
+
+// sortedSet dedupes and orders names, keeping a nil slice nil (an uplink with no
+// node list means "every node", which an empty list would not).
+func sortedSet(in []string) []string {
+	if len(in) == 0 {
+		return in
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		if _, dup := seen[v]; dup {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	sort.Strings(out)
 	return out
 }
 
