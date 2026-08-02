@@ -134,8 +134,8 @@
 						Cordon <span class="font-mono">{node}</span> and live-migrate every running VM to other
 						hosts?
 						{#if running.length}
-							{running.length} of your VM{running.length === 1 ? ' is' : 's are'} here; VMs outside
-							your projects move too.
+							{running.length} of your VM{running.length === 1 ? ' is' : 's are'} here; VMs outside your
+							projects move too.
 						{:else}
 							None of your VMs are here, but VMs outside your projects move too.
 						{/if}
@@ -175,9 +175,7 @@
 							title="Live-migrate the VMs still on this node"
 							class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 						>
-							<MoveRight size={13} /> Retry evacuation{pending.length
-								? ` (${pending.length})`
-								: ''}
+							<MoveRight size={13} /> Retry evacuation{pending.length ? ` (${pending.length})` : ''}
 						</button>
 					{:else}
 						<button
