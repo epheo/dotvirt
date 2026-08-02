@@ -172,6 +172,56 @@ func TestCatalogFromStores(t *testing.T) {
 	}
 }
 
+// One localnet declared by several NNCPs (the usual way to cover nodes whose NIC
+// names differ) is one uplink over the union of their nodes - never a repeated row,
+// which the UI keys by name and would refuse to render.
+func TestUplinksMergeByName(t *testing.T) {
+	s := New(nil, nil)
+	s.nodes = []cluster.NodeLabels{
+		{Name: "w1", Labels: map[string]string{"nic": "eno1"}},
+		{Name: "w2", Labels: map[string]string{"nic": "ens3"}},
+	}
+	mapping := func(name, nic, localnet string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{"name": name},
+			"spec": map[string]any{
+				"nodeSelector": map[string]any{"nic": nic},
+				"desiredState": map[string]any{"ovn": map[string]any{"bridge-mappings": []any{
+					map[string]any{"localnet": localnet, "bridge": "br-" + localnet},
+				}}},
+			},
+		}}
+	}
+	for _, u := range []*unstructured.Unstructured{
+		mapping("uplink-physnet-eno1", "eno1", "physnet"),
+		mapping("uplink-physnet-ens3", "ens3", "physnet"),
+		mapping("restate-br-ex", "eno1", "br-ex"), // collides with the builtin
+	} {
+		if err := s.nncp.Add(u); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := s.uplinks()
+	seen := map[string]model.Uplink{}
+	for _, u := range got {
+		if _, dup := seen[u.Name]; dup {
+			t.Fatalf("duplicate uplink name %q: %+v", u.Name, got)
+		}
+		seen[u.Name] = u
+	}
+	if len(got) != 2 {
+		t.Fatalf("want br-ex + physnet, got %+v", got)
+	}
+	p := seen["physnet"]
+	if p.NodeCount != 2 || p.Nodes[0] != "w1" || p.Nodes[1] != "w2" {
+		t.Errorf("physnet nodes = %v (count %d), want [w1 w2]", p.Nodes, p.NodeCount)
+	}
+	if b := seen["br-ex"]; !b.Builtin || b.NodeCount != 2 {
+		t.Errorf("br-ex = %+v, want the builtin over both nodes", b)
+	}
+}
+
 func assertNetwork(t *testing.T, got, want model.Network) {
 	t.Helper()
 	if got.Name != want.Name || got.Kind != want.Kind || got.Scope != want.Scope ||

@@ -75,19 +75,24 @@
 	// (GitOps/git moved, or a policy reflector fired NetworkChanged), so a merged
 	// segment or firewall rule appears without a reload. Keyed on the stable derived
 	// primitive, so it fires only when networking may have changed - not every
-	// VM-state frame. A failure (e.g. the OVN-K CRDs absent) leaves the catalog
-	// empty - NICs fall back to raw refs, Security shows no rows.
+	// VM-state frame. A failed pull retries with backoff: this is the only fetch of
+	// these planes, so a transient boot error would otherwise blank the networking
+	// and host-configure views for the whole session. 401 signs out centrally.
 	$effect(() => {
 		if (!session.user) return;
 		inventory.networksVersion; // subscribe: re-pull when GitOps/git moves
-		api
-			.networks()
-			.then((n) => (inventory.netInv = n))
-			.catch(() => {}); // 401 signs out centrally
-		api
-			.policies()
-			.then((p) => (inventory.polInv = p))
-			.catch(() => {});
+		let timer = 0;
+		let attempt = 0;
+		const pull = () => {
+			Promise.all([
+				api.networks().then((n) => (inventory.netInv = n)),
+				api.policies().then((p) => (inventory.polInv = p)),
+			]).catch(() => {
+				if (attempt < 5) timer = window.setTimeout(pull, 2 ** attempt++ * 1000);
+			});
+		};
+		pull();
+		return () => clearTimeout(timer);
 	});
 
 	// The recent-tasks feed rides the same out-of-band contract: re-pull when an
