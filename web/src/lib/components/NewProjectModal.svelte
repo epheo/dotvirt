@@ -9,20 +9,29 @@
 	let {
 		onclose,
 		onstaged,
+		adopt: adoptProp = '',
 	}: {
 		onclose: () => void;
 		onstaged: () => void;
+		adopt?: string; // existing unlabeled namespace to bring in as a project
 	} = $props();
+	// The modal mounts fresh per open, so the initial value IS the intent.
+	// svelte-ignore state_referenced_locally
+	const adopt = adoptProp;
 
-	let name = $state(''); // project name -> tenant repo + dotvirt.io/project
-	let namespace = $state(''); // first namespace
+	let name = $state(adopt); // project name -> tenant repo + dotvirt.io/project
+	let namespace = $state(adopt); // first namespace
 	let owners = $state(''); // space/comma-separated usernames
-	let withNetwork = $state(true);
+	// Adoption defaults to no new VM network: the namespace already runs VMs on
+	// whatever networking it has, and staging a primary UDN could break them.
+	let withNetwork = $state(!adopt);
 	let netName = $state('');
 	let subnet = $state('');
 
-	// The first namespace defaults to the project name until the user overrides it.
-	let nsTouched = $state(false);
+	// The first namespace defaults to the project name until the user overrides
+	// it. Adoption pins it: the whole point is bringing in THAT namespace, so a
+	// project rename must not drag it along.
+	let nsTouched = $state(!!adopt);
 	$effect(() => {
 		if (!nsTouched) namespace = name;
 	});
@@ -64,7 +73,7 @@
 </script>
 
 <StageModal
-	title="New Project"
+	title={adopt ? 'Adopt Tenant' : 'New Project'}
 	label="Stage project"
 	{missing}
 	{summary}
@@ -78,12 +87,16 @@
 			>Creates the tenant git repo of the same name.</span
 		>
 	</FormField>
-	<FormField label="First namespace" error={namespace && !validName(namespace) ? NAME_HINT : ''}>
+	<FormField
+		label={adopt ? 'Namespace (existing)' : 'First namespace'}
+		error={namespace && !validName(namespace) ? NAME_HINT : ''}
+	>
 		<TextInput
 			bind:value={namespace}
 			oninput={() => (nsTouched = true)}
 			placeholder="team-c"
 			mono
+			disabled={!!adopt}
 		/>
 	</FormField>
 	<FormField label="Owners (optional)">
@@ -103,8 +116,15 @@
 	{/if}
 
 	<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">
-		Creates the tenant repo now, and stages its first namespace{#if owners.trim()}
-			+ an owners admin grant{/if} into the platform repo. Applied by Argo on merge — open the PR from
-		“Changes”.
+		{#if adopt}
+			Creates the tenant repo now, and stages the existing namespace{#if owners.trim()}
+				+ an owners admin grant{/if} into the platform repo. On merge, Argo labels
+			<span class="font-mono">{adopt}</span> into the project; its VMs then show as untracked, ready to
+			adopt into git.
+		{:else}
+			Creates the tenant repo now, and stages its first namespace{#if owners.trim()}
+				+ an owners admin grant{/if} into the platform repo. Applied by Argo on merge — open the PR from
+			“Changes”.
+		{/if}
 	</p>
 </StageModal>

@@ -82,7 +82,7 @@
 		onstaged={staged}
 	/>
 {:else if m?.kind === 'newProject'}
-	<NewProjectModal onclose={close} onstaged={staged} />
+	<NewProjectModal adopt={m.adopt} onclose={close} onstaged={staged} />
 {:else if m?.kind === 'adoptProject'}
 	<AdoptProjectModal
 		project={m.project}

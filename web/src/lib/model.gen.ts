@@ -1138,6 +1138,15 @@ export interface Project {
   gitOps?: ProjectSync;
 }
 /**
+ * AdoptableNamespace is a namespace holding VMs but no dotvirt.io/project label -
+ * an existing tenant on a cluster dotvirt landed on. Adopting it is the create-
+ * project flow with its name: the staged Namespace manifest labels it on merge.
+ */
+export interface AdoptableNamespace {
+  namespace: string;
+  vms: number /* int */;
+}
+/**
  * ProjectSync is a project's overall GitOps state, read straight from its managing
  * ArgoCD Application. Operation is the last sync's phase ("Running" = applying,
  * "Failed"/"Error" = apply failed), the cue for a "pending apply" or an alarm that a
@@ -1175,4 +1184,11 @@ export interface Inventory {
    * fetched out-of-band): bumps when an op is recorded or a merged PR lands.
    */
   tasksVersion?: number /* uint64 */;
+  /**
+   * Adoptable proposes existing tenants: namespaces with VMs but no project
+   * label. Present only for callers with namespace-create authority (the
+   * adoption gate) - the candidate scan is cluster-wide, so the SSAR is what
+   * keeps one tenant from enumerating another's namespaces.
+   */
+  adoptable?: AdoptableNamespace[];
 }

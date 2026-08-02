@@ -6,6 +6,7 @@
 package inventory
 
 import (
+	"sort"
 	"strings"
 	"time"
 
@@ -116,6 +117,35 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 // splitKey splits a "namespace/name" snapshot key.
 func splitKey(k string) (ns, name string, ok bool) {
 	return strings.Cut(k, "/")
+}
+
+// Adoptable finds the namespaces holding VMs but carrying no project label -
+// tenants that predate dotvirt on this cluster. labeled is the project-labeled
+// namespace set (the SA snapshot's namespace watch is label-selected, so it IS
+// that set); system namespaces are skipped.
+func Adoptable(live map[string]clusterstate.LiveVM, labeled []project.Namespace) []model.AdoptableNamespace {
+	owned := make(map[string]bool, len(labeled))
+	for _, ns := range labeled {
+		owned[ns.Name] = true
+	}
+	counts := map[string]int{}
+	for k := range live {
+		ns, _, ok := splitKey(k)
+		if !ok || owned[ns] || isSystemNamespace(ns) {
+			continue
+		}
+		counts[ns]++
+	}
+	out := make([]model.AdoptableNamespace, 0, len(counts))
+	for ns, n := range counts {
+		out = append(out, model.AdoptableNamespace{Namespace: ns, VMs: n})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Namespace < out[j].Namespace })
+	return out
+}
+
+func isSystemNamespace(ns string) bool {
+	return strings.HasPrefix(ns, "openshift-") || strings.HasPrefix(ns, "kube-")
 }
 
 func enrich(vm *model.VM, in Inputs) {
