@@ -165,7 +165,7 @@
 								<div class="h-5 animate-pulse rounded bg-inset-strong"></div>
 							{/each}
 						</div>
-					{:else if inventory.inventory.projects.length === 0 && treeSection !== 'catalog'}
+					{:else if inventory.inventory.projects.length === 0 && inventory.adoptable.length === 0 && treeSection !== 'catalog'}
 						<div class="space-y-3 p-6 text-center">
 							<p class="text-xs text-ink-faint">No projects visible.</p>
 							{#if inventory.canNamespace}

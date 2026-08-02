@@ -7,7 +7,7 @@ type AppModal =
 	| { kind: 'newNetwork' }
 	| { kind: 'uplink' }
 	| { kind: 'namespace'; project: string | null }
-	| { kind: 'newProject' }
+	| { kind: 'newProject'; adopt?: string } // adopt = existing namespace to bring in as a project
 	| { kind: 'adoptProject'; project: string; namespaces: string[]; recover?: boolean }
 	| { kind: 'egressFw'; namespaces: string[]; namespace?: string }
 	| { kind: 'dfw'; namespaces: string[]; namespace?: string }

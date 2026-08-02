@@ -47,6 +47,10 @@ class InventoryStore {
 	// Open PRs across the user's projects ride the live inventory stream, so a PR
 	// merged anywhere repaints the dock + Changes pane with no manual refresh.
 	readonly proposals = $derived(this.inventory?.proposals ?? []);
+	// Existing tenants proposed for adoption (namespaces with VMs, no project
+	// label). The backend only fills this for callers with namespace-create
+	// authority, so non-empty implies the adopt action is allowed.
+	readonly adoptable = $derived(this.inventory?.adoptable ?? []);
 	readonly projectNames = $derived(
 		this.inventory ? this.inventory.projects.map((p) => p.name) : [],
 	);
