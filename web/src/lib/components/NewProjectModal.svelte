@@ -106,13 +106,17 @@
 		>
 	</FormField>
 
-	<label class="flex items-center gap-2">
-		<input type="checkbox" bind:checked={withNetwork} />
-		<span class="text-ink-soft">Add a VM Network — the namespace's primary Segment (Tier-1)</span>
-	</label>
+	<!-- Not offered when adopting: the namespace's networking already exists on
+	     the cluster; staging a primary UDN on top could break its running VMs. -->
+	{#if !adopt}
+		<label class="flex items-center gap-2">
+			<input type="checkbox" bind:checked={withNetwork} />
+			<span class="text-ink-soft">Add a VM Network — the namespace's primary Segment (Tier-1)</span>
+		</label>
 
-	{#if withNetwork}
-		<VMNetworkFields base={namespace} bind:name={netName} bind:subnet bind:touched={netTouched} />
+		{#if withNetwork}
+			<VMNetworkFields base={namespace} bind:name={netName} bind:subnet bind:touched={netTouched} />
+		{/if}
 	{/if}
 
 	<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">
