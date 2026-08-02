@@ -35,6 +35,8 @@
 </script>
 
 {#if compact}
+	<!-- Only notable states get a dot: drift (clickable detail) and not-tracked
+	     (an adoptable VM must be spottable in the tree). Synced stays unmarked. -->
 	{#if sync === 'OutOfSync'}
 		<button
 			type="button"
@@ -43,6 +45,11 @@
 			title={error || 'ArgoCD: out of sync'}
 			class="inline-block h-1.5 w-1.5 rounded-full {TONE_DOT.danger} cursor-pointer align-middle"
 		></button>
+	{:else if sync === 'NotTracked'}
+		<span
+			title="Not tracked in git"
+			class="inline-block h-1.5 w-1.5 rounded-full {TONE_DOT.neutral} align-middle"
+		></span>
 	{/if}
 {:else}
 	<StatusPill
