@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { Database, LayoutGrid, Network, Server, Shield, Workflow } from 'lucide-svelte';
-	import type { VM } from '$lib/api';
+	import { api, type Node, type VM } from '$lib/api';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
 	import { hrefForScope, scopeFromPath } from '$lib/nav';
 	import { networkByRef } from '$lib/networks';
+	import { resource } from '$lib/resource.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import SyncBadge from '$lib/components/SyncBadge.svelte';
 	import TreeRow from '$lib/components/TreeRow.svelte';
@@ -31,12 +32,21 @@
 	let collapsed = $state<Record<string, boolean>>({});
 	const toggle = (id: string) => (collapsed[id] = !collapsed[id]);
 
+	// Hosts exist without VMs: seed the node groups from the host list so an
+	// empty (fresh, or fully drained) host still has a row. Caller RBAC gates the
+	// list - a tenant without node-read keeps the VM-derived groups only. kind is
+	// fixed per instance (the layout passes a literal), so reading it at init is
+	// the intent and the conditional resource is init-stable.
+	// svelte-ignore state_referenced_locally
+	const nodesRes = kind === 'node' ? resource<Node[]>(() => 'nodes', api.nodes) : null;
+
 	const groups = $derived.by(() => {
 		const m = new Map<string, VM[]>();
 		const add = (key: string, vm: VM) => {
 			if (!m.has(key)) m.set(key, []);
 			m.get(key)!.push(vm);
 		};
+		for (const node of nodesRes?.data ?? []) m.set(node.name, []);
 		for (const vm of inventory.allVMs) {
 			if (kind === 'node') add(vm.nodeName || '(unscheduled)', vm);
 			else if (kind === 'network')
