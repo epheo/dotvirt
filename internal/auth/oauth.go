@@ -283,15 +283,18 @@ func (o *OAuth) ClientRegistered(ctx context.Context) bool {
 	return registered
 }
 
-// secretStale authenticates the client at the token endpoint with a bogus code:
-// invalid_grant means client+secret passed and only the code was wrong;
-// unauthorized_client/invalid_client means the OAuthClient carries a secret
-// other than ours. Anything else (network, 5xx, unexpected shape) reads as fine.
+// secretStale authenticates the client at the token endpoint with a bogus
+// refresh token: invalid_grant means client+secret passed and only the token
+// was wrong; unauthorized_client/invalid_client means the OAuthClient carries
+// a secret other than ours. The refresh grant, not authorization_code: the
+// OpenShift oauth server looks a code up BEFORE authenticating the client and
+// answers unauthorized_client for a bogus one under EITHER secret, which read
+// every correctly-registered client as stale. Anything else (network, 5xx,
+// unexpected shape) reads as fine.
 func (o *OAuth) secretStale(ctx context.Context, m *oauthMeta) bool {
 	form := url.Values{
-		"grant_type":   {"authorization_code"},
-		"code":         {"probe"},
-		"redirect_uri": {o.cfg.RedirectURL},
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {"probe"},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.TokenEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {
