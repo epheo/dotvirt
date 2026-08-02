@@ -109,7 +109,7 @@
 				<div class="truncate px-3 py-1 text-[10px] tracking-wide text-ink-faint uppercase">
 					{ctx.namespace ?? ctx.project}
 				</div>
-				{#if !ctx.repo && inventory.canManage}
+				{#if !ctx.repo && inventory.canNamespace}
 					<MenuItem
 						onclick={() => {
 							ui.modal =
@@ -124,7 +124,7 @@
 				{/if}
 				<!-- A dead repo annotation is a different dead end from repoless. Gated on
 				     the GitOps error; the backend refuses when the repo resolves. -->
-				{#if ctx.kind === 'container' && ctx.repo && projectSyncError(ctx.project) && inventory.canManage}
+				{#if ctx.kind === 'container' && ctx.repo && projectSyncError(ctx.project) && inventory.canNamespace}
 					<MenuItem
 						onclick={() => {
 							ui.modal = {

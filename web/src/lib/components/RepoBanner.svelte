@@ -26,7 +26,7 @@
 	}
 </script>
 
-{#if (attach || recover) && inventory.canManage}
+{#if (attach || recover) && inventory.canNamespace}
 	<Banner tone="warn">
 		<TriangleAlert size={14} class="shrink-0" />
 		<span class="truncate" title={note}>
