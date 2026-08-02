@@ -95,6 +95,19 @@
 		return () => clearTimeout(timer);
 	});
 
+	// The default StorageClass name, once per session: the storage lens uses it
+	// to group classless disks under the real class. The options catalog is
+	// server-cached, so this costs one GET; a failure just keeps the placeholder.
+	$effect(() => {
+		if (!session.user) return;
+		api
+			.options()
+			.then((o) => {
+				inventory.defaultStorageClass = o.storageClasses?.find((s) => s.default)?.name ?? '';
+			})
+			.catch(() => {});
+	});
+
 	// The recent-tasks feed rides the same out-of-band contract: re-pull when an
 	// op is recorded or a merged PR lands (tasksVersion), not on every VM frame.
 	$effect(() => {

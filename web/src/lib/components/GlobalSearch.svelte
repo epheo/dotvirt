@@ -90,9 +90,9 @@
 				if (n.name.toLowerCase().includes(q))
 					out.push({ kind: 'network', network: n.name, hint: n.kind });
 			}
-			const classes = [...new Set(vms.flatMap((v) => vmStorageKeys(v)))].filter(
-				(c) => c !== NO_STORAGE,
-			);
+			const classes = [
+				...new Set(vms.flatMap((v) => vmStorageKeys(v, inventoryStore.defaultStorageClass))),
+			].filter((c) => c !== NO_STORAGE);
 			for (const c of classes) {
 				if (c.toLowerCase().includes(q)) out.push({ kind: 'storage', storageClass: c });
 			}

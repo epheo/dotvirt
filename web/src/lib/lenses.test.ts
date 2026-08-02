@@ -95,6 +95,17 @@ describe('vmStorageKeys', () => {
 		expect(vmStorageKeys(v)).toEqual([DEFAULT_CLASS]);
 	});
 
+	it('resolves a classless dataVolume onto the known default class', () => {
+		const v = vm({
+			disks: [
+				{ name: 'root', type: 'dataVolume' },
+				{ name: 'data', type: 'dataVolume', storageClass: 'fast' },
+			],
+		});
+		expect(vmStorageKeys(v, 'fast')).toEqual(['fast']);
+		expect(vmStorageKeys(v, 'lvms')).toEqual(['lvms', 'fast']);
+	});
+
 	it('dedupes disks on the same class and keeps distinct classes apart', () => {
 		const v = vm({
 			disks: [
