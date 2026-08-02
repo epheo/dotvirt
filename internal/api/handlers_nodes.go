@@ -3,6 +3,10 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
+	"strings"
+
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // Node maintenance (the By-Node view): read a node's cordon/maintenance state,
@@ -71,9 +75,8 @@ func (s *Server) handleNodeCordon(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleNodeMaintenance enters or exits maintenance mode (annotation + cordon
-// in one node patch). Evacuation is not done here: the client drives the
-// per-VM migrate calls so each one is gated by that VM's own RBAC and shows up
-// as its own action row.
+// in one node patch). Evacuation is a separate call (handleNodeEvacuate) so a
+// failed sweep can be retried without re-patching the node.
 func (s *Server) handleNodeMaintenance(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
@@ -98,4 +101,56 @@ func (s *Server) handleNodeMaintenance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleNodeEvacuate live-migrates every running VM off the node - in a dotvirt
+// project or not. The candidate list comes from the SA snapshot, the only complete
+// view of a node (the caller's inventory holds just their projects' VMs, which is
+// how untracked VMs used to be stranded); each migrate still runs under the
+// caller's own token, so per-VM RBAC gates every move and failures surface as
+// rows instead of silent omissions. Gated on the node-patch authority that also
+// reveals the maintenance panel, so a token without it cannot enumerate a node's
+// VMs through the failure list.
+func (s *Server) handleNodeEvacuate(w http.ResponseWriter, r *http.Request) {
+	id, c, err := s.userCluster(r)
+	if err != nil {
+		fail(w, unavailable("cluster access", err))
+		return
+	}
+	node := r.PathValue("node")
+	info, err := c.NodeInfo(r.Context(), node)
+	if err != nil {
+		http.Error(w, err.Error(), runtimeOpStatus(err))
+		return
+	}
+	if !info.CanCordon {
+		http.Error(w, "node evacuation needs node-update authority", http.StatusForbidden)
+		return
+	}
+	out := model.Evacuation{Failures: []model.EvacuationFailure{}}
+	for k, live := range s.state.LiveVMs() {
+		if live.NodeName != node || live.Phase != "Running" {
+			continue
+		}
+		if m := live.Migration; m != nil && !m.Completed && !m.Failed {
+			out.Skipped++ // a second migrate on an active move would 409
+			continue
+		}
+		ns, name, ok := strings.Cut(k, "/")
+		if !ok {
+			continue
+		}
+		mErr := c.Migrate(r.Context(), ns, name, "")
+		s.recordTask("Live-migration", ns, name, id.Username, mErr == nil)
+		if mErr != nil {
+			out.Failures = append(out.Failures, model.EvacuationFailure{Namespace: ns, Name: name, Error: mErr.Error()})
+			continue
+		}
+		out.Requested++
+	}
+	sort.Slice(out.Failures, func(i, j int) bool {
+		a, b := out.Failures[i], out.Failures[j]
+		return a.Namespace+"/"+a.Name < b.Namespace+"/"+b.Name
+	})
+	writeJSON(w, http.StatusOK, out)
 }

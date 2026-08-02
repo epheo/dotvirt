@@ -715,6 +715,21 @@ export interface NodeInfo {
   canCordon: boolean;
 }
 /**
+ * Evacuation is one node-drain sweep's outcome. Failures carry per-VM errors:
+ * each migrate runs under the caller's own RBAC, so a partial sweep must say
+ * which VMs it could not move rather than silently omitting them.
+ */
+export interface Evacuation {
+  requested: number /* int */;
+  skipped?: number /* int */; // already mid-migration
+  failures: EvacuationFailure[];
+}
+export interface EvacuationFailure {
+  namespace: string;
+  name: string;
+  error: string;
+}
+/**
  * ResyncResult reports which ArgoCD Application was synced.
  */
 export interface ResyncResult {
