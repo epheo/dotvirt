@@ -119,12 +119,12 @@
 		{#if adopt}
 			Creates the tenant repo now, and stages the existing namespace{#if owners.trim()}
 				+ an owners admin grant{/if} into the platform repo. On merge, Argo labels
-			<span class="font-mono">{adopt}</span> into the project; its VMs then show as untracked, ready
-			to adopt into git.
+			<span class="font-mono">{adopt}</span> into the project; its VMs then show as untracked, ready to
+			adopt into git.
 		{:else}
 			Creates the tenant repo now, and stages its first namespace{#if owners.trim()}
-				+ an owners admin grant{/if} into the platform repo. Applied by Argo on merge — open the PR
-			from “Changes”.
+				+ an owners admin grant{/if} into the platform repo. Applied by Argo on merge — open the PR from
+			“Changes”.
 		{/if}
 	</p>
 </StageModal>
