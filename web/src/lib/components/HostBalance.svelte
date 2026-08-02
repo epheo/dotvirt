@@ -6,12 +6,12 @@
 	import { inventory } from '$lib/state/inventory.svelte';
 	import InfoCard from './InfoCard.svelte';
 
-	// Worker utilization with the DRS action band: every worker is a dot on a
-	// 0-100% axis (CPU, plus a slim memory strip), so a two-worker lab reads as
-	// a labeled comparison while a spread-out fleet reads as a distribution.
-	// When stacks outgrow the strip the dots give way to a density silhouette
-	// and only out-of-band workers stay individually drawn - the hand-off is
-	// geometric (see dotstrip.ts), never a node-count threshold.
+	// Worker utilization with the DRS action band. A small fleet is a labeled
+	// per-host comparison: the roster rows ARE the chart (a strip with three
+	// dots is whitespace duplicating them). Only past what rows can carry does
+	// the 0-100% strip take over, reading as a distribution - dots first, then
+	// the geometric hand-off to a density silhouette with only out-of-band
+	// workers individually drawn (see dotstrip.ts).
 	// metrics off or no worker series: the card simply absents itself
 	const hl = resource<HostLoad>(
 		() => '',
@@ -19,6 +19,9 @@
 		{ poll: 30000 },
 	);
 	const data = $derived(hl.failed ? null : hl.data);
+	// Rows list everyone up to 10 workers (see rows below); the strip starts
+	// once the roster alone can no longer show the whole fleet.
+	const strip = $derived(!!data && data.workers > 10);
 
 	const W = 640;
 	const CPU_H = 102;
@@ -149,131 +152,138 @@
 		{/snippet}
 
 		<div class="p-3">
-			<svg
-				viewBox="0 0 {W} {vbH}"
-				class="w-full max-w-2xl"
-				role="img"
-				aria-label="Worker utilization distribution"
-			>
-				<text x="0" y="10" class="fill-ink-faint" font-size="9">CPU</text>
-				{#if band}
-					<rect
-						x={px(band.low)}
-						y={CPU_TOP}
-						width={px(band.high) - px(band.low)}
-						height={CPU_H}
-						style:fill="var(--chart-band)"
-						opacity="0.09"
-					/>
-				{/if}
-				<g transform="translate(0 {CPU_TOP})">
-					{#if cpu.dots}
-						{#each cpu.dots as d (d.i)}
-							{@const n = nodes[d.i]}
-							<a href="/hosts/{n.node}">
-								{#if n.unschedulable}
-									<circle
-										cx={d.x}
-										cy={d.y}
-										r={Math.max(1.2, d.r - 0.75)}
-										style:fill="var(--color-panel)"
-										style:stroke={cpuColor(n)}
-										stroke-width="1.5"
-									/>
-								{:else}
-									<circle cx={d.x} cy={d.y} r={d.r} style:fill={cpuColor(n)} />
-								{/if}
-								<title>{title(n)}</title>
-							</a>
-						{/each}
-					{:else}
-						<path
-							d={densityPath(cpu.bins, W, CPU_H - 14, CPU_H)}
-							style:fill="var(--chart-axis)"
-							opacity="0.3"
-						/>
-						{#each [...hotDots, ...coldDots] as n (n.node)}
-							<a href="/hosts/{n.node}">
-								<circle cx={px(n.pct)} cy={CPU_H - 4} r="3" style:fill={cpuColor(n)} />
-								<title>{title(n)}</title>
-							</a>
-						{/each}
-					{/if}
-					{#each labels as l (l.i)}
-						<text x={l.x} y={l.y} text-anchor="middle" class="fill-ink-soft" font-size="9"
-							>{l.text}</text
-						>
-					{/each}
-				</g>
-				<line
-					x1={px(data.mean)}
-					y1={CPU_TOP - 4}
-					x2={px(data.mean)}
-					y2={CPU_TOP + CPU_H}
-					style:stroke="var(--chart-mean)"
-					stroke-dasharray="2 2"
-				/>
-				<text
-					x={Math.min(W - 30, Math.max(42, px(data.mean)))}
-					y="10"
-					text-anchor="middle"
-					class="fill-ink-soft"
-					font-size="9">mean {Math.round(data.mean)}%</text
+			{#if strip}
+				<svg
+					viewBox="0 0 {W} {vbH}"
+					class="w-full max-w-2xl"
+					role="img"
+					aria-label="Worker utilization distribution"
 				>
-				<line
-					x1="0"
-					y1={CPU_TOP + CPU_H}
-					x2={W}
-					y2={CPU_TOP + CPU_H}
-					style:stroke="var(--chart-track-strong)"
-				/>
-
-				{#if memKnown}
-					<text x="0" y="140" class="fill-ink-faint" font-size="9">Memory</text>
-					<g transform="translate(0 {MEM_TOP})">
-						{#if mem.dots}
-							{#each mem.dots as d (d.i)}
+					<text x="0" y="10" class="fill-ink-faint" font-size="9">CPU</text>
+					{#if band}
+						<rect
+							x={px(band.low)}
+							y={CPU_TOP}
+							width={px(band.high) - px(band.low)}
+							height={CPU_H}
+							style:fill="var(--chart-band)"
+							opacity="0.09"
+						/>
+					{/if}
+					<g transform="translate(0 {CPU_TOP})">
+						{#if cpu.dots}
+							{#each cpu.dots as d (d.i)}
 								{@const n = nodes[d.i]}
 								<a href="/hosts/{n.node}">
-									<circle cx={d.x} cy={d.y} r={d.r} style:fill={memColor(n)} />
+									{#if n.unschedulable}
+										<circle
+											cx={d.x}
+											cy={d.y}
+											r={Math.max(1.2, d.r - 0.75)}
+											style:fill="var(--color-panel)"
+											style:stroke={cpuColor(n)}
+											stroke-width="1.5"
+										/>
+									{:else}
+										<circle cx={d.x} cy={d.y} r={d.r} style:fill={cpuColor(n)} />
+									{/if}
 									<title>{title(n)}</title>
 								</a>
 							{/each}
 						{:else}
 							<path
-								d={densityPath(mem.bins, W, MEM_H - 6, MEM_H)}
+								d={densityPath(cpu.bins, W, CPU_H - 14, CPU_H)}
 								style:fill="var(--chart-axis)"
 								opacity="0.3"
 							/>
-							{#each memHotDots as n (n.node)}
+							{#each [...hotDots, ...coldDots] as n (n.node)}
 								<a href="/hosts/{n.node}">
-									<circle cx={px(n.mem ?? 0)} cy={MEM_H - 4} r="3" style:fill="var(--color-warn)" />
+									<circle cx={px(n.pct)} cy={CPU_H - 4} r="3" style:fill={cpuColor(n)} />
 									<title>{title(n)}</title>
 								</a>
 							{/each}
 						{/if}
+						{#each labels as l (l.i)}
+							<text x={l.x} y={l.y} text-anchor="middle" class="fill-ink-soft" font-size="9"
+								>{l.text}</text
+							>
+						{/each}
 					</g>
 					<line
-						x1="0"
-						y1={MEM_TOP + MEM_H}
-						x2={W}
-						y2={MEM_TOP + MEM_H}
-						style:stroke="var(--chart-track)"
+						x1={px(data.mean)}
+						y1={CPU_TOP - 4}
+						x2={px(data.mean)}
+						y2={CPU_TOP + CPU_H}
+						style:stroke="var(--chart-mean)"
+						stroke-dasharray="2 2"
 					/>
-				{/if}
-
-				{#each [0, 25, 50, 75, 100] as t (t)}
 					<text
-						x={px(t)}
-						y={axisY}
-						text-anchor={t === 0 ? 'start' : t === 100 ? 'end' : 'middle'}
-						class="fill-ink-faint"
-						font-size="8">{t}%</text
+						x={Math.min(W - 30, Math.max(42, px(data.mean)))}
+						y="10"
+						text-anchor="middle"
+						class="fill-ink-soft"
+						font-size="9">mean {Math.round(data.mean)}%</text
 					>
-				{/each}
-			</svg>
+					<line
+						x1="0"
+						y1={CPU_TOP + CPU_H}
+						x2={W}
+						y2={CPU_TOP + CPU_H}
+						style:stroke="var(--chart-track-strong)"
+					/>
 
-			<div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+					{#if memKnown}
+						<text x="0" y="140" class="fill-ink-faint" font-size="9">Memory</text>
+						<g transform="translate(0 {MEM_TOP})">
+							{#if mem.dots}
+								{#each mem.dots as d (d.i)}
+									{@const n = nodes[d.i]}
+									<a href="/hosts/{n.node}">
+										<circle cx={d.x} cy={d.y} r={d.r} style:fill={memColor(n)} />
+										<title>{title(n)}</title>
+									</a>
+								{/each}
+							{:else}
+								<path
+									d={densityPath(mem.bins, W, MEM_H - 6, MEM_H)}
+									style:fill="var(--chart-axis)"
+									opacity="0.3"
+								/>
+								{#each memHotDots as n (n.node)}
+									<a href="/hosts/{n.node}">
+										<circle
+											cx={px(n.mem ?? 0)}
+											cy={MEM_H - 4}
+											r="3"
+											style:fill="var(--color-warn)"
+										/>
+										<title>{title(n)}</title>
+									</a>
+								{/each}
+							{/if}
+						</g>
+						<line
+							x1="0"
+							y1={MEM_TOP + MEM_H}
+							x2={W}
+							y2={MEM_TOP + MEM_H}
+							style:stroke="var(--chart-track)"
+						/>
+					{/if}
+
+					{#each [0, 25, 50, 75, 100] as t (t)}
+						<text
+							x={px(t)}
+							y={axisY}
+							text-anchor={t === 0 ? 'start' : t === 100 ? 'end' : 'middle'}
+							class="fill-ink-faint"
+							font-size="8">{t}%</text
+						>
+					{/each}
+				</svg>
+			{/if}
+
+			<div class="{strip ? 'mt-2' : ''} flex flex-wrap items-center gap-2 text-xs">
 				<span class="text-ink-soft">
 					{data.workers} worker{data.workers === 1 ? '' : 's'}
 				</span>
@@ -303,6 +313,10 @@
 				{:else}
 					<span class="text-ink-faint">Rescheduling not configured - no action band.</span>
 				{/if}
+				{#if !strip}
+					<!-- The strip's mean line is absent in roster mode; keep the number. -->
+					<span class="text-ink-faint">mean CPU {Math.round(data.mean)}%</span>
+				{/if}
 				{#if memPressure > 0}
 					<span
 						class="rounded bg-warn-soft px-1.5 py-0.5 font-medium text-warn-ink"
@@ -323,11 +337,24 @@
 			{/if}
 
 			{#if rows.length}
-				<ul class="mt-2 space-y-1">
+				<!-- Bare percent pairs are ambiguous; name the columns once. -->
+				<div
+					class="mt-2 flex items-center gap-2 text-[10px] font-semibold tracking-wide text-ink-faint uppercase"
+				>
+					<span class="w-40 shrink-0">Host</span>
+					<span class="flex-1">CPU</span>
+					<span class="w-9 shrink-0"></span>
+					{#if memKnown}
+						<span class="hidden w-24 shrink-0 sm:block">Memory</span>
+						<span class="hidden w-9 shrink-0 sm:block"></span>
+					{/if}
+				</div>
+				<ul class="mt-1 space-y-1">
 					{#each rows as n (n.node)}
 						<li class="flex items-center gap-2 text-xs">
 							<a
 								href="/hosts/{n.node}"
+								title={n.node}
 								class="w-40 min-w-0 truncate text-ink-soft hover:text-accent-ink hover:underline"
 								>{n.node}</a
 							>
