@@ -205,6 +205,32 @@ func TestBuildDriftEnabledMarksNotTracked(t *testing.T) {
 	}
 }
 
+// A labeled project with no resolvable repo yet (fresh adoption target, forge-less
+// install) still renders its namespaces and running VMs as NotTracked - "not yet
+// managed" must be visible, not blank.
+func TestBuildRepoLessProjectShowsLiveVMs(t *testing.T) {
+	in := Inputs{
+		Branch: "main",
+		Projects: []project.ProjectInfo{
+			{Name: "team-a", Error: "no repo configured", Namespaces: []string{"tenant-a"}},
+		},
+		Live: map[string]clusterstate.LiveVM{
+			"tenant-a/web": {Phase: "Running"},
+		},
+	}
+	inv := Build(in)
+	p := inv.Projects[0]
+	if p.Error == "" {
+		t.Fatal("the unresolved-repo error must stay on the project")
+	}
+	if len(p.Namespaces) != 1 || len(p.Namespaces[0].VMs) != 1 {
+		t.Fatalf("live VM must render despite the missing repo, got %+v", p.Namespaces)
+	}
+	if vm := p.Namespaces[0].VMs[0]; vm.Name != "web" || vm.Sync != model.SyncNotTracked {
+		t.Errorf("live VM should be NotTracked web, got %+v", vm)
+	}
+}
+
 // A dead repo must not blind the inventory: live VMs render (NotTracked) beside
 // the error badge. Hiding them invited the wrong recovery actions.
 func TestBuildRepoUnavailableStillShowsLiveVMs(t *testing.T) {
