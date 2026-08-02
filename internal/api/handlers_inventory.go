@@ -85,6 +85,12 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	}
 	inv := inventory.Build(in)
 	inv.Warnings = warnings
+	// Propose existing tenants (namespaces with VMs, no project label) to callers
+	// who could adopt them - the same namespace-create authority the create-project
+	// route enforces. Rides the frame, so the list drains as adoptions merge.
+	if s.cfg.PlatformRepo != "" && s.canCreateCached(ctx, id, userCluster, ssarNamespace) {
+		inv.Adoptable = inventory.Adoptable(in.Live, s.state.Namespaces())
+	}
 	// The platform tier is config-only (never a labeled namespace), so it's absent
 	// from `projects` - seed it for platform authors so its open PR shows on a cold
 	// load, not just right after a propose tracks it.

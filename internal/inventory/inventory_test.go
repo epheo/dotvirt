@@ -231,6 +231,25 @@ func TestBuildRepoLessProjectShowsLiveVMs(t *testing.T) {
 	}
 }
 
+// Namespaces holding VMs but no project label are adoption candidates; labeled
+// and system namespaces are not.
+func TestAdoptable(t *testing.T) {
+	live := map[string]clusterstate.LiveVM{
+		"legacy-a/vm1":            {Phase: "Running"},
+		"legacy-a/vm2":            {},
+		"legacy-b/vm1":            {Phase: "Running"},
+		"tenant-a/web":            {Phase: "Running"}, // labeled -> already a project
+		"openshift-cnv/plumbing":  {},                 // system -> never proposed
+		"kube-system/should-skip": {},
+	}
+	labeled := []project.Namespace{{Name: "tenant-a"}}
+	got := Adoptable(live, labeled)
+	want := []model.AdoptableNamespace{{Namespace: "legacy-a", VMs: 2}, {Namespace: "legacy-b", VMs: 1}}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("Adoptable = %+v, want %+v", got, want)
+	}
+}
+
 // A dead repo must not blind the inventory: live VMs render (NotTracked) beside
 // the error badge. Hiding them invited the wrong recovery actions.
 func TestBuildRepoUnavailableStillShowsLiveVMs(t *testing.T) {

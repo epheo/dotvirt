@@ -121,6 +121,14 @@ type Project struct {
 	GitOps *ProjectSync `json:"gitOps,omitempty"`
 }
 
+// AdoptableNamespace is a namespace holding VMs but no dotvirt.io/project label -
+// an existing tenant on a cluster dotvirt landed on. Adopting it is the create-
+// project flow with its name: the staged Namespace manifest labels it on merge.
+type AdoptableNamespace struct {
+	Namespace string `json:"namespace"`
+	VMs       int    `json:"vms"`
+}
+
 // ProjectSync is a project's overall GitOps state, read straight from its managing
 // ArgoCD Application. Operation is the last sync's phase ("Running" = applying,
 // "Failed"/"Error" = apply failed), the cue for a "pending apply" or an alarm that a
@@ -152,4 +160,9 @@ type Inventory struct {
 	// TasksVersion is the same contract for the recent-tasks feed (GET /api/tasks,
 	// fetched out-of-band): bumps when an op is recorded or a merged PR lands.
 	TasksVersion uint64 `json:"tasksVersion,omitempty"`
+	// Adoptable proposes existing tenants: namespaces with VMs but no project
+	// label. Present only for callers with namespace-create authority (the
+	// adoption gate) - the candidate scan is cluster-wide, so the SSAR is what
+	// keeps one tenant from enumerating another's namespaces.
+	Adoptable []AdoptableNamespace `json:"adoptable,omitempty"`
 }
