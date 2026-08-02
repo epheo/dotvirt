@@ -4,16 +4,18 @@
 // pure in-memory scan, never a per-request cluster call.
 //
 // Port-group moves publish NetworkChanged so the hub re-broadcasts and the client
-// re-pulls the out-of-band catalog; NNS (node-state) is watched but does NOT signal -
-// its status churns and adapters need no live repaint. Each reflector is discovery-
-// gated (like desched): a cluster without OVN-K UDN or nmstate simply serves an empty
-// slice for that source, never an error loop. Node names come from a background-
-// refreshed cache (nodes:list, no watch), so uplink membership stays off the request
-// path without a nodes:watch grant.
+// re-pulls the out-of-band catalog; NNS (node-state) signals once at initial sync,
+// then stays silent - its status churns and adapters need no live repaint, but a
+// client that pulled before the sync must still learn the adapters exist. Each
+// reflector is discovery-gated (like desched): a cluster without OVN-K UDN or nmstate
+// simply serves an empty slice for that source, never an error loop. Node names come
+// from a background-refreshed cache (nodes:list, no watch) that signals on membership
+// change, so uplink membership stays off the request path without a nodes:watch grant.
 package netstate
 
 import (
 	"context"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -148,10 +150,18 @@ func (s *Snapshot) watch(ctx context.Context, w watchSpec, healthy *atomic.Bool)
 				s.nmstatePresent.Store(true)
 			}
 			onChange := func() {}
-			if w.signal && s.bus != nil {
-				onChange = func() { s.bus.Publish(eventbus.NetworkChanged) }
+			var onSynced func()
+			if s.bus != nil {
+				if w.signal {
+					onChange = func() { s.bus.Publish(eventbus.NetworkChanged) }
+				} else {
+					// A silent watch still signals its initial sync: a client that
+					// pulled the catalog before this store filled would otherwise
+					// never learn the data exists (nothing else bumps the version).
+					onSynced = func() { s.bus.Publish(eventbus.NetworkChanged) }
+				}
 			}
-			store := reflect.NewStore(w.idx, onChange, nil)
+			store := reflect.NewStore(w.idx, onChange, onSynced)
 			lw := reflect.TrackHealth(s.sa.DynamicListWatch(w.gvr), healthy)
 			r := cache.NewReflector(lw, &unstructured.Unstructured{}, store, 0)
 			r.Run(ctx.Done()) // blocks until shutdown; owns its own relist/backoff
@@ -166,15 +176,21 @@ func (s *Snapshot) watch(ctx context.Context, w watchSpec, healthy *atomic.Bool)
 }
 
 // refreshNodes keeps the node-name cache current via a periodic LIST (populated at once
-// on start, then every nodeRefreshInterval).
+// on start, then every nodeRefreshInterval). A changed node set signals NetworkChanged:
+// uplink membership derives from it, and the first LIST usually lands after clients
+// already pulled the catalog.
 func (s *Snapshot) refreshNodes(ctx context.Context) {
 	t := time.NewTicker(nodeRefreshInterval)
 	defer t.Stop()
 	for {
 		if infos, err := s.sa.ListNodeLabels(ctx); err == nil {
 			s.nodesMu.Lock()
+			changed := !nodesEqual(s.nodes, infos)
 			s.nodes = infos
 			s.nodesMu.Unlock()
+			if changed && s.bus != nil {
+				s.bus.Publish(eventbus.NetworkChanged)
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -182,4 +198,16 @@ func (s *Snapshot) refreshNodes(ctx context.Context) {
 		case <-t.C:
 		}
 	}
+}
+
+func nodesEqual(a, b []cluster.NodeLabels) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Name != b[i].Name || !maps.Equal(a[i].Labels, b[i].Labels) {
+			return false
+		}
+	}
+	return true
 }
