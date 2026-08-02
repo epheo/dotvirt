@@ -392,6 +392,7 @@ export const api = {
 		post<void>(`/api/nodes/${enc(node)}/cordon`, { unschedulable }),
 	setNodeMaintenance: (node: string, enter: boolean) =>
 		post<void>(`/api/nodes/${enc(node)}/maintenance`, { enter }),
+	evacuateNode: (node: string) => post<gen.Evacuation>(`/api/nodes/${enc(node)}/evacuate`, {}),
 
 	// Image upload: create the target DataVolume + mint a token; the browser
 	// then streams the file straight to the proxy (uploadUrl from uploadToken).

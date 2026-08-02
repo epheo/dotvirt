@@ -93,6 +93,21 @@ type NodeInfo struct {
 	CanCordon     bool   `json:"canCordon"`
 }
 
+// Evacuation is one node-drain sweep's outcome. Failures carry per-VM errors:
+// each migrate runs under the caller's own RBAC, so a partial sweep must say
+// which VMs it could not move rather than silently omitting them.
+type Evacuation struct {
+	Requested int                 `json:"requested"`
+	Skipped   int                 `json:"skipped,omitempty"` // already mid-migration
+	Failures  []EvacuationFailure `json:"failures"`
+}
+
+type EvacuationFailure struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Error     string `json:"error"`
+}
+
 // ResyncResult reports which ArgoCD Application was synced.
 type ResyncResult struct {
 	Application string `json:"application"`
