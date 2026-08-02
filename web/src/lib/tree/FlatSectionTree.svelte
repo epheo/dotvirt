@@ -51,7 +51,7 @@
 			if (kind === 'node') add(vm.nodeName || '(unscheduled)', vm);
 			else if (kind === 'network')
 				for (const k of vmNetworkKeys(vm, inventory.networks)) add(k, vm);
-			else for (const k of vmStorageKeys(vm)) add(k, vm);
+			else for (const k of vmStorageKeys(vm, inventory.defaultStorageClass)) add(k, vm);
 		}
 		return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 	});

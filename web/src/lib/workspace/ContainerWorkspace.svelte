@@ -70,7 +70,10 @@
 		if (sc.kind === 'node') return all.filter((v) => (v.nodeName || '(unscheduled)') === sc.node);
 		if (sc.kind === 'network')
 			return all.filter((v) => vmNetworkKeys(v, inventory.networks).includes(sc.network));
-		if (sc.kind === 'storage') return all.filter((v) => vmStorageKeys(v).includes(sc.storageClass));
+		if (sc.kind === 'storage')
+			return all.filter((v) =>
+				vmStorageKeys(v, inventory.defaultStorageClass).includes(sc.storageClass),
+			);
 		return inv.projects
 			.filter((p) => p.name === sc.project)
 			.flatMap((p) =>

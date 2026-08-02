@@ -2,6 +2,7 @@
 	import type { VM } from '$lib/api';
 	import { DEFAULT_CLASS } from '$lib/lenses';
 	import { vmHref } from '$lib/nav';
+	import { inventory } from '$lib/state/inventory.svelte';
 	import InfoCard from '$lib/components/InfoCard.svelte';
 	import PowerDot from '$lib/components/PowerDot.svelte';
 	import Row from '$lib/components/Row.svelte';
@@ -15,7 +16,9 @@
 			(n, vm) =>
 				n +
 				(vm.disks ?? []).filter(
-					(d) => d.type === 'dataVolume' && (d.storageClass || DEFAULT_CLASS) === storageClass,
+					(d) =>
+						d.type === 'dataVolume' &&
+						(d.storageClass || inventory.defaultStorageClass || DEFAULT_CLASS) === storageClass,
 				).length,
 			0,
 		),

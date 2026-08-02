@@ -71,6 +71,10 @@ class InventoryStore {
 	// object), so an effect keyed on it re-pulls /api/networks only when networks may
 	// have changed - not on every VM-state frame.
 	readonly networksVersion = $derived(this.inventory?.networksVersion ?? 0);
+	// The cluster's default StorageClass name, so the storage lens groups a
+	// classless disk under the real class instead of a "(cluster default)"
+	// placeholder. Fetched once per session (the options catalog); '' until then.
+	defaultStorageClass = $state('');
 	// The recent-tasks feed (GET /api/tasks), re-pulled when tasksVersion bumps -
 	// every browser sees every admin's ops and merges, with real attribution.
 	taskFeed = $state<TaskEntry[]>([]);
@@ -100,6 +104,7 @@ class InventoryStore {
 		this.netInv = null;
 		this.polInv = null;
 		this.taskFeed = [];
+		this.defaultStorageClass = '';
 	}
 
 	findVM(namespace: string, name: string): VM | null {

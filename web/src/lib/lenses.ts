@@ -40,14 +40,17 @@ export function vmNetworkKeys(vm: VM, networks: Network[] = []): string[] {
 /**
  * The storage classes a VM appears under: one key per distinct dataVolume
  * class (the provisioned disks — container/empty/cloud-init disks have no
- * class to group by).
+ * class to group by). A classless disk lands on the cluster's actual default
+ * class when the caller knows it (inventory.defaultStorageClass), so implicit
+ * and explicit users of the same class group together; the placeholder label
+ * is the fallback before that resolves.
  */
-export function vmStorageKeys(vm: VM): string[] {
+export function vmStorageKeys(vm: VM, defaultClass = ''): string[] {
 	const classes = [
 		...new Set(
 			(vm.disks ?? [])
 				.filter((d) => d.type === 'dataVolume')
-				.map((d) => d.storageClass || DEFAULT_CLASS),
+				.map((d) => d.storageClass || defaultClass || DEFAULT_CLASS),
 		),
 	];
 	return classes.length ? classes : [NO_STORAGE];
