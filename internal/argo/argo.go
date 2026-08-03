@@ -199,9 +199,11 @@ func appSyncFromApps(objs []*unstructured.Unstructured) map[string]model.Project
 			Operation: nestedString(app.Object, "status", "operationState", "phase"),
 			Revision:  shortRev(nestedString(app.Object, "status", "sync", "revision")),
 		}
-		// Surface the apply error only when the last operation didn't succeed - a clean
-		// sync leaves a benign "successfully synced" message that isn't an error.
-		if ps.Operation != "" && ps.Operation != "Succeeded" {
+		// Surface the apply error only on a TERMINAL failure. A Running operation's
+		// message is retry progress ("... denied the request ... Retrying"), not a
+		// settled outcome - surfacing it re-raised the repo-problem banner for the
+		// whole retry window on every transient apply refusal.
+		if ps.Operation == "Failed" || ps.Operation == "Error" {
 			ps.SyncError = scrubSyncMessage(nestedString(app.Object, "status", "operationState", "message"))
 		}
 		// A comparison failure (unclonable repo, forbidden or invalid manifest) runs no
