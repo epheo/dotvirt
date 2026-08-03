@@ -11,13 +11,13 @@ entries:
     package: dotvirt-operator
     name: stable-v0 # released versions only — the channel external consumers subscribe to
     entries:
-      - name: dotvirt-operator.v0.0.31
-        replaces: dotvirt-operator.v0.0.29
+      - name: dotvirt-operator.v0.0.32
+        replaces: dotvirt-operator.v0.0.31
   - schema: olm.channel
     package: dotvirt-operator
     name: candidate-v0 # release-candidates + releases — the QA/preview channel (hetznet)
     entries:
-      - name: dotvirt-operator.v0.0.31
-        replaces: dotvirt-operator.v0.0.29
+      - name: dotvirt-operator.v0.0.32
+        replaces: dotvirt-operator.v0.0.31
   - schema: olm.bundle
-    image: quay.io/epheo/dotvirt-operator-bundle@sha256:b69f3763e697ba99d4eab0a152c61b876e7b188bd4e660fa05a8b640d644ba8a
+    image: quay.io/epheo/dotvirt-operator-bundle@sha256:6f049b26418d803d394a040c0ce6a2120ddd4284759b1a4d87962c0157752af1
