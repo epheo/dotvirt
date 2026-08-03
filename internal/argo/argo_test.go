@@ -304,3 +304,14 @@ func TestAppSyncRunningOperationHasNoError(t *testing.T) {
 		t.Errorf("Failed operation must surface the scrubbed error, got %q", got.SyncError)
 	}
 }
+
+// A Failed operation on a since-converged (Synced) app is history: Argo starts
+// no new operation while live matches git, so the phase outlives the failure.
+func TestAppSyncConvergedAppRetiresFailedOperation(t *testing.T) {
+	a := appWithSync("dotvirt-x", "https://forge/o/x.git", "Synced", "Healthy", "Failed",
+		`one or more objects failed to apply, reason: error when patching "/dev/shm/1": denied (retried 5 times)`)
+	got := appSyncFromApps([]*unstructured.Unstructured{a})[forge.NormalizeRepoURL("https://forge/o/x.git")]
+	if got.SyncError != "" {
+		t.Errorf("converged app must not surface the historical operation error, got %q", got.SyncError)
+	}
+}

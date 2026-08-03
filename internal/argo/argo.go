@@ -162,6 +162,11 @@ func mergeSyncMessages(out map[resKey]Drift, app map[string]any) {
 		if !ok {
 			continue
 		}
+		// The syncResult outlives the operation: a resource that has since
+		// converged must not keep wearing the old apply error.
+		if d.Sync == model.SyncSynced {
+			continue
+		}
 		d.Message = scrubSyncMessage(msg)
 		out[keyOf(res)] = d
 	}
@@ -199,11 +204,12 @@ func appSyncFromApps(objs []*unstructured.Unstructured) map[string]model.Project
 			Operation: nestedString(app.Object, "status", "operationState", "phase"),
 			Revision:  shortRev(nestedString(app.Object, "status", "sync", "revision")),
 		}
-		// Surface the apply error only on a TERMINAL failure. A Running operation's
-		// message is retry progress ("... denied the request ... Retrying"), not a
-		// settled outcome - surfacing it re-raised the repo-problem banner for the
-		// whole retry window on every transient apply refusal.
-		if ps.Operation == "Failed" || ps.Operation == "Error" {
+		// Surface the apply error only on a TERMINAL failure that still stands. A
+		// Running operation's message is retry progress, not a settled outcome. And
+		// a Failed operation on an app that has since converged (Synced) is history:
+		// Argo never starts a new operation while live matches git, so the Failed
+		// phase outlives the problem indefinitely.
+		if (ps.Operation == "Failed" || ps.Operation == "Error") && ps.Sync != model.SyncSynced {
 			ps.SyncError = scrubSyncMessage(nestedString(app.Object, "status", "operationState", "message"))
 		}
 		// A comparison failure (unclonable repo, forbidden or invalid manifest) runs no
