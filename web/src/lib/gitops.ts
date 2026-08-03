@@ -5,8 +5,14 @@ import type { ProjectSync } from './api';
 // merged change was refused by the cluster). Recovery flows key on the first
 // only; offering "Recover repo" on an apply failure invites re-creating a
 // healthy repo.
-export const opFailed = (g?: ProjectSync | null): boolean =>
-	(g?.operation === 'Failed' || g?.operation === 'Error') && !!g?.syncError;
+// A Failed/Error operation that still stands. Once the app converges (Synced),
+// Argo never replaces the operation record - no new operation runs while live
+// matches git - so the phase alone is history, not a problem. EVERY consumer of
+// the operation phase must go through this gate.
+export const opStands = (g?: ProjectSync | null): boolean =>
+	(g?.operation === 'Failed' || g?.operation === 'Error') && g?.sync !== 'Synced';
+
+export const opFailed = (g?: ProjectSync | null): boolean => opStands(g) && !!g?.syncError;
 
 // The comparison-plane error, or '' when there is none (including when the
 // error is an apply failure).
