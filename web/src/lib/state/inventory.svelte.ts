@@ -1,4 +1,11 @@
-import type { Inventory, NetworkInventory, PolicyInventory, TaskEntry, VM } from '$lib/api';
+import type {
+	Inventory,
+	NetworkInventory,
+	Options,
+	PolicyInventory,
+	TaskEntry,
+	VM,
+} from '$lib/api';
 import { deriveIssues } from '$lib/issues';
 
 // The live cluster read layer: the WS inventory snapshot plus the once-per-
@@ -71,10 +78,16 @@ class InventoryStore {
 	// object), so an effect keyed on it re-pulls /api/networks only when networks may
 	// have changed - not on every VM-state frame.
 	readonly networksVersion = $derived(this.inventory?.networksVersion ?? 0);
+	// The cluster options catalog (instance types, storage classes, images),
+	// fetched once per session: read views resolve instancetype sizing and the
+	// default StorageClass from it without a per-view fetch.
+	options = $state<Options | null>(null);
 	// The cluster's default StorageClass name, so the storage lens groups a
 	// classless disk under the real class instead of a "(cluster default)"
-	// placeholder. Fetched once per session (the options catalog); '' until then.
-	defaultStorageClass = $state('');
+	// placeholder; '' until the catalog loads.
+	readonly defaultStorageClass = $derived(
+		this.options?.storageClasses?.find((s) => s.default)?.name ?? '',
+	);
 	// The recent-tasks feed (GET /api/tasks), re-pulled when tasksVersion bumps -
 	// every browser sees every admin's ops and merges, with real attribution.
 	taskFeed = $state<TaskEntry[]>([]);
@@ -104,7 +117,7 @@ class InventoryStore {
 		this.netInv = null;
 		this.polInv = null;
 		this.taskFeed = [];
-		this.defaultStorageClass = '';
+		this.options = null;
 	}
 
 	findVM(namespace: string, name: string): VM | null {

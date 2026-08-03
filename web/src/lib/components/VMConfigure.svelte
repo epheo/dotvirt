@@ -4,6 +4,7 @@
 	import { manifestURL } from '$lib/actions';
 	import type { EditSection } from '$lib/editform';
 	import { resolveNIC, kindLabel } from '$lib/networks';
+	import { inventory } from '$lib/state/inventory.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import Row from './Row.svelte';
 
@@ -28,6 +29,13 @@
 
 	const groupDesc = (g: { mode: string; strict?: boolean }) =>
 		`${g.mode === 'apart' ? 'keep apart' : 'keep together'}${g.strict ? ', strict' : ', preferred'}`;
+
+	// Instancetype-sized VMs carry no cpuCores/memory of their own; resolve the
+	// numbers from the options catalog so the read view answers the question
+	// instead of showing a dash.
+	const it = $derived(
+		(inventory.options?.instancetypes ?? []).find((i) => i.name === vm.instancetype),
+	);
 </script>
 
 {#snippet editButton(section: EditSection)}
@@ -57,8 +65,11 @@
 			<InfoCard title="VM Hardware">
 				{#snippet action()}{@render editButton('compute')}{/snippet}
 				<dl class="divide-y divide-line-soft text-[13px]">
-					<Row label="CPU cores" value={vm.cpuCores ? String(vm.cpuCores) : ''} />
-					<Row label="Memory" value={vm.memory ?? ''} />
+					<Row
+						label="CPU cores"
+						value={vm.cpuCores ? String(vm.cpuCores) : it ? `${it.cpu} (from ${it.name})` : ''}
+					/>
+					<Row label="Memory" value={vm.memory ?? (it ? `${it.memory} (from ${it.name})` : '')} />
 					<Row label="Instance type" value={vm.instancetype ?? ''} />
 					<Row label="Preference" value={vm.preference ?? ''} />
 					<Row label="Power (desired)" value={vm.power} />

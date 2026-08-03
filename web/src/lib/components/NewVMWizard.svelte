@@ -153,6 +153,19 @@
 	const step2Valid = $derived(!!(osImage && preference));
 	const step3Valid = $derived(!!instancetype);
 
+	// Steps the user left while incomplete: on return (rail click, Back, or a
+	// review-step jump) their fields carry inline errors - the amber rail badge
+	// alone names no field.
+	let nudged = $state<Set<number>>(new Set());
+	let prevStep = 0;
+	$effect(() => {
+		const cur = current;
+		if (cur === prevStep) return;
+		if ([step1Valid, step2Valid, step3Valid][prevStep] === false)
+			nudged = new Set([...nudged, prevStep]);
+		prevStep = cur;
+	});
+
 	function addDisk() {
 		extraDisks = [
 			...extraDisks,
@@ -255,7 +268,7 @@
 		<p class="text-xs text-ink-muted">
 			Name the virtual machine and choose the project it belongs to.
 		</p>
-		<FormField label="Name">
+		<FormField label="Name" error={nudged.has(0) && !name ? 'Name is required' : ''}>
 			<TextInput bind:value={name} placeholder="my-vm" />
 		</FormField>
 		<NamespaceSelect bind:namespace {namespaces} fallback="default" />
@@ -267,14 +280,17 @@
 		<p class="text-xs text-ink-muted">
 			Select the OS image to boot from and a preference that tunes the VM for that guest.
 		</p>
-		<FormField label="OS image">
+		<FormField label="OS image" error={nudged.has(1) && !osImage ? 'OS image is required' : ''}>
 			<SelectInput bind:value={osImage}>
 				{#each (options?.osImages ?? []).filter((i) => i.ready) as img (img.namespace + img.name)}
 					<option value={`${img.name}|${img.namespace}`}>{img.name}</option>
 				{/each}
 			</SelectInput>
 		</FormField>
-		<FormField label="Preference (OS tuning)">
+		<FormField
+			label="Preference (OS tuning)"
+			error={nudged.has(1) && !preference ? 'Preference is required' : ''}
+		>
 			<SelectInput bind:value={preference}>
 				{#each options?.preferences ?? [] as p (p.name)}
 					<option value={p.name}>{p.displayName || p.name}</option>
@@ -289,7 +305,10 @@
 		<p class="text-xs text-ink-muted">
 			Choose a size (instance type) and whether to power the VM on after creation.
 		</p>
-		<FormField label="Size (instancetype)">
+		<FormField
+			label="Size (instancetype)"
+			error={nudged.has(2) && !instancetype ? 'Size is required' : ''}
+		>
 			<SelectInput bind:value={instancetype}>
 				{#each options?.instancetypes ?? [] as it (it.name)}
 					<option value={it.name}>{it.name} — {it.cpu} CPU / {it.memory}</option>

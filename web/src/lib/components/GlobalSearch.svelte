@@ -123,9 +123,16 @@
 			e.preventDefault();
 			pick(hits[active]);
 		} else if (e.key === 'Escape') {
-			open = false;
-			input?.blur();
+			dismiss();
 		}
+	}
+
+	// Closing without a pick abandons the query; keeping it would leave a stale
+	// term in the masthead and resume the next open on it.
+	function dismiss() {
+		query = '';
+		open = false;
+		input?.blur();
 	}
 
 	// Global shortcuts: Ctrl/Cmd-K always; "/" when not already typing somewhere.
@@ -205,7 +212,7 @@
 	{#if open && query.trim()}
 		<button
 			class="fixed inset-0 z-30 cursor-default"
-			onclick={() => (open = false)}
+			onclick={dismiss}
 			aria-label="Close search"
 			tabindex="-1"
 		></button>
