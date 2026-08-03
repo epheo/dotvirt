@@ -166,3 +166,32 @@ func TestAdoptableObjectsSkipsAbsentCRDSilently(t *testing.T) {
 		t.Fatalf("an absent CRD is not a permission gap, got %v", unreadable)
 	}
 }
+
+// A ControllerRevision pin (older KubeVirt writes spec.instancetype.revisionName
+// into the VM spec) must not enter git: declared there, any later matcher edit
+// stages a Name change with the stale RevisionName, which the webhook rejects.
+func TestAdoptManifestStripsRevisionName(t *testing.T) {
+	vm := liveObj("kubevirt.io/v1", "VirtualMachine", "team-a", "web", nil)
+	vm.Object["spec"] = map[string]any{
+		"instancetype": map[string]any{
+			"kind":         "VirtualMachineClusterInstancetype",
+			"name":         "u1.medium",
+			"revisionName": "web-u1.medium-v1beta1-abc",
+		},
+		"preference": map[string]any{
+			"name":         "fedora",
+			"revisionName": "web-fedora-v1beta1-def",
+		},
+	}
+	out, err := adoptManifest(vm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if strings.Contains(s, "revisionName") {
+		t.Errorf("revisionName survives adoption:\n%s", s)
+	}
+	if !strings.Contains(s, "name: u1.medium") || !strings.Contains(s, "name: fedora") {
+		t.Errorf("matcher names lost while stripping:\n%s", s)
+	}
+}

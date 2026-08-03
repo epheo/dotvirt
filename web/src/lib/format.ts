@@ -14,6 +14,24 @@ export function cores(v: number): string {
 	return v < 10 ? v.toFixed(2) : v.toFixed(1);
 }
 
+// quantityBytes parses a Kubernetes memory quantity ("2Gi", "512Mi", "4G") into
+// bytes. NaN for shapes it cannot read, so callers skip a comparison rather
+// than mis-refuse on it.
+export function quantityBytes(q: string): number {
+	const m = /^([0-9]+(?:\.[0-9]+)?)(Ki|Mi|Gi|Ti|Pi|k|M|G|T|P)?$/.exec(q.trim());
+	if (!m) return NaN;
+	const bin: Record<string, number> = {
+		Ki: 2 ** 10,
+		Mi: 2 ** 20,
+		Gi: 2 ** 30,
+		Ti: 2 ** 40,
+		Pi: 2 ** 50,
+	};
+	const dec: Record<string, number> = { k: 1e3, M: 1e6, G: 1e9, T: 1e12, P: 1e15 };
+	const s = m[2] ?? '';
+	return Number(m[1]) * (bin[s] ?? dec[s] ?? 1);
+}
+
 // compactSpan renders elapsed seconds at two units of precision ("3d 21h",
 // "5m"); sub-minute stays in seconds - events can be seconds old.
 function compactSpan(s: number): string {
