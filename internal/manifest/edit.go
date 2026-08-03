@@ -221,22 +221,41 @@ func applyPower(ed *lineEditor, spec *yaml.Node, power string) {
 	ed.insertChild(s, "runStrategy", runStrategyFor(on))
 }
 
-func applyCPU(ed *lineEditor, vmRoot *yaml.Node, cores int) {
+// applyCPU sets the guest vCPU count. A fresh cpu block is written as sockets,
+// not cores: preference requirements count vCPUs along the preference's
+// preferred topology, which defaults to sockets - cores there reads as 0 vCPUs
+// and the webhook rejects the sync (a kept preference survives a custom-sizing
+// edit by design). A cores-only block still updates cores in place: that VM
+// already passed the webhook as it is. Any other existing topology collapses
+// onto sockets, deleting the other axes, so the requested count lands exactly
+// rather than multiplying into a stale product.
+func applyCPU(ed *lineEditor, vmRoot *yaml.Node, vcpus int) {
 	domain := domainNode(vmRoot)
 	if domain == nil {
 		return
 	}
-	val := fmt.Sprintf("%d", cores)
-	if cpu := get(domain, "cpu"); cpu != nil {
-		if c := get(cpu, "cores"); c != nil {
-			ed.setScalarAt(c, val)
-			return
-		}
-		ed.insertChild(cpu, "cores", val)
+	val := fmt.Sprintf("%d", vcpus)
+	cpu := get(domain, "cpu")
+	if cpu == nil {
+		ed.insertBlock(domain, []string{"cpu:", "  sockets: " + val})
 		return
 	}
-	// No cpu block: insert "cpu:\n  cores: N" under domain.
-	ed.insertBlock(domain, []string{"cpu:", "  cores: " + val})
+	cores, sockets, threads := get(cpu, "cores"), get(cpu, "sockets"), get(cpu, "threads")
+	if cores != nil && sockets == nil && threads == nil {
+		ed.setScalarAt(cores, val)
+		return
+	}
+	if cores != nil {
+		ed.deleteChild(cpu, "cores")
+	}
+	if threads != nil {
+		ed.deleteChild(cpu, "threads")
+	}
+	if sockets != nil {
+		ed.setScalarAt(sockets, val)
+		return
+	}
+	ed.insertChild(cpu, "sockets", val)
 }
 
 func applyMemory(ed *lineEditor, vmRoot *yaml.Node, memory string) {

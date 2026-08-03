@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { Folder, Layers, LayoutGrid, TriangleAlert } from 'lucide-svelte';
 	import type { Project, ProjectNamespace } from '$lib/api';
+	import { repoError } from '$lib/gitops';
 	import { issueCountByProject } from '$lib/issues';
 	import { hrefForScope, scopeFromPath } from '$lib/nav';
 	import { inventory } from '$lib/state/inventory.svelte';
@@ -140,11 +141,15 @@
 					{#if inventory.canNamespace}
 						{@render repoAction(project, false)}
 					{/if}
-				{:else if project.repo && project.gitOps?.syncError && inventory.canNamespace}
-					<!-- Only the GitOps rollup says the forge lost this repo (the annotation
-					     still parses). The backend refuses when the repo resolves. -->
-					<div class="py-1 pr-2 pl-7 text-xs text-warn-ink italic" title={project.gitOps.syncError}>
-						{project.gitOps.syncError.slice(0, 120)}
+				{:else if project.repo && repoError(project.gitOps) && inventory.canNamespace}
+					<!-- Only a comparison-plane error says the forge lost this repo (the
+					     annotation still parses); an apply failure never offers recovery.
+					     The backend refuses when the repo resolves. -->
+					<div
+						class="py-1 pr-2 pl-7 text-xs text-warn-ink italic"
+						title={repoError(project.gitOps)}
+					>
+						{repoError(project.gitOps).slice(0, 120)}
 					</div>
 					{@render repoAction(project, true)}
 				{/if}

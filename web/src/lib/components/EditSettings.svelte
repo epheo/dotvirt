@@ -277,7 +277,7 @@
 					: ''}.
 			</p>
 		{:else}
-			<FormField label="CPU cores">
+			<FormField label="vCPUs">
 				<TextInput type="number" min="1" bind:value={form.cpuCores} />
 			</FormField>
 			<FormField label="Memory">
@@ -286,7 +286,7 @@
 			{@render preferenceField()}
 			{#if !(form.cpuCores && form.memory)}
 				<p class="col-span-2 text-xs text-warn-ink">
-					Set both CPU cores and memory to apply custom sizing.
+					Set both vCPUs and memory to apply custom sizing.
 				</p>
 			{/if}
 		{/if}

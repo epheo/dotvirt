@@ -271,3 +271,18 @@ func TestAppSyncCleanAppHasNoError(t *testing.T) {
 		t.Errorf("clean app carries SyncError %q", got.SyncError)
 	}
 }
+
+// Apply errors carry kubectl's temp-file path ahead of the actual reason; the
+// scrub drops the path so a truncated banner shows the webhook's message.
+func TestScrubSyncMessage(t *testing.T) {
+	in := `one or more synchronization tasks completed unsuccessfully, reason: error when patching "/dev/shm/261759008": admission webhook "virtualmachine-validator.kubevirt.io" denied the request: insufficient CPU`
+	want := `one or more synchronization tasks completed unsuccessfully, reason: error when patching: admission webhook "virtualmachine-validator.kubevirt.io" denied the request: insufficient CPU`
+	if got := scrubSyncMessage(in); got != want {
+		t.Errorf("scrub = %q, want %q", got, want)
+	}
+	// Messages without the temp path pass through untouched.
+	plain := "rpc error: authentication required"
+	if got := scrubSyncMessage(plain); got != plain {
+		t.Errorf("plain message altered: %q", got)
+	}
+}

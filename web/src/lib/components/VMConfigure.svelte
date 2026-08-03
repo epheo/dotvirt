@@ -66,7 +66,7 @@
 				{#snippet action()}{@render editButton('compute')}{/snippet}
 				<dl class="divide-y divide-line-soft text-[13px]">
 					<Row
-						label="CPU cores"
+						label="vCPUs"
 						value={vm.cpuCores ? String(vm.cpuCores) : it ? `${it.cpu} (from ${it.name})` : ''}
 					/>
 					<Row label="Memory" value={vm.memory ?? (it ? `${it.memory} (from ${it.name})` : '')} />

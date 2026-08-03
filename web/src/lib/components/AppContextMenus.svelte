@@ -8,6 +8,7 @@
 		runRuntimeAction,
 		type VMAction,
 	} from '$lib/actions';
+	import { repoError } from '$lib/gitops';
 	import { vmHref } from '$lib/nav';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
@@ -41,9 +42,11 @@
 		goto(vmHref(vm.namespace, vm.name));
 	}
 
-	// Recover-repo gate: only the GitOps rollup says the forge lost the repo.
+	// Recover-repo gate: only a comparison-plane error says the forge lost the
+	// repo. An apply failure (operation Failed/Error) is a manifest problem the
+	// recovery flow must not offer on.
 	function projectSyncError(project: string): string {
-		return inventory.inventory?.projects.find((p) => p.name === project)?.gitOps?.syncError ?? '';
+		return repoError(inventory.inventory?.projects.find((p) => p.name === project)?.gitOps);
 	}
 
 	// Untracked VMs are what the inventory can see git not describing, so they decide

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { TriangleAlert } from 'lucide-svelte';
+	import { opFailed, repoError } from '$lib/gitops';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import Banner from './Banner.svelte';
@@ -11,8 +12,12 @@
 
 	const p = $derived(inventory.inventory?.projects.find((x) => x.name === project));
 	const attach = $derived(!!p?.error && !p?.repo);
-	// Recovery offers on either error plane: the resolver's (pre-app) or GitOps'.
-	const recover = $derived(!!p && !!p.repo && (!!p.error || !!p.gitOps?.syncError));
+	// A failed sync OPERATION is a manifest problem (the last merged change did
+	// not apply), not a repo problem: offering Recover repo there invites
+	// re-creating a healthy repo. Recovery stays gated on the resolver's error or
+	// GitOps' comparison errors (unreachable/lost repo), which run no operation.
+	const syncFailed = $derived(opFailed(p?.gitOps));
+	const recover = $derived(!!p && !!p.repo && (!!p.error || !!repoError(p?.gitOps)));
 	const note = $derived(p?.error || p?.gitOps?.syncError || '');
 
 	function open(rec: boolean) {
@@ -42,5 +47,13 @@
 		>
 			{attach ? 'Attach repo' : 'Recover repo'}
 		</button>
+	</Banner>
+{:else if syncFailed}
+	<Banner tone="danger">
+		<TriangleAlert size={14} class="shrink-0" />
+		<span class="truncate" title={note}>
+			The last sync failed to apply: {note.slice(0, 160)}
+		</span>
+		<span class="ml-auto shrink-0 text-danger-ink/80">Fix with a new PR or revert the merge.</span>
 	</Banner>
 {/if}
