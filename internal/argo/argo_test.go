@@ -1,6 +1,7 @@
 package argo
 
 import (
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -284,5 +285,22 @@ func TestScrubSyncMessage(t *testing.T) {
 	plain := "rpc error: authentication required"
 	if got := scrubSyncMessage(plain); got != plain {
 		t.Errorf("plain message altered: %q", got)
+	}
+}
+
+// A Running operation's message is retry progress, not a settled failure -
+// surfacing it re-raised the repo-problem banner for the whole retry window.
+func TestAppSyncRunningOperationHasNoError(t *testing.T) {
+	a := appWithSync("dotvirt-x", "https://forge/o/x.git", "OutOfSync", "Progressing", "Running",
+		`one or more objects failed to apply, reason: error when patching "/dev/shm/1": denied. Retrying attempt #2`)
+	got := appSyncFromApps([]*unstructured.Unstructured{a})[forge.NormalizeRepoURL("https://forge/o/x.git")]
+	if got.SyncError != "" {
+		t.Errorf("Running operation must not surface a sync error, got %q", got.SyncError)
+	}
+	b := appWithSync("dotvirt-x", "https://forge/o/x.git", "OutOfSync", "Degraded", "Failed",
+		`one or more objects failed to apply, reason: error when patching "/dev/shm/1": denied`)
+	got = appSyncFromApps([]*unstructured.Unstructured{b})[forge.NormalizeRepoURL("https://forge/o/x.git")]
+	if got.SyncError == "" || strings.Contains(got.SyncError, "/dev/shm") {
+		t.Errorf("Failed operation must surface the scrubbed error, got %q", got.SyncError)
 	}
 }
