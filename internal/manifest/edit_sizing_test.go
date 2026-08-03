@@ -367,3 +367,47 @@ spec:
 		}
 	}
 }
+
+// A captured ControllerRevision pin (older KubeVirt writes spec.instancetype.
+// revisionName) must not survive a matcher change: the webhook rejects a Name
+// update that keeps the old RevisionName.
+func TestSizingInstancetypeEditDropsRevisionName(t *testing.T) {
+	const vmPinned = `apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: pinned
+  namespace: alpha
+spec:
+  runStrategy: Always
+  instancetype:
+    kind: VirtualMachineClusterInstancetype
+    name: u1.small
+    revisionName: pinned-u1.small-v1beta1-abc
+  template:
+    spec:
+      domain:
+        devices:
+          disks:
+          - name: rootdisk
+            disk:
+              bus: virtio
+`
+	out, err := ApplyEdit([]byte(vmPinned), "alpha", "pinned", VMEdit{
+		Sizing:       ptr("instancetype"),
+		Instancetype: ptr("u1.medium"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustParse(t, out)
+	s := string(out)
+	if !strings.Contains(s, "name: u1.medium") {
+		t.Errorf("instancetype not updated:\n%s", s)
+	}
+	if strings.Contains(s, "revisionName:") {
+		t.Errorf("stale revisionName survives the matcher edit:\n%s", s)
+	}
+	if !strings.Contains(s, "kind: VirtualMachineClusterInstancetype") {
+		t.Errorf("matcher kind wrongly removed:\n%s", s)
+	}
+}

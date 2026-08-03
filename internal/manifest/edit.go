@@ -160,6 +160,12 @@ func applyRef(ed *lineEditor, vmRoot *yaml.Node, key, value string) {
 		return
 	}
 	if ref := get(spec, key); ref != nil {
+		// A captured ControllerRevision pin (older KubeVirt writes it into spec)
+		// must not survive a matcher edit: the webhook rejects a Name change that
+		// keeps the old RevisionName.
+		if get(ref, "revisionName") != nil {
+			ed.deleteChild(ref, "revisionName")
+		}
 		if nameNode := get(ref, "name"); nameNode != nil {
 			ed.setScalarAt(nameNode, value)
 			return

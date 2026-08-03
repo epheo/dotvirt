@@ -754,6 +754,12 @@ export interface Instancetype {
 export interface Preference {
   name: string;
   displayName?: string;
+  /**
+   * Minimums from spec.requirements: sizing below them fails KubeVirt's
+   * webhook at sync time, so forms refuse it at stage time.
+   */
+  minCPU?: number /* int64 */;
+  minMemory?: string;
 }
 export interface OSImage {
   name: string;

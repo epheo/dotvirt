@@ -136,6 +136,11 @@ func adoptManifest(obj *unstructured.Unstructured) ([]byte, error) {
 			u.SetAnnotations(cleaned)
 		}
 	}
+	// Older KubeVirt pins the matcher's ControllerRevision into spec; declared in
+	// git it turns any later matcher edit into a webhook reject ("Name updated
+	// without updating RevisionName"). KubeVirt's own GitOps guidance is to strip it.
+	unstructured.RemoveNestedField(u.Object, "spec", "instancetype", "revisionName")
+	unstructured.RemoveNestedField(u.Object, "spec", "preference", "revisionName")
 	return yaml.Marshal(u.Object)
 }
 

@@ -132,6 +132,10 @@ type Instancetype struct {
 type Preference struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"displayName,omitempty"`
+	// Minimums from spec.requirements: sizing below them fails KubeVirt's
+	// webhook at sync time, so forms refuse it at stage time.
+	MinCPU    int64  `json:"minCPU,omitempty"`
+	MinMemory string `json:"minMemory,omitempty"`
 }
 
 type OSImage struct {

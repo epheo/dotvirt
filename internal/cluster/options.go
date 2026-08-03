@@ -59,9 +59,13 @@ func (c *Client) ListOptions(ctx context.Context) (model.Options, error) {
 
 	if items, err := listAll(ctx, dyn, gvrPreferences); err == nil {
 		for i := range items {
+			minCPU, _, _ := unstructured.NestedInt64(items[i].Object, "spec", "requirements", "cpu", "guest")
+			minMem, _, _ := unstructured.NestedString(items[i].Object, "spec", "requirements", "memory", "guest")
 			opts.Preferences = append(opts.Preferences, model.Preference{
 				Name:        items[i].GetName(),
 				DisplayName: items[i].GetAnnotations()["openshift.io/display-name"],
+				MinCPU:      minCPU,
+				MinMemory:   minMem,
 			})
 		}
 	}
