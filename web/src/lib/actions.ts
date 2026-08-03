@@ -76,6 +76,57 @@ export async function adoptVM(
 	}
 }
 
+// adoptNamespaces stages everything the given namespaces run that git does not
+// describe - VMs, disks, networks, policies - as one draft. Each namespace is
+// adopted on its own: one that has nothing left to adopt (or that the caller may
+// not read) must not abandon the rest half-done, with the already staged ones
+// sitting in the draft unmentioned. Shared by the tree's context menu and the
+// project-page banner, so wording and failure handling cannot drift.
+// onstaged runs before the toast so callers refresh their view first.
+export async function adoptNamespaces(
+	namespaces: Iterable<string>,
+	opts?: { onstaged?: () => void | Promise<void> },
+): Promise<void> {
+	const caveats: string[] = [];
+	// The warning is project-wide and re-derived per call; keep only the last
+	// instead of accumulating near-duplicates.
+	let warning = '';
+	let staged = 0;
+	try {
+		for (const ns of namespaces) {
+			try {
+				const view = await api.adoptNamespace(ns);
+				staged++;
+				// A capture bounded by the caller's RBAC (or by what ArgoCD still tracks) is
+				// worth staging, but saying so matters: silence would read as "the namespace
+				// is now fully described".
+				warning = view.warning ?? '';
+			} catch (e) {
+				if (e instanceof Unauthorized) throw e;
+				caveats.push(`${ns}: ${friendlyError(e)}`);
+			}
+		}
+	} catch (e) {
+		if (e instanceof Unauthorized) return;
+	} finally {
+		await opts?.onstaged?.();
+	}
+	const notes = [...caveats, warning].filter(Boolean).join(' ');
+	if (!staged) {
+		ui.showToast(notes || 'Nothing to adopt.', { kind: 'error' });
+		return;
+	}
+	const action = { label: 'Review & propose', run: () => (ui.changesOpen = true) };
+	if (notes) {
+		ui.showToast(`Staged, but not everything: ${notes}`, { kind: 'warning', action });
+	} else {
+		ui.showToast('Staged into Changes - open a PR to adopt them into git.', {
+			kind: 'success',
+			action,
+		});
+	}
+}
+
 const running = (vm: VM) => vm.phase === 'Running';
 const paused = (vm: VM) => !!vm.paused;
 const always = () => true;

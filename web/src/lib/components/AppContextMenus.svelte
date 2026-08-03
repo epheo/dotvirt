@@ -1,8 +1,13 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { api, Unauthorized, type VM } from '$lib/api';
-	import { adoptVM, manifestURL, runRuntimeAction, type VMAction } from '$lib/actions';
-	import { friendlyError } from '$lib/format';
+	import type { VM } from '$lib/api';
+	import {
+		adoptNamespaces,
+		adoptVM,
+		manifestURL,
+		runRuntimeAction,
+		type VMAction,
+	} from '$lib/actions';
 	import { vmHref } from '$lib/nav';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
@@ -55,47 +60,7 @@
 	async function bulkAdoptUntracked(namespaces: string[]) {
 		let want = new Set(untrackedVMs(namespaces).map((v) => v.namespace));
 		if (want.size === 0) want = new Set(namespaces);
-		// Each namespace is adopted on its own: one that has nothing left to adopt (or that
-		// the caller may not read) must not abandon the rest half-done, with the already
-		// staged ones sitting in the draft unmentioned.
-		const caveats: string[] = [];
-		// The warning is project-wide and re-derived per call; keep only the last
-		// instead of accumulating near-duplicates.
-		let warning = '';
-		let staged = 0;
-		try {
-			for (const ns of want) {
-				try {
-					const view = await api.adoptNamespace(ns);
-					staged++;
-					// A capture bounded by the caller's RBAC (or by what ArgoCD still tracks) is
-					// worth staging, but saying so matters: silence would read as "the namespace
-					// is now fully described".
-					warning = view.warning ?? '';
-				} catch (e) {
-					if (e instanceof Unauthorized) throw e;
-					caveats.push(`${ns}: ${friendlyError(e)}`);
-				}
-			}
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-		} finally {
-			await drafts.refresh();
-		}
-		const notes = [...caveats, warning].filter(Boolean).join(' ');
-		if (!staged) {
-			ui.showToast(notes || 'Nothing to adopt.', { kind: 'error' });
-			return;
-		}
-		const action = { label: 'Review & propose', run: () => (ui.changesOpen = true) };
-		if (notes) {
-			ui.showToast(`Staged, but not everything: ${notes}`, { kind: 'warning', action });
-		} else {
-			ui.showToast('Staged into Changes - open a PR to adopt them into git.', {
-				kind: 'success',
-				action,
-			});
-		}
+		await adoptNamespaces(want, { onstaged: () => drafts.refresh() });
 	}
 </script>
 
@@ -147,7 +112,7 @@
 							ui.ctx = null;
 							bulkAdoptUntracked(ns);
 						}}
-						title="Stage everything here that git does not describe, into one PR"
+						title="Capture the live manifests of everything running here that git does not describe (VMs, networks, policies) into one PR"
 						>Adopt into git</MenuItem
 					>
 				{/if}

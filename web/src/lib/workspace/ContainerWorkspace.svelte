@@ -7,6 +7,7 @@
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
+	import AdoptBanner from '$lib/components/AdoptBanner.svelte';
 	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
 	import BulkActionsBar from '$lib/components/BulkActionsBar.svelte';
 	import ClusterSummary from '$lib/components/ClusterSummary.svelte';
@@ -217,6 +218,10 @@
 		{#if scope.kind === 'project' || scope.kind === 'namespace'}
 			<RepoBanner project={scope.project} />
 			<PendingBanner project={scope.project} />
+			<AdoptBanner
+				project={scope.project}
+				namespace={scope.kind === 'namespace' ? scope.namespace : undefined}
+			/>
 		{/if}
 		<div class="min-h-0 flex-1 overflow-y-auto">
 			<ClusterSummary scope={containerScope} onselect={openVM} />
