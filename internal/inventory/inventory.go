@@ -153,11 +153,14 @@ func enrich(vm *model.VM, in Inputs) {
 	if s, ok := in.Live[k]; ok {
 		applyLive(vm, s)
 	}
-	if in.Drift != nil { // nil = Argo not wired; non-nil = configured (absent VM is NotTracked)
+	if in.Drift != nil { // nil = Argo not wired; non-nil = configured
 		if d, ok := in.Drift[k]; ok {
 			vm.Sync, vm.Health, vm.SyncError = d.Sync, d.Health, d.Message
 		} else {
-			vm.Sync = model.SyncNotTracked
+			// This VM IS in git (it was parsed from the repo), so absence from
+			// every Application is the awaiting-Argo window, not "not tracked" -
+			// that label belongs to cluster-only VMs and invites re-adoption.
+			vm.Sync = model.SyncPending
 		}
 	}
 }

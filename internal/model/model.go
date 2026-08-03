@@ -28,6 +28,10 @@ type SyncStatus string
 const (
 	SyncSynced     SyncStatus = "Synced"
 	SyncOutOfSync  SyncStatus = "OutOfSync"
-	SyncNotTracked SyncStatus = "NotTracked" // no ArgoCD Application manages this VM
-	SyncUnknown    SyncStatus = "Unknown"
+	SyncNotTracked SyncStatus = "NotTracked" // lives in the cluster only; git does not describe it
+	// Declared in git but no ArgoCD Application reports it yet - the window
+	// between a merged adoption/create and the ApplicationSet + first sync
+	// catching up. NotTracked here would read as "adoption failed".
+	SyncPending SyncStatus = "Pending"
+	SyncUnknown SyncStatus = "Unknown"
 )

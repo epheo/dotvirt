@@ -76,7 +76,7 @@
 	// like vCenter). Higher rank sorts earlier on ascending.
 	const powerRank = (p: Power) => (p === 'On' ? 2 : p === 'Off' ? 1 : 0);
 	const syncRank = (s: SyncStatus) =>
-		s === 'OutOfSync' ? 3 : s === 'Unknown' ? 2 : s === 'NotTracked' ? 1 : 0;
+		s === 'OutOfSync' ? 4 : s === 'Pending' ? 3 : s === 'Unknown' ? 2 : s === 'NotTracked' ? 1 : 0;
 
 	// Memory like "2Gi"/"512Mi" -> bytes, so the column sorts numerically not lexically.
 	function memBytes(m?: string): number {
@@ -156,6 +156,7 @@
 				['Synced', 'Synced'],
 				['OutOfSync', 'Out of sync'],
 				['NotTracked', 'Not tracked'],
+				['Pending', 'Pending sync'],
 				['Unknown', 'Unknown'],
 			],
 		},

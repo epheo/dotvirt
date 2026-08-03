@@ -52,7 +52,12 @@
 {#if loading && !events}
 	<div class="py-8 text-center text-sm text-ink-faint">Loading events…</div>
 {:else if !events || events.length === 0}
-	<div class="py-8 text-center text-sm text-ink-faint">No recent events.</div>
+	<div class="py-8 text-center text-sm text-ink-faint">
+		No recent events.
+		<p class="mt-1 text-xs">
+			Kubernetes keeps events for about an hour; older activity is under Recent Tasks.
+		</p>
+	</div>
 {:else}
 	<div class="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
 		<button

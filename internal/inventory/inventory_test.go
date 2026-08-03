@@ -185,7 +185,7 @@ func TestBuildSurfacesClusterOnlyVMs(t *testing.T) {
 	}
 }
 
-func TestBuildDriftEnabledMarksNotTracked(t *testing.T) {
+func TestBuildDriftEnabledMarksGitVMPending(t *testing.T) {
 	bare := seedRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -194,14 +194,15 @@ func TestBuildDriftEnabledMarksNotTracked(t *testing.T) {
 	in := Inputs{
 		Branch: "main",
 		Repos:  repos,
-		// Non-nil (but empty) Drift => Argo is wired; no entry for web => NotTracked.
+		// Non-nil (but empty) Drift => Argo is wired; no entry for a VM that IS
+		// in git => Pending (awaiting its Application), never NotTracked.
 		Drift:    map[string]argo.Drift{},
 		Projects: []project.ProjectInfo{{Name: "team-a", Repo: bare, Namespaces: []string{"tenant-a"}}},
 	}
 	inv := Build(in)
 	vm := inv.Projects[0].Namespaces[0].VMs[0]
-	if vm.Sync != model.SyncNotTracked {
-		t.Errorf("with drift enabled and no Application, Sync should be NotTracked, got %q", vm.Sync)
+	if vm.Sync != model.SyncPending {
+		t.Errorf("with drift enabled and no Application, a git VM should be Pending, got %q", vm.Sync)
 	}
 }
 

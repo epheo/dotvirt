@@ -19,6 +19,7 @@
 		Synced: { tone: 'ok', label: 'Synced' },
 		OutOfSync: { tone: 'danger', label: 'Out of sync' },
 		NotTracked: { tone: 'neutral', label: 'Not tracked' },
+		Pending: { tone: 'info', label: 'Pending sync' },
 		Unknown: { tone: 'neutral', label: 'Unknown' },
 	} satisfies Record<SyncStatus, { tone: Tone; label: string }>;
 	const view = $derived(VIEWS[sync as SyncStatus] ?? VIEWS.Unknown);
@@ -49,6 +50,11 @@
 		<span
 			title="Not tracked in git"
 			class="inline-block h-1.5 w-1.5 rounded-full {TONE_DOT.neutral} align-middle"
+		></span>
+	{:else if sync === 'Pending'}
+		<span
+			title="In git — awaiting its ArgoCD Application"
+			class="inline-block h-1.5 w-1.5 rounded-full {TONE_DOT.info} align-middle"
 		></span>
 	{/if}
 {:else}
