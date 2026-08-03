@@ -33,7 +33,10 @@ export function deriveIssues(inv: Inventory | null): Issue[] {
 				project: p.name,
 			});
 		const op = p.gitOps?.operation;
-		if (op === 'Failed' || op === 'Error')
+		// A Failed operation on a since-converged app is history, not a standing
+		// problem: Argo runs no new operation while live matches git, so the
+		// phase outlives the failure indefinitely.
+		if ((op === 'Failed' || op === 'Error') && p.gitOps?.sync !== 'Synced')
 			out.push({
 				severity: 'danger',
 				scope: p.name,

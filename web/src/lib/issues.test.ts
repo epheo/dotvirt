@@ -66,6 +66,17 @@ describe('deriveIssues', () => {
 		expect(issues[0].detail).toBe('webhook denied');
 	});
 
+	it('retires a failed operation once the app has converged', () => {
+		const i = inv([
+			{
+				name: 'p1',
+				gitOps: { sync: 'Synced', operation: 'Failed' },
+				namespaces: [{ namespace: 'ns-a', vms: [vm({ name: 'ok', sync: 'Synced' })] }],
+			},
+		]);
+		expect(deriveIssues(i)).toHaveLength(0);
+	});
+
 	it('flags failed syncs and error-family phases', () => {
 		const i = inv([
 			{
