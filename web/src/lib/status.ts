@@ -3,6 +3,7 @@
 // and task-dock rows onto them. Class maps are literal records - Tailwind only
 // sees static strings.
 import type { Power, ProjectSync } from '$lib/api';
+import { opStands } from '$lib/gitops';
 
 export type Tone = 'ok' | 'warn' | 'danger' | 'info' | 'neutral';
 
@@ -103,8 +104,7 @@ export function projectSyncView(
 ): { tone: Tone; label: string; pulse: boolean } | null {
 	if (!g) return null;
 	const op = g.operation;
-	if (op === 'Failed' || op === 'Error')
-		return { tone: 'danger', label: 'Sync failed', pulse: false };
+	if (opStands(g)) return { tone: 'danger', label: 'Sync failed', pulse: false };
 	if (g.health === 'Degraded' || g.health === 'Missing')
 		return { tone: 'danger', label: g.health, pulse: false };
 	if (op === 'Running' || g.health === 'Progressing')

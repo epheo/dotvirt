@@ -3,6 +3,7 @@
 // standing problems qualify; transitional states (applying, progressing,
 // plain OutOfSync = a pending apply) are deliberately not issues.
 import type { Inventory, VM } from '$lib/api';
+import { opStands } from '$lib/gitops';
 import { hrefForScope, vmHref } from '$lib/nav';
 
 type Issue = {
@@ -32,11 +33,7 @@ export function deriveIssues(inv: Inventory | null): Issue[] {
 				href: phref,
 				project: p.name,
 			});
-		const op = p.gitOps?.operation;
-		// A Failed operation on a since-converged app is history, not a standing
-		// problem: Argo runs no new operation while live matches git, so the
-		// phase outlives the failure indefinitely.
-		if ((op === 'Failed' || op === 'Error') && p.gitOps?.sync !== 'Synced')
+		if (opStands(p.gitOps))
 			out.push({
 				severity: 'danger',
 				scope: p.name,
