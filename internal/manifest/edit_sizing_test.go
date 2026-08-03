@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -83,7 +84,9 @@ func TestSizingInstancetypeToCustom(t *testing.T) {
 	if strings.Contains(s, "instancetype:") {
 		t.Errorf("instancetype not removed when switching to custom:\n%s", s)
 	}
-	if !strings.Contains(s, "cores: 4") || !strings.Contains(s, "guest: 8Gi") {
+	// Sockets, not cores: the kept preference counts its CPU requirements along
+	// the default preferred topology (sockets), so cores would fail the webhook.
+	if !strings.Contains(s, "sockets: 4") || !strings.Contains(s, "guest: 8Gi") {
 		t.Errorf("inline cpu/memory not written:\n%s", s)
 	}
 	if !strings.Contains(s, "name: fedora") {
@@ -281,4 +284,86 @@ spec:
 		t.Errorf("unrelated requests key wrongly removed:\n%s", s)
 	}
 	assertNotBoth(t, out)
+}
+
+// A multi-axis topology collapses onto sockets when the vCPU count is edited:
+// updating one axis of a product would land a wrong total, and sockets is the
+// axis preference requirements count by default.
+func TestSizingTopologyCollapsesToSockets(t *testing.T) {
+	const vmTopo = `apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: topo
+  namespace: alpha
+spec:
+  runStrategy: Always
+  template:
+    spec:
+      domain:
+        cpu:
+          sockets: 2
+          cores: 2
+          threads: 1
+        memory:
+          guest: 4Gi
+        devices:
+          disks:
+          - name: rootdisk
+            disk:
+              bus: virtio
+`
+	out, err := ApplyEdit([]byte(vmTopo), "alpha", "topo", VMEdit{CPUCores: ptr(6)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustParse(t, out)
+	s := string(out)
+	if !strings.Contains(s, "sockets: 6") {
+		t.Errorf("sockets not set:\n%s", s)
+	}
+	if strings.Contains(s, "cores:") || strings.Contains(s, "threads:") {
+		t.Errorf("stale topology axes survive the edit:\n%s", s)
+	}
+	vms, err := ParseVMs("topo.yaml", out, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := vms[0].CPUCores; got != 6 {
+		t.Errorf("parsed vCPUs = %d, want 6", got)
+	}
+}
+
+// The parsed vCPU count is the topology product, whichever axes a manifest
+// declares - edits write sockets, but hand-written manifests use any shape.
+func TestParseVCPUsProduct(t *testing.T) {
+	const tpl = `apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: p
+  namespace: alpha
+spec:
+  template:
+    spec:
+      domain:
+        cpu:
+%s
+`
+	cases := []struct {
+		cpu  string
+		want int
+	}{
+		{"          cores: 4", 4},
+		{"          sockets: 2", 2},
+		{"          sockets: 2\n          cores: 2", 4},
+		{"          sockets: 2\n          cores: 2\n          threads: 2", 8},
+	}
+	for _, c := range cases {
+		vms, err := ParseVMs("p.yaml", []byte(fmt.Sprintf(tpl, c.cpu)), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := vms[0].CPUCores; got != c.want {
+			t.Errorf("cpu %q: vCPUs = %d, want %d", c.cpu, got, c.want)
+		}
+	}
 }

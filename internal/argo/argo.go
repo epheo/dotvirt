@@ -8,6 +8,7 @@ package argo
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -161,9 +162,20 @@ func mergeSyncMessages(out map[resKey]Drift, app map[string]any) {
 		if !ok {
 			continue
 		}
-		d.Message = msg
+		d.Message = scrubSyncMessage(msg)
 		out[keyOf(res)] = d
 	}
+}
+
+// patchTempFile matches the kubectl temp-file path in apply errors ("error when
+// patching \"/dev/shm/261759008\": ..."). The path is meaningless to the user and
+// sits ahead of the webhook's actual reason, so a truncated banner showed only it.
+var patchTempFile = regexp.MustCompile(`(error when [a-z]+) "(?:/dev/shm|/tmp)/[^"]*":?\s*`)
+
+// scrubSyncMessage drops apply-error noise so what the UI has room for is the
+// reason, not kubectl plumbing.
+func scrubSyncMessage(msg string) string {
+	return patchTempFile.ReplaceAllString(msg, "$1: ")
 }
 
 // appSyncFromApps builds each project's overall sync/health keyed by canonical
@@ -190,7 +202,7 @@ func appSyncFromApps(objs []*unstructured.Unstructured) map[string]model.Project
 		// Surface the apply error only when the last operation didn't succeed - a clean
 		// sync leaves a benign "successfully synced" message that isn't an error.
 		if ps.Operation != "" && ps.Operation != "Succeeded" {
-			ps.SyncError = nestedString(app.Object, "status", "operationState", "message")
+			ps.SyncError = scrubSyncMessage(nestedString(app.Object, "status", "operationState", "message"))
 		}
 		// A comparison failure (unclonable repo, forbidden or invalid manifest) runs no
 		// operation, so the message above is absent and only the condition says why.

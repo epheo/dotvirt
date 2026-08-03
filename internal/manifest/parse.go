@@ -50,7 +50,9 @@ type vmDoc struct {
 				Affinity         *affinityDoc      `yaml:"affinity"`
 				Domain           struct {
 					CPU struct {
-						Cores int `yaml:"cores"`
+						Cores   int `yaml:"cores"`
+						Sockets int `yaml:"sockets"`
+						Threads int `yaml:"threads"`
 					} `yaml:"cpu"`
 					Memory struct {
 						Guest string `yaml:"guest"`
@@ -127,7 +129,7 @@ func ParseVMs(path string, content []byte, defaultNS string) ([]model.VM, error)
 			Namespace:        ns,
 			Name:             doc.Metadata.Name,
 			Power:            powerFromDoc(doc),
-			CPUCores:         doc.Spec.Template.Spec.Domain.CPU.Cores,
+			CPUCores:         vcpusFromDoc(doc),
 			Memory:           memoryFromDoc(doc),
 			Instancetype:     refName(doc.Spec.Instancetype),
 			Preference:       refName(doc.Spec.Preference),
@@ -259,4 +261,23 @@ func memoryFromDoc(d vmDoc) string {
 		return g
 	}
 	return d.Spec.Template.Spec.Domain.Resources.Requests.Memory
+}
+
+// vcpusFromDoc is the guest vCPU count the inline topology yields: the product
+// of sockets*cores*threads with absent axes defaulting to 1, as KubeVirt
+// computes it. Zero when no axis is declared (sizing comes from an
+// instancetype, or is unset). Edits write sockets (see applyCPU), but manifests
+// may carry any axis, so reads must not privilege one.
+func vcpusFromDoc(d vmDoc) int {
+	c := d.Spec.Template.Spec.Domain.CPU
+	if c.Cores == 0 && c.Sockets == 0 && c.Threads == 0 {
+		return 0
+	}
+	n := 1
+	for _, axis := range []int{c.Cores, c.Sockets, c.Threads} {
+		if axis > 0 {
+			n *= axis
+		}
+	}
+	return n
 }
