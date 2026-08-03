@@ -492,7 +492,13 @@ export const PowerUnknown: Power = "Unknown"; // unset / unrecognized
 export type SyncStatus = string;
 export const SyncSynced: SyncStatus = "Synced";
 export const SyncOutOfSync: SyncStatus = "OutOfSync";
-export const SyncNotTracked: SyncStatus = "NotTracked"; // no ArgoCD Application manages this VM
+export const SyncNotTracked: SyncStatus = "NotTracked"; // lives in the cluster only; git does not describe it
+/**
+ * Declared in git but no ArgoCD Application reports it yet - the window
+ * between a merged adoption/create and the ApplicationSet + first sync
+ * catching up. NotTracked here would read as "adoption failed".
+ */
+export const SyncPending: SyncStatus = "Pending";
 export const SyncUnknown: SyncStatus = "Unknown";
 
 //////////

@@ -20,7 +20,7 @@ export type { Event as VMEvent, Node as NodeTarget } from './model.gen';
 // --- Narrowing overlays (locally declared exports win over the star re-export) ---
 
 export type Power = 'On' | 'Off' | 'Unknown';
-export type SyncStatus = 'Synced' | 'OutOfSync' | 'NotTracked' | 'Unknown';
+export type SyncStatus = 'Synced' | 'OutOfSync' | 'NotTracked' | 'Pending' | 'Unknown';
 export type NetworkKind = 'default' | 'internal' | 'vlan';
 export type NetworkScope = 'project' | 'shared';
 export type PolicyKind = 'dfw' | 'admin' | 'baseline' | 'gateway' | 'egressip' | 'route';
