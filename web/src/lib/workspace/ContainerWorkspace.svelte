@@ -23,6 +23,7 @@
 	import NodeConfigure from './NodeConfigure.svelte';
 	import SegmentSummary from './SegmentSummary.svelte';
 	import StorageClassSummary from './StorageClassSummary.svelte';
+	import StorageRootSummary from './StorageRootSummary.svelte';
 
 	// The container workspace: every inventory level gets the same breadcrumb +
 	// tab chrome - vCenter's "same tabs at every level". The tab SET follows the
@@ -32,9 +33,13 @@
 	let {
 		scope,
 		trail,
+		lens = 'compute',
 	}: {
 		scope: Scope;
 		trail: { label: string; href?: string }[];
+		// The section serving this workspace: the storage root swaps the compute
+		// cluster cards for a storage fact sheet and drops the compute-only tabs.
+		lens?: 'compute' | 'storage';
 	} = $props();
 
 	const ALL_TABS = [
@@ -48,7 +53,9 @@
 	const tabs = $derived.by(() => {
 		if (scope.kind === 'node')
 			return ALL_TABS.filter((t) => t.id !== 'permissions' && t.id !== 'security');
-		if (scope.kind === 'network' || scope.kind === 'storage')
+		// The storage root is a fact sheet like its per-class pages: DRS, project
+		// repos, and host metrics are compute concerns, not storage tabs.
+		if (scope.kind === 'network' || scope.kind === 'storage' || lens === 'storage')
 			return ALL_TABS.filter((t) => t.id === 'summary' || t.id === 'vms');
 		// Effective policy evaluates against exactly one namespace.
 		if (scope.kind !== 'namespace') return ALL_TABS.filter((t) => t.id !== 'security');
@@ -204,6 +211,8 @@
 		<SegmentSummary network={scope.network} vms={scopedVMs} />
 	{:else if scope.kind === 'storage'}
 		<StorageClassSummary storageClass={scope.storageClass} vms={scopedVMs} />
+	{:else if lens === 'storage'}
+		<StorageRootSummary vms={scopedVMs} />
 	{:else}
 		{#if scope.kind === 'project' || scope.kind === 'namespace'}
 			<RepoBanner project={scope.project} />

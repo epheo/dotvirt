@@ -95,15 +95,15 @@
 		return () => clearTimeout(timer);
 	});
 
-	// The default StorageClass name, once per session: the storage lens uses it
-	// to group classless disks under the real class. The options catalog is
-	// server-cached, so this costs one GET; a failure just keeps the placeholder.
+	// The options catalog, once per session: the storage lens groups classless
+	// disks under the real default class, read views resolve instancetype sizing.
+	// Server-cached, so this costs one GET; a failure just keeps the placeholders.
 	$effect(() => {
 		if (!session.user) return;
 		api
 			.options()
 			.then((o) => {
-				inventory.defaultStorageClass = o.storageClasses?.find((s) => s.default)?.name ?? '';
+				inventory.options = o;
 			})
 			.catch(() => {});
 	});

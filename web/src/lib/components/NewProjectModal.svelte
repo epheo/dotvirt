@@ -51,10 +51,14 @@
 		return m;
 	});
 	const valid = $derived(missing.length === 0);
+	// The adopt line stays short - the body note already carries the full story,
+	// and the truncated long form read as noise.
 	const summary = $derived(
-		valid
-			? `Creates repo “${name}”; stages namespace ${namespace}${withNetwork ? ` + VM Network ${netName}` : ''} → platform repo`
-			: '',
+		!valid
+			? ''
+			: adopt
+				? `Adopts ${namespace} as project “${name}”`
+				: `Creates repo “${name}”; stages namespace ${namespace}${withNetwork ? ` + VM Network ${netName}` : ''} → platform repo`,
 	);
 
 	const parseOwners = (s: string): string[] =>
