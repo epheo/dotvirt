@@ -1,5 +1,5 @@
 // The issues plane: one derivation from the streamed inventory to "what needs
-// attention right now" - vCenter's Issues & Alarms, derive-not-persist. Only
+// attention right now" - an issues-and-alarms plane, derive-not-persist. Only
 // standing problems qualify; transitional states (applying, progressing,
 // plain OutOfSync = a pending apply) are deliberately not issues.
 import type { Inventory, VM } from '$lib/api';

@@ -14,7 +14,7 @@
 		compact = false,
 	}: { sync: SyncStatus | string; error?: string; compact?: boolean } = $props();
 
-	// vCenter-ish: green = in sync, red = drift, gray = not managed.
+	// Green = in sync, red = drift, gray = not managed.
 	const VIEWS = {
 		Synced: { tone: 'ok', label: 'Synced' },
 		OutOfSync: { tone: 'danger', label: 'Out of sync' },

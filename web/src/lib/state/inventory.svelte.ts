@@ -15,7 +15,7 @@ class InventoryStore {
 	inventory = $state<Inventory | null>(null);
 	error = $state('');
 	// The networking read layer: the port-group catalog (so raw OVN-K refs render
-	// as vCenter port groups) plus the physical fabric (uplinks + node NICs).
+	// as catalog port groups) plus the physical fabric (uplinks + node NICs).
 	// Changes rarely; backend caches 60s.
 	netInv = $state<NetworkInventory | null>(null);
 	// The policy plane behind the Security view; fetched beside netInv (both ride

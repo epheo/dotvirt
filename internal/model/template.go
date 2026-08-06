@@ -3,7 +3,7 @@ package model
 // The template library (Content Library).
 
 // Template is one VirtualMachineTemplate manifest in a library repo's
-// templates/ directory - a content-library entry (vSphere: a VM template).
+// templates/ directory - a content-library entry.
 // Name is the file's basename: the deployable identity the API routes carry.
 type Template struct {
 	Name         string              `json:"name"`

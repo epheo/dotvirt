@@ -23,7 +23,7 @@ type AppModal =
 export type DetailAction =
 	'edit' | 'delete' | 'console' | 'snapshot' | 'clone' | 'template' | 'migrate' | 'migrate-storage';
 
-// Right-click context menus - vCenter's signature interaction. The bulk variant
+// Right-click context menus - the inventory's signature interaction. The bulk variant
 // (right-click inside a grid multi-selection) renders inside the workspace that
 // owns the selection; the shell renders the other two.
 type CtxState =

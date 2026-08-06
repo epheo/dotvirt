@@ -5,7 +5,7 @@
 	import Row from './Row.svelte';
 	import DRSModal from './DRSModal.svelte';
 
-	// The cluster's DRS panel (vCenter: Cluster -> Configure -> vSphere DRS):
+	// The cluster's rescheduling panel:
 	// committed configuration from the platform repo, live operator state from
 	// the backend's KubeDescheduler snapshot. Polls like the metrics cards - the
 	// GET is a pure snapshot read.
@@ -22,7 +22,7 @@
 	const view = $derived(drs.data);
 	const error = $derived(disableOp.error || drs.error);
 
-	// One vCenter-style status line for the committed state.
+	// One status line for the committed state.
 	const status = $derived.by(() => {
 		if (!view?.configured) return 'Not configured';
 		switch (view.config?.mode) {
@@ -125,8 +125,9 @@
 		{/if}
 		{#if !view.configured}
 			<p class="border-t border-line-soft px-3 py-2 text-xs text-ink-faint">
-				Without DRS, VMs are placed once at start and stay put. Enabling stages the descheduler
-				operator + configuration into the platform repository — applied when the PR merges.
+				Without dynamic rescheduling, VMs are placed once at start and stay put. Enabling stages the
+				descheduler operator + configuration into the platform repository — applied when the PR
+				merges.
 			</p>
 		{/if}
 		{#if error}

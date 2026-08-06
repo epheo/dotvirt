@@ -13,7 +13,7 @@
 	import TextInput from './TextInput.svelte';
 	import SelectInput from './SelectInput.svelte';
 
-	// The vSphere-DRS dialog, GitOps-shaped: every choice renders into the
+	// The rescheduling dialog, GitOps-shaped: every choice renders into the
 	// KubeDescheduler manifest set staged into the platform draft - nothing
 	// touches the cluster until the PR merges.
 	let {

@@ -195,8 +195,8 @@
 				Nothing staged — the open pull requests above carry everything proposed.
 			</p>
 		{:else if loaded && total === 0}
-			<!-- The one place the write model is explained: like vCenter's Recent
-			     Tasks, except every config change is a reviewable PR before it applies. -->
+			<!-- The one place the write model is explained: a Recent
+			     Tasks pane where every config change is a reviewable PR before it applies. -->
 			<div class="py-8 text-center">
 				<p class="mb-4 text-sm text-ink-faint">No pending changes.</p>
 				<ol class="mx-auto max-w-[20rem] space-y-2 text-left text-xs text-ink-soft">

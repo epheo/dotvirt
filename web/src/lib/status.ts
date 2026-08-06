@@ -89,7 +89,7 @@ export function phaseTextTone(phase: string): string {
 	return PHASE_TEXT[phase] ?? 'text-ink-soft';
 }
 
-// vCenter-style escalation as utilization nears capacity (pct is 0-100).
+// Escalate the color as utilization nears capacity (pct is 0-100).
 export function usageLevelColor(pct: number, base = 'var(--chart-1)'): string {
 	return pct > 90 ? 'var(--color-danger)' : pct > 75 ? 'var(--color-warn)' : base;
 }

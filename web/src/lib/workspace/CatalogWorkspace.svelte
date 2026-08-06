@@ -54,7 +54,7 @@
 			});
 	});
 
-	// The shared library reads as vCenter's subscribed Content Library.
+	// The shared library reads as a subscribed content library.
 	const libraryLabel = (lib: string) => (lib === 'platform' ? 'Shared library' : lib);
 
 	// One uniform row shape per kind: key, title, a right-aligned fact, and the

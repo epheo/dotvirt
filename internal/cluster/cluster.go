@@ -378,7 +378,7 @@ func (c *Client) Restart(ctx context.Context, namespace, name string) error {
 	return c.kubevirt.VirtualMachine(namespace).Restart(ctx, name, &kubevirtcorev1.RestartOptions{})
 }
 
-// Migrate live-migrates the running VMI to another node (the vMotion analog).
+// Migrate live-migrates the running VMI to another node.
 // A non-empty targetNode pins the destination via the migration's added node
 // selector (kubernetes.io/hostname); empty leaves the choice to the scheduler.
 // The selector can only narrow the VM's own constraints, never bypass them.

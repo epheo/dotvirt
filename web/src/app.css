@@ -1,6 +1,6 @@
 @import 'tailwindcss';
 
-/* vCenter-ish neutral theme: dense, slightly cool grays, blue accent.
+/* Dense neutral admin theme: slightly cool grays, blue accent.
    Semantic tokens (values mirror the Tailwind slate/blue palette) — chrome
    components use these, never raw palette names, so surfaces, hairlines and
    the selection blue stay identical across every panel. */

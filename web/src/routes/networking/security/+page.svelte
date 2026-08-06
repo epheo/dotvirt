@@ -12,7 +12,7 @@
 	import TextInput from '$lib/components/TextInput.svelte';
 	import TracePanel from '$lib/components/TracePanel.svelte';
 
-	// The Security view: the live policy plane in NSX-T tiers - cluster admin DFW
+	// The Security view: the live policy plane in tiers - cluster admin DFW
 	// rules above, project DFW and gateway-firewall rules per namespace, Tier-0
 	// (SNAT + external routes) below. Read plane only: every row is a live object;
 	// authoring goes through the same modals (and PRs) as everywhere else.

@@ -43,7 +43,7 @@
 	];
 	const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-	// Overcommit ratio = committed-to-VMs : node-allocatable (vCenter's "vCPU
+	// Overcommit ratio = committed-to-VMs : node-allocatable ("vCPU
 	// 3.2:1"). >1 means more is promised to VMs than the nodes physically have -
 	// fine for CPU (time-shared), a memory warning. Only meaningful with both a
 	// committed amount and a capacity denominator.

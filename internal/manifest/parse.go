@@ -10,7 +10,7 @@ import (
 )
 
 // vmDoc is the minimal shape of a VirtualMachine manifest dotvirt reads for the
-// inventory. Only the fields shown in the vCenter view are decoded.
+// inventory. Only the fields the views show are decoded.
 type vmDoc struct {
 	Kind     string `yaml:"kind"`
 	Metadata struct {

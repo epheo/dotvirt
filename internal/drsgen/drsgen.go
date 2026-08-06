@@ -1,6 +1,6 @@
 // Package drsgen renders the Kube Descheduler Operator manifests behind
-// dotvirt's "DRS" panel - cluster-wide automatic VM rebalancing, the vSphere
-// DRS analog - from a small spec, the way netgen renders networks. Owns-nothing:
+// dotvirt's rescheduling panel - cluster-wide automatic VM rebalancing - from
+// a small spec, the way netgen renders networks. Owns-nothing:
 // the output is proposed via PR into the platform repo and applied by Argo,
 // never written to the cluster. All output paths are constants (no user input
 // ever becomes a path segment) and every field is enum/range-validated.
@@ -29,7 +29,7 @@ const (
 	PSIPath           = "machineconfigs/99-worker-psi.yaml"
 )
 
-// Automation modes - vSphere DRS "Manual" vs "Fully Automated".
+// Automation modes.
 const (
 	ModePredictive = "Predictive" // dry-run: logs/metrics what would migrate, moves nothing
 	ModeAutomatic  = "Automatic"  // evicts, so VMs live-migrate to rebalance

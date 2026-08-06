@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// rangeSpec maps a UI range to a window + sample step, mirroring vCenter's tiers
+// rangeSpec maps a UI range to a window + sample step
 // (real-time / day / week).
 type rangeSpec struct {
 	window time.Duration
@@ -59,7 +59,7 @@ type chartSpec struct {
 	series           []seriesSpec
 }
 
-// chartSpecs builds the curated Overview charts for one VM - vCenter's CPU /
+// chartSpecs builds the curated Overview charts for one VM - CPU /
 // Memory / Network / Disk, plus IOPS and disk latency. Network and disk break
 // out per NIC / per drive. rw is the rate() window.
 func chartSpecs(ns, name, rw string) []chartSpec {
@@ -73,7 +73,7 @@ func chartSpecs(ns, name, rw string) []chartSpec {
 			{"Steal", fmt.Sprintf("sum(rate(kubevirt_vmi_vcpu_delay_seconds_total%s[%s]))*100", s, rw), ""},
 		}},
 		// Used/Cached/Free partition the guest's memory - a stacked area whose
-		// top edge is the domain total, like vCenter's stacked memory chart.
+		// top edge is the domain total.
 		{"memory", "Memory", "bytes", true, []seriesSpec{
 			{"Used", fmt.Sprintf("kubevirt_vmi_memory_used_bytes%s", s), ""},
 			{"Cached", fmt.Sprintf("kubevirt_vmi_memory_cached_bytes%s", s), ""},

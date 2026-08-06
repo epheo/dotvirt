@@ -23,7 +23,7 @@
 <div class="min-h-0 flex-1 overflow-y-auto p-4">
 	<div class="max-w-2xl space-y-4">
 		{#if cluster}
-			<!-- Cluster services (vCenter: Cluster -> Configure -> Services). -->
+			<!-- Cluster services. -->
 			<DRSCard {onstaged} />
 		{/if}
 		{#each projects as p (p.name)}

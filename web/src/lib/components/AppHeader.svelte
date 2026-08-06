@@ -161,8 +161,8 @@
 
 	<GlobalSearch bind:this={search} onpick={onSearchPick} />
 
-	<!-- Create actions collapse into one primary menu (vCenter keeps the global
-	     chrome to identity + search + tasks; creation is otherwise contextual via
+	<!-- Create actions collapse into one primary menu (the global chrome stays
+	     identity + search + tasks; creation is otherwise contextual via
 	     the tree's right-click menus). New VM pre-targets the current scope. -->
 	<HeaderMenu>
 		{#snippet trigger({ open, toggle })}

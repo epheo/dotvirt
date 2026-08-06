@@ -1,8 +1,8 @@
 package model
 
-// Networks: the vCenter "Distributed Port Group" abstraction over OVN-K.
+// Networks: the port-group abstraction over OVN-K.
 
-// NetworkKind classifies a port group by how a VMware admin reads it.
+// NetworkKind classifies a port group by how a virt admin reads it.
 type NetworkKind string
 
 const (
@@ -20,7 +20,7 @@ const (
 )
 
 // Network is one Distributed Port Group: a network a VM attaches a NIC to,
-// abstracting a UDN, CUDN, or raw NAD behind vCenter vocabulary.
+// abstracting a UDN, CUDN, or raw NAD behind port-group vocabulary.
 type Network struct {
 	Name      string       `json:"name"`                // the port-group name shown to the user
 	Kind      NetworkKind  `json:"kind"`                // default | internal | vlan

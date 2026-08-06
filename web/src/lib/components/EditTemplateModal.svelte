@@ -5,7 +5,7 @@
 
 	// Edit a content-library item: the template is a manifest in the library's
 	// git repo, so editing is replacing that file - staged into Changes and
-	// applied when the library's PR merges (vSphere's check-out/check-in, with
+	// applied when the library's PR merges (check-out/check-in, with
 	// the review happening on the PR). The server rejects content that no longer
 	// parses as a VirtualMachineTemplate, so an edit can't break the catalog.
 	let {

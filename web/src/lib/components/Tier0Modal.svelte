@@ -52,7 +52,7 @@
 	const valid = $derived(missing.length === 0);
 	const summary = $derived(
 		valid
-			? `Stages ${kind === 'snat' ? TERMS.snat.nsx : 'external route'} “${name}” (${list.length} IP${list.length === 1 ? '' : 's'}, ${selectedNs.length} project${selectedNs.length === 1 ? '' : 's'}) → platform repo`
+			? `Stages ${kind === 'snat' ? TERMS.snat.net : 'external route'} “${name}” (${list.length} IP${list.length === 1 ? '' : 's'}, ${selectedNs.length} project${selectedNs.length === 1 ? '' : 's'}) → platform repo`
 			: '',
 	);
 
@@ -68,7 +68,7 @@
 </script>
 
 <StageModal
-	title={`${TERMS.tier0.nsx} · ${TERMS.tier0.vsphere}`}
+	title={`${TERMS.tier0.net} · ${TERMS.tier0.virt}`}
 	label="Stage service"
 	{missing}
 	{summary}
@@ -78,7 +78,7 @@
 >
 	<ChoiceCards
 		options={[
-			{ value: 'snat', label: TERMS.snat.nsx, hint: 'Pin egress to fixed IPs (EgressIP)' },
+			{ value: 'snat', label: TERMS.snat.net, hint: 'Pin egress to fixed IPs (EgressIP)' },
 			{ value: 'route', label: 'External Route', hint: 'Steer egress via next-hops' },
 		]}
 		bind:value={kind}
@@ -111,7 +111,7 @@
 
 	<Note tone="neutral">
 		{#if kind === 'snat'}
-			A {TERMS.snat.nsx} pool ({TERMS.snat.backing}) pins the selected projects' north-south egress
+			A {TERMS.snat.net} pool ({TERMS.snat.backing}) pins the selected projects' north-south egress
 			to these fixed, routable source IPs.
 		{:else}
 			An external route (AdminPolicyBasedExternalRoute) steers the selected projects' egress through

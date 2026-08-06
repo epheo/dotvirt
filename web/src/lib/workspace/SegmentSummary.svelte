@@ -25,7 +25,7 @@
 				<Row
 					label="Type"
 					value={pg
-						? `${kindLabel(pg.kind)}${st ? ` — ${st.nsx} · ${st.vsphere}` : ''}`
+						? `${kindLabel(pg.kind)}${st ? ` — ${st.net} · ${st.virt}` : ''}`
 						: network === POD_NETWORK
 							? 'Pod network (cluster default)'
 							: ''}

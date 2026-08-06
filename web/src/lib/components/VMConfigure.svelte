@@ -8,7 +8,7 @@
 	import InfoCard from './InfoCard.svelte';
 	import Row from './Row.svelte';
 
-	// vCenter's settings verb: a left sub-rail of read-only sections; every
+	// The Configure tab: a left sub-rail of read-only sections; every
 	// Edit stages a change through the PR flow (nothing writes the cluster).
 	let {
 		vm,

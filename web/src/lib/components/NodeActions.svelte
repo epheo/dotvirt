@@ -3,7 +3,7 @@
 	import { api, type NodeInfo, type VM } from '$lib/api';
 	import { action, resource } from '$lib/resource.svelte';
 
-	// Host maintenance (vCenter's Enter/Exit Maintenance Mode): entering flips
+	// Host maintenance: entering flips
 	// the node's maintenance annotation + cordon in one server patch, then one
 	// evacuate call sweeps EVERY running VM off the node - the server reads the
 	// full snapshot, so VMs outside the caller's projects (invisible in `vms`)

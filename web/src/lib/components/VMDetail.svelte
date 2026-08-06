@@ -69,7 +69,7 @@
 		onstagedopen?: () => void;
 		onsearchlabel?: (key: string, value: string) => void;
 		// The port-group catalog (GET /api/networks), to resolve each NIC's raw
-		// network ref into the vCenter port group the admin recognizes.
+		// network ref into the port group the admin recognizes.
 		networks?: Network[];
 		// A one-shot request from outside (the context menu) to open a modal/tab
 		// here; seq distinguishes repeated requests for the same id.
@@ -80,7 +80,7 @@
 		onintentdone?: () => void;
 	} = $props();
 
-	// Monitor sub-rail (vCenter keeps all time-series under Monitor).
+	// Monitor sub-rail (all time-series live under Monitor).
 	let monitorView = $state<'events' | 'performance'>('events');
 	let editing = $state(false);
 	// Which EditSettings section a Configure "Edit" jumps to (undefined = all).
@@ -354,7 +354,7 @@
 					onmonitor={() => ontab?.('monitor')}
 				/>
 			{:else if tab === 'monitor'}
-				<!-- Monitor sub-rail: events + performance, vCenter's time-series home. -->
+				<!-- Monitor sub-rail: events + performance. -->
 				<TabBar
 					class="mb-3 border-b border-line"
 					tabs={[

@@ -212,7 +212,7 @@ func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 
 // handleManifest returns the VM's manifest file as it exists on the base branch -
 // the "Download manifest" action. The git file IS the VM's full definition, so
-// this is dotvirt's OVF-export analog.
+// this is dotvirt's VM-export path.
 func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	ns, name := r.PathValue("namespace"), r.PathValue("name")
 	sc, ok := s.resolveProject(w, r, byNamespace(ns))

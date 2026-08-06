@@ -65,7 +65,7 @@ type LiveVM struct {
 
 	// Interfaces is each VMI interface's runtime address info, merged onto the
 	// VM's manifest-declared NIC of the same name for the detail view's per-NIC
-	// IP/MAC (vCenter's per-adapter address columns).
+	// IP/MAC columns.
 	Interfaces []LiveNIC
 
 	// Migration mirrors the VMI's MigrationState when one exists: the live (or
@@ -82,7 +82,7 @@ type LiveNIC struct {
 	IP   string
 }
 
-// Migration is a VM's node-to-node move - vCenter's vMotion progress. Active
+// Migration is a VM's live node-to-node move. Active
 // while neither Completed nor Failed is set.
 type Migration struct {
 	SourceNode string

@@ -47,7 +47,7 @@
 	let events = $state<VMEvent[] | null>(null);
 	let eventsLoading = $state(false);
 
-	// Firing Prometheus alerts (vCenter's Triggered Alarms). Polled slowly; the
+	// Firing Prometheus alerts for the Alarms tab. Polled slowly; the
 	// read is one cached instant query server-side. null = endpoint unavailable
 	// (metrics off), mapped from the failed flag.
 	const alarmsRes = resource<Alert[]>(
@@ -190,7 +190,7 @@
 			aria-label="Resize panel"
 		></div>
 	{/if}
-	<!-- Tabbed header (vCenter's bottom pane): Recent Tasks | Events + collapse. -->
+	<!-- Tabbed header: Recent Tasks | Events + collapse. -->
 	<div class="flex items-center gap-1 bg-inset-strong px-2 py-1 text-ink-soft">
 		<ListChecks size={14} class="mx-1 text-ink-muted" />
 		<TabBar
@@ -270,7 +270,7 @@
 					</table>
 				{/if}
 			{:else if tab === 'alarms'}
-				<!-- vCenter's Triggered Alarms: firing Prometheus alerts + the
+				<!-- The Alarms tab: firing Prometheus alerts + the
 				     inventory-derived amber set (drift, failed migrations). -->
 				{#if alarms === 0}
 					<div class="px-3 py-5 text-center text-ink-faint">
