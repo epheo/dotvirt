@@ -1,5 +1,5 @@
 <script lang="ts">
-	// vCenter's masthead search: one box over the whole streamed inventory - VMs
+	// The masthead search: one box over the whole streamed inventory - VMs
 	// (name, IP, labels), projects, namespaces, nodes, segments, storage
 	// classes. Pure frontend: everything searched is already client-side (which
 	// is why templates, a fetch away, are not here). `label:key=value` (or

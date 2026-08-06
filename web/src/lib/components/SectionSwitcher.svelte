@@ -2,7 +2,7 @@
 	import { Database, Folder, Library, Network, Server } from 'lucide-svelte';
 	import type { Section } from '$lib/nav';
 
-	// vCenter's inventory switcher: five sections, each with its own tree below,
+	// The inventory switcher: five sections, each with its own tree below,
 	// all rendering into the same center workspace.
 	let { active }: { active: Section } = $props();
 

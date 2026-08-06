@@ -39,7 +39,7 @@ type VM struct {
 	VCPUs        int      `json:"vcpus,omitempty"`        // rendered vCPU topology; the summary's value when the manifest delegates sizing to an instancetype
 	StartedAt    string   `json:"startedAt,omitempty"`    // RFC3339; VMI entered Running (for uptime)
 
-	// Migration is the live (or last) node-to-node move - vCenter's vMotion
+	// Migration is the live (or last) node-to-node move and its
 	// progress, read from the VMI's migration state. Nil when never migrated.
 	Migration *Migration `json:"migration,omitempty"`
 
@@ -104,7 +104,7 @@ type ProjectNamespace struct {
 	VMs       []VM   `json:"vms"`
 }
 
-// Project is a tenant in the vCenter-style inventory tree: a named set of
+// Project is a tenant in the inventory tree: a named set of
 // namespaces backed by one git repo. Name + Repo come from namespace
 // label/annotation (dotvirt.io/project, dotvirt.io/repo). Error is set (and Repo
 // left empty) when a project's namespaces are labeled but have no usable repo -

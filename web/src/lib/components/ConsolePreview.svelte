@@ -4,7 +4,7 @@
 	import type { VM } from '$lib/api';
 	import { pollWhileVisible } from '$lib/poll';
 
-	// vCenter's Summary console thumbnail: a periodically-refreshed screenshot of
+	// The Summary console thumbnail: a periodically-refreshed screenshot of
 	// the VM's graphical console (KubeVirt's vnc/screenshot subresource), clicking
 	// through to the live Console tab. Only for running VMs; while the screenshot
 	// fails (no graphics device, or a restart blip) it hides itself but keeps

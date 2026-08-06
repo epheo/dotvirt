@@ -9,7 +9,7 @@
 	import SyncBadge from './SyncBadge.svelte';
 	import TextInput from './TextInput.svelte';
 
-	// Trace a flow: NSX Traceflow's question answered as a control-plane
+	// Trace a flow: the packet-walk question answered as a control-plane
 	// simulation - walk the evaluation order for one concrete source,
 	// destination and protocol/port, and show each step's verdict with the
 	// deciding rule. No packet is injected; the panel says so.

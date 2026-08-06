@@ -27,7 +27,7 @@
 	import StorageRootSummary from './StorageRootSummary.svelte';
 
 	// The container workspace: every inventory level gets the same breadcrumb +
-	// tab chrome - vCenter's "same tabs at every level". The tab SET follows the
+	// tab chrome - the same tabs at every level. The tab SET follows the
 	// object kind: compute containers carry the full set, a host drops
 	// Permissions (nodes aren't namespaced), segments and storage classes are
 	// fact sheets (Summary + their VMs).

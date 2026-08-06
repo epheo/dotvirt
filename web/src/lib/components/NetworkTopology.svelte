@@ -6,7 +6,7 @@
 	import PowerDot from './PowerDot.svelte';
 	import StatusDot from './StatusDot.svelte';
 
-	// The Network Topology map - NSX-T's signature screen, built entirely from the
+	// The Network Topology map, built entirely from the
 	// catalog dotvirt already returns: the platform provider edge (Tier-0) -> each
 	// project's router (Tier-1, its primary segment) -> segments -> VMs. It owns no new
 	// data; segment membership reuses the same vmNetworkKeys the Segments lens groups
@@ -79,7 +79,7 @@
 			<Network size={13} class="shrink-0 text-ink-faint" />
 			<span class="font-medium text-ink-soft">{net.name}</span>
 			<span class="rounded bg-inset-strong px-1.5 py-0.5 text-[10px] text-ink-muted"
-				>{st.nsx} · {st.vsphere}</span
+				>{st.net} · {st.virt}</span
 			>
 			<!-- Plain dot, not the clickable SyncBadge: the card is itself a button, and
 			     nesting another would be invalid; the segment page holds the detail. -->
@@ -116,17 +116,17 @@
 
 <div class="max-w-5xl space-y-5 p-5 text-[13px]">
 	<p class="text-xs text-ink-muted">
-		{TERMS.tier0.nsx} (provider edge) → {TERMS.tier1.nsx} (project router) → {TERMS.segment.nsx}s ({TERMS
-			.segment.vsphere}s) → VMs. Overlay segments are isolated islands — there is no in-overlay
-		router between them yet, so cross-segment traffic exits to the fabric.
+		{TERMS.tier0.net} → {TERMS.tier1.net} → {TERMS.segment.net}s ({TERMS.segment.virt}s) → VMs.
+		Overlay segments are isolated islands — there is no in-overlay router between them yet, so
+		cross-segment traffic exits to the fabric.
 	</p>
 
 	<!-- Tier-0: the platform provider edge - uplinks (transports) and cluster-scoped segments. -->
 	<section class="rounded-lg border border-line-strong bg-inset p-3">
 		<div class="mb-2 flex items-center gap-2">
 			<Radio size={15} class="text-ink-muted" />
-			<span class="font-semibold text-ink-soft">{TERMS.tier0.nsx}</span>
-			<span class="text-xs text-ink-faint">· {TERMS.tier0.vsphere}</span>
+			<span class="font-semibold text-ink-soft">{TERMS.tier0.net}</span>
+			<span class="text-xs text-ink-faint">· {TERMS.tier0.virt}</span>
 		</div>
 		{#if uplinks.length}
 			<div class="mb-2 flex flex-wrap gap-1.5 pl-6">
@@ -151,8 +151,8 @@
 		<section class="rounded-lg border border-line p-3">
 			<div class="mb-2 flex items-center gap-2">
 				<Router size={15} class="text-accent" />
-				<span class="font-semibold text-ink-soft">{TERMS.tier1.nsx}</span>
-				<span class="text-xs text-ink-faint">· {p.name} ({TERMS.tier1.vsphere})</span>
+				<span class="font-semibold text-ink-soft">{TERMS.tier1.net}</span>
+				<span class="text-xs text-ink-faint">· {p.name} ({TERMS.tier1.virt})</span>
 			</div>
 			<div class="space-y-1.5 border-l-2 border-select pl-4">
 				{#each segs.primary as net (net.name)}{@render segmentCard(net)}{/each}

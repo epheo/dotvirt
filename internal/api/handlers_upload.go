@@ -8,7 +8,7 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 )
 
-// Image upload (the OVF-import analog). dotvirt mints the upload-target
+// Image upload. dotvirt mints the upload-target
 // DataVolume + token under the caller's token; the BROWSER then streams the
 // image bytes straight to cdi-uploadproxy (which ships open CORS), so multi-GB
 // images never pass through dotvirt. Disabled when -upload-proxy-url is unset.

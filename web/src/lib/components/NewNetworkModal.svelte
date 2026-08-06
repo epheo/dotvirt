@@ -98,7 +98,7 @@
 </script>
 
 <StageModal
-	title={`New ${TERMS.segment.nsx} · ${TERMS.segment.vsphere}`}
+	title={`New ${TERMS.segment.net} · ${TERMS.segment.virt}`}
 	label="Stage segment"
 	{missing}
 	{summary}
@@ -136,7 +136,7 @@
 			</FormField>
 			<label class="block">
 				<span class="mb-1 flex items-center justify-between text-ink-soft"
-					>Uplink ({TERMS.uplink.nsx}){#if onAddUplink}<button
+					>Uplink ({TERMS.uplink.net}){#if onAddUplink}<button
 							type="button"
 							onclick={onAddUplink}
 							class="text-xs font-normal text-accent hover:underline">+ Add uplink…</button
@@ -170,7 +170,7 @@
 				? ', shared across the selected projects — a cluster-scoped CUDN, proposed to the platform repository'
 				: ' scoped to this project (a namespace UDN on its Tier-1)'}.
 		{:else}
-			A VLAN segment (localnet) bridged to the chosen {TERMS.uplink.nsx.toLowerCase()}, published to
+			A VLAN segment (localnet) bridged to the chosen {TERMS.uplink.net.toLowerCase()}, published to
 			the selected projects. Cluster-scoped — proposed to the platform repository; the uplink must
 			already carry that physical network.
 		{/if}

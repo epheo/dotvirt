@@ -376,9 +376,8 @@ export interface UsageMetric {
   spark?: number /* float64 */[];
 }
 /**
- * VMUsage is a VM's live capacity-and-usage for the Summary tab (vCenter's
- * "Capacity and Usage" panel): CPU % of allocated, memory used of allocated,
- * guest-filesystem used of provisioned.
+ * VMUsage is a VM's live capacity-and-usage for the Summary tab: CPU % of
+ * allocated, memory used of allocated, guest-filesystem used of provisioned.
  */
 export interface VMUsage {
   updated: number /* int64 */; // unix seconds ("Last updated")
@@ -405,8 +404,8 @@ export interface ConsumerVM {
   value: number /* float64 */;
 }
 /**
- * ClusterSummary is the aggregate capacity view for the "All VMs" landing - the
- * vCenter cluster-Summary analog: rings (used vs node-allocatable) + VM counts by
+ * ClusterSummary is the aggregate capacity view for the "All VMs" landing:
+ * rings (used vs node-allocatable) + VM counts by
  * phase + top-consumer VMs. VM-scoped sums are limited to the caller's namespaces;
  * node capacity is the cluster-wide boundary.
  */
@@ -505,7 +504,7 @@ export const SyncUnknown: SyncStatus = "Unknown";
 // source: network.go
 
 /**
- * NetworkKind classifies a port group by how a VMware admin reads it.
+ * NetworkKind classifies a port group by how a virt admin reads it.
  */
 export type NetworkKind = string;
 export const NetworkDefault: NetworkKind = "default"; // primary network - the project's "VM Network"
@@ -519,7 +518,7 @@ export const ScopeProject: NetworkScope = "project"; // namespace-scoped (UDN/NA
 export const ScopeShared: NetworkScope = "shared"; // cluster-scoped (CUDN) - selected projects
 /**
  * Network is one Distributed Port Group: a network a VM attaches a NIC to,
- * abstracting a UDN, CUDN, or raw NAD behind vCenter vocabulary.
+ * abstracting a UDN, CUDN, or raw NAD behind port-group vocabulary.
  */
 export interface Network {
   name: string; // the port-group name shown to the user
@@ -649,7 +648,7 @@ export interface Event {
 }
 /**
  * Snapshot is a VirtualMachineSnapshot for a VM - the Snapshots tab. KubeVirt
- * snapshots are a flat list (no vCenter-style parent/child tree).
+ * snapshots are a flat list (no parent/child tree).
  */
 export interface Snapshot {
   name: string;
@@ -785,7 +784,7 @@ export interface StorageClass {
 // source: policy.go
 
 /**
- * PolicyKind classifies a firewall/routing policy by the NSX-T tier the UI
+ * PolicyKind classifies a firewall/routing policy by the tier the UI
  * presents: the east-west Distributed Firewall (per-project NetworkPolicy and
  * its cluster-wide admin/baseline overrides), the per-project Gateway Firewall
  * (EgressFirewall on the Tier-1), and the Tier-0 planes (EgressIP SNAT,
@@ -939,7 +938,7 @@ export interface TraceStep {
 
 /**
  * Template is one VirtualMachineTemplate manifest in a library repo's
- * templates/ directory - a content-library entry (vSphere: a VM template).
+ * templates/ directory - a content-library entry.
  * Name is the file's basename: the deployable identity the API routes carry.
  */
 export interface Template {
@@ -1055,7 +1054,7 @@ export interface VM {
   vcpus?: number /* int */; // rendered vCPU topology; the summary's value when the manifest delegates sizing to an instancetype
   startedAt?: string; // RFC3339; VMI entered Running (for uptime)
   /**
-   * Migration is the live (or last) node-to-node move - vCenter's vMotion
+   * Migration is the live (or last) node-to-node move and its
    * progress, read from the VMI's migration state. Nil when never migrated.
    */
   migration?: Migration;
@@ -1130,7 +1129,7 @@ export interface ProjectNamespace {
   vms: VM[];
 }
 /**
- * Project is a tenant in the vCenter-style inventory tree: a named set of
+ * Project is a tenant in the inventory tree: a named set of
  * namespaces backed by one git repo. Name + Repo come from namespace
  * label/annotation (dotvirt.io/project, dotvirt.io/repo). Error is set (and Repo
  * left empty) when a project's namespaces are labeled but have no usable repo -

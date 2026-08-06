@@ -2,7 +2,7 @@ package model
 
 // The security plane: DFW tiers, gateway/Tier-0 policies, and the trace.
 
-// PolicyKind classifies a firewall/routing policy by the NSX-T tier the UI
+// PolicyKind classifies a firewall/routing policy by the tier the UI
 // presents: the east-west Distributed Firewall (per-project NetworkPolicy and
 // its cluster-wide admin/baseline overrides), the per-project Gateway Firewall
 // (EgressFirewall on the Tier-1), and the Tier-0 planes (EgressIP SNAT,

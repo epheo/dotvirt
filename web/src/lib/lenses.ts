@@ -4,7 +4,7 @@
 import type { Network, VM } from '$lib/api';
 import { resolveNIC } from '$lib/networks';
 
-// vCenter model: the tree is a scope selector, the center pane is the VM grid.
+// The inventory model: the tree is a scope selector, the center pane is the VM grid.
 // Every inventory level the tree can focus is one of these.
 export type Scope =
 	| { kind: 'all' }
@@ -21,7 +21,7 @@ export const DEFAULT_CLASS = '(cluster default)';
 
 /**
  * The networks a VM appears under: one key per distinct port group, resolved
- * through the catalog so the lens groups by the vCenter port-group name (a
+ * through the catalog so the lens groups by the catalog port-group name (a
  * tenant's primary "VM Network", a shared VLAN…) rather than the raw OVN-K ref —
  * otherwise every primary-UDN VM collapses under a single "pod" key. Falls back
  * to the raw ref (then "Pod network") before the catalog has loaded.

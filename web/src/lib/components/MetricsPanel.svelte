@@ -6,7 +6,7 @@
 	import ErrorNote from './ErrorNote.svelte';
 	import UPlotChart from './UPlotChart.svelte';
 
-	// The one Performance panel - range tiers mirroring vCenter's real-time /
+	// The one Performance panel - range tiers spanning real-time /
 	// historical tiers, 30s real-time refresh (paused while the tab is
 	// backgrounded), and the chart grid. The caller supplies the query and
 	// {#key}s this component on the queried identity (VM or scope), so a new
@@ -52,7 +52,7 @@
 		untrack(refresh);
 	});
 
-	// Auto-refresh in real-time mode (vCenter's ~20s; we use 30s to match the step).
+	// Auto-refresh in real-time mode (30s to match the step).
 	$effect(() => {
 		if (range !== '1h') return;
 		return pollWhileVisible(refresh, 30000);

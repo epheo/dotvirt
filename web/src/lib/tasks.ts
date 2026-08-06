@@ -40,7 +40,7 @@ export function buildTasks(
 	now = Date.now(),
 ): Task[] {
 	const out: Task[] = [];
-	// Live node-to-node moves (vCenter's vMotion rows), streamed off the VMI's
+	// Live node-to-node moves, streamed off the VMI's
 	// migration state.
 	if (inventory) {
 		for (const proj of inventory.projects)

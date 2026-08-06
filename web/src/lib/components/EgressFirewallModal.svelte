@@ -67,7 +67,7 @@
 </script>
 
 <StageModal
-	title={`${TERMS.gatewayFirewall.nsx} · ${TERMS.gatewayFirewall.vsphere}`}
+	title={`${TERMS.gatewayFirewall.net} · ${TERMS.gatewayFirewall.virt}`}
 	size="lg"
 	label="Stage firewall"
 	{missing}
@@ -132,7 +132,7 @@
 	</div>
 
 	<Note tone="neutral">
-		The {TERMS.gatewayFirewall.nsx.toLowerCase()} controls north-south traffic leaving this project's
+		The {TERMS.gatewayFirewall.net.toLowerCase()} controls north-south traffic leaving this project's
 		VMs to external destinations (it is not an east-west, VM-to-VM control — that is the Distributed Firewall).
 		One per namespace; staged into the project's repo and applied by its Argo app.
 	</Note>

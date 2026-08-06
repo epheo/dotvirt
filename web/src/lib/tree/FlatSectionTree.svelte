@@ -13,8 +13,8 @@
 
 	// The flat section trees - Hosts (physical placement), Networking (by NIC
 	// segment), Storage (by dataVolume class): one group per key, a VM under
-	// every key it matches (a VM with two NICs shows under both segments, as
-	// vCenter does). Keys come from $lib/lenses so the grid filter agrees.
+	// every key it matches (a VM with two NICs shows under both segments).
+	// Keys come from $lib/lenses so the grid filter agrees.
 	let { kind }: { kind: 'node' | 'network' | 'storage' } = $props();
 
 	const scope = $derived(scopeFromPath(page.url.pathname));
