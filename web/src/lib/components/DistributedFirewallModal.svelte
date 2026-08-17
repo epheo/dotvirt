@@ -26,8 +26,8 @@
 		onstaged: () => void;
 	} = $props();
 
-	// A Group is a label selector (key=value) - the same primitive NSX-T's dynamic
-	// Groups compile to. The policy protects the "applied-to" Group and allows ingress
+	// A Group is a label selector (key=value) - the grouping primitive every rule
+	// resolves through. The policy protects the "applied-to" Group and allows ingress
 	// only from the peer Groups in its rules (a NetworkPolicy that selects pods
 	// default-denies all other ingress). One ingress row = one allow-from rule.
 	type Row = { key: string; value: string; proto: 'TCP' | 'UDP' | 'SCTP'; port: number | null };
@@ -41,8 +41,8 @@
 	const rows = $derived(rules.rows);
 
 	// Effective members: VMs in the namespace whose labels match the applied-to Group
-	// (every VM in the namespace when no selector is set) - the NSX-T "effective
-	// membership" readout, computed live from the inventory.
+	// (every VM in the namespace when no selector is set) - the effective-membership
+	// readout, computed live from the inventory.
 	const members = $derived(
 		vms.filter(
 			(v) => v.namespace === namespace && (!appliedKey || v.labels?.[appliedKey] === appliedValue),
@@ -80,7 +80,7 @@
 </script>
 
 <StageModal
-	title={`${TERMS.dfw.nsx} · ${TERMS.dfw.vsphere}`}
+	title={`${TERMS.dfw.net} · ${TERMS.dfw.virt}`}
 	size="lg"
 	label="Stage policy"
 	{missing}
@@ -98,7 +98,7 @@
 
 	<div class="rounded border border-line p-3">
 		<span class="text-ink-soft"
-			>Applies to {TERMS.group.nsx}
+			>Applies to {TERMS.group.net}
 			<span class="text-ink-faint">(label; blank = whole project)</span></span
 		>
 		<div class="mt-1 flex items-center gap-2">
@@ -132,7 +132,7 @@
 		</div>
 		{#each rows as row, i (i)}
 			<div class="flex flex-wrap items-center gap-2 rounded border border-line p-2">
-				<span class="text-xs text-ink-faint">{TERMS.group.nsx}</span>
+				<span class="text-xs text-ink-faint">{TERMS.group.net}</span>
 				<PeerSelector
 					bind:key={row.key}
 					bind:value={row.value}
@@ -154,8 +154,8 @@
 	</div>
 
 	<Note tone="neutral">
-		The {TERMS.dfw.nsx.toLowerCase()} controls east-west, VM-to-VM traffic. Selecting a {TERMS.group
-			.nsx} default-denies all other ingress to it, so only the sources above may reach it. Staged into
+		The {TERMS.dfw.net.toLowerCase()} controls east-west, VM-to-VM traffic. Selecting a {TERMS.group
+			.net} default-denies all other ingress to it, so only the sources above may reach it. Staged into
 		the project's repo and applied by its Argo app.
 	</Note>
 </StageModal>

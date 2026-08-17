@@ -53,9 +53,8 @@ type UsageMetric struct {
 	Spark []float64 `json:"spark,omitempty"`
 }
 
-// VMUsage is a VM's live capacity-and-usage for the Summary tab (vCenter's
-// "Capacity and Usage" panel): CPU % of allocated, memory used of allocated,
-// guest-filesystem used of provisioned.
+// VMUsage is a VM's live capacity-and-usage for the Summary tab: CPU % of
+// allocated, memory used of allocated, guest-filesystem used of provisioned.
 type VMUsage struct {
 	Updated int64       `json:"updated"` // unix seconds ("Last updated")
 	CPU     UsageMetric `json:"cpu"`     // Used = % of allocated vCPU, Total = 100
@@ -79,8 +78,8 @@ type ConsumerVM struct {
 	Value     float64 `json:"value"`
 }
 
-// ClusterSummary is the aggregate capacity view for the "All VMs" landing - the
-// vCenter cluster-Summary analog: rings (used vs node-allocatable) + VM counts by
+// ClusterSummary is the aggregate capacity view for the "All VMs" landing:
+// rings (used vs node-allocatable) + VM counts by
 // phase + top-consumer VMs. VM-scoped sums are limited to the caller's namespaces;
 // node capacity is the cluster-wide boundary.
 type ClusterSummary struct {

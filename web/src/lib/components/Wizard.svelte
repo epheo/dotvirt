@@ -4,7 +4,7 @@
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 
-	// A vCenter-style wizard scaffold: a left step-rail, one panel at a time, and a
+	// A wizard scaffold: a left step-rail, one panel at a time, and a
 	// Back/Next/Finish footer. Navigation is deliberately *free* - every step is
 	// reachable at any time (click the rail, or Back/Next as a convenience); the
 	// per-step `valid` flag only drives the rail marker, it never traps the user.

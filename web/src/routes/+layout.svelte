@@ -30,7 +30,7 @@
 
 	// The tree follows the section the URL is in, but sticks across the
 	// section-agnostic /vm route - a VM opened from the Hosts tree keeps the
-	// Hosts tree (and its highlighted row), as vCenter does. The section also
+	// Hosts tree (and its highlighted row). The section also
 	// persists as where "/" lands next visit.
 	let treeSection = $state<Section>('compute');
 	$effect(() => {

@@ -224,7 +224,7 @@ export function drsThresholdLabel(value: string): string {
 	return DRS_THRESHOLDS.find((t) => t.value === value)?.label ?? value;
 }
 
-// The Performance views' range tiers (vCenter's real-time/day/week/month).
+// The Performance views' range tiers (real-time/day/week/month).
 export const METRIC_RANGES = [
 	{ key: '1h', label: 'Real-time' },
 	{ key: '1d', label: 'Day' },
@@ -412,7 +412,7 @@ export const api = {
 	adoptProject: (project: string, owners?: string[]) =>
 		post<DraftView>(`/api/projects/${enc(project)}/adopt`, owners?.length ? { owners } : {}),
 
-	// The template library (vSphere: Content Library). Deploy renders server-side
+	// The template library. Deploy renders server-side
 	// and stages the VM into the draft; save derives a template from a VM's git
 	// manifest ("Clone to Template") - both land as PR-gated changes.
 	templates: () => get<{ templates: gen.Template[] }>('/api/templates'),

@@ -13,7 +13,7 @@ import (
 
 // Manifest returns a VM's manifest file as committed on the base branch - the
 // raw bytes plus its repo path (the download filename). The git file IS the
-// VM's full definition, so this is dotvirt's OVF-export analog.
+// VM's full definition, so this is dotvirt's VM-export path.
 func (c *Coordinator) Manifest(proj project.ProjectInfo, namespace, name string) (path string, content []byte, err error) {
 	read, err := c.read(proj)
 	if err != nil {

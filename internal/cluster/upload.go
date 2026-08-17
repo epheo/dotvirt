@@ -11,7 +11,7 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 )
 
-// Image upload (the OVF-import analog): a CDI upload-source DataVolume is the
+// Image upload: a CDI upload-source DataVolume is the
 // target PVC, and an UploadTokenRequest mints the bearer the browser presents
 // to cdi-uploadproxy when it streams the image bytes directly. Both go through
 // the dynamic client under the user's token - uploading a golden image is an

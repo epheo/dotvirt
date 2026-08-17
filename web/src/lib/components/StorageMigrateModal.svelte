@@ -7,7 +7,7 @@
 	import StageModal from './StageModal.svelte';
 	import StorageClassSelect from './StorageClassSelect.svelte';
 
-	// Storage live migration (the Storage vMotion dialog): pick a target class
+	// Storage live migration: pick a target class
 	// per disk; staging rewrites each disk's DataVolume template and sets
 	// updateVolumesStrategy: Migration - all through the normal PR lane. On
 	// merge KubeVirt copies each disk to a fresh volume on the target class

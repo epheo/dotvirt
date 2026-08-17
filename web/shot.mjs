@@ -205,7 +205,7 @@ const scenes = {
 	},
 
 	net: {
-		desc: 'NSX-T revisit: topology, segment/firewall/tier-0 modals (net-*.png, BASE_URL)',
+		desc: 'Networking revisit: topology, segment/firewall/gateway modals (net-*.png, BASE_URL)',
 		async run() {
 			// Gates on the pinned Topology entry (proves the tree rendered) rather than
 			// a VM row, since the landing tab is Summary.
@@ -617,7 +617,10 @@ const scenes = {
 			await login(page, DEV);
 			await page.waitForSelector('text=vm-tenant-a', { timeout: 20000 });
 			// Project scope, then Configure (quota note under the project card).
-			await page.locator('aside').getByRole('button', { name: /team-a/ }).click();
+			await page
+				.locator('aside')
+				.getByRole('button', { name: /team-a/ })
+				.click();
 			await page.getByRole('button', { name: 'Configure', exact: true }).click();
 			await page.waitForSelector('text=No ResourceQuotas');
 			// Dock ALARMS tab.

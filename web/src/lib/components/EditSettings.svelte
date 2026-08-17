@@ -320,7 +320,7 @@
 
 {#snippet stepScheduling()}
 	<div class="space-y-4">
-		<!-- Placement groups: vCenter's DRS rules. Membership + rule are one
+		<!-- Placement groups: keep-together / keep-apart rules. Membership + rule are one
 		     encoding on the manifest, so this edits both at once. -->
 		<div>
 			<div class="mb-1 flex items-center justify-between">
@@ -407,7 +407,7 @@
 			</div>
 		{/if}
 
-		<!-- DRS participation + eviction behavior (vCenter's per-VM automation
+		<!-- Rescheduling participation + eviction behavior (the per-VM automation
 		     override). -->
 		<div class="border-t border-line-soft pt-3">
 			<label class="flex items-start gap-2 text-[13px]">

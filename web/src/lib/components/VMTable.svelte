@@ -72,8 +72,8 @@
 				: { ...prefs.value, sortKey: k, sortDir: 1 };
 	}
 
-	// Rank power/sync so the interesting states sort first (drift/problems at top,
-	// like vCenter). Higher rank sorts earlier on ascending.
+	// Rank power/sync so the interesting states sort first (drift/problems at top).
+	// Higher rank sorts earlier on ascending.
 	const powerRank = (p: Power) => (p === 'On' ? 2 : p === 'Off' ? 1 : 0);
 	const syncRank = (s: SyncStatus) =>
 		s === 'OutOfSync' ? 4 : s === 'Pending' ? 3 : s === 'Unknown' ? 2 : s === 'NotTracked' ? 1 : 0;

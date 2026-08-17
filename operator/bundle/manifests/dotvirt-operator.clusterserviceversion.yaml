@@ -28,7 +28,7 @@ metadata:
     categories: Developer Tools, Modernization & Migration
     containerImage: quay.io/epheo/dotvirt-operator@sha256:0a78ce0c8c4892fc2649455d1852bfa36f0ef07072d05d77a667b6249625e296
     createdAt: "2026-08-03T15:06:37Z"
-    description: Installs dotvirt, a GitOps web console for KubeVirt with a point-and-click workflow familiar to vSphere admins, plus its platform/tenant tier.
+    description: Installs dotvirt, a GitOps web console for KubeVirt with a point-and-click workflow familiar to virtualization admins, plus its platform/tenant tier.
     features.operators.openshift.io/disconnected: "true"
     features.operators.openshift.io/fips-compliant: "false"
     features.operators.openshift.io/proxy-aware: "false"
@@ -135,7 +135,7 @@ spec:
         version: v1alpha1
   description: |
     dotvirt is a web console for KubeVirt with a point-and-click workflow
-    familiar to vSphere admins, built the GitOps way: every project is a git
+    familiar to virtualization admins, built the GitOps way: every project is a git
     repository of VM manifests, every change ships as a pull request, and
     ArgoCD applies what merges. dotvirt itself owns nothing: requests run under
     your own Kubernetes token, and nothing reaches the cluster except through a

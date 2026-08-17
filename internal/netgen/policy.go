@@ -12,8 +12,8 @@ import (
 // It protects a Group (AppliedTo: a podSelector) inside one namespace, allowing
 // ingress only from the peer Groups named in its rules (a NetworkPolicy that selects
 // pods default-denies all other ingress). Namespace-scoped, so it rides the tenant's
-// own repo. Groups are label selectors - the same primitive NSX-T's dynamic Groups
-// compile to.
+// own repo. Groups are label selectors - the grouping primitive
+// every rule resolves through.
 type NetworkPolicySpec struct {
 	Name      string            `json:"name"`
 	Namespace string            `json:"namespace"`

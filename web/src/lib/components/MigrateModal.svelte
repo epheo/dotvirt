@@ -6,7 +6,7 @@
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
 
-	// Live-migration target picker (the vMotion dialog): Automatic lets the
+	// Live-migration target picker: Automatic lets the
 	// scheduler place the VMI; picking a host pins the migration to it via the
 	// migration's added node selector - which can only narrow the VM's own
 	// scheduling constraints, never bypass them. Listing hosts is cluster-scoped
