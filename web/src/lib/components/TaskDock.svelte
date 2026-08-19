@@ -241,7 +241,15 @@
 									onclick={() => activate(t)}
 									class="cursor-pointer hover:bg-select-soft {rowClass(t)}"
 								>
-									<td class="px-3 py-1.5 text-ink-soft">{t.verb}</td>
+									<td class="px-3 py-1.5 text-ink-soft">
+										<button
+											onclick={(e) => {
+												e.stopPropagation();
+												activate(t);
+											}}
+											class="hover:underline focus-visible:underline">{t.verb}</button
+										>
+									</td>
 									<td class="px-3 py-1.5 font-medium text-ink">
 										{#if t.kind === 'pr' || t.kind === 'sync'}
 											<span class="font-normal text-ink-soft">{t.prTitle}</span>
@@ -283,7 +291,13 @@
 							{#each alarmRows as r (r.key)}
 								<tr onclick={r.onclick} class="cursor-pointer {r.bg} hover:bg-select-soft">
 									<td class="px-3 py-1.5 font-medium text-ink-soft">
-										{r.name}{#if r.count}<span class="text-ink-faint"> ×{r.count}</span>{/if}
+										<button
+											onclick={(e) => {
+												e.stopPropagation();
+												r.onclick();
+											}}
+											class="hover:underline focus-visible:underline">{r.name}</button
+										>{#if r.count}<span class="text-ink-faint"> ×{r.count}</span>{/if}
 									</td>
 									<td class="px-3 py-1.5 text-ink">
 										{r.target}{#if r.targetSub}

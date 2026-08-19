@@ -18,8 +18,10 @@
 	/* ink */
 	--color-ink: oklch(27.9% 0.041 260.031); /* slate-800 */
 	--color-ink-soft: oklch(37.2% 0.044 257.287); /* slate-700 */
-	--color-ink-muted: oklch(55.4% 0.046 257.417); /* slate-500 */
-	--color-ink-faint: oklch(70.4% 0.04 256.788); /* slate-400 */
+	--color-ink-muted: oklch(
+		44.6% 0.043 257.281
+	); /* slate-600: slate-500 fell under 4.5:1 on the inset grounds */
+	--color-ink-faint: oklch(55.4% 0.046 257.417); /* slate-500: slate-400 was ~2.6:1 on white */
 
 	/* accent */
 	--color-accent: oklch(54.6% 0.245 262.881); /* blue-600 */
@@ -114,12 +116,16 @@
 	/* ink */
 	--color-ink: oklch(96.8% 0.007 247.896); /* slate-100 */
 	--color-ink-soft: oklch(86.9% 0.022 252.894); /* slate-300 */
-	--color-ink-muted: oklch(70.4% 0.04 256.788); /* slate-400 */
-	--color-ink-faint: oklch(55.4% 0.046 257.417); /* slate-500 */
+	--color-ink-muted: oklch(78% 0.03 255); /* between slate-300/400: keeps a step above faint */
+	--color-ink-faint: oklch(
+		70.4% 0.04 256.788
+	); /* slate-400: slate-500 was ~3.5:1 on the dark grounds */
 
 	/* accent */
-	--color-accent: oklch(62.3% 0.214 259.815); /* blue-500 */
-	--color-accent-hover: oklch(70.7% 0.165 254.624); /* blue-400 */
+	--color-accent: oklch(
+		54.6% 0.245 262.881
+	); /* blue-600, same as light: white button text on blue-500 was 3.8:1 */
+	--color-accent-hover: oklch(62.3% 0.214 259.815); /* blue-500 */
 	--color-accent-ink: oklch(70.7% 0.165 254.624); /* blue-400 */
 
 	/* selection */
