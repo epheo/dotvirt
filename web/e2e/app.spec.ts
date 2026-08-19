@@ -61,7 +61,7 @@ test('views are deep-linkable and refresh-safe', async ({ page }) => {
 	await expect(page.getByText('Read-only — these are platform objects')).toBeVisible();
 	// Topology is the Networking section home.
 	await page.goto('/networking');
-	await expect(page.getByText('provider edge').first()).toBeVisible();
+	await expect(page.getByText('Provider Gateway').first()).toBeVisible();
 	// A segment group in the tree opens its object page (Summary fact sheet).
 	await page.locator('aside a[href^="/networking/"]').first().click();
 	await expect(page.locator('main').getByText('VMs attached')).toBeVisible();
