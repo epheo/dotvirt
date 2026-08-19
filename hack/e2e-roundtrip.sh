@@ -20,8 +20,10 @@ OWNER="${OWNER:-dotvirt}"; REPO="${REPO:-$PROJECT}"
 VM="${VM:-e2e-rt-$(date +%s)}"
 TIMEOUT="${TIMEOUT:-240}" # per-wait ceiling, seconds
 
-TOK="$(oc whoami -t)"
-FTOK="$(kubectl get secret dotvirt-forge -n dotvirt -o jsonpath='{.data.token}' | base64 -d | tr -d '[:space:]')"
+# Overridable so a driver (hack/e2e-microshift.sh, CI) can inject tokens it
+# minted itself instead of assuming an oc session.
+TOK="${TOK:-$(oc whoami -t)}"
+FTOK="${FTOK:-$(kubectl get secret dotvirt-forge -n dotvirt -o jsonpath='{.data.token}' | base64 -d | tr -d '[:space:]')}"
 
 api()   { curl -ksS -H "Authorization: Bearer $TOK" "$@"; }
 forge() { curl -ksS -H "Authorization: token $FTOK" -H 'Content-Type: application/json' "$@"; }

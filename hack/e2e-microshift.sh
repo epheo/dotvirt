@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+# e2e-microshift.sh — the real-loop tier: boot a disposable MicroShift
+# (ghcr.io/epheo/microshift as a privileged container), install the published
+# dotvirt operator on it, and prove the actual product loop end to end:
+#
+#   operator install -> managed Forgejo -> ArgoCD wiring -> project create via
+#   the dotvirt API -> platform PR merge -> tenant repo + app appear ->
+#   hack/e2e-roundtrip.sh (stage VM -> PR -> merge -> Synced -> delete -> gone)
+#
+# Everything rides in-cluster URLs (forge service, argo service), so no DNS or
+# TLS scaffolding: the operator already targets webhook delivery at dotvirt's
+# own Service, and spec.forge.url/argocd.serverURL pin the rest.
+#
+# Requires root privileges (MicroShift needs OVS + cgroups), podman, kubectl.
+#   sudo hack/e2e-microshift.sh          # full run
+#   CLEAN=1 sudo hack/e2e-microshift.sh  # tear down container + loopback VG
+set -euo pipefail
+
+MS_IMAGE="${MS_IMAGE:-ghcr.io/epheo/microshift:4.22}"
+NAME="${NAME:-dotvirt-e2e-microshift}"
+# The loopback VG backing TopoLVM; the VG name must match the lvmd device-class
+# packaged in the MicroShift image.
+LVM_DISK="${LVM_DISK:-/var/lib/${NAME}/lvmdisk.image}"
+VG_NAME="myvg1"
+ARGOCD_VERSION="${ARGOCD_VERSION:-v3.1.0}"
+KUBEVIRT_VERSION="${KUBEVIRT_VERSION:-}" # empty = the published stable
+WORKDIR="${WORKDIR:-$(mktemp -d /tmp/dotvirt-e2e.XXXXXX)}"
+PROJECT="${PROJECT:-team-a}"
+TIMEOUT_INSTALL="${TIMEOUT_INSTALL:-900}" # per-phase ceiling, seconds
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export KUBECONFIG="${WORKDIR}/kubeconfig"
+
+log() { echo "=== [$(date +%H:%M:%S)] $*"; }
+pexec() { podman exec -i "${NAME}" "$@"; }
+kc() { kubectl --request-timeout=30s "$@"; }
+
+clean() {
+	podman rm -f "${NAME}" 2>/dev/null || true
+	if [ -f "${LVM_DISK}" ]; then
+		vgremove -f -y "${VG_NAME}" 2>/dev/null || true
+		dev="$(losetup -j "${LVM_DISK}" | cut -d: -f1)"
+		[ -n "${dev}" ] && losetup -d "${dev}" 2>/dev/null || true
+		rm -rf "$(dirname "${LVM_DISK}")"
+	fi
+}
+
+diagnostics() {
+	log "DIAGNOSTICS (rc=$1)"
+	kc get nodes -o wide 2>&1 | head -5 || true
+	kc get pods -A 2>&1 | grep -v Running | head -40 || true
+	kc get dotvirt -n dotvirt -o yaml 2>&1 | sed -n '/status:/,$p' | head -60 || true
+	kc get applications.argoproj.io -A 2>&1 | head -10 || true
+	log "dotvirt app logs"
+	kc logs -n dotvirt deploy/dotvirt --tail=60 2>&1 || true
+	log "operator logs"
+	kc logs -n dotvirt-operator deploy/dotvirt-operator-controller-manager --tail=60 2>&1 || true
+	log "microshift journal"
+	pexec journalctl -u microshift --no-pager -n 40 2>&1 || true
+}
+
+if [ "${CLEAN:-0}" = "1" ]; then
+	clean
+	log "cleaned up"
+	exit 0
+fi
+
+[ "$(id -u)" = "0" ] || { echo "run with sudo: MicroShift needs real privileges" >&2; exit 1; }
+trap 'rc=$?; [ ${rc} -ne 0 ] && diagnostics ${rc}; exit ${rc}' EXIT
+
+# retry <label> <seconds> <cmd...>: poll until cmd succeeds or the ceiling hits.
+retry() {
+	local label="$1" ceiling="$2" start
+	shift 2
+	start=$(date +%s)
+	until "$@" >/dev/null 2>&1; do
+		if [ $(($(date +%s) - start)) -gt "${ceiling}" ]; then
+			echo "ERROR: timed out waiting for ${label}" >&2
+			return 1
+		fi
+		sleep 5
+	done
+	log "${label} ($(($(date +%s) - start))s)"
+}
+
+# ── 1. Boot MicroShift as a privileged container ───────────────────────────────
+log "host prerequisites"
+modprobe openvswitch || true
+if [ ! -f "${LVM_DISK}" ]; then
+	mkdir -p "$(dirname "${LVM_DISK}")"
+	truncate --size=4G "${LVM_DISK}"
+	dev="$(losetup --find --show --nooverlap "${LVM_DISK}")"
+	vgcreate -f -y "${VG_NAME}" "${dev}"
+fi
+
+podman rm -f "${NAME}" 2>/dev/null || true
+log "starting ${NAME} from ${MS_IMAGE}"
+vol_opts=(--tty --volume /dev:/dev)
+for device in input snd dri; do
+	[ -d "/dev/${device}" ] && vol_opts+=(--tmpfs "/dev/${device}")
+done
+podman run --privileged -d \
+	--ulimit nofile=524288:524288 \
+	--dns-search=. \
+	"${vol_opts[@]}" \
+	--tmpfs /var/lib/containers \
+	--name "${NAME}" \
+	--hostname "${NAME}" \
+	"${MS_IMAGE}" >/dev/null
+
+retry "microshift.service active" 300 pexec systemctl is-active -q microshift.service
+
+# Kubeconfig for the host: the in-container kubeadmin config, repointed at the
+# container IP. Client certs stay; the server cert isn't SAN'd for the IP, so
+# verification is skipped — this is a throwaway test cluster.
+IP="$(podman inspect -f '{{.NetworkSettings.IPAddress}}' "${NAME}")"
+retry "kubeadmin kubeconfig" 120 pexec test -f /var/lib/microshift/resources/kubeadmin/kubeconfig
+pexec cat /var/lib/microshift/resources/kubeadmin/kubeconfig \
+	| sed -e "s#server: .*#server: https://${IP}:6443#" \
+		-e '/certificate-authority-data:/d' \
+		-e "s#cluster:#cluster:\n    insecure-skip-tls-verify: true#" >"${KUBECONFIG}"
+chmod 600 "${KUBECONFIG}"
+
+node_ready() { kc get nodes 2>/dev/null | grep -q ' Ready '; }
+retry "node Ready" 300 node_ready
+retry "router deployed" 600 kc -n openshift-ingress get deploy router-default
+retry "storage class present" 600 sh -c 'kubectl get storageclass -o name | grep -q .'
+
+# ── 2. ArgoCD (hard dependency; dotvirt never installs it) ─────────────────────
+log "installing Argo CD ${ARGOCD_VERSION}"
+kc create namespace argocd --dry-run=client -o yaml | kc apply -f -
+curl -fsSL "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml" | kc apply -n argocd -f -
+# Plain-HTTP server so the forge can deliver webhooks to the in-cluster Service
+# without a trust store.
+kc -n argocd patch configmap argocd-cmd-params-cm --type merge -p '{"data":{"server.insecure":"true"}}'
+kc -n argocd rollout restart deploy argocd-server
+for d in argocd-repo-server argocd-server argocd-applicationset-controller; do
+	retry "argocd ${d} available" "${TIMEOUT_INSTALL}" kc -n argocd wait deploy/"${d}" --for=condition=Available --timeout=10s
+done
+
+# ── 3. KubeVirt (emulation: the loop applies VM objects, none needs to boot) ──
+if [ -z "${KUBEVIRT_VERSION}" ]; then
+	KUBEVIRT_VERSION="$(curl -fsSL https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt)"
+fi
+log "installing KubeVirt ${KUBEVIRT_VERSION}"
+kc apply -f "https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/kubevirt-operator.yaml"
+kc apply -f - <<EOF
+apiVersion: kubevirt.io/v1
+kind: KubeVirt
+metadata:
+  name: kubevirt
+  namespace: kubevirt
+spec:
+  configuration:
+    developerConfiguration:
+      useEmulation: true
+EOF
+retry "kubevirt Available" "${TIMEOUT_INSTALL}" \
+	kc -n kubevirt wait kubevirt/kubevirt --for=condition=Available --timeout=10s
+# The roundtrip references u1.medium/fedora; recent KubeVirt deploys the common
+# instancetypes itself — install the bundle only when this one doesn't.
+if ! kc get virtualmachineclusterinstancetype u1.medium >/dev/null 2>&1; then
+	log "installing common-instancetypes bundle"
+	kc apply -f "https://github.com/kubevirt/common-instancetypes/releases/latest/download/common-clusterinstancetypes-bundle.yaml"
+	kc apply -f "https://github.com/kubevirt/common-instancetypes/releases/latest/download/common-clusterpreferences-bundle.yaml"
+fi
+
+# ── 4. dotvirt operator (published digest-pinned images) + CR ─────────────────
+log "deploying the dotvirt operator"
+make -C "${REPO_ROOT}/operator" deploy >/dev/null
+retry "operator available" "${TIMEOUT_INSTALL}" \
+	kc -n dotvirt-operator wait deploy --all --for=condition=Available --timeout=10s
+
+log "applying the Dotvirt CR"
+kc create namespace dotvirt --dry-run=client -o yaml | kc apply -f -
+kc apply -f - <<EOF
+apiVersion: dotvirt.io/v1alpha1
+kind: Dotvirt
+metadata:
+  name: dotvirt
+  namespace: dotvirt
+spec:
+  forge:
+    managed: true
+    # In-cluster URL: clones, Argo repo-creds and webhooks all resolve without
+    # external DNS or a trust store — the point of this hermetic loop.
+    url: http://dotvirt-forgejo.dotvirt.svc.cluster.local:3000
+  argocd:
+    namespace: argocd
+    serverURL: http://argocd-server.argocd.svc.cluster.local
+  ingress:
+    type: route
+EOF
+retry "Dotvirt Available" "${TIMEOUT_INSTALL}" sh -c \
+	"kubectl -n dotvirt get dotvirt dotvirt -o jsonpath='{.status.conditions[?(@.type==\"Available\")].status}' | grep -q True"
+retry "dotvirt deployment ready" "${TIMEOUT_INSTALL}" \
+	kc -n dotvirt wait deploy/dotvirt --for=condition=Available --timeout=10s
+
+# ── 5. Reach the API from the host ────────────────────────────────────────────
+log "port-forwarding dotvirt + forge"
+kc -n dotvirt port-forward svc/dotvirt 18080:8080 >/dev/null 2>&1 &
+kc -n dotvirt port-forward svc/dotvirt-forgejo 13000:3000 >/dev/null 2>&1 &
+PF_PIDS="$(jobs -p)"
+trap 'rc=$?; kill ${PF_PIDS} 2>/dev/null || true; [ ${rc} -ne 0 ] && diagnostics ${rc}; exit ${rc}' EXIT
+BASE="http://127.0.0.1:18080"
+FORGE="http://127.0.0.1:13000"
+retry "dotvirt healthz" 120 curl -fsS "${BASE}/api/healthz"
+
+# Caller token: the loop runs as a real (admin) user, exactly like production.
+kc -n dotvirt create serviceaccount e2e-admin --dry-run=client -o yaml | kc apply -f -
+kc create clusterrolebinding e2e-admin --clusterrole=cluster-admin \
+	--serviceaccount=dotvirt:e2e-admin --dry-run=client -o yaml | kc apply -f -
+TOK="$(kc -n dotvirt create token e2e-admin --duration=6h)"
+FTOK="$(kc get secret dotvirt-forge -n dotvirt -o jsonpath='{.data.token}' | base64 -d | tr -d '[:space:]')"
+
+api() { curl -fsS -H "Authorization: Bearer ${TOK}" "$@"; }
+forge() { curl -fsS -H "Authorization: token ${FTOK}" -H 'Content-Type: application/json' "$@"; }
+
+# ── 6. Create the tenant project through dotvirt itself ───────────────────────
+log "creating project ${PROJECT} via the dotvirt API"
+api -X POST "${BASE}/api/projects" -H 'Content-Type: application/json' \
+	-d "{\"name\":\"${PROJECT}\"}" >/dev/null
+PR="$(api -X POST "${BASE}/api/draft/propose?project=platform" -H 'Content-Type: application/json' \
+	-d '{"title":"e2e: create project","message":""}' | grep -o '"prNumber":[0-9]*' | cut -d: -f2)"
+[ -n "${PR}" ] || { echo "ERROR: platform propose returned no PR" >&2; exit 1; }
+merge_pr() {
+	local repo="$1" pr="$2" i
+	for i in $(seq 1 30); do
+		forge -o /dev/null -X POST "${FORGE}/api/v1/repos/dotvirt/${repo}/pulls/${pr}/merge" \
+			-d '{"Do":"merge"}' 2>/dev/null && return 0
+		sleep 2
+	done
+	echo "ERROR: merge of ${repo}#${pr} failed" >&2
+	return 1
+}
+merge_pr platform "${PR}"
+retry "namespace ${PROJECT} labeled" "${TIMEOUT_INSTALL}" sh -c \
+	"kubectl get namespace ${PROJECT} -o jsonpath='{.metadata.labels.dotvirt\.io/project}' 2>/dev/null | grep -q ."
+retry "tenant repo exists" 300 forge -o /dev/null "${FORGE}/api/v1/repos/dotvirt/${PROJECT}"
+retry "project in inventory" 300 sh -c \
+	"curl -fsS -H 'Authorization: Bearer ${TOK}' '${BASE}/api/inventory' | grep -q '\"${PROJECT}\"'"
+
+# ── 7. The round-trip itself ───────────────────────────────────────────────────
+log "running the GitOps round-trip"
+OUT="${WORKDIR}/roundtrip.txt"
+BASE="${BASE}" FORGE="${FORGE}" PROJECT="${PROJECT}" NS="${PROJECT}" \
+	TOK="${TOK}" FTOK="${FTOK}" TIMEOUT=300 \
+	"${REPO_ROOT}/hack/e2e-roundtrip.sh" | tee "${OUT}"
+
+# The measurement script prints TIMEOUT per stalled hop instead of failing;
+# in CI a stalled hop IS the failure.
+if grep -q "TIMEOUT\|!!" "${OUT}"; then
+	echo "ERROR: the round-trip stalled (see above)" >&2
+	exit 1
+fi
+log "round-trip complete — the real loop holds"
