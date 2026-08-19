@@ -28,9 +28,8 @@ import (
 // embedded interface panics on anything a test doesn't expect to be reached.
 type stagingDraft struct {
 	Draft
-	proposed  []model.ProposeRequest
-	unstaged  []string
-	discarded []string
+	proposed []model.ProposeRequest
+	unstaged []string
 }
 
 func (d *stagingDraft) Propose(id auth.Identity, proj project.ProjectInfo, req model.ProposeRequest) (model.ProposeResult, error) {
