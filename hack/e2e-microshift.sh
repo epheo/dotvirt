@@ -71,13 +71,15 @@ fi
 trap 'rc=$?; [ ${rc} -ne 0 ] && diagnostics ${rc}; exit ${rc}' EXIT
 
 # retry <label> <seconds> <cmd...>: poll until cmd succeeds or the ceiling hits.
-# Attempts are individually time-bounded and a heartbeat keeps the CI log live.
+# A heartbeat keeps the CI log live. The command may be a shell FUNCTION, so no
+# timeout wrapper here — each helper bounds its own attempt (pexec wraps podman
+# in timeout, kc carries --request-timeout, curl carries --max-time).
 retry() {
 	local label="$1" ceiling="$2" start beat
 	shift 2
 	start=$(date +%s)
 	beat=$(date +%s)
-	until timeout 25 "$@" >/dev/null 2>&1; do
+	until "$@" >/dev/null 2>&1; do
 		local now
 		now=$(date +%s)
 		if [ $((now - start)) -gt "${ceiling}" ]; then
@@ -216,7 +218,7 @@ PF_PIDS="$(jobs -p)"
 trap 'rc=$?; kill ${PF_PIDS} 2>/dev/null || true; [ ${rc} -ne 0 ] && diagnostics ${rc}; exit ${rc}' EXIT
 BASE="http://127.0.0.1:18080"
 FORGE="http://127.0.0.1:13000"
-retry "dotvirt healthz" 120 curl -fsS "${BASE}/api/healthz"
+retry "dotvirt healthz" 120 curl -fsS --max-time 10 "${BASE}/api/healthz"
 
 # Caller token: the loop runs as a real (admin) user, exactly like production.
 kc -n dotvirt create serviceaccount e2e-admin --dry-run=client -o yaml | kc apply -f -
@@ -225,8 +227,8 @@ kc create clusterrolebinding e2e-admin --clusterrole=cluster-admin \
 TOK="$(kc -n dotvirt create token e2e-admin --duration=6h)"
 FTOK="$(kc get secret dotvirt-forge -n dotvirt -o jsonpath='{.data.token}' | base64 -d | tr -d '[:space:]')"
 
-api() { curl -fsS -H "Authorization: Bearer ${TOK}" "$@"; }
-forge() { curl -fsS -H "Authorization: token ${FTOK}" -H 'Content-Type: application/json' "$@"; }
+api() { curl -fsS --max-time 30 -H "Authorization: Bearer ${TOK}" "$@"; }
+forge() { curl -fsS --max-time 30 -H "Authorization: token ${FTOK}" -H 'Content-Type: application/json' "$@"; }
 
 # ── 6. Create the tenant project through dotvirt itself ───────────────────────
 log "creating project ${PROJECT} via the dotvirt API"
