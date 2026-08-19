@@ -68,6 +68,44 @@ jobs:
       - run: npm run build
         working-directory: web
 
+  # The hermetic UI suite: the built SPA against the scripted fixture backend
+  # (web/e2e/fixture) — no cluster, no forge. Holds the app in the corner-case
+  # states a live cluster never shows on demand (standing sync failures,
+  # degraded planes, 300-VM fleets, WS drops) and gates on behavior, console
+  # errors, and axe. Screenshots of every key view upload as an artifact for a
+  # human pass.
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - run: npx playwright install --with-deps chromium
+        working-directory: web
+      - run: npm run test:ui
+        working-directory: web
+      - name: Upload view screenshots (human-reviewable)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: web/e2e/screenshots/
+          if-no-files-found: ignore
+      - name: Upload the Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          if-no-files-found: ignore
+
   # Merge gate: build both images (no push) + validate the OLM artifacts, so a broken
   # Containerfile/Dockerfile, stale generated manifest, or invalid CSV/catalog fails
   # the PR instead of main. Uses no secrets, so it also runs on fork PRs.

@@ -1,0 +1,34 @@
+# Nightly fuzzing. PR CI runs each fuzz target's committed corpus
+# deterministically (plain `go test`); the open-ended search runs here so a
+# random discovery files as a red nightly with a reproducer, never a flaky PR.
+# A failing input is printed base64-encoded in the log — commit it under
+# testdata/fuzz/<target>/ to make it a permanent regression seed.
+name: fuzz
+
+on:
+  schedule:
+    - cron: '43 5 * * *'
+  workflow_dispatch:
+
+env:
+  GOTOOLCHAIN: auto
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Fuzz the manifest line editor
+        run: go test -fuzz FuzzApplyEdit -fuzztime 10m ./internal/manifest/
+        env: { GOFLAGS: -buildvcs=false }
+      - name: Surface any new crasher
+        if: failure()
+        run: |
+          for f in internal/manifest/testdata/fuzz/*/*; do
+            echo "::group::$f"
+            cat "$f"
+            echo "::endgroup::"
+          done
