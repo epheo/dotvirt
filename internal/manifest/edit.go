@@ -56,7 +56,16 @@ func ApplyEdit(content []byte, namespace, name string, edit VMEdit) ([]byte, err
 	applyDisksNetworks(ed, vm, edit)
 	applyVolumeMigrations(ed, vm, edit.MigrateVolumes)
 
-	return ed.bytes(), nil
+	// Line splicing trusts the document's indentation; degenerate-but-parseable
+	// YAML (found by fuzzing: a tagged scalar where a mapping child sits at a
+	// shallower indent) can defeat that and corrupt the file. Refuse here, at
+	// stage time, rather than let a broken manifest land in a PR and fail only
+	// at apply time.
+	out := ed.bytes()
+	if _, err := ParseVMs("", out, namespace); err != nil {
+		return nil, fmt.Errorf("edit would corrupt the manifest of %s/%s; edit it in git directly: %w", namespace, name, err)
+	}
+	return out, nil
 }
 
 // applyEvictionStrategy sets (or, for "", removes) the template's

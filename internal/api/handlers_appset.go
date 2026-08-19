@@ -21,7 +21,14 @@ func (s *Server) handleAppSetPlugin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "appset plugin not configured", http.StatusNotFound)
 		return
 	}
-	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	// Require the Bearer scheme outright: TrimPrefix alone would also accept a
+	// bare "Authorization: <token>", quietly widening the accepted forms.
+	authz := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authz, "Bearer ") {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	got := strings.TrimPrefix(authz, "Bearer ")
 	if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.AppSetPluginToken)) != 1 {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
