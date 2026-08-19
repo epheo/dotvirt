@@ -58,10 +58,10 @@ diagnostics() {
 	kc logs -n dotvirt deploy/dotvirt --tail=60 2>&1 || true
 	log "operator logs"
 	kc logs -n dotvirt-operator deploy/dotvirt-operator-controller-manager --tail=60 2>&1 || true
-	log "microshift resources tree"
-	pexec ls -laR /var/lib/microshift/resources 2>&1 | head -40 || true
-	log "microshift journal"
+	log "microshift journal (best-effort; exec can hang on this podman)"
 	pexec journalctl -u microshift --no-pager -n 40 2>&1 || true
+	log "container console tail"
+	podman logs --tail 20 "${NAME}" 2>&1 || true
 }
 
 if [ "${CLEAN:-0}" = "1" ]; then
@@ -126,17 +126,26 @@ podman run --privileged -d \
 	--hostname "${NAME}" \
 	"${MS_IMAGE}" >/dev/null
 
-retry "microshift.service active" 300 pexec systemctl is-active -q microshift.service
-
-# Kubeconfig for the host: the in-container kubeadmin config, repointed at the
-# container IP. Client certs stay; the server cert isn't SAN'd for the IP, so
-# verification is skipped — this is a throwaway test cluster.
+# The critical path avoids podman exec entirely: exec sessions into the booted
+# systemd container hang intermittently (and forever) on the runner's podman.
+# The apiserver is probed over TCP and the kubeconfig leaves via podman cp,
+# which rides the container mount, not an exec session.
 IP="$(podman inspect -f '{{.NetworkSettings.IPAddress}}' "${NAME}")"
-retry "kubeadmin kubeconfig" 300 pexec test -f /var/lib/microshift/resources/kubeadmin/kubeconfig
-pexec cat /var/lib/microshift/resources/kubeadmin/kubeconfig \
-	| sed -e "s#server: .*#server: https://${IP}:6443#" \
-		-e '/certificate-authority-data:/d' \
-		-e "s#cluster:#cluster:\n    insecure-skip-tls-verify: true#" >"${KUBECONFIG}"
+apiserver_up() {
+	[ "$(curl -ks -o /dev/null -w '%{http_code}' --max-time 5 "https://${IP}:6443/livez")" != "000" ]
+}
+retry "apiserver answering on ${IP}:6443" 600 apiserver_up
+
+copy_kubeconfig() {
+	podman cp "${NAME}:/var/lib/microshift/resources/kubeadmin/kubeconfig" "${WORKDIR}/kubeconfig.raw" 2>/dev/null
+}
+retry "kubeadmin kubeconfig" 300 copy_kubeconfig
+# Repoint at the container IP. Client certs stay; the server cert isn't SAN'd
+# for the IP, so verification is skipped — this is a throwaway test cluster.
+sed -e "s#server: .*#server: https://${IP}:6443#" \
+	-e '/certificate-authority-data:/d' \
+	-e "s#cluster:#cluster:\n    insecure-skip-tls-verify: true#" \
+	"${WORKDIR}/kubeconfig.raw" >"${KUBECONFIG}"
 chmod 600 "${KUBECONFIG}"
 
 node_ready() { kc get nodes 2>/dev/null | grep -q ' Ready '; }
