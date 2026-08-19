@@ -32,7 +32,9 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export KUBECONFIG="${WORKDIR}/kubeconfig"
 
 log() { echo "=== [$(date +%H:%M:%S)] $*"; }
-pexec() { podman exec -i "${NAME}" "$@"; }
+# Every exec is time-bounded: a single hung attempt would otherwise defeat the
+# retry ceiling (checked only BETWEEN attempts) and stall the job to its kill.
+pexec() { timeout 30 podman exec "${NAME}" "$@"; }
 kc() { kubectl --request-timeout=30s "$@"; }
 
 clean() {
@@ -69,14 +71,22 @@ fi
 trap 'rc=$?; [ ${rc} -ne 0 ] && diagnostics ${rc}; exit ${rc}' EXIT
 
 # retry <label> <seconds> <cmd...>: poll until cmd succeeds or the ceiling hits.
+# Attempts are individually time-bounded and a heartbeat keeps the CI log live.
 retry() {
-	local label="$1" ceiling="$2" start
+	local label="$1" ceiling="$2" start beat
 	shift 2
 	start=$(date +%s)
-	until "$@" >/dev/null 2>&1; do
-		if [ $(($(date +%s) - start)) -gt "${ceiling}" ]; then
+	beat=$(date +%s)
+	until timeout 25 "$@" >/dev/null 2>&1; do
+		local now
+		now=$(date +%s)
+		if [ $((now - start)) -gt "${ceiling}" ]; then
 			echo "ERROR: timed out waiting for ${label}" >&2
 			return 1
+		fi
+		if [ $((now - beat)) -ge 60 ]; then
+			echo "    ... still waiting for ${label} ($((now - start))s)"
+			beat=${now}
 		fi
 		sleep 5
 	done
@@ -94,7 +104,9 @@ if [ ! -f "${LVM_DISK}" ]; then
 fi
 
 podman rm -f "${NAME}" 2>/dev/null || true
-log "starting ${NAME} from ${MS_IMAGE}"
+log "pulling ${MS_IMAGE}"
+podman pull -q "${MS_IMAGE}" >/dev/null
+log "starting ${NAME}"
 vol_opts=(--tty --volume /dev:/dev)
 for device in input snd dri; do
 	[ -d "/dev/${device}" ] && vol_opts+=(--tmpfs "/dev/${device}")
