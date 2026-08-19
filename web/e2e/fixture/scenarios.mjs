@@ -279,6 +279,31 @@ const base = {
 					},
 				],
 			},
+			{
+				name: 'team-batch',
+				repo: 'https://forge.example/dotvirt/team-batch.git',
+				// Converged after a failed apply: operation history says Failed, but
+				// sync is green - the UI must treat the record as history (#154).
+				gitOps: {
+					sync: 'Synced',
+					health: 'Healthy',
+					operation: 'Failed',
+					syncError: 'one earlier apply was refused; since converged',
+					revision: 'cc0011d',
+				},
+				namespaces: [
+					{
+						namespace: 'batch-prod',
+						vms: [
+							vm('batch-prod', 'batch-1', {
+								nodeName: 'worker-2',
+								guestIP: '10.128.0.30',
+								ips: ['10.128.0.30'],
+							}),
+						],
+					},
+				],
+			},
 		],
 		proposals: [
 			{
@@ -516,6 +541,10 @@ const drift = {
 						namespace: 'db-prod',
 						vms: [
 							vm('db-prod', 'db-1'),
+							vm('db-prod', 'pinned-legacy', {
+								scheduling: { custom: true },
+								nodeName: 'worker-2',
+							}),
 							// Cluster-only in a HEALTHY project: the adopt banner must offer
 							// the capture (a broken repo suppresses it; RepoBanner owns those).
 							vm('db-prod', 'legacy-1', {
@@ -607,7 +636,14 @@ function largeScenario() {
 	};
 }
 
+// SSO login-screen states: pending guides an admin to finish setup instead of
+// offering a button that fails; ready offers the SSO path beside the token.
+const sso = { ...base, name: 'sso', authMethods: { sso: true, ssoPending: true } };
+const ssoready = { ...base, name: 'ssoready', authMethods: { sso: true, ssoPending: false } };
+
 export const scenarios = {
+	sso,
+	ssoready,
 	base,
 	empty,
 	degraded,

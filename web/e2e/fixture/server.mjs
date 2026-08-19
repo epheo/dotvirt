@@ -154,7 +154,8 @@ async function handleAPI(req, res, url) {
 		});
 		return res.end(JSON.stringify(s.user));
 	}
-	if (path === '/api/auth/methods') return sendJSON(res, 200, { sso: false, ssoPending: false });
+	if (path === '/api/auth/methods')
+		return sendJSON(res, 200, s.authMethods ?? { sso: false, ssoPending: false });
 	if (path === '/api/logout') {
 		res.writeHead(200, { 'Set-Cookie': 'dv_fixture=; Path=/; Max-Age=0' });
 		return res.end();
