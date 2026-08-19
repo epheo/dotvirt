@@ -57,6 +57,8 @@ diagnostics() {
 	kc logs -n dotvirt deploy/dotvirt --tail=60 2>&1 || true
 	log "operator logs"
 	kc logs -n dotvirt-operator deploy/dotvirt-operator-controller-manager --tail=60 2>&1 || true
+	log "microshift resources tree"
+	pexec ls -laR /var/lib/microshift/resources 2>&1 | head -40 || true
 	log "microshift journal"
 	pexec journalctl -u microshift --no-pager -n 40 2>&1 || true
 }
@@ -83,7 +85,8 @@ retry() {
 		local now
 		now=$(date +%s)
 		if [ $((now - start)) -gt "${ceiling}" ]; then
-			echo "ERROR: timed out waiting for ${label}" >&2
+			echo "ERROR: timed out waiting for ${label}; the last attempt said:" >&2
+			"$@" >&2 2>&1 || true
 			return 1
 		fi
 		if [ $((now - beat)) -ge 60 ]; then
@@ -128,7 +131,7 @@ retry "microshift.service active" 300 pexec systemctl is-active -q microshift.se
 # container IP. Client certs stay; the server cert isn't SAN'd for the IP, so
 # verification is skipped — this is a throwaway test cluster.
 IP="$(podman inspect -f '{{.NetworkSettings.IPAddress}}' "${NAME}")"
-retry "kubeadmin kubeconfig" 120 pexec test -f /var/lib/microshift/resources/kubeadmin/kubeconfig
+retry "kubeadmin kubeconfig" 300 pexec test -f /var/lib/microshift/resources/kubeadmin/kubeconfig
 pexec cat /var/lib/microshift/resources/kubeadmin/kubeconfig \
 	| sed -e "s#server: .*#server: https://${IP}:6443#" \
 		-e '/certificate-authority-data:/d' \
