@@ -56,15 +56,15 @@ func (d *stagingDraft) Get(id auth.Identity, proj project.ProjectInfo) (model.Dr
 func draftServer(t *testing.T, d Draft) *Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews":
+		switch r.URL.Path {
+		case "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews":
 			resp := authzv1.SelfSubjectAccessReview{
 				TypeMeta: metav1.TypeMeta{Kind: "SelfSubjectAccessReview", APIVersion: "authorization.k8s.io/v1"},
 				Status:   authzv1.SubjectAccessReviewStatus{Allowed: r.Header.Get("Authorization") == "Bearer admin-token"},
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
-		case r.URL.Path == "/api/v1/namespaces":
+		case "/api/v1/namespaces":
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(corev1.NamespaceList{
 				TypeMeta: metav1.TypeMeta{Kind: "NamespaceList", APIVersion: "v1"},
