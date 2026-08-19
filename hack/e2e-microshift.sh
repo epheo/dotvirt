@@ -25,6 +25,7 @@ VG_NAME="myvg1"
 ARGOCD_VERSION="${ARGOCD_VERSION:-v3.1.0}"
 KUBEVIRT_VERSION="${KUBEVIRT_VERSION:-}" # empty = the published stable
 WORKDIR="${WORKDIR:-$(mktemp -d /tmp/dotvirt-e2e.XXXXXX)}"
+mkdir -p "${WORKDIR}" # an env-supplied WORKDIR (CI) arrives uncreated
 PROJECT="${PROJECT:-team-a}"
 TIMEOUT_INSTALL="${TIMEOUT_INSTALL:-900}" # per-phase ceiling, seconds
 
