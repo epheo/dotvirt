@@ -137,16 +137,40 @@ apiserver_up() {
 retry "apiserver answering on ${IP}:6443" 600 apiserver_up
 
 copy_kubeconfig() {
-	podman cp "${NAME}:/var/lib/microshift/resources/kubeadmin/kubeconfig" "${WORKDIR}/kubeconfig.raw" 2>/dev/null
+	podman cp "${NAME}:/var/lib/microshift/resources/kubeadmin/kubeconfig" "${WORKDIR}/kubeconfig.raw" 2>/dev/null \
+		&& [ -s "${WORKDIR}/kubeconfig.raw" ]
 }
 retry "kubeadmin kubeconfig" 300 copy_kubeconfig
-# Repoint at the container IP. Client certs stay; the server cert isn't SAN'd
-# for the IP, so verification is skipped — this is a throwaway test cluster.
-sed -e "s#server: .*#server: https://${IP}:6443#" \
-	-e '/certificate-authority-data:/d' \
-	-e "s#cluster:#cluster:\n    insecure-skip-tls-verify: true#" \
-	"${WORKDIR}/kubeconfig.raw" >"${KUBECONFIG}"
+# A fresh minimal kubeconfig around the extracted client credential — never
+# sed-edit YAML (a pattern like 'cluster:' also matches 'clusters:' and quietly
+# corrupts the file). The server cert isn't SAN'd for the container IP, so
+# verification is skipped: a throwaway test cluster.
+CLIENT_CERT="$(awk '/client-certificate-data:/{print $2}' "${WORKDIR}/kubeconfig.raw")"
+CLIENT_KEY="$(awk '/client-key-data:/{print $2}' "${WORKDIR}/kubeconfig.raw")"
+[ -n "${CLIENT_CERT}" ] && [ -n "${CLIENT_KEY}" ] || { echo "ERROR: no client credential in the kubeadmin kubeconfig" >&2; exit 1; }
+cat >"${KUBECONFIG}" <<KCFG
+apiVersion: v1
+kind: Config
+clusters:
+- name: e2e
+  cluster:
+    server: https://${IP}:6443
+    insecure-skip-tls-verify: true
+contexts:
+- name: e2e
+  context:
+    cluster: e2e
+    user: admin
+current-context: e2e
+users:
+- name: admin
+  user:
+    client-certificate-data: ${CLIENT_CERT}
+    client-key-data: ${CLIENT_KEY}
+KCFG
 chmod 600 "${KUBECONFIG}"
+kc_up() { kc get --raw /livez; }
+retry "kubectl reaches the cluster" 60 kc_up
 
 node_ready() { kc get nodes 2>/dev/null | grep -q ' Ready '; }
 retry "node Ready" 300 node_ready
