@@ -62,6 +62,11 @@ diagnostics() {
 	log "recent warning events"
 	kc get events -A --field-selector type=Warning \
 		--sort-by=.lastTimestamp 2>/dev/null | tail -15 || true
+	log "pvcs"
+	kc get pvc -A 2>&1 | head -8 || true
+	log "topolvm logs"
+	kc -n topolvm-system logs deploy/topolvm-controller --tail=15 --all-containers 2>&1 | tail -15 || true
+	kc -n topolvm-system logs ds/topolvm-lvmd-0 --tail=10 2>&1 | tail -10 || true
 	log "dotvirt app logs"
 	kc logs -n dotvirt deploy/dotvirt --tail=60 2>&1 || true
 	log "operator logs"
@@ -184,6 +189,13 @@ node_ready() { kc get nodes 2>/dev/null | grep -q ' Ready '; }
 retry "node Ready" 300 node_ready
 retry "router deployed" 600 kc -n openshift-ingress get deploy router-default
 retry "storage class present" 600 sh -c 'kubectl get storageclass -o name | grep -q .'
+# TopoLVM must be fully up before anything claims a PVC: lvmd (DaemonSet)
+# mints /run/topolvm for the node plugin, and the controller provisions.
+topolvm_ready() {
+	[ "$(kc -n topolvm-system get pods --no-headers 2>/dev/null | awk '$3!="Running"' | wc -l)" = "0" ] \
+		&& [ "$(kc -n topolvm-system get pods --no-headers 2>/dev/null | wc -l)" -ge 3 ]
+}
+retry "topolvm ready" 600 topolvm_ready
 
 # ── 2. ArgoCD (hard dependency; dotvirt never installs it) ─────────────────────
 log "installing Argo CD ${ARGOCD_VERSION}"
