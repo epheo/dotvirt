@@ -54,6 +54,14 @@ diagnostics() {
 	kc get pods -A 2>&1 | grep -v Running | head -40 || true
 	kc get dotvirt -n dotvirt -o yaml 2>&1 | sed -n '/status:/,$p' | head -60 || true
 	kc get applications.argoproj.io -A 2>&1 | head -10 || true
+	log "waiting containers (reason + message)"
+	kc get pods -A -o json 2>/dev/null | jq -r '.items[]
+		| . as $p | .status.containerStatuses[]? | select(.state.waiting)
+		| $p.metadata.namespace + "/" + $p.metadata.name + " [" + .name + "]: "
+		+ .state.waiting.reason + " - " + (.state.waiting.message // "")' 2>/dev/null | head -20 || true
+	log "recent warning events"
+	kc get events -A --field-selector type=Warning \
+		--sort-by=.lastTimestamp 2>/dev/null | tail -15 || true
 	log "dotvirt app logs"
 	kc logs -n dotvirt deploy/dotvirt --tail=60 2>&1 || true
 	log "operator logs"
