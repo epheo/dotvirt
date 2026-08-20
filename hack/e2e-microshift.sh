@@ -265,6 +265,24 @@ retry "operator available" "${TIMEOUT_INSTALL}" \
 
 log "applying the Dotvirt CR"
 kc create namespace dotvirt --dry-run=client -o yaml | kc apply -f -
+# Port-80 alias in front of the managed Forgejo, so spec.forge.url can stay
+# portless: the RELEASED operator still renders the Route host from the URL's
+# host INCLUDING the port, which the apiserver rejects (fixed in this tree by
+# ForgejoHost using Hostname(); drop this shim once that release ships).
+kc apply -f - <<EOF
+apiVersion: v1
+kind: Service
+metadata:
+  name: forge
+  namespace: dotvirt
+spec:
+  selector:
+    app: dotvirt-forgejo
+  ports:
+  - name: http
+    port: 80
+    targetPort: 3000
+EOF
 kc apply -f - <<EOF
 apiVersion: dotvirt.io/v1alpha1
 kind: Dotvirt
@@ -276,7 +294,7 @@ spec:
     managed: true
     # In-cluster URL: clones, Argo repo-creds and webhooks all resolve without
     # external DNS or a trust store — the point of this hermetic loop.
-    url: http://dotvirt-forgejo.dotvirt.svc.cluster.local:3000
+    url: http://forge.dotvirt.svc.cluster.local
   argocd:
     namespace: argocd
     serverURL: http://argocd-server.argocd.svc.cluster.local
@@ -291,7 +309,7 @@ retry "dotvirt deployment ready" "${TIMEOUT_INSTALL}" \
 # ── 5. Reach the API from the host ────────────────────────────────────────────
 log "port-forwarding dotvirt + forge"
 kc -n dotvirt port-forward svc/dotvirt 18080:8080 >/dev/null 2>&1 &
-kc -n dotvirt port-forward svc/dotvirt-forgejo 13000:3000 >/dev/null 2>&1 &
+kc -n dotvirt port-forward svc/forge 13000:80 >/dev/null 2>&1 &
 PF_PIDS="$(jobs -p)"
 trap 'rc=$?; kill ${PF_PIDS} 2>/dev/null || true; [ ${rc} -ne 0 ] && diagnostics ${rc}; exit ${rc}' EXIT
 BASE="http://127.0.0.1:18080"
