@@ -300,6 +300,16 @@ spec:
     port: 80
     targetPort: 3000
 EOF
+# Shim for the RELEASED operator: it demands the OpenShift managed ingress CA
+# for any managed forge — even a plain-http one — and MicroShift doesn't ship
+# openshift-config-managed/default-ingress-cert. Feed it the cluster CA; the
+# entry is inert for an http repo. Fixed in this tree (http skip); drop the
+# shim once that release ships.
+kc create namespace openshift-config-managed --dry-run=client -o yaml | kc apply -f -
+CLUSTER_CA="$(kc -n default get configmap kube-root-ca.crt -o jsonpath='{.data.ca\.crt}')"
+kc -n openshift-config-managed create configmap default-ingress-cert \
+	--from-literal=ca-bundle.crt="${CLUSTER_CA}" --dry-run=client -o yaml | kc apply -f -
+
 kc apply -f - <<EOF
 apiVersion: dotvirt.io/v1alpha1
 kind: Dotvirt

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -212,6 +213,12 @@ func (r *DotvirtReconciler) ensureForgeTLSTrust(ctx context.Context, dv *dotvirt
 	}
 	host := install.ForgejoHost(dv)
 	if host == "" {
+		return nil
+	}
+	// A plain-http forge URL (an in-cluster service, an eval install) has no TLS
+	// to trust; requiring the ingress CA would wedge the whole reconcile on
+	// platforms that don't publish default-ingress-cert (MicroShift).
+	if u, err := url.Parse(dv.Spec.Forge.URL); err == nil && u.Scheme == "http" {
 		return nil
 	}
 	var ingressCA corev1.ConfigMap
