@@ -377,6 +377,22 @@ retry "tenant repo exists" 300 forge -o /dev/null "${FORGE}/api/v1/repos/dotvirt
 retry "project in inventory" 300 sh -c \
 	"curl -fsS -H 'Authorization: Bearer ${TOK}' '${BASE}/api/inventory' | grep -q '\"${PROJECT}\"'"
 
+# ── 6b. Anchor VM: the repo must never render EMPTY ───────────────────────────
+# Argo's automated.allowEmpty stays false by design (an emptied repo cannot
+# wipe a tier), so the round-trip's delete would never prune if its VM were the
+# repo's only manifest. One permanent anchor VM keeps the source non-empty —
+# and doubles as a second pass over the create loop.
+log "staging the anchor VM"
+api -X POST "${BASE}/api/vms" -H 'Content-Type: application/json' -d "{
+  \"name\":\"anchor\",\"namespace\":\"${PROJECT}\",\"instancetype\":\"u1.medium\",\"preference\":\"fedora\",
+  \"osImage\":{\"name\":\"fedora\",\"namespace\":\"openshift-virtualization-os-images\"},
+  \"diskSize\":\"10Gi\",\"running\":false}" >/dev/null
+PR="$(api -X POST "${BASE}/api/draft/propose?project=${PROJECT}" -H 'Content-Type: application/json' \
+	-d '{"title":"e2e: anchor","message":""}' | grep -o '"prNumber":[0-9]*' | cut -d: -f2)"
+merge_pr "${PROJECT}" "${PR}"
+anchor_in_cluster() { kc get vm anchor -n "${PROJECT}"; }
+retry "anchor VM in cluster" 400 anchor_in_cluster
+
 # ── 7. The round-trip itself ───────────────────────────────────────────────────
 log "running the GitOps round-trip"
 OUT="${WORKDIR}/roundtrip.txt"
