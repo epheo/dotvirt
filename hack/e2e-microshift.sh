@@ -188,29 +188,30 @@ retry "storage class present" 600 sh -c 'kubectl get storageclass -o name | grep
 # ── 2. ArgoCD (hard dependency; dotvirt never installs it) ─────────────────────
 log "installing Argo CD ${ARGOCD_VERSION}"
 kc create namespace argocd --dry-run=client -o yaml | kc apply -f -
-# MicroShift enforces SCCs: the community manifests pin fixed UIDs (redis, dex),
-# which restricted-v2 refuses — redis then never mints the argocd-redis secret
-# and every other pod sits in CreateContainerConfigError. anyuid for the argocd
-# namespace is the throwaway-test-rig answer (production uses OpenShift GitOps).
+# MicroShift enforces SCCs: the community manifests pin fixed non-root UIDs
+# (redis 999, dex), which restricted-v2 refuses — redis then never mints the
+# argocd-redis secret and every other pod sits in CreateContainerConfigError.
+# nonroot-v2 (any non-zero UID) is the narrowest grant this distro ships that
+# admits them; production installs use OpenShift GitOps instead.
 kc apply -f - <<SCC
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: e2e-scc-anyuid
+  name: e2e-scc-nonroot
 rules:
 - apiGroups: [security.openshift.io]
   resources: [securitycontextconstraints]
-  resourceNames: [anyuid]
+  resourceNames: [nonroot-v2]
   verbs: [use]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: e2e-argocd-anyuid
+  name: e2e-argocd-nonroot
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: e2e-scc-anyuid
+  name: e2e-scc-nonroot
 subjects:
 - apiGroup: rbac.authorization.k8s.io
   kind: Group
