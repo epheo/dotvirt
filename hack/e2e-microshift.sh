@@ -192,11 +192,30 @@ kc create namespace argocd --dry-run=client -o yaml | kc apply -f -
 # which restricted-v2 refuses — redis then never mints the argocd-redis secret
 # and every other pod sits in CreateContainerConfigError. anyuid for the argocd
 # namespace is the throwaway-test-rig answer (production uses OpenShift GitOps).
-kc create clusterrole e2e-scc-anyuid --verb=use \
-	--resource=securitycontextconstraints.security.openshift.io --resource-name=anyuid \
-	--dry-run=client -o yaml | kc apply -f -
-kc create clusterrolebinding e2e-argocd-anyuid --clusterrole=e2e-scc-anyuid \
-	--group=system:serviceaccounts:argocd --dry-run=client -o yaml | kc apply -f -
+kc apply -f - <<SCC
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: e2e-scc-anyuid
+rules:
+- apiGroups: [security.openshift.io]
+  resources: [securitycontextconstraints]
+  resourceNames: [anyuid]
+  verbs: [use]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: e2e-argocd-anyuid
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: e2e-scc-anyuid
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: Group
+  name: system:serviceaccounts:argocd
+SCC
 curl -fsSL "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml" | kc apply -n argocd -f -
 # Plain-HTTP server so the forge can deliver webhooks to the in-cluster Service
 # without a trust store.
