@@ -112,7 +112,7 @@ log "host prerequisites"
 modprobe openvswitch || true
 if [ ! -f "${LVM_DISK}" ]; then
 	mkdir -p "$(dirname "${LVM_DISK}")"
-	truncate --size=12G "${LVM_DISK}" # sparse; forgejo 5Gi + drafts 1Gi + headroom
+	truncate --size=24G "${LVM_DISK}" # sparse; the distro lvmd reserves spare-gb:10, forgejo 5Gi + drafts 1Gi ride what remains
 	dev="$(losetup --find --show --nooverlap "${LVM_DISK}")"
 	vgcreate -f -y "${VG_NAME}" "${dev}"
 fi
