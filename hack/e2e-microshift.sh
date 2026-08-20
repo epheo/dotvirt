@@ -188,6 +188,15 @@ retry "storage class present" 600 sh -c 'kubectl get storageclass -o name | grep
 # ── 2. ArgoCD (hard dependency; dotvirt never installs it) ─────────────────────
 log "installing Argo CD ${ARGOCD_VERSION}"
 kc create namespace argocd --dry-run=client -o yaml | kc apply -f -
+# MicroShift enforces SCCs: the community manifests pin fixed UIDs (redis, dex),
+# which restricted-v2 refuses — redis then never mints the argocd-redis secret
+# and every other pod sits in CreateContainerConfigError. anyuid for the argocd
+# namespace is the throwaway-test-rig answer (production uses OpenShift GitOps).
+kc create clusterrole e2e-scc-anyuid --verb=use \
+	--resource=securitycontextconstraints.security.openshift.io --resource-name=anyuid \
+	--dry-run=client -o yaml | kc apply -f -
+kc create clusterrolebinding e2e-argocd-anyuid --clusterrole=e2e-scc-anyuid \
+	--group=system:serviceaccounts:argocd --dry-run=client -o yaml | kc apply -f -
 curl -fsSL "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml" | kc apply -n argocd -f -
 # Plain-HTTP server so the forge can deliver webhooks to the in-cluster Service
 # without a trust store.
@@ -196,6 +205,10 @@ kc -n argocd rollout restart deploy argocd-server
 for d in argocd-repo-server argocd-server argocd-applicationset-controller; do
 	retry "argocd ${d} available" "${TIMEOUT_INSTALL}" kc -n argocd wait deploy/"${d}" --for=condition=Available --timeout=10s
 done
+appctrl_ready() {
+	[ "$(kc -n argocd get statefulset argocd-application-controller -o jsonpath='{.status.readyReplicas}')" = "1" ]
+}
+retry "argocd application-controller ready" "${TIMEOUT_INSTALL}" appctrl_ready
 
 # ── 3. KubeVirt (emulation: the loop applies VM objects, none needs to boot) ──
 if [ -z "${KUBEVIRT_VERSION}" ]; then
