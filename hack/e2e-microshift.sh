@@ -67,10 +67,15 @@ diagnostics() {
 	log "topolvm logs"
 	kc -n topolvm-system logs deploy/topolvm-controller --tail=15 --all-containers 2>&1 | tail -15 || true
 	kc -n topolvm-system logs ds/topolvm-lvmd-0 --tail=10 2>&1 | tail -10 || true
+	log "dotvirt namespace state"
+	kc get pods,deploy -n dotvirt -o wide 2>&1 | head -12 || true
+	log "forgejo logs"
+	kc logs -n dotvirt deploy/dotvirt-forgejo --tail=25 2>&1 | tail -25 || true
 	log "dotvirt app logs"
-	kc logs -n dotvirt deploy/dotvirt --tail=60 2>&1 || true
+	kc logs -n dotvirt deploy/dotvirt --tail=40 2>&1 | tail -40 || true
 	log "operator logs"
-	kc logs -n dotvirt-operator deploy/dotvirt-operator-controller-manager --tail=60 2>&1 || true
+	op="$(kc -n dotvirt-operator get deploy -o name 2>/dev/null | head -1)"
+	[ -n "${op}" ] && kc logs -n dotvirt-operator "${op}" --tail=60 2>&1 | tail -60 || true
 	log "microshift journal (best-effort; exec can hang on this podman)"
 	pexec journalctl -u microshift --no-pager -n 40 2>&1 || true
 	log "container console tail"
