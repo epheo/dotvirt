@@ -204,7 +204,7 @@
 			aria-label="Search inventory"
 			class="w-full bg-transparent text-xs text-white placeholder-slate-400 focus:outline-none"
 		/>
-		<kbd class="shrink-0 rounded border border-slate-600 px-1 text-[10px] text-slate-400"
+		<kbd class="shrink-0 rounded border border-slate-600 px-1 text-[10px] text-slate-300"
 			>Ctrl K</kbd
 		>
 	</div>

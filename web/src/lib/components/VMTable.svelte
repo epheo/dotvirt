@@ -6,6 +6,7 @@
 	import { persisted } from '$lib/state/persisted.svelte';
 	import { TBODY, THEAD_TR } from '$lib/table';
 	import PowerDot from './PowerDot.svelte';
+	import { vmHref } from '$lib/nav';
 	import SelectInput from './SelectInput.svelte';
 	import StagedBadge from './StagedBadge.svelte';
 	import StatusPill from './StatusPill.svelte';
@@ -214,6 +215,7 @@
 					} as typeof prefs.value)}
 				class="w-auto! text-ink-soft"
 				title={f.title}
+				aria-label={f.title}
 			>
 				{#each f.options as [value, label] (value)}
 					<option {value}>{label}</option>
@@ -234,6 +236,7 @@
 							indeterminate={someSelected}
 							onchange={toggleAll}
 							title="Select all (filtered)"
+							aria-label="Select all (filtered)"
 							class="cursor-pointer align-middle"
 						/>
 					</th>
@@ -241,6 +244,7 @@
 						<th class="px-3 py-2 font-medium {c.class ?? ''}">
 							<button
 								onclick={() => setSort(c.key)}
+								aria-label="Sort by {c.label || 'power state'}"
 								class="inline-flex items-center gap-1 hover:text-ink"
 							>
 								{c.label}
@@ -276,6 +280,7 @@
 								checked={selected.has(vmKey(vm))}
 								onclick={(e) => e.stopPropagation()}
 								onchange={() => toggleOne(vm)}
+								aria-label="Select {vm.name}"
 								class="cursor-pointer align-middle"
 							/>
 						</td>
@@ -283,8 +288,16 @@
 						<td
 							class="px-3 py-1.5 font-medium {sc?.kind === 'delete'
 								? 'text-ink-faint line-through'
-								: 'text-ink'}">{vm.name}</td
+								: 'text-ink'}"
 						>
+							<!-- A real link: the keyboard (and middle-click) path into the
+							     detail the row's mouse onclick can't provide. -->
+							<a
+								href={vmHref(vm.namespace, vm.name)}
+								onclick={(e) => e.stopPropagation()}
+								class="hover:underline focus-visible:underline">{vm.name}</a
+							>
+						</td>
 						<td class="px-3 py-1.5 text-ink-soft">{vm.namespace}</td>
 						<td class="px-3 py-1.5">
 							<StatusPill

@@ -25,3 +25,6 @@ vite.config.ts.timestamp-*
 # Playwright
 test-results/
 playwright-report/
+
+# Hermetic UI suite artifacts
+e2e/screenshots/

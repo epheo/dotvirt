@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { api, type User } from '$lib/api';
+	import { api, Unauthorized, type User } from '$lib/api';
 
 	let { onlogin }: { onlogin: (user: User) => void } = $props();
 
@@ -32,8 +32,14 @@
 		try {
 			const user = await api.login(token.trim());
 			onlogin(user);
-		} catch {
-			error = 'That token was rejected. Check it and try again.';
+		} catch (e) {
+			// Only a real 401 means the token is bad. A 503 here is usually the
+			// backend (or its cluster connection) being down — blaming the token
+			// sends the user chasing the wrong problem.
+			error =
+				e instanceof Unauthorized
+					? 'That token was rejected. Check it and try again.'
+					: 'dotvirt could not verify the token — the backend or cluster is unreachable. Try again shortly.';
 		} finally {
 			busy = false;
 		}

@@ -13,9 +13,11 @@
 		"format": "prettier --write src",
 		"format:check": "prettier --check src",
 		"test:unit": "vitest run",
+		"test:ui": "playwright test -c playwright.fixture.config.ts",
 		"test:e2e": "playwright test"
 	},
 	"devDependencies": {
+		"@axe-core/playwright": "^4.13.0",
 		"@playwright/test": "^1.60.0",
 		"@sveltejs/adapter-auto": "^7.0.1",
 		"@sveltejs/adapter-static": "^3.0.10",
@@ -31,7 +33,8 @@
 		"tailwindcss": "^4.3.0",
 		"typescript": "^6.0.3",
 		"vite": "^8.0.16",
-		"vitest": "^4.1.10"
+		"vitest": "^4.1.10",
+		"ws": "^8.21.3"
 	},
 	"dependencies": {
 		"@novnc/novnc": "^1.7.0",

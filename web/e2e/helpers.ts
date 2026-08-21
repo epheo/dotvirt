@@ -40,8 +40,8 @@ export async function mergePR(page: Page, repo: string, pr: number) {
 			{
 				headers: { Authorization: `token ${FORGE_TOKEN}` },
 				data: { Do: 'merge' },
-				failOnStatusCode: false
-			}
+				failOnStatusCode: false,
+			},
 		);
 		if (res.status() === 200) return;
 		await page.waitForTimeout(2000);
@@ -50,7 +50,7 @@ export async function mergePR(page: Page, repo: string, pr: number) {
 }
 
 // proposeAndMerge drives the Changes panel for ONE project: it fills that project's PR
-// title, clicks "Create pull request → <project>" (capturing the PR number from the
+// title, clicks "Propose pull request -> <project>" (capturing the PR number from the
 // propose response), then merges that PR and closes the panel.
 export async function proposeAndMerge(page: Page, project: string, title: string): Promise<number> {
 	await page.getByRole('button', { name: /Changes/ }).click();
@@ -60,13 +60,13 @@ export async function proposeAndMerge(page: Page, project: string, title: string
 	// project is staged.
 	const form = page
 		.locator('aside section')
-		.filter({ has: page.getByRole('button', { name: `Propose pull request → ${project}` }) });
+		.filter({ has: page.getByRole('button', { name: `Propose pull request -> ${project}` }) });
 	await form.getByPlaceholder('Pull request title').fill(title);
 	const [resp] = await Promise.all([
 		page.waitForResponse(
-			(r) => r.url().includes('/api/draft/propose') && r.request().method() === 'POST'
+			(r) => r.url().includes('/api/draft/propose') && r.request().method() === 'POST',
 		),
-		form.getByRole('button', { name: `Propose pull request → ${project}` }).click()
+		form.getByRole('button', { name: `Propose pull request -> ${project}` }).click(),
 	]);
 	// prNumber is omitted on the branch-only propose paths (the branch already merged, or a
 	// forge error after the push). The branch is always returned, so recover the open PR.
@@ -84,7 +84,7 @@ export async function proposeAndMerge(page: Page, project: string, title: string
 async function findOpenPR(page: Page, repo: string, branch: string): Promise<number | undefined> {
 	const res = await page.request.get(
 		`${FORGE}/api/v1/repos/${FORGE_OWNER}/${repo}/pulls?state=open&limit=50`,
-		{ headers: { Authorization: `token ${FORGE_TOKEN}` }, failOnStatusCode: false }
+		{ headers: { Authorization: `token ${FORGE_TOKEN}` }, failOnStatusCode: false },
 	);
 	if (!res.ok()) return undefined;
 	const prs = (await res.json()) as Array<{ number: number; head?: { ref?: string } }>;
@@ -103,7 +103,7 @@ export async function cleanupVM(page: Page, project: string, ns: string, vm: str
 		if (!draft?.count) return;
 		const resp = await page.request.post(`/api/draft/propose?project=${project}`, {
 			data: { title: `e2e cleanup ${vm}`, message: '' },
-			failOnStatusCode: false
+			failOnStatusCode: false,
 		});
 		if (!resp.ok()) return;
 		const { prNumber, branch } = (await resp.json()) as { prNumber?: number; branch?: string };

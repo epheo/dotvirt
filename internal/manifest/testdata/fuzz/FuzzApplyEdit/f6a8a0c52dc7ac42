@@ -1,0 +1,9 @@
+go test fuzz v1
+[]byte("kind: VirtualMachine\nmetadata:\n  name: vm-health\nspec: \n  !00000000\n 000000:")
+string("0")
+string("vm-health")
+string("")
+int(0)
+string("0")
+string("0")
+bool(false)
