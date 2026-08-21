@@ -1,0 +1,53 @@
+# The real-loop tier: nightly proof that the PUBLISHED dotvirt images drive the
+# actual product loop on the actual target platform. hack/e2e-microshift.sh
+# boots ghcr.io/epheo/microshift as a privileged container, installs ArgoCD +
+# KubeVirt (emulation) + the digest-pinned dotvirt operator, creates a tenant
+# project through dotvirt's own API, and runs the stage -> PR -> merge -> Argo
+# sync -> delete round-trip, failing on any stalled hop.
+#
+# Nightly (not a PR gate): a ~25-minute multi-system job whose failures are
+# environmental as often as regressions — a red here is a morning
+# investigation with full diagnostics attached, never PR flake.
+name: real-loop
+
+on:
+  schedule:
+    - cron: '7 4 * * *'
+  workflow_dispatch:
+  # Path-scoped PR trigger: the loop's own harness is the one thing PRs can
+  # break that only this job would notice — normal PRs never pay for it.
+  pull_request:
+    paths:
+      - '.github/workflows/real-loop.yaml'
+      - 'hack/e2e-microshift.sh'
+      - 'hack/e2e-roundtrip.sh'
+
+jobs:
+  microshift-roundtrip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free runner disk (the bootc image embeds its payload)
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h / | tail -1
+      - name: Host prerequisites
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y lvm2 podman
+          sudo modprobe openvswitch
+      - name: Run the round-trip on MicroShift
+        run: sudo -E WORKDIR="$RUNNER_TEMP/e2e" hack/e2e-microshift.sh
+      - name: Collect the run log
+        if: always()
+        run: |
+          mkdir -p artifacts
+          cp -r "$RUNNER_TEMP/e2e" artifacts/ 2>/dev/null || true
+          sudo podman logs dotvirt-e2e-microshift > artifacts/microshift-container.log 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-loop-diagnostics
+          path: artifacts/
+          if-no-files-found: ignore

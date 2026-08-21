@@ -62,7 +62,10 @@ func ForgejoHost(dv *dotvirtv1alpha1.Dotvirt) string {
 		return ""
 	}
 	if u, err := url.Parse(dv.Spec.Forge.URL); err == nil {
-		return u.Host
+		// Hostname, never Host: a URL carrying a port (an in-cluster service
+		// URL like http://forge.ns.svc:3000) would otherwise render a Route
+		// whose spec.host the apiserver rejects, wedging ForgeReady.
+		return u.Hostname()
 	}
 	return ""
 }
