@@ -296,3 +296,33 @@ func proposedBranchFor(user, proj string) string {
 	c := &Coordinator{proposed: "dotvirt/proposed"}
 	return c.proposedBranch(user, proj)
 }
+
+// A draft whose whole intent is already true in git (here: a delete staged
+// against a stale mirror, with git losing the file before the propose) must
+// SELF-HEAL: propose answers a classified error naming what happened, clears
+// the draft, and never reaches the forge - not the masked internal error that
+// wedged the user until they guessed to unstage the item.
+func TestProposeSelfHealsSatisfiedDraft(t *testing.T) {
+	f := newProposeFixture(t) // no forge routes: any forge call fails the test
+
+	if _, err := f.c.StageDelete(f.id, f.proj, "alpha", "web"); err != nil {
+		t.Fatalf("StageDelete: %v", err)
+	}
+	// The deletion lands in git out-of-band before the propose.
+	work := t.TempDir()
+	gitRun(t, work, "clone", "-q", f.proj.Repo, ".")
+	gitRun(t, work, "rm", "-q", "web.yaml")
+	gitRun(t, work, "commit", "-qm", "external delete")
+	gitRun(t, work, "push", "-q", "origin", "main")
+
+	_, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{Title: "drop web"})
+	if !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("want classified ErrInvalid, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "already matches git") {
+		t.Fatalf("error must say what happened, got %q", err)
+	}
+	if n := f.draftCount(t); n != 0 {
+		t.Fatalf("draft must self-heal to empty, still has %d entries", n)
+	}
+}

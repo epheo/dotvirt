@@ -1,6 +1,7 @@
 package changeset
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -56,6 +57,13 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	// pushes). K8s usernames aren't emails, so synthesize a stable noreply address.
 	by := git.Author{Name: id.Username, Email: authorEmail(id.Username)}
 	res, err := write.CommitChangeset(c.baseBranch, branch, commitMsg, items, by)
+	if errors.Is(err, git.ErrNoChanges) {
+		// Self-heal: the draft's whole intent is already true in git (typical
+		// after staging against a briefly-stale mirror), so keeping it would
+		// wedge the user behind a permanent error. Clear it and say what happened.
+		_ = c.store.Clear(id.Username, proj.Name)
+		return model.ProposeResult{}, fmt.Errorf("%w: every staged change already matches git; the draft has been cleared", model.ErrInvalid)
+	}
 	if err != nil {
 		return model.ProposeResult{}, err
 	}

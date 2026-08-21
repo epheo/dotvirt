@@ -69,26 +69,30 @@ func TestEnsureOrgWebhookRegistersOnce(t *testing.T) {
 // configured one (in place, not recreated) rather than left to 403 every delivery.
 func TestEnsureOrgWebhookReconcilesSecret(t *testing.T) {
 	resetHookCache()
-	var patched bool
+	var deleted, created bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/hooks":
 			// A hook for the target URL already exists, with no secret echoed back.
 			_, _ = w.Write([]byte(`[{"id":7,"config":{"url":"https://argo/api/webhook","content_type":"json"}}]`))
-		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/orgs/dotvirt/hooks/7":
-			patched = true
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/orgs/dotvirt/hooks/7":
+			deleted = true
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/orgs/dotvirt/hooks":
+			created = true
 			var body struct {
 				Config map[string]string `json:"config"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("decode PATCH body: %v", err)
+				t.Fatalf("decode POST body: %v", err)
 			}
 			if body.Config["secret"] != "rotated" {
-				t.Errorf("PATCH secret = %q, want rotated", body.Config["secret"])
+				t.Errorf("recreated hook secret = %q, want rotated", body.Config["secret"])
 			}
-			w.WriteHeader(http.StatusOK)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":8}`))
 		default:
-			t.Errorf("unexpected %s %s (must reconcile in place, not recreate)", r.Method, r.URL.Path)
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusInternalServerError)
 		}
 	}))
@@ -98,8 +102,11 @@ func TestEnsureOrgWebhookReconcilesSecret(t *testing.T) {
 	if err := c.EnsureOrgWebhook("https://argo/api/webhook", "rotated"); err != nil {
 		t.Fatalf("EnsureOrgWebhook: %v", err)
 	}
-	if !patched {
-		t.Error("expected the existing hook to be PATCHed with the new secret")
+	// RECREATED, never edited: Forgejo's hook-edit API silently ignores
+	// config.secret, so a PATCH "re-assert" would leave a stale secret 403ing
+	// every delivery while the hook reads as converged.
+	if !deleted || !created {
+		t.Errorf("unproven secret must recreate the hook (deleted=%v created=%v)", deleted, created)
 	}
 }
 

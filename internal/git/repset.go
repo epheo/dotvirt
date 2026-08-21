@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
@@ -125,9 +126,25 @@ func (s *RepoSet) Poke(repoURL string) {
 // backstop; the poke (webhook) is the primary trigger.
 func (s *RepoSet) poll(p *repoPair) {
 	last := ""
+	lastErr := ""
 	check := func() {
 		sig, err := p.read.headsSignature()
-		if err != nil || sig == last {
+		if err != nil {
+			// A failing fetch means the mirror is serving STALE git with no other
+			// signal anywhere - the exact state a webhook-outage postmortem found
+			// invisible. Log each distinct failure (and the recovery) instead of
+			// swallowing it; the dedupe keeps a persistent outage to one line.
+			if err.Error() != lastErr {
+				lastErr = err.Error()
+				log.Printf("git: poll %s: fetch failing (mirror stale until it recovers): %v", p.read.url, err)
+			}
+			return
+		}
+		if lastErr != "" {
+			log.Printf("git: poll %s: fetch recovered", p.read.url)
+			lastErr = ""
+		}
+		if sig == last {
 			return
 		}
 		last = sig
