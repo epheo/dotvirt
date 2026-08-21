@@ -8,7 +8,10 @@ test.beforeEach(async ({ page }) => {
 test('shell + container workspace renders after login', async ({ page }) => {
 	// Creation collapses into the "+ New" header menu; its items exist only while open.
 	await page.getByRole('button', { name: /^New$/ }).click();
-	await expect(page.getByRole('button', { name: /New VM/ })).toBeVisible();
+	// Exact: "New VM from Template" sits beside it. Enabled, not just visible:
+	// the item stays disabled until the first inventory frame proves a
+	// repo-backed project, so this also waits out the login race.
+	await expect(page.getByRole('button', { name: 'New VM', exact: true })).toBeEnabled();
 	await page.keyboard.press('Escape');
 	await expect(page.getByRole('button', { name: /Changes/ })).toBeVisible();
 	// The All-VMs landing is a tabbed workspace (Summary / VMs / Monitor); tabs
@@ -63,7 +66,8 @@ test('views are deep-linkable and refresh-safe', async ({ page }) => {
 	await page.goto('/networking');
 	await expect(page.getByText('Provider Gateway').first()).toBeVisible();
 	// A segment group in the tree opens its object page (Summary fact sheet).
-	await page.locator('aside a[href^="/networking/"]').first().click();
+	// The lens also carries a Security entry — exclude it, it is not a segment.
+	await page.locator('aside a[href^="/networking/"]:not([href$="/security"])').first().click();
 	await expect(page.locator('main').getByText('VMs attached')).toBeVisible();
 	// A VM URL survives a hard reload (session cookie + fallback routing).
 	await page.goto('/compute');
