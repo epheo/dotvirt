@@ -76,20 +76,39 @@ func (c *Client) ensureHook(hooksPath, targetURL, secret string) error {
 		}
 	}
 	if len(ours) == 0 {
-		return c.do("POST", hooksPath, withCreateType(desired), nil)
+		var created hook
+		if err := c.do("POST", hooksPath, withCreateType(desired), &created); err != nil {
+			return err
+		}
+		// A create provably lands the secret; record it so the next sweep reads
+		// the new hook as converged instead of recreating it once.
+		recordHookSecret(fmt.Sprintf("%s#%d", hooksPath, created.ID), secret)
+		return nil
 	}
 
-	// Reconcile the first match in place; PATCH only on a real change - a host migration
-	// or a secret the cache hasn't seen this process - so a re-enable (active:true) and a
-	// secret rewrite happen exactly when they recover something, not every sweep. Record
-	// only after the write lands, or a failed PATCH would falsely mark the hook converged.
+	// Reconcile the first match by RECREATION, not edit, and only on a real change
+	// - a host migration or a secret the cache hasn't seen this process - so the
+	// write happens exactly when it recovers something, not every sweep. Recreate
+	// because Forgejo's hook-edit API silently IGNORES config.secret: a PATCH
+	// "re-assert" leaves a rotated-away secret in place and every delivery 403s
+	// while the hook reads as converged (found live: a hook surviving a reinstall
+	// in Forgejo's PVC carried the previous install's secret). Delete-then-create
+	// is the only write that provably lands the secret; if the create fails after
+	// the delete, the next sweep's absent-hook branch restores it. Record only
+	// after the create lands, or a failure would falsely mark the hook converged.
 	primary := ours[0]
 	key := fmt.Sprintf("%s#%d", hooksPath, primary.ID)
 	if primary.Config["url"] != targetURL || !hookSecretMatches(key, secret) {
-		if err := c.do("PATCH", fmt.Sprintf("%s/%d", hooksPath, primary.ID), desired, nil); err != nil {
+		if err := c.do("DELETE", fmt.Sprintf("%s/%d", hooksPath, primary.ID), nil, nil); err != nil {
 			return err
 		}
-		recordHookSecret(key, secret)
+		var created hook
+		if err := c.do("POST", hooksPath, withCreateType(desired), &created); err != nil {
+			return err
+		}
+		// Fingerprint the REPLACEMENT id: recording the old one would leave the
+		// new hook unproven and the next sweep would recreate it again, forever.
+		recordHookSecret(fmt.Sprintf("%s#%d", hooksPath, created.ID), secret)
 	}
 	for _, dup := range ours[1:] {
 		if err := c.do("DELETE", fmt.Sprintf("%s/%d", hooksPath, dup.ID), nil, nil); err != nil {

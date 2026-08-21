@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -79,8 +80,9 @@ func TestCommitChangesetDeleteRemovesFile(t *testing.T) {
 	}
 }
 
-// TestCommitChangesetDeleteAbsentNoop verifies that deleting an already-absent path
-// (the only item) surfaces the "no changes vs base" error rather than committing.
+// Deleting an already-absent path (the only item) is a SATISFIED intent, not a
+// failure: the changeset just has nothing left to commit, and the caller gets
+// the classified ErrNoChanges - never an internal error that wedges the draft.
 func TestCommitChangesetDeleteAbsentNoop(t *testing.T) {
 	bare := seedRepo(t) // only web.yaml on main
 	w := OpenWrite(bare, "", nil, true)
@@ -88,9 +90,34 @@ func TestCommitChangesetDeleteAbsentNoop(t *testing.T) {
 	_, err := w.CommitChangeset("main", "dotvirt/proposed", "drop ghost",
 		[]ChangesetItem{{Path: "alpha/ghost.yaml", Namespace: "alpha", Name: "ghost", Delete: true}},
 		Author{Name: "u", Email: "u@x"})
-	// go-git's Remove of a missing path errors; either way it must NOT succeed.
-	if err == nil {
-		t.Fatal("expected an error deleting an absent file, got nil")
+	if !errors.Is(err, ErrNoChanges) {
+		t.Fatalf("want ErrNoChanges, got %v", err)
+	}
+}
+
+// A stale delete (file already gone from base) beside a real change must not
+// poison the changeset: the stale item is skipped and the rest commits. Found
+// live: a delete staged against a briefly-stale mirror 500'd every subsequent
+// propose until the user guessed to unstage it.
+func TestCommitChangesetSkipsStaleDelete(t *testing.T) {
+	bare := seedMultiRepo(t) // README + tenant-a/web.yaml + tenant-a/db.yaml
+	w := OpenWrite(bare, "", nil, true)
+
+	res, err := w.CommitChangeset("main", "dotvirt/proposed", "stale delete + real delete",
+		[]ChangesetItem{
+			{Path: "tenant-a/ghost.yaml", Namespace: "tenant-a", Name: "ghost", Delete: true},
+			{Path: "tenant-a/db.yaml", Namespace: "tenant-a", Name: "db", Delete: true},
+		},
+		Author{Name: "u", Email: "u@x"})
+	if err != nil {
+		t.Fatalf("CommitChangeset: %v", err)
+	}
+	tree := lsTree(t, bare, res.Branch)
+	if contains(tree, "tenant-a/db.yaml") {
+		t.Error("the real delete must still land")
+	}
+	if !contains(tree, "tenant-a/web.yaml") {
+		t.Error("unrelated files must be kept")
 	}
 }
 

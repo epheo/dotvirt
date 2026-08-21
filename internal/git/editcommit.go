@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/format/index"
 
 	"github.com/epheo/dotvirt/internal/manifest"
 )
@@ -30,6 +31,10 @@ type ChangesetItem struct {
 	NewContent []byte           // create mode (full manifest)
 	Delete     bool             // delete mode: remove Path from the worktree
 }
+
+// ErrNoChanges reports a changeset whose every item already matches base -
+// nothing to commit because the intent is already true in git.
+var ErrNoChanges = errors.New("every staged change already matches git")
 
 // CommitChangeset applies every item to one branch created off base and commits
 // them together - the propose step of the draft workflow. Edits re-read the
@@ -65,6 +70,13 @@ func (w *WriteRepo) CommitChangeset(base, branch, message string, items []Change
 		case it.Delete:
 			// wt.Remove deletes the file and stages the removal; nothing to write.
 			if _, err := wt.Remove(it.Path); err != nil {
+				if errors.Is(err, index.ErrEntryNotFound) {
+					// Already absent on base: the intent - this manifest must not
+					// be in git - is satisfied. A delete staged against a stale
+					// mirror must not wedge the whole propose (found live: every
+					// propose 500'd until the user guessed to unstage the item).
+					continue
+				}
 				return EditResult{}, fmt.Errorf("remove %s: %w", it.Path, err)
 			}
 			continue
@@ -95,7 +107,10 @@ func (w *WriteRepo) CommitChangeset(base, branch, message string, items []Change
 		return EditResult{}, err
 	}
 	if status.IsClean() {
-		return EditResult{}, errors.New("changeset produced no changes vs base")
+		// Classified, not internal: every staged item already matches base (a
+		// stale delete, an edit landing on its own value). The caller clears the
+		// draft - the intent is fully satisfied - and tells the user so.
+		return EditResult{}, ErrNoChanges
 	}
 
 	// Author = the k8s user who proposed; committer = dotvirt (the SA pushing).
