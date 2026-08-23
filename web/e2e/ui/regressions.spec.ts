@@ -125,3 +125,28 @@ test('bulk selection stages a power change per VM', async ({ page }) => {
 	await expect(panel.getByText('web-1')).toBeVisible();
 	await expect(panel.getByText('web-2')).toHaveCount(0);
 });
+
+test('stopped VMs are visible in the summary tile', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	// The live console showed "2 Running" on a 3-VM project: the phase map came
+	// from VMI metrics and stopped VMs (no VMI) were invisible. The backend now
+	// folds them in from the snapshot; the tile must show both.
+	const main = page.locator('main');
+	await expect(main.getByText('Running', { exact: true })).toBeVisible();
+	await expect(main.getByText('Stopped', { exact: true })).toBeVisible();
+});
+
+test('an empty scope reads "no data", not zero-of-zero', async ({ page }) => {
+	await setScenario(page, 'empty');
+	await login(page);
+	await expect(page.locator('main').getByText('no data').first()).toBeVisible();
+});
+
+test('tab scroll regions are keyboard-reachable', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	// axe scrollable-region-focusable, found live on the Permissions tab: the
+	// scroll container carries tabindex so keyboard users can scroll it.
+	await expect(page.locator('main [role="region"][tabindex="0"]').first()).toBeVisible();
+});

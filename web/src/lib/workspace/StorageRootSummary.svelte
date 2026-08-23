@@ -42,7 +42,13 @@
 	});
 </script>
 
-<div class="min-h-0 flex-1 overflow-y-auto p-4">
+<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
+<div
+	class="min-h-0 flex-1 overflow-y-auto p-4"
+	role="region"
+	aria-label="Storage classes"
+	tabindex="0"
+>
 	<div class="max-w-2xl space-y-4">
 		<InfoCard title="Storage classes">
 			{#if rows.length}

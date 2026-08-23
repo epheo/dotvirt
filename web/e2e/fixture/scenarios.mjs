@@ -145,8 +145,11 @@ function clusterSummary(vmCount) {
 			total: 192e9,
 			spark: [30e9, 32e9, 34e9, 33e9, 34e9],
 		},
-		storage: { used: 210e9, total: 2e12 },
-		vms: { Running: Math.max(vmCount - 1, 0), Stopped: Math.min(vmCount, 1) },
+		// Zero-of-zero on an empty scope: the ring must read "no data".
+		storage: vmCount ? { used: 210e9, total: 2e12 } : { used: 0, total: 0 },
+		// Lowercase keys, like the kubevirt_vmi_info-derived map; stopped is the
+		// backend's snapshot overlay (VM objects without an instance).
+		vms: { running: Math.max(vmCount - 1, 0), stopped: Math.min(vmCount, 1) },
 		topCpu: [{ namespace: 'web-prod', name: 'web-1', value: 38.2 }],
 		topMemory: [{ namespace: 'db-prod', name: 'db-1', value: 3.1e9 }],
 	};
