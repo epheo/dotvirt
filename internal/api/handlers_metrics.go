@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"net/http"
 
+	kubevirtcorev1 "kubevirt.io/api/core/v1"
+
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
@@ -96,7 +99,32 @@ func (s *Server) handleClusterSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cs, err := s.metrics.ClusterSummary(r.Context(), sc.id.Token, nss, r.URL.Query().Get("node"))
+	if err == nil && r.URL.Query().Get("node") == "" {
+		// The phase map comes from kubevirt_vmi_info, and a stopped VM has no
+		// VMI - so a 3-VM project read "2 Running" with the third invisible.
+		// Fold the snapshot's VMI-less VMs in as stopped. Node scope keeps the
+		// metric view: a stopped VM runs on no node.
+		foldStoppedVMs(&cs, s.state.VMObjects(nss), s.state.LiveVMs())
+	}
 	respond(w, cs, err)
+}
+
+// foldStoppedVMs adds the VMs without a running instance to the phase map,
+// under the lowercase key the kubevirt_vmi_info-derived entries use.
+func foldStoppedVMs(cs *model.ClusterSummary, vms []kubevirtcorev1.VirtualMachine, live map[string]clusterstate.LiveVM) {
+	stopped := 0
+	for i := range vms {
+		if live[vms[i].Namespace+"/"+vms[i].Name].Phase == "" {
+			stopped++
+		}
+	}
+	if stopped == 0 {
+		return
+	}
+	if cs.VMs == nil {
+		cs.VMs = map[string]int{}
+	}
+	cs.VMs["stopped"] += stopped
 }
 
 // drsDeviation maps a committed DRS threshold to its (under, over) percent

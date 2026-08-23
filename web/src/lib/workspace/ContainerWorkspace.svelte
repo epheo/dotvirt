@@ -223,16 +223,24 @@
 				namespace={scope.kind === 'namespace' ? scope.namespace : undefined}
 			/>
 		{/if}
-		<div class="min-h-0 flex-1 overflow-y-auto">
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
+		<div class="min-h-0 flex-1 overflow-y-auto" role="region" aria-label="Tab content" tabindex="0">
 			<ClusterSummary scope={containerScope} onselect={openVM} />
 		</div>
 	{/if}
 {:else if tab === 'monitor'}
-	<div class="min-h-0 flex-1 overflow-y-auto">
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
+	<div class="min-h-0 flex-1 overflow-y-auto" role="region" aria-label="Tab content" tabindex="0">
 		<ContainerMonitor namespaces={scopedNamespaces} scope={containerScope} onselect={openVM} />
 	</div>
 {:else if tab === 'permissions'}
-	<div class="min-h-0 flex-1 overflow-y-auto p-4">
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
+	<div
+		class="min-h-0 flex-1 overflow-y-auto p-4"
+		role="region"
+		aria-label="Tab content"
+		tabindex="0"
+	>
 		<Permissions namespaces={scopedNamespaces} />
 	</div>
 {:else if tab === 'configure'}
@@ -247,7 +255,13 @@
 	{/if}
 {:else if tab === 'security'}
 	{#if scope.kind === 'namespace'}
-		<div class="min-h-0 flex-1 overflow-y-auto p-4">
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
+		<div
+			class="min-h-0 flex-1 overflow-y-auto p-4"
+			role="region"
+			aria-label="Tab content"
+			tabindex="0"
+		>
 			<EffectivePolicyPanel namespace={scope.namespace} />
 		</div>
 	{/if}

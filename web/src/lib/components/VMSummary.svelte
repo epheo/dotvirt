@@ -104,7 +104,9 @@
 					{:else}—{/if}
 				</div>
 				{#if usage}
-					<div class="mt-1 flex items-center gap-2 text-xs text-ink-faint">
+					<div
+						class="mt-1 flex flex-wrap items-center gap-2 text-xs whitespace-nowrap text-ink-faint"
+					>
 						<Sparkline values={usage.cpu.spark ?? []} color="var(--chart-1)" height={14} />
 						{Math.round(usage.cpu.used)}% used
 					</div>
@@ -130,7 +132,9 @@
 					{:else}—{/if}
 				</div>
 				{#if usage && usage.memory.total}
-					<div class="mt-1 flex items-center gap-2 text-xs text-ink-faint">
+					<div
+						class="mt-1 flex flex-wrap items-center gap-2 text-xs whitespace-nowrap text-ink-faint"
+					>
 						<Sparkline values={usage.memory.spark ?? []} color="var(--chart-2)" height={14} />
 						{fmtUsage('bytes', usage.memory.used)} used
 					</div>
