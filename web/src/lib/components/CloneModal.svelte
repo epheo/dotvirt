@@ -82,7 +82,7 @@
 				<button
 					onclick={create}
 					disabled={!valid || op.busy}
-					class="flex shrink-0 items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:bg-line-strong"
+					class="flex shrink-0 items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:bg-line-strong"
 				>
 					<Copy size={14} />
 					{op.busy ? 'Cloning…' : 'Clone'}

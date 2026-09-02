@@ -15,14 +15,14 @@
 	];
 </script>
 
-<nav class="grid grid-cols-5 border-b border-line">
+<nav class="grid grid-cols-5 border-b border-side-line">
 	{#each SECTIONS as s (s.id)}
 		<a
 			href={s.href}
 			title={s.label}
 			class="flex flex-col items-center gap-0.5 py-2 text-[10px] {active === s.id
-				? 'bg-select font-medium text-accent-ink'
-				: 'text-ink-muted hover:bg-select-soft hover:text-ink-soft'}"
+				? 'bg-side-active font-medium text-side-ink shadow-[inset_0_2px_0_var(--color-accent-hover)]'
+				: 'text-side-dim hover:bg-side-hover hover:text-side-ink'}"
 		>
 			{#if s.id === 'compute'}<Folder size={15} />
 			{:else if s.id === 'hosts'}<Server size={15} />

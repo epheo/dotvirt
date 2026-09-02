@@ -153,7 +153,7 @@
 			type="button"
 			onclick={run}
 			disabled={!ready || op.busy}
-			class="inline-flex items-center gap-1 rounded bg-accent px-2.5 py-1.5 font-medium text-white hover:bg-accent-hover disabled:bg-line-strong"
+			class="inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-1.5 font-medium text-white hover:bg-accent-hover disabled:bg-line-strong"
 		>
 			<Play size={12} />
 			{op.busy ? 'Tracing…' : 'Trace'}
@@ -186,7 +186,7 @@
 						<li class="px-3 py-2 {s.decisive ? 'border-l-2 border-l-accent' : ''}">
 							<div class="flex items-center gap-2 text-xs">
 								<span
-									class="rounded bg-accent-soft px-1.5 py-0.5 whitespace-nowrap text-accent-ink"
+									class="rounded-full bg-accent-soft px-1.5 py-0.5 whitespace-nowrap text-accent-ink"
 								>
 									{STAGE_LABEL[s.stage] ?? s.stage}{s.direction
 										? ` · ${s.direction.toLowerCase()}`

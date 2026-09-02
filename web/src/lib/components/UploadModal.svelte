@@ -232,14 +232,15 @@
 				onclick={start}
 				disabled={!ready}
 				title={ready ? '' : missing[0]}
-				class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
+				class="rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
 			>
 				{stage === 'error' ? 'Retry' : 'Upload'}
 			</button>
 		{:else if stage === 'done'}
 			<button
 				onclick={onclose}
-				class="ml-auto rounded bg-accent px-4 py-1.5 text-sm font-medium text-white">Done</button
+				class="ml-auto rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white"
+				>Done</button
 			>
 		{:else}
 			<span class="ml-auto text-xs text-ink-faint">Working… keep this tab open.</span>

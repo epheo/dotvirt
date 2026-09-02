@@ -71,10 +71,10 @@
 <div class="select-none text-[13px]">
 	<TreeRow active={page.url.pathname === ROOT.href} alignChevron href={ROOT.href}>
 		{#snippet icon()}
-			{#if kind === 'network'}<Workflow size={14} class="text-ink-faint" />
-			{:else}<LayoutGrid size={14} class="text-ink-faint" />{/if}
+			{#if kind === 'network'}<Workflow size={14} class="text-side-dim" />
+			{:else}<LayoutGrid size={14} class="text-side-dim" />{/if}
 		{/snippet}
-		<span class="truncate font-semibold text-ink-soft">{ROOT.label}</span>
+		<span class="truncate font-semibold text-side-ink">{ROOT.label}</span>
 	</TreeRow>
 
 	{#if kind === 'network'}
@@ -83,8 +83,8 @@
 			alignChevron
 			href="/networking/security"
 		>
-			{#snippet icon()}<Shield size={14} class="text-ink-faint" />{/snippet}
-			<span class="truncate font-semibold text-ink-soft">Security</span>
+			{#snippet icon()}<Shield size={14} class="text-side-dim" />{/snippet}
+			<span class="truncate font-semibold text-side-ink">Security</span>
 		</TreeRow>
 	{/if}
 
@@ -98,17 +98,17 @@
 				href={hrefForScope(groupScope(key))}
 			>
 				{#snippet icon()}
-					{#if kind === 'node'}<Server size={14} class="shrink-0 text-ink-muted" />
-					{:else if kind === 'network'}<Network size={14} class="shrink-0 text-ink-muted" />
-					{:else}<Database size={14} class="shrink-0 text-ink-muted" />{/if}
+					{#if kind === 'node'}<Server size={14} class="shrink-0 text-side-dim" />
+					{:else if kind === 'network'}<Network size={14} class="shrink-0 text-side-dim" />
+					{:else}<Database size={14} class="shrink-0 text-side-dim" />{/if}
 				{/snippet}
-				<span class="truncate font-semibold text-ink-soft">{key}</span>
+				<span class="truncate font-semibold text-side-ink">{key}</span>
 				{#snippet trailing()}
 					{#if kind === 'network'}
 						{@const net = networkByRef(key, inventory.networks)}
 						{#if net?.sync}<SyncBadge sync={net.sync} error={net.syncError} compact />{/if}
 					{/if}
-					<span class="text-xs text-ink-faint">{vms.length}</span>
+					<span class="text-xs text-side-dim">{vms.length}</span>
 				{/snippet}
 			</TreeRow>
 			{#if !collapsed[gid]}
@@ -120,6 +120,6 @@
 	{/each}
 
 	{#if groups.length === 0}
-		<div class="px-2 py-4 text-center text-xs text-ink-faint">No VMs in this view.</div>
+		<div class="px-2 py-4 text-center text-xs text-side-dim">No VMs in this view.</div>
 	{/if}
 </div>

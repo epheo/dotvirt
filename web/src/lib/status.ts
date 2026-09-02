@@ -15,12 +15,13 @@ export const TONE_DOT: Record<Tone, string> = {
 	neutral: 'bg-ink-faint',
 };
 
+// PF label anatomy: tinted fill, border from the dot color, dark status ink.
 export const TONE_PILL: Record<Tone, string> = {
-	ok: 'bg-ok-soft text-ok-ink',
-	warn: 'bg-warn-soft text-warn-ink',
-	danger: 'bg-danger-soft text-danger-ink',
-	info: 'bg-accent-soft text-accent-ink',
-	neutral: 'bg-inset-strong text-ink-muted',
+	ok: 'border border-ok/40 bg-ok-soft text-ok-ink',
+	warn: 'border border-warn/50 bg-warn-soft text-warn-ink',
+	danger: 'border border-danger/30 bg-danger-soft text-danger-ink',
+	info: 'border border-accent/30 bg-accent-soft text-accent-ink',
+	neutral: 'border border-line bg-inset-strong text-ink-muted',
 };
 
 export const TONE_TEXT: Record<Tone, string> = {
