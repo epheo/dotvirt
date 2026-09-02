@@ -31,7 +31,7 @@
 		detail = '';
 		const rfb = new RFB(screen, url, {});
 		rfb.scaleViewport = true;
-		rfb.background = '#0f172a';
+		rfb.background = '#151515';
 
 		rfb.addEventListener('connect', () => (status = 'connected'));
 		rfb.addEventListener('disconnect', (e: Event) => {
@@ -61,16 +61,16 @@
 			<span class="text-ink-muted capitalize">{status}{detail ? ` — ${detail}` : ''}</span>
 		</div>
 		<!-- The bezel behind the framebuffer stays dark in both themes (raw slate). -->
-		<div class="relative min-h-0 flex-1 overflow-hidden rounded bg-slate-900">
+		<div class="relative min-h-0 flex-1 overflow-hidden rounded bg-[#151515]">
 			<div bind:this={screen} class="h-full w-full"></div>
 			{#if status === 'disconnected'}
 				<div
-					class="absolute inset-0 flex flex-col items-center justify-center gap-1 text-sm text-slate-300"
+					class="absolute inset-0 flex flex-col items-center justify-center gap-1 text-sm text-side-dim"
 				>
 					<span>{detail || 'Disconnected'}</span>
 					<button
 						onclick={() => reconnectKey++}
-						class="rounded border border-slate-600 px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-800"
+						class="rounded border border-side-active px-2 py-0.5 text-xs text-side-dim hover:bg-[#333638]"
 						>Reconnect</button
 					>
 				</div>

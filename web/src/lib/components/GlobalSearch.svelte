@@ -245,7 +245,7 @@
 
 <div class="relative mx-auto w-80">
 	<div class="flex items-center gap-2 rounded bg-side-hover px-2.5 py-1">
-		<Search size={13} class="shrink-0 text-slate-400" />
+		<Search size={13} class="shrink-0 text-side-dim" />
 		<input
 			bind:this={input}
 			bind:value={query}
@@ -253,9 +253,9 @@
 			{onkeydown}
 			placeholder="Search, or type a verb: migrate web…"
 			aria-label="Search inventory"
-			class="w-full bg-transparent text-xs text-white placeholder-slate-400 focus:outline-none"
+			class="w-full bg-transparent text-xs text-white placeholder-side-dim focus:outline-none"
 		/>
-		<kbd class="shrink-0 rounded border border-side-active px-1 text-[10px] text-slate-300"
+		<kbd class="shrink-0 rounded border border-side-active px-1 text-[10px] text-side-dim"
 			>Ctrl K</kbd
 		>
 	</div>
