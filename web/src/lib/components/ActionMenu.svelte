@@ -8,14 +8,20 @@
 	let {
 		vm,
 		onpick,
+		exclude = [],
 	}: {
 		vm: VM;
 		onpick: (a: VMAction) => void;
+		// Action ids the host already promotes as flat buttons - kept out of the
+		// menu so a verb never appears twice in one header.
+		exclude?: VMAction['id'][];
 	} = $props();
+
+	const actions = $derived(vmActions.filter((a) => !exclude.includes(a.id)));
 </script>
 
 <div class="w-48 rounded border border-line bg-panel py-1 text-xs shadow-lg">
-	{#each vmActions as a (a.id)}
+	{#each actions as a (a.id)}
 		{#if a.sep}
 			<div class="my-1 border-t border-line-soft"></div>
 		{/if}
