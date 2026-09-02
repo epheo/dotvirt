@@ -23,11 +23,11 @@ func TestChangesForEdit(t *testing.T) {
 	})
 
 	want := map[string]model.Change{
-		"Memory":     {Field: "Memory", Action: "change", From: "1Gi", To: "2Gi"},
+		"Memory":     {Field: "Memory", Action: "change", From: "1Gi", To: "2Gi", Restart: true},
 		"Label app":  {Field: "Label app", Action: "change", From: "web", To: "web2"},
 		"Label tier": {Field: "Label tier", Action: "add", To: "front"},
-		"Disk":       {Field: "Disk", Action: "add", To: "data (20Gi)"},
-		"Network":    {Field: "Network", Action: "remove", From: "old"},
+		"Disk":       {Field: "Disk", Action: "add", To: "data (20Gi)", Restart: true},
+		"Network":    {Field: "Network", Action: "remove", From: "old", Restart: true},
 	}
 	got := map[string]model.Change{}
 	for _, c := range changes {

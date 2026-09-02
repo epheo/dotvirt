@@ -16,6 +16,12 @@
 			{:else}
 				<span class="font-medium text-danger-ink line-through">− {c.from}</span>
 			{/if}
+			{#if c.restart}
+				<span
+					class="rounded bg-warn-soft px-1 text-[10px] text-warn-ink"
+					title="Applies at the VM's next power cycle">restart</span
+				>
+			{/if}
 		</li>
 	{/each}
 	{#if changes.length === 0}

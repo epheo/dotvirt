@@ -29,7 +29,11 @@ test('base: VM detail opens with live facts and tabs', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);
 	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
-	await page.locator('tbody tr', { hasText: 'web-1' }).first().click();
+	await page
+		.locator('tbody tr', { hasText: 'web-1' })
+		.first()
+		.getByRole('link', { name: 'web-1', exact: true })
+		.click();
 
 	await expect(page).toHaveURL(/\/vm\/web-prod\/web-1/);
 	await expect(page.getByRole('button', { name: /Edit Settings/ })).toBeVisible();

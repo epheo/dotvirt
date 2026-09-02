@@ -121,8 +121,9 @@ function editChanges(body) {
 	const changes = [];
 	if (body.power) changes.push({ field: 'power', action: 'change', to: body.power });
 	if (body.cpuCores)
-		changes.push({ field: 'cpuCores', action: 'change', to: String(body.cpuCores) });
-	if (body.memory) changes.push({ field: 'memory', action: 'change', to: body.memory });
+		changes.push({ field: 'cpuCores', action: 'change', to: String(body.cpuCores), restart: true });
+	if (body.memory)
+		changes.push({ field: 'memory', action: 'change', to: body.memory, restart: true });
 	if (body.instancetype)
 		changes.push({ field: 'instancetype', action: 'change', to: body.instancetype });
 	for (const d of body.addDisks ?? [])

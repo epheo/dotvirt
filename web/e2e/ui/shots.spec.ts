@@ -24,6 +24,10 @@ test('base views, light and dark', async ({ page }) => {
 	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
 	await shot(page, 'vm-table');
 
+	await page.locator('main tbody tr', { hasText: 'web-1' }).first().click();
+	await shot(page, 'vm-peek');
+	await page.keyboard.press('Escape');
+
 	await openVM(page, 'web-1');
 	await shot(page, 'vm-detail');
 
@@ -50,7 +54,7 @@ test('trouble states', async ({ page }) => {
 	await page.locator('button[title^="Issues"]').click();
 	await shot(page, 'drift-issues-bell');
 	await page.keyboard.press('Escape');
-	await page.locator('button[title^="Changes"]').click();
+	await page.getByRole('link', { name: /Review changes/ }).click();
 	await shot(page, 'drift-changes-prune-warning');
 
 	await setScenario(page, 'degraded');

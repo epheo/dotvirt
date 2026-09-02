@@ -9,6 +9,9 @@ type Change struct {
 	Action string `json:"action"` // change | add | remove
 	From   string `json:"from,omitempty"`
 	To     string `json:"to,omitempty"`
+	// Restart marks a change KubeVirt only applies at the VM's next power
+	// cycle - the review screen's "restart required" plane.
+	Restart bool `json:"restart,omitempty"`
 }
 
 // VMEdit is a set of field changes to apply to a VirtualMachine manifest. Nil/
@@ -164,6 +167,11 @@ type Proposal struct {
 	PRNumber int    `json:"prNumber"`
 	PRURL    string `json:"prURL"`
 	Title    string `json:"title,omitempty"`
+	// Review state, read best-effort from the forge each refresh; zero values
+	// mean unknown (an unreadable protection rule must not render as "none").
+	Approvals         int    `json:"approvals,omitempty"`
+	RequiredApprovals int    `json:"requiredApprovals,omitempty"`
+	Checks            string `json:"checks,omitempty"` // success | pending | failure | error
 }
 
 // TaskEntry is one Recent Tasks row: an imperative runtime op dotvirt performed

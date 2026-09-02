@@ -19,6 +19,7 @@
 	import Permissions from '$lib/components/Permissions.svelte';
 	import TabBar from '$lib/components/TabBar.svelte';
 	import VMTable from '$lib/components/VMTable.svelte';
+	import Inspector from '$lib/components/Inspector.svelte';
 	import BulkActionsMenu from './BulkActionsMenu.svelte';
 	import BulkDeleteConfirm from './BulkDeleteConfirm.svelte';
 	import NodeConfigure from './NodeConfigure.svelte';
@@ -117,6 +118,20 @@
 
 	const openVM = (namespace: string, name: string) => goto(vmHref(namespace, name));
 
+	// The side peek: ?peek=ns/name inspects a row in place (replaceState, like
+	// tabs - back never walks peek moves). Resolved against the scoped list, so
+	// a VM that leaves the scope (or the inventory) closes its peek.
+	const peekKey = $derived(page.url.searchParams.get('peek'));
+	const peekVM = $derived(
+		peekKey ? (scopedVMs.find((v) => `${v.namespace}/${v.name}` === peekKey) ?? null) : null,
+	);
+	function setPeek(vm: VM | null) {
+		const u = new URL(page.url.href);
+		if (vm) u.searchParams.set('peek', `${vm.namespace}/${vm.name}`);
+		else u.searchParams.delete('peek');
+		goto(u.pathname + u.search, { replaceState: true, keepFocus: true, noScroll: true });
+	}
+
 	// --- bulk actions over the grid selection (keys "namespace/name") ---
 	// Deliberately independent of the VM action registry: Power isn't a registry
 	// action, and these stage batch edits, not runtime ops.
@@ -172,10 +187,7 @@
 				.join(', ');
 			ui.showToast(`${verb} ${staged} of ${vms.length}${extra ? ` (${extra})` : ''}.`, {
 				kind: failed ? 'error' : 'success',
-				action:
-					staged > 0
-						? { label: 'Review & propose', run: () => (ui.changesOpen = true) }
-						: undefined,
+				action: staged > 0 ? { label: 'Review & propose', run: () => ui.openChanges() } : undefined,
 			});
 		} finally {
 			bulkBusy = false;
@@ -275,14 +287,22 @@
 			onclear={() => (picked = new Set())}
 		/>
 	{/if}
-	<VMTable
-		vms={scopedVMs}
-		bind:selected={picked}
-		staged={drafts.stagedByKey}
-		onselect={(vm) => openVM(vm.namespace, vm.name)}
-		onstagedopen={(vm) => (ui.modal = { kind: 'staged', vm })}
-		oncontextvm={(vm, x, y) => ui.openVMContext(vm, x, y)}
-	/>
+	<div class="flex min-h-0 flex-1">
+		<div class="min-w-0 flex-1">
+			<VMTable
+				vms={scopedVMs}
+				bind:selected={picked}
+				staged={drafts.stagedByKey}
+				activeKey={peekVM ? peekKey : null}
+				onselect={(vm) => setPeek(peekKey === `${vm.namespace}/${vm.name}` ? null : vm)}
+				onstagedopen={(vm) => (ui.modal = { kind: 'staged', vm })}
+				oncontextvm={(vm, x, y) => ui.openVMContext(vm, x, y)}
+			/>
+		</div>
+		{#if peekVM}
+			<Inspector vm={peekVM} onclose={() => setPeek(null)} />
+		{/if}
+	</div>
 {/if}
 
 {#if bulkCtx}

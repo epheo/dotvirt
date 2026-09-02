@@ -13,7 +13,7 @@ test('shell + container workspace renders after login', async ({ page }) => {
 	// repo-backed project, so this also waits out the login race.
 	await expect(page.getByRole('button', { name: 'New VM', exact: true })).toBeEnabled();
 	await page.keyboard.press('Escape');
-	await expect(page.getByRole('button', { name: /Changes/ })).toBeVisible();
+	await expect(page.getByRole('link', { name: /Review changes/ })).toBeVisible();
 	// The All-VMs landing is a tabbed workspace (Summary / VMs / Monitor); tabs
 	// are links (?tab=), scoped to main — the tree carries links of its own.
 	const main = page.locator('main');

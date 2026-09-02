@@ -73,6 +73,7 @@ test('hosts, storage, catalog and trouble states are accessible', async ({ page 
 	await page.locator('button[title^="Issues"]').click();
 	await checkA11y(page, 'issues bell (drift)');
 	await page.keyboard.press('Escape');
-	await page.locator('button[title^="Changes"]').click();
-	await checkA11y(page, 'changes panel (drift)');
+	await page.getByRole('link', { name: /Review changes/ }).click();
+	await page.waitForTimeout(300);
+	await checkA11y(page, 'changes route (drift)');
 });

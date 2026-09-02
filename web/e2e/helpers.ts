@@ -14,12 +14,13 @@ export async function login(page: Page) {
 	await expect(page.getByRole('button', { name: /^New$/ })).toBeVisible();
 }
 
-// openFirstVM switches to the VMs tab and opens the first VM's detail route.
+// openFirstVM switches to the VMs tab and opens the first VM's detail route
+// (via the name link: a plain row click opens the side peek).
 export async function openFirstVM(page: Page) {
 	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
 	const row = page.locator('tbody tr').first();
 	await expect(row).toBeVisible();
-	await row.click();
+	await row.getByRole('link').first().click();
 	await expect(page.getByRole('button', { name: /Edit Settings/ })).toBeVisible();
 }
 
@@ -27,7 +28,7 @@ export async function openFirstVM(page: Page) {
 // These mirror the knobs of hack/e2e-roundtrip.sh. Merging a PR is the human GitOps
 // gate, so it uses a Forgejo bot token — there is deliberately no dotvirt UI affordance
 // for it; every other step is driven through the app under the session cookie.
-const FORGE = process.env.FORGE ?? 'https://forgejo.apps.hetznet.epheo.eu';
+const FORGE = process.env.FORGE ?? 'https://dotvirt-forgejo-dotvirt-operator.apps.hetznet.epheo.eu';
 const FORGE_TOKEN = process.env.FORGE_TOKEN ?? '';
 const FORGE_OWNER = process.env.OWNER ?? 'dotvirt';
 
@@ -49,24 +50,20 @@ export async function mergePR(page: Page, repo: string, pr: number) {
 	throw new Error(`merge of PR #${pr} in ${repo} failed`);
 }
 
-// proposeAndMerge drives the Changes panel for ONE project: it fills that project's PR
-// title, clicks "Propose pull request -> <project>" (capturing the PR number from the
-// propose response), then merges that PR and closes the panel.
+// proposeAndMerge drives the /changes route for ONE project: it selects one of
+// that project's staged items (the propose form binds to the selected item's
+// project), fills the PR title, proposes (capturing the PR number from the
+// propose response), then merges that PR and returns to the previous view.
 export async function proposeAndMerge(page: Page, project: string, title: string): Promise<number> {
-	await page.getByRole('button', { name: /Changes/ }).click();
-	// The Changes panel renders one <section> per staged project, each with an identical
-	// "Pull request title" placeholder — so scope to this project's section (the submit
-	// button names the project) or an unscoped locator trips strict-mode once a second
-	// project is staged.
-	const form = page
-		.locator('aside section')
-		.filter({ has: page.getByRole('button', { name: `Propose pull request -> ${project}` }) });
-	await form.getByPlaceholder('Pull request title').fill(title);
+	await page.getByRole('link', { name: /Review changes/ }).click();
+	await expect(page).toHaveURL(/\/changes/);
+	await page.locator(`main [data-project="${project}"]`).first().click();
+	await page.getByPlaceholder('Pull request title').fill(title);
 	const [resp] = await Promise.all([
 		page.waitForResponse(
 			(r) => r.url().includes('/api/draft/propose') && r.request().method() === 'POST',
 		),
-		form.getByRole('button', { name: `Propose pull request -> ${project}` }).click(),
+		page.getByRole('button', { name: 'Propose pull request' }).click(),
 	]);
 	// prNumber is omitted on the branch-only propose paths (the branch already merged, or a
 	// forge error after the push). The branch is always returned, so recover the open PR.
@@ -74,7 +71,7 @@ export async function proposeAndMerge(page: Page, project: string, title: string
 	const pr = prNumber ?? (branch ? await findOpenPR(page, project, branch) : undefined);
 	if (!pr) throw new Error(`propose staged no mergeable PR (branch ${branch ?? '?'})`);
 	await mergePR(page, project, pr);
-	await page.locator('aside').getByRole('button', { name: 'Close' }).click(); // unobscure the VM table
+	await page.goBack(); // the route replaced the workspace; return to it
 	return pr;
 }
 

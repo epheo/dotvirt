@@ -20,6 +20,7 @@
 		Upload,
 		User as UserIcon,
 	} from 'lucide-svelte';
+	import { dispatchVMAction } from '$lib/actions';
 	import { hrefForScope, scopeFromPath, vmHref } from '$lib/nav';
 	import StatusDot from './StatusDot.svelte';
 	import { drafts } from '$lib/state/drafts.svelte';
@@ -47,6 +48,9 @@
 	// Global search: a hit either opens a VM or focuses its scope.
 	function onSearchPick(hit: SearchHit) {
 		switch (hit.kind) {
+			case 'action':
+				dispatchVMAction(hit.action, hit.vm, { onstaged: () => drafts.refresh() });
+				break;
 			case 'vm':
 				goto(vmHref(hit.vm.namespace, hit.vm.name));
 				break;
@@ -67,6 +71,9 @@
 				break;
 		}
 	}
+
+	// The Review-changes badge: staged edits + open PRs, everything in flight.
+	const inFlight = $derived(drafts.count + inventory.proposals.length);
 
 	// The issues bell: standing problems derived from the live stream, so the
 	// count moves with the same frames the tree and grid repaint on.
@@ -257,23 +264,25 @@
 		{/snippet}
 	</HeaderMenu>
 
-	<!-- Changes: the GitOps staging cart - a notification-style indicator (badge =
-	     pending staged edits), not a peer of New, so it reads as an icon. -->
-	<button
-		onclick={() => (ui.changesOpen = !ui.changesOpen)}
-		title="Changes — staged edits become a pull request"
-		class="relative rounded p-1.5 hover:bg-slate-700 {ui.changesOpen
+	<!-- Review changes: the GitOps write model's front door - a labeled peer of
+	     New, since reviewing and proposing is the product's primary loop. The
+	     badge counts staged edits + open PRs. -->
+	<a
+		href="/changes"
+		title="Review staged changes and open pull requests"
+		class="relative flex items-center gap-1.5 rounded border border-slate-600 px-2.5 py-1 text-xs font-medium hover:bg-slate-700 {page
+			.url.pathname === '/changes'
 			? 'bg-slate-700 text-white'
-			: 'text-slate-300'}"
+			: 'text-slate-200'}"
 	>
-		<ClipboardList size={16} />
-		{#if drafts.count > 0}
+		<ClipboardList size={13} /> Review changes
+		{#if inFlight > 0}
 			<span
-				class="absolute -top-1 -right-1 rounded-full bg-accent-hover px-1 text-[10px] font-medium text-white"
-				>{drafts.count}</span
+				class="absolute -top-1.5 -right-1.5 rounded-full bg-accent-hover px-1 text-[10px] font-medium text-white"
+				>{inFlight}</span
 			>
 		{/if}
-	</button>
+	</a>
 
 	<HeaderMenu align="right" class="ml-auto">
 		{#snippet trigger({ open, toggle })}

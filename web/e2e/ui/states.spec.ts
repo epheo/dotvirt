@@ -49,8 +49,8 @@ test('untracked VM in a healthy project offers adoption where the user is', asyn
 });
 
 test('prune risk warns before anything merges', async ({ page }) => {
-	await page.locator('button[title^="Changes"]').click();
-	const panel = page.locator('aside').last();
-	await expect(panel.getByText(/Merging will prune 2 objects/)).toBeVisible();
-	await expect(panel.getByText('web-1')).toBeVisible();
+	await page.getByRole('link', { name: /Review changes/ }).click();
+	const main = page.locator('main');
+	await expect(main.getByText(/Merging will prune 2 objects/)).toBeVisible();
+	await expect(main.getByText('web-1').first()).toBeVisible();
 });

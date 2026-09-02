@@ -26,7 +26,7 @@
 		drafts.refresh();
 		ui.showToast('Staged into Changes — applies when the project’s PR merges.', {
 			kind: 'success',
-			action: { label: 'Review & propose', run: () => (ui.changesOpen = true) },
+			action: { label: 'Review & propose', run: () => ui.openChanges() },
 		});
 	};
 
@@ -52,7 +52,7 @@
 	}
 	function reviewStaged() {
 		close();
-		ui.changesOpen = true;
+		ui.openChanges();
 	}
 </script>
 
