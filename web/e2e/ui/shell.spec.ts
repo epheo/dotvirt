@@ -42,12 +42,16 @@ test('base: VM detail opens with live facts and tabs', async ({ page }) => {
 	await expect(page.getByRole('link', { name: 'Snapshots', exact: true })).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Console', exact: true })).toBeVisible();
 
-	// The flat toolbar: imperative verbs promoted, power deliberately absent
-	// (declarative here), delete demoted into the Actions menu.
+	// The flat toolbar: power first (declarative - the button STAGES a change),
+	// then the imperative verbs; delete demoted into the Actions menu.
+	await expect(page.getByRole('button', { name: 'Power off', exact: true })).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Restart', exact: true })).toBeVisible();
-	await expect(page.getByRole('button', { name: 'Migrate', exact: true })).toBeVisible();
-	await expect(page.getByRole('button', { name: /Power (on|off)/ })).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Migrate', exact: true }).first()).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Delete VM' })).toHaveCount(0);
+	await page.getByRole('button', { name: 'Power off', exact: true }).click();
+	// The stage lands as a toast + staged badge, never an immediate power change.
+	await expect(page.getByText(/Power Off staged for web-1/)).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Staged' }).first()).toBeVisible();
 	await page.getByRole('button', { name: 'Actions' }).click();
 	await expect(page.getByRole('button', { name: 'Delete VM' })).toBeVisible();
 	await page.keyboard.press('Escape');
