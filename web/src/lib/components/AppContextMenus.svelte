@@ -182,7 +182,7 @@
 				<MenuItem
 					onclick={() => {
 						ui.ctx = null;
-						ui.changesOpen = true;
+						ui.openChanges();
 					}}>Changes &amp; history</MenuItem
 				>
 			</div>

@@ -68,7 +68,7 @@ export async function adoptVM(
 		await opts?.onstaged?.();
 		ui.showToast(`${vm.name} staged into Changes - open a PR to adopt it into git.`, {
 			kind: 'success',
-			action: { label: 'Review & propose', run: () => (ui.changesOpen = true) },
+			action: { label: 'Review & propose', run: () => ui.openChanges() },
 		});
 	} catch (e) {
 		if (e instanceof Unauthorized) return; // signed out centrally; skip the error toast
@@ -116,7 +116,7 @@ export async function adoptNamespaces(
 		ui.showToast(notes || 'Nothing to adopt.', { kind: 'error' });
 		return;
 	}
-	const action = { label: 'Review & propose', run: () => (ui.changesOpen = true) };
+	const action = { label: 'Review & propose', run: () => ui.openChanges() };
 	if (notes) {
 		ui.showToast(`Staged, but not everything: ${notes}`, { kind: 'warning', action });
 	} else {

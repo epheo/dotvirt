@@ -29,10 +29,7 @@
 		{:else}
 			{stagedCount} staged change{stagedCount === 1 ? '' : 's'} in this project — not yet proposed.
 		{/if}
-		<button
-			onclick={() => (ui.changesOpen = true)}
-			class="font-medium text-accent-ink hover:underline"
-		>
+		<button onclick={() => ui.openChanges()} class="font-medium text-accent-ink hover:underline">
 			Review &amp; propose
 		</button>
 	</Banner>

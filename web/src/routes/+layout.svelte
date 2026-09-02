@@ -16,7 +16,6 @@
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import AppModals from '$lib/components/AppModals.svelte';
 	import Banner from '$lib/components/Banner.svelte';
-	import ChangesPanel from '$lib/components/ChangesPanel.svelte';
 	import Login from '$lib/components/Login.svelte';
 	import SSOBanner from '$lib/components/SSOBanner.svelte';
 	import SectionSwitcher from '$lib/components/SectionSwitcher.svelte';
@@ -131,12 +130,6 @@
 			if (session.user && inventory.projectNames.length) drafts.refresh();
 		});
 	});
-
-	// Opening the Changes drawer re-reads the draft summary, so what it shows is
-	// current at open - the keyed effect above only makes it eventually current.
-	$effect(() => {
-		if (ui.changesOpen) untrack(() => drafts.refresh());
-	});
 </script>
 
 <svelte:head>
@@ -206,20 +199,6 @@
 			<main class="flex min-w-0 flex-1 flex-col overflow-hidden bg-panel">
 				{@render children()}
 			</main>
-
-			{#if ui.changesOpen}
-				<ChangesPanel
-					drafts={drafts.drafts}
-					proposals={inventory.proposals}
-					projects={inventory.canManage
-						? [...inventory.repoProjects, PLATFORM_PROJECT]
-						: inventory.repoProjects}
-					loaded={drafts.loaded}
-					refreshing={drafts.refreshing}
-					onclose={() => (ui.changesOpen = false)}
-					onchanged={() => drafts.refresh()}
-				/>
-			{/if}
 		</div>
 
 		<TaskDock

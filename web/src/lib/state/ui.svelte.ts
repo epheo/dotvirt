@@ -1,3 +1,4 @@
+import { goto } from '$app/navigation';
 import type { Template, VM } from '$lib/api';
 
 // Every modal the shell can show, as one discriminated union - the shell
@@ -70,8 +71,11 @@ class Ui {
 		this.toasts = this.toasts.filter((t) => t.id !== id);
 	}
 
-	// The Changes drawer - a summon-from-anywhere cart, deliberately not a route.
-	changesOpen = $state(false);
+	// Review changes is a route (deep-linkable, back-button-walkable); this is
+	// the one navigation every "Review & propose" affordance shares.
+	openChanges() {
+		goto('/changes');
+	}
 
 	modal = $state<AppModal | null>(null);
 	ctx = $state<CtxState | null>(null);
@@ -98,7 +102,6 @@ class Ui {
 
 	reset() {
 		this.toasts = [];
-		this.changesOpen = false;
 		this.modal = null;
 		this.ctx = null;
 		this.detailIntent = null;
