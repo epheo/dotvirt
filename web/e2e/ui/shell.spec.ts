@@ -41,6 +41,16 @@ test('base: VM detail opens with live facts and tabs', async ({ page }) => {
 	await expect(page.locator('main').getByText('10.128.0.10').first()).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Snapshots', exact: true })).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Console', exact: true })).toBeVisible();
+
+	// The flat toolbar: imperative verbs promoted, power deliberately absent
+	// (declarative here), delete demoted into the Actions menu.
+	await expect(page.getByRole('button', { name: 'Restart', exact: true })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Migrate', exact: true })).toBeVisible();
+	await expect(page.getByRole('button', { name: /Power (on|off)/ })).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Delete VM' })).toHaveCount(0);
+	await page.getByRole('button', { name: 'Actions' }).click();
+	await expect(page.getByRole('button', { name: 'Delete VM' })).toBeVisible();
+	await page.keyboard.press('Escape');
 });
 
 test('empty: onboarding CTA instead of a dead-end blank tree', async ({ page }) => {

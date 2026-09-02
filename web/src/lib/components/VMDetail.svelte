@@ -15,13 +15,23 @@
 
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { ChevronDown, Pencil, Trash2 } from 'lucide-svelte';
+	import {
+		ArrowRightLeft,
+		ChevronDown,
+		Monitor,
+		Pause,
+		Pencil,
+		Play,
+		RotateCw,
+		Server,
+	} from 'lucide-svelte';
 	import { api, Unauthorized, type Change, type DraftItem, type Network, type VM } from '$lib/api';
-	import { adoptVM, manifestURL, runRuntimeAction, type VMAction } from '$lib/actions';
+	import { adoptVM, manifestURL, runRuntimeAction, vmActions, type VMAction } from '$lib/actions';
 	import { type EditSection } from '$lib/editform';
 	import { action } from '$lib/resource.svelte';
 	import { ui, type DetailAction } from '$lib/state/ui.svelte';
 	import { duration, friendlyError } from '$lib/format';
+	import { phaseTone } from '$lib/status';
 	import ActionMenu from './ActionMenu.svelte';
 	import Banner from './Banner.svelte';
 	import CloneModal from './CloneModal.svelte';
@@ -37,10 +47,10 @@
 	import MetricsPanel from './MetricsPanel.svelte';
 	import PendingBanner from './PendingBanner.svelte';
 	import Permissions from './Permissions.svelte';
-	import PowerDot from './PowerDot.svelte';
 	import Snapshots from './Snapshots.svelte';
 	import StagedBadge from './StagedBadge.svelte';
 	import StatusDot from './StatusDot.svelte';
+	import StatusPill from './StatusPill.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 	import TabBar from './TabBar.svelte';
 	import VMConfigure from './VMConfigure.svelte';
@@ -111,6 +121,27 @@
 	// Imperative runtime ops (restart/pause/unpause/live-migrate). Results
 	// surface as toasts - identical feedback to the right-click context menu.
 	let runtimeBusy = $state(false);
+
+	// The flat toolbar: the everyday imperative verbs, promoted out of the
+	// Actions menu. Power is deliberately absent - it is a declarative
+	// (staged, PR-gated) runStrategy change here, and a flat button would read
+	// as immediate. Pause is the instant containment verb instead.
+	const TOOLBAR: { id: VMAction['id']; icon: typeof Monitor; label: string }[] = [
+		{ id: 'console', icon: Monitor, label: 'Console' },
+		{ id: 'migrate', icon: ArrowRightLeft, label: 'Migrate' },
+		{ id: 'restart', icon: RotateCw, label: 'Restart' },
+		{ id: 'pause', icon: Pause, label: 'Pause' },
+		{ id: 'unpause', icon: Play, label: 'Unpause' },
+	];
+	const toolbar = $derived.by(() => {
+		const v = vm;
+		if (!v) return [];
+		return TOOLBAR.filter((t) => (v.paused ? t.id !== 'pause' : t.id !== 'unpause')).map((t) => ({
+			...t,
+			action: vmActions.find((a) => a.id === t.id)!,
+		}));
+	});
+	const PROMOTED: VMAction['id'][] = ['console', 'migrate', 'restart', 'pause', 'unpause', 'edit'];
 
 	function loadDrift(ns: string, name: string) {
 		// Drop a stale response if the selection moved while it was in flight -
@@ -261,58 +292,67 @@
 {#if vm}
 	<div class="flex h-full flex-col">
 		<div class="border-b border-line px-4 pt-4">
-			<div class="mb-3 flex items-center gap-2">
-				<PowerDot power={vm.power} paused={vm.paused} />
+			<div class="flex items-center gap-2.5">
+				<Server size={20} class="shrink-0 text-ink-muted" />
 				<h2 class="text-lg font-semibold text-ink">{vm.name}</h2>
-				<span class="rounded bg-line px-1.5 py-0.5 text-xs text-ink-soft">{vm.namespace}</span>
+				<StatusPill
+					tone={phaseTone(vm.phase, vm.paused)}
+					label={vm.paused ? 'Paused' : (vm.phase ?? String(vm.power))}
+				/>
 				<SyncBadge sync={vm.sync} error={vm.syncError} />
 				{#if stagedItem}
 					<StagedBadge item={stagedItem} onopen={() => onstagedopen?.()} />
 				{/if}
-				<div class="ml-auto flex items-center gap-2">
-					<HeaderMenu align="right" panel={false}>
-						{#snippet trigger({ toggle })}
-							<button
-								onclick={toggle}
-								disabled={runtimeBusy}
-								title="All VM actions — runtime ops act immediately; config changes go through a PR"
-								class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
-							>
-								Actions <ChevronDown size={13} />
-							</button>
-						{/snippet}
-						{#snippet children({ close })}
-							<ActionMenu
-								{vm}
-								onpick={(a) => {
-									close();
-									handleAction(a);
-								}}
-							/>
-						{/snippet}
-					</HeaderMenu>
+				<span class="ml-1 flex min-w-0 items-center gap-1.5 truncate text-xs text-ink-faint">
+					{vm.namespace}{#if vm.nodeName}<span class="text-line-strong">/</span
+						>{vm.nodeName}{/if}{#if vm.instancetype}<span class="text-line-strong">/</span
+						>{vm.instancetype}{/if}
+				</span>
+			</div>
+			<div class="mt-1.5 mb-1 flex flex-wrap items-center gap-0.5">
+				{#each toolbar as t (t.id)}
+					{@const Icon = t.icon}
 					<button
-						onclick={() => openEdit()}
-						disabled={!vm.sourceFile}
-						title={vm.sourceFile ? 'Edit settings' : 'Not in git — adopt this VM first'}
-						class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50 disabled:hover:bg-transparent"
+						onclick={() => handleAction(t.action)}
+						disabled={!t.action.enabled(vm) || runtimeBusy}
+						title={t.action.title ?? ''}
+						class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-45 disabled:hover:bg-transparent"
 					>
-						<Pencil size={13} /> Edit Settings
+						<Icon size={13} />
+						{t.label}
 					</button>
-					<button
-						onclick={() => {
-							deleting = true;
-							delOp.clear();
-						}}
-						disabled={!vm.sourceFile}
-						title={vm.sourceFile
-							? 'Delete this VM (stages a removal into Changes)'
-							: 'Not in git — adopt this VM first'}
-						class="flex items-center gap-1.5 rounded border border-danger/50 px-2.5 py-1 text-xs font-medium text-danger-ink hover:bg-danger-soft/60 disabled:opacity-50 disabled:hover:bg-transparent"
-					>
-						<Trash2 size={13} /> Delete VM
-					</button>
-				</div>
+				{/each}
+				<span class="mx-1.5 h-4 w-px bg-line"></span>
+				<button
+					onclick={() => openEdit()}
+					disabled={!vm.sourceFile}
+					title={vm.sourceFile ? 'Edit settings' : 'Not in git — adopt this VM first'}
+					class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50 disabled:hover:bg-transparent"
+				>
+					<Pencil size={13} /> Edit Settings
+				</button>
+				<HeaderMenu align="right" panel={false}>
+					{#snippet trigger({ toggle })}
+						<button
+							onclick={toggle}
+							disabled={runtimeBusy}
+							title="Everything else — snapshots, clone, adopt, delete; config changes go through a PR"
+							class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
+						>
+							Actions <ChevronDown size={13} />
+						</button>
+					{/snippet}
+					{#snippet children({ close })}
+						<ActionMenu
+							{vm}
+							exclude={PROMOTED}
+							onpick={(a) => {
+								close();
+								handleAction(a);
+							}}
+						/>
+					{/snippet}
+				</HeaderMenu>
 			</div>
 			<TabBar
 				tabs={[
