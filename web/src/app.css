@@ -101,17 +101,20 @@
 :root[data-theme='dark'] {
 	color-scheme: dark;
 
-	/* surfaces */
-	--color-canvas: #0b1120; /* between slate-900 and slate-950 */
-	--color-panel: oklch(20.8% 0.042 265.755); /* slate-900 */
-	--color-inset: oklch(23.9% 0.041 262.5); /* a step above panel */
-	--color-inset-strong: oklch(27.9% 0.041 260.031); /* slate-800 */
-	--color-bar: oklch(12.9% 0.042 264.695); /* slate-950: the header stays darkest */
+	/* surfaces: near-neutral darks (chroma <=0.016) - at slate's 0.04 every
+	   surface reads navy and drowns the accent; color belongs to accent and
+	   status, not the ground. Panel sits a clear step above canvas so cards
+	   separate without shadows. */
+	--color-canvas: oklch(14.5% 0.012 262);
+	--color-panel: oklch(20% 0.014 262);
+	--color-inset: oklch(23.5% 0.015 262);
+	--color-inset-strong: oklch(27.5% 0.016 262);
+	--color-bar: oklch(12.5% 0.014 262); /* the header stays darkest */
 
-	/* hairlines */
-	--color-line: oklch(27.9% 0.041 260.031); /* slate-800 */
-	--color-line-strong: oklch(37.2% 0.044 257.287); /* slate-700 */
-	--color-line-soft: oklch(24.5% 0.041 262);
+	/* hairlines: same near-neutral family, one step more visible than before */
+	--color-line: oklch(29% 0.018 262);
+	--color-line-strong: oklch(38% 0.02 260);
+	--color-line-soft: oklch(25% 0.016 262);
 
 	/* ink */
 	--color-ink: oklch(96.8% 0.007 247.896); /* slate-100 */
@@ -128,9 +131,10 @@
 	--color-accent-hover: oklch(62.3% 0.214 259.815); /* blue-500 */
 	--color-accent-ink: oklch(70.7% 0.165 254.624); /* blue-400 */
 
-	/* selection */
-	--color-select: oklch(37.9% 0.146 265.522 / 0.45); /* blue-800 @ 45% */
-	--color-select-soft: oklch(37.9% 0.146 265.522 / 0.25);
+	/* selection: solid tokens (alpha over varying grounds was unpredictable),
+	   bright enough to read as the one blue plane on the neutral darks */
+	--color-select: oklch(32% 0.085 262);
+	--color-select-soft: oklch(25.5% 0.05 262);
 
 	/* accent tint for informational badges */
 	--color-accent-soft: oklch(28.2% 0.091 267.935); /* blue-950 */
@@ -139,9 +143,10 @@
 	--color-ok: oklch(76.5% 0.177 163.223); /* emerald-400 */
 	--color-warn: oklch(82.8% 0.189 84.429); /* amber-400 */
 	--color-danger: oklch(63.7% 0.237 25.331); /* red-500 */
-	--color-ok-soft: oklch(26.6% 0.065 152.934); /* green-950 */
-	--color-warn-soft: oklch(27.9% 0.077 45.635); /* amber-950 */
-	--color-danger-soft: oklch(25.8% 0.092 26.042); /* red-950 */
+	/* badge tints one step above the -950s, which vanished on the panels */
+	--color-ok-soft: oklch(31% 0.07 153);
+	--color-warn-soft: oklch(32% 0.08 60);
+	--color-danger-soft: oklch(30% 0.09 26);
 	--color-ok-ink: oklch(87.1% 0.15 154.449); /* green-300 */
 	--color-warn-ink: oklch(87.9% 0.169 91.605); /* amber-300 */
 	--color-danger-ink: oklch(80.8% 0.114 19.571); /* red-300 */

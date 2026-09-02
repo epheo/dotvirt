@@ -24,6 +24,7 @@
 		Play,
 		RotateCw,
 		Server,
+		Square,
 	} from 'lucide-svelte';
 	import { api, Unauthorized, type Change, type DraftItem, type Network, type VM } from '$lib/api';
 	import { adoptVM, manifestURL, runRuntimeAction, vmActions, type VMAction } from '$lib/actions';
@@ -126,12 +127,12 @@
 	// Actions menu. Power is deliberately absent - it is a declarative
 	// (staged, PR-gated) runStrategy change here, and a flat button would read
 	// as immediate. Pause is the instant containment verb instead.
-	const TOOLBAR: { id: VMAction['id']; icon: typeof Monitor; label: string }[] = [
-		{ id: 'console', icon: Monitor, label: 'Console' },
-		{ id: 'migrate', icon: ArrowRightLeft, label: 'Migrate' },
+	const TOOLBAR: { id: VMAction['id']; icon: typeof Monitor; label: string; sep?: boolean }[] = [
 		{ id: 'restart', icon: RotateCw, label: 'Restart' },
 		{ id: 'pause', icon: Pause, label: 'Pause' },
 		{ id: 'unpause', icon: Play, label: 'Unpause' },
+		{ id: 'console', icon: Monitor, label: 'Console', sep: true },
+		{ id: 'migrate', icon: ArrowRightLeft, label: 'Migrate' },
 	];
 	const toolbar = $derived.by(() => {
 		const v = vm;
@@ -142,6 +143,33 @@
 		}));
 	});
 	const PROMOTED: VMAction['id'][] = ['console', 'migrate', 'restart', 'pause', 'unpause', 'edit'];
+
+	// Power is declarative here (a staged runStrategy change), but it still
+	// deserves a first-class button: hiding it inside Edit Settings made the
+	// most basic verb the hardest to find. The button stages and says so.
+	let powerBusy = $state(false);
+	async function stagePower() {
+		const target = vm;
+		if (!target?.sourceFile || powerBusy) return;
+		const to = target.power === 'On' ? 'Off' : 'On';
+		powerBusy = true;
+		try {
+			await api.stageEdit(target.namespace, target.name, {
+				sourceFile: target.sourceFile,
+				power: to,
+			});
+			onstaged?.();
+			ui.showToast(`Power ${to} staged for ${target.name} — applies when the PR merges.`, {
+				kind: 'success',
+				action: { label: 'Review & propose', run: () => ui.openChanges() },
+			});
+		} catch (e) {
+			if (e instanceof Unauthorized) return;
+			ui.showToast(friendlyError(e), { kind: 'error' });
+		} finally {
+			powerBusy = false;
+		}
+	}
 
 	function loadDrift(ns: string, name: string) {
 		// Drop a stale response if the selection moved while it was in flight -
@@ -310,8 +338,19 @@
 				</span>
 			</div>
 			<div class="mt-1.5 mb-1 flex flex-wrap items-center gap-0.5">
+				<button
+					onclick={stagePower}
+					disabled={!vm.sourceFile || powerBusy}
+					title={vm.sourceFile
+						? 'Stages a power change into a PR — nothing happens until it merges'
+						: 'Not in git — adopt this VM first'}
+					class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-45 disabled:hover:bg-transparent"
+				>
+					{#if vm.power === 'On'}<Square size={13} /> Power off{:else}<Play size={13} /> Power on{/if}
+				</button>
 				{#each toolbar as t (t.id)}
 					{@const Icon = t.icon}
+					{#if t.sep}<span class="mx-1.5 h-4 w-px bg-line"></span>{/if}
 					<button
 						onclick={() => handleAction(t.action)}
 						disabled={!t.action.enabled(vm) || runtimeBusy}
@@ -393,6 +432,7 @@
 					onconsole={() => ontab?.('console')}
 					onmonitor={() => ontab?.('monitor')}
 					onedit={() => openEdit()}
+					onmigrate={() => (migrating = true)}
 				/>
 			{:else if tab === 'monitor'}
 				<!-- Monitor sub-rail: events + performance. -->

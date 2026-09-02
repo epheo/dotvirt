@@ -1,15 +1,18 @@
 <script lang="ts">
-	import { Activity, ChevronDown, ChevronRight, Cpu, HardDrive, MemoryStick } from 'lucide-svelte';
+	import { ChevronDown, ChevronRight } from 'lucide-svelte';
 	import { api, type Change, type DraftItem, type VM, type VMUsage } from '$lib/api';
-	import { duration, fmtUsage } from '$lib/format';
+	import { duration } from '$lib/format';
 	import { resource } from '$lib/resource.svelte';
 	import CapacityUsage from './CapacityUsage.svelte';
+	import { inventory } from '$lib/state/inventory.svelte';
+	import { ui } from '$lib/state/ui.svelte';
 	import ChangeList from './ChangeList.svelte';
 	import ConsolePreview from './ConsolePreview.svelte';
+	import GitOpsStepper from './GitOpsStepper.svelte';
+	import SyncBadge from './SyncBadge.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import Note from './Note.svelte';
 	import Row from './Row.svelte';
-	import Sparkline from './Sparkline.svelte';
 	import StagedDiff from './StagedDiff.svelte';
 	import StatusDot from './StatusDot.svelte';
 
@@ -26,6 +29,7 @@
 		onconsole,
 		onmonitor,
 		onedit,
+		onmigrate,
 	}: {
 		vm: VM;
 		stagedItem?: DraftItem | null;
@@ -37,6 +41,8 @@
 		onmonitor: () => void;
 		// Opens Edit settings (the card header's next action); absent = read-only host.
 		onedit?: () => void;
+		// Opens the live-migration target picker (the Placement card's action).
+		onmigrate?: () => void;
 	} = $props();
 
 	// A paused VMI keeps phase Running, so the label checks the Paused flag too.
@@ -72,6 +78,10 @@
 		return m;
 	});
 
+	// Standing problems scoped to this VM (the Issues card), off the same
+	// derivation the bell and the inspector use.
+	const vmIssues = $derived(inventory.issues.filter((i) => i.scope === vmKey));
+
 	// Drift detail folds per selection, not per frame: key on identity.
 	let showDrift = $state(false);
 	$effect(() => {
@@ -80,134 +90,149 @@
 	});
 </script>
 
-<!-- At-a-glance tiles + live usage on the left, the console preview spanning
-     both on the right (running VMs only) - the preview emits no DOM when
-     hidden, so the left column reclaims the full width. CPU/Memory tiles
-     carry the live trend and click through to Monitor. -->
-<div class="flex flex-col gap-4 xl:flex-row xl:items-stretch">
-	<div class="min-w-0 flex-1">
-		<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-			<button
-				onclick={onmonitor}
-				title="Open the Monitor tab"
-				class="rounded border border-line bg-inset p-3 text-left hover:border-line-strong"
-			>
-				<div class="flex items-center gap-1.5 text-xs text-ink-muted">
-					<Cpu size={13} /> CPU
-				</div>
-				<div class="mt-1 text-lg font-semibold text-ink">
-					{#if stagedChanges.has('CPU')}
-						<StagedDiff from={`${cpuVal ?? '—'} vCPU`} to={stagedChanges.get('CPU')?.to ?? ''} />
-					{:else if cpuVal}
-						{cpuVal}<span class="ml-1 text-sm font-normal text-ink-muted">vCPU</span>
-					{:else if vm.instancetype}
-						<span class="text-sm font-medium" title="Sized by the instance type"
-							>{vm.instancetype}</span
-						>
-					{:else}—{/if}
-				</div>
-				{#if usage}
-					<div
-						class="mt-1 flex flex-wrap items-center gap-2 text-xs whitespace-nowrap text-ink-faint"
+<!-- The object fact grid (the review-screen idiom): six cards, each carrying
+     its next action, with the live console preview beside them. Usage bars and
+     sparklines live in the Capacity card; staged values render inline as
+     current -> future wherever the field appears. -->
+<div class="flex flex-col gap-4 xl:flex-row xl:items-start">
+	<div class="grid min-w-0 flex-1 gap-4 md:grid-cols-2">
+		<InfoCard title="Guest">
+			{#snippet action()}
+				{#if vm.phase === 'Running'}
+					<button onclick={onconsole} class="text-xs text-accent-ink hover:underline"
+						>Console</button
 					>
-						<Sparkline values={usage.cpu.spark ?? []} color="var(--chart-1)" height={14} />
-						{Math.round(usage.cpu.used)}% used
-					</div>
 				{/if}
-			</button>
-			<button
-				onclick={onmonitor}
-				title="Open the Monitor tab"
-				class="rounded border border-line bg-inset p-3 text-left hover:border-line-strong"
-			>
-				<div class="flex items-center gap-1.5 text-xs text-ink-muted">
-					<MemoryStick size={13} /> Memory
-				</div>
-				<div class="mt-1 text-lg font-semibold text-ink">
+			{/snippet}
+			<dl class="divide-y divide-line-soft text-[13px]">
+				<Row label="Operating system" value={vm.os ?? ''} />
+				<Row label="Power (desired)">
+					{#if stagedChanges.has('Power')}
+						<StagedDiff from={vm.power} to={stagedChanges.get('Power')?.to ?? ''} />
+					{:else}<span class="text-ink">{vm.power}</span>{/if}
+				</Row>
+				<Row label="Status (actual)" value={statusText} />
+				<Row label="IP addresses">
+					<div class="font-mono text-xs text-ink">
+						{#if vm.ips?.length}
+							{#each vm.ips as ip (ip)}<div>{ip}</div>{/each}
+						{:else}{vm.guestIP || '—'}{/if}
+					</div>
+				</Row>
+				<Row label="Uptime" value={vm.power === 'On' ? duration(vm.startedAt) : ''} />
+			</dl>
+		</InfoCard>
+
+		<InfoCard title="Hardware">
+			{#snippet action()}
+				{#if onedit && vm.sourceFile}
+					<button onclick={onedit} class="text-xs text-accent-ink hover:underline">Edit</button>
+				{/if}
+			{/snippet}
+			<dl class="divide-y divide-line-soft text-[13px]">
+				<Row label="Instance type" value={vm.instancetype ?? ''} />
+				<Row label="Preference" value={vm.preference ?? ''} />
+				<Row label="vCPU">
+					{#if stagedChanges.has('CPU')}
+						<StagedDiff from={`${cpuVal ?? '—'}`} to={stagedChanges.get('CPU')?.to ?? ''} />
+					{:else}<span class="text-ink">{cpuVal ?? '—'}</span>{/if}
+				</Row>
+				<Row label="Memory">
 					{#if stagedChanges.has('Memory')}
 						<StagedDiff from={memVal ?? '—'} to={stagedChanges.get('Memory')?.to ?? ''} />
-					{:else if memVal}
-						{memVal}
-					{:else if vm.instancetype}
-						<span class="text-sm font-medium" title="Sized by the instance type"
-							>{vm.instancetype}</span
-						>
-					{:else}—{/if}
-				</div>
-				{#if usage && usage.memory.total}
-					<div
-						class="mt-1 flex flex-wrap items-center gap-2 text-xs whitespace-nowrap text-ink-faint"
+					{:else}<span class="text-ink">{memVal ?? '—'}</span>{/if}
+				</Row>
+				<Row label="Disks">
+					<span class="text-ink">
+						{vm.disks?.length ?? 0}
+						{#if vm.disks?.some((d) => d.size)}
+							<span class="text-ink-faint"
+								>({vm.disks
+									.filter((d) => d.size)
+									.map((d) => d.size)
+									.join(', ')})</span
+							>
+						{/if}
+					</span>
+				</Row>
+				<Row
+					label="Networks"
+					value={vm.networks?.length ? vm.networks.map((n) => n.network || n.name).join(', ') : ''}
+				/>
+			</dl>
+		</InfoCard>
+
+		<InfoCard title="Placement">
+			{#snippet action()}
+				{#if onmigrate && vm.phase === 'Running'}
+					<button onclick={onmigrate} class="text-xs text-accent-ink hover:underline"
+						>Migrate</button
 					>
-						<Sparkline values={usage.memory.spark ?? []} color="var(--chart-2)" height={14} />
-						{fmtUsage('bytes', usage.memory.used)} used
-					</div>
-				{:else if vm.memoryActual && vm.memory && vm.memoryActual !== vm.memory}
-					<div class="mt-1 text-xs text-ink-faint">{vm.memoryActual} live</div>
 				{/if}
-			</button>
-			<div class="rounded border border-line bg-inset p-3">
-				<div class="flex items-center gap-1.5 text-xs text-ink-muted">
-					<HardDrive size={13} /> Disks
-				</div>
-				<div class="mt-1 text-lg font-semibold text-ink">{vm.disks?.length ?? 0}</div>
+			{/snippet}
+			<dl class="divide-y divide-line-soft text-[13px]">
+				<Row label="Host">
+					{#if vm.nodeName}
+						<a href="/hosts/{encodeURIComponent(vm.nodeName)}" class="text-accent hover:underline"
+							>{vm.nodeName}</a
+						>
+					{:else}<span class="text-ink">—</span>{/if}
+				</Row>
+				<Row label="Pinned hosts" value={vm.scheduling?.pin?.join(', ') ?? ''} />
+				<Row
+					label="Placement groups"
+					value={vm.scheduling?.groups?.map((g) => g.name).join(', ') ?? ''}
+				/>
+				<Row label="Balancer" value={vm.drsExclude ? 'Excluded' : 'Automatic'} />
+				<Row label="Eviction strategy" value={vm.evictionStrategy || 'Cluster default'} />
+			</dl>
+		</InfoCard>
+
+		<InfoCard title="GitOps">
+			{#snippet action()}
+				{#if stagedItem}
+					<button onclick={() => ui.openChanges()} class="text-xs text-accent-ink hover:underline"
+						>Review changes</button
+					>
+				{/if}
+			{/snippet}
+			<div class="px-3 pt-2 pb-1">
+				<GitOpsStepper stage={stagedItem ? 'staged' : vm.sync === 'Synced' ? 'synced' : 'merged'} />
 			</div>
-			<div class="rounded border border-line bg-inset p-3">
-				<div class="flex items-center gap-1.5 text-xs text-ink-muted">
-					<Activity size={13} /> Status
-				</div>
-				<div class="mt-1 text-lg font-semibold text-ink">{statusText}</div>
-				{#if duration(vm.startedAt)}<div class="text-xs text-ink-faint">
-						up {duration(vm.startedAt)}
-					</div>{/if}
-			</div>
-		</div>
-		<div class="mt-4">
-			<CapacityUsage {usage} loading={usageLoading} failed={usageFailed} />
-		</div>
+			<dl class="divide-y divide-line-soft text-[13px]">
+				<Row label="Source" value={vm.sourceFile} mono />
+				<Row label="Sync"><SyncBadge sync={vm.sync} error={vm.syncError} /></Row>
+				<Row
+					label="Live vs git"
+					value={driftChanges === null
+						? '—'
+						: driftChanges.length
+							? `${driftChanges.length} field${driftChanges.length > 1 ? 's' : ''} differ — see below`
+							: 'Identical'}
+				/>
+			</dl>
+		</InfoCard>
+
+		<InfoCard title="Issues">
+			{#if vmIssues.length === 0}
+				<p class="flex items-center gap-2 px-3 py-2 text-xs text-ink-faint">
+					<StatusDot tone="ok" size="xs" /> No standing problems.
+				</p>
+			{:else}
+				<ul class="divide-y divide-line-soft">
+					{#each vmIssues as i (i.label)}
+						<li class="flex items-start gap-2 px-3 py-2 text-xs">
+							<span class="mt-0.5"><StatusDot tone={i.severity} size="xs" /></span>
+							<span class="text-ink-soft">{i.label}{i.detail ? ` — ${i.detail}` : ''}</span>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</InfoCard>
+
+		<CapacityUsage {usage} loading={usageLoading} failed={usageFailed} />
 	</div>
 	<ConsolePreview {vm} onopen={() => onconsole()} />
-</div>
-
-<div class="mt-4 grid gap-4 md:grid-cols-2">
-	<!-- Guest & runtime: live identity reported by the guest agent. -->
-	<InfoCard title="Guest & runtime">
-		{#snippet action()}
-			{#if vm.phase === 'Running'}
-				<button onclick={onconsole} class="text-xs text-accent-ink hover:underline">Console</button>
-			{/if}
-		{/snippet}
-		<dl class="divide-y divide-line-soft text-[13px]">
-			<Row label="Operating system" value={vm.os ?? ''} />
-			<Row label="Power (desired)">
-				{#if stagedChanges.has('Power')}
-					<StagedDiff from={vm.power} to={stagedChanges.get('Power')?.to ?? ''} />
-				{:else}<span class="text-ink">{vm.power}</span>{/if}
-			</Row>
-			<Row label="Status (actual)" value={vm.paused ? 'Paused' : (vm.phase ?? '')} />
-			<Row label="IP addresses">
-				<div class="font-mono text-xs text-ink">
-					{#if vm.ips?.length}
-						{#each vm.ips as ip (ip)}<div>{ip}</div>{/each}
-					{:else}{vm.guestIP || '—'}{/if}
-				</div>
-			</Row>
-		</dl>
-	</InfoCard>
-
-	<!-- Configuration & placement: desired config + where it runs. -->
-	<InfoCard title="Configuration & placement">
-		{#snippet action()}
-			{#if onedit && vm.sourceFile}
-				<button onclick={onedit} class="text-xs text-accent-ink hover:underline">Edit</button>
-			{/if}
-		{/snippet}
-		<dl class="divide-y divide-line-soft text-[13px]">
-			<Row label="Instance type" value={vm.instancetype ?? ''} />
-			<Row label="Preference" value={vm.preference ?? ''} />
-			<Row label="Node" value={vm.nodeName ?? ''} />
-			<Row label="Source" value={vm.sourceFile} mono />
-		</dl>
-	</InfoCard>
 </div>
 
 {#if !vm.sourceFile}
