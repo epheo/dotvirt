@@ -7,6 +7,7 @@
 	let {
 		title,
 		confirmWord,
+		verb = 'Delete',
 		busy = false,
 		error = '',
 		onconfirm,
@@ -14,7 +15,8 @@
 		children,
 	}: {
 		title: string;
-		confirmWord: string; // the exact text the user must type to enable Delete
+		confirmWord: string; // the exact text the user must type to enable the verb
+		verb?: string; // the destructive button's label (Release reuses this dialog)
 		busy?: boolean;
 		error?: string;
 		onconfirm: () => void;
@@ -55,7 +57,7 @@
 			disabled={!ready}
 			class="rounded bg-danger px-3 py-1 text-sm font-medium text-white hover:bg-danger-ink disabled:opacity-50"
 		>
-			Delete
+			{verb}
 		</button>
 	{/snippet}
 </Modal>

@@ -211,7 +211,25 @@ async function handleAPI(req, res, url) {
 		});
 	}
 
-	let m = path.match(/^\/api\/projects\/([^/]+)\/history$/);
+	let m = path.match(/^\/api\/projects\/([^/]+)\/release$/);
+	if (m && req.method === 'POST') {
+		const inv = state.scenario.inventory;
+		const p = inv.projects.find((x) => x.name === m[1]);
+		if (!p) return sendText(res, 404, 'project not found');
+		if (p.repo) return sendText(res, 409, 'project has a repo configured');
+		const released = p.namespaces.map((n) => n.namespace);
+		inv.projects = inv.projects.filter((x) => x !== p);
+		inv.adoptable = [
+			...(inv.adoptable ?? []),
+			...p.namespaces
+				.filter((n) => n.vms.length > 0)
+				.map((n) => ({ namespace: n.namespace, vms: n.vms.length })),
+		];
+		broadcastInventory();
+		return sendJSON(res, 200, { released });
+	}
+
+	m = path.match(/^\/api\/projects\/([^/]+)\/history$/);
 	if (m) {
 		return sendJSON(res, 200, [
 			{
@@ -317,7 +335,9 @@ function handleControl(req, res, url) {
 	if (m && req.method === 'POST') {
 		const next = scenarios[m[1]];
 		if (!next) return sendText(res, 404, `no scenario ${m[1]}`);
-		state.scenario = next;
+		// Deep clone: endpoints that mutate scenario state (release) must never
+		// pollute the shared definitions across tests.
+		state.scenario = structuredClone(next);
 		state.staged.clear();
 		broadcastInventory();
 		return sendJSON(res, 200, { scenario: next.name });

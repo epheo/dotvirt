@@ -214,6 +214,8 @@ func run() error {
 			WebhookSecret:     cfg.WebhookSecret,
 			UploadProxyURL:    cfg.UploadProxyURL,
 			PlatformRepo:      cfg.PlatformRepo,
+			ProjectLabel:      cfg.ProjectLabel,
+			RepoAnnotation:    cfg.RepoAnnotation,
 		},
 	})
 

@@ -6,6 +6,7 @@
 	import AddUplinkModal from './AddUplinkModal.svelte';
 	import AdminFirewallModal from './AdminFirewallModal.svelte';
 	import AdoptProjectModal from './AdoptProjectModal.svelte';
+	import ReleaseProjectModal from './ReleaseProjectModal.svelte';
 	import DeployTemplateModal from './DeployTemplateModal.svelte';
 	import DistributedFirewallModal from './DistributedFirewallModal.svelte';
 	import EditTemplateModal from './EditTemplateModal.svelte';
@@ -91,6 +92,8 @@
 		onclose={close}
 		onstaged={staged}
 	/>
+{:else if m?.kind === 'releaseProject'}
+	<ReleaseProjectModal project={m.project} namespaces={m.namespaces} onclose={close} />
 {:else if m?.kind === 'egressFw'}
 	<EgressFirewallModal
 		namespaces={m.namespaces}

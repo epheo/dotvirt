@@ -7,6 +7,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
+	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
@@ -175,6 +176,57 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 		return model.DraftView{}, err
 	}
 	return c.Get(id, commitProj)
+}
+
+// ReleaseDeclared stages the declarative half of a project release: every
+// project namespace the PLATFORM repo declares is rewritten as a plain
+// Namespace - the file stays (handing Argo a deletion would prune the
+// namespace itself), the project label and repo annotation go. Namespaces the
+// platform repo does not describe come back as residue for the caller to
+// unlabel imperatively (label residue has no git path). A declared file
+// carrying more than its Namespace (a VM Network rides some) refuses the whole
+// release rather than pruning tenant networking.
+func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target project.ProjectInfo) (staged, residue []string, err error) {
+	if err := requireRepo(commitProj); err != nil {
+		return nil, nil, err
+	}
+	read, err := c.read(commitProj)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, ns := range target.Namespaces {
+		path := "namespaces/" + ns + ".yaml"
+		content, ok, lerr := read.LookupOnBranch(c.baseBranch, path)
+		if lerr != nil {
+			return nil, nil, lerr
+		}
+		if !ok {
+			residue = append(residue, ns)
+			continue
+		}
+		refs := git.DeclaredRefs(path, content)
+		if len(refs) != 1 || refs[0].Kind != "Namespace" {
+			return nil, nil, fmt.Errorf(
+				"%w: %s declares more than the namespace %s (e.g. a VM Network); rewriting it would prune those - release this project by editing the platform repo",
+				model.ErrConflict, path, ns)
+		}
+		pPath, pContent, gerr := netgen.PlainNamespaceManifest(ns)
+		if gerr != nil {
+			return nil, nil, fmt.Errorf("%w: %v", model.ErrInvalid, gerr)
+		}
+		if serr := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
+			Kind:       draft.KindCreate,
+			Resource:   draft.ResourceNamespace,
+			Namespace:  ns,
+			Name:       ns,
+			SourceFile: pPath,
+			Manifest:   string(pContent),
+		}); serr != nil {
+			return nil, nil, serr
+		}
+		staged = append(staged, ns)
+	}
+	return staged, residue, nil
 }
 
 // ensureTenantRepo derives the tenant repo URL - a sibling of the platform repo

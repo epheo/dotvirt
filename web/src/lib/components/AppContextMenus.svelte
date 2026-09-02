@@ -68,6 +68,17 @@
 						}}
 						title="Create a repo for this project and bring it under GitOps">Attach repo…</MenuItem
 					>
+					<MenuItem
+						onclick={() => {
+							ui.modal =
+								ctx.kind === 'container'
+									? { kind: 'releaseProject', project: ctx.project, namespaces: ctx.namespaces }
+									: null;
+							ui.ctx = null;
+						}}
+						title="Dissolve this project: remove the project label so its namespaces go back to plain (or adoptable) namespaces"
+						>Release project…</MenuItem
+					>
 					<div class="my-1 border-t border-line-soft"></div>
 				{/if}
 				<!-- A dead repo annotation is a different dead end from repoless. Gated on
