@@ -426,6 +426,15 @@ func (c *Client) NodeInfo(ctx context.Context, name string) (model.NodeInfo, err
 	}, nil
 }
 
+// ReleaseNamespace strips dotvirt's tenancy claim (the project label and repo
+// annotation) from a namespace under the caller's token - residue cleanup for
+// a labeled namespace no manifest describes. Cluster RBAC is the sole gate.
+func (c *Client) ReleaseNamespace(ctx context.Context, name, projectLabel, repoAnnotation string) error {
+	patch := fmt.Appendf(nil, `{"metadata":{"labels":{%q:null},"annotations":{%q:null}}}`, projectLabel, repoAnnotation)
+	_, err := c.kube.CoreV1().Namespaces().Patch(ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
+	return err
+}
+
 // SetNodeCordon patches node.spec.unschedulable under the caller's token, so
 // cluster RBAC is the sole gate (a user without node-update gets 403). Cordon
 // stops new placements; running VMIs stay until an evacuation migrates them.

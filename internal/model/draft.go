@@ -160,6 +160,15 @@ type ProposeResult struct {
 	Existing   bool   `json:"existing,omitempty"`
 }
 
+// ReleaseResult is POST /api/projects/{project}/release: namespaces released
+// imperatively (label residue nothing in git described) and namespaces staged
+// as platform-repo rewrites (declared tenancy - the PR is the release).
+type ReleaseResult struct {
+	Released []string   `json:"released,omitempty"`
+	Staged   []string   `json:"staged,omitempty"`
+	Draft    *DraftView `json:"draft,omitempty"`
+}
+
 // Proposal is an open pull request backing a project's draft - the staged->PR->
 // synced lifecycle's middle state, surfaced as a Recent Tasks row.
 type Proposal struct {

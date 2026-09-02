@@ -171,6 +171,16 @@ export interface ProposeResult {
   existing?: boolean;
 }
 /**
+ * ReleaseResult is POST /api/projects/{project}/release: namespaces released
+ * imperatively (label residue nothing in git described) and namespaces staged
+ * as platform-repo rewrites (declared tenancy - the PR is the release).
+ */
+export interface ReleaseResult {
+  released?: string[];
+  staged?: string[];
+  draft?: DraftView;
+}
+/**
  * Proposal is an open pull request backing a project's draft - the staged->PR->
  * synced lifecycle's middle state, surfaced as a Recent Tasks row.
  */

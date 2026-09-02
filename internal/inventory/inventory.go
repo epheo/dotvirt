@@ -145,7 +145,8 @@ func Adoptable(live map[string]clusterstate.LiveVM, labeled []project.Namespace)
 }
 
 func isSystemNamespace(ns string) bool {
-	return strings.HasPrefix(ns, "openshift-") || strings.HasPrefix(ns, "kube-")
+	return strings.HasPrefix(ns, "openshift-") || strings.HasPrefix(ns, "kube-") ||
+		strings.HasSuffix(ns, "-operator-system") // an operator's home is never a tenant
 }
 
 func enrich(vm *model.VM, in Inputs) {

@@ -242,6 +242,7 @@ func TestAdoptable(t *testing.T) {
 		"tenant-a/web":            {Phase: "Running"}, // labeled -> already a project
 		"openshift-cnv/plumbing":  {},                 // system -> never proposed
 		"kube-system/should-skip": {},
+		"acme-operator-system/op": {},                 // an operator's home is never a tenant
 	}
 	labeled := []project.Namespace{{Name: "tenant-a"}}
 	got := Adoptable(live, labeled)

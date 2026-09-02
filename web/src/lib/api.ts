@@ -411,6 +411,10 @@ export const api = {
 	// Wire a repo to an existing labeled-but-repoless project (the "no repo" dead-end).
 	adoptProject: (project: string, owners?: string[]) =>
 		post<DraftView>(`/api/projects/${enc(project)}/adopt`, owners?.length ? { owners } : {}),
+	// Dissolve a repoless project: declared tenancy stages a platform rewrite,
+	// label residue is stripped imperatively under the caller's token.
+	releaseProject: (project: string) =>
+		post<gen.ReleaseResult>(`/api/projects/${enc(project)}/release`, {}),
 
 	// The template library. Deploy renders server-side
 	// and stages the VM into the draft; save derives a template from a VM's git

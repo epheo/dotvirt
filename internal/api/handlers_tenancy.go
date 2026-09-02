@@ -6,7 +6,10 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // handleCreateNamespace stages a new namespace (+ optional primary "VM Network").
@@ -100,4 +103,47 @@ func (s *Server) handleAdoptProject(w http.ResponseWriter, r *http.Request) {
 	}
 	view, err := s.draft.AdoptProject(plat.id, plat.proj, target, body.Owners)
 	respond(w, view, err)
+}
+
+// handleReleaseProject dissolves a repoless project back into a plain
+// namespace (or an adoptable tenant): declared tenancy is staged as a
+// platform-repo rewrite (the PR is the release), label residue is stripped
+// imperatively under the caller's token. Repo-backed projects are refused -
+// release exists for the "no repo configured" dead end, not for tearing down
+// healthy tenants.
+func (s *Server) handleReleaseProject(w http.ResponseWriter, r *http.Request) {
+	plat, ok := s.platformScope(w, r, ssarNamespace)
+	if !ok {
+		return
+	}
+	target, ok := s.projectByName(r.PathValue("project"))
+	if !ok {
+		http.Error(w, "project not found", http.StatusNotFound)
+		return
+	}
+	if target.Repo != "" {
+		fail(w, fmt.Errorf("%w: project %q has a repo configured; release covers only the repoless dead end", model.ErrConflict, target.Name))
+		return
+	}
+	staged, residue, err := s.draft.ReleaseDeclared(plat.id, plat.proj, target)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	res := model.ReleaseResult{Staged: staged}
+	for _, ns := range residue {
+		// The k8s API is the gate: a caller without namespace-update gets its 403
+		// here. Anything already staged stays in the draft (visible, unstageable).
+		if perr := plat.cluster.ReleaseNamespace(r.Context(), ns, s.cfg.ProjectLabel, s.cfg.RepoAnnotation); perr != nil {
+			fail(w, fmt.Errorf("release %s: %w", ns, perr))
+			return
+		}
+		res.Released = append(res.Released, ns)
+	}
+	if len(staged) > 0 {
+		if view, verr := s.draft.Get(plat.id, plat.proj); verr == nil {
+			res.Draft = &view
+		}
+	}
+	respond(w, res, nil)
 }

@@ -647,7 +647,32 @@ function largeScenario() {
 const sso = { ...base, name: 'sso', authMethods: { sso: true, ssoPending: true } };
 const ssoready = { ...base, name: 'ssoready', authMethods: { sso: true, ssoPending: false } };
 
+// ── residue: a labeled project with no repo (an old install's leftover) ────────
+// The "no repo configured" dead-end Release resolves: the project label stands
+// on namespaces nothing in git describes.
+const residue = {
+	...base,
+	name: 'residue',
+	inventory: {
+		...base.inventory,
+		projects: [
+			...base.inventory.projects,
+			{
+				name: 'oldportal',
+				repo: '',
+				namespaces: [
+					{
+						namespace: 'oldportal-ns',
+						vms: [vm('oldportal-ns', 'stray-1', { sync: 'NotTracked', sourceFile: undefined })],
+					},
+				],
+			},
+		],
+	},
+};
+
 export const scenarios = {
+	residue,
 	sso,
 	ssoready,
 	base,

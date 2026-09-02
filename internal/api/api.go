@@ -70,6 +70,7 @@ type Draft interface {
 	// under the caller's own token, so the coordinator stays cluster-free.
 	AdoptNamespace(id auth.Identity, proj project.ProjectInfo, namespace string, objs []changeset.Adoptable) (model.DraftView, error)
 	AdoptProject(id auth.Identity, commitProj, target project.ProjectInfo, owners []string) (model.DraftView, error)
+	ReleaseDeclared(id auth.Identity, commitProj, target project.ProjectInfo) (staged, residue []string, err error)
 	// Resync runs with dotvirt's SA (Argo operations carry no user context);
 	// canUpdateVM is the caller-token SSAR the implementation enforces before
 	// escalating, so no future caller can reach the SA-privileged patch unchecked.
@@ -106,6 +107,8 @@ type Config struct {
 	WebhookSecret     string // HMAC secret for the Forgejo webhook endpoint; empty disables it
 	UploadProxyURL    string // cdi-uploadproxy base for image uploads; empty disables it
 	PlatformRepo      string // platform-tier repo for cluster-scoped + tenancy manifests; empty disables those creates
+	ProjectLabel      string // namespace label naming the project (release strips it)
+	RepoAnnotation    string // namespace annotation holding the repo URL (release strips it)
 }
 
 // visibleTTL bounds a token's cached visible-namespace set. The RBAC version stamp
@@ -298,6 +301,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/projects/{project}/history", s.handleHistory)
 	mux.HandleFunc("POST /api/projects/{project}/revert", s.handleRevert)
 	mux.HandleFunc("POST /api/projects/{project}/adopt", s.handleAdoptProject)
+	mux.HandleFunc("POST /api/projects/{project}/release", s.handleReleaseProject)
 
 	if s.stream != nil {
 		mux.HandleFunc("GET /api/inventory/stream", s.stream.Handler)
