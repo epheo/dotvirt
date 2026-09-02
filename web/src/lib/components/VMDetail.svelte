@@ -352,6 +352,7 @@
 					onresync={resync}
 					onconsole={() => ontab?.('console')}
 					onmonitor={() => ontab?.('monitor')}
+					onedit={() => openEdit()}
 				/>
 			{:else if tab === 'monitor'}
 				<!-- Monitor sub-rail: events + performance. -->

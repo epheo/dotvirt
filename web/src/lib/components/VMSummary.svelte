@@ -25,6 +25,7 @@
 		onresync,
 		onconsole,
 		onmonitor,
+		onedit,
 	}: {
 		vm: VM;
 		stagedItem?: DraftItem | null;
@@ -34,6 +35,8 @@
 		onresync: () => void;
 		onconsole: () => void;
 		onmonitor: () => void;
+		// Opens Edit settings (the card header's next action); absent = read-only host.
+		onedit?: () => void;
 	} = $props();
 
 	// A paused VMI keeps phase Running, so the label checks the Paused flag too.
@@ -168,6 +171,11 @@
 <div class="mt-4 grid gap-4 md:grid-cols-2">
 	<!-- Guest & runtime: live identity reported by the guest agent. -->
 	<InfoCard title="Guest & runtime">
+		{#snippet action()}
+			{#if vm.phase === 'Running'}
+				<button onclick={onconsole} class="text-xs text-accent-ink hover:underline">Console</button>
+			{/if}
+		{/snippet}
 		<dl class="divide-y divide-line-soft text-[13px]">
 			<Row label="Operating system" value={vm.os ?? ''} />
 			<Row label="Power (desired)">
@@ -188,6 +196,11 @@
 
 	<!-- Configuration & placement: desired config + where it runs. -->
 	<InfoCard title="Configuration & placement">
+		{#snippet action()}
+			{#if onedit && vm.sourceFile}
+				<button onclick={onedit} class="text-xs text-accent-ink hover:underline">Edit</button>
+			{/if}
+		{/snippet}
 		<dl class="divide-y divide-line-soft text-[13px]">
 			<Row label="Instance type" value={vm.instancetype ?? ''} />
 			<Row label="Preference" value={vm.preference ?? ''} />

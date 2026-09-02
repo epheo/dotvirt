@@ -20,6 +20,7 @@
 		Upload,
 		User as UserIcon,
 	} from 'lucide-svelte';
+	import { dispatchVMAction } from '$lib/actions';
 	import { hrefForScope, scopeFromPath, vmHref } from '$lib/nav';
 	import StatusDot from './StatusDot.svelte';
 	import { drafts } from '$lib/state/drafts.svelte';
@@ -47,6 +48,9 @@
 	// Global search: a hit either opens a VM or focuses its scope.
 	function onSearchPick(hit: SearchHit) {
 		switch (hit.kind) {
+			case 'action':
+				dispatchVMAction(hit.action, hit.vm, { onstaged: () => drafts.refresh() });
+				break;
 			case 'vm':
 				goto(vmHref(hit.vm.namespace, hit.vm.name));
 				break;

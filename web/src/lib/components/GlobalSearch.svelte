@@ -7,10 +7,12 @@
 	// chips elsewhere call searchFor().
 	import { Search } from 'lucide-svelte';
 	import type { VM } from '$lib/api';
+	import { vmActions, type VMAction } from '$lib/actions';
 	import { vmStorageKeys, NO_STORAGE } from '$lib/lenses';
 	import { inventory as inventoryStore } from '$lib/state/inventory.svelte';
 
 	export type SearchHit =
+		| { kind: 'action'; action: VMAction; vm: VM; hint: string }
 		| { kind: 'vm'; vm: VM; hint: string }
 		| { kind: 'project'; project: string }
 		| { kind: 'namespace'; project: string; namespace: string }
@@ -19,6 +21,23 @@
 		| { kind: 'storage'; storageClass: string };
 
 	let { onpick }: { onpick: (hit: SearchHit) => void } = $props();
+
+	// Verb aliases -> registry action ids (the palette's command vocabulary).
+	const VERBS: Record<string, string> = {
+		migrate: 'migrate',
+		'live-migrate': 'migrate',
+		restart: 'restart',
+		reboot: 'restart',
+		pause: 'pause',
+		unpause: 'unpause',
+		resume: 'unpause',
+		console: 'console',
+		edit: 'edit',
+		snapshot: 'snapshot',
+		clone: 'clone',
+		adopt: 'adopt',
+		delete: 'delete',
+	};
 
 	// Everything searched reads straight off the inventory store - the search is
 	// global by nature, so no scope-narrowing props to thread.
@@ -47,6 +66,34 @@
 		const labelQ = q.startsWith('label:') ? q.slice('label:'.length) : null;
 
 		const vms = inventoryStore.allVMs;
+
+		// A leading verb turns the box into a command line: "migrate web" lists
+		// the registry action on every matching VM it is enabled for. Runtime
+		// verbs run immediately on pick; host verbs open the VM page's dialog.
+		if (labelQ === null) {
+			const [head, ...restWords] = q.split(/\s+/);
+			const verbId = VERBS[head];
+			const a = verbId && vmActions.find((x) => x.id === verbId);
+			if (a) {
+				const rest = restWords.join(' ');
+				for (const vm of vms) {
+					if (out.length >= 5) break;
+					if (
+						rest &&
+						!vm.name.toLowerCase().includes(rest) &&
+						!vm.namespace.toLowerCase().includes(rest)
+					)
+						continue;
+					if (!a.enabled(vm)) continue;
+					out.push({
+						kind: 'action',
+						action: a,
+						vm,
+						hint: vm.namespace + (vm.nodeName ? `, on ${vm.nodeName}` : ''),
+					});
+				}
+			}
+		}
 		for (const vm of vms) {
 			if (out.length >= 8) break;
 			const labels = Object.entries(vm.labels ?? {});
@@ -155,6 +202,8 @@
 
 	function hitLabel(h: SearchHit): string {
 		switch (h.kind) {
+			case 'action':
+				return `${h.action.label.replace('\u2026', '')} ${h.vm.name}`;
 			case 'vm':
 				return h.vm.name;
 			case 'project':
@@ -171,6 +220,7 @@
 	}
 	function hitHint(h: SearchHit): string {
 		switch (h.kind) {
+			case 'action':
 			case 'vm':
 			case 'network':
 				return h.hint;
@@ -181,6 +231,7 @@
 		}
 	}
 	const kindBadge: Record<SearchHit['kind'], string> = {
+		action: 'Action',
 		vm: 'VM',
 		project: 'Project',
 		namespace: 'Namespace',
@@ -200,7 +251,7 @@
 			bind:value={query}
 			onfocus={() => (open = true)}
 			{onkeydown}
-			placeholder="Search VMs, projects, nodes, label:k=v"
+			placeholder="Search, or type a verb: migrate web…"
 			aria-label="Search inventory"
 			class="w-full bg-transparent text-xs text-white placeholder-slate-400 focus:outline-none"
 		/>

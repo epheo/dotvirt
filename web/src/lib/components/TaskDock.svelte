@@ -39,7 +39,13 @@
 
 	type DockTab = 'tasks' | 'events' | 'alarms';
 
-	let openPane = $state(true);
+	// Collapsed by default: the rail is ambient, the pane is on demand. The
+	// choice persists like the dock height does.
+	const dockOpen = persisted('dotvirt.dock.open', false);
+	let openPane = $state(dockOpen.value);
+	$effect(() => {
+		dockOpen.value = openPane;
+	});
 	let tab = $state<DockTab>('tasks');
 
 	// Events lane: fetched on demand when the Events tab is opened (not on the
@@ -208,6 +214,18 @@
 			variant="chips"
 			onchange={(t) => selectTab(t as DockTab)}
 		/>
+		{#if !openPane && tasks[0]}
+			{@const t = tasks[0]}
+			<button
+				onclick={() => selectTab('tasks')}
+				class="flex min-w-0 items-center gap-1.5 px-2 text-ink-muted hover:text-ink-soft"
+				title="Open Recent Tasks"
+			>
+				<StatusDot tone={taskTone(t)} size="xs" pulse={t.kind === 'migration' && t.active} />
+				<span class="truncate">{t.verb} {t.name || t.prTitle || t.project}</span>
+				<span class="shrink-0 text-ink-faint">{t.status}</span>
+			</button>
+		{/if}
 		<button
 			onclick={() => {
 				onrefresh?.();
