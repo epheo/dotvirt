@@ -20,6 +20,7 @@
 		staged,
 		onstagedopen,
 		oncontextvm,
+		activeKey = null,
 	}: {
 		vms: VM[];
 		onselect: (vm: VM) => void;
@@ -27,6 +28,8 @@
 		staged: Map<string, DraftItem>;
 		onstagedopen: (vm: VM) => void;
 		oncontextvm?: (vm: VM, x: number, y: number) => void;
+		// "ns/name" of the row the side peek is inspecting (the selection blue).
+		activeKey?: string | null;
 	} = $props();
 
 	const vmKey = (vm: VM) => `${vm.namespace}/${vm.name}`;
@@ -270,9 +273,11 @@
 							e.preventDefault();
 							oncontextvm(vm, e.clientX, e.clientY);
 						}}
-						class="cursor-pointer hover:bg-select-soft {selected.has(vmKey(vm))
-							? 'bg-select-soft'
-							: ''}"
+						class="cursor-pointer hover:bg-select-soft {activeKey === vmKey(vm)
+							? 'bg-select hover:bg-select'
+							: selected.has(vmKey(vm))
+								? 'bg-select-soft'
+								: ''}"
 					>
 						<td class="px-3 py-1.5">
 							<input

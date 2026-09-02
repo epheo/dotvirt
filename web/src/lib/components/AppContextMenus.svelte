@@ -1,18 +1,11 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import type { VM } from '$lib/api';
-	import {
-		adoptNamespaces,
-		adoptVM,
-		manifestURL,
-		runRuntimeAction,
-		type VMAction,
-	} from '$lib/actions';
+	import { adoptNamespaces, dispatchVMAction, type VMAction } from '$lib/actions';
 	import { repoError } from '$lib/gitops';
-	import { vmHref } from '$lib/nav';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui, type DetailAction } from '$lib/state/ui.svelte';
+	import { ui } from '$lib/state/ui.svelte';
 	import ActionMenu from './ActionMenu.svelte';
 	import ContextMenu from './ContextMenu.svelte';
 	import MenuItem from './MenuItem.svelte';
@@ -26,20 +19,7 @@
 		if (ui.ctx?.kind !== 'vm') return;
 		const vm = ui.ctx.vm;
 		ui.ctx = null;
-		if (a.kind === 'runtime' && a.run) {
-			await runRuntimeAction(a, vm);
-			return;
-		}
-		if (a.id === 'manifest') {
-			window.open(manifestURL(vm), '_blank');
-			return;
-		}
-		if (a.id === 'adopt') {
-			await adoptVM(vm, { onstaged: () => drafts.refresh() });
-			return;
-		}
-		ui.requestDetail(a.id as DetailAction);
-		goto(vmHref(vm.namespace, vm.name));
+		await dispatchVMAction(a, vm, { onstaged: () => drafts.refresh() });
 	}
 
 	// Recover-repo gate: only a comparison-plane error says the forge lost the

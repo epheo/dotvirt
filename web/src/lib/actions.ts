@@ -1,3 +1,4 @@
+import { goto } from '$app/navigation';
 import { vmPath } from './api';
 // The single VM-action registry: every menu that acts on a VM - the detail
 // header's Actions ▾, the right-click context menu, the bulk bar - renders
@@ -12,7 +13,8 @@ import { vmPath } from './api';
 //    download a file) - the registry only describes and gates it.
 import { api, Unauthorized, type VM } from '$lib/api';
 import { friendlyError } from '$lib/format';
-import { ui } from '$lib/state/ui.svelte';
+import { ui, type DetailAction } from '$lib/state/ui.svelte';
+import { vmHref } from '$lib/nav';
 
 type ActionId =
 	| 'restart'
@@ -54,6 +56,31 @@ export async function runRuntimeAction(a: VMAction, vm: VM): Promise<void> {
 		if (e instanceof Unauthorized) return; // signed out centrally; skip the error toast
 		ui.showToast(`${verb} failed for ${vm.name}: ${friendlyError(e)}`, { kind: 'error' });
 	}
+}
+
+// dispatchVMAction performs a registry action from OUTSIDE the VM detail page
+// (context menu, inspector, palette): runtime ops run here with toast feedback,
+// host actions navigate to the detail page carrying a one-shot intent. Shared
+// so the four-way split cannot drift between entry points.
+export async function dispatchVMAction(
+	a: VMAction,
+	vm: VM,
+	opts?: { onstaged?: () => void | Promise<void> },
+): Promise<void> {
+	if (a.kind === 'runtime' && a.run) {
+		await runRuntimeAction(a, vm);
+		return;
+	}
+	if (a.id === 'manifest') {
+		window.open(manifestURL(vm), '_blank');
+		return;
+	}
+	if (a.id === 'adopt') {
+		await adoptVM(vm, opts);
+		return;
+	}
+	ui.requestDetail(a.id as DetailAction);
+	goto(vmHref(vm.namespace, vm.name));
 }
 
 // adoptVM stages a cluster-only VM's live state into the draft, with the one
