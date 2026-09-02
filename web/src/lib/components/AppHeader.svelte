@@ -216,7 +216,7 @@
 				title="Issues — standing problems in the visible inventory"
 				class="relative rounded p-1.5 hover:bg-side-hover {open
 					? 'bg-side-hover text-white'
-					: 'text-slate-300'}"
+					: 'text-side-dim'}"
 			>
 				<TriangleAlert size={16} />
 				{#if issues.length > 0}
@@ -273,7 +273,7 @@
 		class="relative flex items-center gap-1.5 rounded border border-side-active px-2.5 py-1 text-xs font-medium hover:bg-side-hover {page
 			.url.pathname === '/changes'
 			? 'bg-side-hover text-white'
-			: 'text-slate-200'}"
+			: 'text-side-ink'}"
 	>
 		<ClipboardList size={13} /> Review changes
 		{#if inFlight > 0}
@@ -288,7 +288,7 @@
 		{#snippet trigger({ open, toggle })}
 			<button
 				onclick={toggle}
-				class="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-slate-200 hover:bg-side-hover"
+				class="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-side-ink hover:bg-side-hover"
 			>
 				<UserIcon size={14} />
 				{session.user?.username}

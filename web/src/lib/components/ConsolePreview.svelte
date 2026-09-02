@@ -48,7 +48,7 @@
 		onclick={onopen}
 		title="Open the live console"
 		style:aspect-ratio={aspect}
-		class="group relative block w-full max-w-xl overflow-hidden rounded border border-line bg-slate-900 xl:w-auto xl:shrink-0"
+		class="group relative block w-full max-w-xl overflow-hidden rounded border border-line bg-[#151515] xl:w-auto xl:shrink-0"
 		class:hidden={failed}
 	>
 		<img

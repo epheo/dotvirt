@@ -14,7 +14,7 @@
 				{#if t.kind === 'success'}<CircleCheck size={15} class="shrink-0 text-emerald-400" />
 				{:else if t.kind === 'error'}<CircleAlert size={15} class="shrink-0 text-red-400" />
 				{:else if t.kind === 'warning'}<TriangleAlert size={15} class="shrink-0 text-amber-400" />
-				{:else}<Info size={15} class="shrink-0 text-slate-400" />{/if}
+				{:else}<Info size={15} class="shrink-0 text-side-dim" />{/if}
 				{t.msg}
 				{#if t.action}
 					{@const action = t.action}
@@ -23,7 +23,7 @@
 							action.run();
 							ui.dismissToast(t.id);
 						}}
-						class="shrink-0 rounded border border-slate-500 px-2 py-0.5 text-xs font-medium hover:bg-slate-700"
+						class="shrink-0 rounded border border-side-active px-2 py-0.5 text-xs font-medium hover:bg-side-hover"
 					>
 						{action.label}
 					</button>
@@ -31,7 +31,7 @@
 				<button
 					onclick={() => ui.dismissToast(t.id)}
 					aria-label="Dismiss"
-					class="shrink-0 text-slate-400 hover:text-white"><X size={14} /></button
+					class="shrink-0 text-side-dim hover:text-white"><X size={14} /></button
 				>
 			</div>
 		{/each}
