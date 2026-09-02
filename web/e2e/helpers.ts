@@ -28,7 +28,7 @@ export async function openFirstVM(page: Page) {
 // These mirror the knobs of hack/e2e-roundtrip.sh. Merging a PR is the human GitOps
 // gate, so it uses a Forgejo bot token — there is deliberately no dotvirt UI affordance
 // for it; every other step is driven through the app under the session cookie.
-const FORGE = process.env.FORGE ?? 'https://forgejo.apps.hetznet.epheo.eu';
+const FORGE = process.env.FORGE ?? 'https://dotvirt-forgejo-dotvirt-operator.apps.hetznet.epheo.eu';
 const FORGE_TOKEN = process.env.FORGE_TOKEN ?? '';
 const FORGE_OWNER = process.env.OWNER ?? 'dotvirt';
 
