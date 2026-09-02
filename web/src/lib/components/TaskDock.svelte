@@ -223,7 +223,7 @@
 			>
 				<StatusDot tone={taskTone(t)} size="xs" pulse={t.kind === 'migration' && t.active} />
 				<span class="truncate">{t.verb} {t.name || t.prTitle || t.project}</span>
-				<span class="shrink-0 text-ink-faint">{t.status}</span>
+				<span class="shrink-0">{t.status}</span>
 			</button>
 		{/if}
 		<button

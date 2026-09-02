@@ -39,7 +39,8 @@
 	// state. Review happens HERE; approval and merge stay in the forge - the
 	// one primary action is Propose.
 
-	const lanes = $derived(drafts.drafts.filter((d) => d.draft.count > 0));
+	// Warning-only lanes stay: prune risk must warn BEFORE anything is staged.
+	const lanes = $derived(drafts.drafts.filter((d) => d.draft.count > 0 || d.draft.warning));
 	const proposals = $derived(inventory.proposals);
 	// Repo-backed projects, for History (platform included for authors).
 	const repoProjects = $derived(
@@ -62,14 +63,16 @@
 			if (lane && item) return { kind: 'item' as const, project: lane.project, item };
 		}
 		if (sel?.kind === 'proposal') {
-			const p = proposals.find(
+			const p = proposedLane.find(
 				(p) => p.project === sel!.project && p.prNumber === (sel as { prNumber: number }).prNumber,
 			);
 			if (p) return { kind: 'proposal' as const, proposal: p };
 		}
-		const first = lanes[0]?.draft.items[0];
-		if (first) return { kind: 'item' as const, project: lanes[0].project, item: first };
-		if (proposals[0]) return { kind: 'proposal' as const, proposal: proposals[0] };
+		const withItems = lanes.find((l) => l.draft.items.length > 0);
+		const first = withItems?.draft.items[0];
+		if (withItems && first)
+			return { kind: 'item' as const, project: withItems.project, item: first };
+		if (proposedLane[0]) return { kind: 'proposal' as const, proposal: proposedLane[0] };
 		return null;
 	});
 
@@ -127,6 +130,17 @@
 	// Propose results outlive their lane (it empties); rendered until the live
 	// stream carries the PR, exactly like the drawer used to.
 	let results = $state<Record<string, ProposeResult & { title?: string }>>({});
+	// The PR lane: streamed proposals plus just-proposed results the stream has
+	// not carried yet - same rendering, so the stream takes over invisibly.
+	const proposedLane = $derived.by((): Proposal[] => {
+		const out: Proposal[] = [...proposals];
+		const seen = new Set(out.map((p) => `${p.project}#${p.prNumber}`));
+		for (const [project, r] of Object.entries(results)) {
+			if (!r.prURL || !r.prNumber || seen.has(`${project}#${r.prNumber}`)) continue;
+			out.push({ project, prNumber: r.prNumber, prURL: r.prURL, title: r.title ?? '' });
+		}
+		return out.sort((a, b) => a.project.localeCompare(b.project));
+	});
 	$effect(() => {
 		for (const p of proposals) {
 			if (untrack(() => results[p.project])?.prNumber === p.prNumber) delete results[p.project];
@@ -249,7 +263,7 @@
 	<div class="flex items-baseline gap-3 border-b border-line px-4 py-3">
 		<h1 class="text-lg leading-6 font-semibold text-ink">Review changes</h1>
 		<span class="text-xs text-ink-faint">
-			{stagedTotal} staged · {proposals.length} proposed. Review here; approve and merge in the forge.
+			{stagedTotal} staged · {proposedLane.length} proposed. Review here; approve and merge in the forge.
 			Nothing reaches the cluster until the pull request merges.
 		</span>
 	</div>
@@ -297,6 +311,7 @@
 						selected.project === project &&
 						itemKey(selected.item) === itemKey(it)}
 					<button
+						data-project={project}
 						onclick={() => (sel = { kind: 'item', project, key: itemKey(it) })}
 						class="flex w-full items-center gap-2 py-1.5 pr-3 pl-7 text-left hover:bg-select-soft {active
 							? 'bg-select hover:bg-select'
@@ -306,7 +321,7 @@
 						{:else if it.kind === 'create'}<Plus size={13} class="shrink-0 text-ok-ink" />
 						{:else}<Pencil size={13} class="shrink-0 text-accent-ink" />{/if}
 						<span class="truncate text-[13px] font-medium text-ink">{it.name}</span>
-						<span class="min-w-0 truncate text-xs text-ink-faint">
+						<span class="min-w-0 truncate text-xs text-ink-muted">
 							{it.kind === 'delete'
 								? 'Delete'
 								: it.changes
@@ -323,10 +338,10 @@
 			>
 				Proposed
 			</div>
-			{#if proposals.length === 0 && Object.values(results).every((r) => !r.prNumber)}
+			{#if proposedLane.length === 0}
 				<p class="px-3 py-2 text-xs text-ink-faint">No open pull requests.</p>
 			{/if}
-			{#each proposals as p (p.project + '#' + p.prNumber)}
+			{#each proposedLane as p (p.project + '#' + p.prNumber)}
 				{@const active =
 					selected?.kind === 'proposal' &&
 					selected.proposal.project === p.project &&
@@ -342,7 +357,7 @@
 					<div class="flex items-center gap-2">
 						<GitPullRequest size={13} class="shrink-0 text-accent-ink" />
 						<span class="text-[13px] font-medium text-ink">PR #{p.prNumber}</span>
-						<span class="text-xs text-ink-faint">{p.project}</span>
+						<span class="text-xs text-ink-muted">{p.project}</span>
 						{#if chk}<StatusPill tone={chk.tone} label={chk.text} />{/if}
 					</div>
 					{#if p.title || appr}

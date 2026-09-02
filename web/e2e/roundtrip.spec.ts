@@ -23,7 +23,7 @@ test.use({ ignoreHTTPSErrors: true });
 test('create → Synced → delete → gone, observed in the inventory', async ({ page }) => {
 	test.skip(
 		!process.env.OC_TOKEN || !process.env.FORGE_TOKEN,
-		'requires OC_TOKEN + FORGE_TOKEN against a live stack'
+		'requires OC_TOKEN + FORGE_TOKEN against a live stack',
 	);
 	// Three serial sync waits (~SYNC_TIMEOUT each: row appears, flips to Synced, row gone)
 	// plus two merge-retry loops and reloads — widen past a naive 4× so a slow ArgoCD can't
@@ -46,9 +46,9 @@ test('create → Synced → delete → gone, observed in the inventory', async (
 				preference: 'fedora',
 				osImage: { name: 'fedora', namespace: 'openshift-virtualization-os-images' },
 				diskSize: '10Gi',
-				running: false
+				running: false,
 			},
-			failOnStatusCode: false
+			failOnStatusCode: false,
 		});
 		expect(created.ok(), `stage create → ${created.status()}`).toBeTruthy();
 
@@ -67,7 +67,9 @@ test('create → Synced → delete → gone, observed in the inventory', async (
 		await expect(row.getByText('Synced')).toBeVisible({ timeout: SYNC_TIMEOUT });
 
 		// Stage + merge the delete; the row disappears once ArgoCD prunes the VM.
-		const deleted = await page.request.post(`/api/vms/${NS}/${vm}/delete`, { failOnStatusCode: false });
+		const deleted = await page.request.post(`/api/vms/${NS}/${vm}/delete`, {
+			failOnStatusCode: false,
+		});
 		expect(deleted.ok(), `stage delete → ${deleted.status()}`).toBeTruthy();
 
 		await page.reload();
@@ -75,7 +77,9 @@ test('create → Synced → delete → gone, observed in the inventory', async (
 		await proposeAndMerge(page, PROJECT, `e2e: delete ${vm}`);
 
 		await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
-		await expect(page.getByRole('row', { name: new RegExp(`Power:.*${vm}`) })).toHaveCount(0, { timeout: SYNC_TIMEOUT });
+		await expect(page.getByRole('row', { name: new RegExp(`Power:.*${vm}`) })).toHaveCount(0, {
+			timeout: SYNC_TIMEOUT,
+		});
 	} finally {
 		await cleanupVM(page, PROJECT, NS, vm);
 	}

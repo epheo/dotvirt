@@ -47,6 +47,11 @@ export async function login(page: Page) {
 
 export async function openVM(page: Page, name: string) {
 	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
-	await page.locator('main tbody tr', { hasText: name }).first().click();
+	// The name link: a plain row click opens the side peek, not the detail page.
+	await page
+		.locator('main tbody tr', { hasText: name })
+		.first()
+		.getByRole('link', { name, exact: true })
+		.click();
 	await expect(page.getByRole('button', { name: /Edit Settings/ })).toBeVisible();
 }

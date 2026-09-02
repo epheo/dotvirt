@@ -118,12 +118,10 @@ test('bulk selection stages a power change per VM', async ({ page }) => {
 	await page.getByRole('button', { name: 'Power Off (staged)' }).click();
 	// Deliberate skip: web-2 is already Off, so only web-1 stages - a bulk op
 	// must not write no-op edits into the draft.
-	const changes = page.locator('button[title^="Changes"]');
-	await expect(changes).toContainText('1');
-	await changes.click();
-	const panel = page.locator('aside').last();
-	await expect(panel.getByText('web-1')).toBeVisible();
-	await expect(panel.getByText('web-2')).toHaveCount(0);
+	await page.getByRole('link', { name: /Review changes/ }).click();
+	const staged = page.locator('main [data-project]');
+	await expect(staged).toHaveCount(1);
+	await expect(staged.first()).toContainText('web-1');
 });
 
 test('stopped VMs are visible in the summary tile', async ({ page }) => {
