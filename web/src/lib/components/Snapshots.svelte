@@ -79,7 +79,7 @@
 		<button
 			onclick={take}
 			disabled={takeOp.busy}
-			class="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:bg-line-strong"
+			class="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:bg-line-strong"
 		>
 			<Camera size={14} />
 			{takeOp.busy ? 'Taking…' : 'Take snapshot'}

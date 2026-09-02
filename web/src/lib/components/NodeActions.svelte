@@ -144,7 +144,7 @@
 						<button
 							onclick={enterMaintenance}
 							disabled={op.busy}
-							class="rounded bg-accent px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
+							class="rounded-full bg-accent px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
 						>
 							Enter Maintenance Mode
 						</button>

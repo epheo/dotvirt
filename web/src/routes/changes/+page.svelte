@@ -546,7 +546,7 @@
 						<button
 							onclick={() => propose(project)}
 							disabled={proposeOp.busy}
-							class="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:bg-line-strong"
+							class="rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:bg-line-strong"
 						>
 							{proposeOp.busy ? 'Proposing…' : 'Propose pull request'}
 						</button>

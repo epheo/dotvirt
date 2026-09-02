@@ -63,9 +63,9 @@
 		href="/compute"
 	>
 		{#snippet icon()}
-			<LayoutGrid size={14} class="text-ink-faint" />
+			<LayoutGrid size={14} class="text-side-dim" />
 		{/snippet}
-		<span class="truncate font-semibold text-ink-soft">All VMs</span>
+		<span class="truncate font-semibold text-side-ink">All VMs</span>
 	</TreeRow>
 
 	<!-- Attach and Recover share one button: same modal, recover only flips the
@@ -82,7 +82,7 @@
 			title={recover
 				? "Re-create this project's lost repo and re-adopt what is running"
 				: 'Create a repo for this project and bring it under GitOps'}
-			class="mb-1 ml-7 rounded border border-warn/50 bg-warn-soft/60 px-2 py-0.5 text-[11px] font-medium text-warn-ink hover:bg-warn-soft"
+			class="mb-1 ml-7 rounded border border-warn/50 bg-warn/10 px-2 py-0.5 text-[11px] font-medium text-warn hover:bg-warn/25"
 		>
 			{recover ? 'Recover repo' : 'Attach repo'}
 		</button>
@@ -104,18 +104,18 @@
 					})}
 			>
 				{#snippet icon()}
-					<Folder size={14} class="shrink-0 text-accent" />
+					<Folder size={14} class="shrink-0 text-accent-hover" />
 				{/snippet}
-				<span class="truncate font-semibold text-ink-soft">{project.name}</span>
+				<span class="truncate font-semibold text-side-ink">{project.name}</span>
 				{#if project.error}
-					<span class="rounded bg-warn-soft p-0.5 text-warn-ink" title={project.error}
+					<span class="rounded bg-warn/15 p-0.5 text-warn" title={project.error}
 						><TriangleAlert size={10} /></span
 					>
 				{:else}
 					{@const n = issueCounts.get(project.name) ?? 0}
 					{#if n > 0}
 						<span
-							class="rounded bg-warn-soft p-0.5 text-warn-ink"
+							class="rounded bg-warn/15 p-0.5 text-warn"
 							title="{n} issue{n === 1 ? '' : 's'} in this project"
 							><TriangleAlert size={10} /></span
 						>
@@ -129,13 +129,13 @@
 					{/if}
 				{/if}
 				{#snippet trailing()}
-					<span class="text-xs text-ink-faint">{vmCount(project)}</span>
+					<span class="text-xs text-side-dim">{vmCount(project)}</span>
 				{/snippet}
 			</TreeRow>
 
 			{#if projectOpen(project)}
 				{#if project.error}
-					<div class="py-1 pr-2 pl-7 text-xs text-warn-ink italic" title={project.error}>
+					<div class="py-1 pr-2 pl-7 text-xs text-warn italic" title={project.error}>
 						{project.error}
 					</div>
 					{#if inventory.canNamespace}
@@ -145,10 +145,7 @@
 					<!-- Only a comparison-plane error says the forge lost this repo (the
 					     annotation still parses); an apply failure never offers recovery.
 					     The backend refuses when the repo resolves. -->
-					<div
-						class="py-1 pr-2 pl-7 text-xs text-warn-ink italic"
-						title={repoError(project.gitOps)}
-					>
+					<div class="py-1 pr-2 pl-7 text-xs text-warn italic" title={repoError(project.gitOps)}>
 						{repoError(project.gitOps).slice(0, 120)}
 					</div>
 					{@render repoAction(project, true)}
@@ -177,14 +174,14 @@
 								})}
 						>
 							{#snippet icon()}
-								<Layers size={13} class="shrink-0 text-ink-faint" />
+								<Layers size={13} class="shrink-0 text-side-dim" />
 							{/snippet}
-							<span class="truncate text-ink-soft">{ns.namespace}</span>
+							<span class="truncate text-side-ink">{ns.namespace}</span>
 							{#if nsDrift(ns)}
 								<StatusDot tone="danger" size="xs" title="A VM is out of sync" />
 							{/if}
 							{#snippet trailing()}
-								<span class="text-xs text-ink-faint">{ns.vms.length}</span>
+								<span class="text-xs text-side-dim">{ns.vms.length}</span>
 							{/snippet}
 						</TreeRow>
 
@@ -193,7 +190,7 @@
 								<TreeVMRow {vm} indent={3} />
 							{/each}
 							{#if ns.vms.length === 0}
-								<div class="py-1 pl-12 text-xs text-ink-faint italic">no VMs</div>
+								<div class="py-1 pl-12 text-xs text-side-dim italic">no VMs</div>
 							{/if}
 						{/if}
 					</div>
@@ -209,7 +206,7 @@
 	{#if untracked.length > 0}
 		{#if tracked.length > 0}
 			<div
-				class="mt-2 mb-0.5 border-t border-line-soft px-2 pt-1.5 text-[10px] font-semibold tracking-wide text-ink-faint uppercase"
+				class="mt-2 mb-0.5 border-t border-side-hover px-2 pt-1.5 text-[10px] font-semibold tracking-wide text-side-dim uppercase"
 			>
 				Untracked — no repo
 			</div>
@@ -223,21 +220,21 @@
 	     only for callers the backend cleared to adopt them (namespace-create). -->
 	{#if inventory.adoptable.length > 0}
 		<div
-			class="mt-2 mb-0.5 border-t border-line-soft px-2 pt-1.5 text-[10px] font-semibold tracking-wide text-ink-faint uppercase"
+			class="mt-2 mb-0.5 border-t border-side-hover px-2 pt-1.5 text-[10px] font-semibold tracking-wide text-side-dim uppercase"
 		>
 			Existing tenants
 		</div>
 		{#each inventory.adoptable as cand (cand.namespace)}
 			<div class="flex items-center gap-2 px-2 py-1">
-				<Layers size={13} class="shrink-0 text-ink-faint" />
-				<span class="min-w-0 flex-1 truncate text-ink-soft" title={cand.namespace}
+				<Layers size={13} class="shrink-0 text-side-dim" />
+				<span class="min-w-0 flex-1 truncate text-side-ink" title={cand.namespace}
 					>{cand.namespace}</span
 				>
-				<span class="text-xs text-ink-faint">{cand.vms}</span>
+				<span class="text-xs text-side-dim">{cand.vms}</span>
 				<button
 					onclick={() => (ui.modal = { kind: 'newProject', adopt: cand.namespace })}
 					title="Create a project + repo for this namespace and bring its VMs under GitOps"
-					class="rounded border border-warn/50 bg-warn-soft/60 px-2 py-0.5 text-[11px] font-medium text-warn-ink hover:bg-warn-soft"
+					class="rounded border border-warn/50 bg-warn/10 px-2 py-0.5 text-[11px] font-medium text-warn hover:bg-warn/25"
 				>
 					Adopt
 				</button>
@@ -246,7 +243,7 @@
 	{/if}
 
 	{#if projects.length === 0 && inventory.adoptable.length === 0}
-		<div class="px-2 py-4 text-center text-xs text-ink-faint">
+		<div class="px-2 py-4 text-center text-xs text-side-dim">
 			No projects visible. Ask an admin to label a namespace with
 			<code>dotvirt.io/project</code>.
 		</div>

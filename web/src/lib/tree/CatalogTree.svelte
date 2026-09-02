@@ -22,14 +22,14 @@
 	{#each KINDS as k (k.id)}
 		<TreeRow active={onCatalog && kind === k.id} alignChevron href="/catalog?kind={k.id}">
 			{#snippet icon()}
-				{#if k.id === 'templates'}<BookCopy size={14} class="text-ink-faint" />
-				{:else if k.id === 'images'}<HardDrive size={14} class="text-ink-faint" />
-				{:else if k.id === 'instancetypes'}<Cpu size={14} class="text-ink-faint" />
-				{:else if k.id === 'preferences'}<SlidersHorizontal size={14} class="text-ink-faint" />
-				{:else if k.id === 'networks'}<Network size={14} class="text-ink-faint" />
-				{:else}<Database size={14} class="text-ink-faint" />{/if}
+				{#if k.id === 'templates'}<BookCopy size={14} class="text-side-dim" />
+				{:else if k.id === 'images'}<HardDrive size={14} class="text-side-dim" />
+				{:else if k.id === 'instancetypes'}<Cpu size={14} class="text-side-dim" />
+				{:else if k.id === 'preferences'}<SlidersHorizontal size={14} class="text-side-dim" />
+				{:else if k.id === 'networks'}<Network size={14} class="text-side-dim" />
+				{:else}<Database size={14} class="text-side-dim" />{/if}
 			{/snippet}
-			<span class="truncate font-semibold text-ink-soft">{k.label}</span>
+			<span class="truncate font-semibold text-side-ink">{k.label}</span>
 		</TreeRow>
 	{/each}
 </div>

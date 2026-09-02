@@ -27,7 +27,7 @@
 
 	const itemClass = (t: Tab) =>
 		variant === 'underline'
-			? `border-b-2 px-3 py-1.5 ${
+			? `border-b-[3px] px-3 py-1.5 ${
 					active === t.id
 						? 'border-accent text-accent-ink'
 						: 'border-transparent text-ink-muted hover:text-ink-soft'

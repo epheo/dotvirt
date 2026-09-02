@@ -1,79 +1,99 @@
 @import 'tailwindcss';
+/* Red Hat Text/Mono, bundled locally: dotvirt runs inside clusters, so type
+   never loads from a CDN. */
+@import '@fontsource/red-hat-text/400.css';
+@import '@fontsource/red-hat-text/500.css';
+@import '@fontsource/red-hat-text/700.css';
+@import '@fontsource/red-hat-mono/400.css';
+@import '@fontsource/red-hat-mono/500.css';
 
-/* Dense neutral admin theme: slightly cool grays, blue accent.
-   Semantic tokens (values mirror the Tailwind slate/blue palette) — chrome
+/* PatternFly-modeled theme: PF6 palette and anatomy (black masthead, dark
+   rail, PF blue, outlined status labels) on dotvirt's semantic tokens - chrome
    components use these, never raw palette names, so surfaces, hairlines and
-   the selection blue stay identical across every panel. */
+   the selection blue stay identical across every panel. Values transcribe
+   PatternFly; every ink/surface pair holds >=4.5:1 (most >=7:1) per theme. */
 @theme {
+	--font-sans: 'Red Hat Text', 'Segoe UI', system-ui, sans-serif;
+	--font-mono: 'Red Hat Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
 	/* surfaces */
-	--color-canvas: #f4f5f7;
+	--color-canvas: #f0f0f0;
 	--color-panel: #ffffff;
-	--color-inset: oklch(98.4% 0.003 247.858); /* slate-50: card headers, wells */
-	--color-bar: oklch(27.9% 0.041 260.031); /* slate-800: the top header bar */
+	--color-inset: #f5f5f5; /* card headers, wells */
+	--color-bar: #151515; /* the black masthead */
 
 	/* hairlines */
-	--color-line: oklch(92.9% 0.013 255.508); /* slate-200 */
-	--color-line-strong: oklch(86.9% 0.022 252.894); /* slate-300 */
+	--color-line: #d2d2d2;
+	--color-line-strong: #b8bbbe;
 
 	/* ink */
-	--color-ink: oklch(27.9% 0.041 260.031); /* slate-800 */
-	--color-ink-soft: oklch(37.2% 0.044 257.287); /* slate-700 */
-	--color-ink-muted: oklch(
-		44.6% 0.043 257.281
-	); /* slate-600: slate-500 fell under 4.5:1 on the inset grounds */
-	--color-ink-faint: oklch(55.4% 0.046 257.417); /* slate-500: slate-400 was ~2.6:1 on white */
+	--color-ink: #151515;
+	--color-ink-soft: #383838;
+	--color-ink-muted: #4d4d4d;
+	--color-ink-faint: #6a6e73; /* 4.5:1 floor holds on the inset grounds too */
 
-	/* accent */
-	--color-accent: oklch(54.6% 0.245 262.881); /* blue-600 */
-	--color-accent-hover: oklch(62.3% 0.214 259.815); /* blue-500 */
-	--color-accent-ink: oklch(48.8% 0.243 264.376); /* blue-700 */
+	/* accent: PF blue - link, button fill and focus all one hue */
+	--color-accent: #0066cc;
+	--color-accent-hover: #1e7ce0;
+	--color-accent-ink: #0066cc;
 
 	/* selection — the one pair every panel uses: current target vs hover */
-	--color-select: oklch(93.2% 0.032 255.585); /* blue-100 */
-	--color-select-soft: oklch(97% 0.014 254.604); /* blue-50 */
+	--color-select: #e7f1fa;
+	--color-select-soft: #f0f7fc;
 
 	/* softer hairline + stronger well, for table dividers and card headers */
-	--color-line-soft: oklch(96.8% 0.007 247.896); /* slate-100 */
-	--color-inset-strong: oklch(96.8% 0.007 247.896); /* slate-100 */
+	--color-line-soft: #ebebeb;
+	--color-inset-strong: #ebebeb;
 
 	/* accent tint for informational badges — same light value as select, but
 	   badge backgrounds and selection must diverge in a dark theme */
-	--color-accent-soft: oklch(93.2% 0.032 255.585); /* blue-100 */
+	--color-accent-soft: #e7f1fa;
 
-	/* status: dot/fill, badge tint, badge text */
-	--color-ok: oklch(69.6% 0.17 162.48); /* emerald-500 */
-	--color-warn: oklch(76.9% 0.188 70.08); /* amber-500 */
-	--color-danger: oklch(57.7% 0.245 27.325); /* red-600 */
-	--color-ok-soft: oklch(96.2% 0.044 156.743); /* green-100 */
-	--color-warn-soft: oklch(96.2% 0.059 95.617); /* amber-100 */
-	--color-danger-soft: oklch(93.6% 0.032 17.717); /* red-100 */
-	--color-ok-ink: oklch(52.7% 0.154 150.069); /* green-700 */
-	--color-warn-ink: oklch(55.5% 0.163 48.998); /* amber-700 */
-	--color-danger-ink: oklch(50.5% 0.213 27.518); /* red-700 */
+	/* status: dot/fill, label tint, label text (PF label anatomy adds a
+	   border from the dot color at 40% via border-ok/40 etc.) */
+	--color-ok: #3e8635;
+	--color-warn: #f0ab00;
+	--color-danger: #c9190b;
+	--color-ok-soft: #f3faf2;
+	--color-warn-soft: #fdf7e7;
+	--color-danger-soft: #faeae8;
+	--color-ok-ink: #1e4f18;
+	--color-warn-ink: #795600;
+	--color-danger-ink: #7d1007;
 
 	/* below-band "cold" state (host balance): informational, not a warning */
-	--color-cold-soft: oklch(95.1% 0.026 236.824); /* sky-100 */
-	--color-cold-ink: oklch(44.3% 0.11 240.79); /* sky-800 */
+	--color-cold-soft: #daf2f2;
+	--color-cold-ink: #005f60;
+
+	/* the rail: the dark console nav framing the light workspace - one PF-dark
+	   family in BOTH themes, so the chrome is the identity and the workspace
+	   carries the theme */
+	--color-side: #212427;
+	--color-side-ink: #ffffff;
+	--color-side-dim: #adb2b8;
+	--color-side-hover: #333638;
+	--color-side-active: #4f5255;
+	--color-side-line: #151515;
 }
 
 /* Chart series + furniture. Plain :root (no utilities wanted); hex on purpose —
    the uPlot fill derivation appends an alpha byte to the resolved string. */
 :root {
-	--chart-1: #2563eb;
-	--chart-2: #0d9488;
-	--chart-3: #f59e0b;
-	--chart-4: #dc2626;
-	--chart-5: #7c3aed;
-	--chart-6: #16a34a;
-	--chart-grid: #f1f5f9;
-	--chart-axis: #94a3b8;
-	--chart-ticks: #e2e8f0;
-	--chart-track: #e2e8f0;
-	--chart-track-strong: #cbd5e1;
+	--chart-1: #0066cc;
+	--chart-2: #009596;
+	--chart-3: #f0ab00;
+	--chart-4: #c9190b;
+	--chart-5: #6753ac;
+	--chart-6: #3e8635;
+	--chart-grid: #f0f0f0;
+	--chart-axis: #8a8d90;
+	--chart-ticks: #d2d2d2;
+	--chart-track: #ebebeb;
+	--chart-track-strong: #d2d2d2;
 	/* host-balance histogram furniture */
-	--chart-cold: #38bdf8;
-	--chart-band: #10b981;
-	--chart-mean: #475569;
+	--chart-cold: #009596;
+	--chart-band: #3e8635;
+	--chart-mean: #4d4d4d;
 }
 
 /* Keyboard affordance everywhere: components rely on this instead of per-element
@@ -82,6 +102,10 @@
 	:where(button, [href], input, select, textarea, [tabindex]):focus-visible {
 		outline: 2px solid var(--color-accent);
 		outline-offset: 1px;
+	}
+	/* Data reads in columns: digits align everywhere a table shows quantities. */
+	table {
+		font-variant-numeric: tabular-nums;
 	}
 }
 
@@ -94,78 +118,74 @@
 	color-scheme: light;
 }
 
-/* The dark theme is one override block: same semantic roles, night values.
+/* The dark theme is one override block: PF dark values, same semantic roles.
    Utilities compile to var() references (plain @theme, not inline), so no
    component changes are needed — including /NN opacity modifiers, which
-   color-mix the overridden value. */
+   color-mix the overridden value. The rail tokens barely move: the chrome is
+   the constant, the workspace flips. */
 :root[data-theme='dark'] {
 	color-scheme: dark;
 
-	/* surfaces: near-neutral darks (chroma <=0.016) - at slate's 0.04 every
-	   surface reads navy and drowns the accent; color belongs to accent and
-	   status, not the ground. Panel sits a clear step above canvas so cards
-	   separate without shadows. */
-	--color-canvas: oklch(14.5% 0.012 262);
-	--color-panel: oklch(20% 0.014 262);
-	--color-inset: oklch(23.5% 0.015 262);
-	--color-inset-strong: oklch(27.5% 0.016 262);
-	--color-bar: oklch(12.5% 0.014 262); /* the header stays darkest */
+	/* surfaces */
+	--color-canvas: #0f1214;
+	--color-panel: #1b1d21;
+	--color-inset: #212427;
+	--color-inset-strong: #2b2e33;
+	--color-bar: #030303; /* the masthead stays darkest */
 
-	/* hairlines: same near-neutral family, one step more visible than before */
-	--color-line: oklch(29% 0.018 262);
-	--color-line-strong: oklch(38% 0.02 260);
-	--color-line-soft: oklch(25% 0.016 262);
+	/* hairlines */
+	--color-line: #3c3f42;
+	--color-line-strong: #57595c;
+	--color-line-soft: #26292d;
 
 	/* ink */
-	--color-ink: oklch(96.8% 0.007 247.896); /* slate-100 */
-	--color-ink-soft: oklch(86.9% 0.022 252.894); /* slate-300 */
-	--color-ink-muted: oklch(78% 0.03 255); /* between slate-300/400: keeps a step above faint */
-	--color-ink-faint: oklch(
-		70.4% 0.04 256.788
-	); /* slate-400: slate-500 was ~3.5:1 on the dark grounds */
+	--color-ink: #f0f0f0;
+	--color-ink-soft: #d2d2d2;
+	--color-ink-muted: #b8bbbe;
+	--color-ink-faint: #999da1;
 
-	/* accent */
-	--color-accent: oklch(
-		54.6% 0.245 262.881
-	); /* blue-600, same as light: white button text on blue-500 was 3.8:1 */
-	--color-accent-hover: oklch(62.3% 0.214 259.815); /* blue-500 */
-	--color-accent-ink: oklch(70.7% 0.165 254.624); /* blue-400 */
+	/* accent: the button fill keeps PF blue (white ink at 5.6:1); links go to
+	   the light PF blue so they clear 8:1 on the panels */
+	--color-accent: #0066cc;
+	--color-accent-hover: #1e7ce0;
+	--color-accent-ink: #73bcf7;
 
-	/* selection: solid tokens (alpha over varying grounds was unpredictable),
-	   bright enough to read as the one blue plane on the neutral darks */
-	--color-select: oklch(32% 0.085 262);
-	--color-select-soft: oklch(25.5% 0.05 262);
+	/* selection */
+	--color-select: #123a5e;
+	--color-select-soft: #0f2a42;
 
 	/* accent tint for informational badges */
-	--color-accent-soft: oklch(28.2% 0.091 267.935); /* blue-950 */
+	--color-accent-soft: #0a3358;
 
-	/* status */
-	--color-ok: oklch(76.5% 0.177 163.223); /* emerald-400 */
-	--color-warn: oklch(82.8% 0.189 84.429); /* amber-400 */
-	--color-danger: oklch(63.7% 0.237 25.331); /* red-500 */
-	/* badge tints one step above the -950s, which vanished on the panels */
-	--color-ok-soft: oklch(31% 0.07 153);
-	--color-warn-soft: oklch(32% 0.08 60);
-	--color-danger-soft: oklch(30% 0.09 26);
-	--color-ok-ink: oklch(87.1% 0.15 154.449); /* green-300 */
-	--color-warn-ink: oklch(87.9% 0.169 91.605); /* amber-300 */
-	--color-danger-ink: oklch(80.8% 0.114 19.571); /* red-300 */
-	--color-cold-soft: oklch(29.3% 0.066 243.157); /* sky-950 */
-	--color-cold-ink: oklch(82.8% 0.111 230.318); /* sky-300 */
+	/* status: brighter dots, deep label tints, luminous label ink */
+	--color-ok: #6ec664;
+	--color-warn: #f0ab00;
+	--color-danger: #f4695f;
+	--color-ok-soft: #1c3a17;
+	--color-warn-soft: #3d2f05;
+	--color-danger-soft: #45120c;
+	--color-ok-ink: #95d58e;
+	--color-warn-ink: #f4c145;
+	--color-danger-ink: #f9a8a0;
+	--color-cold-soft: #0c3033;
+	--color-cold-ink: #7adbdc;
+
+	/* the rail against the darker canvas: only its border moves */
+	--color-side-line: #030303;
 
 	/* charts: brighter series on a dark canvas, muted furniture */
-	--chart-1: #3b82f6;
-	--chart-2: #14b8a6;
-	--chart-3: #fbbf24;
-	--chart-4: #ef4444;
-	--chart-5: #8b5cf6;
-	--chart-6: #22c55e;
-	--chart-grid: #1e293b;
-	--chart-axis: #64748b;
-	--chart-ticks: #334155;
-	--chart-track: #334155;
-	--chart-track-strong: #475569;
-	--chart-mean: #94a3b8;
+	--chart-1: #73bcf7;
+	--chart-2: #2dd4bf;
+	--chart-3: #f0ab00;
+	--chart-4: #f4695f;
+	--chart-5: #b2a3ff;
+	--chart-6: #6ec664;
+	--chart-grid: #212427;
+	--chart-axis: #8a8d90;
+	--chart-ticks: #3c3f42;
+	--chart-track: #3c3f42;
+	--chart-track-strong: #57595c;
+	--chart-mean: #b8bbbe;
 }
 
 html,
@@ -175,11 +195,7 @@ body {
 }
 
 body {
-	font-family:
-		'Segoe UI',
-		system-ui,
-		-apple-system,
-		sans-serif;
+	font-family: var(--font-sans);
 	font-size: 13px;
 	color: var(--color-ink);
 	background: var(--color-canvas);

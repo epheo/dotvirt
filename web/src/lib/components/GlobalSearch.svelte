@@ -244,7 +244,7 @@
 <svelte:window onkeydown={onWindowKey} />
 
 <div class="relative mx-auto w-80">
-	<div class="flex items-center gap-2 rounded bg-slate-700 px-2.5 py-1">
+	<div class="flex items-center gap-2 rounded bg-side-hover px-2.5 py-1">
 		<Search size={13} class="shrink-0 text-slate-400" />
 		<input
 			bind:this={input}
@@ -255,7 +255,7 @@
 			aria-label="Search inventory"
 			class="w-full bg-transparent text-xs text-white placeholder-slate-400 focus:outline-none"
 		/>
-		<kbd class="shrink-0 rounded border border-slate-600 px-1 text-[10px] text-slate-300"
+		<kbd class="shrink-0 rounded border border-side-active px-1 text-[10px] text-slate-300"
 			>Ctrl K</kbd
 		>
 	</div>

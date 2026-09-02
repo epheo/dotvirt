@@ -35,11 +35,13 @@
 </script>
 
 <div
-	class="flex w-full items-center gap-1 py-1 pr-2 hover:bg-select-soft {INDENT[indent]}
-		{active ? 'bg-select hover:bg-select' : ''}"
+	class="flex w-full items-center gap-1 py-1 pr-2 hover:bg-side-hover {INDENT[indent]}
+		{active
+		? 'bg-side-active shadow-[inset_3px_0_0_var(--color-accent-hover)] hover:bg-side-active'
+		: ''}"
 >
 	{#if expanded !== undefined}
-		<button class="flex w-3 items-center text-ink-faint" onclick={ontoggle} title="Expand/collapse">
+		<button class="flex w-3 items-center text-side-dim" onclick={ontoggle} title="Expand/collapse">
 			{#if expanded}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}
 		</button>
 	{:else if alignChevron}

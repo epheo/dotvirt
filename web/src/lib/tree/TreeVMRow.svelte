@@ -35,7 +35,7 @@
 	{#snippet icon()}
 		<PowerDot power={vm.power} paused={vm.paused} />
 	{/snippet}
-	<span class="truncate {sc?.kind === 'delete' ? 'text-ink-faint line-through' : 'text-ink-soft'}"
+	<span class="truncate {sc?.kind === 'delete' ? 'text-side-dim line-through' : 'text-side-ink'}"
 		>{vm.name}</span
 	>
 	{#snippet trailing()}
