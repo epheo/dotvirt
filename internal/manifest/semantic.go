@@ -74,7 +74,22 @@ func ChangesForEdit(current model.VM, edit VMEdit) []model.Change {
 		out = append(out, model.Change{Field: "Disk " + mv.Name + " storage", Action: "change",
 			From: orClusterDefault(from), To: mv.StorageClass})
 	}
+	for i := range out {
+		out[i].Restart = needsRestart(out[i].Field)
+	}
 	return out
+}
+
+// needsRestart: fields KubeVirt only applies at the next power cycle. Power is
+// itself the cycle; storage migration is live by design; labels and the DRS
+// annotation act on the scheduler/descheduler without one. Placement (pinning,
+// groups) also lands via a live migration, but "restart" is the guarantee.
+func needsRestart(field string) bool {
+	switch field {
+	case "CPU", "Memory", "Instance type", "Preference", "Eviction strategy", "Disk", "Network", "Host pinning":
+		return true
+	}
+	return strings.HasPrefix(field, "Placement group ")
 }
 
 // schedulingChanges renders placement edits against the VM's current policy,

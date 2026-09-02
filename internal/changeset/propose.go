@@ -39,6 +39,14 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 		return model.ProposeResult{}, err
 	}
 
+	// The semantic view becomes the PR description (best-effort: a body render
+	// failure must not block the propose). Read BEFORE the commit below - the
+	// view diffs against the base branch the draft still targets.
+	body := req.Message
+	if view, verr := c.Get(id, proj); verr == nil {
+		body = prBody(view, req.Message, id.Username)
+	}
+
 	title := req.Title
 	if title == "" {
 		title = fmt.Sprintf("dotvirt: %d change(s)", len(entries))
@@ -95,7 +103,7 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 		}
 	}
 
-	pr, err := fc.CreatePR(title, req.Message, branch, c.baseBranch)
+	pr, err := fc.CreatePR(title, body, branch, c.baseBranch)
 	if err == nil {
 		out.PRURL, out.PRNumber = pr.HTMLURL, pr.Number
 		return out, c.store.Clear(id.Username, proj.Name)
@@ -204,5 +212,19 @@ func (c *Coordinator) OpenProposal(id auth.Identity, proj project.ProjectInfo) (
 	if !ok || pr.State != "open" {
 		return model.Proposal{}, false, nil
 	}
-	return model.Proposal{Project: proj.Name, PRNumber: pr.Number, PRURL: pr.HTMLURL, Title: pr.Title}, true, nil
+	p := model.Proposal{Project: proj.Name, PRNumber: pr.Number, PRURL: pr.HTMLURL, Title: pr.Title}
+	// Review state, each read best-effort: an unreadable plane stays zero
+	// (unknown), which the UI renders as nothing - never as "no rule".
+	if n, aerr := fc.Approvals(pr.Number); aerr == nil {
+		p.Approvals = n
+	}
+	if req, found, rerr := fc.RequiredApprovals(c.baseBranch); rerr == nil && found {
+		p.RequiredApprovals = req
+	}
+	if pr.Head.Sha != "" {
+		if st, serr := fc.CombinedStatus(pr.Head.Sha); serr == nil {
+			p.Checks = st
+		}
+	}
+	return p, true, nil
 }

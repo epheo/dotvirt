@@ -183,9 +183,11 @@ func TestCreatePRConflictPreservesStatus(t *testing.T) {
 
 func refHead(ref string) struct {
 	Ref string `json:"ref"`
+	Sha string `json:"sha"`
 } {
 	return struct {
 		Ref string `json:"ref"`
+		Sha string `json:"sha"`
 	}{Ref: ref}
 }
 

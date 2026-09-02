@@ -21,6 +21,7 @@ type PR struct {
 	Title    string    `json:"title"`
 	Head     struct {
 		Ref string `json:"ref"`
+		Sha string `json:"sha"`
 	} `json:"head"`
 	Base struct {
 		Ref string `json:"ref"`
@@ -87,6 +88,76 @@ func (c *Client) MergedPRs(base string, limit int) ([]PR, error) {
 		}
 	}
 	return out, nil
+}
+
+// Approvals counts the PR's standing approvals: each reviewer's LATEST review
+// decides (a later REQUEST_CHANGES withdraws an earlier approval), dismissed
+// reviews don't count. Forgejo lists reviews oldest-first.
+func (c *Client) Approvals(number int) (int, error) {
+	var reviews []struct {
+		State     string `json:"state"`
+		Dismissed bool   `json:"dismissed"`
+		User      struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	}
+	if err := c.do("GET", c.repoPath("/pulls/"+strconv.Itoa(number)+"/reviews"), nil, &reviews); err != nil {
+		return 0, err
+	}
+	latest := map[string]string{}
+	for _, r := range reviews {
+		if r.User.Login == "" || r.Dismissed {
+			continue
+		}
+		// COMMENT reviews carry no verdict; they must not withdraw an approval.
+		if r.State == "APPROVED" || r.State == "REQUEST_CHANGES" {
+			latest[r.User.Login] = r.State
+		}
+	}
+	n := 0
+	for _, s := range latest {
+		if s == "APPROVED" {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// RequiredApprovals reads the branch-protection rule guarding branch, ok=false
+// when no rule names it. Exact-name match only: glob rules exist but the base
+// branch dotvirt targets is a fixed name. Reading protections can need rights
+// the forge token lacks; callers treat any error as unknown, never as "none".
+func (c *Client) RequiredApprovals(branch string) (int, bool, error) {
+	var rules []struct {
+		BranchName        string `json:"branch_name"`
+		RuleName          string `json:"rule_name"`
+		RequiredApprovals int    `json:"required_approvals"`
+	}
+	if err := c.do("GET", c.repoPath("/branch_protections"), nil, &rules); err != nil {
+		return 0, false, err
+	}
+	for _, r := range rules {
+		if r.BranchName == branch || r.RuleName == branch {
+			return r.RequiredApprovals, true, nil
+		}
+	}
+	return 0, false, nil
+}
+
+// CombinedStatus returns the combined CI state ("success", "pending",
+// "failure", "error") for a commit, or "" when nothing reported one.
+func (c *Client) CombinedStatus(sha string) (string, error) {
+	var st struct {
+		State      string `json:"state"`
+		TotalCount int    `json:"total_count"`
+	}
+	if err := c.do("GET", c.repoPath("/commits/"+url.PathEscape(sha)+"/status"), nil, &st); err != nil {
+		return "", err
+	}
+	if st.TotalCount == 0 {
+		return "", nil
+	}
+	return st.State, nil
 }
 
 // ReopenPR reopens a closed (unmerged) pull request and returns its updated state.

@@ -12,6 +12,11 @@ export interface Change {
   action: string; // change | add | remove
   from?: string;
   to?: string;
+  /**
+   * Restart marks a change KubeVirt only applies at the VM's next power
+   * cycle - the review screen's "restart required" plane.
+   */
+  restart?: boolean;
 }
 /**
  * VMEdit is a set of field changes to apply to a VirtualMachine manifest. Nil/
@@ -174,6 +179,13 @@ export interface Proposal {
   prNumber: number /* int */;
   prURL: string;
   title?: string;
+  /**
+   * Review state, read best-effort from the forge each refresh; zero values
+   * mean unknown (an unreadable protection rule must not render as "none").
+   */
+  approvals?: number /* int */;
+  requiredApprovals?: number /* int */;
+  checks?: string; // success | pending | failure | error
 }
 /**
  * TaskEntry is one Recent Tasks row: an imperative runtime op dotvirt performed
