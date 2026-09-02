@@ -47,7 +47,8 @@
 	<div class="border-b border-line-soft px-3 py-2 last:border-b-0">
 		<div class="flex items-center gap-2">
 			{#if tier}
-				<span class="rounded-full bg-accent-soft px-1.5 py-0.5 text-xs whitespace-nowrap text-accent-ink"
+				<span
+					class="rounded-full bg-accent-soft px-1.5 py-0.5 text-xs whitespace-nowrap text-accent-ink"
 					>{tier}</span
 				>
 			{/if}

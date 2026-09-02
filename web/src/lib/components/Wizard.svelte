@@ -116,8 +116,9 @@
 				>{finishLabel}</button
 			>
 		{:else}
-			<button onclick={next} class="rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white"
-				>Next</button
+			<button
+				onclick={next}
+				class="rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white">Next</button
 			>
 		{/if}
 	{/snippet}

@@ -239,7 +239,8 @@
 		{:else if stage === 'done'}
 			<button
 				onclick={onclose}
-				class="ml-auto rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white">Done</button
+				class="ml-auto rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white"
+				>Done</button
 			>
 		{:else}
 			<span class="ml-auto text-xs text-ink-faint">Working… keep this tab open.</span>
