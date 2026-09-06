@@ -55,3 +55,12 @@ export async function openVM(page: Page, name: string) {
 		.click();
 	await expect(page.getByRole('button', { name: /Edit Settings/ })).toBeVisible();
 }
+
+// The edit wizard's finish button renders only on the last step; walk Next to it.
+export async function stageChange(page: Page) {
+	const finish = page.getByRole('button', { name: 'Stage change' });
+	for (let i = 0; i < 12 && !(await finish.isVisible()); i++) {
+		await page.getByRole('button', { name: 'Next', exact: true }).click();
+	}
+	await finish.click();
+}

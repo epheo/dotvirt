@@ -1,4 +1,4 @@
-import { expect, login, openVM, setScenario, test } from './fx';
+import { expect, login, openVM, setScenario, stageChange, test } from './fx';
 
 // One test per UX bug the git history already paid for once. Each names the
 // PR that fixed it; the fixture holds the state that triggered it.
@@ -147,4 +147,25 @@ test('tab scroll regions are keyboard-reachable', async ({ page }) => {
 	// axe scrollable-region-focusable, found live on the Permissions tab: the
 	// scroll container carries tabindex so keyboard users can scroll it.
 	await expect(page.locator('main [role="region"][tabindex="0"]').first()).toBeVisible();
+});
+
+test('a drafts refresh keeps the half-typed PR title', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await openVM(page, 'web-1');
+	await page.getByRole('button', { name: /Edit Settings/ }).click();
+	await page.getByLabel('Memory').fill('8Gi');
+	await stageChange(page);
+	await page.getByRole('link', { name: /Review changes/ }).click();
+
+	const main = page.locator('main');
+	const title = main.getByPlaceholder('Pull request title');
+	await title.fill('web-1: raise memory to 8Gi');
+	// The dock's Refresh re-pulls every draft. The propose form was keyed on the
+	// selection object, rebuilt by that pull, and emptied itself mid-typing.
+	const refreshed = page.waitForResponse((r) => r.url().includes('/api/draft?project='));
+	await page.getByTitle('Refresh').click();
+	await refreshed;
+	await expect(main.getByText('web-prod/web-1')).toBeVisible();
+	await expect(title).toHaveValue('web-1: raise memory to 8Gi');
 });
