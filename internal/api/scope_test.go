@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/kubernetes/scheme"
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -234,17 +236,34 @@ func TestCanReadNodesCachedKeyIsolation(t *testing.T) {
 
 // platformFactory builds a real per-token cluster.Factory whose kubeconfig points
 // at a fake apiserver that answers only SSARs, allowing exactly the admin token.
-// Client construction never dials, so everything but the SSAR stays offline.
 func platformFactory(t *testing.T) *cluster.Factory {
+	t.Helper()
+	return ssarFactory(t, func(r *http.Request, _ *authzv1.SelfSubjectAccessReview) bool {
+		return r.Header.Get("Authorization") == "Bearer admin-token"
+	})
+}
+
+// ssarFactory builds a real per-token cluster.Factory over a fake apiserver that
+// answers only SSARs, with allow deciding each review from the request and its
+// attributes. Client construction never dials, so everything but the SSAR stays
+// offline.
+func ssarFactory(t *testing.T, allow func(*http.Request, *authzv1.SelfSubjectAccessReview) bool) *cluster.Factory {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews" {
 			http.NotFound(w, r)
 			return
 		}
+		// client-go posts protobuf; the universal deserializer reads either wire form.
+		body, _ := io.ReadAll(r.Body)
+		obj, _, err := scheme.Codecs.UniversalDeserializer().Decode(body, nil, &authzv1.SelfSubjectAccessReview{})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		resp := authzv1.SelfSubjectAccessReview{
 			TypeMeta: metav1.TypeMeta{Kind: "SelfSubjectAccessReview", APIVersion: "authorization.k8s.io/v1"},
-			Status:   authzv1.SubjectAccessReviewStatus{Allowed: r.Header.Get("Authorization") == "Bearer admin-token"},
+			Status:   authzv1.SubjectAccessReviewStatus{Allowed: allow(r, obj.(*authzv1.SelfSubjectAccessReview))},
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)

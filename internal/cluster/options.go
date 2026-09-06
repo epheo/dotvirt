@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	authzv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -30,6 +31,25 @@ func (c *Client) dynamic() (dynamic.Interface, error) {
 		return nil, fmt.Errorf("dynamic client unavailable")
 	}
 	return c.dyn, nil
+}
+
+// CanListOSImages and CanListNetworks report whether this token may list the
+// namespaced catalog kind in namespace. They narrow the SA-read catalog per
+// caller: a tenant sees the DataSources and NADs of namespaces it could list
+// itself, so a shared golden-image namespace (readable by every authenticated
+// user) stays visible while another tenant's names do not.
+func (c *Client) CanListOSImages(ctx context.Context, namespace string) bool {
+	return c.canList(ctx, namespace, gvrDataSources)
+}
+
+func (c *Client) CanListNetworks(ctx context.Context, namespace string) bool {
+	return c.canList(ctx, namespace, gvrNADs)
+}
+
+// canList is best-effort like CanReadNodes - a review error reads as "no".
+func (c *Client) canList(ctx context.Context, namespace string, gvr schema.GroupVersionResource) bool {
+	ok, _ := c.allowed(ctx, &authzv1.ResourceAttributes{Namespace: namespace, Verb: "list", Group: gvr.Group, Resource: gvr.Resource})
+	return ok
 }
 
 // ListOptions gathers all wizard/editor choices from the cluster. A failure in
