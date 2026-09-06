@@ -21,11 +21,14 @@
 		goto(`?tab=${t}`, { replaceState: true, noScroll: true, keepFocus: true });
 
 	// One-shot handoff of a pending intent (context menu -> "Edit settings" on an
-	// unopened VM): consume and clear it, so a later visit doesn't replay it.
+	// unopened VM): consume and clear it, so a later visit doesn't replay it. Only
+	// the addressed VM consumes it: during a VM-to-VM navigation this runs first
+	// for the VM being left, which would otherwise apply it and lose it.
 	let intent = $state<typeof ui.detailIntent>(null);
 	$effect(() => {
-		if (ui.detailIntent) {
-			intent = ui.detailIntent;
+		const i = ui.detailIntent;
+		if (i && i.namespace === namespace && i.name === name) {
+			intent = i;
 			ui.detailIntent = null;
 		}
 	});

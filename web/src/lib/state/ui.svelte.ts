@@ -91,11 +91,14 @@ class Ui {
 	}
 
 	// A one-shot request for the VM page to open a modal/tab on arrival (context
-	// menu -> "Edit settings" on an unopened VM); seq re-fires repeats.
-	detailIntent = $state<{ id: DetailAction; seq: number } | null>(null);
+	// menu -> "Edit settings" on an unopened VM); seq re-fires repeats. Addressed
+	// to one VM, so the page of the VM being left lets it pass to the next.
+	detailIntent = $state<{ id: DetailAction; seq: number; namespace: string; name: string } | null>(
+		null,
+	);
 	#intentSeq = 0;
-	requestDetail(id: DetailAction) {
-		this.detailIntent = { id, seq: ++this.#intentSeq };
+	requestDetail(id: DetailAction, vm: { namespace: string; name: string }) {
+		this.detailIntent = { id, seq: ++this.#intentSeq, namespace: vm.namespace, name: vm.name };
 	}
 
 	// The masthead search instance, so object pages can push label queries into it.

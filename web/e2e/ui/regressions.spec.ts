@@ -169,3 +169,16 @@ test('a drafts refresh keeps the half-typed PR title', async ({ page }) => {
 	await expect(main.getByText('web-prod/web-1')).toBeVisible();
 	await expect(title).toHaveValue('web-1: raise memory to 8Gi');
 });
+
+test('context-menu Edit settings on another VM opens on that VM', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await openVM(page, 'web-1');
+	// From web-1's page, the tree's context menu on web-2 must land on web-2 with
+	// the dialog open: the one-shot intent used to be consumed and reset by the
+	// page being left.
+	await page.locator('aside').getByText('web-2', { exact: true }).click({ button: 'right' });
+	await page.getByRole('button', { name: 'Edit settings', exact: true }).click();
+	await expect(page).toHaveURL(/\/vm\/web-prod\/web-2/);
+	await expect(page.getByLabel('Memory')).toBeVisible();
+});
