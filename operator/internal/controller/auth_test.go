@@ -70,6 +70,22 @@ func TestReconcileSSOGatedOffVanilla(t *testing.T) {
 	}
 }
 
+// The SSO gate is an effective-spec decision. A full reconcile on vanilla must
+// leave spec.auth.openShiftSSO as the admin wrote it: the finalizer add is the
+// one spec write, and normalizing before it persisted the gated-off value.
+func TestReconcileDoesNotPersistNormalizedSpec(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Auth.OpenShiftSSO = true
+	c := testBuilder(t).WithObjects(dv).Build()
+	r := newReconciler(c, depsOK) // Platform == Kubernetes
+
+	reconcileOnce(t, r, dv)
+
+	if stored := getCR(t, c, dv); !stored.Spec.Auth.OpenShiftSSO {
+		t.Error("stored spec.auth.openShiftSSO flipped to false: the effective spec leaked into the CR")
+	}
+}
+
 // Derived status: toggling SSO off must retire the stale apply command.
 func TestReconcileSSOToggleOffClearsStatus(t *testing.T) {
 	dv := testCR()

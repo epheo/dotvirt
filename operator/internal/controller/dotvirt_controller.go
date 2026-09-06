@@ -70,7 +70,6 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if !dv.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, r.finalize(ctx, &dv)
 	}
-	r.normalizeSpec(&dv)
 	// Ensure the finalizer is present before provisioning anything cluster-scoped.
 	// Skipped under -dry-run so a validation run mutates nothing (and the CR stays
 	// freely deletable, since the finalizer would otherwise gate its removal).
@@ -79,6 +78,9 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err
 		}
 	}
+	// Only after the finalizer add, the reconcile's one spec write: the effective
+	// spec must never reach the stored CR.
+	r.normalizeSpec(&dv)
 
 	// The install pipeline, in dependency order. A phase that halts (requeue or
 	// error) has already recorded why; a completed pass falls through to the Ready
@@ -116,9 +118,10 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 // normalizeSpec derives the EFFECTIVE in-memory spec the whole pipeline consumes.
-// Never persisted: after the finalizer add the reconcile writes only /status, so
-// these mutations stay in-process (a regression test pins the stored spec). The
-// forge and exposure phases fill their resolved hosts into the spec the same way.
+// Never persisted: it runs after the finalizer add and everything later writes
+// only /status, so these mutations stay in-process (a regression test pins the
+// stored spec). The forge and exposure phases fill their resolved hosts into the
+// spec the same way.
 func (r *DotvirtReconciler) normalizeSpec(dv *dotvirtv1alpha1.Dotvirt) {
 	// SSO is OpenShift-only: the app's oauth flow runs against the cluster oauth server.
 	if dv.Spec.Auth.OpenShiftSSO && r.Platform != platform.OpenShift {
