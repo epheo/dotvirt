@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/model"
@@ -24,12 +25,19 @@ import (
 // isolation holds on the live channel exactly as it does over HTTP.
 type InventoryFunc func(ctx context.Context, id auth.Identity) (model.Inventory, error)
 
+// buildTimeout bounds one identity's frame build. A build can miss the visible-
+// namespace cache and call the apiserver under that user's token; unbounded, one
+// stalled connection would hold the single reconcile goroutine and freeze every
+// other subscriber's stream until TCP gave up on it.
+const buildTimeout = 15 * time.Second
+
 // Hub is the central inventory reconciler. One Hub per process.
 type Hub struct {
 	inventory InventoryFunc
 	wake      <-chan struct{} // bus subscription over the inventory kinds (the edge)
 	version   func() uint64   // summed version of those kinds (the level)
 	kick      chan struct{}   // a connection was added - rebuild so it gets a first frame
+	timeout   time.Duration   // per-identity build bound (buildTimeout; tests shorten it)
 
 	mu    sync.Mutex
 	conns map[*conn]struct{}
@@ -44,6 +52,7 @@ func NewHub(inventory InventoryFunc, wake <-chan struct{}, version func() uint64
 		wake:      wake,
 		version:   version,
 		kick:      make(chan struct{}, 1),
+		timeout:   buildTimeout,
 		conns:     map[*conn]struct{}{},
 	}
 }
@@ -115,7 +124,9 @@ func (h *Hub) reconcile(ctx context.Context) {
 	h.mu.Unlock()
 
 	for _, conns := range byKey {
-		inv, err := h.inventory(ctx, conns[0].id)
+		bctx, cancel := context.WithTimeout(ctx, h.timeout)
+		inv, err := h.inventory(bctx, conns[0].id)
+		cancel()
 		if err != nil {
 			log.Printf("stream: inventory build failed for %s: %v", conns[0].id.Username, err)
 			continue

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/model"
@@ -127,5 +128,34 @@ func frameProject(t *testing.T, c *conn) string {
 	default:
 		t.Fatal("no frame delivered")
 		return ""
+	}
+}
+
+// TestReconcileBoundsOneIdentityBuild pins the liveness guarantee: a build that
+// never returns on its own (a stalled apiserver call under one user's token) is
+// cut off by the per-identity deadline, so the other subscribers still get frames.
+func TestReconcileBoundsOneIdentityBuild(t *testing.T) {
+	stall := func(ctx context.Context, id auth.Identity) (model.Inventory, error) {
+		if id.Username == "stuck" {
+			<-ctx.Done()
+			return model.Inventory{}, ctx.Err()
+		}
+		return echoInventory(ctx, id)
+	}
+	h := NewHub(stall, make(chan struct{}, 1), func() uint64 { return 0 })
+	h.timeout = 50 * time.Millisecond
+	stuck, alice := testConn("stuck"), testConn("alice")
+	h.add(stuck)
+	h.add(alice)
+
+	done := make(chan struct{})
+	go func() { h.reconcile(context.Background()); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reconcile wedged on one identity's build")
+	}
+	if got := frameProject(t, alice); got != "alice" {
+		t.Errorf("alice received %q, want her own frame despite the stalled build", got)
 	}
 }
