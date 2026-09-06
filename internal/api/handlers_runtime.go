@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -27,7 +28,7 @@ func (s *Server) handleRuntimeOp(w http.ResponseWriter, r *http.Request, verb st
 	err := op(r.Context(), sc.cluster, ns, name)
 	s.recordTask(verb, ns, name, sc.id.Username, err == nil)
 	if err != nil {
-		http.Error(w, err.Error(), runtimeOpStatus(err))
+		runtimeFail(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -47,6 +48,20 @@ func runtimeOpStatus(err error) int {
 	default:
 		return http.StatusInternalServerError
 	}
+}
+
+// runtimeFail writes a cluster operation error at the status runtimeOpStatus maps
+// it to. A classified failure (403/404/409) echoes the apiserver's own message
+// about the caller's object; anything else is internal and is redacted like
+// fail(), since a transport error names the apiserver endpoint.
+func runtimeFail(w http.ResponseWriter, err error) {
+	status := runtimeOpStatus(err)
+	msg := err.Error()
+	if status == http.StatusInternalServerError {
+		log.Printf("api: runtime op: %v", err)
+		msg = "internal error"
+	}
+	http.Error(w, msg, status)
 }
 
 func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {

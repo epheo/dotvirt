@@ -14,7 +14,7 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 	}
 	png, err := sc.cluster.Screenshot(r.Context(), ns, name)
 	if err != nil {
-		http.Error(w, err.Error(), runtimeOpStatus(err))
+		runtimeFail(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "image/png")
