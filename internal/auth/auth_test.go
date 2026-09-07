@@ -3,10 +3,13 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"golang.org/x/time/rate"
 	authnv1 "k8s.io/api/authentication/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -112,6 +115,50 @@ func TestValidateCaches(t *testing.T) {
 	}
 	if *calls != 2 {
 		t.Errorf("expected 1 more TokenReview for the bad token, got %d total", *calls)
+	}
+}
+
+// TestValidateThrottlesUnknownTokens pins the amplification bound: distinct
+// unknown tokens beyond the review budget are refused without a TokenReview and
+// without a rejection verdict, while a cached session keeps validating.
+func TestValidateThrottlesUnknownTokens(t *testing.T) {
+	a, calls := fakeAuth(map[string]authnv1.UserInfo{"good": {Username: "alice"}})
+	a.reviews = rate.NewLimiter(0, 3) // a burst of 3 reviews, no refill
+	ctx := context.Background()
+
+	if _, err := a.Validate(ctx, "good"); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		_, _ = a.Validate(ctx, fmt.Sprintf("spray-%d", i))
+	}
+	if *calls != 3 {
+		t.Errorf("TokenReviews = %d, want the burst of 3 (1 session + 2 sprays)", *calls)
+	}
+	_, err := a.Validate(ctx, "spray-9")
+	if !errors.Is(err, ErrThrottled) || errors.Is(err, ErrRejected) {
+		t.Errorf("over budget: err = %v, want ErrThrottled and not a rejection", err)
+	}
+	if _, err := a.Validate(ctx, "good"); err != nil {
+		t.Errorf("cached session must not queue behind the budget: %v", err)
+	}
+}
+
+// A throttled sign-in is 429 with a retry hint: not 401 (nothing is known about
+// the token) and not 503 (the apiserver is fine).
+func TestLoginThrottledIs429(t *testing.T) {
+	a, calls := fakeAuth(nil)
+	a.reviews = rate.NewLimiter(0, 0)
+	rec := httptest.NewRecorder()
+	a.Login(rec, httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"token":"x"}`)))
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want 429", rec.Code)
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Error("429 without Retry-After")
+	}
+	if *calls != 0 {
+		t.Errorf("a throttled login still opened %d TokenReviews", *calls)
 	}
 }
 

@@ -16,6 +16,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
+	"golang.org/x/time/rate"
+
 	"github.com/epheo/dotvirt/internal/restfactory"
 	"github.com/epheo/dotvirt/internal/ttlcache"
 )
@@ -49,7 +51,8 @@ type Authenticator struct {
 	saKube kubernetes.Interface
 	secret []byte
 
-	cache *ttlcache.Cache[cachedIdentity] // keyed by sha256(token)
+	cache   *ttlcache.Cache[cachedIdentity] // keyed by sha256(token)
+	reviews *rate.Limiter                   // TokenReview budget for uncached tokens (reviewRate)
 }
 
 type cachedIdentity struct {
@@ -65,11 +68,27 @@ const authCacheTTL = time.Minute
 // cluster.Factory.SAKube). secret signs the session cookie.
 func New(saKube kubernetes.Interface, secret []byte) *Authenticator {
 	return &Authenticator{
-		saKube: saKube,
-		secret: secret,
-		cache:  ttlcache.New[cachedIdentity](authCacheTTL),
+		saKube:  saKube,
+		secret:  secret,
+		cache:   ttlcache.New[cachedIdentity](authCacheTTL),
+		reviews: rate.NewLimiter(reviewRate, reviewBurst),
 	}
 }
+
+// reviewRate bounds the TokenReviews this process opens for tokens it has not
+// seen. The login route and any bearer header reach that path before any
+// authentication, so without a bound a token spray turns dotvirt into an
+// apiserver amplifier. Cached tokens (every live session) never queue behind it,
+// and the budget sits far above real sign-in traffic.
+const (
+	reviewRate  rate.Limit = 20
+	reviewBurst            = 40
+)
+
+// ErrThrottled reports a TokenReview refused by the process-wide budget. Callers
+// map it to 429 with a retry hint: not 401 (nothing is known about the token) and
+// not 503 (the apiserver is fine).
+var ErrThrottled = errors.New("token validation throttled")
 
 // ErrRejected wraps a definitive authentication failure (the token is empty or the
 // cluster says it's invalid), as opposed to a transient inability to validate (e.g.
@@ -92,6 +111,9 @@ func (a *Authenticator) Validate(ctx context.Context, token string) (Identity, e
 		return c.id, nil
 	}
 
+	if !a.reviews.Allow() {
+		return Identity{}, ErrThrottled
+	}
 	review := &authnv1.TokenReview{Spec: authnv1.TokenReviewSpec{Token: token}}
 	res, err := a.saKube.AuthenticationV1().TokenReviews().Create(ctx, review, metav1.CreateOptions{})
 	if err != nil {
