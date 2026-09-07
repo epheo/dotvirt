@@ -77,21 +77,31 @@
 	// VM-state frame. A failed pull retries with backoff: this is the only fetch of
 	// these planes, so a transient boot error would otherwise blank the networking
 	// and host-configure views for the whole session. 401 signs out centrally.
+	// Only the pull for the current version writes: version bumps come in bursts,
+	// and an older response landing last would paint stale planes (or, after
+	// sign-out, repopulate the reset stores).
 	$effect(() => {
 		if (!session.user) return;
 		inventory.networksVersion; // subscribe: re-pull when GitOps/git moves
 		let timer = 0;
 		let attempt = 0;
+		let live = true;
 		const pull = () => {
-			Promise.all([
-				api.networks().then((n) => (inventory.netInv = n)),
-				api.policies().then((p) => (inventory.polInv = p)),
-			]).catch(() => {
-				if (attempt < 5) timer = window.setTimeout(pull, 2 ** attempt++ * 1000);
-			});
+			Promise.all([api.networks(), api.policies()])
+				.then(([n, p]) => {
+					if (!live) return;
+					inventory.netInv = n;
+					inventory.polInv = p;
+				})
+				.catch(() => {
+					if (live && attempt < 5) timer = window.setTimeout(pull, 2 ** attempt++ * 1000);
+				});
 		};
 		pull();
-		return () => clearTimeout(timer);
+		return () => {
+			live = false;
+			clearTimeout(timer);
+		};
 	});
 
 	// The options catalog, once per session: the storage lens groups classless
@@ -112,10 +122,16 @@
 	$effect(() => {
 		if (!session.user) return;
 		inventory.tasksVersion; // subscribe
+		let live = true;
 		api
 			.tasks()
-			.then((t) => (inventory.taskFeed = t))
+			.then((t) => {
+				if (live) inventory.taskFeed = t;
+			})
 			.catch(() => {});
+		return () => {
+			live = false;
+		};
 	});
 
 	// Recompute the draft summary only when the SET of projects or PR lanes
