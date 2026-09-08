@@ -46,9 +46,12 @@ test('a past change reviews like a staged one and reverts as a new PR', async ({
 	await expect(main.getByRole('link', { name: /PR #40/ })).toHaveAttribute('href', /pulls\/40/);
 	await expect(main.getByText(/data \(50Gi\)/)).toBeVisible();
 
-	// Revert is two clicks and yields a pull request, never a direct change.
-	await main.getByRole('button', { name: 'Revert as pull request' }).click();
-	await main.getByRole('button', { name: 'Confirm revert' }).click();
+	// Undo confirms in a dialog and yields a pull request, never a direct change.
+	await main.getByRole('button', { name: 'Undo this change' }).click();
+	const dialog = page.getByRole('dialog', { name: /Undo this change/ });
+	await expect(dialog.getByText(/web-2: add data disk/)).toBeVisible();
+	await dialog.getByRole('button', { name: 'Open pull request' }).click();
+	await expect(dialog).toHaveCount(0);
 	// The stepper and the note both link the revert PR.
 	await expect(main.getByRole('link', { name: /PR #78/ }).first()).toHaveAttribute(
 		'href',

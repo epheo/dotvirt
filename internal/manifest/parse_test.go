@@ -154,3 +154,32 @@ spec:
 		t.Errorf("emptyDisk unchanged by DV join: %+v", scratch)
 	}
 }
+
+// A template that names no interface still runs on the pod network: the
+// adapter is real on the VMI, so it must show, marked as the file's default.
+func TestParseVMsImplicitPodNetwork(t *testing.T) {
+	const head = "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\nspec:\n  template:\n    spec:\n      domain:\n"
+	cases := []struct {
+		name, tail string
+		want       []model.NIC
+	}{
+		{"none declared", "        devices: {}\n", []model.NIC{{Name: "default", Network: "pod", Implicit: true}}},
+		{"autoattach off", "        devices:\n          autoattachPodInterface: false\n", nil},
+		{"explicit", "        devices:\n          interfaces:\n          - name: nic0\n      networks:\n      - name: nic0\n        multus:\n          networkName: lan\n", []model.NIC{{Name: "nic0", Network: "lan"}}},
+	}
+	for _, c := range cases {
+		vms, err := ParseVMs("alpha/web.yaml", []byte(head+c.tail), "alpha")
+		if err != nil || len(vms) != 1 {
+			t.Fatalf("%s: ParseVMs: %v (%d VMs)", c.name, err, len(vms))
+		}
+		got := vms[0].Networks
+		if len(got) != len(c.want) {
+			t.Fatalf("%s: networks = %+v, want %+v", c.name, got, c.want)
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("%s: network[%d] = %+v, want %+v", c.name, i, got[i], c.want[i])
+			}
+		}
+	}
+}

@@ -30,6 +30,7 @@
 	import ChangeList from '$lib/components/ChangeList.svelte';
 	import ErrorNote from '$lib/components/ErrorNote.svelte';
 	import GitOpsStepper from '$lib/components/GitOpsStepper.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import Note from '$lib/components/Note.svelte';
 	import StatusPill from '$lib/components/StatusPill.svelte';
 	import TextInput from '$lib/components/TextInput.svelte';
@@ -39,7 +40,7 @@
 	// per-project history. Right: the selected change's field diff and impact,
 	// the selected PR's review state, or a past commit's diff with its revert.
 	// Review happens HERE; approval and merge stay in the forge - the primary
-	// actions are Propose and Revert, both of which open a pull request.
+	// actions are Propose and Undo, both of which open a pull request.
 
 	// Warning-only lanes stay: prune risk must warn BEFORE anything is staged.
 	const lanes = $derived(drafts.drafts.filter((d) => d.draft.count > 0 || d.draft.warning));
@@ -216,7 +217,6 @@
 	);
 	$effect(() => {
 		const key = selectedCommitKey;
-		revertArmed = null;
 		if (!key || untrack(() => details[key] || detailError[key])) return;
 		const at = key.lastIndexOf('@');
 		loadDetail(key.slice(0, at), key.slice(at + 1));
@@ -230,22 +230,18 @@
 		}
 	}
 
-	// Two-click revert: first arms, second opens the forward-commit PR. The
-	// result stays with the commit so the pane keeps pointing at the PR.
+	// Undo asks once, in the app's confirm dialog, then opens the forward-commit
+	// PR. The result stays with the commit so the pane keeps pointing at the PR.
 	const revertOp = action();
-	let revertArmed = $state<string | null>(null);
+	let confirmUndo = $state<{ project: string; hash: string } | null>(null);
 	let reverts = $state<Record<string, ProposeResult>>({});
-	async function revert(project: string, hash: string) {
-		const key = commitKey(project, hash);
-		if (revertArmed !== key) {
-			revertArmed = key;
-			return;
-		}
-		revertArmed = null;
+	async function undo(project: string, hash: string) {
 		if (revertOp.busy) return;
-		await revertOp.run(async () => {
+		const key = commitKey(project, hash);
+		const ok = await revertOp.run(async () => {
 			reverts[key] = await api.revert(project, hash);
 		});
+		if (ok) confirmUndo = null;
 		drafts.refresh();
 	}
 
@@ -649,7 +645,9 @@
 									{#if it.kind === 'delete'}<Trash2 size={13} class="shrink-0 text-danger-ink" />
 									{:else if it.kind === 'create'}<Plus size={13} class="shrink-0 text-ok-ink" />
 									{:else}<Pencil size={13} class="shrink-0 text-accent-ink" />{/if}
-									<span class="text-[13px] font-medium text-ink">{it.namespace}/{it.name}</span>
+									<span class="text-[13px] font-medium text-ink"
+										>{it.namespace ? `${it.namespace}/${it.name}` : it.name}</span
+									>
 									<span class="rounded px-1.5 py-0.5 text-xs {TONE_PILL[draftKindTone(it.kind)]}"
 										>{it.kind}</span
 									>
@@ -674,14 +672,14 @@
 					{/if}
 				</div>
 
-				<!-- revert footer: the one action on a past change, itself a pull request -->
+				<!-- undo footer: the one action on a past change, itself a pull request -->
 				<div class="mt-auto border-t border-line bg-inset px-4 py-3">
 					{#if done?.prURL}
 						<div class="mb-2 flex items-center gap-3">
 							<GitOpsStepper stage="proposed" prNumber={done.prNumber} prUrl={done.prURL} />
 						</div>
 						<Note tone="neutral">
-							Revert proposed as
+							Undo proposed as
 							<a href={done.prURL} target="_blank" rel="noopener" class="underline"
 								>PR #{done.prNumber}</a
 							>. Approve and merge it in the forge; nothing changes until then.
@@ -698,7 +696,6 @@
 							{/if}
 						</Note>
 					{:else}
-						<ErrorNote error={revertOp.error} class="mb-2" />
 						{#if detail?.revertWarning}
 							<Note tone="warn" class="mb-2 flex items-start gap-2">
 								<TriangleAlert size={14} class="mt-0.5 shrink-0" />
@@ -708,25 +705,19 @@
 						<div class="flex items-center gap-3">
 							<span class="text-[11px] text-ink-faint">
 								{#if detail?.reverted}
-									Already reverted: main matches the state before this change.
+									Already undone: main matches the state before this change.
 								{:else}
-									Opens a pull request restoring every file this change touched to its previous
-									state. Nothing changes until it merges.
+									Undo opens a pull request that puts every file this change touched back to its
+									previous state. It does not roll back to this point. Nothing changes until the
+									pull request merges.
 								{/if}
 							</span>
 							<button
-								onclick={() => revert(project, c.hash)}
-								disabled={revertOp.busy || !detail || detail.reverted}
-								class="ml-auto shrink-0 rounded-full px-4 py-1.5 text-sm font-medium disabled:border-line disabled:bg-transparent disabled:text-ink-faint {revertArmed ===
-								key
-									? 'bg-danger text-white'
-									: 'border border-line-strong bg-panel text-danger-ink hover:bg-select-soft'}"
+								onclick={() => (confirmUndo = { project, hash: c.hash })}
+								disabled={!detail || detail.reverted}
+								class="ml-auto shrink-0 rounded-full border border-line-strong bg-panel px-4 py-1.5 text-sm font-medium text-danger-ink hover:bg-select-soft disabled:border-line disabled:bg-transparent disabled:text-ink-faint"
 							>
-								{revertOp.busy
-									? 'Reverting…'
-									: revertArmed === key
-										? 'Confirm revert'
-										: 'Revert as pull request'}
+								Undo this change
 							</button>
 						</div>
 					{/if}
@@ -745,3 +736,43 @@
 		</div>
 	</div>
 </div>
+
+{#if confirmUndo}
+	{@const target = history[confirmUndo.project]?.find((x) => x.hash === confirmUndo!.hash)}
+	{@const warning = details[commitKey(confirmUndo.project, confirmUndo.hash)]?.revertWarning}
+	<Modal title="Undo this change?" danger onclose={() => (confirmUndo = null)}>
+		<div class="space-y-2 px-5 py-4 text-sm text-ink-soft">
+			<p>
+				<b class="font-medium text-ink">{target?.title}</b>
+				in {confirmUndo.project}
+				<code class="text-xs text-ink-faint">{target?.shortHash}</code>
+			</p>
+			<p>
+				Opens a pull request restoring every file this change touched to its previous state. Nothing
+				changes until it is approved and merged in the forge.
+			</p>
+			{#if warning}
+				<Note tone="warn" class="flex items-start gap-2">
+					<TriangleAlert size={14} class="mt-0.5 shrink-0" />
+					<span>{warning}</span>
+				</Note>
+			{/if}
+			<ErrorNote error={revertOp.error} />
+		</div>
+		{#snippet footer()}
+			<button
+				onclick={() => (confirmUndo = null)}
+				class="ml-auto rounded border border-line-strong px-3 py-1 text-sm text-ink-soft hover:bg-inset"
+			>
+				Cancel
+			</button>
+			<button
+				onclick={() => undo(confirmUndo!.project, confirmUndo!.hash)}
+				disabled={revertOp.busy}
+				class="rounded bg-danger px-3 py-1 text-sm font-medium text-white hover:bg-danger-ink disabled:opacity-50"
+			>
+				{revertOp.busy ? 'Opening…' : 'Open pull request'}
+			</button>
+		{/snippet}
+	</Modal>
+{/if}

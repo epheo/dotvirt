@@ -132,13 +132,20 @@ func (f *Feed) Merges() []Merge {
 	return out
 }
 
+// RevertSegment is the branch segment under the proposed prefix that holds
+// revert PRs: <prefix>/revert/<user>/<project>-<commit>. Named here, beside the
+// attribution that must skip it, so the two cannot drift apart.
+const RevertSegment = "revert"
+
 // MergeAuthor resolves who a merged PR belongs to. dotvirt's bot opens every
 // proposal PR, so the poster is always the bot - the proposing user is encoded
-// (sanitized) as the first head-branch segment under the proposed prefix. A head
-// outside that prefix is a human PR, attributed to its real poster.
+// (sanitized) as the first head-branch segment under the proposed prefix, one
+// segment deeper for a revert. A head outside that prefix is a human PR,
+// attributed to its real poster.
 func MergeAuthor(headRef, proposedPrefix, poster string) string {
 	if proposedPrefix != "" {
 		if rest, ok := strings.CutPrefix(headRef, proposedPrefix+"/"); ok {
+			rest = strings.TrimPrefix(rest, RevertSegment+"/")
 			if user, _, found := strings.Cut(rest, "/"); found && user != "" {
 				return user
 			}

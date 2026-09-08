@@ -74,6 +74,22 @@ func (c *Client) FindPR(head, base string) (pr PR, ok bool, err error) {
 	return PR{}, false, nil
 }
 
+// OpenPRs lists the open PRs targeting base, bounded by limit.
+func (c *Client) OpenPRs(base string, limit int) ([]PR, error) {
+	q := fmt.Sprintf("/pulls?state=open&limit=%d&base=%s", limit, url.QueryEscape(base))
+	var prs []PR
+	if err := c.do("GET", c.repoPath(q), nil, &prs); err != nil {
+		return nil, err
+	}
+	out := prs[:0]
+	for _, pr := range prs {
+		if pr.Base.Ref == base {
+			out = append(out, pr)
+		}
+	}
+	return out, nil
+}
+
 // MergedPRs lists PRs merged into base, most recently updated first, bounded by
 // limit. Forgejo's list endpoint has no merged-state filter, so this lists closed
 // PRs and keeps the merged ones targeting base.

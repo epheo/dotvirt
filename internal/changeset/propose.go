@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -43,11 +44,15 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	// failure must not block the propose). Read BEFORE the commit below - the
 	// view diffs against the base branch the draft still targets.
 	body := req.Message
-	if view, verr := c.Get(id, proj); verr == nil {
+	view, verr := c.Get(id, proj)
+	if verr == nil {
 		body = prBody(view, req.Message, id.Username)
 	}
 
 	title := req.Title
+	if title == "" && verr == nil {
+		title = defaultTitle(view)
+	}
 	if title == "" {
 		title = fmt.Sprintf("dotvirt: %d change(s)", len(entries))
 	}
@@ -194,37 +199,116 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) ([]git.ChangesetIt
 	return items, nil
 }
 
-// OpenProposal returns the open PR backing (id, proj)'s proposed branch, if any -
-// the staged->PR->synced lifecycle's middle state for the Recent Tasks feed. Returns
-// ok=false (nil error) when the project has no repo/forge or no open PR.
-func (c *Coordinator) OpenProposal(id auth.Identity, proj project.ProjectInfo) (model.Proposal, bool, error) {
+// OpenProposals returns the open PRs (id, proj) has in flight: the one backing
+// the proposed branch and every revert the user opened - the staged->PR->synced
+// lifecycle's middle state for the Changes pane. Reverts each land on their own
+// branch, so they are found by prefix among the open PRs rather than by name.
+// Empty (nil error) when the project has no repo/forge or nothing is open.
+func (c *Coordinator) OpenProposals(id auth.Identity, proj project.ProjectInfo) ([]model.Proposal, error) {
 	if proj.Repo == "" {
-		return model.Proposal{}, false, nil
+		return nil, nil
 	}
 	fc := c.forge.For(proj.Repo) // nil-safe: nil factory / unparsable repo -> nil client
 	if fc == nil {
-		return model.Proposal{}, false, nil
+		return nil, nil
 	}
-	pr, ok, err := fc.FindPR(c.proposedBranch(id.Username, proj.Name), c.baseBranch)
+	var prs []forge.PR
+	if pr, ok, err := fc.FindPR(c.proposedBranch(id.Username, proj.Name), c.baseBranch); err != nil {
+		return nil, err
+	} else if ok && pr.State == "open" {
+		prs = append(prs, pr)
+	}
+	open, err := fc.OpenPRs(c.baseBranch, 50)
 	if err != nil {
-		return model.Proposal{}, false, err
+		return nil, err
 	}
-	if !ok || pr.State != "open" {
-		return model.Proposal{}, false, nil
-	}
-	p := model.Proposal{Project: proj.Name, PRNumber: pr.Number, PRURL: pr.HTMLURL, Title: pr.Title}
-	// Review state, each read best-effort: an unreadable plane stays zero
-	// (unknown), which the UI renders as nothing - never as "no rule".
-	if n, aerr := fc.Approvals(pr.Number); aerr == nil {
-		p.Approvals = n
-	}
-	if req, found, rerr := fc.RequiredApprovals(c.baseBranch); rerr == nil && found {
-		p.RequiredApprovals = req
-	}
-	if pr.Head.Sha != "" {
-		if st, serr := fc.CombinedStatus(pr.Head.Sha); serr == nil {
-			p.Checks = st
+	prefix := c.revertPrefix(id.Username, proj.Name)
+	for _, pr := range open {
+		if strings.HasPrefix(pr.Head.Ref, prefix) {
+			prs = append(prs, pr)
 		}
 	}
-	return p, true, nil
+	if len(prs) == 0 {
+		return nil, nil
+	}
+	// Review state, each read best-effort: an unreadable plane stays zero
+	// (unknown), which the UI renders as nothing - never as "no rule". The
+	// branch rule is one read for all of them.
+	required := 0
+	if req, found, rerr := fc.RequiredApprovals(c.baseBranch); rerr == nil && found {
+		required = req
+	}
+	out := make([]model.Proposal, 0, len(prs))
+	for _, pr := range prs {
+		p := model.Proposal{Project: proj.Name, PRNumber: pr.Number, PRURL: pr.HTMLURL, Title: pr.Title, RequiredApprovals: required}
+		if n, aerr := fc.Approvals(pr.Number); aerr == nil {
+			p.Approvals = n
+		}
+		if pr.Head.Sha != "" {
+			if st, serr := fc.CombinedStatus(pr.Head.Sha); serr == nil {
+				p.Checks = st
+			}
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// defaultTitle names an untitled proposal by what it does, so the history row
+// and the forge list read as the change rather than as a count.
+func defaultTitle(view model.DraftView) string {
+	if len(view.Items) == 0 {
+		return ""
+	}
+	verbs := map[string]string{"edit": "Update", "create": "Create", "delete": "Delete"}
+	kind := view.Items[0].Kind
+	names := make([]string, 0, len(view.Items))
+	for _, it := range view.Items {
+		if it.Kind != kind {
+			kind = ""
+		}
+		names = append(names, it.Name)
+	}
+	list := shortList(names, 3)
+	verb, ok := verbs[kind]
+	if !ok {
+		return fmt.Sprintf("%d changes: %s", len(view.Items), list)
+	}
+	title := verb + " " + list
+	if kind == "edit" && len(view.Items) == 1 {
+		title += ": " + changeSummary(view.Items[0].Changes)
+	}
+	return title
+}
+
+// changeSummary is one change spelled out, or the fields a multi-field edit touches.
+func changeSummary(changes []model.Change) string {
+	if len(changes) == 1 {
+		c := changes[0]
+		switch c.Action {
+		case "change":
+			return fmt.Sprintf("%s %s -> %s", c.Field, c.From, c.To)
+		case "add":
+			return fmt.Sprintf("%s + %s", c.Field, c.To)
+		case "remove":
+			return fmt.Sprintf("%s - %s", c.Field, c.From)
+		}
+	}
+	fields := make([]string, 0, len(changes))
+	seen := map[string]bool{}
+	for _, c := range changes {
+		if !seen[c.Field] {
+			seen[c.Field] = true
+			fields = append(fields, c.Field)
+		}
+	}
+	return shortList(fields, 3)
+}
+
+// shortList joins up to max names, counting the rest.
+func shortList(names []string, max int) string {
+	if len(names) <= max {
+		return strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("%s (+%d more)", strings.Join(names[:max], ", "), len(names)-max)
 }

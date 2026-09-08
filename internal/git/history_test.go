@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/epheo/dotvirt/internal/model"
 )
 
 // webYAML is a tiny VM manifest whose cpu count varies per commit, so an edit
@@ -216,6 +214,16 @@ func TestHistoryAttributesMergeToHeadAuthor(t *testing.T) {
 	if !m.Merge {
 		t.Fatalf("newest commit should be the merge, got %+v", m)
 	}
+	// First parents only: the merge, then main's three commits; bob's branch
+	// commit is the PR's internals, not history.
+	if len(commits) != 4 || commits[len(commits)-1].Message != "seed tenant-a" {
+		t.Errorf("want the first-parent chain (4 commits ending at the root), got %d: %+v", len(commits), commits)
+	}
+	for _, c := range commits {
+		if c.Message == "bump web to 8 cpu, add cache" {
+			t.Errorf("the merged branch's own commit must not appear in history")
+		}
+	}
 	if m.Author != "bob" {
 		t.Errorf("merge Author = %q, want the merged branch's author bob", m.Author)
 	}
@@ -269,14 +277,7 @@ func TestCommitDiffSides(t *testing.T) {
 		t.Errorf("edited file must carry both sides: %+v", f)
 	}
 
-	// The log walks the first-parent chain before the merged branch, so the
-	// root is found by subject, not position.
-	var root model.Commit
-	for _, c := range commits {
-		if c.Message == "seed tenant-a" {
-			root = c
-		}
-	}
+	root := commits[len(commits)-1]
 	d, err = r.CommitDiff(root.Hash)
 	if err != nil {
 		t.Fatalf("CommitDiff(root): %v", err)

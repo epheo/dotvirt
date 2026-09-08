@@ -59,7 +59,10 @@ export function seedEditForm(vm: VM): EditForm {
 		groups: (vm.scheduling?.groups ?? []).map((g) => ({ ...g, removed: false, isNew: false })),
 		pin: [...(vm.scheduling?.pin ?? [])],
 		disks: (vm.disks ?? []).map((d) => ({ ...d, removed: false, isNew: false })),
-		nics: (vm.networks ?? []).map((n) => ({ ...n, removed: false, isNew: false })),
+		// The implicit pod adapter is not in the manifest, so there is nothing to remove.
+		nics: (vm.networks ?? [])
+			.filter((n) => !n.implicit)
+			.map((n) => ({ ...n, removed: false, isNew: false })),
 	};
 }
 

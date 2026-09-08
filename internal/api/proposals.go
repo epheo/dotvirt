@@ -194,8 +194,7 @@ func (s *Server) refreshProposals() bool {
 	s.propMu.Unlock()
 
 	type lookup struct {
-		pr  model.Proposal
-		ok  bool
+		prs []model.Proposal
 		err error
 	}
 	memo := map[string]lookup{}
@@ -207,7 +206,7 @@ func (s *Server) refreshProposals() bool {
 			mk := t.id.Username + "\x00" + p.Name
 			l, seen := memo[mk]
 			if !seen {
-				l.pr, l.ok, l.err = s.draft.OpenProposal(t.id, p)
+				l.prs, l.err = s.draft.OpenProposals(t.id, p)
 				memo[mk] = l
 			}
 			if l.err != nil {
@@ -216,9 +215,7 @@ func (s *Server) refreshProposals() bool {
 				}
 				continue
 			}
-			if l.ok {
-				out = append(out, l.pr)
-			}
+			out = append(out, l.prs...)
 		}
 		if prev, ok := s.proposals.Get(key); ok {
 			if !proposalsEqual(prev, out) {

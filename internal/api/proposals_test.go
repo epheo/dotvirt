@@ -11,7 +11,7 @@ import (
 	"github.com/epheo/dotvirt/internal/project"
 )
 
-// fakeDraft implements only OpenProposal; the embedded interface panics on
+// fakeDraft implements only OpenProposals; the embedded interface panics on
 // anything else, which is exactly what these tests want.
 type fakeDraft struct {
 	Draft
@@ -20,12 +20,14 @@ type fakeDraft struct {
 	calls int
 }
 
-func (f *fakeDraft) OpenProposal(id auth.Identity, proj project.ProjectInfo) (model.Proposal, bool, error) {
+func (f *fakeDraft) OpenProposals(id auth.Identity, proj project.ProjectInfo) ([]model.Proposal, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
-	pr, ok := f.prs[proj.Name]
-	return pr, ok, nil
+	if pr, ok := f.prs[proj.Name]; ok {
+		return []model.Proposal{pr}, nil
+	}
+	return nil, nil
 }
 
 func (f *fakeDraft) forgeCalls() int {

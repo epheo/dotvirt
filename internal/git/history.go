@@ -5,16 +5,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/go-git/go-git/v5/plumbing/storer"
 
 	"github.com/epheo/dotvirt/internal/model"
 )
 
-// History returns up to limit recent commits on branch, newest first - the
-// Changes-pane commit/merge log.
+// History returns up to limit recent commits on branch, newest first, following
+// first parents only. On the base branch every PR is one merge; the merged
+// branch's own commits are that PR's internals, and a full walk would list them
+// again below the root, out of date order.
 func (r *Repo) History(branch string, limit int) ([]model.Commit, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -23,22 +23,19 @@ func (r *Repo) History(branch string, limit int) ([]model.Commit, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve branch %q: %w", branch, err)
 	}
-	iter, err := r.repo.Log(&git.LogOptions{From: ref.Hash()})
+	c, err := r.repo.CommitObject(ref.Hash())
 	if err != nil {
 		return nil, err
 	}
-	defer iter.Close()
-
 	out := []model.Commit{}
-	err = iter.ForEach(func(c *object.Commit) error {
+	for len(out) < limit {
 		out = append(out, commitEntry(c))
-		if len(out) >= limit {
-			return storer.ErrStop
+		if c.NumParents() == 0 {
+			break
 		}
-		return nil
-	})
-	if err != nil && err != storer.ErrStop {
-		return nil, err
+		if c, err = c.Parent(0); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
