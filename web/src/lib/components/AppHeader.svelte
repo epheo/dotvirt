@@ -72,8 +72,10 @@
 		}
 	}
 
-	// The Review-changes badge: staged edits + open PRs, everything in flight.
-	const inFlight = $derived(drafts.count + inventory.proposals.length);
+	// The Review-changes badge: the caller's own work in flight - staged edits
+	// and the PRs they opened. The lane also lists colleagues' PRs, but those are
+	// theirs to drive; counting them would keep the badge lit in any busy team.
+	const inFlight = $derived(drafts.count + inventory.proposals.filter((p) => p.mine).length);
 
 	// The issues bell: standing problems derived from the live stream, so the
 	// count moves with the same frames the tree and grid repaint on.

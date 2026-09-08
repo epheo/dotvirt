@@ -16,14 +16,28 @@ test('the PR lane shows checks and approval state, merge stays in the forge', as
 	await expect(main.getByText('Checks passed').first()).toBeVisible();
 	await expect(main.getByText('Awaiting 1 approval').first()).toBeVisible();
 
-	// Selecting the PR offers exactly one action: the forge deep link. No
-	// in-app merge button exists.
+	// Selecting the PR reviews its diff here and offers exactly one action: the
+	// forge deep link. No in-app merge button exists.
 	await laneRow.click();
+	await expect(main.getByText('12Gi', { exact: true })).toBeVisible();
+	await expect(main.getByText('yours')).toBeVisible();
 	const link = main.getByRole('link', { name: /Open PR to approve and merge/ });
 	await expect(link).toBeVisible();
 	await expect(link).toHaveAttribute('href', /pulls\/41/);
 	await expect(main.getByRole('button', { name: /^Merge/ })).toHaveCount(0);
 	await expect(main.getByText(/Approval and merge happen in the forge/)).toBeVisible();
+
+	// A colleague's PR is in the lane too, attributed; the Mine filter hides it.
+	const bobs = main.getByRole('button', { name: /PR #42/ });
+	await expect(bobs).toContainText('by bob');
+	await bobs.click();
+	await expect(main.getByText('by bob').last()).toBeVisible();
+	await expect(main.getByText('Excluded', { exact: true })).toBeVisible();
+	await main.getByRole('button', { name: 'Mine', exact: true }).click();
+	await expect(bobs).toHaveCount(0);
+	await expect(laneRow).toBeVisible();
+	await main.getByRole('button', { name: 'All', exact: true }).click();
+	await expect(bobs).toBeVisible();
 });
 
 test('the route explains the write model when nothing is in flight', async ({ page }) => {

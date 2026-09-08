@@ -195,12 +195,30 @@ export interface Proposal {
   prURL: string;
   title?: string;
   /**
+   * Branch is the head branch; By the proposing user, from the branch name
+   * (else the forge poster); Revert marks an undo PR. Mine is set per reader:
+   * the lane is project-wide, ownership is the caller's.
+   */
+  branch?: string;
+  by?: string;
+  revert?: boolean;
+  mine?: boolean;
+  /**
    * Review state, read best-effort from the forge each refresh; zero values
    * mean unknown (an unreadable protection rule must not render as "none").
    */
   approvals?: number /* int */;
   requiredApprovals?: number /* int */;
   checks?: string; // success | pending | failure | error
+}
+/**
+ * ProposalDetail is one open PR under review: what merging it would change,
+ * as the semantic items a staged draft renders. Proposal carries identity
+ * only; the lane row holds the review state.
+ */
+export interface ProposalDetail {
+  proposal: Proposal;
+  items: DraftItem[];
 }
 /**
  * TaskEntry is one Recent Tasks row: an imperative runtime op dotvirt performed

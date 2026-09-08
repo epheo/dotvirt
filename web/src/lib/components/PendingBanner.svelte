@@ -36,9 +36,16 @@
 {:else if proposal}
 	<Banner tone="ok">
 		<StatusDot tone="ok" size="xs" />
-		PR #{proposal.prNumber} is open in <strong>{proj}</strong> — its changes apply when it merges.
-		<a href={proposal.prURL} target="_blank" rel="noopener" class="font-medium hover:underline"
-			>View PR ↗</a
+		PR #{proposal.prNumber}{#if proposal.by && !proposal.mine}
+			by {proposal.by}{/if} is open in <strong>{proj}</strong> — its changes apply when it merges.
+		<button
+			onclick={() =>
+				ui.openChanges({
+					kind: 'proposal',
+					project: proposal.project,
+					prNumber: proposal.prNumber,
+				})}
+			class="font-medium hover:underline">Review</button
 		>
 	</Banner>
 {/if}

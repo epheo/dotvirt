@@ -61,6 +61,9 @@ export interface DraftItem extends Omit<gen.DraftItem, 'kind' | 'changes'> {
 export interface CommitDetail extends Omit<gen.CommitDetail, 'items'> {
 	items: DraftItem[];
 }
+export interface ProposalDetail extends Omit<gen.ProposalDetail, 'items'> {
+	items: DraftItem[];
+}
 export interface DraftView extends Omit<gen.DraftView, 'items'> {
 	items: DraftItem[];
 }
@@ -338,6 +341,9 @@ export const api = {
 		get<CommitDetail>(`/api/projects/${enc(project)}/history/${hash}`),
 	revert: (project: string, hash: string) =>
 		post<gen.ProposeResult>(`/api/projects/${enc(project)}/revert`, { hash }),
+	// What merging one open PR would change, from its mirrored head branch.
+	proposal: (project: string, number: number) =>
+		get<ProposalDetail>(`/api/projects/${enc(project)}/proposals/${number}`),
 	// The merged changes to one VM's manifest, newest first.
 	vmHistory: (namespace: string, name: string) =>
 		get<gen.Commit[]>(`${vmPath(namespace, name)}/history`),
