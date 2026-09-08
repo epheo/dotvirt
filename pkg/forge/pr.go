@@ -6,7 +6,9 @@ package forge
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -167,4 +169,33 @@ func (c *Client) ReopenPR(number int) (PR, error) {
 		return PR{}, err
 	}
 	return pr, nil
+}
+
+// PullURL is the browser URL of pull request number on this forge.
+func (c *Client) PullURL(number int) string {
+	return fmt.Sprintf("%s/%s/%s/pulls/%d", c.baseURL, c.owner, c.repo, number)
+}
+
+// mergeSubject matches the subjects Forgejo writes when it merges a PR: a merge
+// commit ("Merge pull request 'title' (#12) from head into base") and a squash
+// ("title (#12)"). Rebase merges keep the branch's own subjects and match nothing.
+var mergeSubject = regexp.MustCompile(`^(?:Merge pull request '(.*)' \(#(\d+)\) from .+ into .+|(.*) \(#(\d+)\))$`)
+
+// MergeSubject reads the PR title and number back out of a merge commit's
+// subject, so history can name a merged change by what the user proposed
+// instead of the forge's boilerplate. ok=false for any other subject.
+func MergeSubject(subject string) (title string, number int, ok bool) {
+	m := mergeSubject.FindStringSubmatch(strings.TrimSpace(subject))
+	if m == nil {
+		return "", 0, false
+	}
+	title, num := m[1], m[2]
+	if num == "" {
+		title, num = m[3], m[4]
+	}
+	n, err := strconv.Atoi(num)
+	if err != nil || n <= 0 || title == "" {
+		return "", 0, false
+	}
+	return title, n, true
 }

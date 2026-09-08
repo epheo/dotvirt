@@ -28,6 +28,9 @@ if (!existsSync(join(buildDir, 'index.html'))) {
 const port = Number(process.env.FIXTURE_PORT ?? 4173);
 const COOKIE = 'dv_fixture=1';
 
+// The merged change history serves, as a full hash: the API refuses anything shorter.
+const MERGE_HASH = 'ab12cd34ef' + '0'.repeat(30);
+
 const state = {
 	scenario: scenarios[process.env.FIXTURE_SCENARIO ?? 'base'],
 	// Per-project items staged through this session's POSTs, merged over the
@@ -233,21 +236,66 @@ async function handleAPI(req, res, url) {
 	if (m) {
 		return sendJSON(res, 200, [
 			{
-				hash: 'ab12cd34ef',
-				shortHash: 'ab12cd3',
-				message: 'web-2: add data disk',
+				hash: MERGE_HASH,
+				shortHash: MERGE_HASH.slice(0, 8),
+				message:
+					"Merge pull request 'web-2: add data disk' (#40) from dotvirt/proposed/admin/team-web into main",
+				title: 'web-2: add data disk',
 				author: 'admin',
 				when: new Date(Date.now() - 6e6).toISOString(),
+				merge: true,
+				prNumber: 40,
+				prURL: `https://forge.example/dotvirt/${m[1]}/pulls/40`,
 			},
 			{
-				hash: '99fe210aaa',
-				shortHash: '99fe210',
+				hash: '99fe210aaa99fe210aaa99fe210aaa99fe210aaa',
+				shortHash: '99fe210a',
 				message: 'initial import',
+				title: 'initial import',
 				author: 'admin',
 				when: new Date(Date.now() - 9e7).toISOString(),
-				merge: true,
 			},
 		]);
+	}
+	// One past change under review: the same items a staged draft renders.
+	m = path.match(/^\/api\/projects\/([^/]+)\/history\/([0-9a-f]{40})$/);
+	if (m) {
+		if (m[2] !== MERGE_HASH) return sendText(res, 404, 'not found: commit');
+		return sendJSON(res, 200, {
+			commit: {
+				hash: MERGE_HASH,
+				shortHash: MERGE_HASH.slice(0, 8),
+				message:
+					"Merge pull request 'web-2: add data disk' (#40) from dotvirt/proposed/admin/team-web into main",
+				title: 'web-2: add data disk',
+				author: 'admin',
+				when: new Date(Date.now() - 6e6).toISOString(),
+				merge: true,
+				prNumber: 40,
+				prURL: `https://forge.example/dotvirt/${m[1]}/pulls/40`,
+			},
+			items: [
+				{
+					kind: 'edit',
+					namespace: 'web-prod',
+					name: 'web-2',
+					changes: [{ field: 'Disk', action: 'add', to: 'data (50Gi)' }],
+					yaml: 'kind: VirtualMachine\nmetadata:\n  name: web-2\n  namespace: web-prod\n',
+				},
+			],
+		});
+	}
+	m = path.match(/^\/api\/projects\/([^/]+)\/revert$/);
+	if (m && req.method === 'POST') {
+		const body = await readBody(req);
+		if (body?.hash !== MERGE_HASH)
+			return sendText(res, 400, 'commit hash must be the full 40-character hash');
+		return sendJSON(res, 200, {
+			branch: `dotvirt/proposed/revert/admin/${m[1]}-${MERGE_HASH.slice(0, 8)}`,
+			pushed: true,
+			prNumber: 78,
+			prURL: `https://forge.example/dotvirt/${m[1]}/pulls/78`,
+		});
 	}
 
 	if (path === '/api/vms' && req.method === 'POST') {

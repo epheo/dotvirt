@@ -31,7 +31,7 @@ func (r *Repo) ParseVMsOnBranch(branch string) ([]model.VM, error) {
 	}
 	var out []model.VM
 	for _, f := range files {
-		vms, err := manifest.ParseVMs(f.Path, f.Content, defaultNamespace(f.Path))
+		vms, err := manifest.ParseVMs(f.Path, f.Content, DefaultNamespace(f.Path))
 		if err != nil {
 			return nil, err
 		}
@@ -73,11 +73,11 @@ func GroupNamespaces(byNS map[string][]model.VM) []model.ProjectNamespace {
 	return out
 }
 
-// defaultNamespace derives a namespace for manifests that omit metadata.namespace,
+// DefaultNamespace derives a namespace for manifests that omit metadata.namespace,
 // using the manifest's top-level directory as a convention (a common GitOps
 // layout: one directory per namespace). Files at the repo root fall back to
 // "default".
-func defaultNamespace(path string) string {
+func DefaultNamespace(path string) string {
 	if dir, _, ok := strings.Cut(path, "/"); ok {
 		return dir
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/epheo/dotvirt/internal/changeset"
@@ -240,6 +241,26 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	respond(w, commits, err)
 }
 
+// commitHash is the only commit reference the history routes accept: the full
+// hash a history row carries, so no abbreviation is ever resolved server-side.
+var commitHash = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// handleCommit renders one past commit as semantic items - the Changes pane's
+// review of a merged change, and what reverting it now would do.
+func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
+	sc, ok := s.pickProject(w, r, r.PathValue("project"))
+	if !ok {
+		return
+	}
+	hash := r.PathValue("hash")
+	if !commitHash.MatchString(hash) {
+		http.Error(w, "commit hash must be the full 40-character hash", http.StatusBadRequest)
+		return
+	}
+	detail, err := s.draft.Commit(sc.proj, hash)
+	respond(w, detail, err)
+}
+
 // handleRevert proposes a forward commit reverting one commit in the project's
 // repo - a new PR, never a history rewrite.
 func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
@@ -250,8 +271,8 @@ func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Hash string `json:"hash"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Hash == "" {
-		http.Error(w, "commit hash is required", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !commitHash.MatchString(req.Hash) {
+		http.Error(w, "commit hash must be the full 40-character hash", http.StatusBadRequest)
 		return
 	}
 	result, err := s.draft.Revert(sc.id, sc.proj, req.Hash)

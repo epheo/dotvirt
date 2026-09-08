@@ -16,6 +16,7 @@
 	import {
 		api,
 		type Commit,
+		type CommitDetail,
 		type DraftItem,
 		type DraftView,
 		type Proposal,
@@ -33,11 +34,12 @@
 	import StatusPill from '$lib/components/StatusPill.svelte';
 	import TextInput from '$lib/components/TextInput.svelte';
 
-	// The review workspace: everything the GitOps write model has in flight.
-	// Left: staged drafts (per project), open PRs, per-project history. Right:
-	// the selected change's field diff and impact, or the selected PR's review
-	// state. Review happens HERE; approval and merge stay in the forge - the
-	// one primary action is Propose.
+	// The review workspace: everything the GitOps write model has in flight,
+	// and what already landed. Left: staged drafts (per project), open PRs,
+	// per-project history. Right: the selected change's field diff and impact,
+	// the selected PR's review state, or a past commit's diff with its revert.
+	// Review happens HERE; approval and merge stay in the forge - the primary
+	// actions are Propose and Revert, both of which open a pull request.
 
 	// Warning-only lanes stay: prune risk must warn BEFORE anything is staged.
 	const lanes = $derived(drafts.drafts.filter((d) => d.draft.count > 0 || d.draft.warning));
@@ -51,7 +53,8 @@
 
 	type Sel =
 		| { kind: 'item'; project: string; key: string }
-		| { kind: 'proposal'; project: string; prNumber: number };
+		| { kind: 'proposal'; project: string; prNumber: number }
+		| { kind: 'commit'; project: string; hash: string };
 	let sel = $state<Sel | null>(null);
 
 	// Resolve the selection against live data; fall back to the first staged
@@ -67,6 +70,11 @@
 				(p) => p.project === sel!.project && p.prNumber === (sel as { prNumber: number }).prNumber,
 			);
 			if (p) return { kind: 'proposal' as const, proposal: p };
+		}
+		if (sel?.kind === 'commit') {
+			const { project, hash } = sel;
+			const c = history[project]?.find((c) => c.hash === hash);
+			if (c) return { kind: 'commit' as const, project, commit: c };
 		}
 		const withItems = lanes.find((l) => l.draft.items.length > 0);
 		const first = withItems?.draft.items[0];
@@ -176,14 +184,11 @@
 		if (await discardOp.run(() => api.discardDraft(project))) drafts.refresh();
 	}
 
-	// ── history + revert (ported from the retired drawer) ───────────────────────
+	// ── history: past changes, reviewed and reverted ────────────────────────────
 	let historyOpen = $state<Record<string, boolean>>({});
 	let history = $state<Record<string, Commit[]>>({});
 	let historyBusy = $state<Record<string, boolean>>({});
 	let historyError = $state<Record<string, string>>({});
-	let revertArmed = $state<string | null>(null);
-	let revertBusy = $state<string | null>(null);
-	let revertResult = $state<Record<string, ProposeResult>>({});
 
 	async function toggleHistory(project: string) {
 		historyOpen[project] = !historyOpen[project];
@@ -200,23 +205,48 @@
 			historyBusy[project] = false;
 		}
 	}
-	// Two-click revert: first arms, second opens the forward-commit PR.
-	async function revert(project: string, c: Commit) {
-		if (revertArmed !== c.hash) {
-			revertArmed = c.hash;
+
+	// A commit's review loads once it is selected and stays cached: the same
+	// field diff a staged item shows, plus what reverting it now would do.
+	const commitKey = (project: string, hash: string) => `${project}@${hash}`;
+	let details = $state<Record<string, CommitDetail>>({});
+	let detailError = $state<Record<string, string>>({});
+	const selectedCommitKey = $derived(
+		selected?.kind === 'commit' ? commitKey(selected.project, selected.commit.hash) : null,
+	);
+	$effect(() => {
+		const key = selectedCommitKey;
+		revertArmed = null;
+		if (!key || untrack(() => details[key] || detailError[key])) return;
+		const at = key.lastIndexOf('@');
+		loadDetail(key.slice(0, at), key.slice(at + 1));
+	});
+	async function loadDetail(project: string, hash: string) {
+		const key = commitKey(project, hash);
+		try {
+			details[key] = await api.commit(project, hash);
+		} catch (e) {
+			detailError[key] = friendlyError(e);
+		}
+	}
+
+	// Two-click revert: first arms, second opens the forward-commit PR. The
+	// result stays with the commit so the pane keeps pointing at the PR.
+	const revertOp = action();
+	let revertArmed = $state<string | null>(null);
+	let reverts = $state<Record<string, ProposeResult>>({});
+	async function revert(project: string, hash: string) {
+		const key = commitKey(project, hash);
+		if (revertArmed !== key) {
+			revertArmed = key;
 			return;
 		}
 		revertArmed = null;
-		revertBusy = c.hash;
-		historyError[project] = '';
-		try {
-			revertResult[c.hash] = await api.revert(project, c.hash);
-			drafts.refresh();
-		} catch (e) {
-			historyError[project] = friendlyError(e);
-		} finally {
-			revertBusy = null;
-		}
+		if (revertOp.busy) return;
+		await revertOp.run(async () => {
+			reverts[key] = await api.revert(project, hash);
+		});
+		drafts.refresh();
 	}
 
 	const EPOCH_FLOOR = Date.UTC(2020, 0, 1);
@@ -410,33 +440,21 @@
 							<p class="py-1 pl-10 text-xs text-danger-ink">{historyError[project]}</p>
 						{:else}
 							{#each history[project] ?? [] as c (c.hash)}
-								<div class="flex items-baseline gap-2 py-0.5 pr-3 pl-10 text-xs">
+								{@const active =
+									selected?.kind === 'commit' &&
+									selected.project === project &&
+									selected.commit.hash === c.hash}
+								<button
+									onclick={() => (sel = { kind: 'commit', project, hash: c.hash })}
+									class="flex w-full items-baseline gap-2 py-1 pr-3 pl-10 text-left text-xs hover:bg-select-soft {active
+										? 'bg-select hover:bg-select'
+										: ''}"
+								>
 									<code class="shrink-0 text-ink-faint">{c.shortHash}</code>
-									<span class="min-w-0 truncate text-ink-soft" title={c.message}>{c.message}</span>
+									<span class="min-w-0 truncate text-ink-soft" title={c.message}>{c.title}</span>
+									{#if c.prNumber}<span class="shrink-0 text-ink-faint">#{c.prNumber}</span>{/if}
 									<span class="ml-auto shrink-0 text-ink-faint">{fmtWhen(c.when)}</span>
-									{#if revertResult[c.hash]?.prURL}
-										<a
-											href={revertResult[c.hash].prURL}
-											target="_blank"
-											rel="noopener"
-											class="shrink-0 text-accent-ink underline"
-											>PR #{revertResult[c.hash].prNumber}</a
-										>
-									{:else if !c.merge}
-										<button
-											onclick={() => revert(project, c)}
-											disabled={revertBusy === c.hash}
-											class="shrink-0 {revertArmed === c.hash
-												? 'font-medium text-danger-ink'
-												: 'text-ink-faint hover:text-ink-soft'}"
-											>{revertBusy === c.hash
-												? 'reverting…'
-												: revertArmed === c.hash
-													? 'confirm revert'
-													: 'revert'}</button
-										>
-									{/if}
-								</div>
+								</button>
 							{:else}
 								<p class="py-1 pl-10 text-xs text-ink-faint">no commits</p>
 							{/each}
@@ -588,6 +606,130 @@
 					>
 						Open PR to approve and merge <ExternalLink size={13} />
 					</a>
+				</div>
+			{:else if selected?.kind === 'commit'}
+				{@const c = selected.commit}
+				{@const project = selected.project}
+				{@const key = commitKey(project, c.hash)}
+				{@const detail = details[key]}
+				{@const done = reverts[key]}
+				<div class="flex items-center gap-2.5 border-b border-line px-4 py-3">
+					<History size={16} class="text-ink-muted" />
+					<span class="min-w-0 truncate text-[15px] font-semibold text-ink">{c.title}</span>
+					<span class="shrink-0 text-xs text-ink-faint">{project}</span>
+					{#if c.prURL}
+						<a
+							href={c.prURL}
+							target="_blank"
+							rel="noopener"
+							class="ml-auto inline-flex shrink-0 items-center gap-1 text-xs text-accent-ink underline"
+							>PR #{c.prNumber} <ExternalLink size={12} /></a
+						>
+					{:else if c.prNumber}
+						<span class="ml-auto shrink-0 text-xs text-ink-faint">PR #{c.prNumber}</span>
+					{/if}
+				</div>
+				<div class="space-y-3 p-4">
+					<p class="text-xs text-ink-muted">
+						<code>{c.shortHash}</code> · {c.author} · {fmtWhen(c.when)}
+						{#if c.merge}· merged{/if}
+					</p>
+					{#if detailError[key]}
+						<ErrorNote error={detailError[key]} />
+					{:else if !detail}
+						<div class="space-y-2">
+							{#each Array(2) as _, i (i)}
+								<div class="h-16 animate-pulse rounded bg-inset-strong"></div>
+							{/each}
+						</div>
+					{:else}
+						{#each detail.items as it (itemKey(it))}
+							<section class="rounded border border-line">
+								<div class="flex items-center gap-2 border-b border-line bg-inset px-3 py-1.5">
+									{#if it.kind === 'delete'}<Trash2 size={13} class="shrink-0 text-danger-ink" />
+									{:else if it.kind === 'create'}<Plus size={13} class="shrink-0 text-ok-ink" />
+									{:else}<Pencil size={13} class="shrink-0 text-accent-ink" />{/if}
+									<span class="text-[13px] font-medium text-ink">{it.namespace}/{it.name}</span>
+									<span class="rounded px-1.5 py-0.5 text-xs {TONE_PILL[draftKindTone(it.kind)]}"
+										>{it.kind}</span
+									>
+								</div>
+								<div class="px-3 py-2">
+									<ChangeList changes={it.changes} />
+								</div>
+								{#if it.yaml}
+									<details class="border-t border-line">
+										<summary
+											class="cursor-pointer px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
+											>Manifest</summary
+										>
+										<pre
+											class="overflow-x-auto px-3 pb-3 font-mono text-[11px] leading-snug text-ink-soft">{it.yaml}</pre>
+									</details>
+								{/if}
+							</section>
+						{:else}
+							<p class="text-xs text-ink-faint">This commit changed no manifests.</p>
+						{/each}
+					{/if}
+				</div>
+
+				<!-- revert footer: the one action on a past change, itself a pull request -->
+				<div class="mt-auto border-t border-line bg-inset px-4 py-3">
+					{#if done?.prURL}
+						<div class="mb-2 flex items-center gap-3">
+							<GitOpsStepper stage="proposed" prNumber={done.prNumber} prUrl={done.prURL} />
+						</div>
+						<Note tone="neutral">
+							Revert proposed as
+							<a href={done.prURL} target="_blank" rel="noopener" class="underline"
+								>PR #{done.prNumber}</a
+							>. Approve and merge it in the forge; nothing changes until then.
+						</Note>
+					{:else if done}
+						<Note tone="neutral">
+							Branch <code>{done.branch}</code> pushed —
+							{#if done.compareURL}
+								<a href={done.compareURL} target="_blank" rel="noopener" class="underline"
+									>open the pull request</a
+								>
+							{:else}
+								no forge configured.
+							{/if}
+						</Note>
+					{:else}
+						<ErrorNote error={revertOp.error} class="mb-2" />
+						{#if detail?.revertWarning}
+							<Note tone="warn" class="mb-2 flex items-start gap-2">
+								<TriangleAlert size={14} class="mt-0.5 shrink-0" />
+								<span>{detail.revertWarning}</span>
+							</Note>
+						{/if}
+						<div class="flex items-center gap-3">
+							<span class="text-[11px] text-ink-faint">
+								{#if detail?.reverted}
+									Already reverted: main matches the state before this change.
+								{:else}
+									Opens a pull request restoring every file this change touched to its previous
+									state. Nothing changes until it merges.
+								{/if}
+							</span>
+							<button
+								onclick={() => revert(project, c.hash)}
+								disabled={revertOp.busy || !detail || detail.reverted}
+								class="ml-auto shrink-0 rounded-full px-4 py-1.5 text-sm font-medium disabled:border-line disabled:bg-transparent disabled:text-ink-faint {revertArmed ===
+								key
+									? 'bg-danger text-white'
+									: 'border border-line-strong bg-panel text-danger-ink hover:bg-select-soft'}"
+							>
+								{revertOp.busy
+									? 'Reverting…'
+									: revertArmed === key
+										? 'Confirm revert'
+										: 'Revert as pull request'}
+							</button>
+						</div>
+					{/if}
 				</div>
 			{:else}
 				<div class="flex flex-1 items-center justify-center">
