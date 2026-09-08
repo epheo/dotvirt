@@ -39,7 +39,7 @@ func DeclaredRefs(path string, content []byte) []model.ObjectRef {
 		}
 		ns := doc.Metadata.Namespace
 		if ns == "" {
-			ns = defaultNamespace(path)
+			ns = DefaultNamespace(path)
 		}
 		out = append(out, model.ObjectRef{Kind: doc.Kind, Namespace: ns, Name: doc.Metadata.Name})
 	}

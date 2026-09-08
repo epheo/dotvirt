@@ -84,6 +84,7 @@ type Draft interface {
 	// matching, so the transport never reads the repo tree itself.
 	Manifest(proj project.ProjectInfo, namespace, name string) (path string, content []byte, err error)
 	History(proj project.ProjectInfo, limit int) ([]model.Commit, error)
+	Commit(proj project.ProjectInfo, hash string) (model.CommitDetail, error)
 	Templates(proj project.ProjectInfo) []model.Template
 }
 
@@ -299,6 +300,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/uploads/{namespace}/{name}", s.handleUploadStatus)
 	mux.HandleFunc("POST /api/uploads/{namespace}/{name}/token", s.handleUploadToken)
 	mux.HandleFunc("GET /api/projects/{project}/history", s.handleHistory)
+	mux.HandleFunc("GET /api/projects/{project}/history/{hash}", s.handleCommit)
 	mux.HandleFunc("POST /api/projects/{project}/revert", s.handleRevert)
 	mux.HandleFunc("POST /api/projects/{project}/adopt", s.handleAdoptProject)
 	mux.HandleFunc("POST /api/projects/{project}/release", s.handleReleaseProject)

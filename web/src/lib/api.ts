@@ -58,6 +58,9 @@ export interface DraftItem extends Omit<gen.DraftItem, 'kind' | 'changes'> {
 	kind: 'edit' | 'create' | 'delete';
 	changes: Change[];
 }
+export interface CommitDetail extends Omit<gen.CommitDetail, 'items'> {
+	items: DraftItem[];
+}
 export interface DraftView extends Omit<gen.DraftView, 'items'> {
 	items: DraftItem[];
 }
@@ -328,8 +331,11 @@ export const api = {
 	// Applies the OAuthClient under the CALLER's token; RBAC is the gate.
 	finishSSO: () => req<void>('/api/auth/oauthclient', { method: 'POST' }),
 
-	// Commit history + per-commit revert (a forward commit opened as a PR).
+	// Commit history, one commit's review, and its revert (a forward commit
+	// opened as a PR).
 	history: (project: string) => get<gen.Commit[]>(`/api/projects/${enc(project)}/history`),
+	commit: (project: string, hash: string) =>
+		get<CommitDetail>(`/api/projects/${enc(project)}/history/${hash}`),
 	revert: (project: string, hash: string) =>
 		post<gen.ProposeResult>(`/api/projects/${enc(project)}/revert`, { hash }),
 

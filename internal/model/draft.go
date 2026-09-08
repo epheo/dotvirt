@@ -132,7 +132,7 @@ type ObjectRef struct {
 // DraftItem is one pending change rendered for the UI.
 type DraftItem struct {
 	Kind      string   `json:"kind"`               // edit | create | delete
-	Resource  string   `json:"resource,omitempty"` // "" == vm | network - disambiguates unstage
+	Resource  string   `json:"resource,omitempty"` // "" == vm | network - disambiguates unstage; a kind name in a commit review
 	Namespace string   `json:"namespace"`
 	Name      string   `json:"name"`
 	Changes   []Change `json:"changes"`
@@ -221,11 +221,27 @@ type Capability struct {
 }
 
 // Commit is one entry in a project's git history, shown in the Changes pane.
+// A forge merge is named by the pull request it merged: Title, PRNumber and
+// PRURL come from the merge subject, so the row reads as what the user proposed.
 type Commit struct {
 	Hash      string `json:"hash"`
 	ShortHash string `json:"shortHash"`
-	Message   string `json:"message"`
+	Message   string `json:"message"` // the subject as committed
+	Title     string `json:"title"`   // the merged PR's title, else Message
 	Author    string `json:"author"`
-	When      string `json:"when"`            // RFC3339
-	Merge     bool   `json:"merge,omitempty"` // a merge commit (not directly revertable)
+	When      string `json:"when"`               // RFC3339
+	Merge     bool   `json:"merge,omitempty"`    // a merge commit; reverts against the base branch side
+	PRNumber  int    `json:"prNumber,omitempty"` // the merged PR, when the subject names one
+	PRURL     string `json:"prURL,omitempty"`
+}
+
+// CommitDetail is one past change under review: the commit and what it did, as
+// the semantic items a staged draft renders. RevertWarning names the files a
+// revert would restore past later commits; Reverted says the base branch already
+// carries every touched file's pre-commit content, so a revert would be empty.
+type CommitDetail struct {
+	Commit        Commit      `json:"commit"`
+	Items         []DraftItem `json:"items"`
+	RevertWarning string      `json:"revertWarning,omitempty"`
+	Reverted      bool        `json:"reverted,omitempty"`
 }

@@ -1,6 +1,7 @@
 package changeset
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -12,8 +13,9 @@ import (
 // Revert proposes a forward commit that undoes `hash` in proj's repo, opening (or
 // recovering) a PR. The revert restores every file the commit changed to its
 // pre-commit state - a new commit reviewable as an ordinary PR, never a history
-// rewrite. A revert whose restored files were since changed by a later commit
-// will show those as part of the PR diff, which the reviewer catches.
+// rewrite. A merge reverts the whole PR it merged. The PR body carries the
+// revert's real diff against the base branch, later changes to those files
+// included, so the reviewer sees what merging it does today.
 func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash string) (model.ProposeResult, error) {
 	if err := requireRepo(proj); err != nil {
 		return model.ProposeResult{}, err
@@ -22,6 +24,10 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 	if err != nil {
 		return model.ProposeResult{}, err
 	}
+	d, err := read.CommitDiff(hash)
+	if err != nil {
+		return model.ProposeResult{}, fmt.Errorf("%w: %v", model.ErrNotFound, err)
+	}
 	items, err := read.RevertItems(hash)
 	if err != nil {
 		return model.ProposeResult{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
@@ -29,12 +35,24 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 	if len(items) == 0 {
 		return model.ProposeResult{}, fmt.Errorf("%w: nothing to revert in that commit", model.ErrInvalid)
 	}
+	c.nameByPR(&d.Commit, proj)
 
 	short := shortCommit(hash)
-	title := "Revert " + short
+	ref := short
+	if d.Commit.PRNumber > 0 {
+		ref = fmt.Sprintf("#%d", d.Commit.PRNumber)
+	}
+	title := fmt.Sprintf("Revert %q (%s)", d.Commit.Title, ref)
+	view := model.DraftView{Items: commitItems(c.revertFiles(read, items))}
+	view.Warning, _ = c.revertState(read, d.Files)
+	body := prBody(view, fmt.Sprintf("Reverts commit %s, %q.", short, d.Commit.Title), id.Username)
+
 	branch := c.revertBranch(id.Username, proj.Name, hash)
 	by := git.Author{Name: id.Username, Email: authorEmail(id.Username)}
 	res, err := write.CommitChangeset(c.baseBranch, branch, title, items, by)
+	if errors.Is(err, git.ErrNoChanges) {
+		return model.ProposeResult{}, fmt.Errorf("%w: %s already matches the state before this change", model.ErrInvalid, c.baseBranch)
+	}
 	if err != nil {
 		return model.ProposeResult{}, err
 	}
@@ -44,7 +62,7 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 	if fc == nil {
 		return out, nil
 	}
-	if pr, err := fc.CreatePR(title, "Reverts commit "+short+".", branch, c.baseBranch); err == nil {
+	if pr, err := fc.CreatePR(title, body, branch, c.baseBranch); err == nil {
 		out.PRURL, out.PRNumber = pr.HTMLURL, pr.Number
 		return out, nil
 	}

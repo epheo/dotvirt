@@ -38,19 +38,6 @@ func (c *Coordinator) Manifest(proj project.ProjectInfo, namespace, name string)
 	return "", nil, fmt.Errorf("%w: manifest file %s", model.ErrNotFound, vm.SourceFile)
 }
 
-// History lists recent commits on the project's base branch - the Changes
-// pane's history view. A repoless project has no history, not an error.
-func (c *Coordinator) History(proj project.ProjectInfo, limit int) ([]model.Commit, error) {
-	if proj.Repo == "" {
-		return []model.Commit{}, nil
-	}
-	read, err := c.read(proj)
-	if err != nil {
-		return nil, err
-	}
-	return read.History(c.baseBranch, limit)
-}
-
 // Templates lists proj's library as committed on the base branch. An unreadable
 // repo degrades to an empty library - the caller's other libraries still list.
 func (c *Coordinator) Templates(proj project.ProjectInfo) []model.Template {

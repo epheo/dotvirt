@@ -141,7 +141,7 @@ export interface ObjectRef {
  */
 export interface DraftItem {
   kind: string; // edit | create | delete
-  resource?: string; // "" == vm | network - disambiguates unstage
+  resource?: string; // "" == vm | network - disambiguates unstage; a kind name in a commit review
   namespace: string;
   name: string;
   changes: Change[];
@@ -239,14 +239,31 @@ export interface Capability {
 }
 /**
  * Commit is one entry in a project's git history, shown in the Changes pane.
+ * A forge merge is named by the pull request it merged: Title, PRNumber and
+ * PRURL come from the merge subject, so the row reads as what the user proposed.
  */
 export interface Commit {
   hash: string;
   shortHash: string;
-  message: string;
+  message: string; // the subject as committed
+  title: string; // the merged PR's title, else Message
   author: string;
   when: string; // RFC3339
-  merge?: boolean; // a merge commit (not directly revertable)
+  merge?: boolean; // a merge commit; reverts against the base branch side
+  prNumber?: number /* int */; // the merged PR, when the subject names one
+  prURL?: string;
+}
+/**
+ * CommitDetail is one past change under review: the commit and what it did, as
+ * the semantic items a staged draft renders. RevertWarning names the files a
+ * revert would restore past later commits; Reverted says the base branch already
+ * carries every touched file's pre-commit content, so a revert would be empty.
+ */
+export interface CommitDetail {
+  commit: Commit;
+  items: DraftItem[];
+  revertWarning?: string;
+  reverted?: boolean;
 }
 
 //////////
