@@ -69,6 +69,7 @@ type vmDoc struct {
 						Interfaces []struct {
 							Name string `yaml:"name"`
 						} `yaml:"interfaces"`
+						AutoattachPodInterface *bool `yaml:"autoattachPodInterface"`
 					} `yaml:"devices"`
 				} `yaml:"domain"`
 				Networks []struct {
@@ -231,6 +232,15 @@ func networksFromDoc(d vmDoc) []model.NIC {
 	var out []model.NIC
 	for _, iface := range ts.Domain.Devices.Interfaces {
 		out = append(out, model.NIC{Name: iface.Name, Network: netType[iface.Name]})
+	}
+	// KubeVirt attaches the pod network when a template declares no interface.
+	// That defaulting lands on the VMI, never on the manifest, so mirror it here
+	// or a minimal manifest reads as unattached while its VMI has an address.
+	// clusterstate.WorkloadNetworks applies the same rule for the trace check.
+	if len(out) == 0 {
+		if auto := ts.Domain.Devices.AutoattachPodInterface; auto == nil || *auto {
+			out = append(out, model.NIC{Name: "default", Network: "pod", Implicit: true})
+		}
 	}
 	return out
 }

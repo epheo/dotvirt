@@ -96,6 +96,9 @@ type NIC struct {
 	Network string `json:"network,omitempty"` // "pod" or the multus networkName
 	MAC     string `json:"mac,omitempty"`     // live, from VMI status
 	IP      string `json:"ip,omitempty"`      // live, from VMI status
+	// Implicit marks the pod-network adapter KubeVirt attaches when the manifest
+	// declares none: real on the VMI, absent from the file, so not removable.
+	Implicit bool `json:"implicit,omitempty"`
 }
 
 // ProjectNamespace is one namespace bucket within a project: the VMs it holds.

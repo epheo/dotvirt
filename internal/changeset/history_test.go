@@ -190,3 +190,74 @@ func TestRevertMergeOpensPR(t *testing.T) {
 		t.Error("db.yaml was added by the merge, so the revert branch must not carry it")
 	}
 }
+
+// A cluster-scoped object reviews by its bare name: the directory it lives in
+// is not a namespace, and the review must not invent one.
+func TestCommitItemsClusterScopedName(t *testing.T) {
+	ns := []byte("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: legacy-app\n  labels:\n    dotvirt.io/project: legacy-app\n")
+	items := commitItems([]git.FileChange{{Path: "namespaces/legacy-app.yaml", After: ns}})
+	if len(items) != 1 {
+		t.Fatalf("want one item, got %+v", items)
+	}
+	it := items[0]
+	if it.Namespace != "" || it.Name != "legacy-app" || it.Resource != "Namespace" || it.Kind != "create" {
+		t.Errorf("item = %+v, want a bare-named Namespace create", it)
+	}
+	if it.Changes[0].To != "legacy-app" {
+		t.Errorf("create change should name the object bare, got %+v", it.Changes[0])
+	}
+	del := commitItems([]git.FileChange{{Path: "namespaces/legacy-app.yaml", Before: ns}})
+	if del[0].Kind != "delete" || del[0].Changes[0].From != "legacy-app" {
+		t.Errorf("delete should name the object bare, got %+v", del[0])
+	}
+}
+
+// The open-PR lane carries the draft's PR and every revert the user opened,
+// found by their branch prefix among the open PRs, with one branch-rule read.
+func TestOpenProposalsIncludesReverts(t *testing.T) {
+	bare, _, hash := seedMerged(t)
+	revertHead := (&Coordinator{proposed: "dotvirt/proposed"}).revertBranch("alice", "p", hash)
+	draftHead := proposedBranchFor("alice", "p")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/pulls") && q.Get("state") == "all":
+			_, _ = w.Write([]byte(`[{"number":4,"state":"open","html_url":"http://forge/pulls/4","title":"edit web","base":{"ref":"main"},"head":{"ref":"` + draftHead + `","sha":"aaa"}}]`))
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/pulls") && q.Get("state") == "open":
+			_, _ = w.Write([]byte(`[{"number":4,"state":"open","html_url":"http://forge/pulls/4","title":"edit web","base":{"ref":"main"},"head":{"ref":"` + draftHead + `","sha":"aaa"}},` +
+				`{"number":9,"state":"open","html_url":"http://forge/pulls/9","title":"Revert \"Resize web\" (#12)","base":{"ref":"main"},"head":{"ref":"` + revertHead + `","sha":"bbb"}},` +
+				`{"number":10,"state":"open","html_url":"http://forge/pulls/10","title":"bob's revert","base":{"ref":"main"},"head":{"ref":"dotvirt/proposed/revert/bob/p-` + hash[:8] + `","sha":"ccc"}},` +
+				`{"number":11,"state":"open","html_url":"http://forge/pulls/11","title":"human PR","base":{"ref":"main"},"head":{"ref":"feature","sha":"ddd"}}]`))
+		case strings.HasSuffix(r.URL.Path, "/branch_protections"):
+			_, _ = w.Write([]byte(`[{"branch_name":"main","required_approvals":1}]`))
+		case strings.Contains(r.URL.Path, "/reviews"):
+			_, _ = w.Write([]byte(`[]`))
+		case strings.Contains(r.URL.Path, "/status"):
+			_, _ = w.Write([]byte(`{"state":"success","total_count":1}`))
+		default:
+			t.Errorf("unexpected forge call %s %s", r.Method, r.URL.String())
+			http.Error(w, "unexpected", http.StatusNotImplemented)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	store, err := draft.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	c := New(store, git.NewRepoSet(ctx, "", nil, false, nil, time.Hour), forge.NewFactory(srv.URL, "tok", false), nil, nil, nil, "main", "dotvirt/proposed")
+
+	prs, err := c.OpenProposals(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: bare})
+	if err != nil {
+		t.Fatalf("OpenProposals: %v", err)
+	}
+	if len(prs) != 2 || prs[0].PRNumber != 4 || prs[1].PRNumber != 9 {
+		t.Fatalf("want the draft PR #4 and alice's revert #9 only, got %+v", prs)
+	}
+	for _, p := range prs {
+		if p.RequiredApprovals != 1 || p.Checks != "success" {
+			t.Errorf("review state missing on %+v", p)
+		}
+	}
+}

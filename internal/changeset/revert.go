@@ -8,6 +8,7 @@ import (
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/tasks"
 )
 
 // Revert proposes a forward commit that undoes `hash` in proj's repo, opening (or
@@ -77,7 +78,14 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 
 // revertBranch is the per-(user, project, commit) branch a revert lands on.
 func (c *Coordinator) revertBranch(user, project, hash string) string {
-	return c.proposed + "/revert/" + refSegment(user) + "/" + refSegment(project) + "-" + shortCommit(hash)
+	return c.revertPrefix(user, project) + shortCommit(hash)
+}
+
+// revertPrefix is what every revert branch of (user, project) starts with - how
+// the open-PR lane recognizes them. The user segment sits where the task feed's
+// attribution expects it (tasks.MergeAuthor).
+func (c *Coordinator) revertPrefix(user, project string) string {
+	return c.proposed + "/" + tasks.RevertSegment + "/" + refSegment(user) + "/" + refSegment(project) + "-"
 }
 
 // shortCommit abbreviates a commit hash to 8 chars for branch names + titles.

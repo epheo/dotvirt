@@ -52,6 +52,7 @@ func TestMergeAuthor(t *testing.T) {
 	cases := []struct {
 		head, want string
 	}{
+		{"dotvirt/proposed/revert/alice/p-4ba5284c", "alice"},
 		// dotvirt proposal branch: the first segment under the prefix is the user.
 		{"dotvirt/proposed/alice/tenant-a-1a2b3c", "alice"},
 		// Sanitized identity (refSegment is lossy but readable).

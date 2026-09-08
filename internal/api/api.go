@@ -75,7 +75,7 @@ type Draft interface {
 	// canUpdateVM is the caller-token SSAR the implementation enforces before
 	// escalating, so no future caller can reach the SA-privileged patch unchecked.
 	Resync(ctx context.Context, canUpdateVM func(context.Context, string, string) (bool, error), namespace, name string) (model.ResyncResult, error)
-	OpenProposal(id auth.Identity, proj project.ProjectInfo) (model.Proposal, bool, error)
+	OpenProposals(id auth.Identity, proj project.ProjectInfo) ([]model.Proposal, error)
 	// RecentlyMerged lists PRs merged into proj's base branch since 'since' - the
 	// task feed's poll backstop behind the forge webhook (and its restart reseed).
 	RecentlyMerged(proj project.ProjectInfo, since time.Time) ([]tasks.Merge, error)

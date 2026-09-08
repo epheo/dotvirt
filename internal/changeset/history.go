@@ -156,7 +156,7 @@ func commitItems(files []git.FileChange) []model.DraftItem {
 			}
 			items = append(items, model.DraftItem{
 				Kind: "delete", Namespace: doc.ref.Namespace, Name: doc.ref.Name, Resource: resourceOf(doc.ref.Kind), YAML: doc.raw,
-				Changes: []model.Change{{Field: "lifecycle", Action: "remove", From: doc.ref.Namespace + "/" + doc.ref.Name}},
+				Changes: []model.Change{{Field: "lifecycle", Action: "remove", From: qualified(doc.ref)}},
 			})
 		}
 	}
@@ -228,7 +228,7 @@ func editChanges(prev, doc document) []model.Change {
 // createChanges summarizes a new object: a VM by its sizing and devices, any
 // other kind by its identity.
 func createChanges(doc document) []model.Change {
-	nsName := doc.ref.Namespace + "/" + doc.ref.Name
+	nsName := qualified(doc.ref)
 	if doc.vm == nil {
 		return []model.Change{{Field: "Create " + kindLabel(doc.ref.Kind), Action: "add", To: nsName}}
 	}
@@ -257,6 +257,14 @@ func createChanges(doc document) []model.Change {
 	}
 	add("Power", string(vm.Power))
 	return out
+}
+
+// qualified is ns/name, or the bare name for a cluster-scoped object.
+func qualified(ref model.ObjectRef) string {
+	if ref.Namespace == "" {
+		return ref.Name
+	}
+	return ref.Namespace + "/" + ref.Name
 }
 
 // resourceOf maps a declared kind onto DraftItem.Resource: "" for a VM (the

@@ -1159,6 +1159,11 @@ export interface NIC {
   network?: string; // "pod" or the multus networkName
   mac?: string; // live, from VMI status
   ip?: string; // live, from VMI status
+  /**
+   * Implicit marks the pod-network adapter KubeVirt attaches when the manifest
+   * declares none: real on the VMI, absent from the file, so not removable.
+   */
+  implicit?: boolean;
 }
 /**
  * ProjectNamespace is one namespace bucket within a project: the VMs it holds.

@@ -487,6 +487,12 @@
 		ontoggle={(n) => (n.removed = !n.removed)}
 		row={nicRow}
 	/>
+	{#if vm.networks?.some((n) => n.implicit)}
+		<p class="mt-2 text-xs text-ink-faint">
+			The pod network adapter is attached by KubeVirt while the manifest declares none; it is not
+			edited here.
+		</p>
+	{/if}
 {/snippet}
 
 {#snippet stepLabels()}

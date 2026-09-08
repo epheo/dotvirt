@@ -19,9 +19,31 @@ type declaredDoc struct {
 	} `yaml:"metadata"`
 }
 
+// clusterScoped lists the kinds dotvirt's repos carry that have no namespace:
+// the platform tier's tenancy and network objects. A cluster-scoped manifest
+// lives in a directory too, but that directory is not its namespace - Argo and
+// the cluster identify these with an empty one.
+var clusterScoped = map[string]bool{
+	"Namespace":                      true,
+	"ClusterUserDefinedNetwork":      true,
+	"NodeNetworkConfigurationPolicy": true,
+	"AdminNetworkPolicy":             true,
+	"BaselineAdminNetworkPolicy":     true,
+	"EgressIP":                       true,
+	"ClusterRole":                    true,
+	"ClusterRoleBinding":             true,
+	"StorageClass":                   true,
+	"PersistentVolume":               true,
+	"Node":                           true,
+}
+
+// ClusterScoped reports whether kind carries no namespace.
+func ClusterScoped(kind string) bool { return clusterScoped[kind] }
+
 // DeclaredRefs: the objects the manifest bytes declare, any kind, multi-doc.
-// path defaults the namespace (<ns>/... layout). An unparsable document declares
-// nothing; consumers only widen, and the manifest parsers report the syntax.
+// path defaults the namespace (<ns>/... layout) for namespaced kinds. An
+// unparsable document declares nothing; consumers only widen, and the manifest
+// parsers report the syntax.
 func DeclaredRefs(path string, content []byte) []model.ObjectRef {
 	var out []model.ObjectRef
 	dec := yaml.NewDecoder(bytes.NewReader(content))
@@ -38,7 +60,9 @@ func DeclaredRefs(path string, content []byte) []model.ObjectRef {
 			continue
 		}
 		ns := doc.Metadata.Namespace
-		if ns == "" {
+		if ClusterScoped(doc.Kind) {
+			ns = ""
+		} else if ns == "" {
 			ns = DefaultNamespace(path)
 		}
 		out = append(out, model.ObjectRef{Kind: doc.Kind, Namespace: ns, Name: doc.Metadata.Name})

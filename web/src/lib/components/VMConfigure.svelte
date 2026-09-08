@@ -127,6 +127,7 @@
 							{@const detail = [
 								n.ip || null,
 								n.mac || null,
+								n.implicit ? 'attached by default, not in the manifest' : null,
 								pg?.scope === 'shared' ? 'shared' : null,
 								pg?.uplink ? `uplink ${pg.uplink}` : null,
 								pg?.subnets?.length ? pg.subnets.join(', ') : null,
