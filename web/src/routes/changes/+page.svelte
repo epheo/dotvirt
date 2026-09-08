@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import {
 		ChevronDown,
 		ChevronRight,
@@ -24,12 +26,14 @@
 	} from '$lib/api';
 	import { friendlyError } from '$lib/format';
 	import { action } from '$lib/resource.svelte';
+	import { itemKey, parseReview, reviewURL, sameReview, type ReviewSel } from '$lib/review';
 	import { draftKindTone, TONE_PILL } from '$lib/status';
 	import { drafts, PLATFORM_PROJECT } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import ChangeList from '$lib/components/ChangeList.svelte';
 	import ErrorNote from '$lib/components/ErrorNote.svelte';
 	import GitOpsStepper from '$lib/components/GitOpsStepper.svelte';
+	import ManifestDiff from '$lib/components/ManifestDiff.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Note from '$lib/components/Note.svelte';
 	import StatusPill from '$lib/components/StatusPill.svelte';
@@ -50,16 +54,35 @@
 		inventory.canManage ? [...inventory.repoProjects, PLATFORM_PROJECT] : inventory.repoProjects,
 	);
 
-	const itemKey = (it: DraftItem) => `${it.resource || 'vm'}:${it.namespace}/${it.name}`;
+	const commitKey = (project: string, hash: string) => `${project}@${hash}`;
 
-	type Sel =
-		| { kind: 'item'; project: string; key: string }
-		| { kind: 'proposal'; project: string; prNumber: number }
-		| { kind: 'commit'; project: string; hash: string };
-	let sel = $state<Sel | null>(null);
+	// The selection mirrors the URL (see review.ts), so a review is shareable
+	// and the VM page deep-links a commit. Written with replaceState, like tabs:
+	// back never walks selection moves. Navigation drives the state back, so a
+	// deep link or an in-app goto selects without a click.
+	let sel = $state<ReviewSel | null>(parseReview(page.url.searchParams));
+	$effect(() => {
+		const q = page.url.searchParams;
+		const next = parseReview(q);
+		const project = q.get('project');
+		untrack(() => {
+			if (!sameReview(next, sel)) sel = next;
+			// ?project= alone, or with a commit, is a request for that history.
+			if (project && (!next || next.kind === 'commit') && !historyOpen[project]) {
+				historyOpen[project] = true;
+				loadHistory(project);
+			}
+		});
+	});
+	function select(s: ReviewSel) {
+		sel = s;
+		goto(reviewURL(s), { replaceState: true, keepFocus: true, noScroll: true });
+	}
 
 	// Resolve the selection against live data; fall back to the first staged
-	// item, then the first PR (drafts and PRs both move under the page).
+	// item, then the first PR (drafts and PRs both move under the page). A
+	// commit stays selected before its history row has loaded: the review
+	// itself names it once the detail lands.
 	const selected = $derived.by(() => {
 		if (sel?.kind === 'item') {
 			const lane = lanes.find((l) => l.project === sel!.project);
@@ -74,8 +97,11 @@
 		}
 		if (sel?.kind === 'commit') {
 			const { project, hash } = sel;
-			const c = history[project]?.find((c) => c.hash === hash);
-			if (c) return { kind: 'commit' as const, project, commit: c };
+			const commit =
+				history[project]?.find((c) => c.hash === hash) ??
+				details[commitKey(project, hash)]?.commit ??
+				null;
+			return { kind: 'commit' as const, project, hash, commit };
 		}
 		const withItems = lanes.find((l) => l.draft.items.length > 0);
 		const first = withItems?.draft.items[0];
@@ -209,11 +235,10 @@
 
 	// A commit's review loads once it is selected and stays cached: the same
 	// field diff a staged item shows, plus what reverting it now would do.
-	const commitKey = (project: string, hash: string) => `${project}@${hash}`;
 	let details = $state<Record<string, CommitDetail>>({});
 	let detailError = $state<Record<string, string>>({});
 	const selectedCommitKey = $derived(
-		selected?.kind === 'commit' ? commitKey(selected.project, selected.commit.hash) : null,
+		selected?.kind === 'commit' ? commitKey(selected.project, selected.hash) : null,
 	);
 	$effect(() => {
 		const key = selectedCommitKey;
@@ -341,7 +366,7 @@
 						itemKey(selected.item) === itemKey(it)}
 					<button
 						data-project={project}
-						onclick={() => (sel = { kind: 'item', project, key: itemKey(it) })}
+						onclick={() => select({ kind: 'item', project, key: itemKey(it) })}
 						class="flex w-full items-center gap-2 py-1.5 pr-3 pl-7 text-left hover:bg-select-soft {active
 							? 'bg-select hover:bg-select'
 							: ''}"
@@ -378,7 +403,7 @@
 				{@const appr = approvalLine(p)}
 				{@const chk = checksPill(p)}
 				<button
-					onclick={() => (sel = { kind: 'proposal', project: p.project, prNumber: p.prNumber })}
+					onclick={() => select({ kind: 'proposal', project: p.project, prNumber: p.prNumber })}
 					class="w-full px-3 py-2 text-left hover:bg-select-soft {active
 						? 'bg-select hover:bg-select'
 						: ''}"
@@ -439,9 +464,9 @@
 								{@const active =
 									selected?.kind === 'commit' &&
 									selected.project === project &&
-									selected.commit.hash === c.hash}
+									selected.hash === c.hash}
 								<button
-									onclick={() => (sel = { kind: 'commit', project, hash: c.hash })}
+									onclick={() => select({ kind: 'commit', project, hash: c.hash })}
 									class="flex w-full items-baseline gap-2 py-1 pr-3 pl-10 text-left text-xs hover:bg-select-soft {active
 										? 'bg-select hover:bg-select'
 										: ''}"
@@ -538,10 +563,9 @@
 						<details class="rounded border border-line">
 							<summary
 								class="cursor-pointer border-line bg-inset px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
-								>Manifest</summary
+								>{it.baseYAML ? 'Manifest diff' : 'Manifest'}</summary
 							>
-							<pre
-								class="overflow-x-auto p-3 font-mono text-[11px] leading-snug text-ink-soft">{it.yaml}</pre>
+							<ManifestDiff before={it.baseYAML} after={it.yaml} />
 						</details>
 					{/if}
 				</div>
@@ -606,14 +630,16 @@
 			{:else if selected?.kind === 'commit'}
 				{@const c = selected.commit}
 				{@const project = selected.project}
-				{@const key = commitKey(project, c.hash)}
+				{@const key = commitKey(project, selected.hash)}
 				{@const detail = details[key]}
 				{@const done = reverts[key]}
 				<div class="flex items-center gap-2.5 border-b border-line px-4 py-3">
 					<History size={16} class="text-ink-muted" />
-					<span class="min-w-0 truncate text-[15px] font-semibold text-ink">{c.title}</span>
+					<span class="min-w-0 truncate text-[15px] font-semibold text-ink"
+						>{c?.title ?? selected.hash.slice(0, 8)}</span
+					>
 					<span class="shrink-0 text-xs text-ink-faint">{project}</span>
-					{#if c.prURL}
+					{#if c?.prURL}
 						<a
 							href={c.prURL}
 							target="_blank"
@@ -621,15 +647,17 @@
 							class="ml-auto inline-flex shrink-0 items-center gap-1 text-xs text-accent-ink underline"
 							>PR #{c.prNumber} <ExternalLink size={12} /></a
 						>
-					{:else if c.prNumber}
+					{:else if c?.prNumber}
 						<span class="ml-auto shrink-0 text-xs text-ink-faint">PR #{c.prNumber}</span>
 					{/if}
 				</div>
 				<div class="space-y-3 p-4">
-					<p class="text-xs text-ink-muted">
-						<code>{c.shortHash}</code> · {c.author} · {fmtWhen(c.when)}
-						{#if c.merge}· merged{/if}
-					</p>
+					{#if c}
+						<p class="text-xs text-ink-muted">
+							<code>{c.shortHash}</code> · {c.author} · {fmtWhen(c.when)}
+							{#if c.merge}· merged{/if}
+						</p>
+					{/if}
 					{#if detailError[key]}
 						<ErrorNote error={detailError[key]} />
 					{:else if !detail}
@@ -659,10 +687,9 @@
 									<details class="border-t border-line">
 										<summary
 											class="cursor-pointer px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
-											>Manifest</summary
+											>{it.baseYAML ? 'Manifest diff' : 'Manifest'}</summary
 										>
-										<pre
-											class="overflow-x-auto px-3 pb-3 font-mono text-[11px] leading-snug text-ink-soft">{it.yaml}</pre>
+										<ManifestDiff before={it.baseYAML} after={it.yaml} />
 									</details>
 								{/if}
 							</section>
@@ -713,7 +740,7 @@
 								{/if}
 							</span>
 							<button
-								onclick={() => (confirmUndo = { project, hash: c.hash })}
+								onclick={() => (confirmUndo = { project, hash: selected.hash })}
 								disabled={!detail || detail.reverted}
 								class="ml-auto shrink-0 rounded-full border border-line-strong bg-panel px-4 py-1.5 text-sm font-medium text-danger-ink hover:bg-select-soft disabled:border-line disabled:bg-transparent disabled:text-ink-faint"
 							>
@@ -738,8 +765,11 @@
 </div>
 
 {#if confirmUndo}
-	{@const target = history[confirmUndo.project]?.find((x) => x.hash === confirmUndo!.hash)}
-	{@const warning = details[commitKey(confirmUndo.project, confirmUndo.hash)]?.revertWarning}
+	{@const undoKey = commitKey(confirmUndo.project, confirmUndo.hash)}
+	{@const target =
+		history[confirmUndo.project]?.find((x) => x.hash === confirmUndo!.hash) ??
+		details[undoKey]?.commit}
+	{@const warning = details[undoKey]?.revertWarning}
 	<Modal title="Undo this change?" danger onclose={() => (confirmUndo = null)}>
 		<div class="space-y-2 px-5 py-4 text-sm text-ink-soft">
 			<p>

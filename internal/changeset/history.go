@@ -40,6 +40,34 @@ func (c *Coordinator) History(proj project.ProjectInfo, limit int) ([]model.Comm
 	return commits, nil
 }
 
+// VMHistory lists the base-branch commits that changed a VM's manifest file:
+// what changed on this VM and when, from the VM page. A VM not in git has no
+// history, not an error - the page already says it is untracked.
+func (c *Coordinator) VMHistory(proj project.ProjectInfo, namespace, name string, limit int) ([]model.Commit, error) {
+	if proj.Repo == "" {
+		return []model.Commit{}, nil
+	}
+	read, err := c.read(proj)
+	if err != nil {
+		return nil, err
+	}
+	vm, found, err := read.FindVMOnBranch(c.baseBranch, namespace, name)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return []model.Commit{}, nil
+	}
+	commits, err := read.FileHistory(c.baseBranch, vm.SourceFile, limit)
+	if err != nil {
+		return nil, err
+	}
+	for i := range commits {
+		c.nameByPR(&commits[i], proj)
+	}
+	return commits, nil
+}
+
 // Commit renders what one past commit did, so it reviews exactly like a pending
 // change, plus what reverting it now would do to the base branch.
 func (c *Coordinator) Commit(proj project.ProjectInfo, hash string) (model.CommitDetail, error) {
@@ -147,6 +175,7 @@ func commitItems(files []git.FileChange) []model.DraftItem {
 			default:
 				item.Kind = "edit"
 				item.Changes = editChanges(prev, doc)
+				item.BaseYAML = prev.raw
 			}
 			items = append(items, item)
 		}

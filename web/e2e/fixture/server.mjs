@@ -30,6 +30,19 @@ const COOKIE = 'dv_fixture=1';
 
 // The merged change history serves, as a full hash: the API refuses anything shorter.
 const MERGE_HASH = 'ab12cd34ef' + '0'.repeat(30);
+const mergeCommit = (project) => ({
+	hash: MERGE_HASH,
+	shortHash: MERGE_HASH.slice(0, 8),
+	message: `Merge pull request 'web-2: add data disk' (#40) from dotvirt/proposed/admin/${project} into main`,
+	title: 'web-2: add data disk',
+	author: 'admin',
+	when: new Date(Date.now() - 6e6).toISOString(),
+	merge: true,
+	prNumber: 40,
+	prURL: `https://forge.example/dotvirt/${project}/pulls/40`,
+});
+const WEB2_BASE =
+	'kind: VirtualMachine\nmetadata:\n  name: web-2\n  namespace: web-prod\nspec:\n  disks:\n  - name: root\n';
 
 const state = {
 	scenario: scenarios[process.env.FIXTURE_SCENARIO ?? 'base'],
@@ -235,18 +248,7 @@ async function handleAPI(req, res, url) {
 	m = path.match(/^\/api\/projects\/([^/]+)\/history$/);
 	if (m) {
 		return sendJSON(res, 200, [
-			{
-				hash: MERGE_HASH,
-				shortHash: MERGE_HASH.slice(0, 8),
-				message:
-					"Merge pull request 'web-2: add data disk' (#40) from dotvirt/proposed/admin/team-web into main",
-				title: 'web-2: add data disk',
-				author: 'admin',
-				when: new Date(Date.now() - 6e6).toISOString(),
-				merge: true,
-				prNumber: 40,
-				prURL: `https://forge.example/dotvirt/${m[1]}/pulls/40`,
-			},
+			mergeCommit(m[1]),
 			{
 				hash: '99fe210aaa99fe210aaa99fe210aaa99fe210aaa',
 				shortHash: '99fe210a',
@@ -262,25 +264,15 @@ async function handleAPI(req, res, url) {
 	if (m) {
 		if (m[2] !== MERGE_HASH) return sendText(res, 404, 'not found: commit');
 		return sendJSON(res, 200, {
-			commit: {
-				hash: MERGE_HASH,
-				shortHash: MERGE_HASH.slice(0, 8),
-				message:
-					"Merge pull request 'web-2: add data disk' (#40) from dotvirt/proposed/admin/team-web into main",
-				title: 'web-2: add data disk',
-				author: 'admin',
-				when: new Date(Date.now() - 6e6).toISOString(),
-				merge: true,
-				prNumber: 40,
-				prURL: `https://forge.example/dotvirt/${m[1]}/pulls/40`,
-			},
+			commit: mergeCommit(m[1]),
 			items: [
 				{
 					kind: 'edit',
 					namespace: 'web-prod',
 					name: 'web-2',
 					changes: [{ field: 'Disk', action: 'add', to: 'data (50Gi)' }],
-					yaml: 'kind: VirtualMachine\nmetadata:\n  name: web-2\n  namespace: web-prod\n',
+					yaml: WEB2_BASE + '  - name: data\n    size: 50Gi\n',
+					baseYAML: WEB2_BASE,
 				},
 			],
 		});
@@ -329,6 +321,13 @@ async function handleAPI(req, res, url) {
 		}
 		if (sub === 'drift') {
 			return sendJSON(res, 200, s.vmDrift?.[`${ns}/${name}`] ?? { drift: false, changes: [] });
+		}
+		if (sub === 'history') {
+			return sendJSON(
+				res,
+				200,
+				ns === 'web-prod' && name === 'web-2' ? [mergeCommit('team-web')] : [],
+			);
 		}
 		if (sub === 'events') {
 			return sendJSON(

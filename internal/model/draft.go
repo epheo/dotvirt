@@ -137,6 +137,9 @@ type DraftItem struct {
 	Name      string   `json:"name"`
 	Changes   []Change `json:"changes"`
 	YAML      string   `json:"yaml,omitempty"` // raw/edited manifest for the collapsed view
+	// BaseYAML is the manifest before an edit, so the review can show the two
+	// as a text diff; empty for a create, a delete, or a field-level VM edit.
+	BaseYAML string `json:"baseYAML,omitempty"`
 }
 
 // DraftView is the whole draft changeset as semantic items. Warning is DERIVED

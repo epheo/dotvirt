@@ -91,6 +91,12 @@ func TestCommitRendersMergedPR(t *testing.T) {
 		web.Changes[0].Field != "CPU" || web.Changes[0].From != "2 vCPU" || web.Changes[0].To != "4 vCPU" {
 		t.Errorf("web edit should be the CPU field diff: %+v", web)
 	}
+	if !strings.Contains(web.BaseYAML, "cores: 2") || !strings.Contains(web.YAML, "cores: 4") {
+		t.Errorf("an edit carries both sides of the manifest: %+v", web)
+	}
+	if db.BaseYAML != "" {
+		t.Errorf("a create has no base side, got %q", db.BaseYAML)
+	}
 	if _, err := c.Commit(proj, "0123456789abcdef0123456789abcdef01234567"); !errors.Is(err, model.ErrNotFound) {
 		t.Errorf("unknown hash should be ErrNotFound, got %v", err)
 	}
@@ -259,5 +265,29 @@ func TestOpenProposalsIncludesReverts(t *testing.T) {
 		if p.RequiredApprovals != 1 || p.Checks != "success" {
 			t.Errorf("review state missing on %+v", p)
 		}
+	}
+}
+
+// A VM's history is its manifest file's, named by the merged PRs; a VM git does
+// not hold has none rather than an error.
+func TestVMHistoryNamesMergedPR(t *testing.T) {
+	bare, _, hash := seedMerged(t)
+	c := newTestCoordinator(t)
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+
+	web, err := c.VMHistory(proj, "alpha", "web", 10)
+	if err != nil {
+		t.Fatalf("VMHistory: %v", err)
+	}
+	if len(web) != 2 || web[0].Hash != hash || web[0].Title != "Resize web" || web[0].PRNumber != 12 {
+		t.Fatalf("web history = %+v", web)
+	}
+	db, err := c.VMHistory(proj, "alpha", "db", 10)
+	if err != nil || len(db) != 1 || db[0].Hash != hash {
+		t.Errorf("db history = %v %+v, want the one merge that added it", err, db)
+	}
+	none, err := c.VMHistory(proj, "alpha", "ghost", 10)
+	if err != nil || len(none) != 0 {
+		t.Errorf("untracked VM: %v %+v", err, none)
 	}
 }

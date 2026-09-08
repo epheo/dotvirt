@@ -289,3 +289,38 @@ func TestCommitDiffSides(t *testing.T) {
 		t.Error("an unknown hash must error")
 	}
 }
+
+// A file's history is the first-parent commits that changed it: the merge
+// counts once for the PR, a sibling file's commits do not appear, and a file
+// that never existed has none.
+func TestFileHistoryFollowsOneFile(t *testing.T) {
+	r, err := Open(seedMerge(t).bare, "", nil)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	web, err := r.FileHistory("main", "tenant-a/web.yaml", 25)
+	if err != nil {
+		t.Fatalf("FileHistory: %v", err)
+	}
+	if len(web) != 3 || !web[0].Merge || web[1].Message != "bump web to 4 cpu" || web[2].Message != "seed tenant-a" {
+		t.Fatalf("web.yaml history = %+v", web)
+	}
+	db, err := r.FileHistory("main", "tenant-a/db.yaml", 25)
+	if err != nil {
+		t.Fatalf("FileHistory: %v", err)
+	}
+	if len(db) != 1 || db[0].Message != "add db" {
+		t.Errorf("db.yaml history = %+v, want only its add", db)
+	}
+	cache, err := r.FileHistory("main", "tenant-a/cache.yaml", 25)
+	if err != nil {
+		t.Fatalf("FileHistory: %v", err)
+	}
+	if len(cache) != 1 || !cache[0].Merge {
+		t.Errorf("cache.yaml history = %+v, want only the merge that added it", cache)
+	}
+	none, err := r.FileHistory("main", "tenant-a/missing.yaml", 25)
+	if err != nil || len(none) != 0 {
+		t.Errorf("missing file: %v %+v", err, none)
+	}
+}

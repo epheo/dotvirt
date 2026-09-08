@@ -338,6 +338,9 @@ export const api = {
 		get<CommitDetail>(`/api/projects/${enc(project)}/history/${hash}`),
 	revert: (project: string, hash: string) =>
 		post<gen.ProposeResult>(`/api/projects/${enc(project)}/revert`, { hash }),
+	// The merged changes to one VM's manifest, newest first.
+	vmHistory: (namespace: string, name: string) =>
+		get<gen.Commit[]>(`${vmPath(namespace, name)}/history`),
 
 	// Staging - the backend resolves the project from the VM's namespace, so these
 	// per-VM routes need no project param.

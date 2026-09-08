@@ -1,5 +1,7 @@
 import { expect, login, setScenario, test } from './fx';
 
+const MERGE_HASH = 'ab12cd34ef' + '0'.repeat(30);
+
 // The /changes review route on its own: PR review state from the forge, the
 // merge-in-forge doctrine, and deep-linkability.
 
@@ -58,4 +60,30 @@ test('a past change reviews like a staged one and reverts as a new PR', async ({
 		/pulls\/78/,
 	);
 	await expect(main.getByText(/Approve and merge it in the forge/)).toBeVisible();
+});
+
+test('a review is deep-linkable, and the VM page links its own history', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await page.goto(`/changes?project=team-web&commit=${MERGE_HASH}`);
+
+	const main = page.locator('main');
+	// The commit is under review without a click, its project history open beside it.
+	await expect(main.getByText(/data \(50Gi\)/)).toBeVisible();
+	await expect(main.getByRole('button', { name: /web-2: add data disk/ })).toBeVisible();
+	// The manifest reads as a text diff of the two committed sides.
+	await main.getByText('Manifest diff').click();
+	await expect(main.getByText(/^\+\s+- name: data$/)).toBeVisible();
+	await expect(main.getByText(/^-\s+/)).toHaveCount(0);
+	// Selecting a PR moves the URL with it.
+	await main.getByRole('button', { name: /PR #41/ }).click();
+	await expect(page).toHaveURL(/\/changes\?project=team-db&pr=41$/);
+
+	// The VM page lists the merged changes to this VM; each opens the same review.
+	await page.goto('/vm/web-prod/web-2');
+	const row = page.locator('main').getByRole('link', { name: /web-2: add data disk/ });
+	await expect(row).toBeVisible();
+	await row.click();
+	await expect(page).toHaveURL(new RegExp(`/changes\\?project=team-web&commit=${MERGE_HASH}$`));
+	await expect(page.locator('main').getByText(/data \(50Gi\)/)).toBeVisible();
 });

@@ -174,6 +174,9 @@ func TestStageUpdateTemplate(t *testing.T) {
 	if !strings.Contains(it.YAML, "description: edited") {
 		t.Fatalf("staged YAML is not the edited content:\n%s", it.YAML)
 	}
+	if it.BaseYAML != libraryTemplate {
+		t.Fatalf("the base side is the committed template, got:\n%s", it.BaseYAML)
+	}
 }
 
 func TestStageUpdateTemplateErrors(t *testing.T) {

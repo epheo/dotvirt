@@ -146,6 +146,11 @@ export interface DraftItem {
   name: string;
   changes: Change[];
   yaml?: string; // raw/edited manifest for the collapsed view
+  /**
+   * BaseYAML is the manifest before an edit, so the review can show the two
+   * as a text diff; empty for a create, a delete, or a field-level VM edit.
+   */
+  baseYAML?: string;
 }
 /**
  * DraftView is the whole draft changeset as semantic items. Warning is DERIVED
