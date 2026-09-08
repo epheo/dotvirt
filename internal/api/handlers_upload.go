@@ -38,7 +38,7 @@ func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := sc.cluster.CreateUploadDataVolume(r.Context(), req.Namespace, req.Name, req.Size, req.StorageClass); err != nil {
-		http.Error(w, err.Error(), runtimeOpStatus(err))
+		runtimeFail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, model.UploadTarget{Namespace: req.Namespace, Name: req.Name})
@@ -69,7 +69,7 @@ func (s *Server) handleUploadToken(w http.ResponseWriter, r *http.Request) {
 	}
 	token, err := sc.cluster.CreateUploadToken(r.Context(), ns, name)
 	if err != nil {
-		http.Error(w, err.Error(), runtimeOpStatus(err))
+		runtimeFail(w, err)
 		return
 	}
 	url := strings.TrimRight(s.cfg.UploadProxyURL, "/") + "/v1beta1/upload-async"

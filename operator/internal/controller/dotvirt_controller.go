@@ -70,7 +70,24 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if !dv.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, r.finalize(ctx, &dv)
 	}
-	r.normalizeSpec(&dv)
+	// One install per cluster: the ClusterRoleBindings it provisions carry fixed
+	// cluster-scoped names, so two CRs would rewrite each other's subjects on every
+	// reconcile and each finalizer would delete the other's bindings. The oldest CR
+	// wins; a later one halts here, before the finalizer, so it stays freely
+	// deletable and owns nothing. The timer matters: the older CR's deletion fires
+	// no event for this one.
+	if other, found, err := r.olderInstall(ctx, &dv); err != nil {
+		return ctrl.Result{}, err
+	} else if found {
+		msg := fmt.Sprintf("another dotvirt install exists at %s/%s and owns this cluster's bindings; delete one of the two",
+			other.Namespace, other.Name)
+		res, err := r.waitPhase(ctx, &dv, dotvirtv1alpha1.ConditionAvailable, "Conflict", msg,
+			dotvirtv1alpha1.PhaseProvisioning, time.Minute)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		return *res, nil
+	}
 	// Ensure the finalizer is present before provisioning anything cluster-scoped.
 	// Skipped under -dry-run so a validation run mutates nothing (and the CR stays
 	// freely deletable, since the finalizer would otherwise gate its removal).
@@ -79,6 +96,9 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err
 		}
 	}
+	// Only after the finalizer add, the reconcile's one spec write: the effective
+	// spec must never reach the stored CR.
+	r.normalizeSpec(&dv)
 
 	// The install pipeline, in dependency order. A phase that halts (requeue or
 	// error) has already recorded why; a completed pass falls through to the Ready
@@ -115,10 +135,38 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{}, nil
 }
 
+// olderInstall returns the Dotvirt CR that precedes dv, if any: by creation time,
+// then namespace/name, so every reconciler picks the same winner. A CR already
+// being deleted no longer counts, which is what unblocks its successor.
+func (r *DotvirtReconciler) olderInstall(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*dotvirtv1alpha1.Dotvirt, bool, error) {
+	var list dotvirtv1alpha1.DotvirtList
+	if err := r.List(ctx, &list); err != nil {
+		return nil, false, err
+	}
+	for i := range list.Items {
+		o := &list.Items[i]
+		if (o.Namespace == dv.Namespace && o.Name == dv.Name) || !o.DeletionTimestamp.IsZero() {
+			continue
+		}
+		if precedes(o, dv) {
+			return o, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+func precedes(a, b *dotvirtv1alpha1.Dotvirt) bool {
+	if !a.CreationTimestamp.Equal(&b.CreationTimestamp) {
+		return a.CreationTimestamp.Before(&b.CreationTimestamp)
+	}
+	return a.Namespace+"/"+a.Name < b.Namespace+"/"+b.Name
+}
+
 // normalizeSpec derives the EFFECTIVE in-memory spec the whole pipeline consumes.
-// Never persisted: after the finalizer add the reconcile writes only /status, so
-// these mutations stay in-process (a regression test pins the stored spec). The
-// forge and exposure phases fill their resolved hosts into the spec the same way.
+// Never persisted: it runs after the finalizer add and everything later writes
+// only /status, so these mutations stay in-process (a regression test pins the
+// stored spec). The forge and exposure phases fill their resolved hosts into the
+// spec the same way.
 func (r *DotvirtReconciler) normalizeSpec(dv *dotvirtv1alpha1.Dotvirt) {
 	// SSO is OpenShift-only: the app's oauth flow runs against the cluster oauth server.
 	if dv.Spec.Auth.OpenShiftSSO && r.Platform != platform.OpenShift {

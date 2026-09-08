@@ -253,6 +253,56 @@ func TestReconcileMinimalCRToReady(t *testing.T) {
 	}
 }
 
+// One install per cluster: its ClusterRoleBindings carry fixed cluster-scoped
+// names, so a second CR would rewrite the first's subjects on every reconcile and
+// its finalizer would delete them. The later CR halts with a Conflict, takes no
+// finalizer and provisions nothing; the older one is untouched; deleting the
+// older one releases the later.
+func TestReconcileRefusesSecondInstall(t *testing.T) {
+	older := testCR()
+	older.CreationTimestamp = metav1.NewTime(time.Now().Add(-time.Hour))
+	newer := testCR()
+	newer.Name, newer.Namespace = "staging", "dotvirt-staging"
+	newer.CreationTimestamp = metav1.Now()
+	c := testBuilder(t).WithObjects(older, newer).Build()
+	r := newReconciler(c, depsOK)
+
+	if res := reconcileOnce(t, r, newer); res.RequeueAfter == 0 {
+		t.Error("a refused install must requeue on a timer: the other CR's deletion fires no event for it")
+	}
+	got := getCR(t, c, newer)
+	if co := cond(got, dotvirtv1alpha1.ConditionAvailable); co == nil || co.Status != metav1.ConditionFalse || co.Reason != "Conflict" {
+		t.Errorf("Available = %+v, want False/Conflict naming the older install", co)
+	}
+	if controllerutil.ContainsFinalizer(got, dotvirtFinalizer) {
+		t.Error("a refused install must stay freely deletable (no finalizer)")
+	}
+	var crbs rbacv1.ClusterRoleBindingList
+	if err := c.List(context.Background(), &crbs); err != nil {
+		t.Fatal(err)
+	}
+	if len(crbs.Items) != 0 {
+		t.Errorf("refused install provisioned %d ClusterRoleBindings", len(crbs.Items))
+	}
+
+	reconcileOnce(t, r, older)
+	if got := getCR(t, c, older); got.Status.Phase != dotvirtv1alpha1.PhaseReady {
+		t.Errorf("older install phase = %q, want Ready", got.Status.Phase)
+	}
+
+	// Delete marks the older CR deleting (its finalizer holds it); that state
+	// already stops counting, and its own finalize pass then releases the shared
+	// ArgoCD-namespace objects the newer install adopts.
+	if err := c.Delete(context.Background(), getCR(t, c, older)); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, older)
+	reconcileOnce(t, r, newer)
+	if got := getCR(t, c, newer); got.Status.Phase != dotvirtv1alpha1.PhaseReady {
+		t.Errorf("released install phase = %q, want Ready", got.Status.Phase)
+	}
+}
+
 // reconcileWorkload reports the UI's external URL in status.consoleURL, so an admin
 // can open it straight from `oc get dotvirt` without hunting for the Route.
 func TestReconcileWorkloadSetsConsoleURL(t *testing.T) {

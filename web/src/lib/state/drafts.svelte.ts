@@ -26,7 +26,14 @@ class DraftsStore {
 		return m;
 	});
 
+	// Only the newest refresh, and nothing started before a reset, may write the
+	// store. Refreshes overlap (the layout's keyed effect and a staging callback),
+	// and an older response landing last would revert the summary; one landing
+	// after sign-out would repopulate it.
+	#gen = 0;
+
 	async refresh() {
+		const gen = ++this.#gen;
 		// Platform authors also carry a platform-tier draft (cluster-scoped network +
 		// namespace changes); draftsByProject drops it for non-authors (403 -> skipped).
 		const names = inventory.canManage
@@ -41,16 +48,19 @@ class DraftsStore {
 		}
 		this.refreshing = true;
 		try {
-			this.drafts = await draftsByProject(names);
+			const d = await draftsByProject(names);
+			if (gen !== this.#gen) return;
+			this.drafts = d;
 			this.loaded = true;
 		} catch {
 			// Keep the last good summary; a 401 signs out centrally.
 		} finally {
-			this.refreshing = false;
+			if (gen === this.#gen) this.refreshing = false;
 		}
 	}
 
 	reset() {
+		this.#gen++;
 		this.drafts = [];
 		this.loaded = false;
 		this.refreshing = false;

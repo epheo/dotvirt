@@ -120,9 +120,12 @@
 	const opError = $derived(proposeOp.error || unstageOp.error || discardOp.error);
 	const clearOps = () => (proposeOp.clear(), unstageOp.clear(), discardOp.clear());
 	// The propose form is per project; a selection move across projects must not
-	// carry a half-typed title along.
+	// carry a half-typed title along. Keyed on the project name, not the selection
+	// object: that object is rebuilt on every drafts refresh (a dock refresh, a
+	// staging callback, another tab's merge) and would wipe a title mid-typing.
+	const selectedProject = $derived(selected?.kind === 'item' ? selected.project : null);
 	$effect(() => {
-		selected?.kind === 'item' && selected.project;
+		selectedProject;
 		title = '';
 		message = '';
 	});

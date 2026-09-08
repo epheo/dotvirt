@@ -79,7 +79,7 @@ export async function dispatchVMAction(
 		await adoptVM(vm, opts);
 		return;
 	}
-	ui.requestDetail(a.id as DetailAction);
+	ui.requestDetail(a.id as DetailAction, vm);
 	goto(vmHref(vm.namespace, vm.name));
 }
 

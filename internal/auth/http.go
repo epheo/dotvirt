@@ -26,9 +26,12 @@ func (a *Authenticator) Login(w http.ResponseWriter, r *http.Request) {
 	token := strings.TrimSpace(body.Token)
 	id, err := a.Validate(r.Context(), token)
 	if err != nil {
-		if errors.Is(err, ErrRejected) {
+		switch {
+		case errors.Is(err, ErrRejected):
 			http.Error(w, "invalid token", http.StatusUnauthorized)
-		} else {
+		case errors.Is(err, ErrThrottled):
+			throttled(w, "too many sign-in attempts, try again shortly")
+		default:
 			http.Error(w, "unable to validate token, try again", http.StatusServiceUnavailable)
 		}
 		return
@@ -73,15 +76,26 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			// Only a definitive rejection signs the user out (401); a transient
 			// inability to validate (API server down/throttled) is 503, so a blip
 			// doesn't bounce valid sessions to the login screen.
-			if errors.Is(err, ErrRejected) {
+			switch {
+			case errors.Is(err, ErrRejected):
 				http.Error(w, "invalid or expired session", http.StatusUnauthorized)
-			} else {
+			case errors.Is(err, ErrThrottled):
+				throttled(w, "session validation throttled, try again shortly")
+			default:
 				http.Error(w, "unable to validate session, try again", http.StatusServiceUnavailable)
 			}
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(NewContext(r.Context(), id)))
 	})
+}
+
+// throttled answers a refused TokenReview: 429 so the client neither signs out
+// (401) nor reads the apiserver as down (503), with the retry hint the budget
+// refills on.
+func throttled(w http.ResponseWriter, msg string) {
+	w.Header().Set("Retry-After", "1")
+	http.Error(w, msg, http.StatusTooManyRequests)
 }
 
 // isOpenPath reports whether a path bypasses authentication. CORS preflight is

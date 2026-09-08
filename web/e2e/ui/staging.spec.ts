@@ -1,17 +1,8 @@
-import { expect, login, openVM, setScenario, test } from './fx';
+import { expect, login, openVM, setScenario, stageChange, test } from './fx';
 
 // The staging lifecycle end to end in the UI: edit -> staged draft -> the
 // /changes review route -> propose. The highest-blast-radius flow in the
 // product, previously covered only against a live stack.
-
-// The wizard's finish button renders only on the last step; walk Next to it.
-async function stageChange(page: import('@playwright/test').Page) {
-	const finish = page.getByRole('button', { name: 'Stage change' });
-	for (let i = 0; i < 12 && !(await finish.isVisible()); i++) {
-		await page.getByRole('button', { name: 'Next', exact: true }).click();
-	}
-	await finish.click();
-}
 
 test('edit stages into the draft and proposes as a PR', async ({ page }) => {
 	await setScenario(page, 'base');

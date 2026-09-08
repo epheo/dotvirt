@@ -26,7 +26,7 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	nodes, err := c.ListNodes(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), runtimeOpStatus(err))
+		runtimeFail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, nodes)
@@ -41,7 +41,7 @@ func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	info, err := c.NodeInfo(r.Context(), r.PathValue("node"))
 	if err != nil {
-		http.Error(w, err.Error(), runtimeOpStatus(err))
+		runtimeFail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, info)
@@ -120,7 +120,7 @@ func (s *Server) handleNodeEvacuate(w http.ResponseWriter, r *http.Request) {
 	node := r.PathValue("node")
 	info, err := c.NodeInfo(r.Context(), node)
 	if err != nil {
-		http.Error(w, err.Error(), runtimeOpStatus(err))
+		runtimeFail(w, err)
 		return
 	}
 	if !info.CanCordon {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/inventory"
 	"github.com/epheo/dotvirt/internal/model"
@@ -156,35 +157,69 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleOptions lists the wizard/editor choices (instancetypes, preferences, OS
-// images, networks). These are cluster catalog data, the same for every tenant, so
-// they're read with dotvirt's SA - a scoped tenant usually lacks cluster-scoped
-// list on these CRDs, which would otherwise yield silently-empty dropdowns. The
-// caller must still be authenticated (middleware) to reach here.
+// images, networks, storage classes). The cluster is read once with dotvirt's SA
+// and cached - a scoped tenant usually lacks cluster-scoped list on these CRDs,
+// which would otherwise yield silently-empty dropdowns. The namespaced entries
+// (OS images, networks) are then narrowed per caller by optionsFor, so another
+// tenant's namespace and network names never leave the process.
 func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
-	if _, ok := auth.FromContext(r.Context()); !ok {
+	id, ok := auth.FromContext(r.Context())
+	if !ok {
 		http.Error(w, "authentication required", http.StatusUnauthorized)
-		return
-	}
-	// Catalog is identical for everyone; serve the shared cache to skip 4 cluster
-	// LISTs per wizard open.
-	if v, ok := s.options.Get("all"); ok {
-		writeJSON(w, http.StatusOK, v)
 		return
 	}
 	if s.clusterF == nil {
 		http.Error(w, "cluster not configured", http.StatusServiceUnavailable)
 		return
 	}
-	sa, err := s.clusterF.SA()
+	all, ok := s.options.Get("all")
+	if !ok {
+		sa, err := s.clusterF.SA()
+		if err != nil {
+			fail(w, unavailable("cluster access", err))
+			return
+		}
+		all, err = sa.ListOptions(r.Context())
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		s.options.Put("all", all)
+	}
+	c, err := s.clusterF.For(id.Token)
 	if err != nil {
 		fail(w, unavailable("cluster access", err))
 		return
 	}
-	opts, err := sa.ListOptions(r.Context())
+	visible, err := s.visibleFor(r.Context(), id, c)
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	s.options.Put("all", opts)
-	writeJSON(w, http.StatusOK, opts)
+	writeJSON(w, http.StatusOK, s.optionsFor(r.Context(), id, c, visible, all))
+}
+
+// optionsFor narrows the shared catalog to what id may see: a namespaced entry
+// passes when its namespace is in the caller's visible set, or when the caller
+// could list that kind there itself (a shared golden-image namespace grants that
+// to every authenticated user; the verdict is SSAR-cached per token). The cached
+// catalog is never mutated - fresh, non-nil slices so they serialize as [].
+func (s *Server) optionsFor(ctx context.Context, id auth.Identity, c *cluster.Client, visible map[string]bool, all model.Options) model.Options {
+	allowed := func(ns, kind string, can func(context.Context, string) bool) bool {
+		return visible[ns] || s.ssarCached(id, "read\x00"+kind+"\x00"+ns, func() bool { return can(ctx, ns) })
+	}
+	out := all
+	out.OSImages = make([]model.OSImage, 0, len(all.OSImages))
+	for _, img := range all.OSImages {
+		if allowed(img.Namespace, "osimages", c.CanListOSImages) {
+			out.OSImages = append(out.OSImages, img)
+		}
+	}
+	out.Networks = make([]model.NetworkOption, 0, len(all.Networks))
+	for _, n := range all.Networks {
+		if allowed(n.Namespace, "networks", c.CanListNetworks) {
+			out.Networks = append(out.Networks, n)
+		}
+	}
+	return out
 }
