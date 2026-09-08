@@ -199,12 +199,12 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) ([]git.ChangesetIt
 	return items, nil
 }
 
-// OpenProposals returns the open PRs (id, proj) has in flight: the one backing
-// the proposed branch and every revert the user opened - the staged->PR->synced
-// lifecycle's middle state for the Changes pane. Reverts each land on their own
-// branch, so they are found by prefix among the open PRs rather than by name.
-// Empty (nil error) when the project has no repo/forge or nothing is open.
-func (c *Coordinator) OpenProposals(id auth.Identity, proj project.ProjectInfo) ([]model.Proposal, error) {
+// OpenProposals lists every open PR into proj's base branch - the Changes
+// pane's Proposed lane, one read shared by all the project's members: a PR is
+// the project's git history in waiting, visible to whoever may read that
+// history. Whose it is stays the reader's question (OwnsProposal). Empty (nil
+// error) when the project has no repo/forge or nothing is open.
+func (c *Coordinator) OpenProposals(proj project.ProjectInfo) ([]model.Proposal, error) {
 	if proj.Repo == "" {
 		return nil, nil
 	}
@@ -212,23 +212,11 @@ func (c *Coordinator) OpenProposals(id auth.Identity, proj project.ProjectInfo) 
 	if fc == nil {
 		return nil, nil
 	}
-	var prs []forge.PR
-	if pr, ok, err := fc.FindPR(c.proposedBranch(id.Username, proj.Name), c.baseBranch); err != nil {
-		return nil, err
-	} else if ok && pr.State == "open" {
-		prs = append(prs, pr)
-	}
 	open, err := fc.OpenPRs(c.baseBranch, 50)
 	if err != nil {
 		return nil, err
 	}
-	prefix := c.revertPrefix(id.Username, proj.Name)
-	for _, pr := range open {
-		if strings.HasPrefix(pr.Head.Ref, prefix) {
-			prs = append(prs, pr)
-		}
-	}
-	if len(prs) == 0 {
+	if len(open) == 0 {
 		return nil, nil
 	}
 	// Review state, each read best-effort: an unreadable plane stays zero
@@ -238,9 +226,10 @@ func (c *Coordinator) OpenProposals(id auth.Identity, proj project.ProjectInfo) 
 	if req, found, rerr := fc.RequiredApprovals(c.baseBranch); rerr == nil && found {
 		required = req
 	}
-	out := make([]model.Proposal, 0, len(prs))
-	for _, pr := range prs {
-		p := model.Proposal{Project: proj.Name, PRNumber: pr.Number, PRURL: pr.HTMLURL, Title: pr.Title, RequiredApprovals: required}
+	out := make([]model.Proposal, 0, len(open))
+	for _, pr := range open {
+		p := c.proposalRow(proj, pr)
+		p.RequiredApprovals = required
 		if n, aerr := fc.Approvals(pr.Number); aerr == nil {
 			p.Approvals = n
 		}
@@ -252,6 +241,27 @@ func (c *Coordinator) OpenProposals(id auth.Identity, proj project.ProjectInfo) 
 		out = append(out, p)
 	}
 	return out, nil
+}
+
+// proposalRow is a PR's identity as the lane carries it. By comes from the
+// head branch the way the task feed attributes merges, since dotvirt's bot
+// posts every proposal.
+func (c *Coordinator) proposalRow(proj project.ProjectInfo, pr forge.PR) model.Proposal {
+	return model.Proposal{
+		Project: proj.Name, PRNumber: pr.Number, PRURL: pr.HTMLURL, Title: pr.Title,
+		Branch: pr.Head.Ref,
+		By:     tasks.MergeAuthor(pr.Head.Ref, c.proposed, pr.User.Login),
+		Revert: strings.HasPrefix(pr.Head.Ref, c.proposed+"/"+tasks.RevertSegment+"/"),
+	}
+}
+
+// OwnsProposal reports whether id opened the PR on branch: the per-(user,
+// project) draft branch or one of the user's revert branches. Exact by
+// construction - both names carry a hash of the raw identity - where the By
+// segment a row shows is lossy. Pure string work, safe on the broadcast path.
+func (c *Coordinator) OwnsProposal(id auth.Identity, proj project.ProjectInfo, branch string) bool {
+	return branch == c.proposedBranch(id.Username, proj.Name) ||
+		strings.HasPrefix(branch, c.revertPrefix(id.Username, proj.Name))
 }
 
 // defaultTitle names an untitled proposal by what it does, so the history row

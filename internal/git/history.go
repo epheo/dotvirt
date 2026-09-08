@@ -160,6 +160,52 @@ func (r *Repo) CommitDiff(hash string) (CommitDiff, error) {
 	return CommitDiff{Commit: commitEntry(c), Files: files}, nil
 }
 
+// ErrNoBranch: the mirror holds no such branch. A head pushed moments ago
+// arrives with the next fetch, so callers say "not yet" rather than fail.
+var ErrNoBranch = errors.New("branch not in the mirror")
+
+// BranchDiff lists the YAML files head changed since it forked from base: the
+// diff from their merge base to head, which is what merging head introduces.
+// Without a common ancestor the diff is against base itself.
+func (r *Repo) BranchDiff(base, head string) ([]FileChange, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	from, err := r.branchCommit(base)
+	if err != nil {
+		return nil, err
+	}
+	to, err := r.branchCommit(head)
+	if err != nil {
+		return nil, err
+	}
+	if bases, err := from.MergeBase(to); err != nil {
+		return nil, err
+	} else if len(bases) > 0 {
+		from = bases[0]
+	}
+	fromTree, err := from.Tree()
+	if err != nil {
+		return nil, err
+	}
+	toTree, err := to.Tree()
+	if err != nil {
+		return nil, err
+	}
+	return treeDiff(fromTree, toTree)
+}
+
+// branchCommit resolves a branch head in the mirror. Caller holds r.mu.
+func (r *Repo) branchCommit(branch string) (*object.Commit, error) {
+	ref, err := r.repo.Reference(plumbing.NewBranchReferenceName(branch), true)
+	if errors.Is(err, plumbing.ErrReferenceNotFound) {
+		return nil, fmt.Errorf("%w: %s", ErrNoBranch, branch)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("resolve branch %q: %w", branch, err)
+	}
+	return r.repo.CommitObject(ref.Hash())
+}
+
 // RevertItems computes the changeset that undoes commit hash: every file the
 // commit changed is restored to its first-parent (pre-commit) content, and files
 // it added are deleted. The result feeds CommitChangeset as a forward revert - a
@@ -217,7 +263,13 @@ func firstParentDiff(c *object.Commit) ([]FileChange, error) {
 			return nil, err
 		}
 	}
-	changes, err := object.DiffTree(parentTree, tree)
+	return treeDiff(parentTree, tree)
+}
+
+// treeDiff is the YAML files that differ between two trees, with both sides'
+// content, in path order. A nil from is the empty tree.
+func treeDiff(from, to *object.Tree) ([]FileChange, error) {
+	changes, err := object.DiffTree(from, to)
 	if err != nil {
 		return nil, err
 	}

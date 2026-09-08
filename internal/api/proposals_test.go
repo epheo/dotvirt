@@ -11,8 +11,8 @@ import (
 	"github.com/epheo/dotvirt/internal/project"
 )
 
-// fakeDraft implements only OpenProposals; the embedded interface panics on
-// anything else, which is exactly what these tests want.
+// fakeDraft implements only the lane's methods; the embedded interface panics
+// on anything else, which is exactly what these tests want.
 type fakeDraft struct {
 	Draft
 	mu    sync.Mutex
@@ -20,7 +20,7 @@ type fakeDraft struct {
 	calls int
 }
 
-func (f *fakeDraft) OpenProposals(id auth.Identity, proj project.ProjectInfo) ([]model.Proposal, error) {
+func (f *fakeDraft) OpenProposals(proj project.ProjectInfo) ([]model.Proposal, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
@@ -28,6 +28,12 @@ func (f *fakeDraft) OpenProposals(id auth.Identity, proj project.ProjectInfo) ([
 		return []model.Proposal{pr}, nil
 	}
 	return nil, nil
+}
+
+// A row is the reader's when its branch names them - enough to pin the
+// per-reader marking.
+func (f *fakeDraft) OwnsProposal(id auth.Identity, _ project.ProjectInfo, branch string) bool {
+	return branch == id.Username
 }
 
 func (f *fakeDraft) forgeCalls() int {
@@ -91,6 +97,37 @@ func TestProposalsHotPathNeverCallsForge(t *testing.T) {
 	}
 	if got := s.proposalsFor(id, projects); len(got) != 0 {
 		t.Fatalf("lane should be empty after the merge, got %v", got)
+	}
+}
+
+// TestProposalsLaneIsProjectScoped pins the shared lane: two users watching
+// one project cost one forge round-trip per pass, both see the PR, and only
+// its proposer sees it as theirs - the cached row itself stays unmarked.
+func TestProposalsLaneIsProjectScoped(t *testing.T) {
+	fd := &fakeDraft{prs: map[string]model.Proposal{
+		"team-a": {Project: "team-a", PRNumber: 7, Branch: "alice"},
+	}}
+	s := NewServer(Deps{Draft: fd})
+	projects := []project.ProjectInfo{{Name: "team-a", Repo: "http://x/r.git"}}
+	alice := auth.Identity{Token: "tok-alice", Username: "alice"}
+	bob := auth.Identity{Token: "tok-bob", Username: "bob"}
+	s.proposalsFor(alice, projects)
+	s.proposalsFor(bob, projects)
+	if !s.refreshProposals() {
+		t.Fatal("a PR should wake the hub")
+	}
+	if fd.forgeCalls() != 1 {
+		t.Fatalf("one project watched twice cost %d forge calls; want 1", fd.forgeCalls())
+	}
+	a, b := s.proposalsFor(alice, projects), s.proposalsFor(bob, projects)
+	if len(a) != 1 || !a[0].Mine {
+		t.Fatalf("alice's lane = %+v, want her PR marked mine", a)
+	}
+	if len(b) != 1 || b[0].Mine {
+		t.Fatalf("bob's lane = %+v, want alice's PR unmarked", b)
+	}
+	if cached, _ := s.proposals.Get("team-a"); cached[0].Mine {
+		t.Fatal("the cached row must stay unmarked")
 	}
 }
 

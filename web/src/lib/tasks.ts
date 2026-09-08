@@ -113,7 +113,7 @@ export function buildTasks(
 			name: '',
 			prTitle: p.title || `PR #${p.prNumber}`,
 			status: `PR #${p.prNumber} open`,
-			by: username,
+			by: p.by || username,
 			project: p.project,
 			url: p.prURL,
 		});

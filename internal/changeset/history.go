@@ -2,6 +2,7 @@ package changeset
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -86,6 +87,37 @@ func (c *Coordinator) Commit(proj project.ProjectInfo, hash string) (model.Commi
 	out := model.CommitDetail{Commit: d.Commit, Items: commitItems(d.Files)}
 	out.RevertWarning, out.Reverted = c.revertState(read, d.Files)
 	return out, nil
+}
+
+// Proposal renders what merging one open PR would change: the diff from the
+// PR's fork point to its head, as the same semantic items a staged draft and a
+// past commit render. The head is read from the local mirror, so a branch
+// pushed moments ago may not be there until the next fetch - that reads as not
+// found, with the retry spelled out.
+func (c *Coordinator) Proposal(proj project.ProjectInfo, number int) (model.ProposalDetail, error) {
+	if err := requireRepo(proj); err != nil {
+		return model.ProposalDetail{}, err
+	}
+	fc := c.forge.For(proj.Repo)
+	if fc == nil {
+		return model.ProposalDetail{}, fmt.Errorf("%w: no forge serves %s", model.ErrInvalid, proj.Name)
+	}
+	pr, err := fc.PR(number)
+	if err != nil {
+		return model.ProposalDetail{}, fmt.Errorf("%w: pull request #%d: %v", model.ErrNotFound, number, err)
+	}
+	read, err := c.read(proj)
+	if err != nil {
+		return model.ProposalDetail{}, err
+	}
+	files, err := read.BranchDiff(c.baseBranch, pr.Head.Ref)
+	if errors.Is(err, git.ErrNoBranch) {
+		return model.ProposalDetail{}, fmt.Errorf("%w: branch %s is not mirrored yet; retry in a moment", model.ErrNotFound, pr.Head.Ref)
+	}
+	if err != nil {
+		return model.ProposalDetail{}, err
+	}
+	return model.ProposalDetail{Proposal: c.proposalRow(proj, pr), Items: commitItems(files)}, nil
 }
 
 // nameByPR replaces a forge merge subject with the merged PR's title and link.

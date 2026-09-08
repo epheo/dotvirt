@@ -179,11 +179,26 @@ type Proposal struct {
 	PRNumber int    `json:"prNumber"`
 	PRURL    string `json:"prURL"`
 	Title    string `json:"title,omitempty"`
+	// Branch is the head branch; By the proposing user, from the branch name
+	// (else the forge poster); Revert marks an undo PR. Mine is set per reader:
+	// the lane is project-wide, ownership is the caller's.
+	Branch string `json:"branch,omitempty"`
+	By     string `json:"by,omitempty"`
+	Revert bool   `json:"revert,omitempty"`
+	Mine   bool   `json:"mine,omitempty"`
 	// Review state, read best-effort from the forge each refresh; zero values
 	// mean unknown (an unreadable protection rule must not render as "none").
 	Approvals         int    `json:"approvals,omitempty"`
 	RequiredApprovals int    `json:"requiredApprovals,omitempty"`
 	Checks            string `json:"checks,omitempty"` // success | pending | failure | error
+}
+
+// ProposalDetail is one open PR under review: what merging it would change,
+// as the semantic items a staged draft renders. Proposal carries identity
+// only; the lane row holds the review state.
+type ProposalDetail struct {
+	Proposal Proposal    `json:"proposal"`
+	Items    []DraftItem `json:"items"`
 }
 
 // TaskEntry is one Recent Tasks row: an imperative runtime op dotvirt performed

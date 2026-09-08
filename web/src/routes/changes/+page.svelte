@@ -22,6 +22,7 @@
 		type DraftItem,
 		type DraftView,
 		type Proposal,
+		type ProposalDetail,
 		type ProposeResult,
 	} from '$lib/api';
 	import { friendlyError } from '$lib/format';
@@ -30,6 +31,7 @@
 	import { draftKindTone, TONE_PILL } from '$lib/status';
 	import { drafts, PLATFORM_PROJECT } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
+	import { persisted } from '$lib/state/persisted.svelte';
 	import ChangeList from '$lib/components/ChangeList.svelte';
 	import ErrorNote from '$lib/components/ErrorNote.svelte';
 	import GitOpsStepper from '$lib/components/GitOpsStepper.svelte';
@@ -40,11 +42,12 @@
 	import TextInput from '$lib/components/TextInput.svelte';
 
 	// The review workspace: everything the GitOps write model has in flight,
-	// and what already landed. Left: staged drafts (per project), open PRs,
-	// per-project history. Right: the selected change's field diff and impact,
-	// the selected PR's review state, or a past commit's diff with its revert.
-	// Review happens HERE; approval and merge stay in the forge - the primary
-	// actions are Propose and Undo, both of which open a pull request.
+	// and what already landed. Left: staged drafts (per project), every open PR
+	// of the caller's projects, per-project history. Right: the selected
+	// change's field diff and impact, the selected PR's diff and review state,
+	// or a past commit's diff with its revert. Review happens HERE; approval
+	// and merge stay in the forge - the primary actions are Propose and Undo,
+	// both of which open a pull request.
 
 	// Warning-only lanes stay: prune risk must warn BEFORE anything is staged.
 	const lanes = $derived(drafts.drafts.filter((d) => d.draft.count > 0 || d.draft.warning));
@@ -107,7 +110,7 @@
 		const first = withItems?.draft.items[0];
 		if (withItems && first)
 			return { kind: 'item' as const, project: withItems.project, item: first };
-		if (proposedLane[0]) return { kind: 'proposal' as const, proposal: proposedLane[0] };
+		if (visibleProposals[0]) return { kind: 'proposal' as const, proposal: visibleProposals[0] };
 		return null;
 	});
 
@@ -175,7 +178,7 @@
 		const seen = new Set(out.map((p) => `${p.project}#${p.prNumber}`));
 		for (const [project, r] of Object.entries(results)) {
 			if (!r.prURL || !r.prNumber || seen.has(`${project}#${r.prNumber}`)) continue;
-			out.push({ project, prNumber: r.prNumber, prURL: r.prURL, title: r.title ?? '' });
+			out.push({ project, prNumber: r.prNumber, prURL: r.prURL, title: r.title ?? '', mine: true });
 		}
 		return out.sort((a, b) => a.project.localeCompare(b.project));
 	});
@@ -184,6 +187,39 @@
 			if (untrack(() => results[p.project])?.prNumber === p.prNumber) delete results[p.project];
 		}
 	});
+	// The lane is the project's, not the caller's: a colleague's PR is as much
+	// in flight as one's own. The filter is a viewing preference, kept.
+	const mineOnly = persisted('dotvirt.changes.mine', false);
+	const visibleProposals = $derived(
+		mineOnly.value ? proposedLane.filter((p) => p.mine) : proposedLane,
+	);
+
+	// A PR's review loads once it is selected and stays cached, like a commit's.
+	// The head branch is read from the mirror, so a PR pushed moments ago can
+	// answer not-yet: the pane offers the retry.
+	const prKey = (project: string, n: number) => `${project}#${n}`;
+	let prDetails = $state<Record<string, ProposalDetail>>({});
+	let prDetailError = $state<Record<string, string>>({});
+	const selectedPRKey = $derived(
+		selected?.kind === 'proposal'
+			? prKey(selected.proposal.project, selected.proposal.prNumber)
+			: null,
+	);
+	$effect(() => {
+		const key = selectedPRKey;
+		if (!key || untrack(() => prDetails[key] || prDetailError[key])) return;
+		const at = key.lastIndexOf('#');
+		loadPRDetail(key.slice(0, at), Number(key.slice(at + 1)));
+	});
+	async function loadPRDetail(project: string, n: number) {
+		const key = prKey(project, n);
+		delete prDetailError[key];
+		try {
+			prDetails[key] = await api.proposal(project, n);
+		} catch (e) {
+			prDetailError[key] = friendlyError(e);
+		}
+	}
 
 	async function propose(project: string) {
 		if (proposeOp.busy) return;
@@ -388,14 +424,28 @@
 			{/each}
 
 			<div
-				class="mt-3 border-t border-line px-3 pt-3 pb-1 text-[11px] font-semibold tracking-wide text-ink-faint uppercase"
+				class="mt-3 flex items-center border-t border-line px-3 pt-3 pb-1 text-[11px] font-semibold tracking-wide text-ink-faint uppercase"
 			>
 				Proposed
+				{#if proposedLane.length > 0}
+					<span class="ml-auto flex gap-2 normal-case">
+						<button
+							onclick={() => (mineOnly.value = false)}
+							class="hover:text-ink {mineOnly.value ? '' : 'text-ink'}">All</button
+						>
+						<button
+							onclick={() => (mineOnly.value = true)}
+							class="hover:text-ink {mineOnly.value ? 'text-ink' : ''}">Mine</button
+						>
+					</span>
+				{/if}
 			</div>
 			{#if proposedLane.length === 0}
 				<p class="px-3 py-2 text-xs text-ink-faint">No open pull requests.</p>
+			{:else if visibleProposals.length === 0}
+				<p class="px-3 py-2 text-xs text-ink-faint">None of the open pull requests are yours.</p>
 			{/if}
-			{#each proposedLane as p (p.project + '#' + p.prNumber)}
+			{#each visibleProposals as p (p.project + '#' + p.prNumber)}
 				{@const active =
 					selected?.kind === 'proposal' &&
 					selected.proposal.project === p.project &&
@@ -412,6 +462,7 @@
 						<GitPullRequest size={13} class="shrink-0 text-accent-ink" />
 						<span class="text-[13px] font-medium text-ink">PR #{p.prNumber}</span>
 						<span class="text-xs text-ink-muted">{p.project}</span>
+						{#if p.by && !p.mine}<span class="text-xs text-ink-faint">by {p.by}</span>{/if}
 						{#if chk}<StatusPill tone={chk.tone} label={chk.text} />{/if}
 					</div>
 					{#if p.title || appr}
@@ -602,30 +653,66 @@
 				{@const p = selected.proposal}
 				{@const appr = approvalLine(p)}
 				{@const chk = checksPill(p)}
+				{@const key = prKey(p.project, p.prNumber)}
+				{@const detail = prDetails[key]}
 				<div class="flex items-center gap-2.5 border-b border-line px-4 py-3">
 					<GitPullRequest size={16} class="text-accent-ink" />
-					<span class="text-[15px] font-semibold text-ink">PR #{p.prNumber}</span>
-					<span class="text-xs text-ink-faint">{p.project}</span>
-				</div>
-				<div class="space-y-3 p-4">
-					{#if p.title}<p class="text-sm text-ink">{p.title}</p>{/if}
-					<div class="flex items-center gap-2">
-						{#if chk}<StatusPill tone={chk.tone} label={chk.text} />{/if}
-						{#if appr}<StatusPill tone={appr.tone} label={appr.text} />{/if}
-					</div>
-					<GitOpsStepper stage="proposed" prNumber={p.prNumber} prUrl={p.prURL} />
-					<Note tone="neutral" class="max-w-xl">
-						Approval and merge happen in the forge; once merged, ArgoCD applies the change and the
-						result shows here and in Recent tasks within seconds.
-					</Note>
+					<span class="min-w-0 truncate text-[15px] font-semibold text-ink"
+						>{p.title || `PR #${p.prNumber}`}</span
+					>
+					<span class="shrink-0 text-xs text-ink-faint">{p.project}</span>
 					<a
 						href={p.prURL}
 						target="_blank"
 						rel="noopener"
-						class="inline-flex items-center gap-1.5 rounded border border-line-strong bg-panel px-3 py-1.5 text-sm font-medium text-accent-ink hover:bg-select-soft"
+						class="ml-auto inline-flex shrink-0 items-center gap-1 text-xs text-accent-ink underline"
+						>PR #{p.prNumber} <ExternalLink size={12} /></a
 					>
-						Open PR to approve and merge <ExternalLink size={13} />
-					</a>
+				</div>
+				<div class="space-y-3 p-4">
+					<div class="flex items-center gap-2 text-xs text-ink-muted">
+						{#if p.by}<span>{p.mine ? 'yours' : `by ${p.by}`}</span>{/if}
+						{#if p.revert}<span>· undoes a past change</span>{/if}
+						{#if chk}<StatusPill tone={chk.tone} label={chk.text} />{/if}
+						{#if appr}<StatusPill tone={appr.tone} label={appr.text} />{/if}
+					</div>
+					{#if prDetailError[key]}
+						<ErrorNote error={prDetailError[key]} />
+						<button
+							onclick={() => loadPRDetail(p.project, p.prNumber)}
+							class="rounded border border-line-strong bg-panel px-3 py-1 text-xs text-ink-soft hover:bg-inset"
+							>Retry</button
+						>
+					{:else if !detail}
+						<div class="space-y-2">
+							{#each Array(2) as _, i (i)}
+								<div class="h-16 animate-pulse rounded bg-inset-strong"></div>
+							{/each}
+						</div>
+					{:else}
+						{@render reviewItems(detail.items, 'This pull request changes no manifests.')}
+					{/if}
+				</div>
+
+				<!-- merge footer: the one action on a proposal lives in the forge -->
+				<div class="mt-auto border-t border-line bg-inset px-4 py-3">
+					<div class="mb-2">
+						<GitOpsStepper stage="proposed" prNumber={p.prNumber} prUrl={p.prURL} />
+					</div>
+					<div class="flex items-center gap-3">
+						<a
+							href={p.prURL}
+							target="_blank"
+							rel="noopener"
+							class="inline-flex shrink-0 items-center gap-1.5 rounded border border-line-strong bg-panel px-3 py-1.5 text-sm font-medium text-accent-ink hover:bg-select-soft"
+						>
+							Open PR to approve and merge <ExternalLink size={13} />
+						</a>
+						<span class="text-[11px] text-ink-faint">
+							Approval and merge happen in the forge; once merged, ArgoCD applies the change and the
+							result shows here and in Recent tasks within seconds.
+						</span>
+					</div>
 				</div>
 			{:else if selected?.kind === 'commit'}
 				{@const c = selected.commit}
@@ -667,35 +754,7 @@
 							{/each}
 						</div>
 					{:else}
-						{#each detail.items as it (itemKey(it))}
-							<section class="rounded border border-line">
-								<div class="flex items-center gap-2 border-b border-line bg-inset px-3 py-1.5">
-									{#if it.kind === 'delete'}<Trash2 size={13} class="shrink-0 text-danger-ink" />
-									{:else if it.kind === 'create'}<Plus size={13} class="shrink-0 text-ok-ink" />
-									{:else}<Pencil size={13} class="shrink-0 text-accent-ink" />{/if}
-									<span class="text-[13px] font-medium text-ink"
-										>{it.namespace ? `${it.namespace}/${it.name}` : it.name}</span
-									>
-									<span class="rounded px-1.5 py-0.5 text-xs {TONE_PILL[draftKindTone(it.kind)]}"
-										>{it.kind}</span
-									>
-								</div>
-								<div class="px-3 py-2">
-									<ChangeList changes={it.changes} />
-								</div>
-								{#if it.yaml}
-									<details class="border-t border-line">
-										<summary
-											class="cursor-pointer px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
-											>{it.baseYAML ? 'Manifest diff' : 'Manifest'}</summary
-										>
-										<ManifestDiff before={it.baseYAML} after={it.yaml} />
-									</details>
-								{/if}
-							</section>
-						{:else}
-							<p class="text-xs text-ink-faint">This commit changed no manifests.</p>
-						{/each}
+						{@render reviewItems(detail.items, 'This commit changed no manifests.')}
 					{/if}
 				</div>
 
@@ -763,6 +822,39 @@
 		</div>
 	</div>
 </div>
+
+<!-- One rendering of reviewed items, for a past commit and an open PR alike. -->
+{#snippet reviewItems(items: DraftItem[], empty: string)}
+	{#each items as it (itemKey(it))}
+		<section class="rounded border border-line">
+			<div class="flex items-center gap-2 border-b border-line bg-inset px-3 py-1.5">
+				{#if it.kind === 'delete'}<Trash2 size={13} class="shrink-0 text-danger-ink" />
+				{:else if it.kind === 'create'}<Plus size={13} class="shrink-0 text-ok-ink" />
+				{:else}<Pencil size={13} class="shrink-0 text-accent-ink" />{/if}
+				<span class="text-[13px] font-medium text-ink"
+					>{it.namespace ? `${it.namespace}/${it.name}` : it.name}</span
+				>
+				<span class="rounded px-1.5 py-0.5 text-xs {TONE_PILL[draftKindTone(it.kind)]}"
+					>{it.kind}</span
+				>
+			</div>
+			<div class="px-3 py-2">
+				<ChangeList changes={it.changes} />
+			</div>
+			{#if it.yaml}
+				<details class="border-t border-line">
+					<summary
+						class="cursor-pointer px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
+						>{it.baseYAML ? 'Manifest diff' : 'Manifest'}</summary
+					>
+					<ManifestDiff before={it.baseYAML} after={it.yaml} />
+				</details>
+			{/if}
+		</section>
+	{:else}
+		<p class="text-xs text-ink-faint">{empty}</p>
+	{/each}
+{/snippet}
 
 {#if confirmUndo}
 	{@const undoKey = commitKey(confirmUndo.project, confirmUndo.hash)}
