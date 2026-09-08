@@ -82,7 +82,7 @@ func New(saKube kubernetes.Interface, secret []byte) *Authenticator {
 // and the budget sits far above real sign-in traffic.
 const (
 	reviewRate  rate.Limit = 20
-	reviewBurst            = 40
+	reviewBurst int        = 40
 )
 
 // ErrThrottled reports a TokenReview refused by the process-wide budget. Callers
