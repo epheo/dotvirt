@@ -12,11 +12,11 @@ import (
 )
 
 // locate finds the base-branch file declaring (resource, namespace, name) - the
-// object identity every draft entry carries - refusing a file that also declares
-// other objects, since a delete or rewrite acts on the whole file. namespace is
-// ClusterScopeNS for a cluster-scoped object.
+// object identity every draft entry carries - under soleDeclarer's rule, since
+// a delete or rewrite acts on the whole file. namespace is ClusterScopeNS for a
+// cluster-scoped object.
 func (c *Coordinator) locate(read *git.Repo, resource draft.Resource, namespace, name string) (string, error) {
-	files, err := read.DeclaredFilesOnBranch(c.baseBranch)
+	idx, err := read.DeclaredFilesOnBranch(c.baseBranch)
 	if err != nil {
 		return "", err
 	}
@@ -25,16 +25,11 @@ func (c *Coordinator) locate(read *git.Repo, resource draft.Resource, namespace,
 		ns = ""
 	}
 	for _, kind := range resource.Kinds() {
-		path, ok := files[model.ObjectRef{Kind: kind, Namespace: ns, Name: name}]
-		if !ok {
+		ref := model.ObjectRef{Kind: kind, Namespace: ns, Name: name}
+		if _, ok := idx.Files[ref]; !ok {
 			continue
 		}
-		for ref, p := range files {
-			if p == path && (ref.Kind != kind || ref.Name != name) {
-				return "", fmt.Errorf("%w: %s/%s is declared in %s beside other objects; change it in git", model.ErrConflict, namespace, name, path)
-			}
-		}
-		return path, nil
+		return soleDeclarer(idx, []model.ObjectRef{ref})
 	}
 	return "", fmt.Errorf("%w: %s/%s not on %s", model.ErrNotFound, namespace, name, c.baseBranch)
 }
@@ -46,7 +41,11 @@ func (c *Coordinator) DeclaredFiles(proj project.ProjectInfo) (map[model.ObjectR
 	if err != nil {
 		return nil, err
 	}
-	return read.DeclaredFilesOnBranch(c.baseBranch)
+	idx, err := read.DeclaredFilesOnBranch(c.baseBranch)
+	if err != nil {
+		return nil, err
+	}
+	return idx.Files, nil
 }
 
 // ObjectSpec reads a declared object back as the form spec its create route

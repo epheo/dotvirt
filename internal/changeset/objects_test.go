@@ -8,6 +8,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
+	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
@@ -98,6 +99,66 @@ func TestStageDeleteObjects(t *testing.T) {
 	if !errors.Is(err, model.ErrNotFound) {
 		t.Errorf("want ErrNotFound for an undeclared network, got %v", err)
 	}
+}
+
+// The whole-file rule in every direction: a re-submitted namespace form that
+// renames the primary network is a conflict, not an edit that prunes it; a file
+// declaring the same policy name in two namespaces is never deleted whole; a
+// file with documents the index cannot name is opaque; a cluster-scoped route
+// is found under the cluster sentinel.
+func TestSoleDeclarerRefusals(t *testing.T) {
+	_, np, err := netgen.NetworkPolicyManifest(netgen.NetworkPolicySpec{Name: "default-deny", Namespace: "alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, np2, err := netgen.NetworkPolicyManifest(netgen.NetworkPolicySpec{Name: "default-deny", Namespace: "beta"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fwPath, fw, err := netgen.EgressFirewallManifest(netgen.EgressFirewallSpec{Namespace: "alpha", Rules: []netgen.EgressRule{{Action: "Deny", CIDR: "0.0.0.0/0"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routePath, route, err := netgen.ExternalRouteManifest(netgen.ExternalRouteSpec{Name: "gw", Namespaces: []string{"alpha"}, NextHops: []string{"10.0.0.1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nsPath, nsContent, err := netgen.NamespaceManifest(netgen.NamespaceSpec{Name: "alpha", Project: "p", Repo: "r", VMNetwork: &netgen.PrimaryNet{Name: "vm-net", Subnet: "10.30.0.0/24"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare := seedBareFiles(t, map[string][]byte{
+		"policies/default-deny.yaml": append(append(np, []byte("---\n")...), np2...),
+		fwPath:                       append(fw, []byte("---\n# scratch notes\nfoo: bar\n")...),
+		routePath:                    route,
+		nsPath:                       nsContent,
+	})
+	c := newTestCoordinator(t)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+
+	if _, err := c.StageDelete(id, proj, string(draft.ResourceNetworkPolicy), "alpha", "default-deny"); !errors.Is(err, model.ErrConflict) {
+		t.Errorf("same kind+name in two namespaces of one file: want ErrConflict, got %v", err)
+	}
+	if _, err := c.StageDelete(id, proj, string(draft.ResourceEgressFirewall), "alpha", "default"); !errors.Is(err, model.ErrConflict) {
+		t.Errorf("file with an unnamed trailing document: want ErrConflict, got %v", err)
+	}
+	if path, err := c.locate(mustRead(t, c, proj), draft.ResourceExternalRoute, ClusterScopeNS, "gw"); err != nil || path != routePath {
+		t.Errorf("cluster-scoped route: path=%q err=%v", path, err)
+	}
+	raw, _ := json.Marshal(netgen.NamespaceSpec{Name: "alpha", VMNetwork: &netgen.PrimaryNet{Name: "vm-net2", Subnet: "10.30.0.0/24"}})
+	if _, err := c.StageCreateNamespace(id, proj, proj, raw); !errors.Is(err, model.ErrConflict) {
+		t.Errorf("namespace re-submitted with another primary network: want ErrConflict, got %v", err)
+	}
+}
+
+func mustRead(t *testing.T, c *Coordinator, proj project.ProjectInfo) *git.Repo {
+	t.Helper()
+	read, err := c.read(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return read
 }
 
 // ObjectSpec hands the edit form the spec that rendered the declared file.

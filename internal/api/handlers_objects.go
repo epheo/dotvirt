@@ -100,9 +100,9 @@ func (s *Server) sourceFiles(ctx context.Context, id auth.Identity, c *cluster.C
 		if idx, ok := indexes[p.Name]; ok {
 			return idx
 		}
-		idx, err := s.draft.DeclaredFiles(p)
-		if err != nil {
-			idx = nil
+		var idx map[model.ObjectRef]string
+		if p.Error == "" { // a project the resolver flagged has no repo to read
+			idx, _ = s.draft.DeclaredFiles(p)
 		}
 		indexes[p.Name] = idx
 		return idx

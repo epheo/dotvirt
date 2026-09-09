@@ -109,7 +109,10 @@
 				: share === 'shared'
 					? { name, scope: 'shared', namespaces: selectedNs }
 					: { name, namespace, scope: 'project' };
-		if (subnet.trim()) req.subnets = [subnet.trim()];
+		// An existing segment keeps its subnets verbatim: the form shows the
+		// first one and OVN-K freezes them all.
+		if (editing) req.subnets = initial!.subnets;
+		else if (subnet.trim()) req.subnets = [subnet.trim()];
 		await api.createNetwork(req);
 	}
 </script>

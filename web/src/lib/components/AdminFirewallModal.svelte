@@ -28,12 +28,15 @@
 	// singleton default that backstops everything, Allow/Deny only. Subject and peers
 	// are namespace selectors - Groups of projects. Cluster-scoped + admin-only, so it
 	// is proposed to the platform repo and gated like a CUDN.
+	// seeded marks a row read back from git: an Allow-from-all there is a
+	// declared rule, where an untouched default row in a new policy is not.
 	type Row = {
 		action: 'Allow' | 'Deny' | 'Pass';
 		key: string;
 		value: string;
 		proto: 'TCP' | 'UDP' | 'SCTP';
 		port: number | null;
+		seeded?: boolean;
 	};
 	const blankRow = (): Row => ({ action: 'Allow', key: '', value: '', proto: 'TCP', port: null });
 
@@ -60,6 +63,7 @@
 				value,
 				proto: port?.protocol ?? 'TCP',
 				port: port?.port ?? null,
+				seeded: true,
 			};
 		}),
 	);
@@ -88,7 +92,7 @@
 			// Skip an untouched default row so it can't silently ship an "Allow from all
 			// namespaces" rule; an explicit Deny/Pass or any configured peer/port is kept
 			// (an empty {} peer is a legitimate "all namespaces" selector once intended).
-			if (r.action === 'Allow' && !r.key.trim() && r.port == null) continue;
+			if (r.action === 'Allow' && !r.key.trim() && r.port == null && !r.seeded) continue;
 			const rule: AdminPolicyRule = {
 				action: r.action,
 				// An empty selector ({}) is a valid "all namespaces" peer.

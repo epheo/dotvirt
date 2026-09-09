@@ -95,7 +95,11 @@ func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, 
 		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
 	}
 	entry.Kind = draft.KindCreate
-	if path, err := c.declaringFile(read, entry); err != nil {
+	idx, err := read.DeclaredFilesOnBranch(c.baseBranch)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	if path, err := soleDeclarer(idx, git.DeclaredRefs(entry.SourceFile, []byte(entry.Manifest))); err != nil {
 		return model.DraftView{}, err
 	} else if path != "" {
 		entry.Kind, entry.SourceFile = draft.KindEdit, path
@@ -106,39 +110,38 @@ func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, 
 	return c.Get(id, proj)
 }
 
-// declaringFile is the base-branch file already declaring the rendered entry's
-// objects, or "" when none does. A file is replaceable only when it declares
-// exactly the rendered set: rewriting a file that also holds other objects (a
-// namespace beside its primary network) would silently drop them, so that case
-// is a conflict to resolve in git.
-func (c *Coordinator) declaringFile(read *git.Repo, entry draft.Entry) (string, error) {
-	files, err := read.DeclaredFilesOnBranch(c.baseBranch)
-	if err != nil {
-		return "", err
-	}
-	refs := git.DeclaredRefs(entry.SourceFile, []byte(entry.Manifest))
+// soleDeclarer is the base-branch file declaring exactly refs, or "" when git
+// declares none of them. Anything in between is a conflict to resolve in git:
+// refs split across files, a file also holding other objects (a namespace
+// beside its primary network) or documents the index cannot name. A rewrite
+// or removal acts on the whole file, so it is offered only when the file is
+// nothing but the objects asked for.
+func soleDeclarer(idx git.DeclaredIndex, refs []model.ObjectRef) (string, error) {
 	path := ""
 	for _, ref := range refs {
-		p, ok := files[ref]
-		if !ok {
-			continue
+		if p, ok := idx.Files[ref]; ok && path != "" && p != path {
+			return "", fmt.Errorf("%w: %s is declared across several files; edit it in git", model.ErrConflict, ref.Name)
+		} else if ok {
+			path = p
 		}
-		if path != "" && p != path {
-			return "", fmt.Errorf("%w: %s is declared across several files; edit it in git", model.ErrConflict, entry.Name)
-		}
-		path = p
 	}
 	if path == "" {
 		return "", nil
 	}
-	declared := 0
-	for _, p := range files {
-		if p == path {
-			declared++
+	want := make(map[model.ObjectRef]bool, len(refs))
+	for _, ref := range refs {
+		if _, ok := idx.Files[ref]; !ok {
+			return "", fmt.Errorf("%w: %s is declared in %s beside objects not in this change; edit it in git", model.ErrConflict, ref.Name, path)
+		}
+		want[ref] = true
+	}
+	for ref, p := range idx.Files {
+		if p == path && !want[ref] {
+			return "", fmt.Errorf("%w: %s/%s is declared in %s beside other objects; edit it in git", model.ErrConflict, ref.Namespace, ref.Name, path)
 		}
 	}
-	if declared != len(refs) {
-		return "", fmt.Errorf("%w: %s is declared in %s beside other objects; edit it in git", model.ErrConflict, entry.Name, path)
+	if idx.Opaque[path] {
+		return "", fmt.Errorf("%w: %s holds documents beside its declared objects; edit it in git", model.ErrConflict, path)
 	}
 	return path, nil
 }

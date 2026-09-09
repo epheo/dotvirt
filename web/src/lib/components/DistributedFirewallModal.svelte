@@ -34,7 +34,15 @@
 	// resolves through. The policy protects the "applied-to" Group and allows ingress
 	// only from the peer Groups in its rules (a NetworkPolicy that selects pods
 	// default-denies all other ingress). One ingress row = one allow-from rule.
-	type Row = { key: string; value: string; proto: 'TCP' | 'UDP' | 'SCTP'; port: number | null };
+	// seeded marks a row read back from git: an empty one is a deliberate
+	// allow-all there, where an untouched blank row in a new policy is not.
+	type Row = {
+		key: string;
+		value: string;
+		proto: 'TCP' | 'UDP' | 'SCTP';
+		port: number | null;
+		seeded?: boolean;
+	};
 	const blankRow = (): Row => ({ key: '', value: '', proto: 'TCP', port: null });
 
 	// svelte-ignore state_referenced_locally
@@ -51,7 +59,7 @@
 		initial?.ingress?.map((r) => {
 			const [key, value] = Object.entries(r.from?.[0] ?? {})[0] ?? ['', ''];
 			const port = r.ports?.[0];
-			return { key, value, proto: port?.protocol ?? 'TCP', port: port?.port ?? null };
+			return { key, value, proto: port?.protocol ?? 'TCP', port: port?.port ?? null, seeded: true };
 		}),
 	);
 	const rows = $derived(rules.rows);
@@ -85,8 +93,9 @@
 			const rule: PolicyRule = {};
 			if (r.key.trim()) rule.from = [{ [r.key.trim()]: r.value.trim() }];
 			if (r.port != null) rule.ports = [{ protocol: r.proto, port: r.port }];
-			// Skip wholly-empty rows (they would allow all traffic, defeating the policy).
-			if (rule.from || rule.ports) ingress.push(rule);
+			// Skip wholly-empty rows the user added (they would allow all traffic,
+			// defeating the policy); a seeded one is what git already says.
+			if (rule.from || rule.ports || r.seeded) ingress.push(rule);
 		}
 		const req: NetworkPolicyCreate = { name, namespace };
 		if (appliedKey.trim()) req.appliedTo = { [appliedKey.trim()]: appliedValue.trim() };
