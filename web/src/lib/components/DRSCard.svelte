@@ -48,7 +48,7 @@
 	const liveStatus = $derived.by(() => {
 		if (!view) return '';
 		const l = view.live;
-		if (l.stale) return 'Status unavailable — the descheduler watch is failing';
+		if (l.stale) return 'Status unavailable: dotvirt cannot read the descheduler state right now';
 		if (l.degraded) return `Operator degraded: ${l.degraded}`;
 		if (l.deployed) return l.available ? 'Operator running' : 'Operator starting';
 		if (l.apiPresent && !l.synced) return 'Reading descheduler state…';

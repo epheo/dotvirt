@@ -687,7 +687,7 @@
 					</div>
 					<textarea
 						bind:value={message}
-						placeholder="Description (optional — the semantic summary is appended)"
+						placeholder="Description (optional; the change summary is appended)"
 						rows="2"
 						class="mt-2 w-full rounded border border-line-strong px-2 py-1.5 text-sm"></textarea>
 				</div>

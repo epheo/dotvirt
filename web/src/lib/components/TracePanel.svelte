@@ -178,7 +178,7 @@
 			</div>
 			{#if !result.steps.length}
 				<p class="px-3 py-3 text-xs text-ink-faint">
-					No policy state available — the networking snapshot is empty.
+					No policy state available: no network policies are visible yet.
 				</p>
 			{:else}
 				<ol class="divide-y divide-line-soft">

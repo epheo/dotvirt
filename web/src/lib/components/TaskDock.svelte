@@ -193,7 +193,7 @@
 			onpointerup={onResizeEnd}
 			role="separator"
 			aria-orientation="horizontal"
-			aria-label="Resize panel"
+			aria-label="Resize Recent Tasks"
 		></div>
 	{/if}
 	<!-- Tabbed header: Recent Tasks | Events + collapse. -->

@@ -570,7 +570,7 @@
 {:else}
 	<Wizard
 		title="New Virtual Machine"
-		footerHint="Staged into the changeset; open a PR from “Changes”."
+		footerHint="Staged into Changes; open a PR from there."
 		finishLabel={op.busy ? 'Staging…' : 'Stage VM'}
 		canFinish={valid}
 		submitting={op.busy}
