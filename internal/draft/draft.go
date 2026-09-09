@@ -89,6 +89,68 @@ func (r Resource) CreateLabel() string {
 	}
 }
 
+// EditLabel names an in-place rewrite of this resource's manifest in the Changes
+// pane (the git-declared object edited from its form).
+func (r Resource) EditLabel() string {
+	switch r {
+	case ResourceNetwork:
+		return "Edit network"
+	case ResourceUplink:
+		return "Edit uplink"
+	case ResourceEgressFirewall:
+		return "Edit gateway firewall"
+	case ResourceEgressIP:
+		return "Edit SNAT pool"
+	case ResourceExternalRoute:
+		return "Edit external route"
+	case ResourceNetworkPolicy:
+		return "Edit distributed firewall policy"
+	case ResourceAdminNetworkPolicy:
+		return "Edit admin firewall policy"
+	case ResourceBaselineAdminNetworkPolicy:
+		return "Edit baseline firewall policy"
+	case ResourceTemplate:
+		return "Edit template"
+	default:
+		return "Edit " + string(r)
+	}
+}
+
+// Kinds are the Kubernetes kinds a resource's manifest can declare - how the
+// delete and read-back paths find the object in git. A network is one of three
+// backings; every other resource is a single kind. Empty for a resource that is
+// a file set rather than one object (DRS).
+func (r Resource) Kinds() []string {
+	switch r {
+	case "", ResourceVM:
+		return []string{"VirtualMachine"}
+	case ResourceNetwork:
+		return []string{"UserDefinedNetwork", "ClusterUserDefinedNetwork", "NetworkAttachmentDefinition"}
+	case ResourceUplink:
+		return []string{"NodeNetworkConfigurationPolicy"}
+	case ResourceNamespace:
+		return []string{"Namespace"}
+	case ResourceRoleBinding:
+		return []string{"RoleBinding"}
+	case ResourceEgressFirewall:
+		return []string{"EgressFirewall"}
+	case ResourceEgressIP:
+		return []string{"EgressIP"}
+	case ResourceExternalRoute:
+		return []string{"AdminPolicyBasedExternalRoute"}
+	case ResourceNetworkPolicy:
+		return []string{"NetworkPolicy"}
+	case ResourceAdminNetworkPolicy:
+		return []string{"AdminNetworkPolicy"}
+	case ResourceBaselineAdminNetworkPolicy:
+		return []string{"BaselineAdminNetworkPolicy"}
+	case ResourceTemplate:
+		return []string{"VirtualMachineTemplate"}
+	default:
+		return nil
+	}
+}
+
 // Entry is one pending change, keyed by resource+namespace/name within its
 // (user,project).
 type Entry struct {

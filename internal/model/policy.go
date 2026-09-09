@@ -42,6 +42,9 @@ type Policy struct {
 	// filter must then keep the row rather than hide a possibly-applying rule.
 	Namespaces []string         `json:"namespaces,omitempty"`
 	Rules      []PolicyRuleView `json:"rules,omitempty"`
+	// SourceFile is the manifest declaring this policy in its project's repo (the
+	// platform repo for a cluster-scoped one); empty when git does not declare it.
+	SourceFile string `json:"sourceFile,omitempty"`
 
 	Sync      SyncStatus `json:"sync,omitempty"`
 	Health    string     `json:"health,omitempty"`

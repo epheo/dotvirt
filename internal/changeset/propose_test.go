@@ -305,7 +305,7 @@ func proposedBranchFor(user, proj string) string {
 func TestProposeSelfHealsSatisfiedDraft(t *testing.T) {
 	f := newProposeFixture(t) // no forge routes: any forge call fails the test
 
-	if _, err := f.c.StageDelete(f.id, f.proj, "alpha", "web"); err != nil {
+	if _, err := f.c.StageDelete(f.id, f.proj, "", "alpha", "web"); err != nil {
 		t.Fatalf("StageDelete: %v", err)
 	}
 	// The deletion lands in git out-of-band before the propose.

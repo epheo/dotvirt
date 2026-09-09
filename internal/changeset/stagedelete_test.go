@@ -33,7 +33,7 @@ func TestStageDeleteStagesRemoval(t *testing.T) {
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
-	view, err := c.StageDelete(id, proj, "alpha", "web")
+	view, err := c.StageDelete(id, proj, "", "alpha", "web")
 	if err != nil {
 		t.Fatalf("StageDelete: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestStageDeleteAbsentNotFound(t *testing.T) {
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
-	_, err := c.StageDelete(id, proj, "alpha", "ghost")
+	_, err := c.StageDelete(id, proj, "", "alpha", "ghost")
 	if !errors.Is(err, model.ErrNotFound) {
 		t.Fatalf("want model.ErrNotFound, got %v", err)
 	}

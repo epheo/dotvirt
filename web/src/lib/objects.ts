@@ -1,0 +1,118 @@
+// Edit and delete for the git-declared network-family objects (segments,
+// firewall rules, Tier-0 services). One entry point for every surface that
+// lists them: the object read back from git feeds the same modal that created
+// it, and a delete stages the file's removal like a VM delete.
+import {
+	api,
+	type AdminNetworkPolicyCreate,
+	type EgressFirewallCreate,
+	type EgressIPCreate,
+	type ExternalRouteCreate,
+	type Network,
+	type NetworkCreate,
+	type NetworkPolicyCreate,
+	type Policy,
+} from '$lib/api';
+import { friendlyError } from '$lib/format';
+import { inventory } from '$lib/state/inventory.svelte';
+import { ui } from '$lib/state/ui.svelte';
+
+/** The draft identity of an object: resource, namespace ('cluster' when cluster-scoped), name. */
+export interface ObjectRef {
+	resource: string;
+	namespace: string;
+	name: string;
+}
+
+const CLUSTER = 'cluster';
+
+const policyResource: Record<Policy['kind'], string> = {
+	dfw: 'networkpolicy',
+	gateway: 'egressfirewall',
+	admin: 'adminnetworkpolicy',
+	baseline: 'baselineadminnetworkpolicy',
+	egressip: 'egressip',
+	route: 'externalroute',
+};
+
+export function networkRef(n: Network): ObjectRef {
+	return {
+		resource: 'network',
+		namespace: n.scope === 'shared' ? CLUSTER : (n.namespace ?? ''),
+		name: n.name,
+	};
+}
+
+export function policyRef(p: Policy): ObjectRef {
+	return { resource: policyResource[p.kind], namespace: p.namespace || CLUSTER, name: p.name };
+}
+
+// A segment's subnet, topology, VLAN and uplink are frozen by OVN-K once
+// created, so only a shared segment's publication list is editable.
+export const canEditNetwork = (n: Network) => !!n.sourceFile && n.scope === 'shared';
+export const canEditPolicy = (p: Policy) => !!p.sourceFile;
+
+/** Read the object back from git and open its form with those values. */
+export async function openEdit(ref: ObjectRef) {
+	let spec: unknown;
+	try {
+		({ spec } = await api.objectSpec(ref.resource, ref.namespace, ref.name));
+	} catch (e) {
+		ui.showToast(friendlyError(e), { kind: 'error' });
+		return;
+	}
+	const modal = modalFor(ref.resource, spec);
+	if (!modal) {
+		ui.showToast(`${ref.name} has settings this form cannot edit; change its manifest in git.`, {
+			kind: 'error',
+		});
+		return;
+	}
+	ui.modal = modal;
+}
+
+export function openDelete(ref: ObjectRef, sourceFile: string) {
+	ui.modal = { kind: 'deleteObject', ...ref, sourceFile };
+}
+
+// The forms hold one selector and one port per rule; a spec wider than that
+// (git allows it) must not be flattened into the form and re-rendered narrower.
+const one = (m?: Record<string, string>) => Object.keys(m ?? {}).length <= 1;
+
+function modalFor(resource: string, spec: unknown): typeof ui.modal {
+	const namespaces = inventory.namespaces;
+	switch (resource) {
+		case 'network':
+			return { kind: 'newNetwork', initial: spec as NetworkCreate };
+		case 'networkpolicy': {
+			const s = spec as NetworkPolicyCreate;
+			const fits =
+				one(s.appliedTo) &&
+				(s.ingress ?? []).every(
+					(r) => (r.from?.length ?? 0) <= 1 && one(r.from?.[0]) && (r.ports?.length ?? 0) <= 1,
+				);
+			return fits ? { kind: 'dfw', namespaces, initial: s } : null;
+		}
+		case 'egressfirewall': {
+			const s = spec as EgressFirewallCreate;
+			const fits = s.rules.every((r) => (r.ports?.length ?? 0) <= 1);
+			return fits ? { kind: 'egressFw', namespaces, initial: s } : null;
+		}
+		case 'adminnetworkpolicy':
+		case 'baselineadminnetworkpolicy': {
+			const s = spec as AdminNetworkPolicyCreate;
+			const fits =
+				one(s.subject) &&
+				!s.egress?.length &&
+				(s.ingress ?? []).every(
+					(r) => r.peers.length === 1 && one(r.peers[0]) && (r.ports?.length ?? 0) <= 1,
+				);
+			return fits ? { kind: 'adminFw', initial: s } : null;
+		}
+		case 'egressip':
+			return { kind: 'tier0', initial: { kind: 'snat', spec: spec as EgressIPCreate } };
+		case 'externalroute':
+			return { kind: 'tier0', initial: { kind: 'route', spec: spec as ExternalRouteCreate } };
+	}
+	return null;
+}

@@ -64,7 +64,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.draft.StageDelete(sc.id, sc.proj, ns, name)
+	result, err := s.draft.StageDelete(sc.id, sc.proj, "", ns, name)
 	respond(w, result, err)
 }
 

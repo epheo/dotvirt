@@ -3,6 +3,7 @@
 	import { api, type EgressFirewallCreate, type EgressFirewallRule } from '$lib/api';
 	import { rowList } from '$lib/rowlist.svelte';
 	import { TERMS } from '$lib/vocab';
+	import FormField from './FormField.svelte';
 	import Note from './Note.svelte';
 	import StageModal from './StageModal.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
@@ -12,15 +13,19 @@
 
 	let {
 		namespaces,
-		namespace: initial,
+		namespace: preselected,
+		initial,
 		onclose,
 		onstaged,
 	}: {
 		namespaces: string[];
 		namespace?: string; // preselected namespace (e.g. from a namespace context menu)
+		initial?: EgressFirewallCreate; // the firewall as git declares it: edit, not create
 		onclose: () => void;
 		onstaged: () => void;
 	} = $props();
+	// svelte-ignore state_referenced_locally
+	const editing = !!initial;
 
 	// One editable rule row. A rule allows or denies egress to a destination - a CIDR
 	// or a DNS name (exactly one) - optionally narrowed to a single transport port.
@@ -35,8 +40,22 @@
 	};
 	const blank = (): Row => ({ action: 'Allow', dest: 'cidr', value: '', proto: 'TCP', port: null });
 
-	let namespace = $state('');
-	const rules = rowList(blank);
+	// svelte-ignore state_referenced_locally
+	let namespace = $state(initial?.namespace ?? '');
+	const rules = rowList(
+		blank,
+		// svelte-ignore state_referenced_locally
+		initial?.rules.map((r) => {
+			const port = r.ports?.[0];
+			return {
+				action: r.action,
+				dest: r.dnsName ? ('dns' as const) : ('cidr' as const),
+				value: r.dnsName ?? r.cidr ?? '',
+				proto: port?.protocol ?? 'TCP',
+				port: port?.port ?? null,
+			};
+		}),
+	);
 	const rows = $derived(rules.rows);
 
 	const missing = $derived.by(() => {
@@ -49,7 +68,7 @@
 	const valid = $derived(missing.length === 0);
 	const summary = $derived(
 		valid
-			? `Stages egress firewall (${rows.length} rule${rows.length === 1 ? '' : 's'}) → ${namespace}`
+			? `${editing ? 'Updates' : 'Stages'} egress firewall (${rows.length} rule${rows.length === 1 ? '' : 's'}) → ${namespace}`
 			: '',
 	);
 
@@ -67,16 +86,24 @@
 </script>
 
 <StageModal
-	title={`${TERMS.gatewayFirewall.net} · ${TERMS.gatewayFirewall.virt}`}
+	title={editing
+		? `Edit ${TERMS.gatewayFirewall.net} · ${namespace}`
+		: `${TERMS.gatewayFirewall.net} · ${TERMS.gatewayFirewall.virt}`}
 	size="lg"
-	label="Stage firewall"
+	label={editing ? 'Stage changes' : 'Stage firewall'}
 	{missing}
 	{summary}
 	onsubmit={stage}
 	{onstaged}
 	{onclose}
 >
-	<NamespaceSelect bind:namespace {namespaces} {initial} />
+	{#if editing}
+		<FormField label="Project (namespace)">
+			<TextInput value={namespace} mono disabled />
+		</FormField>
+	{:else}
+		<NamespaceSelect bind:namespace {namespaces} initial={preselected} />
+	{/if}
 
 	<div class="space-y-2">
 		<div class="flex items-center justify-between">

@@ -1,7 +1,9 @@
 <script lang="ts">
 	import type { VM } from '$lib/api';
 	import { POD_NETWORK } from '$lib/lenses';
+	import { Pencil, Trash2 } from 'lucide-svelte';
 	import { networkByRef, kindLabel } from '$lib/networks';
+	import { canEditNetwork, networkRef, openDelete, openEdit } from '$lib/objects';
 	import { segmentType } from '$lib/vocab';
 	import { vmHref } from '$lib/nav';
 	import { inventory } from '$lib/state/inventory.svelte';
@@ -21,6 +23,28 @@
 <div class="min-h-0 flex-1 overflow-y-auto p-4">
 	<div class="max-w-2xl space-y-4">
 		<InfoCard title={pg ? pg.name : network}>
+			{#snippet action()}
+				<!-- Edit and delete act on the manifest git declares. Only a shared
+				     segment's publication list can change once it exists. -->
+				{#if pg?.sourceFile}
+					<div class="flex items-center gap-3 text-xs">
+						{#if canEditNetwork(pg)}
+							<button
+								type="button"
+								onclick={() => openEdit(networkRef(pg))}
+								class="inline-flex items-center gap-1 text-accent hover:underline"
+								><Pencil size={12} /> Edit publication</button
+							>
+						{/if}
+						<button
+							type="button"
+							onclick={() => openDelete(networkRef(pg), pg.sourceFile!)}
+							class="inline-flex items-center gap-1 text-danger-ink hover:underline"
+							><Trash2 size={12} /> Delete</button
+						>
+					</div>
+				{/if}
+			{/snippet}
 			<dl class="divide-y divide-line-soft text-[13px]">
 				<Row
 					label="Type"
@@ -40,6 +64,13 @@
 					{#if pg.subnets?.length}<Row label="Subnets" value={pg.subnets.join(', ')} />{/if}
 					<Row label="Backing">
 						<span class="text-ink-muted">{pg.backing}</span>
+					</Row>
+					<Row label="Declared in">
+						{#if pg.sourceFile}
+							<span class="font-mono text-xs text-ink-muted">{pg.sourceFile}</span>
+						{:else}
+							<span class="text-ink-faint">not in git</span>
+						{/if}
 					</Row>
 					{#if pg.sync}
 						<Row label="Sync">

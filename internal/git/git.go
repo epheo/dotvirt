@@ -58,6 +58,7 @@ type Repo struct {
 	// hash is read from the local mirror (no network), unlike headsSignature.
 	parseMu    sync.Mutex
 	parseCache map[string]branchParse
+	decl       declIndex // DeclaredFilesOnBranch, same invalidation
 }
 
 // branchParse is one branch's parsed VMs and the commit hash they reflect.

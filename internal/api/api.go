@@ -59,7 +59,12 @@ type Draft interface {
 	StageDisableDRS(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
 	DRSState(proj project.ProjectInfo) (model.DRSGitState, error)
 	DRSDraft(id auth.Identity, proj project.ProjectInfo) (model.DRSDraftState, error)
-	StageDelete(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
+	// StageDelete removes a declared object (a VM when resource is empty).
+	StageDelete(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) (model.DraftView, error)
+	// ObjectSpec reads a declared object back as the spec its create form accepts.
+	ObjectSpec(proj project.ProjectInfo, resource, namespace, name string) (model.ObjectSpec, error)
+	// DeclaredFiles maps every object proj's base branch declares to its file.
+	DeclaredFiles(proj project.ProjectInfo) (map[model.ObjectRef]string, error)
 	Unstage(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) error
 	Get(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
 	Discard(id auth.Identity, proj project.ProjectInfo) error
@@ -277,6 +282,11 @@ func (s *Server) Handler() http.Handler {
 	// applies it on merge.
 	mux.HandleFunc("POST /api/networkpolicies", s.namespacedCreate("a network policy", Draft.StageCreateNetworkPolicy))
 	mux.HandleFunc("POST /api/adminnetworkpolicies", s.handleCreateAdminNetworkPolicy)
+	// Every create above stages an EDIT when git already declares the object, so
+	// the same form and route change one. Read-back for that form, and delete,
+	// address the object by its draft identity (see handlers_objects.go).
+	mux.HandleFunc("GET /api/objects/{resource}/{namespace}/{name}", s.handleObjectSpec)
+	mux.HandleFunc("DELETE /api/objects/{resource}/{namespace}/{name}", s.handleObjectDelete)
 	mux.HandleFunc("POST /api/namespaces", s.handleCreateNamespace)
 	mux.HandleFunc("POST /api/projects", s.handleCreateProject)
 	mux.HandleFunc("GET /api/templates", s.handleTemplates)

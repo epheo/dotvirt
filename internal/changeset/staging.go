@@ -6,6 +6,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
+	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
@@ -80,8 +81,13 @@ const ClusterScopeNS = "cluster"
 // error (spec decode included) is the caller's input, wrapped as ErrInvalid.
 // render returns the entry minus Kind; the entry's Namespace is the object's own
 // or the ClusterScopeNS sentinel.
+//
+// The rendered manifest is a create when git does not yet declare its objects
+// and an edit - the same rendering replacing the declaring file - when it does:
+// one path for the form that creates an object and the form that changes it.
 func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, render func() (draft.Entry, error)) (model.DraftView, error) {
-	if err := requireRepo(proj); err != nil {
+	read, err := c.read(proj)
+	if err != nil {
 		return model.DraftView{}, err
 	}
 	entry, err := render()
@@ -89,10 +95,52 @@ func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, 
 		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
 	}
 	entry.Kind = draft.KindCreate
+	if path, err := c.declaringFile(read, entry); err != nil {
+		return model.DraftView{}, err
+	} else if path != "" {
+		entry.Kind, entry.SourceFile = draft.KindEdit, path
+	}
 	if err := c.store.Stage(id.Username, proj.Name, entry); err != nil {
 		return model.DraftView{}, err
 	}
 	return c.Get(id, proj)
+}
+
+// declaringFile is the base-branch file already declaring the rendered entry's
+// objects, or "" when none does. A file is replaceable only when it declares
+// exactly the rendered set: rewriting a file that also holds other objects (a
+// namespace beside its primary network) would silently drop them, so that case
+// is a conflict to resolve in git.
+func (c *Coordinator) declaringFile(read *git.Repo, entry draft.Entry) (string, error) {
+	files, err := read.DeclaredFilesOnBranch(c.baseBranch)
+	if err != nil {
+		return "", err
+	}
+	refs := git.DeclaredRefs(entry.SourceFile, []byte(entry.Manifest))
+	path := ""
+	for _, ref := range refs {
+		p, ok := files[ref]
+		if !ok {
+			continue
+		}
+		if path != "" && p != path {
+			return "", fmt.Errorf("%w: %s is declared across several files; edit it in git", model.ErrConflict, entry.Name)
+		}
+		path = p
+	}
+	if path == "" {
+		return "", nil
+	}
+	declared := 0
+	for _, p := range files {
+		if p == path {
+			declared++
+		}
+	}
+	if declared != len(refs) {
+		return "", fmt.Errorf("%w: %s is declared in %s beside other objects; edit it in git", model.ErrConflict, entry.Name, path)
+	}
+	return path, nil
 }
 
 // stageSpec decodes rawSpec into S, renders its manifest, and stages it: the
@@ -237,27 +285,26 @@ func (c *Coordinator) StageCreateAdminNetworkPolicy(id auth.Identity, proj proje
 		})
 }
 
-// StageDelete records the removal of an existing VM in (id, proj)'s draft. The VM
-// must exist on the base branch (you can't delete what isn't in git - an unstaged
-// create should be unstaged, not deleted); its manifest path is captured so the
-// propose step removes that file and Argo prunes the VM on merge.
-func (c *Coordinator) StageDelete(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error) {
+// StageDelete records the removal of an existing object (a VM when resource is
+// empty) in (id, proj)'s draft. The object must be declared on the base branch
+// (you can't delete what isn't in git - an unstaged create should be unstaged,
+// not deleted); its file is captured so the propose step removes it and Argo
+// prunes the object on merge. Cluster-scoped objects name ClusterScopeNS.
+func (c *Coordinator) StageDelete(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) (model.DraftView, error) {
 	read, err := c.read(proj)
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	vm, ok, err := read.FindVMOnBranch(c.baseBranch, namespace, name)
+	path, err := c.locate(read, draft.Resource(resource), namespace, name)
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if !ok {
-		return model.DraftView{}, fmt.Errorf("%w: %s/%s not on %s", model.ErrNotFound, namespace, name, c.baseBranch)
-	}
 	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
 		Kind:       draft.KindDelete,
+		Resource:   draft.Resource(resource),
 		Namespace:  namespace,
 		Name:       name,
-		SourceFile: vm.SourceFile,
+		SourceFile: path,
 	}); err != nil {
 		return model.DraftView{}, err
 	}

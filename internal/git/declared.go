@@ -79,17 +79,13 @@ func DeclaredRefs(path string, content []byte) []model.ObjectRef {
 // templates/ is excluded to match the Application's own source exclusion: a template
 // is a blueprint the repo stores, not an object it declares.
 func (r *Repo) DeclaredOnBranch(branch string) (map[model.ObjectRef]bool, error) {
-	out := map[model.ObjectRef]bool{}
-	err := r.walkYAML(branch,
-		func(path string) bool { return !inTemplatesDir(path) },
-		func(path string, content []byte) error {
-			for _, ref := range DeclaredRefs(path, content) {
-				out[ref] = true
-			}
-			return nil
-		})
+	files, err := r.DeclaredFilesOnBranch(branch)
 	if err != nil {
 		return nil, err
+	}
+	out := make(map[model.ObjectRef]bool, len(files))
+	for ref := range files {
+		out[ref] = true
 	}
 	return out, nil
 }

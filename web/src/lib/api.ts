@@ -377,6 +377,15 @@ export const api = {
 	disableDRS: () => req<DraftView>('/api/drs', { method: 'DELETE' }),
 	stageDelete: (namespace: string, name: string) =>
 		post<DraftView>(`${vmPath(namespace, name)}/delete`, {}),
+	// A git-declared network-family object by its draft identity (namespace
+	// 'cluster' for a cluster-scoped one): read back as the spec its create form
+	// accepts, or stage its removal. Creates of a declared object stage an edit.
+	objectSpec: (resource: string, namespace: string, name: string) =>
+		get<gen.ObjectSpec>(`/api/objects/${enc(resource)}/${enc(namespace)}/${enc(name)}`),
+	deleteObject: (resource: string, namespace: string, name: string) =>
+		req<DraftView>(`/api/objects/${enc(resource)}/${enc(namespace)}/${enc(name)}`, {
+			method: 'DELETE',
+		}),
 	// project: cluster-scoped entries resolve by project.
 	unstage: (namespace: string, name: string, resource?: string, project?: string) =>
 		del(`/api/draft/${enc(namespace)}/${enc(name)}${qs({ resource, project })}`),

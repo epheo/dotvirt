@@ -14,6 +14,7 @@
 		namespaces,
 		uplinks = [],
 		canManage = false,
+		initial,
 		onclose,
 		onstaged,
 		onAddUplink,
@@ -21,23 +22,37 @@
 		namespaces: string[];
 		uplinks?: Uplink[]; // discovered Tier-0 uplinks (physical-network hints for a VLAN segment)
 		canManage?: boolean; // caller may author platform-tier segments (shared CUDN / VLAN localnet)
+		// The segment as git declares it: the form edits it instead of creating one.
+		// OVN-K freezes a segment's topology, subnet, VLAN and uplink after creation,
+		// so an edit changes only where a shared segment is published.
+		initial?: NetworkCreate;
 		onclose: () => void;
 		onstaged: () => void;
 		onAddUplink?: () => void; // open the Add Uplink (Tier-0 transport) wizard from the VLAN flow
 	} = $props();
+	// svelte-ignore state_referenced_locally
+	const editing = !!initial;
 
 	// A segment is either an overlay (Geneve) Layer2 network - project-scoped (UDN) or
 	// shared across projects (CUDN) - or a VLAN segment bridged to a Tier-0 uplink
 	// (localnet CUDN). The primary "VM Network" is NOT created here: it is a Tier-1
 	// segment born with its namespace, so it lives in New Namespace / New Project.
-	let kind = $state<'overlay' | 'vlan'>('overlay');
-	let name = $state('');
-	let subnet = $state('');
-	let namespace = $state(''); // overlay / this project (a namespace-scoped UDN)
-	let share = $state<'project' | 'shared'>('project'); // overlay: one namespace (UDN) vs selected projects (CUDN)
-	let vlan = $state<number | undefined>(undefined);
-	let physnet = $state('');
-	let selectedNs = $state<string[]>([]);
+	// svelte-ignore state_referenced_locally
+	let kind = $state<'overlay' | 'vlan'>(initial?.scope === 'vlan' ? 'vlan' : 'overlay');
+	// svelte-ignore state_referenced_locally
+	let name = $state(initial?.name ?? '');
+	// svelte-ignore state_referenced_locally
+	let subnet = $state(initial?.subnets?.[0] ?? '');
+	// svelte-ignore state_referenced_locally
+	let namespace = $state(initial?.namespace ?? ''); // overlay / this project (a namespace-scoped UDN)
+	// svelte-ignore state_referenced_locally
+	let share = $state<'project' | 'shared'>(initial?.scope === 'shared' ? 'shared' : 'project'); // overlay: one namespace (UDN) vs selected projects (CUDN)
+	// svelte-ignore state_referenced_locally
+	let vlan = $state<number | undefined>(initial?.vlan);
+	// svelte-ignore state_referenced_locally
+	let physnet = $state(initial?.physicalNetwork ?? '');
+	// svelte-ignore state_referenced_locally
+	let selectedNs = $state<string[]>(initial?.namespaces ?? []);
 
 	const kindOptions = $derived([
 		{ value: 'overlay' as const, label: 'Overlay Segment', hint: 'Internal · Geneve (Layer 2)' },
@@ -78,6 +93,8 @@
 	// wizards' review step for a single-pane dialog.
 	const summary = $derived.by(() => {
 		if (!valid) return '';
+		if (editing)
+			return `Publishes “${name}” to ${selectedNs.length} project${selectedNs.length === 1 ? '' : 's'} → platform repo`;
 		if (kind === 'vlan')
 			return `Stages VLAN ${vlan} segment “${name}” on ${physnet.trim()} → platform repo, published to ${selectedNs.length} project${selectedNs.length === 1 ? '' : 's'}`;
 		if (share === 'shared')
@@ -98,23 +115,36 @@
 </script>
 
 <StageModal
-	title={`New ${TERMS.segment.net} · ${TERMS.segment.virt}`}
-	label="Stage segment"
+	title={editing
+		? `Edit ${TERMS.segment.net} · ${name}`
+		: `New ${TERMS.segment.net} · ${TERMS.segment.virt}`}
+	label={editing ? 'Stage changes' : 'Stage segment'}
 	{missing}
 	{summary}
 	onsubmit={stage}
 	{onstaged}
 	{onclose}
 >
-	<!-- Segment type: an overlay (Geneve) Layer 2 network, or a VLAN bridged to a
+	{#if editing}
+		<!-- Everything but the publication list is frozen once the segment exists. -->
+		<p class="text-xs text-ink-muted">
+			{kind === 'vlan' ? `VLAN ${vlan} on ${physnet}` : 'Shared overlay segment'}{subnet
+				? ` · ${subnet}`
+				: ''}. Topology, subnet and VLAN cannot change after creation.
+		</p>
+	{:else}
+		<!-- Segment type: an overlay (Geneve) Layer 2 network, or a VLAN bridged to a
 			     Tier-0 uplink. -->
-	<ChoiceCards options={kindOptions} bind:value={kind} />
+		<ChoiceCards options={kindOptions} bind:value={kind} />
 
-	<FormField label="Name" error={name && !nameOK ? NAME_HINT : ''}>
-		<TextInput bind:value={name} placeholder="db-net" mono data-autofocus />
-	</FormField>
+		<FormField label="Name" error={name && !nameOK ? NAME_HINT : ''}>
+			<TextInput bind:value={name} placeholder="db-net" mono data-autofocus />
+		</FormField>
+	{/if}
 
-	{#if kind === 'overlay'}
+	{#if editing}
+		<!-- no type/namespace controls: only the publication list below -->
+	{:else if kind === 'overlay'}
 		<!-- An overlay segment is a single-project UDN, or a Layer2 CUDN shared across
 				     several projects. -->
 		{#if canManage}
@@ -157,12 +187,14 @@
 		</div>
 	{/if}
 
-	<FormField
-		label="Subnet (optional CIDR; blank = no IPAM)"
-		error={subnet && !subnetOK ? CIDR_HINT : ''}
-	>
-		<TextInput bind:value={subnet} placeholder="10.20.0.0/24" mono />
-	</FormField>
+	{#if !editing}
+		<FormField
+			label="Subnet (optional CIDR; blank = no IPAM)"
+			error={subnet && !subnetOK ? CIDR_HINT : ''}
+		>
+			<TextInput bind:value={subnet} placeholder="10.20.0.0/24" mono />
+		</FormField>
+	{/if}
 
 	<Note tone="neutral">
 		{#if kind === 'overlay'}

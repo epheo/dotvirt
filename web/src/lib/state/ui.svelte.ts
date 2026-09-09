@@ -1,21 +1,38 @@
 import { goto } from '$app/navigation';
-import type { Template, VM } from '$lib/api';
+import type {
+	AdminNetworkPolicyCreate,
+	EgressFirewallCreate,
+	EgressIPCreate,
+	ExternalRouteCreate,
+	NetworkCreate,
+	NetworkPolicyCreate,
+	Template,
+	VM,
+} from '$lib/api';
 import { reviewURL, type ReviewTarget } from '$lib/review';
+
+export type Tier0Initial =
+	{ kind: 'snat'; spec: EgressIPCreate } | { kind: 'route'; spec: ExternalRouteCreate };
 
 // Every modal the shell can show, as one discriminated union - the shell
 // renders exactly one, and opening any modal is a single assignment.
 type AppModal =
 	| { kind: 'newVM'; namespaces: string[] | null } // null = all creatable namespaces
-	| { kind: 'newNetwork' }
+	// The network-family forms take an optional initial spec: the object read
+	// back from git, so the create form doubles as the edit form.
+	| { kind: 'newNetwork'; initial?: NetworkCreate }
 	| { kind: 'uplink' }
 	| { kind: 'namespace'; project: string | null }
 	| { kind: 'newProject'; adopt?: string } // adopt = existing namespace to bring in as a project
 	| { kind: 'adoptProject'; project: string; namespaces: string[]; recover?: boolean }
 	| { kind: 'releaseProject'; project: string; namespaces: string[] }
-	| { kind: 'egressFw'; namespaces: string[]; namespace?: string }
-	| { kind: 'dfw'; namespaces: string[]; namespace?: string }
-	| { kind: 'tier0' }
-	| { kind: 'adminFw' }
+	| { kind: 'egressFw'; namespaces: string[]; namespace?: string; initial?: EgressFirewallCreate }
+	| { kind: 'dfw'; namespaces: string[]; namespace?: string; initial?: NetworkPolicyCreate }
+	| { kind: 'tier0'; initial?: Tier0Initial }
+	| { kind: 'adminFw'; initial?: AdminNetworkPolicyCreate }
+	// Stage the removal of a git-declared object (segment, firewall rule, Tier-0
+	// service) - the VM delete's confirm, for the rest of the inventory.
+	| { kind: 'deleteObject'; resource: string; namespace: string; name: string; sourceFile: string }
 	| { kind: 'upload' }
 	| { kind: 'deployTemplate'; library?: string; template?: string } // Deploy from Template (Catalog / New ▾)
 	| { kind: 'editTemplate'; template: Template } // edit a library item's manifest (Catalog)
