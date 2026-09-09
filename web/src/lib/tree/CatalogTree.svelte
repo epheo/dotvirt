@@ -14,6 +14,7 @@
 		catalogHref,
 		catalogKind,
 		catalogRows,
+		libraryLabel,
 		type CatalogKind,
 	} from '$lib/catalog';
 	import { catalog } from '$lib/state/catalog.svelte';
@@ -74,9 +75,15 @@
 						href={catalogHref(k.id, r.key)}
 					>
 						<span class="truncate text-side-ink">{r.title}</span>
+						<!-- Libraries may carry the same template name; the library tells them apart. -->
 						{#snippet trailing()}
 							{#if r.template?.error}
 								<TriangleAlert size={12} class="text-warn" />
+							{/if}
+							{#if r.template}
+								<span class="max-w-24 truncate text-[11px] text-side-dim"
+									>{libraryLabel(r.template.library)}</span
+								>
 							{/if}
 						{/snippet}
 					</TreeRow>

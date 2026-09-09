@@ -81,7 +81,10 @@
 </script>
 
 {#snippet bar(fill: number, color: string)}
-	<div class="mt-0.5 h-1.5 overflow-hidden rounded-full" style="background:var(--chart-track)">
+	<div
+		class="mt-0.5 h-1.5 max-w-56 overflow-hidden rounded-full"
+		style="background:var(--chart-track)"
+	>
 		<div class="h-full rounded-full" style="width:{pct(fill)}%;background:{color}"></div>
 	</div>
 {/snippet}
@@ -92,9 +95,9 @@
 		<table class="w-full text-left text-[13px]">
 			<thead class="border-b border-line text-xs text-ink-muted">
 				<tr>
-					<th class="px-4 py-2 font-medium">Host</th>
-					<th class="px-4 py-2 font-medium">State</th>
-					<th class="px-4 py-2 text-right font-medium">VMs</th>
+					<th class="w-0 px-4 py-2 font-medium whitespace-nowrap">Host</th>
+					<th class="w-0 px-4 py-2 font-medium whitespace-nowrap">State</th>
+					<th class="w-0 px-4 py-2 text-right font-medium whitespace-nowrap">VMs</th>
 					{#if hasLoad}
 						<th class="px-4 py-2 font-medium">CPU</th>
 						<th class="px-4 py-2 font-medium">Memory</th>
@@ -112,28 +115,28 @@
 			<tbody>
 				{#each rows as r (r.name)}
 					<tr class="border-b border-line-soft hover:bg-select-soft">
-						<td class="px-4 py-1.5">
+						<td class="px-4 py-1.5 whitespace-nowrap">
 							<a
 								href={hrefForScope({ kind: 'node', node: r.name })}
 								class="font-medium text-ink hover:text-accent-ink">{r.name}</a
 							>
 						</td>
-						<td class="px-4 py-1.5">
+						<td class="px-4 py-1.5 whitespace-nowrap">
 							{#if r.state}
 								<StatusPill tone={r.state.tone} label={r.state.label} />
 							{:else}
 								<span class="text-ink-faint">—</span>
 							{/if}
 						</td>
-						<td class="px-4 py-1.5 text-right text-ink-soft">{r.vms}</td>
+						<td class="px-4 py-1.5 text-right whitespace-nowrap text-ink-soft">{r.vms}</td>
 						{#if hasLoad}
-							<td class="w-36 px-4 py-1.5">
+							<td class="px-4 py-1.5">
 								{#if r.cpuPct !== undefined}
 									<span class="text-[11px] text-ink-muted">{Math.round(r.cpuPct)}%</span>
 									{@render bar(r.cpuPct / 100, 'var(--chart-1)')}
 								{/if}
 							</td>
-							<td class="w-36 px-4 py-1.5">
+							<td class="px-4 py-1.5">
 								{#if r.memPct}
 									<span
 										class="text-[11px] {r.memPct > 90
@@ -148,20 +151,20 @@
 							</td>
 						{/if}
 						{#if hasCap}
-							<td class="w-44 px-4 py-1.5">
+							<td class="px-4 py-1.5">
 								{#if r.vcpu}
 									{@const rc = ratio(r.vcpu)}
-									<div class="flex items-baseline justify-between text-[11px]">
+									<div class="flex max-w-56 items-baseline justify-between text-[11px]">
 										<span class="text-ink-muted">{cores(r.vcpu.used)} / {cores(r.vcpu.total)}</span>
 										<span class="text-ink-faint">{rc.toFixed(1)}:1</span>
 									</div>
 									{@render bar(rc, 'var(--chart-1)')}
 								{/if}
 							</td>
-							<td class="w-44 px-4 py-1.5">
+							<td class="px-4 py-1.5">
 								{#if r.mem}
 									{@const rm = ratio(r.mem)}
-									<div class="flex items-baseline justify-between text-[11px]">
+									<div class="flex max-w-56 items-baseline justify-between text-[11px]">
 										<span class="text-ink-muted">{bytes(r.mem.used)} / {bytes(r.mem.total)}</span>
 										<span class={rm > 1 ? 'font-medium text-warn-ink' : 'text-ink-faint'}
 											>{rm.toFixed(1)}:1</span
