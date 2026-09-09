@@ -163,7 +163,7 @@
 							`/networking?tab=security${project ? `&tenant=${encodeURIComponent(project)}` : ''}`,
 						);
 					}}
-					title="The policy plane scoped to this tenant">Security view</MenuItem
+					title="Security policies scoped to this tenant">Security view</MenuItem
 				>
 				<MenuItem
 					onclick={() => {

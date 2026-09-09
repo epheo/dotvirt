@@ -53,9 +53,9 @@
 			</section>
 		{/each}
 		<p class="max-w-2xl text-xs text-ink-faint">
-			These reflect your Kubernetes RBAC, evaluated with your own token. Configuration, power, and
-			delete aren't listed: they go through a pull request, where the project's repository decides
-			who merges. Access itself is granted by the platform, not dotvirt.
+			These reflect your own Kubernetes permissions. Configuration, power, and delete aren't listed:
+			they go through a pull request, where the project's repository decides who merges. Access
+			itself is granted by the platform, not dotvirt.
 		</p>
 	</div>
 {/if}

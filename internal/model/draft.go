@@ -1,5 +1,7 @@
 package model
 
+import "encoding/json"
+
 // DTOs crossing the API boundary: the draft/changeset request and view types.
 
 // Change is one human-readable, YAML-free change item (a semantic diff entry).
@@ -127,6 +129,17 @@ type ObjectRef struct {
 	Kind      string `json:"kind"`
 	Namespace string `json:"namespace,omitempty"`
 	Name      string `json:"name"`
+}
+
+// ObjectSpec is a git-declared object read back as the form spec that created
+// it, for editing: GET /api/objects/{resource}/{namespace}/{name}. Spec is the
+// same JSON the matching create route accepts.
+type ObjectSpec struct {
+	Resource   string          `json:"resource"`
+	Namespace  string          `json:"namespace"` // "cluster" for a cluster-scoped object
+	Name       string          `json:"name"`
+	SourceFile string          `json:"sourceFile"`
+	Spec       json.RawMessage `json:"spec" tstype:"unknown"`
 }
 
 // DraftItem is one pending change rendered for the UI.

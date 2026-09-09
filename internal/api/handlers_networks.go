@@ -159,12 +159,6 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	// Per-object drift: attach each segment's own ArgoCD sync/health at serve time
 	// (always fresh, off the cached catalog) - the same surface VMs carry.
 	s.enrichNetworkDrift(out.Networks)
-	// The physical fabric is node-level infrastructure - show it only to callers
-	// who can read nodes (cluster-admins), not every tenant who can attach a NIC.
-	if s.canReadNodesCached(r.Context(), id, c) {
-		out.Uplinks = full.Uplinks
-		out.PhysicalAdapters = full.PhysicalAdapters
-	}
 	// Authoring signal for the UI: a platform repo must be configured and the caller
 	// must be able to create cluster-scoped networks (the platform-operator signal,
 	// also satisfied by cluster-admins). Gates the New VLAN / Add Uplink / New
@@ -185,6 +179,19 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 			ExternalRoute:      can(ssarExtRoute),
 			AdminNetworkPolicy: can(ssarANP),
 		}
+	}
+	// Which file declares each segment: the edit/delete affordance. A shared
+	// segment's platform file shows only to callers who may author that tier.
+	declared := s.sourceFiles(r.Context(), id, c, out.CanManage)
+	for i := range out.Networks {
+		n := &out.Networks[i]
+		n.SourceFile = declared(n.Backing, n.Namespace, n.Name)
+	}
+	// The physical fabric is node-level infrastructure - show it only to callers
+	// who can read nodes (cluster-admins), not every tenant who can attach a NIC.
+	if s.canReadNodesCached(r.Context(), id, c) {
+		out.Uplinks = full.Uplinks
+		out.PhysicalAdapters = full.PhysicalAdapters
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -58,6 +58,15 @@ func (s *Snapshot) Catalog() model.NetworkInventory {
 	for _, nad := range rawNADs {
 		inv.Networks = append(inv.Networks, networkFromNAD(nad))
 	}
+	// The stores iterate in hash order, so without this every refetch would
+	// reshuffle the topology cards.
+	sort.Slice(inv.Networks, func(i, j int) bool {
+		a, b := inv.Networks[i], inv.Networks[j]
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		return a.Namespace < b.Namespace
+	})
 
 	inv.Uplinks = s.uplinks()
 	for _, u := range reflect.List(s.nns) {

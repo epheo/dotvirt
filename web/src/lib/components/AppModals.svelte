@@ -7,6 +7,7 @@
 	import AdminFirewallModal from './AdminFirewallModal.svelte';
 	import AdoptProjectModal from './AdoptProjectModal.svelte';
 	import ReleaseProjectModal from './ReleaseProjectModal.svelte';
+	import DeleteObjectModal from './DeleteObjectModal.svelte';
 	import DeployTemplateModal from './DeployTemplateModal.svelte';
 	import DistributedFirewallModal from './DistributedFirewallModal.svelte';
 	import EditTemplateModal from './EditTemplateModal.svelte';
@@ -69,6 +70,7 @@
 		namespaces={inventory.namespaces}
 		uplinks={inventory.uplinks}
 		canManage={inventory.canManage}
+		initial={m.initial}
 		onAddUplink={() => (ui.modal = { kind: 'uplink' })}
 		onclose={close}
 		onstaged={staged}
@@ -98,6 +100,7 @@
 	<EgressFirewallModal
 		namespaces={m.namespaces}
 		namespace={m.namespace}
+		initial={m.initial}
 		onclose={close}
 		onstaged={staged}
 	/>
@@ -106,13 +109,28 @@
 		namespaces={m.namespaces}
 		namespace={m.namespace}
 		vms={inventory.allVMs}
+		initial={m.initial}
 		onclose={close}
 		onstaged={staged}
 	/>
 {:else if m?.kind === 'tier0'}
-	<Tier0Modal namespaces={inventory.namespaces} onclose={close} onstaged={staged} />
+	<Tier0Modal
+		namespaces={inventory.namespaces}
+		initial={m.initial}
+		onclose={close}
+		onstaged={staged}
+	/>
 {:else if m?.kind === 'adminFw'}
-	<AdminFirewallModal onclose={close} onstaged={staged} />
+	<AdminFirewallModal initial={m.initial} onclose={close} onstaged={staged} />
+{:else if m?.kind === 'deleteObject'}
+	<DeleteObjectModal
+		resource={m.resource}
+		namespace={m.namespace}
+		name={m.name}
+		sourceFile={m.sourceFile}
+		onclose={close}
+		onstaged={staged}
+	/>
 {:else if m?.kind === 'upload'}
 	<UploadModal namespaces={inventory.namespaces} onclose={close} />
 {:else if m?.kind === 'deployTemplate'}

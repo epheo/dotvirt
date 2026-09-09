@@ -30,6 +30,7 @@ var clusterScoped = map[string]bool{
 	"AdminNetworkPolicy":             true,
 	"BaselineAdminNetworkPolicy":     true,
 	"EgressIP":                       true,
+	"AdminPolicyBasedExternalRoute":  true,
 	"ClusterRole":                    true,
 	"ClusterRoleBinding":             true,
 	"StorageClass":                   true,
@@ -70,6 +71,26 @@ func DeclaredRefs(path string, content []byte) []model.ObjectRef {
 	return out
 }
 
+// Documents counts the YAML documents in content, every one of them: empty,
+// comment-only and unparsable documents count too (an unparsable tail ends
+// the count at -1). DeclaredRefs skips what it cannot name, so a file whose
+// count exceeds its refs holds content the declared index cannot account for.
+func Documents(content []byte) int {
+	dec := yaml.NewDecoder(bytes.NewReader(content))
+	n := 0
+	for {
+		var doc any
+		err := dec.Decode(&doc)
+		if err == io.EOF {
+			return n
+		}
+		if err != nil {
+			return -1
+		}
+		n++
+	}
+}
+
 // DeclaredOnBranch returns every object the branch declares. Git is the authority on
 // what git describes: ArgoCD's tracking annotation only records what it has already
 // applied, so it misses an object committed but not yet synced, one whose Application
@@ -79,17 +100,13 @@ func DeclaredRefs(path string, content []byte) []model.ObjectRef {
 // templates/ is excluded to match the Application's own source exclusion: a template
 // is a blueprint the repo stores, not an object it declares.
 func (r *Repo) DeclaredOnBranch(branch string) (map[model.ObjectRef]bool, error) {
-	out := map[model.ObjectRef]bool{}
-	err := r.walkYAML(branch,
-		func(path string) bool { return !inTemplatesDir(path) },
-		func(path string, content []byte) error {
-			for _, ref := range DeclaredRefs(path, content) {
-				out[ref] = true
-			}
-			return nil
-		})
+	idx, err := r.DeclaredFilesOnBranch(branch)
 	if err != nil {
 		return nil, err
+	}
+	out := make(map[model.ObjectRef]bool, len(idx.Files))
+	for ref := range idx.Files {
+		out[ref] = true
 	}
 	return out, nil
 }

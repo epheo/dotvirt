@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { ChevronDown, ChevronRight, Plus, Route } from 'lucide-svelte';
+	import { ChevronDown, ChevronRight, Pencil, Plus, Route, Trash2 } from 'lucide-svelte';
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import type { Policy } from '$lib/api';
+	import { canEditPolicy, openDelete, openEdit, policyRef } from '$lib/objects';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import PolicyRuleTable from '$lib/components/PolicyRuleTable.svelte';
@@ -188,6 +189,31 @@
 						</button>
 						{#if open}
 							<div class="bg-inset/40 px-3 pb-3 pl-9">
+								<!-- Edit and delete act on the manifest git declares; a live-only
+								     policy carries no file, so it has no action here. -->
+								<div class="flex items-center gap-3 pt-2 text-xs">
+									{#if p.sourceFile}
+										<span class="truncate font-mono text-ink-faint" title={p.sourceFile}
+											>{p.sourceFile}</span
+										>
+										{#if canEditPolicy(p)}
+											<button
+												type="button"
+												onclick={() => openEdit(policyRef(p))}
+												class="inline-flex items-center gap-1 text-accent hover:underline"
+												><Pencil size={12} /> Edit</button
+											>
+										{/if}
+										<button
+											type="button"
+											onclick={() => openDelete(policyRef(p), p.sourceFile!)}
+											class="inline-flex items-center gap-1 text-danger-ink hover:underline"
+											><Trash2 size={12} /> Delete</button
+										>
+									{:else}
+										<span class="text-ink-faint">Not declared in git: nothing to stage here.</span>
+									{/if}
+								</div>
 								{#if !p.rules?.length}
 									<p class="pt-2 text-xs text-ink-faint">
 										No rules{p.kind === 'dfw'

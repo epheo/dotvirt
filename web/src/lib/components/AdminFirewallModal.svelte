@@ -12,34 +12,61 @@
 	import ProtoPortInput from './ProtoPortInput.svelte';
 
 	let {
+		initial,
 		onclose,
 		onstaged,
 	}: {
+		initial?: AdminNetworkPolicyCreate; // the policy as git declares it: edit, not create
 		onclose: () => void;
 		onstaged: () => void;
 	} = $props();
+	// svelte-ignore state_referenced_locally
+	const editing = !!initial;
 
 	// The cluster-wide admin DFW tier. An AdminNetworkPolicy is priority-ordered and
 	// can Allow/Deny/Pass (Pass defers to tenant NetworkPolicies); the baseline is the
 	// singleton default that backstops everything, Allow/Deny only. Subject and peers
 	// are namespace selectors - Groups of projects. Cluster-scoped + admin-only, so it
 	// is proposed to the platform repo and gated like a CUDN.
+	// seeded marks a row read back from git: an Allow-from-all there is a
+	// declared rule, where an untouched default row in a new policy is not.
 	type Row = {
 		action: 'Allow' | 'Deny' | 'Pass';
 		key: string;
 		value: string;
 		proto: 'TCP' | 'UDP' | 'SCTP';
 		port: number | null;
+		seeded?: boolean;
 	};
 	const blankRow = (): Row => ({ action: 'Allow', key: '', value: '', proto: 'TCP', port: null });
 
-	let tier = $state<'policy' | 'baseline'>('policy');
+	// svelte-ignore state_referenced_locally
+	let tier = $state<'policy' | 'baseline'>(initial?.baseline ? 'baseline' : 'policy');
 	const baseline = $derived(tier === 'baseline');
-	let name = $state('');
-	let priority = $state<number | null>(10);
-	let subjKey = $state('');
-	let subjValue = $state('');
-	const rules = rowList(blankRow);
+	// svelte-ignore state_referenced_locally
+	const [initialKey, initialValue] = Object.entries(initial?.subject ?? {})[0] ?? ['', ''];
+	// svelte-ignore state_referenced_locally
+	let name = $state(initial?.name ?? '');
+	// svelte-ignore state_referenced_locally
+	let priority = $state<number | null>(initial ? (initial.priority ?? 0) : 10);
+	let subjKey = $state(initialKey);
+	let subjValue = $state(initialValue);
+	const rules = rowList(
+		blankRow,
+		// svelte-ignore state_referenced_locally
+		initial?.ingress?.map((r) => {
+			const [key, value] = Object.entries(r.peers[0] ?? {})[0] ?? ['', ''];
+			const port = r.ports?.[0];
+			return {
+				action: r.action,
+				key,
+				value,
+				proto: port?.protocol ?? 'TCP',
+				port: port?.port ?? null,
+				seeded: true,
+			};
+		}),
+	);
 	const rows = $derived(rules.rows);
 
 	const missing = $derived.by(() => {
@@ -55,8 +82,8 @@
 		!valid
 			? ''
 			: baseline
-				? 'Stages the baseline policy (cluster default backstop) → platform repo'
-				: `Stages admin policy “${name}” (priority ${priority}) → platform repo`,
+				? `${editing ? 'Updates' : 'Stages'} the baseline policy (cluster default backstop) → platform repo`
+				: `${editing ? 'Updates' : 'Stages'} admin policy “${name}” (priority ${priority}) → platform repo`,
 	);
 
 	async function stage() {
@@ -65,7 +92,7 @@
 			// Skip an untouched default row so it can't silently ship an "Allow from all
 			// namespaces" rule; an explicit Deny/Pass or any configured peer/port is kept
 			// (an empty {} peer is a legitimate "all namespaces" selector once intended).
-			if (r.action === 'Allow' && !r.key.trim() && r.port == null) continue;
+			if (r.action === 'Allow' && !r.key.trim() && r.port == null && !r.seeded) continue;
 			const rule: AdminPolicyRule = {
 				action: r.action,
 				// An empty selector ({}) is a valid "all namespaces" peer.
@@ -84,28 +111,30 @@
 </script>
 
 <StageModal
-	title="Admin Distributed Firewall · cluster-wide"
+	title={editing ? `Edit admin policy · ${name}` : 'Admin Distributed Firewall · cluster-wide'}
 	size="lg"
-	label="Stage policy"
+	label={editing ? 'Stage changes' : 'Stage policy'}
 	{missing}
 	{summary}
 	onsubmit={stage}
 	{onstaged}
 	{onclose}
 >
-	<ChoiceCards
-		options={[
-			{ value: 'policy', label: 'Admin Policy', hint: 'Priority-ordered · overrides tenants' },
-			{ value: 'baseline', label: 'Baseline', hint: 'The cluster default backstop' },
-		]}
-		bind:value={tier}
-	/>
+	{#if !editing}
+		<ChoiceCards
+			options={[
+				{ value: 'policy', label: 'Admin Policy', hint: 'Priority-ordered · overrides tenants' },
+				{ value: 'baseline', label: 'Baseline', hint: 'The cluster default backstop' },
+			]}
+			bind:value={tier}
+		/>
+	{/if}
 
 	<div class="grid grid-cols-2 gap-3">
 		<FormField label="Name" error={!baseline && name && !validName(name) ? NAME_HINT : ''}>
 			<TextInput
 				bind:value={name}
-				disabled={baseline}
+				disabled={baseline || editing}
 				placeholder={baseline ? 'default' : 'tenant-isolation'}
 				mono
 			/>

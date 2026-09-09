@@ -80,7 +80,7 @@
 	async function retryEvacuation() {
 		msg = '';
 		await op.run(async () => {
-			msg = `Evacuation ${await evacuate()} — watch the migrations in the dock.`;
+			msg = `Evacuation ${await evacuate()} ; watch the migrations under Recent Tasks.`;
 		});
 	}
 

@@ -39,7 +39,7 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 				if e.FromVersion != "" {
 					item.Changes = restoreChanges(read, c.baseBranch, e)
 				} else {
-					item.Changes = []model.Change{{Field: "Edit template", Action: "change", To: e.Name}}
+					item.Changes = []model.Change{{Field: e.Resource.EditLabel(), Action: "change", To: objectLabel(e)}}
 				}
 				item.YAML = e.Manifest
 				if current, ok, err := read.LookupOnBranch(c.baseBranch, e.SourceFile); err == nil && ok {
@@ -71,11 +71,20 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 				item.YAML = string(content)
 			}
 		case draft.KindDelete:
-			item.Changes = []model.Change{{Field: "lifecycle", Action: "remove", From: e.Namespace + "/" + e.Name}}
+			item.Changes = []model.Change{{Field: "lifecycle", Action: "remove", From: objectLabel(e)}}
 		}
 		view.Items = append(view.Items, item)
 	}
 	return view, nil
+}
+
+// objectLabel names an entry's object: "namespace/name", or the bare name for a
+// cluster-scoped object and for a namespace itself.
+func objectLabel(e draft.Entry) string {
+	if e.Namespace == ClusterScopeNS || e.Resource == draft.ResourceNamespace {
+		return e.Name
+	}
+	return e.Namespace + "/" + e.Name
 }
 
 // pruneWarning: what a merge lets ArgoCD delete, from Argo's own requiresPruning

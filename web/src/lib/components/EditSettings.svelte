@@ -518,9 +518,7 @@
 {/snippet}
 
 {#snippet review()}
-	<p class="mb-3 text-xs text-ink-muted">
-		Review the staged changes, then stage them into the changeset.
-	</p>
+	<p class="mb-3 text-xs text-ink-muted">Review the changes below, then stage them into Changes.</p>
 	{#if summary.length === 0}
 		<div class="rounded border border-line bg-inset p-3 text-xs text-ink-muted">
 			No changes yet — adjust a setting in an earlier step.
@@ -552,7 +550,7 @@
 	submitting={op.busy}
 	error={op.error}
 	finishLabel="Stage change"
-	footerHint="Changes are staged into the changeset; review &amp; open a PR from “Changes”."
+	footerHint="Staged into Changes; review and open a PR there."
 	onfinish={stage}
 	{onclose}
 />

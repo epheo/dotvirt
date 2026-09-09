@@ -137,6 +137,18 @@ export interface ObjectRef {
   name: string;
 }
 /**
+ * ObjectSpec is a git-declared object read back as the form spec that created
+ * it, for editing: GET /api/objects/{resource}/{namespace}/{name}. Spec is the
+ * same JSON the matching create route accepts.
+ */
+export interface ObjectSpec {
+  resource: string;
+  namespace: string; // "cluster" for a cluster-scoped object
+  name: string;
+  sourceFile: string;
+  spec: unknown;
+}
+/**
  * DraftItem is one pending change rendered for the UI.
  */
 export interface DraftItem {
@@ -604,6 +616,12 @@ export interface Network {
    */
   namespaces?: string[];
   /**
+   * SourceFile is the manifest declaring this network in its project's repo
+   * (the platform repo for a shared one); empty when git does not declare it,
+   * which is what makes it editable and deletable from the UI.
+   */
+  sourceFile?: string;
+  /**
    * From ArgoCD, when enabled - the same per-object drift VMs carry, so a segment
    * that failed to apply (or is mid-sync) shows its own badge, not just its project's.
    * Empty when Argo isn't wired or no Application manages this object.
@@ -888,6 +906,11 @@ export interface Policy {
    */
   namespaces?: string[];
   rules?: PolicyRuleView[];
+  /**
+   * SourceFile is the manifest declaring this policy in its project's repo (the
+   * platform repo for a cluster-scoped one); empty when git does not declare it.
+   */
+  sourceFile?: string;
   sync?: SyncStatus;
   health?: string;
   syncError?: string;

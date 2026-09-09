@@ -282,8 +282,8 @@
 			Not in git — this VM exists only in the cluster
 		</div>
 		<p class="mt-1 text-xs text-warn-ink">
-			A clone target (or out-of-band create) has no manifest on the base branch yet: config edits
-			and ArgoCD sync don't apply. Adopting stages its live manifest into
+			A VM created by Clone or outside dotvirt has no manifest in git yet, so settings edits and
+			ArgoCD sync do not apply. Adopting stages its live manifest into
 			<strong>Changes</strong>, to propose as a PR.
 		</p>
 		<div class="mt-2">

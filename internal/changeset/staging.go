@@ -6,6 +6,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
+	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
@@ -80,8 +81,13 @@ const ClusterScopeNS = "cluster"
 // error (spec decode included) is the caller's input, wrapped as ErrInvalid.
 // render returns the entry minus Kind; the entry's Namespace is the object's own
 // or the ClusterScopeNS sentinel.
+//
+// The rendered manifest is a create when git does not yet declare its objects
+// and an edit - the same rendering replacing the declaring file - when it does:
+// one path for the form that creates an object and the form that changes it.
 func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, render func() (draft.Entry, error)) (model.DraftView, error) {
-	if err := requireRepo(proj); err != nil {
+	read, err := c.read(proj)
+	if err != nil {
 		return model.DraftView{}, err
 	}
 	entry, err := render()
@@ -89,10 +95,55 @@ func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, 
 		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
 	}
 	entry.Kind = draft.KindCreate
+	idx, err := read.DeclaredFilesOnBranch(c.baseBranch)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	if path, err := soleDeclarer(idx, git.DeclaredRefs(entry.SourceFile, []byte(entry.Manifest))); err != nil {
+		return model.DraftView{}, err
+	} else if path != "" {
+		entry.Kind, entry.SourceFile = draft.KindEdit, path
+	}
 	if err := c.store.Stage(id.Username, proj.Name, entry); err != nil {
 		return model.DraftView{}, err
 	}
 	return c.Get(id, proj)
+}
+
+// soleDeclarer is the base-branch file declaring exactly refs, or "" when git
+// declares none of them. Anything in between is a conflict to resolve in git:
+// refs split across files, a file also holding other objects (a namespace
+// beside its primary network) or documents the index cannot name. A rewrite
+// or removal acts on the whole file, so it is offered only when the file is
+// nothing but the objects asked for.
+func soleDeclarer(idx git.DeclaredIndex, refs []model.ObjectRef) (string, error) {
+	path := ""
+	for _, ref := range refs {
+		if p, ok := idx.Files[ref]; ok && path != "" && p != path {
+			return "", fmt.Errorf("%w: %s is declared across several files; edit it in git", model.ErrConflict, ref.Name)
+		} else if ok {
+			path = p
+		}
+	}
+	if path == "" {
+		return "", nil
+	}
+	want := make(map[model.ObjectRef]bool, len(refs))
+	for _, ref := range refs {
+		if _, ok := idx.Files[ref]; !ok {
+			return "", fmt.Errorf("%w: %s is declared in %s beside objects not in this change; edit it in git", model.ErrConflict, ref.Name, path)
+		}
+		want[ref] = true
+	}
+	for ref, p := range idx.Files {
+		if p == path && !want[ref] {
+			return "", fmt.Errorf("%w: %s/%s is declared in %s beside other objects; edit it in git", model.ErrConflict, ref.Namespace, ref.Name, path)
+		}
+	}
+	if idx.Opaque[path] {
+		return "", fmt.Errorf("%w: %s holds documents beside its declared objects; edit it in git", model.ErrConflict, path)
+	}
+	return path, nil
 }
 
 // stageSpec decodes rawSpec into S, renders its manifest, and stages it: the
@@ -237,27 +288,26 @@ func (c *Coordinator) StageCreateAdminNetworkPolicy(id auth.Identity, proj proje
 		})
 }
 
-// StageDelete records the removal of an existing VM in (id, proj)'s draft. The VM
-// must exist on the base branch (you can't delete what isn't in git - an unstaged
-// create should be unstaged, not deleted); its manifest path is captured so the
-// propose step removes that file and Argo prunes the VM on merge.
-func (c *Coordinator) StageDelete(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error) {
+// StageDelete records the removal of an existing object (a VM when resource is
+// empty) in (id, proj)'s draft. The object must be declared on the base branch
+// (you can't delete what isn't in git - an unstaged create should be unstaged,
+// not deleted); its file is captured so the propose step removes it and Argo
+// prunes the object on merge. Cluster-scoped objects name ClusterScopeNS.
+func (c *Coordinator) StageDelete(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) (model.DraftView, error) {
 	read, err := c.read(proj)
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	vm, ok, err := read.FindVMOnBranch(c.baseBranch, namespace, name)
+	path, err := c.locate(read, draft.Resource(resource), namespace, name)
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if !ok {
-		return model.DraftView{}, fmt.Errorf("%w: %s/%s not on %s", model.ErrNotFound, namespace, name, c.baseBranch)
-	}
 	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
 		Kind:       draft.KindDelete,
+		Resource:   draft.Resource(resource),
 		Namespace:  namespace,
 		Name:       name,
-		SourceFile: vm.SourceFile,
+		SourceFile: path,
 	}); err != nil {
 		return model.DraftView{}, err
 	}

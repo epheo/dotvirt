@@ -39,6 +39,11 @@ type Network struct {
 	// for project-scoped networks (those attach only in their own Namespace).
 	Namespaces []string `json:"namespaces,omitempty"`
 
+	// SourceFile is the manifest declaring this network in its project's repo
+	// (the platform repo for a shared one); empty when git does not declare it,
+	// which is what makes it editable and deletable from the UI.
+	SourceFile string `json:"sourceFile,omitempty"`
+
 	// From ArgoCD, when enabled - the same per-object drift VMs carry, so a segment
 	// that failed to apply (or is mid-sync) shows its own badge, not just its project's.
 	// Empty when Argo isn't wired or no Application manages this object.

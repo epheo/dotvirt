@@ -14,30 +14,54 @@
 
 	let {
 		namespaces,
-		namespace: initial,
+		namespace: preselected,
 		vms = [],
+		initial,
 		onclose,
 		onstaged,
 	}: {
 		namespaces: string[];
 		namespace?: string; // preselected namespace
 		vms?: VM[]; // for the live "effective members" preview
+		initial?: NetworkPolicyCreate; // the policy as git declares it: edit, not create
 		onclose: () => void;
 		onstaged: () => void;
 	} = $props();
+	// svelte-ignore state_referenced_locally
+	const editing = !!initial;
 
 	// A Group is a label selector (key=value) - the grouping primitive every rule
 	// resolves through. The policy protects the "applied-to" Group and allows ingress
 	// only from the peer Groups in its rules (a NetworkPolicy that selects pods
 	// default-denies all other ingress). One ingress row = one allow-from rule.
-	type Row = { key: string; value: string; proto: 'TCP' | 'UDP' | 'SCTP'; port: number | null };
+	// seeded marks a row read back from git: an empty one is a deliberate
+	// allow-all there, where an untouched blank row in a new policy is not.
+	type Row = {
+		key: string;
+		value: string;
+		proto: 'TCP' | 'UDP' | 'SCTP';
+		port: number | null;
+		seeded?: boolean;
+	};
 	const blankRow = (): Row => ({ key: '', value: '', proto: 'TCP', port: null });
 
-	let name = $state('');
-	let namespace = $state('');
-	let appliedKey = $state(''); // applied-to Group; empty = the whole namespace
-	let appliedValue = $state('');
-	const rules = rowList(blankRow);
+	// svelte-ignore state_referenced_locally
+	const [initialKey, initialValue] = Object.entries(initial?.appliedTo ?? {})[0] ?? ['', ''];
+	// svelte-ignore state_referenced_locally
+	let name = $state(initial?.name ?? '');
+	// svelte-ignore state_referenced_locally
+	let namespace = $state(initial?.namespace ?? '');
+	let appliedKey = $state(initialKey); // applied-to Group; empty = the whole namespace
+	let appliedValue = $state(initialValue);
+	const rules = rowList(
+		blankRow,
+		// svelte-ignore state_referenced_locally
+		initial?.ingress?.map((r) => {
+			const [key, value] = Object.entries(r.from?.[0] ?? {})[0] ?? ['', ''];
+			const port = r.ports?.[0];
+			return { key, value, proto: port?.protocol ?? 'TCP', port: port?.port ?? null, seeded: true };
+		}),
+	);
 	const rows = $derived(rules.rows);
 
 	// Effective members: VMs in the namespace whose labels match the applied-to Group
@@ -59,7 +83,7 @@
 	const valid = $derived(missing.length === 0);
 	const summary = $derived(
 		valid
-			? `Stages DFW policy “${name}” → ${namespace} (${members.length} member VM${members.length === 1 ? '' : 's'})`
+			? `${editing ? 'Updates' : 'Stages'} DFW policy “${name}” → ${namespace} (${members.length} member VM${members.length === 1 ? '' : 's'})`
 			: '',
 	);
 
@@ -69,8 +93,9 @@
 			const rule: PolicyRule = {};
 			if (r.key.trim()) rule.from = [{ [r.key.trim()]: r.value.trim() }];
 			if (r.port != null) rule.ports = [{ protocol: r.proto, port: r.port }];
-			// Skip wholly-empty rows (they would allow all traffic, defeating the policy).
-			if (rule.from || rule.ports) ingress.push(rule);
+			// Skip wholly-empty rows the user added (they would allow all traffic,
+			// defeating the policy); a seeded one is what git already says.
+			if (rule.from || rule.ports || r.seeded) ingress.push(rule);
 		}
 		const req: NetworkPolicyCreate = { name, namespace };
 		if (appliedKey.trim()) req.appliedTo = { [appliedKey.trim()]: appliedValue.trim() };
@@ -80,9 +105,9 @@
 </script>
 
 <StageModal
-	title={`${TERMS.dfw.net} · ${TERMS.dfw.virt}`}
+	title={editing ? `Edit ${TERMS.dfw.net} · ${name}` : `${TERMS.dfw.net} · ${TERMS.dfw.virt}`}
 	size="lg"
-	label="Stage policy"
+	label={editing ? 'Stage changes' : 'Stage policy'}
 	{missing}
 	{summary}
 	onsubmit={stage}
@@ -91,9 +116,21 @@
 >
 	<div class="grid grid-cols-2 gap-3">
 		<FormField label="Name" error={name && !validName(name) ? NAME_HINT : ''}>
-			<TextInput bind:value={name} placeholder="web-allow-db" mono data-autofocus />
+			<TextInput
+				bind:value={name}
+				placeholder="web-allow-db"
+				mono
+				disabled={editing}
+				data-autofocus
+			/>
 		</FormField>
-		<NamespaceSelect bind:namespace {namespaces} {initial} />
+		{#if editing}
+			<FormField label="Project (namespace)">
+				<TextInput value={namespace} mono disabled />
+			</FormField>
+		{:else}
+			<NamespaceSelect bind:namespace {namespaces} initial={preselected} />
+		{/if}
 	</div>
 
 	<div class="rounded border border-line p-3">

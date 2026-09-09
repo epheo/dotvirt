@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api, type EgressIPCreate, type ExternalRouteCreate } from '$lib/api';
+	import type { Tier0Initial } from '$lib/state/ui.svelte';
 	import { validName, NAME_HINT, validIP } from '$lib/validate';
 	import { TERMS } from '$lib/vocab';
 	import CheckGroup from './CheckGroup.svelte';
@@ -11,22 +12,32 @@
 
 	let {
 		namespaces,
+		initial,
 		onclose,
 		onstaged,
 	}: {
 		namespaces: string[];
+		initial?: Tier0Initial; // the service as git declares it: edit, not create
 		onclose: () => void;
 		onstaged: () => void;
 	} = $props();
+	// svelte-ignore state_referenced_locally
+	const editing = !!initial;
 
 	// A Tier-0 (provider-edge) service: a source-NAT pool (EgressIP) pinning a
 	// project's egress to fixed, routable IPs, or an external route steering its egress
 	// through static next-hop gateways (AdminPolicyBasedExternalRoute). Both are
 	// cluster-scoped - proposed to the platform repo.
-	let kind = $state<'snat' | 'route'>('snat');
-	let name = $state('');
-	let ips = $state(''); // egress IPs (snat) or next-hop IPs (route), space/comma separated
-	let selectedNs = $state<string[]>([]);
+	// svelte-ignore state_referenced_locally
+	let kind = $state<'snat' | 'route'>(initial?.kind ?? 'snat');
+	// svelte-ignore state_referenced_locally
+	let name = $state(initial?.spec.name ?? '');
+	// svelte-ignore state_referenced_locally
+	let ips = $state(
+		(initial?.kind === 'snat' ? initial.spec.egressIPs : initial?.spec.nextHops)?.join(' ') ?? '',
+	); // egress IPs (snat) or next-hop IPs (route), space/comma separated
+	// svelte-ignore state_referenced_locally
+	let selectedNs = $state<string[]>(initial?.spec.namespaces ?? []);
 
 	const list = $derived(
 		ips
@@ -52,7 +63,7 @@
 	const valid = $derived(missing.length === 0);
 	const summary = $derived(
 		valid
-			? `Stages ${kind === 'snat' ? TERMS.snat.net : 'external route'} “${name}” (${list.length} IP${list.length === 1 ? '' : 's'}, ${selectedNs.length} project${selectedNs.length === 1 ? '' : 's'}) → platform repo`
+			? `${editing ? 'Updates' : 'Stages'} ${kind === 'snat' ? TERMS.snat.net : 'external route'} “${name}” (${list.length} IP${list.length === 1 ? '' : 's'}, ${selectedNs.length} project${selectedNs.length === 1 ? '' : 's'}) → platform repo`
 			: '',
 	);
 
@@ -68,27 +79,30 @@
 </script>
 
 <StageModal
-	title={`${TERMS.tier0.net} · ${TERMS.tier0.virt}`}
-	label="Stage service"
+	title={editing ? `Edit ${TERMS.tier0.net} · ${name}` : `${TERMS.tier0.net} · ${TERMS.tier0.virt}`}
+	label={editing ? 'Stage changes' : 'Stage service'}
 	{missing}
 	{summary}
 	onsubmit={stage}
 	{onstaged}
 	{onclose}
 >
-	<ChoiceCards
-		options={[
-			{ value: 'snat', label: TERMS.snat.net, hint: 'Pin egress to fixed IPs (EgressIP)' },
-			{ value: 'route', label: 'External Route', hint: 'Steer egress via next-hops' },
-		]}
-		bind:value={kind}
-	/>
+	{#if !editing}
+		<ChoiceCards
+			options={[
+				{ value: 'snat', label: TERMS.snat.net, hint: 'Pin egress to fixed IPs (EgressIP)' },
+				{ value: 'route', label: 'External Route', hint: 'Steer egress via next-hops' },
+			]}
+			bind:value={kind}
+		/>
+	{/if}
 
 	<FormField label="Name" error={name && !validName(name) ? NAME_HINT : ''}>
 		<TextInput
 			bind:value={name}
 			placeholder={kind === 'snat' ? 'team-a-snat' : 'team-a-gw'}
 			mono
+			disabled={editing}
 			data-autofocus
 		/>
 	</FormField>

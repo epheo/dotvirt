@@ -39,7 +39,7 @@
 			error =
 				e instanceof Unauthorized
 					? 'That token was rejected. Check it and try again.'
-					: 'dotvirt could not verify the token — the backend or cluster is unreachable. Try again shortly.';
+					: 'dotvirt could not verify the token: the dotvirt server or the cluster is unreachable. Try again shortly.';
 		} finally {
 			busy = false;
 		}

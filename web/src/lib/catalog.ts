@@ -70,7 +70,7 @@ export function catalogRows(
 					['Kind', 'DataSource (CDI)'],
 					['Namespace', i.namespace],
 					['Ready', i.ready ? 'Yes' : 'No'],
-					['Used as', 'Root-disk source in the New VM wizard'],
+					['Used as', 'Root-disk source when creating a VM'],
 				],
 			}));
 		case 'instancetypes':

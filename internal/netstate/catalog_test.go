@@ -1,6 +1,7 @@
 package netstate
 
 import (
+	"sort"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -150,6 +151,10 @@ func TestCatalogFromStores(t *testing.T) {
 	}
 	if len(inv.Networks) != 3 { // vm-net, shared, legacy - the generated NAD is not double-listed
 		t.Fatalf("want 3 networks, got %d: %v", len(inv.Networks), inv.Networks)
+	}
+	// Store iteration is hash-ordered; the catalog must not pass that on.
+	if names := []string{inv.Networks[0].Name, inv.Networks[1].Name, inv.Networks[2].Name}; !sort.StringsAreSorted(names) {
+		t.Errorf("networks not sorted by name: %v", names)
 	}
 	if got := byName["shared"].Namespaces; len(got) != 1 || got[0] != "tenant-a" {
 		t.Errorf("shared CUDN attachable namespaces = %v, want [tenant-a]", got)

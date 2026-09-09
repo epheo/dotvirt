@@ -46,7 +46,7 @@
 			host changed), recovering stages the manifests that re-point the project instead. Your
 			workloads keep running either way, and nothing syncs until something merges. After a
 			re-create, use "Adopt into git" on the namespaces so the first merge restores everything
-			running (the Changes panel warns while anything is left out). Refused if the repo still
+			running (the Changes section warns while anything is left out). Refused if the repo still
 			resolves as configured.
 		</p>
 	{:else}
@@ -75,6 +75,6 @@
 		Creates the tenant repo now, and stages each namespace (with the <code>dotvirt.io/repo</code>
 		annotation){#if owners.trim()}
 			+ an owners admin grant{/if} into the platform repo. After the PR merges, the project's VMs appear
-		as untracked — adopt them with “Adopt N untracked”.
+		as untracked; adopt them with "Adopt into git".
 	</p>
 </StageModal>

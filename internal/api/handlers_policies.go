@@ -32,6 +32,13 @@ func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
 	// without one still audits the live policy plane.
 	out := scopePolicies(all, visible, s.clusterAuthority(r.Context(), id, c))
 	s.enrichPolicyDrift(out)
+	// Which file declares each policy: the edit/delete affordance. Cluster-tier
+	// rows are already gated on the caller's authority over their kind.
+	declared := s.sourceFiles(r.Context(), id, c, true)
+	for i := range out {
+		p := &out[i]
+		p.SourceFile = declared(p.Backing, p.Namespace, p.Name)
+	}
 	writeJSON(w, http.StatusOK, model.PolicyInventory{Policies: out})
 }
 
