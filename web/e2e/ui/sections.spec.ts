@@ -80,15 +80,47 @@ test('catalog: kinds are tabs, the tree lists items, selection rides the URL', a
 	await expect(main.locator('aside').getByRole('heading', { name })).toBeVisible();
 });
 
-test('the review route is full width: no inventory tree beside its own rail', async ({ page }) => {
+test('Changes is a section: the tree scopes the review, a VM opens its own tab', async ({
+	page,
+}) => {
 	await setScenario(page, 'base');
 	await login(page);
 	await page.goto('/changes');
-	await expect(page.locator('aside')).toHaveCount(0);
-	await expect(page.getByRole('link', { name: /Review changes/ })).toBeVisible();
-	// Leaving the review route restores the tree of the last section.
-	await page.getByRole('link', { name: 'dotvirt' }).click();
-	await expect(page.locator('aside').getByText('All VMs')).toBeVisible();
+	const aside = page.locator('aside');
+	const main = page.locator('main');
+	// No draft: no Propose button. The section is the place, the button the action.
+	await expect(page.getByRole('link', { name: /Propose \d+ change/ })).toHaveCount(0);
+	await expect(aside.getByText('All changes')).toBeVisible();
+	// Both projects' PRs at the root; one project's under its scope, with its
+	// history open without a click.
+	await expect(main.getByRole('button', { name: /PR #41/ })).toBeVisible();
+	await aside.locator('a[href="/changes/team-web"]').click();
+	await expect(page).toHaveURL(/\/changes\/team-web$/);
+	await expect(main.getByRole('button', { name: /PR #42/ })).toBeVisible();
+	await expect(main.getByRole('button', { name: /PR #41/ })).toHaveCount(0);
+	await expect(main.getByRole('button', { name: /web-2: add data disk/ })).toBeVisible();
+	// A namespace narrows history to its directory: db-prod saw only the import.
+	await aside.locator('a[href="/changes/team-db"]').click();
+	await expect(main.getByRole('button', { name: /PR #41/ })).toBeVisible();
+	await aside.locator('a[href="/changes/team-db/db-prod"]').click();
+	await expect(page).toHaveURL(/\/changes\/team-db\/db-prod$/);
+	await expect(main.getByRole('button', { name: /initial import/ })).toBeVisible();
+	await expect(main.getByRole('button', { name: /web-2: add data disk/ })).toHaveCount(0);
+	// A VM leaf opens the VM page on its Changes tab, keeping this tree.
+	await aside.locator('a[href="/vm/web-prod/web-2?tab=changes"]').click();
+	await expect(page).toHaveURL(/\/vm\/web-prod\/web-2\?tab=changes$/);
+	await expect(aside.getByText('All changes')).toBeVisible();
+	await expect(main.getByText('Current version')).toBeVisible();
+	// Restore is the object-level undo: it stages, and the Propose button lands
+	// on that project's lane.
+	await main.getByRole('button', { name: 'Restore this version' }).click();
+	await expect(page.getByText(/Restore of web-2 to 99fe210a staged/)).toBeVisible();
+	const propose = page.getByRole('link', { name: /Propose 1 change/ });
+	await expect(propose).toHaveAttribute('href', '/changes/team-web');
+	await expect(main.getByText(/part of your team-web draft/)).toBeVisible();
+	await propose.click();
+	await expect(page).toHaveURL(/\/changes\/team-web$/);
+	await expect(main.getByText('version 99fe210a')).toBeVisible();
 });
 
 test('the tree and breadcrumb keep the tab in view across objects', async ({ page }) => {

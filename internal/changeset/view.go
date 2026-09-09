@@ -33,8 +33,14 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 		switch e.Kind {
 		case draft.KindEdit:
 			if e.Manifest != "" {
-				// A whole-file replacement (template edit): the manifest IS the change.
-				item.Changes = []model.Change{{Field: "Edit template", Action: "change", To: e.Name}}
+				// A whole-file replacement: the manifest IS the change. A restore
+				// names its version and lists the fields it moves, best effort;
+				// a template edit has no field model.
+				if e.FromVersion != "" {
+					item.Changes = restoreChanges(read, c.baseBranch, e)
+				} else {
+					item.Changes = []model.Change{{Field: "Edit template", Action: "change", To: e.Name}}
+				}
 				item.YAML = e.Manifest
 				if current, ok, err := read.LookupOnBranch(c.baseBranch, e.SourceFile); err == nil && ok {
 					item.BaseYAML = string(current)
@@ -131,4 +137,25 @@ func JoinWarning(a, b string) string {
 		return a
 	}
 	return a + " " + b
+}
+
+// restoreChanges renders a version restore as the field moves it makes, under
+// a row naming the version. The verbatim manifest is what gets committed; the
+// field list only explains it, so an unparseable side degrades to the name.
+func restoreChanges(read *git.Repo, base string, e draft.Entry) []model.Change {
+	out := []model.Change{{Field: "Restore", Action: "change", To: "version " + e.FromVersion}}
+	current, found, err := read.FindVMOnBranch(base, e.Namespace, e.Name)
+	if err != nil || !found {
+		return out
+	}
+	vms, err := manifest.ParseVMs(e.SourceFile, []byte(e.Manifest), e.Namespace)
+	if err != nil {
+		return out
+	}
+	for _, vm := range vms {
+		if vm.Namespace == e.Namespace && vm.Name == e.Name {
+			return append(out, manifest.ChangesForEdit(current, manifest.EditToMatch(current, vm))...)
+		}
+	}
+	return out
 }

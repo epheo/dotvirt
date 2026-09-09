@@ -30,6 +30,16 @@ const COOKIE = 'dv_fixture=1';
 
 // The merged change history serves, as a full hash: the API refuses anything shorter.
 const MERGE_HASH = 'ab12cd34ef' + '0'.repeat(30);
+const INITIAL_HASH = '99fe210aaa99fe210aaa99fe210aaa99fe210aaa';
+const initialCommit = () => ({
+	hash: INITIAL_HASH,
+	shortHash: INITIAL_HASH.slice(0, 8),
+	message: 'initial import',
+	title: 'initial import',
+	author: 'admin',
+	when: new Date(Date.now() - 9e7).toISOString(),
+});
+
 const mergeCommit = (project) => ({
 	hash: MERGE_HASH,
 	shortHash: MERGE_HASH.slice(0, 8),
@@ -247,17 +257,11 @@ async function handleAPI(req, res, url) {
 
 	m = path.match(/^\/api\/projects\/([^/]+)\/history$/);
 	if (m) {
-		return sendJSON(res, 200, [
-			mergeCommit(m[1]),
-			{
-				hash: '99fe210aaa99fe210aaa99fe210aaa99fe210aaa',
-				shortHash: '99fe210a',
-				message: 'initial import',
-				title: 'initial import',
-				author: 'admin',
-				when: new Date(Date.now() - 9e7).toISOString(),
-			},
-		]);
+		// ?namespace= narrows to the commits under that directory: the merge
+		// touched web-prod only, the import touched everything.
+		const ns = url.searchParams.get('namespace');
+		if (ns && ns !== 'web-prod') return sendJSON(res, 200, [initialCommit()]);
+		return sendJSON(res, 200, [mergeCommit(m[1]), initialCommit()]);
 	}
 	// One past change under review: the same items a staged draft renders.
 	m = path.match(/^\/api\/projects\/([^/]+)\/history\/([0-9a-f]{40})$/);
@@ -336,6 +340,18 @@ async function handleAPI(req, res, url) {
 				return stage(res, ns, name, { kind: 'edit', changes: editChanges(body) });
 			}
 			if (sub === 'delete') return stage(res, ns, name, { kind: 'delete', changes: [] });
+			if (sub === 'restore') {
+				const body = await readBody(req);
+				if (body?.hash !== MERGE_HASH && body?.hash !== INITIAL_HASH)
+					return sendText(res, 400, 'commit hash must be the full 40-character hash');
+				return stage(res, ns, name, {
+					kind: 'edit',
+					changes: [
+						{ field: 'Restore', action: 'change', to: `version ${body.hash.slice(0, 8)}` },
+						{ field: 'Disk', action: 'remove', from: 'data (50Gi)' },
+					],
+				});
+			}
 			if (sub === 'adopt') {
 				return stage(res, ns, name, {
 					kind: 'create',
@@ -353,7 +369,7 @@ async function handleAPI(req, res, url) {
 			return sendJSON(
 				res,
 				200,
-				ns === 'web-prod' && name === 'web-2' ? [mergeCommit('team-web')] : [],
+				ns === 'web-prod' && name === 'web-2' ? [mergeCommit('team-web'), initialCommit()] : [],
 			);
 		}
 		if (sub === 'events') {

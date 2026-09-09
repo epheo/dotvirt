@@ -88,7 +88,11 @@ type Draft interface {
 	// matching, so the transport never reads the repo tree itself.
 	Manifest(proj project.ProjectInfo, namespace, name string) (path string, content []byte, err error)
 	History(proj project.ProjectInfo, limit int) ([]model.Commit, error)
+	NamespaceHistory(proj project.ProjectInfo, namespace string, limit int) ([]model.Commit, error)
 	VMHistory(proj project.ProjectInfo, namespace, name string, limit int) ([]model.Commit, error)
+	// RestoreVersion stages one VM's manifest as a past commit held it: the
+	// object-level undo, through the caller's draft like any edit.
+	RestoreVersion(id auth.Identity, proj project.ProjectInfo, namespace, name, hash string) (model.DraftView, error)
 	Commit(proj project.ProjectInfo, hash string) (model.CommitDetail, error)
 	Templates(proj project.ProjectInfo) []model.Template
 }
@@ -332,6 +336,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/networking/trace", s.handleTrace)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/manifest", s.handleManifest)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/history", s.handleVMHistory)
+	mux.HandleFunc("POST /api/vms/{namespace}/{name}/restore", s.handleRestore)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/events", s.handleEvents)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/screenshot", s.handleScreenshot)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/metrics", s.handleMetrics)

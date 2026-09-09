@@ -114,6 +114,10 @@ type Entry struct {
 	// verbatim-manifest VM create was rendered from, so the draft view can say
 	// so instead of presenting it as an adoption.
 	FromTemplate string `json:"fromTemplate,omitempty"`
+
+	// FromVersion is the short commit hash a verbatim-manifest VM edit restores
+	// the file to (the VM page's Restore), so the draft view can name it.
+	FromVersion string `json:"fromVersion,omitempty"`
 }
 
 // Key is the stable identity used to dedupe/replace entries within a draft. VM

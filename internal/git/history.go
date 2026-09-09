@@ -27,6 +27,38 @@ func (r *Repo) FileHistory(branch, path string, limit int) ([]model.Commit, erro
 	return r.walkHistory(branch, limit, func(c *object.Commit) (bool, error) { return touches(c, path) })
 }
 
+// DirHistory is History narrowed to the commits that changed anything under
+// dir - on the base branch, the merged PRs that touched one namespace. A
+// subtree's entry hash moves with any file below it, so this is one tree
+// lookup per commit, like FileHistory.
+func (r *Repo) DirHistory(branch, dir string, limit int) ([]model.Commit, error) {
+	dir = strings.TrimSuffix(dir, "/")
+	return r.walkHistory(branch, limit, func(c *object.Commit) (bool, error) { return touches(c, dir) })
+}
+
+// FileAt reads path as it was in commit hash. ErrNoFile when the commit's
+// tree has no such file.
+func (r *Repo) FileAt(hash, path string) ([]byte, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, err := r.commit(hash)
+	if err != nil {
+		return nil, err
+	}
+	f, err := c.File(path)
+	if errors.Is(err, object.ErrFileNotFound) {
+		return nil, fmt.Errorf("%w: %s at %s", ErrNoFile, path, hash[:8])
+	}
+	if err != nil {
+		return nil, err
+	}
+	s, err := f.Contents()
+	if err != nil {
+		return nil, err
+	}
+	return []byte(s), nil
+}
+
 // historyScan bounds one walk: a file untouched for this many commits reads as
 // having no older history rather than holding r.mu for the whole branch.
 const historyScan = 1000
@@ -163,6 +195,9 @@ func (r *Repo) CommitDiff(hash string) (CommitDiff, error) {
 // ErrNoBranch: the mirror holds no such branch. A head pushed moments ago
 // arrives with the next fetch, so callers say "not yet" rather than fail.
 var ErrNoBranch = errors.New("branch not in the mirror")
+
+// ErrNoFile: a commit's tree has no such file (FileAt).
+var ErrNoFile = errors.New("file not in the commit")
 
 // BranchDiff lists the YAML files head changed since it forked from base: the
 // diff from their merge base to head, which is what merging head introduces.

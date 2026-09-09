@@ -21,7 +21,7 @@
 		User as UserIcon,
 	} from 'lucide-svelte';
 	import { dispatchVMAction } from '$lib/actions';
-	import { hrefForScope, scopeFromPath, vmHref } from '$lib/nav';
+	import { changesHref, hrefForScope, scopeFromPath, vmHref } from '$lib/nav';
 	import StatusDot from './StatusDot.svelte';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
@@ -72,10 +72,12 @@
 		}
 	}
 
-	// The Review-changes badge: the caller's own work in flight - staged edits
-	// and the PRs they opened. The lane also lists colleagues' PRs, but those are
-	// theirs to drive; counting them would keep the badge lit in any busy team.
-	const inFlight = $derived(drafts.count + inventory.proposals.filter((p) => p.mine).length);
+	// The Propose button: the loop's call to action, present only while the
+	// caller has staged edits to propose. It lands on the one project's lane
+	// when the draft is in one project, else on the inbox. The Changes section
+	// is the place; this is the action.
+	const staged = $derived(drafts.drafts.filter((d) => d.draft.count > 0));
+	const proposeHref = $derived(staged.length === 1 ? changesHref(staged[0].project) : '/changes');
 
 	// The issues bell: standing problems derived from the live stream, so the
 	// count moves with the same frames the tree and grid repaint on.
@@ -266,25 +268,15 @@
 		{/snippet}
 	</HeaderMenu>
 
-	<!-- Review changes: the GitOps write model's front door - a labeled peer of
-	     New, since reviewing and proposing is the product's primary loop. The
-	     badge counts staged edits + open PRs. -->
-	<a
-		href="/changes"
-		title="Review staged changes and open pull requests"
-		class="relative flex items-center gap-1.5 rounded border border-side-active px-2.5 py-1 text-xs font-medium hover:bg-side-hover {page
-			.url.pathname === '/changes'
-			? 'bg-side-hover text-white'
-			: 'text-side-ink'}"
-	>
-		<ClipboardList size={13} /> Review changes
-		{#if inFlight > 0}
-			<span
-				class="absolute -top-1.5 -right-1.5 rounded-full bg-accent-hover px-1 text-[10px] font-medium text-white"
-				>{inFlight}</span
-			>
-		{/if}
-	</a>
+	{#if drafts.count > 0}
+		<a
+			href={proposeHref}
+			title="Review the staged changes and open a pull request"
+			class="flex items-center gap-1.5 rounded border border-side-active px-2.5 py-1 text-xs font-medium text-side-ink hover:bg-side-hover"
+		>
+			<ClipboardList size={13} /> Propose {drafts.count} change{drafts.count === 1 ? '' : 's'}
+		</a>
+	{/if}
 
 	<HeaderMenu align="right" class="ml-auto">
 		{#snippet trigger({ open, toggle })}

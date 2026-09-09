@@ -3,7 +3,17 @@
 // tab flips). The VM route is section-agnostic - every section's tree opens VMs.
 import type { Scope } from './lenses';
 
-export type Section = 'compute' | 'hosts' | 'networking' | 'storage' | 'catalog';
+export type Section = 'compute' | 'hosts' | 'networking' | 'storage' | 'catalog' | 'changes';
+
+// The inventory sections: where "/" may land, and what carries an object tree
+// of its own. Changes is a section too, but never a home.
+export const INVENTORY_SECTIONS: Section[] = [
+	'compute',
+	'hosts',
+	'networking',
+	'storage',
+	'catalog',
+];
 
 const enc = encodeURIComponent;
 
@@ -30,19 +40,29 @@ export function vmHref(namespace: string, name: string, tab?: string): string {
 	return `/vm/${enc(namespace)}/${enc(name)}${tab ? `?tab=${tab}` : ''}`;
 }
 
-// The inventory section a path belongs to - drives the tree's lens and the
-// section highlight. null for routes outside the inventory: the VM route keeps
-// whichever tree opened it, the review route has no tree at all.
+// The section a path belongs to - drives the tree's lens and the section
+// highlight. null for the VM route, which keeps whichever tree opened it.
 export function sectionOf(pathname: string): Section | null {
 	const head = pathname.split('/')[1];
-	if (head === 'hosts' || head === 'networking' || head === 'storage' || head === 'catalog')
-		return head;
-	if (head === 'compute') return 'compute';
+	switch (head) {
+		case 'compute':
+		case 'hosts':
+		case 'networking':
+		case 'storage':
+		case 'catalog':
+		case 'changes':
+			return head;
+	}
 	return null;
 }
 
-// Routes that take the whole shell: no inventory tree beside them.
-export const isFullWidth = (pathname: string): boolean => pathname.split('/')[1] === 'changes';
+// The Changes section's scope routes: the whole inventory, one project, one
+// namespace. Selection (a staged item, a PR, a commit) rides the query, see
+// review.ts.
+export function changesHref(project?: string, namespace?: string): string {
+	if (!project) return '/changes';
+	return `/changes/${enc(project)}${namespace ? `/${enc(namespace)}` : ''}`;
+}
 
 export const sectionRoot = (s: Section): string => `/${s}`;
 
@@ -53,6 +73,7 @@ export const VM_TABS = [
 	'configure',
 	'security',
 	'permissions',
+	'changes',
 	'snapshots',
 	'console',
 ] as const;
@@ -92,7 +113,7 @@ function tabsAt(href: string): string[] | null {
 	const path = href.split('?')[0];
 	if (path.split('/')[1] === 'vm') return [...VM_TABS];
 	const section = sectionOf(path);
-	if (!section || section === 'catalog') return null;
+	if (!section || section === 'catalog' || section === 'changes') return null;
 	return containerTabs(scopeFromPath(path), section).map((t) => t.id);
 }
 

@@ -49,6 +49,7 @@
 	import VMConfigure from './VMConfigure.svelte';
 	import VMEventsTable from './VMEventsTable.svelte';
 	import VMSummary from './VMSummary.svelte';
+	import VMChanges from './VMChanges.svelte';
 
 	let {
 		vm,
@@ -392,6 +393,7 @@
 					{ id: 'configure', label: 'Configure' },
 					{ id: 'security', label: 'Security' },
 					{ id: 'permissions', label: 'Permissions' },
+					{ id: 'changes', label: 'Changes' },
 					{ id: 'snapshots', label: 'Snapshots' },
 					{ id: 'console', label: 'Console' },
 				]}
@@ -458,6 +460,10 @@
 				</div>
 			{:else if tab === 'permissions'}
 				<Permissions namespaces={[vm.namespace]} />
+			{:else if tab === 'changes'}
+				{#key vmKey}
+					<VMChanges {vm} {stagedItem} onstaged={() => onstaged?.()} />
+				{/key}
 			{:else if tab === 'snapshots'}
 				{#key vmKey}
 					<Snapshots {vm} />
