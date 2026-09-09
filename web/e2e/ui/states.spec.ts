@@ -49,7 +49,7 @@ test('untracked VM in a healthy project offers adoption where the user is', asyn
 });
 
 test('prune risk warns before anything merges', async ({ page }) => {
-	await page.getByRole('link', { name: /Review changes/ }).click();
+	await page.getByRole('link', { name: /Propose \d+ change/ }).click();
 	const main = page.locator('main');
 	await expect(main.getByText(/Merging will prune 2 objects/)).toBeVisible();
 	await expect(main.getByText('web-1').first()).toBeVisible();

@@ -15,10 +15,10 @@ test('edit stages into the draft and proposes as a PR', async ({ page }) => {
 	await memory.fill('8Gi');
 	await stageChange(page);
 
-	// The Review-changes badge picks the draft up without a reload (1 staged +
-	// the base scenario's standing PR #41).
-	const review = page.getByRole('link', { name: /Review changes/ });
-	await expect(review).toContainText('2');
+	// The Propose button appears with the draft, without a reload, and counts
+	// what it would propose.
+	const review = page.getByRole('link', { name: /Propose \d+ change/ });
+	await expect(review).toHaveText(/Propose 1 change$/);
 
 	// The route shows the semantic item with its impact, not YAML.
 	await review.click();
@@ -48,7 +48,7 @@ test('a failed stage shows the backend detail in the dialog', async ({ page }) =
 	await page.getByRole('button', { name: /Edit Settings/ }).click();
 	await page.getByLabel('Memory').fill('16Gi');
 	await stageChange(page);
-	await page.getByRole('link', { name: /Review changes/ }).click();
+	await page.getByRole('link', { name: /Propose \d+ change/ }).click();
 	const main = page.locator('main');
 	await main.getByRole('button', { name: 'Propose pull request' }).click();
 	// The error surfaces inline; the draft is not silently lost.

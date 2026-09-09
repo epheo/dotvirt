@@ -44,7 +44,7 @@ test('networking and security surfaces are accessible', async ({ page }) => {
 	await expect(page.locator('main').getByText('Provider Gateway').first()).toBeVisible();
 	await checkA11y(page, 'topology');
 
-	await page.goto('/networking/security');
+	await page.goto('/networking?tab=security');
 	await checkA11y(page, 'security');
 });
 
@@ -73,7 +73,7 @@ test('hosts, storage, catalog and trouble states are accessible', async ({ page 
 	await page.locator('button[title^="Issues"]').click();
 	await checkA11y(page, 'issues bell (drift)');
 	await page.keyboard.press('Escape');
-	await page.getByRole('link', { name: /Review changes/ }).click();
+	await page.getByRole('link', { name: /Propose \d+ change/ }).click();
 	await page.waitForTimeout(300);
 	await checkA11y(page, 'changes route (drift)');
 });

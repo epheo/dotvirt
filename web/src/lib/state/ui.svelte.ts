@@ -73,7 +73,7 @@ class Ui {
 		this.toasts = this.toasts.filter((t) => t.id !== id);
 	}
 
-	// Review changes is a route (deep-linkable, back-button-walkable); this is
+	// The Changes section is a route (deep-linkable, back-button-walkable); this is
 	// the one navigation every "Review & propose" affordance shares. A target
 	// lands on one review (a staged item, a PR, a past commit) or a project's
 	// history.

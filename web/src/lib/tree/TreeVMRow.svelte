@@ -12,7 +12,7 @@
 
 	// The VM leaf every section tree renders: power dot, name (struck through
 	// when a delete is staged), and the staged badge or sync state.
-	let { vm, indent = 2 }: { vm: VM; indent?: 2 | 3 } = $props();
+	let { vm, indent = 2, tab }: { vm: VM; indent?: 2 | 3; tab?: string } = $props();
 
 	const key = $derived(`${vm.namespace}/${vm.name}`);
 	const sc = $derived(drafts.stagedByKey.get(key));
@@ -31,7 +31,7 @@
 	}
 </script>
 
-<TreeRow {indent} {active} href={vmHref(vm.namespace, vm.name)} {oncontextmenu}>
+<TreeRow {indent} {active} href={vmHref(vm.namespace, vm.name, tab)} {oncontextmenu}>
 	{#snippet icon()}
 		<PowerDot power={vm.power} paused={vm.paused} />
 	{/snippet}

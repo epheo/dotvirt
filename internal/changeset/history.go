@@ -41,6 +41,26 @@ func (c *Coordinator) History(proj project.ProjectInfo, limit int) ([]model.Comm
 	return commits, nil
 }
 
+// NamespaceHistory is History narrowed to the commits that touched one
+// namespace's directory - the Changes section scoped to a namespace.
+func (c *Coordinator) NamespaceHistory(proj project.ProjectInfo, namespace string, limit int) ([]model.Commit, error) {
+	if proj.Repo == "" {
+		return []model.Commit{}, nil
+	}
+	read, err := c.read(proj)
+	if err != nil {
+		return nil, err
+	}
+	commits, err := read.DirHistory(c.baseBranch, namespace, limit)
+	if err != nil {
+		return nil, err
+	}
+	for i := range commits {
+		c.nameByPR(&commits[i], proj)
+	}
+	return commits, nil
+}
+
 // VMHistory lists the base-branch commits that changed a VM's manifest file:
 // what changed on this VM and when, from the VM page. A VM not in git has no
 // history, not an error - the page already says it is untracked.

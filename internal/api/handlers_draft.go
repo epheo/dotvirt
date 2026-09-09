@@ -11,6 +11,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/validate"
 )
 
 // The draft routes: stage/unstage/discard/propose against the caller's per-project
@@ -232,14 +233,45 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleHistory lists recent commits on the project's base branch - the Changes
-// pane's history view.
+// section's history, narrowed to one namespace's directory with ?namespace=.
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.pickProject(w, r, r.PathValue("project"))
 	if !ok {
 		return
 	}
+	if ns := r.URL.Query().Get("namespace"); ns != "" {
+		if err := validate.RequireDNS1123("namespace", ns); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		commits, err := s.draft.NamespaceHistory(sc.proj, ns, 25)
+		respond(w, commits, err)
+		return
+	}
 	commits, err := s.draft.History(sc.proj, 25)
 	respond(w, commits, err)
+}
+
+// handleRestore stages one VM's manifest as a past commit held it - the VM
+// page's Restore, which lands in the draft and is proposed like any edit.
+func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
+	sc, ns, name, ok := s.vmScope(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Hash string `json:"hash"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !commitHash.MatchString(req.Hash) {
+		http.Error(w, "commit hash must be the full 40-character hash", http.StatusBadRequest)
+		return
+	}
+	result, err := s.draft.RestoreVersion(sc.id, sc.proj, ns, name, req.Hash)
+	respond(w, result, err)
 }
 
 // handleVMHistory lists the merged changes to one VM's manifest - the VM page's

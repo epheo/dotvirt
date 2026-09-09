@@ -55,7 +55,7 @@ export async function mergePR(page: Page, repo: string, pr: number) {
 // project), fills the PR title, proposes (capturing the PR number from the
 // propose response), then merges that PR and returns to the previous view.
 export async function proposeAndMerge(page: Page, project: string, title: string): Promise<number> {
-	await page.getByRole('link', { name: /Review changes/ }).click();
+	await page.getByRole('link', { name: /Propose \d+ change/ }).click();
 	await expect(page).toHaveURL(/\/changes/);
 	await page.locator(`main [data-project="${project}"]`).first().click();
 	await page.getByPlaceholder('Pull request title').fill(title);

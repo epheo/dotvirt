@@ -5,17 +5,17 @@
 	import type { Policy } from '$lib/api';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
-	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
 	import PolicyRuleTable from '$lib/components/PolicyRuleTable.svelte';
 	import SelectInput from '$lib/components/SelectInput.svelte';
 	import SyncBadge from '$lib/components/SyncBadge.svelte';
 	import TextInput from '$lib/components/TextInput.svelte';
 	import TracePanel from '$lib/components/TracePanel.svelte';
 
-	// The Security view: the live policy plane in tiers - cluster admin DFW
-	// rules above, project DFW and gateway-firewall rules per namespace, Tier-0
-	// (SNAT + external routes) below. Read plane only: every row is a live object;
-	// authoring goes through the same modals (and PRs) as everywhere else.
+	// The Networking root's Security tab: the live policy plane in tiers -
+	// cluster admin DFW rules above, project DFW and gateway-firewall rules per
+	// namespace, Tier-0 (SNAT + external routes) below. Read plane only: every
+	// row is a live object; authoring goes through the same modals (and PRs) as
+	// everywhere else.
 	const policies = $derived(inventory.policies);
 
 	// Scope filters: a tenant (project), a free-text query, and a drift-only
@@ -87,8 +87,6 @@
 	// gated exactly like its entry point there.
 	const canProjectRules = $derived(inventory.namespaces.length > 0);
 </script>
-
-<Breadcrumb trail={[{ label: 'Networking', href: '/networking' }, { label: 'Security' }]} />
 
 <div class="flex flex-wrap items-center gap-2 border-b border-line bg-panel px-4 py-2">
 	<SelectInput

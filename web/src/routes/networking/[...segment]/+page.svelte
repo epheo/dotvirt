@@ -8,4 +8,4 @@
 	const scope = $derived<Scope>({ kind: 'network', network: page.params.segment! });
 </script>
 
-<ContainerWorkspace {scope} trail={trailForScope(scope)} />
+<ContainerWorkspace {scope} section="networking" trail={trailForScope(scope)} />

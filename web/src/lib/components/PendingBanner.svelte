@@ -36,8 +36,9 @@
 {:else if proposal}
 	<Banner tone="ok">
 		<StatusDot tone="ok" size="xs" />
-		PR #{proposal.prNumber}{#if proposal.by && !proposal.mine}
-			by {proposal.by}{/if} is open in <strong>{proj}</strong> — its changes apply when it merges.
+		PR #{proposal.prNumber}{#if proposal.by && !proposal.mine}&nbsp;by {proposal.by}{/if} is open in
+		<strong>{proj}</strong>
+		— its changes apply when it merges.
 		<button
 			onclick={() =>
 				ui.openChanges({

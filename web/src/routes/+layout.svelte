@@ -6,8 +6,9 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, onUnauthorized, streamInventory } from '$lib/api';
-	import { sectionOf, vmHref, type Section } from '$lib/nav';
+	import { INVENTORY_SECTIONS, sectionOf, vmHref, type Section } from '$lib/nav';
 	import { drafts, PLATFORM_PROJECT } from '$lib/state/drafts.svelte';
+	import { catalog } from '$lib/state/catalog.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { lastSection } from '$lib/state/nav.svelte';
 	import { session } from '$lib/state/session.svelte';
@@ -22,6 +23,7 @@
 	import TaskDock from '$lib/components/TaskDock.svelte';
 	import ToastHost from '$lib/components/ToastHost.svelte';
 	import CatalogTree from '$lib/tree/CatalogTree.svelte';
+	import ChangesTree from '$lib/tree/ChangesTree.svelte';
 	import ComputeTree from '$lib/tree/ComputeTree.svelte';
 	import FlatSectionTree from '$lib/tree/FlatSectionTree.svelte';
 
@@ -29,13 +31,14 @@
 
 	// The tree follows the section the URL is in, but sticks across the
 	// section-agnostic /vm route - a VM opened from the Hosts tree keeps the
-	// Hosts tree (and its highlighted row). The section also
-	// persists as where "/" lands next visit.
+	// Hosts tree (and its highlighted row). An inventory section also persists
+	// as where "/" lands next visit; Changes is a section but never a home.
 	let treeSection = $state<Section>('compute');
 	$effect(() => {
-		if (page.url.pathname.split('/')[1] !== 'vm') {
-			treeSection = sectionOf(page.url.pathname);
-			lastSection.value = treeSection;
+		const s = sectionOf(page.url.pathname);
+		if (s) {
+			treeSection = s;
+			if (INVENTORY_SECTIONS.includes(s)) lastSection.value = s;
 		}
 	});
 
@@ -50,6 +53,7 @@
 			inventory.reset();
 			drafts.reset();
 			ui.reset();
+			catalog.reset();
 		}
 	});
 
@@ -187,7 +191,7 @@
 								<div class="h-5 animate-pulse rounded bg-side-hover"></div>
 							{/each}
 						</div>
-					{:else if inventory.inventory.projects.length === 0 && inventory.adoptable.length === 0 && treeSection !== 'catalog'}
+					{:else if inventory.inventory.projects.length === 0 && inventory.adoptable.length === 0 && treeSection !== 'catalog' && treeSection !== 'changes'}
 						<div class="space-y-3 p-6 text-center">
 							<p class="text-xs text-side-dim">No projects visible.</p>
 							{#if inventory.canNamespace}
@@ -207,6 +211,8 @@
 						<FlatSectionTree kind="network" />
 					{:else if treeSection === 'storage'}
 						<FlatSectionTree kind="storage" />
+					{:else if treeSection === 'changes'}
+						<ChangesTree />
 					{:else}
 						<CatalogTree />
 					{/if}

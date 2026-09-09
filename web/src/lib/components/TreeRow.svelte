@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { ChevronDown, ChevronRight } from 'lucide-svelte';
 	import type { Snippet } from 'svelte';
+	import { page } from '$app/state';
+	import { keepTab } from '$lib/nav';
 
 	// One row of the inventory tree. Every row kind - pinned destination, group,
 	// container, VM leaf - renders through this so indentation, hover and the
@@ -32,6 +34,8 @@
 	} = $props();
 
 	const INDENT = ['pl-2', 'pl-5', 'pl-7', 'pl-12'] as const;
+	// Switching objects keeps the tab in view (see keepTab).
+	const target = $derived(keepTab(href, page.url.searchParams.get('tab')));
 </script>
 
 <div
@@ -47,7 +51,7 @@
 	{:else if alignChevron}
 		<span class="w-3"></span>
 	{/if}
-	<a class="flex min-w-0 flex-1 items-center gap-1 text-left" {href} {oncontextmenu}>
+	<a class="flex min-w-0 flex-1 items-center gap-1 text-left" href={target} {oncontextmenu}>
 		{#if icon}{@render icon()}{/if}
 		{@render children()}
 		{#if trailing}

@@ -5,10 +5,10 @@
 	import QuotaBand from './QuotaBand.svelte';
 	import Row from './Row.svelte';
 
-	// The compute container's Configure tab: read-only project settings, plus
-	// cluster services (DRS) at the cluster scope. dotvirt owns nothing here -
-	// projects are namespace labels, config is the repo. Node and segment facts
-	// live on their own object pages.
+	// The container Configure tab: read-only project settings for compute
+	// containers, cluster services (DRS) at the Hosts root. dotvirt owns nothing
+	// here - projects are namespace labels, config is the repo. Node and segment
+	// facts live on their own object pages.
 	let {
 		projects,
 		cluster = false,
@@ -23,7 +23,6 @@
 <div class="min-h-0 flex-1 overflow-y-auto p-4">
 	<div class="max-w-2xl space-y-4">
 		{#if cluster}
-			<!-- Cluster services. -->
 			<DRSCard {onstaged} />
 		{/if}
 		{#each projects as p (p.name)}

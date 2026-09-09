@@ -13,7 +13,9 @@ test('shell + container workspace renders after login', async ({ page }) => {
 	// repo-backed project, so this also waits out the login race.
 	await expect(page.getByRole('button', { name: 'New VM', exact: true })).toBeEnabled();
 	await page.keyboard.press('Escape');
-	await expect(page.getByRole('link', { name: /Review changes/ })).toBeVisible();
+	await expect(
+		page.locator('aside').getByRole('link', { name: 'Changes', exact: true }),
+	).toBeVisible();
 	// The All-VMs landing is a tabbed workspace (Summary / VMs / Monitor); tabs
 	// are links (?tab=), scoped to main — the tree carries links of its own.
 	const main = page.locator('main');
@@ -62,12 +64,11 @@ test('views are deep-linkable and refresh-safe', async ({ page }) => {
 	// Catalog is a routed workspace, not a drawer.
 	await page.goto('/catalog?kind=instancetypes');
 	await expect(page.getByText('Read-only — these are platform objects')).toBeVisible();
-	// Topology is the Networking section home.
+	// Topology is the Networking root's Summary.
 	await page.goto('/networking');
 	await expect(page.getByText('Provider Gateway').first()).toBeVisible();
 	// A segment group in the tree opens its object page (Summary fact sheet).
-	// The lens also carries a Security entry — exclude it, it is not a segment.
-	await page.locator('aside a[href^="/networking/"]:not([href$="/security"])').first().click();
+	await page.locator('aside a[href^="/networking/"]').first().click();
 	await expect(page.locator('main').getByText('VMs attached')).toBeVisible();
 	// A VM URL survives a hard reload (session cookie + fallback routing).
 	await page.goto('/compute');

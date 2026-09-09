@@ -11,4 +11,4 @@
 	});
 </script>
 
-<ContainerWorkspace {scope} trail={trailForScope(scope)} />
+<ContainerWorkspace {scope} section="compute" trail={trailForScope(scope)} />

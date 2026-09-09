@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Database, LayoutGrid, Network, Server, Shield, Workflow } from 'lucide-svelte';
+	import { Database, LayoutGrid, Network, Server } from 'lucide-svelte';
 	import { api, type Node, type VM } from '$lib/api';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
 	import { hrefForScope, scopeFromPath } from '$lib/nav';
@@ -19,12 +19,11 @@
 
 	const scope = $derived(scopeFromPath(page.url.pathname));
 
-	// The section home row: Hosts/Storage roll up to the whole inventory;
-	// Networking's home is the Topology map.
+	// The section home row: every section rolls up to the whole inventory.
 	const ROOT = $derived(
 		{
 			node: { label: 'All Nodes', href: '/hosts' },
-			network: { label: 'Topology', href: '/networking' },
+			network: { label: 'All Networks', href: '/networking' },
 			storage: { label: 'All Storage', href: '/storage' },
 		}[kind],
 	);
@@ -71,22 +70,10 @@
 <div class="select-none text-[13px]">
 	<TreeRow active={page.url.pathname === ROOT.href} alignChevron href={ROOT.href}>
 		{#snippet icon()}
-			{#if kind === 'network'}<Workflow size={14} class="text-side-dim" />
-			{:else}<LayoutGrid size={14} class="text-side-dim" />{/if}
+			<LayoutGrid size={14} class="text-side-dim" />
 		{/snippet}
 		<span class="truncate font-semibold text-side-ink">{ROOT.label}</span>
 	</TreeRow>
-
-	{#if kind === 'network'}
-		<TreeRow
-			active={page.url.pathname === '/networking/security'}
-			alignChevron
-			href="/networking/security"
-		>
-			{#snippet icon()}<Shield size={14} class="text-side-dim" />{/snippet}
-			<span class="truncate font-semibold text-side-ink">Security</span>
-		</TreeRow>
-	{/if}
 
 	{#each groups as [key, vms] (key)}
 		{@const gid = `${kind}:${key}`}

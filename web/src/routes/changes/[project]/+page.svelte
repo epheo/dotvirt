@@ -1,5 +1,6 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import ChangesWorkspace from '$lib/workspace/ChangesWorkspace.svelte';
 </script>
 
-<ChangesWorkspace />
+<ChangesWorkspace project={page.params.project!} />

@@ -35,7 +35,7 @@ test('base views, light and dark', async ({ page }) => {
 	await expect(page.locator('main').getByText('Provider Gateway').first()).toBeVisible();
 	await shot(page, 'networking-topology');
 
-	await page.goto('/networking/security');
+	await page.goto('/networking?tab=security');
 	await shot(page, 'security');
 
 	await page.goto('/hosts');
@@ -54,7 +54,7 @@ test('trouble states', async ({ page }) => {
 	await page.locator('button[title^="Issues"]').click();
 	await shot(page, 'drift-issues-bell');
 	await page.keyboard.press('Escape');
-	await page.getByRole('link', { name: /Review changes/ }).click();
+	await page.getByRole('link', { name: /Propose \d+ change/ }).click();
 	await shot(page, 'drift-changes-prune-warning');
 
 	await setScenario(page, 'degraded');

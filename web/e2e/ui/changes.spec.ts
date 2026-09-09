@@ -93,8 +93,8 @@ test('a review is deep-linkable, and the VM page links its own history', async (
 	await main.getByRole('button', { name: /PR #41/ }).click();
 	await expect(page).toHaveURL(/\/changes\?project=team-db&pr=41$/);
 
-	// The VM page lists the merged changes to this VM; each opens the same review.
-	await page.goto('/vm/web-prod/web-2');
+	// The VM's Changes tab lists its versions; each title opens the same review.
+	await page.goto('/vm/web-prod/web-2?tab=changes');
 	const row = page.locator('main').getByRole('link', { name: /web-2: add data disk/ });
 	await expect(row).toBeVisible();
 	await row.click();

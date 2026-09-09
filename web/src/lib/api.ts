@@ -336,7 +336,10 @@ export const api = {
 
 	// Commit history, one commit's review, and its revert (a forward commit
 	// opened as a PR).
-	history: (project: string) => get<gen.Commit[]>(`/api/projects/${enc(project)}/history`),
+	history: (project: string, namespace?: string) =>
+		get<gen.Commit[]>(
+			`/api/projects/${enc(project)}/history${namespace ? `?namespace=${enc(namespace)}` : ''}`,
+		),
 	commit: (project: string, hash: string) =>
 		get<CommitDetail>(`/api/projects/${enc(project)}/history/${hash}`),
 	revert: (project: string, hash: string) =>
@@ -344,9 +347,12 @@ export const api = {
 	// What merging one open PR would change, from its mirrored head branch.
 	proposal: (project: string, number: number) =>
 		get<ProposalDetail>(`/api/projects/${enc(project)}/proposals/${number}`),
-	// The merged changes to one VM's manifest, newest first.
+	// The merged changes to one VM's manifest, newest first, and the object-level
+	// undo: stage the manifest as one of those commits held it.
 	vmHistory: (namespace: string, name: string) =>
 		get<gen.Commit[]>(`${vmPath(namespace, name)}/history`),
+	restoreVersion: (namespace: string, name: string, hash: string) =>
+		post<DraftView>(`${vmPath(namespace, name)}/restore`, { hash }),
 
 	// Staging - the backend resolves the project from the VM's namespace, so these
 	// per-VM routes need no project param.

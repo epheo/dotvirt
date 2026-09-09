@@ -1,16 +1,8 @@
 <script module lang="ts">
-	// The detail view's tab ids, exported so the route guard validates ?tab=
-	// against the same list the TabBar renders.
-	export const VM_TABS = [
-		'summary',
-		'monitor',
-		'configure',
-		'security',
-		'permissions',
-		'snapshots',
-		'console',
-	] as const;
-	export type VMTab = (typeof VM_TABS)[number];
+	// The tab ids live in $lib/nav so the route guard and keepTab validate
+	// ?tab= against the same list the TabBar renders.
+	import { VM_TABS, type VMTab } from '$lib/nav';
+	export { VM_TABS, type VMTab };
 </script>
 
 <script lang="ts">
@@ -57,6 +49,7 @@
 	import VMConfigure from './VMConfigure.svelte';
 	import VMEventsTable from './VMEventsTable.svelte';
 	import VMSummary from './VMSummary.svelte';
+	import VMChanges from './VMChanges.svelte';
 
 	let {
 		vm,
@@ -400,6 +393,7 @@
 					{ id: 'configure', label: 'Configure' },
 					{ id: 'security', label: 'Security' },
 					{ id: 'permissions', label: 'Permissions' },
+					{ id: 'changes', label: 'Changes' },
 					{ id: 'snapshots', label: 'Snapshots' },
 					{ id: 'console', label: 'Console' },
 				]}
@@ -466,6 +460,10 @@
 				</div>
 			{:else if tab === 'permissions'}
 				<Permissions namespaces={[vm.namespace]} />
+			{:else if tab === 'changes'}
+				{#key vmKey}
+					<VMChanges {vm} {stagedItem} onstaged={() => onstaged?.()} />
+				{/key}
 			{:else if tab === 'snapshots'}
 				{#key vmKey}
 					<Snapshots {vm} />
