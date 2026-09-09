@@ -74,5 +74,5 @@ test('deep links survive a hard reload', async ({ page }) => {
 	await page.reload();
 	await expect(page.getByRole('button', { name: /Edit Settings/ })).toBeVisible();
 	await page.goto('/catalog?kind=instancetypes');
-	await expect(page.getByText('Read-only — these are platform objects')).toBeVisible();
+	await expect(page.getByText('Read-only platform objects')).toBeVisible();
 });

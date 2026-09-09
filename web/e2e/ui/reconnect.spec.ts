@@ -44,7 +44,7 @@ test('an unreachable backend at login is not blamed on the token', async ({ page
 
 	await page.fill('textarea', 'perfectly-good-token');
 	await page.click('button[type="submit"]');
-	await expect(page.getByText(/backend or cluster is unreachable/)).toBeVisible();
+	await expect(page.getByText(/dotvirt server or the cluster is unreachable/)).toBeVisible();
 	await expect(page.getByText(/token was rejected/)).toHaveCount(0);
 
 	// A genuinely bad token still gets the token message.
