@@ -48,8 +48,10 @@ export function policyRef(p: Policy): ObjectRef {
 }
 
 // A segment's subnet, topology, VLAN and uplink are frozen by OVN-K once
-// created, so only a shared segment's publication list is editable.
+// created, so only a shared segment's publication list is editable. A primary
+// network is born and dies with its namespace (one file), so it has no delete.
 export const canEditNetwork = (n: Network) => !!n.sourceFile && n.scope === 'shared';
+export const canDeleteNetwork = (n: Network) => !!n.sourceFile && n.kind !== 'default';
 export const canEditPolicy = (p: Policy) => !!p.sourceFile;
 
 /** Read the object back from git and open its form with those values. */

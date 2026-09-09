@@ -3,7 +3,7 @@
 	import { POD_NETWORK } from '$lib/lenses';
 	import { Pencil, Trash2 } from 'lucide-svelte';
 	import { networkByRef, kindLabel } from '$lib/networks';
-	import { canEditNetwork, networkRef, openDelete, openEdit } from '$lib/objects';
+	import { canDeleteNetwork, canEditNetwork, networkRef, openDelete, openEdit } from '$lib/objects';
 	import { segmentType } from '$lib/vocab';
 	import { vmHref } from '$lib/nav';
 	import { inventory } from '$lib/state/inventory.svelte';
@@ -26,7 +26,7 @@
 			{#snippet action()}
 				<!-- Edit and delete act on the manifest git declares. Only a shared
 				     segment's publication list can change once it exists. -->
-				{#if pg?.sourceFile}
+				{#if pg && (canEditNetwork(pg) || canDeleteNetwork(pg))}
 					<div class="flex items-center gap-3 text-xs">
 						{#if canEditNetwork(pg)}
 							<button
@@ -36,12 +36,14 @@
 								><Pencil size={12} /> Edit publication</button
 							>
 						{/if}
-						<button
-							type="button"
-							onclick={() => openDelete(networkRef(pg), pg.sourceFile!)}
-							class="inline-flex items-center gap-1 text-danger-ink hover:underline"
-							><Trash2 size={12} /> Delete</button
-						>
+						{#if canDeleteNetwork(pg)}
+							<button
+								type="button"
+								onclick={() => openDelete(networkRef(pg), pg.sourceFile!)}
+								class="inline-flex items-center gap-1 text-danger-ink hover:underline"
+								><Trash2 size={12} /> Delete</button
+							>
+						{/if}
 					</div>
 				{/if}
 			{/snippet}
