@@ -62,12 +62,11 @@ test('views are deep-linkable and refresh-safe', async ({ page }) => {
 	// Catalog is a routed workspace, not a drawer.
 	await page.goto('/catalog?kind=instancetypes');
 	await expect(page.getByText('Read-only — these are platform objects')).toBeVisible();
-	// Topology is the Networking section home.
+	// Topology is the Networking root's Summary.
 	await page.goto('/networking');
 	await expect(page.getByText('Provider Gateway').first()).toBeVisible();
 	// A segment group in the tree opens its object page (Summary fact sheet).
-	// The lens also carries a Security entry — exclude it, it is not a segment.
-	await page.locator('aside a[href^="/networking/"]:not([href$="/security"])').first().click();
+	await page.locator('aside a[href^="/networking/"]').first().click();
 	await expect(page.locator('main').getByText('VMs attached')).toBeVisible();
 	// A VM URL survives a hard reload (session cookie + fallback routing).
 	await page.goto('/compute');

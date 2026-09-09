@@ -31,13 +31,18 @@ export function vmHref(namespace: string, name: string, tab?: string): string {
 }
 
 // The inventory section a path belongs to - drives the tree's lens and the
-// section highlight. The VM route keeps the Compute tree.
-export function sectionOf(pathname: string): Section {
+// section highlight. null for routes outside the inventory: the VM route keeps
+// whichever tree opened it, the review route has no tree at all.
+export function sectionOf(pathname: string): Section | null {
 	const head = pathname.split('/')[1];
 	if (head === 'hosts' || head === 'networking' || head === 'storage' || head === 'catalog')
 		return head;
-	return 'compute';
+	if (head === 'compute') return 'compute';
+	return null;
 }
+
+// Routes that take the whole shell: no inventory tree beside them.
+export const isFullWidth = (pathname: string): boolean => pathname.split('/')[1] === 'changes';
 
 export const sectionRoot = (s: Section): string => `/${s}`;
 
@@ -58,7 +63,7 @@ export function trailForScope(s: Scope): { label: string; href?: string }[] {
 		case 'node':
 			return [{ label: 'All Nodes', href: '/hosts' }, { label: `Node: ${s.node}` }];
 		case 'network':
-			return [{ label: 'Networking', href: '/networking' }, { label: `Segment: ${s.network}` }];
+			return [{ label: 'All Networks', href: '/networking' }, { label: `Segment: ${s.network}` }];
 		case 'storage':
 			return [{ label: 'All Storage', href: '/storage' }, { label: `Storage: ${s.storageClass}` }];
 	}

@@ -35,7 +35,7 @@ test('base views, light and dark', async ({ page }) => {
 	await expect(page.locator('main').getByText('Provider Gateway').first()).toBeVisible();
 	await shot(page, 'networking-topology');
 
-	await page.goto('/networking/security');
+	await page.goto('/networking?tab=security');
 	await shot(page, 'security');
 
 	await page.goto('/hosts');

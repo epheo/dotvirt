@@ -3,7 +3,7 @@
 	import { page } from '$app/state';
 	import { api, Unauthorized, type VM } from '$lib/api';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
-	import { vmHref } from '$lib/nav';
+	import { hrefForScope, vmHref, type Section } from '$lib/nav';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
@@ -14,6 +14,7 @@
 	import ContainerConfigure from '$lib/components/ContainerConfigure.svelte';
 	import ContainerMonitor from '$lib/components/ContainerMonitor.svelte';
 	import EffectivePolicyPanel from '$lib/components/EffectivePolicyPanel.svelte';
+	import NetworkTopology from '$lib/components/NetworkTopology.svelte';
 	import PendingBanner from '$lib/components/PendingBanner.svelte';
 	import RepoBanner from '$lib/components/RepoBanner.svelte';
 	import Permissions from '$lib/components/Permissions.svelte';
@@ -22,27 +23,31 @@
 	import Inspector from '$lib/components/Inspector.svelte';
 	import BulkActionsMenu from './BulkActionsMenu.svelte';
 	import BulkDeleteConfirm from './BulkDeleteConfirm.svelte';
+	import HostsRootSummary from './HostsRootSummary.svelte';
 	import NodeConfigure from './NodeConfigure.svelte';
+	import SecurityPlane from './SecurityPlane.svelte';
 	import SegmentSummary from './SegmentSummary.svelte';
 	import StorageClassSummary from './StorageClassSummary.svelte';
 	import StorageRootSummary from './StorageRootSummary.svelte';
 
-	// The container workspace: every inventory level gets the same breadcrumb +
-	// tab chrome - the same tabs at every level. The tab SET follows the
-	// object kind: compute containers carry the full set, a host drops
-	// Permissions (nodes aren't namespaced), segments and storage classes are
-	// fact sheets (Summary + their VMs).
+	// The container workspace: every inventory level, section roots included,
+	// gets the same breadcrumb + tab chrome. Roots differ only in what their
+	// Summary shows (cluster capacity, the host fleet, the network topology, the
+	// storage classes). The tab SET follows the object kind: compute containers
+	// carry the full set, hosts drop Permissions (nodes aren't namespaced),
+	// segments and storage classes are fact sheets (Summary + their VMs).
 	let {
 		scope,
+		section,
 		trail,
-		lens = 'compute',
 	}: {
 		scope: Scope;
+		// The section this workspace serves; only a root ('all' scope) needs it
+		// to pick its Summary, but every route names it so the chrome can't drift.
+		section: Exclude<Section, 'catalog'>;
 		trail: { label: string; href?: string }[];
-		// The section serving this workspace: the storage root swaps the compute
-		// cluster cards for a storage fact sheet and drops the compute-only tabs.
-		lens?: 'compute' | 'storage';
 	} = $props();
+	const root = $derived(scope.kind === 'all');
 
 	const ALL_TABS = [
 		{ id: 'summary', label: 'Summary' },
@@ -53,15 +58,20 @@
 		{ id: 'permissions', label: 'Permissions' },
 	];
 	const tabs = $derived.by(() => {
-		if (scope.kind === 'node')
-			return ALL_TABS.filter((t) => t.id !== 'permissions' && t.id !== 'security');
-		// The storage root is a fact sheet like its per-class pages: DRS, project
-		// repos, and host metrics are compute concerns, not storage tabs.
-		if (scope.kind === 'network' || scope.kind === 'storage' || lens === 'storage')
-			return ALL_TABS.filter((t) => t.id === 'summary' || t.id === 'vms');
+		const only = (...ids: string[]) => ALL_TABS.filter((t) => ids.includes(t.id));
+		switch (section) {
+			// Hosts: cluster services (DRS) configure at the root, maintenance per node.
+			case 'hosts':
+				return only('summary', 'vms', 'monitor', 'configure');
+			// Networking: the policy plane is the root's Security tab; a segment is
+			// a fact sheet.
+			case 'networking':
+				return root ? only('summary', 'vms', 'security') : only('summary', 'vms');
+			case 'storage':
+				return only('summary', 'vms');
+		}
 		// Effective policy evaluates against exactly one namespace.
-		if (scope.kind !== 'namespace') return ALL_TABS.filter((t) => t.id !== 'security');
-		return ALL_TABS;
+		return scope.kind === 'namespace' ? ALL_TABS : ALL_TABS.filter((t) => t.id !== 'security');
 	});
 	const tab = $derived.by(() => {
 		const t = page.url.searchParams.get('tab');
@@ -92,15 +102,14 @@
 			);
 	});
 
-	// Projects shown on the Configure tab (the scoped one, or all).
+	// Projects shown on the Configure tab (the scoped one, or all of Compute).
 	const cfgProjects = $derived.by(() => {
 		const inv = inventory.inventory;
 		if (!inv) return [];
 		const sc = scope;
 		if (sc.kind === 'project' || sc.kind === 'namespace')
 			return inv.projects.filter((p) => p.name === sc.project);
-		if (sc.kind === 'node' || sc.kind === 'network' || sc.kind === 'storage') return [];
-		return inv.projects;
+		return sc.kind === 'all' && section === 'compute' ? inv.projects : [];
 	});
 	// The metrics-backend scope. Network/storage lenses are navigation groupings,
 	// not metrics boundaries - their Summary/Monitor aggregate the whole
@@ -224,8 +233,21 @@
 		<SegmentSummary network={scope.network} vms={scopedVMs} />
 	{:else if scope.kind === 'storage'}
 		<StorageClassSummary storageClass={scope.storageClass} vms={scopedVMs} />
-	{:else if lens === 'storage'}
+	{:else if root && section === 'storage'}
 		<StorageRootSummary vms={scopedVMs} />
+	{:else if root && section === 'hosts'}
+		<HostsRootSummary vms={scopedVMs} />
+	{:else if root && section === 'networking'}
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
+		<div class="min-h-0 flex-1 overflow-y-auto" role="region" aria-label="Tab content" tabindex="0">
+			<NetworkTopology
+				networks={inventory.networks}
+				uplinks={inventory.uplinks}
+				vms={scopedVMs}
+				projects={inventory.inventory?.projects ?? []}
+				onpick={(net) => goto(hrefForScope({ kind: 'network', network: net }))}
+			/>
+		</div>
 	{:else}
 		{#if scope.kind === 'project' || scope.kind === 'namespace'}
 			<RepoBanner project={scope.project} />
@@ -261,12 +283,14 @@
 	{:else}
 		<ContainerConfigure
 			projects={cfgProjects}
-			cluster={scope.kind === 'all'}
+			cluster={root && section === 'hosts'}
 			onstaged={() => drafts.refresh()}
 		/>
 	{/if}
 {:else if tab === 'security'}
-	{#if scope.kind === 'namespace'}
+	{#if root}
+		<SecurityPlane />
+	{:else if scope.kind === 'namespace'}
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
 		<div
 			class="min-h-0 flex-1 overflow-y-auto p-4"

@@ -7,4 +7,4 @@
 	const scope = $derived<Scope>({ kind: 'storage', storageClass: page.params.class! });
 </script>
 
-<ContainerWorkspace {scope} trail={trailForScope(scope)} />
+<ContainerWorkspace {scope} section="storage" trail={trailForScope(scope)} />

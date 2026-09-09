@@ -12,7 +12,10 @@
 	// the 0-100% strip take over, reading as a distribution - dots first, then
 	// the geometric hand-off to a density silhouette with only out-of-band
 	// workers individually drawn (see dotstrip.ts).
+	// The host page already lists the fleet, so it turns the roster off and
+	// keeps the band, the strip, and the migration line.
 	// metrics off or no worker series: the card simply absents itself
+	let { roster = true }: { roster?: boolean } = $props();
 	const hl = resource<HostLoad>(
 		() => '',
 		() => api.hostLoad(),
@@ -111,7 +114,7 @@
 	// The roster: everyone for small fleets, out-of-band workers for large
 	// ones - a balanced 500-node fleet needs no rows at all.
 	const rows = $derived.by(() => {
-		if (!data) return [];
+		if (!data || !roster) return [];
 		if (data.workers <= 10) return data.nodes;
 		if (!band) return data.nodes.slice(0, 3);
 		return [
@@ -119,7 +122,7 @@
 			...nodes.filter((n) => n.pct < band.low).slice(-5),
 		];
 	});
-	const unlisted = $derived(data ? data.workers - rows.length : 0);
+	const unlisted = $derived(data && roster ? data.workers - rows.length : 0);
 	const pctClass = (n: HostWorker): string => {
 		if (!band) return 'text-ink-soft';
 		if (n.pct > band.high) return 'text-warn-ink';

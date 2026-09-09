@@ -1,166 +1,69 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api, Unauthorized, type Options, type Template } from '$lib/api';
+	import { api, Unauthorized } from '$lib/api';
+	import { CATALOG_KINDS, catalogHref, catalogKind, catalogRows } from '$lib/catalog';
 	import { friendlyError } from '$lib/format';
+	import { catalog } from '$lib/state/catalog.svelte';
+	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
 	import ErrorNote from '$lib/components/ErrorNote.svelte';
+	import TabBar from '$lib/components/TabBar.svelte';
 
 	// The Content Library: VM templates (deployable, git-backed) first, then a
 	// read-only browser over the cluster's catalog - boot images (DataSources),
-	// instance types, preferences, networks (NADs), storage classes. Catalog
-	// kinds are the wizard's own /api/options; templates come from the library
-	// repos via /api/templates. The kind rides ?kind= so a catalog tab is
-	// deep-linkable like every other tab.
-	let options = $state<Options | null>(null);
-	let templates = $state<Template[] | null>(null);
+	// instance types, preferences, networks (NADs), storage classes. Same
+	// chrome as every container: the kinds are tabs (?kind=), the selected
+	// item rides ?item= so the tree, the table and a shared link agree.
+	const kind = $derived(catalogKind(page.url.searchParams.get('kind')));
+	const picked = $derived(page.url.searchParams.get('item'));
 	let error = $state('');
 
-	type Kind = 'templates' | 'images' | 'instancetypes' | 'preferences' | 'networks' | 'storage';
-	let picked = $state<string | null>(null); // selected item key within the kind
-
-	const KINDS: { id: Kind; label: string }[] = [
-		{ id: 'templates', label: 'VM Templates' },
-		{ id: 'images', label: 'Boot images' },
-		{ id: 'instancetypes', label: 'Instance types' },
-		{ id: 'preferences', label: 'Preferences' },
-		{ id: 'networks', label: 'Networks' },
-		{ id: 'storage', label: 'Storage classes' },
-	];
-	const kind = $derived.by<Kind>(() => {
-		const k = page.url.searchParams.get('kind');
-		return KINDS.some((x) => x.id === k) ? (k as Kind) : 'templates';
-	});
-	const kindLabel = $derived(KINDS.find((k) => k.id === kind)!.label);
+	// Templates re-pull when a merged PR lands (tasksVersion): a template
+	// committed through the app appears without a reload. The options catalog
+	// re-pulls on entry so a boot-time failure heals here.
 	$effect(() => {
-		kind;
-		picked = null;
+		inventory.tasksVersion;
+		catalog.load();
 	});
-
 	$effect(() => {
 		api
 			.options()
-			.then((o) => (options = o))
-			.catch((e) => {
-				if (e instanceof Unauthorized) return;
-				error = friendlyError(e);
-			});
-		api
-			.templates()
-			.then((t) => (templates = t.templates))
+			.then((o) => (inventory.options = o))
 			.catch((e) => {
 				if (e instanceof Unauthorized) return;
 				error = friendlyError(e);
 			});
 	});
 
-	// The shared library reads as a subscribed content library.
-	const libraryLabel = (lib: string) => (lib === 'platform' ? 'Shared library' : lib);
+	const rows = $derived(catalogRows(kind, catalog.templates, inventory.options));
+	const pickedRow = $derived(rows?.find((r) => r.key === picked) ?? null);
 
-	// One uniform row shape per kind: key, title, a right-aligned fact, and the
-	// detail fields shown when selected. Template rows also carry the template so
-	// the detail pane can render parameters + Deploy.
-	type Row = {
-		key: string;
-		title: string;
-		fact: string;
-		detail: [string, string][];
-		template?: Template;
-	};
-	const rows = $derived.by<Row[]>(() => {
-		if (kind === 'templates') {
-			return (templates ?? []).map((t) => ({
-				key: `${t.library}/${t.name}`,
-				title: t.name,
-				fact: t.error
-					? 'Invalid'
-					: [libraryLabel(t.library), t.instancetype].filter(Boolean).join(' · '),
-				detail: [
-					['Kind', 'VirtualMachineTemplate (git)'],
-					['Library', libraryLabel(t.library)],
-					['Description', t.description || '—'],
-					['Instance type', t.instancetype || '—'],
-					['Preference', t.preference || '—'],
-					['Source file', t.sourceFile],
-					...(t.error ? ([['Error', t.error]] as [string, string][]) : []),
-				],
-				template: t,
-			}));
-		}
-		const o = options;
-		if (!o) return [];
-		switch (kind) {
-			case 'images':
-				return (o.osImages ?? []).map((i) => ({
-					key: `${i.namespace}/${i.name}`,
-					title: i.name,
-					fact: i.ready ? 'Ready' : 'Not ready',
-					detail: [
-						['Kind', 'DataSource (CDI)'],
-						['Namespace', i.namespace],
-						['Ready', i.ready ? 'Yes' : 'No'],
-						['Used as', 'Root-disk source in the New VM wizard'],
-					],
-				}));
-			case 'instancetypes':
-				return (o.instancetypes ?? []).map((it) => ({
-					key: it.name,
-					title: it.name,
-					fact: `${it.cpu} CPU / ${it.memory}`,
-					detail: [
-						['Kind', 'VirtualMachineClusterInstancetype'],
-						['vCPUs', String(it.cpu)],
-						['Memory', it.memory],
-						['Used as', 'VM size (spec.instancetype)'],
-					],
-				}));
-			case 'preferences':
-				return (o.preferences ?? []).map((p) => ({
-					key: p.name,
-					title: p.displayName || p.name,
-					fact: p.name,
-					detail: [
-						['Kind', 'VirtualMachineClusterPreference'],
-						['Name', p.name],
-						['Display name', p.displayName || '—'],
-						['Used as', 'OS tuning (spec.preference)'],
-					],
-				}));
-			case 'networks':
-				return (o.networks ?? []).map((n) => ({
-					key: `${n.namespace}/${n.name}`,
-					title: n.name,
-					fact: n.namespace,
-					detail: [
-						['Kind', 'NetworkAttachmentDefinition (Multus)'],
-						['Namespace', n.namespace],
-						['Reference', `${n.namespace}/${n.name}`],
-						['Used as', 'Secondary VM network'],
-					],
-				}));
-			case 'storage':
-				return (o.storageClasses ?? []).map((sc) => ({
-					key: sc.name,
-					title: sc.name,
-					fact: sc.default ? 'default' : '',
-					detail: [
-						['Kind', 'StorageClass'],
-						['Cluster default', sc.default ? 'Yes' : 'No'],
-						['Used as', 'dataVolume storage class for provisioned disks'],
-					],
-				}));
-		}
-	});
-	const pickedRow = $derived(rows.find((r) => r.key === picked) ?? null);
+	// Selection is replaceState, like tabs: back never walks item picks.
+	function setPicked(key: string | null) {
+		goto(catalogHref(kind, key ?? undefined), {
+			replaceState: true,
+			keepFocus: true,
+			noScroll: true,
+		});
+	}
 </script>
 
-<Breadcrumb trail={[{ label: 'Catalog', href: '/catalog' }, { label: kindLabel }]} />
+<Breadcrumb trail={[{ label: 'Catalog' }]} />
+
+<TabBar
+	class="border-b border-line px-4"
+	tabs={CATALOG_KINDS}
+	active={kind}
+	href={(k) => `?kind=${k}`}
+/>
 
 <div class="flex min-h-0 flex-1">
 	<div class="min-h-0 flex-1 overflow-y-auto">
-		{#if error}
-			<ErrorNote {error} class="m-4" />
-		{:else if kind === 'templates' ? !templates : !options}
+		{#if error || catalog.error}
+			<ErrorNote error={error || catalog.error} class="m-4" />
+		{:else if !rows}
 			<p class="py-6 text-center text-sm text-ink-faint">Loading catalog…</p>
 		{:else if rows.length === 0}
 			<p class="py-6 text-center text-sm text-ink-faint">
@@ -179,7 +82,7 @@
 				<tbody>
 					{#each rows as r (r.key)}
 						<tr
-							onclick={() => (picked = picked === r.key ? null : r.key)}
+							onclick={() => setPicked(picked === r.key ? null : r.key)}
 							class="cursor-pointer border-b border-line-soft hover:bg-select-soft {picked === r.key
 								? 'bg-select hover:bg-select'
 								: ''}"

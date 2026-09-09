@@ -2,8 +2,6 @@
 	import { api, type ClusterSummary } from '$lib/api';
 	import { resource } from '$lib/resource.svelte';
 	import { phaseTextTone } from '$lib/status';
-	import HostBalance from './HostBalance.svelte';
-	import HostCapacityCard from './HostCapacityCard.svelte';
 	import IssuesCard from './IssuesCard.svelte';
 	import QuotaBand from './QuotaBand.svelte';
 	import Ring from './Ring.svelte';
@@ -138,12 +136,6 @@
 	<!-- The detail row: full cards below the glance band, using the page's height
 	     instead of cramming everything onto one strip. -->
 	<div class="grid items-start gap-4 p-4 lg:grid-cols-2">
-		<!-- Cluster scope only: the worker distribution is one cluster-wide fact;
-		     a project/namespace/node view would repeat it misleadingly. -->
-		{#if !scope.project && !scope.namespace && !scope.node}
-			<HostBalance />
-			<HostCapacityCard />
-		{/if}
 		<IssuesCard scope={{ project: scope.project, namespace: scope.namespace }} />
 		<TopConsumers topCpu={data.topCpu} topMemory={data.topMemory} {onselect} />
 	</div>

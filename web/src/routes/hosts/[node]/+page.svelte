@@ -7,4 +7,4 @@
 	const scope = $derived<Scope>({ kind: 'node', node: page.params.node! });
 </script>
 
-<ContainerWorkspace {scope} trail={trailForScope(scope)} />
+<ContainerWorkspace {scope} section="hosts" trail={trailForScope(scope)} />

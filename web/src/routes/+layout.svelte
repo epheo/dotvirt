@@ -6,8 +6,9 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, onUnauthorized, streamInventory } from '$lib/api';
-	import { sectionOf, vmHref, type Section } from '$lib/nav';
+	import { isFullWidth, sectionOf, vmHref, type Section } from '$lib/nav';
 	import { drafts, PLATFORM_PROJECT } from '$lib/state/drafts.svelte';
+	import { catalog } from '$lib/state/catalog.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { lastSection } from '$lib/state/nav.svelte';
 	import { session } from '$lib/state/session.svelte';
@@ -33,11 +34,15 @@
 	// persists as where "/" lands next visit.
 	let treeSection = $state<Section>('compute');
 	$effect(() => {
-		if (page.url.pathname.split('/')[1] !== 'vm') {
-			treeSection = sectionOf(page.url.pathname);
-			lastSection.value = treeSection;
+		const s = sectionOf(page.url.pathname);
+		if (s) {
+			treeSection = s;
+			lastSection.value = s;
 		}
 	});
+	// The review route is a mode, not a section: it brings its own rail, so
+	// the inventory tree steps aside instead of stacking beside it.
+	const fullWidth = $derived(isFullWidth(page.url.pathname));
 
 	// Drop to the login screen on any 401. Registered as the api layer's one
 	// signed-out sink, so every fetching component is covered without threading
@@ -50,6 +55,7 @@
 			inventory.reset();
 			drafts.reset();
 			ui.reset();
+			catalog.reset();
 		}
 	});
 
@@ -178,40 +184,42 @@
 		{/if}
 
 		<div class="flex min-h-0 flex-1">
-			<aside class="flex w-72 flex-col border-r border-side-line bg-side">
-				<SectionSwitcher active={treeSection} />
-				<div class="min-h-0 flex-1 overflow-y-auto">
-					{#if !inventory.inventory}
-						<div class="space-y-2 p-3">
-							{#each Array(5) as _, i (i)}
-								<div class="h-5 animate-pulse rounded bg-side-hover"></div>
-							{/each}
-						</div>
-					{:else if inventory.inventory.projects.length === 0 && inventory.adoptable.length === 0 && treeSection !== 'catalog'}
-						<div class="space-y-3 p-6 text-center">
-							<p class="text-xs text-side-dim">No projects visible.</p>
-							{#if inventory.canNamespace}
-								<button
-									onclick={() => (ui.modal = { kind: 'newProject' })}
-									class="inline-flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
-								>
-									<FolderPlus size={14} /> Create your first project
-								</button>
-							{/if}
-						</div>
-					{:else if treeSection === 'compute'}
-						<ComputeTree />
-					{:else if treeSection === 'hosts'}
-						<FlatSectionTree kind="node" />
-					{:else if treeSection === 'networking'}
-						<FlatSectionTree kind="network" />
-					{:else if treeSection === 'storage'}
-						<FlatSectionTree kind="storage" />
-					{:else}
-						<CatalogTree />
-					{/if}
-				</div>
-			</aside>
+			{#if !fullWidth}
+				<aside class="flex w-72 flex-col border-r border-side-line bg-side">
+					<SectionSwitcher active={treeSection} />
+					<div class="min-h-0 flex-1 overflow-y-auto">
+						{#if !inventory.inventory}
+							<div class="space-y-2 p-3">
+								{#each Array(5) as _, i (i)}
+									<div class="h-5 animate-pulse rounded bg-side-hover"></div>
+								{/each}
+							</div>
+						{:else if inventory.inventory.projects.length === 0 && inventory.adoptable.length === 0 && treeSection !== 'catalog'}
+							<div class="space-y-3 p-6 text-center">
+								<p class="text-xs text-side-dim">No projects visible.</p>
+								{#if inventory.canNamespace}
+									<button
+										onclick={() => (ui.modal = { kind: 'newProject' })}
+										class="inline-flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
+									>
+										<FolderPlus size={14} /> Create your first project
+									</button>
+								{/if}
+							</div>
+						{:else if treeSection === 'compute'}
+							<ComputeTree />
+						{:else if treeSection === 'hosts'}
+							<FlatSectionTree kind="node" />
+						{:else if treeSection === 'networking'}
+							<FlatSectionTree kind="network" />
+						{:else if treeSection === 'storage'}
+							<FlatSectionTree kind="storage" />
+						{:else}
+							<CatalogTree />
+						{/if}
+					</div>
+				</aside>
+			{/if}
 			<main class="flex min-w-0 flex-1 flex-col overflow-hidden bg-panel">
 				{@render children()}
 			</main>

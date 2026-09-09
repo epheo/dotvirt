@@ -44,7 +44,7 @@ test('networking and security surfaces are accessible', async ({ page }) => {
 	await expect(page.locator('main').getByText('Provider Gateway').first()).toBeVisible();
 	await checkA11y(page, 'topology');
 
-	await page.goto('/networking/security');
+	await page.goto('/networking?tab=security');
 	await checkA11y(page, 'security');
 });
 

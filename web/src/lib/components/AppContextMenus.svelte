@@ -159,7 +159,9 @@
 					onclick={() => {
 						const project = ctx.kind === 'container' ? ctx.project : null;
 						ui.ctx = null;
-						goto(`/networking/security${project ? `?tenant=${encodeURIComponent(project)}` : ''}`);
+						goto(
+							`/networking?tab=security${project ? `&tenant=${encodeURIComponent(project)}` : ''}`,
+						);
 					}}
 					title="The policy plane scoped to this tenant">Security view</MenuItem
 				>
