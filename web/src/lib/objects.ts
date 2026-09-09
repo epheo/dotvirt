@@ -4,6 +4,7 @@
 // it, and a delete stages the file's removal like a VM delete.
 import {
 	api,
+	Unauthorized,
 	type AdminNetworkPolicyCreate,
 	type EgressFirewallCreate,
 	type EgressIPCreate,
@@ -14,6 +15,7 @@ import {
 	type Policy,
 } from '$lib/api';
 import { friendlyError } from '$lib/format';
+import { drafts } from '$lib/state/drafts.svelte';
 import { inventory } from '$lib/state/inventory.svelte';
 import { ui } from '$lib/state/ui.svelte';
 
@@ -45,6 +47,36 @@ export function networkRef(n: Network): ObjectRef {
 
 export function policyRef(p: Policy): ObjectRef {
 	return { resource: policyResource[p.kind], namespace: p.namespace || CLUSTER, name: p.name };
+}
+
+// Adoption is offered where git declares nothing and the caller may author the
+// tier: a project object needs its namespace in a repo-backed project, a shared
+// one the platform capability the create forms gate on.
+export function canAdoptNetwork(n: Network): boolean {
+	if (n.sourceFile) return false;
+	return n.scope === 'shared'
+		? inventory.canManage
+		: inventory.namespaces.includes(n.namespace ?? '');
+}
+export function canAdoptPolicy(p: Policy): boolean {
+	if (p.sourceFile) return false;
+	if (p.namespace) return inventory.namespaces.includes(p.namespace);
+	return p.kind === 'admin' || p.kind === 'baseline' ? inventory.canAdminFw : inventory.canEgress;
+}
+
+/** Stage the running object's manifest into Changes, as a VM adopt does. */
+export async function openAdopt(ref: ObjectRef) {
+	try {
+		await api.adoptObject(ref.resource, ref.namespace, ref.name);
+		await drafts.refresh();
+		ui.showToast(`${ref.name} staged into Changes - open a PR to adopt it into git.`, {
+			kind: 'success',
+			action: { label: 'Review & propose', run: () => ui.openChanges() },
+		});
+	} catch (e) {
+		if (e instanceof Unauthorized) return;
+		ui.showToast(friendlyError(e), { kind: 'error' });
+	}
 }
 
 // A segment's subnet, topology, VLAN and uplink are frozen by OVN-K once

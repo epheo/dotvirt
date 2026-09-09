@@ -1,9 +1,17 @@
 <script lang="ts">
 	import type { VM } from '$lib/api';
 	import { POD_NETWORK } from '$lib/lenses';
-	import { Pencil, Trash2 } from 'lucide-svelte';
+	import { GitPullRequest, Pencil, Trash2 } from 'lucide-svelte';
 	import { networkByRef, kindLabel } from '$lib/networks';
-	import { canDeleteNetwork, canEditNetwork, networkRef, openDelete, openEdit } from '$lib/objects';
+	import {
+		canAdoptNetwork,
+		canDeleteNetwork,
+		canEditNetwork,
+		networkRef,
+		openAdopt,
+		openDelete,
+		openEdit,
+	} from '$lib/objects';
 	import { segmentType } from '$lib/vocab';
 	import { vmHref } from '$lib/nav';
 	import { inventory } from '$lib/state/inventory.svelte';
@@ -26,7 +34,14 @@
 			{#snippet action()}
 				<!-- Edit and delete act on the manifest git declares. Only a shared
 				     segment's publication list can change once it exists. -->
-				{#if pg && (canEditNetwork(pg) || canDeleteNetwork(pg))}
+				{#if pg && canAdoptNetwork(pg)}
+					<button
+						type="button"
+						onclick={() => openAdopt(networkRef(pg))}
+						class="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+						><GitPullRequest size={12} /> Adopt into git</button
+					>
+				{:else if pg && (canEditNetwork(pg) || canDeleteNetwork(pg))}
 					<div class="flex items-center gap-3 text-xs">
 						{#if canEditNetwork(pg)}
 							<button

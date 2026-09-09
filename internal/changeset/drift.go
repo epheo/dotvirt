@@ -147,6 +147,15 @@ type Adoptable struct {
 // is the authority on that and only the coordinator can read it. Skipping it would
 // restate the repo, overwriting hand-authored manifests with the live defaulted copy.
 func (c *Coordinator) AdoptNamespace(id auth.Identity, proj project.ProjectInfo, namespace string, objs []Adoptable) (model.DraftView, error) {
+	return c.AdoptObjects(id, proj, namespace, objs)
+}
+
+// AdoptObjects stages every captured object git does not already declare - one
+// create entry carrying the live manifest - into (id, proj)'s draft. Cluster-scoped
+// objects (empty Namespace) stage under the ClusterScopeNS sentinel, the identity
+// the platform tier's edit and delete use. where names the scope in the
+// nothing-to-adopt error.
+func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, where string, objs []Adoptable) (model.DraftView, error) {
 	if err := requireRepo(proj); err != nil {
 		return model.DraftView{}, err
 	}
@@ -163,10 +172,14 @@ func (c *Coordinator) AdoptNamespace(id auth.Identity, proj project.ProjectInfo,
 		if declared[model.ObjectRef{Kind: o.Kind, Namespace: o.Namespace, Name: o.Name}] {
 			continue
 		}
+		ns := o.Namespace
+		if ns == "" {
+			ns = ClusterScopeNS
+		}
 		if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   adoptResource(o.Kind),
-			Namespace:  o.Namespace,
+			Namespace:  ns,
 			Name:       o.Name,
 			SourceFile: o.Path,
 			Manifest:   string(o.Manifest),
@@ -176,7 +189,7 @@ func (c *Coordinator) AdoptNamespace(id auth.Identity, proj project.ProjectInfo,
 		staged++
 	}
 	if staged == 0 {
-		return model.DraftView{}, fmt.Errorf("%w: nothing to adopt in %s: git already describes everything running there", model.ErrInvalid, namespace)
+		return model.DraftView{}, fmt.Errorf("%w: nothing to adopt in %s: git already describes everything running there", model.ErrInvalid, where)
 	}
 	return c.Get(id, proj)
 }
@@ -187,16 +200,18 @@ func (c *Coordinator) AdoptNamespace(id auth.Identity, proj project.ProjectInfo,
 // the draft store and the Changes view both switch on, and an unknown value would render
 // and unstage as nothing.
 func adoptResource(kind string) draft.Resource {
-	switch kind {
-	case "UserDefinedNetwork":
-		return draft.ResourceNetwork
-	case "EgressFirewall":
-		return draft.ResourceEgressFirewall
-	case "NetworkPolicy":
-		return draft.ResourceNetworkPolicy
-	default:
-		return draft.ResourceVM
+	for _, r := range []draft.Resource{
+		draft.ResourceNetwork, draft.ResourceUplink, draft.ResourceEgressFirewall,
+		draft.ResourceEgressIP, draft.ResourceExternalRoute, draft.ResourceNetworkPolicy,
+		draft.ResourceAdminNetworkPolicy, draft.ResourceBaselineAdminNetworkPolicy,
+	} {
+		for _, k := range r.Kinds() {
+			if k == kind {
+				return r
+			}
+		}
 	}
+	return draft.ResourceVM
 }
 
 // Resync triggers an ArgoCD sync of the Application managing the VM, bringing the

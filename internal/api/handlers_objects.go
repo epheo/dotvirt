@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/changeset"
@@ -78,6 +80,51 @@ func (s *Server) handleObjectDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	view, err := s.draft.StageDelete(sc.id, sc.proj, resource, ns, name)
 	respond(w, view, err)
+}
+
+// handleObjectAdopt stages one running object git does not describe: the
+// namespace (or cluster) capture, narrowed to the object asked for.
+func (s *Server) handleObjectAdopt(w http.ResponseWriter, r *http.Request) {
+	sc, resource, ns, name, ok := s.objectScope(w, r)
+	if !ok {
+		return
+	}
+	captureNS := ns
+	if ns == changeset.ClusterScopeNS {
+		captureNS = ""
+	}
+	objs, unreadable, ok := s.captureAdoptable(w, r, sc, captureNS)
+	if !ok {
+		return
+	}
+	kinds := draft.Resource(resource).Kinds()
+	var picked []changeset.Adoptable
+	for _, o := range objs {
+		if o.Name == name && slices.Contains(kinds, o.Kind) {
+			picked = append(picked, o)
+		}
+	}
+	if len(picked) == 0 {
+		fail(w, fmt.Errorf("%w: %s/%s is not running, or git already describes it", model.ErrNotFound, ns, name))
+		return
+	}
+	result, err := s.draft.AdoptObjects(sc.id, sc.proj, ns+"/"+name, picked)
+	respond(w, withUnreadable(result, ns, unreadable), err)
+}
+
+// handlePlatformAdopt stages every cluster-scoped object the platform repo does
+// not describe - the platform tier's counterpart of the namespace adoption.
+func (s *Server) handlePlatformAdopt(w http.ResponseWriter, r *http.Request) {
+	sc, ok := s.platformScopeAny(w, r)
+	if !ok {
+		return
+	}
+	objs, unreadable, ok := s.captureAdoptable(w, r, sc, "")
+	if !ok {
+		return
+	}
+	result, err := s.draft.AdoptObjects(sc.id, sc.proj, "the cluster scope", objs)
+	respond(w, withUnreadable(result, "cluster scope", unreadable), err)
 }
 
 // sourceFiles answers "which file declares this object" across the caller's

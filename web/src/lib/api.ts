@@ -386,6 +386,11 @@ export const api = {
 		req<DraftView>(`/api/objects/${enc(resource)}/${enc(namespace)}/${enc(name)}`, {
 			method: 'DELETE',
 		}),
+	// Adoption beyond VMs: one running object git does not describe, or every
+	// cluster-scoped one the platform repo lacks.
+	adoptObject: (resource: string, namespace: string, name: string) =>
+		post<DraftView>(`/api/objects/${enc(resource)}/${enc(namespace)}/${enc(name)}/adopt`, {}),
+	adoptPlatform: () => post<DraftView>('/api/platform/adopt', {}),
 	// project: cluster-scoped entries resolve by project.
 	unstage: (namespace: string, name: string, resource?: string, project?: string) =>
 		del(`/api/draft/${enc(namespace)}/${enc(name)}${qs({ resource, project })}`),

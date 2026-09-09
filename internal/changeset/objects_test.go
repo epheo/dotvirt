@@ -152,6 +152,38 @@ func TestSoleDeclarerRefusals(t *testing.T) {
 	}
 }
 
+// A captured cluster-scoped object stages under the cluster sentinel with its
+// platform resource, so the edit and delete paths find it by the same identity;
+// one git already declares is skipped.
+func TestAdoptObjectsClusterScoped(t *testing.T) {
+	_, declared, err := netgen.Manifest(netgen.Spec{Name: "declared", Scope: netgen.ScopeShared, Namespaces: []string{"a"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare := seedBareFiles(t, map[string][]byte{"networks/declared.yaml": declared})
+	c := newTestCoordinator(t)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "platform", Repo: bare}
+
+	view, err := c.AdoptObjects(id, proj, "the cluster scope", []Adoptable{
+		{Kind: "ClusterUserDefinedNetwork", Name: "declared", Path: "networks/declared.yaml", Manifest: declared},
+		{Kind: "AdminNetworkPolicy", Name: "iso", Path: "adminnetworkpolicies/iso.yaml", Manifest: []byte("kind: AdminNetworkPolicy\nmetadata:\n  name: iso\n")},
+	})
+	if err != nil {
+		t.Fatalf("AdoptObjects: %v", err)
+	}
+	if len(view.Items) != 1 {
+		t.Fatalf("want the one undeclared object staged, got %+v", view.Items)
+	}
+	it := view.Items[0]
+	if it.Namespace != ClusterScopeNS || it.Resource != string(draft.ResourceAdminNetworkPolicy) || it.Name != "iso" {
+		t.Errorf("item = %+v", it)
+	}
+	if _, err := c.StageDelete(id, proj, string(draft.ResourceNetwork), ClusterScopeNS, "declared"); err != nil {
+		t.Errorf("the declared network must be deletable by the same identity: %v", err)
+	}
+}
+
 func mustRead(t *testing.T, c *Coordinator, proj project.ProjectInfo) *git.Repo {
 	t.Helper()
 	read, err := c.read(proj)

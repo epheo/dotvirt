@@ -1,9 +1,24 @@
 <script lang="ts">
-	import { ChevronDown, ChevronRight, Pencil, Plus, Route, Trash2 } from 'lucide-svelte';
+	import {
+		ChevronDown,
+		ChevronRight,
+		GitPullRequest,
+		Pencil,
+		Plus,
+		Route,
+		Trash2,
+	} from 'lucide-svelte';
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import type { Policy } from '$lib/api';
-	import { canEditPolicy, openDelete, openEdit, policyRef } from '$lib/objects';
+	import {
+		canAdoptPolicy,
+		canEditPolicy,
+		openAdopt,
+		openDelete,
+		openEdit,
+		policyRef,
+	} from '$lib/objects';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import PolicyRuleTable from '$lib/components/PolicyRuleTable.svelte';
@@ -209,6 +224,14 @@
 											onclick={() => openDelete(policyRef(p), p.sourceFile!)}
 											class="inline-flex items-center gap-1 text-danger-ink hover:underline"
 											><Trash2 size={12} /> Delete</button
+										>
+									{:else if canAdoptPolicy(p)}
+										<span class="text-ink-faint">Not declared in git.</span>
+										<button
+											type="button"
+											onclick={() => openAdopt(policyRef(p))}
+											class="inline-flex items-center gap-1 text-accent hover:underline"
+											><GitPullRequest size={12} /> Adopt into git</button
 										>
 									{:else}
 										<span class="text-ink-faint">Not declared in git: nothing to stage here.</span>

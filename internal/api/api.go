@@ -74,6 +74,8 @@ type Draft interface {
 	// AdoptNamespace stages what the caller captured from the cluster; the capture runs
 	// under the caller's own token, so the coordinator stays cluster-free.
 	AdoptNamespace(id auth.Identity, proj project.ProjectInfo, namespace string, objs []changeset.Adoptable) (model.DraftView, error)
+	// AdoptObjects is AdoptNamespace for any captured set, cluster-scoped included.
+	AdoptObjects(id auth.Identity, proj project.ProjectInfo, where string, objs []changeset.Adoptable) (model.DraftView, error)
 	AdoptProject(id auth.Identity, commitProj, target project.ProjectInfo, owners []string) (model.DraftView, error)
 	ReleaseDeclared(id auth.Identity, commitProj, target project.ProjectInfo) (staged, residue []string, err error)
 	// Resync runs with dotvirt's SA (Argo operations carry no user context);
@@ -287,6 +289,11 @@ func (s *Server) Handler() http.Handler {
 	// address the object by its draft identity (see handlers_objects.go).
 	mux.HandleFunc("GET /api/objects/{resource}/{namespace}/{name}", s.handleObjectSpec)
 	mux.HandleFunc("DELETE /api/objects/{resource}/{namespace}/{name}", s.handleObjectDelete)
+	// Adoption for the rest of the inventory: one object by its draft identity,
+	// or every cluster-scoped object the platform repo does not yet describe -
+	// the namespace adoption's capture and staging, scoped differently.
+	mux.HandleFunc("POST /api/objects/{resource}/{namespace}/{name}/adopt", s.handleObjectAdopt)
+	mux.HandleFunc("POST /api/platform/adopt", s.handlePlatformAdopt)
 	mux.HandleFunc("POST /api/namespaces", s.handleCreateNamespace)
 	mux.HandleFunc("POST /api/projects", s.handleCreateProject)
 	mux.HandleFunc("GET /api/templates", s.handleTemplates)
