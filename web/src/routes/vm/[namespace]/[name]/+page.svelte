@@ -2,7 +2,8 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
-	import VMDetail, { VM_TABS, type VMTab } from '$lib/components/VMDetail.svelte';
+	import VMDetail from '$lib/components/VMDetail.svelte';
+	import { VM_TABS, type VMTab } from '$lib/nav';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';

@@ -90,3 +90,26 @@ test('the review route is full width: no inventory tree beside its own rail', as
 	await page.getByRole('link', { name: 'dotvirt' }).click();
 	await expect(page.locator('aside').getByText('All VMs')).toBeVisible();
 });
+
+test('the tree and breadcrumb keep the tab in view across objects', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await page.goto('/compute?tab=vms');
+	const aside = page.locator('aside');
+	const main = page.locator('main');
+	await aside.locator('a[href="/compute/team-web?tab=vms"]').click();
+	await expect(page).toHaveURL(/\/compute\/team-web\?tab=vms$/);
+	await expect(main.getByText('web-1')).toBeVisible();
+	// Walking up the breadcrumb keeps it too.
+	await main.getByRole('link', { name: 'All VMs', exact: true }).first().click();
+	await expect(page).toHaveURL(/\/compute\?tab=vms$/);
+	// VM to VM on a VM-only tab stays on it.
+	await page.goto('/vm/web-prod/web-1?tab=snapshots');
+	await aside.locator('a[href="/vm/web-prod/web-2?tab=snapshots"]').click();
+	await expect(page).toHaveURL(/\/vm\/web-prod\/web-2\?tab=snapshots$/);
+	// A target without the tab lands on its Summary.
+	await page.goto('/networking?tab=security');
+	await aside.locator('a[href^="/networking/"]').first().click();
+	await expect(page).not.toHaveURL(/tab=/);
+	await expect(main.getByText('VMs attached')).toBeVisible();
+});

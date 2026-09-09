@@ -46,6 +46,64 @@ export const isFullWidth = (pathname: string): boolean => pathname.split('/')[1]
 
 export const sectionRoot = (s: Section): string => `/${s}`;
 
+// The VM detail tabs, validated by the route guard and by keepTab.
+export const VM_TABS = [
+	'summary',
+	'monitor',
+	'configure',
+	'security',
+	'permissions',
+	'snapshots',
+	'console',
+] as const;
+export type VMTab = (typeof VM_TABS)[number];
+
+export const CONTAINER_TABS = [
+	{ id: 'summary', label: 'Summary' },
+	{ id: 'vms', label: 'VMs' },
+	{ id: 'monitor', label: 'Monitor' },
+	{ id: 'configure', label: 'Configure' },
+	{ id: 'security', label: 'Security' },
+	{ id: 'permissions', label: 'Permissions' },
+];
+
+// The tab set of a container: compute containers carry the full set, hosts
+// drop Permissions (nodes aren't namespaced) and configure DRS at the root,
+// networking's root carries the policy plane as Security, segments and
+// storage classes are fact sheets (Summary + their VMs).
+export function containerTabs(scope: Scope, section: Section): typeof CONTAINER_TABS {
+	const only = (...ids: string[]) => CONTAINER_TABS.filter((t) => ids.includes(t.id));
+	switch (section) {
+		case 'hosts':
+			return only('summary', 'vms', 'monitor', 'configure');
+		case 'networking':
+			return scope.kind === 'all' ? only('summary', 'vms', 'security') : only('summary', 'vms');
+		case 'storage':
+			return only('summary', 'vms');
+	}
+	// Effective policy evaluates against exactly one namespace.
+	return scope.kind === 'namespace'
+		? CONTAINER_TABS
+		: CONTAINER_TABS.filter((t) => t.id !== 'security');
+}
+
+// The tabs an inventory href lands on; null for anything else (catalog, changes).
+function tabsAt(href: string): string[] | null {
+	const path = href.split('?')[0];
+	if (path.split('/')[1] === 'vm') return [...VM_TABS];
+	const section = sectionOf(path);
+	if (!section || section === 'catalog') return null;
+	return containerTabs(scopeFromPath(path), section).map((t) => t.id);
+}
+
+// Moving between objects keeps the tab in view when the target has it: a
+// Monitor-to-Monitor walk down the tree, VM to VM on Console. Summary is the
+// default already, and an unsupported tab would only fall back to it.
+export function keepTab(href: string, tab: string | null): string {
+	if (!tab || tab === 'summary' || href.includes('?')) return href;
+	return tabsAt(href)?.includes(tab) ? `${href}?tab=${tab}` : href;
+}
+
 // The workspace breadcrumb for a scope: ancestors link, the focus is plain.
 // Roots name the section, not "All VMs" everywhere.
 export function trailForScope(s: Scope): { label: string; href?: string }[] {

@@ -3,7 +3,7 @@
 	import { page } from '$app/state';
 	import { api, Unauthorized, type VM } from '$lib/api';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
-	import { hrefForScope, vmHref, type Section } from '$lib/nav';
+	import { containerTabs, hrefForScope, vmHref, type Section } from '$lib/nav';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
@@ -49,30 +49,7 @@
 	} = $props();
 	const root = $derived(scope.kind === 'all');
 
-	const ALL_TABS = [
-		{ id: 'summary', label: 'Summary' },
-		{ id: 'vms', label: 'VMs' },
-		{ id: 'monitor', label: 'Monitor' },
-		{ id: 'configure', label: 'Configure' },
-		{ id: 'security', label: 'Security' },
-		{ id: 'permissions', label: 'Permissions' },
-	];
-	const tabs = $derived.by(() => {
-		const only = (...ids: string[]) => ALL_TABS.filter((t) => ids.includes(t.id));
-		switch (section) {
-			// Hosts: cluster services (DRS) configure at the root, maintenance per node.
-			case 'hosts':
-				return only('summary', 'vms', 'monitor', 'configure');
-			// Networking: the policy plane is the root's Security tab; a segment is
-			// a fact sheet.
-			case 'networking':
-				return root ? only('summary', 'vms', 'security') : only('summary', 'vms');
-			case 'storage':
-				return only('summary', 'vms');
-		}
-		// Effective policy evaluates against exactly one namespace.
-		return scope.kind === 'namespace' ? ALL_TABS : ALL_TABS.filter((t) => t.id !== 'security');
-	});
+	const tabs = $derived(containerTabs(scope, section));
 	const tab = $derived.by(() => {
 		const t = page.url.searchParams.get('tab');
 		return tabs.some((x) => x.id === t) ? t! : 'summary';

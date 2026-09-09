@@ -1,16 +1,8 @@
 <script module lang="ts">
-	// The detail view's tab ids, exported so the route guard validates ?tab=
-	// against the same list the TabBar renders.
-	export const VM_TABS = [
-		'summary',
-		'monitor',
-		'configure',
-		'security',
-		'permissions',
-		'snapshots',
-		'console',
-	] as const;
-	export type VMTab = (typeof VM_TABS)[number];
+	// The tab ids live in $lib/nav so the route guard and keepTab validate
+	// ?tab= against the same list the TabBar renders.
+	import { VM_TABS, type VMTab } from '$lib/nav';
+	export { VM_TABS, type VMTab };
 </script>
 
 <script lang="ts">
