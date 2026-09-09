@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -16,6 +17,24 @@ import (
 // branch's own commits are that PR's internals, and a full walk would list them
 // again below the root, out of date order.
 func (r *Repo) History(branch string, limit int) ([]model.Commit, error) {
+	return r.walkHistory(branch, limit, func(*object.Commit) (bool, error) { return true, nil })
+}
+
+// FileHistory is History narrowed to the commits that changed path: on the base
+// branch, the merged PRs that touched one manifest. A rename reads as a new
+// file, and a multi-document file's history includes its siblings' changes.
+func (r *Repo) FileHistory(branch, path string, limit int) ([]model.Commit, error) {
+	return r.walkHistory(branch, limit, func(c *object.Commit) (bool, error) { return touches(c, path) })
+}
+
+// historyScan bounds one walk: a file untouched for this many commits reads as
+// having no older history rather than holding r.mu for the whole branch.
+const historyScan = 1000
+
+// walkHistory follows first parents from branch's head, keeping the commits
+// keep accepts, until limit are kept, the root is reached, or historyScan
+// commits have been inspected.
+func (r *Repo) walkHistory(branch string, limit int, keep func(*object.Commit) (bool, error)) ([]model.Commit, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -28,8 +47,14 @@ func (r *Repo) History(branch string, limit int) ([]model.Commit, error) {
 		return nil, err
 	}
 	out := []model.Commit{}
-	for len(out) < limit {
-		out = append(out, commitEntry(c))
+	for seen := 0; len(out) < limit && seen < historyScan; seen++ {
+		ok, err := keep(c)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, commitEntry(c))
+		}
 		if c.NumParents() == 0 {
 			break
 		}
@@ -38,6 +63,44 @@ func (r *Repo) History(branch string, limit int) ([]model.Commit, error) {
 		}
 	}
 	return out, nil
+}
+
+// touches reports whether c changed path against its first parent: the blob
+// differs, or the file exists on one side only.
+func touches(c *object.Commit, path string) (bool, error) {
+	now, err := entryHash(c, path)
+	if err != nil {
+		return false, err
+	}
+	if c.NumParents() == 0 {
+		return now != plumbing.ZeroHash, nil
+	}
+	parent, err := c.Parent(0)
+	if err != nil {
+		return false, err
+	}
+	before, err := entryHash(parent, path)
+	if err != nil {
+		return false, err
+	}
+	return now != before, nil
+}
+
+// entryHash is path's blob hash in c's tree, ZeroHash when the tree has no
+// such file.
+func entryHash(c *object.Commit, path string) (plumbing.Hash, error) {
+	tree, err := c.Tree()
+	if err != nil {
+		return plumbing.ZeroHash, err
+	}
+	e, err := tree.FindEntry(path)
+	if errors.Is(err, object.ErrEntryNotFound) || errors.Is(err, object.ErrDirectoryNotFound) {
+		return plumbing.ZeroHash, nil
+	}
+	if err != nil {
+		return plumbing.ZeroHash, err
+	}
+	return e.Hash, nil
 }
 
 // commitEntry renders one commit as a history row. A forge merge commit is

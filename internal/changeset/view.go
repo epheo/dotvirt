@@ -36,6 +36,9 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 				// A whole-file replacement (template edit): the manifest IS the change.
 				item.Changes = []model.Change{{Field: "Edit template", Action: "change", To: e.Name}}
 				item.YAML = e.Manifest
+				if current, ok, err := read.LookupOnBranch(c.baseBranch, e.SourceFile); err == nil && ok {
+					item.BaseYAML = string(current)
+				}
 				break
 			}
 			current, _, err := read.FindVMOnBranch(c.baseBranch, e.Namespace, e.Name)

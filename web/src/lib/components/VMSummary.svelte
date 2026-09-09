@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { ChevronDown, ChevronRight } from 'lucide-svelte';
-	import { api, type Change, type DraftItem, type VM, type VMUsage } from '$lib/api';
-	import { duration } from '$lib/format';
+	import { api, type Change, type Commit, type DraftItem, type VM, type VMUsage } from '$lib/api';
+	import { duration, relativeAge } from '$lib/format';
 	import { resource } from '$lib/resource.svelte';
+	import { itemKey, reviewURL } from '$lib/review';
 	import CapacityUsage from './CapacityUsage.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
@@ -65,6 +66,20 @@
 	const usage = $derived(usageRes.data);
 	const usageLoading = $derived(usageRes.loading);
 	const usageFailed = $derived(usageRes.failed);
+
+	// The VM's merged changes: its manifest file's history on the base branch.
+	// The project's applied revision is in the key: a merge that reaches the
+	// cluster moves it, which is when a new row exists to show.
+	const project = $derived(inventory.projectOf(vm.namespace));
+	const revision = $derived(
+		inventory.inventory?.projects.find((p) => p.name === project)?.gitOps?.revision ?? '',
+	);
+	const historyRes = resource<Commit[]>(
+		() => `${vmKey}|${vm.sourceFile ?? ''}|${revision}`,
+		() => (vm.sourceFile ? api.vmHistory(vm.namespace, vm.name) : Promise.resolve([])),
+		{ reset: true },
+	);
+	const commits = $derived(historyRes.data ?? []);
 
 	// The manifest owns sizing when present; an instancetype-sized VM carries no
 	// cpuCores/memory in git, so the tiles fall back to the rendered topology.
@@ -191,8 +206,9 @@
 		<InfoCard title="GitOps">
 			{#snippet action()}
 				{#if stagedItem}
-					<button onclick={() => ui.openChanges()} class="text-xs text-accent-ink hover:underline"
-						>Review changes</button
+					<button
+						onclick={() => ui.openChanges({ kind: 'item', project, key: itemKey(stagedItem) })}
+						class="text-xs text-accent-ink hover:underline">Review changes</button
 					>
 				{/if}
 			{/snippet}
@@ -211,6 +227,49 @@
 							: 'Identical'}
 				/>
 			</dl>
+			{#if vm.sourceFile}
+				<div class="border-t border-line-soft">
+					<div class="flex items-center justify-between px-3 pt-2 pb-1">
+						<span class="text-[11px] font-semibold tracking-wide text-ink-faint uppercase"
+							>Changes</span
+						>
+						{#if project}
+							<a
+								href={reviewURL({ kind: 'history', project })}
+								class="text-xs text-accent-ink hover:underline">All history</a
+							>
+						{/if}
+					</div>
+					{#if historyRes.loading}
+						<p class="px-3 pb-2 text-xs text-ink-faint">loading…</p>
+					{:else if historyRes.failed}
+						<p class="px-3 pb-2 text-xs text-danger-ink">{historyRes.error}</p>
+					{:else if commits.length === 0}
+						<p class="px-3 pb-2 text-xs text-ink-faint">No merged changes yet.</p>
+					{:else}
+						<ul class="divide-y divide-line-soft text-[13px]">
+							{#each commits as c (c.hash)}
+								<li>
+									<a
+										href={project
+											? reviewURL({ kind: 'commit', project, hash: c.hash })
+											: '/changes'}
+										class="flex items-baseline gap-2 px-3 py-1.5 hover:bg-select-soft"
+									>
+										<span class="min-w-0 truncate text-ink">{c.title}</span>
+										{#if c.prNumber}<span class="shrink-0 text-xs text-ink-faint"
+												>#{c.prNumber}</span
+											>{/if}
+										<span class="ml-auto shrink-0 text-xs text-ink-faint"
+											>{relativeAge(c.when)}</span
+										>
+									</a>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+				</div>
+			{/if}
 		</InfoCard>
 
 		<InfoCard title="Issues">

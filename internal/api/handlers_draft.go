@@ -241,6 +241,17 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	respond(w, commits, err)
 }
 
+// handleVMHistory lists the merged changes to one VM's manifest - the VM page's
+// change history, each row deep-linking into the Changes pane's review.
+func (s *Server) handleVMHistory(w http.ResponseWriter, r *http.Request) {
+	sc, ns, name, ok := s.vmScope(w, r)
+	if !ok {
+		return
+	}
+	commits, err := s.draft.VMHistory(sc.proj, ns, name, 10)
+	respond(w, commits, err)
+}
+
 // commitHash is the only commit reference the history routes accept: the full
 // hash a history row carries, so no abbreviation is ever resolved server-side.
 var commitHash = regexp.MustCompile(`^[0-9a-f]{40}$`)

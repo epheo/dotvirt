@@ -1,5 +1,6 @@
 import { goto } from '$app/navigation';
 import type { Template, VM } from '$lib/api';
+import { reviewURL, type ReviewTarget } from '$lib/review';
 
 // Every modal the shell can show, as one discriminated union - the shell
 // renders exactly one, and opening any modal is a single assignment.
@@ -73,9 +74,11 @@ class Ui {
 	}
 
 	// Review changes is a route (deep-linkable, back-button-walkable); this is
-	// the one navigation every "Review & propose" affordance shares.
-	openChanges() {
-		goto('/changes');
+	// the one navigation every "Review & propose" affordance shares. A target
+	// lands on one review (a staged item, a PR, a past commit) or a project's
+	// history.
+	openChanges(target: ReviewTarget | null = null) {
+		goto(reviewURL(target));
 	}
 
 	modal = $state<AppModal | null>(null);
