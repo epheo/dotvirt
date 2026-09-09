@@ -95,8 +95,8 @@
 	     is PR-gated - so spell out the path rather than just greying the button. -->
 	{#if running && snapshots?.some((s) => s.readyToUse)}
 		<Note tone="warn" border>
-			Restore is disabled while the VM is running. Set its power to <strong>Off</strong> (via a pull request
-			from Edit Settings), and once it's stopped you can roll back to a snapshot here.
+			Restore needs the VM stopped. Use <strong>Power off</strong> in the toolbar: it stages the change,
+			and the VM stops when the pull request merges. Then roll back to a snapshot here.
 		</Note>
 	{/if}
 

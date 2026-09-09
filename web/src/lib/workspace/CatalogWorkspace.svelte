@@ -165,5 +165,5 @@
 <footer class="border-t border-line px-4 py-2 text-xs text-ink-faint">
 	{kind === 'templates'
 		? 'Templates live in git (templates/ in each library repo); deploying stages a VM into Changes — it applies when the PR merges.'
-		: 'Read-only — these are platform objects; the New VM wizard consumes them.'}
+		: 'Read-only platform objects. Pick them when creating a VM.'}
 </footer>
