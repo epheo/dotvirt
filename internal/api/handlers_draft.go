@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/epheo/dotvirt/internal/changeset"
@@ -269,6 +270,25 @@ func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	detail, err := s.draft.Commit(sc.proj, hash)
+	respond(w, detail, err)
+}
+
+// handleProposal renders what merging one open PR would change - the Changes
+// pane's review of a proposal, read from the mirrored head branch.
+func (s *Server) handleProposal(w http.ResponseWriter, r *http.Request) {
+	sc, ok := s.pickProject(w, r, r.PathValue("project"))
+	if !ok {
+		return
+	}
+	n, err := strconv.Atoi(r.PathValue("number"))
+	if err != nil || n <= 0 {
+		http.Error(w, "pull request number must be a positive integer", http.StatusBadRequest)
+		return
+	}
+	detail, err := s.draft.Proposal(sc.proj, n)
+	if err == nil {
+		detail.Proposal.Mine = s.draft.OwnsProposal(sc.id, sc.proj, detail.Proposal.Branch)
+	}
 	respond(w, detail, err)
 }
 

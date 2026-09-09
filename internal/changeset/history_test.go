@@ -218,22 +218,21 @@ func TestCommitItemsClusterScopedName(t *testing.T) {
 	}
 }
 
-// The open-PR lane carries the draft's PR and every revert the user opened,
-// found by their branch prefix among the open PRs, with one branch-rule read.
-func TestOpenProposalsIncludesReverts(t *testing.T) {
+// The open-PR lane is project-wide: every open PR into the base branch, named
+// by its proposer from the branch, reverts flagged, with one branch-rule read.
+// Which rows are the caller's is answered without the forge.
+func TestOpenProposalsListsEveryPR(t *testing.T) {
 	bare, _, hash := seedMerged(t)
 	revertHead := (&Coordinator{proposed: "dotvirt/proposed"}).revertBranch("alice", "p", hash)
 	draftHead := proposedBranchFor("alice", "p")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		switch {
-		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/pulls") && q.Get("state") == "all":
-			_, _ = w.Write([]byte(`[{"number":4,"state":"open","html_url":"http://forge/pulls/4","title":"edit web","base":{"ref":"main"},"head":{"ref":"` + draftHead + `","sha":"aaa"}}]`))
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/pulls") && q.Get("state") == "open":
 			_, _ = w.Write([]byte(`[{"number":4,"state":"open","html_url":"http://forge/pulls/4","title":"edit web","base":{"ref":"main"},"head":{"ref":"` + draftHead + `","sha":"aaa"}},` +
 				`{"number":9,"state":"open","html_url":"http://forge/pulls/9","title":"Revert \"Resize web\" (#12)","base":{"ref":"main"},"head":{"ref":"` + revertHead + `","sha":"bbb"}},` +
 				`{"number":10,"state":"open","html_url":"http://forge/pulls/10","title":"bob's revert","base":{"ref":"main"},"head":{"ref":"dotvirt/proposed/revert/bob/p-` + hash[:8] + `","sha":"ccc"}},` +
-				`{"number":11,"state":"open","html_url":"http://forge/pulls/11","title":"human PR","base":{"ref":"main"},"head":{"ref":"feature","sha":"ddd"}}]`))
+				`{"number":11,"state":"open","html_url":"http://forge/pulls/11","title":"human PR","base":{"ref":"main"},"head":{"ref":"feature","sha":"ddd"},"user":{"login":"carol"}}]`))
 		case strings.HasSuffix(r.URL.Path, "/branch_protections"):
 			_, _ = w.Write([]byte(`[{"branch_name":"main","required_approvals":1}]`))
 		case strings.Contains(r.URL.Path, "/reviews"):
@@ -254,17 +253,87 @@ func TestOpenProposalsIncludesReverts(t *testing.T) {
 	t.Cleanup(cancel)
 	c := New(store, git.NewRepoSet(ctx, "", nil, false, nil, time.Hour), forge.NewFactory(srv.URL, "tok", false), nil, nil, nil, "main", "dotvirt/proposed")
 
-	prs, err := c.OpenProposals(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: bare})
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+	prs, err := c.OpenProposals(proj)
 	if err != nil {
 		t.Fatalf("OpenProposals: %v", err)
 	}
-	if len(prs) != 2 || prs[0].PRNumber != 4 || prs[1].PRNumber != 9 {
-		t.Fatalf("want the draft PR #4 and alice's revert #9 only, got %+v", prs)
+	want := []struct {
+		n      int
+		by     string
+		revert bool
+	}{{4, "alice", false}, {9, "alice", true}, {10, "bob", true}, {11, "carol", false}}
+	if len(prs) != len(want) {
+		t.Fatalf("want every open PR, got %+v", prs)
 	}
-	for _, p := range prs {
-		if p.RequiredApprovals != 1 || p.Checks != "success" {
-			t.Errorf("review state missing on %+v", p)
+	for i, w := range want {
+		p := prs[i]
+		if p.PRNumber != w.n || p.By != w.by || p.Revert != w.revert || p.RequiredApprovals != 1 || p.Checks != "success" {
+			t.Errorf("row %d = %+v, want #%d by %s revert=%v with review state", i, p, w.n, w.by, w.revert)
 		}
+	}
+	alice := auth.Identity{Username: "alice"}
+	if !c.OwnsProposal(alice, proj, prs[0].Branch) || !c.OwnsProposal(alice, proj, prs[1].Branch) {
+		t.Error("alice owns her draft PR and her revert")
+	}
+	if c.OwnsProposal(alice, proj, prs[2].Branch) || c.OwnsProposal(alice, proj, prs[3].Branch) {
+		t.Error("alice owns neither bob's revert nor a hand-made PR")
+	}
+}
+
+// A PR reviews as the diff from its fork point to its head: a change main took
+// after the fork is not the PR's. A head the mirror lacks, or a PR the forge
+// lacks, is not found rather than a failure.
+func TestProposalRendersBranchDiff(t *testing.T) {
+	bare, work, _ := seedMerged(t)
+	head := proposedBranchFor("alice", "p")
+	gitRun(t, work, "checkout", "-qb", head)
+	writeWorkFile(t, work, "alpha/db.yaml", sizedVM("db", 3))
+	gitRun(t, work, "add", "-A")
+	gitRun(t, work, "commit", "-qm", "grow db")
+	gitRun(t, work, "push", "-q", "origin", head)
+	gitRun(t, work, "checkout", "-q", "main")
+	writeWorkFile(t, work, "alpha/cache.yaml", sizedVM("cache", 1))
+	gitRun(t, work, "add", "-A")
+	gitRun(t, work, "commit", "-qm", "add cache")
+	gitRun(t, work, "push", "-q", "origin", "main")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/pulls/5"):
+			_, _ = w.Write([]byte(`{"number":5,"state":"open","html_url":"http://forge/pulls/5","title":"grow db","base":{"ref":"main"},"head":{"ref":"` + head + `","sha":"eee"}}`))
+		case strings.HasSuffix(r.URL.Path, "/pulls/6"):
+			_, _ = w.Write([]byte(`{"number":6,"state":"open","html_url":"http://forge/pulls/6","title":"unfetched","base":{"ref":"main"},"head":{"ref":"dotvirt/proposed/bob/p-ffff","sha":"fff"}}`))
+		default:
+			http.Error(w, "not found", http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	store, err := draft.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	c := New(store, git.NewRepoSet(ctx, "", nil, false, nil, time.Hour), forge.NewFactory(srv.URL, "tok", false), nil, nil, nil, "main", "dotvirt/proposed")
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+
+	d, err := c.Proposal(proj, 5)
+	if err != nil {
+		t.Fatalf("Proposal: %v", err)
+	}
+	if d.Proposal.PRNumber != 5 || d.Proposal.By != "alice" || d.Proposal.Branch != head || d.Proposal.Revert {
+		t.Errorf("proposal row = %+v", d.Proposal)
+	}
+	if len(d.Items) != 1 || d.Items[0].Name != "db" || d.Items[0].Kind != "edit" ||
+		d.Items[0].Changes[0].Field != "CPU" || d.Items[0].Changes[0].From != "1 vCPU" || d.Items[0].Changes[0].To != "3 vCPU" {
+		t.Errorf("want only the db resize, got %+v", d.Items)
+	}
+	if _, err := c.Proposal(proj, 6); !errors.Is(err, model.ErrNotFound) {
+		t.Errorf("unmirrored head should be ErrNotFound, got %v", err)
+	}
+	if _, err := c.Proposal(proj, 7); !errors.Is(err, model.ErrNotFound) {
+		t.Errorf("unknown PR should be ErrNotFound, got %v", err)
 	}
 }
 

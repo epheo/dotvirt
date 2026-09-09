@@ -75,7 +75,11 @@ type Draft interface {
 	// canUpdateVM is the caller-token SSAR the implementation enforces before
 	// escalating, so no future caller can reach the SA-privileged patch unchecked.
 	Resync(ctx context.Context, canUpdateVM func(context.Context, string, string) (bool, error), namespace, name string) (model.ResyncResult, error)
-	OpenProposals(id auth.Identity, proj project.ProjectInfo) ([]model.Proposal, error)
+	// OpenProposals is project-wide (the lane is shared by the project's
+	// members); OwnsProposal marks the caller's own rows without the forge.
+	OpenProposals(proj project.ProjectInfo) ([]model.Proposal, error)
+	OwnsProposal(id auth.Identity, proj project.ProjectInfo, branch string) bool
+	Proposal(proj project.ProjectInfo, number int) (model.ProposalDetail, error)
 	// RecentlyMerged lists PRs merged into proj's base branch since 'since' - the
 	// task feed's poll backstop behind the forge webhook (and its restart reseed).
 	RecentlyMerged(proj project.ProjectInfo, since time.Time) ([]tasks.Merge, error)
@@ -143,7 +147,7 @@ type Server struct {
 	repos     *git.RepoSet
 	visible   *ttlcache.Cache[visibleSet]       // per-token visible-namespace set, RBAC-version-stamped
 	ssar      *ttlcache.Cache[ssarVerdict]      // per-(token, resource) create-SSAR, RBAC-version-stamped
-	proposals *ttlcache.Cache[[]model.Proposal] // per-token open-PR set; written by the refresher, read on broadcast
+	proposals *ttlcache.Cache[[]model.Proposal] // per-project open-PR set; written by the refresher, read on broadcast
 	options   *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
 	metrics   *metrics.Client                   // Prometheus/Thanos for the Performance tab; nil disables it
 	tasks     *tasks.Feed                       // recent-activity feed (ops + merged PRs); nil disables it
@@ -302,6 +306,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/uploads/{namespace}/{name}/token", s.handleUploadToken)
 	mux.HandleFunc("GET /api/projects/{project}/history", s.handleHistory)
 	mux.HandleFunc("GET /api/projects/{project}/history/{hash}", s.handleCommit)
+	mux.HandleFunc("GET /api/projects/{project}/proposals/{number}", s.handleProposal)
 	mux.HandleFunc("POST /api/projects/{project}/revert", s.handleRevert)
 	mux.HandleFunc("POST /api/projects/{project}/adopt", s.handleAdoptProject)
 	mux.HandleFunc("POST /api/projects/{project}/release", s.handleReleaseProject)

@@ -277,6 +277,33 @@ async function handleAPI(req, res, url) {
 			],
 		});
 	}
+	// One open PR under review: the diff its head carries, as draft items.
+	m = path.match(/^\/api\/projects\/([^/]+)\/proposals\/(\d+)$/);
+	if (m) {
+		const pr = (s.inventory.proposals ?? []).find(
+			(p) => p.project === m[1] && p.prNumber === Number(m[2]),
+		);
+		if (!pr) return sendText(res, 404, `not found: pull request #${m[2]}`);
+		const items = {
+			41: {
+				kind: 'edit',
+				namespace: 'db-prod',
+				name: 'db-1',
+				changes: [{ field: 'Memory', action: 'change', from: '8Gi', to: '12Gi' }],
+				yaml: 'kind: VirtualMachine\nmetadata:\n  name: db-1\nspec:\n  memory: 12Gi\n',
+				baseYAML: 'kind: VirtualMachine\nmetadata:\n  name: db-1\nspec:\n  memory: 8Gi\n',
+			},
+			42: {
+				kind: 'edit',
+				namespace: 'web-prod',
+				name: 'web-1',
+				changes: [{ field: 'Balancer', action: 'change', from: 'Automatic', to: 'Excluded' }],
+				yaml: 'kind: VirtualMachine\nmetadata:\n  name: web-1\n  annotations:\n    drs: exclude\n',
+				baseYAML: 'kind: VirtualMachine\nmetadata:\n  name: web-1\n',
+			},
+		}[pr.prNumber];
+		return sendJSON(res, 200, { proposal: pr, items: items ? [items] : [] });
+	}
 	m = path.match(/^\/api\/projects\/([^/]+)\/revert$/);
 	if (m && req.method === 'POST') {
 		const body = await readBody(req);

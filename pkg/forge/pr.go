@@ -74,6 +74,15 @@ func (c *Client) FindPR(head, base string) (pr PR, ok bool, err error) {
 	return PR{}, false, nil
 }
 
+// PR fetches one pull request by number.
+func (c *Client) PR(number int) (PR, error) {
+	var pr PR
+	if err := c.do("GET", c.repoPath(fmt.Sprintf("/pulls/%d", number)), nil, &pr); err != nil {
+		return PR{}, err
+	}
+	return pr, nil
+}
+
 // OpenPRs lists the open PRs targeting base, bounded by limit.
 func (c *Client) OpenPRs(base string, limit int) ([]PR, error) {
 	q := fmt.Sprintf("/pulls?state=open&limit=%d&base=%s", limit, url.QueryEscape(base))
