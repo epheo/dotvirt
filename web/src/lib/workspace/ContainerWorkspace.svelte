@@ -16,6 +16,7 @@
 	import EffectivePolicyPanel from '$lib/components/EffectivePolicyPanel.svelte';
 	import NetworkTopology from '$lib/components/NetworkTopology.svelte';
 	import PendingBanner from '$lib/components/PendingBanner.svelte';
+	import PlatformAdoptBanner from '$lib/components/PlatformAdoptBanner.svelte';
 	import RepoBanner from '$lib/components/RepoBanner.svelte';
 	import Permissions from '$lib/components/Permissions.svelte';
 	import TabBar from '$lib/components/TabBar.svelte';
@@ -215,6 +216,7 @@
 	{:else if root && section === 'hosts'}
 		<HostsRootSummary vms={scopedVMs} />
 	{:else if root && section === 'networking'}
+		<PlatformAdoptBanner />
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
 		<div class="min-h-0 flex-1 overflow-y-auto" role="region" aria-label="Tab content" tabindex="0">
 			<NetworkTopology

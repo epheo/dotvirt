@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/epheo/dotvirt/internal/changeset"
+	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/validate"
 )
@@ -158,6 +159,23 @@ func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	objs, unreadable, ok := s.captureAdoptable(w, r, sc, ns)
+	if !ok {
+		return
+	}
+	result, err := s.draft.AdoptObjects(sc.id, sc.proj, ns, objs)
+	respond(w, withUnreadable(result, ns, unreadable), err)
+}
+
+// captureAdoptable runs the caller-token capture for one namespace ("" = the
+// cluster scope, for the platform tier) and applies the shared refusals: no
+// ArgoCD picture yet, nothing readable, nothing left to adopt. ok=false means
+// the response is written.
+func (s *Server) captureAdoptable(w http.ResponseWriter, r *http.Request, sc scope, ns string) ([]changeset.Adoptable, []string, bool) {
+	where := ns
+	if where == "" {
+		where = "the cluster scope"
+	}
 	// Foreign-app claims only: the own app is not one (git decides what this repo
 	// declares; recovery depends on that). Pre-sync would misread every claim as
 	// residue, so refuse. nil drift is Argo disabled: no annotation is a live claim.
@@ -165,23 +183,32 @@ func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
 	if s.drift != nil {
 		if foreignApps = s.drift.ForeignApps(sc.proj.Repo); foreignApps == nil {
 			fail(w, fmt.Errorf("%w: ArgoCD applications not yet loaded", model.ErrUnavailable))
-			return
+			return nil, nil, false
 		}
 	}
-	objs, unreadable, err := sc.cluster.AdoptableObjects(r.Context(), []string{ns}, foreignApps)
+	var (
+		objs       []cluster.Adoptable
+		unreadable []string
+		err        error
+	)
+	if ns == "" {
+		objs, unreadable, err = sc.cluster.ClusterAdoptableObjects(r.Context(), foreignApps)
+	} else {
+		objs, unreadable, err = sc.cluster.AdoptableObjects(r.Context(), []string{ns}, foreignApps)
+	}
 	if err != nil {
 		fail(w, err)
-		return
+		return nil, nil, false
 	}
 	// "Nothing to adopt" would be a lie when a kind was unreadable, so say what was missed.
 	if len(objs) == 0 && len(unreadable) > 0 {
 		fail(w, fmt.Errorf("%w: cannot read %s in %s, so there is nothing adoptable you have access to",
-			model.ErrForbidden, strings.Join(unreadable, ", "), ns))
-		return
+			model.ErrForbidden, strings.Join(unreadable, ", "), where))
+		return nil, nil, false
 	}
 	if len(objs) == 0 {
-		fail(w, fmt.Errorf("%w: nothing to adopt in %s: everything running there is declared in git or managed by another Application", model.ErrInvalid, ns))
-		return
+		fail(w, fmt.Errorf("%w: nothing to adopt in %s: everything running there is declared in git or managed by another Application", model.ErrInvalid, where))
+		return nil, nil, false
 	}
 	adoptable := make([]changeset.Adoptable, 0, len(objs))
 	for _, o := range objs {
@@ -189,13 +216,17 @@ func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
 			Namespace: o.Namespace, Name: o.Name, Kind: o.Kind, Path: o.Path, Manifest: o.Manifest,
 		})
 	}
-	result, err := s.draft.AdoptNamespace(sc.id, sc.proj, ns, adoptable)
-	if err == nil && len(unreadable) > 0 {
-		// Appended, not assigned: the view may already carry the derived prune warning.
-		result.Warning = changeset.JoinWarning(result.Warning, fmt.Sprintf("%s: you cannot read %s, so any of those stay outside git.",
-			ns, strings.Join(unreadable, ", ")))
+	return adoptable, unreadable, true
+}
+
+// withUnreadable appends the kinds the caller could not read to the view's
+// warning (appended, not assigned: the view may carry the derived prune warning).
+func withUnreadable(v model.DraftView, where string, unreadable []string) model.DraftView {
+	if len(unreadable) > 0 {
+		v.Warning = changeset.JoinWarning(v.Warning, fmt.Sprintf("%s: you cannot read %s, so any of those stay outside git.",
+			where, strings.Join(unreadable, ", ")))
 	}
-	respond(w, result, err)
+	return v
 }
 
 func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
@@ -259,19 +290,28 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	hash, ok := restoreHash(w, r)
+	if !ok {
+		return
+	}
+	result, err := s.draft.RestoreVersion(sc.id, sc.proj, "", ns, name, hash)
+	respond(w, result, err)
+}
+
+// restoreHash reads a restore body's commit hash; ok=false means the response is written.
+func restoreHash(w http.ResponseWriter, r *http.Request) (string, bool) {
 	var req struct {
 		Hash string `json:"hash"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
-		return
+		return "", false
 	}
 	if !commitHash.MatchString(req.Hash) {
 		http.Error(w, "commit hash must be the full 40-character hash", http.StatusBadRequest)
-		return
+		return "", false
 	}
-	result, err := s.draft.RestoreVersion(sc.id, sc.proj, ns, name, req.Hash)
-	respond(w, result, err)
+	return req.Hash, true
 }
 
 // handleVMHistory lists the merged changes to one VM's manifest - the VM page's
@@ -281,7 +321,7 @@ func (s *Server) handleVMHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	commits, err := s.draft.VMHistory(sc.proj, ns, name, 10)
+	commits, err := s.draft.ObjectHistory(sc.proj, "", ns, name, 10)
 	respond(w, commits, err)
 }
 

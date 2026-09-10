@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/changeset"
@@ -69,6 +71,25 @@ func (s *Server) handleObjectSpec(w http.ResponseWriter, r *http.Request) {
 	respond(w, spec, err)
 }
 
+// handleObjectUpdateManifest stages a declared object's manifest replaced
+// verbatim: the edit for what its form has no field for.
+func (s *Server) handleObjectUpdateManifest(w http.ResponseWriter, r *http.Request) {
+	sc, resource, ns, name, ok := s.objectScope(w, r)
+	if !ok {
+		return
+	}
+	_, req, ok := peek[model.UpdateManifestRequest](w, r)
+	if !ok {
+		return
+	}
+	if req.YAML == "" {
+		http.Error(w, "yaml is required", http.StatusBadRequest)
+		return
+	}
+	view, err := s.draft.StageUpdateManifest(sc.id, sc.proj, resource, ns, name, req.YAML)
+	respond(w, view, err)
+}
+
 // handleObjectDelete stages the removal of a declared object's manifest - the
 // same draft-only path as a VM delete; Argo prunes the object on merge.
 func (s *Server) handleObjectDelete(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +99,75 @@ func (s *Server) handleObjectDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	view, err := s.draft.StageDelete(sc.id, sc.proj, resource, ns, name)
 	respond(w, view, err)
+}
+
+// handleObjectAdopt stages one running object git does not describe: the
+// namespace (or cluster) capture, narrowed to the object asked for.
+func (s *Server) handleObjectAdopt(w http.ResponseWriter, r *http.Request) {
+	sc, resource, ns, name, ok := s.objectScope(w, r)
+	if !ok {
+		return
+	}
+	captureNS := ns
+	if ns == changeset.ClusterScopeNS {
+		captureNS = ""
+	}
+	objs, unreadable, ok := s.captureAdoptable(w, r, sc, captureNS)
+	if !ok {
+		return
+	}
+	kinds := draft.Resource(resource).Kinds()
+	var picked []changeset.Adoptable
+	for _, o := range objs {
+		if o.Name == name && slices.Contains(kinds, o.Kind) {
+			picked = append(picked, o)
+		}
+	}
+	if len(picked) != 1 {
+		fail(w, fmt.Errorf("%w: %s/%s is not running", model.ErrNotFound, ns, name))
+		return
+	}
+	result, err := s.draft.AdoptObject(sc.id, sc.proj, picked[0])
+	respond(w, withUnreadable(result, ns, unreadable), err)
+}
+
+// handleObjectHistory lists the merged changes to one declared object's file.
+func (s *Server) handleObjectHistory(w http.ResponseWriter, r *http.Request) {
+	sc, resource, ns, name, ok := s.objectScope(w, r)
+	if !ok {
+		return
+	}
+	commits, err := s.draft.ObjectHistory(sc.proj, resource, ns, name, 10)
+	respond(w, commits, err)
+}
+
+// handleObjectRestore stages one declared object's file as a past commit held it.
+func (s *Server) handleObjectRestore(w http.ResponseWriter, r *http.Request) {
+	sc, resource, ns, name, ok := s.objectScope(w, r)
+	if !ok {
+		return
+	}
+	hash, ok := restoreHash(w, r)
+	if !ok {
+		return
+	}
+	result, err := s.draft.RestoreVersion(sc.id, sc.proj, resource, ns, name, hash)
+	respond(w, result, err)
+}
+
+// handlePlatformAdopt stages every cluster-scoped object the platform repo does
+// not describe - the platform tier's counterpart of the namespace adoption.
+func (s *Server) handlePlatformAdopt(w http.ResponseWriter, r *http.Request) {
+	sc, ok := s.platformScopeAny(w, r)
+	if !ok {
+		return
+	}
+	objs, unreadable, ok := s.captureAdoptable(w, r, sc, "")
+	if !ok {
+		return
+	}
+	result, err := s.draft.AdoptObjects(sc.id, sc.proj, "the cluster scope", objs)
+	respond(w, withUnreadable(result, "cluster scope", unreadable), err)
 }
 
 // sourceFiles answers "which file declares this object" across the caller's

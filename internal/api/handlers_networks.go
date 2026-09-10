@@ -192,6 +192,17 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	if s.canReadNodesCached(r.Context(), id, c) {
 		out.Uplinks = full.Uplinks
 		out.PhysicalAdapters = full.PhysicalAdapters
+		if out.Caps.Uplink {
+			for i := range out.Uplinks {
+				u := &out.Uplinks[i]
+				u.SourceFile = declared("NodeNetworkConfigurationPolicy", "", u.Policy)
+				if s.drift != nil && u.Policy != "" {
+					if d, ok := s.drift.ResourceDrift("nmstate.io", "NodeNetworkConfigurationPolicy", "", u.Policy); ok {
+						u.Sync, u.SyncError = d.Sync, d.Message
+					}
+				}
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

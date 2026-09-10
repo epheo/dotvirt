@@ -9,18 +9,26 @@
 
 	let {
 		adapters = [],
+		initial,
 		onclose,
 		onstaged,
 	}: {
 		adapters?: PhysicalAdapter[]; // node NICs (the port to enslave)
+		initial?: UplinkCreate; // the uplink as git declares it: edit, not create
 		onclose: () => void;
 		onstaged: () => void;
 	} = $props();
+	// svelte-ignore state_referenced_locally
+	const editing = !!initial;
 
-	let name = $state('');
-	let nic = $state('');
-	let bridge = $state('');
-	let node = $state(''); // '' = all worker nodes; else pin to this hostname
+	// svelte-ignore state_referenced_locally
+	let name = $state(initial?.name ?? '');
+	// svelte-ignore state_referenced_locally
+	let nic = $state(initial?.nic ?? '');
+	// svelte-ignore state_referenced_locally
+	let bridge = $state(initial?.bridge ?? '');
+	// svelte-ignore state_referenced_locally
+	let node = $state(initial?.nodeSelector?.['kubernetes.io/hostname'] ?? ''); // '' = all worker nodes; else pin to this hostname
 
 	// Nodes that report adapters, so the user can target one; '' = all workers.
 	const nodes = $derived([...new Set(adapters.map((a) => a.node))].sort());
@@ -47,7 +55,9 @@
 	});
 	const valid = $derived(missing.length === 0);
 	const summary = $derived(
-		valid ? `Stages uplink “${name}” on ${nic} (${node || 'all workers'}) → platform repo` : '',
+		valid
+			? `${editing ? 'Updates' : 'Stages'} uplink “${name}” on ${nic} (${node || 'all workers'}) → platform repo`
+			: '',
 	);
 
 	async function stage() {
@@ -59,8 +69,8 @@
 </script>
 
 <StageModal
-	title="Add Uplink"
-	label="Stage uplink"
+	title={editing ? `Edit Uplink · ${name}` : 'Add Uplink'}
+	label={editing ? 'Stage changes' : 'Stage uplink'}
 	{missing}
 	{summary}
 	onsubmit={stage}
@@ -68,7 +78,13 @@
 	{onclose}
 >
 	<FormField label="Name (physical network)" error={name && !validName(name) ? NAME_HINT : ''}>
-		<TextInput bind:value={name} placeholder="physnet-prod" mono data-autofocus />
+		<TextInput
+			bind:value={name}
+			placeholder="physnet-prod"
+			mono
+			disabled={editing}
+			data-autofocus
+		/>
 	</FormField>
 	<FormField label="Nodes">
 		<SelectInput bind:value={node}>

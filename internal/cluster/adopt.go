@@ -31,6 +31,19 @@ var adoptableKinds = []schema.GroupVersionResource{
 	{Group: "networking.k8s.io", Version: "v1", Resource: "networkpolicies"},
 }
 
+// clusterAdoptableKinds are the cluster-scoped kinds the platform repo may declare.
+// It mirrors the platform AppProject's clusterResourceWhitelist the way
+// adoptableKinds mirrors the tenant one; the Namespace kind is left out because
+// namespaces join through AdoptProject with their tenancy labels.
+var clusterAdoptableKinds = []schema.GroupVersionResource{
+	{Group: "k8s.ovn.org", Version: "v1", Resource: "clusteruserdefinednetworks"},
+	{Group: "k8s.ovn.org", Version: "v1", Resource: "egressips"},
+	{Group: "k8s.ovn.org", Version: "v1", Resource: "adminpolicybasedexternalroutes"},
+	{Group: "policy.networking.k8s.io", Version: "v1alpha1", Resource: "adminnetworkpolicies"},
+	{Group: "policy.networking.k8s.io", Version: "v1alpha1", Resource: "baselineadminnetworkpolicies"},
+	{Group: "nmstate.io", Version: "v1", Resource: "nodenetworkconfigurationpolicies"},
+}
+
 // Adoptable is one live object serialized as the manifest a repo would hold.
 type Adoptable struct {
 	Namespace string
@@ -58,44 +71,66 @@ type Adoptable struct {
 func (c *Client) AdoptableObjects(ctx context.Context, namespaces []string, foreignApps map[string]bool) (objs []Adoptable, unreadable []string, err error) {
 	seen := map[string]bool{}
 	for _, ns := range namespaces {
-		for _, gvr := range adoptableKinds {
-			list, err := c.dyn.Resource(gvr).Namespace(ns).List(ctx, metav1.ListOptions{})
+		objs, unreadable, err = c.capture(ctx, adoptableKinds, ns, foreignApps, objs, unreadable, seen)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return objs, unreadable, nil
+}
+
+// ClusterAdoptableObjects is AdoptableObjects for the platform tier: every
+// cluster-scoped object of the platform kinds that git does not describe.
+func (c *Client) ClusterAdoptableObjects(ctx context.Context, foreignApps map[string]bool) (objs []Adoptable, unreadable []string, err error) {
+	return c.capture(ctx, clusterAdoptableKinds, "", foreignApps, nil, nil, map[string]bool{})
+}
+
+// capture sweeps kinds in one namespace ("" = cluster scope), appending to objs and
+// unreadable (seen dedupes the unreadable names across namespaces).
+func (c *Client) capture(ctx context.Context, kinds []schema.GroupVersionResource, ns string, foreignApps map[string]bool,
+	objs []Adoptable, unreadable []string, seen map[string]bool) ([]Adoptable, []string, error) {
+	for _, gvr := range kinds {
+		res := c.dyn.Resource(gvr)
+		lister := res.Namespace(ns)
+		if ns == "" {
+			lister = res
+		}
+		list, err := lister.List(ctx, metav1.ListOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+				continue
+			}
+			if apierrors.IsForbidden(err) {
+				if !seen[gvr.Resource] {
+					seen[gvr.Resource] = true
+					unreadable = append(unreadable, gvr.Resource)
+				}
+				continue
+			}
+			return nil, nil, fmt.Errorf("read %s in %s: %w", gvr.Resource, ns, err)
+		}
+		for i := range list.Items {
+			obj := &list.Items[i]
+			if claimedByForeignApp(obj, foreignApps) || len(obj.GetOwnerReferences()) > 0 {
+				continue
+			}
+			// A terminating object still LISTs while a finalizer runs. adoptManifest
+			// strips deletionTimestamp and finalizers, so capturing one would produce a
+			// healthy-looking manifest whose merge re-creates what was just deleted.
+			if obj.GetDeletionTimestamp() != nil {
+				continue
+			}
+			m, err := adoptManifest(obj)
 			if err != nil {
-				if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
-					continue
-				}
-				if apierrors.IsForbidden(err) {
-					if !seen[gvr.Resource] {
-						seen[gvr.Resource] = true
-						unreadable = append(unreadable, gvr.Resource)
-					}
-					continue
-				}
-				return nil, nil, fmt.Errorf("read %s in %s: %w", gvr.Resource, ns, err)
+				return nil, nil, fmt.Errorf("serialize %s %s/%s: %w", gvr.Resource, ns, obj.GetName(), err)
 			}
-			for i := range list.Items {
-				obj := &list.Items[i]
-				if claimedByForeignApp(obj, foreignApps) || len(obj.GetOwnerReferences()) > 0 {
-					continue
-				}
-				// A terminating object still LISTs while a finalizer runs. adoptManifest
-				// strips deletionTimestamp and finalizers, so capturing one would produce a
-				// healthy-looking manifest whose merge re-creates what was just deleted.
-				if obj.GetDeletionTimestamp() != nil {
-					continue
-				}
-				m, err := adoptManifest(obj)
-				if err != nil {
-					return nil, nil, fmt.Errorf("serialize %s %s/%s: %w", gvr.Resource, ns, obj.GetName(), err)
-				}
-				objs = append(objs, Adoptable{
-					Namespace: ns,
-					Name:      obj.GetName(),
-					Kind:      obj.GetKind(),
-					Path:      adoptPath(obj),
-					Manifest:  m,
-				})
-			}
+			objs = append(objs, Adoptable{
+				Namespace: ns,
+				Name:      obj.GetName(),
+				Kind:      obj.GetKind(),
+				Path:      adoptPath(obj),
+				Manifest:  m,
+			})
 		}
 	}
 	return objs, unreadable, nil
@@ -163,6 +198,22 @@ func adoptPath(obj *unstructured.Unstructured) string {
 		// OVN allows one per namespace, always named "default", and netgen writes exactly
 		// that file.
 		return ns + "/egressfirewalls/default.yaml"
+	// The platform tier's layouts, as netgen writes them.
+	case "ClusterUserDefinedNetwork":
+		return "networks/" + name + ".yaml"
+	case "EgressIP":
+		return "egressips/" + name + ".yaml"
+	case "AdminPolicyBasedExternalRoute":
+		return "externalroutes/" + name + ".yaml"
+	case "AdminNetworkPolicy":
+		return "adminnetworkpolicies/" + name + ".yaml"
+	case "BaselineAdminNetworkPolicy":
+		return "baselineadminnetworkpolicies/default.yaml"
+	case "NodeNetworkConfigurationPolicy":
+		return "uplinks/" + strings.TrimPrefix(name, "uplink-") + ".yaml"
+	}
+	if ns == "" {
+		return name + "." + strings.ToLower(obj.GetKind()) + ".yaml"
 	}
 	return ns + "/" + name + "." + strings.ToLower(obj.GetKind()) + ".yaml"
 }

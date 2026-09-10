@@ -7,6 +7,7 @@ import type {
 	NetworkCreate,
 	NetworkPolicyCreate,
 	Template,
+	UplinkCreate,
 	VM,
 } from '$lib/api';
 import { reviewURL, type ReviewTarget } from '$lib/review';
@@ -21,7 +22,7 @@ type AppModal =
 	// The network-family forms take an optional initial spec: the object read
 	// back from git, so the create form doubles as the edit form.
 	| { kind: 'newNetwork'; initial?: NetworkCreate }
-	| { kind: 'uplink' }
+	| { kind: 'uplink'; initial?: UplinkCreate }
 	| { kind: 'namespace'; project: string | null }
 	| { kind: 'newProject'; adopt?: string } // adopt = existing namespace to bring in as a project
 	| { kind: 'adoptProject'; project: string; namespaces: string[]; recover?: boolean }
@@ -36,6 +37,16 @@ type AppModal =
 	| { kind: 'upload' }
 	| { kind: 'deployTemplate'; library?: string; template?: string } // Deploy from Template (Catalog / New ▾)
 	| { kind: 'editTemplate'; template: Template } // edit a library item's manifest (Catalog)
+	// Edit a declared object's manifest verbatim, when its form has no field for it.
+	| {
+			kind: 'editManifest';
+			resource: string;
+			namespace: string;
+			name: string;
+			sourceFile: string;
+			yaml: string;
+			reason?: string;
+	  }
 	| { kind: 'staged'; vm: VM }; // the per-VM staged-changes modal (from a Staged badge)
 
 // The host-kind registry actions the VM detail page fulfils with a modal or

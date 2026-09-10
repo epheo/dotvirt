@@ -152,6 +152,112 @@ func TestSoleDeclarerRefusals(t *testing.T) {
 	}
 }
 
+// A captured cluster-scoped object stages under the cluster sentinel with its
+// platform resource, so the edit and delete paths find it by the same identity;
+// one git already declares is skipped.
+func TestAdoptObjectsClusterScoped(t *testing.T) {
+	_, declared, err := netgen.Manifest(netgen.Spec{Name: "declared", Scope: netgen.ScopeShared, Namespaces: []string{"a"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare := seedBareFiles(t, map[string][]byte{"networks/declared.yaml": declared})
+	c := newTestCoordinator(t)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "platform", Repo: bare}
+
+	view, err := c.AdoptObjects(id, proj, "the cluster scope", []Adoptable{
+		{Kind: "ClusterUserDefinedNetwork", Name: "declared", Path: "networks/declared.yaml", Manifest: declared},
+		{Kind: "AdminNetworkPolicy", Name: "iso", Path: "adminnetworkpolicies/iso.yaml", Manifest: []byte("kind: AdminNetworkPolicy\nmetadata:\n  name: iso\n")},
+	})
+	if err != nil {
+		t.Fatalf("AdoptObjects: %v", err)
+	}
+	if len(view.Items) != 1 {
+		t.Fatalf("want the one undeclared object staged, got %+v", view.Items)
+	}
+	it := view.Items[0]
+	if it.Namespace != ClusterScopeNS || it.Resource != string(draft.ResourceAdminNetworkPolicy) || it.Name != "iso" {
+		t.Errorf("item = %+v", it)
+	}
+	if _, err := c.StageDelete(id, proj, string(draft.ResourceNetwork), ClusterScopeNS, "declared"); err != nil {
+		t.Errorf("the declared network must be deletable by the same identity: %v", err)
+	}
+}
+
+// AdoptObject makes git say what runs: a create for an undeclared object, an
+// edit for a drifted one, and a refusal when git already matches.
+func TestAdoptObjectCreateOrEdit(t *testing.T) {
+	path, declared, err := netgen.NetworkPolicyManifest(netgen.NetworkPolicySpec{Name: "web", Namespace: "alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, drifted, err := netgen.NetworkPolicyManifest(netgen.NetworkPolicySpec{Name: "web", Namespace: "alpha", AppliedTo: map[string]string{"app": "web"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare := seedBareFiles(t, map[string][]byte{path: declared})
+	c := newTestCoordinator(t)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+
+	view, err := c.AdoptObject(id, proj, Adoptable{Kind: "NetworkPolicy", Namespace: "alpha", Name: "web", Path: path, Manifest: drifted})
+	if err != nil {
+		t.Fatalf("AdoptObject (drifted): %v", err)
+	}
+	if it := view.Items[0]; it.Kind != string(draft.KindEdit) || !strings.Contains(it.YAML, "app: web") || it.BaseYAML == "" {
+		t.Errorf("drift must stage an edit against the declared file, got %+v", it)
+	}
+	if _, err := c.AdoptObject(id, proj, Adoptable{Kind: "NetworkPolicy", Namespace: "alpha", Name: "web", Path: path, Manifest: declared}); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("a matching object must be refused, got %v", err)
+	}
+	view, err = c.AdoptObject(id, proj, Adoptable{Kind: "NetworkPolicy", Namespace: "alpha", Name: "api", Path: "alpha/networkpolicies/api.yaml", Manifest: []byte("kind: NetworkPolicy\nmetadata:\n  name: api\n  namespace: alpha\n")})
+	if err != nil {
+		t.Fatalf("AdoptObject (new): %v", err)
+	}
+	created := false
+	for _, it := range view.Items {
+		created = created || (it.Name == "api" && it.Kind == string(draft.KindCreate))
+	}
+	if !created {
+		t.Errorf("an undeclared object must stage a create, got %+v", view.Items)
+	}
+}
+
+// A manifest the form has no field for reads back with the raw manifest and a
+// reason instead of a spec, and edits verbatim - as long as the replacement
+// still declares the same object.
+func TestObjectSpecWithoutFormAndVerbatimEdit(t *testing.T) {
+	flat := "apiVersion: k8s.ovn.org/v1\nkind: ClusterUserDefinedNetwork\nmetadata:\n  name: dc-vlan\nspec:\n  namespaceSelector:\n    matchLabels:\n      dc-vlan: \"true\"\n  network:\n    localnet:\n      ipam:\n        mode: Disabled\n      physicalNetworkName: dc-vlan\n      role: Secondary\n    topology: Localnet\n"
+	bare := seedBareFiles(t, map[string][]byte{"networks/dc-vlan.yaml": []byte(flat)})
+	c := newTestCoordinator(t)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "platform", Repo: bare}
+
+	got, err := c.ObjectSpec(proj, string(draft.ResourceNetwork), ClusterScopeNS, "dc-vlan")
+	if err != nil {
+		t.Fatalf("ObjectSpec: %v", err)
+	}
+	if got.Spec != nil || got.Reason == "" || got.Manifest != flat {
+		t.Errorf("want manifest + reason and no spec, got %+v", got)
+	}
+
+	edited := strings.Replace(flat, "dc-vlan: \"true\"", "dc-vlan: \"yes\"", 1)
+	view, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), ClusterScopeNS, "dc-vlan", edited)
+	if err != nil {
+		t.Fatalf("StageUpdateManifest: %v", err)
+	}
+	if it := view.Items[0]; it.Kind != string(draft.KindEdit) || !strings.Contains(it.YAML, "yes") || it.BaseYAML != flat {
+		t.Errorf("verbatim edit item = %+v", it)
+	}
+	renamed := strings.Replace(flat, "name: dc-vlan", "name: other", 1)
+	if _, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), ClusterScopeNS, "dc-vlan", renamed); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("a manifest declaring another object must be refused, got %v", err)
+	}
+	if _, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), ClusterScopeNS, "dc-vlan", flat); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("an unchanged manifest must be refused, got %v", err)
+	}
+}
+
 func mustRead(t *testing.T, c *Coordinator, proj project.ProjectInfo) *git.Repo {
 	t.Helper()
 	read, err := c.read(proj)

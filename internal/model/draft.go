@@ -131,15 +131,24 @@ type ObjectRef struct {
 	Name      string `json:"name"`
 }
 
-// ObjectSpec is a git-declared object read back as the form spec that created
-// it, for editing: GET /api/objects/{resource}/{namespace}/{name}. Spec is the
-// same JSON the matching create route accepts.
+// ObjectSpec is a git-declared object read back for editing: GET
+// /api/objects/{resource}/{namespace}/{name}. Spec is the same JSON the
+// matching create route accepts, when the form can express the manifest; else
+// Reason says why not and the manifest itself is what gets edited.
 type ObjectSpec struct {
 	Resource   string          `json:"resource"`
 	Namespace  string          `json:"namespace"` // "cluster" for a cluster-scoped object
 	Name       string          `json:"name"`
 	SourceFile string          `json:"sourceFile"`
-	Spec       json.RawMessage `json:"spec" tstype:"unknown"`
+	Manifest   string          `json:"manifest"`
+	Spec       json.RawMessage `json:"spec,omitempty" tstype:"unknown"`
+	Reason     string          `json:"reason,omitempty"`
+}
+
+// UpdateManifestRequest replaces a declared object's manifest verbatim - the
+// edit for what no form expresses: PUT /api/objects/{resource}/{namespace}/{name}.
+type UpdateManifestRequest struct {
+	YAML string `json:"yaml"`
 }
 
 // DraftItem is one pending change rendered for the UI.

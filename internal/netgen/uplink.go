@@ -18,6 +18,10 @@ type UplinkSpec struct {
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"` // node subset; empty = all worker nodes
 }
 
+// UplinkPolicyName is the NNCP an uplink renders as: the object's identity in
+// git and on the cluster, distinct from the physical-network name it maps.
+func UplinkPolicyName(name string) string { return "uplink-" + name }
+
 // UplinkManifest renders the NNCP YAML plus its repo-relative path.
 func UplinkManifest(s UplinkSpec) (path string, content []byte, err error) {
 	if err := validate.RequireDNS1123("uplink name", s.Name); err != nil {
@@ -37,7 +41,7 @@ func UplinkManifest(s UplinkSpec) (path string, content []byte, err error) {
 	out, err := yaml.Marshal(map[string]any{
 		"apiVersion": "nmstate.io/v1",
 		"kind":       "NodeNetworkConfigurationPolicy",
-		"metadata":   map[string]any{"name": "uplink-" + s.Name},
+		"metadata":   map[string]any{"name": UplinkPolicyName(s.Name)},
 		"spec": map[string]any{
 			"nodeSelector": toStrAny(sel),
 			"desiredState": map[string]any{

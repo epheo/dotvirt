@@ -28,6 +28,8 @@ func TestDecodeRoundTrip(t *testing.T) {
 			{Action: "Deny", CIDR: "0.0.0.0/0"}}}, nil},
 		{"egressip", EgressIPSpec{Name: "snat", EgressIPs: []string{"192.0.2.10"}, Namespaces: []string{"a"}}, nil},
 		{"route", ExternalRouteSpec{Name: "gw", Namespaces: []string{"a"}, NextHops: []string{"10.0.0.1"}}, nil},
+		{"uplink", UplinkSpec{Name: "physnet", NIC: "eno2"}, nil},
+		{"uplink-pinned", UplinkSpec{Name: "physnet", NIC: "eno2", Bridge: "br-ex2", NodeSelector: map[string]string{"kubernetes.io/hostname": "w1"}}, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -46,6 +48,8 @@ func TestDecodeRoundTrip(t *testing.T) {
 				_, content, err = EgressIPManifest(s)
 			case ExternalRouteSpec:
 				_, content, err = ExternalRouteManifest(s)
+			case UplinkSpec:
+				_, content, err = UplinkManifest(s)
 			}
 			if err != nil {
 				t.Fatalf("render: %v", err)

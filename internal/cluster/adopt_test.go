@@ -18,7 +18,7 @@ import (
 // unregistered one, where a real cluster answers NoMatch and the sweep skips it.
 func adoptableListKinds() map[schema.GroupVersionResource]string {
 	kinds := map[schema.GroupVersionResource]string{}
-	for _, gvr := range adoptableKinds {
+	for _, gvr := range append(append([]schema.GroupVersionResource{}, adoptableKinds...), clusterAdoptableKinds...) {
 		singular := strings.TrimSuffix(gvr.Resource, "s")
 		kinds[gvr] = strings.ToUpper(singular[:1]) + singular[1:] + "List"
 	}

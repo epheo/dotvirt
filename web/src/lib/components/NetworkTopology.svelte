@@ -1,5 +1,13 @@
 <script lang="ts">
-	import { Network, Radio, Router } from 'lucide-svelte';
+	import { GitPullRequest, Network, Pencil, Radio, Router, Trash2 } from 'lucide-svelte';
+	import {
+		canAdoptUplink,
+		canEditUplink,
+		openAdopt,
+		openDelete,
+		openEdit,
+		uplinkRef,
+	} from '$lib/objects';
 	import type { Network as PortGroup, Project, Uplink, VM } from '$lib/api';
 	import { vmNetworkKeys, POD_NETWORK, NO_NETWORK } from '$lib/lenses';
 	import { segmentType, TERMS } from '$lib/vocab';
@@ -131,8 +139,42 @@
 		{#if uplinks.length}
 			<div class="mb-2 flex flex-wrap gap-1.5 pl-6">
 				{#each uplinks as u (u.name)}
-					<span class="rounded border border-line bg-panel px-2 py-0.5 text-[11px] text-ink-soft">
+					<!-- Edit, delete and adopt act on the uplink's policy in git; the builtin
+					     uplink and one folded from several policies carry no single object. -->
+					<span
+						class="inline-flex items-center gap-2 rounded border border-line bg-panel px-2 py-0.5 text-[11px] text-ink-soft"
+					>
 						{u.name}{u.builtin ? ' · default' : ''} <span class="text-ink-faint">({u.bridge})</span>
+						{#if canAdoptUplink(u)}
+							<button
+								type="button"
+								onclick={() => openAdopt(uplinkRef(u))}
+								title="Not declared in git"
+								class="inline-flex items-center gap-1 text-accent hover:underline"
+								><GitPullRequest size={11} /> Adopt into git</button
+							>
+						{:else if canEditUplink(u)}
+							{#if u.sync === 'OutOfSync'}
+								<button
+									type="button"
+									onclick={() => openAdopt(uplinkRef(u), true)}
+									class="inline-flex items-center gap-1 text-accent hover:underline"
+									><GitPullRequest size={11} /> Adopt live changes</button
+								>
+							{/if}
+							<button
+								type="button"
+								onclick={() => openEdit(uplinkRef(u))}
+								class="inline-flex items-center gap-1 text-accent hover:underline"
+								><Pencil size={11} /> Edit</button
+							>
+							<button
+								type="button"
+								onclick={() => openDelete(uplinkRef(u), u.sourceFile!)}
+								class="inline-flex items-center gap-1 text-danger-ink hover:underline"
+								><Trash2 size={11} /> Delete</button
+							>
+						{/if}
 					</span>
 				{/each}
 			</div>

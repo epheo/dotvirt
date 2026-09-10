@@ -25,7 +25,7 @@ func TestRestoreVersionStagesPastManifest(t *testing.T) {
 	}
 	initial := commits[1].Hash
 
-	view, err := c.RestoreVersion(id, proj, "alpha", "web", initial)
+	view, err := c.RestoreVersion(id, proj, "", "alpha", "web", initial)
 	if err != nil {
 		t.Fatalf("RestoreVersion: %v", err)
 	}
@@ -49,13 +49,13 @@ func TestRestoreVersionStagesPastManifest(t *testing.T) {
 		t.Errorf("restore should carry the old manifest verbatim over the current one")
 	}
 
-	if _, err := c.RestoreVersion(id, proj, "alpha", "web", mergeHash); !errors.Is(err, model.ErrInvalid) {
+	if _, err := c.RestoreVersion(id, proj, "", "alpha", "web", mergeHash); !errors.Is(err, model.ErrInvalid) {
 		t.Errorf("restoring the current version should be ErrInvalid, got %v", err)
 	}
-	if _, err := c.RestoreVersion(id, proj, "alpha", "db", initial); !errors.Is(err, model.ErrNotFound) {
+	if _, err := c.RestoreVersion(id, proj, "", "alpha", "db", initial); !errors.Is(err, model.ErrNotFound) {
 		t.Errorf("a file absent at that commit should be ErrNotFound, got %v", err)
 	}
-	if _, err := c.RestoreVersion(id, proj, "alpha", "ghost", initial); !errors.Is(err, model.ErrNotFound) {
+	if _, err := c.RestoreVersion(id, proj, "", "alpha", "ghost", initial); !errors.Is(err, model.ErrNotFound) {
 		t.Errorf("an untracked VM should be ErrNotFound, got %v", err)
 	}
 }

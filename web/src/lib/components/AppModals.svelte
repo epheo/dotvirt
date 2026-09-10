@@ -10,7 +10,7 @@
 	import DeleteObjectModal from './DeleteObjectModal.svelte';
 	import DeployTemplateModal from './DeployTemplateModal.svelte';
 	import DistributedFirewallModal from './DistributedFirewallModal.svelte';
-	import EditTemplateModal from './EditTemplateModal.svelte';
+	import EditManifestModal from './EditManifestModal.svelte';
 	import EgressFirewallModal from './EgressFirewallModal.svelte';
 	import NewNamespaceModal from './NewNamespaceModal.svelte';
 	import NewNetworkModal from './NewNetworkModal.svelte';
@@ -76,7 +76,12 @@
 		onstaged={staged}
 	/>
 {:else if m?.kind === 'uplink'}
-	<AddUplinkModal adapters={inventory.physicalAdapters} onclose={close} onstaged={staged} />
+	<AddUplinkModal
+		adapters={inventory.physicalAdapters}
+		initial={m.initial}
+		onclose={close}
+		onstaged={staged}
+	/>
 {:else if m?.kind === 'namespace'}
 	<NewNamespaceModal
 		projects={inventory.repoProjects}
@@ -142,7 +147,29 @@
 		onstaged={staged}
 	/>
 {:else if m?.kind === 'editTemplate'}
-	<EditTemplateModal template={m.template} onclose={close} onstaged={staged} />
+	{@const t = m.template}
+	<EditManifestModal
+		kind="template"
+		title="Edit Template — {t.name}"
+		sourceFile={t.sourceFile}
+		yaml={t.yaml}
+		summary={`Replaces ${t.sourceFile} in the ${t.library === 'platform' ? 'shared library' : t.library}`}
+		onsubmit={(yaml) => api.updateTemplate({ library: t.library, name: t.name, yaml })}
+		onclose={close}
+		onstaged={staged}
+	/>
+{:else if m?.kind === 'editManifest'}
+	{@const o = m}
+	<EditManifestModal
+		title="Edit manifest — {o.name}"
+		sourceFile={o.sourceFile}
+		yaml={o.yaml}
+		reason={o.reason}
+		summary={`Replaces ${o.sourceFile}`}
+		onsubmit={(yaml) => api.updateObjectManifest(o.resource, o.namespace, o.name, yaml)}
+		onclose={close}
+		onstaged={staged}
+	/>
 {:else if m?.kind === 'staged' && stagedItem}
 	<StagedChangesModal
 		item={stagedItem}

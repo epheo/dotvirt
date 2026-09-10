@@ -111,6 +111,9 @@ func mergeUplinks(in []model.Uplink) []model.Uplink {
 		if m.Bridge == "" {
 			m.Bridge = u.Bridge
 		}
+		if m.Policy != u.Policy {
+			m.Policy = "" // several policies, no single object to act on
+		}
 	}
 	return out
 }
@@ -150,7 +153,7 @@ func (s *Snapshot) uplinksFromNNCP(u *unstructured.Unstructured) []model.Uplink 
 			continue
 		}
 		out = append(out, model.Uplink{
-			Name: str(m["localnet"]), Bridge: str(m["bridge"]),
+			Name: str(m["localnet"]), Bridge: str(m["bridge"]), Policy: u.GetName(),
 			Nodes: nodes, NodeCount: len(nodes),
 		})
 	}
