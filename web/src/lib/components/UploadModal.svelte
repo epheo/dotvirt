@@ -17,9 +17,11 @@
 	// so the browser already trusts it.
 	let {
 		namespaces,
+		namespace: initialNamespace = '',
 		onclose,
 	}: {
 		namespaces: string[];
+		namespace?: string; // preselected target (the opener's scope)
 		onclose: () => void;
 	} = $props();
 
@@ -158,7 +160,7 @@
 				<FormField label="Disk name" error={name && !nameOK ? NAME_HINT : ''}>
 					<TextInput bind:value={name} placeholder="my-image" mono />
 				</FormField>
-				<NamespaceSelect bind:namespace {namespaces} />
+				<NamespaceSelect bind:namespace {namespaces} initial={initialNamespace} />
 				<FormField label="Disk size" error={size && !sizeOK ? 'A quantity like 10Gi.' : ''}>
 					<TextInput bind:value={size} placeholder="10Gi" mono />
 				</FormField>

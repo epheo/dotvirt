@@ -15,11 +15,13 @@
 
 	let {
 		namespaces,
+		namespace: initialNamespace = '',
 		networks = [],
 		onclose,
 		onstaged,
 	}: {
 		namespaces: string[];
+		namespace?: string; // preselected target (the opener's scope)
 		networks?: Network[]; // port-group catalog (from the page), for the adapter picker
 		onclose: () => void;
 		onstaged: () => void;
@@ -271,7 +273,7 @@
 		<FormField label="Name" error={nudged.has(0) && !name ? 'Name is required' : ''}>
 			<TextInput bind:value={name} placeholder="my-vm" />
 		</FormField>
-		<NamespaceSelect bind:namespace {namespaces} fallback="default" />
+		<NamespaceSelect bind:namespace {namespaces} initial={initialNamespace} fallback="default" />
 	</div>
 {/snippet}
 

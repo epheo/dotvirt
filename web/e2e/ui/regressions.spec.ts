@@ -38,6 +38,20 @@ test('#116: the review step names every unmet field', async ({ page }) => {
 	).toBeDisabled();
 });
 
+test('New from inside a namespace preselects that namespace', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	// batch-prod sorts before web-prod, so a first-of-list default would miss.
+	await page.goto('/compute/team-web/web-prod');
+	await page.getByRole('button', { name: /^New$/ }).click();
+	await page.getByRole('button', { name: 'Upload Image', exact: true }).click();
+	await expect(page.getByLabel('Project (namespace)')).toHaveValue('web-prod');
+	await page.keyboard.press('Escape');
+	await page.getByRole('button', { name: /^New$/ }).click();
+	await page.getByRole('button', { name: 'New Segment', exact: true }).click();
+	await expect(page.getByLabel('Project (namespace)')).toHaveValue('web-prod');
+});
+
 test('#142: the hosts tree lists VM-less nodes too', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);

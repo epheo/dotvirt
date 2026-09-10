@@ -61,6 +61,7 @@
 {#if m?.kind === 'newVM'}
 	<NewVMWizard
 		namespaces={m.namespaces ?? inventory.namespaces}
+		namespace={m.namespace}
 		networks={inventory.networks}
 		onclose={close}
 		onstaged={staged}
@@ -68,6 +69,7 @@
 {:else if m?.kind === 'newNetwork'}
 	<NewNetworkModal
 		namespaces={inventory.namespaces}
+		namespace={m.namespace}
 		uplinks={inventory.uplinks}
 		canManage={inventory.canManage}
 		initial={m.initial}
@@ -137,10 +139,11 @@
 		onstaged={staged}
 	/>
 {:else if m?.kind === 'upload'}
-	<UploadModal namespaces={inventory.namespaces} onclose={close} />
+	<UploadModal namespaces={inventory.namespaces} namespace={m.namespace} onclose={close} />
 {:else if m?.kind === 'deployTemplate'}
 	<DeployTemplateModal
 		namespaces={inventory.namespaces}
+		namespace={m.namespace}
 		library={m.library}
 		template={m.template}
 		onclose={close}

@@ -18,10 +18,12 @@ export type Tier0Initial =
 // Every modal the shell can show, as one discriminated union - the shell
 // renders exactly one, and opening any modal is a single assignment.
 type AppModal =
-	| { kind: 'newVM'; namespaces: string[] | null } // null = all creatable namespaces
+	// namespace on the create forms is the preselected target: the one the
+	// opener's view is focused on, so a New from inside a project lands there.
+	| { kind: 'newVM'; namespaces: string[] | null; namespace?: string } // null = all creatable namespaces
 	// The network-family forms take an optional initial spec: the object read
 	// back from git, so the create form doubles as the edit form.
-	| { kind: 'newNetwork'; initial?: NetworkCreate }
+	| { kind: 'newNetwork'; initial?: NetworkCreate; namespace?: string }
 	| { kind: 'uplink'; initial?: UplinkCreate }
 	| { kind: 'namespace'; project: string | null }
 	| { kind: 'newProject'; adopt?: string } // adopt = existing namespace to bring in as a project
@@ -34,8 +36,8 @@ type AppModal =
 	// Stage the removal of a git-declared object (segment, firewall rule, Tier-0
 	// service) - the VM delete's confirm, for the rest of the inventory.
 	| { kind: 'deleteObject'; resource: string; namespace: string; name: string; sourceFile: string }
-	| { kind: 'upload' }
-	| { kind: 'deployTemplate'; library?: string; template?: string } // Deploy from Template (Catalog / New ▾)
+	| { kind: 'upload'; namespace?: string }
+	| { kind: 'deployTemplate'; library?: string; template?: string; namespace?: string } // Deploy from Template (Catalog / New ▾)
 	| { kind: 'editTemplate'; template: Template } // edit a library item's manifest (Catalog)
 	// Edit a declared object's manifest verbatim, when its form has no field for it.
 	| {
