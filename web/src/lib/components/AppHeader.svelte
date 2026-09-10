@@ -44,6 +44,14 @@
 		}
 		return null;
 	});
+	// The namespace every create form preselects: the one in view (a namespace
+	// scope, a VM page, or a project's first namespace). Empty leaves the form
+	// to its own first choice.
+	const scopeNamespace = $derived.by(() => {
+		const parts = page.url.pathname.split('/').slice(1).map(decodeURIComponent);
+		if (parts[0] === 'vm' && parts.length >= 2) return parts[1];
+		return scopeNamespaces?.[0] ?? '';
+	});
 
 	// Global search: a hit either opens a VM or focuses its scope.
 	function onSearchPick(hit: SearchHit) {
@@ -196,10 +204,15 @@
 				<MenuItem
 					onclick={() => {
 						close();
+						const namespace = scopeNamespace || undefined;
 						ui.modal =
 							item.kind === 'newVM'
-								? { kind: 'newVM', namespaces: scopeNamespaces }
-								: { kind: item.kind };
+								? { kind: 'newVM', namespaces: scopeNamespaces, namespace }
+								: item.kind === 'newNetwork' ||
+									  item.kind === 'upload' ||
+									  item.kind === 'deployTemplate'
+									? { kind: item.kind, namespace }
+									: { kind: item.kind };
 					}}
 					disabled={!item.enabled}
 					title={item.title}

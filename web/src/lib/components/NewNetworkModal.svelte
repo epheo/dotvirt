@@ -12,6 +12,7 @@
 
 	let {
 		namespaces,
+		namespace: initialNamespace = '',
 		uplinks = [],
 		canManage = false,
 		initial,
@@ -20,6 +21,7 @@
 		onAddUplink,
 	}: {
 		namespaces: string[];
+		namespace?: string; // preselected project for a new segment (the opener's scope)
 		uplinks?: Uplink[]; // discovered Tier-0 uplinks (physical-network hints for a VLAN segment)
 		canManage?: boolean; // caller may author platform-tier segments (shared CUDN / VLAN localnet)
 		// The segment as git declares it: the form edits it instead of creating one.
@@ -160,7 +162,7 @@
 			/>
 		{/if}
 		{#if share !== 'shared'}
-			<NamespaceSelect bind:namespace {namespaces} />
+			<NamespaceSelect bind:namespace {namespaces} initial={initialNamespace} />
 		{/if}
 	{:else}
 		<div class="grid grid-cols-2 gap-3">

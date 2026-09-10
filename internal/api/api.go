@@ -151,6 +151,11 @@ const visibleTTL = 30 * time.Second
 // live from the netstate snapshot instead, so it needs no cache.)
 const optionsTTL = 60 * time.Second
 
+// storageTTL caches the storage-class fact sheet (SA-read, identical for all).
+// Shorter than the options catalog: it carries the CSI driver's free
+// capacity, which the Storage summary polls to keep current.
+const storageTTL = 20 * time.Second
+
 // Server holds the long-lived collaborators and builds per-request, identity-
 // scoped state.
 type Server struct {
@@ -166,7 +171,8 @@ type Server struct {
 	ssar      *ttlcache.Cache[ssarVerdict]      // per-(token, resource) create-SSAR, RBAC-version-stamped
 	proposals *ttlcache.Cache[[]model.Proposal] // per-project open-PR set; written by the refresher, read on broadcast
 	options   *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
-	metrics   *metrics.Client                   // Prometheus/Thanos for the Performance tab; nil disables it
+	storage   *ttlcache.Cache[[]model.StorageClassInfo]
+	metrics  *metrics.Client                   // Prometheus/Thanos for the Performance tab; nil disables it
 	tasks     *tasks.Feed                       // recent-activity feed (ops + merged PRs); nil disables it
 	draft     Draft
 	auth      *auth.Authenticator // nil leaves the API open (dev)
@@ -218,6 +224,7 @@ func NewServer(d Deps) *Server {
 		ssar:      ttlcache.New[ssarVerdict](visibleTTL),
 		proposals: ttlcache.New[[]model.Proposal](proposalsCacheTTL),
 		options:   ttlcache.New[model.Options](optionsTTL),
+		storage:   ttlcache.New[[]model.StorageClassInfo](storageTTL),
 		metrics:   d.Metrics,
 		tasks:     d.Tasks,
 		draft:     d.Draft,
@@ -267,6 +274,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/inventory", s.handleInventory)
 	mux.HandleFunc("GET /api/tasks", s.handleTasks)
 	mux.HandleFunc("GET /api/options", s.handleOptions)
+	mux.HandleFunc("GET /api/storage/classes", s.handleStorageClasses)
 	mux.HandleFunc("GET /api/networks", s.handleNetworks)
 	mux.HandleFunc("GET /api/policies", s.handlePolicies)
 	mux.HandleFunc("POST /api/networks", s.handleCreateNetwork)

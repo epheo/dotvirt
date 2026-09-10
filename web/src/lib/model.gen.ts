@@ -1045,6 +1045,69 @@ export interface TraceStep {
 }
 
 //////////
+// source: storage.go
+
+/**
+ * StorageClassInfo is the Storage section's fact sheet for one class: the
+ * StorageClass object, what CDI's StorageProfile gives a DataVolume on it,
+ * and the free capacity the CSI driver publishes. Every source is
+ * cluster-scoped platform truth, so one SA read serves every caller.
+ */
+export interface StorageClassInfo {
+  name: string;
+  default?: boolean; // the cluster's default class annotation
+  description?: string; // the platform's description annotation
+  provisioner: string;
+  reclaimPolicy?: string;
+  bindingMode?: string; // Immediate | WaitForFirstConsumer
+  expandable?: boolean; // allowVolumeExpansion: disk resize possible
+  created?: string; // RFC3339
+  /**
+   * SnapshotClass is the VolumeSnapshotClass VM snapshots on this class use:
+   * CDI's pick when its profile names one, else the first class registered
+   * for the provisioner. Empty means VM snapshots cannot be taken here.
+   */
+  snapshotClass?: string;
+  /**
+   * Profile is CDI's StorageProfile for the class; nil when CDI has none,
+   * which means DataVolumes there need explicit claim settings.
+   */
+  profile?: StorageProfile;
+  /**
+   * Free is the unallocated capacity the CSI driver reports, summed over the
+   * class's topology segments. Nil when the driver publishes no
+   * CSIStorageCapacity (most network storage doesn't), so the UI shows
+   * nothing rather than zero.
+   */
+  free?: number /* int64 */;
+  segments?: CapacitySegment[];
+}
+/**
+ * StorageProfile is what a DataVolume gets on the class when its template
+ * leaves claim settings blank (CDI fills them from here).
+ */
+export interface StorageProfile {
+  accessModes: string[]; // the preferred claim property set
+  volumeMode?: string;
+  /**
+   * Shared is true when any property set offers ReadWriteMany: the access
+   * mode KubeVirt needs to live-migrate a VM with a disk on this class.
+   */
+  shared?: boolean;
+  cloneStrategy?: string; // snapshot | copy | csi-clone
+  recognized: boolean; // CDI knows the provisioner's capabilities
+}
+/**
+ * CapacitySegment is one CSIStorageCapacity entry: free capacity in one
+ * topology segment (a node for local storage, or the whole cluster).
+ */
+export interface CapacitySegment {
+  topology?: string; // the segment's topology label values; empty = cluster-wide
+  free: number /* int64 */;
+  maxVolume?: number /* int64 */; // largest single volume the segment can provision
+}
+
+//////////
 // source: template.go
 
 /**

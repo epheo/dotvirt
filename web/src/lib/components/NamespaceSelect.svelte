@@ -17,8 +17,11 @@
 		fallback?: string;
 	} = $props();
 
+	// initial wins only when offered: a stale scope must not pin the select on
+	// a value the list cannot show.
 	$effect(() => {
-		if (!namespace) namespace = initial ?? namespaces[0] ?? fallback;
+		if (!namespace)
+			namespace = initial && namespaces.includes(initial) ? initial : (namespaces[0] ?? fallback);
 	});
 </script>
 

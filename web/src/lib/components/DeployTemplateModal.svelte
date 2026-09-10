@@ -16,12 +16,14 @@
 	// Changes drawer and applies when the project's PR merges.
 	let {
 		namespaces,
+		namespace: initialNamespace = '',
 		library = '',
 		template = '',
 		onclose,
 		onstaged,
 	}: {
 		namespaces: string[]; // repo-backed target namespaces
+		namespace?: string; // preselected target (the opener's scope)
 		library?: string; // preselected library (from the Catalog's Deploy button)
 		template?: string;
 		onclose: () => void;
@@ -42,7 +44,8 @@
 	const op = action();
 
 	$effect(() => {
-		if (!namespace) namespace = namespaces[0] ?? '';
+		if (!namespace)
+			namespace = namespaces.includes(initialNamespace) ? initialNamespace : (namespaces[0] ?? '');
 		untrack(() =>
 			api
 				.templates()

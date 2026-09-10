@@ -1,7 +1,8 @@
 // The grouping keys behind the inventory tree's Networks/Storage lenses,
 // shared with the page's scope filtering so tree groups and grid scope can
 // never disagree on what belongs to a key.
-import type { Network, VM } from '$lib/api';
+import type { Disk, Network, VM } from '$lib/api';
+import { quantityBytes } from '$lib/format';
 import { resolveNIC } from '$lib/networks';
 
 // The inventory model: the tree is a scope selector, the center pane is the VM grid.
@@ -54,4 +55,33 @@ export function vmStorageKeys(vm: VM, defaultClass = ''): string[] {
 		),
 	];
 	return classes.length ? classes : [NO_STORAGE];
+}
+
+/** One provisioned disk on a class, with its requested size in bytes (NaN when unparseable). */
+export interface ClassDisk {
+	vm: VM;
+	disk: Disk;
+	bytes: number;
+}
+
+/**
+ * The dataVolume disks provisioned on storageClass across vms, resolving
+ * classless disks the same way vmStorageKeys does so the count, the sum and
+ * the tree agree.
+ */
+export function disksOnClass(vms: VM[], storageClass: string, defaultClass = ''): ClassDisk[] {
+	const out: ClassDisk[] = [];
+	for (const vm of vms)
+		for (const disk of vm.disks ?? [])
+			if (
+				disk.type === 'dataVolume' &&
+				(disk.storageClass || defaultClass || DEFAULT_CLASS) === storageClass
+			)
+				out.push({ vm, disk, bytes: quantityBytes(disk.size ?? '') });
+	return out;
+}
+
+/** Bytes requested by disks, skipping sizes that cannot be read. */
+export function provisionedBytes(disks: ClassDisk[]): number {
+	return disks.reduce((n, d) => n + (Number.isNaN(d.bytes) ? 0 : d.bytes), 0);
 }

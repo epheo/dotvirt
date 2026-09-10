@@ -322,6 +322,7 @@ export const api = {
 
 	tasks: () => get<TaskEntry[]>('/api/tasks'),
 	options: () => get<gen.Options>('/api/options'),
+	storageClasses: () => get<gen.StorageClassInfo[]>('/api/storage/classes'),
 	networks: () => get<gen.NetworkInventory>('/api/networks'),
 	policies: () => get<gen.PolicyInventory>('/api/policies'),
 	vmPolicy: (namespace: string, name: string) =>

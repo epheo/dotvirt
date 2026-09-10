@@ -41,8 +41,16 @@ rules:
   - apiGroups: ["k8s.cni.cncf.io"]
     resources: ["network-attachment-definitions"]
     verbs: ["get", "list", "watch"]
+  # The Storage section's fact sheet: class facts, CDI's resolved claim
+  # settings, snapshot support, and the CSI driver's published free capacity.
   - apiGroups: ["storage.k8s.io"]
-    resources: ["storageclasses"]
+    resources: ["storageclasses", "csistoragecapacities"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cdi.kubevirt.io"]
+    resources: ["storageprofiles"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotclasses"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["k8s.ovn.org"]
     resources: ["userdefinednetworks", "clusteruserdefinednetworks", "egressfirewalls", "egressips", "adminpolicybasedexternalroutes"]
