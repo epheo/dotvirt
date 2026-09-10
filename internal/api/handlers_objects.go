@@ -71,6 +71,25 @@ func (s *Server) handleObjectSpec(w http.ResponseWriter, r *http.Request) {
 	respond(w, spec, err)
 }
 
+// handleObjectUpdateManifest stages a declared object's manifest replaced
+// verbatim: the edit for what its form has no field for.
+func (s *Server) handleObjectUpdateManifest(w http.ResponseWriter, r *http.Request) {
+	sc, resource, ns, name, ok := s.objectScope(w, r)
+	if !ok {
+		return
+	}
+	_, req, ok := peek[model.UpdateManifestRequest](w, r)
+	if !ok {
+		return
+	}
+	if req.YAML == "" {
+		http.Error(w, "yaml is required", http.StatusBadRequest)
+		return
+	}
+	view, err := s.draft.StageUpdateManifest(sc.id, sc.proj, resource, ns, name, req.YAML)
+	respond(w, view, err)
+}
+
 // handleObjectDelete stages the removal of a declared object's manifest - the
 // same draft-only path as a VM delete; Argo prunes the object on merge.
 func (s *Server) handleObjectDelete(w http.ResponseWriter, r *http.Request) {

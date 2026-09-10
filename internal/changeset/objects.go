@@ -3,6 +3,7 @@ package changeset
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/epheo/dotvirt/internal/auth"
 
@@ -111,13 +112,55 @@ func (c *Coordinator) ObjectSpec(proj project.ProjectInfo, resource, namespace, 
 	if err != nil {
 		return model.ObjectSpec{}, err
 	}
+	out := model.ObjectSpec{Resource: resource, Namespace: namespace, Name: name, SourceFile: path, Manifest: string(content)}
 	spec, err := netgen.Decode(content)
 	if err != nil {
-		return model.ObjectSpec{}, fmt.Errorf("%w: %s: %v", model.ErrConflict, path, err)
+		out.Reason = err.Error()
+		return out, nil
 	}
-	raw, err := json.Marshal(spec)
-	if err != nil {
+	if out.Spec, err = json.Marshal(spec); err != nil {
 		return model.ObjectSpec{}, err
 	}
-	return model.ObjectSpec{Resource: resource, Namespace: namespace, Name: name, SourceFile: path, Spec: raw}, nil
+	return out, nil
+}
+
+// StageUpdateManifest replaces a declared object's file with yaml verbatim -
+// the edit for a manifest no form expresses, on the same whole-file rule as
+// every other edit. The new content must declare exactly the object it
+// replaces: a renamed or extra object is a different change.
+func (c *Coordinator) StageUpdateManifest(id auth.Identity, proj project.ProjectInfo, resource, namespace, name, yaml string) (model.DraftView, error) {
+	read, err := c.read(proj)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	path, err := c.locate(read, draft.Resource(resource), namespace, name)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	ns := namespace
+	if ns == ClusterScopeNS {
+		ns = ""
+	}
+	refs := git.DeclaredRefs(path, []byte(yaml))
+	if len(refs) != 1 || refs[0].Namespace != ns || refs[0].Name != name || !slices.Contains(draft.Resource(resource).Kinds(), refs[0].Kind) {
+		return model.DraftView{}, fmt.Errorf("%w: the manifest must declare exactly %s/%s", model.ErrInvalid, namespace, name)
+	}
+	current, err := read.FileOnBranch(c.baseBranch, path)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	if netgen.SameDocument(current, []byte(yaml)) {
+		return model.DraftView{}, fmt.Errorf("%w: %s/%s already matches git", model.ErrInvalid, namespace, name)
+	}
+	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
+		Kind:       draft.KindEdit,
+		Resource:   draft.Resource(resource),
+		Namespace:  namespace,
+		Name:       name,
+		SourceFile: path,
+		Manifest:   yaml,
+	}); err != nil {
+		return model.DraftView{}, err
+	}
+	return c.Get(id, proj)
 }

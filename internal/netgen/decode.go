@@ -70,11 +70,11 @@ func Decode(content []byte) (any, error) {
 	default:
 		return nil, fmt.Errorf("%s has no form", head.Kind)
 	}
-	if err != nil {
-		return nil, err
-	}
-	if !SameDocument(content, rendered) {
-		return nil, fmt.Errorf("the manifest carries settings the form cannot edit; change it in git")
+	if err != nil || !SameDocument(content, rendered) {
+		// A renderer refusal is the same finding as a mismatch: the manifest
+		// holds something the form has no field for (an untagged localnet, a
+		// label selector, extra labels).
+		return nil, fmt.Errorf("the manifest carries settings the form has no field for")
 	}
 	return spec, nil
 }

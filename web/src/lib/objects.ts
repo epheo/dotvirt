@@ -12,6 +12,7 @@ import {
 	type Network,
 	type NetworkCreate,
 	type NetworkPolicyCreate,
+	type ObjectSpec,
 	type Policy,
 	type Uplink,
 	type UplinkCreate,
@@ -106,23 +107,27 @@ export const canEditNetwork = (n: Network) => !!n.sourceFile && n.scope === 'sha
 export const canDeleteNetwork = (n: Network) => !!n.sourceFile && n.kind !== 'default';
 export const canEditPolicy = (p: Policy) => !!p.sourceFile;
 
-/** Read the object back from git and open its form with those values. */
+/**
+ * Read the object back from git and open its form with those values. A manifest
+ * the form has no field for (the server says why, or the form's own row model
+ * is narrower) opens as the manifest itself.
+ */
 export async function openEdit(ref: ObjectRef) {
-	let spec: unknown;
+	let read: ObjectSpec;
 	try {
-		({ spec } = await api.objectSpec(ref.resource, ref.namespace, ref.name));
+		read = await api.objectSpec(ref.resource, ref.namespace, ref.name);
 	} catch (e) {
 		ui.showToast(friendlyError(e), { kind: 'error' });
 		return;
 	}
-	const modal = modalFor(ref.resource, spec);
-	if (!modal) {
-		ui.showToast(`${ref.name} has settings this form cannot edit; change its manifest in git.`, {
-			kind: 'error',
-		});
-		return;
-	}
-	ui.modal = modal;
+	const modal = read.spec !== undefined ? modalFor(ref.resource, read.spec) : null;
+	ui.modal = modal ?? {
+		kind: 'editManifest',
+		...ref,
+		sourceFile: read.sourceFile,
+		yaml: read.manifest,
+		reason: read.reason ?? 'the form holds one selector and one port per rule',
+	};
 }
 
 export function openDelete(ref: ObjectRef, sourceFile: string) {

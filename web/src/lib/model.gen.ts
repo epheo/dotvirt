@@ -137,16 +137,26 @@ export interface ObjectRef {
   name: string;
 }
 /**
- * ObjectSpec is a git-declared object read back as the form spec that created
- * it, for editing: GET /api/objects/{resource}/{namespace}/{name}. Spec is the
- * same JSON the matching create route accepts.
+ * ObjectSpec is a git-declared object read back for editing: GET
+ * /api/objects/{resource}/{namespace}/{name}. Spec is the same JSON the
+ * matching create route accepts, when the form can express the manifest; else
+ * Reason says why not and the manifest itself is what gets edited.
  */
 export interface ObjectSpec {
   resource: string;
   namespace: string; // "cluster" for a cluster-scoped object
   name: string;
   sourceFile: string;
-  spec: unknown;
+  manifest: string;
+  spec?: unknown;
+  reason?: string;
+}
+/**
+ * UpdateManifestRequest replaces a declared object's manifest verbatim - the
+ * edit for what no form expresses: PUT /api/objects/{resource}/{namespace}/{name}.
+ */
+export interface UpdateManifestRequest {
+  yaml: string;
 }
 /**
  * DraftItem is one pending change rendered for the UI.

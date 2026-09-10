@@ -37,6 +37,16 @@ type AppModal =
 	| { kind: 'upload' }
 	| { kind: 'deployTemplate'; library?: string; template?: string } // Deploy from Template (Catalog / New ▾)
 	| { kind: 'editTemplate'; template: Template } // edit a library item's manifest (Catalog)
+	// Edit a declared object's manifest verbatim, when its form has no field for it.
+	| {
+			kind: 'editManifest';
+			resource: string;
+			namespace: string;
+			name: string;
+			sourceFile: string;
+			yaml: string;
+			reason?: string;
+	  }
 	| { kind: 'staged'; vm: VM }; // the per-VM staged-changes modal (from a Staged badge)
 
 // The host-kind registry actions the VM detail page fulfils with a modal or

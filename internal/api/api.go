@@ -63,6 +63,8 @@ type Draft interface {
 	StageDelete(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) (model.DraftView, error)
 	// ObjectSpec reads a declared object back as the spec its create form accepts.
 	ObjectSpec(proj project.ProjectInfo, resource, namespace, name string) (model.ObjectSpec, error)
+	// StageUpdateManifest replaces a declared object's manifest verbatim.
+	StageUpdateManifest(id auth.Identity, proj project.ProjectInfo, resource, namespace, name, yaml string) (model.DraftView, error)
 	// DeclaredFiles maps every object proj's base branch declares to its file.
 	DeclaredFiles(proj project.ProjectInfo) (map[model.ObjectRef]string, error)
 	Unstage(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) error
@@ -293,6 +295,7 @@ func (s *Server) Handler() http.Handler {
 	// address the object by its draft identity (see handlers_objects.go).
 	mux.HandleFunc("GET /api/objects/{resource}/{namespace}/{name}", s.handleObjectSpec)
 	mux.HandleFunc("DELETE /api/objects/{resource}/{namespace}/{name}", s.handleObjectDelete)
+	mux.HandleFunc("PUT /api/objects/{resource}/{namespace}/{name}", s.handleObjectUpdateManifest)
 	// Adoption for the rest of the inventory: one object by its draft identity,
 	// or every cluster-scoped object the platform repo does not yet describe -
 	// the namespace adoption's capture and staging, scoped differently.

@@ -223,6 +223,41 @@ func TestAdoptObjectCreateOrEdit(t *testing.T) {
 	}
 }
 
+// A manifest the form has no field for reads back with the raw manifest and a
+// reason instead of a spec, and edits verbatim - as long as the replacement
+// still declares the same object.
+func TestObjectSpecWithoutFormAndVerbatimEdit(t *testing.T) {
+	flat := "apiVersion: k8s.ovn.org/v1\nkind: ClusterUserDefinedNetwork\nmetadata:\n  name: dc-vlan\nspec:\n  namespaceSelector:\n    matchLabels:\n      dc-vlan: \"true\"\n  network:\n    localnet:\n      ipam:\n        mode: Disabled\n      physicalNetworkName: dc-vlan\n      role: Secondary\n    topology: Localnet\n"
+	bare := seedBareFiles(t, map[string][]byte{"networks/dc-vlan.yaml": []byte(flat)})
+	c := newTestCoordinator(t)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "platform", Repo: bare}
+
+	got, err := c.ObjectSpec(proj, string(draft.ResourceNetwork), ClusterScopeNS, "dc-vlan")
+	if err != nil {
+		t.Fatalf("ObjectSpec: %v", err)
+	}
+	if got.Spec != nil || got.Reason == "" || got.Manifest != flat {
+		t.Errorf("want manifest + reason and no spec, got %+v", got)
+	}
+
+	edited := strings.Replace(flat, "dc-vlan: \"true\"", "dc-vlan: \"yes\"", 1)
+	view, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), ClusterScopeNS, "dc-vlan", edited)
+	if err != nil {
+		t.Fatalf("StageUpdateManifest: %v", err)
+	}
+	if it := view.Items[0]; it.Kind != string(draft.KindEdit) || !strings.Contains(it.YAML, "yes") || it.BaseYAML != flat {
+		t.Errorf("verbatim edit item = %+v", it)
+	}
+	renamed := strings.Replace(flat, "name: dc-vlan", "name: other", 1)
+	if _, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), ClusterScopeNS, "dc-vlan", renamed); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("a manifest declaring another object must be refused, got %v", err)
+	}
+	if _, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), ClusterScopeNS, "dc-vlan", flat); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("an unchanged manifest must be refused, got %v", err)
+	}
+}
+
 func mustRead(t *testing.T, c *Coordinator, proj project.ProjectInfo) *git.Repo {
 	t.Helper()
 	read, err := c.read(proj)
