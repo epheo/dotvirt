@@ -19,6 +19,7 @@ var annotationsToStrip = []string{
 	"kubemacpool.io/transaction-timestamp",
 	"argocd.argoproj.io/tracking-id",
 	"restore.kubevirt.io/lastRestoreUID", // restore/clone bookkeeping; churns on every restore
+	"nmstate.io/webhook-mutating-timestamp", // stamped by nmstate's webhook on every NNCP update
 }
 
 // ExportManifest serializes a live VM into a clean, deterministic YAML manifest:
