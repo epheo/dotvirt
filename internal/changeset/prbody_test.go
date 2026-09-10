@@ -47,3 +47,18 @@ func TestPRBodyNoRestartNoFooterNote(t *testing.T) {
 		t.Errorf("restart note rendered without any restart-flagged change:\n%s", body)
 	}
 }
+
+func TestPRBodyAcceptedDefaultIsNotAppendedTwice(t *testing.T) {
+	view := model.DraftView{Items: []model.DraftItem{
+		{Kind: "edit", Namespace: "a", Name: "b", Changes: []model.Change{
+			{Field: "CPU", Action: "change", From: "2 vCPU", To: "4 vCPU"},
+		}},
+	}}
+	edited := "Bump for the launch.\n\n" + prBody(view, "", "u")
+	if got := prBody(view, edited, "u"); got != edited {
+		t.Errorf("edited default body not kept verbatim:\n%s", got)
+	}
+	if n := strings.Count(prBody(view, edited, "u"), "## Changes"); n != 1 {
+		t.Errorf("changes block rendered %d times, want 1", n)
+	}
+}

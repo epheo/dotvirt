@@ -185,6 +185,12 @@ export interface DraftView {
   count: number /* int */;
   items: DraftItem[];
   warning?: string;
+  /**
+   * What an untitled, unannotated propose pushes, so the form can show it and
+   * let the user accept or edit it instead of guessing.
+   */
+  defaultTitle?: string;
+  defaultBody?: string;
 }
 /**
  * ProposeResult is returned after proposing the draft as a PR.

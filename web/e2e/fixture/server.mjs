@@ -121,6 +121,33 @@ function draftFor(project) {
 		...fixed,
 		count: items.length,
 		items,
+		...proposeDefaults(items),
+	};
+}
+
+// The backend's untitled-propose defaults, shown in the form as suggestions.
+// A JS twin of changeset.defaultTitle / prBody, close enough for the UI.
+function proposeDefaults(items) {
+	if (!items.length) return {};
+	const verbs = { edit: 'Update', create: 'Create', delete: 'Delete' };
+	const kinds = new Set(items.map((it) => it.kind));
+	const names = items.map((it) => it.name).join(', ');
+	const defaultTitle =
+		kinds.size === 1 ? `${verbs[items[0].kind]} ${names}` : `${items.length} changes: ${names}`;
+	const lines = items.flatMap((it) => [
+		'',
+		`**${it.kind} ${it.namespace}/${it.name}**`,
+		...(it.changes ?? []).map((c) =>
+			c.action === 'add'
+				? `- ${c.field}: + ${c.to}`
+				: c.action === 'remove'
+					? `- ${c.field}: - ${c.from}`
+					: `- ${c.field}: ${c.from ?? ''} -> ${c.to}`,
+		),
+	]);
+	return {
+		defaultTitle,
+		defaultBody: ['## Changes', ...lines, '', '---', 'Proposed from dotvirt by admin.'].join('\n'),
 	};
 }
 
@@ -228,7 +255,10 @@ async function handleAPI(req, res, url) {
 	if (path === '/api/draft/propose' && req.method === 'POST') {
 		const project = url.searchParams.get('project');
 		const body = await readBody(req);
-		if (!body?.title) return sendText(res, 400, 'title is required');
+		// A blank title is not an error: the backend fills the default. The error
+		// path needs a deterministic trigger, so a literal sentinel title fails.
+		if (body?.title === '!fail') return sendText(res, 400, 'propose refused: fixture failure hook');
+		if (!draftFor(project).count) return sendText(res, 400, 'nothing staged');
 		state.staged.delete(project);
 		return sendJSON(res, 200, {
 			branch: `dotvirt/proposed/admin/${project}`,

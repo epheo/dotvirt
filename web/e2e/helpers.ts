@@ -58,7 +58,7 @@ export async function proposeAndMerge(page: Page, project: string, title: string
 	await page.getByRole('link', { name: /Propose \d+ change/ }).click();
 	await expect(page).toHaveURL(/\/changes/);
 	await page.locator(`main [data-project="${project}"]`).first().click();
-	await page.getByPlaceholder('Pull request title').fill(title);
+	await page.getByLabel('Pull request title').fill(title);
 	const [resp] = await Promise.all([
 		page.waitForResponse(
 			(r) => r.url().includes('/api/draft/propose') && r.request().method() === 'POST',

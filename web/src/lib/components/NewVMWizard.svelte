@@ -345,7 +345,7 @@
 			{#each extraDisks as disk, i (i)}
 				<div class="mb-1 flex gap-2">
 					<TextInput bind:value={disk.name} placeholder="name" class="min-w-0 flex-1" />
-					<TextInput bind:value={disk.size} placeholder="10Gi" class="w-20!" />
+					<TextInput bind:value={disk.size} suggest="10Gi" class="w-20!" />
 					<StorageClassSelect
 						options={options?.storageClasses ?? []}
 						bind:value={disk.storageClass}

@@ -292,6 +292,9 @@ func TestDraftWarningDerivedNotStored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
+	if view.DefaultTitle != "Create copy" || !strings.Contains(view.DefaultBody, "## Changes") {
+		t.Fatalf("view must carry the propose defaults, got title %q body %q", view.DefaultTitle, view.DefaultBody)
+	}
 	if strings.Contains(view.Warning, "alpha/copy") {
 		t.Errorf("adopting copy must remove it from the warning, got %q", view.Warning)
 	}

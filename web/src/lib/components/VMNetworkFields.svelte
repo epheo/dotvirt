@@ -32,7 +32,7 @@
 		label="Subnet (CIDR — required for a primary network)"
 		error={subnet && !validCIDR(subnet.trim()) ? CIDR_HINT : ''}
 	>
-		<TextInput bind:value={subnet} placeholder="10.40.0.0/16" mono />
+		<TextInput bind:value={subnet} suggest="10.40.0.0/16" mono />
 	</FormField>
 	<p class="text-[11px] text-ink-faint">
 		A flat layer-2 network that follows VMs across nodes (keeps their IP on migration).

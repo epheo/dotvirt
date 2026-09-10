@@ -50,6 +50,7 @@
 	import Note from '$lib/components/Note.svelte';
 	import RepoBanner from '$lib/components/RepoBanner.svelte';
 	import StatusPill from '$lib/components/StatusPill.svelte';
+	import TextArea from '$lib/components/TextArea.svelte';
 	import TextInput from '$lib/components/TextInput.svelte';
 
 	// The Changes section's workspace: everything the GitOps write model has in
@@ -286,7 +287,7 @@
 		clearOps();
 		await proposeOp.run(async () => {
 			const r = await api.propose(project, title, message);
-			results[project] = { ...r, title: title || undefined };
+			results[project] = { ...r, title: title || laneOf(project)?.defaultTitle };
 			title = '';
 			message = '';
 		});
@@ -672,11 +673,17 @@
 						<span class="ml-auto text-[11px] text-ink-faint">
 							Opens one pull request for the {lane?.count ?? 0} staged change{(lane?.count ?? 0) > 1
 								? 's'
-								: ''} in {project}. The summary and impact become the PR description.
+								: ''} in {project}. Blank fields use the text shown; Tab takes it to edit.
 						</span>
 					</div>
 					<div class="flex items-start gap-2">
-						<TextInput bind:value={title} placeholder="Pull request title" class="flex-1" />
+						<TextInput
+							bind:value={title}
+							suggest={lane?.defaultTitle}
+							placeholder="Pull request title"
+							aria-label="Pull request title"
+							class="flex-1"
+						/>
 						<button
 							onclick={() => propose(project)}
 							disabled={proposeOp.busy}
@@ -685,11 +692,13 @@
 							{proposeOp.busy ? 'Proposing…' : 'Propose pull request'}
 						</button>
 					</div>
-					<textarea
+					<TextArea
 						bind:value={message}
+						suggest={lane?.defaultBody}
 						placeholder="Description (optional; the change summary is appended)"
-						rows="2"
-						class="mt-2 w-full rounded border border-line-strong px-2 py-1.5 text-sm"></textarea>
+						aria-label="Pull request description"
+						class="mt-2"
+					/>
 				</div>
 			{:else if selected?.kind === 'proposal'}
 				{@const p = selected.proposal}

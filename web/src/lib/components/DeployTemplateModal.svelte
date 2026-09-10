@@ -7,6 +7,7 @@
 	import { validName } from '$lib/validate';
 	import FormField from './FormField.svelte';
 	import SelectInput from './SelectInput.svelte';
+	import TextArea from './TextArea.svelte';
 	import TextInput from './TextInput.svelte';
 	import Wizard from './Wizard.svelte';
 
@@ -221,16 +222,19 @@
 						{#if p.required && !p.value && !p.generate}<span class="text-danger">*</span>{/if}
 					</span>
 					{#if long(p.name)}
-						<textarea
+						<TextArea
 							bind:value={params[p.name]}
-							rows="3"
-							placeholder={p.value || (p.generate ? 'generated on deploy' : '')}
-							class="w-full rounded border border-line px-2 py-1.5 font-mono text-xs"></textarea>
+							rows={3}
+							suggest={p.value || undefined}
+							placeholder={p.generate ? 'generated on deploy' : ''}
+							mono
+						/>
 					{:else}
 						<TextInput
 							type={secret(p.name) ? 'password' : 'text'}
 							bind:value={params[p.name]}
-							placeholder={p.value || (p.generate ? 'generated on deploy' : '')}
+							suggest={p.value || undefined}
+							placeholder={p.generate ? 'generated on deploy' : ''}
 						/>
 					{/if}
 					{#if p.description}<p class="mt-1 text-xs text-ink-faint">{p.description}</p>{/if}

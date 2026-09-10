@@ -197,7 +197,7 @@
 			label="Subnet (optional CIDR; blank = no IPAM)"
 			error={subnet && !subnetOK ? CIDR_HINT : ''}
 		>
-			<TextInput bind:value={subnet} placeholder="10.20.0.0/24" mono />
+			<TextInput bind:value={subnet} suggest="10.20.0.0/24" mono />
 		</FormField>
 	{/if}
 

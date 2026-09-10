@@ -103,7 +103,12 @@
 			{/if}
 		</FormField>
 		<FormField label="OVS bridge (optional)">
-			<TextInput bind:value={bridge} placeholder={name ? `br-${name}` : 'br-physnet'} mono />
+			<TextInput
+				bind:value={bridge}
+				suggest={name ? `br-${name}` : undefined}
+				placeholder="br-physnet"
+				mono
+			/>
 		</FormField>
 	</div>
 	<Note tone="warn">
