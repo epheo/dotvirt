@@ -75,6 +75,8 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 		}
 		view.Items = append(view.Items, item)
 	}
+	view.DefaultTitle = defaultTitle(view)
+	view.DefaultBody = prBody(view, "", id.Username)
 	return view, nil
 }
 

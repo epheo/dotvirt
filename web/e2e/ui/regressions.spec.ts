@@ -195,7 +195,7 @@ test('a drafts refresh keeps the half-typed PR title', async ({ page }) => {
 	await page.getByRole('link', { name: /Propose \d+ change/ }).click();
 
 	const main = page.locator('main');
-	const title = main.getByPlaceholder('Pull request title');
+	const title = main.getByLabel('Pull request title');
 	await title.fill('web-1: raise memory to 8Gi');
 	// The dock's Refresh re-pulls every draft. The propose form was keyed on the
 	// selection object, rebuilt by that pull, and emptied itself mid-typing.

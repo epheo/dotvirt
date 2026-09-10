@@ -135,7 +135,8 @@
 					<TextInput
 						bind:value={row.value}
 						size="sm"
-						placeholder={row.dest === 'cidr' ? '0.0.0.0/0' : 'api.example.com'}
+						suggest={row.dest === 'cidr' ? '0.0.0.0/0' : undefined}
+						placeholder="api.example.com"
 						class="min-w-0 flex-1"
 					/>
 					<button

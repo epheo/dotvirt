@@ -7,18 +7,27 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 )
 
+// changesHeading opens the generated part of a PR body. A message that already
+// carries it started from the rendered default (DraftView.DefaultBody accepted
+// in the form), so it is the whole body and the summary must not be appended
+// a second time.
+const changesHeading = "## Changes\n"
+
 // prBody renders the PR description the forge reviewer reads: the user's own
 // message first, then the draft's semantic changes with their restart plane.
 // The review happens in the forge, so dotvirt's analysis has to travel with
 // the PR - a reviewer must not need the YAML diff to see what a change does.
 func prBody(view model.DraftView, message, username string) string {
+	if strings.Contains(message, changesHeading) {
+		return message
+	}
 	var b strings.Builder
 	if message != "" {
 		b.WriteString(message)
 		b.WriteString("\n\n")
 	}
 	if len(view.Items) > 0 {
-		b.WriteString("## Changes\n")
+		b.WriteString(changesHeading)
 		restart := false
 		for _, item := range view.Items {
 			name := item.Name

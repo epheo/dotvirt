@@ -173,6 +173,10 @@ type DraftView struct {
 	Count   int         `json:"count"`
 	Items   []DraftItem `json:"items"`
 	Warning string      `json:"warning,omitempty"`
+	// What an untitled, unannotated propose pushes, so the form can show it and
+	// let the user accept or edit it instead of guessing.
+	DefaultTitle string `json:"defaultTitle,omitempty"`
+	DefaultBody  string `json:"defaultBody,omitempty"`
 }
 
 // ProposeResult is returned after proposing the draft as a PR.
