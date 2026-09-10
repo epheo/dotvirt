@@ -391,6 +391,13 @@ export const api = {
 	adoptObject: (resource: string, namespace: string, name: string) =>
 		post<DraftView>(`/api/objects/${enc(resource)}/${enc(namespace)}/${enc(name)}/adopt`, {}),
 	adoptPlatform: () => post<DraftView>('/api/platform/adopt', {}),
+	// The VM page's history and restore, for every other declared object.
+	objectHistory: (resource: string, namespace: string, name: string) =>
+		get<gen.Commit[]>(`/api/objects/${enc(resource)}/${enc(namespace)}/${enc(name)}/history`),
+	restoreObjectVersion: (resource: string, namespace: string, name: string, hash: string) =>
+		post<DraftView>(`/api/objects/${enc(resource)}/${enc(namespace)}/${enc(name)}/restore`, {
+			hash,
+		}),
 	// project: cluster-scoped entries resolve by project.
 	unstage: (namespace: string, name: string, resource?: string, project?: string) =>
 		del(`/api/draft/${enc(namespace)}/${enc(name)}${qs({ resource, project })}`),

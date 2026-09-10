@@ -76,7 +76,12 @@
 		onstaged={staged}
 	/>
 {:else if m?.kind === 'uplink'}
-	<AddUplinkModal adapters={inventory.physicalAdapters} onclose={close} onstaged={staged} />
+	<AddUplinkModal
+		adapters={inventory.physicalAdapters}
+		initial={m.initial}
+		onclose={close}
+		onstaged={staged}
+	/>
 {:else if m?.kind === 'namespace'}
 	<NewNamespaceModal
 		projects={inventory.repoProjects}

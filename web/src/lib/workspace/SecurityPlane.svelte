@@ -3,6 +3,7 @@
 		ChevronDown,
 		ChevronRight,
 		GitPullRequest,
+		History,
 		Pencil,
 		Plus,
 		Route,
@@ -10,7 +11,7 @@
 	} from 'lucide-svelte';
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
-	import type { Policy } from '$lib/api';
+	import { api, type Policy } from '$lib/api';
 	import {
 		canAdoptPolicy,
 		canEditPolicy,
@@ -21,6 +22,7 @@
 	} from '$lib/objects';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
+	import FileHistory from '$lib/components/FileHistory.svelte';
 	import PolicyRuleTable from '$lib/components/PolicyRuleTable.svelte';
 	import SelectInput from '$lib/components/SelectInput.svelte';
 	import SyncBadge from '$lib/components/SyncBadge.svelte';
@@ -94,6 +96,10 @@
 
 	let expanded = $state<Record<string, boolean>>({});
 	const keyOf = (p: Policy) => `${p.backing}:${p.namespace ?? ''}:${p.name}`;
+	// The project whose repo declares a policy: the platform one for cluster-tier rows.
+	const projectOf = (p: Policy) => (p.namespace ? inventory.projectOf(p.namespace) : 'platform');
+	// History opens on demand: one read per row the user asks about.
+	let history = $state<Record<string, boolean>>({});
 
 	// Open by default: the trace tool is the view's centerpiece; the toggle
 	// only reclaims space.
@@ -219,6 +225,21 @@
 												><Pencil size={12} /> Edit</button
 											>
 										{/if}
+										{#if p.sync === 'OutOfSync'}
+											<button
+												type="button"
+												onclick={() => openAdopt(policyRef(p), true)}
+												class="inline-flex items-center gap-1 text-accent hover:underline"
+												><GitPullRequest size={12} /> Adopt live changes</button
+											>
+										{/if}
+										<button
+											type="button"
+											onclick={() => (history[keyOf(p)] = !history[keyOf(p)])}
+											class="inline-flex items-center gap-1 text-accent hover:underline"
+											><History size={12} />
+											{history[keyOf(p)] ? 'Hide history' : 'History'}</button
+										>
 										<button
 											type="button"
 											onclick={() => openDelete(policyRef(p), p.sourceFile!)}
@@ -237,6 +258,19 @@
 										<span class="text-ink-faint">Not declared in git: nothing to stage here.</span>
 									{/if}
 								</div>
+								{#if p.sourceFile && history[keyOf(p)]}
+									{@const ref = policyRef(p)}
+									<div class="my-2">
+										<FileHistory
+											project={projectOf(p)}
+											name={p.name}
+											load={() => api.objectHistory(ref.resource, ref.namespace, ref.name)}
+											restore={(hash) =>
+												api.restoreObjectVersion(ref.resource, ref.namespace, ref.name, hash)}
+											mine={(it) => it.resource === ref.resource && it.name === ref.name}
+										/>
+									</div>
+								{/if}
 								{#if !p.rules?.length}
 									<p class="pt-2 text-xs text-ink-faint">
 										No rules{p.kind === 'dfw'

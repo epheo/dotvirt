@@ -16,7 +16,7 @@ import (
 // object-level undo. Unlike Revert, which turns a whole merged PR around, this
 // touches one file and goes through the caller's draft like any edit, so the
 // restore is reviewed and proposed before anything reaches the cluster.
-func (c *Coordinator) RestoreVersion(id auth.Identity, proj project.ProjectInfo, namespace, name, hash string) (model.DraftView, error) {
+func (c *Coordinator) RestoreVersion(id auth.Identity, proj project.ProjectInfo, resource, namespace, name, hash string) (model.DraftView, error) {
 	if err := requireRepo(proj); err != nil {
 		return model.DraftView{}, err
 	}
@@ -24,21 +24,18 @@ func (c *Coordinator) RestoreVersion(id auth.Identity, proj project.ProjectInfo,
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	vm, found, err := read.FindVMOnBranch(c.baseBranch, namespace, name)
+	path, err := c.locate(read, draft.Resource(resource), namespace, name)
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if !found {
-		return model.DraftView{}, fmt.Errorf("%w: %s/%s is not in git", model.ErrNotFound, namespace, name)
-	}
-	restored, err := read.FileAt(hash, vm.SourceFile)
+	restored, err := read.FileAt(hash, path)
 	if errors.Is(err, git.ErrNoFile) {
-		return model.DraftView{}, fmt.Errorf("%w: %s did not exist at %s", model.ErrNotFound, vm.SourceFile, shortCommit(hash))
+		return model.DraftView{}, fmt.Errorf("%w: %s did not exist at %s", model.ErrNotFound, path, shortCommit(hash))
 	}
 	if err != nil {
 		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrNotFound, err)
 	}
-	current, ok, err := read.LookupOnBranch(c.baseBranch, vm.SourceFile)
+	current, ok, err := read.LookupOnBranch(c.baseBranch, path)
 	if err != nil {
 		return model.DraftView{}, err
 	}
@@ -47,9 +44,10 @@ func (c *Coordinator) RestoreVersion(id auth.Identity, proj project.ProjectInfo,
 	}
 	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
 		Kind:        draft.KindEdit,
+		Resource:    draft.Resource(resource),
 		Namespace:   namespace,
 		Name:        name,
-		SourceFile:  vm.SourceFile,
+		SourceFile:  path,
 		Manifest:    string(restored),
 		FromVersion: shortCommit(hash),
 	}); err != nil {

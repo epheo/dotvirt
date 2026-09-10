@@ -7,6 +7,7 @@ import type {
 	NetworkCreate,
 	NetworkPolicyCreate,
 	Template,
+	UplinkCreate,
 	VM,
 } from '$lib/api';
 import { reviewURL, type ReviewTarget } from '$lib/review';
@@ -21,7 +22,7 @@ type AppModal =
 	// The network-family forms take an optional initial spec: the object read
 	// back from git, so the create form doubles as the edit form.
 	| { kind: 'newNetwork'; initial?: NetworkCreate }
-	| { kind: 'uplink' }
+	| { kind: 'uplink'; initial?: UplinkCreate }
 	| { kind: 'namespace'; project: string | null }
 	| { kind: 'newProject'; adopt?: string } // adopt = existing namespace to bring in as a project
 	| { kind: 'adoptProject'; project: string; namespaces: string[]; recover?: boolean }

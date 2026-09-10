@@ -290,19 +290,28 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	hash, ok := restoreHash(w, r)
+	if !ok {
+		return
+	}
+	result, err := s.draft.RestoreVersion(sc.id, sc.proj, "", ns, name, hash)
+	respond(w, result, err)
+}
+
+// restoreHash reads a restore body's commit hash; ok=false means the response is written.
+func restoreHash(w http.ResponseWriter, r *http.Request) (string, bool) {
 	var req struct {
 		Hash string `json:"hash"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
-		return
+		return "", false
 	}
 	if !commitHash.MatchString(req.Hash) {
 		http.Error(w, "commit hash must be the full 40-character hash", http.StatusBadRequest)
-		return
+		return "", false
 	}
-	result, err := s.draft.RestoreVersion(sc.id, sc.proj, ns, name, req.Hash)
-	respond(w, result, err)
+	return req.Hash, true
 }
 
 // handleVMHistory lists the merged changes to one VM's manifest - the VM page's
@@ -312,7 +321,7 @@ func (s *Server) handleVMHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	commits, err := s.draft.VMHistory(sc.proj, ns, name, 10)
+	commits, err := s.draft.ObjectHistory(sc.proj, "", ns, name, 10)
 	respond(w, commits, err)
 }
 

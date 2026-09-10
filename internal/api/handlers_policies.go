@@ -64,15 +64,16 @@ func scopePolicies(all []model.Policy, visible map[string]bool, canCluster func(
 // backingGroup maps every managed object's Backing (also its kind) to its API
 // group - the one vocabulary the per-object drift lookups key on.
 var backingGroup = map[string]string{
-	"UserDefinedNetwork":            "k8s.ovn.org",
-	"ClusterUserDefinedNetwork":     "k8s.ovn.org",
-	"NetworkAttachmentDefinition":   "k8s.cni.cncf.io",
-	"NetworkPolicy":                 "networking.k8s.io",
-	"AdminNetworkPolicy":            "policy.networking.k8s.io",
-	"BaselineAdminNetworkPolicy":    "policy.networking.k8s.io",
-	"EgressFirewall":                "k8s.ovn.org",
-	"EgressIP":                      "k8s.ovn.org",
-	"AdminPolicyBasedExternalRoute": "k8s.ovn.org",
+	"UserDefinedNetwork":             "k8s.ovn.org",
+	"ClusterUserDefinedNetwork":      "k8s.ovn.org",
+	"NetworkAttachmentDefinition":    "k8s.cni.cncf.io",
+	"NetworkPolicy":                  "networking.k8s.io",
+	"AdminNetworkPolicy":             "policy.networking.k8s.io",
+	"BaselineAdminNetworkPolicy":     "policy.networking.k8s.io",
+	"EgressFirewall":                 "k8s.ovn.org",
+	"EgressIP":                       "k8s.ovn.org",
+	"AdminPolicyBasedExternalRoute":  "k8s.ovn.org",
+	"NodeNetworkConfigurationPolicy": "nmstate.io",
 }
 
 // enrichPolicyDrift attaches each policy's own ArgoCD sync/health from the shared

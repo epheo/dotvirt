@@ -61,21 +61,27 @@ func Decode(content []byte) (any, error) {
 			_, rendered, err = ExternalRouteManifest(s)
 		}
 		spec = s
+	case "NodeNetworkConfigurationPolicy":
+		var s UplinkSpec
+		if s, err = decodeUplink(content); err == nil {
+			_, rendered, err = UplinkManifest(s)
+		}
+		spec = s
 	default:
 		return nil, fmt.Errorf("%s has no form", head.Kind)
 	}
 	if err != nil {
 		return nil, err
 	}
-	if !sameDocument(content, rendered) {
+	if !SameDocument(content, rendered) {
 		return nil, fmt.Errorf("the manifest carries settings the form cannot edit; change it in git")
 	}
 	return spec, nil
 }
 
-// sameDocument compares two manifests as data, so key order and quoting do not
+// SameDocument compares two manifests as data, so key order and quoting do not
 // count and every field does.
-func sameDocument(a, b []byte) bool {
+func SameDocument(a, b []byte) bool {
 	var da, db any
 	if yaml.Unmarshal(a, &da) != nil || yaml.Unmarshal(b, &db) != nil {
 		return false
@@ -288,6 +294,50 @@ func decodeEgressIP(content []byte) (EgressIPSpec, error) {
 		return EgressIPSpec{}, err
 	}
 	return EgressIPSpec{Name: doc.Metadata.Name, EgressIPs: doc.Spec.EgressIPs, Namespaces: doc.Spec.NamespaceSelector.names()}, nil
+}
+
+func decodeUplink(content []byte) (UplinkSpec, error) {
+	var doc struct {
+		Spec struct {
+			NodeSelector map[string]string `json:"nodeSelector"`
+			DesiredState struct {
+				Interfaces []struct {
+					Name   string `json:"name"`
+					Bridge struct {
+						Port []struct {
+							Name string `json:"name"`
+						} `json:"port"`
+					} `json:"bridge"`
+				} `json:"interfaces"`
+				OVN struct {
+					BridgeMappings []struct {
+						Localnet string `json:"localnet"`
+						Bridge   string `json:"bridge"`
+					} `json:"bridge-mappings"`
+				} `json:"ovn"`
+			} `json:"desiredState"`
+		} `json:"spec"`
+	}
+	if err := yaml.Unmarshal(content, &doc); err != nil {
+		return UplinkSpec{}, err
+	}
+	s := UplinkSpec{NodeSelector: doc.Spec.NodeSelector}
+	if m := doc.Spec.DesiredState.OVN.BridgeMappings; len(m) > 0 {
+		s.Name, s.Bridge = m[0].Localnet, m[0].Bridge
+	}
+	if i := doc.Spec.DesiredState.Interfaces; len(i) > 0 && len(i[0].Bridge.Port) > 0 {
+		s.NIC = i[0].Bridge.Port[0].Name
+	}
+	// The renderer's defaults read back as "unset", so the form shows them as such.
+	if s.Bridge == "br-"+s.Name {
+		s.Bridge = ""
+	}
+	if len(s.NodeSelector) == 1 && s.NodeSelector["node-role.kubernetes.io/worker"] == "" {
+		if _, ok := s.NodeSelector["node-role.kubernetes.io/worker"]; ok {
+			s.NodeSelector = nil
+		}
+	}
+	return s, nil
 }
 
 func decodeExternalRoute(content []byte) (ExternalRouteSpec, error) {

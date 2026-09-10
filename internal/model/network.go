@@ -62,8 +62,18 @@ type Uplink struct {
 	Nodes     []string `json:"nodes,omitempty"`   // nodes carrying the mapping
 	NodeCount int      `json:"nodeCount"`         // len(Nodes), for the "N/M nodes" badge
 	Ports     []string `json:"ports,omitempty"`   // physical NIC(s)/bond enslaved to the bridge
-	VLANs     []int    `json:"vlans,omitempty"`   // LLDP-discovered VLAN IDs (6.5)
-	Status    string   `json:"status,omitempty"`  // NNCE rollup: Available | Progressing | Failing (6.5)
+	// Policy is the NodeNetworkConfigurationPolicy declaring this uplink - the
+	// identity edit, delete and adoption act on. Empty for the builtin uplink and
+	// when several policies fold into one uplink (no single object to act on).
+	Policy string `json:"policy,omitempty"`
+	// SourceFile is the manifest declaring that policy in the platform repo;
+	// empty when git does not declare it.
+	SourceFile string `json:"sourceFile,omitempty"`
+	// The policy's own ArgoCD drift, as segments and rules carry it.
+	Sync      SyncStatus `json:"sync,omitempty"`
+	SyncError string     `json:"syncError,omitempty"`
+	VLANs     []int      `json:"vlans,omitempty"`  // LLDP-discovered VLAN IDs (6.5)
+	Status    string     `json:"status,omitempty"` // NNCE rollup: Available | Progressing | Failing (6.5)
 }
 
 // PhysicalAdapter is one node NIC from NodeNetworkState - the host "Physical

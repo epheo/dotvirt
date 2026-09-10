@@ -76,6 +76,8 @@ type Draft interface {
 	AdoptNamespace(id auth.Identity, proj project.ProjectInfo, namespace string, objs []changeset.Adoptable) (model.DraftView, error)
 	// AdoptObjects is AdoptNamespace for any captured set, cluster-scoped included.
 	AdoptObjects(id auth.Identity, proj project.ProjectInfo, where string, objs []changeset.Adoptable) (model.DraftView, error)
+	// AdoptObject makes git match one running object: create, or edit when it drifted.
+	AdoptObject(id auth.Identity, proj project.ProjectInfo, obj changeset.Adoptable) (model.DraftView, error)
 	AdoptProject(id auth.Identity, commitProj, target project.ProjectInfo, owners []string) (model.DraftView, error)
 	ReleaseDeclared(id auth.Identity, commitProj, target project.ProjectInfo) (staged, residue []string, err error)
 	// Resync runs with dotvirt's SA (Argo operations carry no user context);
@@ -96,10 +98,12 @@ type Draft interface {
 	Manifest(proj project.ProjectInfo, namespace, name string) (path string, content []byte, err error)
 	History(proj project.ProjectInfo, limit int) ([]model.Commit, error)
 	NamespaceHistory(proj project.ProjectInfo, namespace string, limit int) ([]model.Commit, error)
-	VMHistory(proj project.ProjectInfo, namespace, name string, limit int) ([]model.Commit, error)
+	// ObjectHistory lists the merged changes to one object's manifest (a VM when
+	// resource is empty); empty when git does not declare it.
+	ObjectHistory(proj project.ProjectInfo, resource, namespace, name string, limit int) ([]model.Commit, error)
 	// RestoreVersion stages one VM's manifest as a past commit held it: the
 	// object-level undo, through the caller's draft like any edit.
-	RestoreVersion(id auth.Identity, proj project.ProjectInfo, namespace, name, hash string) (model.DraftView, error)
+	RestoreVersion(id auth.Identity, proj project.ProjectInfo, resource, namespace, name, hash string) (model.DraftView, error)
 	Commit(proj project.ProjectInfo, hash string) (model.CommitDetail, error)
 	Templates(proj project.ProjectInfo) []model.Template
 }
@@ -293,6 +297,9 @@ func (s *Server) Handler() http.Handler {
 	// or every cluster-scoped object the platform repo does not yet describe -
 	// the namespace adoption's capture and staging, scoped differently.
 	mux.HandleFunc("POST /api/objects/{resource}/{namespace}/{name}/adopt", s.handleObjectAdopt)
+	// The VM page's history and restore, for every other declared object.
+	mux.HandleFunc("GET /api/objects/{resource}/{namespace}/{name}/history", s.handleObjectHistory)
+	mux.HandleFunc("POST /api/objects/{resource}/{namespace}/{name}/restore", s.handleObjectRestore)
 	mux.HandleFunc("POST /api/platform/adopt", s.handlePlatformAdopt)
 	mux.HandleFunc("POST /api/namespaces", s.handleCreateNamespace)
 	mux.HandleFunc("POST /api/projects", s.handleCreateProject)

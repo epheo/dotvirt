@@ -226,7 +226,9 @@ func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinPro
 func (c *Coordinator) StageCreateUplink(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
 	return stageSpec(c, id, proj, rawSpec, "uplink", netgen.UplinkManifest,
 		func(s netgen.UplinkSpec) (draft.Resource, string, string) {
-			return draft.ResourceUplink, ClusterScopeNS, s.Name
+			// The identity is the NNCP's name, which the read plane and the object
+			// routes carry; the physical-network name is what it maps.
+			return draft.ResourceUplink, ClusterScopeNS, netgen.UplinkPolicyName(s.Name)
 		})
 }
 

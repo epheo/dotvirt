@@ -344,18 +344,18 @@ func TestVMHistoryNamesMergedPR(t *testing.T) {
 	c := newTestCoordinator(t)
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
-	web, err := c.VMHistory(proj, "alpha", "web", 10)
+	web, err := c.ObjectHistory(proj, "", "alpha", "web", 10)
 	if err != nil {
 		t.Fatalf("VMHistory: %v", err)
 	}
 	if len(web) != 2 || web[0].Hash != hash || web[0].Title != "Resize web" || web[0].PRNumber != 12 {
 		t.Fatalf("web history = %+v", web)
 	}
-	db, err := c.VMHistory(proj, "alpha", "db", 10)
+	db, err := c.ObjectHistory(proj, "", "alpha", "db", 10)
 	if err != nil || len(db) != 1 || db[0].Hash != hash {
 		t.Errorf("db history = %v %+v, want the one merge that added it", err, db)
 	}
-	none, err := c.VMHistory(proj, "alpha", "ghost", 10)
+	none, err := c.ObjectHistory(proj, "", "alpha", "ghost", 10)
 	if err != nil || len(none) != 0 {
 		t.Errorf("untracked VM: %v %+v", err, none)
 	}

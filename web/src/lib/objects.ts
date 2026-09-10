@@ -13,6 +13,8 @@ import {
 	type NetworkCreate,
 	type NetworkPolicyCreate,
 	type Policy,
+	type Uplink,
+	type UplinkCreate,
 } from '$lib/api';
 import { friendlyError } from '$lib/format';
 import { drafts } from '$lib/state/drafts.svelte';
@@ -49,6 +51,16 @@ export function policyRef(p: Policy): ObjectRef {
 	return { resource: policyResource[p.kind], namespace: p.namespace || CLUSTER, name: p.name };
 }
 
+// An uplink's identity is its NodeNetworkConfigurationPolicy; the builtin one
+// and an uplink folded from several policies carry none and have no actions.
+export function uplinkRef(u: Uplink): ObjectRef {
+	return { resource: 'uplink', namespace: CLUSTER, name: u.policy ?? '' };
+}
+export const canAdoptUplink = (u: Uplink) =>
+	!!u.policy && !u.sourceFile && !!inventory.caps?.uplink;
+export const canEditUplink = (u: Uplink) =>
+	!!u.policy && !!u.sourceFile && !!inventory.caps?.uplink;
+
 // Adoption is offered where git declares nothing and the caller may author the
 // tier: a project object needs its namespace in a repo-backed project, a shared
 // one the platform capability the create forms gate on.
@@ -64,15 +76,23 @@ export function canAdoptPolicy(p: Policy): boolean {
 	return p.kind === 'admin' || p.kind === 'baseline' ? inventory.canAdminFw : inventory.canEgress;
 }
 
-/** Stage the running object's manifest into Changes, as a VM adopt does. */
-export async function openAdopt(ref: ObjectRef) {
+/**
+ * Stage the running object's manifest into Changes, as a VM adopt does: a
+ * create when git has nothing, an edit when the running state drifted from it.
+ */
+export async function openAdopt(ref: ObjectRef, drifted = false) {
 	try {
 		await api.adoptObject(ref.resource, ref.namespace, ref.name);
 		await drafts.refresh();
-		ui.showToast(`${ref.name} staged into Changes - open a PR to adopt it into git.`, {
-			kind: 'success',
-			action: { label: 'Review & propose', run: () => ui.openChanges() },
-		});
+		ui.showToast(
+			drifted
+				? `Running state of ${ref.name} staged into Changes - open a PR to bring git up to date.`
+				: `${ref.name} staged into Changes - open a PR to adopt it into git.`,
+			{
+				kind: 'success',
+				action: { label: 'Review & propose', run: () => ui.openChanges() },
+			},
+		);
 	} catch (e) {
 		if (e instanceof Unauthorized) return;
 		ui.showToast(friendlyError(e), { kind: 'error' });
@@ -118,6 +138,8 @@ function modalFor(resource: string, spec: unknown): typeof ui.modal {
 	switch (resource) {
 		case 'network':
 			return { kind: 'newNetwork', initial: spec as NetworkCreate };
+		case 'uplink':
+			return { kind: 'uplink', initial: spec as UplinkCreate };
 		case 'networkpolicy': {
 			const s = spec as NetworkPolicyCreate;
 			const fits =

@@ -642,6 +642,22 @@ export interface Uplink {
   nodes?: string[]; // nodes carrying the mapping
   nodeCount: number /* int */; // len(Nodes), for the "N/M nodes" badge
   ports?: string[]; // physical NIC(s)/bond enslaved to the bridge
+  /**
+   * Policy is the NodeNetworkConfigurationPolicy declaring this uplink - the
+   * identity edit, delete and adoption act on. Empty for the builtin uplink and
+   * when several policies fold into one uplink (no single object to act on).
+   */
+  policy?: string;
+  /**
+   * SourceFile is the manifest declaring that policy in the platform repo;
+   * empty when git does not declare it.
+   */
+  sourceFile?: string;
+  /**
+   * The policy's own ArgoCD drift, as segments and rules carry it.
+   */
+  sync?: SyncStatus;
+  syncError?: string;
   vlans?: number /* int */[]; // LLDP-discovered VLAN IDs (6.5)
   status?: string; // NNCE rollup: Available | Progressing | Failing (6.5)
 }

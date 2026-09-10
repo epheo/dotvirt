@@ -2,6 +2,7 @@
 	import type { VM } from '$lib/api';
 	import { POD_NETWORK } from '$lib/lenses';
 	import { GitPullRequest, Pencil, Trash2 } from 'lucide-svelte';
+	import { api } from '$lib/api';
 	import { networkByRef, kindLabel } from '$lib/networks';
 	import {
 		canAdoptNetwork,
@@ -15,6 +16,7 @@
 	import { segmentType } from '$lib/vocab';
 	import { vmHref } from '$lib/nav';
 	import { inventory } from '$lib/state/inventory.svelte';
+	import FileHistory from '$lib/components/FileHistory.svelte';
 	import InfoCard from '$lib/components/InfoCard.svelte';
 	import PowerDot from '$lib/components/PowerDot.svelte';
 	import Row from '$lib/components/Row.svelte';
@@ -26,6 +28,14 @@
 
 	const pg = $derived(networkByRef(network, inventory.networks));
 	const st = $derived(pg ? segmentType(pg) : null);
+	// The project whose repo declares the segment: the platform one for a shared
+	// segment (the name the Changes section uses for that tier).
+	const project = $derived(
+		pg?.scope === 'shared' ? 'platform' : inventory.projectOf(pg?.namespace ?? ''),
+	);
+	// A drifted segment (its Application reports OutOfSync) can be brought back
+	// the other way: git updated to what runs, as a VM's drift adoption does.
+	const drifted = $derived(!!pg?.sourceFile && pg?.sync === 'OutOfSync');
 </script>
 
 <div class="min-h-0 flex-1 overflow-y-auto p-4">
@@ -41,8 +51,16 @@
 						class="inline-flex items-center gap-1 text-xs text-accent hover:underline"
 						><GitPullRequest size={12} /> Adopt into git</button
 					>
-				{:else if pg && (canEditNetwork(pg) || canDeleteNetwork(pg))}
+				{:else if pg && (canEditNetwork(pg) || canDeleteNetwork(pg) || drifted)}
 					<div class="flex items-center gap-3 text-xs">
+						{#if drifted}
+							<button
+								type="button"
+								onclick={() => openAdopt(networkRef(pg), true)}
+								class="inline-flex items-center gap-1 text-accent hover:underline"
+								><GitPullRequest size={12} /> Adopt live changes</button
+							>
+						{/if}
 						{#if canEditNetwork(pg)}
 							<button
 								type="button"
@@ -98,6 +116,17 @@
 				<Row label="VMs attached" value={String(vms.length)} />
 			</dl>
 		</InfoCard>
+
+		{#if pg?.sourceFile && project}
+			{@const ref = networkRef(pg)}
+			<FileHistory
+				{project}
+				name={pg.name}
+				load={() => api.objectHistory(ref.resource, ref.namespace, ref.name)}
+				restore={(hash) => api.restoreObjectVersion(ref.resource, ref.namespace, ref.name, hash)}
+				mine={(it) => it.resource === ref.resource && it.name === ref.name}
+			/>
+		{/if}
 
 		{#if vms.length}
 			<InfoCard title="Attached VMs">

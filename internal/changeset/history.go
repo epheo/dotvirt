@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
@@ -61,10 +62,10 @@ func (c *Coordinator) NamespaceHistory(proj project.ProjectInfo, namespace strin
 	return commits, nil
 }
 
-// VMHistory lists the base-branch commits that changed a VM's manifest file:
+// ObjectHistory lists the base-branch commits that changed one object's file (a VM when resource is empty):
 // what changed on this VM and when, from the VM page. A VM not in git has no
 // history, not an error - the page already says it is untracked.
-func (c *Coordinator) VMHistory(proj project.ProjectInfo, namespace, name string, limit int) ([]model.Commit, error) {
+func (c *Coordinator) ObjectHistory(proj project.ProjectInfo, resource, namespace, name string, limit int) ([]model.Commit, error) {
 	if proj.Repo == "" {
 		return []model.Commit{}, nil
 	}
@@ -72,14 +73,14 @@ func (c *Coordinator) VMHistory(proj project.ProjectInfo, namespace, name string
 	if err != nil {
 		return nil, err
 	}
-	vm, found, err := read.FindVMOnBranch(c.baseBranch, namespace, name)
+	path, err := c.locate(read, draft.Resource(resource), namespace, name)
+	if errors.Is(err, model.ErrNotFound) {
+		return []model.Commit{}, nil // not in git: no history, not an error
+	}
 	if err != nil {
 		return nil, err
 	}
-	if !found {
-		return []model.Commit{}, nil
-	}
-	commits, err := read.FileHistory(c.baseBranch, vm.SourceFile, limit)
+	commits, err := read.FileHistory(c.baseBranch, path, limit)
 	if err != nil {
 		return nil, err
 	}

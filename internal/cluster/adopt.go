@@ -210,7 +210,7 @@ func adoptPath(obj *unstructured.Unstructured) string {
 	case "BaselineAdminNetworkPolicy":
 		return "baselineadminnetworkpolicies/default.yaml"
 	case "NodeNetworkConfigurationPolicy":
-		return "uplinks/" + name + ".yaml"
+		return "uplinks/" + strings.TrimPrefix(name, "uplink-") + ".yaml"
 	}
 	if ns == "" {
 		return name + "." + strings.ToLower(obj.GetKind()) + ".yaml"

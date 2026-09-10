@@ -184,6 +184,45 @@ func TestAdoptObjectsClusterScoped(t *testing.T) {
 	}
 }
 
+// AdoptObject makes git say what runs: a create for an undeclared object, an
+// edit for a drifted one, and a refusal when git already matches.
+func TestAdoptObjectCreateOrEdit(t *testing.T) {
+	path, declared, err := netgen.NetworkPolicyManifest(netgen.NetworkPolicySpec{Name: "web", Namespace: "alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, drifted, err := netgen.NetworkPolicyManifest(netgen.NetworkPolicySpec{Name: "web", Namespace: "alpha", AppliedTo: map[string]string{"app": "web"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare := seedBareFiles(t, map[string][]byte{path: declared})
+	c := newTestCoordinator(t)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+
+	view, err := c.AdoptObject(id, proj, Adoptable{Kind: "NetworkPolicy", Namespace: "alpha", Name: "web", Path: path, Manifest: drifted})
+	if err != nil {
+		t.Fatalf("AdoptObject (drifted): %v", err)
+	}
+	if it := view.Items[0]; it.Kind != string(draft.KindEdit) || !strings.Contains(it.YAML, "app: web") || it.BaseYAML == "" {
+		t.Errorf("drift must stage an edit against the declared file, got %+v", it)
+	}
+	if _, err := c.AdoptObject(id, proj, Adoptable{Kind: "NetworkPolicy", Namespace: "alpha", Name: "web", Path: path, Manifest: declared}); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("a matching object must be refused, got %v", err)
+	}
+	view, err = c.AdoptObject(id, proj, Adoptable{Kind: "NetworkPolicy", Namespace: "alpha", Name: "api", Path: "alpha/networkpolicies/api.yaml", Manifest: []byte("kind: NetworkPolicy\nmetadata:\n  name: api\n  namespace: alpha\n")})
+	if err != nil {
+		t.Fatalf("AdoptObject (new): %v", err)
+	}
+	created := false
+	for _, it := range view.Items {
+		created = created || (it.Name == "api" && it.Kind == string(draft.KindCreate))
+	}
+	if !created {
+		t.Errorf("an undeclared object must stage a create, got %+v", view.Items)
+	}
+}
+
 func mustRead(t *testing.T, c *Coordinator, proj project.ProjectInfo) *git.Repo {
 	t.Helper()
 	read, err := c.read(proj)

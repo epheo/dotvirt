@@ -104,12 +104,36 @@ func (s *Server) handleObjectAdopt(w http.ResponseWriter, r *http.Request) {
 			picked = append(picked, o)
 		}
 	}
-	if len(picked) == 0 {
-		fail(w, fmt.Errorf("%w: %s/%s is not running, or git already describes it", model.ErrNotFound, ns, name))
+	if len(picked) != 1 {
+		fail(w, fmt.Errorf("%w: %s/%s is not running", model.ErrNotFound, ns, name))
 		return
 	}
-	result, err := s.draft.AdoptObjects(sc.id, sc.proj, ns+"/"+name, picked)
+	result, err := s.draft.AdoptObject(sc.id, sc.proj, picked[0])
 	respond(w, withUnreadable(result, ns, unreadable), err)
+}
+
+// handleObjectHistory lists the merged changes to one declared object's file.
+func (s *Server) handleObjectHistory(w http.ResponseWriter, r *http.Request) {
+	sc, resource, ns, name, ok := s.objectScope(w, r)
+	if !ok {
+		return
+	}
+	commits, err := s.draft.ObjectHistory(sc.proj, resource, ns, name, 10)
+	respond(w, commits, err)
+}
+
+// handleObjectRestore stages one declared object's file as a past commit held it.
+func (s *Server) handleObjectRestore(w http.ResponseWriter, r *http.Request) {
+	sc, resource, ns, name, ok := s.objectScope(w, r)
+	if !ok {
+		return
+	}
+	hash, ok := restoreHash(w, r)
+	if !ok {
+		return
+	}
+	result, err := s.draft.RestoreVersion(sc.id, sc.proj, resource, ns, name, hash)
+	respond(w, result, err)
 }
 
 // handlePlatformAdopt stages every cluster-scoped object the platform repo does
