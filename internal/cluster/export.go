@@ -18,7 +18,7 @@ var annotationsToStrip = []string{
 	"kubevirt.io/storage-observed-api-version",
 	"kubemacpool.io/transaction-timestamp",
 	"argocd.argoproj.io/tracking-id",
-	"restore.kubevirt.io/lastRestoreUID", // restore/clone bookkeeping; churns on every restore
+	"restore.kubevirt.io/lastRestoreUID",    // restore/clone bookkeeping; churns on every restore
 	"nmstate.io/webhook-mutating-timestamp", // stamped by nmstate's webhook on every NNCP update
 }
 
