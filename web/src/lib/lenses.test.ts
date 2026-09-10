@@ -5,6 +5,8 @@ import {
 	NO_NETWORK,
 	NO_STORAGE,
 	POD_NETWORK,
+	disksOnClass,
+	provisionedBytes,
 	vmNetworkKeys,
 	vmStorageKeys,
 } from '$lib/lenses';
@@ -120,5 +122,30 @@ describe('vmStorageKeys', () => {
 			disks: [{ name: 'x', type: 'dataVolume', storageClass: 'fast' }],
 		});
 		expect(vmStorageKeys(same)).toContain('fast');
+	});
+});
+
+describe('disksOnClass', () => {
+	const vms = [
+		vm({
+			name: 'a',
+			disks: [
+				{ name: 'root', type: 'dataVolume', size: '10Gi' },
+				{ name: 'data', type: 'dataVolume', size: '2Gi', storageClass: 'slow' },
+				{ name: 'iso', type: 'containerDisk' },
+			],
+		}),
+		vm({ name: 'b', disks: [{ name: 'root', type: 'dataVolume', size: 'huge' }] }),
+	];
+
+	it('resolves classless disks to the default class, like the tree', () => {
+		const fast = disksOnClass(vms, 'fast', 'fast');
+		expect(fast.map((d) => d.vm.name + '/' + d.disk.name)).toEqual(['a/root', 'b/root']);
+		expect(disksOnClass(vms, 'slow', 'fast').map((d) => d.disk.name)).toEqual(['data']);
+	});
+
+	it('sums readable sizes and skips the rest', () => {
+		expect(provisionedBytes(disksOnClass(vms, 'fast', 'fast'))).toBe(10 * 2 ** 30);
+		expect(provisionedBytes(disksOnClass(vms, 'slow', 'fast'))).toBe(2 * 2 ** 30);
 	});
 });

@@ -75,6 +75,23 @@ rules:
   - storage.k8s.io
   resources:
   - storageclasses
+  - csistoragecapacities
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cdi.kubevirt.io
+  resources:
+  - storageprofiles
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - snapshot.storage.k8s.io
+  resources:
+  - volumesnapshotclasses
   verbs:
   - get
   - list

@@ -194,6 +194,7 @@ async function handleAPI(req, res, url) {
 
 	if (path === '/api/inventory') return sendJSON(res, 200, s.inventory);
 	if (path === '/api/options') return sendJSON(res, 200, s.options);
+	if (path === '/api/storage/classes') return sendJSON(res, 200, s.storageClasses ?? []);
 	if (path === '/api/networks') return sendJSON(res, 200, s.networks);
 	if (path === '/api/policies') return sendJSON(res, 200, s.policies);
 	if (path === '/api/tasks') return sendJSON(res, 200, s.tasks);

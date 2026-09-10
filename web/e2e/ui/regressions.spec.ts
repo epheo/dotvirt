@@ -59,6 +59,28 @@ test('#144: classless disks group under the real default class', async ({ page }
 	await expect(page.locator('main').getByText('web-1')).toBeVisible();
 });
 
+test('storage summary shows platform facts beside the VM footprint', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await page.locator('aside').getByRole('link', { name: 'Storage', exact: true }).click();
+	const table = page.locator('main').getByRole('table');
+	// The local class: per-node free capacity summed, single-attach disks.
+	const fast = table.getByRole('row').filter({ hasText: 'fast-ssd' });
+	await expect(fast).toContainText('2.9 TiB');
+	await expect(fast).toContainText('RWO only');
+	// The shared class carries no VMs in the fixture but still lists with its facts.
+	const bulk = table.getByRole('row').filter({ hasText: 'bulk-hdd' });
+	await expect(bulk).toContainText('Supported');
+	await expect(bulk).toContainText('nfs.csi.k8s.io');
+	// The class page repeats the facts and lists every provisioned disk.
+	await fast.getByRole('link', { name: 'fast-ssd' }).click();
+	await expect(page).toHaveURL(/\/storage\/fast-ssd/);
+	const main = page.locator('main');
+	await expect(main.getByText('WaitForFirstConsumer')).toBeVisible();
+	await expect(main.getByText('Free on worker-2')).toBeVisible();
+	await expect(main.getByRole('heading', { name: 'Disks' })).toBeVisible();
+});
+
 test('#123: global search reaches segments and storage classes', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);

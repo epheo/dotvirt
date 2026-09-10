@@ -46,6 +46,49 @@ const options = {
 	storageClasses: [{ name: 'fast-ssd', default: true }, { name: 'bulk-hdd' }],
 };
 
+// The Storage section's fact sheet: one local (per-node capacity, RWO) and
+// one shared class, so the summary shows both live-migration verdicts.
+const storageClasses = [
+	{
+		name: 'bulk-hdd',
+		provisioner: 'nfs.csi.k8s.io',
+		reclaimPolicy: 'Delete',
+		bindingMode: 'Immediate',
+		expandable: true,
+		created: iso(200 * 1440),
+		snapshotClass: 'bulk-hdd-snap',
+		profile: {
+			accessModes: ['ReadWriteMany'],
+			volumeMode: 'Filesystem',
+			shared: true,
+			cloneStrategy: 'copy',
+			recognized: true,
+		},
+	},
+	{
+		name: 'fast-ssd',
+		default: true,
+		description: 'NVMe pool',
+		provisioner: 'topolvm.io',
+		reclaimPolicy: 'Delete',
+		bindingMode: 'WaitForFirstConsumer',
+		expandable: true,
+		created: iso(200 * 1440),
+		snapshotClass: 'fast-ssd',
+		profile: {
+			accessModes: ['ReadWriteOnce'],
+			volumeMode: 'Block',
+			cloneStrategy: 'snapshot',
+			recognized: true,
+		},
+		free: 3.2e12,
+		segments: [
+			{ topology: 'worker-1', free: 1.1e12 },
+			{ topology: 'worker-2', free: 2.1e12 },
+		],
+	},
+];
+
 const networks = {
 	networks: [
 		{
@@ -390,6 +433,7 @@ const base = {
 		},
 	],
 	options,
+	storageClasses,
 	networks,
 	policies,
 	nodes,
