@@ -18,6 +18,9 @@ func FuzzApplyEdit(f *testing.F) {
 	f.Add([]byte("apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: v\nspec: {}\n"),
 		"ns", "v", "1Gi", 1, "d", "1Gi", true)
 	f.Add([]byte("not: yaml: at: all ["), "ns", "v", "1Gi", 1, "", "", false)
+	// A bare CR is a line break to yaml.v3 but not to the editor's "\n" split.
+	f.Add([]byte("kind: VirtualMachine\nmetadata:\n name: vm-health\nspec:\n template:\n  spec:\n   domain:\n    devices:\n     disks:\r     -"),
+		"0", "vm-health", "0", -69, "0", "0", true)
 
 	f.Fuzz(func(t *testing.T, content []byte, ns, name, memory string, cpu int, disk, size string, on bool) {
 		edit := model.VMEdit{}
