@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"errors"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -12,8 +13,23 @@ import (
 // rewrites only the touched lines, keeping diffs reviewable and every
 // untouched byte (comments, ordering, quoting) intact.
 
-func splitLines(content []byte) []string {
-	return strings.Split(string(content), "\n")
+// newLineEditor splits content on "\n" so that a yaml.Node's Line indexes
+// lines. yaml.v3 also breaks lines on a bare CR, NEL, LS and PS; a document
+// using any of those would put every node position off by one or more lines
+// (corrupting the edit, or indexing past the slice), so it is refused. CRLF
+// is fine: the "\r" stays on the line and the count agrees.
+func newLineEditor(content []byte) (*lineEditor, error) {
+	s := string(content)
+	for i := 0; i < len(s); i++ {
+		switch {
+		case s[i] == '\r' && (i+1 == len(s) || s[i+1] != '\n'),
+			strings.HasPrefix(s[i:], "\u0085"),
+			strings.HasPrefix(s[i:], "\u2028"),
+			strings.HasPrefix(s[i:], "\u2029"):
+			return nil, errors.New("manifest uses a line break other than LF or CRLF")
+		}
+	}
+	return &lineEditor{lines: strings.Split(s, "\n")}, nil
 }
 
 // lineEditor applies in-place line edits, insertions, and deletions to a file's

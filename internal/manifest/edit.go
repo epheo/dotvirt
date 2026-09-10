@@ -31,7 +31,10 @@ func ApplyEdit(content []byte, namespace, name string, edit VMEdit) ([]byte, err
 		return nil, fmt.Errorf("VM %s/%s not found in manifest", namespace, name)
 	}
 
-	ed := &lineEditor{lines: splitLines(content)}
+	ed, err := newLineEditor(content)
+	if err != nil {
+		return nil, fmt.Errorf("edit %s/%s in git directly: %w", namespace, name, err)
+	}
 
 	if edit.Power != nil {
 		applyPower(ed, vm, *edit.Power)

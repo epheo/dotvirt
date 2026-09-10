@@ -3,6 +3,8 @@ package manifest
 import (
 	"strings"
 	"testing"
+
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -112,6 +114,28 @@ func TestApplyEditNotFound(t *testing.T) {
 	_, err := ApplyEdit([]byte(realisticVM), "wrong", "nope", VMEdit{Memory: ptr("2Gi")})
 	if err == nil {
 		t.Fatal("expected error for missing VM")
+	}
+}
+
+// yaml.v3 breaks lines on a bare CR (and NEL, LS, PS) while the editor splits
+// on "\n" only; the two counts disagree and every node position is off. The
+// editor must refuse such input rather than splice at the wrong line or index
+// past the slice (the fuzz crasher: "disks:\r     -").
+func TestApplyEditRefusesNonLFLineBreaks(t *testing.T) {
+	add := VMEdit{AddDisks: []model.DiskAdd{{Name: "data", Size: "1Gi"}}}
+	for _, sep := range []string{"\r", "\u0085", "\u2028", "\u2029"} {
+		in := strings.ReplaceAll(realisticVM, "\n", sep)
+		if _, err := ApplyEdit([]byte(in), "vm-health-gitops", "vm-health", add); err == nil {
+			t.Errorf("separator %q: expected refusal", sep)
+		}
+	}
+	crlf := strings.ReplaceAll(realisticVM, "\n", "\r\n")
+	out, err := ApplyEdit([]byte(crlf), "vm-health-gitops", "vm-health", add)
+	if err != nil {
+		t.Fatalf("CRLF must stay editable: %v", err)
+	}
+	if !strings.Contains(string(out), "- name: data") {
+		t.Fatalf("disk not added:\n%s", out)
 	}
 }
 
