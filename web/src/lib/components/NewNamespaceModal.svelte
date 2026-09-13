@@ -11,12 +11,10 @@
 		projects = [],
 		project: initialProject,
 		onclose,
-		onstaged,
 	}: {
 		projects?: string[]; // repo-backed projects the namespace can join
 		project?: string; // preselected project (e.g. from a project's context menu)
 		onclose: () => void;
-		onstaged: () => void;
 	} = $props();
 
 	let name = $state('');
@@ -65,7 +63,6 @@
 	{missing}
 	{summary}
 	onsubmit={stage}
-	{onstaged}
 	{onclose}
 >
 	<FormField label="Name" error={name && !validName(name) ? NAME_HINT : ''}>

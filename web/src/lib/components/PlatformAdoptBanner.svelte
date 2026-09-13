@@ -2,7 +2,6 @@
 	import { GitPullRequest } from 'lucide-svelte';
 	import { api, Unauthorized } from '$lib/api';
 	import { friendlyError } from '$lib/format';
-	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import Banner from './Banner.svelte';
@@ -20,15 +19,10 @@
 		busy = true;
 		try {
 			const view = await api.adoptPlatform();
-			await drafts.refresh();
-			ui.showToast(
+			ui.toastStaged(
 				[`${view.count} platform objects staged into Changes.`, view.warning]
 					.filter(Boolean)
 					.join(' '),
-				{
-					kind: 'success',
-					action: { label: 'Review & propose', run: () => ui.openChanges() },
-				},
 			);
 		} catch (e) {
 			if (!(e instanceof Unauthorized)) ui.showToast(friendlyError(e), { kind: 'error' });

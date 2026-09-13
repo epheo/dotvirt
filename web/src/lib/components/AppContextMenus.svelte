@@ -3,7 +3,6 @@
 	import type { VM } from '$lib/api';
 	import { adoptNamespaces, dispatchVMAction, type VMAction } from '$lib/actions';
 	import { repoError } from '$lib/gitops';
-	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import ActionMenu from './ActionMenu.svelte';
@@ -19,7 +18,7 @@
 		if (ui.ctx?.kind !== 'vm') return;
 		const vm = ui.ctx.vm;
 		ui.ctx = null;
-		await dispatchVMAction(a, vm, { onstaged: () => drafts.refresh() });
+		await dispatchVMAction(a, vm);
 	}
 
 	// Recover-repo gate: only a comparison-plane error says the forge lost the
@@ -43,7 +42,7 @@
 	async function bulkAdoptUntracked(namespaces: string[]) {
 		let want = new Set(untrackedVMs(namespaces).map((v) => v.namespace));
 		if (want.size === 0) want = new Set(namespaces);
-		await adoptNamespaces(want, { onstaged: () => drafts.refresh() });
+		await adoptNamespaces(want);
 	}
 </script>
 

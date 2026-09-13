@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api, drsThresholdLabel, type DRSView } from '$lib/api';
 	import { action, resource } from '$lib/resource.svelte';
+	import { ui } from '$lib/state/ui.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import Row from './Row.svelte';
 	import DRSModal from './DRSModal.svelte';
@@ -9,8 +10,6 @@
 	// committed configuration from the platform repo, live operator state from
 	// the backend's KubeDescheduler snapshot. Polls like the metrics cards - the
 	// GET is a pure snapshot read.
-	let { onstaged }: { onstaged?: () => void } = $props();
-
 	let configuring = $state(false);
 	const disableOp = action(); // a failed disable, distinct from the read's failure
 
@@ -61,14 +60,9 @@
 	function disable() {
 		return disableOp.run(async () => {
 			await api.disableDRS();
-			onstaged?.();
+			ui.toastStaged();
 			await drs.refresh();
 		});
-	}
-
-	function staged() {
-		onstaged?.();
-		drs.refresh();
 	}
 </script>
 
@@ -139,5 +133,5 @@
 </InfoCard>
 
 {#if configuring && view}
-	<DRSModal {view} onclose={() => (configuring = false)} onstaged={staged} />
+	<DRSModal {view} onclose={() => (configuring = false)} onstaged={() => drs.refresh()} />
 {/if}

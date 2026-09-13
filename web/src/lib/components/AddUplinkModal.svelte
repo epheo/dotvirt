@@ -11,12 +11,10 @@
 		adapters = [],
 		initial,
 		onclose,
-		onstaged,
 	}: {
 		adapters?: PhysicalAdapter[]; // node NICs (the port to enslave)
 		initial?: UplinkCreate; // the uplink as git declares it: edit, not create
 		onclose: () => void;
-		onstaged: () => void;
 	} = $props();
 	// svelte-ignore state_referenced_locally
 	const editing = !!initial;
@@ -74,7 +72,6 @@
 	{missing}
 	{summary}
 	onsubmit={stage}
-	{onstaged}
 	{onclose}
 >
 	<FormField label="Name (physical network)" error={name && !validName(name) ? NAME_HINT : ''}>

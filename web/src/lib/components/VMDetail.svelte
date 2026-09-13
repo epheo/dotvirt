@@ -49,7 +49,6 @@
 		vm,
 		tab = 'summary',
 		ontab,
-		onstaged,
 		stagedItem = null,
 		onstagedopen,
 		onsearchlabel,
@@ -60,7 +59,6 @@
 		// switch (an action jumping to Snapshots/Console).
 		tab?: VMTab;
 		ontab?: (t: VMTab) => void;
-		onstaged?: () => void;
 		stagedItem?: DraftItem | null;
 		onstagedopen?: () => void;
 		onsearchlabel?: (key: string, value: string) => void;
@@ -118,11 +116,7 @@
 				sourceFile: target.sourceFile,
 				power: to,
 			});
-			onstaged?.();
-			ui.showToast(`Power ${to} staged for ${target.name} — applies when the PR merges.`, {
-				kind: 'success',
-				action: { label: 'Review & propose', run: () => ui.openChanges() },
-			});
+			ui.toastStaged(`Power ${to} staged for ${target.name} — applies when the PR merges.`);
 		} catch (e) {
 			if (e instanceof Unauthorized) return;
 			ui.showToast(friendlyError(e), { kind: 'error' });
@@ -199,7 +193,7 @@
 	async function adopt() {
 		reconciling = true;
 		try {
-			await adoptVM(vm, { onstaged });
+			await adoptVM(vm);
 		} finally {
 			reconciling = false;
 		}
@@ -370,7 +364,7 @@
 			<Permissions namespaces={[vm.namespace]} />
 		{:else if tab === 'changes'}
 			{#key vmKey}
-				<VMChanges {vm} {stagedItem} onstaged={() => onstaged?.()} />
+				<VMChanges {vm} {stagedItem} />
 			{/key}
 		{:else if tab === 'snapshots'}
 			{#key vmKey}

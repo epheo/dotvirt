@@ -91,7 +91,7 @@
 	<div class="flex flex-wrap items-center gap-1 border-b border-line px-2 py-1.5">
 		{#each quick as a (a.id)}
 			<button
-				onclick={() => dispatchVMAction(a, vm, { onstaged: () => drafts.refresh() })}
+				onclick={() => dispatchVMAction(a, vm)}
 				title={a.title}
 				class="rounded px-2 py-1 text-xs text-ink-soft hover:bg-inset"
 			>
@@ -112,7 +112,7 @@
 					{vm}
 					onpick={(a) => {
 						close();
-						dispatchVMAction(a, vm, { onstaged: () => drafts.refresh() });
+						dispatchVMAction(a, vm);
 					}}
 				/>
 			{/snippet}

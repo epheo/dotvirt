@@ -4,7 +4,6 @@
 	import { api, type CreateVMRequest, type Network, type Options } from '$lib/api';
 	import { friendlyError } from '$lib/format';
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
-	import { action } from '$lib/resource.svelte';
 	import Modal from './Modal.svelte';
 	import Wizard from './Wizard.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
@@ -18,13 +17,11 @@
 		namespace: initialNamespace = '',
 		networks = [],
 		onclose,
-		onstaged,
 	}: {
 		namespaces: string[];
 		namespace?: string; // preselected target (the opener's scope)
 		networks?: Network[]; // port-group catalog (from the page), for the adapter picker
 		onclose: () => void;
-		onstaged: () => void;
 	} = $props();
 
 	let options = $state<Options | null>(null);
@@ -50,6 +47,10 @@
 	// A successful stage with a password swaps the wizard for the one-time
 	// credentials reveal instead of closing.
 	let revealed = $state(false);
+	function staged() {
+		if (password) revealed = true;
+		else onclose();
+	}
 	let copied = $state('');
 	let extraDisks = $state<{ name: string; size: string; storageClass: string }[]>([]);
 	// Selected secondary networks, held as attach refs ("namespace/nad", or a bare
@@ -58,8 +59,6 @@
 	// Attach the primary (pod-network) NIC. On by default, but - unlike a pod - a VM
 	// may decline it and run on secondary networks alone.
 	let attachPrimary = $state(true);
-
-	const op = action();
 
 	// The active wizard step (bound into <Wizard>); the review step's Edit links
 	// seek it back to a specific step.
@@ -226,8 +225,7 @@
 		return m;
 	});
 
-	async function submit() {
-		if (!valid) return;
+	function submit() {
 		const [imgName, imgNs] = osImage.split('|');
 		const req: CreateVMRequest = {
 			name,
@@ -254,11 +252,7 @@
 				sshKey: sshKey || undefined,
 				password: password || undefined,
 			};
-		if (await op.run(() => api.stageCreate(req))) {
-			onstaged();
-			if (password) revealed = true;
-			else onclose();
-		}
+		return api.stageCreate(req);
 	}
 </script>
 
@@ -573,12 +567,11 @@
 	<Wizard
 		title="New Virtual Machine"
 		footerHint="Staged into Changes; open a PR from there."
-		finishLabel={op.busy ? 'Staging…' : 'Stage VM'}
+		finishLabel="Stage VM"
 		canFinish={valid}
-		submitting={op.busy}
-		error={op.error}
 		bind:current
-		onfinish={submit}
+		onsubmit={submit}
+		onstaged={staged}
 		{onclose}
 		steps={[
 			{ title: 'Name and project', valid: step1Valid, body: step1 },

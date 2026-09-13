@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { GitPullRequest } from 'lucide-svelte';
 	import { adoptNamespaces } from '$lib/actions';
-	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import Banner from './Banner.svelte';
 
@@ -52,9 +51,7 @@
 		if (busy) return;
 		busy = true;
 		try {
-			await adoptNamespaces(adoptNS, {
-				onstaged: () => drafts.refresh(),
-			});
+			await adoptNamespaces(adoptNS);
 		} finally {
 			busy = false;
 		}

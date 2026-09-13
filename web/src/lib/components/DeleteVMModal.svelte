@@ -1,16 +1,17 @@
 <script lang="ts">
 	import { api, type VM } from '$lib/api';
 	import { action } from '$lib/resource.svelte';
+	import { ui } from '$lib/state/ui.svelte';
 	import ConfirmDelete from './ConfirmDelete.svelte';
 
 	// Delete is destructive once the PR merges, so it is gated behind a confirm
 	// that requires typing the VM name.
-	let { vm, onclose, onstaged }: { vm: VM; onclose: () => void; onstaged: () => void } = $props();
+	let { vm, onclose }: { vm: VM; onclose: () => void } = $props();
 
 	const op = action();
 	async function confirm() {
 		if (await op.run(() => api.stageDelete(vm.namespace, vm.name))) {
-			onstaged();
+			ui.toastStaged();
 			onclose();
 		}
 	}

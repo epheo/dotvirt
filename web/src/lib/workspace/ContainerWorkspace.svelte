@@ -167,15 +167,13 @@
 			}
 			const failed = results.filter((r) => r.status === 'rejected').length;
 			const staged = results.length - failed;
-			await drafts.refresh();
 			picked = new Set();
 			const extra = [skipped ? `${skipped} skipped` : '', failed ? `${failed} failed` : '']
 				.filter(Boolean)
 				.join(', ');
-			ui.showToast(`${verb} ${staged} of ${vms.length}${extra ? ` (${extra})` : ''}.`, {
-				kind: failed ? 'error' : 'success',
-				action: staged > 0 ? { label: 'Review & propose', run: () => ui.openChanges() } : undefined,
-			});
+			const msg = `${verb} ${staged} of ${vms.length}${extra ? ` (${extra})` : ''}.`;
+			if (staged > 0) ui.toastStaged(msg, { kind: failed ? 'error' : 'success' });
+			else ui.showToast(msg, { kind: 'error' });
 		} finally {
 			bulkBusy = false;
 		}
@@ -260,11 +258,7 @@
 	{#if scope.kind === 'node'}
 		<NodeConfigure node={scope.node} vms={scopedVMs} />
 	{:else}
-		<ContainerConfigure
-			projects={cfgProjects}
-			cluster={root && section === 'hosts'}
-			onstaged={() => drafts.refresh()}
-		/>
+		<ContainerConfigure projects={cfgProjects} cluster={root && section === 'hosts'} />
 	{/if}
 {:else if tab === 'security'}
 	{#if root}

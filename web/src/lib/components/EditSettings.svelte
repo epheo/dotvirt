@@ -18,7 +18,6 @@
 		type NicRow,
 	} from '$lib/editform';
 	import { quantityBytes } from '$lib/format';
-	import { action } from '$lib/resource.svelte';
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
 	import { validName, NAME_HINT } from '$lib/validate';
 	import CheckGroup from './CheckGroup.svelte';
@@ -34,13 +33,11 @@
 		vm,
 		networks = [],
 		onclose,
-		onstaged,
 		initialSection,
 	}: {
 		vm: VM;
 		networks?: Network[]; // port-group catalog (from the page), for the adapter picker
 		onclose: () => void;
-		onstaged: () => void;
 		// Opened from a Configure section: start the wizard on that step.
 		initialSection?: EditSection;
 	} = $props();
@@ -51,8 +48,6 @@
 	// seed the editable working copy is intentional.
 	// svelte-ignore state_referenced_locally
 	let form = $state(seedEditForm(vm));
-
-	const op = action();
 
 	// Start on the step the user opened from a Configure section (else Compute).
 	// svelte-ignore state_referenced_locally
@@ -208,13 +203,7 @@
 	// so the review never diverges from the commit.
 	const summary = $derived(summarize(vm, form));
 
-	async function stage() {
-		if (!dirty || prefViolation) return;
-		if (await op.run(() => api.stageEdit(vm.namespace, vm.name, buildEditRequest(vm, form)))) {
-			onstaged();
-			onclose();
-		}
-	}
+	const stage = () => api.stageEdit(vm.namespace, vm.name, buildEditRequest(vm, form));
 </script>
 
 {#snippet preferenceField()}
@@ -547,10 +536,8 @@
 		{ title: 'Ready to complete', body: review },
 	]}
 	canFinish={dirty && !prefViolation}
-	submitting={op.busy}
-	error={op.error}
 	finishLabel="Stage change"
 	footerHint="Staged into Changes; review and open a PR there."
-	onfinish={stage}
+	onsubmit={stage}
 	{onclose}
 />

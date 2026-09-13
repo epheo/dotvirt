@@ -15,11 +15,9 @@
 	let {
 		vm,
 		onclose,
-		onstaged,
 	}: {
 		vm: VM;
 		onclose: () => void;
-		onstaged: () => void;
 	} = $props();
 
 	// The prefill seeds from the VM the modal opened for (host closes it on
@@ -55,7 +53,6 @@
 	{missing}
 	{summary}
 	onsubmit={stage}
-	{onstaged}
 	{onclose}
 >
 	{#snippet icon()}<BookCopy size={16} class="text-ink-muted" />{/snippet}

@@ -3,7 +3,6 @@
 	import { BookCopy } from 'lucide-svelte';
 	import { api, Unauthorized, type Template } from '$lib/api';
 	import { friendlyError } from '$lib/format';
-	import { action } from '$lib/resource.svelte';
 	import { validName } from '$lib/validate';
 	import FormField from './FormField.svelte';
 	import SelectInput from './SelectInput.svelte';
@@ -21,14 +20,12 @@
 		library = '',
 		template = '',
 		onclose,
-		onstaged,
 	}: {
 		namespaces: string[]; // repo-backed target namespaces
 		namespace?: string; // preselected target (the opener's scope)
 		library?: string; // preselected library (from the Catalog's Deploy button)
 		template?: string;
 		onclose: () => void;
-		onstaged: () => void;
 	} = $props();
 
 	let templates = $state<Template[] | null>(null);
@@ -42,7 +39,6 @@
 	let powerOn = $state(false); // templates blueprint Halted; this boots the VM on sync
 	let params = $state<Record<string, string>>({});
 	let step = $state(0);
-	const op = action();
 
 	$effect(() => {
 		if (!namespace)
@@ -113,26 +109,18 @@
 	const secret = (n: string) => /password|secret/i.test(n);
 	const long = (n: string) => /ssh|key|user_data/i.test(n);
 
-	async function deploy() {
-		if (!tpl) return;
-		const t = tpl;
-		if (
-			await op.run(() => {
-				const sent: Record<string, string> = {};
-				for (const [k, v] of Object.entries(params)) if (v.trim() !== '') sent[k] = v;
-				return api.deployTemplate({
-					library: t.library,
-					template: t.name,
-					namespace,
-					name: name.trim() || undefined,
-					parameters: Object.keys(sent).length ? sent : undefined,
-					powerOn: powerOn || undefined,
-				});
-			})
-		) {
-			onstaged();
-			onclose();
-		}
+	function deploy() {
+		const t = tpl!; // canFinish gates Finish on a picked template
+		const sent: Record<string, string> = {};
+		for (const [k, v] of Object.entries(params)) if (v.trim() !== '') sent[k] = v;
+		return api.deployTemplate({
+			library: t.library,
+			template: t.name,
+			namespace,
+			name: name.trim() || undefined,
+			parameters: Object.keys(sent).length ? sent : undefined,
+			powerOn: powerOn || undefined,
+		});
 	}
 </script>
 
@@ -140,12 +128,10 @@
 	title="Deploy from Template"
 	bind:current={step}
 	canFinish={targetOK && missing.length === 0}
-	submitting={op.busy}
-	error={op.error}
 	finishLabel="Stage deploy"
 	footerHint="Stages into Changes — the VM is created when the project’s PR merges."
 	{onclose}
-	onfinish={deploy}
+	onsubmit={deploy}
 	steps={[
 		{ title: 'Template & target', valid: targetOK, body: targetStep },
 		{

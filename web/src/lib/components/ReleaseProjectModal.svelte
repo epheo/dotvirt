@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { api, Unauthorized, type ReleaseResult } from '$lib/api';
 	import { friendlyError } from '$lib/format';
-	import { drafts } from '$lib/state/drafts.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import ConfirmDelete from './ConfirmDelete.svelte';
 
@@ -29,11 +28,9 @@
 			const r: ReleaseResult = await api.releaseProject(name);
 			onclose();
 			if (r.staged?.length) {
-				await drafts.refresh();
-				ui.showToast(
+				ui.toastStaged(
 					`Release of ${name} staged for ${r.staged.join(', ')} — merges apply it` +
 						(r.released?.length ? `; ${r.released.join(', ')} released immediately.` : '.'),
-					{ kind: 'success', action: { label: 'Review & propose', run: () => ui.openChanges() } },
 				);
 			} else {
 				ui.showToast(

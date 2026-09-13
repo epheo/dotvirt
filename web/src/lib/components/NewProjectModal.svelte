@@ -8,11 +8,9 @@
 
 	let {
 		onclose,
-		onstaged,
 		adopt: adoptProp = '',
 	}: {
 		onclose: () => void;
-		onstaged: () => void;
 		adopt?: string; // existing unlabeled namespace to bring in as a project
 	} = $props();
 	// The modal mounts fresh per open, so the initial value IS the intent.
@@ -82,7 +80,6 @@
 	{missing}
 	{summary}
 	onsubmit={stage}
-	{onstaged}
 	{onclose}
 >
 	<FormField label="Project name" error={name && !validName(name) ? NAME_HINT : ''}>

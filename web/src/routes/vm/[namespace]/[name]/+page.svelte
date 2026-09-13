@@ -32,7 +32,6 @@
 			{vm}
 			{tab}
 			ontab={setTab}
-			onstaged={() => drafts.refresh()}
 			stagedItem={drafts.stagedByKey.get(`${namespace}/${name}`) ?? null}
 			onstagedopen={() => vm && (ui.modal = { kind: 'staged', vm })}
 			onsearchlabel={(k, v) => ui.search?.searchFor(`label:${k}=${v}`)}

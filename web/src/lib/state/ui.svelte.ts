@@ -12,6 +12,7 @@ import type {
 } from '$lib/api';
 import type { EditSection } from '$lib/editform';
 import { reviewURL, type ReviewTarget } from '$lib/review';
+import { drafts } from './drafts.svelte';
 
 export type Tier0Initial =
 	{ kind: 'snat'; spec: EgressIPCreate } | { kind: 'route'; spec: ExternalRouteCreate };
@@ -108,11 +109,25 @@ class Ui {
 	}
 
 	// The Changes section is a route (deep-linkable, back-button-walkable); this is
-	// the one navigation every "Review & propose" affordance shares. A target
-	// lands on one review (a staged item, a PR, a past commit) or a project's
-	// history.
+	// the one navigation every review affordance shares. A target lands on one
+	// review (a staged item, a PR, a past commit) or a project's history.
 	openChanges(target: ReviewTarget | null = null) {
 		goto(reviewURL(target));
+	}
+
+	// What every successful stage does, wherever it was triggered (dialog,
+	// banner, toolbar verb, batch): refresh the drafts summary and hand the user
+	// the way forward. kind lets a partial batch keep that affordance while
+	// reporting as a warning or error; target picks the review it opens.
+	toastStaged(
+		msg = 'Staged into Changes — applies when the project’s PR merges.',
+		opts?: { kind?: ToastKind; target?: ReviewTarget },
+	) {
+		drafts.refresh();
+		this.showToast(msg, {
+			kind: opts?.kind ?? 'success',
+			action: { label: 'Review & propose', run: () => this.openChanges(opts?.target ?? null) },
+		});
 	}
 
 	modal = $state<AppModal | null>(null);

@@ -62,11 +62,7 @@ export async function runRuntimeAction(a: VMAction, vm: VM): Promise<void> {
 // (context menu, inspector, palette): runtime ops run here with toast feedback,
 // host actions open their dialog or tab and land on the VM's page. Shared so
 // the four-way split cannot drift between entry points.
-export async function dispatchVMAction(
-	a: VMAction,
-	vm: VM,
-	opts?: { onstaged?: () => void | Promise<void> },
-): Promise<void> {
+export async function dispatchVMAction(a: VMAction, vm: VM): Promise<void> {
 	if (a.kind === 'runtime' && a.run) {
 		await runRuntimeAction(a, vm);
 		return;
@@ -76,7 +72,7 @@ export async function dispatchVMAction(
 			window.open(manifestURL(vm), '_blank');
 			return;
 		case 'adopt':
-			await adoptVM(vm, opts);
+			await adoptVM(vm);
 			return;
 		case 'console':
 			goto(vmHref(vm.namespace, vm.name, 'console'));
@@ -116,18 +112,10 @@ export function openVMDialog(id: ActionId, vm: VM): void {
 
 // adoptVM stages a cluster-only VM's live state into the draft, with the one
 // adopt toast, so wording cannot drift between the menus that trigger it.
-// onstaged runs before the success toast so callers refresh their view first.
-export async function adoptVM(
-	vm: { namespace: string; name: string },
-	opts?: { onstaged?: () => void | Promise<void> },
-): Promise<void> {
+export async function adoptVM(vm: { namespace: string; name: string }): Promise<void> {
 	try {
 		await api.adopt(vm.namespace, vm.name);
-		await opts?.onstaged?.();
-		ui.showToast(`${vm.name} staged into Changes - open a PR to adopt it into git.`, {
-			kind: 'success',
-			action: { label: 'Review & propose', run: () => ui.openChanges() },
-		});
+		ui.toastStaged(`${vm.name} staged into Changes - open a PR to adopt it into git.`);
 	} catch (e) {
 		if (e instanceof Unauthorized) return; // signed out centrally; skip the error toast
 		ui.showToast(friendlyError(e), { kind: 'error' });
@@ -140,48 +128,34 @@ export async function adoptVM(
 // not read) must not abandon the rest half-done, with the already staged ones
 // sitting in the draft unmentioned. Shared by the tree's context menu and the
 // project-page banner, so wording and failure handling cannot drift.
-// onstaged runs before the toast so callers refresh their view first.
-export async function adoptNamespaces(
-	namespaces: Iterable<string>,
-	opts?: { onstaged?: () => void | Promise<void> },
-): Promise<void> {
+export async function adoptNamespaces(namespaces: Iterable<string>): Promise<void> {
 	const caveats: string[] = [];
 	// The warning is project-wide and re-derived per call; keep only the last
 	// instead of accumulating near-duplicates.
 	let warning = '';
 	let staged = 0;
-	try {
-		for (const ns of namespaces) {
-			try {
-				const view = await api.adoptNamespace(ns);
-				staged++;
-				// A capture bounded by the caller's RBAC (or by what ArgoCD still tracks) is
-				// worth staging, but saying so matters: silence would read as "the namespace
-				// is now fully described".
-				warning = view.warning ?? '';
-			} catch (e) {
-				if (e instanceof Unauthorized) throw e;
-				caveats.push(`${ns}: ${friendlyError(e)}`);
-			}
+	for (const ns of namespaces) {
+		try {
+			const view = await api.adoptNamespace(ns);
+			staged++;
+			// A capture bounded by the caller's RBAC (or by what ArgoCD still tracks) is
+			// worth staging, but saying so matters: silence would read as "the namespace
+			// is now fully described".
+			warning = view.warning ?? '';
+		} catch (e) {
+			if (e instanceof Unauthorized) return; // signed out centrally; skip the toast
+			caveats.push(`${ns}: ${friendlyError(e)}`);
 		}
-	} catch (e) {
-		if (e instanceof Unauthorized) return;
-	} finally {
-		await opts?.onstaged?.();
 	}
 	const notes = [...caveats, warning].filter(Boolean).join(' ');
 	if (!staged) {
 		ui.showToast(notes || 'Nothing to adopt.', { kind: 'error' });
 		return;
 	}
-	const action = { label: 'Review & propose', run: () => ui.openChanges() };
 	if (notes) {
-		ui.showToast(`Staged, but not everything: ${notes}`, { kind: 'warning', action });
+		ui.toastStaged(`Staged, but not everything: ${notes}`, { kind: 'warning' });
 	} else {
-		ui.showToast('Staged into Changes - open a PR to adopt them into git.', {
-			kind: 'success',
-			action,
-		});
+		ui.toastStaged('Staged into Changes - open a PR to adopt them into git.');
 	}
 }
 
