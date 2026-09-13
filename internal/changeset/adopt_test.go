@@ -74,10 +74,7 @@ func TestAdoptStagesCreateForClusterOnlyVM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.List: %v", err)
 	}
-	items, err := c.toChangesetItems(entries)
-	if err != nil {
-		t.Fatalf("toChangesetItems: %v", err)
-	}
+	items := c.toChangesetItems(entries)
 	if len(items) != 1 || items[0].Path != "alpha/copy.yaml" || items[0].NewContent == nil {
 		t.Fatalf("want a create at alpha/copy.yaml, got %+v", items)
 	}

@@ -13,7 +13,6 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/tasks"
-	"github.com/epheo/dotvirt/internal/vmgen"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
@@ -35,10 +34,7 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 		return model.ProposeResult{}, err
 	}
 
-	items, err := c.toChangesetItems(entries)
-	if err != nil {
-		return model.ProposeResult{}, err
-	}
+	items := c.toChangesetItems(entries)
 
 	// The semantic view becomes the PR description (best-effort: a body render
 	// failure must not block the propose). Read BEFORE the commit below - the
@@ -166,7 +162,7 @@ func (c *Coordinator) proposedBranch(user, project string) string {
 	return c.proposed + "/" + refSegment(user) + "/" + refSegment(project) + "-" + shortHash(user, project)
 }
 
-func (c *Coordinator) toChangesetItems(entries []draft.Entry) ([]git.ChangesetItem, error) {
+func (c *Coordinator) toChangesetItems(entries []draft.Entry) []git.ChangesetItem {
 	items := make([]git.ChangesetItem, 0, len(entries))
 	for _, e := range entries {
 		switch e.Kind {
@@ -181,22 +177,12 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) ([]git.ChangesetIt
 				Path: e.SourceFile, Namespace: e.Namespace, Name: e.Name, Edit: e.Edit,
 			})
 		case draft.KindCreate:
-			// An adopt-create carries the live manifest verbatim; a
-			// wizard create generates one from its spec.
-			if e.Manifest != "" {
-				items = append(items, git.ChangesetItem{Path: e.SourceFile, Namespace: e.Namespace, Name: e.Name, NewContent: []byte(e.Manifest)})
-				continue
-			}
-			path, content, err := vmgen.Manifest(*e.Spec)
-			if err != nil {
-				return nil, fmt.Errorf("generate %s/%s: %w", e.Namespace, e.Name, err)
-			}
-			items = append(items, git.ChangesetItem{Path: path, Namespace: e.Namespace, Name: e.Name, NewContent: content})
+			items = append(items, git.ChangesetItem{Path: e.SourceFile, Namespace: e.Namespace, Name: e.Name, NewContent: []byte(e.Manifest)})
 		case draft.KindDelete:
 			items = append(items, git.ChangesetItem{Path: e.SourceFile, Namespace: e.Namespace, Name: e.Name, Delete: true})
 		}
 	}
-	return items, nil
+	return items
 }
 
 // OpenProposals lists every open PR into proj's base branch - the Changes

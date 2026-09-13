@@ -1,7 +1,8 @@
-// Package draft holds dotvirt's pending changesets: VM edits and new-VM specs
-// staged by a user but not yet committed. Drafts are keyed by (user, project) -
-// each tenant gets an independent changeset per user - and persisted one JSON
-// file per pair (<dir>/<user>/<project>.json) so they survive backend restarts.
+// Package draft holds dotvirt's pending changesets: the edits, rendered
+// manifests and removals a user staged but has not yet proposed. Drafts are
+// keyed by (user, project) - each tenant gets an independent changeset per
+// user - and persisted one JSON file per pair (<dir>/<user>/<project>.json) so
+// they survive backend restarts.
 package draft
 
 import (
@@ -15,7 +16,6 @@ import (
 	"sync"
 
 	"github.com/epheo/dotvirt/internal/model"
-	"github.com/epheo/dotvirt/internal/vmgen"
 )
 
 // Kind distinguishes an edit of an existing VM, a brand-new VM, and the removal
@@ -159,18 +159,23 @@ type Entry struct {
 	Namespace string   `json:"namespace"`
 	Name      string   `json:"name"`
 
-	// SourceFile is the repo-relative manifest path. Set for KindEdit (the file to
-	// patch) and KindDelete (the file to remove).
+	// SourceFile is the repo-relative manifest path: the file a create lands at,
+	// an edit patches or replaces, a delete removes.
 	SourceFile string `json:"sourceFile,omitempty"`
 
 	// Edit fields (KindEdit): the change to apply to an existing manifest.
 	Edit *model.VMEdit `json:"edit,omitempty"`
 
-	// Create fields (KindCreate): the wizard spec for a new VM, OR - when
-	// adopting an object that exists only in the cluster - its live state
-	// serialized verbatim (SourceFile then carries the path it lands at).
-	Spec     *vmgen.Spec `json:"spec,omitempty"`
-	Manifest string      `json:"manifest,omitempty"`
+	// Manifest is the file content a create commits verbatim (rendered from a
+	// form, captured from the cluster, or deployed from a template) or a
+	// whole-file edit replaces. Every KindCreate carries one: a create without
+	// it has nothing to commit and is dropped on load.
+	Manifest string `json:"manifest,omitempty"`
+
+	// FromWizard marks a VM manifest rendered from the New VM wizard, so the
+	// draft view summarizes it by its sizing instead of presenting it as an
+	// adoption (the default reading of a VM manifest create).
+	FromWizard bool `json:"fromWizard,omitempty"`
 
 	// FromTemplate names the library template ("<library>/<template>") a
 	// verbatim-manifest VM create was rendered from, so the draft view can say
@@ -237,6 +242,12 @@ func (s *Store) loadLocked(user, project string) (map[string]Entry, error) {
 			log.Printf("draft: %s is corrupt (%v); quarantined as .corrupt, starting fresh", p, err)
 		} else {
 			for _, e := range list {
+				if e.Kind == KindCreate && e.Manifest == "" {
+					// A create without a manifest has nothing to commit (an older
+					// on-disk draft's unrendered spec); dropping it beats an empty file.
+					log.Printf("draft: %s: dropping stale create %s (no manifest)", p, e.Key())
+					continue
+				}
 				d[e.Key()] = e
 			}
 		}
