@@ -11,7 +11,7 @@
 		Server,
 		Square,
 	} from 'lucide-svelte';
-	import { api, Unauthorized, type Change, type DraftItem, type Network, type VM } from '$lib/api';
+	import { api, type Change, type DraftItem, type Network, type VM } from '$lib/api';
 	import {
 		adoptVM,
 		manifestURL,
@@ -22,8 +22,9 @@
 	} from '$lib/actions';
 	import { type EditSection } from '$lib/editform';
 	import { type VMTab } from '$lib/nav';
+	import { action } from '$lib/resource.svelte';
 	import { ui } from '$lib/state/ui.svelte';
-	import { duration, friendlyError } from '$lib/format';
+	import { duration } from '$lib/format';
 	import { phaseTone } from '$lib/status';
 	import ActionMenu from './ActionMenu.svelte';
 	import Banner from './Banner.svelte';
@@ -77,11 +78,12 @@
 
 	// Drift detail (running vs main) for the selected VM.
 	let driftChanges = $state<Change[] | null>(null);
-	let reconciling = $state(false);
+	// adopt/resync, feeding the Summary card's busy state.
+	const reconcileOp = action({ toast: true });
 
 	// Imperative runtime ops (restart/pause/unpause/live-migrate). Results
 	// surface as toasts - identical feedback to the right-click context menu.
-	let runtimeBusy = $state(false);
+	const runtimeOp = action({ toast: true });
 
 	// The flat toolbar: the everyday imperative verbs, promoted out of the
 	// Actions menu. Power is deliberately absent - it is a declarative
@@ -105,24 +107,18 @@
 	// Power is declarative here (a staged runStrategy change), but it still
 	// deserves a first-class button: hiding it inside Edit Settings made the
 	// most basic verb the hardest to find. The button stages and says so.
-	let powerBusy = $state(false);
-	async function stagePower() {
+	const powerOp = action({ toast: true });
+	function stagePower() {
 		const target = vm;
-		if (!target.sourceFile || powerBusy) return;
+		if (!target.sourceFile || powerOp.busy) return;
 		const to = target.power === 'On' ? 'Off' : 'On';
-		powerBusy = true;
-		try {
+		return powerOp.run(async () => {
 			await api.stageEdit(target.namespace, target.name, {
 				sourceFile: target.sourceFile,
 				power: to,
 			});
 			ui.toastStaged(`Power ${to} staged for ${target.name} — applies when the PR merges.`);
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			ui.showToast(friendlyError(e), { kind: 'error' });
-		} finally {
-			powerBusy = false;
-		}
+		});
 	}
 
 	function loadDrift(ns: string, name: string) {
@@ -145,12 +141,7 @@
 	async function handleAction(a: VMAction) {
 		const target = vm;
 		if (a.kind === 'runtime' && a.run) {
-			runtimeBusy = true;
-			try {
-				await runRuntimeAction(a, target);
-			} finally {
-				runtimeBusy = false;
-			}
+			await runtimeOp.run(() => runRuntimeAction(a, target));
 			return;
 		}
 		switch (a.id) {
@@ -189,27 +180,14 @@
 		});
 	});
 
-	// adoptVM owns the toasts; this wrapper only feeds the Summary card's busy state.
-	async function adopt() {
-		reconciling = true;
-		try {
-			await adoptVM(vm);
-		} finally {
-			reconciling = false;
-		}
-	}
+	// adoptVM owns its toasts; the run only feeds the busy state.
+	const adopt = () => reconcileOp.run(() => adoptVM(vm));
 
-	async function resync() {
-		reconciling = true;
-		try {
+	function resync() {
+		return reconcileOp.run(async () => {
 			const r = await api.resync(vm.namespace, vm.name);
 			ui.showToast(`Re-sync triggered on ArgoCD app "${r.application}".`, { kind: 'success' });
-		} catch (e) {
-			if (e instanceof Unauthorized) return; // signed out centrally; skip the error toast
-			ui.showToast(friendlyError(e), { kind: 'error' });
-		} finally {
-			reconciling = false;
-		}
+		});
 	}
 </script>
 
@@ -235,7 +213,7 @@
 		<div class="mt-1.5 mb-1 flex flex-wrap items-center gap-0.5">
 			<button
 				onclick={stagePower}
-				disabled={!vm.sourceFile || powerBusy}
+				disabled={!vm.sourceFile || powerOp.busy}
 				title={vm.sourceFile
 					? 'Stages a power change into a PR — nothing happens until it merges'
 					: 'Not in git — adopt this VM first'}
@@ -248,7 +226,7 @@
 				{#if t.sep}<span class="mx-1.5 h-4 w-px bg-line"></span>{/if}
 				<button
 					onclick={() => handleAction(t.action)}
-					disabled={!t.action.enabled(vm) || runtimeBusy}
+					disabled={!t.action.enabled(vm) || runtimeOp.busy}
 					title={t.action.title ?? ''}
 					class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-45 disabled:hover:bg-transparent"
 				>
@@ -269,7 +247,7 @@
 				{#snippet trigger({ toggle })}
 					<button
 						onclick={toggle}
-						disabled={runtimeBusy}
+						disabled={runtimeOp.busy}
 						title="Everything else — snapshots, clone, adopt, delete; config changes go through a PR"
 						class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 					>
@@ -322,7 +300,7 @@
 				{vm}
 				{stagedItem}
 				{driftChanges}
-				{reconciling}
+				reconciling={reconcileOp.busy}
 				onadopt={adopt}
 				onresync={resync}
 				onconsole={() => ontab?.('console')}

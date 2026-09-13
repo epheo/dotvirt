@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '$lib/api';
+	import { action } from '$lib/resource.svelte';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
@@ -32,24 +33,20 @@
 	const close = () => (ui.modal = null);
 
 	// The per-VM staged-changes modal (opened from a Staged badge).
-	let stagedBusy = $state(false);
+	const discardOp = action({ toast: true }); // a failure leaves the modal open to retry
 	const stagedItem = $derived(
 		m?.kind === 'staged'
 			? (drafts.stagedByKey.get(`${m.vm.namespace}/${m.vm.name}`) ?? null)
 			: null,
 	);
-	async function discardStaged() {
+	function discardStaged() {
 		if (m?.kind !== 'staged') return;
-		stagedBusy = true;
-		try {
-			await api.unstage(m.vm.namespace, m.vm.name);
+		const { namespace, name } = m.vm;
+		return discardOp.run(async () => {
+			await api.unstage(namespace, name);
 			close();
 			await drafts.refresh();
-		} catch {
-			// Failure leaves the modal open to retry; a 401 signs out centrally.
-		} finally {
-			stagedBusy = false;
-		}
+		});
 	}
 	function reviewStaged() {
 		close();
@@ -155,7 +152,7 @@
 {:else if m?.kind === 'staged' && stagedItem}
 	<StagedChangesModal
 		item={stagedItem}
-		busy={stagedBusy}
+		busy={discardOp.busy}
 		onclose={close}
 		ondiscard={discardStaged}
 		onreview={reviewStaged}

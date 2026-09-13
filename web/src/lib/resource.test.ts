@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Unauthorized } from './api';
+
+// The ui store pulls in $app/navigation; the toast is all action() needs.
+const ui = vi.hoisted(() => ({ showToast: vi.fn() }));
+vi.mock('$lib/state/ui.svelte', () => ({ ui }));
+
 import { action, resource, type Resource } from './resource.svelte';
 import { box, effectRoot, flushSync } from '../test/runes.svelte';
 
@@ -151,6 +156,8 @@ describe('resource', () => {
 });
 
 describe('action', () => {
+	beforeEach(() => ui.showToast.mockClear());
+
 	it('resolves true on success and exposes busy while running', async () => {
 		let op!: ReturnType<typeof action>;
 		const stop = effectRoot(() => {
@@ -185,6 +192,29 @@ describe('action', () => {
 		});
 		expect(await op.run(() => Promise.reject(new Unauthorized()))).toBe(false);
 		expect(op.error).toBe('');
+		stop();
+	});
+
+	it('toast: a failure surfaces as an error toast, never in the inline slot', async () => {
+		let op!: ReturnType<typeof action>;
+		const stop = effectRoot(() => {
+			op = action({ toast: true });
+		});
+		expect(await op.run(() => Promise.reject(new Error('Error: adopt failed: denied')))).toBe(
+			false,
+		);
+		expect(op.error).toBe('');
+		expect(ui.showToast).toHaveBeenCalledWith('adopt failed: denied', { kind: 'error' });
+		stop();
+	});
+
+	it('toast: Unauthorized is still swallowed, no toast over the login redirect', async () => {
+		let op!: ReturnType<typeof action>;
+		const stop = effectRoot(() => {
+			op = action({ toast: true });
+		});
+		expect(await op.run(() => Promise.reject(new Unauthorized()))).toBe(false);
+		expect(ui.showToast).not.toHaveBeenCalled();
 		stop();
 	});
 });

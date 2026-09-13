@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { GitPullRequest } from 'lucide-svelte';
-	import { api, Unauthorized } from '$lib/api';
-	import { friendlyError } from '$lib/format';
+	import { api } from '$lib/api';
+	import { action } from '$lib/resource.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import Banner from './Banner.svelte';
@@ -13,22 +13,16 @@
 		inventory.networks.filter((n) => n.scope === 'shared' && !n.sourceFile).length +
 			inventory.policies.filter((p) => !p.namespace && !p.sourceFile).length,
 	);
-	let busy = $state(false);
-	async function adopt() {
-		if (busy) return;
-		busy = true;
-		try {
+	const op = action({ toast: true });
+	function adopt() {
+		return op.run(async () => {
 			const view = await api.adoptPlatform();
 			ui.toastStaged(
 				[`${view.count} platform objects staged into Changes.`, view.warning]
 					.filter(Boolean)
 					.join(' '),
 			);
-		} catch (e) {
-			if (!(e instanceof Unauthorized)) ui.showToast(friendlyError(e), { kind: 'error' });
-		} finally {
-			busy = false;
-		}
+		});
 	}
 </script>
 
@@ -44,10 +38,10 @@
 		</span>
 		<button
 			onclick={adopt}
-			disabled={busy}
+			disabled={op.busy}
 			class="ml-auto shrink-0 font-medium text-accent-ink hover:underline disabled:opacity-50"
 		>
-			{busy ? 'Capturing…' : 'Adopt into git'}
+			{op.busy ? 'Capturing…' : 'Adopt into git'}
 		</button>
 	</Banner>
 {/if}

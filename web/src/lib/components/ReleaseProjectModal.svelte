@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { api, Unauthorized, type ReleaseResult } from '$lib/api';
-	import { friendlyError } from '$lib/format';
+	import { api, type ReleaseResult } from '$lib/api';
+	import { action } from '$lib/resource.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import ConfirmDelete from './ConfirmDelete.svelte';
 
@@ -14,17 +14,13 @@
 		onclose,
 	}: { project: string; namespaces: string[]; onclose: () => void } = $props();
 
-	let busy = $state(false);
-	let error = $state('');
+	const op = action();
 
-	async function release() {
-		if (busy) return;
+	function release() {
 		// Snapshot the props: onclose() unmounts this modal and its prop
 		// expressions (m.project) die with it - reading them after is a TypeError.
 		const name = project;
-		busy = true;
-		error = '';
-		try {
+		return op.run(async () => {
 			const r: ReleaseResult = await api.releaseProject(name);
 			onclose();
 			if (r.staged?.length) {
@@ -38,12 +34,7 @@
 					{ kind: 'success' },
 				);
 			}
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			error = friendlyError(e);
-		} finally {
-			busy = false;
-		}
+		});
 	}
 </script>
 
@@ -51,8 +42,8 @@
 	title="Release project"
 	confirmWord={project}
 	verb="Release"
-	{busy}
-	{error}
+	busy={op.busy}
+	error={op.error}
 	onconfirm={release}
 	{onclose}
 >
