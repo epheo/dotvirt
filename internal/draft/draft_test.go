@@ -136,6 +136,33 @@ func TestSafeSegmentNoTraversal(t *testing.T) {
 	}
 }
 
+// A create staged before manifests were rendered at stage time carries a spec
+// and no manifest: nothing propose could commit. It is dropped on load while the
+// rest of the draft survives, and the file is not treated as corrupt.
+func TestStaleCreateDroppedOnLoad(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	p := s.path("alice", "team-a")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := `[{"kind":"create","namespace":"tenant-a","name":"db","spec":{"name":"db","namespace":"tenant-a"}},
+		{"kind":"edit","namespace":"tenant-a","name":"web","sourceFile":"tenant-a/web.yaml","edit":{"memory":"2Gi"}}]`
+	if err := os.WriteFile(p, []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := s.List("alice", "team-a")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name != "web" {
+		t.Fatalf("want only the edit to survive, got %+v", entries)
+	}
+	if _, err := os.Stat(p + ".corrupt"); !os.IsNotExist(err) {
+		t.Error("a stale create is not corruption; the file must not be quarantined")
+	}
+}
+
 // A corrupt draft file must not wedge its (user, project) forever: it is
 // quarantined (kept as .corrupt for inspection) and the draft starts fresh.
 func TestCorruptDraftQuarantined(t *testing.T) {

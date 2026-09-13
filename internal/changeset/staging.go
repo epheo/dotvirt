@@ -41,7 +41,9 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 	return c.Get(id, proj)
 }
 
-// StageCreate records a new-VM spec in (id, proj)'s draft.
+// StageCreate records a new VM in (id, proj)'s draft: the wizard spec rendered
+// to its manifest here, once, so the preview shows the bytes propose commits and
+// a spec the renderer refuses fails at the form rather than at propose.
 func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
 	if err := requireRepo(proj); err != nil {
 		return model.DraftView{}, err
@@ -50,19 +52,17 @@ func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, ra
 	if err := json.Unmarshal(rawSpec, &spec); err != nil {
 		return model.DraftView{}, fmt.Errorf("%w: invalid VM spec: %v", model.ErrInvalid, err)
 	}
-	// The pair becomes the manifest's repo path (ns/name.yaml); reject traversal
-	// and non-DNS-1123 names at stage time, not at propose.
-	if err := validate.RequireDNS1123("VM name", spec.Name); err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
-	}
-	if err := validate.RequireDNS1123("namespace", spec.Namespace); err != nil {
+	path, content, err := vmgen.Manifest(spec)
+	if err != nil {
 		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
 	}
 	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
-		Kind:      draft.KindCreate,
-		Namespace: spec.Namespace,
-		Name:      spec.Name,
-		Spec:      &spec,
+		Kind:       draft.KindCreate,
+		Namespace:  spec.Namespace,
+		Name:       spec.Name,
+		SourceFile: path,
+		Manifest:   string(content),
+		FromWizard: true,
 	}); err != nil {
 		return model.DraftView{}, err
 	}

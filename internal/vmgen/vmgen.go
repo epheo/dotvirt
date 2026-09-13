@@ -64,8 +64,9 @@ func Manifest(s Spec) (path string, content []byte, err error) {
 		return "", nil, err
 	}
 
-	// The manifest lands in a git repo: only a password hash may enter it. Hash
-	// on a copy so the caller's spec keeps what the user typed.
+	// The manifest is the only form the VM is kept in (the draft, then git), so
+	// only a hash may enter it and the typed password never outlives this call.
+	// Hash a copy so the caller's spec keeps what the user typed.
 	if s.CloudInit != nil && s.CloudInit.Password != "" {
 		ci := *s.CloudInit
 		h, err := hashPassword(ci.Password)

@@ -10,7 +10,6 @@ import (
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
-	"github.com/epheo/dotvirt/internal/vmgen"
 )
 
 // Get renders (id, proj)'s draft as semantic diff items against the base branch.
@@ -53,22 +52,15 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 			}
 			item.Changes = manifest.ChangesForEdit(current, *e.Edit)
 		case draft.KindCreate:
-			if e.Manifest != "" {
-				// A verbatim-manifest create: the manifest IS the change.
-				field, to := e.Resource.CreateLabel(), e.Namespace+"/"+e.Name
-				if e.FromTemplate != "" {
-					field = "Deploy from template " + e.FromTemplate
-				}
-				if e.Namespace == ClusterScopeNS || e.Resource == draft.ResourceNamespace {
-					to = e.Name // cluster-scoped, or the namespace itself: no prefix
-				}
-				item.Changes = []model.Change{{Field: field, Action: "add", To: to}}
-				item.YAML = e.Manifest
-				break
-			}
-			item.Changes = changesForCreate(*e.Spec)
-			if _, content, err := vmgen.Manifest(*e.Spec); err == nil {
-				item.YAML = string(content)
+			// The manifest IS the change; the rows only explain it.
+			item.YAML = e.Manifest
+			switch {
+			case e.FromWizard:
+				item.Changes = wizardChanges(e)
+			case e.FromTemplate != "":
+				item.Changes = []model.Change{{Field: "Deploy from template " + e.FromTemplate, Action: "add", To: objectLabel(e)}}
+			default:
+				item.Changes = []model.Change{{Field: e.Resource.CreateLabel(), Action: "add", To: objectLabel(e)}}
 			}
 		case draft.KindDelete:
 			item.Changes = []model.Change{{Field: "lifecycle", Action: "remove", From: objectLabel(e)}}
@@ -87,6 +79,17 @@ func objectLabel(e draft.Entry) string {
 		return e.Name
 	}
 	return e.Namespace + "/" + e.Name
+}
+
+// wizardChanges summarizes a wizard-rendered VM by its sizing and devices, read
+// from the staged manifest so the preview cannot drift from what propose
+// commits; they are the rows the commit review renders once it is merged.
+func wizardChanges(e draft.Entry) []model.Change {
+	docs := documentsIn(e.SourceFile, []byte(e.Manifest))
+	if len(docs.order) != 1 {
+		return []model.Change{{Field: "Create VM", Action: "add", To: objectLabel(e)}}
+	}
+	return createChanges(docs.order[0])
 }
 
 // pruneWarning: what a merge lets ArgoCD delete, from Argo's own requiresPruning

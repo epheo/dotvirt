@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/validate"
-	"github.com/epheo/dotvirt/internal/vmgen"
 )
 
 // authorEmail derives a stable noreply commit email from a k8s username, which is
@@ -57,41 +55,6 @@ func refSegment(s string) string {
 func shortHash(user, project string) string {
 	sum := sha256.Sum256([]byte(user + "\x00" + project))
 	return hex.EncodeToString(sum[:])[:10]
-}
-
-// changesForCreate renders a new-VM spec as "add" semantic items for the draft
-// preview, without showing YAML.
-func changesForCreate(s vmgen.Spec) []model.Change {
-	out := []model.Change{
-		{Field: "Create VM", Action: "add", To: s.Namespace + "/" + s.Name},
-		{Field: "Instance type", Action: "add", To: s.Instancetype},
-		{Field: "Preference", Action: "add", To: s.Preference},
-		{Field: "OS image", Action: "add", To: s.OSImage.Name},
-	}
-	if s.DiskSize != "" {
-		out = append(out, model.Change{Field: "Root disk", Action: "add", To: s.DiskSize})
-	}
-	if s.StorageClass != "" {
-		out = append(out, model.Change{Field: "Storage class", Action: "add", To: s.StorageClass})
-	}
-	for _, d := range s.ExtraDisks {
-		out = append(out, model.Change{Field: "Disk", Action: "add", To: manifest.DiskLabel(d.Name, d.Size, d.StorageClass)})
-	}
-	for _, n := range s.Networks {
-		out = append(out, model.Change{Field: "Network", Action: "add", To: n.Name})
-	}
-	if s.PrimaryNetwork != nil && !*s.PrimaryNetwork {
-		out = append(out, model.Change{Field: "Primary network", Action: "remove", From: "VM Network"})
-	}
-	out = append(out, model.Change{Field: "Power", Action: "add", To: powerWord(s.Running)})
-	return out
-}
-
-func powerWord(running bool) string {
-	if running {
-		return "On"
-	}
-	return "Off"
 }
 
 // requireDNS1123 is validate.RequireDNS1123 wrapped with ErrInvalid so the
