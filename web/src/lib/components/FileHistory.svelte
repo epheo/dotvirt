@@ -5,7 +5,6 @@
 	import { changesHref } from '$lib/nav';
 	import { action, resource } from '$lib/resource.svelte';
 	import { itemKey, reviewURL } from '$lib/review';
-	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import ChangeList from './ChangeList.svelte';
@@ -24,14 +23,12 @@
 		load,
 		restore: restoreVersion,
 		mine,
-		onstaged,
 	}: {
 		project: string;
 		name: string; // the object, for copy
 		load: () => Promise<Commit[]>;
 		restore: (hash: string) => Promise<unknown>;
 		mine: (it: DraftItem) => boolean; // a commit's items that belong to this object
-		onstaged?: () => void;
 	} = $props();
 
 	// History keys on the project's applied revision: a merge that reaches the
@@ -75,16 +72,11 @@
 		restoring = c.hash;
 		const ok = await restoreOp.run(() => restoreVersion(c.hash));
 		restoring = null;
-		if (!ok) return;
-		await drafts.refresh();
-		onstaged?.();
-		ui.showToast(`Restore of ${name} to ${c.shortHash} staged.`, {
-			kind: 'success',
-			action: {
-				label: 'Review & propose',
-				run: () => ui.openChanges({ kind: 'history', project }),
-			},
-		});
+		if (ok) {
+			ui.toastStaged(`Restore of ${name} to ${c.shortHash} staged.`, {
+				target: { kind: 'history', project },
+			});
+		}
 	}
 </script>
 

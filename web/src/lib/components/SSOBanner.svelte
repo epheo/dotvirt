@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { TriangleAlert } from 'lucide-svelte';
 	import { api } from '$lib/api';
-	import { friendlyError } from '$lib/format';
+	import { action } from '$lib/resource.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import Banner from './Banner.svelte';
@@ -9,7 +9,7 @@
 	// One-click SSO finish for admins. The apply runs under the CALLER's token;
 	// the API server's RBAC is the gate, and a refusal surfaces legibly.
 	let pending = $state(false);
-	let busy = $state(false);
+	const op = action({ toast: true });
 	$effect(() => {
 		api
 			.authMethods()
@@ -17,19 +17,14 @@
 			.catch(() => {});
 	});
 
-	async function finish() {
-		busy = true;
-		try {
+	function finish() {
+		return op.run(async () => {
 			await api.finishSSO();
 			pending = false;
 			ui.showToast('OpenShift SSO is ready: the sign-in button now works for everyone.', {
 				kind: 'success',
 			});
-		} catch (e) {
-			ui.showToast(friendlyError(e), { kind: 'error' });
-		} finally {
-			busy = false;
-		}
+		});
 	}
 </script>
 
@@ -39,10 +34,10 @@
 		<span>OpenShift SSO is not ready: its OAuthClient is missing or holds an outdated secret.</span>
 		<button
 			onclick={finish}
-			disabled={busy}
+			disabled={op.busy}
 			class="ml-auto rounded border border-warn/50 bg-panel px-2 py-0.5 text-xs font-medium hover:bg-warn-soft disabled:opacity-50"
 		>
-			{busy ? 'Finishing…' : 'Finish SSO setup'}
+			{op.busy ? 'Finishing…' : 'Finish SSO setup'}
 		</button>
 	</Banner>
 {/if}

@@ -12,18 +12,16 @@
 	let {
 		projects,
 		cluster = false,
-		onstaged,
 	}: {
 		projects: Project[];
 		cluster?: boolean;
-		onstaged?: () => void; // a DRS change was staged - refresh the drafts badge
 	} = $props();
 </script>
 
 <div class="min-h-0 flex-1 overflow-y-auto p-4">
 	<div class="max-w-2xl space-y-4">
 		{#if cluster}
-			<DRSCard {onstaged} />
+			<DRSCard />
 		{/if}
 		{#each projects as p (p.name)}
 			<InfoCard title="Project: {p.name}">

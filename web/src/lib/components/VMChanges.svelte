@@ -19,11 +19,7 @@
 	// restorable. Restore is the object-level undo: it stages one file as a
 	// past commit held it and goes through Propose like any edit. Undo of a
 	// whole pull request stays in the Changes section, at the project.
-	let {
-		vm,
-		stagedItem,
-		onstaged,
-	}: { vm: VM; stagedItem: DraftItem | null; onstaged?: () => void } = $props();
+	let { vm, stagedItem }: { vm: VM; stagedItem: DraftItem | null } = $props();
 
 	const project = $derived(inventory.projectOf(vm.namespace));
 	const draftCount = $derived(drafts.drafts.find((d) => d.project === project)?.draft.count ?? 0);
@@ -133,7 +129,6 @@
 			load={() => api.vmHistory(vm.namespace, vm.name)}
 			restore={(hash) => api.restoreVersion(vm.namespace, vm.name, hash)}
 			mine={(it) => it.namespace === vm.namespace && it.name === vm.name}
-			{onstaged}
 		/>
 	{/if}
 </div>

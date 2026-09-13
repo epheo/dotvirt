@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { action } from '$lib/resource.svelte';
+	import { ui } from '$lib/state/ui.svelte';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
@@ -9,7 +10,7 @@
 	// StageFooter, owning the submit action() every dialog repeated. The
 	// form-specific missing/summary derivations stay in each dialog - they ARE
 	// the form; this owns only what happens around them. onsubmit stages the
-	// request; success reports to onstaged then closes.
+	// request; success raises the staged toast, then closes.
 	let {
 		title,
 		size = 'md',
@@ -29,7 +30,8 @@
 		summary?: string;
 		// The staging call's response is irrelevant here: success means "staged".
 		onsubmit: () => Promise<unknown>;
-		onstaged: () => void;
+		// For a host that must refresh a view of its own after the stage.
+		onstaged?: () => void;
 		onclose: () => void;
 		icon?: Snippet;
 		children: Snippet;
@@ -40,7 +42,8 @@
 	async function submit() {
 		if (missing.length) return;
 		if (await op.run(onsubmit)) {
-			onstaged();
+			ui.toastStaged();
+			onstaged?.();
 			onclose();
 		}
 	}

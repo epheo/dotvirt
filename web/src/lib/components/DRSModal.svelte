@@ -23,7 +23,7 @@
 	}: {
 		view: DRSView; // current state, to seed the form
 		onclose: () => void;
-		onstaged: () => void;
+		onstaged?: () => void; // the card re-reads its snapshot after the stage
 	} = $props();
 
 	// Seed from the pending draft when one is staged - editing an unproposed

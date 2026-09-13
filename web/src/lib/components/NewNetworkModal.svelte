@@ -17,7 +17,6 @@
 		canManage = false,
 		initial,
 		onclose,
-		onstaged,
 		onAddUplink,
 	}: {
 		namespaces: string[];
@@ -29,7 +28,6 @@
 		// so an edit changes only where a shared segment is published.
 		initial?: NetworkCreate;
 		onclose: () => void;
-		onstaged: () => void;
 		onAddUplink?: () => void; // open the Add Uplink (Tier-0 transport) wizard from the VLAN flow
 	} = $props();
 	// svelte-ignore state_referenced_locally
@@ -127,7 +125,6 @@
 	{missing}
 	{summary}
 	onsubmit={stage}
-	{onstaged}
 	{onclose}
 >
 	{#if editing}

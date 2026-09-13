@@ -15,11 +15,9 @@
 	let {
 		vm,
 		onclose,
-		onstaged,
 	}: {
 		vm: VM;
 		onclose: () => void;
-		onstaged: () => void;
 	} = $props();
 
 	// Only DataVolume-backed disks are migratable (the manifest owns their
@@ -69,7 +67,6 @@
 		? `Stages ${moves.map((m) => `${m.name} → ${m.storageClass}`).join(', ')}`
 		: ''}
 	onsubmit={stage}
-	{onstaged}
 	{onclose}
 >
 	<p class="text-xs text-ink-muted">

@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { Check } from 'lucide-svelte';
+	import { action } from '$lib/resource.svelte';
+	import { ui } from '$lib/state/ui.svelte';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 
@@ -10,7 +12,8 @@
 	// per-step `valid` flag only drives the rail marker, it never traps the user.
 	// The single hard gate is `canFinish`, which disables Finish on the last step.
 	// The parent owns all form state and the validity derivations; this component
-	// owns only navigation + chrome, so it stays reusable by other create flows.
+	// owns navigation, chrome and the submit action() around onsubmit, so it
+	// stays reusable by other create flows.
 	type WizardStep = {
 		title: string;
 		valid?: boolean; // undefined => optional step (no required fields)
@@ -22,28 +25,38 @@
 		steps,
 		current = $bindable(0),
 		canFinish = false,
-		submitting = false,
-		error = '',
 		finishLabel = 'Finish',
 		footerHint = '',
 		icon,
-		onfinish,
+		onsubmit,
+		onstaged,
 		onclose,
 	}: {
 		title: string;
 		steps: WizardStep[];
 		current?: number;
 		canFinish?: boolean;
-		submitting?: boolean;
-		error?: string;
 		finishLabel?: string;
 		footerHint?: string;
 		icon?: Snippet;
-		onfinish: () => void;
+		// The staging call's response is irrelevant here: success means "staged".
+		onsubmit: () => Promise<unknown>;
+		// Replaces the close after a successful stage, for a wizard with a screen
+		// still to show (the VM create's credentials reveal).
+		onstaged?: () => void;
 		onclose: () => void;
 	} = $props();
 
+	const op = action();
 	const last = $derived(current === steps.length - 1);
+
+	async function submit() {
+		if (!canFinish) return;
+		if (await op.run(onsubmit)) {
+			ui.toastStaged();
+			(onstaged ?? onclose)();
+		}
+	}
 
 	function go(i: number) {
 		current = i;
@@ -95,7 +108,7 @@
 		</div>
 	</div>
 
-	<ErrorNote {error} class="mx-5 mb-1" />
+	<ErrorNote error={op.error} class="mx-5 mb-1" />
 	{#snippet footer()}
 		{#if footerHint}<span class="text-xs text-ink-faint">{footerHint}</span>{/if}
 		<button
@@ -110,10 +123,10 @@
 		>
 		{#if last}
 			<button
-				onclick={onfinish}
-				disabled={!canFinish || submitting}
+				onclick={submit}
+				disabled={!canFinish || op.busy}
 				class="rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
-				>{finishLabel}</button
+				>{op.busy ? 'Staging…' : finishLabel}</button
 			>
 		{:else}
 			<button

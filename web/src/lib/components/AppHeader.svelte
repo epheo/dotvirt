@@ -57,7 +57,7 @@
 	function onSearchPick(hit: SearchHit) {
 		switch (hit.kind) {
 			case 'action':
-				dispatchVMAction(hit.action, hit.vm, { onstaged: () => drafts.refresh() });
+				dispatchVMAction(hit.action, hit.vm);
 				break;
 			case 'vm':
 				goto(vmHref(hit.vm.namespace, hit.vm.name));

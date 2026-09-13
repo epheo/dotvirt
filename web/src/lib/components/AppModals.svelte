@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '$lib/api';
+	import { action } from '$lib/resource.svelte';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
@@ -30,33 +31,22 @@
 	// exactly one can be open and opening any is a single assignment.
 	const m = $derived(ui.modal);
 	const close = () => (ui.modal = null);
-	const staged = () => {
-		drafts.refresh();
-		ui.showToast('Staged into Changes — applies when the project’s PR merges.', {
-			kind: 'success',
-			action: { label: 'Review & propose', run: () => ui.openChanges() },
-		});
-	};
 
 	// The per-VM staged-changes modal (opened from a Staged badge).
-	let stagedBusy = $state(false);
+	const discardOp = action({ toast: true }); // a failure leaves the modal open to retry
 	const stagedItem = $derived(
 		m?.kind === 'staged'
 			? (drafts.stagedByKey.get(`${m.vm.namespace}/${m.vm.name}`) ?? null)
 			: null,
 	);
-	async function discardStaged() {
+	function discardStaged() {
 		if (m?.kind !== 'staged') return;
-		stagedBusy = true;
-		try {
-			await api.unstage(m.vm.namespace, m.vm.name);
+		const { namespace, name } = m.vm;
+		return discardOp.run(async () => {
+			await api.unstage(namespace, name);
 			close();
 			await drafts.refresh();
-		} catch {
-			// Failure leaves the modal open to retry; a 401 signs out centrally.
-		} finally {
-			stagedBusy = false;
-		}
+		});
 	}
 	function reviewStaged() {
 		close();
@@ -70,7 +60,6 @@
 		namespace={m.namespace}
 		networks={inventory.networks}
 		onclose={close}
-		onstaged={staged}
 	/>
 {:else if m?.kind === 'newNetwork'}
 	<NewNetworkModal
@@ -81,31 +70,23 @@
 		initial={m.initial}
 		onAddUplink={() => (ui.modal = { kind: 'uplink' })}
 		onclose={close}
-		onstaged={staged}
 	/>
 {:else if m?.kind === 'uplink'}
-	<AddUplinkModal
-		adapters={inventory.physicalAdapters}
-		initial={m.initial}
-		onclose={close}
-		onstaged={staged}
-	/>
+	<AddUplinkModal adapters={inventory.physicalAdapters} initial={m.initial} onclose={close} />
 {:else if m?.kind === 'namespace'}
 	<NewNamespaceModal
 		projects={inventory.repoProjects}
 		project={m.project ?? undefined}
 		onclose={close}
-		onstaged={staged}
 	/>
 {:else if m?.kind === 'newProject'}
-	<NewProjectModal adopt={m.adopt} onclose={close} onstaged={staged} />
+	<NewProjectModal adopt={m.adopt} onclose={close} />
 {:else if m?.kind === 'adoptProject'}
 	<AdoptProjectModal
 		project={m.project}
 		namespaces={m.namespaces}
 		recover={m.recover}
 		onclose={close}
-		onstaged={staged}
 	/>
 {:else if m?.kind === 'releaseProject'}
 	<ReleaseProjectModal project={m.project} namespaces={m.namespaces} onclose={close} />
@@ -115,7 +96,6 @@
 		namespace={m.namespace}
 		initial={m.initial}
 		onclose={close}
-		onstaged={staged}
 	/>
 {:else if m?.kind === 'dfw'}
 	<DistributedFirewallModal
@@ -124,17 +104,11 @@
 		vms={inventory.allVMs}
 		initial={m.initial}
 		onclose={close}
-		onstaged={staged}
 	/>
 {:else if m?.kind === 'tier0'}
-	<Tier0Modal
-		namespaces={inventory.namespaces}
-		initial={m.initial}
-		onclose={close}
-		onstaged={staged}
-	/>
+	<Tier0Modal namespaces={inventory.namespaces} initial={m.initial} onclose={close} />
 {:else if m?.kind === 'adminFw'}
-	<AdminFirewallModal initial={m.initial} onclose={close} onstaged={staged} />
+	<AdminFirewallModal initial={m.initial} onclose={close} />
 {:else if m?.kind === 'deleteObject'}
 	<DeleteObjectModal
 		resource={m.resource}
@@ -142,7 +116,6 @@
 		name={m.name}
 		sourceFile={m.sourceFile}
 		onclose={close}
-		onstaged={staged}
 	/>
 {:else if m?.kind === 'upload'}
 	<UploadModal namespaces={inventory.namespaces} namespace={m.namespace} onclose={close} />
@@ -153,7 +126,6 @@
 		library={m.library}
 		template={m.template}
 		onclose={close}
-		onstaged={staged}
 	/>
 {:else if m?.kind === 'editTemplate'}
 	{@const t = m.template}
@@ -165,7 +137,6 @@
 		summary={`Replaces ${t.sourceFile} in the ${t.library === 'platform' ? 'shared library' : t.library}`}
 		onsubmit={(yaml) => api.updateTemplate({ library: t.library, name: t.name, yaml })}
 		onclose={close}
-		onstaged={staged}
 	/>
 {:else if m?.kind === 'editManifest'}
 	{@const o = m}
@@ -177,12 +148,11 @@
 		summary={`Replaces ${o.sourceFile}`}
 		onsubmit={(yaml) => api.updateObjectManifest(o.resource, o.namespace, o.name, yaml)}
 		onclose={close}
-		onstaged={staged}
 	/>
 {:else if m?.kind === 'staged' && stagedItem}
 	<StagedChangesModal
 		item={stagedItem}
-		busy={stagedBusy}
+		busy={discardOp.busy}
 		onclose={close}
 		ondiscard={discardStaged}
 		onreview={reviewStaged}
@@ -193,14 +163,13 @@
 		networks={inventory.networks}
 		initialSection={m.section}
 		onclose={close}
-		onstaged={staged}
 	/>
 {:else if m?.kind === 'deleteVM'}
-	<DeleteVMModal vm={m.vm} onclose={close} onstaged={staged} />
+	<DeleteVMModal vm={m.vm} onclose={close} />
 {:else if m?.kind === 'cloneVM'}
 	<CloneModal vm={m.vm} onclose={close} />
 {:else if m?.kind === 'saveTemplate'}
-	<SaveTemplateModal vm={m.vm} onclose={close} onstaged={staged} />
+	<SaveTemplateModal vm={m.vm} onclose={close} />
 {:else if m?.kind === 'migrateVM'}
 	{@const vm = m.vm}
 	<MigrateModal
@@ -211,5 +180,5 @@
 		}}
 	/>
 {:else if m?.kind === 'migrateStorage'}
-	<StorageMigrateModal vm={m.vm} onclose={close} onstaged={staged} />
+	<StorageMigrateModal vm={m.vm} onclose={close} />
 {/if}

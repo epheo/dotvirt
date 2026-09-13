@@ -16,7 +16,6 @@
 		kind = 'object',
 		onsubmit,
 		onclose,
-		onstaged,
 	}: {
 		title: string;
 		sourceFile: string;
@@ -26,7 +25,6 @@
 		kind?: 'template' | 'object';
 		onsubmit: (yaml: string) => Promise<unknown>;
 		onclose: () => void;
-		onstaged: () => void;
 	} = $props();
 
 	// The buffer seeds from the file the modal opened for (the host closes it on
@@ -46,7 +44,6 @@
 	{missing}
 	{summary}
 	onsubmit={() => onsubmit(yaml)}
-	{onstaged}
 	{onclose}
 >
 	{#snippet icon()}

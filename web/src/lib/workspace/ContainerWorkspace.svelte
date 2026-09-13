@@ -4,6 +4,7 @@
 	import { api, Unauthorized, type VM } from '$lib/api';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
 	import { containerTabs, hrefForScope, vmHref, type Section } from '$lib/nav';
+	import { action } from '$lib/resource.svelte';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
@@ -125,7 +126,7 @@
 
 	let picked = $state<Set<string>>(new Set());
 	let confirmingBulkDelete = $state(false);
-	let bulkBusy = $state(false);
+	const bulkOp = action({ toast: true });
 
 	// The VM objects currently picked (resolve keys against the live inventory).
 	const pickedVMs = $derived(
@@ -150,35 +151,31 @@
 	// Run one staging call per VM in parallel, tallying outcomes. `skip` filters
 	// no-ops client-side; any per-VM failure folds into the skipped count rather
 	// than aborting the batch.
-	async function runBulk(
+	function runBulk(
 		vms: VM[],
 		stage: (vm: VM) => Promise<unknown>,
 		skip: (vm: VM) => boolean,
 		verb: string,
 	) {
-		if (bulkBusy) return;
-		bulkBusy = true;
-		try {
+		if (bulkOp.busy) return;
+		return bulkOp.run(async () => {
 			const actionable = vms.filter((vm) => !skip(vm));
 			const skipped = vms.length - actionable.length;
 			const results = await Promise.allSettled(actionable.map((vm) => stage(vm)));
-			if (results.some((r) => r.status === 'rejected' && r.reason instanceof Unauthorized)) {
-				return; // signed out centrally by the api layer
-			}
-			const failed = results.filter((r) => r.status === 'rejected').length;
+			const rejected = results.filter((r) => r.status === 'rejected');
+			// allSettled hides a sign-out from the action's own swallow.
+			const denied = rejected.find((r) => r.reason instanceof Unauthorized);
+			if (denied) throw denied.reason;
+			const failed = rejected.length;
 			const staged = results.length - failed;
-			await drafts.refresh();
 			picked = new Set();
 			const extra = [skipped ? `${skipped} skipped` : '', failed ? `${failed} failed` : '']
 				.filter(Boolean)
 				.join(', ');
-			ui.showToast(`${verb} ${staged} of ${vms.length}${extra ? ` (${extra})` : ''}.`, {
-				kind: failed ? 'error' : 'success',
-				action: staged > 0 ? { label: 'Review & propose', run: () => ui.openChanges() } : undefined,
-			});
-		} finally {
-			bulkBusy = false;
-		}
+			const msg = `${verb} ${staged} of ${vms.length}${extra ? ` (${extra})` : ''}.`;
+			if (staged > 0) ui.toastStaged(msg, { kind: failed ? 'error' : 'success' });
+			else ui.showToast(msg, { kind: 'error' });
+		});
 	}
 
 	function bulkPower(target: 'On' | 'Off') {
@@ -260,11 +257,7 @@
 	{#if scope.kind === 'node'}
 		<NodeConfigure node={scope.node} vms={scopedVMs} />
 	{:else}
-		<ContainerConfigure
-			projects={cfgProjects}
-			cluster={root && section === 'hosts'}
-			onstaged={() => drafts.refresh()}
-		/>
+		<ContainerConfigure projects={cfgProjects} cluster={root && section === 'hosts'} />
 	{/if}
 {:else if tab === 'security'}
 	{#if root}
@@ -284,7 +277,7 @@
 	{#if picked.size > 0}
 		<BulkActionsBar
 			count={picked.size}
-			busy={bulkBusy}
+			busy={bulkOp.busy}
 			onpower={bulkPower}
 			ondelete={() => (confirmingBulkDelete = true)}
 			onclear={() => (picked = new Set())}
@@ -323,7 +316,7 @@
 {#if confirmingBulkDelete}
 	<BulkDeleteConfirm
 		vms={pickedVMs}
-		busy={bulkBusy}
+		busy={bulkOp.busy}
 		onconfirm={bulkDelete}
 		onclose={() => (confirmingBulkDelete = false)}
 	/>

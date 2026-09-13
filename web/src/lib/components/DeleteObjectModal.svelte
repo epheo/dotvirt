@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api } from '$lib/api';
 	import { action } from '$lib/resource.svelte';
+	import { ui } from '$lib/state/ui.svelte';
 	import ConfirmDelete from './ConfirmDelete.svelte';
 
 	// The VM delete's confirm for every other git-declared object: stages the
@@ -11,20 +12,18 @@
 		name,
 		sourceFile,
 		onclose,
-		onstaged,
 	}: {
 		resource: string;
 		namespace: string;
 		name: string;
 		sourceFile: string;
 		onclose: () => void;
-		onstaged: () => void;
 	} = $props();
 
 	const op = action();
 	async function confirm() {
 		if (await op.run(() => api.deleteObject(resource, namespace, name))) {
-			onstaged();
+			ui.toastStaged();
 			onclose();
 		}
 	}

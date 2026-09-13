@@ -18,7 +18,6 @@ import {
 	type UplinkCreate,
 } from '$lib/api';
 import { friendlyError } from '$lib/format';
-import { drafts } from '$lib/state/drafts.svelte';
 import { inventory } from '$lib/state/inventory.svelte';
 import { ui } from '$lib/state/ui.svelte';
 
@@ -84,15 +83,10 @@ export function canAdoptPolicy(p: Policy): boolean {
 export async function openAdopt(ref: ObjectRef, drifted = false) {
 	try {
 		await api.adoptObject(ref.resource, ref.namespace, ref.name);
-		await drafts.refresh();
-		ui.showToast(
+		ui.toastStaged(
 			drifted
 				? `Running state of ${ref.name} staged into Changes - open a PR to bring git up to date.`
 				: `${ref.name} staged into Changes - open a PR to adopt it into git.`,
-			{
-				kind: 'success',
-				action: { label: 'Review & propose', run: () => ui.openChanges() },
-			},
 		);
 	} catch (e) {
 		if (e instanceof Unauthorized) return;

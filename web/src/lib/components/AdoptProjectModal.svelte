@@ -13,13 +13,11 @@
 		namespaces,
 		recover = false,
 		onclose,
-		onstaged,
 	}: {
 		project: string;
 		namespaces: string[];
 		recover?: boolean;
 		onclose: () => void;
-		onstaged: () => void;
 	} = $props();
 
 	let owners = $state(''); // space/comma-separated usernames
@@ -36,7 +34,6 @@
 	label="Attach repo"
 	summary={`Creates repo “${project}”; stages ${namespaces.length} namespace annotation${namespaces.length === 1 ? '' : 's'} → platform repo`}
 	onsubmit={() => api.adoptProject(project, parseOwners(owners))}
-	{onstaged}
 	{onclose}
 >
 	{#if recover}

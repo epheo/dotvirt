@@ -18,14 +18,12 @@
 		vms = [],
 		initial,
 		onclose,
-		onstaged,
 	}: {
 		namespaces: string[];
 		namespace?: string; // preselected namespace
 		vms?: VM[]; // for the live "effective members" preview
 		initial?: NetworkPolicyCreate; // the policy as git declares it: edit, not create
 		onclose: () => void;
-		onstaged: () => void;
 	} = $props();
 	// svelte-ignore state_referenced_locally
 	const editing = !!initial;
@@ -111,7 +109,6 @@
 	{missing}
 	{summary}
 	onsubmit={stage}
-	{onstaged}
 	{onclose}
 >
 	<div class="grid grid-cols-2 gap-3">

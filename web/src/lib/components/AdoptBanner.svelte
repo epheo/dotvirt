@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { GitPullRequest } from 'lucide-svelte';
 	import { adoptNamespaces } from '$lib/actions';
-	import { drafts } from '$lib/state/drafts.svelte';
+	import { action } from '$lib/resource.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import Banner from './Banner.svelte';
 
@@ -47,18 +47,8 @@
 		return nss;
 	});
 
-	let busy = $state(false);
-	async function adopt() {
-		if (busy) return;
-		busy = true;
-		try {
-			await adoptNamespaces(adoptNS, {
-				onstaged: () => drafts.refresh(),
-			});
-		} finally {
-			busy = false;
-		}
-	}
+	const op = action({ toast: true });
+	const adopt = () => op.run(() => adoptNamespaces(adoptNS));
 </script>
 
 {#if healthy && untracked > 0}
@@ -69,10 +59,10 @@
 		>
 		<button
 			onclick={adopt}
-			disabled={busy}
+			disabled={op.busy}
 			class="ml-auto shrink-0 font-medium text-accent-ink hover:underline disabled:opacity-50"
 		>
-			{busy ? 'Capturing…' : 'Adopt into git'}
+			{op.busy ? 'Capturing…' : 'Adopt into git'}
 		</button>
 	</Banner>
 {/if}

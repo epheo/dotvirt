@@ -16,13 +16,11 @@
 		namespace: preselected,
 		initial,
 		onclose,
-		onstaged,
 	}: {
 		namespaces: string[];
 		namespace?: string; // preselected namespace (e.g. from a namespace context menu)
 		initial?: EgressFirewallCreate; // the firewall as git declares it: edit, not create
 		onclose: () => void;
-		onstaged: () => void;
 	} = $props();
 	// svelte-ignore state_referenced_locally
 	const editing = !!initial;
@@ -94,7 +92,6 @@
 	{missing}
 	{summary}
 	onsubmit={stage}
-	{onstaged}
 	{onclose}
 >
 	{#if editing}

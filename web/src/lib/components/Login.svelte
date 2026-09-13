@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { api, Unauthorized, type User } from '$lib/api';
+	import { action } from '$lib/resource.svelte';
 
 	let { onlogin }: { onlogin: (user: User) => void } = $props();
 
 	let token = $state('');
-	let busy = $state(false);
-	let error = $state('');
+	const op = action();
 	// SSO is offered once the backend confirms it; the token form always stays.
 	// ssoPending: say "not finished" instead of offering a failing button.
 	let sso = $state(false);
@@ -24,25 +24,24 @@
 	// detail is server-logged, never shown - it can carry endpoint internals).
 	const ssoError = $derived(page.url.searchParams.get('sso_error') !== null);
 
-	async function submit(e: SubmitEvent) {
+	function submit(e: SubmitEvent) {
 		e.preventDefault();
 		if (!token.trim()) return;
-		busy = true;
-		error = '';
-		try {
-			const user = await api.login(token.trim());
-			onlogin(user);
-		} catch (e) {
-			// Only a real 401 means the token is bad. A 503 here is usually the
-			// backend (or its cluster connection) being down — blaming the token
-			// sends the user chasing the wrong problem.
-			error =
-				e instanceof Unauthorized
-					? 'That token was rejected. Check it and try again.'
-					: 'dotvirt could not verify the token: the dotvirt server or the cluster is unreachable. Try again shortly.';
-		} finally {
-			busy = false;
-		}
+		return op.run(async () => {
+			try {
+				onlogin(await api.login(token.trim()));
+			} catch (e) {
+				// The one place a 401 is the answer rather than a sign-out: only a real
+				// 401 means the token is bad. A 503 here is usually the backend (or its
+				// cluster connection) being down — blaming the token sends the user
+				// chasing the wrong problem.
+				throw new Error(
+					e instanceof Unauthorized
+						? 'That token was rejected. Check it and try again.'
+						: 'dotvirt could not verify the token: the dotvirt server or the cluster is unreachable. Try again shortly.',
+				);
+			}
+		});
 	}
 </script>
 
@@ -92,18 +91,18 @@
 			class="w-full rounded border border-line-strong px-3 py-2 font-mono text-xs break-all"
 		></textarea>
 
-		{#if error}
-			<p class="mt-2 text-sm text-danger">{error}</p>
+		{#if op.error}
+			<p class="mt-2 text-sm text-danger">{op.error}</p>
 		{/if}
 
 		<button
 			type="submit"
-			disabled={busy || !token.trim()}
+			disabled={op.busy || !token.trim()}
 			class="mt-3 w-full rounded {sso
 				? 'border border-line bg-inset text-ink-soft hover:bg-inset-strong'
 				: 'bg-accent text-white hover:bg-accent-hover'} px-4 py-2 text-sm font-medium disabled:opacity-40"
 		>
-			{busy ? 'Signing in…' : 'Sign in with token'}
+			{op.busy ? 'Signing in…' : 'Sign in with token'}
 		</button>
 
 		<div class="mt-4 border-t border-line-soft pt-3 text-xs text-ink-muted">
