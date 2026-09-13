@@ -6,17 +6,23 @@
 	import AddUplinkModal from './AddUplinkModal.svelte';
 	import AdminFirewallModal from './AdminFirewallModal.svelte';
 	import AdoptProjectModal from './AdoptProjectModal.svelte';
+	import CloneModal from './CloneModal.svelte';
 	import ReleaseProjectModal from './ReleaseProjectModal.svelte';
 	import DeleteObjectModal from './DeleteObjectModal.svelte';
+	import DeleteVMModal from './DeleteVMModal.svelte';
 	import DeployTemplateModal from './DeployTemplateModal.svelte';
 	import DistributedFirewallModal from './DistributedFirewallModal.svelte';
 	import EditManifestModal from './EditManifestModal.svelte';
+	import EditSettings from './EditSettings.svelte';
 	import EgressFirewallModal from './EgressFirewallModal.svelte';
+	import MigrateModal from './MigrateModal.svelte';
 	import NewNamespaceModal from './NewNamespaceModal.svelte';
 	import NewNetworkModal from './NewNetworkModal.svelte';
 	import NewProjectModal from './NewProjectModal.svelte';
 	import NewVMWizard from './NewVMWizard.svelte';
+	import SaveTemplateModal from './SaveTemplateModal.svelte';
 	import StagedChangesModal from './StagedChangesModal.svelte';
+	import StorageMigrateModal from './StorageMigrateModal.svelte';
 	import Tier0Modal from './Tier0Modal.svelte';
 	import UploadModal from './UploadModal.svelte';
 
@@ -181,4 +187,29 @@
 		ondiscard={discardStaged}
 		onreview={reviewStaged}
 	/>
+{:else if m?.kind === 'editVM'}
+	<EditSettings
+		vm={m.vm}
+		networks={inventory.networks}
+		initialSection={m.section}
+		onclose={close}
+		onstaged={staged}
+	/>
+{:else if m?.kind === 'deleteVM'}
+	<DeleteVMModal vm={m.vm} onclose={close} onstaged={staged} />
+{:else if m?.kind === 'cloneVM'}
+	<CloneModal vm={m.vm} onclose={close} />
+{:else if m?.kind === 'saveTemplate'}
+	<SaveTemplateModal vm={m.vm} onclose={close} onstaged={staged} />
+{:else if m?.kind === 'migrateVM'}
+	{@const vm = m.vm}
+	<MigrateModal
+		{vm}
+		onclose={close}
+		ondone={(ok) => {
+			if (ok) ui.showToast(`Live-migration requested for ${vm.name}.`, { kind: 'success' });
+		}}
+	/>
+{:else if m?.kind === 'migrateStorage'}
+	<StorageMigrateModal vm={m.vm} onclose={close} onstaged={staged} />
 {/if}
