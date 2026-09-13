@@ -10,6 +10,7 @@ import type {
 	UplinkCreate,
 	VM,
 } from '$lib/api';
+import type { EditSection } from '$lib/editform';
 import { reviewURL, type ReviewTarget } from '$lib/review';
 
 export type Tier0Initial =
@@ -49,12 +50,15 @@ type AppModal =
 			yaml: string;
 			reason?: string;
 	  }
-	| { kind: 'staged'; vm: VM }; // the per-VM staged-changes modal (from a Staged badge)
-
-// The host-kind registry actions the VM detail page fulfils with a modal or
-// tab - what a context menu on an unopened VM may request it to open.
-export type DetailAction =
-	'edit' | 'delete' | 'console' | 'snapshot' | 'clone' | 'template' | 'migrate' | 'migrate-storage';
+	| { kind: 'staged'; vm: VM } // the per-VM staged-changes modal (from a Staged badge)
+	// The VM dialogs live here, not on the detail page, so every VM menu (detail
+	// toolbar, context menu, inspector, palette) opens them the same way.
+	| { kind: 'editVM'; vm: VM; section?: EditSection } // section = the step a Configure "Edit" jumps to
+	| { kind: 'deleteVM'; vm: VM }
+	| { kind: 'cloneVM'; vm: VM }
+	| { kind: 'saveTemplate'; vm: VM }
+	| { kind: 'migrateVM'; vm: VM }
+	| { kind: 'migrateStorage'; vm: VM };
 
 // Right-click context menus - the inventory's signature interaction. The bulk variant
 // (right-click inside a grid multi-selection) renders inside the workspace that
@@ -123,17 +127,6 @@ class Ui {
 		this.ctx = { x, y, kind: 'vm', vm };
 	}
 
-	// A one-shot request for the VM page to open a modal/tab on arrival (context
-	// menu -> "Edit settings" on an unopened VM); seq re-fires repeats. Addressed
-	// to one VM, so the page of the VM being left lets it pass to the next.
-	detailIntent = $state<{ id: DetailAction; seq: number; namespace: string; name: string } | null>(
-		null,
-	);
-	#intentSeq = 0;
-	requestDetail(id: DetailAction, vm: { namespace: string; name: string }) {
-		this.detailIntent = { id, seq: ++this.#intentSeq, namespace: vm.namespace, name: vm.name };
-	}
-
 	// The masthead search instance, so object pages can push label queries into it.
 	search: { searchFor: (q: string) => void } | null = null;
 
@@ -141,7 +134,6 @@ class Ui {
 		this.toasts = [];
 		this.modal = null;
 		this.ctx = null;
-		this.detailIntent = null;
 	}
 }
 

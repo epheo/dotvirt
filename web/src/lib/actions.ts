@@ -13,7 +13,7 @@ import { vmPath } from './api';
 //    download a file) - the registry only describes and gates it.
 import { api, Unauthorized, type VM } from '$lib/api';
 import { friendlyError } from '$lib/format';
-import { ui, type DetailAction } from '$lib/state/ui.svelte';
+import { ui } from '$lib/state/ui.svelte';
 import { vmHref } from '$lib/nav';
 
 type ActionId =
@@ -60,8 +60,8 @@ export async function runRuntimeAction(a: VMAction, vm: VM): Promise<void> {
 
 // dispatchVMAction performs a registry action from OUTSIDE the VM detail page
 // (context menu, inspector, palette): runtime ops run here with toast feedback,
-// host actions navigate to the detail page carrying a one-shot intent. Shared
-// so the four-way split cannot drift between entry points.
+// host actions open their dialog or tab and land on the VM's page. Shared so
+// the four-way split cannot drift between entry points.
 export async function dispatchVMAction(
 	a: VMAction,
 	vm: VM,
@@ -71,16 +71,47 @@ export async function dispatchVMAction(
 		await runRuntimeAction(a, vm);
 		return;
 	}
-	if (a.id === 'manifest') {
-		window.open(manifestURL(vm), '_blank');
-		return;
+	switch (a.id) {
+		case 'manifest':
+			window.open(manifestURL(vm), '_blank');
+			return;
+		case 'adopt':
+			await adoptVM(vm, opts);
+			return;
+		case 'console':
+			goto(vmHref(vm.namespace, vm.name, 'console'));
+			return;
+		case 'snapshot':
+			goto(vmHref(vm.namespace, vm.name, 'snapshots'));
+			return;
 	}
-	if (a.id === 'adopt') {
-		await adoptVM(vm, opts);
-		return;
-	}
-	ui.requestDetail(a.id as DetailAction, vm);
+	openVMDialog(a.id, vm);
 	goto(vmHref(vm.namespace, vm.name));
+}
+
+// openVMDialog opens the modal behind a dialog-backed host action - the one
+// id-to-dialog mapping, so the detail toolbar and dispatchVMAction agree.
+export function openVMDialog(id: ActionId, vm: VM): void {
+	switch (id) {
+		case 'edit':
+			ui.modal = { kind: 'editVM', vm };
+			break;
+		case 'delete':
+			ui.modal = { kind: 'deleteVM', vm };
+			break;
+		case 'clone':
+			ui.modal = { kind: 'cloneVM', vm };
+			break;
+		case 'template':
+			ui.modal = { kind: 'saveTemplate', vm };
+			break;
+		case 'migrate':
+			ui.modal = { kind: 'migrateVM', vm };
+			break;
+		case 'migrate-storage':
+			ui.modal = { kind: 'migrateStorage', vm };
+			break;
+	}
 }
 
 // adoptVM stages a cluster-only VM's live state into the draft, with the one
