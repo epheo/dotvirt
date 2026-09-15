@@ -257,7 +257,6 @@ func (r *DotvirtReconciler) applyOwned(ctx context.Context, dv *dotvirtv1alpha1.
 	return nil
 }
 
-// secret reads one namespaced Secret.
 func (r *DotvirtReconciler) secret(ctx context.Context, ns, name string) (*corev1.Secret, error) {
 	var s corev1.Secret
 	if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &s); err != nil {

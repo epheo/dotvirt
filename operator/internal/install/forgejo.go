@@ -83,7 +83,6 @@ func ForgejoPVC(dv *dotvirtv1alpha1.Dotvirt) *corev1.PersistentVolumeClaim {
 	return pvc(forgejoPVCName, dv, "5Gi")
 }
 
-// ForgejoService exposes Forgejo's HTTP port in-cluster.
 func ForgejoService(dv *dotvirtv1alpha1.Dotvirt) *corev1.Service {
 	return service(ForgejoServiceName, dv, forgejoSelector, ForgejoHTTPPort)
 }

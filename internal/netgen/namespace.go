@@ -28,10 +28,6 @@ type PrimaryNet struct {
 	Subnet string `json:"subnet"` // required CIDR - a primary UDN must do IPAM (see below)
 }
 
-// NamespaceManifest renders the Namespace (labeled into the project) plus, when a
-// VM Network is requested, its primary UDN - as one multi-document file. A primary
-// UDN needs the namespace label + an empty namespace, both of which hold because
-// the namespace is created in the same change.
 // PlainNamespaceManifest renders a namespace with dotvirt's tenancy stripped -
 // the declarative half of a project release. The FILE stays (handing Argo a
 // deletion would prune the namespace itself); only the project label and repo
@@ -49,6 +45,10 @@ func PlainNamespaceManifest(name string) (path string, content []byte, err error
 	return "namespaces/" + name + ".yaml", out, nil
 }
 
+// NamespaceManifest renders the Namespace (labeled into the project) plus, when a
+// VM Network is requested, its primary UDN - as one multi-document file. A primary
+// UDN needs the namespace label + an empty namespace, both of which hold because
+// the namespace is created in the same change.
 func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error) {
 	if err := validate.RequireDNS1123("namespace", s.Name); err != nil {
 		return "", nil, err

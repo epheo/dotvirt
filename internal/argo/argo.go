@@ -297,7 +297,6 @@ func opSeverity(phase string) int {
 	}
 }
 
-// shortRev abbreviates a git revision for display; short or empty values pass through.
 func shortRev(rev string) string {
 	if len(rev) > 7 {
 		return rev[:7]

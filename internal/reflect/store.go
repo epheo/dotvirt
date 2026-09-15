@@ -61,10 +61,6 @@ type countingStore struct {
 	didSync  bool
 }
 
-// NewStore wraps idx so onChange fires after every reflector mutation and onSynced
-// fires exactly once when the initial relist (first Replace) lands. onSynced may be
-// nil for a signal-only reflector whose readiness nobody waits on. The result is a
-// cache.Indexer (reads delegate to idx) usable as a cache.NewReflector store.
 func NewStore(idx cache.Indexer, onChange, onSynced func()) cache.Indexer {
 	return &countingStore{Indexer: idx, onChange: onChange, onSynced: onSynced}
 }
@@ -118,8 +114,6 @@ type signalStore struct {
 	didSync  bool
 }
 
-// NewSignalStore builds a retain-nothing cache.Store that fires onChange on every
-// reflector mutation and onSynced once on the initial relist.
 func NewSignalStore(onChange, onSynced func()) cache.Store {
 	return &signalStore{onChange: onChange, onSynced: onSynced}
 }

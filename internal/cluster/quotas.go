@@ -57,7 +57,6 @@ func quotaFrom(q *corev1.ResourceQuota) model.NamespaceQuota {
 	return nq
 }
 
-// quotaUnit derives a display unit from the quota's resource name.
 func quotaUnit(resource string) string {
 	switch {
 	case strings.Contains(resource, "cpu"):

@@ -63,8 +63,6 @@ func hardenedPodSecurityContext(setFSGroup bool) *corev1.PodSecurityContext {
 	return sc
 }
 
-// hardenedContainerSecurityContext drops all capabilities and forbids privilege
-// escalation.
 func hardenedContainerSecurityContext() *corev1.SecurityContext {
 	noPrivilegeEscalation := false
 	return &corev1.SecurityContext{

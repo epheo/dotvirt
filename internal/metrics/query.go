@@ -82,7 +82,6 @@ func (c *Client) vector(ctx context.Context, token, query string) []labeledValue
 	return out
 }
 
-// fanOut runs one query per name concurrently, collecting run's result per name.
 func fanOut[T any](queries map[string]string, run func(q string) T) map[string]T {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -141,8 +140,6 @@ func (g *gather) wait() error {
 	return nil
 }
 
-// scalars runs named instant queries concurrently, returning name->first value (0
-// when a query has no result).
 func (c *Client) scalars(ctx context.Context, token string, queries map[string]string) map[string]float64 {
 	return fanOut(queries, func(q string) float64 {
 		if vec := c.vector(ctx, token, q); len(vec) > 0 {
@@ -249,7 +246,6 @@ func rateWindow(step time.Duration) time.Duration {
 	return 2 * time.Minute
 }
 
-// promDur formats a duration the way PromQL wants it (e.g. "2m", "1h").
 func promDur(d time.Duration) string {
 	switch {
 	case d%time.Hour == 0:

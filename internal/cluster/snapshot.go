@@ -75,7 +75,6 @@ func (c *Client) CreateSnapshot(ctx context.Context, namespace, vmName, snapName
 	return err
 }
 
-// DeleteSnapshot removes a VirtualMachineSnapshot.
 func (c *Client) DeleteSnapshot(ctx context.Context, namespace, snapName string) error {
 	dyn, err := c.dynamic()
 	if err != nil {

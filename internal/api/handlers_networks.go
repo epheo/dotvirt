@@ -20,7 +20,6 @@ import (
 // api.go, where each route's authorization rationale lives; only the routes with
 // per-request scope or SSAR switches keep bespoke handlers here.
 
-// nsPeek is the routing field of a namespace-scoped create body.
 type nsPeek struct {
 	Namespace string `json:"namespace"`
 }

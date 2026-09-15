@@ -7,7 +7,6 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 )
 
-// runtimeOp is one imperative VMI action (restart/migrate/pause/unpause).
 type runtimeOp func(ctx context.Context, c *cluster.Client, namespace, name string) error
 
 // handleRuntimeOp runs an imperative VMI action under the caller's token - the

@@ -163,7 +163,6 @@ func Load(args []string) (*Config, error) {
 	return c, nil
 }
 
-// randomSecret returns a 32-byte hex key for signing session cookies.
 func randomSecret() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
