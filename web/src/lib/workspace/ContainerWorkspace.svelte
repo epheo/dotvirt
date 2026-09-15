@@ -121,7 +121,7 @@
 
 	let picked = $state<Set<string>>(new Set());
 	let confirmingBulkDelete = $state(false);
-	const bulkOp = action({ toast: true });
+	const bulkOp = action({ toast: ui.toastError });
 
 	// The VM objects currently picked (resolve keys against the live inventory).
 	const pickedVMs = $derived(inventory.allVMs.filter((vm) => picked.has(vmKey(vm))));

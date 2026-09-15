@@ -12,7 +12,7 @@
 	// banner clears on the backend's word, not the click's.
 	const auth = authMethods();
 	const pending = $derived(!!auth.data?.sso && !!auth.data?.ssoPending);
-	const op = action({ toast: true });
+	const op = action({ toast: ui.toastError });
 
 	function finish() {
 		return op.run(async () => {

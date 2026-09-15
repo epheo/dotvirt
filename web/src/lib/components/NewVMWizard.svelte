@@ -555,7 +555,7 @@
 		canFinish={valid}
 		bind:current
 		onsubmit={submit}
-		onstaged={staged}
+		onsuccess={staged}
 		{onclose}
 		steps={[
 			{ title: 'Name and project', valid: step1Valid, body: step1 },

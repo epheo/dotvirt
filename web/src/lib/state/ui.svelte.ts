@@ -107,6 +107,9 @@ class Ui {
 	dismissToast(id: number) {
 		this.toasts = this.toasts.filter((t) => t.id !== id);
 	}
+	// An arrow so it can be handed to action() unbound: the primitive takes a
+	// reporter rather than importing the shell.
+	toastError = (msg: string) => this.showToast(msg, { kind: 'error' });
 
 	// The Changes section is a route (deep-linkable, back-button-walkable); this is
 	// the one navigation every review affordance shares. A target lands on one

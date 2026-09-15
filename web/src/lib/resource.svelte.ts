@@ -2,7 +2,6 @@ import { untrack } from 'svelte';
 import { Unauthorized } from './api';
 import { friendlyError } from './format';
 import { pollWhileVisible } from './poll';
-import { ui } from './state/ui.svelte';
 
 // resource owns the keyed-fetch idiom shared by the detail and metrics panels:
 // a load keyed on a STABLE identity string (never a per-frame object - the live
@@ -88,9 +87,10 @@ export function resource<T>(
 // the central-401 swallow - so no dialog hand-rolls the sequence or forgets the
 // Unauthorized branch and paints an error banner over the login redirect.
 // run resolves true on success, so call sites close on `if (await op.run(...))`.
-// toast reports a failure as an error toast instead of the inline slot: the
-// surfacing for imperative verbs (banners, toolbars, batches) that own no form
-// to paint it in.
+// toast reports a failure through the given reporter instead of the inline
+// slot: the surfacing for imperative verbs (banners, toolbars, batches) that
+// own no form to paint it in. It is passed in so this primitive does not
+// depend on the shell.
 export interface Action {
 	readonly busy: boolean;
 	readonly error: string;
@@ -98,7 +98,7 @@ export interface Action {
 	run(fn: () => Promise<unknown>): Promise<boolean>;
 }
 
-export function action(opts: { toast?: boolean } = {}): Action {
+export function action(opts: { toast?: (message: string) => void } = {}): Action {
 	let busy = $state(false);
 	let error = $state('');
 	return {
@@ -119,7 +119,7 @@ export function action(opts: { toast?: boolean } = {}): Action {
 				return true;
 			} catch (e) {
 				if (e instanceof Unauthorized) return false;
-				if (opts.toast) ui.showToast(friendlyError(e), { kind: 'error' });
+				if (opts.toast) opts.toast(friendlyError(e));
 				else error = friendlyError(e);
 				return false;
 			} finally {

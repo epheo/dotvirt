@@ -68,11 +68,11 @@
 	}
 
 	// adopt/resync, feeding the Summary card's busy state.
-	const reconcileOp = action({ toast: true });
+	const reconcileOp = action({ toast: ui.toastError });
 
 	// Imperative runtime ops (restart/pause/unpause/live-migrate). Results
 	// surface as toasts - identical feedback to the right-click context menu.
-	const runtimeOp = action({ toast: true });
+	const runtimeOp = action({ toast: ui.toastError });
 
 	// The flat toolbar: the everyday imperative verbs, promoted out of the
 	// Actions menu. Power is deliberately absent - it is a declarative
@@ -96,7 +96,7 @@
 	// Power is declarative here (a staged runStrategy change), but it still
 	// deserves a first-class button: hiding it inside Edit Settings made the
 	// most basic verb the hardest to find. The button stages and says so.
-	const powerOp = action({ toast: true });
+	const powerOp = action({ toast: ui.toastError });
 	function stagePower() {
 		const target = vm;
 		if (!target.sourceFile || powerOp.busy) return;

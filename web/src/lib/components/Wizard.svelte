@@ -30,7 +30,7 @@
 		footerHint = '',
 		icon,
 		onsubmit,
-		onstaged,
+		onsuccess,
 		onclose,
 	}: {
 		title: string;
@@ -43,8 +43,9 @@
 		// The staging call's response is irrelevant here: success means "staged".
 		onsubmit: () => Promise<unknown>;
 		// Replaces the close after a successful stage, for a wizard with a screen
-		// still to show (the VM create's credentials reveal).
-		onstaged?: () => void;
+		// still to show (the VM create's credentials reveal). Unlike StageModal's
+		// onstaged, which runs in addition to the close.
+		onsuccess?: () => void;
 		onclose: () => void;
 	} = $props();
 
@@ -55,7 +56,7 @@
 		if (!canFinish) return;
 		if (await op.run(onsubmit)) {
 			ui.toastStaged();
-			(onstaged ?? onclose)();
+			(onsuccess ?? onclose)();
 		}
 	}
 

@@ -14,7 +14,7 @@
 		inventory.networks.filter((n) => n.scope === 'shared' && !n.sourceFile).length +
 			inventory.policies.filter((p) => !p.namespace && !p.sourceFile).length,
 	);
-	const op = action({ toast: true });
+	const op = action({ toast: ui.toastError });
 	function adopt() {
 		return op.run(async () => {
 			const view = await api.adoptPlatform();
