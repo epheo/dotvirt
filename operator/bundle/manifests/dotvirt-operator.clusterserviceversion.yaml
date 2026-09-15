@@ -221,7 +221,6 @@ spec:
                 - deletecollection
                 - get
                 - patch
-                - update
             - apiGroups:
                 - ""
               resources:
