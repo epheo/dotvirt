@@ -139,7 +139,8 @@ type DotvirtSpec struct {
 type DotvirtStatus struct {
 	// ObservedGeneration is the .metadata.generation last reconciled.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-	// Phase is a short human-facing summary (e.g. Pending, Provisioning, Ready).
+	// Phase is a short human-facing summary: Provisioning, BlockedOnDependencies or
+	// Ready (the Phase* consts).
 	Phase string `json:"phase,omitempty"`
 	// Conditions follow the standard k8s conventions (see the Condition* consts).
 	// +listType=map
