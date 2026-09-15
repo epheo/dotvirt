@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/url"
@@ -106,34 +105,28 @@ func (r *DotvirtReconciler) mirrorAppsetToken(ctx context.Context, dv *dotvirtv1
 	if err != nil {
 		return err // the source is ensured earlier in this reconcile
 	}
-	var existing corev1.Secret
-	err = r.Get(ctx, types.NamespacedName{Namespace: argoNS, Name: install.AppsetSecretName}, &existing)
+	// One mirror name per ArgoCD namespace, so a second install sharing that namespace
+	// would rewrite this one on every reconcile while the first rewrote it back, leaving
+	// both plugin generators intermittently 401ing. Re-stamping the labels would also
+	// pull the other install's Secret into this one's uninstall blast radius. Fail
+	// loudly instead: the topology needs one ArgoCD namespace per install.
+	existing, err := r.secret(ctx, argoNS, install.AppsetSecretName)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
 	if err == nil {
-		// One mirror name per ArgoCD namespace, so a second install sharing that namespace
-		// would rewrite this one on every reconcile while the first rewrote it back, leaving
-		// both plugin generators intermittently 401ing. Re-stamping the labels would also
-		// pull the other install's Secret into this one's uninstall blast radius. Fail
-		// loudly instead: the topology needs one ArgoCD namespace per install.
 		if owner := existing.Labels[install.InstanceLabel]; owner != "" && owner != dv.Name {
 			return fmt.Errorf("appset token mirror %s/%s belongs to dotvirt install %q; give each install its own ArgoCD namespace",
 				argoNS, install.AppsetSecretName, owner)
 		}
-		if bytes.Equal(existing.Data["token"], src.Data["token"]) {
-			return nil
-		}
-		existing.Data = map[string][]byte{"token": src.Data["token"]}
-		// Stamp an adopted predecessor's mirror so it is cleaned up with this instance.
-		existing.Labels = install.Labels(dv.Name)
-		return r.Update(ctx, &existing)
 	}
-	if !apierrors.IsNotFound(err) {
-		return err
-	}
-	mirror := &corev1.Secret{
+	// The labels adopt an unlabeled predecessor's mirror, so it is cleaned up with
+	// this instance.
+	return r.apply(ctx, &corev1.Secret{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
 		ObjectMeta: metav1.ObjectMeta{Name: install.AppsetSecretName, Namespace: argoNS, Labels: install.Labels(dv.Name)},
 		Data:       map[string][]byte{"token": src.Data["token"]},
-	}
-	return r.Create(ctx, mirror)
+	})
 }
 
 // ensureArgoWebhook registers one ORG-level forge webhook -> ArgoCD and sets the

@@ -207,12 +207,10 @@ func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvi
 	return nil, nil
 }
 
-// apply server-side-applies obj honoring -dry-run. Every apply in this package
-// goes through here (or applyOwned) so no call site can pass a literal that
-// diverges from r.DryRun. SSA is the norm for anything the operator owns or
-// converges; Get+Create (ensureSecret) is reserved for create-once generated
-// values; mirrorAppsetToken hand-rolls its convergence to enforce the
-// one-ArgoCD-namespace-per-install guard.
+// apply server-side-applies obj honoring -dry-run. Every write of a rendered
+// object goes through here (or applyOwned) so no call site can pass a literal
+// that diverges from r.DryRun, and no object needs the update verb; the
+// create-once secrets only gate the apply behind an existence check.
 func (r *DotvirtReconciler) apply(ctx context.Context, obj client.Object) error {
 	return install.Apply(ctx, r.Client, obj, r.DryRun)
 }

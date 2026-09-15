@@ -13,7 +13,7 @@ package controller
 // OwnerReferencesPermissionEnforcement admission plugin checks via this subresource.
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;patch
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;deletecollection
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;patch;deletecollection
 // configmaps get/update: read the default ingress CA (openshift-config-managed) and
 // merge the managed forge's host into argocd-tls-certs-cm, so Argo VERIFIES the
 // router-served cert instead of x509-failing on every repo.
