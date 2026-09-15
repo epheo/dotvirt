@@ -289,7 +289,6 @@
 				onadopt={adopt}
 				onresync={resync}
 				onconsole={() => ontab?.('console')}
-				onmonitor={() => ontab?.('monitor')}
 				onedit={() => openEdit()}
 				onmigrate={() => openVMDialog('migrate', vm)}
 			/>

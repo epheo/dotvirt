@@ -44,10 +44,7 @@
 	// The tenant filter mirrors ?tenant=, so the scoped view is shareable and
 	// the project context menu can deep-link into it: the select writes the URL,
 	// and navigation (deep link, in-app goto) drives the state back.
-	let tenant = $state(page.url.searchParams.get('tenant') ?? '');
-	$effect(() => {
-		tenant = page.url.searchParams.get('tenant') ?? '';
-	});
+	let tenant = $derived(page.url.searchParams.get('tenant') ?? '');
 	function setTenant(v: string) {
 		const url = new URL(page.url);
 		if (v) url.searchParams.set('tenant', v);

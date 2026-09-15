@@ -1,4 +1,7 @@
 import { test as base, expect, type Page } from '@playwright/test';
+import { signIn } from '../shared';
+
+export { openVM } from '../shared';
 
 // Shared plumbing for the hermetic UI suite: scenario switching against the
 // fixture server's control plane, the login shortcut, and a console gate that
@@ -37,24 +40,8 @@ export async function setScenario(page: Page, name: string) {
 	expect(res.ok(), `switch to scenario ${name}`).toBeTruthy();
 }
 
-// login signs in with the fixture token and waits for the app shell.
-export async function login(page: Page) {
-	await page.goto('/');
-	await page.fill('textarea', 'fixture-token');
-	await page.click('button[type="submit"]');
-	await expect(page.locator('aside').getByRole('link', { name: 'Compute' })).toBeVisible();
-}
-
-export async function openVM(page: Page, name: string) {
-	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
-	// The name link: a plain row click opens the side peek, not the detail page.
-	await page
-		.locator('main tbody tr', { hasText: name })
-		.first()
-		.getByRole('link', { name, exact: true })
-		.click();
-	await expect(page.getByRole('button', { name: /Edit Settings/ })).toBeVisible();
-}
+// login signs in with the fixture token.
+export const login = (page: Page) => signIn(page, 'fixture-token');
 
 // The edit wizard's finish button renders only on the last step; walk Next to it.
 export async function stageChange(page: Page) {

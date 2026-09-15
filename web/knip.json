@@ -1,0 +1,6 @@
+{
+	"$schema": "https://unpkg.com/knip@6/schema.json",
+	"include": ["exports", "types", "nsExports", "nsTypes"],
+	"ignore": ["src/lib/model.gen.ts"],
+	"ignoreExportsUsedInFile": { "interface": true, "type": true }
+}

@@ -73,7 +73,6 @@
 		});
 	});
 	let pinText = $state('');
-	// svelte-ignore state_referenced_locally
 	pinText = form.pin.join(' ');
 	function syncPinText() {
 		form.pin = splitList(pinText);

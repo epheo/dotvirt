@@ -7,7 +7,7 @@
 	import { page } from '$app/state';
 	import { api, onUnauthorized, streamInventory, withRetry } from '$lib/api';
 	import { INVENTORY_SECTIONS, sectionOf, vmHref, type Section } from '$lib/nav';
-	import { drafts, PLATFORM_PROJECT } from '$lib/state/drafts.svelte';
+	import { drafts } from '$lib/state/drafts.svelte';
 	import { catalog } from '$lib/state/catalog.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { reviewCache } from '$lib/state/reviewCache.svelte';

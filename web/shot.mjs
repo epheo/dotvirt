@@ -229,12 +229,16 @@ const scenes = {
 			async function closeModal() {
 				try {
 					await page.getByRole('button', { name: 'Cancel' }).click({ timeout: 2000 });
-				} catch {}
+				} catch {
+					/* best-effort */
+				}
 				try {
 					await page
 						.locator('div[role="presentation"]')
 						.waitFor({ state: 'detached', timeout: 3000 });
-				} catch {}
+				} catch {
+					/* best-effort */
+				}
 			}
 
 			await login(page, base);

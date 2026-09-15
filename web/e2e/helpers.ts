@@ -1,27 +1,14 @@
 import { expect, type Page } from '@playwright/test';
+import { signIn } from './shared';
+
+export { openVM } from './shared';
 
 const TOKEN = process.env.OC_TOKEN ?? '';
 
-// login authenticates with the OpenShift token and waits for the inventory shell.
+// login authenticates with the OpenShift token.
 export async function login(page: Page) {
 	if (!TOKEN) throw new Error('OC_TOKEN env var is required for the e2e tests');
-	await page.goto('/');
-	await page.waitForSelector('textarea');
-	await page.fill('textarea', TOKEN);
-	await page.click('button[type="submit"]');
-	// The "+ New" menu trigger is unambiguous and appears once authenticated ("All VMs"
-	// shows in both the tree and the breadcrumb, so it's not a unique anchor).
-	await expect(page.getByRole('button', { name: /^New$/ })).toBeVisible();
-}
-
-// openFirstVM switches to the VMs tab and opens the first VM's detail route
-// (via the name link: a plain row click opens the side peek).
-export async function openFirstVM(page: Page) {
-	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
-	const row = page.locator('tbody tr').first();
-	await expect(row).toBeVisible();
-	await row.getByRole('link').first().click();
-	await expect(page.getByRole('button', { name: /Edit Settings/ })).toBeVisible();
+	await signIn(page, TOKEN);
 }
 
 // ── GitOps round-trip helpers (roundtrip.spec.ts) ──────────────────────────────
@@ -34,7 +21,7 @@ const FORGE_OWNER = process.env.OWNER ?? 'dotvirt';
 
 // mergePR merges a Forgejo pull request, retrying while Forgejo finishes computing
 // mergeability (a freshly opened PR reports non-200 until then).
-export async function mergePR(page: Page, repo: string, pr: number) {
+async function mergePR(page: Page, repo: string, pr: number) {
 	for (let i = 0; i < 20; i++) {
 		const res = await page.request.post(
 			`${FORGE}/api/v1/repos/${FORGE_OWNER}/${repo}/pulls/${pr}/merge`,

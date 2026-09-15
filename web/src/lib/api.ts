@@ -21,9 +21,6 @@ export type { Event as VMEvent, Node as NodeTarget } from './model.gen';
 
 export type Power = 'On' | 'Off' | 'Unknown';
 export type SyncStatus = 'Synced' | 'OutOfSync' | 'NotTracked' | 'Pending' | 'Unknown';
-export type NetworkKind = 'default' | 'internal' | 'vlan';
-export type NetworkScope = 'project' | 'shared';
-export type PolicyKind = 'dfw' | 'admin' | 'baseline' | 'gateway' | 'egressip' | 'route';
 export type DRSMode = 'Predictive' | 'Automatic';
 
 export interface PlacementGroup extends Omit<gen.PlacementGroup, 'mode'> {

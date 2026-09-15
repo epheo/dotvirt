@@ -30,8 +30,8 @@
 	<div class="flex items-baseline justify-between text-xs">
 		<span class="text-ink-muted">{label}</span>
 		<span class="text-ink-soft">
-			{fmtUsage(unit, used)}{#if unit === 'bytes' && total > 0}{' '}<span class="text-ink-faint"
-					>of {fmtUsage(unit, total)}</span
+			{fmtUsage(unit, used)}{#if unit === 'bytes' && total > 0}<span class="text-ink-faint">
+					of {fmtUsage(unit, total)}</span
 				>{/if}
 		</span>
 	</div>

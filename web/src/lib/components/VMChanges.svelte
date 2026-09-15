@@ -6,7 +6,6 @@
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { reviewCache } from '$lib/state/reviewCache.svelte';
-	import { ui } from '$lib/state/ui.svelte';
 	import ChangeList from './ChangeList.svelte';
 	import Button from './Button.svelte';
 	import InfoCard from './InfoCard.svelte';

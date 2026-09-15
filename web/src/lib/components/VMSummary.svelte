@@ -38,7 +38,6 @@
 		onadopt,
 		onresync,
 		onconsole,
-		onmonitor,
 		onedit,
 		onmigrate,
 	}: {
@@ -49,7 +48,6 @@
 		onadopt: () => void;
 		onresync: () => void;
 		onconsole: () => void;
-		onmonitor: () => void;
 		// Opens Edit settings (the card header's next action); absent = read-only host.
 		onedit?: () => void;
 		// Opens the live-migration target picker (the Placement card's action).

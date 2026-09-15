@@ -8,7 +8,7 @@ import { commitKey, prKey } from '$lib/review';
 // object's History card look at the same ones, so a review loads once per
 // key for the session. A commit never changes; a PR's head moves only when
 // the app proposes again, which forgets that project's PR reviews.
-export type Review<T> = { readonly data: T | null; readonly error: string };
+type Review<T> = { readonly data: T | null; readonly error: string };
 
 class ReviewCache {
 	#commits = $state<Record<string, Review<CommitDetail>>>({});
