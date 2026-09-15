@@ -69,16 +69,8 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 		rendered.Manifest = patched
 	}
 
-	// A deploy must never silently overwrite a committed VM (a duplicate deploy
-	// or a generated-name collision) - merging would replace it. The declared
-	// index answers, since the VM may sit in a multi-document file at another
-	// path; a failed read is a failure, never absence.
-	idx, err := targetRead.DeclaredFilesOnBranch(c.baseBranch)
-	if err != nil {
+	if err := c.requireUndeclaredVM(targetRead, req.Namespace, rendered.Name); err != nil {
 		return model.DraftView{}, err
-	}
-	if _, ok := declaredRef(idx, draft.ResourceVM, req.Namespace, rendered.Name); ok {
-		return model.DraftView{}, fmt.Errorf("%w: %s/%s already exists in git", model.ErrConflict, req.Namespace, rendered.Name)
 	}
 	path := req.Namespace + "/" + rendered.Name + ".yaml"
 

@@ -64,6 +64,25 @@ func TestStageCreateRejectsIncompleteSpec(t *testing.T) {
 	}
 }
 
+// The wizard must not stage a VM the base branch already declares - here at a
+// path other than the one the wizard would write - since merging would
+// replace it.
+func TestStageCreateRefusesDeclaredVM(t *testing.T) {
+	bare := seedBare(t)
+	c := newTestCoordinator(t)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+
+	raw := json.RawMessage(`{"name":"web","namespace":"alpha","instancetype":"u1.medium","preference":"fedora",
+		"osImage":{"name":"fedora","namespace":"kv"}}`)
+	if _, err := c.StageCreateVM(id, proj, raw); !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("want ErrConflict for a VM git already declares, got %v", err)
+	}
+	if entries, _ := c.store.List(id.Username, proj.Name); len(entries) != 0 {
+		t.Errorf("a refused create must not be staged, got %+v", entries)
+	}
+}
+
 // A wizard VM is rendered once, at stage time: the preview, the persisted draft
 // and the proposed commit are the same bytes, and the typed cloud-init password
 // exists nowhere past the request - only its hash does.
