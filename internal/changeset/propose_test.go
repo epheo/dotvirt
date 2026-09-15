@@ -371,3 +371,58 @@ func TestOpenOrRecoverPR(t *testing.T) {
 		})
 	}
 }
+
+// Review state must track a PR whose head stands still: an approval lands and
+// CI finishes without a push, and the next refresh shows both. Once the PR is
+// settled (head, activity and a finished CI all unchanged) a refresh reads the
+// list alone.
+func TestOpenProposalsRefreshesUnchangedHead(t *testing.T) {
+	head := proposedBranchFor("alice", "p")
+	var reviews, status, updated string
+	var reads int
+	f := newProposeFixture(t,
+		func(m, path string) (int, string, bool) {
+			if m != "GET" {
+				return 0, "", false
+			}
+			switch {
+			case strings.HasSuffix(path, "/pulls"):
+				return http.StatusOK, `[{"number":4,"state":"open","html_url":"http://forge/pulls/4","title":"edit web","updated_at":"` + updated +
+					`","base":{"ref":"main"},"head":{"ref":"` + head + `","sha":"aaa"}}]`, true
+			case strings.HasSuffix(path, "/branch_protections"):
+				return http.StatusOK, `[]`, true
+			case strings.Contains(path, "/reviews"):
+				reads++
+				return http.StatusOK, reviews, true
+			case strings.Contains(path, "/status"):
+				reads++
+				return http.StatusOK, status, true
+			}
+			return 0, "", false
+		})
+
+	refresh := func() model.Proposal {
+		t.Helper()
+		prs, err := f.c.OpenProposals(f.proj)
+		if err != nil || len(prs) != 1 {
+			t.Fatalf("OpenProposals: %v (%d rows)", err, len(prs))
+		}
+		return prs[0]
+	}
+
+	reviews, status, updated = `[]`, `{"state":"pending","total_count":1}`, "2026-01-01T00:00:00Z"
+	if p := refresh(); p.Approvals != 0 || p.Checks != "pending" {
+		t.Fatalf("first refresh = approvals %d checks %q", p.Approvals, p.Checks)
+	}
+	reviews, status, updated = `[{"state":"APPROVED","user":{"login":"bob"}}]`, `{"state":"success","total_count":1}`, "2026-01-01T00:01:00Z"
+	if p := refresh(); p.Approvals != 1 || p.Checks != "success" {
+		t.Fatalf("an approval and a finished CI on the same head must show: approvals %d checks %q", p.Approvals, p.Checks)
+	}
+	before := reads
+	if p := refresh(); p.Approvals != 1 || p.Checks != "success" {
+		t.Fatalf("settled state must persist: approvals %d checks %q", p.Approvals, p.Checks)
+	}
+	if reads != before {
+		t.Fatalf("a settled PR must not be re-read, got %d extra forge calls", reads-before)
+	}
+}

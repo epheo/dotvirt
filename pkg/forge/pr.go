@@ -20,8 +20,11 @@ type PR struct {
 	Merged  bool   `json:"merged"`
 	// MergedAt is zero while unmerged (Forgejo sends null; time honors that).
 	MergedAt time.Time `json:"merged_at"`
-	Title    string    `json:"title"`
-	Head     struct {
+	// UpdatedAt moves with the PR's issue activity (reviews, comments, pushes)
+	// but not with commit statuses, which hang off the commit.
+	UpdatedAt time.Time `json:"updated_at"`
+	Title     string    `json:"title"`
+	Head      struct {
 		Ref string `json:"ref"`
 		Sha string `json:"sha"`
 	} `json:"head"`
