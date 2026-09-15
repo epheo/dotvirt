@@ -5,6 +5,7 @@
 	import { dispatchVMAction, vmActions } from '$lib/actions';
 	import { vmHref } from '$lib/nav';
 	import { duration } from '$lib/format';
+	import { vmSizing } from '$lib/sizing';
 	import { phaseTone } from '$lib/status';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
@@ -48,14 +49,7 @@
 		}
 	}
 
-	// Resolve instancetype-backed sizing like the grid does, so the two agree.
-	const flavor = $derived(
-		vm.instancetype
-			? inventory.options?.instancetypes?.find((i) => i.name === vm.instancetype)
-			: undefined,
-	);
-	const cpu = $derived(vm.cpuCores ?? flavor?.cpu ?? (vm.vcpus || undefined));
-	const mem = $derived(vm.memory ?? flavor?.memory ?? vm.memoryActual);
+	const sizing = $derived(vmSizing(vm, inventory.options));
 </script>
 
 <svelte:window {onkeydown} />
@@ -192,7 +186,7 @@
 		{/if}
 		<div class="flex justify-between gap-3 border-b border-line-soft px-3 py-1.5">
 			<dt class="text-ink-muted">vCPU / Memory</dt>
-			<dd class="text-ink">{cpu ?? '—'} / {mem ?? '—'}</dd>
+			<dd class="text-ink">{sizing.cpu ?? '—'} / {sizing.memory ?? '—'}</dd>
 		</div>
 		<div class="flex justify-between gap-3 border-b border-line-soft px-3 py-1.5">
 			<dt class="text-ink-muted">Disks</dt>

@@ -4,6 +4,7 @@
 	import { duration, relativeAge } from '$lib/format';
 	import { resource } from '$lib/resource.svelte';
 	import { itemKey } from '$lib/review';
+	import { vmSizing } from '$lib/sizing';
 	import CapacityUsage from './CapacityUsage.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
@@ -81,10 +82,7 @@
 	);
 	const latest = $derived(historyRes.data?.[0] ?? null);
 
-	// The manifest owns sizing when present; an instancetype-sized VM carries no
-	// cpuCores/memory in git, so the tiles fall back to the rendered topology.
-	const cpuVal = $derived(vm.cpuCores ?? (vm.vcpus || undefined));
-	const memVal = $derived(vm.memory ?? vm.memoryActual);
+	const sizing = $derived(vmSizing(vm, inventory.options));
 
 	// Staged changes for this VM, keyed by field label (for inline current->future).
 	const stagedChanges = $derived.by(() => {
@@ -149,13 +147,13 @@
 				<Row label="Preference" value={vm.preference ?? ''} />
 				<Row label="vCPU">
 					{#if stagedChanges.has('CPU')}
-						<StagedDiff from={`${cpuVal ?? '—'}`} to={stagedChanges.get('CPU')?.to ?? ''} />
-					{:else}<span class="text-ink">{cpuVal ?? '—'}</span>{/if}
+						<StagedDiff from={`${sizing.cpu ?? '—'}`} to={stagedChanges.get('CPU')?.to ?? ''} />
+					{:else}<span class="text-ink">{sizing.cpu ?? '—'}</span>{/if}
 				</Row>
 				<Row label="Memory">
 					{#if stagedChanges.has('Memory')}
-						<StagedDiff from={memVal ?? '—'} to={stagedChanges.get('Memory')?.to ?? ''} />
-					{:else}<span class="text-ink">{memVal ?? '—'}</span>{/if}
+						<StagedDiff from={sizing.memory ?? '—'} to={stagedChanges.get('Memory')?.to ?? ''} />
+					{:else}<span class="text-ink">{sizing.memory ?? '—'}</span>{/if}
 				</Row>
 				<Row label="Disks">
 					<span class="text-ink">

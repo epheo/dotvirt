@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { ChevronDown, ChevronUp } from 'lucide-svelte';
-	import { api } from '$lib/api';
 	import type { DraftItem, Power, SyncStatus, VM } from '$lib/api';
+	import { vmSizing } from '$lib/sizing';
 	import { phaseTone } from '$lib/status';
+	import { inventory } from '$lib/state/inventory.svelte';
 	import { persisted } from '$lib/state/persisted.svelte';
 	import { TBODY, THEAD_TR } from '$lib/table';
 	import PowerDot from './PowerDot.svelte';
@@ -34,27 +35,8 @@
 
 	const vmKey = (vm: VM) => `${vm.namespace}/${vm.name}`;
 
-	// An instancetype-sized VM carries no inline domain.cpu/memory in git, so the
-	// manifest fields are legitimately empty. Resolve sizing for display: manifest
-	// first (custom-sized), then the instancetype catalog (covers stopped VMs),
-	// then the live VMI (running VM whose flavor isn't in the cluster catalog).
-	let flavorSizing = $state(new Map<string, { cpu: number; memory: string }>());
-	$effect(() => {
-		api
-			.options()
-			.then((o) => {
-				flavorSizing = new Map(o.instancetypes.map((it) => [it.name, it]));
-			})
-			.catch(() => {});
-	});
-	const cpuOf = (vm: VM) =>
-		vm.cpuCores ??
-		(vm.instancetype ? flavorSizing.get(vm.instancetype)?.cpu : undefined) ??
-		(vm.vcpus || undefined);
-	const memOf = (vm: VM) =>
-		vm.memory ??
-		(vm.instancetype ? flavorSizing.get(vm.instancetype)?.memory : undefined) ??
-		vm.memoryActual;
+	const cpuOf = (vm: VM) => vmSizing(vm, inventory.options).cpu;
+	const memOf = (vm: VM) => vmSizing(vm, inventory.options).memory;
 
 	let search = $state('');
 
