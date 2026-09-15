@@ -2,10 +2,11 @@
 	import type { Snippet } from 'svelte';
 	import type { HTMLAnchorAttributes, HTMLButtonAttributes } from 'svelte/elements';
 
-	// The three button shapes in the product: primary (the one pill per
-	// surface), secondary (bordered), link (accent text). href renders an
-	// anchor with the same look, for a verb that is a navigation (a forge
-	// deep link, a tab). class is for layout only (ml-auto, flex-1, w-full).
+	// The button shapes in the product: primary (the one pill per surface),
+	// secondary (bordered), ghost (a footer's Cancel/Back), danger (the
+	// destructive confirm), link (accent text). href renders an anchor with
+	// the same look, for a verb that is a navigation (a forge deep link, a
+	// tab). class is for layout only (ml-auto, flex-1, w-full).
 	let {
 		variant = 'primary',
 		size = 'md',
@@ -14,7 +15,7 @@
 		children,
 		...rest
 	}: {
-		variant?: 'primary' | 'secondary' | 'link';
+		variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'link';
 		size?: 'md' | 'sm';
 		href?: string;
 		class?: string;
@@ -27,6 +28,8 @@
 			'rounded-full bg-accent font-medium text-white hover:bg-accent-hover disabled:bg-line-strong',
 		secondary:
 			'rounded border border-line-strong bg-panel text-ink-soft hover:bg-inset disabled:opacity-50',
+		ghost: 'rounded text-ink-soft hover:bg-inset-strong disabled:text-ink-faint',
+		danger: 'rounded bg-danger font-medium text-white hover:bg-danger-ink disabled:opacity-50',
 		link: 'text-accent-ink hover:underline disabled:opacity-50',
 	};
 	const PAD = { md: 'px-4 py-1.5 text-sm', sm: 'px-3 py-1 text-xs' };

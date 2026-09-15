@@ -58,12 +58,8 @@
 	</div>
 	{#snippet footer()}
 		<Button variant="secondary" class="ml-auto" onclick={onclose}>Cancel</Button>
-		<button
-			onclick={undo}
-			disabled={op.busy}
-			class="rounded bg-danger px-3 py-1 text-sm font-medium text-white hover:bg-danger-ink disabled:opacity-50"
-		>
+		<Button variant="danger" onclick={undo} disabled={op.busy}>
 			{op.busy ? 'Opening…' : 'Open pull request'}
-		</button>
+		</Button>
 	{/snippet}
 </Modal>

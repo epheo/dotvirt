@@ -116,13 +116,14 @@
 					<SelectInput
 						bind:value={row.action}
 						size="sm"
-						class="w-auto! {row.action === 'Deny' ? 'text-danger-ink' : 'text-ok-ink'}"
+						width="w-auto"
+						class={row.action === 'Deny' ? 'text-danger-ink' : 'text-ok-ink'}
 					>
 						<option value="Allow">Allow</option>
 						<option value="Deny">Deny</option>
 					</SelectInput>
 					<span class="text-xs text-ink-faint">egress to</span>
-					<SelectInput bind:value={row.dest} size="sm" class="w-auto!">
+					<SelectInput bind:value={row.dest} size="sm" width="w-auto">
 						<option value="cidr">CIDR</option>
 						<option value="dns">DNS name</option>
 					</SelectInput>
@@ -145,7 +146,7 @@
 					<ProtoPortInput
 						bind:proto={row.proto}
 						bind:port={row.port}
-						portClass="w-24"
+						portWidth="w-24"
 						labelClass=""
 					/>
 				</div>

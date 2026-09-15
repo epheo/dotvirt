@@ -90,13 +90,13 @@
 			<label class="flex flex-col gap-1">
 				<span class="text-ink-faint">Source VM</span>
 				<span class="flex gap-1">
-					<SelectInput bind:value={pickNS} size="sm" class="w-auto!" onchange={() => (pickVM = '')}>
+					<SelectInput bind:value={pickNS} size="sm" width="w-auto" onchange={() => (pickVM = '')}>
 						<option value="" disabled>namespace</option>
 						{#each inventory.namespaces as ns (ns)}
 							<option value={ns}>{ns}</option>
 						{/each}
 					</SelectInput>
-					<SelectInput bind:value={pickVM} size="sm" class="w-auto!">
+					<SelectInput bind:value={pickVM} size="sm" width="w-auto">
 						<option value="" disabled>vm</option>
 						{#each vmsIn(pickNS) as v (v.name)}
 							<option value={v.name}>{v.name}</option>
@@ -108,31 +108,31 @@
 		<label class="flex flex-col gap-1">
 			<span class="text-ink-faint">Destination</span>
 			<span class="flex items-center gap-1">
-				<SelectInput bind:value={dstMode} size="sm" class="w-auto!">
+				<SelectInput bind:value={dstMode} size="sm" width="w-auto">
 					<option value="vm">VM</option>
 					<option value="ip">External IP</option>
 				</SelectInput>
 				{#if dstMode === 'vm'}
-					<SelectInput bind:value={dstNS} size="sm" class="w-auto!" onchange={() => (dstVM = '')}>
+					<SelectInput bind:value={dstNS} size="sm" width="w-auto" onchange={() => (dstVM = '')}>
 						<option value="" disabled>namespace</option>
 						{#each inventory.namespaces as ns (ns)}
 							<option value={ns}>{ns}</option>
 						{/each}
 					</SelectInput>
-					<SelectInput bind:value={dstVM} size="sm" class="w-auto!">
+					<SelectInput bind:value={dstVM} size="sm" width="w-auto">
 						<option value="" disabled>vm</option>
 						{#each vmsIn(dstNS) as v (v.name)}
 							<option value={v.name}>{v.name}</option>
 						{/each}
 					</SelectInput>
 				{:else}
-					<TextInput bind:value={dstIP} size="sm" class="w-36!" placeholder="203.0.113.9" />
+					<TextInput bind:value={dstIP} size="sm" width="w-36" placeholder="203.0.113.9" />
 				{/if}
 			</span>
 		</label>
 		<label class="flex flex-col gap-1">
 			<span class="text-ink-faint">Protocol</span>
-			<SelectInput bind:value={protocol} size="sm" class="w-auto!">
+			<SelectInput bind:value={protocol} size="sm" width="w-auto">
 				<option>TCP</option>
 				<option>UDP</option>
 				<option>SCTP</option>
@@ -143,7 +143,7 @@
 			<TextInput
 				bind:value={port}
 				size="sm"
-				class="w-20!"
+				width="w-20"
 				type="number"
 				min="1"
 				max="65535"

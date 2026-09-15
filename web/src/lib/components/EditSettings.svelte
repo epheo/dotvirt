@@ -398,8 +398,8 @@
 {#snippet stepStorage()}
 	{#snippet diskRow(disk: DiskRow)}
 		{#if disk.isNew}
-			<TextInput bind:value={disk.name} size="sm" class="w-24!" />
-			<TextInput bind:value={disk.size} size="sm" class="w-16!" />
+			<TextInput bind:value={disk.name} size="sm" width="w-24" />
+			<TextInput bind:value={disk.size} size="sm" width="w-16" />
 			<StorageClassSelect
 				options={options?.storageClasses ?? []}
 				bind:value={disk.storageClass}
@@ -428,7 +428,7 @@
 {#snippet stepNetworks()}
 	{#snippet nicRow(nic: NicRow)}
 		{#if nic.isNew}
-			<SelectInput bind:value={nic.network} size="sm" class="w-60!">
+			<SelectInput bind:value={nic.network} size="sm" width="w-60">
 				{#each available as net (net.scope + (net.namespace ?? '') + net.name)}
 					<option value={attachRef(net)}
 						>{net.name} — {kindLabel(net.kind)}{net.scope === 'shared' ? ' · shared' : ''}</option

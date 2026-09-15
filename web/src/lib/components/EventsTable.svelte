@@ -81,7 +81,13 @@
 				{r} <span class="text-ink-faint">{n}</span>
 			</button>
 		{/each}
-		<SelectInput bind:value={windowH} size="sm" class="ml-auto w-auto!" aria-label="Time window">
+		<SelectInput
+			bind:value={windowH}
+			size="sm"
+			width="w-auto"
+			class="ml-auto"
+			aria-label="Time window"
+		>
 			<option value={0}>All time</option>
 			<option value={1}>Last hour</option>
 			<option value={6}>Last 6h</option>

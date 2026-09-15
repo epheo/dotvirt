@@ -9,13 +9,15 @@
 	// and focus treatment, so dialogs stop hand-rolling drifting class strings.
 	// size 'sm' is the compact table/toolbar variant. Everything else (type,
 	// min/max, list, placeholder, data-autofocus) passes through as native
-	// attributes. class lands on the wrapper: callers size the field with it.
+	// attributes. width is the wrapper's width utility (full by default: the
+	// modal-form case); class is for the rest of its layout (ml-auto).
 	// suggest is a default the empty field falls back to: shown as the
 	// placeholder, taken as the value on Tab. placeholder alone is a hint.
 	let {
 		value = $bindable(),
 		mono = false,
 		size = 'md',
+		width = 'w-full',
 		suggest,
 		placeholder,
 		class: cls = '',
@@ -25,12 +27,13 @@
 		value?: V;
 		mono?: boolean;
 		size?: 'md' | 'sm';
+		width?: string;
 		suggest?: string;
 		class?: string;
-	} & Omit<HTMLInputAttributes, 'value' | 'class' | 'size'> = $props();
+	} & Omit<HTMLInputAttributes, 'value' | 'class' | 'size' | 'width'> = $props();
 </script>
 
-<span class="relative block w-full {cls}">
+<span class="relative block {width} {cls}">
 	<input
 		bind:value
 		placeholder={suggest || placeholder}

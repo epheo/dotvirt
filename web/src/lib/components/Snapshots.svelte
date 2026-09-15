@@ -75,7 +75,7 @@
 		<TextInput
 			bind:value={snapName}
 			placeholder="snapshot name (auto-generated if blank)"
-			class="w-72!"
+			width="w-72"
 		/>
 		<Button onclick={take} disabled={takeOp.busy}>
 			<Camera size={14} />

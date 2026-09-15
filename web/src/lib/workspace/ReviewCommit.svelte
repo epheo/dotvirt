@@ -108,13 +108,14 @@
 						merges.
 					{/if}
 				</span>
-				<button
+				<Button
+					variant="danger"
+					class="ml-auto shrink-0"
 					onclick={onundo}
 					disabled={!detail || detail.reverted}
-					class="ml-auto shrink-0 rounded-full border border-line-strong bg-panel px-4 py-1.5 text-sm font-medium text-danger-ink hover:bg-select-soft disabled:border-line disabled:bg-transparent disabled:text-ink-faint"
 				>
 					Undo this change
-				</button>
+				</Button>
 			</div>
 		{/if}
 	{/snippet}

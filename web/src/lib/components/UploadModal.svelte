@@ -225,11 +225,7 @@
 					>{missing[0]}{missing.length > 1 ? ` (+${missing.length - 1} more)` : ''}</span
 				>
 			{/if}
-			<button
-				onclick={onclose}
-				class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong"
-				>Cancel</button
-			>
+			<Button variant="ghost" class="ml-auto" onclick={onclose}>Cancel</Button>
 			<Button onclick={start} disabled={!ready} title={ready ? '' : missing[0]}>
 				{stage === 'error' ? 'Retry' : 'Upload'}
 			</Button>
