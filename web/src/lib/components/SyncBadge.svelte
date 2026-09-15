@@ -14,7 +14,6 @@
 		compact = false,
 	}: { sync: SyncStatus | string; error?: string; compact?: boolean } = $props();
 
-	// Green = in sync, red = drift, gray = not managed.
 	const VIEWS = {
 		Synced: { tone: 'ok', label: 'Synced' },
 		OutOfSync: { tone: 'danger', label: 'Out of sync' },

@@ -275,7 +275,6 @@
 				onmigrate={() => (ui.modal = { kind: 'migrateVM', vm })}
 			/>
 		{:else if tab === 'monitor'}
-			<!-- Monitor sub-rail: events + performance. -->
 			<TabBar
 				class="mb-3 border-b border-line"
 				tabs={[
