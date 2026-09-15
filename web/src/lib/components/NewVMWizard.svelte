@@ -25,6 +25,8 @@
 		onclose: () => void;
 	} = $props();
 
+	// Re-pulls only after a boot-time failure, so opening the dialog is the retry.
+	inventory.loadOptions();
 	const options = $derived(inventory.options);
 
 	// Form state

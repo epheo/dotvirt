@@ -27,6 +27,9 @@
 		onclose: () => void;
 	} = $props();
 
+	// Re-pulls only after a boot-time failure, so opening the dialog is the retry.
+	inventory.loadOptions();
+
 	type Stage = 'form' | 'creating' | 'preparing' | 'uploading' | 'importing' | 'done' | 'error';
 	let stage = $state<Stage>('form');
 	let error = $state('');

@@ -20,7 +20,7 @@
 
 	// Templates re-pull when a merged PR lands (tasksVersion): a template
 	// committed through the app appears without a reload. The options catalog
-	// re-pulls on entry so a boot-time failure heals here.
+	// re-pulls on entry after a boot-time failure, so it heals here.
 	$effect(() => {
 		inventory.tasksVersion;
 		catalog.load();
