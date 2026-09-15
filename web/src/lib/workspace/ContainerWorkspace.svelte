@@ -160,7 +160,7 @@
 				.join(', ');
 			const msg = `${verb} ${staged} of ${vms.length}${extra ? ` (${extra})` : ''}.`;
 			if (staged > 0) ui.toastStaged(msg, { kind: failed ? 'error' : 'success' });
-			else ui.showToast(msg, { kind: 'error' });
+			else ui.showToast(msg, { kind: failed ? 'error' : 'success' });
 		});
 	}
 
