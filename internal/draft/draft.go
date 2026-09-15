@@ -56,99 +56,22 @@ const (
 // proposal.
 func (r Resource) Atomic() bool { return r == ResourceDRS }
 
-// CreateLabel names a create of this resource in the Changes pane. Lives beside
-// the consts so a new resource cannot ship rendering under the VM-adoption default.
-func (r Resource) CreateLabel() string {
-	switch r {
-	case ResourceNetwork:
-		return "Create network"
-	case ResourceUplink:
-		return "Create uplink"
-	case ResourceNamespace:
-		return "Create namespace"
-	case ResourceRoleBinding:
-		return "Grant tenant access"
-	case ResourceEgressFirewall:
-		return "Create gateway firewall"
-	case ResourceEgressIP:
-		return "Create SNAT pool"
-	case ResourceExternalRoute:
-		return "Create external route"
-	case ResourceNetworkPolicy:
-		return "Create distributed firewall policy"
-	case ResourceAdminNetworkPolicy:
-		return "Create admin firewall policy"
-	case ResourceBaselineAdminNetworkPolicy:
-		return "Create baseline firewall policy"
-	case ResourceDRS:
-		return "Configure DRS"
-	case ResourceTemplate:
-		return "Save as template"
-	default:
-		return "Adopt VM from cluster"
-	}
-}
+// CreateLabel names a create of this resource in the Changes pane.
+func (r Resource) CreateLabel() string { return r.row().CreateLabel }
 
 // EditLabel names an in-place rewrite of this resource's manifest in the Changes
 // pane (the git-declared object edited from its form).
-func (r Resource) EditLabel() string {
-	switch r {
-	case ResourceNetwork:
-		return "Edit network"
-	case ResourceUplink:
-		return "Edit uplink"
-	case ResourceEgressFirewall:
-		return "Edit gateway firewall"
-	case ResourceEgressIP:
-		return "Edit SNAT pool"
-	case ResourceExternalRoute:
-		return "Edit external route"
-	case ResourceNetworkPolicy:
-		return "Edit distributed firewall policy"
-	case ResourceAdminNetworkPolicy:
-		return "Edit admin firewall policy"
-	case ResourceBaselineAdminNetworkPolicy:
-		return "Edit baseline firewall policy"
-	case ResourceTemplate:
-		return "Edit template"
-	default:
-		return "Edit " + string(r)
-	}
-}
+func (r Resource) EditLabel() string { return r.row().EditLabel }
 
 // Kinds are the Kubernetes kinds a resource's manifest can declare - how the
-// delete and read-back paths find the object in git. A network is one of three
-// backings; every other resource is a single kind. Empty for a resource that is
-// a file set rather than one object (DRS).
-func (r Resource) Kinds() []string {
-	switch r {
-	case "", ResourceVM:
-		return []string{"VirtualMachine"}
-	case ResourceNetwork:
-		return []string{"UserDefinedNetwork", "ClusterUserDefinedNetwork", "NetworkAttachmentDefinition"}
-	case ResourceUplink:
-		return []string{"NodeNetworkConfigurationPolicy"}
-	case ResourceNamespace:
-		return []string{"Namespace"}
-	case ResourceRoleBinding:
-		return []string{"RoleBinding"}
-	case ResourceEgressFirewall:
-		return []string{"EgressFirewall"}
-	case ResourceEgressIP:
-		return []string{"EgressIP"}
-	case ResourceExternalRoute:
-		return []string{"AdminPolicyBasedExternalRoute"}
-	case ResourceNetworkPolicy:
-		return []string{"NetworkPolicy"}
-	case ResourceAdminNetworkPolicy:
-		return []string{"AdminNetworkPolicy"}
-	case ResourceBaselineAdminNetworkPolicy:
-		return []string{"BaselineAdminNetworkPolicy"}
-	case ResourceTemplate:
-		return []string{"VirtualMachineTemplate"}
-	default:
-		return nil
-	}
+// delete and read-back paths find the object in git.
+func (r Resource) Kinds() []string { return r.row().KindNames() }
+
+// row is the resource's entry in the kind table; a word outside it (a draft
+// written by another version) has no kinds and no labels.
+func (r Resource) row() model.Resource {
+	row, _ := model.LookupResource(string(r))
+	return row
 }
 
 // Entry is one pending change, keyed by resource+namespace/name within its
