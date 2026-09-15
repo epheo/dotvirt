@@ -25,10 +25,14 @@ type DialerForToken func(token string) (VNCDialer, error)
 // a per-request, per-user dialer.
 type VNCProxy struct {
 	dialerFor DialerForToken
+	upgrader  websocket.Upgrader
 }
 
-// NewVNCProxy builds a VNC proxy that dials as the requesting user.
-func NewVNCProxy(d DialerForToken) *VNCProxy { return &VNCProxy{dialerFor: d} }
+// NewVNCProxy builds a VNC proxy that dials as the requesting user; uiOrigin is
+// the frontend origin its sockets accept besides same-origin.
+func NewVNCProxy(d DialerForToken, uiOrigin string) *VNCProxy {
+	return &VNCProxy{dialerFor: d, upgrader: upgrader(uiOrigin)}
+}
 
 // Handler upgrades the request to a WebSocket and pipes it bidirectionally to the
 // VMI's VNC stream: browser binary frames -> virt-api, and back. The dial uses the
@@ -55,7 +59,7 @@ func (p *VNCProxy) Handler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = conn.Close() }()
 
-	ws, err := upgrader.Upgrade(w, r, nil)
+	ws, err := p.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}

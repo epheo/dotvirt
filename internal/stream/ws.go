@@ -17,34 +17,31 @@ const (
 	pingPeriod = (pongWait * 9) / 10
 )
 
-// allowedOrigin is the configured frontend origin (e.g. http://localhost:5173)
-// permitted to open WebSockets cross-origin. Empty means same-origin only.
-var allowedOrigin string
-
-// SetAllowedOrigin configures the cross-origin policy for WebSocket upgrades. Set
-// once at startup from the UI-origin config.
-func SetAllowedOrigin(origin string) { allowedOrigin = origin }
-
 // upgrader gates WebSocket origins: WS handshakes are NOT covered by CORS, so an
 // unchecked CheckOrigin would let any web page open a socket carrying the victim's
-// session cookie and stream their inventory. We accept only same-origin requests
-// and the configured UI origin.
-var upgrader = websocket.Upgrader{CheckOrigin: checkOrigin}
+// session cookie and stream their inventory. It accepts same-origin requests and
+// allowed, the configured frontend origin (e.g. http://localhost:5173); empty
+// means same-origin only.
+func upgrader(allowed string) websocket.Upgrader {
+	return websocket.Upgrader{CheckOrigin: checkOrigin(allowed)}
+}
 
-func checkOrigin(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return true // non-browser client (no Origin); cookie/Bearer auth still gates the request
+func checkOrigin(allowed string) func(*http.Request) bool {
+	return func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true // non-browser client (no Origin); cookie/Bearer auth still gates the request
+		}
+		if allowed != "" && origin == allowed {
+			return true
+		}
+		// Same-origin: the Origin's host matches the request's Host.
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		return u.Host == r.Host
 	}
-	if allowedOrigin != "" && origin == allowedOrigin {
-		return true
-	}
-	// Same-origin: the Origin's host matches the request's Host.
-	u, err := url.Parse(origin)
-	if err != nil {
-		return false
-	}
-	return u.Host == r.Host
 }
 
 // Handler upgrades a request to a WebSocket carrying the caller's inventory. The
@@ -59,7 +56,7 @@ func (h *Hub) Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	wsconn, err := upgrader.Upgrade(w, r, nil)
+	wsconn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return // Upgrade already wrote an error response
 	}

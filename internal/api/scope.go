@@ -268,10 +268,8 @@ func byNamespace(ns string) projectPicker {
 // byName picks the project named want (for whole-draft routes carrying ?project=).
 func byName(want string) projectPicker {
 	return func(projects []project.ProjectInfo) (project.ProjectInfo, string, bool) {
-		for _, p := range projects {
-			if p.Name == want {
-				return p, "", true
-			}
+		if p, ok := findProject(projects, want); ok {
+			return p, "", true
 		}
 		return project.ProjectInfo{}, "no visible project by that name", false
 	}
@@ -287,12 +285,7 @@ func (s *Server) AllProjects() []project.ProjectInfo {
 }
 
 func (s *Server) projectByName(name string) (project.ProjectInfo, bool) {
-	for _, p := range s.AllProjects() {
-		if p.Name == name {
-			return p, true
-		}
-	}
-	return project.ProjectInfo{}, false
+	return findProject(s.AllProjects(), name)
 }
 
 // draftScope resolves the whole-draft routes (GET/DELETE/propose) that carry the

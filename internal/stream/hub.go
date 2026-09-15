@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/model"
 )
@@ -38,6 +40,7 @@ type Hub struct {
 	version   func() uint64   // summed version of those kinds (the level)
 	kick      chan struct{}   // a connection was added - rebuild so it gets a first frame
 	timeout   time.Duration   // per-identity build bound (buildTimeout; tests shorten it)
+	upgrader  websocket.Upgrader
 
 	mu    sync.Mutex
 	conns map[*conn]struct{}
@@ -46,13 +49,14 @@ type Hub struct {
 // NewHub builds the hub over a bus subscription (wake) and a reader for the summed
 // version of the kinds that subscription covers. Passing both keeps this package
 // decoupled from the specific kind set - the caller (main) owns it.
-func NewHub(inventory InventoryFunc, wake <-chan struct{}, version func() uint64) *Hub {
+func NewHub(inventory InventoryFunc, wake <-chan struct{}, version func() uint64, uiOrigin string) *Hub {
 	return &Hub{
 		inventory: inventory,
 		wake:      wake,
 		version:   version,
 		kick:      make(chan struct{}, 1),
 		timeout:   buildTimeout,
+		upgrader:  upgrader(uiOrigin),
 		conns:     map[*conn]struct{}{},
 	}
 }

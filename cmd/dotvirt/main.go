@@ -221,10 +221,6 @@ func run() error {
 		},
 	})
 
-	// WebSocket origin policy: same-origin + the configured UI origin (CORS doesn't
-	// cover WS handshakes, so this is the only origin gate for the stream/VNC sockets).
-	stream.SetAllowedOrigin(cfg.UIOrigin)
-
 	// Live inventory hub: each connection's frame is built under its identity (same
 	// path as GET /api/inventory). It wakes on every kind that can alter a frame and
 	// reconciles to the summed version of those kinds - so it coalesces by build
@@ -235,7 +231,7 @@ func run() error {
 		eventbus.NetworkChanged, eventbus.TaskChanged,
 	}
 	hubWake, _ := bus.Subscribe(inventoryKinds...)
-	hub := stream.NewHub(server.InventoryForIdentity, hubWake, func() uint64 { return bus.Version(inventoryKinds...) })
+	hub := stream.NewHub(server.InventoryForIdentity, hubWake, func() uint64 { return bus.Version(inventoryKinds...) }, cfg.UIOrigin)
 	go hub.Run(ctx)
 	server.UseStream(hub)
 
@@ -247,7 +243,7 @@ func run() error {
 	// VNC dials as the requesting user (KubeVirt RBAC gates the console).
 	server.UseVNC(stream.NewVNCProxy(func(token string) (stream.VNCDialer, error) {
 		return clusterFactory.For(token)
-	}))
+	}, cfg.UIOrigin))
 
 	// Webhook auto-registration: one ORG-level hook so the forge delivers push/PR events
 	// for every repo (the platform repo + all projects, present + future) to dotvirt, so

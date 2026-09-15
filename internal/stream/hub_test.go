@@ -18,7 +18,7 @@ func echoInventory(_ context.Context, id auth.Identity) (model.Inventory, error)
 }
 
 func newTestHub() *Hub {
-	return NewHub(echoInventory, make(chan struct{}, 1), func() uint64 { return 0 })
+	return NewHub(echoInventory, make(chan struct{}, 1), func() uint64 { return 0 }, "")
 }
 
 func testConn(name string) *conn {
@@ -142,7 +142,7 @@ func TestReconcileBoundsOneIdentityBuild(t *testing.T) {
 		}
 		return echoInventory(ctx, id)
 	}
-	h := NewHub(stall, make(chan struct{}, 1), func() uint64 { return 0 })
+	h := NewHub(stall, make(chan struct{}, 1), func() uint64 { return 0 }, "")
 	h.timeout = 50 * time.Millisecond
 	stuck, alice := testConn("stuck"), testConn("alice")
 	h.add(stuck)
