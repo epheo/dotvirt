@@ -152,8 +152,7 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 // up half declared. The capture runs under the caller's own token, so a user adopts
 // exactly what their RBAC lets them read. One draft, proposed as one PR.
 func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
-	ns := r.PathValue("namespace")
-	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	sc, ns, _, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
@@ -246,8 +245,7 @@ func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 // the "Download manifest" action. The git file IS the VM's full definition, so
 // this is dotvirt's VM-export path.
 func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
-	ns, name := r.PathValue("namespace"), r.PathValue("name")
-	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}

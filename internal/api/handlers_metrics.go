@@ -31,8 +31,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if !s.metricsReady(w) {
 		return
 	}
-	ns, name := r.PathValue("namespace"), r.PathValue("name")
-	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
@@ -46,8 +45,7 @@ func (s *Server) handleVMUsage(w http.ResponseWriter, r *http.Request) {
 	if !s.metricsReady(w) {
 		return
 	}
-	ns, name := r.PathValue("namespace"), r.PathValue("name")
-	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}

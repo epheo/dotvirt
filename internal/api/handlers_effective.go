@@ -36,8 +36,7 @@ func (s *Server) handleVMPolicy(w http.ResponseWriter, r *http.Request) {
 // handleNamespacePolicy answers for a whole namespace: pod-selecting policies
 // come back conditional rather than resolved.
 func (s *Server) handleNamespacePolicy(w http.ResponseWriter, r *http.Request) {
-	ns := r.PathValue("namespace")
-	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	sc, ns, _, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}

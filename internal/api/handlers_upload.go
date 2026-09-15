@@ -46,8 +46,7 @@ func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 
 // handleUploadStatus reports the upload DataVolume's phase + import progress.
 func (s *Server) handleUploadStatus(w http.ResponseWriter, r *http.Request) {
-	ns, name := r.PathValue("namespace"), r.PathValue("name")
-	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
@@ -62,8 +61,7 @@ func (s *Server) handleUploadToken(w http.ResponseWriter, r *http.Request) {
 		fail(w, fmt.Errorf("%w: image upload not configured", model.ErrUnavailable))
 		return
 	}
-	ns, name := r.PathValue("namespace"), r.PathValue("name")
-	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}

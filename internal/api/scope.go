@@ -123,12 +123,13 @@ func (s *Server) platformProject() project.ProjectInfo {
 	return project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}
 }
 
-// vmScope is the preamble of every /api/vms/{namespace}/{name} route: resolve
-// the tenant project owning the path's namespace (the authorization point) and
-// hand back the path pair.
+// vmScope is the preamble of every route addressing {namespace}/{name} by
+// path (name is empty on the namespace-only routes): resolve the tenant project
+// owning the path's namespace (the authorization point) and hand back the pair.
 func (s *Server) vmScope(w http.ResponseWriter, r *http.Request) (sc scope, ns, name string, ok bool) {
-	sc, ok = s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
-	return sc, r.PathValue("namespace"), r.PathValue("name"), ok
+	ns, name = r.PathValue("namespace"), r.PathValue("name")
+	sc, ok = s.resolveProject(w, r, byNamespace(ns))
+	return sc, ns, name, ok
 }
 
 // The platform-tier create authorities, each spelled exactly once: the create
