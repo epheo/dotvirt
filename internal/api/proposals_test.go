@@ -162,7 +162,7 @@ func TestProposalsPlatformProjectSticky(t *testing.T) {
 // TestCanAuthorPlatformNoRepo pins the safety gate: with no platform repo
 // configured, the inventory never seeds (or SSAR-checks) the platform tier.
 func TestCanAuthorPlatformNoRepo(t *testing.T) {
-	s := NewServer(Deps{}) // no PlatformRepo
+	s := NewServer(Deps{Draft: &fakeDraft{}}) // no PlatformRepo
 	id := auth.Identity{Token: "tok", Username: "u"}
 	// A nil cluster client is safe here: the repo-empty guard returns before any
 	// SSAR, so it must not be dereferenced.

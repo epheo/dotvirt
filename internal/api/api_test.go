@@ -95,6 +95,17 @@ func TestFailMasksInternalDetail(t *testing.T) {
 	}
 }
 
+// A wiring without the coordinator has no product; it must fail at
+// construction, not on the first draft-backed request.
+func TestNewServerRequiresDraft(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("NewServer accepted a nil Draft")
+		}
+	}()
+	NewServer(Deps{})
+}
+
 func TestRespond(t *testing.T) {
 	rec := httptest.NewRecorder()
 	respond(rec, map[string]string{"a": "b"}, nil)

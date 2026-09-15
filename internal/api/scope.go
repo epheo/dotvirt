@@ -203,10 +203,6 @@ func (s *Server) resolveProject(w http.ResponseWriter, r *http.Request, pick pro
 		fail(w, unavailable("cluster access", err))
 		return scope{}, false
 	}
-	if s.draft == nil {
-		http.Error(w, "changeset/draft not configured", http.StatusServiceUnavailable)
-		return scope{}, false
-	}
 	projects, err := s.projectsFor(r.Context(), id, c)
 	if err != nil {
 		fail(w, err)
@@ -320,10 +316,6 @@ func (s *Server) platformScopeWith(w http.ResponseWriter, r *http.Request, autho
 	id, c, err := s.userCluster(r)
 	if err != nil {
 		fail(w, unavailable("cluster access", err))
-		return scope{}, false
-	}
-	if s.draft == nil {
-		http.Error(w, "changeset/draft not configured", http.StatusServiceUnavailable)
 		return scope{}, false
 	}
 	if s.cfg.PlatformRepo == "" {

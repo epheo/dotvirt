@@ -30,7 +30,7 @@ import (
 // cluster-wide namespace list is the visibility source, not the candidates).
 func scopeServer(bus *eventbus.Bus) *Server {
 	sa := cluster.NewClient(fake.NewSimpleClientset(), nil, nil)
-	return NewServer(Deps{State: clusterstate.New(sa, "dotvirt.io/project", bus), Bus: bus})
+	return NewServer(Deps{State: clusterstate.New(sa, "dotvirt.io/project", bus), Bus: bus, Draft: &fakeDraft{}})
 }
 
 // listCountingClient is a user-identity client over a fake clientset seeded with

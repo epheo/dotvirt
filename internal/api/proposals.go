@@ -46,9 +46,6 @@ type propTarget struct {
 // of this frame (the refresher wakes the hub when its lane lands). Nil when no
 // project has a lane yet, so a cold frame ships without one.
 func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo) []model.Proposal {
-	if s.draft == nil {
-		return nil
-	}
 	out := []model.Proposal{}
 	hit, cold := false, false
 	for _, p := range s.trackProposals(id, projects) {
@@ -141,9 +138,6 @@ func (s *Server) nudgeProposals() {
 // subscribes to GitChanged ONLY (not the cluster/live kinds), so a VM phase change
 // never triggers a forge re-query.
 func (s *Server) RunProposalsRefresher(ctx context.Context, bus *eventbus.Bus) {
-	if s.draft == nil {
-		return
-	}
 	gitChanged, cancel := bus.Subscribe(eventbus.GitChanged)
 	defer cancel()
 	t := time.NewTicker(proposalsRefreshEvery)

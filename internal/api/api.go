@@ -190,10 +190,12 @@ type Server struct {
 	propNudge   chan struct{}
 }
 
-// Deps are the collaborators for NewServer. Nil pieces degrade gracefully. The
-// stream + VNC handlers aren't here: they're wired post-construction via
-// UseStream/UseVNC, because the hub is built over the server's own
-// InventoryForIdentity (chicken-and-egg otherwise).
+// Deps are the collaborators for NewServer. Draft is required: without the
+// coordinator there is no product, and every draft-backed route dereferences
+// it. The other nil pieces each disable one feature. The stream + VNC handlers
+// aren't here: they're wired post-construction via UseStream/UseVNC, because
+// the hub is built over the server's own InventoryForIdentity (chicken-and-egg
+// otherwise).
 type Deps struct {
 	ClusterFactory *cluster.Factory
 	State          *clusterstate.State
@@ -211,8 +213,12 @@ type Deps struct {
 	Config         Config
 }
 
-// NewServer builds the API server from its collaborators.
+// NewServer builds the API server from its collaborators. It panics on a nil
+// Draft so a stripped-down wiring fails at startup, not on the first request.
 func NewServer(d Deps) *Server {
+	if d.Draft == nil {
+		panic("api: NewServer requires a Draft")
+	}
 	return &Server{
 		clusterF:  d.ClusterFactory,
 		state:     d.State,
