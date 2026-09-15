@@ -1,29 +1,19 @@
 package api
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/epheo/dotvirt/internal/cluster"
+)
 
 // handleStorageClasses serves the Storage section's class fact sheet. Every
 // source is cluster-scoped platform truth a scoped tenant can't list itself,
 // so it is read once with dotvirt's SA and cached - catalog stance, like
 // /api/options. The cache is short because free capacity moves.
 func (s *Server) handleStorageClasses(w http.ResponseWriter, r *http.Request) {
-	if _, _, err := s.userCluster(r); err != nil {
-		fail(w, unavailable("cluster access", err))
-		return
-	}
-	classes, ok := s.storage.Get("all")
+	_, _, classes, ok := saCached(s, w, r, s.storage, (*cluster.Client).ListStorageClasses)
 	if !ok {
-		sa, err := s.clusterF.SA()
-		if err != nil {
-			fail(w, unavailable("cluster access", err))
-			return
-		}
-		classes, err = sa.ListStorageClasses(r.Context())
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		s.storage.Put("all", classes)
+		return
 	}
 	writeJSON(w, http.StatusOK, classes)
 }

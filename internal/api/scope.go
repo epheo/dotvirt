@@ -12,6 +12,7 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/restfactory"
+	"github.com/epheo/dotvirt/internal/ttlcache"
 )
 
 // visibleSet is a token's visible-namespace set stamped with the RBAC version it was
@@ -113,6 +114,33 @@ func (s *Server) canCreateCached(ctx context.Context, id auth.Identity, c *clust
 // The "read\x00" segment keeps the key out of the create-tuple namespace.
 func (s *Server) canReadNodesCached(ctx context.Context, id auth.Identity, c *cluster.Client) bool {
 	return s.ssarCached(id, "read\x00nodes", func() bool { return c.CanReadNodes(ctx) })
+}
+
+// saCached is the preamble of a catalog route: the caller's identity first
+// (the normal gate, so a missing identity or cluster answers like every other
+// route), then one SA-read value cached under a single key for everyone - a
+// scoped tenant can't list these cluster-scoped kinds itself. ok=false means
+// the response is written.
+func saCached[T any](s *Server, w http.ResponseWriter, r *http.Request, cache *ttlcache.Cache[T], fetch func(*cluster.Client, context.Context) (T, error)) (id auth.Identity, c *cluster.Client, v T, ok bool) {
+	id, c, err := s.userCluster(r)
+	if err != nil {
+		fail(w, unavailable("cluster access", err))
+		return id, nil, v, false
+	}
+	if v, ok = cache.Get("all"); ok {
+		return id, c, v, true
+	}
+	sa, err := s.clusterF.SA()
+	if err != nil {
+		fail(w, unavailable("cluster access", err))
+		return id, nil, v, false
+	}
+	if v, err = fetch(sa, r.Context()); err != nil {
+		fail(w, err)
+		return id, nil, v, false
+	}
+	cache.Put("all", v)
+	return id, c, v, true
 }
 
 // ssarRef is one create-authority tuple (API group + plural resource).
