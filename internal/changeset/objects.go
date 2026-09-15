@@ -49,7 +49,7 @@ func declaredRef(idx git.DeclaredIndex, resource draft.Resource, namespace, name
 // git declares nothing, an edit of the declaring file when the running state
 // differs from it (the segment and rule counterpart of a VM's drift adoption).
 // Rejected when git already matches, so the draft never carries a no-op.
-func (c *Coordinator) AdoptObject(id auth.Identity, proj project.ProjectInfo, o Adoptable) (model.DraftView, error) {
+func (c *Coordinator) AdoptObject(id auth.Identity, proj project.ProjectInfo, o model.Adoptable) (model.DraftView, error) {
 	read, err := c.read(proj)
 	if err != nil {
 		return model.DraftView{}, err

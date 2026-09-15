@@ -165,7 +165,7 @@ func TestAdoptObjectsClusterScoped(t *testing.T) {
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
-	view, err := c.AdoptObjects(id, proj, "the cluster scope", []Adoptable{
+	view, err := c.AdoptObjects(id, proj, "the cluster scope", []model.Adoptable{
 		{Kind: "ClusterUserDefinedNetwork", Name: "declared", Path: "networks/declared.yaml", Manifest: declared},
 		{Kind: "AdminNetworkPolicy", Name: "iso", Path: "adminnetworkpolicies/iso.yaml", Manifest: []byte("kind: AdminNetworkPolicy\nmetadata:\n  name: iso\n")},
 	})
@@ -200,17 +200,17 @@ func TestAdoptObjectCreateOrEdit(t *testing.T) {
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
-	view, err := c.AdoptObject(id, proj, Adoptable{Kind: "NetworkPolicy", Namespace: "alpha", Name: "web", Path: path, Manifest: drifted})
+	view, err := c.AdoptObject(id, proj, model.Adoptable{Kind: "NetworkPolicy", Namespace: "alpha", Name: "web", Path: path, Manifest: drifted})
 	if err != nil {
 		t.Fatalf("AdoptObject (drifted): %v", err)
 	}
 	if it := view.Items[0]; it.Kind != string(draft.KindEdit) || !strings.Contains(it.YAML, "app: web") || it.BaseYAML == "" {
 		t.Errorf("drift must stage an edit against the declared file, got %+v", it)
 	}
-	if _, err := c.AdoptObject(id, proj, Adoptable{Kind: "NetworkPolicy", Namespace: "alpha", Name: "web", Path: path, Manifest: declared}); !errors.Is(err, model.ErrInvalid) {
+	if _, err := c.AdoptObject(id, proj, model.Adoptable{Kind: "NetworkPolicy", Namespace: "alpha", Name: "web", Path: path, Manifest: declared}); !errors.Is(err, model.ErrInvalid) {
 		t.Errorf("a matching object must be refused, got %v", err)
 	}
-	view, err = c.AdoptObject(id, proj, Adoptable{Kind: "NetworkPolicy", Namespace: "alpha", Name: "api", Path: "alpha/networkpolicies/api.yaml", Manifest: []byte("kind: NetworkPolicy\nmetadata:\n  name: api\n  namespace: alpha\n")})
+	view, err = c.AdoptObject(id, proj, model.Adoptable{Kind: "NetworkPolicy", Namespace: "alpha", Name: "api", Path: "alpha/networkpolicies/api.yaml", Manifest: []byte("kind: NetworkPolicy\nmetadata:\n  name: api\n  namespace: alpha\n")})
 	if err != nil {
 		t.Fatalf("AdoptObject (new): %v", err)
 	}

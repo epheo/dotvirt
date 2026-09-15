@@ -24,7 +24,6 @@ import (
 
 	"github.com/epheo/dotvirt/internal/argo"
 	"github.com/epheo/dotvirt/internal/auth"
-	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/desched"
@@ -74,11 +73,11 @@ type Draft interface {
 	Adopt(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
 	// AdoptNamespace stages what the caller captured from the cluster; the capture runs
 	// under the caller's own token, so the coordinator stays cluster-free.
-	AdoptNamespace(id auth.Identity, proj project.ProjectInfo, namespace string, objs []changeset.Adoptable) (model.DraftView, error)
+	AdoptNamespace(id auth.Identity, proj project.ProjectInfo, namespace string, objs []model.Adoptable) (model.DraftView, error)
 	// AdoptObjects is AdoptNamespace for any captured set, cluster-scoped included.
-	AdoptObjects(id auth.Identity, proj project.ProjectInfo, where string, objs []changeset.Adoptable) (model.DraftView, error)
+	AdoptObjects(id auth.Identity, proj project.ProjectInfo, where string, objs []model.Adoptable) (model.DraftView, error)
 	// AdoptObject makes git match one running object: create, or edit when it drifted.
-	AdoptObject(id auth.Identity, proj project.ProjectInfo, obj changeset.Adoptable) (model.DraftView, error)
+	AdoptObject(id auth.Identity, proj project.ProjectInfo, obj model.Adoptable) (model.DraftView, error)
 	AdoptProject(id auth.Identity, commitProj, target project.ProjectInfo, owners []string) (model.DraftView, error)
 	ReleaseDeclared(id auth.Identity, commitProj, target project.ProjectInfo) (staged, residue []string, err error)
 	// Resync runs with dotvirt's SA (Argo operations carry no user context);

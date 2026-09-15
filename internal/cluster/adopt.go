@@ -51,15 +51,6 @@ func networkFamilyGVRs(clusterScoped bool) []schema.GroupVersionResource {
 	return out
 }
 
-// Adoptable is one live object serialized as the manifest a repo would hold.
-type Adoptable struct {
-	Namespace string
-	Name      string
-	Kind      string
-	Path      string // repo-relative
-	Manifest  []byte
-}
-
 // AdoptableObjects: everything running in namespaces that git does not describe,
 // plus the kinds the caller could not read.
 //
@@ -75,7 +66,7 @@ type Adoptable struct {
 // Forbidden kinds are named in unreadable, never an error: capture runs under the
 // caller's token and standard admin roles miss some kinds; failing hard would put
 // adoption out of their reach, silence would read partial as whole.
-func (c *Client) AdoptableObjects(ctx context.Context, namespaces []string, foreignApps map[string]bool) (objs []Adoptable, unreadable []string, err error) {
+func (c *Client) AdoptableObjects(ctx context.Context, namespaces []string, foreignApps map[string]bool) (objs []model.Adoptable, unreadable []string, err error) {
 	seen := map[string]bool{}
 	for _, ns := range namespaces {
 		objs, unreadable, err = c.capture(ctx, adoptableKinds, ns, foreignApps, objs, unreadable, seen)
@@ -88,14 +79,14 @@ func (c *Client) AdoptableObjects(ctx context.Context, namespaces []string, fore
 
 // ClusterAdoptableObjects is AdoptableObjects for the platform tier: every
 // cluster-scoped object of the platform kinds that git does not describe.
-func (c *Client) ClusterAdoptableObjects(ctx context.Context, foreignApps map[string]bool) (objs []Adoptable, unreadable []string, err error) {
+func (c *Client) ClusterAdoptableObjects(ctx context.Context, foreignApps map[string]bool) (objs []model.Adoptable, unreadable []string, err error) {
 	return c.capture(ctx, clusterAdoptableKinds, "", foreignApps, nil, nil, map[string]bool{})
 }
 
 // capture sweeps kinds in one namespace ("" = cluster scope), appending to objs and
 // unreadable (seen dedupes the unreadable names across namespaces).
 func (c *Client) capture(ctx context.Context, kinds []schema.GroupVersionResource, ns string, foreignApps map[string]bool,
-	objs []Adoptable, unreadable []string, seen map[string]bool) ([]Adoptable, []string, error) {
+	objs []model.Adoptable, unreadable []string, seen map[string]bool) ([]model.Adoptable, []string, error) {
 	for _, gvr := range kinds {
 		res := c.dyn.Resource(gvr)
 		lister := res.Namespace(ns)
@@ -131,7 +122,7 @@ func (c *Client) capture(ctx context.Context, kinds []schema.GroupVersionResourc
 			if err != nil {
 				return nil, nil, fmt.Errorf("serialize %s %s/%s: %w", gvr.Resource, ns, obj.GetName(), err)
 			}
-			objs = append(objs, Adoptable{
+			objs = append(objs, model.Adoptable{
 				Namespace: ns,
 				Name:      obj.GetName(),
 				Kind:      obj.GetKind(),

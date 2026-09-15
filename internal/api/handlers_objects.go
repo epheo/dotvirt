@@ -8,7 +8,6 @@ import (
 	"slices"
 
 	"github.com/epheo/dotvirt/internal/auth"
-	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/eventbus"
@@ -102,7 +101,7 @@ func (s *Server) handleObjectAdopt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kinds := draft.Resource(resource).Kinds()
-	var picked []changeset.Adoptable
+	var picked []model.Adoptable
 	for _, o := range objs {
 		if o.Name == name && slices.Contains(kinds, o.Kind) {
 			picked = append(picked, o)

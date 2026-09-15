@@ -114,7 +114,7 @@ func TestAdoptNamespaceStagesEveryKind(t *testing.T) {
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
-	objs := []Adoptable{
+	objs := []model.Adoptable{
 		{Namespace: "alpha", Name: "copy", Kind: "VirtualMachine",
 			Path: "alpha/copy.yaml", Manifest: []byte(liveVMYAML("copy", ""))},
 		{Namespace: "alpha", Name: "deny", Kind: "NetworkPolicy",
@@ -162,7 +162,7 @@ func TestAdoptNamespaceSkipsWhatBaseAlreadyDeclares(t *testing.T) {
 
 	// web is declared on main; the capture still offers it (no tracking-id on the object).
 	// A different path must not defeat the check: identity is what is declared, not layout.
-	objs := []Adoptable{
+	objs := []model.Adoptable{
 		{Namespace: "alpha", Name: "web", Kind: "VirtualMachine",
 			Path: "alpha/elsewhere/web.yaml", Manifest: []byte(liveVMYAML("web", ""))},
 		{Namespace: "alpha", Name: "copy", Kind: "VirtualMachine",
@@ -186,7 +186,7 @@ func TestAdoptNamespaceAllDeclaredIsInvalid(t *testing.T) {
 	bare, _ := seedBareWithLive(t)
 	c := newTestCoordinator(t)
 	_, err := c.AdoptNamespace(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: bare}, "alpha",
-		[]Adoptable{{Namespace: "alpha", Name: "web", Kind: "VirtualMachine",
+		[]model.Adoptable{{Namespace: "alpha", Name: "web", Kind: "VirtualMachine",
 			Path: "alpha/web.yaml", Manifest: []byte(liveVMYAML("web", ""))}})
 	if !errors.Is(err, model.ErrInvalid) {
 		t.Fatalf("want model.ErrInvalid when base declares everything captured, got %v", err)

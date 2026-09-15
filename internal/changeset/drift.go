@@ -125,18 +125,6 @@ func (c *Coordinator) stageAdoptCreate(username, projName string, l liveVM) erro
 	})
 }
 
-// Adoptable is one object the caller captured from the cluster, ready to stage.
-// Deliberately mirrors cluster.Adoptable field for field: the coordinator stays
-// cluster-free (the capture runs under the caller's token in the transport), so
-// do not "deduplicate" the two types into a shared import.
-type Adoptable struct {
-	Namespace string
-	Name      string
-	Kind      string
-	Path      string
-	Manifest  []byte
-}
-
 // AdoptNamespace stages everything the namespace runs that git does not describe, as
 // one draft: the whole namespace comes under GitOps in a single PR, not just its VMs.
 // The caller captures under its own token (cluster.AdoptableObjects) and this only
@@ -146,7 +134,7 @@ type Adoptable struct {
 // What base already declares is dropped here rather than by the capture, because git
 // is the authority on that and only the coordinator can read it. Skipping it would
 // restate the repo, overwriting hand-authored manifests with the live defaulted copy.
-func (c *Coordinator) AdoptNamespace(id auth.Identity, proj project.ProjectInfo, namespace string, objs []Adoptable) (model.DraftView, error) {
+func (c *Coordinator) AdoptNamespace(id auth.Identity, proj project.ProjectInfo, namespace string, objs []model.Adoptable) (model.DraftView, error) {
 	return c.AdoptObjects(id, proj, namespace, objs)
 }
 
@@ -155,7 +143,7 @@ func (c *Coordinator) AdoptNamespace(id auth.Identity, proj project.ProjectInfo,
 // objects (empty Namespace) stage under the model.ClusterScopeNS sentinel, the identity
 // the platform tier's edit and delete use. where names the scope in the
 // nothing-to-adopt error.
-func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, where string, objs []Adoptable) (model.DraftView, error) {
+func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, where string, objs []model.Adoptable) (model.DraftView, error) {
 	if err := requireRepo(proj); err != nil {
 		return model.DraftView{}, err
 	}

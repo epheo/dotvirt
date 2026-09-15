@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/epheo/dotvirt/internal/changeset"
-	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/validate"
 )
@@ -164,7 +163,7 @@ func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
 // cluster scope, for the platform tier) and applies the shared refusals: no
 // ArgoCD picture yet, nothing readable, nothing left to adopt. ok=false means
 // the response is written.
-func (s *Server) captureAdoptable(w http.ResponseWriter, r *http.Request, sc scope, ns string) ([]changeset.Adoptable, []string, bool) {
+func (s *Server) captureAdoptable(w http.ResponseWriter, r *http.Request, sc scope, ns string) ([]model.Adoptable, []string, bool) {
 	where := ns
 	if where == "" {
 		where = "the cluster scope"
@@ -180,7 +179,7 @@ func (s *Server) captureAdoptable(w http.ResponseWriter, r *http.Request, sc sco
 		}
 	}
 	var (
-		objs       []cluster.Adoptable
+		objs       []model.Adoptable
 		unreadable []string
 		err        error
 	)
@@ -203,13 +202,7 @@ func (s *Server) captureAdoptable(w http.ResponseWriter, r *http.Request, sc sco
 		fail(w, fmt.Errorf("%w: nothing to adopt in %s: everything running there is declared in git or managed by another Application", model.ErrInvalid, where))
 		return nil, nil, false
 	}
-	adoptable := make([]changeset.Adoptable, 0, len(objs))
-	for _, o := range objs {
-		adoptable = append(adoptable, changeset.Adoptable{
-			Namespace: o.Namespace, Name: o.Name, Kind: o.Kind, Path: o.Path, Manifest: o.Manifest,
-		})
-	}
-	return adoptable, unreadable, true
+	return objs, unreadable, true
 }
 
 // withUnreadable appends the kinds the caller could not read to the view's
