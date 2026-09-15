@@ -370,6 +370,26 @@ func TestTraceGatewayNodeSelector(t *testing.T) {
 	}
 }
 
+// An unresolvable gateway rule that could only allow, followed by nothing,
+// agrees with the gateway's default allow: the answer is certain, since no
+// resolution of the rule could change it.
+func TestTraceGatewayMaybeAllowAgreesWithDefault(t *testing.T) {
+	s := New(nil, nil)
+	add(t, s.egressfw, map[string]any{
+		"apiVersion": "k8s.ovn.org/v1", "kind": "EgressFirewall",
+		"metadata": map[string]any{"name": "default", "namespace": "team-a"},
+		"spec": map[string]any{"egress": []any{
+			map[string]any{"type": "Allow", "to": map[string]any{"dnsName": "mirror.example.com"}},
+		}},
+	})
+	src := wl("team-a", "web", nil, nil, "10.128.2.5")
+
+	res := s.Trace(src, nil, "203.0.113.9", "TCP", 443)
+	if res.Verdict != "Allow" {
+		t.Fatalf("dns allow before the default allow: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+}
+
 // An ANP nodes-peer can match an external target (the address may be a
 // node's) but never a VM's pod-net address.
 func TestTraceANPNodesPeer(t *testing.T) {
