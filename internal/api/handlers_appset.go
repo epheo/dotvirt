@@ -41,7 +41,7 @@ func (s *Server) handleAppSetPlugin(w http.ResponseWriter, r *http.Request) {
 		Repo    string `json:"repo"`
 	}
 	params := []param{}
-	for _, p := range s.resolver.Resolve(s.state.Namespaces(), nil) {
+	for _, p := range s.AllProjects() {
 		if p.Repo == "" {
 			continue // a project with no usable repo can't be synced
 		}

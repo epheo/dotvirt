@@ -276,12 +276,17 @@ func byName(want string) projectPicker {
 	}
 }
 
-// projectByName resolves a project by name from the SA-owned snapshot, WITHOUT the
-// caller's RBAC filter. Only safe behind a platform-admin gate (platformScope): it's
-// how the platform tier addresses a tenant it's about to adopt, the same all-projects
-// view the exporter and ApplicationSet use.
+// AllProjects is every project the SA-owned snapshot resolves, WITHOUT the
+// caller's RBAC filter. Only safe behind a platform-admin gate (platformScope)
+// or in dotvirt's own background acts: it's how the platform tier addresses a
+// tenant it's about to adopt, and the view the webhook sweep and the
+// ApplicationSet plugin enumerate.
+func (s *Server) AllProjects() []project.ProjectInfo {
+	return s.resolver.Resolve(s.state.Namespaces(), nil)
+}
+
 func (s *Server) projectByName(name string) (project.ProjectInfo, bool) {
-	for _, p := range s.resolver.Resolve(s.state.Namespaces(), nil) {
+	for _, p := range s.AllProjects() {
 		if p.Name == name {
 			return p, true
 		}
