@@ -203,4 +203,9 @@ func TestWithCORS(t *testing.T) {
 	if rec.Code != http.StatusNoContent || hit {
 		t.Errorf("preflight: code=%d nextHit=%v", rec.Code, hit)
 	}
+	// The manifest and template editors PUT; a preflight that omits the method
+	// makes the browser refuse the request in dev.
+	if got := rec.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, "PUT") {
+		t.Errorf("allow-methods = %q, want PUT listed", got)
+	}
 }
