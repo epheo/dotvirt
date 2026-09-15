@@ -262,6 +262,37 @@ func TestReconcileMinimalCRToReady(t *testing.T) {
 	}
 }
 
+// Dry-run validates the render but persists nothing, and every phase that skips
+// real work must say so: an ArgoReady=True next to a mirror that was never
+// written would read as a verified install.
+func TestReconcileDryRunReportsSkippedArgoWork(t *testing.T) {
+	dv := testCR()
+	c := testBuilder(t).WithObjects(dv).Build()
+	r := newReconciler(c, depsOK)
+	r.DryRun = true
+
+	if res := reconcileOnce(t, r, dv); res != (ctrl.Result{}) {
+		t.Fatalf("result = %+v, want zero (no requeue)", res)
+	}
+
+	got := getCR(t, c, dv)
+	for _, ct := range []string{
+		dotvirtv1alpha1.ConditionSecretsReady,
+		dotvirtv1alpha1.ConditionArgoReady,
+	} {
+		if co := cond(got, ct); co == nil || co.Status != metav1.ConditionUnknown || co.Reason != "DryRun" {
+			t.Errorf("condition %s = %+v, want Unknown/DryRun", ct, co)
+		}
+	}
+	argoNS := "argocd" // the vanilla-Kubernetes default argoTarget resolves
+	if exists(t, c, &corev1.Secret{}, argoNS, install.AppsetSecretName) {
+		t.Error("dry-run mirrored the appset token")
+	}
+	if exists(t, c, &appsv1.Deployment{}, dv.Namespace, install.AppName) {
+		t.Error("dry-run persisted the workload Deployment")
+	}
+}
+
 // One install per cluster: its ClusterRoleBindings carry fixed cluster-scoped
 // names, so a second CR would rewrite the first's subjects on every reconcile and
 // its finalizer would delete them. The later CR halts with a Conflict, takes no
