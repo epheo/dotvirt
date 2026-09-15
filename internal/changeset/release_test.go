@@ -29,7 +29,7 @@ metadata:
 func TestReleaseDeclaredSplitsGitFromResidue(t *testing.T) {
 	// alpha is declared in the platform repo; ghost is label residue only.
 	bare, _ := seedWork(t, map[string][]byte{"namespaces/alpha.yaml": []byte(declaredNS)})
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	plat := project.ProjectInfo{Name: "platform", Repo: bare}
 	target := project.ProjectInfo{Name: "legacy", Namespaces: []string{"alpha", "ghost"}}
@@ -64,7 +64,7 @@ func TestReleaseDeclaredRefusesMultiDocManifest(t *testing.T) {
 	// A namespace file carrying a UDN must refuse: rewriting it would hand
 	// Argo a prune of tenant networking.
 	bare, _ := seedWork(t, map[string][]byte{"namespaces/alpha.yaml": []byte(declaredNSWithUDN)})
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	plat := project.ProjectInfo{Name: "platform", Repo: bare}
 	target := project.ProjectInfo{Name: "legacy", Namespaces: []string{"alpha"}}
 

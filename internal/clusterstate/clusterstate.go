@@ -141,9 +141,6 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 		{reflect.NewSignalStore(rbac, nil), &rbacv1.RoleBinding{}, sa.RoleBindingListWatch()},
 	}
 	s.healthy = make([]atomic.Bool, len(s.specs))
-	for i := range s.healthy {
-		s.healthy[i].Store(true) // optimistic until a list/watch actually errors
-	}
 	return s
 }
 

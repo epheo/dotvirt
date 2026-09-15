@@ -46,7 +46,7 @@ func seedBareWithLive(t *testing.T) (string, fakeLive) {
 // the live manifest verbatim, and proposes to the same path.
 func TestAdoptStagesCreateForClusterOnlyVM(t *testing.T) {
 	bare, live := seedBareWithLive(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	c.live = live
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
@@ -87,7 +87,7 @@ func TestAdoptStagesCreateForClusterOnlyVM(t *testing.T) {
 // KindEdit making base match running.
 func TestAdoptStagesEditForDriftedVM(t *testing.T) {
 	bare, live := seedBareWithLive(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	c.live = live
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
@@ -110,7 +110,7 @@ func TestAdoptStagesEditForDriftedVM(t *testing.T) {
 // caller (cluster.AdoptableObjects); this only stages.
 func TestAdoptObjectsStagesEveryKind(t *testing.T) {
 	bare, _ := seedBareWithLive(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
@@ -143,7 +143,7 @@ func TestAdoptObjectsStagesEveryKind(t *testing.T) {
 // an empty PR.
 func TestAdoptObjectsNothingToAdopt(t *testing.T) {
 	bare, _ := seedBareWithLive(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	_, err := c.AdoptObjects(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: bare}, "beta", nil)
 	if !errors.Is(err, model.ErrInvalid) {
 		t.Fatalf("want model.ErrInvalid when there is nothing to adopt, got %v", err)
@@ -156,7 +156,7 @@ func TestAdoptObjectsNothingToAdopt(t *testing.T) {
 // would overwrite the hand-authored manifest with the live defaulted copy.
 func TestAdoptObjectsSkipsWhatBaseAlreadyDeclares(t *testing.T) {
 	bare, _ := seedBareWithLive(t) // main holds alpha/web.yaml
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
@@ -184,7 +184,7 @@ func TestAdoptObjectsSkipsWhatBaseAlreadyDeclares(t *testing.T) {
 // must be told that, not handed an empty draft that looks like work.
 func TestAdoptObjectsAllDeclaredIsInvalid(t *testing.T) {
 	bare, _ := seedBareWithLive(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	_, err := c.AdoptObjects(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: bare}, "alpha",
 		[]model.Adoptable{{Namespace: "alpha", Name: "web", Kind: "VirtualMachine",
 			Path: "alpha/web.yaml", Manifest: []byte(liveVMYAML("web", ""))}})
@@ -197,7 +197,7 @@ func TestAdoptObjectsAllDeclaredIsInvalid(t *testing.T) {
 // annotation (+ an owners RoleBinding) into the platform draft - the staging core of
 // AdoptProject, exercised without a forge.
 func TestStageProjectAdoptionStampsRepoOnEveryNamespace(t *testing.T) {
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := "alice"
 	const platform = "platform"
 	target := project.ProjectInfo{Name: "team-a", Namespaces: []string{"team-a", "team-a-db"}}
@@ -245,7 +245,7 @@ func TestStageProjectAdoptionStampsRepoOnEveryNamespace(t *testing.T) {
 
 func TestAdoptAbsentFromRunningNotFound(t *testing.T) {
 	bare, live := seedBareWithLive(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	c.live = live
 
 	_, err := c.Adopt(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: bare}, "alpha", "ghost")
@@ -263,7 +263,7 @@ func (f fakePrune) PrunePending(string, []string) []model.ObjectRef { return f }
 // stages. Nothing stored, so reopening never shows partial as complete.
 func TestDraftWarningDerivedNotStored(t *testing.T) {
 	bare, live := seedBareWithLive(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	c.live = live
 	c.prune = fakePrune{
 		{Kind: "VirtualMachine", Namespace: "alpha", Name: "copy"},

@@ -59,7 +59,7 @@ func gitOut(t *testing.T, wd string, args ...string) string {
 // PR it merged, with the merge commit as the unit.
 func TestCommitRendersMergedPR(t *testing.T) {
 	bare, _, hash := seedMerged(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
 	commits, err := c.History(proj, 25)
@@ -114,7 +114,7 @@ func TestCommitRevertStateTracksMain(t *testing.T) {
 	gitRun(t, work, "commit", "-qm", "bump again")
 	gitRun(t, work, "push", "-q", "origin", "main")
 	// A coordinator opened after each push mirrors it; the poll path is async.
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 
 	d, err := c.Commit(proj, hash)
 	if err != nil {
@@ -129,7 +129,7 @@ func TestCommitRevertStateTracksMain(t *testing.T) {
 	gitRun(t, work, "add", "-A")
 	gitRun(t, work, "commit", "-qm", "manual undo")
 	gitRun(t, work, "push", "-q", "origin", "main")
-	c = newTestCoordinator(t)
+	c = newTestCoordinator(t, false)
 
 	d, err = c.Commit(proj, hash)
 	if err != nil {
@@ -166,13 +166,8 @@ func TestRevertMergeOpensPR(t *testing.T) {
 		_, _ = w.Write([]byte(`{"number":13,"state":"open","html_url":"http://forge/pulls/13"}`))
 	}))
 	t.Cleanup(srv.Close)
-	store, err := draft.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	c := New(store, git.NewRepoSet(ctx, "", nil, true, nil, time.Hour), forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, ""), nil, nil, nil, "main", "dotvirt/proposed")
+	c := newTestCoordinator(t, true)
+	c.forge = forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, "")
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
 	out, err := c.Revert(auth.Identity{Username: "alice"}, proj, hash)
@@ -360,7 +355,7 @@ func TestProposalRendersBranchDiff(t *testing.T) {
 // not hold has none rather than an error.
 func TestVMHistoryNamesMergedPR(t *testing.T) {
 	bare, _, hash := seedMerged(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
 	web, err := c.ObjectHistory(proj, "", "alpha", "web", 10)

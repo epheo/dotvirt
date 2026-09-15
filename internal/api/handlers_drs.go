@@ -28,7 +28,7 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 	if s.desched != nil {
 		view.Live = s.desched.Live()
 	}
-	if s.cfg.PlatformRepo != "" && s.reader != nil {
+	if s.cfg.PlatformRepo != "" {
 		ctx := r.Context()
 		view.CanManage = s.canCreateCached(ctx, id, c, ssarDescheduler)
 		view.CanPSI = s.canCreateCached(ctx, id, c, ssarMachineCfg)

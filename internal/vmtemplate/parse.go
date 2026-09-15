@@ -34,6 +34,9 @@ const (
 	descriptionAnnotation = "description"
 )
 
+// Path is the library file a template named name lives at.
+func Path(name string) string { return Dir + "/" + name + ".yaml" }
+
 // Parse decodes one templates/*.yaml file into a catalog entry. Parse is
 // tolerant: a file that fails to decode is still listed, carrying Error, so a
 // bad commit degrades one entry instead of hiding the whole library.

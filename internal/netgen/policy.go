@@ -48,7 +48,7 @@ func NetworkPolicyManifest(s NetworkPolicySpec) (path string, content []byte, er
 	// the whole project" case; otherwise scope to the Group's labels.
 	podSelector := map[string]any{}
 	if len(s.AppliedTo) > 0 {
-		podSelector = map[string]any{"matchLabels": toStrAny(s.AppliedTo)}
+		podSelector = map[string]any{"matchLabels": s.AppliedTo}
 	}
 	spec := map[string]any{"podSelector": podSelector, "policyTypes": []any{"Ingress"}}
 	if len(s.Ingress) > 0 {
@@ -58,7 +58,7 @@ func NetworkPolicyManifest(s NetworkPolicySpec) (path string, content []byte, er
 			if len(r.From) > 0 {
 				from := make([]any, 0, len(r.From))
 				for _, peer := range r.From {
-					from = append(from, map[string]any{"podSelector": map[string]any{"matchLabels": toStrAny(peer)}})
+					from = append(from, map[string]any{"podSelector": map[string]any{"matchLabels": peer}})
 				}
 				rule["from"] = from
 			}
@@ -125,7 +125,7 @@ func AdminNetworkPolicyManifest(s AdminNetworkPolicySpec) (path string, content 
 	}
 	subjectSel := map[string]any{}
 	if len(s.Subject) > 0 {
-		subjectSel = map[string]any{"matchLabels": toStrAny(s.Subject)}
+		subjectSel = map[string]any{"matchLabels": s.Subject}
 	}
 	spec := map[string]any{"subject": map[string]any{"namespaces": subjectSel}}
 	if !s.Baseline {
@@ -151,7 +151,7 @@ func AdminNetworkPolicyManifest(s AdminNetworkPolicySpec) (path string, content 
 			for _, p := range r.Peers {
 				sel := map[string]any{}
 				if len(p) > 0 {
-					sel = map[string]any{"matchLabels": toStrAny(p)}
+					sel = map[string]any{"matchLabels": p}
 				}
 				peers = append(peers, map[string]any{"namespaces": sel})
 			}

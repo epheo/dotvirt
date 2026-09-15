@@ -11,6 +11,7 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/validate"
+	"github.com/epheo/dotvirt/internal/vmgen"
 	"github.com/epheo/dotvirt/internal/vmtemplate"
 )
 
@@ -36,7 +37,7 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	raw, ok, err := libRead.LookupOnBranch(c.baseBranch, vmtemplate.Dir+"/"+req.Template+".yaml")
+	raw, ok, err := libRead.LookupOnBranch(c.baseBranch, vmtemplate.Path(req.Template))
 	if err != nil {
 		return model.DraftView{}, err
 	}
@@ -72,13 +73,11 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 	if err := c.requireUndeclaredVM(targetRead, req.Namespace, rendered.Name); err != nil {
 		return model.DraftView{}, err
 	}
-	path := req.Namespace + "/" + rendered.Name + ".yaml"
-
 	if err := c.store.Stage(id.Username, targetProj.Name, draft.Entry{
 		Kind:         draft.KindCreate,
 		Namespace:    req.Namespace,
 		Name:         rendered.Name,
-		SourceFile:   path,
+		SourceFile:   vmgen.ManifestPath(req.Namespace, rendered.Name),
 		Manifest:     string(rendered.Manifest),
 		FromTemplate: libraryProj.Name + "/" + req.Template,
 	}); err != nil {
@@ -120,7 +119,7 @@ func (c *Coordinator) StageSaveTemplate(id auth.Identity, commitProj, sourceProj
 		return model.DraftView{}, err
 	}
 
-	path := vmtemplate.Dir + "/" + req.Name + ".yaml"
+	path := vmtemplate.Path(req.Name)
 	_, exists, err := commitRead.LookupOnBranch(c.baseBranch, path)
 	if err != nil {
 		return model.DraftView{}, err
@@ -155,7 +154,7 @@ func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.P
 	if err := validate.RequireDNS1123("template name", req.Name); err != nil {
 		return model.DraftView{}, err
 	}
-	path := vmtemplate.Dir + "/" + req.Name + ".yaml"
+	path := vmtemplate.Path(req.Name)
 	if t := vmtemplate.Parse(path, []byte(req.YAML), commitProj.Name); t.Error != "" {
 		return model.DraftView{}, fmt.Errorf("%w: %s", model.ErrInvalid, t.Error)
 	}

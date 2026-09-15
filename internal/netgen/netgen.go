@@ -44,14 +44,6 @@ func toAny(ss []string) []any {
 	return out
 }
 
-func toStrAny(m map[string]string) map[string]any {
-	out := make(map[string]any, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
-}
-
 // nsNameSelector selects namespaces by their metadata.name - the one selector
 // shape every cluster-scoped manifest (CUDN, EgressIP, external route) uses to
 // publish to a chosen set of projects.

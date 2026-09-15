@@ -44,7 +44,7 @@ func UplinkManifest(s UplinkSpec) (path string, content []byte, err error) {
 		"kind":       "NodeNetworkConfigurationPolicy",
 		"metadata":   map[string]any{"name": UplinkPolicyName(s.Name)},
 		"spec": map[string]any{
-			"nodeSelector": toStrAny(sel),
+			"nodeSelector": sel,
 			"desiredState": map[string]any{
 				"interfaces": []any{map[string]any{
 					"name":  bridge,

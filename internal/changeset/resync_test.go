@@ -16,7 +16,7 @@ func (f *fakeResyncer) Resync(ctx context.Context, namespace, name string) (mode
 }
 
 func TestResyncEnforcesCallerAuthority(t *testing.T) {
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	rs := &fakeResyncer{}
 	c.resyncer = rs
 
@@ -36,7 +36,7 @@ func TestResyncEnforcesCallerAuthority(t *testing.T) {
 }
 
 func TestResyncUnavailableWithoutArgo(t *testing.T) {
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	allow := func(context.Context, string, string) (bool, error) { return true, nil }
 	if _, err := c.Resync(context.Background(), allow, "a", "b"); !errors.Is(err, model.ErrUnavailable) {
 		t.Fatalf("want ErrUnavailable, got %v", err)
