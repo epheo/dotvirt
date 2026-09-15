@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { BookCopy } from 'lucide-svelte';
-	import { api, Unauthorized, type Template } from '$lib/api';
-	import { friendlyError } from '$lib/format';
+	import { api, type Template } from '$lib/api';
+	import { catalog } from '$lib/state/catalog.svelte';
 	import { validName } from '$lib/validate';
 	import FormField from './FormField.svelte';
 	import SelectInput from './SelectInput.svelte';
@@ -28,9 +28,6 @@
 		onclose: () => void;
 	} = $props();
 
-	let templates = $state<Template[] | null>(null);
-	let loadError = $state('');
-
 	// The preselection seeds from the opener's intent; the picker can change it.
 	// svelte-ignore state_referenced_locally
 	let pickedKey = $state(library && template ? `${library}/${template}` : '');
@@ -43,18 +40,19 @@
 	$effect(() => {
 		if (!namespace)
 			namespace = namespaces.includes(initialNamespace) ? initialNamespace : (namespaces[0] ?? '');
-		untrack(() =>
-			api
-				.templates()
-				.then((t) => {
-					templates = t.templates.filter((x) => !x.error);
-					if (!pickedKey && templates.length) pickedKey = key(templates[0]);
-				})
-				.catch((e) => {
-					if (e instanceof Unauthorized) return;
-					loadError = friendlyError(e);
-				}),
-		);
+	});
+
+	// The shared library re-pulls on open, so a template merged since the last
+	// visit is deployable; ones that failed to parse are not offered.
+	$effect(() => {
+		catalog.load();
+	});
+	const templates = $derived(catalog.templates?.filter((t) => !t.error) ?? null);
+	$effect(() => {
+		const first = templates?.[0];
+		untrack(() => {
+			if (first && !pickedKey) pickedKey = key(first);
+		});
 	});
 
 	const key = (t: Template) => `${t.library}/${t.name}`;
@@ -146,8 +144,8 @@
 </Wizard>
 
 {#snippet targetStep()}
-	{#if loadError}
-		<p class="rounded bg-danger-soft/60 px-3 py-2 text-xs text-danger-ink">{loadError}</p>
+	{#if catalog.error}
+		<p class="rounded bg-danger-soft/60 px-3 py-2 text-xs text-danger-ink">{catalog.error}</p>
 	{:else if !templates}
 		<p class="text-sm text-ink-faint">Loading templates…</p>
 	{:else if !templates.length}

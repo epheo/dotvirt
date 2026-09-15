@@ -1,8 +1,6 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { METRIC_RANGES, Unauthorized, type VMMetrics } from '$lib/api';
-	import { friendlyError } from '$lib/format';
-	import { pollWhileVisible } from '$lib/poll';
+	import { METRIC_RANGES, type VMMetrics } from '$lib/api';
+	import { resource } from '$lib/resource.svelte';
 	import ErrorNote from './ErrorNote.svelte';
 	import UPlotChart from './UPlotChart.svelte';
 
@@ -23,40 +21,18 @@
 
 	const RANGES = METRIC_RANGES;
 	let range = $state('1h');
-	let metrics = $state<VMMetrics | null>(null);
-	let loading = $state(false);
-	let error = $state('');
+	// Keyed on the range (a new range is a new query, so the old charts blank);
+	// only real-time mode auto-refreshes, at the 30s step.
+	const res = resource<VMMetrics>(
+		() => range,
+		(r) => load(r),
+		{ poll: () => (range === '1h' ? 30000 : 0), reset: true },
+	);
+	const metrics = $derived(res.data);
 
 	const empty = $derived(
 		!!emptyText && !!metrics && metrics.charts.every((c) => c.series.length === 0),
 	);
-
-	async function refresh() {
-		loading = true;
-		error = '';
-		try {
-			metrics = await load(range);
-		} catch (e) {
-			if (e instanceof Unauthorized) return; // signed out centrally by the api layer
-			error = friendlyError(e);
-			metrics = null;
-		} finally {
-			loading = false;
-		}
-	}
-
-	// Reload on range change; untrack the call so the query's own reads (the
-	// caller's per-frame vm/scope props) don't re-fire this effect.
-	$effect(() => {
-		range;
-		untrack(refresh);
-	});
-
-	// Auto-refresh in real-time mode (30s to match the step).
-	$effect(() => {
-		if (range !== '1h') return;
-		return pollWhileVisible(refresh, 30000);
-	});
 </script>
 
 <div class="space-y-3">
@@ -70,11 +46,10 @@
 					: 'border-line-strong text-ink-soft hover:bg-inset'}">{r.label}</button
 			>
 		{/each}
-		{#if loading}<span class="text-xs text-ink-faint">updating…</span>{/if}
 	</div>
 
-	{#if error}
-		<ErrorNote {error} />
+	{#if res.failed}
+		<ErrorNote error={res.error} />
 	{:else if empty}
 		<p class="py-8 text-center text-sm text-ink-faint">{emptyText}</p>
 	{:else if metrics}

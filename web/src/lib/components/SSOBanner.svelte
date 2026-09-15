@@ -3,24 +3,21 @@
 	import { api } from '$lib/api';
 	import { action } from '$lib/resource.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
+	import { authMethods } from '$lib/state/session.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import Banner from './Banner.svelte';
 
 	// One-click SSO finish for admins. The apply runs under the CALLER's token;
-	// the API server's RBAC is the gate, and a refusal surfaces legibly.
-	let pending = $state(false);
+	// the API server's RBAC is the gate, and a refusal surfaces legibly. The
+	// banner clears on the backend's word, not the click's.
+	const auth = authMethods();
+	const pending = $derived(!!auth.data?.sso && !!auth.data?.ssoPending);
 	const op = action({ toast: true });
-	$effect(() => {
-		api
-			.authMethods()
-			.then((m) => (pending = m.sso && m.ssoPending))
-			.catch(() => {});
-	});
 
 	function finish() {
 		return op.run(async () => {
 			await api.finishSSO();
-			pending = false;
+			await auth.refresh();
 			ui.showToast('OpenShift SSO is ready: the sign-in button now works for everyone.', {
 				kind: 'success',
 			});
