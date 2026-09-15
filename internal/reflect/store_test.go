@@ -8,16 +8,12 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-func newIndexer() cache.Indexer {
-	return cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
-}
-
 // TestStoreFiresOnChangeAndSyncs checks the watch->signal plumbing: each mutation
 // fires onChange; the first Replace (initial relist) additionally fires onSynced
 // exactly once, and a later relist must NOT re-fire it.
 func TestStoreFiresOnChangeAndSyncs(t *testing.T) {
 	var changes, syncs int
-	s := NewStore(newIndexer(), func() { changes++ }, func() { syncs++ })
+	s := NewStore(NewIndexer(), func() { changes++ }, func() { syncs++ })
 
 	obj := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "a"}}
 	_ = s.Replace([]any{obj}, "1") // initial relist
@@ -35,11 +31,11 @@ func TestStoreFiresOnChangeAndSyncs(t *testing.T) {
 // TestStoreNilOnSynced confirms a signal-only store (no readiness callback) is safe.
 func TestStoreNilOnSynced(t *testing.T) {
 	var changes int
-	s := NewStore(newIndexer(), func() { changes++ }, nil)
+	s := NewStore(NewIndexer(), func() { changes++ }, nil)
 	_ = s.Replace([]any{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "a"}}}, "1")
 	if changes != 1 {
 		t.Errorf("onChange should fire on Replace even with nil onSynced, got %d", changes)
 	}
 }
 
-var _ cache.Store = NewStore(newIndexer(), func() {}, nil) // must satisfy the reflector's store
+var _ cache.Store = NewStore(NewIndexer(), func() {}, nil) // must satisfy the reflector's store
