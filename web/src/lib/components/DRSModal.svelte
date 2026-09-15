@@ -29,7 +29,6 @@
 
 	// Seed from the pending draft when one is staged - editing an unproposed
 	// change continues it (PSI opt-in included) - else the committed config.
-	// The modal is mounted fresh per open.
 	// svelte-ignore state_referenced_locally
 	const cfg = view.draft?.config ?? view.config;
 	let mode = $state<DRSMode>((cfg?.mode as DRSMode) ?? 'Automatic');

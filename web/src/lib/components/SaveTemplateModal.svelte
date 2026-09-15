@@ -20,8 +20,6 @@
 		onclose: () => void;
 	} = $props();
 
-	// The prefill seeds from the VM the modal opened for (host closes it on
-	// selection change, so the initial capture is the intent).
 	// svelte-ignore state_referenced_locally
 	let name = $state(vm.name + '-template');
 	let description = $state('');

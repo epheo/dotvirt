@@ -137,15 +137,11 @@ export interface UplinkCreate {
 }
 // EgressFirewall - a namespace's north-south egress rules (the Tier-1 gateway
 // firewall). One per namespace (named "default" server-side); rules are first-match.
-export interface EgressFirewallPort {
-	protocol: 'TCP' | 'UDP' | 'SCTP';
-	port: number;
-}
 export interface EgressFirewallRule {
 	action: 'Allow' | 'Deny';
 	cidr?: string; // set exactly one of cidr / dnsName
 	dnsName?: string;
-	ports?: EgressFirewallPort[];
+	ports?: PolicyPort[];
 }
 export interface EgressFirewallCreate {
 	namespace: string;
@@ -310,7 +306,7 @@ function qs(params: Record<string, string | undefined>): string {
 }
 
 // A container-scope read's query params (the project/namespace/node levels).
-export type ScopeQuery = { project?: string; namespace?: string; node?: string };
+type ScopeQuery = { project?: string; namespace?: string; node?: string };
 
 // scopeQS is qs over a scope read's levels; extra appends params (e.g. range).
 function scopeQS(scope: ScopeQuery, extra?: Record<string, string>): string {

@@ -14,7 +14,6 @@
 		onclose: () => void;
 		adopt?: string; // existing unlabeled namespace to bring in as a project
 	} = $props();
-	// The modal mounts fresh per open, so the initial value IS the intent.
 	// svelte-ignore state_referenced_locally
 	const adopt = adoptProp;
 

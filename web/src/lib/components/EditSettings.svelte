@@ -39,8 +39,6 @@
 
 	const options = $derived(inventory.options);
 
-	// The modal is mounted fresh per VM, so capturing the initial prop value to
-	// seed the editable working copy is intentional.
 	// svelte-ignore state_referenced_locally
 	let form = $state(seedEditForm(vm));
 

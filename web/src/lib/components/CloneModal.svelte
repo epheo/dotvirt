@@ -27,8 +27,6 @@
 		ondone?: (ok: boolean) => void;
 	} = $props();
 
-	// The prefill seeds from the VM the modal opened for; the host closes the
-	// modal on selection change, so the initial capture is the intent.
 	// svelte-ignore state_referenced_locally
 	let target = $state(vm.name + '-clone');
 	const op = action();

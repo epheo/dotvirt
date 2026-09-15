@@ -11,6 +11,11 @@
 	// form-specific missing/summary derivations stay in each dialog - they ARE
 	// the form; this owns only what happens around them. onsubmit stages the
 	// request; success raises the staged toast, then closes.
+	//
+	// Every dialog mounts fresh per open (the shell renders one ui.modal and
+	// closes it on selection change), so a form field seeded from a prop at
+	// init is the intent; that is what each svelte-ignore
+	// state_referenced_locally in the dialogs stands for.
 	let {
 		title,
 		size = 'md',
