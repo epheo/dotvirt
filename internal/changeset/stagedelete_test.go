@@ -60,3 +60,16 @@ func TestStageDeleteAbsentNotFound(t *testing.T) {
 		t.Fatalf("want model.ErrNotFound, got %v", err)
 	}
 }
+
+// A base branch the mirror lacks is a retryable outage the client can act on,
+// not an unexplained 500.
+func TestStageDeleteUnmirroredBranchIsUnavailable(t *testing.T) {
+	bare := seedBareFiles(t, nil)
+	gitRun(t, bare, "branch", "-m", "main", "trunk")
+	c := newTestCoordinator(t)
+
+	_, err := c.StageDelete(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: bare}, "", "alpha", "web")
+	if !errors.Is(err, model.ErrUnavailable) || !errors.Is(err, git.ErrNoBranch) {
+		t.Fatalf("want a classified ErrUnavailable that is still git.ErrNoBranch, got %v", err)
+	}
+}
