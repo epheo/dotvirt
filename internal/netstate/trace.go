@@ -235,7 +235,7 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 		return *res
 	}
 
-	w.addStep(nil, nil, "default", "Allow", "No policy matches this flow — the network default allows it.", false, true)
+	w.addStep(nil, nil, "default", "Allow", "No policy matches this flow - the network default allows it.", false, true)
 	return w.decide("Allow")
 }
 
@@ -262,7 +262,7 @@ func (s *Snapshot) gatewayWalk(ns, dstIP, protocol string, port int) walkResult 
 		}
 	}
 	if fw != nil {
-		w.addStep(&fw.view, nil, "gateway", "Allow", "No gateway rule matches — the gateway defaults to allow.", false, true)
+		w.addStep(&fw.view, nil, "gateway", "Allow", "No gateway rule matches - the gateway defaults to allow.", false, true)
 	}
 	return w.decide("Allow")
 }
@@ -321,7 +321,7 @@ func (s *Snapshot) connectivity(src, dst TraceWorkload) (bool, []model.TraceStep
 	}
 	for _, name := range s.sharedSegments(src.Nets, dst.Nets) {
 		steps = append(steps, model.TraceStep{Stage: "segment", Action: "Bypass",
-			Note: "Both attach segment " + name + " — an unfiltered layer-2 path; east-west policy does not apply on secondary segments."})
+			Note: "Both attach segment " + name + " - an unfiltered layer-2 path; east-west policy does not apply on secondary segments."})
 	}
 	return reachable, steps
 }
@@ -335,7 +335,7 @@ func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string) []model
 		if s.isLocalnet(ref) {
 			_, name := s.segmentKey(ref)
 			steps = append(steps, model.TraceStep{Stage: "segment", Action: "Bypass",
-				Note: "NIC on VLAN segment " + name + " — traffic leaving through it bypasses these controls."})
+				Note: "NIC on VLAN segment " + name + " - traffic leaving through it bypasses these controls."})
 		}
 	}
 	return steps

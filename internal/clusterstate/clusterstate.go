@@ -307,9 +307,6 @@ func (s *State) WorkloadNetworks(namespace, name string) (podNet bool, defaultNe
 	return false, "", nil, nil, false
 }
 
-// Namespaces returns the project-labeled namespaces in the snapshot as the
-// resolver's input type (Name + labels/annotations), so the read path feeds
-// project.Resolve directly. Pure in-memory, no cluster call.
 // NamespaceLabels returns one namespace's labels by name, nil when the
 // snapshot does not hold it - an indexer key read, not a scan of Namespaces.
 func (s *State) NamespaceLabels(name string) map[string]string {
@@ -321,6 +318,9 @@ func (s *State) NamespaceLabels(name string) map[string]string {
 	return nil
 }
 
+// Namespaces returns the project-labeled namespaces in the snapshot as the
+// resolver's input type (Name + labels/annotations), so the read path feeds
+// project.Resolve directly. Pure in-memory, no cluster call.
 func (s *State) Namespaces() []project.Namespace {
 	objs := s.nss.List()
 	out := make([]project.Namespace, 0, len(objs))

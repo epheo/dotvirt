@@ -155,10 +155,6 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	// Per-object drift: attach each segment's own ArgoCD sync/health at serve time
 	// (always fresh, off the cached catalog) - the same surface VMs carry.
 	s.enrichNetworkDrift(out.Networks)
-	// Authoring signal for the UI: a platform repo must be configured and the caller
-	// must be able to create cluster-scoped networks (the platform-operator signal,
-	// also satisfied by cluster-admins). Gates the New VLAN / Add Uplink / New
-	// Namespace actions, matching the platformScope gate the create routes enforce.
 	// Per-action authoring authority: the same SSARs the create handlers enforce, so
 	// the UI gates each button precisely. CanManage stays the coarse CUDN signal that
 	// gates the platform-draft view. All false when no platform repo is configured.
