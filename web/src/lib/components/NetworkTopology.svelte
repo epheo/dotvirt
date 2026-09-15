@@ -150,7 +150,7 @@
 								type="button"
 								onclick={() => openAdopt(uplinkRef(u))}
 								title="Not declared in git"
-								class="inline-flex items-center gap-1 text-accent hover:underline"
+								class="inline-flex items-center gap-1 text-accent-ink hover:underline"
 								><GitPullRequest size={11} /> Adopt into git</button
 							>
 						{:else if canEditUplink(u)}
@@ -158,14 +158,14 @@
 								<button
 									type="button"
 									onclick={() => openAdopt(uplinkRef(u), true)}
-									class="inline-flex items-center gap-1 text-accent hover:underline"
+									class="inline-flex items-center gap-1 text-accent-ink hover:underline"
 									><GitPullRequest size={11} /> Adopt live changes</button
 								>
 							{/if}
 							<button
 								type="button"
 								onclick={() => openEdit(uplinkRef(u))}
-								class="inline-flex items-center gap-1 text-accent hover:underline"
+								class="inline-flex items-center gap-1 text-accent-ink hover:underline"
 								><Pencil size={11} /> Edit</button
 							>
 							<button

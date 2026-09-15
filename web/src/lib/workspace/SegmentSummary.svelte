@@ -48,7 +48,7 @@
 					<button
 						type="button"
 						onclick={() => openAdopt(networkRef(pg))}
-						class="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+						class="inline-flex items-center gap-1 text-xs text-accent-ink hover:underline"
 						><GitPullRequest size={12} /> Adopt into git</button
 					>
 				{:else if pg && (canEditNetwork(pg) || canDeleteNetwork(pg) || drifted)}
@@ -57,7 +57,7 @@
 							<button
 								type="button"
 								onclick={() => openAdopt(networkRef(pg), true)}
-								class="inline-flex items-center gap-1 text-accent hover:underline"
+								class="inline-flex items-center gap-1 text-accent-ink hover:underline"
 								><GitPullRequest size={12} /> Adopt live changes</button
 							>
 						{/if}
@@ -65,7 +65,7 @@
 							<button
 								type="button"
 								onclick={() => openEdit(networkRef(pg))}
-								class="inline-flex items-center gap-1 text-accent hover:underline"
+								class="inline-flex items-center gap-1 text-accent-ink hover:underline"
 								><Pencil size={12} /> Edit publication</button
 							>
 						{/if}

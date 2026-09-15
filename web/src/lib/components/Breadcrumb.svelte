@@ -16,9 +16,9 @@
 			<span class="text-line-strong">/</span>
 		{/if}
 		{#if c.href}
-			<a href={keepTab(c.href, tab)} class="text-accent hover:underline">{c.label}</a>
+			<a href={keepTab(c.href, tab)} class="text-accent-ink hover:underline">{c.label}</a>
 		{:else if c.onclick}
-			<button onclick={c.onclick} class="text-accent hover:underline">{c.label}</button>
+			<button onclick={c.onclick} class="text-accent-ink hover:underline">{c.label}</button>
 		{:else if i === trail.length - 1}
 			<span class="truncate font-medium text-ink-soft">{c.label}</span>
 		{:else}

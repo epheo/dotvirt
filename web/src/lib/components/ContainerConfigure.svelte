@@ -28,8 +28,10 @@
 				<dl class="divide-y divide-line-soft text-[13px]">
 					<Row label="Repository">
 						{#if p.repo}
-							<a href={p.repo} target="_blank" class="font-mono text-xs text-accent hover:underline"
-								>{p.repo}</a
+							<a
+								href={p.repo}
+								target="_blank"
+								class="font-mono text-xs text-accent-ink hover:underline">{p.repo}</a
 							>
 						{:else}
 							<span class="text-ink-faint">— not configured</span>
