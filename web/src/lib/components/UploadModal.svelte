@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { Check, Upload } from 'lucide-svelte';
-	import { api, Unauthorized, type Options } from '$lib/api';
+	import { api, Unauthorized } from '$lib/api';
 	import { friendlyError } from '$lib/format';
+	import { inventory } from '$lib/state/inventory.svelte';
 	import { validName, NAME_HINT } from '$lib/validate';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
@@ -36,14 +37,6 @@
 	let namespace = $state('');
 	let size = $state('10Gi');
 	let storageClass = $state('');
-	let options = $state<Options | null>(null);
-
-	$effect(() => {
-		api
-			.options()
-			.then((o) => (options = o))
-			.catch(() => {});
-	});
 
 	// RFC 1123 label (a PVC/DataVolume name), like the clone target.
 	const nameOK = $derived(validName(name));
@@ -165,7 +158,10 @@
 					<TextInput bind:value={size} placeholder="10Gi" mono />
 				</FormField>
 				<FormField label="Storage class">
-					<StorageClassSelect options={options?.storageClasses ?? []} bind:value={storageClass} />
+					<StorageClassSelect
+						options={inventory.options?.storageClasses ?? []}
+						bind:value={storageClass}
+					/>
 				</FormField>
 			</div>
 			{#if file}

@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { api, Unauthorized, type NodeTarget, type VM } from '$lib/api';
+	import { api, type NodeTarget, type VM } from '$lib/api';
 	import { action } from '$lib/resource.svelte';
+	import { nodeTargets } from '$lib/state/hosts.svelte';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';
@@ -22,25 +22,9 @@
 		ondone?: (ok: boolean) => void;
 	} = $props();
 
-	let nodes = $state<NodeTarget[] | null>(null);
-	let canPick = $state(true);
+	const hosts = nodeTargets();
 	let target = $state(''); // '' = automatic
 	const op = action();
-
-	async function load() {
-		try {
-			nodes = await api.nodes();
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			canPick = false; // no node-list RBAC - the scheduler's choice only
-			nodes = [];
-		}
-	}
-	// Load once on mount (untracked: the host hands down a fresh vm each frame,
-	// but this modal acts on the one it opened for).
-	$effect(() => {
-		untrack(load);
-	});
 
 	// Why a host can't be picked ('' = it can). The current host is excluded
 	// because KubeVirt only migrates between distinct nodes.
@@ -80,14 +64,14 @@
 				<span class="text-xs text-ink-muted">— the scheduler picks the best host</span>
 			</label>
 
-			{#if nodes === null && canPick}
+			{#if hosts.loading}
 				<p class="px-3 py-1 text-xs text-ink-faint">Loading hosts…</p>
-			{:else if !canPick}
+			{:else if hosts.failed}
 				<p class="px-3 py-1 text-xs text-ink-faint">
 					Your account can't list hosts — placement stays with the scheduler.
 				</p>
 			{:else}
-				{#each nodes ?? [] as n (n.name)}
+				{#each hosts.data ?? [] as n (n.name)}
 					{@const why = blocked(n)}
 					<label
 						class="flex items-center gap-2 rounded border px-3 py-2 {why

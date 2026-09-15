@@ -48,10 +48,14 @@
 	});
 	let tab = $state<DockTab>('tasks');
 
-	// Events lane: fetched on demand when the Events tab is opened (not on the
+	// Events lane: pulled only while the Events tab is open (never on the
 	// broadcast hot path), so a busy cluster's event churn can't spam the UI.
-	let events = $state<VMEvent[] | null>(null);
-	let eventsLoading = $state(false);
+	// Every open is a key change, so it re-pulls; closed resolves empty.
+	const eventsRes = resource<VMEvent[]>(
+		() => (openPane && tab === 'events' ? 'open' : ''),
+		(k) => (k ? api.allEvents() : Promise.resolve([])),
+		{ reset: true },
+	);
 
 	// Firing Prometheus alerts for the Alarms tab. Polled slowly; the
 	// read is one cached instant query server-side. null = endpoint unavailable
@@ -89,19 +93,9 @@
 		dock.value = { height: dockHeight };
 	}
 
-	function loadEvents() {
-		eventsLoading = true;
-		api
-			.allEvents()
-			.then((e) => (events = e))
-			.catch(() => (events = []))
-			.finally(() => (eventsLoading = false));
-	}
-
 	function selectTab(t: DockTab) {
 		tab = t;
 		openPane = true;
-		if (t === 'events') loadEvents(); // refresh on each open
 		if (t === 'alarms') alarmsRes.refresh();
 	}
 
@@ -229,7 +223,7 @@
 		<button
 			onclick={() => {
 				onrefresh?.();
-				if (tab === 'events') loadEvents();
+				if (tab === 'events') eventsRes.refresh();
 			}}
 			class="ml-auto p-1 text-ink-faint hover:text-ink-soft"
 			title="Refresh"
@@ -335,7 +329,12 @@
 				{/if}
 			{:else}
 				<div class="px-3 py-2">
-					<EventsTable {events} loading={eventsLoading} showVM {onselect} />
+					<EventsTable
+						events={eventsRes.data ?? []}
+						loading={eventsRes.loading}
+						showVM
+						{onselect}
+					/>
 				</div>
 			{/if}
 		</div>

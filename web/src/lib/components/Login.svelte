@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { api, Unauthorized, type User } from '$lib/api';
 	import { action } from '$lib/resource.svelte';
+	import { authMethods } from '$lib/state/session.svelte';
 
 	let { onlogin }: { onlogin: (user: User) => void } = $props();
 
@@ -9,17 +10,9 @@
 	const op = action();
 	// SSO is offered once the backend confirms it; the token form always stays.
 	// ssoPending: say "not finished" instead of offering a failing button.
-	let sso = $state(false);
-	let ssoPending = $state(false);
-	$effect(() => {
-		api
-			.authMethods()
-			.then((m) => {
-				sso = m.sso;
-				ssoPending = m.ssoPending;
-			})
-			.catch(() => {});
-	});
+	const auth = authMethods();
+	const sso = $derived(auth.data?.sso ?? false);
+	const ssoPending = $derived(auth.data?.ssoPending ?? false);
 	// The OAuth callback bounces here with ?sso_error=1 on any failure (the
 	// detail is server-logged, never shown - it can carry endpoint internals).
 	const ssoError = $derived(page.url.searchParams.get('sso_error') !== null);

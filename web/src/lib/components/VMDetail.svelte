@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import {
 		ArrowRightLeft,
 		ChevronDown,
@@ -22,7 +21,7 @@
 	} from '$lib/actions';
 	import { type EditSection } from '$lib/editform';
 	import { type VMTab } from '$lib/nav';
-	import { action } from '$lib/resource.svelte';
+	import { action, resource } from '$lib/resource.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import { duration } from '$lib/format';
 	import { phaseTone } from '$lib/status';
@@ -76,8 +75,6 @@
 		ui.modal = { kind: 'editVM', vm, section };
 	}
 
-	// Drift detail (running vs main) for the selected VM.
-	let driftChanges = $state<Change[] | null>(null);
 	// adopt/resync, feeding the Summary card's busy state.
 	const reconcileOp = action({ toast: true });
 
@@ -121,20 +118,6 @@
 		});
 	}
 
-	function loadDrift(ns: string, name: string) {
-		// Drop a stale response if the selection moved while it was in flight -
-		// VM A's drift must never render under VM B.
-		const fresh = () => vm.namespace === ns && vm.name === name;
-		api
-			.drift(ns, name)
-			.then((d) => {
-				if (fresh()) driftChanges = d.drift ? d.changes : [];
-			})
-			.catch(() => {
-				if (fresh()) driftChanges = null; // a 401 signs out centrally via the api layer
-			});
-	}
-
 	// One handler for every registry action: runtime ops run via the registry's
 	// own run() (with busy/result reporting; the server records the task), host
 	// actions open their dialog or switch a tab.
@@ -167,18 +150,20 @@
 	// The reset keys on the selection's IDENTITY, not the vm object: every live
 	// inventory frame hands down a fresh object for the same VM, and resetting
 	// on reference would snap the Monitor rail back and refetch drift whenever
-	// cluster state moves.
+	// cluster state moves. The tab itself is URL state - a fresh VM route
+	// arrives without ?tab=.
 	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
 	$effect(() => {
-		// Reset when the selection changes, and (re)load drift for this VM. The
-		// tab itself is URL state - a fresh VM route arrives without ?tab=.
 		vmKey;
-		untrack(() => {
-			monitorView = 'events';
-			driftChanges = null;
-			loadDrift(vm.namespace, vm.name);
-		});
+		monitorView = 'events';
 	});
+	// Drift detail (running vs main): null until known, [] when identical.
+	const driftRes = resource<Change[]>(
+		() => vmKey,
+		() => api.drift(vm.namespace, vm.name).then((d) => (d.drift ? d.changes : [])),
+		{ reset: true },
+	);
+	const driftChanges = $derived(driftRes.data);
 
 	// adoptVM owns its toasts; the run only feeds the busy state.
 	const adopt = () => reconcileOp.run(() => adoptVM(vm));

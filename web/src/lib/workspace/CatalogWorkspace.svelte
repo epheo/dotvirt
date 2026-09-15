@@ -1,9 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api, Unauthorized } from '$lib/api';
 	import { CATALOG_KINDS, catalogHref, catalogKind, catalogRows } from '$lib/catalog';
-	import { friendlyError } from '$lib/format';
 	import { catalog } from '$lib/state/catalog.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
@@ -18,7 +16,6 @@
 	// item rides ?item= so the tree, the table and a shared link agree.
 	const kind = $derived(catalogKind(page.url.searchParams.get('kind')));
 	const picked = $derived(page.url.searchParams.get('item'));
-	let error = $state('');
 
 	// Templates re-pull when a merged PR lands (tasksVersion): a template
 	// committed through the app appears without a reload. The options catalog
@@ -28,13 +25,7 @@
 		catalog.load();
 	});
 	$effect(() => {
-		api
-			.options()
-			.then((o) => (inventory.options = o))
-			.catch((e) => {
-				if (e instanceof Unauthorized) return;
-				error = friendlyError(e);
-			});
+		inventory.loadOptions();
 	});
 
 	const rows = $derived(catalogRows(kind, catalog.templates, inventory.options));
@@ -61,8 +52,8 @@
 
 <div class="flex min-h-0 flex-1">
 	<div class="min-h-0 flex-1 overflow-y-auto">
-		{#if error || catalog.error}
-			<ErrorNote error={error || catalog.error} class="m-4" />
+		{#if inventory.optionsError || catalog.error}
+			<ErrorNote error={inventory.optionsError || catalog.error} class="m-4" />
 		{:else if !rows}
 			<p class="py-6 text-center text-sm text-ink-faint">Loading catalog…</p>
 		{:else if rows.length === 0}

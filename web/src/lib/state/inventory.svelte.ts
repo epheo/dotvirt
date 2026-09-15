@@ -1,11 +1,15 @@
-import type {
-	Inventory,
-	NetworkInventory,
-	Options,
-	PolicyInventory,
-	TaskEntry,
-	VM,
+import {
+	api,
+	Unauthorized,
+	withRetry,
+	type Inventory,
+	type NetworkInventory,
+	type Options,
+	type PolicyInventory,
+	type TaskEntry,
+	type VM,
 } from '$lib/api';
+import { friendlyError } from '$lib/format';
 import { deriveIssues } from '$lib/issues';
 
 // The live cluster read layer: the WS inventory snapshot plus the once-per-
@@ -78,10 +82,15 @@ class InventoryStore {
 	// object), so an effect keyed on it re-pulls /api/networks only when networks may
 	// have changed - not on every VM-state frame.
 	readonly networksVersion = $derived(this.inventory?.networksVersion ?? 0);
-	// The cluster options catalog (instance types, storage classes, images),
-	// fetched once per session: read views resolve instancetype sizing and the
-	// default StorageClass from it without a per-view fetch.
+	// The cluster options catalog (instance types, storage classes, images):
+	// read views resolve instancetype sizing and the default StorageClass from
+	// it without a per-view fetch. loadOptions is its one writer.
 	options = $state<Options | null>(null);
+	optionsError = $state(''); // the last pull's terminal failure; '' once one succeeds
+	#optionsPull: Promise<void> | null = null;
+	// Bumped by reset(), so a pull started before a sign-out drops its late
+	// response instead of repopulating the reset store.
+	#generation = 0;
 	// The cluster's default StorageClass name, so the storage lens groups a
 	// classless disk under the real class instead of a "(cluster default)"
 	// placeholder; '' until the catalog loads.
@@ -112,12 +121,39 @@ class InventoryStore {
 		this.error = '';
 	}
 
+	// The catalog is fetched once per session, so a transient boot error would
+	// leave sizing and storage-class reads on placeholders until reload: the
+	// pull retries with backoff, and the Catalog re-pulls on entry to heal a
+	// failure that outlasted the retries. Concurrent callers share one pull.
+	loadOptions(): Promise<void> {
+		if (this.#optionsPull) return this.#optionsPull;
+		const gen = this.#generation;
+		const pull = withRetry(() => api.options())
+			.then((o) => {
+				if (gen !== this.#generation) return;
+				this.options = o;
+				this.optionsError = '';
+			})
+			.catch((e) => {
+				if (gen !== this.#generation || e instanceof Unauthorized) return;
+				this.optionsError = friendlyError(e);
+			})
+			.finally(() => {
+				if (this.#optionsPull === pull) this.#optionsPull = null;
+			});
+		this.#optionsPull = pull;
+		return pull;
+	}
+
 	reset() {
 		this.inventory = null;
 		this.netInv = null;
 		this.polInv = null;
 		this.taskFeed = [];
 		this.options = null;
+		this.optionsError = '';
+		this.#optionsPull = null;
+		this.#generation++;
 	}
 
 	findVM(namespace: string, name: string): VM | null {

@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { Check, Copy, X } from 'lucide-svelte';
-	import { api, type CreateVMRequest, type Network, type Options } from '$lib/api';
-	import { friendlyError } from '$lib/format';
+	import { api, type CreateVMRequest, type Network } from '$lib/api';
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
+	import { inventory } from '$lib/state/inventory.svelte';
 	import Modal from './Modal.svelte';
 	import Wizard from './Wizard.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
@@ -24,8 +24,7 @@
 		onclose: () => void;
 	} = $props();
 
-	let options = $state<Options | null>(null);
-	let loadError = $state('');
+	const options = $derived(inventory.options);
 
 	// Form state
 	let name = $state('');
@@ -120,27 +119,28 @@
 		setTimeout(() => (copied = ''), 1500);
 	}
 
+	// Sensible defaults from what's available, seeded once the catalog lands
+	// and only into fields still blank. Guard each list - a source the backend
+	// SA can't read comes back empty (or null on an old build).
 	$effect(() => {
-		api
-			.options()
-			.then((o) => {
-				options = o;
-				// Sensible defaults from what's available. Guard each list - a source
-				// the backend SA can't read comes back empty (or null on an old build).
-				const osImages = o.osImages ?? [];
-				const fed =
-					osImages.find((i) => i.ready && i.name === 'fedora') ?? osImages.find((i) => i.ready);
-				if (fed) osImage = `${fed.name}|${fed.namespace}`;
+		const o = inventory.options;
+		if (!o) return;
+		untrack(() => {
+			const osImages = o.osImages ?? [];
+			const fed =
+				osImages.find((i) => i.ready && i.name === 'fedora') ?? osImages.find((i) => i.ready);
+			if (fed && !osImage) osImage = `${fed.name}|${fed.namespace}`;
+			if (!preference)
 				preference =
 					(o.preferences ?? []).find((p) => p.name === 'fedora')?.name ??
 					o.preferences?.[0]?.name ??
 					'';
+			if (!instancetype)
 				instancetype =
 					(o.instancetypes ?? []).find((i) => i.name === 'u1.medium')?.name ??
 					o.instancetypes?.[0]?.name ??
 					'';
-			})
-			.catch((e) => (loadError = friendlyError(e)));
+		});
 	});
 
 	// A VM needs at least one NIC: the primary, a secondary, or both.
@@ -549,11 +549,11 @@
 			>
 		{/snippet}
 	</Modal>
-{:else if loadError}
+{:else if inventory.optionsError}
 	<Modal title="New Virtual Machine" {onclose}>
 		<div class="px-5 py-4">
 			<p class="rounded bg-danger-soft/60 px-3 py-2 text-sm text-danger-ink">
-				Failed to load options: {loadError}
+				Failed to load options: {inventory.optionsError}
 			</p>
 		</div>
 	</Modal>
