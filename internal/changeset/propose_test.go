@@ -64,7 +64,7 @@ func newProposeFixture(t *testing.T, routes ...route) *proposeFixture {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repos := git.NewRepoSet(ctx, "", nil, false, nil, time.Hour)
-	ff := forge.NewFactory(srv.URL, "tok", false)
+	ff := forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, "")
 	c := New(store, repos, ff, nil, nil, nil, "main", "dotvirt/proposed")
 
 	return &proposeFixture{

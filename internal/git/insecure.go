@@ -7,7 +7,7 @@ import (
 	gittransport "github.com/go-git/go-git/v5/plumbing/transport/client"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 
-	"github.com/epheo/dotvirt/internal/tlsconf"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // AllowInsecureTLS makes go-git skip TLS certificate verification for https
@@ -25,7 +25,7 @@ func AllowInsecureTLS() {
 // AllowCustomCA: go-git trusts caFile (the ingress CA serving a managed forge
 // Route) as the sole root, right for this single-forge process.
 func AllowCustomCA(caFile string) {
-	pool := tlsconf.RootCAs("git", caFile)
+	pool := forge.RootCAs("git", caFile)
 	if pool == nil {
 		return
 	}

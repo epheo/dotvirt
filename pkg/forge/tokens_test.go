@@ -37,7 +37,7 @@ func TestMintTokenUnauthorizedMapsToErrUnauthorized(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			tok, err := NewFactory(srv.URL, "unused", false).
+			tok, err := NewFactory(srv.URL, StaticToken("unused"), false, "").
 				MintToken("dotvirt-bot", "pw", "dotvirt-operator", []string{"read:user"})
 			if c.wantUnauth && !errors.Is(err, ErrUnauthorized) {
 				t.Fatalf("err = %v, want ErrUnauthorized", err)

@@ -287,7 +287,7 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	// err (requeue) rather than a needless re-mint.
 	var existing corev1.Secret
 	if err := r.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: credName}, &existing); err == nil {
-		valid, err := forge.NewFactory(apiBase, "unused", false).
+		valid, err := forge.NewFactory(apiBase, forge.StaticToken("unused"), false, "").
 			ValidateToken(string(existing.Data["token"]))
 		if err != nil {
 			return false, err
@@ -326,7 +326,7 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	// without this the freshly minted token validates as "rejected" and the operator
 	// re-mints every reconcile forever. write:organization/write:repository cover the org
 	// + repo webhook and PR operations.
-	token, err := forge.NewFactory(apiBase, "unused", false).
+	token, err := forge.NewFactory(apiBase, forge.StaticToken("unused"), false, "").
 		MintToken(install.ForgejoBotUser, string(admin.Data["password"]), "dotvirt-operator", []string{"read:user", "write:organization", "write:repository"})
 	if err != nil {
 		return false, err
@@ -336,7 +336,7 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	}
 	// Ensure the owner org exists (repos live under it for the org-level webhook).
 	if dv.Spec.Forge.PlatformRepo != "" {
-		if c := forge.NewFactory(apiBase, token, false).For(dv.Spec.Forge.PlatformRepo); c != nil {
+		if c := forge.NewFactory(apiBase, forge.StaticToken(token), false, "").For(dv.Spec.Forge.PlatformRepo); c != nil {
 			if err := c.EnsureOrg(); err != nil {
 				return false, err
 			}

@@ -9,28 +9,39 @@ import (
 	"strings"
 )
 
+// parsed is a URL split once by net/url. origin is "scheme://[user@]host" and
+// path what follows it, as written; a host-free ref ("owner/repo.git") or a
+// string net/url refuses has no origin and is all path.
+type parsed struct {
+	origin string
+	host   string // lowercased; credentials dropped, since user@host and host are one forge
+	path   string
+}
+
+func parseURL(raw string) parsed {
+	s := strings.TrimSpace(raw)
+	u, err := url.Parse(s)
+	if err != nil {
+		return parsed{path: s}
+	}
+	if u.Scheme == "" {
+		return parsed{path: u.Path}
+	}
+	origin := u.Scheme + "://"
+	if u.User != nil {
+		origin += u.User.String() + "@"
+	}
+	return parsed{origin: origin + u.Host, host: strings.ToLower(u.Host), path: u.Path}
+}
+
 // ownerRepo extracts the owner and repo from a Forgejo/Gitea repo URL. It takes
 // the last two path segments and strips a trailing ".git", so
 // https://forge.example/dotvirt/team-a.git -> ("dotvirt", "team-a"). It fails
 // closed (ok=false) on anything it can't parse cleanly, so the caller degrades to
 // a compare link rather than building a malformed API path.
 func ownerRepo(repoURL string) (owner, repo string, ok bool) {
-	s := repoURL
-	// Drop any query string / fragment before touching the path or the .git suffix.
-	if i := strings.IndexAny(s, "?#"); i >= 0 {
-		s = s[:i]
-	}
-	s = strings.TrimRight(s, "/")
-	s = strings.TrimSuffix(s, ".git")
-	// Drop scheme + host: keep the path.
-	if i := strings.Index(s, "://"); i >= 0 {
-		if slash := strings.IndexByte(s[i+3:], '/'); slash >= 0 {
-			s = s[i+3+slash+1:]
-		} else {
-			return "", "", false
-		}
-	}
-	parts := strings.Split(strings.Trim(s, "/"), "/")
+	p := strings.TrimSuffix(strings.Trim(parseURL(repoURL).path, "/"), ".git")
+	parts := strings.Split(p, "/")
 	if len(parts) < 2 {
 		return "", "", false
 	}
@@ -61,34 +72,29 @@ func NormalizeRepoURL(u string) string {
 
 // OwnerPrefixURL is the forge owner URL ("scheme://host/.../<owner>") of a repo
 // URL - the prefix Argo longest-prefix-matches to attach one repo-credential to
-// every repo under that owner. Unlike path.Dir, it preserves the "://" in the
-// scheme (path.Dir collapses it to ":/", yielding a prefix Argo never matches).
-// Returns the input unchanged when there's no repo segment to strip.
+// every repo under that owner, and what a sibling repo under the same owner is
+// named from. Returns the input unchanged when there's no repo segment to strip.
 func OwnerPrefixURL(repoURL string) string {
-	s := strings.TrimSuffix(strings.TrimRight(repoURL, "/"), ".git")
-	// Find where the path starts, after scheme://host, so we never cut into "://".
-	pathStart := 0
-	if i := strings.Index(s, "://"); i >= 0 {
-		pathStart = i + 3
+	u := parseURL(repoURL)
+	p := strings.TrimSuffix(strings.TrimRight(u.path, "/"), ".git")
+	i := strings.LastIndexByte(p, '/')
+	if i < 0 {
+		return repoURL
 	}
-	slash := strings.LastIndexByte(s[pathStart:], '/')
-	if slash <= 0 {
-		return repoURL // no owner/repo path segments to strip
-	}
-	return s[:pathStart+slash]
+	return u.origin + p[:i]
 }
 
 // CompareURL is the browser URL to manually open a PR for head->base, used when
 // the forge API isn't configured.
 func (c *Client) CompareURL(head, base string) string {
-	return fmt.Sprintf("%s/%s/%s/compare/%s...%s", c.baseURL, c.owner, c.repo, base, head)
+	return fmt.Sprintf("%s/%s/%s/compare/%s...%s", c.f.baseURL, c.owner, c.repo, base, head)
 }
 
-// urlPath returns the path component of a URL, or raw unchanged if it doesn't parse -
+// urlPath returns the path component of a URL, or raw unchanged if it has none -
 // enough to identify a webhook across a host change without binding to scheme/host/port.
 func urlPath(raw string) string {
-	if u, err := url.Parse(raw); err == nil && u.Path != "" {
-		return u.Path
+	if p := parseURL(raw).path; p != "" {
+		return p
 	}
 	return raw
 }
@@ -98,23 +104,17 @@ func urlPath(raw string) string {
 // change re-resolves projects instead of stranding them. Relative input passes
 // through.
 func PathRef(repoURL string) string {
-	s := strings.TrimSpace(repoURL)
-	i := strings.Index(s, "://")
-	if i < 0 {
-		return strings.TrimLeft(s, "/")
-	}
-	s = s[i+3:]
-	slash := strings.IndexByte(s, '/')
-	if slash < 0 {
+	u := parseURL(repoURL)
+	if u.origin != "" && u.path == "" {
 		return repoURL
 	}
-	return s[slash+1:]
+	return strings.TrimLeft(u.path, "/")
 }
 
 // ResolveRef joins a relative ref onto base; absolute refs pass through.
 // Empty base leaves a relative ref unresolvable: "".
 func ResolveRef(base, ref string) string {
-	if strings.Contains(ref, "://") {
+	if parseURL(ref).origin != "" {
 		return ref
 	}
 	if base == "" {

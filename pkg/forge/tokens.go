@@ -4,11 +4,9 @@
 package forge
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -32,28 +30,16 @@ func (f *Factory) MintToken(username, password, tokenName string, scopes []strin
 	if err := f.deleteToken(username, password, tokenName); err != nil {
 		return "", err
 	}
-	body, err := json.Marshal(map[string]any{"name": tokenName, "scopes": scopes})
+	status, data, err := f.call("POST", "/api/v1/users/"+username+"/tokens", basicAuth(username, password),
+		map[string]any{"name": tokenName, "scopes": scopes})
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequest("POST", f.baseURL+"/api/v1/users/"+username+"/tokens", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.SetBasicAuth(username, password)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	resp, err := f.http.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("forge mint token: %w", err)
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode == http.StatusUnauthorized {
+	if status == http.StatusUnauthorized {
 		return "", fmt.Errorf("forge mint token: %w", ErrUnauthorized)
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("forge mint token: %s: %s", resp.Status, strings.TrimSpace(string(data)))
+	if !ok2xx(status) {
+		return "", fmt.Errorf("forge mint token: %s: %s", statusText(status), strings.TrimSpace(string(data)))
 	}
 	var out struct {
 		Sha1 string `json:"sha1"`
@@ -68,25 +54,18 @@ func (f *Factory) MintToken(username, password, tokenName string, scopes []strin
 // token NAME as the path id). A 404 (no such token) is success - the goal state is
 // "no token of this name", so MintToken can recreate it cleanly on re-mint.
 func (f *Factory) deleteToken(username, password, tokenName string) error {
-	req, err := http.NewRequest("DELETE", f.baseURL+"/api/v1/users/"+username+"/tokens/"+url.PathEscape(tokenName), nil)
+	status, _, err := f.call("DELETE", "/api/v1/users/"+username+"/tokens/"+url.PathEscape(tokenName), basicAuth(username, password), nil)
 	if err != nil {
 		return err
 	}
-	req.SetBasicAuth(username, password)
-	req.Header.Set("Accept", "application/json")
-	resp, err := f.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("forge delete token: %w", err)
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	if resp.StatusCode == http.StatusNotFound || (resp.StatusCode >= 200 && resp.StatusCode < 300) {
+	switch {
+	case status == http.StatusNotFound || ok2xx(status):
 		return nil
-	}
-	if resp.StatusCode == http.StatusUnauthorized {
+	case status == http.StatusUnauthorized:
 		return fmt.Errorf("forge delete token: %w", ErrUnauthorized)
+	default:
+		return fmt.Errorf("forge delete token: %s", statusText(status))
 	}
-	return fmt.Errorf("forge delete token: %s", resp.Status)
 }
 
 // ValidateToken reports whether token authenticates against the forge, via a GET of
@@ -101,27 +80,16 @@ func (f *Factory) ValidateToken(token string) (valid bool, err error) {
 	if f == nil {
 		return false, fmt.Errorf("forge not configured")
 	}
-	req, err := http.NewRequest("GET", f.baseURL+"/api/v1/user", nil)
+	status, _, err := f.call("GET", "/api/v1/user", tokenAuth(token), nil)
 	if err != nil {
 		return false, err
 	}
-	req.Header.Set("Authorization", "token "+token)
-	req.Header.Set("Accept", "application/json")
-	resp, err := f.http.Do(req)
-	if err != nil {
-		return false, fmt.Errorf("forge validate token: %w", err)
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
 	switch {
-	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+	case ok2xx(status) || status == http.StatusForbidden:
 		return true, nil
-	case resp.StatusCode == http.StatusForbidden:
-		// Authenticated but forbidden (scope) - a valid credential, not a bad token.
-		return true, nil
-	case resp.StatusCode == http.StatusUnauthorized:
+	case status == http.StatusUnauthorized:
 		return false, nil
 	default:
-		return false, fmt.Errorf("forge validate token: %s", resp.Status)
+		return false, fmt.Errorf("forge validate token: %s", statusText(status))
 	}
 }
