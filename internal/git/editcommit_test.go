@@ -1,6 +1,7 @@
 package git
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
@@ -66,7 +67,7 @@ func TestCommitChangesetDeleteRemovesFile(t *testing.T) {
 	w := OpenWrite(bare, "", nil, true)
 
 	res, err := w.CommitChangeset("main", "dotvirt/proposed", "drop db",
-		[]ChangesetItem{{Path: "tenant-a/db.yaml", Namespace: "tenant-a", Name: "db", Delete: true}},
+		[]ChangesetItem{{Path: "tenant-a/db.yaml", Delete: true}},
 		Author{Name: "u", Email: "u@x"})
 	if err != nil {
 		t.Fatalf("CommitChangeset: %v", err)
@@ -88,7 +89,7 @@ func TestCommitChangesetDeleteAbsentNoop(t *testing.T) {
 	w := OpenWrite(bare, "", nil, true)
 
 	_, err := w.CommitChangeset("main", "dotvirt/proposed", "drop ghost",
-		[]ChangesetItem{{Path: "alpha/ghost.yaml", Namespace: "alpha", Name: "ghost", Delete: true}},
+		[]ChangesetItem{{Path: "alpha/ghost.yaml", Delete: true}},
 		Author{Name: "u", Email: "u@x"})
 	if !errors.Is(err, ErrNoChanges) {
 		t.Fatalf("want ErrNoChanges, got %v", err)
@@ -105,8 +106,8 @@ func TestCommitChangesetSkipsStaleDelete(t *testing.T) {
 
 	res, err := w.CommitChangeset("main", "dotvirt/proposed", "stale delete + real delete",
 		[]ChangesetItem{
-			{Path: "tenant-a/ghost.yaml", Namespace: "tenant-a", Name: "ghost", Delete: true},
-			{Path: "tenant-a/db.yaml", Namespace: "tenant-a", Name: "db", Delete: true},
+			{Path: "tenant-a/ghost.yaml", Delete: true},
+			{Path: "tenant-a/db.yaml", Delete: true},
 		},
 		Author{Name: "u", Email: "u@x"})
 	if err != nil {
@@ -118,6 +119,42 @@ func TestCommitChangesetSkipsStaleDelete(t *testing.T) {
 	}
 	if !contains(tree, "tenant-a/web.yaml") {
 		t.Error("unrelated files must be kept")
+	}
+}
+
+// A Transform runs on the file as base holds it in the fresh write clone, and
+// its output is what lands on the branch.
+func TestCommitChangesetTransformRewritesBase(t *testing.T) {
+	bare := seedMultiRepo(t)
+	w := OpenWrite(bare, "", nil, true)
+
+	var seen []byte
+	res, err := w.CommitChangeset("main", "dotvirt/proposed", "rename",
+		[]ChangesetItem{{Path: "tenant-a/web.yaml", Transform: func(current []byte) ([]byte, error) {
+			seen = current
+			return bytes.ReplaceAll(current, []byte("name: web"), []byte("name: www")), nil
+		}}},
+		Author{Name: "u", Email: "u@x"})
+	if err != nil {
+		t.Fatalf("CommitChangeset: %v", err)
+	}
+	if !bytes.Contains(seen, []byte("name: web")) {
+		t.Fatalf("Transform must see the base content, got %q", seen)
+	}
+	out, err := exec.Command("git", "--git-dir", bare, "show", res.Branch+":tenant-a/web.yaml").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git show: %v\n%s", err, out)
+	}
+	if !bytes.Contains(out, []byte("name: www")) {
+		t.Errorf("branch holds %q, want the transformed content", out)
+	}
+
+	boom := errors.New("boom")
+	_, err = w.CommitChangeset("main", "dotvirt/proposed", "fail",
+		[]ChangesetItem{{Path: "tenant-a/web.yaml", Transform: func([]byte) ([]byte, error) { return nil, boom }}},
+		Author{Name: "u", Email: "u@x"})
+	if !errors.Is(err, boom) {
+		t.Fatalf("a failing Transform must surface, got %v", err)
 	}
 }
 

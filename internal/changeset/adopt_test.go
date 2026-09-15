@@ -22,10 +22,10 @@ type fakeLive map[string]string // repo path -> manifest
 
 func (f fakeLive) Ready() bool { return true }
 
-func (f fakeLive) VMManifests([]string) []LiveManifest {
-	out := make([]LiveManifest, 0, len(f))
+func (f fakeLive) VMManifests([]string) []model.File {
+	out := make([]model.File, 0, len(f))
 	for path, content := range f {
-		out = append(out, LiveManifest{Path: path, Content: []byte(content)})
+		out = append(out, model.File{Path: path, Content: []byte(content)})
 	}
 	return out
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/epheo/dotvirt/internal/argo"
+	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
@@ -66,7 +67,7 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 		read, _, err := in.Repos.Get(p.Repo)
 		if err != nil {
 			out.Error = "repo unavailable: " + err.Error()
-		} else if vms, err = read.ParseVMsOnBranch(in.Branch); err != nil {
+		} else if vms, err = changeset.VMsOnBranch(read, in.Branch); err != nil {
 			out.Error = "read repo: " + err.Error()
 		}
 	}
@@ -110,7 +111,19 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 		byNS[ns] = append(byNS[ns], vm)
 	}
 
-	out.Namespaces = git.GroupNamespaces(byNS)
+	out.Namespaces = groupNamespaces(byNS)
+	return out
+}
+
+// groupNamespaces turns a namespace->VMs map into sorted ProjectNamespace
+// buckets (VMs by name, namespaces by name).
+func groupNamespaces(byNS map[string][]model.VM) []model.ProjectNamespace {
+	out := make([]model.ProjectNamespace, 0, len(byNS))
+	for ns, vms := range byNS {
+		sort.Slice(vms, func(i, j int) bool { return vms[i].Name < vms[j].Name })
+		out = append(out, model.ProjectNamespace{Namespace: ns, VMs: vms})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Namespace < out[j].Namespace })
 	return out
 }
 

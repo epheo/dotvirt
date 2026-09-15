@@ -70,11 +70,7 @@ func (r *Repo) walkHistory(branch string, limit int, keep func(*object.Commit) (
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	ref, err := r.repo.Reference(plumbing.NewBranchReferenceName(branch), true)
-	if err != nil {
-		return nil, fmt.Errorf("resolve branch %q: %w", branch, err)
-	}
-	c, err := r.repo.CommitObject(ref.Hash())
+	c, err := r.branchCommit(branch)
 	if err != nil {
 		return nil, err
 	}
@@ -170,10 +166,12 @@ type FileChange struct {
 // CommitDiff is one commit and the manifest files it changed against its first
 // parent. For a forge merge the first parent is the base branch as it stood, so
 // the diff is exactly what the merged PR introduced. templates/ is included:
-// the library's history is history too.
+// the library's history is history too. Root marks the commit without a
+// parent, whose Files are the whole tree.
 type CommitDiff struct {
 	Commit model.Commit
 	Files  []FileChange
+	Root   bool
 }
 
 // CommitDiff resolves hash and diffs it against its first parent (a root commit
@@ -189,7 +187,7 @@ func (r *Repo) CommitDiff(hash string) (CommitDiff, error) {
 	if err != nil {
 		return CommitDiff{}, err
 	}
-	return CommitDiff{Commit: commitEntry(c), Files: files}, nil
+	return CommitDiff{Commit: commitEntry(c), Files: files, Root: c.NumParents() == 0}, nil
 }
 
 // ErrNoBranch: the mirror holds no such branch. A head pushed moments ago
@@ -229,7 +227,9 @@ func (r *Repo) BranchDiff(base, head string) ([]FileChange, error) {
 	return treeDiff(fromTree, toTree)
 }
 
-// branchCommit resolves a branch head in the mirror. Caller holds r.mu.
+// branchCommit is the one branch resolver: every read of a branch head goes
+// through it, so a branch the mirror lacks reads as ErrNoBranch everywhere.
+// Caller holds r.mu.
 func (r *Repo) branchCommit(branch string) (*object.Commit, error) {
 	ref, err := r.repo.Reference(plumbing.NewBranchReferenceName(branch), true)
 	if errors.Is(err, plumbing.ErrReferenceNotFound) {
@@ -238,31 +238,25 @@ func (r *Repo) branchCommit(branch string) (*object.Commit, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve branch %q: %w", branch, err)
 	}
-	return r.repo.CommitObject(ref.Hash())
+	c, err := r.repo.CommitObject(ref.Hash())
+	if err != nil {
+		return nil, fmt.Errorf("commit for %q: %w", branch, err)
+	}
+	return c, nil
 }
 
-// RevertItems computes the changeset that undoes commit hash: every file the
-// commit changed is restored to its first-parent (pre-commit) content, and files
-// it added are deleted. The result feeds CommitChangeset as a forward revert - a
-// new commit, never a history rewrite. A merge reverts against its first parent,
-// the base branch side, which undoes the whole merged PR. The root commit is
-// rejected: undoing it would empty the repo.
-func (r *Repo) RevertItems(hash string) ([]ChangesetItem, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, err := r.commit(hash)
-	if err != nil {
-		return nil, err
-	}
-	if c.NumParents() == 0 {
+// RevertItems is the changeset that undoes the commit: every file it changed
+// restored to its first-parent (pre-commit) content, every file it added
+// deleted. The result feeds CommitChangeset as a forward revert - a new commit,
+// never a history rewrite. A merge reverts against its first parent, the base
+// branch side, which undoes the whole merged PR. The root commit is rejected:
+// undoing it would empty the repo.
+func (d CommitDiff) RevertItems() ([]ChangesetItem, error) {
+	if d.Root {
 		return nil, fmt.Errorf("cannot revert the root commit")
 	}
-	files, err := firstParentDiff(c)
-	if err != nil {
-		return nil, err
-	}
-	items := make([]ChangesetItem, 0, len(files))
-	for _, f := range files {
+	items := make([]ChangesetItem, 0, len(d.Files))
+	for _, f := range d.Files {
 		if f.Before == nil {
 			items = append(items, ChangesetItem{Path: f.Path, Delete: true})
 			continue

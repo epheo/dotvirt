@@ -3,6 +3,7 @@ package git
 import (
 	"bytes"
 	"io"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -44,17 +45,27 @@ func ClusterScoped(kind string) bool {
 // unparsable document declares nothing; consumers only widen, and the manifest
 // parsers report the syntax.
 func DeclaredRefs(path string, content []byte) []model.ObjectRef {
-	var out []model.ObjectRef
+	refs, _ := declared(path, content)
+	return refs
+}
+
+// declared reads every document's identity header in one pass: the refs the
+// content declares and its document count, every document counted - empty,
+// comment-only and headerless ones too (an unparsable tail ends the count at
+// -1). A file whose count exceeds its refs holds content the declared index
+// cannot account for.
+func declared(path string, content []byte) (refs []model.ObjectRef, docs int) {
 	dec := yaml.NewDecoder(bytes.NewReader(content))
 	for {
 		var doc declaredDoc
 		err := dec.Decode(&doc)
 		if err == io.EOF {
-			break
+			return refs, docs
 		}
 		if err != nil {
-			break
+			return refs, -1
 		}
+		docs++
 		if doc.Kind == "" || doc.Metadata.Name == "" {
 			continue
 		}
@@ -64,39 +75,64 @@ func DeclaredRefs(path string, content []byte) []model.ObjectRef {
 		} else if ns == "" {
 			ns = DefaultNamespace(path)
 		}
-		out = append(out, model.ObjectRef{Kind: doc.Kind, Namespace: ns, Name: doc.Metadata.Name})
-	}
-	return out
-}
-
-// Documents counts the YAML documents in content, every one of them: empty,
-// comment-only and unparsable documents count too (an unparsable tail ends
-// the count at -1). DeclaredRefs skips what it cannot name, so a file whose
-// count exceeds its refs holds content the declared index cannot account for.
-func Documents(content []byte) int {
-	dec := yaml.NewDecoder(bytes.NewReader(content))
-	n := 0
-	for {
-		var doc any
-		err := dec.Decode(&doc)
-		if err == io.EOF {
-			return n
-		}
-		if err != nil {
-			return -1
-		}
-		n++
+		refs = append(refs, model.ObjectRef{Kind: doc.Kind, Namespace: ns, Name: doc.Metadata.Name})
 	}
 }
 
-// DeclaredOnBranch returns every object the branch declares. Git is the authority on
-// what git describes: ArgoCD's tracking annotation only records what it has already
-// applied, so it misses an object committed but not yet synced, one whose Application
-// is broken, and every object on a cluster tracking by label instead. Adoption asks
-// this before capturing, so it never restates something the repo already holds.
+// DefaultNamespace derives a namespace for manifests that omit metadata.namespace,
+// using the manifest's top-level directory as a convention (a common GitOps
+// layout: one directory per namespace). Files at the repo root fall back to
+// "default".
+func DefaultNamespace(path string) string {
+	if dir, _, ok := strings.Cut(path, "/"); ok {
+		return dir
+	}
+	return "default"
+}
+
+// DeclaredIndex is one branch's declared objects: which file holds each, and
+// which files hold more than their declared objects (extra documents the
+// index cannot name), so a rewrite or removal of those files is never offered
+// as if it touched only the object asked for.
+type DeclaredIndex struct {
+	Files  map[model.ObjectRef]string
+	Opaque map[string]bool
+}
+
+// DeclaredFilesOnBranch indexes every object the branch declares by file - the
+// edit and delete paths' answer to "which file do I rewrite", regardless of
+// where the manifest was committed. Git is the authority on what git describes:
+// ArgoCD's tracking annotation only records what it has already applied, so it
+// misses an object committed but not yet synced, one whose Application is
+// broken, and every object on a cluster tracking by label instead.
 //
-// templates/ is excluded to match the Application's own source exclusion: a template
-// is a blueprint the repo stores, not an object it declares.
+// templates/ is excluded to match the Application's own source exclusion: a
+// template is a blueprint the repo stores, not an object it declares. Memoized
+// per branch head; the index is shared with later callers: read only.
+func (r *Repo) DeclaredFilesOnBranch(branch string) (DeclaredIndex, error) {
+	return Memoized(r, "declared", branch, func() (DeclaredIndex, error) {
+		idx := DeclaredIndex{Files: map[model.ObjectRef]string{}, Opaque: map[string]bool{}}
+		err := r.walkYAML(branch,
+			func(path string) bool { return !inTemplatesDir(path) },
+			func(path string, content []byte) error {
+				refs, docs := declared(path, content)
+				for _, ref := range refs {
+					idx.Files[ref] = path
+				}
+				if docs != len(refs) {
+					idx.Opaque[path] = true
+				}
+				return nil
+			})
+		if err != nil {
+			return DeclaredIndex{}, err
+		}
+		return idx, nil
+	})
+}
+
+// DeclaredOnBranch is the set of objects the branch declares - what adoption
+// asks before capturing, so it never restates something the repo already holds.
 func (r *Repo) DeclaredOnBranch(branch string) (map[model.ObjectRef]bool, error) {
 	idx, err := r.DeclaredFilesOnBranch(branch)
 	if err != nil {

@@ -28,6 +28,7 @@ import (
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/metrics"
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netstate"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/stream"
@@ -44,16 +45,16 @@ type liveVMs struct{ state *clusterstate.State }
 // permanently-failing VMI reflector must not wedge drift and adoption forever.
 func (l liveVMs) Ready() bool { return l.state.VMSnapshotReady() }
 
-func (l liveVMs) VMManifests(namespaces []string) []changeset.LiveManifest {
+func (l liveVMs) VMManifests(namespaces []string) []model.File {
 	objs := l.state.VMObjects(namespaces)
-	out := make([]changeset.LiveManifest, 0, len(objs))
+	out := make([]model.File, 0, len(objs))
 	for i := range objs {
 		content, err := cluster.ExportManifest(objs[i])
 		if err != nil {
 			log.Printf("live manifest %s/%s: %v", objs[i].Namespace, objs[i].Name, err)
 			continue
 		}
-		out = append(out, changeset.LiveManifest{Path: cluster.ExportPath(objs[i]), Content: content})
+		out = append(out, model.File{Path: cluster.ExportPath(objs[i]), Content: content})
 	}
 	return out
 }

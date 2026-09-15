@@ -51,27 +51,14 @@ type Repo struct {
 	mu   sync.Mutex
 	repo *git.Repository
 
-	// parseCache memoizes ParseVMsOnBranch keyed by the branch's commit hash, so the
-	// whole-tree walk+parse runs once per branch per actual content change instead of
-	// once per project per identity per inventory build. Self-invalidating: when the
-	// fetcher advances the mirror the branch hash moves, so the next read misses. The
-	// hash is read from the local mirror (no network), unlike headsSignature.
-	parseMu    sync.Mutex
-	parseCache map[string]branchParse
-	decl       declIndex // DeclaredFilesOnBranch, same invalidation
-}
-
-// branchParse is one branch's parsed VMs and the commit hash they reflect.
-type branchParse struct {
-	hash string
-	vms  []model.VM
+	memos memoTable
 }
 
 // Open clones url into memory (bare, all branches) and returns a Repo. username +
 // tokenFn provide https basic auth, resolved on each fetch (pass a nil/empty
 // source for public/local).
 func Open(url, username string, tokenFn forge.TokenSource) (*Repo, error) {
-	r := &Repo{creds: creds{url: url, username: username, tokenFn: tokenFn}, parseCache: map[string]branchParse{}}
+	r := &Repo{creds: creds{url: url, username: username, tokenFn: tokenFn}}
 	if err := r.clone(); err != nil {
 		return nil, err
 	}
@@ -79,7 +66,7 @@ func Open(url, username string, tokenFn forge.TokenSource) (*Repo, error) {
 }
 
 // branchHash returns branch's current commit hash from the local mirror (no fetch),
-// or "" if the branch can't be resolved - the parse-cache invalidation key.
+// or "" if the branch can't be resolved - the memo invalidation key.
 func (r *Repo) branchHash(branch string) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -157,12 +144,6 @@ func (r *Repo) headsSignature() (string, error) {
 	return strings.Join(heads, ","), nil
 }
 
-// ManifestFile is one VM manifest located in the repo.
-type ManifestFile struct {
-	Path    string // path within the repo
-	Content []byte
-}
-
 // walkYAML visits branch's .yaml/.yml files passing include, under the repo
 // lock - the one tree-walk behind VMManifests, TemplatesOnBranch and
 // DeclaredOnBranch.
@@ -188,13 +169,13 @@ func (r *Repo) walkYAML(branch string, include func(path string) bool, visit fun
 // VMManifests returns every file on branch that contains a VirtualMachine doc.
 // Files are matched by .yaml/.yml extension then filtered by content, so a
 // single file with multiple docs is still found.
-func (r *Repo) VMManifests(branch string) ([]ManifestFile, error) {
-	var out []ManifestFile
+func (r *Repo) VMManifests(branch string) ([]model.File, error) {
+	var out []model.File
 	err := r.walkYAML(branch,
 		func(path string) bool { return !inTemplatesDir(path) },
 		func(path string, content []byte) error {
 			if containsVirtualMachine(content) {
-				out = append(out, ManifestFile{Path: path, Content: content})
+				out = append(out, model.File{Path: path, Content: content})
 			}
 			return nil
 		})
@@ -242,17 +223,13 @@ func (r *Repo) FileOnBranch(branch, path string) ([]byte, error) {
 	return readFile(f)
 }
 
-// treeFor resolves branch -> commit -> tree. Caller holds r.mu.
+// treeFor is branch's head tree. Caller holds r.mu.
 func (r *Repo) treeFor(branch string) (*object.Tree, error) {
-	ref, err := r.repo.Reference(plumbing.NewBranchReferenceName(branch), true)
+	c, err := r.branchCommit(branch)
 	if err != nil {
-		return nil, fmt.Errorf("resolve branch %q: %w", branch, err)
+		return nil, err
 	}
-	commit, err := r.repo.CommitObject(ref.Hash())
-	if err != nil {
-		return nil, fmt.Errorf("commit for %q: %w", branch, err)
-	}
-	return commit.Tree()
+	return c.Tree()
 }
 
 func readFile(f *object.File) ([]byte, error) {
@@ -273,22 +250,18 @@ func containsVirtualMachine(content []byte) bool {
 	return strings.Contains(string(content), "kind: VirtualMachine")
 }
 
-// TemplatesDir is the library directory: VirtualMachineTemplate manifests the
-// ArgoCD Applications exclude from the applied path. VMManifests skips it (a
-// template's embedded VM blueprint is not inventory), and TemplatesOnBranch
-// reads only it.
-const TemplatesDir = "templates"
-
+// inTemplatesDir: VMManifests skips the library (a template's embedded VM
+// blueprint is not inventory); TemplatesOnBranch reads only it.
 func inTemplatesDir(name string) bool {
-	return strings.HasPrefix(name, TemplatesDir+"/")
+	return strings.HasPrefix(name, model.TemplatesDir+"/")
 }
 
 // TemplatesOnBranch returns every .yaml file under templates/ on branch - the
 // repo's template library, parsed by the caller.
-func (r *Repo) TemplatesOnBranch(branch string) ([]ManifestFile, error) {
-	var out []ManifestFile
+func (r *Repo) TemplatesOnBranch(branch string) ([]model.File, error) {
+	var out []model.File
 	err := r.walkYAML(branch, inTemplatesDir, func(path string, content []byte) error {
-		out = append(out, ManifestFile{Path: path, Content: content})
+		out = append(out, model.File{Path: path, Content: content})
 		return nil
 	})
 	if err != nil {

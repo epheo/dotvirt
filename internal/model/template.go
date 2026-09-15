@@ -2,6 +2,11 @@ package model
 
 // The template library (Content Library).
 
+// TemplatesDir is the library directory within a repo: VirtualMachineTemplate
+// manifests the ArgoCD Applications exclude from the applied path, so the git
+// plane's inventory walk skips it and the library read covers only it.
+const TemplatesDir = "templates"
+
 // Template is one VirtualMachineTemplate manifest in a library repo's
 // templates/ directory - a content-library entry.
 // Name is the file's basename: the deployable identity the API routes carry.

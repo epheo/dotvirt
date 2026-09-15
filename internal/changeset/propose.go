@@ -10,6 +10,7 @@ import (
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
+	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/tasks"
@@ -168,18 +169,26 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) []git.ChangesetIte
 		switch e.Kind {
 		case draft.KindEdit:
 			// A template edit replaces the file wholesale (Manifest set); a VM
-			// edit patches targeted fields in place.
+			// edit patches targeted fields into the file as base holds it at
+			// commit time.
 			if e.Manifest != "" {
-				items = append(items, git.ChangesetItem{Path: e.SourceFile, Namespace: e.Namespace, Name: e.Name, NewContent: []byte(e.Manifest)})
+				items = append(items, git.ChangesetItem{Path: e.SourceFile, NewContent: []byte(e.Manifest)})
 				continue
 			}
+			if e.Edit == nil {
+				continue
+			}
+			edit := *e.Edit
 			items = append(items, git.ChangesetItem{
-				Path: e.SourceFile, Namespace: e.Namespace, Name: e.Name, Edit: e.Edit,
+				Path: e.SourceFile,
+				Transform: func(current []byte) ([]byte, error) {
+					return manifest.ApplyEdit(current, e.Namespace, e.Name, edit)
+				},
 			})
 		case draft.KindCreate:
-			items = append(items, git.ChangesetItem{Path: e.SourceFile, Namespace: e.Namespace, Name: e.Name, NewContent: []byte(e.Manifest)})
+			items = append(items, git.ChangesetItem{Path: e.SourceFile, NewContent: []byte(e.Manifest)})
 		case draft.KindDelete:
-			items = append(items, git.ChangesetItem{Path: e.SourceFile, Namespace: e.Namespace, Name: e.Name, Delete: true})
+			items = append(items, git.ChangesetItem{Path: e.SourceFile, Delete: true})
 		}
 	}
 	return items

@@ -7,7 +7,6 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
-	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
@@ -35,8 +34,11 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	raw, err := libRead.FileOnBranch(c.baseBranch, git.TemplatesDir+"/"+req.Template+".yaml")
+	raw, ok, err := libRead.LookupOnBranch(c.baseBranch, vmtemplate.Dir+"/"+req.Template+".yaml")
 	if err != nil {
+		return model.DraftView{}, err
+	}
+	if !ok {
 		return model.DraftView{}, fmt.Errorf("%w: template %q not in library %q", model.ErrNotFound, req.Template, libraryProj.Name)
 	}
 
@@ -69,12 +71,18 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	path := req.Namespace + "/" + rendered.Name + ".yaml"
 	// A deploy must never silently overwrite a committed VM (a duplicate deploy
-	// or a generated-name collision) - merging would replace it.
-	if _, err := targetRead.FileOnBranch(c.baseBranch, path); err == nil {
+	// or a generated-name collision) - merging would replace it. The declared
+	// index answers, since the VM may sit in a multi-document file at another
+	// path; a failed read is a failure, never absence.
+	idx, err := targetRead.DeclaredFilesOnBranch(c.baseBranch)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	if _, ok := declaredRef(idx, draft.ResourceVM, req.Namespace, rendered.Name); ok {
 		return model.DraftView{}, fmt.Errorf("%w: %s/%s already exists in git", model.ErrConflict, req.Namespace, rendered.Name)
 	}
+	path := req.Namespace + "/" + rendered.Name + ".yaml"
 
 	if err := c.store.Stage(id.Username, targetProj.Name, draft.Entry{
 		Kind:         draft.KindCreate,
@@ -105,7 +113,7 @@ func (c *Coordinator) StageSaveTemplate(id auth.Identity, commitProj, sourceProj
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	vm, found, err := srcRead.FindVMOnBranch(c.baseBranch, req.SourceNamespace, req.SourceName)
+	vm, found, err := findVM(srcRead, c.baseBranch, req.SourceNamespace, req.SourceName)
 	if err != nil {
 		return model.DraftView{}, err
 	}
@@ -121,12 +129,16 @@ func (c *Coordinator) StageSaveTemplate(id auth.Identity, commitProj, sourceProj
 		return model.DraftView{}, err
 	}
 
-	path := git.TemplatesDir + "/" + req.Name + ".yaml"
+	path := vmtemplate.Dir + "/" + req.Name + ".yaml"
 	commitRead, err := c.read(commitProj)
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if _, err := commitRead.FileOnBranch(c.baseBranch, path); err == nil {
+	_, exists, err := commitRead.LookupOnBranch(c.baseBranch, path)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	if exists {
 		return model.DraftView{}, fmt.Errorf("%w: template %q already exists in library %q", model.ErrConflict, req.Name, commitProj.Name)
 	}
 
@@ -155,7 +167,7 @@ func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.P
 	if err := requireDNS1123("template name", req.Name); err != nil {
 		return model.DraftView{}, err
 	}
-	path := git.TemplatesDir + "/" + req.Name + ".yaml"
+	path := vmtemplate.Dir + "/" + req.Name + ".yaml"
 	if t := vmtemplate.Parse(path, []byte(req.YAML), commitProj.Name); t.Error != "" {
 		return model.DraftView{}, fmt.Errorf("%w: %s", model.ErrInvalid, t.Error)
 	}
@@ -163,7 +175,11 @@ func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.P
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if _, err := read.FileOnBranch(c.baseBranch, path); err != nil {
+	_, exists, err := read.LookupOnBranch(c.baseBranch, path)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	if !exists {
 		return model.DraftView{}, fmt.Errorf("%w: template %q not in library %q", model.ErrNotFound, req.Name, commitProj.Name)
 	}
 

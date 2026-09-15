@@ -31,16 +31,10 @@ type Resyncer interface {
 // in-memory snapshot keeps live state out of git entirely: no write per tick to every
 // tenant repo, nothing to lag behind the cluster, and nothing lost with the repo.
 type LiveSource interface {
-	VMManifests(namespaces []string) []LiveManifest
+	VMManifests(namespaces []string) []model.File
 	// Ready is false while the backing reflector is still on its initial LIST, when a
 	// partial answer would read as "these VMs are gone".
 	Ready() bool
-}
-
-// LiveManifest is one running VM as the repo path and bytes it would occupy.
-type LiveManifest struct {
-	Path    string
-	Content []byte
 }
 
 // PruneSource: what ArgoCD would prune for a repo, per Argo's OWN comparison.

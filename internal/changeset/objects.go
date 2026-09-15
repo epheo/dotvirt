@@ -23,15 +23,25 @@ func (c *Coordinator) locate(read *git.Repo, resource draft.Resource, namespace,
 	if err != nil {
 		return "", err
 	}
+	ref, ok := declaredRef(idx, resource, namespace, name)
+	if !ok {
+		return "", fmt.Errorf("%w: %s/%s not on %s", model.ErrNotFound, namespace, name, c.baseBranch)
+	}
+	return soleDeclarer(idx, []model.ObjectRef{ref})
+}
+
+// declaredRef is the identity under which idx declares (resource, namespace,
+// name), whatever file and document it sits in; ok=false when the branch
+// declares no such object.
+func declaredRef(idx git.DeclaredIndex, resource draft.Resource, namespace, name string) (model.ObjectRef, bool) {
 	ns := model.ObjectNamespace(namespace)
 	for _, kind := range resource.Kinds() {
 		ref := model.ObjectRef{Kind: kind, Namespace: ns, Name: name}
-		if _, ok := idx.Files[ref]; !ok {
-			continue
+		if _, ok := idx.Files[ref]; ok {
+			return ref, true
 		}
-		return soleDeclarer(idx, []model.ObjectRef{ref})
 	}
-	return "", fmt.Errorf("%w: %s/%s not on %s", model.ErrNotFound, namespace, name, c.baseBranch)
+	return model.ObjectRef{}, false
 }
 
 // AdoptObject makes git say what the cluster runs for one object: a create when

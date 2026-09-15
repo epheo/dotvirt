@@ -77,7 +77,7 @@ func (c *Coordinator) Adopt(id auth.Identity, proj project.ProjectInfo, namespac
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	desired, okD, err := read.FindVMOnBranch(c.baseBranch, namespace, name)
+	desired, okD, err := findVM(read, c.baseBranch, namespace, name)
 	if err != nil {
 		return model.DraftView{}, err
 	}
@@ -227,7 +227,7 @@ func (c *Coordinator) VMDrift(proj project.ProjectInfo, namespace, name string) 
 	if err != nil {
 		return model.DriftResult{}, err
 	}
-	desired, okD, err := read.FindVMOnBranch(c.baseBranch, namespace, name)
+	desired, okD, err := findVM(read, c.baseBranch, namespace, name)
 	if err != nil {
 		return model.DriftResult{}, err
 	}

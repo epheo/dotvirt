@@ -1,14 +1,14 @@
 package vmtemplate
 
-import "github.com/epheo/dotvirt/internal/git"
+import "github.com/epheo/dotvirt/internal/model"
 
 // SeedFiles is the starter library committed to a newly created project repo:
 // a full guest-customization example and a minimal one, both deployable with
 // defaults alone. The DataSource/instancetype/preference names match what CNV
 // ships (and what the New-VM wizard offers); OS_IMAGE_NAMESPACE exists so
 // clusters that keep boot images elsewhere can retarget without editing YAML.
-func SeedFiles() []git.File {
-	return []git.File{
+func SeedFiles() []model.File {
+	return []model.File{
 		{Path: Dir + "/fedora-server.yaml", Content: []byte(fedoraServer)},
 		{Path: Dir + "/fedora-minimal.yaml", Content: []byte(fedoraMinimal)},
 	}

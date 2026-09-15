@@ -46,7 +46,7 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 				}
 				break
 			}
-			current, _, err := read.FindVMOnBranch(c.baseBranch, e.Namespace, e.Name)
+			current, _, err := findVM(read, c.baseBranch, e.Namespace, e.Name)
 			if err != nil {
 				return model.DraftView{}, err
 			}
@@ -158,7 +158,7 @@ func JoinWarning(a, b string) string {
 // field list only explains it, so an unparseable side degrades to the name.
 func restoreChanges(read *git.Repo, base string, e draft.Entry) []model.Change {
 	out := []model.Change{{Field: "Restore", Action: "change", To: "version " + e.FromVersion}}
-	current, found, err := read.FindVMOnBranch(base, e.Namespace, e.Name)
+	current, found, err := findVM(read, base, e.Namespace, e.Name)
 	if err != nil || !found {
 		return out
 	}

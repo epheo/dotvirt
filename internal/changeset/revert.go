@@ -29,7 +29,7 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 	if err != nil {
 		return model.ProposeResult{}, fmt.Errorf("%w: %v", model.ErrNotFound, err)
 	}
-	items, err := read.RevertItems(hash)
+	items, err := d.RevertItems()
 	if err != nil {
 		return model.ProposeResult{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
 	}
