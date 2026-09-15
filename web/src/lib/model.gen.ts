@@ -657,7 +657,6 @@ export interface Uplink {
   builtin?: boolean; // the default br-ex uplink
   nodes?: string[]; // nodes carrying the mapping
   nodeCount: number /* int */; // len(Nodes), for the "N/M nodes" badge
-  ports?: string[]; // physical NIC(s)/bond enslaved to the bridge
   /**
    * Policy is the NodeNetworkConfigurationPolicy declaring this uplink - the
    * identity edit, delete and adoption act on. Empty for the builtin uplink and
@@ -675,8 +674,6 @@ export interface Uplink {
   sync?: SyncStatus;
   health?: string;
   syncError?: string;
-  vlans?: number /* int */[]; // LLDP-discovered VLAN IDs (6.5)
-  status?: string; // NNCE rollup: Available | Progressing | Failing (6.5)
 }
 /**
  * PhysicalAdapter is one node NIC from NodeNetworkState - the host "Physical
