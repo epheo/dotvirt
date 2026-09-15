@@ -4,12 +4,12 @@ package vmgen
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 	"sigs.k8s.io/yaml"
 
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/validate"
 )
 
@@ -121,7 +121,7 @@ func validateSpec(s Spec) error {
 func metadata(s Spec) map[string]any {
 	m := map[string]any{"name": s.Name, "namespace": s.Namespace}
 	if len(s.Labels) > 0 {
-		m["labels"] = toAnyMap(s.Labels)
+		m["labels"] = s.Labels
 	}
 	return m
 }
@@ -135,10 +135,10 @@ func vmSpec(s Spec) map[string]any {
 	// storage class, so they outlive VM restarts and can be storage-migrated later.
 	for _, d := range s.ExtraDisks {
 		dvTemplates = append(dvTemplates,
-			blankDataVolumeTemplate(extraDiskVol(s.Name, d.Name), orDefault(d.Size, "10Gi"), d.StorageClass))
+			BlankDataVolumeTemplate(extraDiskVol(s.Name, d.Name), orDefault(d.Size, "10Gi"), d.StorageClass))
 	}
 	return map[string]any{
-		"runStrategy":         runStrategy(s.Running),
+		"runStrategy":         model.RunStrategy(s.Running),
 		"instancetype":        map[string]any{"name": s.Instancetype},
 		"preference":          map[string]any{"name": s.Preference},
 		"dataVolumeTemplates": dvTemplates,
@@ -160,9 +160,10 @@ func dataVolumeTemplate(name string, img OSImageRef, size, class string) map[str
 	}
 }
 
-// blankDataVolumeTemplate provisions an empty, formatted-on-first-boot PVC - the
-// backing for an extra data disk.
-func blankDataVolumeTemplate(name, size, class string) map[string]any {
+// BlankDataVolumeTemplate provisions an empty, formatted-on-first-boot PVC - the
+// backing for an extra data disk, whether created with the VM or added later
+// (manifest renders this same shape into an existing file).
+func BlankDataVolumeTemplate(name, size, class string) map[string]any {
 	return map[string]any{
 		"metadata": map[string]any{"name": name},
 		"spec": map[string]any{
@@ -253,10 +254,7 @@ func masqueradeIface(name string) map[string]any {
 // multusNetwork builds a NAD-backed (multus) network + bridge interface. ref is
 // "<namespace>/<nad>" or "<nad>"; the interface name is derived from the NAD name.
 func multusNetwork(ref string) (network map[string]any, iface map[string]any) {
-	ifaceName := ref
-	if i := strings.LastIndex(ref, "/"); i >= 0 {
-		ifaceName = ref[i+1:]
-	}
+	ifaceName := model.InterfaceName(ref)
 	network = map[string]any{
 		"name":   ifaceName,
 		"multus": map[string]any{"networkName": ref},
@@ -318,29 +316,9 @@ func cloudInit(s Spec) map[string]any {
 	}
 }
 
-func runStrategy(running bool) string {
-	if running {
-		return "Always"
-	}
-	return "Halted"
-}
-
 func orDefault(v, def string) string {
 	if v == "" {
 		return def
 	}
 	return v
-}
-
-func toAnyMap(m map[string]string) map[string]any {
-	out := make(map[string]any, len(m))
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		out[k] = m[k]
-	}
-	return out
 }

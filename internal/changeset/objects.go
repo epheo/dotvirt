@@ -9,6 +9,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
+	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
@@ -75,7 +76,7 @@ func (c *Coordinator) AdoptObject(id auth.Identity, proj project.ProjectInfo, o 
 		if err != nil {
 			return model.DraftView{}, err
 		}
-		if netgen.SameDocument(current, o.Manifest) {
+		if manifest.SameDocument(current, o.Manifest) {
 			return model.DraftView{}, fmt.Errorf("%w: %s/%s already matches git", model.ErrInvalid, ns, o.Name)
 		}
 		entry.Kind, entry.SourceFile = draft.KindEdit, path
@@ -150,7 +151,7 @@ func (c *Coordinator) StageUpdateManifest(id auth.Identity, proj project.Project
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if netgen.SameDocument(current, []byte(yaml)) {
+	if manifest.SameDocument(current, []byte(yaml)) {
 		return model.DraftView{}, fmt.Errorf("%w: %s/%s already matches git", model.ErrInvalid, namespace, name)
 	}
 	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{

@@ -2,9 +2,10 @@ package netgen
 
 import (
 	"fmt"
-	"reflect"
 
 	"sigs.k8s.io/yaml"
+
+	"github.com/epheo/dotvirt/internal/manifest"
 )
 
 // Decode reads a manifest this package rendered back into the spec that renders
@@ -13,16 +14,13 @@ import (
 // cannot express (hand-written selectors, extra fields) is refused rather than
 // silently rewritten without those settings.
 func Decode(content []byte) (any, error) {
-	var head struct {
-		Kind string `json:"kind"`
-	}
-	if err := yaml.Unmarshal(content, &head); err != nil {
+	head, err := manifest.Header(content)
+	if err != nil {
 		return nil, err
 	}
 	var (
 		spec     any
 		rendered []byte
-		err      error
 	)
 	switch head.Kind {
 	case "UserDefinedNetwork", "ClusterUserDefinedNetwork":
@@ -70,23 +68,13 @@ func Decode(content []byte) (any, error) {
 	default:
 		return nil, fmt.Errorf("%s has no form", head.Kind)
 	}
-	if err != nil || !SameDocument(content, rendered) {
+	if err != nil || !manifest.SameDocument(content, rendered) {
 		// A renderer refusal is the same finding as a mismatch: the manifest
 		// holds something the form has no field for (an untagged localnet, a
 		// label selector, extra labels).
 		return nil, fmt.Errorf("the manifest carries settings the form has no field for")
 	}
 	return spec, nil
-}
-
-// SameDocument compares two manifests as data, so key order and quoting do not
-// count and every field does.
-func SameDocument(a, b []byte) bool {
-	var da, db any
-	if yaml.Unmarshal(a, &da) != nil || yaml.Unmarshal(b, &db) != nil {
-		return false
-	}
-	return reflect.DeepEqual(da, db)
 }
 
 func decodePorts(docs []PortDoc) []PolicyPort {

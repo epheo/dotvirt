@@ -168,3 +168,49 @@ func changedLines(a, b string) int {
 func unifiedish(a, b string) string {
 	return "--- before\n" + a + "--- after\n" + b
 }
+
+// A VM declared in the second document of a multi-document file is found and
+// edited in place: one Unmarshal would only ever see the first document.
+func TestApplyEditFindsVMInSecondDocument(t *testing.T) {
+	const twoVMs = `apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: first
+  namespace: alpha
+spec:
+  runStrategy: Always
+  template:
+    spec:
+      domain:
+        memory:
+          guest: 1Gi
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: second
+  namespace: alpha
+spec:
+  runStrategy: Always
+  template:
+    spec:
+      domain:
+        memory:
+          guest: 1Gi
+`
+	out, err := ApplyEdit([]byte(twoVMs), "alpha", "second", VMEdit{Memory: ptr("4Gi")})
+	if err != nil {
+		t.Fatalf("ApplyEdit: %v", err)
+	}
+	got := string(out)
+	first, second, _ := strings.Cut(got, "---")
+	if !strings.Contains(second, "guest: 4Gi") || strings.Contains(first, "guest: 4Gi") {
+		t.Fatalf("edit must land in the second document only:\n%s", got)
+	}
+	if n := changedLines(twoVMs, got); n != 1 {
+		t.Errorf("expected 1 changed line, got %d:\n%s", n, unifiedish(twoVMs, got))
+	}
+	if _, err := ApplyEdit([]byte(twoVMs), "alpha", "third", VMEdit{Memory: ptr("4Gi")}); err == nil {
+		t.Error("a VM no document declares must not be found")
+	}
+}

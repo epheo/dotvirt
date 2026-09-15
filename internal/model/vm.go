@@ -1,5 +1,7 @@
 package model
 
+import "strings"
+
 // The VM inventory: what a project runs and how each VM presents in the tree.
 
 // VM is a single virtual machine as shown in the inventory. Fields are populated
@@ -99,6 +101,16 @@ type NIC struct {
 	// Implicit marks the pod-network adapter KubeVirt attaches when the manifest
 	// declares none: real on the VMI, absent from the file, so not removable.
 	Implicit bool `json:"implicit,omitempty"`
+}
+
+// InterfaceName is the name a VM interface takes from the network it attaches:
+// the NetworkAttachmentDefinition's own name, without the namespace a
+// <namespace>/<name> reference carries.
+func InterfaceName(networkRef string) string {
+	if i := strings.LastIndex(networkRef, "/"); i >= 0 {
+		return networkRef[i+1:]
+	}
+	return networkRef
 }
 
 // ProjectNamespace is one namespace bucket within a project: the VMs it holds.

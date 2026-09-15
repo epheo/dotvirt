@@ -1,24 +1,11 @@
 package git
 
 import (
-	"bytes"
-	"io"
 	"strings"
 
-	"gopkg.in/yaml.v3"
-
+	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 )
-
-// declaredDoc is the identity header every Kubernetes manifest carries; the rest of
-// each document is ignored, so this reads any kind without a typed model.
-type declaredDoc struct {
-	Kind     string `yaml:"kind"`
-	Metadata struct {
-		Name      string `yaml:"name"`
-		Namespace string `yaml:"namespace"`
-	} `yaml:"metadata"`
-}
 
 // unmanagedClusterScoped lists the cluster-scoped kinds a repo may carry that
 // dotvirt does not manage; the managed ones answer from the kind table. A
@@ -49,34 +36,21 @@ func DeclaredRefs(path string, content []byte) []model.ObjectRef {
 	return refs
 }
 
-// declared reads every document's identity header in one pass: the refs the
-// content declares and its document count, every document counted - empty,
-// comment-only and headerless ones too (an unparsable tail ends the count at
-// -1). A file whose count exceeds its refs holds content the declared index
+// declared is manifest.Headers under the repo's namespace rule: a cluster-scoped
+// kind has none, a namespaced one that omits it takes the file's directory. A
+// file whose document count exceeds its refs holds content the declared index
 // cannot account for.
 func declared(path string, content []byte) (refs []model.ObjectRef, docs int) {
-	dec := yaml.NewDecoder(bytes.NewReader(content))
-	for {
-		var doc declaredDoc
-		err := dec.Decode(&doc)
-		if err == io.EOF {
-			return refs, docs
+	heads, docs := manifest.Headers(content)
+	for _, h := range heads {
+		if ClusterScoped(h.Kind) {
+			h.Namespace = ""
+		} else if h.Namespace == "" {
+			h.Namespace = DefaultNamespace(path)
 		}
-		if err != nil {
-			return refs, -1
-		}
-		docs++
-		if doc.Kind == "" || doc.Metadata.Name == "" {
-			continue
-		}
-		ns := doc.Metadata.Namespace
-		if ClusterScoped(doc.Kind) {
-			ns = ""
-		} else if ns == "" {
-			ns = DefaultNamespace(path)
-		}
-		refs = append(refs, model.ObjectRef{Kind: doc.Kind, Namespace: ns, Name: doc.Metadata.Name})
+		refs = append(refs, h)
 	}
+	return refs, docs
 }
 
 // DefaultNamespace derives a namespace for manifests that omit metadata.namespace,
