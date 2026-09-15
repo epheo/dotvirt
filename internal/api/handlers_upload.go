@@ -1,7 +1,8 @@
 package api
 
 import (
-	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -16,21 +17,20 @@ import (
 // handleCreateUpload creates the upload-target DataVolume in the caller's project.
 func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.UploadProxyURL == "" {
-		http.Error(w, "image upload not configured", http.StatusServiceUnavailable)
+		fail(w, fmt.Errorf("%w: image upload not configured", model.ErrUnavailable))
 		return
 	}
-	var req struct {
+	req, ok := decode[struct {
 		Namespace    string `json:"namespace"`
 		Name         string `json:"name"`
 		Size         string `json:"size"`
 		StorageClass string `json:"storageClass"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+	}](w, r)
+	if !ok {
 		return
 	}
 	if req.Namespace == "" || req.Name == "" || req.Size == "" {
-		http.Error(w, "namespace, name and size are required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("namespace, name and size are required")))
 		return
 	}
 	sc, ok := s.resolveProject(w, r, byNamespace(req.Namespace))
@@ -38,7 +38,7 @@ func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := sc.cluster.CreateUploadDataVolume(r.Context(), req.Namespace, req.Name, req.Size, req.StorageClass); err != nil {
-		runtimeFail(w, err)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, model.UploadTarget{Namespace: req.Namespace, Name: req.Name})
@@ -46,8 +46,7 @@ func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 
 // handleUploadStatus reports the upload DataVolume's phase + import progress.
 func (s *Server) handleUploadStatus(w http.ResponseWriter, r *http.Request) {
-	ns, name := r.PathValue("namespace"), r.PathValue("name")
-	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
@@ -59,17 +58,16 @@ func (s *Server) handleUploadStatus(w http.ResponseWriter, r *http.Request) {
 // browser POSTs the image to.
 func (s *Server) handleUploadToken(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.UploadProxyURL == "" {
-		http.Error(w, "image upload not configured", http.StatusServiceUnavailable)
+		fail(w, fmt.Errorf("%w: image upload not configured", model.ErrUnavailable))
 		return
 	}
-	ns, name := r.PathValue("namespace"), r.PathValue("name")
-	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
 	token, err := sc.cluster.CreateUploadToken(r.Context(), ns, name)
 	if err != nil {
-		runtimeFail(w, err)
+		fail(w, err)
 		return
 	}
 	url := strings.TrimRight(s.cfg.UploadProxyURL, "/") + "/v1beta1/upload-async"

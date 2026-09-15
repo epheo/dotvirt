@@ -2,8 +2,11 @@ package api
 
 import (
 	"crypto/subtle"
+	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // handleAppSetPlugin serves the ArgoCD ApplicationSet plugin generator: it returns
@@ -18,7 +21,7 @@ import (
 // user session); the path is exempted from user-auth in auth.isOpenPath.
 func (s *Server) handleAppSetPlugin(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.AppSetPluginToken == "" {
-		http.Error(w, "appset plugin not configured", http.StatusNotFound)
+		fail(w, fmt.Errorf("%w: appset plugin not configured", model.ErrNotFound))
 		return
 	}
 	// Require the Bearer scheme outright: TrimPrefix alone would also accept a
@@ -38,7 +41,7 @@ func (s *Server) handleAppSetPlugin(w http.ResponseWriter, r *http.Request) {
 		Repo    string `json:"repo"`
 	}
 	params := []param{}
-	for _, p := range s.resolver.Resolve(s.state.Namespaces(), nil) {
+	for _, p := range s.AllProjects() {
 		if p.Repo == "" {
 			continue // a project with no usable repo can't be synced
 		}

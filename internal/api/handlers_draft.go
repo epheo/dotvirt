@@ -1,7 +1,7 @@
 package api
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path"
@@ -24,13 +24,12 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req model.EditRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+	req, ok := decode[model.EditRequest](w, r)
+	if !ok {
 		return
 	}
 	if req.SourceFile == "" {
-		http.Error(w, "sourceFile is required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("sourceFile is required")))
 		return
 	}
 	result, err := s.draft.StageEdit(sc.id, sc.proj, ns, name, req)
@@ -45,7 +44,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p.Namespace == "" {
-		http.Error(w, "spec namespace is required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("spec namespace is required")))
 		return
 	}
 	sc, ok := s.resolveProject(w, r, byNamespace(p.Namespace))
@@ -115,18 +114,13 @@ func (s *Server) handlePropose(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req model.ProposeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+	req, ok := decode[model.ProposeRequest](w, r)
+	if !ok {
 		return
 	}
 	result, err := s.draft.Propose(sc.id, sc.proj, req)
 	if err == nil {
-		// Track this project first: the nudge below only refreshes tokens already in
-		// the watch set, and a token that hasn't built an inventory yet isn't in it -
-		// so without this its new PR would wait for a later inventory build.
-		s.trackProposalsProject(sc.id, sc.proj)
-		s.nudgeProposals() // the new PR reaches every lane before the git poll notices
+		s.proposalOpened(sc)
 	}
 	respond(w, result, err)
 }
@@ -154,8 +148,7 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 // up half declared. The capture runs under the caller's own token, so a user adopts
 // exactly what their RBAC lets them read. One draft, proposed as one PR.
 func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
-	ns := r.PathValue("namespace")
-	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	sc, ns, _, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
@@ -248,8 +241,7 @@ func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 // the "Download manifest" action. The git file IS the VM's full definition, so
 // this is dotvirt's VM-export path.
 func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
-	ns, name := r.PathValue("namespace"), r.PathValue("name")
-	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
@@ -272,7 +264,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	if ns := r.URL.Query().Get("namespace"); ns != "" {
 		if err := validate.RequireDNS1123("namespace", ns); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			fail(w, invalid(err))
 			return
 		}
 		commits, err := s.draft.NamespaceHistory(sc.proj, ns, 25)
@@ -290,7 +282,7 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	hash, ok := restoreHash(w, r)
+	hash, ok := hashBody(w, r)
 	if !ok {
 		return
 	}
@@ -298,17 +290,17 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	respond(w, result, err)
 }
 
-// restoreHash reads a restore body's commit hash; ok=false means the response is written.
-func restoreHash(w http.ResponseWriter, r *http.Request) (string, bool) {
-	var req struct {
+// hashBody reads the commit hash a restore or revert body names; ok=false means
+// the response is written.
+func hashBody(w http.ResponseWriter, r *http.Request) (string, bool) {
+	req, ok := decode[struct {
 		Hash string `json:"hash"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+	}](w, r)
+	if !ok {
 		return "", false
 	}
 	if !commitHash.MatchString(req.Hash) {
-		http.Error(w, "commit hash must be the full 40-character hash", http.StatusBadRequest)
+		fail(w, invalid(errors.New("commit hash must be the full 40-character hash")))
 		return "", false
 	}
 	return req.Hash, true
@@ -338,7 +330,7 @@ func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
 	}
 	hash := r.PathValue("hash")
 	if !commitHash.MatchString(hash) {
-		http.Error(w, "commit hash must be the full 40-character hash", http.StatusBadRequest)
+		fail(w, invalid(errors.New("commit hash must be the full 40-character hash")))
 		return
 	}
 	detail, err := s.draft.Commit(sc.proj, hash)
@@ -354,7 +346,7 @@ func (s *Server) handleProposal(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := strconv.Atoi(r.PathValue("number"))
 	if err != nil || n <= 0 {
-		http.Error(w, "pull request number must be a positive integer", http.StatusBadRequest)
+		fail(w, invalid(errors.New("pull request number must be a positive integer")))
 		return
 	}
 	detail, err := s.draft.Proposal(sc.proj, n)
@@ -371,16 +363,13 @@ func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req struct {
-		Hash string `json:"hash"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !commitHash.MatchString(req.Hash) {
-		http.Error(w, "commit hash must be the full 40-character hash", http.StatusBadRequest)
+	hash, ok := hashBody(w, r)
+	if !ok {
 		return
 	}
-	result, err := s.draft.Revert(sc.id, sc.proj, req.Hash)
+	result, err := s.draft.Revert(sc.id, sc.proj, hash)
 	if err == nil {
-		s.nudgeProposals() // the revert PR reaches every lane before the git poll notices
+		s.proposalOpened(sc)
 	}
 	respond(w, result, err)
 }

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 )
@@ -25,10 +24,12 @@ func (s *Server) handleTakeSnapshot(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req struct {
+	req, ok := decodeOptional[struct {
 		Name string `json:"name"`
+	}](w, r)
+	if !ok {
+		return
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
 	snapName := req.Name
 	if snapName == "" {
 		snapName = name + "-" + time.Now().UTC().Format("20060102-150405")
@@ -36,7 +37,7 @@ func (s *Server) handleTakeSnapshot(w http.ResponseWriter, r *http.Request) {
 	err := sc.cluster.CreateSnapshot(r.Context(), ns, name, snapName)
 	s.recordTask("Snapshot", ns, name, sc.id.Username, err == nil)
 	if err != nil {
-		runtimeFail(w, err)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"name": snapName})
@@ -51,7 +52,7 @@ func (s *Server) handleRestoreSnapshot(w http.ResponseWriter, r *http.Request) {
 	err := sc.cluster.RestoreSnapshot(r.Context(), ns, name, r.PathValue("snapshot"))
 	s.recordTask("Restore snapshot", ns, name, sc.id.Username, err == nil)
 	if err != nil {
-		runtimeFail(w, err)
+		fail(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -63,7 +64,7 @@ func (s *Server) handleDeleteSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := sc.cluster.DeleteSnapshot(r.Context(), ns, r.PathValue("snapshot")); err != nil {
-		runtimeFail(w, err)
+		fail(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

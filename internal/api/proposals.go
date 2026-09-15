@@ -46,9 +46,6 @@ type propTarget struct {
 // of this frame (the refresher wakes the hub when its lane lands). Nil when no
 // project has a lane yet, so a cold frame ships without one.
 func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo) []model.Proposal {
-	if s.draft == nil {
-		return nil
-	}
 	out := []model.Proposal{}
 	hit, cold := false, false
 	for _, p := range s.trackProposals(id, projects) {
@@ -124,14 +121,22 @@ func findProject(ps []project.ProjectInfo, name string) (project.ProjectInfo, bo
 	return project.ProjectInfo{}, false
 }
 
-// nudgeProposals asks the refresher for an out-of-cycle pass (coalesced). Handlers
-// call it after a propose/revert so every subscriber's lane repaints without
-// waiting for the git poll to notice the pushed branch.
+// nudgeProposals asks the refresher for an out-of-cycle pass (coalesced), so
+// every subscriber's lane repaints without waiting for the git poll to notice
+// the pushed branch.
 func (s *Server) nudgeProposals() {
 	select {
 	case s.propNudge <- struct{}{}:
 	default:
 	}
+}
+
+// proposalOpened is what a handler does once it has opened a PR: track the
+// project for the caller, then nudge. The order matters - the nudged pass only
+// queries tracked projects (see trackProposalsProject).
+func (s *Server) proposalOpened(sc scope) {
+	s.trackProposalsProject(sc.id, sc.proj)
+	s.nudgeProposals()
 }
 
 // RunProposalsRefresher drives the lane's freshness off the hot path: it blocks on
@@ -141,9 +146,6 @@ func (s *Server) nudgeProposals() {
 // subscribes to GitChanged ONLY (not the cluster/live kinds), so a VM phase change
 // never triggers a forge re-query.
 func (s *Server) RunProposalsRefresher(ctx context.Context, bus *eventbus.Bus) {
-	if s.draft == nil {
-		return
-	}
 	gitChanged, cancel := bus.Subscribe(eventbus.GitChanged)
 	defer cancel()
 	t := time.NewTicker(proposalsRefreshEvery)

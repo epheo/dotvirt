@@ -5,7 +5,7 @@ package api
 // the platform tier), kept apart from the port-group handlers next door.
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -25,7 +25,7 @@ func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p.Project == "" {
-		http.Error(w, "the project the namespace joins is required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("the project the namespace joins is required")))
 		return
 	}
 	// The tenant project it joins: annotation source + authz (the caller must see it).
@@ -56,7 +56,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p.Name == "" {
-		http.Error(w, "a project name is required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("a project name is required")))
 		return
 	}
 	plat, ok := s.platformScope(w, r, ssarNamespace)
@@ -67,7 +67,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	// re-manage rather than a create. Checked here, before the coordinator touches the
 	// forge, so a refusal never leaves a repo behind.
 	if _, exists := s.projectByName(p.Name); exists {
-		http.Error(w, "that project already exists; adopt it instead of creating it", http.StatusConflict)
+		fail(w, fmt.Errorf("%w: that project already exists; adopt it instead of creating it", model.ErrConflict))
 		return
 	}
 	view, err := s.draft.StageCreateProject(plat.id, plat.proj, raw)
@@ -80,17 +80,11 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 // tier), so it's gated on namespace-create authority; the target tenant is resolved
 // from the SA snapshot (the caller is a platform admin) and must currently be repoless.
 func (s *Server) handleAdoptProject(w http.ResponseWriter, r *http.Request) {
-	var body struct {
+	body, ok := decodeOptional[struct {
 		Owners []string `json:"owners,omitempty"`
-	}
-	if raw, err := readAll(r); err != nil {
-		fail(w, invalid(err))
+	}](w, r)
+	if !ok {
 		return
-	} else if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &body); err != nil {
-			fail(w, invalid(err))
-			return
-		}
 	}
 	plat, ok := s.platformScope(w, r, ssarNamespace)
 	if !ok {
@@ -98,7 +92,7 @@ func (s *Server) handleAdoptProject(w http.ResponseWriter, r *http.Request) {
 	}
 	target, ok := s.projectByName(r.PathValue("project"))
 	if !ok {
-		http.Error(w, "project not found", http.StatusNotFound)
+		fail(w, fmt.Errorf("%w: project %q", model.ErrNotFound, r.PathValue("project")))
 		return
 	}
 	view, err := s.draft.AdoptProject(plat.id, plat.proj, target, body.Owners)
@@ -118,7 +112,7 @@ func (s *Server) handleReleaseProject(w http.ResponseWriter, r *http.Request) {
 	}
 	target, ok := s.projectByName(r.PathValue("project"))
 	if !ok {
-		http.Error(w, "project not found", http.StatusNotFound)
+		fail(w, fmt.Errorf("%w: project %q", model.ErrNotFound, r.PathValue("project")))
 		return
 	}
 	if target.Repo != "" {

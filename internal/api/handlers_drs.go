@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/model"
@@ -62,7 +63,7 @@ func (s *Server) handleDRSEnable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p.InstallPSI && !sc.cluster.CanCreateClusterResource(r.Context(), ssarMachineCfg.group, ssarMachineCfg.resource) {
-		http.Error(w, "not authorized to create machineconfigs", http.StatusForbidden)
+		fail(w, fmt.Errorf("%w: not authorized to create machineconfigs", model.ErrForbidden))
 		return
 	}
 	view, err := s.draft.StageEnableDRS(sc.id, sc.proj, raw)

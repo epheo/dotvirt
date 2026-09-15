@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
 	"github.com/epheo/dotvirt/internal/argo"
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/changeset"
@@ -156,6 +158,11 @@ const optionsTTL = 60 * time.Second
 // capacity, which the Storage summary polls to keep current.
 const storageTTL = 20 * time.Second
 
+// declaredTTL backstops a project's declared-files index. Freshness comes from
+// the GitChanged stamp: every poll or webhook that moves a head invalidates the
+// entry, so the TTL only bounds a repo that stopped publishing.
+const declaredTTL = 5 * time.Minute
+
 // Server holds the long-lived collaborators and builds per-request, identity-
 // scoped state.
 type Server struct {
@@ -172,8 +179,9 @@ type Server struct {
 	proposals *ttlcache.Cache[[]model.Proposal] // per-project open-PR set; written by the refresher, read on broadcast
 	options   *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
 	storage   *ttlcache.Cache[[]model.StorageClassInfo]
-	metrics  *metrics.Client                   // Prometheus/Thanos for the Performance tab; nil disables it
-	tasks     *tasks.Feed                       // recent-activity feed (ops + merged PRs); nil disables it
+	declared  *ttlcache.Cache[declaredIndex] // per-repo declared-files index, GitChanged-stamped
+	metrics   *metrics.Client                // Prometheus/Thanos for the Performance tab; nil disables it
+	tasks     *tasks.Feed                    // recent-activity feed (ops + merged PRs); nil disables it
 	draft     Draft
 	auth      *auth.Authenticator // nil leaves the API open (dev)
 	oauth     *auth.OAuth         // nil hides the OpenShift SSO login path
@@ -188,10 +196,12 @@ type Server struct {
 	propNudge   chan struct{}
 }
 
-// Deps are the collaborators for NewServer. Nil pieces degrade gracefully. The
-// stream + VNC handlers aren't here: they're wired post-construction via
-// UseStream/UseVNC, because the hub is built over the server's own
-// InventoryForIdentity (chicken-and-egg otherwise).
+// Deps are the collaborators for NewServer. Draft is required: without the
+// coordinator there is no product, and every draft-backed route dereferences
+// it. The other nil pieces each disable one feature. The stream + VNC handlers
+// aren't here: they're wired post-construction via UseStream/UseVNC, because
+// the hub is built over the server's own InventoryForIdentity (chicken-and-egg
+// otherwise).
 type Deps struct {
 	ClusterFactory *cluster.Factory
 	State          *clusterstate.State
@@ -209,8 +219,12 @@ type Deps struct {
 	Config         Config
 }
 
-// NewServer builds the API server from its collaborators.
+// NewServer builds the API server from its collaborators. It panics on a nil
+// Draft so a stripped-down wiring fails at startup, not on the first request.
 func NewServer(d Deps) *Server {
+	if d.Draft == nil {
+		panic("api: NewServer requires a Draft")
+	}
 	return &Server{
 		clusterF:  d.ClusterFactory,
 		state:     d.State,
@@ -225,6 +239,7 @@ func NewServer(d Deps) *Server {
 		proposals: ttlcache.New[[]model.Proposal](proposalsCacheTTL),
 		options:   ttlcache.New[model.Options](optionsTTL),
 		storage:   ttlcache.New[[]model.StorageClassInfo](storageTTL),
+		declared:  ttlcache.New[declaredIndex](declaredTTL),
 		metrics:   d.Metrics,
 		tasks:     d.Tasks,
 		draft:     d.Draft,
@@ -449,7 +464,7 @@ func withCORS(origin string, next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		w.Header().Set("Vary", "Origin")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -459,29 +474,45 @@ func withCORS(origin string, next http.Handler) http.Handler {
 	})
 }
 
-// readAll reads a request body. withBodyLimit caps it; a second cap here would
-// truncate silently instead of letting MaxBytesReader error.
-func readAll(r *http.Request) ([]byte, error) {
-	return io.ReadAll(r.Body)
-}
-
-// peek reads the body and decodes just the routing fields T names; the staging
-// layer re-decodes the raw body in full. ok=false means the response is written.
-func peek[T any](w http.ResponseWriter, r *http.Request) (raw []byte, p T, ok bool) {
-	raw, err := readAll(r)
+// readBody reads the whole request body and decodes it into T. ok=false means
+// the 400 is written. optional lets an empty body stand for the zero T.
+func readBody[T any](w http.ResponseWriter, r *http.Request, optional bool) (raw []byte, v T, ok bool) {
+	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		fail(w, invalid(err))
-		return nil, p, false
+		return nil, v, false
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if optional && len(raw) == 0 {
+		return raw, v, true
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
 		fail(w, invalid(err))
-		return nil, p, false
+		return nil, v, false
 	}
-	return raw, p, true
+	return raw, v, true
+}
+
+// peek decodes just the routing fields T names and hands back the raw body for
+// the staging layer to decode in full.
+func peek[T any](w http.ResponseWriter, r *http.Request) (raw []byte, p T, ok bool) {
+	return readBody[T](w, r, false)
+}
+
+// decode is the body reader for a route that consumes the whole request itself.
+func decode[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
+	_, v, ok := readBody[T](w, r, false)
+	return v, ok
+}
+
+// decodeOptional is decode for a route whose body may be omitted.
+func decodeOptional[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
+	_, v, ok := readBody[T](w, r, true)
+	return v, ok
 }
 
 // withBodyLimit caps every request body so a decoder errors instead of
-// buffering whatever a client streams.
+// buffering whatever a client streams. It is the only cap: a second one at a
+// read site would truncate silently instead of letting MaxBytesReader error.
 func withBodyLimit(n int64, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Body != nil {
@@ -500,9 +531,11 @@ func respond(w http.ResponseWriter, v any, err error) {
 	writeJSON(w, http.StatusOK, v)
 }
 
-// fail writes err mapped to a status by its model.Err* kind. Errors without a
-// kind are internal: the detail is logged, never echoed - it can carry k8s, git,
-// or forge internals (URLs, credentials, object paths) the caller must not see.
+// fail writes err mapped to a status by statusFor. A classified error (a
+// model.Err* kind or the apiserver's verdict on the caller's object) echoes its
+// message; an unclassified one is internal: the detail is logged, never echoed -
+// it can carry k8s, git, or forge internals (URLs, credentials, object paths)
+// the caller must not see.
 func fail(w http.ResponseWriter, err error) {
 	status := statusFor(err)
 	msg := err.Error()
@@ -524,17 +557,20 @@ func unavailable(what string, err error) error {
 	return fmt.Errorf("%w: %s", model.ErrUnavailable, what)
 }
 
-// statusFor maps a domain error to an HTTP status by the kind it wraps (see
-// model.Err*), defaulting to 500 for anything unclassified.
+// statusFor maps an error to an HTTP status by the kind it wraps: a model.Err*
+// kind, or an apiserver status from an operation run under the caller's token
+// (Forbidden is the caller's RBAC verdict; Conflict and BadRequest both mean the
+// object's state refuses the act, e.g. pausing a stopped VM). Anything
+// unclassified is a 500.
 func statusFor(err error) int {
 	switch {
 	case errors.Is(err, model.ErrInvalid):
 		return http.StatusBadRequest
-	case errors.Is(err, model.ErrNotFound):
+	case errors.Is(err, model.ErrNotFound), apierrors.IsNotFound(err):
 		return http.StatusNotFound
-	case errors.Is(err, model.ErrForbidden):
+	case errors.Is(err, model.ErrForbidden), apierrors.IsForbidden(err):
 		return http.StatusForbidden
-	case errors.Is(err, model.ErrConflict):
+	case errors.Is(err, model.ErrConflict), apierrors.IsConflict(err), apierrors.IsBadRequest(err):
 		return http.StatusConflict
 	case errors.Is(err, model.ErrUnavailable):
 		return http.StatusServiceUnavailable

@@ -20,7 +20,7 @@ import (
 // configured - the shared preamble of every Thanos-backed handler.
 func (s *Server) metricsReady(w http.ResponseWriter) bool {
 	if s.metrics == nil {
-		http.Error(w, "metrics not configured", http.StatusServiceUnavailable)
+		fail(w, fmt.Errorf("%w: metrics not configured", model.ErrUnavailable))
 		return false
 	}
 	return true
@@ -31,8 +31,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if !s.metricsReady(w) {
 		return
 	}
-	ns, name := r.PathValue("namespace"), r.PathValue("name")
-	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
@@ -46,8 +45,7 @@ func (s *Server) handleVMUsage(w http.ResponseWriter, r *http.Request) {
 	if !s.metricsReady(w) {
 		return
 	}
-	ns, name := r.PathValue("namespace"), r.PathValue("name")
-	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
@@ -63,7 +61,7 @@ func (s *Server) handleVMUsage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) scopeNamespaces(r *http.Request) (scope, []string, error) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		return scope{}, nil, fmt.Errorf("%w: %v", model.ErrUnavailable, err)
+		return scope{}, nil, unavailable("cluster access", err)
 	}
 	projects, err := s.projectsFor(r.Context(), id, c)
 	if err != nil {
@@ -224,7 +222,7 @@ func (s *Server) nodeMetricsScope(w http.ResponseWriter, r *http.Request) (auth.
 		return auth.Identity{}, false
 	}
 	if !s.canReadNodesCached(r.Context(), id, c) {
-		http.Error(w, "node metrics require node read access", http.StatusForbidden)
+		fail(w, fmt.Errorf("%w: node metrics require node read access", model.ErrForbidden))
 		return auth.Identity{}, false
 	}
 	return id, true

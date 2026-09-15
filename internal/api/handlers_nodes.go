@@ -1,7 +1,7 @@
 package api
 
 import (
-	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -26,7 +26,7 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	nodes, err := c.ListNodes(r.Context())
 	if err != nil {
-		runtimeFail(w, err)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, nodes)
@@ -41,7 +41,7 @@ func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	info, err := c.NodeInfo(r.Context(), r.PathValue("node"))
 	if err != nil {
-		runtimeFail(w, err)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, info)
@@ -54,11 +54,10 @@ func (s *Server) handleNodeCordon(w http.ResponseWriter, r *http.Request) {
 		fail(w, unavailable("cluster access", err))
 		return
 	}
-	var req struct {
+	req, ok := decode[struct {
 		Unschedulable bool `json:"unschedulable"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+	}](w, r)
+	if !ok {
 		return
 	}
 	verb := "Cordon"
@@ -68,7 +67,7 @@ func (s *Server) handleNodeCordon(w http.ResponseWriter, r *http.Request) {
 	opErr := c.SetNodeCordon(r.Context(), r.PathValue("node"), req.Unschedulable)
 	s.recordTask(verb, "", r.PathValue("node"), id.Username, opErr == nil)
 	if opErr != nil {
-		http.Error(w, opErr.Error(), runtimeOpStatus(opErr))
+		fail(w, opErr)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -83,11 +82,10 @@ func (s *Server) handleNodeMaintenance(w http.ResponseWriter, r *http.Request) {
 		fail(w, unavailable("cluster access", err))
 		return
 	}
-	var req struct {
+	req, ok := decode[struct {
 		Enter bool `json:"enter"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+	}](w, r)
+	if !ok {
 		return
 	}
 	verb := "Enter maintenance"
@@ -97,7 +95,7 @@ func (s *Server) handleNodeMaintenance(w http.ResponseWriter, r *http.Request) {
 	opErr := c.SetNodeMaintenance(r.Context(), r.PathValue("node"), req.Enter)
 	s.recordTask(verb, "", r.PathValue("node"), id.Username, opErr == nil)
 	if opErr != nil {
-		http.Error(w, opErr.Error(), runtimeOpStatus(opErr))
+		fail(w, opErr)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -120,11 +118,11 @@ func (s *Server) handleNodeEvacuate(w http.ResponseWriter, r *http.Request) {
 	node := r.PathValue("node")
 	info, err := c.NodeInfo(r.Context(), node)
 	if err != nil {
-		runtimeFail(w, err)
+		fail(w, err)
 		return
 	}
 	if !info.CanCordon {
-		http.Error(w, "node evacuation needs node-update authority", http.StatusForbidden)
+		fail(w, fmt.Errorf("%w: node evacuation needs node-update authority", model.ErrForbidden))
 		return
 	}
 	out := model.Evacuation{Failures: []model.EvacuationFailure{}}

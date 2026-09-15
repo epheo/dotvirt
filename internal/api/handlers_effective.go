@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -23,7 +24,7 @@ func (s *Server) handleVMPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	lbls, live, found := s.state.WorkloadLabels(ns, name)
 	if !found {
-		http.Error(w, "vm not found", http.StatusNotFound)
+		fail(w, fmt.Errorf("%w: vm %s/%s", model.ErrNotFound, ns, name))
 		return
 	}
 	eff := s.effectivePolicy(ns, lbls, true)
@@ -35,8 +36,7 @@ func (s *Server) handleVMPolicy(w http.ResponseWriter, r *http.Request) {
 // handleNamespacePolicy answers for a whole namespace: pod-selecting policies
 // come back conditional rather than resolved.
 func (s *Server) handleNamespacePolicy(w http.ResponseWriter, r *http.Request) {
-	ns := r.PathValue("namespace")
-	sc, ok := s.resolveProject(w, r, byNamespace(ns))
+	sc, ns, _, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
@@ -91,14 +91,7 @@ func (s *Server) effectivePolicy(ns string, podLabels map[string]string, podScop
 	if s.netstate == nil {
 		return model.EffectivePolicy{Namespace: ns}
 	}
-	var nsLabels map[string]string
-	for _, n := range s.state.Namespaces() {
-		if n.Name == ns {
-			nsLabels = n.Labels
-			break
-		}
-	}
-	eff := s.netstate.Effective(ns, nsLabels, podLabels, podScoped)
+	eff := s.netstate.Effective(ns, s.state.NamespaceLabels(ns), podLabels, podScoped)
 	for _, bs := range [][]model.PolicyBinding{eff.EastWest, eff.Gateway, eff.SNAT, eff.Routes} {
 		for i := range bs {
 			s.policyDrift(&bs[i].Policy)

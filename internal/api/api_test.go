@@ -10,11 +10,17 @@ import (
 	"strings"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
 	"github.com/epheo/dotvirt/internal/model"
 )
 
-// statusFor is the one error-to-HTTP mapping every route shares; each model.Err
-// kind must keep its status and anything unclassified must stay a 500.
+var vmiResource = schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}
+
+// statusFor is the one error-to-HTTP mapping every route shares: each model.Err
+// kind keeps its status, an apiserver verdict maps like the kind it means (also
+// through a wrap), and anything unclassified stays a 500.
 func TestStatusFor(t *testing.T) {
 	cases := []struct {
 		err  error
@@ -25,12 +31,45 @@ func TestStatusFor(t *testing.T) {
 		{fmt.Errorf("%w: nope", model.ErrForbidden), http.StatusForbidden},
 		{fmt.Errorf("%w: exists", model.ErrConflict), http.StatusConflict},
 		{fmt.Errorf("%w: git", model.ErrUnavailable), http.StatusServiceUnavailable},
+		{apierrors.NewForbidden(vmiResource, "web-1", errors.New("rbac")), http.StatusForbidden},
+		{fmt.Errorf("restart: %w", apierrors.NewNotFound(vmiResource, "web-1")), http.StatusNotFound},
+		{apierrors.NewConflict(vmiResource, "web-1", errors.New("migrating")), http.StatusConflict},
+		{apierrors.NewBadRequest("VM is not running"), http.StatusConflict},
 		{errors.New("a kubeconfig path leaked here"), http.StatusInternalServerError},
 	}
 	for _, c := range cases {
 		if got := statusFor(c.err); got != c.want {
 			t.Errorf("statusFor(%v) = %d, want %d", c.err, got, c.want)
 		}
+	}
+}
+
+// fail echoes an apiserver verdict about the caller's own object but hides an
+// unclassified failure: a dial error names the apiserver host.
+func TestFailClusterErrors(t *testing.T) {
+	cases := []struct {
+		name   string
+		err    error
+		want   int
+		echo   string
+		hidden string
+	}{
+		{"forbidden", apierrors.NewForbidden(vmiResource, "web-1", errors.New("rbac")), http.StatusForbidden, "web-1", ""},
+		{"wrapped not found", fmt.Errorf("restart: %w", apierrors.NewNotFound(vmiResource, "web-1")), http.StatusNotFound, "web-1", ""},
+		{"unclassified", errors.New("dial tcp 10.0.0.1:6443: connect: connection refused"), http.StatusInternalServerError, "internal error", "10.0.0.1"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			fail(rec, c.err)
+			body := rec.Body.String()
+			if rec.Code != c.want || !strings.Contains(body, c.echo) {
+				t.Errorf("status %d body %q, want %d containing %q", rec.Code, body, c.want, c.echo)
+			}
+			if c.hidden != "" && strings.Contains(body, c.hidden) {
+				t.Errorf("internal detail leaked: %q", body)
+			}
+		})
 	}
 }
 
@@ -54,6 +93,17 @@ func TestFailMasksInternalDetail(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "internal error") {
 		t.Errorf("masked body = %q, want the generic message", rec.Body.String())
 	}
+}
+
+// A wiring without the coordinator has no product; it must fail at
+// construction, not on the first draft-backed request.
+func TestNewServerRequiresDraft(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("NewServer accepted a nil Draft")
+		}
+	}()
+	NewServer(Deps{})
 }
 
 func TestRespond(t *testing.T) {
@@ -152,5 +202,10 @@ func TestWithCORS(t *testing.T) {
 	})).ServeHTTP(rec, httptest.NewRequest(http.MethodOptions, "/api/me", nil))
 	if rec.Code != http.StatusNoContent || hit {
 		t.Errorf("preflight: code=%d nextHit=%v", rec.Code, hit)
+	}
+	// The manifest and template editors PUT; a preflight that omits the method
+	// makes the browser refuse the request in dev.
+	if got := rec.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, "PUT") {
+		t.Errorf("allow-methods = %q, want PUT listed", got)
 	}
 }

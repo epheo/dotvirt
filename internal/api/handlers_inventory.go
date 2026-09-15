@@ -163,32 +163,8 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 // (OS images, networks) are then narrowed per caller by optionsFor, so another
 // tenant's namespace and network names never leave the process.
 func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
-	id, ok := auth.FromContext(r.Context())
+	id, c, all, ok := saCached(s, w, r, s.options, (*cluster.Client).ListOptions)
 	if !ok {
-		http.Error(w, "authentication required", http.StatusUnauthorized)
-		return
-	}
-	if s.clusterF == nil {
-		http.Error(w, "cluster not configured", http.StatusServiceUnavailable)
-		return
-	}
-	all, ok := s.options.Get("all")
-	if !ok {
-		sa, err := s.clusterF.SA()
-		if err != nil {
-			fail(w, unavailable("cluster access", err))
-			return
-		}
-		all, err = sa.ListOptions(r.Context())
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		s.options.Put("all", all)
-	}
-	c, err := s.clusterF.For(id.Token)
-	if err != nil {
-		fail(w, unavailable("cluster access", err))
 		return
 	}
 	visible, err := s.visibleFor(r.Context(), id, c)

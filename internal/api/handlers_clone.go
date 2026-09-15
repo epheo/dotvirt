@@ -1,7 +1,7 @@
 package api
 
 import (
-	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -28,17 +28,19 @@ func (s *Server) handleCreateClone(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req struct {
+	req, ok := decodeOptional[struct {
 		Target string `json:"target"`
+	}](w, r)
+	if !ok {
+		return
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
 	target := strings.TrimSpace(req.Target)
 	if target == "" {
-		http.Error(w, "target name is required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("target name is required")))
 		return
 	}
 	if target == name {
-		http.Error(w, "target must differ from the source VM name", http.StatusBadRequest)
+		fail(w, invalid(errors.New("target must differ from the source VM name")))
 		return
 	}
 	// The clone CR's own name just needs uniqueness; the target VM carries the
@@ -47,7 +49,7 @@ func (s *Server) handleCreateClone(w http.ResponseWriter, r *http.Request) {
 	err := sc.cluster.CreateClone(r.Context(), ns, name, cloneName, target)
 	s.recordTask("Clone", ns, name, sc.id.Username, err == nil)
 	if err != nil {
-		runtimeFail(w, err)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"name": cloneName, "target": target})

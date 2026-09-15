@@ -1,6 +1,9 @@
 package api
 
-import "net/http"
+import (
+	"errors"
+	"net/http"
+)
 
 // handlePermissions returns the caller's effective capabilities in one
 // namespace (the Permissions tab). resolveProject gates the namespace the same
@@ -9,7 +12,7 @@ import "net/http"
 func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) {
 	ns := r.URL.Query().Get("namespace")
 	if ns == "" {
-		http.Error(w, "namespace query parameter is required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("namespace query parameter is required")))
 		return
 	}
 	sc, ok := s.resolveProject(w, r, byNamespace(ns))

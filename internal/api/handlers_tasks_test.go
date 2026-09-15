@@ -55,6 +55,7 @@ func TestWebhookRecordsMerge(t *testing.T) {
 	feed := tasks.New(eventbus.New())
 	s := NewServer(Deps{
 		Tasks:  feed,
+		Draft:  &fakeDraft{},
 		Config: Config{WebhookSecret: "hooksecret", BaseBranch: "main", ProposedBranch: "dotvirt/proposed"},
 	})
 	// merged_at must be fresh: the feed prunes past MergeRetention on write.

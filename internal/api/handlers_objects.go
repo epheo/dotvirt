@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/draft"
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 )
@@ -47,14 +49,14 @@ func (s *Server) objectScope(w http.ResponseWriter, r *http.Request) (sc scope, 
 	if ns == changeset.ClusterScopeNS {
 		ref, cluster := clusterResourceSSAR[res]
 		if !cluster {
-			http.Error(w, resource+" is not cluster-scoped", http.StatusBadRequest)
+			fail(w, invalid(fmt.Errorf("%s is not cluster-scoped", resource)))
 			return sc, "", "", "", false
 		}
 		sc, ok = s.platformScope(w, r, ref)
 		return sc, resource, ns, name, ok
 	}
 	if !namespacedResources[res] {
-		http.Error(w, resource+" is not namespace-scoped", http.StatusBadRequest)
+		fail(w, invalid(fmt.Errorf("%s is not namespace-scoped", resource)))
 		return sc, "", "", "", false
 	}
 	sc, ok = s.resolveProject(w, r, byNamespace(ns))
@@ -83,7 +85,7 @@ func (s *Server) handleObjectUpdateManifest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if req.YAML == "" {
-		http.Error(w, "yaml is required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("yaml is required")))
 		return
 	}
 	view, err := s.draft.StageUpdateManifest(sc.id, sc.proj, resource, ns, name, req.YAML)
@@ -147,7 +149,7 @@ func (s *Server) handleObjectRestore(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	hash, ok := restoreHash(w, r)
+	hash, ok := hashBody(w, r)
 	if !ok {
 		return
 	}
@@ -172,8 +174,7 @@ func (s *Server) handlePlatformAdopt(w http.ResponseWriter, r *http.Request) {
 
 // sourceFiles answers "which file declares this object" across the caller's
 // projects, the platform repo included when withPlatform - the read plane's
-// signal that an object can be edited or deleted from here. Each project's index
-// is fetched once per call, and an unreachable repo reads as declaring nothing.
+// signal that an object can be edited or deleted from here.
 func (s *Server) sourceFiles(ctx context.Context, id auth.Identity, c *cluster.Client, withPlatform bool) func(kind, namespace, name string) string {
 	projects, err := s.projectsFor(ctx, id, c)
 	if err != nil {
@@ -185,18 +186,6 @@ func (s *Server) sourceFiles(ctx context.Context, id auth.Identity, c *cluster.C
 			byNS[ns] = p
 		}
 	}
-	indexes := map[string]map[model.ObjectRef]string{}
-	index := func(p project.ProjectInfo) map[model.ObjectRef]string {
-		if idx, ok := indexes[p.Name]; ok {
-			return idx
-		}
-		var idx map[model.ObjectRef]string
-		if p.Error == "" { // a project the resolver flagged has no repo to read
-			idx, _ = s.draft.DeclaredFiles(p)
-		}
-		indexes[p.Name] = idx
-		return idx
-	}
 	return func(kind, namespace, name string) string {
 		var p project.ProjectInfo
 		if namespace == "" {
@@ -207,6 +196,35 @@ func (s *Server) sourceFiles(ctx context.Context, id auth.Identity, c *cluster.C
 		} else if p = byNS[namespace]; p.Repo == "" {
 			return ""
 		}
-		return index(p)[model.ObjectRef{Kind: kind, Namespace: namespace, Name: name}]
+		return s.declaredFiles(p)[model.ObjectRef{Kind: kind, Namespace: namespace, Name: name}]
 	}
+}
+
+// declaredIndex is one repo's declared-files index stamped with the git version
+// it was read at; valid only while that version still matches the bus.
+type declaredIndex struct {
+	files map[model.ObjectRef]string
+	ver   uint64
+}
+
+// declaredFiles is p's declared-files index, cached per repo and invalidated by
+// the GitChanged version, so the polled catalog routes read a repo index once
+// per push rather than once per request. A project the resolver flagged has no
+// repo to read; a failed read is not cached, so it declares nothing this once
+// and is retried on the next call.
+func (s *Server) declaredFiles(p project.ProjectInfo) map[model.ObjectRef]string {
+	if p.Error != "" {
+		return nil
+	}
+	ver := s.bus.Version(eventbus.GitChanged)
+	key := p.Name + "\x00" + p.Repo
+	if e, ok := s.declared.Get(key); ok && e.ver == ver {
+		return e.files
+	}
+	files, err := s.draft.DeclaredFiles(p)
+	if err != nil {
+		return nil
+	}
+	s.declared.Put(key, declaredIndex{files: files, ver: ver})
+	return files
 }

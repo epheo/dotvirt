@@ -260,7 +260,7 @@ func run() error {
 	switch {
 	case webhookBase != "" && cfg.WebhookSecret != "" && forgeFactory != nil:
 		target := strings.TrimRight(webhookBase, "/") + "/api/webhooks/forge"
-		go ensureWebhooks(ctx, clusterSnapshot, resolver, forgeFactory, target, cfg.WebhookSecret, cfg.PlatformRepo)
+		go ensureWebhooks(ctx, clusterSnapshot, server.AllProjects, forgeFactory, target, cfg.WebhookSecret, cfg.PlatformRepo)
 	case forgeFactory != nil:
 		// Forge is wired but there's no way for it to reach back: updates degrade silently
 		// to the poll otherwise, so say so.
@@ -310,7 +310,7 @@ func run() error {
 // project namespaces yet still gets its hook. It anchors the org on the platform repo, or on
 // any resolved project when there is none. Failures are logged and retried next tick - a
 // forge hiccup must not affect serving.
-func ensureWebhooks(ctx context.Context, state *clusterstate.State, resolver *project.Resolver, ff *forge.Factory, target, secret, platformRepo string) {
+func ensureWebhooks(ctx context.Context, state *clusterstate.State, projects func() []project.ProjectInfo, ff *forge.Factory, target, secret, platformRepo string) {
 	// Anchoring on a project needs the namespace reflector's initial LIST; the platform
 	// repo anchors the org hook without it, so only wait when there's no platform repo.
 	if platformRepo == "" {
@@ -323,7 +323,7 @@ func ensureWebhooks(ctx context.Context, state *clusterstate.State, resolver *pr
 		if platformRepo != "" {
 			repos = append(repos, platformRepo)
 		}
-		for _, p := range resolver.Resolve(state.Namespaces(), nil) {
+		for _, p := range projects() {
 			if p.Repo != "" {
 				repos = append(repos, p.Repo)
 			}

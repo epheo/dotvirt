@@ -2,14 +2,17 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/eventbus"
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/restfactory"
+	"github.com/epheo/dotvirt/internal/ttlcache"
 )
 
 // visibleSet is a token's visible-namespace set stamped with the RBAC version it was
@@ -113,6 +116,33 @@ func (s *Server) canReadNodesCached(ctx context.Context, id auth.Identity, c *cl
 	return s.ssarCached(id, "read\x00nodes", func() bool { return c.CanReadNodes(ctx) })
 }
 
+// saCached is the preamble of a catalog route: the caller's identity first
+// (the normal gate, so a missing identity or cluster answers like every other
+// route), then one SA-read value cached under a single key for everyone - a
+// scoped tenant can't list these cluster-scoped kinds itself. ok=false means
+// the response is written.
+func saCached[T any](s *Server, w http.ResponseWriter, r *http.Request, cache *ttlcache.Cache[T], fetch func(*cluster.Client, context.Context) (T, error)) (id auth.Identity, c *cluster.Client, v T, ok bool) {
+	id, c, err := s.userCluster(r)
+	if err != nil {
+		fail(w, unavailable("cluster access", err))
+		return id, nil, v, false
+	}
+	if v, ok = cache.Get("all"); ok {
+		return id, c, v, true
+	}
+	sa, err := s.clusterF.SA()
+	if err != nil {
+		fail(w, unavailable("cluster access", err))
+		return id, nil, v, false
+	}
+	if v, err = fetch(sa, r.Context()); err != nil {
+		fail(w, err)
+		return id, nil, v, false
+	}
+	cache.Put("all", v)
+	return id, c, v, true
+}
+
 // ssarRef is one create-authority tuple (API group + plural resource).
 type ssarRef struct{ group, resource string }
 
@@ -121,12 +151,13 @@ func (s *Server) platformProject() project.ProjectInfo {
 	return project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}
 }
 
-// vmScope is the preamble of every /api/vms/{namespace}/{name} route: resolve
-// the tenant project owning the path's namespace (the authorization point) and
-// hand back the path pair.
+// vmScope is the preamble of every route addressing {namespace}/{name} by
+// path (name is empty on the namespace-only routes): resolve the tenant project
+// owning the path's namespace (the authorization point) and hand back the pair.
 func (s *Server) vmScope(w http.ResponseWriter, r *http.Request) (sc scope, ns, name string, ok bool) {
-	sc, ok = s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
-	return sc, r.PathValue("namespace"), r.PathValue("name"), ok
+	ns, name = r.PathValue("namespace"), r.PathValue("name")
+	sc, ok = s.resolveProject(w, r, byNamespace(ns))
+	return sc, ns, name, ok
 }
 
 // The platform-tier create authorities, each spelled exactly once: the create
@@ -201,10 +232,6 @@ func (s *Server) resolveProject(w http.ResponseWriter, r *http.Request, pick pro
 		fail(w, unavailable("cluster access", err))
 		return scope{}, false
 	}
-	if s.draft == nil {
-		http.Error(w, "changeset/draft not configured", http.StatusServiceUnavailable)
-		return scope{}, false
-	}
 	projects, err := s.projectsFor(r.Context(), id, c)
 	if err != nil {
 		fail(w, err)
@@ -212,7 +239,7 @@ func (s *Server) resolveProject(w http.ResponseWriter, r *http.Request, pick pro
 	}
 	proj, msg, ok := pick(projects)
 	if !ok {
-		http.Error(w, msg, http.StatusNotFound)
+		fail(w, fmt.Errorf("%w: %s", model.ErrNotFound, msg))
 		return scope{}, false
 	}
 	return scope{id: id, cluster: c, proj: proj}, true
@@ -233,7 +260,7 @@ func byNamespace(ns string) projectPicker {
 				}
 			}
 		}
-		return project.ProjectInfo{}, "namespace not found in any visible project", false
+		return project.ProjectInfo{}, "namespace is in none of the visible projects", false
 	}
 }
 
@@ -245,16 +272,21 @@ func byName(want string) projectPicker {
 				return p, "", true
 			}
 		}
-		return project.ProjectInfo{}, "project not found or not visible", false
+		return project.ProjectInfo{}, "no visible project by that name", false
 	}
 }
 
-// projectByName resolves a project by name from the SA-owned snapshot, WITHOUT the
-// caller's RBAC filter. Only safe behind a platform-admin gate (platformScope): it's
-// how the platform tier addresses a tenant it's about to adopt, the same all-projects
-// view the exporter and ApplicationSet use.
+// AllProjects is every project the SA-owned snapshot resolves, WITHOUT the
+// caller's RBAC filter. Only safe behind a platform-admin gate (platformScope)
+// or in dotvirt's own background acts: it's how the platform tier addresses a
+// tenant it's about to adopt, and the view the webhook sweep and the
+// ApplicationSet plugin enumerate.
+func (s *Server) AllProjects() []project.ProjectInfo {
+	return s.resolver.Resolve(s.state.Namespaces(), nil)
+}
+
 func (s *Server) projectByName(name string) (project.ProjectInfo, bool) {
-	for _, p := range s.resolver.Resolve(s.state.Namespaces(), nil) {
+	for _, p := range s.AllProjects() {
 		if p.Name == name {
 			return p, true
 		}
@@ -267,7 +299,7 @@ func (s *Server) projectByName(name string) (project.ProjectInfo, bool) {
 func (s *Server) draftScope(w http.ResponseWriter, r *http.Request) (scope, bool) {
 	want := r.URL.Query().Get("project")
 	if want == "" {
-		http.Error(w, "project query parameter is required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("project query parameter is required")))
 		return scope{}, false
 	}
 	return s.pickProject(w, r, want)
@@ -320,16 +352,12 @@ func (s *Server) platformScopeWith(w http.ResponseWriter, r *http.Request, autho
 		fail(w, unavailable("cluster access", err))
 		return scope{}, false
 	}
-	if s.draft == nil {
-		http.Error(w, "changeset/draft not configured", http.StatusServiceUnavailable)
-		return scope{}, false
-	}
 	if s.cfg.PlatformRepo == "" {
-		http.Error(w, "platform repo not configured (set -platform-repo)", http.StatusServiceUnavailable)
+		fail(w, fmt.Errorf("%w: platform repo not configured (set -platform-repo)", model.ErrUnavailable))
 		return scope{}, false
 	}
 	if !authorized(r.Context(), id, c) {
-		http.Error(w, deny, http.StatusForbidden)
+		fail(w, fmt.Errorf("%w: %s", model.ErrForbidden, deny))
 		return scope{}, false
 	}
 	return scope{id: id, cluster: c, proj: s.platformProject()}, true

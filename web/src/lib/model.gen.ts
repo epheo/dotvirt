@@ -673,6 +673,7 @@ export interface Uplink {
    * The policy's own ArgoCD drift, as segments and rules carry it.
    */
   sync?: SyncStatus;
+  health?: string;
   syncError?: string;
   vlans?: number /* int */[]; // LLDP-discovered VLAN IDs (6.5)
   status?: string; // NNCE rollup: Available | Progressing | Failing (6.5)
