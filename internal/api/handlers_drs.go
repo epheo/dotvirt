@@ -62,7 +62,7 @@ func (s *Server) handleDRSEnable(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if p.InstallPSI && !sc.cluster.CanCreateClusterResource(r.Context(), ssarMachineCfg.group, ssarMachineCfg.resource) {
+	if p.InstallPSI && !s.canCreateCached(r.Context(), sc.id, sc.cluster, ssarMachineCfg) {
 		fail(w, fmt.Errorf("%w: not authorized to create machineconfigs", model.ErrForbidden))
 		return
 	}

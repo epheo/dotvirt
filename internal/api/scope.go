@@ -87,12 +87,10 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 }
 
 // ssarCached answers one authorization probe behind the per-(token, key),
-// rbacVersion-stamped cache - for signals read on polled or broadcast paths,
-// where an uncached SSAR would post to the apiserver per request. A
-// RoleBinding/namespace move invalidates lazily via the version stamp; the TTL
-// backstops the cluster-scoped RBAC changes the version doesn't observe (see
-// visibleTTL). Mutating routes keep their uncached platformScope SSAR - a
-// write deserves a fresh answer.
+// rbacVersion-stamped cache, so a signal read on a polled or broadcast path
+// does not post an SSAR to the apiserver per request. A RoleBinding/namespace
+// move invalidates lazily via the version stamp; the TTL backstops the
+// cluster-scoped RBAC changes the version doesn't observe (see visibleTTL).
 func (s *Server) ssarCached(id auth.Identity, key string, probe func() bool) bool {
 	ver := s.rbacVersion()
 	k := restfactory.TokenKey(id.Token) + "\x00" + key
@@ -339,8 +337,8 @@ const platformProjectName = "platform"
 // SIGNAL (the user never applies it; Argo does, from the platform repo), so the
 // author-time check matches the apply-time AppProject boundary.
 func (s *Server) platformScope(w http.ResponseWriter, r *http.Request, ref ssarRef) (scope, bool) {
-	return s.platformScopeWith(w, r, func(ctx context.Context, _ auth.Identity, c *cluster.Client) bool {
-		return c.CanCreateClusterResource(ctx, ref.group, ref.resource)
+	return s.platformScopeWith(w, r, func(ctx context.Context, id auth.Identity, c *cluster.Client) bool {
+		return s.canCreateCached(ctx, id, c, ref)
 	}, "not authorized to create "+ref.resource)
 }
 
