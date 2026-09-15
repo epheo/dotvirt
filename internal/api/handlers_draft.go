@@ -120,11 +120,7 @@ func (s *Server) handlePropose(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.draft.Propose(sc.id, sc.proj, req)
 	if err == nil {
-		// Track this project first: the nudge below only refreshes tokens already in
-		// the watch set, and a token that hasn't built an inventory yet isn't in it -
-		// so without this its new PR would wait for a later inventory build.
-		s.trackProposalsProject(sc.id, sc.proj)
-		s.nudgeProposals() // the new PR reaches every lane before the git poll notices
+		s.proposalOpened(sc)
 	}
 	respond(w, result, err)
 }
@@ -373,7 +369,7 @@ func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.draft.Revert(sc.id, sc.proj, hash)
 	if err == nil {
-		s.nudgeProposals() // the revert PR reaches every lane before the git poll notices
+		s.proposalOpened(sc)
 	}
 	respond(w, result, err)
 }

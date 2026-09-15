@@ -121,14 +121,22 @@ func findProject(ps []project.ProjectInfo, name string) (project.ProjectInfo, bo
 	return project.ProjectInfo{}, false
 }
 
-// nudgeProposals asks the refresher for an out-of-cycle pass (coalesced). Handlers
-// call it after a propose/revert so every subscriber's lane repaints without
-// waiting for the git poll to notice the pushed branch.
+// nudgeProposals asks the refresher for an out-of-cycle pass (coalesced), so
+// every subscriber's lane repaints without waiting for the git poll to notice
+// the pushed branch.
 func (s *Server) nudgeProposals() {
 	select {
 	case s.propNudge <- struct{}{}:
 	default:
 	}
+}
+
+// proposalOpened is what a handler does once it has opened a PR: track the
+// project for the caller, then nudge. The order matters - the nudged pass only
+// queries tracked projects (see trackProposalsProject).
+func (s *Server) proposalOpened(sc scope) {
+	s.trackProposalsProject(sc.id, sc.proj)
+	s.nudgeProposals()
 }
 
 // RunProposalsRefresher drives the lane's freshness off the hot path: it blocks on
