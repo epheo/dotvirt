@@ -27,7 +27,10 @@ func TestMemoizedByBranchHead(t *testing.T) {
 		return v
 	}
 
-	if get("a") != 1 || get("a") != 1 {
+	if get("a") != 1 {
+		t.Fatalf("first read must build, got %d builds", builds)
+	}
+	if get("a") != 1 {
 		t.Fatalf("same head must be served from the memo, built %d times", builds)
 	}
 	if get("b") != 2 {
