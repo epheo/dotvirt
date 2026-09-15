@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 )
@@ -25,10 +24,12 @@ func (s *Server) handleTakeSnapshot(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req struct {
+	req, ok := decodeOptional[struct {
 		Name string `json:"name"`
+	}](w, r)
+	if !ok {
+		return
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
 	snapName := req.Name
 	if snapName == "" {
 		snapName = name + "-" + time.Now().UTC().Format("20060102-150405")

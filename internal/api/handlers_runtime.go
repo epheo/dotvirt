@@ -2,9 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/cluster"
@@ -38,11 +35,10 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 // handleMigrate accepts an optional target: {"node": "..."} pins the migration
 // to that host; an empty body (or empty node) leaves placement to the scheduler.
 func (s *Server) handleMigrate(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+	req, ok := decodeOptional[struct {
 		Node string `json:"node"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+	}](w, r)
+	if !ok {
 		return
 	}
 	s.handleRuntimeOp(w, r, "Live-migration", func(ctx context.Context, c *cluster.Client, ns, name string) error {

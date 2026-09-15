@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"sort"
 	"strings"
@@ -54,11 +53,10 @@ func (s *Server) handleNodeCordon(w http.ResponseWriter, r *http.Request) {
 		fail(w, unavailable("cluster access", err))
 		return
 	}
-	var req struct {
+	req, ok := decode[struct {
 		Unschedulable bool `json:"unschedulable"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+	}](w, r)
+	if !ok {
 		return
 	}
 	verb := "Cordon"
@@ -83,11 +81,10 @@ func (s *Server) handleNodeMaintenance(w http.ResponseWriter, r *http.Request) {
 		fail(w, unavailable("cluster access", err))
 		return
 	}
-	var req struct {
+	req, ok := decode[struct {
 		Enter bool `json:"enter"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+	}](w, r)
+	if !ok {
 		return
 	}
 	verb := "Enter maintenance"

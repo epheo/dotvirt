@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -28,10 +27,12 @@ func (s *Server) handleCreateClone(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req struct {
+	req, ok := decodeOptional[struct {
 		Target string `json:"target"`
+	}](w, r)
+	if !ok {
+		return
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
 	target := strings.TrimSpace(req.Target)
 	if target == "" {
 		http.Error(w, "target name is required", http.StatusBadRequest)

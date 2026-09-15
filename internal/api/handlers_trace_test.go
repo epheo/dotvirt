@@ -16,7 +16,7 @@ func TestHandleTraceValidation(t *testing.T) {
 		body string
 		want string
 	}{
-		{"malformed json", `{`, "invalid request body"},
+		{"malformed json", `{`, "invalid request"},
 		{"missing source", `{"destination":{"ip":"10.0.0.1"}}`, "source namespace and vm are required"},
 		{"no destination", `{"source":{"namespace":"a","vm":"web"},"destination":{}}`, "destination must be a vm or an ip"},
 		{"both destinations", `{"source":{"namespace":"a","vm":"web"},"destination":{"namespace":"b","vm":"db","ip":"10.0.0.1"}}`, "destination must be a vm or an ip"},

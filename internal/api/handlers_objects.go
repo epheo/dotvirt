@@ -147,7 +147,7 @@ func (s *Server) handleObjectRestore(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	hash, ok := restoreHash(w, r)
+	hash, ok := hashBody(w, r)
 	if !ok {
 		return
 	}

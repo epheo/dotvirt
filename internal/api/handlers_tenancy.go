@@ -5,7 +5,6 @@ package api
 // the platform tier), kept apart from the port-group handlers next door.
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -80,17 +79,11 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 // tier), so it's gated on namespace-create authority; the target tenant is resolved
 // from the SA snapshot (the caller is a platform admin) and must currently be repoless.
 func (s *Server) handleAdoptProject(w http.ResponseWriter, r *http.Request) {
-	var body struct {
+	body, ok := decodeOptional[struct {
 		Owners []string `json:"owners,omitempty"`
-	}
-	if raw, err := readAll(r); err != nil {
-		fail(w, invalid(err))
+	}](w, r)
+	if !ok {
 		return
-	} else if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &body); err != nil {
-			fail(w, invalid(err))
-			return
-		}
 	}
 	plat, ok := s.platformScope(w, r, ssarNamespace)
 	if !ok {

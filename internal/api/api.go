@@ -467,19 +467,40 @@ func readAll(r *http.Request) ([]byte, error) {
 	return io.ReadAll(r.Body)
 }
 
-// peek reads the body and decodes just the routing fields T names; the staging
-// layer re-decodes the raw body in full. ok=false means the response is written.
-func peek[T any](w http.ResponseWriter, r *http.Request) (raw []byte, p T, ok bool) {
+// readBody reads the whole request body and decodes it into T. ok=false means
+// the 400 is written. optional lets an empty body stand for the zero T.
+func readBody[T any](w http.ResponseWriter, r *http.Request, optional bool) (raw []byte, v T, ok bool) {
 	raw, err := readAll(r)
 	if err != nil {
 		fail(w, invalid(err))
-		return nil, p, false
+		return nil, v, false
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if optional && len(raw) == 0 {
+		return raw, v, true
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
 		fail(w, invalid(err))
-		return nil, p, false
+		return nil, v, false
 	}
-	return raw, p, true
+	return raw, v, true
+}
+
+// peek decodes just the routing fields T names and hands back the raw body for
+// the staging layer to decode in full.
+func peek[T any](w http.ResponseWriter, r *http.Request) (raw []byte, p T, ok bool) {
+	return readBody[T](w, r, false)
+}
+
+// decode is the body reader for a route that consumes the whole request itself.
+func decode[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
+	_, v, ok := readBody[T](w, r, false)
+	return v, ok
+}
+
+// decodeOptional is decode for a route whose body may be omitted.
+func decodeOptional[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
+	_, v, ok := readBody[T](w, r, true)
+	return v, ok
 }
 
 // withBodyLimit caps every request body so a decoder errors instead of

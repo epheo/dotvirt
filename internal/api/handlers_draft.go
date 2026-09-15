@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"path"
@@ -24,9 +23,8 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req model.EditRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+	req, ok := decode[model.EditRequest](w, r)
+	if !ok {
 		return
 	}
 	if req.SourceFile == "" {
@@ -115,9 +113,8 @@ func (s *Server) handlePropose(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req model.ProposeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+	req, ok := decode[model.ProposeRequest](w, r)
+	if !ok {
 		return
 	}
 	result, err := s.draft.Propose(sc.id, sc.proj, req)
@@ -290,7 +287,7 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	hash, ok := restoreHash(w, r)
+	hash, ok := hashBody(w, r)
 	if !ok {
 		return
 	}
@@ -298,13 +295,13 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	respond(w, result, err)
 }
 
-// restoreHash reads a restore body's commit hash; ok=false means the response is written.
-func restoreHash(w http.ResponseWriter, r *http.Request) (string, bool) {
-	var req struct {
+// hashBody reads the commit hash a restore or revert body names; ok=false means
+// the response is written.
+func hashBody(w http.ResponseWriter, r *http.Request) (string, bool) {
+	req, ok := decode[struct {
 		Hash string `json:"hash"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+	}](w, r)
+	if !ok {
 		return "", false
 	}
 	if !commitHash.MatchString(req.Hash) {
@@ -371,14 +368,11 @@ func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req struct {
-		Hash string `json:"hash"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !commitHash.MatchString(req.Hash) {
-		http.Error(w, "commit hash must be the full 40-character hash", http.StatusBadRequest)
+	hash, ok := hashBody(w, r)
+	if !ok {
 		return
 	}
-	result, err := s.draft.Revert(sc.id, sc.proj, req.Hash)
+	result, err := s.draft.Revert(sc.id, sc.proj, hash)
 	if err == nil {
 		s.nudgeProposals() // the revert PR reaches every lane before the git poll notices
 	}

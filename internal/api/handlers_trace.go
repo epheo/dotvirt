@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/netip"
 
@@ -13,9 +12,8 @@ import (
 // from the SA snapshots, like the effective-policy answer. The caller must be
 // able to see both in-cluster ends; resolveProject gates each namespace.
 func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {
-	var req model.TraceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+	req, ok := decode[model.TraceRequest](w, r)
+	if !ok {
 		return
 	}
 	if req.Source.Namespace == "" || req.Source.VM == "" {

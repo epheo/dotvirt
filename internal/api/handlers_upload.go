@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -19,14 +18,13 @@ func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "image upload not configured", http.StatusServiceUnavailable)
 		return
 	}
-	var req struct {
+	req, ok := decode[struct {
 		Namespace    string `json:"namespace"`
 		Name         string `json:"name"`
 		Size         string `json:"size"`
 		StorageClass string `json:"storageClass"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+	}](w, r)
+	if !ok {
 		return
 	}
 	if req.Namespace == "" || req.Name == "" || req.Size == "" {
