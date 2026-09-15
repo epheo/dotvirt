@@ -19,7 +19,7 @@ func (c *Coordinator) Manifest(proj project.ProjectInfo, namespace, name string)
 	if err != nil {
 		return "", nil, err
 	}
-	vm, found, err := read.FindVMOnBranch(c.baseBranch, namespace, name)
+	vm, found, err := findVM(read, c.baseBranch, namespace, name)
 	if err != nil {
 		return "", nil, err
 	}

@@ -9,21 +9,18 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/format/index"
 
-	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
-// ChangesetItem is one change to apply within a CommitChangeset: an edit of an
-// existing manifest (Edit set, applied via manifest.ApplyEdit), a brand-new file
-// (NewContent set), or the removal of an existing file (Delete set). Exactly one
-// mode is used per item.
+// ChangesetItem is one change to apply within a CommitChangeset: a rewrite of
+// an existing file from its current content (Transform), a whole file
+// (NewContent), or the removal of one (Delete). Exactly one mode is used per
+// item.
 type ChangesetItem struct {
 	Path       string // repo-relative manifest path
-	Namespace  string // VM identity (for manifest.ApplyEdit targeting)
-	Name       string
-	Edit       *manifest.VMEdit // edit mode
-	NewContent []byte           // create mode (full manifest)
-	Delete     bool             // delete mode: remove Path from the worktree
+	Transform  func(current []byte) ([]byte, error)
+	NewContent []byte
+	Delete     bool
 }
 
 // ErrNoChanges reports a changeset whose every item already matches base -
@@ -31,9 +28,10 @@ type ChangesetItem struct {
 var ErrNoChanges = errors.New("every staged change already matches git")
 
 // CommitChangeset applies every item to one branch created off base and commits
-// them together - the propose step of the draft workflow. Edits re-read the
-// current source on base (so the proposal is against current trunk) and apply
-// via manifest.ApplyEdit (minimal diff); creates write a new file. Pushes when enabled.
+// them together - the propose step of the draft workflow. A Transform runs on
+// the file as the fresh write clone holds it on base, so the proposal is
+// against current trunk, not the mirror the draft was staged from. Pushes
+// when enabled.
 //
 // The branch is force-updated, so re-proposing replaces its contents rather than
 // stacking commits - keeping one PR per draft.
@@ -117,14 +115,13 @@ func applyItem(wt *git.Worktree, it ChangesetItem) error {
 			return fmt.Errorf("remove %s: %w", it.Path, err)
 		}
 		return nil
-	case it.Edit != nil:
-		original, err := readWorktree(wt, it.Path)
+	case it.Transform != nil:
+		current, err := readWorktree(wt, it.Path)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", it.Path, err)
 		}
-		content, err = manifest.ApplyEdit(original, it.Namespace, it.Name, *it.Edit)
-		if err != nil {
-			return fmt.Errorf("apply edit to %s: %w", it.Path, err)
+		if content, err = it.Transform(current); err != nil {
+			return fmt.Errorf("rewrite %s: %w", it.Path, err)
 		}
 	case it.NewContent != nil:
 		content = it.NewContent

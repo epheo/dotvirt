@@ -104,7 +104,7 @@ func (c *Coordinator) StageSaveTemplate(id auth.Identity, commitProj, sourceProj
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	vm, found, err := srcRead.FindVMOnBranch(c.baseBranch, req.SourceNamespace, req.SourceName)
+	vm, found, err := findVM(srcRead, c.baseBranch, req.SourceNamespace, req.SourceName)
 	if err != nil {
 		return model.DraftView{}, err
 	}
