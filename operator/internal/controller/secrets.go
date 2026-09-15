@@ -8,9 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
@@ -21,8 +19,9 @@ import (
 // key, the ApplicationSet plugin token, and the webhook secrets. The forge
 // credential is supplied by the admin (spec.forge.credentialsSecret) or, earlier
 // in the pipeline, by the managed-Forgejo bootstrap.
-func (r *DotvirtReconciler) reconcileSecrets(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
+func (r *DotvirtReconciler) reconcileSecrets(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, _ *reconcileCtx) (*ctrl.Result, error) {
 	if r.DryRun {
+		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionSecretsReady, "secret generation")
 		return nil, nil
 	}
 	secrets := []struct{ name, key string }{
@@ -41,33 +40,28 @@ func (r *DotvirtReconciler) reconcileSecrets(ctx context.Context, dv *dotvirtv1a
 			return nil, err
 		}
 	}
+	r.setCondition(dv, dotvirtv1alpha1.ConditionSecretsReady, metav1.ConditionTrue, "Ready", "generated secrets present")
 	return nil, nil
 }
 
-// ensureSecret creates a labeled, owner-referenced Secret with a random value if it
+// ensureSecret applies a labeled, owner-referenced Secret with a random value if it
 // doesn't already exist. Create-once: an existing secret is never regenerated, so
 // the session key / plugin token survive re-reconciles and restarts.
 func (r *DotvirtReconciler) ensureSecret(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, name, key string) error {
-	var existing corev1.Secret
-	err := r.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: name}, &existing)
-	if err == nil {
+	if _, err := r.secret(ctx, dv.Namespace, name); err == nil {
 		return nil
-	}
-	if !apierrors.IsNotFound(err) {
+	} else if !apierrors.IsNotFound(err) {
 		return err
 	}
 	value, err := randomHex(32)
 	if err != nil {
 		return err
 	}
-	s := &corev1.Secret{
+	return r.applyOwned(ctx, dv, &corev1.Secret{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: dv.Namespace, Labels: install.Labels(dv.Name)},
 		Data:       map[string][]byte{key: []byte(value)},
-	}
-	if err := controllerutil.SetControllerReference(dv, s, r.Scheme); err != nil {
-		return err
-	}
-	return r.Create(ctx, s)
+	})
 }
 
 func randomHex(n int) (string, error) {

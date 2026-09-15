@@ -251,8 +251,9 @@ spec:
                 format: int64
                 type: integer
               phase:
-                description: Phase is a short human-facing summary (e.g. Pending,
-                  Provisioning, Ready).
+                description: |-
+                  Phase is a short human-facing summary: Provisioning, BlockedOnDependencies or
+                  Ready (the Phase* consts).
                 type: string
               ssoOAuthClient:
                 description: |-

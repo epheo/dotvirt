@@ -18,7 +18,8 @@ const (
 
 // Detect reports OpenShift when the cluster serves the OpenShift API groups (the
 // presence of config.openshift.io / route.openshift.io is the canonical signal),
-// else vanilla Kubernetes. Errors default to Kubernetes (the portable rendering).
+// else vanilla Kubernetes. On error the value is a placeholder: main.go fails
+// startup rather than render for a guessed platform.
 func Detect(cfg *rest.Config) (Platform, error) {
 	dc, err := discovery.NewDiscoveryClientForConfig(cfg)
 	if err != nil {

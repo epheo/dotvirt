@@ -108,7 +108,7 @@ func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt, argoWebhookHost string) []corev1.En
 	// allowed by NAME on top of `external`: that entry matches only public resolved
 	// IPs, and the Argo Route often resolves to a private ingress VIP (lab/on-prem
 	// clusters), where the SSRF guard would silently drop every forge->Argo delivery.
-	allowed := serviceHost(dv) + ",external"
+	allowed := svcHost(AppName, dv.Namespace) + ",external"
 	if argoWebhookHost != "" {
 		allowed += "," + argoWebhookHost
 	}

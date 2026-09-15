@@ -28,9 +28,16 @@ import (
 // reconcileForge stands up + bootstraps the managed Forgejo (opt-in, eval-grade)
 // before anything that needs the forge credential. Once dotvirt-forge exists, the
 // rest of the install can't tell it from a BYO forge. For a wholly unconfigured forge
-// it records NotConfigured (push-only) and returns; for a BYO forge it's a no-op.
-// Requeues while Forgejo is coming up or its router host isn't assigned yet.
-func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
+// it records NotConfigured (push-only) and returns; for a BYO forge only the
+// trust anchors remain. Requeues while Forgejo is coming up or its router host
+// isn't assigned yet.
+func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (*ctrl.Result, error) {
+	// Before the first pod a pass may start: the managed Forgejo and the app both
+	// mount the CA copy, and a Go process loads its trust roots once, so a copy
+	// landing after a pod started stays invisible to it until a restart. Every
+	// install needs it (the app's OAuth exchange verifies against the same copy),
+	// so it precedes the managed check.
+	r.ensureTrustAnchors(ctx, dv, rc)
 	if !dv.Spec.Forge.Managed {
 		// Derived status, so a switch off managed retires the stale bootstrap hint too.
 		dv.Status.ForgeURL = dv.Spec.Forge.URL
@@ -48,14 +55,11 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 		}
 		return nil, nil
 	}
-	// Trust anchors before the Deployment that mounts them (optional mounts, so
-	// ordering is comfort not correctness).
-	r.ensureTrustAnchors(ctx, dv)
 	// Apply the base workload (incl. the exposure) first: on OpenShift with no explicit
 	// URL that Route is hostless, so the router assigns a host we read back and fill into
 	// the effective spec, before rendering the Deployment whose ROOT_URL needs it.
 	if err := r.applyForgejoBase(ctx, dv); err != nil {
-		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "ApplyFailed", err)
+		return nil, failPhase("ApplyFailed", err)
 	}
 	// Set here, not at Ready: the admin secret exists once the base is applied, so the
 	// hint also shows while provisioning.
@@ -66,8 +70,8 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 	}
 	applyEffectiveForgeSpec(dv, forgeURL)
 	dv.Status.ForgeURL = forgeURL
-	if err := r.applyForgejoDeployment(ctx, dv); err != nil {
-		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "ApplyFailed", err)
+	if err := r.applyForgejoDeployment(ctx, dv, rc); err != nil {
+		return nil, failPhase("ApplyFailed", err)
 	}
 	if r.DryRun {
 		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionForgeReady, "Forgejo bootstrap")
@@ -85,7 +89,7 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 			dotvirtv1alpha1.PhaseProvisioning, time.Minute)
 	}
 	if err != nil {
-		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "Error", err)
+		return nil, err
 	}
 	if !ready {
 		return r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing",
@@ -123,7 +127,7 @@ func (r *DotvirtReconciler) resolveForgeURL(ctx context.Context, dv *dotvirtv1al
 	// it does not on vanilla Kubernetes NOR when spec.ingress.type names another exposure.
 	// Reading routeHost in those cases would wait for a Route nothing creates, requeueing
 	// forever, so halt on the same predicate the exposure uses.
-	if r.Platform != platform.OpenShift || r.resolveExposureType(dv) != "route" {
+	if r.Platform != platform.OpenShift || r.resolveExposureType(dv) != dotvirtv1alpha1.IngressRoute {
 		res, err := r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "ForgeURLRequired",
 			"set spec.forge.url: the operator can only discover a managed forge's hostname from an OpenShift Route, which this install does not create",
 			dotvirtv1alpha1.PhaseProvisioning, 0)
@@ -163,7 +167,7 @@ func forgeAdminHint(ns string) string {
 // A failure keeps Available and Phase untouched (the operand still serves; the
 // condition plus the app's recover-repo UI carry the signal) but requeues, since
 // no watch event fires when the forge comes back.
-func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
+func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, _ *reconcileCtx) (*ctrl.Result, error) {
 	switch {
 	case dv.Spec.Forge.PlatformRepo == "":
 		// No platform tier configured; nothing to bootstrap.
@@ -239,14 +243,13 @@ func (r *DotvirtReconciler) applyForgejoBase(ctx context.Context, dv *dotvirtv1a
 // applyForgejoDeployment renders the Forgejo Deployment once the effective URL is filled,
 // so its ROOT_URL is the browser-facing host. Kept separate from applyForgejoBase for
 // that ordering.
-func (r *DotvirtReconciler) applyForgejoDeployment(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
+func (r *DotvirtReconciler) applyForgejoDeployment(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) error {
 	// The webhook allowlist needs ArgoCD's externally-visible host (see forgejoEnv),
-	// resolved the same way webhook registration does. Empty (no Argo URL yet) renders
-	// the baseline allowlist; the reconcile that registers the webhook then re-renders
-	// the Deployment with the host in place.
-	argoNS, _ := r.argoTarget(dv)
+	// the URL webhook registration posts to. Empty (no Argo URL yet) renders the
+	// baseline allowlist; the pass that resolves it re-renders the Deployment with
+	// the host in place.
 	argoHost := ""
-	if u, err := url.Parse(r.argoServerURL(ctx, dv, argoNS)); err == nil {
+	if u, err := url.Parse(rc.argoURL); err == nil {
 		argoHost = u.Hostname()
 	}
 	// fsGroup only on vanilla K8s; OpenShift's restricted-v2 injects its own.

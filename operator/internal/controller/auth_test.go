@@ -21,7 +21,7 @@ func TestReconcileSSOOpenShiftWiring(t *testing.T) {
 	r := newReconciler(c, depsOK)
 	r.Platform = platform.OpenShift
 
-	if _, err := r.reconcileSecrets(context.Background(), dv); err != nil {
+	if _, err := r.reconcileSecrets(context.Background(), dv, phaseCtx(r, dv)); err != nil {
 		t.Fatalf("reconcileSecrets: %v", err)
 	}
 	if !dv.Spec.Auth.OpenShiftSSO {
@@ -30,7 +30,7 @@ func TestReconcileSSOOpenShiftWiring(t *testing.T) {
 	if !exists(t, c, &corev1.Secret{}, dv.Namespace, install.OAuthSecretName) {
 		t.Error("OAuth client secret not generated")
 	}
-	if _, err := r.reconcileWorkload(context.Background(), dv); err != nil {
+	if _, err := r.reconcileWorkload(context.Background(), dv, phaseCtx(r, dv)); err != nil {
 		t.Fatalf("reconcileWorkload: %v", err)
 	}
 	cmd := dv.Status.SSOOAuthClient
@@ -59,7 +59,7 @@ func TestReconcileSSOGatedOffVanilla(t *testing.T) {
 	r := newReconciler(c, depsOK) // Platform == Kubernetes
 
 	r.normalizeSpec(dv)
-	if _, err := r.reconcileSecrets(context.Background(), dv); err != nil {
+	if _, err := r.reconcileSecrets(context.Background(), dv, phaseCtx(r, dv)); err != nil {
 		t.Fatalf("reconcileSecrets: %v", err)
 	}
 	if dv.Spec.Auth.OpenShiftSSO {
@@ -96,7 +96,7 @@ func TestReconcileSSOToggleOffClearsStatus(t *testing.T) {
 	r := newReconciler(c, depsOK)
 	r.Platform = platform.OpenShift
 
-	if _, err := r.reconcileWorkload(context.Background(), dv); err != nil {
+	if _, err := r.reconcileWorkload(context.Background(), dv, phaseCtx(r, dv)); err != nil {
 		t.Fatalf("reconcileWorkload: %v", err)
 	}
 	if dv.Status.SSOOAuthClient != "" {

@@ -17,10 +17,7 @@ import (
 // owner-referenced to this CR for automatic GC (unlike the cluster-scoped
 // resources reconcileArgo applies, which a namespaced CR can't own - those rely
 // on the finalizer).
-func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
-	// Converged every pass (the ingress CA rotates); also covers forge-less installs
-	// that skip the forge phase's call.
-	r.ensureTrustAnchors(ctx, dv)
+func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, _ *reconcileCtx) (*ctrl.Result, error) {
 	// Exposure first: on OpenShift an empty ingress.host yields a hostless Route the
 	// router names. Read that host back and fill it in-memory so the Deployment's
 	// DOTVIRT_PUBLIC_URL (OAuth callback + webhook self-registration) is set this same
@@ -35,7 +32,7 @@ func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1
 		base = append(base, exposure)
 	}
 	if err := r.applyOwned(ctx, dv, base...); err != nil {
-		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionWorkloadReady, "ApplyFailed", err)
+		return nil, failPhase("ApplyFailed", err)
 	}
 	if dv.Spec.Ingress.Host == "" && !r.DryRun && r.Platform == platform.OpenShift {
 		if host := r.routeHost(ctx, dv.Namespace, install.AppName); host != "" {
@@ -56,22 +53,22 @@ func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1
 		dv.Status.SSOOAuthClient = ""
 	}
 	if err := r.applyOwned(ctx, dv, install.Deployment(dv)); err != nil {
-		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionWorkloadReady, "ApplyFailed", err)
+		return nil, failPhase("ApplyFailed", err)
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionWorkloadReady, metav1.ConditionTrue, "Ready", "workload applied")
 	return nil, nil
 }
 
 // resolveExposureType picks the exposure kind for the configured/detected ingress type:
-// the explicit spec value, or Route on OpenShift / Ingress on vanilla when "auto"/unset.
-func (r *DotvirtReconciler) resolveExposureType(dv *dotvirtv1alpha1.Dotvirt) string {
-	if t := string(dv.Spec.Ingress.Type); t != "" && t != "auto" {
+// the explicit spec value, or Route on OpenShift / Ingress on vanilla when auto/unset.
+func (r *DotvirtReconciler) resolveExposureType(dv *dotvirtv1alpha1.Dotvirt) dotvirtv1alpha1.IngressType {
+	if t := dv.Spec.Ingress.Type; t != "" && t != dotvirtv1alpha1.IngressAuto {
 		return t
 	}
 	if r.Platform == platform.OpenShift {
-		return "route"
+		return dotvirtv1alpha1.IngressRoute
 	}
-	return "ingress"
+	return dotvirtv1alpha1.IngressIngress
 }
 
 // exposureFor builds the external exposure of the named Service for the resolved
@@ -79,9 +76,9 @@ func (r *DotvirtReconciler) resolveExposureType(dv *dotvirtv1alpha1.Dotvirt) str
 // Ingress on vanilla Kubernetes (host required).
 func (r *DotvirtReconciler) exposureFor(dv *dotvirtv1alpha1.Dotvirt, name string, port int32, host string) client.Object {
 	switch r.resolveExposureType(dv) {
-	case "route":
+	case dotvirtv1alpha1.IngressRoute:
 		return install.Route(dv, name, host)
-	case "ingress":
+	case dotvirtv1alpha1.IngressIngress:
 		if host != "" {
 			return install.Ingress(dv, name, port, host)
 		}

@@ -129,15 +129,14 @@ func Service(dv *dotvirtv1alpha1.Dotvirt) *corev1.Service {
 	return service(AppName, dv, selectorLabels, HTTPPort)
 }
 
-// serviceHost is dotvirt's in-cluster DNS host and ServiceURL its base URL. A managed
-// forge delivers webhooks here, not to the external Route: an in-cluster Forgejo can't
-// hairpin to the Route and doesn't trust its CA. dotvirt serves plain HTTP; the delivery
-// is still authenticated by HMAC.
-func serviceHost(dv *dotvirtv1alpha1.Dotvirt) string { return svcHost(AppName, dv.Namespace) }
-func ServiceURL(dv *dotvirtv1alpha1.Dotvirt) string  { return svcURL(AppName, dv.Namespace, HTTPPort) }
+// ServiceURL is dotvirt's in-cluster base URL. A managed forge delivers webhooks
+// here, not to the external Route: an in-cluster Forgejo can't hairpin to the
+// Route and doesn't trust its CA. dotvirt serves plain HTTP; the delivery is
+// still authenticated by HMAC.
+func ServiceURL(dv *dotvirtv1alpha1.Dotvirt) string { return svcURL(AppName, dv.Namespace, HTTPPort) }
 
-// svcHost and svcURL build the in-cluster DNS host / base URL for a Service -
-// `<name>.<ns>.svc[:port]` - so the template lives in one place.
+// svcHost and svcURL are the one template for a Service's in-cluster DNS host /
+// base URL, `<name>.<ns>.svc[:port]`, so no caller can drift the suffix.
 func svcHost(name, namespace string) string { return name + "." + namespace + ".svc" }
 func svcURL(name, namespace string, port int32) string {
 	return fmt.Sprintf("http://%s:%d", svcHost(name, namespace), port)

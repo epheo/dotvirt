@@ -11,6 +11,9 @@ const (
 	// ConditionForgeReady is True when a managed Forgejo is up and bootstrapped (its
 	// admin + scoped token + owner org); irrelevant for a BYO forge.
 	ConditionForgeReady = "ForgeReady"
+	// ConditionSecretsReady is True when the generated secrets (session key, plugin
+	// token, webhook secrets, OAuth client secret) exist.
+	ConditionSecretsReady = "SecretsReady"
 	// ConditionWorkloadReady is True when the namespaced workload (ServiceAccount,
 	// PVC, Service, Deployment, exposure) is applied.
 	ConditionWorkloadReady = "WorkloadReady"
@@ -44,6 +47,12 @@ const (
 // silent no-exposure install.
 // +kubebuilder:validation:Enum=auto;route;ingress
 type IngressType string
+
+const (
+	IngressAuto    IngressType = "auto"
+	IngressRoute   IngressType = "route"
+	IngressIngress IngressType = "ingress"
+)
 
 // ForgeSpec points dotvirt at its git forge and the platform-tier repo. The forge
 // credential here is the INSTALL-TIME admin token the operator uses to create the
@@ -130,7 +139,8 @@ type DotvirtSpec struct {
 type DotvirtStatus struct {
 	// ObservedGeneration is the .metadata.generation last reconciled.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-	// Phase is a short human-facing summary (e.g. Pending, Provisioning, Ready).
+	// Phase is a short human-facing summary: Provisioning, BlockedOnDependencies or
+	// Ready (the Phase* consts).
 	Phase string `json:"phase,omitempty"`
 	// Conditions follow the standard k8s conventions (see the Condition* consts).
 	// +listType=map
