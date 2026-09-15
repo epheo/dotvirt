@@ -48,7 +48,7 @@ func (c *Coordinator) StageEnableDRS(id auth.Identity, proj project.ProjectInfo,
 		if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   draft.ResourceDRS,
-			Namespace:  ClusterScopeNS,
+			Namespace:  model.ClusterScopeNS,
 			Name:       f.Name,
 			SourceFile: f.Path,
 			Manifest:   string(f.Content),
@@ -81,7 +81,7 @@ func (c *Coordinator) StageDisableDRS(id auth.Identity, proj project.ProjectInfo
 	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
 		Kind:       draft.KindDelete,
 		Resource:   draft.ResourceDRS,
-		Namespace:  ClusterScopeNS,
+		Namespace:  model.ClusterScopeNS,
 		Name:       "kubedescheduler",
 		SourceFile: drsgen.CRPath,
 	}); err != nil {

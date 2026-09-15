@@ -33,8 +33,8 @@ func TestStageCreateRejectsBadNames(t *testing.T) {
 		{"name": "Web", "namespace": "alpha"},
 	} {
 		raw, _ := json.Marshal(spec)
-		if _, err := c.StageCreate(id, proj, raw); !errors.Is(err, model.ErrInvalid) {
-			t.Errorf("StageCreate(%v): want ErrInvalid, got %v", spec, err)
+		if _, err := c.StageCreateVM(id, proj, raw); !errors.Is(err, model.ErrInvalid) {
+			t.Errorf("StageCreateVM(%v): want ErrInvalid, got %v", spec, err)
 		}
 	}
 }
@@ -55,8 +55,8 @@ func TestStageCreateRejectsIncompleteSpec(t *testing.T) {
 		spec := maps.Clone(full)
 		delete(spec, missing)
 		raw, _ := json.Marshal(spec)
-		if _, err := c.StageCreate(id, proj, raw); !errors.Is(err, model.ErrInvalid) {
-			t.Errorf("StageCreate without %s: want ErrInvalid, got %v", missing, err)
+		if _, err := c.StageCreateVM(id, proj, raw); !errors.Is(err, model.ErrInvalid) {
+			t.Errorf("StageCreateVM without %s: want ErrInvalid, got %v", missing, err)
 		}
 	}
 	if entries, _ := c.store.List(id.Username, proj.Name); len(entries) != 0 {
@@ -84,9 +84,9 @@ func TestStageCreateCommitsPreviewedManifest(t *testing.T) {
 	raw := json.RawMessage(`{"name":"db","namespace":"alpha","instancetype":"u1.medium","preference":"fedora",
 		"osImage":{"name":"fedora","namespace":"kv"},"diskSize":"40Gi","running":true,
 		"cloudInit":{"user":"admin","password":"` + typed + `"}}`)
-	view, err := c.StageCreate(id, proj, raw)
+	view, err := c.StageCreateVM(id, proj, raw)
 	if err != nil {
-		t.Fatalf("StageCreate: %v", err)
+		t.Fatalf("StageCreateVM: %v", err)
 	}
 	if len(view.Items) != 1 || view.Items[0].Kind != "create" || view.Items[0].YAML == "" {
 		t.Fatalf("want one create item carrying its YAML, got %+v", view.Items)
@@ -130,5 +130,24 @@ func TestSiblingRepoURL(t *testing.T) {
 	}
 	if got := siblingRepoURL("noslash", "x"); got != "" {
 		t.Errorf("siblingRepoURL(no slash) = %q, want empty", got)
+	}
+}
+
+// Every network-family resource in the kind table has a create form here and
+// nothing outside the family does: the route table, the object routes and
+// adoption all read the family from the table.
+func TestRenderersCoverTheNetworkFamily(t *testing.T) {
+	seen := 0
+	for _, r := range model.Resources() {
+		_, ok := renderers[draft.Resource(r.Name)]
+		if ok != r.NetworkFamily {
+			t.Errorf("%s: renderer %v, network family %v", r.Name, ok, r.NetworkFamily)
+		}
+		if ok {
+			seen++
+		}
+	}
+	if seen != len(renderers) {
+		t.Errorf("%d renderers, %d in the table", len(renderers), seen)
 	}
 }

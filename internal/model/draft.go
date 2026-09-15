@@ -137,7 +137,7 @@ type ObjectRef struct {
 // Reason says why not and the manifest itself is what gets edited.
 type ObjectSpec struct {
 	Resource   string          `json:"resource"`
-	Namespace  string          `json:"namespace"` // "cluster" for a cluster-scoped object
+	Namespace  string          `json:"namespace"` // ClusterScopeNS ("cluster") for a cluster-scoped object
 	Name       string          `json:"name"`
 	SourceFile string          `json:"sourceFile"`
 	Manifest   string          `json:"manifest"`
@@ -154,7 +154,7 @@ type UpdateManifestRequest struct {
 // DraftItem is one pending change rendered for the UI.
 type DraftItem struct {
 	Kind      string   `json:"kind"`               // edit | create | delete
-	Resource  string   `json:"resource,omitempty"` // "" == vm | network - disambiguates unstage; a kind name in a commit review
+	Resource  string   `json:"resource,omitempty"` // the draft resource ("" == vm); a commit review names an unmanaged kind by its kind
 	Namespace string   `json:"namespace"`
 	Name      string   `json:"name"`
 	Changes   []Change `json:"changes"`

@@ -176,7 +176,7 @@ func TestUnstageDRSIsAtomic(t *testing.T) {
 	if _, err := c.StageEnableDRS(id, proj, mustJSON(t, drsgen.Spec{Mode: drsgen.ModeAutomatic, InstallPSI: true})); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Unstage(id, proj, string(draft.ResourceDRS), ClusterScopeNS, "subscription"); err != nil {
+	if err := c.Unstage(id, proj, string(draft.ResourceDRS), model.ClusterScopeNS, "subscription"); err != nil {
 		t.Fatalf("Unstage: %v", err)
 	}
 	view, err := c.Get(id, proj)

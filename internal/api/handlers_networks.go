@@ -1,16 +1,14 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 
-	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
-	"github.com/epheo/dotvirt/internal/project"
 )
 
 // The networking create routes resolve their target TIER from the object's SCOPE,
@@ -22,11 +20,6 @@ import (
 // api.go, where each route's authorization rationale lives; only the routes with
 // per-request scope or SSAR switches keep bespoke handlers here.
 
-// stageFunc is a Draft StageCreateX method expression. Passing the receiver per
-// call (platformScope/resolveProject 503 on a nil draft first) keeps a degraded
-// wiring from panicking at route registration.
-type stageFunc func(Draft, auth.Identity, project.ProjectInfo, json.RawMessage) (model.DraftView, error)
-
 // nsPeek is the routing field of a namespace-scoped create body.
 type nsPeek struct {
 	Namespace string `json:"namespace"`
@@ -34,7 +27,7 @@ type nsPeek struct {
 
 // platformCreate builds the handler for a cluster-scoped create: always the
 // platform tier, SSAR-gated on the caller's authority to create ref's kind.
-func (s *Server) platformCreate(ref ssarRef, stage stageFunc) http.HandlerFunc {
+func (s *Server) platformCreate(ref ssarRef, resource draft.Resource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		raw, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -45,7 +38,7 @@ func (s *Server) platformCreate(ref ssarRef, stage stageFunc) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		view, err := stage(s.draft, sc.id, sc.proj, raw)
+		view, err := s.draft.StageCreate(sc.id, sc.proj, resource, raw)
 		respond(w, view, err)
 	}
 }
@@ -54,7 +47,7 @@ func (s *Server) platformCreate(ref ssarRef, stage stageFunc) http.HandlerFunc {
 // spec's namespace and routes to the tenant project owning it (resolveProject is
 // the authorization point - a namespace outside the caller's projects is not
 // found). what names the kind in the missing-namespace error, article included.
-func (s *Server) namespacedCreate(what string, stage stageFunc) http.HandlerFunc {
+func (s *Server) namespacedCreate(what string, resource draft.Resource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		raw, p, ok := peek[nsPeek](w, r)
 		if !ok {
@@ -68,7 +61,7 @@ func (s *Server) namespacedCreate(what string, stage stageFunc) http.HandlerFunc
 		if !ok {
 			return
 		}
-		view, err := stage(s.draft, sc.id, sc.proj, raw)
+		view, err := s.draft.StageCreate(sc.id, sc.proj, resource, raw)
 		respond(w, view, err)
 	}
 }
@@ -99,7 +92,7 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	view, err := s.draft.StageCreateNetwork(sc.id, sc.proj, raw)
+	view, err := s.draft.StageCreate(sc.id, sc.proj, draft.ResourceNetwork, raw)
 	respond(w, view, err)
 }
 
@@ -121,7 +114,7 @@ func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	view, err := s.draft.StageCreateAdminNetworkPolicy(sc.id, sc.proj, raw)
+	view, err := s.draft.StageCreate(sc.id, sc.proj, draft.ResourceAdminNetworkPolicy, raw)
 	respond(w, view, err)
 }
 

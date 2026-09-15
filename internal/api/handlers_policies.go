@@ -62,30 +62,15 @@ func scopePolicies(all []model.Policy, visible map[string]bool, canCluster func(
 	return out
 }
 
-// backingGroup maps every managed object's Backing (also its kind) to its API
-// group - the one vocabulary the per-object drift lookups key on.
-var backingGroup = map[string]string{
-	"UserDefinedNetwork":             "k8s.ovn.org",
-	"ClusterUserDefinedNetwork":      "k8s.ovn.org",
-	"NetworkAttachmentDefinition":    "k8s.cni.cncf.io",
-	"NetworkPolicy":                  "networking.k8s.io",
-	"AdminNetworkPolicy":             "policy.networking.k8s.io",
-	"BaselineAdminNetworkPolicy":     "policy.networking.k8s.io",
-	"EgressFirewall":                 "k8s.ovn.org",
-	"EgressIP":                       "k8s.ovn.org",
-	"AdminPolicyBasedExternalRoute":  "k8s.ovn.org",
-	"NodeNetworkConfigurationPolicy": "nmstate.io",
-}
-
 // driftFor is one managed object's ArgoCD sync/health from the shared
 // Application snapshot, addressed by its Backing (also its kind). ok=false when
 // Argo isn't wired, the backing is unmanaged, or no Application manages it.
 func (s *Server) driftFor(backing, namespace, name string) (argo.Drift, bool) {
-	group, ok := backingGroup[backing]
+	_, kind, ok := model.LookupKind(backing)
 	if s.drift == nil || !ok {
 		return argo.Drift{}, false
 	}
-	return s.drift.ResourceDrift(group, backing, namespace, name)
+	return s.drift.ResourceDrift(kind.Group, backing, namespace, name)
 }
 
 // enrichPolicyDrift attaches each policy's own ArgoCD sync/health - the same

@@ -5,3 +5,6 @@
 packages:
   - path: "github.com/epheo/dotvirt/internal/model"
     output_path: "web/src/lib/model.gen.ts"
+    # kinds.go is Go-side wiring (the managed-kind table), not a wire type.
+    exclude_files:
+      - "kinds.go"

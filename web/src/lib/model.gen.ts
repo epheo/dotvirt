@@ -144,7 +144,7 @@ export interface ObjectRef {
  */
 export interface ObjectSpec {
   resource: string;
-  namespace: string; // "cluster" for a cluster-scoped object
+  namespace: string; // ClusterScopeNS ("cluster") for a cluster-scoped object
   name: string;
   sourceFile: string;
   manifest: string;
@@ -163,7 +163,7 @@ export interface UpdateManifestRequest {
  */
 export interface DraftItem {
   kind: string; // edit | create | delete
-  resource?: string; // "" == vm | network - disambiguates unstage; a kind name in a commit review
+  resource?: string; // the draft resource ("" == vm); a commit review names an unmanaged kind by its kind
   namespace: string;
   name: string;
   changes: Change[];

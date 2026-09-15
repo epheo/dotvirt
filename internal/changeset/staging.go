@@ -41,10 +41,10 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 	return c.Get(id, proj)
 }
 
-// StageCreate records a new VM in (id, proj)'s draft: the wizard spec rendered
+// StageCreateVM records a new VM in (id, proj)'s draft: the wizard spec rendered
 // to its manifest here, once, so the preview shows the bytes propose commits and
 // a spec the renderer refuses fails at the form rather than at propose.
-func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
+func (c *Coordinator) StageCreateVM(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
 	if err := requireRepo(proj); err != nil {
 		return model.DraftView{}, err
 	}
@@ -69,18 +69,13 @@ func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, ra
 	return c.Get(id, proj)
 }
 
-// ClusterScopeNS is the placeholder "namespace" for cluster-scoped draft entries
-// (CUDN networks, NNCP uplinks) - they have no real namespace, but the draft keys
-// + the unstage route are ns/name-shaped, so a sentinel keeps both well-formed.
-const ClusterScopeNS = "cluster"
-
-// stageRendered is the shared tail of the netgen-backed StageCreateX methods:
+// stageRendered is the shared tail of StageCreate and StageCreateNamespace:
 // requireRepo, then one rendered manifest staged verbatim (the adopt-create path)
 // so propose commits it and Argo applies it on merge. requireRepo runs before
 // render so a repoless project fails ErrConflict, never ErrInvalid; any render
 // error (spec decode included) is the caller's input, wrapped as ErrInvalid.
 // render returns the entry minus Kind; the entry's Namespace is the object's own
-// or the ClusterScopeNS sentinel.
+// or the model.ClusterScopeNS sentinel.
 //
 // The rendered manifest is a create when git does not yet declare its objects
 // and an edit - the same rendering replacing the declaring file - when it does:
@@ -146,20 +141,62 @@ func soleDeclarer(idx git.DeclaredIndex, refs []model.ObjectRef) (string, error)
 	return path, nil
 }
 
-// stageSpec decodes rawSpec into S, renders its manifest, and stages it: the
-// whole body of every single-manifest StageCreateX. meta derives the entry's
-// identity from the decoded spec (per-kind quirks live there). A free function
-// because methods cannot take type parameters.
-func stageSpec[S any](c *Coordinator, id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage, what string,
-	render func(S) (path string, content []byte, err error),
-	meta func(S) (resource draft.Resource, ns, name string),
-) (model.DraftView, error) {
-	return c.stageRendered(id, proj, func() (draft.Entry, error) {
+// renderer turns a create form's spec into the entry it stages: the manifest
+// netgen renders and the identity the draft, the object routes and the Changes
+// pane carry.
+type renderer func(rawSpec json.RawMessage) (draft.Entry, error)
+
+// renderers is the network family's create forms, keyed by the resource a
+// route names. The route resolved the target tier from the object's scope; a
+// renderer decides only how the spec renders and what identity it stages under.
+var renderers = map[draft.Resource]renderer{
+	// A namespace-scoped UDN (project scope) or a cluster-scoped CUDN
+	// (shared/vlan scope), the latter under the cluster sentinel.
+	draft.ResourceNetwork: render("network", netgen.Manifest, func(s netgen.Spec) (draft.Resource, string, string) {
+		return draft.ResourceNetwork, model.DraftNamespace(s.Namespace), s.Name
+	}),
+	// An uplink's identity is its NNCP's name, which the read plane and the
+	// object routes carry; the physical-network name is what it maps.
+	draft.ResourceUplink: render("uplink", netgen.UplinkManifest, func(s netgen.UplinkSpec) (draft.Resource, string, string) {
+		return draft.ResourceUplink, model.ClusterScopeNS, netgen.UplinkPolicyName(s.Name)
+	}),
+	// OVN-K permits one egress firewall per namespace, always named "default".
+	draft.ResourceEgressFirewall: render("egress firewall", netgen.EgressFirewallManifest, func(s netgen.EgressFirewallSpec) (draft.Resource, string, string) {
+		return draft.ResourceEgressFirewall, s.Namespace, "default"
+	}),
+	draft.ResourceEgressIP: render("egress IP", netgen.EgressIPManifest, func(s netgen.EgressIPSpec) (draft.Resource, string, string) {
+		return draft.ResourceEgressIP, model.ClusterScopeNS, s.Name
+	}),
+	draft.ResourceExternalRoute: render("external route", netgen.ExternalRouteManifest, func(s netgen.ExternalRouteSpec) (draft.Resource, string, string) {
+		return draft.ResourceExternalRoute, model.ClusterScopeNS, s.Name
+	}),
+	draft.ResourceNetworkPolicy: render("network policy", netgen.NetworkPolicyManifest, func(s netgen.NetworkPolicySpec) (draft.Resource, string, string) {
+		return draft.ResourceNetworkPolicy, s.Namespace, s.Name
+	}),
+	// One form serves both admin tiers: the spec's baseline flag picks the
+	// singleton BaselineAdminNetworkPolicy, always named "default".
+	draft.ResourceAdminNetworkPolicy:         adminPolicy,
+	draft.ResourceBaselineAdminNetworkPolicy: adminPolicy,
+}
+
+var adminPolicy = render("admin network policy", netgen.AdminNetworkPolicyManifest, func(s netgen.AdminNetworkPolicySpec) (draft.Resource, string, string) {
+	if s.Baseline {
+		return draft.ResourceBaselineAdminNetworkPolicy, model.ClusterScopeNS, "default"
+	}
+	return draft.ResourceAdminNetworkPolicy, model.ClusterScopeNS, s.Name
+})
+
+// render builds a renderer: decode rawSpec into S, render its manifest, name
+// the entry. meta derives the identity from the decoded spec (the per-kind
+// quirks live there). A free function because methods cannot take type
+// parameters.
+func render[S any](what string, manifest func(S) (path string, content []byte, err error), meta func(S) (resource draft.Resource, ns, name string)) renderer {
+	return func(rawSpec json.RawMessage) (draft.Entry, error) {
 		var spec S
 		if err := json.Unmarshal(rawSpec, &spec); err != nil {
 			return draft.Entry{}, fmt.Errorf("invalid %s spec: %v", what, err)
 		}
-		path, content, err := render(spec)
+		path, content, err := manifest(spec)
 		resource, ns, name := meta(spec)
 		return draft.Entry{
 			Resource:   resource,
@@ -168,22 +205,19 @@ func stageSpec[S any](c *Coordinator, id auth.Identity, proj project.ProjectInfo
 			SourceFile: path,
 			Manifest:   string(content),
 		}, err
-	})
+	}
 }
 
-// StageCreateNetwork records a new Distributed Port Group in (id, proj)'s draft:
-// a namespace-scoped UDN (project scope) or a cluster-scoped CUDN (shared/vlan
-// scope) - for the latter, proj is the platform repo (dotvirt routes cluster-scoped
-// creates there by KIND, not an admin-picked repo).
-func (c *Coordinator) StageCreateNetwork(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	return stageSpec(c, id, proj, rawSpec, "network", netgen.Manifest,
-		func(s netgen.Spec) (draft.Resource, string, string) {
-			ns := s.Namespace
-			if ns == "" {
-				ns = ClusterScopeNS // cluster-scoped CUDN
-			}
-			return draft.ResourceNetwork, ns, s.Name
-		})
+// StageCreate records a new network-family object in (id, proj)'s draft, its
+// form spec rendered to a manifest here, once. The route resolved proj from
+// the object's scope - the tenant repo owning a namespaced object, the
+// platform repo for a cluster-scoped one - so resource only picks the renderer.
+func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, resource draft.Resource, rawSpec json.RawMessage) (model.DraftView, error) {
+	stage, ok := renderers[resource]
+	if !ok {
+		return model.DraftView{}, fmt.Errorf("%w: %s has no create form", model.ErrInvalid, resource)
+	}
+	return c.stageRendered(id, proj, func() (draft.Entry, error) { return stage(rawSpec) })
 }
 
 // StageCreateNamespace records a new namespace (with an optional primary "VM
@@ -220,81 +254,11 @@ func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinPro
 	})
 }
 
-// StageCreateUplink records a new Uplink (an nmstate NNCP) in (id, proj)'s draft -
-// proj is the platform repo (an uplink is cluster-scoped, so it always routes to the
-// platform tier). Stages under the ClusterScopeNS sentinel.
-func (c *Coordinator) StageCreateUplink(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	return stageSpec(c, id, proj, rawSpec, "uplink", netgen.UplinkManifest,
-		func(s netgen.UplinkSpec) (draft.Resource, string, string) {
-			// The identity is the NNCP's name, which the read plane and the object
-			// routes carry; the physical-network name is what it maps.
-			return draft.ResourceUplink, ClusterScopeNS, netgen.UplinkPolicyName(s.Name)
-		})
-}
-
-// StageCreateEgressFirewall records a new namespace egress firewall (the Tier-1
-// gateway firewall) in (id, proj)'s draft. It is namespace-scoped, so proj is the
-// tenant project owning the namespace (handlers route it via resolveProject, like a
-// project UDN). The object is always named "default" (OVN-K permits one per namespace).
-func (c *Coordinator) StageCreateEgressFirewall(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	return stageSpec(c, id, proj, rawSpec, "egress firewall", netgen.EgressFirewallManifest,
-		func(s netgen.EgressFirewallSpec) (draft.Resource, string, string) {
-			return draft.ResourceEgressFirewall, s.Namespace, "default"
-		})
-}
-
-// StageCreateEgressIP records a new cluster-scoped EgressIP (the Tier-0 source-NAT
-// pool) in (id, proj)'s draft. proj is the platform repo - cluster-scoped, so it
-// always routes to the platform tier (handlers gate it on the caller's EgressIP-create
-// authority). Staged under the ClusterScopeNS sentinel.
-func (c *Coordinator) StageCreateEgressIP(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	return stageSpec(c, id, proj, rawSpec, "egress IP", netgen.EgressIPManifest,
-		func(s netgen.EgressIPSpec) (draft.Resource, string, string) {
-			return draft.ResourceEgressIP, ClusterScopeNS, s.Name
-		})
-}
-
-// StageCreateExternalRoute records a new cluster-scoped AdminPolicyBasedExternalRoute
-// (the Tier-0 external next-hop route) in (id, proj)'s draft - proj is the platform
-// repo. Staged under the ClusterScopeNS sentinel.
-func (c *Coordinator) StageCreateExternalRoute(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	return stageSpec(c, id, proj, rawSpec, "external route", netgen.ExternalRouteManifest,
-		func(s netgen.ExternalRouteSpec) (draft.Resource, string, string) {
-			return draft.ResourceExternalRoute, ClusterScopeNS, s.Name
-		})
-}
-
-// StageCreateNetworkPolicy records a new NetworkPolicy (the east-west Distributed
-// Firewall) in (id, proj)'s draft - namespace-scoped, so proj is the tenant project
-// owning the namespace.
-func (c *Coordinator) StageCreateNetworkPolicy(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	return stageSpec(c, id, proj, rawSpec, "network policy", netgen.NetworkPolicyManifest,
-		func(s netgen.NetworkPolicySpec) (draft.Resource, string, string) {
-			return draft.ResourceNetworkPolicy, s.Namespace, s.Name
-		})
-}
-
-// StageCreateAdminNetworkPolicy records a new cluster-wide admin DFW policy (the
-// AdminNetworkPolicy that overrides tenant NetworkPolicies, or the singleton
-// BaselineAdminNetworkPolicy default) in (id, proj)'s draft. proj is the platform
-// repo - cluster-scoped + admin-only, so it always routes to the platform tier
-// (handlers gate it on the caller's ANP/BANP-create authority). Staged under the
-// ClusterScopeNS sentinel.
-func (c *Coordinator) StageCreateAdminNetworkPolicy(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	return stageSpec(c, id, proj, rawSpec, "admin network policy", netgen.AdminNetworkPolicyManifest,
-		func(s netgen.AdminNetworkPolicySpec) (draft.Resource, string, string) {
-			if s.Baseline {
-				return draft.ResourceBaselineAdminNetworkPolicy, ClusterScopeNS, "default"
-			}
-			return draft.ResourceAdminNetworkPolicy, ClusterScopeNS, s.Name
-		})
-}
-
 // StageDelete records the removal of an existing object (a VM when resource is
 // empty) in (id, proj)'s draft. The object must be declared on the base branch
 // (you can't delete what isn't in git - an unstaged create should be unstaged,
 // not deleted); its file is captured so the propose step removes it and Argo
-// prunes the object on merge. Cluster-scoped objects name ClusterScopeNS.
+// prunes the object on merge. Cluster-scoped objects name model.ClusterScopeNS.
 func (c *Coordinator) StageDelete(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) (model.DraftView, error) {
 	read, err := c.read(proj)
 	if err != nil {

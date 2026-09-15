@@ -19,27 +19,25 @@ type declaredDoc struct {
 	} `yaml:"metadata"`
 }
 
-// clusterScoped lists the kinds dotvirt's repos carry that have no namespace:
-// the platform tier's tenancy and network objects. A cluster-scoped manifest
-// lives in a directory too, but that directory is not its namespace - Argo and
-// the cluster identify these with an empty one.
-var clusterScoped = map[string]bool{
-	"Namespace":                      true,
-	"ClusterUserDefinedNetwork":      true,
-	"NodeNetworkConfigurationPolicy": true,
-	"AdminNetworkPolicy":             true,
-	"BaselineAdminNetworkPolicy":     true,
-	"EgressIP":                       true,
-	"AdminPolicyBasedExternalRoute":  true,
-	"ClusterRole":                    true,
-	"ClusterRoleBinding":             true,
-	"StorageClass":                   true,
-	"PersistentVolume":               true,
-	"Node":                           true,
+// unmanagedClusterScoped lists the cluster-scoped kinds a repo may carry that
+// dotvirt does not manage; the managed ones answer from the kind table. A
+// cluster-scoped manifest lives in a directory too, but that directory is not
+// its namespace - Argo and the cluster identify these with an empty one.
+var unmanagedClusterScoped = map[string]bool{
+	"ClusterRole":        true,
+	"ClusterRoleBinding": true,
+	"StorageClass":       true,
+	"PersistentVolume":   true,
+	"Node":               true,
 }
 
 // ClusterScoped reports whether kind carries no namespace.
-func ClusterScoped(kind string) bool { return clusterScoped[kind] }
+func ClusterScoped(kind string) bool {
+	if _, k, ok := model.LookupKind(kind); ok {
+		return k.ClusterScoped
+	}
+	return unmanagedClusterScoped[kind]
+}
 
 // DeclaredRefs: the objects the manifest bytes declare, any kind, multi-doc.
 // path defaults the namespace (<ns>/... layout) for namespaced kinds. An
