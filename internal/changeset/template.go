@@ -10,6 +10,7 @@ import (
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/validate"
 	"github.com/epheo/dotvirt/internal/vmtemplate"
 )
 
@@ -27,7 +28,7 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 	}
 	// The template name becomes a repo path segment - same trust boundary as
 	// project/namespace names.
-	if err := requireDNS1123("template name", req.Template); err != nil {
+	if err := validate.RequireDNS1123("template name", req.Template); err != nil {
 		return model.DraftView{}, err
 	}
 	libRead, err := c.read(libraryProj)
@@ -53,7 +54,7 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if err := requireDNS1123("rendered VM name", rendered.Name); err != nil {
+	if err := validate.RequireDNS1123("rendered VM name", rendered.Name); err != nil {
 		return model.DraftView{}, err
 	}
 	// Templates blueprint their VMs Halted; "Power on after deployment" flips
@@ -106,7 +107,7 @@ func (c *Coordinator) StageSaveTemplate(id auth.Identity, commitProj, sourceProj
 	if err := requireRepo(commitProj); err != nil {
 		return model.DraftView{}, err
 	}
-	if err := requireDNS1123("template name", req.Name); err != nil {
+	if err := validate.RequireDNS1123("template name", req.Name); err != nil {
 		return model.DraftView{}, err
 	}
 	srcRead, err := c.read(sourceProj)
@@ -164,7 +165,7 @@ func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.P
 	if err := requireRepo(commitProj); err != nil {
 		return model.DraftView{}, err
 	}
-	if err := requireDNS1123("template name", req.Name); err != nil {
+	if err := validate.RequireDNS1123("template name", req.Name); err != nil {
 		return model.DraftView{}, err
 	}
 	path := vmtemplate.Dir + "/" + req.Name + ".yaml"

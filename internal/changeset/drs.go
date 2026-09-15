@@ -38,7 +38,7 @@ func (c *Coordinator) StageEnableDRS(id auth.Identity, proj project.ProjectInfo,
 	}
 	files, err := drsgen.Manifests(spec)
 	if err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		return model.DraftView{}, invalid(err)
 	}
 	if _, err := c.unstageResource(id, proj, draft.ResourceDRS); err != nil {
 		return model.DraftView{}, err

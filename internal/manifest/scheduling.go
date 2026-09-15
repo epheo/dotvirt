@@ -218,7 +218,7 @@ func applySchedulingRules(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) (map[s
 	var remove []string
 	for _, g := range edit.AddGroups {
 		if err := validate.RequireDNS1123("group name", g.Name); err != nil {
-			return nil, nil, fmt.Errorf("%w: %s", model.ErrInvalid, err)
+			return nil, nil, err
 		}
 		if g.Mode != "together" && g.Mode != "apart" {
 			return nil, nil, fmt.Errorf("%w: group mode %q must be together or apart", model.ErrInvalid, g.Mode)

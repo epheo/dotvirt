@@ -264,7 +264,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	if ns := r.URL.Query().Get("namespace"); ns != "" {
 		if err := validate.RequireDNS1123("namespace", ns); err != nil {
-			fail(w, invalid(err))
+			fail(w, err)
 			return
 		}
 		commits, err := s.draft.NamespaceHistory(sc.proj, ns, 25)

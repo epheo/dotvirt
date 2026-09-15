@@ -11,6 +11,7 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/validate"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
@@ -52,10 +53,10 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	// The name becomes a repo path segment, a Namespace name, a label value, and a
 	// staged manifest path - so it must be a strict DNS-1123 label. This rejects
 	// path-traversal ("../x"), separators ("a/b"), and anything k8s would refuse.
-	if err := requireDNS1123("project name", spec.Name); err != nil {
+	if err := validate.RequireDNS1123("project name", spec.Name); err != nil {
 		return model.DraftView{}, err
 	}
-	if err := requireDNS1123("namespace name", ns); err != nil {
+	if err := validate.RequireDNS1123("namespace name", ns); err != nil {
 		return model.DraftView{}, err
 	}
 	// Whether the tenant already exists is a CLUSTER fact, checked by the caller before
@@ -72,7 +73,7 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	nsSpec := netgen.NamespaceSpec{Name: ns, Project: spec.Name, Repo: forge.PathRef(repoURL), VMNetwork: spec.VMNetwork}
 	nsPath, nsContent, err := netgen.NamespaceManifest(nsSpec)
 	if err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		return model.DraftView{}, invalid(err)
 	}
 	if err := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
 		Kind:       draft.KindCreate,
@@ -90,7 +91,7 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 			Namespace: ns, Project: spec.Name, Owners: spec.Owners,
 		})
 		if err != nil {
-			return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+			return model.DraftView{}, invalid(err)
 		}
 		if err := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
 			Kind:       draft.KindCreate,
@@ -130,7 +131,7 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	if err := requireRepo(commitProj); err != nil {
 		return model.DraftView{}, err
 	}
-	if err := requireDNS1123("project name", target.Name); err != nil {
+	if err := validate.RequireDNS1123("project name", target.Name); err != nil {
 		return model.DraftView{}, err
 	}
 	if len(target.Namespaces) == 0 {
@@ -212,7 +213,7 @@ func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target proje
 		}
 		pPath, pContent, gerr := netgen.PlainNamespaceManifest(ns)
 		if gerr != nil {
-			return nil, nil, fmt.Errorf("%w: %v", model.ErrInvalid, gerr)
+			return nil, nil, invalid(gerr)
 		}
 		if serr := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
 			Kind:       draft.KindCreate,
@@ -264,7 +265,7 @@ func (c *Coordinator) stageProjectAdoption(username, commitProjName string, targ
 		// Host-free ref; the re-home path depends on it.
 		nsPath, nsContent, err := netgen.NamespaceManifest(netgen.NamespaceSpec{Name: ns, Project: target.Name, Repo: forge.PathRef(repoURL)})
 		if err != nil {
-			return fmt.Errorf("%w: %v", model.ErrInvalid, err)
+			return invalid(err)
 		}
 		if err := c.store.Stage(username, commitProjName, draft.Entry{
 			Kind:       draft.KindCreate,
@@ -281,7 +282,7 @@ func (c *Coordinator) stageProjectAdoption(username, commitProjName string, targ
 		}
 		rbPath, rbContent, err := netgen.RoleBindingManifest(netgen.RoleBindingSpec{Namespace: ns, Project: target.Name, Owners: owners})
 		if err != nil {
-			return fmt.Errorf("%w: %v", model.ErrInvalid, err)
+			return invalid(err)
 		}
 		if err := c.store.Stage(username, commitProjName, draft.Entry{
 			Kind:       draft.KindCreate,

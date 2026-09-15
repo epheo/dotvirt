@@ -7,6 +7,8 @@ import (
 	"path"
 	"regexp"
 	"strings"
+
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // dns1123Label matches a Kubernetes DNS-1123 label - lowercase alphanumerics and
@@ -20,10 +22,11 @@ func DNS1123Name(s string) bool {
 	return len(s) > 0 && len(s) <= 63 && dns1123Label.MatchString(s)
 }
 
-// RequireDNS1123 returns a descriptive error naming field when s fails DNS1123Name.
+// RequireDNS1123 refuses s as the caller's input (model.ErrInvalid) when it
+// fails DNS1123Name, naming field.
 func RequireDNS1123(field, s string) error {
 	if !DNS1123Name(s) {
-		return fmt.Errorf("%s %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", field, s)
+		return fmt.Errorf("%w: %s %q must be a DNS-1123 label (lowercase alphanumeric and -, max 63)", model.ErrInvalid, field, s)
 	}
 	return nil
 }
@@ -46,10 +49,11 @@ func RepoPath(s string) bool {
 	return true
 }
 
-// RequireRepoPath returns a descriptive error naming field when s fails RepoPath.
+// RequireRepoPath refuses s as the caller's input (model.ErrInvalid) when it
+// fails RepoPath, naming field.
 func RequireRepoPath(field, s string) error {
 	if !RepoPath(s) {
-		return fmt.Errorf("%s %q must be a clean repo-relative path", field, s)
+		return fmt.Errorf("%w: %s %q must be a clean repo-relative path", model.ErrInvalid, field, s)
 	}
 	return nil
 }
