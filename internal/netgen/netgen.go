@@ -58,7 +58,7 @@ func toStrAny(m map[string]string) map[string]any {
 func nsNameSelector(namespaces []string) map[string]any {
 	return map[string]any{
 		"matchExpressions": []any{map[string]any{
-			"key":      "kubernetes.io/metadata.name",
+			"key":      NamespaceNameLabel,
 			"operator": "In",
 			"values":   toAny(namespaces),
 		}},
