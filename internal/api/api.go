@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
 	"github.com/epheo/dotvirt/internal/argo"
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/changeset"
@@ -172,8 +174,8 @@ type Server struct {
 	proposals *ttlcache.Cache[[]model.Proposal] // per-project open-PR set; written by the refresher, read on broadcast
 	options   *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
 	storage   *ttlcache.Cache[[]model.StorageClassInfo]
-	metrics  *metrics.Client                   // Prometheus/Thanos for the Performance tab; nil disables it
-	tasks     *tasks.Feed                       // recent-activity feed (ops + merged PRs); nil disables it
+	metrics   *metrics.Client // Prometheus/Thanos for the Performance tab; nil disables it
+	tasks     *tasks.Feed     // recent-activity feed (ops + merged PRs); nil disables it
 	draft     Draft
 	auth      *auth.Authenticator // nil leaves the API open (dev)
 	oauth     *auth.OAuth         // nil hides the OpenShift SSO login path
@@ -500,9 +502,11 @@ func respond(w http.ResponseWriter, v any, err error) {
 	writeJSON(w, http.StatusOK, v)
 }
 
-// fail writes err mapped to a status by its model.Err* kind. Errors without a
-// kind are internal: the detail is logged, never echoed - it can carry k8s, git,
-// or forge internals (URLs, credentials, object paths) the caller must not see.
+// fail writes err mapped to a status by statusFor. A classified error (a
+// model.Err* kind or the apiserver's verdict on the caller's object) echoes its
+// message; an unclassified one is internal: the detail is logged, never echoed -
+// it can carry k8s, git, or forge internals (URLs, credentials, object paths)
+// the caller must not see.
 func fail(w http.ResponseWriter, err error) {
 	status := statusFor(err)
 	msg := err.Error()
@@ -524,17 +528,20 @@ func unavailable(what string, err error) error {
 	return fmt.Errorf("%w: %s", model.ErrUnavailable, what)
 }
 
-// statusFor maps a domain error to an HTTP status by the kind it wraps (see
-// model.Err*), defaulting to 500 for anything unclassified.
+// statusFor maps an error to an HTTP status by the kind it wraps: a model.Err*
+// kind, or an apiserver status from an operation run under the caller's token
+// (Forbidden is the caller's RBAC verdict; Conflict and BadRequest both mean the
+// object's state refuses the act, e.g. pausing a stopped VM). Anything
+// unclassified is a 500.
 func statusFor(err error) int {
 	switch {
 	case errors.Is(err, model.ErrInvalid):
 		return http.StatusBadRequest
-	case errors.Is(err, model.ErrNotFound):
+	case errors.Is(err, model.ErrNotFound), apierrors.IsNotFound(err):
 		return http.StatusNotFound
-	case errors.Is(err, model.ErrForbidden):
+	case errors.Is(err, model.ErrForbidden), apierrors.IsForbidden(err):
 		return http.StatusForbidden
-	case errors.Is(err, model.ErrConflict):
+	case errors.Is(err, model.ErrConflict), apierrors.IsConflict(err), apierrors.IsBadRequest(err):
 		return http.StatusConflict
 	case errors.Is(err, model.ErrUnavailable):
 		return http.StatusServiceUnavailable

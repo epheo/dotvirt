@@ -26,7 +26,7 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	nodes, err := c.ListNodes(r.Context())
 	if err != nil {
-		runtimeFail(w, err)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, nodes)
@@ -41,7 +41,7 @@ func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	info, err := c.NodeInfo(r.Context(), r.PathValue("node"))
 	if err != nil {
-		runtimeFail(w, err)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, info)
@@ -68,7 +68,7 @@ func (s *Server) handleNodeCordon(w http.ResponseWriter, r *http.Request) {
 	opErr := c.SetNodeCordon(r.Context(), r.PathValue("node"), req.Unschedulable)
 	s.recordTask(verb, "", r.PathValue("node"), id.Username, opErr == nil)
 	if opErr != nil {
-		http.Error(w, opErr.Error(), runtimeOpStatus(opErr))
+		fail(w, opErr)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -97,7 +97,7 @@ func (s *Server) handleNodeMaintenance(w http.ResponseWriter, r *http.Request) {
 	opErr := c.SetNodeMaintenance(r.Context(), r.PathValue("node"), req.Enter)
 	s.recordTask(verb, "", r.PathValue("node"), id.Username, opErr == nil)
 	if opErr != nil {
-		http.Error(w, opErr.Error(), runtimeOpStatus(opErr))
+		fail(w, opErr)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -120,7 +120,7 @@ func (s *Server) handleNodeEvacuate(w http.ResponseWriter, r *http.Request) {
 	node := r.PathValue("node")
 	info, err := c.NodeInfo(r.Context(), node)
 	if err != nil {
-		runtimeFail(w, err)
+		fail(w, err)
 		return
 	}
 	if !info.CanCordon {

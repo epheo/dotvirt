@@ -47,7 +47,7 @@ func (s *Server) handleCreateClone(w http.ResponseWriter, r *http.Request) {
 	err := sc.cluster.CreateClone(r.Context(), ns, name, cloneName, target)
 	s.recordTask("Clone", ns, name, sc.id.Username, err == nil)
 	if err != nil {
-		runtimeFail(w, err)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"name": cloneName, "target": target})
