@@ -35,7 +35,7 @@ func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1
 		base = append(base, exposure)
 	}
 	if err := r.applyOwned(ctx, dv, base...); err != nil {
-		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionWorkloadReady, "ApplyFailed", err)
+		return nil, failPhase("ApplyFailed", err)
 	}
 	if dv.Spec.Ingress.Host == "" && !r.DryRun && r.Platform == platform.OpenShift {
 		if host := r.routeHost(ctx, dv.Namespace, install.AppName); host != "" {
@@ -56,7 +56,7 @@ func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1
 		dv.Status.SSOOAuthClient = ""
 	}
 	if err := r.applyOwned(ctx, dv, install.Deployment(dv)); err != nil {
-		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionWorkloadReady, "ApplyFailed", err)
+		return nil, failPhase("ApplyFailed", err)
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionWorkloadReady, metav1.ConditionTrue, "Ready", "workload applied")
 	return nil, nil

@@ -11,6 +11,9 @@ const (
 	// ConditionForgeReady is True when a managed Forgejo is up and bootstrapped (its
 	// admin + scoped token + owner org); irrelevant for a BYO forge.
 	ConditionForgeReady = "ForgeReady"
+	// ConditionSecretsReady is True when the generated secrets (session key, plugin
+	// token, webhook secrets, OAuth client secret) exist.
+	ConditionSecretsReady = "SecretsReady"
 	// ConditionWorkloadReady is True when the namespaced workload (ServiceAccount,
 	// PVC, Service, Deployment, exposure) is applied.
 	ConditionWorkloadReady = "WorkloadReady"

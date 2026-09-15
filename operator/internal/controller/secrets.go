@@ -23,6 +23,7 @@ import (
 // in the pipeline, by the managed-Forgejo bootstrap.
 func (r *DotvirtReconciler) reconcileSecrets(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
 	if r.DryRun {
+		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionSecretsReady, "secret generation")
 		return nil, nil
 	}
 	secrets := []struct{ name, key string }{
@@ -41,6 +42,7 @@ func (r *DotvirtReconciler) reconcileSecrets(ctx context.Context, dv *dotvirtv1a
 			return nil, err
 		}
 	}
+	r.setCondition(dv, dotvirtv1alpha1.ConditionSecretsReady, metav1.ConditionTrue, "Ready", "generated secrets present")
 	return nil, nil
 }
 

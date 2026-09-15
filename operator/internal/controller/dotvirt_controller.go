@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -51,10 +52,14 @@ type DotvirtReconciler struct {
 // resources, which a namespaced CR can't garbage-collect via ownerReferences.
 const dotvirtFinalizer = "dotvirt.io/finalizer"
 
-// reconcilePhase is one step of the install pipeline. It owns one status condition,
-// and halts the reconcile by returning a non-nil result (carrying any requeue) or
-// an error; (nil, nil) hands off to the next phase.
-type reconcilePhase func(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error)
+// reconcilePhase is one step of the install pipeline. It owns one status
+// condition: any error it returns is recorded there (recordFailure), a non-nil
+// result halts the reconcile after a wait the phase already recorded, and
+// (nil, nil) hands off to the next phase.
+type reconcilePhase struct {
+	cond string
+	run  func(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error)
+}
 
 // Reconcile drives the install in order, recording a status condition per step so a
 // stuck install is legible from `kubectl get dotvirt` / `describe`.
@@ -100,23 +105,24 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// spec must never reach the stored CR.
 	r.normalizeSpec(&dv)
 
-	// The install pipeline, in dependency order. A phase that halts (requeue or
-	// error) has already recorded why; a completed pass falls through to the Ready
-	// status write below.
+	// The install pipeline, in dependency order. A phase that halts on a wait has
+	// already recorded why; one that fails is recorded here, so no error is
+	// invisible in status; a completed pass falls through to the Ready status
+	// write below.
 	for _, phase := range []reconcilePhase{
-		r.reconcileDependencies,
-		r.reconcileForge,
-		r.reconcileSecrets,
-		r.reconcileWorkload,
-		r.reconcileArgo,
-		r.reconcileArgoWebhook,
-		r.reconcileDotvirtWebhook,
+		{dotvirtv1alpha1.ConditionDependenciesReady, r.reconcileDependencies},
+		{dotvirtv1alpha1.ConditionForgeReady, r.reconcileForge},
+		{dotvirtv1alpha1.ConditionSecretsReady, r.reconcileSecrets},
+		{dotvirtv1alpha1.ConditionWorkloadReady, r.reconcileWorkload},
+		{dotvirtv1alpha1.ConditionArgoReady, r.reconcileArgo},
+		{dotvirtv1alpha1.ConditionArgoWebhook, r.reconcileArgoWebhook},
+		{dotvirtv1alpha1.ConditionDotvirtWebhook, r.reconcileDotvirtWebhook},
 		// Last: its failure requeues, and nothing above depends on the repo.
-		r.reconcilePlatformRepo,
+		{dotvirtv1alpha1.ConditionForgeRepoReady, r.reconcilePlatformRepo},
 	} {
-		res, err := phase(ctx, &dv)
+		res, err := phase.run(ctx, &dv)
 		if err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, r.recordFailure(ctx, &dv, phase.cond, err)
 		}
 		if res != nil {
 			return *res, nil
@@ -327,9 +333,29 @@ func (r *DotvirtReconciler) setCondition(dv *dotvirtv1alpha1.Dotvirt, condType s
 	})
 }
 
-// failPhase records a failure condition + the Provisioning phase (best-effort status
-// write) and returns the original error so Reconcile requeues on it.
-func (r *DotvirtReconciler) failPhase(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, condType, reason string, err error) error {
+// phaseFailure is an error a phase tagged with the condition reason it chose.
+type phaseFailure struct {
+	reason string
+	err    error
+}
+
+func (f phaseFailure) Error() string { return f.err.Error() }
+func (f phaseFailure) Unwrap() error { return f.err }
+
+// failPhase is the explicit form of a phase failure: it names the reason the
+// condition shows. A raw error returned from a phase is recorded the same way
+// under "Error"; the tag only refines the reason.
+func failPhase(reason string, err error) error { return phaseFailure{reason: reason, err: err} }
+
+// recordFailure writes the phase's failure condition + the Provisioning phase
+// (best-effort: Reconcile returns the error, so nothing else would persist the
+// status) and hands the error back for the requeue.
+func (r *DotvirtReconciler) recordFailure(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, condType string, err error) error {
+	reason := "Error"
+	var f phaseFailure
+	if errors.As(err, &f) {
+		reason = f.reason
+	}
 	r.setCondition(dv, condType, metav1.ConditionFalse, reason, err.Error())
 	dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
 	if uerr := r.writeStatus(ctx, dv); uerr != nil {
@@ -338,8 +364,8 @@ func (r *DotvirtReconciler) failPhase(ctx context.Context, dv *dotvirtv1alpha1.D
 	return err
 }
 
-// waitPhase is failPhase's no-error twin for EXPECTED waits: record the
-// not-ready condition + phase, persist status, and hand back the halt result.
+// waitPhase is the explicit form of an EXPECTED wait: record the not-ready
+// condition + phase, persist status, and hand back the halt result.
 // requeue 0 halts without a retry timer (the wait clears via a watch event).
 // phase "" leaves Status.Phase untouched (a late retry must not regress a
 // Ready install to Provisioning).

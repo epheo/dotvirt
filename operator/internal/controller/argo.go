@@ -64,7 +64,7 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	}
 	for _, obj := range objs {
 		if err := r.apply(ctx, obj); err != nil {
-			return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionArgoReady, "ApplyFailed", err)
+			return nil, failPhase("ApplyFailed", err)
 		}
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionArgoReady, metav1.ConditionTrue, "Ready", "argo resources applied")

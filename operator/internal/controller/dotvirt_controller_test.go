@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -168,6 +169,7 @@ func TestReconcileHaltsOnMissingHardDependency(t *testing.T) {
 		t.Errorf("DependenciesReady = %+v, want False/MissingPrerequisite", dep)
 	}
 	for _, ct := range []string{
+		dotvirtv1alpha1.ConditionSecretsReady,
 		dotvirtv1alpha1.ConditionWorkloadReady,
 		dotvirtv1alpha1.ConditionArgoReady,
 		dotvirtv1alpha1.ConditionAvailable,
@@ -213,6 +215,7 @@ func TestReconcileMinimalCRToReady(t *testing.T) {
 	}
 	for ct, want := range map[string]metav1.ConditionStatus{
 		dotvirtv1alpha1.ConditionDependenciesReady: metav1.ConditionTrue,
+		dotvirtv1alpha1.ConditionSecretsReady:      metav1.ConditionTrue,
 		dotvirtv1alpha1.ConditionWorkloadReady:     metav1.ConditionTrue,
 		dotvirtv1alpha1.ConditionArgoReady:         metav1.ConditionTrue,
 		dotvirtv1alpha1.ConditionAvailable:         metav1.ConditionTrue,
@@ -316,6 +319,39 @@ func TestReconcileWorkloadSetsConsoleURL(t *testing.T) {
 	}
 	if dv.Status.ConsoleURL != "https://dotvirt.apps.cluster.example" {
 		t.Errorf("status.consoleURL = %q, want https://<ingress host>", dv.Status.ConsoleURL)
+	}
+}
+
+// A phase that returns a raw error is recorded like one that names its reason:
+// the loop writes it on the phase's condition, so a secrets read denied by RBAC
+// is legible from `kubectl get dotvirt`, not only from the operator log.
+func TestReconcileRecordsSecretsPhaseFailure(t *testing.T) {
+	dv := testCR()
+	c := testBuilder(t).WithObjects(dv).WithInterceptorFuncs(interceptor.Funcs{
+		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if _, ok := obj.(*corev1.Secret); ok {
+				return errors.New("secrets are forbidden")
+			}
+			return cl.Get(ctx, key, obj, opts...)
+		},
+	}).Build()
+	r := newReconciler(c, depsOK)
+
+	_, err := r.Reconcile(context.Background(),
+		ctrl.Request{NamespacedName: types.NamespacedName{Namespace: dv.Namespace, Name: dv.Name}})
+	if err == nil {
+		t.Fatal("Reconcile must return the phase error so it requeues")
+	}
+	got := getCR(t, c, dv)
+	sc := cond(got, dotvirtv1alpha1.ConditionSecretsReady)
+	if sc == nil || sc.Status != metav1.ConditionFalse || sc.Reason != "Error" || !strings.Contains(sc.Message, "secrets are forbidden") {
+		t.Errorf("SecretsReady = %+v, want False/Error carrying the error", sc)
+	}
+	if got.Status.Phase != dotvirtv1alpha1.PhaseProvisioning {
+		t.Errorf("phase = %q, want Provisioning", got.Status.Phase)
+	}
+	if cond(got, dotvirtv1alpha1.ConditionWorkloadReady) != nil {
+		t.Error("workload phase ran after the secrets failure")
 	}
 }
 

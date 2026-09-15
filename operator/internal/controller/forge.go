@@ -55,7 +55,7 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 	// URL that Route is hostless, so the router assigns a host we read back and fill into
 	// the effective spec, before rendering the Deployment whose ROOT_URL needs it.
 	if err := r.applyForgejoBase(ctx, dv); err != nil {
-		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "ApplyFailed", err)
+		return nil, failPhase("ApplyFailed", err)
 	}
 	// Set here, not at Ready: the admin secret exists once the base is applied, so the
 	// hint also shows while provisioning.
@@ -67,7 +67,7 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 	applyEffectiveForgeSpec(dv, forgeURL)
 	dv.Status.ForgeURL = forgeURL
 	if err := r.applyForgejoDeployment(ctx, dv); err != nil {
-		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "ApplyFailed", err)
+		return nil, failPhase("ApplyFailed", err)
 	}
 	if r.DryRun {
 		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionForgeReady, "Forgejo bootstrap")
@@ -85,7 +85,7 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 			dotvirtv1alpha1.PhaseProvisioning, time.Minute)
 	}
 	if err != nil {
-		return nil, r.failPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "Error", err)
+		return nil, err
 	}
 	if !ready {
 		return r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing",
