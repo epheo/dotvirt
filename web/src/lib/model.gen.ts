@@ -144,7 +144,7 @@ export interface ObjectRef {
  */
 export interface ObjectSpec {
   resource: string;
-  namespace: string; // ClusterScopeNS for a cluster-scoped object
+  namespace: string; // ClusterScopeNS ("cluster") for a cluster-scoped object
   name: string;
   sourceFile: string;
   manifest: string;

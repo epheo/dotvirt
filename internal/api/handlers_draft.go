@@ -51,7 +51,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.draft.StageCreate(sc.id, sc.proj, raw)
+	result, err := s.draft.StageCreateVM(sc.id, sc.proj, raw)
 	respond(w, result, err)
 }
 

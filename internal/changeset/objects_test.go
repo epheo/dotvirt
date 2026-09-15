@@ -38,9 +38,9 @@ func TestStageCreateOfDeclaredObjectIsEdit(t *testing.T) {
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
 	raw, _ := json.Marshal(netgen.Spec{Name: "db-net", Scope: netgen.ScopeProject, Namespace: "alpha", Subnets: []string{"10.20.0.0/23"}})
-	view, err := c.StageCreateNetwork(id, proj, raw)
+	view, err := c.StageCreate(id, proj, draft.ResourceNetwork, raw)
 	if err != nil {
-		t.Fatalf("StageCreateNetwork: %v", err)
+		t.Fatalf("StageCreate: %v", err)
 	}
 	if len(view.Items) != 1 {
 		t.Fatalf("want 1 item, got %+v", view.Items)
@@ -57,9 +57,9 @@ func TestStageCreateOfDeclaredObjectIsEdit(t *testing.T) {
 	}
 
 	raw, _ = json.Marshal(netgen.Spec{Name: "new-net", Scope: netgen.ScopeProject, Namespace: "alpha"})
-	view, err = c.StageCreateNetwork(id, proj, raw)
+	view, err = c.StageCreate(id, proj, draft.ResourceNetwork, raw)
 	if err != nil {
-		t.Fatalf("StageCreateNetwork: %v", err)
+		t.Fatalf("StageCreate: %v", err)
 	}
 	if got := view.Items[len(view.Items)-1]; got.Kind != string(draft.KindCreate) || got.Name != "new-net" {
 		t.Errorf("an undeclared network stays a create, got %+v", got)

@@ -28,6 +28,7 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/desched"
+	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/metrics"
@@ -44,14 +45,10 @@ import (
 // result DTOs live in model so the implementation needn't depend on this package.
 type Draft interface {
 	StageEdit(id auth.Identity, proj project.ProjectInfo, namespace, name string, req model.EditRequest) (model.DraftView, error)
-	StageCreate(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
-	StageCreateNetwork(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
-	StageCreateUplink(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
-	StageCreateEgressFirewall(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
-	StageCreateEgressIP(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
-	StageCreateExternalRoute(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
-	StageCreateNetworkPolicy(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
-	StageCreateAdminNetworkPolicy(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
+	StageCreateVM(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
+	// StageCreate renders one network-family object from its form spec; the
+	// route resolved proj from the object's scope, resource picks the form.
+	StageCreate(id auth.Identity, proj project.ProjectInfo, resource draft.Resource, spec json.RawMessage) (model.DraftView, error)
 	StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
 	StageCreateProject(id auth.Identity, commitProj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
 	StageDeployFromTemplate(id auth.Identity, targetProj, libraryProj project.ProjectInfo, req model.DeployTemplateRequest) (model.DraftView, error)
@@ -296,22 +293,22 @@ func (s *Server) Handler() http.Handler {
 	// The single-scope network-family creates, by tier (see handlers_networks.go):
 	// an Uplink (nmstate NNCP) is always cluster-scoped, so always the platform
 	// tier, gated on the caller's authority to create NNCPs.
-	mux.HandleFunc("POST /api/uplinks", s.platformCreate(ssarUplink, Draft.StageCreateUplink))
+	mux.HandleFunc("POST /api/uplinks", s.platformCreate(ssarUplink, draft.ResourceUplink))
 	// An egress firewall (the Tier-1 gateway firewall) is namespace-scoped, so it
 	// routes to the tenant project owning the namespace, the same path as a
 	// project-scoped UDN; the tenant's Argo app applies it on merge (its AppProject
 	// must permit k8s.ovn.org/EgressFirewall).
-	mux.HandleFunc("POST /api/egressfirewalls", s.namespacedCreate("an egress firewall", Draft.StageCreateEgressFirewall))
+	mux.HandleFunc("POST /api/egressfirewalls", s.namespacedCreate("an egress firewall", draft.ResourceEgressFirewall))
 	// An EgressIP (the Tier-0 source-NAT pool) is always platform-tier, gated on
 	// the caller's authority to create EgressIPs.
-	mux.HandleFunc("POST /api/egressips", s.platformCreate(ssarEgressIP, Draft.StageCreateEgressIP))
+	mux.HandleFunc("POST /api/egressips", s.platformCreate(ssarEgressIP, draft.ResourceEgressIP))
 	// An AdminPolicyBasedExternalRoute (the Tier-0 external next-hop route) is
 	// always platform-tier, gated on the caller's authority to create them.
-	mux.HandleFunc("POST /api/externalroutes", s.platformCreate(ssarExtRoute, Draft.StageCreateExternalRoute))
+	mux.HandleFunc("POST /api/externalroutes", s.platformCreate(ssarExtRoute, draft.ResourceExternalRoute))
 	// A NetworkPolicy (the east-west Distributed Firewall) is namespace-scoped, so
 	// it routes to the tenant project owning the namespace; the tenant's Argo app
 	// applies it on merge.
-	mux.HandleFunc("POST /api/networkpolicies", s.namespacedCreate("a network policy", Draft.StageCreateNetworkPolicy))
+	mux.HandleFunc("POST /api/networkpolicies", s.namespacedCreate("a network policy", draft.ResourceNetworkPolicy))
 	mux.HandleFunc("POST /api/adminnetworkpolicies", s.handleCreateAdminNetworkPolicy)
 	// Every create above stages an EDIT when git already declares the object, so
 	// the same form and route change one. Read-back for that form, and delete,

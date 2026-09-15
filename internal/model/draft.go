@@ -137,7 +137,7 @@ type ObjectRef struct {
 // Reason says why not and the manifest itself is what gets edited.
 type ObjectSpec struct {
 	Resource   string          `json:"resource"`
-	Namespace  string          `json:"namespace"` // ClusterScopeNS for a cluster-scoped object
+	Namespace  string          `json:"namespace"` // ClusterScopeNS ("cluster") for a cluster-scoped object
 	Name       string          `json:"name"`
 	SourceFile string          `json:"sourceFile"`
 	Manifest   string          `json:"manifest"`
