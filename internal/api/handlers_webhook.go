@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -29,7 +30,7 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 		fail(w, fmt.Errorf("%w: webhook not configured", model.ErrNotFound))
 		return
 	}
-	body, err := readAll(r)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		fail(w, invalid(err))
 		return

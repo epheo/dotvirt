@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -35,7 +36,7 @@ type nsPeek struct {
 // platform tier, SSAR-gated on the caller's authority to create ref's kind.
 func (s *Server) platformCreate(ref ssarRef, stage stageFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		raw, err := readAll(r)
+		raw, err := io.ReadAll(r.Body)
 		if err != nil {
 			fail(w, invalid(err))
 			return

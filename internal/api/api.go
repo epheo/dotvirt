@@ -474,16 +474,10 @@ func withCORS(origin string, next http.Handler) http.Handler {
 	})
 }
 
-// readAll reads a request body. withBodyLimit caps it; a second cap here would
-// truncate silently instead of letting MaxBytesReader error.
-func readAll(r *http.Request) ([]byte, error) {
-	return io.ReadAll(r.Body)
-}
-
 // readBody reads the whole request body and decodes it into T. ok=false means
 // the 400 is written. optional lets an empty body stand for the zero T.
 func readBody[T any](w http.ResponseWriter, r *http.Request, optional bool) (raw []byte, v T, ok bool) {
-	raw, err := readAll(r)
+	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		fail(w, invalid(err))
 		return nil, v, false
@@ -517,7 +511,8 @@ func decodeOptional[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
 }
 
 // withBodyLimit caps every request body so a decoder errors instead of
-// buffering whatever a client streams.
+// buffering whatever a client streams. It is the only cap: a second one at a
+// read site would truncate silently instead of letting MaxBytesReader error.
 func withBodyLimit(n int64, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Body != nil {
