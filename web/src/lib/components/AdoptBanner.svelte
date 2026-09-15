@@ -13,7 +13,7 @@
 	// would actually stage something.
 	let { project, namespace }: { project: string; namespace?: string } = $props();
 
-	const p = $derived(inventory.inventory?.projects.find((x) => x.name === project));
+	const p = $derived(inventory.projects.find((x) => x.name === project));
 	const healthy = $derived(!!p?.repo && !p?.error && !p?.gitOps?.syncError);
 	const scoped = $derived(namespace ? [namespace] : (p?.namespaces.map((n) => n.namespace) ?? []));
 	// Untracked VMs, project networks and rules in the scope; the capture itself

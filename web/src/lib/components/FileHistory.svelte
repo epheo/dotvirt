@@ -37,7 +37,7 @@
 	// History keys on the project's applied revision: a merge that reaches the
 	// cluster moves it, which is when a new version exists to show.
 	const revision = $derived(
-		inventory.inventory?.projects.find((p) => p.name === project)?.gitOps?.revision ?? '',
+		inventory.projects.find((p) => p.name === project)?.gitOps?.revision ?? '',
 	);
 	const historyRes = resource<Commit[]>(
 		() => `${project}/${name}|${revision}`,

@@ -52,7 +52,6 @@
 		ontab,
 		stagedItem = null,
 		onstagedopen,
-		onsearchlabel,
 		networks = [],
 	}: {
 		vm: VM;
@@ -62,7 +61,6 @@
 		ontab?: (t: VMTab) => void;
 		stagedItem?: DraftItem | null;
 		onstagedopen?: () => void;
-		onsearchlabel?: (key: string, value: string) => void;
 		// The port-group catalog (GET /api/networks), to resolve each NIC's raw
 		// network ref into the port group the admin recognizes.
 		networks?: Network[];
@@ -314,7 +312,7 @@
 				<VMEventsTable {vm} />
 			{/if}
 		{:else if tab === 'configure'}
-			<VMConfigure {vm} {networks} onedit={openEdit} {onsearchlabel} />
+			<VMConfigure {vm} {networks} onedit={openEdit} />
 		{:else if tab === 'security'}
 			<div class="max-w-3xl space-y-4">
 				<section class="rounded border border-line bg-panel p-3">

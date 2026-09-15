@@ -82,7 +82,7 @@
 	// is in the key: a merge that reaches the cluster moves it.
 	const project = $derived(inventory.projectOf(vm.namespace));
 	const revision = $derived(
-		inventory.inventory?.projects.find((p) => p.name === project)?.gitOps?.revision ?? '',
+		inventory.projects.find((p) => p.name === project)?.gitOps?.revision ?? '',
 	);
 	const historyRes = resource<Commit[]>(
 		() => `${key}|${vm.sourceFile ?? ''}|${revision}`,

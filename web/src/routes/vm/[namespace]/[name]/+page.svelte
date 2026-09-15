@@ -35,7 +35,6 @@
 			ontab={setTab}
 			stagedItem={drafts.stagedByKey.get(vmKey(vm)) ?? null}
 			onstagedopen={() => vm && (ui.modal = { kind: 'staged', vm })}
-			onsearchlabel={(k, v) => ui.search?.searchFor(`label:${k}=${v}`)}
 			networks={inventory.networks}
 		/>
 	</div>

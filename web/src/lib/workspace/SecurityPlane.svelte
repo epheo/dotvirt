@@ -62,9 +62,7 @@
 
 	const tenantNS = $derived(
 		new Set(
-			(inventory.inventory?.projects ?? [])
-				.find((p) => p.name === tenant)
-				?.namespaces.map((n) => n.namespace) ?? [],
+			inventory.projects.find((p) => p.name === tenant)?.namespaces.map((n) => n.namespace) ?? [],
 		),
 	);
 

@@ -177,7 +177,7 @@
 				<div class="min-h-0 flex-1 overflow-y-auto">
 					{#if !inventory.inventory}
 						<div class="p-3"><Skeleton rows={5} class="h-5" bg="bg-side-hover" /></div>
-					{:else if inventory.inventory.projects.length === 0 && inventory.adoptable.length === 0 && treeSection !== 'catalog' && treeSection !== 'changes'}
+					{:else if inventory.projects.length === 0 && inventory.adoptable.length === 0 && treeSection !== 'catalog' && treeSection !== 'changes'}
 						<div class="space-y-3 p-6 text-center">
 							<p class="text-xs text-side-dim">No projects visible.</p>
 							{#if inventory.canNamespace}
