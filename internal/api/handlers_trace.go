@@ -97,12 +97,7 @@ func (s *Server) traceWorkload(ns, name string) (netstate.TraceWorkload, bool) {
 	wl := netstate.TraceWorkload{
 		Namespace: ns, Name: name,
 		PodLabels: lbls, IPs: ips, PodNet: podNet, DefaultNet: defaultNet, Nets: nets,
-	}
-	for _, n := range s.state.Namespaces() {
-		if n.Name == ns {
-			wl.NSLabels = n.Labels
-			break
-		}
+		NSLabels: s.state.NamespaceLabels(ns),
 	}
 	return wl, true
 }

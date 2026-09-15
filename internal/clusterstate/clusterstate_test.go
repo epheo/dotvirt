@@ -132,6 +132,12 @@ func TestNamespacesExposesLabelsAndAnnotations(t *testing.T) {
 	if got[0].Labels["dotvirt.io/project"] != "team-a" || got[0].Annotations["dotvirt.io/repo"] != "https://forge/team-a.git" {
 		t.Errorf("namespace labels/annotations not exposed: %+v", got[0])
 	}
+	if lbls := s.NamespaceLabels("tenant-a"); lbls["dotvirt.io/project"] != "team-a" {
+		t.Errorf("NamespaceLabels(tenant-a) = %v", lbls)
+	}
+	if lbls := s.NamespaceLabels("absent"); lbls != nil {
+		t.Errorf("NamespaceLabels(absent) = %v, want nil", lbls)
+	}
 }
 
 func testVM(gen int64) *kubevirtcorev1.VirtualMachine {

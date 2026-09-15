@@ -91,14 +91,7 @@ func (s *Server) effectivePolicy(ns string, podLabels map[string]string, podScop
 	if s.netstate == nil {
 		return model.EffectivePolicy{Namespace: ns}
 	}
-	var nsLabels map[string]string
-	for _, n := range s.state.Namespaces() {
-		if n.Name == ns {
-			nsLabels = n.Labels
-			break
-		}
-	}
-	eff := s.netstate.Effective(ns, nsLabels, podLabels, podScoped)
+	eff := s.netstate.Effective(ns, s.state.NamespaceLabels(ns), podLabels, podScoped)
 	for _, bs := range [][]model.PolicyBinding{eff.EastWest, eff.Gateway, eff.SNAT, eff.Routes} {
 		for i := range bs {
 			s.policyDrift(&bs[i].Policy)
