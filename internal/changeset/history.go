@@ -20,83 +20,64 @@ import (
 // dotvirt change reaches main as a forge merge, so a merge is the unit reviewed
 // and reverted here.
 
-// History lists recent commits on the project's base branch, newest first. A
-// forge merge is named by the pull request it merged, so the row reads as what
-// the user proposed rather than the forge's merge boilerplate. A repoless
-// project has no history, not an error.
-func (c *Coordinator) History(proj project.ProjectInfo, limit int) ([]model.Commit, error) {
-	if proj.Repo == "" {
-		return []model.Commit{}, nil
-	}
-	read, err := c.read(proj)
-	if err != nil {
-		return nil, err
-	}
-	commits, err := read.History(c.baseBranch, limit)
-	if err != nil {
-		return nil, err
-	}
-	for i := range commits {
-		c.nameByPR(&commits[i], proj)
-	}
-	return commits, nil
+// History lists recent commits on the project's base branch, newest first.
+func (r *Reader) History(proj project.ProjectInfo, limit int) ([]model.Commit, error) {
+	return r.history(proj, func(read *git.Repo) ([]model.Commit, error) {
+		return read.History(r.baseBranch, limit)
+	})
 }
 
 // NamespaceHistory is History narrowed to the commits that touched one
 // namespace's directory - the Changes section scoped to a namespace.
-func (c *Coordinator) NamespaceHistory(proj project.ProjectInfo, namespace string, limit int) ([]model.Commit, error) {
-	if proj.Repo == "" {
-		return []model.Commit{}, nil
-	}
-	read, err := c.read(proj)
-	if err != nil {
-		return nil, err
-	}
-	commits, err := read.DirHistory(c.baseBranch, namespace, limit)
-	if err != nil {
-		return nil, err
-	}
-	for i := range commits {
-		c.nameByPR(&commits[i], proj)
-	}
-	return commits, nil
+func (r *Reader) NamespaceHistory(proj project.ProjectInfo, namespace string, limit int) ([]model.Commit, error) {
+	return r.history(proj, func(read *git.Repo) ([]model.Commit, error) {
+		return read.DirHistory(r.baseBranch, namespace, limit)
+	})
 }
 
-// ObjectHistory lists the base-branch commits that changed one object's file (a VM when resource is empty):
-// what changed on this VM and when, from the VM page. A VM not in git has no
-// history, not an error - the page already says it is untracked.
-func (c *Coordinator) ObjectHistory(proj project.ProjectInfo, resource, namespace, name string, limit int) ([]model.Commit, error) {
+// ObjectHistory is History narrowed to the commits that changed one object's
+// file (a VM when resource is empty): what changed on it and when, from its
+// page. An object not in git has no history, not an error - the page already
+// says it is untracked.
+func (r *Reader) ObjectHistory(proj project.ProjectInfo, resource, namespace, name string, limit int) ([]model.Commit, error) {
+	return r.history(proj, func(read *git.Repo) ([]model.Commit, error) {
+		path, err := r.locate(read, draft.Resource(resource), namespace, name)
+		if errors.Is(err, model.ErrNotFound) {
+			return []model.Commit{}, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return read.FileHistory(r.baseBranch, path, limit)
+	})
+}
+
+// history is the one body behind the three views. A repoless project has no
+// history, not an error. A forge merge is named by the pull request it merged,
+// so the row reads as what the user proposed rather than the forge's merge
+// boilerplate.
+func (r *Reader) history(proj project.ProjectInfo, list func(read *git.Repo) ([]model.Commit, error)) ([]model.Commit, error) {
 	if proj.Repo == "" {
 		return []model.Commit{}, nil
 	}
-	read, err := c.read(proj)
+	read, err := r.read(proj)
 	if err != nil {
 		return nil, err
 	}
-	path, err := c.locate(read, draft.Resource(resource), namespace, name)
-	if errors.Is(err, model.ErrNotFound) {
-		return []model.Commit{}, nil // not in git: no history, not an error
-	}
-	if err != nil {
-		return nil, err
-	}
-	commits, err := read.FileHistory(c.baseBranch, path, limit)
+	commits, err := list(read)
 	if err != nil {
 		return nil, err
 	}
 	for i := range commits {
-		c.nameByPR(&commits[i], proj)
+		r.nameByPR(&commits[i], proj)
 	}
 	return commits, nil
 }
 
 // Commit renders what one past commit did, so it reviews exactly like a pending
 // change, plus what reverting it now would do to the base branch.
-func (c *Coordinator) Commit(proj project.ProjectInfo, hash string) (model.CommitDetail, error) {
-	if err := requireRepo(proj); err != nil {
-		return model.CommitDetail{}, err
-	}
-	read, err := c.read(proj)
+func (r *Reader) Commit(proj project.ProjectInfo, hash string) (model.CommitDetail, error) {
+	read, err := r.read(proj)
 	if err != nil {
 		return model.CommitDetail{}, err
 	}
@@ -104,9 +85,9 @@ func (c *Coordinator) Commit(proj project.ProjectInfo, hash string) (model.Commi
 	if err != nil {
 		return model.CommitDetail{}, fmt.Errorf("%w: %v", model.ErrNotFound, err)
 	}
-	c.nameByPR(&d.Commit, proj)
+	r.nameByPR(&d.Commit, proj)
 	out := model.CommitDetail{Commit: d.Commit, Items: commitItems(d.Files)}
-	out.RevertWarning, out.Reverted = c.revertState(read, d.Files)
+	out.RevertWarning, out.Reverted = r.revertState(read, d.Files)
 	return out, nil
 }
 
@@ -115,11 +96,12 @@ func (c *Coordinator) Commit(proj project.ProjectInfo, hash string) (model.Commi
 // past commit render. The head is read from the local mirror, so a branch
 // pushed moments ago may not be there until the next fetch - that reads as not
 // found, with the retry spelled out.
-func (c *Coordinator) Proposal(proj project.ProjectInfo, number int) (model.ProposalDetail, error) {
-	if err := requireRepo(proj); err != nil {
+func (r *Reader) Proposal(proj project.ProjectInfo, number int) (model.ProposalDetail, error) {
+	read, err := r.read(proj)
+	if err != nil {
 		return model.ProposalDetail{}, err
 	}
-	fc := c.forge.For(proj.Repo)
+	fc := r.forge.For(proj.Repo)
 	if fc == nil {
 		return model.ProposalDetail{}, fmt.Errorf("%w: no forge serves %s", model.ErrInvalid, proj.Name)
 	}
@@ -127,31 +109,27 @@ func (c *Coordinator) Proposal(proj project.ProjectInfo, number int) (model.Prop
 	if err != nil {
 		return model.ProposalDetail{}, fmt.Errorf("%w: pull request #%d: %v", model.ErrNotFound, number, err)
 	}
-	read, err := c.read(proj)
-	if err != nil {
-		return model.ProposalDetail{}, err
-	}
-	files, err := read.BranchDiff(c.baseBranch, pr.Head.Ref)
+	files, err := read.BranchDiff(r.baseBranch, pr.Head.Ref)
 	if errors.Is(err, git.ErrNoBranch) {
 		return model.ProposalDetail{}, fmt.Errorf("%w: branch %s is not mirrored yet; retry in a moment", model.ErrNotFound, pr.Head.Ref)
 	}
 	if err != nil {
 		return model.ProposalDetail{}, err
 	}
-	return model.ProposalDetail{Proposal: c.proposalRow(proj, pr), Items: commitItems(files)}, nil
+	return model.ProposalDetail{Proposal: r.proposalRow(proj, pr), Items: commitItems(files)}, nil
 }
 
 // nameByPR replaces a forge merge subject with the merged PR's title and link.
 // The link is built only for a repo this forge serves: For discards the host,
 // so a repo hosted elsewhere would get a link into the wrong forge.
-func (c *Coordinator) nameByPR(commit *model.Commit, proj project.ProjectInfo) {
+func (r *Reader) nameByPR(commit *model.Commit, proj project.ProjectInfo) {
 	title, n, ok := forge.MergeSubject(commit.Message)
 	if !ok {
 		return
 	}
 	commit.Title, commit.PRNumber = title, n
-	if c.forge.SameForge(proj.Repo) {
-		if fc := c.forge.For(proj.Repo); fc != nil {
+	if r.forge.SameForge(proj.Repo) {
+		if fc := r.forge.For(proj.Repo); fc != nil {
 			commit.PRURL = fc.PullURL(n)
 		}
 	}
@@ -161,11 +139,11 @@ func (c *Coordinator) nameByPR(commit *model.Commit, proj project.ProjectInfo) {
 // wholesale, so anything committed to that file since is undone with it. The
 // warning names those files. Reverted is true when the base branch already
 // carries every file's pre-commit content: a revert would be empty.
-func (c *Coordinator) revertState(read *git.Repo, files []git.FileChange) (warning string, reverted bool) {
+func (r *Reader) revertState(read *git.Repo, files []git.FileChange) (warning string, reverted bool) {
 	var later []string
 	reverted = len(files) > 0
 	for _, f := range files {
-		current, ok, err := read.LookupOnBranch(c.baseBranch, f.Path)
+		current, ok, err := read.LookupOnBranch(r.baseBranch, f.Path)
 		if err != nil {
 			return "", false
 		}
@@ -191,10 +169,10 @@ func (c *Coordinator) revertState(read *git.Repo, files []git.FileChange) (warni
 // revertFiles is what a revert would do to the base branch as it stands now:
 // each restored file against its current content, so the PR body shows the real
 // diff of the PR - later changes included - not the commit's mirror image.
-func (c *Coordinator) revertFiles(read *git.Repo, items []git.ChangesetItem) []git.FileChange {
+func (r *Reader) revertFiles(read *git.Repo, items []git.ChangesetItem) []git.FileChange {
 	out := make([]git.FileChange, 0, len(items))
 	for _, it := range items {
-		current, ok, err := read.LookupOnBranch(c.baseBranch, it.Path)
+		current, ok, err := read.LookupOnBranch(r.baseBranch, it.Path)
 		if err != nil || !ok {
 			current = nil
 		}

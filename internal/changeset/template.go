@@ -20,7 +20,8 @@ import (
 // platform library); the render is pure computation, so deploying needs only
 // the authority to stage into the target project.
 func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libraryProj project.ProjectInfo, req model.DeployTemplateRequest) (model.DraftView, error) {
-	if err := requireRepo(targetProj); err != nil {
+	targetRead, err := c.read(targetProj)
+	if err != nil {
 		return model.DraftView{}, err
 	}
 	if req.Template == "" || req.Namespace == "" {
@@ -68,10 +69,6 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 		rendered.Manifest = patched
 	}
 
-	targetRead, err := c.read(targetProj)
-	if err != nil {
-		return model.DraftView{}, err
-	}
 	// A deploy must never silently overwrite a committed VM (a duplicate deploy
 	// or a generated-name collision) - merging would replace it. The declared
 	// index answers, since the VM may sit in a multi-document file at another
@@ -104,7 +101,8 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 // project, or the platform repo for the shared library); sourceProj owns the
 // VM being templated.
 func (c *Coordinator) StageSaveTemplate(id auth.Identity, commitProj, sourceProj project.ProjectInfo, req model.SaveTemplateRequest) (model.DraftView, error) {
-	if err := requireRepo(commitProj); err != nil {
+	commitRead, err := c.read(commitProj)
+	if err != nil {
 		return model.DraftView{}, err
 	}
 	if err := validate.RequireDNS1123("template name", req.Name); err != nil {
@@ -131,10 +129,6 @@ func (c *Coordinator) StageSaveTemplate(id auth.Identity, commitProj, sourceProj
 	}
 
 	path := vmtemplate.Dir + "/" + req.Name + ".yaml"
-	commitRead, err := c.read(commitProj)
-	if err != nil {
-		return model.DraftView{}, err
-	}
 	_, exists, err := commitRead.LookupOnBranch(c.baseBranch, path)
 	if err != nil {
 		return model.DraftView{}, err
@@ -162,7 +156,8 @@ func (c *Coordinator) StageSaveTemplate(id auth.Identity, commitProj, sourceProj
 // template must already exist on the base branch: a merely-staged save is
 // edited by re-staging the save.
 func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.ProjectInfo, req model.UpdateTemplateRequest) (model.DraftView, error) {
-	if err := requireRepo(commitProj); err != nil {
+	read, err := c.read(commitProj)
+	if err != nil {
 		return model.DraftView{}, err
 	}
 	if err := validate.RequireDNS1123("template name", req.Name); err != nil {
@@ -171,10 +166,6 @@ func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.P
 	path := vmtemplate.Dir + "/" + req.Name + ".yaml"
 	if t := vmtemplate.Parse(path, []byte(req.YAML), commitProj.Name); t.Error != "" {
 		return model.DraftView{}, fmt.Errorf("%w: %s", model.ErrInvalid, t.Error)
-	}
-	read, err := c.read(commitProj)
-	if err != nil {
-		return model.DraftView{}, err
 	}
 	_, exists, err := read.LookupOnBranch(c.baseBranch, path)
 	if err != nil {

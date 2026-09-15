@@ -123,16 +123,6 @@ func TestStageCreateCommitsPreviewedManifest(t *testing.T) {
 	}
 }
 
-func TestSiblingRepoURL(t *testing.T) {
-	got := siblingRepoURL("https://forge/dotvirt/platform.git", "team-a")
-	if want := "https://forge/dotvirt/team-a.git"; got != want {
-		t.Errorf("siblingRepoURL = %q, want %q", got, want)
-	}
-	if got := siblingRepoURL("noslash", "x"); got != "" {
-		t.Errorf("siblingRepoURL(no slash) = %q, want empty", got)
-	}
-}
-
 // Every network-family resource in the kind table has a create form here and
 // nothing outside the family does: the route table, the object routes and
 // adoption all read the family from the table.

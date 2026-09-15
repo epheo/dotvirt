@@ -292,6 +292,27 @@ func (c *Coordinator) Unstage(id auth.Identity, proj project.ProjectInfo, resour
 	return c.store.Unstage(id.Username, proj.Name, draft.Resource(resource), namespace, name)
 }
 
+// unstageResource drops every entry of one resource from (id, proj)'s draft,
+// reporting how many it removed. Backs both the atomic-resource unstage (see
+// draft.Resource.Atomic) and the declarative DRS restage.
+func (c *Coordinator) unstageResource(id auth.Identity, proj project.ProjectInfo, r draft.Resource) (int, error) {
+	entries, err := c.store.List(id.Username, proj.Name)
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, e := range entries {
+		if e.Resource != r {
+			continue
+		}
+		if err := c.store.Unstage(id.Username, proj.Name, e.Resource, e.Namespace, e.Name); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
+}
+
 // Discard clears (id, proj)'s draft.
 func (c *Coordinator) Discard(id auth.Identity, proj project.ProjectInfo) error {
 	return c.store.Clear(id.Username, proj.Name)

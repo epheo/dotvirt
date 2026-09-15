@@ -18,6 +18,7 @@ import (
 // declaredDraft counts repo index reads; the embedded interface panics on
 // anything else.
 type declaredDraft struct {
+	Reader
 	Draft
 	reads int
 }
@@ -38,6 +39,7 @@ func TestSourceFilesCachedUntilGitChanges(t *testing.T) {
 		State:    clusterstate.New(sa, "dotvirt.io/project", bus),
 		Bus:      bus,
 		Resolver: project.NewResolver("dotvirt.io/project", "dotvirt.io/repo", ""),
+		Reader:   d,
 		Draft:    d,
 		Config:   Config{PlatformRepo: "https://forge/platform.git"},
 	})

@@ -46,7 +46,7 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 // to an absent library - the other libraries still list.
 func (s *Server) appendTemplates(list *model.TemplateList, library, repoURL string) {
 	proj := project.ProjectInfo{Name: library, Repo: repoURL}
-	list.Templates = append(list.Templates, s.draft.Templates(proj)...)
+	list.Templates = append(list.Templates, s.reader.Templates(proj)...)
 }
 
 // handleDeployTemplate renders a library template and stages the VM into the

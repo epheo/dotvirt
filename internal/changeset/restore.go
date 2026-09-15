@@ -17,9 +17,6 @@ import (
 // touches one file and goes through the caller's draft like any edit, so the
 // restore is reviewed and proposed before anything reaches the cluster.
 func (c *Coordinator) RestoreVersion(id auth.Identity, proj project.ProjectInfo, resource, namespace, name, hash string) (model.DraftView, error) {
-	if err := requireRepo(proj); err != nil {
-		return model.DraftView{}, err
-	}
 	read, err := c.read(proj)
 	if err != nil {
 		return model.DraftView{}, err

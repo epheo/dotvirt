@@ -56,7 +56,7 @@ func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo) 
 		}
 		hit = true
 		for _, row := range rows {
-			row.Mine = s.draft.OwnsProposal(id, p, row.Branch)
+			row.Mine = s.reader.OwnsProposal(id, p, row.Branch)
 			out = append(out, row)
 		}
 	}
@@ -186,7 +186,7 @@ func (s *Server) refreshMerged() {
 	s.propMu.Unlock()
 	since := time.Now().Add(-tasks.MergeRetention)
 	for _, p := range byRepo {
-		merges, err := s.draft.RecentlyMerged(p, since)
+		merges, err := s.reader.RecentlyMerged(p, since)
 		if err != nil {
 			log.Printf("tasks: merged PRs for %s: %v (skipping)", p.Name, err)
 			continue
@@ -219,7 +219,7 @@ func (s *Server) refreshProposals() bool {
 
 	anyChanged := false
 	for name, p := range watched {
-		rows, err := s.draft.OpenProposals(p)
+		rows, err := s.reader.OpenProposals(p)
 		if err != nil {
 			log.Printf("proposals: %s: %v (skipping)", name, err)
 			continue

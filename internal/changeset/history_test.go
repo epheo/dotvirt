@@ -151,6 +151,10 @@ func TestRevertMergeOpensPR(t *testing.T) {
 		Title, Body, Head, Base string
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/pulls") {
+			_, _ = w.Write([]byte("[]")) // no PR on the revert branch yet
+			return
+		}
 		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/pulls") {
 			t.Errorf("unexpected forge call %s %s", r.Method, r.URL.Path)
 			http.Error(w, "unexpected", http.StatusNotImplemented)
@@ -223,7 +227,7 @@ func TestCommitItemsClusterScopedName(t *testing.T) {
 // Which rows are the caller's is answered without the forge.
 func TestOpenProposalsListsEveryPR(t *testing.T) {
 	bare, _, hash := seedMerged(t)
-	revertHead := (&Coordinator{proposed: "dotvirt/proposed"}).revertBranch("alice", "p", hash)
+	revertHead := (&Reader{proposed: "dotvirt/proposed"}).revertBranch("alice", "p", hash)
 	draftHead := proposedBranchFor("alice", "p")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -358,5 +362,27 @@ func TestVMHistoryNamesMergedPR(t *testing.T) {
 	none, err := c.ObjectHistory(proj, "", "alpha", "ghost", 10)
 	if err != nil || len(none) != 0 {
 		t.Errorf("untracked VM: %v %+v", err, none)
+	}
+}
+
+// The read half stands on its own: history and commit review need neither a
+// draft store nor an identity, so a Reader built without either serves them.
+func TestReaderServesHistoryWithoutStore(t *testing.T) {
+	bare, _, hash := seedMerged(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	r := NewReader(git.NewRepoSet(ctx, "", nil, false, nil, time.Hour), nil, nil, "main", "dotvirt/proposed")
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+
+	commits, err := r.History(proj, 10)
+	if err != nil || len(commits) == 0 || commits[0].Title != "Resize web" || commits[0].PRNumber != 12 {
+		t.Fatalf("History = %+v, %v; want the merge named by its PR", commits, err)
+	}
+	detail, err := r.Commit(proj, hash)
+	if err != nil || len(detail.Items) != 2 {
+		t.Fatalf("Commit = %+v, %v; want the two items the merge changed", detail, err)
+	}
+	if _, err := r.VMDrift(proj, "alpha", "web"); !errors.Is(err, model.ErrUnavailable) {
+		t.Errorf("without a live source drift is unavailable, got %v", err)
 	}
 }

@@ -10,7 +10,7 @@ import (
 // The trace request contract: every malformed shape is rejected as a 400
 // before any project resolution or cluster access happens.
 func TestHandleTraceValidation(t *testing.T) {
-	s := NewServer(Deps{Draft: &fakeDraft{}})
+	s := NewServer(Deps{Reader: &fakeDraft{}, Draft: &fakeDraft{}})
 	cases := []struct {
 		name string
 		body string
@@ -42,7 +42,7 @@ func TestHandleTraceValidation(t *testing.T) {
 
 // handlePermissions requires an explicit namespace before doing anything else.
 func TestHandlePermissionsRequiresNamespace(t *testing.T) {
-	s := NewServer(Deps{Draft: &fakeDraft{}})
+	s := NewServer(Deps{Reader: &fakeDraft{}, Draft: &fakeDraft{}})
 	rec := httptest.NewRecorder()
 	s.handlePermissions(rec, httptest.NewRequest(http.MethodGet, "/api/permissions", nil))
 	if rec.Code != http.StatusBadRequest {

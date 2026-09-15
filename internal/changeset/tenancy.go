@@ -3,7 +3,6 @@ package changeset
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
@@ -67,42 +66,12 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	// First namespace, joined to the new project/repo (stamps its dotvirt.io labels).
-	// Host-free ref: the forge identity lives only in the install config, so a
-	// host change re-resolves projects instead of stranding them.
-	nsSpec := netgen.NamespaceSpec{Name: ns, Project: spec.Name, Repo: forge.PathRef(repoURL), VMNetwork: spec.VMNetwork}
-	nsPath, nsContent, err := netgen.NamespaceManifest(nsSpec)
-	if err != nil {
-		return model.DraftView{}, invalid(err)
-	}
-	if err := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
-		Kind:       draft.KindCreate,
-		Resource:   draft.ResourceNamespace,
-		Namespace:  ns,
-		Name:       ns,
-		SourceFile: nsPath,
-		Manifest:   string(nsContent),
-	}); err != nil {
+	// The first namespace joins the new project, with its primary VM Network
+	// when the form chose one.
+	first := tenantNamespaces(project.ProjectInfo{Name: spec.Name, Namespaces: []string{ns}}, repoURL)
+	first[0].VMNetwork = spec.VMNetwork
+	if err := c.stageProjectAdoption(id.Username, commitProj.Name, first, spec.Owners); err != nil {
 		return model.DraftView{}, err
-	}
-	// Owners -> a namespace-admin RoleBinding (the delegation that makes it a tenant).
-	if len(spec.Owners) > 0 {
-		rbPath, rbContent, err := netgen.RoleBindingManifest(netgen.RoleBindingSpec{
-			Namespace: ns, Project: spec.Name, Owners: spec.Owners,
-		})
-		if err != nil {
-			return model.DraftView{}, invalid(err)
-		}
-		if err := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
-			Kind:       draft.KindCreate,
-			Resource:   draft.ResourceRoleBinding,
-			Namespace:  ns,
-			Name:       ns + "-admins",
-			SourceFile: rbPath,
-			Manifest:   string(rbContent),
-		}); err != nil {
-			return model.DraftView{}, err
-		}
 	}
 	view, err := c.Get(id, commitProj)
 	if err != nil {
@@ -125,8 +94,8 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 // (re-)staged into the PLATFORM repo carrying the dotvirt.io/repo annotation. On
 // merge the namespaces come under Argo and the ApplicationSet generates the project's
 // app (it skips repoless projects). VMs in those namespaces then surface as
-// NotTracked and are brought in via AdoptNamespace - still PR-gated. commitProj is
-// the platform project; target is the project being adopted.
+// NotTracked and are brought in by adopting the namespace (AdoptObjects) - still
+// PR-gated. commitProj is the platform project; target is the project being adopted.
 func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.ProjectInfo, owners []string) (model.DraftView, error) {
 	if err := requireRepo(commitProj); err != nil {
 		return model.DraftView{}, err
@@ -158,7 +127,7 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 				return model.DraftView{}, fmt.Errorf("%w: project %q's repo (%s) is hosted on another forge", model.ErrConflict, target.Name, target.Repo)
 			}
 			// Re-home: no repo create, no seed; the repo is already here.
-			if err := c.stageProjectAdoption(id.Username, commitProj.Name, target, target.Repo, owners); err != nil {
+			if err := c.stageProjectAdoption(id.Username, commitProj.Name, tenantNamespaces(target, target.Repo), owners); err != nil {
 				return model.DraftView{}, err
 			}
 			return c.Get(id, commitProj)
@@ -173,7 +142,7 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if err := c.stageProjectAdoption(id.Username, commitProj.Name, target, repoURL, owners); err != nil {
+	if err := c.stageProjectAdoption(id.Username, commitProj.Name, tenantNamespaces(target, repoURL), owners); err != nil {
 		return model.DraftView{}, err
 	}
 	return c.Get(id, commitProj)
@@ -188,9 +157,6 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 // carrying more than its Namespace (a VM Network rides some) refuses the whole
 // release rather than pruning tenant networking.
 func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target project.ProjectInfo) (staged, residue []string, err error) {
-	if err := requireRepo(commitProj); err != nil {
-		return nil, nil, err
-	}
 	read, err := c.read(commitProj)
 	if err != nil {
 		return nil, nil, err
@@ -235,10 +201,11 @@ func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target proje
 // into a freshly created one. Shared by project creation and adoption; created is
 // false when the repo already existed, which the caller uses to guard.
 func (c *Coordinator) ensureTenantRepo(platformRepo, name string) (repoURL string, created bool, err error) {
-	repoURL = siblingRepoURL(platformRepo, name)
-	if repoURL == "" {
+	owner := forge.OwnerPrefixURL(platformRepo)
+	if owner == platformRepo {
 		return "", false, fmt.Errorf("%w: cannot derive a repo URL from the platform repo %q", model.ErrInvalid, platformRepo)
 	}
+	repoURL = owner + "/" + name + ".git"
 	fc := c.forge.For(repoURL)
 	if fc == nil {
 		return "", false, fmt.Errorf("%w: forge not configured; cannot create the project repo", model.ErrInvalid)
@@ -253,25 +220,37 @@ func (c *Coordinator) ensureTenantRepo(platformRepo, name string) (repoURL strin
 	return repoURL, created, nil
 }
 
-// stageProjectAdoption stages the namespace (+ optional owner RoleBinding) manifests
-// that join target to repoURL into commitProjName's platform draft. Split from
-// AdoptProject so the staging is unit-testable without a forge. Each namespace
-// manifest is stamped with target's dotvirt.io/project label and dotvirt.io/repo
-// annotation (netgen.NamespaceManifest), staged as a create that the propose step
-// writes by path - create-or-overwrite - so a namespace already in the platform repo
-// (e.g. dotvirt-made, annotation later dropped) is corrected rather than duplicated.
-func (c *Coordinator) stageProjectAdoption(username, commitProjName string, target project.ProjectInfo, repoURL string, owners []string) error {
+// tenantNamespaces is the namespace spec joining each of target's namespaces to
+// repoURL: stamped with target's dotvirt.io/project label and the HOST-FREE
+// dotvirt.io/repo annotation, so the forge identity lives only in the install
+// config and a host change re-resolves projects instead of stranding them (the
+// re-home path depends on it).
+func tenantNamespaces(target project.ProjectInfo, repoURL string) []netgen.NamespaceSpec {
+	specs := make([]netgen.NamespaceSpec, 0, len(target.Namespaces))
 	for _, ns := range target.Namespaces {
-		// Host-free ref; the re-home path depends on it.
-		nsPath, nsContent, err := netgen.NamespaceManifest(netgen.NamespaceSpec{Name: ns, Project: target.Name, Repo: forge.PathRef(repoURL)})
+		specs = append(specs, netgen.NamespaceSpec{Name: ns, Project: target.Name, Repo: forge.PathRef(repoURL)})
+	}
+	return specs
+}
+
+// stageProjectAdoption stages the Namespace manifest of each spec (and, when
+// owners are given, the namespace-admin RoleBinding that makes them a tenant)
+// into commitProjName's platform draft: the declarative half of creating,
+// adopting and re-homing a project, unit-testable without a forge. Staged as
+// creates that the propose step writes by path - create-or-overwrite - so a
+// namespace already in the platform repo (e.g. dotvirt-made, annotation later
+// dropped) is corrected rather than duplicated.
+func (c *Coordinator) stageProjectAdoption(username, commitProjName string, specs []netgen.NamespaceSpec, owners []string) error {
+	for _, spec := range specs {
+		nsPath, nsContent, err := netgen.NamespaceManifest(spec)
 		if err != nil {
 			return invalid(err)
 		}
 		if err := c.store.Stage(username, commitProjName, draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   draft.ResourceNamespace,
-			Namespace:  ns,
-			Name:       ns,
+			Namespace:  spec.Name,
+			Name:       spec.Name,
 			SourceFile: nsPath,
 			Manifest:   string(nsContent),
 		}); err != nil {
@@ -280,15 +259,15 @@ func (c *Coordinator) stageProjectAdoption(username, commitProjName string, targ
 		if len(owners) == 0 {
 			continue
 		}
-		rbPath, rbContent, err := netgen.RoleBindingManifest(netgen.RoleBindingSpec{Namespace: ns, Project: target.Name, Owners: owners})
+		rbPath, rbContent, err := netgen.RoleBindingManifest(netgen.RoleBindingSpec{Namespace: spec.Name, Project: spec.Project, Owners: owners})
 		if err != nil {
 			return invalid(err)
 		}
 		if err := c.store.Stage(username, commitProjName, draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   draft.ResourceRoleBinding,
-			Namespace:  ns,
-			Name:       ns + "-admins",
+			Namespace:  spec.Name,
+			Name:       spec.Name + "-admins",
 			SourceFile: rbPath,
 			Manifest:   string(rbContent),
 		}); err != nil {
@@ -296,15 +275,4 @@ func (c *Coordinator) stageProjectAdoption(username, commitProjName string, targ
 		}
 	}
 	return nil
-}
-
-// siblingRepoURL derives a repo URL alongside ref under the same owner: it replaces
-// ref's last path segment with name (.../<owner>/<ref>.git -> .../<owner>/<name>.git).
-func siblingRepoURL(ref, name string) string {
-	s := strings.TrimSuffix(strings.TrimRight(ref, "/"), ".git")
-	i := strings.LastIndexByte(s, '/')
-	if i < 0 {
-		return ""
-	}
-	return s[:i+1] + name + ".git"
 }

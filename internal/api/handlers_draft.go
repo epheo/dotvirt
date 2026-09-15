@@ -129,7 +129,7 @@ func (s *Server) handleDrift(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.draft.VMDrift(sc.proj, ns, name)
+	result, err := s.reader.VMDrift(sc.proj, ns, name)
 	respond(w, result, err)
 }
 
@@ -238,7 +238,7 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	p, content, err := s.draft.Manifest(sc.proj, ns, name)
+	p, content, err := s.reader.Manifest(sc.proj, ns, name)
 	if err != nil {
 		fail(w, err)
 		return
@@ -260,11 +260,11 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 			fail(w, err)
 			return
 		}
-		commits, err := s.draft.NamespaceHistory(sc.proj, ns, 25)
+		commits, err := s.reader.NamespaceHistory(sc.proj, ns, 25)
 		respond(w, commits, err)
 		return
 	}
-	commits, err := s.draft.History(sc.proj, 25)
+	commits, err := s.reader.History(sc.proj, 25)
 	respond(w, commits, err)
 }
 
@@ -306,7 +306,7 @@ func (s *Server) handleVMHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	commits, err := s.draft.ObjectHistory(sc.proj, "", ns, name, 10)
+	commits, err := s.reader.ObjectHistory(sc.proj, "", ns, name, 10)
 	respond(w, commits, err)
 }
 
@@ -326,7 +326,7 @@ func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
 		fail(w, invalid(errors.New("commit hash must be the full 40-character hash")))
 		return
 	}
-	detail, err := s.draft.Commit(sc.proj, hash)
+	detail, err := s.reader.Commit(sc.proj, hash)
 	respond(w, detail, err)
 }
 
@@ -342,9 +342,9 @@ func (s *Server) handleProposal(w http.ResponseWriter, r *http.Request) {
 		fail(w, invalid(errors.New("pull request number must be a positive integer")))
 		return
 	}
-	detail, err := s.draft.Proposal(sc.proj, n)
+	detail, err := s.reader.Proposal(sc.proj, n)
 	if err == nil {
-		detail.Proposal.Mine = s.draft.OwnsProposal(sc.id, sc.proj, detail.Proposal.Branch)
+		detail.Proposal.Mine = s.reader.OwnsProposal(sc.id, sc.proj, detail.Proposal.Branch)
 	}
 	respond(w, detail, err)
 }

@@ -18,10 +18,7 @@ import (
 // revert's real diff against the base branch, later changes to those files
 // included, so the reviewer sees what merging it does today.
 func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash string) (model.ProposeResult, error) {
-	if err := requireRepo(proj); err != nil {
-		return model.ProposeResult{}, err
-	}
-	read, write, err := c.repos.Get(proj.Repo)
+	read, write, err := c.write(proj)
 	if err != nil {
 		return model.ProposeResult{}, err
 	}
@@ -59,33 +56,22 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 	}
 	out := model.ProposeResult{Branch: res.Branch, Pushed: res.Pushed}
 
-	fc := c.forge.For(proj.Repo)
-	if fc == nil {
-		return out, nil
+	if fc := c.forge.For(proj.Repo); fc != nil {
+		c.openOrRecoverPR(fc, &out, branch, title, body)
 	}
-	if pr, err := fc.CreatePR(title, body, branch, c.baseBranch); err == nil {
-		out.PRURL, out.PRNumber = pr.HTMLURL, pr.Number
-		return out, nil
-	}
-	// A PR for this revert branch may already exist (re-revert): recover it.
-	if existing, ok, ferr := fc.FindPR(branch, c.baseBranch); ferr == nil && ok && existing.State == "open" {
-		out.PRURL, out.PRNumber, out.Existing = existing.HTMLURL, existing.Number, true
-		return out, nil
-	}
-	out.CompareURL = fc.CompareURL(branch, c.baseBranch)
 	return out, nil
 }
 
 // revertBranch is the per-(user, project, commit) branch a revert lands on.
-func (c *Coordinator) revertBranch(user, project, hash string) string {
-	return c.revertPrefix(user, project) + shortCommit(hash)
+func (r *Reader) revertBranch(user, project, hash string) string {
+	return r.revertPrefix(user, project) + shortCommit(hash)
 }
 
 // revertPrefix is what every revert branch of (user, project) starts with - how
 // the open-PR lane recognizes them. The user segment sits where the task feed's
 // attribution expects it (tasks.MergeAuthor).
-func (c *Coordinator) revertPrefix(user, project string) string {
-	return c.proposed + "/" + tasks.RevertSegment + "/" + refSegment(user) + "/" + refSegment(project) + "-"
+func (r *Reader) revertPrefix(user, project string) string {
+	return r.proposed + "/" + tasks.RevertSegment + "/" + refSegment(user) + "/" + refSegment(project) + "-"
 }
 
 // shortCommit abbreviates a commit hash to 8 chars for branch names + titles.

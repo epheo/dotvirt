@@ -4,13 +4,15 @@
 // PR against that project's repo (propose.go, revert.go), and reconciles the two
 // directions of drift (drift.go). Identity and project are passed per call:
 // reads/writes target the project's repo, drafts are keyed by the user. It
-// satisfies api.Draft without importing api - request/result DTOs live in model.
+// satisfies api.Reader and api.Draft without importing api - request/result DTOs
+// live in model.
 package changeset
 
 import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
@@ -43,45 +45,77 @@ type PruneSource interface {
 	PrunePending(repo string, namespaces []string) []model.ObjectRef
 }
 
-// Coordinator implements api.Draft. It owns no single repo/identity: each method
-// receives the caller's Identity and the target ProjectInfo and resolves the
-// repo + branches from there.
-type Coordinator struct {
-	store    *draft.Store
-	repos    *git.RepoSet
-	forge    *forge.Factory      // may be nil -> degrade to compare URL
-	resyncer Resyncer            // may be nil -> re-sync unavailable
-	renderer vmtemplate.Renderer // processes library templates into VM manifests
-
-	live  LiveSource  // may be nil -> adoption and drift unavailable
-	prune PruneSource // may be nil -> the draft view carries no prune warning
+// Reader serves the read-only views of a project's git and forge state:
+// history, proposals, manifests, templates, declared files, drift. Its
+// methods need neither the caller's identity nor a draft, which is what lets
+// them implement api.Reader on their own and test without a draft store.
+// Coordinator embeds it.
+type Reader struct {
+	repos *git.RepoSet
+	forge *forge.Factory // may be nil -> no forge views, PR links or reopen
+	live  LiveSource     // may be nil -> adoption and drift unavailable
 
 	baseBranch string
-	proposed   string // working branch name, e.g. dotvirt/proposed
+	proposed   string // working branch prefix, e.g. dotvirt/proposed
+
+	reviewMu sync.Mutex
+	reviewed map[string]map[int]reviewed // per repo: open PR -> review state at its last head
+}
+
+// NewReader builds the read half on its own. ff and live may be nil.
+func NewReader(repos *git.RepoSet, ff *forge.Factory, live LiveSource, baseBranch, proposedBranch string) *Reader {
+	return &Reader{repos: repos, forge: ff, live: live, baseBranch: baseBranch, proposed: proposedBranch}
+}
+
+// Coordinator implements api.Draft over a Reader: the write half, staging into
+// per-(user, project) drafts and turning them into branches and pull requests.
+// It owns no single repo/identity: each method receives the caller's Identity
+// and the target ProjectInfo and resolves the repo + branches from there.
+type Coordinator struct {
+	*Reader
+	store    *draft.Store
+	resyncer Resyncer            // may be nil -> re-sync unavailable
+	renderer vmtemplate.Renderer // processes library templates into VM manifests
+	prune    PruneSource         // may be nil -> the draft view carries no prune warning
 }
 
 // New builds a Coordinator. forge and resyncer may be nil (PR creation degrades
 // to a compare link; re-sync becomes unavailable).
 func New(store *draft.Store, repos *git.RepoSet, ff *forge.Factory, rs Resyncer, live LiveSource, prune PruneSource, baseBranch, proposedBranch string) *Coordinator {
 	return &Coordinator{
-		store: store, repos: repos, forge: ff, resyncer: rs, live: live, prune: prune, renderer: vmtemplate.EngineRenderer{},
-		baseBranch: baseBranch, proposed: proposedBranch,
+		Reader:   NewReader(repos, ff, live, baseBranch, proposedBranch),
+		store:    store,
+		resyncer: rs,
+		renderer: vmtemplate.EngineRenderer{},
+		prune:    prune,
 	}
 }
 
-// read returns the project repo's read mirror, for parsing VMs during previews.
-func (c *Coordinator) read(proj project.ProjectInfo) (*git.Repo, error) {
+// repo resolves the project repo's mirror and push clone, handing the caller
+// only the failure kind: the raw error can embed the repo URL (credentials
+// included on some transports), so it is logged here and never returned.
+func (r *Reader) repo(proj project.ProjectInfo) (*git.Repo, *git.WriteRepo, error) {
 	if err := requireRepo(proj); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	read, _, err := c.repos.Get(proj.Repo)
+	read, write, err := r.repos.Get(proj.Repo)
 	if err != nil {
-		// The raw error can embed the repo URL (credentials included on some
-		// transports); log it, hand the caller only the kind.
 		log.Printf("changeset: project %s repo: %v", proj.Name, err)
-		return nil, fmt.Errorf("%w: project repo unreachable", model.ErrUnavailable)
+		return nil, nil, fmt.Errorf("%w: project repo unreachable", model.ErrUnavailable)
 	}
-	return read, nil
+	return read, write, nil
+}
+
+// read is the project repo's mirror, for parsing what the base branch holds.
+func (r *Reader) read(proj project.ProjectInfo) (*git.Repo, error) {
+	read, _, err := r.repo(proj)
+	return read, err
+}
+
+// write is read's write-side sibling: the mirror beside the push clone a
+// commit goes through.
+func (c *Coordinator) write(proj project.ProjectInfo) (*git.Repo, *git.WriteRepo, error) {
+	return c.repo(proj)
 }
 
 // requireRepo rejects an action on a project with no usable repo BEFORE any draft

@@ -28,12 +28,12 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 	if s.desched != nil {
 		view.Live = s.desched.Live()
 	}
-	if s.cfg.PlatformRepo != "" && s.draft != nil {
+	if s.cfg.PlatformRepo != "" && s.reader != nil {
 		ctx := r.Context()
 		view.CanManage = s.canCreateCached(ctx, id, c, ssarDescheduler)
 		view.CanPSI = s.canCreateCached(ctx, id, c, ssarMachineCfg)
 		platform := s.platformProject()
-		if git, err := s.draft.DRSState(platform); err != nil {
+		if git, err := s.reader.DRSState(platform); err != nil {
 			view.Warning = "platform repo unavailable — committed DRS state unknown: " + err.Error()
 		} else {
 			view.Configured, view.Config, view.PSIConfigured = git.Configured, git.Config, git.PSIConfigured

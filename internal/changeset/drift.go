@@ -31,15 +31,15 @@ type liveVM struct {
 // Refuses while the VM reflector is still on its initial LIST: absent-from-live is what
 // makes VMDrift report drift and Adopt say the VM is not running, so a half-filled
 // snapshot would flag every tracked VM in the project. Unavailable beats wrong.
-func (c *Coordinator) liveVMs(namespaces []string) ([]liveVM, error) {
-	if c.live == nil {
+func (r *Reader) liveVMs(namespaces []string) ([]liveVM, error) {
+	if r.live == nil {
 		return nil, fmt.Errorf("%w: live cluster state", model.ErrUnavailable)
 	}
-	if !c.live.Ready() {
+	if !r.live.Ready() {
 		return nil, fmt.Errorf("%w: live cluster state still loading", model.ErrUnavailable)
 	}
 	var out []liveVM
-	for _, m := range c.live.VMManifests(namespaces) {
+	for _, m := range r.live.VMManifests(namespaces) {
 		// An exported manifest always carries its namespace, so there is none to default.
 		vms, err := manifest.ParseVMs(m.Path, m.Content, "")
 		if err != nil {
@@ -55,8 +55,8 @@ func (c *Coordinator) liveVMs(namespaces []string) ([]liveVM, error) {
 	return out, nil
 }
 
-func (c *Coordinator) findLiveVM(namespace, name string) (liveVM, bool, error) {
-	live, err := c.liveVMs([]string{namespace})
+func (r *Reader) findLiveVM(namespace, name string) (liveVM, bool, error) {
+	live, err := r.liveVMs([]string{namespace})
 	if err != nil {
 		return liveVM{}, false, err
 	}
@@ -114,7 +114,7 @@ func (c *Coordinator) Adopt(id auth.Identity, proj project.ProjectInfo, namespac
 
 // stageAdoptCreate stages a brand-new manifest from live state, for a VM with no file
 // on base. The serialized bytes are staged verbatim, so the proposal is exactly what
-// the cluster holds. It only stages, so AdoptNamespace can loop it before one Get.
+// the cluster holds.
 func (c *Coordinator) stageAdoptCreate(username, projName string, l liveVM) error {
 	return c.store.Stage(username, projName, draft.Entry{
 		Kind:       draft.KindCreate,
@@ -125,28 +125,20 @@ func (c *Coordinator) stageAdoptCreate(username, projName string, l liveVM) erro
 	})
 }
 
-// AdoptNamespace stages everything the namespace runs that git does not describe, as
-// one draft: the whole namespace comes under GitOps in a single PR, not just its VMs.
-// The caller captures under its own token (cluster.AdoptableObjects) and this only
-// stages, keeping the coordinator cluster-free. Idempotent: re-staging replaces the
-// draft entry.
+// AdoptObjects stages every captured object git does not already declare - one
+// create entry carrying the live manifest - into (id, proj)'s draft, so a whole
+// namespace (or the cluster scope) comes under GitOps in a single PR, not just
+// its VMs. The caller captures under its own token (cluster.AdoptableObjects)
+// and this only stages, keeping the coordinator cluster-free. Idempotent:
+// re-staging replaces the draft entry. Cluster-scoped objects (empty Namespace)
+// stage under the model.ClusterScopeNS sentinel, the identity the platform
+// tier's edit and delete use. where names the scope in the nothing-to-adopt
+// error.
 //
 // What base already declares is dropped here rather than by the capture, because git
 // is the authority on that and only the coordinator can read it. Skipping it would
 // restate the repo, overwriting hand-authored manifests with the live defaulted copy.
-func (c *Coordinator) AdoptNamespace(id auth.Identity, proj project.ProjectInfo, namespace string, objs []model.Adoptable) (model.DraftView, error) {
-	return c.AdoptObjects(id, proj, namespace, objs)
-}
-
-// AdoptObjects stages every captured object git does not already declare - one
-// create entry carrying the live manifest - into (id, proj)'s draft. Cluster-scoped
-// objects (empty Namespace) stage under the model.ClusterScopeNS sentinel, the identity
-// the platform tier's edit and delete use. where names the scope in the
-// nothing-to-adopt error.
 func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, where string, objs []model.Adoptable) (model.DraftView, error) {
-	if err := requireRepo(proj); err != nil {
-		return model.DraftView{}, err
-	}
 	read, err := c.read(proj)
 	if err != nil {
 		return model.DraftView{}, err
@@ -210,16 +202,16 @@ func (c *Coordinator) Resync(ctx context.Context, canUpdateVM func(context.Conte
 
 // VMDrift returns the semantic diff between a VM as it runs (actual) and as main
 // declares it (desired), within proj's repo.
-func (c *Coordinator) VMDrift(proj project.ProjectInfo, namespace, name string) (model.DriftResult, error) {
-	read, err := c.read(proj)
+func (r *Reader) VMDrift(proj project.ProjectInfo, namespace, name string) (model.DriftResult, error) {
+	read, err := r.read(proj)
 	if err != nil {
 		return model.DriftResult{}, err
 	}
-	desired, okD, err := findVM(read, c.baseBranch, namespace, name)
+	desired, okD, err := findVM(read, r.baseBranch, namespace, name)
 	if err != nil {
 		return model.DriftResult{}, err
 	}
-	actual, okA, err := c.findLiveVM(namespace, name)
+	actual, okA, err := r.findLiveVM(namespace, name)
 	if err != nil {
 		return model.DriftResult{}, err
 	}

@@ -55,7 +55,7 @@ func (s *Server) handleObjectSpec(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	spec, err := s.draft.ObjectSpec(sc.proj, resource, ns, name)
+	spec, err := s.reader.ObjectSpec(sc.proj, resource, ns, name)
 	respond(w, spec, err)
 }
 
@@ -121,7 +121,7 @@ func (s *Server) handleObjectHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	commits, err := s.draft.ObjectHistory(sc.proj, resource, ns, name, 10)
+	commits, err := s.reader.ObjectHistory(sc.proj, resource, ns, name, 10)
 	respond(w, commits, err)
 }
 
@@ -203,7 +203,7 @@ func (s *Server) declaredFiles(p project.ProjectInfo) map[model.ObjectRef]string
 	if e, ok := s.declared.Get(key); ok && e.ver == ver {
 		return e.files
 	}
-	files, err := s.draft.DeclaredFiles(p)
+	files, err := s.reader.DeclaredFiles(p)
 	if err != nil {
 		return nil
 	}

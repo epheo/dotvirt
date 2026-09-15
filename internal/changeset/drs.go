@@ -100,38 +100,17 @@ func (c *Coordinator) StageDisableDRS(id auth.Identity, proj project.ProjectInfo
 	return c.Get(id, proj)
 }
 
-// unstageResource drops every entry of one resource from (id, proj)'s draft,
-// reporting how many it removed. Backs both the declarative DRS restage and
-// the atomic-resource unstage (see draft.Resource.Atomic).
-func (c *Coordinator) unstageResource(id auth.Identity, proj project.ProjectInfo, r draft.Resource) (int, error) {
-	entries, err := c.store.List(id.Username, proj.Name)
-	if err != nil {
-		return 0, err
-	}
-	removed := 0
-	for _, e := range entries {
-		if e.Resource != r {
-			continue
-		}
-		if err := c.store.Unstage(id.Username, proj.Name, e.Resource, e.Namespace, e.Name); err != nil {
-			return removed, err
-		}
-		removed++
-	}
-	return removed, nil
-}
-
 // DRSState reads the platform repo's committed DRS configuration off the base
 // branch: whether the KubeDescheduler CR is there (and parses), and whether the
 // PSI MachineConfig rode along. A missing file (or missing branch, e.g. a fresh
 // platform repo) is "not configured", not an error.
-func (c *Coordinator) DRSState(proj project.ProjectInfo) (model.DRSGitState, error) {
-	read, err := c.read(proj)
+func (r *Reader) DRSState(proj project.ProjectInfo) (model.DRSGitState, error) {
+	read, err := r.read(proj)
 	if err != nil {
 		return model.DRSGitState{}, err
 	}
 	var out model.DRSGitState
-	content, ok, err := read.LookupOnBranch(c.baseBranch, drsgen.CRPath)
+	content, ok, err := read.LookupOnBranch(r.baseBranch, drsgen.CRPath)
 	if errors.Is(err, git.ErrNoBranch) || err == nil && !ok {
 		return out, nil
 	}
@@ -144,7 +123,7 @@ func (c *Coordinator) DRSState(proj project.ProjectInfo) (model.DRSGitState, err
 	if spec, err := drsgen.Parse(content); err == nil {
 		out.Config = configFromSpec(spec)
 	}
-	if _, out.PSIConfigured, err = read.LookupOnBranch(c.baseBranch, drsgen.PSIPath); err != nil {
+	if _, out.PSIConfigured, err = read.LookupOnBranch(r.baseBranch, drsgen.PSIPath); err != nil {
 		return model.DRSGitState{}, err
 	}
 	return out, nil

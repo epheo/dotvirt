@@ -38,10 +38,41 @@ import (
 	"github.com/epheo/dotvirt/internal/ttlcache"
 )
 
-// Draft is the per-(user,project) staging area for pending VM changes, proposed
+// Reader serves the read-only views of a project's git and forge state that
+// need no draft: history, proposals, manifests, templates, declared files,
+// drift. Implemented by changeset.Reader, which the coordinator embeds, so
+// one value serves this and Draft. Request/result DTOs live in model so the
+// implementation needn't depend on this package.
+type Reader interface {
+	// Read-only git views: the coordinator owns branch names and source-file
+	// matching, so the transport never reads the repo tree itself.
+	Manifest(proj project.ProjectInfo, namespace, name string) (path string, content []byte, err error)
+	History(proj project.ProjectInfo, limit int) ([]model.Commit, error)
+	NamespaceHistory(proj project.ProjectInfo, namespace string, limit int) ([]model.Commit, error)
+	// ObjectHistory lists the merged changes to one object's manifest (a VM when
+	// resource is empty); empty when git does not declare it.
+	ObjectHistory(proj project.ProjectInfo, resource, namespace, name string, limit int) ([]model.Commit, error)
+	Commit(proj project.ProjectInfo, hash string) (model.CommitDetail, error)
+	Proposal(proj project.ProjectInfo, number int) (model.ProposalDetail, error)
+	// OpenProposals is project-wide (the lane is shared by the project's
+	// members); OwnsProposal marks the caller's own rows without the forge.
+	OpenProposals(proj project.ProjectInfo) ([]model.Proposal, error)
+	OwnsProposal(id auth.Identity, proj project.ProjectInfo, branch string) bool
+	// RecentlyMerged lists PRs merged into proj's base branch since 'since' - the
+	// task feed's poll backstop behind the forge webhook (and its restart reseed).
+	RecentlyMerged(proj project.ProjectInfo, since time.Time) ([]tasks.Merge, error)
+	Templates(proj project.ProjectInfo) []model.Template
+	// DeclaredFiles maps every object proj's base branch declares to its file.
+	DeclaredFiles(proj project.ProjectInfo) (map[model.ObjectRef]string, error)
+	// ObjectSpec reads a declared object back as the spec its create form accepts.
+	ObjectSpec(proj project.ProjectInfo, resource, namespace, name string) (model.ObjectSpec, error)
+	DRSState(proj project.ProjectInfo) (model.DRSGitState, error)
+	VMDrift(proj project.ProjectInfo, namespace, name string) (model.DriftResult, error)
+}
+
+// Draft is the per-(user,project) staging area for pending changes, proposed
 // as one PR to the project's repo. Implemented by the changeset coordinator. Each
-// method takes the caller's Identity and the resolved target project. Request/
-// result DTOs live in model so the implementation needn't depend on this package.
+// method takes the caller's Identity and the resolved target project.
 type Draft interface {
 	StageEdit(id auth.Identity, proj project.ProjectInfo, namespace, name string, req model.EditRequest) (model.DraftView, error)
 	StageCreateVM(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
@@ -55,26 +86,19 @@ type Draft interface {
 	StageUpdateTemplate(id auth.Identity, commitProj project.ProjectInfo, req model.UpdateTemplateRequest) (model.DraftView, error)
 	StageEnableDRS(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
 	StageDisableDRS(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
-	DRSState(proj project.ProjectInfo) (model.DRSGitState, error)
 	DRSDraft(id auth.Identity, proj project.ProjectInfo) (model.DRSDraftState, error)
 	// StageDelete removes a declared object (a VM when resource is empty).
 	StageDelete(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) (model.DraftView, error)
-	// ObjectSpec reads a declared object back as the spec its create form accepts.
-	ObjectSpec(proj project.ProjectInfo, resource, namespace, name string) (model.ObjectSpec, error)
 	// StageUpdateManifest replaces a declared object's manifest verbatim.
 	StageUpdateManifest(id auth.Identity, proj project.ProjectInfo, resource, namespace, name, yaml string) (model.DraftView, error)
-	// DeclaredFiles maps every object proj's base branch declares to its file.
-	DeclaredFiles(proj project.ProjectInfo) (map[model.ObjectRef]string, error)
 	Unstage(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) error
 	Get(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
 	Discard(id auth.Identity, proj project.ProjectInfo) error
 	Propose(id auth.Identity, proj project.ProjectInfo, req model.ProposeRequest) (model.ProposeResult, error)
-	VMDrift(proj project.ProjectInfo, namespace, name string) (model.DriftResult, error)
 	Adopt(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
-	// AdoptNamespace stages what the caller captured from the cluster; the capture runs
-	// under the caller's own token, so the coordinator stays cluster-free.
-	AdoptNamespace(id auth.Identity, proj project.ProjectInfo, namespace string, objs []model.Adoptable) (model.DraftView, error)
-	// AdoptObjects is AdoptNamespace for any captured set, cluster-scoped included.
+	// AdoptObjects stages what the caller captured from the cluster, a namespace
+	// or the cluster scope; the capture runs under the caller's own token, so the
+	// coordinator stays cluster-free.
 	AdoptObjects(id auth.Identity, proj project.ProjectInfo, where string, objs []model.Adoptable) (model.DraftView, error)
 	// AdoptObject makes git match one running object: create, or edit when it drifted.
 	AdoptObject(id auth.Identity, proj project.ProjectInfo, obj model.Adoptable) (model.DraftView, error)
@@ -84,28 +108,10 @@ type Draft interface {
 	// canUpdateVM is the caller-token SSAR the implementation enforces before
 	// escalating, so no future caller can reach the SA-privileged patch unchecked.
 	Resync(ctx context.Context, canUpdateVM func(context.Context, string, string) (bool, error), namespace, name string) (model.ResyncResult, error)
-	// OpenProposals is project-wide (the lane is shared by the project's
-	// members); OwnsProposal marks the caller's own rows without the forge.
-	OpenProposals(proj project.ProjectInfo) ([]model.Proposal, error)
-	OwnsProposal(id auth.Identity, proj project.ProjectInfo, branch string) bool
-	Proposal(proj project.ProjectInfo, number int) (model.ProposalDetail, error)
-	// RecentlyMerged lists PRs merged into proj's base branch since 'since' - the
-	// task feed's poll backstop behind the forge webhook (and its restart reseed).
-	RecentlyMerged(proj project.ProjectInfo, since time.Time) ([]tasks.Merge, error)
 	Revert(id auth.Identity, proj project.ProjectInfo, hash string) (model.ProposeResult, error)
-	// Read-only git views: the coordinator owns branch names and source-file
-	// matching, so the transport never reads the repo tree itself.
-	Manifest(proj project.ProjectInfo, namespace, name string) (path string, content []byte, err error)
-	History(proj project.ProjectInfo, limit int) ([]model.Commit, error)
-	NamespaceHistory(proj project.ProjectInfo, namespace string, limit int) ([]model.Commit, error)
-	// ObjectHistory lists the merged changes to one object's manifest (a VM when
-	// resource is empty); empty when git does not declare it.
-	ObjectHistory(proj project.ProjectInfo, resource, namespace, name string, limit int) ([]model.Commit, error)
 	// RestoreVersion stages one VM's manifest as a past commit held it: the
 	// object-level undo, through the caller's draft like any edit.
 	RestoreVersion(id auth.Identity, proj project.ProjectInfo, resource, namespace, name, hash string) (model.DraftView, error)
-	Commit(proj project.ProjectInfo, hash string) (model.CommitDetail, error)
-	Templates(proj project.ProjectInfo) []model.Template
 }
 
 // StreamHandler upgrades a request to a WebSocket that pushes live inventory.
@@ -178,6 +184,7 @@ type Server struct {
 	declared  *ttlcache.Cache[declaredIndex] // per-repo declared-files index, GitChanged-stamped
 	metrics   *metrics.Client                // Prometheus/Thanos for the Performance tab; nil disables it
 	tasks     *tasks.Feed                    // recent-activity feed (ops + merged PRs); nil disables it
+	reader    Reader
 	draft     Draft
 	auth      *auth.Authenticator // nil leaves the API open (dev)
 	oauth     *auth.OAuth         // nil hides the OpenShift SSO login path
@@ -192,9 +199,9 @@ type Server struct {
 	propNudge   chan struct{}
 }
 
-// Deps are the collaborators for NewServer. Draft is required: without the
-// coordinator there is no product, and every draft-backed route dereferences
-// it. The other nil pieces each disable one feature. The stream + VNC handlers
+// Deps are the collaborators for NewServer. Reader and Draft are required:
+// without the coordinator there is no product, and every git-backed route
+// dereferences them. The other nil pieces each disable one feature. The stream + VNC handlers
 // aren't here: they're wired post-construction via UseStream/UseVNC, because
 // the hub is built over the server's own InventoryForIdentity (chicken-and-egg
 // otherwise).
@@ -209,6 +216,7 @@ type Deps struct {
 	Repos          *git.RepoSet
 	Metrics        *metrics.Client // Prometheus/Thanos query client; nil disables the Performance tab
 	Tasks          *tasks.Feed     // recent-activity feed; nil disables GET /api/tasks
+	Reader         Reader
 	Draft          Draft
 	Auth           *auth.Authenticator
 	OAuth          *auth.OAuth // OpenShift SSO flow; nil hides it
@@ -216,10 +224,11 @@ type Deps struct {
 }
 
 // NewServer builds the API server from its collaborators. It panics on a nil
-// Draft so a stripped-down wiring fails at startup, not on the first request.
+// Reader or Draft so a stripped-down wiring fails at startup, not on the first
+// request.
 func NewServer(d Deps) *Server {
-	if d.Draft == nil {
-		panic("api: NewServer requires a Draft")
+	if d.Reader == nil || d.Draft == nil {
+		panic("api: NewServer requires a Reader and a Draft")
 	}
 	return &Server{
 		clusterF:  d.ClusterFactory,
@@ -238,6 +247,7 @@ func NewServer(d Deps) *Server {
 		declared:  ttlcache.New[declaredIndex](declaredTTL),
 		metrics:   d.Metrics,
 		tasks:     d.Tasks,
+		reader:    d.Reader,
 		draft:     d.Draft,
 		auth:      d.Auth,
 		oauth:     d.OAuth,

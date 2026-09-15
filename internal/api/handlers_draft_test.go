@@ -27,6 +27,7 @@ import (
 // stagingDraft records the staging calls the transport routes into it; the
 // embedded interface panics on anything a test doesn't expect to be reached.
 type stagingDraft struct {
+	Reader
 	Draft
 	proposed []model.ProposeRequest
 	unstaged []string
@@ -53,7 +54,7 @@ func (d *stagingDraft) Get(id auth.Identity, proj project.ProjectInfo) (model.Dr
 // SSAR gate allows exactly admin-token, and the cluster-wide namespace list is
 // empty - so tenant project resolution finds nothing (the not-found paths) while
 // the platform tier resolves for the admin.
-func draftServer(t *testing.T, d Draft) *Server {
+func draftServer(t *testing.T, d *stagingDraft) *Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -92,6 +93,7 @@ func draftServer(t *testing.T, d Draft) *Server {
 		State:          clusterstate.New(sa, "dotvirt.io/project", bus),
 		Bus:            bus,
 		Resolver:       project.NewResolver("dotvirt.io/project", "dotvirt.io/repo", ""),
+		Reader:         d,
 		Draft:          d,
 		Config:         Config{PlatformRepo: "https://forge/platform.git", BaseBranch: "main"},
 	})

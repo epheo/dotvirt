@@ -203,6 +203,7 @@ func run() error {
 		Repos:          repos,
 		Metrics:        metricsClient,
 		Tasks:          taskFeed,
+		Reader:         coordinator,
 		Draft:          coordinator,
 		Auth:           authenticator,
 		OAuth:          oauthFlow,

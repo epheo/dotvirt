@@ -11,7 +11,7 @@ import (
 )
 
 func webhookServer(secret string) *Server {
-	return NewServer(Deps{Draft: &fakeDraft{}, Config: Config{WebhookSecret: secret}})
+	return NewServer(Deps{Reader: &fakeDraft{}, Draft: &fakeDraft{}, Config: Config{WebhookSecret: secret}})
 }
 
 func deliver(t *testing.T, s *Server, body []byte, sig string) *httptest.ResponseRecorder {

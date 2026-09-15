@@ -25,6 +25,7 @@ func TestAppSetPluginAuth(t *testing.T) {
 			State:    clusterstate.New(sa, "dotvirt.io/project", bus),
 			Bus:      bus,
 			Resolver: project.NewResolver("dotvirt.io/project", "dotvirt.io/repo", ""),
+			Reader:   &fakeDraft{},
 			Draft:    &fakeDraft{},
 			Config:   Config{AppSetPluginToken: token},
 		})
