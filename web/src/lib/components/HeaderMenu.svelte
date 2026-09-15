@@ -4,6 +4,7 @@
 	// outside its own subtree. The trigger snippet gets {open, toggle}; the menu body
 	// gets {close} so an item can dismiss the menu after acting.
 	import type { Snippet } from 'svelte';
+	import { dismiss } from '$lib/dismiss';
 
 	let {
 		align = 'left',
@@ -22,24 +23,12 @@
 	} = $props();
 
 	let open = $state(false);
-	let root = $state<HTMLElement | null>(null);
 
 	const toggle = () => (open = !open);
 	const close = () => (open = false);
-
-	// Bubble-phase window handlers: the trigger's own onclick runs first (so toggling
-	// shut stays shut), then this fires - a click landing outside `root` dismisses.
-	function onWindowClick(e: MouseEvent) {
-		if (open && root && !root.contains(e.target as Node)) close();
-	}
-	function onKeydown(e: KeyboardEvent) {
-		if (open && e.key === 'Escape') close();
-	}
 </script>
 
-<svelte:window onclick={onWindowClick} onkeydown={onKeydown} />
-
-<div class="relative {className}" bind:this={root}>
+<div class="relative {className}" {@attach dismiss(close)}>
 	{@render trigger({ open, toggle })}
 	{#if open}
 		<div

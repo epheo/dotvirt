@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 // Hermetic UI suite: the built SPA against the fixture backend
 // (e2e/fixture/server.mjs) — no cluster, no forge. Scenario state is global on
-// the one server, so files run serially (workers: 1). `npm run build` first.
+// the one server, so files run serially (workers: 1). test:ui builds first.
 export default defineConfig({
 	testDir: './e2e/ui',
 	timeout: 30_000,

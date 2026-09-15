@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api, type EgressIPCreate, type ExternalRouteCreate } from '$lib/api';
+	import { splitList } from '$lib/format';
 	import type { Tier0Initial } from '$lib/state/ui.svelte';
 	import { validName, NAME_HINT, validIP } from '$lib/validate';
 	import { TERMS } from '$lib/vocab';
@@ -37,17 +38,12 @@
 	// svelte-ignore state_referenced_locally
 	let selectedNs = $state<string[]>(initial?.spec.namespaces ?? []);
 
-	const list = $derived(
-		ips
-			.split(/[\s,]+/)
-			.map((s) => s.trim())
-			.filter(Boolean),
-	);
+	const list = $derived(splitList(ips));
 	const badIPs = $derived(list.filter((ip) => !validIP(ip)));
 	const missing = $derived.by(() => {
 		const m: string[] = [];
 		if (!name) m.push('Name is required');
-		else if (!validName(name)) m.push('Name must be lowercase alphanumeric with dashes');
+		else if (!validName(name)) m.push(NAME_HINT);
 		if (!list.length)
 			m.push(
 				kind === 'snat'

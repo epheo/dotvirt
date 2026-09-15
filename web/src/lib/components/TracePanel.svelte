@@ -5,6 +5,7 @@
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { TONE_PILL, TONE_TEXT, type Tone } from '$lib/status';
 	import PolicyRuleTable from './PolicyRuleTable.svelte';
+	import Button from './Button.svelte';
 	import SelectInput from './SelectInput.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 	import TextInput from './TextInput.svelte';
@@ -149,15 +150,10 @@
 				placeholder="any"
 			/>
 		</label>
-		<button
-			type="button"
-			onclick={run}
-			disabled={!ready || op.busy}
-			class="inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-1.5 font-medium text-white hover:bg-accent-hover disabled:bg-line-strong"
-		>
+		<Button size="sm" onclick={run} disabled={!ready || op.busy}>
 			<Play size={12} />
 			{op.busy ? 'Tracing…' : 'Trace'}
-		</button>
+		</Button>
 	</div>
 	<p class="text-xs text-ink-faint">
 		Simulates the live policy objects — no packet is injected, so datapath faults stay invisible to

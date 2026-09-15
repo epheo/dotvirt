@@ -1,4 +1,7 @@
 <script lang="ts">
+	import SelectInput from './SelectInput.svelte';
+	import TextInput from './TextInput.svelte';
+
 	// Protocol + optional port pair shared by the firewall rule rows.
 	// port is number | null, not string: <input type="number"> coerces its
 	// binding to a number (or null when cleared), so a string type would make
@@ -19,16 +22,17 @@
 </script>
 
 <span class={labelClass}>port</span>
-<select bind:value={proto} class="rounded border border-line-strong px-1.5 py-1 text-xs">
+<SelectInput bind:value={proto} size="sm" class="w-auto!">
 	<option value="TCP">TCP</option>
 	<option value="UDP">UDP</option>
 	<option value="SCTP">SCTP</option>
-</select>
-<input
+</SelectInput>
+<TextInput
 	type="number"
 	bind:value={port}
+	size="sm"
 	placeholder="any"
 	min="1"
 	max="65535"
-	class="{portClass} rounded border border-line-strong px-2 py-1 text-xs"
+	class={portClass}
 />

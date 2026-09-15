@@ -19,7 +19,7 @@
 		if (parts[0] !== 'changes') return { project: '', namespace: '' };
 		return { project: parts[1] ?? '', namespace: parts[2] ?? '' };
 	});
-	const projects = $derived(inventory.inventory?.projects ?? []);
+	const projects = $derived(inventory.projects);
 	const tracked = $derived(projects.filter((p) => p.repo));
 	const untracked = $derived(projects.filter((p) => !p.repo));
 

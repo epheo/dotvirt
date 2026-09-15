@@ -4,12 +4,15 @@
 	// classes. Pure frontend: everything searched is already client-side (which
 	// is why templates, a fetch away, are not here). `label:key=value` (or
 	// `label:key`) narrows to VM labels - the tags-parity affordance; label
-	// chips elsewhere call searchFor().
+	// chips elsewhere push one through ui.search.
+	import { untrack } from 'svelte';
 	import { Search } from 'lucide-svelte';
+	import { dismiss } from '$lib/dismiss';
 	import type { VM } from '$lib/api';
 	import { vmActions, type VMAction } from '$lib/actions';
 	import { vmStorageKeys, NO_STORAGE } from '$lib/lenses';
-	import { inventory as inventoryStore } from '$lib/state/inventory.svelte';
+	import { inventory } from '$lib/state/inventory.svelte';
+	import { ui } from '$lib/state/ui.svelte';
 
 	export type SearchHit =
 		| { kind: 'action'; action: VMAction; vm: VM; hint: string }
@@ -41,31 +44,33 @@
 
 	// Everything searched reads straight off the inventory store - the search is
 	// global by nature, so no scope-narrowing props to thread.
-	const inventory = $derived(inventoryStore.inventory);
-	const networks = $derived(inventoryStore.networks);
-
 	let query = $state('');
 	let open = $state(false);
 	let active = $state(0);
 	let input = $state<HTMLInputElement | null>(null);
 
-	// Focus + prefill from outside (label chips -> `label:k=v`).
-	export function searchFor(q: string) {
-		query = q;
-		open = true;
-		active = 0;
-		input?.focus();
-	}
+	// A query pushed from elsewhere (a label chip) takes over the box.
+	$effect(() => {
+		const q = ui.search;
+		if (!q) return;
+		untrack(() => {
+			ui.search = '';
+			query = q;
+			open = true;
+			active = 0;
+			input?.focus();
+		});
+	});
 
 	const hits = $derived.by((): SearchHit[] => {
 		const q = query.trim().toLowerCase();
-		if (!inventory || !q) return [];
+		if (!q) return [];
 		const out: SearchHit[] = [];
 
 		// label:key=value / label:key - VM-label search only.
 		const labelQ = q.startsWith('label:') ? q.slice('label:'.length) : null;
 
-		const vms = inventoryStore.allVMs;
+		const vms = inventory.allVMs;
 
 		// A leading verb turns the box into a command line: "migrate web" lists
 		// the registry action on every matching VM it is enabled for. Runtime
@@ -133,12 +138,12 @@
 			for (const node of nodes) {
 				if (node.toLowerCase().includes(q)) out.push({ kind: 'node', node });
 			}
-			for (const n of networks) {
+			for (const n of inventory.networks) {
 				if (n.name.toLowerCase().includes(q))
 					out.push({ kind: 'network', network: n.name, hint: n.kind });
 			}
 			const classes = [
-				...new Set(vms.flatMap((v) => vmStorageKeys(v, inventoryStore.defaultStorageClass))),
+				...new Set(vms.flatMap((v) => vmStorageKeys(v, inventory.defaultStorageClass))),
 			].filter((c) => c !== NO_STORAGE);
 			for (const c of classes) {
 				if (c.toLowerCase().includes(q)) out.push({ kind: 'storage', storageClass: c });
@@ -169,14 +174,13 @@
 		} else if (e.key === 'Enter' && hits[active]) {
 			e.preventDefault();
 			pick(hits[active]);
-		} else if (e.key === 'Escape') {
-			dismiss();
 		}
 	}
 
 	// Closing without a pick abandons the query; keeping it would leave a stale
 	// term in the masthead and resume the next open on it.
-	function dismiss() {
+	function close() {
+		if (!open) return;
 		query = '';
 		open = false;
 		input?.blur();
@@ -243,7 +247,7 @@
 
 <svelte:window onkeydown={onWindowKey} />
 
-<div class="relative mx-auto w-80">
+<div class="relative mx-auto w-80" {@attach dismiss(close)}>
 	<div class="flex items-center gap-2 rounded bg-side-hover px-2.5 py-1">
 		<Search size={13} class="shrink-0 text-side-dim" />
 		<input
@@ -261,12 +265,6 @@
 	</div>
 
 	{#if open && query.trim()}
-		<button
-			class="fixed inset-0 z-30 cursor-default"
-			onclick={dismiss}
-			aria-label="Close search"
-			tabindex="-1"
-		></button>
 		<div
 			class="absolute top-full left-0 z-40 mt-1 w-full overflow-hidden rounded border border-line bg-panel shadow-xl"
 		>

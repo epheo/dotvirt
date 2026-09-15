@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { Camera, RotateCcw, Trash2 } from 'lucide-svelte';
-	import { api, type Snapshot, type VM } from '$lib/api';
+	import { api, vmKey, type Snapshot, type VM } from '$lib/api';
 	import { relativeAge } from '$lib/format';
 	import { action, resource, type Resource } from '$lib/resource.svelte';
 	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
 	import ErrorNote from './ErrorNote.svelte';
+	import Button from './Button.svelte';
 	import Note from './Note.svelte';
 	import StatusDot from './StatusDot.svelte';
 	import TextInput from './TextInput.svelte';
@@ -25,11 +26,11 @@
 
 	// Keyed on the VM identity (the live stream hands down a fresh vm each
 	// frame); polls only while a snapshot is still settling.
-	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
+	const key = $derived(vmKey(vm));
 	// The explicit binding type breaks the inference cycle through the poll
 	// gate (snapRes -> poll -> pending -> snapshots -> snapRes).
 	const snapRes: Resource<Snapshot[]> = resource(
-		() => vmKey,
+		() => key,
 		() => api.snapshots(vm.namespace, vm.name),
 		{ reset: true, poll: () => (pending ? 4000 : 0) },
 	);
@@ -76,14 +77,10 @@
 			placeholder="snapshot name (auto-generated if blank)"
 			class="w-72!"
 		/>
-		<button
-			onclick={take}
-			disabled={takeOp.busy}
-			class="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:bg-line-strong"
-		>
+		<Button onclick={take} disabled={takeOp.busy}>
 			<Camera size={14} />
 			{takeOp.busy ? 'Taking…' : 'Take snapshot'}
-		</button>
+		</Button>
 		{#if running}
 			<span class="text-xs text-ink-faint">Online snapshot (VM is running)</span>
 		{/if}

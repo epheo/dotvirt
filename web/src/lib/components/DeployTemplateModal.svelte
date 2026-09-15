@@ -2,8 +2,9 @@
 	import { untrack } from 'svelte';
 	import { BookCopy } from 'lucide-svelte';
 	import { api, type Template } from '$lib/api';
+	import { libraryLabel } from '$lib/catalog';
 	import { catalog } from '$lib/state/catalog.svelte';
-	import { validName } from '$lib/validate';
+	import { NAME_HINT, validName } from '$lib/validate';
 	import FormField from './FormField.svelte';
 	import SelectInput from './SelectInput.svelte';
 	import TextArea from './TextArea.svelte';
@@ -56,7 +57,6 @@
 	});
 
 	const key = (t: Template) => `${t.library}/${t.name}`;
-	const libraryLabel = (lib: string) => (lib === 'platform' ? 'Shared library' : lib);
 	const tpl = $derived(templates?.find((t) => key(t) === pickedKey) ?? null);
 	const libraries = $derived([...new Set((templates ?? []).map((t) => t.library))]);
 
@@ -186,7 +186,7 @@
 							? 'Left empty, a unique name is generated on deploy (the example above is illustrative).'
 							: 'Left empty, the template’s default name is used.'}
 					{:else if !validName(name)}
-						<span class="text-warn-ink">Lowercase alphanumeric and “-”, max 63 characters.</span>
+						<span class="text-warn-ink">{NAME_HINT}</span>
 					{/if}
 				</p>
 			</FormField>
@@ -200,11 +200,7 @@
 	{:else}
 		<div class="max-w-md space-y-3">
 			{#each formParams as p (p.name)}
-				<label class="block">
-					<span class="mb-1 block text-xs font-medium text-ink-muted">
-						{p.displayName || p.name}
-						{#if p.required && !p.value && !p.generate}<span class="text-danger">*</span>{/if}
-					</span>
+				<FormField label={p.displayName || p.name} required={p.required && !p.value && !p.generate}>
 					{#if long(p.name)}
 						<TextArea
 							bind:value={params[p.name]}
@@ -222,7 +218,7 @@
 						/>
 					{/if}
 					{#if p.description}<p class="mt-1 text-xs text-ink-faint">{p.description}</p>{/if}
-				</label>
+				</FormField>
 			{/each}
 		</div>
 	{/if}

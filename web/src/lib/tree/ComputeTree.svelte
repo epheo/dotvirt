@@ -17,7 +17,7 @@
 	// -> VMs. Highlights derive from the URL. Projects without a repo sink below
 	// the tracked ones so a broken/unadopted project never pushes real work down.
 	const scope = $derived(scopeFromPath(page.url.pathname));
-	const projects = $derived(inventory.inventory?.projects ?? []);
+	const projects = $derived(inventory.projects);
 	const tracked = $derived(projects.filter((p) => !p.error));
 	const untracked = $derived(projects.filter((p) => p.error));
 

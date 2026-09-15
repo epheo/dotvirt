@@ -18,7 +18,7 @@ export type Scope =
 export const NO_NETWORK = '(no network)';
 export const POD_NETWORK = 'Pod network';
 export const NO_STORAGE = '(no provisioned storage)';
-export const DEFAULT_CLASS = '(cluster default)';
+const DEFAULT_CLASS = '(cluster default)';
 
 /**
  * The networks a VM appears under: one key per distinct port group, resolved
@@ -58,7 +58,7 @@ export function vmStorageKeys(vm: VM, defaultClass = ''): string[] {
 }
 
 /** One provisioned disk on a class, with its requested size in bytes (NaN when unparseable). */
-export interface ClassDisk {
+interface ClassDisk {
 	vm: VM;
 	disk: Disk;
 	bytes: number;

@@ -6,7 +6,9 @@
 	import { resolveNIC, kindLabel } from '$lib/networks';
 	import { vmSizing } from '$lib/sizing';
 	import { inventory } from '$lib/state/inventory.svelte';
+	import { ui } from '$lib/state/ui.svelte';
 	import InfoCard from './InfoCard.svelte';
+	import Button from './Button.svelte';
 	import Row from './Row.svelte';
 
 	// The Configure tab: a left sub-rail of read-only sections; every
@@ -15,14 +17,12 @@
 		vm,
 		networks = [],
 		onedit,
-		onsearchlabel,
 	}: {
 		vm: VM;
 		// The port-group catalog, to resolve raw NIC refs into port groups.
 		networks?: Network[];
 		// Opens the edit modal jumped to the given section.
 		onedit: (section: EditSection) => void;
-		onsearchlabel?: (key: string, value: string) => void;
 	} = $props();
 
 	type Section = 'hardware' | 'scheduling' | 'storage' | 'network' | 'labels' | 'source';
@@ -39,12 +39,9 @@
 </script>
 
 {#snippet editButton(section: EditSection)}
-	<button
-		onclick={() => onedit(section)}
-		class="flex items-center gap-1 text-xs text-accent hover:underline"
-	>
+	<Button variant="link" size="sm" onclick={() => onedit(section)}>
 		<Pencil size={11} /> Edit
-	</button>
+	</Button>
 {/snippet}
 
 <div class="flex gap-4">
@@ -167,7 +164,7 @@
 					{#if vm.labels && Object.keys(vm.labels).length}
 						{#each Object.entries(vm.labels) as [k, v] (k)}
 							<button
-								onclick={() => onsearchlabel?.(k, v)}
+								onclick={() => (ui.search = `label:${k}=${v}`)}
 								title="Find everything labeled {k}={v}"
 								class="mr-1 mb-1 inline-block rounded bg-inset-strong px-1.5 py-0.5 text-xs text-ink-soft hover:bg-select-soft hover:text-accent-ink"
 								>{k}={v}</button

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api, type ProjectCreate } from '$lib/api';
+	import { splitList } from '$lib/format';
 	import { validName, NAME_HINT, validCIDR } from '$lib/validate';
 	import StageModal from './StageModal.svelte';
 	import FormField from './FormField.svelte';
@@ -13,7 +14,6 @@
 		onclose: () => void;
 		adopt?: string; // existing unlabeled namespace to bring in as a project
 	} = $props();
-	// The modal mounts fresh per open, so the initial value IS the intent.
 	// svelte-ignore state_referenced_locally
 	const adopt = adoptProp;
 
@@ -38,9 +38,9 @@
 	const missing = $derived.by(() => {
 		const m: string[] = [];
 		if (!name) m.push('Project name is required');
-		else if (!validName(name)) m.push('Project name must be lowercase alphanumeric with dashes');
+		else if (!validName(name)) m.push(`Project name: ${NAME_HINT}`);
 		if (!namespace) m.push('First namespace is required');
-		else if (!validName(namespace)) m.push('Namespace must be lowercase alphanumeric with dashes');
+		else if (!validName(namespace)) m.push(`Namespace: ${NAME_HINT}`);
 		if (withNetwork) {
 			if (!netName) m.push('VM Network name is required');
 			if (!subnet.trim()) m.push('Subnet is required for a primary network');
@@ -59,15 +59,9 @@
 				: `Creates repo “${name}”; stages namespace ${namespace}${withNetwork ? ` + VM Network ${netName}` : ''} → platform repo`,
 	);
 
-	const parseOwners = (s: string): string[] =>
-		s
-			.split(/[\s,]+/)
-			.map((o) => o.trim())
-			.filter(Boolean);
-
 	async function stage() {
 		const req: ProjectCreate = { name, namespace };
-		const o = parseOwners(owners);
+		const o = splitList(owners);
 		if (o.length) req.owners = o;
 		if (withNetwork) req.vmNetwork = { name: netName, subnet: subnet.trim() };
 		await api.createProject(req);

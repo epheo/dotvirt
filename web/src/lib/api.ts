@@ -21,9 +21,6 @@ export type { Event as VMEvent, Node as NodeTarget } from './model.gen';
 
 export type Power = 'On' | 'Off' | 'Unknown';
 export type SyncStatus = 'Synced' | 'OutOfSync' | 'NotTracked' | 'Pending' | 'Unknown';
-export type NetworkKind = 'default' | 'internal' | 'vlan';
-export type NetworkScope = 'project' | 'shared';
-export type PolicyKind = 'dfw' | 'admin' | 'baseline' | 'gateway' | 'egressip' | 'route';
 export type DRSMode = 'Predictive' | 'Automatic';
 
 export interface PlacementGroup extends Omit<gen.PlacementGroup, 'mode'> {
@@ -37,6 +34,9 @@ export interface VM extends Omit<gen.VM, 'power' | 'sync' | 'scheduling'> {
 	sync: SyncStatus;
 	scheduling?: VMScheduling;
 }
+// The "namespace/name" identity every VM-keyed map, route and selection uses.
+export const vmKey = (vm: { namespace: string; name: string }) => `${vm.namespace}/${vm.name}`;
+
 export interface ProjectSync extends Omit<gen.ProjectSync, 'sync'> {
 	sync?: SyncStatus;
 }
@@ -134,15 +134,11 @@ export interface UplinkCreate {
 }
 // EgressFirewall - a namespace's north-south egress rules (the Tier-1 gateway
 // firewall). One per namespace (named "default" server-side); rules are first-match.
-export interface EgressFirewallPort {
-	protocol: 'TCP' | 'UDP' | 'SCTP';
-	port: number;
-}
 export interface EgressFirewallRule {
 	action: 'Allow' | 'Deny';
 	cidr?: string; // set exactly one of cidr / dnsName
 	dnsName?: string;
-	ports?: EgressFirewallPort[];
+	ports?: PolicyPort[];
 }
 export interface EgressFirewallCreate {
 	namespace: string;
@@ -307,7 +303,7 @@ function qs(params: Record<string, string | undefined>): string {
 }
 
 // A container-scope read's query params (the project/namespace/node levels).
-export type ScopeQuery = { project?: string; namespace?: string; node?: string };
+type ScopeQuery = { project?: string; namespace?: string; node?: string };
 
 // scopeQS is qs over a scope read's levels; extra appends params (e.g. range).
 function scopeQS(scope: ScopeQuery, extra?: Record<string, string>): string {

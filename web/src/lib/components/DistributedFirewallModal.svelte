@@ -5,6 +5,7 @@
 	import { TERMS } from '$lib/vocab';
 	import { validName, NAME_HINT } from '$lib/validate';
 	import Note from './Note.svelte';
+	import Button from './Button.svelte';
 	import StageModal from './StageModal.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
 	import FormField from './FormField.svelte';
@@ -74,7 +75,7 @@
 	const missing = $derived.by(() => {
 		const m: string[] = [];
 		if (!name) m.push('Name is required');
-		else if (!validName(name)) m.push('Name must be lowercase alphanumeric with dashes');
+		else if (!validName(name)) m.push(NAME_HINT);
 		if (!namespace) m.push('Project is required');
 		return m;
 	});
@@ -158,11 +159,7 @@
 	<div class="space-y-2">
 		<div class="flex items-center justify-between">
 			<span class="text-ink-soft">Allow ingress from</span>
-			<button
-				onclick={rules.add}
-				class="flex items-center gap-1 text-xs text-accent hover:underline"
-				><Plus size={12} /> Add source</button
-			>
+			<Button variant="link" size="sm" onclick={rules.add}><Plus size={12} /> Add source</Button>
 		</div>
 		{#each rows as row, i (i)}
 			<div class="flex flex-wrap items-center gap-2 rounded border border-line p-2">
@@ -172,8 +169,8 @@
 					bind:value={row.value}
 					keyPlaceholder="app"
 					valuePlaceholder="web"
-					keyClass="w-20"
-					valueClass="w-24"
+					keyClass="w-20!"
+					valueClass="w-24!"
 				/>
 				<ProtoPortInput bind:proto={row.proto} bind:port={row.port} portClass="w-20" />
 				<button

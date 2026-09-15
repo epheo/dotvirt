@@ -3,8 +3,8 @@
 // are short and edits touch a few lines, so a common prefix/suffix strip plus
 // an LCS over the remainder is exact and cheap.
 
-export type DiffLine = { kind: 'same' | 'add' | 'del'; text: string };
-export type DiffRow = DiffLine | { kind: 'skip'; count: number };
+type DiffLine = { kind: 'same' | 'add' | 'del'; text: string };
+type DiffRow = DiffLine | { kind: 'skip'; count: number };
 
 export function lineDiff(before: string, after: string): DiffLine[] {
 	const a = lines(before);
@@ -70,8 +70,10 @@ function lcsDiff(a: string[], b: string[]): DiffLine[] {
 	let i = 0;
 	let j = 0;
 	while (i < n && j < m) {
-		if (a[i] === b[j]) (out.push({ kind: 'same', text: a[i++] }), j++);
-		else if (lcs[i + 1][j] >= lcs[i][j + 1]) out.push({ kind: 'del', text: a[i++] });
+		if (a[i] === b[j]) {
+			out.push({ kind: 'same', text: a[i++] });
+			j++;
+		} else if (lcs[i + 1][j] >= lcs[i][j + 1]) out.push({ kind: 'del', text: a[i++] });
 		else out.push({ kind: 'add', text: b[j++] });
 	}
 	while (i < n) out.push({ kind: 'del', text: a[i++] });

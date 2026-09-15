@@ -5,8 +5,9 @@
 	import { approvalLine, checksPill, itemKey, reviewURL } from '$lib/review';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { reviewCache } from '$lib/state/reviewCache.svelte';
 	import ChangeList from './ChangeList.svelte';
+	import Button from './Button.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import FileHistory from './FileHistory.svelte';
 	import Note from './Note.svelte';
@@ -25,22 +26,18 @@
 	const draftCount = $derived(drafts.drafts.find((d) => d.project === project)?.draft.count ?? 0);
 
 	// Open PRs of the project, kept when their diff names this VM. A PR's
-	// items load once (the same review the Changes section renders).
+	// items are the review the Changes section renders, loaded once per PR;
+	// the load re-runs only when the set of open PRs moves.
 	const projectPRs = $derived(inventory.proposals.filter((p) => p.project === project));
-	let prItems = $state<Record<number, DraftItem[] | null>>({});
 	$effect(() => {
-		for (const p of projectPRs) {
-			if (untrack(() => prItems[p.prNumber]) !== undefined) continue;
-			prItems[p.prNumber] = null;
-			api
-				.proposal(p.project, p.prNumber)
-				.then((d) => (prItems[p.prNumber] = d.items))
-				.catch(() => (prItems[p.prNumber] = []));
-		}
+		inventory.proposalsKey;
+		for (const p of untrack(() => projectPRs)) reviewCache.loadProposal(p.project, p.prNumber);
 	});
+	const reviewOf = (p: { project: string; prNumber: number }) =>
+		reviewCache.proposal(p.project, p.prNumber);
 	const touching = $derived(
 		projectPRs.filter((p) =>
-			(prItems[p.prNumber] ?? []).some(
+			(reviewOf(p)?.data?.items ?? []).some(
 				(it) =>
 					(!it.resource || it.resource === 'vm') &&
 					it.namespace === vm.namespace &&
@@ -48,7 +45,12 @@
 			),
 		),
 	);
-	const prsLoading = $derived(projectPRs.some((p) => prItems[p.prNumber] === null));
+	const prsLoading = $derived(
+		projectPRs.some((p) => {
+			const r = reviewOf(p);
+			return !r || (!r.data && !r.error);
+		}),
+	);
 </script>
 
 <div class="max-w-3xl space-y-4">
@@ -61,9 +63,11 @@
 		<InfoCard title="Staged">
 			{#snippet action()}
 				{#if stagedItem}
-					<a
+					<Button
+						variant="link"
+						size="sm"
 						href={reviewURL({ kind: 'item', project, key: itemKey(stagedItem) })}
-						class="text-xs text-accent-ink hover:underline">Review and propose</a
+						>Review and propose</Button
 					>
 				{/if}
 			{/snippet}
@@ -112,9 +116,11 @@
 							<span class="ml-auto flex shrink-0 items-center gap-1.5">
 								{#if chk}<StatusPill tone={chk.tone} label={chk.text} />{/if}
 								{#if appr}<StatusPill tone={appr.tone} label={appr.text} />{/if}
-								<a
+								<Button
+									variant="link"
+									size="sm"
 									href={reviewURL({ kind: 'proposal', project, prNumber: p.prNumber })}
-									class="text-xs text-accent-ink hover:underline">Review</a
+									>Review</Button
 								>
 							</span>
 						</li>

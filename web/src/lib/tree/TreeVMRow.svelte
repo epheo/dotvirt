@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { Pencil, Trash2 } from 'lucide-svelte';
-	import type { VM } from '$lib/api';
+	import { vmKey, type VM } from '$lib/api';
 	import { vmHref } from '$lib/nav';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { TONE_PILL } from '$lib/status';
@@ -14,7 +14,7 @@
 	// when a delete is staged), and the staged badge or sync state.
 	let { vm, indent = 2, tab }: { vm: VM; indent?: 2 | 3; tab?: string } = $props();
 
-	const key = $derived(`${vm.namespace}/${vm.name}`);
+	const key = $derived(vmKey(vm));
 	const sc = $derived(drafts.stagedByKey.get(key));
 	const active = $derived.by(() => {
 		const parts = page.url.pathname.split('/');

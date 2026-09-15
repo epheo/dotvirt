@@ -2,6 +2,7 @@
 	import { Ban, CheckCircle2, LogOut, MoveRight, Wrench } from 'lucide-svelte';
 	import { api, type NodeInfo, type VM } from '$lib/api';
 	import { action, resource } from '$lib/resource.svelte';
+	import Button from './Button.svelte';
 
 	// Host maintenance: entering flips
 	// the node's maintenance annotation + cordon in one server patch, then one
@@ -141,58 +142,49 @@
 						{/if}
 					</p>
 					<div class="flex items-center gap-2">
-						<button
-							onclick={enterMaintenance}
-							disabled={op.busy}
-							class="rounded-full bg-accent px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
-						>
+						<Button size="sm" onclick={enterMaintenance} disabled={op.busy}>
 							Enter Maintenance Mode
-						</button>
-						<button
+						</Button>
+						<Button
+							variant="secondary"
+							size="sm"
 							onclick={() => (confirming = false)}
 							disabled={op.busy}
-							class="rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 						>
 							Cancel
-						</button>
+						</Button>
 					</div>
 				</div>
 			{:else}
 				<div class="flex flex-wrap items-center gap-2">
 					{#if info.maintenance}
-						<button
-							onclick={exitMaintenance}
-							disabled={op.busy}
-							class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
-						>
+						<Button variant="secondary" size="sm" onclick={exitMaintenance} disabled={op.busy}>
 							<LogOut size={13} /> Exit Maintenance Mode
-						</button>
+						</Button>
 						<!-- Always offered: the node may still hold VMs outside the caller's
 						     projects, which `pending` cannot count. -->
-						<button
+						<Button
+							variant="secondary"
+							size="sm"
 							onclick={retryEvacuation}
 							disabled={op.busy}
 							title="Live-migrate the VMs still on this node"
-							class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 						>
 							<MoveRight size={13} /> Retry evacuation{pending.length ? ` (${pending.length})` : ''}
-						</button>
+						</Button>
 					{:else}
-						<button
+						<Button
+							variant="secondary"
+							size="sm"
 							onclick={() => (confirming = true)}
 							disabled={op.busy}
 							title="Cordon this node and live-migrate every running VM away"
-							class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 						>
 							<Wrench size={13} /> Enter Maintenance Mode
-						</button>
-						<button
-							onclick={toggleCordon}
-							disabled={op.busy}
-							class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
-						>
+						</Button>
+						<Button variant="secondary" size="sm" onclick={toggleCordon} disabled={op.busy}>
 							{#if info.unschedulable}<CheckCircle2 size={13} /> Uncordon{:else}<Ban size={13} /> Cordon{/if}
-						</button>
+						</Button>
 					{/if}
 				</div>
 			{/if}

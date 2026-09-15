@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api, Unauthorized, type VM } from '$lib/api';
+	import { api, Unauthorized, vmKey, type VM } from '$lib/api';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
 	import { containerTabs, hrefForScope, vmHref, type Section } from '$lib/nav';
 	import { action } from '$lib/resource.svelte';
@@ -31,6 +31,7 @@
 	import SegmentSummary from './SegmentSummary.svelte';
 	import StorageClassSummary from './StorageClassSummary.svelte';
 	import StorageRootSummary from './StorageRootSummary.svelte';
+	import TabPane from '$lib/components/TabPane.svelte';
 
 	// The container workspace: every inventory level, section roots included,
 	// gets the same breadcrumb + tab chrome. Roots differ only in what their
@@ -60,8 +61,6 @@
 	// VMs in the current scope, feeding the grid. Network/storage membership uses
 	// the same key helpers as the tree's grouping, so they can never disagree.
 	const scopedVMs = $derived.by(() => {
-		const inv = inventory.inventory;
-		if (!inv) return [];
 		const sc = scope; // const preserves TS narrowing into the filter closures
 		const all = inventory.allVMs;
 		if (sc.kind === 'all') return all;
@@ -72,7 +71,7 @@
 			return all.filter((v) =>
 				vmStorageKeys(v, inventory.defaultStorageClass).includes(sc.storageClass),
 			);
-		return inv.projects
+		return inventory.projects
 			.filter((p) => p.name === sc.project)
 			.flatMap((p) =>
 				p.namespaces
@@ -83,12 +82,10 @@
 
 	// Projects shown on the Configure tab (the scoped one, or all of Compute).
 	const cfgProjects = $derived.by(() => {
-		const inv = inventory.inventory;
-		if (!inv) return [];
 		const sc = scope;
 		if (sc.kind === 'project' || sc.kind === 'namespace')
-			return inv.projects.filter((p) => p.name === sc.project);
-		return sc.kind === 'all' && section === 'compute' ? inv.projects : [];
+			return inventory.projects.filter((p) => p.name === sc.project);
+		return sc.kind === 'all' && section === 'compute' ? inventory.projects : [];
 	});
 	// The metrics-backend scope. Network/storage lenses are navigation groupings,
 	// not metrics boundaries - their Summary/Monitor aggregate the whole
@@ -110,12 +107,10 @@
 	// tabs - back never walks peek moves). Resolved against the scoped list, so
 	// a VM that leaves the scope (or the inventory) closes its peek.
 	const peekKey = $derived(page.url.searchParams.get('peek'));
-	const peekVM = $derived(
-		peekKey ? (scopedVMs.find((v) => `${v.namespace}/${v.name}` === peekKey) ?? null) : null,
-	);
+	const peekVM = $derived(peekKey ? (scopedVMs.find((v) => vmKey(v) === peekKey) ?? null) : null);
 	function setPeek(vm: VM | null) {
 		const u = new URL(page.url.href);
-		if (vm) u.searchParams.set('peek', `${vm.namespace}/${vm.name}`);
+		if (vm) u.searchParams.set('peek', vmKey(vm));
 		else u.searchParams.delete('peek');
 		goto(u.pathname + u.search, { replaceState: true, keepFocus: true, noScroll: true });
 	}
@@ -129,24 +124,15 @@
 	const bulkOp = action({ toast: true });
 
 	// The VM objects currently picked (resolve keys against the live inventory).
-	const pickedVMs = $derived(
-		inventory.allVMs.filter((vm) => picked.has(`${vm.namespace}/${vm.name}`)),
-	);
+	const pickedVMs = $derived(inventory.allVMs.filter((vm) => picked.has(vmKey(vm))));
 
-	// Bulk context menu for a right-click inside the multi-selection. Registered
-	// with the shell while this workspace is mounted; the shell renders the
-	// single-VM and container variants.
+	// A right-click inside the multi-selection acts on the selection: the bulk
+	// menu renders here; the shell renders the single-VM variant.
 	let bulkCtx = $state<{ x: number; y: number } | null>(null);
-	$effect(() => {
-		ui.bulkIntercept = (vm, x, y) => {
-			if (picked.size > 1 && picked.has(`${vm.namespace}/${vm.name}`)) {
-				bulkCtx = { x, y };
-				return true;
-			}
-			return false;
-		};
-		return () => (ui.bulkIntercept = null);
-	});
+	function contextVM(vm: VM, x: number, y: number) {
+		if (picked.size > 1 && picked.has(vmKey(vm))) bulkCtx = { x, y };
+		else ui.openVMContext(vm, x, y);
+	}
 
 	// Run one staging call per VM in parallel, tallying outcomes. `skip` filters
 	// no-ops client-side; any per-VM failure folds into the skipped count rather
@@ -214,16 +200,15 @@
 		<HostsRootSummary vms={scopedVMs} />
 	{:else if root && section === 'networking'}
 		<PlatformAdoptBanner />
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
-		<div class="min-h-0 flex-1 overflow-y-auto" role="region" aria-label="Tab content" tabindex="0">
+		<TabPane>
 			<NetworkTopology
 				networks={inventory.networks}
 				uplinks={inventory.uplinks}
 				vms={scopedVMs}
-				projects={inventory.inventory?.projects ?? []}
+				projects={inventory.projects}
 				onpick={(net) => goto(hrefForScope({ kind: 'network', network: net }))}
 			/>
-		</div>
+		</TabPane>
 	{:else}
 		{#if scope.kind === 'project' || scope.kind === 'namespace'}
 			<RepoBanner project={scope.project} />
@@ -233,26 +218,18 @@
 				namespace={scope.kind === 'namespace' ? scope.namespace : undefined}
 			/>
 		{/if}
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
-		<div class="min-h-0 flex-1 overflow-y-auto" role="region" aria-label="Tab content" tabindex="0">
+		<TabPane>
 			<ClusterSummary scope={containerScope} onselect={openVM} />
-		</div>
+		</TabPane>
 	{/if}
 {:else if tab === 'monitor'}
-	<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
-	<div class="min-h-0 flex-1 overflow-y-auto" role="region" aria-label="Tab content" tabindex="0">
+	<TabPane>
 		<ContainerMonitor namespaces={scopedNamespaces} scope={containerScope} onselect={openVM} />
-	</div>
+	</TabPane>
 {:else if tab === 'permissions'}
-	<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
-	<div
-		class="min-h-0 flex-1 overflow-y-auto p-4"
-		role="region"
-		aria-label="Tab content"
-		tabindex="0"
-	>
+	<TabPane class="p-4">
 		<Permissions namespaces={scopedNamespaces} />
-	</div>
+	</TabPane>
 {:else if tab === 'configure'}
 	{#if scope.kind === 'node'}
 		<NodeConfigure node={scope.node} vms={scopedVMs} />
@@ -263,15 +240,9 @@
 	{#if root}
 		<SecurityPlane />
 	{:else if scope.kind === 'namespace'}
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
-		<div
-			class="min-h-0 flex-1 overflow-y-auto p-4"
-			role="region"
-			aria-label="Tab content"
-			tabindex="0"
-		>
+		<TabPane class="p-4">
 			<EffectivePolicyPanel namespace={scope.namespace} />
-		</div>
+		</TabPane>
 	{/if}
 {:else}
 	{#if picked.size > 0}
@@ -290,9 +261,9 @@
 				bind:selected={picked}
 				staged={drafts.stagedByKey}
 				activeKey={peekVM ? peekKey : null}
-				onselect={(vm) => setPeek(peekKey === `${vm.namespace}/${vm.name}` ? null : vm)}
+				onselect={(vm) => setPeek(peekKey === vmKey(vm) ? null : vm)}
 				onstagedopen={(vm) => (ui.modal = { kind: 'staged', vm })}
-				oncontextvm={(vm, x, y) => ui.openVMContext(vm, x, y)}
+				oncontextvm={contextVM}
 			/>
 		</div>
 		{#if peekVM}

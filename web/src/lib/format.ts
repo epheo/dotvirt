@@ -61,12 +61,29 @@ export function relativeAge(t: string | number | undefined): string {
 	return compactSpan(Math.max(0, Math.floor((Date.now() - ms) / 1000))) + ' ago';
 }
 
+// shortDate renders a calendar date for history rows; a zero or unreadable
+// time reads as a dash.
+const EPOCH_FLOOR = Date.UTC(2020, 0, 1);
+export function shortDate(iso: string): string {
+	const t = new Date(iso).getTime();
+	if (Number.isNaN(t) || t < EPOCH_FLOOR) return '—';
+	return new Date(t).toLocaleDateString(undefined, {
+		year: 'numeric',
+		month: 'short',
+		day: 'numeric',
+	});
+}
+
 // fmtUsage formats a value by a unit hint used across the usage widgets.
 export function fmtUsage(unit: 'pct' | 'bytes' | 'cores', v: number): string {
 	if (unit === 'pct') return v.toFixed(1) + '%';
 	if (unit === 'cores') return cores(v);
 	return bytes(v);
 }
+
+// The free-text list fields (owners, IPs, pinned hosts) take space- or
+// comma-separated entries.
+export const splitList = (s: string): string[] => s.split(/[\s,]+/).filter(Boolean);
 
 // Thrown errors stringify as "Error: <msg>"; toasts show just the message.
 export function friendlyError(e: unknown): string {

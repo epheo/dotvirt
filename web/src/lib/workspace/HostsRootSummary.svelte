@@ -5,6 +5,7 @@
 	import { resource } from '$lib/resource.svelte';
 	import type { Tone } from '$lib/status';
 	import HostBalance from '$lib/components/HostBalance.svelte';
+	import TabPane from '$lib/components/TabPane.svelte';
 	import StatusPill from '$lib/components/StatusPill.svelte';
 
 	// The Hosts root's Summary: the fleet as one table - state, placement,
@@ -89,8 +90,7 @@
 	</div>
 {/snippet}
 
-<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
-<div class="min-h-0 flex-1 overflow-y-auto" role="region" aria-label="Tab content" tabindex="0">
+<TabPane>
 	{#if rows.length}
 		<table class="w-full text-left text-[13px]">
 			<thead class="border-b border-line text-xs text-ink-muted">
@@ -198,4 +198,4 @@
 			<HostBalance roster={false} />
 		</div>
 	</div>
-</div>
+</TabPane>

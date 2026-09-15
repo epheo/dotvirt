@@ -7,6 +7,7 @@
 	import { inventory } from '$lib/state/inventory.svelte';
 	import type { Tone } from '$lib/status';
 	import Note from '$lib/components/Note.svelte';
+	import TabPane from '$lib/components/TabPane.svelte';
 	import StatusPill from '$lib/components/StatusPill.svelte';
 
 	// The Storage root's Summary: every class as one row - what the platform
@@ -82,8 +83,7 @@
 			: '';
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
-<div class="min-h-0 flex-1 overflow-y-auto" role="region" aria-label="Storage classes" tabindex="0">
+<TabPane label="Storage classes">
 	{#if hasFacts && defaults !== 1}
 		<Note tone="warn" class="mx-4 mt-4 px-3 py-2 text-xs">
 			{#if defaults === 0}
@@ -212,4 +212,4 @@
 	<p class="px-4 py-2 text-xs text-ink-faint">
 		Storage classes are managed by the cluster platform, not dotvirt.
 	</p>
-</div>
+</TabPane>

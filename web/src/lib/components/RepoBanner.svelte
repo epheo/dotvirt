@@ -10,7 +10,7 @@
 	// Same gates as the tree; the backend still refuses when the repo resolves.
 	let { project }: { project: string } = $props();
 
-	const p = $derived(inventory.inventory?.projects.find((x) => x.name === project));
+	const p = $derived(inventory.projects.find((x) => x.name === project));
 	const attach = $derived(!!p?.error && !p?.repo);
 	// A failed sync OPERATION is a manifest problem (the last merged change did
 	// not apply), not a repo problem: offering Recover repo there invites

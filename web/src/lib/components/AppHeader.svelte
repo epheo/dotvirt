@@ -23,6 +23,7 @@
 	import { dispatchVMAction } from '$lib/actions';
 	import { changesHref, hrefForScope, scopeFromPath, vmHref } from '$lib/nav';
 	import StatusDot from './StatusDot.svelte';
+	import Button from './Button.svelte';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { session } from '$lib/state/session.svelte';
@@ -38,7 +39,7 @@
 	const scopeNamespaces = $derived.by(() => {
 		const sc = scopeFromPath(page.url.pathname);
 		if (sc.kind === 'project' || sc.kind === 'namespace') {
-			const p = inventory.inventory?.projects.find((proj) => proj.name === sc.project);
+			const p = inventory.projects.find((proj) => proj.name === sc.project);
 			if (!p?.repo) return null;
 			return sc.kind === 'namespace' ? [sc.namespace] : p.namespaces.map((n) => n.namespace);
 		}
@@ -91,13 +92,6 @@
 	// count moves with the same frames the tree and grid repaint on.
 	const issues = $derived(inventory.issues);
 	const worstTone = $derived(issues.some((i) => i.severity === 'danger') ? 'danger' : 'warn');
-
-	// Object pages push label queries into the masthead search via ui.search.
-	let search = $state<GlobalSearch | null>(null);
-	$effect(() => {
-		ui.search = search;
-		return () => (ui.search = null);
-	});
 
 	// The "New" menu, one row per creatable kind. divider starts the
 	// platform-tier section. newVM's payload alone carries extra state
@@ -178,22 +172,19 @@
 <header class="flex items-center gap-3 border-b border-line-strong bg-bar px-4 py-2 text-white">
 	<a href="/compute" class="font-semibold">dotvirt</a>
 
-	<GlobalSearch bind:this={search} onpick={onSearchPick} />
+	<GlobalSearch onpick={onSearchPick} />
 
 	<!-- Create actions collapse into one primary menu (the global chrome stays
 	     identity + search + tasks; creation is otherwise contextual via
 	     the tree's right-click menus). New VM pre-targets the current scope. -->
 	<HeaderMenu>
 		{#snippet trigger({ open, toggle })}
-			<button
-				onclick={toggle}
-				class="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1 text-xs font-medium text-white hover:bg-accent-hover"
-			>
+			<Button size="sm" onclick={toggle}>
 				<Plus size={14} /> New <ChevronDown
 					size={12}
 					class="transition-transform {open ? 'rotate-180' : ''}"
 				/>
-			</button>
+			</Button>
 		{/snippet}
 		{#snippet children({ close })}
 			{#each NEW_ITEMS as item (item.kind)}

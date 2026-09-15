@@ -23,6 +23,7 @@
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import FileHistory from '$lib/components/FileHistory.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import PolicyRuleTable from '$lib/components/PolicyRuleTable.svelte';
 	import SelectInput from '$lib/components/SelectInput.svelte';
 	import SyncBadge from '$lib/components/SyncBadge.svelte';
@@ -43,10 +44,7 @@
 	// The tenant filter mirrors ?tenant=, so the scoped view is shareable and
 	// the project context menu can deep-link into it: the select writes the URL,
 	// and navigation (deep link, in-app goto) drives the state back.
-	let tenant = $state(page.url.searchParams.get('tenant') ?? '');
-	$effect(() => {
-		tenant = page.url.searchParams.get('tenant') ?? '';
-	});
+	let tenant = $derived(page.url.searchParams.get('tenant') ?? '');
 	function setTenant(v: string) {
 		const url = new URL(page.url);
 		if (v) url.searchParams.set('tenant', v);
@@ -61,9 +59,7 @@
 
 	const tenantNS = $derived(
 		new Set(
-			(inventory.inventory?.projects ?? [])
-				.find((p) => p.name === tenant)
-				?.namespaces.map((n) => n.namespace) ?? [],
+			inventory.projects.find((p) => p.name === tenant)?.namespaces.map((n) => n.namespace) ?? [],
 		),
 	);
 
@@ -143,10 +139,10 @@
 	</button>
 	{#if filtered}
 		<span class="text-xs text-ink-faint">{shown.length} of {policies.length} policies</span>
-		<button
-			type="button"
-			onclick={() => (setTenant(''), (query = ''), (driftOnly = false))}
-			class="text-xs text-accent hover:underline">Clear</button
+		<Button
+			variant="link"
+			size="sm"
+			onclick={() => (setTenant(''), (query = ''), (driftOnly = false))}>Clear</Button
 		>
 	{/if}
 	<button
@@ -218,27 +214,18 @@
 											>{p.sourceFile}</span
 										>
 										{#if canEditPolicy(p)}
-											<button
-												type="button"
-												onclick={() => openEdit(policyRef(p))}
-												class="inline-flex items-center gap-1 text-accent hover:underline"
-												><Pencil size={12} /> Edit</button
+											<Button variant="link" onclick={() => openEdit(policyRef(p))}
+												><Pencil size={12} /> Edit</Button
 											>
 										{/if}
 										{#if p.sync === 'OutOfSync'}
-											<button
-												type="button"
-												onclick={() => openAdopt(policyRef(p), true)}
-												class="inline-flex items-center gap-1 text-accent hover:underline"
-												><GitPullRequest size={12} /> Adopt live changes</button
+											<Button variant="link" onclick={() => openAdopt(policyRef(p), true)}
+												><GitPullRequest size={12} /> Adopt live changes</Button
 											>
 										{/if}
-										<button
-											type="button"
-											onclick={() => (history[keyOf(p)] = !history[keyOf(p)])}
-											class="inline-flex items-center gap-1 text-accent hover:underline"
+										<Button variant="link" onclick={() => (history[keyOf(p)] = !history[keyOf(p)])}
 											><History size={12} />
-											{history[keyOf(p)] ? 'Hide history' : 'History'}</button
+											{history[keyOf(p)] ? 'Hide history' : 'History'}</Button
 										>
 										<button
 											type="button"
@@ -248,11 +235,8 @@
 										>
 									{:else if canAdoptPolicy(p)}
 										<span class="text-ink-faint">Not declared in git.</span>
-										<button
-											type="button"
-											onclick={() => openAdopt(policyRef(p))}
-											class="inline-flex items-center gap-1 text-accent hover:underline"
-											><GitPullRequest size={12} /> Adopt into git</button
+										<Button variant="link" onclick={() => openAdopt(policyRef(p))}
+											><GitPullRequest size={12} /> Adopt into git</Button
 										>
 									{:else}
 										<span class="text-ink-faint">Not declared in git: nothing to stage here.</span>

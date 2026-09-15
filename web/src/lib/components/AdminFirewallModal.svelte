@@ -4,12 +4,14 @@
 	import { rowList } from '$lib/rowlist.svelte';
 	import { validName, NAME_HINT } from '$lib/validate';
 	import ChoiceCards from './ChoiceCards.svelte';
+	import Button from './Button.svelte';
 	import Note from './Note.svelte';
 	import StageModal from './StageModal.svelte';
 	import FormField from './FormField.svelte';
 	import TextInput from './TextInput.svelte';
 	import PeerSelector from './PeerSelector.svelte';
 	import ProtoPortInput from './ProtoPortInput.svelte';
+	import SelectInput from './SelectInput.svelte';
 
 	let {
 		initial,
@@ -71,7 +73,7 @@
 		if (baseline) return [];
 		const m: string[] = [];
 		if (!name) m.push('Name is required');
-		else if (!validName(name)) m.push('Name must be lowercase alphanumeric with dashes');
+		else if (!validName(name)) m.push(NAME_HINT);
 		if (priority == null || priority < 0 || priority > 1000) m.push('Priority must be 0-1000');
 		return m;
 	});
@@ -159,17 +161,14 @@
 	<div class="space-y-2">
 		<div class="flex items-center justify-between">
 			<span class="text-ink-soft">Ingress rules <span class="text-ink-faint">(ordered)</span></span>
-			<button
-				onclick={rules.add}
-				class="flex items-center gap-1 text-xs text-accent hover:underline"
-				><Plus size={12} /> Add rule</button
-			>
+			<Button variant="link" size="sm" onclick={rules.add}><Plus size={12} /> Add rule</Button>
 		</div>
 		{#each rows as row, i (i)}
 			<div class="flex flex-wrap items-center gap-2 rounded border border-line p-2">
-				<select
+				<SelectInput
 					bind:value={row.action}
-					class="rounded border border-line-strong px-2 py-1 text-xs {row.action === 'Deny'
+					size="sm"
+					class="w-auto! {row.action === 'Deny'
 						? 'text-danger-ink'
 						: row.action === 'Allow'
 							? 'text-ok-ink'
@@ -178,15 +177,15 @@
 					<option value="Allow">Allow</option>
 					<option value="Deny">Deny</option>
 					{#if !baseline}<option value="Pass">Pass</option>{/if}
-				</select>
+				</SelectInput>
 				<span class="text-xs text-ink-faint">from project</span>
 				<PeerSelector
 					bind:key={row.key}
 					bind:value={row.value}
 					keyPlaceholder="tier"
 					valuePlaceholder="web"
-					keyClass="w-20"
-					valueClass="w-20"
+					keyClass="w-20!"
+					valueClass="w-20!"
 				/>
 				<ProtoPortInput bind:proto={row.proto} bind:port={row.port} portClass="w-16" />
 				<button

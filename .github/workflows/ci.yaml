@@ -61,6 +61,8 @@ jobs:
         working-directory: web
       - run: npm run format:check
         working-directory: web
+      - run: npm run lint
+        working-directory: web
       - run: npm run check
         working-directory: web
       - run: npm run test:unit
@@ -84,8 +86,6 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
-        working-directory: web
-      - run: npm run build
         working-directory: web
       - run: npx playwright install --with-deps chromium
         working-directory: web

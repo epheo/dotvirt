@@ -23,7 +23,7 @@ export const catalogHref = (kind: CatalogKind, item?: string): string =>
 // The shared library reads as a subscribed content library.
 export const libraryLabel = (lib: string) => (lib === 'platform' ? 'Shared library' : lib);
 
-export type CatalogRow = {
+type CatalogRow = {
 	key: string;
 	title: string;
 	fact: string;

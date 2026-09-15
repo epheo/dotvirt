@@ -17,7 +17,7 @@ export type Task = {
 	active?: boolean; // for 'migration' rows: still moving
 };
 
-export interface TaskSources {
+interface TaskSources {
 	inventory: Inventory | null;
 	feed: TaskEntry[];
 	drafts: { project: string; draft: DraftView }[];

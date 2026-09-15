@@ -1,4 +1,6 @@
 <script lang="ts">
+	import TextInput from './TextInput.svelte';
+
 	// Key=value label-selector pair shared by the firewall modals, both as the
 	// "applies to" panel (flex-1 inputs, the default) and inline in rule rows
 	// (fixed widths via keyClass/valueClass). Renders as a fragment so the
@@ -20,14 +22,6 @@
 	} = $props();
 </script>
 
-<input
-	bind:value={key}
-	placeholder={keyPlaceholder}
-	class="{keyClass} rounded border border-line-strong px-2 py-1 text-xs"
-/>
+<TextInput bind:value={key} size="sm" placeholder={keyPlaceholder} class={keyClass} />
 <span class="text-ink-faint">=</span>
-<input
-	bind:value
-	placeholder={valuePlaceholder}
-	class="{valueClass} rounded border border-line-strong px-2 py-1 text-xs"
-/>
+<TextInput bind:value size="sm" placeholder={valuePlaceholder} class={valueClass} />

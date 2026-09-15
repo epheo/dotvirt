@@ -35,7 +35,7 @@
 		...new Set(
 			[...adapters]
 				.filter((a) => !node || a.node === node)
-				.sort((a, b) => (a.role === 'available' ? -1 : 1))
+				.sort((a, b) => Number(b.role === 'available') - Number(a.role === 'available'))
 				.map((a) => a.name),
 		),
 	]);
@@ -47,7 +47,7 @@
 	const missing = $derived.by(() => {
 		const m: string[] = [];
 		if (!name) m.push('Name is required');
-		else if (!validName(name)) m.push('Name must be lowercase alphanumeric with dashes');
+		else if (!validName(name)) m.push(NAME_HINT);
 		if (!nic) m.push('Physical adapter is required');
 		return m;
 	});

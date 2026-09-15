@@ -1,11 +1,20 @@
 <script lang="ts">
 	import { ChevronDown, ChevronRight } from 'lucide-svelte';
-	import { api, type Change, type Commit, type DraftItem, type VM, type VMUsage } from '$lib/api';
+	import {
+		api,
+		vmKey,
+		type Change,
+		type Commit,
+		type DraftItem,
+		type VM,
+		type VMUsage,
+	} from '$lib/api';
 	import { duration, relativeAge } from '$lib/format';
 	import { resource } from '$lib/resource.svelte';
 	import { itemKey } from '$lib/review';
 	import { vmSizing } from '$lib/sizing';
 	import CapacityUsage from './CapacityUsage.svelte';
+	import Button from './Button.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import ChangeList from './ChangeList.svelte';
@@ -29,7 +38,6 @@
 		onadopt,
 		onresync,
 		onconsole,
-		onmonitor,
 		onedit,
 		onmigrate,
 	}: {
@@ -40,7 +48,6 @@
 		onadopt: () => void;
 		onresync: () => void;
 		onconsole: () => void;
-		onmonitor: () => void;
 		// Opens Edit settings (the card header's next action); absent = read-only host.
 		onedit?: () => void;
 		// Opens the live-migration target picker (the Placement card's action).
@@ -50,14 +57,14 @@
 	// A paused VMI keeps phase Running, so the label checks the Paused flag too.
 	const statusText = $derived(vm.paused ? 'Paused' : (vm.phase ?? vm.power));
 
-	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
+	const key = $derived(vmKey(vm));
 
 	// One usage snapshot feeds the CPU/Memory tiles and the bars below, so both
 	// always agree. Keyed on identity (the live stream hands down a fresh vm
 	// object every frame); resource's stale guard drops an in-flight response
 	// once the selection moves, so VM A's numbers never render under VM B.
 	const usageRes = resource<VMUsage>(
-		() => vmKey,
+		() => key,
 		() => api.vmUsage(vm.namespace, vm.name),
 		{
 			poll: 30000,
@@ -73,10 +80,10 @@
 	// is in the key: a merge that reaches the cluster moves it.
 	const project = $derived(inventory.projectOf(vm.namespace));
 	const revision = $derived(
-		inventory.inventory?.projects.find((p) => p.name === project)?.gitOps?.revision ?? '',
+		inventory.projects.find((p) => p.name === project)?.gitOps?.revision ?? '',
 	);
 	const historyRes = resource<Commit[]>(
-		() => `${vmKey}|${vm.sourceFile ?? ''}|${revision}`,
+		() => `${key}|${vm.sourceFile ?? ''}|${revision}`,
 		() => (vm.sourceFile ? api.vmHistory(vm.namespace, vm.name) : Promise.resolve([])),
 		{ reset: true },
 	);
@@ -93,12 +100,12 @@
 
 	// Standing problems scoped to this VM (the Issues card), off the same
 	// derivation the bell and the inspector use.
-	const vmIssues = $derived(inventory.issues.filter((i) => i.scope === vmKey));
+	const vmIssues = $derived(inventory.issues.filter((i) => i.scope === key));
 
 	// Drift detail folds per selection, not per frame: key on identity.
 	let showDrift = $state(false);
 	$effect(() => {
-		vmKey;
+		key;
 		showDrift = false;
 	});
 </script>
@@ -112,9 +119,7 @@
 		<InfoCard title="Guest">
 			{#snippet action()}
 				{#if vm.phase === 'Running'}
-					<button onclick={onconsole} class="text-xs text-accent-ink hover:underline"
-						>Console</button
-					>
+					<Button variant="link" size="sm" onclick={onconsole}>Console</Button>
 				{/if}
 			{/snippet}
 			<dl class="divide-y divide-line-soft text-[13px]">
@@ -139,7 +144,7 @@
 		<InfoCard title="Hardware">
 			{#snippet action()}
 				{#if onedit && vm.sourceFile}
-					<button onclick={onedit} class="text-xs text-accent-ink hover:underline">Edit</button>
+					<Button variant="link" size="sm" onclick={onedit}>Edit</Button>
 				{/if}
 			{/snippet}
 			<dl class="divide-y divide-line-soft text-[13px]">
@@ -178,9 +183,7 @@
 		<InfoCard title="Placement">
 			{#snippet action()}
 				{#if onmigrate && vm.phase === 'Running'}
-					<button onclick={onmigrate} class="text-xs text-accent-ink hover:underline"
-						>Migrate</button
-					>
+					<Button variant="link" size="sm" onclick={onmigrate}>Migrate</Button>
 				{/if}
 			{/snippet}
 			<dl class="divide-y divide-line-soft text-[13px]">
@@ -204,9 +207,11 @@
 		<InfoCard title="GitOps">
 			{#snippet action()}
 				{#if stagedItem}
-					<button
+					<Button
+						variant="link"
+						size="sm"
 						onclick={() => ui.openChanges({ kind: 'item', project, key: itemKey(stagedItem) })}
-						class="text-xs text-accent-ink hover:underline">Review changes</button
+						>Review changes</Button
 					>
 				{/if}
 			{/snippet}
@@ -239,10 +244,11 @@
 						>
 						<span class="shrink-0 text-ink-faint">{relativeAge(latest.when)}</span>
 					{/if}
-					<a
+					<Button
+						variant="link"
+						class="ml-auto shrink-0"
 						href="?tab=changes"
-						data-sveltekit-replacestate
-						class="ml-auto shrink-0 text-accent-ink hover:underline">All changes</a
+						data-sveltekit-replacestate>All changes</Button
 					>
 				</div>
 			{/if}

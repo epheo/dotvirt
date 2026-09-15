@@ -133,22 +133,19 @@ class Ui {
 	modal = $state<AppModal | null>(null);
 	ctx = $state<CtxState | null>(null);
 
-	// A VM right-click inside the grid's multi-selection acts on the selection.
-	// The workspace that owns `picked` registers this while mounted; it returns
-	// true when it captured the event (and opened its own bulk menu).
-	bulkIntercept: ((vm: VM, x: number, y: number) => boolean) | null = null;
 	openVMContext(vm: VM, x: number, y: number) {
-		if (this.bulkIntercept?.(vm, x, y)) return;
 		this.ctx = { x, y, kind: 'vm', vm };
 	}
 
-	// The masthead search instance, so object pages can push label queries into it.
-	search: { searchFor: (q: string) => void } | null = null;
+	// A query for the masthead search box, pushed by a label chip on an object
+	// page; the box takes it, focuses, and clears it.
+	search = $state('');
 
 	reset() {
 		this.toasts = [];
 		this.modal = null;
 		this.ctx = null;
+		this.search = '';
 	}
 }
 

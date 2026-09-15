@@ -1,4 +1,4 @@
-import type { Proposal } from './api';
+import { vmKey, type Proposal } from './api';
 import { changesHref } from './nav';
 
 // The Changes section's selection as URL state, so a review is shareable and
@@ -17,7 +17,10 @@ const fullHash = /^[0-9a-f]{40}$/;
 
 // A staged item's identity within its project's draft (the &item= value).
 export const itemKey = (it: { resource?: string; namespace: string; name: string }) =>
-	`${it.resource || 'vm'}:${it.namespace}/${it.name}`;
+	`${it.resource || 'vm'}:${vmKey(it)}`;
+// A past commit's and an open PR's identities, for the lanes and the review cache.
+export const commitKey = (project: string, hash: string) => `${project}@${hash}`;
+export const prKey = (project: string, prNumber: number) => `${project}#${prNumber}`;
 
 export function reviewURL(t: ReviewTarget | null): string {
 	if (!t) return '/changes';

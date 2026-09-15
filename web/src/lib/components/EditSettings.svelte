@@ -9,12 +9,13 @@
 		type EditSection,
 		type NicRow,
 	} from '$lib/editform';
-	import { quantityBytes } from '$lib/format';
+	import { quantityBytes, splitList } from '$lib/format';
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
 	import { nodeTargets } from '$lib/state/hosts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { validName, NAME_HINT } from '$lib/validate';
 	import CheckGroup from './CheckGroup.svelte';
+	import Button from './Button.svelte';
 	import Note from './Note.svelte';
 	import Wizard from './Wizard.svelte';
 	import FormField from './FormField.svelte';
@@ -38,8 +39,6 @@
 
 	const options = $derived(inventory.options);
 
-	// The modal is mounted fresh per VM, so capturing the initial prop value to
-	// seed the editable working copy is intentional.
 	// svelte-ignore state_referenced_locally
 	let form = $state(seedEditForm(vm));
 
@@ -74,10 +73,9 @@
 		});
 	});
 	let pinText = $state('');
-	// svelte-ignore state_referenced_locally
 	pinText = form.pin.join(' ');
 	function syncPinText() {
-		form.pin = pinText.split(/[\s,]+/).filter(Boolean);
+		form.pin = splitList(pinText);
 	}
 
 	const customScheduling = $derived(!!vm.scheduling?.custom);
@@ -290,9 +288,7 @@
 			<div class="mb-1 flex items-center justify-between">
 				<span class="text-ink-muted">Placement groups</span>
 				{#if !customScheduling}
-					<button onclick={addGroup} type="button" class="text-xs text-accent hover:underline"
-						>+ Add group</button
-					>
+					<Button variant="link" size="sm" onclick={addGroup}>+ Add group</Button>
 				{/if}
 			</div>
 			{#if customScheduling}
@@ -462,9 +458,11 @@
 {#snippet stepLabels()}
 	<div class="mb-2 flex items-center justify-between">
 		<span class="text-xs text-ink-faint">Key/value metadata.</span>
-		<button
+		<Button
+			variant="link"
+			size="sm"
 			onclick={() => (form.labelRows = [...form.labelRows, { key: '', value: '' }])}
-			class="text-xs text-accent hover:underline">+ Add label</button
+			>+ Add label</Button
 		>
 	</div>
 	{#each form.labelRows as row, i (i)}

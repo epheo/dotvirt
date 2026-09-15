@@ -2,7 +2,7 @@
 // one blank row (or the rows an edit starts from), immutable add/remove (rows
 // is reassigned so $derived readers see the change). Callers keep the
 // length-1 floor via their disabled gate.
-export interface RowList<T> {
+interface RowList<T> {
 	readonly rows: T[];
 	add(): void;
 	remove(i: number): void;

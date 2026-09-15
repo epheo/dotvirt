@@ -79,7 +79,7 @@ export const VM_TABS = [
 ] as const;
 export type VMTab = (typeof VM_TABS)[number];
 
-export const CONTAINER_TABS = [
+const CONTAINER_TABS = [
 	{ id: 'summary', label: 'Summary' },
 	{ id: 'vms', label: 'VMs' },
 	{ id: 'monitor', label: 'Monitor' },

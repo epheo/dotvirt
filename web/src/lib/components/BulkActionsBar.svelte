@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Power, PowerOff, Trash2 } from 'lucide-svelte';
+	import Button from './Button.svelte';
 
 	// The grid's bulk-selection bar. Every action stages a change through the
 	// PR flow (nothing touches the cluster); the host owns the selection set
@@ -22,20 +23,12 @@
 <div class="flex items-center gap-2 border-b border-line bg-select-soft px-4 py-1.5 text-sm">
 	<span class="font-medium text-ink-soft">{count} selected</span>
 	<span class="text-ink-faint">|</span>
-	<button
-		onclick={() => onpower('On')}
-		disabled={busy}
-		class="flex items-center gap-1.5 rounded border border-line-strong bg-panel px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
-	>
+	<Button variant="secondary" size="sm" onclick={() => onpower('On')} disabled={busy}>
 		<Power size={13} class="text-ok-ink" /> Power On
-	</button>
-	<button
-		onclick={() => onpower('Off')}
-		disabled={busy}
-		class="flex items-center gap-1.5 rounded border border-line-strong bg-panel px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
-	>
+	</Button>
+	<Button variant="secondary" size="sm" onclick={() => onpower('Off')} disabled={busy}>
 		<PowerOff size={13} class="text-ink-muted" /> Power Off
-	</button>
+	</Button>
 	<button
 		onclick={ondelete}
 		disabled={busy}

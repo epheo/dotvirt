@@ -1,4 +1,4 @@
-import { draftsByProject, type DraftItem, type DraftView } from '$lib/api';
+import { draftsByProject, vmKey, type DraftItem, type DraftView } from '$lib/api';
 import { inventory } from './inventory.svelte';
 
 // The synthetic platform-tier project (matches the backend's platformProjectName);
@@ -21,8 +21,7 @@ class DraftsStore {
 	// VMs with an unproposed staged change (this user's draft), keyed "ns/name".
 	readonly stagedByKey = $derived.by(() => {
 		const m = new Map<string, DraftItem>();
-		for (const { draft } of this.drafts)
-			for (const it of draft.items) m.set(`${it.namespace}/${it.name}`, it);
+		for (const { draft } of this.drafts) for (const it of draft.items) m.set(vmKey(it), it);
 		return m;
 	});
 

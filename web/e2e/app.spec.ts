@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { login, openFirstVM } from './helpers';
+import { login, openVM } from './helpers';
 
 test.beforeEach(async ({ page }) => {
 	await login(page);
@@ -37,7 +37,7 @@ test('inventory sections switch tree and workspace', async ({ page }) => {
 });
 
 test('VMs tab lists VMs and opens a detail route', async ({ page }) => {
-	await openFirstVM(page);
+	await openVM(page);
 	await expect(page).toHaveURL(/\/vm\//);
 	// VM workspace tabs are links: Summary / Monitor / … / Snapshots / Console.
 	await expect(page.getByRole('link', { name: 'Snapshots', exact: true })).toBeVisible();
@@ -45,7 +45,7 @@ test('VMs tab lists VMs and opens a detail route', async ({ page }) => {
 });
 
 test('VM Monitor exposes the Events + Performance sub-rail', async ({ page }) => {
-	await openFirstVM(page);
+	await openVM(page);
 	// Scope to the detail pane — the bottom dock also has an "Events" tab.
 	const detail = page.locator('main');
 	await detail.getByRole('link', { name: 'Monitor', exact: true }).click();
@@ -54,7 +54,7 @@ test('VM Monitor exposes the Events + Performance sub-rail', async ({ page }) =>
 });
 
 test('Snapshots tab shows the take control', async ({ page }) => {
-	await openFirstVM(page);
+	await openVM(page);
 	await page.getByRole('link', { name: 'Snapshots', exact: true }).click();
 	await expect(page).toHaveURL(/tab=snapshots/);
 	await expect(page.getByRole('button', { name: /Take snapshot/ })).toBeVisible();
@@ -72,7 +72,7 @@ test('views are deep-linkable and refresh-safe', async ({ page }) => {
 	await expect(page.locator('main').getByText('VMs attached')).toBeVisible();
 	// A VM URL survives a hard reload (session cookie + fallback routing).
 	await page.goto('/compute');
-	await openFirstVM(page);
+	await openVM(page);
 	const url = page.url();
 	await page.reload();
 	await expect(page).toHaveURL(url);

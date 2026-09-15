@@ -1,9 +1,10 @@
 <script lang="ts">
-	import type { VM } from '$lib/api';
+	import { vmKey, type VM } from '$lib/api';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import Banner from './Banner.svelte';
+	import Button from './Button.svelte';
 	import StatusDot from './StatusDot.svelte';
 
 	// Pending-change awareness on object pages: an unproposed staged change (this
@@ -12,9 +13,7 @@
 	let { vm = undefined, project = undefined }: { vm?: VM; project?: string } = $props();
 
 	const proj = $derived(vm ? inventory.projectOf(vm.namespace) : (project ?? ''));
-	const stagedItem = $derived(
-		vm ? drafts.stagedByKey.get(`${vm.namespace}/${vm.name}`) : undefined,
-	);
+	const stagedItem = $derived(vm ? drafts.stagedByKey.get(vmKey(vm)) : undefined);
 	const stagedCount = $derived(
 		!vm && project ? (drafts.drafts.find((d) => d.project === project)?.draft.count ?? 0) : 0,
 	);
@@ -29,9 +28,9 @@
 		{:else}
 			{stagedCount} staged change{stagedCount === 1 ? '' : 's'} in this project — not yet proposed.
 		{/if}
-		<button onclick={() => ui.openChanges()} class="font-medium text-accent-ink hover:underline">
+		<Button variant="link" class="font-medium" onclick={() => ui.openChanges()}>
 			Review &amp; propose
-		</button>
+		</Button>
 	</Banner>
 {:else if proposal}
 	<Banner tone="ok">

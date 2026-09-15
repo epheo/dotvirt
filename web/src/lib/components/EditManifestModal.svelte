@@ -27,8 +27,6 @@
 		onclose: () => void;
 	} = $props();
 
-	// The buffer seeds from the file the modal opened for (the host closes it on
-	// selection change, so the initial capture is the intent).
 	// svelte-ignore state_referenced_locally
 	let yaml = $state(initial);
 	const dirty = $derived(yaml !== initial);

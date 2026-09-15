@@ -25,7 +25,7 @@
 	// repo. An apply failure (operation Failed/Error) is a manifest problem the
 	// recovery flow must not offer on.
 	function projectSyncError(project: string): string {
-		return repoError(inventory.inventory?.projects.find((p) => p.name === project)?.gitOps);
+		return repoError(inventory.projects.find((p) => p.name === project)?.gitOps);
 	}
 
 	// Untracked VMs are what the inventory can see git not describing, so they decide

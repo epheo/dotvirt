@@ -11,6 +11,7 @@ import {
 } from '$lib/api';
 import { friendlyError } from '$lib/format';
 import { deriveIssues } from '$lib/issues';
+import { prKey } from '$lib/review';
 
 // The live cluster read layer: the WS inventory snapshot plus the once-per-
 // session networking inventory (GET /api/networks). Everything else the UI
@@ -18,6 +19,7 @@ import { deriveIssues } from '$lib/issues';
 class InventoryStore {
 	inventory = $state<Inventory | null>(null);
 	error = $state('');
+	readonly projects = $derived(this.inventory?.projects ?? []);
 	// The networking read layer: the port-group catalog (so raw OVN-K refs render
 	// as catalog port groups) plus the physical fabric (uplinks + node NICs).
 	// Changes rarely; backend caches 60s.
@@ -46,11 +48,7 @@ class InventoryStore {
 	readonly canAdminFw = $derived(!!this.netInv?.caps?.adminNetworkPolicy);
 
 	// All VMs across the 3-level tree (project -> namespace -> vm).
-	readonly allVMs = $derived(
-		this.inventory
-			? this.inventory.projects.flatMap((p) => p.namespaces.flatMap((n) => n.vms))
-			: [],
-	);
+	readonly allVMs = $derived(this.projects.flatMap((p) => p.namespaces.flatMap((n) => n.vms)));
 	readonly vmCount = $derived(this.allVMs.length);
 	// Standing problems (the issues plane), derived once per frame for the
 	// header bell, the tree badges and the Summary card.
@@ -62,9 +60,7 @@ class InventoryStore {
 	// label). The backend only fills this for callers with namespace-create
 	// authority, so non-empty implies the adopt action is allowed.
 	readonly adoptable = $derived(this.inventory?.adoptable ?? []);
-	readonly projectNames = $derived(
-		this.inventory ? this.inventory.projects.map((p) => p.name) : [],
-	);
+	readonly projectNames = $derived(this.projects.map((p) => p.name));
 	// A stable primitive key for the SET of project names: $derived arrays are a
 	// new reference every inventory frame, which would re-fire effects on every VM
 	// state change. Keying on this string fires them only when the set changes.
@@ -73,7 +69,7 @@ class InventoryStore {
 	// into a PR and a merge/close clears the lane - possibly from another tab.
 	readonly proposalsKey = $derived(
 		this.proposals
-			.map((p) => `${p.project}#${p.prNumber}`)
+			.map((p) => prKey(p.project, p.prNumber))
 			.sort()
 			.join('\0'),
 	);
@@ -104,17 +100,11 @@ class InventoryStore {
 	// Namespaces a VM can be created in: those in projects that have a repo (no
 	// point staging into a project with no backing repo).
 	readonly namespaces = $derived(
-		this.inventory
-			? this.inventory.projects
-					.filter((p) => p.repo)
-					.flatMap((p) => p.namespaces.map((n) => n.namespace))
-			: [],
+		this.projects.filter((p) => p.repo).flatMap((p) => p.namespaces.map((n) => n.namespace)),
 	);
 	// Projects with a backing repo - the ones with commit history to browse +
 	// revert from (the Changes panel's History section).
-	readonly repoProjects = $derived(
-		this.inventory ? this.inventory.projects.filter((p) => p.repo).map((p) => p.name) : [],
-	);
+	readonly repoProjects = $derived(this.projects.filter((p) => p.repo).map((p) => p.name));
 
 	apply(inv: Inventory) {
 		this.inventory = inv;
@@ -162,8 +152,7 @@ class InventoryStore {
 
 	projectOf(namespace: string): string {
 		return (
-			this.inventory?.projects.find((p) => p.namespaces.some((n) => n.namespace === namespace))
-				?.name ?? ''
+			this.projects.find((p) => p.namespaces.some((n) => n.namespace === namespace))?.name ?? ''
 		);
 	}
 }

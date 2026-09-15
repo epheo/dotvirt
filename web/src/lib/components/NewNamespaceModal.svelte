@@ -31,7 +31,7 @@
 	const missing = $derived.by(() => {
 		const m: string[] = [];
 		if (!name) m.push('Name is required');
-		else if (!validName(name)) m.push('Name must be lowercase alphanumeric with dashes');
+		else if (!validName(name)) m.push(NAME_HINT);
 		if (!project) m.push('Project is required');
 		if (withNetwork) {
 			if (!netName) m.push('VM Network name is required');

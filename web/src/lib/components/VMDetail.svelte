@@ -10,7 +10,7 @@
 		Server,
 		Square,
 	} from 'lucide-svelte';
-	import { api, type Change, type DraftItem, type Network, type VM } from '$lib/api';
+	import { api, vmKey, type Change, type DraftItem, type Network, type VM } from '$lib/api';
 	import {
 		adoptVM,
 		manifestURL,
@@ -26,6 +26,7 @@
 	import { duration } from '$lib/format';
 	import { phaseTone } from '$lib/status';
 	import ActionMenu from './ActionMenu.svelte';
+	import Button from './Button.svelte';
 	import Banner from './Banner.svelte';
 	import Console from './Console.svelte';
 	import EffectivePolicyPanel from './EffectivePolicyPanel.svelte';
@@ -51,7 +52,6 @@
 		ontab,
 		stagedItem = null,
 		onstagedopen,
-		onsearchlabel,
 		networks = [],
 	}: {
 		vm: VM;
@@ -61,7 +61,6 @@
 		ontab?: (t: VMTab) => void;
 		stagedItem?: DraftItem | null;
 		onstagedopen?: () => void;
-		onsearchlabel?: (key: string, value: string) => void;
 		// The port-group catalog (GET /api/networks), to resolve each NIC's raw
 		// network ref into the port group the admin recognizes.
 		networks?: Network[];
@@ -152,14 +151,14 @@
 	// on reference would snap the Monitor rail back and refetch drift whenever
 	// cluster state moves. The tab itself is URL state - a fresh VM route
 	// arrives without ?tab=.
-	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
+	const key = $derived(vmKey(vm));
 	$effect(() => {
-		vmKey;
+		key;
 		monitorView = 'events';
 	});
 	// Drift detail (running vs main): null until known, [] when identical.
 	const driftRes = resource<Change[]>(
-		() => vmKey,
+		() => key,
 		() => api.drift(vm.namespace, vm.name).then((d) => (d.drift ? d.changes : [])),
 		{ reset: true },
 	);
@@ -220,14 +219,15 @@
 				</button>
 			{/each}
 			<span class="mx-1.5 h-4 w-px bg-line"></span>
-			<button
+			<Button
+				variant="secondary"
+				size="sm"
 				onclick={() => openEdit()}
 				disabled={!vm.sourceFile}
 				title={vm.sourceFile ? 'Edit settings' : 'Not in git — adopt this VM first'}
-				class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50 disabled:hover:bg-transparent"
 			>
 				<Pencil size={13} /> Edit Settings
-			</button>
+			</Button>
 			<HeaderMenu align="right" panel={false}>
 				{#snippet trigger({ toggle })}
 					<button
@@ -289,7 +289,6 @@
 				onadopt={adopt}
 				onresync={resync}
 				onconsole={() => ontab?.('console')}
-				onmonitor={() => ontab?.('monitor')}
 				onedit={() => openEdit()}
 				onmigrate={() => openVMDialog('migrate', vm)}
 			/>
@@ -305,19 +304,19 @@
 				onchange={(v) => (monitorView = v as typeof monitorView)}
 			/>
 			{#if monitorView === 'performance'}
-				{#key vmKey}
+				{#key key}
 					<MetricsPanel load={(r) => api.metrics(vm.namespace, vm.name, r)} />
 				{/key}
 			{:else}
 				<VMEventsTable {vm} />
 			{/if}
 		{:else if tab === 'configure'}
-			<VMConfigure {vm} {networks} onedit={openEdit} {onsearchlabel} />
+			<VMConfigure {vm} {networks} onedit={openEdit} />
 		{:else if tab === 'security'}
 			<div class="max-w-3xl space-y-4">
 				<section class="rounded border border-line bg-panel p-3">
 					<h2 class="mb-2 text-sm font-semibold text-ink">Trace a flow from this VM</h2>
-					{#key vmKey}
+					{#key key}
 						<TracePanel source={{ namespace: vm.namespace, vm: vm.name }} />
 					{/key}
 				</section>
@@ -326,15 +325,15 @@
 		{:else if tab === 'permissions'}
 			<Permissions namespaces={[vm.namespace]} />
 		{:else if tab === 'changes'}
-			{#key vmKey}
+			{#key key}
 				<VMChanges {vm} {stagedItem} />
 			{/key}
 		{:else if tab === 'snapshots'}
-			{#key vmKey}
+			{#key key}
 				<Snapshots {vm} />
 			{/key}
 		{:else}
-			{#key vmKey}
+			{#key key}
 				<Console {vm} />
 			{/key}
 		{/if}

@@ -4,6 +4,7 @@
 	import { action } from '$lib/resource.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import Banner from './Banner.svelte';
+	import Button from './Button.svelte';
 
 	// Brownfield guidance: a repo-backed project running objects git does not
 	// describe gets the adopt call-to-action where the user already is, not only
@@ -12,7 +13,7 @@
 	// would actually stage something.
 	let { project, namespace }: { project: string; namespace?: string } = $props();
 
-	const p = $derived(inventory.inventory?.projects.find((x) => x.name === project));
+	const p = $derived(inventory.projects.find((x) => x.name === project));
 	const healthy = $derived(!!p?.repo && !p?.error && !p?.gitOps?.syncError);
 	const scoped = $derived(namespace ? [namespace] : (p?.namespaces.map((n) => n.namespace) ?? []));
 	// Untracked VMs, project networks and rules in the scope; the capture itself
@@ -57,12 +58,8 @@
 		<span class="min-w-0 truncate"
 			><strong>{untracked} {untracked === 1 ? 'object runs' : 'objects run'}</strong> {copy}</span
 		>
-		<button
-			onclick={adopt}
-			disabled={op.busy}
-			class="ml-auto shrink-0 font-medium text-accent-ink hover:underline disabled:opacity-50"
-		>
+		<Button variant="link" class="ml-auto shrink-0 font-medium" onclick={adopt} disabled={op.busy}>
 			{op.busy ? 'Capturing…' : 'Adopt into git'}
-		</button>
+		</Button>
 	</Banner>
 {/if}

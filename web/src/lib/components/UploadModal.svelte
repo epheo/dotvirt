@@ -5,6 +5,7 @@
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { validName, NAME_HINT } from '$lib/validate';
 	import ErrorNote from './ErrorNote.svelte';
+	import Button from './Button.svelte';
 	import Modal from './Modal.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
 	import FormField from './FormField.svelte';
@@ -45,7 +46,7 @@
 		const m: string[] = [];
 		if (!file) m.push('Pick an image file');
 		if (!name) m.push('Disk name is required');
-		else if (!nameOK) m.push('Disk name must be lowercase alphanumeric with dashes');
+		else if (!nameOK) m.push(`Disk name: ${NAME_HINT}`);
 		if (!namespace) m.push('Project is required');
 		if (!sizeOK) m.push('Disk size must be a quantity like 10Gi');
 		return m;
@@ -226,20 +227,11 @@
 				class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong"
 				>Cancel</button
 			>
-			<button
-				onclick={start}
-				disabled={!ready}
-				title={ready ? '' : missing[0]}
-				class="rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
-			>
+			<Button onclick={start} disabled={!ready} title={ready ? '' : missing[0]}>
 				{stage === 'error' ? 'Retry' : 'Upload'}
-			</button>
+			</Button>
 		{:else if stage === 'done'}
-			<button
-				onclick={onclose}
-				class="ml-auto rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white"
-				>Done</button
-			>
+			<Button class="ml-auto" onclick={onclose}>Done</Button>
 		{:else}
 			<span class="ml-auto text-xs text-ink-faint">Working… keep this tab open.</span>
 		{/if}

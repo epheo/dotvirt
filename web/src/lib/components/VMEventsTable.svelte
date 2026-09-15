@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { api, type VM } from '$lib/api';
+	import { api, vmKey, type VM } from '$lib/api';
 	import { resource } from '$lib/resource.svelte';
 	import EventsTable from './EventsTable.svelte';
 
@@ -9,9 +9,9 @@
 
 	// Keyed on identity (the stream hands down a fresh vm object every frame);
 	// a failed read renders as an empty list.
-	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
+	const key = $derived(vmKey(vm));
 	const evRes = resource(
-		() => vmKey,
+		() => key,
 		() => api.events(vm.namespace, vm.name),
 		{ reset: true },
 	);
