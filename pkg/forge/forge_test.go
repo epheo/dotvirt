@@ -63,7 +63,7 @@ func TestOwnerPrefixURL(t *testing.T) {
 
 // testClient points a Client at an httptest server with the standard owner/repo.
 func testClient(srvURL string) *Client {
-	return NewFactory(srvURL, "tok", false).For(srvURL + "/dotvirt/team-a.git")
+	return NewFactory(srvURL, StaticToken("tok"), false, "").For(srvURL + "/dotvirt/team-a.git")
 }
 
 func TestFindPRAcrossStates(t *testing.T) {
@@ -232,7 +232,7 @@ func TestEnsureWebhookReconcilesOnce(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewFactory(srv.URL, "tok", false).For("https://forge/o/r.git")
+	c := NewFactory(srv.URL, StaticToken("tok"), false, "").For("https://forge/o/r.git")
 	const target = "https://dotvirt/api/webhooks/forge"
 
 	// Absent -> created once; the create lands the secret, so the sweeps that
@@ -299,7 +299,7 @@ func TestEnsureWebhookHostChangeRecreates(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewFactory(srv.URL, "tok", false).For("https://forge/o/r.git")
+	c := NewFactory(srv.URL, StaticToken("tok"), false, "").For("https://forge/o/r.git")
 	const target = "http://dotvirt.dotvirt.svc:8080/api/webhooks/forge"
 	if err := c.EnsureWebhook(target, "s3cret"); err != nil {
 		t.Fatalf("EnsureWebhook: %v", err)
@@ -334,7 +334,7 @@ func TestEnsureWebhookDeletesDuplicates(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewFactory(srv.URL, "tok", false).For("https://forge/o/r.git")
+	c := NewFactory(srv.URL, StaticToken("tok"), false, "").For("https://forge/o/r.git")
 	if err := c.EnsureWebhook("https://dotvirt/api/webhooks/forge", "s3cret"); err != nil {
 		t.Fatalf("EnsureWebhook: %v", err)
 	}
@@ -369,5 +369,41 @@ func TestNormalizeRepoURL(t *testing.T) {
 	}
 	if got := NormalizeRepoURL(""); got != "" {
 		t.Errorf("NormalizeRepoURL(\"\") = %q, want empty", got)
+	}
+}
+
+// One net/url parse serves every URL helper, so the forms a repo is written in
+// - host-free annotation refs, credentialed clone URLs, bare paths - resolve
+// the same way everywhere.
+func TestURLHelpersAgreeOnEveryForm(t *testing.T) {
+	cases := []struct {
+		url                      string
+		host, pathRef, ownerRepo string
+	}{
+		{"https://forge.example/dotvirt/team-a.git", "forge.example", "dotvirt/team-a.git", "dotvirt/team-a"},
+		{"https://bot:secret@Forge.Example:3000/dotvirt/team-a.git", "forge.example:3000", "dotvirt/team-a.git", "dotvirt/team-a"},
+		{"dotvirt/team-a.git", "", "dotvirt/team-a.git", "dotvirt/team-a"},
+		{"/tmp/repos/dotvirt/team-a.git", "", "tmp/repos/dotvirt/team-a.git", "dotvirt/team-a"},
+	}
+	for _, c := range cases {
+		if got := parseURL(c.url).host; got != c.host {
+			t.Errorf("parseURL(%q).host = %q, want %q", c.url, got, c.host)
+		}
+		if got := PathRef(c.url); got != c.pathRef {
+			t.Errorf("PathRef(%q) = %q, want %q", c.url, got, c.pathRef)
+		}
+		owner, repo, ok := ownerRepo(c.url)
+		if !ok || owner+"/"+repo != c.ownerRepo {
+			t.Errorf("ownerRepo(%q) = (%q, %q, %v), want %q", c.url, owner, repo, ok, c.ownerRepo)
+		}
+	}
+	if !NewFactory("https://forge.example", StaticToken("t"), false, "").SameForge("https://bot:x@FORGE.example/o/r.git") {
+		t.Error("credentials and case must not make a repo foreign")
+	}
+	if got := ResolveRef("https://forge.example", "o/r.git"); got != "https://forge.example/o/r.git" {
+		t.Errorf("ResolveRef relative = %q", got)
+	}
+	if got := ResolveRef("https://forge.example", "file:///srv/o/r.git"); got != "file:///srv/o/r.git" {
+		t.Errorf("ResolveRef absolute = %q", got)
 	}
 }

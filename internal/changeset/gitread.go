@@ -14,38 +14,33 @@ import (
 // Manifest returns a VM's manifest file as committed on the base branch - the
 // raw bytes plus its repo path (the download filename). The git file IS the
 // VM's full definition, so this is dotvirt's VM-export path.
-func (c *Coordinator) Manifest(proj project.ProjectInfo, namespace, name string) (path string, content []byte, err error) {
-	read, err := c.read(proj)
+func (r *Reader) Manifest(proj project.ProjectInfo, namespace, name string) (path string, content []byte, err error) {
+	read, err := r.read(proj)
 	if err != nil {
 		return "", nil, err
 	}
-	vm, found, err := findVM(read, c.baseBranch, namespace, name)
+	vm, found, err := findVM(read, r.baseBranch, namespace, name)
 	if err != nil {
 		return "", nil, err
 	}
 	if !found {
 		return "", nil, fmt.Errorf("%w: VM %s/%s is not in git", model.ErrNotFound, namespace, name)
 	}
-	files, err := read.VMManifests(c.baseBranch)
+	content, err = read.FileOnBranch(r.baseBranch, vm.SourceFile)
 	if err != nil {
 		return "", nil, err
 	}
-	for _, f := range files {
-		if f.Path == vm.SourceFile {
-			return f.Path, f.Content, nil
-		}
-	}
-	return "", nil, fmt.Errorf("%w: manifest file %s", model.ErrNotFound, vm.SourceFile)
+	return vm.SourceFile, content, nil
 }
 
 // Templates lists proj's library as committed on the base branch. An unreadable
 // repo degrades to an empty library - the caller's other libraries still list.
-func (c *Coordinator) Templates(proj project.ProjectInfo) []model.Template {
-	read, err := c.read(proj)
+func (r *Reader) Templates(proj project.ProjectInfo) []model.Template {
+	read, err := r.read(proj)
 	if err != nil {
 		return nil
 	}
-	files, err := read.TemplatesOnBranch(c.baseBranch)
+	files, err := read.TemplatesOnBranch(r.baseBranch)
 	if err != nil {
 		return nil
 	}

@@ -198,7 +198,7 @@ func (c *Client) ReopenPR(number int) (PR, error) {
 
 // PullURL is the browser URL of pull request number on this forge.
 func (c *Client) PullURL(number int) string {
-	return fmt.Sprintf("%s/%s/%s/pulls/%d", c.baseURL, c.owner, c.repo, number)
+	return fmt.Sprintf("%s/%s/%s/pulls/%d", c.f.baseURL, c.owner, c.repo, number)
 }
 
 // mergeSubject matches the subjects Forgejo writes when it merges a PR: a merge

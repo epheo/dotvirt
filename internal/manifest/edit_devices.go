@@ -1,11 +1,13 @@
 package manifest
 
 import (
+	"bytes"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/vmgen"
 )
 
 // applyDisksNetworks adds/removes disks and networks on the VM template. Disks
@@ -30,7 +32,7 @@ func applyDisksNetworks(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) {
 	}
 
 	for _, n := range edit.AddNetworks {
-		iface := ifaceName(n.Name)
+		iface := model.InterfaceName(n.Name)
 		appendItem(ed, get(devices, "interfaces"), []string{
 			"- name: " + iface,
 			"  bridge: {}",
@@ -86,23 +88,23 @@ func applyAddDisks(ed *lineEditor, spec, tmplSpec, devices *yaml.Node, vm string
 	}
 }
 
-// blankDVTemplate is a dataVolumeTemplates sequence item (block lines starting
-// with "- ") for a blank PVC named dv. storageClassName is emitted only when a
-// class is set, mirroring vmgen's storageBlock.
+// blankDVTemplate renders the wizard's blank DataVolume as the sequence-item
+// lines the line editor splices, so a disk added later and a disk created with
+// the VM are one shape.
 func blankDVTemplate(dv, size, class string) []string {
-	lines := []string{
-		"- metadata:",
-		"    name: " + dv,
-		"  spec:",
-		"    source:",
-		"      blank: {}",
-		"    storage:",
-		"      resources:",
-		"        requests:",
-		"          storage: " + size,
-	}
-	if class != "" {
-		lines = append(lines, "      storageClassName: "+class)
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	// A map of string scalars always encodes.
+	_ = enc.Encode(vmgen.BlankDataVolumeTemplate(dv, size, class))
+	_ = enc.Close()
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	for i, l := range lines {
+		if i == 0 {
+			lines[i] = "- " + l
+		} else {
+			lines[i] = "  " + l
+		}
 	}
 	return lines
 }
@@ -133,13 +135,6 @@ func templateSpecNode(vmRoot *yaml.Node) *yaml.Node {
 	spec := get(vmRoot, "spec")
 	tmpl := get(spec, "template")
 	return get(tmpl, "spec")
-}
-
-func ifaceName(ref string) string {
-	if i := strings.LastIndex(ref, "/"); i >= 0 {
-		return ref[i+1:]
-	}
-	return ref
 }
 
 // removeNamedItem deletes the sequence item whose `name:` equals name.

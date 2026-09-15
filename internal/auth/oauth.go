@@ -27,7 +27,7 @@ import (
 	"golang.org/x/oauth2"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/epheo/dotvirt/internal/tlsconf"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // OAuthConfig wires the OpenShift OAuthClient dotvirt was registered as.
@@ -72,7 +72,7 @@ func NewOAuth(cfg OAuthConfig, saKube kubernetes.Interface, auth *Authenticator)
 	if cfg.CAFile != "" || cfg.InsecureTLS {
 		tlsCfg := &tls.Config{InsecureSkipVerify: cfg.InsecureTLS} //nolint:gosec // explicit dev opt-in
 		if cfg.CAFile != "" {
-			if pool := tlsconf.RootCAs("oauth", cfg.CAFile); pool != nil {
+			if pool := forge.RootCAs("oauth", cfg.CAFile); pool != nil {
 				tlsCfg.RootCAs = pool
 			}
 		}

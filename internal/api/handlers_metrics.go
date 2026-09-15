@@ -183,9 +183,9 @@ func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	if s.cfg.PlatformRepo != "" && s.draft != nil {
+	if s.cfg.PlatformRepo != "" && s.reader != nil {
 		platform := s.platformProject()
-		if st, err := s.draft.DRSState(platform); err == nil && st.Configured && st.Config != nil {
+		if st, err := s.reader.DRSState(platform); err == nil && st.Configured && st.Config != nil {
 			foldDRSBand(&load, st.Config.Threshold)
 		}
 	}

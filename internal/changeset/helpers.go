@@ -3,11 +3,11 @@ package changeset
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/epheo/dotvirt/internal/model"
-	"github.com/epheo/dotvirt/internal/validate"
 )
 
 // authorEmail derives a stable noreply commit email from a k8s username, which is
@@ -57,11 +57,12 @@ func shortHash(user, project string) string {
 	return hex.EncodeToString(sum[:])[:10]
 }
 
-// requireDNS1123 is validate.RequireDNS1123 wrapped with ErrInvalid so the
-// transport maps a bad name to a 400.
-func requireDNS1123(field, s string) error {
-	if err := validate.RequireDNS1123(field, s); err != nil {
-		return fmt.Errorf("%w: %s", model.ErrInvalid, err)
+// invalid classifies a renderer's refusal as the caller's input. A validate
+// error already carries the kind and passes through, so the message is never
+// prefixed twice.
+func invalid(err error) error {
+	if errors.Is(err, model.ErrInvalid) {
+		return err
 	}
-	return nil
+	return fmt.Errorf("%w: %v", model.ErrInvalid, err)
 }

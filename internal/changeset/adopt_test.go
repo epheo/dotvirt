@@ -105,34 +105,34 @@ func TestAdoptStagesEditForDriftedVM(t *testing.T) {
 	}
 }
 
-// AdoptNamespace stages every captured object whatever its kind, so a namespace comes
+// AdoptObjects stages every captured object whatever its kind, so a namespace comes
 // under git whole rather than VM by VM. What is worth capturing is decided by the
 // caller (cluster.AdoptableObjects); this only stages.
-func TestAdoptNamespaceStagesEveryKind(t *testing.T) {
+func TestAdoptObjectsStagesEveryKind(t *testing.T) {
 	bare, _ := seedBareWithLive(t)
 	c := newTestCoordinator(t)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
-	objs := []Adoptable{
+	objs := []model.Adoptable{
 		{Namespace: "alpha", Name: "copy", Kind: "VirtualMachine",
 			Path: "alpha/copy.yaml", Manifest: []byte(liveVMYAML("copy", ""))},
 		{Namespace: "alpha", Name: "deny", Kind: "NetworkPolicy",
 			Path:     "alpha/networkpolicies/deny.yaml",
 			Manifest: []byte("apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: deny\n  namespace: alpha\nspec: {}\n")},
 	}
-	view, err := c.AdoptNamespace(id, proj, "alpha", objs)
+	view, err := c.AdoptObjects(id, proj, "alpha", objs)
 	if err != nil {
-		t.Fatalf("AdoptNamespace: %v", err)
+		t.Fatalf("AdoptObjects: %v", err)
 	}
 	if view.Count != 2 {
 		t.Fatalf("want both objects staged, got count=%d", view.Count)
 	}
 
 	// Idempotent: re-staging replaces each entry rather than duplicating it.
-	view, err = c.AdoptNamespace(id, proj, "alpha", objs)
+	view, err = c.AdoptObjects(id, proj, "alpha", objs)
 	if err != nil {
-		t.Fatalf("AdoptNamespace (rerun): %v", err)
+		t.Fatalf("AdoptObjects (rerun): %v", err)
 	}
 	if view.Count != 2 {
 		t.Fatalf("re-adopt should be idempotent, got count=%d", view.Count)
@@ -141,10 +141,10 @@ func TestAdoptNamespaceStagesEveryKind(t *testing.T) {
 
 // Nothing left to adopt is a clear ErrInvalid, so the UI says so rather than opening
 // an empty PR.
-func TestAdoptNamespaceNothingToAdopt(t *testing.T) {
+func TestAdoptObjectsNothingToAdopt(t *testing.T) {
 	bare, _ := seedBareWithLive(t)
 	c := newTestCoordinator(t)
-	_, err := c.AdoptNamespace(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: bare}, "beta", nil)
+	_, err := c.AdoptObjects(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: bare}, "beta", nil)
 	if !errors.Is(err, model.ErrInvalid) {
 		t.Fatalf("want model.ErrInvalid when there is nothing to adopt, got %v", err)
 	}
@@ -154,7 +154,7 @@ func TestAdoptNamespaceNothingToAdopt(t *testing.T) {
 // what it has applied, so it misses an object committed but not yet synced, one whose
 // Application is broken, and every object on a cluster tracking by label. Restating one
 // would overwrite the hand-authored manifest with the live defaulted copy.
-func TestAdoptNamespaceSkipsWhatBaseAlreadyDeclares(t *testing.T) {
+func TestAdoptObjectsSkipsWhatBaseAlreadyDeclares(t *testing.T) {
 	bare, _ := seedBareWithLive(t) // main holds alpha/web.yaml
 	c := newTestCoordinator(t)
 	id := auth.Identity{Username: "alice"}
@@ -162,15 +162,15 @@ func TestAdoptNamespaceSkipsWhatBaseAlreadyDeclares(t *testing.T) {
 
 	// web is declared on main; the capture still offers it (no tracking-id on the object).
 	// A different path must not defeat the check: identity is what is declared, not layout.
-	objs := []Adoptable{
+	objs := []model.Adoptable{
 		{Namespace: "alpha", Name: "web", Kind: "VirtualMachine",
 			Path: "alpha/elsewhere/web.yaml", Manifest: []byte(liveVMYAML("web", ""))},
 		{Namespace: "alpha", Name: "copy", Kind: "VirtualMachine",
 			Path: "alpha/copy.yaml", Manifest: []byte(liveVMYAML("copy", ""))},
 	}
-	view, err := c.AdoptNamespace(id, proj, "alpha", objs)
+	view, err := c.AdoptObjects(id, proj, "alpha", objs)
 	if err != nil {
-		t.Fatalf("AdoptNamespace: %v", err)
+		t.Fatalf("AdoptObjects: %v", err)
 	}
 	if view.Count != 1 {
 		t.Fatalf("want only the undeclared VM staged, got count=%d", view.Count)
@@ -182,11 +182,11 @@ func TestAdoptNamespaceSkipsWhatBaseAlreadyDeclares(t *testing.T) {
 
 // Everything running is already declared, so there is nothing to propose: the caller
 // must be told that, not handed an empty draft that looks like work.
-func TestAdoptNamespaceAllDeclaredIsInvalid(t *testing.T) {
+func TestAdoptObjectsAllDeclaredIsInvalid(t *testing.T) {
 	bare, _ := seedBareWithLive(t)
 	c := newTestCoordinator(t)
-	_, err := c.AdoptNamespace(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: bare}, "alpha",
-		[]Adoptable{{Namespace: "alpha", Name: "web", Kind: "VirtualMachine",
+	_, err := c.AdoptObjects(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: bare}, "alpha",
+		[]model.Adoptable{{Namespace: "alpha", Name: "web", Kind: "VirtualMachine",
 			Path: "alpha/web.yaml", Manifest: []byte(liveVMYAML("web", ""))}})
 	if !errors.Is(err, model.ErrInvalid) {
 		t.Fatalf("want model.ErrInvalid when base declares everything captured, got %v", err)
@@ -203,7 +203,7 @@ func TestStageProjectAdoptionStampsRepoOnEveryNamespace(t *testing.T) {
 	target := project.ProjectInfo{Name: "team-a", Namespaces: []string{"team-a", "team-a-db"}}
 	repoURL := "https://forge.example/acme/team-a.git"
 
-	if err := c.stageProjectAdoption(id, platform, target, repoURL, []string{"alice", "bob"}); err != nil {
+	if err := c.stageProjectAdoption(id, platform, tenantNamespaces(target, repoURL), []string{"alice", "bob"}); err != nil {
 		t.Fatalf("stageProjectAdoption: %v", err)
 	}
 	entries, err := c.store.List(id, platform)

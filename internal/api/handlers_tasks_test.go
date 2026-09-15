@@ -55,6 +55,7 @@ func TestWebhookRecordsMerge(t *testing.T) {
 	feed := tasks.New(eventbus.New())
 	s := NewServer(Deps{
 		Tasks:  feed,
+		Reader: &fakeDraft{},
 		Draft:  &fakeDraft{},
 		Config: Config{WebhookSecret: "hooksecret", BaseBranch: "main", ProposedBranch: "dotvirt/proposed"},
 	})

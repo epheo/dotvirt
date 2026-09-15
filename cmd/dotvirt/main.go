@@ -96,7 +96,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	forgeFactory := forge.NewFactoryFnCA(cfg.ForgeURL, tokenSrc, cfg.InsecureTLS, cfg.ForgeCA)
+	forgeFactory := forge.NewFactory(cfg.ForgeURL, tokenSrc, cfg.InsecureTLS, cfg.ForgeCA)
 	if forgeFactory == nil {
 		log.Printf("forge not configured (DOTVIRT_FORGE_URL unset): propose will push-only, no PR will be created")
 	}
@@ -203,6 +203,7 @@ func run() error {
 		Repos:          repos,
 		Metrics:        metricsClient,
 		Tasks:          taskFeed,
+		Reader:         coordinator,
 		Draft:          coordinator,
 		Auth:           authenticator,
 		OAuth:          oauthFlow,

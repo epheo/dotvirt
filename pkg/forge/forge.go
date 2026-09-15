@@ -6,24 +6,22 @@ package forge
 import (
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
-
-	"github.com/epheo/dotvirt/internal/tlsconf"
 )
 
-// Client is a Forgejo API client scoped to one repository.
+// Client is a Forgejo API client scoped to one repository of its Factory's forge.
 type Client struct {
-	baseURL string // e.g. http://forgejo:3000
-	tokenFn TokenSource
-	owner   string
-	repo    string
-	http    *http.Client
+	f     *Factory
+	owner string
+	repo  string
 }
 
 // TokenSource yields the CURRENT forge token on each call. Resolving per-call
@@ -59,23 +57,14 @@ type Factory struct {
 	http    *http.Client
 }
 
-// NewFactory builds a Factory from the shared forge endpoint + a static token.
-// Returns nil when unconfigured so callers degrade to push-only. For a rotating
-// token (mounted file), use NewFactoryFnCA.
-func NewFactory(baseURL, token string, insecure bool) *Factory {
-	if token == "" {
-		return nil
-	}
-	return NewFactoryFnCA(baseURL, StaticToken(token), insecure, "")
-}
-
-// NewFactoryFnCA is NewFactory with a TokenSource resolved per request (so a
-// rotated token takes effect without restart) and an optional PEM CA bundle:
-// the no-insecure path for a managed forge behind the cluster's ingress CA.
-// Returns nil when the base URL is unset (forge disabled); a tokenFn that
+// NewFactory builds a Factory over the shared forge endpoint. tokenFn is
+// resolved per request, so a rotated token takes effect without a restart;
+// caFile is an optional PEM bundle for a forge behind the cluster's ingress
+// CA, and insecure skips verification instead (dev). Returns nil when the base
+// URL is unset (forge disabled) so callers degrade to push-only; a tokenFn that
 // currently yields "" still builds a Factory (the token may appear once the
 // mounted secret is written).
-func NewFactoryFnCA(baseURL string, tokenFn TokenSource, insecure bool, caFile string) *Factory {
+func NewFactory(baseURL string, tokenFn TokenSource, insecure bool, caFile string) *Factory {
 	if baseURL == "" || tokenFn == nil {
 		return nil
 	}
@@ -101,7 +90,7 @@ func (f *Factory) For(repoURL string) *Client {
 	if !ok {
 		return nil
 	}
-	return &Client{baseURL: f.baseURL, tokenFn: f.tokenFn, owner: owner, repo: repo, http: f.http}
+	return &Client{f: f, owner: owner, repo: repo}
 }
 
 // SameForge reports whether repoURL names a repo this forge actually serves. For
@@ -112,26 +101,8 @@ func (f *Factory) SameForge(repoURL string) bool {
 	if f == nil {
 		return false
 	}
-	host := urlHost(repoURL)
-	return host == "" || host == urlHost(f.baseURL)
-}
-
-// urlHost is repoURL's lowercased host, or "" when it carries no scheme://host.
-func urlHost(repoURL string) string {
-	s := strings.TrimSpace(repoURL)
-	i := strings.Index(s, "://")
-	if i < 0 {
-		return ""
-	}
-	s = s[i+3:]
-	if slash := strings.IndexByte(s, '/'); slash >= 0 {
-		s = s[:slash]
-	}
-	// Credentials in a clone URL are not identity: user@host and host are one forge.
-	if at := strings.LastIndexByte(s, '@'); at >= 0 {
-		s = s[at+1:]
-	}
-	return strings.ToLower(s)
+	host := parseURL(repoURL).host
+	return host == "" || host == parseURL(f.baseURL).host
 }
 
 func httpClient(insecure bool, caFile string) *http.Client {
@@ -143,11 +114,30 @@ func httpClient(insecure bool, caFile string) *http.Client {
 		return hc
 	}
 	if caFile != "" {
-		if pool := tlsconf.RootCAs("forge", caFile); pool != nil {
+		if pool := RootCAs("forge", caFile); pool != nil {
 			hc.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}
 		}
 	}
 	return hc
+}
+
+// RootCAs returns a pool holding caFile's certificates, or nil when the file is
+// unreadable or holds none (logged under component). One tolerance rule for
+// every optional CA bundle dotvirt mounts: a bad or lagging bundle keeps the
+// caller on the system trust pool, so a missing CA mount degrades to a legible
+// TLS error, never a crash.
+func RootCAs(component, caFile string) *x509.CertPool {
+	pem, err := os.ReadFile(caFile)
+	if err != nil {
+		log.Printf("%s: CA %s unreadable (%v); staying on the system trust pool", component, caFile, err)
+		return nil
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		log.Printf("%s: CA %s holds no certificates; staying on the system trust pool", component, caFile)
+		return nil
+	}
+	return pool
 }
 
 // EnsureRepo creates the client's repo if it doesn't already exist - under its
@@ -200,25 +190,17 @@ func (c *Client) EnsureOrg() error {
 // exists reports whether a GET on path returns 2xx (true) or 404 (false); any other
 // status is an error. Separate from do() because do() treats every non-2xx as error.
 func (c *Client) exists(path string) (bool, error) {
-	req, err := http.NewRequest("GET", c.baseURL+path, nil)
+	status, _, err := c.f.call("GET", path, c.f.auth(), nil)
 	if err != nil {
 		return false, err
 	}
-	req.Header.Set("Authorization", "token "+c.tokenFn())
-	req.Header.Set("Accept", "application/json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return false, fmt.Errorf("forge GET %s: %w", path, err)
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
 	switch {
-	case resp.StatusCode == http.StatusNotFound:
+	case status == http.StatusNotFound:
 		return false, nil
-	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+	case ok2xx(status):
 		return true, nil
 	default:
-		return false, fmt.Errorf("forge GET %s: %s", path, resp.Status)
+		return false, fmt.Errorf("forge GET %s: %s", path, statusText(status))
 	}
 }
 
@@ -226,34 +208,73 @@ func (c *Client) repoPath(suffix string) string {
 	return fmt.Sprintf("/api/v1/repos/%s/%s%s", c.owner, c.repo, suffix)
 }
 
+// do performs one repo API call as the forge token: any non-2xx is an error
+// carrying the status and the forge's own message, a 2xx body decodes into out.
 func (c *Client) do(method, path string, body, out any) error {
-	var reader io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return err
-		}
-		reader = bytes.NewReader(b)
-	}
-	req, err := http.NewRequest(method, c.baseURL+path, reader)
+	status, data, err := c.f.call(method, path, c.f.auth(), body)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "token "+c.tokenFn())
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("forge %s %s: %w", method, path, err)
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("forge %s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(data)))
+	if !ok2xx(status) {
+		return fmt.Errorf("forge %s %s: %s: %s", method, path, statusText(status), strings.TrimSpace(string(data)))
 	}
 	if out != nil && len(data) > 0 {
 		return json.Unmarshal(data, out)
 	}
 	return nil
 }
+
+// authMode is how one request authenticates: the forge token (the runtime's
+// calls), a caller-supplied token (a validation probe), or basic credentials
+// (token administration as the forge admin).
+type authMode struct {
+	token          string
+	user, password string
+}
+
+func tokenAuth(token string) authMode          { return authMode{token: token} }
+func basicAuth(user, password string) authMode { return authMode{user: user, password: password} }
+
+// auth is the factory's own token, read per call so a rotation takes effect.
+func (f *Factory) auth() authMode { return tokenAuth(f.tokenFn()) }
+
+// call performs one API request against the forge: body marshalled as JSON when
+// set, the response body read whole. Every HTTP status comes back as status so
+// each caller keeps its own rule (a 404 is "absent" to exists and an error to
+// do); only a transport failure is err.
+func (f *Factory) call(method, path string, a authMode, body any) (status int, data []byte, err error) {
+	var reader io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return 0, nil, err
+		}
+		reader = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(method, f.baseURL+path, reader)
+	if err != nil {
+		return 0, nil, err
+	}
+	if a.user != "" {
+		req.SetBasicAuth(a.user, a.password)
+	} else {
+		req.Header.Set("Authorization", "token "+a.token)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := f.http.Do(req)
+	if err != nil {
+		return 0, nil, fmt.Errorf("forge %s %s: %w", method, path, err)
+	}
+	defer resp.Body.Close()
+	data, _ = io.ReadAll(resp.Body)
+	return resp.StatusCode, data, nil
+}
+
+func ok2xx(status int) bool { return status >= 200 && status < 300 }
+
+// statusText renders a status the way net/http's Response.Status does ("409
+// Conflict"), which the logs and the callers' error strings rely on.
+func statusText(status int) string { return fmt.Sprintf("%d %s", status, http.StatusText(status)) }

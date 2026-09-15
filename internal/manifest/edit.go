@@ -1,7 +1,9 @@
 package manifest
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 
 	"gopkg.in/yaml.v3"
 
@@ -21,12 +23,10 @@ type VMEdit = model.VMEdit
 // yaml.v3's encoder reformats sequences on round-trip, so a node-tree re-marshal
 // would produce noisy diffs; line splicing avoids that entirely.
 func ApplyEdit(content []byte, namespace, name string, edit VMEdit) ([]byte, error) {
-	var root yaml.Node
-	if err := yaml.Unmarshal(content, &root); err != nil {
+	vm, err := findVM(content, namespace, name)
+	if err != nil {
 		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
-
-	vm := findVM(&root, namespace, name)
 	if vm == nil {
 		return nil, fmt.Errorf("VM %s/%s not found in manifest", namespace, name)
 	}
@@ -188,25 +188,24 @@ func applyRef(ed *lineEditor, vmRoot *yaml.Node, key, value string) {
 	ed.insertBlock(spec, []string{key + ":", "  name: " + value})
 }
 
-// findVM locates the VirtualMachine mapping node for (namespace, name) across all
-// documents in the file.
-func findVM(root *yaml.Node, namespace, name string) *yaml.Node {
-	var docs []*yaml.Node
-	if root.Kind == yaml.DocumentNode {
-		docs = []*yaml.Node{root}
-	}
-	// Multi-document files parse as a sequence of documents only when decoded in a
-	// loop; a single Unmarshal yields one DocumentNode. Handle both: walk content.
-	candidates := docs
-	if len(candidates) == 0 && len(root.Content) > 0 {
-		candidates = root.Content
-	}
-	for _, doc := range candidates {
-		m := contentRoot(doc)
-		if m == nil {
-			continue
+// findVM locates the VirtualMachine mapping node for (namespace, name), nil
+// when no document declares it. Documents are decoded one by one: a single
+// Unmarshal yields only the first of a multi-document file. Node lines count
+// from the start of content whichever document they sit in, so the node found
+// addresses the line editor directly.
+func findVM(content []byte, namespace, name string) (*yaml.Node, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(content))
+	for {
+		var doc yaml.Node
+		err := dec.Decode(&doc)
+		if err == io.EOF {
+			return nil, nil
 		}
-		if nodeValue(get(m, "kind")) != "VirtualMachine" {
+		if err != nil {
+			return nil, err
+		}
+		m := contentRoot(&doc)
+		if m == nil || nodeValue(get(m, "kind")) != "VirtualMachine" {
 			continue
 		}
 		meta := get(m, "metadata")
@@ -216,9 +215,8 @@ func findVM(root *yaml.Node, namespace, name string) *yaml.Node {
 		if ns := nodeValue(get(meta, "namespace")); ns != "" && ns != namespace {
 			continue
 		}
-		return m
+		return m, nil
 	}
-	return nil
 }
 
 func applyPower(ed *lineEditor, spec *yaml.Node, power string) {
@@ -226,17 +224,16 @@ func applyPower(ed *lineEditor, spec *yaml.Node, power string) {
 	if s == nil {
 		return
 	}
-	on := power == "On"
+	on := power == string(model.PowerOn)
 	if running := get(s, "running"); running != nil {
 		ed.setScalarAt(running, boolStr(on))
 		return
 	}
 	if rs := get(s, "runStrategy"); rs != nil {
-		ed.setScalarAt(rs, runStrategyFor(on))
+		ed.setScalarAt(rs, model.RunStrategy(on))
 		return
 	}
-	// Neither present: insert runStrategy as the first child of spec.
-	ed.insertChild(s, "runStrategy", runStrategyFor(on))
+	ed.insertChild(s, "runStrategy", model.RunStrategy(on))
 }
 
 // applyCPU sets the guest vCPU count. A fresh cpu block is written as sockets,
@@ -301,26 +298,7 @@ func applyMemory(ed *lineEditor, vmRoot *yaml.Node, memory string) {
 }
 
 func domainNode(vmRoot *yaml.Node) *yaml.Node {
-	s := get(vmRoot, "spec")
-	if s == nil {
-		return nil
-	}
-	tmpl := get(s, "template")
-	if tmpl == nil {
-		return nil
-	}
-	ts := get(tmpl, "spec")
-	if ts == nil {
-		return nil
-	}
-	return get(ts, "domain")
-}
-
-func runStrategyFor(on bool) string {
-	if on {
-		return "Always"
-	}
-	return "Halted"
+	return get(templateSpecNode(vmRoot), "domain")
 }
 
 func boolStr(b bool) string {

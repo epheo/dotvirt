@@ -14,9 +14,8 @@ import (
 type vmDoc struct {
 	Kind     string `yaml:"kind"`
 	Metadata struct {
-		Name      string            `yaml:"name"`
-		Namespace string            `yaml:"namespace"`
-		Labels    map[string]string `yaml:"labels"`
+		objectMeta `yaml:",inline"`
+		Labels     map[string]string `yaml:"labels"`
 	} `yaml:"metadata"`
 	Spec struct {
 		// KubeVirt supports both; runStrategy is preferred, running is legacy.

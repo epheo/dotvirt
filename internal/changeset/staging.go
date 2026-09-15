@@ -27,7 +27,7 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 	// SourceFile addresses a file in the proposal diff - the one repo path a
 	// client supplies directly, so it passes the same gate created names do.
 	if err := validate.RequireRepoPath("source file", req.SourceFile); err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		return model.DraftView{}, err
 	}
 	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
 		Kind:       draft.KindEdit,
@@ -54,7 +54,7 @@ func (c *Coordinator) StageCreateVM(id auth.Identity, proj project.ProjectInfo, 
 	}
 	path, content, err := vmgen.Manifest(spec)
 	if err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		return model.DraftView{}, invalid(err)
 	}
 	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
 		Kind:       draft.KindCreate,
@@ -73,7 +73,7 @@ func (c *Coordinator) StageCreateVM(id auth.Identity, proj project.ProjectInfo, 
 // requireRepo, then one rendered manifest staged verbatim (the adopt-create path)
 // so propose commits it and Argo applies it on merge. requireRepo runs before
 // render so a repoless project fails ErrConflict, never ErrInvalid; any render
-// error (spec decode included) is the caller's input, wrapped as ErrInvalid.
+// error (spec decode included) is the caller's input, classified ErrInvalid.
 // render returns the entry minus Kind; the entry's Namespace is the object's own
 // or the model.ClusterScopeNS sentinel.
 //
@@ -87,7 +87,7 @@ func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, 
 	}
 	entry, err := render()
 	if err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+		return model.DraftView{}, invalid(err)
 	}
 	entry.Kind = draft.KindCreate
 	idx, err := read.DeclaredFilesOnBranch(c.baseBranch)
@@ -290,6 +290,27 @@ func (c *Coordinator) Unstage(id auth.Identity, proj project.ProjectInfo, resour
 		return err
 	}
 	return c.store.Unstage(id.Username, proj.Name, draft.Resource(resource), namespace, name)
+}
+
+// unstageResource drops every entry of one resource from (id, proj)'s draft,
+// reporting how many it removed. Backs both the atomic-resource unstage (see
+// draft.Resource.Atomic) and the declarative DRS restage.
+func (c *Coordinator) unstageResource(id auth.Identity, proj project.ProjectInfo, r draft.Resource) (int, error) {
+	entries, err := c.store.List(id.Username, proj.Name)
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, e := range entries {
+		if e.Resource != r {
+			continue
+		}
+		if err := c.store.Unstage(id.Username, proj.Name, e.Resource, e.Namespace, e.Name); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
 }
 
 // Discard clears (id, proj)'s draft.

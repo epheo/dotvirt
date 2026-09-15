@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/epheo/dotvirt/internal/tlsconf"
+	"github.com/epheo/dotvirt/pkg/forge"
 
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/ttlcache"
@@ -57,7 +57,7 @@ func New(baseURL, caPath string, insecure bool) (*Client, error) {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	switch {
 	case caPath != "":
-		if pool := tlsconf.RootCAs("metrics", caPath); pool != nil {
+		if pool := forge.RootCAs("metrics", caPath); pool != nil {
 			tr.TLSClientConfig = &tls.Config{RootCAs: pool}
 		}
 	case insecure:

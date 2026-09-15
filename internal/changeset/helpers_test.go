@@ -35,7 +35,7 @@ func TestRefSegmentLegal(t *testing.T) {
 // identities must never share a working branch, even when their readable segments
 // sanitize identically.
 func TestProposedBranchNoCollision(t *testing.T) {
-	c := &Coordinator{proposed: "dotvirt/proposed"}
+	c := &Reader{proposed: "dotvirt/proposed"}
 
 	// Pairs whose refSegment-ed forms collide but whose raw identities differ.
 	collidingUsers := [][2]string{

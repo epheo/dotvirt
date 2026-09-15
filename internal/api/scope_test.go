@@ -30,7 +30,7 @@ import (
 // cluster-wide namespace list is the visibility source, not the candidates).
 func scopeServer(bus *eventbus.Bus) *Server {
 	sa := cluster.NewClient(fake.NewSimpleClientset(), nil, nil)
-	return NewServer(Deps{State: clusterstate.New(sa, "dotvirt.io/project", bus), Bus: bus, Draft: &fakeDraft{}})
+	return NewServer(Deps{State: clusterstate.New(sa, "dotvirt.io/project", bus), Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}})
 }
 
 // listCountingClient is a user-identity client over a fake clientset seeded with
@@ -306,7 +306,7 @@ func TestPlatformScope(t *testing.T) {
 	f := platformFactory(t)
 	// draft only needs to be non-nil; platformScope never calls it.
 	newScopeServer := func(repo string) *Server {
-		return NewServer(Deps{ClusterFactory: f, Draft: &fakeDraft{}, Config: Config{PlatformRepo: repo}})
+		return NewServer(Deps{ClusterFactory: f, Reader: &fakeDraft{}, Draft: &fakeDraft{}, Config: Config{PlatformRepo: repo}})
 	}
 	request := func(token string) *http.Request {
 		r := httptest.NewRequest(http.MethodPost, "/api/networks", nil)

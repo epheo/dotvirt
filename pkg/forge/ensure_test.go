@@ -26,7 +26,7 @@ func TestEnsureRepoCreatesWhenAbsent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewFactory(srv.URL, "tok", false).For("http://forge/dotvirt/platform.git")
+	c := NewFactory(srv.URL, StaticToken("tok"), false, "").For("http://forge/dotvirt/platform.git")
 	created, err := c.EnsureRepo()
 	if err != nil {
 		t.Fatalf("EnsureRepo: %v", err)
@@ -55,7 +55,7 @@ func TestEnsureOrgWebhookRegistersOnce(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewFactory(srv.URL, "tok", false).For("http://forge/dotvirt/platform.git")
+	c := NewFactory(srv.URL, StaticToken("tok"), false, "").For("http://forge/dotvirt/platform.git")
 	if err := c.EnsureOrgWebhook("https://argo/api/webhook", "s3cr3t"); err != nil {
 		t.Fatalf("EnsureOrgWebhook: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestEnsureOrgWebhookReconcilesSecret(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewFactory(srv.URL, "tok", false).For("http://forge/dotvirt/platform.git")
+	c := NewFactory(srv.URL, StaticToken("tok"), false, "").For("http://forge/dotvirt/platform.git")
 	if err := c.EnsureOrgWebhook("https://argo/api/webhook", "rotated"); err != nil {
 		t.Fatalf("EnsureOrgWebhook: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestMintToken(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tok, err := NewFactory(srv.URL, "ignored", false).MintToken("dotvirt-bot", "pw", "dotvirt-operator", []string{"write:organization", "write:repository"})
+	tok, err := NewFactory(srv.URL, StaticToken("ignored"), false, "").MintToken("dotvirt-bot", "pw", "dotvirt-operator", []string{"write:organization", "write:repository"})
 	if err != nil {
 		t.Fatalf("MintToken: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestValidateToken(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := NewFactory(srv.URL, "ignored", false)
+	f := NewFactory(srv.URL, StaticToken("ignored"), false, "")
 	if valid, err := f.ValidateToken("good"); err != nil || !valid {
 		t.Errorf("ValidateToken(good) = (%v,%v), want (true,nil)", valid, err)
 	}
@@ -193,7 +193,7 @@ func TestEnsureOrgCreatesWhenAbsent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewFactory(srv.URL, "tok", false).For("http://forge/dotvirt/platform.git")
+	c := NewFactory(srv.URL, StaticToken("tok"), false, "").For("http://forge/dotvirt/platform.git")
 	if err := c.EnsureOrg(); err != nil {
 		t.Fatalf("EnsureOrg: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestEnsureRepoSkipsWhenPresent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewFactory(srv.URL, "tok", false).For("http://forge/dotvirt/platform.git")
+	c := NewFactory(srv.URL, StaticToken("tok"), false, "").For("http://forge/dotvirt/platform.git")
 	created, err := c.EnsureRepo()
 	if err != nil {
 		t.Fatalf("EnsureRepo: %v", err)

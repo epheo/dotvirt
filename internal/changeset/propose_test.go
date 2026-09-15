@@ -64,7 +64,7 @@ func newProposeFixture(t *testing.T, routes ...route) *proposeFixture {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repos := git.NewRepoSet(ctx, "", nil, false, nil, time.Hour)
-	ff := forge.NewFactory(srv.URL, "tok", false)
+	ff := forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, "")
 	c := New(store, repos, ff, nil, nil, nil, "main", "dotvirt/proposed")
 
 	return &proposeFixture{
@@ -293,7 +293,7 @@ func boolStr(b bool) string {
 // proposedBranchFor mirrors Coordinator.proposedBranch for the default prefix, so
 // the test's stub PR head matches what Propose actually pushes.
 func proposedBranchFor(user, proj string) string {
-	c := &Coordinator{proposed: "dotvirt/proposed"}
+	c := &Reader{proposed: "dotvirt/proposed"}
 	return c.proposedBranch(user, proj)
 }
 
@@ -324,5 +324,50 @@ func TestProposeSelfHealsSatisfiedDraft(t *testing.T) {
 	}
 	if n := f.draftCount(t); n != 0 {
 		t.Fatalf("draft must self-heal to empty, still has %d entries", n)
+	}
+}
+
+// openOrRecoverPR is the one way a pushed branch gets its PR: an open one is
+// reused, a closed-unmerged one reopened, and one is created only when the
+// branch has none - or its last PR merged, when a create the forge refuses
+// falls back to the compare URL.
+func TestOpenOrRecoverPR(t *testing.T) {
+	head := proposedBranchFor("alice", "p")
+	cases := []struct {
+		name         string
+		routes       []route
+		wantNumber   int
+		wantExisting bool
+		wantOK       bool
+	}{
+		{"open PR is reused", []route{
+			whenList("GET", "/pulls", http.StatusOK, "open", false),
+		}, 4, true, true},
+		{"closed PR is reopened", []route{
+			whenList("GET", "/pulls", http.StatusOK, "closed", false),
+			when("PATCH", "/pulls/4", http.StatusOK, `{"number":4,"state":"open","html_url":"http://forge/pulls/4"}`),
+		}, 4, true, true},
+		{"no PR is created", []route{
+			when("GET", "/pulls", http.StatusOK, "[]"),
+			when("POST", "/pulls", http.StatusCreated, `{"number":1,"state":"open","html_url":"http://forge/pulls/1"}`),
+		}, 1, false, true},
+		{"merged PR leaves the compare URL", []route{
+			whenList("GET", "/pulls", http.StatusOK, "closed", true),
+			when("POST", "/pulls", http.StatusConflict, "pull request already exists"),
+		}, 0, false, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newProposeFixture(t, c.routes...)
+			fc := f.c.forge.For(f.proj.Repo)
+			var out model.ProposeResult
+			ok := f.c.openOrRecoverPR(fc, &out, head, "t", "b")
+			if ok != c.wantOK || out.PRNumber != c.wantNumber || out.Existing != c.wantExisting {
+				t.Fatalf("got ok=%v %+v, want ok=%v #%d existing=%v", ok, out, c.wantOK, c.wantNumber, c.wantExisting)
+			}
+			if !ok && out.CompareURL == "" {
+				t.Fatal("a missing PR must leave the compare URL")
+			}
+		})
 	}
 }

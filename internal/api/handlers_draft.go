@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/epheo/dotvirt/internal/changeset"
-	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/validate"
 )
@@ -130,7 +129,7 @@ func (s *Server) handleDrift(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.draft.VMDrift(sc.proj, ns, name)
+	result, err := s.reader.VMDrift(sc.proj, ns, name)
 	respond(w, result, err)
 }
 
@@ -164,7 +163,7 @@ func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
 // cluster scope, for the platform tier) and applies the shared refusals: no
 // ArgoCD picture yet, nothing readable, nothing left to adopt. ok=false means
 // the response is written.
-func (s *Server) captureAdoptable(w http.ResponseWriter, r *http.Request, sc scope, ns string) ([]changeset.Adoptable, []string, bool) {
+func (s *Server) captureAdoptable(w http.ResponseWriter, r *http.Request, sc scope, ns string) ([]model.Adoptable, []string, bool) {
 	where := ns
 	if where == "" {
 		where = "the cluster scope"
@@ -180,7 +179,7 @@ func (s *Server) captureAdoptable(w http.ResponseWriter, r *http.Request, sc sco
 		}
 	}
 	var (
-		objs       []cluster.Adoptable
+		objs       []model.Adoptable
 		unreadable []string
 		err        error
 	)
@@ -203,13 +202,7 @@ func (s *Server) captureAdoptable(w http.ResponseWriter, r *http.Request, sc sco
 		fail(w, fmt.Errorf("%w: nothing to adopt in %s: everything running there is declared in git or managed by another Application", model.ErrInvalid, where))
 		return nil, nil, false
 	}
-	adoptable := make([]changeset.Adoptable, 0, len(objs))
-	for _, o := range objs {
-		adoptable = append(adoptable, changeset.Adoptable{
-			Namespace: o.Namespace, Name: o.Name, Kind: o.Kind, Path: o.Path, Manifest: o.Manifest,
-		})
-	}
-	return adoptable, unreadable, true
+	return objs, unreadable, true
 }
 
 // withUnreadable appends the kinds the caller could not read to the view's
@@ -245,7 +238,7 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	p, content, err := s.draft.Manifest(sc.proj, ns, name)
+	p, content, err := s.reader.Manifest(sc.proj, ns, name)
 	if err != nil {
 		fail(w, err)
 		return
@@ -264,14 +257,14 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	if ns := r.URL.Query().Get("namespace"); ns != "" {
 		if err := validate.RequireDNS1123("namespace", ns); err != nil {
-			fail(w, invalid(err))
+			fail(w, err)
 			return
 		}
-		commits, err := s.draft.NamespaceHistory(sc.proj, ns, 25)
+		commits, err := s.reader.NamespaceHistory(sc.proj, ns, 25)
 		respond(w, commits, err)
 		return
 	}
-	commits, err := s.draft.History(sc.proj, 25)
+	commits, err := s.reader.History(sc.proj, 25)
 	respond(w, commits, err)
 }
 
@@ -313,7 +306,7 @@ func (s *Server) handleVMHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	commits, err := s.draft.ObjectHistory(sc.proj, "", ns, name, 10)
+	commits, err := s.reader.ObjectHistory(sc.proj, "", ns, name, 10)
 	respond(w, commits, err)
 }
 
@@ -333,7 +326,7 @@ func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
 		fail(w, invalid(errors.New("commit hash must be the full 40-character hash")))
 		return
 	}
-	detail, err := s.draft.Commit(sc.proj, hash)
+	detail, err := s.reader.Commit(sc.proj, hash)
 	respond(w, detail, err)
 }
 
@@ -349,9 +342,9 @@ func (s *Server) handleProposal(w http.ResponseWriter, r *http.Request) {
 		fail(w, invalid(errors.New("pull request number must be a positive integer")))
 		return
 	}
-	detail, err := s.draft.Proposal(sc.proj, n)
+	detail, err := s.reader.Proposal(sc.proj, n)
 	if err == nil {
-		detail.Proposal.Mine = s.draft.OwnsProposal(sc.id, sc.proj, detail.Proposal.Branch)
+		detail.Proposal.Mine = s.reader.OwnsProposal(sc.id, sc.proj, detail.Proposal.Branch)
 	}
 	respond(w, detail, err)
 }

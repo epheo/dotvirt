@@ -22,6 +22,14 @@ const (
 	PowerUnknown Power = "Unknown" // unset / unrecognized
 )
 
+// RunStrategy is the KubeVirt runStrategy a desired power state writes.
+func RunStrategy(on bool) string {
+	if on {
+		return "Always"
+	}
+	return "Halted"
+}
+
 // SyncStatus mirrors ArgoCD's per-resource sync state.
 type SyncStatus string
 

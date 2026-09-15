@@ -9,6 +9,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
+	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
@@ -18,14 +19,14 @@ import (
 // object identity every draft entry carries - under soleDeclarer's rule, since
 // a delete or rewrite acts on the whole file. namespace is model.ClusterScopeNS for a
 // cluster-scoped object.
-func (c *Coordinator) locate(read *git.Repo, resource draft.Resource, namespace, name string) (string, error) {
-	idx, err := read.DeclaredFilesOnBranch(c.baseBranch)
+func (r *Reader) locate(read *git.Repo, resource draft.Resource, namespace, name string) (string, error) {
+	idx, err := read.DeclaredFilesOnBranch(r.baseBranch)
 	if err != nil {
 		return "", err
 	}
 	ref, ok := declaredRef(idx, resource, namespace, name)
 	if !ok {
-		return "", fmt.Errorf("%w: %s/%s not on %s", model.ErrNotFound, namespace, name, c.baseBranch)
+		return "", fmt.Errorf("%w: %s/%s not on %s", model.ErrNotFound, namespace, name, r.baseBranch)
 	}
 	return soleDeclarer(idx, []model.ObjectRef{ref})
 }
@@ -48,7 +49,7 @@ func declaredRef(idx git.DeclaredIndex, resource draft.Resource, namespace, name
 // git declares nothing, an edit of the declaring file when the running state
 // differs from it (the segment and rule counterpart of a VM's drift adoption).
 // Rejected when git already matches, so the draft never carries a no-op.
-func (c *Coordinator) AdoptObject(id auth.Identity, proj project.ProjectInfo, o Adoptable) (model.DraftView, error) {
+func (c *Coordinator) AdoptObject(id auth.Identity, proj project.ProjectInfo, o model.Adoptable) (model.DraftView, error) {
 	read, err := c.read(proj)
 	if err != nil {
 		return model.DraftView{}, err
@@ -75,7 +76,7 @@ func (c *Coordinator) AdoptObject(id auth.Identity, proj project.ProjectInfo, o 
 		if err != nil {
 			return model.DraftView{}, err
 		}
-		if netgen.SameDocument(current, o.Manifest) {
+		if manifest.SameDocument(current, o.Manifest) {
 			return model.DraftView{}, fmt.Errorf("%w: %s/%s already matches git", model.ErrInvalid, ns, o.Name)
 		}
 		entry.Kind, entry.SourceFile = draft.KindEdit, path
@@ -88,12 +89,12 @@ func (c *Coordinator) AdoptObject(id auth.Identity, proj project.ProjectInfo, o 
 
 // DeclaredFiles maps every object proj's base branch declares to its file - the
 // read plane's "declared in git" signal for objects live-first views list.
-func (c *Coordinator) DeclaredFiles(proj project.ProjectInfo) (map[model.ObjectRef]string, error) {
-	read, err := c.read(proj)
+func (r *Reader) DeclaredFiles(proj project.ProjectInfo) (map[model.ObjectRef]string, error) {
+	read, err := r.read(proj)
 	if err != nil {
 		return nil, err
 	}
-	idx, err := read.DeclaredFilesOnBranch(c.baseBranch)
+	idx, err := read.DeclaredFilesOnBranch(r.baseBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -103,16 +104,16 @@ func (c *Coordinator) DeclaredFiles(proj project.ProjectInfo) (map[model.ObjectR
 // ObjectSpec reads a declared object back as the form spec its create route
 // accepts, so the same form can edit it. A manifest the form cannot represent
 // (hand-written settings) is refused, never approximated.
-func (c *Coordinator) ObjectSpec(proj project.ProjectInfo, resource, namespace, name string) (model.ObjectSpec, error) {
-	read, err := c.read(proj)
+func (r *Reader) ObjectSpec(proj project.ProjectInfo, resource, namespace, name string) (model.ObjectSpec, error) {
+	read, err := r.read(proj)
 	if err != nil {
 		return model.ObjectSpec{}, err
 	}
-	path, err := c.locate(read, draft.Resource(resource), namespace, name)
+	path, err := r.locate(read, draft.Resource(resource), namespace, name)
 	if err != nil {
 		return model.ObjectSpec{}, err
 	}
-	content, err := read.FileOnBranch(c.baseBranch, path)
+	content, err := read.FileOnBranch(r.baseBranch, path)
 	if err != nil {
 		return model.ObjectSpec{}, err
 	}
@@ -150,7 +151,7 @@ func (c *Coordinator) StageUpdateManifest(id auth.Identity, proj project.Project
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if netgen.SameDocument(current, []byte(yaml)) {
+	if manifest.SameDocument(current, []byte(yaml)) {
 		return model.DraftView{}, fmt.Errorf("%w: %s/%s already matches git", model.ErrInvalid, namespace, name)
 	}
 	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{

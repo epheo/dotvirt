@@ -27,10 +27,7 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	if len(entries) == 0 {
 		return model.ProposeResult{}, fmt.Errorf("%w: draft is empty", model.ErrInvalid)
 	}
-	if err := requireRepo(proj); err != nil {
-		return model.ProposeResult{}, err
-	}
-	_, write, err := c.repos.Get(proj.Repo)
+	_, write, err := c.write(proj)
 	if err != nil {
 		return model.ProposeResult{}, err
 	}
@@ -84,54 +81,61 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 		// No forge configured (or unparsable repo): report the pushed branch only.
 		return out, c.store.Clear(id.Username, proj.Name)
 	}
+	if !c.openOrRecoverPR(fc, &out, branch, title, body) {
+		// Kept staged so the user can retry once the forge answers.
+		return out, nil
+	}
+	return out, c.store.Clear(id.Username, proj.Name)
+}
 
-	// The branch is per-(user, project) and reused on every propose, so a PR for
-	// this head->base often already exists, possibly closed. Look it up before
-	// creating: reuse an open one, reopen a closed-unmerged one so the freshly
-	// pushed commits surface, and create only when the branch has no live PR
-	// (none yet, or the last one merged).
-	if existing, ok, ferr := fc.FindPR(branch, c.baseBranch); ferr == nil && ok {
+// openOrRecoverPR gives a pushed branch its pull request and records it on out.
+// Propose and Revert both reuse a deterministic branch, so a PR for this
+// head->base often already exists, possibly closed: an open one is reused, a
+// closed-unmerged one reopened so the fresh push surfaces, and one is created
+// only when the branch has no live PR (none yet, or the last one merged). A
+// found or reopened PR is marked Existing. When the forge will not answer with
+// a PR, out carries the compare URL instead and ok is false: the branch IS
+// pushed, so the user can still open the PR by hand, and the caller decides
+// what a missing PR means for the draft. That is a 200, not an error - an error
+// would make the handler drop the result body.
+func (c *Coordinator) openOrRecoverPR(fc *forge.Client, out *model.ProposeResult, branch, title, body string) bool {
+	if found, ok, err := fc.FindPR(branch, c.baseBranch); err == nil && ok {
 		switch {
-		case existing.State == "open":
-			out.PRURL, out.PRNumber, out.Existing = existing.HTMLURL, existing.Number, true
-			return out, c.store.Clear(id.Username, proj.Name)
-		case !existing.Merged:
-			if reopened, rerr := fc.ReopenPR(existing.Number); rerr == nil {
+		case found.State == "open":
+			out.PRURL, out.PRNumber, out.Existing = found.HTMLURL, found.Number, true
+			return true
+		case !found.Merged:
+			reopened, err := fc.ReopenPR(found.Number)
+			if err == nil {
 				out.PRURL, out.PRNumber, out.Existing = reopened.HTMLURL, reopened.Number, true
-				return out, c.store.Clear(id.Username, proj.Name)
-			} else {
-				log.Printf("propose %s/%s: found closed PR #%d but reopen failed: %v", proj.Name, branch, existing.Number, rerr)
+				return true
 			}
+			log.Printf("changeset: %s: found closed PR #%d but reopen failed: %v", branch, found.Number, err)
 		}
 	}
-
 	pr, err := fc.CreatePR(title, body, branch, c.baseBranch)
-	if err == nil {
-		out.PRURL, out.PRNumber = pr.HTMLURL, pr.Number
-		return out, c.store.Clear(id.Username, proj.Name)
+	if err != nil {
+		log.Printf("changeset: %s: branch pushed but PR unavailable: %v", branch, err)
+		out.CompareURL = fc.CompareURL(branch, c.baseBranch)
+		return false
 	}
-
-	// The branch IS pushed. Hand back the compare URL so the user can open the PR
-	// manually, and KEEP the draft staged so they can retry; this is a 200, not an
-	// error (returning err here would make the handler drop the result body).
-	log.Printf("propose %s/%s: branch pushed but PR unavailable: %v", proj.Name, branch, err)
-	out.CompareURL = fc.CompareURL(branch, c.baseBranch)
-	return out, nil
+	out.PRURL, out.PRNumber = pr.HTMLURL, pr.Number
+	return true
 }
 
 // RecentlyMerged lists PRs merged into proj's base branch since 'since' - the
 // task feed's merged lane (the poll backstop behind the forge webhook, and the
 // reseed after a restart). Attribution comes from the head branch, not the PR
 // poster: dotvirt's bot opens every proposal PR (see tasks.MergeAuthor).
-func (c *Coordinator) RecentlyMerged(proj project.ProjectInfo, since time.Time) ([]tasks.Merge, error) {
+func (r *Reader) RecentlyMerged(proj project.ProjectInfo, since time.Time) ([]tasks.Merge, error) {
 	if proj.Repo == "" {
 		return nil, nil
 	}
-	fc := c.forge.For(proj.Repo) // nil-safe: nil factory / unparsable repo -> nil client
+	fc := r.forge.For(proj.Repo) // nil-safe: nil factory / unparsable repo -> nil client
 	if fc == nil {
 		return nil, nil
 	}
-	prs, err := fc.MergedPRs(c.baseBranch, 20)
+	prs, err := fc.MergedPRs(r.baseBranch, 20)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +150,7 @@ func (c *Coordinator) RecentlyMerged(proj project.ProjectInfo, since time.Time) 
 			Number:  pr.Number,
 			URL:     pr.HTMLURL,
 			Title:   pr.Title,
-			By:      tasks.MergeAuthor(pr.Head.Ref, c.proposed, pr.User.Login),
+			By:      tasks.MergeAuthor(pr.Head.Ref, r.proposed, pr.User.Login),
 			At:      pr.MergedAt,
 		})
 	}
@@ -159,8 +163,8 @@ func (c *Coordinator) RecentlyMerged(proj project.ProjectInfo, since time.Time) 
 // of the RAW (user, project) is appended to guarantee distinct identities never
 // share a branch - without it, two usernames that sanitize to the same string
 // would force-push over each other's PR.
-func (c *Coordinator) proposedBranch(user, project string) string {
-	return c.proposed + "/" + refSegment(user) + "/" + refSegment(project) + "-" + shortHash(user, project)
+func (r *Reader) proposedBranch(user, project string) string {
+	return r.proposed + "/" + refSegment(user) + "/" + refSegment(project) + "-" + shortHash(user, project)
 }
 
 func (c *Coordinator) toChangesetItems(entries []draft.Entry) []git.ChangesetItem {
@@ -194,59 +198,101 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) []git.ChangesetIte
 	return items
 }
 
+// reviewed is one open PR's review state at one head. Approvals and checks are
+// re-read only when the head moves, so a refresh whose PRs stand still costs
+// one list call instead of two more per PR.
+type reviewed struct {
+	sha       string
+	approvals int
+	checks    string
+}
+
 // OpenProposals lists every open PR into proj's base branch - the Changes
 // pane's Proposed lane, one read shared by all the project's members: a PR is
 // the project's git history in waiting, visible to whoever may read that
 // history. Whose it is stays the reader's question (OwnsProposal). Empty (nil
 // error) when the project has no repo/forge or nothing is open.
-func (c *Coordinator) OpenProposals(proj project.ProjectInfo) ([]model.Proposal, error) {
+func (r *Reader) OpenProposals(proj project.ProjectInfo) ([]model.Proposal, error) {
 	if proj.Repo == "" {
 		return nil, nil
 	}
-	fc := c.forge.For(proj.Repo) // nil-safe: nil factory / unparsable repo -> nil client
+	fc := r.forge.For(proj.Repo) // nil-safe: nil factory / unparsable repo -> nil client
 	if fc == nil {
 		return nil, nil
 	}
-	open, err := fc.OpenPRs(c.baseBranch, 50)
+	open, err := fc.OpenPRs(r.baseBranch, 50)
 	if err != nil {
 		return nil, err
 	}
+	key := forge.NormalizeRepoURL(proj.Repo)
 	if len(open) == 0 {
+		r.setReviewed(key, nil)
 		return nil, nil
 	}
 	// Review state, each read best-effort: an unreadable plane stays zero
-	// (unknown), which the UI renders as nothing - never as "no rule". The
-	// branch rule is one read for all of them.
+	// (unknown), which the UI renders as nothing - never as "no rule" - and is
+	// not remembered, so the next refresh reads it again. The branch rule is
+	// one read for all of them.
 	required := 0
-	if req, found, rerr := fc.RequiredApprovals(c.baseBranch); rerr == nil && found {
+	if req, found, rerr := fc.RequiredApprovals(r.baseBranch); rerr == nil && found {
 		required = req
 	}
+	prev := r.getReviewed(key)
+	next := make(map[int]reviewed, len(open))
 	out := make([]model.Proposal, 0, len(open))
 	for _, pr := range open {
-		p := c.proposalRow(proj, pr)
+		p := r.proposalRow(proj, pr)
 		p.RequiredApprovals = required
-		if n, aerr := fc.Approvals(pr.Number); aerr == nil {
-			p.Approvals = n
-		}
-		if pr.Head.Sha != "" {
-			if st, serr := fc.CombinedStatus(pr.Head.Sha); serr == nil {
-				p.Checks = st
+		rv, ok := prev[pr.Number]
+		if !ok || rv.sha != pr.Head.Sha {
+			rv, ok = reviewed{sha: pr.Head.Sha}, true
+			if n, aerr := fc.Approvals(pr.Number); aerr == nil {
+				rv.approvals = n
+			} else {
+				ok = false
+			}
+			if pr.Head.Sha != "" {
+				if st, serr := fc.CombinedStatus(pr.Head.Sha); serr == nil {
+					rv.checks = st
+				} else {
+					ok = false
+				}
 			}
 		}
+		if ok {
+			next[pr.Number] = rv
+		}
+		p.Approvals, p.Checks = rv.approvals, rv.checks
 		out = append(out, p)
 	}
+	r.setReviewed(key, next)
 	return out, nil
+}
+
+func (r *Reader) getReviewed(repo string) map[int]reviewed {
+	r.reviewMu.Lock()
+	defer r.reviewMu.Unlock()
+	return r.reviewed[repo]
+}
+
+func (r *Reader) setReviewed(repo string, prs map[int]reviewed) {
+	r.reviewMu.Lock()
+	defer r.reviewMu.Unlock()
+	if r.reviewed == nil {
+		r.reviewed = map[string]map[int]reviewed{}
+	}
+	r.reviewed[repo] = prs
 }
 
 // proposalRow is a PR's identity as the lane carries it. By comes from the
 // head branch the way the task feed attributes merges, since dotvirt's bot
 // posts every proposal.
-func (c *Coordinator) proposalRow(proj project.ProjectInfo, pr forge.PR) model.Proposal {
+func (r *Reader) proposalRow(proj project.ProjectInfo, pr forge.PR) model.Proposal {
 	return model.Proposal{
 		Project: proj.Name, PRNumber: pr.Number, PRURL: pr.HTMLURL, Title: pr.Title,
 		Branch: pr.Head.Ref,
-		By:     tasks.MergeAuthor(pr.Head.Ref, c.proposed, pr.User.Login),
-		Revert: strings.HasPrefix(pr.Head.Ref, c.proposed+"/"+tasks.RevertSegment+"/"),
+		By:     tasks.MergeAuthor(pr.Head.Ref, r.proposed, pr.User.Login),
+		Revert: strings.HasPrefix(pr.Head.Ref, r.proposed+"/"+tasks.RevertSegment+"/"),
 	}
 }
 
@@ -254,9 +300,9 @@ func (c *Coordinator) proposalRow(proj project.ProjectInfo, pr forge.PR) model.P
 // project) draft branch or one of the user's revert branches. Exact by
 // construction - both names carry a hash of the raw identity - where the By
 // segment a row shows is lossy. Pure string work, safe on the broadcast path.
-func (c *Coordinator) OwnsProposal(id auth.Identity, proj project.ProjectInfo, branch string) bool {
-	return branch == c.proposedBranch(id.Username, proj.Name) ||
-		strings.HasPrefix(branch, c.revertPrefix(id.Username, proj.Name))
+func (r *Reader) OwnsProposal(id auth.Identity, proj project.ProjectInfo, branch string) bool {
+	return branch == r.proposedBranch(id.Username, proj.Name) ||
+		strings.HasPrefix(branch, r.revertPrefix(id.Username, proj.Name))
 }
 
 // defaultTitle names an untitled proposal by what it does, so the history row

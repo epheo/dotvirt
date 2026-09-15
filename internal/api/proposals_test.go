@@ -14,6 +14,7 @@ import (
 // fakeDraft implements only the lane's methods; the embedded interface panics
 // on anything else, which is exactly what these tests want.
 type fakeDraft struct {
+	Reader
 	Draft
 	mu    sync.Mutex
 	prs   map[string]model.Proposal // project name -> its open PR
@@ -47,7 +48,7 @@ func (f *fakeDraft) forgeCalls() int {
 // refreshProposals, and the hub is woken only when a lane visibly changes.
 func TestProposalsHotPathNeverCallsForge(t *testing.T) {
 	fd := &fakeDraft{prs: map[string]model.Proposal{}}
-	s := NewServer(Deps{Draft: fd})
+	s := NewServer(Deps{Reader: fd, Draft: fd})
 	id := auth.Identity{Token: "tok-alice", Username: "alice"}
 	projects := []project.ProjectInfo{{Name: "team-a", Repo: "http://x/r.git"}}
 
@@ -107,7 +108,7 @@ func TestProposalsLaneIsProjectScoped(t *testing.T) {
 	fd := &fakeDraft{prs: map[string]model.Proposal{
 		"team-a": {Project: "team-a", PRNumber: 7, Branch: "alice"},
 	}}
-	s := NewServer(Deps{Draft: fd})
+	s := NewServer(Deps{Reader: fd, Draft: fd})
 	projects := []project.ProjectInfo{{Name: "team-a", Repo: "http://x/r.git"}}
 	alice := auth.Identity{Token: "tok-alice", Username: "alice"}
 	bob := auth.Identity{Token: "tok-bob", Username: "bob"}
@@ -139,7 +140,7 @@ func TestProposalsPlatformProjectSticky(t *testing.T) {
 	fd := &fakeDraft{prs: map[string]model.Proposal{
 		"platform": {Project: "platform", PRNumber: 1, PRURL: "http://x/pr/1"},
 	}}
-	s := NewServer(Deps{Draft: fd})
+	s := NewServer(Deps{Reader: fd, Draft: fd})
 	id := auth.Identity{Token: "tok-admin", Username: "kube:admin"}
 
 	// A propose into the platform tier tracks it (handlePropose's pre-nudge step).
@@ -162,7 +163,7 @@ func TestProposalsPlatformProjectSticky(t *testing.T) {
 // TestCanAuthorPlatformNoRepo pins the safety gate: with no platform repo
 // configured, the inventory never seeds (or SSAR-checks) the platform tier.
 func TestCanAuthorPlatformNoRepo(t *testing.T) {
-	s := NewServer(Deps{Draft: &fakeDraft{}}) // no PlatformRepo
+	s := NewServer(Deps{Reader: &fakeDraft{}, Draft: &fakeDraft{}}) // no PlatformRepo
 	id := auth.Identity{Token: "tok", Username: "u"}
 	// A nil cluster client is safe here: the repo-empty guard returns before any
 	// SSAR, so it must not be dereferenced.
@@ -175,7 +176,7 @@ func TestCanAuthorPlatformNoRepo(t *testing.T) {
 // drops out of the refresh set, so dead sessions cost no forge traffic.
 func TestProposalsTargetExpiry(t *testing.T) {
 	fd := &fakeDraft{prs: map[string]model.Proposal{}}
-	s := NewServer(Deps{Draft: fd})
+	s := NewServer(Deps{Reader: fd, Draft: fd})
 	id := auth.Identity{Token: "tok-bob", Username: "bob"}
 	s.proposalsFor(id, []project.ProjectInfo{{Name: "team-b"}})
 

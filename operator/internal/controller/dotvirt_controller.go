@@ -262,7 +262,7 @@ func (r *DotvirtReconciler) forgeClient(ctx context.Context, dv *dotvirtv1alpha1
 	if dv.Spec.Forge.Managed {
 		base = r.managedForgeAPIBase(dv)
 	}
-	c := forge.NewFactory(base, token, dv.Spec.Forge.InsecureTLS).For(dv.Spec.Forge.PlatformRepo)
+	c := forge.NewFactory(base, forge.StaticToken(token), dv.Spec.Forge.InsecureTLS, "").For(dv.Spec.Forge.PlatformRepo)
 	if c == nil {
 		return nil, fmt.Errorf("cannot parse platform repo URL %q", dv.Spec.Forge.PlatformRepo)
 	}

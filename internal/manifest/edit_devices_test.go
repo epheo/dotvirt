@@ -257,3 +257,28 @@ func hasStr(s []string, v string) bool {
 	}
 	return false
 }
+
+// The blank DataVolume an added disk gets is the wizard's own shape, rendered
+// as the two-space block the line editor splices: byte for byte what a VM
+// created with that disk would carry.
+func TestBlankDVTemplateMatchesWizardShape(t *testing.T) {
+	want := []string{
+		"- metadata:",
+		"    name: web-data",
+		"  spec:",
+		"    source:",
+		"      blank: {}",
+		"    storage:",
+		"      resources:",
+		"        requests:",
+		"          storage: 20Gi",
+		"      storageClassName: fast",
+	}
+	got := blankDVTemplate("web-data", "20Gi", "fast")
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("blankDVTemplate =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if got := blankDVTemplate("web-data", "20Gi", ""); len(got) != len(want)-1 || strings.Contains(strings.Join(got, "\n"), "storageClassName") {
+		t.Errorf("an empty class must be omitted so the provisioner picks the default:\n%s", strings.Join(got, "\n"))
+	}
+}

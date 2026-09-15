@@ -23,7 +23,7 @@ func TestOptionsFilteredPerCaller(t *testing.T) {
 	f := ssarFactory(t, func(_ *http.Request, review *authzv1.SelfSubjectAccessReview) bool {
 		return review.Spec.ResourceAttributes.Namespace == "os-images"
 	})
-	s := NewServer(Deps{ClusterFactory: f, Draft: &fakeDraft{}, Bus: eventbus.New()})
+	s := NewServer(Deps{ClusterFactory: f, Reader: &fakeDraft{}, Draft: &fakeDraft{}, Bus: eventbus.New()})
 	all := model.Options{
 		Instancetypes: []model.Instancetype{{Name: "u1.small"}},
 		OSImages: []model.OSImage{
