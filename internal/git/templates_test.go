@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // The templates/ dir is the library: TemplatesOnBranch reads exactly it, and
@@ -19,7 +21,7 @@ func TestTemplatesDirSplit(t *testing.T) {
 		t.Fatal(err)
 	}
 	tpl := "apiVersion: template.kubevirt.io/v1beta1\nkind: VirtualMachineTemplate\nmetadata:\n  name: base\nspec:\n  virtualMachine:\n    kind: VirtualMachine\n"
-	if _, err := write.Commit("seed", "add template", []File{
+	if _, err := write.Commit("seed", "add template", []model.File{
 		{Path: "templates/base.yaml", Content: []byte(tpl)},
 	}); err != nil {
 		t.Fatal(err)

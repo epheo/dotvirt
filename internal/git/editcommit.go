@@ -10,6 +10,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/format/index"
 
 	"github.com/epheo/dotvirt/internal/manifest"
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // EditResult reports the outcome of a CommitChangeset: the working branch the
@@ -94,7 +95,7 @@ func (w *WriteRepo) CommitChangeset(base, branch, message string, items []Change
 		default:
 			continue
 		}
-		if err := writeWorktreeFile(wt, File{Path: it.Path, Content: content}); err != nil {
+		if err := writeWorktreeFile(wt, model.File{Path: it.Path, Content: content}); err != nil {
 			return EditResult{}, err
 		}
 		if _, err := wt.Add(it.Path); err != nil {

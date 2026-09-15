@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // seedMultiRepo creates a bare repo with a README + two VM manifests under
@@ -55,7 +57,7 @@ func TestCommitAdditiveAndNoOp(t *testing.T) {
 	w := OpenWrite(bare, "", nil, true)
 
 	content := []byte("kind: VirtualMachine\nmetadata: {name: web, namespace: tenant-a}\n")
-	files := []File{{Path: "tenant-a/web.yaml", Content: content}}
+	files := []model.File{{Path: "tenant-a/web.yaml", Content: content}}
 	res, err := w.Commit("seed", "sync", files)
 	if err != nil {
 		t.Fatalf("Commit: %v", err)
@@ -64,7 +66,7 @@ func TestCommitAdditiveAndNoOp(t *testing.T) {
 		t.Fatal("identical content must not commit")
 	}
 
-	files = []File{{Path: "tenant-a/new.yaml", Content: []byte("kind: VirtualMachine\nmetadata: {name: new, namespace: tenant-a}\n")}}
+	files = []model.File{{Path: "tenant-a/new.yaml", Content: []byte("kind: VirtualMachine\nmetadata: {name: new, namespace: tenant-a}\n")}}
 	res, err = w.Commit("seed", "sync", files)
 	if err != nil {
 		t.Fatalf("Commit: %v", err)

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5"
@@ -31,12 +32,6 @@ type WriteRepo struct {
 // (set false when there's no writable remote, e.g. tests).
 func OpenWrite(url, username string, tokenFn forge.TokenSource, push bool) *WriteRepo {
 	return &WriteRepo{creds: creds{url: url, username: username, tokenFn: tokenFn}, push: push}
-}
-
-// File is a path/content pair to write into the repo.
-type File struct {
-	Path    string
-	Content []byte
 }
 
 // CommitResult reports what a commit did.
@@ -114,7 +109,7 @@ func (w *WriteRepo) pushBranch(repo *git.Repository, branch string) error {
 // never churns history.
 //
 // branch is created from the default branch if it doesn't exist yet.
-func (w *WriteRepo) Commit(branch, message string, files []File) (CommitResult, error) {
+func (w *WriteRepo) Commit(branch, message string, files []model.File) (CommitResult, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -184,7 +179,7 @@ func checkoutBranch(repo *git.Repository, wt *git.Worktree, branch string) error
 	return wt.Checkout(&git.CheckoutOptions{Branch: local, Create: true})
 }
 
-func writeWorktreeFile(wt *git.Worktree, f File) error {
+func writeWorktreeFile(wt *git.Worktree, f model.File) error {
 	if err := ensureDir(wt, f.Path); err != nil {
 		return err
 	}

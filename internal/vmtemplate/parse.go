@@ -15,7 +15,6 @@ import (
 
 	tplv1beta1 "kubevirt.io/virt-template-api/core/v1beta1"
 
-	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
@@ -28,7 +27,7 @@ const (
 	// Dir is the library directory within a repo. It must stay outside the
 	// ArgoCD-applied file set (the operator's Applications exclude it) until
 	// the CRD exists on-cluster.
-	Dir = git.TemplatesDir
+	Dir = model.TemplatesDir
 
 	// descriptionAnnotation carries the template's human description; the CRD
 	// spec has no description field, so the convention rides metadata.

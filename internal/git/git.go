@@ -157,12 +157,6 @@ func (r *Repo) headsSignature() (string, error) {
 	return strings.Join(heads, ","), nil
 }
 
-// ManifestFile is one VM manifest located in the repo.
-type ManifestFile struct {
-	Path    string // path within the repo
-	Content []byte
-}
-
 // walkYAML visits branch's .yaml/.yml files passing include, under the repo
 // lock - the one tree-walk behind VMManifests, TemplatesOnBranch and
 // DeclaredOnBranch.
@@ -188,13 +182,13 @@ func (r *Repo) walkYAML(branch string, include func(path string) bool, visit fun
 // VMManifests returns every file on branch that contains a VirtualMachine doc.
 // Files are matched by .yaml/.yml extension then filtered by content, so a
 // single file with multiple docs is still found.
-func (r *Repo) VMManifests(branch string) ([]ManifestFile, error) {
-	var out []ManifestFile
+func (r *Repo) VMManifests(branch string) ([]model.File, error) {
+	var out []model.File
 	err := r.walkYAML(branch,
 		func(path string) bool { return !inTemplatesDir(path) },
 		func(path string, content []byte) error {
 			if containsVirtualMachine(content) {
-				out = append(out, ManifestFile{Path: path, Content: content})
+				out = append(out, model.File{Path: path, Content: content})
 			}
 			return nil
 		})
@@ -273,22 +267,18 @@ func containsVirtualMachine(content []byte) bool {
 	return strings.Contains(string(content), "kind: VirtualMachine")
 }
 
-// TemplatesDir is the library directory: VirtualMachineTemplate manifests the
-// ArgoCD Applications exclude from the applied path. VMManifests skips it (a
-// template's embedded VM blueprint is not inventory), and TemplatesOnBranch
-// reads only it.
-const TemplatesDir = "templates"
-
+// inTemplatesDir: VMManifests skips the library (a template's embedded VM
+// blueprint is not inventory); TemplatesOnBranch reads only it.
 func inTemplatesDir(name string) bool {
-	return strings.HasPrefix(name, TemplatesDir+"/")
+	return strings.HasPrefix(name, model.TemplatesDir+"/")
 }
 
 // TemplatesOnBranch returns every .yaml file under templates/ on branch - the
 // repo's template library, parsed by the caller.
-func (r *Repo) TemplatesOnBranch(branch string) ([]ManifestFile, error) {
-	var out []ManifestFile
+func (r *Repo) TemplatesOnBranch(branch string) ([]model.File, error) {
+	var out []model.File
 	err := r.walkYAML(branch, inTemplatesDir, func(path string, content []byte) error {
-		out = append(out, ManifestFile{Path: path, Content: content})
+		out = append(out, model.File{Path: path, Content: content})
 		return nil
 	})
 	if err != nil {

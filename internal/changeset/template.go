@@ -7,7 +7,6 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
-	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
@@ -35,7 +34,7 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	raw, err := libRead.FileOnBranch(c.baseBranch, git.TemplatesDir+"/"+req.Template+".yaml")
+	raw, err := libRead.FileOnBranch(c.baseBranch, vmtemplate.Dir+"/"+req.Template+".yaml")
 	if err != nil {
 		return model.DraftView{}, fmt.Errorf("%w: template %q not in library %q", model.ErrNotFound, req.Template, libraryProj.Name)
 	}
@@ -121,7 +120,7 @@ func (c *Coordinator) StageSaveTemplate(id auth.Identity, commitProj, sourceProj
 		return model.DraftView{}, err
 	}
 
-	path := git.TemplatesDir + "/" + req.Name + ".yaml"
+	path := vmtemplate.Dir + "/" + req.Name + ".yaml"
 	commitRead, err := c.read(commitProj)
 	if err != nil {
 		return model.DraftView{}, err
@@ -155,7 +154,7 @@ func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.P
 	if err := requireDNS1123("template name", req.Name); err != nil {
 		return model.DraftView{}, err
 	}
-	path := git.TemplatesDir + "/" + req.Name + ".yaml"
+	path := vmtemplate.Dir + "/" + req.Name + ".yaml"
 	if t := vmtemplate.Parse(path, []byte(req.YAML), commitProj.Name); t.Error != "" {
 		return model.DraftView{}, fmt.Errorf("%w: %s", model.ErrInvalid, t.Error)
 	}
