@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { History, RotateCcw } from 'lucide-svelte';
-	import { api, type Commit, type CommitDetail, type DraftItem } from '$lib/api';
-	import { friendlyError, relativeAge } from '$lib/format';
+	import { type Commit, type CommitDetail, type DraftItem } from '$lib/api';
+	import { relativeAge } from '$lib/format';
 	import { changesHref } from '$lib/nav';
 	import { action, resource } from '$lib/resource.svelte';
 	import { itemKey, reviewURL } from '$lib/review';
 	import { inventory } from '$lib/state/inventory.svelte';
+	import { reviewCache } from '$lib/state/reviewCache.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import ChangeList from './ChangeList.svelte';
 	import Button from './Button.svelte';
@@ -49,16 +50,9 @@
 
 	// One version's diff, opened inline: the commit's items narrowed to this object.
 	let open = $state<string | null>(null);
-	let details = $state<Record<string, CommitDetail>>({});
-	let detailError = $state<Record<string, string>>({});
-	async function toggle(hash: string) {
+	function toggle(hash: string) {
 		open = open === hash ? null : hash;
-		if (!open || details[hash] || detailError[hash]) return;
-		try {
-			details[hash] = await api.commit(project, hash);
-		} catch (e) {
-			detailError[hash] = friendlyError(e);
-		}
+		if (open) reviewCache.loadCommit(project, hash);
 	}
 	const ownItems = (d: CommitDetail): DraftItem[] => {
 		const own = d.items.filter(mine);
@@ -139,14 +133,14 @@
 						{/if}
 					</div>
 					{#if shown}
-						{@const d = details[c.hash]}
+						{@const review = reviewCache.commit(project, c.hash)}
 						<div class="space-y-2 border-t border-line-soft bg-inset px-3 py-2 pl-9">
-							{#if detailError[c.hash]}
-								<ErrorNote error={detailError[c.hash]} />
-							{:else if !d}
+							{#if review?.error}
+								<ErrorNote error={review.error} />
+							{:else if !review?.data}
 								<Skeleton class="h-10" />
 							{:else}
-								{#each ownItems(d) as it (itemKey(it))}
+								{#each ownItems(review.data) as it (itemKey(it))}
 									<ChangeList changes={it.changes} />
 									{#if it.yaml}
 										<details class="rounded border border-line bg-panel">

@@ -5,6 +5,7 @@
 	import { approvalLine, checksPill, itemKey, reviewURL } from '$lib/review';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
+	import { reviewCache } from '$lib/state/reviewCache.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import ChangeList from './ChangeList.svelte';
 	import Button from './Button.svelte';
@@ -26,22 +27,18 @@
 	const draftCount = $derived(drafts.drafts.find((d) => d.project === project)?.draft.count ?? 0);
 
 	// Open PRs of the project, kept when their diff names this VM. A PR's
-	// items load once (the same review the Changes section renders).
+	// items are the review the Changes section renders, loaded once per PR;
+	// the load re-runs only when the set of open PRs moves.
 	const projectPRs = $derived(inventory.proposals.filter((p) => p.project === project));
-	let prItems = $state<Record<number, DraftItem[] | null>>({});
 	$effect(() => {
-		for (const p of projectPRs) {
-			if (untrack(() => prItems[p.prNumber]) !== undefined) continue;
-			prItems[p.prNumber] = null;
-			api
-				.proposal(p.project, p.prNumber)
-				.then((d) => (prItems[p.prNumber] = d.items))
-				.catch(() => (prItems[p.prNumber] = []));
-		}
+		inventory.proposalsKey;
+		for (const p of untrack(() => projectPRs)) reviewCache.loadProposal(p.project, p.prNumber);
 	});
+	const reviewOf = (p: { project: string; prNumber: number }) =>
+		reviewCache.proposal(p.project, p.prNumber);
 	const touching = $derived(
 		projectPRs.filter((p) =>
-			(prItems[p.prNumber] ?? []).some(
+			(reviewOf(p)?.data?.items ?? []).some(
 				(it) =>
 					(!it.resource || it.resource === 'vm') &&
 					it.namespace === vm.namespace &&
@@ -49,7 +46,12 @@
 			),
 		),
 	);
-	const prsLoading = $derived(projectPRs.some((p) => prItems[p.prNumber] === null));
+	const prsLoading = $derived(
+		projectPRs.some((p) => {
+			const r = reviewOf(p);
+			return !r || (!r.data && !r.error);
+		}),
+	);
 </script>
 
 <div class="max-w-3xl space-y-4">

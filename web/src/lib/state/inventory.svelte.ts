@@ -11,6 +11,7 @@ import {
 } from '$lib/api';
 import { friendlyError } from '$lib/format';
 import { deriveIssues } from '$lib/issues';
+import { prKey } from '$lib/review';
 
 // The live cluster read layer: the WS inventory snapshot plus the once-per-
 // session networking inventory (GET /api/networks). Everything else the UI
@@ -73,7 +74,7 @@ class InventoryStore {
 	// into a PR and a merge/close clears the lane - possibly from another tab.
 	readonly proposalsKey = $derived(
 		this.proposals
-			.map((p) => `${p.project}#${p.prNumber}`)
+			.map((p) => prKey(p.project, p.prNumber))
 			.sort()
 			.join('\0'),
 	);

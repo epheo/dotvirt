@@ -10,6 +10,7 @@
 	import { drafts, PLATFORM_PROJECT } from '$lib/state/drafts.svelte';
 	import { catalog } from '$lib/state/catalog.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
+	import { reviewCache } from '$lib/state/reviewCache.svelte';
 	import { lastSection } from '$lib/state/nav.svelte';
 	import { session } from '$lib/state/session.svelte';
 	import { ui } from '$lib/state/ui.svelte';
@@ -54,6 +55,7 @@
 		if (!session.user) {
 			inventory.reset();
 			drafts.reset();
+			reviewCache.reset();
 			ui.reset();
 			catalog.reset();
 		}
