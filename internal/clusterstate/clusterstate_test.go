@@ -6,12 +6,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
+
+	"github.com/epheo/dotvirt/internal/reflect"
 )
 
 // stateWithIndexers builds a State around fresh indexers the test can seed
 // directly, standing in for what the reflectors would populate from the cluster.
 func stateWithIndexers() *State {
-	return &State{vms: newIndexer(), vmis: newIndexer(), nss: newIndexer()}
+	return &State{vms: reflect.NewIndexer(), vmis: reflect.NewIndexer(), nss: reflect.NewIndexer()}
 }
 
 func TestLiveVMsMergesVMIOntoVM(t *testing.T) {
@@ -150,7 +152,7 @@ func testVM(gen int64) *kubevirtcorev1.VirtualMachine {
 // real spec change (generation bump) fire both.
 func TestVMSpecStoreGatesOnGeneration(t *testing.T) {
 	var spec, live int
-	store := newVMSpecStore(newIndexer(), func() { spec++ }, func() { live++ }, nil)
+	store := newVMSpecStore(reflect.NewIndexer(), func() { spec++ }, func() { live++ }, nil)
 
 	if err := store.Add(testVM(1)); err != nil {
 		t.Fatal(err)
@@ -177,7 +179,7 @@ func TestVMSpecStoreGatesOnGeneration(t *testing.T) {
 
 func TestVMSpecStoreReplaceFiresSyncedOnce(t *testing.T) {
 	var spec, live, synced int
-	store := newVMSpecStore(newIndexer(), func() { spec++ }, func() { live++ }, func() { synced++ })
+	store := newVMSpecStore(reflect.NewIndexer(), func() { spec++ }, func() { live++ }, func() { synced++ })
 	_ = store.Replace([]any{testVM(1)}, "1")
 	_ = store.Replace([]any{testVM(1)}, "2") // a later relist must NOT re-fire synced
 	if spec != 2 || live != 2 {

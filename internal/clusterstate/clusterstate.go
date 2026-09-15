@@ -29,7 +29,6 @@ import (
 	"context"
 	"maps"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -102,18 +101,14 @@ type State struct {
 	// RoleBindings are watched too, but only as an RBACChanged signal - via a
 	// retain-nothing signal store, so there's no indexer for them here.
 
-	specs []reflectorSpec // reflector wiring, built in New, started in Run
+	specs   []reflectorSpec // reflector wiring, built in New, started in Run
+	healthy []atomic.Bool   // one reflect.TrackHealth flag per specs entry
 
 	// Per-store readiness: each reflector's initial LIST (first Replace) landing.
 	// Tracked per store (not a single counter) so a consumer gates on exactly the
 	// stores it reads: drift must not stall on a failing VMI reflector, and
-	// nobody waits on the signal-only RoleBinding reflector. Lock-free VMSnapshotReady
-	// reads on the hot path.
-	vmsSynced, vmisSynced, nssSynced atomic.Bool
-	// allSynced is closed once the three readable stores have all synced, so
-	// WaitForSync blocks deterministically instead of polling.
-	syncedOnce sync.Once
-	allSynced  chan struct{}
+	// nobody waits on the signal-only RoleBinding reflector.
+	vmsReady, vmisReady, nssReady reflect.Ready
 
 	bus *eventbus.Bus // reflectors publish their kind here on every mutation
 }
@@ -123,10 +118,10 @@ type State struct {
 // bus whenever the snapshot moves, so the inventory hub rebuilds; bus is optional
 // (nil disables signalling, e.g. in tests).
 func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
-	s := &State{bus: bus, allSynced: make(chan struct{})}
-	s.vms = newIndexer()
-	s.vmis = newIndexer()
-	s.nss = newIndexer()
+	s := &State{bus: bus}
+	s.vms = reflect.NewIndexer()
+	s.vmis = reflect.NewIndexer()
+	s.nss = reflect.NewIndexer()
 
 	vmSpec := func() { bus.Publish(eventbus.VMSpecChanged) }
 	live := func() { bus.Publish(eventbus.LiveChanged) }
@@ -136,14 +131,18 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 		// vms: VMSpecChanged is gated on metadata.generation by vmSpecStore, so a
 		// status-only VM write fires only LiveChanged, so consumers of VMSpecChanged
 		// don't wake on VM-status heartbeats.
-		{newVMSpecStore(s.vms, vmSpec, live, func() { s.vmsSynced.Store(true); s.checkSynced() }), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch()},
-		{reflect.NewStore(s.vmis, live, func() { s.vmisSynced.Store(true); s.checkSynced() }), &kubevirtcorev1.VirtualMachineInstance{}, sa.VMIListWatch()},
+		{newVMSpecStore(s.vms, vmSpec, live, s.vmsReady.Mark), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch()},
+		{reflect.NewStore(s.vmis, live, s.vmisReady.Mark), &kubevirtcorev1.VirtualMachineInstance{}, sa.VMIListWatch()},
 		// A namespace move is both a topology change (inventory) and a visibility
 		// change; NamespaceChanged is summed into both the inventory and RBAC versions.
-		{reflect.NewStore(s.nss, namespace, func() { s.nssSynced.Store(true); s.checkSynced() }), &corev1.Namespace{}, sa.NamespaceListWatch(projectLabel)},
+		{reflect.NewStore(s.nss, namespace, s.nssReady.Mark), &corev1.Namespace{}, sa.NamespaceListWatch(projectLabel)},
 		// Signal-only: a retain-nothing store (never read), so the cluster-wide
 		// RoleBinding watch costs no per-object memory - it only nudges visibility.
 		{reflect.NewSignalStore(rbac, nil), &rbacv1.RoleBinding{}, sa.RoleBindingListWatch()},
+	}
+	s.healthy = make([]atomic.Bool, len(s.specs))
+	for i := range s.healthy {
+		s.healthy[i].Store(true) // optimistic until a list/watch actually errors
 	}
 	return s
 }
@@ -151,53 +150,43 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 type reflectorSpec struct {
 	store    cache.Store // already wrapped to fire the right Publishes + readiness
 	expected any
-	lw       cache.ListerWatcher
+	lw       *cache.ListWatch
 }
 
 // Run starts one reflector per resource; each owns its own relist/backoff and
 // stops when ctx is cancelled. Returns immediately - call WaitForSync to block
 // until the initial LIST has populated the snapshot.
 func (s *State) Run(ctx context.Context) {
-	for _, spec := range s.specs {
-		r := cache.NewReflector(spec.lw, spec.expected, spec.store, 0)
-		go r.Run(ctx.Done())
+	for i, spec := range s.specs {
+		reflect.RunTyped(ctx, reflect.TrackHealth(spec.lw, &s.healthy[i]), spec.expected, spec.store)
 	}
 }
 
-// newIndexer builds a namespace-keyed store for one resource.
-func newIndexer() cache.Indexer {
-	return cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
-}
+// Healthy reports whether every watch is currently established
+// (reflect.TrackHealth). The snapshot keeps serving its last-good stores while
+// unhealthy; the inventory surfaces a "may be stale" warning so a sustained
+// outage isn't silent.
+func (s *State) Healthy() bool { return reflect.AllHealthy(s.healthy) }
 
 // WaitForSync blocks until every READABLE reflector's initial LIST has landed (the
 // VM, VMI and namespace stores - not the signal-only RoleBinding watch), or ctx is
-// done. Deterministic: it waits on a channel closed by the last store to sync, not a
-// poll. Returns ctx.Err() on cancellation, nil once synced.
+// done. Returns ctx.Err() on cancellation, nil once synced.
 func (s *State) WaitForSync(ctx context.Context) error {
-	select {
-	case <-s.allSynced:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	for _, r := range []*reflect.Ready{&s.vmsReady, &s.vmisReady, &s.nssReady} {
+		if err := r.Wait(ctx); err != nil {
+			return err
+		}
 	}
-}
-
-// checkSynced closes allSynced once all three readable stores have landed their
-// initial LIST. Invoked from each readable reflector's onSynced (each fires exactly
-// once); the sync.Once makes the close idempotent.
-func (s *State) checkSynced() {
-	if s.vmsSynced.Load() && s.vmisSynced.Load() && s.nssSynced.Load() {
-		s.syncedOnce.Do(func() { close(s.allSynced) })
-	}
+	return nil
 }
 
 // VMSnapshotReady reports whether the VM and namespace stores have synced. Drift and
 // adoption read absence as meaning: a VM missing from the snapshot reads as not running.
 // They never read VMIs, so a permanently failing VMI reflector (e.g. a removed RBAC
 // verb) must NOT wedge them. (Whole-snapshot readiness, incl. VMIs, is what
-// WaitForSync's allSynced channel gates.)
+// WaitForSync gates.)
 func (s *State) VMSnapshotReady() bool {
-	return s.vmsSynced.Load() && s.nssSynced.Load()
+	return s.vmsReady.Done() && s.nssReady.Done()
 }
 
 // VMObjects returns deep copies of the full VirtualMachine objects in the given
