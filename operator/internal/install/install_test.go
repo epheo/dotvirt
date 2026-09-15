@@ -211,7 +211,7 @@ func TestForgejoWebhookAllowlistIncludesArgoHost(t *testing.T) {
 		d.Spec.Template.Spec.Containers[0].Env,
 	} {
 		got, ok := envValue(env, "FORGEJO__webhook__ALLOWED_HOST_LIST")
-		if !ok || got != serviceHost(testDotvirt())+",external,"+argo {
+		if !ok || got != svcHost(AppName, testDotvirt().Namespace)+",external,"+argo {
 			t.Errorf("ALLOWED_HOST_LIST = (%q, ok=%v), want service host + external + argo host", got, ok)
 		}
 	}
@@ -219,7 +219,7 @@ func TestForgejoWebhookAllowlistIncludesArgoHost(t *testing.T) {
 	// No Argo URL resolvable yet: the baseline list, no trailing separator.
 	got, _ := envValue(ForgejoDeployment(testDotvirt(), false, "", "h").Spec.Template.Spec.Containers[0].Env,
 		"FORGEJO__webhook__ALLOWED_HOST_LIST")
-	if got != serviceHost(testDotvirt())+",external" {
+	if got != svcHost(AppName, testDotvirt().Namespace)+",external" {
 		t.Errorf("ALLOWED_HOST_LIST without an Argo host = %q", got)
 	}
 }
