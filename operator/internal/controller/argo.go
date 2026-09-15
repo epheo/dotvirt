@@ -9,7 +9,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -26,16 +25,16 @@ import (
 // the AppProject tier (+ the static platform Application). Not owner-referenceable
 // by a namespaced CR, so they carry managed-by labels and the finalizer cleans
 // them up.
-func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
-	argoNS, argoSA := r.argoTarget(dv)
+func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (*ctrl.Result, error) {
+	argoNS, argoSA := rc.argoNS, rc.argoSA
 	platformRepo := dv.Spec.Forge.PlatformRepo
 	// The plugin generator reads the appset token from the ArgoCD namespace, so
-	// mirror the generated one there (create-once).
+	// mirror the generated one there.
 	if !r.DryRun {
 		if err := r.mirrorAppsetToken(ctx, dv, argoNS); err != nil {
 			return nil, err
 		}
-		if err := r.ensureForgeTLSTrust(ctx, dv, argoNS); err != nil {
+		if err := r.ensureForgeTLSTrust(ctx, dv, rc); err != nil {
 			return nil, err
 		}
 	}
@@ -75,13 +74,12 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 // dry-run (it mutates the forge + argocd-secret, which server-side dry-run can't
 // model). A registration failure is recorded on the condition but doesn't halt
 // the pipeline - Argo falls back to its poll.
-func (r *DotvirtReconciler) reconcileArgoWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
+func (r *DotvirtReconciler) reconcileArgoWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (*ctrl.Result, error) {
 	if r.DryRun {
 		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionArgoWebhook, "argo webhook")
 		return nil, nil
 	}
-	argoNS, _ := r.argoTarget(dv)
-	if configured, err := r.ensureArgoWebhook(ctx, dv, argoNS); err != nil {
+	if configured, err := r.ensureArgoWebhook(ctx, dv, rc); err != nil {
 		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionFalse, "Error", err.Error())
 	} else if configured {
 		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionTrue, "Registered", "org webhook -> ArgoCD")
@@ -137,12 +135,8 @@ func (r *DotvirtReconciler) mirrorAppsetToken(ctx context.Context, dv *dotvirtv1
 // so none of those should fail the install. err is reserved for operator-internal
 // failures (reading the webhook secret / forge credentials, applying argocd-secret).
 // Real-only (the caller skips it in dry-run) - it mutates the forge + argocd-secret.
-func (r *DotvirtReconciler) ensureArgoWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) (configured bool, err error) {
-	if dv.Spec.Forge.URL == "" || dv.Spec.Forge.PlatformRepo == "" {
-		return false, nil
-	}
-	argoURL := r.argoServerURL(ctx, dv, argoNS)
-	if argoURL == "" {
+func (r *DotvirtReconciler) ensureArgoWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (configured bool, err error) {
+	if dv.Spec.Forge.URL == "" || dv.Spec.Forge.PlatformRepo == "" || rc.argoURL == "" {
 		return false, nil
 	}
 	// The shared webhook secret, generated create-once in the dotvirt namespace.
@@ -152,7 +146,7 @@ func (r *DotvirtReconciler) ensureArgoWebhook(ctx context.Context, dv *dotvirtv1
 	}
 	value := string(s.Data["secret"])
 	// Argo verifies the delivery signature against this key (own only the key).
-	if err := r.apply(ctx, install.ArgoWebhookSecret(argoNS, value)); err != nil {
+	if err := r.apply(ctx, install.ArgoWebhookSecret(rc.argoNS, value)); err != nil {
 		return false, fmt.Errorf("set argo webhook secret: %w", err)
 	}
 	// One org webhook covers every repo, using the forge credential to register it.
@@ -165,7 +159,7 @@ func (r *DotvirtReconciler) ensureArgoWebhook(ctx context.Context, dv *dotvirtv1
 	// hard install error, because ArgoCD's poll already backstops a missed nudge. Log it
 	// and report unconfigured so the next reconcile retries. The secret/credential steps
 	// above stay hard errors - those are operator-internal, not forge-transient.
-	if err := client.EnsureOrgWebhook(strings.TrimRight(argoURL, "/")+"/api/webhook", value); err != nil {
+	if err := client.EnsureOrgWebhook(strings.TrimRight(rc.argoURL, "/")+"/api/webhook", value); err != nil {
 		logf.FromContext(ctx).Info("argo webhook registration deferred; ArgoCD poll backstops", "error", err.Error())
 		return false, nil
 	}
@@ -200,7 +194,7 @@ func (r *DotvirtReconciler) repoCreds(ctx context.Context, dv *dotvirtv1alpha1.D
 // worked after an invisible hand-added cert. Managed-on-OpenShift only. MERGE:
 // never touch other hosts' entries. Left on uninstall: not a secret, and a dead
 // host key is inert.
-func (r *DotvirtReconciler) ensureForgeTLSTrust(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) error {
+func (r *DotvirtReconciler) ensureForgeTLSTrust(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) error {
 	if !dv.Spec.Forge.Managed || r.Platform != platform.OpenShift {
 		return nil
 	}
@@ -214,15 +208,10 @@ func (r *DotvirtReconciler) ensureForgeTLSTrust(ctx context.Context, dv *dotvirt
 	if u, err := url.Parse(dv.Spec.Forge.URL); err == nil && u.Scheme == "http" {
 		return nil
 	}
-	var ingressCA corev1.ConfigMap
-	if err := r.Get(ctx, types.NamespacedName{Namespace: "openshift-config-managed", Name: "default-ingress-cert"}, &ingressCA); err != nil {
+	if rc.ingressCAErr != nil {
 		// Legible and blocking: without trust every Application wedges in a
 		// ComparisonError that says x509, three layers away from this cause.
-		return fmt.Errorf("read default ingress CA (needed to trust the managed forge's route in ArgoCD): %w", err)
-	}
-	ca := ingressCA.Data["ca-bundle.crt"]
-	if ca == "" {
-		return fmt.Errorf("default-ingress-cert has no ca-bundle.crt")
+		return fmt.Errorf("trust the managed forge's route in ArgoCD: %w", rc.ingressCAErr)
 	}
 	// SSA with ONLY our host key: ConfigMap data keys get per-key field
 	// ownership, so the merge cannot clobber the gitops operator's writes the way
@@ -230,8 +219,8 @@ func (r *DotvirtReconciler) ensureForgeTLSTrust(ctx context.Context, dv *dotvirt
 	// CM is shared, and labeling it would pull it into finalizer cleanup.
 	cm := &corev1.ConfigMap{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
-		ObjectMeta: metav1.ObjectMeta{Name: "argocd-tls-certs-cm", Namespace: argoNS},
-		Data:       map[string]string{host: ca},
+		ObjectMeta: metav1.ObjectMeta{Name: "argocd-tls-certs-cm", Namespace: rc.argoNS},
+		Data:       map[string]string{host: rc.ingressCA},
 	}
 	return r.apply(ctx, cm)
 }

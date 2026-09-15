@@ -58,7 +58,7 @@ const dotvirtFinalizer = "dotvirt.io/finalizer"
 // (nil, nil) hands off to the next phase.
 type reconcilePhase struct {
 	cond string
-	run  func(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error)
+	run  func(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (*ctrl.Result, error)
 }
 
 // Reconcile drives the install in order, recording a status condition per step so a
@@ -104,6 +104,7 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Only after the finalizer add, the reconcile's one spec write: the effective
 	// spec must never reach the stored CR.
 	r.normalizeSpec(&dv)
+	rc := r.newReconcileCtx(ctx, &dv)
 
 	// The install pipeline, in dependency order. A phase that halts on a wait has
 	// already recorded why; one that fails is recorded here, so no error is
@@ -120,7 +121,7 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// Last: its failure requeues, and nothing above depends on the repo.
 		{dotvirtv1alpha1.ConditionForgeRepoReady, r.reconcilePlatformRepo},
 	} {
-		res, err := phase.run(ctx, &dv)
+		res, err := phase.run(ctx, &dv, rc)
 		if err != nil {
 			return ctrl.Result{}, r.recordFailure(ctx, &dv, phase.cond, err)
 		}
@@ -180,11 +181,36 @@ func (r *DotvirtReconciler) normalizeSpec(dv *dotvirtv1alpha1.Dotvirt) {
 	}
 }
 
+// reconcileCtx is what one pass derives once, after normalizeSpec, for every
+// phase to read instead of re-resolving: the ArgoCD target and external URL (a
+// Route GET) and the default ingress CA (a ConfigMap GET).
+type reconcileCtx struct {
+	argoNS, argoSA string
+	// argoURL is the externally reachable ArgoCD base URL, "" when neither the
+	// spec nor the OpenShift GitOps Route names one (Argo falls back to its poll).
+	argoURL string
+	// ingressCA is the router CA, read on OpenShift only; ingressCAErr says why it
+	// is empty there. How much that matters is the consumer's call: the trust
+	// anchors degrade to the system pool, the managed forge's Argo trust blocks.
+	ingressCA    string
+	ingressCAErr error
+}
+
+func (r *DotvirtReconciler) newReconcileCtx(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) *reconcileCtx {
+	rc := &reconcileCtx{}
+	rc.argoNS, rc.argoSA = r.argoTarget(dv)
+	rc.argoURL = r.argoServerURL(ctx, dv, rc.argoNS)
+	if r.Platform == platform.OpenShift {
+		rc.ingressCA, rc.ingressCAErr = r.readIngressCA(ctx)
+	}
+	return rc
+}
+
 // reconcileDependencies gates on the hard prerequisites: ArgoCD + KubeVirt are
 // PREREQUISITES we never install; if either is absent, record why and requeue (the
 // admin may install the prereq operator). OVN-K/NMState/CDI are soft - note them
 // and proceed.
-func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
+func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, _ *reconcileCtx) (*ctrl.Result, error) {
 	probe := r.probe
 	if probe == nil {
 		probe = deps.Probe
@@ -287,11 +313,15 @@ func (r *DotvirtReconciler) routeHost(ctx context.Context, ns, name string) stri
 }
 
 // argoServerURL resolves the externally reachable ArgoCD base URL: the spec
-// override, else the OpenShift GitOps server Route, else "" (caller falls back to
-// Argo's poll).
+// override, else the OpenShift GitOps server Route, else "" (the webhook is
+// skipped and Argo falls back to its poll). Routes exist only where the route
+// API does, so the lookup is gated like the Route watch in SetupWithManager.
 func (r *DotvirtReconciler) argoServerURL(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) string {
 	if dv.Spec.ArgoCD.ServerURL != "" {
 		return dv.Spec.ArgoCD.ServerURL
+	}
+	if r.Platform != platform.OpenShift {
+		return ""
 	}
 	if host := r.routeHost(ctx, argoNS, "openshift-gitops-server"); host != "" {
 		return "https://" + host

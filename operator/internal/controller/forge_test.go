@@ -173,7 +173,7 @@ func TestReconcileForgeSilentForBYO(t *testing.T) {
 	c := testBuilder(t).WithObjects(dv).Build()
 	r := newReconciler(c, depsOK)
 
-	res, err := r.reconcileForge(context.Background(), dv)
+	res, err := r.reconcileForge(context.Background(), dv, phaseCtx(r, dv))
 	if err != nil || res != nil {
 		t.Fatalf("reconcileForge (BYO) = (%+v, %v), want (nil, nil)", res, err)
 	}
@@ -198,7 +198,7 @@ func TestReconcileForgeURLWithoutCredential(t *testing.T) {
 	c := testBuilder(t).WithObjects(dv).Build()
 	r := newReconciler(c, depsOK)
 
-	if _, err := r.reconcileForge(context.Background(), dv); err != nil {
+	if _, err := r.reconcileForge(context.Background(), dv, phaseCtx(r, dv)); err != nil {
 		t.Fatalf("reconcileForge: %v", err)
 	}
 	fc := cond(dv, dotvirtv1alpha1.ConditionForgeReady)
@@ -214,7 +214,7 @@ func TestReconcileForgeNotConfigured(t *testing.T) {
 	c := testBuilder(t).WithObjects(dv).Build()
 	r := newReconciler(c, depsOK)
 
-	res, err := r.reconcileForge(context.Background(), dv)
+	res, err := r.reconcileForge(context.Background(), dv, phaseCtx(r, dv))
 	if err != nil || res != nil {
 		t.Fatalf("reconcileForge = (%+v, %v), want (nil, nil)", res, err)
 	}
@@ -243,7 +243,7 @@ func TestReconcileForgeCreatesHostlessRouteAndWaits(t *testing.T) {
 	r := newReconciler(c, depsOK)
 	r.Platform = platform.OpenShift
 
-	res, err := r.reconcileForge(context.Background(), dv)
+	res, err := r.reconcileForge(context.Background(), dv, phaseCtx(r, dv))
 	if err != nil {
 		t.Fatalf("reconcileForge: %v", err)
 	}

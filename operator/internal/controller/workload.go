@@ -17,10 +17,7 @@ import (
 // owner-referenced to this CR for automatic GC (unlike the cluster-scoped
 // resources reconcileArgo applies, which a namespaced CR can't own - those rely
 // on the finalizer).
-func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
-	// Converged every pass (the ingress CA rotates); also covers forge-less installs
-	// that skip the forge phase's call.
-	r.ensureTrustAnchors(ctx, dv)
+func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, _ *reconcileCtx) (*ctrl.Result, error) {
 	// Exposure first: on OpenShift an empty ingress.host yields a hostless Route the
 	// router names. Read that host back and fill it in-memory so the Deployment's
 	// DOTVIRT_PUBLIC_URL (OAuth callback + webhook self-registration) is set this same

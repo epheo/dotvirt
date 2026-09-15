@@ -19,7 +19,7 @@ import (
 // key, the ApplicationSet plugin token, and the webhook secrets. The forge
 // credential is supplied by the admin (spec.forge.credentialsSecret) or, earlier
 // in the pipeline, by the managed-Forgejo bootstrap.
-func (r *DotvirtReconciler) reconcileSecrets(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*ctrl.Result, error) {
+func (r *DotvirtReconciler) reconcileSecrets(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, _ *reconcileCtx) (*ctrl.Result, error) {
 	if r.DryRun {
 		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionSecretsReady, "secret generation")
 		return nil, nil

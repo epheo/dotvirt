@@ -73,6 +73,12 @@ func newReconciler(c client.Client, probe func(*rest.Config) (deps.Result, error
 	return &DotvirtReconciler{Client: c, Scheme: c.Scheme(), Platform: platform.Kubernetes, probe: probe}
 }
 
+// phaseCtx derives the per-pass values the way Reconcile does, for tests that
+// drive one phase directly.
+func phaseCtx(r *DotvirtReconciler, dv *dotvirtv1alpha1.Dotvirt) *reconcileCtx {
+	return r.newReconcileCtx(context.Background(), dv)
+}
+
 func reconcileOnce(t *testing.T, r *DotvirtReconciler, dv *dotvirtv1alpha1.Dotvirt) ctrl.Result {
 	t.Helper()
 	res, err := r.Reconcile(context.Background(),
@@ -314,7 +320,7 @@ func TestReconcileWorkloadSetsConsoleURL(t *testing.T) {
 	c := testBuilder(t).WithObjects(dv).Build()
 	r := newReconciler(c, depsOK)
 
-	if res, err := r.reconcileWorkload(context.Background(), dv); err != nil || res != nil {
+	if res, err := r.reconcileWorkload(context.Background(), dv, phaseCtx(r, dv)); err != nil || res != nil {
 		t.Fatalf("reconcileWorkload = (%+v, %v), want (nil, nil)", res, err)
 	}
 	if dv.Status.ConsoleURL != "https://dotvirt.apps.cluster.example" {
@@ -550,7 +556,7 @@ func TestEnsureForgeTLSTrustMergesHost(t *testing.T) {
 	r := newReconciler(c, depsOK)
 	r.Platform = platform.OpenShift
 
-	if err := r.ensureForgeTLSTrust(context.Background(), dv, "openshift-gitops"); err != nil {
+	if err := r.ensureForgeTLSTrust(context.Background(), dv, phaseCtx(r, dv)); err != nil {
 		t.Fatalf("ensureForgeTLSTrust: %v", err)
 	}
 	var cm corev1.ConfigMap
@@ -573,7 +579,7 @@ func TestEnsureForgeTLSTrustGates(t *testing.T) {
 	c := testBuilder(t).WithObjects(dv).Build()
 	r := newReconciler(c, depsOK)
 	r.Platform = platform.OpenShift
-	if err := r.ensureForgeTLSTrust(context.Background(), dv, "openshift-gitops"); err != nil {
+	if err := r.ensureForgeTLSTrust(context.Background(), dv, phaseCtx(r, dv)); err != nil {
 		t.Fatalf("BYO must be a no-op, got %v", err)
 	}
 	var cm corev1.ConfigMap
@@ -594,7 +600,7 @@ func TestEnsureTrustAnchors(t *testing.T) {
 	r := newReconciler(c, depsOK)
 	r.Platform = platform.OpenShift
 
-	r.ensureTrustAnchors(context.Background(), dv)
+	r.ensureTrustAnchors(context.Background(), dv, phaseCtx(r, dv))
 
 	var ca corev1.ConfigMap
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: dv.Namespace, Name: install.IngressCAConfigMap}, &ca); err != nil || ca.Data["ca-bundle.crt"] != "PEM" {

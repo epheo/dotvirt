@@ -20,9 +20,9 @@ func TestForgeTLSTrustSkipsPlainHTTP(t *testing.T) {
 			Forge: dotvirtv1alpha1.ForgeSpec{Managed: true, URL: "http://forge.dotvirt.svc.cluster.local"},
 		},
 	}
-	// No client wired: reaching the CA read would nil-panic, so a clean return
-	// proves the http skip fires first.
-	if err := r.ensureForgeTLSTrust(context.Background(), dv, "argocd"); err != nil {
+	// No CA in the pass and no client wired: reaching the trust step would fail
+	// on the missing CA, so a clean return proves the http skip fires first.
+	if err := r.ensureForgeTLSTrust(context.Background(), dv, &reconcileCtx{argoNS: "argocd"}); err != nil {
 		t.Fatalf("plain-http forge demanded TLS trust: %v", err)
 	}
 }
