@@ -18,7 +18,7 @@ export type Scope =
 export const NO_NETWORK = '(no network)';
 export const POD_NETWORK = 'Pod network';
 export const NO_STORAGE = '(no provisioned storage)';
-const DEFAULT_CLASS = '(cluster default)';
+export const DEFAULT_CLASS = '(cluster default)';
 
 /**
  * The networks a VM appears under: one key per distinct port group, resolved

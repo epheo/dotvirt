@@ -211,8 +211,8 @@ test('context-menu Edit settings on another VM opens on that VM', async ({ page 
 	await login(page);
 	await openVM(page, 'web-1');
 	// From web-1's page, the tree's context menu on web-2 must land on web-2 with
-	// the dialog open: the one-shot intent used to be consumed and reset by the
-	// page being left.
+	// the dialog open: the dialog is the shell's, so leaving the page cannot
+	// drop it.
 	await page.locator('aside').getByText('web-2', { exact: true }).click({ button: 'right' });
 	await page.getByRole('button', { name: 'Edit settings', exact: true }).click();
 	await expect(page).toHaveURL(/\/vm\/web-prod\/web-2/);
