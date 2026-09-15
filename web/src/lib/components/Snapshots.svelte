@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Camera, RotateCcw, Trash2 } from 'lucide-svelte';
-	import { api, type Snapshot, type VM } from '$lib/api';
+	import { api, vmKey, type Snapshot, type VM } from '$lib/api';
 	import { relativeAge } from '$lib/format';
 	import { action, resource, type Resource } from '$lib/resource.svelte';
 	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
@@ -25,11 +25,11 @@
 
 	// Keyed on the VM identity (the live stream hands down a fresh vm each
 	// frame); polls only while a snapshot is still settling.
-	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
+	const key = $derived(vmKey(vm));
 	// The explicit binding type breaks the inference cycle through the poll
 	// gate (snapRes -> poll -> pending -> snapshots -> snapRes).
 	const snapRes: Resource<Snapshot[]> = resource(
-		() => vmKey,
+		() => key,
 		() => api.snapshots(vm.namespace, vm.name),
 		{ reset: true, poll: () => (pending ? 4000 : 0) },
 	);

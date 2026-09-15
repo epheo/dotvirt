@@ -68,6 +68,10 @@ export function fmtUsage(unit: 'pct' | 'bytes' | 'cores', v: number): string {
 	return bytes(v);
 }
 
+// The free-text list fields (owners, IPs, pinned hosts) take space- or
+// comma-separated entries.
+export const splitList = (s: string): string[] => s.split(/[\s,]+/).filter(Boolean);
+
 // Thrown errors stringify as "Error: <msg>"; toasts show just the message.
 export function friendlyError(e: unknown): string {
 	return (e instanceof Error ? e.message : String(e)).replace(/^Error:\s*/, '');

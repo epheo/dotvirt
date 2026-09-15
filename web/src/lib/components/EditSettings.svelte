@@ -9,7 +9,7 @@
 		type EditSection,
 		type NicRow,
 	} from '$lib/editform';
-	import { quantityBytes } from '$lib/format';
+	import { quantityBytes, splitList } from '$lib/format';
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
 	import { nodeTargets } from '$lib/state/hosts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
@@ -77,7 +77,7 @@
 	// svelte-ignore state_referenced_locally
 	pinText = form.pin.join(' ');
 	function syncPinText() {
-		form.pin = pinText.split(/[\s,]+/).filter(Boolean);
+		form.pin = splitList(pinText);
 	}
 
 	const customScheduling = $derived(!!vm.scheduling?.custom);

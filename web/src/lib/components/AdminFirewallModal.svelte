@@ -71,7 +71,7 @@
 		if (baseline) return [];
 		const m: string[] = [];
 		if (!name) m.push('Name is required');
-		else if (!validName(name)) m.push('Name must be lowercase alphanumeric with dashes');
+		else if (!validName(name)) m.push(NAME_HINT);
 		if (priority == null || priority < 0 || priority > 1000) m.push('Priority must be 0-1000');
 		return m;
 	});

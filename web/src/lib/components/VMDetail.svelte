@@ -10,7 +10,7 @@
 		Server,
 		Square,
 	} from 'lucide-svelte';
-	import { api, type Change, type DraftItem, type Network, type VM } from '$lib/api';
+	import { api, vmKey, type Change, type DraftItem, type Network, type VM } from '$lib/api';
 	import {
 		adoptVM,
 		manifestURL,
@@ -152,14 +152,14 @@
 	// on reference would snap the Monitor rail back and refetch drift whenever
 	// cluster state moves. The tab itself is URL state - a fresh VM route
 	// arrives without ?tab=.
-	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
+	const key = $derived(vmKey(vm));
 	$effect(() => {
-		vmKey;
+		key;
 		monitorView = 'events';
 	});
 	// Drift detail (running vs main): null until known, [] when identical.
 	const driftRes = resource<Change[]>(
-		() => vmKey,
+		() => key,
 		() => api.drift(vm.namespace, vm.name).then((d) => (d.drift ? d.changes : [])),
 		{ reset: true },
 	);
@@ -305,7 +305,7 @@
 				onchange={(v) => (monitorView = v as typeof monitorView)}
 			/>
 			{#if monitorView === 'performance'}
-				{#key vmKey}
+				{#key key}
 					<MetricsPanel load={(r) => api.metrics(vm.namespace, vm.name, r)} />
 				{/key}
 			{:else}
@@ -317,7 +317,7 @@
 			<div class="max-w-3xl space-y-4">
 				<section class="rounded border border-line bg-panel p-3">
 					<h2 class="mb-2 text-sm font-semibold text-ink">Trace a flow from this VM</h2>
-					{#key vmKey}
+					{#key key}
 						<TracePanel source={{ namespace: vm.namespace, vm: vm.name }} />
 					{/key}
 				</section>
@@ -326,15 +326,15 @@
 		{:else if tab === 'permissions'}
 			<Permissions namespaces={[vm.namespace]} />
 		{:else if tab === 'changes'}
-			{#key vmKey}
+			{#key key}
 				<VMChanges {vm} {stagedItem} />
 			{/key}
 		{:else if tab === 'snapshots'}
-			{#key vmKey}
+			{#key key}
 				<Snapshots {vm} />
 			{/key}
 		{:else}
-			{#key vmKey}
+			{#key key}
 				<Console {vm} />
 			{/key}
 		{/if}

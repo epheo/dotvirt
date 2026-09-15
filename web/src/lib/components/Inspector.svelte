@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { ChevronDown, Maximize2, X } from 'lucide-svelte';
 	import { goto } from '$app/navigation';
-	import type { VM } from '$lib/api';
+	import { vmKey, type VM } from '$lib/api';
 	import { dispatchVMAction, vmActions } from '$lib/actions';
 	import { vmHref } from '$lib/nav';
 	import { duration } from '$lib/format';
@@ -24,7 +24,7 @@
 	// peek costs no cluster round-trip.
 	let { vm, onclose }: { vm: VM; onclose: () => void } = $props();
 
-	const key = $derived(`${vm.namespace}/${vm.name}`);
+	const key = $derived(vmKey(vm));
 	const stagedItem = $derived(drafts.stagedByKey.get(key));
 	const vmIssues = $derived(inventory.issues.filter((i) => i.scope === key));
 

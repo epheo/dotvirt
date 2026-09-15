@@ -74,7 +74,7 @@
 	const missing = $derived.by(() => {
 		const m: string[] = [];
 		if (!name) m.push('Name is required');
-		else if (!validName(name)) m.push('Name must be lowercase alphanumeric with dashes');
+		else if (!validName(name)) m.push(NAME_HINT);
 		if (!namespace) m.push('Project is required');
 		return m;
 	});

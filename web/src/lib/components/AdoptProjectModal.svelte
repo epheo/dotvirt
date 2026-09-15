@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '$lib/api';
+	import { splitList } from '$lib/format';
 	import FormField from './FormField.svelte';
 	import StageModal from './StageModal.svelte';
 	import TextInput from './TextInput.svelte';
@@ -21,19 +22,13 @@
 	} = $props();
 
 	let owners = $state(''); // space/comma-separated usernames
-
-	const parseOwners = (s: string): string[] =>
-		s
-			.split(/[\s,]+/)
-			.map((o) => o.trim())
-			.filter(Boolean);
 </script>
 
 <StageModal
 	title={recover ? `Recover repo for "${project}"` : `Attach repo to "${project}"`}
 	label="Attach repo"
 	summary={`Creates repo “${project}”; stages ${namespaces.length} namespace annotation${namespaces.length === 1 ? '' : 's'} → platform repo`}
-	onsubmit={() => api.adoptProject(project, parseOwners(owners))}
+	onsubmit={() => api.adoptProject(project, splitList(owners))}
 	{onclose}
 >
 	{#if recover}

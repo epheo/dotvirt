@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api, Unauthorized, type VM } from '$lib/api';
+	import { api, Unauthorized, vmKey, type VM } from '$lib/api';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
 	import { containerTabs, hrefForScope, vmHref, type Section } from '$lib/nav';
 	import { action } from '$lib/resource.svelte';
@@ -110,12 +110,10 @@
 	// tabs - back never walks peek moves). Resolved against the scoped list, so
 	// a VM that leaves the scope (or the inventory) closes its peek.
 	const peekKey = $derived(page.url.searchParams.get('peek'));
-	const peekVM = $derived(
-		peekKey ? (scopedVMs.find((v) => `${v.namespace}/${v.name}` === peekKey) ?? null) : null,
-	);
+	const peekVM = $derived(peekKey ? (scopedVMs.find((v) => vmKey(v) === peekKey) ?? null) : null);
 	function setPeek(vm: VM | null) {
 		const u = new URL(page.url.href);
-		if (vm) u.searchParams.set('peek', `${vm.namespace}/${vm.name}`);
+		if (vm) u.searchParams.set('peek', vmKey(vm));
 		else u.searchParams.delete('peek');
 		goto(u.pathname + u.search, { replaceState: true, keepFocus: true, noScroll: true });
 	}
@@ -129,9 +127,7 @@
 	const bulkOp = action({ toast: true });
 
 	// The VM objects currently picked (resolve keys against the live inventory).
-	const pickedVMs = $derived(
-		inventory.allVMs.filter((vm) => picked.has(`${vm.namespace}/${vm.name}`)),
-	);
+	const pickedVMs = $derived(inventory.allVMs.filter((vm) => picked.has(vmKey(vm))));
 
 	// Bulk context menu for a right-click inside the multi-selection. Registered
 	// with the shell while this workspace is mounted; the shell renders the
@@ -139,7 +135,7 @@
 	let bulkCtx = $state<{ x: number; y: number } | null>(null);
 	$effect(() => {
 		ui.bulkIntercept = (vm, x, y) => {
-			if (picked.size > 1 && picked.has(`${vm.namespace}/${vm.name}`)) {
+			if (picked.size > 1 && picked.has(vmKey(vm))) {
 				bulkCtx = { x, y };
 				return true;
 			}
@@ -290,7 +286,7 @@
 				bind:selected={picked}
 				staged={drafts.stagedByKey}
 				activeKey={peekVM ? peekKey : null}
-				onselect={(vm) => setPeek(peekKey === `${vm.namespace}/${vm.name}` ? null : vm)}
+				onselect={(vm) => setPeek(peekKey === vmKey(vm) ? null : vm)}
 				onstagedopen={(vm) => (ui.modal = { kind: 'staged', vm })}
 				oncontextvm={(vm, x, y) => ui.openVMContext(vm, x, y)}
 			/>

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { VM } from '$lib/api';
+	import { vmKey, type VM } from '$lib/api';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
@@ -12,9 +12,7 @@
 	let { vm = undefined, project = undefined }: { vm?: VM; project?: string } = $props();
 
 	const proj = $derived(vm ? inventory.projectOf(vm.namespace) : (project ?? ''));
-	const stagedItem = $derived(
-		vm ? drafts.stagedByKey.get(`${vm.namespace}/${vm.name}`) : undefined,
-	);
+	const stagedItem = $derived(vm ? drafts.stagedByKey.get(vmKey(vm)) : undefined);
 	const stagedCount = $derived(
 		!vm && project ? (drafts.drafts.find((d) => d.project === project)?.draft.count ?? 0) : 0,
 	);

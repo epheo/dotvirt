@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { ChevronDown, ChevronUp } from 'lucide-svelte';
-	import type { DraftItem, Power, SyncStatus, VM } from '$lib/api';
+	import { vmKey, type DraftItem, type Power, type SyncStatus, type VM } from '$lib/api';
+	import { quantityBytes } from '$lib/format';
 	import { vmSizing } from '$lib/sizing';
 	import { phaseTone } from '$lib/status';
 	import { inventory } from '$lib/state/inventory.svelte';
@@ -33,8 +34,6 @@
 		activeKey?: string | null;
 	} = $props();
 
-	const vmKey = (vm: VM) => `${vm.namespace}/${vm.name}`;
-
 	const cpuOf = (vm: VM) => vmSizing(vm, inventory.options).cpu;
 	const memOf = (vm: VM) => vmSizing(vm, inventory.options).memory;
 
@@ -64,24 +63,8 @@
 	const syncRank = (s: SyncStatus) =>
 		s === 'OutOfSync' ? 4 : s === 'Pending' ? 3 : s === 'Unknown' ? 2 : s === 'NotTracked' ? 1 : 0;
 
-	// Memory like "2Gi"/"512Mi" -> bytes, so the column sorts numerically not lexically.
-	function memBytes(m?: string): number {
-		if (!m) return 0;
-		const match = /^(\d+(?:\.\d+)?)\s*([KMGT]i?)?B?$/.exec(m.trim());
-		if (!match) return 0;
-		const n = parseFloat(match[1]);
-		const mult: Record<string, number> = {
-			Ki: 1024,
-			Mi: 1024 ** 2,
-			Gi: 1024 ** 3,
-			Ti: 1024 ** 4,
-			K: 1e3,
-			M: 1e6,
-			G: 1e9,
-			T: 1e12,
-		};
-		return n * (mult[match[2] ?? ''] ?? 1);
-	}
+	// Memory sorts numerically; an unreadable quantity sorts as zero.
+	const memBytes = (m?: string) => (m && quantityBytes(m)) || 0;
 
 	function cmp(a: VM, b: VM): number {
 		const key = prefs.value.sortKey;

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Monitor } from 'lucide-svelte';
 	import { screenshotURL } from '$lib/actions';
-	import type { VM } from '$lib/api';
+	import { vmKey, type VM } from '$lib/api';
 	import { pollWhileVisible } from '$lib/poll';
 
 	// The Summary console thumbnail: a periodically-refreshed screenshot of
@@ -21,9 +21,9 @@
 	// like the console really is - never a letterboxed stretch. 4:3 (the VGA
 	// default) stands in until the first frame reports its true size.
 	let aspect = $state('4 / 3');
-	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
+	const key = $derived(vmKey(vm));
 	$effect(() => {
-		vmKey; // reset state on selection change
+		key; // reset state on selection change
 		failed = false;
 		aspect = '4 / 3';
 		tick = Date.now();

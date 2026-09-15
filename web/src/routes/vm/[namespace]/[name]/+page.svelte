@@ -4,6 +4,7 @@
 	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
 	import VMDetail from '$lib/components/VMDetail.svelte';
 	import { VM_TABS, type VMTab } from '$lib/nav';
+	import { vmKey } from '$lib/api';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
@@ -32,7 +33,7 @@
 			{vm}
 			{tab}
 			ontab={setTab}
-			stagedItem={drafts.stagedByKey.get(`${namespace}/${name}`) ?? null}
+			stagedItem={drafts.stagedByKey.get(vmKey(vm)) ?? null}
 			onstagedopen={() => vm && (ui.modal = { kind: 'staged', vm })}
 			onsearchlabel={(k, v) => ui.search?.searchFor(`label:${k}=${v}`)}
 			networks={inventory.networks}

@@ -24,6 +24,7 @@
 		type Proposal,
 		type ProposalDetail,
 		type ProposeResult,
+		vmKey,
 	} from '$lib/api';
 	import { friendlyError } from '$lib/format';
 	import { action } from '$lib/resource.svelte';
@@ -884,9 +885,7 @@
 				{#if it.kind === 'delete'}<Trash2 size={13} class="shrink-0 text-danger-ink" />
 				{:else if it.kind === 'create'}<Plus size={13} class="shrink-0 text-ok-ink" />
 				{:else}<Pencil size={13} class="shrink-0 text-accent-ink" />{/if}
-				<span class="text-[13px] font-medium text-ink"
-					>{it.namespace ? `${it.namespace}/${it.name}` : it.name}</span
-				>
+				<span class="text-[13px] font-medium text-ink">{it.namespace ? vmKey(it) : it.name}</span>
 				<span class="rounded px-1.5 py-0.5 text-xs {TONE_PILL[draftKindTone(it.kind)]}"
 					>{it.kind}</span
 				>

@@ -45,7 +45,7 @@
 		const m: string[] = [];
 		if (!file) m.push('Pick an image file');
 		if (!name) m.push('Disk name is required');
-		else if (!nameOK) m.push('Disk name must be lowercase alphanumeric with dashes');
+		else if (!nameOK) m.push(`Disk name: ${NAME_HINT}`);
 		if (!namespace) m.push('Project is required');
 		if (!sizeOK) m.push('Disk size must be a quantity like 10Gi');
 		return m;

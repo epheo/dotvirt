@@ -37,6 +37,9 @@ export interface VM extends Omit<gen.VM, 'power' | 'sync' | 'scheduling'> {
 	sync: SyncStatus;
 	scheduling?: VMScheduling;
 }
+// The "namespace/name" identity every VM-keyed map, route and selection uses.
+export const vmKey = (vm: { namespace: string; name: string }) => `${vm.namespace}/${vm.name}`;
+
 export interface ProjectSync extends Omit<gen.ProjectSync, 'sync'> {
 	sync?: SyncStatus;
 }

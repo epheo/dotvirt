@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { api } from '$lib/api';
+	import { api, vmKey } from '$lib/api';
 	import { action } from '$lib/resource.svelte';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
@@ -35,9 +35,7 @@
 	// The per-VM staged-changes modal (opened from a Staged badge).
 	const discardOp = action({ toast: true }); // a failure leaves the modal open to retry
 	const stagedItem = $derived(
-		m?.kind === 'staged'
-			? (drafts.stagedByKey.get(`${m.vm.namespace}/${m.vm.name}`) ?? null)
-			: null,
+		m?.kind === 'staged' ? (drafts.stagedByKey.get(vmKey(m.vm)) ?? null) : null,
 	);
 	function discardStaged() {
 		if (m?.kind !== 'staged') return;

@@ -1,6 +1,14 @@
 <script lang="ts">
 	import { ChevronDown, ChevronRight } from 'lucide-svelte';
-	import { api, type Change, type Commit, type DraftItem, type VM, type VMUsage } from '$lib/api';
+	import {
+		api,
+		vmKey,
+		type Change,
+		type Commit,
+		type DraftItem,
+		type VM,
+		type VMUsage,
+	} from '$lib/api';
 	import { duration, relativeAge } from '$lib/format';
 	import { resource } from '$lib/resource.svelte';
 	import { itemKey } from '$lib/review';
@@ -50,14 +58,14 @@
 	// A paused VMI keeps phase Running, so the label checks the Paused flag too.
 	const statusText = $derived(vm.paused ? 'Paused' : (vm.phase ?? vm.power));
 
-	const vmKey = $derived(`${vm.namespace}/${vm.name}`);
+	const key = $derived(vmKey(vm));
 
 	// One usage snapshot feeds the CPU/Memory tiles and the bars below, so both
 	// always agree. Keyed on identity (the live stream hands down a fresh vm
 	// object every frame); resource's stale guard drops an in-flight response
 	// once the selection moves, so VM A's numbers never render under VM B.
 	const usageRes = resource<VMUsage>(
-		() => vmKey,
+		() => key,
 		() => api.vmUsage(vm.namespace, vm.name),
 		{
 			poll: 30000,
@@ -76,7 +84,7 @@
 		inventory.inventory?.projects.find((p) => p.name === project)?.gitOps?.revision ?? '',
 	);
 	const historyRes = resource<Commit[]>(
-		() => `${vmKey}|${vm.sourceFile ?? ''}|${revision}`,
+		() => `${key}|${vm.sourceFile ?? ''}|${revision}`,
 		() => (vm.sourceFile ? api.vmHistory(vm.namespace, vm.name) : Promise.resolve([])),
 		{ reset: true },
 	);
@@ -93,12 +101,12 @@
 
 	// Standing problems scoped to this VM (the Issues card), off the same
 	// derivation the bell and the inspector use.
-	const vmIssues = $derived(inventory.issues.filter((i) => i.scope === vmKey));
+	const vmIssues = $derived(inventory.issues.filter((i) => i.scope === key));
 
 	// Drift detail folds per selection, not per frame: key on identity.
 	let showDrift = $state(false);
 	$effect(() => {
-		vmKey;
+		key;
 		showDrift = false;
 	});
 </script>

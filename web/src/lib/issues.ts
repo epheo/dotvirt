@@ -2,7 +2,7 @@
 // attention right now" - an issues-and-alarms plane, derive-not-persist. Only
 // standing problems qualify; transitional states (applying, progressing,
 // plain OutOfSync = a pending apply) are deliberately not issues.
-import type { Inventory, VM } from '$lib/api';
+import { vmKey, type Inventory, type VM } from '$lib/api';
 import { opStands } from '$lib/gitops';
 import { hrefForScope, vmHref } from '$lib/nav';
 
@@ -68,7 +68,7 @@ function vmIssue(project: string, vm: VM): Issue | null {
 	if (!danger.length && !warn.length) return null;
 	return {
 		severity: danger.length ? 'danger' : 'warn',
-		scope: `${vm.namespace}/${vm.name}`,
+		scope: vmKey(vm),
 		label: [...danger, ...warn].join(', '),
 		detail,
 		href: vmHref(vm.namespace, vm.name),
