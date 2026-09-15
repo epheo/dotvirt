@@ -3,11 +3,13 @@ package changeset
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/drsgen"
+	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 )
@@ -42,7 +44,11 @@ func (c *Coordinator) StageEnableDRS(id auth.Identity, proj project.ProjectInfo,
 		return model.DraftView{}, err
 	}
 	for _, f := range files {
-		if current, err := read.FileOnBranch(c.baseBranch, f.Path); err == nil && bytes.Equal(current, f.Content) {
+		current, ok, err := read.LookupOnBranch(c.baseBranch, f.Path)
+		if err != nil {
+			return model.DraftView{}, err
+		}
+		if ok && bytes.Equal(current, f.Content) {
 			continue // already live in git; nothing to propose for this file
 		}
 		if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
@@ -72,7 +78,11 @@ func (c *Coordinator) StageDisableDRS(id auth.Identity, proj project.ProjectInfo
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if _, err := read.FileOnBranch(c.baseBranch, drsgen.CRPath); err != nil {
+	_, configured, err := read.LookupOnBranch(c.baseBranch, drsgen.CRPath)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	if !configured {
 		if pending == 0 {
 			return model.DraftView{}, fmt.Errorf("%w: DRS is not configured on %s", model.ErrNotFound, c.baseBranch)
 		}
@@ -121,9 +131,12 @@ func (c *Coordinator) DRSState(proj project.ProjectInfo) (model.DRSGitState, err
 		return model.DRSGitState{}, err
 	}
 	var out model.DRSGitState
-	content, err := read.FileOnBranch(c.baseBranch, drsgen.CRPath)
-	if err != nil {
+	content, ok, err := read.LookupOnBranch(c.baseBranch, drsgen.CRPath)
+	if errors.Is(err, git.ErrNoBranch) || err == nil && !ok {
 		return out, nil
+	}
+	if err != nil {
+		return model.DRSGitState{}, err
 	}
 	out.Configured = true
 	// A hand-edited CR that no longer parses still reads as configured - the
@@ -131,8 +144,8 @@ func (c *Coordinator) DRSState(proj project.ProjectInfo) (model.DRSGitState, err
 	if spec, err := drsgen.Parse(content); err == nil {
 		out.Config = configFromSpec(spec)
 	}
-	if _, err := read.FileOnBranch(c.baseBranch, drsgen.PSIPath); err == nil {
-		out.PSIConfigured = true
+	if _, out.PSIConfigured, err = read.LookupOnBranch(c.baseBranch, drsgen.PSIPath); err != nil {
+		return model.DRSGitState{}, err
 	}
 	return out, nil
 }

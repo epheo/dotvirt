@@ -120,6 +120,31 @@ func TestStageDeployFromTemplateErrors(t *testing.T) {
 	}
 }
 
+// A target whose base branch the mirror cannot resolve is a failed read, not
+// an absent VM: the deploy must surface it rather than stage a create that
+// would land over whatever the branch holds.
+func TestStageDeployFromTemplateReadFailureIsNotAbsence(t *testing.T) {
+	library := seedBareFiles(t, map[string][]byte{"templates/base.yaml": []byte(libraryTemplate)})
+	target := seedBareFiles(t, nil)
+	gitRun(t, target, "branch", "-m", "main", "trunk")
+	c := newTestCoordinator(t)
+	id := auth.Identity{Username: "alice"}
+
+	_, err := c.StageDeployFromTemplate(id,
+		project.ProjectInfo{Name: "p", Repo: target}, project.ProjectInfo{Name: "lib", Repo: library},
+		model.DeployTemplateRequest{Template: "base", Namespace: "alpha", Name: "web-01"})
+	if !errors.Is(err, git.ErrNoBranch) {
+		t.Fatalf("want the read failure surfaced, got %v", err)
+	}
+	entries, err := c.store.List(id.Username, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("nothing may be staged after a failed read, got %+v", entries)
+	}
+}
+
 // Templates blueprint Halted; the PowerOn flag must flip only the rendered
 // manifest's run state, leaving the default deploy untouched.
 func TestStageDeployFromTemplatePowerOn(t *testing.T) {
