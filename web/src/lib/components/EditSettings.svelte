@@ -1,14 +1,7 @@
 <script lang="ts">
 	import { X } from 'lucide-svelte';
 	import { untrack } from 'svelte';
-	import {
-		api,
-		Unauthorized,
-		type Network,
-		type NodeTarget,
-		type Options,
-		type VM,
-	} from '$lib/api';
+	import { api, Unauthorized, type Network, type NodeTarget, type VM } from '$lib/api';
 	import {
 		buildEditRequest,
 		seedEditForm,
@@ -19,6 +12,7 @@
 	} from '$lib/editform';
 	import { quantityBytes } from '$lib/format';
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
+	import { inventory } from '$lib/state/inventory.svelte';
 	import { validName, NAME_HINT } from '$lib/validate';
 	import CheckGroup from './CheckGroup.svelte';
 	import Note from './Note.svelte';
@@ -42,7 +36,7 @@
 		initialSection?: EditSection;
 	} = $props();
 
-	let options = $state<Options | null>(null);
+	const options = $derived(inventory.options);
 
 	// The modal is mounted fresh per VM, so capturing the initial prop value to
 	// seed the editable working copy is intentional.
@@ -106,14 +100,6 @@
 			{ name: '', mode: 'together', strict: true, removed: false, isNew: true },
 		];
 	}
-
-	let optionsError = $state('');
-	$effect(() => {
-		api
-			.options()
-			.then((o) => (options = o))
-			.catch((e) => (optionsError = `Couldn't load cluster options: ${e}`));
-	});
 
 	// Attachable secondaries for this VM's namespace = shared (CUDN) networks +
 	// this namespace's own non-default networks (the primary "VM Network" backs the
@@ -219,9 +205,10 @@
 {/snippet}
 
 {#snippet stepCompute()}
-	{#if optionsError}
+	{#if inventory.optionsError}
 		<Note tone="warn" border class="mb-3">
-			{optionsError} — the instance type / preference dropdowns may be empty.
+			Couldn't load cluster options: {inventory.optionsError} — the instance type / preference dropdowns
+			may be empty.
 		</Note>
 	{/if}
 

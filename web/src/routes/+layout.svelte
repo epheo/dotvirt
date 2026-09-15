@@ -5,7 +5,7 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api, onUnauthorized, streamInventory } from '$lib/api';
+	import { api, onUnauthorized, streamInventory, withRetry } from '$lib/api';
 	import { INVENTORY_SECTIONS, sectionOf, vmHref, type Section } from '$lib/nav';
 	import { drafts, PLATFORM_PROJECT } from '$lib/state/drafts.svelte';
 	import { catalog } from '$lib/state/catalog.svelte';
@@ -87,38 +87,24 @@
 	$effect(() => {
 		if (!session.user) return;
 		inventory.networksVersion; // subscribe: re-pull when GitOps/git moves
-		let timer = 0;
-		let attempt = 0;
 		let live = true;
-		const pull = () => {
-			Promise.all([api.networks(), api.policies()])
-				.then(([n, p]) => {
-					if (!live) return;
-					inventory.netInv = n;
-					inventory.polInv = p;
-				})
-				.catch(() => {
-					if (live && attempt < 5) timer = window.setTimeout(pull, 2 ** attempt++ * 1000);
-				});
-		};
-		pull();
+		withRetry(() => Promise.all([api.networks(), api.policies()]))
+			.then(([n, p]) => {
+				if (!live) return;
+				inventory.netInv = n;
+				inventory.polInv = p;
+			})
+			.catch(() => {});
 		return () => {
 			live = false;
-			clearTimeout(timer);
 		};
 	});
 
 	// The options catalog, once per session: the storage lens groups classless
 	// disks under the real default class, read views resolve instancetype sizing.
-	// Server-cached, so this costs one GET; a failure just keeps the placeholders.
 	$effect(() => {
 		if (!session.user) return;
-		api
-			.options()
-			.then((o) => {
-				inventory.options = o;
-			})
-			.catch(() => {});
+		inventory.loadOptions();
 	});
 
 	// The recent-tasks feed rides the same out-of-band contract: re-pull when an

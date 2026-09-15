@@ -533,6 +533,22 @@ export function retryDelay(retry: number): number {
 	return 500 * 2 ** (Math.min(Math.max(retry, 1), 6) - 1);
 }
 
+// withRetry re-runs fn on failure with backoff (1s doubling, `retries` more
+// tries) before rejecting with the last error. For the once-per-session
+// catalog pulls, whose only fetch would otherwise leave the whole session on
+// placeholders after a transient boot error. A 401 is never retried: it
+// signs out centrally.
+export async function withRetry<T>(fn: () => Promise<T>, retries = 5): Promise<T> {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			return await fn();
+		} catch (e) {
+			if (attempt >= retries || e instanceof Unauthorized) throw e;
+			await new Promise((r) => setTimeout(r, 2 ** attempt * 1000));
+		}
+	}
+}
+
 /**
  * streamInventory subscribes to the caller's live inventory over WebSocket. The
  * session cookie rides the handshake (same-origin), so the server pushes only the

@@ -1,7 +1,6 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { api, Unauthorized, type Options, type VM } from '$lib/api';
-	import { friendlyError } from '$lib/format';
+	import { api, type VM } from '$lib/api';
+	import { inventory } from '$lib/state/inventory.svelte';
 	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
 	import ErrorNote from './ErrorNote.svelte';
 	import StageModal from './StageModal.svelte';
@@ -24,21 +23,7 @@
 	// provisioning); container/cloud-init/empty disks are listed nowhere here.
 	const disks = $derived((vm.disks ?? []).filter((d) => d.type === 'dataVolume'));
 
-	let options = $state<Options | null>(null);
 	let targets = $state<Record<string, string>>({}); // disk name -> target class ('' = keep)
-	let loadError = $state(''); // the class-list fetch, distinct from the submit
-
-	async function load() {
-		try {
-			options = await api.options();
-		} catch (e) {
-			if (e instanceof Unauthorized) return;
-			loadError = friendlyError(e);
-		}
-	}
-	$effect(() => {
-		untrack(load);
-	});
 
 	const moves = $derived(
 		disks
@@ -95,7 +80,7 @@
 					</td>
 					<td class="py-1.5">
 						<StorageClassSelect
-							options={options?.storageClasses ?? []}
+							options={inventory.options?.storageClasses ?? []}
 							value={targets[d.name] ?? ''}
 							onchange={(e) => (targets = { ...targets, [d.name]: e.currentTarget.value })}
 							emptyLabel="— keep —"
@@ -107,5 +92,5 @@
 		</tbody>
 	</table>
 
-	<ErrorNote error={loadError} />
+	<ErrorNote error={inventory.optionsError} />
 </StageModal>
