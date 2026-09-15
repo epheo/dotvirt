@@ -61,7 +61,7 @@ func projectUDN(s Spec) (string, []byte, error) {
 		return "", nil, err
 	}
 	out, err := yaml.Marshal(map[string]any{
-		"apiVersion": "k8s.ovn.org/v1",
+		"apiVersion": model.MustKind("UserDefinedNetwork").APIVersion(),
 		"kind":       "UserDefinedNetwork",
 		"metadata":   map[string]any{"name": s.Name, "namespace": s.Namespace},
 		"spec":       map[string]any{"topology": "Layer2", "layer2": layer2Spec(s.Subnets)},
@@ -86,7 +86,7 @@ func sharedCUDN(s Spec) (string, []byte, error) {
 		return "", nil, err
 	}
 	out, err := yaml.Marshal(map[string]any{
-		"apiVersion": "k8s.ovn.org/v1",
+		"apiVersion": model.MustKind("ClusterUserDefinedNetwork").APIVersion(),
 		"kind":       "ClusterUserDefinedNetwork",
 		"metadata":   map[string]any{"name": s.Name},
 		"spec": map[string]any{
@@ -132,7 +132,7 @@ func vlanCUDN(s Spec) (string, []byte, error) {
 		localnet["ipam"] = map[string]any{"mode": "Enabled"}
 	}
 	out, err := yaml.Marshal(map[string]any{
-		"apiVersion": "k8s.ovn.org/v1",
+		"apiVersion": model.MustKind("ClusterUserDefinedNetwork").APIVersion(),
 		"kind":       "ClusterUserDefinedNetwork",
 		"metadata":   map[string]any{"name": s.Name},
 		"spec": map[string]any{

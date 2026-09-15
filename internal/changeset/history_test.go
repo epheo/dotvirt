@@ -206,7 +206,7 @@ func TestCommitItemsClusterScopedName(t *testing.T) {
 		t.Fatalf("want one item, got %+v", items)
 	}
 	it := items[0]
-	if it.Namespace != "" || it.Name != "legacy-app" || it.Resource != "Namespace" || it.Kind != "create" {
+	if it.Namespace != "" || it.Name != "legacy-app" || it.Resource != string(draft.ResourceNamespace) || it.Kind != "create" {
 		t.Errorf("item = %+v, want a bare-named Namespace create", it)
 	}
 	if it.Changes[0].To != "legacy-app" {

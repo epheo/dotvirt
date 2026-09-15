@@ -349,13 +349,18 @@ func qualified(ref model.ObjectRef) string {
 	return ref.Namespace + "/" + ref.Name
 }
 
-// resourceOf maps a declared kind onto DraftItem.Resource: "" for a VM (the
-// draft's default), the kind name for anything else.
+// resourceOf maps a declared kind onto DraftItem.Resource, the draft
+// vocabulary: "" for a VM (the draft's default). A kind dotvirt does not manage
+// keeps its kind name, so the row still says what it is.
 func resourceOf(kind string) string {
-	if kind == "VirtualMachine" {
+	r, _, ok := model.LookupKind(kind)
+	switch {
+	case !ok:
+		return kind
+	case draft.Resource(r.Name) == draft.ResourceVM:
 		return ""
 	}
-	return kind
+	return r.Name
 }
 
 func kindLabel(kind string) string {

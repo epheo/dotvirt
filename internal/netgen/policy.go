@@ -5,6 +5,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/validate"
 )
 
@@ -73,7 +74,7 @@ func NetworkPolicyManifest(s NetworkPolicySpec) (path string, content []byte, er
 		spec["ingress"] = ingress
 	}
 	out, err := yaml.Marshal(map[string]any{
-		"apiVersion": "networking.k8s.io/v1",
+		"apiVersion": model.MustKind("NetworkPolicy").APIVersion(),
 		"kind":       "NetworkPolicy",
 		"metadata":   map[string]any{"name": s.Name, "namespace": s.Namespace},
 		"spec":       spec,
@@ -185,7 +186,7 @@ func AdminNetworkPolicyManifest(s AdminNetworkPolicySpec) (path string, content 
 		kind, dir = "BaselineAdminNetworkPolicy", "baselineadminnetworkpolicies"
 	}
 	out, err := yaml.Marshal(map[string]any{
-		"apiVersion": "policy.networking.k8s.io/v1alpha1",
+		"apiVersion": model.MustKind(kind).APIVersion(),
 		"kind":       kind,
 		"metadata":   map[string]any{"name": name},
 		"spec":       spec,

@@ -146,6 +146,9 @@ func saCached[T any](s *Server, w http.ResponseWriter, r *http.Request, cache *t
 // ssarRef is one create-authority tuple (API group + plural resource).
 type ssarRef struct{ group, resource string }
 
+// ssarFor is the create authority over one managed kind.
+func ssarFor(k model.Kind) ssarRef { return ssarRef{k.Group, k.Plural} }
+
 // platformProject is the synthetic platform-tier project over the platform repo.
 func (s *Server) platformProject() project.ProjectInfo {
 	return project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}
@@ -160,21 +163,21 @@ func (s *Server) vmScope(w http.ResponseWriter, r *http.Request) (sc scope, ns, 
 	return sc, ns, name, ok
 }
 
-// The platform-tier create authorities, each spelled exactly once: the create
-// routes gate on them (platformScope), NetworkCaps projects them to the UI, and
-// the authoring signal ORs a subset - adding a platform kind touches only this
-// list and its routes.
+// The platform-tier create authorities, each named once and spelled by the
+// kind table: the create routes gate on them (platformScope), NetworkCaps
+// projects them to the UI, and the authoring signal ORs a subset - adding a
+// platform kind touches the table, this list and its routes.
 var (
-	ssarCUDN        = ssarRef{"k8s.ovn.org", "clusteruserdefinednetworks"}
-	ssarUplink      = ssarRef{"nmstate.io", "nodenetworkconfigurationpolicies"}
-	ssarNamespace   = ssarRef{"", "namespaces"}
-	ssarEgressIP    = ssarRef{"k8s.ovn.org", "egressips"}
-	ssarExtRoute    = ssarRef{"k8s.ovn.org", "adminpolicybasedexternalroutes"}
-	ssarANP         = ssarRef{"policy.networking.k8s.io", "adminnetworkpolicies"}
-	ssarBANP        = ssarRef{"policy.networking.k8s.io", "baselineadminnetworkpolicies"}
-	ssarDescheduler = ssarRef{"operator.openshift.io", "kubedeschedulers"}
-	ssarMachineCfg  = ssarRef{"machineconfiguration.openshift.io", "machineconfigs"}
-	ssarVMTemplate  = ssarRef{"template.kubevirt.io", "virtualmachinetemplates"}
+	ssarCUDN        = ssarFor(model.MustKind("ClusterUserDefinedNetwork"))
+	ssarUplink      = ssarFor(model.MustKind("NodeNetworkConfigurationPolicy"))
+	ssarNamespace   = ssarFor(model.MustKind("Namespace"))
+	ssarEgressIP    = ssarFor(model.MustKind("EgressIP"))
+	ssarExtRoute    = ssarFor(model.MustKind("AdminPolicyBasedExternalRoute"))
+	ssarANP         = ssarFor(model.MustKind("AdminNetworkPolicy"))
+	ssarBANP        = ssarFor(model.MustKind("BaselineAdminNetworkPolicy"))
+	ssarDescheduler = ssarFor(model.MustKind("KubeDescheduler"))
+	ssarMachineCfg  = ssarFor(model.MustKind("MachineConfig"))
+	ssarVMTemplate  = ssarFor(model.MustKind("VirtualMachineTemplate"))
 )
 
 // platformAuthorResources are the create-SSARs that signal platform-tier

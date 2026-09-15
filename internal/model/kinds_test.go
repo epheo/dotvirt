@@ -60,3 +60,26 @@ func TestClusterScopeTranslation(t *testing.T) {
 		t.Error("the sentinel must translate both ways")
 	}
 }
+
+// The API groups the drift plane keys on; the NAD group in particular is easy
+// to get wrong (k8s.cni.cncf.io, not k8s.ovn.org).
+func TestKindGroups(t *testing.T) {
+	cases := map[string]string{
+		"UserDefinedNetwork":             "k8s.ovn.org",
+		"ClusterUserDefinedNetwork":      "k8s.ovn.org",
+		"NetworkAttachmentDefinition":    "k8s.cni.cncf.io",
+		"NetworkPolicy":                  "networking.k8s.io",
+		"AdminNetworkPolicy":             "policy.networking.k8s.io",
+		"BaselineAdminNetworkPolicy":     "policy.networking.k8s.io",
+		"EgressFirewall":                 "k8s.ovn.org",
+		"EgressIP":                       "k8s.ovn.org",
+		"AdminPolicyBasedExternalRoute":  "k8s.ovn.org",
+		"NodeNetworkConfigurationPolicy": "nmstate.io",
+		"Namespace":                      "",
+	}
+	for kind, want := range cases {
+		if got := MustKind(kind).Group; got != want {
+			t.Errorf("%s: group %q, want %q", kind, got, want)
+		}
+	}
+}

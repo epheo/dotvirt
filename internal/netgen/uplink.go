@@ -5,6 +5,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/validate"
 )
 
@@ -39,7 +40,7 @@ func UplinkManifest(s UplinkSpec) (path string, content []byte, err error) {
 		sel = map[string]string{"node-role.kubernetes.io/worker": ""}
 	}
 	out, err := yaml.Marshal(map[string]any{
-		"apiVersion": "nmstate.io/v1",
+		"apiVersion": model.MustKind("NodeNetworkConfigurationPolicy").APIVersion(),
 		"kind":       "NodeNetworkConfigurationPolicy",
 		"metadata":   map[string]any{"name": UplinkPolicyName(s.Name)},
 		"spec": map[string]any{

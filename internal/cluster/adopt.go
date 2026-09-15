@@ -11,37 +11,44 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
+
+	"github.com/epheo/dotvirt/internal/model"
 )
+
+// GVR is the dynamic-client address of one managed kind.
+func GVR(k model.Kind) schema.GroupVersionResource {
+	return schema.GroupVersionResource{Group: k.Group, Version: k.Version, Resource: k.Plural}
+}
 
 // trackingIDAnnotation is ArgoCD's resource-tracking key, formatted
 // "<app>:<group>/<kind>:<namespace>/<name>" where <app> may be "<ns>/<name>".
 const trackingIDAnnotation = "argocd.argoproj.io/tracking-id"
 
-// adoptableKinds are the namespace-scoped kinds a tenant repo may declare. It mirrors
+// adoptableKinds are the namespace-scoped kinds a tenant repo may declare: the
+// VM, its DataVolumes and the network family's namespaced backings. It mirrors
 // the tenant AppProject's namespaceResourceWhitelist (operator/internal/install/
 // argocd.go): capturing outside it stages manifests ArgoCD is configured to refuse,
 // capturing less leaves the namespace half under git. Operator and app ship in one
 // release, so the two are kept in step by hand rather than read back from the cluster.
-var adoptableKinds = []schema.GroupVersionResource{
-	{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachines"},
+var adoptableKinds = append([]schema.GroupVersionResource{
+	GVR(model.MustKind("VirtualMachine")),
 	{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datavolumes"},
-	{Group: "k8s.ovn.org", Version: "v1", Resource: "userdefinednetworks"},
-	{Group: "k8s.cni.cncf.io", Version: "v1", Resource: "network-attachment-definitions"},
-	{Group: "k8s.ovn.org", Version: "v1", Resource: "egressfirewalls"},
-	{Group: "networking.k8s.io", Version: "v1", Resource: "networkpolicies"},
-}
+}, networkFamilyGVRs(false)...)
 
 // clusterAdoptableKinds are the cluster-scoped kinds the platform repo may declare.
 // It mirrors the platform AppProject's clusterResourceWhitelist the way
 // adoptableKinds mirrors the tenant one; the Namespace kind is left out because
 // namespaces join through AdoptProject with their tenancy labels.
-var clusterAdoptableKinds = []schema.GroupVersionResource{
-	{Group: "k8s.ovn.org", Version: "v1", Resource: "clusteruserdefinednetworks"},
-	{Group: "k8s.ovn.org", Version: "v1", Resource: "egressips"},
-	{Group: "k8s.ovn.org", Version: "v1", Resource: "adminpolicybasedexternalroutes"},
-	{Group: "policy.networking.k8s.io", Version: "v1alpha1", Resource: "adminnetworkpolicies"},
-	{Group: "policy.networking.k8s.io", Version: "v1alpha1", Resource: "baselineadminnetworkpolicies"},
-	{Group: "nmstate.io", Version: "v1", Resource: "nodenetworkconfigurationpolicies"},
+var clusterAdoptableKinds = networkFamilyGVRs(true)
+
+func networkFamilyGVRs(clusterScoped bool) []schema.GroupVersionResource {
+	var out []schema.GroupVersionResource
+	for _, k := range model.NetworkFamilyKinds() {
+		if k.ClusterScoped == clusterScoped {
+			out = append(out, GVR(k))
+		}
+	}
+	return out
 }
 
 // Adoptable is one live object serialized as the manifest a repo would hold.

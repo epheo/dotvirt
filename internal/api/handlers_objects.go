@@ -24,38 +24,25 @@ import (
 // caller's authority to create that kind - so reading back or deleting an object
 // needs the same standing as authoring it.
 
-// clusterResourceSSAR gates each cluster-scoped resource on its create authority.
-var clusterResourceSSAR = map[draft.Resource]ssarRef{
-	draft.ResourceNetwork:                    ssarCUDN,
-	draft.ResourceUplink:                     ssarUplink,
-	draft.ResourceEgressIP:                   ssarEgressIP,
-	draft.ResourceExternalRoute:              ssarExtRoute,
-	draft.ResourceAdminNetworkPolicy:         ssarANP,
-	draft.ResourceBaselineAdminNetworkPolicy: ssarBANP,
-}
-
-// namespacedResources are the network-family resources a tenant project declares.
-var namespacedResources = map[draft.Resource]bool{
-	draft.ResourceNetwork:        true,
-	draft.ResourceEgressFirewall: true,
-	draft.ResourceNetworkPolicy:  true,
-}
-
 // objectScope is the preamble of every object route: the resource, its
-// identity, and the tier resolved from its scope.
+// identity, and the tier resolved from its scope in the kind table.
 func (s *Server) objectScope(w http.ResponseWriter, r *http.Request) (sc scope, resource, ns, name string, ok bool) {
 	resource, ns, name = r.PathValue("resource"), r.PathValue("namespace"), r.PathValue("name")
-	res := draft.Resource(resource)
+	res, known := model.LookupResource(resource)
+	if !known || !res.NetworkFamily {
+		fail(w, invalid(fmt.Errorf("%s has no object routes", resource)))
+		return sc, "", "", "", false
+	}
 	if ns == model.ClusterScopeNS {
-		ref, cluster := clusterResourceSSAR[res]
+		kind, cluster := res.ClusterKind()
 		if !cluster {
 			fail(w, invalid(fmt.Errorf("%s is not cluster-scoped", resource)))
 			return sc, "", "", "", false
 		}
-		sc, ok = s.platformScope(w, r, ref)
+		sc, ok = s.platformScope(w, r, ssarFor(kind))
 		return sc, resource, ns, name, ok
 	}
-	if !namespacedResources[res] {
+	if !res.Namespaced() {
 		fail(w, invalid(fmt.Errorf("%s is not namespace-scoped", resource)))
 		return sc, "", "", "", false
 	}

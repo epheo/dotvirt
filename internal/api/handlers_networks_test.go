@@ -42,30 +42,3 @@ func TestScopeNetworks(t *testing.T) {
 		t.Errorf("scopeNetworks mutated the cached input slice: %v", in[2].Namespaces)
 	}
 }
-
-// backingGroup keys the drift plane's per-object lookups; an absent backing
-// means no drift lookup. The NAD group in particular is easy to get wrong
-// (k8s.cni.cncf.io, not k8s.ovn.org).
-func TestBackingGroup(t *testing.T) {
-	cases := map[string]string{
-		"UserDefinedNetwork":            "k8s.ovn.org",
-		"ClusterUserDefinedNetwork":     "k8s.ovn.org",
-		"NetworkAttachmentDefinition":   "k8s.cni.cncf.io",
-		"NetworkPolicy":                 "networking.k8s.io",
-		"AdminNetworkPolicy":            "policy.networking.k8s.io",
-		"BaselineAdminNetworkPolicy":    "policy.networking.k8s.io",
-		"EgressFirewall":                "k8s.ovn.org",
-		"EgressIP":                      "k8s.ovn.org",
-		"AdminPolicyBasedExternalRoute": "k8s.ovn.org",
-	}
-	for backing, want := range cases {
-		if got := backingGroup[backing]; got != want {
-			t.Errorf("backingGroup[%q] = %q, want %q", backing, got, want)
-		}
-	}
-	for _, absent := range []string{"", "SomethingElse"} {
-		if _, ok := backingGroup[absent]; ok {
-			t.Errorf("backingGroup[%q] must be absent", absent)
-		}
-	}
-}

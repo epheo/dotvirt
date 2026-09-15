@@ -192,20 +192,11 @@ func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, w
 
 // adoptResource maps a captured kind onto the draft vocabulary, so the Changes view
 // labels an adopted network as a network rather than as a VM (the empty default). A kind
-// with no term stays ResourceVM rather than minting one: the vocabulary is a closed set
-// the draft store and the Changes view both switch on, and an unknown value would render
-// and unstage as nothing.
+// outside the table (a DataVolume) stays ResourceVM rather than minting a word: the
+// vocabulary is a closed set, and an unknown value would render and unstage as nothing.
 func adoptResource(kind string) draft.Resource {
-	for _, r := range []draft.Resource{
-		draft.ResourceNetwork, draft.ResourceUplink, draft.ResourceEgressFirewall,
-		draft.ResourceEgressIP, draft.ResourceExternalRoute, draft.ResourceNetworkPolicy,
-		draft.ResourceAdminNetworkPolicy, draft.ResourceBaselineAdminNetworkPolicy,
-	} {
-		for _, k := range r.Kinds() {
-			if k == kind {
-				return r
-			}
-		}
+	if r, _, ok := model.LookupKind(kind); ok {
+		return draft.Resource(r.Name)
 	}
 	return draft.ResourceVM
 }

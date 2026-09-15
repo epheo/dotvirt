@@ -154,7 +154,7 @@ type UpdateManifestRequest struct {
 // DraftItem is one pending change rendered for the UI.
 type DraftItem struct {
 	Kind      string   `json:"kind"`               // edit | create | delete
-	Resource  string   `json:"resource,omitempty"` // "" == vm | network - disambiguates unstage; a kind name in a commit review
+	Resource  string   `json:"resource,omitempty"` // the draft resource ("" == vm); a commit review names an unmanaged kind by its kind
 	Namespace string   `json:"namespace"`
 	Name      string   `json:"name"`
 	Changes   []Change `json:"changes"`
