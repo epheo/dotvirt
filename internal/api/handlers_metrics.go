@@ -63,7 +63,7 @@ func (s *Server) handleVMUsage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) scopeNamespaces(r *http.Request) (scope, []string, error) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		return scope{}, nil, fmt.Errorf("%w: %v", model.ErrUnavailable, err)
+		return scope{}, nil, unavailable("cluster access", err)
 	}
 	projects, err := s.projectsFor(r.Context(), id, c)
 	if err != nil {
