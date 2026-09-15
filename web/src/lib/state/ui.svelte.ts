@@ -19,7 +19,7 @@ export type Tier0Initial =
 
 // Every modal the shell can show, as one discriminated union - the shell
 // renders exactly one, and opening any modal is a single assignment.
-type AppModal =
+export type AppModal =
 	// namespace on the create forms is the preselected target: the one the
 	// opener's view is focused on, so a New from inside a project lands there.
 	| { kind: 'newVM'; namespaces: string[] | null; namespace?: string } // null = all creatable namespaces

@@ -66,18 +66,19 @@ export function changesHref(project?: string, namespace?: string): string {
 
 export const sectionRoot = (s: Section): string => `/${s}`;
 
-// The VM detail tabs, validated by the route guard and by keepTab.
+// The VM detail tabs: rendered by the page, validated by the route guard and
+// by keepTab.
 export const VM_TABS = [
-	'summary',
-	'monitor',
-	'configure',
-	'security',
-	'permissions',
-	'changes',
-	'snapshots',
-	'console',
+	{ id: 'summary', label: 'Summary' },
+	{ id: 'monitor', label: 'Monitor' },
+	{ id: 'configure', label: 'Configure' },
+	{ id: 'security', label: 'Security' },
+	{ id: 'permissions', label: 'Permissions' },
+	{ id: 'changes', label: 'Changes' },
+	{ id: 'snapshots', label: 'Snapshots' },
+	{ id: 'console', label: 'Console' },
 ] as const;
-export type VMTab = (typeof VM_TABS)[number];
+export type VMTab = (typeof VM_TABS)[number]['id'];
 
 const CONTAINER_TABS = [
 	{ id: 'summary', label: 'Summary' },
@@ -111,7 +112,7 @@ export function containerTabs(scope: Scope, section: Section): typeof CONTAINER_
 // The tabs an inventory href lands on; null for anything else (catalog, changes).
 function tabsAt(href: string): string[] | null {
 	const path = href.split('?')[0];
-	if (path.split('/')[1] === 'vm') return [...VM_TABS];
+	if (path.split('/')[1] === 'vm') return VM_TABS.map((t) => t.id);
 	const section = sectionOf(path);
 	if (!section || section === 'catalog' || section === 'changes') return null;
 	return containerTabs(scopeFromPath(path), section).map((t) => t.id);
