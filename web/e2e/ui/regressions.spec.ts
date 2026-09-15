@@ -218,3 +218,24 @@ test('context-menu Edit settings on another VM opens on that VM', async ({ page 
 	await expect(page).toHaveURL(/\/vm\/web-prod\/web-2/);
 	await expect(page.getByLabel('Memory')).toBeVisible();
 });
+
+test('the click that closes a context menu does not select the row under it', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
+	const rows = page.locator('main tbody tr');
+	// Open from the row's last cell so the menu hangs clear of the name cells.
+	await rows.filter({ hasText: 'web-1' }).locator('td').last().click({ button: 'right' });
+	const menu = page.getByRole('button', { name: 'Edit settings', exact: true });
+	await expect(menu).toBeVisible();
+	// The backdrop that used to swallow this click was replaced by window
+	// listeners that let it through to the grid, so the row also peeked.
+	const web2 = rows.filter({ hasText: 'web-2' }).getByText('web-2', { exact: true });
+	await web2.click();
+	await expect(menu).toBeHidden();
+	await expect(page.getByRole('complementary', { name: 'VM inspector' })).toHaveCount(0);
+	await expect(page).not.toHaveURL(/peek=/);
+	// A right-click on another row still swaps menus in one gesture.
+	await web2.click({ button: 'right' });
+	await expect(menu).toBeVisible();
+});
