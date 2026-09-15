@@ -52,9 +52,9 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 // draft. The PSI file reboots the worker pool when merged, so it carries its
 // own machineconfigs-create SSAR on top of the kubedeschedulers gate.
 func (s *Server) handleDRSEnable(w http.ResponseWriter, r *http.Request) {
-	raw, p, ok := peek[struct {
+	raw, p, ok := readBody[struct {
 		InstallPSI bool `json:"installPSI"`
-	}](w, r)
+	}](w, r, false)
 	if !ok {
 		return
 	}

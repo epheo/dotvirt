@@ -66,7 +66,7 @@ func (s *Server) handleObjectUpdateManifest(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	_, req, ok := peek[model.UpdateManifestRequest](w, r)
+	_, req, ok := readBody[model.UpdateManifestRequest](w, r, false)
 	if !ok {
 		return
 	}

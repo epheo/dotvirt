@@ -91,31 +91,32 @@ func New(store *draft.Store, repos *git.RepoSet, ff *forge.Factory, rs Resyncer,
 	}
 }
 
-// repo resolves the project repo's mirror and push clone, handing the caller
-// only the failure kind: the raw error can embed the repo URL (credentials
-// included on some transports), so it is logged here and never returned.
-func (r *Reader) repo(proj project.ProjectInfo) (*git.Repo, *git.WriteRepo, error) {
+// read is the project repo's mirror, for parsing what the base branch holds.
+// It hands the caller only the failure kind: the raw error can embed the repo
+// URL (credentials included on some transports), so it is logged here and
+// never returned.
+func (r *Reader) read(proj project.ProjectInfo) (*git.Repo, error) {
 	if err := requireRepo(proj); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	read, write, err := r.repos.Get(proj.Repo)
+	read, _, err := r.repos.Get(proj.Repo)
 	if err != nil {
 		log.Printf("changeset: project %s repo: %v", proj.Name, err)
-		return nil, nil, fmt.Errorf("%w: project repo unreachable", model.ErrUnavailable)
+		return nil, fmt.Errorf("%w: project repo unreachable", model.ErrUnavailable)
 	}
-	return read, write, nil
-}
-
-// read is the project repo's mirror, for parsing what the base branch holds.
-func (r *Reader) read(proj project.ProjectInfo) (*git.Repo, error) {
-	read, _, err := r.repo(proj)
-	return read, err
+	return read, nil
 }
 
 // write is read's write-side sibling: the mirror beside the push clone a
-// commit goes through.
+// commit goes through. Only the write half may hand out the push clone; the
+// second Get is the pair read just opened.
 func (c *Coordinator) write(proj project.ProjectInfo) (*git.Repo, *git.WriteRepo, error) {
-	return c.repo(proj)
+	read, err := c.read(proj)
+	if err != nil {
+		return nil, nil, err
+	}
+	_, write, _ := c.repos.Get(proj.Repo)
+	return read, write, nil
 }
 
 // requireRepo rejects an action on a project with no usable repo BEFORE any draft

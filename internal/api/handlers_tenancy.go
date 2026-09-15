@@ -18,9 +18,9 @@ import (
 // project it JOINS (carried as "project"), so that project's Argo app syncs
 // workloads into it once the platform app creates it.
 func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
-	raw, p, ok := peek[struct {
+	raw, p, ok := readBody[struct {
 		Project string `json:"project"`
-	}](w, r)
+	}](w, r, false)
 	if !ok {
 		return
 	}
@@ -49,9 +49,9 @@ func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 // platform-admin act (it lands a Namespace + RBAC in the platform tier).
 func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	// Peek the name for an early 400; the Coordinator re-decodes the full spec.
-	raw, p, ok := peek[struct {
+	raw, p, ok := readBody[struct {
 		Name string `json:"name"`
-	}](w, r)
+	}](w, r, false)
 	if !ok {
 		return
 	}

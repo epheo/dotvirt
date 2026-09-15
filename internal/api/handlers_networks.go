@@ -49,7 +49,7 @@ func (s *Server) platformCreate(ref ssarRef, resource draft.Resource) http.Handl
 // found). what names the kind in the missing-namespace error, article included.
 func (s *Server) namespacedCreate(what string, resource draft.Resource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		raw, p, ok := peek[nsPeek](w, r)
+		raw, p, ok := readBody[nsPeek](w, r, false)
 		if !ok {
 			return
 		}
@@ -71,10 +71,10 @@ func (s *Server) namespacedCreate(what string, resource draft.Resource) http.Han
 // lands in the tenant repo owning its namespace; a shared/VLAN CUDN is
 // cluster-scoped, so it routes to the platform tier.
 func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
-	raw, p, ok := peek[struct {
+	raw, p, ok := readBody[struct {
 		Scope     string `json:"scope"`
 		Namespace string `json:"namespace"`
-	}](w, r)
+	}](w, r, false)
 	if !ok {
 		return
 	}
@@ -100,9 +100,9 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 // (AdminNetworkPolicy or the baseline default) - always platform-tier and admin-only,
 // gated on the caller's authority to create the matching kind.
 func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.Request) {
-	raw, p, ok := peek[struct {
+	raw, p, ok := readBody[struct {
 		Baseline bool `json:"baseline"`
-	}](w, r)
+	}](w, r, false)
 	if !ok {
 		return
 	}
