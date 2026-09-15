@@ -222,6 +222,21 @@ func TestCommitItemsClusterScopedName(t *testing.T) {
 	}
 }
 
+// A commit reviews with the words the draft showed before the merge: the
+// table's labels, not the kind name.
+func TestCommitItemsUseTableLabels(t *testing.T) {
+	udn := []byte("apiVersion: k8s.ovn.org/v1\nkind: UserDefinedNetwork\nmetadata:\n  name: blue\n  namespace: alpha\n")
+	grown := append(append([]byte{}, udn...), []byte("spec:\n  topology: Layer2\n")...)
+	created := commitItems([]git.FileChange{{Path: "alpha/blue.yaml", After: udn}})
+	if len(created) != 1 || created[0].Changes[0].Field != "Create network" {
+		t.Errorf("create row = %+v, want the draft's \"Create network\"", created)
+	}
+	edited := commitItems([]git.FileChange{{Path: "alpha/blue.yaml", Before: udn, After: grown}})
+	if len(edited) != 1 || edited[0].Changes[0].Field != "Edit network" {
+		t.Errorf("edit row = %+v, want the draft's \"Edit network\"", edited)
+	}
+}
+
 // The open-PR lane is project-wide: every open PR into the base branch, named
 // by its proposer from the branch, reverts flagged, with one branch-rule read.
 // Which rows are the caller's is answered without the forge.

@@ -191,8 +191,8 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		if out.Caps.Uplink {
 			for i := range out.Uplinks {
 				u := &out.Uplinks[i]
-				u.SourceFile = declared("NodeNetworkConfigurationPolicy", "", u.Policy)
-				if d, ok := s.driftFor("NodeNetworkConfigurationPolicy", "", u.Policy); ok {
+				u.SourceFile = declared(model.KindNNCP.Kind, "", u.Policy)
+				if d, ok := s.driftFor(model.KindNNCP.Kind, "", u.Policy); ok {
 					u.Sync, u.Health, u.SyncError = d.Sync, d.Health, d.Message
 				}
 			}

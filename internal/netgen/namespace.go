@@ -90,7 +90,7 @@ func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error)
 		// have to be >= the Namespace's (default 0); a negative wave inverts the order
 		// and wedges the sync on "namespace not found", so we set none.
 		udn, err := yaml.Marshal(map[string]any{
-			"apiVersion": model.MustKind("UserDefinedNetwork").APIVersion(),
+			"apiVersion": model.KindUDN.APIVersion(),
 			"kind":       "UserDefinedNetwork",
 			"metadata":   map[string]any{"name": p.Name, "namespace": s.Name},
 			"spec":       map[string]any{"topology": "Layer2", "layer2": layer2},

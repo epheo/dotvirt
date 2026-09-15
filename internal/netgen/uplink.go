@@ -40,7 +40,7 @@ func UplinkManifest(s UplinkSpec) (path string, content []byte, err error) {
 		sel = map[string]string{"node-role.kubernetes.io/worker": ""}
 	}
 	out, err := yaml.Marshal(map[string]any{
-		"apiVersion": model.MustKind("NodeNetworkConfigurationPolicy").APIVersion(),
+		"apiVersion": model.KindNNCP.APIVersion(),
 		"kind":       "NodeNetworkConfigurationPolicy",
 		"metadata":   map[string]any{"name": UplinkPolicyName(s.Name)},
 		"spec": map[string]any{

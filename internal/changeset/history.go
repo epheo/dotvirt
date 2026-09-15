@@ -249,7 +249,7 @@ func documentsIn(path string, content []byte) orderedDocs {
 			continue
 		}
 		doc := document{ref: refs[0], raw: strings.TrimSpace(chunk) + "\n"}
-		if doc.ref.Kind == "VirtualMachine" {
+		if doc.ref.Kind == model.KindVM.Kind {
 			if vms, err := manifest.ParseVMs(path, []byte(chunk), ns); err == nil && len(vms) == 1 {
 				doc.vm = &vms[0]
 			}
@@ -282,18 +282,22 @@ func editChanges(prev, doc document) []model.Change {
 			return changes
 		}
 	}
-	return []model.Change{{Field: "Edit " + kindLabel(doc.ref.Kind), Action: "change", To: doc.ref.Name}}
+	return []model.Change{{Field: changeLabel(doc.ref.Kind, false), Action: "change", To: doc.ref.Name}}
 }
 
 // createChanges summarizes a new object: a VM by its sizing and devices, any
-// other kind by its identity.
+// other kind by its identity. A committed VM was created, never adopted, so
+// the VM row keeps the wizard's label rather than the table's adoption one.
 func createChanges(doc document) []model.Change {
 	nsName := qualified(doc.ref)
-	if doc.vm == nil {
-		return []model.Change{{Field: "Create " + kindLabel(doc.ref.Kind), Action: "add", To: nsName}}
+	if doc.ref.Kind != model.KindVM.Kind {
+		return []model.Change{{Field: changeLabel(doc.ref.Kind, true), Action: "add", To: nsName}}
 	}
-	vm := doc.vm
 	out := []model.Change{{Field: "Create VM", Action: "add", To: nsName}}
+	vm := doc.vm
+	if vm == nil {
+		return out
+	}
 	add := func(field, to string) {
 		if to != "" {
 			out = append(out, model.Change{Field: field, Action: "add", To: to})
@@ -341,9 +345,18 @@ func resourceOf(kind string) string {
 	return r.Name
 }
 
-func kindLabel(kind string) string {
-	if kind == "VirtualMachine" {
-		return "VM"
+// changeLabel names a create or edit of kind the way the draft view does, from
+// the table, so a commit reviews with the rows the proposal showed. A kind
+// dotvirt does not manage keeps its name, so the row still says what it is.
+func changeLabel(kind string, create bool) string {
+	r, _, ok := model.LookupKind(kind)
+	switch {
+	case !ok && create:
+		return "Create " + kind
+	case !ok:
+		return "Edit " + kind
+	case create:
+		return r.CreateLabel
 	}
-	return kind
+	return r.EditLabel
 }

@@ -166,16 +166,16 @@ func (s *Server) vmScope(w http.ResponseWriter, r *http.Request) (sc scope, ns, 
 // projects them to the UI, and the authoring signal ORs a subset - adding a
 // platform kind touches the table, this list and its routes.
 var (
-	ssarCUDN        = ssarFor(model.MustKind("ClusterUserDefinedNetwork"))
-	ssarUplink      = ssarFor(model.MustKind("NodeNetworkConfigurationPolicy"))
-	ssarNamespace   = ssarFor(model.MustKind("Namespace"))
-	ssarEgressIP    = ssarFor(model.MustKind("EgressIP"))
-	ssarExtRoute    = ssarFor(model.MustKind("AdminPolicyBasedExternalRoute"))
-	ssarANP         = ssarFor(model.MustKind("AdminNetworkPolicy"))
-	ssarBANP        = ssarFor(model.MustKind("BaselineAdminNetworkPolicy"))
-	ssarDescheduler = ssarFor(model.MustKind("KubeDescheduler"))
-	ssarMachineCfg  = ssarFor(model.MustKind("MachineConfig"))
-	ssarVMTemplate  = ssarFor(model.MustKind("VirtualMachineTemplate"))
+	ssarCUDN        = ssarFor(model.KindCUDN)
+	ssarUplink      = ssarFor(model.KindNNCP)
+	ssarNamespace   = ssarFor(model.KindNS)
+	ssarEgressIP    = ssarFor(model.KindEgressIP)
+	ssarExtRoute    = ssarFor(model.KindExtRoute)
+	ssarANP         = ssarFor(model.KindANP)
+	ssarBANP        = ssarFor(model.KindBANP)
+	ssarDescheduler = ssarFor(model.KindDesched)
+	ssarMachineCfg  = ssarFor(model.KindMachCfg)
+	ssarVMTemplate  = ssarFor(model.KindTemplate)
 )
 
 // platformAuthorResources are the create-SSARs that signal platform-tier

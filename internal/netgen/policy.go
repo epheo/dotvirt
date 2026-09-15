@@ -74,7 +74,7 @@ func NetworkPolicyManifest(s NetworkPolicySpec) (path string, content []byte, er
 		spec["ingress"] = ingress
 	}
 	out, err := yaml.Marshal(map[string]any{
-		"apiVersion": model.MustKind("NetworkPolicy").APIVersion(),
+		"apiVersion": model.KindNetpol.APIVersion(),
 		"kind":       "NetworkPolicy",
 		"metadata":   map[string]any{"name": s.Name, "namespace": s.Namespace},
 		"spec":       spec,
@@ -181,18 +181,18 @@ func AdminNetworkPolicyManifest(s AdminNetworkPolicySpec) (path string, content 
 		}
 		spec["egress"] = eg
 	}
-	kind, dir := "AdminNetworkPolicy", "adminnetworkpolicies"
+	kind := model.KindANP
 	if s.Baseline {
-		kind, dir = "BaselineAdminNetworkPolicy", "baselineadminnetworkpolicies"
+		kind = model.KindBANP
 	}
 	out, err := yaml.Marshal(map[string]any{
-		"apiVersion": model.MustKind(kind).APIVersion(),
-		"kind":       kind,
+		"apiVersion": kind.APIVersion(),
+		"kind":       kind.Kind,
 		"metadata":   map[string]any{"name": name},
 		"spec":       spec,
 	})
 	if err != nil {
 		return "", nil, err
 	}
-	return dir + "/" + name + ".yaml", out, nil
+	return kind.Plural + "/" + name + ".yaml", out, nil
 }

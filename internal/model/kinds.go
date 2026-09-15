@@ -93,44 +93,46 @@ func (r Resource) KindNames() []string {
 	return out
 }
 
+// The managed kinds, each spelled once; a consumer that knows which kind it
+// wants names the var rather than looking the name up.
 var (
-	kindVM       = Kind{Kind: "VirtualMachine", Group: "kubevirt.io", Version: "v1", Plural: "virtualmachines"}
-	kindUDN      = Kind{Kind: "UserDefinedNetwork", Group: "k8s.ovn.org", Version: "v1", Plural: "userdefinednetworks"}
-	kindCUDN     = Kind{Kind: "ClusterUserDefinedNetwork", Group: "k8s.ovn.org", Version: "v1", Plural: "clusteruserdefinednetworks", ClusterScoped: true}
-	kindNAD      = Kind{Kind: "NetworkAttachmentDefinition", Group: "k8s.cni.cncf.io", Version: "v1", Plural: "network-attachment-definitions"}
-	kindNNCP     = Kind{Kind: "NodeNetworkConfigurationPolicy", Group: "nmstate.io", Version: "v1", Plural: "nodenetworkconfigurationpolicies", ClusterScoped: true}
-	kindNS       = Kind{Kind: "Namespace", Version: "v1", Plural: "namespaces", ClusterScoped: true}
-	kindRB       = Kind{Kind: "RoleBinding", Group: "rbac.authorization.k8s.io", Version: "v1", Plural: "rolebindings"}
-	kindEgressFW = Kind{Kind: "EgressFirewall", Group: "k8s.ovn.org", Version: "v1", Plural: "egressfirewalls"}
-	kindEgressIP = Kind{Kind: "EgressIP", Group: "k8s.ovn.org", Version: "v1", Plural: "egressips", ClusterScoped: true}
-	kindExtRoute = Kind{Kind: "AdminPolicyBasedExternalRoute", Group: "k8s.ovn.org", Version: "v1", Plural: "adminpolicybasedexternalroutes", ClusterScoped: true}
-	kindNetpol   = Kind{Kind: "NetworkPolicy", Group: "networking.k8s.io", Version: "v1", Plural: "networkpolicies"}
-	kindANP      = Kind{Kind: "AdminNetworkPolicy", Group: "policy.networking.k8s.io", Version: "v1alpha1", Plural: "adminnetworkpolicies", ClusterScoped: true}
-	kindBANP     = Kind{Kind: "BaselineAdminNetworkPolicy", Group: "policy.networking.k8s.io", Version: "v1alpha1", Plural: "baselineadminnetworkpolicies", ClusterScoped: true}
-	kindOpGroup  = Kind{Kind: "OperatorGroup", Group: "operators.coreos.com", Version: "v1", Plural: "operatorgroups"}
-	kindSub      = Kind{Kind: "Subscription", Group: "operators.coreos.com", Version: "v1alpha1", Plural: "subscriptions"}
-	kindDesched  = Kind{Kind: "KubeDescheduler", Group: "operator.openshift.io", Version: "v1", Plural: "kubedeschedulers"}
-	kindMachCfg  = Kind{Kind: "MachineConfig", Group: "machineconfiguration.openshift.io", Version: "v1", Plural: "machineconfigs", ClusterScoped: true}
-	kindTemplate = Kind{Kind: "VirtualMachineTemplate", Group: "template.kubevirt.io", Version: "v1beta1", Plural: "virtualmachinetemplates"}
+	KindVM       = Kind{Kind: "VirtualMachine", Group: "kubevirt.io", Version: "v1", Plural: "virtualmachines"}
+	KindUDN      = Kind{Kind: "UserDefinedNetwork", Group: "k8s.ovn.org", Version: "v1", Plural: "userdefinednetworks"}
+	KindCUDN     = Kind{Kind: "ClusterUserDefinedNetwork", Group: "k8s.ovn.org", Version: "v1", Plural: "clusteruserdefinednetworks", ClusterScoped: true}
+	KindNAD      = Kind{Kind: "NetworkAttachmentDefinition", Group: "k8s.cni.cncf.io", Version: "v1", Plural: "network-attachment-definitions"}
+	KindNNCP     = Kind{Kind: "NodeNetworkConfigurationPolicy", Group: "nmstate.io", Version: "v1", Plural: "nodenetworkconfigurationpolicies", ClusterScoped: true}
+	KindNS       = Kind{Kind: "Namespace", Version: "v1", Plural: "namespaces", ClusterScoped: true}
+	KindRB       = Kind{Kind: "RoleBinding", Group: "rbac.authorization.k8s.io", Version: "v1", Plural: "rolebindings"}
+	KindEgressFW = Kind{Kind: "EgressFirewall", Group: "k8s.ovn.org", Version: "v1", Plural: "egressfirewalls"}
+	KindEgressIP = Kind{Kind: "EgressIP", Group: "k8s.ovn.org", Version: "v1", Plural: "egressips", ClusterScoped: true}
+	KindExtRoute = Kind{Kind: "AdminPolicyBasedExternalRoute", Group: "k8s.ovn.org", Version: "v1", Plural: "adminpolicybasedexternalroutes", ClusterScoped: true}
+	KindNetpol   = Kind{Kind: "NetworkPolicy", Group: "networking.k8s.io", Version: "v1", Plural: "networkpolicies"}
+	KindANP      = Kind{Kind: "AdminNetworkPolicy", Group: "policy.networking.k8s.io", Version: "v1alpha1", Plural: "adminnetworkpolicies", ClusterScoped: true}
+	KindBANP     = Kind{Kind: "BaselineAdminNetworkPolicy", Group: "policy.networking.k8s.io", Version: "v1alpha1", Plural: "baselineadminnetworkpolicies", ClusterScoped: true}
+	KindOpGroup  = Kind{Kind: "OperatorGroup", Group: "operators.coreos.com", Version: "v1", Plural: "operatorgroups"}
+	KindSub      = Kind{Kind: "Subscription", Group: "operators.coreos.com", Version: "v1alpha1", Plural: "subscriptions"}
+	KindDesched  = Kind{Kind: "KubeDescheduler", Group: "operator.openshift.io", Version: "v1", Plural: "kubedeschedulers"}
+	KindMachCfg  = Kind{Kind: "MachineConfig", Group: "machineconfiguration.openshift.io", Version: "v1", Plural: "machineconfigs", ClusterScoped: true}
+	KindTemplate = Kind{Kind: "VirtualMachineTemplate", Group: "template.kubevirt.io", Version: "v1beta1", Plural: "virtualmachinetemplates"}
 )
 
 // resources is the table; names are the draft's on-disk vocabulary.
 var resources = []Resource{
-	{Name: "vm", Kinds: []Kind{kindVM}, CreateLabel: "Adopt VM from cluster", EditLabel: "Edit VM"},
-	{Name: "network", Kinds: []Kind{kindUDN, kindCUDN, kindNAD}, CreateLabel: "Create network", EditLabel: "Edit network", NetworkFamily: true},
-	{Name: "uplink", Kinds: []Kind{kindNNCP}, CreateLabel: "Create uplink", EditLabel: "Edit uplink", NetworkFamily: true},
-	{Name: "namespace", Kinds: []Kind{kindNS}, CreateLabel: "Create namespace", EditLabel: "Edit namespace"},
-	{Name: "rolebinding", Kinds: []Kind{kindRB}, CreateLabel: "Grant tenant access", EditLabel: "Edit tenant access"},
-	{Name: "egressfirewall", Kinds: []Kind{kindEgressFW}, CreateLabel: "Create gateway firewall", EditLabel: "Edit gateway firewall", NetworkFamily: true},
-	{Name: "egressip", Kinds: []Kind{kindEgressIP}, CreateLabel: "Create SNAT pool", EditLabel: "Edit SNAT pool", NetworkFamily: true},
-	{Name: "externalroute", Kinds: []Kind{kindExtRoute}, CreateLabel: "Create external route", EditLabel: "Edit external route", NetworkFamily: true},
-	{Name: "networkpolicy", Kinds: []Kind{kindNetpol}, CreateLabel: "Create distributed firewall policy", EditLabel: "Edit distributed firewall policy", NetworkFamily: true},
-	{Name: "adminnetworkpolicy", Kinds: []Kind{kindANP}, CreateLabel: "Create admin firewall policy", EditLabel: "Edit admin firewall policy", NetworkFamily: true},
-	{Name: "baselineadminnetworkpolicy", Kinds: []Kind{kindBANP}, CreateLabel: "Create baseline firewall policy", EditLabel: "Edit baseline firewall policy", NetworkFamily: true},
+	{Name: "vm", Kinds: []Kind{KindVM}, CreateLabel: "Adopt VM from cluster", EditLabel: "Edit VM"},
+	{Name: "network", Kinds: []Kind{KindUDN, KindCUDN, KindNAD}, CreateLabel: "Create network", EditLabel: "Edit network", NetworkFamily: true},
+	{Name: "uplink", Kinds: []Kind{KindNNCP}, CreateLabel: "Create uplink", EditLabel: "Edit uplink", NetworkFamily: true},
+	{Name: "namespace", Kinds: []Kind{KindNS}, CreateLabel: "Create namespace", EditLabel: "Edit namespace"},
+	{Name: "rolebinding", Kinds: []Kind{KindRB}, CreateLabel: "Grant tenant access", EditLabel: "Edit tenant access"},
+	{Name: "egressfirewall", Kinds: []Kind{KindEgressFW}, CreateLabel: "Create gateway firewall", EditLabel: "Edit gateway firewall", NetworkFamily: true},
+	{Name: "egressip", Kinds: []Kind{KindEgressIP}, CreateLabel: "Create SNAT pool", EditLabel: "Edit SNAT pool", NetworkFamily: true},
+	{Name: "externalroute", Kinds: []Kind{KindExtRoute}, CreateLabel: "Create external route", EditLabel: "Edit external route", NetworkFamily: true},
+	{Name: "networkpolicy", Kinds: []Kind{KindNetpol}, CreateLabel: "Create distributed firewall policy", EditLabel: "Edit distributed firewall policy", NetworkFamily: true},
+	{Name: "adminnetworkpolicy", Kinds: []Kind{KindANP}, CreateLabel: "Create admin firewall policy", EditLabel: "Edit admin firewall policy", NetworkFamily: true},
+	{Name: "baselineadminnetworkpolicy", Kinds: []Kind{KindBANP}, CreateLabel: "Create baseline firewall policy", EditLabel: "Edit baseline firewall policy", NetworkFamily: true},
 	// The DRS file set: the descheduler operator install, its CR and the PSI
 	// kernel-arg MachineConfig. Its Namespace document is the namespace resource.
-	{Name: "drs", Kinds: []Kind{kindOpGroup, kindSub, kindDesched, kindMachCfg}, CreateLabel: "Configure DRS", EditLabel: "Edit DRS"},
-	{Name: "template", Kinds: []Kind{kindTemplate}, CreateLabel: "Save as template", EditLabel: "Edit template"},
+	{Name: "drs", Kinds: []Kind{KindOpGroup, KindSub, KindDesched, KindMachCfg}, CreateLabel: "Configure DRS", EditLabel: "Edit DRS"},
+	{Name: "template", Kinds: []Kind{KindTemplate}, CreateLabel: "Save as template", EditLabel: "Edit template"},
 }
 
 // Resources is the whole table, read-only.
@@ -160,16 +162,6 @@ func LookupKind(kind string) (Resource, Kind, bool) {
 		}
 	}
 	return Resource{}, Kind{}, false
-}
-
-// MustKind is LookupKind for a kind the caller spells out: a name outside the
-// table is a programming error, not a runtime state.
-func MustKind(kind string) Kind {
-	_, k, ok := LookupKind(kind)
-	if !ok {
-		panic("model: " + kind + " is not a managed kind")
-	}
-	return k
 }
 
 // NetworkFamilyKinds lists every backing of the network family, in table order.

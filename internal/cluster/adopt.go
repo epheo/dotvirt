@@ -31,7 +31,7 @@ const trackingIDAnnotation = "argocd.argoproj.io/tracking-id"
 // capturing less leaves the namespace half under git. Operator and app ship in one
 // release, so the two are kept in step by hand rather than read back from the cluster.
 var adoptableKinds = append([]schema.GroupVersionResource{
-	GVR(model.MustKind("VirtualMachine")),
+	GVR(model.KindVM),
 	{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datavolumes"},
 }, networkFamilyGVRs(false)...)
 

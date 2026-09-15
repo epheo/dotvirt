@@ -19,7 +19,7 @@ var (
 	gvrInstancetypes  = schema.GroupVersionResource{Group: "instancetype.kubevirt.io", Version: "v1beta1", Resource: "virtualmachineclusterinstancetypes"}
 	gvrPreferences    = schema.GroupVersionResource{Group: "instancetype.kubevirt.io", Version: "v1beta1", Resource: "virtualmachineclusterpreferences"}
 	gvrDataSources    = schema.GroupVersionResource{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datasources"}
-	gvrNADs           = GVR(model.MustKind("NetworkAttachmentDefinition"))
+	gvrNADs           = GVR(model.KindNAD)
 	gvrStorageClasses = schema.GroupVersionResource{Group: "storage.k8s.io", Version: "v1", Resource: "storageclasses"}
 )
 

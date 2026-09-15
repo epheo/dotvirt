@@ -42,10 +42,10 @@ func TestKindTableRoundTrips(t *testing.T) {
 }
 
 func TestKindAPIVersion(t *testing.T) {
-	if got := MustKind("Namespace").APIVersion(); got != "v1" {
+	if got := KindNS.APIVersion(); got != "v1" {
 		t.Errorf("core group: got %q", got)
 	}
-	if got := MustKind("UserDefinedNetwork").APIVersion(); got != "k8s.ovn.org/v1" {
+	if got := KindUDN.APIVersion(); got != "k8s.ovn.org/v1" {
 		t.Errorf("grouped: got %q", got)
 	}
 }
@@ -78,8 +78,9 @@ func TestKindGroups(t *testing.T) {
 		"Namespace":                      "",
 	}
 	for kind, want := range cases {
-		if got := MustKind(kind).Group; got != want {
-			t.Errorf("%s: group %q, want %q", kind, got, want)
+		_, k, ok := LookupKind(kind)
+		if !ok || k.Group != want {
+			t.Errorf("%s: group %q (found %v), want %q", kind, k.Group, ok, want)
 		}
 	}
 }
