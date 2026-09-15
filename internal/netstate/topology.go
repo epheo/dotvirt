@@ -35,12 +35,12 @@ func (s *Snapshot) primaryDomain(ns string) (key, display string) {
 		if u.GetNamespace() != ns {
 			continue
 		}
-		if _, role := udnNetwork(u); strings.EqualFold(role, "Primary") {
+		if strings.EqualFold(udnConfig(u).Role(), "Primary") {
 			return "udn:" + ns + "/" + u.GetName(), "network " + u.GetName()
 		}
 	}
 	for _, u := range reflect.List(s.cudn) {
-		if _, role := cudnNetwork(u); !strings.EqualFold(role, "Primary") {
+		if !strings.EqualFold(cudnConfig(u).Role(), "Primary") {
 			continue
 		}
 		for _, nad := range reflect.List(s.nad) {

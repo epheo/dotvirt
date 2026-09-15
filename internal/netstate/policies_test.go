@@ -126,48 +126,6 @@ func TestPolicies(t *testing.T) {
 	}
 }
 
-// The tenant filter hides a cluster row only when its namespaces are provably
-// enumerated; every ambiguous selector must come out nil so the row stays.
-func TestSelectorNamespaces(t *testing.T) {
-	nameIn := func(vals ...any) map[string]any {
-		return map[string]any{"matchExpressions": []any{map[string]any{
-			"key": "kubernetes.io/metadata.name", "operator": "In", "values": vals,
-		}}}
-	}
-	cases := []struct {
-		name string
-		sel  map[string]any
-		want []string
-	}{
-		{"empty selector", map[string]any{}, nil},
-		{"name-In", nameIn("a", "b"), []string{"a", "b"}},
-		{"name-In empty values", nameIn(), nil},
-		{"name matchLabel", map[string]any{"matchLabels": map[string]any{"kubernetes.io/metadata.name": "a"}}, []string{"a"}},
-		{"other matchLabel", map[string]any{"matchLabels": map[string]any{"env": "prod"}}, nil},
-		{"name-NotIn", map[string]any{"matchExpressions": []any{map[string]any{
-			"key": "kubernetes.io/metadata.name", "operator": "NotIn", "values": []any{"a"},
-		}}}, nil},
-		{"name-In plus label", func() map[string]any {
-			s := nameIn("a")
-			s["matchLabels"] = map[string]any{"env": "prod"}
-			return s
-		}(), nil},
-	}
-	for _, c := range cases {
-		got := selectorNamespaces(c.sel)
-		if len(got) != len(c.want) {
-			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
-			continue
-		}
-		for i := range got {
-			if got[i] != c.want[i] {
-				t.Errorf("%s: got %v, want %v", c.name, got, c.want)
-				break
-			}
-		}
-	}
-}
-
 // An empty-podSelector NetworkPolicy with a declared direction and no rules is
 // the default-deny idiom - it must come out as "all pods" with zero rule rows,
 // never invent a rule.

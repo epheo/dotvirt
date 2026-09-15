@@ -1,15 +1,10 @@
 package netstate
 
 import (
-	"sort"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/epheo/dotvirt/internal/model"
-	"github.com/epheo/dotvirt/internal/reflect"
 )
 
 // Effective computes the policy chain governing one workload - the same pure
@@ -25,100 +20,75 @@ import (
 func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, podScoped bool) model.EffectivePolicy {
 	eff := model.EffectivePolicy{Namespace: ns}
 
-	// Admin tier, evaluated first, precedence-ordered (lower priority wins).
-	var admins []model.PolicyBinding
-	for _, u := range reflect.List(s.anp) {
-		if m := anpSubjectMatch(u, nsLabels, podLabels, podScoped); m != matchNo {
-			admins = append(admins, model.PolicyBinding{Policy: policyFromANP(u, false), Conditional: m == matchCond})
-		}
+	for _, b := range bind(s.sortedANPs(), nsLabels, podLabels, podScoped) {
+		eff.EastWest = append(eff.EastWest, b.binding(""))
 	}
-	sort.Slice(admins, func(i, j int) bool {
-		a, b := admins[i].Policy, admins[j].Policy
-		if a.Priority != b.Priority {
-			return a.Priority < b.Priority
+	// A definite selection default-denies the directions the policy declares
+	// - the fact the panel must surface, since it flips the namespace from
+	// open to allowlist.
+	for _, b := range s.selectingNetpols(ns, podLabels, podScoped) {
+		if b.m == matchYes {
+			eff.DefaultDenyIngress = eff.DefaultDenyIngress || b.pol.denyIngress
+			eff.DefaultDenyEgress = eff.DefaultDenyEgress || b.pol.denyEgress
 		}
-		return a.Name < b.Name
-	})
-
-	// Project tier: NetworkPolicies in the namespace whose podSelector selects
-	// the workload. A definite selection default-denies the directions the
-	// policy declares - the fact the panel must surface, since it flips the
-	// namespace from open to allowlist.
-	var project []model.PolicyBinding
-	for _, u := range reflect.List(s.netpol) {
-		if u.GetNamespace() != ns {
-			continue
-		}
-		sel, _, _ := unstructured.NestedMap(u.Object, "spec", "podSelector")
-		m := podMatch(sel, podLabels, podScoped)
-		if m == matchNo {
-			continue
-		}
-		if m == matchYes {
-			ing, eg := netpolTypes(u)
-			eff.DefaultDenyIngress = eff.DefaultDenyIngress || ing
-			eff.DefaultDenyEgress = eff.DefaultDenyEgress || eg
-		}
-		project = append(project, model.PolicyBinding{Policy: policyFromNetpol(u), Conditional: m == matchCond})
+		eff.EastWest = append(eff.EastWest, b.binding(""))
 	}
-	sort.Slice(project, func(i, j int) bool { return project[i].Policy.Name < project[j].Policy.Name })
-
-	// Baseline tier, evaluated last.
-	var base []model.PolicyBinding
-	for _, u := range reflect.List(s.banp) {
-		if m := anpSubjectMatch(u, nsLabels, podLabels, podScoped); m != matchNo {
-			base = append(base, model.PolicyBinding{
-				Policy:      policyFromANP(u, true),
-				Conditional: m == matchCond,
-				Note:        "Applies only where no admin or project rule decided.",
-			})
-		}
+	for _, b := range bind(s.baselines(), nsLabels, podLabels, podScoped) {
+		eff.EastWest = append(eff.EastWest, b.binding("Applies only where no admin or project rule decided."))
 	}
-
-	eff.EastWest = append(append(admins, project...), base...)
 
 	// Gateway firewall: the namespace's EgressFirewall (rules are first-match).
-	for _, u := range reflect.List(s.egressfw) {
-		if u.GetNamespace() == ns {
-			eff.Gateway = append(eff.Gateway, model.PolicyBinding{Policy: policyFromEgressFirewall(u)})
-		}
+	for _, p := range s.gateways(ns) {
+		eff.Gateway = append(eff.Gateway, model.PolicyBinding{Policy: p.view})
 	}
 
 	// Tier-0: the SNAT pools and external routes binding this namespace.
 	snat, routes := s.egressBindings(nsLabels, podLabels, podScoped)
 	for _, b := range snat {
-		eff.SNAT = append(eff.SNAT, model.PolicyBinding{Policy: b.pol, Conditional: b.m == matchCond})
+		eff.SNAT = append(eff.SNAT, b.binding(""))
 	}
 	for _, b := range routes {
-		eff.Routes = append(eff.Routes, model.PolicyBinding{Policy: b.pol, Conditional: b.m == matchCond})
+		eff.Routes = append(eff.Routes, b.binding(""))
 	}
 	return eff
 }
 
-// egressBinding pairs an egress-plane policy with its selector verdict.
-type egressBinding struct {
-	pol model.Policy
+// bound pairs a policy with its subject's verdict against a workload.
+type bound struct {
+	pol *policy
 	m   match
+}
+
+func (b bound) binding(note string) model.PolicyBinding {
+	return model.PolicyBinding{Policy: b.pol.view, Conditional: b.m == matchCond, Note: note}
+}
+
+// bind keeps the policies whose subject may apply to the workload, in the
+// order given - the one filter every tier and plane shares.
+func bind(policies []*policy, nsLabels, podLabels map[string]string, podScoped bool) []bound {
+	var out []bound
+	for _, p := range policies {
+		if m := p.subject.match(nsLabels, podLabels, podScoped); m != matchNo {
+			out = append(out, bound{p, m})
+		}
+	}
+	return out
+}
+
+// selectingNetpols returns the namespace's NetworkPolicies whose podSelector
+// selects the workload, by name - the project tier both Effective and Trace
+// walk. Selection alone isolates the declared directions; whether a rule then
+// allows a given flow is the trace's question.
+func (s *Snapshot) selectingNetpols(ns string, podLabels map[string]string, podScoped bool) []bound {
+	return bind(inNamespace(s.netpol, ns, decodeNetpol), nil, podLabels, podScoped)
 }
 
 // egressBindings resolves which SNAT pools (EgressIP: namespaceSelector plus an
 // optional podSelector narrowing within it) and external routes bind a workload
 // - the one query behind the Effective view and the trace's egress planes.
-func (s *Snapshot) egressBindings(nsLabels, podLabels map[string]string, podScoped bool) (snat, routes []egressBinding) {
-	for _, u := range reflect.List(s.egressip) {
-		nsSel, _, _ := unstructured.NestedMap(u.Object, "spec", "namespaceSelector")
-		podSel, _, _ := unstructured.NestedMap(u.Object, "spec", "podSelector")
-		if m := combineMatch(matchSelector(nsSel, nsLabels), podMatch(podSel, podLabels, podScoped)); m != matchNo {
-			snat = append(snat, egressBinding{policyFromEgressIP(u), m})
-		}
-	}
-	for _, u := range reflect.List(s.extroute) {
-		sel, _, _ := unstructured.NestedMap(u.Object, "spec", "from", "namespaceSelector")
-		if m := matchSelector(sel, nsLabels); m != matchNo {
-			routes = append(routes, egressBinding{policyFromExtRoute(u), m})
-		}
-	}
-	return snat, routes
+func (s *Snapshot) egressBindings(nsLabels, podLabels map[string]string, podScoped bool) (snat, routes []bound) {
+	return bind(decoded(s.egressip, decodeEgressIP), nsLabels, podLabels, podScoped),
+		bind(decoded(s.extroute, decodeExtRoute), nsLabels, podLabels, podScoped)
 }
 
 // match is a selector's verdict against known labels. matchCond means the
@@ -142,20 +112,25 @@ func combineMatch(a, b match) match {
 	return matchYes
 }
 
-// matchSelector evaluates a LabelSelector (as stored in an unstructured spec)
-// against known labels. Absent/empty selects everything - the API convention
-// every kind here shares. Undecodable selectors come back matchCond, not
-// matchNo: live objects are apiserver-validated so this is near-impossible,
-// but the conservative direction is to keep the row.
-func matchSelector(sel map[string]any, lbls map[string]string) match {
-	if len(sel) == 0 {
+// match resolves the subject against a workload: the namespace selector
+// against its namespace labels, the pod selector against its pod labels.
+func (s subject) match(nsLabels, podLabels map[string]string, podScoped bool) match {
+	if s.none {
+		return matchNo
+	}
+	return combineMatch(matchSelector(s.ns, nsLabels), podMatch(s.pod, podLabels, podScoped))
+}
+
+// matchSelector evaluates a LabelSelector against known labels. Absent/empty
+// selects everything - the API convention every kind here shares. A selector
+// the library rejects comes back matchCond, not matchNo: live objects are
+// apiserver-validated so this is near-impossible, but the conservative
+// direction is to keep the row.
+func matchSelector(sel *metav1.LabelSelector, lbls map[string]string) match {
+	if emptySelector(sel) {
 		return matchYes
 	}
-	var ls metav1.LabelSelector
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(sel, &ls); err != nil {
-		return matchCond
-	}
-	sl, err := metav1.LabelSelectorAsSelector(&ls)
+	sl, err := metav1.LabelSelectorAsSelector(sel)
 	if err != nil {
 		return matchCond
 	}
@@ -165,44 +140,19 @@ func matchSelector(sel map[string]any, lbls map[string]string) match {
 	return matchNo
 }
 
+func emptySelector(sel *metav1.LabelSelector) bool {
+	return sel == nil || (len(sel.MatchLabels) == 0 && len(sel.MatchExpressions) == 0)
+}
+
 // podMatch resolves a pod-level selector: empty selects all pods (so it is
 // definite even for a namespace-level query); otherwise a namespace-level
 // query can only say "the pods matching this".
-func podMatch(sel map[string]any, podLabels map[string]string, podScoped bool) match {
-	if len(sel) == 0 {
+func podMatch(sel *metav1.LabelSelector, podLabels map[string]string, podScoped bool) match {
+	if emptySelector(sel) {
 		return matchYes
 	}
 	if !podScoped {
 		return matchCond
 	}
 	return matchSelector(sel, podLabels)
-}
-
-// anpSubjectMatch resolves an ANP/BANP subject (exactly one of namespaces or
-// pods) against the workload. No subject matches nothing.
-func anpSubjectMatch(u *unstructured.Unstructured, nsLabels, podLabels map[string]string, podScoped bool) match {
-	if sel, found, _ := unstructured.NestedMap(u.Object, "spec", "subject", "namespaces"); found {
-		return matchSelector(sel, nsLabels)
-	}
-	if pods, found, _ := unstructured.NestedMap(u.Object, "spec", "subject", "pods"); found {
-		nsSel, _ := pods["namespaceSelector"].(map[string]any)
-		podSel, _ := pods["podSelector"].(map[string]any)
-		return combineMatch(matchSelector(nsSel, nsLabels), podMatch(podSel, podLabels, podScoped))
-	}
-	return matchNo
-}
-
-// netpolTypes reports which directions a NetworkPolicy default-denies for the
-// pods it selects, honoring the API defaulting: policyTypes absent means
-// Ingress, plus Egress when egress rules are present.
-func netpolTypes(u *unstructured.Unstructured) (ingress, egress bool) {
-	if types, found, _ := unstructured.NestedStringSlice(u.Object, "spec", "policyTypes"); found && len(types) > 0 {
-		for _, t := range types {
-			ingress = ingress || t == "Ingress"
-			egress = egress || t == "Egress"
-		}
-		return ingress, egress
-	}
-	_, egFound, _ := unstructured.NestedSlice(u.Object, "spec", "egress")
-	return true, egFound
 }

@@ -4,10 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-
 	"github.com/epheo/dotvirt/internal/model"
-	"github.com/epheo/dotvirt/internal/reflect"
 )
 
 // TraceWorkload is one in-cluster endpoint, resolved by the caller from
@@ -90,74 +87,83 @@ func verdict(rs ...walkResult) string {
 	return "Allow"
 }
 
+// walk accumulates one pass's steps plus the actions of the maybe-matching
+// rules seen so far, so a later certain rule can tell whether an unresolved
+// one above could have decided differently.
+type walk struct {
+	dir         string
+	steps       []model.TraceStep
+	condActions []string
+}
+
+// addStep records a rule-stage step; the step carries the one matched rule,
+// not the policy's whole table. pol is nil for the network default.
+func (w *walk) addStep(pol *model.Policy, rule *model.PolicyRuleView, stage, action, note string, cond, decisive bool) {
+	if pol != nil {
+		p := *pol
+		p.Rules = nil
+		pol = &p
+	}
+	w.steps = append(w.steps, model.TraceStep{
+		Stage: stage, Direction: w.dir, Policy: pol, Rule: rule,
+		Action: action, Conditional: cond, Decisive: decisive, Note: note,
+	})
+}
+
+// maybe records a rule that may match: visible, non-decisive, and remembered
+// so a later decision is only certain if it agrees.
+func (w *walk) maybe(pol *model.Policy, rule *model.PolicyRuleView, stage, action, reason string) {
+	w.addStep(pol, rule, stage, action, "May match: "+reason+".", true, false)
+	w.condActions = append(w.condActions, action)
+}
+
+// decide fixes the outcome: certain only when no unresolved rule above could
+// have decided differently.
+func (w *walk) decide(action string) walkResult {
+	for _, a := range w.condActions {
+		if a != action {
+			return w.result("Conditional")
+		}
+	}
+	return w.result(action)
+}
+
+func (w *walk) result(outcome string) walkResult {
+	return walkResult{steps: w.steps, outcome: outcome}
+}
+
 // directionWalk runs one side of the flow (egress rules on the source,
 // ingress rules on the destination) through the east-west tiers.
 func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTarget, protocol string, port int) walkResult {
-	field, peerKey := "egress", "to"
-	if dir == "Ingress" {
-		field, peerKey = "ingress", "from"
-	}
-	var steps []model.TraceStep
-	var condActions []string
-
-	addStep := func(pol model.Policy, rule *model.PolicyRuleView, stage, action, note string, cond, decisive bool) {
-		pol.Rules = nil // the step carries the one matched rule, not the whole table
-		steps = append(steps, model.TraceStep{
-			Stage: stage, Direction: dir, Policy: &pol, Rule: rule,
-			Action: action, Conditional: cond, Decisive: decisive, Note: note,
-		})
-	}
-	// decide fixes the outcome: certain only when no unresolved rule above
-	// could have decided differently.
-	decide := func(action string) walkResult {
-		for _, a := range condActions {
-			if a != action {
-				return walkResult{steps: steps, outcome: "Conditional"}
-			}
-		}
-		return walkResult{steps: steps, outcome: action}
-	}
+	w := &walk{dir: dir}
 
 	// adminTier serves both ANP walks: every rule in order, first match decides;
 	// Allow/Deny are final, and (admin tier only) Pass hands the flow down. A
 	// non-nil return is the walk's outcome; nil means evaluation continues into
 	// the tiers below (no decision, or a Pass delegation).
-	adminTier := func(policies []*unstructured.Unstructured, baseline bool) *walkResult {
-		stage := "admin"
-		if baseline {
-			stage = "baseline"
-		}
-		for _, u := range policies {
-			sm := matched{m: anpSubjectMatch(u, subject.NSLabels, subject.PodLabels, true)}
-			if sm.m == matchNo {
-				continue
-			}
+	adminTier := func(policies []*policy, stage string) *walkResult {
+		baseline := stage == "baseline"
+		for _, b := range bind(policies, subject.NSLabels, subject.PodLabels, true) {
+			sm := matched{m: b.m}
 			if sm.m == matchCond {
-				sm.reason = "the policy's subject selector could not be resolved"
+				sm.reason = reasonSubject
 			}
-			rules, _, _ := unstructured.NestedSlice(u.Object, "spec", field)
-			for _, raw := range rules {
-				r, ok := raw.(map[string]any)
-				if !ok {
-					continue
-				}
-				m := allOf(sm, anpPeerMatch(r[peerKey], peer), anpPortsMatch(r["ports"], protocol, port))
+			for _, r := range b.pol.rules(dir) {
+				m := allOf(sm, r.match(peer, protocol, port))
 				if m.m == matchNo {
 					continue
 				}
-				action := str(r["action"])
-				rv := &model.PolicyRuleView{Direction: dir, Action: action, Peer: adminPeers(r[peerKey]), Ports: portsSummary(r["ports"])}
+				rv := r.view(dir)
 				if m.m == matchCond {
-					addStep(policyFromANP(u, baseline), rv, stage, action, "May match: "+m.reason+".", true, false)
-					condActions = append(condActions, action)
+					w.maybe(&b.pol.view, &rv, stage, r.action, m.reason)
 					continue
 				}
-				if !baseline && action == "Pass" {
-					addStep(policyFromANP(u, false), rv, stage, action, "Delegates this flow to the project tier.", false, true)
+				if !baseline && r.action == "Pass" {
+					w.addStep(&b.pol.view, &rv, stage, r.action, "Delegates this flow to the project tier.", false, true)
 					return nil
 				}
-				addStep(policyFromANP(u, baseline), rv, stage, action, "", false, true)
-				res := decide(action)
+				w.addStep(&b.pol.view, &rv, stage, r.action, "", false, true)
+				res := w.decide(r.action)
 				return &res
 			}
 		}
@@ -166,7 +172,7 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 
 	// Admin tier: every ANP rule in (priority, rule) order. The first match
 	// decides - Allow/Deny are final for the flow, Pass hands it down.
-	if res := adminTier(s.sortedANPs(), false); res != nil {
+	if res := adminTier(s.sortedANPs(), "admin"); res != nil {
 		return *res
 	}
 
@@ -174,147 +180,91 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 	// continues into the tiers below, so it can no longer change the outcome.
 	// (Inside the admin tier it still diverges - a later decisive ANP rule
 	// would have been skipped by a matching Pass.)
-	kept := condActions[:0]
-	for _, a := range condActions {
+	kept := w.condActions[:0]
+	for _, a := range w.condActions {
 		if a != "Pass" {
 			kept = append(kept, a)
 		}
 	}
-	condActions = kept
+	w.condActions = kept
 
 	// Project tier: rules across every selecting NetworkPolicy are one allow
 	// list. Selection alone isolates the direction - no allowing rule means
 	// the tier default-denies the flow.
-	var selecting []*unstructured.Unstructured
-	definiteSel := 0
-	for _, u := range reflect.List(s.netpol) {
-		if u.GetNamespace() != subject.Namespace {
+	var selecting []bound
+	definite := 0
+	for _, b := range s.selectingNetpols(subject.Namespace, subject.PodLabels, true) {
+		if (dir == "Ingress" && !b.pol.denyIngress) || (dir == "Egress" && !b.pol.denyEgress) {
 			continue
 		}
-		sel, _, _ := unstructured.NestedMap(u.Object, "spec", "podSelector")
-		m := matchSelector(sel, subject.PodLabels)
-		if m == matchNo {
-			continue
+		if b.m == matchYes {
+			definite++
 		}
-		ing, eg := netpolTypes(u)
-		if (dir == "Ingress" && !ing) || (dir == "Egress" && !eg) {
-			continue
-		}
-		if m == matchYes {
-			definiteSel++
-		}
-		selecting = append(selecting, u)
+		selecting = append(selecting, b)
 	}
 	if len(selecting) > 0 {
-		for _, u := range selecting {
-			rules, _, _ := unstructured.NestedSlice(u.Object, "spec", field)
-			for _, raw := range rules {
-				r, ok := raw.(map[string]any)
-				if !ok {
-					continue
-				}
-				m := allOf(netpolPeersMatch(r[peerKey], peer, subject.Namespace), netpolPortsMatch(r["ports"], protocol, port))
+		for _, b := range selecting {
+			for _, r := range b.pol.rules(dir) {
+				m := r.match(peer, protocol, port)
 				if m.m == matchNo {
 					continue
 				}
-				rv := &model.PolicyRuleView{Direction: dir, Action: "Allow", Peer: netpolPeers(r[peerKey]), Ports: portsSummary(r["ports"])}
+				rv := r.view(dir)
 				if m.m == matchCond {
-					addStep(policyFromNetpol(u), rv, "dfw", "Allow", "May match: "+m.reason+".", true, false)
-					condActions = append(condActions, "Allow")
+					w.maybe(&b.pol.view, &rv, "dfw", r.action, m.reason)
 					continue
 				}
-				addStep(policyFromNetpol(u), rv, "dfw", "Allow", "", false, true)
-				return decide("Allow")
+				w.addStep(&b.pol.view, &rv, "dfw", r.action, "", false, true)
+				return w.decide(r.action)
 			}
 		}
 		note := fmt.Sprintf("Selected by %d project %s for %s; no rule allows this flow.",
 			len(selecting), plural(len(selecting), "policy", "policies"), strings.ToLower(dir))
-		if definiteSel == 0 {
+		first := &selecting[0].pol.view
+		if definite == 0 {
 			// Selection itself unresolved: isolation may not even apply.
-			addStep(policyFromNetpol(selecting[0]), nil, "dfw", "Deny", note+" Selection could not be resolved.", true, false)
-			return walkResult{steps: steps, outcome: "Conditional"}
+			w.addStep(first, nil, "dfw", "Deny", note+" Selection could not be resolved.", true, false)
+			return w.result("Conditional")
 		}
-		addStep(policyFromNetpol(selecting[0]), nil, "dfw", "Deny", note, false, true)
-		return decide("Deny")
+		w.addStep(first, nil, "dfw", "Deny", note, false, true)
+		return w.decide("Deny")
 	}
 
 	// Baseline tier: reached only when nothing above decided.
-	if res := adminTier(reflect.List(s.banp), true); res != nil {
+	if res := adminTier(s.baselines(), "baseline"); res != nil {
 		return *res
 	}
 
-	steps = append(steps, model.TraceStep{
-		Stage: "default", Direction: dir, Action: "Allow", Decisive: true,
-		Note: "No policy matches this flow — the network default allows it.",
-	})
-	return decide("Allow")
+	w.addStep(nil, nil, "default", "Allow", "No policy matches this flow — the network default allows it.", false, true)
+	return w.decide("Allow")
 }
 
 // gatewayWalk runs the namespace's EgressFirewall rules in order - the
 // gateway tier is first-match, default allow.
 func (s *Snapshot) gatewayWalk(ns, dstIP, protocol string, port int) walkResult {
-	var steps []model.TraceStep
-	var condActions []string
-	var fw *unstructured.Unstructured
-	for _, u := range reflect.List(s.egressfw) {
-		if u.GetNamespace() != ns {
-			continue
-		}
-		fw = u
-		rules, _, _ := unstructured.NestedSlice(u.Object, "spec", "egress")
-		for _, raw := range rules {
-			r, ok := raw.(map[string]any)
-			if !ok {
-				continue
-			}
-			to, _ := r["to"].(map[string]any)
-			var pm matched
-			peer := ""
-			if c := str(to["cidrSelector"]); c != "" {
-				pm, peer = cidrsMatch([]any{c}, peerTarget{ip: dstIP}), c
-			} else if d := str(to["dnsName"]); d != "" {
-				pm, peer = matched{m: matchCond, reason: "DNS-name rule (" + d + ") — resolution unknown here"}, d
-			} else if to["nodeSelector"] != nil {
-				pm, peer = matched{m: matchCond, reason: "node-selector rule — whether this address is a cluster node is unknown here"}, "cluster nodes"
-			} else {
-				// An unrecognized destination form still stays visible - a
-				// dropped rule would let a later rule decide with certainty.
-				pm, peer = matched{m: matchCond, reason: "a destination form this trace cannot resolve"}, "unresolved destination"
-			}
-			m := allOf(pm, netpolPortsMatch(r["ports"], protocol, port))
+	w := &walk{dir: "Egress"}
+	target := peerTarget{ip: dstIP}
+	var fw *policy
+	for _, p := range s.gateways(ns) {
+		fw = p
+		for _, r := range p.egress {
+			m := r.match(target, protocol, port)
 			if m.m == matchNo {
 				continue
 			}
-			action := str(r["type"])
-			rv := &model.PolicyRuleView{Direction: "Egress", Action: action, Peer: peer, Ports: portsSummary(r["ports"])}
-			pol := policyFromEgressFirewall(u)
-			pol.Rules = nil
+			rv := r.view("Egress")
 			if m.m == matchCond {
-				steps = append(steps, model.TraceStep{Stage: "gateway", Direction: "Egress", Policy: &pol, Rule: rv,
-					Action: action, Conditional: true, Note: "May match: " + m.reason + "."})
-				condActions = append(condActions, action)
+				w.maybe(&p.view, &rv, "gateway", r.action, m.reason)
 				continue
 			}
-			steps = append(steps, model.TraceStep{Stage: "gateway", Direction: "Egress", Policy: &pol, Rule: rv,
-				Action: action, Decisive: true})
-			for _, a := range condActions {
-				if a != action {
-					return walkResult{steps: steps, outcome: "Conditional"}
-				}
-			}
-			return walkResult{steps: steps, outcome: action}
+			w.addStep(&p.view, &rv, "gateway", r.action, "", false, true)
+			return w.decide(r.action)
 		}
 	}
 	if fw != nil {
-		pol := policyFromEgressFirewall(fw)
-		pol.Rules = nil
-		steps = append(steps, model.TraceStep{Stage: "gateway", Direction: "Egress", Policy: &pol,
-			Action: "Allow", Decisive: true, Note: "No gateway rule matches — the gateway defaults to allow."})
+		w.addStep(&fw.view, nil, "gateway", "Allow", "No gateway rule matches — the gateway defaults to allow.", false, true)
 	}
-	if len(condActions) > 0 {
-		return walkResult{steps: steps, outcome: "Conditional"}
-	}
-	return walkResult{steps: steps, outcome: "Allow"}
+	return w.decide("Allow")
 }
 
 // egressPlaneSteps reports the informational planes an external flow rides:
@@ -334,8 +284,8 @@ func (s *Snapshot) egressPlaneSteps(src TraceWorkload) []model.TraceStep {
 
 // planeStep renders one egress binding as an informational trace row, detaching
 // the policy's single rule into the step's Rule slot.
-func planeStep(b egressBinding, stage, action, note string) model.TraceStep {
-	pol := b.pol
+func planeStep(b bound, stage, action, note string) model.TraceStep {
+	pol := b.pol.view
 	var rv *model.PolicyRuleView
 	if len(pol.Rules) > 0 {
 		rv = &pol.Rules[0]

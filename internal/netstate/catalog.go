@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/reflect"
 )
 
@@ -140,20 +141,15 @@ func sortedSet(in []string) []string {
 // uplinksFromNNCP reads the ovn.bridge-mappings an NNCP declares - each one is an
 // uplink (physical-network name -> OVS bridge) - scoped to the policy's nodes.
 func (s *Snapshot) uplinksFromNNCP(u *unstructured.Unstructured) []model.Uplink {
-	maps, found, _ := unstructured.NestedSlice(u.Object, "spec", "desiredState", "ovn", "bridge-mappings")
-	if !found {
-		return nil
-	}
-	sel, _, _ := unstructured.NestedStringMap(u.Object, "spec", "nodeSelector")
-	nodes := s.nodesMatching(sel)
-	out := []model.Uplink{}
-	for _, raw := range maps {
-		m, ok := raw.(map[string]any)
-		if !ok || str(m["state"]) == "absent" {
+	doc := decode[netgen.UplinkDoc](u)
+	nodes := s.nodesMatching(doc.Spec.NodeSelector)
+	var out []model.Uplink
+	for _, m := range doc.Spec.DesiredState.OVN.BridgeMappings {
+		if m.State == "absent" {
 			continue
 		}
 		out = append(out, model.Uplink{
-			Name: str(m["localnet"]), Bridge: str(m["bridge"]), Policy: u.GetName(),
+			Name: m.Localnet, Bridge: m.Bridge, Policy: u.GetName(),
 			Nodes: nodes, NodeCount: len(nodes),
 		})
 	}
@@ -183,21 +179,14 @@ func matchesLabels(have, want map[string]string) bool {
 	return true
 }
 
-// udnNetwork reads a UserDefinedNetwork's topology + role. Its network config
-// sits directly under spec (spec.topology, spec.<topology>.role) - the one
-// decoder for OVN-K's role-under-lowercased-topology shape.
-func udnNetwork(u *unstructured.Unstructured) (topology, role string) {
-	topology, _, _ = unstructured.NestedString(u.Object, "spec", "topology")
-	role, _, _ = unstructured.NestedString(u.Object, "spec", strings.ToLower(topology), "role")
-	return topology, role
+// udnConfig and cudnConfig read the one OVN-K network body the two kinds
+// nest at different depths: directly under spec, or under spec.network.
+func udnConfig(u *unstructured.Unstructured) netgen.NetworkConfig {
+	return decode[netgen.NetworkDoc](u).Spec.NetworkConfig
 }
 
-// cudnNetwork is udnNetwork for a ClusterUserDefinedNetwork, whose config nests
-// one level deeper under spec.network.
-func cudnNetwork(u *unstructured.Unstructured) (topology, role string) {
-	topology, _, _ = unstructured.NestedString(u.Object, "spec", "network", "topology")
-	role, _, _ = unstructured.NestedString(u.Object, "spec", "network", strings.ToLower(topology), "role")
-	return topology, role
+func cudnConfig(u *unstructured.Unstructured) netgen.NetworkConfig {
+	return decode[netgen.NetworkDoc](u).Spec.Network
 }
 
 // nadConfig decodes a NAD's spec.config CNI JSON blob; ok is false when absent
@@ -216,37 +205,34 @@ func nadConfig(u *unstructured.Unstructured) (cfg struct {
 
 // networkFromUDN decodes a namespace-scoped UserDefinedNetwork.
 func networkFromUDN(u *unstructured.Unstructured) model.Network {
-	topology, role := udnNetwork(u)
-	key := strings.ToLower(topology)
+	cfg := udnConfig(u)
 	return model.Network{
 		Name:      u.GetName(),
-		Kind:      kindFor(topology, role),
+		Kind:      kindFor(cfg.Topology, cfg.Role()),
 		Scope:     model.ScopeProject,
 		Namespace: u.GetNamespace(),
-		Subnets:   subnetsAt(u.Object, "spec", key),
+		Subnets:   cfg.Subnets(),
 		Backing:   "UserDefinedNetwork",
-		Topology:  topology,
+		Topology:  cfg.Topology,
 		AttachRef: u.GetNamespace() + "/" + u.GetName(),
 	}
 }
 
 // networkFromCUDN decodes a cluster-scoped ClusterUserDefinedNetwork.
 func networkFromCUDN(u *unstructured.Unstructured) model.Network {
-	topology, role := cudnNetwork(u)
-	key := strings.ToLower(topology)
+	cfg := cudnConfig(u)
 	n := model.Network{
 		Name:      u.GetName(),
-		Kind:      kindFor(topology, role),
+		Kind:      kindFor(cfg.Topology, cfg.Role()),
 		Scope:     model.ScopeShared,
-		Subnets:   subnetsAt(u.Object, "spec", "network", key),
+		Subnets:   cfg.Subnets(),
 		Backing:   "ClusterUserDefinedNetwork",
-		Topology:  topology,
+		Topology:  cfg.Topology,
 		AttachRef: u.GetName(),
 	}
 	if n.Kind == model.NetworkVLAN {
-		n.Uplink, _, _ = unstructured.NestedString(u.Object, "spec", "network", "localnet", "physicalNetworkName")
-		id, _, _ := unstructured.NestedInt64(u.Object, "spec", "network", "localnet", "vlan", "access", "id")
-		n.VLAN = int(id)
+		n.Uplink = cfg.Localnet.PhysicalNetworkName
+		n.VLAN = cfg.Localnet.VLAN.Access.ID
 	}
 	return n
 }
@@ -288,27 +274,6 @@ func kindFor(topology, role string) model.NetworkKind {
 		return model.NetworkDefault
 	}
 	return model.NetworkInternal
-}
-
-// subnetsAt extracts a subnets list at prefix. OVN-K writes it two ways: a plain
-// []string of CIDRs (Layer2/localnet) or a list of {cidr, hostSubnet} (Layer3).
-func subnetsAt(obj map[string]any, prefix ...string) []string {
-	raw, found, _ := unstructured.NestedSlice(obj, append(prefix, "subnets")...)
-	if !found {
-		return nil
-	}
-	var out []string
-	for _, s := range raw {
-		switch v := s.(type) {
-		case string:
-			out = append(out, v)
-		case map[string]any:
-			if cidr, ok := v["cidr"].(string); ok {
-				out = append(out, cidr)
-			}
-		}
-	}
-	return out
 }
 
 // isSystemNamespace reports whether a namespace holds platform plumbing rather

@@ -89,79 +89,23 @@ func SameDocument(a, b []byte) bool {
 	return reflect.DeepEqual(da, db)
 }
 
-// The document shapes below mirror what the renderers write; unknown fields are
-// dropped on decode and caught by Decode's re-render comparison.
-
-type metaDoc struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-}
-
-type labelSelector struct {
-	MatchLabels      map[string]string `json:"matchLabels"`
-	MatchExpressions []struct {
-		Key      string   `json:"key"`
-		Operator string   `json:"operator"`
-		Values   []string `json:"values"`
-	} `json:"matchExpressions"`
-}
-
-// names reads back the nsNameSelector shape: the namespaces published to.
-func (s labelSelector) names() []string {
-	for _, e := range s.MatchExpressions {
-		if e.Key == "kubernetes.io/metadata.name" && e.Operator == "In" {
-			return e.Values
-		}
-	}
-	return nil
-}
-
-type portDoc struct {
-	Protocol   string   `json:"protocol"`
-	Port       int      `json:"port"`
-	PortNumber *portDoc `json:"portNumber"` // the admin tiers' wrapper
-}
-
-func decodePorts(docs []portDoc) []PolicyPort {
+func decodePorts(docs []PortDoc) []PolicyPort {
 	var out []PolicyPort
 	for _, p := range docs {
 		if p.PortNumber != nil {
 			p = *p.PortNumber
 		}
-		out = append(out, PolicyPort{Protocol: p.Protocol, Port: p.Port})
+		port := 0
+		if p.Port != nil {
+			port = p.Port.IntValue()
+		}
+		out = append(out, PolicyPort{Protocol: p.Protocol, Port: port})
 	}
 	return out
 }
 
 func decodeNetwork(content []byte) (Spec, error) {
-	var doc struct {
-		Kind     string  `json:"kind"`
-		Metadata metaDoc `json:"metadata"`
-		Spec     struct {
-			// UDN: the network config sits directly under spec.
-			Topology string `json:"topology"`
-			Layer2   struct {
-				Subnets []string `json:"subnets"`
-			} `json:"layer2"`
-			// CUDN: the same config nests under spec.network.
-			NamespaceSelector labelSelector `json:"namespaceSelector"`
-			Network           struct {
-				Topology string `json:"topology"`
-				Layer2   struct {
-					Subnets []string `json:"subnets"`
-				} `json:"layer2"`
-				Localnet struct {
-					PhysicalNetworkName string   `json:"physicalNetworkName"`
-					Subnets             []string `json:"subnets"`
-					VLAN                struct {
-						Access struct {
-							ID int `json:"id"`
-						} `json:"access"`
-					} `json:"vlan"`
-				} `json:"localnet"`
-			} `json:"network"`
-		} `json:"spec"`
-	}
+	var doc NetworkDoc
 	if err := yaml.Unmarshal(content, &doc); err != nil {
 		return Spec{}, err
 	}
@@ -170,7 +114,7 @@ func decodeNetwork(content []byte) (Spec, error) {
 		s.Scope, s.Namespace, s.Subnets = ScopeProject, doc.Metadata.Namespace, doc.Spec.Layer2.Subnets
 		return s, nil
 	}
-	s.Namespaces = doc.Spec.NamespaceSelector.names()
+	s.Namespaces = NamespaceNames(&doc.Spec.NamespaceSelector)
 	if doc.Spec.Network.Topology == "Localnet" {
 		ln := doc.Spec.Network.Localnet
 		s.Scope, s.PhysicalNetwork, s.VLAN, s.Subnets = ScopeVLAN, ln.PhysicalNetworkName, ln.VLAN.Access.ID, ln.Subnets
@@ -181,18 +125,7 @@ func decodeNetwork(content []byte) (Spec, error) {
 }
 
 func decodeNetworkPolicy(content []byte) (NetworkPolicySpec, error) {
-	var doc struct {
-		Metadata metaDoc `json:"metadata"`
-		Spec     struct {
-			PodSelector labelSelector `json:"podSelector"`
-			Ingress     []struct {
-				From []struct {
-					PodSelector labelSelector `json:"podSelector"`
-				} `json:"from"`
-				Ports []portDoc `json:"ports"`
-			} `json:"ingress"`
-		} `json:"spec"`
-	}
+	var doc NetworkPolicyDoc
 	if err := yaml.Unmarshal(content, &doc); err != nil {
 		return NetworkPolicySpec{}, err
 	}
@@ -200,7 +133,11 @@ func decodeNetworkPolicy(content []byte) (NetworkPolicySpec, error) {
 	for _, r := range doc.Spec.Ingress {
 		rule := PolicyRule{Ports: decodePorts(r.Ports)}
 		for _, f := range r.From {
-			rule.From = append(rule.From, f.PodSelector.MatchLabels)
+			var group map[string]string
+			if f.PodSelector != nil {
+				group = f.PodSelector.MatchLabels
+			}
+			rule.From = append(rule.From, group)
 		}
 		s.Ingress = append(s.Ingress, rule)
 	}
@@ -208,27 +145,7 @@ func decodeNetworkPolicy(content []byte) (NetworkPolicySpec, error) {
 }
 
 func decodeAdminNetworkPolicy(content []byte) (AdminNetworkPolicySpec, error) {
-	type peerDoc struct {
-		Namespaces labelSelector `json:"namespaces"`
-	}
-	type ruleDoc struct {
-		Action string    `json:"action"`
-		From   []peerDoc `json:"from"`
-		To     []peerDoc `json:"to"`
-		Ports  []portDoc `json:"ports"`
-	}
-	var doc struct {
-		Kind     string  `json:"kind"`
-		Metadata metaDoc `json:"metadata"`
-		Spec     struct {
-			Priority int `json:"priority"`
-			Subject  struct {
-				Namespaces labelSelector `json:"namespaces"`
-			} `json:"subject"`
-			Ingress []ruleDoc `json:"ingress"`
-			Egress  []ruleDoc `json:"egress"`
-		} `json:"spec"`
-	}
+	var doc AdminNetworkPolicyDoc
 	if err := yaml.Unmarshal(content, &doc); err != nil {
 		return AdminNetworkPolicySpec{}, err
 	}
@@ -236,42 +153,32 @@ func decodeAdminNetworkPolicy(content []byte) (AdminNetworkPolicySpec, error) {
 		Name:     doc.Metadata.Name,
 		Baseline: doc.Kind == "BaselineAdminNetworkPolicy",
 		Priority: doc.Spec.Priority,
-		Subject:  doc.Spec.Subject.Namespaces.MatchLabels,
 	}
-	rules := func(docs []ruleDoc, peers func(ruleDoc) []peerDoc) []AdminPolicyRule {
+	if ns := doc.Spec.Subject.Namespaces; ns != nil {
+		s.Subject = ns.MatchLabels
+	}
+	rules := func(docs []AdminPolicyRuleDoc, peers func(AdminPolicyRuleDoc) []AdminPeerDoc) []AdminPolicyRule {
 		var out []AdminPolicyRule
 		for _, r := range docs {
 			rule := AdminPolicyRule{Action: r.Action, Ports: decodePorts(r.Ports)}
 			for _, p := range peers(r) {
-				sel := p.Namespaces.MatchLabels
-				if sel == nil {
-					sel = map[string]string{} // the "all namespaces" peer
+				group := map[string]string{} // the "all namespaces" peer
+				if p.Namespaces != nil && p.Namespaces.MatchLabels != nil {
+					group = p.Namespaces.MatchLabels
 				}
-				rule.Peers = append(rule.Peers, sel)
+				rule.Peers = append(rule.Peers, group)
 			}
 			out = append(out, rule)
 		}
 		return out
 	}
-	s.Ingress = rules(doc.Spec.Ingress, func(r ruleDoc) []peerDoc { return r.From })
-	s.Egress = rules(doc.Spec.Egress, func(r ruleDoc) []peerDoc { return r.To })
+	s.Ingress = rules(doc.Spec.Ingress, func(r AdminPolicyRuleDoc) []AdminPeerDoc { return r.From })
+	s.Egress = rules(doc.Spec.Egress, func(r AdminPolicyRuleDoc) []AdminPeerDoc { return r.To })
 	return s, nil
 }
 
 func decodeEgressFirewall(content []byte) (EgressFirewallSpec, error) {
-	var doc struct {
-		Metadata metaDoc `json:"metadata"`
-		Spec     struct {
-			Egress []struct {
-				Type string `json:"type"`
-				To   struct {
-					CIDRSelector string `json:"cidrSelector"`
-					DNSName      string `json:"dnsName"`
-				} `json:"to"`
-				Ports []portDoc `json:"ports"`
-			} `json:"egress"`
-		} `json:"spec"`
-	}
+	var doc EgressFirewallDoc
 	if err := yaml.Unmarshal(content, &doc); err != nil {
 		return EgressFirewallSpec{}, err
 	}
@@ -283,41 +190,15 @@ func decodeEgressFirewall(content []byte) (EgressFirewallSpec, error) {
 }
 
 func decodeEgressIP(content []byte) (EgressIPSpec, error) {
-	var doc struct {
-		Metadata metaDoc `json:"metadata"`
-		Spec     struct {
-			EgressIPs         []string      `json:"egressIPs"`
-			NamespaceSelector labelSelector `json:"namespaceSelector"`
-		} `json:"spec"`
-	}
+	var doc EgressIPDoc
 	if err := yaml.Unmarshal(content, &doc); err != nil {
 		return EgressIPSpec{}, err
 	}
-	return EgressIPSpec{Name: doc.Metadata.Name, EgressIPs: doc.Spec.EgressIPs, Namespaces: doc.Spec.NamespaceSelector.names()}, nil
+	return EgressIPSpec{Name: doc.Metadata.Name, EgressIPs: doc.Spec.EgressIPs, Namespaces: NamespaceNames(&doc.Spec.NamespaceSelector)}, nil
 }
 
 func decodeUplink(content []byte) (UplinkSpec, error) {
-	var doc struct {
-		Spec struct {
-			NodeSelector map[string]string `json:"nodeSelector"`
-			DesiredState struct {
-				Interfaces []struct {
-					Name   string `json:"name"`
-					Bridge struct {
-						Port []struct {
-							Name string `json:"name"`
-						} `json:"port"`
-					} `json:"bridge"`
-				} `json:"interfaces"`
-				OVN struct {
-					BridgeMappings []struct {
-						Localnet string `json:"localnet"`
-						Bridge   string `json:"bridge"`
-					} `json:"bridge-mappings"`
-				} `json:"ovn"`
-			} `json:"desiredState"`
-		} `json:"spec"`
-	}
+	var doc UplinkDoc
 	if err := yaml.Unmarshal(content, &doc); err != nil {
 		return UplinkSpec{}, err
 	}
@@ -341,23 +222,11 @@ func decodeUplink(content []byte) (UplinkSpec, error) {
 }
 
 func decodeExternalRoute(content []byte) (ExternalRouteSpec, error) {
-	var doc struct {
-		Metadata metaDoc `json:"metadata"`
-		Spec     struct {
-			From struct {
-				NamespaceSelector labelSelector `json:"namespaceSelector"`
-			} `json:"from"`
-			NextHops struct {
-				Static []struct {
-					IP string `json:"ip"`
-				} `json:"static"`
-			} `json:"nextHops"`
-		} `json:"spec"`
-	}
+	var doc ExternalRouteDoc
 	if err := yaml.Unmarshal(content, &doc); err != nil {
 		return ExternalRouteSpec{}, err
 	}
-	s := ExternalRouteSpec{Name: doc.Metadata.Name, Namespaces: doc.Spec.From.NamespaceSelector.names()}
+	s := ExternalRouteSpec{Name: doc.Metadata.Name, Namespaces: NamespaceNames(&doc.Spec.From.NamespaceSelector)}
 	for _, h := range doc.Spec.NextHops.Static {
 		s.NextHops = append(s.NextHops, h.IP)
 	}
