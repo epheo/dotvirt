@@ -6,9 +6,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
@@ -24,7 +26,7 @@ import (
 // (a PR opening/merging doesn't necessarily move branch heads).
 func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.WebhookSecret == "" {
-		http.Error(w, "webhook not configured", http.StatusNotFound)
+		fail(w, fmt.Errorf("%w: webhook not configured", model.ErrNotFound))
 		return
 	}
 	body, err := readAll(r)
@@ -38,7 +40,7 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 		sig = r.Header.Get("X-Gitea-Signature")
 	}
 	if !validSignature(body, sig, s.cfg.WebhookSecret) {
-		http.Error(w, "invalid signature", http.StatusForbidden)
+		fail(w, fmt.Errorf("%w: invalid signature", model.ErrForbidden))
 		return
 	}
 

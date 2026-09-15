@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"path"
@@ -28,7 +29,7 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.SourceFile == "" {
-		http.Error(w, "sourceFile is required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("sourceFile is required")))
 		return
 	}
 	result, err := s.draft.StageEdit(sc.id, sc.proj, ns, name, req)
@@ -43,7 +44,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p.Namespace == "" {
-		http.Error(w, "spec namespace is required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("spec namespace is required")))
 		return
 	}
 	sc, ok := s.resolveProject(w, r, byNamespace(p.Namespace))
@@ -269,7 +270,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	if ns := r.URL.Query().Get("namespace"); ns != "" {
 		if err := validate.RequireDNS1123("namespace", ns); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			fail(w, invalid(err))
 			return
 		}
 		commits, err := s.draft.NamespaceHistory(sc.proj, ns, 25)
@@ -305,7 +306,7 @@ func hashBody(w http.ResponseWriter, r *http.Request) (string, bool) {
 		return "", false
 	}
 	if !commitHash.MatchString(req.Hash) {
-		http.Error(w, "commit hash must be the full 40-character hash", http.StatusBadRequest)
+		fail(w, invalid(errors.New("commit hash must be the full 40-character hash")))
 		return "", false
 	}
 	return req.Hash, true
@@ -335,7 +336,7 @@ func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
 	}
 	hash := r.PathValue("hash")
 	if !commitHash.MatchString(hash) {
-		http.Error(w, "commit hash must be the full 40-character hash", http.StatusBadRequest)
+		fail(w, invalid(errors.New("commit hash must be the full 40-character hash")))
 		return
 	}
 	detail, err := s.draft.Commit(sc.proj, hash)
@@ -351,7 +352,7 @@ func (s *Server) handleProposal(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := strconv.Atoi(r.PathValue("number"))
 	if err != nil || n <= 0 {
-		http.Error(w, "pull request number must be a positive integer", http.StatusBadRequest)
+		fail(w, invalid(errors.New("pull request number must be a positive integer")))
 		return
 	}
 	detail, err := s.draft.Proposal(sc.proj, n)

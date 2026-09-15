@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -58,7 +60,7 @@ func (s *Server) namespacedCreate(what string, stage stageFunc) http.HandlerFunc
 			return
 		}
 		if p.Namespace == "" {
-			http.Error(w, "a namespace is required for "+what, http.StatusBadRequest)
+			fail(w, invalid(fmt.Errorf("a namespace is required for %s", what)))
 			return
 		}
 		sc, ok := s.resolveProject(w, r, byNamespace(p.Namespace))
@@ -86,7 +88,7 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 	switch p.Scope {
 	case "", netgen.ScopeProject:
 		if p.Namespace == "" {
-			http.Error(w, "a namespace is required for a project-scoped network", http.StatusBadRequest)
+			fail(w, invalid(errors.New("a namespace is required for a project-scoped network")))
 			return
 		}
 		sc, ok = s.resolveProject(w, r, byNamespace(p.Namespace))

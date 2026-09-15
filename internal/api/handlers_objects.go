@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -47,14 +48,14 @@ func (s *Server) objectScope(w http.ResponseWriter, r *http.Request) (sc scope, 
 	if ns == changeset.ClusterScopeNS {
 		ref, cluster := clusterResourceSSAR[res]
 		if !cluster {
-			http.Error(w, resource+" is not cluster-scoped", http.StatusBadRequest)
+			fail(w, invalid(fmt.Errorf("%s is not cluster-scoped", resource)))
 			return sc, "", "", "", false
 		}
 		sc, ok = s.platformScope(w, r, ref)
 		return sc, resource, ns, name, ok
 	}
 	if !namespacedResources[res] {
-		http.Error(w, resource+" is not namespace-scoped", http.StatusBadRequest)
+		fail(w, invalid(fmt.Errorf("%s is not namespace-scoped", resource)))
 		return sc, "", "", "", false
 	}
 	sc, ok = s.resolveProject(w, r, byNamespace(ns))
@@ -83,7 +84,7 @@ func (s *Server) handleObjectUpdateManifest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if req.YAML == "" {
-		http.Error(w, "yaml is required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("yaml is required")))
 		return
 	}
 	view, err := s.draft.StageUpdateManifest(sc.id, sc.proj, resource, ns, name, req.YAML)

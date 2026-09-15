@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -121,7 +122,7 @@ func (s *Server) handleNodeEvacuate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !info.CanCordon {
-		http.Error(w, "node evacuation needs node-update authority", http.StatusForbidden)
+		fail(w, fmt.Errorf("%w: node evacuation needs node-update authority", model.ErrForbidden))
 		return
 	}
 	out := model.Evacuation{Failures: []model.EvacuationFailure{}}

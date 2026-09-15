@@ -20,7 +20,7 @@ import (
 // configured - the shared preamble of every Thanos-backed handler.
 func (s *Server) metricsReady(w http.ResponseWriter) bool {
 	if s.metrics == nil {
-		http.Error(w, "metrics not configured", http.StatusServiceUnavailable)
+		fail(w, fmt.Errorf("%w: metrics not configured", model.ErrUnavailable))
 		return false
 	}
 	return true
@@ -224,7 +224,7 @@ func (s *Server) nodeMetricsScope(w http.ResponseWriter, r *http.Request) (auth.
 		return auth.Identity{}, false
 	}
 	if !s.canReadNodesCached(r.Context(), id, c) {
-		http.Error(w, "node metrics require node read access", http.StatusForbidden)
+		fail(w, fmt.Errorf("%w: node metrics require node read access", model.ErrForbidden))
 		return auth.Identity{}, false
 	}
 	return id, true

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -35,11 +36,11 @@ func (s *Server) handleCreateClone(w http.ResponseWriter, r *http.Request) {
 	}
 	target := strings.TrimSpace(req.Target)
 	if target == "" {
-		http.Error(w, "target name is required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("target name is required")))
 		return
 	}
 	if target == name {
-		http.Error(w, "target must differ from the source VM name", http.StatusBadRequest)
+		fail(w, invalid(errors.New("target must differ from the source VM name")))
 		return
 	}
 	// The clone CR's own name just needs uniqueness; the target VM carries the

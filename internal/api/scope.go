@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/eventbus"
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/restfactory"
 )
@@ -212,7 +214,7 @@ func (s *Server) resolveProject(w http.ResponseWriter, r *http.Request, pick pro
 	}
 	proj, msg, ok := pick(projects)
 	if !ok {
-		http.Error(w, msg, http.StatusNotFound)
+		fail(w, fmt.Errorf("%w: %s", model.ErrNotFound, msg))
 		return scope{}, false
 	}
 	return scope{id: id, cluster: c, proj: proj}, true
@@ -233,7 +235,7 @@ func byNamespace(ns string) projectPicker {
 				}
 			}
 		}
-		return project.ProjectInfo{}, "namespace not found in any visible project", false
+		return project.ProjectInfo{}, "namespace is in none of the visible projects", false
 	}
 }
 
@@ -245,7 +247,7 @@ func byName(want string) projectPicker {
 				return p, "", true
 			}
 		}
-		return project.ProjectInfo{}, "project not found or not visible", false
+		return project.ProjectInfo{}, "no visible project by that name", false
 	}
 }
 
@@ -267,7 +269,7 @@ func (s *Server) projectByName(name string) (project.ProjectInfo, bool) {
 func (s *Server) draftScope(w http.ResponseWriter, r *http.Request) (scope, bool) {
 	want := r.URL.Query().Get("project")
 	if want == "" {
-		http.Error(w, "project query parameter is required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("project query parameter is required")))
 		return scope{}, false
 	}
 	return s.pickProject(w, r, want)
@@ -325,11 +327,11 @@ func (s *Server) platformScopeWith(w http.ResponseWriter, r *http.Request, autho
 		return scope{}, false
 	}
 	if s.cfg.PlatformRepo == "" {
-		http.Error(w, "platform repo not configured (set -platform-repo)", http.StatusServiceUnavailable)
+		fail(w, fmt.Errorf("%w: platform repo not configured (set -platform-repo)", model.ErrUnavailable))
 		return scope{}, false
 	}
 	if !authorized(r.Context(), id, c) {
-		http.Error(w, deny, http.StatusForbidden)
+		fail(w, fmt.Errorf("%w: %s", model.ErrForbidden, deny))
 		return scope{}, false
 	}
 	return scope{id: id, cluster: c, proj: s.platformProject()}, true

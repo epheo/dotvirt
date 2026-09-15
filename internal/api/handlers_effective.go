@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -23,7 +24,7 @@ func (s *Server) handleVMPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	lbls, live, found := s.state.WorkloadLabels(ns, name)
 	if !found {
-		http.Error(w, "vm not found", http.StatusNotFound)
+		fail(w, fmt.Errorf("%w: vm %s/%s", model.ErrNotFound, ns, name))
 		return
 	}
 	eff := s.effectivePolicy(ns, lbls, true)

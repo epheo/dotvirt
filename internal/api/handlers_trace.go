@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"net/netip"
 
@@ -17,28 +19,28 @@ func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Source.Namespace == "" || req.Source.VM == "" {
-		http.Error(w, "source namespace and vm are required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("source namespace and vm are required")))
 		return
 	}
 	dstVM := req.Destination.Namespace != "" && req.Destination.VM != ""
 	if dstVM == (req.Destination.IP != "") {
-		http.Error(w, "destination must be a vm or an ip", http.StatusBadRequest)
+		fail(w, invalid(errors.New("destination must be a vm or an ip")))
 		return
 	}
 	if req.Destination.IP != "" {
 		if _, err := netip.ParseAddr(req.Destination.IP); err != nil {
-			http.Error(w, "invalid destination ip", http.StatusBadRequest)
+			fail(w, invalid(errors.New("invalid destination ip")))
 			return
 		}
 	}
 	switch req.Protocol {
 	case "", "TCP", "UDP", "SCTP":
 	default:
-		http.Error(w, "protocol must be TCP, UDP or SCTP", http.StatusBadRequest)
+		fail(w, invalid(errors.New("protocol must be TCP, UDP or SCTP")))
 		return
 	}
 	if req.Port < 0 || req.Port > 65535 {
-		http.Error(w, "invalid port", http.StatusBadRequest)
+		fail(w, invalid(errors.New("invalid port")))
 		return
 	}
 
@@ -58,14 +60,14 @@ func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {
 
 	src, ok := s.traceWorkload(req.Source.Namespace, req.Source.VM)
 	if !ok {
-		http.Error(w, "source vm not found", http.StatusNotFound)
+		fail(w, fmt.Errorf("%w: source vm", model.ErrNotFound))
 		return
 	}
 	var dst *netstate.TraceWorkload
 	if dstVM {
 		d, ok := s.traceWorkload(req.Destination.Namespace, req.Destination.VM)
 		if !ok {
-			http.Error(w, "destination vm not found", http.StatusNotFound)
+			fail(w, fmt.Errorf("%w: destination vm", model.ErrNotFound))
 			return
 		}
 		dst = &d

@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -15,7 +17,7 @@ import (
 // handleCreateUpload creates the upload-target DataVolume in the caller's project.
 func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.UploadProxyURL == "" {
-		http.Error(w, "image upload not configured", http.StatusServiceUnavailable)
+		fail(w, fmt.Errorf("%w: image upload not configured", model.ErrUnavailable))
 		return
 	}
 	req, ok := decode[struct {
@@ -28,7 +30,7 @@ func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Namespace == "" || req.Name == "" || req.Size == "" {
-		http.Error(w, "namespace, name and size are required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("namespace, name and size are required")))
 		return
 	}
 	sc, ok := s.resolveProject(w, r, byNamespace(req.Namespace))
@@ -57,7 +59,7 @@ func (s *Server) handleUploadStatus(w http.ResponseWriter, r *http.Request) {
 // browser POSTs the image to.
 func (s *Server) handleUploadToken(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.UploadProxyURL == "" {
-		http.Error(w, "image upload not configured", http.StatusServiceUnavailable)
+		fail(w, fmt.Errorf("%w: image upload not configured", model.ErrUnavailable))
 		return
 	}
 	ns, name := r.PathValue("namespace"), r.PathValue("name")

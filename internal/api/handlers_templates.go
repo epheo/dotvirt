@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/model"
@@ -57,7 +59,7 @@ func (s *Server) handleDeployTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Namespace == "" {
-		http.Error(w, "a target namespace is required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("a target namespace is required")))
 		return
 	}
 	sc, ok := s.resolveProject(w, r, byNamespace(req.Namespace))
@@ -81,7 +83,7 @@ func (s *Server) libraryFor(w http.ResponseWriter, r *http.Request, sc scope, li
 		return sc.proj, true
 	case platformProjectName:
 		if s.cfg.PlatformRepo == "" {
-			http.Error(w, "platform repo not configured (set -platform-repo)", http.StatusServiceUnavailable)
+			fail(w, fmt.Errorf("%w: platform repo not configured (set -platform-repo)", model.ErrUnavailable))
 			return project.ProjectInfo{}, false
 		}
 		return s.platformProject(), true
@@ -96,7 +98,7 @@ func (s *Server) libraryFor(w http.ResponseWriter, r *http.Request, sc scope, li
 			return p, true
 		}
 	}
-	http.Error(w, "library not found", http.StatusNotFound)
+	fail(w, fmt.Errorf("%w: library %q", model.ErrNotFound, library))
 	return project.ProjectInfo{}, false
 }
 
@@ -110,7 +112,7 @@ func (s *Server) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Library == "" || req.Name == "" || req.YAML == "" {
-		http.Error(w, "library, name, and yaml are required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("library, name, and yaml are required")))
 		return
 	}
 	var sc scope
@@ -137,7 +139,7 @@ func (s *Server) handleSaveTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.SourceNamespace == "" || req.SourceName == "" {
-		http.Error(w, "a source VM is required", http.StatusBadRequest)
+		fail(w, invalid(errors.New("a source VM is required")))
 		return
 	}
 	sc, ok := s.resolveProject(w, r, byNamespace(req.SourceNamespace))
@@ -154,7 +156,7 @@ func (s *Server) handleSaveTemplate(w http.ResponseWriter, r *http.Request) {
 		}
 		commitProj = psc.proj
 	default:
-		http.Error(w, "library must be the VM's project or the shared library", http.StatusBadRequest)
+		fail(w, invalid(errors.New("library must be the VM's project or the shared library")))
 		return
 	}
 	view, err := s.draft.StageSaveTemplate(sc.id, commitProj, sc.proj, req)
