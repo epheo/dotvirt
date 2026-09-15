@@ -48,6 +48,12 @@ const (
 // +kubebuilder:validation:Enum=auto;route;ingress
 type IngressType string
 
+const (
+	IngressAuto    IngressType = "auto"
+	IngressRoute   IngressType = "route"
+	IngressIngress IngressType = "ingress"
+)
+
 // ForgeSpec points dotvirt at its git forge and the platform-tier repo. The forge
 // credential here is the INSTALL-TIME admin token the operator uses to create the
 // platform repo, distinct from (and more privileged than) dotvirt's runtime

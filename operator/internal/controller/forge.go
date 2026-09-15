@@ -127,7 +127,7 @@ func (r *DotvirtReconciler) resolveForgeURL(ctx context.Context, dv *dotvirtv1al
 	// it does not on vanilla Kubernetes NOR when spec.ingress.type names another exposure.
 	// Reading routeHost in those cases would wait for a Route nothing creates, requeueing
 	// forever, so halt on the same predicate the exposure uses.
-	if r.Platform != platform.OpenShift || r.resolveExposureType(dv) != "route" {
+	if r.Platform != platform.OpenShift || r.resolveExposureType(dv) != dotvirtv1alpha1.IngressRoute {
 		res, err := r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "ForgeURLRequired",
 			"set spec.forge.url: the operator can only discover a managed forge's hostname from an OpenShift Route, which this install does not create",
 			dotvirtv1alpha1.PhaseProvisioning, 0)
