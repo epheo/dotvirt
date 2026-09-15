@@ -152,7 +152,7 @@ func (c *Coordinator) AdoptNamespace(id auth.Identity, proj project.ProjectInfo,
 
 // AdoptObjects stages every captured object git does not already declare - one
 // create entry carrying the live manifest - into (id, proj)'s draft. Cluster-scoped
-// objects (empty Namespace) stage under the ClusterScopeNS sentinel, the identity
+// objects (empty Namespace) stage under the model.ClusterScopeNS sentinel, the identity
 // the platform tier's edit and delete use. where names the scope in the
 // nothing-to-adopt error.
 func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, where string, objs []Adoptable) (model.DraftView, error) {
@@ -172,14 +172,10 @@ func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, w
 		if declared[model.ObjectRef{Kind: o.Kind, Namespace: o.Namespace, Name: o.Name}] {
 			continue
 		}
-		ns := o.Namespace
-		if ns == "" {
-			ns = ClusterScopeNS
-		}
 		if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   adoptResource(o.Kind),
-			Namespace:  ns,
+			Namespace:  model.DraftNamespace(o.Namespace),
 			Name:       o.Name,
 			SourceFile: o.Path,
 			Manifest:   string(o.Manifest),

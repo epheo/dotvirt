@@ -133,7 +133,7 @@ func (c *Coordinator) StageSaveTemplate(id auth.Identity, commitProj, sourceProj
 	if err := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
 		Kind:       draft.KindCreate,
 		Resource:   draft.ResourceTemplate,
-		Namespace:  ClusterScopeNS,
+		Namespace:  model.ClusterScopeNS,
 		Name:       req.Name,
 		SourceFile: path,
 		Manifest:   string(tplYAML),
@@ -170,7 +170,7 @@ func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.P
 	if err := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
 		Kind:       draft.KindEdit,
 		Resource:   draft.ResourceTemplate,
-		Namespace:  ClusterScopeNS,
+		Namespace:  model.ClusterScopeNS,
 		Name:       req.Name,
 		SourceFile: path,
 		Manifest:   req.YAML,

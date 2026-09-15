@@ -143,7 +143,7 @@ func TestSoleDeclarerRefusals(t *testing.T) {
 	if _, err := c.StageDelete(id, proj, string(draft.ResourceEgressFirewall), "alpha", "default"); !errors.Is(err, model.ErrConflict) {
 		t.Errorf("file with an unnamed trailing document: want ErrConflict, got %v", err)
 	}
-	if path, err := c.locate(mustRead(t, c, proj), draft.ResourceExternalRoute, ClusterScopeNS, "gw"); err != nil || path != routePath {
+	if path, err := c.locate(mustRead(t, c, proj), draft.ResourceExternalRoute, model.ClusterScopeNS, "gw"); err != nil || path != routePath {
 		t.Errorf("cluster-scoped route: path=%q err=%v", path, err)
 	}
 	raw, _ := json.Marshal(netgen.NamespaceSpec{Name: "alpha", VMNetwork: &netgen.PrimaryNet{Name: "vm-net2", Subnet: "10.30.0.0/24"}})
@@ -176,10 +176,10 @@ func TestAdoptObjectsClusterScoped(t *testing.T) {
 		t.Fatalf("want the one undeclared object staged, got %+v", view.Items)
 	}
 	it := view.Items[0]
-	if it.Namespace != ClusterScopeNS || it.Resource != string(draft.ResourceAdminNetworkPolicy) || it.Name != "iso" {
+	if it.Namespace != model.ClusterScopeNS || it.Resource != string(draft.ResourceAdminNetworkPolicy) || it.Name != "iso" {
 		t.Errorf("item = %+v", it)
 	}
-	if _, err := c.StageDelete(id, proj, string(draft.ResourceNetwork), ClusterScopeNS, "declared"); err != nil {
+	if _, err := c.StageDelete(id, proj, string(draft.ResourceNetwork), model.ClusterScopeNS, "declared"); err != nil {
 		t.Errorf("the declared network must be deletable by the same identity: %v", err)
 	}
 }
@@ -233,7 +233,7 @@ func TestObjectSpecWithoutFormAndVerbatimEdit(t *testing.T) {
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
-	got, err := c.ObjectSpec(proj, string(draft.ResourceNetwork), ClusterScopeNS, "dc-vlan")
+	got, err := c.ObjectSpec(proj, string(draft.ResourceNetwork), model.ClusterScopeNS, "dc-vlan")
 	if err != nil {
 		t.Fatalf("ObjectSpec: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestObjectSpecWithoutFormAndVerbatimEdit(t *testing.T) {
 	}
 
 	edited := strings.Replace(flat, "dc-vlan: \"true\"", "dc-vlan: \"yes\"", 1)
-	view, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), ClusterScopeNS, "dc-vlan", edited)
+	view, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), model.ClusterScopeNS, "dc-vlan", edited)
 	if err != nil {
 		t.Fatalf("StageUpdateManifest: %v", err)
 	}
@@ -250,10 +250,10 @@ func TestObjectSpecWithoutFormAndVerbatimEdit(t *testing.T) {
 		t.Errorf("verbatim edit item = %+v", it)
 	}
 	renamed := strings.Replace(flat, "name: dc-vlan", "name: other", 1)
-	if _, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), ClusterScopeNS, "dc-vlan", renamed); !errors.Is(err, model.ErrInvalid) {
+	if _, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), model.ClusterScopeNS, "dc-vlan", renamed); !errors.Is(err, model.ErrInvalid) {
 		t.Errorf("a manifest declaring another object must be refused, got %v", err)
 	}
-	if _, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), ClusterScopeNS, "dc-vlan", flat); !errors.Is(err, model.ErrInvalid) {
+	if _, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), model.ClusterScopeNS, "dc-vlan", flat); !errors.Is(err, model.ErrInvalid) {
 		t.Errorf("an unchanged manifest must be refused, got %v", err)
 	}
 }

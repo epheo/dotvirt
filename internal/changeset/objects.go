@@ -16,17 +16,14 @@ import (
 
 // locate finds the base-branch file declaring (resource, namespace, name) - the
 // object identity every draft entry carries - under soleDeclarer's rule, since
-// a delete or rewrite acts on the whole file. namespace is ClusterScopeNS for a
+// a delete or rewrite acts on the whole file. namespace is model.ClusterScopeNS for a
 // cluster-scoped object.
 func (c *Coordinator) locate(read *git.Repo, resource draft.Resource, namespace, name string) (string, error) {
 	idx, err := read.DeclaredFilesOnBranch(c.baseBranch)
 	if err != nil {
 		return "", err
 	}
-	ns := namespace
-	if ns == ClusterScopeNS {
-		ns = ""
-	}
+	ns := model.ObjectNamespace(namespace)
 	for _, kind := range resource.Kinds() {
 		ref := model.ObjectRef{Kind: kind, Namespace: ns, Name: name}
 		if _, ok := idx.Files[ref]; !ok {
@@ -54,10 +51,7 @@ func (c *Coordinator) AdoptObject(id auth.Identity, proj project.ProjectInfo, o 
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	ns := o.Namespace
-	if ns == "" {
-		ns = ClusterScopeNS
-	}
+	ns := model.DraftNamespace(o.Namespace)
 	entry := draft.Entry{
 		Kind:       draft.KindCreate,
 		Resource:   adoptResource(o.Kind),
@@ -137,10 +131,7 @@ func (c *Coordinator) StageUpdateManifest(id auth.Identity, proj project.Project
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	ns := namespace
-	if ns == ClusterScopeNS {
-		ns = ""
-	}
+	ns := model.ObjectNamespace(namespace)
 	refs := git.DeclaredRefs(path, []byte(yaml))
 	if len(refs) != 1 || refs[0].Namespace != ns || refs[0].Name != name || !slices.Contains(draft.Resource(resource).Kinds(), refs[0].Kind) {
 		return model.DraftView{}, fmt.Errorf("%w: the manifest must declare exactly %s/%s", model.ErrInvalid, namespace, name)

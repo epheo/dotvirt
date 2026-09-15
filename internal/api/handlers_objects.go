@@ -46,7 +46,7 @@ var namespacedResources = map[draft.Resource]bool{
 func (s *Server) objectScope(w http.ResponseWriter, r *http.Request) (sc scope, resource, ns, name string, ok bool) {
 	resource, ns, name = r.PathValue("resource"), r.PathValue("namespace"), r.PathValue("name")
 	res := draft.Resource(resource)
-	if ns == changeset.ClusterScopeNS {
+	if ns == model.ClusterScopeNS {
 		ref, cluster := clusterResourceSSAR[res]
 		if !cluster {
 			fail(w, invalid(fmt.Errorf("%s is not cluster-scoped", resource)))
@@ -110,11 +110,7 @@ func (s *Server) handleObjectAdopt(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	captureNS := ns
-	if ns == changeset.ClusterScopeNS {
-		captureNS = ""
-	}
-	objs, unreadable, ok := s.captureAdoptable(w, r, sc, captureNS)
+	objs, unreadable, ok := s.captureAdoptable(w, r, sc, model.ObjectNamespace(ns))
 	if !ok {
 		return
 	}

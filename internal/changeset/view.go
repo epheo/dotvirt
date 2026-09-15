@@ -75,7 +75,7 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 // objectLabel names an entry's object: "namespace/name", or the bare name for a
 // cluster-scoped object and for a namespace itself.
 func objectLabel(e draft.Entry) string {
-	if e.Namespace == ClusterScopeNS || e.Resource == draft.ResourceNamespace {
+	if e.Namespace == model.ClusterScopeNS || e.Resource == draft.ResourceNamespace {
 		return e.Name
 	}
 	return e.Namespace + "/" + e.Name
