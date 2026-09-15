@@ -94,16 +94,12 @@ func (s *Snapshot) WaitForSync(ctx context.Context) error {
 	}
 }
 
-// Synced reports whether the initial Applications LIST has landed.
-func (s *Snapshot) Synced() bool { return s.synced.Load() }
-
 // Drift returns per-VM drift keyed "namespace/name", computed from the in-memory
 // Application store. It returns nil UNTIL the initial LIST has landed: inventory
 // treats a non-nil (even empty) Drift map as "Argo is configured, so a VM absent
 // from it is NotTracked" - returning an empty map pre-sync would flash every VM to
-// NotTracked. nil instead leaves Sync unset (the benign not-yet-known state), which
-// the caller distinguishes from "Argo disabled" via Synced(). Always non-nil once
-// synced.
+// NotTracked. nil instead leaves Sync unset (the benign not-yet-known state), the
+// same as when Argo is disabled. Always non-nil once synced.
 func (s *Snapshot) Drift() map[string]Drift {
 	if !s.synced.Load() {
 		return nil
