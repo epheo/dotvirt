@@ -34,11 +34,14 @@ func OpenWrite(url, username string, tokenFn forge.TokenSource, push bool) *Writ
 	return &WriteRepo{creds: creds{url: url, username: username, tokenFn: tokenFn}, push: push}
 }
 
-// CommitResult reports what a commit did.
+// CommitResult reports what a write did on branch. Committed is false when the
+// tree already matched the branch head, so a no-op never churns history; Hash
+// and Pushed describe the commit made.
 type CommitResult struct {
 	Branch    string
-	Committed bool   // false when the tree was already up to date (no-op)
-	Hash      string // commit hash when Committed
+	Committed bool
+	Hash      string
+	Pushed    bool
 }
 
 // dotvirtSig is the signature for dotvirt's own writes (template seeding) and
@@ -104,11 +107,9 @@ func (w *WriteRepo) pushBranch(repo *git.Repository, branch string) error {
 	return nil
 }
 
-// Commit writes files onto branch. If the resulting tree is identical to the
-// branch head, it commits nothing and returns Committed=false, so a no-op
-// never churns history.
-//
-// branch is created from the default branch if it doesn't exist yet.
+// Commit writes files onto branch as dotvirt itself, on top of the branch's
+// real remote state (created from the default branch when it doesn't exist yet).
+// Identical content commits nothing.
 func (w *WriteRepo) Commit(branch, message string, files []model.File) (CommitResult, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -117,41 +118,14 @@ func (w *WriteRepo) Commit(branch, message string, files []model.File) (CommitRe
 	if err != nil {
 		return CommitResult{}, err
 	}
-
 	if err := checkoutBranch(repo, wt, branch); err != nil {
 		return CommitResult{}, err
 	}
-
-	for _, f := range files {
-		if err := writeWorktreeFile(wt, f); err != nil {
-			return CommitResult{}, err
-		}
-		// Stage explicitly: Commit{All:true} only stages already-tracked files,
-		// so newly created manifests would otherwise be left out.
-		if _, err := wt.Add(f.Path); err != nil {
-			return CommitResult{}, fmt.Errorf("stage %s: %w", f.Path, err)
-		}
+	items := make([]ChangesetItem, len(files))
+	for i, f := range files {
+		items[i] = ChangesetItem{Path: f.Path, NewContent: f.Content}
 	}
-
-	status, err := wt.Status()
-	if err != nil {
-		return CommitResult{}, err
-	}
-	if status.IsClean() {
-		return CommitResult{Branch: branch, Committed: false}, nil
-	}
-
-	sig := dotvirtSig()
-	commit, err := wt.Commit(message, &git.CommitOptions{Author: sig, Committer: sig})
-	if err != nil {
-		return CommitResult{}, fmt.Errorf("commit: %w", err)
-	}
-
-	if err := w.pushBranch(repo, branch); err != nil {
-		return CommitResult{}, err
-	}
-
-	return CommitResult{Branch: branch, Committed: true, Hash: commit.String()}, nil
+	return w.commitItems(repo, wt, branch, message, items, Author{})
 }
 
 // checkoutBranch checks out branch as a local branch tracking the remote. A

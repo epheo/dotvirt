@@ -2,48 +2,31 @@ package git
 
 import (
 	"sort"
-	"strings"
 
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
 // ParseVMsOnBranch parses every VM on a branch (pure manifest view, no live/argo
-// enrichment). Memoized by the branch's commit hash so the tree walk + parse runs
-// once per content change, shared across every identity's inventory build; the
-// result is read-only to callers (the inventory builder copies each VM out). A
-// content change advances the branch hash, missing the cache. The returned slice
-// must not be mutated.
+// enrichment). Memoized per branch head so the tree walk + parse runs once per
+// content change, shared across every identity's inventory build; the returned
+// slice must not be mutated.
 func (r *Repo) ParseVMsOnBranch(branch string) ([]model.VM, error) {
-	hash := r.branchHash(branch)
-	if hash != "" {
-		r.parseMu.Lock()
-		c, ok := r.parseCache[branch]
-		r.parseMu.Unlock()
-		if ok && c.hash == hash {
-			return c.vms, nil
-		}
-	}
-
-	files, err := r.VMManifests(branch)
-	if err != nil {
-		return nil, err
-	}
-	var out []model.VM
-	for _, f := range files {
-		vms, err := manifest.ParseVMs(f.Path, f.Content, DefaultNamespace(f.Path))
+	return Memoized(r, "vms", branch, func() ([]model.VM, error) {
+		files, err := r.VMManifests(branch)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, vms...)
-	}
-
-	if hash != "" {
-		r.parseMu.Lock()
-		r.parseCache[branch] = branchParse{hash: hash, vms: out}
-		r.parseMu.Unlock()
-	}
-	return out, nil
+		var out []model.VM
+		for _, f := range files {
+			vms, err := manifest.ParseVMs(f.Path, f.Content, DefaultNamespace(f.Path))
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, vms...)
+		}
+		return out, nil
+	})
 }
 
 // FindVMOnBranch returns the parsed VM (namespace, name) on a branch, ok=false if
@@ -71,15 +54,4 @@ func GroupNamespaces(byNS map[string][]model.VM) []model.ProjectNamespace {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Namespace < out[j].Namespace })
 	return out
-}
-
-// DefaultNamespace derives a namespace for manifests that omit metadata.namespace,
-// using the manifest's top-level directory as a convention (a common GitOps
-// layout: one directory per namespace). Files at the repo root fall back to
-// "default".
-func DefaultNamespace(path string) string {
-	if dir, _, ok := strings.Cut(path, "/"); ok {
-		return dir
-	}
-	return "default"
 }

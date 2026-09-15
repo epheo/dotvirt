@@ -144,6 +144,14 @@ func TestHistoryRespectsLimit(t *testing.T) {
 	}
 }
 
+func revertItems(r *Repo, hash string) ([]ChangesetItem, error) {
+	d, err := r.CommitDiff(hash)
+	if err != nil {
+		return nil, err
+	}
+	return d.RevertItems()
+}
+
 func TestRevertItemsRestoresEditedFile(t *testing.T) {
 	r, err := Open(seedHistory(t), "", nil)
 	if err != nil {
@@ -151,7 +159,7 @@ func TestRevertItemsRestoresEditedFile(t *testing.T) {
 	}
 	commits, _ := r.History("main", 25)
 	bump := commits[1] // "bump web to 4 cpu" - edits web.yaml from 2 to 4 cpu
-	items, err := r.RevertItems(bump.Hash)
+	items, err := revertItems(r, bump.Hash)
 	if err != nil {
 		t.Fatalf("RevertItems: %v", err)
 	}
@@ -174,7 +182,7 @@ func TestRevertItemsDeletesAddedFile(t *testing.T) {
 	}
 	commits, _ := r.History("main", 25)
 	addDB := commits[0] // "add db" - introduced db.yaml, so reverting deletes it
-	items, err := r.RevertItems(addDB.Hash)
+	items, err := revertItems(r, addDB.Hash)
 	if err != nil {
 		t.Fatalf("RevertItems: %v", err)
 	}
@@ -193,7 +201,7 @@ func TestRevertItemsRejectsRoot(t *testing.T) {
 	}
 	commits, _ := r.History("main", 25)
 	root := commits[len(commits)-1] // "seed tenant-a" - no parent to restore to
-	if _, err := r.RevertItems(root.Hash); err == nil {
+	if _, err := revertItems(r, root.Hash); err == nil {
 		t.Fatal("expected an error reverting the root commit, got nil")
 	}
 }
@@ -238,7 +246,7 @@ func TestRevertItemsUndoesWholeMerge(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	commits, _ := r.History("main", 25)
-	items, err := r.RevertItems(commits[0].Hash)
+	items, err := revertItems(r, commits[0].Hash)
 	if err != nil {
 		t.Fatalf("RevertItems(merge): %v", err)
 	}
