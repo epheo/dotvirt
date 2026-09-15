@@ -43,6 +43,7 @@
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { persisted } from '$lib/state/persisted.svelte';
 	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import ChangeList from '$lib/components/ChangeList.svelte';
 	import ErrorNote from '$lib/components/ErrorNote.svelte';
 	import GitOpsStepper from '$lib/components/GitOpsStepper.svelte';
@@ -50,6 +51,7 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import Note from '$lib/components/Note.svelte';
 	import RepoBanner from '$lib/components/RepoBanner.svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 	import StatusPill from '$lib/components/StatusPill.svelte';
 	import TextArea from '$lib/components/TextArea.svelte';
 	import TextInput from '$lib/components/TextInput.svelte';
@@ -406,11 +408,7 @@
 				Staged
 			</div>
 			{#if !drafts.loaded}
-				<div class="space-y-2 p-3">
-					{#each Array(3) as _, i (i)}
-						<div class="h-7 animate-pulse rounded bg-inset-strong"></div>
-					{/each}
-				</div>
+				<div class="p-3"><Skeleton rows={3} class="h-7" /></div>
 			{:else if lanes.length === 0}
 				<p class="px-3 py-2 text-xs text-ink-faint">
 					Nothing staged{scopeProject ? ` in ${scopeProject}` : ''}. Edits, creates and deletes land
@@ -685,13 +683,9 @@
 							aria-label="Pull request title"
 							class="flex-1"
 						/>
-						<button
-							onclick={() => propose(project)}
-							disabled={proposeOp.busy}
-							class="rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:bg-line-strong"
-						>
+						<Button onclick={() => propose(project)} disabled={proposeOp.busy}>
 							{proposeOp.busy ? 'Proposing…' : 'Propose pull request'}
-						</button>
+						</Button>
 					</div>
 					<TextArea
 						bind:value={message}
@@ -730,17 +724,13 @@
 					</div>
 					{#if prDetailError[key]}
 						<ErrorNote error={prDetailError[key]} />
-						<button
-							onclick={() => loadPRDetail(p.project, p.prNumber)}
-							class="rounded border border-line-strong bg-panel px-3 py-1 text-xs text-ink-soft hover:bg-inset"
-							>Retry</button
+						<Button
+							variant="secondary"
+							size="sm"
+							onclick={() => loadPRDetail(p.project, p.prNumber)}>Retry</Button
 						>
 					{:else if !detail}
-						<div class="space-y-2">
-							{#each Array(2) as _, i (i)}
-								<div class="h-16 animate-pulse rounded bg-inset-strong"></div>
-							{/each}
-						</div>
+						<Skeleton rows={2} class="h-16" />
 					{:else}
 						{@render reviewItems(detail.items, 'This pull request changes no manifests.')}
 					{/if}
@@ -752,14 +742,15 @@
 						<GitOpsStepper stage="proposed" prNumber={p.prNumber} prUrl={p.prURL} />
 					</div>
 					<div class="flex items-center gap-3">
-						<a
+						<Button
+							variant="secondary"
+							class="shrink-0"
 							href={p.prURL}
 							target="_blank"
 							rel="noopener"
-							class="inline-flex shrink-0 items-center gap-1.5 rounded border border-line-strong bg-panel px-3 py-1.5 text-sm font-medium text-accent-ink hover:bg-select-soft"
 						>
 							Open PR to approve and merge <ExternalLink size={13} />
-						</a>
+						</Button>
 						<span class="text-[11px] text-ink-faint">
 							Approval and merge happen in the forge; once merged, ArgoCD applies the change and the
 							result shows here and in Recent tasks within seconds.
@@ -800,11 +791,7 @@
 					{#if detailError[key]}
 						<ErrorNote error={detailError[key]} />
 					{:else if !detail}
-						<div class="space-y-2">
-							{#each Array(2) as _, i (i)}
-								<div class="h-16 animate-pulse rounded bg-inset-strong"></div>
-							{/each}
-						</div>
+						<Skeleton rows={2} class="h-16" />
 					{:else}
 						{@render reviewItems(detail.items, 'This commit changed no manifests.')}
 					{/if}
@@ -934,12 +921,9 @@
 			<ErrorNote error={revertOp.error} />
 		</div>
 		{#snippet footer()}
-			<button
-				onclick={() => (confirmUndo = null)}
-				class="ml-auto rounded border border-line-strong px-3 py-1 text-sm text-ink-soft hover:bg-inset"
-			>
+			<Button variant="secondary" class="ml-auto" onclick={() => (confirmUndo = null)}>
 				Cancel
-			</button>
+			</Button>
 			<button
 				onclick={() => undo(confirmUndo!.project, confirmUndo!.hash)}
 				disabled={revertOp.busy}

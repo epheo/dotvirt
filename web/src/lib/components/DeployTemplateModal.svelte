@@ -200,11 +200,7 @@
 	{:else}
 		<div class="max-w-md space-y-3">
 			{#each formParams as p (p.name)}
-				<label class="block">
-					<span class="mb-1 block text-xs font-medium text-ink-muted">
-						{p.displayName || p.name}
-						{#if p.required && !p.value && !p.generate}<span class="text-danger">*</span>{/if}
-					</span>
+				<FormField label={p.displayName || p.name} required={p.required && !p.value && !p.generate}>
 					{#if long(p.name)}
 						<TextArea
 							bind:value={params[p.name]}
@@ -222,7 +218,7 @@
 						/>
 					{/if}
 					{#if p.description}<p class="mt-1 text-xs text-ink-faint">{p.description}</p>{/if}
-				</label>
+				</FormField>
 			{/each}
 		</div>
 	{/if}

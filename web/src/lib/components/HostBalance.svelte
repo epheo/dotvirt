@@ -5,6 +5,7 @@
 	import { resource } from '$lib/resource.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import InfoCard from './InfoCard.svelte';
+	import Button from './Button.svelte';
 
 	// Worker utilization with the DRS action band. A small fleet is a labeled
 	// per-host comparison: the roster rows ARE the chart (a strip with three
@@ -149,9 +150,9 @@
 {#if data}
 	<InfoCard title="Host balance">
 		{#snippet action()}
-			<a href="?tab=configure" class="text-xs text-accent-ink hover:underline">
+			<Button variant="link" size="sm" href="?tab=configure">
 				{band ? 'Rescheduling settings' : 'Enable Dynamic Rescheduling'}
-			</a>
+			</Button>
 		{/snippet}
 
 		<div class="p-3">

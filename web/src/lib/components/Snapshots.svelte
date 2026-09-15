@@ -5,6 +5,7 @@
 	import { action, resource, type Resource } from '$lib/resource.svelte';
 	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
 	import ErrorNote from './ErrorNote.svelte';
+	import Button from './Button.svelte';
 	import Note from './Note.svelte';
 	import StatusDot from './StatusDot.svelte';
 	import TextInput from './TextInput.svelte';
@@ -76,14 +77,10 @@
 			placeholder="snapshot name (auto-generated if blank)"
 			class="w-72!"
 		/>
-		<button
-			onclick={take}
-			disabled={takeOp.busy}
-			class="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:bg-line-strong"
-		>
+		<Button onclick={take} disabled={takeOp.busy}>
 			<Camera size={14} />
 			{takeOp.busy ? 'Taking…' : 'Take snapshot'}
-		</button>
+		</Button>
 		{#if running}
 			<span class="text-xs text-ink-faint">Online snapshot (VM is running)</span>
 		{/if}

@@ -14,6 +14,7 @@
 	import { itemKey } from '$lib/review';
 	import { vmSizing } from '$lib/sizing';
 	import CapacityUsage from './CapacityUsage.svelte';
+	import Button from './Button.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import ChangeList from './ChangeList.svelte';
@@ -120,9 +121,7 @@
 		<InfoCard title="Guest">
 			{#snippet action()}
 				{#if vm.phase === 'Running'}
-					<button onclick={onconsole} class="text-xs text-accent-ink hover:underline"
-						>Console</button
-					>
+					<Button variant="link" size="sm" onclick={onconsole}>Console</Button>
 				{/if}
 			{/snippet}
 			<dl class="divide-y divide-line-soft text-[13px]">
@@ -147,7 +146,7 @@
 		<InfoCard title="Hardware">
 			{#snippet action()}
 				{#if onedit && vm.sourceFile}
-					<button onclick={onedit} class="text-xs text-accent-ink hover:underline">Edit</button>
+					<Button variant="link" size="sm" onclick={onedit}>Edit</Button>
 				{/if}
 			{/snippet}
 			<dl class="divide-y divide-line-soft text-[13px]">
@@ -186,9 +185,7 @@
 		<InfoCard title="Placement">
 			{#snippet action()}
 				{#if onmigrate && vm.phase === 'Running'}
-					<button onclick={onmigrate} class="text-xs text-accent-ink hover:underline"
-						>Migrate</button
-					>
+					<Button variant="link" size="sm" onclick={onmigrate}>Migrate</Button>
 				{/if}
 			{/snippet}
 			<dl class="divide-y divide-line-soft text-[13px]">
@@ -212,9 +209,11 @@
 		<InfoCard title="GitOps">
 			{#snippet action()}
 				{#if stagedItem}
-					<button
+					<Button
+						variant="link"
+						size="sm"
 						onclick={() => ui.openChanges({ kind: 'item', project, key: itemKey(stagedItem) })}
-						class="text-xs text-accent-ink hover:underline">Review changes</button
+						>Review changes</Button
 					>
 				{/if}
 			{/snippet}
@@ -247,10 +246,11 @@
 						>
 						<span class="shrink-0 text-ink-faint">{relativeAge(latest.when)}</span>
 					{/if}
-					<a
+					<Button
+						variant="link"
+						class="ml-auto shrink-0"
 						href="?tab=changes"
-						data-sveltekit-replacestate
-						class="ml-auto shrink-0 text-accent-ink hover:underline">All changes</a
+						data-sveltekit-replacestate>All changes</Button
 					>
 				</div>
 			{/if}

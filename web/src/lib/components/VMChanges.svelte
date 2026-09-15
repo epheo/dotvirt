@@ -7,6 +7,7 @@
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import ChangeList from './ChangeList.svelte';
+	import Button from './Button.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import FileHistory from './FileHistory.svelte';
 	import Note from './Note.svelte';
@@ -61,9 +62,11 @@
 		<InfoCard title="Staged">
 			{#snippet action()}
 				{#if stagedItem}
-					<a
+					<Button
+						variant="link"
+						size="sm"
 						href={reviewURL({ kind: 'item', project, key: itemKey(stagedItem) })}
-						class="text-xs text-accent-ink hover:underline">Review and propose</a
+						>Review and propose</Button
 					>
 				{/if}
 			{/snippet}
@@ -112,9 +115,11 @@
 							<span class="ml-auto flex shrink-0 items-center gap-1.5">
 								{#if chk}<StatusPill tone={chk.tone} label={chk.text} />{/if}
 								{#if appr}<StatusPill tone={appr.tone} label={appr.text} />{/if}
-								<a
+								<Button
+									variant="link"
+									size="sm"
 									href={reviewURL({ kind: 'proposal', project, prNumber: p.prNumber })}
-									class="text-xs text-accent-ink hover:underline">Review</a
+									>Review</Button
 								>
 							</span>
 						</li>

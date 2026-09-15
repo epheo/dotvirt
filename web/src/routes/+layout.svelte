@@ -14,12 +14,14 @@
 	import { session } from '$lib/state/session.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import AppContextMenus from '$lib/components/AppContextMenus.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import AppModals from '$lib/components/AppModals.svelte';
 	import Banner from '$lib/components/Banner.svelte';
 	import Login from '$lib/components/Login.svelte';
 	import SSOBanner from '$lib/components/SSOBanner.svelte';
 	import SectionSwitcher from '$lib/components/SectionSwitcher.svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 	import TaskDock from '$lib/components/TaskDock.svelte';
 	import ToastHost from '$lib/components/ToastHost.svelte';
 	import CatalogTree from '$lib/tree/CatalogTree.svelte';
@@ -172,21 +174,14 @@
 				<SectionSwitcher active={treeSection} />
 				<div class="min-h-0 flex-1 overflow-y-auto">
 					{#if !inventory.inventory}
-						<div class="space-y-2 p-3">
-							{#each Array(5) as _, i (i)}
-								<div class="h-5 animate-pulse rounded bg-side-hover"></div>
-							{/each}
-						</div>
+						<div class="p-3"><Skeleton rows={5} class="h-5" bg="bg-side-hover" /></div>
 					{:else if inventory.inventory.projects.length === 0 && inventory.adoptable.length === 0 && treeSection !== 'catalog' && treeSection !== 'changes'}
 						<div class="space-y-3 p-6 text-center">
 							<p class="text-xs text-side-dim">No projects visible.</p>
 							{#if inventory.canNamespace}
-								<button
-									onclick={() => (ui.modal = { kind: 'newProject' })}
-									class="inline-flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
-								>
+								<Button size="sm" onclick={() => (ui.modal = { kind: 'newProject' })}>
 									<FolderPlus size={14} /> Create your first project
-								</button>
+								</Button>
 							{/if}
 						</div>
 					{:else if treeSection === 'compute'}

@@ -2,6 +2,7 @@
 	import type { VMEvent } from '$lib/api';
 	import { duration } from '$lib/format';
 	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
+	import SelectInput from './SelectInput.svelte';
 	import StatusDot from './StatusDot.svelte';
 
 	// The one events table behind every Monitor -> Events lane. Owns the
@@ -80,16 +81,12 @@
 				{r} <span class="text-ink-faint">{n}</span>
 			</button>
 		{/each}
-		<select
-			bind:value={windowH}
-			class="ml-auto rounded border border-line-strong bg-panel px-1.5 py-0.5 text-xs text-ink-soft"
-			aria-label="Time window"
-		>
+		<SelectInput bind:value={windowH} size="sm" class="ml-auto w-auto!" aria-label="Time window">
 			<option value={0}>All time</option>
 			<option value={1}>Last hour</option>
 			<option value={6}>Last 6h</option>
 			<option value={24}>Last 24h</option>
-		</select>
+		</SelectInput>
 	</div>
 
 	{#if shown.length === 0}

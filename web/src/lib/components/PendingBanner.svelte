@@ -4,6 +4,7 @@
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import Banner from './Banner.svelte';
+	import Button from './Button.svelte';
 	import StatusDot from './StatusDot.svelte';
 
 	// Pending-change awareness on object pages: an unproposed staged change (this
@@ -27,9 +28,9 @@
 		{:else}
 			{stagedCount} staged change{stagedCount === 1 ? '' : 's'} in this project — not yet proposed.
 		{/if}
-		<button onclick={() => ui.openChanges()} class="font-medium text-accent-ink hover:underline">
+		<Button variant="link" class="font-medium" onclick={() => ui.openChanges()}>
 			Review &amp; propose
-		</button>
+		</Button>
 	</Banner>
 {:else if proposal}
 	<Banner tone="ok">

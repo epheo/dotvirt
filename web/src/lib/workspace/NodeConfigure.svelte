@@ -3,6 +3,7 @@
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import InfoCard from '$lib/components/InfoCard.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import NodeActions from '$lib/components/NodeActions.svelte';
 	import Row from '$lib/components/Row.svelte';
 
@@ -32,11 +33,13 @@
 		{#if nodeUplinks.length}
 			<InfoCard title="Uplinks">
 				{#snippet action()}
-					<button
+					<Button
+						variant="link"
+						size="sm"
 						onclick={() => (ui.modal = { kind: 'uplink' })}
 						disabled={!inventory.canManage}
 						title={inventory.canManage ? '' : 'Requires platform-network authoring permission'}
-						class="text-xs text-accent hover:underline disabled:text-ink-faint">+ Add uplink</button
+						>+ Add uplink</Button
 					>
 				{/snippet}
 				<ul class="divide-y divide-line-soft px-3 text-[13px]">

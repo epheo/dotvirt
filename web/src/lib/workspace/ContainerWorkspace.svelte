@@ -31,6 +31,7 @@
 	import SegmentSummary from './SegmentSummary.svelte';
 	import StorageClassSummary from './StorageClassSummary.svelte';
 	import StorageRootSummary from './StorageRootSummary.svelte';
+	import TabPane from '$lib/components/TabPane.svelte';
 
 	// The container workspace: every inventory level, section roots included,
 	// gets the same breadcrumb + tab chrome. Roots differ only in what their
@@ -210,8 +211,7 @@
 		<HostsRootSummary vms={scopedVMs} />
 	{:else if root && section === 'networking'}
 		<PlatformAdoptBanner />
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
-		<div class="min-h-0 flex-1 overflow-y-auto" role="region" aria-label="Tab content" tabindex="0">
+		<TabPane>
 			<NetworkTopology
 				networks={inventory.networks}
 				uplinks={inventory.uplinks}
@@ -219,7 +219,7 @@
 				projects={inventory.inventory?.projects ?? []}
 				onpick={(net) => goto(hrefForScope({ kind: 'network', network: net }))}
 			/>
-		</div>
+		</TabPane>
 	{:else}
 		{#if scope.kind === 'project' || scope.kind === 'namespace'}
 			<RepoBanner project={scope.project} />
@@ -229,26 +229,18 @@
 				namespace={scope.kind === 'namespace' ? scope.namespace : undefined}
 			/>
 		{/if}
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
-		<div class="min-h-0 flex-1 overflow-y-auto" role="region" aria-label="Tab content" tabindex="0">
+		<TabPane>
 			<ClusterSummary scope={containerScope} onselect={openVM} />
-		</div>
+		</TabPane>
 	{/if}
 {:else if tab === 'monitor'}
-	<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
-	<div class="min-h-0 flex-1 overflow-y-auto" role="region" aria-label="Tab content" tabindex="0">
+	<TabPane>
 		<ContainerMonitor namespaces={scopedNamespaces} scope={containerScope} onselect={openVM} />
-	</div>
+	</TabPane>
 {:else if tab === 'permissions'}
-	<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
-	<div
-		class="min-h-0 flex-1 overflow-y-auto p-4"
-		role="region"
-		aria-label="Tab content"
-		tabindex="0"
-	>
+	<TabPane class="p-4">
 		<Permissions namespaces={scopedNamespaces} />
-	</div>
+	</TabPane>
 {:else if tab === 'configure'}
 	{#if scope.kind === 'node'}
 		<NodeConfigure node={scope.node} vms={scopedVMs} />
@@ -259,15 +251,9 @@
 	{#if root}
 		<SecurityPlane />
 	{:else if scope.kind === 'namespace'}
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex (axe scrollable-region-focusable: a scroll region must be keyboard-reachable) -->
-		<div
-			class="min-h-0 flex-1 overflow-y-auto p-4"
-			role="region"
-			aria-label="Tab content"
-			tabindex="0"
-		>
+		<TabPane class="p-4">
 			<EffectivePolicyPanel namespace={scope.namespace} />
-		</div>
+		</TabPane>
 	{/if}
 {:else}
 	{#if picked.size > 0}

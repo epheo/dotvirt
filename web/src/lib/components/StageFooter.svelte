@@ -1,4 +1,6 @@
 <script lang="ts">
+	import Button from './Button.svelte';
+
 	// The staging dialogs' shared footer row: one always-meaningful line
 	// (why the action is disabled > what will be staged > the generic hint),
 	// then Cancel and the primary action with its busy label.
@@ -42,10 +44,6 @@
 	class="ml-auto shrink-0 rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong"
 	>Cancel</button
 >
-<button
-	onclick={onsubmit}
-	disabled={disabled || submitting}
-	class="shrink-0 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
->
+<Button class="shrink-0" onclick={onsubmit} disabled={disabled || submitting}>
 	{submitting ? busyLabel : label}
-</button>
+</Button>

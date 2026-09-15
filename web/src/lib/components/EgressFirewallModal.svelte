@@ -4,6 +4,7 @@
 	import { rowList } from '$lib/rowlist.svelte';
 	import { TERMS } from '$lib/vocab';
 	import FormField from './FormField.svelte';
+	import Button from './Button.svelte';
 	import Note from './Note.svelte';
 	import StageModal from './StageModal.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
@@ -107,11 +108,7 @@
 			<span class="text-ink-soft"
 				>Egress rules <span class="text-ink-faint">(first match wins)</span></span
 			>
-			<button
-				onclick={rules.add}
-				class="flex items-center gap-1 text-xs text-accent hover:underline"
-				><Plus size={12} /> Add rule</button
-			>
+			<Button variant="link" size="sm" onclick={rules.add}><Plus size={12} /> Add rule</Button>
 		</div>
 		{#each rows as row, i (i)}
 			<div class="rounded border border-line p-2">

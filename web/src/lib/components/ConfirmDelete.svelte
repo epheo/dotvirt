@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import Modal from './Modal.svelte';
+	import Button from './Button.svelte';
+	import TextInput from './TextInput.svelte';
 
 	// Shared type-to-confirm delete dialog, used for both single-VM (type the VM
 	// name) and bulk (type "delete") removals. The body is passed as children.
@@ -34,11 +36,11 @@
 		<label for="confirm-delete-input" class="mt-3 mb-1 block text-xs text-ink-muted">
 			Type <span class="font-mono">{confirmWord}</span> to confirm:
 		</label>
-		<input
+		<TextInput
 			id="confirm-delete-input"
 			data-autofocus
 			bind:value={text}
-			class="w-full rounded border border-line-strong px-2 py-1 font-mono text-sm focus:border-danger/60"
+			mono
 			placeholder={confirmWord}
 		/>
 		{#if error}
@@ -46,12 +48,7 @@
 		{/if}
 	</div>
 	{#snippet footer()}
-		<button
-			onclick={onclose}
-			class="ml-auto rounded border border-line-strong px-3 py-1 text-sm text-ink-soft hover:bg-inset"
-		>
-			Cancel
-		</button>
+		<Button variant="secondary" class="ml-auto" onclick={onclose}>Cancel</Button>
 		<button
 			onclick={onconfirm}
 			disabled={!ready}

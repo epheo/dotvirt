@@ -4,6 +4,7 @@
 	import { action } from '$lib/resource.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import Banner from './Banner.svelte';
+	import Button from './Button.svelte';
 
 	// Brownfield guidance: a repo-backed project running objects git does not
 	// describe gets the adopt call-to-action where the user already is, not only
@@ -57,12 +58,8 @@
 		<span class="min-w-0 truncate"
 			><strong>{untracked} {untracked === 1 ? 'object runs' : 'objects run'}</strong> {copy}</span
 		>
-		<button
-			onclick={adopt}
-			disabled={op.busy}
-			class="ml-auto shrink-0 font-medium text-accent-ink hover:underline disabled:opacity-50"
-		>
+		<Button variant="link" class="ml-auto shrink-0 font-medium" onclick={adopt} disabled={op.busy}>
 			{op.busy ? 'Capturing…' : 'Adopt into git'}
-		</button>
+		</Button>
 	</Banner>
 {/if}

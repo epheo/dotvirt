@@ -4,6 +4,7 @@
 	import { action } from '$lib/resource.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import ErrorNote from './ErrorNote.svelte';
+	import Button from './Button.svelte';
 	import Modal from './Modal.svelte';
 
 	// A wizard scaffold: a left step-rail, one panel at a time, and a
@@ -122,17 +123,11 @@
 			>Back</button
 		>
 		{#if last}
-			<button
-				onclick={submit}
-				disabled={!canFinish || op.busy}
-				class="rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:bg-line-strong"
-				>{op.busy ? 'Staging…' : finishLabel}</button
+			<Button onclick={submit} disabled={!canFinish || op.busy}
+				>{op.busy ? 'Staging…' : finishLabel}</Button
 			>
 		{:else}
-			<button
-				onclick={next}
-				class="rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white">Next</button
-			>
+			<Button onclick={next}>Next</Button>
 		{/if}
 	{/snippet}
 </Modal>

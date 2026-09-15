@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { DraftItem } from '$lib/api';
 	import ChangeList from './ChangeList.svelte';
+	import Button from './Button.svelte';
 	import GitOpsStepper from './GitOpsStepper.svelte';
 	import Modal from './Modal.svelte';
 
@@ -38,18 +39,7 @@
 		{/if}
 	</div>
 	{#snippet footer()}
-		<button
-			onclick={ondiscard}
-			disabled={busy}
-			class="rounded border border-line-strong px-3 py-1 text-sm text-ink-soft hover:bg-inset disabled:opacity-50"
-		>
-			Discard
-		</button>
-		<button
-			onclick={onreview}
-			class="ml-auto rounded-full bg-accent px-3 py-1 text-sm font-medium text-white hover:bg-accent-hover"
-		>
-			Review &amp; propose →
-		</button>
+		<Button variant="secondary" onclick={ondiscard} disabled={busy}>Discard</Button>
+		<Button class="ml-auto" onclick={onreview}>Review &amp; propose →</Button>
 	{/snippet}
 </Modal>

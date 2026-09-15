@@ -1,4 +1,4 @@
-<script lang="ts">
+<script lang="ts" generics="V extends string | number">
 	import type { Snippet } from 'svelte';
 	import type { HTMLSelectAttributes } from 'svelte/elements';
 
@@ -11,7 +11,7 @@
 		class: cls = '',
 		children,
 		...rest
-	}: { value?: string; size?: 'md' | 'sm'; class?: string; children: Snippet } & Omit<
+	}: { value?: V; size?: 'md' | 'sm'; class?: string; children: Snippet } & Omit<
 		HTMLSelectAttributes,
 		'value' | 'class' | 'size'
 	> = $props();

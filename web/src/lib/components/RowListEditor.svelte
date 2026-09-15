@@ -1,5 +1,6 @@
 <script lang="ts" generics="T extends { removed: boolean }">
 	import type { Snippet } from 'svelte';
+	import Button from './Button.svelte';
 
 	// Shared scaffolding for the device edit steps: live-count header with an
 	// add button, numbered rows struck through when removed, a remove/undo
@@ -30,12 +31,9 @@
 
 <div class="mb-2 flex items-center justify-between">
 	<span class="text-xs text-ink-faint">{active} {unit}</span>
-	<button
-		onclick={onadd}
-		class="rounded border border-line-strong px-2 py-0.5 text-xs hover:bg-inset"
-	>
+	<Button variant="secondary" size="sm" onclick={onadd}>
 		{addLabel}
-	</button>
+	</Button>
 </div>
 {#each items as item, i (i)}
 	<div class="mb-1 flex items-center gap-2 {item.removed ? 'opacity-40 line-through' : ''}">

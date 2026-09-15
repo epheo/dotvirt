@@ -7,6 +7,7 @@
 	import { vmSizing } from '$lib/sizing';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import InfoCard from './InfoCard.svelte';
+	import Button from './Button.svelte';
 	import Row from './Row.svelte';
 
 	// The Configure tab: a left sub-rail of read-only sections; every
@@ -39,12 +40,9 @@
 </script>
 
 {#snippet editButton(section: EditSection)}
-	<button
-		onclick={() => onedit(section)}
-		class="flex items-center gap-1 text-xs text-accent hover:underline"
-	>
+	<Button variant="link" size="sm" onclick={() => onedit(section)}>
 		<Pencil size={11} /> Edit
-	</button>
+	</Button>
 {/snippet}
 
 <div class="flex gap-4">

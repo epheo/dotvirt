@@ -3,6 +3,7 @@
 	import { validName, NAME_HINT, validCIDR, CIDR_HINT } from '$lib/validate';
 	import { TERMS, dual } from '$lib/vocab';
 	import ChoiceCards from './ChoiceCards.svelte';
+	import Button from './Button.svelte';
 	import CheckGroup from './CheckGroup.svelte';
 	import Note from './Note.svelte';
 	import StageModal from './StageModal.svelte';
@@ -168,10 +169,11 @@
 			</FormField>
 			<label class="block">
 				<span class="mb-1 flex items-center justify-between text-ink-soft"
-					>Uplink ({TERMS.uplink.net}){#if onAddUplink}<button
-							type="button"
-							onclick={onAddUplink}
-							class="text-xs font-normal text-accent hover:underline">+ Add uplink…</button
+					>Uplink ({TERMS.uplink.net}){#if onAddUplink}<Button
+							variant="link"
+							size="sm"
+							class="font-normal"
+							onclick={onAddUplink}>+ Add uplink…</Button
 						>{/if}</span
 				>
 				<TextInput bind:value={physnet} placeholder="physnet-prod" mono list="uplink-list" />

@@ -6,6 +6,7 @@
 	// `label:key`) narrows to VM labels - the tags-parity affordance; label
 	// chips elsewhere call searchFor().
 	import { Search } from 'lucide-svelte';
+	import { dismiss } from '$lib/dismiss';
 	import type { VM } from '$lib/api';
 	import { vmActions, type VMAction } from '$lib/actions';
 	import { vmStorageKeys, NO_STORAGE } from '$lib/lenses';
@@ -169,14 +170,13 @@
 		} else if (e.key === 'Enter' && hits[active]) {
 			e.preventDefault();
 			pick(hits[active]);
-		} else if (e.key === 'Escape') {
-			dismiss();
 		}
 	}
 
 	// Closing without a pick abandons the query; keeping it would leave a stale
 	// term in the masthead and resume the next open on it.
-	function dismiss() {
+	function close() {
+		if (!open) return;
 		query = '';
 		open = false;
 		input?.blur();
@@ -243,7 +243,7 @@
 
 <svelte:window onkeydown={onWindowKey} />
 
-<div class="relative mx-auto w-80">
+<div class="relative mx-auto w-80" {@attach dismiss(close)}>
 	<div class="flex items-center gap-2 rounded bg-side-hover px-2.5 py-1">
 		<Search size={13} class="shrink-0 text-side-dim" />
 		<input
@@ -261,12 +261,6 @@
 	</div>
 
 	{#if open && query.trim()}
-		<button
-			class="fixed inset-0 z-30 cursor-default"
-			onclick={dismiss}
-			aria-label="Close search"
-			tabindex="-1"
-		></button>
 		<div
 			class="absolute top-full left-0 z-40 mt-1 w-full overflow-hidden rounded border border-line bg-panel shadow-xl"
 		>

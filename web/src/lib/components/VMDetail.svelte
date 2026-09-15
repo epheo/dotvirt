@@ -26,6 +26,7 @@
 	import { duration } from '$lib/format';
 	import { phaseTone } from '$lib/status';
 	import ActionMenu from './ActionMenu.svelte';
+	import Button from './Button.svelte';
 	import Banner from './Banner.svelte';
 	import Console from './Console.svelte';
 	import EffectivePolicyPanel from './EffectivePolicyPanel.svelte';
@@ -220,14 +221,15 @@
 				</button>
 			{/each}
 			<span class="mx-1.5 h-4 w-px bg-line"></span>
-			<button
+			<Button
+				variant="secondary"
+				size="sm"
 				onclick={() => openEdit()}
 				disabled={!vm.sourceFile}
 				title={vm.sourceFile ? 'Edit settings' : 'Not in git — adopt this VM first'}
-				class="flex items-center gap-1.5 rounded border border-line-strong px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50 disabled:hover:bg-transparent"
 			>
 				<Pencil size={13} /> Edit Settings
-			</button>
+			</Button>
 			<HeaderMenu align="right" panel={false}>
 				{#snippet trigger({ toggle })}
 					<button

@@ -3,6 +3,7 @@
 	import { api, Unauthorized, type User } from '$lib/api';
 	import { action } from '$lib/resource.svelte';
 	import { authMethods } from '$lib/state/session.svelte';
+	import Button from './Button.svelte';
 
 	let { onlogin }: { onlogin: (user: User) => void } = $props();
 
@@ -62,12 +63,7 @@
 				secret. A cluster admin can sign in with a token below and fix it in one click.
 			</p>
 		{:else if sso}
-			<a
-				href="/api/auth/openshift"
-				class="mb-4 block w-full rounded-full bg-accent px-4 py-2 text-center text-sm font-medium text-white hover:bg-accent-hover"
-			>
-				Sign in with OpenShift
-			</a>
+			<Button class="mb-4 w-full" href="/api/auth/openshift">Sign in with OpenShift</Button>
 			<div class="mb-3 flex items-center gap-2 text-xs text-ink-faint">
 				<span class="h-px flex-1 bg-line"></span>
 				or paste a token

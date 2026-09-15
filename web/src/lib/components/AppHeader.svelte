@@ -23,6 +23,7 @@
 	import { dispatchVMAction } from '$lib/actions';
 	import { changesHref, hrefForScope, scopeFromPath, vmHref } from '$lib/nav';
 	import StatusDot from './StatusDot.svelte';
+	import Button from './Button.svelte';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { session } from '$lib/state/session.svelte';
@@ -185,15 +186,12 @@
 	     the tree's right-click menus). New VM pre-targets the current scope. -->
 	<HeaderMenu>
 		{#snippet trigger({ open, toggle })}
-			<button
-				onclick={toggle}
-				class="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1 text-xs font-medium text-white hover:bg-accent-hover"
-			>
+			<Button size="sm" onclick={toggle}>
 				<Plus size={14} /> New <ChevronDown
 					size={12}
 					class="transition-transform {open ? 'rotate-180' : ''}"
 				/>
-			</button>
+			</Button>
 		{/snippet}
 		{#snippet children({ close })}
 			{#each NEW_ITEMS as item (item.kind)}

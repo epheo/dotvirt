@@ -5,6 +5,7 @@
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import Banner from './Banner.svelte';
+	import Button from './Button.svelte';
 
 	// The platform tier's AdoptBanner: shared segments and cluster-wide policies
 	// running with no manifest in the platform repo. Shown only to callers who may
@@ -36,12 +37,8 @@
 				: 'them'}. Adopting captures every untracked shared segment, VLAN, admin policy, egress IP,
 			external route and uplink into one pull request; nothing changes until it merges.
 		</span>
-		<button
-			onclick={adopt}
-			disabled={op.busy}
-			class="ml-auto shrink-0 font-medium text-accent-ink hover:underline disabled:opacity-50"
-		>
+		<Button variant="link" class="ml-auto shrink-0 font-medium" onclick={adopt} disabled={op.busy}>
 			{op.busy ? 'Capturing…' : 'Adopt into git'}
-		</button>
+		</Button>
 	</Banner>
 {/if}

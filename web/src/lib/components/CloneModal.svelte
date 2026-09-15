@@ -6,6 +6,7 @@
 	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
 	import { validName } from '$lib/validate';
 	import ErrorNote from './ErrorNote.svelte';
+	import Button from './Button.svelte';
 	import FormField from './FormField.svelte';
 	import Modal from './Modal.svelte';
 	import StatusDot from './StatusDot.svelte';
@@ -79,14 +80,10 @@
 					class="flex-1"
 					placeholder="{vm.name}-clone"
 				/>
-				<button
-					onclick={create}
-					disabled={!valid || op.busy}
-					class="flex shrink-0 items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:bg-line-strong"
-				>
+				<Button class="shrink-0" onclick={create} disabled={!valid || op.busy}>
 					<Copy size={14} />
 					{op.busy ? 'Cloning…' : 'Clone'}
-				</button>
+				</Button>
 			</div>
 		</FormField>
 		<ErrorNote error={op.error} class="mt-2" />

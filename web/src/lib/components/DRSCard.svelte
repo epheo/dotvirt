@@ -3,6 +3,7 @@
 	import { action, resource } from '$lib/resource.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import InfoCard from './InfoCard.svelte';
+	import Button from './Button.svelte';
 	import Row from './Row.svelte';
 	import DRSModal from './DRSModal.svelte';
 
@@ -77,8 +78,8 @@
 						class="text-xs text-danger hover:underline disabled:text-ink-faint">Disable…</button
 					>
 				{/if}
-				<button onclick={() => (configuring = true)} class="text-xs text-accent hover:underline"
-					>{view.configured ? 'Configure' : 'Enable Dynamic Rescheduling'}</button
+				<Button variant="link" size="sm" onclick={() => (configuring = true)}
+					>{view.configured ? 'Configure' : 'Enable Dynamic Rescheduling'}</Button
 				>
 			</span>
 		{/if}

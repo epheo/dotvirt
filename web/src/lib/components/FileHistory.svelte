@@ -8,9 +8,11 @@
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import ChangeList from './ChangeList.svelte';
+	import Button from './Button.svelte';
 	import ErrorNote from './ErrorNote.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import ManifestDiff from './ManifestDiff.svelte';
+	import Skeleton from './Skeleton.svelte';
 
 	// One object's manifest history in git, each version restorable: the VM
 	// page's History card, shared with segments, rules and uplinks. Restore is
@@ -116,24 +118,24 @@
 						<span class="ml-auto shrink-0 text-xs text-ink-faint"
 							>{relativeAge(c.when)} · {c.author}</span
 						>
-						<button
-							onclick={() => toggle(c.hash)}
-							class="shrink-0 text-xs text-accent-ink hover:underline"
-							>{shown ? 'Hide diff' : 'Diff'}</button
+						<Button variant="link" size="sm" class="shrink-0" onclick={() => toggle(c.hash)}
+							>{shown ? 'Hide diff' : 'Diff'}</Button
 						>
 						{#if current}
 							<span class="shrink-0 rounded border border-line px-2 py-0.5 text-xs text-ink-faint"
 								>Current version</span
 							>
 						{:else}
-							<button
+							<Button
+								variant="secondary"
+								size="sm"
+								class="shrink-0 text-ink"
 								onclick={() => restore(c)}
 								disabled={restoreOp.busy}
-								class="inline-flex shrink-0 items-center gap-1 rounded border border-line-strong bg-panel px-2 py-0.5 text-xs font-medium text-ink hover:bg-select-soft disabled:text-ink-faint"
 							>
 								<RotateCcw size={11} />
 								{restoring === c.hash ? 'Restoring…' : 'Restore this version'}
-							</button>
+							</Button>
 						{/if}
 					</div>
 					{#if shown}
@@ -142,7 +144,7 @@
 							{#if detailError[c.hash]}
 								<ErrorNote error={detailError[c.hash]} />
 							{:else if !d}
-								<div class="h-10 animate-pulse rounded bg-inset-strong"></div>
+								<Skeleton class="h-10" />
 							{:else}
 								{#each ownItems(d) as it (itemKey(it))}
 									<ChangeList changes={it.changes} />
@@ -178,8 +180,7 @@
 			<span>
 				Showing {commits.length} version{commits.length === 1 ? '' : 's'}. Undo of a whole pull
 				request lives under
-				<a href={changesHref(project)} class="text-accent-ink hover:underline">Changes</a>, at the
-				project.
+				<Button variant="link" href={changesHref(project)}>Changes</Button>, at the project.
 			</span>
 		</p>
 	{/if}

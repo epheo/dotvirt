@@ -8,6 +8,7 @@
 		type DRSView,
 	} from '$lib/api';
 	import ChoiceCards from './ChoiceCards.svelte';
+	import Button from './Button.svelte';
 	import StageModal from './StageModal.svelte';
 	import FormField from './FormField.svelte';
 	import TextInput from './TextInput.svelte';
@@ -119,13 +120,9 @@
 		/>
 	</FormField>
 
-	<button
-		type="button"
-		onclick={() => (showAdvanced = !showAdvanced)}
-		class="text-xs text-accent hover:underline"
-	>
+	<Button variant="link" size="sm" onclick={() => (showAdvanced = !showAdvanced)}>
 		{showAdvanced ? '− Hide' : '+ Show'} advanced settings
-	</button>
+	</Button>
 	{#if showAdvanced}
 		<div class="space-y-3 rounded border border-line bg-inset p-3">
 			<label class="flex items-start gap-2">

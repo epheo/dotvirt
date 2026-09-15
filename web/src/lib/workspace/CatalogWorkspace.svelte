@@ -6,6 +6,7 @@
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import ErrorNote from '$lib/components/ErrorNote.svelte';
 	import TabBar from '$lib/components/TabBar.svelte';
 
@@ -133,13 +134,14 @@
 				{/if}
 				<div class="flex gap-2 border-t border-line p-3">
 					{#if !t.error}
-						<button
+						<Button
+							size="sm"
+							class="flex-1"
 							onclick={() =>
 								(ui.modal = { kind: 'deployTemplate', library: t.library, template: t.name })}
-							class="flex-1 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
 						>
 							Deploy…
-						</button>
+						</Button>
 					{/if}
 					<button
 						onclick={() => (ui.modal = { kind: 'editTemplate', template: t })}

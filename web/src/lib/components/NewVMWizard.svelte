@@ -5,6 +5,7 @@
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import Modal from './Modal.svelte';
+	import Button from './Button.svelte';
 	import Wizard from './Wizard.svelte';
 	import NamespaceSelect from './NamespaceSelect.svelte';
 	import FormField from './FormField.svelte';
@@ -332,9 +333,7 @@
 		<div>
 			<div class="mb-1 flex items-center justify-between">
 				<span class="text-ink-soft">Extra disks</span>
-				<button onclick={addDisk} type="button" class="text-xs text-accent hover:underline"
-					>+ Add disk</button
-				>
+				<Button variant="link" size="sm" onclick={addDisk}>+ Add disk</Button>
 			</div>
 			{#each extraDisks as disk, i (i)}
 				<div class="mb-1 flex gap-2">
@@ -403,13 +402,11 @@
 			Guest login, injected at first boot. Cloud images ship with locked passwords, so one is
 			generated for console access.
 		</p>
-		<label class="block">
-			<span class="text-ink-soft">cloud-init user</span>
-			<TextInput bind:value={user} placeholder="cloud-user" class="mt-1" />
-		</label>
-		<label class="block">
-			<span class="text-ink-soft">Console password</span>
-			<div class="mt-1 flex gap-2">
+		<FormField label="cloud-init user">
+			<TextInput bind:value={user} placeholder="cloud-user" />
+		</FormField>
+		<FormField label="Console password">
+			<div class="flex gap-2">
 				<TextInput bind:value={password} class="min-w-0 flex-1 font-mono" />
 				<button
 					type="button"
@@ -422,16 +419,13 @@
 				Git stores only a hash. The password is shown once after staging and can never be displayed
 				again. Clear the field to disable password login.
 			</p>
-		</label>
-		<label class="block">
-			<span class="text-ink-soft"
-				>SSH public key <span class="text-ink-faint">(optional)</span></span
-			>
-			<TextInput bind:value={sshKey} placeholder="ssh-ed25519 AAAA…" class="mt-1" />
+		</FormField>
+		<FormField label="SSH public key (optional)">
+			<TextInput bind:value={sshKey} placeholder="ssh-ed25519 AAAA…" />
 			<p class="mt-1 text-xs text-ink-faint">
 				With a key set, the password works on the console only; SSH password login stays off.
 			</p>
-		</label>
+		</FormField>
 	</div>
 {/snippet}
 
@@ -439,11 +433,7 @@
 	<div class="rounded border border-line">
 		<div class="flex items-center justify-between border-b border-line-soft bg-inset px-3 py-1.5">
 			<span class="text-xs font-semibold tracking-wide text-ink-muted uppercase">{title}</span>
-			<button
-				type="button"
-				onclick={() => (current = step)}
-				class="text-xs text-accent hover:underline">Edit</button
-			>
+			<Button variant="link" size="sm" onclick={() => (current = step)}>Edit</Button>
 		</div>
 		<dl class="divide-y divide-line-soft">
 			{#each rows as r (r[0])}
@@ -466,11 +456,7 @@
 					{#each missing as m (m.label)}
 						<li class="flex items-center justify-between gap-2">
 							<span>• {m.label}</span>
-							<button
-								type="button"
-								onclick={() => (current = m.step)}
-								class="text-accent-ink hover:underline">Edit</button
-							>
+							<Button variant="link" onclick={() => (current = m.step)}>Edit</Button>
 						</li>
 					{/each}
 				</ul>
@@ -542,11 +528,7 @@
 			</p>
 		</div>
 		{#snippet footer()}
-			<button
-				onclick={onclose}
-				class="ml-auto rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white"
-				>Done</button
-			>
+			<Button class="ml-auto" onclick={onclose}>Done</Button>
 		{/snippet}
 	</Modal>
 {:else if inventory.optionsError}
