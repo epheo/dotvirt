@@ -73,6 +73,9 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	if s.netstate != nil && !s.netstate.Healthy() {
 		warnings = append(warnings, "the network catalog may be stale — a networking watch is failing")
 	}
+	if !s.state.Healthy() {
+		warnings = append(warnings, "the VM snapshot may be stale - a cluster watch is failing")
+	}
 	// Zero project namespaces with a platform repo configured is either a pristine
 	// install (fine, the empty state is correct) or a platform app that stopped
 	// applying (broken). The platform Application's own rollup - already in the

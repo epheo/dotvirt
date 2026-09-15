@@ -20,7 +20,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/cache"
 
@@ -67,11 +66,7 @@ type Snapshot struct {
 	// watches pairs each store with its GVR, built once in New so Run and the
 	// health flags cannot drift out of step when a kind is added.
 	watches []watchSpec
-	// One health flag per watches entry (reflect.TrackHealth): false while that
-	// watch errors. Healthy ANDs them, so one broken watch can't be masked by
-	// another re-establishing. A CRD still absent (never discovered) stays true -
-	// absence is a feature state, not staleness.
-	healthy []atomic.Bool
+	healthy []atomic.Bool // one reflect.TrackHealth flag per watches entry
 
 	nodesMu sync.RWMutex
 	nodes   []cluster.NodeLabels
@@ -80,7 +75,7 @@ type Snapshot struct {
 // New builds the snapshot over sa (dotvirt's ServiceAccount client). bus may be nil in
 // tests (Catalog reads the stores directly; only the change signal is suppressed).
 func New(sa *cluster.Client, bus *eventbus.Bus) *Snapshot {
-	idx := func() cache.Indexer { return cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{}) }
+	idx := reflect.NewIndexer
 	s := &Snapshot{
 		sa: sa, bus: bus,
 		udn: idx(), cudn: idx(), nad: idx(), nns: idx(), nncp: idx(),
@@ -101,7 +96,7 @@ func New(sa *cluster.Client, bus *eventbus.Bus) *Snapshot {
 	}
 	s.healthy = make([]atomic.Bool, len(s.watches))
 	for i := range s.healthy {
-		s.healthy[i].Store(true) // optimistic until a list/watch actually errors
+		s.healthy[i].Store(true) // a CRD never discovered must not read as stale
 	}
 	return s
 }
@@ -117,18 +112,7 @@ type watchSpec struct {
 // Healthy reports whether every started networking watch is currently established.
 // The catalog keeps serving its last-good stores while unhealthy; the inventory
 // surfaces a "may be stale" warning so a sustained outage isn't silent.
-func (s *Snapshot) Healthy() bool {
-	for i := range s.healthy {
-		if !s.healthy[i].Load() {
-			return false
-		}
-	}
-	return true
-}
-
-// discoveryInterval paces the API probe while a CRD is absent - one lightweight
-// discovery GET per tick, ending once the reflector owns a watch connection.
-const discoveryInterval = time.Minute
+func (s *Snapshot) Healthy() bool { return reflect.AllHealthy(s.healthy) }
 
 // nodeRefreshInterval bounds how stale uplink node membership can get; node add/remove
 // is rare and this cache is off the request path, so a coarse poll is enough.
@@ -139,46 +123,32 @@ const nodeRefreshInterval = 2 * time.Minute
 // kinds signal NetworkChanged; NNS is watched silently.
 func (s *Snapshot) Run(ctx context.Context) {
 	for i := range s.watches {
-		go s.watch(ctx, s.watches[i], &s.healthy[i])
+		s.watch(ctx, s.watches[i], &s.healthy[i])
 	}
 	go s.refreshNodes(ctx)
 }
 
-// watch runs a discovery-gated reflector for one spec: it re-probes slowly until the
-// API appears, then owns a watch connection for the rest of the process. Serving the
-// NNS CRD flips nmstatePresent, which gates the fabric UI.
+// watch starts one spec's discovery-gated reflector. Serving the NNS CRD flips
+// nmstatePresent, which gates the fabric UI.
 func (s *Snapshot) watch(ctx context.Context, w watchSpec, healthy *atomic.Bool) {
-	t := time.NewTicker(discoveryInterval)
-	defer t.Stop()
-	for {
-		if s.sa.HasAPIResource(w.gvr) {
-			if w.gvr == gvrNNS {
-				s.nmstatePresent.Store(true)
-			}
-			onChange := func() {}
-			var onSynced func()
-			if s.bus != nil {
-				if w.signal {
-					onChange = func() { s.bus.Publish(eventbus.NetworkChanged) }
-				} else {
-					// A silent watch still signals its initial sync: a client that
-					// pulled the catalog before this store filled would otherwise
-					// never learn the data exists (nothing else bumps the version).
-					onSynced = func() { s.bus.Publish(eventbus.NetworkChanged) }
-				}
-			}
-			store := reflect.NewStore(w.idx, onChange, onSynced)
-			lw := reflect.TrackHealth(s.sa.DynamicListWatch(w.gvr), healthy)
-			r := cache.NewReflector(lw, &unstructured.Unstructured{}, store, 0)
-			r.Run(ctx.Done()) // blocks until shutdown; owns its own relist/backoff
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
+	served := s.sa.HasAPIResource
+	if w.gvr == gvrNNS {
+		served = reflect.Served(served, &s.nmstatePresent)
+	}
+	onChange := func() {}
+	var onSynced func()
+	if s.bus != nil {
+		if w.signal {
+			onChange = func() { s.bus.Publish(eventbus.NetworkChanged) }
+		} else {
+			// A silent watch still signals its initial sync: a client that
+			// pulled the catalog before this store filled would otherwise
+			// never learn the data exists (nothing else bumps the version).
+			onSynced = func() { s.bus.Publish(eventbus.NetworkChanged) }
 		}
 	}
+	store := reflect.NewStore(w.idx, onChange, onSynced)
+	reflect.RunWhenServed(ctx, served, w.gvr, s.sa.DynamicListWatch(w.gvr), store, healthy)
 }
 
 // refreshNodes keeps the node-name cache current via a periodic LIST (populated at once

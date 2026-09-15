@@ -30,7 +30,7 @@ func TestSnapshotDriftNilUntilSynced(t *testing.T) {
 		t.Fatal("Drift() must be nil before the initial LIST has landed (else every VM flashes NotTracked)")
 	}
 	_ = s.apps.Add(app("argocd", "managed", []any{vmResource("prod", "vm-a", "Synced", "Healthy")}))
-	s.synced.Store(true)
+	s.synced.Mark()
 
 	d := s.Drift()
 	if d == nil {
@@ -45,7 +45,7 @@ func TestSnapshotmanagingApp(t *testing.T) {
 	s := NewSnapshot(&Client{}, nil)
 	_ = s.apps.Add(appWithSource("argocd", "team-a", "https://forge/team-a.git",
 		[]any{vmResource("prod", "vm-a", "Synced", "Healthy")}))
-	s.synced.Store(true)
+	s.synced.Mark()
 
 	ref, ok := s.managingApp("prod", "vm-a")
 	if !ok || ref.Name != "team-a" || ref.Namespace != "argocd" || ref.TargetRevision != "main" {
@@ -65,7 +65,7 @@ func TestSnapshotRefreshForRepoMatchesByCanonicalURL(t *testing.T) {
 	s := NewSnapshot(&Client{dyn: dyn}, nil)
 	_ = s.apps.Add(a)
 	_ = s.apps.Add(other)
-	s.synced.Store(true)
+	s.synced.Mark()
 
 	// Pushed as the html_url form (no .git, lowercase host) - must still match the
 	// annotated clone_url form (.git, mixed case) via canonical normalization.
@@ -107,7 +107,7 @@ func TestSnapshotRefreshForRepoNoopUntilSynced(t *testing.T) {
 func TestSnapshotDriftMemoizedUntilStoreMoves(t *testing.T) {
 	s := NewSnapshot(&Client{}, nil)
 	_ = s.apps.Add(app("argocd", "managed", []any{vmResource("prod", "vm-a", "Synced", "Healthy")}))
-	s.synced.Store(true)
+	s.synced.Mark()
 
 	_ = s.Drift() // populate the memoized cache
 
@@ -134,7 +134,7 @@ func TestObjectDriftGen(t *testing.T) {
 		udnResource("prod", "db-net", "Synced", ""),
 	})
 	_ = s.apps.Add(a)
-	s.synced.Store(true)
+	s.synced.Mark()
 
 	gen := s.ObjectDriftGen()
 
@@ -172,7 +172,7 @@ func TestForeignAppsExcludesOwnRepo(t *testing.T) {
 	if s.ForeignApps("https://forge.example/dotvirt/team-a.git") != nil {
 		t.Fatal("must be nil before the initial LIST, so callers refuse rather than misread")
 	}
-	s.synced.Store(true)
+	s.synced.Mark()
 	for _, a := range []*unstructured.Unstructured{
 		appWithSource("openshift-gitops", "dotvirt-team-a", "https://forge.example/dotvirt/team-a.git", nil),
 		appWithSource("openshift-gitops", "dotvirt-platform", "https://forge.example/dotvirt/platform.git", nil),
@@ -201,7 +201,7 @@ func TestPrunePendingRelaysArgoComparison(t *testing.T) {
 	if s.PrunePending("https://forge.example/dotvirt/team-a.git", []string{"team-a"}) != nil {
 		t.Fatal("must be nil before the initial LIST")
 	}
-	s.synced.Store(true)
+	s.synced.Mark()
 	res := func(kind, ns, name string, prune bool) map[string]any {
 		return map[string]any{"kind": kind, "namespace": ns, "name": name, "requiresPruning": prune}
 	}

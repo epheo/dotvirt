@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
-	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -47,45 +46,21 @@ type Snapshot struct {
 	// currently established - false means the store may be stale, e.g. the
 	// SA's RBAC hasn't reconciled yet or the apiserver is failing).
 	apiPresent atomic.Bool
-	synced     atomic.Bool
+	synced     reflect.Ready
 	healthy    atomic.Bool
 }
 
 // New builds the snapshot over sa (dotvirt's ServiceAccount client).
 func New(sa *cluster.Client) *Snapshot {
-	return &Snapshot{sa: sa, store: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})}
+	return &Snapshot{sa: sa, store: reflect.NewIndexer()}
 }
-
-// discoveryInterval paces the API probe while the descheduler CRD is absent -
-// one lightweight discovery GET per tick, ending once the API appears (the
-// reflector then owns a watch connection). CRD removal afterwards is not
-// re-probed: the watch goes quiet on a last-known state, and a full uninstall
-// of the operator is outside dotvirt's flow anyway.
-const discoveryInterval = time.Minute
 
 // Run starts the discovery-gated reflector and returns immediately; everything
 // stops when ctx is cancelled.
 func (s *Snapshot) Run(ctx context.Context) {
-	go func() {
-		t := time.NewTicker(discoveryInterval)
-		defer t.Stop()
-		for {
-			if s.sa.HasAPIResource(kubedeschedulersGVR) {
-				s.apiPresent.Store(true)
-				s.healthy.Store(true) // optimistic until a list/watch actually errors
-				store := reflect.NewStore(s.store, func() {}, func() { s.synced.Store(true) })
-				lw := reflect.TrackHealth(s.sa.DynamicListWatch(kubedeschedulersGVR), &s.healthy)
-				r := cache.NewReflector(lw, &unstructured.Unstructured{}, store, 0)
-				r.Run(ctx.Done()) // blocks until shutdown; owns its own relist/backoff
-				return
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-			}
-		}
-	}()
+	served := reflect.Served(s.sa.HasAPIResource, &s.apiPresent)
+	store := reflect.NewStore(s.store, func() {}, s.synced.Mark)
+	reflect.RunWhenServed(ctx, served, kubedeschedulersGVR, s.sa.DynamicListWatch(kubedeschedulersGVR), store, &s.healthy)
 }
 
 // Live reads the current DRS live state from the in-memory store. Only scalar
@@ -94,7 +69,7 @@ func (s *Snapshot) Run(ctx context.Context) {
 func (s *Snapshot) Live() model.DRSLive {
 	out := model.DRSLive{
 		APIPresent: s.apiPresent.Load(),
-		Synced:     s.synced.Load(),
+		Synced:     s.synced.Done(),
 		Stale:      s.apiPresent.Load() && !s.healthy.Load(),
 	}
 	u, ok := s.managedCR()

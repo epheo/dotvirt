@@ -27,12 +27,11 @@ import (
 // a cluster LIST. The store is always current post-sync, so drift is never staler
 // than the watch delivers.
 type Snapshot struct {
-	sa       *Client
-	apps     cache.Indexer
-	synced   atomic.Bool
-	syncedCh chan struct{} // closed on the initial LIST, so WaitForSync doesn't poll
-	healthy  atomic.Bool   // false while the Applications watch errors (ArgoCD unreachable)
-	bus      *eventbus.Bus
+	sa      *Client
+	apps    cache.Indexer
+	synced  reflect.Ready
+	healthy atomic.Bool // false while the Applications watch errors (ArgoCD unreachable)
+	bus     *eventbus.Bus
 
 	// Memoized drift: rebuilt lazily only when the Application store moves
 	// (driftDirty), so one reconcile across N identities parses the apps once, not N
@@ -54,12 +53,7 @@ type Snapshot struct {
 // NewSnapshot builds the Application snapshot over the SA argo client. bus may be
 // nil (signalling disabled, e.g. in tests).
 func NewSnapshot(sa *Client, bus *eventbus.Bus) *Snapshot {
-	s := &Snapshot{
-		sa:       sa,
-		apps:     cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{}),
-		syncedCh: make(chan struct{}),
-		bus:      bus,
-	}
+	s := &Snapshot{sa: sa, apps: reflect.NewIndexer(), bus: bus}
 	s.healthy.Store(true) // optimistic until a list/watch actually errors
 	return s
 }
@@ -70,11 +64,9 @@ func NewSnapshot(sa *Client, bus *eventbus.Bus) *Snapshot {
 func (s *Snapshot) Run(ctx context.Context) {
 	store := reflect.NewStore(s.apps,
 		func() { s.driftDirty.Store(true); s.bus.Publish(eventbus.DriftChanged) },
-		func() { s.synced.Store(true); close(s.syncedCh) }, // onSynced fires once -> close is safe
+		s.synced.Mark,
 	)
-	lw := reflect.TrackHealth(s.sa.applicationsListWatch(), &s.healthy)
-	r := cache.NewReflector(lw, &unstructured.Unstructured{}, store, 0)
-	go r.Run(ctx.Done())
+	reflect.Run(ctx, reflect.TrackHealth(s.sa.applicationsListWatch(), &s.healthy), store)
 }
 
 // Healthy reports whether the Applications watch is currently established
@@ -84,15 +76,7 @@ func (s *Snapshot) Run(ctx context.Context) {
 func (s *Snapshot) Healthy() bool { return s.healthy.Load() }
 
 // WaitForSync blocks until the initial Applications LIST has landed or ctx is done.
-// Deterministic - waits on the channel closed by the initial Replace, not a poll.
-func (s *Snapshot) WaitForSync(ctx context.Context) error {
-	select {
-	case <-s.syncedCh:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
+func (s *Snapshot) WaitForSync(ctx context.Context) error { return s.synced.Wait(ctx) }
 
 // Drift returns per-VM drift keyed "namespace/name", computed from the in-memory
 // Application store. It returns nil UNTIL the initial LIST has landed: inventory
@@ -101,7 +85,7 @@ func (s *Snapshot) WaitForSync(ctx context.Context) error {
 // NotTracked. nil instead leaves Sync unset (the benign not-yet-known state), the
 // same as when Argo is disabled. Always non-nil once synced.
 func (s *Snapshot) Drift() map[string]Drift {
-	if !s.synced.Load() {
+	if !s.synced.Done() {
 		return nil
 	}
 	s.driftMu.Lock()
@@ -116,7 +100,7 @@ func (s *Snapshot) Drift() map[string]Drift {
 // inventory build can distinguish "Argo disabled/not-yet-synced" (nil) from "tracked"
 // (non-nil, a repo absent from it simply has no managing Application).
 func (s *Snapshot) ProjectDrift() map[string]model.ProjectSync {
-	if !s.synced.Load() {
+	if !s.synced.Done() {
 		return nil
 	}
 	s.driftMu.Lock()
@@ -132,7 +116,7 @@ func (s *Snapshot) ProjectDrift() map[string]model.ProjectSync {
 // annotation is residue, not a claim. nil before the initial LIST so callers
 // refuse rather than misread.
 func (s *Snapshot) ForeignApps(ownRepo string) map[string]bool {
-	if !s.synced.Load() {
+	if !s.synced.Done() {
 		return nil
 	}
 	own := forge.NormalizeRepoURL(ownRepo)
@@ -158,7 +142,7 @@ func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.Object
 		want[ns] = true
 	}
 	own := forge.NormalizeRepoURL(repo)
-	if !s.synced.Load() || own == "" {
+	if !s.synced.Done() || own == "" {
 		return nil
 	}
 	var out []model.ObjectRef
@@ -209,7 +193,7 @@ func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.Object
 // are the ArgoCD resource's own (e.g. "k8s.ovn.org","UserDefinedNetwork"); namespace is
 // "" for cluster-scoped kinds.
 func (s *Snapshot) ResourceDrift(group, kind, namespace, name string) (Drift, bool) {
-	if !s.synced.Load() {
+	if !s.synced.Done() {
 		return Drift{}, false
 	}
 	s.driftMu.Lock()
@@ -224,7 +208,7 @@ func (s *Snapshot) ResourceDrift(group, kind, namespace, name string) (Drift, bo
 // not on every Application object churn. Rebuilds like the other readers, so it's
 // current as of this call.
 func (s *Snapshot) ObjectDriftGen() uint64 {
-	if !s.synced.Load() {
+	if !s.synced.Done() {
 		return 0
 	}
 	s.driftMu.Lock()
@@ -301,7 +285,7 @@ type AppRef struct {
 // ok=false if the snapshot hasn't synced or no Application manages the VM - the
 // caller (Resync) then falls back to a live lookup.
 func (s *Snapshot) managingApp(namespace, name string) (AppRef, bool) {
-	if !s.synced.Load() {
+	if !s.synced.Done() {
 		return AppRef{}, false
 	}
 	for _, app := range reflect.List(s.apps) {
@@ -350,7 +334,7 @@ func (s *Snapshot) Resync(ctx context.Context, namespace, name string) (model.Re
 // Best-effort: errors are logged, never returned - ArgoCD's own webhook + poll
 // remain as backstops. No-op until the snapshot has synced.
 func (s *Snapshot) RefreshForRepo(ctx context.Context, repoURLs ...string) {
-	if !s.synced.Load() {
+	if !s.synced.Done() {
 		return
 	}
 	want := make(map[string]bool, len(repoURLs))

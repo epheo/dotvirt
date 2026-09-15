@@ -1,11 +1,12 @@
-// Package reflect holds the generic reflector plumbing shared by dotvirt's
-// in-memory snapshots (clusterstate's live VM/VMI/namespace snapshot, argo's
-// drift snapshot, desched's DRS snapshot). The pieces that are genuinely
-// reusable - and subtle enough to be worth defining once - are the store
-// wrapper that turns a stream of watch deltas into a single coalesced
-// "something moved" signal and marks the initial relist complete, and the
-// ListWatch wrapper that turns watch errors into a health signal. Each
-// snapshot composes these and adds its own typed read methods.
+// Package reflect holds the reflector plumbing shared by dotvirt's in-memory
+// snapshots (clusterstate's live VM/VMI/namespace snapshot, argo's drift
+// snapshot, desched's DRS snapshot, netstate's networking catalog). Each
+// snapshot composes these and adds its own typed read methods: the indexer
+// and the reflector start (Run, or RunWhenServed for a CRD that may be
+// absent), the store wrapper that turns a stream of watch deltas into a single
+// coalesced "something moved" signal and marks the initial relist complete,
+// the Ready latch that signal lands on, and the ListWatch wrapper that turns
+// watch errors into a health signal.
 package reflect
 
 import (
