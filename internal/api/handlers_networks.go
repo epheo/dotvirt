@@ -198,10 +198,8 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 			for i := range out.Uplinks {
 				u := &out.Uplinks[i]
 				u.SourceFile = declared("NodeNetworkConfigurationPolicy", "", u.Policy)
-				if s.drift != nil && u.Policy != "" {
-					if d, ok := s.drift.ResourceDrift("nmstate.io", "NodeNetworkConfigurationPolicy", "", u.Policy); ok {
-						u.Sync, u.SyncError = d.Sync, d.Message
-					}
+				if d, ok := s.driftFor("NodeNetworkConfigurationPolicy", "", u.Policy); ok {
+					u.Sync, u.Health, u.SyncError = d.Sync, d.Health, d.Message
 				}
 			}
 		}
@@ -228,22 +226,14 @@ func scopeNetworks(nets []model.Network, visible map[string]bool) []model.Networ
 	return out
 }
 
-// enrichNetworkDrift attaches each segment's own ArgoCD sync/health/apply-error,
-// looked up from the shared Application snapshot by object identity - the same
-// per-object drift plane VMs use. Mutates the scoped copies in place (never the cached
-// catalog, which scopeNetworks already copied). No-op when Argo isn't wired.
+// enrichNetworkDrift attaches each segment's own ArgoCD sync/health/apply-error
+// - the same per-object drift plane VMs use. Mutates the scoped copies in place
+// (never the cached catalog, which scopeNetworks already copied).
 func (s *Server) enrichNetworkDrift(nets []model.Network) {
-	if s.drift == nil {
-		return
-	}
 	for i := range nets {
-		group, ok := backingGroup[nets[i].Backing]
-		if !ok {
-			continue
-		}
 		// UDN/NAD are namespaced; a CUDN is cluster-scoped, so its resource namespace is
 		// empty (Network.Namespace is already "" for shared networks).
-		if d, ok := s.drift.ResourceDrift(group, nets[i].Backing, nets[i].Namespace, nets[i].Name); ok {
+		if d, ok := s.driftFor(nets[i].Backing, nets[i].Namespace, nets[i].Name); ok {
 			nets[i].Sync, nets[i].Health, nets[i].SyncError = d.Sync, d.Health, d.Message
 		}
 	}

@@ -71,6 +71,7 @@ type Uplink struct {
 	SourceFile string `json:"sourceFile,omitempty"`
 	// The policy's own ArgoCD drift, as segments and rules carry it.
 	Sync      SyncStatus `json:"sync,omitempty"`
+	Health    string     `json:"health,omitempty"`
 	SyncError string     `json:"syncError,omitempty"`
 	VLANs     []int      `json:"vlans,omitempty"`  // LLDP-discovered VLAN IDs (6.5)
 	Status    string     `json:"status,omitempty"` // NNCE rollup: Available | Progressing | Failing (6.5)

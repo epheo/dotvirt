@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/epheo/dotvirt/internal/argo"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
@@ -76,21 +77,27 @@ var backingGroup = map[string]string{
 	"NodeNetworkConfigurationPolicy": "nmstate.io",
 }
 
-// enrichPolicyDrift attaches each policy's own ArgoCD sync/health from the shared
-// Application snapshot - the same per-object drift plane VMs and networks use.
+// driftFor is one managed object's ArgoCD sync/health from the shared
+// Application snapshot, addressed by its Backing (also its kind). ok=false when
+// Argo isn't wired, the backing is unmanaged, or no Application manages it.
+func (s *Server) driftFor(backing, namespace, name string) (argo.Drift, bool) {
+	group, ok := backingGroup[backing]
+	if s.drift == nil || !ok {
+		return argo.Drift{}, false
+	}
+	return s.drift.ResourceDrift(group, backing, namespace, name)
+}
+
+// enrichPolicyDrift attaches each policy's own ArgoCD sync/health - the same
+// per-object drift plane VMs and networks use.
 func (s *Server) enrichPolicyDrift(pols []model.Policy) {
 	for i := range pols {
 		s.policyDrift(&pols[i])
 	}
 }
 
-// policyDrift is a no-op when Argo isn't wired or the backing is unmanaged.
 func (s *Server) policyDrift(p *model.Policy) {
-	group, ok := backingGroup[p.Backing]
-	if s.drift == nil || !ok {
-		return
-	}
-	if d, ok := s.drift.ResourceDrift(group, p.Backing, p.Namespace, p.Name); ok {
+	if d, ok := s.driftFor(p.Backing, p.Namespace, p.Name); ok {
 		p.Sync, p.Health, p.SyncError = d.Sync, d.Health, d.Message
 	}
 }
