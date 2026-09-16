@@ -43,17 +43,14 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		Live:     s.state.LiveVMs(),
 	}
 	// Drift comes from the SA-owned Application snapshot (lock-free, watch-fed).
-	// Distinguish three states the inventory must NOT conflate: Argo off (s.drift
-	// nil -> no warning, Sync left unset); Argo configured but the reflector hasn't
-	// completed its initial LIST (s.drift.Drift() is nil -> surface a warning, still
-	// leave Sync unset rather than flashing every VM to NotTracked); and synced
-	// (apply the always-non-nil drift map).
+	// Three states the inventory must NOT conflate: Argo off (s.drift nil: no
+	// warning, Sync left unset); Argo configured but the reflector has not
+	// completed its initial LIST (Drift() nil: warn, still leave Sync unset rather
+	// than flashing every VM to NotTracked); and synced (the always-non-nil drift
+	// map). Drift() is read once, so no window opens between the readiness check
+	// and the read.
 	var warnings []string
 	if s.drift != nil {
-		// Drift() is nil exactly while Argo is configured but its reflector hasn't
-		// finished the initial LIST - surface that as a degradation (Sync left unset,
-		// not a flash of NotTracked); once synced it's an always-non-nil map. One call,
-		// so there's no window between a readiness check and the read.
 		if d := s.drift.Drift(); d != nil {
 			in.Drift = d
 			// Same snapshot, same readiness gate: the per-project rollup covers every

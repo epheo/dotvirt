@@ -391,7 +391,6 @@ func severityRank(s string) int {
 	}
 }
 
-// consumers turns a topk vector into sorted ConsumerVM rows (highest first).
 func consumers(vec []labeledValue) []model.ConsumerVM {
 	out := make([]model.ConsumerVM, 0, len(vec))
 	for _, lv := range vec {

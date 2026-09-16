@@ -29,7 +29,6 @@
 	inventory.loadOptions();
 	const options = $derived(inventory.options);
 
-	// Form state
 	let name = $state('');
 	// Default to the first project; seeded in the mount effect to avoid capturing
 	// only the initial prop value.

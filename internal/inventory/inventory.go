@@ -127,7 +127,6 @@ func groupNamespaces(byNS map[string][]model.VM) []model.ProjectNamespace {
 	return out
 }
 
-// splitKey splits a "namespace/name" snapshot key.
 func splitKey(k string) (ns, name string, ok bool) {
 	return strings.Cut(k, "/")
 }

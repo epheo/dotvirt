@@ -195,7 +195,6 @@ func template(s Spec, rootVol string) map[string]any {
 	disks := []any{namedDisk("rootdisk")}
 	volumes := []any{dataVolumeMount("rootdisk", rootVol)}
 
-	// Extra disks reference the blank DataVolume templates added in vmSpec.
 	for _, d := range s.ExtraDisks {
 		disks = append(disks, namedDisk(d.Name))
 		volumes = append(volumes, dataVolumeMount(d.Name, extraDiskVol(s.Name, d.Name)))

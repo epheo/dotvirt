@@ -153,9 +153,3 @@ type StorageClass struct {
 	Name    string `json:"name"`
 	Default bool   `json:"default,omitempty"` // the cluster's default class annotation
 }
-
-//
-// dotvirt presents OVN-K networking in port-group terms: a Network is a port group a
-// VM NIC attaches to; an Uplink is the physical-adapter binding;
-// a PhysicalAdapter is one node NIC. The OVN-K objects behind them (UDN, CUDN,
-// localnet, NAD) and nmstate (NNCP, NNS) never surface to the user.

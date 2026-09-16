@@ -142,14 +142,12 @@ func checkoutBranch(repo *git.Repository, wt *git.Worktree, branch string) error
 
 	remoteRef := plumbing.NewRemoteReferenceName("origin", branch)
 	if rr, err := repo.Reference(remoteRef, true); err == nil {
-		// Create local branch at the remote branch's commit.
 		if err := repo.Storer.SetReference(plumbing.NewHashReference(local, rr.Hash())); err != nil {
 			return err
 		}
 		return wt.Checkout(&git.CheckoutOptions{Branch: local})
 	}
 
-	// Branch exists nowhere yet: create it from current HEAD (new feature branch).
 	return wt.Checkout(&git.CheckoutOptions{Branch: local, Create: true})
 }
 

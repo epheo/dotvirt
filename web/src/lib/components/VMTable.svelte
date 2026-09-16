@@ -142,7 +142,6 @@
 		{ key: 'sync', label: 'Sync' },
 	];
 
-	// --- selection ---
 	const allSelected = $derived(rows.length > 0 && rows.every((vm) => selected.has(vmKey(vm))));
 	const someSelected = $derived(rows.some((vm) => selected.has(vmKey(vm))) && !allSelected);
 

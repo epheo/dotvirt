@@ -7,10 +7,10 @@
 // or a TTL (invalidation falls out of comparing a version).
 //
 // A single channel can only notify ONE consumer; the fan-out is what lets the
-// exporter, the proposals refresher, and the inventory hub ride the same events.
-// Typed kinds keep a consumer from waking on churn it doesn't care about - the
-// exporter depends on VMSpecChanged + NamespaceChanged, so a VMI status heartbeat
-// (LiveChanged) never wakes it.
+// inventory hub and the proposals refresher ride the same events. Typed kinds
+// keep a consumer from waking on churn it doesn't care about - the proposals
+// refresher subscribes to GitChanged alone, so a VMI status heartbeat
+// (LiveChanged) never re-queries the forge.
 package eventbus
 
 import (
@@ -72,7 +72,6 @@ type subscription struct {
 	ch    chan struct{}
 }
 
-// New builds an empty Bus.
 func New() *Bus {
 	return &Bus{subs: map[*subscription]struct{}{}}
 }

@@ -58,7 +58,6 @@ type Feed struct {
 	merges map[string]map[int]Merge // repo -> PR number -> merge
 }
 
-// New builds an empty Feed publishing TaskChanged on bus.
 func New(bus *eventbus.Bus) *Feed {
 	return &Feed{bus: bus, merges: map[string]map[int]Merge{}}
 }

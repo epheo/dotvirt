@@ -136,7 +136,6 @@ func AdminNetworkPolicyManifest(s AdminNetworkPolicySpec) (path string, content 
 		for i, r := range rules {
 			switch r.Action {
 			case "Allow", "Deny":
-				// always valid
 			case "Pass":
 				if s.Baseline {
 					return nil, fmt.Errorf("rule %d: a baseline policy has no Pass action (Allow or Deny only)", i+1)

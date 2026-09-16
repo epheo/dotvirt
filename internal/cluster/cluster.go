@@ -390,12 +390,10 @@ func (c *Client) Migrate(ctx context.Context, namespace, name, targetNode string
 	return c.kubevirt.VirtualMachine(namespace).Migrate(ctx, name, opts)
 }
 
-// Pause freezes the running VMI (vCPUs stopped, memory retained).
 func (c *Client) Pause(ctx context.Context, namespace, name string) error {
 	return c.kubevirt.VirtualMachineInstance(namespace).Pause(ctx, name, &kubevirtcorev1.PauseOptions{})
 }
 
-// Unpause resumes a paused VMI.
 func (c *Client) Unpause(ctx context.Context, namespace, name string) error {
 	return c.kubevirt.VirtualMachineInstance(namespace).Unpause(ctx, name, &kubevirtcorev1.UnpauseOptions{})
 }

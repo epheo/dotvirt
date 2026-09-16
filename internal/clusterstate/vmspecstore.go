@@ -30,7 +30,6 @@ func newVMSpecStore(idx cache.Indexer, onSpec, onLive, onSynced func()) cache.In
 	return &vmSpecStore{Indexer: reflect.NewStore(idx, onLive, onSynced), gen: map[string]int64{}, onSpec: onSpec}
 }
 
-// keyAndGen extracts the namespace/name key and generation of a VM object.
 func keyAndGen(obj any) (key string, generation int64, ok bool) {
 	m, isMeta := obj.(metav1.Object)
 	if !isMeta {

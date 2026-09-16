@@ -1,6 +1,9 @@
 package model
 
-// Networks: the port-group abstraction over OVN-K.
+// dotvirt presents OVN-K networking in port-group terms: a Network is a port group
+// a VM NIC attaches to, an Uplink is the physical-adapter binding, and a
+// PhysicalAdapter is one node NIC. The OVN-K objects behind them (UDN, CUDN,
+// localnet, NAD) and nmstate (NNCP, NNS) never surface to the user.
 
 // NetworkKind classifies a port group by how a virt admin reads it.
 type NetworkKind string

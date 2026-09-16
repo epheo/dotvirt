@@ -176,7 +176,6 @@
 			{/if}
 			<ErrorNote {error} class="mt-2" />
 		{:else}
-			<!-- Progress view. -->
 			<div class="space-y-3 py-2">
 				{#snippet step(label: string, active: boolean, complete: boolean)}
 					<div class="flex items-center gap-2 text-sm">

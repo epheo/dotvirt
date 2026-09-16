@@ -150,7 +150,6 @@ func (s *Store) loadLocked(user, project string) (map[string]Entry, error) {
 	data, err := os.ReadFile(p)
 	switch {
 	case os.IsNotExist(err):
-		// fresh draft
 	case err != nil:
 		return nil, fmt.Errorf("read draft %s/%s: %w", user, project, err)
 	default:

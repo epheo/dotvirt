@@ -86,7 +86,6 @@ func (r *DotvirtReconciler) exposureFor(dv *dotvirtv1alpha1.Dotvirt, name string
 	return nil
 }
 
-// exposure builds the UI ingress object on spec.ingress.host.
 func (r *DotvirtReconciler) exposure(dv *dotvirtv1alpha1.Dotvirt) client.Object {
 	return r.exposureFor(dv, install.AppName, install.HTTPPort, dv.Spec.Ingress.Host)
 }
