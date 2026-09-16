@@ -69,7 +69,7 @@ func EgressFirewallManifest(s EgressFirewallSpec) (path string, content []byte, 
 	}
 	out, err := yaml.Marshal(map[string]any{
 		"apiVersion": model.KindEgressFW.APIVersion(),
-		"kind":       "EgressFirewall",
+		"kind":       model.KindEgressFW.Kind,
 		"metadata":   map[string]any{"name": "default", "namespace": s.Namespace},
 		"spec":       map[string]any{"egress": egress},
 	})
@@ -107,7 +107,7 @@ func EgressIPManifest(s EgressIPSpec) (path string, content []byte, err error) {
 	}
 	out, err := yaml.Marshal(map[string]any{
 		"apiVersion": model.KindEgressIP.APIVersion(),
-		"kind":       "EgressIP",
+		"kind":       model.KindEgressIP.Kind,
 		"metadata":   map[string]any{"name": s.Name},
 		"spec": map[string]any{
 			"egressIPs":         toAny(s.EgressIPs),
@@ -150,7 +150,7 @@ func ExternalRouteManifest(s ExternalRouteSpec) (path string, content []byte, er
 	}
 	out, err := yaml.Marshal(map[string]any{
 		"apiVersion": model.KindExtRoute.APIVersion(),
-		"kind":       "AdminPolicyBasedExternalRoute",
+		"kind":       model.KindExtRoute.Kind,
 		"metadata":   map[string]any{"name": s.Name},
 		"spec": map[string]any{
 			"from":     map[string]any{"namespaceSelector": nsNameSelector(s.Namespaces)},

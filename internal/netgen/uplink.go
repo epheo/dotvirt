@@ -41,7 +41,7 @@ func UplinkManifest(s UplinkSpec) (path string, content []byte, err error) {
 	}
 	out, err := yaml.Marshal(map[string]any{
 		"apiVersion": model.KindNNCP.APIVersion(),
-		"kind":       "NodeNetworkConfigurationPolicy",
+		"kind":       model.KindNNCP.Kind,
 		"metadata":   map[string]any{"name": UplinkPolicyName(s.Name)},
 		"spec": map[string]any{
 			"nodeSelector": sel,

@@ -75,7 +75,7 @@ func NetworkPolicyManifest(s NetworkPolicySpec) (path string, content []byte, er
 	}
 	out, err := yaml.Marshal(map[string]any{
 		"apiVersion": model.KindNetpol.APIVersion(),
-		"kind":       "NetworkPolicy",
+		"kind":       model.KindNetpol.Kind,
 		"metadata":   map[string]any{"name": s.Name, "namespace": s.Namespace},
 		"spec":       spec,
 	})

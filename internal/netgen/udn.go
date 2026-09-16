@@ -62,7 +62,7 @@ func projectUDN(s Spec) (string, []byte, error) {
 	}
 	out, err := yaml.Marshal(map[string]any{
 		"apiVersion": model.KindUDN.APIVersion(),
-		"kind":       "UserDefinedNetwork",
+		"kind":       model.KindUDN.Kind,
 		"metadata":   map[string]any{"name": s.Name, "namespace": s.Namespace},
 		"spec":       map[string]any{"topology": "Layer2", "layer2": layer2Spec(s.Subnets)},
 	})
@@ -87,7 +87,7 @@ func sharedCUDN(s Spec) (string, []byte, error) {
 	}
 	out, err := yaml.Marshal(map[string]any{
 		"apiVersion": model.KindCUDN.APIVersion(),
-		"kind":       "ClusterUserDefinedNetwork",
+		"kind":       model.KindCUDN.Kind,
 		"metadata":   map[string]any{"name": s.Name},
 		"spec": map[string]any{
 			"namespaceSelector": nsNameSelector(s.Namespaces),
@@ -133,7 +133,7 @@ func vlanCUDN(s Spec) (string, []byte, error) {
 	}
 	out, err := yaml.Marshal(map[string]any{
 		"apiVersion": model.KindCUDN.APIVersion(),
-		"kind":       "ClusterUserDefinedNetwork",
+		"kind":       model.KindCUDN.Kind,
 		"metadata":   map[string]any{"name": s.Name},
 		"spec": map[string]any{
 			"namespaceSelector": nsNameSelector(s.Namespaces),
