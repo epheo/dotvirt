@@ -8,5 +8,6 @@ packages:
     # kinds.go is Go-side wiring (the managed-kind table), not a wire type.
     exclude_files:
       - "kinds.go"
-      # file.go carries repo bytes between Go packages, never over the wire.
+      # file.go is the repo layout and its bytes between Go packages, never
+      # over the wire.
       - "file.go"

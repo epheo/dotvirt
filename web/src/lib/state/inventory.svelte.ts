@@ -111,12 +111,14 @@ class InventoryStore {
 		this.error = '';
 	}
 
-	// The catalog is fetched once per session, so a transient boot error would
-	// leave sizing and storage-class reads on placeholders until reload: the
-	// pull retries with backoff, and the Catalog re-pulls on entry to heal a
+	// The catalog is fetched once per session: a call with it loaded is a no-op.
+	// A transient boot error would leave sizing and storage-class reads on
+	// placeholders until reload, so the pull retries with backoff and the
+	// dialogs that need the catalog call again on open, which re-pulls after a
 	// failure that outlasted the retries. Concurrent callers share one pull.
 	loadOptions(): Promise<void> {
 		if (this.#optionsPull) return this.#optionsPull;
+		if (this.options && !this.optionsError) return Promise.resolve();
 		const gen = this.#generation;
 		const pull = withRetry(() => api.options())
 			.then((o) => {

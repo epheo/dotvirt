@@ -168,11 +168,12 @@
 				<SelectInput
 					bind:value={row.action}
 					size="sm"
-					class="w-auto! {row.action === 'Deny'
+					width="w-auto"
+					class={row.action === 'Deny'
 						? 'text-danger-ink'
 						: row.action === 'Allow'
 							? 'text-ok-ink'
-							: 'text-ink-soft'}"
+							: 'text-ink-soft'}
 				>
 					<option value="Allow">Allow</option>
 					<option value="Deny">Deny</option>
@@ -184,10 +185,10 @@
 					bind:value={row.value}
 					keyPlaceholder="tier"
 					valuePlaceholder="web"
-					keyClass="w-20!"
-					valueClass="w-20!"
+					keyWidth="w-20"
+					valueWidth="w-20"
 				/>
-				<ProtoPortInput bind:proto={row.proto} bind:port={row.port} portClass="w-16" />
+				<ProtoPortInput bind:proto={row.proto} bind:port={row.port} portWidth="w-16" />
 				<button
 					onclick={() => rules.remove(i)}
 					disabled={rows.length === 1}

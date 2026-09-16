@@ -49,7 +49,7 @@ func (s *Server) platformCreate(ref ssarRef, resource draft.Resource) http.Handl
 // found). what names the kind in the missing-namespace error, article included.
 func (s *Server) namespacedCreate(what string, resource draft.Resource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		raw, p, ok := peek[nsPeek](w, r)
+		raw, p, ok := readBody[nsPeek](w, r, false)
 		if !ok {
 			return
 		}
@@ -71,10 +71,10 @@ func (s *Server) namespacedCreate(what string, resource draft.Resource) http.Han
 // lands in the tenant repo owning its namespace; a shared/VLAN CUDN is
 // cluster-scoped, so it routes to the platform tier.
 func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
-	raw, p, ok := peek[struct {
+	raw, p, ok := readBody[struct {
 		Scope     string `json:"scope"`
 		Namespace string `json:"namespace"`
-	}](w, r)
+	}](w, r, false)
 	if !ok {
 		return
 	}
@@ -100,9 +100,9 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 // (AdminNetworkPolicy or the baseline default) - always platform-tier and admin-only,
 // gated on the caller's authority to create the matching kind.
 func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.Request) {
-	raw, p, ok := peek[struct {
+	raw, p, ok := readBody[struct {
 		Baseline bool `json:"baseline"`
-	}](w, r)
+	}](w, r, false)
 	if !ok {
 		return
 	}
@@ -155,10 +155,6 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	// Per-object drift: attach each segment's own ArgoCD sync/health at serve time
 	// (always fresh, off the cached catalog) - the same surface VMs carry.
 	s.enrichNetworkDrift(out.Networks)
-	// Authoring signal for the UI: a platform repo must be configured and the caller
-	// must be able to create cluster-scoped networks (the platform-operator signal,
-	// also satisfied by cluster-admins). Gates the New VLAN / Add Uplink / New
-	// Namespace actions, matching the platformScope gate the create routes enforce.
 	// Per-action authoring authority: the same SSARs the create handlers enforce, so
 	// the UI gates each button precisely. CanManage stays the coarse CUDN signal that
 	// gates the platform-draft view. All false when no platform repo is configured.
@@ -191,8 +187,8 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		if out.Caps.Uplink {
 			for i := range out.Uplinks {
 				u := &out.Uplinks[i]
-				u.SourceFile = declared("NodeNetworkConfigurationPolicy", "", u.Policy)
-				if d, ok := s.driftFor("NodeNetworkConfigurationPolicy", "", u.Policy); ok {
+				u.SourceFile = declared(model.KindNNCP.Kind, "", u.Policy)
+				if d, ok := s.driftFor(model.KindNNCP.Kind, "", u.Policy); ok {
 					u.Sync, u.Health, u.SyncError = d.Sync, d.Health, d.Message
 				}
 			}

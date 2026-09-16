@@ -19,7 +19,7 @@ export type Tier0Initial =
 
 // Every modal the shell can show, as one discriminated union - the shell
 // renders exactly one, and opening any modal is a single assignment.
-type AppModal =
+export type AppModal =
 	// namespace on the create forms is the preselected target: the one the
 	// opener's view is focused on, so a New from inside a project lands there.
 	| { kind: 'newVM'; namespaces: string[] | null; namespace?: string } // null = all creatable namespaces
@@ -107,6 +107,9 @@ class Ui {
 	dismissToast(id: number) {
 		this.toasts = this.toasts.filter((t) => t.id !== id);
 	}
+	// An arrow so it can be handed to action() unbound: the primitive takes a
+	// reporter rather than importing the shell.
+	toastError = (msg: string) => this.showToast(msg, { kind: 'error' });
 
 	// The Changes section is a route (deep-linkable, back-button-walkable); this is
 	// the one navigation every review affordance shares. A target lands on one

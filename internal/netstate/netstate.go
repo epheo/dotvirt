@@ -29,26 +29,23 @@ import (
 	"github.com/epheo/dotvirt/internal/reflect"
 )
 
-// gvr is the kind table's coordinates for one watched kind.
-func gvr(kind string) schema.GroupVersionResource { return cluster.GVR(model.MustKind(kind)) }
-
 var (
-	gvrUDN  = gvr("UserDefinedNetwork")
-	gvrCUDN = gvr("ClusterUserDefinedNetwork")
-	gvrNAD  = gvr("NetworkAttachmentDefinition")
-	gvrNNCP = gvr("NodeNetworkConfigurationPolicy")
+	gvrUDN  = cluster.GVR(model.KindUDN)
+	gvrCUDN = cluster.GVR(model.KindCUDN)
+	gvrNAD  = cluster.GVR(model.KindNAD)
+	gvrNNCP = cluster.GVR(model.KindNNCP)
 	// Node state is read, never declared, so the table does not list it; it
 	// shares nmstate's group with the policy.
 	gvrNNS = schema.GroupVersionResource{Group: gvrNNCP.Group, Version: "v1beta1", Resource: "nodenetworkstates"}
 
 	// The policy plane (see policies.go): the DFW tiers and the Tier-0/Tier-1
 	// firewall + routing objects the Security view reads.
-	gvrNetpol   = gvr("NetworkPolicy")
-	gvrANP      = gvr("AdminNetworkPolicy")
-	gvrBANP     = gvr("BaselineAdminNetworkPolicy")
-	gvrEgressFW = gvr("EgressFirewall")
-	gvrEgressIP = gvr("EgressIP")
-	gvrExtRoute = gvr("AdminPolicyBasedExternalRoute")
+	gvrNetpol   = cluster.GVR(model.KindNetpol)
+	gvrANP      = cluster.GVR(model.KindANP)
+	gvrBANP     = cluster.GVR(model.KindBANP)
+	gvrEgressFW = cluster.GVR(model.KindEgressFW)
+	gvrEgressIP = cluster.GVR(model.KindEgressIP)
+	gvrExtRoute = cluster.GVR(model.KindExtRoute)
 )
 
 // Snapshot holds the watch-fed networking stores. Build with New, start with Run;

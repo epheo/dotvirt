@@ -191,8 +191,9 @@ func (r *Repo) CommitDiff(hash string) (CommitDiff, error) {
 }
 
 // ErrNoBranch: the mirror holds no such branch. A head pushed moments ago
-// arrives with the next fetch, so callers say "not yet" rather than fail.
-var ErrNoBranch = errors.New("branch not in the mirror")
+// arrives with the next fetch, so it is classified as a retryable outage
+// (503) rather than a failure; callers with a better answer override it.
+var ErrNoBranch = fmt.Errorf("%w: branch not mirrored yet", model.ErrUnavailable)
 
 // ErrNoFile: a commit's tree has no such file (FileAt).
 var ErrNoFile = errors.New("file not in the commit")

@@ -126,11 +126,6 @@
 		{/if}
 	</div>
 	{#snippet footer()}
-		<button
-			onclick={onclose}
-			class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong"
-		>
-			Close
-		</button>
+		<Button variant="ghost" class="ml-auto" onclick={onclose}>Close</Button>
 	{/snippet}
 </Modal>

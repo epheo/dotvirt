@@ -1,12 +1,10 @@
 package changeset
 
 import (
-	"context"
 	"errors"
 	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
@@ -39,7 +37,7 @@ spec:
 
 func TestStageDeployFromTemplate(t *testing.T) {
 	bare := seedBareFiles(t, map[string][]byte{"templates/base.yaml": []byte(libraryTemplate)})
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
@@ -66,7 +64,7 @@ func TestStageDeployFromTemplate(t *testing.T) {
 
 func TestStageDeployFromTemplateGeneratesName(t *testing.T) {
 	bare := seedBareFiles(t, map[string][]byte{"templates/base.yaml": []byte(libraryTemplate)})
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	view, err := c.StageDeployFromTemplate(auth.Identity{Username: "alice"},
 		project.ProjectInfo{Name: "p", Repo: bare}, project.ProjectInfo{Name: "p", Repo: bare},
 		model.DeployTemplateRequest{Template: "base", Namespace: "alpha"})
@@ -82,7 +80,7 @@ func TestStageDeployFromTemplateSharedLibrary(t *testing.T) {
 	// The template lives in the platform repo; the VM stages into the tenant's.
 	platform := seedBareFiles(t, map[string][]byte{"templates/base.yaml": []byte(libraryTemplate)})
 	tenant := seedBareFiles(t, nil)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	view, err := c.StageDeployFromTemplate(auth.Identity{Username: "alice"},
 		project.ProjectInfo{Name: "p", Repo: tenant}, project.ProjectInfo{Name: "platform", Repo: platform},
 		model.DeployTemplateRequest{Library: "platform", Template: "base", Namespace: "alpha", Name: "web-01"})
@@ -99,7 +97,7 @@ func TestStageDeployFromTemplateErrors(t *testing.T) {
 		"templates/base.yaml": []byte(libraryTemplate),
 		"alpha/web-01.yaml":   []byte("apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web-01\n  namespace: alpha\n"),
 	})
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
@@ -127,7 +125,7 @@ func TestStageDeployFromTemplateReadFailureIsNotAbsence(t *testing.T) {
 	library := seedBareFiles(t, map[string][]byte{"templates/base.yaml": []byte(libraryTemplate)})
 	target := seedBareFiles(t, nil)
 	gitRun(t, target, "branch", "-m", "main", "trunk")
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 
 	_, err := c.StageDeployFromTemplate(id,
@@ -149,7 +147,7 @@ func TestStageDeployFromTemplateReadFailureIsNotAbsence(t *testing.T) {
 // manifest's run state, leaving the default deploy untouched.
 func TestStageDeployFromTemplatePowerOn(t *testing.T) {
 	bare := seedBareFiles(t, map[string][]byte{"templates/base.yaml": []byte(libraryTemplate)})
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
@@ -177,7 +175,7 @@ func TestStageDeployFromTemplatePowerOn(t *testing.T) {
 
 func TestStageUpdateTemplate(t *testing.T) {
 	bare := seedBareFiles(t, map[string][]byte{"templates/base.yaml": []byte(libraryTemplate)})
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
@@ -206,7 +204,7 @@ func TestStageUpdateTemplate(t *testing.T) {
 
 func TestStageUpdateTemplateErrors(t *testing.T) {
 	bare := seedBareFiles(t, map[string][]byte{"templates/base.yaml": []byte(libraryTemplate)})
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
@@ -231,7 +229,7 @@ func TestStageUpdateTemplateErrors(t *testing.T) {
 func TestStageSaveTemplate(t *testing.T) {
 	vm := "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\nspec:\n  runStrategy: Always\n"
 	bare := seedBareFiles(t, map[string][]byte{"alpha/web.yaml": []byte(vm)})
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
@@ -262,7 +260,7 @@ func TestStageSaveTemplateErrors(t *testing.T) {
 		"alpha/web.yaml":          []byte(vm),
 		"templates/existing.yaml": []byte(libraryTemplate),
 	})
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
@@ -290,14 +288,7 @@ func TestProposeCommitsTemplateEntries(t *testing.T) {
 		"templates/base.yaml": []byte(libraryTemplate),
 		"alpha/web.yaml":      []byte("apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\nspec:\n  runStrategy: Always\n"),
 	})
-	// A pushing RepoSet: the assertion is the bare repo's proposed branch.
-	store, err := draft.Open(t.TempDir())
-	if err != nil {
-		t.Fatalf("draft.Open: %v", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	c := New(store, git.NewRepoSet(ctx, "", nil, true, nil, time.Hour), nil, nil, nil, nil, "main", "dotvirt/proposed")
+	c := newTestCoordinator(t, true)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 

@@ -15,7 +15,7 @@ import (
 // and a file the commit lacked are refused.
 func TestRestoreVersionStagesPastManifest(t *testing.T) {
 	bare, _, mergeHash := seedMerged(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 	id := auth.Identity{Username: "admin"}
 
@@ -63,7 +63,7 @@ func TestRestoreVersionStagesPastManifest(t *testing.T) {
 // A namespace's history is the commits that touched its directory.
 func TestNamespaceHistoryFollowsDirectory(t *testing.T) {
 	bare, _, mergeHash := seedMerged(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
 	alpha, err := c.NamespaceHistory(proj, "alpha", 25)

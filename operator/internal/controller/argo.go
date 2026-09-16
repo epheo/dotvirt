@@ -29,7 +29,10 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	argoNS, argoSA := rc.argoNS, rc.argoSA
 	platformRepo := dv.Spec.Forge.PlatformRepo
 	// The plugin generator reads the appset token from the ArgoCD namespace, so
-	// mirror the generated one there.
+	// mirror the generated one there. Dry-run skips both this and the TLS trust
+	// merge: the mirror copies a Secret the (skipped) secrets phase never
+	// generated, and the trust merge writes a shared, unlabeled ConfigMap outside
+	// the render. The rendered objects below still validate against the API server.
 	if !r.DryRun {
 		if err := r.mirrorAppsetToken(ctx, dv, argoNS); err != nil {
 			return nil, err
@@ -64,6 +67,10 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 		if err := r.apply(ctx, obj); err != nil {
 			return nil, failPhase("ApplyFailed", err)
 		}
+	}
+	if r.DryRun {
+		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionArgoReady, "appset-token mirror and forge TLS trust")
+		return nil, nil
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionArgoReady, metav1.ConditionTrue, "Ready", "argo resources applied")
 	return nil, nil

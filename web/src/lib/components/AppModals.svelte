@@ -33,7 +33,7 @@
 	const close = () => (ui.modal = null);
 
 	// The per-VM staged-changes modal (opened from a Staged badge).
-	const discardOp = action({ toast: true }); // a failure leaves the modal open to retry
+	const discardOp = action({ toast: ui.toastError }); // a failure leaves the modal open to retry
 	const stagedItem = $derived(
 		m?.kind === 'staged' ? (drafts.stagedByKey.get(vmKey(m.vm)) ?? null) : null,
 	);

@@ -53,9 +53,7 @@ type Snapshot struct {
 // NewSnapshot builds the Application snapshot over the SA argo client. bus may be
 // nil (signalling disabled, e.g. in tests).
 func NewSnapshot(sa *Client, bus *eventbus.Bus) *Snapshot {
-	s := &Snapshot{sa: sa, apps: reflect.NewIndexer(), bus: bus}
-	s.healthy.Store(true) // optimistic until a list/watch actually errors
-	return s
+	return &Snapshot{sa: sa, apps: reflect.NewIndexer(), bus: bus}
 }
 
 // Run starts the Applications reflector; it owns its own relist/backoff and stops

@@ -13,7 +13,6 @@ rules:
   - deletecollection
   - get
   - patch
-  - update
 - apiGroups:
   - ""
   resources:

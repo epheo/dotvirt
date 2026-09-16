@@ -38,7 +38,7 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 // handleCreate stages a new VM. The path carries no namespace, so we peek the
 // spec's namespace to pick the target project.
 func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
-	raw, p, ok := peek[nsPeek](w, r)
+	raw, p, ok := readBody[nsPeek](w, r, false)
 	if !ok {
 		return
 	}

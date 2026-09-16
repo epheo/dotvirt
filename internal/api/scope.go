@@ -87,12 +87,10 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 }
 
 // ssarCached answers one authorization probe behind the per-(token, key),
-// rbacVersion-stamped cache - for signals read on polled or broadcast paths,
-// where an uncached SSAR would post to the apiserver per request. A
-// RoleBinding/namespace move invalidates lazily via the version stamp; the TTL
-// backstops the cluster-scoped RBAC changes the version doesn't observe (see
-// visibleTTL). Mutating routes keep their uncached platformScope SSAR - a
-// write deserves a fresh answer.
+// rbacVersion-stamped cache, so a signal read on a polled or broadcast path
+// does not post an SSAR to the apiserver per request. A RoleBinding/namespace
+// move invalidates lazily via the version stamp; the TTL backstops the
+// cluster-scoped RBAC changes the version doesn't observe (see visibleTTL).
 func (s *Server) ssarCached(id auth.Identity, key string, probe func() bool) bool {
 	ver := s.rbacVersion()
 	k := restfactory.TokenKey(id.Token) + "\x00" + key
@@ -168,16 +166,16 @@ func (s *Server) vmScope(w http.ResponseWriter, r *http.Request) (sc scope, ns, 
 // projects them to the UI, and the authoring signal ORs a subset - adding a
 // platform kind touches the table, this list and its routes.
 var (
-	ssarCUDN        = ssarFor(model.MustKind("ClusterUserDefinedNetwork"))
-	ssarUplink      = ssarFor(model.MustKind("NodeNetworkConfigurationPolicy"))
-	ssarNamespace   = ssarFor(model.MustKind("Namespace"))
-	ssarEgressIP    = ssarFor(model.MustKind("EgressIP"))
-	ssarExtRoute    = ssarFor(model.MustKind("AdminPolicyBasedExternalRoute"))
-	ssarANP         = ssarFor(model.MustKind("AdminNetworkPolicy"))
-	ssarBANP        = ssarFor(model.MustKind("BaselineAdminNetworkPolicy"))
-	ssarDescheduler = ssarFor(model.MustKind("KubeDescheduler"))
-	ssarMachineCfg  = ssarFor(model.MustKind("MachineConfig"))
-	ssarVMTemplate  = ssarFor(model.MustKind("VirtualMachineTemplate"))
+	ssarCUDN        = ssarFor(model.KindCUDN)
+	ssarUplink      = ssarFor(model.KindNNCP)
+	ssarNamespace   = ssarFor(model.KindNS)
+	ssarEgressIP    = ssarFor(model.KindEgressIP)
+	ssarExtRoute    = ssarFor(model.KindExtRoute)
+	ssarANP         = ssarFor(model.KindANP)
+	ssarBANP        = ssarFor(model.KindBANP)
+	ssarDescheduler = ssarFor(model.KindDesched)
+	ssarMachineCfg  = ssarFor(model.KindMachCfg)
+	ssarVMTemplate  = ssarFor(model.KindTemplate)
 )
 
 // platformAuthorResources are the create-SSARs that signal platform-tier
@@ -270,10 +268,8 @@ func byNamespace(ns string) projectPicker {
 // byName picks the project named want (for whole-draft routes carrying ?project=).
 func byName(want string) projectPicker {
 	return func(projects []project.ProjectInfo) (project.ProjectInfo, string, bool) {
-		for _, p := range projects {
-			if p.Name == want {
-				return p, "", true
-			}
+		if p, ok := findProject(projects, want); ok {
+			return p, "", true
 		}
 		return project.ProjectInfo{}, "no visible project by that name", false
 	}
@@ -289,12 +285,7 @@ func (s *Server) AllProjects() []project.ProjectInfo {
 }
 
 func (s *Server) projectByName(name string) (project.ProjectInfo, bool) {
-	for _, p := range s.AllProjects() {
-		if p.Name == name {
-			return p, true
-		}
-	}
-	return project.ProjectInfo{}, false
+	return findProject(s.AllProjects(), name)
 }
 
 // draftScope resolves the whole-draft routes (GET/DELETE/propose) that carry the
@@ -339,8 +330,8 @@ const platformProjectName = "platform"
 // SIGNAL (the user never applies it; Argo does, from the platform repo), so the
 // author-time check matches the apply-time AppProject boundary.
 func (s *Server) platformScope(w http.ResponseWriter, r *http.Request, ref ssarRef) (scope, bool) {
-	return s.platformScopeWith(w, r, func(ctx context.Context, _ auth.Identity, c *cluster.Client) bool {
-		return c.CanCreateClusterResource(ctx, ref.group, ref.resource)
+	return s.platformScopeWith(w, r, func(ctx context.Context, id auth.Identity, c *cluster.Client) bool {
+		return s.canCreateCached(ctx, id, c, ref)
 	}, "not authorized to create "+ref.resource)
 }
 

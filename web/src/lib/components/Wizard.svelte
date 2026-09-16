@@ -30,7 +30,7 @@
 		footerHint = '',
 		icon,
 		onsubmit,
-		onstaged,
+		onsuccess,
 		onclose,
 	}: {
 		title: string;
@@ -43,8 +43,9 @@
 		// The staging call's response is irrelevant here: success means "staged".
 		onsubmit: () => Promise<unknown>;
 		// Replaces the close after a successful stage, for a wizard with a screen
-		// still to show (the VM create's credentials reveal).
-		onstaged?: () => void;
+		// still to show (the VM create's credentials reveal). Unlike StageModal's
+		// onstaged, which runs in addition to the close.
+		onsuccess?: () => void;
 		onclose: () => void;
 	} = $props();
 
@@ -55,7 +56,7 @@
 		if (!canFinish) return;
 		if (await op.run(onsubmit)) {
 			ui.toastStaged();
-			(onstaged ?? onclose)();
+			(onsuccess ?? onclose)();
 		}
 	}
 
@@ -112,16 +113,8 @@
 	<ErrorNote error={op.error} class="mx-5 mb-1" />
 	{#snippet footer()}
 		{#if footerHint}<span class="text-xs text-ink-faint">{footerHint}</span>{/if}
-		<button
-			onclick={onclose}
-			class="ml-auto rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong">Cancel</button
-		>
-		<button
-			onclick={back}
-			disabled={current === 0}
-			class="rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong disabled:text-ink-faint"
-			>Back</button
-		>
+		<Button variant="ghost" class="ml-auto" onclick={onclose}>Cancel</Button>
+		<Button variant="ghost" onclick={back} disabled={current === 0}>Back</Button>
 		{#if last}
 			<Button onclick={submit} disabled={!canFinish || op.busy}
 				>{op.busy ? 'Staging…' : finishLabel}</Button

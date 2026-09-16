@@ -110,7 +110,7 @@
 	<SelectInput
 		value={tenant}
 		size="sm"
-		class="w-auto!"
+		width="w-auto"
 		onchange={(e) => setTenant(e.currentTarget.value)}
 		aria-label="Filter by tenant"
 	>
@@ -123,7 +123,7 @@
 		type="search"
 		bind:value={query}
 		size="sm"
-		class="w-64!"
+		width="w-64"
 		aria-label="Filter policies"
 		placeholder="Filter by name, target, or rule"
 	/>

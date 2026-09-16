@@ -45,7 +45,8 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 // to its manifest here, once, so the preview shows the bytes propose commits and
 // a spec the renderer refuses fails at the form rather than at propose.
 func (c *Coordinator) StageCreateVM(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	if err := requireRepo(proj); err != nil {
+	read, err := c.read(proj)
+	if err != nil {
 		return model.DraftView{}, err
 	}
 	var spec vmgen.Spec
@@ -55,6 +56,9 @@ func (c *Coordinator) StageCreateVM(id auth.Identity, proj project.ProjectInfo, 
 	path, content, err := vmgen.Manifest(spec)
 	if err != nil {
 		return model.DraftView{}, invalid(err)
+	}
+	if err := c.requireUndeclaredVM(read, spec.Namespace, spec.Name); err != nil {
+		return model.DraftView{}, err
 	}
 	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
 		Kind:       draft.KindCreate,
@@ -67,6 +71,22 @@ func (c *Coordinator) StageCreateVM(id auth.Identity, proj project.ProjectInfo, 
 		return model.DraftView{}, err
 	}
 	return c.Get(id, proj)
+}
+
+// requireUndeclaredVM refuses a create of a VM the base branch already
+// declares: merging would silently replace it (a duplicate deploy, a wizard
+// name collision). The declared index answers, since the VM may sit in a
+// multi-document file at another path; a failed read is a failure, never
+// absence.
+func (c *Coordinator) requireUndeclaredVM(read *git.Repo, namespace, name string) error {
+	idx, err := read.DeclaredFilesOnBranch(c.baseBranch)
+	if err != nil {
+		return err
+	}
+	if _, ok := declaredRef(idx, draft.ResourceVM, namespace, name); ok {
+		return fmt.Errorf("%w: %s/%s already exists in git", model.ErrConflict, namespace, name)
+	}
+	return nil
 }
 
 // stageRendered is the shared tail of StageCreate and StageCreateNamespace:

@@ -20,7 +20,7 @@ func TestForgejoHostStripsPort(t *testing.T) {
 	cases := map[string]string{
 		"http://dotvirt-forgejo.dotvirt.svc.cluster.local:3000": "dotvirt-forgejo.dotvirt.svc.cluster.local",
 		"https://forgejo.apps.example.com":                      "forgejo.apps.example.com",
-		"": "",
+		"":                                                      "",
 	}
 	for url, want := range cases {
 		if got := ForgejoHost(dv(url)); got != want {

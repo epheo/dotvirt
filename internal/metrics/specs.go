@@ -106,16 +106,16 @@ func scopeChartSpecs(sel, rw string) []chartSpec {
 	topk := func(expr string) string { return fmt.Sprintf("topk(5, sum by(namespace,name)(%s))", expr) }
 	rate := func(metric string) string { return fmt.Sprintf("rate(%s%s[%s])", metric, sel, rw) }
 	return []chartSpec{
-		{"cpu", "CPU — top VMs", "cores", false, []seriesSpec{
+		{"cpu", "CPU - top VMs", "cores", false, []seriesSpec{
 			{"", topk(rate("kubevirt_vmi_cpu_usage_seconds_total")), ""},
 		}},
-		{"memory", "Memory — top VMs", "bytes", false, []seriesSpec{
+		{"memory", "Memory - top VMs", "bytes", false, []seriesSpec{
 			{"", topk(fmt.Sprintf("kubevirt_vmi_memory_used_bytes%s", sel)), ""},
 		}},
-		{"network", "Network — top VMs", "Bps", false, []seriesSpec{
+		{"network", "Network - top VMs", "Bps", false, []seriesSpec{
 			{"", topk(rate("kubevirt_vmi_network_receive_bytes_total") + " + " + rate("kubevirt_vmi_network_transmit_bytes_total")), ""},
 		}},
-		{"disk", "Disk throughput — top VMs", "Bps", false, []seriesSpec{
+		{"disk", "Disk throughput - top VMs", "Bps", false, []seriesSpec{
 			{"", topk(rate("kubevirt_vmi_storage_read_traffic_bytes_total") + " + " + rate("kubevirt_vmi_storage_write_traffic_bytes_total")), ""},
 		}},
 	}

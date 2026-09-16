@@ -60,7 +60,6 @@ func runWhenServed(ctx context.Context, every time.Duration, has func(schema.Gro
 	defer t.Stop()
 	for {
 		if has(gvr) {
-			healthy.Store(true) // optimistic until a list/watch actually errors
 			Run(ctx, TrackHealth(lw, healthy), store)
 			return
 		}

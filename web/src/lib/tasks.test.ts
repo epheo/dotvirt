@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTasks } from './tasks';
-
-type TaskSources = Parameters<typeof buildTasks>[0];
+import { buildTasks, type TaskSources } from './tasks';
 import type { Inventory } from './api';
 
 const now = Date.parse('2026-07-27T12:00:00Z');

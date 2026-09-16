@@ -28,7 +28,7 @@
 	const close = () => (open = false);
 </script>
 
-<div class="relative {className}" {@attach dismiss(close)}>
+<div class="relative {className}" {@attach open && dismiss(close)}>
 	{@render trigger({ open, toggle })}
 	{#if open}
 		<div

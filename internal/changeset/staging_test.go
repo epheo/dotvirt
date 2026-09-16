@@ -1,25 +1,22 @@
 package changeset
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"maps"
 	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
-	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 )
 
 func TestStageCreateRejectsBadNames(t *testing.T) {
 	bare := seedBare(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
@@ -43,7 +40,7 @@ func TestStageCreateRejectsBadNames(t *testing.T) {
 // and leaves nothing staged.
 func TestStageCreateRejectsIncompleteSpec(t *testing.T) {
 	bare := seedBare(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
@@ -64,19 +61,31 @@ func TestStageCreateRejectsIncompleteSpec(t *testing.T) {
 	}
 }
 
+// The wizard must not stage a VM the base branch already declares - here at a
+// path other than the one the wizard would write - since merging would
+// replace it.
+func TestStageCreateRefusesDeclaredVM(t *testing.T) {
+	bare := seedBare(t)
+	c := newTestCoordinator(t, false)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+
+	raw := json.RawMessage(`{"name":"web","namespace":"alpha","instancetype":"u1.medium","preference":"fedora",
+		"osImage":{"name":"fedora","namespace":"kv"}}`)
+	if _, err := c.StageCreateVM(id, proj, raw); !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("want ErrConflict for a VM git already declares, got %v", err)
+	}
+	if entries, _ := c.store.List(id.Username, proj.Name); len(entries) != 0 {
+		t.Errorf("a refused create must not be staged, got %+v", entries)
+	}
+}
+
 // A wizard VM is rendered once, at stage time: the preview, the persisted draft
 // and the proposed commit are the same bytes, and the typed cloud-init password
 // exists nowhere past the request - only its hash does.
 func TestStageCreateCommitsPreviewedManifest(t *testing.T) {
 	bare := seedBare(t)
-	// A pushing RepoSet: the assertion is the bare repo's proposed branch.
-	store, err := draft.Open(t.TempDir())
-	if err != nil {
-		t.Fatalf("draft.Open: %v", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	c := New(store, git.NewRepoSet(ctx, "", nil, true, nil, time.Hour), nil, nil, nil, nil, "main", "dotvirt/proposed")
+	c := newTestCoordinator(t, true)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
@@ -95,7 +104,7 @@ func TestStageCreateCommitsPreviewedManifest(t *testing.T) {
 	if strings.Contains(it.YAML, typed) || !strings.Contains(it.YAML, "password: $2a$") {
 		t.Fatalf("the preview must carry the hash, never the typed password:\n%s", it.YAML)
 	}
-	entries, err := store.List(id.Username, proj.Name)
+	entries, err := c.store.List(id.Username, proj.Name)
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("store.List: %v, %+v", err, entries)
 	}

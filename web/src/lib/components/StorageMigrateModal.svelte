@@ -19,6 +19,9 @@
 		onclose: () => void;
 	} = $props();
 
+	// Re-pulls only after a boot-time failure, so opening the dialog is the retry.
+	inventory.loadOptions();
+
 	// Only DataVolume-backed disks are migratable (the manifest owns their
 	// provisioning); container/cloud-init/empty disks are listed nowhere here.
 	const disks = $derived((vm.disks ?? []).filter((d) => d.type === 'dataVolume'));

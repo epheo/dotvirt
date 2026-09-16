@@ -199,12 +199,28 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) []git.ChangesetIte
 }
 
 // reviewed is one open PR's review state at one head. Approvals and checks are
-// re-read only when the head moves, so a refresh whose PRs stand still costs
-// one list call instead of two more per PR.
+// re-read only when the PR may have moved (see settled), so a refresh whose PRs
+// stand still costs one list call instead of two more per PR.
 type reviewed struct {
 	sha       string
+	updatedAt time.Time
 	approvals int
 	checks    string
+}
+
+// settled reports whether pr's cached state can still be trusted: the head is
+// the same, nothing touched the PR since (a review bumps updated_at), and CI
+// has finished - a status change does not touch the PR, so a pending check
+// must be polled until it lands.
+func (rv reviewed) settled(pr forge.PR) bool {
+	if rv.sha != pr.Head.Sha || !rv.updatedAt.Equal(pr.UpdatedAt) {
+		return false
+	}
+	switch rv.checks {
+	case "success", "failure", "error":
+		return true
+	}
+	return false
 }
 
 // OpenProposals lists every open PR into proj's base branch - the Changes
@@ -244,8 +260,8 @@ func (r *Reader) OpenProposals(proj project.ProjectInfo) ([]model.Proposal, erro
 		p := r.proposalRow(proj, pr)
 		p.RequiredApprovals = required
 		rv, ok := prev[pr.Number]
-		if !ok || rv.sha != pr.Head.Sha {
-			rv, ok = reviewed{sha: pr.Head.Sha}, true
+		if !ok || !rv.settled(pr) {
+			rv, ok = reviewed{sha: pr.Head.Sha, updatedAt: pr.UpdatedAt}, true
 			if n, aerr := fc.Approvals(pr.Number); aerr == nil {
 				rv.approvals = n
 			} else {

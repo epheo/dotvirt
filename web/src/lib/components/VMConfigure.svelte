@@ -183,7 +183,7 @@
 					<Row label="Sync" value={vm.sync} />
 				</dl>
 				<div class="border-t border-line-soft px-3 py-2">
-					<a href={manifestURL(vm)} target="_blank" class="text-xs text-accent hover:underline"
+					<a href={manifestURL(vm)} target="_blank" class="text-xs text-accent-ink hover:underline"
 						>Download manifest ↗</a
 					>
 					<p class="mt-1 text-xs text-ink-faint">

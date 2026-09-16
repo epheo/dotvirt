@@ -169,10 +169,10 @@
 					bind:value={row.value}
 					keyPlaceholder="app"
 					valuePlaceholder="web"
-					keyClass="w-20!"
-					valueClass="w-24!"
+					keyWidth="w-20"
+					valueWidth="w-24"
 				/>
-				<ProtoPortInput bind:proto={row.proto} bind:port={row.port} portClass="w-20" />
+				<ProtoPortInput bind:proto={row.proto} bind:port={row.port} portWidth="w-20" />
 				<button
 					onclick={() => rules.remove(i)}
 					disabled={rows.length === 1}

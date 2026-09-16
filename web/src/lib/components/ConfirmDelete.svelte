@@ -49,12 +49,6 @@
 	</div>
 	{#snippet footer()}
 		<Button variant="secondary" class="ml-auto" onclick={onclose}>Cancel</Button>
-		<button
-			onclick={onconfirm}
-			disabled={!ready}
-			class="rounded bg-danger px-3 py-1 text-sm font-medium text-white hover:bg-danger-ink disabled:opacity-50"
-		>
-			{verb}
-		</button>
+		<Button variant="danger" onclick={onconfirm} disabled={!ready}>{verb}</Button>
 	{/snippet}
 </Modal>

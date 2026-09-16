@@ -25,8 +25,11 @@ import (
 // staleness signal, not a TTL. The reflector re-lists+re-watches on a drop, so
 // a transient blip that immediately recovers stays healthy; a sustained outage
 // (repeated errors) reads as unhealthy. Callers surface it as a "may be stale"
-// warning while the store keeps serving its last-good contents.
+// warning while the store keeps serving its last-good contents. The flag
+// starts true: nothing has failed yet, and a watch not yet established is
+// not a stale one.
 func TrackHealth(lw *cache.ListWatch, healthy *atomic.Bool) *cache.ListWatch {
+	healthy.Store(true)
 	// Sources set the WithContext pair (the reflector cancels in-flight calls on
 	// shutdown through it); the deprecated context-free fields stay nil.
 	list, watchFn := lw.ListWithContextFunc, lw.WatchFuncWithContext

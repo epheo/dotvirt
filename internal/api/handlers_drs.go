@@ -28,13 +28,13 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 	if s.desched != nil {
 		view.Live = s.desched.Live()
 	}
-	if s.cfg.PlatformRepo != "" && s.reader != nil {
+	if s.cfg.PlatformRepo != "" {
 		ctx := r.Context()
 		view.CanManage = s.canCreateCached(ctx, id, c, ssarDescheduler)
 		view.CanPSI = s.canCreateCached(ctx, id, c, ssarMachineCfg)
 		platform := s.platformProject()
 		if git, err := s.reader.DRSState(platform); err != nil {
-			view.Warning = "platform repo unavailable — committed DRS state unknown: " + err.Error()
+			view.Warning = "platform repo unavailable - committed DRS state unknown: " + err.Error()
 		} else {
 			view.Configured, view.Config, view.PSIConfigured = git.Configured, git.Config, git.PSIConfigured
 		}
@@ -52,9 +52,9 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 // draft. The PSI file reboots the worker pool when merged, so it carries its
 // own machineconfigs-create SSAR on top of the kubedeschedulers gate.
 func (s *Server) handleDRSEnable(w http.ResponseWriter, r *http.Request) {
-	raw, p, ok := peek[struct {
+	raw, p, ok := readBody[struct {
 		InstallPSI bool `json:"installPSI"`
-	}](w, r)
+	}](w, r, false)
 	if !ok {
 		return
 	}
@@ -62,7 +62,7 @@ func (s *Server) handleDRSEnable(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if p.InstallPSI && !sc.cluster.CanCreateClusterResource(r.Context(), ssarMachineCfg.group, ssarMachineCfg.resource) {
+	if p.InstallPSI && !s.canCreateCached(r.Context(), sc.id, sc.cluster, ssarMachineCfg) {
 		fail(w, fmt.Errorf("%w: not authorized to create machineconfigs", model.ErrForbidden))
 		return
 	}

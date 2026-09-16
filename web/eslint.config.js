@@ -17,6 +17,8 @@ export default ts.config(
 				'error',
 				{ argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none' },
 			],
+			// A best-effort step's empty catch is the idiom, not an omission.
+			'no-empty': ['error', { allowEmptyCatch: true }],
 			// The SPA has no base path: its hrefs and goto targets are the URL
 			// scheme nav.ts owns, never resolve()d.
 			'svelte/no-navigation-without-resolve': 'off',

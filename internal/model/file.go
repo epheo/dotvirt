@@ -1,5 +1,10 @@
 package model
 
+// TemplatesDir is the library directory within a repo: VirtualMachineTemplate
+// manifests the ArgoCD Applications exclude from the applied path, so the git
+// plane's inventory walk skips it and the library read covers only it.
+const TemplatesDir = "templates"
+
 // File is a repo-relative path with the bytes it holds: what the git plane
 // reads and writes, what a renderer produces, and what the cluster exports for
 // adoption.

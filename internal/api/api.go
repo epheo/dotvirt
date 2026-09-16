@@ -480,8 +480,10 @@ func withCORS(origin string, next http.Handler) http.Handler {
 	})
 }
 
-// readBody reads the whole request body and decodes it into T. ok=false means
-// the 400 is written. optional lets an empty body stand for the zero T.
+// readBody reads the whole request body and decodes it into T, handing back
+// the raw bytes too for a route that peeks at routing fields and leaves the
+// full decode to the staging layer. ok=false means the 400 is written.
+// optional lets an empty body stand for the zero T.
 func readBody[T any](w http.ResponseWriter, r *http.Request, optional bool) (raw []byte, v T, ok bool) {
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -496,12 +498,6 @@ func readBody[T any](w http.ResponseWriter, r *http.Request, optional bool) (raw
 		return nil, v, false
 	}
 	return raw, v, true
-}
-
-// peek decodes just the routing fields T names and hands back the raw body for
-// the staging layer to decode in full.
-func peek[T any](w http.ResponseWriter, r *http.Request) (raw []byte, p T, ok bool) {
-	return readBody[T](w, r, false)
 }
 
 // decode is the body reader for a route that consumes the whole request itself.

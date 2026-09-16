@@ -11,16 +11,9 @@
 		Square,
 	} from 'lucide-svelte';
 	import { api, vmKey, type Change, type DraftItem, type Network, type VM } from '$lib/api';
-	import {
-		adoptVM,
-		manifestURL,
-		openVMDialog,
-		runRuntimeAction,
-		vmActions,
-		type VMAction,
-	} from '$lib/actions';
+	import { adoptVM, manifestURL, runRuntimeAction, vmActions, type VMAction } from '$lib/actions';
 	import { type EditSection } from '$lib/editform';
-	import { type VMTab } from '$lib/nav';
+	import { VM_TABS, type VMTab } from '$lib/nav';
 	import { action, resource } from '$lib/resource.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import { duration } from '$lib/format';
@@ -75,11 +68,11 @@
 	}
 
 	// adopt/resync, feeding the Summary card's busy state.
-	const reconcileOp = action({ toast: true });
+	const reconcileOp = action({ toast: ui.toastError });
 
 	// Imperative runtime ops (restart/pause/unpause/live-migrate). Results
 	// surface as toasts - identical feedback to the right-click context menu.
-	const runtimeOp = action({ toast: true });
+	const runtimeOp = action({ toast: ui.toastError });
 
 	// The flat toolbar: the everyday imperative verbs, promoted out of the
 	// Actions menu. Power is deliberately absent - it is a declarative
@@ -103,7 +96,7 @@
 	// Power is declarative here (a staged runStrategy change), but it still
 	// deserves a first-class button: hiding it inside Edit Settings made the
 	// most basic verb the hardest to find. The button stages and says so.
-	const powerOp = action({ toast: true });
+	const powerOp = action({ toast: ui.toastError });
 	function stagePower() {
 		const target = vm;
 		if (!target.sourceFile || powerOp.busy) return;
@@ -117,13 +110,17 @@
 		});
 	}
 
-	// One handler for every registry action: runtime ops run via the registry's
-	// own run() (with busy/result reporting; the server records the task), host
-	// actions open their dialog or switch a tab.
+	// One handler for every registry action. It differs from dispatchVMAction
+	// only where the page has something the shell does not: a busy wrapper for
+	// runtime ops and adopt, and ontab instead of a goto for tab switches.
 	async function handleAction(a: VMAction) {
 		const target = vm;
 		if (a.kind === 'runtime' && a.run) {
 			await runtimeOp.run(() => runRuntimeAction(a, target));
+			return;
+		}
+		if (a.open) {
+			ui.modal = a.open(target);
 			return;
 		}
 		switch (a.id) {
@@ -141,8 +138,6 @@
 			case 'snapshot':
 				ontab?.('snapshots');
 				break;
-			default:
-				openVMDialog(a.id, target);
 		}
 	}
 
@@ -251,20 +246,7 @@
 				{/snippet}
 			</HeaderMenu>
 		</div>
-		<TabBar
-			tabs={[
-				{ id: 'summary', label: 'Summary' },
-				{ id: 'monitor', label: 'Monitor' },
-				{ id: 'configure', label: 'Configure' },
-				{ id: 'security', label: 'Security' },
-				{ id: 'permissions', label: 'Permissions' },
-				{ id: 'changes', label: 'Changes' },
-				{ id: 'snapshots', label: 'Snapshots' },
-				{ id: 'console', label: 'Console' },
-			]}
-			active={tab}
-			href={(t) => `?tab=${t}`}
-		/>
+		<TabBar tabs={[...VM_TABS]} active={tab} href={(t) => `?tab=${t}`} />
 	</div>
 
 	{#if vm.migration && !vm.migration.completed && !vm.migration.failed}
@@ -290,7 +272,7 @@
 				onresync={resync}
 				onconsole={() => ontab?.('console')}
 				onedit={() => openEdit()}
-				onmigrate={() => openVMDialog('migrate', vm)}
+				onmigrate={() => (ui.modal = { kind: 'migrateVM', vm })}
 			/>
 		{:else if tab === 'monitor'}
 			<!-- Monitor sub-rail: events + performance. -->

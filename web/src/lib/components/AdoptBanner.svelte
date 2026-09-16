@@ -3,6 +3,7 @@
 	import { adoptNamespaces } from '$lib/actions';
 	import { action } from '$lib/resource.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
+	import { ui } from '$lib/state/ui.svelte';
 	import Banner from './Banner.svelte';
 	import Button from './Button.svelte';
 
@@ -48,7 +49,7 @@
 		return nss;
 	});
 
-	const op = action({ toast: true });
+	const op = action({ toast: ui.toastError });
 	const adopt = () => op.run(() => adoptNamespaces(adoptNS));
 </script>
 

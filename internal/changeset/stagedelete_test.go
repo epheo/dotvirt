@@ -13,9 +13,10 @@ import (
 	"github.com/epheo/dotvirt/internal/project"
 )
 
-// newTestCoordinator builds a Coordinator over a disk draft store and a
-// push-disabled RepoSet (long poll interval so the background poll never fires).
-func newTestCoordinator(t *testing.T) *Coordinator {
+// newTestCoordinator builds a Coordinator over a disk draft store and a RepoSet
+// with a long poll interval, so the background poll never fires. push enables
+// pushes, for a test whose assertion is the bare remote's proposed branch.
+func newTestCoordinator(t *testing.T, push bool) *Coordinator {
 	t.Helper()
 	store, err := draft.Open(t.TempDir())
 	if err != nil {
@@ -23,13 +24,13 @@ func newTestCoordinator(t *testing.T) *Coordinator {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	repos := git.NewRepoSet(ctx, "", nil, false, nil, time.Hour)
+	repos := git.NewRepoSet(ctx, "", nil, push, nil, time.Hour)
 	return New(store, repos, nil, nil, nil, nil, "main", "dotvirt/proposed")
 }
 
 func TestStageDeleteStagesRemoval(t *testing.T) {
 	bare := seedBare(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
@@ -51,12 +52,25 @@ func TestStageDeleteStagesRemoval(t *testing.T) {
 
 func TestStageDeleteAbsentNotFound(t *testing.T) {
 	bare := seedBare(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
 	_, err := c.StageDelete(id, proj, "", "alpha", "ghost")
 	if !errors.Is(err, model.ErrNotFound) {
 		t.Fatalf("want model.ErrNotFound, got %v", err)
+	}
+}
+
+// A base branch the mirror lacks is a retryable outage the client can act on,
+// not an unexplained 500.
+func TestStageDeleteUnmirroredBranchIsUnavailable(t *testing.T) {
+	bare := seedBareFiles(t, nil)
+	gitRun(t, bare, "branch", "-m", "main", "trunk")
+	c := newTestCoordinator(t, false)
+
+	_, err := c.StageDelete(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: bare}, "", "alpha", "web")
+	if !errors.Is(err, model.ErrUnavailable) || !errors.Is(err, git.ErrNoBranch) {
+		t.Fatalf("want a classified ErrUnavailable that is still git.ErrNoBranch, got %v", err)
 	}
 }

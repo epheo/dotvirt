@@ -1,17 +1,14 @@
 package changeset
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"os/exec"
 	"testing"
-	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/drsgen"
-	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 )
@@ -41,7 +38,7 @@ func mustJSON(t *testing.T, v any) json.RawMessage {
 
 func TestStageEnableDRSStagesFileSet(t *testing.T) {
 	bare := seedBareFiles(t, nil)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "admin"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
@@ -63,7 +60,7 @@ func TestStageEnableDRSStagesOnlyChangedFiles(t *testing.T) {
 	// The operator install (+ a Predictive CR) is already committed; switching to
 	// Automatic must stage only the KubeDescheduler CR.
 	bare := seedBareFiles(t, drsFiles(t, drsgen.Spec{Mode: drsgen.ModePredictive}))
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "admin"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
@@ -82,7 +79,7 @@ func TestStageEnableDRSUnchangedIsCleanDraft(t *testing.T) {
 	// is the cancel gesture (revert to the committed configuration).
 	spec := drsgen.Spec{Mode: drsgen.ModeAutomatic}
 	bare := seedBareFiles(t, drsFiles(t, spec))
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "admin"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
@@ -110,7 +107,7 @@ func TestStageEnableDRSReconfigureDropsStaleSiblings(t *testing.T) {
 	// A re-configure without the PSI opt-in must not leave the previously
 	// staged MachineConfig behind - the draft is replaced wholesale.
 	bare := seedBareFiles(t, nil)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "admin"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
@@ -133,7 +130,7 @@ func TestStageEnableDRSReconfigureDropsStaleSiblings(t *testing.T) {
 
 func TestDRSDraft(t *testing.T) {
 	bare := seedBareFiles(t, nil)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "admin"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
@@ -169,7 +166,7 @@ func TestUnstageDRSIsAtomic(t *testing.T) {
 	// ChangesPanel's per-row button) must drop the whole set, never leaving a
 	// proposable half-install.
 	bare := seedBareFiles(t, nil)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "admin"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
@@ -190,7 +187,7 @@ func TestUnstageDRSIsAtomic(t *testing.T) {
 
 func TestStageDisableDRSStagesRemoval(t *testing.T) {
 	bare := seedBareFiles(t, drsFiles(t, drsgen.Spec{Mode: drsgen.ModeAutomatic}))
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "admin"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
@@ -209,7 +206,7 @@ func TestStageDisableDRSStagesRemoval(t *testing.T) {
 
 func TestStageDisableDRSNotConfigured(t *testing.T) {
 	bare := seedBareFiles(t, nil)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "admin"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
@@ -220,7 +217,7 @@ func TestStageDisableDRSNotConfigured(t *testing.T) {
 
 func TestStageDisableDRSCancelsPendingEnable(t *testing.T) {
 	bare := seedBareFiles(t, nil)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "admin"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
@@ -241,14 +238,7 @@ func TestStageDisableDRSCancelsPendingEnable(t *testing.T) {
 // Parse. Push is enabled (unlike newProposeFixture) so the bare remote is the
 // thing asserted on - what the forge PR would actually contain.
 func TestProposeDRSCommitsFileSet(t *testing.T) {
-	store, err := draft.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	repos := git.NewRepoSet(ctx, "", nil, true, nil, time.Hour)
-	c := New(store, repos, nil, nil, nil, nil, "main", "dotvirt/proposed")
+	c := newTestCoordinator(t, true)
 	id := auth.Identity{Username: "admin"}
 	bare := seedBareFiles(t, nil)
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
@@ -294,7 +284,7 @@ func TestProposeDRSCommitsFileSet(t *testing.T) {
 }
 
 func TestDRSState(t *testing.T) {
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 
 	empty := project.ProjectInfo{Name: "platform", Repo: seedBareFiles(t, nil)}
 	state, err := c.DRSState(empty)

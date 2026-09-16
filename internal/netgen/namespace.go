@@ -41,7 +41,7 @@ func PlainNamespaceManifest(name string) (path string, content []byte, err error
 		return "", nil, err
 	}
 	out, err := yaml.Marshal(map[string]any{
-		"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]any{"name": name},
+		"apiVersion": model.KindNS.APIVersion(), "kind": model.KindNS.Kind, "metadata": map[string]any{"name": name},
 	})
 	if err != nil {
 		return "", nil, err
@@ -66,7 +66,7 @@ func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error)
 		meta["annotations"] = map[string]any{"dotvirt.io/repo": s.Repo}
 	}
 	ns, err := yaml.Marshal(map[string]any{
-		"apiVersion": "v1", "kind": "Namespace", "metadata": meta,
+		"apiVersion": model.KindNS.APIVersion(), "kind": model.KindNS.Kind, "metadata": meta,
 	})
 	if err != nil {
 		return "", nil, err
@@ -90,8 +90,8 @@ func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error)
 		// have to be >= the Namespace's (default 0); a negative wave inverts the order
 		// and wedges the sync on "namespace not found", so we set none.
 		udn, err := yaml.Marshal(map[string]any{
-			"apiVersion": model.MustKind("UserDefinedNetwork").APIVersion(),
-			"kind":       "UserDefinedNetwork",
+			"apiVersion": model.KindUDN.APIVersion(),
+			"kind":       model.KindUDN.Kind,
 			"metadata":   map[string]any{"name": p.Name, "namespace": s.Name},
 			"spec":       map[string]any{"topology": "Layer2", "layer2": layer2},
 		})
@@ -147,8 +147,8 @@ func RoleBindingManifest(s RoleBindingSpec) (path string, content []byte, err er
 		meta["labels"] = map[string]any{"dotvirt.io/project": s.Project}
 	}
 	rb, err := yaml.Marshal(map[string]any{
-		"apiVersion": "rbac.authorization.k8s.io/v1",
-		"kind":       "RoleBinding",
+		"apiVersion": model.KindRB.APIVersion(),
+		"kind":       model.KindRB.Kind,
 		"metadata":   meta,
 		"roleRef": map[string]any{
 			"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": role,

@@ -62,7 +62,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 			// Synced, but the watch is erroring: the drift shown is the last-good store.
 			// Warn so a permanent ArgoCD outage doesn't masquerade as fresh sync state.
 			if !s.drift.Healthy() {
-				warnings = append(warnings, "sync status may be stale — ArgoCD is unreachable")
+				warnings = append(warnings, "sync status may be stale - ArgoCD is unreachable")
 			}
 		} else {
 			warnings = append(warnings, "sync status is temporarily unavailable")
@@ -71,10 +71,10 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	// Same staleness contract as drift: the network catalog keeps serving its
 	// last-good stores while a watch errors - warn so that isn't silent.
 	if s.netstate != nil && !s.netstate.Healthy() {
-		warnings = append(warnings, "the network catalog may be stale — a networking watch is failing")
+		warnings = append(warnings, "the network catalog may be stale - a networking watch is failing")
 	}
 	if !s.state.Healthy() {
-		warnings = append(warnings, "the VM snapshot may be stale - a cluster watch is failing")
+		warnings = append(warnings, "the cluster snapshot may be stale - a cluster watch is failing")
 	}
 	// Zero project namespaces with a platform repo configured is either a pristine
 	// install (fine, the empty state is correct) or a platform app that stopped
@@ -131,7 +131,7 @@ func platformSyncWarning(drift map[string]model.ProjectSync, platformRepo string
 	}
 	ps, ok := drift[forge.NormalizeRepoURL(platformRepo)]
 	if !ok {
-		return "no projects found and no ArgoCD Application sources the platform repo — the dotvirt-platform Application is missing"
+		return "no projects found and no ArgoCD Application sources the platform repo - the dotvirt-platform Application is missing"
 	}
 	okHealth := ps.Health == "" || ps.Health == "Healthy" || ps.Health == "Progressing"
 	failedOp := ps.Operation == "Failed" || ps.Operation == "Error"

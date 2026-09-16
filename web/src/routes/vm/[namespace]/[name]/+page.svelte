@@ -17,7 +17,7 @@
 
 	const tab = $derived.by<VMTab>(() => {
 		const t = page.url.searchParams.get('tab') as VMTab | null;
-		return t && VM_TABS.includes(t) ? t : 'summary';
+		return t && VM_TABS.some((x) => x.id === t) ? t : 'summary';
 	});
 	const setTab = (t: VMTab) =>
 		goto(`?tab=${t}`, { replaceState: true, noScroll: true, keepFocus: true });

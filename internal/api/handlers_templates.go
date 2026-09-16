@@ -54,7 +54,7 @@ func (s *Server) appendTemplates(list *model.TemplateList, library, repoURL stri
 // there (same authorization as POST /api/vms); the library only needs to be
 // readable - the caller's own projects or the shared platform library.
 func (s *Server) handleDeployTemplate(w http.ResponseWriter, r *http.Request) {
-	_, req, ok := peek[model.DeployTemplateRequest](w, r)
+	_, req, ok := readBody[model.DeployTemplateRequest](w, r, false)
 	if !ok {
 		return
 	}
@@ -107,7 +107,7 @@ func (s *Server) libraryFor(w http.ResponseWriter, r *http.Request, sc scope, li
 // saving into it: project membership for a project library, the
 // virtualmachinetemplates create SSAR for the shared one.
 func (s *Server) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
-	_, req, ok := peek[model.UpdateTemplateRequest](w, r)
+	_, req, ok := readBody[model.UpdateTemplateRequest](w, r, false)
 	if !ok {
 		return
 	}
@@ -134,7 +134,7 @@ func (s *Server) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 // virtualmachinetemplates create SSAR (rule-based, so it works before the CRD
 // exists on-cluster), like every platform-tier create.
 func (s *Server) handleSaveTemplate(w http.ResponseWriter, r *http.Request) {
-	_, req, ok := peek[model.SaveTemplateRequest](w, r)
+	_, req, ok := readBody[model.SaveTemplateRequest](w, r, false)
 	if !ok {
 		return
 	}

@@ -10,10 +10,12 @@ import { vmPath } from './api';
 //    doesn't touch git, so Argo never reverts it). Hosts wrap run() with their
 //    own busy/result reporting; `verb` is the task-log wording.
 //  - 'host': the embedding view performs it (open a modal, switch a tab,
-//    download a file) - the registry only describes and gates it.
+//    download a file) - the registry only describes and gates it. A
+//    dialog-backed one names its modal in `open`, so no host has to keep an
+//    id-to-dialog switch of its own.
 import { api, Unauthorized, type VM } from '$lib/api';
 import { friendlyError } from '$lib/format';
-import { ui } from '$lib/state/ui.svelte';
+import { ui, type AppModal } from '$lib/state/ui.svelte';
 import { vmHref } from '$lib/nav';
 
 type ActionId =
@@ -43,6 +45,8 @@ export interface VMAction {
 	title?: string;
 	enabled: (vm: VM) => boolean;
 	run?: (vm: VM) => Promise<void>;
+	/** The modal a dialog-backed host action opens. */
+	open?: (vm: VM) => AppModal;
 }
 
 // runRuntimeAction runs a registry runtime action with the standard toast
@@ -67,6 +71,11 @@ export async function dispatchVMAction(a: VMAction, vm: VM): Promise<void> {
 		await runRuntimeAction(a, vm);
 		return;
 	}
+	if (a.open) {
+		ui.modal = a.open(vm);
+		goto(vmHref(vm.namespace, vm.name));
+		return;
+	}
 	switch (a.id) {
 		case 'manifest':
 			window.open(manifestURL(vm), '_blank');
@@ -80,33 +89,6 @@ export async function dispatchVMAction(a: VMAction, vm: VM): Promise<void> {
 		case 'snapshot':
 			goto(vmHref(vm.namespace, vm.name, 'snapshots'));
 			return;
-	}
-	openVMDialog(a.id, vm);
-	goto(vmHref(vm.namespace, vm.name));
-}
-
-// openVMDialog opens the modal behind a dialog-backed host action - the one
-// id-to-dialog mapping, so the detail toolbar and dispatchVMAction agree.
-export function openVMDialog(id: ActionId, vm: VM): void {
-	switch (id) {
-		case 'edit':
-			ui.modal = { kind: 'editVM', vm };
-			break;
-		case 'delete':
-			ui.modal = { kind: 'deleteVM', vm };
-			break;
-		case 'clone':
-			ui.modal = { kind: 'cloneVM', vm };
-			break;
-		case 'template':
-			ui.modal = { kind: 'saveTemplate', vm };
-			break;
-		case 'migrate':
-			ui.modal = { kind: 'migrateVM', vm };
-			break;
-		case 'migrate-storage':
-			ui.modal = { kind: 'migrateStorage', vm };
-			break;
 	}
 }
 
@@ -197,6 +179,7 @@ export const vmActions: VMAction[] = [
 		kind: 'host',
 		title: 'Move the running VM to another host — pick a target or let the scheduler choose',
 		enabled: running,
+		open: (vm) => ({ kind: 'migrateVM', vm }),
 	},
 	{
 		id: 'migrate-storage',
@@ -206,6 +189,7 @@ export const vmActions: VMAction[] = [
 		// Needs a live VMI to copy from, a git manifest to edit, and at least
 		// one DataVolume-backed disk to move.
 		enabled: (vm) => running(vm) && inGit(vm) && !!vm.disks?.some((d) => d.type === 'dataVolume'),
+		open: (vm) => ({ kind: 'migrateStorage', vm }),
 	},
 	{ id: 'console', label: 'Open console', kind: 'host', sep: true, enabled: running },
 	{ id: 'snapshot', label: 'Snapshots', kind: 'host', enabled: always },
@@ -215,6 +199,7 @@ export const vmActions: VMAction[] = [
 		kind: 'host',
 		title: 'Copy this VM via snapshot + restore; adopt the result into git after',
 		enabled: always,
+		open: (vm) => ({ kind: 'cloneVM', vm }),
 	},
 	{
 		id: 'template',
@@ -222,6 +207,7 @@ export const vmActions: VMAction[] = [
 		kind: 'host',
 		title: 'Derive a reusable template from this VM’s git manifest — staged as a PR',
 		enabled: inGit,
+		open: (vm) => ({ kind: 'saveTemplate', vm }),
 	},
 	{
 		id: 'adopt',
@@ -238,6 +224,7 @@ export const vmActions: VMAction[] = [
 		kind: 'host',
 		title: 'Stages a config change into a PR',
 		enabled: inGit,
+		open: (vm) => ({ kind: 'editVM', vm }),
 	},
 	{
 		id: 'manifest',
@@ -254,6 +241,7 @@ export const vmActions: VMAction[] = [
 		sep: true,
 		title: 'Stages a removal into a PR',
 		enabled: inGit,
+		open: (vm) => ({ kind: 'deleteVM', vm }),
 	},
 ];
 

@@ -172,7 +172,7 @@
 
 <div class="flex h-full flex-col">
 	<div class="flex items-center gap-2 border-b border-line px-4 py-2">
-		<TextInput bind:value={search} placeholder="Search name, namespace, IP…" class="w-64!" />
+		<TextInput bind:value={search} placeholder="Search name, namespace, IP…" width="w-64" />
 		{#each FILTERS as f (f.key)}
 			<SelectInput
 				value={prefs.value[f.key]}
@@ -181,7 +181,8 @@
 						...prefs.value,
 						[f.key]: e.currentTarget.value as 'all' | Power | SyncStatus,
 					} as typeof prefs.value)}
-				class="w-auto! text-ink-soft"
+				width="w-auto"
+				class="text-ink-soft"
 				title={f.title}
 				aria-label={f.title}
 			>

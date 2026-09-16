@@ -174,8 +174,14 @@
 		} else if (e.key === 'Enter' && hits[active]) {
 			e.preventDefault();
 			pick(hits[active]);
+		} else if (e.key === 'Escape') {
+			close();
 		}
 	}
+
+	// The click-away only arms with the hit list on screen: a focused, empty
+	// box must not eat the page's next click.
+	const showing = $derived(open && query.trim() !== '');
 
 	// Closing without a pick abandons the query; keeping it would leave a stale
 	// term in the masthead and resume the next open on it.
@@ -247,7 +253,7 @@
 
 <svelte:window onkeydown={onWindowKey} />
 
-<div class="relative mx-auto w-80" {@attach dismiss(close)}>
+<div class="relative mx-auto w-80" {@attach showing && dismiss(close)}>
 	<div class="flex items-center gap-2 rounded bg-side-hover px-2.5 py-1">
 		<Search size={13} class="shrink-0 text-side-dim" />
 		<input
@@ -264,7 +270,7 @@
 		>
 	</div>
 
-	{#if open && query.trim()}
+	{#if showing}
 		<div
 			class="absolute top-full left-0 z-40 mt-1 w-full overflow-hidden rounded border border-line bg-panel shadow-xl"
 		>

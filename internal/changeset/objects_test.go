@@ -33,7 +33,7 @@ func seedNetworkRepo(t *testing.T) string {
 // edit of the declaring file, not a second create.
 func TestStageCreateOfDeclaredObjectIsEdit(t *testing.T) {
 	bare := seedNetworkRepo(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
@@ -71,7 +71,7 @@ func TestStageCreateOfDeclaredObjectIsEdit(t *testing.T) {
 // removed with them.
 func TestStageDeleteObjects(t *testing.T) {
 	bare := seedNetworkRepo(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
@@ -133,7 +133,7 @@ func TestSoleDeclarerRefusals(t *testing.T) {
 		routePath:                    route,
 		nsPath:                       nsContent,
 	})
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
@@ -161,7 +161,7 @@ func TestAdoptObjectsClusterScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	bare := seedBareFiles(t, map[string][]byte{"networks/declared.yaml": declared})
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
@@ -196,7 +196,7 @@ func TestAdoptObjectCreateOrEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 	bare := seedBareFiles(t, map[string][]byte{path: declared})
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
@@ -229,7 +229,7 @@ func TestAdoptObjectCreateOrEdit(t *testing.T) {
 func TestObjectSpecWithoutFormAndVerbatimEdit(t *testing.T) {
 	flat := "apiVersion: k8s.ovn.org/v1\nkind: ClusterUserDefinedNetwork\nmetadata:\n  name: dc-vlan\nspec:\n  namespaceSelector:\n    matchLabels:\n      dc-vlan: \"true\"\n  network:\n    localnet:\n      ipam:\n        mode: Disabled\n      physicalNetworkName: dc-vlan\n      role: Secondary\n    topology: Localnet\n"
 	bare := seedBareFiles(t, map[string][]byte{"networks/dc-vlan.yaml": []byte(flat)})
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
@@ -270,7 +270,7 @@ func mustRead(t *testing.T, c *Coordinator, proj project.ProjectInfo) *git.Repo 
 // ObjectSpec hands the edit form the spec that rendered the declared file.
 func TestObjectSpec(t *testing.T) {
 	bare := seedNetworkRepo(t)
-	c := newTestCoordinator(t)
+	c := newTestCoordinator(t, false)
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
 	got, err := c.ObjectSpec(proj, string(draft.ResourceNetwork), "alpha", "db-net")

@@ -11,18 +11,18 @@
 	let {
 		proto = $bindable('TCP'),
 		port = $bindable(null),
-		portClass = 'w-20',
+		portWidth = 'w-20',
 		labelClass = 'text-xs text-ink-faint',
 	}: {
 		proto?: 'TCP' | 'UDP' | 'SCTP';
 		port?: number | null;
-		portClass?: string;
+		portWidth?: string;
 		labelClass?: string;
 	} = $props();
 </script>
 
 <span class={labelClass}>port</span>
-<SelectInput bind:value={proto} size="sm" class="w-auto!">
+<SelectInput bind:value={proto} size="sm" width="w-auto">
 	<option value="TCP">TCP</option>
 	<option value="UDP">UDP</option>
 	<option value="SCTP">SCTP</option>
@@ -34,5 +34,5 @@
 	placeholder="any"
 	min="1"
 	max="65535"
-	class={portClass}
+	width={portWidth}
 />

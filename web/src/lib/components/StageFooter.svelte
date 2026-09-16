@@ -39,11 +39,7 @@
 {:else}
 	<span class="text-xs text-ink-faint">{hint}</span>
 {/if}
-<button
-	onclick={oncancel}
-	class="ml-auto shrink-0 rounded px-4 py-1.5 text-sm text-ink-soft hover:bg-inset-strong"
-	>Cancel</button
->
+<Button variant="ghost" class="ml-auto shrink-0" onclick={oncancel}>Cancel</Button>
 <Button class="shrink-0" onclick={onsubmit} disabled={disabled || submitting}>
 	{submitting ? busyLabel : label}
 </Button>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Network, VM } from '$lib/api';
 import {
+	DEFAULT_CLASS,
 	NO_NETWORK,
 	NO_STORAGE,
 	POD_NETWORK,
@@ -93,7 +94,7 @@ describe('vmStorageKeys', () => {
 
 	it('groups a classless dataVolume under the cluster default', () => {
 		const v = vm({ disks: [{ name: 'root', type: 'dataVolume' }] });
-		expect(vmStorageKeys(v)).toEqual(['(cluster default)']);
+		expect(vmStorageKeys(v)).toEqual([DEFAULT_CLASS]);
 	});
 
 	it('resolves a classless dataVolume onto the known default class', () => {

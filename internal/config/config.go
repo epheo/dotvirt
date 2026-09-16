@@ -158,7 +158,7 @@ func Load(args []string) (*Config, error) {
 			return nil, err
 		}
 		c.SessionSecret = secret
-		log.Println("config: no -session-secret set; using a random key — sessions won't survive a restart")
+		log.Println("config: no -session-secret set; using a random key - sessions won't survive a restart")
 	}
 	return c, nil
 }

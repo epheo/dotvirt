@@ -133,7 +133,7 @@
 		<Row label="Host">
 			{#if vm.nodeName}<a
 					href="/hosts/{encodeURIComponent(vm.nodeName)}"
-					class="text-accent hover:underline">{vm.nodeName}</a
+					class="text-accent-ink hover:underline">{vm.nodeName}</a
 				>{:else}—{/if}
 		</Row>
 		<Row label="Guest IP" value={vm.guestIP ?? ''} mono />
