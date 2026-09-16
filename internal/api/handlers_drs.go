@@ -34,7 +34,7 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 		view.CanPSI = s.canCreateCached(ctx, id, c, ssarMachineCfg)
 		platform := s.platformProject()
 		if git, err := s.reader.DRSState(platform); err != nil {
-			view.Warning = "platform repo unavailable — committed DRS state unknown: " + err.Error()
+			view.Warning = "platform repo unavailable - committed DRS state unknown: " + err.Error()
 		} else {
 			view.Configured, view.Config, view.PSIConfigured = git.Configured, git.Config, git.PSIConfigured
 		}
