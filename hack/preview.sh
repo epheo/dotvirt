@@ -24,9 +24,11 @@ restore() { git checkout -- "$CSV" "$TMPL" operator/internal/install/dotvirt.go 
   operator/config/default/kustomization.yaml operator/bundle operator/bundle.Dockerfile operator/catalog 2>/dev/null || true; }
 trap restore EXIT   # preview is throwaway — never leave committed files changed
 
-echo ">> app  -> $REG/dotvirt:$SHA"
-build_push Containerfile . "$REG/dotvirt:$SHA"
-D_APP="$(digest "$REG/dotvirt:$SHA")"
+# The per-commit SHA tag belongs to CI's image job. A second push to it orphans the
+# loser and quay prunes untagged manifests, so a digest pinned here can vanish.
+echo ">> app  -> $REG/dotvirt:v$VERSION"
+build_push Containerfile . "$REG/dotvirt:v$VERSION"
+D_APP="$(digest "$REG/dotvirt:v$VERSION")"
 repin "$REG/dotvirt" "$D_APP" operator/internal/install/dotvirt.go operator/config/manager/manager.yaml
 
 echo ">> operator -> $REG/dotvirt-operator:v$VERSION"

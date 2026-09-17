@@ -4,7 +4,9 @@
 # the operand fallback (DefaultImage) + the RELATED_IMAGE_* env, the operator Deployment (via
 # the kustomize digest), the catalog template, and the CatalogSource. The bundle's
 # relatedImages is assembled from those env vars by operator-manifest-tools at `make bundle`.
-# NEVER pushes a moving :latest — only the per-commit SHA (app) and the immutable :vVERSION tag.
+# NEVER pushes a moving :latest, only the immutable :vVERSION tags. The per-commit SHA tag
+# belongs to CI's image job: a second push there orphans its digest (quay prunes untagged
+# manifests) under whoever pinned it.
 #
 #   VERSION=0.0.6 PREV=0.0.5 hack/release.sh        # PREV = the version this replaces
 #
@@ -17,10 +19,9 @@ VERSION="${VERSION:?set VERSION=x.y.z}"
 PREV="${PREV:?set PREV=x.y.z — the version $VERSION replaces}"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
-echo ">> [1/4] app  -> $REG/dotvirt:$SHA (+ :v$VERSION)"
-build_push Containerfile . "$REG/dotvirt:$SHA" --build-arg VERSION="$VERSION"
-skopeo copy --multi-arch all "docker://$REG/dotvirt:$SHA" "docker://$REG/dotvirt:v$VERSION"
-D_APP="$(digest "$REG/dotvirt:$SHA")"; echo "   app digest: $D_APP"
+echo ">> [1/4] app  -> $REG/dotvirt:v$VERSION"
+build_push Containerfile . "$REG/dotvirt:v$VERSION" --build-arg VERSION="$VERSION"
+D_APP="$(digest "$REG/dotvirt:v$VERSION")"; echo "   app digest: $D_APP"
 repin "$REG/dotvirt" "$D_APP" operator/internal/install/dotvirt.go operator/config/manager/manager.yaml
 
 echo ">> [2/4] operator -> $REG/dotvirt-operator:v$VERSION"
