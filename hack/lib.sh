@@ -12,7 +12,6 @@ REG="${REG:-quay.io/epheo}"                  # images live under quay.io/epheo
 TOOL="${CONTAINER_TOOL:-podman}"
 PLATFORMS="${PLATFORMS:-linux/amd64,linux/arm64}"   # multi-arch: operands run on amd64 + arm64 nodes
 OPM="${OPM:-go run github.com/operator-framework/operator-registry/cmd/opm@$OPM_VERSION}"
-SHA="$(git rev-parse --short HEAD)"
 CSV=operator/config/manifests/bases/dotvirt-operator.clusterserviceversion.yaml
 TMPL=operator/catalog-template.yaml
 
