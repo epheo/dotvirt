@@ -18,12 +18,12 @@ import (
 
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	if s.tasks == nil {
-		writeJSON(w, http.StatusOK, []model.TaskEntry{})
+		writeJSON(w, []model.TaskEntry{})
 		return
 	}
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return
 	}
 	projects, err := s.projectsFor(r.Context(), id, c)
@@ -35,7 +35,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		projects = append(projects, s.platformProject())
 	}
 	canNodes := s.canReadNodesCached(r.Context(), id, c)
-	writeJSON(w, http.StatusOK, scopeTasks(s.tasks.Ops(), s.tasks.Merges(), projects, canNodes))
+	writeJSON(w, scopeTasks(s.tasks.Ops(), s.tasks.Merges(), projects, canNodes))
 }
 
 // recordTask logs one imperative act into the feed. Nil-safe so handlers need no

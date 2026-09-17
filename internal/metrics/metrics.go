@@ -322,7 +322,7 @@ func (c *Client) ScopeMetrics(ctx context.Context, token string, namespaces []st
 		return model.VMMetrics{}, fmt.Errorf("%w: %v", model.ErrUnavailable, err)
 	}
 
-	out := model.VMMetrics{Range: rng, StepSec: step, Charts: make([]model.MetricChart, len(specs))}
+	out := model.VMMetrics{Range: rng, Charts: make([]model.MetricChart, len(specs))}
 	for ci, cs := range specs {
 		out.Charts[ci] = buildChart(cs, namedFromLabeled(results[ci]))
 	}
@@ -455,7 +455,7 @@ func (c *Client) VMMetrics(ctx context.Context, token, ns, name, rng string) (mo
 		return model.VMMetrics{}, fmt.Errorf("%w: %v", model.ErrUnavailable, err)
 	}
 
-	out := model.VMMetrics{Range: rng, StepSec: step, Charts: make([]model.MetricChart, len(specs))}
+	out := model.VMMetrics{Range: rng, Charts: make([]model.MetricChart, len(specs))}
 	for ci, cs := range specs {
 		var series []namedSeries
 		for _, got := range results[ci] {

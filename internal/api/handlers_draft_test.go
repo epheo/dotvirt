@@ -38,7 +38,7 @@ func (d *stagingDraft) Propose(id auth.Identity, proj project.ProjectInfo, req m
 		return model.ProposeResult{}, fmt.Errorf("%w: title is required", model.ErrInvalid)
 	}
 	d.proposed = append(d.proposed, req)
-	return model.ProposeResult{Branch: "dotvirt/proposed/u/" + proj.Name, Pushed: true, PRNumber: 7}, nil
+	return model.ProposeResult{Branch: "dotvirt/proposed/u/" + proj.Name, PRNumber: 7}, nil
 }
 
 func (d *stagingDraft) Unstage(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) error {

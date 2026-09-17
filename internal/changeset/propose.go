@@ -74,7 +74,7 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	if err != nil {
 		return model.ProposeResult{}, err
 	}
-	out := model.ProposeResult{Branch: res.Branch, Pushed: res.Pushed}
+	out := model.ProposeResult{Branch: res.Branch}
 
 	fc := c.forge.For(proj.Repo)
 	if fc == nil {

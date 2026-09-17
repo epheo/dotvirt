@@ -65,7 +65,7 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	}
 	for _, obj := range objs {
 		if err := r.apply(ctx, obj); err != nil {
-			return nil, failPhase("ApplyFailed", err)
+			return nil, applyFailed(err)
 		}
 	}
 	if r.DryRun {

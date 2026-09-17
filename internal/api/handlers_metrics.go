@@ -61,7 +61,7 @@ func (s *Server) handleVMUsage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) scopeNamespaces(r *http.Request) (scope, []string, error) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		return scope{}, nil, unavailable("cluster access", err)
+		return scope{}, nil, unavailable(err)
 	}
 	projects, err := s.projectsFor(r.Context(), id, c)
 	if err != nil {
@@ -189,7 +189,7 @@ func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
 			foldDRSBand(&load, st.Config.Threshold)
 		}
 	}
-	writeJSON(w, http.StatusOK, load)
+	writeJSON(w, load)
 }
 
 // handleHostCapacity returns each worker's committed-vs-allocatable picture.
@@ -205,7 +205,7 @@ func (s *Server) handleHostCapacity(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, hc)
+	writeJSON(w, hc)
 }
 
 // nodeMetricsScope is the shared gate of the node-data handlers: metrics wired,
@@ -218,7 +218,7 @@ func (s *Server) nodeMetricsScope(w http.ResponseWriter, r *http.Request) (auth.
 	}
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return auth.Identity{}, false
 	}
 	if !s.canReadNodesCached(r.Context(), id, c) {

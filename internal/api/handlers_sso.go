@@ -20,7 +20,7 @@ func (s *Server) handleFinishSSO(w http.ResponseWriter, r *http.Request) {
 	}
 	_, c, err := s.userCluster(r)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return
 	}
 	id, secret, redirect := s.oauth.DesiredClient()

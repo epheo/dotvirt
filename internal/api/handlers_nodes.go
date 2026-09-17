@@ -21,7 +21,7 @@ import (
 func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 	_, c, err := s.userCluster(r)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return
 	}
 	nodes, err := c.ListNodes(r.Context())
@@ -29,14 +29,14 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, nodes)
+	writeJSON(w, nodes)
 }
 
 // handleNodeInfo returns a node's schedulability + whether the caller may cordon it.
 func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
 	_, c, err := s.userCluster(r)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return
 	}
 	info, err := c.NodeInfo(r.Context(), r.PathValue("node"))
@@ -44,14 +44,14 @@ func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, info)
+	writeJSON(w, info)
 }
 
 // handleNodeCordon patches node.spec.unschedulable (cordon/uncordon).
 func (s *Server) handleNodeCordon(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return
 	}
 	req, ok := decode[struct {
@@ -79,7 +79,7 @@ func (s *Server) handleNodeCordon(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleNodeMaintenance(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return
 	}
 	req, ok := decode[struct {
@@ -112,7 +112,7 @@ func (s *Server) handleNodeMaintenance(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleNodeEvacuate(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return
 	}
 	node := r.PathValue("node")
@@ -150,5 +150,5 @@ func (s *Server) handleNodeEvacuate(w http.ResponseWriter, r *http.Request) {
 		a, b := out.Failures[i], out.Failures[j]
 		return a.Namespace+"/"+a.Name < b.Namespace+"/"+b.Name
 	})
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, out)
 }

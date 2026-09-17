@@ -52,5 +52,5 @@ func (s *Server) handleCreateClone(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"name": cloneName, "target": target})
+	writeJSON(w, map[string]string{"name": cloneName, "target": target})
 }

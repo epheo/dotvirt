@@ -45,7 +45,6 @@ type StorageProfile struct {
 // CapacitySegment is one CSIStorageCapacity entry: free capacity in one
 // topology segment (a node for local storage, or the whole cluster).
 type CapacitySegment struct {
-	Topology  string `json:"topology,omitempty"` // the segment's topology label values; empty = cluster-wide
-	Free      int64  `json:"free"`
-	MaxVolume int64  `json:"maxVolume,omitempty"` // largest single volume the segment can provision
+	Topology string `json:"topology,omitempty"` // the segment's topology label values; empty = cluster-wide
+	Free     int64  `json:"free"`
 }

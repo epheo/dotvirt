@@ -22,12 +22,12 @@ import (
 func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return
 	}
 	projs, err := s.projectsFor(r.Context(), id, c)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return
 	}
 	list := model.TemplateList{Templates: []model.Template{}}
@@ -39,7 +39,7 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 			s.appendTemplates(&list, p.Name, p.Repo)
 		}
 	}
-	writeJSON(w, http.StatusOK, list)
+	writeJSON(w, list)
 }
 
 // appendTemplates adds one library to the listing. An unreadable repo degrades
@@ -90,7 +90,7 @@ func (s *Server) libraryFor(w http.ResponseWriter, r *http.Request, sc scope, li
 	}
 	projs, err := s.projectsFor(r.Context(), sc.id, sc.cluster)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return project.ProjectInfo{}, false
 	}
 	for _, p := range projs {

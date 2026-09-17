@@ -36,31 +36,12 @@ export const TERMS = {
 	},
 	gatewayFirewall: { net: 'Gateway Firewall', virt: 'Egress Rules', backing: 'EgressFirewall' },
 	snat: { net: 'Source NAT', virt: 'Egress SNAT', backing: 'EgressIP' },
-	dhcp: { net: 'DHCP / IP Pool', virt: 'IP Pool', backing: 'UDN subnets (IPAM)' },
-	bgp: { net: 'Route Advertisement', virt: 'BGP peering', backing: 'RouteAdvertisements' },
 	dfw: {
 		net: 'Distributed Firewall',
 		virt: 'Security Policy',
 		backing: 'NetworkPolicy / AdminNetworkPolicy',
 	},
 	group: { net: 'Group', virt: 'Selector', backing: 'label selector' },
-	// Content-library concepts (both idioms already agree on these names).
-	template: {
-		net: 'VM Template',
-		virt: 'VM Template',
-		backing: 'VirtualMachineTemplate (template.kubevirt.io/v1beta1) in git',
-	},
-	library: {
-		net: 'Template Library',
-		virt: 'Content Library',
-		backing: 'templates/ in the project or platform repo',
-	},
-	customization: {
-		net: 'Customization',
-		virt: 'Customization Spec',
-		backing: 'template parameters + cloud-init',
-	},
-	tag: { net: 'Tag', virt: 'Custom Attribute', backing: 'label' },
 } satisfies Record<string, Term>;
 
 // Render a term as "Fabric (Inventory)" - the default dual presentation for a heading

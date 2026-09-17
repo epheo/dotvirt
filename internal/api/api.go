@@ -271,7 +271,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		writeJSON(w, map[string]string{"status": "ok"})
 	})
 
 	if s.auth != nil {
@@ -283,7 +283,7 @@ func (s *Server) Handler() http.Handler {
 		// so the screen can say "finish setup" instead of offering a button that fails.
 		mux.HandleFunc("GET /api/auth/methods", func(w http.ResponseWriter, r *http.Request) {
 			pending := s.oauth != nil && !s.oauth.ClientRegistered(r.Context())
-			writeJSON(w, http.StatusOK, map[string]bool{"sso": s.oauth != nil, "ssoPending": pending})
+			writeJSON(w, map[string]bool{"sso": s.oauth != nil, "ssoPending": pending})
 		})
 		if s.oauth != nil {
 			mux.HandleFunc("GET /api/auth/openshift", s.oauth.LoginRedirect)
@@ -530,7 +530,7 @@ func respond(w http.ResponseWriter, v any, err error) {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, v)
+	writeJSON(w, v)
 }
 
 // fail writes err mapped to a status by statusFor. A classified error (a
@@ -552,11 +552,11 @@ func fail(w http.ResponseWriter, err error) {
 // malformed input, safe to echo back.
 func invalid(err error) error { return fmt.Errorf("%w: %v", model.ErrInvalid, err) }
 
-// unavailable logs err and returns a 503 kind naming only what failed: transport
-// errors from git/forge/cluster dialing can embed endpoints and tokens.
-func unavailable(what string, err error) error {
-	log.Printf("api: %s unavailable: %v", what, err)
-	return fmt.Errorf("%w: %s", model.ErrUnavailable, what)
+// unavailable logs err and returns a 503 kind that names only the failure: dial
+// errors from the cluster can embed endpoints and tokens.
+func unavailable(err error) error {
+	log.Printf("api: cluster access unavailable: %v", err)
+	return fmt.Errorf("%w: cluster access", model.ErrUnavailable)
 }
 
 // statusFor maps an error to an HTTP status by the kind it wraps: a model.Err*
@@ -581,8 +581,8 @@ func statusFor(err error) int {
 	}
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
+func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
+	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(v)
 }

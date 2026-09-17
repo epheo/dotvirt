@@ -126,7 +126,7 @@ func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.R
 func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return
 	}
 
@@ -163,7 +163,6 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		cudn := can(ssarCUDN)
 		out.CanManage = cudn
 		out.Caps = model.NetworkCaps{
-			SharedSegment:      cudn,
 			Uplink:             can(ssarUplink),
 			Namespace:          can(ssarNamespace),
 			EgressIP:           can(ssarEgressIP),
@@ -193,7 +192,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, out)
 }
 
 // scopeNetworks keeps shared (cluster) networks and only the project networks in
