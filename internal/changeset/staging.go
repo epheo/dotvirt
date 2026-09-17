@@ -246,14 +246,23 @@ func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, re
 // to joinProj, the tenant project it JOINS, so that project's per-project app syncs
 // workloads into it once it exists. The namespace + primary UDN land as one
 // multi-doc manifest.
-func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
+func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (model.DraftView, error) {
+	var spec netgen.NamespaceSpec
+	if err := json.Unmarshal(rawSpec, &spec); err != nil {
+		return model.DraftView{}, invalid(fmt.Errorf("invalid namespace spec: %v", err))
+	}
+	// An existing namespace joins as it is; only a new one may take a VM Network.
+	ln, err := live.lookup(spec.Name)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	if err := primaryNetworkOnExisting(spec.Name, ln, spec.VMNetwork); err != nil {
+		return model.DraftView{}, err
+	}
+	spec.Live = ln
 	return c.stageRendered(id, commitProj, func() (draft.Entry, error) {
 		if joinProj.Repo == "" {
 			return draft.Entry{}, fmt.Errorf("the joining project has no repo")
-		}
-		var spec netgen.NamespaceSpec
-		if err := json.Unmarshal(rawSpec, &spec); err != nil {
-			return draft.Entry{}, fmt.Errorf("invalid namespace spec: %v", err)
 		}
 		// Stamp the namespace's dotvirt.io labels/annotations to the tenant it joins,
 		// not the platform repo it's committed to. Host-free ref ONLY when the repo is

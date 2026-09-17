@@ -203,7 +203,11 @@ func TestStageProjectAdoptionStampsRepoOnEveryNamespace(t *testing.T) {
 	target := project.ProjectInfo{Name: "team-a", Namespaces: []string{"team-a", "team-a-db"}}
 	repoURL := "https://forge.example/acme/team-a.git"
 
-	if err := c.stageProjectAdoption(id, platform, tenantNamespaces(target, repoURL), []string{"alice", "bob"}); err != nil {
+	specs, err := tenantNamespaces(target, repoURL, nil)
+	if err != nil {
+		t.Fatalf("tenantNamespaces: %v", err)
+	}
+	if err := c.stageProjectAdoption(id, platform, specs, []string{"alice", "bob"}); err != nil {
 		t.Fatalf("stageProjectAdoption: %v", err)
 	}
 	entries, err := c.store.List(id, platform)

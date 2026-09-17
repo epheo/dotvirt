@@ -16,6 +16,7 @@ metadata:
   name: alpha
   labels:
     dotvirt.io/project: legacy
+    tenant: a
 `
 
 const declaredNSWithUDN = declaredNS + `---
@@ -57,6 +58,8 @@ func TestReleaseDeclaredSplitsGitFromResidue(t *testing.T) {
 		t.Fatalf("rewrite still carries the project label:\n%s", y)
 	} else if !strings.Contains(y, "name: alpha") {
 		t.Fatalf("rewrite lost the namespace:\n%s", y)
+	} else if !strings.Contains(y, "tenant: a") {
+		t.Fatalf("rewrite dropped the namespace's own label:\n%s", y)
 	}
 }
 
