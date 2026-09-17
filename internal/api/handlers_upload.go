@@ -41,7 +41,7 @@ func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, model.UploadTarget{Namespace: req.Namespace, Name: req.Name})
+	writeJSON(w, model.UploadTarget{Namespace: req.Namespace, Name: req.Name})
 }
 
 // handleUploadStatus reports the upload DataVolume's phase + import progress.
@@ -71,5 +71,5 @@ func (s *Server) handleUploadToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	url := strings.TrimRight(s.cfg.UploadProxyURL, "/") + "/v1beta1/upload-async"
-	writeJSON(w, http.StatusOK, model.UploadToken{Token: token, UploadURL: url})
+	writeJSON(w, model.UploadToken{Token: token, UploadURL: url})
 }

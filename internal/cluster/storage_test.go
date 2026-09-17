@@ -96,8 +96,8 @@ func TestListStorageClassesJoinsLayers(t *testing.T) {
 	if f.Free == nil || *f.Free != 16<<30 {
 		t.Errorf("free = %v, want the segments summed (16Gi)", f.Free)
 	}
-	if len(f.Segments) != 2 || f.Segments[0].Topology != "node-a" || f.Segments[1].MaxVolume != 4<<30 {
-		t.Errorf("segments = %+v, want sorted by topology with maxVolume kept", f.Segments)
+	if len(f.Segments) != 2 || f.Segments[0].Topology != "node-a" {
+		t.Errorf("segments = %+v, want sorted by topology", f.Segments)
 	}
 
 	n := got[1]

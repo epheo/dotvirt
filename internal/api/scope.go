@@ -122,7 +122,7 @@ func (s *Server) canReadNodesCached(ctx context.Context, id auth.Identity, c *cl
 func saCached[T any](s *Server, w http.ResponseWriter, r *http.Request, cache *ttlcache.Cache[T], fetch func(*cluster.Client, context.Context) (T, error)) (id auth.Identity, c *cluster.Client, v T, ok bool) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return id, nil, v, false
 	}
 	if v, ok = cache.Get("all"); ok {
@@ -130,7 +130,7 @@ func saCached[T any](s *Server, w http.ResponseWriter, r *http.Request, cache *t
 	}
 	sa, err := s.clusterF.SA()
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return id, nil, v, false
 	}
 	if v, err = fetch(sa, r.Context()); err != nil {
@@ -230,7 +230,7 @@ type scope struct {
 func (s *Server) resolveProject(w http.ResponseWriter, r *http.Request, pick projectPicker) (scope, bool) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return scope{}, false
 	}
 	projects, err := s.projectsFor(r.Context(), id, c)
@@ -343,7 +343,7 @@ func (s *Server) platformScope(w http.ResponseWriter, r *http.Request, ref ssarR
 func (s *Server) platformScopeWith(w http.ResponseWriter, r *http.Request, authorized func(context.Context, auth.Identity, *cluster.Client) bool, deny string) (scope, bool) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return scope{}, false
 	}
 	if s.cfg.PlatformRepo == "" {

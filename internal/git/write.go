@@ -36,12 +36,11 @@ func OpenWrite(url, username string, tokenFn forge.TokenSource, push bool) *Writ
 
 // CommitResult reports what a write did on branch. Committed is false when the
 // tree already matched the branch head, so a no-op never churns history; Hash
-// and Pushed describe the commit made.
+// is the commit made.
 type CommitResult struct {
 	Branch    string
 	Committed bool
 	Hash      string
-	Pushed    bool
 }
 
 // dotvirtSig is the signature for dotvirt's own writes (template seeding) and

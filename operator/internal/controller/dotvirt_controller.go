@@ -369,10 +369,9 @@ type phaseFailure struct {
 func (f phaseFailure) Error() string { return f.err.Error() }
 func (f phaseFailure) Unwrap() error { return f.err }
 
-// failPhase is the explicit form of a phase failure: it names the reason the
-// condition shows. A raw error returned from a phase is recorded the same way
-// under "Error"; the tag only refines the reason.
-func failPhase(reason string, err error) error { return phaseFailure{reason: reason, err: err} }
+// applyFailed tags an operand apply error so the condition shows "ApplyFailed"
+// instead of the "Error" a raw error returned from a phase is recorded under.
+func applyFailed(err error) error { return phaseFailure{reason: "ApplyFailed", err: err} }
 
 // recordFailure writes the phase's failure condition + the Provisioning phase
 // (best-effort: Reconcile returns the error, so nothing else would persist the

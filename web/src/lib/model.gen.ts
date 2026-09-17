@@ -197,7 +197,6 @@ export interface DraftView {
  */
 export interface ProposeResult {
   branch: string;
-  pushed: boolean;
   prURL?: string;
   prNumber?: number /* int */;
   compareURL?: string;
@@ -372,9 +371,7 @@ export interface DRSLive {
    * Deployed: a KubeDescheduler CR exists in the cluster.
    */
   deployed: boolean;
-  managementState?: string;
   mode?: string;
-  profiles?: string[];
   intervalSeconds?: number /* int64 */;
   /**
    * Available mirrors the operator's Available condition; Degraded carries the
@@ -453,7 +450,6 @@ export interface MetricChart {
  */
 export interface VMMetrics {
   range: string;
-  stepSec: number /* int */;
   charts: MetricChart[];
 }
 /**
@@ -719,7 +715,6 @@ export interface NetworkInventory {
  * no platform repo is configured.
  */
 export interface NetworkCaps {
-  sharedSegment: boolean; // shared / VLAN CUDN
   uplink: boolean; // nmstate NNCP
   namespace: boolean; // namespaces (New Project / Namespace)
   egressIP: boolean; // Tier-0 SNAT
@@ -1108,7 +1103,6 @@ export interface StorageProfile {
 export interface CapacitySegment {
   topology?: string; // the segment's topology label values; empty = cluster-wide
   free: number /* int64 */;
-  maxVolume?: number /* int64 */; // largest single volume the segment can provision
 }
 
 //////////

@@ -78,8 +78,6 @@ func (s *Snapshot) Live() model.DRSLive {
 	}
 	out.Deployed = true
 	out.Mode, _, _ = unstructured.NestedString(u.Object, "spec", "mode")
-	out.ManagementState, _, _ = unstructured.NestedString(u.Object, "spec", "managementState")
-	out.Profiles, _, _ = unstructured.NestedStringSlice(u.Object, "spec", "profiles")
 	out.IntervalSeconds, _, _ = unstructured.NestedInt64(u.Object, "spec", "deschedulingIntervalSeconds")
 	conditions, found, _ := unstructured.NestedSlice(u.Object, "status", "conditions")
 	if !found || len(conditions) == 0 {

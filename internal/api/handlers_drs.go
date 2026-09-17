@@ -21,7 +21,7 @@ import (
 func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return
 	}
 	var view model.DRSView
@@ -44,7 +44,7 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, view)
+	writeJSON(w, view)
 }
 
 // handleDRSEnable stages the DRS (descheduler) file set - operator install +

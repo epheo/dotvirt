@@ -113,7 +113,6 @@ type NetworkInventory struct {
 // UI can show only the authoring buttons the caller can actually use. All false when
 // no platform repo is configured.
 type NetworkCaps struct {
-	SharedSegment      bool `json:"sharedSegment"`      // shared / VLAN CUDN
 	Uplink             bool `json:"uplink"`             // nmstate NNCP
 	Namespace          bool `json:"namespace"`          // namespaces (New Project / Namespace)
 	EgressIP           bool `json:"egressIP"`           // Tier-0 SNAT

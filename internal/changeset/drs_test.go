@@ -251,9 +251,6 @@ func TestProposeDRSCommitsFileSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Propose: %v", err)
 	}
-	if !out.Pushed {
-		t.Fatalf("branch not pushed: %+v", out)
-	}
 
 	show := func(path string) []byte {
 		t.Helper()
