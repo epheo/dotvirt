@@ -24,6 +24,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/argo"
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/desched"
@@ -79,8 +80,10 @@ type Draft interface {
 	// StageCreate renders one network-family object from its form spec; the
 	// route resolved proj from the object's scope, resource picks the form.
 	StageCreate(id auth.Identity, proj project.ProjectInfo, resource draft.Resource, spec json.RawMessage) (model.DraftView, error)
-	StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
-	StageCreateProject(id auth.Identity, commitProj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
+	// The tenancy stagers take the caller-token namespace capture: a namespace
+	// that already exists keeps what it carries.
+	StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, spec json.RawMessage, live changeset.LiveNamespaces) (model.DraftView, error)
+	StageCreateProject(id auth.Identity, commitProj project.ProjectInfo, spec json.RawMessage, live changeset.LiveNamespaces) (model.DraftView, error)
 	StageDeployFromTemplate(id auth.Identity, targetProj, libraryProj project.ProjectInfo, req model.DeployTemplateRequest) (model.DraftView, error)
 	StageSaveTemplate(id auth.Identity, commitProj, sourceProj project.ProjectInfo, req model.SaveTemplateRequest) (model.DraftView, error)
 	StageUpdateTemplate(id auth.Identity, commitProj project.ProjectInfo, req model.UpdateTemplateRequest) (model.DraftView, error)
@@ -102,7 +105,7 @@ type Draft interface {
 	AdoptObjects(id auth.Identity, proj project.ProjectInfo, where string, objs []model.Adoptable) (model.DraftView, error)
 	// AdoptObject makes git match one running object: create, or edit when it drifted.
 	AdoptObject(id auth.Identity, proj project.ProjectInfo, obj model.Adoptable) (model.DraftView, error)
-	AdoptProject(id auth.Identity, commitProj, target project.ProjectInfo, owners []string) (model.DraftView, error)
+	AdoptProject(id auth.Identity, commitProj, target project.ProjectInfo, owners []string, live changeset.LiveNamespaces) (model.DraftView, error)
 	ReleaseDeclared(id auth.Identity, commitProj, target project.ProjectInfo) (staged, residue []string, err error)
 	// Resync runs with dotvirt's SA (Argo operations carry no user context);
 	// canUpdateVM is the caller-token SSAR the implementation enforces before

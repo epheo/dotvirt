@@ -147,7 +147,7 @@ func TestSoleDeclarerRefusals(t *testing.T) {
 		t.Errorf("cluster-scoped route: path=%q err=%v", path, err)
 	}
 	raw, _ := json.Marshal(netgen.NamespaceSpec{Name: "alpha", VMNetwork: &netgen.PrimaryNet{Name: "vm-net2", Subnet: "10.30.0.0/24"}})
-	if _, err := c.StageCreateNamespace(id, proj, proj, raw); !errors.Is(err, model.ErrConflict) {
+	if _, err := c.StageCreateNamespace(id, proj, proj, raw, nil); !errors.Is(err, model.ErrConflict) {
 		t.Errorf("namespace re-submitted with another primary network: want ErrConflict, got %v", err)
 	}
 }

@@ -5,12 +5,24 @@ package api
 // the platform tier), kept apart from the port-group handlers next door.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 
+	"github.com/epheo/dotvirt/internal/changeset"
+	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/netgen"
 )
+
+// liveNamespaces binds the namespace capture to the caller's token: a namespace
+// that already exists is adopted as the caller can read it, never regenerated.
+func liveNamespaces(ctx context.Context, c *cluster.Client) changeset.LiveNamespaces {
+	return func(name string) (*netgen.LiveNamespace, error) {
+		return c.LiveNamespace(ctx, name)
+	}
+}
 
 // handleCreateNamespace stages a new namespace (+ optional primary "VM Network").
 // The Namespace object is cluster-scoped, so it is COMMITTED to the platform repo
@@ -38,7 +50,7 @@ func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	view, err := s.draft.StageCreateNamespace(join.id, plat.proj, join.proj, raw)
+	view, err := s.draft.StageCreateNamespace(join.id, plat.proj, join.proj, raw, liveNamespaces(r.Context(), plat.cluster))
 	respond(w, view, err)
 }
 
@@ -70,7 +82,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, fmt.Errorf("%w: that project already exists; adopt it instead of creating it", model.ErrConflict))
 		return
 	}
-	view, err := s.draft.StageCreateProject(plat.id, plat.proj, raw)
+	view, err := s.draft.StageCreateProject(plat.id, plat.proj, raw, liveNamespaces(r.Context(), plat.cluster))
 	respond(w, view, err)
 }
 
@@ -95,7 +107,7 @@ func (s *Server) handleAdoptProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, fmt.Errorf("%w: project %q", model.ErrNotFound, r.PathValue("project")))
 		return
 	}
-	view, err := s.draft.AdoptProject(plat.id, plat.proj, target, body.Owners)
+	view, err := s.draft.AdoptProject(plat.id, plat.proj, target, body.Owners, liveNamespaces(r.Context(), plat.cluster))
 	respond(w, view, err)
 }
 
