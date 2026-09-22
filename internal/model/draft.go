@@ -182,7 +182,6 @@ type DraftView struct {
 // ProposeResult is returned after proposing the draft as a PR.
 type ProposeResult struct {
 	Branch     string `json:"branch"`
-	Pushed     bool   `json:"pushed"`
 	PRURL      string `json:"prURL,omitempty"`
 	PRNumber   int    `json:"prNumber,omitempty"`
 	CompareURL string `json:"compareURL,omitempty"`

@@ -145,7 +145,7 @@ func platformSyncWarning(drift map[string]model.ProjectSync, platformRepo string
 func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 	id, _, err := s.userCluster(r)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return
 	}
 	inv, err := s.InventoryForIdentity(r.Context(), id)
@@ -153,7 +153,7 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, inv)
+	writeJSON(w, inv)
 }
 
 // handleOptions lists the wizard/editor choices (instancetypes, preferences, OS
@@ -172,7 +172,7 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.optionsFor(r.Context(), id, c, visible, all))
+	writeJSON(w, s.optionsFor(r.Context(), id, c, visible, all))
 }
 
 // optionsFor narrows the shared catalog to what id may see: a namespaced entry

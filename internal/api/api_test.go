@@ -126,7 +126,7 @@ func TestRespond(t *testing.T) {
 // unavailable's public message must name only WHAT failed - transport errors
 // embed endpoints and credentials that stay in the log.
 func TestUnavailableNamesOnlyTheSubsystem(t *testing.T) {
-	err := unavailable("cluster access", errors.New("dial tcp 10.0.0.1:6443: token=abc"))
+	err := unavailable(errors.New("dial tcp 10.0.0.1:6443: token=abc"))
 	if !errors.Is(err, model.ErrUnavailable) {
 		t.Fatal("kind lost")
 	}

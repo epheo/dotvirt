@@ -16,7 +16,7 @@ import (
 func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
-		fail(w, unavailable("cluster access", err))
+		fail(w, unavailable(err))
 		return
 	}
 	var all []model.Policy
@@ -40,7 +40,7 @@ func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
 		p := &out[i]
 		p.SourceFile = declared(p.Backing, p.Namespace, p.Name)
 	}
-	writeJSON(w, http.StatusOK, model.PolicyInventory{Policies: out})
+	writeJSON(w, model.PolicyInventory{Policies: out})
 }
 
 // scopePolicies keeps namespace-tier policies in visible namespaces and

@@ -174,7 +174,7 @@ func TestRevertMergeOpensPR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
-	if out.PRNumber != 13 || out.PRURL == "" || !out.Pushed {
+	if out.PRNumber != 13 || out.PRURL == "" {
 		t.Fatalf("want an opened PR, got %+v", out)
 	}
 	if got.Title != `Revert "Resize web" (#12)` || got.Base != "main" || got.Head != out.Branch {

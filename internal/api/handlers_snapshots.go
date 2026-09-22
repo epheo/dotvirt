@@ -40,7 +40,7 @@ func (s *Server) handleTakeSnapshot(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"name": snapName})
+	writeJSON(w, map[string]string{"name": snapName})
 }
 
 // handleRestoreSnapshot rolls the VM back to a snapshot (the VM must be stopped).
