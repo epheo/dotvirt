@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -13,6 +14,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/netgen"
 )
 
 // GVR is the dynamic-client address of one managed kind.
@@ -49,6 +51,49 @@ func networkFamilyGVRs(clusterScoped bool) []schema.GroupVersionResource {
 		}
 	}
 	return out
+}
+
+// What the cluster stamps on every namespace rather than what its author
+// declared: the apiserver's name label, the pod-security levels OpenShift's
+// label-sync controller derives from SCC grants (declared in git, Argo would
+// fight that controller on the next grant; enforce is never controller-set, so
+// it stays), and the SCC ranges the policy controller allocates per cluster.
+var (
+	namespaceLabelsToStrip = []string{
+		"kubernetes.io/metadata.name",
+		"pod-security.kubernetes.io/audit",
+		"pod-security.kubernetes.io/audit-version",
+		"pod-security.kubernetes.io/warn",
+		"pod-security.kubernetes.io/warn-version",
+	}
+	namespaceAnnotationPrefixesToStrip = []string{"openshift.io/sa.scc.", "security.openshift.io/"}
+)
+
+// LiveNamespace captures what an existing namespace carries, under the caller's
+// token, stripped to what its author declared. Nil when the namespace does not
+// exist: adoption then renders a fresh one.
+func (c *Client) LiveNamespace(ctx context.Context, name string) (*netgen.LiveNamespace, error) {
+	ns, err := c.kube.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read namespace %s: %w", name, err)
+	}
+	labels := maps.Clone(ns.Labels)
+	for _, k := range namespaceLabelsToStrip {
+		delete(labels, k)
+	}
+	ann := stripAnnotations(ns.Annotations)
+	for k := range ann {
+		for _, prefix := range namespaceAnnotationPrefixesToStrip {
+			if strings.HasPrefix(k, prefix) {
+				delete(ann, k)
+				break
+			}
+		}
+	}
+	return &netgen.LiveNamespace{Labels: labels, Annotations: ann}, nil
 }
 
 // AdoptableObjects: everything running in namespaces that git does not describe,

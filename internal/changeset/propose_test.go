@@ -14,6 +14,7 @@ import (
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
@@ -80,7 +81,7 @@ func newProposeFixture(t *testing.T, routes ...route) *proposeFixture {
 // only the warning tells a former install's leftover from a harmless retry.
 func TestCreateProjectReusesExistingRepoWithWarning(t *testing.T) {
 	f := newProposeFixture(t, when("GET", "team-a", http.StatusOK, "{}"))
-	view, err := f.c.StageCreateProject(f.id, f.proj, json.RawMessage(`{"name":"team-a","namespace":"team-a"}`))
+	view, err := f.c.StageCreateProject(f.id, f.proj, json.RawMessage(`{"name":"team-a","namespace":"team-a"}`), nil)
 	if err != nil {
 		t.Fatalf("a pre-existing repo must be reused, not refused: %v", err)
 	}
@@ -99,7 +100,7 @@ func TestCreateProjectFreshRepoNoWarning(t *testing.T) {
 			}
 			return 0, "", false
 		})
-	view, err := f.c.StageCreateProject(f.id, f.proj, json.RawMessage(`{"name":"team-a","namespace":"team-a"}`))
+	view, err := f.c.StageCreateProject(f.id, f.proj, json.RawMessage(`{"name":"team-a","namespace":"team-a"}`), nil)
 	if err != nil {
 		t.Fatalf("StageCreateProject: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestCreateProjectFreshRepoNoWarning(t *testing.T) {
 // A repo annotation that still resolves means the project is already managed.
 func TestAdoptProjectRefusesResolvingRepo(t *testing.T) {
 	f := newProposeFixture(t, when("GET", "team-a", http.StatusOK, "{}"))
-	_, err := f.c.AdoptProject(f.id, f.proj, f.target("team-a"), nil)
+	_, err := f.c.AdoptProject(f.id, f.proj, f.target("team-a"), nil, nil)
 	if !errors.Is(err, model.ErrConflict) {
 		t.Fatalf("want model.ErrConflict when the repo still resolves, got %v", err)
 	}
@@ -130,7 +131,7 @@ func TestAdoptProjectRecreatesLostRepo(t *testing.T) {
 			}
 			return 0, "", false
 		})
-	if _, err := f.c.AdoptProject(f.id, f.proj, f.target("team-a"), nil); err != nil {
+	if _, err := f.c.AdoptProject(f.id, f.proj, f.target("team-a"), nil, nil); err != nil {
 		t.Fatalf("a lost repo must be re-created, not refused: %v", err)
 	}
 }
@@ -142,7 +143,7 @@ func TestAdoptProjectRefusesRepoOnAnotherForge(t *testing.T) {
 	f := newProposeFixture(t, when("GET", "team-a", http.StatusNotFound, ""))
 	target := project.ProjectInfo{Name: "team-a", Namespaces: []string{"team-a"},
 		Repo: "https://github.example/acme/team-a.git"}
-	_, err := f.c.AdoptProject(f.id, f.proj, target, nil)
+	_, err := f.c.AdoptProject(f.id, f.proj, target, nil, nil)
 	if !errors.Is(err, model.ErrConflict) {
 		t.Fatalf("want model.ErrConflict for a repo this forge does not serve, got %v", err)
 	}
@@ -154,7 +155,7 @@ func TestAdoptProjectRehomesForeignHostRepo(t *testing.T) {
 	f := newProposeFixture(t, when("GET", "team-a", http.StatusOK, "{}"))
 	target := project.ProjectInfo{Name: "team-a", Namespaces: []string{"team-a"},
 		Repo: "https://old-forge.example/acme/team-a.git"}
-	if _, err := f.c.AdoptProject(f.id, f.proj, target, nil); err != nil {
+	if _, err := f.c.AdoptProject(f.id, f.proj, target, nil, nil); err != nil {
 		t.Fatalf("a same-owner repo on this forge must re-home, not refuse: %v", err)
 	}
 	entries, err := f.c.store.List(f.id.Username, f.proj.Name)
@@ -424,5 +425,47 @@ func TestOpenProposalsRefreshesUnchangedHead(t *testing.T) {
 	}
 	if reads != before {
 		t.Fatalf("a settled PR must not be re-read, got %d extra forge calls", reads-before)
+	}
+}
+
+// An adopted namespace keeps what it already carries: Argo applies an omitted
+// label as its removal, and OVN refuses removing the primary-network label.
+func TestCreateProjectKeepsExistingNamespaceMetadata(t *testing.T) {
+	f := newProposeFixture(t,
+		when("GET", "tenant-a", http.StatusNotFound, ""),
+		func(m, path string) (int, string, bool) {
+			if m == "POST" && strings.HasPrefix(path, "/api/v1/orgs/") && strings.HasSuffix(path, "/repos") {
+				return http.StatusCreated, "{}", true
+			}
+			return 0, "", false
+		})
+	live := func(string) (*netgen.LiveNamespace, error) {
+		return &netgen.LiveNamespace{Labels: map[string]string{"tenant": "a", "k8s.ovn.org/primary-user-defined-network": ""}}, nil
+	}
+	view, err := f.c.StageCreateProject(f.id, f.proj, json.RawMessage(`{"name":"tenant-a","namespace":"tenant-a"}`), live)
+	if err != nil {
+		t.Fatalf("StageCreateProject: %v", err)
+	}
+	if len(view.Items) != 1 {
+		t.Fatalf("want the namespace alone staged, got %d items", len(view.Items))
+	}
+	y := view.Items[0].YAML
+	for _, want := range []string{"tenant: a", `k8s.ovn.org/primary-user-defined-network: ""`, "dotvirt.io/project: tenant-a"} {
+		if !strings.Contains(y, want) {
+			t.Errorf("staged namespace must carry %q:\n%s", want, y)
+		}
+	}
+}
+
+// A VM Network on a namespace that already exists is refused before the repo is
+// created: OVN allows the primary-network label only at creation, and a refusal
+// must not burn the name. The fixture fails on any forge call.
+func TestCreateProjectRefusesVMNetworkOnExistingNamespace(t *testing.T) {
+	f := newProposeFixture(t)
+	live := func(string) (*netgen.LiveNamespace, error) { return &netgen.LiveNamespace{}, nil }
+	_, err := f.c.StageCreateProject(f.id, f.proj,
+		json.RawMessage(`{"name":"tenant-a","namespace":"tenant-a","vmNetwork":{"name":"vm-net","subnet":"10.40.0.0/24"}}`), live)
+	if !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("want ErrConflict, got %v", err)
 	}
 }

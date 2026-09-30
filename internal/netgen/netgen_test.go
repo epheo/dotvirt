@@ -557,3 +557,69 @@ func TestBaselineAdminNetworkPolicy(t *testing.T) {
 		t.Error("expected error for an out-of-range priority")
 	}
 }
+
+// An adopted namespace keeps what it already carries; only the tenancy keys are
+// dotvirt's to set.
+func TestNamespaceManifestKeepsLiveMetadata(t *testing.T) {
+	_, content, err := NamespaceManifest(NamespaceSpec{
+		Name: "tenant-a", Project: "tenant-a", Repo: "acme/tenant-a.git",
+		Live: &LiveNamespace{
+			Labels:      map[string]string{"tenant": "a", primaryNetworkLabel: "", projectLabel: "stale"},
+			Annotations: map[string]string{"openshift.io/description": "roundtable", repoAnnotation: "acme/old.git"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	y := string(content)
+	for _, want := range []string{
+		"tenant: a", `k8s.ovn.org/primary-user-defined-network: ""`, "dotvirt.io/project: tenant-a",
+		"openshift.io/description: roundtable", "dotvirt.io/repo: acme/tenant-a.git",
+	} {
+		if !strings.Contains(y, want) {
+			t.Errorf("missing %q:\n%s", want, y)
+		}
+	}
+	for _, stale := range []string{"stale", "acme/old.git"} {
+		if strings.Contains(y, stale) {
+			t.Errorf("live tenancy must yield to the spec, found %q:\n%s", stale, y)
+		}
+	}
+}
+
+// A release strips only dotvirt's tenancy; the namespace's own metadata stays,
+// and a map emptied by the strip goes with it.
+func TestReleasedNamespaceManifestKeepsForeignMetadata(t *testing.T) {
+	out, err := ReleasedNamespaceManifest([]byte(`apiVersion: v1
+kind: Namespace
+metadata:
+  annotations:
+    dotvirt.io/repo: acme/tenant-a.git
+    openshift.io/description: roundtable
+  labels:
+    dotvirt.io/project: tenant-a
+    k8s.ovn.org/primary-user-defined-network: ""
+  name: tenant-a
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	y := string(out)
+	for _, gone := range []string{"dotvirt.io/project", "dotvirt.io/repo"} {
+		if strings.Contains(y, gone) {
+			t.Errorf("release must drop %s:\n%s", gone, y)
+		}
+	}
+	for _, want := range []string{`k8s.ovn.org/primary-user-defined-network: ""`, "openshift.io/description: roundtable", "name: tenant-a"} {
+		if !strings.Contains(y, want) {
+			t.Errorf("release must keep %q:\n%s", want, y)
+		}
+	}
+	out, err = ReleasedNamespaceManifest([]byte("apiVersion: v1\nkind: Namespace\nmetadata:\n  labels:\n    dotvirt.io/project: p\n  name: n\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "labels") {
+		t.Errorf("an emptied labels map must go:\n%s", out)
+	}
+}

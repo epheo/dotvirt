@@ -19,6 +19,29 @@ import (
 // the declarative half into the platform draft. Everything else in this package
 // only writes draft entries.
 
+// LiveNamespaces reads what a namespace already carries on the cluster, nil
+// when it does not exist. Bound to the caller's token by the handler, so the
+// coordinator stays cluster-free and a user adopts exactly what they can read.
+// A nil func means nothing exists yet.
+type LiveNamespaces func(name string) (*netgen.LiveNamespace, error)
+
+func (l LiveNamespaces) lookup(name string) (*netgen.LiveNamespace, error) {
+	if l == nil {
+		return nil, nil
+	}
+	return l(name)
+}
+
+// primaryNetworkOnExisting refuses a VM Network on a namespace that already
+// exists: OVN allows the primary-network label only at creation, so the sync
+// could never apply it.
+func primaryNetworkOnExisting(ns string, live *netgen.LiveNamespace, net *netgen.PrimaryNet) error {
+	if live != nil && net != nil {
+		return fmt.Errorf("%w: namespace %q already exists; a VM Network can only be added when a namespace is created", model.ErrConflict, ns)
+	}
+	return nil
+}
+
 // ProjectSpec describes a new tenant project to bootstrap from the UI: a forge repo,
 // a first namespace (optionally with a primary VM Network), and the owners granted
 // admin on it. This is what fills the "no New Project button" gap.
@@ -34,7 +57,7 @@ type ProjectSpec struct {
 // RoleBinding granting them namespace-admin are staged into the PLATFORM repo
 // (cluster-tenancy is admin-tier; a tenant repo couldn't carry either). commitProj
 // is the platform project.
-func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
+func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (model.DraftView, error) {
 	if err := requireRepo(commitProj); err != nil {
 		return model.DraftView{}, err
 	}
@@ -62,14 +85,21 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	// this runs. Refusing here on a pre-existing repo instead would burn the name: the
 	// repo is created first, so a run that failed or was discarded after that point
 	// could never be retried. ensureTenantRepo is idempotent, so a retry reuses it.
+	// Read the namespace before the repo exists: a refusal must not leave one behind.
+	ln, err := live.lookup(ns)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	if err := primaryNetworkOnExisting(ns, ln, spec.VMNetwork); err != nil {
+		return model.DraftView{}, err
+	}
 	repoURL, created, err := c.ensureTenantRepo(commitProj.Repo, spec.Name)
 	if err != nil {
 		return model.DraftView{}, err
 	}
 	// The first namespace joins the new project, with its primary VM Network
 	// when the form chose one.
-	first := tenantNamespaces(project.ProjectInfo{Name: spec.Name, Namespaces: []string{ns}}, repoURL)
-	first[0].VMNetwork = spec.VMNetwork
+	first := []netgen.NamespaceSpec{{Name: ns, Project: spec.Name, Repo: forge.PathRef(repoURL), VMNetwork: spec.VMNetwork, Live: ln}}
 	if err := c.stageProjectAdoption(id.Username, commitProj.Name, first, spec.Owners); err != nil {
 		return model.DraftView{}, err
 	}
@@ -96,7 +126,7 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 // app (it skips repoless projects). VMs in those namespaces then surface as
 // NotTracked and are brought in by adopting the namespace (AdoptObjects) - still
 // PR-gated. commitProj is the platform project; target is the project being adopted.
-func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.ProjectInfo, owners []string) (model.DraftView, error) {
+func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.ProjectInfo, owners []string, live LiveNamespaces) (model.DraftView, error) {
 	if err := requireRepo(commitProj); err != nil {
 		return model.DraftView{}, err
 	}
@@ -127,7 +157,11 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 				return model.DraftView{}, fmt.Errorf("%w: project %q's repo (%s) is hosted on another forge", model.ErrConflict, target.Name, target.Repo)
 			}
 			// Re-home: no repo create, no seed; the repo is already here.
-			if err := c.stageProjectAdoption(id.Username, commitProj.Name, tenantNamespaces(target, target.Repo), owners); err != nil {
+			specs, err := tenantNamespaces(target, target.Repo, live)
+			if err != nil {
+				return model.DraftView{}, err
+			}
+			if err := c.stageProjectAdoption(id.Username, commitProj.Name, specs, owners); err != nil {
 				return model.DraftView{}, err
 			}
 			return c.Get(id, commitProj)
@@ -142,16 +176,21 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if err := c.stageProjectAdoption(id.Username, commitProj.Name, tenantNamespaces(target, repoURL), owners); err != nil {
+	specs, err := tenantNamespaces(target, repoURL, live)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	if err := c.stageProjectAdoption(id.Username, commitProj.Name, specs, owners); err != nil {
 		return model.DraftView{}, err
 	}
 	return c.Get(id, commitProj)
 }
 
 // ReleaseDeclared stages the declarative half of a project release: every
-// project namespace the PLATFORM repo declares is rewritten as a plain
-// Namespace - the file stays (handing Argo a deletion would prune the
-// namespace itself), the project label and repo annotation go. Namespaces the
+// project namespace the PLATFORM repo declares is rewritten without its
+// tenancy - the file and whatever else it carries stay (handing Argo a
+// deletion would prune the namespace itself), only the project label and repo
+// annotation go. Namespaces the
 // platform repo does not describe come back as residue for the caller to
 // unlabel imperatively (label residue has no git path). A declared file
 // carrying more than its Namespace (a VM Network rides some) refuses the whole
@@ -177,7 +216,7 @@ func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target proje
 				"%w: %s declares more than the namespace %s (e.g. a VM Network); rewriting it would prune those - release this project by editing the platform repo",
 				model.ErrConflict, path, ns)
 		}
-		pPath, pContent, gerr := netgen.PlainNamespaceManifest(ns)
+		released, gerr := netgen.ReleasedNamespaceManifest(content)
 		if gerr != nil {
 			return nil, nil, invalid(gerr)
 		}
@@ -186,8 +225,8 @@ func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target proje
 			Resource:   draft.ResourceNamespace,
 			Namespace:  ns,
 			Name:       ns,
-			SourceFile: pPath,
-			Manifest:   string(pContent),
+			SourceFile: path,
+			Manifest:   string(released),
 		}); serr != nil {
 			return nil, nil, serr
 		}
@@ -224,13 +263,17 @@ func (c *Coordinator) ensureTenantRepo(platformRepo, name string) (repoURL strin
 // repoURL: stamped with target's dotvirt.io/project label and the HOST-FREE
 // dotvirt.io/repo annotation, so the forge identity lives only in the install
 // config and a host change re-resolves projects instead of stranding them (the
-// re-home path depends on it).
-func tenantNamespaces(target project.ProjectInfo, repoURL string) []netgen.NamespaceSpec {
+// re-home path depends on it). Each keeps what it already carries on the cluster.
+func tenantNamespaces(target project.ProjectInfo, repoURL string, live LiveNamespaces) ([]netgen.NamespaceSpec, error) {
 	specs := make([]netgen.NamespaceSpec, 0, len(target.Namespaces))
 	for _, ns := range target.Namespaces {
-		specs = append(specs, netgen.NamespaceSpec{Name: ns, Project: target.Name, Repo: forge.PathRef(repoURL)})
+		ln, err := live.lookup(ns)
+		if err != nil {
+			return nil, err
+		}
+		specs = append(specs, netgen.NamespaceSpec{Name: ns, Project: target.Name, Repo: forge.PathRef(repoURL), Live: ln})
 	}
-	return specs
+	return specs, nil
 }
 
 // stageProjectAdoption stages the Namespace manifest of each spec (and, when

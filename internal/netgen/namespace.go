@@ -9,6 +9,14 @@ import (
 	"github.com/epheo/dotvirt/internal/validate"
 )
 
+// The tenancy keys dotvirt stamps on a namespace; everything else on it belongs
+// to whoever created it.
+const (
+	projectLabel        = "dotvirt.io/project"
+	repoAnnotation      = "dotvirt.io/repo"
+	primaryNetworkLabel = "k8s.ovn.org/primary-user-defined-network"
+)
+
 // NamespaceSpec describes a namespace to create within a project, optionally with
 // a primary "VM Network" (a primary UDN). A primary UDN requires a fresh,
 // labeled namespace, so the two are created together in one manifest.
@@ -17,6 +25,19 @@ type NamespaceSpec struct {
 	Project   string      `json:"project"` // dotvirt.io/project label
 	Repo      string      `json:"repo"`    // dotvirt.io/repo annotation
 	VMNetwork *PrimaryNet `json:"vmNetwork,omitempty"`
+	// Live is what the namespace already carries when adoption meets an
+	// existing one, nil for a new one. Never a wire field: the capture runs
+	// under the caller's token, not from the request body.
+	Live *LiveNamespace `json:"-"`
+}
+
+// LiveNamespace is an existing namespace's own metadata, kept verbatim beneath
+// the tenancy keys. Argo applies an omitted label as its removal, and OVN
+// refuses removing the primary-network label once the namespace exists, so a
+// manifest rendered from the spec alone wedges the platform sync on it.
+type LiveNamespace struct {
+	Labels      map[string]string
+	Annotations map[string]string
 }
 
 // PrimaryNet is the namespace's default "VM Network" - a primary Layer2 UDN. It's
@@ -28,21 +49,32 @@ type PrimaryNet struct {
 	Subnet string `json:"subnet"` // required CIDR - a primary UDN must do IPAM (see below)
 }
 
-// PlainNamespaceManifest renders a namespace with dotvirt's tenancy stripped -
-// the declarative half of a project release. The FILE stays (handing Argo a
-// deletion would prune the namespace itself); only the project label and repo
-// annotation go, so the next sync unlabels the live namespace.
-func PlainNamespaceManifest(name string) (path string, content []byte, err error) {
-	if err := validate.RequireDNS1123("namespace", name); err != nil {
-		return "", nil, err
+// ReleasedNamespaceManifest rewrites a declared Namespace with dotvirt's
+// tenancy stripped - the declarative half of a project release. The FILE stays
+// (handing Argo a deletion would prune the namespace itself) and so does
+// everything else it declares: only the project label and repo annotation go,
+// so the next sync unlabels the live namespace and touches nothing else.
+func ReleasedNamespaceManifest(declared []byte) ([]byte, error) {
+	var doc map[string]any
+	if err := yaml.Unmarshal(declared, &doc); err != nil {
+		return nil, fmt.Errorf("declared namespace: %w", err)
 	}
-	out, err := yaml.Marshal(map[string]any{
-		"apiVersion": model.KindNS.APIVersion(), "kind": model.KindNS.Kind, "metadata": map[string]any{"name": name},
-	})
-	if err != nil {
-		return "", nil, err
+	meta, _ := doc["metadata"].(map[string]any)
+	if meta == nil {
+		return nil, fmt.Errorf("declared namespace has no metadata")
 	}
-	return "namespaces/" + name + ".yaml", out, nil
+	dropMetaKey(meta, "labels", projectLabel)
+	dropMetaKey(meta, "annotations", repoAnnotation)
+	return yaml.Marshal(doc)
+}
+
+// dropMetaKey removes one key from a metadata map field, and the field once empty.
+func dropMetaKey(meta map[string]any, field, key string) {
+	m, _ := meta[field].(map[string]any)
+	delete(m, key)
+	if len(m) == 0 {
+		delete(meta, field)
+	}
 }
 
 // NamespaceManifest renders the Namespace (labeled into the project) plus, when a
@@ -56,14 +88,26 @@ func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error)
 	if s.Project == "" {
 		return "", nil, fmt.Errorf("a project is required")
 	}
-	labels := map[string]any{"dotvirt.io/project": s.Project}
+	labels, annotations := map[string]any{}, map[string]any{}
+	if s.Live != nil {
+		for k, v := range s.Live.Labels {
+			labels[k] = v
+		}
+		for k, v := range s.Live.Annotations {
+			annotations[k] = v
+		}
+	}
+	labels[projectLabel] = s.Project
 	if s.VMNetwork != nil {
 		// Required for OVN-K to treat a UDN in this namespace as primary.
-		labels["k8s.ovn.org/primary-user-defined-network"] = ""
+		labels[primaryNetworkLabel] = ""
 	}
 	meta := map[string]any{"name": s.Name, "labels": labels}
 	if s.Repo != "" {
-		meta["annotations"] = map[string]any{"dotvirt.io/repo": s.Repo}
+		annotations[repoAnnotation] = s.Repo
+	}
+	if len(annotations) > 0 {
+		meta["annotations"] = annotations
 	}
 	ns, err := yaml.Marshal(map[string]any{
 		"apiVersion": model.KindNS.APIVersion(), "kind": model.KindNS.Kind, "metadata": meta,
@@ -144,7 +188,7 @@ func RoleBindingManifest(s RoleBindingSpec) (path string, content []byte, err er
 	}
 	meta := map[string]any{"name": s.Namespace + "-admins", "namespace": s.Namespace}
 	if s.Project != "" {
-		meta["labels"] = map[string]any{"dotvirt.io/project": s.Project}
+		meta["labels"] = map[string]any{projectLabel: s.Project}
 	}
 	rb, err := yaml.Marshal(map[string]any{
 		"apiVersion": model.KindRB.APIVersion(),
