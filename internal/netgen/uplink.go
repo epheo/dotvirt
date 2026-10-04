@@ -51,8 +51,13 @@ func UplinkManifest(s UplinkSpec) (path string, content []byte, err error) {
 					"type":  "ovs-bridge",
 					"state": "up",
 					"bridge": map[string]any{
-						"options": map[string]any{"stp": false},
-						"port":    []any{map[string]any{"name": s.NIC}},
+						// OVN attaches its localnet patch port to this bridge once a
+						// network maps to it. Without this, nmstate's verification
+						// sees an undeclared port, rolls back, and the policy never
+						// converges again.
+						"allow-extra-patch-ports": true,
+						"options":                 map[string]any{"stp": false},
+						"port":                    []any{map[string]any{"name": s.NIC}},
 					},
 				}},
 				"ovn": map[string]any{

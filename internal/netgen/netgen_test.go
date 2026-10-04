@@ -219,7 +219,8 @@ func TestUplinkManifest(t *testing.T) {
 	for _, want := range []string{
 		"kind: NodeNetworkConfigurationPolicy",
 		"type: ovs-bridge",
-		"name: br-physnet-prod", // default bridge
+		"allow-extra-patch-ports: true", // OVN's localnet patch port must not fail verification
+		"name: br-physnet-prod",         // default bridge
 		"name: eno2",
 		"localnet: physnet-prod",
 		"node-role.kubernetes.io/worker", // default node selector
