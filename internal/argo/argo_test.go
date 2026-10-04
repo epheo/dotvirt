@@ -315,3 +315,37 @@ func TestAppSyncConvergedAppRetiresFailedOperation(t *testing.T) {
 		t.Errorf("converged app must not surface the historical operation error, got %q", got.SyncError)
 	}
 }
+
+// The rollup names what is wrong, not just that something is: degraded objects
+// with Argo's health message, refused applies with the apply error (only while
+// the operation stands), VMs' Suspended and a sync in flight left out.
+func TestUnhealthyResourcesNamesObjects(t *testing.T) {
+	a := appWithSyncResult("openshift-gitops", "dotvirt-platform",
+		[]any{
+			map[string]any{"group": "nmstate.io", "kind": "NodeNetworkConfigurationPolicy", "name": "dc-vlan-bridge", "status": "Synced",
+				"health": map[string]any{"status": "Degraded", "message": "FailedToConfigure: 1/1 nodes failed to configure"}},
+			map[string]any{"group": "", "kind": "Namespace", "name": "tenant-a", "status": "OutOfSync"},
+			map[string]any{"group": "kubevirt.io", "kind": "VirtualMachine", "namespace": "demo", "name": "halted", "status": "Synced",
+				"health": map[string]any{"status": "Suspended"}},
+			map[string]any{"group": "k8s.ovn.org", "kind": "UserDefinedNetwork", "namespace": "demo", "name": "net", "status": "OutOfSync",
+				"health": map[string]any{"status": "Progressing"}},
+		},
+		[]any{
+			map[string]any{"group": "", "kind": "Namespace", "name": "tenant-a", "status": "SyncFailed",
+				"message": `error when patching "/dev/shm/x": namespaces "tenant-a" is forbidden: label cannot be removed`},
+		})
+	got := unhealthyResources(a.Object, true)
+	if len(got) != 2 {
+		t.Fatalf("want the degraded policy and the refused namespace, got %+v", got)
+	}
+	if got[0].Kind != "Namespace" || got[0].Name != "tenant-a" || got[0].Health != "" || !strings.Contains(got[0].Message, "forbidden") {
+		t.Errorf("refused apply: got %+v", got[0])
+	}
+	if got[1].Kind != "NodeNetworkConfigurationPolicy" || got[1].Health != "Degraded" || got[1].Message != "FailedToConfigure: 1/1 nodes failed to configure" {
+		t.Errorf("degraded object: got %+v", got[1])
+	}
+	// A settled operation leaves no refused applies: the syncResult is history.
+	if got := unhealthyResources(a.Object, false); len(got) != 1 || got[0].Kind != "NodeNetworkConfigurationPolicy" {
+		t.Errorf("without a standing operation only health counts, got %+v", got)
+	}
+}

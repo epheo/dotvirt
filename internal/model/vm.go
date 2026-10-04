@@ -155,6 +155,19 @@ type ProjectSync struct {
 	Operation string     `json:"operation,omitempty"` // operationState.phase: Running | Succeeded | Failed | Error
 	SyncError string     `json:"syncError,omitempty"` // operationState.message when the last sync didn't succeed
 	Revision  string     `json:"revision,omitempty"`  // short applied git revision
+	// Unhealthy names what the Application holds that is degraded or was refused,
+	// with Argo's own reason: the rollup alone says only "Degraded".
+	Unhealthy []ObjectHealth `json:"unhealthy,omitempty"`
+}
+
+// ObjectHealth is one object an Application reports as degraded or refused: its
+// identity, the health Argo computed, and the health or apply message.
+type ObjectHealth struct {
+	Kind      string `json:"kind"`
+	Namespace string `json:"namespace,omitempty"`
+	Name      string `json:"name"`
+	Health    string `json:"health,omitempty"` // Degraded | Missing | Unknown; empty for a refused apply
+	Message   string `json:"message,omitempty"`
 }
 
 // Inventory is the full multi-project tree. Warnings carry non-fatal degradations
@@ -180,4 +193,8 @@ type Inventory struct {
 	// adoption gate) - the candidate scan is cluster-wide, so the SSAR is what
 	// keeps one tenant from enumerating another's namespaces.
 	Adoptable []AdoptableNamespace `json:"adoptable,omitempty"`
+	// Platform is the platform Application's rollup. The tier has no project row,
+	// so what it failed to apply or keeps unhealthy rides here for the issues
+	// plane. Nil when no platform repo is configured or Argo is off / pre-sync.
+	Platform *ProjectSync `json:"platform,omitempty"`
 }

@@ -564,6 +564,22 @@ const drift = {
 	...base,
 	name: 'drift',
 	inventory: {
+		// The platform tier's standing problem: an uplink policy nmstate cannot
+		// apply. It must reach the issues plane by name, with a link.
+		platform: {
+			sync: 'Synced',
+			health: 'Degraded',
+			operation: 'Succeeded',
+			revision: 'c0ffee1',
+			unhealthy: [
+				{
+					kind: 'NodeNetworkConfigurationPolicy',
+					name: 'dc-vlan-bridge',
+					health: 'Degraded',
+					message: 'FailedToConfigure: 1/1 nodes failed to configure',
+				},
+			],
+		},
 		projects: [
 			{
 				name: 'team-web',

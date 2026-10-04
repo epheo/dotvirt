@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -217,11 +218,82 @@ func appSyncFromApps(objs []*unstructured.Unstructured) map[string]model.Project
 		if ps.SyncError == "" {
 			ps.SyncError = errorCondition(app.Object)
 		}
+		ps.Unhealthy = unhealthyResources(app.Object, ps.Operation == "Failed" || ps.Operation == "Error")
 		if prev, exists := out[repo]; !exists || rollupSeverity(ps) >= rollupSeverity(prev) {
 			out[repo] = ps
 		}
 	}
 	return out
+}
+
+// unhealthyResources lists the Application's objects that are degraded or whose
+// apply was refused, in a stable order. Suspended is a Halted VM's normal health
+// and Progressing a sync in flight, so neither is listed. Refused applies come
+// from the syncResult, which outlives the operation: they count only while the
+// operation stands (opStands) and the object has not converged since - the same
+// gate the rollup's SyncError and mergeSyncMessages apply.
+func unhealthyResources(app map[string]any, opStands bool) []model.ObjectHealth {
+	byKey := map[resKey]*model.ObjectHealth{}
+	var out []*model.ObjectHealth
+	entry := func(res map[string]any) *model.ObjectHealth {
+		k := keyOf(res)
+		if o, ok := byKey[k]; ok {
+			return o
+		}
+		o := &model.ObjectHealth{Kind: k.kind, Namespace: k.namespace, Name: k.name}
+		byKey[k] = o
+		out = append(out, o)
+		return o
+	}
+	synced := map[resKey]bool{}
+	resources, _, _ := unstructured.NestedSlice(app, "status", "resources")
+	for _, raw := range resources {
+		res, ok := raw.(map[string]any)
+		if !ok || asString(res, "name") == "" {
+			continue
+		}
+		if syncStatus(asString(res, "status")) == model.SyncSynced {
+			synced[keyOf(res)] = true
+		}
+		switch h := nestedString(res, "health", "status"); h {
+		case "", "Healthy", "Progressing", "Suspended":
+		default:
+			o := entry(res)
+			o.Health, o.Message = h, nestedString(res, "health", "message")
+		}
+	}
+	if opStands {
+		results, _, _ := unstructured.NestedSlice(app, "status", "operationState", "syncResult", "resources")
+		for _, raw := range results {
+			res, ok := raw.(map[string]any)
+			if !ok || asString(res, "name") == "" {
+				continue
+			}
+			msg := asString(res, "message")
+			if msg == "" || asString(res, "status") == "Synced" || synced[keyOf(res)] {
+				continue
+			}
+			entry(res).Message = scrubSyncMessage(msg)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Kind != b.Kind {
+			return a.Kind < b.Kind
+		}
+		if a.Namespace != b.Namespace {
+			return a.Namespace < b.Namespace
+		}
+		return a.Name < b.Name
+	})
+	list := make([]model.ObjectHealth, len(out))
+	for i, o := range out {
+		list[i] = *o
+	}
+	return list
 }
 
 // appRepos lists the Application's canonical source repo URLs: spec.source.repoURL

@@ -123,4 +123,75 @@ describe('scope helpers', () => {
 		expect(counts.get('p1')).toBe(1);
 		expect(counts.get('p2')).toBe(2);
 	});
+
+	it('names each degraded or refused object and links to its view', () => {
+		const i: Inventory = {
+			projects: [
+				{
+					name: 'p1',
+					gitOps: {
+						sync: 'Synced',
+						health: 'Degraded',
+						unhealthy: [
+							{ kind: 'UserDefinedNetwork', namespace: 'ns-a', name: 'net-a', health: 'Degraded' },
+							{ kind: 'VirtualMachine', namespace: 'ns-a', name: 'vm-a', health: 'Degraded' },
+						],
+					},
+					namespaces: [{ namespace: 'ns-a', vms: [] }],
+				},
+			],
+			platform: {
+				sync: 'Synced',
+				health: 'Degraded',
+				unhealthy: [
+					{
+						kind: 'NodeNetworkConfigurationPolicy',
+						name: 'dc-vlan-bridge',
+						health: 'Degraded',
+						message: 'FailedToConfigure: 1/1 nodes failed to configure',
+					},
+				],
+			},
+		};
+		const issues = deriveIssues(i);
+		// The VM is vmIssue's to report, so only the segment and the policy remain.
+		expect(issues.map((x) => [x.scope, x.label, x.href, x.project, x.severity])).toEqual([
+			[
+				'dc-vlan-bridge',
+				'NodeNetworkConfigurationPolicy degraded',
+				'/networking',
+				'platform',
+				'warn',
+			],
+			['ns-a/net-a', 'UserDefinedNetwork degraded', '/networking/net-a', 'p1', 'warn'],
+		]);
+		expect(issues[0].detail).toBe('FailedToConfigure: 1/1 nodes failed to configure');
+	});
+
+	it('reports a refused platform apply as the failure and the object it refused', () => {
+		const i: Inventory = {
+			projects: [],
+			platform: {
+				sync: 'OutOfSync',
+				health: 'Healthy',
+				operation: 'Failed',
+				syncError: 'one or more synchronization tasks completed unsuccessfully',
+				unhealthy: [
+					{
+						kind: 'Namespace',
+						name: 'tenant-a',
+						message: 'namespaces "tenant-a" is forbidden: label cannot be removed',
+					},
+				],
+			},
+		};
+		const issues = deriveIssues(i);
+		expect(issues.map((x) => [x.scope, x.label, x.href, x.severity])).toEqual([
+			['platform', 'Sync failed', '/changes', 'danger'],
+			['tenant-a', 'Namespace apply failed', '/compute', 'danger'],
+		]);
+		expect(issues[1].detail).toMatch(/forbidden/);
+		// Platform issues never leak into a project's own scope.
+		expect(issuesInScope(issues, { project: 'p1' })).toEqual([]);
+	});
 });

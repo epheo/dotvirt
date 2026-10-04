@@ -47,8 +47,9 @@ export interface Project extends Omit<gen.Project, 'namespaces' | 'gitOps'> {
 	namespaces: ProjectNamespace[];
 	gitOps?: ProjectSync;
 }
-export interface Inventory extends Omit<gen.Inventory, 'projects'> {
+export interface Inventory extends Omit<gen.Inventory, 'projects' | 'platform'> {
 	projects: Project[];
+	platform?: ProjectSync;
 }
 
 export interface Change extends Omit<gen.Change, 'action'> {
