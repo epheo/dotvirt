@@ -93,7 +93,7 @@ func (w *WriteRepo) commitItems(repo *git.Repository, wt *git.Worktree, branch, 
 	if err := w.pushBranch(repo, branch); err != nil {
 		return CommitResult{}, err
 	}
-	return CommitResult{Branch: branch, Committed: true, Hash: hash.String(), Pushed: w.push}, nil
+	return CommitResult{Branch: branch, Committed: true, Hash: hash.String()}, nil
 }
 
 // applyItem writes one item into the worktree and stages it. Staging is

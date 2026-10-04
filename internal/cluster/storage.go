@@ -142,9 +142,8 @@ func capacitySegment(u *unstructured.Unstructured) model.CapacitySegment {
 	}
 	sort.Strings(vals)
 	return model.CapacitySegment{
-		Topology:  strings.Join(vals, ","),
-		Free:      quantityBytes(u.Object, "capacity"),
-		MaxVolume: quantityBytes(u.Object, "maximumVolumeSize"),
+		Topology: strings.Join(vals, ","),
+		Free:     quantityBytes(u.Object, "capacity"),
 	}
 }
 

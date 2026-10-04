@@ -40,9 +40,8 @@ type MetricChart struct {
 // VMMetrics is a VM's performance time-series for one range - several charts built
 // from KubeVirt's kubevirt_vmi_* Prometheus metrics, shaped for direct charting.
 type VMMetrics struct {
-	Range   string        `json:"range"`
-	StepSec int           `json:"stepSec"`
-	Charts  []MetricChart `json:"charts"`
+	Range  string        `json:"range"`
+	Charts []MetricChart `json:"charts"`
 }
 
 // UsageMetric is one resource's point-in-time usage for a VM Summary bar - Used of

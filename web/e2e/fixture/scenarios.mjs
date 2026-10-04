@@ -140,7 +140,6 @@ const networks = {
 	nmstatePresent: true,
 	canManage: true,
 	caps: {
-		sharedSegment: true,
 		uplink: true,
 		namespace: true,
 		egressIP: true,
@@ -244,7 +243,6 @@ function vmMetrics(range = '1h') {
 	const wave = (base, amp) => times.map((_, i) => base + amp * Math.sin(i / 4));
 	return {
 		range,
-		stepSec: 120,
 		charts: [
 			{
 				key: 'cpu',
@@ -544,7 +542,6 @@ const degraded = {
 		physicalAdapters: [],
 		canManage: false,
 		caps: {
-			sharedSegment: false,
 			uplink: false,
 			namespace: true,
 			egressIP: false,

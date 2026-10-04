@@ -30,7 +30,7 @@ func (s *Server) handleVMPolicy(w http.ResponseWriter, r *http.Request) {
 	eff := s.effectivePolicy(ns, lbls, true)
 	eff.VM, eff.Labels, eff.LabelsLive = name, lbls, live
 	s.redactEffective(r.Context(), sc, &eff)
-	writeJSON(w, http.StatusOK, eff)
+	writeJSON(w, eff)
 }
 
 // handleNamespacePolicy answers for a whole namespace: pod-selecting policies
@@ -42,7 +42,7 @@ func (s *Server) handleNamespacePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	eff := s.effectivePolicy(ns, nil, false)
 	s.redactEffective(r.Context(), sc, &eff)
-	writeJSON(w, http.StatusOK, eff)
+	writeJSON(w, eff)
 }
 
 // clusterAuthority reports per kind whether the caller may read the

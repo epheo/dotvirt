@@ -54,7 +54,7 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 	if err != nil {
 		return model.ProposeResult{}, err
 	}
-	out := model.ProposeResult{Branch: res.Branch, Pushed: res.Pushed}
+	out := model.ProposeResult{Branch: res.Branch}
 
 	if fc := c.forge.For(proj.Repo); fc != nil {
 		c.openOrRecoverPR(fc, &out, branch, title, body)

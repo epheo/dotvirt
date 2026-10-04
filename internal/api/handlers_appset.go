@@ -47,5 +47,5 @@ func (s *Server) handleAppSetPlugin(w http.ResponseWriter, r *http.Request) {
 		}
 		params = append(params, param{Project: p.Name, Repo: p.Repo})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"output": map[string]any{"parameters": params}})
+	writeJSON(w, map[string]any{"output": map[string]any{"parameters": params}})
 }

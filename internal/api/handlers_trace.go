@@ -54,7 +54,7 @@ func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if s.netstate == nil {
-		writeJSON(w, http.StatusOK, model.TraceResult{Steps: []model.TraceStep{}})
+		writeJSON(w, model.TraceResult{Steps: []model.TraceStep{}})
 		return
 	}
 
@@ -83,7 +83,7 @@ func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {
 			redactSubjects(can, p)
 		}
 	}
-	writeJSON(w, http.StatusOK, res)
+	writeJSON(w, res)
 }
 
 // traceWorkload assembles one endpoint from the clusterstate snapshot: the

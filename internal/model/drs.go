@@ -42,11 +42,9 @@ type DRSLive struct {
 	Synced bool `json:"synced"`
 	Stale  bool `json:"stale,omitempty"`
 	// Deployed: a KubeDescheduler CR exists in the cluster.
-	Deployed        bool     `json:"deployed"`
-	ManagementState string   `json:"managementState,omitempty"`
-	Mode            string   `json:"mode,omitempty"`
-	Profiles        []string `json:"profiles,omitempty"`
-	IntervalSeconds int64    `json:"intervalSeconds,omitempty"`
+	Deployed        bool   `json:"deployed"`
+	Mode            string `json:"mode,omitempty"`
+	IntervalSeconds int64  `json:"intervalSeconds,omitempty"`
 	// Available mirrors the operator's Available condition; Degraded carries the
 	// Degraded condition's message when that condition is true.
 	Available bool   `json:"available"`
