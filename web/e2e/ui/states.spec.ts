@@ -26,6 +26,21 @@ test('standing sync failure surfaces on bell, tree and project', async ({ page }
 	await expect(dbRow.locator('[title*="issue"]')).toHaveCount(0);
 });
 
+test('a platform-tier problem is an issue that names the object and links to it', async ({
+	page,
+}) => {
+	// The platform Application has no project row; its degraded uplink policy
+	// must still reach the bell by name, with Argo's reason, and open the view
+	// that shows it.
+	const bell = page.locator('button[title^="Issues"]');
+	await bell.click();
+	const row = page.getByRole('button', { name: /dc-vlan-bridge/ }).first();
+	await expect(row).toBeVisible();
+	await expect(row).toHaveAttribute('title', /1\/1 nodes failed to configure/);
+	await row.click();
+	await expect(page).toHaveURL(/\/networking/);
+});
+
 test('Pending is a waiting state, never a failure', async ({ page }) => {
 	// A merged VM awaiting its first Argo sync reads "Pending sync" — showing
 	// NotTracked here made adoption look failed (the bug that minted the state).

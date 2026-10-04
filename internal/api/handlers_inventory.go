@@ -73,19 +73,15 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	if !s.state.Healthy() {
 		warnings = append(warnings, "the cluster snapshot may be stale - a cluster watch is failing")
 	}
-	// The platform Application's own rollup - already in the drift snapshot -
-	// names a platform sync that stopped applying. A merged tenancy PR the cluster
-	// refused is otherwise visible only in Argo, and with zero project namespaces
-	// the same rollup tells a pristine install from a broken one. Surfaced
-	// cluster-wide (the snapshot is unfiltered) so a user legitimately scoped to
-	// no project can't mask a broken sync.
-	if s.cfg.PlatformRepo != "" {
-		if w := platformSyncWarning(in.ProjectDrift, s.cfg.PlatformRepo); w != "" {
-			warnings = append(warnings, w)
-		}
-	}
 	inv := inventory.Build(in)
 	inv.Warnings = warnings
+	// The platform tier has no project row; its Application rollup rides the frame
+	// on its own so the issues plane names what it failed to apply or keeps
+	// unhealthy. Cluster-wide (the snapshot is unfiltered): a user scoped to no
+	// project must not mask a broken platform sync.
+	if s.cfg.PlatformRepo != "" {
+		inv.Platform = platformRollup(in.ProjectDrift, s.cfg.PlatformRepo)
+	}
 	// Propose existing tenants (namespaces with VMs, no project label) to callers
 	// who could adopt them - the same namespace-create authority the create-project
 	// route enforces. Rides the frame, so the list drains as adoptions merge.
@@ -117,33 +113,22 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	return inv, nil
 }
 
-// platformSyncWarning names a platform Application that is missing or whose
-// last sync did not apply. drift is ProjectDrift(): nil while Argo is off or
-// pre-sync - stay quiet; off means there is no platform sync to be unhealthy,
-// pre-sync already carries its own warning. Progressing/Running are quiet too:
-// the first sync after an install is not a degradation.
-func platformSyncWarning(drift map[string]model.ProjectSync, platformRepo string) string {
+// platformRollup is the platform Application's rollup out of ProjectDrift(). nil
+// while Argo is off or pre-sync: off means there is no platform sync to judge,
+// pre-sync already carries its own warning. An absent Application is itself the
+// problem - nothing applies the platform repo - and reads as a standing error.
+func platformRollup(drift map[string]model.ProjectSync, platformRepo string) *model.ProjectSync {
 	if drift == nil {
-		return ""
+		return nil
 	}
-	ps, ok := drift[forge.NormalizeRepoURL(platformRepo)]
-	if !ok {
-		return "no ArgoCD Application sources the platform repo - the dotvirt-platform Application is missing, so tenancy changes cannot apply"
+	if ps, ok := drift[forge.NormalizeRepoURL(platformRepo)]; ok {
+		return &ps
 	}
-	okHealth := ps.Health == "" || ps.Health == "Healthy" || ps.Health == "Progressing"
-	failedOp := ps.Operation == "Failed" || ps.Operation == "Error"
-	if okHealth && !failedOp && ps.SyncError == "" {
-		return ""
+	return &model.ProjectSync{
+		Health:    "Missing",
+		Operation: "Error",
+		SyncError: "no ArgoCD Application sources the platform repo - the dotvirt-platform Application is missing, so tenancy changes cannot apply",
 	}
-	msg := "the platform GitOps sync is unhealthy (dotvirt-platform Application"
-	if !okHealth {
-		msg += ", health " + ps.Health
-	}
-	msg += ")"
-	if ps.SyncError != "" {
-		msg += ": " + ps.SyncError
-	}
-	return msg
 }
 
 func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {

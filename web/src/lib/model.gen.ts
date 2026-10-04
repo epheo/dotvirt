@@ -1347,6 +1347,22 @@ export interface ProjectSync {
   operation?: string; // operationState.phase: Running | Succeeded | Failed | Error
   syncError?: string; // operationState.message when the last sync didn't succeed
   revision?: string; // short applied git revision
+  /**
+   * Unhealthy names what the Application holds that is degraded or was refused,
+   * with Argo's own reason: the rollup alone says only "Degraded".
+   */
+  unhealthy?: ObjectHealth[];
+}
+/**
+ * ObjectHealth is one object an Application reports as degraded or refused: its
+ * identity, the health Argo computed, and the health or apply message.
+ */
+export interface ObjectHealth {
+  kind: string;
+  namespace?: string;
+  name: string;
+  health?: string; // Degraded | Missing | Unknown; empty for a refused apply
+  message?: string;
 }
 /**
  * Inventory is the full multi-project tree. Warnings carry non-fatal degradations
@@ -1379,4 +1395,10 @@ export interface Inventory {
    * keeps one tenant from enumerating another's namespaces.
    */
   adoptable?: AdoptableNamespace[];
+  /**
+   * Platform is the platform Application's rollup. The tier has no project row,
+   * so what it failed to apply or keeps unhealthy rides here for the issues
+   * plane. Nil when no platform repo is configured or Argo is off / pre-sync.
+   */
+  platform?: ProjectSync;
 }
