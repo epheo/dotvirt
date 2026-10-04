@@ -73,13 +73,13 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	if !s.state.Healthy() {
 		warnings = append(warnings, "the cluster snapshot may be stale - a cluster watch is failing")
 	}
-	// Zero project namespaces with a platform repo configured is either a pristine
-	// install (fine, the empty state is correct) or a platform app that stopped
-	// applying (broken). The platform Application's own rollup - already in the
-	// drift snapshot - tells them apart, so warn only on actual breakage and name
-	// it. Surfaced cluster-wide (the snapshot is unfiltered) so a user legitimately
-	// scoped to no project can't mask a broken sync.
-	if s.cfg.PlatformRepo != "" && len(s.state.Namespaces()) == 0 {
+	// The platform Application's own rollup - already in the drift snapshot -
+	// names a platform sync that stopped applying. A merged tenancy PR the cluster
+	// refused is otherwise visible only in Argo, and with zero project namespaces
+	// the same rollup tells a pristine install from a broken one. Surfaced
+	// cluster-wide (the snapshot is unfiltered) so a user legitimately scoped to
+	// no project can't mask a broken sync.
+	if s.cfg.PlatformRepo != "" {
 		if w := platformSyncWarning(in.ProjectDrift, s.cfg.PlatformRepo); w != "" {
 			warnings = append(warnings, w)
 		}
@@ -117,9 +117,9 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	return inv, nil
 }
 
-// platformSyncWarning decides what "zero project namespaces" means from the
-// platform Application's rollup. drift is ProjectDrift(): nil while Argo is off
-// or pre-sync - stay quiet; off means there is no platform sync to be unhealthy,
+// platformSyncWarning names a platform Application that is missing or whose
+// last sync did not apply. drift is ProjectDrift(): nil while Argo is off or
+// pre-sync - stay quiet; off means there is no platform sync to be unhealthy,
 // pre-sync already carries its own warning. Progressing/Running are quiet too:
 // the first sync after an install is not a degradation.
 func platformSyncWarning(drift map[string]model.ProjectSync, platformRepo string) string {
@@ -128,14 +128,18 @@ func platformSyncWarning(drift map[string]model.ProjectSync, platformRepo string
 	}
 	ps, ok := drift[forge.NormalizeRepoURL(platformRepo)]
 	if !ok {
-		return "no projects found and no ArgoCD Application sources the platform repo - the dotvirt-platform Application is missing"
+		return "no ArgoCD Application sources the platform repo - the dotvirt-platform Application is missing, so tenancy changes cannot apply"
 	}
 	okHealth := ps.Health == "" || ps.Health == "Healthy" || ps.Health == "Progressing"
 	failedOp := ps.Operation == "Failed" || ps.Operation == "Error"
 	if okHealth && !failedOp && ps.SyncError == "" {
-		return "" // genuinely no projects yet
+		return ""
 	}
-	msg := "the platform GitOps sync is unhealthy (dotvirt-platform Application)"
+	msg := "the platform GitOps sync is unhealthy (dotvirt-platform Application"
+	if !okHealth {
+		msg += ", health " + ps.Health
+	}
+	msg += ")"
 	if ps.SyncError != "" {
 		msg += ": " + ps.SyncError
 	}

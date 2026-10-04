@@ -8,9 +8,9 @@ import (
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
-// Zero project namespaces must warn only when the platform Application is
-// actually broken: a pristine install (healthy app, nothing to apply) and a
-// first sync in flight are silent, a missing or failing app names the breakage.
+// The banner fires only when the platform Application is actually broken: a
+// healthy app (nothing or everything applied) and a first sync in flight are
+// silent, a missing or failing app names the breakage with its cause.
 func TestPlatformSyncWarning(t *testing.T) {
 	const repo = "https://forge.example/dotvirt/platform.git"
 	key := forge.NormalizeRepoURL(repo)
