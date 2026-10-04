@@ -3,10 +3,10 @@ module github.com/epheo/dotvirt
 go 1.26.5
 
 require (
-	github.com/go-git/go-billy/v5 v5.9.0
-	github.com/go-git/go-git/v5 v5.19.1
+	github.com/go-git/go-billy/v5 v5.9.2
+	github.com/go-git/go-git/v5 v5.19.3
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
-	golang.org/x/crypto v0.54.0
+	golang.org/x/crypto v0.57.0
 	golang.org/x/oauth2 v0.27.0
 	golang.org/x/time v0.9.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -52,7 +52,6 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v0.0.0-20191119172530-79f836b90111 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
-	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kubernetes-csi/external-snapshotter/client/v4 v4.2.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
@@ -61,7 +60,7 @@ require (
 	github.com/openshift/api v0.0.0-20230503133300-8bbcb7ca7183 // indirect
 	github.com/openshift/client-go v0.0.0-20210112165513-ebc401615f47 // indirect
 	github.com/openshift/custom-resource-status v1.1.2 // indirect
-	github.com/pjbgf/sha1cd v0.6.0 // indirect
+	github.com/pjbgf/sha1cd v0.7.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.68.0 // indirect
@@ -73,10 +72,10 @@ require (
 	go.uber.org/mock v0.5.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/net v0.57.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/term v0.45.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/term v0.46.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
