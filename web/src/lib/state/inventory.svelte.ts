@@ -12,12 +12,16 @@ import {
 import { friendlyError } from '$lib/format';
 import { deriveIssues } from '$lib/issues';
 import { prKey } from '$lib/review';
+import { share } from '$lib/share';
 
 // The live cluster read layer: the WS inventory snapshot plus the once-per-
 // session networking inventory (GET /api/networks). Everything else the UI
 // shows about cluster state derives from these two.
 class InventoryStore {
-	inventory = $state<Inventory | null>(null);
+	// Raw, not a deep proxy: apply() replaces the whole frame and nothing
+	// mutates it in place, so per-field signals would only cost a re-proxy of
+	// every VM on every frame.
+	inventory = $state.raw<Inventory | null>(null);
 	error = $state('');
 	readonly projects = $derived(this.inventory?.projects ?? []);
 	// The networking read layer: the port-group catalog (so raw OVN-K refs render
@@ -107,7 +111,7 @@ class InventoryStore {
 	readonly repoProjects = $derived(this.projects.filter((p) => p.repo).map((p) => p.name));
 
 	apply(inv: Inventory) {
-		this.inventory = inv;
+		this.inventory = share(this.inventory, inv);
 		this.error = '';
 	}
 
