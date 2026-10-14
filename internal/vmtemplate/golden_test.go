@@ -43,7 +43,7 @@ func TestRenderGolden(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, err := EngineRenderer{}.Render(tc.raw, tc.params, "tenant-a")
-			got := "error: <nil>\n"
+			var got string
 			if err != nil {
 				got = "error: " + err.Error() + "\n"
 			} else {
