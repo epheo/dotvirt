@@ -8,6 +8,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -24,6 +25,7 @@ func (r *DotvirtReconciler) finalize(ctx context.Context, dv *dotvirtv1alpha1.Do
 	if err := r.cleanupClusterResources(ctx, dv); err != nil {
 		return err
 	}
+	r.markPruned(types.NamespacedName{Namespace: dv.Namespace, Name: dv.Name}, "")
 	controllerutil.RemoveFinalizer(dv, dotvirtFinalizer)
 	return r.Update(ctx, dv)
 }

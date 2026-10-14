@@ -93,10 +93,14 @@ not watch (Services, AppProjects, bindings) heals without a CR edit.
 
 ### Prune
 
-After a completed pass the operator deletes the objects carrying this install's
-instance labels that the pass did not render: a Route left by a switch to Ingress,
+After a completed pass whose render changed, or at least every 5 minutes, the
+operator deletes the objects carrying this install's instance labels that the pass
+did not render: a Route left by a switch to Ingress,
 the platform tier after `spec.forge.platformRepo` is cleared, everything in a former
 ArgoCD namespace, a managed forge switched off, names an older version rendered.
+Secrets and ConfigMaps are swept only in the namespaces the install writes (the
+ArgoCD namespace, and a former one still holding its argoproj objects), so a
+labelled copy an admin made elsewhere survives.
 Never pruned: anything without the labels, and Secrets, PersistentVolumeClaims and
 the CA ConfigMaps in the install namespace (generated keys, the minted forge token
 and the forge's git data are state, not render). A pass that halts prunes nothing.
@@ -213,6 +217,18 @@ no extra trust configuration is needed.
 - **`make bundle`**: generate the OLM bundle for OperatorHub (needs `operator-sdk`
   on PATH; merges the CSV base in `config/manifests/bases/` with the generated CRD +
   RBAC + Deployment). Building/pushing the bundle image to a catalog is a release step.
+
+## Upgrading
+
+- The CSV supports only the `AllNamespaces` install mode: one install per cluster,
+  watched cluster-wide.
+  - An OperatorGroup with `targetNamespaces` (OwnNamespace or SingleNamespace) fails
+    the upgrade with `UnsupportedOperatorGroup`.
+  - To migrate, delete that OperatorGroup and recreate it with `spec: {}`, then let
+    OLM retry the install.
+  - The `Dotvirt` resource and the workloads are untouched by the swap.
+- The first reconcile after the upgrade restarts the dotvirt and managed Forgejo
+  pods once (a new instance label on the pods, new Forgejo settings).
 
 ## Managed Forgejo credentials
 

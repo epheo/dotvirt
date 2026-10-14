@@ -48,7 +48,10 @@ func (r *DotvirtReconciler) reconcileSecrets(ctx context.Context, dv *dotvirtv1a
 // doesn't already exist. Create-once: an existing secret is never regenerated, so
 // the session key / plugin token survive re-reconciles and restarts.
 func (r *DotvirtReconciler) ensureSecret(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, name, key string) error {
-	if _, err := r.secret(ctx, dv.Namespace, name); err == nil {
+	if s, err := r.secret(ctx, dv.Namespace, name); err == nil {
+		// Still rendered, so the render set (and prune's digest) is the same
+		// whether or not this pass created it.
+		r.recordRender(ctx, s)
 		return nil
 	} else if !apierrors.IsNotFound(err) {
 		return err

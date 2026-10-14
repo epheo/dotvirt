@@ -76,6 +76,9 @@ func TestPruneDeletesOnlyUnrenderedInstanceObjects(t *testing.T) {
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: install.AppsetSecretName, Namespace: oldArgo, Labels: mine}},
 		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-appset-plugin", Namespace: oldArgo, Labels: legacy}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "foreign", Namespace: oldArgo, Labels: sameNameElsewhere}},
+		// An admin's `get -o yaml | apply -n` copy keeps the labels.
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-forge", Namespace: "admin-copy", Labels: mine}},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-appset-plugin", Namespace: "admin-copy", Labels: mine}},
 	).Build()
 	r := newReconciler(c, depsOK)
 	reconcileOnce(t, r, dv)
@@ -105,6 +108,8 @@ func TestPruneDeletesOnlyUnrenderedInstanceObjects(t *testing.T) {
 		{&corev1.ConfigMap{}, dv.Namespace, install.IngressCAConfigMap},
 		{&rbacv1.ClusterRoleBinding{}, "", "other-install"},
 		{&corev1.Secret{}, oldArgo, "foreign"},
+		{&corev1.Secret{}, "admin-copy", "dotvirt-forge"},
+		{&corev1.ConfigMap{}, "admin-copy", "dotvirt-appset-plugin"},
 		{argoObj("AppProject", "", "", nil), "argocd", "dotvirt-tenants"},
 		{argoObj("ApplicationSet", "", "", nil), "argocd", "dotvirt-projects"},
 	} {
@@ -207,5 +212,48 @@ func TestRepoCredsReadErrorIsNotAbsence(t *testing.T) {
 	r := newReconciler(c, depsOK)
 	if obj, err := r.repoCreds(context.Background(), dv, "argocd"); err == nil {
 		t.Errorf("repoCreds = (%v, nil), want the read error", obj)
+	}
+}
+
+// Reconciles fire on every labelled object event; prune's uncached LISTs run
+// only when the render changed or the drift timer is due.
+func TestPruneRunsOnRenderChangeOrTimer(t *testing.T) {
+	dv := testCR()
+	lists := 0
+	c := testBuilder(t).WithObjects(dv).WithInterceptorFuncs(interceptor.Funcs{
+		List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if _, ok := list.(*rbacv1.ClusterRoleBindingList); ok {
+				lists++
+			}
+			return cl.List(ctx, list, opts...)
+		},
+	}).Build()
+	r := newReconciler(c, depsOK)
+	now := time.Now()
+	r.now = func() time.Time { return now }
+
+	reconcileOnce(t, r, dv)
+	if lists != 1 {
+		t.Fatalf("first pass pruned %d times, want 1", lists)
+	}
+	reconcileOnce(t, r, dv)
+	if lists != 1 {
+		t.Errorf("unchanged render pruned again before the timer")
+	}
+
+	fresh := getCR(t, c, dv)
+	fresh.Spec.Ingress.Host = "dotvirt.example"
+	if err := c.Update(context.Background(), fresh); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, dv)
+	if lists != 2 {
+		t.Errorf("changed render (new Ingress) did not prune: %d", lists)
+	}
+
+	now = now.Add(driftResync)
+	reconcileOnce(t, r, dv)
+	if lists != 3 {
+		t.Errorf("drift timer did not prune")
 	}
 }

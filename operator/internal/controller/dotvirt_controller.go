@@ -50,6 +50,8 @@ type DotvirtReconciler struct {
 	// over its in-cluster Service URL, which a unit test redirects to an httptest
 	// server. nil = the real Service URL.
 	forgeAPIBase func(*dotvirtv1alpha1.Dotvirt) string
+
+	pruneState
 }
 
 // driftResync bounds how long out-of-band drift on an unwatched kind (Services,
@@ -155,9 +157,13 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	// Only a completed pass knows the full render; a halted one would prune
 	// whatever its skipped phases own.
-	pruneErr := r.prune(ctx, &dv, rendered)
-	if pruneErr != nil {
-		log.Error(pruneErr, "prune failed; retrying")
+	var pruneErr error
+	if digest := rendered.digest(); r.pruneDue(req.NamespacedName, digest) {
+		if pruneErr = r.prune(ctx, &dv, rendered); pruneErr != nil {
+			log.Error(pruneErr, "prune failed; retrying")
+		} else {
+			r.markPruned(req.NamespacedName, digest)
+		}
 	}
 	if err := r.writeStatus(ctx, &dv); err != nil {
 		return ctrl.Result{}, err

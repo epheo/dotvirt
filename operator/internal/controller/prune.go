@@ -2,6 +2,12 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"sort"
+	"strings"
+	"sync"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -11,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -54,11 +61,24 @@ func (r *DotvirtReconciler) recordRender(ctx context.Context, obj client.Object)
 	s[objKey{gvk.GroupKind(), obj.GetNamespace(), obj.GetName()}] = struct{}{}
 }
 
-// pruneScope is one kind prune sweeps. ownNamespace kinds are listed in the
-// install namespace only; the rest everywhere except it.
+// pruneWhere says which namespaces prune lists a kind in.
+type pruneWhere int
+
+const (
+	// installNS: the install namespace only.
+	installNS pruneWhere = iota
+	// anywhere: cluster-scoped kinds, and the argoproj kinds, which only this
+	// operator labels; where they sit tells prune which namespaces it wrote.
+	anywhere
+	// writtenNS: the namespaces this install wrote, never the install namespace.
+	// A cluster-wide sweep would delete an admin's labelled copy elsewhere.
+	writtenNS
+)
+
+// pruneScope is one kind prune sweeps.
 type pruneScope struct {
-	list         func() client.ObjectList
-	ownNamespace bool
+	list  func() client.ObjectList
+	where pruneWhere
 }
 
 func typedList(l client.ObjectList) func() client.ObjectList {
@@ -73,26 +93,40 @@ func unstructuredList(gvk schema.GroupVersionKind) func() client.ObjectList {
 	}
 }
 
-// pruneScopes are the rendered kinds. Left out on purpose, in the install
+// pruneScopes are the rendered kinds, the anywhere ones before the writtenNS
+// ones they discover namespaces for. Left out on purpose, in the install
 // namespace: Secrets and PVCs are state, not render (create-once keys, the
 // minted forge token, the forge's git data); the CA ConfigMaps are best-effort
 // copies a transient read failure must not delete.
 func pruneScopes() []pruneScope {
 	scopes := []pruneScope{
-		{typedList(&appsv1.DeploymentList{}), true},
-		{typedList(&corev1.ServiceList{}), true},
-		{typedList(&corev1.ServiceAccountList{}), true},
-		{typedList(&networkingv1.NetworkPolicyList{}), true},
-		{typedList(&networkingv1.IngressList{}), true},
-		{unstructuredList(install.RouteGVK), true},
-		{typedList(&rbacv1.ClusterRoleBindingList{}), false},
-		{typedList(&corev1.SecretList{}), false},
-		{typedList(&corev1.ConfigMapList{}), false},
+		{typedList(&appsv1.DeploymentList{}), installNS},
+		{typedList(&corev1.ServiceList{}), installNS},
+		{typedList(&corev1.ServiceAccountList{}), installNS},
+		{typedList(&networkingv1.NetworkPolicyList{}), installNS},
+		{typedList(&networkingv1.IngressList{}), installNS},
+		{unstructuredList(install.RouteGVK), installNS},
+		{typedList(&rbacv1.ClusterRoleBindingList{}), anywhere},
 	}
 	for _, kind := range []string{"AppProject", "Application", "ApplicationSet"} {
-		scopes = append(scopes, pruneScope{unstructuredList(install.ArgoGVK(kind)), false})
+		scopes = append(scopes, pruneScope{unstructuredList(install.ArgoGVK(kind)), anywhere})
 	}
-	return scopes
+	return append(scopes,
+		pruneScope{typedList(&corev1.SecretList{}), writtenNS},
+		pruneScope{typedList(&corev1.ConfigMapList{}), writtenNS},
+	)
+}
+
+// renderedNamespaces are the namespaces other than the install's that the pass
+// wrote to.
+func renderedNamespaces(dv *dotvirtv1alpha1.Dotvirt, rendered renderSet) map[string]bool {
+	ns := map[string]bool{}
+	for k := range rendered {
+		if k.namespace != "" && k.namespace != dv.Namespace {
+			ns[k.namespace] = true
+		}
+	}
+	return ns
 }
 
 // prune deletes this install's objects that the completed pass did not render:
@@ -102,45 +136,68 @@ func pruneScopes() []pruneScope {
 // install.OwnedBy marks as this install's are candidates. Listing goes to the
 // API server directly: the cache holds none of these kinds cluster-wide.
 func (r *DotvirtReconciler) prune(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rendered renderSet) error {
-	log := logf.FromContext(ctx)
+	// Seeded with this pass's namespaces; a former ArgoCD namespace joins when
+	// an argoproj object of this install is found there.
+	written := renderedNamespaces(dv, rendered)
 	for _, sc := range pruneScopes() {
-		list := sc.list()
-		opts := []client.ListOption{client.MatchingLabels{install.InstanceLabel: dv.Name}}
-		if sc.ownNamespace {
-			opts = append(opts, client.InNamespace(dv.Namespace))
+		var namespaces []string
+		switch sc.where {
+		case installNS:
+			namespaces = []string{dv.Namespace}
+		case anywhere:
+			namespaces = []string{""}
+		case writtenNS:
+			for ns := range written {
+				namespaces = append(namespaces, ns)
+			}
 		}
-		if err := r.reader().List(ctx, list, opts...); err != nil {
-			if meta.IsNoMatchError(err) {
-				continue
-			}
-			return err
-		}
-		items, err := meta.ExtractList(list)
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			obj, ok := item.(client.Object)
-			if !ok {
-				continue
-			}
-			if !sc.ownNamespace && obj.GetNamespace() == dv.Namespace {
-				continue
-			}
-			if !install.OwnedBy(obj.GetLabels(), dv) {
-				continue
-			}
-			gvk, err := apiutil.GVKForObject(obj, r.Scheme)
-			if err != nil {
-				gvk = obj.GetObjectKind().GroupVersionKind()
-			}
-			if _, keep := rendered[objKey{gvk.GroupKind(), obj.GetNamespace(), obj.GetName()}]; keep {
-				continue
-			}
-			log.Info("pruning object the install no longer renders", "kind", gvk.Kind, "namespace", obj.GetNamespace(), "name", obj.GetName())
-			if err := r.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+		for _, ns := range namespaces {
+			if err := r.pruneList(ctx, dv, sc, ns, rendered, written); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func (r *DotvirtReconciler) pruneList(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, sc pruneScope, ns string, rendered renderSet, written map[string]bool) error {
+	list := sc.list()
+	opts := []client.ListOption{client.MatchingLabels{install.InstanceLabel: dv.Name}}
+	if ns != "" {
+		opts = append(opts, client.InNamespace(ns))
+	}
+	if err := r.reader().List(ctx, list, opts...); err != nil {
+		if meta.IsNoMatchError(err) {
+			return nil
+		}
+		return err
+	}
+	items, err := meta.ExtractList(list)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		obj, ok := item.(client.Object)
+		if !ok || !install.OwnedBy(obj.GetLabels(), dv) {
+			continue
+		}
+		if sc.where != installNS && obj.GetNamespace() == dv.Namespace {
+			continue
+		}
+		if sc.where == anywhere && obj.GetNamespace() != "" {
+			written[obj.GetNamespace()] = true
+		}
+		gvk, err := apiutil.GVKForObject(obj, r.Scheme)
+		if err != nil {
+			gvk = obj.GetObjectKind().GroupVersionKind()
+		}
+		if _, keep := rendered[objKey{gvk.GroupKind(), obj.GetNamespace(), obj.GetName()}]; keep {
+			continue
+		}
+		logf.FromContext(ctx).Info("pruning object the install no longer renders",
+			"kind", gvk.Kind, "namespace", obj.GetNamespace(), "name", obj.GetName())
+		if err := r.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+			return err
 		}
 	}
 	return nil
@@ -152,4 +209,59 @@ func (r *DotvirtReconciler) reader() client.Reader {
 		return r.APIReader
 	}
 	return r.Client
+}
+
+// pruneState is the reconciler's memory of past prunes.
+type pruneState struct {
+	pruneMu sync.Mutex
+	pruned  map[types.NamespacedName]pruneMark
+	// now is a test seam; nil = time.Now.
+	now func() time.Time
+}
+
+// pruneMark is the last successful prune of one install.
+type pruneMark struct {
+	digest string
+	at     time.Time
+}
+
+// digest fingerprints a render set independent of map order.
+func (s renderSet) digest() string {
+	keys := make([]string, 0, len(s))
+	for k := range s {
+		keys = append(keys, k.gk.String()+"/"+k.namespace+"/"+k.name)
+	}
+	sort.Strings(keys)
+	sum := sha256.Sum256([]byte(strings.Join(keys, "\n")))
+	return hex.EncodeToString(sum[:])
+}
+
+// pruneDue spares the uncached LISTs on the event-driven passes: prune runs when
+// the render changed since the last successful prune, or once the drift timer
+// is due. Out-of-band leftovers wait at most that long.
+func (r *DotvirtReconciler) pruneDue(key types.NamespacedName, digest string) bool {
+	r.pruneMu.Lock()
+	defer r.pruneMu.Unlock()
+	m, ok := r.pruned[key]
+	return !ok || m.digest != digest || r.clock().Sub(m.at) >= driftResync/2
+}
+
+func (r *DotvirtReconciler) markPruned(key types.NamespacedName, digest string) {
+	r.pruneMu.Lock()
+	defer r.pruneMu.Unlock()
+	if r.pruned == nil {
+		r.pruned = map[types.NamespacedName]pruneMark{}
+	}
+	if digest == "" {
+		delete(r.pruned, key)
+		return
+	}
+	r.pruned[key] = pruneMark{digest: digest, at: r.clock()}
+}
+
+func (r *DotvirtReconciler) clock() time.Time {
+	if r.now != nil {
+		return r.now()
+	}
+	return time.Now()
 }

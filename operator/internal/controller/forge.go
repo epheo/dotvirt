@@ -292,6 +292,7 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	// it's genuinely valid, else fall through to re-mint. A forge blip surfaces as
 	// err (requeue) rather than a needless re-mint.
 	if existing, err := r.secret(ctx, dv.Namespace, credName); err == nil {
+		r.recordRender(ctx, existing)
 		valid, err := forge.NewFactory(apiBase, forge.StaticToken("unused"), false, "").
 			ValidateToken(string(existing.Data["token"]))
 		if err != nil {
