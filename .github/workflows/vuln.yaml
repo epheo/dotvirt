@@ -1,0 +1,57 @@
+# Known-vulnerability scan. On PRs and main it gates like any check; the nightly
+# run exists because advisories land against code that has not changed, and it
+# keeps one open issue current instead of filing a red run nobody reads.
+name: vuln
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '29 5 * * *'
+  workflow_dispatch:
+
+env:
+  GOTOOLCHAIN: auto
+
+jobs:
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Load pinned tool versions
+        run: grep -v '^#' hack/versions.env >> "$GITHUB_ENV"
+      - name: Scan
+        env: { GOFLAGS: -buildvcs=false }
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@"$GOVULNCHECK_VERSION"
+          rc=0
+          section() {
+            local name=$1; shift
+            printf '### %s\n```\n' "$name" >> report.md
+            "$@" 2>&1 | tee -a report.md
+            [ "${PIPESTATUS[0]}" -eq 0 ] || rc=1
+            printf '```\n' >> report.md
+          }
+          section app govulncheck ./...
+          section operator govulncheck -C operator ./...
+          section web npm audit --prefix web --audit-level=moderate
+          exit $rc
+      - name: Open or update the tracking issue
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          title="Nightly vulnerability scan failing"
+          body="$(printf 'Run: %s/%s/actions/runs/%s\n\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"; cat report.md)"
+          n=$(gh issue list --state open --search "in:title \"$title\"" --json number -q '.[0].number')
+          if [ -n "$n" ]; then gh issue edit "$n" --body "$body"; else gh issue create --title "$title" --body "$body"; fi
+    permissions:
+      contents: read
+      issues: write
