@@ -2,6 +2,9 @@ module github.com/epheo/dotvirt
 
 go 1.26.5
 
+// npm packages can ship .go files (flatted does); keep them out of ./...
+ignore ./web/node_modules
+
 require (
 	github.com/go-git/go-billy/v5 v5.9.2
 	github.com/go-git/go-git/v5 v5.19.3
