@@ -17,7 +17,8 @@ RUN npm run build
 FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.27.2@sha256:820153096fda4de6ac1b7194d12e416b7dd8f4e9a33d17e0345b111b945162d8 AS build
 # GOWORK=off: the repo-root go.work arrives with `COPY . .` and would change the build
 # list after `go mod download`, sending the build to the network uncached.
-ENV GOTOOLCHAIN=auto CGO_ENABLED=0 GOWORK=off GOFLAGS="-buildvcs=false -mod=readonly"
+ENV GOTOOLCHAIN=auto CGO_ENABLED=0 GOWORK=off GOFLAGS="-buildvcs=false -mod=readonly" \
+    GOPROXY="https://proxy.golang.org|direct"
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./

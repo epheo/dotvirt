@@ -14,6 +14,7 @@ on:
 
 env:
   GOTOOLCHAIN: auto
+  GOPROXY: https://proxy.golang.org|direct # '|' falls back on any proxy error, not only 404/410
 
 jobs:
   preview:
