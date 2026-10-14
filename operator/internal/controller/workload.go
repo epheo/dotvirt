@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -17,7 +19,7 @@ import (
 // owner-referenced to this CR for automatic GC (unlike the cluster-scoped
 // resources reconcileArgo applies, which a namespaced CR can't own - those rely
 // on the finalizer).
-func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, _ *reconcileCtx) (*ctrl.Result, error) {
+func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (*ctrl.Result, error) {
 	// Exposure first: on OpenShift an empty ingress.host yields a hostless Route the
 	// router names. Read that host back and fill it in-memory so the Deployment's
 	// DOTVIRT_PUBLIC_URL (OAuth callback + webhook self-registration) is set this same
@@ -30,6 +32,9 @@ func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1
 	}
 	if exposure := r.exposure(dv); exposure != nil {
 		base = append(base, exposure)
+	}
+	if r.Platform == platform.OpenShift {
+		base = append(base, install.OperandNetworkPolicy(dv, rc.argoNS, r.OperatorNamespace))
 	}
 	if err := r.applyOwned(ctx, dv, base...); err != nil {
 		return nil, applyFailed(err)
@@ -55,8 +60,34 @@ func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1
 	if err := r.applyOwned(ctx, dv, install.Deployment(dv)); err != nil {
 		return nil, applyFailed(err)
 	}
-	r.setCondition(dv, dotvirtv1alpha1.ConditionWorkloadReady, metav1.ConditionTrue, "Ready", "workload applied")
+	if r.DryRun {
+		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionWorkloadReady, "the rollout check")
+		return nil, nil
+	}
+	ready, err := r.operandReady(ctx, dv)
+	if err != nil {
+		return nil, err
+	}
+	// Not a halt: the later phases do not need the pod, and a crashlooping pod
+	// must not stop the Argo wiring from converging. Available reads this
+	// condition at the end of the pass; the Deployment watch re-triggers.
+	if !ready {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionWorkloadReady, metav1.ConditionFalse, "Progressing",
+			"workload applied; waiting for the dotvirt pod to become ready")
+		return nil, nil
+	}
+	r.setCondition(dv, dotvirtv1alpha1.ConditionWorkloadReady, metav1.ConditionTrue, "Ready", "dotvirt pod ready")
 	return nil, nil
+}
+
+// operandReady reads the Deployment back; not-found is not-ready, since the
+// cache can lag the apply this same pass.
+func (r *DotvirtReconciler) operandReady(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (bool, error) {
+	var d appsv1.Deployment
+	if err := r.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: install.AppName}, &d); err != nil {
+		return false, client.IgnoreNotFound(err)
+	}
+	return d.Status.ReadyReplicas >= 1, nil
 }
 
 // resolveExposureType picks the exposure kind for the configured/detected ingress type:

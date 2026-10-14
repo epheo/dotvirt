@@ -7,17 +7,21 @@
 // cross-namespace resources via ownerReferences (k8s forbids it):
 //   - dotvirt-namespace resources (Deployment, Service, SA, PVC) get an ownerRef to
 //     the CR - automatic garbage collection.
-//   - cluster-scoped + ArgoCD-namespace resources (ClusterRoles, AppProjects, the
-//     ApplicationSet/Application) carry the managed-by labels below and are cleaned
-//     up by the CR's finalizer on delete (added with those resources).
+//   - cluster-scoped + ArgoCD-namespace resources (ClusterRoleBindings, AppProjects,
+//     the ApplicationSet/Application, the plugin ConfigMap and Secrets) carry the
+//     instance labels below and are cleaned up by the CR's finalizer on delete.
 package install
 
 import (
 	"context"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/selection"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 )
 
 // fieldManager is the server-side-apply field owner for everything the operator
@@ -31,30 +35,58 @@ const AppName = "dotvirt"
 // container port and probes, the `-addr` flag, and every in-cluster URL built to it.
 const HTTPPort int32 = 8080
 
-// InstanceLabel ties a cluster-scoped or foreign-namespace object (which can't
-// carry an ownerRef to a namespaced CR) to the install that owns it; the
-// finalizer's cleanup selects on it.
-const InstanceLabel = "dotvirt.io/instance"
+// InstanceLabel and InstanceNamespaceLabel together tie a rendered object to the
+// install that owns it; prune and the finalizer's cleanup select on both. Two
+// labels, not one "<ns>.<name>" value: a label value caps at 63 characters and a
+// CR name alone may be longer.
+const (
+	InstanceLabel          = "dotvirt.io/instance"
+	InstanceNamespaceLabel = "dotvirt.io/instance-namespace"
+)
 
-// Labels are the recommended labels plus InstanceLabel, stamped on every
+// Labels are the recommended labels plus the instance labels, stamped on every
 // rendered resource.
-func Labels(instance string) map[string]string {
+func Labels(dv *dotvirtv1alpha1.Dotvirt) map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/name":       AppName,
 		"app.kubernetes.io/managed-by": fieldManager,
-		InstanceLabel:                  instance,
+		InstanceLabel:                  dv.Name,
+		InstanceNamespaceLabel:         dv.Namespace,
+	}
+}
+
+// OwnedBy reports whether labels mark an object as dv's. An object carrying only
+// InstanceLabel was rendered before InstanceNamespaceLabel existed; it counts as
+// dv's when the name matches, since one install per cluster is enforced.
+func OwnedBy(labels map[string]string, dv *dotvirtv1alpha1.Dotvirt) bool {
+	if labels[InstanceLabel] != dv.Name {
+		return false
+	}
+	ns, ok := labels[InstanceNamespaceLabel]
+	return !ok || ns == dv.Namespace
+}
+
+// InstanceSelectors match dv's objects: the current label pair, and the legacy
+// name-only label (OwnedBy explains why that one is still dv's).
+func InstanceSelectors(dv *dotvirtv1alpha1.Dotvirt) []labels.Selector {
+	name, _ := labels.NewRequirement(InstanceLabel, selection.Equals, []string{dv.Name})
+	ns, _ := labels.NewRequirement(InstanceNamespaceLabel, selection.Equals, []string{dv.Namespace})
+	noNS, _ := labels.NewRequirement(InstanceNamespaceLabel, selection.DoesNotExist, nil)
+	return []labels.Selector{
+		labels.NewSelector().Add(*name, *ns),
+		labels.NewSelector().Add(*name, *noNS),
 	}
 }
 
 // unstructuredObject renders a labeled unstructured object with the given spec -
 // the shared shape for the kinds the operator applies without importing their API
 // module (the argoproj.io resources, the OpenShift Route).
-func unstructuredObject(gvk schema.GroupVersionKind, name, namespace, instance string, spec map[string]any) *unstructured.Unstructured {
+func unstructuredObject(gvk schema.GroupVersionKind, name, namespace string, dv *dotvirtv1alpha1.Dotvirt, spec map[string]any) *unstructured.Unstructured {
 	u := &unstructured.Unstructured{Object: map[string]any{}}
 	u.SetGroupVersionKind(gvk)
 	u.SetName(name)
 	u.SetNamespace(namespace)
-	u.SetLabels(Labels(instance))
+	u.SetLabels(Labels(dv))
 	u.Object["spec"] = spec
 	return u
 }

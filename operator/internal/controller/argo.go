@@ -60,8 +60,12 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	// Argo repo-creds (from the forge credential) so Argo can clone the tenant +
 	// platform repos, including private ones. Best-effort - nil if the forge URL or
 	// secret is absent.
-	if rc := r.repoCreds(ctx, dv, argoNS); rc != nil {
-		objs = append(objs, rc)
+	creds, err := r.repoCreds(ctx, dv, argoNS)
+	if err != nil {
+		return nil, err
+	}
+	if creds != nil {
+		objs = append(objs, creds)
 	}
 	for _, obj := range objs {
 		if err := r.apply(ctx, obj); err != nil {
@@ -120,16 +124,16 @@ func (r *DotvirtReconciler) mirrorAppsetToken(ctx context.Context, dv *dotvirtv1
 		return err
 	}
 	if err == nil {
-		if owner := existing.Labels[install.InstanceLabel]; owner != "" && owner != dv.Name {
-			return fmt.Errorf("appset token mirror %s/%s belongs to dotvirt install %q; give each install its own ArgoCD namespace",
-				argoNS, install.AppsetSecretName, owner)
+		if owner := existing.Labels[install.InstanceLabel]; owner != "" && !install.OwnedBy(existing.Labels, dv) {
+			return fmt.Errorf("appset token mirror %s/%s belongs to dotvirt install %s/%s; give each install its own ArgoCD namespace",
+				argoNS, install.AppsetSecretName, existing.Labels[install.InstanceNamespaceLabel], owner)
 		}
 	}
 	// The labels adopt an unlabeled predecessor's mirror, so it is cleaned up with
 	// this instance.
 	return r.apply(ctx, &corev1.Secret{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
-		ObjectMeta: metav1.ObjectMeta{Name: install.AppsetSecretName, Namespace: argoNS, Labels: install.Labels(dv.Name)},
+		ObjectMeta: metav1.ObjectMeta{Name: install.AppsetSecretName, Namespace: argoNS, Labels: install.Labels(dv)},
 		Data:       map[string][]byte{"token": src.Data["token"]},
 	})
 }
@@ -174,25 +178,29 @@ func (r *DotvirtReconciler) ensureArgoWebhook(ctx context.Context, dv *dotvirtv1
 }
 
 // repoCreds builds the Argo repo-credentials Secret from the forge credential, or
-// nil when the forge URL/secret is unavailable (best-effort - Argo then relies on
-// anonymous read for public repos).
-func (r *DotvirtReconciler) repoCreds(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) client.Object {
+// nil when there is no forge URL or credential (Argo then relies on anonymous
+// read for public repos). A read error is returned, not read as absent: prune
+// would delete the live repo-creds on a transient failure.
+func (r *DotvirtReconciler) repoCreds(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) (client.Object, error) {
 	if dv.Spec.Forge.URL == "" {
-		return nil
+		return nil, nil
 	}
 	s, err := r.secret(ctx, dv.Namespace, install.ForgeSecretName(dv))
+	if apierrors.IsNotFound(err) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	token := string(s.Data["token"])
 	if token == "" {
-		return nil
+		return nil, nil
 	}
 	prefix := dv.Spec.Forge.URL
 	if dv.Spec.Forge.PlatformRepo != "" {
 		prefix = forge.OwnerPrefixURL(dv.Spec.Forge.PlatformRepo)
 	}
-	return install.RepoCredsSecret(dv, argoNS, prefix, string(s.Data["username"]), token)
+	return install.RepoCredsSecret(dv, argoNS, prefix, string(s.Data["username"]), token), nil
 }
 
 // ensureForgeTLSTrust merges the forge host + ingress CA into argocd-tls-certs-cm

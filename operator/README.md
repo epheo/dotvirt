@@ -64,9 +64,9 @@ owns one status condition; a phase that fails or waits records why there, so
    token, the webhook secrets and, with SSO, the OAuth client secret. Create-once:
    they survive restarts and are never regenerated.
 4. **Workload** (`WorkloadReady`): the ServiceAccount, drafts PVC, Service, Route or
-   Ingress, and the Deployment, owner-referenced to the CR for automatic cleanup. A
-   single replica by design: the drafts PVC is ReadWriteOnce, so the Deployment
-   recreates rather than rolls.
+   Ingress, NetworkPolicy (below) and the Deployment, owner-referenced to the CR for
+   automatic cleanup. `True` only once the dotvirt pod is ready; `Progressing` until
+   then, without holding back the later phases. Single replica, see below.
 5. **GitOps wiring** (`ArgoReady`): mirrors the plugin token into the ArgoCD
    namespace and trusts the managed forge's Route there (below), then applies the
    bindings of the three static operand ClusterRoles (shipped in
@@ -83,13 +83,74 @@ owns one status condition; a phase that fails or waits records why there, so
    (`forge.EnsureRepo`, the imperative step a declarative installer can't do). Last,
    so its retry never delays another phase.
 
-`Available` rolls a completed pass up; `status.phase` is `Provisioning`,
-`BlockedOnDependencies` or `Ready`.
+`Available` is `True` only after a completed pass with the dotvirt pod ready. A
+phase that fails or blocks sets it `False` with that phase's reason; the one
+exception is the platform-repo retry, which leaves a serving install `Available`.
+`status.phase` is `Provisioning`, `BlockedOnDependencies` or `Ready`.
+
+A completed pass requeues after 10 minutes, so drift on the kinds the operator does
+not watch (Services, AppProjects, bindings) heals without a CR edit.
+
+### Prune
+
+After a completed pass whose render changed, or at least every 5 minutes, the
+operator deletes the objects carrying this install's instance labels that the pass
+did not render: a Route left by a switch to Ingress,
+the platform tier after `spec.forge.platformRepo` is cleared, everything in a former
+ArgoCD namespace, a managed forge switched off, names an older version rendered.
+Secrets and ConfigMaps are swept only in the namespaces the install writes (the
+ArgoCD namespace, and a former one still holding its argoproj objects), so a
+labelled copy an admin made elsewhere survives.
+Never pruned: anything without the labels, and Secrets, PersistentVolumeClaims and
+the CA ConfigMaps in the install namespace (generated keys, the minted forge token
+and the forge's git data are state, not render). A pass that halts prunes nothing.
+
+The labels are `dotvirt.io/instance` (the CR name) and
+`dotvirt.io/instance-namespace` (its namespace). Objects from versions that set only
+the first are still recognized as this install's; the next apply relabels them.
 
 `-dry-run` server-side-applies every rendered resource with `dryRun=All`: the API
 server validates schema, admission, and RBAC, and nothing is persisted, a spec check
 against a real cluster. Phases whose work dry-run cannot model (the secrets, the
-forge bootstrap, both webhooks, the platform repo) record a `DryRun` condition instead.
+forge bootstrap, the workload rollout, both webhooks, the platform repo) record a
+`DryRun` condition instead, and so does `Available`: nothing serves.
+
+## Network policies
+
+On OpenShift the dotvirt and managed Forgejo pods get an ingress NetworkPolicy
+admitting their HTTP port only from:
+
+- the install namespace (the managed forge delivers webhooks to dotvirt's Service);
+- the ArgoCD namespace (the ApplicationSet plugin generator; repo-server on an
+  in-cluster forge URL);
+- the operator namespace (the forge bootstrap calls Forgejo's Service);
+- the router: the `policy-group.network.openshift.io/ingress` and `/host-network`
+  namespace groups, and `openshift-ingress` by name for MicroShift. Browsers, a
+  bring-your-own forge's webhooks, ArgoCD clones of a Route-exposed forge and the
+  app's own forge API calls all arrive this way.
+
+Egress is not restricted. Vanilla Kubernetes gets no policy: the ingress
+controller's namespace is not knowable there, and a wrong guess cuts the console
+off.
+
+## Single replica
+
+dotvirt runs one replica by design, not by default. Drafts live on a
+ReadWriteOnce PVC, and git writes are serialized by an in-process lock; a second
+replica would split drafts and race pushes. The Deployment therefore uses the
+`Recreate` strategy, and scaling it is unsupported.
+
+## The ArgoCD controller's rights
+
+The `dotvirt-argocd-apply` binding grants the shared ArgoCD application
+controller ServiceAccount apply rights on everything dotvirt's PRs emit, including
+`MachineConfig`, `Subscription`/`OperatorGroup` and `KubeDescheduler` (the DRS
+platform objects) and RoleBindings. It is cluster-wide: every Application that
+controller reconciles gains them, not only dotvirt's. The `dotvirt-tenants`
+AppProject is what keeps tenant repos to namespaced workloads; Applications in
+other AppProjects on a shared ArgoCD are bounded only by their own AppProject.
+Give dotvirt its own ArgoCD instance where other teams' Applications must not
+hold these rights.
 
 ## Trust anchors
 
@@ -157,7 +218,23 @@ no extra trust configuration is needed.
   on PATH; merges the CSV base in `config/manifests/bases/` with the generated CRD +
   RBAC + Deployment). Building/pushing the bundle image to a catalog is a release step.
 
+## Upgrading
+
+- The CSV supports only the `AllNamespaces` install mode: one install per cluster,
+  watched cluster-wide.
+  - An OperatorGroup with `targetNamespaces` (OwnNamespace or SingleNamespace) fails
+    the upgrade with `UnsupportedOperatorGroup`.
+  - To migrate, delete that OperatorGroup and recreate it with `spec: {}`, then let
+    OLM retry the install.
+  - The `Dotvirt` resource and the workloads are untouched by the swap.
+- The first reconcile after the upgrade restarts the dotvirt and managed Forgejo
+  pods once (a new instance label on the pods, new Forgejo settings).
+
 ## Managed Forgejo credentials
+
+Registration is disabled and viewing requires sign-in: the Route never serves the
+manifests anonymously. The app and ArgoCD clone with the bot token; the pod mounts
+no ServiceAccount token.
 
 The bootstrap admin is `dotvirt-bot`. The operator reports the command that reveals
 its password in `status.forgeAdminHint`; the value itself stays in the Secret:

@@ -26,7 +26,7 @@ func ApplicationSet(dv *dotvirtv1alpha1.Dotvirt, argoNS string) *unstructured.Un
 		},
 		"spec": argoAppSpec(projectTenants, "{{.repo}}"),
 	}
-	return argoObject("ApplicationSet", applicationSetName, argoNS, dv.Name, map[string]any{
+	return argoObject("ApplicationSet", applicationSetName, argoNS, dv, map[string]any{
 		"goTemplate":        true,
 		"goTemplateOptions": []any{"missingkey=error"},
 		// Renaming generated apps prunes the old ones; preserve their resources so a
@@ -49,7 +49,7 @@ func ApplicationSet(dv *dotvirtv1alpha1.Dotvirt, argoNS string) *unstructured.Un
 func AppsetPluginConfigMap(dv *dotvirtv1alpha1.Dotvirt, argoNS, dotvirtNS string) *corev1.ConfigMap {
 	return &corev1.ConfigMap{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
-		ObjectMeta: metav1.ObjectMeta{Name: appsetConfigMapName, Namespace: argoNS, Labels: Labels(dv.Name)},
+		ObjectMeta: metav1.ObjectMeta{Name: appsetConfigMapName, Namespace: argoNS, Labels: Labels(dv)},
 		Data: map[string]string{
 			"baseUrl": svcURL(AppName, dotvirtNS, HTTPPort),
 			"token":   "$" + appsetConfigMapName + ":token",

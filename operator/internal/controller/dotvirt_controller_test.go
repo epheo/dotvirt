@@ -63,7 +63,7 @@ func testCR() *dotvirtv1alpha1.Dotvirt {
 func testBuilder(t *testing.T) *fake.ClientBuilder {
 	return fake.NewClientBuilder().
 		WithScheme(testScheme(t)).
-		WithStatusSubresource(&dotvirtv1alpha1.Dotvirt{})
+		WithStatusSubresource(&dotvirtv1alpha1.Dotvirt{}, &appsv1.Deployment{})
 }
 
 // depsOK stubs the probe with a fully satisfied cluster.
@@ -112,6 +112,20 @@ func exists(t *testing.T, c client.Client, obj client.Object, ns, name string) b
 		t.Fatalf("get %s/%s: %v", ns, name, err)
 	}
 	return false
+}
+
+// markOperandReady stands in for the Deployment controller: the dotvirt pod
+// reports ready.
+func markOperandReady(t *testing.T, c client.Client, dv *dotvirtv1alpha1.Dotvirt) {
+	t.Helper()
+	var d appsv1.Deployment
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: dv.Namespace, Name: install.AppName}, &d); err != nil {
+		t.Fatalf("get operand Deployment: %v", err)
+	}
+	d.Status.ReadyReplicas = 1
+	if err := c.Status().Update(context.Background(), &d); err != nil {
+		t.Fatalf("mark operand ready: %v", err)
+	}
 }
 
 func argoObj(kind, ns, name string, labels map[string]string) *unstructured.Unstructured {
@@ -174,11 +188,13 @@ func TestReconcileHaltsOnMissingHardDependency(t *testing.T) {
 	if dep == nil || dep.Status != metav1.ConditionFalse || dep.Reason != "MissingPrerequisite" {
 		t.Errorf("DependenciesReady = %+v, want False/MissingPrerequisite", dep)
 	}
+	if av := cond(got, dotvirtv1alpha1.ConditionAvailable); av == nil || av.Status != metav1.ConditionFalse || av.Reason != "MissingPrerequisite" {
+		t.Errorf("Available = %+v, want False/MissingPrerequisite", av)
+	}
 	for _, ct := range []string{
 		dotvirtv1alpha1.ConditionSecretsReady,
 		dotvirtv1alpha1.ConditionWorkloadReady,
 		dotvirtv1alpha1.ConditionArgoReady,
-		dotvirtv1alpha1.ConditionAvailable,
 	} {
 		if cond(got, ct) != nil {
 			t.Errorf("condition %s set; later phases must not run after the halt", ct)
@@ -196,20 +212,34 @@ func TestReconcileHaltsOnMissingHardDependency(t *testing.T) {
 	}
 }
 
-// A minimal CR (BYO forge left unconfigured) reconciles end-to-end in one pass:
-// every phase applies against the fake API, and the CR lands Ready/Available with
-// the finalizer set. This pins the pipeline's happy path, including that the
+// A minimal CR (BYO forge left unconfigured) reconciles end-to-end: every phase
+// applies against the fake API, but Available stays False until the dotvirt pod
+// is ready; the next pass then lands Ready/Available with the finalizer set and
+// a drift requeue. This pins the pipeline's happy path, including that the
 // server-side applies in workload/argo phases succeed and converge.
 func TestReconcileMinimalCRToReady(t *testing.T) {
 	dv := testCR()
 	c := testBuilder(t).WithObjects(dv).Build()
 	r := newReconciler(c, depsOK)
 
-	if res := reconcileOnce(t, r, dv); res != (ctrl.Result{}) {
-		t.Fatalf("result = %+v, want zero (no requeue)", res)
+	reconcileOnce(t, r, dv)
+	got := getCR(t, c, dv)
+	if co := cond(got, dotvirtv1alpha1.ConditionWorkloadReady); co == nil || co.Status != metav1.ConditionFalse || co.Reason != "Progressing" {
+		t.Errorf("WorkloadReady before the pod is ready = %+v, want False/Progressing", co)
+	}
+	if co := cond(got, dotvirtv1alpha1.ConditionAvailable); co == nil || co.Status != metav1.ConditionFalse {
+		t.Errorf("Available before the pod is ready = %+v, want False", co)
+	}
+	if got.Status.Phase == dotvirtv1alpha1.PhaseReady {
+		t.Error("phase Ready while the dotvirt pod is not ready")
 	}
 
-	got := getCR(t, c, dv)
+	markOperandReady(t, c, dv)
+	if res := reconcileOnce(t, r, dv); res.RequeueAfter != driftResync {
+		t.Fatalf("result = %+v, want RequeueAfter %v (drift healing)", res, driftResync)
+	}
+
+	got = getCR(t, c, dv)
 	if got.Status.Phase != dotvirtv1alpha1.PhaseReady {
 		t.Errorf("phase = %q, want Ready", got.Status.Phase)
 	}
@@ -276,9 +306,14 @@ func TestReconcileDryRunReportsSkippedArgoWork(t *testing.T) {
 	}
 
 	got := getCR(t, c, dv)
+	if got.Status.Phase == dotvirtv1alpha1.PhaseReady {
+		t.Error("dry-run reported phase Ready; nothing serves")
+	}
 	for _, ct := range []string{
 		dotvirtv1alpha1.ConditionSecretsReady,
+		dotvirtv1alpha1.ConditionWorkloadReady,
 		dotvirtv1alpha1.ConditionArgoReady,
+		dotvirtv1alpha1.ConditionAvailable,
 	} {
 		if co := cond(got, ct); co == nil || co.Status != metav1.ConditionUnknown || co.Reason != "DryRun" {
 			t.Errorf("condition %s = %+v, want Unknown/DryRun", ct, co)
@@ -326,6 +361,8 @@ func TestReconcileRefusesSecondInstall(t *testing.T) {
 	}
 
 	reconcileOnce(t, r, older)
+	markOperandReady(t, c, older)
+	reconcileOnce(t, r, older)
 	if got := getCR(t, c, older); got.Status.Phase != dotvirtv1alpha1.PhaseReady {
 		t.Errorf("older install phase = %q, want Ready", got.Status.Phase)
 	}
@@ -337,6 +374,8 @@ func TestReconcileRefusesSecondInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	reconcileOnce(t, r, older)
+	reconcileOnce(t, r, newer)
+	markOperandReady(t, c, newer)
 	reconcileOnce(t, r, newer)
 	if got := getCR(t, c, newer); got.Status.Phase != dotvirtv1alpha1.PhaseReady {
 		t.Errorf("released install phase = %q, want Ready", got.Status.Phase)
@@ -386,6 +425,9 @@ func TestReconcileRecordsSecretsPhaseFailure(t *testing.T) {
 	}
 	if got.Status.Phase != dotvirtv1alpha1.PhaseProvisioning {
 		t.Errorf("phase = %q, want Provisioning", got.Status.Phase)
+	}
+	if av := cond(got, dotvirtv1alpha1.ConditionAvailable); av == nil || av.Status != metav1.ConditionFalse || av.Reason != "Error" {
+		t.Errorf("Available = %+v, want False/Error rolled up from the failed phase", av)
 	}
 	if cond(got, dotvirtv1alpha1.ConditionWorkloadReady) != nil {
 		t.Error("workload phase ran after the secrets failure")
@@ -482,7 +524,7 @@ func TestFinalizeDeletesOnlyThisInstance(t *testing.T) {
 	dv.DeletionTimestamp = &now
 
 	argoNS := "argocd" // the vanilla-Kubernetes default argoTarget resolves
-	mine := install.Labels(dv.Name)
+	mine := install.Labels(dv)
 	other := map[string]string{"dotvirt.io/instance": "other"}
 
 	c := testBuilder(t).WithObjects(

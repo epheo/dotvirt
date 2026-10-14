@@ -10,15 +10,15 @@ rules:
   - configmaps
   verbs:
   - create
+  - delete
   - deletecollection
   - get
+  - list
   - patch
 - apiGroups:
   - ""
   resources:
   - persistentvolumeclaims
-  - serviceaccounts
-  - services
   verbs:
   - create
   - patch
@@ -28,17 +28,29 @@ rules:
   - secrets
   verbs:
   - create
+  - delete
   - deletecollection
   - get
   - list
   - patch
   - watch
 - apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  - services
+  verbs:
+  - create
+  - delete
+  - list
+  - patch
+- apiGroups:
   - apps
   resources:
   - deployments
   verbs:
   - create
+  - delete
   - get
   - list
   - patch
@@ -51,7 +63,9 @@ rules:
   - appprojects
   verbs:
   - create
+  - delete
   - deletecollection
+  - list
   - patch
 - apiGroups:
   - dotvirt.io
@@ -80,8 +94,11 @@ rules:
   - networking.k8s.io
   resources:
   - ingresses
+  - networkpolicies
   verbs:
   - create
+  - delete
+  - list
   - patch
 - apiGroups:
   - rbac.authorization.k8s.io
@@ -89,7 +106,9 @@ rules:
   - clusterrolebindings
   verbs:
   - create
+  - delete
   - deletecollection
+  - list
   - patch
 - apiGroups:
   - rbac.authorization.k8s.io
@@ -107,6 +126,7 @@ rules:
   - routes
   verbs:
   - create
+  - delete
   - get
   - list
   - patch

@@ -26,7 +26,7 @@ func Route(dv *dotvirtv1alpha1.Dotvirt, name, host string) *unstructured.Unstruc
 	if host != "" {
 		spec["host"] = host
 	}
-	return unstructuredObject(RouteGVK, name, dv.Namespace, dv.Name, spec)
+	return unstructuredObject(RouteGVK, name, dv.Namespace, dv, spec)
 }
 
 // Ingress exposes the named Service on vanilla Kubernetes, as an Ingress of the
@@ -36,7 +36,7 @@ func Ingress(dv *dotvirtv1alpha1.Dotvirt, name string, port int32, host string) 
 	pathType := networkingv1.PathTypePrefix
 	return &networkingv1.Ingress{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "Ingress"},
-		ObjectMeta: objectMeta(name, dv.Namespace, dv.Name),
+		ObjectMeta: objectMeta(name, dv),
 		Spec: networkingv1.IngressSpec{
 			Rules: []networkingv1.IngressRule{{
 				Host: host,
