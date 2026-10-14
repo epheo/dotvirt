@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -21,6 +23,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
+	"github.com/go-git/go-git/v5/storage"
 	"github.com/go-git/go-git/v5/storage/memory"
 )
 
@@ -47,6 +50,10 @@ func (c creds) auth() *http.BasicAuth {
 // Repo is a cached clone of the manifest repository. Reads are concurrency-safe.
 type Repo struct {
 	creds
+
+	// fetchMu serializes refresh; reads never take it, so a slow fetch
+	// cannot stall them.
+	fetchMu sync.Mutex
 
 	mu   sync.Mutex
 	repo *git.Repository
@@ -78,7 +85,9 @@ func (r *Repo) branchHash(branch string) string {
 }
 
 func (r *Repo) clone() error {
-	repo, err := git.Clone(memory.NewStorage(), nil, &git.CloneOptions{
+	ctx, cancel := context.WithTimeout(context.Background(), cloneTimeout)
+	defer cancel()
+	repo, err := git.CloneContext(ctx, memory.NewStorage(), nil, &git.CloneOptions{
 		URL:          r.url,
 		Auth:         r.auth(),
 		Mirror:       true, // fetch all refs; we read branches directly from refs
@@ -91,30 +100,70 @@ func (r *Repo) clone() error {
 	return nil
 }
 
-// fetchTimeout bounds a single background fetch. Without it a stalled connection
-// to the remote (common over a flaky/self-signed Route) would hold r.mu forever -
-// and since reads (VMManifests) also take r.mu, every inventory read for that repo
-// would deadlock. Capping the fetch lets it fail and release the lock; the poll
-// retries on the next tick.
-const fetchTimeout = 30 * time.Second
+// Network bounds: a stalled remote (common over a flaky or self-signed Route)
+// must fail and let the next poll or request retry, never hang a goroutine.
+const (
+	cloneTimeout = 2 * time.Minute
+	fetchTimeout = 30 * time.Second
+)
 
-// Refresh updates the cached clone's branch refs from the remote. This is the
+// refresh updates the cached clone's branch refs from the remote. This is the
 // single point of network freshness: the background fetcher calls it on a
 // schedule, and it's nudged after dotvirt's own pushes. Reads never call it.
+//
+// The fetch writes into a fork of the mirror's storage and swaps it in under
+// r.mu: go-git's memory storage is unsynchronized maps, so fetching into the
+// live one would race the reads, and locking it would stall them on the network.
 func (r *Repo) refresh() error {
+	r.fetchMu.Lock()
+	defer r.fetchMu.Unlock()
+
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	fork, err := forkStorage(r.repo.Storer)
+	r.mu.Unlock()
+	if err != nil {
+		return fmt.Errorf("fetch: %w", err)
+	}
+	next, err := git.Open(fork, nil)
+	if err != nil {
+		return fmt.Errorf("fetch: %w", err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 	defer cancel()
-	err := r.repo.FetchContext(ctx, &git.FetchOptions{
+	err = next.FetchContext(ctx, &git.FetchOptions{
 		Auth:     r.auth(),
 		RefSpecs: []config.RefSpec{"+refs/heads/*:refs/heads/*"},
 		Force:    true,
 	})
-	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
+	if errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return nil
+	}
+	if err != nil {
 		return fmt.Errorf("fetch: %w", err)
 	}
+	r.mu.Lock()
+	r.repo = next
+	r.mu.Unlock()
 	return nil
+}
+
+// forkStorage copies the mirror's indexes; objects are immutable and shared,
+// so a fetch into the fork leaves the original untouched.
+func forkStorage(s storage.Storer) (*memory.Storage, error) {
+	src, ok := s.(*memory.Storage)
+	if !ok {
+		return nil, fmt.Errorf("mirror storage is %T, not memory", s)
+	}
+	dst := memory.NewStorage()
+	dst.ConfigStorage = src.ConfigStorage
+	maps.Copy(dst.Objects, src.Objects)
+	maps.Copy(dst.Commits, src.Commits)
+	maps.Copy(dst.Trees, src.Trees)
+	maps.Copy(dst.Blobs, src.Blobs)
+	maps.Copy(dst.Tags, src.Tags)
+	maps.Copy(dst.ReferenceStorage, src.ReferenceStorage)
+	dst.ShallowStorage = slices.Clone(src.ShallowStorage)
+	return dst, nil
 }
 
 // headsSignature refreshes from the remote and returns a stable string
