@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/url"
 	"sort"
 	"time"
 
@@ -24,7 +25,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
-	"kubevirt.io/client-go/kubecli"
+	kvclient "kubevirt.io/client-go/kubevirt"
+	kvcorev1 "kubevirt.io/client-go/kubevirt/typed/core/v1"
 
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/restfactory"
@@ -33,9 +35,11 @@ import (
 // Client reads VM and namespace state from the cluster under one identity (one
 // bearer token). Built by a Factory; never constructed directly.
 type Client struct {
-	kubevirt kubecli.KubevirtClient
+	kubevirt kvclient.Interface
 	kube     kubernetes.Interface
 	dyn      dynamic.Interface // for CRDs without a typed client (instancetypes, etc.)
+	// cfg dials the VNC websocket, which the generated clientset cannot open.
+	cfg *rest.Config
 }
 
 // Factory mints per-token Clients. The shared restfactory owns the identity
@@ -66,13 +70,13 @@ func (f *Factory) SAKube() (kubernetes.Interface, error) {
 
 // NewClient assembles a Client from already-built typed clients. The Factory uses
 // it after constructing per-token clients; tests use it with fakes.
-func NewClient(kube kubernetes.Interface, kubevirt kubecli.KubevirtClient, dyn dynamic.Interface) *Client {
+func NewClient(kube kubernetes.Interface, kubevirt kvclient.Interface, dyn dynamic.Interface) *Client {
 	return &Client{kubevirt: kubevirt, kube: kube, dyn: dyn}
 }
 
 // clientsFor is the restfactory build hook: a token-bearing config -> a full Client.
 func clientsFor(cfg *rest.Config) (*Client, error) {
-	kv, err := kubecli.GetKubevirtClientFromRESTConfig(cfg)
+	kv, err := kvclient.NewForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("kubevirt client: %w", err)
 	}
@@ -84,7 +88,9 @@ func clientsFor(cfg *rest.Config) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dynamic client: %w", err)
 	}
-	return NewClient(kube, kv, dyn), nil
+	c := NewClient(kube, kv, dyn)
+	c.cfg = cfg
+	return c, nil
 }
 
 // VisibleNamespaces returns the namespaces this client's token may read VMs in.
@@ -138,10 +144,10 @@ func (c *Client) VisibleNamespaces(ctx context.Context, candidates []string) ([]
 func (c *Client) VMListWatch() *cache.ListWatch {
 	return &cache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
-			return c.kubevirt.VirtualMachine(metav1.NamespaceAll).List(ctx, o)
+			return c.kubevirt.KubevirtV1().VirtualMachines(metav1.NamespaceAll).List(ctx, o)
 		},
 		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
-			return c.kubevirt.VirtualMachine(metav1.NamespaceAll).Watch(ctx, o)
+			return c.kubevirt.KubevirtV1().VirtualMachines(metav1.NamespaceAll).Watch(ctx, o)
 		},
 	}
 }
@@ -151,10 +157,10 @@ func (c *Client) VMListWatch() *cache.ListWatch {
 func (c *Client) VMIListWatch() *cache.ListWatch {
 	return &cache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
-			return c.kubevirt.VirtualMachineInstance(metav1.NamespaceAll).List(ctx, o)
+			return c.kubevirt.KubevirtV1().VirtualMachineInstances(metav1.NamespaceAll).List(ctx, o)
 		},
 		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
-			return c.kubevirt.VirtualMachineInstance(metav1.NamespaceAll).Watch(ctx, o)
+			return c.kubevirt.KubevirtV1().VirtualMachineInstances(metav1.NamespaceAll).Watch(ctx, o)
 		},
 	}
 }
@@ -274,7 +280,8 @@ func contains(haystack []string, wanted ...string) bool {
 // carrying the RFB protocol. The caller bridges it to the browser's noVNC
 // WebSocket. preserveSession=false so each connection is independent.
 func (c *Client) VNCConn(namespace, name string) (net.Conn, error) {
-	stream, err := c.kubevirt.VirtualMachineInstance(namespace).VNC(name, false)
+	q := url.Values{"preserveSession": {"false"}}
+	stream, err := kvcorev1.AsyncSubresourceHelper(c.cfg, "virtualmachineinstances", namespace, name, "vnc", q)
 	if err != nil {
 		return nil, fmt.Errorf("open VNC for %s/%s: %w", namespace, name, err)
 	}
@@ -285,7 +292,7 @@ func (c *Client) VNCConn(namespace, name string) (net.Conn, error) {
 // subresource), for the Summary's console preview. Needs a running VMI with a
 // VNC-capable graphics device; errors otherwise (the UI just hides the thumb).
 func (c *Client) Screenshot(ctx context.Context, namespace, name string) ([]byte, error) {
-	return c.kubevirt.VirtualMachineInstance(namespace).Screenshot(ctx, name, &kubevirtcorev1.ScreenshotOptions{})
+	return c.kubevirt.KubevirtV1().VirtualMachineInstances(namespace).Screenshot(ctx, name, &kubevirtcorev1.ScreenshotOptions{})
 }
 
 // ListEvents returns recent Kubernetes Events for the VM ns/name and its VMI
@@ -386,7 +393,7 @@ func sortEventsDesc(events []model.Event) {
 
 // Restart restarts the VM: the running VMI is recreated per its run strategy.
 func (c *Client) Restart(ctx context.Context, namespace, name string) error {
-	return c.kubevirt.VirtualMachine(namespace).Restart(ctx, name, &kubevirtcorev1.RestartOptions{})
+	return c.kubevirt.KubevirtV1().VirtualMachines(namespace).Restart(ctx, name, &kubevirtcorev1.RestartOptions{})
 }
 
 // Migrate live-migrates the running VMI to another node.
@@ -398,15 +405,15 @@ func (c *Client) Migrate(ctx context.Context, namespace, name, targetNode string
 	if targetNode != "" {
 		opts.AddedNodeSelector = map[string]string{corev1.LabelHostname: targetNode}
 	}
-	return c.kubevirt.VirtualMachine(namespace).Migrate(ctx, name, opts)
+	return c.kubevirt.KubevirtV1().VirtualMachines(namespace).Migrate(ctx, name, opts)
 }
 
 func (c *Client) Pause(ctx context.Context, namespace, name string) error {
-	return c.kubevirt.VirtualMachineInstance(namespace).Pause(ctx, name, &kubevirtcorev1.PauseOptions{})
+	return c.kubevirt.KubevirtV1().VirtualMachineInstances(namespace).Pause(ctx, name, &kubevirtcorev1.PauseOptions{})
 }
 
 func (c *Client) Unpause(ctx context.Context, namespace, name string) error {
-	return c.kubevirt.VirtualMachineInstance(namespace).Unpause(ctx, name, &kubevirtcorev1.UnpauseOptions{})
+	return c.kubevirt.KubevirtV1().VirtualMachineInstances(namespace).Unpause(ctx, name, &kubevirtcorev1.UnpauseOptions{})
 }
 
 // --- node maintenance (cordon/uncordon + maintenance mode; the By-Node view) ---

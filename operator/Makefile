@@ -8,7 +8,7 @@ VERSION ?= 0.0.0
 IMG ?= quay.io/epheo/dotvirt-operator:v$(VERSION)
 BUNDLE_IMG ?= quay.io/epheo/dotvirt-operator-bundle:v$(VERSION)
 CONTAINER_TOOL ?= docker
-CONTROLLER_GEN ?= go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.18.0
+CONTROLLER_GEN ?= go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20.1
 KUSTOMIZE ?= go run sigs.k8s.io/kustomize/kustomize/v5@v5.4.3
 OPERATOR_SDK ?= operator-sdk
 # Without this tag opm links gpgme through cgo, absent on CI runners.

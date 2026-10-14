@@ -17,7 +17,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
-	"kubevirt.io/client-go/kubecli"
 	kvfake "kubevirt.io/client-go/kubevirt/fake"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -29,21 +28,6 @@ import (
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/restfactory"
 )
-
-// fakeKubevirt serves the VM and VMI list/watch the SA snapshot runs; the
-// embedded interface panics on anything else.
-type fakeKubevirt struct {
-	kubecli.KubevirtClient
-	cs *kvfake.Clientset
-}
-
-func (f fakeKubevirt) VirtualMachine(ns string) kubecli.VirtualMachineInterface {
-	return f.cs.KubevirtV1().VirtualMachines(ns)
-}
-
-func (f fakeKubevirt) VirtualMachineInstance(ns string) kubecli.VirtualMachineInstanceInterface {
-	return f.cs.KubevirtV1().VirtualMachineInstances(ns)
-}
 
 // reachedDraft records which coordinator call a route reached; reaching it
 // means the authoring gate let the request through.
@@ -168,7 +152,7 @@ func tenantServer(t *testing.T, d *reachedDraft, nss []string, visible []string)
 		}})
 	}
 	kube := fake.NewSimpleClientset(&corev1.NamespaceList{Items: objs})
-	sa := cluster.NewClient(kube, fakeKubevirt{cs: kvfake.NewSimpleClientset()}, nil)
+	sa := cluster.NewClient(kube, kvfake.NewSimpleClientset(), nil)
 	bus := eventbus.New()
 	state := clusterstate.New(sa, "dotvirt.io/project", bus)
 	ctx, cancel := context.WithCancel(context.Background())

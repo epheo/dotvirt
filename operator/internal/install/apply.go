@@ -100,5 +100,6 @@ func Apply(ctx context.Context, c client.Client, obj client.Object, dryRun bool)
 	if dryRun {
 		opts = append(opts, client.DryRunAll)
 	}
-	return c.Patch(ctx, obj, client.Apply, opts...)
+	// Client.Apply takes ApplyConfigurations, which the typed builders do not render.
+	return c.Patch(ctx, obj, client.Apply, opts...) //nolint:staticcheck // SA1019, see above
 }
