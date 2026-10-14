@@ -1,0 +1,17 @@
+{
+  "name": "derived",
+  "library": "acme",
+  "description": "golden web tier",
+  "sourceFile": "templates/derived.yaml",
+  "parameters": [
+    {
+      "name": "NAME",
+      "description": "Unique VM name",
+      "generate": "expression",
+      "from": "web-01-[a-z0-9]{5}"
+    }
+  ],
+  "instancetype": "u1.medium",
+  "preference": "fedora",
+  "yaml": ""
+}

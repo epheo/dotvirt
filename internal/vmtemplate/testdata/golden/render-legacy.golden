@@ -1,0 +1,21 @@
+name: vm-01
+namespace: tenant-a
+message: 
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: vm-01
+  namespace: tenant-a
+spec:
+  runStrategy: Halted
+  template:
+    metadata: {}
+    spec:
+      domain:
+        cpu:
+          model: host-model
+        devices: {}
+        firmware:
+          serial: s3cret
+        resources: {}

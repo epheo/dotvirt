@@ -1,0 +1,58 @@
+name: db-01
+namespace: tenant-a
+message: 
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: db-01
+  namespace: tenant-a
+spec:
+  dataVolumeTemplates:
+  - metadata:
+      name: db-01-rootdisk
+    spec:
+      sourceRef:
+        kind: DataSource
+        name: fedora
+        namespace: images
+      storage:
+        resources:
+          requests:
+            storage: 30Gi
+  instancetype:
+    name: u1.medium
+  preference:
+    name: fedora
+  runStrategy: Halted
+  template:
+    metadata: {}
+    spec:
+      domain:
+        devices:
+          disks:
+          - disk:
+              bus: virtio
+            name: rootdisk
+          - disk:
+              bus: virtio
+            name: cloudinitdisk
+          interfaces:
+          - masquerade: {}
+            name: default
+        resources: {}
+      networks:
+      - name: default
+        pod: {}
+      volumes:
+      - dataVolume:
+          name: db-01-rootdisk
+        name: rootdisk
+      - cloudInitNoCloud:
+          userData: |
+            #cloud-config
+            hostname: db
+            user: ops
+            ssh_authorized_keys:
+              - "ssh-ed25519 AAAAC3Nza ops@x"
+        name: cloudinitdisk

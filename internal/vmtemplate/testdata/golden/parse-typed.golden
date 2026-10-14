@@ -1,0 +1,34 @@
+{
+  "name": "typed",
+  "library": "acme",
+  "description": "Non-string and multi-reference substitution",
+  "sourceFile": "templates/typed.yaml",
+  "parameters": [
+    {
+      "name": "NAME",
+      "generate": "expression",
+      "from": "typed-[a-z0-9]{5}"
+    },
+    {
+      "name": "CORES",
+      "value": "2"
+    },
+    {
+      "name": "MEMORY",
+      "value": "2Gi"
+    },
+    {
+      "name": "ZONE",
+      "value": "eu-1"
+    },
+    {
+      "name": "AUTOATTACH",
+      "value": "false"
+    },
+    {
+      "name": "LABELS",
+      "value": "{\"tier\":\"web\",\"zone\":\"eu-1\"}"
+    }
+  ],
+  "yaml": ""
+}

@@ -18,8 +18,8 @@ require (
 	k8s.io/client-go v0.35.9
 	kubevirt.io/api v1.8.4
 	kubevirt.io/client-go v1.8.4
-	kubevirt.io/virt-template-api v0.2.2
-	kubevirt.io/virt-template-engine v0.2.2
+	kubevirt.io/virt-template-api v0.2.4
+	kubevirt.io/virt-template-engine v0.2.4
 	sigs.k8s.io/yaml v1.6.0
 )
 

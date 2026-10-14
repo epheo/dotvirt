@@ -1,0 +1,47 @@
+name: min-01
+namespace: tenant-a
+message: 
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: min-01
+  namespace: tenant-a
+spec:
+  dataVolumeTemplates:
+  - metadata:
+      name: min-01-rootdisk
+    spec:
+      sourceRef:
+        kind: DataSource
+        name: fedora
+        namespace: openshift-virtualization-os-images
+      storage:
+        resources:
+          requests:
+            storage: 30Gi
+  instancetype:
+    name: u1.small
+  preference:
+    name: fedora
+  runStrategy: Halted
+  template:
+    metadata: {}
+    spec:
+      domain:
+        devices:
+          disks:
+          - disk:
+              bus: virtio
+            name: rootdisk
+          interfaces:
+          - masquerade: {}
+            name: default
+        resources: {}
+      networks:
+      - name: default
+        pod: {}
+      volumes:
+      - dataVolume:
+          name: min-01-rootdisk
+        name: rootdisk
