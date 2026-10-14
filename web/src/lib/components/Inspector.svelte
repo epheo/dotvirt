@@ -1,15 +1,15 @@
 <script lang="ts">
 	import { ChevronDown, Maximize2, X } from 'lucide-svelte';
 	import { goto } from '$app/navigation';
-	import { vmKey, vmRef, type VM } from '$lib/api';
-	import { dispatchVMAction, vmActions } from '$lib/actions';
-	import { vmHref } from '$lib/nav';
-	import { duration } from '$lib/format';
-	import { vmSizing } from '$lib/sizing';
-	import { phaseTone } from '$lib/status';
-	import { drafts } from '$lib/state/drafts.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { vmKey, vmRef, type VM } from '#lib/api.js';
+	import { dispatchVMAction, vmActions } from '#lib/actions.js';
+	import { vmHref } from '#lib/nav.js';
+	import { duration } from '#lib/format.js';
+	import { vmSizing } from '#lib/sizing.js';
+	import { phaseTone } from '#lib/status.js';
+	import { drafts } from '#lib/state/drafts.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import ActionMenu from './ActionMenu.svelte';
 	import Button from './Button.svelte';
 	import HeaderMenu from './HeaderMenu.svelte';

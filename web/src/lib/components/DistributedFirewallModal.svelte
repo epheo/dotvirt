@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { Plus, Trash2 } from 'lucide-svelte';
-	import { api, type NetworkPolicyCreate, type PolicyRule, type VM } from '$lib/api';
-	import { rowList } from '$lib/rowlist.svelte';
-	import { TERMS } from '$lib/vocab';
-	import { validName, NAME_HINT } from '$lib/validate';
+	import { api, type NetworkPolicyCreate, type PolicyRule, type VM } from '#lib/api.js';
+	import { rowList } from '#lib/rowlist.svelte.js';
+	import { TERMS } from '#lib/vocab.js';
+	import { validName, NAME_HINT } from '#lib/validate.js';
 	import Note from './Note.svelte';
 	import Button from './Button.svelte';
 	import StageModal from './StageModal.svelte';

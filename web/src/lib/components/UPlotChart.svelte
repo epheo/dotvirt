@@ -1,10 +1,10 @@
 <script lang="ts">
 	import uPlot from 'uplot';
 	import 'uplot/dist/uPlot.min.css';
-	import type { MetricChart } from '$lib/api';
-	import { chartSeries, chartUI } from '$lib/chart';
-	import { bytes } from '$lib/format';
-	import { theme } from '$lib/state/theme.svelte';
+	import type { MetricChart } from '#lib/api.js';
+	import { chartSeries, chartUI } from '#lib/chart.js';
+	import { bytes } from '#lib/format.js';
+	import { theme } from '#lib/state/theme.svelte.js';
 
 	let { chart }: { chart: MetricChart } = $props();
 

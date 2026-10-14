@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { ConsumerVM } from '$lib/api';
-	import { bytes, cores } from '$lib/format';
+	import type { ConsumerVM } from '#lib/api.js';
+	import { bytes, cores } from '#lib/format.js';
 	import InfoCard from './InfoCard.svelte';
 
 	// Top VM consumers as a card: CPU-ranked rows with usage bars scaled to the

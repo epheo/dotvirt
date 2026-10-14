@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { api, vmKey, type VM } from '$lib/api';
-	import { resource } from '$lib/resource.svelte';
+	import { api, vmKey, type VM } from '#lib/api.js';
+	import { resource } from '#lib/resource.svelte.js';
 	import EventsTable from './EventsTable.svelte';
 
 	// The Monitor tab's Kubernetes-events lane. Owns its load: it is mounted

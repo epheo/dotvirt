@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Change } from '$lib/api';
+	import type { Change } from '#lib/api.js';
 	let { changes }: { changes: Change[] } = $props();
 </script>
 

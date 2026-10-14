@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { TONE_DOT, type Tone } from '$lib/status';
+	import { TONE_DOT, type Tone } from '#lib/status.js';
 
 	// The one status dot. `pulse` marks in-flight states (migrations, syncs).
 	let {

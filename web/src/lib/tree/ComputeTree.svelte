@@ -1,16 +1,16 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { Folder, Layers, LayoutGrid, TriangleAlert } from 'lucide-svelte';
-	import type { Project, ProjectNamespace } from '$lib/api';
-	import { repoError } from '$lib/gitops';
-	import { issueCountByProject } from '$lib/issues';
-	import { hrefForScope, scopeFromPath } from '$lib/nav';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { persisted } from '$lib/state/persisted.svelte';
-	import { ui } from '$lib/state/ui.svelte';
-	import ProjectSyncBadge from '$lib/components/ProjectSyncBadge.svelte';
-	import StatusDot from '$lib/components/StatusDot.svelte';
-	import TreeRow from '$lib/components/TreeRow.svelte';
+	import type { Project, ProjectNamespace } from '#lib/api.js';
+	import { repoError } from '#lib/gitops.js';
+	import { issueCountByProject } from '#lib/issues.js';
+	import { hrefForScope, scopeFromPath } from '#lib/nav.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { persisted } from '#lib/state/persisted.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
+	import ProjectSyncBadge from '#lib/components/ProjectSyncBadge.svelte';
+	import StatusDot from '#lib/components/StatusDot.svelte';
+	import TreeRow from '#lib/components/TreeRow.svelte';
 	import TreeVMRow from './TreeVMRow.svelte';
 
 	// The Compute tree (VMs & Templates analog): All VMs -> projects -> namespaces

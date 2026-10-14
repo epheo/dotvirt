@@ -1,4 +1,4 @@
-import type { Options, VM } from '$lib/api';
+import type { Options, VM } from '#lib/api.js';
 
 export interface Sizing {
 	cpu?: number;

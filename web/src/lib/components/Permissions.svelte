@@ -3,8 +3,8 @@
 	// SelfSubjectRulesReview under their own token. Read-only - dotvirt grants
 	// nothing; RBAC is managed by the platform.
 	import { Check, X } from 'lucide-svelte';
-	import { api, type Permissions } from '$lib/api';
-	import { resource } from '$lib/resource.svelte';
+	import { api, type Permissions } from '#lib/api.js';
+	import { resource } from '#lib/resource.svelte.js';
 	import Note from './Note.svelte';
 
 	let { namespaces }: { namespaces: string[] } = $props();

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import RFB from '@novnc/novnc';
-	import type { VM } from '$lib/api';
+	import type { VM } from '#lib/api.js';
 	import StatusDot from './StatusDot.svelte';
 
 	let { vm }: { vm: VM } = $props();

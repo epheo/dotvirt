@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { CircleCheck } from 'lucide-svelte';
-	import { issuesInScope } from '$lib/issues';
-	import { inventory } from '$lib/state/inventory.svelte';
+	import { issuesInScope } from '#lib/issues.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
 	import StatusDot from './StatusDot.svelte';
 
 	// The Summary lane of the issues plane: standing problems in this scope,

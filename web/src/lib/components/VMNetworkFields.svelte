@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { validCIDR, CIDR_HINT } from '$lib/validate';
+	import { validCIDR, CIDR_HINT } from '#lib/validate.js';
 	import FormField from './FormField.svelte';
 	import TextInput from './TextInput.svelte';
 

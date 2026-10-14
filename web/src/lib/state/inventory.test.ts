@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Inventory } from '$lib/api';
+import type { Inventory } from '#lib/api.js';
 
-vi.mock('$lib/api', () => ({ api: {}, Unauthorized: class {}, withRetry: vi.fn() }));
+vi.mock('#lib/api.js', () => ({ api: {}, Unauthorized: class {}, withRetry: vi.fn() }));
 
-import { inventory } from '$lib/state/inventory.svelte';
+import { inventory } from '#lib/state/inventory.svelte.js';
 
 const frame = (power: string) =>
 	JSON.parse(

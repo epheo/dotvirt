@@ -12,7 +12,7 @@ const api = vi.hoisted(() => {
 	}
 	return { api: { me: vi.fn() }, Unauthorized, HttpError, retryDelay: () => 1000 };
 });
-vi.mock('$lib/api', () => api);
+vi.mock('#lib/api.js', () => api);
 
 import { session } from './session.svelte';
 

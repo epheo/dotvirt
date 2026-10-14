@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { SyncStatus } from '$lib/api';
-	import { TONE_DOT, type Tone } from '$lib/status';
+	import type { SyncStatus } from '#lib/api.js';
+	import { TONE_DOT, type Tone } from '#lib/status.js';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StatusDot from './StatusDot.svelte';

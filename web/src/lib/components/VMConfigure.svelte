@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { Pencil } from 'lucide-svelte';
-	import type { Network, VM } from '$lib/api';
-	import { manifestURL } from '$lib/actions';
-	import type { EditSection } from '$lib/editform';
-	import { resolveNIC, kindLabel } from '$lib/networks';
-	import { vmSizing } from '$lib/sizing';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import type { Network, VM } from '#lib/api.js';
+	import { manifestURL } from '#lib/actions.js';
+	import type { EditSection } from '#lib/editform.js';
+	import { resolveNIC, kindLabel } from '#lib/networks.js';
+	import { vmSizing } from '#lib/sizing.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import InfoCard from './InfoCard.svelte';
 	import Button from './Button.svelte';
 	import Row from './Row.svelte';

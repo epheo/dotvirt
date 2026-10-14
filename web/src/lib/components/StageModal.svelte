@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { action } from '$lib/resource.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { action } from '#lib/resource.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';

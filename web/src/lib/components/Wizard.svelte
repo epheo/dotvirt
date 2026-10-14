@@ -1,8 +1,8 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { Check } from 'lucide-svelte';
-	import { action } from '$lib/resource.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { action } from '#lib/resource.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import ErrorNote from './ErrorNote.svelte';
 	import Button from './Button.svelte';
 	import Modal from './Modal.svelte';

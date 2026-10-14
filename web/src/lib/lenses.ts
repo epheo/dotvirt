@@ -1,9 +1,9 @@
 // The grouping keys behind the inventory tree's Networks/Storage lenses,
 // shared with the page's scope filtering so tree groups and grid scope can
 // never disagree on what belongs to a key.
-import type { Disk, Network, VM } from '$lib/api';
-import { quantityBytes } from '$lib/format';
-import { resolveNIC } from '$lib/networks';
+import type { Disk, Network, VM } from '#lib/api.js';
+import { quantityBytes } from '#lib/format.js';
+import { resolveNIC } from '#lib/networks.js';
 
 // The inventory model: the tree is a scope selector, the center pane is the VM grid.
 // Every inventory level the tree can focus is one of these.

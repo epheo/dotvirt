@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { Camera, RotateCcw, Trash2 } from 'lucide-svelte';
-	import { api, vmKey, type Snapshot, type VM } from '$lib/api';
-	import { relativeAge } from '$lib/format';
-	import { action, resource, type Resource } from '$lib/resource.svelte';
-	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
+	import { api, vmKey, type Snapshot, type VM } from '#lib/api.js';
+	import { relativeAge } from '#lib/format.js';
+	import { action, resource, type Resource } from '#lib/resource.svelte.js';
+	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '#lib/table.js';
 	import ErrorNote from './ErrorNote.svelte';
 	import Button from './Button.svelte';
 	import Note from './Note.svelte';

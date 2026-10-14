@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { GitPullRequest, Pencil } from 'lucide-svelte';
-	import { api, type DraftItem, type VM } from '$lib/api';
-	import { approvalLine, checksPill, itemKey, reviewURL } from '$lib/review';
-	import { drafts } from '$lib/state/drafts.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { reviewCache } from '$lib/state/reviewCache.svelte';
+	import { api, type DraftItem, type VM } from '#lib/api.js';
+	import { approvalLine, checksPill, itemKey, reviewURL } from '#lib/review.js';
+	import { drafts } from '#lib/state/drafts.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 	import ChangeList from './ChangeList.svelte';
 	import Button from './Button.svelte';
 	import InfoCard from './InfoCard.svelte';

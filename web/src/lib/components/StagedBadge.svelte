@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Pencil, Trash2 } from 'lucide-svelte';
-	import type { DraftItem } from '$lib/api';
+	import type { DraftItem } from '#lib/api.js';
 	import StatusPill from './StatusPill.svelte';
 
 	// A VM with an unproposed staged change (the current user's draft). Shown in

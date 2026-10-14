@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { api, type PhysicalAdapter, type UplinkCreate } from '$lib/api';
-	import { validName, NAME_HINT } from '$lib/validate';
+	import { api, type PhysicalAdapter, type UplinkCreate } from '#lib/api.js';
+	import { validName, NAME_HINT } from '#lib/validate.js';
 	import Note from './Note.svelte';
 	import StageModal from './StageModal.svelte';
 	import FormField from './FormField.svelte';

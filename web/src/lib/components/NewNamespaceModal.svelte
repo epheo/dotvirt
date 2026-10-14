@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { api, type NamespaceCreate } from '$lib/api';
-	import { validName, NAME_HINT, validCIDR } from '$lib/validate';
+	import { api, type NamespaceCreate } from '#lib/api.js';
+	import { validName, NAME_HINT, validCIDR } from '#lib/validate.js';
 	import StageModal from './StageModal.svelte';
 	import FormField from './FormField.svelte';
 	import TextInput from './TextInput.svelte';

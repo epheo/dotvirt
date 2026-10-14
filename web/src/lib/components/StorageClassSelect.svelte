@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { HTMLSelectAttributes } from 'svelte/elements';
-	import type { StorageClass } from '$lib/api';
+	import type { StorageClass } from '#lib/api.js';
 	import SelectInput from './SelectInput.svelte';
 
 	// The one storage-class picker. The empty option means "no explicit class"

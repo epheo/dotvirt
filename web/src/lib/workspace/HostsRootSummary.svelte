@@ -1,12 +1,12 @@
 <script lang="ts">
-	import { api, type HostCapacity, type HostLoad, type Node, type VM } from '$lib/api';
-	import { bytes, cores } from '$lib/format';
-	import { hrefForScope } from '$lib/nav';
-	import { resource } from '$lib/resource.svelte';
-	import type { Tone } from '$lib/status';
-	import HostBalance from '$lib/components/HostBalance.svelte';
-	import TabPane from '$lib/components/TabPane.svelte';
-	import StatusPill from '$lib/components/StatusPill.svelte';
+	import { api, type HostCapacity, type HostLoad, type Node, type VM } from '#lib/api.js';
+	import { bytes, cores } from '#lib/format.js';
+	import { hrefForScope } from '#lib/nav.js';
+	import { resource } from '#lib/resource.svelte.js';
+	import type { Tone } from '#lib/status.js';
+	import HostBalance from '#lib/components/HostBalance.svelte';
+	import TabPane from '#lib/components/TabPane.svelte';
+	import StatusPill from '#lib/components/StatusPill.svelte';
 
 	// The Hosts root's Summary: the fleet as one table - state, placement,
 	// live utilization, and what is committed to VMs against what the node can

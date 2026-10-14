@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { vmKey, type VM } from '$lib/api';
-	import { drafts } from '$lib/state/drafts.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { vmKey, type VM } from '#lib/api.js';
+	import { drafts } from '#lib/state/drafts.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import Banner from './Banner.svelte';
 	import Button from './Button.svelte';
 	import StatusDot from './StatusDot.svelte';

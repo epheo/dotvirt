@@ -1,7 +1,7 @@
 import { untrack } from 'svelte';
-import { api, type CommitDetail, type ProposalDetail } from '$lib/api';
-import { friendlyError } from '$lib/format';
-import { commitKey, prKey } from '$lib/review';
+import { api, type CommitDetail, type ProposalDetail } from '#lib/api.js';
+import { friendlyError } from '#lib/format.js';
+import { commitKey, prKey } from '#lib/review.js';
 
 // A review is a past commit's or an open PR's items: the same field diff a
 // staged item shows. The Changes panes, the VM page's Changes tab and every

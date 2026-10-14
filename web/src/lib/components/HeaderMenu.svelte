@@ -4,7 +4,7 @@
 	// outside its own subtree. The trigger snippet gets {open, toggle}; the menu body
 	// gets {close} so an item can dismiss the menu after acting.
 	import type { Snippet } from 'svelte';
-	import { dismiss } from '$lib/dismiss';
+	import { dismiss } from '#lib/dismiss.js';
 
 	let {
 		align = 'left',

@@ -1,14 +1,14 @@
 <script lang="ts">
-	import { api, type StorageClassInfo, type VM } from '$lib/api';
-	import { bytes } from '$lib/format';
-	import { disksOnClass, provisionedBytes, vmStorageKeys, NO_STORAGE } from '$lib/lenses';
-	import { hrefForScope } from '$lib/nav';
-	import { resource } from '$lib/resource.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import type { Tone } from '$lib/status';
-	import Note from '$lib/components/Note.svelte';
-	import TabPane from '$lib/components/TabPane.svelte';
-	import StatusPill from '$lib/components/StatusPill.svelte';
+	import { api, type StorageClassInfo, type VM } from '#lib/api.js';
+	import { bytes } from '#lib/format.js';
+	import { disksOnClass, provisionedBytes, vmStorageKeys, NO_STORAGE } from '#lib/lenses.js';
+	import { hrefForScope } from '#lib/nav.js';
+	import { resource } from '#lib/resource.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import type { Tone } from '#lib/status.js';
+	import Note from '#lib/components/Note.svelte';
+	import TabPane from '#lib/components/TabPane.svelte';
+	import StatusPill from '#lib/components/StatusPill.svelte';
 
 	// The Storage root's Summary: every class as one row - what the platform
 	// offers (provisioner, free capacity, live-migration and snapshot support)

@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import type { VM } from '$lib/api';
-	import { adoptNamespaces, dispatchVMAction, type VMAction } from '$lib/actions';
-	import { repoError } from '$lib/gitops';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import type { VM } from '#lib/api.js';
+	import { adoptNamespaces, dispatchVMAction, type VMAction } from '#lib/actions.js';
+	import { repoError } from '#lib/gitops.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import ActionMenu from './ActionMenu.svelte';
 	import ContextMenu from './ContextMenu.svelte';
 	import MenuItem from './MenuItem.svelte';

@@ -3,7 +3,7 @@
      on them by mistake. -->
 <script lang="ts" generics="V extends string | number | null">
 	import type { HTMLInputAttributes } from 'svelte/elements';
-	import { acceptsSuggestion } from '$lib/suggest';
+	import { acceptsSuggestion } from '#lib/suggest.js';
 
 	// The canonical modal text/number field: one home for the border, padding
 	// and focus treatment, so dialogs stop hand-rolling drifting class strings.

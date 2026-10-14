@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { Pencil, Trash2 } from 'lucide-svelte';
-	import { vmKey, type VM } from '$lib/api';
-	import { vmHref } from '$lib/nav';
-	import { drafts } from '$lib/state/drafts.svelte';
-	import { TONE_PILL } from '$lib/status';
-	import { ui } from '$lib/state/ui.svelte';
-	import PowerDot from '$lib/components/PowerDot.svelte';
-	import SyncBadge from '$lib/components/SyncBadge.svelte';
-	import TreeRow from '$lib/components/TreeRow.svelte';
+	import { vmKey, type VM } from '#lib/api.js';
+	import { vmHref } from '#lib/nav.js';
+	import { drafts } from '#lib/state/drafts.svelte.js';
+	import { TONE_PILL } from '#lib/status.js';
+	import { ui } from '#lib/state/ui.svelte.js';
+	import PowerDot from '#lib/components/PowerDot.svelte';
+	import SyncBadge from '#lib/components/SyncBadge.svelte';
+	import TreeRow from '#lib/components/TreeRow.svelte';
 
 	// The VM leaf every section tree renders: power dot, name (struck through
 	// when a delete is staged), and the staged badge or sync state.

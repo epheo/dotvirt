@@ -1,9 +1,9 @@
 <script lang="ts">
-	import type { VM } from '$lib/api';
-	import { POD_NETWORK } from '$lib/lenses';
+	import type { VM } from '#lib/api.js';
+	import { POD_NETWORK } from '#lib/lenses.js';
 	import { GitPullRequest, Pencil, Trash2 } from 'lucide-svelte';
-	import { api } from '$lib/api';
-	import { networkByRef, kindLabel } from '$lib/networks';
+	import { api } from '#lib/api.js';
+	import { networkByRef, kindLabel } from '#lib/networks.js';
 	import {
 		canAdoptNetwork,
 		canAuthorRef,
@@ -13,15 +13,15 @@
 		openAdopt,
 		openDelete,
 		openEdit,
-	} from '$lib/objects';
-	import { segmentType } from '$lib/vocab';
-	import { vmHref } from '$lib/nav';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import FileHistory from '$lib/components/FileHistory.svelte';
-	import InfoCard from '$lib/components/InfoCard.svelte';
-	import PowerDot from '$lib/components/PowerDot.svelte';
-	import Row from '$lib/components/Row.svelte';
-	import SyncBadge from '$lib/components/SyncBadge.svelte';
+	} from '#lib/objects.js';
+	import { segmentType } from '#lib/vocab.js';
+	import { vmHref } from '#lib/nav.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import FileHistory from '#lib/components/FileHistory.svelte';
+	import InfoCard from '#lib/components/InfoCard.svelte';
+	import PowerDot from '#lib/components/PowerDot.svelte';
+	import Row from '#lib/components/Row.svelte';
+	import SyncBadge from '#lib/components/SyncBadge.svelte';
 
 	// The segment object page's Summary: the port group's facts (from the
 	// networking read layer) plus the VMs attached to it.

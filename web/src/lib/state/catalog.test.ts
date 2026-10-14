@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({ templates: vi.fn() }));
-vi.mock('$lib/api', () => ({ api, Unauthorized: class extends Error {} }));
+vi.mock('#lib/api.js', () => ({ api, Unauthorized: class extends Error {} }));
 
 import { catalog } from './catalog.svelte';
 

@@ -1,4 +1,4 @@
-import { draftsByProject, vmKey, type DraftItem, type DraftView } from '$lib/api';
+import { draftsByProject, vmKey, type DraftItem, type DraftView } from '#lib/api.js';
 import { inventory } from './inventory.svelte';
 
 // The synthetic platform-tier project (matches the backend's platformProjectName);

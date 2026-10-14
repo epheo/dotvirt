@@ -1,4 +1,4 @@
-import { browser } from '$app/environment';
+import { browser } from '$app/env';
 
 // A $state-backed value that survives reloads. Whole-value assignment only -
 // callers replace objects (`p.value = { ...p.value, key: v }`), which keeps

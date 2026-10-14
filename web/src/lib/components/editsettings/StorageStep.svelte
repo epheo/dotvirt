@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { Options } from '$lib/api';
-	import type { DiskRow, EditForm } from '$lib/editform';
+	import type { Options } from '#lib/api.js';
+	import type { DiskRow, EditForm } from '#lib/editform.js';
 	import RowListEditor from '../RowListEditor.svelte';
 	import StorageClassSelect from '../StorageClassSelect.svelte';
 	import TextInput from '../TextInput.svelte';

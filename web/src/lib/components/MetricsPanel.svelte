@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { METRIC_RANGES, type VMMetrics } from '$lib/api';
-	import { resource } from '$lib/resource.svelte';
+	import { METRIC_RANGES, type VMMetrics } from '#lib/api.js';
+	import { resource } from '#lib/resource.svelte.js';
 	import ErrorNote from './ErrorNote.svelte';
 	import UPlotChart from './UPlotChart.svelte';
 

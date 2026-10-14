@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { api, type ClusterSummary } from '$lib/api';
-	import { resource } from '$lib/resource.svelte';
-	import { phaseTextTone } from '$lib/status';
+	import { api, type ClusterSummary } from '#lib/api.js';
+	import { resource } from '#lib/resource.svelte.js';
+	import { phaseTextTone } from '#lib/status.js';
 	import IssuesCard from './IssuesCard.svelte';
 	import QuotaBand from './QuotaBand.svelte';
 	import Ring from './Ring.svelte';

@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { VMUsage } from '$lib/api';
-	import { relativeAge } from '$lib/format';
+	import type { VMUsage } from '#lib/api.js';
+	import { relativeAge } from '#lib/format.js';
 	import UsageBar from './UsageBar.svelte';
 
 	// Pure view over the summary's usage snapshot - VMSummary owns the fetch so

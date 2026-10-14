@@ -1,6 +1,6 @@
 <script lang="ts">
-	import ContextMenu from '$lib/components/ContextMenu.svelte';
-	import MenuItem from '$lib/components/MenuItem.svelte';
+	import ContextMenu from '#lib/components/ContextMenu.svelte';
+	import MenuItem from '#lib/components/MenuItem.svelte';
 
 	// Verb list for a right-click inside the multi-selection. Deliberately not
 	// driven by the VM action registry: Power isn't a registry action, and these

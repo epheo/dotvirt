@@ -1,5 +1,5 @@
 <script lang="ts">
-	import ContainerWorkspace from '$lib/workspace/ContainerWorkspace.svelte';
+	import ContainerWorkspace from '#lib/workspace/ContainerWorkspace.svelte';
 </script>
 
 <ContainerWorkspace

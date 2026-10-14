@@ -2,7 +2,7 @@
 	import { untrack, type Snippet } from 'svelte';
 	import { FolderPlus, TriangleAlert } from 'lucide-svelte';
 	import '../app.css';
-	import favicon from '$lib/assets/favicon.svg';
+	import favicon from '#lib/assets/favicon.svg';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import {
@@ -12,31 +12,31 @@
 		Unauthorized,
 		withRetry,
 		type StreamStatus,
-	} from '$lib/api';
-	import { friendlyError } from '$lib/format';
-	import { INVENTORY_SECTIONS, sectionOf, vmHref, type Section } from '$lib/nav';
-	import { drafts } from '$lib/state/drafts.svelte';
-	import { catalog } from '$lib/state/catalog.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { reviewCache } from '$lib/state/reviewCache.svelte';
-	import { lastSection } from '$lib/state/nav.svelte';
-	import { session } from '$lib/state/session.svelte';
-	import { ui } from '$lib/state/ui.svelte';
-	import AppContextMenus from '$lib/components/AppContextMenus.svelte';
-	import Button from '$lib/components/Button.svelte';
-	import AppHeader from '$lib/components/AppHeader.svelte';
-	import AppModals from '$lib/components/AppModals.svelte';
-	import Banner from '$lib/components/Banner.svelte';
-	import Login from '$lib/components/Login.svelte';
-	import SSOBanner from '$lib/components/SSOBanner.svelte';
-	import SectionSwitcher from '$lib/components/SectionSwitcher.svelte';
-	import Skeleton from '$lib/components/Skeleton.svelte';
-	import TaskDock from '$lib/components/TaskDock.svelte';
-	import ToastHost from '$lib/components/ToastHost.svelte';
-	import CatalogTree from '$lib/tree/CatalogTree.svelte';
-	import ChangesTree from '$lib/tree/ChangesTree.svelte';
-	import ComputeTree from '$lib/tree/ComputeTree.svelte';
-	import FlatSectionTree from '$lib/tree/FlatSectionTree.svelte';
+	} from '#lib/api.js';
+	import { friendlyError } from '#lib/format.js';
+	import { INVENTORY_SECTIONS, sectionOf, vmHref, type Section } from '#lib/nav.js';
+	import { drafts } from '#lib/state/drafts.svelte.js';
+	import { catalog } from '#lib/state/catalog.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
+	import { lastSection } from '#lib/state/nav.svelte.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
+	import AppContextMenus from '#lib/components/AppContextMenus.svelte';
+	import Button from '#lib/components/Button.svelte';
+	import AppHeader from '#lib/components/AppHeader.svelte';
+	import AppModals from '#lib/components/AppModals.svelte';
+	import Banner from '#lib/components/Banner.svelte';
+	import Login from '#lib/components/Login.svelte';
+	import SSOBanner from '#lib/components/SSOBanner.svelte';
+	import SectionSwitcher from '#lib/components/SectionSwitcher.svelte';
+	import Skeleton from '#lib/components/Skeleton.svelte';
+	import TaskDock from '#lib/components/TaskDock.svelte';
+	import ToastHost from '#lib/components/ToastHost.svelte';
+	import CatalogTree from '#lib/tree/CatalogTree.svelte';
+	import ChangesTree from '#lib/tree/ChangesTree.svelte';
+	import ComputeTree from '#lib/tree/ComputeTree.svelte';
+	import FlatSectionTree from '#lib/tree/FlatSectionTree.svelte';
 
 	let { children }: { children: Snippet } = $props();
 

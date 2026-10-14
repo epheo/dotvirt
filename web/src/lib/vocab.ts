@@ -5,7 +5,7 @@
 // through here so the two idioms never drift and a reader from either world can
 // self-orient. The backend model keeps neutral field names - this is presentation
 // only, the networking analog of $lib/networks' port-group helpers.
-import type { Network } from '$lib/api';
+import type { Network } from '#lib/api.js';
 
 // A concept named in both idioms, with the OVN-K/Kubernetes object behind it for
 // the detail drawers and tooltips.

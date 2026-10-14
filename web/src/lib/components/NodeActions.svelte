@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Ban, CheckCircle2, LogOut, MoveRight, Wrench } from 'lucide-svelte';
-	import { api, type NodeInfo, type VM } from '$lib/api';
-	import { action, resource } from '$lib/resource.svelte';
+	import { api, type NodeInfo, type VM } from '#lib/api.js';
+	import { action, resource } from '#lib/resource.svelte.js';
 	import Button from './Button.svelte';
 
 	// Host maintenance: entering flips

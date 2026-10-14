@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { Monitor } from 'lucide-svelte';
-	import { screenshotURL } from '$lib/actions';
-	import { vmKey, type VM } from '$lib/api';
-	import { pollWhileVisible } from '$lib/poll';
+	import { screenshotURL } from '#lib/actions.js';
+	import { vmKey, type VM } from '#lib/api.js';
+	import { pollWhileVisible } from '#lib/poll.js';
 
 	// The Summary console thumbnail: a periodically-refreshed screenshot of
 	// the VM's graphical console (KubeVirt's vnc/screenshot subresource), clicking

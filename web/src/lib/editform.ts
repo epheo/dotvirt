@@ -2,7 +2,7 @@
 // from a VM, then diff it back into an EditRequest. No Svelte imports, so the
 // seed/diff behavior is unit-testable.
 
-import type { Disk, EditRequest, NIC, PlacementGroup, Power, VM } from '$lib/api';
+import type { Disk, EditRequest, NIC, PlacementGroup, Power, VM } from '#lib/api.js';
 
 // The Edit Settings sections a Configure card (or context menu) can deep-link
 // to - one vocabulary for the dialog, its openers, and the wizard step map.

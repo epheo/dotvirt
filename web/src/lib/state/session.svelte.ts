@@ -1,6 +1,6 @@
-import { api, HttpError, retryDelay, Unauthorized, type User } from '$lib/api';
-import { friendlyError } from '$lib/format';
-import { resource, type Resource } from '$lib/resource.svelte';
+import { api, HttpError, retryDelay, Unauthorized, type User } from '#lib/api.js';
+import { friendlyError } from '#lib/format.js';
+import { resource, type Resource } from '#lib/resource.svelte.js';
 
 // The signed-in caller. Every API call runs under this user's own token; the
 // layout registers the api layer's one 401 sink to clear it (plus the other

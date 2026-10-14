@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { Plus, Trash2 } from 'lucide-svelte';
-	import { api, type AdminNetworkPolicyCreate, type AdminPolicyRule } from '$lib/api';
-	import { rowList } from '$lib/rowlist.svelte';
-	import { validName, NAME_HINT } from '$lib/validate';
+	import { api, type AdminNetworkPolicyCreate, type AdminPolicyRule } from '#lib/api.js';
+	import { rowList } from '#lib/rowlist.svelte.js';
+	import { validName, NAME_HINT } from '#lib/validate.js';
 	import ChoiceCards from './ChoiceCards.svelte';
 	import Button from './Button.svelte';
 	import Note from './Note.svelte';

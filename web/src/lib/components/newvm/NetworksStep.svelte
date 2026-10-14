@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { Network } from '$lib/api';
-	import { kindLabel, attachRef } from '$lib/networks';
+	import type { Network } from '#lib/api.js';
+	import { kindLabel, attachRef } from '#lib/networks.js';
 
 	let {
 		attachPrimary = $bindable(),

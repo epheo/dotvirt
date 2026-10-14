@@ -8,15 +8,15 @@
 		type DraftItem,
 		type VM,
 		type VMUsage,
-	} from '$lib/api';
-	import { duration, relativeAge } from '$lib/format';
-	import { resource } from '$lib/resource.svelte';
-	import { itemKey } from '$lib/review';
-	import { vmSizing } from '$lib/sizing';
+	} from '#lib/api.js';
+	import { duration, relativeAge } from '#lib/format.js';
+	import { resource } from '#lib/resource.svelte.js';
+	import { itemKey } from '#lib/review.js';
+	import { vmSizing } from '#lib/sizing.js';
 	import CapacityUsage from './CapacityUsage.svelte';
 	import Button from './Button.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import ChangeList from './ChangeList.svelte';
 	import ConsolePreview from './ConsolePreview.svelte';
 	import GitOpsStepper from './GitOpsStepper.svelte';

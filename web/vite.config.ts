@@ -1,3 +1,4 @@
+import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
@@ -14,10 +15,8 @@ export default defineConfig({
 			// Standalone SPA: static adapter, no SSR (all data is live, per-session
 			// cluster/git state — nothing to prerender). Builds to ./build, deployable
 			// to any static host or a small nginx container that reverse-proxies /api.
-			adapter: adapter({
-				fallback: 'index.html',
-				precompress: false
-			})
+			adapter: adapter({ fallback: 'index.html', precompress: false }),
+			preprocess: vitePreprocess()
 		})
 	],
 	server: {

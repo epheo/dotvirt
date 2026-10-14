@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { api, type EgressIPCreate, type ExternalRouteCreate } from '$lib/api';
-	import { splitList } from '$lib/format';
-	import type { Tier0Initial } from '$lib/state/ui.svelte';
-	import { validName, NAME_HINT, validIP } from '$lib/validate';
-	import { TERMS } from '$lib/vocab';
+	import { api, type EgressIPCreate, type ExternalRouteCreate } from '#lib/api.js';
+	import { splitList } from '#lib/format.js';
+	import type { Tier0Initial } from '#lib/state/ui.svelte.js';
+	import { validName, NAME_HINT, validIP } from '#lib/validate.js';
+	import { TERMS } from '#lib/vocab.js';
 	import CheckGroup from './CheckGroup.svelte';
 	import ChoiceCards from './ChoiceCards.svelte';
 	import Note from './Note.svelte';

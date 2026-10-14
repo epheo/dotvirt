@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { api, drsThresholdLabel, type DRSView } from '$lib/api';
-	import { action, resource } from '$lib/resource.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { api, drsThresholdLabel, type DRSView } from '#lib/api.js';
+	import { action, resource } from '#lib/resource.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import InfoCard from './InfoCard.svelte';
 	import Button from './Button.svelte';
 	import Row from './Row.svelte';

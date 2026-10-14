@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { Network, VM } from '$lib/api';
-	import type { EditForm, NicRow } from '$lib/editform';
-	import { kindLabel, attachRef } from '$lib/networks';
+	import type { Network, VM } from '#lib/api.js';
+	import type { EditForm, NicRow } from '#lib/editform.js';
+	import { kindLabel, attachRef } from '#lib/networks.js';
 	import RowListEditor from '../RowListEditor.svelte';
 	import SelectInput from '../SelectInput.svelte';
 

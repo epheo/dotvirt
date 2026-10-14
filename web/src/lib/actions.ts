@@ -13,11 +13,11 @@ import { vmPath, vmRef } from './api';
 //    download a file) - the registry only describes and gates it. A
 //    dialog-backed one names its modal in `open`, so no host has to keep an
 //    id-to-dialog switch of its own.
-import { api, Unauthorized, type VM } from '$lib/api';
-import { friendlyError } from '$lib/format';
-import { inventory } from '$lib/state/inventory.svelte';
-import { ui, type AppModal } from '$lib/state/ui.svelte';
-import { vmHref } from '$lib/nav';
+import { api, Unauthorized, type VM } from '#lib/api.js';
+import { friendlyError } from '#lib/format.js';
+import { inventory } from '#lib/state/inventory.svelte.js';
+import { ui, type AppModal } from '#lib/state/ui.svelte.js';
+import { vmHref } from '#lib/nav.js';
 
 type ActionId =
 	| 'restart'

@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { api, type EffectivePolicy, type PolicyBinding } from '$lib/api';
-	import { resource } from '$lib/resource.svelte';
-	import { friendlyError } from '$lib/format';
+	import { api, type EffectivePolicy, type PolicyBinding } from '#lib/api.js';
+	import { resource } from '#lib/resource.svelte.js';
+	import { friendlyError } from '#lib/format.js';
 	import PolicyRuleTable from './PolicyRuleTable.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 

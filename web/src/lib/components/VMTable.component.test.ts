@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
-import type { DraftItem, VM } from '$lib/api';
+import type { DraftItem, VM } from '#lib/api.js';
 import VMTable from './VMTable.svelte';
 import VMTableHost from '../../test/VMTableHost.svelte';
 

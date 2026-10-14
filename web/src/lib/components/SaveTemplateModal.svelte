@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { BookCopy } from 'lucide-svelte';
-	import { api, type VM } from '$lib/api';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { validName, NAME_HINT } from '$lib/validate';
+	import { api, type VM } from '#lib/api.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { validName, NAME_HINT } from '#lib/validate.js';
 	import FormField from './FormField.svelte';
 	import StageModal from './StageModal.svelte';
 	import TextInput from './TextInput.svelte';

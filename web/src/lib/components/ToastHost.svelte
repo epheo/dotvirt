@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from 'lucide-svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { ui } from '#lib/state/ui.svelte.js';
 </script>
 
 {#if ui.toasts.length}

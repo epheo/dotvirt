@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { api, type CreateVMRequest, type Network } from '$lib/api';
-	import { attachableNetworks } from '$lib/networks';
-	import { rowList } from '$lib/rowlist.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
+	import { api, type CreateVMRequest, type Network } from '#lib/api.js';
+	import { attachableNetworks } from '#lib/networks.js';
+	import { rowList } from '#lib/rowlist.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
 	import Modal from './Modal.svelte';
 	import Wizard from './Wizard.svelte';
 	import NameStep from './newvm/NameStep.svelte';

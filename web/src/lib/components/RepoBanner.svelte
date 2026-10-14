@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { TriangleAlert } from 'lucide-svelte';
-	import { opFailed, repoError } from '$lib/gitops';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { opFailed, repoError } from '#lib/gitops.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import Banner from './Banner.svelte';
 
 	// Untracked projects sit collapsed in the tree, hiding its attach/recover

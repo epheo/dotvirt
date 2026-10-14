@@ -1,6 +1,6 @@
-import { vmKey, type Inventory, type ObjectHealth, type VM } from '$lib/api';
-import { opStands, repoError } from '$lib/gitops';
-import { hrefForScope, vmHref } from '$lib/nav';
+import { vmKey, type Inventory, type ObjectHealth, type VM } from '#lib/api.js';
+import { opStands, repoError } from '#lib/gitops.js';
+import { hrefForScope, vmHref } from '#lib/nav.js';
 
 type Issue = {
 	severity: 'danger' | 'warn';

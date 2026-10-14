@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { api, type ReleaseResult } from '$lib/api';
-	import { action } from '$lib/resource.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { api, type ReleaseResult } from '#lib/api.js';
+	import { action } from '#lib/resource.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import ConfirmDelete from './ConfirmDelete.svelte';
 
 	// Release a repoless project: the "no repo configured" dead-end's way BACK.

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Project } from '$lib/api';
+	import type { Project } from '#lib/api.js';
 	import DRSCard from './DRSCard.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import QuotaBand from './QuotaBand.svelte';

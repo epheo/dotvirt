@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Options } from '$lib/api';
+	import type { Options } from '#lib/api.js';
 	import FormField from '../FormField.svelte';
 	import SelectInput from '../SelectInput.svelte';
 

@@ -1,10 +1,10 @@
 <script lang="ts">
-	import { api, type Network, type VM } from '$lib/api';
-	import { buildEditRequest, seedEditForm, summarize, type EditSection } from '$lib/editform';
-	import { quantityBytes } from '$lib/format';
-	import { attachableNetworks } from '$lib/networks';
-	import { nodeTargets } from '$lib/state/hosts.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
+	import { api, type Network, type VM } from '#lib/api.js';
+	import { buildEditRequest, seedEditForm, summarize, type EditSection } from '#lib/editform.js';
+	import { quantityBytes } from '#lib/format.js';
+	import { attachableNetworks } from '#lib/networks.js';
+	import { nodeTargets } from '#lib/state/hosts.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
 	import Wizard from './Wizard.svelte';
 	import ComputeStep from './editsettings/ComputeStep.svelte';
 	import SchedulingStep from './editsettings/SchedulingStep.svelte';

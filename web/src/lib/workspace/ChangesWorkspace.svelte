@@ -2,9 +2,9 @@
 	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api, Unauthorized, type Proposal, type ProposeResult } from '$lib/api';
-	import { friendlyError } from '$lib/format';
-	import { changesHref } from '$lib/nav';
+	import { api, Unauthorized, type Proposal, type ProposeResult } from '#lib/api.js';
+	import { friendlyError } from '#lib/format.js';
+	import { changesHref } from '#lib/nav.js';
 	import {
 		commitKey,
 		itemKey,
@@ -13,13 +13,13 @@
 		reviewURL,
 		sameReview,
 		type ReviewSel,
-	} from '$lib/review';
-	import { drafts, PLATFORM_PROJECT } from '$lib/state/drafts.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { persisted } from '$lib/state/persisted.svelte';
-	import { reviewCache } from '$lib/state/reviewCache.svelte';
-	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
-	import RepoBanner from '$lib/components/RepoBanner.svelte';
+	} from '#lib/review.js';
+	import { drafts, PLATFORM_PROJECT } from '#lib/state/drafts.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { persisted } from '#lib/state/persisted.svelte.js';
+	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
+	import Breadcrumb from '#lib/components/Breadcrumb.svelte';
+	import RepoBanner from '#lib/components/RepoBanner.svelte';
 	import ChangesLanes, { type HistoryLane } from './ChangesLanes.svelte';
 	import ReviewCommit from './ReviewCommit.svelte';
 	import ReviewItem from './ReviewItem.svelte';
@@ -154,11 +154,7 @@
 	function select(s: ReviewSel) {
 		sel = s;
 		const url = reviewURL(s);
-		goto(page.url.pathname + url.slice(url.indexOf('?')), {
-			replaceState: true,
-			keepFocus: true,
-			noScroll: true,
-		});
+		goto(page.url.pathname + url.slice(url.indexOf('?')), { replace: true, reset: false });
 	}
 
 	// Propose results outlive their lane (it empties); rendered until the live

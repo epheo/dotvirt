@@ -10,9 +10,9 @@ import type {
 	UplinkCreate,
 	VM,
 	VMRef,
-} from '$lib/api';
-import type { EditSection } from '$lib/editform';
-import { reviewURL, type ReviewTarget } from '$lib/review';
+} from '#lib/api.js';
+import type { EditSection } from '#lib/editform.js';
+import { reviewURL, type ReviewTarget } from '#lib/review.js';
 import { drafts } from './drafts.svelte';
 
 export type Tier0Initial =

@@ -6,7 +6,7 @@
 		type DRSEnableRequest,
 		type DRSMode,
 		type DRSView,
-	} from '$lib/api';
+	} from '#lib/api.js';
 	import ChoiceCards from './ChoiceCards.svelte';
 	import Button from './Button.svelte';
 	import StageModal from './StageModal.svelte';

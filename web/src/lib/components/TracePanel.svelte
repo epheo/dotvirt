@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { Play } from 'lucide-svelte';
-	import { api, type TraceResult, type TraceStep } from '$lib/api';
-	import { action } from '$lib/resource.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { TONE_PILL, TONE_TEXT, type Tone } from '$lib/status';
+	import { api, type TraceResult, type TraceStep } from '#lib/api.js';
+	import { action } from '#lib/resource.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { TONE_PILL, TONE_TEXT, type Tone } from '#lib/status.js';
 	import PolicyRuleTable from './PolicyRuleTable.svelte';
 	import Button from './Button.svelte';
 	import SelectInput from './SelectInput.svelte';

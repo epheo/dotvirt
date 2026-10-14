@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { Check, Upload } from 'lucide-svelte';
-	import { api, Unauthorized } from '$lib/api';
-	import { friendlyError } from '$lib/format';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { validName, NAME_HINT } from '$lib/validate';
+	import { api, Unauthorized } from '#lib/api.js';
+	import { friendlyError } from '#lib/format.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { validName, NAME_HINT } from '#lib/validate.js';
 	import ErrorNote from './ErrorNote.svelte';
 	import Button from './Button.svelte';
 	import Modal from './Modal.svelte';

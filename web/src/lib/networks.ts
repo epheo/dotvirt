@@ -1,7 +1,7 @@
 // Port-group presentation helpers: turn a VM NIC's raw OVN-K network ref into the
 // port-group object a virt admin recognizes. Shared by the VM detail's Network
 // adapters and the Networks lens panel so they label networks identically.
-import type { Network, NIC } from '$lib/api';
+import type { Network, NIC } from '#lib/api.js';
 
 /** The display label for a port-group kind. */
 export function kindLabel(kind: Network['kind']): string {

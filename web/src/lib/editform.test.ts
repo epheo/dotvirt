@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { VM } from '$lib/api';
-import { buildEditRequest, seedEditForm } from '$lib/editform';
+import type { VM } from '#lib/api.js';
+import { buildEditRequest, seedEditForm } from '#lib/editform.js';
 
 function vm(over: Partial<VM> = {}): VM {
 	return {

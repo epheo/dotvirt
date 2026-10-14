@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { Folder, GitPullRequest, Layers, LayoutGrid, Network, Pencil } from 'lucide-svelte';
-	import type { Project } from '$lib/api';
-	import { changesHref } from '$lib/nav';
-	import { drafts, PLATFORM_PROJECT } from '$lib/state/drafts.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { persisted } from '$lib/state/persisted.svelte';
-	import TreeRow from '$lib/components/TreeRow.svelte';
+	import type { Project } from '#lib/api.js';
+	import { changesHref } from '#lib/nav.js';
+	import { drafts, PLATFORM_PROJECT } from '#lib/state/drafts.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { persisted } from '#lib/state/persisted.svelte.js';
+	import TreeRow from '#lib/components/TreeRow.svelte';
 	import TreeVMRow from './TreeVMRow.svelte';
 
 	// The Changes tree: the compute hierarchy as a scope selector for the review

@@ -10,9 +10,9 @@
 		Trash2,
 		TriangleAlert,
 	} from 'lucide-svelte';
-	import { api, type Commit, type DraftView, type Proposal, type ProposeResult } from '$lib/api';
-	import { shortDate } from '$lib/format';
-	import { action } from '$lib/resource.svelte';
+	import { api, type Commit, type DraftView, type Proposal, type ProposeResult } from '#lib/api.js';
+	import { shortDate } from '#lib/format.js';
+	import { action } from '#lib/resource.svelte.js';
 	import {
 		approvalLine,
 		checksPill,
@@ -20,13 +20,13 @@
 		prKey,
 		sameReview,
 		type ReviewSel,
-	} from '$lib/review';
-	import { drafts } from '$lib/state/drafts.svelte';
-	import Button from '$lib/components/Button.svelte';
-	import ErrorNote from '$lib/components/ErrorNote.svelte';
-	import Note from '$lib/components/Note.svelte';
-	import Skeleton from '$lib/components/Skeleton.svelte';
-	import StatusPill from '$lib/components/StatusPill.svelte';
+	} from '#lib/review.js';
+	import { drafts } from '#lib/state/drafts.svelte.js';
+	import Button from '#lib/components/Button.svelte';
+	import ErrorNote from '#lib/components/ErrorNote.svelte';
+	import Note from '#lib/components/Note.svelte';
+	import Skeleton from '#lib/components/Skeleton.svelte';
+	import StatusPill from '#lib/components/StatusPill.svelte';
 
 	// The left column: the lifecycle of the scope's changes. Staged drafts per
 	// project, every open PR of the caller's projects, history per repo-backed

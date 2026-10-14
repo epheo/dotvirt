@@ -2,7 +2,7 @@
 	import { ChevronDown, ChevronRight } from 'lucide-svelte';
 	import type { Snippet } from 'svelte';
 	import { page } from '$app/state';
-	import { keepTab } from '$lib/nav';
+	import { keepTab } from '#lib/nav.js';
 
 	// One row of the inventory tree. Every row kind - pinned destination, group,
 	// container, VM leaf - renders through this so indentation, hover and the

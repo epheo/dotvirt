@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { DraftItem, VM } from '$lib/api';
-	import VMTable from '$lib/components/VMTable.svelte';
+	import type { DraftItem, VM } from '#lib/api.js';
+	import VMTable from '#lib/components/VMTable.svelte';
 
 	// Binds selected the way the workspace does, and shows it, so a test sees
 	// the selection the bulk bar would act on.

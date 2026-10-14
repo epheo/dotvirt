@@ -2,8 +2,8 @@
 // and the domain mappers that translate VM power, VMI phase, alert severity,
 // and task-dock rows onto them. Class maps are literal records - Tailwind only
 // sees static strings.
-import type { Power, ProjectSync } from '$lib/api';
-import { opStands } from '$lib/gitops';
+import type { Power, ProjectSync } from '#lib/api.js';
+import { opStands } from '#lib/gitops.js';
 
 export type Tone = 'ok' | 'warn' | 'danger' | 'info' | 'neutral';
 

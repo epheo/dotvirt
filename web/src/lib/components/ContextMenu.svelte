@@ -4,7 +4,7 @@
 	// Escape. Content comes from the children snippet (ActionMenu for VM rows, the
 	// bulk or container panels otherwise).
 	import type { Snippet } from 'svelte';
-	import { dismiss } from '$lib/dismiss';
+	import { dismiss } from '#lib/dismiss.js';
 
 	let {
 		x,
