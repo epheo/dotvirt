@@ -1,6 +1,13 @@
 <script lang="ts">
 	import { ChevronDown, ChevronUp } from 'lucide-svelte';
-	import { vmKey, type DraftItem, type Power, type SyncStatus, type VM } from '$lib/api';
+	import {
+		vmKey,
+		type DraftItem,
+		type Options,
+		type Power,
+		type SyncStatus,
+		type VM,
+	} from '$lib/api';
 	import { quantityBytes } from '$lib/format';
 	import { vmSizing } from '$lib/sizing';
 	import { phaseTone } from '$lib/status';
@@ -34,8 +41,25 @@
 		activeKey?: string | null;
 	} = $props();
 
-	const cpuOf = (vm: VM) => vmSizing(vm, inventory.options).cpu;
-	const memOf = (vm: VM) => vmSizing(vm, inventory.options).memory;
+	// Sizing once per VM object, not per sort comparison: inventory.apply keeps
+	// unchanged VMs identical across frames, so the cache survives live updates.
+	type RowSize = { cpu?: number; memory?: string; memBytes: number };
+	let sizes = new WeakMap<VM, RowSize>();
+	let sizesFor: Options | null = null;
+	function sizeOf(vm: VM): RowSize {
+		const options = inventory.options;
+		if (options !== sizesFor) {
+			sizes = new WeakMap();
+			sizesFor = options;
+		}
+		let s = sizes.get(vm);
+		if (!s) {
+			const { cpu, memory } = vmSizing(vm, options);
+			s = { cpu, memory, memBytes: (memory && quantityBytes(memory)) || 0 };
+			sizes.set(vm, s);
+		}
+		return s;
+	}
 
 	let search = $state('');
 
@@ -63,9 +87,6 @@
 	const syncRank = (s: SyncStatus) =>
 		s === 'OutOfSync' ? 4 : s === 'Pending' ? 3 : s === 'Unknown' ? 2 : s === 'NotTracked' ? 1 : 0;
 
-	// Memory sorts numerically; an unreadable quantity sorts as zero.
-	const memBytes = (m?: string) => (m && quantityBytes(m)) || 0;
-
 	function cmp(a: VM, b: VM): number {
 		const key = prefs.value.sortKey;
 		switch (key) {
@@ -74,9 +95,9 @@
 			case 'sync':
 				return syncRank(a.sync) - syncRank(b.sync);
 			case 'cpuCores':
-				return (cpuOf(a) ?? 0) - (cpuOf(b) ?? 0);
+				return (sizeOf(a).cpu ?? 0) - (sizeOf(b).cpu ?? 0);
 			case 'memory':
-				return memBytes(memOf(a)) - memBytes(memOf(b));
+				return sizeOf(a).memBytes - sizeOf(b).memBytes;
 			default: {
 				const av = (a[key] ?? '').toString().toLowerCase();
 				const bv = (b[key] ?? '').toString().toLowerCase();
@@ -231,6 +252,7 @@
 			<tbody class={TBODY}>
 				{#each rows as vm (vm.namespace + '/' + vm.name)}
 					{@const sc = staged.get(vm.namespace + '/' + vm.name)}
+					{@const size = sizeOf(vm)}
 					<tr
 						onclick={() => onselect(vm)}
 						oncontextmenu={(e) => {
@@ -278,10 +300,10 @@
 						</td>
 						<td class="px-3 py-1.5 font-mono text-xs text-ink-soft">{vm.guestIP ?? '—'}</td>
 						<td class="px-3 py-1.5 text-right text-ink-soft" title={vm.instancetype}
-							>{cpuOf(vm) ?? '—'}</td
+							>{size.cpu ?? '—'}</td
 						>
 						<td class="px-3 py-1.5 text-right text-ink-soft" title={vm.instancetype}
-							>{memOf(vm) ?? '—'}</td
+							>{size.memory ?? '—'}</td
 						>
 						<td class="px-3 py-1.5">
 							{#if sc}
