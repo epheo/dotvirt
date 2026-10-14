@@ -35,5 +35,6 @@ updates:
     directories: ['/', '/operator']
     schedule: { interval: weekly, day: monday }
     groups:
+      # One weekly PR for every base image, digest refreshes included.
       images:
-        update-types: [minor, patch, digest]
+        patterns: ['*']
