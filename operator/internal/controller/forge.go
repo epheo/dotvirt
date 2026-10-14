@@ -58,7 +58,7 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 	// Apply the base workload (incl. the exposure) first: on OpenShift with no explicit
 	// URL that Route is hostless, so the router assigns a host we read back and fill into
 	// the effective spec, before rendering the Deployment whose ROOT_URL needs it.
-	if err := r.applyForgejoBase(ctx, dv); err != nil {
+	if err := r.applyForgejoBase(ctx, dv, rc); err != nil {
 		return nil, applyFailed(err)
 	}
 	// Set here, not at Ready: the admin secret exists once the base is applied, so the
@@ -218,7 +218,7 @@ func (r *DotvirtReconciler) forgejoExposure(dv *dotvirtv1alpha1.Dotvirt) client.
 // after resolveForgeURL, because its ROOT_URL depends on the resolved host. The rootless
 // image runs under dotvirt's non-root securityContext (no SCC binding); the PVC is
 // orphaned (no ownerRef) so the git data survives uninstall.
-func (r *DotvirtReconciler) applyForgejoBase(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
+func (r *DotvirtReconciler) applyForgejoBase(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) error {
 	if !r.DryRun {
 		if err := r.ensureSecret(ctx, dv, install.ForgejoAdminSecret, "password"); err != nil {
 			return err
@@ -236,6 +236,9 @@ func (r *DotvirtReconciler) applyForgejoBase(ctx context.Context, dv *dotvirtv1a
 	}
 	if exp := r.forgejoExposure(dv); exp != nil {
 		owned = append(owned, exp)
+	}
+	if r.Platform == platform.OpenShift {
+		owned = append(owned, install.ForgejoNetworkPolicy(dv, rc.argoNS, r.OperatorNamespace))
 	}
 	return r.applyOwned(ctx, dv, owned...)
 }
@@ -288,8 +291,7 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	// rotation (Argo + the app then fail auth). Validate it; only short-circuit when
 	// it's genuinely valid, else fall through to re-mint. A forge blip surfaces as
 	// err (requeue) rather than a needless re-mint.
-	var existing corev1.Secret
-	if err := r.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: credName}, &existing); err == nil {
+	if existing, err := r.secret(ctx, dv.Namespace, credName); err == nil {
 		valid, err := forge.NewFactory(apiBase, forge.StaticToken("unused"), false, "").
 			ValidateToken(string(existing.Data["token"]))
 		if err != nil {
@@ -354,7 +356,7 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 func (r *DotvirtReconciler) writeForgeSecret(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, name, url, username, token string) error {
 	s := &corev1.Secret{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: dv.Namespace, Labels: install.Labels(dv.Name)},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: dv.Namespace, Labels: install.Labels(dv)},
 		// Data (not StringData): all three keys are rewritten every time, so no stale key
 		// lingers, and the value is readable without the API server's StringData merge.
 		Data: map[string][]byte{"url": []byte(url), "username": []byte(username), "token": []byte(token)},

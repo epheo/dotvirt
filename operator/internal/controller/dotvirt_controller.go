@@ -37,6 +37,10 @@ type DotvirtReconciler struct {
 	Config   *rest.Config      // discovery for the dependency probe
 	Platform platform.Platform // detected once at startup (cmd/main.go)
 	DryRun   bool              // -dry-run: validate via server-side dry-run apply; persist nothing
+	// APIReader bypasses the cache for prune's cluster-wide lists.
+	APIReader client.Reader
+	// OperatorNamespace is admitted by the NetworkPolicies; "" when unknown.
+	OperatorNamespace string
 
 	// probe is a test seam (not config): deps.Probe needs a live discovery
 	// endpoint, so tests stub it. nil = the real probe.
@@ -47,6 +51,10 @@ type DotvirtReconciler struct {
 	// server. nil = the real Service URL.
 	forgeAPIBase func(*dotvirtv1alpha1.Dotvirt) string
 }
+
+// driftResync bounds how long out-of-band drift on an unwatched kind (Services,
+// AppProjects, bindings) survives without a CR or owned-object event.
+const driftResync = 10 * time.Minute
 
 // dotvirtFinalizer guards cleanup of the cluster-scoped + ArgoCD-namespace
 // resources, which a namespaced CR can't garbage-collect via ownerReferences.
@@ -105,6 +113,7 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// spec must never reach the stored CR.
 	r.normalizeSpec(&dv)
 	rc := r.newReconcileCtx(ctx, &dv)
+	ctx, rendered := withRenderSet(ctx)
 
 	// The install pipeline, in dependency order. A phase that halts on a wait has
 	// already recorded why; one that fails is recorded here, so no error is
@@ -130,16 +139,35 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
+	dv.Status.ObservedGeneration = dv.Generation
 	if r.DryRun {
 		log.Info("dry-run complete: all rendered resources accepted by the API server (nothing persisted)")
+		r.setCondition(&dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionUnknown, "DryRun",
+			"dry-run validated the render; nothing was persisted, so nothing serves")
+		return ctrl.Result{}, r.writeStatus(ctx, &dv)
 	}
-	r.setCondition(&dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionTrue, "Reconciled", "install reconciled")
-	dv.Status.Phase = dotvirtv1alpha1.PhaseReady
-	dv.Status.ObservedGeneration = dv.Generation
+	if wr := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionWorkloadReady); wr != nil && wr.Status == metav1.ConditionTrue {
+		r.setCondition(&dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionTrue, "Reconciled", "install reconciled and serving")
+		dv.Status.Phase = dotvirtv1alpha1.PhaseReady
+	} else {
+		r.markUnavailable(&dv, dotvirtv1alpha1.ConditionWorkloadReady, "WorkloadProgressing", "the dotvirt pod is not ready yet")
+		dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
+	}
+	// Only a completed pass knows the full render; a halted one would prune
+	// whatever its skipped phases own.
+	pruneErr := r.prune(ctx, &dv, rendered)
+	if pruneErr != nil {
+		log.Error(pruneErr, "prune failed; retrying")
+	}
 	if err := r.writeStatus(ctx, &dv); err != nil {
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{}, nil
+	if pruneErr != nil {
+		return ctrl.Result{}, pruneErr
+	}
+	// The watches cover the CR, Deployments, Secrets and Routes; this timer heals
+	// drift on the rest.
+	return ctrl.Result{RequeueAfter: driftResync}, nil
 }
 
 // olderInstall returns the Dotvirt CR that precedes dv, if any: by creation time,
@@ -238,6 +266,7 @@ func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvi
 // that diverges from r.DryRun, and no object needs the update verb; the
 // create-once secrets only gate the apply behind an existence check.
 func (r *DotvirtReconciler) apply(ctx context.Context, obj client.Object) error {
+	r.recordRender(ctx, obj)
 	return install.Apply(ctx, r.Client, obj, r.DryRun)
 }
 
@@ -360,6 +389,15 @@ func (r *DotvirtReconciler) setCondition(dv *dotvirtv1alpha1.Dotvirt, condType s
 	})
 }
 
+// markUnavailable rolls a blocking phase condition up into Available=False, so
+// tooling that watches only Available never reads a stuck install as serving.
+func (r *DotvirtReconciler) markUnavailable(dv *dotvirtv1alpha1.Dotvirt, condType, reason, msg string) {
+	if condType == dotvirtv1alpha1.ConditionAvailable {
+		return
+	}
+	r.setCondition(dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionFalse, reason, condType+": "+msg)
+}
+
 // phaseFailure is an error a phase tagged with the condition reason it chose.
 type phaseFailure struct {
 	reason string
@@ -383,6 +421,7 @@ func (r *DotvirtReconciler) recordFailure(ctx context.Context, dv *dotvirtv1alph
 		reason = f.reason
 	}
 	r.setCondition(dv, condType, metav1.ConditionFalse, reason, err.Error())
+	r.markUnavailable(dv, condType, reason, err.Error())
 	dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
 	if uerr := r.writeStatus(ctx, dv); uerr != nil {
 		logf.FromContext(ctx).Error(uerr, "status update failed", "phase", dotvirtv1alpha1.PhaseProvisioning)
@@ -393,11 +432,12 @@ func (r *DotvirtReconciler) recordFailure(ctx context.Context, dv *dotvirtv1alph
 // waitPhase is the explicit form of an EXPECTED wait: record the not-ready
 // condition + phase, persist status, and hand back the halt result.
 // requeue 0 halts without a retry timer (the wait clears via a watch event).
-// phase "" leaves Status.Phase untouched (a late retry must not regress a
-// Ready install to Provisioning).
+// phase "" leaves Status.Phase and Available untouched (a late retry must not
+// regress a serving install).
 func (r *DotvirtReconciler) waitPhase(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, condType, reason, msg, phase string, requeue time.Duration) (*ctrl.Result, error) {
 	r.setCondition(dv, condType, metav1.ConditionFalse, reason, msg)
 	if phase != "" {
+		r.markUnavailable(dv, condType, reason, msg)
 		dv.Status.Phase = phase
 	}
 	if err := r.writeStatus(ctx, dv); err != nil {
@@ -414,8 +454,8 @@ func (r *DotvirtReconciler) waitPhase(ctx context.Context, dv *dotvirtv1alpha1.D
 func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Watch only the owned kinds the RBAC already lets the cache list: a deleted or
 	// drifted Deployment/Secret re-reconciles promptly. Services, SAs, PVCs and
-	// Ingresses stay create-only by design (least-privilege RBAC); their drift heals
-	// on the next CR-driven reconcile or the manager resync.
+	// Ingresses stay unwatched by design (least-privilege RBAC); their drift heals
+	// on the driftResync requeue.
 	b := ctrl.NewControllerManagedBy(mgr).
 		For(&dotvirtv1alpha1.Dotvirt{}).
 		Named("dotvirt").

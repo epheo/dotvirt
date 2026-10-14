@@ -15,14 +15,14 @@ import (
 
 // clusterMeta is ObjectMeta for a cluster-scoped resource: no namespace, but labeled
 // so the CR's finalizer can find + delete it (a namespaced CR can't ownerRef it).
-func clusterMeta(name, instance string) metav1.ObjectMeta {
-	return metav1.ObjectMeta{Name: name, Labels: Labels(instance)}
+func clusterMeta(name string, dv *dotvirtv1alpha1.Dotvirt) metav1.ObjectMeta {
+	return metav1.ObjectMeta{Name: name, Labels: Labels(dv)}
 }
 
-func crb(name, role, instance string, subjects []rbacv1.Subject) *rbacv1.ClusterRoleBinding {
+func crb(name, role string, dv *dotvirtv1alpha1.Dotvirt, subjects []rbacv1.Subject) *rbacv1.ClusterRoleBinding {
 	return &rbacv1.ClusterRoleBinding{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRoleBinding"},
-		ObjectMeta: clusterMeta(name, instance),
+		ObjectMeta: clusterMeta(name, dv),
 		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: role},
 		Subjects:   subjects,
 	}
@@ -30,7 +30,7 @@ func crb(name, role, instance string, subjects []rbacv1.Subject) *rbacv1.Cluster
 
 // DotvirtClusterRoleBinding binds the "dotvirt" read role to dotvirt's ServiceAccount.
 func DotvirtClusterRoleBinding(dv *dotvirtv1alpha1.Dotvirt) *rbacv1.ClusterRoleBinding {
-	return crb("dotvirt", "dotvirt", dv.Name, []rbacv1.Subject{
+	return crb("dotvirt", "dotvirt", dv, []rbacv1.Subject{
 		{Kind: "ServiceAccount", Name: AppName, Namespace: dv.Namespace},
 	})
 }
@@ -38,7 +38,7 @@ func DotvirtClusterRoleBinding(dv *dotvirtv1alpha1.Dotvirt) *rbacv1.ClusterRoleB
 // ArgocdApplyClusterRoleBinding binds the "dotvirt-argocd-apply" role to the shared Argo
 // controller SA. The AppProjects (not the role) scope which app may use cluster-scoped kinds.
 func ArgocdApplyClusterRoleBinding(dv *dotvirtv1alpha1.Dotvirt, argoNS, argoSA string) *rbacv1.ClusterRoleBinding {
-	return crb("dotvirt-argocd-apply", "dotvirt-argocd-apply", dv.Name, []rbacv1.Subject{
+	return crb("dotvirt-argocd-apply", "dotvirt-argocd-apply", dv, []rbacv1.Subject{
 		{Kind: "ServiceAccount", Name: argoSA, Namespace: argoNS},
 	})
 }
@@ -46,7 +46,7 @@ func ArgocdApplyClusterRoleBinding(dv *dotvirtv1alpha1.Dotvirt, argoNS, argoSA s
 // PlatformNetworkAdminBinding binds the platform-network authoring role to the
 // platform-admins group (cluster-admins satisfy it implicitly).
 func PlatformNetworkAdminBinding(dv *dotvirtv1alpha1.Dotvirt) *rbacv1.ClusterRoleBinding {
-	return crb("dotvirt-platform-network-admin", "dotvirt-platform-network-admin", dv.Name, []rbacv1.Subject{
+	return crb("dotvirt-platform-network-admin", "dotvirt-platform-network-admin", dv, []rbacv1.Subject{
 		{Kind: "Group", APIGroup: "rbac.authorization.k8s.io", Name: "dotvirt-platform-admins"},
 	})
 }

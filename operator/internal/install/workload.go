@@ -16,14 +16,14 @@ import (
 func serviceAccount(name string, dv *dotvirtv1alpha1.Dotvirt) *corev1.ServiceAccount {
 	return &corev1.ServiceAccount{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ServiceAccount"},
-		ObjectMeta: objectMeta(name, dv.Namespace, dv.Name),
+		ObjectMeta: objectMeta(name, dv),
 	}
 }
 
 func pvc(name string, dv *dotvirtv1alpha1.Dotvirt, size string) *corev1.PersistentVolumeClaim {
 	return &corev1.PersistentVolumeClaim{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaim"},
-		ObjectMeta: objectMeta(name, dv.Namespace, dv.Name),
+		ObjectMeta: objectMeta(name, dv),
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 			Resources: corev1.VolumeResourceRequirements{
@@ -36,7 +36,7 @@ func pvc(name string, dv *dotvirtv1alpha1.Dotvirt, size string) *corev1.Persiste
 func service(name string, dv *dotvirtv1alpha1.Dotvirt, selector map[string]string, port int32) *corev1.Service {
 	return &corev1.Service{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
-		ObjectMeta: objectMeta(name, dv.Namespace, dv.Name),
+		ObjectMeta: objectMeta(name, dv),
 		Spec: corev1.ServiceSpec{
 			Selector: selector,
 			Ports:    []corev1.ServicePort{{Name: "http", Port: port, TargetPort: intstr.FromInt32(port)}},

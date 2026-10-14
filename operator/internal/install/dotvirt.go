@@ -100,14 +100,14 @@ func secretEnv(name, secret, key string, optional bool) corev1.EnvVar {
 // Deployment in place rather than colliding with its immutable selector.
 var selectorLabels = map[string]string{"app": AppName}
 
-func objectMeta(name, namespace, instance string) metav1.ObjectMeta {
-	return metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: Labels(instance)}
+func objectMeta(name string, dv *dotvirtv1alpha1.Dotvirt) metav1.ObjectMeta {
+	return metav1.ObjectMeta{Name: name, Namespace: dv.Namespace, Labels: Labels(dv)}
 }
 
 // podLabels merges the recommended labels with the immutable selector label, so the
 // pods carry app.kubernetes.io/* AND match the Deployment/Service selector.
-func podLabels(instance string) map[string]string {
-	m := Labels(instance)
+func podLabels(dv *dotvirtv1alpha1.Dotvirt) map[string]string {
+	m := Labels(dv)
 	for k, v := range selectorLabels {
 		m[k] = v
 	}
@@ -280,14 +280,14 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt) *appsv1.Deployment {
 	replicas := int32(1)
 	return &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
-		ObjectMeta: objectMeta(AppName, dv.Namespace, dv.Name),
+		ObjectMeta: objectMeta(AppName, dv),
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			// The RWO drafts PVC can't be mounted by two pods at once.
 			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
 			Selector: &metav1.LabelSelector{MatchLabels: selectorLabels},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: podLabels(dv.Name)},
+				ObjectMeta: metav1.ObjectMeta{Labels: podLabels(dv)},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: AppName,
 					// Restricted-v2 compatible (the app image is distroless-nonroot). No

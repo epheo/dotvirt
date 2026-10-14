@@ -116,6 +116,14 @@ func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt, argoWebhookHost string) []corev1.En
 		{Name: "FORGEJO__database__DB_TYPE", Value: "sqlite3"},
 		{Name: "FORGEJO__server__ROOT_URL", Value: forgejoExternalURL(dv) + "/"},
 		{Name: "FORGEJO__webhook__ALLOWED_HOST_LIST", Value: allowed},
+		// The one account is the operator-minted bot; a Route-exposed forge must not
+		// mint more.
+		{Name: "FORGEJO__service__DISABLE_REGISTRATION", Value: "true"},
+		// The repos are created public, so without this the Route serves every
+		// manifest anonymously. Every machine reader authenticates: the app and
+		// ArgoCD clone with the bot token, the operator calls the API with it, and
+		// /api/healthz sits outside the sign-in gate.
+		{Name: "FORGEJO__service__REQUIRE_SIGNIN_VIEW", Value: "true"},
 		// Webhook TLS is VERIFIED: the mounted ingress CA joins the system pool via
 		// Go's colon-separated SSL_CERT_DIR (empty dir on vanilla).
 		{Name: "SSL_CERT_DIR", Value: "/etc/ssl/certs:" + forgejoCADir},
@@ -167,9 +175,10 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 		`|| forgejo admin user change-password --username ` + ForgejoBotUser + ` --password "$ADMIN_PW" --must-change-password=false`
 
 	caOptional := true
+	noAutomount := false
 	return &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
-		ObjectMeta: objectMeta(ForgejoServiceName, dv.Namespace, dv.Name),
+		ObjectMeta: objectMeta(ForgejoServiceName, dv),
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}, // RWO data
@@ -184,7 +193,9 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: forgejoSAName,
-					SecurityContext:    hardenedPodSecurityContext(setFSGroup),
+					// Forgejo never calls the Kubernetes API.
+					AutomountServiceAccountToken: &noAutomount,
+					SecurityContext:              hardenedPodSecurityContext(setFSGroup),
 					InitContainers: []corev1.Container{{
 						Name:            "bootstrap",
 						Image:           forgejoImg,

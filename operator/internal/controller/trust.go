@@ -45,7 +45,7 @@ func (r *DotvirtReconciler) ensureTrustAnchors(ctx context.Context, dv *dotvirtv
 	} else {
 		cm := &corev1.ConfigMap{
 			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
-			ObjectMeta: metav1.ObjectMeta{Name: install.IngressCAConfigMap, Namespace: dv.Namespace, Labels: install.Labels(dv.Name)},
+			ObjectMeta: metav1.ObjectMeta{Name: install.IngressCAConfigMap, Namespace: dv.Namespace, Labels: install.Labels(dv)},
 			Data:       map[string]string{install.IngressCAKey: rc.ingressCA},
 		}
 		if err := r.applyOwned(ctx, dv, cm); err != nil {
@@ -59,7 +59,7 @@ func (r *DotvirtReconciler) ensureTrustAnchors(ctx context.Context, dv *dotvirtv
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name: install.ServiceCAConfigMap, Namespace: dv.Namespace,
-			Labels:      install.Labels(dv.Name),
+			Labels:      install.Labels(dv),
 			Annotations: map[string]string{"service.beta.openshift.io/inject-cabundle": "true"},
 		},
 	}

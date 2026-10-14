@@ -27,7 +27,7 @@ metadata:
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
     containerImage: quay.io/epheo/dotvirt-operator@sha256:b94540fe484eaaf001db3defda433c3c80ec83271269abc7b50cec52a0680ddb
-    createdAt: "2026-09-10T11:58:09Z"
+    createdAt: "2026-10-14T07:14:16Z"
     description: Installs dotvirt, a GitOps web console for KubeVirt with a point-and-click workflow familiar to virtualization admins, plus its platform/tenant tier.
     features.operators.openshift.io/disconnected: "true"
     features.operators.openshift.io/fips-compliant: "false"
@@ -218,15 +218,15 @@ spec:
                 - configmaps
               verbs:
                 - create
+                - delete
                 - deletecollection
                 - get
+                - list
                 - patch
             - apiGroups:
                 - ""
               resources:
                 - persistentvolumeclaims
-                - serviceaccounts
-                - services
               verbs:
                 - create
                 - patch
@@ -236,17 +236,29 @@ spec:
                 - secrets
               verbs:
                 - create
+                - delete
                 - deletecollection
                 - get
                 - list
                 - patch
                 - watch
             - apiGroups:
+                - ""
+              resources:
+                - serviceaccounts
+                - services
+              verbs:
+                - create
+                - delete
+                - list
+                - patch
+            - apiGroups:
                 - apps
               resources:
                 - deployments
               verbs:
                 - create
+                - delete
                 - get
                 - list
                 - patch
@@ -259,7 +271,9 @@ spec:
                 - appprojects
               verbs:
                 - create
+                - delete
                 - deletecollection
+                - list
                 - patch
             - apiGroups:
                 - dotvirt.io
@@ -288,8 +302,11 @@ spec:
                 - networking.k8s.io
               resources:
                 - ingresses
+                - networkpolicies
               verbs:
                 - create
+                - delete
+                - list
                 - patch
             - apiGroups:
                 - rbac.authorization.k8s.io
@@ -297,7 +314,9 @@ spec:
                 - clusterrolebindings
               verbs:
                 - create
+                - delete
                 - deletecollection
+                - list
                 - patch
             - apiGroups:
                 - rbac.authorization.k8s.io
@@ -315,6 +334,7 @@ spec:
                 - routes
               verbs:
                 - create
+                - delete
                 - get
                 - list
                 - patch
@@ -407,9 +427,9 @@ spec:
           serviceAccountName: dotvirt-operator-controller
     strategy: deployment
   installModes:
-    - supported: true
+    - supported: false
       type: OwnNamespace
-    - supported: true
+    - supported: false
       type: SingleNamespace
     - supported: false
       type: MultiNamespace

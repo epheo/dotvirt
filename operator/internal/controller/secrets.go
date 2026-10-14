@@ -59,7 +59,7 @@ func (r *DotvirtReconciler) ensureSecret(ctx context.Context, dv *dotvirtv1alpha
 	}
 	return r.applyOwned(ctx, dv, &corev1.Secret{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: dv.Namespace, Labels: install.Labels(dv.Name)},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: dv.Namespace, Labels: install.Labels(dv)},
 		Data:       map[string][]byte{key: []byte(value)},
 	})
 }
