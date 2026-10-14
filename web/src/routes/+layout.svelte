@@ -5,7 +5,7 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api, onUnauthorized, streamInventory, withRetry } from '$lib/api';
+	import { api, onUnauthorized, streamInventory, withRetry, type StreamStatus } from '$lib/api';
 	import { INVENTORY_SECTIONS, sectionOf, vmHref, type Section } from '$lib/nav';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { catalog } from '$lib/state/catalog.svelte';
@@ -67,14 +67,31 @@
 
 	// Live subscription, established once signed in. The cookie rides the handshake;
 	// a 401 on the upgrade (expired session) drops us back to login.
+	// The banner names a lost stream (the tree is a stale snapshot meanwhile)
+	// and offers a retry that skips the backoff wait.
+	let liveStream: { retryNow: () => void } | null = null;
+	const STREAM_LOST: Record<StreamStatus, string> = {
+		connecting: '',
+		live: '',
+		reconnecting: 'Live updates lost. Reconnecting…',
+		down: 'Live updates down: the server is not answering. Still retrying.',
+	};
 	$effect(() => {
 		if (!session.user) return;
 		inventory.inventory = null;
-		const stop = streamInventory(
+		const s = streamInventory(
 			(inv) => inventory.apply(inv),
 			() => (session.user = null),
+			(status) => {
+				inventory.stream = status;
+				inventory.error = STREAM_LOST[status];
+			},
 		);
-		return stop;
+		liveStream = s;
+		return () => {
+			s.close();
+			liveStream = null;
+		};
 	});
 
 	// The port-group catalog and the policy plane are fetched out-of-band (not on the
@@ -164,9 +181,10 @@
 		<AppHeader />
 
 		{#if inventory.error}
-			<Banner tone="danger" size="md" class="items-start">
-				<span class="font-medium">Error:</span>
-				<span class="font-mono text-xs break-all">{inventory.error}</span>
+			<Banner tone={inventory.stream === 'down' ? 'danger' : 'warn'} size="md">
+				<TriangleAlert size={16} class="shrink-0" />
+				<span>{inventory.error}</span>
+				<Button variant="link" size="sm" onclick={() => liveStream?.retryNow()}>Retry</Button>
 			</Banner>
 		{/if}
 

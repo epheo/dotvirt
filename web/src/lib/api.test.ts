@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { draftsByProject, retryDelay, Unauthorized, withRetry } from '$lib/api';
+import {
+	draftsByProject,
+	retryDelay,
+	streamInventory,
+	Unauthorized,
+	withRetry,
+	type StreamStatus,
+} from '$lib/api';
 
 describe('retryDelay', () => {
 	it('starts at 0.5s and doubles per attempt', () => {
@@ -80,6 +87,63 @@ describe('draftsByProject', () => {
 			]);
 		} finally {
 			vi.unstubAllGlobals();
+		}
+	});
+});
+
+describe('streamInventory status', () => {
+	class FakeSocket {
+		static all: FakeSocket[] = [];
+		onopen?: () => void;
+		onclose?: () => void;
+		onmessage?: (e: { data: string }) => void;
+		onerror?: () => void;
+		constructor() {
+			FakeSocket.all.push(this);
+		}
+		close() {
+			this.onclose?.();
+		}
+	}
+
+	it('reports live, then reconnecting, then down once backoff hits the cap', async () => {
+		vi.useFakeTimers();
+		vi.stubGlobal('WebSocket', FakeSocket);
+		vi.stubGlobal('location', { protocol: 'http:', host: 'x' });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() => Promise.resolve(Response.json({ username: 'ada', groups: [] }))),
+		);
+		FakeSocket.all = [];
+		const seen: StreamStatus[] = [];
+		const s = streamInventory(
+			() => {},
+			undefined,
+			(st) => seen.push(st),
+		);
+		try {
+			FakeSocket.all[0].onopen!();
+			FakeSocket.all[0].close();
+			expect(seen).toEqual(['connecting', 'live', 'reconnecting']);
+
+			// Each retry fails before opening: the session probe passes, backoff grows.
+			for (let i = 1; i < 6; i++) {
+				await vi.advanceTimersByTimeAsync(retryDelay(i));
+				FakeSocket.all[i].close();
+				await vi.advanceTimersByTimeAsync(0);
+			}
+			expect(seen.at(-1)).toBe('down');
+
+			// retryNow skips the 16s wait.
+			const before = FakeSocket.all.length;
+			s.retryNow();
+			expect(FakeSocket.all.length).toBe(before + 1);
+			FakeSocket.all.at(-1)!.onopen!();
+			expect(seen.at(-1)).toBe('live');
+		} finally {
+			s.close();
+			vi.unstubAllGlobals();
+			vi.useRealTimers();
 		}
 	});
 });

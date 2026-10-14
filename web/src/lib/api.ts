@@ -570,17 +570,23 @@ export async function withRetry<T>(fn: () => Promise<T>, retries = 5): Promise<T
 	}
 }
 
+// The live stream's health: 'reconnecting' while backoff retries run,
+// 'down' once they reach the cap (the server has stopped answering).
+export type StreamStatus = 'connecting' | 'live' | 'reconnecting' | 'down';
+
 /**
  * streamInventory subscribes to the caller's live inventory over WebSocket. The
  * session cookie rides the handshake (same-origin), so the server pushes only the
- * caller's tree. Calls onInventory on each push, auto-reconnects with backoff, and
- * invokes onUnauthorized if the handshake is rejected (expired session). Returns a
- * function to close the subscription.
+ * caller's tree. Calls onInventory on each push, auto-reconnects with backoff
+ * (reporting each transition to onStatus), and invokes onUnauthorized if the
+ * handshake is rejected (expired session). close ends the subscription;
+ * retryNow skips a pending backoff wait.
  */
 export function streamInventory(
 	onInventory: (inv: Inventory) => void,
 	onUnauthorized?: () => void,
-): () => void {
+	onStatus?: (s: StreamStatus) => void,
+): { close: () => void; retryNow: () => void } {
 	let ws: WebSocket | null = null;
 	let closed = false;
 	let retry = 0;
@@ -593,12 +599,14 @@ export function streamInventory(
 	};
 
 	const connect = () => {
+		reconnectTimer = undefined;
 		if (closed) return;
 		everOpen = false;
 		ws = new WebSocket(url());
 		ws.onopen = () => {
 			everOpen = true;
 			retry = 0;
+			onStatus?.('live');
 		};
 		ws.onmessage = (e) => {
 			try {
@@ -610,6 +618,7 @@ export function streamInventory(
 		const scheduleReconnect = () => {
 			if (closed) return;
 			retry = Math.min(retry + 1, 6);
+			onStatus?.(retry >= 6 ? 'down' : 'reconnecting');
 			reconnectTimer = setTimeout(connect, retryDelay(retry));
 		};
 		ws.onclose = () => {
@@ -638,11 +647,21 @@ export function streamInventory(
 		ws.onerror = () => ws?.close();
 	};
 
+	onStatus?.('connecting');
 	connect();
 
-	return () => {
-		closed = true;
-		clearTimeout(reconnectTimer);
-		ws?.close();
+	return {
+		close: () => {
+			closed = true;
+			clearTimeout(reconnectTimer);
+			ws?.close();
+		},
+		// Only while a backoff wait is pending: a socket or probe in flight
+		// already is the retry.
+		retryNow: () => {
+			if (closed || reconnectTimer === undefined) return;
+			clearTimeout(reconnectTimer);
+			connect();
+		},
 	};
 }

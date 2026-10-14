@@ -6,6 +6,7 @@ import {
 	type NetworkInventory,
 	type Options,
 	type PolicyInventory,
+	type StreamStatus,
 	type TaskEntry,
 	type VM,
 } from '$lib/api';
@@ -23,6 +24,8 @@ class InventoryStore {
 	// every VM on every frame.
 	inventory = $state.raw<Inventory | null>(null);
 	error = $state('');
+	// The live stream's health; the snapshot above is stale unless 'live'.
+	stream = $state<StreamStatus>('connecting');
 	readonly projects = $derived(this.inventory?.projects ?? []);
 	// The networking read layer: the port-group catalog (so raw OVN-K refs render
 	// as catalog port groups) plus the physical fabric (uplinks + node NICs).
@@ -146,6 +149,8 @@ class InventoryStore {
 		this.netInv = null;
 		this.polInv = null;
 		this.taskFeed = [];
+		this.error = '';
+		this.stream = 'connecting';
 		this.options = null;
 		this.optionsError = '';
 		this.#optionsPull = null;
