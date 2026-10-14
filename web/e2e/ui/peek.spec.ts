@@ -25,6 +25,8 @@ test('row click peeks; Enter expands; Esc closes', async ({ page }) => {
 	await expect(page).not.toHaveURL(/peek=/);
 
 	await page.locator('main tbody tr', { hasText: 'web-1' }).first().click();
+	// goto settles a tick after the click; Enter before it re-peeks instead of expanding.
+	await expect(peek).toBeVisible();
 	await page.keyboard.press('Enter');
 	await expect(page).toHaveURL(/\/vm\/web-prod\/web-1/);
 	await expect(page.getByRole('button', { name: /Edit Settings/ })).toBeVisible();
