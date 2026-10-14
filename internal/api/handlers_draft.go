@@ -77,7 +77,7 @@ func (s *Server) handleDraftGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDraftDiscard(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.draftScope(w, r)
-	if !ok || !s.authorizeDraft(w, r, sc) {
+	if !ok {
 		return
 	}
 	if err := s.draft.Discard(sc.id, sc.proj); err != nil {
@@ -97,7 +97,7 @@ func (s *Server) handleUnstage(w http.ResponseWriter, r *http.Request) {
 	} else {
 		sc, ok = s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
 	}
-	if !ok || !s.authorizeDraft(w, r, sc) {
+	if !ok {
 		return
 	}
 	if err := s.draft.Unstage(sc.id, sc.proj, r.URL.Query().Get("resource"), r.PathValue("namespace"), r.PathValue("name")); err != nil {

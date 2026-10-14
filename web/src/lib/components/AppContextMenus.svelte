@@ -53,6 +53,14 @@
 			<ActionMenu vm={ctx.vm} onpick={onCtxPick} />
 		{:else}
 			{@const untracked = untrackedVMs(ctx.namespaces)}
+			{@const authorNS = ctx.namespaces.filter((ns) => inventory.canAuthor(ns))}
+			{@const authorHere =
+				ctx.namespace && inventory.canAuthor(ctx.namespace) ? ctx.namespace : undefined}
+			{@const createOff = !ctx.repo
+				? 'Project has no backing repo'
+				: authorNS.length
+					? ''
+					: 'Read-only: you may not edit VMs here'}
 			<div class="w-48 rounded border border-line bg-panel py-1 text-xs shadow-lg">
 				<div class="truncate px-3 py-1 text-[10px] tracking-wide text-ink-faint uppercase">
 					{ctx.namespace ?? ctx.project}
@@ -112,36 +120,32 @@
 				{/if}
 				<MenuItem
 					onclick={() => {
-						const ns = ctx.kind === 'container' ? ctx.namespaces : null;
+						const ns = ctx.kind === 'container' ? authorNS : null;
 						ui.ctx = null;
 						ui.modal = { kind: 'newVM', namespaces: ns };
 					}}
-					disabled={!ctx.repo}
-					title={ctx.repo ? '' : 'Project has no backing repo'}>New VM here…</MenuItem
+					disabled={!!createOff}
+					title={createOff}>New VM here…</MenuItem
 				>
 				<MenuItem
 					onclick={() => {
 						const c = ctx.kind === 'container' ? ctx : null;
 						ui.ctx = null;
-						ui.modal = c
-							? { kind: 'egressFw', namespaces: c.namespaces, namespace: c.namespace }
-							: null;
+						ui.modal = c ? { kind: 'egressFw', namespaces: authorNS, namespace: authorHere } : null;
 					}}
-					disabled={!ctx.repo}
-					title={ctx.repo
-						? 'Add a north-south egress firewall (the Tier-1 gateway firewall)'
-						: 'Project has no backing repo'}>New Egress Firewall…</MenuItem
+					disabled={!!createOff}
+					title={createOff || 'Add a north-south egress firewall (the Tier-1 gateway firewall)'}
+					>New Egress Firewall…</MenuItem
 				>
 				<MenuItem
 					onclick={() => {
 						const c = ctx.kind === 'container' ? ctx : null;
 						ui.ctx = null;
-						ui.modal = c ? { kind: 'dfw', namespaces: c.namespaces, namespace: c.namespace } : null;
+						ui.modal = c ? { kind: 'dfw', namespaces: authorNS, namespace: authorHere } : null;
 					}}
-					disabled={!ctx.repo}
-					title={ctx.repo
-						? 'Add an east-west Distributed Firewall policy (NetworkPolicy)'
-						: 'Project has no backing repo'}>New Security Policy…</MenuItem
+					disabled={!!createOff}
+					title={createOff || 'Add an east-west Distributed Firewall policy (NetworkPolicy)'}
+					>New Security Policy…</MenuItem
 				>
 				{#if inventory.canNamespace}
 					<MenuItem

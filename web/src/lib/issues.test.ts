@@ -22,13 +22,7 @@ describe('deriveIssues', () => {
 		const i = inv([
 			{
 				name: 'p1',
-				namespaces: [
-					{
-						namespace: 'ns-a',
-						canAuthor: true,
-						vms: [vm({ phase: 'Running', health: 'Healthy' })],
-					},
-				],
+				namespaces: [{ namespace: 'ns-a', vms: [vm({ phase: 'Running', health: 'Healthy' })] }],
 			},
 		]);
 		expect(deriveIssues(i)).toEqual([]);
@@ -40,13 +34,7 @@ describe('deriveIssues', () => {
 			{
 				name: 'p1',
 				gitOps: { sync: 'OutOfSync', operation: 'Running', health: 'Progressing' },
-				namespaces: [
-					{
-						namespace: 'ns-a',
-						canAuthor: true,
-						vms: [vm({ sync: 'OutOfSync', phase: 'Migrating' })],
-					},
-				],
+				namespaces: [{ namespace: 'ns-a', vms: [vm({ sync: 'OutOfSync', phase: 'Migrating' })] }],
 			},
 		]);
 		expect(deriveIssues(i)).toEqual([]);
@@ -60,7 +48,6 @@ describe('deriveIssues', () => {
 				namespaces: [
 					{
 						namespace: 'ns-a',
-						canAuthor: true,
 						vms: [
 							vm({ name: 'broken', syncError: 'webhook denied', health: 'Degraded' }),
 							vm({ name: 'sad', health: 'Degraded' }),
@@ -84,9 +71,7 @@ describe('deriveIssues', () => {
 			{
 				name: 'p1',
 				gitOps: { sync: 'Synced', operation: 'Failed' },
-				namespaces: [
-					{ namespace: 'ns-a', canAuthor: true, vms: [vm({ name: 'ok', sync: 'Synced' })] },
-				],
+				namespaces: [{ namespace: 'ns-a', vms: [vm({ name: 'ok', sync: 'Synced' })] }],
 			},
 		]);
 		expect(deriveIssues(i)).toHaveLength(0);
@@ -98,11 +83,7 @@ describe('deriveIssues', () => {
 				name: 'p1',
 				gitOps: { operation: 'Failed', syncError: 'apply refused' },
 				namespaces: [
-					{
-						namespace: 'ns-a',
-						canAuthor: true,
-						vms: [vm({ name: 'stuck', phase: 'ErrorUnschedulable' })],
-					},
+					{ namespace: 'ns-a', vms: [vm({ name: 'stuck', phase: 'ErrorUnschedulable' })] },
 				],
 			},
 		]);
@@ -117,19 +98,13 @@ describe('scope helpers', () => {
 		inv([
 			{
 				name: 'p1',
-				namespaces: [
-					{ namespace: 'ns-a', canAuthor: true, vms: [vm({ name: 'x', health: 'Degraded' })] },
-				],
+				namespaces: [{ namespace: 'ns-a', vms: [vm({ name: 'x', health: 'Degraded' })] }],
 			},
 			{
 				name: 'p2',
 				error: 'broken',
 				namespaces: [
-					{
-						namespace: 'ns-b',
-						canAuthor: true,
-						vms: [vm({ name: 'y', namespace: 'ns-b', syncError: 'nope' })],
-					},
+					{ namespace: 'ns-b', vms: [vm({ name: 'y', namespace: 'ns-b', syncError: 'nope' })] },
 				],
 			},
 		]),
@@ -162,7 +137,7 @@ describe('scope helpers', () => {
 							{ kind: 'VirtualMachine', namespace: 'ns-a', name: 'vm-a', health: 'Degraded' },
 						],
 					},
-					namespaces: [{ namespace: 'ns-a', canAuthor: true, vms: [] }],
+					namespaces: [{ namespace: 'ns-a', vms: [] }],
 				},
 			],
 			platform: {

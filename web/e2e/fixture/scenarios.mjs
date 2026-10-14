@@ -145,6 +145,7 @@ const networks = {
 		egressIP: true,
 		externalRoute: true,
 		adminNetworkPolicy: true,
+		platform: true,
 	},
 };
 
@@ -551,6 +552,7 @@ const degraded = {
 			egressIP: false,
 			externalRoute: false,
 			adminNetworkPolicy: false,
+			platform: false,
 		},
 	},
 	// The optional planes answer 503 (down), not empty (fine): the UI must

@@ -14,7 +14,9 @@ import (
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"kubevirt.io/client-go/kubecli"
 	kvfake "kubevirt.io/client-go/kubevirt/fake"
 
@@ -134,6 +136,15 @@ const (
 
 func readVerb(v string) bool { return v == "get" || v == "list" || v == "watch" }
 
+// projectOf labels every test namespace into "team", except "sneaky", which
+// claims the platform tier's reserved name.
+func projectOf(ns string) string {
+	if ns == "sneaky" {
+		return platformProjectName
+	}
+	return "team"
+}
+
 // tenantServer is the transport over a real SA snapshot holding the given
 // project namespaces (all in project "team"), with every token seeded to see
 // visible of them.
@@ -152,7 +163,7 @@ func tenantServer(t *testing.T, d *reachedDraft, nss []string, visible []string)
 	for _, ns := range nss {
 		objs = append(objs, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
 			Name:        ns,
-			Labels:      map[string]string{"dotvirt.io/project": "team"},
+			Labels:      map[string]string{"dotvirt.io/project": projectOf(ns)},
 			Annotations: map[string]string{"dotvirt.io/repo": "https://forge/team.git"},
 		}})
 	}
@@ -199,8 +210,6 @@ var authorRoutes = []struct {
 	{http.MethodPost, "/api/vms/web/vm1/delete", ``, "StageDelete"},
 	{http.MethodPost, "/api/vms/web/vm1/adopt", ``, "Adopt"},
 	{http.MethodPost, "/api/vms/web/vm1/restore", `{"hash":"` + hash40 + `"}`, "RestoreVersion"},
-	{http.MethodDelete, "/api/draft?project=team", ``, "Discard"},
-	{http.MethodDelete, "/api/draft/web/vm1", ``, "Unstage"},
 	{http.MethodPost, "/api/draft/propose?project=team", `{"title":"t"}`, "Propose"},
 	{http.MethodPost, "/api/projects/team/revert", `{"hash":"` + hash40 + `"}`, "Revert"},
 	{http.MethodPost, "/api/networks", `{"scope":"project","namespace":"web"}`, "StageCreate"},
@@ -255,14 +264,84 @@ func TestAuthorGateViewerForbiddenEditorPasses(t *testing.T) {
 	}
 }
 
-// The read paths keep serving a viewer: the gate is on writes only.
-func TestAuthorGateLeavesReadsOpen(t *testing.T) {
+// The read paths keep serving a viewer, and discard and unstage only clear
+// the caller's own draft, so a demoted user can still drop leftovers.
+func TestAuthorGateLeavesReadsAndCleanupOpen(t *testing.T) {
 	d := &reachedDraft{}
 	s := tenantServer(t, d, []string{"web"}, []string{"web"})
 	rec := serve(s, http.MethodGet, "/api/permissions?namespace=web", "", viewerToken)
 	if rec.Code == http.StatusForbidden {
 		t.Fatalf("viewer read refused: %q", rec.Body.String())
 	}
+	for _, rt := range []struct{ method, path, reaches string }{
+		{http.MethodDelete, "/api/draft?project=team", "Discard"},
+		{http.MethodDelete, "/api/draft/web/vm1", "Unstage"},
+	} {
+		rec := serve(s, rt.method, rt.path, "", viewerToken)
+		if got := d.take(); rec.Code != http.StatusNoContent || len(got) != 1 || got[0] != rt.reaches {
+			t.Errorf("viewer %s %s = %d %q, reached %v", rt.method, rt.path, rec.Code, rec.Body.String(), got)
+		}
+	}
+}
+
+// A project name never stands for the platform tier: only platformScope sets
+// the bypass, and a namespace labelled with the reserved name resolves nowhere.
+func TestPlatformNameIsNotABypass(t *testing.T) {
+	d := &reachedDraft{}
+	s := tenantServer(t, d, []string{"web", "sneaky"}, []string{"web", "sneaky"})
+	for _, p := range s.AllProjects() {
+		if p.Name == platformProjectName {
+			t.Fatalf("resolver emitted the reserved name: %+v", p)
+		}
+	}
+	c, err := s.clusterF.For(viewerToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := scope{id: auth.Identity{Token: viewerToken}, cluster: c, proj: project.ProjectInfo{Name: platformProjectName, Namespaces: []string{"web"}}}
+	r := httptest.NewRequest(http.MethodPost, "/", nil)
+	for name, gate := range map[string]func(http.ResponseWriter) bool{
+		"authorize":      func(w http.ResponseWriter) bool { return s.authorize(w, r, sc, verbUpdate, ssarVM, "web") },
+		"authorizeDraft": func(w http.ResponseWriter) bool { return s.authorizeDraft(w, r, sc) },
+		"authorizeRepo":  func(w http.ResponseWriter) bool { return s.authorizeRepo(w, r, sc) },
+	} {
+		if gate(httptest.NewRecorder()) {
+			t.Errorf("%s let a project named %q through on its name", name, platformProjectName)
+		}
+	}
+}
+
+// The frame's signal: one cluster-wide allow answers every namespace; else
+// each is reviewed; a failed review is unknown (absent), never false.
+func TestAuthorNamespaces(t *testing.T) {
+	s := scopeServer(eventbus.New())
+	ctx := context.Background()
+	nss := []string{"a", "b", "c"}
+
+	t.Run("cluster-wide allow short-circuits", func(t *testing.T) {
+		c, reviews := ssarCountingClient(func(a *authzv1.ResourceAttributes) bool { return a.Namespace == "" })
+		got := s.authorNamespaces(ctx, auth.Identity{Token: "admin"}, c, nss)
+		if *reviews != 1 || len(got) != 3 || !got["a"] || !got["b"] || !got["c"] {
+			t.Fatalf("got %v after %d reviews, want all true after 1", got, *reviews)
+		}
+	})
+	t.Run("per namespace", func(t *testing.T) {
+		c, reviews := ssarCountingClient(func(a *authzv1.ResourceAttributes) bool { return a.Namespace == "b" })
+		got := s.authorNamespaces(ctx, auth.Identity{Token: "tenant"}, c, nss)
+		if *reviews != 4 || got["a"] || !got["b"] || got["c"] || len(got) != 3 {
+			t.Fatalf("got %v after %d reviews", got, *reviews)
+		}
+	})
+	t.Run("a failed review is unknown", func(t *testing.T) {
+		kube := fake.NewSimpleClientset()
+		kube.PrependReactor("create", "selfsubjectaccessreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, errors.New("timeout")
+		})
+		got := s.authorNamespaces(ctx, auth.Identity{Token: "flaky"}, cluster.NewClient(kube, nil, nil), nss)
+		if len(got) != 0 {
+			t.Fatalf("got %v, want no verdicts", got)
+		}
+	})
 }
 
 // A revert rewrites files of any namespace, so a project namespace the caller

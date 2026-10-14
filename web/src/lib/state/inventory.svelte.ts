@@ -15,6 +15,8 @@ import { deriveIssues } from '$lib/issues';
 import { prKey } from '$lib/review';
 import { share } from '$lib/share';
 
+const authorable = (n: { canAuthor?: boolean }) => n.canAuthor !== false;
+
 // The live cluster read layer: the WS inventory snapshot plus the once-per-
 // session networking inventory (GET /api/networks). Everything else the UI
 // shows about cluster state derives from these two.
@@ -112,11 +114,12 @@ class InventoryStore {
 		this.projects.filter((p) => p.repo).flatMap((p) => p.namespaces.map((n) => n.namespace)),
 	);
 	// Namespaces the caller may stage into: repo-backed and canAuthor, the gate
-	// every stage route enforces.
+	// every stage route enforces. An absent verdict (the review failed this
+	// frame) keeps offering; the route still refuses.
 	readonly namespaces = $derived(
 		this.projects
 			.filter((p) => p.repo)
-			.flatMap((p) => p.namespaces.filter((n) => n.canAuthor).map((n) => n.namespace)),
+			.flatMap((p) => p.namespaces.filter(authorable).map((n) => n.namespace)),
 	);
 	readonly #authorSet = $derived(new Set(this.namespaces));
 	// Projects with a backing repo - the ones with commit history to browse +
@@ -180,9 +183,9 @@ class InventoryStore {
 	// Revert rewrites any file of the project, so the backend wants authoring
 	// rights in every namespace of it.
 	canRevert(project: string): boolean {
-		if (project === 'platform') return this.canManage;
+		if (project === 'platform') return !!this.caps?.platform;
 		const p = this.projects.find((x) => x.name === project);
-		return !!p?.namespaces.length && p.namespaces.every((n) => n.canAuthor);
+		return !!p?.namespaces.length && p.namespaces.every(authorable);
 	}
 
 	projectOf(namespace: string): string {
