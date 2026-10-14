@@ -9,7 +9,7 @@ on:
 
 env:
   IMAGE: quay.io/epheo/dotvirt
-  GOTOOLCHAIN: auto # go.mod pins 1.26.4; let the toolchain download
+  GOTOOLCHAIN: auto # go.mod pins the Go version; let the toolchain download
 
 jobs:
   go:

@@ -3,7 +3,7 @@
 #   docker build -f operator/Dockerfile -t quay.io/epheo/dotvirt-operator:<tag> .
 # CGO is disabled, so the manager cross-compiles for $TARGETARCH on the native build host
 # (no QEMU) — buildx sets TARGETOS/TARGETARCH per target platform.
-FROM --platform=$BUILDPLATFORM golang:1.26@sha256:ae5a2316d12f3e78fd99177dad452e6ad4f240af2d71d57b480c3477f250fec6 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.2@sha256:820153096fda4de6ac1b7194d12e416b7dd8f4e9a33d17e0345b111b945162d8 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY . .

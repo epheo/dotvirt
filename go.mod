@@ -1,6 +1,6 @@
 module github.com/epheo/dotvirt
 
-go 1.26.5
+go 1.27.2
 
 // npm packages can ship .go files (flatted does); keep them out of ./...
 ignore ./web/node_modules
