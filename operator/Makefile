@@ -35,6 +35,14 @@ manifests: ## Generate the CRD + RBAC role into config/.
 fmt: ; go fmt ./...
 vet: ; go vet ./...
 
+# The envtest suite runs the controller against a real kube-apiserver + etcd,
+# fetched (pinned) into bin/; plain `go test` skips it.
+SETUP_ENVTEST ?= go run sigs.k8s.io/controller-runtime/tools/setup-envtest@$(SETUP_ENVTEST_VERSION)
+.PHONY: test-envtest
+test-envtest: ## Run the envtest suite (server-side apply + the operator's RBAC).
+	KUBEBUILDER_ASSETS="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(CURDIR)/bin/envtest -p path)" \
+		go test ./internal/controller/ -run TestEnvtest -count=1 -v
+
 .PHONY: build
 build: generate fmt vet ## Build the manager binary.
 	go build -o bin/manager ./cmd
