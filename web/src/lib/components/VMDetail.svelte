@@ -15,6 +15,7 @@
 	import { type EditSection } from '$lib/editform';
 	import { VM_TABS, type VMTab } from '$lib/nav';
 	import { action, resource } from '$lib/resource.svelte';
+	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import { duration } from '$lib/format';
 	import { phaseTone } from '$lib/status';
@@ -152,8 +153,14 @@
 		monitorView = 'events';
 	});
 	// Drift detail (running vs main): null until known, [] when identical.
+	// Re-read when the sync verdict or the applied revision moves: either can
+	// open or close a drift with the VM identity unchanged.
+	const revision = $derived(
+		inventory.projects.find((p) => p.namespaces.some((n) => n.namespace === vm.namespace))
+			?.gitOps?.revision ?? '',
+	);
 	const driftRes = resource<Change[]>(
-		() => key,
+		() => `${key}|${vm.sync}|${revision}`,
 		() => api.drift(vm.namespace, vm.name).then((d) => (d.drift ? d.changes : [])),
 		{ reset: true },
 	);
