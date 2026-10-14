@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -30,9 +29,8 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 		fail(w, fmt.Errorf("%w: webhook not configured", model.ErrNotFound))
 		return
 	}
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		fail(w, invalid(err))
+	body, ok := readRaw(w, r)
+	if !ok {
 		return
 	}
 	// Forgejo sends its own header; Gitea-lineage servers send X-Gitea-Signature.

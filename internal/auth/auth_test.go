@@ -162,6 +162,22 @@ func TestLoginThrottledIs429(t *testing.T) {
 	}
 }
 
+// The API caps every body before Login runs; past the cap Login answers 413,
+// and no TokenReview is spent on it.
+func TestLoginOversizedBodyIs413(t *testing.T) {
+	a, calls := fakeAuth(nil)
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"token":"`+strings.Repeat("x", 64)+`"}`))
+	r.Body = http.MaxBytesReader(rec, r.Body, 16)
+	a.Login(rec, r)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want 413", rec.Code)
+	}
+	if *calls != 0 {
+		t.Errorf("an oversized login opened %d TokenReviews", *calls)
+	}
+}
+
 func TestMiddlewareInjectsIdentity(t *testing.T) {
 	a, _ := fakeAuth(map[string]authnv1.UserInfo{"good": {Username: "alice"}})
 

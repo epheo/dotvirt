@@ -2,10 +2,12 @@ package stream
 
 import (
 	"io"
+	"log"
 	"net"
 	"net/http"
 
 	"github.com/gorilla/websocket"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/epheo/dotvirt/internal/auth"
 )
@@ -34,6 +36,10 @@ func NewVNCProxy(d DialerForToken, uiOrigin string) *VNCProxy {
 	return &VNCProxy{dialerFor: d, upgrader: upgrader(uiOrigin)}
 }
 
+// vncReadLimit bounds one browser frame. noVNC sends key, pointer and
+// clipboard messages; a larger frame is not a console, it is a memory sink.
+const vncReadLimit = 1 << 20
+
 // Handler upgrades the request to a WebSocket and pipes it bidirectionally to the
 // VMI's VNC stream: browser binary frames -> virt-api, and back. The dial uses the
 // caller's token (Identity from the auth middleware), so a user can only reach a
@@ -44,17 +50,37 @@ func (p *VNCProxy) Handler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 		return
 	}
+	// Refuse before dialing: a cross-site page or a plain GET must not make
+	// virt-api open a console under the caller's token.
+	if !websocket.IsWebSocketUpgrade(r) {
+		http.Error(w, "websocket upgrade required", http.StatusBadRequest)
+		return
+	}
+	if !p.upgrader.CheckOrigin(r) {
+		http.Error(w, "origin not allowed", http.StatusForbidden)
+		return
+	}
 	namespace := r.PathValue("namespace")
 	name := r.PathValue("name")
 
+	// Dial errors embed apiserver endpoints; the caller gets a fixed message.
 	dialer, err := p.dialerFor(id.Token)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		log.Printf("vnc: %s/%s: client: %v", namespace, name, err)
+		http.Error(w, "cluster access unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	conn, err := dialer.VNCConn(namespace, name)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		log.Printf("vnc: %s/%s: dial: %v", namespace, name, err)
+		switch {
+		case apierrors.IsForbidden(err):
+			http.Error(w, "not allowed to open this console", http.StatusForbidden)
+		case apierrors.IsNotFound(err):
+			http.Error(w, "VM is not running", http.StatusNotFound)
+		default:
+			http.Error(w, "console unavailable", http.StatusBadGateway)
+		}
 		return
 	}
 	defer func() { _ = conn.Close() }()
@@ -64,6 +90,7 @@ func (p *VNCProxy) Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = ws.Close() }()
+	ws.SetReadLimit(vncReadLimit)
 
 	// Bridge both directions; when either side ends, tear down both.
 	errc := make(chan error, 2)

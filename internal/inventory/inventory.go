@@ -6,8 +6,11 @@
 package inventory
 
 import (
+	"fmt"
+	"log"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/argo"
@@ -48,6 +51,22 @@ func Build(in Inputs) model.Inventory {
 	return model.Inventory{Projects: projects}
 }
 
+// repoErrs holds the last repo error logged per project: Build runs per
+// identity per frame, so an unchanged failure is logged once, not every frame.
+var repoErrs sync.Map
+
+func logRepoErr(project string, err error) {
+	if err == nil {
+		repoErrs.Delete(project)
+		return
+	}
+	msg := err.Error()
+	if prev, loaded := repoErrs.Swap(project, msg); loaded && prev == msg {
+		return
+	}
+	log.Printf("inventory: project %s: %s", project, msg)
+}
+
 func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 	out := model.Project{Name: p.Name, Repo: p.Repo, Error: p.Error, Namespaces: []model.ProjectNamespace{}}
 	// The GitOps rollup is keyed by the Application's repo, independent of whether
@@ -64,12 +83,17 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 	// look empty and invited the wrong recovery actions.
 	var vms []model.VM
 	if p.Repo != "" {
+		// The badge names the failure only: git errors carry the forge URL and
+		// transport detail, and every subscriber of the project sees this text.
 		read, _, err := in.Repos.Get(p.Repo)
 		if err != nil {
-			out.Error = "repo unavailable: " + err.Error()
+			out.Error = "repo unavailable"
+			err = fmt.Errorf("open repo: %w", err)
 		} else if vms, err = changeset.VMsOnBranch(read, in.Branch); err != nil {
-			out.Error = "read repo: " + err.Error()
+			out.Error = "repo unreadable"
+			err = fmt.Errorf("read repo: %w", err)
 		}
+		logRepoErr(p.Name, err)
 	}
 
 	allowed := toSet(p.Namespaces)

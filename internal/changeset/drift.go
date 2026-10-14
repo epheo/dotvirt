@@ -188,7 +188,7 @@ func adoptResource(kind string) draft.Resource {
 // Because this is the one operation that escalates to dotvirt's SA, the caller's
 // own authority over the VM (canUpdateVM, a user-token SSAR) is enforced here,
 // beside the escalation - not only at the transport layer.
-func (c *Coordinator) Resync(ctx context.Context, canUpdateVM func(context.Context, string, string) (bool, error), namespace, name string) (model.ResyncResult, error) {
+func (c *Coordinator) Resync(ctx context.Context, canUpdateVM func(context.Context, string, string) (bool, error), username, namespace, name string) (model.ResyncResult, error) {
 	if c.resyncer == nil {
 		return model.ResyncResult{}, fmt.Errorf("%w: re-sync unavailable (ArgoCD not configured)", model.ErrUnavailable)
 	}
@@ -197,7 +197,7 @@ func (c *Coordinator) Resync(ctx context.Context, canUpdateVM func(context.Conte
 	} else if !allowed {
 		return model.ResyncResult{}, fmt.Errorf("%w: you don't have permission to sync VM %s/%s", model.ErrForbidden, namespace, name)
 	}
-	return c.resyncer.Resync(ctx, namespace, name)
+	return c.resyncer.Resync(ctx, username, namespace, name)
 }
 
 // VMDrift returns the semantic diff between a VM as it runs (actual) and as main

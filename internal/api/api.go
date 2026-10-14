@@ -110,7 +110,7 @@ type Draft interface {
 	// Resync runs with dotvirt's SA (Argo operations carry no user context);
 	// canUpdateVM is the caller-token SSAR the implementation enforces before
 	// escalating, so no future caller can reach the SA-privileged patch unchecked.
-	Resync(ctx context.Context, canUpdateVM func(context.Context, string, string) (bool, error), namespace, name string) (model.ResyncResult, error)
+	Resync(ctx context.Context, canUpdateVM func(context.Context, string, string) (bool, error), username, namespace, name string) (model.ResyncResult, error)
 	Revert(id auth.Identity, proj project.ProjectInfo, hash string) (model.ProposeResult, error)
 	// RestoreVersion stages one VM's manifest as a past commit held it: the
 	// object-level undo, through the caller's draft like any edit.
@@ -425,6 +425,7 @@ func (s *Server) Handler() http.Handler {
 	// including the pre-auth /api/login, which would otherwise buffer an
 	// unbounded body.
 	handler = withBodyLimit(1<<20, handler)
+	handler = withCrossOriginProtection(s.cfg.AllowOrigin, handler)
 	apiHandler := withCORS(s.cfg.AllowOrigin, handler)
 
 	// In production the same binary serves the built SPA at the same origin (so
@@ -483,14 +484,31 @@ func withCORS(origin string, next http.Handler) http.Handler {
 	})
 }
 
+// withCrossOriginProtection rejects a cross-origin, state-changing browser
+// request. SameSite=Lax alone is not enough: every Route under one OpenShift
+// apps domain is same-site, so a sibling app could POST with the session
+// cookie. Safe methods pass (the WS upgrades check Origin themselves), and so
+// do requests without browser fetch metadata: the forge webhook and the
+// ApplicationSet plugin carry their own credentials.
+func withCrossOriginProtection(uiOrigin string, next http.Handler) http.Handler {
+	cop := http.NewCrossOriginProtection()
+	if uiOrigin != "" {
+		if err := cop.AddTrustedOrigin(uiOrigin); err != nil {
+			// config.Load rejects such an origin at startup.
+			panic(fmt.Sprintf("api: ui-origin %q: %v", uiOrigin, err))
+		}
+	}
+	return cop.Handler(next)
+}
+
 // readBody reads the whole request body and decodes it into T, handing back
 // the raw bytes too for a route that peeks at routing fields and leaves the
-// full decode to the staging layer. ok=false means the 400 is written.
+// full decode to the staging layer. ok=false means the 400 (413 past
+// withBodyLimit) is written.
 // optional lets an empty body stand for the zero T.
 func readBody[T any](w http.ResponseWriter, r *http.Request, optional bool) (raw []byte, v T, ok bool) {
-	raw, err := io.ReadAll(r.Body)
-	if err != nil {
-		fail(w, invalid(err))
+	raw, ok = readRaw(w, r)
+	if !ok {
 		return nil, v, false
 	}
 	if optional && len(raw) == 0 {
@@ -501,6 +519,21 @@ func readBody[T any](w http.ResponseWriter, r *http.Request, optional bool) (raw
 		return nil, v, false
 	}
 	return raw, v, true
+}
+
+// readRaw reads the whole request body; a body past withBodyLimit is a 413.
+// ok=false means the response is written.
+func readRaw(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		if tooBig := (*http.MaxBytesError)(nil); errors.As(err, &tooBig) {
+			http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
+			return nil, false
+		}
+		fail(w, invalid(err))
+		return nil, false
+	}
+	return raw, true
 }
 
 // decode is the body reader for a route that consumes the whole request itself.
