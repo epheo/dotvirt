@@ -4,7 +4,7 @@
 # --- Stage 1: build the SPA (adapter-static → /web/build) ---
 # Pinned to the build host's arch (the SPA output is arch-neutral static assets, so there's
 # no point emulating it per target platform).
-FROM --platform=$BUILDPLATFORM docker.io/library/node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS web
+FROM --platform=$BUILDPLATFORM docker.io/library/node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci

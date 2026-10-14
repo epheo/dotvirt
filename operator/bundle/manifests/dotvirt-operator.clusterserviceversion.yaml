@@ -57,7 +57,7 @@ metadata:
         }
       }
     operatorframework.io/suggested-namespace: dotvirt-operator
-    operators.operatorframework.io/builder: operator-sdk-v1.42.2
+    operators.operatorframework.io/builder: operator-sdk-v1.42.3
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
     repository: https://github.com/epheo/dotvirt
     support: https://github.com/epheo/dotvirt/issues
