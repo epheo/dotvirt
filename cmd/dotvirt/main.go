@@ -282,11 +282,7 @@ func run() error {
 	}
 	cancelSync()
 
-	srv := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           server.Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
+	srv := newHTTPServer(cfg.Addr, server.Handler())
 
 	go func() {
 		log.Printf("dotvirt listening on %s (project-label=%s)", cfg.Addr, cfg.ProjectLabel)
@@ -300,6 +296,18 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// newHTTPServer bounds idle keep-alives only: WS and VNC connections are hijacked,
+// so net/http's timeouts stop applying to them once upgraded. Read/WriteTimeout
+// stay unset because they would cut long uploads and streamed responses.
+func newHTTPServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
 }
 
 // ensureWebhooks registers dotvirt's ORG-level forge webhook at startup and re-asserts it
