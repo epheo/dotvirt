@@ -13,6 +13,7 @@
 // rides cross-origin in dev (Vite proxy) and same-origin in production.
 
 import type * as gen from './model.gen';
+import { friendlyError } from './format';
 
 export type * from './model.gen';
 export type { Event as VMEvent, Node as NodeTarget } from './model.gen';
@@ -247,6 +248,18 @@ export class Unauthorized extends Error {
 	}
 }
 
+// HttpError carries the status of a non-2xx answer, for callers that treat
+// one status as an answer rather than a failure (a 403 that means "not yours").
+export class HttpError extends Error {
+	constructor(
+		message: string,
+		readonly status: number,
+	) {
+		super(message);
+		this.name = 'HttpError';
+	}
+}
+
 // The one signed-out sink: every 401 funnels through req(), so the page
 // registers a single handler here instead of each fetching component
 // remembering to report it. The WebSocket paths (streamInventory, VNC) don't
@@ -262,7 +275,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 		unauthorizedSink?.();
 		throw new Unauthorized();
 	}
-	if (!res.ok) throw new Error(`${path}: ${res.status} ${await res.text()}`);
+	if (!res.ok) throw new HttpError(`${path}: ${res.status} ${await res.text()}`, res.status);
 	if (res.status === 204) return undefined as T;
 	return res.json() as Promise<T>;
 }
@@ -504,27 +517,35 @@ export const api = {
 		post<void>(`${vmPath(namespace, name)}/unpause`, {}),
 };
 
-// draftsByProject fetches the draft for each named project and returns the
-// non-empty ones, for the Changes panel + header badge. Projects with no repo are
-// skipped (they can't hold a draft).
-export async function draftsByProject(
-	projects: string[],
-): Promise<{ project: string; draft: DraftView }[]> {
+// draftsByProject fetches the draft for each named project: the non-empty
+// ones for the Changes panel + header badge, and the projects whose fetch
+// failed, so a lane shows its error instead of silently reading as empty. A
+// 403 is an answer (no draft authority, e.g. the platform tier for
+// non-authors), not a failure.
+export async function draftsByProject(projects: string[]): Promise<{
+	drafts: { project: string; draft: DraftView }[];
+	failed: { project: string; error: string }[];
+}> {
 	const results = await Promise.all(
 		projects.map(async (project) => {
 			try {
 				return { project, draft: await api.getDraft(project) };
 			} catch (e) {
 				if (e instanceof Unauthorized) throw e;
-				return null;
+				if (e instanceof HttpError && e.status === 403) return null;
+				return { project, error: friendlyError(e) };
 			}
 		}),
 	);
-	// Warning-only drafts render too: prune risk must warn BEFORE anything merges.
-	return results.filter(
-		(r): r is { project: string; draft: DraftView } =>
-			!!r && (r.draft.count > 0 || !!r.draft.warning),
-	);
+	const drafts: { project: string; draft: DraftView }[] = [];
+	const failed: { project: string; error: string }[] = [];
+	for (const r of results) {
+		if (!r) continue;
+		if (r.error !== undefined) failed.push({ project: r.project, error: r.error });
+		// Warning-only drafts render too: prune risk must warn BEFORE anything merges.
+		else if (r.draft.count > 0 || r.draft.warning) drafts.push({ project: r.project, draft: r.draft });
+	}
+	return { drafts, failed };
 }
 
 // Reconnect backoff for streamInventory: 0.5s doubling to a 16s cap.

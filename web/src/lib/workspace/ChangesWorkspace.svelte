@@ -287,6 +287,7 @@
 			{active}
 			onselect={select}
 			ontogglehistory={toggleHistory}
+			onretryhistory={loadHistory}
 			ondismiss={(project) => delete results[project]}
 		/>
 

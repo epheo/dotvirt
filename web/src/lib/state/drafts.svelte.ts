@@ -1,4 +1,5 @@
-import { draftsByProject, vmKey, type DraftItem, type DraftView } from '$lib/api';
+import { draftsByProject, Unauthorized, vmKey, type DraftItem, type DraftView } from '$lib/api';
+import { friendlyError } from '$lib/format';
 import { inventory } from './inventory.svelte';
 
 // The synthetic platform-tier project (matches the backend's platformProjectName);
@@ -16,6 +17,10 @@ class DraftsStore {
 	loaded = $state(false);
 	// A refresh is in flight; the last good summary stays rendered meanwhile.
 	refreshing = $state(false);
+	// Projects whose draft could not be read on the last refresh.
+	failed = $state<{ project: string; error: string }[]>([]);
+	// The last refresh failed as a whole; '' once one lands.
+	error = $state('');
 
 	readonly count = $derived(this.drafts.reduce((n, d) => n + d.draft.count, 0));
 	// VMs with an unproposed staged change (this user's draft), keyed "ns/name".
@@ -40,6 +45,7 @@ class DraftsStore {
 			: inventory.projectNames;
 		if (!names.length) {
 			this.drafts = [];
+			this.failed = [];
 			// An empty project set is a real answer once the inventory has landed -
 			// only "inventory not streamed yet" still counts as not-looked.
 			if (inventory.inventory) this.loaded = true;
@@ -49,10 +55,14 @@ class DraftsStore {
 		try {
 			const d = await draftsByProject(names);
 			if (gen !== this.#gen) return;
-			this.drafts = d;
+			this.drafts = d.drafts;
+			this.failed = d.failed;
+			this.error = '';
 			this.loaded = true;
-		} catch {
+		} catch (e) {
 			// Keep the last good summary; a 401 signs out centrally.
+			if (gen !== this.#gen || e instanceof Unauthorized) return;
+			this.error = friendlyError(e);
 		} finally {
 			if (gen === this.#gen) this.refreshing = false;
 		}
@@ -61,6 +71,8 @@ class DraftsStore {
 	reset() {
 		this.#gen++;
 		this.drafts = [];
+		this.failed = [];
+		this.error = '';
 		this.loaded = false;
 		this.refreshing = false;
 	}

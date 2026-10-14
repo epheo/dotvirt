@@ -6,7 +6,11 @@ import type { DraftView } from '$lib/api';
 // order, and sign-out can land mid-flight: the store must apply only the newest
 // refresh, and nothing from before a reset.
 
-const api = vi.hoisted(() => ({ draftsByProject: vi.fn() }));
+const api = vi.hoisted(() => ({
+	draftsByProject: vi.fn(),
+	Unauthorized: class extends Error {},
+	vmKey: (v: { namespace: string; name: string }) => `${v.namespace}/${v.name}`,
+}));
 vi.mock('$lib/api', () => api);
 const inv = vi.hoisted(() => ({
 	inventory: {} as unknown,
@@ -23,9 +27,12 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 
-const view = (count: number): { project: string; draft: DraftView }[] => [
-	{ project: 'web-prod', draft: { base: 'main', branch: 'draft', count, items: [] } },
-];
+const view = (count: number) => ({
+	drafts: [
+		{ project: 'web-prod', draft: { base: 'main', branch: 'draft', count, items: [] } as DraftView },
+	],
+	failed: [] as { project: string; error: string }[],
+});
 
 describe('drafts.refresh', () => {
 	beforeEach(() => {
@@ -62,5 +69,29 @@ describe('drafts.refresh', () => {
 		expect(drafts.count).toBe(0);
 		expect(drafts.loaded).toBe(false);
 		expect(drafts.refreshing).toBe(false);
+	});
+
+	it('keeps per-project failures beside the drafts that loaded', async () => {
+		api.draftsByProject.mockResolvedValueOnce({
+			...view(1),
+			failed: [{ project: 'db', error: 'forge down' }],
+		});
+		await drafts.refresh();
+		expect(drafts.count).toBe(1);
+		expect(drafts.failed).toEqual([{ project: 'db', error: 'forge down' }]);
+		expect(drafts.loaded).toBe(true);
+	});
+
+	it('surfaces a failed refresh instead of a skeleton forever, and clears it on retry', async () => {
+		api.draftsByProject.mockRejectedValueOnce(new Error('network down'));
+		await drafts.refresh();
+		expect(drafts.loaded).toBe(false);
+		expect(drafts.error).toBe('network down');
+		expect(drafts.refreshing).toBe(false);
+
+		api.draftsByProject.mockResolvedValueOnce(view(0));
+		await drafts.refresh();
+		expect(drafts.error).toBe('');
+		expect(drafts.loaded).toBe(true);
 	});
 });

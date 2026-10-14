@@ -129,16 +129,16 @@
 	});
 
 	// Recompute the draft summary only when the SET of projects or PR lanes
-	// changes: depend on the stable keys, and read the project list via untrack so
-	// the effect doesn't also subscribe to the per-frame array reference (which
-	// would re-fire on every VM state change). Staging actions call drafts.refresh
-	// directly.
+	// changes, or once the first frame lands (an empty project set is an answer
+	// too, or the Changes lanes would wait forever): depend on stable keys, never
+	// the per-frame arrays, which would re-fire on every VM state change.
+	// Staging actions call drafts.refresh directly.
+	const streamed = $derived(inventory.inventory !== null);
 	$effect(() => {
 		inventory.projectKey;
 		inventory.proposalsKey;
-		untrack(() => {
-			if (session.user && inventory.projectNames.length) drafts.refresh();
-		});
+		inventory.canManage; // platform authors also carry a platform draft
+		if (session.user && streamed) untrack(() => drafts.refresh());
 	});
 </script>
 
