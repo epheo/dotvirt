@@ -1,8 +1,10 @@
+import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { svelteTesting } from '@testing-library/svelte/vite';
 import { compileModule } from 'svelte/compiler';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vitest/config';
 
-// Unit tests cover pure logic plus the rune modules (persisted, resource,
+// Two projects. unit: pure logic plus the rune modules (persisted, resource,
 // action): node environment, no jsdom. $app/environment is stubbed to
 // browser=true so persisted() runs its storage path against the test's
 // hand-rolled localStorage.
@@ -24,14 +26,19 @@ function svelteRuneModules(): Plugin {
 	};
 }
 
+// component (*.component.test.ts): mounted .svelte components in jsdom via
+// @testing-library/svelte. jsdom runs Vite's client pipeline, so the stock
+// svelte plugin compiles components and rune modules for the client itself.
+const alias = (path: string) => fileURLToPath(new URL(path, import.meta.url));
+
 export default defineConfig({
-	plugins: [svelteRuneModules()],
 	resolve: {
 		// The client svelte runtime, matching the client compile above.
 		conditions: ['browser'],
 		alias: {
-			$lib: fileURLToPath(new URL('./src/lib', import.meta.url)),
-			'$app/environment': fileURLToPath(new URL('./src/test/app-environment.ts', import.meta.url)),
+			$lib: alias('./src/lib'),
+			'$app/environment': alias('./src/test/app-environment.ts'),
+			'$app/navigation': alias('./src/test/app-navigation.ts'),
 		},
 	},
 	ssr: {
@@ -40,6 +47,34 @@ export default defineConfig({
 		},
 	},
 	test: {
-		include: ['src/**/*.test.ts'],
+		projects: [
+			{
+				extends: true,
+				plugins: [svelteRuneModules()],
+				test: {
+					name: 'unit',
+					include: ['src/**/*.test.ts'],
+					exclude: ['src/**/*.component.test.ts'],
+				},
+			},
+			{
+				extends: true,
+				plugins: [
+					// The build's runes rule (vite.config.ts): app components are runes-only.
+					svelte({
+						compilerOptions: {
+							runes: ({ filename }) =>
+								filename.split(/[/\\]/).includes('node_modules') ? undefined : true,
+						},
+					}),
+					svelteTesting(),
+				],
+				test: {
+					name: 'component',
+					include: ['src/**/*.component.test.ts'],
+					environment: 'jsdom',
+				},
+			},
+		],
 	},
 });
