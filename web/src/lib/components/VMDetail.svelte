@@ -10,7 +10,7 @@
 		Server,
 		Square,
 	} from 'lucide-svelte';
-	import { api, vmKey, type Change, type DraftItem, type Network, type VM } from '$lib/api';
+	import { api, vmKey, vmRef, type Change, type DraftItem, type Network, type VM } from '$lib/api';
 	import { adoptVM, manifestURL, runRuntimeAction, vmActions, type VMAction } from '$lib/actions';
 	import { type EditSection } from '$lib/editform';
 	import { VM_TABS, type VMTab } from '$lib/nav';
@@ -64,7 +64,7 @@
 
 	// section = the EditSettings step a Configure "Edit" jumps to (undefined = all).
 	function openEdit(section?: EditSection) {
-		ui.modal = { kind: 'editVM', vm, section };
+		ui.modal = { kind: 'editVM', vm: vmRef(vm), section };
 	}
 
 	// adopt/resync, feeding the Summary card's busy state.
@@ -272,7 +272,7 @@
 				onresync={resync}
 				onconsole={() => ontab?.('console')}
 				onedit={() => openEdit()}
-				onmigrate={() => (ui.modal = { kind: 'migrateVM', vm })}
+				onmigrate={() => (ui.modal = { kind: 'migrateVM', vm: vmRef(vm) })}
 			/>
 		{:else if tab === 'monitor'}
 			<TabBar

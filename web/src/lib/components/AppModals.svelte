@@ -4,6 +4,8 @@
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import { ui } from '$lib/state/ui.svelte';
+	import Button from './Button.svelte';
+	import Modal from './Modal.svelte';
 	import AddUplinkModal from './AddUplinkModal.svelte';
 	import AdminFirewallModal from './AdminFirewallModal.svelte';
 	import AdoptProjectModal from './AdoptProjectModal.svelte';
@@ -50,6 +52,11 @@
 		close();
 		ui.openChanges();
 	}
+
+	// The VM dialogs act on the live VM, never on the frame they opened from; a
+	// VM deleted under an open dialog leaves a "gone" notice, not a stale form.
+	const ref = $derived(m && 'vm' in m && m.kind !== 'staged' ? m.vm : null);
+	const vm = $derived(ref ? inventory.findVM(ref.namespace, ref.name) : null);
 </script>
 
 {#if m?.kind === 'newVM'}
@@ -155,21 +162,27 @@
 		ondiscard={discardStaged}
 		onreview={reviewStaged}
 	/>
-{:else if m?.kind === 'editVM'}
+{:else if ref && !vm}
+	<Modal title="VM not found" onclose={close}>
+		<p class="px-5 py-4 text-sm text-ink-soft">
+			{ref.namespace}/{ref.name} no longer exists in the cluster.
+		</p>
+		{#snippet footer()}<Button class="ml-auto" onclick={close}>Close</Button>{/snippet}
+	</Modal>
+{:else if m?.kind === 'editVM' && vm}
 	<EditSettings
-		vm={m.vm}
+		{vm}
 		networks={inventory.networks}
 		initialSection={m.section}
 		onclose={close}
 	/>
-{:else if m?.kind === 'deleteVM'}
-	<DeleteVMModal vm={m.vm} onclose={close} />
-{:else if m?.kind === 'cloneVM'}
-	<CloneModal vm={m.vm} onclose={close} />
-{:else if m?.kind === 'saveTemplate'}
-	<SaveTemplateModal vm={m.vm} onclose={close} />
-{:else if m?.kind === 'migrateVM'}
-	{@const vm = m.vm}
+{:else if m?.kind === 'deleteVM' && vm}
+	<DeleteVMModal {vm} onclose={close} />
+{:else if m?.kind === 'cloneVM' && vm}
+	<CloneModal {vm} onclose={close} />
+{:else if m?.kind === 'saveTemplate' && vm}
+	<SaveTemplateModal {vm} onclose={close} />
+{:else if m?.kind === 'migrateVM' && vm}
 	<MigrateModal
 		{vm}
 		onclose={close}
@@ -177,6 +190,6 @@
 			if (ok) ui.showToast(`Live-migration requested for ${vm.name}.`, { kind: 'success' });
 		}}
 	/>
-{:else if m?.kind === 'migrateStorage'}
-	<StorageMigrateModal vm={m.vm} onclose={close} />
+{:else if m?.kind === 'migrateStorage' && vm}
+	<StorageMigrateModal {vm} onclose={close} />
 {/if}

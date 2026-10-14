@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api, Unauthorized, vmKey, type VM } from '$lib/api';
+	import { api, Unauthorized, vmKey, vmRef, type VM } from '$lib/api';
 	import { bulkOutcome } from '$lib/bulk';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
 	import { containerTabs, hrefForScope, vmHref, type Section } from '$lib/nav';
@@ -257,7 +257,7 @@
 				staged={drafts.stagedByKey}
 				activeKey={peekVM ? peekKey : null}
 				onselect={(vm) => setPeek(peekKey === vmKey(vm) ? null : vm)}
-				onstagedopen={(vm) => (ui.modal = { kind: 'staged', vm })}
+				onstagedopen={(vm) => (ui.modal = { kind: 'staged', vm: vmRef(vm) })}
 				oncontextvm={contextVM}
 			/>
 		</div>

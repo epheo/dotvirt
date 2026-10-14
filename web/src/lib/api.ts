@@ -36,6 +36,9 @@ export interface VM extends Omit<gen.VM, 'power' | 'sync' | 'scheduling'> {
 }
 // The "namespace/name" identity every VM-keyed map, route and selection uses.
 export const vmKey = (vm: { namespace: string; name: string }) => `${vm.namespace}/${vm.name}`;
+// A VM's identity alone, for state that outlives a frame and must resolve live.
+export type VMRef = { namespace: string; name: string };
+export const vmRef = (vm: VMRef): VMRef => ({ namespace: vm.namespace, name: vm.name });
 
 export interface ProjectSync extends Omit<gen.ProjectSync, 'sync'> {
 	sync?: SyncStatus;

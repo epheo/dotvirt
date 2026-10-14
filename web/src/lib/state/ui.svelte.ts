@@ -9,6 +9,7 @@ import type {
 	Template,
 	UplinkCreate,
 	VM,
+	VMRef,
 } from '$lib/api';
 import type { EditSection } from '$lib/editform';
 import { reviewURL, type ReviewTarget } from '$lib/review';
@@ -51,15 +52,16 @@ export type AppModal =
 			yaml: string;
 			reason?: string;
 	  }
-	| { kind: 'staged'; vm: VM } // the per-VM staged-changes modal (from a Staged badge)
+	| { kind: 'staged'; vm: VMRef } // the per-VM staged-changes modal (from a Staged badge)
 	// The VM dialogs live here, not on the detail page, so every VM menu (detail
-	// toolbar, context menu, inspector, palette) opens them the same way.
-	| { kind: 'editVM'; vm: VM; section?: EditSection } // section = the step a Configure "Edit" jumps to
-	| { kind: 'deleteVM'; vm: VM }
-	| { kind: 'cloneVM'; vm: VM }
-	| { kind: 'saveTemplate'; vm: VM }
-	| { kind: 'migrateVM'; vm: VM }
-	| { kind: 'migrateStorage'; vm: VM };
+	// toolbar, context menu, inspector, palette) opens them the same way. They
+	// hold the identity only: the host resolves the live VM every frame.
+	| { kind: 'editVM'; vm: VMRef; section?: EditSection } // section = the step a Configure "Edit" jumps to
+	| { kind: 'deleteVM'; vm: VMRef }
+	| { kind: 'cloneVM'; vm: VMRef }
+	| { kind: 'saveTemplate'; vm: VMRef }
+	| { kind: 'migrateVM'; vm: VMRef }
+	| { kind: 'migrateStorage'; vm: VMRef };
 
 // Right-click context menus - the inventory's signature interaction. The bulk variant
 // (right-click inside a grid multi-selection) renders inside the workspace that

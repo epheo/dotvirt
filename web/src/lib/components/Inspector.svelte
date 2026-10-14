@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { ChevronDown, Maximize2, X } from 'lucide-svelte';
 	import { goto } from '$app/navigation';
-	import { vmKey, type VM } from '$lib/api';
+	import { vmKey, vmRef, type VM } from '$lib/api';
 	import { dispatchVMAction, vmActions } from '$lib/actions';
 	import { vmHref } from '$lib/nav';
 	import { duration } from '$lib/format';
@@ -148,7 +148,7 @@
 		<GitOpsStepper stage={vm.sync === 'Synced' ? 'synced' : 'merged'} compact />
 		<SyncBadge sync={vm.sync} error={vm.syncError} compact />
 		{#if stagedItem}
-			<StagedBadge item={stagedItem} onopen={() => (ui.modal = { kind: 'staged', vm })} />
+			<StagedBadge item={stagedItem} onopen={() => (ui.modal = { kind: 'staged', vm: vmRef(vm) })} />
 		{/if}
 		{#if stagedItem}
 			<Button variant="link" size="sm" class="ml-auto" onclick={() => ui.openChanges()}
