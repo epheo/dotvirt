@@ -18,6 +18,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/managedfields"
+	"k8s.io/client-go/applyconfigurations"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -25,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/structured-merge-diff/v6/typed"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/deps"
@@ -63,7 +66,28 @@ func testCR() *dotvirtv1alpha1.Dotvirt {
 func testBuilder(t *testing.T) *fake.ClientBuilder {
 	return fake.NewClientBuilder().
 		WithScheme(testScheme(t)).
-		WithStatusSubresource(&dotvirtv1alpha1.Dotvirt{}, &appsv1.Deployment{})
+		WithStatusSubresource(&dotvirtv1alpha1.Dotvirt{}, &appsv1.Deployment{}).
+		WithTypeConverters(
+			nilStatusConverter{applyconfigurations.NewTypeConverter(clientgoscheme.Scheme)},
+			managedfields.NewDeducedTypeConverter(),
+		)
+}
+
+// nilStatusConverter drops the "status: null" the fake client writes on apply
+// for kinds it believes have a status subresource. Its list still names
+// NetworkPolicy, whose schema has no status, so without this the apply falls
+// through to the deduced converter and fails to merge.
+type nilStatusConverter struct{ managedfields.TypeConverter }
+
+func (c nilStatusConverter) ObjectToTyped(obj runtime.Object, opts ...typed.ValidationOptions) (*typed.TypedValue, error) {
+	if u, ok := obj.(*unstructured.Unstructured); ok {
+		if v, has := u.Object["status"]; has && v == nil {
+			u = u.DeepCopy()
+			delete(u.Object, "status")
+			obj = u
+		}
+	}
+	return c.TypeConverter.ObjectToTyped(obj, opts...)
 }
 
 // depsOK stubs the probe with a fully satisfied cluster.

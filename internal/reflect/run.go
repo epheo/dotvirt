@@ -18,15 +18,22 @@ func NewIndexer() cache.Indexer {
 // Run starts a reflector feeding store from lw with unstructured objects and
 // no resync, and returns immediately. The reflector owns its own
 // relist/backoff and stops when ctx is cancelled.
-func Run(ctx context.Context, lw cache.ListerWatcher, store cache.Store) {
+func Run(ctx context.Context, lw *cache.ListWatch, store cache.Store) {
 	RunTyped(ctx, lw, &unstructured.Unstructured{}, store)
 }
 
 // RunTyped is Run for a source that yields typed objects; expected is a zero
 // value of the watched type, which the reflector uses to drop foreign events.
-func RunTyped(ctx context.Context, lw cache.ListerWatcher, expected any, store cache.Store) {
-	go cache.NewReflector(lw, expected, store, 0).Run(ctx.Done())
+func RunTyped(ctx context.Context, lw *cache.ListWatch, expected any, store cache.Store) {
+	go cache.NewReflector(cache.ToListWatcherWithWatchListSemantics(lw, listThenWatch{}), expected, store, 0).Run(ctx.Done())
 }
+
+// listThenWatch opts the reflector out of client-go's streaming WatchList:
+// TrackHealth reads LIST errors, and a fake watch never sends the bookmark
+// the stream waits on.
+type listThenWatch struct{}
+
+func (listThenWatch) IsWatchListSemanticsUnSupported() bool { return true }
 
 // discoveryInterval paces the API probe while a CRD is absent - one lightweight
 // discovery GET per tick, ending once the reflector owns a watch connection.
