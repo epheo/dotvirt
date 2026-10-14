@@ -54,11 +54,9 @@
 		else onclose();
 	}
 	let copied = $state('');
-	const disks = rowList(
-		(n) => ({ name: `disk${n + 1}`, size: '10Gi', storageClass: '' }),
-		[],
-		{ empty: true },
-	);
+	const disks = rowList((n) => ({ name: `disk${n + 1}`, size: '10Gi', storageClass: '' }), [], {
+		empty: true,
+	});
 	const extraDisks = $derived(disks.rows);
 	// Selected secondary networks, held as attach refs ("namespace/nad", or a bare
 	// name for a shared CUDN).

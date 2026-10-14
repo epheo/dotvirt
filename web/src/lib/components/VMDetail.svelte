@@ -156,8 +156,8 @@
 	// Re-read when the sync verdict or the applied revision moves: either can
 	// open or close a drift with the VM identity unchanged.
 	const revision = $derived(
-		inventory.projects.find((p) => p.namespaces.some((n) => n.namespace === vm.namespace))
-			?.gitOps?.revision ?? '',
+		inventory.projects.find((p) => p.namespaces.some((n) => n.namespace === vm.namespace))?.gitOps
+			?.revision ?? '',
 	);
 	const driftRes = resource<Change[]>(
 		() => `${key}|${vm.sync}|${revision}`,

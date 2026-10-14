@@ -250,7 +250,7 @@ export class Unauthorized extends Error {
 
 // HttpError carries the status of a non-2xx answer, for callers that treat
 // one status as an answer rather than a failure (a 403 that means "not yours").
-export class HttpError extends Error {
+class HttpError extends Error {
 	constructor(
 		message: string,
 		readonly status: number,
@@ -543,7 +543,8 @@ export async function draftsByProject(projects: string[]): Promise<{
 		if (!r) continue;
 		if (r.error !== undefined) failed.push({ project: r.project, error: r.error });
 		// Warning-only drafts render too: prune risk must warn BEFORE anything merges.
-		else if (r.draft.count > 0 || r.draft.warning) drafts.push({ project: r.project, draft: r.draft });
+		else if (r.draft.count > 0 || r.draft.warning)
+			drafts.push({ project: r.project, draft: r.draft });
 	}
 	return { drafts, failed };
 }

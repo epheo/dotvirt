@@ -148,7 +148,10 @@
 		<GitOpsStepper stage={vm.sync === 'Synced' ? 'synced' : 'merged'} compact />
 		<SyncBadge sync={vm.sync} error={vm.syncError} compact />
 		{#if stagedItem}
-			<StagedBadge item={stagedItem} onopen={() => (ui.modal = { kind: 'staged', vm: vmRef(vm) })} />
+			<StagedBadge
+				item={stagedItem}
+				onopen={() => (ui.modal = { kind: 'staged', vm: vmRef(vm) })}
+			/>
 		{/if}
 		{#if stagedItem}
 			<Button variant="link" size="sm" class="ml-auto" onclick={() => ui.openChanges()}

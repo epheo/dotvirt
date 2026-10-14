@@ -29,7 +29,10 @@ function deferred<T>() {
 
 const view = (count: number) => ({
 	drafts: [
-		{ project: 'web-prod', draft: { base: 'main', branch: 'draft', count, items: [] } as DraftView },
+		{
+			project: 'web-prod',
+			draft: { base: 'main', branch: 'draft', count, items: [] } as DraftView,
+		},
 	],
 	failed: [] as { project: string; error: string }[],
 });

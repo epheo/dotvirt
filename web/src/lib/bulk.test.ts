@@ -21,9 +21,12 @@ describe('bulkOutcome', () => {
 	});
 
 	it('clears the selection when everything staged', () => {
-		const out = bulkOutcome('Powered on: staged', 1, [vm('a')], [
-			{ status: 'fulfilled', value: undefined },
-		]);
+		const out = bulkOutcome(
+			'Powered on: staged',
+			1,
+			[vm('a')],
+			[{ status: 'fulfilled', value: undefined }],
+		);
 		expect(out.keep.size).toBe(0);
 		expect(out.msg).toBe('Powered on: staged 1 of 1.');
 	});

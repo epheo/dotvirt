@@ -170,12 +170,7 @@
 		{#snippet footer()}<Button class="ml-auto" onclick={close}>Close</Button>{/snippet}
 	</Modal>
 {:else if m?.kind === 'editVM' && vm}
-	<EditSettings
-		{vm}
-		networks={inventory.networks}
-		initialSection={m.section}
-		onclose={close}
-	/>
+	<EditSettings {vm} networks={inventory.networks} initialSection={m.section} onclose={close} />
 {:else if m?.kind === 'deleteVM' && vm}
 	<DeleteVMModal {vm} onclose={close} />
 {:else if m?.kind === 'cloneVM' && vm}
