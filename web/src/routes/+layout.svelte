@@ -5,7 +5,15 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api, onUnauthorized, streamInventory, withRetry, type StreamStatus } from '$lib/api';
+	import {
+		api,
+		onUnauthorized,
+		streamInventory,
+		Unauthorized,
+		withRetry,
+		type StreamStatus,
+	} from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import { INVENTORY_SECTIONS, sectionOf, vmHref, type Section } from '$lib/nav';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { catalog } from '$lib/state/catalog.svelte';
@@ -105,17 +113,24 @@
 	// Only the pull for the current version writes: version bumps come in bursts,
 	// and an older response landing last would paint stale planes (or, after
 	// sign-out, repopulate the reset stores).
+	// A pull that outlasts its retries is named in a banner whose Retry bumps
+	// netRetry; the last good planes stay rendered meanwhile.
+	let netRetry = $state(0);
 	$effect(() => {
 		if (!session.user) return;
 		inventory.networksVersion; // subscribe: re-pull when GitOps/git moves
+		netRetry;
 		let live = true;
 		withRetry(() => Promise.all([api.networks(), api.policies()]))
 			.then(([n, p]) => {
 				if (!live) return;
 				inventory.netInv = n;
 				inventory.polInv = p;
+				inventory.netError = '';
 			})
-			.catch(() => {});
+			.catch((e) => {
+				if (live && !(e instanceof Unauthorized)) inventory.netError = friendlyError(e);
+			});
 		return () => {
 			live = false;
 		};
@@ -130,16 +145,22 @@
 
 	// The recent-tasks feed rides the same out-of-band contract: re-pull when an
 	// op is recorded or a merged PR lands (tasksVersion), not on every VM frame.
+	let tasksRetry = $state(0);
 	$effect(() => {
 		if (!session.user) return;
 		inventory.tasksVersion; // subscribe
+		tasksRetry;
 		let live = true;
 		api
 			.tasks()
 			.then((t) => {
-				if (live) inventory.taskFeed = t;
+				if (!live) return;
+				inventory.taskFeed = t;
+				inventory.tasksError = '';
 			})
-			.catch(() => {});
+			.catch((e) => {
+				if (live && !(e instanceof Unauthorized)) inventory.tasksError = friendlyError(e);
+			});
 		return () => {
 			live = false;
 		};
@@ -185,6 +206,16 @@
 				<TriangleAlert size={16} class="shrink-0" />
 				<span>{inventory.error}</span>
 				<Button variant="link" size="sm" onclick={() => liveStream?.retryNow()}>Retry</Button>
+			</Banner>
+		{/if}
+
+		{#if inventory.netError}
+			<Banner tone="warn" size="md">
+				<TriangleAlert size={16} class="shrink-0" />
+				<span class="min-w-0"
+					>Networking and security views may be out of date: {inventory.netError}</span
+				>
+				<Button variant="link" size="sm" onclick={() => netRetry++}>Retry</Button>
 			</Banner>
 		{/if}
 
@@ -236,10 +267,14 @@
 			drafts={drafts.drafts}
 			proposals={inventory.proposals}
 			tasks={inventory.taskFeed}
+			tasksError={inventory.tasksError}
 			inventory={inventory.inventory}
 			username={session.user.username}
 			onselect={(namespace, name) => goto(vmHref(namespace, name))}
-			onrefresh={() => drafts.refresh()}
+			onrefresh={() => {
+				drafts.refresh();
+				tasksRetry++;
+			}}
 		/>
 
 		<AppModals />

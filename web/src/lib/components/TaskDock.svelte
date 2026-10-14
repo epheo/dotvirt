@@ -14,8 +14,10 @@
 	import { persisted } from '$lib/state/persisted.svelte';
 	import { severityTone, taskTone, TONE_TEXT } from '$lib/status';
 	import { TBODY, THEAD_TR } from '$lib/table';
+	import Button from './Button.svelte';
 	import EventsTable from './EventsTable.svelte';
 	import GitOpsStepper from './GitOpsStepper.svelte';
+	import Note from './Note.svelte';
 	import StatusDot from './StatusDot.svelte';
 	import TabBar from './TabBar.svelte';
 
@@ -23,6 +25,7 @@
 		drafts,
 		proposals,
 		tasks: feed,
+		tasksError = '',
 		inventory,
 		username,
 		onselect,
@@ -31,6 +34,7 @@
 		drafts: { project: string; draft: DraftView }[];
 		proposals: Proposal[];
 		tasks: TaskEntry[];
+		tasksError?: string; // the feed pull failed; onrefresh retries it
 		inventory: Inventory | null;
 		username: string;
 		onselect: (namespace: string, name: string) => void;
@@ -242,8 +246,16 @@
 	{#if openPane}
 		<div class="overflow-y-auto" style="height: {dockHeight}px">
 			{#if tab === 'tasks'}
+				{#if tasksError}
+					<Note tone="danger" class="m-2 flex items-center gap-2">
+						<span class="min-w-0 flex-1">Recent tasks could not be read: {tasksError}</span>
+						<Button variant="link" size="sm" onclick={() => onrefresh?.()}>Retry</Button>
+					</Note>
+				{/if}
 				{#if tasks.length === 0}
-					<div class="px-3 py-5 text-center text-ink-faint">No active tasks.</div>
+					{#if !tasksError}
+						<div class="px-3 py-5 text-center text-ink-faint">No active tasks.</div>
+					{/if}
 				{:else}
 					<table class="w-full">
 						{@render dockHead(['Task', 'Target', 'Status', 'Initiated by', 'Project'])}
