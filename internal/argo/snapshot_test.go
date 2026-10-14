@@ -2,6 +2,7 @@ package argo
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -232,5 +233,34 @@ func TestPrunePendingRelaysArgoComparison(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("got %v, want %v", got, want)
 		}
+	}
+}
+
+func TestResyncRecordsCallerAndMissesAsNotFound(t *testing.T) {
+	a := appWithSource("argocd", "team-a", "https://forge/team-a.git",
+		[]any{vmResource("prod", "vm-a", "Synced", "Healthy")})
+	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), a)
+	s := NewSnapshot(&Client{dyn: dyn}, nil)
+	_ = s.apps.Add(a)
+	s.synced.Mark()
+
+	if _, err := s.Resync(context.Background(), "alice", "prod", "ghost"); !errors.Is(err, model.ErrNotFound) {
+		t.Errorf("unmanaged VM: err = %v, want ErrNotFound", err)
+	}
+
+	res, err := s.Resync(context.Background(), `al"ice`, "prod", "vm-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Application != "team-a" || res.Revision != "main" {
+		t.Errorf("result = %+v", res)
+	}
+	got, err := dyn.Resource(applicationsGVR).Namespace("argocd").Get(context.Background(), "team-a", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, _, _ := unstructured.NestedString(got.Object, "operation", "initiatedBy", "username")
+	if user != `al"ice` {
+		t.Errorf("initiatedBy.username = %q, want the caller", user)
 	}
 }

@@ -10,7 +10,7 @@ import (
 
 type fakeResyncer struct{ called bool }
 
-func (f *fakeResyncer) Resync(ctx context.Context, namespace, name string) (model.ResyncResult, error) {
+func (f *fakeResyncer) Resync(ctx context.Context, username, namespace, name string) (model.ResyncResult, error) {
 	f.called = true
 	return model.ResyncResult{Application: "app"}, nil
 }
@@ -21,7 +21,7 @@ func TestResyncEnforcesCallerAuthority(t *testing.T) {
 	c.resyncer = rs
 
 	deny := func(context.Context, string, string) (bool, error) { return false, nil }
-	if _, err := c.Resync(context.Background(), deny, "alpha", "web"); !errors.Is(err, model.ErrForbidden) {
+	if _, err := c.Resync(context.Background(), deny, "alice", "alpha", "web"); !errors.Is(err, model.ErrForbidden) {
 		t.Fatalf("denied caller: want ErrForbidden, got %v", err)
 	}
 	if rs.called {
@@ -29,7 +29,7 @@ func TestResyncEnforcesCallerAuthority(t *testing.T) {
 	}
 
 	allow := func(context.Context, string, string) (bool, error) { return true, nil }
-	res, err := c.Resync(context.Background(), allow, "alpha", "web")
+	res, err := c.Resync(context.Background(), allow, "alice", "alpha", "web")
 	if err != nil || res.Application != "app" {
 		t.Fatalf("allowed caller: got %+v, %v", res, err)
 	}
@@ -38,7 +38,7 @@ func TestResyncEnforcesCallerAuthority(t *testing.T) {
 func TestResyncUnavailableWithoutArgo(t *testing.T) {
 	c := newTestCoordinator(t, false)
 	allow := func(context.Context, string, string) (bool, error) { return true, nil }
-	if _, err := c.Resync(context.Background(), allow, "a", "b"); !errors.Is(err, model.ErrUnavailable) {
+	if _, err := c.Resync(context.Background(), allow, "alice", "a", "b"); !errors.Is(err, model.ErrUnavailable) {
 		t.Fatalf("want ErrUnavailable, got %v", err)
 	}
 }

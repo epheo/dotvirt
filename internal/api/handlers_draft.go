@@ -225,7 +225,7 @@ func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.draft.Resync(r.Context(), sc.cluster.CanUpdateVM, ns, name)
+	result, err := s.draft.Resync(r.Context(), sc.cluster.CanUpdateVM, sc.id.Username, ns, name)
 	s.recordTask("Resync", ns, name, sc.id.Username, err == nil)
 	respond(w, result, err)
 }

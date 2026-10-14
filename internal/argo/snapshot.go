@@ -2,6 +2,7 @@ package argo
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"slices"
@@ -300,27 +301,53 @@ func (s *Snapshot) managingApp(namespace, name string) (AppRef, bool) {
 // so a resync right after startup doesn't spuriously 404), then requests a sync via
 // the Application's operation field - the k8s API dotvirt already has, no separate
 // Argo API token. (Distinct from RefreshForRepo: this is the user's explicit
-// per-VM "sync now", which must work even when auto-sync is off.)
-func (s *Snapshot) Resync(ctx context.Context, namespace, name string) (model.ResyncResult, error) {
+// per-VM "sync now", which must work even when auto-sync is off.) username is
+// the caller, recorded as the operation's initiator so Argo's history names the
+// person, not dotvirt's SA.
+func (s *Snapshot) Resync(ctx context.Context, username, namespace, name string) (model.ResyncResult, error) {
 	ref, ok := s.managingApp(namespace, name)
 	if !ok {
 		ref, ok = s.sa.findmanagingAppLive(ctx, namespace, name)
 		if !ok {
-			return model.ResyncResult{}, fmt.Errorf("no ArgoCD Application manages %s/%s", namespace, name)
+			return model.ResyncResult{}, fmt.Errorf("%w: no ArgoCD Application manages %s/%s", model.ErrNotFound, namespace, name)
 		}
 	}
 	revision := ref.TargetRevision
 	if revision == "" {
 		revision = "HEAD"
 	}
-	patch := fmt.Appendf(nil,
-		`{"operation":{"initiatedBy":{"username":"dotvirt"},"sync":{"revision":%q},"info":[{"name":"reason","value":"dotvirt re-sync from git"}]}}`,
-		revision,
-	)
+	patch, err := resyncPatch(username, revision)
+	if err != nil {
+		return model.ResyncResult{}, err
+	}
 	if _, err := s.sa.patchApp(ctx, ref.Namespace, ref.Name, patch); err != nil {
 		return model.ResyncResult{}, fmt.Errorf("trigger sync of %s: %w", ref.Name, err)
 	}
 	return model.ResyncResult{Application: ref.Name, Revision: revision}, nil
+}
+
+// resyncPatch is the Application operation requesting a sync to revision. It
+// is marshalled, not formatted: username is caller-controlled text.
+func resyncPatch(username, revision string) ([]byte, error) {
+	type kv struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	}
+	var op struct {
+		Operation struct {
+			InitiatedBy struct {
+				Username string `json:"username"`
+			} `json:"initiatedBy"`
+			Sync struct {
+				Revision string `json:"revision"`
+			} `json:"sync"`
+			Info []kv `json:"info"`
+		} `json:"operation"`
+	}
+	op.Operation.InitiatedBy.Username = username
+	op.Operation.Sync.Revision = revision
+	op.Operation.Info = []kv{{"reason", "dotvirt re-sync from git"}}
+	return json.Marshal(op)
 }
 
 // RefreshForRepo asks ArgoCD to re-pull git and re-sync every Application sourcing

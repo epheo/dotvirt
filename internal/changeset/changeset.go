@@ -25,7 +25,7 @@ import (
 // Resyncer triggers an ArgoCD sync of the Application managing a VM, for the
 // main->running drift reconcile. Implemented by the argo client. May be nil.
 type Resyncer interface {
-	Resync(ctx context.Context, namespace, name string) (model.ResyncResult, error)
+	Resync(ctx context.Context, username, namespace, name string) (model.ResyncResult, error)
 }
 
 // LiveSource supplies the cluster's current VM manifests, serialized exactly as git
