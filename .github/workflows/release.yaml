@@ -112,6 +112,18 @@ jobs:
             --title "release v$REL_VERSION" \
             --body "Digest-pinned release cut by CI; images already pushed to quay.io/epheo. Merge to record the pins, then apply operator/install/catalogsource.yaml." \
             || echo "::warning::could not open the pin PR — open it manually: https://github.com/$GITHUB_REPOSITORY/compare/main...$branch"
+      - name: Draft the GitHub Release
+        # A draft: upgrade notes (manual steps, breaking changes) need a human before
+        # it is published; the generated part lists the PRs since the previous tag.
+        if: env.REL_SKIP != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "v$REL_VERSION" >/dev/null 2>&1 && exit 0
+          gh release create "v$REL_VERSION" --draft --verify-tag \
+            --title "v$REL_VERSION" \
+            --generate-notes --notes-start-tag "v$REL_PREV" \
+            operator/install/catalogsource.yaml
 
   # Prove the just-pushed release actually installs from quay before anyone merges the
   # pin PR — the same install the daily canary runs, pointed at the fresh catalog digest.
