@@ -150,7 +150,7 @@ jobs:
             https://raw.githubusercontent.com/k8s-operatorhub/community-operators/main/categories.json
           OPERATOR_BUNDLE_CATEGORIES=/tmp/categories.json \
             operator-sdk bundle validate ./operator/bundle --select-optional suite=operatorframework
-          go run "github.com/operator-framework/operator-registry/cmd/opm@$OPM_VERSION" validate operator/catalog
+          go run -tags containers_image_openpgp "github.com/operator-framework/operator-registry/cmd/opm@$OPM_VERSION" validate operator/catalog
       - name: Committed bundle in sync
         # operator/bundle is generated from operator/config by `make bundle`, and nothing
         # else keeps them in sync — regenerate at the committed CSV's version and fail on

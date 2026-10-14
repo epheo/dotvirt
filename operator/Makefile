@@ -11,7 +11,8 @@ CONTAINER_TOOL ?= docker
 CONTROLLER_GEN ?= go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.18.0
 KUSTOMIZE ?= go run sigs.k8s.io/kustomize/kustomize/v5@v5.4.3
 OPERATOR_SDK ?= operator-sdk
-OPM ?= go run github.com/operator-framework/operator-registry/cmd/opm@$(OPM_VERSION)
+# Without this tag opm links gpgme through cgo, absent on CI runners.
+OPM ?= go run -tags containers_image_openpgp github.com/operator-framework/operator-registry/cmd/opm@$(OPM_VERSION)
 # Pins the bundle CSV's images to digests + rebuilds spec.relatedImages from them (the same
 # `operator-manifest pin` the community-operators-prod pipeline runs); used by `bundle` below.
 OPERATOR_MANIFEST_TOOLS ?= go run github.com/operator-framework/operator-manifest-tools@$(OPERATOR_MANIFEST_TOOLS_VERSION)
