@@ -88,13 +88,7 @@
 		Staged
 	</div>
 	<ErrorNote error={discardOp.error} class="mx-3 mb-1" />
-	{#if drafts.error}
-		<Note tone="danger" class="mx-3 mb-1 flex items-center gap-2">
-			<span class="min-w-0 flex-1">{drafts.error}</span>
-			{@render retryDrafts()}
-		</Note>
-	{/if}
-	{#if !drafts.loaded && !drafts.error}
+	{#if !drafts.loaded}
 		<div class="p-3"><Skeleton rows={3} class="h-7" /></div>
 	{:else if drafts.loaded && lanes.length === 0 && failedLanes.length === 0}
 		<p class="px-3 py-2 text-xs text-ink-faint">

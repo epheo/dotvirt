@@ -1,4 +1,4 @@
-import { api, retryDelay, Unauthorized, type User } from '$lib/api';
+import { api, HttpError, retryDelay, Unauthorized, type User } from '$lib/api';
 import { friendlyError } from '$lib/format';
 import { resource, type Resource } from '$lib/resource.svelte';
 
@@ -8,8 +8,9 @@ import { resource, type Resource } from '$lib/resource.svelte';
 class Session {
 	user = $state<User | null>(null);
 	checking = $state(true);
-	// The boot probe's last non-401 failure while it keeps retrying; '' otherwise.
-	unreachable = $state('');
+	// The boot probe's last non-401 failure while it keeps retrying. answered
+	// tells a server error (it replied) from no response at all.
+	bootError = $state<{ answered: boolean; detail: string } | null>(null);
 	#wake: (() => void) | null = null;
 
 	// Only a 401 means "sign in": anything else (backend restarting, network
@@ -25,7 +26,7 @@ class Session {
 					this.user = null;
 					break;
 				}
-				this.unreachable = friendlyError(e);
+				this.bootError = { answered: e instanceof HttpError, detail: friendlyError(e) };
 				await new Promise<void>((resolve) => {
 					const id = setTimeout(resolve, retryDelay(attempt));
 					this.#wake = () => {
@@ -36,7 +37,7 @@ class Session {
 				this.#wake = null;
 			}
 		}
-		this.unreachable = '';
+		this.bootError = null;
 		this.checking = false;
 	}
 

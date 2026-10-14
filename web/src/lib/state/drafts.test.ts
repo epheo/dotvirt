@@ -84,17 +84,4 @@ describe('drafts.refresh', () => {
 		expect(drafts.failed).toEqual([{ project: 'db', error: 'forge down' }]);
 		expect(drafts.loaded).toBe(true);
 	});
-
-	it('surfaces a failed refresh instead of a skeleton forever, and clears it on retry', async () => {
-		api.draftsByProject.mockRejectedValueOnce(new Error('network down'));
-		await drafts.refresh();
-		expect(drafts.loaded).toBe(false);
-		expect(drafts.error).toBe('network down');
-		expect(drafts.refreshing).toBe(false);
-
-		api.draftsByProject.mockResolvedValueOnce(view(0));
-		await drafts.refresh();
-		expect(drafts.error).toBe('');
-		expect(drafts.loaded).toBe(true);
-	});
 });

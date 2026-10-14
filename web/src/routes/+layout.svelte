@@ -187,9 +187,11 @@
 
 {#if session.checking}
 	<div class="flex h-screen flex-col items-center justify-center gap-3 text-sm text-ink-faint">
-		{#if session.unreachable}
-			<p class="font-medium text-ink-soft">Server unreachable. Retrying…</p>
-			<p class="max-w-md text-center font-mono text-xs break-all">{session.unreachable}</p>
+		{#if session.bootError}
+			<p class="font-medium text-ink-soft">
+				{session.bootError.answered ? 'Server error' : 'Server unreachable'}. Retrying…
+			</p>
+			<p class="max-w-md text-center font-mono text-xs break-all">{session.bootError.detail}</p>
 			<Button variant="secondary" size="sm" onclick={() => session.retryNow()}>Retry now</Button>
 		{:else}
 			Loading…

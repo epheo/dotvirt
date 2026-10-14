@@ -1,5 +1,4 @@
-import { draftsByProject, Unauthorized, vmKey, type DraftItem, type DraftView } from '$lib/api';
-import { friendlyError } from '$lib/format';
+import { draftsByProject, vmKey, type DraftItem, type DraftView } from '$lib/api';
 import { inventory } from './inventory.svelte';
 
 // The synthetic platform-tier project (matches the backend's platformProjectName);
@@ -19,8 +18,6 @@ class DraftsStore {
 	refreshing = $state(false);
 	// Projects whose draft could not be read on the last refresh.
 	failed = $state<{ project: string; error: string }[]>([]);
-	// The last refresh failed as a whole; '' once one lands.
-	error = $state('');
 
 	readonly count = $derived(this.drafts.reduce((n, d) => n + d.draft.count, 0));
 	// VMs with an unproposed staged change (this user's draft), keyed "ns/name".
@@ -57,12 +54,9 @@ class DraftsStore {
 			if (gen !== this.#gen) return;
 			this.drafts = d.drafts;
 			this.failed = d.failed;
-			this.error = '';
 			this.loaded = true;
-		} catch (e) {
-			// Keep the last good summary; a 401 signs out centrally.
-			if (gen !== this.#gen || e instanceof Unauthorized) return;
-			this.error = friendlyError(e);
+		} catch {
+			// Only a 401 escapes draftsByProject; it signs out centrally.
 		} finally {
 			if (gen === this.#gen) this.refreshing = false;
 		}
@@ -72,7 +66,6 @@ class DraftsStore {
 		this.#gen++;
 		this.drafts = [];
 		this.failed = [];
-		this.error = '';
 		this.loaded = false;
 		this.refreshing = false;
 	}

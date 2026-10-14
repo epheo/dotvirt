@@ -2,7 +2,15 @@ import { describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => {
 	class Unauthorized extends Error {}
-	return { api: { me: vi.fn() }, Unauthorized, retryDelay: () => 1000 };
+	class HttpError extends Error {
+		constructor(
+			m: string,
+			readonly status: number,
+		) {
+			super(m);
+		}
+	}
+	return { api: { me: vi.fn() }, Unauthorized, HttpError, retryDelay: () => 1000 };
 });
 vi.mock('$lib/api', () => api);
 
@@ -18,11 +26,11 @@ describe('session.check', () => {
 			const done = session.check();
 			await vi.advanceTimersByTimeAsync(0);
 			expect(session.checking).toBe(true);
-			expect(session.unreachable).toBe('Failed to fetch');
+			expect(session.bootError).toEqual({ answered: false, detail: 'Failed to fetch' });
 			await vi.advanceTimersByTimeAsync(1000);
 			await done;
 			expect(session.user?.username).toBe('ada');
-			expect(session.unreachable).toBe('');
+			expect(session.bootError).toBeNull();
 			expect(session.checking).toBe(false);
 		} finally {
 			vi.useRealTimers();
@@ -31,10 +39,12 @@ describe('session.check', () => {
 
 	it('retryNow skips the backoff wait', async () => {
 		api.api.me
-			.mockRejectedValueOnce(new Error('503'))
+			.mockRejectedValueOnce(new api.HttpError('/api/me: 500 boom', 500))
 			.mockResolvedValueOnce({ username: 'ada', groups: [] });
 		const done = session.check();
-		await vi.waitFor(() => expect(session.unreachable).toBe('503'));
+		await vi.waitFor(() =>
+			expect(session.bootError).toEqual({ answered: true, detail: '/api/me: 500 boom' }),
+		);
 		session.retryNow();
 		await done;
 		expect(session.user?.username).toBe('ada');
@@ -45,6 +55,6 @@ describe('session.check', () => {
 		await session.check();
 		expect(session.user).toBeNull();
 		expect(session.checking).toBe(false);
-		expect(session.unreachable).toBe('');
+		expect(session.bootError).toBeNull();
 	});
 });

@@ -146,4 +146,28 @@ describe('streamInventory status', () => {
 			vi.useRealTimers();
 		}
 	});
+
+	it('retryNow during the session probe skips the next backoff wait', async () => {
+		vi.useFakeTimers();
+		vi.stubGlobal('WebSocket', FakeSocket);
+		vi.stubGlobal('location', { protocol: 'http:', host: 'x' });
+		let answer!: (r: Response) => void;
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() => new Promise<Response>((r) => (answer = r))),
+		);
+		FakeSocket.all = [];
+		const s = streamInventory(() => {});
+		try {
+			FakeSocket.all[0].close(); // never opened: probes the session
+			s.retryNow();
+			answer(Response.json({ username: 'ada', groups: [] }));
+			await vi.advanceTimersByTimeAsync(0);
+			expect(FakeSocket.all.length).toBe(2);
+		} finally {
+			s.close();
+			vi.unstubAllGlobals();
+			vi.useRealTimers();
+		}
+	});
 });

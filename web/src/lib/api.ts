@@ -250,7 +250,7 @@ export class Unauthorized extends Error {
 
 // HttpError carries the status of a non-2xx answer, for callers that treat
 // one status as an answer rather than a failure (a 403 that means "not yours").
-class HttpError extends Error {
+export class HttpError extends Error {
 	constructor(
 		message: string,
 		readonly status: number,
@@ -581,7 +581,7 @@ export type StreamStatus = 'connecting' | 'live' | 'reconnecting' | 'down';
  * caller's tree. Calls onInventory on each push, auto-reconnects with backoff
  * (reporting each transition to onStatus), and invokes onUnauthorized if the
  * handshake is rejected (expired session). close ends the subscription;
- * retryNow skips a pending backoff wait.
+ * retryNow skips the backoff wait, pending or next.
  */
 export function streamInventory(
 	onInventory: (inv: Inventory) => void,
@@ -593,6 +593,9 @@ export function streamInventory(
 	let retry = 0;
 	let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	let everOpen = false;
+	// retryNow asked while an attempt (socket or session probe) was in flight:
+	// if that attempt fails, the next one starts without the backoff wait.
+	let skipWait = false;
 
 	const url = () => {
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -607,6 +610,7 @@ export function streamInventory(
 		ws.onopen = () => {
 			everOpen = true;
 			retry = 0;
+			skipWait = false;
 			onStatus?.('live');
 		};
 		ws.onmessage = (e) => {
@@ -620,7 +624,8 @@ export function streamInventory(
 			if (closed) return;
 			retry = Math.min(retry + 1, 6);
 			onStatus?.(retry >= 6 ? 'down' : 'reconnecting');
-			reconnectTimer = setTimeout(connect, retryDelay(retry));
+			reconnectTimer = setTimeout(connect, skipWait ? 0 : retryDelay(retry));
+			skipWait = false;
 		};
 		ws.onclose = () => {
 			if (closed) return;
@@ -657,10 +662,12 @@ export function streamInventory(
 			clearTimeout(reconnectTimer);
 			ws?.close();
 		},
-		// Only while a backoff wait is pending: a socket or probe in flight
-		// already is the retry.
 		retryNow: () => {
-			if (closed || reconnectTimer === undefined) return;
+			if (closed) return;
+			if (reconnectTimer === undefined) {
+				skipWait = true;
+				return;
+			}
 			clearTimeout(reconnectTimer);
 			connect();
 		},
