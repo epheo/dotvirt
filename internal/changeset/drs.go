@@ -8,14 +8,14 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
-	"github.com/epheo/dotvirt/internal/drsgen"
+	"github.com/epheo/dotvirt/internal/drs"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 )
 
 // DRS (the descheduler tier) follows the platform-repo staging model: enabling
-// or re-configuring stages the drsgen file set into the platform draft, and the
+// or re-configuring stages the drs file set into the platform draft, and the
 // committed state is read back off the base branch - the same
 // stage -> propose -> merge -> Argo-applies path as every other platform kind.
 
@@ -32,11 +32,11 @@ func (c *Coordinator) StageEnableDRS(id auth.Identity, proj project.ProjectInfo,
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	var spec drsgen.Spec
+	var spec drs.Spec
 	if err := json.Unmarshal(rawSpec, &spec); err != nil {
 		return model.DraftView{}, fmt.Errorf("%w: invalid DRS spec: %v", model.ErrInvalid, err)
 	}
-	files, err := drsgen.Manifests(spec)
+	files, err := drs.Manifests(spec)
 	if err != nil {
 		return model.DraftView{}, invalid(err)
 	}
@@ -78,7 +78,7 @@ func (c *Coordinator) StageDisableDRS(id auth.Identity, proj project.ProjectInfo
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	_, configured, err := read.LookupOnBranch(c.baseBranch, drsgen.CRPath)
+	_, configured, err := read.LookupOnBranch(c.baseBranch, drs.CRPath)
 	if err != nil {
 		return model.DraftView{}, err
 	}
@@ -93,7 +93,7 @@ func (c *Coordinator) StageDisableDRS(id auth.Identity, proj project.ProjectInfo
 		Resource:   draft.ResourceDRS,
 		Namespace:  model.ClusterScopeNS,
 		Name:       "kubedescheduler",
-		SourceFile: drsgen.CRPath,
+		SourceFile: drs.CRPath,
 	}); err != nil {
 		return model.DraftView{}, err
 	}
@@ -110,7 +110,7 @@ func (r *Reader) DRSState(proj project.ProjectInfo) (model.DRSGitState, error) {
 		return model.DRSGitState{}, err
 	}
 	var out model.DRSGitState
-	content, ok, err := read.LookupOnBranch(r.baseBranch, drsgen.CRPath)
+	content, ok, err := read.LookupOnBranch(r.baseBranch, drs.CRPath)
 	if errors.Is(err, git.ErrNoBranch) || err == nil && !ok {
 		return out, nil
 	}
@@ -120,10 +120,10 @@ func (r *Reader) DRSState(proj project.ProjectInfo) (model.DRSGitState, error) {
 	out.Configured = true
 	// A hand-edited CR that no longer parses still reads as configured - the
 	// panel then shows the raw state without a config form prefill.
-	if spec, err := drsgen.Parse(content); err == nil {
+	if spec, err := drs.Parse(content); err == nil {
 		out.Config = configFromSpec(spec)
 	}
-	if _, out.PSIConfigured, err = read.LookupOnBranch(r.baseBranch, drsgen.PSIPath); err != nil {
+	if _, out.PSIConfigured, err = read.LookupOnBranch(r.baseBranch, drs.PSIPath); err != nil {
 		return model.DRSGitState{}, err
 	}
 	return out, nil
@@ -147,7 +147,7 @@ func (c *Coordinator) DRSDraft(id auth.Identity, proj project.ProjectInfo) (mode
 		case e.Kind == draft.KindDelete:
 			out.DisableStaged = true
 		case e.Name == "kubedescheduler":
-			if spec, err := drsgen.Parse([]byte(e.Manifest)); err == nil {
+			if spec, err := drs.Parse([]byte(e.Manifest)); err == nil {
 				out.Config = configFromSpec(spec)
 			}
 		case e.Name == "psi-machineconfig":
@@ -158,7 +158,7 @@ func (c *Coordinator) DRSDraft(id auth.Identity, proj project.ProjectInfo) (mode
 }
 
 // configFromSpec resolves a parsed KubeDescheduler Spec into the config DTO.
-func configFromSpec(spec drsgen.Spec) *model.DRSConfig {
+func configFromSpec(spec drs.Spec) *model.DRSConfig {
 	return &model.DRSConfig{
 		Mode:               spec.Mode,
 		Threshold:          spec.Threshold,

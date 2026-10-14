@@ -1,6 +1,6 @@
 // Package reflect holds the reflector plumbing shared by dotvirt's in-memory
 // snapshots (clusterstate's live VM/VMI/namespace snapshot, argo's drift
-// snapshot, desched's DRS snapshot, netstate's networking catalog). Each
+// snapshot, drs's DRS snapshot, netstate's networking catalog). Each
 // snapshot composes these and adds its own typed read methods: the indexer
 // and the reflector start (Run, or RunWhenServed for a CRD that may be
 // absent), the store wrapper that turns a stream of watch deltas into a single

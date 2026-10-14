@@ -1,11 +1,9 @@
-package desched
+package drs
 
 import (
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-
-	"github.com/epheo/dotvirt/internal/drsgen"
 )
 
 // cr builds a managed-CR unstructured with the given status conditions.
@@ -13,7 +11,7 @@ func cr(conditions ...map[string]any) *unstructured.Unstructured {
 	u := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "operator.openshift.io/v1",
 		"kind":       "KubeDescheduler",
-		"metadata":   map[string]any{"name": "cluster", "namespace": drsgen.Namespace},
+		"metadata":   map[string]any{"name": "cluster", "namespace": Namespace},
 		"spec":       map[string]any{"mode": "Predictive"},
 	}}
 	if conditions != nil {
@@ -31,7 +29,7 @@ func liveFor(t *testing.T, u *unstructured.Unstructured) (out struct {
 	Degraded  string
 }) {
 	t.Helper()
-	s := New(nil)
+	s := NewSnapshot(nil)
 	if err := s.store.Add(u); err != nil {
 		t.Fatal(err)
 	}

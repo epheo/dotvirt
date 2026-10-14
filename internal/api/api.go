@@ -27,8 +27,8 @@ import (
 	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
-	"github.com/epheo/dotvirt/internal/desched"
 	"github.com/epheo/dotvirt/internal/draft"
+	"github.com/epheo/dotvirt/internal/drs"
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/metrics"
@@ -174,7 +174,7 @@ type Server struct {
 	clusterF  *cluster.Factory
 	state     *clusterstate.State // SA-owned live+topology snapshot; the read path's source
 	drift     *argo.Snapshot      // nil when Argo disabled; SA-owned, watch-fed Application snapshot
-	desched   *desched.Snapshot   // nil disables the DRS live plane; SA-owned KubeDescheduler snapshot
+	desched   *drs.Snapshot       // nil disables the DRS live plane; SA-owned KubeDescheduler snapshot
 	netstate  *netstate.Snapshot  // SA-owned, watch-fed networking catalog (port groups + fabric)
 	bus       *eventbus.Bus       // change-version source for the version-stamped auth caches
 	resolver  *project.Resolver
@@ -215,7 +215,7 @@ type Deps struct {
 	ClusterFactory *cluster.Factory
 	State          *clusterstate.State
 	Drift          *argo.Snapshot     // SA-owned drift snapshot (watch-fed); nil when Argo disabled
-	Desched        *desched.Snapshot  // SA-owned KubeDescheduler snapshot; nil disables the DRS live plane
+	Desched        *drs.Snapshot      // SA-owned KubeDescheduler snapshot; nil disables the DRS live plane
 	Netstate       *netstate.Snapshot // SA-owned networking catalog snapshot (watch-fed)
 	Bus            *eventbus.Bus      // change-version source for version-stamped caches
 	Resolver       *project.Resolver
