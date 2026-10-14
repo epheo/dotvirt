@@ -1,0 +1,39 @@
+# Weekly drift PRs. Minor and patch bumps are grouped per ecosystem; majors come
+# alone so each gets its own review. Security fixes are not batched: the vuln
+# workflow gates PRs and the nightly scan files them.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directories: ['/', '/operator']
+    schedule: { interval: weekly, day: monday }
+    groups:
+      go-minor:
+        update-types: [minor, patch]
+    ignore:
+      # Held to the OpenShift Kubernetes minor (4.22 = 1.35) and the KubeVirt line
+      # OpenShift Virtualization ships (virt-template is pre-1.0, where minors
+      # break); raise these by hand.
+      - dependency-name: 'k8s.io/*'
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: 'sigs.k8s.io/controller-runtime'
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: 'kubevirt.io/*'
+        update-types: [version-update:semver-minor, version-update:semver-major]
+  - package-ecosystem: npm
+    directory: /web
+    schedule: { interval: weekly, day: monday }
+    groups:
+      npm-minor:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    groups:
+      actions:
+        update-types: [minor, patch]
+  - package-ecosystem: docker
+    directories: ['/', '/operator']
+    schedule: { interval: weekly, day: monday }
+    groups:
+      images:
+        update-types: [minor, patch, digest]
