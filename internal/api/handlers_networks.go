@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/draft"
@@ -28,9 +27,8 @@ type nsPeek struct {
 // platform tier, SSAR-gated on the caller's authority to create ref's kind.
 func (s *Server) platformCreate(ref ssarRef, resource draft.Resource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		raw, err := io.ReadAll(r.Body)
-		if err != nil {
-			fail(w, invalid(err))
+		raw, ok := readRaw(w, r)
+		if !ok {
 			return
 		}
 		sc, ok := s.platformScope(w, r, ref)
