@@ -1,7 +1,7 @@
 // OpenShift SSO: the authorization-code flow against the cluster's OAuth server.
 // Only token ACQUISITION changes - the access token OpenShift returns is a normal
 // bearer token for the API server, so it lands in the exact same TokenReview +
-// signed-cookie + per-request pass-through path as a pasted token, and cluster
+// sealed-cookie + per-request pass-through path as a pasted token, and cluster
 // RBAC stays the sole authority. Token paste remains for vanilla Kubernetes and
 // ServiceAccounts.
 
@@ -123,7 +123,7 @@ func (o *OAuth) oauth2Config(m *oauthMeta) *oauth2.Config {
 }
 
 // stateCookie carries the CSRF state across the round-trip to the OAuth server,
-// HMAC-signed with the session secret like the session cookie itself.
+// sealed with the session secret like the session cookie itself.
 const stateCookie = "dotvirt_oauth_state"
 
 // LoginRedirect (GET /api/auth/openshift) sends the browser to the cluster's

@@ -1,49 +1,80 @@
 package auth
 
 import (
-	"crypto/hmac"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/hkdf"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"net/http"
 	"strings"
 )
 
-// cookieName is the session cookie holding the signed bearer token.
+// cookieName is the session cookie holding the sealed bearer token.
 const cookieName = "dotvirt_session"
 
-// cookieValue encodes the token as base64(token)."."hex(HMAC-SHA256(token)). The
-// HMAC binds the value to dotvirt's secret so a client can't forge a cookie for
-// an arbitrary token - though the token itself is the real credential; the MAC
-// just lets us reject tampering cheaply before spending a TokenReview.
-func cookieValue(token string, secret []byte) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(token)) + "." + sign(token, secret)
+// cookiePrefix versions the sealed format; any other value, including the
+// older HMAC-only form, fails to open and reads as logged out.
+const cookiePrefix = "v2."
+
+// cookieKey derives the AES-256 key from SessionSecret so the secret itself is
+// never used as a cipher key and a later key purpose cannot collide with it.
+func cookieKey(secret []byte) []byte {
+	key, err := hkdf.Key(sha256.New, secret, nil, "dotvirt session cookie v2", 32)
+	if err != nil {
+		panic(err) // only on an impossible length request
+	}
+	return key
 }
 
-// parseCookieValue verifies the HMAC and returns the raw token.
+func cookieAEAD(secret []byte) cipher.AEAD {
+	block, err := aes.NewCipher(cookieKey(secret))
+	if err != nil {
+		panic(err)
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		panic(err)
+	}
+	return aead
+}
+
+// cookieValue seals the token with AES-GCM so the bearer token never sits in
+// the browser in clear; the GCM tag also rejects tampering before a TokenReview.
+func cookieValue(token string, secret []byte) string {
+	aead := cookieAEAD(secret)
+	nonce := make([]byte, aead.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		panic(err)
+	}
+	sealed := aead.Seal(nonce, nonce, []byte(token), []byte(cookiePrefix))
+	return cookiePrefix + base64.RawURLEncoding.EncodeToString(sealed)
+}
+
+// parseCookieValue opens a sealed value and returns the raw token.
 func parseCookieValue(value string, secret []byte) (string, bool) {
-	encToken, mac, ok := strings.Cut(value, ".")
+	enc, ok := strings.CutPrefix(value, cookiePrefix)
 	if !ok {
 		return "", false
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(encToken)
+	sealed, err := base64.RawURLEncoding.DecodeString(enc)
 	if err != nil {
 		return "", false
 	}
-	token := string(raw)
-	if !hmac.Equal([]byte(mac), []byte(sign(token, secret))) {
+	aead := cookieAEAD(secret)
+	if len(sealed) < aead.NonceSize() {
 		return "", false
 	}
-	return token, true
+	nonce, ct := sealed[:aead.NonceSize()], sealed[aead.NonceSize():]
+	raw, err := aead.Open(nil, nonce, ct, []byte(cookiePrefix))
+	if err != nil {
+		return "", false
+	}
+	return string(raw), true
 }
 
-func sign(token string, secret []byte) string {
-	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte(token))
-	return hex.EncodeToString(mac.Sum(nil))
-}
-
-// setCookie writes the signed session cookie. httpOnly (no JS access), SameSite
+// setCookie writes the sealed session cookie. httpOnly (no JS access), SameSite
 // Lax (sent on top-level navigations + same-site requests), Secure when the
 // request arrived over TLS.
 func setCookie(w http.ResponseWriter, r *http.Request, token string, secret []byte) {
@@ -57,7 +88,7 @@ func setCookie(w http.ResponseWriter, r *http.Request, token string, secret []by
 	})
 }
 
-// readCookie returns the verified token from the session cookie.
+// readCookie returns the opened token from the session cookie.
 func readCookie(r *http.Request, secret []byte) (string, bool) {
 	c, err := r.Cookie(cookieName)
 	if err != nil {

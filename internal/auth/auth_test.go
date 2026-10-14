@@ -2,6 +2,10 @@ package auth
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -34,17 +38,68 @@ func TestCookieRoundTrip(t *testing.T) {
 func TestCookieTamperRejected(t *testing.T) {
 	value := cookieValue("real-token", secret)
 
-	// Wrong secret: the MAC won't verify.
 	if _, ok := parseCookieValue(value, []byte("other-secret")); ok {
-		t.Error("accepted a cookie signed with a different secret")
+		t.Error("accepted a cookie sealed with a different secret")
 	}
-	// Mangled MAC.
-	if _, ok := parseCookieValue(value+"00", secret); ok {
-		t.Error("accepted a cookie with a tampered MAC")
+	enc := strings.TrimPrefix(value, cookiePrefix)
+	flipped := []byte(enc)
+	i := len(flipped) / 2
+	if flipped[i] == 'A' {
+		flipped[i] = 'B'
+	} else {
+		flipped[i] = 'A'
 	}
-	// No separator.
+	if _, ok := parseCookieValue(cookiePrefix+string(flipped), secret); ok {
+		t.Error("accepted tampered ciphertext")
+	}
+	if _, ok := parseCookieValue(cookiePrefix+"AAAA", secret); ok {
+		t.Error("accepted a value shorter than the nonce")
+	}
 	if _, ok := parseCookieValue("garbage", secret); ok {
 		t.Error("accepted a malformed cookie value")
+	}
+}
+
+func TestCookieHidesToken(t *testing.T) {
+	const token = "sha256~visible-token"
+	a, b := cookieValue(token, secret), cookieValue(token, secret)
+	if strings.Contains(a, token) || strings.Contains(a, base64.RawURLEncoding.EncodeToString([]byte(token))) {
+		t.Error("sealed cookie carries the token in clear")
+	}
+	if a == b {
+		t.Error("two seals of one token are identical: nonce is not random")
+	}
+}
+
+// A typical projected SA JWT is ~1 KiB; the sealed value must stay well under
+// the 4 KiB browser cookie cap.
+func TestCookieSizeForJWT(t *testing.T) {
+	jwt := strings.Repeat("x", 1400)
+	if n := len(cookieName) + 1 + len(cookieValue(jwt, secret)); n > 4096 {
+		t.Errorf("sealed cookie is %d bytes, over the 4 KiB cap", n)
+	}
+}
+
+// Cookies minted before sealing (base64(token).hex(HMAC)) must read as logged
+// out, never as an error.
+func TestOldFormatCookieReadsLoggedOut(t *testing.T) {
+	const token = "sha256~old"
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(token))
+	old := base64.RawURLEncoding.EncodeToString([]byte(token)) + "." + hex.EncodeToString(mac.Sum(nil))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/inventory", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: old})
+	if _, ok := readCookie(req, secret); ok {
+		t.Fatal("old-format cookie still opens")
+	}
+	a, _ := fakeAuth(map[string]authnv1.UserInfo{token: {Username: "alice"}})
+	rec := httptest.NewRecorder()
+	a.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("old-format cookie reached the handler")
+	})).ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("old-format cookie: status %d, want 401", rec.Code)
 	}
 }
 
