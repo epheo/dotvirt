@@ -2,12 +2,14 @@ package git
 
 import (
 	"context"
+	"errors"
 	"log"
 	"sync"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/pkg/forge"
+	"github.com/go-git/go-git/v5/plumbing/transport"
 )
 
 // RepoSet manages dotvirt's per-project git repositories: one read mirror + one
@@ -37,13 +39,35 @@ type RepoSet struct {
 	// annotation) resolves to one entry - a webhook Poke can't miss it on a spelling
 	// difference. The raw URL each entry was opened with is used for the clone.
 	cache map[string]*repoPair
+	// failed holds a recent Open error per key so a dead repo is retried after
+	// openBackoff, not re-cloned by every inventory build.
+	failed map[string]openFailure
+	// opening lets concurrent Gets of one repo share a single clone.
+	opening map[string]chan struct{}
+
+	open func(url, user string, tokenFn forge.TokenSource) (*Repo, error)
+	now  func() time.Time
 }
 
 type repoPair struct {
+	key   string
 	read  *Repo
 	write *WriteRepo
 	poke  chan struct{} // out-of-cycle fetch trigger (webhook), coalesced
+	used  time.Time     // last Get; guarded by RepoSet.mu
 }
+
+type openFailure struct {
+	err   error
+	until time.Time
+}
+
+const (
+	openBackoff = 30 * time.Second
+	// idleTimeout evicts a repo no Get has asked for, e.g. a deleted project's:
+	// its poll would otherwise fetch forever. A later Get re-clones it fresh.
+	idleTimeout = time.Hour
+)
 
 // NewRepoSet builds a RepoSet. forgeUser/forgeToken authenticate every repo's
 // clone/push; push=false disables pushes (offline/tests). ctx bounds the per-repo
@@ -59,6 +83,10 @@ func NewRepoSet(ctx context.Context, forgeUser string, tokenFn forge.TokenSource
 		bus:      bus,
 		interval: interval,
 		cache:    map[string]*repoPair{},
+		failed:   map[string]openFailure{},
+		opening:  map[string]chan struct{}{},
+		open:     Open,
+		now:      time.Now,
 	}
 }
 
@@ -68,34 +96,61 @@ func NewRepoSet(ctx context.Context, forgeUser string, tokenFn forge.TokenSource
 // is lazy (clones per commit) so OpenWrite itself never errors.
 func (s *RepoSet) Get(repoURL string) (*Repo, *WriteRepo, error) {
 	key := forge.NormalizeRepoURL(repoURL)
-	s.mu.Lock()
-	if p, ok := s.cache[key]; ok {
+	var done chan struct{}
+	for done == nil {
+		s.mu.Lock()
+		if p, ok := s.cache[key]; ok {
+			p.used = s.now()
+			s.mu.Unlock()
+			return p.read, p.write, nil
+		}
+		if f, ok := s.failed[key]; ok && s.now().Before(f.until) {
+			s.mu.Unlock()
+			return nil, nil, f.err
+		}
+		if wait, ok := s.opening[key]; ok {
+			s.mu.Unlock()
+			<-wait
+			continue
+		}
+		done = make(chan struct{})
+		s.opening[key] = done
 		s.mu.Unlock()
-		return p.read, p.write, nil
 	}
-	s.mu.Unlock()
 
 	// Open outside the lock with the RAW url (the clone may need the exact form):
 	// the read clone hits the network and can be slow; we don't want to block Get
-	// for other repos. A rare duplicate open under a race is resolved below (first
-	// writer wins, later opens are discarded).
-	read, err := Open(repoURL, s.user, s.tokenFn)
-	if err != nil {
-		return nil, nil, err
-	}
-	write := OpenWrite(repoURL, s.user, s.tokenFn, s.push)
+	// for other repos.
+	read, err := s.open(repoURL, s.user, s.tokenFn)
 
 	s.mu.Lock()
-	if p, ok := s.cache[key]; ok {
-		s.mu.Unlock()
-		return p.read, p.write, nil // someone else won the race; use theirs
+	defer s.mu.Unlock()
+	delete(s.opening, key)
+	close(done)
+	if err != nil {
+		s.failed[key] = openFailure{err: err, until: s.now().Add(openBackoff)}
+		return nil, nil, err
 	}
-	pair := &repoPair{read: read, write: write, poke: make(chan struct{}, 1)}
+	delete(s.failed, key)
+	pair := &repoPair{
+		key:   key,
+		read:  read,
+		write: OpenWrite(repoURL, s.user, s.tokenFn, s.push),
+		poke:  make(chan struct{}, 1),
+		used:  s.now(),
+	}
 	s.cache[key] = pair
-	s.mu.Unlock()
-
 	go s.poll(pair)
 	return pair.read, pair.write, nil
+}
+
+// Created clears repoURL's cached open failure: dotvirt just made the repo on
+// the forge, so a "not found" from before must not fail the seed or the first
+// propose for the rest of the backoff.
+func (s *RepoSet) Created(repoURL string) {
+	s.mu.Lock()
+	delete(s.failed, forge.NormalizeRepoURL(repoURL))
+	s.mu.Unlock()
 }
 
 // Poke fetches repoURL's heads now instead of waiting for the next poll tick -
@@ -110,6 +165,7 @@ func (s *RepoSet) Poke(repoURL string) {
 	key := forge.NormalizeRepoURL(repoURL)
 	s.mu.Lock()
 	p := s.cache[key]
+	delete(s.failed, key) // the forge says the repo exists: retry its clone now
 	s.mu.Unlock()
 	if p == nil {
 		return
@@ -123,12 +179,17 @@ func (s *RepoSet) Poke(repoURL string) {
 // poll fetches repo on an interval - or immediately on a poke - and publishes
 // GitChanged when its heads move. One goroutine per open repo; headsSignature is
 // the single network fetch (reads never fetch). The ticker is the missed-event
-// backstop; the poke (webhook) is the primary trigger.
+// backstop; the poke (webhook) is the primary trigger. It ends, dropping the
+// entry, once the repo is idle or gone from the forge.
 func (s *RepoSet) poll(p *repoPair) {
 	last := ""
 	lastErr := ""
-	check := func() {
+	check := func() (gone bool) {
 		sig, err := p.read.headsSignature()
+		if errors.Is(err, transport.ErrRepositoryNotFound) {
+			log.Printf("git: poll %s: repo gone, dropping it", p.read.url)
+			return true
+		}
 		if err != nil {
 			// A failing fetch means the mirror is serving STALE git with no other
 			// signal anywhere - the exact state a webhook-outage postmortem found
@@ -138,17 +199,18 @@ func (s *RepoSet) poll(p *repoPair) {
 				lastErr = err.Error()
 				log.Printf("git: poll %s: fetch failing (mirror stale until it recovers): %v", p.read.url, err)
 			}
-			return
+			return false
 		}
 		if lastErr != "" {
 			log.Printf("git: poll %s: fetch recovered", p.read.url)
 			lastErr = ""
 		}
 		if sig == last {
-			return
+			return false
 		}
 		last = sig
 		s.bus.Publish(eventbus.GitChanged)
+		return false
 	}
 	t := time.NewTicker(s.interval)
 	defer t.Stop()
@@ -157,9 +219,29 @@ func (s *RepoSet) poll(p *repoPair) {
 		case <-s.ctx.Done():
 			return
 		case <-t.C:
-			check()
+			if s.idle(p) || check() {
+				s.evict(p)
+				return
+			}
 		case <-p.poke:
-			check()
+			if check() {
+				s.evict(p)
+				return
+			}
 		}
+	}
+}
+
+func (s *RepoSet) idle(p *repoPair) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.now().Sub(p.used) > idleTimeout
+}
+
+func (s *RepoSet) evict(p *repoPair) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cache[p.key] == p {
+		delete(s.cache, p.key)
 	}
 }

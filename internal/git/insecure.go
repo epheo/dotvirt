@@ -14,12 +14,7 @@ import (
 // remotes. For dev only (e.g. a Forgejo Route with a self-signed cluster cert);
 // never enable against untrusted networks.
 func AllowInsecureTLS() {
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec G402 - dev flag
-		},
-	}
-	gittransport.InstallProtocol("https", githttp.NewClient(client))
+	installHTTPS(&tls.Config{InsecureSkipVerify: true}) // #nosec G402 - dev flag
 }
 
 // AllowCustomCA: go-git trusts caFile (the ingress CA serving a managed forge
@@ -29,8 +24,18 @@ func AllowCustomCA(caFile string) {
 	if pool == nil {
 		return
 	}
-	client := &http.Client{
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}},
-	}
+	installHTTPS(&tls.Config{RootCAs: pool})
+}
+
+func installHTTPS(tlsCfg *tls.Config) {
+	client := &http.Client{Transport: transportWith(tlsCfg)}
 	gittransport.InstallProtocol("https", githttp.NewClient(client))
+}
+
+// transportWith keeps the default transport's proxy and dial/TLS/idle
+// timeouts; a bare Transport would drop them and hang on a dead remote.
+func transportWith(tlsCfg *tls.Config) *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.TLSClientConfig = tlsCfg
+	return t
 }

@@ -1,6 +1,8 @@
 package git
 
 import (
+	"net/http/cgi"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -100,4 +102,76 @@ func contains(ss []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// Writes clone one commit deep; the pushed history must still be complete on
+// the remote, for an existing branch, a new one, and a changeset.
+func TestShallowWritesKeepRemoteConnected(t *testing.T) {
+	t.Run("file", func(t *testing.T) {
+		bare := seedMultiRepo(t)
+		testShallowWrites(t, bare, bare)
+	})
+	// Over smart http go-git takes the network push path, not the local one.
+	t.Run("http", func(t *testing.T) {
+		bare := seedMultiRepo(t)
+		testShallowWrites(t, bare, serveHTTP(t, bare))
+	})
+}
+
+// serveHTTP serves bare through git http-backend with pushes enabled.
+func serveHTTP(t *testing.T, bare string) string {
+	t.Helper()
+	execPath, err := exec.Command("git", "--exec-path").Output()
+	if err != nil {
+		t.Skipf("git --exec-path: %v", err)
+	}
+	backend := filepath.Join(strings.TrimSpace(string(execPath)), "git-http-backend")
+	if _, err := os.Stat(backend); err != nil {
+		t.Skipf("no git-http-backend: %v", err)
+	}
+	h := &cgi.Handler{
+		Path: backend,
+		Env: []string{
+			"GIT_PROJECT_ROOT=" + filepath.Dir(bare),
+			"GIT_HTTP_EXPORT_ALL=1",
+			"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.receivepack", "GIT_CONFIG_VALUE_0=true",
+		},
+	}
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	return srv.URL + "/" + filepath.Base(bare)
+}
+
+func testShallowWrites(t *testing.T, bare, url string) {
+	w := OpenWrite(url, "", nil, true)
+	file := func(n string) []model.File {
+		return []model.File{{Path: "tenant-a/" + n + ".yaml", Content: []byte("kind: ConfigMap\n")}}
+	}
+	for _, n := range []string{"a", "b"} {
+		if _, err := w.Commit("seed", "add "+n, file(n)); err != nil {
+			t.Fatalf("Commit seed %s: %v", n, err)
+		}
+	}
+	if _, err := w.Commit("fresh", "add c", file("c")); err != nil {
+		t.Fatalf("Commit fresh: %v", err)
+	}
+	items := []ChangesetItem{{Path: "tenant-a/d.yaml", NewContent: []byte("kind: ConfigMap\n")}}
+	if _, err := w.CommitChangeset("seed", "proposed", "add d", items, Author{Name: "u"}); err != nil {
+		t.Fatalf("CommitChangeset: %v", err)
+	}
+
+	git := func(args ...string) string {
+		out, err := exec.Command("git", append([]string{"-C", bare}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("fsck", "--strict", "--no-dangling")
+	if n := git("rev-list", "--count", "proposed"); n != "4" {
+		t.Errorf("proposed history = %s commits, want 4 (seed + a + b + d)", n)
+	}
+	if n := git("rev-list", "--count", "fresh"); n != "2" {
+		t.Errorf("fresh history = %s commits, want 2 (forked from main)", n)
+	}
 }

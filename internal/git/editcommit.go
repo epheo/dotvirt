@@ -43,7 +43,7 @@ func (w *WriteRepo) CommitChangeset(base, branch, message string, items []Change
 		return CommitResult{}, errors.New("nothing to propose")
 	}
 
-	repo, wt, err := w.openWorktree()
+	repo, wt, err := w.openWorktree(base)
 	if err != nil {
 		return CommitResult{}, err
 	}

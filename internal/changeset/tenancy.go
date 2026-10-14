@@ -254,6 +254,7 @@ func (c *Coordinator) ensureTenantRepo(platformRepo, name string) (repoURL strin
 		return "", false, fmt.Errorf("create project repo: %w", err)
 	}
 	if created {
+		c.repos.Created(repoURL)
 		c.seedTemplates(repoURL)
 	}
 	return repoURL, created, nil

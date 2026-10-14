@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -71,13 +72,19 @@ func (a Author) signature() *object.Signature {
 	return &object.Signature{Name: a.Name, Email: email, When: time.Now().UTC()}
 }
 
-// openWorktree clones the repo into memory and returns it with its worktree -
-// every write operation starts from fresh remote state. Callers hold w.mu.
-func (w *WriteRepo) openWorktree() (*git.Repository, *git.Worktree, error) {
-	repo, err := git.Clone(memory.NewStorage(), memfs.New(), &git.CloneOptions{
-		URL:  w.url,
-		Auth: w.auth(),
-	})
+// writeTimeout bounds each network leg of a write (clone, push): a user waits
+// on it, and a stalled remote must fail rather than hold w.mu.
+const writeTimeout = time.Minute
+
+// openWorktree clones branch alone, one commit deep, into memory - every write
+// starts from fresh remote state and needs nothing older: commits build on the
+// tip and the push forces. A branch the remote lacks falls back to the default
+// branch, which checkoutBranch forks it from. Callers hold w.mu.
+func (w *WriteRepo) openWorktree(branch string) (*git.Repository, *git.Worktree, error) {
+	repo, err := w.cloneShallow(plumbing.NewBranchReferenceName(branch))
+	if isMissingRef(err) {
+		repo, err = w.cloneShallow("")
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("clone for write: %w", err)
 	}
@@ -88,6 +95,22 @@ func (w *WriteRepo) openWorktree() (*git.Repository, *git.Worktree, error) {
 	return repo, wt, nil
 }
 
+func (w *WriteRepo) cloneShallow(ref plumbing.ReferenceName) (*git.Repository, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+	defer cancel()
+	return git.CloneContext(ctx, memory.NewStorage(), memfs.New(), &git.CloneOptions{
+		URL:           w.url,
+		Auth:          w.auth(),
+		ReferenceName: ref,
+		SingleBranch:  true,
+		Depth:         1,
+	})
+}
+
+func isMissingRef(err error) bool {
+	return errors.Is(err, plumbing.ErrReferenceNotFound) || errors.Is(err, git.NoMatchingRefSpecError{})
+}
+
 // pushBranch force-pushes branch when pushes are enabled (no-op otherwise); an
 // already-up-to-date remote is not an error. Force is correct for both callers:
 // the template seed lands on a repo dotvirt just created, and a re-propose
@@ -96,7 +119,9 @@ func (w *WriteRepo) pushBranch(repo *git.Repository, branch string) error {
 	if !w.push {
 		return nil
 	}
-	err := repo.Push(&git.PushOptions{
+	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+	defer cancel()
+	err := repo.PushContext(ctx, &git.PushOptions{
 		Auth:     w.auth(),
 		RefSpecs: []config.RefSpec{config.RefSpec(fmt.Sprintf("+refs/heads/%s:refs/heads/%s", branch, branch))},
 	})
@@ -113,7 +138,7 @@ func (w *WriteRepo) Commit(branch, message string, files []model.File) (CommitRe
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	repo, wt, err := w.openWorktree()
+	repo, wt, err := w.openWorktree(branch)
 	if err != nil {
 		return CommitResult{}, err
 	}
