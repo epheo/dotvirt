@@ -28,6 +28,18 @@ const saTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 // a revoked token stops working promptly, long enough to amortize a request burst.
 const clientTTL = 5 * time.Minute
 
+// client-go defaults to 5 QPS / burst 10 per client. A user without cluster-wide VM
+// read is probed with one SelfSubjectRulesReview per project namespace, so a 100+
+// namespace cluster would queue for ~20s at the default; the burst absorbs one full
+// probe sweep and APF still guards the apiserver.
+const (
+	userQPS   = 50
+	userBurst = 200
+	// The SA drives the reflectors' relists and the Argo patches; no per-request fan-out.
+	saQPS   = 50
+	saBurst = 100
+)
+
 // Factory builds and caches clients of type T, one per bearer token.
 type Factory[T any] struct {
 	base     *rest.Config // credential-less; per-user tokens ride a copy of this
@@ -52,8 +64,8 @@ func New[T any](kubeconfig string, build func(*rest.Config) (T, error)) (*Factor
 		return nil, err
 	}
 	return &Factory[T]{
-		base:     clearCredentials(full),
-		saConfig: saConfig(full),
+		base:     withLimits(clearCredentials(full), userQPS, userBurst),
+		saConfig: withLimits(saConfig(full), saQPS, saBurst),
 		build:    build,
 		cache:    ttlcache.New[T](clientTTL),
 	}, nil
@@ -128,6 +140,13 @@ func clearCredentials(full *rest.Config) *rest.Config {
 			CAData:     full.TLSClientConfig.CAData,
 		},
 	}
+}
+
+func withLimits(cfg *rest.Config, qps float32, burst int) *rest.Config {
+	if cfg != nil {
+		cfg.QPS, cfg.Burst = qps, burst
+	}
+	return cfg
 }
 
 // saConfig returns the config dotvirt uses as its own ServiceAccount, keeping the
