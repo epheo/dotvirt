@@ -1,13 +1,13 @@
 // Package netstate is dotvirt's networking read plane: an SA-maintained, watch-fed
 // snapshot of the port-group CRDs (UDN/CUDN/NAD) and the physical fabric (nmstate
-// NNS/NNCP), following the clusterstate/argo/desched reflector model - Catalog() is a
+// NNS/NNCP), following the clusterstate/argo/drs reflector model - Catalog() is a
 // pure in-memory scan, never a per-request cluster call.
 //
 // Port-group moves publish NetworkChanged so the hub re-broadcasts and the client
 // re-pulls the out-of-band catalog; NNS (node-state) signals once at initial sync,
 // then stays silent - its status churns and adapters need no live repaint, but a
 // client that pulled before the sync must still learn the adapters exist. Each
-// reflector is discovery-gated (like desched): a cluster without OVN-K UDN or nmstate
+// reflector is discovery-gated (like drs): a cluster without OVN-K UDN or nmstate
 // simply serves an empty slice for that source, never an error loop. Node names come
 // from a background-refreshed cache (nodes:list, no watch) that signals on membership
 // change, so uplink membership stays off the request path without a nodes:watch grant.

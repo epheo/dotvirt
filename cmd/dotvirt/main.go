@@ -23,8 +23,8 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/config"
-	"github.com/epheo/dotvirt/internal/desched"
 	"github.com/epheo/dotvirt/internal/draft"
+	"github.com/epheo/dotvirt/internal/drs"
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/metrics"
@@ -122,12 +122,12 @@ func run() error {
 	// DRS status plane: the SA-watched KubeDescheduler snapshot behind GET
 	// /api/drs. Discovery-gated - on a cluster without the descheduler operator
 	// it stays a slow API probe, never an error loop.
-	deschedSnapshot := desched.New(saCluster)
-	deschedSnapshot.Run(ctx)
+	drsSnapshot := drs.NewSnapshot(saCluster)
+	drsSnapshot.Run(ctx)
 
 	// Networking read plane: the SA-watched port-group + fabric snapshot behind GET
 	// /api/networks. Reflectors publish NetworkChanged so the catalog refreshes live;
-	// discovery-gated like desched, so a cluster without OVN-K UDN or nmstate degrades
+	// discovery-gated like drs, so a cluster without OVN-K UDN or nmstate degrades
 	// to empty rather than error-looping.
 	netSnapshot := netstate.New(saCluster, bus)
 	netSnapshot.Run(ctx)
@@ -196,7 +196,7 @@ func run() error {
 		ClusterFactory: clusterFactory,
 		State:          clusterSnapshot,
 		Drift:          argoSnapshot,
-		Desched:        deschedSnapshot,
+		DRS:            drsSnapshot,
 		Netstate:       netSnapshot,
 		Bus:            bus,
 		Resolver:       resolver,

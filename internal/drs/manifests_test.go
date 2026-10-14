@@ -1,4 +1,4 @@
-package drsgen
+package drs
 
 import (
 	"strings"

@@ -4,7 +4,7 @@
 // `make types`). The overlays below shadow the star re-export only where the
 // generated shape is too loose (string where the wire carries a closed union)
 // or wrong (Go []*float64 marshals null, not undefined). Request types with no
-// internal/model counterpart (decoded server-side into netgen/vmgen/drsgen
+// internal/model counterpart (decoded server-side into netgen/vmgen/drs
 // specs) stay hand-written.
 //
 // Every request is identity-scoped: a signed session cookie (set by login) is
@@ -213,7 +213,7 @@ export interface DRSEnableRequest {
 	installPSI?: boolean; // also stage the worker PSI MachineConfig (reboots workers on merge)
 }
 
-// --- DRS vocabulary (mirrored from internal/drsgen, the backend validator) ---
+// --- DRS vocabulary (mirrored from internal/drs, the backend validator) ---
 
 export const DRS_THRESHOLDS = [
 	{ value: 'AsymmetricLow', label: 'Conservative', detail: 'move only off clearly hot nodes' },

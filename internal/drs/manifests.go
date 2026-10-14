@@ -1,10 +1,13 @@
-// Package drsgen renders the Kube Descheduler Operator manifests behind
-// dotvirt's rescheduling panel - cluster-wide automatic VM rebalancing - from
-// a small spec, the way netgen renders networks. Owns-nothing:
-// the output is proposed via PR into the platform repo and applied by Argo,
-// never written to the cluster. All output paths are constants (no user input
-// ever becomes a path segment) and every field is enum/range-validated.
-package drsgen
+// Package drs backs dotvirt's rescheduling panel - cluster-wide automatic VM
+// rebalancing via the Kube Descheduler Operator. It has two halves: Manifests
+// and Parse render and read the operator manifests from a small spec, the way
+// netgen renders networks; Snapshot watches the live KubeDescheduler CR.
+//
+// Owns-nothing: the rendered output is proposed via PR into the platform repo
+// and applied by Argo, never written to the cluster. All output paths are
+// constants (no user input ever becomes a path segment) and every field is
+// enum/range-validated.
+package drs
 
 import (
 	"fmt"

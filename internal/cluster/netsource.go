@@ -10,7 +10,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// The raw access the netstate and desched snapshots build their reflectors on, kept
+// The raw access the netstate and drs snapshots build their reflectors on, kept
 // here so the dynamic client and discovery stay behind cluster.Client (no snapshot
 // touches a clientset directly).
 

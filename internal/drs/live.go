@@ -1,12 +1,13 @@
-// Package desched is dotvirt's DRS status plane: an SA-maintained, watch-fed
-// snapshot of the KubeDescheduler CR, following the clusterstate/argo reflector
-// model - the read (Live) is a pure in-memory scan, never a cluster call.
+package drs
+
+// The DRS status plane: an SA-maintained, watch-fed snapshot of the
+// KubeDescheduler CR, following the clusterstate/argo reflector model - the
+// read (Live) is a pure in-memory scan, never a cluster call.
 //
 // Unlike those planes, this API may be legitimately absent: installing the
 // descheduler operator is exactly what the DRS panel proposes. Run therefore
 // gates the reflector on API discovery and re-probes slowly until the CRD
 // appears, so absence reads as "not installed", never a reflector error loop.
-package desched
 
 import (
 	"context"
@@ -19,7 +20,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/epheo/dotvirt/internal/cluster"
-	"github.com/epheo/dotvirt/internal/drsgen"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/reflect"
 )
@@ -34,8 +34,8 @@ var kubedeschedulersGVR = schema.GroupVersionResource{
 	Resource: "kubedeschedulers",
 }
 
-// Snapshot holds the watched KubeDescheduler state. Build with New, start with
-// Run; Live is safe for concurrent callers.
+// Snapshot holds the watched KubeDescheduler state. Build with NewSnapshot,
+// start with Run; Live is safe for concurrent callers.
 type Snapshot struct {
 	sa    *cluster.Client
 	store cache.Indexer
@@ -50,8 +50,8 @@ type Snapshot struct {
 	healthy    atomic.Bool
 }
 
-// New builds the snapshot over sa (dotvirt's ServiceAccount client).
-func New(sa *cluster.Client) *Snapshot {
+// NewSnapshot builds the snapshot over sa (dotvirt's ServiceAccount client).
+func NewSnapshot(sa *cluster.Client) *Snapshot {
 	return &Snapshot{sa: sa, store: reflect.NewIndexer()}
 }
 
@@ -113,11 +113,11 @@ func (s *Snapshot) Live() model.DRSLive {
 }
 
 // managedCR picks ONE KubeDescheduler to report: the CR dotvirt itself
-// proposes (drsgen's namespace, name "cluster") when present, else the first
+// proposes (Namespace, name "cluster") when present, else the first
 // sorted key so a nonstandard install still surfaces - deterministically,
 // never mixing fields across objects.
 func (s *Snapshot) managedCR() (*unstructured.Unstructured, bool) {
-	if u, ok := reflect.Get(s.store, drsgen.Namespace+"/cluster"); ok {
+	if u, ok := reflect.Get(s.store, Namespace+"/cluster"); ok {
 		return u, true
 	}
 	keys := s.store.ListKeys()

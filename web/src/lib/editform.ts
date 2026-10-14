@@ -23,7 +23,7 @@ interface GroupRow extends PlacementGroup {
 	isNew: boolean;
 }
 
-interface EditForm {
+export interface EditForm {
 	power: Power;
 	cpuCores?: number;
 	memory: string;

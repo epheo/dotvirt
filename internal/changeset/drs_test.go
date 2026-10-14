@@ -8,15 +8,15 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
-	"github.com/epheo/dotvirt/internal/drsgen"
+	"github.com/epheo/dotvirt/internal/drs"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 )
 
 // drsFiles renders spec's file set keyed by path, for seeding repos.
-func drsFiles(t *testing.T, spec drsgen.Spec) map[string][]byte {
+func drsFiles(t *testing.T, spec drs.Spec) map[string][]byte {
 	t.Helper()
-	files, err := drsgen.Manifests(spec)
+	files, err := drs.Manifests(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestStageEnableDRSStagesFileSet(t *testing.T) {
 	id := auth.Identity{Username: "admin"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
-	view, err := c.StageEnableDRS(id, proj, mustJSON(t, drsgen.Spec{Mode: drsgen.ModeAutomatic, InstallPSI: true}))
+	view, err := c.StageEnableDRS(id, proj, mustJSON(t, drs.Spec{Mode: drs.ModeAutomatic, InstallPSI: true}))
 	if err != nil {
 		t.Fatalf("StageEnableDRS: %v", err)
 	}
@@ -59,12 +59,12 @@ func TestStageEnableDRSStagesFileSet(t *testing.T) {
 func TestStageEnableDRSStagesOnlyChangedFiles(t *testing.T) {
 	// The operator install (+ a Predictive CR) is already committed; switching to
 	// Automatic must stage only the KubeDescheduler CR.
-	bare := seedBareFiles(t, drsFiles(t, drsgen.Spec{Mode: drsgen.ModePredictive}))
+	bare := seedBareFiles(t, drsFiles(t, drs.Spec{Mode: drs.ModePredictive}))
 	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "admin"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
-	view, err := c.StageEnableDRS(id, proj, mustJSON(t, drsgen.Spec{Mode: drsgen.ModeAutomatic}))
+	view, err := c.StageEnableDRS(id, proj, mustJSON(t, drs.Spec{Mode: drs.ModeAutomatic}))
 	if err != nil {
 		t.Fatalf("StageEnableDRS: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestStageEnableDRSUnchangedIsCleanDraft(t *testing.T) {
 	// Declarative: a spec matching the base branch is an empty delta - a clean
 	// draft, not an error. With a pending change staged first, the same submit
 	// is the cancel gesture (revert to the committed configuration).
-	spec := drsgen.Spec{Mode: drsgen.ModeAutomatic}
+	spec := drs.Spec{Mode: drs.ModeAutomatic}
 	bare := seedBareFiles(t, drsFiles(t, spec))
 	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "admin"}
@@ -91,7 +91,7 @@ func TestStageEnableDRSUnchangedIsCleanDraft(t *testing.T) {
 		t.Fatalf("want empty draft for an unchanged config, got %d items", view.Count)
 	}
 
-	if _, err := c.StageEnableDRS(id, proj, mustJSON(t, drsgen.Spec{Mode: drsgen.ModePredictive, InstallPSI: true})); err != nil {
+	if _, err := c.StageEnableDRS(id, proj, mustJSON(t, drs.Spec{Mode: drs.ModePredictive, InstallPSI: true})); err != nil {
 		t.Fatal(err)
 	}
 	view, err = c.StageEnableDRS(id, proj, mustJSON(t, spec))
@@ -111,10 +111,10 @@ func TestStageEnableDRSReconfigureDropsStaleSiblings(t *testing.T) {
 	id := auth.Identity{Username: "admin"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
-	if _, err := c.StageEnableDRS(id, proj, mustJSON(t, drsgen.Spec{Mode: drsgen.ModeAutomatic, InstallPSI: true})); err != nil {
+	if _, err := c.StageEnableDRS(id, proj, mustJSON(t, drs.Spec{Mode: drs.ModeAutomatic, InstallPSI: true})); err != nil {
 		t.Fatal(err)
 	}
-	view, err := c.StageEnableDRS(id, proj, mustJSON(t, drsgen.Spec{Mode: drsgen.ModeAutomatic}))
+	view, err := c.StageEnableDRS(id, proj, mustJSON(t, drs.Spec{Mode: drs.ModeAutomatic}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestDRSDraft(t *testing.T) {
 	}
 
 	soft := false
-	spec := drsgen.Spec{Mode: drsgen.ModePredictive, Threshold: "High", IntervalSeconds: 120,
+	spec := drs.Spec{Mode: drs.ModePredictive, Threshold: "High", IntervalSeconds: 120,
 		SoftTainter: &soft, InstallPSI: true}
 	if _, err := c.StageEnableDRS(id, proj, mustJSON(t, spec)); err != nil {
 		t.Fatal(err)
@@ -170,7 +170,7 @@ func TestUnstageDRSIsAtomic(t *testing.T) {
 	id := auth.Identity{Username: "admin"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
-	if _, err := c.StageEnableDRS(id, proj, mustJSON(t, drsgen.Spec{Mode: drsgen.ModeAutomatic, InstallPSI: true})); err != nil {
+	if _, err := c.StageEnableDRS(id, proj, mustJSON(t, drs.Spec{Mode: drs.ModeAutomatic, InstallPSI: true})); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Unstage(id, proj, string(draft.ResourceDRS), model.ClusterScopeNS, "subscription"); err != nil {
@@ -186,7 +186,7 @@ func TestUnstageDRSIsAtomic(t *testing.T) {
 }
 
 func TestStageDisableDRSStagesRemoval(t *testing.T) {
-	bare := seedBareFiles(t, drsFiles(t, drsgen.Spec{Mode: drsgen.ModeAutomatic}))
+	bare := seedBareFiles(t, drsFiles(t, drs.Spec{Mode: drs.ModeAutomatic}))
 	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "admin"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
@@ -221,7 +221,7 @@ func TestStageDisableDRSCancelsPendingEnable(t *testing.T) {
 	id := auth.Identity{Username: "admin"}
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
-	if _, err := c.StageEnableDRS(id, proj, mustJSON(t, drsgen.Spec{Mode: drsgen.ModeAutomatic})); err != nil {
+	if _, err := c.StageEnableDRS(id, proj, mustJSON(t, drs.Spec{Mode: drs.ModeAutomatic})); err != nil {
 		t.Fatal(err)
 	}
 	view, err := c.StageDisableDRS(id, proj)
@@ -233,7 +233,7 @@ func TestStageDisableDRSCancelsPendingEnable(t *testing.T) {
 	}
 }
 
-// The full draft -> branch -> remote flow: an enable proposes exactly the drsgen
+// The full draft -> branch -> remote flow: an enable proposes exactly the drs
 // file set onto the pushed working branch, and the content round-trips through
 // Parse. Push is enabled (unlike newProposeFixture) so the bare remote is the
 // thing asserted on - what the forge PR would actually contain.
@@ -243,7 +243,7 @@ func TestProposeDRSCommitsFileSet(t *testing.T) {
 	bare := seedBareFiles(t, nil)
 	proj := project.ProjectInfo{Name: "platform", Repo: bare}
 
-	spec := drsgen.Spec{Mode: drsgen.ModeAutomatic, Threshold: "Medium", InstallPSI: true}
+	spec := drs.Spec{Mode: drs.ModeAutomatic, Threshold: "Medium", InstallPSI: true}
 	if _, err := c.StageEnableDRS(id, proj, mustJSON(t, spec)); err != nil {
 		t.Fatalf("StageEnableDRS: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestProposeDRSCommitsFileSet(t *testing.T) {
 		}
 		return got
 	}
-	files, err := drsgen.Manifests(spec)
+	files, err := drs.Manifests(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestProposeDRSCommitsFileSet(t *testing.T) {
 			t.Errorf("%s content mismatch on pushed branch", want.Path)
 		}
 	}
-	parsed, err := drsgen.Parse(show(drsgen.CRPath))
+	parsed, err := drs.Parse(show(drs.CRPath))
 	if err != nil || parsed.Mode != "Automatic" || parsed.Threshold != "Medium" {
 		t.Fatalf("committed CR doesn't round-trip: %+v (%v)", parsed, err)
 	}
@@ -293,7 +293,7 @@ func TestDRSState(t *testing.T) {
 	}
 
 	soft := false
-	spec := drsgen.Spec{Mode: drsgen.ModePredictive, Threshold: "Medium", IntervalSeconds: 120,
+	spec := drs.Spec{Mode: drs.ModePredictive, Threshold: "Medium", IntervalSeconds: 120,
 		SoftTainter: &soft, EvictionNodeLimit: 3, EvictionTotalLimit: 7, InstallPSI: true}
 	configured := project.ProjectInfo{Name: "platform", Repo: seedBareFiles(t, drsFiles(t, spec))}
 	state, err = c.DRSState(configured)

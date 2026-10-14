@@ -1,28 +1,17 @@
 <script lang="ts">
-	import { X } from 'lucide-svelte';
 	import { api, type Network, type VM } from '$lib/api';
-	import {
-		buildEditRequest,
-		seedEditForm,
-		summarize,
-		type DiskRow,
-		type EditSection,
-		type NicRow,
-	} from '$lib/editform';
-	import { quantityBytes, splitList } from '$lib/format';
-	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
+	import { buildEditRequest, seedEditForm, summarize, type EditSection } from '$lib/editform';
+	import { quantityBytes } from '$lib/format';
+	import { attachableNetworks } from '$lib/networks';
 	import { nodeTargets } from '$lib/state/hosts.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
-	import { validName, NAME_HINT } from '$lib/validate';
-	import CheckGroup from './CheckGroup.svelte';
-	import Button from './Button.svelte';
-	import Note from './Note.svelte';
 	import Wizard from './Wizard.svelte';
-	import FormField from './FormField.svelte';
-	import RowListEditor from './RowListEditor.svelte';
-	import SelectInput from './SelectInput.svelte';
-	import StorageClassSelect from './StorageClassSelect.svelte';
-	import TextInput from './TextInput.svelte';
+	import ComputeStep from './editsettings/ComputeStep.svelte';
+	import SchedulingStep from './editsettings/SchedulingStep.svelte';
+	import StorageStep from './editsettings/StorageStep.svelte';
+	import NetworksStep from './editsettings/NetworksStep.svelte';
+	import LabelsStep from './editsettings/LabelsStep.svelte';
+	import ReviewStep from './editsettings/ReviewStep.svelte';
 
 	let {
 		vm,
@@ -52,42 +41,11 @@
 	);
 
 	// Hosts for the pin picker; without node-list RBAC it degrades to a
-	// free-text host list.
+	// free-text host list. Held here, not in the step, so revisiting Scheduling
+	// never refetches.
 	const hosts = nodeTargets();
-	// Offer every schedulable-ish host, plus any already-pinned name that no
-	// longer exists (so a stale pin can still be unchecked).
-	const hostItems = $derived.by(() => {
-		const nodes = hosts.data ?? [];
-		const names = new Set(nodes.map((n) => n.name));
-		for (const h of form.pin) names.add(h);
-		return [...names].sort().map((n) => {
-			const node = nodes.find((x) => x.name === n);
-			return {
-				value: n,
-				hint: !node
-					? 'unknown'
-					: node.unschedulable
-						? 'cordoned'
-						: node.maintenance
-							? 'maintenance'
-							: '',
-			};
-		});
-	});
-	let pinText = $state('');
-	pinText = form.pin.join(' ');
-	function syncPinText() {
-		form.pin = splitList(pinText);
-	}
-
-	const customScheduling = $derived(!!vm.scheduling?.custom);
-
-	function addGroup() {
-		form.groups = [
-			...form.groups,
-			{ name: '', mode: 'together', strict: true, removed: false, isNew: true },
-		];
-	}
+	// svelte-ignore state_referenced_locally
+	let pinText = $state(form.pin.join(' '));
 
 	// Attachable secondaries for this VM's namespace = shared (CUDN) networks +
 	// this namespace's own non-default networks (the primary "VM Network" backs the
@@ -99,44 +57,6 @@
 	const selectedIT = $derived(
 		(options?.instancetypes ?? []).find((i) => i.name === form.instancetype),
 	);
-
-	function setMode(next: 'instancetype' | 'custom') {
-		if (next === form.mode) return;
-		// Converting to custom: start from the instancetype's numbers so the user
-		// tweaks real values rather than the blank inline fields.
-		if (next === 'custom' && !form.cpuCores && !form.memory && selectedIT) {
-			form.cpuCores = selectedIT.cpu;
-			form.memory = selectedIT.memory;
-		}
-		form.mode = next;
-	}
-
-	function addNewDevice(kind: 'disk' | 'network') {
-		if (kind === 'disk') {
-			form.disks = [
-				...form.disks,
-				{
-					name: `disk-${form.disks.length + 1}`,
-					type: 'dataVolume',
-					size: '10Gi',
-					storageClass: '',
-					removed: false,
-					isNew: true,
-				},
-			];
-		} else {
-			const first = available[0];
-			form.nics = [
-				...form.nics,
-				{
-					name: first ? first.name : 'net1',
-					network: first ? attachRef(first) : '',
-					removed: false,
-					isNew: true,
-				},
-			];
-		}
-	}
 
 	const dirty = $derived.by(() => {
 		const r = buildEditRequest(vm, form);
@@ -180,323 +100,35 @@
 	const stage = () => api.stageEdit(vm.namespace, vm.name, buildEditRequest(vm, form));
 </script>
 
-{#snippet preferenceField()}
-	<!-- Rendered once per sizing branch: the field is identical in both. -->
-	<FormField label="Preference">
-		<SelectInput bind:value={form.preference}>
-			<option value="">— unchanged —</option>
-			{#each options?.preferences ?? [] as p (p.name)}
-				<option value={p.name}>{p.displayName || p.name}</option>
-			{/each}
-		</SelectInput>
-	</FormField>
-{/snippet}
-
 {#snippet stepCompute()}
-	{#if inventory.optionsError}
-		<Note tone="warn" border class="mb-3">
-			Couldn't load cluster options: {inventory.optionsError} — the instance type / preference dropdowns
-			may be empty.
-		</Note>
-	{/if}
-
-	<!-- Sizing mode: CPU/memory OR an instance type, never both -->
-	<div class="mb-3">
-		<span class="text-ink-muted">Sizing</span>
-		<div class="mt-1 inline-flex overflow-hidden rounded border border-line-strong">
-			<button
-				type="button"
-				onclick={() => setMode('instancetype')}
-				class="px-3 py-1 text-xs {form.mode === 'instancetype'
-					? 'bg-accent text-white'
-					: 'bg-panel text-ink-soft hover:bg-inset'}"
-			>
-				Instance type
-			</button>
-			<button
-				type="button"
-				onclick={() => setMode('custom')}
-				class="border-l border-line-strong px-3 py-1 text-xs {form.mode === 'custom'
-					? 'bg-accent text-white'
-					: 'bg-panel text-ink-soft hover:bg-inset'}"
-			>
-				Custom CPU/Memory
-			</button>
-		</div>
-		{#if form.mode !== (vm.instancetype ? 'instancetype' : 'custom')}
-			<p class="mt-1 text-xs text-warn-ink">
-				{form.mode === 'custom'
-					? 'Switches to custom CPU/memory and removes the instance type.'
-					: 'Uses the instance type and removes the custom CPU/memory.'}
-			</p>
-		{/if}
-	</div>
-
-	<div class="grid grid-cols-2 gap-3">
-		<FormField label="Power state">
-			<SelectInput bind:value={form.power}>
-				<option value="On">On</option>
-				<option value="Off">Off</option>
-				{#if form.power === 'Unknown'}<option value="Unknown">Unknown</option>{/if}
-			</SelectInput>
-		</FormField>
-
-		{#if form.mode === 'instancetype'}
-			<FormField label="Instance type">
-				<SelectInput bind:value={form.instancetype}>
-					<!-- Keep the current value selectable even if it isn't in the cluster
-					     list (orphaned ref, or options still loading) so the binding can't
-					     silently desync to the first option. -->
-					{#if form.instancetype && !selectedIT}
-						<option value={form.instancetype}
-							>{form.instancetype} (current — not in cluster list)</option
-						>
-					{/if}
-					{#each options?.instancetypes ?? [] as it (it.name)}
-						<option value={it.name}>{it.name} ({it.cpu} CPU / {it.memory})</option>
-					{/each}
-				</SelectInput>
-			</FormField>
-			{@render preferenceField()}
-			<p class="col-span-2 text-xs text-ink-faint">
-				CPU and memory are provided by the instance type{selectedIT
-					? `: ${selectedIT.cpu} CPU / ${selectedIT.memory}`
-					: ''}.
-			</p>
-		{:else}
-			<FormField label="vCPUs">
-				<TextInput type="number" min="1" bind:value={form.cpuCores} />
-			</FormField>
-			<FormField label="Memory">
-				<TextInput bind:value={form.memory} placeholder="2Gi" />
-			</FormField>
-			{@render preferenceField()}
-			{#if !(form.cpuCores && form.memory)}
-				<p class="col-span-2 text-xs text-warn-ink">
-					Set both vCPUs and memory to apply custom sizing.
-				</p>
-			{:else if prefViolation}
-				<p class="col-span-2 text-xs text-danger-ink">{prefViolation}</p>
-			{/if}
-		{/if}
-	</div>
+	<ComputeStep
+		bind:form
+		{vm}
+		{options}
+		optionsError={inventory.optionsError}
+		{selectedIT}
+		{prefViolation}
+	/>
 {/snippet}
 
 {#snippet stepScheduling()}
-	<div class="space-y-4">
-		<!-- Placement groups: keep-together / keep-apart rules. Membership + rule are one
-		     encoding on the manifest, so this edits both at once. -->
-		<div>
-			<div class="mb-1 flex items-center justify-between">
-				<span class="text-ink-muted">Placement groups</span>
-				{#if !customScheduling}
-					<Button variant="link" size="sm" onclick={addGroup}>+ Add group</Button>
-				{/if}
-			</div>
-			{#if customScheduling}
-				<Note tone="warn" border>
-					This VM carries hand-written affinity or node selection — placement is managed in git, not
-					from this form.
-				</Note>
-			{:else}
-				{#each form.groups as group, i (i)}
-					<div
-						class="mb-1 flex flex-wrap items-center gap-2 {group.removed
-							? 'opacity-40 line-through'
-							: ''}"
-					>
-						{#if group.isNew}
-							<TextInput
-								bind:value={group.name}
-								placeholder="web-tier"
-								mono
-								class="w-40 flex-none"
-							/>
-						{:else}
-							<span class="w-40 truncate font-mono text-[13px] text-ink">{group.name}</span>
-						{/if}
-						<SelectInput bind:value={group.mode} class="w-56 flex-none" disabled={group.removed}>
-							<option value="together">Keep together — same host</option>
-							<option value="apart">Keep apart — different hosts</option>
-						</SelectInput>
-						<label class="flex items-center gap-1.5 text-xs text-ink-soft">
-							<input type="checkbox" bind:checked={group.strict} disabled={group.removed} />
-							strict
-						</label>
-						<button
-							onclick={() =>
-								group.isNew
-									? (form.groups = form.groups.filter((_, idx) => idx !== i))
-									: (group.removed = !group.removed)}
-							class="ml-auto text-xs {group.removed ? 'text-accent' : 'text-danger'}"
-						>
-							{group.removed ? 'undo' : 'remove'}
-						</button>
-						{#if group.isNew && group.name && !validName(group.name)}
-							<p class="w-full text-xs text-warn-ink">{NAME_HINT}</p>
-						{/if}
-					</div>
-				{:else}
-					<p class="text-xs text-ink-faint">
-						No groups. VMs sharing a group are kept on one host (together) or spread across hosts
-						(apart) — strict rules bind the scheduler, non-strict are best effort.
-					</p>
-				{/each}
-			{/if}
-		</div>
-
-		<!-- Host pinning: a required node-affinity host list. -->
-		{#if !customScheduling}
-			<div>
-				<span class="mb-1 block text-ink-muted">Pin to hosts</span>
-				{#if hosts.loading}
-					<p class="text-xs text-ink-faint">Loading hosts…</p>
-				{:else if !hosts.failed && hostItems.length}
-					<CheckGroup items={hostItems} bind:selected={form.pin} />
-				{:else}
-					<TextInput
-						bind:value={pinText}
-						oninput={syncPinText}
-						placeholder="w1 w2 (space separated; empty = any host)"
-						mono
-					/>
-				{/if}
-				<p class="mt-1 text-xs text-ink-faint">
-					{form.pin.length
-						? 'The scheduler may only place this VM on the checked hosts.'
-						: 'No pinning — the scheduler places this VM on any eligible host.'}
-				</p>
-			</div>
-		{/if}
-
-		<!-- Rescheduling participation + eviction behavior (the per-VM automation
-		     override). -->
-		<div class="border-t border-line-soft pt-3">
-			<label class="flex items-start gap-2 text-[13px]">
-				<input type="checkbox" bind:checked={form.drsExclude} class="mt-0.5" />
-				<span>
-					Exclude from load balancing
-					<span class="block text-xs text-ink-faint">
-						Automatic rebalancing skips this VM; node drains still live-migrate it.
-					</span>
-				</span>
-			</label>
-			<FormField label="Eviction strategy">
-				<SelectInput bind:value={form.evictionStrategy}>
-					<option value="">Cluster default</option>
-					<option value="LiveMigrate">LiveMigrate — evictions live-migrate the VM</option>
-					<option value="LiveMigrateIfPossible"
-						>LiveMigrateIfPossible — migrate when possible, else restart</option
-					>
-					<option value="None">None — pinned (blocks node drains)</option>
-				</SelectInput>
-			</FormField>
-		</div>
-	</div>
+	<SchedulingStep bind:form bind:pinText {vm} {hosts} />
 {/snippet}
 
 {#snippet stepStorage()}
-	{#snippet diskRow(disk: DiskRow)}
-		{#if disk.isNew}
-			<TextInput bind:value={disk.name} size="sm" width="w-24" />
-			<TextInput bind:value={disk.size} size="sm" width="w-16" />
-			<StorageClassSelect
-				options={options?.storageClasses ?? []}
-				bind:value={disk.storageClass}
-				class="min-w-0 flex-1 py-1! text-xs"
-			/>
-		{:else}
-			<span class="text-xs text-ink-muted"
-				>{disk.name} ({disk.type}{disk.size ? ` · ${disk.size}` : ''}{disk.storageClass
-					? ` · ${disk.storageClass}`
-					: ''})</span
-			>
-		{/if}
-	{/snippet}
-	<RowListEditor
-		items={form.disks}
-		unit="disk(s)"
-		addLabel="+ Add hard disk"
-		rowLabel="Hard disk"
-		empty="No disks."
-		onadd={() => addNewDevice('disk')}
-		ontoggle={(d) => (d.removed = !d.removed)}
-		row={diskRow}
-	/>
+	<StorageStep bind:form {options} />
 {/snippet}
 
 {#snippet stepNetworks()}
-	{#snippet nicRow(nic: NicRow)}
-		{#if nic.isNew}
-			<SelectInput bind:value={nic.network} size="sm" width="w-60">
-				{#each available as net (net.scope + (net.namespace ?? '') + net.name)}
-					<option value={attachRef(net)}
-						>{net.name} — {kindLabel(net.kind)}{net.scope === 'shared' ? ' · shared' : ''}</option
-					>
-				{/each}
-			</SelectInput>
-		{:else}
-			<span class="text-xs text-ink-muted">{nic.name} ({nic.network})</span>
-		{/if}
-	{/snippet}
-	<RowListEditor
-		items={form.nics}
-		unit="adapter(s)"
-		addLabel="+ Add network adapter"
-		rowLabel="Network adapter"
-		empty="No adapters."
-		onadd={() => addNewDevice('network')}
-		ontoggle={(n) => (n.removed = !n.removed)}
-		row={nicRow}
-	/>
-	{#if vm.networks?.some((n) => n.implicit)}
-		<p class="mt-2 text-xs text-ink-faint">
-			The pod network adapter is attached by KubeVirt while the manifest declares none; it is not
-			edited here.
-		</p>
-	{/if}
+	<NetworksStep bind:form {vm} {available} />
 {/snippet}
 
 {#snippet stepLabels()}
-	<div class="mb-2 flex items-center justify-between">
-		<span class="text-xs text-ink-faint">Key/value metadata.</span>
-		<Button
-			variant="link"
-			size="sm"
-			onclick={() => (form.labelRows = [...form.labelRows, { key: '', value: '' }])}
-			>+ Add label</Button
-		>
-	</div>
-	{#each form.labelRows as row, i (i)}
-		<div class="mb-1 flex gap-2">
-			<TextInput bind:value={row.key} size="sm" class="w-1/2!" placeholder="key" />
-			<TextInput bind:value={row.value} size="sm" class="w-1/2!" placeholder="value" />
-			<button
-				onclick={() => (form.labelRows = form.labelRows.filter((_, idx) => idx !== i))}
-				aria-label="Remove label"
-				class="text-danger"><X size={14} /></button
-			>
-		</div>
-	{/each}
-	{#if form.labelRows.length === 0}<p class="text-xs text-ink-faint">No labels.</p>{/if}
+	<LabelsStep bind:form />
 {/snippet}
 
 {#snippet review()}
-	<p class="mb-3 text-xs text-ink-muted">Review the changes below, then stage them into Changes.</p>
-	{#if summary.length === 0}
-		<div class="rounded border border-line bg-inset p-3 text-xs text-ink-muted">
-			No changes yet — adjust a setting in an earlier step.
-		</div>
-	{:else}
-		<dl class="divide-y divide-line-soft rounded border border-line text-[13px]">
-			{#each summary as c, i (i)}
-				<div class="flex justify-between gap-3 px-3 py-1.5">
-					<dt class="shrink-0 text-ink-muted">{c.label}</dt>
-					<dd class="min-w-0 truncate text-right text-ink-soft">{c.value}</dd>
-				</div>
-			{/each}
-		</dl>
-	{/if}
+	<ReviewStep {summary} />
 {/snippet}
 
 <Wizard
