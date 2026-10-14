@@ -28,6 +28,9 @@ jobs:
       - run: go vet ./... && go test ./...
         working-directory: operator
         env: { GOFLAGS: -buildvcs=false }
+      - name: Operator envtest (server-side apply + RBAC on a real apiserver)
+        run: make -C operator test-envtest
+        env: { GOFLAGS: -buildvcs=false }
 
   lint:
     runs-on: ubuntu-latest
