@@ -178,8 +178,8 @@ func TestPlatformDraftGatedBySSAR(t *testing.T) {
 }
 
 // The admin path end to end: propose validates its body AFTER the scope gate,
-// a successful propose reaches the coordinator exactly once and nudges the
-// proposals refresher so the new PR lane appears without waiting for the poll.
+// a successful propose reaches the coordinator exactly once, tracks the caller,
+// and nudges the refresher so the new PR lane appears without waiting for the poll.
 func TestPlatformProposeFlow(t *testing.T) {
 	d := &stagingDraft{}
 	s := draftServer(t, d)

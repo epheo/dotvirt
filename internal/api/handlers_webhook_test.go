@@ -58,3 +58,30 @@ func TestWebhookDisabledWithoutSecret(t *testing.T) {
 		t.Fatalf("unconfigured endpoint: got %d, want 404", w.Code)
 	}
 }
+
+// A push reaches the proposals lane through the poke's GitChanged, so it must
+// not nudge; a PR event can move no head, so it nudges its repo.
+func TestWebhookNudgesProposalsOnPREventsOnly(t *testing.T) {
+	s := webhookServer("hooksecret")
+	push := []byte(`{"repository":{"clone_url":"https://forge/o/r.git","html_url":"https://forge/o/r"}}`)
+	deliver(t, s, push, sign(push, "hooksecret"))
+	select {
+	case <-s.propNudge:
+		t.Fatal("a push event nudged the proposals refresher")
+	default:
+	}
+
+	pr := []byte(`{"action":"closed","pull_request":{"number":3},"repository":{"clone_url":"https://forge/o/r.git","html_url":"https://forge/o/r"}}`)
+	deliver(t, s, pr, sign(pr, "hooksecret"))
+	select {
+	case <-s.propNudge:
+	default:
+		t.Fatal("a PR event must nudge the proposals refresher")
+	}
+	s.propMu.Lock()
+	_, dirty := s.propDirty["https://forge/o/r"]
+	s.propMu.Unlock()
+	if !dirty {
+		t.Fatalf("the nudge must name the PR's repo, dirty = %v", s.propDirty)
+	}
+}

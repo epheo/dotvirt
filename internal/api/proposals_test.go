@@ -2,13 +2,17 @@ package api
 
 import (
 	"context"
+	"errors"
+	"maps"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // fakeDraft implements only the lane's methods; the embedded interface panics
@@ -18,13 +22,22 @@ type fakeDraft struct {
 	Draft
 	mu    sync.Mutex
 	prs   map[string]model.Proposal // project name -> its open PR
+	fail  string                    // project whose lookup errors
 	calls int
+	by    map[string]int // forge calls per project
 }
 
 func (f *fakeDraft) OpenProposals(proj project.ProjectInfo) ([]model.Proposal, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
+	if f.by == nil {
+		f.by = map[string]int{}
+	}
+	f.by[proj.Name]++
+	if proj.Name == f.fail {
+		return nil, errors.New("forge down")
+	}
 	if pr, ok := f.prs[proj.Name]; ok {
 		return []model.Proposal{pr}, nil
 	}
@@ -65,7 +78,7 @@ func TestProposalsHotPathNeverCallsForge(t *testing.T) {
 	}
 
 	// First pass over an empty lane: cache fills, but nothing visible changed.
-	if s.refreshProposals() {
+	if s.refreshProposals(true) {
 		t.Fatal("empty cold lane should not wake the hub")
 	}
 	if got := s.proposalsFor(id, projects); got == nil || len(got) != 0 {
@@ -76,7 +89,7 @@ func TestProposalsHotPathNeverCallsForge(t *testing.T) {
 	fd.mu.Lock()
 	fd.prs["team-a"] = model.Proposal{Project: "team-a", PRNumber: 7, PRURL: "http://x/pr/7"}
 	fd.mu.Unlock()
-	if !s.refreshProposals() {
+	if !s.refreshProposals(true) {
 		t.Fatal("a new PR should wake the hub")
 	}
 	got := s.proposalsFor(id, projects)
@@ -85,7 +98,7 @@ func TestProposalsHotPathNeverCallsForge(t *testing.T) {
 	}
 
 	// Same state again: no change, no wake.
-	if s.refreshProposals() {
+	if s.refreshProposals(true) {
 		t.Fatal("an unchanged lane should not wake the hub")
 	}
 
@@ -93,7 +106,7 @@ func TestProposalsHotPathNeverCallsForge(t *testing.T) {
 	fd.mu.Lock()
 	delete(fd.prs, "team-a")
 	fd.mu.Unlock()
-	if !s.refreshProposals() {
+	if !s.refreshProposals(true) {
 		t.Fatal("a merged PR should wake the hub")
 	}
 	if got := s.proposalsFor(id, projects); len(got) != 0 {
@@ -114,7 +127,7 @@ func TestProposalsLaneIsProjectScoped(t *testing.T) {
 	bob := auth.Identity{Token: "tok-bob", Username: "bob"}
 	s.proposalsFor(alice, projects)
 	s.proposalsFor(bob, projects)
-	if !s.refreshProposals() {
+	if !s.refreshProposals(true) {
 		t.Fatal("a PR should wake the hub")
 	}
 	if fd.forgeCalls() != 1 {
@@ -143,9 +156,9 @@ func TestProposalsPlatformProjectSticky(t *testing.T) {
 	s := NewServer(Deps{Reader: fd, Draft: fd})
 	id := auth.Identity{Token: "tok-admin", Username: "kube:admin"}
 
-	// A propose into the platform tier tracks it (handlePropose's pre-nudge step).
+	// A propose into the platform tier tracks it (handlePropose's pre-poke step).
 	s.trackProposalsProject(id, project.ProjectInfo{Name: "platform", Repo: "http://x/platform.git"})
-	if !s.refreshProposals() {
+	if !s.refreshProposals(true) {
 		t.Fatal("platform PR should wake the hub after a propose tracks it")
 	}
 	if got := s.proposalsFor(id, nil); len(got) != 1 || got[0].Project != "platform" {
@@ -154,7 +167,7 @@ func TestProposalsPlatformProjectSticky(t *testing.T) {
 
 	// A subsequent inventory build (discovery never lists platform) must keep it.
 	s.trackProposals(id, []project.ProjectInfo{{Name: "team-a", Repo: "http://x/a.git"}})
-	s.refreshProposals()
+	s.refreshProposals(true)
 	if got := s.proposalsFor(id, nil); len(got) != 1 || got[0].Project != "platform" {
 		t.Fatalf("platform lane dropped after an inventory build: %v", got)
 	}
@@ -188,7 +201,7 @@ func TestProposalsTargetExpiry(t *testing.T) {
 	}
 	s.propMu.Unlock()
 
-	s.refreshProposals()
+	s.refreshProposals(true)
 	if fd.forgeCalls() != 0 {
 		t.Fatalf("expired target still hit the forge %d times", fd.forgeCalls())
 	}
@@ -198,4 +211,66 @@ func TestProposalsTargetExpiry(t *testing.T) {
 	if left != 0 {
 		t.Fatalf("%d expired targets still tracked", left)
 	}
+}
+
+// takeCalls returns the per-project forge calls since the last take.
+func (f *fakeDraft) takeCalls() map[string]int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	by := maps.Clone(f.by)
+	f.by = nil
+	if by == nil {
+		by = map[string]int{}
+	}
+	return by
+}
+
+// TestProposalsRefreshOnlyDueProjects pins the per-repo fan-out: a push to one
+// repo re-queries that repo's lane alone, a nudge naming a repo does the same,
+// a failed lookup stays due, and only the backstop re-queries every lane.
+func TestProposalsRefreshOnlyDueProjects(t *testing.T) {
+	bus := eventbus.New()
+	fd := &fakeDraft{prs: map[string]model.Proposal{}}
+	s := NewServer(Deps{Reader: fd, Draft: fd, Bus: bus})
+	id := auth.Identity{Token: "tok-alice", Username: "alice"}
+	s.trackProposals(id, []project.ProjectInfo{
+		{Name: "team-a", Repo: "https://forge/o/a.git"},
+		{Name: "team-b", Repo: "https://forge/o/b"},
+	})
+	want := func(step string, calls map[string]int) {
+		t.Helper()
+		if got := fd.takeCalls(); !maps.Equal(got, calls) {
+			t.Fatalf("%s: forge calls %v, want %v", step, got, calls)
+		}
+	}
+
+	s.refreshProposals(false)
+	want("cold lanes", map[string]int{"team-a": 1, "team-b": 1})
+	s.refreshProposals(false)
+	want("nothing moved", map[string]int{})
+
+	bus.PublishKey(eventbus.GitChanged, forge.NormalizeRepoURL("https://forge/o/a"))
+	s.refreshProposals(false)
+	want("push to a", map[string]int{"team-a": 1})
+
+	s.nudgeProposals(forge.NormalizeRepoURL("https://forge/o/b.git"))
+	s.refreshProposals(false)
+	want("nudge for b", map[string]int{"team-b": 1})
+
+	fd.mu.Lock()
+	fd.fail = "team-a"
+	fd.mu.Unlock()
+	bus.PublishKey(eventbus.GitChanged, forge.NormalizeRepoURL("https://forge/o/a"))
+	s.refreshProposals(false)
+	want("failing push to a", map[string]int{"team-a": 1})
+	s.refreshProposals(false)
+	want("failed lane stays due", map[string]int{"team-a": 1})
+	fd.mu.Lock()
+	fd.fail = ""
+	fd.mu.Unlock()
+	s.refreshProposals(false)
+	want("recovered lane", map[string]int{"team-a": 1})
+
+	s.refreshProposals(true)
+	want("backstop", map[string]int{"team-a": 1, "team-b": 1})
 }

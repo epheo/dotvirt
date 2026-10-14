@@ -15,15 +15,16 @@ import (
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
-// The Forgejo webhook: push/PR events trigger an immediate fetch of that repo
-// plus a proposals refresh, so the UI repaints in webhook latency instead of
-// the next poll tick (and the poll interval can stretch to minutes). The
-// endpoint authenticates by HMAC signature, not a user session - it's exempted
-// in auth.isOpenPath and disabled entirely when no secret is configured.
+// The Forgejo webhook: push/PR events trigger an immediate fetch of that repo,
+// and PR events a refresh of its proposals lane, so the UI repaints in webhook
+// latency instead of the next poll tick (and the poll interval can stretch to
+// minutes). The endpoint authenticates by HMAC signature, not a user session -
+// it's exempted in auth.isOpenPath and disabled entirely when no secret is
+// configured.
 
 // handleForgeWebhook validates the HMAC-SHA256 signature Forgejo puts on every
-// delivery, pokes the named repo's poller, and nudges the proposals refresher
-// (a PR opening/merging doesn't necessarily move branch heads).
+// delivery, pokes the named repo's poller, and on a PR event nudges the proposals
+// refresher for that repo.
 func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.WebhookSecret == "" {
 		fail(w, fmt.Errorf("%w: webhook not configured", model.ErrNotFound))
@@ -74,15 +75,19 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 			s.repos.Poke(u)
 		}
 	}
-	s.nudgeProposals()
+	repo := forge.NormalizeRepoURL(event.Repository.CloneURL)
+	if repo == "" {
+		repo = forge.NormalizeRepoURL(event.Repository.HTMLURL)
+	}
+	// A push reaches the lane through the poke's GitChanged; a PR event may move
+	// no head (opened after its push, closed unmerged), so it nudges that repo.
+	if event.PullRequest.Number != 0 && repo != "" {
+		s.nudgeProposals(repo)
+	}
 	// A PR merged into the trunk lands in the Recent Tasks feed now, in webhook
 	// latency; the proposals refresher's forge poll is the backstop that records
 	// the same (deduped) entry when no webhook arrives.
 	if pr := event.PullRequest; s.tasks != nil && pr.Merged && pr.Base.Ref == s.cfg.BaseBranch {
-		repo := forge.NormalizeRepoURL(event.Repository.CloneURL)
-		if repo == "" {
-			repo = forge.NormalizeRepoURL(event.Repository.HTMLURL)
-		}
 		if repo != "" {
 			s.tasks.RecordMerge(tasks.Merge{
 				RepoURL: repo,

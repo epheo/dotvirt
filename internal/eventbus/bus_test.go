@@ -117,3 +117,55 @@ func TestVersionBumpedBeforeWake(t *testing.T) {
 		t.Errorf("version not bumped before wake: %d <= %d", got, before)
 	}
 }
+
+func TestPublishKeyMovesOnlyThatKey(t *testing.T) {
+	b := New()
+	ch, _ := b.Subscribe(GitChanged)
+	a0, b0, total := b.KeyVersion(GitChanged, "a"), b.KeyVersion(GitChanged, "b"), b.Version(GitChanged)
+
+	b.PublishKey(GitChanged, "a")
+	if !drained(ch) {
+		t.Fatal("a keyed publish must wake the kind's subscribers")
+	}
+	if b.KeyVersion(GitChanged, "a") == a0 {
+		t.Error("KeyVersion(a) did not move on PublishKey(a)")
+	}
+	if b.KeyVersion(GitChanged, "b") != b0 {
+		t.Error("KeyVersion(b) moved on PublishKey(a)")
+	}
+	if b.Version(GitChanged) == total {
+		t.Error("Version(kind) did not move on a keyed publish")
+	}
+}
+
+// An unkeyed publish is a broadcast: a consumer scoped to any key must see it.
+func TestUnkeyedPublishMovesEveryKey(t *testing.T) {
+	b := New()
+	b.PublishKey(GitChanged, "a")
+	a0, never := b.KeyVersion(GitChanged, "a"), b.KeyVersion(GitChanged, "never-published")
+	b.Publish(GitChanged)
+	if b.KeyVersion(GitChanged, "a") == a0 || b.KeyVersion(GitChanged, "never-published") == never {
+		t.Error("an unkeyed publish must move every key of the kind")
+	}
+}
+
+func TestPublishKeyConcurrent(t *testing.T) {
+	b := New()
+	done := make(chan struct{})
+	for _, k := range []string{"a", "b"} {
+		go func() {
+			for range 1000 {
+				b.PublishKey(GitChanged, k)
+			}
+			done <- struct{}{}
+		}()
+	}
+	for range 1000 {
+		_ = b.KeyVersion(GitChanged, "a")
+	}
+	<-done
+	<-done
+	if got := b.KeyVersion(GitChanged, "a") + b.KeyVersion(GitChanged, "b"); got != 2000 {
+		t.Errorf("keyed versions sum = %d, want 2000", got)
+	}
+}
