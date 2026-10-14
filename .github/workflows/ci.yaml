@@ -10,6 +10,7 @@ on:
 env:
   IMAGE: quay.io/epheo/dotvirt
   GOTOOLCHAIN: auto # go.mod pins the Go version; let the toolchain download
+  GOPROXY: https://proxy.golang.org|direct # '|' falls back on any proxy error, not only 404/410
 
 jobs:
   go:
