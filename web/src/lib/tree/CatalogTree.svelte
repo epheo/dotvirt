@@ -16,10 +16,10 @@
 		catalogRows,
 		libraryLabel,
 		type CatalogKind,
-	} from '$lib/catalog';
-	import { catalog } from '$lib/state/catalog.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import TreeRow from '$lib/components/TreeRow.svelte';
+	} from '#lib/catalog.js';
+	import { catalog } from '#lib/state/catalog.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import TreeRow from '#lib/components/TreeRow.svelte';
 
 	// The Catalog tree (Content Libraries analog): one group per kind - the
 	// template library first, the deployable content - with the kind's items

@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { History, RotateCcw } from 'lucide-svelte';
-	import { type Commit, type CommitDetail, type DraftItem } from '$lib/api';
-	import { relativeAge } from '$lib/format';
-	import { changesHref } from '$lib/nav';
-	import { action, resource } from '$lib/resource.svelte';
-	import { itemKey, reviewURL } from '$lib/review';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { reviewCache } from '$lib/state/reviewCache.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { type Commit, type CommitDetail, type DraftItem } from '#lib/api.js';
+	import { relativeAge } from '#lib/format.js';
+	import { changesHref } from '#lib/nav.js';
+	import { action, resource } from '#lib/resource.svelte.js';
+	import { itemKey, reviewURL } from '#lib/review.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import ChangeList from './ChangeList.svelte';
 	import Button from './Button.svelte';
 	import ErrorNote from './ErrorNote.svelte';

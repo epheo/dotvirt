@@ -2,7 +2,9 @@ import js from '@eslint/js';
 import svelte from 'eslint-plugin-svelte';
 import globals from 'globals';
 import ts from 'typescript-eslint';
-import svelteConfig from './svelte.config.js';
+import { loadConfig } from '@sveltejs/load-config';
+
+const svelteConfig = (await loadConfig('./', { traverse: false }))?.config;
 
 // Lint is what svelte-check cannot flag: unused bindings and the shape rules
 // of the recommended sets. Style is prettier's; the types are svelte-check's.

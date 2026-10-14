@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { ExternalLink, History, TriangleAlert } from 'lucide-svelte';
-	import type { Commit, ProposeResult } from '$lib/api';
-	import { shortDate } from '$lib/format';
-	import { reviewCache } from '$lib/state/reviewCache.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import Button from '$lib/components/Button.svelte';
-	import ErrorNote from '$lib/components/ErrorNote.svelte';
-	import GitOpsStepper from '$lib/components/GitOpsStepper.svelte';
-	import Note from '$lib/components/Note.svelte';
-	import Skeleton from '$lib/components/Skeleton.svelte';
+	import type { Commit, ProposeResult } from '#lib/api.js';
+	import { shortDate } from '#lib/format.js';
+	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import Button from '#lib/components/Button.svelte';
+	import ErrorNote from '#lib/components/ErrorNote.svelte';
+	import GitOpsStepper from '#lib/components/GitOpsStepper.svelte';
+	import Note from '#lib/components/Note.svelte';
+	import Skeleton from '#lib/components/Skeleton.svelte';
 	import ReviewItems from './ReviewItems.svelte';
 	import ReviewPane from './ReviewPane.svelte';
 

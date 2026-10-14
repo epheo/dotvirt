@@ -1,5 +1,5 @@
-import { api, Unauthorized, type Template } from '$lib/api';
-import { friendlyError } from '$lib/format';
+import { api, Unauthorized, type Template } from '#lib/api.js';
+import { friendlyError } from '#lib/format.js';
 
 // The template library, shared by the Catalog tree and workspace so both list
 // the same items from one fetch. The platform kinds come from inventory.options.

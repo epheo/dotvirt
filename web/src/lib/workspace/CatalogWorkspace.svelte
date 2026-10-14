@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { CATALOG_KINDS, catalogHref, catalogKind, catalogRows } from '$lib/catalog';
-	import { catalog } from '$lib/state/catalog.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui } from '$lib/state/ui.svelte';
-	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
-	import Button from '$lib/components/Button.svelte';
-	import ErrorNote from '$lib/components/ErrorNote.svelte';
-	import TabBar from '$lib/components/TabBar.svelte';
+	import { CATALOG_KINDS, catalogHref, catalogKind, catalogRows } from '#lib/catalog.js';
+	import { catalog } from '#lib/state/catalog.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
+	import Breadcrumb from '#lib/components/Breadcrumb.svelte';
+	import Button from '#lib/components/Button.svelte';
+	import ErrorNote from '#lib/components/ErrorNote.svelte';
+	import TabBar from '#lib/components/TabBar.svelte';
 
 	// The Content Library: VM templates (deployable, git-backed) first, then a
 	// read-only browser over the cluster's catalog - boot images (DataSources),
@@ -34,11 +34,7 @@
 
 	// Selection is replaceState, like tabs: back never walks item picks.
 	function setPicked(key: string | null) {
-		goto(catalogHref(kind, key ?? undefined), {
-			replaceState: true,
-			keepFocus: true,
-			noScroll: true,
-		});
+		goto(catalogHref(kind, key ?? undefined), { replace: true, reset: false });
 	}
 </script>
 

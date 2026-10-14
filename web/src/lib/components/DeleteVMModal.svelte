@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { api, type VM } from '$lib/api';
-	import { action } from '$lib/resource.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { api, type VM } from '#lib/api.js';
+	import { action } from '#lib/resource.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import ConfirmDelete from './ConfirmDelete.svelte';
 
 	// Delete is destructive once the PR merges, so it is gated behind a confirm

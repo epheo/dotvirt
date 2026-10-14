@@ -1,4 +1,4 @@
-import { INVENTORY_SECTIONS, type Section } from '$lib/nav';
+import { INVENTORY_SECTIONS, type Section } from '#lib/nav.js';
 import { persisted } from './persisted.svelte';
 
 // Where "home" (/) lands: the last inventory section the user was in.

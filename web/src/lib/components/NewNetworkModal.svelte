@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { api, type NetworkCreate, type Uplink } from '$lib/api';
-	import { validName, NAME_HINT, validCIDR, CIDR_HINT } from '$lib/validate';
-	import { TERMS, dual } from '$lib/vocab';
+	import { api, type NetworkCreate, type Uplink } from '#lib/api.js';
+	import { validName, NAME_HINT, validCIDR, CIDR_HINT } from '#lib/validate.js';
+	import { TERMS, dual } from '#lib/vocab.js';
 	import ChoiceCards from './ChoiceCards.svelte';
 	import Button from './Button.svelte';
 	import CheckGroup from './CheckGroup.svelte';

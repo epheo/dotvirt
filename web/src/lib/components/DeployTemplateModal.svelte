@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { BookCopy } from 'lucide-svelte';
-	import { api, type Template } from '$lib/api';
-	import { libraryLabel } from '$lib/catalog';
-	import { catalog } from '$lib/state/catalog.svelte';
-	import { NAME_HINT, validName } from '$lib/validate';
+	import { api, type Template } from '#lib/api.js';
+	import { libraryLabel } from '#lib/catalog.js';
+	import { catalog } from '#lib/state/catalog.svelte.js';
+	import { NAME_HINT, validName } from '#lib/validate.js';
 	import FormField from './FormField.svelte';
 	import SelectInput from './SelectInput.svelte';
 	import TextArea from './TextArea.svelte';

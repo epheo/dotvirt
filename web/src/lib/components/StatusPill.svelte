@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { TONE_DOT, TONE_PILL, type Tone } from '$lib/status';
+	import { TONE_DOT, TONE_PILL, type Tone } from '#lib/status.js';
 
 	// The one status pill: tinted background + status ink, with a leading dot
 	// (or a caller icon in its place). Renders a button when clickable so hosts

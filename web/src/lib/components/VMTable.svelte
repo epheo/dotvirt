@@ -7,15 +7,15 @@
 		type Power,
 		type SyncStatus,
 		type VM,
-	} from '$lib/api';
-	import { quantityBytes } from '$lib/format';
-	import { vmSizing } from '$lib/sizing';
-	import { phaseTone } from '$lib/status';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { persisted } from '$lib/state/persisted.svelte';
-	import { TBODY, THEAD_TR } from '$lib/table';
+	} from '#lib/api.js';
+	import { quantityBytes } from '#lib/format.js';
+	import { vmSizing } from '#lib/sizing.js';
+	import { phaseTone } from '#lib/status.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { persisted } from '#lib/state/persisted.svelte.js';
+	import { TBODY, THEAD_TR } from '#lib/table.js';
 	import PowerDot from './PowerDot.svelte';
-	import { vmHref } from '$lib/nav';
+	import { vmHref } from '#lib/nav.js';
 	import SelectInput from './SelectInput.svelte';
 	import StagedBadge from './StagedBadge.svelte';
 	import StatusPill from './StatusPill.svelte';

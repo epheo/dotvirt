@@ -1,15 +1,15 @@
 <script lang="ts">
-	import { api, type StorageClassInfo, type VM } from '$lib/api';
-	import { bytes, relativeAge } from '$lib/format';
-	import { disksOnClass, provisionedBytes } from '$lib/lenses';
-	import { vmHref } from '$lib/nav';
-	import { resource } from '$lib/resource.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import InfoCard from '$lib/components/InfoCard.svelte';
-	import Note from '$lib/components/Note.svelte';
-	import PowerDot from '$lib/components/PowerDot.svelte';
-	import Row from '$lib/components/Row.svelte';
-	import StatusPill from '$lib/components/StatusPill.svelte';
+	import { api, type StorageClassInfo, type VM } from '#lib/api.js';
+	import { bytes, relativeAge } from '#lib/format.js';
+	import { disksOnClass, provisionedBytes } from '#lib/lenses.js';
+	import { vmHref } from '#lib/nav.js';
+	import { resource } from '#lib/resource.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import InfoCard from '#lib/components/InfoCard.svelte';
+	import Note from '#lib/components/Note.svelte';
+	import PowerDot from '#lib/components/PowerDot.svelte';
+	import Row from '#lib/components/Row.svelte';
+	import StatusPill from '#lib/components/StatusPill.svelte';
 
 	// The storage-class object page's Summary: the platform's facts about the
 	// class (what a disk on it gets, what the driver has left), then the disks

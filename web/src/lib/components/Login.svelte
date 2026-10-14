@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { api, Unauthorized, type User } from '$lib/api';
-	import { action } from '$lib/resource.svelte';
-	import { authMethods } from '$lib/state/session.svelte';
+	import { api, Unauthorized, type User } from '#lib/api.js';
+	import { action } from '#lib/resource.svelte.js';
+	import { authMethods } from '#lib/state/session.svelte.js';
 	import Button from './Button.svelte';
 
 	let { onlogin }: { onlogin: (user: User) => void } = $props();

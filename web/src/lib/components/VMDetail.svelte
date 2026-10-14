@@ -10,15 +10,29 @@
 		Server,
 		Square,
 	} from 'lucide-svelte';
-	import { api, vmKey, vmRef, type Change, type DraftItem, type Network, type VM } from '$lib/api';
-	import { adoptVM, manifestURL, runRuntimeAction, vmActions, type VMAction } from '$lib/actions';
-	import { type EditSection } from '$lib/editform';
-	import { VM_TABS, type VMTab } from '$lib/nav';
-	import { action, resource } from '$lib/resource.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui } from '$lib/state/ui.svelte';
-	import { duration } from '$lib/format';
-	import { phaseTone } from '$lib/status';
+	import {
+		api,
+		vmKey,
+		vmRef,
+		type Change,
+		type DraftItem,
+		type Network,
+		type VM,
+	} from '#lib/api.js';
+	import {
+		adoptVM,
+		manifestURL,
+		runRuntimeAction,
+		vmActions,
+		type VMAction,
+	} from '#lib/actions.js';
+	import { type EditSection } from '#lib/editform.js';
+	import { VM_TABS, type VMTab } from '#lib/nav.js';
+	import { action, resource } from '#lib/resource.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
+	import { duration } from '#lib/format.js';
+	import { phaseTone } from '#lib/status.js';
 	import ActionMenu from './ActionMenu.svelte';
 	import Button from './Button.svelte';
 	import Banner from './Banner.svelte';

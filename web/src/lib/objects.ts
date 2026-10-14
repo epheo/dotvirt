@@ -16,10 +16,10 @@ import {
 	type Policy,
 	type Uplink,
 	type UplinkCreate,
-} from '$lib/api';
-import { friendlyError } from '$lib/format';
-import { inventory } from '$lib/state/inventory.svelte';
-import { ui } from '$lib/state/ui.svelte';
+} from '#lib/api.js';
+import { friendlyError } from '#lib/format.js';
+import { inventory } from '#lib/state/inventory.svelte.js';
+import { ui } from '#lib/state/ui.svelte.js';
 
 /** The draft identity of an object: resource, namespace ('cluster' when cluster-scoped), name. */
 export interface ObjectRef {

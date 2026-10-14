@@ -2,8 +2,8 @@
 	// The shared action-menu panel: renders the VM-action registry for one VM.
 	// Hosts own positioning (header dropdown, right-click menu) and perform the
 	// picked action - this panel only displays and gates.
-	import type { VM } from '$lib/api';
-	import { vmActions, type VMAction } from '$lib/actions';
+	import type { VM } from '#lib/api.js';
+	import { vmActions, type VMAction } from '#lib/actions.js';
 
 	let {
 		vm,

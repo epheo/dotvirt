@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { hunks, lineDiff } from '$lib/textdiff';
+	import { hunks, lineDiff } from '#lib/textdiff.js';
 
 	// The Manifest fold's body: the object's YAML as changed, or, when the
 	// committed side is known, the line diff between the two. A VM edit

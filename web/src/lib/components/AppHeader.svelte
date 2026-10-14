@@ -20,15 +20,15 @@
 		Upload,
 		User as UserIcon,
 	} from 'lucide-svelte';
-	import { dispatchVMAction } from '$lib/actions';
-	import { changesHref, hrefForScope, scopeFromPath, vmHref } from '$lib/nav';
+	import { dispatchVMAction } from '#lib/actions.js';
+	import { changesHref, hrefForScope, scopeFromPath, vmHref } from '#lib/nav.js';
 	import StatusDot from './StatusDot.svelte';
 	import Button from './Button.svelte';
-	import { drafts } from '$lib/state/drafts.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { session } from '$lib/state/session.svelte';
-	import { theme } from '$lib/state/theme.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { drafts } from '#lib/state/drafts.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { theme } from '#lib/state/theme.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import GlobalSearch, { type SearchHit } from './GlobalSearch.svelte';
 	import HeaderMenu from './HeaderMenu.svelte';
 	import MenuItem from './MenuItem.svelte';

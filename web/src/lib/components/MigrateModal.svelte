@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { api, type NodeTarget, type VM } from '$lib/api';
-	import { action } from '$lib/resource.svelte';
-	import { nodeTargets } from '$lib/state/hosts.svelte';
+	import { api, type NodeTarget, type VM } from '#lib/api.js';
+	import { action } from '#lib/resource.svelte.js';
+	import { nodeTargets } from '#lib/state/hosts.svelte.js';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StageFooter from './StageFooter.svelte';

@@ -1,5 +1,5 @@
-import { api, type NodeTarget } from '$lib/api';
-import { resource, type Resource } from '$lib/resource.svelte';
+import { api, type NodeTarget } from '#lib/api.js';
+import { resource, type Resource } from '#lib/resource.svelte.js';
 
 // The host roster behind every host picker, pulled fresh per dialog open
 // (readiness and maintenance move). Listing nodes is cluster-scoped RBAC: a

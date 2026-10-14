@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { ProjectSync } from '$lib/api';
-	import { projectSyncView } from '$lib/status';
+	import type { ProjectSync } from '#lib/api.js';
+	import { projectSyncView } from '#lib/status.js';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
 	import StatusDot from './StatusDot.svelte';

@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { api, type VMEvent } from '$lib/api';
-	import { resource } from '$lib/resource.svelte';
+	import { api, type VMEvent } from '#lib/api.js';
+	import { resource } from '#lib/resource.svelte.js';
 	import EventsTable from './EventsTable.svelte';
 	import MetricsPanel from './MetricsPanel.svelte';
 	import TabBar from './TabBar.svelte';

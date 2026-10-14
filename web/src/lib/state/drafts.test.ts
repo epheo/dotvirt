@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DraftView } from '$lib/api';
+import type { DraftView } from '#lib/api.js';
 
 // The drafts summary is refreshed from several places at once (the layout's
 // keyed effect, staging callbacks, the dock). Response order is not request
@@ -11,15 +11,15 @@ const api = vi.hoisted(() => ({
 	Unauthorized: class extends Error {},
 	vmKey: (v: { namespace: string; name: string }) => `${v.namespace}/${v.name}`,
 }));
-vi.mock('$lib/api', () => api);
+vi.mock('#lib/api.js', () => api);
 const inv = vi.hoisted(() => ({
 	inventory: {} as unknown,
 	canManage: false,
 	projectNames: ['web-prod'],
 }));
-vi.mock('$lib/state/inventory.svelte', () => ({ inventory: inv }));
+vi.mock('#lib/state/inventory.svelte.js', () => ({ inventory: inv }));
 
-import { drafts } from '$lib/state/drafts.svelte';
+import { drafts } from '#lib/state/drafts.svelte.js';
 
 function deferred<T>() {
 	let resolve!: (v: T) => void;

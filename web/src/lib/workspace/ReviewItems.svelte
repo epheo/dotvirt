@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { Pencil, Plus, Trash2 } from 'lucide-svelte';
-	import { vmKey, type DraftItem } from '$lib/api';
-	import { itemKey } from '$lib/review';
-	import { draftKindTone, TONE_PILL } from '$lib/status';
-	import ChangeList from '$lib/components/ChangeList.svelte';
-	import ManifestDiff from '$lib/components/ManifestDiff.svelte';
+	import { vmKey, type DraftItem } from '#lib/api.js';
+	import { itemKey } from '#lib/review.js';
+	import { draftKindTone, TONE_PILL } from '#lib/status.js';
+	import ChangeList from '#lib/components/ChangeList.svelte';
+	import ManifestDiff from '#lib/components/ManifestDiff.svelte';
 
 	// One rendering of reviewed items, for a past commit and an open PR alike.
 	let { items, empty }: { items: DraftItem[]; empty: string } = $props();

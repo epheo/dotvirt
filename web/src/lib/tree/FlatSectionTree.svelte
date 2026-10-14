@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { Database, LayoutGrid, Network, Server } from 'lucide-svelte';
-	import { api, type Node, type VM } from '$lib/api';
-	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
-	import { hrefForScope, scopeFromPath } from '$lib/nav';
-	import { networkByRef } from '$lib/networks';
-	import { resource } from '$lib/resource.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import SyncBadge from '$lib/components/SyncBadge.svelte';
-	import TreeRow from '$lib/components/TreeRow.svelte';
+	import { api, type Node, type VM } from '#lib/api.js';
+	import { vmNetworkKeys, vmStorageKeys, type Scope } from '#lib/lenses.js';
+	import { hrefForScope, scopeFromPath } from '#lib/nav.js';
+	import { networkByRef } from '#lib/networks.js';
+	import { resource } from '#lib/resource.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import SyncBadge from '#lib/components/SyncBadge.svelte';
+	import TreeRow from '#lib/components/TreeRow.svelte';
 	import TreeVMRow from './TreeVMRow.svelte';
 
 	// The flat section trees - Hosts (physical placement), Networking (by NIC

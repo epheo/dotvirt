@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { VM } from '$lib/api';
-	import ConfirmDelete from '$lib/components/ConfirmDelete.svelte';
+	import type { VM } from '#lib/api.js';
+	import ConfirmDelete from '#lib/components/ConfirmDelete.svelte';
 
 	// Type-to-confirm dialog enumerating the VMs about to be delete-staged.
 	let {

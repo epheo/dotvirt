@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Options, VM } from '$lib/api';
-import { vmSizing } from '$lib/sizing';
+import type { Options, VM } from '#lib/api.js';
+import { vmSizing } from '#lib/sizing.js';
 
 function vm(over: Partial<VM> = {}): VM {
 	return {

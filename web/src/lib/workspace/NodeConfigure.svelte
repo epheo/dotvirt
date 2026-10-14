@@ -1,11 +1,11 @@
 <script lang="ts">
-	import type { VM } from '$lib/api';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui } from '$lib/state/ui.svelte';
-	import InfoCard from '$lib/components/InfoCard.svelte';
-	import Button from '$lib/components/Button.svelte';
-	import NodeActions from '$lib/components/NodeActions.svelte';
-	import Row from '$lib/components/Row.svelte';
+	import type { VM } from '#lib/api.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
+	import InfoCard from '#lib/components/InfoCard.svelte';
+	import Button from '#lib/components/Button.svelte';
+	import NodeActions from '#lib/components/NodeActions.svelte';
+	import Row from '#lib/components/Row.svelte';
 
 	// The host's Configure tab: maintenance verbs plus the physical fabric.
 	// dotvirt owns nothing here - node configuration is the cluster platform's.

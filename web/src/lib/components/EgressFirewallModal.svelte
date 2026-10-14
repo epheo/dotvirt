@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { Plus, Trash2 } from 'lucide-svelte';
-	import { api, type EgressFirewallCreate, type EgressFirewallRule } from '$lib/api';
-	import { rowList } from '$lib/rowlist.svelte';
-	import { TERMS } from '$lib/vocab';
+	import { api, type EgressFirewallCreate, type EgressFirewallRule } from '#lib/api.js';
+	import { rowList } from '#lib/rowlist.svelte.js';
+	import { TERMS } from '#lib/vocab.js';
 	import FormField from './FormField.svelte';
 	import Button from './Button.svelte';
 	import Note from './Note.svelte';

@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { PolicyRuleView } from '$lib/api';
-	import { TONE_TEXT, type Tone } from '$lib/status';
-	import { TBODY, TH, TH_LAST, THEAD_TR } from '$lib/table';
+	import type { PolicyRuleView } from '#lib/api.js';
+	import { TONE_TEXT, type Tone } from '#lib/status.js';
+	import { TBODY, TH, TH_LAST, THEAD_TR } from '#lib/table.js';
 
 	// A policy's rule summaries in the Security vocabulary: Direction / Action /
 	// Peer / Ports, with the action toned like the Security view rows.

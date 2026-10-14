@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { resource } from '$lib/resource.svelte';
+	import { resource } from '#lib/resource.svelte.js';
 
 	// A minimal host for resource(): the component tests drive it through props
 	// the way a detail panel's identity string changes under it.

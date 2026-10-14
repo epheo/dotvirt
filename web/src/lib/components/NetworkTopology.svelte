@@ -7,10 +7,10 @@
 		openDelete,
 		openEdit,
 		uplinkRef,
-	} from '$lib/objects';
-	import type { Network as PortGroup, Project, Uplink, VM } from '$lib/api';
-	import { vmNetworkKeys, POD_NETWORK, NO_NETWORK } from '$lib/lenses';
-	import { segmentType, TERMS } from '$lib/vocab';
+	} from '#lib/objects.js';
+	import type { Network as PortGroup, Project, Uplink, VM } from '#lib/api.js';
+	import { vmNetworkKeys, POD_NETWORK, NO_NETWORK } from '#lib/lenses.js';
+	import { segmentType, TERMS } from '#lib/vocab.js';
 	import PowerDot from './PowerDot.svelte';
 	import StatusDot from './StatusDot.svelte';
 

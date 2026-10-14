@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { fmtUsage } from '$lib/format';
-	import { usageLevelColor } from '$lib/status';
+	import { fmtUsage } from '#lib/format.js';
+	import { usageLevelColor } from '#lib/status.js';
 	import Sparkline from './Sparkline.svelte';
 
 	let {

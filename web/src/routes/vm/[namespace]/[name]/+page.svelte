@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
-	import VMDetail from '$lib/components/VMDetail.svelte';
-	import { VM_TABS, type VMTab } from '$lib/nav';
-	import { vmKey, vmRef } from '$lib/api';
-	import { drafts } from '$lib/state/drafts.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import Breadcrumb from '#lib/components/Breadcrumb.svelte';
+	import VMDetail from '#lib/components/VMDetail.svelte';
+	import { VM_TABS, type VMTab } from '#lib/nav.js';
+	import { vmKey, vmRef } from '#lib/api.js';
+	import { drafts } from '#lib/state/drafts.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 
 	const namespace = $derived(page.params.namespace!);
 	const name = $derived(page.params.name!);
@@ -19,8 +19,7 @@
 		const t = page.url.searchParams.get('tab') as VMTab | null;
 		return t && VM_TABS.some((x) => x.id === t) ? t : 'summary';
 	});
-	const setTab = (t: VMTab) =>
-		goto(`?tab=${t}`, { replaceState: true, noScroll: true, keepFocus: true });
+	const setTab = (t: VMTab) => goto(`?tab=${t}`, { replace: true, reset: false });
 </script>
 
 <Breadcrumb

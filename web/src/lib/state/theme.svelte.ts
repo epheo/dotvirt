@@ -1,4 +1,4 @@
-import { browser } from '$app/environment';
+import { browser } from '$app/env';
 import { persisted } from './persisted.svelte';
 
 type ThemeMode = 'light' | 'dark' | 'system';

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { DraftItem } from '$lib/api';
+	import type { DraftItem } from '#lib/api.js';
 	import ChangeList from './ChangeList.svelte';
 	import Button from './Button.svelte';
 	import GitOpsStepper from './GitOpsStepper.svelte';

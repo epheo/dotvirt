@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vitest/config';
 
 // Two projects. unit: pure logic plus the rune modules (persisted, resource,
-// action): node environment, no jsdom. $app/environment is stubbed to
+// action): node environment, no jsdom. $app/env is stubbed to
 // browser=true so persisted() runs its storage path against the test's
 // hand-rolled localStorage.
 //
@@ -36,8 +36,7 @@ export default defineConfig({
 		// The client svelte runtime, matching the client compile above.
 		conditions: ['browser'],
 		alias: {
-			$lib: alias('./src/lib'),
-			'$app/environment': alias('./src/test/app-environment.ts'),
+			'$app/env': alias('./src/test/app-env.ts'),
 			'$app/navigation': alias('./src/test/app-navigation.ts'),
 		},
 	},

@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { api, type ProjectCreate } from '$lib/api';
-	import { splitList } from '$lib/format';
-	import { validName, NAME_HINT, validCIDR } from '$lib/validate';
-	import { inventory } from '$lib/state/inventory.svelte';
+	import { api, type ProjectCreate } from '#lib/api.js';
+	import { splitList } from '#lib/format.js';
+	import { validName, NAME_HINT, validCIDR } from '#lib/validate.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
 	import StageModal from './StageModal.svelte';
 	import FormField from './FormField.svelte';
 	import TextInput from './TextInput.svelte';

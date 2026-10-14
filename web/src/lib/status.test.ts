@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TONE_DOT, TONE_PILL, TONE_TEXT, severityTone, taskTone, type Tone } from '$lib/status';
+import { TONE_DOT, TONE_PILL, TONE_TEXT, severityTone, taskTone, type Tone } from '#lib/status.js';
 
 const TONES: Tone[] = ['ok', 'warn', 'danger', 'info', 'neutral'];
 

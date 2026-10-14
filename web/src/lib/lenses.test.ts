@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Network, VM } from '$lib/api';
+import type { Network, VM } from '#lib/api.js';
 import {
 	DEFAULT_CLASS,
 	NO_NETWORK,
@@ -9,7 +9,7 @@ import {
 	provisionedBytes,
 	vmNetworkKeys,
 	vmStorageKeys,
-} from '$lib/lenses';
+} from '#lib/lenses.js';
 
 function vm(over: Partial<VM> = {}): VM {
 	return {

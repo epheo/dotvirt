@@ -9,11 +9,11 @@ import {
 	type StreamStatus,
 	type TaskEntry,
 	type VM,
-} from '$lib/api';
-import { friendlyError } from '$lib/format';
-import { deriveIssues } from '$lib/issues';
-import { prKey } from '$lib/review';
-import { share } from '$lib/share';
+} from '#lib/api.js';
+import { friendlyError } from '#lib/format.js';
+import { deriveIssues } from '#lib/issues.js';
+import { prKey } from '#lib/review.js';
+import { share } from '#lib/share.js';
 
 const authorable = (n: { canAuthor?: boolean }) => n.canAuthor !== false;
 

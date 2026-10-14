@@ -1,9 +1,9 @@
 <script lang="ts">
-	import type { NodeTarget, VM } from '$lib/api';
-	import type { EditForm } from '$lib/editform';
-	import { splitList } from '$lib/format';
-	import type { Resource } from '$lib/resource.svelte';
-	import { validName, NAME_HINT } from '$lib/validate';
+	import type { NodeTarget, VM } from '#lib/api.js';
+	import type { EditForm } from '#lib/editform.js';
+	import { splitList } from '#lib/format.js';
+	import type { Resource } from '#lib/resource.svelte.js';
+	import { validName, NAME_HINT } from '#lib/validate.js';
 	import Button from '../Button.svelte';
 	import CheckGroup from '../CheckGroup.svelte';
 	import FormField from '../FormField.svelte';

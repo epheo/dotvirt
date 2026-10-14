@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { HTMLTextareaAttributes } from 'svelte/elements';
-	import { acceptsSuggestion } from '$lib/suggest';
+	import { acceptsSuggestion } from '#lib/suggest.js';
 
 	// TextInput's multi-line twin, with the same suggest contract: the default
 	// shows as the placeholder and Tab takes it. rows follows the longer of the

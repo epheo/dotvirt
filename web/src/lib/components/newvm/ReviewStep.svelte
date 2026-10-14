@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { Network, Options } from '$lib/api';
-	import { kindLabel, attachRef } from '$lib/networks';
+	import type { Network, Options } from '#lib/api.js';
+	import { kindLabel, attachRef } from '#lib/networks.js';
 	import Button from '../Button.svelte';
 
 	let {

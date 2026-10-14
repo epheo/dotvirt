@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { api, type VM } from '$lib/api';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
+	import { api, type VM } from '#lib/api.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '#lib/table.js';
 	import ErrorNote from './ErrorNote.svelte';
 	import StageModal from './StageModal.svelte';
 	import StorageClassSelect from './StorageClassSelect.svelte';

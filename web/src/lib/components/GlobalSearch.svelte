@@ -7,12 +7,12 @@
 	// chips elsewhere push one through ui.search.
 	import { untrack } from 'svelte';
 	import { Search } from 'lucide-svelte';
-	import { dismiss } from '$lib/dismiss';
-	import type { VM } from '$lib/api';
-	import { vmActions, type VMAction } from '$lib/actions';
-	import { vmStorageKeys, NO_STORAGE } from '$lib/lenses';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { dismiss } from '#lib/dismiss.js';
+	import type { VM } from '#lib/api.js';
+	import { vmActions, type VMAction } from '#lib/actions.js';
+	import { vmStorageKeys, NO_STORAGE } from '#lib/lenses.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 
 	export type SearchHit =
 		| { kind: 'action'; action: VMAction; vm: VM; hint: string }

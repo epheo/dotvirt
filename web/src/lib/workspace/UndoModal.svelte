@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { TriangleAlert } from 'lucide-svelte';
-	import { api, type Commit, type ProposeResult } from '$lib/api';
-	import { action } from '$lib/resource.svelte';
-	import { drafts } from '$lib/state/drafts.svelte';
-	import Button from '$lib/components/Button.svelte';
-	import ErrorNote from '$lib/components/ErrorNote.svelte';
-	import Modal from '$lib/components/Modal.svelte';
-	import Note from '$lib/components/Note.svelte';
+	import { api, type Commit, type ProposeResult } from '#lib/api.js';
+	import { action } from '#lib/resource.svelte.js';
+	import { drafts } from '#lib/state/drafts.svelte.js';
+	import Button from '#lib/components/Button.svelte';
+	import ErrorNote from '#lib/components/ErrorNote.svelte';
+	import Modal from '#lib/components/Modal.svelte';
+	import Note from '#lib/components/Note.svelte';
 
 	// Undo asks once, in the app's confirm dialog, then opens the forward-commit
 	// pull request. Nothing changes until that PR merges.

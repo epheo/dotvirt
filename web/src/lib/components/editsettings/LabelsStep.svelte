@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { X } from 'lucide-svelte';
-	import type { EditForm } from '$lib/editform';
+	import type { EditForm } from '#lib/editform.js';
 	import Button from '../Button.svelte';
 	import TextInput from '../TextInput.svelte';
 

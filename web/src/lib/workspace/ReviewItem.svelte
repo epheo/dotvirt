@@ -7,18 +7,18 @@
 		type DraftView,
 		type ProposeResult,
 		type VM,
-	} from '$lib/api';
-	import { bytes, quantityBytes } from '$lib/format';
-	import { action } from '$lib/resource.svelte';
-	import { draftKindTone, TONE_PILL } from '$lib/status';
-	import { drafts } from '$lib/state/drafts.svelte';
-	import Button from '$lib/components/Button.svelte';
-	import ChangeList from '$lib/components/ChangeList.svelte';
-	import ErrorNote from '$lib/components/ErrorNote.svelte';
-	import GitOpsStepper from '$lib/components/GitOpsStepper.svelte';
-	import ManifestDiff from '$lib/components/ManifestDiff.svelte';
-	import TextArea from '$lib/components/TextArea.svelte';
-	import TextInput from '$lib/components/TextInput.svelte';
+	} from '#lib/api.js';
+	import { bytes, quantityBytes } from '#lib/format.js';
+	import { action } from '#lib/resource.svelte.js';
+	import { draftKindTone, TONE_PILL } from '#lib/status.js';
+	import { drafts } from '#lib/state/drafts.svelte.js';
+	import Button from '#lib/components/Button.svelte';
+	import ChangeList from '#lib/components/ChangeList.svelte';
+	import ErrorNote from '#lib/components/ErrorNote.svelte';
+	import GitOpsStepper from '#lib/components/GitOpsStepper.svelte';
+	import ManifestDiff from '#lib/components/ManifestDiff.svelte';
+	import TextArea from '#lib/components/TextArea.svelte';
+	import TextInput from '#lib/components/TextInput.svelte';
 	import ReviewPane from './ReviewPane.svelte';
 
 	// A staged item under review: its field diff, what merging does to the

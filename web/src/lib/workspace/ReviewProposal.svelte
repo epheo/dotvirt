@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { ExternalLink, GitPullRequest } from 'lucide-svelte';
-	import type { Proposal } from '$lib/api';
-	import { approvalLine, checksPill } from '$lib/review';
-	import { reviewCache } from '$lib/state/reviewCache.svelte';
-	import Button from '$lib/components/Button.svelte';
-	import ErrorNote from '$lib/components/ErrorNote.svelte';
-	import GitOpsStepper from '$lib/components/GitOpsStepper.svelte';
-	import Skeleton from '$lib/components/Skeleton.svelte';
-	import StatusPill from '$lib/components/StatusPill.svelte';
+	import type { Proposal } from '#lib/api.js';
+	import { approvalLine, checksPill } from '#lib/review.js';
+	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
+	import Button from '#lib/components/Button.svelte';
+	import ErrorNote from '#lib/components/ErrorNote.svelte';
+	import GitOpsStepper from '#lib/components/GitOpsStepper.svelte';
+	import Skeleton from '#lib/components/Skeleton.svelte';
+	import StatusPill from '#lib/components/StatusPill.svelte';
 	import ReviewItems from './ReviewItems.svelte';
 	import ReviewPane from './ReviewPane.svelte';
 

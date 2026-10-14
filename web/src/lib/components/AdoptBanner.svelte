@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { GitPullRequest } from 'lucide-svelte';
-	import { adoptNamespaces } from '$lib/actions';
-	import { action } from '$lib/resource.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { adoptNamespaces } from '#lib/actions.js';
+	import { action } from '#lib/resource.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import Banner from './Banner.svelte';
 	import Button from './Button.svelte';
 

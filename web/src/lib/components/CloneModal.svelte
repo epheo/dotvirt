@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { Copy } from 'lucide-svelte';
-	import { api, type Clone, type VM } from '$lib/api';
-	import { relativeAge } from '$lib/format';
-	import { action, resource, type Resource } from '$lib/resource.svelte';
-	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
-	import { validName } from '$lib/validate';
+	import { api, type Clone, type VM } from '#lib/api.js';
+	import { relativeAge } from '#lib/format.js';
+	import { action, resource, type Resource } from '#lib/resource.svelte.js';
+	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '#lib/table.js';
+	import { validName } from '#lib/validate.js';
 	import ErrorNote from './ErrorNote.svelte';
 	import Button from './Button.svelte';
 	import FormField from './FormField.svelte';

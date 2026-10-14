@@ -8,12 +8,12 @@
 		type Proposal,
 		type TaskEntry,
 		type VMEvent,
-	} from '$lib/api';
-	import { resource } from '$lib/resource.svelte';
-	import { buildTasks, type Task } from '$lib/tasks';
-	import { persisted } from '$lib/state/persisted.svelte';
-	import { severityTone, taskTone, TONE_TEXT } from '$lib/status';
-	import { TBODY, THEAD_TR } from '$lib/table';
+	} from '#lib/api.js';
+	import { resource } from '#lib/resource.svelte.js';
+	import { buildTasks, type Task } from '#lib/tasks.js';
+	import { persisted } from '#lib/state/persisted.svelte.js';
+	import { severityTone, taskTone, TONE_TEXT } from '#lib/status.js';
+	import { TBODY, THEAD_TR } from '#lib/table.js';
 	import Button from './Button.svelte';
 	import EventsTable from './EventsTable.svelte';
 	import GitOpsStepper from './GitOpsStepper.svelte';

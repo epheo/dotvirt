@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { Instancetype, Options, VM } from '$lib/api';
-	import type { EditForm } from '$lib/editform';
+	import type { Instancetype, Options, VM } from '#lib/api.js';
+	import type { EditForm } from '#lib/editform.js';
 	import FormField from '../FormField.svelte';
 	import Note from '../Note.svelte';
 	import SelectInput from '../SelectInput.svelte';

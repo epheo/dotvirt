@@ -32,7 +32,7 @@ export function reviewURL(t: ReviewTarget | null): string {
 	return `/changes?${q}`;
 }
 
-export function parseReview(q: URLSearchParams): ReviewSel | null {
+export function parseReview(q: Pick<URLSearchParams, 'get'>): ReviewSel | null {
 	const project = q.get('project');
 	if (!project) return null;
 	const commit = q.get('commit');

@@ -6,7 +6,7 @@ import {
 	Unauthorized,
 	withRetry,
 	type StreamStatus,
-} from '$lib/api';
+} from '#lib/api.js';
 
 describe('retryDelay', () => {
 	it('starts at 0.5s and doubles per attempt', () => {

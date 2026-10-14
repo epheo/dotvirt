@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { persisted } from '$lib/state/persisted.svelte';
+import { persisted } from '#lib/state/persisted.svelte.js';
 
 // Hand-rolled localStorage: enough surface for persisted(), no jsdom.
 const store = new Map<string, string>();

@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { api, type HostLoad, type HostWorker } from '$lib/api';
-	import { densityPath, layoutStrip } from '$lib/dotstrip';
-	import { relativeAge } from '$lib/format';
-	import { resource } from '$lib/resource.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
+	import { api, type HostLoad, type HostWorker } from '#lib/api.js';
+	import { densityPath, layoutStrip } from '#lib/dotstrip.js';
+	import { relativeAge } from '#lib/format.js';
+	import { resource } from '#lib/resource.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
 	import InfoCard from './InfoCard.svelte';
 	import Button from './Button.svelte';
 

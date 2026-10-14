@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { VMEvent } from '$lib/api';
-	import { duration } from '$lib/format';
-	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '$lib/table';
+	import type { VMEvent } from '#lib/api.js';
+	import { duration } from '#lib/format.js';
+	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '#lib/table.js';
 	import SelectInput from './SelectInput.svelte';
 	import StatusDot from './StatusDot.svelte';
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Inventory, VM } from '$lib/api';
-import { deriveIssues, issuesInScope, issueCountByProject } from '$lib/issues';
+import type { Inventory, VM } from '#lib/api.js';
+import { deriveIssues, issuesInScope, issueCountByProject } from '#lib/issues.js';
 
 function vm(over: Partial<VM>): VM {
 	return {

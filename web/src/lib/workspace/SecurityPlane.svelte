@@ -9,9 +9,9 @@
 		Route,
 		Trash2,
 	} from 'lucide-svelte';
-	import { replaceState } from '$app/navigation';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api, type Policy } from '$lib/api';
+	import { api, type Policy } from '#lib/api.js';
 	import {
 		canAdoptPolicy,
 		canAuthorRef,
@@ -20,16 +20,16 @@
 		openDelete,
 		openEdit,
 		policyRef,
-	} from '$lib/objects';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui } from '$lib/state/ui.svelte';
-	import FileHistory from '$lib/components/FileHistory.svelte';
-	import Button from '$lib/components/Button.svelte';
-	import PolicyRuleTable from '$lib/components/PolicyRuleTable.svelte';
-	import SelectInput from '$lib/components/SelectInput.svelte';
-	import SyncBadge from '$lib/components/SyncBadge.svelte';
-	import TextInput from '$lib/components/TextInput.svelte';
-	import TracePanel from '$lib/components/TracePanel.svelte';
+	} from '#lib/objects.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
+	import FileHistory from '#lib/components/FileHistory.svelte';
+	import Button from '#lib/components/Button.svelte';
+	import PolicyRuleTable from '#lib/components/PolicyRuleTable.svelte';
+	import SelectInput from '#lib/components/SelectInput.svelte';
+	import SyncBadge from '#lib/components/SyncBadge.svelte';
+	import TextInput from '#lib/components/TextInput.svelte';
+	import TracePanel from '#lib/components/TracePanel.svelte';
 
 	// The Networking root's Security tab: the live policy plane in tiers -
 	// cluster admin DFW rules above, project DFW and gateway-firewall rules per
@@ -47,10 +47,10 @@
 	// and navigation (deep link, in-app goto) drives the state back.
 	let tenant = $derived(page.url.searchParams.get('tenant') ?? '');
 	function setTenant(v: string) {
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		if (v) url.searchParams.set('tenant', v);
 		else url.searchParams.delete('tenant');
-		replaceState(url, {});
+		goto(url, { shallow: true, replace: true });
 		tenant = v;
 	}
 	let query = $state('');

@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { api, vmKey } from '$lib/api';
-	import { action } from '$lib/resource.svelte';
-	import { drafts } from '$lib/state/drafts.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { api, vmKey } from '#lib/api.js';
+	import { action } from '#lib/resource.svelte.js';
+	import { drafts } from '#lib/state/drafts.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import Button from './Button.svelte';
 	import Modal from './Modal.svelte';
 	import AddUplinkModal from './AddUplinkModal.svelte';

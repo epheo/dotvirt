@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { keepTab } from '$lib/nav';
+	import { keepTab } from '#lib/nav.js';
 
 	// The workspace breadcrumb strip: ancestors navigate (href, or a callback
 	// where the host owns the transition), the current object is plain and bold.

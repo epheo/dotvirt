@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { api, type NamespaceQuota } from '$lib/api';
-	import { bytes, cores } from '$lib/format';
-	import { resource } from '$lib/resource.svelte';
-	import { usageLevelColor } from '$lib/status';
+	import { api, type NamespaceQuota } from '#lib/api.js';
+	import { bytes, cores } from '#lib/format.js';
+	import { resource } from '#lib/resource.svelte.js';
+	import { usageLevelColor } from '#lib/status.js';
 
 	// ResourceQuota usage bars for a container scope (project / namespace) -
 	// the quota-aware capacity band. Self-contained: fetches its own data, so

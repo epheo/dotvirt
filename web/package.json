@@ -21,8 +21,9 @@
 		"@axe-core/playwright": "^4.13.0",
 		"@eslint/js": "^10.0.1",
 		"@playwright/test": "^1.64.0",
-		"@sveltejs/adapter-static": "^3.0.10",
-		"@sveltejs/kit": "^2.63.0",
+		"@sveltejs/adapter-static": "^4.0.0",
+		"@sveltejs/kit": "^3.0.1",
+		"@sveltejs/load-config": "^0.2.2",
 		"@sveltejs/vite-plugin-svelte": "^7.3.1",
 		"@tailwindcss/vite": "^4.3.0",
 		"@testing-library/svelte": "^5.4.2",
@@ -50,5 +51,8 @@
 		"@novnc/novnc": "^1.7.0",
 		"lucide-svelte": "^1.0.1",
 		"uplot": "^1.6.32"
+	},
+	"imports": {
+		"#lib/*": "./src/lib/*"
 	}
 }

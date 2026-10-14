@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { TriangleAlert } from 'lucide-svelte';
-	import { api } from '$lib/api';
-	import { action } from '$lib/resource.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { authMethods } from '$lib/state/session.svelte';
-	import { ui } from '$lib/state/ui.svelte';
+	import { api } from '#lib/api.js';
+	import { action } from '#lib/resource.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { authMethods } from '#lib/state/session.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import Banner from './Banner.svelte';
 
 	// One-click SSO finish for admins. The apply runs under the CALLER's token;

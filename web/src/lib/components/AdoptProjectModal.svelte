@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { api } from '$lib/api';
-	import { splitList } from '$lib/format';
+	import { api } from '#lib/api.js';
+	import { splitList } from '#lib/format.js';
 	import FormField from './FormField.svelte';
 	import StageModal from './StageModal.svelte';
 	import TextInput from './TextInput.svelte';

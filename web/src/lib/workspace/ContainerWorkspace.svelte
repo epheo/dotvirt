@@ -1,29 +1,29 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api, Unauthorized, vmKey, vmRef, type VM } from '$lib/api';
-	import { bulkOutcome } from '$lib/bulk';
-	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
-	import { containerTabs, hrefForScope, vmHref, type Section } from '$lib/nav';
-	import { action } from '$lib/resource.svelte';
-	import { drafts } from '$lib/state/drafts.svelte';
-	import { inventory } from '$lib/state/inventory.svelte';
-	import { ui } from '$lib/state/ui.svelte';
-	import AdoptBanner from '$lib/components/AdoptBanner.svelte';
-	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
-	import BulkActionsBar from '$lib/components/BulkActionsBar.svelte';
-	import ClusterSummary from '$lib/components/ClusterSummary.svelte';
-	import ContainerConfigure from '$lib/components/ContainerConfigure.svelte';
-	import ContainerMonitor from '$lib/components/ContainerMonitor.svelte';
-	import EffectivePolicyPanel from '$lib/components/EffectivePolicyPanel.svelte';
-	import NetworkTopology from '$lib/components/NetworkTopology.svelte';
-	import PendingBanner from '$lib/components/PendingBanner.svelte';
-	import PlatformAdoptBanner from '$lib/components/PlatformAdoptBanner.svelte';
-	import RepoBanner from '$lib/components/RepoBanner.svelte';
-	import Permissions from '$lib/components/Permissions.svelte';
-	import TabBar from '$lib/components/TabBar.svelte';
-	import VMTable from '$lib/components/VMTable.svelte';
-	import Inspector from '$lib/components/Inspector.svelte';
+	import { api, Unauthorized, vmKey, vmRef, type VM } from '#lib/api.js';
+	import { bulkOutcome } from '#lib/bulk.js';
+	import { vmNetworkKeys, vmStorageKeys, type Scope } from '#lib/lenses.js';
+	import { containerTabs, hrefForScope, vmHref, type Section } from '#lib/nav.js';
+	import { action } from '#lib/resource.svelte.js';
+	import { drafts } from '#lib/state/drafts.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
+	import AdoptBanner from '#lib/components/AdoptBanner.svelte';
+	import Breadcrumb from '#lib/components/Breadcrumb.svelte';
+	import BulkActionsBar from '#lib/components/BulkActionsBar.svelte';
+	import ClusterSummary from '#lib/components/ClusterSummary.svelte';
+	import ContainerConfigure from '#lib/components/ContainerConfigure.svelte';
+	import ContainerMonitor from '#lib/components/ContainerMonitor.svelte';
+	import EffectivePolicyPanel from '#lib/components/EffectivePolicyPanel.svelte';
+	import NetworkTopology from '#lib/components/NetworkTopology.svelte';
+	import PendingBanner from '#lib/components/PendingBanner.svelte';
+	import PlatformAdoptBanner from '#lib/components/PlatformAdoptBanner.svelte';
+	import RepoBanner from '#lib/components/RepoBanner.svelte';
+	import Permissions from '#lib/components/Permissions.svelte';
+	import TabBar from '#lib/components/TabBar.svelte';
+	import VMTable from '#lib/components/VMTable.svelte';
+	import Inspector from '#lib/components/Inspector.svelte';
 	import BulkActionsMenu from './BulkActionsMenu.svelte';
 	import BulkDeleteConfirm from './BulkDeleteConfirm.svelte';
 	import HostsRootSummary from './HostsRootSummary.svelte';
@@ -32,7 +32,7 @@
 	import SegmentSummary from './SegmentSummary.svelte';
 	import StorageClassSummary from './StorageClassSummary.svelte';
 	import StorageRootSummary from './StorageRootSummary.svelte';
-	import TabPane from '$lib/components/TabPane.svelte';
+	import TabPane from '#lib/components/TabPane.svelte';
 
 	// The container workspace: every inventory level, section roots included,
 	// gets the same breadcrumb + tab chrome. Roots differ only in what their
@@ -113,7 +113,7 @@
 		const u = new URL(page.url.href);
 		if (vm) u.searchParams.set('peek', vmKey(vm));
 		else u.searchParams.delete('peek');
-		goto(u.pathname + u.search, { replaceState: true, keepFocus: true, noScroll: true });
+		goto(u.pathname + u.search, { replace: true, reset: false });
 	}
 
 	// --- bulk actions over the grid selection (keys "namespace/name") ---
