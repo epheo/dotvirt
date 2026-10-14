@@ -30,6 +30,29 @@ test('row click peeks; Enter expands; Esc closes', async ({ page }) => {
 	await expect(page.getByRole('button', { name: /Edit Settings/ })).toBeVisible();
 });
 
+test('rows move by arrow keys; Enter peeks then expands; Space selects', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
+	const rows = page.locator('main tbody tr');
+	await rows.first().focus();
+	await page.keyboard.press('ArrowDown');
+	const second = rows.nth(1);
+	await expect(second).toBeFocused();
+	const name = (await second.locator('a').textContent())!.trim();
+
+	await page.keyboard.press('Space');
+	await expect(second).toHaveAttribute('aria-selected', 'true');
+
+	await page.keyboard.press('Enter');
+	const peek = page.getByRole('complementary', { name: 'VM inspector' });
+	await expect(peek.getByText(name, { exact: true }).first()).toBeVisible();
+	await expect(page).not.toHaveURL(/\/vm\//);
+
+	await page.keyboard.press('Enter');
+	await expect(page).toHaveURL(new RegExp(`/vm/[^/]+/${name}`));
+});
+
 test('a peeked VM that leaves the scope closes its peek', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);

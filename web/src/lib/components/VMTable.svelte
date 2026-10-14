@@ -180,6 +180,43 @@
 		selected = next;
 	}
 
+	// Roving tabindex: one row is in the tab order, arrows move focus between
+	// rows. Falls back to the peeked row, then the first, when the focused VM
+	// leaves the filtered set.
+	let focusKey = $state<string | null>(null);
+	const tabKey = $derived.by(() => {
+		const keys = new Set(rows.map(vmKey));
+		if (focusKey && keys.has(focusKey)) return focusKey;
+		if (activeKey && keys.has(activeKey)) return activeKey;
+		return rows.length ? vmKey(rows[0]) : null;
+	});
+
+	function onrowkeydown(e: KeyboardEvent, vm: VM) {
+		// The checkbox and the name link keep their own keys.
+		if (e.target !== e.currentTarget) return;
+		const row = e.currentTarget as HTMLElement;
+		const body = row.parentElement!;
+		const target = {
+			ArrowDown: row.nextElementSibling,
+			ArrowUp: row.previousElementSibling,
+			Home: body.firstElementChild,
+			End: body.lastElementChild,
+		}[e.key];
+		if (target !== undefined) {
+			e.preventDefault();
+			(target as HTMLElement | null)?.focus();
+		} else if (e.key === 'Enter') {
+			// On the peeked row Enter reaches the inspector, which opens the full page.
+			if (vmKey(vm) === activeKey) return;
+			e.preventDefault();
+			e.stopPropagation();
+			onselect(vm);
+		} else if (e.key === ' ') {
+			e.preventDefault();
+			toggleOne(vm);
+		}
+	}
+
 	// Drop selected keys for VMs no longer present (deleted/scoped out), so the
 	// action bar count never counts rows the user can't see.
 	$effect(() => {
@@ -215,7 +252,7 @@
 	</div>
 
 	<div class="min-h-0 flex-1 overflow-auto">
-		<table class="w-full text-[13px]">
+		<table class="w-full text-[13px]" role="grid" aria-multiselectable="true" aria-label="VMs">
 			<thead class="sticky top-0 bg-inset text-left text-xs text-ink-muted">
 				<tr class={THEAD_TR}>
 					<th class="w-8 px-3 py-2">
@@ -251,25 +288,30 @@
 			</thead>
 			<tbody class={TBODY}>
 				{#each rows as vm (vm.namespace + '/' + vm.name)}
-					{@const sc = staged.get(vm.namespace + '/' + vm.name)}
+					{@const k = vmKey(vm)}
+					{@const sc = staged.get(k)}
 					{@const size = sizeOf(vm)}
 					<tr
+						tabindex={k === tabKey ? 0 : -1}
+						aria-selected={selected.has(k)}
+						onfocus={() => (focusKey = k)}
+						onkeydown={(e) => onrowkeydown(e, vm)}
 						onclick={() => onselect(vm)}
 						oncontextmenu={(e) => {
 							if (!oncontextvm) return;
 							e.preventDefault();
 							oncontextvm(vm, e.clientX, e.clientY);
 						}}
-						class="cursor-pointer hover:bg-select-soft {activeKey === vmKey(vm)
+						class="cursor-pointer hover:bg-select-soft {activeKey === k
 							? 'bg-select hover:bg-select'
-							: selected.has(vmKey(vm))
+							: selected.has(k)
 								? 'bg-select-soft'
 								: ''}"
 					>
 						<td class="px-3 py-1.5">
 							<input
 								type="checkbox"
-								checked={selected.has(vmKey(vm))}
+								checked={selected.has(k)}
 								onclick={(e) => e.stopPropagation()}
 								onchange={() => toggleOne(vm)}
 								aria-label="Select {vm.name}"
