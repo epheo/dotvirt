@@ -26,8 +26,8 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var view model.DRSView
-	if s.desched != nil {
-		view.Live = s.desched.Live()
+	if s.drs != nil {
+		view.Live = s.drs.Live()
 	}
 	if s.cfg.PlatformRepo != "" {
 		ctx := r.Context()

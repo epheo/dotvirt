@@ -122,8 +122,8 @@ func run() error {
 	// DRS status plane: the SA-watched KubeDescheduler snapshot behind GET
 	// /api/drs. Discovery-gated - on a cluster without the descheduler operator
 	// it stays a slow API probe, never an error loop.
-	deschedSnapshot := drs.NewSnapshot(saCluster)
-	deschedSnapshot.Run(ctx)
+	drsSnapshot := drs.NewSnapshot(saCluster)
+	drsSnapshot.Run(ctx)
 
 	// Networking read plane: the SA-watched port-group + fabric snapshot behind GET
 	// /api/networks. Reflectors publish NetworkChanged so the catalog refreshes live;
@@ -196,7 +196,7 @@ func run() error {
 		ClusterFactory: clusterFactory,
 		State:          clusterSnapshot,
 		Drift:          argoSnapshot,
-		Desched:        deschedSnapshot,
+		DRS:            drsSnapshot,
 		Netstate:       netSnapshot,
 		Bus:            bus,
 		Resolver:       resolver,

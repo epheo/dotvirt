@@ -34,8 +34,8 @@ var kubedeschedulersGVR = schema.GroupVersionResource{
 	Resource: "kubedeschedulers",
 }
 
-// Snapshot holds the watched KubeDescheduler state. Build with NewSnapshot, start with
-// Run; Live is safe for concurrent callers.
+// Snapshot holds the watched KubeDescheduler state. Build with NewSnapshot,
+// start with Run; Live is safe for concurrent callers.
 type Snapshot struct {
 	sa    *cluster.Client
 	store cache.Indexer
