@@ -148,7 +148,15 @@
 </svelte:head>
 
 {#if session.checking}
-	<div class="flex h-screen items-center justify-center text-sm text-ink-faint">Loading…</div>
+	<div class="flex h-screen flex-col items-center justify-center gap-3 text-sm text-ink-faint">
+		{#if session.unreachable}
+			<p class="font-medium text-ink-soft">Server unreachable. Retrying…</p>
+			<p class="max-w-md text-center font-mono text-xs break-all">{session.unreachable}</p>
+			<Button variant="secondary" size="sm" onclick={() => session.retryNow()}>Retry now</Button>
+		{:else}
+			Loading…
+		{/if}
+	</div>
 {:else if !session.user}
 	<Login onlogin={(u) => (session.user = u)} />
 {:else}
