@@ -6,6 +6,7 @@ import {
 	type NetworkInventory,
 	type Options,
 	type PolicyInventory,
+	type StreamStatus,
 	type TaskEntry,
 	type VM,
 } from '$lib/api';
@@ -23,6 +24,8 @@ class InventoryStore {
 	// every VM on every frame.
 	inventory = $state.raw<Inventory | null>(null);
 	error = $state('');
+	// The live stream's health; the snapshot above is stale unless 'live'.
+	stream = $state<StreamStatus>('connecting');
 	readonly projects = $derived(this.inventory?.projects ?? []);
 	// The networking read layer: the port-group catalog (so raw OVN-K refs render
 	// as catalog port groups) plus the physical fabric (uplinks + node NICs).
@@ -31,6 +34,8 @@ class InventoryStore {
 	// The policy plane behind the Security view; fetched beside netInv (both ride
 	// the networksVersion refetch).
 	polInv = $state<PolicyInventory | null>(null);
+	// The last networks/policies pull's terminal failure; '' once one succeeds.
+	netError = $state('');
 
 	readonly networks = $derived(this.netInv?.networks ?? []);
 	readonly policies = $derived(this.polInv?.policies ?? []);
@@ -100,6 +105,7 @@ class InventoryStore {
 	// The recent-tasks feed (GET /api/tasks), re-pulled when tasksVersion bumps -
 	// every browser sees every admin's ops and merges, with real attribution.
 	taskFeed = $state<TaskEntry[]>([]);
+	tasksError = $state(''); // the last feed pull's failure; '' once one succeeds
 	readonly tasksVersion = $derived(this.inventory?.tasksVersion ?? 0);
 	// Namespaces a VM can be created in: those in projects that have a repo (no
 	// point staging into a project with no backing repo).
@@ -146,6 +152,10 @@ class InventoryStore {
 		this.netInv = null;
 		this.polInv = null;
 		this.taskFeed = [];
+		this.tasksError = '';
+		this.netError = '';
+		this.error = '';
+		this.stream = 'connecting';
 		this.options = null;
 		this.optionsError = '';
 		this.#optionsPull = null;

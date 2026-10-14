@@ -3,6 +3,7 @@
 	import { Check, Copy, X } from 'lucide-svelte';
 	import { api, type CreateVMRequest, type Network } from '$lib/api';
 	import { kindLabel, attachableNetworks, attachRef } from '$lib/networks';
+	import { rowList } from '$lib/rowlist.svelte';
 	import { inventory } from '$lib/state/inventory.svelte';
 	import Modal from './Modal.svelte';
 	import Button from './Button.svelte';
@@ -53,7 +54,10 @@
 		else onclose();
 	}
 	let copied = $state('');
-	let extraDisks = $state<{ name: string; size: string; storageClass: string }[]>([]);
+	const disks = rowList((n) => ({ name: `disk${n + 1}`, size: '10Gi', storageClass: '' }), [], {
+		empty: true,
+	});
+	const extraDisks = $derived(disks.rows);
 	// Selected secondary networks, held as attach refs ("namespace/nad", or a bare
 	// name for a shared CUDN).
 	let selectedNetworks = $state<string[]>([]);
@@ -168,16 +172,6 @@
 			nudged = new Set([...nudged, prevStep]);
 		prevStep = cur;
 	});
-
-	function addDisk() {
-		extraDisks = [
-			...extraDisks,
-			{ name: `disk${extraDisks.length + 1}`, size: '10Gi', storageClass: '' },
-		];
-	}
-	function removeDisk(i: number) {
-		extraDisks = extraDisks.filter((_, idx) => idx !== i);
-	}
 
 	// Review-step display labels (names, not raw refs/ids).
 	const osImageName = $derived(osImage ? osImage.split('|')[0] : '');
@@ -334,9 +328,9 @@
 		<div>
 			<div class="mb-1 flex items-center justify-between">
 				<span class="text-ink-soft">Extra disks</span>
-				<Button variant="link" size="sm" onclick={addDisk}>+ Add disk</Button>
+				<Button variant="link" size="sm" onclick={disks.add}>+ Add disk</Button>
 			</div>
-			{#each extraDisks as disk, i (i)}
+			{#each disks.rows as disk, i (i)}
 				<div class="mb-1 flex gap-2">
 					<TextInput bind:value={disk.name} placeholder="name" class="min-w-0 flex-1" />
 					<TextInput bind:value={disk.size} suggest="10Gi" width="w-20" />
@@ -346,7 +340,7 @@
 						class="min-w-0 flex-1"
 					/>
 					<button
-						onclick={() => removeDisk(i)}
+						onclick={() => disks.remove(i)}
 						type="button"
 						aria-label="Remove disk"
 						class="text-danger hover:text-danger-ink"><X size={14} /></button

@@ -13,6 +13,7 @@
 // rides cross-origin in dev (Vite proxy) and same-origin in production.
 
 import type * as gen from './model.gen';
+import { friendlyError } from './format';
 
 export type * from './model.gen';
 export type { Event as VMEvent, Node as NodeTarget } from './model.gen';
@@ -36,6 +37,9 @@ export interface VM extends Omit<gen.VM, 'power' | 'sync' | 'scheduling'> {
 }
 // The "namespace/name" identity every VM-keyed map, route and selection uses.
 export const vmKey = (vm: { namespace: string; name: string }) => `${vm.namespace}/${vm.name}`;
+// A VM's identity alone, for state that outlives a frame and must resolve live.
+export type VMRef = { namespace: string; name: string };
+export const vmRef = (vm: VMRef): VMRef => ({ namespace: vm.namespace, name: vm.name });
 
 export interface ProjectSync extends Omit<gen.ProjectSync, 'sync'> {
 	sync?: SyncStatus;
@@ -244,6 +248,18 @@ export class Unauthorized extends Error {
 	}
 }
 
+// HttpError carries the status of a non-2xx answer, for callers that treat
+// one status as an answer rather than a failure (a 403 that means "not yours").
+export class HttpError extends Error {
+	constructor(
+		message: string,
+		readonly status: number,
+	) {
+		super(message);
+		this.name = 'HttpError';
+	}
+}
+
 // The one signed-out sink: every 401 funnels through req(), so the page
 // registers a single handler here instead of each fetching component
 // remembering to report it. The WebSocket paths (streamInventory, VNC) don't
@@ -259,7 +275,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 		unauthorizedSink?.();
 		throw new Unauthorized();
 	}
-	if (!res.ok) throw new Error(`${path}: ${res.status} ${await res.text()}`);
+	if (!res.ok) throw new HttpError(`${path}: ${res.status} ${await res.text()}`, res.status);
 	if (res.status === 204) return undefined as T;
 	return res.json() as Promise<T>;
 }
@@ -501,27 +517,36 @@ export const api = {
 		post<void>(`${vmPath(namespace, name)}/unpause`, {}),
 };
 
-// draftsByProject fetches the draft for each named project and returns the
-// non-empty ones, for the Changes panel + header badge. Projects with no repo are
-// skipped (they can't hold a draft).
-export async function draftsByProject(
-	projects: string[],
-): Promise<{ project: string; draft: DraftView }[]> {
+// draftsByProject fetches the draft for each named project: the non-empty
+// ones for the Changes panel + header badge, and the projects whose fetch
+// failed, so a lane shows its error instead of silently reading as empty. A
+// 403 is an answer (no draft authority, e.g. the platform tier for
+// non-authors), not a failure.
+export async function draftsByProject(projects: string[]): Promise<{
+	drafts: { project: string; draft: DraftView }[];
+	failed: { project: string; error: string }[];
+}> {
 	const results = await Promise.all(
 		projects.map(async (project) => {
 			try {
 				return { project, draft: await api.getDraft(project) };
 			} catch (e) {
 				if (e instanceof Unauthorized) throw e;
-				return null;
+				if (e instanceof HttpError && e.status === 403) return null;
+				return { project, error: friendlyError(e) };
 			}
 		}),
 	);
-	// Warning-only drafts render too: prune risk must warn BEFORE anything merges.
-	return results.filter(
-		(r): r is { project: string; draft: DraftView } =>
-			!!r && (r.draft.count > 0 || !!r.draft.warning),
-	);
+	const drafts: { project: string; draft: DraftView }[] = [];
+	const failed: { project: string; error: string }[] = [];
+	for (const r of results) {
+		if (!r) continue;
+		if (r.error !== undefined) failed.push({ project: r.project, error: r.error });
+		// Warning-only drafts render too: prune risk must warn BEFORE anything merges.
+		else if (r.draft.count > 0 || r.draft.warning)
+			drafts.push({ project: r.project, draft: r.draft });
+	}
+	return { drafts, failed };
 }
 
 // Reconnect backoff for streamInventory: 0.5s doubling to a 16s cap.
@@ -546,22 +571,31 @@ export async function withRetry<T>(fn: () => Promise<T>, retries = 5): Promise<T
 	}
 }
 
+// The live stream's health: 'reconnecting' while backoff retries run,
+// 'down' once they reach the cap (the server has stopped answering).
+export type StreamStatus = 'connecting' | 'live' | 'reconnecting' | 'down';
+
 /**
  * streamInventory subscribes to the caller's live inventory over WebSocket. The
  * session cookie rides the handshake (same-origin), so the server pushes only the
- * caller's tree. Calls onInventory on each push, auto-reconnects with backoff, and
- * invokes onUnauthorized if the handshake is rejected (expired session). Returns a
- * function to close the subscription.
+ * caller's tree. Calls onInventory on each push, auto-reconnects with backoff
+ * (reporting each transition to onStatus), and invokes onUnauthorized if the
+ * handshake is rejected (expired session). close ends the subscription;
+ * retryNow skips the backoff wait, pending or next.
  */
 export function streamInventory(
 	onInventory: (inv: Inventory) => void,
 	onUnauthorized?: () => void,
-): () => void {
+	onStatus?: (s: StreamStatus) => void,
+): { close: () => void; retryNow: () => void } {
 	let ws: WebSocket | null = null;
 	let closed = false;
 	let retry = 0;
 	let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	let everOpen = false;
+	// retryNow asked while an attempt (socket or session probe) was in flight:
+	// if that attempt fails, the next one starts without the backoff wait.
+	let skipWait = false;
 
 	const url = () => {
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -569,12 +603,15 @@ export function streamInventory(
 	};
 
 	const connect = () => {
+		reconnectTimer = undefined;
 		if (closed) return;
 		everOpen = false;
 		ws = new WebSocket(url());
 		ws.onopen = () => {
 			everOpen = true;
 			retry = 0;
+			skipWait = false;
+			onStatus?.('live');
 		};
 		ws.onmessage = (e) => {
 			try {
@@ -586,7 +623,9 @@ export function streamInventory(
 		const scheduleReconnect = () => {
 			if (closed) return;
 			retry = Math.min(retry + 1, 6);
-			reconnectTimer = setTimeout(connect, retryDelay(retry));
+			onStatus?.(retry >= 6 ? 'down' : 'reconnecting');
+			reconnectTimer = setTimeout(connect, skipWait ? 0 : retryDelay(retry));
+			skipWait = false;
 		};
 		ws.onclose = () => {
 			if (closed) return;
@@ -614,11 +653,23 @@ export function streamInventory(
 		ws.onerror = () => ws?.close();
 	};
 
+	onStatus?.('connecting');
 	connect();
 
-	return () => {
-		closed = true;
-		clearTimeout(reconnectTimer);
-		ws?.close();
+	return {
+		close: () => {
+			closed = true;
+			clearTimeout(reconnectTimer);
+			ws?.close();
+		},
+		retryNow: () => {
+			if (closed) return;
+			if (reconnectTimer === undefined) {
+				skipWait = true;
+				return;
+			}
+			clearTimeout(reconnectTimer);
+			connect();
+		},
 	};
 }

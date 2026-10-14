@@ -22,6 +22,7 @@
 		type ReviewSel,
 	} from '$lib/review';
 	import { drafts } from '$lib/state/drafts.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import ErrorNote from '$lib/components/ErrorNote.svelte';
 	import Note from '$lib/components/Note.svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
@@ -45,6 +46,7 @@
 		active,
 		onselect,
 		ontogglehistory,
+		onretryhistory,
 		ondismiss,
 	}: {
 		scopeProject: string;
@@ -59,6 +61,7 @@
 		active: ReviewSel | null;
 		onselect: (s: ReviewSel) => void;
 		ontogglehistory: (project: string) => void;
+		onretryhistory: (project: string) => void;
 		ondismiss: (project: string) => void;
 	} = $props();
 
@@ -69,7 +72,16 @@
 	}
 
 	const on = (s: ReviewSel) => sameReview(active, s);
+	const failedLanes = $derived(
+		drafts.failed.filter((f) => !scopeProject || f.project === scopeProject),
+	);
 </script>
+
+{#snippet retryDrafts()}
+	<Button variant="link" size="sm" disabled={drafts.refreshing} onclick={() => drafts.refresh()}
+		>Retry</Button
+	>
+{/snippet}
 
 <div class="flex w-96 shrink-0 flex-col overflow-y-auto border-r border-line">
 	<div class="px-3 pt-3 pb-1 text-[11px] font-semibold tracking-wide text-ink-faint uppercase">
@@ -78,12 +90,22 @@
 	<ErrorNote error={discardOp.error} class="mx-3 mb-1" />
 	{#if !drafts.loaded}
 		<div class="p-3"><Skeleton rows={3} class="h-7" /></div>
-	{:else if lanes.length === 0}
+	{:else if drafts.loaded && lanes.length === 0 && failedLanes.length === 0}
 		<p class="px-3 py-2 text-xs text-ink-faint">
 			Nothing staged{scopeProject ? ` in ${scopeProject}` : ''}. Edits, creates and deletes land
 			here before becoming a pull request.
 		</p>
 	{/if}
+	{#each failedLanes as f (f.project)}
+		<div class="flex items-center gap-2 px-3 py-1.5">
+			<Folder size={14} class="text-ink-faint" />
+			<span class="font-medium text-ink">{f.project}</span>
+		</div>
+		<Note tone="danger" class="mx-3 mb-1 flex items-center gap-2">
+			<span class="min-w-0 flex-1">Could not read the draft: {f.error}</span>
+			{@render retryDrafts()}
+		</Note>
+	{/each}
 	{#each lanes as { project, draft } (project)}
 		<div class="flex items-center gap-2 px-3 py-1.5">
 			<Folder size={14} class="text-ink-faint" />
@@ -209,10 +231,13 @@
 				{project}
 			</button>
 			{#if lane?.open}
-				{#if lane.busy}
+				{#if lane.busy && !lane.commits.length}
 					<p class="py-1 pl-10 text-xs text-ink-faint">loading…</p>
 				{:else if lane.error}
-					<p class="py-1 pl-10 text-xs text-danger-ink">{lane.error}</p>
+					<p class="py-1 pl-10 text-xs text-danger-ink">
+						{lane.error}
+						<Button variant="link" size="sm" onclick={() => onretryhistory(project)}>Retry</Button>
+					</p>
 				{:else}
 					{#each lane.commits as c (c.hash)}
 						{@const sel = { kind: 'commit', project, hash: c.hash } as const}

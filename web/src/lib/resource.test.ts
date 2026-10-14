@@ -67,6 +67,32 @@ describe('resource', () => {
 		stop();
 	});
 
+	it('drops an older run on the same key that lands after a newer one', async () => {
+		// A poll and a manual refresh overlap on one key: response order is not
+		// request order.
+		const calls: ReturnType<typeof deferred<string>>[] = [];
+		let r!: Resource<string>;
+		const stop = effectRoot(() => {
+			r = resource(
+				() => 'vm-a',
+				() => {
+					const d = deferred<string>();
+					calls.push(d);
+					return d.promise;
+				},
+			);
+		});
+		const second = r.refresh();
+		calls[1].resolve('new');
+		await second;
+		expect(r.data).toBe('new');
+		calls[0].resolve('old');
+		await tick();
+		expect(r.data).toBe('new');
+		expect(r.loading).toBe(false);
+		stop();
+	});
+
 	it('reset:true blanks on a key change, reset:false keeps the old view', async () => {
 		for (const reset of [true, false]) {
 			const key = box('a');

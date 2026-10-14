@@ -76,11 +76,27 @@
 	const STAGE_ORDER = ['creating', 'preparing', 'uploading', 'importing', 'done'];
 	const stageIdx = $derived(STAGE_ORDER.indexOf(stage));
 
-	const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+	// Torn down (sign-out, navigation): stop the stream and the polls, which
+	// would otherwise run for up to 20 minutes against a dead dialog.
+	const teardown = new AbortController();
+	$effect(() => () => teardown.abort());
+	const sleep = (ms: number) =>
+		new Promise<void>((resolve, reject) => {
+			const abort = () => {
+				clearTimeout(id);
+				reject(teardown.signal.reason);
+			};
+			const id = setTimeout(() => {
+				teardown.signal.removeEventListener('abort', abort);
+				resolve();
+			}, ms);
+			teardown.signal.addEventListener('abort', abort, { once: true });
+		});
 
 	// Poll the DataVolume until a predicate holds (or it fails / times out).
 	async function pollUntil(pred: (phase: string) => boolean, label: string): Promise<void> {
 		for (let i = 0; i < 600; i++) {
+			teardown.signal.throwIfAborted();
 			const st = await api.uploadStatus(namespace, name);
 			if (st.progress) importInfo = st.progress;
 			if (st.phase === 'Failed') throw new Error('CDI reported the upload failed');
@@ -94,7 +110,16 @@
 	// progress an fetch() can't.
 	function streamToProxy(url: string, token: string): Promise<void> {
 		return new Promise((resolve, reject) => {
+			teardown.signal.throwIfAborted();
 			const xhr = new XMLHttpRequest();
+			teardown.signal.addEventListener(
+				'abort',
+				() => {
+					xhr.abort();
+					reject(teardown.signal.reason);
+				},
+				{ once: true },
+			);
 			xhr.open('POST', url);
 			xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 			xhr.upload.onprogress = (e) => {
@@ -129,7 +154,7 @@
 			await pollUntil((p) => p === 'Succeeded', 'CDI to finish importing');
 			stage = 'done';
 		} catch (e) {
-			if (e instanceof Unauthorized) return;
+			if (e instanceof Unauthorized || teardown.signal.aborted) return;
 			error = friendlyError(e);
 			stage = 'error';
 		}

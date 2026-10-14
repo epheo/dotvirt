@@ -1,5 +1,5 @@
 import { goto } from '$app/navigation';
-import { vmPath } from './api';
+import { vmPath, vmRef } from './api';
 // The single VM-action registry: every menu that acts on a VM - the detail
 // header's Actions ▾, the right-click context menu, the bulk bar - renders
 // some projection of this list, so labels, ordering, and above all the
@@ -179,7 +179,7 @@ export const vmActions: VMAction[] = [
 		kind: 'host',
 		title: 'Move the running VM to another host — pick a target or let the scheduler choose',
 		enabled: running,
-		open: (vm) => ({ kind: 'migrateVM', vm }),
+		open: (vm) => ({ kind: 'migrateVM', vm: vmRef(vm) }),
 	},
 	{
 		id: 'migrate-storage',
@@ -189,7 +189,7 @@ export const vmActions: VMAction[] = [
 		// Needs a live VMI to copy from, a git manifest to edit, and at least
 		// one DataVolume-backed disk to move.
 		enabled: (vm) => running(vm) && inGit(vm) && !!vm.disks?.some((d) => d.type === 'dataVolume'),
-		open: (vm) => ({ kind: 'migrateStorage', vm }),
+		open: (vm) => ({ kind: 'migrateStorage', vm: vmRef(vm) }),
 	},
 	{ id: 'console', label: 'Open console', kind: 'host', sep: true, enabled: running },
 	{ id: 'snapshot', label: 'Snapshots', kind: 'host', enabled: always },
@@ -199,7 +199,7 @@ export const vmActions: VMAction[] = [
 		kind: 'host',
 		title: 'Copy this VM via snapshot + restore; adopt the result into git after',
 		enabled: always,
-		open: (vm) => ({ kind: 'cloneVM', vm }),
+		open: (vm) => ({ kind: 'cloneVM', vm: vmRef(vm) }),
 	},
 	{
 		id: 'template',
@@ -207,7 +207,7 @@ export const vmActions: VMAction[] = [
 		kind: 'host',
 		title: 'Derive a reusable template from this VM’s git manifest — staged as a PR',
 		enabled: inGit,
-		open: (vm) => ({ kind: 'saveTemplate', vm }),
+		open: (vm) => ({ kind: 'saveTemplate', vm: vmRef(vm) }),
 	},
 	{
 		id: 'adopt',
@@ -224,7 +224,7 @@ export const vmActions: VMAction[] = [
 		kind: 'host',
 		title: 'Stages a config change into a PR',
 		enabled: inGit,
-		open: (vm) => ({ kind: 'editVM', vm }),
+		open: (vm) => ({ kind: 'editVM', vm: vmRef(vm) }),
 	},
 	{
 		id: 'manifest',
@@ -241,7 +241,7 @@ export const vmActions: VMAction[] = [
 		sep: true,
 		title: 'Stages a removal into a PR',
 		enabled: inGit,
-		open: (vm) => ({ kind: 'deleteVM', vm }),
+		open: (vm) => ({ kind: 'deleteVM', vm: vmRef(vm) }),
 	},
 ];
 

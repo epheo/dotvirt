@@ -5,7 +5,15 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api, onUnauthorized, streamInventory, withRetry } from '$lib/api';
+	import {
+		api,
+		onUnauthorized,
+		streamInventory,
+		Unauthorized,
+		withRetry,
+		type StreamStatus,
+	} from '$lib/api';
+	import { friendlyError } from '$lib/format';
 	import { INVENTORY_SECTIONS, sectionOf, vmHref, type Section } from '$lib/nav';
 	import { drafts } from '$lib/state/drafts.svelte';
 	import { catalog } from '$lib/state/catalog.svelte';
@@ -66,15 +74,32 @@
 	});
 
 	// Live subscription, established once signed in. The cookie rides the handshake;
-	// a 401 on the upgrade (expired session) drops us back to login.
+	// a 401 on the upgrade (expired session) drops us back to login. The banner
+	// names a lost stream (the tree is a stale snapshot meanwhile) and offers a
+	// retry that skips the backoff wait.
+	let liveStream: { retryNow: () => void } | null = null;
+	const STREAM_LOST: Record<StreamStatus, string> = {
+		connecting: '',
+		live: '',
+		reconnecting: 'Live updates lost. Reconnecting…',
+		down: 'Live updates down: the server is not answering. Still retrying.',
+	};
 	$effect(() => {
 		if (!session.user) return;
 		inventory.inventory = null;
-		const stop = streamInventory(
+		const s = streamInventory(
 			(inv) => inventory.apply(inv),
 			() => (session.user = null),
+			(status) => {
+				inventory.stream = status;
+				inventory.error = STREAM_LOST[status];
+			},
 		);
-		return stop;
+		liveStream = s;
+		return () => {
+			s.close();
+			liveStream = null;
+		};
 	});
 
 	// The port-group catalog and the policy plane are fetched out-of-band (not on the
@@ -88,17 +113,24 @@
 	// Only the pull for the current version writes: version bumps come in bursts,
 	// and an older response landing last would paint stale planes (or, after
 	// sign-out, repopulate the reset stores).
+	// A pull that outlasts its retries is named in a banner whose Retry bumps
+	// netRetry; the last good planes stay rendered meanwhile.
+	let netRetry = $state(0);
 	$effect(() => {
 		if (!session.user) return;
 		inventory.networksVersion; // subscribe: re-pull when GitOps/git moves
+		netRetry;
 		let live = true;
 		withRetry(() => Promise.all([api.networks(), api.policies()]))
 			.then(([n, p]) => {
 				if (!live) return;
 				inventory.netInv = n;
 				inventory.polInv = p;
+				inventory.netError = '';
 			})
-			.catch(() => {});
+			.catch((e) => {
+				if (live && !(e instanceof Unauthorized)) inventory.netError = friendlyError(e);
+			});
 		return () => {
 			live = false;
 		};
@@ -113,32 +145,38 @@
 
 	// The recent-tasks feed rides the same out-of-band contract: re-pull when an
 	// op is recorded or a merged PR lands (tasksVersion), not on every VM frame.
+	let tasksRetry = $state(0);
 	$effect(() => {
 		if (!session.user) return;
 		inventory.tasksVersion; // subscribe
+		tasksRetry;
 		let live = true;
 		api
 			.tasks()
 			.then((t) => {
-				if (live) inventory.taskFeed = t;
+				if (!live) return;
+				inventory.taskFeed = t;
+				inventory.tasksError = '';
 			})
-			.catch(() => {});
+			.catch((e) => {
+				if (live && !(e instanceof Unauthorized)) inventory.tasksError = friendlyError(e);
+			});
 		return () => {
 			live = false;
 		};
 	});
 
 	// Recompute the draft summary only when the SET of projects or PR lanes
-	// changes: depend on the stable keys, and read the project list via untrack so
-	// the effect doesn't also subscribe to the per-frame array reference (which
-	// would re-fire on every VM state change). Staging actions call drafts.refresh
-	// directly.
+	// changes, or once the first frame lands (an empty project set is an answer
+	// too, or the Changes lanes would wait forever): depend on stable keys, never
+	// the per-frame arrays, which would re-fire on every VM state change.
+	// Staging actions call drafts.refresh directly.
+	const streamed = $derived(inventory.inventory !== null);
 	$effect(() => {
 		inventory.projectKey;
 		inventory.proposalsKey;
-		untrack(() => {
-			if (session.user && inventory.projectNames.length) drafts.refresh();
-		});
+		inventory.canManage; // platform authors also carry a platform draft
+		if (session.user && streamed) untrack(() => drafts.refresh());
 	});
 </script>
 
@@ -148,7 +186,17 @@
 </svelte:head>
 
 {#if session.checking}
-	<div class="flex h-screen items-center justify-center text-sm text-ink-faint">Loading…</div>
+	<div class="flex h-screen flex-col items-center justify-center gap-3 text-sm text-ink-faint">
+		{#if session.bootError}
+			<p class="font-medium text-ink-soft">
+				{session.bootError.answered ? 'Server error' : 'Server unreachable'}. Retrying…
+			</p>
+			<p class="max-w-md text-center font-mono text-xs break-all">{session.bootError.detail}</p>
+			<Button variant="secondary" size="sm" onclick={() => session.retryNow()}>Retry now</Button>
+		{:else}
+			Loading…
+		{/if}
+	</div>
 {:else if !session.user}
 	<Login onlogin={(u) => (session.user = u)} />
 {:else}
@@ -156,9 +204,20 @@
 		<AppHeader />
 
 		{#if inventory.error}
-			<Banner tone="danger" size="md" class="items-start">
-				<span class="font-medium">Error:</span>
-				<span class="font-mono text-xs break-all">{inventory.error}</span>
+			<Banner tone={inventory.stream === 'down' ? 'danger' : 'warn'} size="md">
+				<TriangleAlert size={16} class="shrink-0" />
+				<span>{inventory.error}</span>
+				<Button variant="link" size="sm" onclick={() => liveStream?.retryNow()}>Retry</Button>
+			</Banner>
+		{/if}
+
+		{#if inventory.netError}
+			<Banner tone="warn" size="md">
+				<TriangleAlert size={16} class="shrink-0" />
+				<span class="min-w-0"
+					>Networking and security views may be out of date: {inventory.netError}</span
+				>
+				<Button variant="link" size="sm" onclick={() => netRetry++}>Retry</Button>
 			</Banner>
 		{/if}
 
@@ -210,10 +269,14 @@
 			drafts={drafts.drafts}
 			proposals={inventory.proposals}
 			tasks={inventory.taskFeed}
+			tasksError={inventory.tasksError}
 			inventory={inventory.inventory}
 			username={session.user.username}
 			onselect={(namespace, name) => goto(vmHref(namespace, name))}
-			onrefresh={() => drafts.refresh()}
+			onrefresh={() => {
+				drafts.refresh();
+				tasksRetry++;
+			}}
 		/>
 
 		<AppModals />

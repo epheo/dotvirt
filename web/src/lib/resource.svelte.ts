@@ -31,21 +31,26 @@ export function resource<T>(
 	let data = $state<T | null>(null);
 	let loading = $state(false);
 	let error = $state('');
+	// Only the newest run writes: a poll and a manual refresh on the same key
+	// overlap, and the older response landing last would paint stale data.
+	let seq = 0;
 
 	async function run() {
 		const k = untrack(key);
+		const mine = ++seq;
+		const current = () => mine === seq && key() === k;
 		if (data === null) loading = true;
 		try {
 			const v = await load(k);
-			if (key() !== k) return; // the key moved while in flight: stale response
+			if (!current()) return;
 			data = v;
 			error = '';
 		} catch (e) {
 			if (e instanceof Unauthorized) return; // signs out centrally via the api layer
-			if (key() !== k) return;
+			if (!current()) return;
 			error = friendlyError(e);
 		} finally {
-			if (key() === k) loading = false;
+			if (current()) loading = false;
 		}
 	}
 

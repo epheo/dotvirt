@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api, Unauthorized, vmKey, type VM } from '$lib/api';
+	import { api, Unauthorized, vmKey, vmRef, type VM } from '$lib/api';
+	import { bulkOutcome } from '$lib/bulk';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '$lib/lenses';
 	import { containerTabs, hrefForScope, vmHref, type Section } from '$lib/nav';
 	import { action } from '$lib/resource.svelte';
@@ -135,8 +136,7 @@
 	}
 
 	// Run one staging call per VM in parallel, tallying outcomes. `skip` filters
-	// no-ops client-side; any per-VM failure folds into the skipped count rather
-	// than aborting the batch.
+	// no-ops client-side; a per-VM failure never aborts the batch.
 	function runBulk(
 		vms: VM[],
 		stage: (vm: VM) => Promise<unknown>,
@@ -146,19 +146,14 @@
 		if (bulkOp.busy) return;
 		return bulkOp.run(async () => {
 			const actionable = vms.filter((vm) => !skip(vm));
-			const skipped = vms.length - actionable.length;
 			const results = await Promise.allSettled(actionable.map((vm) => stage(vm)));
-			const rejected = results.filter((r) => r.status === 'rejected');
 			// allSettled hides a sign-out from the action's own swallow.
-			const denied = rejected.find((r) => r.reason instanceof Unauthorized);
+			const denied = results.find(
+				(r) => r.status === 'rejected' && r.reason instanceof Unauthorized,
+			) as PromiseRejectedResult | undefined;
 			if (denied) throw denied.reason;
-			const failed = rejected.length;
-			const staged = results.length - failed;
-			picked = new Set();
-			const extra = [skipped ? `${skipped} skipped` : '', failed ? `${failed} failed` : '']
-				.filter(Boolean)
-				.join(', ');
-			const msg = `${verb} ${staged} of ${vms.length}${extra ? ` (${extra})` : ''}.`;
+			const { keep, staged, failed, msg } = bulkOutcome(verb, vms.length, actionable, results);
+			picked = keep;
 			if (staged > 0) ui.toastStaged(msg, { kind: failed ? 'error' : 'success' });
 			else ui.showToast(msg, { kind: failed ? 'error' : 'success' });
 		});
@@ -262,7 +257,7 @@
 				staged={drafts.stagedByKey}
 				activeKey={peekVM ? peekKey : null}
 				onselect={(vm) => setPeek(peekKey === vmKey(vm) ? null : vm)}
-				onstagedopen={(vm) => (ui.modal = { kind: 'staged', vm })}
+				onstagedopen={(vm) => (ui.modal = { kind: 'staged', vm: vmRef(vm) })}
 				oncontextvm={contextVM}
 			/>
 		</div>
