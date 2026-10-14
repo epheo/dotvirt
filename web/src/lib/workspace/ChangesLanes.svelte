@@ -209,7 +209,7 @@
 				{project}
 			</button>
 			{#if lane?.open}
-				{#if lane.busy}
+				{#if lane.busy && !lane.commits.length}
 					<p class="py-1 pl-10 text-xs text-ink-faint">loading…</p>
 				{:else if lane.error}
 					<p class="py-1 pl-10 text-xs text-danger-ink">{lane.error}</p>

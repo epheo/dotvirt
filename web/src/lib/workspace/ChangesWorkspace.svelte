@@ -2,7 +2,7 @@
 	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api, type Proposal, type ProposeResult } from '$lib/api';
+	import { api, Unauthorized, type Proposal, type ProposeResult } from '$lib/api';
 	import { friendlyError } from '$lib/format';
 	import { changesHref } from '$lib/nav';
 	import {
@@ -77,6 +77,18 @@
 	// History per repo-backed project, loaded when its lane opens. Kept here,
 	// not in the lanes: a selected commit resolves against it.
 	let history = $state<Record<string, HistoryLane>>({});
+	// A lane's content is a function of the namespace scope and the project's
+	// applied revision (a merge that reaches the cluster moves it).
+	const revisionOf = (project: string) =>
+		(project === PLATFORM_PROJECT
+			? inventory.inventory?.platform?.revision
+			: inventory.projects.find((p) => p.name === project)?.gitOps?.revision) ?? '';
+	const laneKey = (project: string) => `${scopeNS}|${revisionOf(project)}`;
+	const historyKeys = $derived(repoProjects.map((p) => `${p}|${laneKey(p)}`).join('\0'));
+	// Only a lane's newest load writes: scope switches and revision moves
+	// overlap, and a late response would paint another scope's commits.
+	let historySeq = 0;
+	const latest = new Map<string, { seq: number; key: string }>();
 	function openHistory(project: string) {
 		if (!history[project]) history[project] = { open: true, busy: false, error: '', commits: [] };
 		history[project].open = true;
@@ -88,14 +100,21 @@
 	}
 	async function loadHistory(project: string) {
 		const lane = history[project];
+		const key = laneKey(project);
+		const seq = ++historySeq;
+		// Another namespace's commits must not linger while this scope loads.
+		if (latest.get(project)?.key.split('|')[0] !== scopeNS) lane.commits = [];
+		latest.set(project, { seq, key });
+		const mine = () => latest.get(project)?.seq === seq;
 		lane.busy = true;
 		lane.error = '';
 		try {
-			lane.commits = await api.history(project, scopeNS || undefined);
+			const commits = await api.history(project, scopeNS || undefined);
+			if (mine()) lane.commits = commits;
 		} catch (e) {
-			lane.error = friendlyError(e);
+			if (mine() && !(e instanceof Unauthorized)) lane.error = friendlyError(e);
 		} finally {
-			lane.busy = false;
+			if (mine()) lane.busy = false;
 		}
 	}
 	// A scope opens its history without a click; a namespace narrows it.
@@ -104,6 +123,14 @@
 		scopeNS;
 		if (!p) return;
 		untrack(() => openHistory(p));
+	});
+	// Open lanes follow their key: a namespace switch or a revision move.
+	$effect(() => {
+		historyKeys;
+		untrack(() => {
+			for (const [project, lane] of Object.entries(history))
+				if (lane.open && latest.get(project)?.key !== laneKey(project)) loadHistory(project);
+		});
 	});
 
 	// The selection mirrors the URL (see review.ts), so a review is shareable
@@ -148,10 +175,13 @@
 		}
 		return out.sort((a, b) => a.project.localeCompare(b.project));
 	});
+	// Keyed on the PR-set string, not the per-frame proposals array.
 	$effect(() => {
-		for (const p of proposals) {
-			if (untrack(() => results[p.project])?.prNumber === p.prNumber) delete results[p.project];
-		}
+		inventory.proposalsKey;
+		untrack(() => {
+			for (const p of inventory.proposals)
+				if (results[p.project]?.prNumber === p.prNumber) delete results[p.project];
+		});
 	});
 	// A propose moves the project's open PR head, so its cached review is stale.
 	function proposed(project: string, r: ProposeResult & { title?: string }) {
