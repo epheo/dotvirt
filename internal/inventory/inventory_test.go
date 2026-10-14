@@ -279,3 +279,20 @@ func TestBuildRepoUnavailableStillShowsLiveVMs(t *testing.T) {
 		t.Errorf("live VM should be NotTracked web, got %+v", vm)
 	}
 }
+
+// A repo that cannot be opened badges the project with a fixed message: the
+// git error carries the repo path and transport detail.
+func TestBuildRepoErrorHidesDetail(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	missing := filepath.Join(t.TempDir(), "secret-path", "gone.git")
+	in := Inputs{
+		Branch:   "main",
+		Repos:    git.NewRepoSet(ctx, "", nil, false, nil, time.Hour),
+		Projects: []project.ProjectInfo{{Name: "team-a", Repo: missing, Namespaces: []string{"tenant-a"}}},
+	}
+	p := Build(in).Projects[0]
+	if p.Error != "repo unavailable" {
+		t.Errorf("project error = %q, want the fixed %q", p.Error, "repo unavailable")
+	}
+}
