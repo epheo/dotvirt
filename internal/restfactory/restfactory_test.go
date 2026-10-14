@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"k8s.io/client-go/rest"
+
+	"github.com/epheo/dotvirt/internal/ttlcache"
 )
 
 // TestClearCredentials is the security-critical check: the base config a per-user
@@ -74,5 +76,71 @@ func TestSAConfig(t *testing.T) {
 		if _, err := os.Stat(saTokenPath); err != nil {
 			t.Errorf("no SA credential → nil, got %+v", cfg)
 		}
+	}
+}
+
+func recordingFactory(t *testing.T, sa *rest.Config) (*Factory[*rest.Config], *int) {
+	t.Helper()
+	builds := 0
+	full := &rest.Config{Host: "https://api.example:6443", BearerToken: "sa-secret"}
+	return &Factory[*rest.Config]{
+		base:     withLimits(clearCredentials(full), userQPS, userBurst),
+		saConfig: withLimits(saConfig(sa), saQPS, saBurst),
+		build:    func(c *rest.Config) (*rest.Config, error) { builds++; return c, nil },
+		cache:    ttlcache.New[*rest.Config](clientTTL),
+	}, &builds
+}
+
+// For must carry exactly the caller's token over the credential-less base, sized
+// limits, and reuse one client per token.
+func TestForCarriesOnlyCallerToken(t *testing.T) {
+	f, builds := recordingFactory(t, &rest.Config{BearerToken: "sa-secret"})
+
+	a, err := f.For("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.BearerToken != "alice" || a.BearerTokenFile != "" {
+		t.Errorf("For(alice) carries token %q file %q", a.BearerToken, a.BearerTokenFile)
+	}
+	if a.QPS != userQPS || a.Burst != userBurst {
+		t.Errorf("For limits = %v/%d, want %v/%d", a.QPS, a.Burst, userQPS, userBurst)
+	}
+	if f.base.BearerToken != "" {
+		t.Error("For mutated the shared base config")
+	}
+
+	again, _ := f.For("alice")
+	b, _ := f.For("bob")
+	if again != a || *builds != 2 {
+		t.Errorf("want one cached client per token, got %d builds", *builds)
+	}
+	if b.BearerToken != "bob" {
+		t.Errorf("For(bob) carries token %q", b.BearerToken)
+	}
+}
+
+func TestSABuildsOnceWithSALimits(t *testing.T) {
+	f, builds := recordingFactory(t, &rest.Config{BearerTokenFile: "/var/run/token"})
+
+	c, err := f.SA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.BearerTokenFile != "/var/run/token" || c.QPS != saQPS || c.Burst != saBurst {
+		t.Errorf("SA config = file %q limits %v/%d", c.BearerTokenFile, c.QPS, c.Burst)
+	}
+	if again, _ := f.SA(); again != c || *builds != 1 {
+		t.Errorf("SA client should be built once, got %d builds", *builds)
+	}
+}
+
+func TestSAWithoutCredentialsFails(t *testing.T) {
+	if _, err := os.Stat(saTokenPath); err == nil {
+		t.Skip("host has a mounted SA token")
+	}
+	f, _ := recordingFactory(t, &rest.Config{})
+	if _, err := f.SA(); err == nil {
+		t.Error("SA without credentials should fail")
 	}
 }

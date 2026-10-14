@@ -17,6 +17,7 @@
 // A fourth, signal-only reflector watches RoleBindings: dotvirt never reads them,
 // but a RoleBinding move can change which namespaces a token may see, so it
 // publishes RBACChanged to invalidate the per-token visible-set cache promptly.
+// Only bindings in project namespaces signal (projectRBACStore).
 //
 // On any mutation a reflector publishes its kind to the shared event bus, which the
 // hub subscribes to; the read path doesn't diff anything.
@@ -138,10 +139,17 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 		{reflect.NewStore(s.nss, namespace, s.nssReady.Mark), &corev1.Namespace{}, sa.NamespaceListWatch(projectLabel)},
 		// Signal-only: a retain-nothing store (never read), so the cluster-wide
 		// RoleBinding watch costs no per-object memory - it only nudges visibility.
-		{reflect.NewSignalStore(rbac, nil), &rbacv1.RoleBinding{}, sa.RoleBindingListWatch()},
+		{s.newRBACStore(rbac), &rbacv1.RoleBinding{}, sa.RoleBindingListWatch()},
 	}
 	s.healthy = make([]atomic.Bool, len(s.specs))
 	return s
+}
+
+func (s *State) newRBACStore(onChange func()) cache.Store {
+	return &projectRBACStore{Store: reflect.NewSignalStore(onChange, nil), isProject: func(ns string) bool {
+		_, ok, _ := s.nss.GetByKey(ns)
+		return ok
+	}}
 }
 
 type reflectorSpec struct {
