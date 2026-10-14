@@ -55,7 +55,7 @@ func (s *Server) namespacedCreate(what string, resource draft.Resource) http.Han
 			return
 		}
 		sc, ok := s.resolveProject(w, r, byNamespace(p.Namespace))
-		if !ok {
+		if !ok || !s.authorizeObject(w, r, sc, verbCreate, string(resource), p.Namespace) {
 			return
 		}
 		view, err := s.draft.StageCreate(sc.id, sc.proj, resource, raw)
@@ -83,6 +83,7 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sc, ok = s.resolveProject(w, r, byNamespace(p.Namespace))
+		ok = ok && s.authorizeObject(w, r, sc, verbCreate, string(draft.ResourceNetwork), p.Namespace)
 	default: // ScopeShared / ScopeVLAN - a cluster-scoped CUDN
 		sc, ok = s.platformScope(w, r, ssarCUDN)
 	}

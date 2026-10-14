@@ -1304,6 +1304,11 @@ export interface NIC {
 export interface ProjectNamespace {
   namespace: string;
   vms: VM[];
+  /**
+   * CanAuthor is the caller's update right on VMs here: the gate every
+   * stage, propose and revert route enforces, so the UI hides what would 403.
+   */
+  canAuthor: boolean;
 }
 /**
  * Project is a tenant in the inventory tree: a named set of

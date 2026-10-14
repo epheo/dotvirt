@@ -40,6 +40,7 @@
 	// tracked, none declared) falls back to every namespace; per-ns 400s surface
 	// rather than silently skipping.
 	async function bulkAdoptUntracked(namespaces: string[]) {
+		namespaces = namespaces.filter((ns) => inventory.canAuthor(ns));
 		let want = new Set(untrackedVMs(namespaces).map((v) => v.namespace));
 		if (want.size === 0) want = new Set(namespaces);
 		await adoptNamespaces(want);
@@ -98,7 +99,7 @@
 					>
 					<div class="my-1 border-t border-line-soft"></div>
 				{/if}
-				{#if ctx.repo && (untracked.length || projectSyncError(ctx.project))}
+				{#if ctx.repo && ctx.namespaces.some( (ns) => inventory.canAuthor(ns) ) && (untracked.length || projectSyncError(ctx.project))}
 					<MenuItem
 						onclick={() => {
 							const ns = ctx.kind === 'container' ? ctx.namespaces : [];

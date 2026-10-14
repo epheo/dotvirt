@@ -6,6 +6,7 @@
 	import { networkByRef, kindLabel } from '$lib/networks';
 	import {
 		canAdoptNetwork,
+		canAuthorRef,
 		canDeleteNetwork,
 		canEditNetwork,
 		networkRef,
@@ -35,7 +36,9 @@
 	);
 	// A drifted segment (its Application reports OutOfSync) can be brought back
 	// the other way: git updated to what runs, as a VM's drift adoption does.
-	const drifted = $derived(!!pg?.sourceFile && pg?.sync === 'OutOfSync');
+	const drifted = $derived(
+		!!pg?.sourceFile && pg?.sync === 'OutOfSync' && canAuthorRef(networkRef(pg)),
+	);
 </script>
 
 <div class="min-h-0 flex-1 overflow-y-auto p-4">
@@ -123,7 +126,9 @@
 				{project}
 				name={pg.name}
 				load={() => api.objectHistory(ref.resource, ref.namespace, ref.name)}
-				restore={(hash) => api.restoreObjectVersion(ref.resource, ref.namespace, ref.name, hash)}
+				restore={canAuthorRef(ref)
+					? (hash) => api.restoreObjectVersion(ref.resource, ref.namespace, ref.name, hash)
+					: undefined}
 				mine={(it) => it.resource === ref.resource && it.name === ref.name}
 			/>
 		{/if}

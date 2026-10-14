@@ -107,11 +107,18 @@ class InventoryStore {
 	taskFeed = $state<TaskEntry[]>([]);
 	tasksError = $state(''); // the last feed pull's failure; '' once one succeeds
 	readonly tasksVersion = $derived(this.inventory?.tasksVersion ?? 0);
-	// Namespaces a VM can be created in: those in projects that have a repo (no
-	// point staging into a project with no backing repo).
-	readonly namespaces = $derived(
+	// Namespaces in projects that have a repo, whether or not the caller may author there.
+	readonly repoNamespaces = $derived(
 		this.projects.filter((p) => p.repo).flatMap((p) => p.namespaces.map((n) => n.namespace)),
 	);
+	// Namespaces the caller may stage into: repo-backed and canAuthor, the gate
+	// every stage route enforces.
+	readonly namespaces = $derived(
+		this.projects
+			.filter((p) => p.repo)
+			.flatMap((p) => p.namespaces.filter((n) => n.canAuthor).map((n) => n.namespace)),
+	);
+	readonly #authorSet = $derived(new Set(this.namespaces));
 	// Projects with a backing repo - the ones with commit history to browse +
 	// revert from (the Changes panel's History section).
 	readonly repoProjects = $derived(this.projects.filter((p) => p.repo).map((p) => p.name));
@@ -164,6 +171,18 @@ class InventoryStore {
 
 	findVM(namespace: string, name: string): VM | null {
 		return this.allVMs.find((v) => v.namespace === namespace && v.name === name) ?? null;
+	}
+
+	canAuthor(namespace: string): boolean {
+		return this.#authorSet.has(namespace);
+	}
+
+	// Revert rewrites any file of the project, so the backend wants authoring
+	// rights in every namespace of it.
+	canRevert(project: string): boolean {
+		if (project === 'platform') return this.canManage;
+		const p = this.projects.find((x) => x.name === project);
+		return !!p?.namespaces.length && p.namespaces.every((n) => n.canAuthor);
 	}
 
 	projectOf(namespace: string): string {

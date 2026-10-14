@@ -92,14 +92,24 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 // move invalidates lazily via the version stamp; the TTL backstops the
 // cluster-scoped RBAC changes the version doesn't observe (see visibleTTL).
 func (s *Server) ssarCached(id auth.Identity, key string, probe func() bool) bool {
+	ok, _ := s.ssarChecked(id, key, func() (bool, error) { return probe(), nil })
+	return ok
+}
+
+// ssarChecked is ssarCached for a probe that can fail: an error is returned
+// and never cached, so a transient apiserver failure cannot pin a denial.
+func (s *Server) ssarChecked(id auth.Identity, key string, probe func() (bool, error)) (bool, error) {
 	ver := s.rbacVersion()
 	k := restfactory.TokenKey(id.Token) + "\x00" + key
 	if e, ok := s.ssar.Get(k); ok && e.ver == ver {
-		return e.ok
+		return e.ok, nil
 	}
-	ok := probe()
+	ok, err := probe()
+	if err != nil {
+		return false, err
+	}
 	s.ssar.Put(k, ssarVerdict{ok: ok, ver: ver})
-	return ok
+	return ok, nil
 }
 
 func (s *Server) canCreateCached(ctx context.Context, id auth.Identity, c *cluster.Client, ref ssarRef) bool {

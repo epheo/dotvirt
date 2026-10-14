@@ -41,3 +41,25 @@ describe('inventory.apply', () => {
 		expect(inventory.findVM('web', 'b')?.power).toBe('Off');
 	});
 });
+
+describe('inventory authoring signal', () => {
+	it('offers staging only where the frame grants it', () => {
+		inventory.apply({
+			projects: [
+				{
+					name: 'p',
+					repo: 'https://forge/p.git',
+					namespaces: [
+						{ namespace: 'web', vms: [], canAuthor: true },
+						{ namespace: 'db', vms: [], canAuthor: false },
+					],
+				},
+			],
+		} as unknown as Inventory);
+		expect(inventory.repoNamespaces).toEqual(['web', 'db']);
+		expect(inventory.namespaces).toEqual(['web']);
+		expect(inventory.canAuthor('web')).toBe(true);
+		expect(inventory.canAuthor('db')).toBe(false);
+		expect(inventory.canRevert('p')).toBe(false);
+	});
+});

@@ -3,6 +3,7 @@
 	import type { Commit, ProposeResult } from '$lib/api';
 	import { shortDate } from '$lib/format';
 	import { reviewCache } from '$lib/state/reviewCache.svelte';
+	import { inventory } from '$lib/state/inventory.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import ErrorNote from '$lib/components/ErrorNote.svelte';
 	import GitOpsStepper from '$lib/components/GitOpsStepper.svelte';
@@ -112,7 +113,10 @@
 					variant="danger"
 					class="ml-auto shrink-0"
 					onclick={onundo}
-					disabled={!detail || detail.reverted}
+					disabled={!detail || detail.reverted || !inventory.canRevert(project)}
+					title={inventory.canRevert(project)
+						? undefined
+						: 'Undo needs edit rights in every namespace of ' + project}
 				>
 					Undo this change
 				</Button>

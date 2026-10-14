@@ -106,7 +106,11 @@
 	};
 	const NEW_ITEMS = $derived.by((): NewItem[] => {
 		const noRepo = !inventory.namespaces.length;
-		const repoTitle = noRepo ? 'No project with a backing repo yet' : '';
+		const repoTitle = !noRepo
+			? ''
+			: inventory.repoNamespaces.length
+				? 'Read-only: you may not edit VMs in any namespace'
+				: 'No project with a backing repo yet';
 		return [
 			{
 				icon: Server,
@@ -126,7 +130,7 @@
 				icon: Network,
 				label: 'New Segment',
 				kind: 'newNetwork',
-				enabled: !noRepo,
+				enabled: !noRepo || inventory.canManage,
 				title: 'Create a Segment (Port Group) — an overlay or VLAN Layer 2 network VMs attach to',
 			},
 			{

@@ -133,7 +133,9 @@
 			{project}
 			name={vm.name}
 			load={() => api.vmHistory(vm.namespace, vm.name)}
-			restore={(hash) => api.restoreVersion(vm.namespace, vm.name, hash)}
+			restore={inventory.canAuthor(vm.namespace)
+				? (hash) => api.restoreVersion(vm.namespace, vm.name, hash)
+				: undefined}
 			mine={(it) => it.namespace === vm.namespace && it.name === vm.name}
 		/>
 	{/if}

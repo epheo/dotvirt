@@ -45,7 +45,8 @@
 		stagedItem?: DraftItem | null;
 		driftChanges: Change[] | null;
 		reconciling: boolean;
-		onadopt: () => void;
+		// Absent when the caller may not stage in this namespace.
+		onadopt?: () => void;
 		onresync: () => void;
 		onconsole: () => void;
 		// Opens Edit settings (the card header's next action); absent = read-only host.
@@ -291,16 +292,18 @@
 			ArgoCD sync do not apply. Adopting stages its live manifest into
 			<strong>Changes</strong>, to propose as a PR.
 		</p>
-		<div class="mt-2">
-			<button
-				onclick={onadopt}
-				disabled={reconciling}
-				title="Stage this VM's live manifest into a PR so git starts tracking it"
-				class="rounded border border-warn/70 bg-panel px-2.5 py-1 text-xs font-medium text-warn-ink hover:bg-warn-soft disabled:opacity-50"
-			>
-				Adopt into git
-			</button>
-		</div>
+		{#if onadopt}
+			<div class="mt-2">
+				<button
+					onclick={onadopt}
+					disabled={reconciling}
+					title="Stage this VM's live manifest into a PR so git starts tracking it"
+					class="rounded border border-warn/70 bg-panel px-2.5 py-1 text-xs font-medium text-warn-ink hover:bg-warn-soft disabled:opacity-50"
+				>
+					Adopt into git
+				</button>
+			</div>
+		{/if}
 	</Note>
 {/if}
 
@@ -321,14 +324,16 @@
 				<p class="mb-1 text-xs text-warn-ink">Desired (main) → Actual (running):</p>
 				<ChangeList changes={driftChanges} />
 				<div class="mt-3 flex items-center gap-2">
-					<button
-						onclick={onadopt}
-						disabled={reconciling}
-						title="Stage the live state into a PR so git matches the cluster"
-						class="rounded border border-warn/70 bg-panel px-2.5 py-1 text-xs font-medium text-warn-ink hover:bg-warn-soft disabled:opacity-50"
-					>
-						Adopt into PR (running→main)
-					</button>
+					{#if onadopt}
+						<button
+							onclick={onadopt}
+							disabled={reconciling}
+							title="Stage the live state into a PR so git matches the cluster"
+							class="rounded border border-warn/70 bg-panel px-2.5 py-1 text-xs font-medium text-warn-ink hover:bg-warn-soft disabled:opacity-50"
+						>
+							Adopt into PR (running→main)
+						</button>
+					{/if}
 					<button
 						onclick={onresync}
 						disabled={reconciling}

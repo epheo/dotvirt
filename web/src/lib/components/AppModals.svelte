@@ -111,7 +111,7 @@
 		onclose={close}
 	/>
 {:else if m?.kind === 'tier0'}
-	<Tier0Modal namespaces={inventory.namespaces} initial={m.initial} onclose={close} />
+	<Tier0Modal namespaces={inventory.repoNamespaces} initial={m.initial} onclose={close} />
 {:else if m?.kind === 'adminFw'}
 	<AdminFirewallModal initial={m.initial} onclose={close} />
 {:else if m?.kind === 'deleteObject'}
