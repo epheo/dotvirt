@@ -11,6 +11,10 @@
 // keep a consumer from waking on churn it doesn't care about - the proposals
 // refresher subscribes to GitChanged alone, so a VMI status heartbeat
 // (LiveChanged) never re-queries the forge.
+//
+// A kind can also be published per key (PublishKey): GitChanged is keyed by repo,
+// so a consumer scoped to some repos reconciles against KeyVersion of those alone
+// and a push to one tenant's repo leaves every other tenant's work untouched.
 package eventbus
 
 import (
@@ -38,7 +42,8 @@ const (
 	// DriftChanged: an ArgoCD Application moved - sync/health drift.
 	DriftChanged
 	// GitChanged: a project repo's branch heads moved (a push/merge, seen via the
-	// forge webhook or the backstop poll).
+	// forge webhook or the backstop poll). Published per repo: the key is the
+	// canonical repo URL (forge.NormalizeRepoURL).
 	GitChanged
 	// ProposalsChanged: a token's open-PR lane changed (the refresher found a diff).
 	ProposalsChanged
@@ -63,6 +68,12 @@ type Bus struct {
 	// (the sum of independent atomics is not a serializable global clock).
 	versions [kindCount]atomic.Uint64
 
+	// broad[k] counts unkeyed Publish(k) calls; it is part of every key's version,
+	// so an unkeyed publish moves every key of that kind.
+	broad [kindCount]atomic.Uint64
+	keyMu sync.Mutex
+	keyed [kindCount]map[string]uint64
+
 	mu   sync.RWMutex
 	subs map[*subscription]struct{}
 }
@@ -86,6 +97,41 @@ func (b *Bus) Publish(k Kind) {
 		return
 	}
 	b.versions[k].Add(1)
+	b.broad[k].Add(1)
+	b.wake(k)
+}
+
+// PublishKey is Publish scoped to one key of k: Version(k) and KeyVersion(k, key)
+// move, other keys of k do not. The kind's version is bumped before the key's, so
+// a reader that sees the key move also sees Version(k) move when it reads it next
+// (Publish keeps the same order).
+func (b *Bus) PublishKey(k Kind, key string) {
+	if b == nil {
+		return
+	}
+	b.versions[k].Add(1)
+	b.keyMu.Lock()
+	if b.keyed[k] == nil {
+		b.keyed[k] = map[string]uint64{}
+	}
+	b.keyed[k][key]++
+	b.keyMu.Unlock()
+	b.wake(k)
+}
+
+// KeyVersion is the level of one key of k: it moves on PublishKey(k, key) and on
+// every unkeyed Publish(k). Equality-only, like Version. Nil-safe (returns 0).
+func (b *Bus) KeyVersion(k Kind, key string) uint64 {
+	if b == nil {
+		return 0
+	}
+	b.keyMu.Lock()
+	v := b.keyed[k][key]
+	b.keyMu.Unlock()
+	return v + b.broad[k].Load()
+}
+
+func (b *Bus) wake(k Kind) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	for s := range b.subs {

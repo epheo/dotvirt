@@ -164,8 +164,8 @@ const optionsTTL = 60 * time.Second
 const storageTTL = 20 * time.Second
 
 // declaredTTL backstops a project's declared-files index. Freshness comes from
-// the GitChanged stamp: every poll or webhook that moves a head invalidates the
-// entry, so the TTL only bounds a repo that stopped publishing.
+// its repo's GitChanged stamp: every poll or webhook that moves one of its heads
+// invalidates the entry, so the TTL only bounds a repo that stopped publishing.
 const declaredTTL = 5 * time.Minute
 
 // Server holds the long-lived collaborators and builds per-request, identity-
@@ -195,11 +195,14 @@ type Server struct {
 	vnc       VNCHandler
 	cfg       Config
 
-	// Proposals-refresher state (see proposals.go): who to refresh, and the
-	// coalesced out-of-cycle trigger.
+	// Proposals-refresher state (see proposals.go): who to refresh, the coalesced
+	// out-of-cycle trigger, the repos a nudge named, and the repo version each
+	// project's lane was last read at.
 	propMu      sync.Mutex
 	propTargets map[string]propTarget
 	propNudge   chan struct{}
+	propDirty   map[string]struct{}
+	propSeen    map[string]uint64
 }
 
 // Deps are the collaborators for NewServer. Reader and Draft are required:
@@ -258,6 +261,8 @@ func NewServer(d Deps) *Server {
 
 		propTargets: map[string]propTarget{},
 		propNudge:   make(chan struct{}, 1),
+		propDirty:   map[string]struct{}{},
+		propSeen:    map[string]uint64{},
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // The object routes act on one git-declared network-family object by the
@@ -190,15 +191,15 @@ type declaredIndex struct {
 }
 
 // declaredFiles is p's declared-files index, cached per repo and invalidated by
-// the GitChanged version, so the polled catalog routes read a repo index once
-// per push rather than once per request. A project the resolver flagged has no
+// its repo's GitChanged version, so the polled catalog routes read a repo index
+// once per push to that repo rather than once per request. A project the resolver flagged has no
 // repo to read; a failed read is not cached, so it declares nothing this once
 // and is retried on the next call.
 func (s *Server) declaredFiles(p project.ProjectInfo) map[model.ObjectRef]string {
 	if p.Error != "" {
 		return nil
 	}
-	ver := s.bus.Version(eventbus.GitChanged)
+	ver := s.bus.KeyVersion(eventbus.GitChanged, forge.NormalizeRepoURL(p.Repo))
 	key := p.Name + "\x00" + p.Repo
 	if e, ok := s.declared.Get(key); ok && e.ver == ver {
 		return e.files

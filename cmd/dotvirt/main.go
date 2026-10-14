@@ -223,15 +223,16 @@ func run() error {
 
 	// Live inventory hub: each connection's frame is built under its identity (same
 	// path as GET /api/inventory). It wakes on every kind that can alter a frame and
-	// reconciles to the summed version of those kinds - so it coalesces by build
-	// duration (no debounce) and never recomputes when nothing it depends on moved.
+	// reconciles each identity to the version of those kinds - GitChanged only for
+	// the repos its frame shows - so it coalesces by build duration (no debounce)
+	// and never rebuilds a frame when nothing it depends on moved.
 	inventoryKinds := []eventbus.Kind{
 		eventbus.VMSpecChanged, eventbus.LiveChanged, eventbus.NamespaceChanged,
 		eventbus.RBACChanged, eventbus.DriftChanged, eventbus.GitChanged, eventbus.ProposalsChanged,
 		eventbus.NetworkChanged, eventbus.TaskChanged,
 	}
 	hubWake, _ := bus.Subscribe(inventoryKinds...)
-	hub := stream.NewHub(server.InventoryForIdentity, hubWake, func() uint64 { return bus.Version(inventoryKinds...) }, cfg.UIOrigin)
+	hub := stream.NewHub(server.InventoryForIdentity, hubWake, stream.RepoLevels(bus, eventbus.GitChanged, inventoryKinds...), cfg.UIOrigin)
 	go hub.Run(ctx)
 	server.UseStream(hub)
 

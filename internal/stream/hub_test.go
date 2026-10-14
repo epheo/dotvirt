@@ -3,11 +3,14 @@ package stream
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
@@ -17,8 +20,12 @@ func echoInventory(_ context.Context, id auth.Identity) (model.Inventory, error)
 	return model.Inventory{Projects: []model.Project{{Name: id.Username}}}, nil
 }
 
+func testLevels() Levels {
+	return RepoLevels(eventbus.New(), eventbus.GitChanged, eventbus.LiveChanged, eventbus.GitChanged)
+}
+
 func newTestHub() *Hub {
-	return NewHub(echoInventory, make(chan struct{}, 1), func() uint64 { return 0 }, "")
+	return NewHub(echoInventory, make(chan struct{}, 1), testLevels(), "")
 }
 
 func testConn(name string) *conn {
@@ -142,7 +149,7 @@ func TestReconcileBoundsOneIdentityBuild(t *testing.T) {
 		}
 		return echoInventory(ctx, id)
 	}
-	h := NewHub(stall, make(chan struct{}, 1), func() uint64 { return 0 }, "")
+	h := NewHub(stall, make(chan struct{}, 1), testLevels(), "")
 	h.timeout = 50 * time.Millisecond
 	stuck, alice := testConn("stuck"), testConn("alice")
 	h.add(stuck)
@@ -157,5 +164,136 @@ func TestReconcileBoundsOneIdentityBuild(t *testing.T) {
 	}
 	if got := frameProject(t, alice); got != "alice" {
 		t.Errorf("alice received %q, want her own frame despite the stalled build", got)
+	}
+}
+
+// repoHub serves each user one project on repo "https://forge/<user>" and counts
+// builds per user.
+func repoHub(bus *eventbus.Bus) (*Hub, *sync.Map) {
+	var builds sync.Map
+	inv := func(_ context.Context, id auth.Identity) (model.Inventory, error) {
+		n, _ := builds.LoadOrStore(id.Username, new(atomic.Int64))
+		n.(*atomic.Int64).Add(1)
+		return model.Inventory{Projects: []model.Project{{Name: id.Username, Repo: "https://forge/" + id.Username + ".git"}}}, nil
+	}
+	return NewHub(inv, make(chan struct{}, 1), RepoLevels(bus, eventbus.GitChanged, eventbus.LiveChanged, eventbus.GitChanged), ""), &builds
+}
+
+func takeBuilds(builds *sync.Map) map[string]int64 {
+	out := map[string]int64{}
+	builds.Range(func(k, v any) bool {
+		if n := v.(*atomic.Int64).Swap(0); n > 0 {
+			out[k.(string)] = n
+		}
+		return true
+	})
+	return out
+}
+
+// TestReconcileRebuildsOnlyMovedIdentities pins the per-repo fan-out: a push to
+// one repo rebuilds only the frames showing it, a new tab of a current identity
+// gets the cached frame without a build, and an unscoped kind rebuilds everyone.
+func TestReconcileRebuildsOnlyMovedIdentities(t *testing.T) {
+	bus := eventbus.New()
+	h, builds := repoHub(bus)
+	alice, bob := testConn("alice"), testConn("bob")
+	h.add(alice)
+	h.add(bob)
+	want := func(step string, n map[string]int64) {
+		t.Helper()
+		if got := takeBuilds(builds); fmt.Sprint(got) != fmt.Sprint(n) {
+			t.Fatalf("%s: builds %v, want %v", step, got, n)
+		}
+	}
+
+	h.reconcile(context.Background())
+	want("first pass", map[string]int64{"alice": 1, "bob": 1})
+	h.reconcile(context.Background())
+	want("nothing moved", map[string]int64{})
+
+	bus.PublishKey(eventbus.GitChanged, "https://forge/alice")
+	h.reconcile(context.Background())
+	want("push to alice's repo", map[string]int64{"alice": 1})
+
+	bus.PublishKey(eventbus.GitChanged, "https://forge/nobody")
+	h.reconcile(context.Background())
+	want("push to an unseen repo", map[string]int64{})
+
+	bob2 := testConn("bob")
+	h.add(bob2)
+	h.reconcile(context.Background())
+	want("new tab", map[string]int64{})
+	if got := frameProject(t, bob2); got != "bob" {
+		t.Fatalf("bob's new tab got %q, want the cached frame", got)
+	}
+
+	bus.Publish(eventbus.LiveChanged)
+	h.reconcile(context.Background())
+	want("unscoped kind", map[string]int64{"alice": 1, "bob": 1})
+}
+
+// TestReconcileLevelMovedMidBuild: a frame whose level moved while it built may
+// miss that move, so the identity stays due.
+func TestReconcileLevelMovedMidBuild(t *testing.T) {
+	bus := eventbus.New()
+	var builds atomic.Int64
+	inv := func(_ context.Context, id auth.Identity) (model.Inventory, error) {
+		if builds.Add(1) == 1 {
+			bus.Publish(eventbus.LiveChanged)
+		}
+		return echoInventory(context.Background(), id)
+	}
+	h := NewHub(inv, make(chan struct{}, 1), RepoLevels(bus, eventbus.GitChanged, eventbus.LiveChanged, eventbus.GitChanged), "")
+	h.add(testConn("a"))
+	h.reconcile(context.Background())
+	h.reconcile(context.Background())
+	h.reconcile(context.Background())
+	if n := builds.Load(); n != 2 {
+		t.Fatalf("builds = %d, want 2 (one rebuild after the mid-build move)", n)
+	}
+}
+
+// TestReconcileWorkerPoolBound: builds run concurrently, never more than
+// buildWorkers at once, and every identity still gets its own frame.
+func TestReconcileWorkerPoolBound(t *testing.T) {
+	var active, peak atomic.Int64
+	release := make(chan struct{})
+	inv := func(ctx context.Context, id auth.Identity) (model.Inventory, error) {
+		n := active.Add(1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		<-release
+		active.Add(-1)
+		return echoInventory(ctx, id)
+	}
+	h := NewHub(inv, make(chan struct{}, 1), testLevels(), "")
+	conns := make([]*conn, 3*buildWorkers)
+	for i := range conns {
+		conns[i] = testConn(fmt.Sprintf("u%d", i))
+		h.add(conns[i])
+	}
+
+	done := make(chan struct{})
+	go func() { h.reconcile(context.Background()); close(done) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for active.Load() < buildWorkers {
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d concurrent builds, want %d", active.Load(), buildWorkers)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(release)
+	<-done
+	if p := peak.Load(); p != buildWorkers {
+		t.Fatalf("peak concurrent builds = %d, want %d", p, buildWorkers)
+	}
+	for i, c := range conns {
+		if got := frameProject(t, c); got != fmt.Sprintf("u%d", i) {
+			t.Fatalf("conn %d got %q", i, got)
+		}
 	}
 }

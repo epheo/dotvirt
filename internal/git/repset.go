@@ -209,7 +209,7 @@ func (s *RepoSet) poll(p *repoPair) {
 			return false
 		}
 		last = sig
-		s.bus.Publish(eventbus.GitChanged)
+		s.bus.PublishKey(eventbus.GitChanged, p.key)
 		return false
 	}
 	t := time.NewTicker(s.interval)

@@ -178,8 +178,8 @@ func TestPlatformDraftGatedBySSAR(t *testing.T) {
 }
 
 // The admin path end to end: propose validates its body AFTER the scope gate,
-// a successful propose reaches the coordinator exactly once and nudges the
-// proposals refresher so the new PR lane appears without waiting for the poll.
+// a successful propose reaches the coordinator exactly once and tracks the
+// caller, so the GitChanged its repo poke publishes refreshes the new PR lane.
 func TestPlatformProposeFlow(t *testing.T) {
 	d := &stagingDraft{}
 	s := draftServer(t, d)
@@ -203,11 +203,6 @@ func TestPlatformProposeFlow(t *testing.T) {
 	}
 	if len(d.proposed) != 1 || d.proposed[0].Title != "drs: enable" {
 		t.Fatalf("coordinator saw %+v", d.proposed)
-	}
-	select {
-	case <-s.propNudge:
-	default:
-		t.Fatal("a successful propose must nudge the proposals refresher")
 	}
 	s.propMu.Lock()
 	_, tracked := s.propTargets[restfactory.TokenKey("admin-token")]
