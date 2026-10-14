@@ -74,9 +74,9 @@
 	});
 
 	// Live subscription, established once signed in. The cookie rides the handshake;
-	// a 401 on the upgrade (expired session) drops us back to login.
-	// The banner names a lost stream (the tree is a stale snapshot meanwhile)
-	// and offers a retry that skips the backoff wait.
+	// a 401 on the upgrade (expired session) drops us back to login. The banner
+	// names a lost stream (the tree is a stale snapshot meanwhile) and offers a
+	// retry that skips the backoff wait.
 	let liveStream: { retryNow: () => void } | null = null;
 	const STREAM_LOST: Record<StreamStatus, string> = {
 		connecting: '',
