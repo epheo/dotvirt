@@ -17,14 +17,13 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAllEvents lists recent VM/VMI Events across the caller's visible
-// namespaces - the dock's Events lane. scopeNamespaces bounds it to the
+// namespaces - the dock's Events lane. containerScope bounds it to the
 // repo-backed projects' namespaces (the managed inventory), not every visible
 // namespace - listing events across an admin's whole cluster takes many
 // seconds and matches no VM the UI shows.
 func (s *Server) handleAllEvents(w http.ResponseWriter, r *http.Request) {
-	sc, nss, err := s.scopeNamespaces(r)
-	if err != nil {
-		fail(w, err)
+	sc, nss, ok := s.containerScope(w, r)
+	if !ok {
 		return
 	}
 	events, err := sc.cluster.ListVMEvents(r.Context(), nss)

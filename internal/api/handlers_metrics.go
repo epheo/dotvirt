@@ -53,37 +53,6 @@ func (s *Server) handleVMUsage(w http.ResponseWriter, r *http.Request) {
 	respond(w, u, err)
 }
 
-// scopeNamespaces resolves a container-scope read's preamble: the caller's
-// identity + cluster client, and the repo-backed projects' namespaces - the
-// same VMs the inventory grid shows - optionally narrowed by ?project= /
-// ?namespace= so every container level (all, project, namespace, node) gets
-// its own view.
-func (s *Server) scopeNamespaces(r *http.Request) (scope, []string, error) {
-	id, c, err := s.userCluster(r)
-	if err != nil {
-		return scope{}, nil, unavailable(err)
-	}
-	projects, err := s.projectsFor(r.Context(), id, c)
-	if err != nil {
-		return scope{}, nil, err
-	}
-	wantProject := r.URL.Query().Get("project")
-	wantNamespace := r.URL.Query().Get("namespace")
-	var nss []string
-	for _, p := range projects {
-		if p.Repo == "" || (wantProject != "" && p.Name != wantProject) {
-			continue
-		}
-		for _, n := range p.Namespaces {
-			if wantNamespace != "" && n != wantNamespace {
-				continue
-			}
-			nss = append(nss, n)
-		}
-	}
-	return scope{id: id, cluster: c}, nss, nil
-}
-
 // handleClusterSummary returns the aggregate capacity view (the "All VMs" cluster
 // landing): rings of VM usage vs node-allocatable capacity, VM counts by phase, and
 // top-consumer VMs. VM-scoped sums are limited to the caller's visible namespaces.
@@ -91,12 +60,13 @@ func (s *Server) handleClusterSummary(w http.ResponseWriter, r *http.Request) {
 	if !s.metricsReady(w) {
 		return
 	}
-	sc, nss, err := s.scopeNamespaces(r)
-	if err != nil {
-		fail(w, err)
+	sc, nss, ok := s.containerScope(w, r)
+	if !ok {
 		return
 	}
-	cs, err := s.metrics.ClusterSummary(r.Context(), sc.id.Token, nss, r.URL.Query().Get("node"))
+	// The node-allocatable totals are node data, gated like handleHostLoad.
+	nodeTotals := s.canReadNodesCached(r.Context(), sc.id, sc.cluster)
+	cs, err := s.metrics.ClusterSummary(r.Context(), sc.id.Token, nss, r.URL.Query().Get("node"), nodeTotals)
 	if err == nil && r.URL.Query().Get("node") == "" {
 		// The phase map comes from kubevirt_vmi_info, and a stopped VM has no
 		// VMI - so a 3-VM project read "2 Running" with the third invisible.
@@ -234,9 +204,8 @@ func (s *Server) handleScopeMetrics(w http.ResponseWriter, r *http.Request) {
 	if !s.metricsReady(w) {
 		return
 	}
-	sc, nss, err := s.scopeNamespaces(r)
-	if err != nil {
-		fail(w, err)
+	sc, nss, ok := s.containerScope(w, r)
+	if !ok {
 		return
 	}
 	m, err := s.metrics.ScopeMetrics(r.Context(), sc.id.Token, nss, r.URL.Query().Get("node"), r.URL.Query().Get("range"))
@@ -249,9 +218,8 @@ func (s *Server) handleAlarms(w http.ResponseWriter, r *http.Request) {
 	if !s.metricsReady(w) {
 		return
 	}
-	sc, nss, err := s.scopeNamespaces(r)
-	if err != nil {
-		fail(w, err)
+	sc, nss, ok := s.containerScope(w, r)
+	if !ok {
 		return
 	}
 	a, err := s.metrics.Alerts(r.Context(), sc.id.Token, nss)
@@ -262,9 +230,8 @@ func (s *Server) handleAlarms(w http.ResponseWriter, r *http.Request) {
 // namespaces - the project capacity band + container Configure. Read under the
 // caller's token, so RBAC gates which namespaces' quotas are visible.
 func (s *Server) handleQuotas(w http.ResponseWriter, r *http.Request) {
-	sc, nss, err := s.scopeNamespaces(r)
-	if err != nil {
-		fail(w, err)
+	sc, nss, ok := s.containerScope(w, r)
+	if !ok {
 		return
 	}
 	q, err := sc.cluster.ListQuotas(r.Context(), nss)

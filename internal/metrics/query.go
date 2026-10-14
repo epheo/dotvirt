@@ -55,9 +55,10 @@ type labeledValue struct {
 	value  float64
 }
 
-// vector runs an instant query and returns its result series. A failed/empty query
-// yields an empty slice (callers treat a missing value as zero).
-func (c *Client) vector(ctx context.Context, token, query string) []labeledValue {
+// vector runs an instant query and returns its result series. On error the
+// slice is empty and callers read a missing value as zero, but must not cache
+// the result.
+func (c *Client) vector(ctx context.Context, token, query string) ([]labeledValue, error) {
 	v := url.Values{}
 	v.Set("query", query)
 	var body struct {
@@ -68,8 +69,8 @@ func (c *Client) vector(ctx context.Context, token, query string) []labeledValue
 			} `json:"result"`
 		} `json:"data"`
 	}
-	if c.queryJSON(ctx, token, "/api/v1/query", v, &body) != nil {
-		return nil
+	if err := c.queryJSON(ctx, token, "/api/v1/query", v, &body); err != nil {
+		return nil, err
 	}
 	out := make([]labeledValue, 0, len(body.Data.Result))
 	for _, r := range body.Data.Result {
@@ -79,25 +80,31 @@ func (c *Client) vector(ctx context.Context, token, query string) []labeledValue
 		}
 		out = append(out, labeledValue{labels: r.Metric, value: f})
 	}
-	return out
+	return out, nil
 }
 
-func fanOut[T any](queries map[string]string, run func(q string) T) map[string]T {
+// fanOut runs every query concurrently; the error is the first one seen, with
+// every other result still filled in so the caller can render a degraded view.
+func fanOut[T any](queries map[string]string, run func(q string) (T, error)) (map[string]T, error) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+	var firstErr error
 	out := make(map[string]T, len(queries))
 	for k, q := range queries {
 		wg.Add(1)
 		go func(k, q string) {
 			defer wg.Done()
-			v := run(q)
+			v, err := run(q)
 			mu.Lock()
 			out[k] = v
+			if err != nil && firstErr == nil {
+				firstErr = err
+			}
 			mu.Unlock()
 		}(k, q)
 	}
 	wg.Wait()
-	return out
+	return out, firstErr
 }
 
 // gather runs chart queries concurrently under the shared partial-failure rule:
@@ -140,12 +147,17 @@ func (g *gather) wait() error {
 	return nil
 }
 
-func (c *Client) scalars(ctx context.Context, token string, queries map[string]string) map[string]float64 {
-	return fanOut(queries, func(q string) float64 {
-		if vec := c.vector(ctx, token, q); len(vec) > 0 {
-			return vec[0].value
+// partial reports, after wait, that some query failed even though others
+// served data: the result renders but must not be cached.
+func (g *gather) partial() bool { return g.firstErr != nil }
+
+func (c *Client) scalars(ctx context.Context, token string, queries map[string]string) (map[string]float64, error) {
+	return fanOut(queries, func(q string) (float64, error) {
+		vec, err := c.vector(ctx, token, q)
+		if len(vec) > 0 {
+			return vec[0].value, err
 		}
-		return 0
+		return 0, err
 	})
 }
 
@@ -182,7 +194,7 @@ func (c *Client) rangeSeries(ctx context.Context, token, query string, start, en
 		return nil, err
 	}
 	if body.Status != "success" {
-		return nil, nil
+		return nil, fmt.Errorf("query API status %q", body.Status)
 	}
 	out := make([]labeledSeries, 0, len(body.Data.Result))
 	for _, r := range body.Data.Result {
@@ -220,11 +232,11 @@ type sparkResult struct {
 
 // sparklines runs named queries over the last hour concurrently, returning each as
 // a recent-values slice plus its latest value (for an inline sparkline + readout).
-func (c *Client) sparklines(ctx context.Context, token string, queries map[string]string) map[string]sparkResult {
+func (c *Client) sparklines(ctx context.Context, token string, queries map[string]string) (map[string]sparkResult, error) {
 	end := time.Now().Unix()
 	start := end - 3600
-	return fanOut(queries, func(q string) sparkResult {
-		smp, _ := c.rangeQuery(ctx, token, q, start, end, 120) // 2m step -> ~30 points
+	return fanOut(queries, func(q string) (sparkResult, error) {
+		smp, err := c.rangeQuery(ctx, token, q, start, end, 120) // 2m step -> ~30 points
 		vals := make([]float64, len(smp))
 		for i, s := range smp {
 			vals[i] = s.v
@@ -233,7 +245,7 @@ func (c *Client) sparklines(ctx context.Context, token string, queries map[strin
 		if len(vals) > 0 {
 			last = vals[len(vals)-1]
 		}
-		return sparkResult{vals: vals, last: last}
+		return sparkResult{vals: vals, last: last}, err
 	})
 }
 

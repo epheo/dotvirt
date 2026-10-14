@@ -228,22 +228,73 @@ type scope struct {
 // cluster client so a handler that needs it (e.g. resync's permission check) reuses
 // it instead of re-minting.
 func (s *Server) resolveProject(w http.ResponseWriter, r *http.Request, pick projectPicker) (scope, bool) {
+	sc, projects, ok := s.callerProjects(w, r)
+	if !ok {
+		return scope{}, false
+	}
+	if sc.proj, ok = pickOrFail(w, pick, projects); !ok {
+		return scope{}, false
+	}
+	return sc, true
+}
+
+// callerProjects is the identity -> cluster -> visible-projects preamble the
+// project and container resolvers share. ok=false means the response is written.
+func (s *Server) callerProjects(w http.ResponseWriter, r *http.Request) (scope, []project.ProjectInfo, bool) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
 		fail(w, unavailable(err))
-		return scope{}, false
+		return scope{}, nil, false
 	}
 	projects, err := s.projectsFor(r.Context(), id, c)
 	if err != nil {
 		fail(w, err)
-		return scope{}, false
+		return scope{}, nil, false
 	}
+	return scope{id: id, cluster: c}, projects, true
+}
+
+func pickOrFail(w http.ResponseWriter, pick projectPicker, projects []project.ProjectInfo) (project.ProjectInfo, bool) {
 	proj, msg, ok := pick(projects)
 	if !ok {
 		fail(w, fmt.Errorf("%w: %s", model.ErrNotFound, msg))
-		return scope{}, false
 	}
-	return scope{id: id, cluster: c, proj: proj}, true
+	return proj, ok
+}
+
+// containerScope resolves a container-level read (all, project, namespace,
+// node): the repo-backed projects' namespaces, the same VMs the inventory grid
+// shows, narrowed by ?project= and ?namespace=. A named project or namespace
+// outside the caller's view is a 404, never an empty scope that reads as
+// "nothing here".
+func (s *Server) containerScope(w http.ResponseWriter, r *http.Request) (scope, []string, bool) {
+	sc, projects, ok := s.callerProjects(w, r)
+	if !ok {
+		return scope{}, nil, false
+	}
+	q := r.URL.Query()
+	if want := q.Get("project"); want != "" {
+		if sc.proj, ok = pickOrFail(w, byName(want), projects); !ok {
+			return scope{}, nil, false
+		}
+		projects = []project.ProjectInfo{sc.proj}
+	}
+	if ns := q.Get("namespace"); ns != "" {
+		if sc.proj, ok = pickOrFail(w, byNamespace(ns), projects); !ok {
+			return scope{}, nil, false
+		}
+		if sc.proj.Repo == "" {
+			return sc, nil, true
+		}
+		return sc, []string{ns}, true
+	}
+	var nss []string
+	for _, p := range projects {
+		if p.Repo != "" {
+			nss = append(nss, p.Namespaces...)
+		}
+	}
+	return sc, nss, true
 }
 
 // projectPicker selects the target project from the caller's visible projects,

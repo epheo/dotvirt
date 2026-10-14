@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -237,7 +238,10 @@ func TestVectorAndConsumers(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	vec := mustNew(t, srv.URL).vector(context.Background(), "tok", "q")
+	vec, err := mustNew(t, srv.URL).vector(context.Background(), "tok", "q")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(vec) != 2 {
 		t.Fatalf("vector parsed %d series, want 2", len(vec))
 	}
@@ -370,5 +374,126 @@ func TestCapacity(t *testing.T) {
 	}
 	if cap.Nodes[0].VCPUAllocated != 0 {
 		t.Errorf("w2 vCPU = %v, want 0 (no VMI series)", cap.Nodes[0].VCPUAllocated)
+	}
+}
+
+// promStub answers every query with one series of value v; a query containing
+// fail answers 403 instead. It counts the requests it serves.
+func promStub(t *testing.T, fail string, hits *atomic.Int64) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		q := r.URL.Query().Get("query")
+		if fail != "" && strings.Contains(q, fail) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "query_range") {
+			fmt.Fprint(w, `{"status":"success","data":{"result":[{"metric":{"namespace":"a","name":"vm"},"values":[[100,"7"]]}]}}`)
+			return
+		}
+		fmt.Fprint(w, `{"status":"success","data":{"result":[{"metric":{"phase":"running","namespace":"a","name":"vm"},"value":[100,"7"]}]}}`)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// A summary with a failed query still renders, but is never cached: the next
+// caller with the same scope re-queries instead of inheriting the zeros.
+func TestClusterSummaryNotCachedOnQueryError(t *testing.T) {
+	var hits atomic.Int64
+	c := mustNew(t, promStub(t, "kube_node_status_allocatable", &hits).URL)
+	cs, err := c.ClusterSummary(context.Background(), "tok", []string{"a"}, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cs.CPU.Total != 0 || cs.CPU.Used != 7 {
+		t.Errorf("degraded summary = %+v, want used 7, total 0", cs.CPU)
+	}
+	first := hits.Load()
+	if _, err := c.ClusterSummary(context.Background(), "tok", []string{"a"}, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if hits.Load() == first {
+		t.Error("a summary with a failed query was served from cache")
+	}
+}
+
+func TestClusterSummaryCachedWhenClean(t *testing.T) {
+	var hits atomic.Int64
+	c := mustNew(t, promStub(t, "", &hits).URL)
+	if _, err := c.ClusterSummary(context.Background(), "tok", []string{"a"}, "", true); err != nil {
+		t.Fatal(err)
+	}
+	first := hits.Load()
+	if _, err := c.ClusterSummary(context.Background(), "tok", []string{"a"}, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if hits.Load() != first {
+		t.Error("a clean summary should be served from cache")
+	}
+}
+
+// Node totals are node data: without node read they are neither queried nor
+// served from a node reader's cached entry.
+func TestClusterSummaryNodeTotalsGated(t *testing.T) {
+	var hits atomic.Int64
+	c := mustNew(t, promStub(t, "", &hits).URL)
+	admin, err := c.ClusterSummary(context.Background(), "admin", []string{"a"}, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admin.CPU.Total != 7 || admin.Memory.Total != 7 {
+		t.Fatalf("node reader totals = %v/%v, want 7/7", admin.CPU.Total, admin.Memory.Total)
+	}
+	tenant, err := c.ClusterSummary(context.Background(), "tenant", []string{"a"}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tenant.CPU.Total != 0 || tenant.Memory.Total != 0 {
+		t.Errorf("tenant got node totals %v/%v", tenant.CPU.Total, tenant.Memory.Total)
+	}
+}
+
+func TestHostLoadNotCachedOnQueryError(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		q := r.URL.Query().Get("query")
+		if strings.Contains(q, "MemAvailable") {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"status":"success","data":{"result":[{"metric":{"node":"w1","instance":"w1"},"value":[100,"0.5"]}]}}`)
+	}))
+	defer srv.Close()
+	c := mustNew(t, srv.URL)
+	if _, err := c.HostLoad(context.Background(), "tok"); err != nil {
+		t.Fatal(err)
+	}
+	first := hits.Load()
+	if _, err := c.HostLoad(context.Background(), "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if hits.Load() == first {
+		t.Error("a host load with a failed query was served from cache")
+	}
+}
+
+// A total failure surfaces as a fixed 503 message: the backend's error text
+// can carry its URL.
+func TestScopeMetricsErrorHidesBackendDetail(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "nope", http.StatusForbidden)
+	}))
+	defer srv.Close()
+	_, err := mustNew(t, srv.URL).ScopeMetrics(context.Background(), "tok", []string{"a"}, "", "")
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if strings.Contains(err.Error(), srv.URL) || strings.Contains(err.Error(), "403") {
+		t.Errorf("error leaks backend detail: %v", err)
 	}
 }

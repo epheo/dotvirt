@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -23,8 +24,11 @@ import (
 // Result caches are keyed by QUERY PARAMETERS, not the caller's token: the data for
 // a VM (or a scope) is identical for any user authorized to see it, and the API
 // handler has already gated access before calling here. So same-scope users and
-// re-mounts share one Thanos fan-out instead of each re-querying. TTLs are short
-// (well under the UI's 30s poll) to stay fresh while absorbing bursts.
+// re-mounts share one Thanos fan-out instead of each re-querying. Every input
+// that changes what a caller may see (namespace set, node-read access) is part
+// of the key, and a result with any failed query is never cached: one caller's
+// Forbidden must not become another's zeros. TTLs are short (well under the
+// UI's 30s poll) to stay fresh while absorbing bursts.
 const (
 	vmTTL      = 15 * time.Second
 	clusterTTL = 20 * time.Second
@@ -107,12 +111,12 @@ func (c *Client) VMUsage(ctx context.Context, token, ns, name string) (model.VMU
 		return v, nil
 	}
 	s := fmt.Sprintf("{namespace=%q,name=%q}", ns, name)
-	sp := c.sparklines(ctx, token, map[string]string{
+	sp, spErr := c.sparklines(ctx, token, map[string]string{
 		"cpu":  fmt.Sprintf("rate(kubevirt_vmi_cpu_usage_seconds_total%s[2m])*100 / on(namespace,name) %s", s, vcpuCount(s)),
 		"mem":  fmt.Sprintf("kubevirt_vmi_memory_used_bytes%s", s),
 		"stor": fmt.Sprintf("sum(kubevirt_vmi_filesystem_used_bytes%s)", s),
 	})
-	tot := c.scalars(ctx, token, map[string]string{
+	tot, totErr := c.scalars(ctx, token, map[string]string{
 		"mem":  fmt.Sprintf("kubevirt_vmi_memory_domain_bytes%s", s),
 		"stor": fmt.Sprintf("sum(kubevirt_vmi_filesystem_capacity_bytes%s)", s),
 	})
@@ -122,7 +126,9 @@ func (c *Client) VMUsage(ctx context.Context, token, ns, name string) (model.VMU
 		Memory:  model.UsageMetric{Used: sp["mem"].last, Total: tot["mem"], Spark: sp["mem"].vals},
 		Storage: model.UsageMetric{Used: sp["stor"].last, Total: tot["stor"], Spark: sp["stor"].vals},
 	}
-	c.vmUsage.Put(key, out)
+	if spErr == nil && totErr == nil {
+		c.vmUsage.Put(key, out)
+	}
 	return out, nil
 }
 
@@ -130,11 +136,12 @@ func (c *Client) VMUsage(ctx context.Context, token, ns, name string) (model.VMU
 // whole inventory, a project, a namespace, or a node). VM-scoped sums are limited
 // to namespaces (the caller's visible set) and optionally a node; capacity is the
 // node-allocatable total (cluster-wide, or that one node). topConsumers lists the
-// heaviest VMs by CPU + memory.
-func (c *Client) ClusterSummary(ctx context.Context, token string, namespaces []string, node string) (model.ClusterSummary, error) {
-	// Cache by the scope (sorted namespaces + node), not the token: any user with
-	// this namespace set gets the same aggregate, so same-scope viewers share it.
-	key := scopeKey(namespaces, node)
+// heaviest VMs by CPU + memory. nodeTotals gates the node-allocatable totals:
+// they are node data, served only to a caller who may read nodes.
+func (c *Client) ClusterSummary(ctx context.Context, token string, namespaces []string, node string, nodeTotals bool) (model.ClusterSummary, error) {
+	// Cache by the scope (sorted namespaces + node + node access), not the
+	// token: any user with this view gets the same aggregate.
+	key := scopeKey(namespaces, node, fmt.Sprintf("nodes=%t", nodeTotals))
 	if v, ok := c.cluster.Get(key); ok {
 		return v, nil
 	}
@@ -147,29 +154,33 @@ func (c *Client) ClusterSummary(ctx context.Context, token string, namespaces []
 		nodeFilter = fmt.Sprintf(`,node=%q`, node)
 	}
 
-	sp := c.sparklines(ctx, token, map[string]string{
+	var errs errSet
+	sp := errs.sparks(c.sparklines(ctx, token, map[string]string{
 		"cpu":  fmt.Sprintf("sum(rate(%s[2m]))", vm("kubevirt_vmi_cpu_usage_seconds_total")),
 		"mem":  fmt.Sprintf("sum(%s)", vm("kubevirt_vmi_memory_used_bytes")),
 		"stor": fmt.Sprintf("sum(%s)", vm("kubevirt_vmi_filesystem_used_bytes")),
-	})
-	sc := c.scalars(ctx, token, map[string]string{
+	}))
+	scalarQ := map[string]string{
 		"cpuAlloc":  vcpuTotal(nsSel),
-		"cpuTotal":  fmt.Sprintf(`sum(kube_node_status_allocatable{resource="cpu"%s})`, nodeFilter),
 		"memAlloc":  fmt.Sprintf("sum(%s)", vm("kubevirt_vmi_memory_domain_bytes")),
-		"memTotal":  fmt.Sprintf(`sum(kube_node_status_allocatable{resource="memory"%s})`, nodeFilter),
 		"storTotal": fmt.Sprintf("sum(%s)", vm("kubevirt_vmi_filesystem_capacity_bytes")),
-	})
+	}
+	if nodeTotals {
+		scalarQ["cpuTotal"] = fmt.Sprintf(`sum(kube_node_status_allocatable{resource="cpu"%s})`, nodeFilter)
+		scalarQ["memTotal"] = fmt.Sprintf(`sum(kube_node_status_allocatable{resource="memory"%s})`, nodeFilter)
+	}
+	sc := errs.floats(c.scalars(ctx, token, scalarQ))
 
 	// kubevirt_vmi_phase_count has no namespace label; kubevirt_vmi_info does (one
 	// series per VMI, with a phase label), so it counts per namespace.
 	vms := map[string]int{}
-	for _, lv := range c.vector(ctx, token, fmt.Sprintf("sum by(phase)(%s)", vm("kubevirt_vmi_info"))) {
+	for _, lv := range errs.vec(c.vector(ctx, token, fmt.Sprintf("sum by(phase)(%s)", vm("kubevirt_vmi_info")))) {
 		if p := lv.labels["phase"]; p != "" {
 			vms[p] = int(lv.value)
 		}
 	}
-	topCPU := consumers(c.vector(ctx, token, fmt.Sprintf("topk(5, sum by(namespace,name)(rate(%s[2m])))", vm("kubevirt_vmi_cpu_usage_seconds_total"))))
-	topMem := consumers(c.vector(ctx, token, fmt.Sprintf("topk(5, sum by(namespace,name)(%s))", vm("kubevirt_vmi_memory_used_bytes"))))
+	topCPU := consumers(errs.vec(c.vector(ctx, token, fmt.Sprintf("topk(5, sum by(namespace,name)(rate(%s[2m])))", vm("kubevirt_vmi_cpu_usage_seconds_total")))))
+	topMem := consumers(errs.vec(c.vector(ctx, token, fmt.Sprintf("topk(5, sum by(namespace,name)(%s))", vm("kubevirt_vmi_memory_used_bytes")))))
 
 	out := model.ClusterSummary{
 		Updated:   time.Now().Unix(),
@@ -180,21 +191,24 @@ func (c *Client) ClusterSummary(ctx context.Context, token string, namespaces []
 		TopCPU:    topCPU,
 		TopMemory: topMem,
 	}
-	c.cluster.Put(key, out)
+	if !errs.any {
+		c.cluster.Put(key, out)
+	}
 	return out, nil
 }
 
 // byLabel runs an instant vector and indexes the result by one label's value
 // (node-exporter labels nodes `instance`, kube-state-metrics `node`; the joins
 // happen in Go). Empty-label series are dropped.
-func (c *Client) byLabel(ctx context.Context, token, q, label string) map[string]float64 {
+func (c *Client) byLabel(ctx context.Context, token, q, label string) (map[string]float64, error) {
+	vec, err := c.vector(ctx, token, q)
 	m := map[string]float64{}
-	for _, lv := range c.vector(ctx, token, q) {
+	for _, lv := range vec {
 		if n := lv.labels[label]; n != "" {
 			m[n] = lv.value
 		}
 	}
-	return m
+	return m, err
 }
 
 // HostLoad returns the worker-node utilization distribution behind the DRS
@@ -208,11 +222,12 @@ func (c *Client) HostLoad(ctx context.Context, token string) (model.HostLoad, er
 	if v, ok := c.hosts.Get("hosts"); ok {
 		return v, nil
 	}
-	util := c.byLabel(ctx, token, `1 - avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[2m]))`, "instance")
-	mem := c.byLabel(ctx, token, `1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes`, "instance")
-	unsched := c.byLabel(ctx, token, `kube_node_spec_unschedulable`, "node")
+	var errs errSet
+	util := errs.floats(c.byLabel(ctx, token, `1 - avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[2m]))`, "instance"))
+	mem := errs.floats(c.byLabel(ctx, token, `1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes`, "instance"))
+	unsched := errs.floats(c.byLabel(ctx, token, `kube_node_spec_unschedulable`, "node"))
 	var nodes []model.HostWorker
-	for _, lv := range c.vector(ctx, token, `kube_node_role{role="worker"}`) {
+	for _, lv := range errs.vec(c.vector(ctx, token, `kube_node_role{role="worker"}`)) {
 		n := lv.labels["node"]
 		u, ok := util[n]
 		if n == "" || !ok {
@@ -235,7 +250,9 @@ func (c *Client) HostLoad(ctx context.Context, token string) (model.HostLoad, er
 		sum += n.Pct
 	}
 	load.Mean = sum / float64(len(nodes))
-	c.hosts.Put("hosts", load)
+	if !errs.any {
+		c.hosts.Put("hosts", load)
+	}
 	return load, nil
 }
 
@@ -248,14 +265,15 @@ func (c *Client) Capacity(ctx context.Context, token string) (model.HostCapacity
 	if v, ok := c.capacity.Get("capacity"); ok {
 		return v, nil
 	}
-	cpuAlloc := c.byLabel(ctx, token, `kube_node_status_allocatable{resource="cpu"}`, "node")
-	memAlloc := c.byLabel(ctx, token, `kube_node_status_allocatable{resource="memory"}`, "node")
+	var errs errSet
+	cpuAlloc := errs.floats(c.byLabel(ctx, token, `kube_node_status_allocatable{resource="cpu"}`, "node"))
+	memAlloc := errs.floats(c.byLabel(ctx, token, `kube_node_status_allocatable{resource="memory"}`, "node"))
 	// Per-node vCPU sum, with vcpuCount's per-vCPU-series fallback for older KubeVirt.
-	vcpu := c.byLabel(ctx, token, `(sum by(node)(kubevirt_vmi_vcpu_count) or sum by(node)(count by(node,namespace,name)(kubevirt_vmi_vcpu_seconds_total)))`, "node")
-	memVM := c.byLabel(ctx, token, `sum by(node)(kubevirt_vmi_memory_domain_bytes)`, "node")
+	vcpu := errs.floats(c.byLabel(ctx, token, `(sum by(node)(kubevirt_vmi_vcpu_count) or sum by(node)(count by(node,namespace,name)(kubevirt_vmi_vcpu_seconds_total)))`, "node"))
+	memVM := errs.floats(c.byLabel(ctx, token, `sum by(node)(kubevirt_vmi_memory_domain_bytes)`, "node"))
 
 	var nodes []model.HostCapacityNode
-	for _, lv := range c.vector(ctx, token, `kube_node_role{role="worker"}`) {
+	for _, lv := range errs.vec(c.vector(ctx, token, `kube_node_role{role="worker"}`)) {
 		n := lv.labels["node"]
 		alloc, ok := cpuAlloc[n]
 		if n == "" || !ok {
@@ -283,7 +301,9 @@ func (c *Client) Capacity(ctx context.Context, token string) (model.HostCapacity
 	sort.Slice(nodes, func(i, j int) bool { return ratio(nodes[i]) > ratio(nodes[j]) })
 
 	out := model.HostCapacity{Updated: time.Now().Unix(), Nodes: nodes}
-	c.capacity.Put("capacity", out)
+	if !errs.any {
+		c.capacity.Put("capacity", out)
+	}
 	return out, nil
 }
 
@@ -319,14 +339,16 @@ func (c *Client) ScopeMetrics(ctx context.Context, token string, namespaces []st
 		})
 	}
 	if err := g.wait(); err != nil {
-		return model.VMMetrics{}, fmt.Errorf("%w: %v", model.ErrUnavailable, err)
+		return model.VMMetrics{}, unreachable(err)
 	}
 
 	out := model.VMMetrics{Range: rng, Charts: make([]model.MetricChart, len(specs))}
 	for ci, cs := range specs {
 		out.Charts[ci] = buildChart(cs, namedFromLabeled(results[ci]))
 	}
-	c.scope.Put(key, out)
+	if !g.partial() {
+		c.scope.Put(key, out)
+	}
 	return out, nil
 }
 
@@ -344,8 +366,11 @@ func (c *Client) Alerts(ctx context.Context, token string, namespaces []string) 
 		return v, nil
 	}
 	q := fmt.Sprintf(`ALERTS{alertstate="firing",namespace=~%q}`, strings.Join(namespaces, "|"))
+	// A failed read degrades to no rows, like the other summary reads, and is
+	// not cached.
+	vec, err := c.vector(ctx, token, q)
 	rows := map[string]*model.Alert{}
-	for _, lv := range c.vector(ctx, token, q) {
+	for _, lv := range vec {
 		a := model.Alert{
 			Name:      lv.labels["alertname"],
 			Severity:  lv.labels["severity"],
@@ -373,7 +398,9 @@ func (c *Client) Alerts(ctx context.Context, token string, namespaces []string) 
 		}
 		return out[i].Namespace+"/"+out[i].VM < out[j].Namespace+"/"+out[j].VM
 	})
-	c.alerts.Put(key, out)
+	if err == nil {
+		c.alerts.Put(key, out)
+	}
 	return out, nil
 }
 
@@ -389,6 +416,32 @@ func severityRank(s string) int {
 	default:
 		return 3
 	}
+}
+
+// errSet records whether any query of a fan-out failed, passing each result
+// through so the degraded view still renders.
+type errSet struct{ any bool }
+
+func (e *errSet) note(err error) {
+	if err != nil {
+		e.any = true
+	}
+}
+
+func (e *errSet) vec(v []labeledValue, err error) []labeledValue { e.note(err); return v }
+
+func (e *errSet) floats(v map[string]float64, err error) map[string]float64 { e.note(err); return v }
+
+func (e *errSet) sparks(v map[string]sparkResult, err error) map[string]sparkResult {
+	e.note(err)
+	return v
+}
+
+// unreachable logs the backend's error and returns a fixed 503: its text can
+// carry the querier's URL and upstream detail.
+func unreachable(err error) error {
+	log.Printf("metrics: query failed: %v", err)
+	return fmt.Errorf("%w: metrics backend unreachable", model.ErrUnavailable)
 }
 
 func consumers(vec []labeledValue) []model.ConsumerVM {
@@ -452,7 +505,7 @@ func (c *Client) VMMetrics(ctx context.Context, token, ns, name, rng string) (mo
 		}
 	}
 	if err := g.wait(); err != nil {
-		return model.VMMetrics{}, fmt.Errorf("%w: %v", model.ErrUnavailable, err)
+		return model.VMMetrics{}, unreachable(err)
 	}
 
 	out := model.VMMetrics{Range: rng, Charts: make([]model.MetricChart, len(specs))}
@@ -463,6 +516,8 @@ func (c *Client) VMMetrics(ctx context.Context, token, ns, name, rng string) (mo
 		}
 		out.Charts[ci] = buildChart(cs, series)
 	}
-	c.vmMetrics.Put(key, out)
+	if !g.partial() {
+		c.vmMetrics.Put(key, out)
+	}
 	return out, nil
 }
