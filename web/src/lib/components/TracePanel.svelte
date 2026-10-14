@@ -92,7 +92,7 @@
 				<span class="flex gap-1">
 					<SelectInput bind:value={pickNS} size="sm" width="w-auto" onchange={() => (pickVM = '')}>
 						<option value="" disabled>namespace</option>
-						{#each inventory.namespaces as ns (ns)}
+						{#each inventory.repoNamespaces as ns (ns)}
 							<option value={ns}>{ns}</option>
 						{/each}
 					</SelectInput>
@@ -115,7 +115,7 @@
 				{#if dstMode === 'vm'}
 					<SelectInput bind:value={dstNS} size="sm" width="w-auto" onchange={() => (dstVM = '')}>
 						<option value="" disabled>namespace</option>
-						{#each inventory.namespaces as ns (ns)}
+						{#each inventory.repoNamespaces as ns (ns)}
 							<option value={ns}>{ns}</option>
 						{/each}
 					</SelectInput>

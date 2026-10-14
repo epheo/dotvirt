@@ -117,6 +117,10 @@ func InterfaceName(networkRef string) string {
 type ProjectNamespace struct {
 	Namespace string `json:"namespace"`
 	VMs       []VM   `json:"vms"`
+	// CanAuthor is the caller's update right on VMs here: the gate every
+	// stage, propose and revert route enforces, so the UI hides what would 403.
+	// Nil when the review failed this frame: unknown, so the UI keeps offering.
+	CanAuthor *bool `json:"canAuthor,omitempty"`
 }
 
 // Project is a tenant in the inventory tree: a named set of

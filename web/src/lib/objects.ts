@@ -98,8 +98,14 @@ export async function openAdopt(ref: ObjectRef, drifted = false) {
 // created, so only a shared segment's publication list is editable. A primary
 // network is born and dies with its namespace (one file), so it has no delete.
 export const canEditNetwork = (n: Network) => !!n.sourceFile && n.scope === 'shared';
-export const canDeleteNetwork = (n: Network) => !!n.sourceFile && n.kind !== 'default';
-export const canEditPolicy = (p: Policy) => !!p.sourceFile;
+export const canDeleteNetwork = (n: Network) =>
+	!!n.sourceFile && n.kind !== 'default' && canAuthorRef(networkRef(n));
+export const canEditPolicy = (p: Policy) => !!p.sourceFile && canAuthorRef(policyRef(p));
+
+// A namespaced object stages under the caller's own edit right there; a
+// cluster-scoped one is left to the platform gates its callers already check.
+export const canAuthorRef = (ref: ObjectRef) =>
+	ref.namespace === CLUSTER || inventory.canAuthor(ref.namespace);
 
 /**
  * Read the object back from git and open its form with those values. A manifest

@@ -20,7 +20,7 @@ import (
 
 func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)
-	if !ok {
+	if !ok || !s.authorize(w, r, sc, verbUpdate, ssarVM, ns) {
 		return
 	}
 	req, ok := decode[model.EditRequest](w, r)
@@ -47,7 +47,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sc, ok := s.resolveProject(w, r, byNamespace(p.Namespace))
-	if !ok {
+	if !ok || !s.authorize(w, r, sc, verbCreate, ssarVM, p.Namespace) {
 		return
 	}
 	result, err := s.draft.StageCreateVM(sc.id, sc.proj, raw)
@@ -55,12 +55,11 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDelete stages the removal of a VM's manifest into the caller's draft. Like
-// edit/adopt it only mutates the user's own draft (no cluster write, no SA
-// escalation - Argo prunes the VM on merge under its own RBAC), so namespace
-// membership via resolveProject is the right gate, not resync's CanUpdateVM check.
+// edit/adopt it only mutates the user's own draft; Argo prunes the VM on merge
+// under its own RBAC, so the gate is the caller's own delete right.
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)
-	if !ok {
+	if !ok || !s.authorize(w, r, sc, verbDelete, ssarVM, ns) {
 		return
 	}
 	result, err := s.draft.StageDelete(sc.id, sc.proj, "", ns, name)
@@ -110,7 +109,7 @@ func (s *Server) handleUnstage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePropose(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.draftScope(w, r)
-	if !ok {
+	if !ok || !s.authorizeDraft(w, r, sc) {
 		return
 	}
 	req, ok := decode[model.ProposeRequest](w, r)
@@ -135,7 +134,7 @@ func (s *Server) handleDrift(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)
-	if !ok {
+	if !ok || !s.authorize(w, r, sc, verbUpdate, ssarVM, ns) {
 		return
 	}
 	result, err := s.draft.Adopt(sc.id, sc.proj, ns, name)
@@ -148,7 +147,7 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 // exactly what their RBAC lets them read. One draft, proposed as one PR.
 func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
 	sc, ns, _, ok := s.vmScope(w, r)
-	if !ok {
+	if !ok || !s.authorize(w, r, sc, verbUpdate, ssarVM, ns) {
 		return
 	}
 	objs, unreadable, ok := s.captureAdoptable(w, r, sc, ns)
@@ -272,7 +271,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 // page's Restore, which lands in the draft and is proposed like any edit.
 func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)
-	if !ok {
+	if !ok || !s.authorize(w, r, sc, verbUpdate, ssarVM, ns) {
 		return
 	}
 	hash, ok := hashBody(w, r)
@@ -353,7 +352,7 @@ func (s *Server) handleProposal(w http.ResponseWriter, r *http.Request) {
 // repo - a new PR, never a history rewrite.
 func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.pickProject(w, r, r.PathValue("project"))
-	if !ok {
+	if !ok || !s.authorizeRepo(w, r, sc) {
 		return
 	}
 	hash, ok := hashBody(w, r)

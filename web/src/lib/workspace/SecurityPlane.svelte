@@ -14,6 +14,7 @@
 	import { api, type Policy } from '$lib/api';
 	import {
 		canAdoptPolicy,
+		canAuthorRef,
 		canEditPolicy,
 		openAdopt,
 		openDelete,
@@ -218,7 +219,7 @@
 												><Pencil size={12} /> Edit</Button
 											>
 										{/if}
-										{#if p.sync === 'OutOfSync'}
+										{#if p.sync === 'OutOfSync' && canEditPolicy(p)}
 											<Button variant="link" onclick={() => openAdopt(policyRef(p), true)}
 												><GitPullRequest size={12} /> Adopt live changes</Button
 											>
@@ -227,12 +228,14 @@
 											><History size={12} />
 											{history[keyOf(p)] ? 'Hide history' : 'History'}</Button
 										>
-										<button
-											type="button"
-											onclick={() => openDelete(policyRef(p), p.sourceFile!)}
-											class="inline-flex items-center gap-1 text-danger-ink hover:underline"
-											><Trash2 size={12} /> Delete</button
-										>
+										{#if canEditPolicy(p)}
+											<button
+												type="button"
+												onclick={() => openDelete(policyRef(p), p.sourceFile!)}
+												class="inline-flex items-center gap-1 text-danger-ink hover:underline"
+												><Trash2 size={12} /> Delete</button
+											>
+										{/if}
 									{:else if canAdoptPolicy(p)}
 										<span class="text-ink-faint">Not declared in git.</span>
 										<Button variant="link" onclick={() => openAdopt(policyRef(p))}
@@ -249,8 +252,10 @@
 											project={projectOf(p)}
 											name={p.name}
 											load={() => api.objectHistory(ref.resource, ref.namespace, ref.name)}
-											restore={(hash) =>
-												api.restoreObjectVersion(ref.resource, ref.namespace, ref.name, hash)}
+											restore={canAuthorRef(ref)
+												? (hash) =>
+														api.restoreObjectVersion(ref.resource, ref.namespace, ref.name, hash)
+												: undefined}
 											mine={(it) => it.resource === ref.resource && it.name === ref.name}
 										/>
 									</div>

@@ -16,7 +16,12 @@
 
 	const p = $derived(inventory.projects.find((x) => x.name === project));
 	const healthy = $derived(!!p?.repo && !p?.error && !p?.gitOps?.syncError);
-	const scoped = $derived(namespace ? [namespace] : (p?.namespaces.map((n) => n.namespace) ?? []));
+	// Only namespaces the caller may stage into: adopting anywhere else 403s.
+	const scoped = $derived(
+		(namespace ? [namespace] : (p?.namespaces.map((n) => n.namespace) ?? [])).filter((ns) =>
+			inventory.canAuthor(ns),
+		),
+	);
 	// Untracked VMs, project networks and rules in the scope; the capture itself
 	// sweeps the whole namespace (disks too), so the copy says so.
 	const untrackedVMs = $derived.by(() => {

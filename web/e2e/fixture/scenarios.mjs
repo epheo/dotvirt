@@ -145,6 +145,7 @@ const networks = {
 		egressIP: true,
 		externalRoute: true,
 		adminNetworkPolicy: true,
+		platform: true,
 	},
 };
 
@@ -297,6 +298,7 @@ const base = {
 				namespaces: [
 					{
 						namespace: 'web-prod',
+						canAuthor: true,
 						vms: [
 							vm('web-prod', 'web-1'),
 							vm('web-prod', 'web-2', {
@@ -319,6 +321,7 @@ const base = {
 				namespaces: [
 					{
 						namespace: 'db-prod',
+						canAuthor: true,
 						vms: [vm('db-prod', 'db-1', { instancetype: 'u1.large', vcpus: 4, memory: '8Gi' })],
 					},
 				],
@@ -338,6 +341,7 @@ const base = {
 				namespaces: [
 					{
 						namespace: 'batch-prod',
+						canAuthor: true,
 						vms: [
 							vm('batch-prod', 'batch-1', {
 								nodeName: 'worker-2',
@@ -511,6 +515,7 @@ const degraded = {
 				namespaces: [
 					{
 						namespace: 'db-prod',
+						canAuthor: true,
 						// Git-only rows: the live plane is down, so no phase/IP/node.
 						vms: [
 							vm('db-prod', 'db-1', {
@@ -547,6 +552,7 @@ const degraded = {
 			egressIP: false,
 			externalRoute: false,
 			adminNetworkPolicy: false,
+			platform: false,
 		},
 	},
 	// The optional planes answer 503 (down), not empty (fine): the UI must
@@ -595,6 +601,7 @@ const drift = {
 				namespaces: [
 					{
 						namespace: 'web-prod',
+						canAuthor: true,
 						vms: [
 							vm('web-prod', 'web-1'),
 							// The standing failure: OutOfSync WITH an apply error. The tree
@@ -616,6 +623,7 @@ const drift = {
 				namespaces: [
 					{
 						namespace: 'db-prod',
+						canAuthor: true,
 						vms: [
 							vm('db-prod', 'db-1'),
 							vm('db-prod', 'pinned-legacy', {
@@ -734,6 +742,7 @@ const residue = {
 				namespaces: [
 					{
 						namespace: 'oldportal-ns',
+						canAuthor: true,
 						vms: [vm('oldportal-ns', 'stray-1', { sync: 'NotTracked', sourceFile: undefined })],
 					},
 				],

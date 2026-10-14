@@ -168,6 +168,8 @@
 
 	// adoptVM owns its toasts; the run only feeds the busy state.
 	const adopt = () => reconcileOp.run(() => adoptVM(vm));
+	const canAuthor = $derived(inventory.canAuthor(vm.namespace));
+	const readOnly = 'Read-only: you may not edit VMs in this namespace';
 
 	function resync() {
 		return reconcileOp.run(async () => {
@@ -199,10 +201,12 @@
 		<div class="mt-1.5 mb-1 flex flex-wrap items-center gap-0.5">
 			<button
 				onclick={stagePower}
-				disabled={!vm.sourceFile || powerOp.busy}
-				title={vm.sourceFile
-					? 'Stages a power change into a PR — nothing happens until it merges'
-					: 'Not in git — adopt this VM first'}
+				disabled={!vm.sourceFile || !canAuthor || powerOp.busy}
+				title={!vm.sourceFile
+					? 'Not in git — adopt this VM first'
+					: canAuthor
+						? 'Stages a power change into a PR — nothing happens until it merges'
+						: readOnly}
 				class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-45 disabled:hover:bg-transparent"
 			>
 				{#if vm.power === 'On'}<Square size={13} /> Power off{:else}<Play size={13} /> Power on{/if}
@@ -225,8 +229,12 @@
 				variant="secondary"
 				size="sm"
 				onclick={() => openEdit()}
-				disabled={!vm.sourceFile}
-				title={vm.sourceFile ? 'Edit settings' : 'Not in git — adopt this VM first'}
+				disabled={!vm.sourceFile || !canAuthor}
+				title={!vm.sourceFile
+					? 'Not in git — adopt this VM first'
+					: canAuthor
+						? 'Edit settings'
+						: readOnly}
 			>
 				<Pencil size={13} /> Edit Settings
 			</Button>
@@ -275,10 +283,10 @@
 				{stagedItem}
 				{driftChanges}
 				reconciling={reconcileOp.busy}
-				onadopt={adopt}
+				onadopt={canAuthor ? adopt : undefined}
 				onresync={resync}
 				onconsole={() => ontab?.('console')}
-				onedit={() => openEdit()}
+				onedit={canAuthor ? () => openEdit() : undefined}
 				onmigrate={() => (ui.modal = { kind: 'migrateVM', vm: vmRef(vm) })}
 			/>
 		{:else if tab === 'monitor'}

@@ -1,7 +1,7 @@
 // Package auth authenticates dotvirt users by their Kubernetes bearer token.
 // A user pastes a token (oc whoami -t / kubectl create token); dotvirt validates
 // it with a TokenReview (as its own ServiceAccount) and, on success, hands back
-// the token in a signed httpOnly cookie. There is no server-side session store:
+// the token in an AES-GCM sealed httpOnly cookie. There is no server-side session store:
 // the cookie *is* the token, and every downstream cluster call re-presents it so
 // cluster RBAC remains the sole authority.
 package auth

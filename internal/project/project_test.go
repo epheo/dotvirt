@@ -77,3 +77,15 @@ func TestResolveConflictingRepo(t *testing.T) {
 		t.Errorf("expected team-d with conflict Error and empty repo, got %+v", infos)
 	}
 }
+
+// A namespace claiming the platform tier's reserved name joins no project.
+func TestResolveIgnoresReservedName(t *testing.T) {
+	r := NewResolver("p", "r", "")
+	got := r.Resolve([]Namespace{
+		{Name: "a", Labels: map[string]string{"p": PlatformName}, Annotations: map[string]string{"r": "https://f/x.git"}},
+		{Name: "b", Labels: map[string]string{"p": "team"}, Annotations: map[string]string{"r": "https://f/t.git"}},
+	}, nil)
+	if len(got) != 1 || got[0].Name != "team" {
+		t.Fatalf("Resolve = %+v, want only team", got)
+	}
+}

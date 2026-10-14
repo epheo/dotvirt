@@ -75,6 +75,21 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	}
 	inv := inventory.Build(in)
 	inv.Warnings = warnings
+	var nss []string
+	for _, p := range inv.Projects {
+		for _, pn := range p.Namespaces {
+			nss = append(nss, pn.Namespace)
+		}
+	}
+	author := s.authorNamespaces(ctx, id, userCluster, nss)
+	for i := range inv.Projects {
+		for j := range inv.Projects[i].Namespaces {
+			pn := &inv.Projects[i].Namespaces[j]
+			if ok, known := author[pn.Namespace]; known {
+				pn.CanAuthor = &ok
+			}
+		}
+	}
 	// The platform tier has no project row; its Application rollup rides the frame
 	// on its own so the issues plane names what it failed to apply or keeps
 	// unhealthy. Cluster-wide (the snapshot is unfiltered): a user scoped to no

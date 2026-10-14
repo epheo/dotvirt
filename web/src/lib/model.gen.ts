@@ -720,6 +720,11 @@ export interface NetworkCaps {
   egressIP: boolean; // Tier-0 SNAT
   externalRoute: boolean; // Tier-0 external route
   adminNetworkPolicy: boolean; // cluster-wide admin DFW (ANP/BANP)
+  /**
+   * Platform is any platform authoring signal: the gate on the platform
+   * tier's whole-draft routes and its revert.
+   */
+  platform: boolean;
 }
 
 //////////
@@ -1304,6 +1309,12 @@ export interface NIC {
 export interface ProjectNamespace {
   namespace: string;
   vms: VM[];
+  /**
+   * CanAuthor is the caller's update right on VMs here: the gate every
+   * stage, propose and revert route enforces, so the UI hides what would 403.
+   * Nil when the review failed this frame: unknown, so the UI keeps offering.
+   */
+  canAuthor?: boolean;
 }
 /**
  * Project is a tenant in the inventory tree: a named set of

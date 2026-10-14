@@ -92,14 +92,24 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 // move invalidates lazily via the version stamp; the TTL backstops the
 // cluster-scoped RBAC changes the version doesn't observe (see visibleTTL).
 func (s *Server) ssarCached(id auth.Identity, key string, probe func() bool) bool {
+	ok, _ := s.ssarChecked(id, key, func() (bool, error) { return probe(), nil })
+	return ok
+}
+
+// ssarChecked is ssarCached for a probe that can fail: an error is returned
+// and never cached, so a transient apiserver failure cannot pin a denial.
+func (s *Server) ssarChecked(id auth.Identity, key string, probe func() (bool, error)) (bool, error) {
 	ver := s.rbacVersion()
 	k := restfactory.TokenKey(id.Token) + "\x00" + key
 	if e, ok := s.ssar.Get(k); ok && e.ver == ver {
-		return e.ok
+		return e.ok, nil
 	}
-	ok := probe()
+	ok, err := probe()
+	if err != nil {
+		return false, err
+	}
 	s.ssar.Put(k, ssarVerdict{ok: ok, ver: ver})
-	return ok
+	return ok, nil
 }
 
 func (s *Server) canCreateCached(ctx context.Context, id auth.Identity, c *cluster.Client, ref ssarRef) bool {
@@ -218,6 +228,9 @@ type scope struct {
 	id      auth.Identity
 	cluster *cluster.Client
 	proj    project.ProjectInfo
+	// platform is set only by platformScopeWith, after its own SSAR gate; a
+	// project name is never trusted to mean the platform tier.
+	platform bool
 }
 
 // resolveProject is the shared preamble for every draft/VM route: identity -> user
@@ -374,7 +387,7 @@ func (s *Server) platformScopeAny(w http.ResponseWriter, r *http.Request) (scope
 // platformProjectName is the synthetic project name for the platform tier - the
 // repo holding cluster-scoped + tenancy manifests. It is config-only (-platform-repo),
 // never a dotvirt.io/project-labeled namespace, so project discovery never emits it.
-const platformProjectName = "platform"
+const platformProjectName = project.PlatformName
 
 // platformScope resolves the platform tier for a cluster-scoped create. It
 // SSAR-gates on the caller's authority to create ref's kind - the authoring
@@ -405,5 +418,5 @@ func (s *Server) platformScopeWith(w http.ResponseWriter, r *http.Request, autho
 		fail(w, fmt.Errorf("%w: %s", model.ErrForbidden, deny))
 		return scope{}, false
 	}
-	return scope{id: id, cluster: c, proj: s.platformProject()}, true
+	return scope{id: id, cluster: c, proj: s.platformProject(), platform: true}, true
 }

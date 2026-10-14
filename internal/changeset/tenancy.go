@@ -75,7 +75,7 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	// The name becomes a repo path segment, a Namespace name, a label value, and a
 	// staged manifest path - so it must be a strict DNS-1123 label. This rejects
 	// path-traversal ("../x"), separators ("a/b"), and anything k8s would refuse.
-	if err := validate.RequireDNS1123("project name", spec.Name); err != nil {
+	if err := tenantName(spec.Name); err != nil {
 		return model.DraftView{}, err
 	}
 	if err := validate.RequireDNS1123("namespace name", ns); err != nil {
@@ -130,7 +130,7 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	if err := requireRepo(commitProj); err != nil {
 		return model.DraftView{}, err
 	}
-	if err := validate.RequireDNS1123("project name", target.Name); err != nil {
+	if err := tenantName(target.Name); err != nil {
 		return model.DraftView{}, err
 	}
 	if len(target.Namespaces) == 0 {
@@ -317,6 +317,18 @@ func (c *Coordinator) stageProjectAdoption(username, commitProjName string, spec
 		}); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// tenantName validates a tenant project name: a DNS-1123 label that is not the
+// platform tier's reserved name.
+func tenantName(name string) error {
+	if err := validate.RequireDNS1123("project name", name); err != nil {
+		return err
+	}
+	if name == project.PlatformName {
+		return fmt.Errorf("%w: %q is reserved for the platform tier", model.ErrInvalid, name)
 	}
 	return nil
 }

@@ -51,7 +51,7 @@ func (s *Server) appendTemplates(list *model.TemplateList, library, repoURL stri
 
 // handleDeployTemplate renders a library template and stages the VM into the
 // target namespace's draft. The gate is the target: deploying is creating a VM
-// there (same authorization as POST /api/vms); the library only needs to be
+// there (the create SSAR POST /api/vms enforces); the library only needs to be
 // readable - the caller's own projects or the shared platform library.
 func (s *Server) handleDeployTemplate(w http.ResponseWriter, r *http.Request) {
 	_, req, ok := readBody[model.DeployTemplateRequest](w, r, false)
@@ -63,7 +63,7 @@ func (s *Server) handleDeployTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sc, ok := s.resolveProject(w, r, byNamespace(req.Namespace))
-	if !ok {
+	if !ok || !s.authorize(w, r, sc, verbCreate, ssarVM, req.Namespace) {
 		return
 	}
 	lib, ok := s.libraryFor(w, r, sc, req.Library)
@@ -104,7 +104,7 @@ func (s *Server) libraryFor(w http.ResponseWriter, r *http.Request, sc scope, li
 
 // handleUpdateTemplate replaces a library template's manifest - editing a
 // content-library item. Editing IS writing to the library, so the gate matches
-// saving into it: project membership for a project library, the
+// saving into it: authoring rights in the project for a project library, the
 // virtualmachinetemplates create SSAR for the shared one.
 func (s *Server) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 	_, req, ok := readBody[model.UpdateTemplateRequest](w, r, false)
@@ -120,6 +120,7 @@ func (s *Server) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 		sc, ok = s.platformScope(w, r, ssarVMTemplate)
 	} else {
 		sc, ok = s.resolveProject(w, r, byName(req.Library))
+		ok = ok && s.authorizeDraft(w, r, sc)
 	}
 	if !ok {
 		return
@@ -130,7 +131,7 @@ func (s *Server) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 
 // handleSaveTemplate derives a template from a VM's git manifest and stages it
 // into a library - "Clone to Template". Saving into the VM's own project needs
-// only that project's membership; saving into the shared library gates on the
+// authoring rights there; saving into the shared library gates on the
 // virtualmachinetemplates create SSAR (rule-based, so it works before the CRD
 // exists on-cluster), like every platform-tier create.
 func (s *Server) handleSaveTemplate(w http.ResponseWriter, r *http.Request) {
@@ -149,6 +150,9 @@ func (s *Server) handleSaveTemplate(w http.ResponseWriter, r *http.Request) {
 	commitProj := sc.proj
 	switch req.Library {
 	case "", sc.proj.Name:
+		if !s.authorizeDraft(w, r, sc) {
+			return
+		}
 	case platformProjectName:
 		psc, ok := s.platformScope(w, r, ssarVMTemplate)
 		if !ok {

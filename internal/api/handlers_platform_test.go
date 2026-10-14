@@ -222,6 +222,12 @@ func TestSaveTemplate(t *testing.T) {
 		}
 		return nil
 	}
+	// The tenant edits VMs in its namespace: saving into its own library needs
+	// that, saving into the shared one needs the template create it lacks.
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		return token == adminToken ||
+			(a.Verb == "update" && a.Resource == "virtualmachines" && a.Namespace == "team-a-dev")
+	}
 	d := &planeDraft{}
 	s := fc.server(d, Config{PlatformRepo: platformRepo})
 

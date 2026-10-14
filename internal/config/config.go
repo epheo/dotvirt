@@ -96,7 +96,7 @@ type Config struct {
 	StaticDir string
 
 	// Auth
-	SessionSecret string // HMAC key signing the session cookie; random if empty
+	SessionSecret string // derives the key sealing the session cookie; random if empty
 
 	// OpenShift SSO (optional): the OAuthClient dotvirt is registered as. Setting
 	// the client ID enables the flow (it also needs PublicURL for the redirect
@@ -141,7 +141,7 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.WebhookURL, "webhook-url", os.Getenv("DOTVIRT_WEBHOOK_URL"), "base URL the forge delivers webhooks to (defaults to -public-url; set to the in-cluster Service URL when the forge can't reach/TLS-trust the external Route)")
 	fs.StringVar(&c.AppSetPluginToken, "appset-plugin-token", os.Getenv("DOTVIRT_APPSET_PLUGIN_TOKEN"), "shared bearer for the ArgoCD ApplicationSet plugin-generator endpoint (empty disables it)")
 	fs.StringVar(&c.StaticDir, "static-dir", os.Getenv("DOTVIRT_STATIC_DIR"), "directory of the built SPA to serve at the same origin (empty = dev: SPA served by Vite)")
-	fs.StringVar(&c.SessionSecret, "session-secret", os.Getenv("DOTVIRT_SESSION_SECRET"), "HMAC key signing the session cookie (random if empty; sessions then drop on restart)")
+	fs.StringVar(&c.SessionSecret, "session-secret", os.Getenv("DOTVIRT_SESSION_SECRET"), "secret the session cookie's encryption key derives from (random if empty; sessions then drop on restart)")
 	fs.StringVar(&c.OAuthClientID, "oauth-client-id", os.Getenv("DOTVIRT_OAUTH_CLIENT_ID"), "OpenShift OAuthClient name enabling SSO login (empty disables; needs -public-url)")
 	fs.StringVar(&c.OAuthClientSecret, "oauth-client-secret", os.Getenv("DOTVIRT_OAUTH_CLIENT_SECRET"), "secret of the OpenShift OAuthClient")
 	fs.StringVar(&c.OAuthCA, "oauth-ca", os.Getenv("DOTVIRT_OAUTH_CA"), "PEM CA bundle path to trust for the oauth token endpoint (e.g. the ingress CA)")

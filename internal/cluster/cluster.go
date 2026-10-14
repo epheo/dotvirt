@@ -236,6 +236,17 @@ func (c *Client) CanUpdateVM(ctx context.Context, namespace, name string) (bool,
 	return ok, nil
 }
 
+// Can reports whether this token may perform verb on group/resource in
+// namespace ("" for cluster scope). A review error is returned, not read as
+// "no", so a gate can answer 503 instead of a false 403.
+func (c *Client) Can(ctx context.Context, verb, group, resource, namespace string) (bool, error) {
+	ok, err := c.allowed(ctx, &authzv1.ResourceAttributes{Namespace: namespace, Verb: verb, Group: group, Resource: resource})
+	if err != nil {
+		return false, fmt.Errorf("access review for %s %s in %s: %w", verb, resource, namespace, err)
+	}
+	return ok, nil
+}
+
 // grantsRead reports whether a resource rule allows get or list on the given
 // group/resource. "*" matches any verb, group, or resource.
 func grantsRead(rule authzv1.ResourceRule, group, resource string) bool {

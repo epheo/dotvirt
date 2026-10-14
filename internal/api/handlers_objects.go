@@ -64,7 +64,7 @@ func (s *Server) handleObjectSpec(w http.ResponseWriter, r *http.Request) {
 // verbatim: the edit for what its form has no field for.
 func (s *Server) handleObjectUpdateManifest(w http.ResponseWriter, r *http.Request) {
 	sc, resource, ns, name, ok := s.objectScope(w, r)
-	if !ok {
+	if !ok || !s.authorizeObject(w, r, sc, verbUpdate, resource, ns, name) {
 		return
 	}
 	_, req, ok := readBody[model.UpdateManifestRequest](w, r, false)
@@ -83,7 +83,7 @@ func (s *Server) handleObjectUpdateManifest(w http.ResponseWriter, r *http.Reque
 // same draft-only path as a VM delete; Argo prunes the object on merge.
 func (s *Server) handleObjectDelete(w http.ResponseWriter, r *http.Request) {
 	sc, resource, ns, name, ok := s.objectScope(w, r)
-	if !ok {
+	if !ok || !s.authorizeObject(w, r, sc, verbDelete, resource, ns, name) {
 		return
 	}
 	view, err := s.draft.StageDelete(sc.id, sc.proj, resource, ns, name)
@@ -94,7 +94,7 @@ func (s *Server) handleObjectDelete(w http.ResponseWriter, r *http.Request) {
 // namespace (or cluster) capture, narrowed to the object asked for.
 func (s *Server) handleObjectAdopt(w http.ResponseWriter, r *http.Request) {
 	sc, resource, ns, name, ok := s.objectScope(w, r)
-	if !ok {
+	if !ok || !s.authorizeObject(w, r, sc, verbUpdate, resource, ns, name) {
 		return
 	}
 	objs, unreadable, ok := s.captureAdoptable(w, r, sc, model.ObjectNamespace(ns))
@@ -129,7 +129,7 @@ func (s *Server) handleObjectHistory(w http.ResponseWriter, r *http.Request) {
 // handleObjectRestore stages one declared object's file as a past commit held it.
 func (s *Server) handleObjectRestore(w http.ResponseWriter, r *http.Request) {
 	sc, resource, ns, name, ok := s.objectScope(w, r)
-	if !ok {
+	if !ok || !s.authorizeObject(w, r, sc, verbUpdate, resource, ns, name) {
 		return
 	}
 	hash, ok := hashBody(w, r)

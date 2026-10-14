@@ -6,7 +6,9 @@
 package project
 
 import (
+	"log"
 	"sort"
+	"sync"
 
 	"github.com/epheo/dotvirt/pkg/forge"
 )
@@ -41,7 +43,13 @@ type Resolver struct {
 	projectLabel string
 	repoAnno     string
 	forgeBase    string
+	warned       sync.Map // namespace -> struct{}: reserved-name labels already logged
 }
+
+// PlatformName is the synthetic platform tier's project name. It is reserved:
+// a tenant by that name would share the platform draft and its route gates, so
+// Resolve never emits one and the tenancy flows refuse it.
+const PlatformName = "platform"
 
 // NewResolver builds a Resolver for the given label/annotation keys. forgeBase is
 // the effective forge URL relative repo refs resolve against; empty leaves them
@@ -78,6 +86,12 @@ func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []Pr
 		name := ns.Labels[r.projectLabel]
 		if name == "" {
 			continue // not a dotvirt-managed namespace
+		}
+		if name == PlatformName {
+			if _, seen := r.warned.LoadOrStore(ns.Name, struct{}{}); !seen {
+				log.Printf("project: namespace %s carries the reserved project name %q; ignored", ns.Name, PlatformName)
+			}
+			continue
 		}
 		a := byProject[name]
 		if a == nil {

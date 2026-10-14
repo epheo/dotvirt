@@ -30,7 +30,8 @@
 		project: string;
 		name: string; // the object, for copy
 		load: () => Promise<Commit[]>;
-		restore: (hash: string) => Promise<unknown>;
+		// Absent when the caller may not stage here: the history stays readable.
+		restore?: (hash: string) => Promise<unknown>;
 		mine: (it: DraftItem) => boolean; // a commit's items that belong to this object
 	} = $props();
 
@@ -66,7 +67,7 @@
 	async function restore(c: Commit) {
 		if (restoreOp.busy) return;
 		restoring = c.hash;
-		const ok = await restoreOp.run(() => restoreVersion(c.hash));
+		const ok = await restoreOp.run(() => restoreVersion!(c.hash));
 		restoring = null;
 		if (ok) {
 			ui.toastStaged(`Restore of ${name} to ${c.shortHash} staged.`, {
@@ -119,7 +120,7 @@
 							<span class="shrink-0 rounded border border-line px-2 py-0.5 text-xs text-ink-faint"
 								>Current version</span
 							>
-						{:else}
+						{:else if restoreVersion}
 							<Button
 								variant="secondary"
 								size="sm"
@@ -155,7 +156,7 @@
 								{:else}
 									<p class="text-xs text-ink-faint">This commit changed no manifests.</p>
 								{/each}
-								{#if !current}
+								{#if !current && restoreVersion}
 									<p class="text-xs text-ink-faint">
 										Restoring stages {name} exactly as it was after this change into your
 										{project} draft. Nothing changes until that pull request merges.

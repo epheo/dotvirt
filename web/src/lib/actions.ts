@@ -15,6 +15,7 @@ import { vmPath, vmRef } from './api';
 //    id-to-dialog switch of its own.
 import { api, Unauthorized, type VM } from '$lib/api';
 import { friendlyError } from '$lib/format';
+import { inventory } from '$lib/state/inventory.svelte';
 import { ui, type AppModal } from '$lib/state/ui.svelte';
 import { vmHref } from '$lib/nav';
 
@@ -147,6 +148,8 @@ const always = () => true;
 // Git-backed verbs need a manifest on the base branch; a cluster-only VM (e.g.
 // a fresh clone target) has none until adopted.
 const inGit = (vm: VM) => !!vm.sourceFile;
+// Staging verbs also need the caller's own edit right there; read access alone 403s.
+const author = (vm: VM) => inventory.canAuthor(vm.namespace);
 
 export const vmActions: VMAction[] = [
 	{
@@ -188,7 +191,8 @@ export const vmActions: VMAction[] = [
 		title: 'Live-copy disks to another storage class — staged as a PR',
 		// Needs a live VMI to copy from, a git manifest to edit, and at least
 		// one DataVolume-backed disk to move.
-		enabled: (vm) => running(vm) && inGit(vm) && !!vm.disks?.some((d) => d.type === 'dataVolume'),
+		enabled: (vm) =>
+			running(vm) && inGit(vm) && author(vm) && !!vm.disks?.some((d) => d.type === 'dataVolume'),
 		open: (vm) => ({ kind: 'migrateStorage', vm: vmRef(vm) }),
 	},
 	{ id: 'console', label: 'Open console', kind: 'host', sep: true, enabled: running },
@@ -206,7 +210,7 @@ export const vmActions: VMAction[] = [
 		label: 'Clone to Template…',
 		kind: 'host',
 		title: 'Derive a reusable template from this VM’s git manifest — staged as a PR',
-		enabled: inGit,
+		enabled: (vm) => inGit(vm) && author(vm),
 		open: (vm) => ({ kind: 'saveTemplate', vm: vmRef(vm) }),
 	},
 	{
@@ -216,14 +220,14 @@ export const vmActions: VMAction[] = [
 		sep: true,
 		title: 'Stage this cluster-only VM into a PR to bring it under GitOps',
 		// The complement of inGit: only a NotTracked (live-but-ungitted) VM can be adopted.
-		enabled: (vm) => vm.sync === 'NotTracked',
+		enabled: (vm) => vm.sync === 'NotTracked' && author(vm),
 	},
 	{
 		id: 'edit',
 		label: 'Edit settings',
 		kind: 'host',
 		title: 'Stages a config change into a PR',
-		enabled: inGit,
+		enabled: (vm) => inGit(vm) && author(vm),
 		open: (vm) => ({ kind: 'editVM', vm: vmRef(vm) }),
 	},
 	{
@@ -240,7 +244,7 @@ export const vmActions: VMAction[] = [
 		danger: true,
 		sep: true,
 		title: 'Stages a removal into a PR',
-		enabled: inGit,
+		enabled: (vm) => inGit(vm) && author(vm),
 		open: (vm) => ({ kind: 'deleteVM', vm: vmRef(vm) }),
 	},
 ];

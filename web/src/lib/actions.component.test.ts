@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { VM } from './api';
+import type { Inventory, VM } from './api';
 import { adoptNamespaces, dispatchVMAction, manifestURL, vmActions } from './actions';
+import { inventory } from './state/inventory.svelte';
 import { ui } from './state/ui.svelte';
 import { navigations } from '../test/app-navigation';
 
@@ -22,8 +23,21 @@ const enabledIds = (v: VM) => vmActions.filter((a) => a.enabled(v)).map((a) => a
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
+// The staging verbs also need the caller's edit right in the VM's namespace.
+const grant = (canAuthor: boolean) =>
+	inventory.apply({
+		projects: [
+			{
+				name: 'p',
+				repo: 'https://forge/p.git',
+				namespaces: [{ namespace: 'team-a', vms: [], canAuthor }],
+			},
+		],
+	} as unknown as Inventory);
+
 beforeEach(() => {
 	ui.reset();
+	grant(true);
 	navigations.length = 0;
 	fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
 	vi.stubGlobal('fetch', fetchMock);
@@ -34,6 +48,15 @@ afterEach(() => {
 });
 
 describe('vmActions gates', () => {
+	it('a viewer gets no staging verbs', () => {
+		grant(false);
+		const ids = enabledIds(vm({ disks: [{ name: 'root', type: 'dataVolume' }] } as Partial<VM>));
+		for (const id of ['edit', 'delete', 'template', 'migrate-storage'])
+			expect(ids).not.toContain(id);
+		expect(enabledIds(vm({ sync: 'NotTracked', sourceFile: undefined }))).not.toContain('adopt');
+		expect(ids).toContain('restart');
+	});
+
 	it('ids are unique', () => {
 		const ids = vmActions.map((a) => a.id);
 		expect(new Set(ids).size).toBe(ids.length);
