@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ import (
 // calls hit srv regardless of host - so routes match on the path suffix.
 type proposeFixture struct {
 	c       *Coordinator
+	repos   *git.RepoSet
 	proj    project.ProjectInfo
 	id      auth.Identity
 	forgeAt string
@@ -70,6 +72,7 @@ func newProposeFixture(t *testing.T, routes ...route) *proposeFixture {
 
 	return &proposeFixture{
 		c:       c,
+		repos:   repos,
 		proj:    project.ProjectInfo{Name: "p", Repo: seedBare(t)},
 		id:      auth.Identity{Username: "alice"},
 		forgeAt: srv.URL,
@@ -133,6 +136,33 @@ func TestAdoptProjectRecreatesLostRepo(t *testing.T) {
 		})
 	if _, err := f.c.AdoptProject(f.id, f.proj, f.target("team-a"), nil, nil); err != nil {
 		t.Fatalf("a lost repo must be re-created, not refused: %v", err)
+	}
+}
+
+// A lost repo's clone failure, cached by inventory builds before adoption,
+// must not outlive dotvirt re-creating it: the seed and the first propose
+// open it right away.
+func TestAdoptProjectRetriesRecreatedRepoAtOnce(t *testing.T) {
+	var repoURL string
+	f := newProposeFixture(t,
+		when("GET", "team-a", http.StatusNotFound, ""),
+		func(m, path string) (int, string, bool) {
+			if m == "POST" && strings.HasPrefix(path, "/api/v1/orgs/") && strings.HasSuffix(path, "/repos") {
+				gitRun(t, filepath.Dir(repoURL), "clone", "-q", "--bare", seedBare(t), repoURL)
+				return http.StatusCreated, "{}", true
+			}
+			return 0, "", false
+		})
+	repoURL = filepath.Join(filepath.Dir(f.proj.Repo), "team-a.git")
+	if _, _, err := f.repos.Get(repoURL); err == nil {
+		t.Fatal("the lost repo must fail to open before adoption")
+	}
+
+	if _, err := f.c.AdoptProject(f.id, f.proj, f.target("team-a"), nil, nil); err != nil {
+		t.Fatalf("AdoptProject: %v", err)
+	}
+	if _, _, err := f.repos.Get(repoURL); err != nil {
+		t.Fatalf("re-created repo still served the cached failure: %v", err)
 	}
 }
 

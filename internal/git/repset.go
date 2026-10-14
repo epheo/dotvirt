@@ -144,6 +144,15 @@ func (s *RepoSet) Get(repoURL string) (*Repo, *WriteRepo, error) {
 	return pair.read, pair.write, nil
 }
 
+// Created clears repoURL's cached open failure: dotvirt just made the repo on
+// the forge, so a "not found" from before must not fail the seed or the first
+// propose for the rest of the backoff.
+func (s *RepoSet) Created(repoURL string) {
+	s.mu.Lock()
+	delete(s.failed, forge.NormalizeRepoURL(repoURL))
+	s.mu.Unlock()
+}
+
 // Poke fetches repoURL's heads now instead of waiting for the next poll tick -
 // the webhook's instant-update path. Matched by canonical URL, so a webhook
 // payload's clone_url/html_url form finds the entry the project annotation opened.

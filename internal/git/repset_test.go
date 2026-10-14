@@ -101,6 +101,11 @@ func TestRepoSetBacksOffFailedOpen(t *testing.T) {
 	if n := opens.Load(); n != 3 {
 		t.Fatalf("opens after poke = %d, want 3", n)
 	}
+	rs.Created("https://forge/o/r.git")
+	_, _, _ = rs.Get("https://forge/o/r")
+	if n := opens.Load(); n != 4 {
+		t.Fatalf("opens after Created = %d, want 4", n)
+	}
 }
 
 // Concurrent Gets of one unopened repo share a single clone.

@@ -92,31 +92,31 @@ func New(store *draft.Store, repos *git.RepoSet, ff *forge.Factory, rs Resyncer,
 }
 
 // read is the project repo's mirror, for parsing what the base branch holds.
-// It hands the caller only the failure kind: the raw error can embed the repo
-// URL (credentials included on some transports), so it is logged here and
-// never returned.
 func (r *Reader) read(proj project.ProjectInfo) (*git.Repo, error) {
+	read, _, err := r.pair(proj)
+	return read, err
+}
+
+// pair is the project's mirror and push clone from ONE Get: a second Get may
+// find the entry evicted and the re-clone failing. It hands the caller only the
+// failure kind: the raw error can embed the repo URL (credentials included on
+// some transports), so it is logged here and never returned.
+func (r *Reader) pair(proj project.ProjectInfo) (*git.Repo, *git.WriteRepo, error) {
 	if err := requireRepo(proj); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	read, _, err := r.repos.Get(proj.Repo)
+	read, write, err := r.repos.Get(proj.Repo)
 	if err != nil {
 		log.Printf("changeset: project %s repo: %v", proj.Name, err)
-		return nil, fmt.Errorf("%w: project repo unreachable", model.ErrUnavailable)
+		return nil, nil, fmt.Errorf("%w: project repo unreachable", model.ErrUnavailable)
 	}
-	return read, nil
+	return read, write, nil
 }
 
 // write is read's write-side sibling: the mirror beside the push clone a
-// commit goes through. Only the write half may hand out the push clone; the
-// second Get is the pair read just opened.
+// commit goes through. Only the write half may hand out the push clone.
 func (c *Coordinator) write(proj project.ProjectInfo) (*git.Repo, *git.WriteRepo, error) {
-	read, err := c.read(proj)
-	if err != nil {
-		return nil, nil, err
-	}
-	_, write, _ := c.repos.Get(proj.Repo)
-	return read, write, nil
+	return c.pair(proj)
 }
 
 // requireRepo rejects an action on a project with no usable repo BEFORE any draft
