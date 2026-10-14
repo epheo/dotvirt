@@ -3,7 +3,7 @@
 // add/remove (rows is reassigned so $derived readers see the change). Callers
 // keep the length-1 floor via their disabled gate; empty starts a list that
 // may hold no rows at all. blank gets the current length, for numbered names.
-interface RowList<T> {
+export interface RowList<T> {
 	readonly rows: T[];
 	add(): void;
 	remove(i: number): void;
