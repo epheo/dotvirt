@@ -643,10 +643,10 @@ kubevirt.io/containerized-data-importer-api v1.64.0 h1:yBLY6qEogUp8F+XSJvabIkx9u
 kubevirt.io/containerized-data-importer-api v1.64.0/go.mod h1:VGp35wxpLXU18b7cnEpmcThI3AjcZUSfg/Zfql44U4o=
 kubevirt.io/controller-lifecycle-operator-sdk/api v0.2.4 h1:fZYvD3/Vnitfkx6IJxjLAk8ugnZQ7CXVYcRfkSKmuZY=
 kubevirt.io/controller-lifecycle-operator-sdk/api v0.2.4/go.mod h1:018lASpFYBsYN6XwmA2TIrPCx6e0gviTd/ZNtSitKgc=
-kubevirt.io/virt-template-api v0.2.2 h1:WfyjCsycNAO4DidPm6IPXWKt6KIYswphW37BbiJMMLc=
-kubevirt.io/virt-template-api v0.2.2/go.mod h1:O4+LtY4jVbyMa6beA0fYsDCIiqSgdxWmZEoNGDD3cuE=
-kubevirt.io/virt-template-engine v0.2.2 h1:M0nPFQHAdrdksga+Y09vyPL7+sUcIPovb+XzYXWIJow=
-kubevirt.io/virt-template-engine v0.2.2/go.mod h1:BlX06MGdxb8RZTQfXuzq9ZyfS11xZjIzAGcHr8kf+0A=
+kubevirt.io/virt-template-api v0.2.4 h1:THazqzQgN12B/pAC7Mjr0+vr+kH/KDzMAHdUVnpI+T4=
+kubevirt.io/virt-template-api v0.2.4/go.mod h1:O4+LtY4jVbyMa6beA0fYsDCIiqSgdxWmZEoNGDD3cuE=
+kubevirt.io/virt-template-engine v0.2.4 h1:DqmXu5JPvN2ETNHDngfeV2Y3s7jDt5hnPOdPqLgAzvs=
+kubevirt.io/virt-template-engine v0.2.4/go.mod h1:BlX06MGdxb8RZTQfXuzq9ZyfS11xZjIzAGcHr8kf+0A=
 sigs.k8s.io/controller-runtime v0.23.3 h1:VjB/vhoPoA9l1kEKZHBMnQF33tdCLQKJtydy4iqwZ80=
 sigs.k8s.io/controller-runtime v0.23.3/go.mod h1:B6COOxKptp+YaUT5q4l6LqUJTRpizbgf9KSRNdQGns0=
 sigs.k8s.io/json v0.0.0-20211020170558-c049b76a60c6/go.mod h1:p4QtZmO4uMYipTQNzagwnNoseA6OxSUutVw05NhYDRs=
