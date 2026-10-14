@@ -19,9 +19,9 @@ import (
 // refresher owns freshness: it re-queries the forge for a watched project when
 // its repo's heads move (a propose/merge), when a nudge names its repo or finds
 // it uncached, and for all of them on a slow backstop tick - then wakes the hub
-// only when some lane actually changed. The
-// lane is project-scoped, not per-token: every member of a project sees the
-// same PRs, and which are theirs is marked at read time.
+// only when some lane actually changed. The lane is project-scoped, not
+// per-token: every member of a project sees the same PRs, and which are theirs
+// is marked at read time.
 const (
 	// proposalsRefreshEvery is the backstop cadence; real freshness comes from the
 	// git-change signal and explicit nudges.
@@ -139,12 +139,14 @@ func (s *Server) nudgeProposals(repo string) {
 }
 
 // proposalOpened is what a handler does once it has pushed and opened a PR:
-// track the project for the caller, then poke its repo. The poke's fetch sees
-// the pushed branch and publishes GitChanged for that repo, which is what
-// refreshes the lane - and the inventory and declared files with it. The order
-// matters - a pass only queries tracked projects (see trackProposalsProject).
+// track the project for the caller, nudge its repo, and poke the repo so the
+// fetch publishes GitChanged for the pushed branch (the inventory and declared
+// files follow it). The nudge covers a fetch that saw no head move: a poll that
+// landed between the push and the PR, or a failed fetch. The order matters - a
+// pass only queries tracked projects (see trackProposalsProject).
 func (s *Server) proposalOpened(sc scope) {
 	s.trackProposalsProject(sc.id, sc.proj)
+	s.nudgeProposals(forge.NormalizeRepoURL(sc.proj.Repo))
 	s.repos.Poke(sc.proj.Repo)
 }
 

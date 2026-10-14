@@ -16,10 +16,11 @@ import (
 )
 
 // The Forgejo webhook: push/PR events trigger an immediate fetch of that repo,
-// and PR events a refresh of its proposals lane, so the UI repaints in webhook latency instead of
-// the next poll tick (and the poll interval can stretch to minutes). The
-// endpoint authenticates by HMAC signature, not a user session - it's exempted
-// in auth.isOpenPath and disabled entirely when no secret is configured.
+// and PR events a refresh of its proposals lane, so the UI repaints in webhook
+// latency instead of the next poll tick (and the poll interval can stretch to
+// minutes). The endpoint authenticates by HMAC signature, not a user session -
+// it's exempted in auth.isOpenPath and disabled entirely when no secret is
+// configured.
 
 // handleForgeWebhook validates the HMAC-SHA256 signature Forgejo puts on every
 // delivery, pokes the named repo's poller, and on a PR event nudges the proposals

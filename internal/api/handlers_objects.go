@@ -192,9 +192,9 @@ type declaredIndex struct {
 
 // declaredFiles is p's declared-files index, cached per repo and invalidated by
 // its repo's GitChanged version, so the polled catalog routes read a repo index
-// once per push to that repo rather than once per request. A project the resolver flagged has no
-// repo to read; a failed read is not cached, so it declares nothing this once
-// and is retried on the next call.
+// once per push to that repo rather than once per request. A project the
+// resolver flagged has no repo to read; a failed read is not cached, so it
+// declares nothing this once and is retried on the next call.
 func (s *Server) declaredFiles(p project.ProjectInfo) map[model.ObjectRef]string {
 	if p.Error != "" {
 		return nil

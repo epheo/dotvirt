@@ -1,9 +1,10 @@
 // Package stream pushes live inventory to WebSocket clients. One central goroutine
 // reconciles each connected identity's inventory frame to the latest change-version
-// (building the identities that moved on a bounded worker pool) and hands every connection the freshest frame; connections are level-triggered
-// writers that always send the latest. There is no debounce (coalescing falls out of
-// the build duration - see Run), no heartbeat broadcast (a fresh connection gets
-// the current frame on connect; a quiet one needs no resend), and no send-buffer overflow (each
+// (building the identities that moved on a bounded worker pool) and hands every
+// connection the freshest frame; connections are level-triggered writers that
+// always send the latest. There is no debounce (coalescing falls out of the build
+// duration - see Run), no heartbeat broadcast (a fresh connection gets the current
+// frame on connect; a quiet one needs no resend), and no send-buffer overflow (each
 // connection's mailbox conflates to the latest frame, so a slow client converges
 // instead of dropping frames). The UI never polls, and one user never receives
 // another tenant's tree (each frame is built under the connection's identity).
@@ -13,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"slices"
 	"sync"
 	"time"
 
@@ -87,15 +89,17 @@ func NewHub(inventory InventoryFunc, wake <-chan struct{}, levels Levels, uiOrig
 	}
 }
 
-// conn is one WebSocket connection. The Run goroutine is the sole writer of lastJS
-// and the sole producer into out (a conflating 1-slot mailbox); the connection's
-// writePump drains out and writes the latest frame. quit is closed on teardown.
+// conn is one WebSocket connection. Within a pass, the one goroutine handling its
+// identity (Run or a build worker) is the sole writer of lastJS and the sole
+// producer into out (a conflating 1-slot mailbox); passes never overlap. The
+// connection's writePump drains out and writes the latest frame. quit is closed on
+// teardown.
 type conn struct {
 	id     auth.Identity
 	key    string // groups connections of the same identity (same token -> one build)
 	out    chan []byte
 	quit   chan struct{}
-	lastJS string // last frame delivered to THIS conn; owned by the Run goroutine
+	lastJS string // last frame delivered to THIS conn; owned as described above
 }
 
 func (h *Hub) add(c *conn) {
@@ -164,14 +168,16 @@ func (h *Hub) reconcile(ctx context.Context) {
 	type job struct {
 		key   string
 		conns []*conn
+		prev  *frame
 	}
 	var due []job
 	for key, conns := range byKey {
-		if f := h.idents[key]; f != nil && h.levels.Stamp(f.deps) == f.stamp {
+		f := h.idents[key]
+		if f != nil && h.levels.Stamp(f.deps) == f.stamp {
 			sendLatest(conns, f.data) // a new tab of an identity that is current
 			continue
 		}
-		due = append(due, job{key, conns})
+		due = append(due, job{key, conns, f})
 	}
 
 	built := make([]*frame, len(due))
@@ -182,7 +188,7 @@ func (h *Hub) reconcile(ctx context.Context) {
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				built[i] = h.build(ctx, due[i].conns)
+				built[i] = h.build(ctx, due[i].conns, due[i].prev)
 			}
 		}()
 	}
@@ -201,11 +207,17 @@ func (h *Hub) reconcile(ctx context.Context) {
 	}
 }
 
-// build builds one identity's frame, delivers it, and returns it stamped. Nil on
-// failure, or when the level moved mid-build: that frame may predate the move, so
-// the identity stays due for the next pass.
-func (h *Hub) build(ctx context.Context, conns []*conn) *frame {
-	before := h.levels.Total()
+// build builds one identity's frame, delivers it, and returns it stamped with the
+// level read before the build, so a move during the build leaves it due. prev is
+// the identity's last frame, nil when it has none. Nil on failure, or when the
+// frame's repos differ from prev's and anything moved mid-build (no pre-build
+// level was read for its new repos).
+func (h *Hub) build(ctx context.Context, conns []*conn, prev *frame) *frame {
+	var prevDeps []string
+	if prev != nil {
+		prevDeps = prev.deps
+	}
+	total, stamp := h.levels.Total(), h.levels.Stamp(prevDeps)
 	bctx, cancel := context.WithTimeout(ctx, h.timeout)
 	inv, err := h.inventory(bctx, conns[0].id)
 	cancel()
@@ -219,10 +231,13 @@ func (h *Hub) build(ctx context.Context, conns []*conn) *frame {
 	}
 	sendLatest(conns, data)
 	deps := h.levels.Deps(inv)
+	if slices.Equal(deps, prevDeps) {
+		return &frame{data: data, deps: deps, stamp: stamp}
+	}
+	// Stamp is read after the build here; Total moves before any key does, so an
+	// unchanged Total proves no move landed before that read.
 	f := &frame{data: data, deps: deps, stamp: h.levels.Stamp(deps)}
-	// Stamp is read after the build; Total moves before any key does, so an
-	// unchanged Total proves the stamp predates nothing the frame missed.
-	if h.levels.Total() != before {
+	if h.levels.Total() != total {
 		return nil
 	}
 	return f

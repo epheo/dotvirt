@@ -297,3 +297,37 @@ func TestReconcileWorkerPoolBound(t *testing.T) {
 		}
 	}
 }
+
+// TestReconcileUnrelatedPushMidBuild: a push to another repo during a rebuild
+// leaves the frame current; a push to its own repo leaves it due.
+func TestReconcileUnrelatedPushMidBuild(t *testing.T) {
+	bus := eventbus.New()
+	var builds atomic.Int64
+	var during atomic.Value // repo key published inside the next build
+	inv := func(_ context.Context, id auth.Identity) (model.Inventory, error) {
+		builds.Add(1)
+		if k := during.Swap(""); k != nil && k != "" {
+			bus.PublishKey(eventbus.GitChanged, k.(string))
+		}
+		return model.Inventory{Projects: []model.Project{{Name: id.Username, Repo: "https://forge/a.git"}}}, nil
+	}
+	h := NewHub(inv, make(chan struct{}, 1), RepoLevels(bus, eventbus.GitChanged, eventbus.LiveChanged, eventbus.GitChanged), "")
+	h.add(testConn("a"))
+	h.reconcile(context.Background())
+
+	bus.PublishKey(eventbus.GitChanged, "https://forge/a")
+	during.Store("https://forge/other")
+	h.reconcile(context.Background())
+	h.reconcile(context.Background())
+	if n := builds.Load(); n != 2 {
+		t.Fatalf("builds = %d, want 2: another repo's push must not discard the frame", n)
+	}
+
+	bus.PublishKey(eventbus.GitChanged, "https://forge/a")
+	during.Store("https://forge/a")
+	h.reconcile(context.Background())
+	h.reconcile(context.Background())
+	if n := builds.Load(); n != 4 {
+		t.Fatalf("builds = %d, want 4: its own repo's push mid-build must leave it due", n)
+	}
+}
