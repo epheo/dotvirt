@@ -35,13 +35,13 @@ jobs:
       catalog-image: ${{ steps.pins.outputs.catalog-image }}
       version: ${{ steps.pins.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
       - name: Load pinned tool versions
         run: grep -v '^#' hack/versions.env >> "$GITHUB_ENV"
       - name: Resolve version + prev
@@ -79,9 +79,9 @@ jobs:
         run: |
           echo "$P" | docker login quay.io -u "$U" --password-stdin
           echo "$P" | skopeo login quay.io -u "$U" --password-stdin
-      - uses: docker/setup-qemu-action@v3   # emulation for the catalog image's arm64 cache-build RUN
+      - uses: docker/setup-qemu-action@v4   # emulation for the catalog image's arm64 cache-build RUN
         if: env.REL_SKIP != 'true'
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
         if: env.REL_SKIP != 'true'
       - name: Cut release (build + push + digest-pin)
         if: env.REL_SKIP != 'true'

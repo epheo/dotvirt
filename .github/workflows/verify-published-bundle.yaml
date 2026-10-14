@@ -33,7 +33,7 @@ jobs:
   install:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/olm-kind
       - name: Install from the published catalog (operator/install/, as an admin would)
         run: |

@@ -20,7 +20,7 @@ runs:
         sudo chmod +x /usr/local/bin/operator-sdk
     - name: Restore preloaded-image cache
       id: images
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.cache/olm-kind-images.tar
         key: olm-kind-images-${{ hashFiles('hack/versions.env', '.github/actions/olm-kind/action.yml') }}
@@ -47,23 +47,22 @@ runs:
         # the ceiling before the node starts. -w is runtime-only: fine on a throwaway VM.
         sudo sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576
         docker run -d --restart=always -p 127.0.0.1:5000:5000 --name kind-registry registry:2
-        cat <<EOF | kind create cluster --image "$KIND_NODE_IMAGE" --wait 5m --config=-
-        kind: Cluster
-        apiVersion: kind.x-k8s.io/v1alpha4
-        containerdConfigPatches:
-        - |-
-          [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5000"]
-            endpoint = ["http://kind-registry:5000"]
-        EOF
+        kind create cluster --image "$KIND_NODE_IMAGE" --wait 5m
+        # containerd 2 dropped registry.mirrors; kind node images ship config_path
+        # pointing at certs.d, so the alias is a hosts.toml per node.
+        for node in $(kind get nodes); do
+          docker exec "$node" mkdir -p /etc/containerd/certs.d/localhost:5000
+          echo '[host."http://kind-registry:5000"]' |
+            docker exec -i "$node" cp /dev/stdin /etc/containerd/certs.d/localhost:5000/hosts.toml
+        done
         docker network connect kind kind-registry
         # Scorecard's test pods pull this with IfNotPresent semantics — loading it into
         # the node means they never hit the network.
         kind load docker-image "quay.io/operator-framework/scorecard-test:$OPERATOR_SDK_VERSION"
     - name: Install OLM
       shell: bash
-      # Pin the OLM version (operator-sdk v1.42.2's default) — unpinned pulls
-      # latest-of-the-day, whose images intermittently fail to come up in kind and
-      # leave `run bundle` with no InstallPlan ("context deadline exceeded").
+      # Pin the OLM version: unpinned pulls latest-of-the-day, whose images
+      # intermittently fail to come up in kind and leave no InstallPlan.
       run: |
         operator-sdk olm install --version "$OLM_VERSION" --timeout 5m
         # The default operatorhubio catalog is a large pull that lands exactly when the

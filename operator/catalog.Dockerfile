@@ -3,7 +3,7 @@
 # package/channel/bundle graph from /configs.
 # opm version is single-sourced in hack/versions.env; `make catalog-build` passes it as a
 # --build-arg. The default here keeps a bare `docker build` working and must match it.
-ARG OPM_VERSION=v1.51.0
+ARG OPM_VERSION=v1.74.0
 FROM quay.io/operator-framework/opm:${OPM_VERSION}
 ENTRYPOINT ["/bin/opm"]
 CMD ["serve", "/configs", "--cache-dir=/tmp/cache"]
