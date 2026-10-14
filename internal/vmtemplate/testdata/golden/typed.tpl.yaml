@@ -1,0 +1,51 @@
+apiVersion: template.kubevirt.io/v1beta1
+kind: VirtualMachineTemplate
+metadata:
+  name: typed
+  annotations:
+    description: Non-string and multi-reference substitution
+spec:
+  message: VM ${NAME} gets ${CORES} cores in ${ZONE}
+  parameters:
+    - name: NAME
+      generate: expression
+      from: "typed-[a-z0-9]{5}"
+    - name: CORES
+      value: "2"
+    - name: MEMORY
+      value: 2Gi
+    - name: ZONE
+      value: eu-1
+    - name: AUTOATTACH
+      value: "false"
+    - name: LABELS
+      value: '{"tier":"web","zone":"eu-1"}'
+  virtualMachine:
+    apiVersion: kubevirt.io/v1
+    kind: VirtualMachine
+    metadata:
+      name: ${NAME}
+      namespace: hardcoded
+      labels:
+        app: ${NAME}-${ZONE}
+    spec:
+      runStrategy: Halted
+      template:
+        metadata:
+          labels: ${{LABELS}}
+        spec:
+          domain:
+            cpu:
+              cores: ${{CORES}}
+            memory:
+              guest: ${MEMORY}
+            devices:
+              autoattachGraphicsDevice: ${{AUTOATTACH}}
+              disks:
+                - name: containerdisk
+                  disk:
+                    bus: virtio
+          volumes:
+            - name: containerdisk
+              containerDisk:
+                image: quay.io/containerdisks/fedora:latest

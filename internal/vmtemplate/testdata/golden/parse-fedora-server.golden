@@ -1,0 +1,36 @@
+{
+  "name": "fedora-server",
+  "library": "acme",
+  "description": "Fedora server with cloud-init guest customization (hostname, user, SSH key)",
+  "sourceFile": "templates/fedora-server.yaml",
+  "parameters": [
+    {
+      "name": "NAME",
+      "description": "Unique VM name",
+      "generate": "expression",
+      "from": "fedora-[a-z0-9]{5}"
+    },
+    {
+      "name": "HOSTNAME",
+      "description": "Guest hostname",
+      "value": "fedora"
+    },
+    {
+      "name": "CLOUD_USER",
+      "description": "Cloud-init user account",
+      "value": "fedora"
+    },
+    {
+      "name": "SSH_AUTHORIZED_KEY",
+      "description": "SSH public key added to the cloud-init user (optional)"
+    },
+    {
+      "name": "OS_IMAGE_NAMESPACE",
+      "description": "Namespace of the fedora boot-image DataSource",
+      "value": "openshift-virtualization-os-images"
+    }
+  ],
+  "instancetype": "u1.medium",
+  "preference": "fedora",
+  "yaml": ""
+}

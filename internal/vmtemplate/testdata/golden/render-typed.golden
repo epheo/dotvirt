@@ -1,0 +1,35 @@
+name: typed-01
+namespace: tenant-a
+message: VM typed-01 gets 4 cores in eu-1
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  labels:
+    app: typed-01-eu-1
+  name: typed-01
+  namespace: tenant-a
+spec:
+  runStrategy: Halted
+  template:
+    metadata:
+      labels:
+        tier: web
+        zone: eu-1
+    spec:
+      domain:
+        cpu:
+          cores: 4
+        devices:
+          autoattachGraphicsDevice: false
+          disks:
+          - disk:
+              bus: virtio
+            name: containerdisk
+        memory:
+          guest: 2Gi
+        resources: {}
+      volumes:
+      - containerDisk:
+          image: quay.io/containerdisks/fedora:latest
+        name: containerdisk

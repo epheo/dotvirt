@@ -1,0 +1,22 @@
+{
+  "name": "fedora-minimal",
+  "library": "acme",
+  "description": "Minimal Fedora VM — a generated name is the only parameter",
+  "sourceFile": "templates/fedora-minimal.yaml",
+  "parameters": [
+    {
+      "name": "NAME",
+      "description": "Unique VM name",
+      "generate": "expression",
+      "from": "fedora-[a-z0-9]{5}"
+    },
+    {
+      "name": "OS_IMAGE_NAMESPACE",
+      "description": "Namespace of the fedora boot-image DataSource",
+      "value": "openshift-virtualization-os-images"
+    }
+  ],
+  "instancetype": "u1.small",
+  "preference": "fedora",
+  "yaml": ""
+}
