@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -151,6 +152,13 @@ func Load(args []string) (*Config, error) {
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
+	}
+	// The same rule the API's cross-origin check applies: an origin it would
+	// reject fails here instead of 403ing every UI write.
+	if c.UIOrigin != "" {
+		if err := http.NewCrossOriginProtection().AddTrustedOrigin(c.UIOrigin); err != nil {
+			return nil, fmt.Errorf("-ui-origin: %w", err)
+		}
 	}
 	if c.SessionSecret == "" {
 		secret, err := randomSecret()

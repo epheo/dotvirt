@@ -494,7 +494,8 @@ func withCrossOriginProtection(uiOrigin string, next http.Handler) http.Handler 
 	cop := http.NewCrossOriginProtection()
 	if uiOrigin != "" {
 		if err := cop.AddTrustedOrigin(uiOrigin); err != nil {
-			log.Printf("api: ui-origin %q not trusted for cross-origin writes: %v", uiOrigin, err)
+			// config.Load rejects such an origin at startup.
+			panic(fmt.Sprintf("api: ui-origin %q: %v", uiOrigin, err))
 		}
 	}
 	return cop.Handler(next)
