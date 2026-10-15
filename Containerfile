@@ -4,7 +4,7 @@
 # --- Stage 1: build the SPA (adapter-static → /web/build) ---
 # Pinned to the build host's arch (the SPA output is arch-neutral static assets, so there's
 # no point emulating it per target platform).
-FROM --platform=$BUILDPLATFORM docker.io/library/node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS web
+FROM --platform=$BUILDPLATFORM docker.io/library/node:25-alpine@sha256:bdf2cca6fe3dabd014ea60163eca3f0f7015fbd5c7ee1b0e9ccb4ced6eb02ef4 AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -27,7 +27,7 @@ COPY . .
 RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /dotvirt ./cmd/dotvirt
 
 # --- Stage 3: minimal runtime ---
-FROM gcr.io/distroless/static:nonroot@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6
+FROM gcr.io/distroless/static:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
 ARG VERSION=dev
 # OCI + Red Hat/OpenShift image metadata (mirrors the operator image; the
 # name/vendor/version/release/summary/description/maintainer labels + /licenses dir
