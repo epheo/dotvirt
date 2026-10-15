@@ -19,6 +19,9 @@ updates:
         update-types: [version-update:semver-minor, version-update:semver-major]
       - dependency-name: 'kubevirt.io/*'
         update-types: [version-update:semver-minor, version-update:semver-major]
+      # Moves with k8s.io/apimachinery, which pins the version it is tested with.
+      - dependency-name: 'sigs.k8s.io/structured-merge-diff/*'
+        update-types: [version-update:semver-minor, version-update:semver-major]
   - package-ecosystem: npm
     directory: /web
     schedule: { interval: weekly, day: monday }
@@ -38,3 +41,7 @@ updates:
       # One weekly PR for every base image, digest refreshes included.
       images:
         patterns: ['*']
+    ignore:
+      # Node majors move with node-version in the workflows; raise both by hand.
+      - dependency-name: 'node'
+        update-types: [version-update:semver-major]
