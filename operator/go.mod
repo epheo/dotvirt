@@ -9,7 +9,7 @@ require (
 	k8s.io/apimachinery v0.35.9
 	k8s.io/client-go v0.35.9
 	sigs.k8s.io/controller-runtime v0.23.3
-	sigs.k8s.io/structured-merge-diff/v6 v6.3.2-0.20260122202528-d9cc6641c482
+	sigs.k8s.io/structured-merge-diff/v6 v6.3.3
 )
 
 require (
