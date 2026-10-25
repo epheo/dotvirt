@@ -14,7 +14,7 @@ RUN npm run build
 # --- Stage 2: build the static Go binary ---
 # CGO is disabled, so the Go toolchain cross-compiles for $TARGETARCH on the native build
 # host (no QEMU) — buildx sets TARGETOS/TARGETARCH per target platform.
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.27.2@sha256:820153096fda4de6ac1b7194d12e416b7dd8f4e9a33d17e0345b111b945162d8 AS build
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.27.3@sha256:f20d83a83e18dbd2a4714b8ffd4b30b287b6243962dd75608e86abcc63ba4efc AS build
 # GOWORK=off: the repo-root go.work arrives with `COPY . .` and would change the build
 # list after `go mod download`, sending the build to the network uncached.
 ENV GOTOOLCHAIN=auto CGO_ENABLED=0 GOWORK=off GOFLAGS="-buildvcs=false -mod=readonly" \
