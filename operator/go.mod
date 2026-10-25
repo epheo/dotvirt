@@ -1,6 +1,6 @@
 module github.com/epheo/dotvirt/operator
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/epheo/dotvirt v0.0.0
