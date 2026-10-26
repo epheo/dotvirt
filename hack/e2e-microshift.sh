@@ -192,7 +192,12 @@ retry "kubectl reaches the cluster" 60 kc_up
 
 node_ready() { kc get nodes 2>/dev/null | grep -q ' Ready '; }
 retry "node Ready" 300 node_ready
-retry "router deployed" 600 kc -n openshift-ingress get deploy router-default
+# portail is the edge (epheo.15+): the router is Removed by default, and the
+# Gateway API experimental CRDs land from manifests.d once the core is up.
+no_router() { [ -z "$(kc get namespace openshift-ingress --ignore-not-found -o name)" ]; }
+retry "router removed" 600 no_router
+retry "gateway api crds established" 600 kc wait --for=condition=Established --timeout=5s \
+	crd/tcproutes.gateway.networking.k8s.io crd/udproutes.gateway.networking.k8s.io
 retry "storage class present" 600 sh -c 'kubectl get storageclass -o name | grep -q .'
 # TopoLVM must be fully up before anything claims a PVC: lvmd (DaemonSet)
 # mints /run/topolvm for the node plugin, and the controller provisions.
