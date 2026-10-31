@@ -45,4 +45,4 @@ updates:
       # Node majors move with node-version in the workflows; raise both by hand.
       # update-types semver-major only skips the newest major, so name the range.
       - dependency-name: 'library/node'
-        versions: ['>=25']
+        versions: ['>=27']

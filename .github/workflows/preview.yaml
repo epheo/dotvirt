@@ -27,7 +27,7 @@ jobs:
           go-version-file: go.mod
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 26
       - name: Load pinned tool versions
         run: grep -v '^#' hack/versions.env >> "$GITHUB_ENV"
       - name: Install skopeo + operator-sdk
