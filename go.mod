@@ -13,9 +13,9 @@ require (
 	golang.org/x/crypto v0.58.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/time v0.16.0
-	k8s.io/api v0.35.9
-	k8s.io/apimachinery v0.35.9
-	k8s.io/client-go v0.35.9
+	k8s.io/api v0.35.10
+	k8s.io/apimachinery v0.35.10
+	k8s.io/client-go v0.35.10
 	kubevirt.io/api v1.8.4
 	kubevirt.io/client-go v1.8.4
 	kubevirt.io/virt-template-api v0.2.4
