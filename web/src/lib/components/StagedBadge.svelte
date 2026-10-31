@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Pencil, Trash2 } from 'lucide-svelte';
+	import { Pencil, Trash2 } from '@lucide/svelte';
 	import type { DraftItem } from '#lib/api.js';
 	import StatusPill from './StatusPill.svelte';
 

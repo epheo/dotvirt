@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Plus, Trash2 } from 'lucide-svelte';
+	import { Plus, Trash2 } from '@lucide/svelte';
 	import { api, type EgressFirewallCreate, type EgressFirewallRule } from '#lib/api.js';
 	import { rowList } from '#lib/rowlist.svelte.js';
 	import { TERMS } from '#lib/vocab.js';

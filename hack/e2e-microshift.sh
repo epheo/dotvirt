@@ -22,7 +22,7 @@ NAME="${NAME:-dotvirt-e2e-microshift}"
 # packaged in the MicroShift image.
 LVM_DISK="${LVM_DISK:-/var/lib/${NAME}/lvmdisk.image}"
 VG_NAME="myvg1"
-ARGOCD_VERSION="${ARGOCD_VERSION:-v3.1.0}"
+ARGOCD_VERSION="${ARGOCD_VERSION:-v3.5.6}"
 KUBEVIRT_VERSION="${KUBEVIRT_VERSION:-}" # empty = the published stable
 WORKDIR="${WORKDIR:-$(mktemp -d /tmp/dotvirt-e2e.XXXXXX)}"
 mkdir -p "${WORKDIR}" # an env-supplied WORKDIR (CI) arrives uncreated
@@ -239,7 +239,8 @@ subjects:
   kind: Group
   name: system:serviceaccounts:argocd
 SCC
-curl -fsSL "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml" | kc apply -n argocd -f -
+# The ApplicationSet CRD outgrows the client-side apply annotation limit (Argo CD >= 3.3).
+curl -fsSL "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml" | kc apply -n argocd --server-side --force-conflicts -f -
 # Plain-HTTP server so the forge can deliver webhooks to the in-cluster Service
 # without a trust store.
 kc -n argocd patch configmap argocd-cmd-params-cm --type merge -p '{"data":{"server.insecure":"true"}}'

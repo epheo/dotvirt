@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChevronDown, Maximize2, X } from 'lucide-svelte';
+	import { ChevronDown, Maximize2, X } from '@lucide/svelte';
 	import { goto } from '$app/navigation';
 	import { vmKey, vmRef, type VM } from '#lib/api.js';
 	import { dispatchVMAction, vmActions } from '#lib/actions.js';

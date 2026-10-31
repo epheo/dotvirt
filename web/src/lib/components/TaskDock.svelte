@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChevronDown, ChevronUp, ListChecks, RefreshCw } from 'lucide-svelte';
+	import { ChevronDown, ChevronUp, ListChecks, RefreshCw } from '@lucide/svelte';
 	import {
 		api,
 		type Alert,

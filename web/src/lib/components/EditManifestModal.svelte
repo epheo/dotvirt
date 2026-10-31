@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { BookCopy, FileCode } from 'lucide-svelte';
+	import { BookCopy, FileCode } from '@lucide/svelte';
 	import StageModal from './StageModal.svelte';
 
 	// Edit a manifest as the file git holds: the object's own form covers the

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { BookCopy } from 'lucide-svelte';
+	import { BookCopy } from '@lucide/svelte';
 	import { api, type Template } from '#lib/api.js';
 	import { libraryLabel } from '#lib/catalog.js';
 	import { catalog } from '#lib/state/catalog.svelte.js';

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Check, Upload } from 'lucide-svelte';
+	import { Check, Upload } from '@lucide/svelte';
 	import { api, Unauthorized } from '#lib/api.js';
 	import { friendlyError } from '#lib/format.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';

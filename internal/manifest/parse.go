@@ -6,7 +6,7 @@ import (
 	"io"
 
 	"github.com/epheo/dotvirt/internal/model"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // vmDoc is the minimal shape of a VirtualMachine manifest dotvirt reads for the

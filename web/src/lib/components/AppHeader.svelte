@@ -19,7 +19,7 @@
 		TriangleAlert,
 		Upload,
 		User as UserIcon,
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { dispatchVMAction } from '#lib/actions.js';
 	import { changesHref, hrefForScope, scopeFromPath, vmHref } from '#lib/nav.js';
 	import StatusDot from './StatusDot.svelte';

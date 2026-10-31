@@ -1,6 +1,6 @@
 package manifest
 
-import "gopkg.in/yaml.v3"
+import "go.yaml.in/yaml/v3"
 
 // Helpers for navigating and minimally mutating a yaml.Node mapping tree.
 // yaml.v3 stores a mapping's children as a flat slice [key0,val0,key1,val1,...].

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ClipboardList, Database, Folder, Library, Network, Server } from 'lucide-svelte';
+	import { ClipboardList, Database, Folder, Library, Network, Server } from '@lucide/svelte';
 	import type { Section } from '#lib/nav.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';

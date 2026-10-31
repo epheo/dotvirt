@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Power, PowerOff, Trash2 } from 'lucide-svelte';
+	import { Power, PowerOff, Trash2 } from '@lucide/svelte';
 	import Button from './Button.svelte';
 
 	// The grid's bulk-selection bar. Every action stages a change through the

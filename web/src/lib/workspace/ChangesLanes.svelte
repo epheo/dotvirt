@@ -9,7 +9,7 @@
 		Plus,
 		Trash2,
 		TriangleAlert,
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { api, type Commit, type DraftView, type Proposal, type ProposeResult } from '#lib/api.js';
 	import { shortDate } from '#lib/format.js';
 	import { action } from '#lib/resource.svelte.js';

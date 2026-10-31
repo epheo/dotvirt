@@ -9,7 +9,7 @@
 		RotateCw,
 		Server,
 		Square,
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import {
 		api,
 		vmKey,

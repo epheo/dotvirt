@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ExternalLink, History, TriangleAlert } from 'lucide-svelte';
+	import { ExternalLink, History, TriangleAlert } from '@lucide/svelte';
 	import type { Commit, ProposeResult } from '#lib/api.js';
 	import { shortDate } from '#lib/format.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';

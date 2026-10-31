@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Plus, Trash2 } from 'lucide-svelte';
+	import { Plus, Trash2 } from '@lucide/svelte';
 	import { api, type AdminNetworkPolicyCreate, type AdminPolicyRule } from '#lib/api.js';
 	import { rowList } from '#lib/rowlist.svelte.js';
 	import { validName, NAME_HINT } from '#lib/validate.js';

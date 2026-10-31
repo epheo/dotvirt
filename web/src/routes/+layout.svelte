@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack, type Snippet } from 'svelte';
-	import { FolderPlus, TriangleAlert } from 'lucide-svelte';
+	import { FolderPlus, TriangleAlert } from '@lucide/svelte';
 	import '../app.css';
 	import favicon from '#lib/assets/favicon.svg';
 	import { goto } from '$app/navigation';

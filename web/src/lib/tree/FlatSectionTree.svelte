@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Database, LayoutGrid, Network, Server } from 'lucide-svelte';
+	import { Database, LayoutGrid, Network, Server } from '@lucide/svelte';
 	import { api, type Node, type VM } from '#lib/api.js';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '#lib/lenses.js';
 	import { hrefForScope, scopeFromPath } from '#lib/nav.js';

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Pencil } from 'lucide-svelte';
+	import { Pencil } from '@lucide/svelte';
 	import type { Network, VM } from '#lib/api.js';
 	import { manifestURL } from '#lib/actions.js';
 	import type { EditSection } from '#lib/editform.js';

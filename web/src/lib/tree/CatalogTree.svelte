@@ -8,7 +8,7 @@
 		Network,
 		SlidersHorizontal,
 		TriangleAlert,
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import {
 		CATALOG_KINDS,
 		catalogHref,

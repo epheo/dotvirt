@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { CircleCheck } from 'lucide-svelte';
+	import { CircleCheck } from '@lucide/svelte';
 	import { issuesInScope } from '#lib/issues.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import StatusDot from './StatusDot.svelte';

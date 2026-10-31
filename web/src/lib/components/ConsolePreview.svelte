@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Monitor } from 'lucide-svelte';
+	import { Monitor } from '@lucide/svelte';
 	import { screenshotURL } from '#lib/actions.js';
 	import { vmKey, type VM } from '#lib/api.js';
 	import { pollWhileVisible } from '#lib/poll.js';

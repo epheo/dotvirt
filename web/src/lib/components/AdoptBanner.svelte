@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { GitPullRequest } from 'lucide-svelte';
+	import { GitPullRequest } from '@lucide/svelte';
 	import { adoptNamespaces } from '#lib/actions.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';

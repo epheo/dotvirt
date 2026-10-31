@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { X } from 'lucide-svelte';
+	import { X } from '@lucide/svelte';
 	import type { Options } from '#lib/api.js';
 	import type { RowList } from '#lib/rowlist.svelte.js';
 	import Button from '../Button.svelte';

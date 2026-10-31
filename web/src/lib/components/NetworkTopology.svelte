@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { GitPullRequest, Network, Pencil, Radio, Router, Trash2 } from 'lucide-svelte';
+	import { GitPullRequest, Network, Pencil, Radio, Router, Trash2 } from '@lucide/svelte';
 	import {
 		canAdoptUplink,
 		canEditUplink,

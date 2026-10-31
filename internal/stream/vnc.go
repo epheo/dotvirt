@@ -93,10 +93,10 @@ func (p *VNCProxy) Handler(w http.ResponseWriter, r *http.Request) {
 	ws.SetReadLimit(vncReadLimit)
 
 	// Bridge both directions; when either side ends, tear down both.
-	errc := make(chan error, 2)
-	go func() { errc <- copyWSToConn(ws, conn) }() // browser -> VMI
-	go func() { errc <- copyConnToWS(conn, ws) }() // VMI -> browser
-	<-errc
+	done := make(chan struct{}, 2)
+	go func() { _ = copyWSToConn(ws, conn); done <- struct{}{} }() // browser -> VMI
+	go func() { _ = copyConnToWS(conn, ws); done <- struct{}{} }() // VMI -> browser
+	<-done
 }
 
 // copyWSToConn forwards binary WebSocket frames from the browser to the VNC conn.

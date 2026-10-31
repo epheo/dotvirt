@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { History, RotateCcw } from 'lucide-svelte';
+	import { History, RotateCcw } from '@lucide/svelte';
 	import { type Commit, type CommitDetail, type DraftItem } from '#lib/api.js';
 	import { relativeAge } from '#lib/format.js';
 	import { changesHref } from '#lib/nav.js';

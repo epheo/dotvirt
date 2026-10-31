@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Folder, Layers, LayoutGrid, TriangleAlert } from 'lucide-svelte';
+	import { Folder, Layers, LayoutGrid, TriangleAlert } from '@lucide/svelte';
 	import type { Project, ProjectNamespace } from '#lib/api.js';
 	import { repoError } from '#lib/gitops.js';
 	import { issueCountByProject } from '#lib/issues.js';
