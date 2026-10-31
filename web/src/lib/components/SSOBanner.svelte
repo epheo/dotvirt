@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { TriangleAlert } from 'lucide-svelte';
+	import { TriangleAlert } from '@lucide/svelte';
 	import { api } from '#lib/api.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';

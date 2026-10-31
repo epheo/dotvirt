@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { BookCopy } from 'lucide-svelte';
+	import { BookCopy } from '@lucide/svelte';
 	import { api, type VM } from '#lib/api.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { validName, NAME_HINT } from '#lib/validate.js';

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Check, Copy } from 'lucide-svelte';
+	import { Check, Copy } from '@lucide/svelte';
 	import Button from '../Button.svelte';
 	import Modal from '../Modal.svelte';
 

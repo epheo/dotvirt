@@ -8,7 +8,7 @@
 		Plus,
 		Route,
 		Trash2,
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, type Policy } from '#lib/api.js';

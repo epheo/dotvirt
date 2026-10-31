@@ -6,7 +6,7 @@
 	// `label:key`) narrows to VM labels - the tags-parity affordance; label
 	// chips elsewhere push one through ui.search.
 	import { untrack } from 'svelte';
-	import { Search } from 'lucide-svelte';
+	import { Search } from '@lucide/svelte';
 	import { dismiss } from '#lib/dismiss.js';
 	import type { VM } from '#lib/api.js';
 	import { vmActions, type VMAction } from '#lib/actions.js';

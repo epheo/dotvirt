@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Pencil, Plus, Trash2 } from 'lucide-svelte';
+	import { Pencil, Plus, Trash2 } from '@lucide/svelte';
 	import { vmKey, type DraftItem } from '#lib/api.js';
 	import { itemKey } from '#lib/review.js';
 	import { draftKindTone, TONE_PILL } from '#lib/status.js';

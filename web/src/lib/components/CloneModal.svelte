@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Copy } from 'lucide-svelte';
+	import { Copy } from '@lucide/svelte';
 	import { api, type Clone, type VM } from '#lib/api.js';
 	import { relativeAge } from '#lib/format.js';
 	import { action, resource, type Resource } from '#lib/resource.svelte.js';

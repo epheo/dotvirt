@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { GitPullRequest, Pencil } from 'lucide-svelte';
+	import { GitPullRequest, Pencil } from '@lucide/svelte';
 	import { api, type DraftItem, type VM } from '#lib/api.js';
 	import { approvalLine, checksPill, itemKey, reviewURL } from '#lib/review.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';

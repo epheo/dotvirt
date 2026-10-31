@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Pencil, Trash2 } from 'lucide-svelte';
+	import { Pencil, Trash2 } from '@lucide/svelte';
 	import { vmKey, type VM } from '#lib/api.js';
 	import { vmHref } from '#lib/nav.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';

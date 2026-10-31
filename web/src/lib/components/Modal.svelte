@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { X } from 'lucide-svelte';
+	import { X } from '@lucide/svelte';
 
 	// The one dialog shell: overlay, backdrop-click + Escape dismissal, focus
 	// containment, and the title bar every modal shares. Callers own the body

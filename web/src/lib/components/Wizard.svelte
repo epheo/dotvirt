@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { Check } from 'lucide-svelte';
+	import { Check } from '@lucide/svelte';
 	import { action } from '#lib/resource.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import ErrorNote from './ErrorNote.svelte';

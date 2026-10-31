@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { TriangleAlert } from 'lucide-svelte';
+	import { TriangleAlert } from '@lucide/svelte';
 	import { api, type Commit, type ProposeResult } from '#lib/api.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';

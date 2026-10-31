@@ -6,7 +6,7 @@
 // BASE_URL where a scene serves a non-default origin. Per-scene extras are
 // noted in the table.
 import { execSync } from 'node:child_process';
-import { chromium } from 'playwright';
+import { chromium } from '@playwright/test';
 
 const OUT = process.env.OUT || '/tmp';
 const DEV = 'http://localhost:5173';

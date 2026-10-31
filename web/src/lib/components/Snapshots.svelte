@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Camera, RotateCcw, Trash2 } from 'lucide-svelte';
+	import { Camera, RotateCcw, Trash2 } from '@lucide/svelte';
 	import { api, vmKey, type Snapshot, type VM } from '#lib/api.js';
 	import { relativeAge } from '#lib/format.js';
 	import { action, resource, type Resource } from '#lib/resource.svelte.js';

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ExternalLink, GitPullRequest } from 'lucide-svelte';
+	import { ExternalLink, GitPullRequest } from '@lucide/svelte';
 	import type { Proposal } from '#lib/api.js';
 	import { approvalLine, checksPill } from '#lib/review.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';

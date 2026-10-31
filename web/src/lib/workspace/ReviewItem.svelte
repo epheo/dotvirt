@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Server, TriangleAlert } from 'lucide-svelte';
+	import { Server, TriangleAlert } from '@lucide/svelte';
 	import {
 		api,
 		vmKey,

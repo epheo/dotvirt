@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Folder, GitPullRequest, Layers, LayoutGrid, Network, Pencil } from 'lucide-svelte';
+	import { Folder, GitPullRequest, Layers, LayoutGrid, Network, Pencil } from '@lucide/svelte';
 	import type { Project } from '#lib/api.js';
 	import { changesHref } from '#lib/nav.js';
 	import { drafts, PLATFORM_PROJECT } from '#lib/state/drafts.svelte.js';

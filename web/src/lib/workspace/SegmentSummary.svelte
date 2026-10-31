@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { VM } from '#lib/api.js';
 	import { POD_NETWORK } from '#lib/lenses.js';
-	import { GitPullRequest, Pencil, Trash2 } from 'lucide-svelte';
+	import { GitPullRequest, Pencil, Trash2 } from '@lucide/svelte';
 	import { api } from '#lib/api.js';
 	import { networkByRef, kindLabel } from '#lib/networks.js';
 	import {
