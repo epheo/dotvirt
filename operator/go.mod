@@ -4,10 +4,10 @@ go 1.27.3
 
 require (
 	github.com/epheo/dotvirt v0.0.0
-	k8s.io/api v0.35.9
+	k8s.io/api v0.35.10
 	k8s.io/apiextensions-apiserver v0.35.9
-	k8s.io/apimachinery v0.35.9
-	k8s.io/client-go v0.35.9
+	k8s.io/apimachinery v0.35.10
+	k8s.io/client-go v0.35.10
 	sigs.k8s.io/controller-runtime v0.23.3
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.3
 )
