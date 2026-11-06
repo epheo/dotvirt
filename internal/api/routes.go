@@ -119,6 +119,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 
 	// Draft changeset routes (all project-scoped).
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/edit", s.handleEdit)
+	mux.HandleFunc("POST /api/vms/{namespace}/{name}/edit/preview", s.handleEditPreview)
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/delete", s.handleDelete)
 	mux.HandleFunc("POST /api/vms", s.handleCreate)
 	mux.HandleFunc("GET /api/draft", s.handleDraftGet)

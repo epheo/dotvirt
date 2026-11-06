@@ -35,6 +35,21 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 	respond(w, result, err)
 }
 
+// handleEditPreview answers what staging an edit would change, without staging
+// it. Same gates as handleEdit: only someone who may stage asks.
+func (s *Server) handleEditPreview(w http.ResponseWriter, r *http.Request) {
+	sc, ns, name, ok := s.vmScope(w, r)
+	if !ok || !s.authorize(w, r, sc, verbUpdate, ssarVM, ns) {
+		return
+	}
+	edit, ok := decode[model.VMEdit](w, r)
+	if !ok {
+		return
+	}
+	changes, err := s.draft.PreviewEdit(sc.proj, ns, name, edit)
+	respond(w, changes, err)
+}
+
 // handleCreate stages a new VM. The path carries no namespace, so we peek the
 // spec's namespace to pick the target project.
 func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {

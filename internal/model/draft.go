@@ -162,6 +162,9 @@ type DraftItem struct {
 	// BaseYAML is the manifest before an edit, so the review can show the two
 	// as a text diff; empty for a create, a delete, or a field-level VM edit.
 	BaseYAML string `json:"baseYAML,omitempty"`
+	// Edit is a field-level VM edit as staged. Staging replaces the entry, so
+	// an editor that changes one field sends this plus its own change.
+	Edit *VMEdit `json:"edit,omitempty"`
 }
 
 // DraftView is the whole draft changeset as semantic items. Warning is DERIVED

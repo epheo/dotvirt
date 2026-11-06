@@ -173,6 +173,11 @@ export interface DraftItem {
    * as a text diff; empty for a create, a delete, or a field-level VM edit.
    */
   baseYAML?: string;
+  /**
+   * Edit is a field-level VM edit as staged. Staging replaces the entry, so
+   * an editor that changes one field sends this plus its own change.
+   */
+  edit?: VMEdit;
 }
 /**
  * DraftView is the whole draft changeset as semantic items. Warning is DERIVED

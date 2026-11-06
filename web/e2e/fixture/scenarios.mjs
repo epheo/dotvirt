@@ -669,7 +669,8 @@ const drift = {
 					kind: 'edit',
 					namespace: 'web-prod',
 					name: 'web-1',
-					changes: [{ field: 'memory', action: 'change', from: '4Gi', to: '8Gi' }],
+					changes: [{ field: 'Memory', action: 'change', from: '4Gi', to: '8Gi', restart: true }],
+					edit: { memory: '8Gi' },
 				},
 			],
 			warning:
@@ -683,7 +684,7 @@ const drift = {
 	vmDrift: {
 		'web-prod/web-1': {
 			drift: true,
-			changes: [{ field: 'cpuCores', action: 'change', from: '2', to: '4' }],
+			changes: [{ field: 'CPU', action: 'change', from: '2 vCPU', to: '4 vCPU' }],
 		},
 	},
 };
