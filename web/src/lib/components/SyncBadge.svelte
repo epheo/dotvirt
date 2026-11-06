@@ -17,7 +17,7 @@
 	const VIEWS = {
 		Synced: { tone: 'ok', label: 'Synced' },
 		OutOfSync: { tone: 'danger', label: 'Out of sync' },
-		NotTracked: { tone: 'neutral', label: 'Not tracked' },
+		NotTracked: { tone: 'neutral', label: 'Not in git' },
 		Pending: { tone: 'info', label: 'Pending sync' },
 		Unknown: { tone: 'neutral', label: 'Unknown' },
 	} satisfies Record<SyncStatus, { tone: Tone; label: string }>;
@@ -47,7 +47,7 @@
 		></button>
 	{:else if sync === 'NotTracked'}
 		<span
-			title="Not tracked in git"
+			title="Not in git"
 			class="inline-block h-1.5 w-1.5 rounded-full {TONE_DOT.neutral} align-middle"
 		></span>
 	{:else if sync === 'Pending'}

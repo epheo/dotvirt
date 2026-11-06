@@ -10,9 +10,9 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('standing sync failure surfaces on bell, tree and project', async ({ page }) => {
-	// The issues bell counts the standing problems (project failure + bad VM).
+	// The header counts the standing problems (project failure + bad VM) in words.
 	const bell = page.locator('button[title^="Issues"]');
-	await expect(bell.locator('span').last()).toHaveText(/\d+/);
+	await expect(bell).toHaveText(/\d+ issues?/);
 	await bell.click();
 	await expect(page.getByText('Sync failed').first()).toBeVisible();
 	await expect(page.getByText(/admission webhook/).first()).toBeVisible();
@@ -49,7 +49,7 @@ test('Pending is a waiting state, never a failure', async ({ page }) => {
 	await main.getByRole('link', { name: 'VMs', exact: true }).click();
 	const row = main.locator('tbody tr', { hasText: 'db-2' });
 	await expect(row).toContainText('Pending');
-	await expect(row).not.toContainText('Not tracked');
+	await expect(row).not.toContainText('Not in git');
 });
 
 test('untracked VM in a healthy project offers adoption where the user is', async ({ page }) => {
@@ -60,7 +60,7 @@ test('untracked VM in a healthy project offers adoption where the user is', asyn
 	await expect(main.getByRole('button', { name: 'Adopt into git' })).toBeVisible();
 	// And the VM row itself says what it is.
 	await main.getByRole('link', { name: 'VMs', exact: true }).click();
-	await expect(main.locator('tbody tr', { hasText: 'legacy-1' })).toContainText('Not tracked');
+	await expect(main.locator('tbody tr', { hasText: 'legacy-1' })).toContainText('Not in git');
 });
 
 test('prune risk warns before anything merges', async ({ page }) => {

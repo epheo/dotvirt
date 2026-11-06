@@ -8,12 +8,14 @@
 	import {
 		api,
 		onUnauthorized,
+		type Alert,
 		streamInventory,
 		Unauthorized,
 		withRetry,
 		type StreamStatus,
 	} from '#lib/api.js';
 	import { friendlyError } from '#lib/format.js';
+	import { resource } from '#lib/resource.svelte.js';
 	import { INVENTORY_SECTIONS, sectionOf, vmHref, type Section } from '#lib/nav.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { catalog } from '#lib/state/catalog.svelte.js';
@@ -164,6 +166,18 @@
 		return () => {
 			live = false;
 		};
+	});
+
+	// Firing cluster alerts join the issues plane: one cached instant query
+	// server-side, polled slowly while signed in. A failed read marks the feed
+	// unavailable rather than reading as "none firing".
+	const alarms = resource<Alert[]>(
+		() => (session.user ? 'on' : ''),
+		(k) => (k ? api.alarms() : Promise.resolve([])),
+		{ poll: () => (session.user ? 30000 : 0) },
+	);
+	$effect(() => {
+		inventory.alerts = alarms.failed ? null : (alarms.data ?? []);
 	});
 
 	// Recompute the draft summary only when the SET of projects or PR lanes

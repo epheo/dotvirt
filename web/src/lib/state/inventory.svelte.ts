@@ -1,6 +1,7 @@
 import {
 	api,
 	Unauthorized,
+	type Alert,
 	withRetry,
 	type Inventory,
 	type NetworkInventory,
@@ -11,7 +12,7 @@ import {
 	type VM,
 } from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
-import { deriveIssues } from '#lib/issues.js';
+import { deriveIssues, deriveSuggestions } from '#lib/issues.js';
 import { prKey } from '#lib/review.js';
 import { share } from '#lib/share.js';
 
@@ -61,9 +62,16 @@ class InventoryStore {
 	// All VMs across the 3-level tree (project -> namespace -> vm).
 	readonly allVMs = $derived(this.projects.flatMap((p) => p.namespaces.flatMap((n) => n.vms)));
 	readonly vmCount = $derived(this.allVMs.length);
-	// Standing problems (the issues plane), derived once per frame for the
-	// header bell, the tree badges and the Summary card.
-	readonly issues = $derived(deriveIssues(this.inventory));
+	// Firing cluster alerts, polled out of band; null = the alerts feed is
+	// unavailable (metrics off or unreachable), [] = none firing.
+	alerts = $state.raw<Alert[] | null>([]);
+	// Standing problems and firing alerts (the issues plane), derived once per
+	// frame for the header count, the tree badges and the Summary card.
+	readonly issues = $derived(
+		deriveIssues(this.inventory, { alerts: this.alerts ?? [], canRepair: this.canNamespace }),
+	);
+	// What is worth doing but not wrong: adoptable namespaces and VMs.
+	readonly suggestions = $derived(deriveSuggestions(this.inventory, (ns) => this.canAuthor(ns)));
 	// Open PRs across the user's projects ride the live inventory stream, so a PR
 	// merged anywhere repaints the dock + Changes pane with no manual refresh.
 	readonly proposals = $derived(this.inventory?.proposals ?? []);
@@ -163,6 +171,7 @@ class InventoryStore {
 		this.polInv = null;
 		this.taskFeed = [];
 		this.tasksError = '';
+		this.alerts = [];
 		this.netError = '';
 		this.error = '';
 		this.stream = 'connecting';

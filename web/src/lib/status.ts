@@ -2,7 +2,7 @@
 // and the domain mappers that translate VM power, VMI phase, alert severity,
 // and task-dock rows onto them. Class maps are literal records - Tailwind only
 // sees static strings.
-import type { Power, ProjectSync } from '#lib/api.js';
+import type { Power, ProjectSync, VM } from '#lib/api.js';
 import { opStands } from '#lib/gitops.js';
 
 export type Tone = 'ok' | 'warn' | 'danger' | 'info' | 'neutral';
@@ -49,6 +49,41 @@ export function phaseTone(phase?: string, paused = false): Tone {
 	return 'info'; // Provisioning, Starting, Stopping, Migrating, WaitingFor...
 }
 
+// How a VM is, for the one State cell: its run state as a dot and a word, plus
+// at most one exception, the worst that applies. A healthy VM carries none, so
+// only rows that need a person draw color and words.
+export type VMStateView = {
+	tone: Tone;
+	word: string;
+	// detail is the cluster's own words, shown beside the label; hint only
+	// rides the tooltip.
+	exception?: { tone: Tone; label: string; detail?: string; hint?: string };
+};
+
+export function vmState(vm: VM): VMStateView {
+	const tone = phaseTone(vm.phase, vm.paused);
+	const word = vm.paused ? 'Paused' : (vm.phase ?? (vm.power === 'Off' ? 'Stopped' : '-'));
+	const exception = vm.syncError
+		? { tone: 'danger' as const, label: 'Apply refused', detail: vm.syncError }
+		: vm.health === 'Degraded'
+			? { tone: 'warn' as const, label: 'Degraded' }
+			: vm.sync === 'OutOfSync'
+				? { tone: 'warn' as const, label: 'Differs from git' }
+				: vm.sync === 'NotTracked'
+					? { tone: 'info' as const, label: 'Not in git' }
+					: vm.sync === 'Pending'
+						? { tone: 'info' as const, label: 'Pending sync' }
+						: undefined;
+	return { tone, word, exception };
+}
+
+// Sort weight of a state: the worst of the run state and the exception, so
+// "issues first" floats a crash-looping VM as high as a refused apply.
+export function vmStateRank(v: VMStateView): number {
+	const w = (t?: Tone) => (t === 'danger' ? 3 : t === 'warn' ? 2 : t === 'info' ? 1 : 0);
+	return Math.max(v.tone === 'info' ? 0 : w(v.tone), w(v.exception?.tone));
+}
+
 // Task-dock rows: anything still moving is info (hosts pulse the dot),
 // success lands ok, failures danger, standing drift warn.
 export function taskTone(t: { kind: string; ok?: boolean; active?: boolean }): Tone {
@@ -77,17 +112,6 @@ export function severityTone(severity?: string): Tone {
 // reads "staged", not "healthy".
 export function draftKindTone(kind: string): Tone {
 	return kind === 'delete' ? 'danger' : kind === 'create' ? 'ok' : 'info';
-}
-
-const PHASE_TEXT: Record<string, string> = {
-	running: 'text-ok-ink',
-	paused: 'text-warn-ink',
-	failed: 'text-danger',
-};
-
-// VM-count tiles: lowercase phase rollup key -> text class; the rest stay soft ink.
-export function phaseTextTone(phase: string): string {
-	return PHASE_TEXT[phase] ?? 'text-ink-soft';
 }
 
 // Escalate the color as utilization nears capacity (pct is 0-100).

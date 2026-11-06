@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Inventory, VM } from '#lib/api.js';
-import { deriveIssues, issuesInScope, issueCountByProject } from '#lib/issues.js';
+import {
+	alertLabel,
+	deriveIssues,
+	deriveSuggestions,
+	issuesInScope,
+	issueCountByProject,
+} from '#lib/issues.js';
 
 function vm(over: Partial<VM>): VM {
 	return {
@@ -193,5 +199,108 @@ describe('scope helpers', () => {
 		expect(issues[1].detail).toMatch(/forbidden/);
 		// Platform issues never leak into a project's own scope.
 		expect(issuesInScope(issues, { project: 'p1' })).toEqual([]);
+	});
+});
+
+describe('next steps', () => {
+	it('offers the repo dialog only to callers who may run it', () => {
+		const i = inv([
+			{ name: 'p1', error: 'no usable repo', namespaces: [{ namespace: 'ns-a', vms: [] }] },
+		]);
+		const [repair] = deriveIssues(i, { canRepair: true });
+		expect(repair.action).toEqual({
+			label: 'Attach repo',
+			modal: { kind: 'adoptProject', project: 'p1', namespaces: ['ns-a'], recover: false },
+		});
+		expect(deriveIssues(i)[0].action).toEqual({ label: 'Open project', href: '/compute/p1' });
+	});
+
+	it('reads a lost repo as recoverable, and a converged app as healthy', () => {
+		const lost = inv([
+			{
+				name: 'p1',
+				repo: 'https://forge/p1',
+				gitOps: { sync: 'Unknown', syncError: 'repository not found' },
+				namespaces: [],
+			},
+		]);
+		expect(deriveIssues(lost, { canRepair: true })[0].action.label).toBe('Recover repo');
+		const converged = inv([
+			{
+				name: 'p1',
+				repo: 'https://forge/p1',
+				gitOps: { sync: 'Synced', operation: 'Failed', syncError: 'an old refused apply' },
+				namespaces: [],
+			},
+		]);
+		expect(deriveIssues(converged, { canRepair: true })).toEqual([]);
+	});
+});
+
+describe('alerts', () => {
+	const fleet = inv([
+		{ name: 'p1', namespaces: [{ namespace: 'ns-a', vms: [vm({ phase: 'Running' })] }] },
+	]);
+
+	it('joins firing alerts to the plane at their severity, on the Monitor tab', () => {
+		const issues = deriveIssues(fleet, {
+			alerts: [
+				{
+					name: 'KubeVirtVMIExcessiveMigrations',
+					severity: 'warning',
+					namespace: 'ns-a',
+					vm: 'vm-a',
+					count: 3,
+				},
+				{ name: 'KubeVirtNoAvailableNodesToRunVMs', severity: 'critical' },
+				{ name: 'KubeVirtDeprecatedAPIRequested', severity: 'info' },
+			],
+		});
+		expect(issues.map((x) => [x.severity, x.scope, x.label, x.href, x.project])).toEqual([
+			['danger', 'cluster', 'No available nodes to run VMs', '/compute?tab=monitor', ''],
+			['warn', 'ns-a/vm-a', 'VMI excessive migrations', '/vm/ns-a/vm-a?tab=monitor', 'p1'],
+		]);
+		expect(issues[1].detail).toBe('Cluster alert KubeVirtVMIExcessiveMigrations, firing 3 times');
+		expect(issues[1].action).toEqual({ label: 'Open monitor', href: '/vm/ns-a/vm-a?tab=monitor' });
+	});
+
+	it('keeps a namespace alert inside its namespace scope', () => {
+		const issues = deriveIssues(fleet, {
+			alerts: [{ name: 'KubeVirtVMStuckInErrorState', severity: 'warning', namespace: 'ns-a' }],
+		});
+		expect(issuesInScope(issues, { project: 'p1', namespace: 'ns-a' })).toHaveLength(1);
+		expect(issuesInScope(issues, { project: 'p1', namespace: 'ns-b' })).toHaveLength(0);
+	});
+
+	it('reads alert names as words', () => {
+		expect(alertLabel('KubeVirtVMIExcessiveMigrations')).toBe('VMI excessive migrations');
+		expect(alertLabel('KubeVirtVMStuckInErrorState')).toBe('VM stuck in error state');
+	});
+});
+
+describe('deriveSuggestions', () => {
+	it('suggests adoption, never as an issue, gated like the stage routes', () => {
+		const i: Inventory = {
+			projects: [
+				{
+					name: 'p1',
+					namespaces: [
+						{ namespace: 'ns-a', vms: [vm({ name: 'loose', sync: 'NotTracked' })] },
+						{
+							namespace: 'ns-ro',
+							vms: [vm({ namespace: 'ns-ro', name: 'ro', sync: 'NotTracked' })],
+						},
+					],
+				},
+			],
+			adoptable: [{ namespace: 'legacy', vms: 2 }],
+		};
+		const s = deriveSuggestions(i, (ns) => ns === 'ns-a');
+		expect(s.map((x) => [x.scope, x.label, x.action.label])).toEqual([
+			['legacy', '2 VMs outside any project', 'Adopt'],
+			['ns-a/loose', 'running, not in git', 'Adopt into git'],
+		]);
+		expect(s.every((x) => x.severity === 'info')).toBe(true);
+		expect(deriveIssues(i)).toEqual([]);
 	});
 });
