@@ -88,8 +88,8 @@ test('Changes is a section: the tree scopes the review, a VM opens its own tab',
 	await page.goto('/changes');
 	const aside = page.locator('aside');
 	const main = page.locator('main');
-	// No draft: no Propose button. The section is the place, the button the action.
-	await expect(page.getByRole('link', { name: /Propose \d+ change/ })).toHaveCount(0);
+	// The section is the full view of the pipeline, so the change tray steps aside.
+	await expect(page.getByRole('complementary', { name: 'Changes in flight' })).toHaveCount(0);
 	await expect(aside.getByText('All changes')).toBeVisible();
 	// Both projects' PRs at the root; one project's under its scope, with its
 	// history open without a click.
@@ -111,11 +111,13 @@ test('Changes is a section: the tree scopes the review, a VM opens its own tab',
 	await expect(page).toHaveURL(/\/vm\/web-prod\/web-2\?tab=changes$/);
 	await expect(aside.getByText('All changes')).toBeVisible();
 	await expect(main.getByText('Current version')).toBeVisible();
-	// Restore is the object-level undo: it stages, and the Propose button lands
-	// on that project's lane.
+	// Restore is the object-level undo: it stages, and the tray's lane opens
+	// that project's draft.
 	await main.getByRole('button', { name: 'Restore this version' }).click();
 	await expect(page.getByText(/Restore of web-2 to 99fe210a staged/)).toBeVisible();
-	const propose = page.getByRole('link', { name: /Propose 1 change/ });
+	const propose = page
+		.getByRole('complementary', { name: 'Changes in flight' })
+		.getByRole('link', { name: 'Open in Changes' });
 	await expect(propose).toHaveAttribute('href', '/changes/team-web');
 	await expect(main.getByText(/part of your team-web draft/)).toBeVisible();
 	await propose.click();

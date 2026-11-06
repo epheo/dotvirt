@@ -6,7 +6,6 @@
 		Check,
 		ChevronDown,
 		CircleCheck,
-		ClipboardList,
 		FolderPlus,
 		Monitor,
 		Moon,
@@ -21,11 +20,10 @@
 		User as UserIcon,
 	} from '@lucide/svelte';
 	import { dispatchVMAction } from '#lib/actions.js';
-	import { changesHref, hrefForScope, scopeFromPath, vmHref } from '#lib/nav.js';
+	import { hrefForScope, scopeFromPath, vmHref } from '#lib/nav.js';
 	import { TONE_PILL } from '#lib/status.js';
 	import Button from './Button.svelte';
 	import IssueRow from './IssueRow.svelte';
-	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { theme } from '#lib/state/theme.svelte.js';
@@ -81,13 +79,6 @@
 				break;
 		}
 	}
-
-	// The Propose button: the loop's call to action, present only while the
-	// caller has staged edits to propose. It lands on the one project's lane
-	// when the draft is in one project, else on the inbox. The Changes section
-	// is the place; this is the action.
-	const staged = $derived(drafts.drafts.filter((d) => d.draft.count > 0));
-	const proposeHref = $derived(staged.length === 1 ? changesHref(staged[0].project) : '/changes');
 
 	// The issues count: derived from the live stream and the alerts poll, so it
 	// moves with the same frames the tree and grid repaint on.
@@ -283,16 +274,6 @@
 			</div>
 		{/snippet}
 	</HeaderMenu>
-
-	{#if drafts.count > 0}
-		<a
-			href={proposeHref}
-			title="Review the staged changes and open a pull request"
-			class="flex items-center gap-1.5 rounded border border-side-active px-2.5 py-1 text-xs font-medium text-side-ink hover:bg-side-hover"
-		>
-			<ClipboardList size={13} /> Propose {drafts.count} change{drafts.count === 1 ? '' : 's'}
-		</a>
-	{/if}
 
 	<HeaderMenu align="right" class="ml-auto">
 		{#snippet trigger({ open, toggle })}

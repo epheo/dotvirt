@@ -15,13 +15,13 @@ test('edit stages into the draft and proposes as a PR', async ({ page }) => {
 	await memory.fill('8Gi');
 	await stageChange(page);
 
-	// The Propose button appears with the draft, without a reload, and counts
-	// what it would propose.
-	const review = page.getByRole('link', { name: /Propose \d+ change/ });
-	await expect(review).toHaveText(/Propose 1 change$/);
+	// The change tray unfolds with the draft, without a reload, and counts what
+	// it would propose.
+	const tray = page.getByRole('complementary', { name: 'Changes in flight' });
+	await expect(tray.getByText('1 staged change')).toBeVisible();
 
-	// The route shows the semantic item with its impact, not YAML.
-	await review.click();
+	// The full view shows the semantic item with its impact, not YAML.
+	await tray.getByRole('link', { name: 'Open in Changes' }).click();
 	await expect(page).toHaveURL(/\/changes/);
 	const main = page.locator('main');
 	await expect(main.getByText('web-prod/web-1')).toBeVisible();
@@ -38,6 +38,25 @@ test('edit stages into the draft and proposes as a PR', async ({ page }) => {
 	await expect(main.getByRole('link', { name: /Open PR to approve and merge/ })).toBeVisible();
 });
 
+test('the tray reviews and proposes in a sheet; merge stays in the forge', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await openVM(page, 'web-1');
+	await page.getByRole('button', { name: /Edit Settings/ }).click();
+	await page.getByLabel('Memory').fill('8Gi');
+	await stageChange(page);
+
+	const tray = page.getByRole('complementary', { name: 'Changes in flight' });
+	await tray.getByRole('button', { name: 'Review and propose' }).click();
+	const sheet = page.getByRole('dialog');
+	// Consequences come before the button: the title is written, the restart named.
+	await expect(sheet.getByLabel('Pull request title')).toHaveValue(/Update web-1/);
+	await expect(sheet.getByText(/web-1 restarts once/)).toBeVisible();
+	await sheet.getByRole('button', { name: 'Open pull request' }).click();
+	await expect(page.getByText(/PR #77 opened in team-web/)).toBeVisible();
+	await expect(tray.getByText('1 staged change')).toHaveCount(0);
+});
+
 test('a failed stage shows the backend detail in the dialog', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);
@@ -48,7 +67,11 @@ test('a failed stage shows the backend detail in the dialog', async ({ page }) =
 	await page.getByRole('button', { name: /Edit Settings/ }).click();
 	await page.getByLabel('Memory').fill('16Gi');
 	await stageChange(page);
-	await page.getByRole('link', { name: /Propose \d+ change/ }).click();
+	await page
+		.getByRole('complementary', { name: 'Changes in flight' })
+		.getByRole('link', { name: 'Open in Changes' })
+		.first()
+		.click();
 	const main = page.locator('main');
 	await main.getByLabel('Pull request title').fill('!fail');
 	await main.getByRole('button', { name: 'Propose pull request' }).click();
@@ -64,7 +87,11 @@ test('the propose form shows the default title and body; Tab takes them', async 
 	await page.getByRole('button', { name: /Edit Settings/ }).click();
 	await page.getByLabel('Memory').fill('8Gi');
 	await stageChange(page);
-	await page.getByRole('link', { name: /Propose \d+ change/ }).click();
+	await page
+		.getByRole('complementary', { name: 'Changes in flight' })
+		.getByRole('link', { name: 'Open in Changes' })
+		.first()
+		.click();
 
 	// What a blank propose pushes is visible in place, not a surprise after.
 	const main = page.locator('main');

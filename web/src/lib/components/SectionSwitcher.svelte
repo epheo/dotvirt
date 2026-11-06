@@ -1,13 +1,10 @@
 <script lang="ts">
 	import { ClipboardList, Database, Folder, Library, Network, Server } from '@lucide/svelte';
 	import type { Section } from '#lib/nav.js';
-	import { drafts } from '#lib/state/drafts.svelte.js';
-	import { inventory } from '#lib/state/inventory.svelte.js';
 
 	// The section switcher: six sections, each with its own tree below, all
-	// rendering into the same center workspace. Changes carries a dot when the
-	// caller has work in flight (staged edits, own open PRs); the header's
-	// Propose button carries the count, so the number lives once.
+	// rendering into the same center workspace. Work in flight lives in the
+	// change tray, not on the switcher.
 	let { active }: { active: Section } = $props();
 
 	const SECTIONS: { id: Section; label: string; href: string }[] = [
@@ -18,7 +15,6 @@
 		{ id: 'catalog', label: 'Catalog', href: '/catalog' },
 		{ id: 'changes', label: 'Changes', href: '/changes' },
 	];
-	const inFlight = $derived(drafts.count > 0 || inventory.proposals.some((p) => p.mine));
 </script>
 
 <!-- Two rows of three, a 12px label under each icon: every name reads whole
@@ -39,12 +35,6 @@
 			{:else if s.id === 'catalog'}<Library size={14} class="shrink-0" />
 			{:else}<ClipboardList size={14} class="shrink-0" />{/if}
 			{s.label}
-			{#if s.id === 'changes' && inFlight}
-				<span
-					class="absolute top-1.5 right-2 h-1.5 w-1.5 rounded-full bg-accent-hover"
-					title="Changes in flight"
-				></span>
-			{/if}
 		</a>
 	{/each}
 </nav>

@@ -2,6 +2,7 @@ package changeset
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -301,6 +302,10 @@ func TestDraftWarningDerivedNotStored(t *testing.T) {
 	}
 	if !strings.Contains(view.Warning, "UserDefinedNetwork alpha/backend") {
 		t.Errorf("the unadopted network must keep warning, got %q", view.Warning)
+	}
+	// The review lists the same objects one by one.
+	if want := []model.ObjectRef{{Kind: "UserDefinedNetwork", Namespace: "alpha", Name: "backend"}}; !reflect.DeepEqual(view.Prune, want) {
+		t.Errorf("Prune = %v, want %v", view.Prune, want)
 	}
 }
 

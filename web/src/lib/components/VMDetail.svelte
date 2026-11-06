@@ -2,6 +2,7 @@
 	import {
 		ArrowRightLeft,
 		ChevronDown,
+		GitBranch,
 		Monitor,
 		Pause,
 		Pencil,
@@ -34,14 +35,12 @@
 	import { duration } from '#lib/format.js';
 	import { phaseTone } from '#lib/status.js';
 	import ActionMenu from './ActionMenu.svelte';
-	import Button from './Button.svelte';
 	import Banner from './Banner.svelte';
 	import Console from './Console.svelte';
 	import EffectivePolicyPanel from './EffectivePolicyPanel.svelte';
 	import HeaderMenu from './HeaderMenu.svelte';
 	import TracePanel from './TracePanel.svelte';
 	import MetricsPanel from './MetricsPanel.svelte';
-	import PendingBanner from './PendingBanner.svelte';
 	import Permissions from './Permissions.svelte';
 	import Snapshots from './Snapshots.svelte';
 	import StagedBadge from './StagedBadge.svelte';
@@ -93,12 +92,12 @@
 	// Actions menu. Power is deliberately absent - it is a declarative
 	// (staged, PR-gated) runStrategy change here, and a flat button would read
 	// as immediate. Pause is the instant containment verb instead.
-	const TOOLBAR: { id: VMAction['id']; icon: typeof Monitor; label: string; sep?: boolean }[] = [
+	const TOOLBAR: { id: VMAction['id']; icon: typeof Monitor; label: string }[] = [
+		{ id: 'console', icon: Monitor, label: 'Console' },
+		{ id: 'migrate', icon: ArrowRightLeft, label: 'Migrate' },
 		{ id: 'restart', icon: RotateCw, label: 'Restart' },
 		{ id: 'pause', icon: Pause, label: 'Pause' },
 		{ id: 'unpause', icon: Play, label: 'Unpause' },
-		{ id: 'console', icon: Monitor, label: 'Console', sep: true },
-		{ id: 'migrate', icon: ArrowRightLeft, label: 'Migrate' },
 	];
 	const toolbar = $derived(
 		TOOLBAR.filter((t) => (vm.paused ? t.id !== 'pause' : t.id !== 'unpause')).map((t) => ({
@@ -212,52 +211,66 @@
 					>{vm.instancetype}{/if}
 			</span>
 		</div>
-		<div class="mt-1.5 mb-1 flex flex-wrap items-center gap-0.5">
-			<button
-				onclick={stagePower}
-				disabled={!vm.sourceFile || !canAuthor || powerOp.busy}
-				title={!vm.sourceFile
-					? 'Not in git — adopt this VM first'
-					: canAuthor
-						? 'Stages a power change into a PR — nothing happens until it merges'
-						: readOnly}
-				class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-45 disabled:hover:bg-transparent"
-			>
-				{#if vm.power === 'On'}<Square size={13} /> Power off{:else}<Play size={13} /> Power on{/if}
-			</button>
-			{#each toolbar as t (t.id)}
-				{@const Icon = t.icon}
-				{#if t.sep}<span class="mx-1.5 h-4 w-px bg-line"></span>{/if}
-				<button
-					onclick={() => handleAction(t.action)}
-					disabled={!t.action.enabled(vm) || runtimeOp.busy}
-					title={t.action.title ?? ''}
-					class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-45 disabled:hover:bg-transparent"
+		<!-- Two groups, named: what runs now, and what only stages a change for a
+		     pull request. The git glyph repeats the second on each button. -->
+		<div class="mt-2 mb-2 flex flex-wrap items-end gap-x-3 gap-y-2">
+			<div role="group" aria-label="Runs now" class="flex flex-col gap-1">
+				<span class="px-1 text-[11px] tracking-wide text-ink-muted uppercase">Runs now</span>
+				<div class="flex flex-wrap items-center gap-0.5">
+					{#each toolbar as t (t.id)}
+						{@const Icon = t.icon}
+						<button
+							onclick={() => handleAction(t.action)}
+							disabled={!t.action.enabled(vm) || runtimeOp.busy}
+							title={t.action.title ?? ''}
+							class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-45 disabled:hover:bg-transparent"
+						>
+							<Icon size={13} />
+							{t.label}
+						</button>
+					{/each}
+				</div>
+			</div>
+			<span class="mb-1 h-6 w-px bg-line"></span>
+			<div role="group" aria-label="Goes through a pull request" class="flex flex-col gap-1">
+				<span class="px-1 text-[11px] tracking-wide text-ink-muted uppercase"
+					>Goes through a pull request</span
 				>
-					<Icon size={13} />
-					{t.label}
-				</button>
-			{/each}
-			<span class="mx-1.5 h-4 w-px bg-line"></span>
-			<Button
-				variant="secondary"
-				size="sm"
-				onclick={() => openEdit()}
-				disabled={!vm.sourceFile || !canAuthor}
-				title={!vm.sourceFile
-					? 'Not in git — adopt this VM first'
-					: canAuthor
-						? 'Edit settings'
-						: readOnly}
-			>
-				<Pencil size={13} /> Edit Settings
-			</Button>
+				<div class="flex flex-wrap items-center gap-1.5">
+					<button
+						onclick={stagePower}
+						disabled={!vm.sourceFile || !canAuthor || powerOp.busy}
+						title={!vm.sourceFile
+							? 'Not in git: adopt this VM first'
+							: canAuthor
+								? 'Stages a power change into a PR; nothing happens until it merges'
+								: readOnly}
+						class="flex items-center gap-1.5 rounded border border-accent/30 bg-select-soft px-2.5 py-1 text-xs font-medium text-ink hover:bg-select disabled:opacity-45"
+					>
+						{#if vm.power === 'On'}<Square size={13} /> Power off{:else}<Play size={13} /> Power on{/if}
+						<GitBranch size={12} class="text-accent-ink" />
+					</button>
+					<button
+						onclick={() => openEdit()}
+						disabled={!vm.sourceFile || !canAuthor}
+						title={!vm.sourceFile
+							? 'Not in git: adopt this VM first'
+							: canAuthor
+								? 'Edit settings; changes stage into a PR'
+								: readOnly}
+						class="flex items-center gap-1.5 rounded border border-accent/30 bg-select-soft px-2.5 py-1 text-xs font-medium text-ink hover:bg-select disabled:opacity-45"
+					>
+						<Pencil size={13} /> Edit Settings
+						<GitBranch size={12} class="text-accent-ink" />
+					</button>
+				</div>
+			</div>
 			<HeaderMenu align="right" panel={false}>
 				{#snippet trigger({ toggle })}
 					<button
 						onclick={toggle}
 						disabled={runtimeOp.busy}
-						title="Everything else — snapshots, clone, adopt, delete; config changes go through a PR"
+						title="Everything else: snapshots, clone, adopt, delete; config changes go through a PR"
 						class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-50"
 					>
 						Actions <ChevronDown size={13} />
@@ -287,8 +300,6 @@
 				)} ago{/if}
 		</Banner>
 	{/if}
-
-	<PendingBanner {vm} />
 
 	<div class="min-h-0 flex-1 overflow-y-auto p-4">
 		{#if tab === 'summary'}

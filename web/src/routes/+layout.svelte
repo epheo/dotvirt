@@ -23,9 +23,11 @@
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 	import { lastSection } from '#lib/state/nav.svelte.js';
 	import { session } from '#lib/state/session.svelte.js';
+	import { tray } from '#lib/state/tray.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import AppContextMenus from '#lib/components/AppContextMenus.svelte';
 	import Button from '#lib/components/Button.svelte';
+	import ChangeTray from '#lib/components/ChangeTray.svelte';
 	import AppHeader from '#lib/components/AppHeader.svelte';
 	import AppModals from '#lib/components/AppModals.svelte';
 	import Banner from '#lib/components/Banner.svelte';
@@ -68,6 +70,7 @@
 			reviewCache.reset();
 			ui.reset();
 			catalog.reset();
+			tray.reset();
 		}
 	});
 
@@ -274,8 +277,9 @@
 					{/if}
 				</div>
 			</aside>
-			<main class="flex min-w-0 flex-1 flex-col overflow-hidden bg-panel">
+			<main class="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-panel">
 				{@render children()}
+				<ChangeTray />
 			</main>
 		</div>
 

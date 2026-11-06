@@ -160,7 +160,11 @@ test('bulk selection stages a power change per VM', async ({ page }) => {
 	await page.getByRole('button', { name: 'Power Off (staged)' }).click();
 	// Deliberate skip: web-2 is already Off, so only web-1 stages - a bulk op
 	// must not write no-op edits into the draft.
-	await page.getByRole('link', { name: /Propose \d+ change/ }).click();
+	await page
+		.getByRole('complementary', { name: 'Changes in flight' })
+		.getByRole('link', { name: 'Open in Changes' })
+		.first()
+		.click();
 	const staged = page.locator('main [data-project]');
 	await expect(staged).toHaveCount(1);
 	await expect(staged.first()).toContainText('web-1');
@@ -198,7 +202,11 @@ test('a drafts refresh keeps the half-typed PR title', async ({ page }) => {
 	await page.getByRole('button', { name: /Edit Settings/ }).click();
 	await page.getByLabel('Memory').fill('8Gi');
 	await stageChange(page);
-	await page.getByRole('link', { name: /Propose \d+ change/ }).click();
+	await page
+		.getByRole('complementary', { name: 'Changes in flight' })
+		.getByRole('link', { name: 'Open in Changes' })
+		.first()
+		.click();
 
 	const main = page.locator('main');
 	const title = main.getByLabel('Pull request title');

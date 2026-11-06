@@ -54,7 +54,11 @@ test('trouble states', async ({ page }) => {
 	await page.locator('button[title^="Issues"]').click();
 	await shot(page, 'drift-issues-bell');
 	await page.keyboard.press('Escape');
-	await page.getByRole('link', { name: /Propose \d+ change/ }).click();
+	await page
+		.getByRole('complementary', { name: 'Changes in flight' })
+		.getByRole('link', { name: 'Open in Changes' })
+		.first()
+		.click();
 	await shot(page, 'drift-changes-prune-warning');
 
 	await setScenario(page, 'degraded');

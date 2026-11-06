@@ -186,6 +186,12 @@ export interface DraftView {
   items: DraftItem[];
   warning?: string;
   /**
+   * Prune lists every object the next merged change lets ArgoCD delete: live,
+   * no longer declared, and not spoken for by the draft itself. The review
+   * asks for an explicit yes before proposing when it is non-empty.
+   */
+  prune?: ObjectRef[];
+  /**
    * What an untitled, unannotated propose pushes, so the form can show it and
    * let the user accept or edit it instead of guessing.
    */
