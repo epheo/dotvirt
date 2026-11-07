@@ -20,7 +20,9 @@ test('every section renders the full platform', async ({ page }) => {
 	await expect(main.getByText('Top consumers').first()).toBeVisible();
 
 	await page.goto('/compute?tab=vms');
-	await expect(main.locator('tbody tr').first()).toBeVisible();
+	await expect(main.getByRole('navigation', { name: 'Pages' })).toContainText(
+		'Showing 1-50 of 2,846',
+	);
 
 	await page.goto('/hosts');
 	await expect(main.locator('tbody tr', { hasText: 'host-17' })).toContainText('Maintenance');
