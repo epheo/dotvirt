@@ -17,8 +17,8 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/selection"
@@ -105,6 +105,13 @@ func TestEnvtest(t *testing.T) {
 			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "clusterroles"}, false},
 			{authzv1.ResourceAttributes{Verb: "update", Group: "apps", Resource: "deployments", Namespace: "dotvirt"}, false},
 			{authzv1.ResourceAttributes{Verb: "watch", Resource: "configmaps"}, false},
+			// Deletes are scoped to the names the install renders.
+			{authzv1.ResourceAttributes{Verb: "delete", Resource: "secrets", Namespace: "argocd", Name: install.AppsetSecretName}, true},
+			{authzv1.ResourceAttributes{Verb: "delete", Resource: "secrets", Namespace: "argocd", Name: "argocd-secret"}, false},
+			{authzv1.ResourceAttributes{Verb: "deletecollection", Resource: "secrets", Namespace: "argocd"}, false},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: "dotvirt"}, true},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: "cluster-admin"}, false},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "argoproj.io", Resource: "applications", Namespace: "argocd", Name: "some-tenant"}, false},
 		} {
 			res, err := kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx,
 				&authzv1.SelfSubjectAccessReview{Spec: authzv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &c.attrs}}, metav1.CreateOptions{})
@@ -214,26 +221,48 @@ func TestEnvtest(t *testing.T) {
 
 	t.Run("deletion cleans up as the operator", func(t *testing.T) {
 		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
+		// A name only an older version rendered: the name-scoped delete grant
+		// refuses it, which must not wedge deletion.
+		legacy := &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-legacy", Labels: install.Labels(dv)},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "dotvirt"},
+		}
+		mustCreate(t, admin, legacy)
 		if err := admin.Delete(ctx, dv); err != nil {
 			t.Fatal(err)
 		}
 		eventually(t, "CR gone", func() bool {
 			return apierrors.IsNotFound(admin.Get(ctx, client.ObjectKeyFromObject(dv), &dotvirtv1alpha1.Dotvirt{}))
 		})
-		var crbs rbacv1.ClusterRoleBindingList
-		if err := admin.List(ctx, &crbs, client.MatchingLabels{install.InstanceLabel: "x"}); err != nil {
-			t.Fatal(err)
+		left := map[string]bool{}
+		for _, list := range []client.ObjectList{
+			&rbacv1.ClusterRoleBindingList{},
+			&corev1.SecretList{},
+			&corev1.ConfigMapList{},
+			&appsv1.DeploymentList{},
+			&corev1.ServiceList{},
+			&corev1.ServiceAccountList{},
+			unstructuredList(install.ArgoGVK("AppProject"))(),
+			unstructuredList(install.ArgoGVK("ApplicationSet"))(),
+		} {
+			if err := admin.List(ctx, list, client.MatchingLabels{install.InstanceLabel: dv.Name}); err != nil {
+				t.Fatal(err)
+			}
+			items, err := apimeta.ExtractList(list)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, item := range items {
+				obj := item.(client.Object)
+				// The install namespace's state is ownerRef-GC'd, and envtest runs no GC.
+				if _, isSecret := obj.(*corev1.Secret); isSecret && obj.GetNamespace() == dv.Namespace {
+					continue
+				}
+				left[obj.GetNamespace()+"/"+obj.GetName()] = true
+			}
 		}
-		if len(crbs.Items) != 0 {
-			t.Errorf("instance ClusterRoleBindings left: %d", len(crbs.Items))
-		}
-		ul := &unstructured.UnstructuredList{}
-		ul.SetGroupVersionKind(install.ArgoGVK("ApplicationSetList"))
-		if err := admin.List(ctx, ul, client.InNamespace("argocd"), client.MatchingLabels{install.InstanceLabel: "x"}); err != nil {
-			t.Fatal(err)
-		}
-		if len(ul.Items) != 0 {
-			t.Errorf("instance ApplicationSets left: %d", len(ul.Items))
+		if len(left) != 1 || !left["/"+legacy.Name] {
+			t.Errorf("left after deletion: %v, want only the refused legacy binding", left)
 		}
 	})
 }

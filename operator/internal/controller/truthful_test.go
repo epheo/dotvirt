@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,10 +15,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
@@ -437,7 +442,7 @@ func TestStatusBaseIsReadUncached(t *testing.T) {
 	if err := c.Status().Update(context.Background(), lastWrite); err != nil {
 		t.Fatal(err)
 	}
-	lagging := interceptor.NewClient(c.(client.WithWatch), interceptor.Funcs{
+	lagging := interceptor.NewClient(c, interceptor.Funcs{
 		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 			if out, ok := obj.(*dotvirtv1alpha1.Dotvirt); ok {
 				cached.DeepCopyInto(out)
@@ -451,5 +456,87 @@ func TestStatusBaseIsReadUncached(t *testing.T) {
 	reconcileOnce(t, r, dv)
 	if got := getCR(t, c, dv); got.Status.Phase != dotvirtv1alpha1.PhaseReady {
 		t.Errorf("phase = %q, want Ready: the diff ran against a stale base", got.Status.Phase)
+	}
+}
+
+// Prune and the finalizer delete one object at a time under a delete grant that
+// names each object (rbac_markers.go). Every object prune may sweep, across the
+// installs that render the most, must be named there and nothing may be deleted
+// cluster-wide or by collection: an unnamed object is skipped and left behind.
+func TestDeleteGrantCoversEveryRenderedName(t *testing.T) {
+	granted := map[string]bool{}
+	for _, role := range readClusterRoles(t, filepath.Join("..", "..", "config", "rbac", "role.yaml")) {
+		for _, rule := range role.Rules {
+			if slices.Contains(rule.Verbs, "deletecollection") {
+				t.Errorf("deletecollection granted on %v", rule.Resources)
+			}
+			if !slices.Contains(rule.Verbs, "delete") {
+				continue
+			}
+			if len(rule.ResourceNames) == 0 {
+				t.Errorf("delete on %v is not scoped by name", rule.Resources)
+			}
+			for _, g := range rule.APIGroups {
+				for _, res := range rule.Resources {
+					for _, name := range rule.ResourceNames {
+						granted[g+"/"+res+"/"+name] = true
+					}
+				}
+			}
+		}
+	}
+	scheme := testScheme(t)
+	scopes := map[schema.GroupKind]pruneScope{}
+	for _, sc := range pruneScopes() {
+		gvk, err := apiutil.GVKForObject(sc.list(), scheme)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scopes[schema.GroupKind{Group: gvk.Group, Kind: strings.TrimSuffix(gvk.Kind, "List")}] = sc
+	}
+
+	forgeDown := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer forgeDown.Close()
+	byo, creds := byoForgeCR(forgeDown.URL)
+	withIngress := managedForgeCR()
+	withIngress.Spec.Ingress.Host = "dotvirt.example"
+	for _, pass := range []struct {
+		name     string
+		dv       *dotvirtv1alpha1.Dotvirt
+		objs     []client.Object
+		platform platform.Platform
+		dryRun   bool
+	}{
+		// Real: the appset mirror and repo-creds Secrets render outside dry-run only.
+		{"BYO forge on OpenShift", byo, []client.Object{creds}, platform.OpenShift, false},
+		{"managed forge on OpenShift", managedForgeCR(), nil, platform.OpenShift, true},
+		{"managed forge behind Ingresses", withIngress, nil, platform.Kubernetes, true},
+	} {
+		var applied []objKey
+		c := testBuilder(t).WithObjects(append(pass.objs, pass.dv)...).WithInterceptorFuncs(interceptor.Funcs{
+			Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+				gvk, err := apiutil.GVKForObject(obj, cl.Scheme())
+				if err != nil {
+					return err
+				}
+				applied = append(applied, objKey{gvk.GroupKind(), obj.GetNamespace(), obj.GetName()})
+				return cl.Patch(ctx, obj, patch, opts...)
+			},
+		}).Build()
+		r := newReconciler(c, depsOK)
+		r.Platform, r.DryRun = pass.platform, pass.dryRun
+		reconcileOnce(t, r, pass.dv)
+		for _, k := range applied {
+			sc, prunable := scopes[k.gk]
+			if !prunable || (sc.where == writtenNS && k.namespace == pass.dv.Namespace) {
+				continue
+			}
+			resource, _ := apimeta.UnsafeGuessKindToResource(k.gk.WithVersion(""))
+			if !granted[k.gk.Group+"/"+resource.Resource+"/"+k.name] {
+				t.Errorf("%s: %s %s/%s is rendered, but the delete grant does not name it", pass.name, k.gk.Kind, k.namespace, k.name)
+			}
+		}
 	}
 }
