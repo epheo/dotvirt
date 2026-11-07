@@ -56,13 +56,10 @@ func (s *Snapshot) Trace(src TraceWorkload, dst *TraceWorkload, dstIP, protocol 
 		return res
 	}
 
-	steps, cluster, vlan := s.externalConnectivity(src, dstIP)
+	steps, decided, vlan := s.externalConnectivity(src, dstIP)
 	res.Steps = append(res.Steps, steps...)
-	if !cluster {
-		res.Verdict = "Unreachable"
-		if vlan {
-			res.Verdict = "Conditional"
-		}
+	if decided != "" {
+		res.Verdict = decided
 		return res
 	}
 	// Both must pass: OVN-K runs the admin, project and baseline egress rules
@@ -390,10 +387,11 @@ func (s *Snapshot) connectivity(src, dst TraceWorkload) (bool, []model.TraceStep
 
 // externalConnectivity frames the egress path. The cluster controls filter
 // only the primary NIC (the pod network, or a default multus binding that is
-// not localnet); a VLAN NIC reaches the fabric around all of them. cluster
-// reports a primary NIC, vlan any VLAN NIC.
-func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string) (steps []model.TraceStep, cluster, vlan bool) {
-	cluster = src.PodNet || (src.DefaultNet != "" && !s.isLocalnet(src.DefaultNet))
+// not localnet); a VLAN NIC reaches the fabric around all of them. decided is
+// the verdict when no primary NIC exists, so no cluster control sees the flow;
+// vlan reports a VLAN NIC, which leaves a cluster Deny inconclusive.
+func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string) (steps []model.TraceStep, decided string, vlan bool) {
+	cluster := src.PodNet || (src.DefaultNet != "" && !s.isLocalnet(src.DefaultNet))
 	refs := src.Nets
 	if src.DefaultNet != "" && !cluster {
 		refs = append([]string{src.DefaultNet}, src.Nets...)
@@ -411,12 +409,16 @@ func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string) (steps 
 	case cluster:
 		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Reachable",
 			Note: "Cluster egress path to " + dstIP + ", evaluated against the source's egress controls."})
-	case vlan:
+	case len(refs) > 0:
+		// A secondary segment has no cluster egress, but a VLAN, or a router
+		// on the segment, may still carry the flow.
+		decided = "Conditional"
 		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Bypass", Conditional: true,
-			Note: src.Name + " has no primary network: traffic to " + dstIP + " leaves only through a VLAN segment, which no cluster control filters. The physical network decides."})
+			Note: src.Name + " has no primary network: traffic to " + dstIP + " can leave only through a secondary segment, which no cluster control filters. The network behind it decides."})
 	default:
+		decided = "Unreachable"
 		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: true,
-			Note: src.Name + " has no primary network attachment."})
+			Note: src.Name + " has no network attachment."})
 	}
-	return append(steps, segments...), cluster, vlan
+	return append(steps, segments...), decided, vlan
 }

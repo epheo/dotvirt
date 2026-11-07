@@ -641,8 +641,9 @@ func TestTraceProjectSelectionUnresolved(t *testing.T) {
 }
 
 // An external flow is filtered only on the primary NIC. With no primary, a
-// VLAN NIC is the only way out and no cluster control applies; beside a
-// primary, a cluster Deny is not final; with no NIC at all nothing leaves.
+// secondary NIC is the only way out and no cluster control applies; beside a
+// primary, a VLAN NIC leaves a cluster Deny inconclusive; with no NIC at all
+// nothing leaves.
 func TestTraceExternalVLAN(t *testing.T) {
 	s := New(nil, nil)
 	add(t, s.nad, map[string]any{
@@ -674,6 +675,12 @@ func TestTraceExternalVLAN(t *testing.T) {
 	both.Nets = []string{"team-a/vlan10"}
 	if res := s.Trace(both, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Conditional" {
 		t.Fatalf("primary plus VLAN under a gateway deny: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+
+	internal := wl("team-a", "backend", nil, nil)
+	internal.PodNet, internal.Nets = false, []string{"team-a/db-segment"}
+	if res := s.Trace(internal, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Conditional" {
+		t.Fatalf("secondary-only source, a router may carry it: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 
 	bare := wl("team-a", "island", nil, nil)
