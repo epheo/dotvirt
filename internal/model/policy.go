@@ -79,8 +79,9 @@ type PolicyBinding struct {
 type EffectivePolicy struct {
 	Namespace string `json:"namespace"`
 	VM        string `json:"vm,omitempty"`
-	// Labels pod selectors were matched against. Live: the running VMI's (what
-	// the virt-launcher pod carries); otherwise the manifest template's.
+	// Labels pod selectors were matched against: the virt-launcher pod's, the
+	// VMI's own plus KubeVirt's fixed set. Live: from the running VMI;
+	// otherwise the template's, without the instance UID a start assigns.
 	Labels     map[string]string `json:"labels,omitempty"`
 	LabelsLive bool              `json:"labelsLive,omitempty"`
 
