@@ -63,7 +63,7 @@ func (h *Hub) Handler(w http.ResponseWriter, r *http.Request) {
 
 	// Group connections by the token's hash (same key the API caches use), so two
 	// tabs of one user share a build - and the raw bearer never becomes a map key.
-	c := &conn{id: id, key: restfactory.TokenKey(id.Token), out: make(chan []byte, 1), quit: make(chan struct{})}
+	c := newConn(id, restfactory.TokenKey(id.Token))
 	h.add(c)
 	defer h.remove(c)
 
@@ -92,6 +92,7 @@ func readPump(wsconn *websocket.Conn, done chan<- struct{}) {
 // mailbox (always the latest frame the reconciler delivered) and writes it, so a
 // slow client converges to current state without dropped frames. The ping keeps the
 // TCP connection alive (it is NOT a content heartbeat - content arrives on change).
+// An evicted connection gets a close frame and ends.
 func writePump(wsconn *websocket.Conn, c *conn, done <-chan struct{}) {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
@@ -101,6 +102,10 @@ func writePump(wsconn *websocket.Conn, c *conn, done <-chan struct{}) {
 	for {
 		select {
 		case <-done:
+			return
+		case <-c.evict:
+			_ = wsconn.SetWriteDeadline(time.Now().Add(writeWait))
+			_ = wsconn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "session rejected"))
 			return
 		case data := <-c.out:
 			_ = wsconn.SetWriteDeadline(time.Now().Add(writeWait))

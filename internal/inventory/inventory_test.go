@@ -74,7 +74,7 @@ func TestBuildFiltersAndEnriches(t *testing.T) {
 	bare := seedRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	repos := git.NewRepoSet(ctx, "", nil, false, nil, time.Hour)
+	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
 
 	in := Inputs{
 		Branch: "main",
@@ -130,7 +130,7 @@ func TestBuildAttachesProjectGitOps(t *testing.T) {
 	bare := seedRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	repos := git.NewRepoSet(ctx, "", nil, false, nil, time.Hour)
+	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
 
 	in := Inputs{
 		Branch: "main",
@@ -162,7 +162,7 @@ func TestBuildSurfacesClusterOnlyVMs(t *testing.T) {
 	bare := seedRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	repos := git.NewRepoSet(ctx, "", nil, false, nil, time.Hour)
+	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
 
 	in := Inputs{
 		Branch:   "main",
@@ -191,7 +191,7 @@ func TestBuildDriftEnabledMarksGitVMPending(t *testing.T) {
 	bare := seedRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	repos := git.NewRepoSet(ctx, "", nil, false, nil, time.Hour)
+	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
 
 	in := Inputs{
 		Branch: "main",
@@ -256,7 +256,7 @@ func TestAdoptable(t *testing.T) {
 func TestBuildRepoUnavailableStillShowsLiveVMs(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	repos := git.NewRepoSet(ctx, "", nil, false, nil, time.Hour)
+	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
 
 	in := Inputs{
 		Branch:   "main",
@@ -285,7 +285,7 @@ func TestBuildRepoErrorHidesDetail(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "secret-path", "gone.git")
 	in := Inputs{
 		Branch:   "main",
-		Repos:    git.NewRepoSet(ctx, "", nil, false, nil, time.Hour),
+		Repos:    git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour),
 		Projects: []project.ProjectInfo{{Name: "team-a", Repo: missing, Namespaces: []string{"tenant-a"}}},
 	}
 	p := Build(in).Projects[0]
