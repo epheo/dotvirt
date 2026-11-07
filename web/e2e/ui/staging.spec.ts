@@ -135,7 +135,12 @@ test('a setting edits in place: consequence first, fields add up, one unstages a
 
 	// A second field joins the staged edit instead of replacing it.
 	await page.getByRole('button', { name: 'Change Memory' }).click();
-	await page.getByRole('textbox', { name: 'Memory' }).fill('8Gi');
+	const memory = page.getByRole('textbox', { name: 'Memory' });
+	// Room on the hosts shows before staging; a size no host fits is called out.
+	await memory.fill('100Gi');
+	await expect(page.getByText(/No host has 100 GiB free\. Most room: worker-2/)).toBeVisible();
+	await memory.fill('8Gi');
+	await expect(page.getByText(/Fits on 2 of 2 hosts\./)).toBeVisible();
 	await page.getByRole('button', { name: 'Stage', exact: true }).click();
 	const tray = page.getByRole('complementary', { name: 'Changes in flight' });
 	await expect(tray.getByText(/cpu 2 to 4/)).toBeVisible();
