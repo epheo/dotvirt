@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strings"
 
 	"github.com/epheo/dotvirt/internal/model"
 )
@@ -126,25 +125,23 @@ func (s *Server) handleNodeEvacuate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := model.Evacuation{Failures: []model.EvacuationFailure{}}
-	for k, live := range s.state.LiveVMs() {
-		if live.NodeName != node || live.Phase != "Running" {
-			continue
+	for ns, vms := range s.state.Live() {
+		for name, live := range vms {
+			if live.NodeName != node || live.Phase != "Running" {
+				continue
+			}
+			if m := live.Migration; m != nil && !m.Completed && !m.Failed {
+				out.Skipped++ // a second migrate on an active move would 409
+				continue
+			}
+			mErr := c.Migrate(r.Context(), ns, name, "")
+			s.recordTask("Live-migration", ns, name, id.Username, mErr == nil)
+			if mErr != nil {
+				out.Failures = append(out.Failures, model.EvacuationFailure{Namespace: ns, Name: name, Error: mErr.Error()})
+				continue
+			}
+			out.Requested++
 		}
-		if m := live.Migration; m != nil && !m.Completed && !m.Failed {
-			out.Skipped++ // a second migrate on an active move would 409
-			continue
-		}
-		ns, name, ok := strings.Cut(k, "/")
-		if !ok {
-			continue
-		}
-		mErr := c.Migrate(r.Context(), ns, name, "")
-		s.recordTask("Live-migration", ns, name, id.Username, mErr == nil)
-		if mErr != nil {
-			out.Failures = append(out.Failures, model.EvacuationFailure{Namespace: ns, Name: name, Error: mErr.Error()})
-			continue
-		}
-		out.Requested++
 	}
 	sort.Slice(out.Failures, func(i, j int) bool {
 		a, b := out.Failures[i], out.Failures[j]

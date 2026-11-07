@@ -32,7 +32,7 @@ type Inputs struct {
 	Branch   string // repo branch to read (e.g. base/main); empty -> repo default
 	Repos    *git.RepoSet
 
-	Live  map[string]clusterstate.LiveVM
+	Live  clusterstate.LiveView
 	Drift map[string]argo.Drift
 	// ProjectDrift is each project's ArgoCD Application rollup keyed by canonical
 	// repoURL. Nil (like Drift) means Argo isn't wired or hasn't synced; non-nil with a
@@ -119,20 +119,15 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 	// NotTracked by definition (nothing on main for Argo to manage); desired
 	// state doesn't exist, so Power is Unknown and config fields stay empty -
 	// an empty SourceFile is the UI's "not in git" marker.
-	for k, live := range in.Live {
-		ns, name, ok := splitKey(k)
-		if !ok {
-			continue
+	for ns := range allowed {
+		for name, live := range in.Live[ns] {
+			if _, tracked := inGit[ns+"/"+name]; tracked {
+				continue
+			}
+			vm := model.VM{Namespace: ns, Name: name, Power: model.PowerUnknown, Sync: model.SyncNotTracked}
+			applyLive(&vm, live)
+			byNS[ns] = append(byNS[ns], vm)
 		}
-		if _, inProject := allowed[ns]; !inProject {
-			continue
-		}
-		if _, tracked := inGit[k]; tracked {
-			continue
-		}
-		vm := model.VM{Namespace: ns, Name: name, Power: model.PowerUnknown, Sync: model.SyncNotTracked}
-		applyLive(&vm, live)
-		byNS[ns] = append(byNS[ns], vm)
 	}
 
 	out.Namespaces = groupNamespaces(byNS)
@@ -151,30 +146,21 @@ func groupNamespaces(byNS map[string][]model.VM) []model.ProjectNamespace {
 	return out
 }
 
-func splitKey(k string) (ns, name string, ok bool) {
-	return strings.Cut(k, "/")
-}
-
 // Adoptable finds the namespaces holding VMs but carrying no project label -
 // tenants that predate dotvirt on this cluster. labeled is the project-labeled
 // namespace set (the SA snapshot's namespace watch is label-selected, so it IS
 // that set); system namespaces are skipped.
-func Adoptable(live map[string]clusterstate.LiveVM, labeled []project.Namespace) []model.AdoptableNamespace {
+func Adoptable(live clusterstate.LiveView, labeled []project.Namespace) []model.AdoptableNamespace {
 	owned := make(map[string]bool, len(labeled))
 	for _, ns := range labeled {
 		owned[ns.Name] = true
 	}
-	counts := map[string]int{}
-	for k := range live {
-		ns, _, ok := splitKey(k)
-		if !ok || owned[ns] || isSystemNamespace(ns) {
+	out := []model.AdoptableNamespace{}
+	for ns, vms := range live {
+		if len(vms) == 0 || owned[ns] || isSystemNamespace(ns) {
 			continue
 		}
-		counts[ns]++
-	}
-	out := make([]model.AdoptableNamespace, 0, len(counts))
-	for ns, n := range counts {
-		out = append(out, model.AdoptableNamespace{Namespace: ns, VMs: n})
+		out = append(out, model.AdoptableNamespace{Namespace: ns, VMs: len(vms)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Namespace < out[j].Namespace })
 	return out
@@ -186,12 +172,11 @@ func isSystemNamespace(ns string) bool {
 }
 
 func enrich(vm *model.VM, in Inputs) {
-	k := vm.Namespace + "/" + vm.Name
-	if s, ok := in.Live[k]; ok {
+	if s, ok := in.Live[vm.Namespace][vm.Name]; ok {
 		applyLive(vm, s)
 	}
 	if in.Drift != nil { // nil = Argo not wired; non-nil = configured
-		if d, ok := in.Drift[k]; ok {
+		if d, ok := in.Drift[vm.Namespace+"/"+vm.Name]; ok {
 			vm.Sync, vm.Health, vm.SyncError = d.Sync, d.Health, d.Message
 		} else {
 			// This VM IS in git (it was parsed from the repo), so absence from
