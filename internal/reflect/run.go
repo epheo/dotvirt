@@ -10,9 +10,10 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// NewIndexer builds the namespace-keyed store every snapshot reflector feeds.
+// NewIndexer builds the namespace-keyed store every snapshot reflector feeds,
+// counting its writes per namespace (Generation).
 func NewIndexer() cache.Indexer {
-	return cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	return &generations{Indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{}), gens: map[string]uint64{}}
 }
 
 // Run starts a reflector feeding store from lw with unstructured objects and
