@@ -29,7 +29,7 @@ const (
 )
 
 // ArgoGVK is the GroupVersionKind for an argoproj.io resource (used by the builders
-// here and by the operator's finalizer cleanup). Rendered as unstructured so the
+// here and by the operator's prune). Rendered as unstructured so the
 // operator needn't vendor the heavy argo-cd module.
 func ArgoGVK(kind string) schema.GroupVersionKind {
 	return schema.GroupVersionKind{Group: argoGroup, Version: argoVersion, Kind: kind}

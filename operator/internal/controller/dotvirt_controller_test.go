@@ -37,7 +37,7 @@ import (
 
 // testScheme mirrors the manager's scheme, plus the argoproj.io kinds registered
 // as unstructured: a real API server resolves them via discovery, but the fake
-// client's DeleteAllOf needs the kind AND its List kind in the scheme.
+// client's List needs the kind AND its List kind in the scheme.
 func testScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()
@@ -337,6 +337,9 @@ func TestReconcileDryRunReportsSkippedArgoWork(t *testing.T) {
 		dotvirtv1alpha1.ConditionSecretsReady,
 		dotvirtv1alpha1.ConditionWorkloadReady,
 		dotvirtv1alpha1.ConditionArgoReady,
+		dotvirtv1alpha1.ConditionArgoWebhook,
+		dotvirtv1alpha1.ConditionDotvirtWebhook,
+		dotvirtv1alpha1.ConditionForgeRepoReady,
 		dotvirtv1alpha1.ConditionAvailable,
 	} {
 		if co := cond(got, ct); co == nil || co.Status != metav1.ConditionUnknown || co.Reason != "DryRun" {
@@ -538,9 +541,9 @@ func TestReconcileConvergesStaleAppsetMirror(t *testing.T) {
 
 // Deletion cleans exactly the label-tracked resources of THIS instance: its
 // ClusterRoleBindings, its ArgoCD-namespace Secrets/ConfigMaps and argoproj.io
-// objects. Other instances' and unlabeled resources survive, resources outside the
-// cleanup scope (the CR's own namespace, which is ownerRef-GC'd) are untouched,
-// and dropping the finalizer releases the CR.
+// objects. Other instances' and unlabeled resources survive, the install
+// namespace's state (ownerRef-GC'd) is untouched, and dropping the finalizer
+// releases the CR.
 func TestFinalizeDeletesOnlyThisInstance(t *testing.T) {
 	now := metav1.Now()
 	dv := testCR()
@@ -597,41 +600,56 @@ func TestFinalizeDeletesOnlyThisInstance(t *testing.T) {
 		{&rbacv1.ClusterRoleBinding{}, "", "crb-other"},
 		{&corev1.Secret{}, argoNS, "sec-other"},
 		{argoObj("AppProject", "", "", nil), argoNS, "proj-other"},
-		// Own-namespace resources are ownerRef-GC'd by Kubernetes, never by cleanup.
+		// Own-namespace state is ownerRef-GC'd by Kubernetes, never by the finalizer.
 		{&corev1.Secret{}, dv.Namespace, "sec-home"},
 	} {
 		if !exists(t, c, kept.obj, kept.ns, kept.nam) {
-			t.Errorf("%s/%s deleted; cleanup must only take this instance's tracked resources", kept.ns, kept.nam)
+			t.Errorf("%s/%s deleted; deletion must only take this instance's tracked resources", kept.ns, kept.nam)
 		}
 	}
 }
 
-// Cleanup tolerates a cluster the resources already left: NotFound from a
-// DeleteAllOf and a missing argoproj.io CRD (NoMatchError, ArgoCD uninstalled
-// first) must not wedge deletion; the finalizer still comes off.
-func TestFinalizeToleratesNotFoundAndMissingArgoCRD(t *testing.T) {
+// Deletion tolerates what the operator cannot or need not delete: a missing
+// argoproj.io CRD (ArgoCD uninstalled first), an object gone between list and
+// delete, and a name only an older version rendered, which the name-scoped
+// delete grant refuses. None may wedge it; the finalizer still comes off.
+func TestFinalizeToleratesMissingCRDGoneAndForbidden(t *testing.T) {
 	now := metav1.Now()
 	dv := testCR()
 	dv.Finalizers = []string{dotvirtFinalizer}
 	dv.DeletionTimestamp = &now
+	mine := install.Labels(dv)
 
-	c := testBuilder(t).WithObjects(dv).WithInterceptorFuncs(interceptor.Funcs{
-		DeleteAllOf: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.DeleteAllOfOption) error {
-			switch obj.(type) {
-			case *unstructured.Unstructured:
-				gvk := obj.GetObjectKind().GroupVersionKind()
+	c := testBuilder(t).WithObjects(
+		dv,
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-appset-plugin", Namespace: "argocd", Labels: mine}},
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-legacy", Labels: mine}},
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-platform-network-admin", Labels: mine}},
+	).WithInterceptorFuncs(interceptor.Funcs{
+		List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if u, ok := list.(*unstructured.UnstructuredList); ok && u.GroupVersionKind().Group == "argoproj.io" {
+				gvk := u.GroupVersionKind()
 				return &apimeta.NoKindMatchError{GroupKind: gvk.GroupKind(), SearchedVersions: []string{gvk.Version}}
-			case *corev1.ConfigMap:
-				return apierrors.NewNotFound(schema.GroupResource{Resource: "configmaps"}, "")
 			}
-			return cl.DeleteAllOf(ctx, obj, opts...)
+			return cl.List(ctx, list, opts...)
+		},
+		Delete: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+			switch obj.GetName() {
+			case "dotvirt-appset-plugin":
+				return apierrors.NewNotFound(schema.GroupResource{Resource: "configmaps"}, obj.GetName())
+			case "dotvirt-legacy":
+				return apierrors.NewForbidden(schema.GroupResource{Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings"}, obj.GetName(), errors.New("not in resourceNames"))
+			}
+			return cl.Delete(ctx, obj, opts...)
 		},
 	}).Build()
-	r := newReconciler(c, depsOK)
 
-	reconcileOnce(t, r, dv)
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
 	if exists(t, c, &dotvirtv1alpha1.Dotvirt{}, dv.Namespace, dv.Name) {
 		t.Error("CR still present; tolerated errors must not block the finalizer")
+	}
+	if exists(t, c, &rbacv1.ClusterRoleBinding{}, "", "dotvirt-platform-network-admin") {
+		t.Error("a refused delete stopped the sweep before the rest")
 	}
 }
 
