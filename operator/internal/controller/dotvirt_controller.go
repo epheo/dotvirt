@@ -15,9 +15,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/deps"
@@ -37,7 +39,8 @@ type DotvirtReconciler struct {
 	Config   *rest.Config      // discovery for the dependency probe
 	Platform platform.Platform // detected once at startup (cmd/main.go)
 	DryRun   bool              // -dry-run: validate via server-side dry-run apply; persist nothing
-	// APIReader bypasses the cache for prune's cluster-wide lists.
+	// APIReader bypasses the cache: the pass's read of the CR and prune's
+	// cluster-wide lists.
 	APIReader client.Reader
 	// OperatorNamespace is admitted by the NetworkPolicies; "" when unknown.
 	OperatorNamespace string
@@ -58,6 +61,9 @@ type DotvirtReconciler struct {
 // AppProjects, bindings) survives without a CR or owned-object event.
 const driftResync = 10 * time.Minute
 
+// platformRepoRetry replaces driftResync while the platform repo is missing.
+const platformRepoRetry = time.Minute
+
 // dotvirtFinalizer guards cleanup of the cluster-scoped + ArgoCD-namespace
 // resources, which a namespaced CR can't garbage-collect via ownerReferences.
 const dotvirtFinalizer = "dotvirt.io/finalizer"
@@ -69,15 +75,24 @@ const dotvirtFinalizer = "dotvirt.io/finalizer"
 type reconcilePhase struct {
 	cond string
 	run  func(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (*ctrl.Result, error)
+	// dryRunSkip names the work a -dry-run pass skips instead of running the
+	// phase: forge and Secret mutations server-side dry-run cannot model. ""
+	// runs the phase, which then validates its applies as dry-run.
+	dryRunSkip string
 }
 
 // Reconcile drives the install in order, recording a status condition per step so a
-// stuck install is legible from `kubectl get dotvirt` / `describe`.
+// stuck install is legible from `kubectl get dotvirt` / `describe`. Phases change
+// status in memory only; the pass persists it once, whichever way it ends.
 func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
+	// Uncached: the status write is a diff against this read, and the cache can
+	// lag the previous pass's own write. Diffed against that stale base, a field
+	// flipping back (Ready after a Provisioning the cache never saw) would drop
+	// out of the patch and stay wrong on the server.
 	var dv dotvirtv1alpha1.Dotvirt
-	if err := r.Get(ctx, req.NamespacedName, &dv); err != nil {
+	if err := r.reader().Get(ctx, req.NamespacedName, &dv); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	log.Info("reconciling dotvirt install", "platform", r.Platform)
@@ -85,56 +100,77 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if !dv.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, r.finalize(ctx, &dv)
 	}
+	base := dv.DeepCopy()
+	var res ctrl.Result
+	var err error
 	// One install per cluster: the ClusterRoleBindings it provisions carry fixed
 	// cluster-scoped names, so two CRs would rewrite each other's subjects on every
 	// reconcile and each finalizer would delete the other's bindings. The oldest CR
 	// wins; a later one halts here, before the finalizer, so it stays freely
 	// deletable and owns nothing. The timer matters: the older CR's deletion fires
 	// no event for this one.
-	if other, found, err := r.olderInstall(ctx, &dv); err != nil {
-		return ctrl.Result{}, err
+	if other, found, lerr := r.olderInstall(ctx, &dv); lerr != nil {
+		return ctrl.Result{}, lerr
 	} else if found {
 		msg := fmt.Sprintf("another dotvirt install exists at %s/%s and owns this cluster's bindings; delete one of the two",
 			other.Namespace, other.Name)
-		res, err := r.waitPhase(ctx, &dv, dotvirtv1alpha1.ConditionAvailable, "Conflict", msg,
+		res = *r.waitPhase(&dv, dotvirtv1alpha1.ConditionAvailable, "Conflict", msg,
 			dotvirtv1alpha1.PhaseProvisioning, time.Minute)
-		if err != nil {
-			return ctrl.Result{}, err
+	} else {
+		// Ensure the finalizer is present before provisioning anything cluster-scoped.
+		// Skipped under -dry-run so a validation run mutates nothing (and the CR stays
+		// freely deletable, since the finalizer would otherwise gate its removal).
+		if !r.DryRun && controllerutil.AddFinalizer(&dv, dotvirtFinalizer) {
+			if err := r.Update(ctx, &dv); err != nil {
+				return ctrl.Result{}, err
+			}
+			// The Update moved resourceVersion; a stale base would put it in the
+			// status patch and turn it into an optimistic lock.
+			base = dv.DeepCopy()
 		}
-		return *res, nil
+		// Only after the finalizer add, the reconcile's one spec write: the effective
+		// spec must never reach the stored CR.
+		r.normalizeSpec(&dv)
+		res, err = r.provision(ctx, req.NamespacedName, &dv)
 	}
-	// Ensure the finalizer is present before provisioning anything cluster-scoped.
-	// Skipped under -dry-run so a validation run mutates nothing (and the CR stays
-	// freely deletable, since the finalizer would otherwise gate its removal).
-	if !r.DryRun && controllerutil.AddFinalizer(&dv, dotvirtFinalizer) {
-		if err := r.Update(ctx, &dv); err != nil {
-			return ctrl.Result{}, err
+	if werr := r.writeStatus(ctx, &dv, base); werr != nil {
+		if err == nil {
+			return ctrl.Result{}, werr
 		}
+		log.Error(werr, "status update failed")
 	}
-	// Only after the finalizer add, the reconcile's one spec write: the effective
-	// spec must never reach the stored CR.
-	r.normalizeSpec(&dv)
-	rc := r.newReconcileCtx(ctx, &dv)
+	return res, err
+}
+
+// provision runs the install pipeline over the effective spec.
+func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedName, dv *dotvirtv1alpha1.Dotvirt) (ctrl.Result, error) {
+	rc := r.newReconcileCtx(ctx, dv)
 	ctx, rendered := withRenderSet(ctx)
 
 	// The install pipeline, in dependency order. A phase that halts on a wait has
 	// already recorded why; one that fails is recorded here, so no error is
-	// invisible in status; a completed pass falls through to the Ready status
-	// write below.
+	// invisible in status; a completed pass falls through to the Ready roll-up
+	// below.
 	for _, phase := range []reconcilePhase{
-		{dotvirtv1alpha1.ConditionDependenciesReady, r.reconcileDependencies},
-		{dotvirtv1alpha1.ConditionForgeReady, r.reconcileForge},
-		{dotvirtv1alpha1.ConditionSecretsReady, r.reconcileSecrets},
-		{dotvirtv1alpha1.ConditionWorkloadReady, r.reconcileWorkload},
-		{dotvirtv1alpha1.ConditionArgoReady, r.reconcileArgo},
-		{dotvirtv1alpha1.ConditionArgoWebhook, r.reconcileArgoWebhook},
-		{dotvirtv1alpha1.ConditionDotvirtWebhook, r.reconcileDotvirtWebhook},
-		// Last: its failure requeues, and nothing above depends on the repo.
-		{dotvirtv1alpha1.ConditionForgeRepoReady, r.reconcilePlatformRepo},
+		{dotvirtv1alpha1.ConditionDependenciesReady, r.reconcileDependencies, ""},
+		{dotvirtv1alpha1.ConditionForgeReady, r.reconcileForge, ""},
+		{dotvirtv1alpha1.ConditionSecretsReady, r.reconcileSecrets, "secret generation"},
+		{dotvirtv1alpha1.ConditionWorkloadReady, r.reconcileWorkload, ""},
+		{dotvirtv1alpha1.ConditionArgoReady, r.reconcileArgo, ""},
+		// Before the org webhooks, which need the managed forge's org it ensures;
+		// after the rest, so a slow forge only delays phases that call it anyway.
+		{dotvirtv1alpha1.ConditionForgeRepoReady, r.reconcilePlatformRepo, "platform-repo bootstrap"},
+		{dotvirtv1alpha1.ConditionArgoWebhook, r.reconcileArgoWebhook, "argo webhook"},
+		{dotvirtv1alpha1.ConditionDotvirtWebhook, r.reconcileDotvirtWebhook, "dotvirt webhook"},
 	} {
-		res, err := phase.run(ctx, &dv, rc)
+		if r.DryRun && phase.dryRunSkip != "" {
+			r.dryRunSkip(dv, phase.cond, phase.dryRunSkip)
+			continue
+		}
+		res, err := phase.run(ctx, dv, rc)
 		if err != nil {
-			return ctrl.Result{}, r.recordFailure(ctx, &dv, phase.cond, err)
+			r.recordFailure(dv, phase.cond, err)
+			return ctrl.Result{}, err
 		}
 		if res != nil {
 			return *res, nil
@@ -143,33 +179,28 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	dv.Status.ObservedGeneration = dv.Generation
 	if r.DryRun {
-		log.Info("dry-run complete: all rendered resources accepted by the API server (nothing persisted)")
-		r.setCondition(&dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionUnknown, "DryRun",
+		logf.FromContext(ctx).Info("dry-run complete: all rendered resources accepted by the API server (nothing persisted)")
+		r.setCondition(dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionUnknown, "DryRun",
 			"dry-run validated the render; nothing was persisted, so nothing serves")
-		return ctrl.Result{}, r.writeStatus(ctx, &dv)
+		return ctrl.Result{}, nil
 	}
 	if wr := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionWorkloadReady); wr != nil && wr.Status == metav1.ConditionTrue {
-		r.setCondition(&dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionTrue, "Reconciled", "install reconciled and serving")
+		r.setCondition(dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionTrue, "Reconciled", "install reconciled and serving")
 		dv.Status.Phase = dotvirtv1alpha1.PhaseReady
 	} else {
-		r.markUnavailable(&dv, dotvirtv1alpha1.ConditionWorkloadReady, "WorkloadProgressing", "the dotvirt pod is not ready yet")
+		r.markUnavailable(dv, dotvirtv1alpha1.ConditionWorkloadReady, "WorkloadProgressing", "the dotvirt pod is not ready yet")
 		dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
 	}
 	// Only a completed pass knows the full render; a halted one would prune
 	// whatever its skipped phases own.
-	var pruneErr error
-	if digest := rendered.digest(); r.pruneDue(req.NamespacedName, digest) {
-		if pruneErr = r.prune(ctx, &dv, rendered); pruneErr != nil {
-			log.Error(pruneErr, "prune failed; retrying")
-		} else {
-			r.markPruned(req.NamespacedName, digest)
+	if digest := rendered.digest(); r.pruneDue(key, digest) {
+		if err := r.prune(ctx, dv, rendered); err != nil {
+			return ctrl.Result{}, fmt.Errorf("prune: %w", err)
 		}
+		r.markPruned(key, digest)
 	}
-	if err := r.writeStatus(ctx, &dv); err != nil {
-		return ctrl.Result{}, err
-	}
-	if pruneErr != nil {
-		return ctrl.Result{}, pruneErr
+	if repo := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeRepoReady); repo != nil && repo.Status == metav1.ConditionFalse {
+		return ctrl.Result{RequeueAfter: platformRepoRetry}, nil
 	}
 	// The watches cover the CR, Deployments, Secrets and Routes; this timer heals
 	// drift on the rest.
@@ -222,7 +253,10 @@ type reconcileCtx struct {
 	argoNS, argoSA string
 	// argoURL is the externally reachable ArgoCD base URL, "" when neither the
 	// spec nor the OpenShift GitOps Route names one (Argo falls back to its poll).
-	argoURL string
+	// argoURLErr says the Route could not be read: "" is then unknown, not
+	// absent, and a consumer fails rather than act on it.
+	argoURL    string
+	argoURLErr error
 	// ingressCA is the router CA, read on OpenShift only; ingressCAErr says why it
 	// is empty there. How much that matters is the consumer's call: the trust
 	// anchors degrade to the system pool, the managed forge's Argo trust blocks.
@@ -233,7 +267,7 @@ type reconcileCtx struct {
 func (r *DotvirtReconciler) newReconcileCtx(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) *reconcileCtx {
 	rc := &reconcileCtx{}
 	rc.argoNS, rc.argoSA = r.argoTarget(dv)
-	rc.argoURL = r.argoServerURL(ctx, dv, rc.argoNS)
+	rc.argoURL, rc.argoURLErr = r.argoServerURL(ctx, dv, rc.argoNS)
 	if r.Platform == platform.OpenShift {
 		rc.ingressCA, rc.ingressCAErr = r.readIngressCA(ctx)
 	}
@@ -255,13 +289,13 @@ func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvi
 		// report "all dependencies present" from the zero result.
 		logf.FromContext(ctx).Error(err, "dependency probe failed")
 		dv.Status.ObservedGeneration = dv.Generation
-		return r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionDependenciesReady, "ProbeFailed",
-			err.Error(), dotvirtv1alpha1.PhaseBlockedOnDependencies, time.Minute)
+		return r.waitPhase(dv, dotvirtv1alpha1.ConditionDependenciesReady, "ProbeFailed",
+			err.Error(), dotvirtv1alpha1.PhaseBlockedOnDependencies, time.Minute), nil
 	}
 	if len(depRes.MissingHard) > 0 {
 		dv.Status.ObservedGeneration = dv.Generation
-		return r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionDependenciesReady, "MissingPrerequisite",
-			depRes.Summary(), dotvirtv1alpha1.PhaseBlockedOnDependencies, time.Minute)
+		return r.waitPhase(dv, dotvirtv1alpha1.ConditionDependenciesReady, "MissingPrerequisite",
+			depRes.Summary(), dotvirtv1alpha1.PhaseBlockedOnDependencies, time.Minute), nil
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionDependenciesReady, metav1.ConditionTrue, "Satisfied", depRes.Summary())
 	return nil, nil
@@ -300,8 +334,8 @@ func (r *DotvirtReconciler) secret(ctx context.Context, ns, name string) (*corev
 	return &s, nil
 }
 
-// dryRunSkip records the standard condition for a phase whose real work mutates
-// state (the forge, argocd-secret) that server-side dry-run cannot model.
+// dryRunSkip records the standard condition for work that mutates state (the
+// forge, argocd-secret) server-side dry-run cannot model.
 func (r *DotvirtReconciler) dryRunSkip(dv *dotvirtv1alpha1.Dotvirt, condType, what string) {
 	r.setCondition(dv, condType, metav1.ConditionUnknown, "DryRun", "skipped "+what+" in dry-run")
 }
@@ -334,33 +368,36 @@ func (r *DotvirtReconciler) forgeClient(ctx context.Context, dv *dotvirtv1alpha1
 }
 
 // routeHost reads the spec.host an OpenShift Route carries: the explicit host, or the
-// one the router assigned to a hostless Route. Empty when the Route is absent or its
-// host isn't assigned yet. Unstructured so the module needs no openshift/api dep.
-func (r *DotvirtReconciler) routeHost(ctx context.Context, ns, name string) string {
+// one the router assigned to a hostless Route. "" only when the Route is absent or its
+// host isn't assigned yet: callers render the host into pod templates, where a blank
+// from a read blip would roll the pods. Unstructured so the module needs no
+// openshift/api dep.
+func (r *DotvirtReconciler) routeHost(ctx context.Context, ns, name string) (string, error) {
 	route := &unstructured.Unstructured{}
 	route.SetGroupVersionKind(install.RouteGVK)
 	if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, route); err != nil {
-		return ""
+		return "", client.IgnoreNotFound(err)
 	}
 	host, _, _ := unstructured.NestedString(route.Object, "spec", "host")
-	return host
+	return host, nil
 }
 
 // argoServerURL resolves the externally reachable ArgoCD base URL: the spec
 // override, else the OpenShift GitOps server Route, else "" (the webhook is
 // skipped and Argo falls back to its poll). Routes exist only where the route
 // API does, so the lookup is gated like the Route watch in SetupWithManager.
-func (r *DotvirtReconciler) argoServerURL(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) string {
+func (r *DotvirtReconciler) argoServerURL(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) (string, error) {
 	if dv.Spec.ArgoCD.ServerURL != "" {
-		return dv.Spec.ArgoCD.ServerURL
+		return dv.Spec.ArgoCD.ServerURL, nil
 	}
 	if r.Platform != platform.OpenShift {
-		return ""
+		return "", nil
 	}
-	if host := r.routeHost(ctx, argoNS, "openshift-gitops-server"); host != "" {
-		return "https://" + host
+	host, err := r.routeHost(ctx, argoNS, "openshift-gitops-server")
+	if err != nil || host == "" {
+		return "", err
 	}
-	return ""
+	return "https://" + host, nil
 }
 
 // argoTarget resolves the ArgoCD namespace + controller ServiceAccount from the
@@ -417,10 +454,8 @@ func (f phaseFailure) Unwrap() error { return f.err }
 // instead of the "Error" a raw error returned from a phase is recorded under.
 func applyFailed(err error) error { return phaseFailure{reason: "ApplyFailed", err: err} }
 
-// recordFailure writes the phase's failure condition + the Provisioning phase
-// (best-effort: Reconcile returns the error, so nothing else would persist the
-// status) and hands the error back for the requeue.
-func (r *DotvirtReconciler) recordFailure(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, condType string, err error) error {
+// recordFailure records the phase's failure condition and the Provisioning phase.
+func (r *DotvirtReconciler) recordFailure(dv *dotvirtv1alpha1.Dotvirt, condType string, err error) {
 	reason := "Error"
 	var f phaseFailure
 	if errors.As(err, &f) {
@@ -429,30 +464,16 @@ func (r *DotvirtReconciler) recordFailure(ctx context.Context, dv *dotvirtv1alph
 	r.setCondition(dv, condType, metav1.ConditionFalse, reason, err.Error())
 	r.markUnavailable(dv, condType, reason, err.Error())
 	dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
-	if uerr := r.writeStatus(ctx, dv); uerr != nil {
-		logf.FromContext(ctx).Error(uerr, "status update failed", "phase", dotvirtv1alpha1.PhaseProvisioning)
-	}
-	return err
 }
 
 // waitPhase is the explicit form of an EXPECTED wait: record the not-ready
-// condition + phase, persist status, and hand back the halt result.
+// condition + phase and hand back the halt result.
 // requeue 0 halts without a retry timer (the wait clears via a watch event).
-// phase "" leaves Status.Phase and Available untouched (a late retry must not
-// regress a serving install).
-func (r *DotvirtReconciler) waitPhase(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, condType, reason, msg, phase string, requeue time.Duration) (*ctrl.Result, error) {
+func (r *DotvirtReconciler) waitPhase(dv *dotvirtv1alpha1.Dotvirt, condType, reason, msg, phase string, requeue time.Duration) *ctrl.Result {
 	r.setCondition(dv, condType, metav1.ConditionFalse, reason, msg)
-	if phase != "" {
-		r.markUnavailable(dv, condType, reason, msg)
-		dv.Status.Phase = phase
-	}
-	if err := r.writeStatus(ctx, dv); err != nil {
-		return nil, err
-	}
-	if requeue == 0 {
-		return &ctrl.Result{}, nil
-	}
-	return &ctrl.Result{RequeueAfter: requeue}, nil
+	r.markUnavailable(dv, condType, reason, msg)
+	dv.Status.Phase = phase
+	return &ctrl.Result{RequeueAfter: requeue}
 }
 
 // SetupWithManager registers the reconciler; r.Platform must already be set
@@ -462,8 +483,12 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// drifted Deployment/Secret re-reconciles promptly. Services, SAs, PVCs and
 	// Ingresses stay unwatched by design (least-privilege RBAC); their drift heals
 	// on the driftResync requeue.
+	// The CR triggers on spec changes and deletion (which bumps the generation of
+	// an object holding finalizers), never on the pass's own status write: an
+	// error message carrying an ephemeral port would otherwise re-run the pass
+	// back to back against a struggling forge.
 	b := ctrl.NewControllerManagedBy(mgr).
-		For(&dotvirtv1alpha1.Dotvirt{}).
+		For(&dotvirtv1alpha1.Dotvirt{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("dotvirt").
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Secret{})
@@ -479,12 +504,12 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return b.Complete(r)
 }
 
-// writeStatus persists the derived status as a MERGE PATCH, not an Update: OLM and
-// the status informer touch the object between our read and write often enough that
-// resourceVersion'd updates spray "object has been modified" requeue noise into the
-// log, which reads as a broken install to anyone skimming it. A merge patch carries
-// no resourceVersion, and every status field (conditions included) is derived and
-// dotvirt-owned, so replace-wholesale semantics are exact.
-func (r *DotvirtReconciler) writeStatus(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
-	return r.Status().Patch(ctx, dv, client.Merge)
+// writeStatus persists the pass's status as a merge patch diffed against base,
+// the pass's own read. OLM and the status informer touch the object between that
+// read and this write often enough that a resourceVersion'd write sprays "object
+// has been modified" requeue noise into the log, which reads as a broken install.
+// The diff never carries resourceVersion while base and dv share one, and a
+// derived field the pass cleared goes out as a null, so it still converges.
+func (r *DotvirtReconciler) writeStatus(ctx context.Context, dv, base *dotvirtv1alpha1.Dotvirt) error {
+	return r.Status().Patch(ctx, dv, client.MergeFrom(base))
 }

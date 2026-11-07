@@ -40,9 +40,11 @@ func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1
 		return nil, applyFailed(err)
 	}
 	if dv.Spec.Ingress.Host == "" && !r.DryRun && r.Platform == platform.OpenShift {
-		if host := r.routeHost(ctx, dv.Namespace, install.AppName); host != "" {
-			dv.Spec.Ingress.Host = host // in-memory only (never persisted; drives DOTVIRT_PUBLIC_URL)
+		host, err := r.routeHost(ctx, dv.Namespace, install.AppName)
+		if err != nil {
+			return nil, fmt.Errorf("read the console Route: %w", err)
 		}
+		dv.Spec.Ingress.Host = host // in-memory only (never persisted; drives DOTVIRT_PUBLIC_URL)
 	}
 	if dv.Spec.Ingress.Host != "" {
 		dv.Status.ConsoleURL = "https://" + dv.Spec.Ingress.Host

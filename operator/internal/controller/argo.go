@@ -86,10 +86,6 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 // model). A registration failure is recorded on the condition but doesn't halt
 // the pipeline - Argo falls back to its poll.
 func (r *DotvirtReconciler) reconcileArgoWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (*ctrl.Result, error) {
-	if r.DryRun {
-		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionArgoWebhook, "argo webhook")
-		return nil, nil
-	}
 	if configured, err := r.ensureArgoWebhook(ctx, dv, rc); err != nil {
 		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionFalse, "Error", err.Error())
 	} else if configured {
@@ -144,10 +140,17 @@ func (r *DotvirtReconciler) mirrorAppsetToken(ctx context.Context, dv *dotvirtv1
 // when no Argo URL is resolvable, no platform repo names the org, or the forge
 // registration itself transiently fails (logged) - Argo's poll backstops a missed nudge,
 // so none of those should fail the install. err is reserved for operator-internal
-// failures (reading the webhook secret / forge credentials, applying argocd-secret).
+// failures (reading the ArgoCD Route, the webhook secret or the forge credentials,
+// applying argocd-secret).
 // Real-only (the caller skips it in dry-run) - it mutates the forge + argocd-secret.
 func (r *DotvirtReconciler) ensureArgoWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (configured bool, err error) {
-	if dv.Spec.Forge.URL == "" || dv.Spec.Forge.PlatformRepo == "" || rc.argoURL == "" {
+	if dv.Spec.Forge.URL == "" || dv.Spec.Forge.PlatformRepo == "" {
+		return false, nil
+	}
+	if rc.argoURLErr != nil {
+		return false, fmt.Errorf("read the ArgoCD Route: %w", rc.argoURLErr)
+	}
+	if rc.argoURL == "" {
 		return false, nil
 	}
 	// The shared webhook secret, generated create-once in the dotvirt namespace.
