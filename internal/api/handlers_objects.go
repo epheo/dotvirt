@@ -10,10 +10,8 @@ import (
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/draft"
-	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
-	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // The object routes act on one git-declared network-family object by the
@@ -67,7 +65,7 @@ func (s *Server) handleObjectUpdateManifest(w http.ResponseWriter, r *http.Reque
 	if !ok || !s.authorizeObject(w, r, sc, verbUpdate, resource, ns, name) {
 		return
 	}
-	_, req, ok := readBody[model.UpdateManifestRequest](w, r, false)
+	req, ok := decode[model.UpdateManifestRequest](w, r)
 	if !ok {
 		return
 	}
@@ -157,7 +155,9 @@ func (s *Server) handlePlatformAdopt(w http.ResponseWriter, r *http.Request) {
 
 // sourceFiles answers "which file declares this object" across the caller's
 // projects, the platform repo included when withPlatform - the read plane's
-// signal that an object can be edited or deleted from here.
+// signal that an object can be edited or deleted from here. The repo's
+// declared index is memoized per branch head, so a lookup is a cache read. A
+// project the resolver flagged has no repo to read.
 func (s *Server) sourceFiles(ctx context.Context, id auth.Identity, c *cluster.Client, withPlatform bool) func(kind, namespace, name string) string {
 	projects, err := s.projectsFor(ctx, id, c)
 	if err != nil {
@@ -179,35 +179,13 @@ func (s *Server) sourceFiles(ctx context.Context, id auth.Identity, c *cluster.C
 		} else if p = byNS[namespace]; p.Repo == "" {
 			return ""
 		}
-		return s.declaredFiles(p)[model.ObjectRef{Kind: kind, Namespace: namespace, Name: name}]
+		if p.Error != "" {
+			return ""
+		}
+		files, err := s.reader.DeclaredFiles(p)
+		if err != nil {
+			return ""
+		}
+		return files[model.ObjectRef{Kind: kind, Namespace: namespace, Name: name}]
 	}
-}
-
-// declaredIndex is one repo's declared-files index stamped with the git version
-// it was read at; valid only while that version still matches the bus.
-type declaredIndex struct {
-	files map[model.ObjectRef]string
-	ver   uint64
-}
-
-// declaredFiles is p's declared-files index, cached per repo and invalidated by
-// its repo's GitChanged version, so the polled catalog routes read a repo index
-// once per push to that repo rather than once per request. A project the
-// resolver flagged has no repo to read; a failed read is not cached, so it
-// declares nothing this once and is retried on the next call.
-func (s *Server) declaredFiles(p project.ProjectInfo) map[model.ObjectRef]string {
-	if p.Error != "" {
-		return nil
-	}
-	ver := s.bus.KeyVersion(eventbus.GitChanged, forge.NormalizeRepoURL(p.Repo))
-	key := p.Name + "\x00" + p.Repo
-	if e, ok := s.declared.Get(key); ok && e.ver == ver {
-		return e.files
-	}
-	files, err := s.reader.DeclaredFiles(p)
-	if err != nil {
-		return nil
-	}
-	s.declared.Put(key, declaredIndex{files: files, ver: ver})
-	return files
 }

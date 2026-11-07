@@ -21,6 +21,7 @@
 		num,
 		planBulkMove,
 		planBulkSnapshot,
+		repeatedNames,
 		settleEach,
 		ago,
 		shortName,
@@ -59,6 +60,13 @@
 	);
 	const desc = $derived(q.get('sort') === 'vm-desc');
 	const sorted = $derived(sortRows(shown, 'vm', desc));
+	const repeated = $derived(
+		repeatedNames(
+			shown,
+			(r) => r.vm.namespace,
+			(r) => r.vm.name,
+		),
+	);
 	const size = $derived(Number(q.get('per')) || DEFAULT_PAGE_SIZE);
 	const s = $derived(pageSlice(sorted.length, Number(q.get('page')) || 1, size));
 	const pageRows = $derived(sorted.slice(s.start, s.end));
@@ -455,7 +463,10 @@
 									href={vmHref(r.vm.namespace, r.vm.name)}
 									class="font-mono text-xs font-medium text-ink hover:text-accent-ink"
 									onclick={(e) => e.stopPropagation()}>{r.vm.name}</a
-								>{#if !r.running}<span class="ml-1.5 text-xs text-ink-faint">stopped</span>{/if}
+								>{#if repeated.has(r.vm.name)}<span class="ml-1.5 text-xs text-ink-faint"
+										>{r.vm.namespace}</span
+									>{/if}{#if !r.running}<span class="ml-1.5 text-xs text-ink-faint">stopped</span
+									>{/if}
 							</td>
 							<td class="h-10 border-b border-line-soft px-2 whitespace-nowrap">
 								<!-- The row opens the disk on click; this is the keyboard way in. -->

@@ -17,6 +17,7 @@ import {
 	planBulkSnapshot,
 	settleEach,
 	projectsBySize,
+	repeatedNames,
 	sortRows,
 	staleShare,
 	storageContext,
@@ -284,6 +285,24 @@ describe('library', () => {
 			'os-images/fedora-42',
 			'os-images/centos-stream-9',
 		]);
+		// Past the used ones, the rest may all be unused: the fold then counts
+		// images and no disks, which the row words as such.
+		const rest = topImages(
+			imageUsage(r, [
+				{ name: 'fedora-42', namespace: 'os-images', ready: true },
+				...Array.from({ length: 11 }, (_, i) => ({
+					name: `idle-${i}`,
+					namespace: 'os-images',
+					ready: true,
+				})),
+			]),
+			4,
+		);
+		expect(rest.top.map((u) => u.image)).toEqual([
+			'os-images/fedora-42',
+			'os-images/centos-stream-9',
+		]);
+		expect(rest.more).toMatchObject({ count: 11, disks: 0, local: 0, shared: 0 });
 		const sum = topImages(uses, 1);
 		expect(sum.top.map((u) => u.image)).toEqual(['os-images/fedora-42']);
 		expect(sum.more).toMatchObject({ count: 2, disks: 1, shared: 1, fresh: 1 });
@@ -524,5 +543,31 @@ describe('settleEach', () => {
 			out.map((r) => (r.status === 'fulfilled' ? r.value : (r.reason as Error).message)),
 		).toEqual([10, 20, 30, 'four', 50, 60]);
 		expect(await settleEach([], async () => 1)).toEqual([]);
+	});
+});
+
+describe('repeatedNames', () => {
+	it('flags a name only when it spans namespaces', () => {
+		const items = [
+			{ namespace: 'qa-a', name: 'test' },
+			{ namespace: 'qa-b', name: 'test' },
+			{ namespace: 'web-prod', name: 'web-1' },
+			// Two disks of one VM repeat its name in one namespace: not ambiguous.
+			{ namespace: 'web-prod', name: 'web-1' },
+		];
+		expect(
+			repeatedNames(
+				items,
+				(i) => i.namespace,
+				(i) => i.name,
+			),
+		).toEqual(new Set(['test']));
+		expect(
+			repeatedNames(
+				[],
+				() => '',
+				() => '',
+			),
+		).toEqual(new Set());
 	});
 });
