@@ -197,7 +197,7 @@ func commitItems(files []git.FileChange) []model.DraftItem {
 		before := documentsIn(f.Path, f.Before)
 		after := documentsIn(f.Path, f.After)
 		for _, doc := range after.order {
-			item := model.DraftItem{Namespace: doc.ref.Namespace, Name: doc.ref.Name, Resource: resourceOf(doc.ref.Kind), YAML: doc.raw}
+			item := model.DraftItem{Namespace: doc.ref.Namespace, Name: doc.ref.Name, Resource: kindRow(doc.ref.Kind).Name, YAML: doc.raw}
 			prev, existed := before.byRef[doc.ref]
 			switch {
 			case !existed:
@@ -217,8 +217,8 @@ func commitItems(files []git.FileChange) []model.DraftItem {
 				continue
 			}
 			items = append(items, model.DraftItem{
-				Kind: "delete", Namespace: doc.ref.Namespace, Name: doc.ref.Name, Resource: resourceOf(doc.ref.Kind), YAML: doc.raw,
-				Changes: []model.Change{{Field: "lifecycle", Action: "remove", From: qualified(doc.ref)}},
+				Kind: "delete", Namespace: doc.ref.Namespace, Name: doc.ref.Name, Resource: kindRow(doc.ref.Kind).Name, YAML: doc.raw,
+				Changes: []model.Change{{Field: "lifecycle", Action: "remove", From: qualified(doc.ref.Namespace, doc.ref.Name)}},
 			})
 		}
 	}
@@ -284,16 +284,16 @@ func editChanges(prev, doc document) []model.Change {
 			return changes
 		}
 	}
-	return []model.Change{{Field: changeLabel(doc.ref.Kind, false), Action: "change", To: doc.ref.Name}}
+	return []model.Change{{Field: kindRow(doc.ref.Kind).EditLabel, Action: "change", To: doc.ref.Name}}
 }
 
 // createChanges summarizes a new object: a VM by its sizing and devices, any
 // other kind by its identity. A committed VM was created, never adopted, so
 // the VM row keeps the wizard's label rather than the table's adoption one.
 func createChanges(doc document) []model.Change {
-	nsName := qualified(doc.ref)
+	nsName := qualified(doc.ref.Namespace, doc.ref.Name)
 	if doc.ref.Kind != model.KindVM.Kind {
-		return []model.Change{{Field: changeLabel(doc.ref.Kind, true), Action: "add", To: nsName}}
+		return []model.Change{{Field: kindRow(doc.ref.Kind).CreateLabel, Action: "add", To: nsName}}
 	}
 	out := []model.Change{{Field: "Create VM", Action: "add", To: nsName}}
 	vm := doc.vm
@@ -325,40 +325,26 @@ func createChanges(doc document) []model.Change {
 	return out
 }
 
-// qualified is ns/name, or the bare name for a cluster-scoped object.
-func qualified(ref model.ObjectRef) string {
-	if ref.Namespace == "" {
-		return ref.Name
+// qualified is ns/name, or the bare name for a cluster-scoped object under
+// either spelling of its scope.
+func qualified(namespace, name string) string {
+	if model.ObjectNamespace(namespace) == "" {
+		return name
 	}
-	return ref.Namespace + "/" + ref.Name
+	return namespace + "/" + name
 }
 
-// resourceOf maps a declared kind onto DraftItem.Resource, the draft
-// vocabulary: "" for a VM (the draft's default). A kind dotvirt does not manage
-// keeps its kind name, so the row still says what it is.
-func resourceOf(kind string) string {
+// kindRow is a declared kind's table row, so a commit reviews with the rows the
+// proposal showed. Its Name is DraftItem.Resource: "" for a VM, the draft's
+// default. A kind dotvirt does not manage reads as a row of its own name, so
+// the row still says what it is.
+func kindRow(kind string) model.Resource {
 	r, _, ok := model.LookupKind(kind)
 	switch {
 	case !ok:
-		return kind
+		return model.Resource{Name: kind, CreateLabel: "Create " + kind, EditLabel: "Edit " + kind}
 	case draft.Resource(r.Name) == draft.ResourceVM:
-		return ""
+		r.Name = ""
 	}
-	return r.Name
-}
-
-// changeLabel names a create or edit of kind the way the draft view does, from
-// the table, so a commit reviews with the rows the proposal showed. A kind
-// dotvirt does not manage keeps its name, so the row still says what it is.
-func changeLabel(kind string, create bool) string {
-	r, _, ok := model.LookupKind(kind)
-	switch {
-	case !ok && create:
-		return "Create " + kind
-	case !ok:
-		return "Edit " + kind
-	case create:
-		return r.CreateLabel
-	}
-	return r.EditLabel
+	return r
 }

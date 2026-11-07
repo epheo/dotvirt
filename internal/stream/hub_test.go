@@ -3,11 +3,14 @@ package stream
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/eventbus"
@@ -29,7 +32,7 @@ func newTestHub() *Hub {
 }
 
 func testConn(name string) *conn {
-	return &conn{id: auth.Identity{Username: name}, key: name, out: make(chan []byte, 1), quit: make(chan struct{})}
+	return newConn(auth.Identity{Username: name, Token: "tok-" + name}, name)
 }
 
 // TestDeliverAfterRemoveDoesNotBlockOrPanic reproduces the teardown race: a frame
@@ -95,6 +98,23 @@ func TestReconcileDedupAndFreshConn(t *testing.T) {
 	h.reconcile(context.Background())
 	if got := frameProject(t, a2); got != "a" {
 		t.Errorf("fresh second connection got %q, want the current frame", got)
+	}
+}
+
+// A pass re-offers every current frame to every connection; telling that a
+// connection already holds it must cost a comparison, not a copy of the frame.
+func TestSendLatestCurrentConnDoesNotCopy(t *testing.T) {
+	c := testConn("a")
+	data := []byte(`{"projects":[{"name":"a"}]}`)
+	sendLatest([]*conn{c}, data)
+	<-c.out
+	if n := testing.AllocsPerRun(100, func() { sendLatest([]*conn{c}, data) }); n != 0 {
+		t.Fatalf("sendLatest to a current connection allocated %v times per call", n)
+	}
+	select {
+	case <-c.out:
+		t.Fatal("a current connection was sent its frame again")
+	default:
 	}
 }
 
@@ -329,5 +349,128 @@ func TestReconcileUnrelatedPushMidBuild(t *testing.T) {
 	h.reconcile(context.Background())
 	if n := builds.Load(); n != 4 {
 		t.Fatalf("builds = %d, want 4: its own repo's push mid-build must leave it due", n)
+	}
+}
+
+// TestRejectedTokenEndsItsConnections pins API-3: a build whose session a
+// TokenReview rejected ends that identity's connections, so the reconnect
+// meets a 401 instead of a frozen frame. Any other failure, a bare apiserver
+// 401 included, keeps the connection.
+func TestRejectedTokenEndsItsConnections(t *testing.T) {
+	inv := func(_ context.Context, id auth.Identity) (model.Inventory, error) {
+		switch id.Username {
+		case "alice":
+			return model.Inventory{}, fmt.Errorf("%w: session expired", auth.ErrRejected)
+		case "carol":
+			return model.Inventory{}, apierrors.NewUnauthorized("virt-api refused")
+		}
+		return echoInventory(context.Background(), id)
+	}
+	h := NewHub(inv, make(chan struct{}, 1), testLevels(), "")
+	alice, alice2, bob, carol := testConn("alice"), testConn("alice"), testConn("bob"), testConn("carol")
+	for _, c := range []*conn{alice, alice2, bob, carol} {
+		h.add(c)
+	}
+
+	h.reconcile(context.Background())
+	h.reconcile(context.Background()) // a second pass before teardown must not double-close
+	for _, c := range []*conn{alice, alice2} {
+		select {
+		case <-c.evict:
+		default:
+			t.Fatal("a rejected session's connection was kept open")
+		}
+	}
+	for _, c := range []*conn{bob, carol} {
+		select {
+		case <-c.evict:
+			t.Fatalf("%s was evicted; only a rejected session ends its connections", c.id.Username)
+		default:
+		}
+	}
+}
+
+// TestFailedBuildRetriesWithoutAnEvent pins the quiet-cluster liveness: a first
+// build that fails is rebuilt on its own backoff, so the client gets a frame
+// without any change on the bus.
+func TestFailedBuildRetriesWithoutAnEvent(t *testing.T) {
+	var calls atomic.Int32
+	inv := func(ctx context.Context, id auth.Identity) (model.Inventory, error) {
+		if calls.Add(1) == 1 {
+			return model.Inventory{}, errors.New("review backend down")
+		}
+		return echoInventory(ctx, id)
+	}
+	h := NewHub(inv, make(chan struct{}), testLevels(), "")
+	h.retryBase = 10 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.Run(ctx)
+	alice := testConn("alice")
+	h.add(alice)
+
+	select {
+	case data := <-alice.out:
+		var inv model.Inventory
+		if err := json.Unmarshal(data, &inv); err != nil || len(inv.Projects) != 1 || inv.Projects[0].Name != "alice" {
+			t.Fatalf("frame = %s, want alice's", data)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a failed first build was never retried")
+	}
+	// The frame reaches the conn from inside the build; the pass settles the
+	// retry only after every build of the pass returns.
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		h.mu.Lock()
+		pending := len(h.retries)
+		h.mu.Unlock()
+		if pending == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("a built identity kept %d pending retries", pending)
+		}
+	}
+}
+
+// TestRetryBackoffAndDisconnect pins the retry bounds: the delay doubles up to
+// retryCap, and a disconnect drops the pending retry and stops its timer.
+func TestRetryBackoffAndDisconnect(t *testing.T) {
+	fail := func(context.Context, auth.Identity) (model.Inventory, error) {
+		return model.Inventory{}, errors.New("review backend down")
+	}
+	h := NewHub(fail, make(chan struct{}, 1), testLevels(), "")
+	h.retryBase = time.Hour
+	if d := h.retryDelay(0); d != retryCap {
+		t.Errorf("first delay = %v, want the cap", d)
+	}
+	h.retryBase = time.Second
+	if d0, d1, d9 := h.retryDelay(0), h.retryDelay(1), h.retryDelay(9); d0 != time.Second || d1 != 2*time.Second || d9 != retryCap {
+		t.Errorf("delays = %v, %v, %v; want 1s, 2s, cap", d0, d1, d9)
+	}
+
+	alice := testConn("alice")
+	h.add(alice)
+	h.reconcile(context.Background())
+	h.reconcile(context.Background())
+	h.mu.Lock()
+	r := h.retries[alice.key]
+	h.mu.Unlock()
+	if r == nil || r.attempt != 2 {
+		t.Fatalf("retry = %+v, want attempt 2 after two failures", r)
+	}
+	h.remove(alice)
+	h.mu.Lock()
+	left := len(h.retries)
+	h.mu.Unlock()
+	if left != 0 || r.timer.Stop() {
+		t.Error("a disconnected identity kept its retry or a live timer")
+	}
+	h.retryLater(alice.key)
+	h.mu.Lock()
+	left = len(h.retries)
+	h.mu.Unlock()
+	if left != 0 {
+		t.Error("a retry was scheduled for an identity no longer connected")
 	}
 }

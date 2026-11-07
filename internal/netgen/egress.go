@@ -84,7 +84,7 @@ func EgressFirewallManifest(s EgressFirewallSpec) (path string, content []byte, 
 	if err != nil {
 		return "", nil, err
 	}
-	return s.Namespace + "/egressfirewalls/default.yaml", out, nil
+	return model.KindEgressFW.RepoPath(s.Namespace, "default"), out, nil
 }
 
 // EgressIPSpec describes a cluster-scoped EgressIP - the Tier-0 source-NAT pool that
@@ -128,7 +128,7 @@ func EgressIPManifest(s EgressIPSpec) (path string, content []byte, err error) {
 	if err != nil {
 		return "", nil, err
 	}
-	return "egressips/" + s.Name + ".yaml", out, nil
+	return model.KindEgressIP.RepoPath("", s.Name), out, nil
 }
 
 // ExternalRouteSpec describes a cluster-scoped AdminPolicyBasedExternalRoute - the
@@ -174,5 +174,5 @@ func ExternalRouteManifest(s ExternalRouteSpec) (path string, content []byte, er
 	if err != nil {
 		return "", nil, err
 	}
-	return "externalroutes/" + s.Name + ".yaml", out, nil
+	return model.KindExtRoute.RepoPath("", s.Name), out, nil
 }

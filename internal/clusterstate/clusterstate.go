@@ -19,8 +19,9 @@
 // publishes RBACChanged to invalidate the per-token visible-set cache promptly.
 // Only bindings in project namespaces signal (projectRBACStore).
 //
-// On any mutation a reflector publishes its kind to the shared event bus, which the
-// hub subscribes to; the read path doesn't diff anything.
+// The VM and VMI stores keep a derived live view current as they move and
+// publish LiveChanged only when it changes; the namespace store publishes on any
+// mutation. The hub subscribes to both; the read path diffs nothing.
 //
 // Authorization is unchanged: the snapshot is global truth, but a user only ever
 // sees the namespaces their own RBAC grants - the filter is the security gate.
@@ -28,6 +29,8 @@ package clusterstate
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"maps"
 	"strings"
 	"sync/atomic"
@@ -35,6 +38,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/tools/cache"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
@@ -44,9 +48,9 @@ import (
 	"github.com/epheo/dotvirt/internal/reflect"
 )
 
-// LiveVM is one VM's actual state, keyed by "namespace/name" for merging into the
-// git-derived inventory - clusterstate's own read DTO, derived from the watched
-// VMI objects (inventory.applyLive copies it onto each model.VM).
+// LiveVM is one VM's actual state, for merging into the git-derived inventory -
+// clusterstate's own read DTO, derived from the watched VMI objects
+// (inventory.applyLive copies it onto each model.VM).
 type LiveVM struct {
 	Phase    string
 	GuestIP  string   // primary interface IP (the inventory grid's IP column)
@@ -94,11 +98,12 @@ type Migration struct {
 }
 
 // State is the SA-maintained snapshot. Build with New, start with Run; reads
-// (LiveVMs, Namespaces) are lock-free indexer scans safe for concurrent callers.
+// (Live, Namespaces) are lock-free and safe for concurrent callers.
 type State struct {
 	vms  cache.Indexer
 	vmis cache.Indexer
 	nss  cache.Indexer
+	live *liveIndex
 	// RoleBindings are watched too, but only as an RBACChanged signal - via a
 	// retain-nothing signal store, so there's no indexer for them here.
 
@@ -123,17 +128,13 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 	s.vms = reflect.NewIndexer()
 	s.vmis = reflect.NewIndexer()
 	s.nss = reflect.NewIndexer()
+	s.live = newLiveIndex(s.vms, s.vmis, s.publishLive)
 
-	vmSpec := func() { bus.Publish(eventbus.VMSpecChanged) }
-	live := func() { bus.Publish(eventbus.LiveChanged) }
 	namespace := func() { bus.Publish(eventbus.NamespaceChanged) }
 	rbac := func() { bus.Publish(eventbus.RBACChanged) }
 	s.specs = []reflectorSpec{
-		// vms: VMSpecChanged is gated on metadata.generation by vmSpecStore, so a
-		// status-only VM write fires only LiveChanged, so consumers of VMSpecChanged
-		// don't wake on VM-status heartbeats.
-		{newVMSpecStore(s.vms, vmSpec, live, s.vmsReady.Mark), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch()},
-		{reflect.NewStore(s.vmis, live, s.vmisReady.Mark), &kubevirtcorev1.VirtualMachineInstance{}, sa.VMIListWatch()},
+		{s.live.store(s.vms, s.vmsReady.Mark), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch()},
+		{s.live.store(s.vmis, s.vmisReady.Mark), &kubevirtcorev1.VirtualMachineInstance{}, sa.VMIListWatch()},
 		// A namespace move is both a topology change (inventory) and a visibility
 		// change; NamespaceChanged is summed into both the inventory and RBAC versions.
 		{reflect.NewStore(s.nss, namespace, s.nssReady.Mark), &corev1.Namespace{}, sa.NamespaceListWatch(projectLabel)},
@@ -146,7 +147,7 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 }
 
 func (s *State) newRBACStore(onChange func()) cache.Store {
-	return &projectRBACStore{Store: reflect.NewSignalStore(onChange, nil), isProject: func(ns string) bool {
+	return &projectRBACStore{onChange: onChange, isProject: func(ns string) bool {
 		_, ok, _ := s.nss.GetByKey(ns)
 		return ok
 	}}
@@ -163,9 +164,13 @@ type reflectorSpec struct {
 // until the initial LIST has populated the snapshot.
 func (s *State) Run(ctx context.Context) {
 	for i, spec := range s.specs {
-		reflect.RunTyped(ctx, reflect.TrackHealth(spec.lw, &s.healthy[i]), spec.expected, spec.store)
+		reflect.RunTyped(ctx, reflect.TrackHealth(spec.lw, &s.healthy[i], s.publishLive), spec.expected, spec.store)
 	}
 }
+
+// publishLive also carries health flips: the frame's stale warning reads
+// Healthy.
+func (s *State) publishLive() { s.bus.Publish(eventbus.LiveChanged) }
 
 // Healthy reports whether every watch is currently established
 // (reflect.TrackHealth). The snapshot keeps serving its last-good stores while
@@ -213,106 +218,156 @@ func (s *State) VMObjects(namespaces []string) []kubevirtcorev1.VirtualMachine {
 	return out
 }
 
-// LiveVMs returns the current live state of every VM in the snapshot, keyed by
-// "namespace/name". A VM with no running VMI is present with a zero (stopped)
-// LiveVM; a VMI supplies phase/IP/node. Pure in-memory - no cluster call.
-func (s *State) LiveVMs() map[string]LiveVM {
-	out := map[string]LiveVM{}
-	for _, obj := range s.vms.List() {
-		vm, ok := obj.(*kubevirtcorev1.VirtualMachine)
-		if !ok {
-			continue
+// Live returns the current live state of every VM in the snapshot - one view
+// shared by all callers, which must not modify it. Pure in-memory, no copy.
+func (s *State) Live() LiveView { return s.live.load() }
+
+// StoppedVMs counts the VMs in namespaces that have no running instance.
+func (s *State) StoppedVMs(namespaces []string) int {
+	live := s.Live()
+	n := 0
+	for _, ns := range namespaces {
+		for _, vm := range live[ns] {
+			if vm.Phase == "" {
+				n++
+			}
 		}
-		out[vm.Namespace+"/"+vm.Name] = LiveVM{} // exists, no running instance
 	}
-	for _, obj := range s.vmis.List() {
-		vmi, ok := obj.(*kubevirtcorev1.VirtualMachineInstance)
-		if !ok {
-			continue
+	return n
+}
+
+// Workload is one VM as network policy sees it.
+type Workload struct {
+	// Labels are the virt-launcher pod's, the ones selectors match: the VMI's
+	// own plus KubeVirt's fixed set.
+	Labels map[string]string
+	// Live: a running VMI answered. Otherwise the VM template supplied the
+	// deterministic subset, without the instance UID or node a start assigns.
+	Live bool
+
+	// PodNet: binds the namespace's primary network. DefaultNet: the NAD a
+	// default multus binding substitutes for it, "namespace/name"; it is NOT
+	// the namespace primary. Nets: secondary multus refs, namespace-qualified.
+	PodNet     bool
+	DefaultNet string
+	Nets       []string
+
+	// IPs are the primary NIC's addresses, nil when stopped. Secondary and
+	// guest-only interfaces never carry a flow the cluster policies filter.
+	IPs []string
+}
+
+// Workload resolves one VM's network identity, from the running VMI (what
+// actually runs) else the VM template; found=false when the VM is in neither
+// store. Both Effective and Trace match against it. Copies - reflector-owned
+// objects must never escape.
+func (s *State) Workload(namespace, name string) (w Workload, found bool) {
+	if obj, ok, _ := s.vmis.GetByKey(namespace + "/" + name); ok {
+		if vmi, ok := obj.(*kubevirtcorev1.VirtualMachineInstance); ok {
+			w.Live = true
+			primary := w.attach(namespace, &vmi.Spec)
+			w.Labels = launcherLabels(vmi.Name, vmi.Spec.Hostname, vmi.Labels, vmi.Annotations)
+			w.Labels[kubevirtcorev1.CreatedByLabel] = string(vmi.UID)
+			for _, iface := range vmi.Status.Interfaces {
+				if primary == "" || iface.Name != primary {
+					continue
+				}
+				if len(iface.IPs) > 0 {
+					w.IPs = append(w.IPs, iface.IPs...)
+				} else if iface.IP != "" {
+					w.IPs = append(w.IPs, iface.IP)
+				}
+			}
+			return w, true
 		}
-		out[vmi.Namespace+"/"+vmi.Name] = liveFromVMI(vmi)
+	}
+	if obj, ok, _ := s.vms.GetByKey(namespace + "/" + name); ok {
+		if vm, ok := obj.(*kubevirtcorev1.VirtualMachine); ok {
+			t := vm.Spec.Template
+			if t == nil {
+				t = &kubevirtcorev1.VirtualMachineInstanceTemplateSpec{}
+			}
+			w.attach(namespace, &t.Spec)
+			// KubeVirt autoattaches the pod network when a template names
+			// none; that defaulting lands on the VMI at creation, never on the
+			// stored template, so mirror it here or a stopped minimal manifest
+			// reads as unattached.
+			if len(t.Spec.Networks) == 0 {
+				if auto := t.Spec.Domain.Devices.AutoattachPodInterface; auto == nil || *auto {
+					w.PodNet = true
+				}
+			}
+			// The VMI a start creates takes the template's metadata and the VM's name.
+			w.Labels = launcherLabels(vm.Name, t.Spec.Hostname, t.ObjectMeta.Labels, t.ObjectMeta.Annotations)
+			return w, true
+		}
+	}
+	return Workload{}, false
+}
+
+// attach records spec's NIC bindings and returns the primary one's network
+// name (pod or default multus), "" when there is none.
+func (w *Workload) attach(namespace string, spec *kubevirtcorev1.VirtualMachineInstanceSpec) (primary string) {
+	qualify := func(ref string) string {
+		if strings.Contains(ref, "/") {
+			return ref
+		}
+		return namespace + "/" + ref
+	}
+	for _, n := range spec.Networks {
+		switch {
+		case n.Pod != nil:
+			w.PodNet, primary = true, n.Name
+		case n.Multus != nil && n.Multus.Default:
+			w.DefaultNet, primary = qualify(n.Multus.NetworkName), n.Name
+		case n.Multus != nil:
+			w.Nets = append(w.Nets, qualify(n.Multus.NetworkName))
+		}
+	}
+	return primary
+}
+
+// istioInject is copied from a VMI annotation to the same pod label.
+const istioInject = "sidecar.istio.io/inject"
+
+// launcherLabels mirrors virt-controller's virt-launcher pod labels (KubeVirt
+// v1.8 services.podLabels) except kubevirt.io/created-by, the VMI UID, which
+// only a live VMI has.
+func launcherLabels(name, hostname string, labels, annotations map[string]string) map[string]string {
+	out := maps.Clone(labels)
+	if out == nil {
+		out = map[string]string{}
+	}
+	out[kubevirtcorev1.AppLabel] = "virt-launcher"
+	out[kubevirtcorev1.DeprecatedVirtualMachineNameLabel] = launcherHostname(name, hostname)
+	out[kubevirtcorev1.VirtualMachineInstanceIDLabel] = vmiID(name)
+	if v, ok := annotations[istioInject]; ok {
+		out[istioInject] = v
 	}
 	return out
 }
 
-// WorkloadLabels returns the labels network policies match for one VM's
-// workload: the running VMI's (what the virt-launcher pod carries), else the
-// manifest template's for a stopped VM. live reports which source answered;
-// found=false when the VM is in neither store. Copies - reflector-owned
-// objects must never escape.
-func (s *State) WorkloadLabels(namespace, name string) (lbls map[string]string, live, found bool) {
-	if obj, ok, _ := s.vmis.GetByKey(namespace + "/" + name); ok {
-		if vmi, ok := obj.(*kubevirtcorev1.VirtualMachineInstance); ok {
-			return maps.Clone(vmi.Labels), true, true
-		}
+// launcherHostname is KubeVirt's dns.SanitizeHostname.
+func launcherHostname(name, hostname string) string {
+	if hostname != "" {
+		return hostname
 	}
-	if obj, ok, _ := s.vms.GetByKey(namespace + "/" + name); ok {
-		if vm, ok := obj.(*kubevirtcorev1.VirtualMachine); ok {
-			if vm.Spec.Template != nil {
-				lbls = maps.Clone(vm.Spec.Template.ObjectMeta.Labels)
-			}
-			return lbls, false, true
-		}
+	h, _, _ := strings.Cut(name, ".")
+	if len(h) > validation.DNS1123LabelMaxLength {
+		h = h[:validation.DNS1123LabelMaxLength]
 	}
-	return nil, false, false
+	return h
 }
 
-// WorkloadNetworks reports one VM workload's NIC attachments for the trace
-// connectivity check: whether it binds the namespace's primary network (pod
-// binding), the NAD substituted as its default network (a default multus
-// binding replaces the pod network with that NAD's segment - it is NOT the
-// namespace primary), and its secondary multus refs, namespace-qualified.
-// Live VMI spec first (what actually runs), else the VM template; addresses
-// come from the running VMI's interfaces, nil when stopped.
-func (s *State) WorkloadNetworks(namespace, name string) (podNet bool, defaultNet string, nets, ips []string, found bool) {
-	fromSpec := func(spec *kubevirtcorev1.VirtualMachineInstanceSpec) {
-		for _, n := range spec.Networks {
-			switch {
-			case n.Pod != nil:
-				podNet = true
-			case n.Multus != nil && n.Multus.Default:
-				ref := n.Multus.NetworkName
-				if !strings.Contains(ref, "/") {
-					ref = namespace + "/" + ref
-				}
-				defaultNet = ref
-			case n.Multus != nil:
-				ref := n.Multus.NetworkName
-				if !strings.Contains(ref, "/") {
-					ref = namespace + "/" + ref
-				}
-				nets = append(nets, ref)
-			}
-		}
+// vmiID is KubeVirt's apimachinery.CalculateVirtualMachineInstanceID: the
+// name, or a hash-suffixed prefix when it overflows a label value.
+func vmiID(name string) string {
+	if len(name) <= validation.DNS1035LabelMaxLength {
+		return name
 	}
-	if obj, ok, _ := s.vmis.GetByKey(namespace + "/" + name); ok {
-		if vmi, ok := obj.(*kubevirtcorev1.VirtualMachineInstance); ok {
-			fromSpec(&vmi.Spec)
-			for _, iface := range vmi.Status.Interfaces {
-				ips = append(ips, iface.IPs...)
-			}
-			return podNet, defaultNet, nets, ips, true
-		}
-	}
-	if obj, ok, _ := s.vms.GetByKey(namespace + "/" + name); ok {
-		if vm, ok := obj.(*kubevirtcorev1.VirtualMachine); ok {
-			if vm.Spec.Template != nil {
-				spec := &vm.Spec.Template.Spec
-				fromSpec(spec)
-				// KubeVirt autoattaches the pod network when a template names
-				// none; that defaulting lands on the VMI at creation, never on
-				// the stored template, so mirror it here or a stopped minimal
-				// manifest reads as unattached.
-				if len(spec.Networks) == 0 {
-					if auto := spec.Domain.Devices.AutoattachPodInterface; auto == nil || *auto {
-						podNet = true
-					}
-				}
-			}
-			return podNet, defaultNet, nets, nil, true
-		}
-	}
-	return false, "", nil, nil, false
+	const hashLen = 8
+	sum := sha1.Sum([]byte(name)) // KubeVirt's derivation, not a security use
+	return name[:validation.DNS1035LabelMaxLength-hashLen-1] + "-" + hex.EncodeToString(sum[:])[:hashLen]
 }
 
 // NamespaceLabels returns one namespace's labels by name, nil when the

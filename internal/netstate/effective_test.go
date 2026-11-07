@@ -1,6 +1,8 @@
 package netstate
 
 import (
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/epheo/dotvirt/internal/model"
@@ -243,5 +245,56 @@ func TestEffectiveEgressPlanes(t *testing.T) {
 
 	if eff := s.Effective("team-b", map[string]string{"kubernetes.io/metadata.name": "team-b"}, nil, false); len(eff.Gateway)+len(eff.SNAT)+len(eff.Routes) != 0 {
 		t.Errorf("team-b: nothing binds, got %+v", eff)
+	}
+}
+
+// Egress planes bind in name order, not the store's hash order.
+func TestEffectiveEgressPlanesOrdered(t *testing.T) {
+	s := New(nil, nil)
+	names := []string{"pool-d", "pool-b", "pool-a", "pool-c"}
+	for _, name := range names {
+		add(t, s.egressip, map[string]any{
+			"apiVersion": "k8s.ovn.org/v1", "kind": "EgressIP",
+			"metadata": map[string]any{"name": name},
+			"spec":     map[string]any{"egressIPs": []any{"192.0.2.10"}, "namespaceSelector": map[string]any{}},
+		})
+	}
+	for range 50 {
+		eff := s.Effective("team-a", nil, nil, true)
+		var got []string
+		for _, b := range eff.SNAT {
+			got = append(got, b.Policy.Name)
+		}
+		if !slices.Equal(got, []string{"pool-a", "pool-b", "pool-c", "pool-d"}) {
+			t.Fatalf("SNAT order = %v", got)
+		}
+	}
+}
+
+// The Effective view flags what the trace treats as uncertain: two admin
+// policies sharing a priority, and one past the range OVN-K enforces.
+func TestEffectiveANPPriorityNotes(t *testing.T) {
+	s := New(nil, nil)
+	for name, prio := range map[string]int64{"a-shared": 5, "b-shared": 5, "solo": 7, "too-low": 500} {
+		add(t, s.anp, map[string]any{
+			"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "AdminNetworkPolicy",
+			"metadata": map[string]any{"name": name},
+			"spec":     map[string]any{"priority": prio, "subject": map[string]any{"namespaces": map[string]any{}}},
+		})
+	}
+	notes := map[string]string{}
+	for _, b := range s.Effective("team-a", nil, nil, true).EastWest {
+		notes[b.Policy.Name] = b.Note
+	}
+	for _, name := range []string{"a-shared", "b-shared"} {
+		if !strings.Contains(notes[name], "same priority") {
+			t.Errorf("%s note = %q, want the shared-priority flag", name, notes[name])
+		}
+	}
+	if notes["solo"] != "" {
+		t.Errorf("solo note = %q, want none", notes["solo"])
+	}
+	if !strings.Contains(notes["too-low"], "does not enforce priority 500") {
+		t.Errorf("too-low note = %q, want the unenforced flag", notes["too-low"])
 	}
 }

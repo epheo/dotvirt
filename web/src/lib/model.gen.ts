@@ -158,6 +158,10 @@ export interface ObjectSpec {
   manifest: string;
   spec?: unknown;
   reason?: string;
+  /**
+   * BaseBlob is the git blob ID of Manifest, for UpdateManifestRequest.
+   */
+  baseBlob?: string;
 }
 /**
  * UpdateManifestRequest replaces a declared object's manifest verbatim - the
@@ -165,6 +169,11 @@ export interface ObjectSpec {
  */
 export interface UpdateManifestRequest {
   yaml: string;
+  /**
+   * BaseBlob is the version the edit was made on (ObjectSpec.BaseBlob); a
+   * stale one is refused. Optional.
+   */
+  baseBlob?: string;
 }
 /**
  * DraftItem is one pending change rendered for the UI.
@@ -220,6 +229,11 @@ export interface ProposeResult {
   prNumber?: number /* int */;
   compareURL?: string;
   existing?: boolean;
+  /**
+   * Warning is what the propose decided on the user's behalf and they
+   * should read.
+   */
+  warning?: string;
 }
 /**
  * ReleaseResult is POST /api/projects/{project}/release: namespaces released
@@ -670,7 +684,7 @@ export interface Uplink {
   name: string; // physicalNetworkName
   bridge: string; // OVS bridge (br-ex, br-physnet...)
   builtin?: boolean; // the default br-ex uplink
-  nodes?: string[]; // nodes carrying the mapping
+  nodes: string[]; // nodes carrying the mapping; never omitted, the web reads absent as every node
   nodeCount: number /* int */; // len(Nodes), for the "N/M nodes" badge
   /**
    * Policy is the NodeNetworkConfigurationPolicy declaring this uplink - the
@@ -1001,8 +1015,9 @@ export interface EffectivePolicy {
   namespace: string;
   vm?: string;
   /**
-   * Labels pod selectors were matched against. Live: the running VMI's (what
-   * the virt-launcher pod carries); otherwise the manifest template's.
+   * Labels pod selectors were matched against: the virt-launcher pod's, the
+   * VMI's own plus KubeVirt's fixed set. Live: from the running VMI;
+   * otherwise the template's, without the instance UID a start assigns.
    */
   labels?: { [key: string]: string};
   labelsLive?: boolean;
@@ -1146,6 +1161,7 @@ export interface Template {
   instancetype?: string; // blueprint summary, best-effort
   preference?: string;
   yaml: string;
+  baseBlob?: string; // git blob ID of YAML, for UpdateTemplateRequest
   error?: string; // parse failure - listed, but not deployable
 }
 /**
@@ -1187,6 +1203,11 @@ export interface UpdateTemplateRequest {
   library: string;
   name: string;
   yaml: string;
+  /**
+   * BaseBlob is the version the edit was made on (Template.BaseBlob); a
+   * stale one is refused. Optional.
+   */
+  baseBlob?: string;
 }
 /**
  * SaveTemplateRequest derives a template from an existing VM's git manifest and

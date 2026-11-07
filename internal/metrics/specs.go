@@ -32,18 +32,31 @@ func resolveRange(rng string) (string, rangeSpec) {
 	return defaultRange, ranges[defaultRange]
 }
 
-// vcpuCount is the per-VM vCPU denominator. kubevirt_vmi_vcpu_count only
-// exists on newer KubeVirt; older versions expose one series per vCPU instead,
-// so fall back to counting those - dividing by the absent metric alone would
-// blank every CPU-percentage chart.
-func vcpuCount(sel string) string {
-	return fmt.Sprintf("(kubevirt_vmi_vcpu_count%s or count by(namespace,name)(kubevirt_vmi_vcpu_seconds_total%s))", sel, sel)
+// vcpus is one vCPU count per `by` group (namespace,name plus any outer
+// grouping). kubevirt_vmi_vcpu_count only exists on newer KubeVirt; older
+// versions expose a series per vCPU and state, so the fallback counts distinct
+// ids. Both sides aggregate to the same label set because `or` dedupes only on
+// identical sets: a raw series beside a count is two series per VM, which the
+// per-VM division rejects. max folds a migration's two launchers.
+func vcpus(by, sel string) string {
+	return fmt.Sprintf("(max by(%[1]s)(kubevirt_vmi_vcpu_count%[2]s) or count by(%[1]s)(count by(%[1]s,id)(kubevirt_vmi_vcpu_seconds_total%[2]s)))", by, sel)
 }
 
-// vcpuTotal is the scope-wide allocated-vCPU sum with the same fallback.
-func vcpuTotal(sel string) string {
-	return fmt.Sprintf("(sum(kubevirt_vmi_vcpu_count%s) or sum(count by(namespace,name)(kubevirt_vmi_vcpu_seconds_total%s)))", sel, sel)
+// vcpuCount is the per-VM vCPU denominator.
+func vcpuCount(sel string) string { return vcpus("namespace,name", sel) }
+
+// vcpuTotal is the scope-wide allocated-vCPU sum.
+func vcpuTotal(sel string) string { return "sum" + vcpuCount(sel) }
+
+// cpuPercent is one VM's CPU use as a percentage of its vCPUs over window rw.
+// The sum folds a migration's two launchers so the division still matches
+// one series to one.
+func cpuPercent(sel, rw string) string {
+	return fmt.Sprintf("sum by(namespace,name)(rate(kubevirt_vmi_cpu_usage_seconds_total%s[%s]))*100 / on(namespace,name) %s", sel, rw, vcpuCount(sel))
 }
+
+// nodeVCPUs is the allocated-vCPU sum per node.
+func nodeVCPUs() string { return "sum by(node)" + vcpus("node,namespace,name", "") }
 
 type seriesSpec struct {
 	name  string
@@ -66,7 +79,7 @@ func chartSpecs(ns, name, rw string) []chartSpec {
 	s := fmt.Sprintf("{namespace=%q,name=%q}", ns, name)
 	return []chartSpec{
 		{"cpu", "CPU", "%", false, []seriesSpec{
-			{"Usage", fmt.Sprintf("rate(kubevirt_vmi_cpu_usage_seconds_total%s[%s])*100 / on(namespace,name) %s", s, rw, vcpuCount(s)), ""},
+			{"Usage", cpuPercent(s, rw), ""},
 			// Wait/Steal are exported per vCPU (an id label); without the sum
 			// the chart would plot one arbitrary vCPU's series on SMP VMs.
 			{"Wait", fmt.Sprintf("sum(rate(kubevirt_vmi_vcpu_wait_seconds_total%s[%s]))*100", s, rw), ""},

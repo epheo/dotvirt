@@ -18,6 +18,11 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 	if err != nil {
 		return model.DraftView{}, err
 	}
+	return c.render(id, proj, entries)
+}
+
+// render is entries as the draft view renders them against the base branch.
+func (c *Coordinator) render(id auth.Identity, proj project.ProjectInfo, entries []draft.Entry) (model.DraftView, error) {
 	view := model.DraftView{Base: c.baseBranch, Branch: c.proposedBranch(id.Username, proj.Name), Count: len(entries), Items: []model.DraftItem{}}
 	view.Prune = c.prunePending(proj, entries)
 	view.Warning = pruneWarning(view.Prune)
@@ -74,13 +79,13 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 	return view, nil
 }
 
-// objectLabel names an entry's object: "namespace/name", or the bare name for a
-// cluster-scoped object and for a namespace itself.
+// objectLabel names an entry's object; a namespace's entry is keyed under its
+// own name.
 func objectLabel(e draft.Entry) string {
-	if e.Namespace == model.ClusterScopeNS || e.Resource == draft.ResourceNamespace {
+	if e.Resource == draft.ResourceNamespace {
 		return e.Name
 	}
-	return e.Namespace + "/" + e.Name
+	return qualified(e.Namespace, e.Name)
 }
 
 // wizardChanges summarizes a wizard-rendered VM by its sizing and devices, read

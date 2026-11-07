@@ -6,7 +6,7 @@ import (
 
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
-	"github.com/epheo/dotvirt/internal/vmgen"
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // annotationsToStrip are server- or controller-set annotations that would make
@@ -27,42 +27,24 @@ var annotationsToStrip = []string{
 // cluster state always produces identical bytes, so an unchanged VM never reads as
 // drift against the manifest git holds.
 func ExportManifest(vm kubevirtcorev1.VirtualMachine) ([]byte, error) {
-	clean := kubevirtcorev1.VirtualMachine{
+	return yaml.Marshal(exportedVM{
+		TypeMeta: metav1.TypeMeta{APIVersion: kubevirtcorev1.SchemeGroupVersion.String(), Kind: "VirtualMachine"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        vm.Name,
+			Namespace:   vm.Namespace,
+			Labels:      vm.Labels,
+			Annotations: stripAnnotations(vm.Annotations),
+		},
 		Spec: vm.Spec,
-	}
-	clean.APIVersion = kubevirtcorev1.SchemeGroupVersion.String()
-	clean.Kind = "VirtualMachine"
-	clean.ObjectMeta = metav1.ObjectMeta{
-		Name:        vm.Name,
-		Namespace:   vm.Namespace,
-		Labels:      vm.Labels,
-		Annotations: stripAnnotations(vm.Annotations),
-	}
-	// Status is desired-state-irrelevant; leave it zero so it serializes minimally.
-	clean.Status = kubevirtcorev1.VirtualMachineStatus{}
-
-	raw, err := yaml.Marshal(clean)
-	if err != nil {
-		return nil, err
-	}
-	// VirtualMachineStatus has no omitempty, so it marshals as "status: {}".
-	// Drop it: a desired-state manifest shouldn't carry an empty status block.
-	return dropEmptyStatus(raw)
+	})
 }
 
-// dropEmptyStatus round-trips through a generic map to remove a top-level empty
-// "status" key, independent of which status subfields happen to be zero.
-func dropEmptyStatus(raw []byte) ([]byte, error) {
-	var m map[string]any
-	if err := yaml.Unmarshal(raw, &m); err != nil {
-		return nil, err
-	}
-	if s, ok := m["status"]; ok {
-		if sm, ok := s.(map[string]any); ok && len(sm) == 0 {
-			delete(m, "status")
-		}
-	}
-	return yaml.Marshal(m)
+// exportedVM is a VirtualMachine without its status, which has no omitempty
+// and would otherwise marshal as "status: {}" into a desired-state manifest.
+type exportedVM struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              kubevirtcorev1.VirtualMachineSpec `json:"spec"`
 }
 
 func stripAnnotations(in map[string]string) map[string]string {
@@ -82,8 +64,7 @@ func stripAnnotations(in map[string]string) map[string]string {
 	return out
 }
 
-// ExportPath is the repo-relative path a serialized VM's manifest lands at when
-// adopted: the wizard's layout, so adopt-then-edit converges on one file.
+// ExportPath is the repo-relative path a serialized VM's manifest lands at.
 func ExportPath(vm kubevirtcorev1.VirtualMachine) string {
-	return vmgen.ManifestPath(vm.Namespace, vm.Name)
+	return model.KindVM.RepoPath(vm.Namespace, vm.Name)
 }

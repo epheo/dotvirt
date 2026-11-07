@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
@@ -25,6 +28,20 @@ type fakeDraft struct {
 	fail  string                    // project whose lookup errors
 	calls int
 	by    map[string]int // forge calls per project
+
+	merged      []tasks.Merge // what the forge lists as merged
+	mergedFail  bool
+	mergedCalls int
+}
+
+func (f *fakeDraft) RecentlyMerged(project.ProjectInfo, time.Time) ([]tasks.Merge, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mergedCalls++
+	if f.mergedFail {
+		return nil, errors.New("forge down")
+	}
+	return f.merged, nil
 }
 
 func (f *fakeDraft) OpenProposals(proj project.ProjectInfo) ([]model.Proposal, error) {
@@ -65,7 +82,7 @@ func TestProposalsHotPathNeverCallsForge(t *testing.T) {
 	id := auth.Identity{Token: "tok-alice", Username: "alice"}
 	projects := []project.ProjectInfo{{Name: "team-a", Repo: "http://x/r.git"}}
 
-	if got := s.proposalsFor(id, projects); got != nil {
+	if got := s.proposalsFor(id, projects, false); got != nil {
 		t.Fatalf("cold cache should yield no lane, got %v", got)
 	}
 	if fd.forgeCalls() != 0 {
@@ -81,7 +98,7 @@ func TestProposalsHotPathNeverCallsForge(t *testing.T) {
 	if s.refreshProposals(true) {
 		t.Fatal("empty cold lane should not wake the hub")
 	}
-	if got := s.proposalsFor(id, projects); got == nil || len(got) != 0 {
+	if got := s.proposalsFor(id, projects, false); got == nil || len(got) != 0 {
 		t.Fatalf("after refresh the lane should be cached empty, got %v", got)
 	}
 
@@ -92,7 +109,7 @@ func TestProposalsHotPathNeverCallsForge(t *testing.T) {
 	if !s.refreshProposals(true) {
 		t.Fatal("a new PR should wake the hub")
 	}
-	got := s.proposalsFor(id, projects)
+	got := s.proposalsFor(id, projects, false)
 	if len(got) != 1 || got[0].PRNumber != 7 {
 		t.Fatalf("lane = %v, want PR #7", got)
 	}
@@ -109,7 +126,7 @@ func TestProposalsHotPathNeverCallsForge(t *testing.T) {
 	if !s.refreshProposals(true) {
 		t.Fatal("a merged PR should wake the hub")
 	}
-	if got := s.proposalsFor(id, projects); len(got) != 0 {
+	if got := s.proposalsFor(id, projects, false); len(got) != 0 {
 		t.Fatalf("lane should be empty after the merge, got %v", got)
 	}
 }
@@ -125,15 +142,15 @@ func TestProposalsLaneIsProjectScoped(t *testing.T) {
 	projects := []project.ProjectInfo{{Name: "team-a", Repo: "http://x/r.git"}}
 	alice := auth.Identity{Token: "tok-alice", Username: "alice"}
 	bob := auth.Identity{Token: "tok-bob", Username: "bob"}
-	s.proposalsFor(alice, projects)
-	s.proposalsFor(bob, projects)
+	s.proposalsFor(alice, projects, false)
+	s.proposalsFor(bob, projects, false)
 	if !s.refreshProposals(true) {
 		t.Fatal("a PR should wake the hub")
 	}
 	if fd.forgeCalls() != 1 {
 		t.Fatalf("one project watched twice cost %d forge calls; want 1", fd.forgeCalls())
 	}
-	a, b := s.proposalsFor(alice, projects), s.proposalsFor(bob, projects)
+	a, b := s.proposalsFor(alice, projects, false), s.proposalsFor(bob, projects, false)
 	if len(a) != 1 || !a[0].Mine {
 		t.Fatalf("alice's lane = %+v, want her PR marked mine", a)
 	}
@@ -145,31 +162,38 @@ func TestProposalsLaneIsProjectScoped(t *testing.T) {
 	}
 }
 
-// TestProposalsPlatformProjectSticky pins the platform-PR fix: the synthetic
-// "platform" project is config-only and never in discovery, so a propose into it
-// must track it explicitly, and a later inventory build must NOT drop it - else its
-// PR shows briefly then vanishes.
+// TestProposalsPlatformProjectSticky pins the platform lane's lifecycle: the
+// synthetic "platform" project is config-only and never in discovery, so a
+// propose into it tracks it explicitly; a build whose platform review failed
+// keeps it (else its PR shows briefly then vanishes); a build that decided
+// the caller is no platform author drops it, so a demoted author stops seeing
+// platform PRs.
 func TestProposalsPlatformProjectSticky(t *testing.T) {
 	fd := &fakeDraft{prs: map[string]model.Proposal{
 		"platform": {Project: "platform", PRNumber: 1, PRURL: "http://x/pr/1"},
 	}}
 	s := NewServer(Deps{Reader: fd, Draft: fd})
 	id := auth.Identity{Token: "tok-admin", Username: "kube:admin"}
+	platform := project.ProjectInfo{Name: "platform", Repo: "http://x/platform.git"}
+	teamA := []project.ProjectInfo{{Name: "team-a", Repo: "http://x/a.git"}}
+	hasPlatform := func(rows []model.Proposal) bool {
+		return len(rows) == 1 && rows[0].Project == "platform"
+	}
 
 	// A propose into the platform tier tracks it (handlePropose's pre-poke step).
-	s.trackProposalsProject(id, project.ProjectInfo{Name: "platform", Repo: "http://x/platform.git"})
+	s.trackProposalsProject(id, platform)
 	if !s.refreshProposals(true) {
 		t.Fatal("platform PR should wake the hub after a propose tracks it")
 	}
-	if got := s.proposalsFor(id, nil); len(got) != 1 || got[0].Project != "platform" {
+	if got := s.proposalsFor(id, []project.ProjectInfo{platform}, false); !hasPlatform(got) {
 		t.Fatalf("platform lane = %v, want PR for platform", got)
 	}
 
-	// A subsequent inventory build (discovery never lists platform) must keep it.
-	s.trackProposals(id, []project.ProjectInfo{{Name: "team-a", Repo: "http://x/a.git"}})
-	s.refreshProposals(true)
-	if got := s.proposalsFor(id, nil); len(got) != 1 || got[0].Project != "platform" {
-		t.Fatalf("platform lane dropped after an inventory build: %v", got)
+	if got := s.proposalsFor(id, teamA, true); !hasPlatform(got) {
+		t.Fatalf("platform lane dropped by a build whose review failed: %v", got)
+	}
+	if got := s.proposalsFor(id, teamA, false); hasPlatform(got) {
+		t.Fatalf("platform lane survived a build that found no platform authority: %v", got)
 	}
 }
 
@@ -180,7 +204,7 @@ func TestCanAuthorPlatformNoRepo(t *testing.T) {
 	id := auth.Identity{Token: "tok", Username: "u"}
 	// A nil cluster client is safe here: the repo-empty guard returns before any
 	// SSAR, so it must not be dereferenced.
-	if s.canAuthorPlatform(context.TODO(), id, nil) {
+	if ok, err := s.canAuthorPlatform(context.TODO(), id, nil); ok || err != nil {
 		t.Fatal("canAuthorPlatform must be false when no platform repo is configured")
 	}
 }
@@ -191,7 +215,7 @@ func TestProposalsTargetExpiry(t *testing.T) {
 	fd := &fakeDraft{prs: map[string]model.Proposal{}}
 	s := NewServer(Deps{Reader: fd, Draft: fd})
 	id := auth.Identity{Token: "tok-bob", Username: "bob"}
-	s.proposalsFor(id, []project.ProjectInfo{{Name: "team-b"}})
+	s.proposalsFor(id, []project.ProjectInfo{{Name: "team-b"}}, false)
 
 	// Age the target past the tracking window.
 	s.propMu.Lock()
@@ -227,7 +251,8 @@ func (f *fakeDraft) takeCalls() map[string]int {
 
 // TestProposalsRefreshOnlyDueProjects pins the per-repo fan-out: a push to one
 // repo re-queries that repo's lane alone, a nudge naming a repo does the same,
-// a failed lookup stays due, and only the backstop re-queries every lane.
+// a failed lookup waits for the backstop, and only the backstop re-queries every
+// lane.
 func TestProposalsRefreshOnlyDueProjects(t *testing.T) {
 	bus := eventbus.New()
 	fd := &fakeDraft{prs: map[string]model.Proposal{}}
@@ -236,7 +261,7 @@ func TestProposalsRefreshOnlyDueProjects(t *testing.T) {
 	s.trackProposals(id, []project.ProjectInfo{
 		{Name: "team-a", Repo: "https://forge/o/a.git"},
 		{Name: "team-b", Repo: "https://forge/o/b"},
-	})
+	}, false)
 	want := func(step string, calls map[string]int) {
 		t.Helper()
 		if got := fd.takeCalls(); !maps.Equal(got, calls) {
@@ -264,13 +289,142 @@ func TestProposalsRefreshOnlyDueProjects(t *testing.T) {
 	s.refreshProposals(false)
 	want("failing push to a", map[string]int{"team-a": 1})
 	s.refreshProposals(false)
-	want("failed lane stays due", map[string]int{"team-a": 1})
+	want("failed lane waits", map[string]int{})
 	fd.mu.Lock()
 	fd.fail = ""
 	fd.mu.Unlock()
-	s.refreshProposals(false)
-	want("recovered lane", map[string]int{"team-a": 1})
 
 	s.refreshProposals(true)
 	want("backstop", map[string]int{"team-a": 1, "team-b": 1})
+}
+
+// A failing forge must cost one query per backstop, not one per frame build:
+// every build of a frame whose lane is cold nudges the refresher, and a lane
+// that never caches turned each nudge into another forge round-trip.
+func TestProposalsFailingForgeNotAmplified(t *testing.T) {
+	fd := &fakeDraft{prs: map[string]model.Proposal{
+		"team-a": {Project: "team-a", PRNumber: 7, PRURL: "http://x/pr/7"},
+	}, fail: "team-b"}
+	s := NewServer(Deps{Reader: fd, Draft: fd})
+	id := auth.Identity{Token: "tok-alice", Username: "alice"}
+	projects := []project.ProjectInfo{{Name: "team-a", Repo: "http://x/a.git"}, {Name: "team-b", Repo: "http://x/b.git"}}
+
+	for range 5 {
+		s.proposalsFor(id, projects, false)
+		s.refreshProposals(false)
+	}
+	if got := fd.takeCalls(); got["team-b"] != 1 {
+		t.Fatalf("a cold lane on a failing forge was queried %d times over 5 frame builds; want 1", got["team-b"])
+	}
+
+	fd.mu.Lock()
+	fd.fail = "team-a"
+	fd.mu.Unlock()
+	s.refreshProposals(true)
+	if got := s.proposalsFor(id, projects, false); len(got) != 1 || got[0].PRNumber != 7 {
+		t.Fatalf("a failed refresh dropped the last known rows: %v", got)
+	}
+}
+
+// Frames rebuild only when something they show moves, so a tab open on a quiet
+// cluster builds once; its open stream, not rebuilds, must keep its lanes
+// refreshed past the tracking window, and closing it must let them expire.
+func TestProposalsOpenStreamKeepsTokenWatched(t *testing.T) {
+	fd := &fakeDraft{prs: map[string]model.Proposal{}}
+	s := NewServer(Deps{Reader: fd, Draft: fd})
+	id := auth.Identity{Token: "tok-bob", Username: "bob"}
+
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	stream := s.streaming(func(http.ResponseWriter, *http.Request) {
+		close(entered)
+		<-release
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/inventory/stream", nil)
+	req = req.WithContext(auth.NewContext(req.Context(), id))
+	go func() {
+		stream(httptest.NewRecorder(), req)
+		close(done)
+	}()
+	<-entered
+
+	s.proposalsFor(id, []project.ProjectInfo{{Name: "team-b"}}, false)
+	age := func() {
+		s.propMu.Lock()
+		for key, tgt := range s.propTargets {
+			tgt.lastSeen = time.Now().Add(-proposalsTrackFor - time.Minute)
+			s.propTargets[key] = tgt
+		}
+		s.propMu.Unlock()
+	}
+	age()
+	s.refreshProposals(true)
+	if got := fd.takeCalls(); got["team-b"] != 1 {
+		t.Fatalf("a token with an open stream stopped being refreshed: %v", got)
+	}
+
+	close(release)
+	<-done
+	age()
+	s.refreshProposals(true)
+	if got := fd.takeCalls(); len(got) != 0 {
+		t.Fatalf("a closed stream's token is still refreshed: %v", got)
+	}
+}
+
+// The merged lane costs a forge call only when its repo's head moved, plus one
+// settling read on the next backstop tick: the forge pushes a merge before it
+// marks the PR merged, so the read on the move can miss it.
+func TestMergedLaneReadsOnHeadMoves(t *testing.T) {
+	bus := eventbus.New()
+	feed := tasks.New(bus)
+	fd := &fakeDraft{prs: map[string]model.Proposal{}}
+	s := NewServer(Deps{Reader: fd, Draft: fd, Bus: bus, Tasks: feed})
+	repo := forge.NormalizeRepoURL("https://forge/o/a.git")
+	s.trackProposals(auth.Identity{Token: "tok-alice", Username: "alice"},
+		[]project.ProjectInfo{{Name: "team-a", Repo: "https://forge/o/a.git"}}, false)
+	reads := mergedReads{}
+	pass := func(step string, tick bool, want int) {
+		t.Helper()
+		fd.mu.Lock()
+		fd.mergedCalls = 0
+		fd.mu.Unlock()
+		s.refreshMerged(reads, tick)
+		fd.mu.Lock()
+		defer fd.mu.Unlock()
+		if fd.mergedCalls != want {
+			t.Fatalf("%s: %d merged-lane reads, want %d", step, fd.mergedCalls, want)
+		}
+	}
+	set := func(fn func()) {
+		fd.mu.Lock()
+		fn()
+		fd.mu.Unlock()
+	}
+
+	pass("cold lane", false, 1)
+	pass("nothing moved", false, 0)
+	pass("settle the reseed", true, 1)
+	pass("quiet backstop", true, 0)
+
+	bus.PublishKey(eventbus.GitChanged, repo)
+	pass("head moved, PR not marked merged yet", false, 1)
+	set(func() { fd.merged = []tasks.Merge{{RepoURL: repo, Number: 7, At: time.Now()}} })
+	pass("no move", false, 0)
+	if len(feed.Merges()) != 0 {
+		t.Fatal("merge recorded before the forge listed it")
+	}
+	pass("settle the move", true, 1)
+	if m := feed.Merges(); len(m) != 1 || m[0].Number != 7 {
+		t.Fatalf("settling read missed the merge: %+v", m)
+	}
+	pass("settled", true, 0)
+
+	set(func() { fd.mergedFail = true })
+	bus.PublishKey(eventbus.GitChanged, repo)
+	pass("failing read on a move", false, 1)
+	pass("failure waits for the backstop", false, 0)
+	pass("failed settle", true, 1)
+	set(func() { fd.mergedFail = false })
+	pass("retried on the next tick", true, 1)
+	pass("settled after recovery", true, 0)
 }

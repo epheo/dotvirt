@@ -20,13 +20,16 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
-var secret = []byte("test-secret-key")
+var (
+	secret     = []byte("test-secret-key")
+	testSealer = newSealer(secret)
+)
 
 func TestCookieRoundTrip(t *testing.T) {
 	const token = "sha256~abc.def-ghi"
-	value := cookieValue(token, secret)
+	value := cookieValue(token, testSealer)
 
-	got, ok := parseCookieValue(value, secret)
+	got, ok := parseCookieValue(value, testSealer)
 	if !ok {
 		t.Fatal("parseCookieValue rejected a value it just signed")
 	}
@@ -36,9 +39,9 @@ func TestCookieRoundTrip(t *testing.T) {
 }
 
 func TestCookieTamperRejected(t *testing.T) {
-	value := cookieValue("real-token", secret)
+	value := cookieValue("real-token", testSealer)
 
-	if _, ok := parseCookieValue(value, []byte("other-secret")); ok {
+	if _, ok := parseCookieValue(value, newSealer([]byte("other-secret"))); ok {
 		t.Error("accepted a cookie sealed with a different secret")
 	}
 	enc := strings.TrimPrefix(value, cookiePrefix)
@@ -49,20 +52,20 @@ func TestCookieTamperRejected(t *testing.T) {
 	} else {
 		flipped[i] = 'A'
 	}
-	if _, ok := parseCookieValue(cookiePrefix+string(flipped), secret); ok {
+	if _, ok := parseCookieValue(cookiePrefix+string(flipped), testSealer); ok {
 		t.Error("accepted tampered ciphertext")
 	}
-	if _, ok := parseCookieValue(cookiePrefix+"AAAA", secret); ok {
+	if _, ok := parseCookieValue(cookiePrefix+"AAAA", testSealer); ok {
 		t.Error("accepted a value shorter than the nonce")
 	}
-	if _, ok := parseCookieValue("garbage", secret); ok {
+	if _, ok := parseCookieValue("garbage", testSealer); ok {
 		t.Error("accepted a malformed cookie value")
 	}
 }
 
 func TestCookieHidesToken(t *testing.T) {
 	const token = "sha256~visible-token"
-	a, b := cookieValue(token, secret), cookieValue(token, secret)
+	a, b := cookieValue(token, testSealer), cookieValue(token, testSealer)
 	if strings.Contains(a, token) || strings.Contains(a, base64.RawURLEncoding.EncodeToString([]byte(token))) {
 		t.Error("sealed cookie carries the token in clear")
 	}
@@ -75,7 +78,7 @@ func TestCookieHidesToken(t *testing.T) {
 // the 4 KiB browser cookie cap.
 func TestCookieSizeForJWT(t *testing.T) {
 	jwt := strings.Repeat("x", 1400)
-	if n := len(cookieName) + 1 + len(cookieValue(jwt, secret)); n > 4096 {
+	if n := len(cookieName) + 1 + len(cookieValue(jwt, testSealer)); n > 4096 {
 		t.Errorf("sealed cookie is %d bytes, over the 4 KiB cap", n)
 	}
 }
@@ -90,7 +93,7 @@ func TestOldFormatCookieReadsLoggedOut(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/inventory", nil)
 	req.AddCookie(&http.Cookie{Name: cookieName, Value: old})
-	if _, ok := readCookie(req, secret); ok {
+	if _, ok := readCookie(req, testSealer); ok {
 		t.Fatal("old-format cookie still opens")
 	}
 	a, _ := fakeAuth(map[string]authnv1.UserInfo{token: {Username: "alice"}})
@@ -170,6 +173,29 @@ func TestValidateCaches(t *testing.T) {
 	}
 	if *calls != 2 {
 		t.Errorf("expected 1 more TokenReview for the bad token, got %d total", *calls)
+	}
+}
+
+// TestRecheck pins the session-end rule: a token the apiserver refused is
+// re-reviewed despite the cached session, a rejection is cached and answered
+// without another review, and a token that still validates is not rejected.
+func TestRecheck(t *testing.T) {
+	valid := map[string]authnv1.UserInfo{"good": {Username: "alice"}, "fine": {Username: "bob"}}
+	a, calls := fakeAuth(valid)
+	for _, tok := range []string{"good", "fine"} {
+		if _, err := a.Validate(context.Background(), tok); err != nil {
+			t.Fatalf("Validate(%s): %v", tok, err)
+		}
+	}
+	delete(valid, "good")
+	if err := a.Recheck(context.Background(), "good"); !errors.Is(err, ErrRejected) || *calls != 3 {
+		t.Fatalf("dead token: err = %v, reviews = %d; want a fresh rejecting review", err, *calls)
+	}
+	if err := a.Recheck(context.Background(), "good"); !errors.Is(err, ErrRejected) || *calls != 3 {
+		t.Fatalf("cached rejection: err = %v, reviews = %d; want no further review", err, *calls)
+	}
+	if err := a.Recheck(context.Background(), "fine"); err != nil || *calls != 4 {
+		t.Fatalf("live token: err = %v, reviews = %d; want a fresh accepting review", err, *calls)
 	}
 }
 

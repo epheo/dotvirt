@@ -13,26 +13,22 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/restfactory"
-	"github.com/epheo/dotvirt/pkg/forge"
 )
 
-// declaredDraft counts repo index reads; the embedded interface panics on
-// anything else.
+// declaredDraft serves one platform uplink's file; the embedded interface
+// panics on anything else.
 type declaredDraft struct {
 	Reader
 	Draft
-	reads int
 }
 
 func (d *declaredDraft) DeclaredFiles(project.ProjectInfo) (map[model.ObjectRef]string, error) {
-	d.reads++
 	return map[model.ObjectRef]string{{Kind: "NodeNetworkConfigurationPolicy", Name: "uplink-1"}: "uplinks/uplink-1.yaml"}, nil
 }
 
-// The declared-files index is read once per push, not once per request: a
-// second lookup is served from the cache, and only a GitChanged publish for its
-// repo (a poll or webhook that moved a head) makes the next lookup read again.
-func TestSourceFilesCachedUntilGitChanges(t *testing.T) {
+// A cluster-scoped object resolves against the platform repo, and only where
+// the caller asked for the platform tier.
+func TestSourceFilesPlatformObject(t *testing.T) {
 	bus := eventbus.New()
 	sa := cluster.NewClient(fake.NewSimpleClientset(), nil, nil)
 	d := &declaredDraft{}
@@ -48,27 +44,14 @@ func TestSourceFilesCachedUntilGitChanges(t *testing.T) {
 	// A seeded visible set keeps projectsFor off the cluster; the platform repo
 	// needs no tenant namespace to resolve.
 	s.visible.Put(restfactory.TokenKey(id.Token), visibleSet{ns: map[string]bool{}, ver: s.rbacVersion()})
-	lookup := func() string {
-		return s.sourceFiles(context.Background(), id, nil, true)("NodeNetworkConfigurationPolicy", "", "uplink-1")
+	lookup := func(withPlatform bool) string {
+		return s.sourceFiles(context.Background(), id, nil, withPlatform)("NodeNetworkConfigurationPolicy", "", "uplink-1")
 	}
 
-	if got := lookup(); got != "uplinks/uplink-1.yaml" {
+	if got := lookup(true); got != "uplinks/uplink-1.yaml" {
 		t.Fatalf("sourceFile = %q", got)
 	}
-	lookup()
-	if d.reads != 1 {
-		t.Fatalf("second lookup read the repo index again: %d reads", d.reads)
-	}
-	bus.PublishKey(eventbus.GitChanged, forge.NormalizeRepoURL("https://forge/tenant.git"))
-	if lookup(); d.reads != 1 {
-		t.Fatalf("another repo's push re-read this index: %d reads", d.reads)
-	}
-	bus.PublishKey(eventbus.GitChanged, forge.NormalizeRepoURL("https://forge/platform.git"))
-	if got := lookup(); got != "uplinks/uplink-1.yaml" || d.reads != 2 {
-		t.Fatalf("after its repo's GitChanged: sourceFile = %q, reads = %d, want a fresh read", got, d.reads)
-	}
-	bus.Publish(eventbus.GitChanged)
-	if lookup(); d.reads != 3 {
-		t.Fatalf("an unkeyed GitChanged must invalidate every repo: %d reads", d.reads)
+	if got := lookup(false); got != "" {
+		t.Fatalf("sourceFile without the platform tier = %q, want none", got)
 	}
 }

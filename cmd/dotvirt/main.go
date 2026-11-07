@@ -90,7 +90,7 @@ func run() error {
 	// Per-project git + the Forge API share ONE token source (resolved per call, so
 	// an operator re-mint/rotation is picked up without restart).
 	tokenSrc := cfg.ForgeTokenSource()
-	repos := git.NewRepoSet(ctx, cfg.GitUsername, tokenSrc, true, bus, cfg.GitPollInterval)
+	repos := git.NewRepoSet(ctx, cfg.ForgeURL, cfg.GitUsername, tokenSrc, true, bus, cfg.GitPollInterval)
 
 	draftStore, err := draft.Open(cfg.DraftDir)
 	if err != nil {
@@ -112,10 +112,10 @@ func run() error {
 	}
 
 	// One SA-maintained snapshot of live VM state + project topology, fed by
-	// reflectors (not per-request fetches). Its reflectors publish VMSpecChanged /
-	// LiveChanged (VMs/VMIs) and NamespaceChanged to the bus, so the hub re-broadcasts
-	// on any cluster change; the read path filters this shared snapshot per token
-	// instead of hitting the cluster.
+	// reflectors (not per-request fetches). Its reflectors publish LiveChanged (a
+	// VM's live state moved) and NamespaceChanged to the bus, so the hub
+	// re-broadcasts on any cluster change a frame shows; the read path filters this
+	// shared snapshot per token instead of hitting the cluster.
 	clusterSnapshot := clusterstate.New(saCluster, cfg.ProjectLabel, bus)
 	clusterSnapshot.Run(ctx)
 
@@ -141,8 +141,8 @@ func run() error {
 		}
 		// The Application snapshot is the drift plane: a reflector feeds an in-memory
 		// store and publishes DriftChanged, so reads are lock-free and the hub
-		// rebroadcasts on every Application move. It is also the resyncer - it owns the
-		// app index the per-VM re-sync resolves.
+		// rebroadcasts when drift moves. It is also the resyncer - it owns the app
+		// index the per-VM re-sync resolves.
 		argoSnapshot = argo.NewSnapshot(saArgo, bus)
 		argoSnapshot.Run(ctx)
 		resyncer = argoSnapshot
@@ -227,9 +227,9 @@ func run() error {
 	// the repos its frame shows - so it coalesces by build duration (no debounce)
 	// and never rebuilds a frame when nothing it depends on moved.
 	inventoryKinds := []eventbus.Kind{
-		eventbus.VMSpecChanged, eventbus.LiveChanged, eventbus.NamespaceChanged,
+		eventbus.LiveChanged, eventbus.NamespaceChanged,
 		eventbus.RBACChanged, eventbus.DriftChanged, eventbus.GitChanged, eventbus.ProposalsChanged,
-		eventbus.NetworkChanged, eventbus.TaskChanged,
+		eventbus.NetworkChanged, eventbus.TaskChanged, eventbus.TTLBackstop,
 	}
 	hubWake, _ := bus.Subscribe(inventoryKinds...)
 	hub := stream.NewHub(server.InventoryForIdentity, hubWake, stream.RepoLevels(bus, eventbus.GitChanged, inventoryKinds...), cfg.UIOrigin)
@@ -240,6 +240,11 @@ func run() error {
 	// handler nudges, and a slow backstop - so the broadcast path never calls the
 	// forge; a changed lane publishes ProposalsChanged.
 	go server.RunProposalsRefresher(ctx, bus)
+
+	// Frames also read TTL-cached authorization that no watch observes; while a
+	// stream is open, the backstop rebuilds frames often enough that an expired
+	// entry is re-evaluated within 45s (identical frames are not resent).
+	go server.RunTTLBackstop(ctx)
 
 	// VNC dials as the requesting user (KubeVirt RBAC gates the console).
 	server.UseVNC(stream.NewVNCProxy(func(token string) (stream.VNCDialer, error) {

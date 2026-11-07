@@ -77,24 +77,36 @@ func kindRank(k model.PolicyKind) int {
 // selectorSummary renders a LabelSelector for humans: "k=v, k2=v2" plus
 // "key op (values)" expressions. The name-In expression netgen writes for
 // namespace pickers collapses to the bare namespace list. Empty selector = "".
-func selectorSummary(sel *metav1.LabelSelector) string {
+// red, for a namespace selector, replaces the values it hides with
+// otherNamespaces; nil renders everything.
+func selectorSummary(sel *metav1.LabelSelector, red *Redaction) string {
 	if sel == nil {
 		return ""
 	}
 	var parts []string
+	add := func(part string) {
+		if part != otherNamespaces || !slices.Contains(parts, otherNamespaces) {
+			parts = append(parts, part)
+		}
+	}
 	for _, k := range slices.Sorted(maps.Keys(sel.MatchLabels)) {
-		parts = append(parts, k+"="+sel.MatchLabels[k])
+		if red.hides(k, sel.MatchLabels[k]) {
+			add(otherNamespaces)
+			continue
+		}
+		add(k + "=" + sel.MatchLabels[k])
 	}
 	for _, e := range sel.MatchExpressions {
-		if names, ok := netgen.NameIn(e); ok {
-			parts = append(parts, strings.Join(names, ", "))
+		values := red.filter(e.Key, e.Values)
+		if _, ok := netgen.NameIn(e); ok {
+			add(strings.Join(values, ", "))
 			continue
 		}
 		s := e.Key + " " + strings.ToLower(string(e.Operator))
-		if len(e.Values) > 0 {
-			s += " (" + strings.Join(e.Values, ", ") + ")"
+		if len(values) > 0 {
+			s += " (" + strings.Join(values, ", ") + ")"
 		}
-		parts = append(parts, s)
+		add(s)
 	}
 	return strings.Join(parts, ", ")
 }

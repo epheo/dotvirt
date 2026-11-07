@@ -24,9 +24,10 @@ import (
 // forge. The poll is the missed-event backstop; the forge webhook (via Poke) is the
 // primary, near-instant trigger.
 type RepoSet struct {
-	user    string
-	tokenFn forge.TokenSource
-	push    bool
+	forgeURL string // the one host the token may travel to (forge.CarriesToken)
+	user     string
+	tokenFn  forge.TokenSource
+	push     bool
 
 	// Poll wiring, shared by every repo's poll goroutine.
 	ctx      context.Context
@@ -40,7 +41,8 @@ type RepoSet struct {
 	// difference. The raw URL each entry was opened with is used for the clone.
 	cache map[string]*repoPair
 	// failed holds a recent Open error per key so a dead repo is retried after
-	// openBackoff, not re-cloned by every inventory build.
+	// openBackoff, not re-cloned by every inventory build, and so the open that
+	// finally succeeds publishes GitChanged.
 	failed map[string]openFailure
 	// opening lets concurrent Gets of one repo share a single clone.
 	opening map[string]chan struct{}
@@ -69,13 +71,15 @@ const (
 	idleTimeout = time.Hour
 )
 
-// NewRepoSet builds a RepoSet. forgeUser/forgeToken authenticate every repo's
-// clone/push; push=false disables pushes (offline/tests). ctx bounds the per-repo
+// NewRepoSet builds a RepoSet. forgeUser/tokenFn authenticate the clone/push
+// of every repo the forge at forgeURL serves; a repo elsewhere is reached
+// anonymously. push=false disables pushes (offline/tests). ctx bounds the per-repo
 // poll goroutines. bus receives a coalesced GitChanged whenever any repo's branch
 // heads move (subscribers: the inventory hub and the proposals refresher); it may
 // be nil to disable signalling (tests).
-func NewRepoSet(ctx context.Context, forgeUser string, tokenFn forge.TokenSource, push bool, bus *eventbus.Bus, interval time.Duration) *RepoSet {
+func NewRepoSet(ctx context.Context, forgeURL, forgeUser string, tokenFn forge.TokenSource, push bool, bus *eventbus.Bus, interval time.Duration) *RepoSet {
 	return &RepoSet{
+		forgeURL: forgeURL,
 		user:     forgeUser,
 		tokenFn:  tokenFn,
 		push:     push,
@@ -121,7 +125,11 @@ func (s *RepoSet) Get(repoURL string) (*Repo, *WriteRepo, error) {
 	// Open outside the lock with the RAW url (the clone may need the exact form):
 	// the read clone hits the network and can be slow; we don't want to block Get
 	// for other repos.
-	read, err := s.open(repoURL, s.user, s.tokenFn)
+	tokenFn := s.tokenFn
+	if !forge.CarriesToken(s.forgeURL, repoURL) {
+		tokenFn = nil
+	}
+	read, err := s.open(repoURL, s.user, tokenFn)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -131,17 +139,32 @@ func (s *RepoSet) Get(repoURL string) (*Repo, *WriteRepo, error) {
 		s.failed[key] = openFailure{err: err, until: s.now().Add(openBackoff)}
 		return nil, nil, err
 	}
+	_, recovered := s.failed[key]
 	delete(s.failed, key)
 	pair := &repoPair{
 		key:   key,
 		read:  read,
-		write: OpenWrite(repoURL, s.user, s.tokenFn, s.push),
+		write: OpenWrite(repoURL, s.user, tokenFn, s.push),
 		poke:  make(chan struct{}, 1),
 		used:  s.now(),
 	}
 	s.cache[key] = pair
 	go s.poll(pair)
+	if recovered {
+		// Frames built while the clone failed show the repo unavailable, and its
+		// return moves no head the poll could report.
+		s.bus.PublishKey(eventbus.GitChanged, key)
+	}
 	return pair.read, pair.write, nil
+}
+
+// retryNow lets the next Get re-open key at once. The failure is expired, not
+// dropped, so that open still knows it is a recovery.
+func (s *RepoSet) retryNow(key string) {
+	if f, ok := s.failed[key]; ok {
+		f.until = time.Time{}
+		s.failed[key] = f
+	}
 }
 
 // Created clears repoURL's cached open failure: dotvirt just made the repo on
@@ -149,7 +172,7 @@ func (s *RepoSet) Get(repoURL string) (*Repo, *WriteRepo, error) {
 // propose for the rest of the backoff.
 func (s *RepoSet) Created(repoURL string) {
 	s.mu.Lock()
-	delete(s.failed, forge.NormalizeRepoURL(repoURL))
+	s.retryNow(forge.NormalizeRepoURL(repoURL))
 	s.mu.Unlock()
 }
 
@@ -165,7 +188,7 @@ func (s *RepoSet) Poke(repoURL string) {
 	key := forge.NormalizeRepoURL(repoURL)
 	s.mu.Lock()
 	p := s.cache[key]
-	delete(s.failed, key) // the forge says the repo exists: retry its clone now
+	s.retryNow(key) // the forge says the repo exists: retry its clone now
 	s.mu.Unlock()
 	if p == nil {
 		return

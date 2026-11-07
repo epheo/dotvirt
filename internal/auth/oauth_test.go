@@ -3,13 +3,19 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	authnv1 "k8s.io/api/authentication/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 // fakeOAuthAt wires the flow over a stub oauth server and a pre-seeded
@@ -119,7 +125,7 @@ func TestOAuthFlow(t *testing.T) {
 	if session == "" {
 		t.Fatal("no session cookie set")
 	}
-	tok, ok := parseCookieValue(session, secret)
+	tok, ok := parseCookieValue(session, testSealer)
 	if !ok || tok != "sha256~sso-token" {
 		t.Errorf("session carries %q, want the exchanged access token", tok)
 	}
@@ -204,5 +210,138 @@ func TestOAuthCallbackRejectedToken(t *testing.T) {
 
 	if !strings.Contains(rec.Header().Get("Location"), "sso_error") {
 		t.Fatalf("rejected token should bounce to the login screen, got %q", rec.Header().Get("Location"))
+	}
+}
+
+// TestClientRegisteredProbesOncePerWindow pins API-8: /api/auth/methods is
+// unauthenticated, so a burst of callers - concurrent, or arriving after a
+// probe that failed on the network - must cost one outbound probe per window,
+// not one each.
+func TestClientRegisteredProbesOncePerWindow(t *testing.T) {
+	var hits atomic.Int32
+	a, _ := fakeAuth(nil)
+	o := fakeOAuthAt(t, a, func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		time.Sleep(20 * time.Millisecond)
+		// Drop the connection: a network failure, read as registered.
+		if hj, ok := w.(http.Hijacker); ok {
+			if conn, _, err := hj.Hijack(); err == nil {
+				_ = conn.Close()
+			}
+		}
+	})
+
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Go(func() {
+			if !o.ClientRegistered(context.Background()) {
+				t.Error("a probe that never answered must read as registered")
+			}
+		})
+	}
+	wg.Wait()
+	for range 5 {
+		o.ClientRegistered(context.Background())
+	}
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("outbound probes = %d, want 1 per window", n)
+	}
+}
+
+// TestDiscoverCachesFailureWithoutHoldingTheLock pins the discovery half of
+// API-8: a failed discovery answers the next callers for the window instead of
+// re-dialing, and the lock the login screen shares is free while it runs.
+func TestDiscoverCachesFailureWithoutHoldingTheLock(t *testing.T) {
+	var hits atomic.Int32
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		<-release
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	kube, err := kubernetes.NewForConfig(&rest.Config{Host: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := &OAuth{saKube: kube, client: srv.Client()}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := o.discover(context.Background(), false)
+		done <- err
+	}()
+	for hits.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	marked := make(chan struct{})
+	go func() {
+		o.MarkRegistered()
+		close(marked)
+	}()
+	select {
+	case <-marked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("discovery held the lock across its network call")
+	}
+	if _, err := o.discover(context.Background(), false); !errors.Is(err, errDiscoveryPending) {
+		t.Fatalf("concurrent discover = %v, want errDiscoveryPending without a second dial", err)
+	}
+	close(release)
+	if err := <-done; err == nil {
+		t.Fatal("a 404 well-known document must fail discovery")
+	}
+	if _, err := o.discover(context.Background(), false); err == nil || errors.Is(err, errDiscoveryPending) {
+		t.Fatalf("after the failure: %v, want the cached failure", err)
+	}
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("discovery dials = %d, want 1 per window", n)
+	}
+}
+
+// TestLoginWaitsOnInFlightDiscovery pins the login side of the shared
+// discovery: a sign-in arriving while the first discovery runs waits for its
+// outcome and redirects, instead of failing with "in progress".
+func TestLoginWaitsOnInFlightDiscovery(t *testing.T) {
+	var hits atomic.Int32
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"authorization_endpoint":"https://oauth.example/oauth/authorize","token_endpoint":"https://oauth.example/oauth/token"}`))
+	}))
+	defer srv.Close()
+	kube, err := kubernetes.NewForConfig(&rest.Config{Host: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := fakeAuth(nil)
+	o := &OAuth{saKube: kube, client: srv.Client(), auth: a, cfg: OAuthConfig{ClientID: "dotvirt", RedirectURL: "https://dotvirt.example/api/auth/callback"}}
+
+	first := make(chan error, 1)
+	go func() {
+		_, err := o.discover(context.Background(), false)
+		first <- err
+	}()
+	for hits.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	login := make(chan int, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		o.LoginRedirect(rec, httptest.NewRequest(http.MethodGet, "/api/auth/openshift", nil))
+		login <- rec.Code
+	}()
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	if err := <-first; err != nil {
+		t.Fatalf("discovery: %v", err)
+	}
+	if code := <-login; code != http.StatusFound {
+		t.Fatalf("login during discovery = %d, want 302 once it lands", code)
+	}
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("discovery dials = %d, want 1", n)
 	}
 }

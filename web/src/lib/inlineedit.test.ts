@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DraftItem, VM } from '#lib/api.js';
-import { composeEdit, inlineBlock } from '#lib/inlineedit.js';
+import { fieldEdit, inlineBlock } from '#lib/inlineedit.js';
 
 const vm = (over: Partial<VM> = {}): VM => ({
 	namespace: 'ns',
@@ -13,25 +13,16 @@ const vm = (over: Partial<VM> = {}): VM => ({
 	...over,
 });
 
-describe('composeEdit', () => {
-	it('adds the field to what is already staged', () => {
-		expect(composeEdit({ memory: '8Gi' }, 'cpuCores', 4, 2)).toEqual({
-			memory: '8Gi',
-			cpuCores: 4,
-		});
+describe('fieldEdit', () => {
+	it('sends the one field, cpu as a number', () => {
+		expect(fieldEdit('cpuCores', '4')).toEqual({ cpuCores: 4 });
+		expect(fieldEdit('memory', '8Gi')).toEqual({ memory: '8Gi' });
+		expect(fieldEdit('power', 'Off')).toEqual({ power: 'Off' });
 	});
 
-	it('drops the field when it returns to the git value', () => {
-		expect(composeEdit({ memory: '8Gi', cpuCores: 4 }, 'cpuCores', 2, 2)).toEqual({
-			memory: '8Gi',
-		});
-	});
-
-	it('stages nothing when the last field goes back', () => {
-		expect(composeEdit({ cpuCores: 4 }, 'cpuCores', 2, 2)).toBeNull();
-		expect(
-			composeEdit({ cpuCores: 4, setLabels: {}, removeDisks: [] }, 'cpuCores', 2, 2),
-		).toBeNull();
+	it('sends a value git leaves unset as its zero, which unstages the field', () => {
+		expect(fieldEdit('cpuCores', undefined)).toEqual({ cpuCores: 0 });
+		expect(fieldEdit('memory', undefined)).toEqual({ memory: '' });
 	});
 });
 
@@ -57,5 +48,8 @@ describe('inlineBlock', () => {
 		);
 		expect(inlineBlock(vm({ instancetype: 'u1.medium' }), 'cpuCores', null)).toMatch(/u1.medium/);
 		expect(inlineBlock(vm({ instancetype: 'u1.medium' }), 'power', null)).toBe('');
+		const switching = staged({ edit: { sizing: 'instancetype', instancetype: 'u1.large' } });
+		expect(inlineBlock(vm(), 'cpuCores', switching)).toMatch(/u1.large/);
+		expect(inlineBlock(vm(), 'power', switching)).toBe('');
 	});
 });

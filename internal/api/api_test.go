@@ -36,6 +36,14 @@ func TestStatusFor(t *testing.T) {
 		{apierrors.NewConflict(vmiResource, "web-1", errors.New("migrating")), http.StatusConflict},
 		{apierrors.NewBadRequest("VM is not running"), http.StatusConflict},
 		{errors.New("a kubeconfig path leaked here"), http.StatusInternalServerError},
+		{errSessionRejected, http.StatusUnauthorized},
+		// A bare apiserver 401 is not a verdict on the session.
+		{fmt.Errorf("pause: %w", apierrors.NewUnauthorized("virt-api refused")), http.StatusServiceUnavailable},
+		{apierrors.NewTooManyRequests("slow down", 1), http.StatusServiceUnavailable},
+		{apierrors.NewTimeoutError("review", 1), http.StatusServiceUnavailable},
+		{apierrors.NewServiceUnavailable("apiserver restarting"), http.StatusServiceUnavailable},
+		// dotvirt's own identity: its 401 must never end the caller's session.
+		{unavailable(apierrors.NewUnauthorized("sa token expired")), http.StatusServiceUnavailable},
 	}
 	for _, c := range cases {
 		if got := statusFor(c.err); got != c.want {

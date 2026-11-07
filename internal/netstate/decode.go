@@ -6,6 +6,8 @@ package netstate
 // and Trace all read through here, so no reader can walk a shape differently.
 
 import (
+	"cmp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -34,6 +36,7 @@ type policy struct {
 	subject subject
 	ingress []rule
 	egress  []rule
+	fixed   []model.PolicyRuleView // rows not drawn from rules: an EgressIP pool, a route's next hops
 	// NetworkPolicy only: the directions a definite selection default-denies.
 	denyIngress, denyEgress bool
 }
@@ -47,14 +50,21 @@ func (p *policy) rules(dir string) []rule {
 
 // finish fills the columns derived from the subject and rules.
 func (p *policy) finish() *policy {
-	p.view.Target = p.subject.summary()
+	p.view.Target, p.view.Rules = p.render(nil)
+	return p
+}
+
+// render is the policy's target and rule rows as red lets one caller read
+// them; nil renders everything.
+func (p *policy) render(red *Redaction) (string, []model.PolicyRuleView) {
+	rows := slices.Clone(p.fixed)
 	for _, r := range p.ingress {
-		p.view.Rules = append(p.view.Rules, r.view("Ingress"))
+		rows = append(rows, r.view("Ingress", red))
 	}
 	for _, r := range p.egress {
-		p.view.Rules = append(p.view.Rules, r.view("Egress"))
+		rows = append(rows, r.view("Egress", red))
 	}
-	return p
+	return p.subject.summary(red), rows
 }
 
 // subject is what a policy applies to. nil selectors are unconstrained: a
@@ -66,14 +76,14 @@ type subject struct {
 	none    bool // an admin policy without a subject applies to nothing
 }
 
-func (s subject) summary() string {
+func (s subject) summary(red *Redaction) string {
 	if s.none {
 		return ""
 	}
 	if s.ns == nil {
-		return orAny(selectorSummary(s.pod), "all pods")
+		return orAny(selectorSummary(s.pod, nil), "all pods")
 	}
-	return strings.TrimSpace(orAny(selectorSummary(s.ns), "all namespaces") + " " + prefixed("pods ", selectorSummary(s.pod)))
+	return strings.TrimSpace(orAny(selectorSummary(s.ns, red), "all namespaces") + " " + prefixed("pods ", selectorSummary(s.pod, nil)))
 }
 
 // decodeNetpol reads a NetworkPolicy: the project east-west DFW rules. A
@@ -163,7 +173,7 @@ func decodeEgressIP(u *unstructured.Unstructured) *policy {
 	}
 	p.view.Namespaces = netgen.NamespaceNames(p.subject.ns)
 	if len(doc.Spec.EgressIPs) > 0 {
-		p.view.Rules = []model.PolicyRuleView{{Direction: "Egress", Action: "SNAT", Peer: strings.Join(doc.Spec.EgressIPs, ", ")}}
+		p.fixed = []model.PolicyRuleView{{Direction: "Egress", Action: "SNAT", Peer: strings.Join(doc.Spec.EgressIPs, ", ")}}
 	}
 	return p.finish()
 }
@@ -184,16 +194,29 @@ func decodeExtRoute(u *unstructured.Unstructured) *policy {
 		}
 	}
 	if len(ips) > 0 {
-		p.view.Rules = []model.PolicyRuleView{{Direction: "Egress", Action: "Route", Peer: "via " + strings.Join(ips, ", ")}}
+		p.fixed = []model.PolicyRuleView{{Direction: "Egress", Action: "Route", Peer: "via " + strings.Join(ips, ", ")}}
 	}
 	return p.finish()
 }
 
 type decoder func(*unstructured.Unstructured) *policy
 
-// decoded runs one store's objects through a kind's decoder.
+// byKey orders objects by (namespace, name). Stores iterate in hash order; a
+// walk, plane or merge that followed it would answer differently for one
+// unchanged snapshot.
+func byKey(objs []*unstructured.Unstructured) []*unstructured.Unstructured {
+	slices.SortFunc(objs, func(a, b *unstructured.Unstructured) int {
+		return cmp.Or(cmp.Compare(a.GetNamespace(), b.GetNamespace()), cmp.Compare(a.GetName(), b.GetName()))
+	})
+	return objs
+}
+
+func sortedList(idx cache.Indexer) []*unstructured.Unstructured { return byKey(reflect.List(idx)) }
+
+// decoded runs one store's objects through a kind's decoder, in sortedList
+// order.
 func decoded(idx cache.Indexer, dec decoder) []*policy {
-	objs := reflect.List(idx)
+	objs := sortedList(idx)
 	out := make([]*policy, 0, len(objs))
 	for _, u := range objs {
 		out = append(out, dec(u))
@@ -201,16 +224,18 @@ func decoded(idx cache.Indexer, dec decoder) []*policy {
 	return out
 }
 
-// inNamespace decodes a namespaced store's objects for ns, by name, so a
-// tier's walk order does not follow the store's hash order.
+// inNamespace decodes a namespaced store's objects for ns, by name.
 func inNamespace(idx cache.Indexer, ns string, dec decoder) []*policy {
-	var out []*policy
+	var objs []*unstructured.Unstructured
 	for _, u := range reflect.List(idx) {
 		if u.GetNamespace() == ns {
-			out = append(out, dec(u))
+			objs = append(objs, u)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].view.Name < out[j].view.Name })
+	out := make([]*policy, 0, len(objs))
+	for _, u := range byKey(objs) {
+		out = append(out, dec(u))
+	}
 	return out
 }
 
@@ -226,6 +251,25 @@ func (s *Snapshot) sortedANPs() []*policy {
 		return a.Name < b.Name
 	})
 	return ps
+}
+
+// enforcedANPs splits sortedANPs at the priority OVN-K stops programming.
+func (s *Snapshot) enforcedANPs() (enforced, unenforced []*policy) {
+	ps := s.sortedANPs()
+	i := sort.Search(len(ps), func(i int) bool { return ps[i].view.Priority > netgen.MaxANPPriority })
+	return ps[:i], ps[i:]
+}
+
+// ANPAtPriority names the AdminNetworkPolicy other than name that holds
+// priority, if any. OVN-K applies equal-priority policies in an undefined
+// order, so a second one there makes both unpredictable.
+func (s *Snapshot) ANPAtPriority(priority int, name string) (string, bool) {
+	for _, p := range s.sortedANPs() {
+		if p.view.Priority == priority && p.view.Name != name {
+			return p.view.Name, true
+		}
+	}
+	return "", false
 }
 
 func (s *Snapshot) baselines() []*policy { return decoded(s.banp, decodeBANP) }

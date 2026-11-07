@@ -96,10 +96,13 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 
 // handleCreateAdminNetworkPolicy stages a cluster-wide admin DFW policy
 // (AdminNetworkPolicy or the baseline default) - always platform-tier and admin-only,
-// gated on the caller's authority to create the matching kind.
+// gated on the caller's authority to create the matching kind. A priority a live
+// policy already holds is refused: OVN-K would order the two arbitrarily.
 func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.Request) {
 	raw, p, ok := readBody[struct {
-		Baseline bool `json:"baseline"`
+		Name     string `json:"name"`
+		Baseline bool   `json:"baseline"`
+		Priority int    `json:"priority"`
 	}](w, r, false)
 	if !ok {
 		return
@@ -111,6 +114,13 @@ func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.R
 	sc, ok := s.platformScope(w, r, ref)
 	if !ok {
 		return
+	}
+	if !p.Baseline && s.netstate != nil {
+		if other, taken := s.netstate.ANPAtPriority(p.Priority, p.Name); taken {
+			fail(w, fmt.Errorf("%w: priority %d is held by admin network policy %q; pick a free one, equal priorities apply in an undefined order",
+				model.ErrConflict, p.Priority, other))
+			return
+		}
 	}
 	view, err := s.draft.StageCreate(sc.id, sc.proj, draft.ResourceAdminNetworkPolicy, raw)
 	respond(w, view, err)
@@ -150,16 +160,22 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		PhysicalAdapters: []model.PhysicalAdapter{},
 		NMStatePresent:   full.NMStatePresent,
 	}
+	ctx := r.Context()
+	can := func(ref ssarRef) bool {
+		ok, _ := s.can(ctx, id, c, verbCreate, ref, "")
+		return ok
+	}
+	cudn := can(ssarCUDN)
 	// Per-object drift: attach each segment's own ArgoCD sync/health at serve time
 	// (always fresh, off the cached catalog) - the same surface VMs carry.
 	s.enrichNetworkDrift(out.Networks)
+	if !cudn {
+		redactSharedErrors(out.Networks)
+	}
 	// Per-action authoring authority: the same SSARs the create handlers enforce, so
 	// the UI gates each button precisely. CanManage stays the coarse CUDN signal that
 	// gates the platform-draft view. All false when no platform repo is configured.
 	if s.cfg.PlatformRepo != "" {
-		ctx := r.Context()
-		can := func(ref ssarRef) bool { return s.canCreateCached(ctx, id, c, ref) }
-		cudn := can(ssarCUDN)
 		out.CanManage = cudn
 		out.Caps = model.NetworkCaps{
 			Uplink:             can(ssarUplink),
@@ -167,8 +183,8 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 			EgressIP:           can(ssarEgressIP),
 			ExternalRoute:      can(ssarExtRoute),
 			AdminNetworkPolicy: can(ssarANP),
-			Platform:           s.canAuthorPlatform(ctx, id, c),
 		}
+		out.Caps.Platform, _ = s.canAuthorPlatform(ctx, id, c)
 	}
 	// Which file declares each segment: the edit/delete affordance. A shared
 	// segment's platform file shows only to callers who may author that tier.
@@ -179,7 +195,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	}
 	// The physical fabric is node-level infrastructure - show it only to callers
 	// who can read nodes (cluster-admins), not every tenant who can attach a NIC.
-	if s.canReadNodesCached(r.Context(), id, c) {
+	if canNodes, _ := s.can(r.Context(), id, c, verbList, ssarNodes, ""); canNodes {
 		out.Uplinks = full.Uplinks
 		out.PhysicalAdapters = full.PhysicalAdapters
 		if out.Caps.Uplink {
@@ -213,6 +229,19 @@ func scopeNetworks(nets []model.Network, visible map[string]bool) []model.Networ
 	}
 	return out
 }
+
+// redactSharedErrors replaces a shared network's apply error with a generic
+// line: a CUDN's error can name every namespace its selector reaches, which
+// only its authors may read.
+func redactSharedErrors(nets []model.Network) {
+	for i := range nets {
+		if nets[i].Scope == model.ScopeShared && nets[i].SyncError != "" {
+			nets[i].SyncError = sharedNetworkErrorForTenants
+		}
+	}
+}
+
+const sharedNetworkErrorForTenants = "the platform could not apply this network"
 
 // enrichNetworkDrift attaches each segment's own ArgoCD sync/health/apply-error
 // - the same per-object drift plane VMs use. Mutates the scoped copies in place

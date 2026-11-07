@@ -80,5 +80,5 @@ func UplinkManifest(s UplinkSpec) (path string, content []byte, err error) {
 	if err != nil {
 		return "", nil, err
 	}
-	return "uplinks/" + s.Name + ".yaml", out, nil
+	return model.KindNNCP.RepoPath("", UplinkPolicyName(s.Name)), out, nil
 }
