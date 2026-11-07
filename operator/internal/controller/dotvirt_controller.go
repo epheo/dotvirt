@@ -157,10 +157,11 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 		{dotvirtv1alpha1.ConditionSecretsReady, r.reconcileSecrets, "secret generation"},
 		{dotvirtv1alpha1.ConditionWorkloadReady, r.reconcileWorkload, ""},
 		{dotvirtv1alpha1.ConditionArgoReady, r.reconcileArgo, ""},
+		// Before the org webhooks, which need the managed forge's org it ensures;
+		// after the rest, so a slow forge only delays phases that call it anyway.
+		{dotvirtv1alpha1.ConditionForgeRepoReady, r.reconcilePlatformRepo, "platform-repo bootstrap"},
 		{dotvirtv1alpha1.ConditionArgoWebhook, r.reconcileArgoWebhook, "argo webhook"},
 		{dotvirtv1alpha1.ConditionDotvirtWebhook, r.reconcileDotvirtWebhook, "dotvirt webhook"},
-		// Last: nothing above depends on the repo, so a slow forge delays no phase.
-		{dotvirtv1alpha1.ConditionForgeRepoReady, r.reconcilePlatformRepo, "platform-repo bootstrap"},
 	} {
 		if r.DryRun && phase.dryRunSkip != "" {
 			r.dryRunSkip(dv, phase.cond, phase.dryRunSkip)

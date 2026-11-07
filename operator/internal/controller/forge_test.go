@@ -446,3 +446,53 @@ func TestPlatformRepoEnsuresManagedOrg(t *testing.T) {
 		t.Errorf("ForgeRepoReady = %+v, want True", repo)
 	}
 }
+
+// On a fresh managed forge the org the ArgoCD webhook registers on is created
+// by the platform-repo phase, so that phase must run first: otherwise the
+// first full pass defers the hook until some later event re-runs the pipeline.
+func TestManagedOrgExistsBeforeOrgWebhook(t *testing.T) {
+	dv := managedForgeCR()
+	dv.Spec.ArgoCD.ServerURL = "https://argocd.example"
+	org := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/user":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/orgs":
+			org = true
+			w.WriteHeader(http.StatusCreated)
+		case !org:
+			w.WriteHeader(http.StatusNotFound)
+		case r.URL.Path == "/api/v1/orgs/dotvirt":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/dotvirt/platform":
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/hooks":
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":1}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	minted := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: install.ForgeSecretName(dv), Namespace: dv.Namespace},
+		Data: map[string][]byte{
+			"url": []byte(dv.Spec.Forge.URL), "username": []byte(install.ForgejoBotUser), "token": []byte("tok"),
+		},
+	}
+	c := testBuilder(t).WithObjects(dv, minted).Build()
+	r := newReconciler(c, depsOK)
+	r.forgeAPIBase = func(*dotvirtv1alpha1.Dotvirt) string { return srv.URL }
+
+	reconcileOnce(t, r, dv)
+	got := getCR(t, c, dv)
+	if wh := cond(got, dotvirtv1alpha1.ConditionArgoWebhook); wh == nil || wh.Status != metav1.ConditionTrue {
+		t.Errorf("ArgoWebhook = %+v, want True on the pass that creates the org", wh)
+	}
+	if repo := cond(got, dotvirtv1alpha1.ConditionForgeRepoReady); repo == nil || repo.Status != metav1.ConditionTrue {
+		t.Errorf("ForgeRepoReady = %+v, want True", repo)
+	}
+}
