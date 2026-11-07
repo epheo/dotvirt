@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -21,26 +23,68 @@ import (
 	"github.com/epheo/dotvirt/operator/internal/platform"
 )
 
-// The platform-repo retry passes phase "": the operand still serves, so a
-// serving install stays Available. Every other blocking wait or failure rolls
-// up into Available=False.
-func TestAvailableRollUpSparesPlatformRepoRetry(t *testing.T) {
+// byoForgeCR is a CR wired to a bring-your-own forge at url, with its
+// credentials Secret.
+func byoForgeCR(url string) (*dotvirtv1alpha1.Dotvirt, *corev1.Secret) {
 	dv := testCR()
-	c := testBuilder(t).WithObjects(dv).Build()
+	dv.Spec.Forge = dotvirtv1alpha1.ForgeSpec{
+		URL:               url,
+		CredentialsSecret: "byo-creds",
+		PlatformRepo:      url + "/dotvirt/platform.git",
+	}
+	creds := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "byo-creds", Namespace: dv.Namespace},
+		Data:       map[string][]byte{"url": []byte(url), "username": []byte("bot"), "token": []byte("tok")},
+	}
+	return dv, creds
+}
+
+// A fresh install whose forge is down still completes its pass: the operand
+// serves without the platform repo, so Available, the phase and the observed
+// generation land, and only the requeue tightens until the repo exists.
+func TestPlatformRepoFailureNeverBlocksAvailable(t *testing.T) {
+	forgeDown := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer forgeDown.Close()
+	dv, creds := byoForgeCR(forgeDown.URL)
+	c := testBuilder(t).WithObjects(dv, creds).Build()
 	r := newReconciler(c, depsOK)
+
+	reconcileOnce(t, r, dv)
+	markOperandReady(t, c, dv)
+	res := reconcileOnce(t, r, dv)
+
+	got := getCR(t, c, dv)
+	if av := cond(got, dotvirtv1alpha1.ConditionAvailable); av == nil || av.Status != metav1.ConditionTrue {
+		t.Errorf("Available = %+v, want True: the operand serves without the platform repo", av)
+	}
+	if got.Status.Phase != dotvirtv1alpha1.PhaseReady || got.Status.ObservedGeneration != got.Generation {
+		t.Errorf("phase=%q observedGeneration=%d, want Ready at generation %d", got.Status.Phase, got.Status.ObservedGeneration, got.Generation)
+	}
+	if repo := cond(got, dotvirtv1alpha1.ConditionForgeRepoReady); repo == nil || repo.Status != metav1.ConditionFalse {
+		t.Errorf("ForgeRepoReady = %+v, want False", repo)
+	}
+	if res.RequeueAfter != platformRepoRetry {
+		t.Errorf("RequeueAfter = %v, want %v while the repo is missing", res.RequeueAfter, platformRepoRetry)
+	}
+}
+
+// A blocking wait rolls up into Available=False naming the phase.
+func TestWaitRollsUpIntoAvailable(t *testing.T) {
+	dv := testCR()
+	r := newReconciler(testBuilder(t).WithObjects(dv).Build(), depsOK)
 	r.setCondition(dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionTrue, "Reconciled", "")
 	dv.Status.Phase = dotvirtv1alpha1.PhaseReady
-
-	r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeRepoReady, "Error", "forge down", "", time.Minute)
-	if av := cond(dv, dotvirtv1alpha1.ConditionAvailable); av.Status != metav1.ConditionTrue || dv.Status.Phase != dotvirtv1alpha1.PhaseReady {
-		t.Errorf("platform-repo retry regressed a serving install: Available=%+v phase=%q", av, dv.Status.Phase)
-	}
 
 	r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing", "forge starting",
 		dotvirtv1alpha1.PhaseProvisioning, time.Minute)
 	av := cond(dv, dotvirtv1alpha1.ConditionAvailable)
 	if av.Status != metav1.ConditionFalse || av.Reason != "Progressing" || !strings.HasPrefix(av.Message, dotvirtv1alpha1.ConditionForgeReady) {
 		t.Errorf("Available = %+v, want False/Progressing naming ForgeReady", av)
+	}
+	if dv.Status.Phase != dotvirtv1alpha1.PhaseProvisioning {
+		t.Errorf("phase = %q, want Provisioning", dv.Status.Phase)
 	}
 }
 

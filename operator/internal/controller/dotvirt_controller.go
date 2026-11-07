@@ -58,6 +58,9 @@ type DotvirtReconciler struct {
 // AppProjects, bindings) survives without a CR or owned-object event.
 const driftResync = 10 * time.Minute
 
+// platformRepoRetry replaces driftResync while the platform repo is missing.
+const platformRepoRetry = time.Minute
+
 // dotvirtFinalizer guards cleanup of the cluster-scoped + ArgoCD-namespace
 // resources, which a namespaced CR can't garbage-collect via ownerReferences.
 const dotvirtFinalizer = "dotvirt.io/finalizer"
@@ -149,7 +152,7 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 		{dotvirtv1alpha1.ConditionArgoReady, r.reconcileArgo, ""},
 		{dotvirtv1alpha1.ConditionArgoWebhook, r.reconcileArgoWebhook, "argo webhook"},
 		{dotvirtv1alpha1.ConditionDotvirtWebhook, r.reconcileDotvirtWebhook, "dotvirt webhook"},
-		// Last: its failure requeues, and nothing above depends on the repo.
+		// Last: nothing above depends on the repo, so a slow forge delays no phase.
 		{dotvirtv1alpha1.ConditionForgeRepoReady, r.reconcilePlatformRepo, "platform-repo bootstrap"},
 	} {
 		if r.DryRun && phase.dryRunSkip != "" {
@@ -187,6 +190,9 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 			return ctrl.Result{}, fmt.Errorf("prune: %w", err)
 		}
 		r.markPruned(key, digest)
+	}
+	if repo := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeRepoReady); repo != nil && repo.Status == metav1.ConditionFalse {
+		return ctrl.Result{RequeueAfter: platformRepoRetry}, nil
 	}
 	// The watches cover the CR, Deployments, Secrets and Routes; this timer heals
 	// drift on the rest.
@@ -449,14 +455,10 @@ func (r *DotvirtReconciler) recordFailure(dv *dotvirtv1alpha1.Dotvirt, condType 
 // waitPhase is the explicit form of an EXPECTED wait: record the not-ready
 // condition + phase and hand back the halt result.
 // requeue 0 halts without a retry timer (the wait clears via a watch event).
-// phase "" leaves Status.Phase and Available untouched (a late retry must not
-// regress a serving install).
 func (r *DotvirtReconciler) waitPhase(dv *dotvirtv1alpha1.Dotvirt, condType, reason, msg, phase string, requeue time.Duration) *ctrl.Result {
 	r.setCondition(dv, condType, metav1.ConditionFalse, reason, msg)
-	if phase != "" {
-		r.markUnavailable(dv, condType, reason, msg)
-		dv.Status.Phase = phase
-	}
+	r.markUnavailable(dv, condType, reason, msg)
+	dv.Status.Phase = phase
 	return &ctrl.Result{RequeueAfter: requeue}
 }
 

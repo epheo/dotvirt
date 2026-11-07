@@ -160,20 +160,19 @@ func forgeAdminHint(ns string) string {
 
 // reconcilePlatformRepo ensures the platform repo exists - the imperative
 // bootstrap pure declarative installers can't do. Skipped in dry-run (a real forge
-// mutation server-side dry-run can't model). Runs LAST in the pipeline: nothing
-// below it depends on the repo existing, so its retry never delays another phase.
-// A failure keeps Available and Phase untouched (the operand still serves; the
-// condition plus the app's recover-repo UI carry the signal) but requeues, since
-// no watch event fires when the forge comes back.
+// mutation server-side dry-run can't model). Best-effort, like the webhooks: a
+// failure is recorded and the pass completes, since the operand serves without
+// the repo (the condition plus the app's recover-repo UI carry the signal), so
+// Available, the observed generation and prune must not wait on the forge. The
+// pass then requeues on platformRepoRetry: no watch event fires when the forge
+// comes back.
 func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, _ *reconcileCtx) (*ctrl.Result, error) {
 	if dv.Spec.Forge.PlatformRepo == "" {
 		return nil, nil
 	}
 	if err := r.ensurePlatformRepo(ctx, dv); err != nil {
-		// phase "": the operand still serves, so the retry must not regress
-		// a Ready install.
-		return r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeRepoReady, "Error",
-			err.Error(), "", time.Minute), nil
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionFalse, "Error", err.Error())
+		return nil, nil
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionTrue, "Ready", "platform repo present")
 	return nil, nil
