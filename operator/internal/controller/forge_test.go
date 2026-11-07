@@ -56,9 +56,6 @@ func TestBootstrapForgejoMintsViaServiceURLWritesExternalURL(t *testing.T) {
 			sawTokenPOST = true
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"sha1":"tok123"}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt":
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{}`)) // org already exists
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
@@ -384,5 +381,48 @@ func TestEffectiveForgeSpecNotPersisted(t *testing.T) {
 	if stored.Spec.Forge.URL != "" || stored.Spec.Forge.PlatformRepo != "" {
 		t.Errorf("stored spec mutated: url=%q platformRepo=%q, both must stay empty",
 			stored.Spec.Forge.URL, stored.Spec.Forge.PlatformRepo)
+	}
+}
+
+// The managed forge's owner org is ensured beside the platform repo on every
+// pass: created once at token mint, a single failed create would leave every
+// later repo create 404ing forever.
+func TestPlatformRepoEnsuresManagedOrg(t *testing.T) {
+	dv := managedForgeCR()
+	var orgCreated, repoCreated bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && (r.URL.Path == "/api/v1/orgs/dotvirt" || r.URL.Path == "/api/v1/repos/dotvirt/platform"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/orgs":
+			orgCreated = true
+			w.WriteHeader(http.StatusCreated)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/orgs/dotvirt/repos":
+			if !orgCreated {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			repoCreated = true
+			w.WriteHeader(http.StatusCreated)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	cred := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: install.ForgeSecretName(dv), Namespace: dv.Namespace},
+		Data:       map[string][]byte{"token": []byte("tok")},
+	}
+	r := newReconciler(testBuilder(t).WithObjects(dv, cred).Build(), depsOK)
+	r.forgeAPIBase = func(*dotvirtv1alpha1.Dotvirt) string { return srv.URL }
+
+	if _, err := r.reconcilePlatformRepo(context.Background(), dv, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !orgCreated || !repoCreated {
+		t.Errorf("org created=%v repo created=%v, want both", orgCreated, repoCreated)
+	}
+	if repo := cond(dv, dotvirtv1alpha1.ConditionForgeRepoReady); repo == nil || repo.Status != metav1.ConditionTrue {
+		t.Errorf("ForgeRepoReady = %+v, want True", repo)
 	}
 }

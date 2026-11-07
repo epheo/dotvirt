@@ -180,11 +180,18 @@ func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvi
 
 // ensurePlatformRepo creates the platform repo on the forge if absent - the
 // install-time step a Helm/Kustomize/ArgoCD-app installer structurally can't do
-// (it's a forge API call, not a kubectl apply).
+// (it's a forge API call, not a kubectl apply). A managed forge's owner org is
+// the operator's to create too (repos live under it for the org-level webhook);
+// ensuring it every pass, not only at token mint, lets one failed create heal.
 func (r *DotvirtReconciler) ensurePlatformRepo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
 	client, err := r.forgeClient(ctx, dv)
 	if err != nil {
 		return err
+	}
+	if dv.Spec.Forge.Managed {
+		if err := client.EnsureOrg(); err != nil {
+			return err
+		}
 	}
 	created, err := client.EnsureRepo()
 	if err != nil {
@@ -267,8 +274,8 @@ func (r *DotvirtReconciler) adminSecretHash(ctx context.Context, dv *dotvirtv1al
 	return hex.EncodeToString(sum[:8])
 }
 
-// bootstrapForgejo mints the scoped token + ensures the owner org once the managed
-// Forgejo is up, then writes the dotvirt-forge secret. Idempotent: a no-op once
+// bootstrapForgejo mints the scoped token once the managed Forgejo is up, then
+// writes the dotvirt-forge secret. Idempotent: a no-op once
 // dotvirt-forge exists; returns ready=false (caller requeues) while Forgejo isn't up.
 func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (bool, error) {
 	credName := install.ForgeSecretName(dv)
@@ -332,14 +339,6 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	}
 	if err := r.writeForgeSecret(ctx, dv, credName, dv.Spec.Forge.URL, install.ForgejoBotUser, token); err != nil {
 		return false, err
-	}
-	// Ensure the owner org exists (repos live under it for the org-level webhook).
-	if dv.Spec.Forge.PlatformRepo != "" {
-		if c := forge.NewFactory(apiBase, forge.StaticToken(token), false, "").For(dv.Spec.Forge.PlatformRepo); c != nil {
-			if err := c.EnsureOrg(); err != nil {
-				return false, err
-			}
-		}
 	}
 	return true, nil
 }
