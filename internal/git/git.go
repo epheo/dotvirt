@@ -304,9 +304,7 @@ func (r *Repo) LookupOnBranch(branch, path string) (content []byte, ok bool, err
 // Pins is each of paths' blob ID on branch, AbsentBlob for a path the
 // branch does not hold: the versions whole-file content is made from.
 func (r *Repo) Pins(branch string, paths ...string) (map[string]string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	tree, err := r.treeFor(branch)
+	tree, err := treeFor(r.repo.Load(), branch)
 	if err != nil {
 		return nil, err
 	}
