@@ -144,7 +144,7 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 }
 
 func (s *State) newRBACStore(onChange func()) cache.Store {
-	return &projectRBACStore{Store: reflect.NewSignalStore(onChange, nil), isProject: func(ns string) bool {
+	return &projectRBACStore{onChange: onChange, isProject: func(ns string) bool {
 		_, ok, _ := s.nss.GetByKey(ns)
 		return ok
 	}}

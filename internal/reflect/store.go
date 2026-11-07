@@ -142,44 +142,6 @@ func (c *countingStore) Replace(list []any, rv string) error {
 	return nil
 }
 
-// signalStore is a cache.Store that retains NOTHING - it only fires onChange on each
-// reflector mutation and onSynced once on the first Replace. For a watch kept purely
-// as a change signal (e.g. RoleBindings, watched only to invalidate the per-token
-// visibility cache and never read), this avoids holding every object cluster-wide in
-// memory. The reflector never reads the store back, so discarding is safe.
-type signalStore struct {
-	onChange func()
-	onSynced func() // optional; called once on the first Replace
-	didSync  bool
-}
-
-func NewSignalStore(onChange, onSynced func()) cache.Store {
-	return &signalStore{onChange: onChange, onSynced: onSynced}
-}
-
-func (s *signalStore) Add(any) error    { s.onChange(); return nil }
-func (s *signalStore) Update(any) error { s.onChange(); return nil }
-func (s *signalStore) Delete(any) error { s.onChange(); return nil }
-
-func (s *signalStore) Replace(_ []any, _ string) error {
-	if !s.didSync {
-		s.didSync = true
-		if s.onSynced != nil {
-			s.onSynced()
-		}
-	}
-	s.onChange()
-	return nil
-}
-
-// The read half is unused (the reflector never reads its store back) - satisfy
-// cache.Store with empty results.
-func (s *signalStore) List() []any                        { return nil }
-func (s *signalStore) ListKeys() []string                 { return nil }
-func (s *signalStore) Get(any) (any, bool, error)         { return nil, false, nil }
-func (s *signalStore) GetByKey(string) (any, bool, error) { return nil, false, nil }
-func (s *signalStore) Resync() error                      { return nil }
-
 // List returns idx's objects as typed unstructured pointers; non-unstructured
 // entries (there are none in practice) are skipped.
 func List(idx cache.Indexer) []*unstructured.Unstructured {
