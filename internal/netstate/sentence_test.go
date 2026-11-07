@@ -204,7 +204,7 @@ func TestSentencesRedactOtherTenants(t *testing.T) {
 	nsLabels := func(ns string) map[string]string {
 		return map[string]string{"kubernetes.io/metadata.name": ns, "dotvirt.io/project": "team-a"}
 	}
-	got := s.NetworkRules([]string{"tenant-a"}, nsLabels, red)
+	got := s.NetworkRules([]string{"tenant-a"}, nsLabels, red, "")
 	if len(got.Reaches) != 1 {
 		t.Fatalf("reaches = %+v, want into-b naming tenant-a", got.Reaches)
 	}

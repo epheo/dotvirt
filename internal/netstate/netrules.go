@@ -1,9 +1,13 @@
 package netstate
 
 import (
+	"slices"
 	"sort"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/netgen"
 )
 
 // NetworkRules answers which rules bear on the VMs of one network, given the
@@ -14,7 +18,9 @@ import (
 //
 // red renders the peer rules' sentences for one caller (nil renders
 // everything); policies and rows come out whole, for the caller's redactor.
-func (s *Snapshot) NetworkRules(namespaces []string, nsLabels func(string) map[string]string, red *Redaction) model.NetworkRules {
+// projectLabel is the namespace label naming a project: a selector on it
+// names the project, as a namespace list names its namespaces.
+func (s *Snapshot) NetworkRules(namespaces []string, nsLabels func(string) map[string]string, red *Redaction, projectLabel string) model.NetworkRules {
 	out := model.NetworkRules{Namespaces: namespaces, Applies: []model.PolicyBinding{}, Reaches: []model.PeerRule{}}
 	bound := map[string]int{} // policy identity -> index in Applies
 	for _, ns := range namespaces {
@@ -56,13 +62,16 @@ func (s *Snapshot) NetworkRules(namespaces []string, nsLabels func(string) map[s
 		}
 		for _, dir := range []string{"Ingress", "Egress"} {
 			for _, r := range p.rules(dir) {
-				if pr, ok := peerRule(p, r, dir, namespaces, nsLabels, red); ok {
+				if pr, ok := peerRule(p, r, dir, namespaces, nsLabels, red, projectLabel); ok {
 					out.Reaches = append(out.Reaches, pr)
 				}
 			}
 		}
 	}
 	sort.SliceStable(out.Reaches, func(i, j int) bool {
+		if out.Reaches[i].Wildcard != out.Reaches[j].Wildcard {
+			return !out.Reaches[i].Wildcard
+		}
 		a, b := out.Reaches[i].Policy, out.Reaches[j].Policy
 		if evalRank(a.Kind) != evalRank(b.Kind) {
 			return evalRank(a.Kind) < evalRank(b.Kind)
@@ -78,37 +87,63 @@ func (s *Snapshot) NetworkRules(namespaces []string, nsLabels func(string) map[s
 	return out
 }
 
-// peerRule reads one rule from the side of the network's namespaces: the
-// first peer alternative that may select their VMs decides the sentence.
-func peerRule(p *policy, r rule, dir string, namespaces []string, nsLabels func(string) map[string]string, red *Redaction) (model.PeerRule, bool) {
-	for _, pe := range r.peers {
+// peerRule reads one rule from the side of the network's namespaces. A peer
+// that names one of them (by namespace, or by project) decides the sentence;
+// failing that, the first that merely matches - an "any namespace" or label
+// selector - does, and the rule is marked a wildcard.
+func peerRule(p *policy, r rule, dir string, namespaces []string, nsLabels func(string) map[string]string, red *Redaction, projectLabel string) (model.PeerRule, bool) {
+	var picked *peer
+	pickedMatch, named := matchNo, false
+	for i := range r.peers {
+		pe := &r.peers[i]
 		if pe.kind != peerSelector {
 			continue
 		}
-		best := matchNo
+		best, names := matchNo, false
 		for _, ns := range namespaces {
 			if pe.namespace != "" && pe.namespace != ns {
 				continue
 			}
 			m := combineMatch(matchSelector(pe.ns, nsLabels(ns)), podMatch(pe.pod, nil, false))
-			if m == matchYes || (m == matchCond && best == matchNo) {
+			if m == matchNo {
+				continue
+			}
+			if m == matchYes || best == matchNo {
 				best = m
 			}
+			names = names || pe.namespace == ns || namesNamespace(pe.ns, ns, nsLabels(ns), projectLabel)
 		}
-		if best == matchNo {
+		if best == matchNo || (picked != nil && (named || !names)) {
 			continue
 		}
-		// Policy and Rule come out whole, for the caller's redactor to match
-		// and re-render; the sentence is rendered for the caller here.
-		_, applies, _ := p.render(red)
-		return model.PeerRule{
-			Policy:      p.view,
-			Rule:        r.view(dir, nil),
-			Text:        r.peerText(dir, pe, applies, red),
-			Conditional: best == matchCond,
-		}, true
+		picked, pickedMatch, named = pe, best, names
 	}
-	return model.PeerRule{}, false
+	if picked == nil {
+		return model.PeerRule{}, false
+	}
+	// Policy and Rule come out whole, for the caller's redactor to match and
+	// re-render; the sentence is rendered for the caller here.
+	_, applies, _ := p.render(red)
+	return model.PeerRule{
+		Policy:      p.view,
+		Rule:        r.view(dir, nil),
+		Text:        r.peerText(dir, *picked, applies, red),
+		Conditional: pickedMatch == matchCond,
+		Wildcard:    !named,
+	}, true
+}
+
+// namesNamespace reports whether a namespace selector names ns outright: its
+// name in the list netgen writes, or its project's label value.
+func namesNamespace(sel *metav1.LabelSelector, ns string, labels map[string]string, projectLabel string) bool {
+	if slices.Contains(netgen.NamespaceNames(sel), ns) {
+		return true
+	}
+	if sel == nil || projectLabel == "" {
+		return false
+	}
+	v, ok := sel.MatchLabels[projectLabel]
+	return ok && v != "" && labels[projectLabel] == v
 }
 
 func policyKey(p model.Policy) string { return p.Backing + ":" + p.Namespace + ":" + p.Name }

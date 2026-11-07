@@ -317,7 +317,7 @@ func (s *Server) handleNetworkRules(w http.ResponseWriter, r *http.Request) {
 	if !pr.can(model.PolicyAdmin) || !pr.can(model.PolicyBaseline) {
 		red = pr.view
 	}
-	out := s.netstate.NetworkRules(nss, s.state.NamespaceLabels, red)
+	out := s.netstate.NetworkRules(nss, s.state.NamespaceLabels, red, s.cfg.ProjectLabel)
 	out.Network = key
 	out = scopeNetworkRules(out, visible, pr.apply)
 	for i := range out.Applies {

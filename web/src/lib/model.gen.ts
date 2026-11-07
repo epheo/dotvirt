@@ -1177,6 +1177,11 @@ export interface PeerRule {
    * Conditional: the peer narrows by pod labels, so only the matching VMs.
    */
   conditional?: boolean;
+  /**
+   * Wildcard: no peer names these namespaces or their project; one merely
+   * matches them ("any namespace", or a label they happen to carry).
+   */
+  wildcard?: boolean;
 }
 
 //////////
