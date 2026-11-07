@@ -1,12 +1,12 @@
 import type { Network, Project } from '#lib/api.js';
-import { membership, type NetProblem } from '#lib/netmap.js';
+import type { NetProblem } from '#lib/netmap.js';
 import { networkKey } from '#lib/networks.js';
 import { inventory } from './inventory.svelte.js';
 
 // What every Networking surface derives from the live inventory and the
 // catalog, once per frame for the rail, the header, the map and the pages.
 class NetworkingState {
-	readonly members = $derived(membership(inventory.allVMs, inventory.networks));
+	readonly members = $derived(inventory.netMembers);
 	readonly problems = $derived(inventory.netProblems);
 	readonly byKey = $derived(new Map(inventory.networks.map((n) => [networkKey(n), n])));
 

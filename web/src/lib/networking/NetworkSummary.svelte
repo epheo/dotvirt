@@ -482,13 +482,11 @@
 						Room for {fmt(Math.max(0, capacity - used))} more.
 						{#if !clash.length}Overlaps no other network.{/if}
 					</span>
-					{#if clash.length}
+					{#if clashProblem}
 						<div
 							class="rounded-md border border-warn/60 bg-warn-soft px-3 py-2 text-[13px] text-warn-ink"
 						>
-							{#if clashProblem}{clashProblem.detail}{:else}Shares addresses with {clash
-									.map((o) => o.name)
-									.join(', ')}, in another namespace.{/if}
+							{clashProblem.detail}
 							{#each clash.slice(0, 2) as o (networkKey(o))}
 								<a
 									href={networkHref(networkKey(o))}
@@ -496,6 +494,12 @@
 								>
 							{/each}
 						</div>
+					{:else if clash.length}
+						<span class="text-[13px] text-ink-faint">
+							{clash.map((o) => o.name).join(', ')}
+							{clash.length === 1 ? 'reuses' : 'reuse'} this range in another namespace. They never meet,
+							so that is fine.
+						</span>
 					{/if}
 				</div>
 			{:else}

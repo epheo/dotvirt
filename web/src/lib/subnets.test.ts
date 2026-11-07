@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { contains, overlaps, parseCIDR, usableAddresses } from './subnets';
+import type { Network } from '#lib/api.js';
+import { canMeet, contains, overlaps, parseCIDR, usableAddresses } from './subnets';
 
 describe('parseCIDR', () => {
 	it('normalizes host bits to the network start', () => {
@@ -54,5 +55,31 @@ describe('contains', () => {
 		expect(contains('10.40.0.0/16', '10.40.3.7')).toBe(true);
 		expect(contains('10.40.0.0/16', '10.41.0.1')).toBe(false);
 		expect(contains('10.40.0.0/16', '10.40')).toBe(false);
+	});
+});
+
+describe('canMeet', () => {
+	const net = (over: Partial<Network>): Network => ({
+		name: 'n',
+		kind: 'internal',
+		scope: 'project',
+		backing: 'UserDefinedNetwork',
+		...over,
+	});
+	const a = net({ namespace: 'default' });
+	it('meets in one namespace', () => {
+		expect(canMeet(a, net({ namespace: 'default' }))).toBe(true);
+	});
+	it('keeps isolated namespaces apart unless a VM sits on both', () => {
+		const b = net({ namespace: 'other' });
+		expect(canMeet(a, b)).toBe(false);
+		expect(canMeet(a, b, true)).toBe(true);
+	});
+	it('meets where a shared or VLAN network is published', () => {
+		const shared = net({ scope: 'shared', namespaces: ['x', 'default'] });
+		const vlan = net({ kind: 'vlan', scope: 'shared', namespaces: ['y'] });
+		expect(canMeet(a, shared)).toBe(true);
+		expect(canMeet(a, vlan)).toBe(false);
+		expect(canMeet(shared, net({ scope: 'shared', namespaces: ['x'] }))).toBe(true);
 	});
 });

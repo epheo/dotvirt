@@ -1,5 +1,6 @@
 // CIDR arithmetic for the networking views: how many addresses a subnet
 // holds and whether two subnets share any. IPv4 and IPv6, as bigint ranges.
+import type { Network } from '#lib/api.js';
 
 interface Range {
 	v6: boolean;
@@ -71,4 +72,17 @@ export function contains(cidr: string, ip: string): boolean {
 	const r = parseCIDR(cidr);
 	const a = parseCIDR(`${ip}/${ip.includes(':') ? 128 : 32}`);
 	return !!r && !!a && r.v6 === a.v6 && r.start <= a.start && a.start <= r.end;
+}
+
+/**
+ * Whether two networks can meet, so an overlap between them is a problem: one
+ * VM already sits on both, or one could (the same namespace, or a shared or
+ * VLAN network published where the other lives). Isolated project networks in
+ * different namespaces may reuse a range: OVN-K keeps them apart.
+ */
+export function canMeet(a: Network, b: Network, sharesVM = false): boolean {
+	if (sharesVM) return true;
+	const where = (n: Network) => (n.namespaces?.length ? n.namespaces : [n.namespace ?? '']);
+	const wa = where(a);
+	return where(b).some((ns) => ns !== '' && wa.includes(ns));
 }

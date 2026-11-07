@@ -5,7 +5,7 @@
 import type { NIC, Network, Policy, Project, Uplink, VM } from '#lib/api.js';
 import { NO_NETWORK, POD_NETWORK, vmNetworkKeys } from '#lib/lenses.js';
 import { networkKey, resolveNIC } from '#lib/networks.js';
-import { contains, overlaps } from '#lib/subnets.js';
+import { canMeet, contains, overlaps } from '#lib/subnets.js';
 
 // --- membership ---------------------------------------------------------------
 
@@ -55,11 +55,14 @@ export const uplinkLabel = (u: Uplink): string => (u.builtin ? 'default' : u.nam
 
 /**
  * The standing networking problems: uplinks that failed on some hosts, and
- * networks whose subnets overlap. Overlapping ranges cannot meet: one VM
- * attaching both, or both routed to the fabric, would make addresses
- * ambiguous, so the overlap is flagged before anyone tries.
+ * networks whose subnets overlap where they can meet (subnets.canMeet). VM
+ * membership answers "a VM already sits on both".
  */
-export function networkProblems(networks: Network[], uplinks: Uplink[]): NetProblem[] {
+export function networkProblems(
+	networks: Network[],
+	uplinks: Uplink[],
+	members?: Membership,
+): NetProblem[] {
 	const out: NetProblem[] = [];
 	for (const u of uplinks) {
 		const hosts = (u.failures ?? []).map((f) => f.node);
@@ -77,7 +80,7 @@ export function networkProblems(networks: Network[], uplinks: Uplink[]): NetProb
 			reason,
 		});
 	}
-	for (const group of overlapGroups(networks)) {
+	for (const group of overlapGroups(networks, members)) {
 		const names = group.map((n) => n.name);
 		const cidrs = new Set(group.flatMap((n) => n.subnets ?? []));
 		const detail =
@@ -96,13 +99,20 @@ export function networkProblems(networks: Network[], uplinks: Uplink[]): NetProb
 	return out;
 }
 
-function overlapGroups(networks: Network[]): Network[][] {
+function overlapGroups(networks: Network[], members?: Membership): Network[][] {
 	const nets = networks.filter((n) => n.subnets?.length);
 	const parent = nets.map((_, i) => i);
 	const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+	const sharesVM = (a: Network, b: Network) => {
+		const on = new Set(members?.byNet.get(networkKey(a)) ?? []);
+		return (members?.byNet.get(networkKey(b)) ?? []).some((v) => on.has(v));
+	};
 	for (let i = 0; i < nets.length; i++)
 		for (let j = i + 1; j < nets.length; j++)
-			if (nets[i].subnets!.some((a) => nets[j].subnets!.some((b) => overlaps(a, b))))
+			if (
+				nets[i].subnets!.some((a) => nets[j].subnets!.some((b) => overlaps(a, b))) &&
+				canMeet(nets[i], nets[j], sharesVM(nets[i], nets[j]))
+			)
 				parent[find(i)] = find(j);
 	const groups = new Map<number, Network[]>();
 	nets.forEach((n, i) => {

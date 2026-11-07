@@ -49,7 +49,7 @@ const networks: Network[] = [
 		attachRef: 'default/udn-tcp-frontend',
 		subnets: ['10.200.0.0/16'],
 	}),
-	// Same range again, in another namespace: one more member of the overlap.
+	// Same range, other namespace: isolated, never an overlap.
 	net({
 		name: 'reuse',
 		namespace: 'db-prod',
@@ -178,14 +178,24 @@ describe('membership', () => {
 });
 
 describe('networkProblems', () => {
-	it('reports a failing uplink and one overlap per shared range', () => {
+	it('reports a failing uplink and an overlap only where the networks can meet', () => {
 		const ps = networkProblems(networks, uplinks);
 		expect(ps.map((p) => [p.kind, p.title])).toEqual([
 			['uplink', 'Fails on worker-2'],
 			['overlap', 'Overlap'],
 		]);
-		expect(ps[1].detail).toBe('reuse, udn-frontend and udn-tcp-frontend all use 10.200.0.0/16.');
-		expect(ps[1].networks).toEqual([
+		expect(ps[1].detail).toBe('udn-frontend and udn-tcp-frontend both use 10.200.0.0/16.');
+		expect(ps[1].networks).toEqual(['default/udn-frontend', 'default/udn-tcp-frontend']);
+	});
+	it('counts a VM on both networks as meeting', () => {
+		const both = vm('db-prod', 'bridge', {
+			networks: [
+				{ name: 'r', network: 'db-prod/reuse' },
+				{ name: 'f', network: 'default/udn-frontend' },
+			],
+		});
+		const ps = networkProblems(networks, [], membership([both], networks));
+		expect(ps[0].networks).toEqual([
 			'db-prod/reuse',
 			'default/udn-frontend',
 			'default/udn-tcp-frontend',
