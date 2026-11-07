@@ -6,6 +6,8 @@
 # Triggered two ways: push a `v*` tag (VERSION from the tag, PREV = the current
 # stable-v0-channel head in operator/catalog-template.yaml — no manual input, so it can't
 # drift), or workflow_dispatch for re-runs / overrides with an explicit version + prev.
+# Any re-run reuses the :vVERSION images already pushed, so the digests an earlier run
+# pinned survive; it then updates that run's pin branch and draft Release in place.
 # Runs in the `QUAY` environment (QUAY_USERNAME / QUAY_PASSWORD push secrets).
 name: release
 
@@ -20,6 +22,10 @@ on:
       prev:
         description: "Version this release replaces, x.y.z"
         required: true
+      force:
+        description: "Rebuild images already pushed for this version (moves their tags; quay prunes the old digests)"
+        type: boolean
+        default: false
 
 env:
   GOPROXY: https://proxy.golang.org|direct # '|' falls back on any proxy error, not only 404/410
@@ -75,6 +81,9 @@ jobs:
         if: env.REL_SKIP != 'true'
       - name: Cut release (build + push + digest-pin)
         if: env.REL_SKIP != 'true'
+        env:
+          FORCE: ${{ inputs.force && '1' || '' }}
+          OPM: opm # the operator-tools binary; the scripts' default compiles opm from source
         run: VERSION="$REL_VERSION" PREV="$REL_PREV" CONTAINER_TOOL=docker ./hack/release.sh
       - name: Record the pinned catalog image
         id: pins
@@ -92,7 +101,13 @@ jobs:
           branch="release-v$REL_VERSION"
           git switch -c "$branch"
           git commit -am "release v$REL_VERSION: digest-pinned (replaces v$REL_PREV)"
-          git push -u origin "$branch"
+          # A re-run replaces the earlier run's pin commit. The lease names the tip it
+          # replaces (empty: the branch must not exist): a bare --force-with-lease reads
+          # a tracking ref this tag checkout never fetched, and rejects every re-run.
+          lease="$(git ls-remote origin "refs/heads/$branch" | cut -f1)"
+          git push --force-with-lease="refs/heads/$branch:$lease" -u origin "$branch"
+          open="$(gh pr list --head "$branch" --json number --jq length || echo 0)"
+          [ "$open" = 0 ] || exit 0
           # PR creation needs the repo setting "Allow GitHub Actions to create and
           # approve pull requests". Without it the branch is still pushed and the
           # images are already on quay — failing here would only skip verify, so
@@ -108,7 +123,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view "v$REL_VERSION" >/dev/null 2>&1 && exit 0
+          if gh release view "v$REL_VERSION" >/dev/null 2>&1; then
+            # The asset must pin this run's catalog, which a forced re-run or a changed prev moved.
+            gh release upload "v$REL_VERSION" operator/install/catalogsource.yaml --clobber
+            exit 0
+          fi
           gh release create "v$REL_VERSION" --draft --verify-tag \
             --title "v$REL_VERSION" \
             --generate-notes --notes-start-tag "v$REL_PREV" \
