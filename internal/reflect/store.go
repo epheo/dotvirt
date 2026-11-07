@@ -13,6 +13,7 @@ import (
 	"context"
 	"sync/atomic"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -28,8 +29,18 @@ import (
 // warning while the store keeps serving its last-good contents. The flag
 // starts true: nothing has failed yet, and a watch not yet established is
 // not a stale one.
-func TrackHealth(lw *cache.ListWatch, healthy *atomic.Bool) *cache.ListWatch {
+//
+// onFlip (optional) fires on each transition. A snapshot whose stores publish
+// only on content change must publish here too: the watch re-establishes after
+// the relist's Replace, so a relist that changed nothing would otherwise leave
+// the stale warning standing until unrelated churn.
+func TrackHealth(lw *cache.ListWatch, healthy *atomic.Bool, onFlip func()) *cache.ListWatch {
 	healthy.Store(true)
+	set := func(v bool) {
+		if healthy.Swap(v) != v && onFlip != nil {
+			onFlip()
+		}
+	}
 	// Sources set the WithContext pair (the reflector cancels in-flight calls on
 	// shutdown through it); the deprecated context-free fields stay nil.
 	list, watchFn := lw.ListWithContextFunc, lw.WatchFuncWithContext
@@ -37,13 +48,13 @@ func TrackHealth(lw *cache.ListWatch, healthy *atomic.Bool) *cache.ListWatch {
 		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
 			obj, err := list(ctx, o)
 			if err != nil {
-				healthy.Store(false)
+				set(false)
 			}
 			return obj, err
 		},
 		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
 			w, err := watchFn(ctx, o)
-			healthy.Store(err == nil)
+			set(err == nil)
 			return w, err
 		},
 	}
@@ -53,7 +64,8 @@ func TrackHealth(lw *cache.ListWatch, healthy *atomic.Bool) *cache.ListWatch {
 // reflector applies (Add/Update/Delete/Replace), so the read methods never have to
 // diff anything. Replace fires onChange once for a whole relist rather than per
 // item - exactly the coarse signal we want - and also fires onSynced the first
-// time (the initial LIST landed), for readiness gating.
+// time (the initial LIST landed), for readiness gating. Objects are trimmed
+// before they are stored.
 type countingStore struct {
 	cache.Indexer
 	onChange func()
@@ -65,7 +77,30 @@ func NewStore(idx cache.Indexer, onChange, onSynced func()) cache.Indexer {
 	return &countingStore{Indexer: idx, onChange: onChange, onSynced: onSynced}
 }
 
+// lastApplied is kubectl's copy of the whole applied manifest.
+const lastApplied = "kubectl.kubernetes.io/last-applied-configuration"
+
+// trim drops what no snapshot reader uses yet every object carries at size:
+// managedFields and the last-applied annotation. The reflector hands the store
+// freshly decoded objects it keeps no other reference to, so trimming in place
+// is safe.
+func trim(obj any) {
+	m, err := meta.Accessor(obj)
+	if err != nil {
+		return
+	}
+	m.SetManagedFields(nil)
+	// Unstructured returns a copy of its annotations, so write the result back.
+	if a := m.GetAnnotations(); a != nil {
+		if _, ok := a[lastApplied]; ok {
+			delete(a, lastApplied)
+			m.SetAnnotations(a)
+		}
+	}
+}
+
 func (c *countingStore) Add(obj any) error {
+	trim(obj)
 	if err := c.Indexer.Add(obj); err != nil {
 		return err
 	}
@@ -74,6 +109,7 @@ func (c *countingStore) Add(obj any) error {
 }
 
 func (c *countingStore) Update(obj any) error {
+	trim(obj)
 	if err := c.Indexer.Update(obj); err != nil {
 		return err
 	}
@@ -90,6 +126,9 @@ func (c *countingStore) Delete(obj any) error {
 }
 
 func (c *countingStore) Replace(list []any, rv string) error {
+	for _, obj := range list {
+		trim(obj)
+	}
 	if err := c.Indexer.Replace(list, rv); err != nil {
 		return err
 	}
@@ -102,44 +141,6 @@ func (c *countingStore) Replace(list []any, rv string) error {
 	c.onChange()
 	return nil
 }
-
-// signalStore is a cache.Store that retains NOTHING - it only fires onChange on each
-// reflector mutation and onSynced once on the first Replace. For a watch kept purely
-// as a change signal (e.g. RoleBindings, watched only to invalidate the per-token
-// visibility cache and never read), this avoids holding every object cluster-wide in
-// memory. The reflector never reads the store back, so discarding is safe.
-type signalStore struct {
-	onChange func()
-	onSynced func() // optional; called once on the first Replace
-	didSync  bool
-}
-
-func NewSignalStore(onChange, onSynced func()) cache.Store {
-	return &signalStore{onChange: onChange, onSynced: onSynced}
-}
-
-func (s *signalStore) Add(any) error    { s.onChange(); return nil }
-func (s *signalStore) Update(any) error { s.onChange(); return nil }
-func (s *signalStore) Delete(any) error { s.onChange(); return nil }
-
-func (s *signalStore) Replace(_ []any, _ string) error {
-	if !s.didSync {
-		s.didSync = true
-		if s.onSynced != nil {
-			s.onSynced()
-		}
-	}
-	s.onChange()
-	return nil
-}
-
-// The read half is unused (the reflector never reads its store back) - satisfy
-// cache.Store with empty results.
-func (s *signalStore) List() []any                        { return nil }
-func (s *signalStore) ListKeys() []string                 { return nil }
-func (s *signalStore) Get(any) (any, bool, error)         { return nil, false, nil }
-func (s *signalStore) GetByKey(string) (any, bool, error) { return nil, false, nil }
-func (s *signalStore) Resync() error                      { return nil }
 
 // List returns idx's objects as typed unstructured pointers; non-unstructured
 // entries (there are none in practice) are skipped.

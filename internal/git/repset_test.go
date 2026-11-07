@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
@@ -105,6 +106,57 @@ func TestRepoSetBacksOffFailedOpen(t *testing.T) {
 	_, _, _ = rs.Get("https://forge/o/r")
 	if n := opens.Load(); n != 4 {
 		t.Fatalf("opens after Created = %d, want 4", n)
+	}
+}
+
+// A repo whose clone failed comes back without moving a head, so the poll has
+// nothing to report: the recovering open itself must publish GitChanged, or
+// frames keep showing it unavailable until an unrelated event. A first open
+// publishes nothing.
+func TestRepoSetPublishesRecoveredOpen(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	bus := eventbus.New()
+	rs := NewRepoSet(ctx, "", nil, false, bus, time.Hour)
+	clock := &fakeClock{}
+	rs.now = clock.now
+	var fail atomic.Bool
+	rs.open = func(string, string, forge.TokenSource) (*Repo, error) {
+		if fail.Load() {
+			return nil, errors.New("dead")
+		}
+		return &Repo{}, nil
+	}
+	ver := func(url string) uint64 { return bus.KeyVersion(eventbus.GitChanged, forge.NormalizeRepoURL(url)) }
+
+	if _, _, err := rs.Get("https://forge/o/fresh.git"); err != nil || ver("https://forge/o/fresh") != 0 {
+		t.Fatalf("a first open published: err=%v ver=%d", err, ver("https://forge/o/fresh"))
+	}
+
+	fail.Store(true)
+	if _, _, err := rs.Get("https://forge/o/r.git"); err == nil {
+		t.Fatal("expected the open error")
+	}
+	fail.Store(false)
+	clock.advance(openBackoff + time.Second)
+	if _, _, err := rs.Get("https://forge/o/r"); err != nil {
+		t.Fatal(err)
+	}
+	if ver("https://forge/o/r") != 1 {
+		t.Fatalf("a recovered open published %d times, want 1", ver("https://forge/o/r"))
+	}
+
+	fail.Store(true)
+	if _, _, err := rs.Get("https://forge/o/p.git"); err == nil {
+		t.Fatal("expected the open error")
+	}
+	fail.Store(false)
+	rs.Poke("https://forge/o/p")
+	if _, _, err := rs.Get("https://forge/o/p"); err != nil {
+		t.Fatal(err)
+	}
+	if ver("https://forge/o/p") != 1 {
+		t.Fatalf("an open recovered through a poke published %d times, want 1", ver("https://forge/o/p"))
 	}
 }
 

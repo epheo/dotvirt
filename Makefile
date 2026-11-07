@@ -30,8 +30,10 @@ e2e:
 image:
 	podman build -f Containerfile -t $(IMAGE):$(TAG) .
 
+# Pushes dev-$(TAG): CI's image job owns the bare short-sha tag, and a second push there
+# moves it, so quay prunes the digest whoever pinned the first one holds.
 push: image
-	podman push $(IMAGE):$(TAG)
+	podman push $(IMAGE):$(TAG) docker://$(IMAGE):dev-$(TAG)
 
 run: build
 	./dotvirt
