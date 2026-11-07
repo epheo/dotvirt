@@ -268,8 +268,7 @@ func (c *Client) Capacity(ctx context.Context, token string) (model.HostCapacity
 	var errs errSet
 	cpuAlloc := errs.floats(c.byLabel(ctx, token, `kube_node_status_allocatable{resource="cpu"}`, "node"))
 	memAlloc := errs.floats(c.byLabel(ctx, token, `kube_node_status_allocatable{resource="memory"}`, "node"))
-	// Per-node vCPU sum, with vcpuCount's per-vCPU-series fallback for older KubeVirt.
-	vcpu := errs.floats(c.byLabel(ctx, token, `(sum by(node)(kubevirt_vmi_vcpu_count) or sum by(node)(count by(node,namespace,name)(kubevirt_vmi_vcpu_seconds_total)))`, "node"))
+	vcpu := errs.floats(c.byLabel(ctx, token, nodeVCPUs(), "node"))
 	memVM := errs.floats(c.byLabel(ctx, token, `sum by(node)(kubevirt_vmi_memory_domain_bytes)`, "node"))
 
 	var nodes []model.HostCapacityNode
