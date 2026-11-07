@@ -334,23 +334,21 @@ func TestReconcileUnrelatedPushMidBuild(t *testing.T) {
 	}
 }
 
-// TestRejectedTokenEndsItsConnections pins API-3: a build the apiserver
-// refuses for the caller's token ends that identity's connections and drops
-// its cached session, so the reconnect meets a 401 instead of a frozen frame.
-// Any other failure keeps the connection for the next pass.
+// TestRejectedTokenEndsItsConnections pins API-3: a build whose session a
+// TokenReview rejected ends that identity's connections, so the reconnect
+// meets a 401 instead of a frozen frame. Any other failure, a bare apiserver
+// 401 included, keeps the connection.
 func TestRejectedTokenEndsItsConnections(t *testing.T) {
 	inv := func(_ context.Context, id auth.Identity) (model.Inventory, error) {
 		switch id.Username {
 		case "alice":
-			return model.Inventory{}, fmt.Errorf("list namespaces: %w", apierrors.NewUnauthorized("token expired"))
+			return model.Inventory{}, fmt.Errorf("%w: session expired", auth.ErrRejected)
 		case "carol":
-			return model.Inventory{}, apierrors.NewServiceUnavailable("apiserver restarting")
+			return model.Inventory{}, apierrors.NewUnauthorized("virt-api refused")
 		}
 		return echoInventory(context.Background(), id)
 	}
 	h := NewHub(inv, make(chan struct{}, 1), testLevels(), "")
-	var forgot []string
-	h.OnRejected(func(token string) { forgot = append(forgot, token) })
 	alice, alice2, bob, carol := testConn("alice"), testConn("alice"), testConn("bob"), testConn("carol")
 	for _, c := range []*conn{alice, alice2, bob, carol} {
 		h.add(c)
@@ -362,17 +360,14 @@ func TestRejectedTokenEndsItsConnections(t *testing.T) {
 		select {
 		case <-c.evict:
 		default:
-			t.Fatal("a rejected token's connection was kept open")
+			t.Fatal("a rejected session's connection was kept open")
 		}
 	}
 	for _, c := range []*conn{bob, carol} {
 		select {
 		case <-c.evict:
-			t.Fatalf("%s was evicted; only a rejected token ends its connections", c.id.Username)
+			t.Fatalf("%s was evicted; only a rejected session ends its connections", c.id.Username)
 		default:
 		}
-	}
-	if len(forgot) == 0 || forgot[0] != "tok-alice" {
-		t.Fatalf("forgot = %v, want the rejected token", forgot)
 	}
 }

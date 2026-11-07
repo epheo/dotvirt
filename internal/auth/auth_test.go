@@ -173,22 +173,26 @@ func TestValidateCaches(t *testing.T) {
 	}
 }
 
-// TestForgetRevalidates pins the expired-session path: once the apiserver
-// rejects a token the cache vouched for, Forget makes the next request ask
-// again, so a revoked token is a 401 now rather than a cached session.
-func TestForgetRevalidates(t *testing.T) {
-	valid := map[string]authnv1.UserInfo{"good": {Username: "alice"}}
+// TestRecheck pins the session-end rule: a token the apiserver refused is
+// re-reviewed despite the cached session, a rejection is cached and answered
+// without another review, and a token that still validates is not rejected.
+func TestRecheck(t *testing.T) {
+	valid := map[string]authnv1.UserInfo{"good": {Username: "alice"}, "fine": {Username: "bob"}}
 	a, calls := fakeAuth(valid)
-	if _, err := a.Validate(context.Background(), "good"); err != nil {
-		t.Fatalf("Validate: %v", err)
+	for _, tok := range []string{"good", "fine"} {
+		if _, err := a.Validate(context.Background(), tok); err != nil {
+			t.Fatalf("Validate(%s): %v", tok, err)
+		}
 	}
 	delete(valid, "good")
-	if _, err := a.Validate(context.Background(), "good"); err != nil {
-		t.Fatalf("cached session: %v", err)
+	if err := a.Recheck(context.Background(), "good"); !errors.Is(err, ErrRejected) || *calls != 3 {
+		t.Fatalf("dead token: err = %v, reviews = %d; want a fresh rejecting review", err, *calls)
 	}
-	a.Forget("good")
-	if _, err := a.Validate(context.Background(), "good"); !errors.Is(err, ErrRejected) || *calls != 2 {
-		t.Fatalf("after Forget: err = %v, reviews = %d; want a fresh rejecting review", err, *calls)
+	if err := a.Recheck(context.Background(), "good"); !errors.Is(err, ErrRejected) || *calls != 3 {
+		t.Fatalf("cached rejection: err = %v, reviews = %d; want no further review", err, *calls)
+	}
+	if err := a.Recheck(context.Background(), "fine"); err != nil || *calls != 4 {
+		t.Fatalf("live token: err = %v, reviews = %d; want a fresh accepting review", err, *calls)
 	}
 }
 

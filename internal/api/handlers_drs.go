@@ -67,7 +67,7 @@ func (s *Server) handleDRSEnable(w http.ResponseWriter, r *http.Request) {
 	if p.InstallPSI {
 		ok, err := s.can(r.Context(), sc.id, sc.cluster, verbCreate, ssarMachineCfg, "")
 		if err != nil {
-			fail(w, reviewFailed(err))
+			fail(w, s.reviewFailed(r.Context(), sc.id, err))
 			return
 		}
 		if !ok {

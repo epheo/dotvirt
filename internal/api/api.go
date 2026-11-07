@@ -463,27 +463,39 @@ func unavailable(err error) error {
 	return fmt.Errorf("%w: cluster access", model.ErrUnavailable)
 }
 
-// reviewFailed answers an authorization review that could not be made under
-// the caller's token: a token the apiserver rejects stays a 401 so the session
-// ends; anything else is a 503 naming no internals.
-func reviewFailed(err error) error {
-	if apierrors.IsUnauthorized(err) {
-		return err
+// errSessionRejected is the one error that answers 401, so the UI signs out. It
+// is produced only by reviewFailed, after a fresh TokenReview rejected the
+// token.
+var errSessionRejected = fmt.Errorf("%w: session expired", auth.ErrRejected)
+
+// reviewFailed answers an authorization review that failed under the caller's
+// token. A 401 there is checked against a fresh TokenReview: only a rejected
+// token ends the session; a token that still validates, or a review that
+// cannot run, is a 503. Either way the answer is a fixed line and the detail
+// is only logged: a visibility probe's error can name other tenants'
+// namespaces.
+func (s *Server) reviewFailed(ctx context.Context, id auth.Identity, err error) error {
+	if apierrors.IsUnauthorized(err) && s.auth != nil {
+		if errors.Is(s.auth.Recheck(ctx, id.Token), auth.ErrRejected) {
+			log.Printf("api: %s: session rejected: %v", id.Username, err)
+			return errSessionRejected
+		}
 	}
 	return unavailable(err)
 }
 
 // statusFor maps an error to an HTTP status by the kind it wraps: a model.Err*
 // kind, or an apiserver status from an operation run under the caller's token
-// (Unauthorized means that token died, so the session ends; Forbidden is the
-// caller's RBAC verdict; Conflict and BadRequest both mean the object's state
-// refuses the act, e.g. pausing a stopped VM; throttling and timeouts are
-// transient). Anything unclassified is a 500. An apiserver status from
-// dotvirt's own identity must never reach here unwrapped (see unavailable): its
-// 401 would sign the caller out.
+// (Forbidden is the caller's RBAC verdict; Conflict and BadRequest both mean
+// the object's state refuses the act, e.g. pausing a stopped VM; throttling,
+// timeouts and a bare Unauthorized are transient). Only errSessionRejected is
+// a 401: an apiserver 401 alone can be a subresource's or an authenticator
+// outage, and must not sign a valid session out. Anything unclassified is a
+// 500. An apiserver status from dotvirt's own identity must never reach here
+// unwrapped (see unavailable).
 func statusFor(err error) int {
 	switch {
-	case apierrors.IsUnauthorized(err):
+	case errors.Is(err, auth.ErrRejected):
 		return http.StatusUnauthorized
 	case errors.Is(err, model.ErrInvalid):
 		return http.StatusBadRequest
@@ -493,7 +505,7 @@ func statusFor(err error) int {
 		return http.StatusForbidden
 	case errors.Is(err, model.ErrConflict), apierrors.IsConflict(err), apierrors.IsBadRequest(err):
 		return http.StatusConflict
-	case errors.Is(err, model.ErrUnavailable), apierrors.IsTooManyRequests(err),
+	case errors.Is(err, model.ErrUnavailable), apierrors.IsUnauthorized(err), apierrors.IsTooManyRequests(err),
 		apierrors.IsTimeout(err), apierrors.IsServiceUnavailable(err):
 		return http.StatusServiceUnavailable
 	default:

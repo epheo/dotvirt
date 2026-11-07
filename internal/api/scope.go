@@ -78,7 +78,7 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 	candidates := namespaceNames(s.state.Namespaces())
 	names, err := c.VisibleNamespaces(ctx, candidates)
 	if err != nil {
-		return nil, reviewFailed(err)
+		return nil, s.reviewFailed(ctx, id, err)
 	}
 	set := make(map[string]bool, len(names))
 	for _, n := range names {
@@ -94,7 +94,7 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 // RoleBinding/namespace move invalidates lazily via the stamp; the TTL
 // backstops the cluster-scoped RBAC changes the stamp doesn't observe (see
 // visibleTTL). Only a verdict is cached: a failed review is returned, so a
-// blip can never pin a denial. A gate answers the error with reviewFailed; a
+// blip can never pin a denial. A gate answers the error with s.reviewFailed; a
 // UI signal or a filter reads it as no.
 func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, verb string, ref ssarRef, ns string) (bool, error) {
 	ver := s.rbacVersion()
@@ -413,7 +413,7 @@ func (s *Server) platformScopeWith(w http.ResponseWriter, r *http.Request, autho
 	}
 	ok, err := authorized(r.Context(), id, c)
 	if err != nil {
-		fail(w, reviewFailed(err))
+		fail(w, s.reviewFailed(r.Context(), id, err))
 		return scope{}, false
 	}
 	if !ok {

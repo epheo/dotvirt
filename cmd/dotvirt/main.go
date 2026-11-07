@@ -233,7 +233,6 @@ func run() error {
 	}
 	hubWake, _ := bus.Subscribe(inventoryKinds...)
 	hub := stream.NewHub(server.InventoryForIdentity, hubWake, stream.RepoLevels(bus, eventbus.GitChanged, inventoryKinds...), cfg.UIOrigin)
-	hub.OnRejected(authenticator.Forget)
 	go hub.Run(ctx)
 	server.UseStream(hub)
 

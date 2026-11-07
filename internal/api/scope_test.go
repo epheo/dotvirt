@@ -9,9 +9,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
+	authnv1 "k8s.io/api/authentication/v1"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -194,14 +196,48 @@ func TestVisibleForNeverCachesAFailure(t *testing.T) {
 	}
 }
 
-// TestCallerTokenRejectedIs401 pins the session end: when the apiserver
-// rejects the caller's own token mid-request, the answer is a 401 (the UI
-// signs out), never a 500 that leaves a dead session on screen.
-func TestCallerTokenRejectedIs401(t *testing.T) {
+// TestOnlyARejectedSessionIs401 pins the session end: an apiserver 401 on
+// the caller's review is checked against a fresh TokenReview. A rejected token
+// answers 401 (the UI signs out); a token that still validates - an
+// authenticator blip - answers 503 and keeps the session. Neither body names a
+// namespace the probe touched.
+func TestOnlyARejectedSessionIs401(t *testing.T) {
 	fc := newFakeCluster(t)
-	fc.ssarFail = func(*authzv1.ResourceAttributes) int { return http.StatusUnauthorized }
+	// The per-namespace probe fails, so the raw error names the namespace.
+	fc.ssarFail = func(a *authzv1.ResourceAttributes) int {
+		if a.Namespace != "" {
+			return http.StatusUnauthorized
+		}
+		return 0
+	}
 	s := fc.server(nil, Config{})
-	wantStatus(t, do(s, tenantToken, http.MethodGet, "/api/inventory", ""), http.StatusUnauthorized)
+	var alive atomic.Bool
+	kube := fake.NewSimpleClientset()
+	kube.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		tr := action.(k8stesting.CreateAction).GetObject().(*authnv1.TokenReview).DeepCopy()
+		tr.Status = authnv1.TokenReviewStatus{Authenticated: alive.Load(), User: authnv1.UserInfo{Username: "tenant"}}
+		return true, tr, nil
+	})
+	s.auth = auth.New(kube, []byte("0123456789abcdef0123456789abcdef"))
+	mux := http.NewServeMux()
+	s.routes(mux)
+	get := func() *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, asUser(httptest.NewRequest(http.MethodGet, "/api/inventory", nil), tenantToken))
+		return rec
+	}
+
+	alive.Store(true)
+	rec := get()
+	wantStatus(t, rec, http.StatusServiceUnavailable)
+	alive.Store(false)
+	rec401 := get()
+	wantStatus(t, rec401, http.StatusUnauthorized)
+	for _, r := range []*httptest.ResponseRecorder{rec, rec401} {
+		if body := r.Body.String(); strings.Contains(body, "team-a-dev") || strings.Contains(body, "orphans-ns") || strings.Contains(body, "of 2") {
+			t.Errorf("body names a probed namespace: %q", body)
+		}
+	}
 }
 
 // TestCanCachesVerdicts pins the SSAR cache: one round per (token, question)

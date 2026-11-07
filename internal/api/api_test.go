@@ -36,7 +36,9 @@ func TestStatusFor(t *testing.T) {
 		{apierrors.NewConflict(vmiResource, "web-1", errors.New("migrating")), http.StatusConflict},
 		{apierrors.NewBadRequest("VM is not running"), http.StatusConflict},
 		{errors.New("a kubeconfig path leaked here"), http.StatusInternalServerError},
-		{fmt.Errorf("list namespaces: %w", apierrors.NewUnauthorized("token expired")), http.StatusUnauthorized},
+		{errSessionRejected, http.StatusUnauthorized},
+		// A bare apiserver 401 is not a verdict on the session.
+		{fmt.Errorf("pause: %w", apierrors.NewUnauthorized("virt-api refused")), http.StatusServiceUnavailable},
 		{apierrors.NewTooManyRequests("slow down", 1), http.StatusServiceUnavailable},
 		{apierrors.NewTimeoutError("review", 1), http.StatusServiceUnavailable},
 		{apierrors.NewServiceUnavailable("apiserver restarting"), http.StatusServiceUnavailable},

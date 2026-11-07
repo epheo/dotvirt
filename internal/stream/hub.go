@@ -13,13 +13,13 @@ package stream
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"slices"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/model"
@@ -60,7 +60,6 @@ type Hub struct {
 	kick      chan struct{}   // a connection was added - rebuild so it gets a first frame
 	timeout   time.Duration   // per-identity build bound (buildTimeout; tests shorten it)
 	upgrader  websocket.Upgrader
-	forget    func(token string) // drops a rejected token's cached session; nil skips
 
 	mu    sync.Mutex
 	conns map[*conn]struct{}
@@ -90,11 +89,6 @@ func NewHub(inventory InventoryFunc, wake <-chan struct{}, levels Levels, uiOrig
 		idents:    map[string]*frame{},
 	}
 }
-
-// OnRejected sets forget, called with a token the apiserver rejected during a
-// build so the next handshake re-validates it instead of riding the cached
-// session. Set before Run.
-func (h *Hub) OnRejected(forget func(token string)) { h.forget = forget }
 
 // conn is one WebSocket connection. Within a pass, the one goroutine handling its
 // identity (Run or a build worker) is the sole writer of lastJS, the sole
@@ -237,7 +231,7 @@ func (h *Hub) build(ctx context.Context, conns []*conn, prev *frame) *frame {
 	cancel()
 	if err != nil {
 		log.Printf("stream: inventory build failed for %s: %v", conns[0].id.Username, err)
-		if apierrors.IsUnauthorized(err) {
+		if errors.Is(err, auth.ErrRejected) {
 			h.reject(conns)
 		}
 		return nil
@@ -260,14 +254,10 @@ func (h *Hub) build(ctx context.Context, conns []*conn, prev *frame) *frame {
 	return f
 }
 
-// reject ends conns whose token the apiserver refused: a frozen frame would
-// otherwise stand in for a session that is over. The client reconnects, and
-// with the cached session forgotten its handshake meets the 401 that signs it
-// out. Only the caller's own token builds a frame, so the 401 is theirs.
+// reject ends conns whose session a TokenReview rejected: a frozen frame would
+// otherwise stand in for a session that is over. The rejection is cached, so
+// the client's reconnect meets the 401 that signs it out.
 func (h *Hub) reject(conns []*conn) {
-	if h.forget != nil {
-		h.forget(conns[0].id.Token)
-	}
 	for _, c := range conns {
 		select {
 		case <-c.evict:

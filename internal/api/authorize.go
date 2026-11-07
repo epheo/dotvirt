@@ -62,7 +62,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, sc scope, ver
 	}
 	ok, err := s.can(r.Context(), sc.id, sc.cluster, verb, ref, ns)
 	if err != nil {
-		fail(w, reviewFailed(err))
+		fail(w, s.reviewFailed(r.Context(), sc.id, err))
 		return false
 	}
 	if !ok {
@@ -105,7 +105,7 @@ func (s *Server) authorizeDraft(w http.ResponseWriter, r *http.Request, sc scope
 	for _, ns := range sc.proj.Namespaces {
 		ok, err := s.can(r.Context(), sc.id, sc.cluster, verbUpdate, ssarVM, ns)
 		if err != nil {
-			fail(w, reviewFailed(err))
+			fail(w, s.reviewFailed(r.Context(), sc.id, err))
 			return false
 		}
 		if ok {
