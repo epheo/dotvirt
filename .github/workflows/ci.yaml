@@ -188,11 +188,14 @@ jobs:
           docker build -f operator/Dockerfile -t localhost:5000/dotvirt-operator:ci .
           docker push localhost:5000/dotvirt-operator:ci
       - name: Point the bundle at the freshly built image
-        # Swap only the manager image ref — the bundle otherwise stays exactly what
-        # validate proved in sync with operator/config.
+        # Swap only the manager image ref; the bundle otherwise stays exactly what
+        # validate proves in sync with operator/config. A sed that matches nothing would
+        # install the published operator and pass without testing this tree.
         run: |
-          sed -i -E 's#quay\.io/epheo/dotvirt-operator@sha256:[0-9a-f]+#localhost:5000/dotvirt-operator:ci#g' \
-            operator/bundle/manifests/dotvirt-operator.clusterserviceversion.yaml
+          csv=operator/bundle/manifests/dotvirt-operator.clusterserviceversion.yaml
+          sed -i -E 's#quay\.io/epheo/dotvirt-operator@sha256:[0-9a-f]+#localhost:5000/dotvirt-operator:ci#g' "$csv"
+          grep -q 'localhost:5000/dotvirt-operator:ci' "$csv" \
+            || { echo "::error::no quay.io/epheo/dotvirt-operator@sha256 ref in $csv to repoint"; exit 1; }
       - name: Build + push the bundle to the local registry
         run: make -C operator bundle-build bundle-push BUNDLE_IMG=localhost:5000/dotvirt-operator-bundle:ci CONTAINER_TOOL=docker
       - name: Render + push a CI catalog serving that bundle
