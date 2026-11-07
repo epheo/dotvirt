@@ -7,7 +7,7 @@
 	import { nodeTargets } from '#lib/state/hosts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
-	import { nearestFree, overlapping, suggestSubnet } from '#lib/subnets.js';
+	import { canMeet, nearestFree, overlapping, suggestSubnet } from '#lib/subnets.js';
 	import { NAME_HINT, validName } from '#lib/validate.js';
 	import Card from '../Card.svelte';
 	import Consequence from '../Consequence.svelte';
@@ -116,8 +116,16 @@
 		});
 	});
 	const subnetValid = $derived(!subnet.trim() || /^[0-9a-fA-F:.]+\/\d{1,3}$/.test(subnet.trim()));
-	const clash = $derived(
+	const overlap = $derived(
 		addresses && subnet.trim() && subnetValid ? overlapping(subnet.trim(), others) : [],
+	);
+	// Only a network the new one can meet makes the overlap a problem; an
+	// isolated project network elsewhere may reuse the range (subnets.canMeet).
+	const self = $derived(who === 'project' ? { namespace } : { namespaces: selectedNs });
+	const clash = $derived(overlap.filter((n) => canMeet(self, n)));
+	const reuse = $derived(overlap.filter((n) => !canMeet(self, n)));
+	const reuseText = $derived(
+		`${reuse.map((n) => n.name).join(', ')} ${reuse.length === 1 ? 'uses' : 'use'} this range in another namespace. They never meet, so that is fine.`,
 	);
 	const freeNear = $derived(clash.length ? nearestFree(subnet.trim(), taken, 1)[0] : undefined);
 	const fixes = $derived(
@@ -440,7 +448,7 @@
 					oninput={() => (subnetTouched = true)}
 					autocomplete="off"
 					spellcheck="false"
-					aria-describedby="net-subnet-help net-subnet-warn"
+					aria-describedby="net-subnet-help net-subnet-warn net-subnet-reuse"
 				/>
 				<span id="net-subnet-help" class={HELP}>
 					{#if !subnetValid}<span class="text-warn-ink">Use CIDR form, like 10.40.0.0/16.</span
@@ -448,6 +456,7 @@
 							>Suggested <span class="font-mono text-ink-soft">{suggestion.cidr}</span>. Why: {suggestion.reason}.</span
 						>{/if}
 				</span>
+
 				{#if clash.length}
 					<div
 						id="net-subnet-warn"
@@ -483,6 +492,9 @@
 							{/if}
 						</div>
 					</div>
+				{/if}
+				{#if reuse.length}
+					<span id="net-subnet-reuse" class={HELP}>{reuseText}</span>
 				{/if}
 			</div>
 		{/if}

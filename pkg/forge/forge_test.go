@@ -407,3 +407,29 @@ func TestURLHelpersAgreeOnEveryForm(t *testing.T) {
 		t.Errorf("ResolveRef absolute = %q", got)
 	}
 }
+
+// CHG-11: the git token travels only to the forge's own host, and over plain
+// http only when the forge itself is http - a namespace annotation naming
+// another host must not harvest it.
+func TestCarriesToken(t *testing.T) {
+	for _, c := range []struct {
+		forge, repo string
+		want        bool
+	}{
+		{"https://forge.example", "https://forge.example/dotvirt/team-a.git", true},
+		{"https://forge.example/", "https://FORGE.example/dotvirt/team-a.git", true},
+		{"https://forge.example", "https://bot:x@forge.example/o/r.git", true},
+		{"https://forge.example", "https://evil.example/dotvirt/team-a.git", false},
+		{"https://forge.example", "https://forge.example.evil.example/o/r.git", false},
+		{"https://forge.example", "http://forge.example/dotvirt/team-a.git", false},
+		{"https://forge.example", "https://forge.example:8443/o/r.git", false},
+		{"http://forgejo.dotvirt.svc:3000", "http://forgejo.dotvirt.svc:3000/o/r.git", true},
+		{"https://forge.example", "dotvirt/team-a.git", false},
+		{"https://forge.example", "/srv/git/team-a.git", false},
+		{"", "https://forge.example/o/r.git", false},
+	} {
+		if got := CarriesToken(c.forge, c.repo); got != c.want {
+			t.Errorf("CarriesToken(%q, %q) = %v, want %v", c.forge, c.repo, got, c.want)
+		}
+	}
+}

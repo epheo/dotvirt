@@ -498,6 +498,39 @@ func TestScopeMetricsErrorHidesBackendDetail(t *testing.T) {
 	}
 }
 
+// Network traffic counts only the exact (VM, interface) attachments, sums a
+// VM's attachments, converts bytes/s to bits/s and ranks busiest first.
+func TestNetworkTraffic(t *testing.T) {
+	var query string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.Query().Get("query")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[
+			{"metric":{"namespace":"web-prod","name":"web-1","interface":"web-net"},"value":[100,"1000"]},
+			{"metric":{"namespace":"web-prod","name":"web-2","interface":"web-net"},"value":[100,"5000"]},
+			{"metric":{"namespace":"web-prod","name":"web-2","interface":"web-net-b"},"value":[100,"500"]},
+			{"metric":{"namespace":"web-prod","name":"other","interface":"web-net"},"value":[100,"9000"]}]}}`)
+	}))
+	defer srv.Close()
+
+	got, err := mustNew(t, srv.URL).NetworkTraffic(context.Background(), "tok", []Attachment{
+		{"web-prod", "web-1", "web-net"},
+		{"web-prod", "web-2", "web-net"},
+		{"web-prod", "web-2", "web-net-b"},
+	}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`namespace=~"web-prod"`, `interface=~"web-net|web-net-b"`, "[1h]", "receive", "transmit"} {
+		if !strings.Contains(query, want) {
+			t.Errorf("query %q lacks %q", query, want)
+		}
+	}
+	if len(got) != 2 || got[0].Name != "web-2" || got[0].BitsPerSecond != 44000 || got[1].Name != "web-1" || got[1].BitsPerSecond != 8000 {
+		t.Errorf("traffic = %+v, want web-2 44000 then web-1 8000", got)
+	}
+}
+
 // Each side of the vCPU `or` must aggregate to the same label set, or a VM
 // reporting both metrics comes back as two series and the per-VM division
 // fails on a duplicate match.

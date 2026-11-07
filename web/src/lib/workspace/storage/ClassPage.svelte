@@ -192,6 +192,18 @@
 						<p class="text-[13px] text-ink-faint">
 							The storage driver does not report free space for this class.
 						</p>
+					{:else if facts.shared === false}
+						<!-- The per-host split names hosts, so it reaches only callers who
+						     may read nodes; the total is all anyone else gets. -->
+						<p class="text-[13px]">
+							{size(info.free)} free in total, spread across hosts. A disk here takes its space on one
+							host.
+						</p>
+						{#if segments.length === 0}
+							<p class="mt-1 text-xs text-ink-faint">
+								The split per host shows to accounts that can see hosts.
+							</p>
+						{/if}
 					{:else}
 						<p class="text-[13px]">{size(info.free)} free across the cluster.</p>
 					{/if}

@@ -165,11 +165,11 @@ describe('scope helpers', () => {
 			[
 				'dc-vlan-bridge',
 				'NodeNetworkConfigurationPolicy degraded',
-				'/networking',
+				'/networking?tab=uplinks',
 				'platform',
 				'warn',
 			],
-			['ns-a/net-a', 'UserDefinedNetwork degraded', '/networking/net-a', 'p1', 'warn'],
+			['ns-a/net-a', 'UserDefinedNetwork degraded', '/networking/ns-a/net-a', 'p1', 'warn'],
 		]);
 		expect(issues[0].detail).toBe('FailedToConfigure: 1/1 nodes failed to configure');
 	});
@@ -302,5 +302,46 @@ describe('deriveSuggestions', () => {
 		]);
 		expect(s.every((x) => x.severity === 'info')).toBe(true);
 		expect(deriveIssues(i)).toEqual([]);
+	});
+});
+
+describe('network problems in the issues plane', () => {
+	it('names the uplink and the overlapping networks, and drops the repeated policy rollup', () => {
+		const inv: Inventory = {
+			projects: [{ name: 'p1', namespaces: [{ namespace: 'ns-a', vms: [] }] }],
+			platform: {
+				sync: 'Synced',
+				health: 'Degraded',
+				unhealthy: [
+					{ kind: 'NodeNetworkConfigurationPolicy', name: 'uplink-dc', health: 'Degraded' },
+				],
+			},
+		};
+		const issues = deriveIssues(inv, {
+			network: [
+				{
+					id: 'uplink:dc',
+					kind: 'uplink',
+					severity: 'danger',
+					title: 'Fails on host-41',
+					detail: 'dc is not configured on host-41: FailedToConfigure.',
+					uplink: 'dc',
+					policy: 'uplink-dc',
+					hosts: ['host-41'],
+				},
+				{
+					id: 'overlap:x',
+					kind: 'overlap',
+					severity: 'warn',
+					title: 'Overlap',
+					detail: 'a and b both use 10.200.0.0/16.',
+					networks: ['ns-a/a', 'ns-a/b'],
+				},
+			],
+		});
+		expect(issues.map((x) => [x.scope, x.label, x.href, x.project, x.severity])).toEqual([
+			['dc', 'fails on host-41', '/networking?tab=uplinks', 'platform', 'danger'],
+			['a and b', 'subnets overlap', '/networking/ns-a/a', 'p1', 'warn'],
+		]);
 	});
 });

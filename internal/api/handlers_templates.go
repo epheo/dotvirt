@@ -27,7 +27,7 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 	}
 	projs, err := s.projectsFor(r.Context(), id, c)
 	if err != nil {
-		fail(w, unavailable(err))
+		fail(w, err)
 		return
 	}
 	list := model.TemplateList{Templates: []model.Template{}}
@@ -95,7 +95,7 @@ func (s *Server) libraryFor(w http.ResponseWriter, r *http.Request, sc scope, li
 	}
 	projs, err := s.projectsFor(r.Context(), sc.id, sc.cluster)
 	if err != nil {
-		fail(w, unavailable(err))
+		fail(w, err)
 		return project.ProjectInfo{}, false
 	}
 	for _, p := range projs {

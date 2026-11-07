@@ -155,15 +155,16 @@ func decodePorts(docs []netgen.PortDoc, defaultProto string) []port {
 	return out
 }
 
-// view renders the rule as one Security table row.
-func (r rule) view(dir string) model.PolicyRuleView {
-	return model.PolicyRuleView{Direction: dir, Action: r.action, Peer: r.peerSummary(), Ports: r.portSummary()}
+// view renders the rule as one Security table row; red hides namespaces in
+// its peers (nil renders everything).
+func (r rule) view(dir string, red *Redaction) model.PolicyRuleView {
+	return model.PolicyRuleView{Direction: dir, Action: r.action, Peer: r.peerSummary(red), Ports: r.portSummary(), Text: r.text(dir, red)}
 }
 
-func (r rule) peerSummary() string {
+func (r rule) peerSummary(red *Redaction) string {
 	var parts []string
 	for _, p := range r.peers {
-		if s := p.summary(); s != "" {
+		if s := p.summary(red); s != "" {
 			parts = append(parts, s)
 		}
 	}
@@ -178,21 +179,21 @@ func (r rule) portSummary() string {
 	return strings.Join(parts, ", ")
 }
 
-func (p peer) summary() string {
+func (p peer) summary(red *Redaction) string {
 	switch p.kind {
 	case peerSelector:
 		var parts []string
 		if p.ns != nil {
-			parts = append(parts, "ns "+orAny(selectorSummary(p.ns), "any"))
+			parts = append(parts, "ns "+orAny(selectorSummary(p.ns, red), "any"))
 		}
 		if p.pod != nil {
-			parts = append(parts, "pods "+orAny(selectorSummary(p.pod), "any"))
+			parts = append(parts, "pods "+orAny(selectorSummary(p.pod, nil), "any"))
 		}
 		return strings.Join(parts, " ")
 	case peerNetworks:
 		return "cidr " + strings.Join(p.cidrs, ", ")
 	case peerNodes:
-		return "nodes " + orAny(selectorSummary(p.nodes), "any")
+		return "nodes " + orAny(selectorSummary(p.nodes, nil), "any")
 	case peerCIDRSelector:
 		return p.cidrs[0]
 	case peerDNSName:

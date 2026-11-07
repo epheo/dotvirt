@@ -38,6 +38,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/storage/snapshots", s.handleStorageSnapshots)
 	mux.HandleFunc("GET /api/storage/claims", s.handleStorageClaims)
 	mux.HandleFunc("GET /api/networks", s.handleNetworks)
+	mux.HandleFunc("GET /api/networks/rules", s.handleNetworkRules)
 	mux.HandleFunc("GET /api/policies", s.handlePolicies)
 	mux.HandleFunc("POST /api/networks", s.handleCreateNetwork)
 	// The single-scope network-family creates, by tier (see handlers_networks.go):
@@ -95,6 +96,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/metrics/scope", s.handleScopeMetrics)
 	mux.HandleFunc("GET /api/metrics/hosts", s.handleHostLoad)
 	mux.HandleFunc("GET /api/metrics/capacity", s.handleHostCapacity)
+	mux.HandleFunc("GET /api/metrics/network", s.handleNetworkTraffic)
 	mux.HandleFunc("GET /api/alarms", s.handleAlarms)
 	mux.HandleFunc("GET /api/quotas", s.handleQuotas)
 	mux.HandleFunc("GET /api/nodes", s.handleNodes)
@@ -113,7 +115,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/projects/{project}/release", s.handleReleaseProject)
 
 	if s.stream != nil {
-		mux.HandleFunc("GET /api/inventory/stream", s.stream.Handler)
+		mux.HandleFunc("GET /api/inventory/stream", s.streaming(s.stream.Handler))
 	}
 	if s.vnc != nil {
 		mux.HandleFunc("GET /api/vms/{namespace}/{name}/vnc", s.vnc.Handler)

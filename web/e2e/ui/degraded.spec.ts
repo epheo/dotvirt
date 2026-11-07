@@ -45,5 +45,9 @@ test('platform authoring gates follow the caps, not hardcoded roles', async ({ p
 	// nmstate absent + no platform caps: the fabric affordances hide rather
 	// than render empty panels.
 	await page.locator('aside').getByRole('link', { name: 'Networking' }).click();
-	await expect(page.locator('main').getByText('Provider Gateway').first()).toBeVisible();
+	const main = page.locator('main');
+	await expect(main.getByRole('heading', { name: 'Cluster map' })).toBeVisible();
+	await page.goto('/networking?tab=uplinks');
+	await expect(main.getByText('Uplinks need the NMState operator on the cluster.')).toBeVisible();
+	await expect(main.getByRole('button', { name: 'New uplink' })).toHaveCount(0);
 });

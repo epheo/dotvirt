@@ -52,7 +52,7 @@ describe('vmNetworkKeys', () => {
 
 	it('resolves the default NIC to the primary port group of its namespace', () => {
 		const v = vm({ networks: [{ name: 'default', network: 'pod' }] });
-		expect(vmNetworkKeys(v, catalog)).toEqual(['network-a']);
+		expect(vmNetworkKeys(v, catalog)).toEqual(['ns-a/network-a']);
 	});
 
 	it('resolves a multus ref through the catalog to the port-group name', () => {

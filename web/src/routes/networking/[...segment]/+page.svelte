@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import type { Scope } from '#lib/lenses.js';
-	import { trailForScope } from '#lib/nav.js';
-	import ContainerWorkspace from '#lib/workspace/ContainerWorkspace.svelte';
+	import NetworkPage from '#lib/networking/NetworkPage.svelte';
 
-	// Rest param: network keys may carry a raw "ns/name" NAD ref.
-	const scope = $derived<Scope>({ kind: 'network', network: page.params.segment! });
+	// Rest param: a project network's key is "namespace/name".
+	const key = $derived(page.params.segment!);
 </script>
 
-<ContainerWorkspace {scope} section="networking" trail={trailForScope(scope)} />
+{#key key}
+	<NetworkPage {key} />
+{/key}

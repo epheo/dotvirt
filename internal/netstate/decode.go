@@ -36,6 +36,7 @@ type policy struct {
 	subject subject
 	ingress []rule
 	egress  []rule
+	fixed   []model.PolicyRuleView // rows not drawn from rules: an EgressIP pool, a route's next hops
 	// NetworkPolicy only: the directions a definite selection default-denies.
 	denyIngress, denyEgress bool
 }
@@ -49,14 +50,22 @@ func (p *policy) rules(dir string) []rule {
 
 // finish fills the columns derived from the subject and rules.
 func (p *policy) finish() *policy {
-	p.view.Target = p.subject.summary()
+	p.view.Target, p.view.Applies, p.view.Rules = p.render(nil)
+	p.view.Isolation = p.isolation()
+	return p
+}
+
+// render is the policy's target, its subject in words and its rule rows as
+// red lets one caller read them; nil renders everything.
+func (p *policy) render(red *Redaction) (target, applies string, rows []model.PolicyRuleView) {
+	rows = slices.Clone(p.fixed)
 	for _, r := range p.ingress {
-		p.view.Rules = append(p.view.Rules, r.view("Ingress"))
+		rows = append(rows, r.view("Ingress", red))
 	}
 	for _, r := range p.egress {
-		p.view.Rules = append(p.view.Rules, r.view("Egress"))
+		rows = append(rows, r.view("Egress", red))
 	}
-	return p
+	return p.subject.summary(red), p.subject.applies(p.view.Namespace, red), rows
 }
 
 // subject is what a policy applies to. nil selectors are unconstrained: a
@@ -68,14 +77,14 @@ type subject struct {
 	none    bool // an admin policy without a subject applies to nothing
 }
 
-func (s subject) summary() string {
+func (s subject) summary(red *Redaction) string {
 	if s.none {
 		return ""
 	}
 	if s.ns == nil {
-		return orAny(selectorSummary(s.pod), "all pods")
+		return orAny(selectorSummary(s.pod, nil), "all pods")
 	}
-	return strings.TrimSpace(orAny(selectorSummary(s.ns), "all namespaces") + " " + prefixed("pods ", selectorSummary(s.pod)))
+	return strings.TrimSpace(orAny(selectorSummary(s.ns, red), "all namespaces") + " " + prefixed("pods ", selectorSummary(s.pod, nil)))
 }
 
 // decodeNetpol reads a NetworkPolicy: the project east-west DFW rules. A
@@ -165,7 +174,10 @@ func decodeEgressIP(u *unstructured.Unstructured) *policy {
 	}
 	p.view.Namespaces = netgen.NamespaceNames(p.subject.ns)
 	if len(doc.Spec.EgressIPs) > 0 {
-		p.view.Rules = []model.PolicyRuleView{{Direction: "Egress", Action: "SNAT", Peer: strings.Join(doc.Spec.EgressIPs, ", ")}}
+		p.fixed = []model.PolicyRuleView{{
+			Direction: "Egress", Action: "SNAT", Peer: strings.Join(doc.Spec.EgressIPs, ", "),
+			Text: "Leaves with source IP " + strings.Join(doc.Spec.EgressIPs, " or ") + ".",
+		}}
 	}
 	return p.finish()
 }
@@ -186,7 +198,10 @@ func decodeExtRoute(u *unstructured.Unstructured) *policy {
 		}
 	}
 	if len(ips) > 0 {
-		p.view.Rules = []model.PolicyRuleView{{Direction: "Egress", Action: "Route", Peer: "via " + strings.Join(ips, ", ")}}
+		p.fixed = []model.PolicyRuleView{{
+			Direction: "Egress", Action: "Route", Peer: "via " + strings.Join(ips, ", "),
+			Text: "Leaves through " + strings.Join(ips, " or ") + ".",
+		}}
 	}
 	return p.finish()
 }

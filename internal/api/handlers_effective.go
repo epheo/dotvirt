@@ -8,6 +8,7 @@ import (
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/netstate"
 )
 
 // The effective-policy answer: what governs one workload, in evaluation order.
@@ -50,39 +51,79 @@ func (s *Server) handleNamespacePolicy(w http.ResponseWriter, r *http.Request) {
 // routes enforce, cached per (token, kind).
 func (s *Server) clusterAuthority(ctx context.Context, id auth.Identity, c *cluster.Client) func(model.PolicyKind) bool {
 	return func(k model.PolicyKind) bool {
-		switch k {
-		case model.PolicyAdmin:
-			return s.canCreateCached(ctx, id, c, ssarANP)
-		case model.PolicyBaseline:
-			return s.canCreateCached(ctx, id, c, ssarBANP)
-		case model.PolicyEgressIP:
-			return s.canCreateCached(ctx, id, c, ssarEgressIP)
-		case model.PolicyRoute:
-			return s.canCreateCached(ctx, id, c, ssarExtRoute)
+		ref, ok := clusterPolicyRefs[k]
+		if !ok {
+			return false
 		}
-		return false
+		allowed, _ := s.can(ctx, id, c, verbCreate, ref, "")
+		return allowed
 	}
 }
 
-// redactSubjects strips a cluster-tier policy's enumerated subject namespaces
-// for callers without authority over the kind. The rules stay - a rule that
-// governs the caller's workload is never hidden - but where else an admin
-// policy applies (namespaces across other tenants) is the rollup-tier
-// information /api/policies gates, so the same authority gates it here.
-func redactSubjects(can func(model.PolicyKind) bool, p *model.Policy) {
-	switch p.Kind {
-	case model.PolicyAdmin, model.PolicyBaseline, model.PolicyEgressIP, model.PolicyRoute:
-		if p.Namespaces != nil && !can(p.Kind) {
-			p.Namespaces = nil
+// clusterPolicyRefs is the create authority over each cluster-tier policy kind.
+var clusterPolicyRefs = map[model.PolicyKind]ssarRef{
+	model.PolicyAdmin:    ssarANP,
+	model.PolicyBaseline: ssarBANP,
+	model.PolicyEgressIP: ssarEgressIP,
+	model.PolicyRoute:    ssarExtRoute,
+}
+
+// policyRedactor hides, from a caller without authority over a cluster-tier
+// policy's kind, what that policy says about other tenants: its subject
+// namespaces, every namespace name and project label value its text spells
+// outside the caller's view, and its apply error. The rules stay - a rule that
+// governs the caller's workload is never hidden - while the full rollup is
+// what /api/policies gates on the same authority.
+type policyRedactor struct {
+	can  func(model.PolicyKind) bool
+	view *netstate.Redaction
+	snap *netstate.Snapshot
+}
+
+// policyRedactor is the caller's redactor: their visible namespaces and the
+// projects those belong to. A failed visibility read hides every name.
+func (s *Server) policyRedactor(ctx context.Context, id auth.Identity, c *cluster.Client) policyRedactor {
+	projects := map[string]bool{}
+	visible, err := s.visibleFor(ctx, id, c)
+	if err == nil {
+		for _, p := range s.resolver.Resolve(s.state.Namespaces(), visible) {
+			projects[p.Name] = true
 		}
 	}
+	return policyRedactor{
+		can:  s.clusterAuthority(ctx, id, c),
+		snap: s.netstate,
+		view: &netstate.Redaction{
+			ProjectLabel: s.cfg.ProjectLabel,
+			Namespace:    func(ns string) bool { return visible[ns] },
+			Project:      func(name string) bool { return projects[name] },
+		},
+	}
 }
+
+// apply redacts p, and rule when it is one of p's rows (a trace step's).
+func (pr policyRedactor) apply(p *model.Policy, rule *model.PolicyRuleView) {
+	if _, cluster := clusterPolicyRefs[p.Kind]; !cluster || pr.can(p.Kind) {
+		return
+	}
+	p.Namespaces = nil
+	if p.SyncError != "" {
+		p.SyncError = redactedSyncError
+	}
+	if pr.snap != nil {
+		pr.snap.Redact(p, rule, pr.view)
+	}
+}
+
+// redactedSyncError stands in for a cluster-tier policy's apply error, which
+// can name other tenants' namespaces.
+const redactedSyncError = "the platform could not apply this policy"
 
 func (s *Server) redactEffective(ctx context.Context, sc scope, eff *model.EffectivePolicy) {
-	can := s.clusterAuthority(ctx, sc.id, sc.cluster)
+	pr := s.policyRedactor(ctx, sc.id, sc.cluster)
 	for _, bs := range [][]model.PolicyBinding{eff.EastWest, eff.Gateway, eff.SNAT, eff.Routes} {
 		for i := range bs {
-			redactSubjects(can, &bs[i].Policy)
+			pr.apply(&bs[i].Policy, nil)
 		}
 	}
 }

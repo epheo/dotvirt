@@ -111,6 +111,25 @@ func PathRef(repoURL string) string {
 	return strings.TrimLeft(u.path, "/")
 }
 
+// CarriesToken reports whether a git transport to repoURL may carry the token
+// of the forge at forgeURL: only to that forge's own host, and over plain http
+// only when the forge itself is configured http. A repo annotation naming any
+// other host, or a downgrade to http, gets an anonymous transport instead.
+func CarriesToken(forgeURL, repoURL string) bool {
+	f, ferr := url.Parse(strings.TrimSpace(forgeURL))
+	r, rerr := url.Parse(strings.TrimSpace(repoURL))
+	if ferr != nil || rerr != nil || f.Host == "" || !strings.EqualFold(r.Host, f.Host) {
+		return false
+	}
+	switch strings.ToLower(r.Scheme) {
+	case "https":
+		return true
+	case "http":
+		return strings.EqualFold(f.Scheme, "http")
+	}
+	return false
+}
+
 // ResolveRef joins a relative ref onto base; absolute refs pass through.
 // Empty base leaves a relative ref unresolvable: "".
 func ResolveRef(base, ref string) string {

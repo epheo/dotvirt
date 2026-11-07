@@ -1,6 +1,7 @@
 import { vmKey, type Alert, type Inventory, type ObjectHealth, type VM } from '#lib/api.js';
 import { opStands, repoError } from '#lib/gitops.js';
-import { hrefForScope, vmHref } from '#lib/nav.js';
+import type { NetProblem } from '#lib/netmap.js';
+import { hrefForScope, networkHref, vmHref } from '#lib/nav.js';
 import type { AppModal } from '#lib/state/ui.svelte.js';
 
 // What fixes an issue, one click from wherever it is listed: a view to open, a
@@ -34,10 +35,17 @@ const badPhase = /Err|CrashLoop|Unschedulable|Failed/;
 // card. canRepair is the namespace-create authority the repo dialogs need.
 export function deriveIssues(
 	inv: Inventory | null,
-	opts: { alerts?: Alert[]; canRepair?: boolean } = {},
+	opts: { alerts?: Alert[]; canRepair?: boolean; network?: NetProblem[] } = {},
 ): Issue[] {
 	if (!inv) return [];
 	const out: Issue[] = [];
+	// A failing uplink reports per host from its own problem; Argo's rollup of
+	// the same policy would only repeat it.
+	const failingPolicies = new Set((opts.network ?? []).map((p) => p.policy).filter(Boolean));
+	const objectIssueOf = (project: string, o: ObjectHealth) =>
+		o.kind === 'NodeNetworkConfigurationPolicy' && failingPolicies.has(o.name)
+			? null
+			: objectIssue(inv, project, o);
 	for (const p of inv.projects) {
 		const phref = hrefForScope({ kind: 'project', project: p.name });
 		// A resolver error or a repo GitOps cannot compare against; the same
@@ -74,7 +82,7 @@ export function deriveIssues(
 				action: open(phref),
 			});
 		for (const o of p.gitOps?.unhealthy ?? []) {
-			const issue = objectIssue(inv, p.name, o);
+			const issue = objectIssueOf(p.name, o);
 			if (issue) out.push(issue);
 		}
 		for (const ns of p.namespaces)
@@ -98,10 +106,11 @@ export function deriveIssues(
 				action: open('/changes'),
 			});
 		for (const o of g.unhealthy ?? []) {
-			const issue = objectIssue(inv, PLATFORM, o);
+			const issue = objectIssueOf(PLATFORM, o);
 			if (issue) out.push(issue);
 		}
 	}
+	for (const p of opts.network ?? []) out.push(networkIssue(inv, p));
 	for (const a of opts.alerts ?? []) {
 		const issue = alertIssue(inv, a);
 		if (issue) out.push(issue);
@@ -183,24 +192,25 @@ function objectIssue(inv: Inventory, project: string, o: ObjectHealth): Issue | 
 }
 
 // Where each kind is shown: segments have a route of their own (a NAD by its
-// attach ref), uplinks sit on the networking root and policies on its security
-// tab, tenancy objects on the project that owns the namespace.
+// attach ref), uplinks and policies on the networking root's Uplinks and
+// Firewall tabs, tenancy objects on the project that owns the namespace.
 function objectHref(inv: Inventory, o: ObjectHealth): string {
 	switch (o.kind) {
 		case 'UserDefinedNetwork':
+			return hrefForScope({ kind: 'network', network: `${o.namespace}/${o.name}` });
 		case 'ClusterUserDefinedNetwork':
 			return hrefForScope({ kind: 'network', network: o.name });
 		case 'NetworkAttachmentDefinition':
 			return hrefForScope({ kind: 'network', network: `${o.namespace}/${o.name}` });
 		case 'NodeNetworkConfigurationPolicy':
-			return '/networking';
+			return '/networking?tab=uplinks';
 		case 'NetworkPolicy':
 		case 'EgressFirewall':
 		case 'AdminNetworkPolicy':
 		case 'BaselineAdminNetworkPolicy':
 		case 'EgressIP':
 		case 'AdminPolicyBasedExternalRoute':
-			return '/networking?tab=security';
+			return '/networking?tab=firewall';
 		case 'Namespace': {
 			const p = projectOf(inv, o.name);
 			return p ? hrefForScope({ kind: 'namespace', project: p, namespace: o.name }) : '/compute';
@@ -212,6 +222,35 @@ function objectHref(inv: Inventory, o: ObjectHealth): string {
 		default:
 			return '/changes';
 	}
+}
+
+// A networking problem from the catalog (an uplink failing on hosts, subnets
+// that overlap where one VM could attach both), named by its objects.
+function networkIssue(inv: Inventory, p: NetProblem): Issue {
+	if (p.kind === 'uplink') {
+		const href = '/networking?tab=uplinks';
+		return {
+			severity: p.severity,
+			scope: p.uplink ?? '',
+			label: p.title.toLowerCase(),
+			detail: p.detail,
+			href,
+			project: PLATFORM,
+			action: open(href),
+		};
+	}
+	const keys = p.networks ?? [];
+	const href = keys.length ? networkHref(keys[0]) : '/networking?tab=networks';
+	const ns = keys[0]?.includes('/') ? keys[0].split('/')[0] : '';
+	return {
+		severity: p.severity,
+		scope: keys.map((k) => k.slice(k.lastIndexOf('/') + 1)).join(' and '),
+		label: 'subnets overlap',
+		detail: p.detail,
+		href,
+		project: (ns && projectOf(inv, ns)) || PLATFORM,
+		action: { label: 'Open the network', href },
+	};
 }
 
 function projectOf(inv: Inventory, namespace: string): string | undefined {

@@ -74,6 +74,8 @@
 	   for counts drawn as bars or squares beside their legend */
 	--color-glyph: #264a73;
 	--color-glyph-2: #009596;
+	/* the network map's attached connectors */
+	--color-wire: #a3a6a9;
 
 	/* the rail: the dark console nav framing the light workspace - one PF-dark
 	   family in BOTH themes, so the chrome is the identity and the workspace
@@ -197,6 +199,7 @@
 	--color-cold-ink: #7adbdc;
 	--color-glyph: #5b8fc9;
 	--color-glyph-2: #2dbcbd;
+	--color-wire: #6a6e73;
 
 	/* the rail against the darker canvas: only its border moves */
 	--color-side-line: #030303;

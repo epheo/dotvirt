@@ -71,10 +71,20 @@ type Uplink struct {
 	// SourceFile is the manifest declaring that policy in the platform repo;
 	// empty when git does not declare it.
 	SourceFile string `json:"sourceFile,omitempty"`
+	// Failures are the hosts where the policy did not apply, from nmstate's
+	// per-host enactments: the uplink is missing there.
+	Failures []UplinkFailure `json:"failures,omitempty"`
 	// The policy's own ArgoCD drift, as segments and rules carry it.
 	Sync      SyncStatus `json:"sync,omitempty"`
 	Health    string     `json:"health,omitempty"`
 	SyncError string     `json:"syncError,omitempty"`
+}
+
+// UplinkFailure is one host where an uplink's policy failed or was aborted.
+type UplinkFailure struct {
+	Node    string `json:"node"`
+	Reason  string `json:"reason"`            // FailedToConfigure, ConfigurationAborted...
+	Message string `json:"message,omitempty"` // the first line of nmstate's report
 }
 
 // PhysicalAdapter is one node NIC from NodeNetworkState - the host "Physical

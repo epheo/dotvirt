@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
@@ -22,7 +23,7 @@ type visibleSet struct {
 	ver uint64
 }
 
-// ssarVerdict is one (token, resource) create-SSAR answer, stamped the same way.
+// ssarVerdict is one (token, question) SSAR verdict, stamped the same way.
 type ssarVerdict struct {
 	ok  bool
 	ver uint64
@@ -65,8 +66,9 @@ func (s *Server) projectsFor(ctx context.Context, id auth.Identity, c *cluster.C
 }
 
 // visibleFor returns the set of namespaces id's token may read VMs in, cached by
-// token for visibleTTL. The snapshot's project namespaces feed the Forbidden->SSRR
-// fallback inside VisibleNamespaces.
+// token for visibleTTL. The snapshot's project namespaces are the candidates
+// VisibleNamespaces probes when the token lacks cluster-wide VM read. A failed
+// probe is never cached: the next read asks again.
 func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Client) (map[string]bool, error) {
 	ver := s.rbacVersion()
 	key := restfactory.TokenKey(id.Token)
@@ -76,7 +78,7 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 	candidates := namespaceNames(s.state.Namespaces())
 	names, err := c.VisibleNamespaces(ctx, candidates)
 	if err != nil {
-		return nil, err
+		return nil, s.reviewFailed(ctx, id, err)
 	}
 	set := make(map[string]bool, len(names))
 	for _, n := range names {
@@ -86,42 +88,26 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 	return set, nil
 }
 
-// ssarCached answers one authorization probe behind the per-(token, key),
-// rbacVersion-stamped cache, so a signal read on a polled or broadcast path
-// does not post an SSAR to the apiserver per request. A RoleBinding/namespace
-// move invalidates lazily via the version stamp; the TTL backstops the
-// cluster-scoped RBAC changes the version doesn't observe (see visibleTTL).
-func (s *Server) ssarCached(id auth.Identity, key string, probe func() bool) bool {
-	ok, _ := s.ssarChecked(id, key, func() (bool, error) { return probe(), nil })
-	return ok
-}
-
-// ssarChecked is ssarCached for a probe that can fail: an error is returned
-// and never cached, so a transient apiserver failure cannot pin a denial.
-func (s *Server) ssarChecked(id auth.Identity, key string, probe func() (bool, error)) (bool, error) {
+// can answers verb on ref in ns ("" for cluster scope) under id's token,
+// behind a per-(token, question) cache stamped with rbacVersion, so a signal
+// read on a polled or broadcast path does not post an SSAR per request. A
+// RoleBinding/namespace move invalidates lazily via the stamp; the TTL
+// backstops the cluster-scoped RBAC changes the stamp doesn't observe (see
+// visibleTTL). Only a verdict is cached: a failed review is returned, so a
+// blip can never pin a denial. A gate answers the error with s.reviewFailed; a
+// UI signal or a filter reads it as no.
+func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, verb string, ref ssarRef, ns string) (bool, error) {
 	ver := s.rbacVersion()
-	k := restfactory.TokenKey(id.Token) + "\x00" + key
+	k := strings.Join([]string{restfactory.TokenKey(id.Token), verb, ref.group, ref.resource, ns}, "\x00")
 	if e, ok := s.ssar.Get(k); ok && e.ver == ver {
 		return e.ok, nil
 	}
-	ok, err := probe()
+	ok, err := c.Can(ctx, verb, ref.group, ref.resource, ns)
 	if err != nil {
 		return false, err
 	}
 	s.ssar.Put(k, ssarVerdict{ok: ok, ver: ver})
 	return ok, nil
-}
-
-func (s *Server) canCreateCached(ctx context.Context, id auth.Identity, c *cluster.Client, ref ssarRef) bool {
-	return s.ssarCached(id, ref.group+"/"+ref.resource, func() bool {
-		return c.CanCreateClusterResource(ctx, ref.group, ref.resource)
-	})
-}
-
-// canReadNodesCached gates the node-data reads (physical fabric, host metrics).
-// The "read\x00" segment keeps the key out of the create-tuple namespace.
-func (s *Server) canReadNodesCached(ctx context.Context, id auth.Identity, c *cluster.Client) bool {
-	return s.ssarCached(id, "read\x00nodes", func() bool { return c.CanReadNodes(ctx) })
 }
 
 // saCached is the preamble of a catalog route: the caller's identity first
@@ -144,15 +130,19 @@ func saCached[T any](s *Server, w http.ResponseWriter, r *http.Request, cache *t
 		return id, nil, v, false
 	}
 	if v, err = fetch(sa, r.Context()); err != nil {
-		fail(w, err)
+		fail(w, unavailable(err))
 		return id, nil, v, false
 	}
 	cache.Put("all", v)
 	return id, c, v, true
 }
 
-// ssarRef is one create-authority tuple (API group + plural resource).
+// ssarRef is one authority tuple (API group + plural resource).
 type ssarRef struct{ group, resource string }
+
+// ssarNodes is node read: the gate on node-level data (physical fabric, host
+// metrics, node ops in the task feed).
+var ssarNodes = ssarRef{resource: "nodes"}
 
 // ssarFor is the create authority over one managed kind.
 func ssarFor(k model.Kind) ssarRef { return ssarRef{k.Group, k.Plural} }
@@ -201,17 +191,23 @@ var platformAuthorResources = []ssarRef{ssarCUDN, ssarDescheduler, ssarVMTemplat
 // broadcast path stays free of a per-subscriber cluster call. False when no
 // platform repo is configured. Used to seed the synthetic platform project
 // into the proposals query so a platform PR surfaces on a cold page load, not
-// only right after proposing.
-func (s *Server) canAuthorPlatform(ctx context.Context, id auth.Identity, c *cluster.Client) bool {
+// only right after proposing. An error means no signal allowed and at least
+// one review failed.
+func (s *Server) canAuthorPlatform(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
 	if s.cfg.PlatformRepo == "" {
-		return false
+		return false, nil
 	}
+	var failed error
 	for _, r := range platformAuthorResources {
-		if s.canCreateCached(ctx, id, c, r) {
-			return true
+		ok, err := s.can(ctx, id, c, verbCreate, r, "")
+		if ok {
+			return true, nil
+		}
+		if err != nil {
+			failed = err
 		}
 	}
-	return false
+	return false, failed
 }
 
 func namespaceNames(nss []project.Namespace) []string {
@@ -394,8 +390,8 @@ const platformProjectName = project.PlatformName
 // SIGNAL (the user never applies it; Argo does, from the platform repo), so the
 // author-time check matches the apply-time AppProject boundary.
 func (s *Server) platformScope(w http.ResponseWriter, r *http.Request, ref ssarRef) (scope, bool) {
-	return s.platformScopeWith(w, r, func(ctx context.Context, id auth.Identity, c *cluster.Client) bool {
-		return s.canCreateCached(ctx, id, c, ref)
+	return s.platformScopeWith(w, r, func(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
+		return s.can(ctx, id, c, verbCreate, ref, "")
 	}, "not authorized to create "+ref.resource)
 }
 
@@ -403,8 +399,9 @@ func (s *Server) platformScope(w http.ResponseWriter, r *http.Request, ref ssarR
 // + cluster, the draft and -platform-repo availability gates, and the synthetic
 // platform ProjectInfo - parameterized only by the authoring authorization, so
 // the two security gates above cannot drift apart. Fails closed: 503 when the
-// platform tier isn't configured, 403 with deny when the caller lacks authority.
-func (s *Server) platformScopeWith(w http.ResponseWriter, r *http.Request, authorized func(context.Context, auth.Identity, *cluster.Client) bool, deny string) (scope, bool) {
+// platform tier isn't configured, 403 with deny when the caller lacks authority,
+// 503 when the review itself failed.
+func (s *Server) platformScopeWith(w http.ResponseWriter, r *http.Request, authorized func(context.Context, auth.Identity, *cluster.Client) (bool, error), deny string) (scope, bool) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
 		fail(w, unavailable(err))
@@ -414,7 +411,12 @@ func (s *Server) platformScopeWith(w http.ResponseWriter, r *http.Request, autho
 		fail(w, fmt.Errorf("%w: platform repo not configured (set -platform-repo)", model.ErrUnavailable))
 		return scope{}, false
 	}
-	if !authorized(r.Context(), id, c) {
+	ok, err := authorized(r.Context(), id, c)
+	if err != nil {
+		fail(w, s.reviewFailed(r.Context(), id, err))
+		return scope{}, false
+	}
+	if !ok {
 		fail(w, fmt.Errorf("%w: %s", model.ErrForbidden, deny))
 		return scope{}, false
 	}

@@ -3,6 +3,21 @@
 // adapters and the Networks lens panel so they label networks identically.
 import type { Network, NIC } from '#lib/api.js';
 
+/**
+ * A network's identity in routes, the tree and the grid scope: a project
+ * network by "namespace/name" (two projects may name theirs alike), a shared
+ * one by name.
+ */
+export function networkKey(n: Network): string {
+	return n.scope === 'shared' ? n.name : (n.attachRef ?? `${n.namespace}/${n.name}`);
+}
+
+/** What a network is, in the words the networking views use. */
+export function networkKind(n: Network): 'Project network' | 'Shared network' | 'VLAN network' {
+	if (n.kind === 'vlan') return 'VLAN network';
+	return n.scope === 'shared' ? 'Shared network' : 'Project network';
+}
+
 /** The display label for a port-group kind. */
 export function kindLabel(kind: Network['kind']): string {
 	switch (kind) {

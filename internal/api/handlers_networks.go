@@ -8,6 +8,7 @@ import (
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
+	"github.com/epheo/dotvirt/internal/netstate"
 )
 
 // The networking create routes resolve their target TIER from the object's SCOPE,
@@ -170,16 +171,22 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		PhysicalAdapters: []model.PhysicalAdapter{},
 		NMStatePresent:   full.NMStatePresent,
 	}
+	ctx := r.Context()
+	can := func(ref ssarRef) bool {
+		ok, _ := s.can(ctx, id, c, verbCreate, ref, "")
+		return ok
+	}
+	cudn := can(ssarCUDN)
 	// Per-object drift: attach each segment's own ArgoCD sync/health at serve time
 	// (always fresh, off the cached catalog) - the same surface VMs carry.
 	s.enrichNetworkDrift(out.Networks)
+	if !cudn {
+		redactSharedErrors(out.Networks)
+	}
 	// Per-action authoring authority: the same SSARs the create handlers enforce, so
 	// the UI gates each button precisely. CanManage stays the coarse CUDN signal that
 	// gates the platform-draft view. All false when no platform repo is configured.
 	if s.cfg.PlatformRepo != "" {
-		ctx := r.Context()
-		can := func(ref ssarRef) bool { return s.canCreateCached(ctx, id, c, ref) }
-		cudn := can(ssarCUDN)
 		out.CanManage = cudn
 		out.Caps = model.NetworkCaps{
 			Uplink:             can(ssarUplink),
@@ -187,8 +194,8 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 			EgressIP:           can(ssarEgressIP),
 			ExternalRoute:      can(ssarExtRoute),
 			AdminNetworkPolicy: can(ssarANP),
-			Platform:           s.canAuthorPlatform(ctx, id, c),
 		}
+		out.Caps.Platform, _ = s.canAuthorPlatform(ctx, id, c)
 	}
 	// Which file declares each segment: the edit/delete affordance. A shared
 	// segment's platform file shows only to callers who may author that tier.
@@ -199,7 +206,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	}
 	// The physical fabric is node-level infrastructure - show it only to callers
 	// who can read nodes (cluster-admins), not every tenant who can attach a NIC.
-	if s.canReadNodesCached(r.Context(), id, c) {
+	if canNodes, _ := s.can(r.Context(), id, c, verbList, ssarNodes, ""); canNodes {
 		out.Uplinks = full.Uplinks
 		out.PhysicalAdapters = full.PhysicalAdapters
 		if out.Caps.Uplink {
@@ -234,6 +241,19 @@ func scopeNetworks(nets []model.Network, visible map[string]bool) []model.Networ
 	return out
 }
 
+// redactSharedErrors replaces a shared network's apply error with a generic
+// line: a CUDN's error can name every namespace its selector reaches, which
+// only its authors may read.
+func redactSharedErrors(nets []model.Network) {
+	for i := range nets {
+		if nets[i].Scope == model.ScopeShared && nets[i].SyncError != "" {
+			nets[i].SyncError = sharedNetworkErrorForTenants
+		}
+	}
+}
+
+const sharedNetworkErrorForTenants = "the platform could not apply this network"
+
 // enrichNetworkDrift attaches each segment's own ArgoCD sync/health/apply-error
 // - the same per-object drift plane VMs use. Mutates the scoped copies in place
 // (never the cached catalog, which scopeNetworks already copied).
@@ -258,4 +278,91 @@ func visibleSubset(nss []string, visible map[string]bool) []string {
 		}
 	}
 	return out
+}
+
+// handleNetworkRules answers what bears on one network's VMs: the rules
+// binding its namespaces and the rules elsewhere naming those VMs as their
+// other end, from the SA policy snapshot. The network resolves through the
+// caller-scoped catalog, so a network in a namespace the caller can't see is
+// not found, and a shared network spans only its visible namespaces.
+func (s *Server) handleNetworkRules(w http.ResponseWriter, r *http.Request) {
+	id, c, err := s.userCluster(r)
+	if err != nil {
+		fail(w, unavailable(err))
+		return
+	}
+	if s.netstate == nil {
+		fail(w, fmt.Errorf("%w: networking is not wired", model.ErrUnavailable))
+		return
+	}
+	visible, err := s.visibleFor(r.Context(), id, c)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	key := r.URL.Query().Get("network")
+	n, ok := findNetwork(scopeNetworks(s.netstate.Catalog().Networks, visible), key)
+	if !ok {
+		fail(w, fmt.Errorf("%w: network %q", model.ErrNotFound, key))
+		return
+	}
+	nss := n.Namespaces
+	if n.Scope == model.ScopeProject {
+		nss = []string{n.Namespace}
+	}
+	pr := s.policyRedactor(r.Context(), id, c)
+	// A peer rule's sentence names its subject; a caller without authority
+	// over the cluster tier reads it with other tenants' names hidden.
+	var red *netstate.Redaction
+	if !pr.can(model.PolicyAdmin) || !pr.can(model.PolicyBaseline) {
+		red = pr.view
+	}
+	out := s.netstate.NetworkRules(nss, s.state.NamespaceLabels, red)
+	out.Network = key
+	out = scopeNetworkRules(out, visible, pr.apply)
+	for i := range out.Applies {
+		s.policyDrift(&out.Applies[i].Policy)
+	}
+	for i := range out.Reaches {
+		s.policyDrift(&out.Reaches[i].Policy)
+	}
+	writeJSON(w, out)
+}
+
+// findNetwork resolves a network key the way the UI routes it: a project
+// network by its "namespace/name" attach ref, a shared one by name; a bare
+// name falls back to the first network so named.
+func findNetwork(nets []model.Network, key string) (model.Network, bool) {
+	for _, n := range nets {
+		if n.AttachRef == key || (n.Scope == model.ScopeShared && n.Name == key) {
+			return n, true
+		}
+	}
+	for _, n := range nets {
+		if n.Name == key {
+			return n, true
+		}
+	}
+	return model.Network{}, false
+}
+
+// scopeNetworkRules applies the policy plane's visibility to one network's
+// rules. A binding governs the caller's own VMs, so it stays, redacted like
+// the effective view. A peer rule in another namespace shows only where the
+// caller sees that namespace; a cluster rule naming these VMs governs them
+// too, so it stays, redacted.
+func scopeNetworkRules(in model.NetworkRules, visible map[string]bool, redact func(*model.Policy, *model.PolicyRuleView)) model.NetworkRules {
+	for i := range in.Applies {
+		redact(&in.Applies[i].Policy, nil)
+	}
+	reaches := make([]model.PeerRule, 0, len(in.Reaches))
+	for _, pr := range in.Reaches {
+		if pr.Policy.Namespace != "" && !visible[pr.Policy.Namespace] {
+			continue
+		}
+		redact(&pr.Policy, &pr.Rule)
+		reaches = append(reaches, pr)
+	}
+	in.Reaches = reaches
+	return in
 }

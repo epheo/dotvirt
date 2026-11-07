@@ -138,3 +138,18 @@ type NamespaceQuota struct {
 	Name      string      `json:"name"`
 	Items     []QuotaItem `json:"items"`
 }
+
+// NetworkTraffic is GET /api/metrics/network: the busiest VMs on one network
+// by traffic over Window.
+type NetworkTraffic struct {
+	Network string      `json:"network"`
+	Window  string      `json:"window"`
+	VMs     []TrafficVM `json:"vms"`
+}
+
+// TrafficVM is one VM's traffic on a network: received plus sent, averaged.
+type TrafficVM struct {
+	Namespace     string  `json:"namespace"`
+	Name          string  `json:"name"`
+	BitsPerSecond float64 `json:"bitsPerSecond"`
+}

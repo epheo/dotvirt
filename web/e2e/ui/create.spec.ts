@@ -71,7 +71,7 @@ test('a Change editor searches, and one editor is open at a time', async ({ page
 	const sheet = await openNew(page);
 	await sheet.getByRole('button', { name: 'Change network' }).click();
 	await page.keyboard.type('frontend');
-	await expect(sheet.getByText(/1 of 3 networks match/)).toBeVisible();
+	await expect(sheet.getByText(/1 of 5 networks match/)).toBeVisible();
 	await sheet.getByRole('checkbox', { name: /udn-frontend/ }).check();
 	await sheet.getByRole('button', { name: 'Change size' }).click();
 	await expect(sheet.getByRole('button', { name: 'Change network' })).toBeVisible();
@@ -110,9 +110,14 @@ test('a taken range names its networks and offers free ones', async ({ page }) =
 	await sheet.getByLabel('Name', { exact: true }).fill('web-backend');
 	await expect(sheet.getByText('Free in team-web.')).toBeVisible();
 	await sheet.getByLabel('Subnet').fill('10.200.0.0/16');
+	// Only a network the new one can meet is a clash; the isolated reuse in
+	// another namespace is a quiet line.
 	const warn = sheet.getByText(/Already used by/);
-	await expect(warn).toContainText('udn-frontend and udn-tcp-frontend');
-	await expect(sheet.getByText('Overlaps udn-frontend and udn-tcp-frontend.')).toBeVisible();
+	await expect(warn).toContainText('Already used by udn-frontend.');
+	await expect(
+		sheet.getByText(/udn-tcp-frontend uses this range in another namespace/),
+	).toBeVisible();
+	await expect(sheet.getByText('Overlaps udn-frontend.')).toBeVisible();
 	await sheet.getByRole('button', { name: 'Use 10.201.0.0/16' }).click();
 	await expect(warn).toBeHidden();
 	await expect(sheet.getByLabel('Subnet')).toHaveValue('10.201.0.0/16');

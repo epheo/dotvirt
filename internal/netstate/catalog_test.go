@@ -302,3 +302,58 @@ func assertNetwork(t *testing.T, got, want model.Network) {
 		}
 	}
 }
+
+// A host where nmstate failed (or aborted) the policy is the uplink's
+// standing failure there; healthy enactments and other policies' never count.
+func TestUplinkFailures(t *testing.T) {
+	s := New(nil, nil)
+	s.nodes = []cluster.NodeLabels{{Name: "host-40"}, {Name: "host-41"}, {Name: "host-42"}}
+	if err := s.nncp.Add(&unstructured.Unstructured{Object: map[string]any{
+		"metadata": map[string]any{"name": "uplink-dc-vlan"},
+		"spec": map[string]any{"desiredState": map[string]any{"ovn": map[string]any{"bridge-mappings": []any{
+			map[string]any{"localnet": "dc-vlan", "bridge": "br-dc"},
+		}}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	enact := func(node, policy, typ, reason, msg string, labeled bool) {
+		meta := map[string]any{"name": node + "." + policy}
+		if labeled {
+			meta["labels"] = map[string]any{"nmstate.io/policy": policy, "nmstate.io/node": node}
+		} else {
+			meta["labels"] = map[string]any{"nmstate.io/policy": policy}
+		}
+		if err := s.nnce.Add(&unstructured.Unstructured{Object: map[string]any{
+			"metadata": meta,
+			"status": map[string]any{"conditions": []any{
+				map[string]any{"type": "Available", "status": "False"},
+				map[string]any{"type": typ, "status": "True", "reason": reason, "message": msg},
+			}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	enact("host-41", "uplink-dc-vlan", "Failing", "FailedToConfigure", "error reconciling: VerificationError\nfull nmstate dump", true)
+	enact("host-40", "uplink-dc-vlan", "Aborted", "ConfigurationAborted", "aborted after failures elsewhere", false)
+	enact("host-42", "uplink-dc-vlan", "Available", "SuccessfullyConfigured", "", true)
+	enact("host-41", "uplink-other", "Failing", "FailedToConfigure", "", true)
+
+	var dc model.Uplink
+	for _, u := range s.uplinks() {
+		if u.Name == "dc-vlan" {
+			dc = u
+		}
+	}
+	want := []model.UplinkFailure{
+		{Node: "host-40", Reason: "ConfigurationAborted", Message: "aborted after failures elsewhere"},
+		{Node: "host-41", Reason: "FailedToConfigure", Message: "error reconciling: VerificationError"},
+	}
+	if len(dc.Failures) != len(want) {
+		t.Fatalf("failures = %+v, want %+v", dc.Failures, want)
+	}
+	for i := range want {
+		if dc.Failures[i] != want[i] {
+			t.Errorf("failure[%d] = %+v, want %+v", i, dc.Failures[i], want[i])
+		}
+	}
+}

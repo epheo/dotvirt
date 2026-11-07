@@ -57,6 +57,91 @@ const mergeCommit = (project) => ({
 const WEB2_BASE =
 	'kind: VirtualMachine\nmetadata:\n  name: web-2\n  namespace: web-prod\nspec:\n  disks:\n  - name: root\n';
 
+// ── networking: rules, traffic and history derived from the scenario ──────────
+
+// The namespaces a network's VMs live in, by its route key.
+function networkNamespaces(s, key) {
+	const n = (s.networks?.networks ?? []).find(
+		(x) => x.attachRef === key || (x.scope === 'shared' && x.name === key),
+	);
+	if (!n) return null;
+	return n.scope === 'shared' ? (n.namespaces ?? []) : [n.namespace];
+}
+
+// What binds some namespaces, in the evaluator's order.
+function bindingsFor(s, nss) {
+	const rank = { admin: 0, dfw: 1, baseline: 2, gateway: 3, egressip: 4, route: 5 };
+	const on = (p) =>
+		p.namespace
+			? nss.includes(p.namespace)
+			: p.kind === 'admin' ||
+				p.kind === 'baseline' ||
+				(p.namespaces ?? []).some((n) => nss.includes(n));
+	return (s.policies?.policies ?? [])
+		.filter(on)
+		.sort((a, b) => rank[a.kind] - rank[b.kind] || (a.priority ?? 0) - (b.priority ?? 0))
+		.map((policy) => ({
+			policy,
+			conditional:
+				policy.kind === 'dfw' && policy.target !== 'all pods' && policy.target !== 'all VMs',
+		}));
+}
+
+// One workload's effective policy: pod selectors resolve against app=<vm>.
+function effectiveFor(s, ns, vm) {
+	const b = bindingsFor(s, [ns])
+		.filter(
+			(x) =>
+				x.policy.kind !== 'dfw' ||
+				x.policy.target === 'all pods' ||
+				x.policy.target === 'all VMs' ||
+				x.policy.target === `app=${vm}`,
+		)
+		.map((x) => ({ ...x, conditional: false }));
+	const of = (...kinds) => b.filter((x) => kinds.includes(x.policy.kind));
+	return {
+		namespace: ns,
+		vm,
+		labels: { app: vm },
+		eastWest: of('admin', 'dfw', 'baseline'),
+		gateway: of('gateway'),
+		snat: of('egressip'),
+		routes: of('route'),
+	};
+}
+
+// A stable traffic figure per VM name, so screenshots do not move.
+function trafficOf(name) {
+	let h = 7;
+	for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 997;
+	return (40 + (h % 160)) * 1e6;
+}
+
+const networkCommits = (project, name) => [
+	{
+		hash: 'c42c42c42c' + '0'.repeat(30),
+		shortHash: 'c42c42c4',
+		message: `Merge pull request 'Attach two VMs to ${name}' (#42)`,
+		title: `Attach two VMs to ${name}`,
+		author: 'admin',
+		when: new Date(Date.now() - 3 * 864e5).toISOString(),
+		merge: true,
+		prNumber: 42,
+		prURL: `https://forge.example/dotvirt/${project}/pulls/42`,
+	},
+	{
+		hash: 'c39c39c39c' + '0'.repeat(30),
+		shortHash: 'c39c39c3',
+		message: `Merge pull request 'Move ${name} to a /16' (#39)`,
+		title: `Move ${name} to a /16`,
+		author: 'admin',
+		when: new Date(Date.now() - 8 * 864e5).toISOString(),
+		merge: true,
+		prNumber: 39,
+		prURL: `https://forge.example/dotvirt/${project}/pulls/39`,
+	},
+];
+
 const state = {
 	scenario: scenarios[process.env.FIXTURE_SCENARIO ?? 'base'],
 	// Per-project items staged through this session's POSTs, merged over the
@@ -333,7 +418,52 @@ async function handleAPI(req, res, url) {
 		});
 	}
 
-	let m = path.match(/^\/api\/projects\/([^/]+)\/release$/);
+	let m;
+	if (path === '/api/networks/rules') {
+		const key = url.searchParams.get('network') ?? '';
+		const nss = networkNamespaces(s, key);
+		if (!nss) return sendText(res, 404, `not found: network "${key}"`);
+		return sendJSON(res, 200, {
+			network: key,
+			namespaces: nss,
+			applies: bindingsFor(s, nss),
+			reaches: s.networkReaches?.[key] ?? [],
+		});
+	}
+	if (path === '/api/metrics/network') {
+		if (!s.metrics) return sendText(res, 503, 'metrics not configured');
+		const key = url.searchParams.get('network') ?? '';
+		const limit = Number(url.searchParams.get('limit') ?? 5);
+		const net = (s.networks?.networks ?? []).find(
+			(x) => x.attachRef === key || (x.scope === 'shared' && x.name === key),
+		);
+		// A VM is on the network when a NIC names it: by attach ref, or a
+		// shared network by its bare name; the pod network takes pod NICs.
+		const on = (n) =>
+			key === 'Pod network'
+				? !n.network || n.network === 'pod'
+				: !!net &&
+					(n.network === net.attachRef ||
+						(net.scope === 'shared' && n.network?.split('/').pop() === net.name));
+		const vms = s.inventory.projects
+			.flatMap((p) => p.namespaces)
+			.flatMap((n) => n.vms)
+			.filter((v) => v.phase === 'Running' && (v.networks ?? []).some(on));
+		return sendJSON(res, 200, {
+			network: key,
+			window: '1h',
+			vms: vms
+				.map((v) => ({ namespace: v.namespace, name: v.name, bitsPerSecond: trafficOf(v.name) }))
+				.sort((a, b) => b.bitsPerSecond - a.bitsPerSecond)
+				.slice(0, limit),
+		});
+	}
+	m = path.match(/^\/api\/objects\/([^/]+)\/([^/]+)\/([^/]+)\/history$/);
+	if (m) {
+		const project = m[2] === 'cluster' ? 'platform' : (projectOf(m[2])?.name ?? 'platform');
+		return sendJSON(res, 200, networkCommits(project, m[3]));
+	}
+	m = path.match(/^\/api\/projects\/([^/]+)\/release$/);
 	if (m && req.method === 'POST') {
 		const inv = state.scenario.inventory;
 		const p = inv.projects.find((x) => x.name === m[1]);
@@ -485,19 +615,12 @@ async function handleAPI(req, res, url) {
 			return sendJSON(res, 200, s.metrics.vmMetrics);
 		}
 		if (sub === 'clones') return sendJSON(res, 200, []);
-		if (sub === 'policy') {
-			return sendJSON(res, 200, {
-				namespace: ns,
-				vm: name,
-				labels: { app: name },
-				eastWest: [],
-				gateway: [],
-			});
-		}
+		if (sub === 'policy') return sendJSON(res, 200, effectiveFor(s, ns, name));
 	}
 
 	m = path.match(/^\/api\/namespaces\/([^/]+)\/policy$/);
-	if (m) return sendJSON(res, 200, { namespace: m[1], eastWest: [], gateway: [] });
+	if (m)
+		return sendJSON(res, 200, { ...effectiveFor(s, m[1], ''), vm: undefined, labels: undefined });
 
 	m = path.match(/^\/api\/nodes\/([^/]+)$/);
 	if (m) {
