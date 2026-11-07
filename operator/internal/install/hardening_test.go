@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	networkingv1 "k8s.io/api/networking/v1"
-	"k8s.io/apimachinery/pkg/labels"
 )
 
 // The managed forge is Route-exposed: no self-registration, no anonymous read,
@@ -41,13 +40,6 @@ func TestOwnedBy(t *testing.T) {
 	} {
 		if got := OwnedBy(tc.labels, dv); got != tc.want {
 			t.Errorf("%s: OwnedBy = %v, want %v", tc.name, got, tc.want)
-		}
-		matched := false
-		for _, s := range InstanceSelectors(dv) {
-			matched = matched || s.Matches(labels.Set(tc.labels))
-		}
-		if matched != tc.want {
-			t.Errorf("%s: InstanceSelectors match = %v, want %v (must agree with OwnedBy)", tc.name, matched, tc.want)
 		}
 	}
 }

@@ -1,5 +1,5 @@
 // Package git is dotvirt's git plane: it clones a repo once into memory and
-// reads VM manifests from any branch's tree without checking it out. Reads never
+// reads manifests from any branch's tree without checking it out. Reads never
 // touch the network - a single background fetcher (driven by the git poll, and
 // nudged after dotvirt's own pushes) owns freshness, and a writer that must
 // read its own push back calls Refresh.
@@ -62,7 +62,7 @@ type Repo struct {
 	memos memoTable
 }
 
-// Open clones url into memory (bare, all branches) and returns a Repo. username +
+// Open clones url's branches into memory (bare) and returns a Repo. username +
 // tokenFn provide https basic auth, resolved on each fetch (pass a nil/empty
 // source for public/local).
 func Open(url, username string, tokenFn forge.TokenSource) (*Repo, error) {
@@ -72,6 +72,9 @@ func Open(url, username string, tokenFn forge.TokenSource) (*Repo, error) {
 	}
 	return r, nil
 }
+
+// URL is the remote this mirror reads, for logs.
+func (r *Repo) URL() string { return r.url }
 
 // branchHash returns branch's current commit hash from the local mirror (no fetch),
 // or "" if the branch can't be resolved - the memo invalidation key.
@@ -85,20 +88,37 @@ func (r *Repo) branchHash(branch string) string {
 	return ref.Hash().String()
 }
 
+// headRefs maps the remote's branches onto local branch refs, the only refs
+// reads resolve. A mirror clone would also pull the forge's refs/pull/*, one
+// per PR ever opened, and never move them again.
+var headRefs = []config.RefSpec{"+refs/heads/*:refs/heads/*"}
+
 func (r *Repo) clone() error {
 	ctx, cancel := context.WithTimeout(context.Background(), cloneTimeout)
 	defer cancel()
-	repo, err := git.CloneContext(ctx, memory.NewStorage(), nil, &git.CloneOptions{
-		URL:          r.url,
-		Auth:         r.auth(),
-		Mirror:       true, // fetch all refs; we read branches directly from refs
-		SingleBranch: false,
-	})
-	if err != nil {
+	repo, err := git.Init(memory.NewStorage(), nil)
+	if err == nil {
+		_, err = repo.CreateRemote(&config.RemoteConfig{Name: git.DefaultRemoteName, URLs: []string{r.url}, Fetch: headRefs})
+	}
+	if err == nil {
+		err = r.fetchHeads(ctx, repo)
+	}
+	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
 		return fmt.Errorf("clone %s: %w", r.url, err)
 	}
 	r.repo = repo
 	return nil
+}
+
+// fetchHeads brings repo's branches level with the remote's, dropping the
+// ones deleted there so a merged PR's branch does not outlive it.
+func (r *Repo) fetchHeads(ctx context.Context, repo *git.Repository) error {
+	return repo.FetchContext(ctx, &git.FetchOptions{
+		Auth:     r.auth(),
+		RefSpecs: headRefs,
+		Force:    true,
+		Prune:    true,
+	})
 }
 
 // Network bounds: a stalled remote (common over a flaky or self-signed Route)
@@ -131,11 +151,7 @@ func (r *Repo) refresh() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 	defer cancel()
-	err = next.FetchContext(ctx, &git.FetchOptions{
-		Auth:     r.auth(),
-		RefSpecs: []config.RefSpec{"+refs/heads/*:refs/heads/*"},
-		Force:    true,
-	})
+	err = r.fetchHeads(ctx, next)
 	if errors.Is(err, git.NoErrAlreadyUpToDate) {
 		return nil
 	}
@@ -197,10 +213,10 @@ func (r *Repo) headsSignature() (string, error) {
 	return strings.Join(heads, ","), nil
 }
 
-// walkYAML visits branch's .yaml/.yml files passing include, under the repo
-// lock - the one tree-walk behind VMManifests, TemplatesOnBranch and
-// DeclaredOnBranch.
-func (r *Repo) walkYAML(branch string, include func(path string) bool, visit func(path string, content []byte) error) error {
+// WalkYAML visits branch's .yaml/.yml files passing include: the one tree
+// walk behind every per-branch index. visit runs under the repo lock, so it
+// must not call back into r.
+func (r *Repo) WalkYAML(branch string, include func(path string) bool, visit func(path string, content []byte) error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	tree, err := r.treeFor(branch)
@@ -217,26 +233,6 @@ func (r *Repo) walkYAML(branch string, include func(path string) bool, visit fun
 		}
 		return visit(f.Name, content)
 	})
-}
-
-// VMManifests returns every file on branch that contains a VirtualMachine doc.
-// Files are matched by .yaml/.yml extension then filtered by content, so a
-// single file with multiple docs is still found.
-func (r *Repo) VMManifests(branch string) ([]model.File, error) {
-	var out []model.File
-	err := r.walkYAML(branch,
-		func(path string) bool { return !inTemplatesDir(path) },
-		func(path string, content []byte) error {
-			if containsVirtualMachine(content) {
-				out = append(out, model.File{Path: path, Content: content})
-			}
-			return nil
-		})
-	if err != nil {
-		return nil, err
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
-	return out, nil
 }
 
 // LookupOnBranch is FileOnBranch distinguishing absence from failure: ok=false
@@ -317,14 +313,9 @@ func isYAML(name string) bool {
 	return strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml")
 }
 
-// containsVirtualMachine is a cheap pre-filter; full parsing happens later.
-func containsVirtualMachine(content []byte) bool {
-	return strings.Contains(string(content), "kind: VirtualMachine")
-}
-
-// inTemplatesDir: VMManifests skips the library (a template's embedded VM
-// blueprint is not inventory); TemplatesOnBranch reads only it.
-func inTemplatesDir(name string) bool {
+// InTemplatesDir: the library holds blueprints, not declared objects (a
+// template's embedded VM is not inventory); TemplatesOnBranch reads only it.
+func InTemplatesDir(name string) bool {
 	return strings.HasPrefix(name, model.TemplatesDir+"/")
 }
 
@@ -332,7 +323,7 @@ func inTemplatesDir(name string) bool {
 // repo's template library, parsed by the caller.
 func (r *Repo) TemplatesOnBranch(branch string) ([]model.File, error) {
 	var out []model.File
-	err := r.walkYAML(branch, inTemplatesDir, func(path string, content []byte) error {
+	err := r.WalkYAML(branch, InTemplatesDir, func(path string, content []byte) error {
 		out = append(out, model.File{Path: path, Content: content})
 		return nil
 	})

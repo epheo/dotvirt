@@ -108,17 +108,23 @@ func (f *Factory) SameForge(repoURL string) bool {
 func httpClient(insecure bool, caFile string) *http.Client {
 	hc := &http.Client{Timeout: 15 * time.Second}
 	if insecure {
-		hc.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec G402 - dev flag
-		}
+		hc.Transport = TLSTransport(&tls.Config{InsecureSkipVerify: true}) // #nosec G402 - dev flag
 		return hc
 	}
 	if caFile != "" {
 		if pool := RootCAs("forge", caFile); pool != nil {
-			hc.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}
+			hc.Transport = TLSTransport(&tls.Config{RootCAs: pool})
 		}
 	}
 	return hc
+}
+
+// TLSTransport is the default transport with tlsCfg. A bare Transport would
+// drop HTTPS_PROXY and the dial/TLS/idle timeouts, and hang on a dead remote.
+func TLSTransport(tlsCfg *tls.Config) *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.TLSClientConfig = tlsCfg
+	return t
 }
 
 // RootCAs returns a pool holding caFile's certificates, or nil when the file is

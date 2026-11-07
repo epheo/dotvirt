@@ -20,7 +20,7 @@ import (
 // a delete or rewrite acts on the whole file. namespace is model.ClusterScopeNS for a
 // cluster-scoped object.
 func (r *Reader) locate(read *git.Repo, resource draft.Resource, namespace, name string) (string, error) {
-	idx, err := read.DeclaredFilesOnBranch(r.baseBranch)
+	idx, err := indexDeclared(read, r.baseBranch)
 	if err != nil {
 		return "", err
 	}
@@ -34,7 +34,7 @@ func (r *Reader) locate(read *git.Repo, resource draft.Resource, namespace, name
 // declaredRef is the identity under which idx declares (resource, namespace,
 // name), whatever file and document it sits in; ok=false when the branch
 // declares no such object.
-func declaredRef(idx git.DeclaredIndex, resource draft.Resource, namespace, name string) (model.ObjectRef, bool) {
+func declaredRef(idx declaredIndex, resource draft.Resource, namespace, name string) (model.ObjectRef, bool) {
 	ns := model.ObjectNamespace(namespace)
 	for _, kind := range resource.Kinds() {
 		ref := model.ObjectRef{Kind: kind, Namespace: ns, Name: name}
@@ -54,11 +54,11 @@ func (c *Coordinator) AdoptObject(id auth.Identity, proj project.ProjectInfo, o 
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	idx, err := read.DeclaredFilesOnBranch(c.baseBranch)
+	idx, err := indexDeclared(read, c.baseBranch)
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	path, err := soleDeclarer(idx, git.DeclaredRefs(o.Path, o.Manifest))
+	path, err := soleDeclarer(idx, declaredRefs(o.Path, o.Manifest))
 	if err != nil {
 		return model.DraftView{}, err
 	}
@@ -91,7 +91,7 @@ func (r *Reader) DeclaredFiles(proj project.ProjectInfo) (map[model.ObjectRef]st
 	if err != nil {
 		return nil, err
 	}
-	idx, err := read.DeclaredFilesOnBranch(r.baseBranch)
+	idx, err := indexDeclared(read, r.baseBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +140,7 @@ func (c *Coordinator) StageUpdateManifest(id auth.Identity, proj project.Project
 		return model.DraftView{}, err
 	}
 	ns := model.ObjectNamespace(namespace)
-	refs := git.DeclaredRefs(path, []byte(yaml))
+	refs := declaredRefs(path, []byte(yaml))
 	if len(refs) != 1 || refs[0].Namespace != ns || refs[0].Name != name || !slices.Contains(draft.Resource(resource).Kinds(), refs[0].Kind) {
 		return model.DraftView{}, fmt.Errorf("%w: the manifest must declare exactly %s/%s", model.ErrInvalid, namespace, name)
 	}
