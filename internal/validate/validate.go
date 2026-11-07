@@ -48,6 +48,20 @@ func RequireDNS1123List(field string, names []string) error {
 	return nil
 }
 
+// RequireNetworkRef refuses ref unless it names a NetworkAttachmentDefinition
+// as <namespace>/<name> or <name>, both DNS-1123 labels: the name also becomes
+// a VM interface name.
+func RequireNetworkRef(field, ref string) error {
+	ns, name, qualified := strings.Cut(ref, "/")
+	if !qualified {
+		return RequireDNS1123(field, ns)
+	}
+	if err := RequireDNS1123(field+" namespace", ns); err != nil {
+		return err
+	}
+	return RequireDNS1123(field, name)
+}
+
 // RequireObjectName refuses s unless it is a DNS-1123 subdomain: the
 // metadata.name rule for most kinds (nodes, storage classes, instance types).
 func RequireObjectName(field, s string) error {

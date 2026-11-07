@@ -40,16 +40,15 @@ func applyDisksNetworks(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) {
 	}
 
 	for _, n := range edit.AddNetworks {
-		iface := ed.str(model.InterfaceName(n.Name))
-		appendItem(ed, get(devices, "interfaces"), []string{
-			"- name: " + iface,
-			"  bridge: {}",
-		})
-		appendItem(ed, get(tmplSpec, "networks"), []string{
-			"- name: " + iface,
-			"  multus:",
-			"    networkName: " + ed.str(n.Name),
-		})
+		iface := "- name: " + ed.str(n.InterfaceName())
+		binding, network := "  bridge: {}", []string{"  multus:", "    networkName: " + ed.str(n.Name)}
+		if n.Name == model.PodNetwork {
+			// Masquerade, as vmgen's primary NIC: the binding KubeVirt
+			// recommends on the pod network, where bridge is often refused.
+			binding, network = "  masquerade: {}", []string{"  pod: {}"}
+		}
+		appendItem(ed, get(devices, "interfaces"), []string{iface, binding})
+		appendItem(ed, get(tmplSpec, "networks"), append([]string{iface}, network...))
 	}
 	for _, name := range edit.RemoveNetworks {
 		removeNamedItem(ed, get(devices, "interfaces"), name)

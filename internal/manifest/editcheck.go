@@ -52,15 +52,12 @@ func ValidateEdit(e VMEdit) error {
 		}
 	}
 	for _, n := range e.AddNetworks {
-		// A network is a NetworkAttachmentDefinition, bare or <namespace>/<name>;
-		// its name also becomes the interface name.
-		ns, name, qualified := strings.Cut(n.Name, "/")
-		if qualified {
-			add(validate.RequireDNS1123("network namespace", ns))
-		} else {
-			name = ns
+		if n.Name != model.PodNetwork {
+			add(validate.RequireNetworkRef("network", n.Name))
 		}
-		add(validate.RequireDNS1123("network", name))
+		if n.Interface != "" {
+			add(validate.RequireDNS1123("interface name", n.Interface))
+		}
 	}
 	for _, m := range e.MigrateVolumes {
 		add(validate.RequireObjectName("storage class", m.StorageClass))
@@ -147,7 +144,7 @@ func verifyEdit(out []byte, defaultNS, namespace, name string, edit VMEdit) erro
 		}
 	}
 	for _, n := range edit.AddNetworks {
-		nic, ok := nics[model.InterfaceName(n.Name)]
+		nic, ok := nics[n.InterfaceName()]
 		want(ok && nic.Network == n.Name, "network "+n.Name)
 	}
 	for _, n := range edit.RemoveNetworks {

@@ -102,8 +102,14 @@ export interface DiskAdd {
   size: string;
   storageClass?: string; // blank DataVolume class; empty = cluster default
 }
+/**
+ * NetworkAdd's Name is a NetworkAttachmentDefinition (<namespace>/<name> or
+ * <name>), or PodNetwork. Interface names the VM interface; empty derives it
+ * from Name, and adoption sets it so the file matches the live NIC.
+ */
 export interface NetworkAdd {
   name: string;
+  interface?: string;
 }
 /**
  * VolumeMigration moves one disk to another storage class (storage live
@@ -1302,12 +1308,17 @@ export interface Disk {
   storageClass?: string; // dataVolume storageClassName (empty = cluster default)
 }
 /**
+ * PodNetwork is the Network of a NIC on the pod network, where any other value
+ * is a multus networkName.
+ */
+export const PodNetwork = "pod";
+/**
  * NIC is a network interface on the VM. Name/Network come from the manifest;
  * MAC/IP are merged from the live VMI status when running.
  */
 export interface NIC {
   name: string;
-  network?: string; // "pod" or the multus networkName
+  network?: string; // PodNetwork or the multus networkName
   mac?: string; // live, from VMI status
   ip?: string; // live, from VMI status
   /**

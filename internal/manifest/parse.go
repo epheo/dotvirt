@@ -223,7 +223,7 @@ func networksFromDoc(d vmDoc) []model.NIC {
 	for _, n := range ts.Networks {
 		switch {
 		case n.Pod != nil:
-			netType[n.Name] = "pod"
+			netType[n.Name] = model.PodNetwork
 		case n.Multus != nil:
 			netType[n.Name] = n.Multus.NetworkName
 		}
@@ -238,7 +238,7 @@ func networksFromDoc(d vmDoc) []model.NIC {
 	// clusterstate.WorkloadNetworks applies the same rule for the trace check.
 	if len(out) == 0 {
 		if auto := ts.Domain.Devices.AutoattachPodInterface; auto == nil || *auto {
-			out = append(out, model.NIC{Name: "default", Network: "pod", Implicit: true})
+			out = append(out, model.NIC{Name: "default", Network: model.PodNetwork, Implicit: true})
 		}
 	}
 	return out

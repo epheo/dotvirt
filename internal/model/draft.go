@@ -100,8 +100,20 @@ type DiskAdd struct {
 	StorageClass string `json:"storageClass,omitempty"` // blank DataVolume class; empty = cluster default
 }
 
+// NetworkAdd's Name is a NetworkAttachmentDefinition (<namespace>/<name> or
+// <name>), or PodNetwork. Interface names the VM interface; empty derives it
+// from Name, and adoption sets it so the file matches the live NIC.
 type NetworkAdd struct {
-	Name string `json:"name"`
+	Name      string `json:"name"`
+	Interface string `json:"interface,omitempty"`
+}
+
+// InterfaceName is the VM interface n attaches through.
+func (n NetworkAdd) InterfaceName() string {
+	if n.Interface != "" {
+		return n.Interface
+	}
+	return InterfaceName(n.Name)
 }
 
 // VolumeMigration moves one disk to another storage class (storage live
