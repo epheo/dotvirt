@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -223,5 +224,98 @@ func TestEditLeavesUntouchedFlowAlone(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "cpu: {cores: 2, sockets: 1}") || !strings.Contains(string(out), "guest: 2Gi") {
 		t.Fatalf("unexpected edit:\n%s", out)
+	}
+}
+
+// verifyEdit is the only thing standing between a splice the layout defeated
+// and a PR that announces it, so every VMEdit field must be read back. Each
+// sample sets one field to a value the unedited manifest does not hold:
+// verifyEdit must refuse it as unapplied. A field added to VMEdit without a
+// sample here, or one verifyEdit ignores, fails.
+func TestVerifyEditCoversEveryField(t *testing.T) {
+	const base = `apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: web
+  namespace: alpha
+  labels:
+    app: web
+spec:
+  runStrategy: Always
+  dataVolumeTemplates:
+  - metadata:
+      name: web-data
+    spec:
+      storage:
+        resources:
+          requests:
+            storage: 10Gi
+  template:
+    metadata:
+      labels:
+        group.scheduling.dotvirt.io/tier: together
+    spec:
+      evictionStrategy: LiveMigrate
+      domain:
+        cpu:
+          sockets: 1
+        memory:
+          guest: 1Gi
+        devices:
+          disks:
+          - name: data
+            disk:
+              bus: virtio
+          interfaces:
+          - name: default
+            masquerade: {}
+      networks:
+      - name: default
+        pod: {}
+      volumes:
+      - name: data
+        dataVolume:
+          name: web-data
+`
+	samples := map[string]VMEdit{
+		"Power":            {Power: ptr("Off")},
+		"CPUCores":         {CPUCores: ptr(4)},
+		"Memory":           {Memory: ptr("4Gi")},
+		"Instancetype":     {Instancetype: ptr("u1.small")},
+		"Preference":       {Preference: ptr("fedora")},
+		"Sizing":           {Sizing: ptr("instancetype")},
+		"SetLabels":        {SetLabels: map[string]string{"env": "prod"}},
+		"RemoveLabels":     {RemoveLabels: []string{"app"}},
+		"DRSExclude":       {DRSExclude: ptr(true)},
+		"EvictionStrategy": {EvictionStrategy: ptr("None")},
+		"AddDisks":         {AddDisks: []model.DiskAdd{{Name: "extra", Size: "1Gi"}}},
+		"RemoveDisks":      {RemoveDisks: []string{"data"}},
+		"AddNetworks":      {AddNetworks: []model.NetworkAdd{{Name: "vlan-10"}}},
+		"RemoveNetworks":   {RemoveNetworks: []string{"default"}},
+		"MigrateVolumes":   {MigrateVolumes: []model.VolumeMigration{{Name: "data", StorageClass: "fast"}}},
+		"Pin":              {Pin: &[]string{"n1"}},
+		"AddGroups":        {AddGroups: []model.PlacementGroup{{Name: "db", Mode: "apart"}}},
+		"RemoveGroups":     {RemoveGroups: []string{"tier"}},
+	}
+	if err := verifyEdit([]byte(base), "alpha", "alpha", "web", VMEdit{}); err != nil {
+		t.Fatalf("the unedited manifest must verify against an empty edit: %v", err)
+	}
+	typ := reflect.TypeOf(VMEdit{})
+	for i := range typ.NumField() {
+		field := typ.Field(i).Name
+		edit, ok := samples[field]
+		if !ok {
+			t.Errorf("VMEdit.%s has no sample: add one here and its read-back to verifyEdit", field)
+			continue
+		}
+		v := reflect.ValueOf(edit)
+		for j := range typ.NumField() {
+			if set := !v.Field(j).IsZero(); set != (j == i) {
+				t.Errorf("sample for %s must set only %s, %s set = %v", field, field, typ.Field(j).Name, set)
+			}
+		}
+		if err := verifyEdit([]byte(base), "alpha", "alpha", "web", edit); !errors.Is(err, model.ErrConflict) {
+			t.Errorf("verifyEdit ignores VMEdit.%s: an unapplied %s passed (%v)", field, field, err)
+		}
 	}
 }
