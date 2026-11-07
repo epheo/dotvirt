@@ -32,11 +32,11 @@ test('base views, light and dark', async ({ page }) => {
 	await shot(page, 'vm-detail');
 
 	await page.goto('/networking');
-	await expect(page.locator('main').getByText('Provider Gateway').first()).toBeVisible();
-	await shot(page, 'networking-topology');
+	await expect(page.locator('main').getByRole('heading', { name: 'Cluster map' })).toBeVisible();
+	await shot(page, 'networking-map');
 
-	await page.goto('/networking?tab=security');
-	await shot(page, 'security');
+	await page.goto('/networking?tab=firewall');
+	await shot(page, 'firewall');
 
 	await page.goto('/hosts');
 	await shot(page, 'hosts');

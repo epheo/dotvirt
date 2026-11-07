@@ -25,9 +25,9 @@
 			</span>
 			<span>{l.text}</span>
 			<small class="col-start-2 text-xs leading-4 text-ink-faint">
-				{l.tier}{#if l.policy}{' '}<a
+				{l.tier}{#if l.policy}<a
 						href={firewallHref(l.policy.name)}
-						class="text-accent-ink hover:underline">{l.policy.name}</a
+						class="ml-1 text-accent-ink underline underline-offset-2">{l.policy.name}</a
 					>{/if}{#if l.note}, {l.note}{/if}{#if owner && l.policy?.namespace}, {inventory.projectOf(
 						l.policy.namespace,
 					) || l.policy.namespace}{/if}

@@ -40,12 +40,16 @@ test('inventory surfaces are accessible', async ({ page }) => {
 test('networking and security surfaces are accessible', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);
-	await page.goto('/networking');
-	await expect(page.locator('main').getByText('Provider Gateway').first()).toBeVisible();
-	await checkA11y(page, 'topology');
+	await page.goto('/networking?find=db-1');
+	await expect(page.getByRole('complementary', { name: /Inspector, db-1/ })).toBeVisible();
+	await checkA11y(page, 'map');
 
-	await page.goto('/networking?tab=security');
-	await checkA11y(page, 'security');
+	await page.goto('/networking?tab=firewall');
+	await checkA11y(page, 'firewall');
+
+	await page.goto('/networking/web-prod/web-net');
+	await expect(page.getByRole('heading', { name: 'Address use' })).toBeVisible();
+	await checkA11y(page, 'network page');
 });
 
 test('a VM opens by keyboard alone', async ({ page }) => {

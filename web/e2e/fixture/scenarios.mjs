@@ -287,10 +287,10 @@ const vmUsage = {
 };
 
 // ── networking: the Networking section's catalog, rules and history ──────────
-// One picture of every networking state the Map, the network page and the
-// firewall show: a primary project network, isolated ones, two overlapping on
-// one namespace, shared overlays, VLAN networks and an uplink failing on one
-// host. Rule texts are what the server renders from the typed rules.
+// One picture of the networking states the Map, the network page and the
+// firewall show: project networks, shared overlays, VLAN networks, rules on
+// both sides of a network; drift adds an uplink failing on one host, scale
+// the overlap. Rule texts are what the server renders from the typed rules.
 
 const netCatalog = {
 	...networks,
@@ -336,7 +336,7 @@ const netCatalog = {
 			kind: 'internal',
 			scope: 'project',
 			namespace: 'db-prod',
-			subnets: ['10.200.0.0/16'],
+			subnets: ['10.201.0.0/16'],
 			attachRef: 'db-prod/udn-tcp-frontend',
 			backing: 'UserDefinedNetwork',
 			topology: 'Layer3',
@@ -383,7 +383,13 @@ const netCatalog = {
 		},
 	],
 	uplinks: [
-		{ name: 'default', bridge: 'br-ex', builtin: true, nodeCount: 3 },
+		{
+			name: 'default',
+			bridge: 'br-ex',
+			builtin: true,
+			nodes: ['worker-1', 'worker-2', 'worker-3'],
+			nodeCount: 3,
+		},
 		{
 			name: 'physnet',
 			bridge: 'br-physnet',
@@ -400,16 +406,29 @@ const netCatalog = {
 			nodeCount: 3,
 			policy: 'uplink-dc-vlan',
 			sourceFile: 'uplinks/dc-vlan.yaml',
-			failures: [
-				{
-					node: 'worker-2',
-					reason: 'FailedToConfigure',
-					message: 'error reconciling NodeNetworkConfigurationPolicy: VerificationError on br-dc',
-				},
-			],
 			sync: 'Synced',
 		},
 	],
+};
+
+// The same catalog in trouble: the dc-vlan uplink failing on one host.
+const netTrouble = {
+	...netCatalog,
+	uplinks: netCatalog.uplinks.map((u) =>
+		u.name === 'dc-vlan'
+			? {
+					...u,
+					failures: [
+						{
+							node: 'worker-2',
+							reason: 'FailedToConfigure',
+							message:
+								'error reconciling NodeNetworkConfigurationPolicy: VerificationError on br-dc',
+						},
+					],
+				}
+			: u,
+	),
 };
 
 const netPolicies = {
@@ -562,6 +581,67 @@ const netNICs = {
 		{ name: 'dc', network: 'dc-vlan-net' },
 	],
 };
+
+// The scale scenario's networking, in the shapes the server renders: rule
+// sentences, the failing uplink's host, the rules naming web-net's VMs.
+function sentence(r) {
+	const ports = r.ports ? r.ports.replaceAll('/', ' ') : '';
+	const peer = (r.peer ?? '')
+		.replace(/^ns any$/, 'VMs in any namespace')
+		.replace(/^namespace (.+)$/, 'VMs in $1')
+		.replace(/^([\w.-]+=[\w.-]+)$/, 'VMs labeled $1');
+	if (r.action === 'SNAT') return `Leaves with source IP ${r.peer}.`;
+	if (r.action === 'Route') return `Leaves through ${r.peer.replace(/^via /, '')}.`;
+	if (r.direction === 'Ingress')
+		return `${r.action === 'Deny' ? 'Blocks' : 'Accepts'} ${ports || 'all traffic'} from ${peer}.`;
+	return `${r.action === 'Deny' ? 'Cannot reach' : 'Can reach'} ${peer}${ports ? ` on ${ports}` : ''}.`;
+}
+
+function appliesOf(p) {
+	const t = p.target ?? '';
+	if (t === 'all namespaces') return 'every namespace';
+	if (t === 'all VMs' || t === 'all pods') return `every VM in ${p.namespace}`;
+	if (t.startsWith('namespace ')) return `every VM in ${t.slice(10)}`;
+	return `VMs labeled ${t} in ${p.namespace}`;
+}
+
+function withScaleNetworking(sc) {
+	const policies = sc.policies.policies.map((p) => {
+		const rules = (p.rules ?? []).map((r) =>
+			p.name === 'deny-lateral' ? { ...r, peer: 'ns any' } : r,
+		);
+		return {
+			...p,
+			applies: appliesOf(p),
+			isolation: p.kind === 'dfw' ? 'Blocks other incoming traffic.' : undefined,
+			rules: rules.map((r) => ({ ...r, text: sentence(r) })),
+		};
+	});
+	const uplinks = sc.networks.uplinks.map((u) =>
+		u.name === 'dc-vlan'
+			? {
+					...u,
+					failures: [{ node: 'host-41', reason: 'FailedToConfigure', message: 'bond0 not found' }],
+				}
+			: u,
+	);
+	const toDB = policies.find((p) => p.name === 'allow-web-to-db');
+	return {
+		...sc,
+		networks: { ...sc.networks, uplinks },
+		policies: { policies },
+		networkReaches: {
+			'web-prod/web-net': [
+				{
+					policy: toDB,
+					rule: toDB.rules[0],
+					text: 'VMs labeled app=web in web-prod can reach VMs labeled app=db-1 in db-prod on TCP 5432.',
+					conditional: true,
+				},
+			],
+		},
+	};
+}
 
 function withNetworking(sc) {
 	for (const p of sc.inventory.projects)
@@ -860,6 +940,7 @@ const degraded = {
 const drift = {
 	...base,
 	name: 'drift',
+	networks: netTrouble,
 	inventory: {
 		// The platform tier's standing problem: an uplink policy nmstate cannot
 		// apply. It must reach the issues plane by name, with a link.
@@ -1058,5 +1139,5 @@ export const scenarios = {
 	large: largeScenario(),
 	// A full platform at the boards' numbers (2,846 VMs, 131 networks, 3,412
 	// disks); see scale.mjs.
-	scale: scaleScenario(base),
+	scale: withScaleNetworking(scaleScenario(base)),
 };

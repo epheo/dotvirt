@@ -15,7 +15,7 @@
 	import { networkKey, networkKind } from '#lib/networks.js';
 	import { canEditUplink, openEdit, uplinkRef } from '#lib/objects.js';
 	import { resource } from '#lib/resource.svelte.js';
-	import { vmRuleLines } from '#lib/rulelines.js';
+	import { topLines, vmRuleLines } from '#lib/rulelines.js';
 	import { vmSizing } from '#lib/sizing.js';
 	import { vmState } from '#lib/status.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -194,10 +194,10 @@
 						{:else if !eff}
 							<p class="text-xs text-ink-faint">Reading the rules...</p>
 						{:else}
-							<RuleList lines={lines.slice(0, 4)} />
-							{#if lines.length > 4}
+							<RuleList lines={topLines(lines, 3)} />
+							{#if lines.length > 3}
 								<p class="mt-2 text-xs text-ink-faint">
-									{lines.length - 4} more on the Firewall tab.
+									{lines.length - 3} more on the Firewall tab.
 								</p>
 							{/if}
 						{/if}
@@ -283,7 +283,7 @@
 								<li>
 									<a
 										href={networkHref(networkKey(n))}
-										class="font-mono text-accent-ink hover:underline">{n.name}</a
+										class="font-mono text-accent-ink underline underline-offset-2">{n.name}</a
 									>
 									<span class="text-ink-faint">{n.subnets?.[0] ?? ''}</span>
 								</li>

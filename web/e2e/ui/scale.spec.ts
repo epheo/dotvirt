@@ -26,7 +26,10 @@ test('every section renders the full platform', async ({ page }) => {
 	await expect(main.locator('tbody tr', { hasText: 'host-17' })).toContainText('Maintenance');
 
 	await page.goto('/networking');
-	await expect(main.getByText('web-net').first()).toBeVisible();
+	await expect(main.getByText('2 problems')).toBeVisible();
+	await expect(main.getByText('47 more projects')).toBeVisible();
+	await page.goto('/networking/web-prod/web-net');
+	await expect(main.getByText('of 65,534 used')).toBeVisible();
 	await page.goto('/networking?tab=security');
 	await expect(main.getByText('deny-lateral').first()).toBeVisible();
 

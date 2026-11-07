@@ -55,7 +55,9 @@ export const uplinkLabel = (u: Uplink): string => (u.builtin ? 'default' : u.nam
 
 /**
  * The standing networking problems: uplinks that failed on some hosts, and
- * networks whose subnets overlap where one VM could attach both.
+ * networks whose subnets overlap. Overlapping ranges cannot meet: one VM
+ * attaching both, or both routed to the fabric, would make addresses
+ * ambiguous, so the overlap is flagged before anyone tries.
  */
 export function networkProblems(networks: Network[], uplinks: Uplink[]): NetProblem[] {
 	const out: NetProblem[] = [];
@@ -94,25 +96,13 @@ export function networkProblems(networks: Network[], uplinks: Uplink[]): NetProb
 	return out;
 }
 
-// Two networks can meet when one VM could attach both: the same namespace, or
-// a shared network published where the other lives. Isolated networks in
-// different namespaces may reuse a range on purpose.
-function canMeet(a: Network, b: Network): boolean {
-	const where = (n: Network) => (n.scope === 'shared' ? (n.namespaces ?? []) : [n.namespace ?? '']);
-	const wa = where(a);
-	return where(b).some((ns) => ns && wa.includes(ns));
-}
-
 function overlapGroups(networks: Network[]): Network[][] {
 	const nets = networks.filter((n) => n.subnets?.length);
 	const parent = nets.map((_, i) => i);
 	const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
 	for (let i = 0; i < nets.length; i++)
 		for (let j = i + 1; j < nets.length; j++)
-			if (
-				canMeet(nets[i], nets[j]) &&
-				nets[i].subnets!.some((a) => nets[j].subnets!.some((b) => overlaps(a, b)))
-			)
+			if (nets[i].subnets!.some((a) => nets[j].subnets!.some((b) => overlaps(a, b))))
 				parent[find(i)] = find(j);
 	const groups = new Map<number, Network[]>();
 	nets.forEach((n, i) => {
@@ -189,7 +179,7 @@ export interface MapInput {
 }
 
 /** Networks the shared lane draws: shared and VLAN ones (project networks sit in their project). */
-export const laneNetwork = (n: Network): boolean => n.scope === 'shared' || n.kind === 'vlan';
+const laneNetwork = (n: Network): boolean => n.scope === 'shared' || n.kind === 'vlan';
 
 /**
  * The cluster map: every uplink as a row, the shared and VLAN networks beside

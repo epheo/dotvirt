@@ -68,8 +68,8 @@ class InventoryStore {
 	alerts = $state.raw<Alert[] | null>([]);
 	// Standing problems and firing alerts (the issues plane), derived once per
 	// frame for the header count, the tree badges and the Summary card.
-	// Networking problems the catalog shows: uplinks failing on hosts, subnets
-	// that overlap where one VM could attach both.
+	// Networking problems the catalog shows: uplinks failing on hosts and
+	// subnets that overlap.
 	readonly netProblems = $derived(networkProblems(this.networks, this.uplinks));
 	readonly issues = $derived(
 		deriveIssues(this.inventory, {

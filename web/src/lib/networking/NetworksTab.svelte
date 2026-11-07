@@ -71,10 +71,11 @@
 		pageNo = 0;
 		goto(u.pathname + u.search, { replace: true, reset: false });
 	}
-	const ownerText = (r: Row) =>
-		r.n.scope === 'shared'
-			? `${r.n.namespaces?.length ?? 0} namespace${r.n.namespaces?.length === 1 ? '' : 's'}`
-			: r.owner || r.n.namespace || '';
+	const ownerText = (r: Row) => {
+		if (r.n.scope !== 'shared') return r.owner || r.n.namespace || '';
+		const n = networking.projectsOf(r.n).length;
+		return `${n} project${n === 1 ? '' : 's'}`;
+	};
 </script>
 
 <div class="flex flex-col gap-4">

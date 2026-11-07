@@ -27,9 +27,9 @@
 
 	const tierLabel = (b: PolicyBinding) =>
 		b.policy.kind === 'admin'
-			? `Admin · priority ${b.policy.priority ?? 0}`
+			? `Cluster rule, priority ${b.policy.priority ?? 0}`
 			: b.policy.kind === 'baseline'
-				? 'Baseline'
+				? 'Cluster default rule'
 				: 'Project';
 
 	const denyText = $derived.by(() => {
@@ -77,7 +77,7 @@
 		{:else}
 			<p class="mt-1 text-xs text-ink-faint">
 				No rules{b.policy.kind === 'dfw'
-					? ' — the selected pods default-deny all other ingress'
+					? ': the VMs it selects accept no other incoming traffic'
 					: ''}.
 			</p>
 		{/if}
@@ -109,14 +109,16 @@
 		<div class="flex flex-wrap items-center gap-1.5 text-xs text-ink-muted">
 			{#if eff.vm}
 				<span>
-					Matched against {eff.labelsLive ? 'the running instance labels' : 'the manifest labels'}:
+					Matched against {eff.labelsLive ? 'the pod labels' : 'the manifest labels'}:
 				</span>
 				{#if eff.labels && Object.keys(eff.labels).length}
 					{#each Object.entries(eff.labels) as [k, v] (k)}
 						<span class="rounded bg-inset px-1.5 py-0.5 text-ink-muted">{k}={v}</span>
 					{/each}
 				{:else}
-					<span class="text-ink-faint">none — only selector-free policies can single it out</span>
+					<span class="text-ink-faint"
+						>none, so only rules without a label selector can pick it</span
+					>
 				{/if}
 			{:else}
 				<span>
@@ -127,9 +129,9 @@
 
 		<section class="rounded border border-line bg-panel">
 			<header class="flex items-center gap-2 border-b border-line px-3 py-2">
-				<h2 class="text-sm font-semibold text-ink">Distributed Firewall — east-west</h2>
+				<h2 class="text-sm font-semibold text-ink">Between VMs</h2>
 				<span class="min-w-0 flex-1 truncate text-xs text-ink-faint"
-					>Evaluated top to bottom; admin tiers override, baseline is the last resort</span
+					>Met top to bottom: cluster rules first, the cluster default rule last</span
 				>
 			</header>
 			{#if denyText}
@@ -139,7 +141,7 @@
 			{/if}
 			{#if !eff.eastWest?.length}
 				<p class="px-3 py-3 text-xs text-ink-faint">
-					No firewall rules bind this workload — east-west traffic is unrestricted.
+					No rule binds this workload: traffic between VMs is unrestricted.
 				</p>
 			{:else}
 				{#each eff.eastWest as b (keyOf(b))}
@@ -149,22 +151,22 @@
 		</section>
 
 		{@render plane(
-			'Gateway Firewall',
-			'North-south egress — first match wins',
+			'Outbound rules',
+			'Traffic leaving the cluster; the first match wins',
 			eff.gateway,
-			'No egress firewall — external egress is unrestricted.',
+			'No outbound rule: it reaches anything outside.',
 		)}
 		{@render plane(
-			'SNAT (Tier-0)',
-			'The egress IP pool this workload leaves through',
+			'Fixed outbound IP',
+			'The source address this workload leaves with',
 			eff.snat,
-			'No SNAT pool — egress uses the node IP.',
+			"None: traffic leaves with its host's address.",
 		)}
 		{@render plane(
-			'External routes (Tier-0)',
-			'Policy-based next hops steering this egress',
+			'External routes',
+			'Next hops its outbound traffic takes',
 			eff.routes,
-			'No policy-based routes — egress follows the default gateway.',
+			'None: outbound traffic follows the default gateway.',
 		)}
 	</div>
 {/if}

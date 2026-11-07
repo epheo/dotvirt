@@ -239,7 +239,7 @@
 				/>
 			</div>
 			<div
-				class="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-line-soft px-card py-2.5 text-xs leading-4 text-ink-soft"
+				class="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-line-soft px-card py-2.5 text-xs leading-4 text-ink-soft"
 			>
 				<span class="inline-flex items-center gap-1.5"
 					><span class="inline-block w-[22px] border-t-[3px] border-accent"></span>{selVM
@@ -247,7 +247,7 @@
 						: 'Way out'}</span
 				>
 				<span class="inline-flex items-center gap-1.5"
-					><span class="inline-block w-[22px] border-t-2 border-[#a3a6a9]"></span>Attached</span
+					><span class="inline-block w-[22px] border-t-2 border-wire"></span>Attached</span
 				>
 				<span class="inline-flex items-center gap-1.5"
 					><span class="inline-block w-[22px] border-t-2 border-dashed border-danger"

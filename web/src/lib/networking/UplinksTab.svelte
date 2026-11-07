@@ -107,7 +107,7 @@
 						Carries
 						{#each vlans.slice(0, 6) as n, i (networkKey(n))}{i ? ', ' : ''}<a
 								href={networkHref(networkKey(n))}
-								class="font-mono text-accent-ink hover:underline">{n.name}</a
+								class="font-mono text-accent-ink underline underline-offset-2">{n.name}</a
 							>{/each}{vlans.length > 6 ? ` and ${vlans.length - 6} more` : ''}.
 					</p>
 				{/if}

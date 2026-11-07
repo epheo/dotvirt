@@ -77,7 +77,7 @@ function bindingsFor(s, nss) {
 				(p.namespaces ?? []).some((n) => nss.includes(n));
 	return (s.policies?.policies ?? [])
 		.filter(on)
-		.sort((a, b) => rank[a.kind] - rank[b.kind])
+		.sort((a, b) => rank[a.kind] - rank[b.kind] || (a.priority ?? 0) - (b.priority ?? 0))
 		.map((policy) => ({
 			policy,
 			conditional: policy.kind === 'dfw' && policy.target !== 'all pods',
@@ -117,8 +117,8 @@ const networkCommits = (project, name) => [
 	{
 		hash: 'c42c42c42c' + '0'.repeat(30),
 		shortHash: 'c42c42c4',
-		message: `Merge pull request 'Attach web-1 to lan-101' (#42)`,
-		title: 'Attach web-1 to lan-101',
+		message: `Merge pull request 'Attach two VMs to ${name}' (#42)`,
+		title: `Attach two VMs to ${name}`,
 		author: 'admin',
 		when: new Date(Date.now() - 3 * 864e5).toISOString(),
 		merge: true,
@@ -427,12 +427,21 @@ async function handleAPI(req, res, url) {
 		if (!s.metrics) return sendText(res, 503, 'metrics not configured');
 		const key = url.searchParams.get('network') ?? '';
 		const limit = Number(url.searchParams.get('limit') ?? 5);
-		const nss = key === 'Pod network' ? null : networkNamespaces(s, key);
+		const net = (s.networks?.networks ?? []).find(
+			(x) => x.attachRef === key || (x.scope === 'shared' && x.name === key),
+		);
+		// A VM is on the network when a NIC names it: by attach ref, or a
+		// shared network by its bare name; the pod network takes pod NICs.
+		const on = (n) =>
+			key === 'Pod network'
+				? !n.network || n.network === 'pod'
+				: !!net &&
+					(n.network === net.attachRef ||
+						(net.scope === 'shared' && n.network?.split('/').pop() === net.name));
 		const vms = s.inventory.projects
 			.flatMap((p) => p.namespaces)
-			.filter((n) => !nss || nss.includes(n.namespace))
 			.flatMap((n) => n.vms)
-			.filter((v) => v.phase === 'Running');
+			.filter((v) => v.phase === 'Running' && (v.networks ?? []).some(on));
 		return sendJSON(res, 200, {
 			network: key,
 			window: '1h',

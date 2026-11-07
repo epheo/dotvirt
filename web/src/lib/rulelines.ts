@@ -97,3 +97,28 @@ export function networkRuleLines(rules: NetworkRules): RuleLine[] {
 		});
 	return out;
 }
+
+/**
+ * The n lines most worth a glance, kept in the evaluator's order: rules a
+ * project wrote to let traffic in, then the first cluster rule that blocks
+ * and rules elsewhere naming these VMs, then what reaches outside, then the
+ * rest.
+ */
+export function topLines(lines: RuleLine[], n: number): RuleLine[] {
+	const firstDeny = lines.find((l) => l.policy?.kind === 'admin' && l.icon === 'deny');
+	const score = (l: RuleLine) => {
+		if (l.key.startsWith('peer:')) return 1;
+		if (l.policy?.kind === 'dfw' && l.icon !== 'deny') return 0;
+		if (l === firstDeny) return 1;
+		if (l.icon === 'out') return 2;
+		return 3;
+	};
+	const picked = new Set(
+		lines
+			.map((l, i) => ({ i, s: score(l) }))
+			.sort((a, b) => a.s - b.s || a.i - b.i)
+			.slice(0, n)
+			.map((x) => x.i),
+	);
+	return lines.filter((_, i) => picked.has(i));
+}

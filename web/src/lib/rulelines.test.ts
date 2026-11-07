@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EffectivePolicy, NetworkRules, Policy } from '#lib/api.js';
-import { networkRuleLines, vmRuleLines } from './rulelines';
+import { networkRuleLines, topLines, vmRuleLines } from './rulelines';
 
 const denyLateral: Policy = {
 	name: 'deny-lateral',
@@ -67,5 +67,29 @@ describe('networkRuleLines', () => {
 		expect(lines[1].note).toBe('for VMs labeled app=db in db-prod');
 		expect(lines.at(-1)).toMatchObject({ icon: 'allow', tier: 'Project rule' });
 		expect(new Set(lines.map((l) => l.key)).size).toBe(lines.length);
+	});
+});
+
+describe('topLines', () => {
+	it('picks what a reader needs first but keeps the evaluation order', () => {
+		const allowDNS: Policy = {
+			name: 'allow-dns',
+			kind: 'admin',
+			backing: 'AdminNetworkPolicy',
+			priority: 5,
+			rules: [{ direction: 'Ingress', action: 'Allow', text: 'Accepts UDP 53 from VMs in dns.' }],
+		};
+		const lines = vmRuleLines(
+			{
+				namespace: 'db-prod',
+				eastWest: [{ policy: allowDNS }, { policy: denyLateral }, { policy: allowDB }],
+			},
+			'team-db',
+		);
+		expect(topLines(lines, 3).map((l) => l.text)).toEqual([
+			'Blocks all traffic from VMs in any namespace.',
+			'Accepts TCP 5432 from VMs labeled app=web in web-prod.',
+			'Reaches anything outside.',
+		]);
 	});
 });

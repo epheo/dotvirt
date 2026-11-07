@@ -49,7 +49,7 @@ const networks: Network[] = [
 		attachRef: 'default/udn-tcp-frontend',
 		subnets: ['10.200.0.0/16'],
 	}),
-	// Same range, other namespace: isolated, never an overlap.
+	// Same range again, in another namespace: one more member of the overlap.
 	net({
 		name: 'reuse',
 		namespace: 'db-prod',
@@ -178,14 +178,18 @@ describe('membership', () => {
 });
 
 describe('networkProblems', () => {
-	it('reports a failing uplink and overlaps only where networks can meet', () => {
+	it('reports a failing uplink and one overlap per shared range', () => {
 		const ps = networkProblems(networks, uplinks);
 		expect(ps.map((p) => [p.kind, p.title])).toEqual([
 			['uplink', 'Fails on worker-2'],
 			['overlap', 'Overlap'],
 		]);
-		expect(ps[1].detail).toBe('udn-frontend and udn-tcp-frontend both use 10.200.0.0/16.');
-		expect(ps[1].networks).toEqual(['default/udn-frontend', 'default/udn-tcp-frontend']);
+		expect(ps[1].detail).toBe('reuse, udn-frontend and udn-tcp-frontend all use 10.200.0.0/16.');
+		expect(ps[1].networks).toEqual([
+			'db-prod/reuse',
+			'default/udn-frontend',
+			'default/udn-tcp-frontend',
+		]);
 	});
 	it('names the hosts a VLAN network is cut off from', () => {
 		expect(cutOffHosts(networks[7], uplinks)).toEqual(['worker-2']);

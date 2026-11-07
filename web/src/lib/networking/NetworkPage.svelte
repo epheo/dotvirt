@@ -90,14 +90,16 @@
 
 {#snippet status()}
 	{#if net?.kind === 'vlan'}
-		VLAN network{net.vlan ? ` ${net.vlan}` : ''} on {net.uplink ?? 'an uplink'}{#if cut.length}, cut
-			off on {cut.join(', ')}{/if}
+		VLAN{net.vlan ? ` ${net.vlan}` : ''} on {net.uplink ?? 'an uplink'}{#if cut.length}, cut off on {cut.join(
+				', ',
+			)}{/if}
 	{:else if net?.scope === 'shared'}
-		Shared network, {net.namespaces?.length ?? 0} namespace{net.namespaces?.length === 1 ? '' : 's'}
+		{@const n = networking.projectsOf(net).length}
+		Shared network, {n} project{n === 1 ? '' : 's'}
 	{:else if net}
 		Project network of <a
 			href="/networking?tab=networks&project={encodeURIComponent(owner)}"
-			class="text-accent-ink hover:underline">{owner || net.namespace}</a
+			class="text-accent-ink underline underline-offset-2">{owner || net.namespace}</a
 		>
 	{/if}
 {/snippet}

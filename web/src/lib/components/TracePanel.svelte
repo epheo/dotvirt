@@ -59,7 +59,7 @@
 	const VERDICT_TEXT: Record<string, string> = {
 		Allow: 'Allowed. Every rule on the way lets this flow through.',
 		Deny: 'Blocked. A rule below stops this flow.',
-		Conditional: 'Not certain. A rule below may match; see the flagged steps.',
+		Conditional: 'Not certain. A step below could not be resolved.',
 		Unreachable: 'Unreachable. No shared network carries this flow.',
 	};
 
@@ -74,6 +74,15 @@
 		snat: 'Fixed outbound IP',
 		route: 'External route',
 	};
+	// An unresolved answer says why, in the words of the step that could not
+	// be resolved, rather than a generic hedge.
+	function verdictText(r: TraceResult): string {
+		if (r.verdict === 'Conditional') {
+			const why = r.steps.find((s) => s.conditional && s.note)?.note;
+			if (why) return `Not certain: ${why}`;
+		}
+		return VERDICT_TEXT[r.verdict] ?? '';
+	}
 	const actionTone = (s: TraceStep): Tone =>
 		s.action === 'Deny' || s.action === 'Unreachable'
 			? 'danger'
@@ -169,7 +178,7 @@
 						VERDICT_TONE[result.verdict] ?? 'neutral'
 					]}">{result.verdict}</span
 				>
-				<span class="text-xs text-ink-muted">{VERDICT_TEXT[result.verdict] ?? ''}</span>
+				<span class="text-xs text-ink-muted">{verdictText(result)}</span>
 			</div>
 			{#if !result.steps.length}
 				<p class="px-3 py-3 text-xs text-ink-faint">

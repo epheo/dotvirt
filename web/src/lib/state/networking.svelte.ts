@@ -20,8 +20,16 @@ class NetworkingState {
 
 	// Firewall objects: cluster rules, project rules (east-west and outbound),
 	// and the outbound planes at the cluster edge.
+	// In the order traffic meets them: admin rules by priority, the baseline last.
 	readonly clusterRules = $derived(
-		inventory.policies.filter((p) => p.kind === 'admin' || p.kind === 'baseline'),
+		inventory.policies
+			.filter((p) => p.kind === 'admin' || p.kind === 'baseline')
+			.sort(
+				(a, b) =>
+					Number(a.kind === 'baseline') - Number(b.kind === 'baseline') ||
+					(a.priority ?? 0) - (b.priority ?? 0) ||
+					a.name.localeCompare(b.name),
+			),
 	);
 	readonly projectRules = $derived(
 		inventory.policies.filter((p) => p.kind === 'dfw' || p.kind === 'gateway'),
@@ -36,6 +44,15 @@ class NetworkingState {
 
 	problemsOf(key: string): NetProblem[] {
 		return this.problems.filter((p) => p.networks?.includes(key));
+	}
+
+	// The projects a shared network reaches: where it is published, else where
+	// its VMs live.
+	projectsOf(n: Network): string[] {
+		const nss = n.namespaces?.length
+			? n.namespaces
+			: this.vmsOn(networkKey(n)).map((v) => v.namespace);
+		return [...new Set(nss.map((ns) => inventory.projectOf(ns) || ns))];
 	}
 
 	// The project that owns a project network's namespace; '' for shared ones.

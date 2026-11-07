@@ -5,7 +5,6 @@
 // through here so the two idioms never drift and a reader from either world can
 // self-orient. The backend model keeps neutral field names - this is presentation
 // only, the networking analog of $lib/networks' port-group helpers.
-import type { Network } from '#lib/api.js';
 
 // A concept named in both idioms, with the OVN-K/Kubernetes object behind it for
 // the detail drawers and tooltips.
@@ -48,37 +47,4 @@ export const TERMS = {
 // or chip. Components that have room for two lines can read t.net / t.virt directly.
 export function dual(t: Term): string {
 	return `${t.net} (${t.virt})`;
-}
-
-// A segment kind named in both idioms plus its OVN-K backing - the dual-vocabulary
-// successor to $lib/networks' kindLabel. The primary "VM Network" is the Project
-// Gateway's own segment (a primary UDN, born with its namespace); VLAN segments ride
-// the provider edge; everything else is an isolated overlay segment, project- or
-// cluster-scoped.
-interface SegmentType extends Term {
-	backing: string;
-}
-export function segmentType(n: Network): SegmentType {
-	switch (n.kind) {
-		case 'default':
-			return {
-				net: 'Project Segment',
-				virt: 'VM Network',
-				backing: 'primary UserDefinedNetwork',
-			};
-		case 'vlan':
-			return {
-				net: 'VLAN Segment',
-				virt: 'VLAN',
-				backing: 'localnet ClusterUserDefinedNetwork',
-			};
-		default:
-			return n.scope === 'shared'
-				? {
-						net: 'Overlay Segment',
-						virt: 'Shared Port Group',
-						backing: 'ClusterUserDefinedNetwork',
-					}
-				: { net: 'Overlay Segment', virt: 'Internal Port Group', backing: 'UserDefinedNetwork' };
-	}
 }

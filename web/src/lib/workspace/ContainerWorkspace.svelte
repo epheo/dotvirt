@@ -4,7 +4,7 @@
 	import { api, Unauthorized, vmKey, vmRef, type VM } from '#lib/api.js';
 	import { bulkOutcome } from '#lib/bulk.js';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '#lib/lenses.js';
-	import { containerTabs, hrefForScope, vmHref, type Section } from '#lib/nav.js';
+	import { containerTabs, vmHref, type Section } from '#lib/nav.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -16,8 +16,6 @@
 	import ContainerConfigure from '#lib/components/ContainerConfigure.svelte';
 	import ContainerMonitor from '#lib/components/ContainerMonitor.svelte';
 	import EffectivePolicyPanel from '#lib/components/EffectivePolicyPanel.svelte';
-	import NetworkTopology from '#lib/components/NetworkTopology.svelte';
-	import PlatformAdoptBanner from '#lib/components/PlatformAdoptBanner.svelte';
 	import RepoBanner from '#lib/components/RepoBanner.svelte';
 	import Permissions from '#lib/components/Permissions.svelte';
 	import TabBar from '#lib/components/TabBar.svelte';
@@ -27,8 +25,6 @@
 	import BulkDeleteConfirm from './BulkDeleteConfirm.svelte';
 	import HostsRootSummary from './HostsRootSummary.svelte';
 	import NodeConfigure from './NodeConfigure.svelte';
-	import SecurityPlane from './SecurityPlane.svelte';
-	import SegmentSummary from './SegmentSummary.svelte';
 	import StorageClassSummary from './StorageClassSummary.svelte';
 	import StorageRootSummary from './StorageRootSummary.svelte';
 	import TabPane from '#lib/components/TabPane.svelte';
@@ -184,25 +180,12 @@
 <TabBar class="px-4" {tabs} active={tab} href={(t) => `?tab=${t}`} />
 
 {#if tab === 'summary'}
-	{#if scope.kind === 'network'}
-		<SegmentSummary network={scope.network} vms={scopedVMs} />
-	{:else if scope.kind === 'storage'}
+	{#if scope.kind === 'storage'}
 		<StorageClassSummary storageClass={scope.storageClass} vms={scopedVMs} />
 	{:else if root && section === 'storage'}
 		<StorageRootSummary vms={scopedVMs} />
 	{:else if root && section === 'hosts'}
 		<HostsRootSummary vms={scopedVMs} />
-	{:else if root && section === 'networking'}
-		<PlatformAdoptBanner />
-		<TabPane>
-			<NetworkTopology
-				networks={inventory.networks}
-				uplinks={inventory.uplinks}
-				vms={scopedVMs}
-				projects={inventory.projects}
-				onpick={(net) => goto(hrefForScope({ kind: 'network', network: net }))}
-			/>
-		</TabPane>
 	{:else}
 		{#if scope.kind === 'project' || scope.kind === 'namespace'}
 			<RepoBanner project={scope.project} />
@@ -230,9 +213,7 @@
 		<ContainerConfigure projects={cfgProjects} cluster={root && section === 'hosts'} />
 	{/if}
 {:else if tab === 'security'}
-	{#if root}
-		<SecurityPlane />
-	{:else if scope.kind === 'namespace'}
+	{#if scope.kind === 'namespace'}
 		<TabPane class="p-4">
 			<EffectivePolicyPanel namespace={scope.namespace} />
 		</TabPane>

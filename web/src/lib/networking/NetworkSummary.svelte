@@ -10,18 +10,21 @@
 	} from '#lib/api.js';
 	import { relativeAge } from '#lib/format.js';
 	import { POD_NETWORK, vmNetworkKeys } from '#lib/lenses.js';
-	import { cutOffHosts, uplinkLabel } from '#lib/netmap.js';
+	import { uplinkLabel } from '#lib/netmap.js';
 	import { networkHref, vmHref } from '#lib/nav.js';
 	import { networkKey } from '#lib/networks.js';
 	import {
+		canAdoptNetwork,
+		canAuthorRef,
 		canDeleteNetwork,
 		canEditNetwork,
 		networkRef,
+		openAdopt,
 		openDelete,
 		openEdit,
 	} from '#lib/objects.js';
 	import { resource } from '#lib/resource.svelte.js';
-	import type { RuleLine } from '#lib/rulelines.js';
+	import { topLines, type RuleLine } from '#lib/rulelines.js';
 	import { overlaps, usableAddresses } from '#lib/subnets.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { networking } from '#lib/state/networking.svelte.js';
@@ -213,8 +216,8 @@
 						>Way out</span
 					>
 					{#if throughMain}
-						<span class="absolute top-[14px] left-0 text-xs text-ink-faint"
-							>Through its VMs' main network; {name} itself stays inside the cluster.</span
+						<span class="absolute top-0 left-[64px] text-xs leading-4 text-ink-faint"
+							>through its VMs' main network</span
 						>
 					{/if}
 					<span
@@ -252,7 +255,7 @@
 									? 'stroke-ok [stroke-width:2.5]'
 									: r.tone === 'shared'
 										? 'stroke-ink-faint [stroke-dasharray:5_4] [stroke-width:2]'
-										: 'stroke-[#a3a6a9] [stroke-dasharray:1_4] [stroke-linecap:round] [stroke-width:2]'}
+										: 'stroke-wire [stroke-dasharray:1_4] [stroke-linecap:round] [stroke-width:2]'}
 							/>
 						{/each}
 					</svg>
@@ -292,10 +295,10 @@
 					{:else if via === 'fabric'}
 						{#snippet fabric()}
 							<span class="text-[13px] leading-4 font-bold">Datacenter fabric</span>
-							<span class="text-xs leading-4 text-ink-muted">VMs keep their own IP.</span>
+							<span class="text-xs leading-4 text-ink-muted">VMs keep their IP.</span>
 						{/snippet}
 						{@render node(
-							'top-[86px] left-0 h-16 w-28 border-2 border-accent bg-select-soft px-[9px] py-[3px]',
+							'top-[86px] left-0 min-h-16 w-28 border-2 border-accent bg-select-soft px-[9px] py-[3px]',
 							fabric,
 						)}
 						{#snippet vup()}
@@ -384,8 +387,8 @@
 					VMs on both</span
 				>
 				<span class="inline-flex items-center gap-1.5"
-					><span class="inline-block w-[22px] border-t-2 border-dotted border-[#a3a6a9]"
-					></span>Blocked by a rule</span
+					><span class="inline-block w-[22px] border-t-2 border-dotted border-wire"></span>Blocked
+					by a rule</span
 				>
 			</div>
 		</Card>
@@ -406,7 +409,7 @@
 					No rule bears on it. Its VMs accept traffic from anywhere.
 				</p>
 			{:else}
-				<RuleList lines={lines.slice(0, 3)} owner gap="gap-3" />
+				<RuleList lines={topLines(lines, 3)} owner gap="gap-3" />
 			{/if}
 		</Card>
 
@@ -471,7 +474,7 @@
 								? 'bg-danger'
 								: used / capacity > 0.75
 									? 'bg-warn'
-									: 'bg-[#264a73]'}"
+									: 'bg-present'}"
 							style="width: {Math.min(100, (used / capacity) * 100)}%"
 						></div>
 					</div>
@@ -489,7 +492,7 @@
 							{#each clash.slice(0, 2) as o (networkKey(o))}
 								<a
 									href={networkHref(networkKey(o))}
-									class="ml-1 font-mono text-accent-ink hover:underline">{o.name}</a
+									class="ml-1 font-mono text-accent-ink underline underline-offset-2">{o.name}</a
 								>
 							{/each}
 						</div>
@@ -572,13 +575,36 @@
 							</Consequence>
 						</div>
 					{/if}
-					{#if !secondary && !canEditNetwork(net) && !canDeleteNetwork(net)}
+					{#if canAdoptNetwork(net)}
+						<div class="flex flex-col gap-1.5 py-3">
+							<div class="flex flex-wrap items-center gap-2">
+								<Button variant="outline" size="sm" onclick={() => openAdopt(networkRef(net))}
+									>Adopt into git</Button
+								>
+								<StageChip kind="pr" />
+							</div>
+							<Consequence size="sm" tone="info"
+								>Stages its running manifest in {project}; then it changes here like any other.</Consequence
+							>
+						</div>
+					{:else if net.sourceFile && net.sync === 'OutOfSync' && canAuthorRef(networkRef(net))}
+						<div class="flex flex-col gap-1.5 py-3">
+							<div class="flex flex-wrap items-center gap-2">
+								<Button variant="outline" size="sm" onclick={() => openAdopt(networkRef(net), true)}
+									>Adopt live changes</Button
+								>
+								<StageChip kind="pr" />
+							</div>
+							<Consequence size="sm" tone="warn"
+								>The cluster differs from git; this brings git up to what runs.</Consequence
+							>
+						</div>
+					{/if}
+					{#if !secondary && net.sourceFile && !canEditNetwork(net) && !canDeleteNetwork(net)}
 						<p class="py-3 text-[13px] text-ink-faint">
-							{!net.sourceFile
-								? 'Not in git: adopt it from the project to change it here.'
-								: net.kind === 'default'
-									? `${project}'s main network lives as long as its namespace.`
-									: 'You cannot stage changes to it.'}
+							{net.kind === 'default'
+								? `${project}'s main network lives as long as its namespace.`
+								: 'You cannot stage changes to it.'}
 						</p>
 					{/if}
 				</div>
@@ -648,7 +674,7 @@
 									<td class="py-2 pr-card text-right whitespace-nowrap">
 										<span class="mr-2 inline-block h-1.5 w-14 rounded bg-inset-strong align-middle"
 											><span
-												class="block h-1.5 rounded bg-[#264a73]"
+												class="block h-1.5 rounded bg-present"
 												style="width: {(t.bitsPerSecond / maxBits) * 100}%"
 											></span></span
 										>{mbit(t.bitsPerSecond)}

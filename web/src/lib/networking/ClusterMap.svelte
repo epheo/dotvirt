@@ -171,7 +171,7 @@
 	});
 
 	const STROKE = {
-		attached: 'stroke-[#a3a6a9] [stroke-width:2]',
+		attached: 'stroke-wire [stroke-width:2]',
 		failing: 'stroke-danger [stroke-width:2] [stroke-dasharray:6_4]',
 		path: 'stroke-accent [stroke-width:3]',
 	};
@@ -238,8 +238,9 @@
 			{@render name(id, r.label)}
 		</span>
 		<span class="text-xs leading-4 text-ink-muted">
-			{#if r.uplink.bridge}<span class="font-mono text-xs">{r.uplink.bridge}</span
-				>{', '}{/if}{hostsText(r)}
+			{#if r.uplink.bridge}<span class="font-mono text-xs">{r.uplink.bridge}</span>,{/if}<span
+				class={r.uplink.bridge ? 'ml-1' : ''}>{hostsText(r)}</span
+			>
 		</span>
 		{#if r.uplink.builtin}
 			<span class="text-xs leading-4 text-ink-muted"

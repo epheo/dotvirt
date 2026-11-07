@@ -1,21 +1,18 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Database, LayoutGrid, Network, Server } from '@lucide/svelte';
+	import { Database, LayoutGrid, Server } from '@lucide/svelte';
 	import { api, type Node, type VM } from '#lib/api.js';
-	import { vmNetworkKeys, vmStorageKeys, type Scope } from '#lib/lenses.js';
+	import { vmStorageKeys, type Scope } from '#lib/lenses.js';
 	import { hrefForScope, scopeFromPath } from '#lib/nav.js';
-	import { networkByRef } from '#lib/networks.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
-	import SyncBadge from '#lib/components/SyncBadge.svelte';
 	import TreeRow from '#lib/components/TreeRow.svelte';
 	import TreeVMRow from './TreeVMRow.svelte';
 
-	// The flat section trees - Hosts (physical placement), Networking (by NIC
-	// segment), Storage (by dataVolume class): one group per key, a VM under
-	// every key it matches (a VM with two NICs shows under both segments).
+	// The flat section trees - Hosts (physical placement) and Storage (by
+	// dataVolume class): one group per key, a VM under every key it matches.
 	// Keys come from $lib/lenses so the grid filter agrees.
-	let { kind }: { kind: 'node' | 'network' | 'storage' } = $props();
+	let { kind }: { kind: 'node' | 'storage' } = $props();
 
 	const scope = $derived(scopeFromPath(page.url.pathname));
 
@@ -23,7 +20,6 @@
 	const ROOT = $derived(
 		{
 			node: { label: 'All Nodes', href: '/hosts' },
-			network: { label: 'All Networks', href: '/networking' },
 			storage: { label: 'All Storage', href: '/storage' },
 		}[kind],
 	);
@@ -48,22 +44,15 @@
 		for (const node of nodesRes?.data ?? []) m.set(node.name, []);
 		for (const vm of inventory.allVMs) {
 			if (kind === 'node') add(vm.nodeName || '(unscheduled)', vm);
-			else if (kind === 'network')
-				for (const k of vmNetworkKeys(vm, inventory.networks)) add(k, vm);
 			else for (const k of vmStorageKeys(vm, inventory.defaultStorageClass)) add(k, vm);
 		}
 		return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 	});
 
 	const groupScope = (key: string): Scope =>
-		kind === 'node'
-			? { kind: 'node', node: key }
-			: kind === 'network'
-				? { kind: 'network', network: key }
-				: { kind: 'storage', storageClass: key };
+		kind === 'node' ? { kind: 'node', node: key } : { kind: 'storage', storageClass: key };
 	const groupScoped = (key: string) =>
 		(scope.kind === 'node' && scope.node === key) ||
-		(scope.kind === 'network' && scope.network === key) ||
 		(scope.kind === 'storage' && scope.storageClass === key);
 </script>
 
@@ -86,17 +75,10 @@
 			>
 				{#snippet icon()}
 					{#if kind === 'node'}<Server size={14} class="shrink-0 text-side-dim" />
-					{:else if kind === 'network'}<Network size={14} class="shrink-0 text-side-dim" />
 					{:else}<Database size={14} class="shrink-0 text-side-dim" />{/if}
 				{/snippet}
-				<span class="truncate font-semibold text-side-ink"
-					>{kind === 'network' ? (networkByRef(key, inventory.networks)?.name ?? key) : key}</span
-				>
+				<span class="truncate font-semibold text-side-ink">{key}</span>
 				{#snippet trailing()}
-					{#if kind === 'network'}
-						{@const net = networkByRef(key, inventory.networks)}
-						{#if net?.sync}<SyncBadge sync={net.sync} error={net.syncError} compact />{/if}
-					{/if}
 					<span class="text-xs text-side-dim">{vms.length}</span>
 				{/snippet}
 			</TreeRow>
