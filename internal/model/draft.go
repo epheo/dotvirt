@@ -143,12 +143,17 @@ type ObjectSpec struct {
 	Manifest   string          `json:"manifest"`
 	Spec       json.RawMessage `json:"spec,omitempty" tstype:"unknown"`
 	Reason     string          `json:"reason,omitempty"`
+	// BaseBlob is the git blob ID of Manifest, for UpdateManifestRequest.
+	BaseBlob string `json:"baseBlob,omitempty"`
 }
 
 // UpdateManifestRequest replaces a declared object's manifest verbatim - the
 // edit for what no form expresses: PUT /api/objects/{resource}/{namespace}/{name}.
 type UpdateManifestRequest struct {
 	YAML string `json:"yaml"`
+	// BaseBlob is the version the edit was made on (ObjectSpec.BaseBlob); a
+	// stale one is refused. Optional.
+	BaseBlob string `json:"baseBlob,omitempty"`
 }
 
 // DraftItem is one pending change rendered for the UI.
@@ -211,6 +216,9 @@ type ProposeResult struct {
 	PRNumber   int    `json:"prNumber,omitempty"`
 	CompareURL string `json:"compareURL,omitempty"`
 	Existing   bool   `json:"existing,omitempty"`
+	// Warning is what the propose decided on the user's behalf and they
+	// should read.
+	Warning string `json:"warning,omitempty"`
 }
 
 // ReleaseResult is POST /api/projects/{project}/release: namespaces released

@@ -86,7 +86,7 @@ func (d *reachedDraft) StageDelete(auth.Identity, project.ProjectInfo, string, s
 	d.hit("StageDelete")
 	return view, nil
 }
-func (d *reachedDraft) StageUpdateManifest(auth.Identity, project.ProjectInfo, string, string, string, string) (model.DraftView, error) {
+func (d *reachedDraft) StageUpdateManifest(auth.Identity, project.ProjectInfo, string, string, string, model.UpdateManifestRequest) (model.DraftView, error) {
 	d.hit("StageUpdateManifest")
 	return view, nil
 }

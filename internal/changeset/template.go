@@ -7,6 +7,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
+	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
@@ -142,17 +143,15 @@ func (c *Coordinator) StageSaveTemplate(id auth.Identity, commitProj, sourceProj
 		return model.DraftView{}, fmt.Errorf("%w: template %q already exists in library %q", model.ErrConflict, req.Name, commitProj.Name)
 	}
 
-	if err := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
+	return c.stage(id, commitProj, draft.Entry{
 		Kind:       draft.KindCreate,
 		Resource:   draft.ResourceTemplate,
 		Namespace:  model.ClusterScopeNS,
 		Name:       req.Name,
 		SourceFile: path,
 		Manifest:   string(tplYAML),
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, commitProj)
+		BaseBlob:   git.AbsentBlob,
+	})
 }
 
 // StageUpdateTemplate replaces a library template's manifest - editing a
@@ -172,25 +171,26 @@ func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.P
 	if t := vmtemplate.Parse(path, []byte(req.YAML), commitProj.Name); t.Error != "" {
 		return model.DraftView{}, fmt.Errorf("%w: %s", model.ErrInvalid, t.Error)
 	}
-	_, exists, err := read.LookupOnBranch(c.baseBranch, path)
+	current, exists, err := read.LookupOnBranch(c.baseBranch, path)
 	if err != nil {
 		return model.DraftView{}, err
 	}
 	if !exists {
 		return model.DraftView{}, fmt.Errorf("%w: template %q not in library %q", model.ErrNotFound, req.Name, commitProj.Name)
 	}
+	if err := loadedCurrent(req.BaseBlob, current, "template "+req.Name, c.baseBranch); err != nil {
+		return model.DraftView{}, err
+	}
 
-	if err := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
+	return c.stage(id, commitProj, draft.Entry{
 		Kind:       draft.KindEdit,
 		Resource:   draft.ResourceTemplate,
 		Namespace:  model.ClusterScopeNS,
 		Name:       req.Name,
 		SourceFile: path,
 		Manifest:   req.YAML,
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, commitProj)
+		BaseBlob:   git.BlobID(current),
+	})
 }
 
 // seedTemplates pushes the starter library onto a repo dotvirt just created.

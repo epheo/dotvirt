@@ -83,7 +83,12 @@ export function buildEditRequest(vm: VM, form: EditForm): EditRequest {
 	// A VM wrongly carrying inline cpu/memory under an instancetype must be
 	// normalized even when nothing visibly changed - this heals a SyncFailed VM.
 	const needsHeal = form.mode === 'instancetype' && (!!vm.cpuCores || !!vm.memory);
-	if (sizingChanged || needsHeal) {
+	if (vmMode === 'custom' && form.mode === 'custom') {
+		// Already custom: only the field that moved. The backend lays an edit
+		// over what is staged, so a field sent at git's value would unstage it.
+		if (form.cpuCores && form.cpuCores !== vm.cpuCores) req.cpuCores = form.cpuCores;
+		if (form.memory && form.memory !== (vm.memory ?? '')) req.memory = form.memory;
+	} else if (sizingChanged || needsHeal) {
 		if (form.mode === 'custom') {
 			// Only convert to custom sizing when BOTH values are present. Sending
 			// sizing:'custom' strips the instance type on the backend; without
@@ -169,6 +174,10 @@ export function summarize(vm: VM, form: EditForm): { label: string; value: strin
 		});
 	if (r.sizing === 'custom')
 		out.push({ label: 'Sizing', value: `Custom · ${r.cpuCores} CPU / ${r.memory}` });
+	else {
+		if (r.cpuCores) out.push({ label: 'CPU', value: `${vm.cpuCores ?? '-'} -> ${r.cpuCores}` });
+		if (r.memory) out.push({ label: 'Memory', value: `${vm.memory ?? '-'} -> ${r.memory}` });
+	}
 	if (r.preference) out.push({ label: 'Preference', value: r.preference });
 	if (r.drsExclude !== undefined)
 		out.push({

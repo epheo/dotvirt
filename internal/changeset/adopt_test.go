@@ -106,6 +106,27 @@ func TestAdoptStagesEditForDriftedVM(t *testing.T) {
 	}
 }
 
+// Adopting drift onto a staged edit of the VM adds to it, as any field edit
+// does; it never drops what the user staged.
+func TestAdoptLaysDriftOverStagedEdit(t *testing.T) {
+	bare, live := seedBareWithLive(t)
+	c := newTestCoordinator(t, false)
+	c.live = live
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+	off := "Off"
+	if _, err := c.StageEdit(id, proj, "alpha", "web", model.EditRequest{SourceFile: "alpha/web.yaml", VMEdit: model.VMEdit{Power: &off}}); err != nil {
+		t.Fatalf("StageEdit: %v", err)
+	}
+	if _, err := c.Adopt(id, proj, "alpha", "web"); err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+	entries, _ := c.store.List(id.Username, proj.Name)
+	if len(entries) != 1 || entries[0].Edit == nil || entries[0].Edit.Power == nil || entries[0].Edit.SetLabels["env"] != "prod" {
+		t.Fatalf("want the staged power and the adopted label together, got %+v", entries)
+	}
+}
+
 // AdoptObjects stages every captured object whatever its kind, so a namespace comes
 // under git whole rather than VM by VM. What is worth capturing is decided by the
 // caller (cluster.AdoptableObjects); this only stages.
@@ -194,13 +215,10 @@ func TestAdoptObjectsAllDeclaredIsInvalid(t *testing.T) {
 	}
 }
 
-// stageProjectAdoption stamps each of a project's namespaces with the dotvirt.io/repo
-// annotation (+ an owners RoleBinding) into the platform draft - the staging core of
+// projectAdoption stamps each of a project's namespaces with the dotvirt.io/repo
+// annotation (+ an owners RoleBinding) for the platform draft - the staging core of
 // AdoptProject, exercised without a forge.
-func TestStageProjectAdoptionStampsRepoOnEveryNamespace(t *testing.T) {
-	c := newTestCoordinator(t, false)
-	id := "alice"
-	const platform = "platform"
+func TestProjectAdoptionStampsRepoOnEveryNamespace(t *testing.T) {
 	target := project.ProjectInfo{Name: "team-a", Namespaces: []string{"team-a", "team-a-db"}}
 	repoURL := "https://forge.example/acme/team-a.git"
 
@@ -208,12 +226,9 @@ func TestStageProjectAdoptionStampsRepoOnEveryNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tenantNamespaces: %v", err)
 	}
-	if err := c.stageProjectAdoption(id, platform, specs, []string{"alice", "bob"}); err != nil {
-		t.Fatalf("stageProjectAdoption: %v", err)
-	}
-	entries, err := c.store.List(id, platform)
+	entries, err := projectAdoption(specs, []string{"alice", "bob"})
 	if err != nil {
-		t.Fatalf("store.List: %v", err)
+		t.Fatalf("projectAdoption: %v", err)
 	}
 
 	nsByName := map[string]draft.Entry{}

@@ -13,6 +13,9 @@ import (
 // a second time.
 const changesHeading = "## Changes\n"
 
+// footer closes every generated PR body.
+const footer = "\n---\nProposed from dotvirt by "
+
 // prBody renders the PR description the forge reviewer reads: the user's own
 // message first, then the draft's semantic changes with their restart plane.
 // The review happens in the forge, so dotvirt's analysis has to travel with
@@ -59,6 +62,18 @@ func prBody(view model.DraftView, message, username string) string {
 	if view.Warning != "" {
 		fmt.Fprintf(&b, "\n**Warning:** %s\n", view.Warning)
 	}
-	fmt.Fprintf(&b, "\n---\nProposed from dotvirt by %s.\n", username)
+	fmt.Fprintf(&b, "%s%s.\n", footer, username)
 	return b.String()
+}
+
+// userMessage is the user's own text in a PR body: what precedes the
+// generated changes and footer.
+func userMessage(body string) string {
+	if i := strings.Index(body, changesHeading); i >= 0 {
+		body = body[:i]
+	}
+	if i := strings.Index(body, footer); i >= 0 {
+		body = body[:i]
+	}
+	return strings.TrimSpace(body)
 }
