@@ -188,6 +188,7 @@ function objectIssue(inv: Inventory, project: string, o: ObjectHealth): Issue | 
 function objectHref(inv: Inventory, o: ObjectHealth): string {
 	switch (o.kind) {
 		case 'UserDefinedNetwork':
+			return hrefForScope({ kind: 'network', network: `${o.namespace}/${o.name}` });
 		case 'ClusterUserDefinedNetwork':
 			return hrefForScope({ kind: 'network', network: o.name });
 		case 'NetworkAttachmentDefinition':

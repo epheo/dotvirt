@@ -10,6 +10,7 @@
 	} from '#lib/objects.js';
 	import type { Network as PortGroup, Project, Uplink, VM } from '#lib/api.js';
 	import { vmNetworkKeys, POD_NETWORK, NO_NETWORK } from '#lib/lenses.js';
+	import { networkKey } from '#lib/networks.js';
 	import { segmentType, TERMS } from '#lib/vocab.js';
 	import PowerDot from './PowerDot.svelte';
 	import StatusDot from './StatusDot.svelte';
@@ -78,9 +79,9 @@
 
 {#snippet segmentCard(net: PortGroup)}
 	{@const st = segmentType(net)}
-	{@const list = vmsFor(net.name)}
+	{@const list = vmsFor(networkKey(net))}
 	<button
-		onclick={() => onpick(net.name)}
+		onclick={() => onpick(networkKey(net))}
 		class="flex w-full flex-col gap-1 rounded border border-line bg-panel px-3 py-2 text-left hover:border-accent/60 hover:bg-select-soft"
 	>
 		<div class="flex flex-wrap items-center gap-2">

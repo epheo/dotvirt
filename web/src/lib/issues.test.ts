@@ -169,7 +169,7 @@ describe('scope helpers', () => {
 				'platform',
 				'warn',
 			],
-			['ns-a/net-a', 'UserDefinedNetwork degraded', '/networking/net-a', 'p1', 'warn'],
+			['ns-a/net-a', 'UserDefinedNetwork degraded', '/networking/ns-a/net-a', 'p1', 'warn'],
 		]);
 		expect(issues[0].detail).toBe('FailedToConfigure: 1/1 nodes failed to configure');
 	});

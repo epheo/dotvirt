@@ -89,7 +89,9 @@
 					{:else if kind === 'network'}<Network size={14} class="shrink-0 text-side-dim" />
 					{:else}<Database size={14} class="shrink-0 text-side-dim" />{/if}
 				{/snippet}
-				<span class="truncate font-semibold text-side-ink">{key}</span>
+				<span class="truncate font-semibold text-side-ink"
+					>{kind === 'network' ? (networkByRef(key, inventory.networks)?.name ?? key) : key}</span
+				>
 				{#snippet trailing()}
 					{#if kind === 'network'}
 						{@const net = networkByRef(key, inventory.networks)}

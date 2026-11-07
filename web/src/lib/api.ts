@@ -338,6 +338,9 @@ export const api = {
 	storageClasses: () => get<gen.StorageClassInfo[]>('/api/storage/classes'),
 	networks: () => get<gen.NetworkInventory>('/api/networks'),
 	policies: () => get<gen.PolicyInventory>('/api/policies'),
+	networkRules: (key: string) => get<gen.NetworkRules>(`/api/networks/rules?network=${enc(key)}`),
+	networkTraffic: (key: string, limit = 5) =>
+		get<gen.NetworkTraffic>(`/api/metrics/network?network=${enc(key)}&limit=${limit}`),
 	vmPolicy: (namespace: string, name: string) =>
 		get<gen.EffectivePolicy>(`${vmPath(namespace, name)}/policy`),
 	namespacePolicy: (namespace: string) =>
