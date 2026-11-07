@@ -101,6 +101,23 @@ func TestReconcileDedupAndFreshConn(t *testing.T) {
 	}
 }
 
+// A pass re-offers every current frame to every connection; telling that a
+// connection already holds it must cost a comparison, not a copy of the frame.
+func TestSendLatestCurrentConnDoesNotCopy(t *testing.T) {
+	c := testConn("a")
+	data := []byte(`{"projects":[{"name":"a"}]}`)
+	sendLatest([]*conn{c}, data)
+	<-c.out
+	if n := testing.AllocsPerRun(100, func() { sendLatest([]*conn{c}, data) }); n != 0 {
+		t.Fatalf("sendLatest to a current connection allocated %v times per call", n)
+	}
+	select {
+	case <-c.out:
+		t.Fatal("a current connection was sent its frame again")
+	default:
+	}
+}
+
 // TestDeliverConflatesToLatest: when the writer is slow (mailbox already full), a
 // newer frame replaces the pending one - the client converges to latest, never sends
 // a stale backlog.

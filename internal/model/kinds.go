@@ -1,5 +1,7 @@
 package model
 
+import "strings"
+
 // The managed-object vocabulary: every Kubernetes kind dotvirt's repos
 // declare, the draft resource each backs, and what the Changes pane calls a
 // change to it. Draft labels, API gates, watches, renderers, adoption and the
@@ -44,6 +46,45 @@ func (k Kind) APIVersion() string {
 		return k.Version
 	}
 	return k.Group + "/" + k.Version
+}
+
+// RepoPath is where the repo layout files an object of kind k: where the
+// generators write it and adoption captures it, so adopt-then-edit lands on one
+// file. Moving a path orphans every file already committed under the old one.
+// "" for a kind the layout does not place.
+func (k Kind) RepoPath(namespace, name string) string {
+	switch k.Kind {
+	case KindVM.Kind:
+		return namespace + "/" + name + ".yaml"
+	case KindUDN.Kind:
+		return namespace + "/networks/" + name + ".yaml"
+	case KindNetpol.Kind:
+		return namespace + "/networkpolicies/" + name + ".yaml"
+	case KindEgressFW.Kind:
+		// OVN admits one per namespace, named default.
+		return namespace + "/egressfirewalls/default.yaml"
+	case KindRB.Kind:
+		// One tenant grant per namespace.
+		return "rbac/" + namespace + ".yaml"
+	case KindNS.Kind:
+		return "namespaces/" + name + ".yaml"
+	case KindCUDN.Kind:
+		return "networks/" + name + ".yaml"
+	case KindEgressIP.Kind:
+		return "egressips/" + name + ".yaml"
+	case KindExtRoute.Kind:
+		return "externalroutes/" + name + ".yaml"
+	case KindANP.Kind:
+		return "adminnetworkpolicies/" + name + ".yaml"
+	case KindBANP.Kind:
+		// The cluster admits one, named default.
+		return "baselineadminnetworkpolicies/default.yaml"
+	case KindNNCP.Kind:
+		// Filed under the uplink it renders, not its policy name
+		// (netgen.UplinkPolicyName).
+		return "uplinks/" + strings.TrimPrefix(name, "uplink-") + ".yaml"
+	}
+	return ""
 }
 
 // Resource is one draft resource: the word a draft entry, an object route and

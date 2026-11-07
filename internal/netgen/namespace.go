@@ -149,7 +149,7 @@ func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error)
 	for _, d := range docs[1:] {
 		out = append(out, append([]byte("---\n"), d...)...)
 	}
-	return "namespaces/" + s.Name + ".yaml", out, nil
+	return model.KindNS.RepoPath("", s.Name), out, nil
 }
 
 // RoleBindingSpec grants a tenant's owners admin on one of its namespaces - the
@@ -186,7 +186,8 @@ func RoleBindingManifest(s RoleBindingSpec) (path string, content []byte, err er
 			"kind": "User", "apiGroup": "rbac.authorization.k8s.io", "name": o,
 		})
 	}
-	meta := map[string]any{"name": s.Namespace + "-admins", "namespace": s.Namespace}
+	name := s.Namespace + "-admins"
+	meta := map[string]any{"name": name, "namespace": s.Namespace}
 	if s.Project != "" {
 		meta["labels"] = map[string]any{projectLabel: s.Project}
 	}
@@ -202,5 +203,5 @@ func RoleBindingManifest(s RoleBindingSpec) (path string, content []byte, err er
 	if err != nil {
 		return "", nil, err
 	}
-	return "rbac/" + s.Namespace + ".yaml", rb, nil
+	return model.KindRB.RepoPath(s.Namespace, name), rb, nil
 }
