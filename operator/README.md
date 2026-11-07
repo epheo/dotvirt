@@ -59,9 +59,11 @@ owns one status condition; a phase that fails or waits records why there, so
 2. **Forge** (`ForgeReady`): converges the trust anchors (below) first, then, with
    `spec.forge.managed`, stands up the eval-grade Forgejo (single pod, SQLite, a PVC
    that survives uninstall), resolves its external URL (an explicit `spec.forge.url`,
-   or the host the router assigns to a hostless Route), mints its scoped bot token
-   and ensures the owner org. A bring-your-own forge is left alone; no forge at all
-   records `NotConfigured` (push-only).
+   or the host the router assigns to a hostless Route) and mints its scoped bot
+   token. A bring-your-own forge is only observed: `BringYourOwn` when its
+   `spec.forge.credentialsSecret` exists, `CredentialsSecretMissing` naming it when
+   not (the dotvirt pod cannot start without it). No forge at all records
+   `NotConfigured` (push-only).
 3. **Secrets** (`SecretsReady`): generates the session key, the ApplicationSet-plugin
    token, the webhook secrets and, with SSO, the OAuth client secret. Create-once:
    they survive restarts and are never regenerated.
@@ -76,22 +78,26 @@ owns one status condition; a phase that fails or waits records why there, so
    roles), the `dotvirt-tenants` / `dotvirt-platform` AppProjects, the per-project
    ApplicationSet, the static platform Application and the Argo repo-credentials.
    These live outside the CR's namespace, so a finalizer reclaims them on delete.
-6. **Argo webhook** (`ArgoWebhook`): registers one org-level forge-to-ArgoCD webhook
+6. **Platform repo** (`ForgeRepoReady`): ensures the platform git repo exists
+   (`forge.EnsureRepo`, the imperative step a declarative installer can't do) and,
+   for a managed forge, its owner org. Best-effort: a failure is recorded and the
+   pass goes on. The condition is absent when no platform repo is configured.
+7. **Argo webhook** (`ArgoWebhook`): registers one org-level forge-to-ArgoCD webhook
    for instant sync; `Unknown` when no ArgoCD URL resolves (Argo falls back to its
    poll).
-7. **dotvirt webhook** (`DotvirtWebhook`): the forge-to-dotvirt hook is registered by
+8. **dotvirt webhook** (`DotvirtWebhook`): the forge-to-dotvirt hook is registered by
    the app itself; the operator only observes it.
-8. **Platform repo** (`ForgeRepoReady`): ensures the platform git repo exists
-   (`forge.EnsureRepo`, the imperative step a declarative installer can't do). Last,
-   so its retry never delays another phase.
 
 `Available` is `True` only after a completed pass with the dotvirt pod ready. A
-phase that fails or blocks sets it `False` with that phase's reason; the one
-exception is the platform-repo retry, which leaves a serving install `Available`.
+phase that fails or blocks sets it `False` with that phase's reason; the
+best-effort phases (platform repo, both webhooks) never do, since the operand
+serves without them.
 `status.phase` is `Provisioning`, `BlockedOnDependencies` or `Ready`.
 
 A completed pass requeues after 10 minutes, so drift on the kinds the operator does
-not watch (Services, AppProjects, bindings) heals without a CR edit.
+not watch (Services, AppProjects, bindings) heals without a CR edit; while the
+platform repo is missing, after 1 minute instead. Edits to the CR trigger a pass
+only when they change its spec (or delete it), never a status write.
 
 ### Prune
 
@@ -99,13 +105,19 @@ After a completed pass whose render changed, or at least every 5 minutes, the
 operator deletes the objects carrying this install's instance labels that the pass
 did not render: a Route left by a switch to Ingress,
 the platform tier after `spec.forge.platformRepo` is cleared, everything in a former
-ArgoCD namespace, a managed forge switched off, names an older version rendered.
+ArgoCD namespace, a managed forge switched off.
 Secrets and ConfigMaps are swept only in the namespaces the install writes (the
 ArgoCD namespace, and a former one still holding its argoproj objects), so a
 labelled copy an admin made elsewhere survives.
 Never pruned: anything without the labels, and Secrets, PersistentVolumeClaims and
 the CA ConfigMaps in the install namespace (generated keys, the minted forge token
 and the forge's git data are state, not render). A pass that halts prunes nothing.
+Deleting the CR runs the same prune with nothing rendered.
+
+The operator's delete grant names each object it renders (`rbac_markers.go`), so it
+cannot delete any other Secret, binding or Application in the cluster. An object
+only an older version rendered under another name is refused, logged and left for
+an admin to delete; it never blocks prune or deletion.
 
 The labels are `dotvirt.io/instance` (the CR name) and
 `dotvirt.io/instance-namespace` (its namespace). Objects from versions that set only

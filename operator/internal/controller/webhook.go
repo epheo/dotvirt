@@ -19,10 +19,6 @@ import (
 // needs the argocd-secret write the app must never hold.) Never halts; the git
 // poll backstops.
 func (r *DotvirtReconciler) reconcileDotvirtWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, _ *reconcileCtx) (*ctrl.Result, error) {
-	if r.DryRun {
-		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionDotvirtWebhook, "dotvirt webhook")
-		return nil, nil
-	}
 	if registered, err := r.observeDotvirtWebhook(ctx, dv); err != nil {
 		r.setCondition(dv, dotvirtv1alpha1.ConditionDotvirtWebhook, metav1.ConditionUnknown, "Unobservable",
 			"could not read the forge's webhooks ("+err.Error()+"); updates still flow via the app's git poll")
