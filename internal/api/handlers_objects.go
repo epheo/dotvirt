@@ -73,7 +73,7 @@ func (s *Server) handleObjectUpdateManifest(w http.ResponseWriter, r *http.Reque
 		fail(w, invalid(errors.New("yaml is required")))
 		return
 	}
-	view, err := s.draft.StageUpdateManifest(sc.id, sc.proj, resource, ns, name, req.YAML)
+	view, err := s.draft.StageUpdateManifest(sc.id, sc.proj, resource, ns, name, req)
 	respond(w, view, err)
 }
 

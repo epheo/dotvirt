@@ -77,6 +77,26 @@ func TestReleaseDeclaredRefusesMultiDocManifest(t *testing.T) {
 	}
 }
 
+// A release rewrites the declared file from the version it read. Once a
+// later merge moves that file, proposing would undo the merge: refused.
+func TestReleaseRefusedOverAMovedNamespaceFile(t *testing.T) {
+	bare, work := seedWork(t, map[string][]byte{"namespaces/alpha.yaml": []byte(declaredNS)})
+	c := newTestCoordinator(t, true)
+	id := auth.Identity{Username: "alice"}
+	plat := project.ProjectInfo{Name: "platform", Repo: bare}
+	target := project.ProjectInfo{Name: "legacy", Namespaces: []string{"alpha"}}
+	if _, _, err := c.ReleaseDeclared(id, plat, target); err != nil {
+		t.Fatalf("ReleaseDeclared: %v", err)
+	}
+
+	writeWorkFile(t, work, "namespaces/alpha.yaml", []byte(declaredNS+"    team: b\n"))
+	gitRun(t, work, "commit", "-qam", "label alpha")
+	gitRun(t, work, "push", "-q", "origin", "main")
+	if _, err := c.Propose(id, plat, model.ProposeRequest{Title: "release legacy"}); !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "alpha") {
+		t.Fatalf("want ErrConflict naming alpha, got %v", err)
+	}
+}
+
 // A namespace declared outside namespaces/<ns>.yaml is still git's: its file is
 // rewritten in place, never sent to the imperative path the next sync undoes.
 func TestReleaseDeclaredFindsNamespaceAnywhere(t *testing.T) {

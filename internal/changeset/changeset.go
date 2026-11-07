@@ -77,6 +77,8 @@ type Coordinator struct {
 	resyncer Resyncer            // may be nil -> re-sync unavailable
 	renderer vmtemplate.Renderer // processes library templates into VM manifests
 	prune    PruneSource         // may be nil -> the draft view carries no prune warning
+
+	proposing keyedMutex // one Propose per (user, project)
 }
 
 // New builds a Coordinator. forge and resyncer may be nil (PR creation degrades
