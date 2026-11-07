@@ -42,15 +42,26 @@ func (s *Server) streamOpen(key string) bool {
 	return s.streams[key] > 0
 }
 
+const (
+	// ttlBackstopEvery is the TTL backstop's cadence. A cached entry serves while
+	// younger than visibleTTL, so the first tick to find it expired comes up to one
+	// period after it ages out: ticking at visibleTTL would double the bound.
+	ttlBackstopEvery = visibleTTL / 2
+	// ttlBackstopBound is how long a cluster-scoped RBAC change can take to reach
+	// an open frame: the entry's TTL, then the wait for the next tick.
+	ttlBackstopBound = visibleTTL + ttlBackstopEvery
+)
+
 // RunTTLBackstop is the TTL backstop for frame inputs no watch observes: a
 // token's visible namespaces and SSAR verdicts also move with ClusterRoleBindings,
 // ClusterRoles and group membership, and are cached for visibleTTL only. An
 // expired entry is re-evaluated by the next frame build, so while a stream is open
-// this publishes TTLBackstop every visibleTTL to cause one; a frame that comes out
-// identical is not resent. TTLBackstop is in no cache's version stamp, so nothing
-// is invalidated before its TTL.
+// this publishes TTLBackstop every ttlBackstopEvery to cause one, which bounds
+// such a change at ttlBackstopBound (45s); a frame that comes out identical is not
+// resent. TTLBackstop is in no cache's version stamp, so nothing is invalidated
+// before its TTL.
 func (s *Server) RunTTLBackstop(ctx context.Context) {
-	t := time.NewTicker(visibleTTL)
+	t := time.NewTicker(ttlBackstopEvery)
 	defer t.Stop()
 	for {
 		select {

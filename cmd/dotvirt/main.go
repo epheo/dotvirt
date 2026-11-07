@@ -242,8 +242,8 @@ func run() error {
 	go server.RunProposalsRefresher(ctx, bus)
 
 	// Frames also read TTL-cached authorization that no watch observes; while a
-	// stream is open, the backstop rebuilds frames at that TTL (identical frames
-	// are not resent).
+	// stream is open, the backstop rebuilds frames often enough that an expired
+	// entry is re-evaluated within 45s (identical frames are not resent).
 	go server.RunTTLBackstop(ctx)
 
 	// VNC dials as the requesting user (KubeVirt RBAC gates the console).

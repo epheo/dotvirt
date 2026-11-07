@@ -151,7 +151,8 @@ type Config struct {
 // backstop that bounds staleness for those un-watched RBAC sources, so it stays short
 // - long enough to spare the periodic SelfSubjectRulesReview on quiet tokens, short
 // enough that a cluster-level revocation can't linger. An expired entry is only
-// re-evaluated by a rebuild, so RunTTLBackstop wakes open streams at this cadence.
+// re-evaluated by a rebuild, which RunTTLBackstop causes for open streams, so a
+// revocation reaches an open frame within ttlBackstopBound.
 const visibleTTL = 30 * time.Second
 
 // optionsTTL caches the wizard catalog (instancetypes/preferences/datasources).
