@@ -19,9 +19,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes"
@@ -77,6 +76,7 @@ func TestEnvtest(t *testing.T) {
 	for _, ns := range []string{"dotvirt", "argocd"} {
 		mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
 	}
+	mustCreate(t, admin, projectNS("team-a", "team-a", "https://forge.example/dotvirt/team-a.git"))
 	for _, f := range []string{"role.yaml", "operand_roles.yaml"} {
 		for _, role := range readClusterRoles(t, filepath.Join("..", "..", "config", "rbac", f)) {
 			mustCreate(t, admin, role)
@@ -112,6 +112,12 @@ func TestEnvtest(t *testing.T) {
 			{authzv1.ResourceAttributes{Verb: "delete", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: "dotvirt"}, true},
 			{authzv1.ResourceAttributes{Verb: "delete", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: "cluster-admin"}, false},
 			{authzv1.ResourceAttributes{Verb: "delete", Group: "argoproj.io", Resource: "applications", Namespace: "argocd", Name: "some-tenant"}, false},
+			// Tenant AppProjects are named after their projects; prune bounds the
+			// unscoped delete to this install's labels.
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "argoproj.io", Resource: "appprojects", Namespace: "argocd", Name: "dotvirt-p-any"}, true},
+			{authzv1.ResourceAttributes{Verb: "deletecollection", Group: "argoproj.io", Resource: "appprojects", Namespace: "argocd"}, false},
+			{authzv1.ResourceAttributes{Verb: "watch", Resource: "namespaces"}, true},
+			{authzv1.ResourceAttributes{Verb: "patch", Resource: "namespaces", Name: "team-a"}, false},
 		} {
 			res, err := kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx,
 				&authzv1.SelfSubjectAccessReview{Spec: authzv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &c.attrs}}, metav1.CreateOptions{})
@@ -175,6 +181,21 @@ func TestEnvtest(t *testing.T) {
 		if err := admin.Get(ctx, client.ObjectKeyFromObject(appset), argoObj("ApplicationSet", "", "", nil)); err != nil {
 			t.Errorf("ApplicationSet: %v", err)
 		}
+		if err := admin.Get(ctx, types.NamespacedName{Namespace: "argocd", Name: "dotvirt-p-team-a"}, argoObj("AppProject", "", "", nil)); err != nil {
+			t.Errorf("tenant AppProject: %v", err)
+		}
+	})
+
+	t.Run("a labeled namespace confines its project", func(t *testing.T) {
+		mustCreate(t, admin, projectNS("team-b", "team-b", "https://forge.example/dotvirt/team-b.git"))
+		ap := argoObj("AppProject", "", "", nil)
+		eventually(t, "team-b AppProject", func() bool {
+			return admin.Get(ctx, types.NamespacedName{Namespace: "argocd", Name: "dotvirt-p-team-b"}, ap) == nil
+		})
+		dests, _, _ := unstructured.NestedSlice(ap.Object, "spec", "destinations")
+		if len(dests) != 1 || dests[0].(map[string]any)["namespace"] != "team-b" {
+			t.Errorf("destinations = %v, want team-b only", dests)
+		}
 	})
 
 	t.Run("apply reclaims owned fields and keeps foreign ones", func(t *testing.T) {
@@ -228,6 +249,10 @@ func TestEnvtest(t *testing.T) {
 			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "dotvirt"},
 		}
 		mustCreate(t, admin, legacy)
+		// Same name shape, not this install's: the unscoped AppProject delete
+		// must still leave it.
+		foreign := argoObj("AppProject", "argocd", "dotvirt-p-foreign", nil)
+		mustCreate(t, admin, foreign)
 		if err := admin.Delete(ctx, dv); err != nil {
 			t.Fatal(err)
 		}
@@ -264,6 +289,9 @@ func TestEnvtest(t *testing.T) {
 		if len(left) != 1 || !left["/"+legacy.Name] {
 			t.Errorf("left after deletion: %v, want only the refused legacy binding", left)
 		}
+		if err := admin.Get(ctx, client.ObjectKeyFromObject(foreign), argoObj("AppProject", "", "", nil)); err != nil {
+			t.Errorf("foreign AppProject: %v", err)
+		}
 	})
 }
 
@@ -271,17 +299,12 @@ func TestEnvtest(t *testing.T) {
 // counts its install passes.
 func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) *atomic.Int64 {
 	t.Helper()
-	hasInstance, _ := labels.NewRequirement(install.InstanceLabel, selection.Exists, nil)
-	instanceOnly := cache.ByObject{Label: labels.NewSelector().Add(*hasInstance)}
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: "0"},
 		HealthProbeBindAddress: "0",
-		Cache: cache.Options{ByObject: map[client.Object]cache.ByObject{
-			&corev1.Secret{}:     instanceOnly,
-			&appsv1.Deployment{}: instanceOnly,
-		}},
-		Client: client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}}}},
+		Cache:                  cache.Options{ByObject: CacheByObject(platform.Kubernetes)},
+		Client:                 client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}}}},
 	})
 	if err != nil {
 		t.Fatal(err)

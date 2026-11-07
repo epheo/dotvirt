@@ -1,6 +1,8 @@
 package install
 
 import (
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -333,5 +335,56 @@ func TestForgejoVerifiesWebhookTLS(t *testing.T) {
 	}
 	if !hasVolume(d, "ingress-ca") {
 		t.Error("forgejo ingress-ca mount missing")
+	}
+}
+
+// A tenant AppProject admits exactly its project's namespaces and repo, with
+// the shared tier's workload whitelist, and the ApplicationSet template names
+// it and a destination the plugin picks among those namespaces.
+func TestTenantAppProjectConfinesOneProject(t *testing.T) {
+	dv := testDotvirt()
+	ap := TenantAppProject(dv, "argocd", "team-a", []string{"a-dev", "a-prod"}, []string{"https://forge/dotvirt/team-a.git"})
+	if ap.GetName() != "dotvirt-p-team-a" || ap.GetLabels()[ProjectLabel] != "team-a" || !OwnedBy(ap.GetLabels(), dv) {
+		t.Fatalf("name %s labels %v", ap.GetName(), ap.GetLabels())
+	}
+	dests, _, _ := unstructured.NestedSlice(ap.Object, "spec", "destinations")
+	var got []string
+	for _, d := range dests {
+		got = append(got, d.(map[string]any)["namespace"].(string))
+	}
+	if strings.Join(got, ",") != "a-dev,a-prod" {
+		t.Errorf("destinations = %v", got)
+	}
+	if repos, _, _ := unstructured.NestedStringSlice(ap.Object, "spec", "sourceRepos"); len(repos) != 1 || repos[0] != "https://forge/dotvirt/team-a.git" {
+		t.Errorf("sourceRepos = %v", repos)
+	}
+	shared := TenantsAppProject(dv, "argocd", "https://forge/dotvirt/platform.git", "ns")
+	for _, f := range []string{"clusterResourceWhitelist", "namespaceResourceWhitelist"} {
+		if !reflect.DeepEqual(ap.Object["spec"].(map[string]any)[f], shared.Object["spec"].(map[string]any)[f]) {
+			t.Errorf("%s differs from the shared tier's", f)
+		}
+	}
+	empty := TenantAppProject(dv, "argocd", "gone", nil, nil)
+	if d, _, _ := unstructured.NestedSlice(empty.Object, "spec", "destinations"); d == nil || len(d) != 0 {
+		t.Errorf("an emptied project must render an empty destination list, got %v", d)
+	}
+
+	spec, _, _ := unstructured.NestedMap(ApplicationSet(dv, "argocd").Object, "spec", "template", "spec")
+	if spec["project"] != TenantProjectName("{{.project}}") || spec["destination"].(map[string]any)["namespace"] != "{{.namespace}}" {
+		t.Errorf("template project %v destination %v", spec["project"], spec["destination"])
+	}
+	platform, _, _ := unstructured.NestedString(PlatformApplication(dv, "argocd", "https://forge/x/platform.git").Object, "spec", "project")
+	if platform != projectPlatform {
+		t.Errorf("platform Application project = %s", platform)
+	}
+}
+
+// The app reads tenancy from the keys the AppProjects are derived from.
+func TestDeploymentPinsTenancyKeys(t *testing.T) {
+	args := Deployment(testDotvirt()).Spec.Template.Spec.Containers[0].Args
+	for _, want := range []string{"-project-label=" + ProjectLabel, "-repo-annotation=" + RepoAnnotation} {
+		if !slices.Contains(args, want) {
+			t.Errorf("args %v lack %s", args, want)
+		}
 	}
 }

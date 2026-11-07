@@ -13,18 +13,19 @@ const (
 	appsetConfigMapName = "dotvirt-appset-plugin"
 )
 
-// ApplicationSet generates one Argo Application per dotvirt project - in the
-// dotvirt-tenants AppProject (restricted), from dotvirt's plugin generator - so
+// ApplicationSet generates one Argo Application per dotvirt project - each in its
+// project's own AppProject (TenantAppProject), from dotvirt's plugin generator - so
 // labeling a namespace provisions its tenant app. Unstructured (no argo-cd module
-// dep). The {{.project}}/{{.repo}} templates are evaluated by Argo, so they stay
-// literal strings here.
+// dep). The {{.project}}/{{.repo}}/{{.namespace}} templates are evaluated by Argo,
+// so they stay literal strings here. The destination namespace is one of the
+// project's own, the only ones its AppProject admits.
 func ApplicationSet(dv *dotvirtv1alpha1.Dotvirt, argoNS string) *unstructured.Unstructured {
 	template := map[string]any{
 		"metadata": map[string]any{
 			"name":   "dotvirt-{{.project}}",
-			"labels": map[string]any{"dotvirt.io/project": "{{.project}}"},
+			"labels": map[string]any{ProjectLabel: "{{.project}}"},
 		},
-		"spec": argoAppSpec(projectTenants, "{{.repo}}"),
+		"spec": argoAppSpec(TenantProjectName("{{.project}}"), "{{.repo}}", "{{.namespace}}"),
 	}
 	return argoObject("ApplicationSet", applicationSetName, argoNS, dv, map[string]any{
 		"goTemplate":        true,

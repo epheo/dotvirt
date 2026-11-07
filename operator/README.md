@@ -75,9 +75,15 @@ owns one status condition; a phase that fails or waits records why there, so
    namespace and trusts the managed forge's Route there (below), then applies the
    bindings of the three static operand ClusterRoles (shipped in
    `config/rbac/operand_roles.yaml`; the operator only `bind`s them, never authors
-   roles), the `dotvirt-tenants` / `dotvirt-platform` AppProjects, the per-project
+   roles), one AppProject per tenant project plus `dotvirt-platform`, the per-project
    ApplicationSet, the static platform Application and the Argo repo-credentials.
    These live outside the CR's namespace, so a finalizer reclaims them on delete.
+   A tenant AppProject (`dotvirt-p-<project>`) is derived from the namespaces
+   labeled `dotvirt.io/project=<project>`: those namespaces are its only
+   destinations and the `dotvirt.io/repo` they name its only source, so a manifest
+   merged into one tenant's repo cannot land in another tenant's namespace. A
+   labeled namespace appearing, leaving or changing project or repo re-runs the
+   pass.
 6. **Platform repo** (`ForgeRepoReady`): ensures the platform git repo exists
    (`forge.EnsureRepo`, the imperative step a declarative installer can't do) and,
    for a managed forge, its owner org. Best-effort: a failure is recorded and the
@@ -105,7 +111,10 @@ After a completed pass whose render changed, or at least every 5 minutes, the
 operator deletes the objects carrying this install's instance labels that the pass
 did not render: a Route left by a switch to Ingress,
 the platform tier after `spec.forge.platformRepo` is cleared, everything in a former
-ArgoCD namespace, a managed forge switched off.
+ArgoCD namespace, a managed forge switched off. A tenant AppProject whose project
+is gone, and the shared `dotvirt-tenants` AppProject of earlier versions, are kept
+while an Application still references them (the former admitting nothing), then
+pruned.
 Secrets and ConfigMaps are swept only in the namespaces the install writes (the
 ArgoCD namespace, and a former one still holding its argoproj objects), so a
 labelled copy an admin made elsewhere survives.
@@ -115,7 +124,9 @@ and the forge's git data are state, not render). A pass that halts prunes nothin
 Deleting the CR runs the same prune with nothing rendered.
 
 The operator's delete grant names each object it renders (`rbac_markers.go`), so it
-cannot delete any other Secret, binding or Application in the cluster. An object
+cannot delete any other Secret, binding or Application in the cluster. AppProjects
+are the exception: tenant ones are named after their projects, so the grant covers
+any AppProject and prune's label check is what keeps it to this install's. An object
 only an older version rendered under another name is refused, logged and left for
 an admin to delete; it never blocks prune or deletion.
 
@@ -160,9 +171,10 @@ The `dotvirt-argocd-apply` binding grants the shared ArgoCD application
 controller ServiceAccount apply rights on everything dotvirt's PRs emit, including
 `MachineConfig`, `Subscription`/`OperatorGroup` and `KubeDescheduler` (the DRS
 platform objects) and RoleBindings. It is cluster-wide: every Application that
-controller reconciles gains them, not only dotvirt's. The `dotvirt-tenants`
-AppProject is what keeps tenant repos to namespaced workloads; Applications in
-other AppProjects on a shared ArgoCD are bounded only by their own AppProject.
+controller reconciles gains them, not only dotvirt's. The tenant AppProjects
+keep each tenant repo to namespaced workloads in its own namespaces;
+Applications in other AppProjects on a shared ArgoCD are bounded only by their
+own AppProject.
 Give dotvirt its own ArgoCD instance where other teams' Applications must not
 hold these rights.
 

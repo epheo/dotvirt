@@ -126,6 +126,7 @@ func TestPruneDeletesOnlyUnrenderedInstanceObjects(t *testing.T) {
 		// An admin's `get -o yaml | apply -n` copy keeps the labels.
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-forge", Namespace: "admin-copy", Labels: mine}},
 		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-appset-plugin", Namespace: "admin-copy", Labels: mine}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a", Labels: map[string]string{install.ProjectLabel: "team-a"}}},
 	).Build()
 	r := newReconciler(c, depsOK)
 	reconcileOnce(t, r, dv)
@@ -140,6 +141,8 @@ func TestPruneDeletesOnlyUnrenderedInstanceObjects(t *testing.T) {
 		{&rbacv1.ClusterRoleBinding{}, "", "dotvirt-renamed"},
 		{argoObj("AppProject", "", "", nil), "argocd", "dotvirt-platform"},
 		{argoObj("AppProject", "", "", nil), oldArgo, "dotvirt-tenants"},
+		// No Application references the shared tier, so it is not rendered.
+		{argoObj("AppProject", "", "", nil), "argocd", "dotvirt-tenants"},
 		{&corev1.Secret{}, oldArgo, install.AppsetSecretName},
 		{&corev1.ConfigMap{}, oldArgo, "dotvirt-appset-plugin"},
 	} {
@@ -157,7 +160,7 @@ func TestPruneDeletesOnlyUnrenderedInstanceObjects(t *testing.T) {
 		{&corev1.Secret{}, oldArgo, "foreign"},
 		{&corev1.Secret{}, "admin-copy", "dotvirt-forge"},
 		{&corev1.ConfigMap{}, "admin-copy", "dotvirt-appset-plugin"},
-		{argoObj("AppProject", "", "", nil), "argocd", "dotvirt-tenants"},
+		{argoObj("AppProject", "", "", nil), "argocd", "dotvirt-p-team-a"},
 		{argoObj("ApplicationSet", "", "", nil), "argocd", "dotvirt-projects"},
 	} {
 		if !exists(t, c, kept.obj, kept.ns, kept.name) {
@@ -464,6 +467,10 @@ func TestStatusBaseIsReadUncached(t *testing.T) {
 // installs that render the most, must be named there and nothing may be deleted
 // cluster-wide or by collection: an unnamed object is skipped and left behind.
 func TestDeleteGrantCoversEveryRenderedName(t *testing.T) {
+	// The tenant AppProjects are named after their projects, so their delete
+	// cannot be scoped by name; prune bounds it to this install's labels
+	// (TestFinalizeDeletesOnlyOwnedAppProjects). Nothing else may join them.
+	unscoped := map[string]bool{"argoproj.io/appprojects": true}
 	granted := map[string]bool{}
 	for _, role := range readClusterRoles(t, filepath.Join("..", "..", "config", "rbac", "role.yaml")) {
 		for _, rule := range role.Rules {
@@ -473,11 +480,14 @@ func TestDeleteGrantCoversEveryRenderedName(t *testing.T) {
 			if !slices.Contains(rule.Verbs, "delete") {
 				continue
 			}
-			if len(rule.ResourceNames) == 0 {
-				t.Errorf("delete on %v is not scoped by name", rule.Resources)
-			}
 			for _, g := range rule.APIGroups {
 				for _, res := range rule.Resources {
+					if len(rule.ResourceNames) == 0 {
+						if !unscoped[g+"/"+res] {
+							t.Errorf("delete on %s/%s is not scoped by name", g, res)
+						}
+						granted[g+"/"+res+"/*"] = true
+					}
 					for _, name := range rule.ResourceNames {
 						granted[g+"/"+res+"/"+name] = true
 					}
@@ -515,7 +525,8 @@ func TestDeleteGrantCoversEveryRenderedName(t *testing.T) {
 		{"managed forge behind Ingresses", withIngress, nil, platform.Kubernetes, true},
 	} {
 		var applied []objKey
-		c := testBuilder(t).WithObjects(append(pass.objs, pass.dv)...).WithInterceptorFuncs(interceptor.Funcs{
+		tenant := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a", Labels: map[string]string{install.ProjectLabel: "team-a"}}}
+		c := testBuilder(t).WithObjects(append(pass.objs, pass.dv, tenant)...).WithInterceptorFuncs(interceptor.Funcs{
 			Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
 				gvk, err := apiutil.GVKForObject(obj, cl.Scheme())
 				if err != nil {
@@ -534,7 +545,8 @@ func TestDeleteGrantCoversEveryRenderedName(t *testing.T) {
 				continue
 			}
 			resource, _ := apimeta.UnsafeGuessKindToResource(k.gk.WithVersion(""))
-			if !granted[k.gk.Group+"/"+resource.Resource+"/"+k.name] {
+			gr := k.gk.Group + "/" + resource.Resource
+			if !granted[gr+"/"+k.name] && !granted[gr+"/*"] {
 				t.Errorf("%s: %s %s/%s is rendered, but the delete grant does not name it", pass.name, k.gk.Kind, k.namespace, k.name)
 			}
 		}
