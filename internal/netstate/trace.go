@@ -14,11 +14,11 @@ type TraceWorkload struct {
 	Namespace  string
 	Name       string
 	NSLabels   map[string]string
-	PodLabels  map[string]string
-	IPs        []string // live VMI addresses; nil for a stopped VM
-	PodNet     bool     // attaches the namespace's primary network
-	DefaultNet string   // NAD ref substituted as the default network, "namespace/name"
-	Nets       []string // secondary multus refs, "namespace/name"
+	PodLabels  map[string]string // the virt-launcher pod's
+	IPs        []string          // the primary NIC's live addresses; nil for a stopped VM
+	PodNet     bool              // attaches the namespace's primary network
+	DefaultNet string            // NAD ref substituted as the default network, "namespace/name"
+	Nets       []string          // secondary multus refs, "namespace/name"
 }
 
 // Trace simulates one flow through the policy planes: the same pure in-memory
