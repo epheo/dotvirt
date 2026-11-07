@@ -22,18 +22,24 @@ type VMEdit = model.VMEdit
 //
 // yaml.v3's encoder reformats sequences on round-trip, so a node-tree re-marshal
 // would produce noisy diffs; line splicing avoids that entirely.
+//
+// Errors are classified: model.ErrInvalid for a value the edit carries,
+// model.ErrConflict for a manifest the editor cannot apply it to.
 func ApplyEdit(content []byte, namespace, name string, edit VMEdit) ([]byte, error) {
+	if err := validateEdit(edit); err != nil {
+		return nil, err
+	}
 	vm, err := findVM(content, namespace, name)
 	if err != nil {
-		return nil, fmt.Errorf("parse manifest: %w", err)
+		return nil, fmt.Errorf("%w: the manifest of %s/%s does not parse; fix it in git: %v", model.ErrConflict, namespace, name, err)
 	}
 	if vm == nil {
-		return nil, fmt.Errorf("VM %s/%s not found in manifest", namespace, name)
+		return nil, fmt.Errorf("%w: VM %s/%s not found in manifest", model.ErrConflict, namespace, name)
 	}
 
 	ed, err := newLineEditor(content)
 	if err != nil {
-		return nil, fmt.Errorf("edit %s/%s in git directly: %w", namespace, name, err)
+		return nil, fmt.Errorf("%w: edit %s/%s in git directly: %v", model.ErrConflict, namespace, name, err)
 	}
 
 	if edit.Power != nil {
@@ -58,6 +64,9 @@ func ApplyEdit(content []byte, namespace, name string, edit VMEdit) ([]byte, err
 	}
 	applyDisksNetworks(ed, vm, edit)
 	applyVolumeMigrations(ed, vm, edit.MigrateVolumes)
+	if ed.err != nil {
+		return nil, ed.err
+	}
 
 	// Line splicing trusts the document's indentation; degenerate-but-parseable
 	// YAML (found by fuzzing: a tagged scalar where a mapping child sits at a
@@ -66,7 +75,7 @@ func ApplyEdit(content []byte, namespace, name string, edit VMEdit) ([]byte, err
 	// at apply time.
 	out := ed.bytes()
 	if _, err := ParseVMs("", out, namespace); err != nil {
-		return nil, fmt.Errorf("edit would corrupt the manifest of %s/%s; edit it in git directly: %w", namespace, name, err)
+		return nil, fmt.Errorf("%w: edit would corrupt the manifest of %s/%s; edit it in git directly: %v", model.ErrConflict, namespace, name, err)
 	}
 	return out, nil
 }
@@ -84,11 +93,11 @@ func applyEvictionStrategy(ed *lineEditor, vmRoot *yaml.Node, strategy string) {
 			ed.deleteChild(s, "evictionStrategy")
 			return
 		}
-		ed.setScalarAt(es, strategy)
+		ed.setScalarAt(es, ed.str(strategy))
 		return
 	}
 	if strategy != "" {
-		ed.insertChild(s, "evictionStrategy", strategy)
+		ed.insertChild(s, "evictionStrategy", ed.str(strategy))
 	}
 }
 
@@ -171,6 +180,7 @@ func applyRef(ed *lineEditor, vmRoot *yaml.Node, key, value string) {
 	if spec == nil {
 		return
 	}
+	value = ed.str(value)
 	if ref := get(spec, key); ref != nil {
 		// A captured ControllerRevision pin (older KubeVirt writes it into spec)
 		// must not survive a matcher edit: the webhook rejects a Name change that
@@ -278,6 +288,7 @@ func applyMemory(ed *lineEditor, vmRoot *yaml.Node, memory string) {
 	if domain == nil {
 		return
 	}
+	memory = ed.str(memory)
 	if mem := get(domain, "memory"); mem != nil {
 		if g := get(mem, "guest"); g != nil {
 			ed.setScalarAt(g, memory)

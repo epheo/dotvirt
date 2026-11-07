@@ -36,7 +36,7 @@ func TestApplyEditDRSExcludeAddsAnnotation(t *testing.T) {
 		t.Fatalf("ApplyEdit: %v", err)
 	}
 	got := string(out)
-	if !strings.Contains(got, `"`+PreferNoEvictionAnnotation+`": "true"`) {
+	if !strings.Contains(got, PreferNoEvictionAnnotation+`: "true"`) {
 		t.Fatalf("annotation not added:\n%s", got)
 	}
 	// The annotation value must survive a YAML round trip as a STRING (a bare
@@ -155,7 +155,7 @@ func TestApplyEditDRSExcludeCreatesTemplateMetadata(t *testing.T) {
 		t.Fatalf("ApplyEdit: %v", err)
 	}
 	got := string(out)
-	if !strings.Contains(got, `"`+PreferNoEvictionAnnotation+`": "true"`) {
+	if !strings.Contains(got, PreferNoEvictionAnnotation+`: "true"`) {
 		t.Fatalf("annotation not added:\n%s", got)
 	}
 	// The created block must land under template, not under template.spec.

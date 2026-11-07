@@ -61,14 +61,15 @@ func migrateOneVolume(ed *lineEditor, templates, volumes *yaml.Node, m model.Vol
 		return false
 	}
 
-	newName := nextDVName(dvName.Value, templates)
+	newName := ed.str(nextDVName(dvName.Value, templates))
 	ed.setScalarAt(get(get(tmpl, "metadata"), "name"), newName)
 	ed.setScalarAt(dvName, newName)
 
+	class := ed.str(m.StorageClass)
 	if sc := get(storage, "storageClassName"); sc != nil {
-		ed.setScalarAt(sc, m.StorageClass)
+		ed.setScalarAt(sc, class)
 	} else {
-		ed.insertChild(storage, "storageClassName", m.StorageClass)
+		ed.insertChild(storage, "storageClassName", class)
 	}
 
 	// The destination provisions blank: its content comes from the live copy,

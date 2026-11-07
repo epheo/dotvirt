@@ -32,7 +32,7 @@ func applyDisksNetworks(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) {
 	}
 
 	for _, n := range edit.AddNetworks {
-		iface := model.InterfaceName(n.Name)
+		iface := ed.str(model.InterfaceName(n.Name))
 		appendItem(ed, get(devices, "interfaces"), []string{
 			"- name: " + iface,
 			"  bridge: {}",
@@ -40,7 +40,7 @@ func applyDisksNetworks(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) {
 		appendItem(ed, get(tmplSpec, "networks"), []string{
 			"- name: " + iface,
 			"  multus:",
-			"    networkName: " + n.Name,
+			"    networkName: " + ed.str(n.Name),
 		})
 	}
 	for _, name := range edit.RemoveNetworks {
@@ -67,14 +67,14 @@ func applyAddDisks(ed *lineEditor, spec, tmplSpec, devices *yaml.Node, vm string
 			size = "10Gi"
 		}
 		appendItem(ed, get(devices, "disks"), []string{
-			"- name: " + d.Name,
+			"- name: " + ed.str(d.Name),
 			"  disk:",
 			"    bus: virtio",
 		})
 		appendItem(ed, get(tmplSpec, "volumes"), []string{
-			"- name: " + d.Name,
+			"- name: " + ed.str(d.Name),
 			"  dataVolume:",
-			"    name: " + dv,
+			"    name: " + ed.str(dv),
 		})
 		item := blankDVTemplate(dv, size, d.StorageClass)
 		if templates != nil {

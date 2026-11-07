@@ -1,10 +1,6 @@
 package manifest
 
-import (
-	"fmt"
-
-	"go.yaml.in/yaml/v3"
-)
+import "go.yaml.in/yaml/v3"
 
 // applyMetadata upserts/removes labels under metadata.
 func applyMetadata(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) {
@@ -34,7 +30,7 @@ func applyMapEdits(ed *lineEditor, parent *yaml.Node, field string, set map[stri
 		// written YAML is deterministic and matches the (sorted) preview.
 		block := []string{field + ":"}
 		for _, k := range sortedKeys(set) {
-			block = append(block, "  "+quoteKey(k)+": "+set[k])
+			block = append(block, "  "+ed.str(k)+": "+ed.str(set[k]))
 		}
 		ed.insertBlock(parent, block)
 		return
@@ -50,9 +46,9 @@ func applyMapEdits(ed *lineEditor, parent *yaml.Node, field string, set map[stri
 
 	for _, k := range sortedKeys(set) {
 		if existing := get(m, k); existing != nil {
-			ed.setScalarAt(existing, set[k])
+			ed.setScalarAt(existing, ed.str(set[k]))
 		} else {
-			ed.insertChild(m, quoteKey(k), set[k])
+			ed.insertChild(m, ed.str(k), ed.str(set[k]))
 		}
 	}
 	for _, k := range remove {
@@ -92,16 +88,6 @@ func emptiesMap(m *yaml.Node, remove []string) bool {
 	return true
 }
 
-// quoteKey quotes a map key if it contains characters (like '/') that need it.
-func quoteKey(k string) string {
-	for _, r := range k {
-		if r == '/' || r == '.' || r == ':' {
-			return fmt.Sprintf("%q", k)
-		}
-	}
-	return k
-}
-
 // PreferNoEvictionAnnotation is the descheduler's per-VM opt-out: its PRESENCE
 // (the value is not evaluated) makes the automatic load balancer skip the VM,
 // while a node drain still live-migrates it. Set on the VM TEMPLATE metadata so
@@ -135,7 +121,7 @@ func applyTemplateMeta(ed *lineEditor, vmRoot *yaml.Node, labelSet map[string]st
 		}
 		block = append(block, "  "+field+":")
 		for _, k := range sortedKeys(set) {
-			block = append(block, "    "+quoteKey(k)+": "+set[k])
+			block = append(block, "    "+ed.str(k)+": "+ed.str(set[k]))
 		}
 	}
 	section("labels", labelSet)
@@ -146,15 +132,13 @@ func applyTemplateMeta(ed *lineEditor, vmRoot *yaml.Node, labelSet map[string]st
 	ed.insertBlock(tmpl, block)
 }
 
-// drsAnnotationEdits maps the DRS-exclude toggle to annotation edits. The
-// value must stay a YAML string ("true" bare would parse as a bool, which the
-// API rejects for annotations), so it is spliced pre-quoted.
+// drsAnnotationEdits maps the DRS-exclude toggle to annotation edits.
 func drsAnnotationEdits(edit VMEdit) (map[string]string, []string) {
 	if edit.DRSExclude == nil {
 		return nil, nil
 	}
 	if *edit.DRSExclude {
-		return map[string]string{PreferNoEvictionAnnotation: `"true"`}, nil
+		return map[string]string{PreferNoEvictionAnnotation: "true"}, nil
 	}
 	return nil, []string{PreferNoEvictionAnnotation}
 }

@@ -33,7 +33,7 @@ func TestApplyEditAddPlacementGroup(t *testing.T) {
 		t.Fatalf("ApplyEdit: %v", err)
 	}
 	got := string(out)
-	if !strings.Contains(got, `"group.scheduling.dotvirt.io/web-tier": together`) {
+	if !strings.Contains(got, `group.scheduling.dotvirt.io/web-tier: together`) {
 		t.Fatalf("membership label not added:\n%s", got)
 	}
 	if !strings.Contains(got, "kubevirt.io/domain: web") {

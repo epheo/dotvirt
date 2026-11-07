@@ -2,9 +2,14 @@ package manifest
 
 import (
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+	sigsyaml "sigs.k8s.io/yaml"
+
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // The byte-stable line editor: a generic text splicer over the manifest's
@@ -34,10 +39,73 @@ func newLineEditor(content []byte) (*lineEditor, error) {
 
 // lineEditor applies in-place line edits, insertions, and deletions to a file's
 // lines, using yaml.Node positions (1-based Line, Column) to target exact spots.
+// The first splice it cannot make safely is kept in err, so the appliers stay
+// free of error plumbing and ApplyEdit refuses the whole edit.
 type lineEditor struct {
 	lines   []string
 	inserts []insertion  // queued block insertions
 	deleted map[int]bool // 0-based line indices to drop
+	err     error
+}
+
+func (e *lineEditor) fail(err error) {
+	if e.err == nil {
+		e.err = err
+	}
+}
+
+// str is yamlString for a value or key an applier splices; a refusal fails the
+// edit.
+func (e *lineEditor) str(s string) string {
+	out, err := yamlString(s)
+	if err != nil {
+		e.fail(err)
+	}
+	return out
+}
+
+// yamlString renders s as a one-line YAML string scalar, usable as a mapping
+// key or value: plain when both readers that matter take the plain text back
+// as the same string, double-quoted otherwise. The readers are yaml.v3
+// (dotvirt's own parse) and YAML 1.1 through sigs.k8s.io/yaml (what Argo and
+// kubectl apply with), where yes, on and 0x10 are not strings either. Line
+// breaks are refused: the editor addresses the file by lines, and a raw break
+// in a value opens a new key or document.
+func yamlString(s string) (string, error) {
+	if strings.ContainsAny(s, "\r\n\u0085\u2028\u2029") {
+		return "", fmt.Errorf("%w: %q spans lines", model.ErrInvalid, s)
+	}
+	for _, text := range []string{s, strconv.Quote(s)} {
+		if readsBack(text, s) {
+			return text, nil
+		}
+	}
+	return "", fmt.Errorf("%w: %q cannot be written as a YAML string", model.ErrInvalid, s)
+}
+
+// readsBack reports whether text, as both key and value of a one-line
+// mapping, decodes to the string want under both readers.
+func readsBack(text, want string) bool {
+	line := []byte(text + ": " + text)
+	var doc yaml.Node
+	if yaml.Unmarshal(line, &doc) != nil {
+		return false
+	}
+	m := contentRoot(&doc)
+	if m == nil || m.Kind != yaml.MappingNode || len(m.Content) != 2 {
+		return false
+	}
+	for _, n := range m.Content {
+		if n.Kind != yaml.ScalarNode || n.ShortTag() != "!!str" || n.Value != want {
+			return false
+		}
+	}
+	var v map[string]any
+	if sigsyaml.Unmarshal(line, &v) != nil || len(v) != 1 {
+		return false
+	}
+	got, ok := v[want].(string)
+	return ok && got == want
 }
 
 type insertion struct {
