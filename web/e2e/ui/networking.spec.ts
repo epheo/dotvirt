@@ -87,3 +87,22 @@ test('rules that merely match any namespace fold into one line', async ({ page }
 	await expect(main.getByText(/openshift-gitops on TCP 8082/)).toBeVisible();
 	await expect(main.getByRole('heading', { name: 'Rules elsewhere that name it' })).toHaveCount(0);
 });
+
+test('a tenant counts and draws only the networks it can see', async ({ page }) => {
+	// The catalog a tenant gets holds its project networks and the shared ones
+	// published to it; every count and lane comes from it, never from the
+	// cluster's whole.
+	await setScenario(page, 'tenant');
+	await login(page);
+	await page.goto('/networking');
+	const main = page.locator('main');
+	const aside = page.locator('aside');
+	await expect(main.getByText('2 VMs, 6 networks')).toBeVisible();
+	await expect(main.getByRole('link', { name: /^Networks\s*6$/ })).toBeVisible();
+	await expect(aside.getByText('Networks', { exact: true }).locator('..')).toContainText('6');
+	for (const foreign of ['dc-vlan-net', 'internal-l2', 'udn-tcp-frontend', 'team-db'])
+		await expect(page.getByText(foreign)).toHaveCount(0);
+	await main.getByRole('link', { name: /^Networks/ }).click();
+	await expect(main.getByText('6 of 6', { exact: true })).toBeVisible();
+	await expect(page.getByText('dc-vlan-net')).toHaveCount(0);
+});

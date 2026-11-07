@@ -1,10 +1,13 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 
+	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
@@ -165,18 +168,19 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := model.NetworkInventory{
-		Networks:         scopeNetworks(full.Networks, visible),
-		Uplinks:          []model.Uplink{},
-		PhysicalAdapters: []model.PhysicalAdapter{},
-		NMStatePresent:   full.NMStatePresent,
-	}
 	ctx := r.Context()
 	can := func(ref ssarRef) bool {
 		ok, _ := s.can(ctx, id, c, verbCreate, ref, "")
 		return ok
 	}
 	cudn := can(ssarCUDN)
+	platform, _ := s.canAuthorPlatform(ctx, id, c)
+	out := model.NetworkInventory{
+		Networks:         scopeNetworks(full.Networks, visible, cudn || platform),
+		Uplinks:          []model.Uplink{},
+		PhysicalAdapters: []model.PhysicalAdapter{},
+		NMStatePresent:   full.NMStatePresent,
+	}
 	// Per-object drift: attach each segment's own ArgoCD sync/health at serve time
 	// (always fresh, off the cached catalog) - the same surface VMs carry.
 	s.enrichNetworkDrift(out.Networks)
@@ -195,7 +199,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 			ExternalRoute:      can(ssarExtRoute),
 			AdminNetworkPolicy: can(ssarANP),
 		}
-		out.Caps.Platform, _ = s.canAuthorPlatform(ctx, id, c)
+		out.Caps.Platform = platform
 	}
 	// Which file declares each segment: the edit/delete affordance. A shared
 	// segment's platform file shows only to callers who may author that tier.
@@ -222,23 +226,39 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
-// scopeNetworks keeps shared (cluster) networks and only the project networks in
-// namespaces the caller can see. A shared network publishes cluster-wide, so its
-// own Namespaces list can name other tenants' namespaces - filter it to the
-// caller's visible set so the port group stays discoverable (name/kind/VLAN, like
-// a StorageClass) without ever revealing a namespace outside the caller's RBAC.
-func scopeNetworks(nets []model.Network, visible map[string]bool) []model.Network {
+// scopeNetworks is the catalog one caller sees: project networks in the
+// namespaces they can see, and shared networks published to at least one of
+// them, its Namespaces narrowed to those (a shared network's name and its
+// other namespaces echo other tenants). A caller with platform networking
+// authority (all) sees every shared network, published or not, to fix it.
+func scopeNetworks(nets []model.Network, visible map[string]bool, all bool) []model.Network {
 	out := make([]model.Network, 0, len(nets))
 	for _, n := range nets {
 		switch {
 		case n.Scope == model.ScopeShared:
 			n.Namespaces = visibleSubset(n.Namespaces, visible)
-			out = append(out, n)
+			if all || len(n.Namespaces) > 0 {
+				out = append(out, n)
+			}
 		case visible[n.Namespace]:
 			out = append(out, n)
 		}
 	}
 	return out
+}
+
+// callerNetworks is the catalog as /api/networks serves it to this caller, for
+// the routes that resolve one network by key: a network the caller cannot
+// see there is not found here either.
+func (s *Server) callerNetworks(ctx context.Context, id auth.Identity, c *cluster.Client, visible map[string]bool) []model.Network {
+	if s.netstate == nil {
+		return nil
+	}
+	all, _ := s.can(ctx, id, c, verbCreate, ssarCUDN, "")
+	if !all {
+		all, _ = s.canAuthorPlatform(ctx, id, c)
+	}
+	return scopeNetworks(s.netstate.Catalog().Networks, visible, all)
 }
 
 // redactSharedErrors replaces a shared network's apply error with a generic
@@ -301,7 +321,7 @@ func (s *Server) handleNetworkRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := r.URL.Query().Get("network")
-	n, ok := findNetwork(scopeNetworks(s.netstate.Catalog().Networks, visible), key)
+	n, ok := findNetwork(s.callerNetworks(r.Context(), id, c, visible), key)
 	if !ok {
 		fail(w, fmt.Errorf("%w: network %q", model.ErrNotFound, key))
 		return
