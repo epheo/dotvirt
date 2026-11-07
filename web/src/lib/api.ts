@@ -623,14 +623,29 @@ export function retryDelay(retry: number): number {
 // tries) before rejecting with the last error. For the once-per-session
 // catalog pulls, whose only fetch would otherwise leave the whole session on
 // placeholders after a transient boot error. A 401 is never retried: it
-// signs out centrally.
-export async function withRetry<T>(fn: () => Promise<T>, retries = 5): Promise<T> {
+// signs out centrally. signal is the owner's lifetime: once it aborts, no
+// further try runs and the last error rejects at once.
+export async function withRetry<T>(
+	fn: () => Promise<T>,
+	{ retries = 5, signal }: { retries?: number; signal?: AbortSignal } = {},
+): Promise<T> {
 	for (let attempt = 0; ; attempt++) {
 		try {
 			return await fn();
 		} catch (e) {
-			if (attempt >= retries || e instanceof Unauthorized) throw e;
-			await new Promise((r) => setTimeout(r, 2 ** attempt * 1000));
+			if (attempt >= retries || e instanceof Unauthorized || signal?.aborted) throw e;
+			await new Promise<void>((wake) => {
+				const t = setTimeout(wake, 2 ** attempt * 1000);
+				signal?.addEventListener(
+					'abort',
+					() => {
+						clearTimeout(t);
+						wake();
+					},
+					{ once: true },
+				);
+			});
+			if (signal?.aborted) throw e;
 		}
 	}
 }

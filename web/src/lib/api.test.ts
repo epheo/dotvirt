@@ -50,7 +50,7 @@ describe('withRetry', () => {
 		vi.useFakeTimers();
 		try {
 			const fn = vi.fn(() => Promise.reject(new Error('down')));
-			const p = withRetry(fn, 2);
+			const p = withRetry(fn, { retries: 2 });
 			p.catch(() => {}); // the assertion below attaches after the timers run
 			await vi.advanceTimersByTimeAsync(3000);
 			expect(fn).toHaveBeenCalledTimes(3);
@@ -58,6 +58,30 @@ describe('withRetry', () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it('stops retrying once its owner is gone', async () => {
+		vi.useFakeTimers();
+		try {
+			const owner = new AbortController();
+			const fn = vi.fn(() => Promise.reject(new Error('down')));
+			const p = withRetry(fn, { signal: owner.signal });
+			p.catch(() => {});
+			await vi.advanceTimersByTimeAsync(0);
+			expect(fn).toHaveBeenCalledTimes(1);
+			owner.abort();
+			await vi.advanceTimersByTimeAsync(60_000);
+			expect(fn).toHaveBeenCalledTimes(1);
+			await expect(p).rejects.toThrow('down');
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('tries once when asked for no retries', async () => {
+		const fn = vi.fn(() => Promise.reject(new Error('down')));
+		await expect(withRetry(fn, { retries: 0 })).rejects.toThrow('down');
+		expect(fn).toHaveBeenCalledTimes(1);
 	});
 
 	it('never retries a 401', async () => {

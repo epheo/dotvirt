@@ -11,7 +11,6 @@
 		type Alert,
 		streamInventory,
 		Unauthorized,
-		withRetry,
 		type StreamStatus,
 	} from '#lib/api.js';
 	import { friendlyError } from '#lib/format.js';
@@ -113,38 +112,21 @@
 		};
 	});
 
-	// The port-group catalog and the policy plane are fetched out-of-band (not on the
-	// live frame). Re-pull both on sign-in AND whenever networksVersion bumps
-	// (GitOps/git moved, or a policy reflector fired NetworkChanged), so a merged
-	// segment or firewall rule appears without a reload. Keyed on the stable derived
-	// primitive, so it fires only when networking may have changed - not every
-	// VM-state frame. A failed pull retries with backoff: this is the only fetch of
-	// these planes, so a transient boot error would otherwise blank the networking
-	// and host-configure views for the whole session. 401 signs out centrally.
-	// Only the pull for the current version writes: version bumps come in bursts,
-	// and an older response landing last would paint stale planes (or, after
-	// sign-out, repopulate the reset stores).
-	// A pull that outlasts its retries is named in a banner whose Retry bumps
-	// netRetry; the last good planes stay rendered meanwhile.
-	let netRetry = $state(0);
+	// The port-group catalog and the policy plane: re-pulled on sign-in AND
+	// whenever networksVersion bumps (GitOps/git moved, or a policy reflector
+	// fired NetworkChanged), so a merged segment or firewall rule appears
+	// without a reload. Keyed on the stable derived primitive, so it fires only
+	// when networking may have changed, not every VM-state frame. The pull
+	// retries with backoff (its only fetch: a transient boot error would
+	// otherwise blank the networking views for the session) and stops when this
+	// effect re-runs or tears down. One that outlasts its retries is named in a
+	// banner whose Retry is one attempt.
 	$effect(() => {
 		if (!session.user) return;
 		inventory.networksVersion; // subscribe: re-pull when GitOps/git moves
-		netRetry;
-		let live = true;
-		withRetry(() => Promise.all([api.networks(), api.policies()]))
-			.then(([n, p]) => {
-				if (!live) return;
-				inventory.netInv = n;
-				inventory.polInv = p;
-				inventory.netError = '';
-			})
-			.catch((e) => {
-				if (live && !(e instanceof Unauthorized)) inventory.netError = friendlyError(e);
-			});
-		return () => {
-			live = false;
-		};
+		const owner = new AbortController();
+		void untrack(() => inventory.loadNet({ signal: owner.signal }));
+		return () => owner.abort();
 	});
 
 	// The options catalog, once per session: the storage lens groups classless
@@ -240,7 +222,13 @@
 				<span class="min-w-0"
 					>Networking and security views may be out of date: {inventory.netError}</span
 				>
-				<Button variant="link" size="sm" onclick={() => netRetry++}>Retry</Button>
+				<Button
+					variant="link"
+					size="sm"
+					disabled={inventory.netBusy}
+					onclick={() => inventory.loadNet({ retries: 0 })}
+					>{inventory.netBusy ? 'Retrying...' : 'Retry'}</Button
+				>
 			</Banner>
 		{/if}
 

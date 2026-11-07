@@ -39,6 +39,9 @@ class InventoryStore {
 	polInv = $state<PolicyInventory | null>(null);
 	// The last networks/policies pull's terminal failure; '' once one succeeds.
 	netError = $state('');
+	// A networks/policies pull is in flight: the banner's Retry waits on it.
+	netBusy = $state(false);
+	#netPull: AbortController | null = null;
 
 	readonly networks = $derived(this.netInv?.networks ?? []);
 	readonly policies = $derived(this.polInv?.policies ?? []);
@@ -167,7 +170,41 @@ class InventoryStore {
 		return pull;
 	}
 
+	// loadNet pulls the port-group catalog and the policy plane together; they
+	// are fetched out-of-band, not on the frame. A new pull supersedes the one
+	// in flight, so a burst of version bumps writes only the newest answer.
+	// signal is the caller's lifetime: once it aborts, the retries stop and
+	// nothing is written. retries 0 is one attempt, for a person's Retry. The
+	// last good planes stay on screen while a pull fails.
+	async loadNet(opts: { signal?: AbortSignal; retries?: number } = {}): Promise<void> {
+		this.#netPull?.abort();
+		const pull = new AbortController();
+		this.#netPull = pull;
+		opts.signal?.addEventListener('abort', () => pull.abort(), { once: true });
+		this.netBusy = true;
+		try {
+			const [n, p] = await withRetry(() => Promise.all([api.networks(), api.policies()]), {
+				retries: opts.retries,
+				signal: pull.signal,
+			});
+			if (pull.signal.aborted) return;
+			this.netInv = n;
+			this.polInv = p;
+			this.netError = '';
+		} catch (e) {
+			if (!pull.signal.aborted && !(e instanceof Unauthorized)) this.netError = friendlyError(e);
+		} finally {
+			if (this.#netPull === pull) {
+				this.#netPull = null;
+				this.netBusy = false;
+			}
+		}
+	}
+
 	reset() {
+		this.#netPull?.abort();
+		this.#netPull = null;
+		this.netBusy = false;
 		this.inventory = null;
 		this.netInv = null;
 		this.polInv = null;
