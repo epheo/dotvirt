@@ -639,3 +639,71 @@ func TestTraceProjectSelectionUnresolved(t *testing.T) {
 		t.Fatalf("allow from an unresolved selection: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 }
+
+// An external flow is filtered only on the primary NIC. With no primary, a
+// VLAN NIC is the only way out and no cluster control applies; beside a
+// primary, a cluster Deny is not final; with no NIC at all nothing leaves.
+func TestTraceExternalVLAN(t *testing.T) {
+	s := New(nil, nil)
+	add(t, s.nad, map[string]any{
+		"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
+		"metadata": map[string]any{"name": "vlan10", "namespace": "team-a"},
+		"spec":     map[string]any{"config": `{"name":"vlan10","topology":"localnet","physicalNetworkName":"dc","vlanID":10}`},
+	})
+	add(t, s.egressfw, map[string]any{
+		"apiVersion": "k8s.ovn.org/v1", "kind": "EgressFirewall",
+		"metadata": map[string]any{"name": "default", "namespace": "team-a"},
+		"spec": map[string]any{"egress": []any{
+			map[string]any{"type": "Deny", "to": map[string]any{"cidrSelector": "0.0.0.0/0"}},
+		}},
+	})
+
+	vlanOnly := wl("team-a", "appliance", nil, nil, "192.0.2.5")
+	vlanOnly.PodNet, vlanOnly.Nets = false, []string{"team-a/vlan10"}
+	res := s.Trace(vlanOnly, nil, "203.0.113.9", "TCP", 443)
+	if res.Verdict != "Conditional" {
+		t.Fatalf("VLAN-only source: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	for _, st := range res.Steps {
+		if st.Stage == "gateway" || st.Stage == "admin" || st.Stage == "default" {
+			t.Fatalf("no cluster control filters a VLAN-only source, got %v", stepKinds(t, res))
+		}
+	}
+
+	both := wl("team-a", "web", nil, nil, "10.128.2.5")
+	both.Nets = []string{"team-a/vlan10"}
+	if res := s.Trace(both, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Conditional" {
+		t.Fatalf("primary plus VLAN under a gateway deny: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+
+	bare := wl("team-a", "island", nil, nil)
+	bare.PodNet = false
+	if res := s.Trace(bare, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Unreachable" {
+		t.Fatalf("no NIC: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+}
+
+// The gateway runs in its own OVN ACL stage: an admin Allow ends the egress
+// tiers but never skips the EgressFirewall.
+func TestTraceExternalAdminAllowMeetsGateway(t *testing.T) {
+	s := New(nil, nil)
+	anp(t, s, "allow-partner", 1, map[string]any{
+		"action": "Allow", "to": []any{map[string]any{"networks": []any{"198.51.100.0/24"}}},
+	})
+	add(t, s.egressfw, map[string]any{
+		"apiVersion": "k8s.ovn.org/v1", "kind": "EgressFirewall",
+		"metadata": map[string]any{"name": "default", "namespace": "team-a"},
+		"spec": map[string]any{"egress": []any{
+			map[string]any{"type": "Deny", "to": map[string]any{"cidrSelector": "0.0.0.0/0"}},
+		}},
+	})
+	src := wl("team-a", "web", nil, nil, "10.128.2.5")
+	res := s.Trace(src, nil, "198.51.100.7", "TCP", 443)
+	if res.Verdict != "Deny" {
+		t.Fatalf("admin allow then gateway deny: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	last := res.Steps[len(res.Steps)-1]
+	if last.Stage != "gateway" || last.Action != "Deny" || !last.Decisive {
+		t.Fatalf("the gateway must decide, got %v", stepKinds(t, res))
+	}
+}

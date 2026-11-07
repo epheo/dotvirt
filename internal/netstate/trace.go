@@ -30,7 +30,8 @@ type TraceWorkload struct {
 // destination, each through admin (by precedence, Pass delegating down), then
 // the selecting NetworkPolicies (selection alone isolates: no allowing rule
 // means default-deny), then baseline. An external destination runs the egress
-// side plus the gateway firewall, and reports the SNAT/route planes.
+// side plus the gateway firewall, and reports the SNAT/route planes; a VLAN
+// NIC is a path none of them filter.
 //
 // Deny is only ever certain. A rule that cannot be resolved here (named port,
 // a stopped VM's unknown addresses, a DNS rule) stays visible as a
@@ -55,12 +56,27 @@ func (s *Snapshot) Trace(src TraceWorkload, dst *TraceWorkload, dstIP, protocol 
 		return res
 	}
 
-	res.Steps = append(res.Steps, s.externalConnectivity(src, dstIP)...)
+	steps, cluster, vlan := s.externalConnectivity(src, dstIP)
+	res.Steps = append(res.Steps, steps...)
+	if !cluster {
+		res.Verdict = "Unreachable"
+		if vlan {
+			res.Verdict = "Conditional"
+		}
+		return res
+	}
+	// Both must pass: OVN-K runs the admin, project and baseline egress rules
+	// as from-lport ACLs in the source switch's ingress pipeline and the
+	// EgressFirewall as to-lport ACLs in its egress pipeline, each stage with
+	// its own tier walk, so an admin Allow never skips the gateway.
 	eg := s.directionWalk("Egress", src, peerTarget{ip: dstIP}, protocol, port)
 	gw := s.gatewayWalk(src.Namespace, dstIP, protocol, port)
 	res.Steps = append(append(res.Steps, eg.steps...), gw.steps...)
 	res.Steps = append(res.Steps, s.egressPlaneSteps(src)...)
 	res.Verdict = verdict(eg, gw)
+	if vlan && res.Verdict == "Deny" {
+		res.Verdict = "Conditional" // the guest may route the flow out its VLAN NIC
+	}
 	return res
 }
 
@@ -372,17 +388,35 @@ func (s *Snapshot) connectivity(src, dst TraceWorkload) (bool, []model.TraceStep
 	return reachable, steps
 }
 
-// externalConnectivity frames the egress path, flagging VLAN NICs whose
-// traffic leaves through the fabric around every control the trace evaluates.
-func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string) []model.TraceStep {
-	steps := []model.TraceStep{{Stage: "connectivity", Action: "Reachable",
-		Note: "Cluster egress path to " + dstIP + ", evaluated against the source's egress controls."}}
-	for _, ref := range src.Nets {
+// externalConnectivity frames the egress path. The cluster controls filter
+// only the primary NIC (the pod network, or a default multus binding that is
+// not localnet); a VLAN NIC reaches the fabric around all of them. cluster
+// reports a primary NIC, vlan any VLAN NIC.
+func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string) (steps []model.TraceStep, cluster, vlan bool) {
+	cluster = src.PodNet || (src.DefaultNet != "" && !s.isLocalnet(src.DefaultNet))
+	refs := src.Nets
+	if src.DefaultNet != "" && !cluster {
+		refs = append([]string{src.DefaultNet}, src.Nets...)
+	}
+	var segments []model.TraceStep
+	for _, ref := range refs {
 		if s.isLocalnet(ref) {
 			_, name := s.segmentKey(ref)
-			steps = append(steps, model.TraceStep{Stage: "segment", Action: "Bypass",
-				Note: "NIC on VLAN segment " + name + " - traffic leaving through it bypasses these controls."})
+			segments = append(segments, model.TraceStep{Stage: "segment", Action: "Bypass", Conditional: true,
+				Note: "NIC on VLAN segment " + name + " - the guest can route this flow out of it, around every control evaluated here."})
 		}
 	}
-	return steps
+	vlan = len(segments) > 0
+	switch {
+	case cluster:
+		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Reachable",
+			Note: "Cluster egress path to " + dstIP + ", evaluated against the source's egress controls."})
+	case vlan:
+		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Bypass", Conditional: true,
+			Note: src.Name + " has no primary network: traffic to " + dstIP + " leaves only through a VLAN segment, which no cluster control filters. The physical network decides."})
+	default:
+		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: true,
+			Note: src.Name + " has no primary network attachment."})
+	}
+	return append(steps, segments...), cluster, vlan
 }
