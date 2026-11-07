@@ -557,6 +557,13 @@ func TestBaselineAdminNetworkPolicy(t *testing.T) {
 	if _, _, err := AdminNetworkPolicyManifest(AdminNetworkPolicySpec{Name: "x", Priority: 2000}); err == nil {
 		t.Error("expected error for an out-of-range priority")
 	}
+	// The API admits 100..1000, but OVN-K never programs them.
+	if _, _, err := AdminNetworkPolicyManifest(AdminNetworkPolicySpec{Name: "x", Priority: 100}); err == nil || !strings.Contains(err.Error(), "0..99") {
+		t.Errorf("priority 100 must be refused naming the range, got %v", err)
+	}
+	if _, _, err := AdminNetworkPolicyManifest(AdminNetworkPolicySpec{Name: "x", Priority: 99}); err != nil {
+		t.Errorf("priority 99 is enforced and must be accepted: %v", err)
+	}
 }
 
 // An adopted namespace keeps what it already carries; only the tenancy keys are
