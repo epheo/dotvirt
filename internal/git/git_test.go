@@ -42,13 +42,13 @@ func TestReadsDoNotWaitOnFetch(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := r.VMManifests("main")
+		_, err := r.FileOnBranch("main", "web.yaml")
 		done <- err
 	}()
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("VMManifests: %v", err)
+			t.Fatalf("FileOnBranch: %v", err)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("read blocked behind a stalled fetch")

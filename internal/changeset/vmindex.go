@@ -1,6 +1,10 @@
 package changeset
 
 import (
+	"log"
+	"slices"
+	"strings"
+
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
@@ -10,20 +14,38 @@ import (
 // or Argo enrichment. Memoized on the repo per branch head, so the tree walk
 // and parse run once per content change and are shared across every
 // identity's inventory build; the returned slice must not be mutated.
+//
+// A declaring file that does not parse is logged and skipped, once per head:
+// one bad manifest must not blank the project's inventory. Its VMs stay in the
+// declared index, which is what keeps adoption from restating them.
 func VMsOnBranch(read *git.Repo, branch string) ([]model.VM, error) {
 	return git.Memoized(read, "vms", branch, func() ([]model.VM, error) {
-		files, err := read.VMManifests(branch)
+		idx, err := indexDeclared(read, branch)
 		if err != nil {
 			return nil, err
 		}
-		var out []model.VM
-		for _, f := range files {
-			vms, err := manifest.ParseVMs(f.Path, f.Content, defaultNamespace(f.Path))
-			if err != nil {
-				return nil, err
+		files := map[string]bool{}
+		for ref, path := range idx.Files {
+			if ref.Kind == model.KindVM.Kind {
+				files[path] = true
 			}
-			out = append(out, vms...)
 		}
+		var out []model.VM
+		err = read.WalkYAML(branch,
+			func(path string) bool { return files[path] },
+			func(path string, content []byte) error {
+				vms, err := manifest.ParseVMs(path, content, defaultNamespace(path))
+				if err != nil {
+					log.Printf("changeset: %s branch %s: skipping %v", read.URL(), branch, err)
+					return nil
+				}
+				out = append(out, vms...)
+				return nil
+			})
+		if err != nil {
+			return nil, err
+		}
+		slices.SortStableFunc(out, func(a, b model.VM) int { return strings.Compare(a.SourceFile, b.SourceFile) })
 		return out, nil
 	})
 }

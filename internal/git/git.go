@@ -72,6 +72,9 @@ func Open(url, username string, tokenFn forge.TokenSource) (*Repo, error) {
 	return r, nil
 }
 
+// URL is the remote this mirror reads, for logs.
+func (r *Repo) URL() string { return r.url }
+
 // branchHash returns branch's current commit hash from the local mirror (no fetch),
 // or "" if the branch can't be resolved - the memo invalidation key.
 func (r *Repo) branchHash(branch string) string {
@@ -228,26 +231,6 @@ func (r *Repo) WalkYAML(branch string, include func(path string) bool, visit fun
 	})
 }
 
-// VMManifests returns every file on branch that contains a VirtualMachine doc.
-// Files are matched by .yaml/.yml extension then filtered by content, so a
-// single file with multiple docs is still found.
-func (r *Repo) VMManifests(branch string) ([]model.File, error) {
-	var out []model.File
-	err := r.WalkYAML(branch,
-		func(path string) bool { return !InTemplatesDir(path) },
-		func(path string, content []byte) error {
-			if containsVirtualMachine(content) {
-				out = append(out, model.File{Path: path, Content: content})
-			}
-			return nil
-		})
-	if err != nil {
-		return nil, err
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
-	return out, nil
-}
-
 // LookupOnBranch is FileOnBranch distinguishing absence from failure: ok=false
 // with a nil error means the branch resolves but holds no such file - the
 // release path branches on exactly that.
@@ -305,11 +288,6 @@ func readFile(f *object.File) ([]byte, error) {
 
 func isYAML(name string) bool {
 	return strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml")
-}
-
-// containsVirtualMachine is a cheap pre-filter; full parsing happens later.
-func containsVirtualMachine(content []byte) bool {
-	return strings.Contains(string(content), "kind: VirtualMachine")
 }
 
 // InTemplatesDir: the library holds blueprints, not declared objects (a

@@ -109,8 +109,8 @@ func (c *Coordinator) requireUndeclaredVM(read *git.Repo, namespace, name string
 	if err != nil {
 		return err
 	}
-	if _, ok := declaredRef(idx, draft.ResourceVM, namespace, name); ok {
-		return fmt.Errorf("%w: %s/%s already exists in git", model.ErrConflict, namespace, name)
+	if ref, ok := declaredRef(idx, draft.ResourceVM, namespace, name); ok {
+		return fmt.Errorf("%w: %s/%s already exists in git (%s)", model.ErrConflict, namespace, name, idx.Files[ref])
 	}
 	return nil
 }
