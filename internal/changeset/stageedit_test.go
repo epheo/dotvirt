@@ -191,3 +191,25 @@ func TestAdoptChecksTheEdit(t *testing.T) {
 	}
 }
 
+// Rebuilding an open PR replays the field edit it carries on the current
+// main. One main no longer takes fails as a conflict naming the VM, and the
+// way out is the PR, since unstaging the draft leaves the carried edit.
+func TestReproposeOfAnEditMainNoLongerTakesIsConflict(t *testing.T) {
+	f, _ := newPRFixture(t)
+	f.stageLabel(t, "env", "prod")
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); err != nil {
+		t.Fatalf("first Propose: %v", err)
+	}
+	f.commitMain(t, "web.yaml", flowMeta)
+	off := string(model.PowerOff)
+	if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", model.EditRequest{VMEdit: model.VMEdit{Power: &off}}); err != nil {
+		t.Fatalf("StageEdit: %v", err)
+	}
+	_, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{})
+	if !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "alpha/web") || !strings.Contains(err.Error(), "#1") {
+		t.Fatalf("want ErrConflict naming alpha/web and PR #1, got %v", err)
+	}
+	if n := f.draftCount(t); n != 1 {
+		t.Errorf("a refused propose must keep the draft, got %d entries", n)
+	}
+}

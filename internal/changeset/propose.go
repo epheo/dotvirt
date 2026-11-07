@@ -80,9 +80,7 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) []git.ChangesetIte
 				Transform: func(current []byte) ([]byte, error) {
 					out, err := manifest.ApplyEdit(current, defaultNamespace(e.SourceFile), e.Namespace, e.Name, edit)
 					if err != nil {
-						// The base can move after stage, and not every edit in a
-						// draft was dry-run (adoption): name the entry to unstage.
-						return nil, conflict(err, "the staged edit of %s/%s no longer applies; unstage it", e.Namespace, e.Name)
+						return nil, &staleEdit{entry: e, base: c.baseBranch, err: err}
 					}
 					return out, nil
 				},

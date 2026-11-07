@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
@@ -67,15 +68,30 @@ func invalid(err error) error {
 	return fmt.Errorf("%w: %v", model.ErrInvalid, err)
 }
 
-// conflict re-files err under model.ErrConflict with context, dropping the
-// kind each line of err leads with, so the message names one kind once.
-func conflict(err error, format string, args ...any) error {
-	lines := strings.Split(err.Error(), "\n")
+// staleEdit is a field edit the base branch no longer takes: base moved
+// after stage, or the edit was never dry-run. A conflict, whose way out
+// depends on where the edit lives (see proposeRun.extend).
+type staleEdit struct {
+	entry draft.Entry
+	base  string
+	err   error
+}
+
+// what names the edit and why it fails, with err's own kind dropped so the
+// message names one kind once.
+func (s *staleEdit) what() string {
+	lines := strings.Split(s.err.Error(), "\n")
 	for i, l := range lines {
 		for _, kind := range []error{model.ErrInvalid, model.ErrConflict} {
 			l = strings.TrimPrefix(l, kind.Error()+": ")
 		}
 		lines[i] = l
 	}
-	return fmt.Errorf("%w: %s: %s", model.ErrConflict, fmt.Sprintf(format, args...), strings.Join(lines, "; "))
+	return fmt.Sprintf("the edit of %s no longer applies to %s (%s)", objectLabel(s.entry), s.base, strings.Join(lines, "; "))
 }
+
+func (s *staleEdit) Error() string {
+	return model.ErrConflict.Error() + ": " + s.what() + "; unstage it and stage it again on the current version"
+}
+
+func (s *staleEdit) Is(target error) bool { return target == model.ErrConflict }
