@@ -245,7 +245,10 @@ type reconcileCtx struct {
 	argoNS, argoSA string
 	// argoURL is the externally reachable ArgoCD base URL, "" when neither the
 	// spec nor the OpenShift GitOps Route names one (Argo falls back to its poll).
-	argoURL string
+	// argoURLErr says the Route could not be read: "" is then unknown, not
+	// absent, and a consumer fails rather than act on it.
+	argoURL    string
+	argoURLErr error
 	// ingressCA is the router CA, read on OpenShift only; ingressCAErr says why it
 	// is empty there. How much that matters is the consumer's call: the trust
 	// anchors degrade to the system pool, the managed forge's Argo trust blocks.
@@ -256,7 +259,7 @@ type reconcileCtx struct {
 func (r *DotvirtReconciler) newReconcileCtx(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) *reconcileCtx {
 	rc := &reconcileCtx{}
 	rc.argoNS, rc.argoSA = r.argoTarget(dv)
-	rc.argoURL = r.argoServerURL(ctx, dv, rc.argoNS)
+	rc.argoURL, rc.argoURLErr = r.argoServerURL(ctx, dv, rc.argoNS)
 	if r.Platform == platform.OpenShift {
 		rc.ingressCA, rc.ingressCAErr = r.readIngressCA(ctx)
 	}
@@ -357,33 +360,36 @@ func (r *DotvirtReconciler) forgeClient(ctx context.Context, dv *dotvirtv1alpha1
 }
 
 // routeHost reads the spec.host an OpenShift Route carries: the explicit host, or the
-// one the router assigned to a hostless Route. Empty when the Route is absent or its
-// host isn't assigned yet. Unstructured so the module needs no openshift/api dep.
-func (r *DotvirtReconciler) routeHost(ctx context.Context, ns, name string) string {
+// one the router assigned to a hostless Route. "" only when the Route is absent or its
+// host isn't assigned yet: callers render the host into pod templates, where a blank
+// from a read blip would roll the pods. Unstructured so the module needs no
+// openshift/api dep.
+func (r *DotvirtReconciler) routeHost(ctx context.Context, ns, name string) (string, error) {
 	route := &unstructured.Unstructured{}
 	route.SetGroupVersionKind(install.RouteGVK)
 	if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, route); err != nil {
-		return ""
+		return "", client.IgnoreNotFound(err)
 	}
 	host, _, _ := unstructured.NestedString(route.Object, "spec", "host")
-	return host
+	return host, nil
 }
 
 // argoServerURL resolves the externally reachable ArgoCD base URL: the spec
 // override, else the OpenShift GitOps server Route, else "" (the webhook is
 // skipped and Argo falls back to its poll). Routes exist only where the route
 // API does, so the lookup is gated like the Route watch in SetupWithManager.
-func (r *DotvirtReconciler) argoServerURL(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) string {
+func (r *DotvirtReconciler) argoServerURL(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) (string, error) {
 	if dv.Spec.ArgoCD.ServerURL != "" {
-		return dv.Spec.ArgoCD.ServerURL
+		return dv.Spec.ArgoCD.ServerURL, nil
 	}
 	if r.Platform != platform.OpenShift {
-		return ""
+		return "", nil
 	}
-	if host := r.routeHost(ctx, argoNS, "openshift-gitops-server"); host != "" {
-		return "https://" + host
+	host, err := r.routeHost(ctx, argoNS, "openshift-gitops-server")
+	if err != nil || host == "" {
+		return "", err
 	}
-	return ""
+	return "https://" + host, nil
 }
 
 // argoTarget resolves the ArgoCD namespace + controller ServiceAccount from the

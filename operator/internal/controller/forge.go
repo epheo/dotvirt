@@ -71,7 +71,7 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 	applyEffectiveForgeSpec(dv, forgeURL)
 	dv.Status.ForgeURL = forgeURL
 	if err := r.applyForgejoDeployment(ctx, dv, rc); err != nil {
-		return nil, applyFailed(err)
+		return nil, err
 	}
 	if r.DryRun {
 		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionForgeReady, "Forgejo bootstrap")
@@ -132,7 +132,10 @@ func (r *DotvirtReconciler) resolveForgeURL(ctx context.Context, dv *dotvirtv1al
 			"set spec.forge.url: the operator can only discover a managed forge's hostname from an OpenShift Route, which this install does not create",
 			dotvirtv1alpha1.PhaseProvisioning, 0), nil
 	}
-	host := r.routeHost(ctx, dv.Namespace, install.ForgejoServiceName)
+	host, err := r.routeHost(ctx, dv.Namespace, install.ForgejoServiceName)
+	if err != nil {
+		return "", nil, fmt.Errorf("read the forge Route: %w", err)
+	}
 	if host == "" {
 		return "", r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing",
 			"waiting for the router to assign the forge hostname", dotvirtv1alpha1.PhaseProvisioning, 5*time.Second), nil
@@ -245,33 +248,44 @@ func (r *DotvirtReconciler) applyForgejoBase(ctx context.Context, dv *dotvirtv1a
 
 // applyForgejoDeployment renders the Forgejo Deployment once the effective URL is filled,
 // so its ROOT_URL is the browser-facing host. Kept separate from applyForgejoBase for
-// that ordering.
+// that ordering. A failed read of a template input fails the phase: rendering it
+// blank would roll the Recreate pod twice for one read blip.
 func (r *DotvirtReconciler) applyForgejoDeployment(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) error {
 	// The webhook allowlist needs ArgoCD's externally-visible host (see forgejoEnv),
 	// the URL webhook registration posts to. Empty (no Argo URL yet) renders the
 	// baseline allowlist; the pass that resolves it re-renders the Deployment with
 	// the host in place.
+	if rc.argoURLErr != nil {
+		return fmt.Errorf("read the ArgoCD Route: %w", rc.argoURLErr)
+	}
 	argoHost := ""
 	if u, err := url.Parse(rc.argoURL); err == nil {
 		argoHost = u.Hostname()
 	}
+	hash, err := r.adminSecretHash(ctx, dv)
+	if err != nil {
+		return err
+	}
 	// fsGroup only on vanilla K8s; OpenShift's restricted-v2 injects its own.
-	return r.applyOwned(ctx, dv, install.ForgejoDeployment(dv, r.Platform != platform.OpenShift, argoHost, r.adminSecretHash(ctx, dv)))
+	if err := r.applyOwned(ctx, dv, install.ForgejoDeployment(dv, r.Platform != platform.OpenShift, argoHost, hash)); err != nil {
+		return applyFailed(err)
+	}
+	return nil
 }
 
 // adminSecretHash rides the pod template so a rotated secret rolls the pod and
 // the initContainer converges the DB password with no human runbook. Empty in
-// dry-run and on read failure; the 401 path stays the legible fallback.
-func (r *DotvirtReconciler) adminSecretHash(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) string {
+// dry-run, where the secret is never generated.
+func (r *DotvirtReconciler) adminSecretHash(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (string, error) {
 	if r.DryRun {
-		return ""
+		return "", nil
 	}
 	s, err := r.secret(ctx, dv.Namespace, install.ForgejoAdminSecret)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("read the forge admin secret: %w", err)
 	}
 	sum := sha256.Sum256(s.Data["password"])
-	return hex.EncodeToString(sum[:8])
+	return hex.EncodeToString(sum[:8]), nil
 }
 
 // bootstrapForgejo mints the scoped token once the managed Forgejo is up, then

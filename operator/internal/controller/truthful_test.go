@@ -9,10 +9,12 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -324,4 +326,71 @@ func TestStatusWriteSurvivesConcurrentWriter(t *testing.T) {
 	if got := getCR(t, c, dv); got.Status.Phase == "" {
 		t.Error("status not written")
 	}
+}
+
+// failRouteGet fails reads of the named Route; every other read passes through.
+func failRouteGet(name string) interceptor.Funcs {
+	return interceptor.Funcs{
+		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if u, ok := obj.(*unstructured.Unstructured); ok && u.GroupVersionKind() == install.RouteGVK && key.Name == name {
+				return errors.New("apiserver unavailable")
+			}
+			return cl.Get(ctx, key, obj, opts...)
+		},
+	}
+}
+
+// A failed Route read is not "no host yet": rendering the console without
+// DOTVIRT_PUBLIC_URL rolls the Recreate pod and breaks OAuth until the next pass.
+func TestRouteReadErrorFailsWorkload(t *testing.T) {
+	dv := testCR()
+	c := testBuilder(t).WithObjects(dv).WithInterceptorFuncs(failRouteGet(install.AppName)).Build()
+	r := newReconciler(c, depsOK)
+	r.Platform = platform.OpenShift
+
+	if _, err := r.reconcileWorkload(context.Background(), dv, phaseCtx(r, dv)); err == nil {
+		t.Error("reconcileWorkload succeeded on a failed Route read")
+	}
+	if exists(t, c, &appsv1.Deployment{}, dv.Namespace, install.AppName) {
+		t.Error("Deployment rendered without the console host")
+	}
+}
+
+// The Forgejo pod template carries the ArgoCD host and the admin secret hash; a
+// failed read of either fails the phase instead of rendering a blank that rolls
+// the pod.
+func TestForgeTemplateReadErrorsFailThePhase(t *testing.T) {
+	t.Run("ArgoCD Route", func(t *testing.T) {
+		dv := managedForgeCR()
+		c := testBuilder(t).WithObjects(dv).WithInterceptorFuncs(failRouteGet("openshift-gitops-server")).Build()
+		r := newReconciler(c, depsOK)
+		r.Platform = platform.OpenShift
+		if _, err := r.reconcileForge(context.Background(), dv, phaseCtx(r, dv)); err == nil {
+			t.Error("reconcileForge succeeded on a failed ArgoCD Route read")
+		}
+		if exists(t, c, &appsv1.Deployment{}, dv.Namespace, install.ForgejoServiceName) {
+			t.Error("Forgejo Deployment rendered without the ArgoCD host")
+		}
+	})
+	t.Run("admin secret", func(t *testing.T) {
+		dv := managedForgeCR()
+		reads := 0
+		c := testBuilder(t).WithObjects(dv).WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if key.Name == install.ForgejoAdminSecret {
+					if reads++; reads > 1 {
+						return errors.New("apiserver unavailable")
+					}
+				}
+				return cl.Get(ctx, key, obj, opts...)
+			},
+		}).Build()
+		r := newReconciler(c, depsOK)
+		if _, err := r.reconcileForge(context.Background(), dv, phaseCtx(r, dv)); err == nil {
+			t.Error("reconcileForge succeeded on a failed admin secret read")
+		}
+		if exists(t, c, &appsv1.Deployment{}, dv.Namespace, install.ForgejoServiceName) {
+			t.Error("Forgejo Deployment rendered without the admin secret hash")
+		}
+	})
 }
