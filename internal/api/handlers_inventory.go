@@ -40,7 +40,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		Projects: projects,
 		Branch:   s.cfg.BaseBranch,
 		Repos:    s.repos,
-		Live:     s.state.LiveVMs(),
+		Live:     s.state.Live(),
 	}
 	// Drift comes from the SA-owned Application snapshot (lock-free, watch-fed).
 	// Three states the inventory must NOT conflate: Argo off (s.drift nil: no
@@ -114,10 +114,9 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	// Watermark for the out-of-band network catalog: bumps when a port group moves
 	// (NetworkChanged) or a non-VM object's drift content moves (ObjectDriftGen), so
 	// the client re-pulls /api/networks - a merged segment, and its badge, show live.
-	// The drift term is the CONTENT generation, not the raw DriftChanged version:
-	// Application objects churn on every reconcile (reconciledAt), and a version that
-	// counted that would defeat the hub's identical-frame suppression and refetch the
-	// catalog for nothing.
+	// The drift term is the non-VM generation, not the DriftChanged version: that
+	// also moves on VM-only drift, which the frame carries itself, and counting it
+	// would refetch the catalog for nothing.
 	inv.NetworksVersion = s.bus.Version(eventbus.NetworkChanged)
 	if s.drift != nil {
 		inv.NetworksVersion += s.drift.ObjectDriftGen()
