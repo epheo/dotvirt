@@ -38,17 +38,19 @@ func (r *Reader) NamespaceHistory(proj project.ProjectInfo, namespace string, li
 // ObjectHistory is History narrowed to the commits that changed one object's
 // file (a VM when resource is empty): what changed on it and when, from its
 // page. An object not in git has no history, not an error - the page already
-// says it is untracked.
+// says it is untracked. Reading touches nothing, so the file may declare
+// other objects too, unlike the whole-file rewrites locate serves.
 func (r *Reader) ObjectHistory(proj project.ProjectInfo, resource, namespace, name string, limit int) ([]model.Commit, error) {
 	return r.history(proj, func(read *git.Repo) ([]model.Commit, error) {
-		path, err := r.locate(read, draft.Resource(resource), namespace, name)
-		if errors.Is(err, model.ErrNotFound) {
-			return []model.Commit{}, nil
-		}
+		idx, err := indexDeclared(read, r.baseBranch)
 		if err != nil {
 			return nil, err
 		}
-		return read.FileHistory(r.baseBranch, path, limit)
+		ref, ok := declaredRef(idx, draft.Resource(resource), namespace, name)
+		if !ok {
+			return []model.Commit{}, nil
+		}
+		return read.FileHistory(r.baseBranch, idx.Files[ref], limit)
 	})
 }
 
