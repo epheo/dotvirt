@@ -1304,6 +1304,43 @@ const residue = {
 	},
 };
 
+// A tenant's view (team-web only): what the server serves a caller without
+// platform networking authority - project networks in its namespace, shared
+// networks published there, its own rules, no fabric, no cluster rules.
+function tenantView(sc, project) {
+	const projects = sc.inventory.projects.filter((p) => p.name === project);
+	const nss = projects.flatMap((p) => p.namespaces.map((n) => n.namespace));
+	const mine = (n) =>
+		n.scope === 'shared'
+			? (n.namespaces ?? []).some((ns) => nss.includes(ns))
+			: nss.includes(n.namespace);
+	return {
+		...sc,
+		name: 'tenant',
+		inventory: {
+			...sc.inventory,
+			projects,
+			proposals: (sc.inventory.proposals ?? []).filter((p) => p.project === project),
+		},
+		networks: {
+			...sc.networks,
+			networks: sc.networks.networks
+				.filter(mine)
+				.map((n) =>
+					n.scope === 'shared'
+						? { ...n, namespaces: n.namespaces.filter((x) => nss.includes(x)) }
+						: n,
+				),
+			uplinks: [],
+			physicalAdapters: [],
+			canManage: false,
+			caps: Object.fromEntries(Object.keys(sc.networks.caps).map((k) => [k, false])),
+		},
+		policies: { policies: sc.policies.policies.filter((p) => nss.includes(p.namespace)) },
+		networkReaches: {},
+	};
+}
+
 export const scenarios = {
 	residue,
 	sso,
@@ -1317,4 +1354,5 @@ export const scenarios = {
 	// disks); see scale.mjs.
 	scale: withScaleNetworking(scaleScenario(base)),
 	dupnames,
+	tenant: tenantView(base, 'team-web'),
 };
