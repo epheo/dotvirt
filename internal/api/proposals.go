@@ -153,7 +153,7 @@ func (s *Server) streaming(next http.HandlerFunc) http.HandlerFunc {
 
 // nudgeProposals asks the refresher for an out-of-cycle pass (coalesced). A
 // non-empty repo (canonical URL) marks that repo's projects due even though no
-// head moved; with none, the pass picks up only lanes not cached yet.
+// head moved; with none, the pass picks up only lanes never read.
 func (s *Server) nudgeProposals(repo string) {
 	if repo != "" {
 		s.propMu.Lock()
