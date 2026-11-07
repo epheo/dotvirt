@@ -233,8 +233,10 @@
 			{:else}
 				<div class="px-3 py-2">
 					<EventsTable
-						events={eventsRes.data ?? []}
+						events={eventsRes.data}
 						loading={eventsRes.loading}
+						error={eventsRes.error}
+						onretry={eventsRes.refresh}
 						showVM
 						{onselect}
 					/>

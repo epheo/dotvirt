@@ -7,16 +7,18 @@
 	// only while the lane is visible, so the mount-time fetch IS the lazy load.
 	let { vm }: { vm: VM } = $props();
 
-	// Keyed on identity (the stream hands down a fresh vm object every frame);
-	// a failed read renders as an empty list.
+	// Keyed on identity (the stream hands down a fresh vm object every frame).
 	const key = $derived(vmKey(vm));
 	const evRes = resource(
 		() => key,
 		() => api.events(vm.namespace, vm.name),
 		{ reset: true },
 	);
-	const events = $derived(evRes.failed ? [] : evRes.data);
-	const loading = $derived(evRes.loading);
 </script>
 
-<EventsTable {events} {loading} />
+<EventsTable
+	events={evRes.data}
+	loading={evRes.loading}
+	error={evRes.error}
+	onretry={evRes.refresh}
+/>

@@ -11,6 +11,7 @@
 //   POST /__fixture/ws-drop            close every live inventory socket
 //   POST /__fixture/ws-refuse/{n}      destroy the next n WS handshakes pre-open
 //   POST /__fixture/login-status/{s}   next POST /api/login answers status s
+//   POST /__fixture/fail/{plane}/{n}   the next n reads of a plane answer 503 (events)
 //   GET  /__fixture/scenario           current scenario name
 
 import { createReadStream, existsSync, statSync } from 'node:fs';
@@ -65,7 +66,15 @@ const state = {
 	wsRefuse: 0, // destroy the next n WS handshakes before the socket opens
 	sockets: new Set(),
 	uploads: new Map(), // "ns/name" -> DataVolume phase, for the upload flow
+	fail: new Map(), // plane -> reads left to fail, so a test sees the error and the retry
 };
+
+// failing spends one injected failure of a plane, if any are left.
+function failing(plane) {
+	const n = state.fail.get(plane) ?? 0;
+	if (n > 0) state.fail.set(plane, n - 1);
+	return n > 0;
+}
 
 const MIME = {
 	'.html': 'text/html; charset=utf-8',
@@ -275,7 +284,10 @@ async function handleAPI(req, res, url) {
 	if (path === '/api/networks') return sendJSON(res, 200, s.networks);
 	if (path === '/api/policies') return sendJSON(res, 200, s.policies);
 	if (path === '/api/tasks') return sendJSON(res, 200, s.tasks);
-	if (path === '/api/events') return sendJSON(res, 200, s.events);
+	if (path === '/api/events') {
+		if (failing('events')) return sendText(res, 503, 'events read failed: fixture failure hook');
+		return sendJSON(res, 200, s.events);
+	}
 	if (path === '/api/nodes') return sendJSON(res, 200, s.nodes);
 	if (path === '/api/quotas') return sendJSON(res, 200, s.quotas ?? []);
 	if (path === '/api/templates') return sendJSON(res, 200, s.templates ?? { templates: [] });
@@ -460,6 +472,7 @@ async function handleAPI(req, res, url) {
 			);
 		}
 		if (sub === 'events') {
+			if (failing('events')) return sendText(res, 503, 'events read failed: fixture failure hook');
 			return sendJSON(
 				res,
 				200,
@@ -617,6 +630,7 @@ function handleControl(req, res, url) {
 		// pollute the shared definitions across tests.
 		state.scenario = structuredClone(next);
 		state.staged.clear();
+		state.fail.clear();
 		broadcastInventory();
 		return sendJSON(res, 200, { scenario: next.name });
 	}
@@ -641,6 +655,11 @@ function handleControl(req, res, url) {
 			res.end();
 		});
 		return;
+	}
+	m = path.match(/^\/__fixture\/fail\/([a-z]+)\/(\d+)$/);
+	if (m && req.method === 'POST') {
+		state.fail.set(m[1], Number(m[2]));
+		return sendJSON(res, 200, { plane: m[1], fail: Number(m[2]) });
 	}
 	m = path.match(/^\/__fixture\/login-status\/(\d+)$/);
 	if (m && req.method === 'POST') {

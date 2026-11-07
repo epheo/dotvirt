@@ -2,6 +2,7 @@
 	import type { VMEvent } from '#lib/api.js';
 	import { duration } from '#lib/format.js';
 	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '#lib/table.js';
+	import Button from './Button.svelte';
 	import SelectInput from './SelectInput.svelte';
 	import StatusDot from './StatusDot.svelte';
 
@@ -11,11 +12,17 @@
 	let {
 		events,
 		loading = false,
+		error = '',
+		onretry,
 		showVM = false,
 		onselect,
 	}: {
 		events: VMEvent[] | null;
 		loading?: boolean;
+		// A failed read with nothing to show: said as a failure, never as a quiet
+		// cluster, with onretry beside it.
+		error?: string;
+		onretry?: () => void;
 		// Container lanes name the VM per row; the VM lane shows the object kind.
 		showVM?: boolean;
 		onselect?: (namespace: string, name: string) => void;
@@ -50,7 +57,16 @@
 	const warnings = $derived((events ?? []).filter((e) => e.type === 'Warning').length);
 </script>
 
-{#if loading && !events}
+{#if error && !events}
+	<div class="py-8 text-center text-sm">
+		<p class="text-danger-ink">Events could not be read: {error}</p>
+		{#if onretry}
+			<Button variant="secondary" size="sm" class="mt-3" disabled={loading} onclick={onretry}>
+				{loading ? 'Trying again...' : 'Try again'}
+			</Button>
+		{/if}
+	</div>
+{:else if loading && !events}
 	<div class="py-8 text-center text-sm text-ink-faint">Loading events…</div>
 {:else if !events || events.length === 0}
 	<div class="py-8 text-center text-sm text-ink-faint">

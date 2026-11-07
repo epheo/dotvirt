@@ -33,8 +33,6 @@
 		},
 		{ reset: true },
 	);
-	const events = $derived(evRes.failed ? [] : evRes.data);
-	const loading = $derived(evRes.loading);
 </script>
 
 <div class="p-4">
@@ -59,6 +57,13 @@
 			/>
 		{/key}
 	{:else}
-		<EventsTable {events} {loading} showVM {onselect} />
+		<EventsTable
+			events={evRes.data}
+			loading={evRes.loading}
+			error={evRes.error}
+			onretry={evRes.refresh}
+			showVM
+			{onselect}
+		/>
 	{/if}
 </div>
