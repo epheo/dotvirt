@@ -3,6 +3,7 @@ package stream
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -369,5 +370,83 @@ func TestRejectedTokenEndsItsConnections(t *testing.T) {
 			t.Fatalf("%s was evicted; only a rejected session ends its connections", c.id.Username)
 		default:
 		}
+	}
+}
+
+// TestFailedBuildRetriesWithoutAnEvent pins the quiet-cluster liveness: a first
+// build that fails is rebuilt on its own backoff, so the client gets a frame
+// without any change on the bus.
+func TestFailedBuildRetriesWithoutAnEvent(t *testing.T) {
+	var calls atomic.Int32
+	inv := func(ctx context.Context, id auth.Identity) (model.Inventory, error) {
+		if calls.Add(1) == 1 {
+			return model.Inventory{}, errors.New("review backend down")
+		}
+		return echoInventory(ctx, id)
+	}
+	h := NewHub(inv, make(chan struct{}), testLevels(), "")
+	h.retryBase = 10 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.Run(ctx)
+	alice := testConn("alice")
+	h.add(alice)
+
+	select {
+	case data := <-alice.out:
+		var inv model.Inventory
+		if err := json.Unmarshal(data, &inv); err != nil || len(inv.Projects) != 1 || inv.Projects[0].Name != "alice" {
+			t.Fatalf("frame = %s, want alice's", data)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a failed first build was never retried")
+	}
+	h.mu.Lock()
+	pending := len(h.retries)
+	h.mu.Unlock()
+	if pending != 0 {
+		t.Errorf("a built identity kept %d pending retries", pending)
+	}
+}
+
+// TestRetryBackoffAndDisconnect pins the retry bounds: the delay doubles up to
+// retryCap, and a disconnect drops the pending retry and stops its timer.
+func TestRetryBackoffAndDisconnect(t *testing.T) {
+	fail := func(context.Context, auth.Identity) (model.Inventory, error) {
+		return model.Inventory{}, errors.New("review backend down")
+	}
+	h := NewHub(fail, make(chan struct{}, 1), testLevels(), "")
+	h.retryBase = time.Hour
+	if d := h.retryDelay(0); d != retryCap {
+		t.Errorf("first delay = %v, want the cap", d)
+	}
+	h.retryBase = time.Second
+	if d0, d1, d9 := h.retryDelay(0), h.retryDelay(1), h.retryDelay(9); d0 != time.Second || d1 != 2*time.Second || d9 != retryCap {
+		t.Errorf("delays = %v, %v, %v; want 1s, 2s, cap", d0, d1, d9)
+	}
+
+	alice := testConn("alice")
+	h.add(alice)
+	h.reconcile(context.Background())
+	h.reconcile(context.Background())
+	h.mu.Lock()
+	r := h.retries[alice.key]
+	h.mu.Unlock()
+	if r == nil || r.attempt != 2 {
+		t.Fatalf("retry = %+v, want attempt 2 after two failures", r)
+	}
+	h.remove(alice)
+	h.mu.Lock()
+	left := len(h.retries)
+	h.mu.Unlock()
+	if left != 0 || r.timer.Stop() {
+		t.Error("a disconnected identity kept its retry or a live timer")
+	}
+	h.retryLater(alice.key)
+	h.mu.Lock()
+	left = len(h.retries)
+	h.mu.Unlock()
+	if left != 0 {
+		t.Error("a retry was scheduled for an identity no longer connected")
 	}
 }

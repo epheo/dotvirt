@@ -35,6 +35,15 @@ type InventoryFunc func(ctx context.Context, id auth.Identity) (model.Inventory,
 // stalled build would hold its worker and delay that pass's end until TCP gave up.
 const buildTimeout = 15 * time.Second
 
+// retryBase and retryCap bound the backoff after a failed build. A failure
+// leaves the identity due, but a pass runs only on a change or a new
+// connection: on a quiet cluster a failed first build would leave the client
+// on its skeleton until something unrelated moved.
+const (
+	retryBase = time.Second
+	retryCap  = 30 * time.Second
+)
+
 // buildWorkers bounds the concurrent identity builds in one pass: enough that one
 // slow identity doesn't serialize the others, few enough that a pass can't open a
 // burst of apiserver calls under every connected token at once.
@@ -59,12 +68,20 @@ type Hub struct {
 	levels    Levels          // the level
 	kick      chan struct{}   // a connection was added - rebuild so it gets a first frame
 	timeout   time.Duration   // per-identity build bound (buildTimeout; tests shorten it)
+	retryBase time.Duration   // first retry delay (retryBase; tests shorten it)
 	upgrader  websocket.Upgrader
 
-	mu    sync.Mutex
-	conns map[*conn]struct{}
+	mu      sync.Mutex
+	conns   map[*conn]struct{}
+	retries map[string]*retry // pending rebuild per failed identity key, only while connected
 
 	idents map[string]*frame // last frame per identity key; owned by the Run goroutine
+}
+
+// retry is one identity's scheduled rebuild after consecutive failed builds.
+type retry struct {
+	attempt int
+	timer   *time.Timer
 }
 
 // frame is the last frame built for one identity and the level it was built at.
@@ -84,8 +101,10 @@ func NewHub(inventory InventoryFunc, wake <-chan struct{}, levels Levels, uiOrig
 		levels:    levels,
 		kick:      make(chan struct{}, 1),
 		timeout:   buildTimeout,
+		retryBase: retryBase,
 		upgrader:  upgrader(uiOrigin),
 		conns:     map[*conn]struct{}{},
+		retries:   map[string]*retry{},
 		idents:    map[string]*frame{},
 	}
 }
@@ -114,17 +133,75 @@ func (h *Hub) add(c *conn) {
 	h.conns[c] = struct{}{}
 	h.mu.Unlock()
 	// Wake Run so the new connection gets its first frame without waiting for a change.
+	h.poke()
+}
+
+func (h *Hub) remove(c *conn) {
+	h.mu.Lock()
+	delete(h.conns, c)
+	if !h.connectedLocked(c.key) {
+		h.settleLocked(c.key)
+	}
+	h.mu.Unlock()
+	close(c.quit) // unblocks any in-flight deliver; the writer stops on its own done
+}
+
+// poke wakes Run for a pass outside the change stream.
+func (h *Hub) poke() {
 	select {
 	case h.kick <- struct{}{}:
 	default:
 	}
 }
 
-func (h *Hub) remove(c *conn) {
+// retryLater schedules a pass for key's identity after a failed build, each
+// consecutive failure waiting longer up to retryCap. Nothing is scheduled for
+// an identity no longer connected.
+func (h *Hub) retryLater(key string) {
 	h.mu.Lock()
-	delete(h.conns, c)
+	defer h.mu.Unlock()
+	if !h.connectedLocked(key) {
+		return
+	}
+	r := h.retries[key]
+	if r == nil {
+		r = &retry{}
+		h.retries[key] = r
+	} else {
+		r.timer.Stop()
+	}
+	d := h.retryDelay(r.attempt)
+	if d < retryCap {
+		r.attempt++
+	}
+	r.timer = time.AfterFunc(d, h.poke)
+}
+
+func (h *Hub) retryDelay(attempt int) time.Duration {
+	return min(h.retryBase<<attempt, retryCap)
+}
+
+// settle drops key's pending retry: it built, or it left.
+func (h *Hub) settle(key string) {
+	h.mu.Lock()
+	h.settleLocked(key)
 	h.mu.Unlock()
-	close(c.quit) // unblocks any in-flight deliver; the writer stops on its own done
+}
+
+func (h *Hub) settleLocked(key string) {
+	if r := h.retries[key]; r != nil {
+		r.timer.Stop()
+		delete(h.retries, key)
+	}
+}
+
+func (h *Hub) connectedLocked(key string) bool {
+	for c := range h.conns {
+		if c.key == key {
+			return true
+		}
+	}
+	return false
 }
 
 // Run reconciles every connected identity's frame to the current change-version.
@@ -157,8 +234,8 @@ func (h *Hub) Run(ctx context.Context) {
 // to that identity's connections that haven't sent it yet. An identity is built by
 // one worker per pass and passes never overlap, so its frames arrive in build order.
 // A per-identity build failure is logged and skips that identity, never the
-// others; it stays due for the next pass. A token the apiserver rejects ends
-// that identity's connections instead (see reject).
+// others; it stays due, and a retry pass is scheduled (retryLater). A rejected
+// session ends that identity's connections instead (see reject).
 func (h *Hub) reconcile(ctx context.Context) {
 	h.mu.Lock()
 	byKey := make(map[string][]*conn, len(h.conns))
@@ -189,6 +266,7 @@ func (h *Hub) reconcile(ctx context.Context) {
 	}
 
 	built := make([]*frame, len(due))
+	failed := make([]bool, len(due))
 	jobs := make(chan int)
 	var wg sync.WaitGroup
 	for range min(buildWorkers, len(due)) {
@@ -196,7 +274,7 @@ func (h *Hub) reconcile(ctx context.Context) {
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				built[i] = h.build(ctx, due[i].conns, due[i].prev)
+				built[i], failed[i] = h.build(ctx, due[i].conns, due[i].prev)
 			}
 		}()
 	}
@@ -207,20 +285,27 @@ func (h *Hub) reconcile(ctx context.Context) {
 	wg.Wait()
 
 	for i, f := range built {
-		if f == nil {
-			delete(h.idents, due[i].key)
-			continue
+		key := due[i].key
+		switch {
+		case f != nil:
+			h.idents[key] = f
+			h.settle(key)
+		case failed[i]:
+			delete(h.idents, key)
+			h.retryLater(key)
+		default:
+			delete(h.idents, key)
 		}
-		h.idents[due[i].key] = f
 	}
 }
 
 // build builds one identity's frame, delivers it, and returns it stamped with the
 // level read before the build, so a move during the build leaves it due. prev is
-// the identity's last frame, nil when it has none. Nil on failure, or when the
-// frame's repos differ from prev's and anything moved mid-build (no pre-build
-// level was read for its new repos).
-func (h *Hub) build(ctx context.Context, conns []*conn, prev *frame) *frame {
+// the identity's last frame, nil when it has none. Nil on failure (failed is
+// set unless the session was rejected), or when the frame's repos differ from
+// prev's and anything moved mid-build (no pre-build level was read for its new
+// repos; the move itself brings the next pass).
+func (h *Hub) build(ctx context.Context, conns []*conn, prev *frame) (f *frame, failed bool) {
 	var prevDeps []string
 	if prev != nil {
 		prevDeps = prev.deps
@@ -233,25 +318,26 @@ func (h *Hub) build(ctx context.Context, conns []*conn, prev *frame) *frame {
 		log.Printf("stream: inventory build failed for %s: %v", conns[0].id.Username, err)
 		if errors.Is(err, auth.ErrRejected) {
 			h.reject(conns)
+			return nil, false
 		}
-		return nil
+		return nil, true
 	}
 	data, err := json.Marshal(inv)
 	if err != nil {
-		return nil
+		return nil, true
 	}
 	sendLatest(conns, data)
 	deps := h.levels.Deps(inv)
 	if slices.Equal(deps, prevDeps) {
-		return &frame{data: data, deps: deps, stamp: stamp}
+		return &frame{data: data, deps: deps, stamp: stamp}, false
 	}
 	// Stamp is read after the build here; Total moves before any key does, so an
 	// unchanged Total proves no move landed before that read.
-	f := &frame{data: data, deps: deps, stamp: h.levels.Stamp(deps)}
+	f = &frame{data: data, deps: deps, stamp: h.levels.Stamp(deps)}
 	if h.levels.Total() != total {
-		return nil
+		return nil, false
 	}
-	return f
+	return f, false
 }
 
 // reject ends conns whose session a TokenReview rejected: a frozen frame would
