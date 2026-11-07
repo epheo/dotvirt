@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -234,7 +236,8 @@ func (f *fakeDraft) takeCalls() map[string]int {
 
 // TestProposalsRefreshOnlyDueProjects pins the per-repo fan-out: a push to one
 // repo re-queries that repo's lane alone, a nudge naming a repo does the same,
-// a failed lookup stays due, and only the backstop re-queries every lane.
+// a failed lookup waits for the backstop, and only the backstop re-queries every
+// lane.
 func TestProposalsRefreshOnlyDueProjects(t *testing.T) {
 	bus := eventbus.New()
 	fd := &fakeDraft{prs: map[string]model.Proposal{}}
@@ -271,13 +274,84 @@ func TestProposalsRefreshOnlyDueProjects(t *testing.T) {
 	s.refreshProposals(false)
 	want("failing push to a", map[string]int{"team-a": 1})
 	s.refreshProposals(false)
-	want("failed lane stays due", map[string]int{"team-a": 1})
+	want("failed lane waits", map[string]int{})
 	fd.mu.Lock()
 	fd.fail = ""
 	fd.mu.Unlock()
-	s.refreshProposals(false)
-	want("recovered lane", map[string]int{"team-a": 1})
 
 	s.refreshProposals(true)
 	want("backstop", map[string]int{"team-a": 1, "team-b": 1})
+}
+
+// A failing forge must cost one query per backstop, not one per frame build:
+// every build of a frame whose lane is cold nudges the refresher, and a lane
+// that never caches turned each nudge into another forge round-trip.
+func TestProposalsFailingForgeNotAmplified(t *testing.T) {
+	fd := &fakeDraft{prs: map[string]model.Proposal{
+		"team-a": {Project: "team-a", PRNumber: 7, PRURL: "http://x/pr/7"},
+	}, fail: "team-b"}
+	s := NewServer(Deps{Reader: fd, Draft: fd})
+	id := auth.Identity{Token: "tok-alice", Username: "alice"}
+	projects := []project.ProjectInfo{{Name: "team-a", Repo: "http://x/a.git"}, {Name: "team-b", Repo: "http://x/b.git"}}
+
+	for range 5 {
+		s.proposalsFor(id, projects, false)
+		s.refreshProposals(false)
+	}
+	if got := fd.takeCalls(); got["team-b"] != 1 {
+		t.Fatalf("a cold lane on a failing forge was queried %d times over 5 frame builds; want 1", got["team-b"])
+	}
+
+	fd.mu.Lock()
+	fd.fail = "team-a"
+	fd.mu.Unlock()
+	s.refreshProposals(true)
+	if got := s.proposalsFor(id, projects, false); len(got) != 1 || got[0].PRNumber != 7 {
+		t.Fatalf("a failed refresh dropped the last known rows: %v", got)
+	}
+}
+
+// Frames rebuild only when something they show moves, so a tab open on a quiet
+// cluster builds once; its open stream, not rebuilds, must keep its lanes
+// refreshed past the tracking window, and closing it must let them expire.
+func TestProposalsOpenStreamKeepsTokenWatched(t *testing.T) {
+	fd := &fakeDraft{prs: map[string]model.Proposal{}}
+	s := NewServer(Deps{Reader: fd, Draft: fd})
+	id := auth.Identity{Token: "tok-bob", Username: "bob"}
+
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	stream := s.streaming(func(http.ResponseWriter, *http.Request) {
+		close(entered)
+		<-release
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/inventory/stream", nil)
+	req = req.WithContext(auth.NewContext(req.Context(), id))
+	go func() {
+		stream(httptest.NewRecorder(), req)
+		close(done)
+	}()
+	<-entered
+
+	s.proposalsFor(id, []project.ProjectInfo{{Name: "team-b"}}, false)
+	age := func() {
+		s.propMu.Lock()
+		for key, tgt := range s.propTargets {
+			tgt.lastSeen = time.Now().Add(-proposalsTrackFor - time.Minute)
+			s.propTargets[key] = tgt
+		}
+		s.propMu.Unlock()
+	}
+	age()
+	s.refreshProposals(true)
+	if got := fd.takeCalls(); got["team-b"] != 1 {
+		t.Fatalf("a token with an open stream stopped being refreshed: %v", got)
+	}
+
+	close(release)
+	<-done
+	age()
+	s.refreshProposals(true)
+	if got := fd.takeCalls(); len(got) != 0 {
+		t.Fatalf("a closed stream's token is still refreshed: %v", got)
+	}
 }

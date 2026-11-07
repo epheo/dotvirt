@@ -41,7 +41,8 @@ type RepoSet struct {
 	// difference. The raw URL each entry was opened with is used for the clone.
 	cache map[string]*repoPair
 	// failed holds a recent Open error per key so a dead repo is retried after
-	// openBackoff, not re-cloned by every inventory build.
+	// openBackoff, not re-cloned by every inventory build, and so the open that
+	// finally succeeds publishes GitChanged.
 	failed map[string]openFailure
 	// opening lets concurrent Gets of one repo share a single clone.
 	opening map[string]chan struct{}
@@ -138,6 +139,7 @@ func (s *RepoSet) Get(repoURL string) (*Repo, *WriteRepo, error) {
 		s.failed[key] = openFailure{err: err, until: s.now().Add(openBackoff)}
 		return nil, nil, err
 	}
+	_, recovered := s.failed[key]
 	delete(s.failed, key)
 	pair := &repoPair{
 		key:   key,
@@ -148,7 +150,21 @@ func (s *RepoSet) Get(repoURL string) (*Repo, *WriteRepo, error) {
 	}
 	s.cache[key] = pair
 	go s.poll(pair)
+	if recovered {
+		// Frames built while the clone failed show the repo unavailable, and its
+		// return moves no head the poll could report.
+		s.bus.PublishKey(eventbus.GitChanged, key)
+	}
 	return pair.read, pair.write, nil
+}
+
+// retryNow lets the next Get re-open key at once. The failure is expired, not
+// dropped, so that open still knows it is a recovery.
+func (s *RepoSet) retryNow(key string) {
+	if f, ok := s.failed[key]; ok {
+		f.until = time.Time{}
+		s.failed[key] = f
+	}
 }
 
 // Created clears repoURL's cached open failure: dotvirt just made the repo on
@@ -156,7 +172,7 @@ func (s *RepoSet) Get(repoURL string) (*Repo, *WriteRepo, error) {
 // propose for the rest of the backoff.
 func (s *RepoSet) Created(repoURL string) {
 	s.mu.Lock()
-	delete(s.failed, forge.NormalizeRepoURL(repoURL))
+	s.retryNow(forge.NormalizeRepoURL(repoURL))
 	s.mu.Unlock()
 }
 
@@ -172,7 +188,7 @@ func (s *RepoSet) Poke(repoURL string) {
 	key := forge.NormalizeRepoURL(repoURL)
 	s.mu.Lock()
 	p := s.cache[key]
-	delete(s.failed, key) // the forge says the repo exists: retry its clone now
+	s.retryNow(key) // the forge says the repo exists: retry its clone now
 	s.mu.Unlock()
 	if p == nil {
 		return
