@@ -212,7 +212,7 @@
 </script>
 
 <div class="flex h-full flex-col">
-	<div class="border-b border-line px-4 pt-4">
+	<div class="px-4 pt-4">
 		<!-- Where the VM stands, in one line: what runs and where, then on the
 		     right whether it matches git and what waits to be proposed. -->
 		<div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -355,7 +355,7 @@
 			/>
 		{:else if tab === 'monitor'}
 			<TabBar
-				class="mb-3 border-b border-line"
+				class="mb-3"
 				tabs={[
 					{ id: 'events', label: 'Events' },
 					{ id: 'performance', label: 'Performance' },

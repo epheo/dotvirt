@@ -38,14 +38,9 @@
 	}
 </script>
 
-<Breadcrumb trail={[{ label: 'Catalog' }]} />
+<Breadcrumb class="border-b border-line px-4 py-2" trail={[{ label: 'Catalog' }]} />
 
-<TabBar
-	class="border-b border-line px-4"
-	tabs={CATALOG_KINDS}
-	active={kind}
-	href={(k) => `?kind=${k}`}
-/>
+<TabBar class="px-4" tabs={CATALOG_KINDS} active={kind} href={(k) => `?kind=${k}`} />
 
 <div class="flex min-h-0 flex-1">
 	<div class="min-h-0 flex-1 overflow-y-auto">

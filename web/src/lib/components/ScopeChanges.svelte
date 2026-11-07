@@ -90,13 +90,13 @@
 		<Button variant="link" size="sm" href={allHref}>All changes</Button>
 	{/snippet}
 	{#if empty}
-		<p class="px-3 py-2 text-xs text-ink-muted">
+		<p class="px-card py-2 text-xs text-ink-muted">
 			Nothing staged, in review or merged in the last hour here.
 		</p>
 	{:else}
 		<ul class="divide-y divide-line-soft text-xs">
 			{#each staged as d (d.project)}
-				<li class="flex items-start gap-3 px-3 py-2.5">
+				<li class="flex items-start gap-3 px-card py-2.5">
 					<Pencil size={14} class="mt-0.5 shrink-0 text-accent-ink" />
 					<div class="min-w-0 flex-1">
 						<p class="text-ink"><strong>Staged by you</strong> in {d.project}</p>
@@ -116,7 +116,7 @@
 			{/each}
 			{#each open as p (p.project + p.prNumber)}
 				{@const appr = approvalLine(p)}
-				<li class="flex items-start gap-3 px-3 py-2.5">
+				<li class="flex items-start gap-3 px-card py-2.5">
 					<GitPullRequest size={14} class="mt-0.5 shrink-0 text-accent-ink" />
 					<div class="min-w-0 flex-1">
 						<p class="text-ink">
@@ -133,7 +133,7 @@
 				</li>
 			{/each}
 			{#each merged as { t, state } (`${t.project}#${t.prNumber}@${t.at}`)}
-				<li class="flex items-start gap-3 px-3 py-2.5">
+				<li class="flex items-start gap-3 px-card py-2.5">
 					{#if state?.tone === 'danger'}
 						<TriangleAlert size={14} class="mt-0.5 shrink-0 text-danger-ink" />
 					{:else if state?.tone === 'info'}

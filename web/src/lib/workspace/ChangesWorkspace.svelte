@@ -259,9 +259,7 @@
 
 <div class="flex min-h-0 flex-1 flex-col">
 	<div class="flex items-center border-b border-line">
-		<div class="min-w-0 flex-1 [&>div]:border-b-0">
-			<Breadcrumb {trail} />
-		</div>
+		<Breadcrumb class="min-w-0 flex-1 px-4 py-2" {trail} />
 		<span class="shrink-0 px-4 text-xs text-ink-faint">
 			{stagedTotal} staged · {proposedLane.length} proposed. Review here; approve and merge in the forge.
 		</span>
