@@ -41,6 +41,7 @@
 	import ChangesTree from '#lib/tree/ChangesTree.svelte';
 	import ComputeTree from '#lib/tree/ComputeTree.svelte';
 	import FlatSectionTree from '#lib/tree/FlatSectionTree.svelte';
+	import NetworkingTree from '#lib/tree/NetworkingTree.svelte';
 
 	let { children }: { children: Snippet } = $props();
 
@@ -269,7 +270,7 @@
 					{:else if treeSection === 'hosts'}
 						<FlatSectionTree kind="node" />
 					{:else if treeSection === 'networking'}
-						<FlatSectionTree kind="network" />
+						<NetworkingTree />
 					{:else if treeSection === 'storage'}
 						<FlatSectionTree kind="storage" />
 					{:else if treeSection === 'changes'}

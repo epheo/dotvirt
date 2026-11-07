@@ -44,6 +44,7 @@ export interface NetProblem {
 	title: string; // the badge: "Fails on host-41", "Overlap"
 	detail: string; // one sentence
 	uplink?: string;
+	policy?: string; // the uplink's policy, when one object declares it
 	hosts?: string[];
 	reason?: string;
 	networks?: string[]; // keys
@@ -69,6 +70,7 @@ export function networkProblems(networks: Network[], uplinks: Uplink[]): NetProb
 			title: hosts.length === 1 ? `Fails on ${hosts[0]}` : `Fails on ${hosts.length} hosts`,
 			detail: `${uplinkLabel(u)} is not configured on ${list(hosts)}: ${reason}.`,
 			uplink: u.name,
+			policy: u.policy,
 			hosts,
 			reason,
 		});

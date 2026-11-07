@@ -57,22 +57,22 @@
 		Unreachable: 'neutral',
 	};
 	const VERDICT_TEXT: Record<string, string> = {
-		Allow: 'Allowed — every evaluated control lets this flow through.',
-		Deny: 'Denied — a rule below stops this flow.',
-		Conditional: 'Unresolved — a rule below may match; see the flagged steps.',
-		Unreachable: 'Unreachable — no shared network carries this flow.',
+		Allow: 'Allowed. Every rule on the way lets this flow through.',
+		Deny: 'Blocked. A rule below stops this flow.',
+		Conditional: 'Not certain. A rule below may match; see the flagged steps.',
+		Unreachable: 'Unreachable. No shared network carries this flow.',
 	};
 
 	const STAGE_LABEL: Record<string, string> = {
 		connectivity: 'Connectivity',
-		segment: 'Segment',
-		admin: 'Admin DFW',
-		dfw: 'Project DFW',
-		baseline: 'Baseline',
+		segment: 'Network',
+		admin: 'Cluster rule',
+		dfw: 'Project rule',
+		baseline: 'Cluster default rule',
 		default: 'Default',
-		gateway: 'Gateway FW',
-		snat: 'SNAT',
-		route: 'Route',
+		gateway: 'Outbound rule',
+		snat: 'Fixed outbound IP',
+		route: 'External route',
 	};
 	const actionTone = (s: TraceStep): Tone =>
 		s.action === 'Deny' || s.action === 'Unreachable'
@@ -152,16 +152,15 @@
 		</label>
 		<Button size="sm" onclick={run} disabled={!ready || op.busy}>
 			<Play size={12} />
-			{op.busy ? 'Tracing…' : 'Trace'}
+			{op.busy ? 'Checking...' : 'Check'}
 		</Button>
 	</div>
 	<p class="text-xs text-ink-faint">
-		Simulates the live policy objects — no packet is injected, so datapath faults stay invisible to
-		it.
+		Simulates the live rules. It sends no packet, so faults in the datapath stay invisible to it.
 	</p>
 
 	{#if op.error}
-		<p class="text-xs text-danger-ink">Trace failed: {op.error}</p>
+		<p class="text-xs text-danger-ink">Check failed: {op.error}</p>
 	{:else if result}
 		<div class="rounded border border-line bg-panel">
 			<div class="flex items-center gap-2 border-b border-line px-3 py-2">

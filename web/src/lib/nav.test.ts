@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { keepTab } from './nav';
+import { keepTab, networkingTab } from './nav';
 
 describe('keepTab', () => {
 	it('carries the tab to an object that has it', () => {
@@ -8,7 +8,13 @@ describe('keepTab', () => {
 		expect(keepTab('/vm/web-prod/web-2', 'console')).toBe('/vm/web-prod/web-2?tab=console');
 	});
 	it('drops a tab the target lacks', () => {
-		expect(keepTab('/networking/web-net', 'security')).toBe('/networking/web-net');
+		expect(keepTab('/networking/web-prod/web-net', 'firewall')).toBe(
+			'/networking/web-prod/web-net',
+		);
+		expect(keepTab('/networking/web-prod/web-net', 'vms')).toBe(
+			'/networking/web-prod/web-net?tab=vms',
+		);
+		expect(keepTab('/networking', 'rules')).toBe('/networking');
 		expect(keepTab('/hosts/worker-1', 'permissions')).toBe('/hosts/worker-1');
 		expect(keepTab('/compute/team-web', 'snapshots')).toBe('/compute/team-web');
 	});
@@ -17,5 +23,14 @@ describe('keepTab', () => {
 		expect(keepTab('/compute', null)).toBe('/compute');
 		expect(keepTab('/catalog?kind=images', 'vms')).toBe('/catalog?kind=images');
 		expect(keepTab('/changes', 'vms')).toBe('/changes');
+	});
+});
+
+describe('networkingTab', () => {
+	it('maps the old root tabs and defaults to the map', () => {
+		expect(networkingTab('security')).toBe('firewall');
+		expect(networkingTab('summary')).toBe('map');
+		expect(networkingTab(null)).toBe('map');
+		expect(networkingTab('uplinks')).toBe('uplinks');
 	});
 });

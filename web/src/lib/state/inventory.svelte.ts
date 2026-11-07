@@ -13,6 +13,7 @@ import {
 } from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
 import { deriveIssues, deriveSuggestions } from '#lib/issues.js';
+import { networkProblems } from '#lib/netmap.js';
 import { prKey } from '#lib/review.js';
 import { share } from '#lib/share.js';
 
@@ -67,8 +68,15 @@ class InventoryStore {
 	alerts = $state.raw<Alert[] | null>([]);
 	// Standing problems and firing alerts (the issues plane), derived once per
 	// frame for the header count, the tree badges and the Summary card.
+	// Networking problems the catalog shows: uplinks failing on hosts, subnets
+	// that overlap where one VM could attach both.
+	readonly netProblems = $derived(networkProblems(this.networks, this.uplinks));
 	readonly issues = $derived(
-		deriveIssues(this.inventory, { alerts: this.alerts ?? [], canRepair: this.canNamespace }),
+		deriveIssues(this.inventory, {
+			alerts: this.alerts ?? [],
+			canRepair: this.canNamespace,
+			network: this.netProblems,
+		}),
 	);
 	// What is worth doing but not wrong: adoptable namespaces and VMs.
 	readonly suggestions = $derived(deriveSuggestions(this.inventory, (ns) => this.canAuthor(ns)));

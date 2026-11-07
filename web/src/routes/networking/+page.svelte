@@ -1,9 +1,5 @@
 <script lang="ts">
-	import ContainerWorkspace from '#lib/workspace/ContainerWorkspace.svelte';
+	import NetworkingRoot from '#lib/networking/NetworkingRoot.svelte';
 </script>
 
-<ContainerWorkspace
-	scope={{ kind: 'all' }}
-	section="networking"
-	trail={[{ label: 'All Networks' }]}
-/>
+<NetworkingRoot />

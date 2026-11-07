@@ -284,9 +284,296 @@ const vmUsage = {
 	storage: { used: 8.2e9, total: 21.5e9 },
 };
 
+// ── networking: the Networking section's catalog, rules and history ──────────
+// One picture of every networking state the Map, the network page and the
+// firewall show: a primary project network, isolated ones, two overlapping on
+// one namespace, shared overlays, VLAN networks and an uplink failing on one
+// host. Rule texts are what the server renders from the typed rules.
+
+const netCatalog = {
+	...networks,
+	networks: [
+		{
+			name: 'web-net',
+			kind: 'internal',
+			scope: 'project',
+			namespace: 'web-prod',
+			subnets: ['10.40.0.0/16'],
+			attachRef: 'web-prod/web-net',
+			backing: 'UserDefinedNetwork',
+			topology: 'Layer2',
+			sourceFile: 'networks/web-net.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'internal-l2',
+			kind: 'internal',
+			scope: 'project',
+			namespace: 'batch-prod',
+			subnets: ['10.20.9.0/24'],
+			attachRef: 'batch-prod/internal-l2',
+			backing: 'UserDefinedNetwork',
+			topology: 'Layer2',
+			sourceFile: 'networks/internal-l2.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'udn-frontend',
+			kind: 'internal',
+			scope: 'project',
+			namespace: 'db-prod',
+			subnets: ['10.200.0.0/16'],
+			attachRef: 'db-prod/udn-frontend',
+			backing: 'UserDefinedNetwork',
+			topology: 'Layer3',
+			sourceFile: 'networks/udn-frontend.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'udn-tcp-frontend',
+			kind: 'internal',
+			scope: 'project',
+			namespace: 'db-prod',
+			subnets: ['10.200.0.0/16'],
+			attachRef: 'db-prod/udn-tcp-frontend',
+			backing: 'UserDefinedNetwork',
+			topology: 'Layer3',
+			sourceFile: 'networks/udn-tcp-frontend.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'blue-secondary',
+			kind: 'internal',
+			scope: 'shared',
+			subnets: ['10.222.1.0/24'],
+			attachRef: 'blue-secondary',
+			backing: 'ClusterUserDefinedNetwork',
+			topology: 'Layer2',
+			namespaces: ['web-prod', 'db-prod', 'batch-prod'],
+			sourceFile: 'networks/blue-secondary.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'green-secondary',
+			kind: 'internal',
+			scope: 'shared',
+			subnets: ['10.222.2.0/24'],
+			attachRef: 'green-secondary',
+			backing: 'ClusterUserDefinedNetwork',
+			topology: 'Layer2',
+			namespaces: ['web-prod'],
+			sourceFile: 'networks/green-secondary.yaml',
+			sync: 'Synced',
+		},
+		{ ...networks.networks[1], sourceFile: 'networks/lan-101.yaml' },
+		{
+			name: 'dc-vlan-net',
+			kind: 'vlan',
+			scope: 'shared',
+			vlan: 100,
+			uplink: 'dc-vlan',
+			attachRef: 'dc-vlan-net',
+			backing: 'ClusterUserDefinedNetwork',
+			topology: 'Localnet',
+			namespaces: ['batch-prod', 'db-prod'],
+			sourceFile: 'networks/dc-vlan-net.yaml',
+			sync: 'Synced',
+		},
+	],
+	uplinks: [
+		{ name: 'default', bridge: 'br-ex', builtin: true, nodeCount: 3 },
+		{
+			name: 'physnet',
+			bridge: 'br-physnet',
+			nodes: ['worker-1', 'worker-2'],
+			nodeCount: 2,
+			policy: 'uplink-physnet',
+			sourceFile: 'uplinks/physnet.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'dc-vlan',
+			bridge: 'br-dc',
+			nodes: ['worker-1', 'worker-2', 'worker-3'],
+			nodeCount: 3,
+			policy: 'uplink-dc-vlan',
+			sourceFile: 'uplinks/dc-vlan.yaml',
+			failures: [
+				{
+					node: 'worker-2',
+					reason: 'FailedToConfigure',
+					message: 'error reconciling NodeNetworkConfigurationPolicy: VerificationError on br-dc',
+				},
+			],
+			sync: 'Synced',
+		},
+	],
+};
+
+const netPolicies = {
+	policies: [
+		{
+			name: 'deny-lateral',
+			kind: 'admin',
+			backing: 'AdminNetworkPolicy',
+			priority: 10,
+			target: 'all namespaces',
+			applies: 'every namespace',
+			rules: [
+				{
+					direction: 'Ingress',
+					action: 'Deny',
+					peer: 'ns any',
+					text: 'Blocks all traffic from VMs in any namespace.',
+				},
+			],
+			sourceFile: 'policies/deny-lateral.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'allow-web-to-db',
+			kind: 'dfw',
+			namespace: 'db-prod',
+			backing: 'NetworkPolicy',
+			target: 'app=db-1',
+			applies: 'VMs labeled app=db-1 in db-prod',
+			isolation: 'Blocks other incoming traffic.',
+			rules: [
+				{
+					direction: 'Ingress',
+					action: 'Allow',
+					peer: 'ns web-prod pods app=web-1',
+					ports: 'TCP/5432',
+					text: 'Accepts TCP 5432 from VMs labeled app=web-1 in web-prod.',
+				},
+			],
+			sourceFile: 'policies/allow-web-to-db.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'allow-https',
+			kind: 'dfw',
+			namespace: 'web-prod',
+			backing: 'NetworkPolicy',
+			target: 'all pods',
+			applies: 'every VM in web-prod',
+			isolation: 'Blocks other incoming traffic.',
+			rules: [
+				{
+					direction: 'Ingress',
+					action: 'Allow',
+					peer: 'pods any',
+					ports: 'TCP/443',
+					text: 'Accepts TCP 443 from VMs in web-prod.',
+				},
+			],
+			sourceFile: 'policies/allow-https.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'default',
+			kind: 'gateway',
+			namespace: 'batch-prod',
+			backing: 'EgressFirewall',
+			applies: 'every VM in batch-prod',
+			rules: [
+				{
+					direction: 'Egress',
+					action: 'Allow',
+					peer: 'mirror.example.com',
+					ports: 'TCP/443',
+					text: 'Can reach mirror.example.com on TCP 443.',
+				},
+				{
+					direction: 'Egress',
+					action: 'Deny',
+					peer: '0.0.0.0/0',
+					text: 'Cannot reach anything outside.',
+				},
+			],
+			sourceFile: 'policies/egress.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'web-egress',
+			kind: 'egressip',
+			backing: 'EgressIP',
+			target: 'web-prod',
+			applies: 'every VM in web-prod',
+			namespaces: ['web-prod'],
+			rules: [
+				{
+					direction: 'Egress',
+					action: 'SNAT',
+					peer: '192.0.2.10',
+					text: 'Leaves with source IP 192.0.2.10.',
+				},
+			],
+			sourceFile: 'egress/web-egress.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'dmz-route',
+			kind: 'route',
+			backing: 'AdminPolicyBasedExternalRoute',
+			target: 'batch-prod',
+			applies: 'every VM in batch-prod',
+			namespaces: ['batch-prod'],
+			rules: [
+				{
+					direction: 'Egress',
+					action: 'Route',
+					peer: 'via 10.0.0.1',
+					text: 'Leaves through 10.0.0.1.',
+				},
+			],
+			sourceFile: 'egress/dmz-route.yaml',
+			sync: 'Synced',
+		},
+	],
+};
+
+// Rules elsewhere that name a network's VMs as their other end, by network key.
+const netReaches = {
+	'web-prod/web-net': [
+		{
+			policy: netPolicies.policies[1],
+			rule: netPolicies.policies[1].rules[0],
+			text: 'VMs labeled app=web-1 in web-prod can reach VMs labeled app=db-1 in db-prod on TCP 5432.',
+			conditional: true,
+		},
+	],
+};
+
+// Which extra NICs the base VMs carry, by "namespace/name".
+const netNICs = {
+	'web-prod/web-1': [
+		{ name: 'web-net', network: 'web-prod/web-net' },
+		{ name: 'lan', network: 'lan-101' },
+	],
+	'web-prod/web-2': [
+		{ name: 'web-net', network: 'web-prod/web-net' },
+		{ name: 'blue', network: 'blue-secondary' },
+	],
+	'batch-prod/batch-1': [
+		{ name: 'l2', network: 'batch-prod/internal-l2' },
+		{ name: 'dc', network: 'dc-vlan-net' },
+	],
+};
+
+function withNetworking(sc) {
+	for (const p of sc.inventory.projects)
+		for (const ns of p.namespaces)
+			for (const v of ns.vms) {
+				const extra = netNICs[`${v.namespace}/${v.name}`];
+				if (extra) v.networks = [...(v.networks ?? []), ...extra];
+			}
+	return { ...sc, networks: netCatalog, policies: netPolicies, networkReaches: netReaches };
+}
+
 // ── base: a small healthy fleet ────────────────────────────────────────────────
 
-const base = {
+let base = {
 	name: 'base',
 	user: { username: 'admin', groups: ['dotvirt-admins'] },
 	inventory: {
@@ -474,6 +761,8 @@ const base = {
 		vmUsage,
 	},
 };
+
+base = withNetworking(base);
 
 // ── empty: pristine install, nothing visible yet ───────────────────────────────
 

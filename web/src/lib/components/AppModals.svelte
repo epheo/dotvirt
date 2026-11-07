@@ -28,6 +28,7 @@
 	import StagedChangesModal from './StagedChangesModal.svelte';
 	import StorageMigrateModal from './StorageMigrateModal.svelte';
 	import Tier0Modal from './Tier0Modal.svelte';
+	import TraceModal from '#lib/networking/TraceModal.svelte';
 	import UploadModal from './UploadModal.svelte';
 	import UndoModal from '#lib/workspace/UndoModal.svelte';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
@@ -70,6 +71,8 @@
 		networks={inventory.networks}
 		onclose={close}
 	/>
+{:else if m?.kind === 'trace'}
+	<TraceModal source={m.source} onclose={close} />
 {:else if m?.kind === 'newNetwork'}
 	<NewNetworkModal
 		namespaces={inventory.namespaces}
