@@ -74,30 +74,28 @@ func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res := s.netstate.Trace(src, dst, req.Destination.IP, req.Protocol, req.Port)
-	can := s.clusterAuthority(r.Context(), sc.id, sc.cluster)
+	pr := s.policyRedactor(r.Context(), sc.id, sc.cluster)
 	for i := range res.Steps {
 		if p := res.Steps[i].Policy; p != nil {
 			if s.drift != nil {
 				s.policyDrift(p)
 			}
-			redactSubjects(can, p)
+			pr.apply(p, res.Steps[i].Rule)
 		}
 	}
 	writeJSON(w, res)
 }
 
 // traceWorkload assembles one endpoint from the clusterstate snapshot: the
-// labels selectors match, NIC attachments and live addresses.
+// same identity the effective-policy answer matches, plus its namespace labels.
 func (s *Server) traceWorkload(ns, name string) (netstate.TraceWorkload, bool) {
-	lbls, _, found := s.state.WorkloadLabels(ns, name)
+	w, found := s.state.Workload(ns, name)
 	if !found {
 		return netstate.TraceWorkload{}, false
 	}
-	podNet, defaultNet, nets, ips, _ := s.state.WorkloadNetworks(ns, name)
-	wl := netstate.TraceWorkload{
+	return netstate.TraceWorkload{
 		Namespace: ns, Name: name,
-		PodLabels: lbls, IPs: ips, PodNet: podNet, DefaultNet: defaultNet, Nets: nets,
+		PodLabels: w.Labels, IPs: w.IPs, PodNet: w.PodNet, DefaultNet: w.DefaultNet, Nets: w.Nets,
 		NSLabels: s.state.NamespaceLabels(ns),
-	}
-	return wl, true
+	}, true
 }

@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/epheo/dotvirt/internal/netgen"
 )
 
 // matched is a rule-component verdict plus why it couldn't be resolved when
@@ -56,15 +58,22 @@ func anyOf(parts ...matched) matched {
 // Conditional-outcome reasons. Each situation is worded here once, so the
 // trace UI never shows two phrasings for one condition.
 const (
-	reasonPortNeeded = "the rule restricts ports; give a destination port to resolve it"
-	reasonNamedPort  = "a named port can't be resolved here"
-	reasonNoAddrs    = "the VM reports no addresses (not running), so CIDR rules can't be resolved"
-	reasonSelector   = "a selector could not be resolved"
-	reasonSubject    = "the policy's subject selector could not be resolved"
-	reasonNodePeer   = "a node-selector rule - whether this address is a cluster node is unknown here"
-	reasonDNSName    = "DNS-name rule (%s) - resolution unknown here"
-	reasonUnresolved = "a destination form this trace cannot resolve"
+	reasonPortNeeded    = "the rule restricts ports; give a destination port to resolve it"
+	reasonNamedPort     = "a named port can't be resolved here"
+	reasonNoAddrs       = "the VM reports no primary-network address (stopped or starting), so CIDR rules can't be resolved"
+	reasonSelector      = "a selector could not be resolved"
+	reasonSubject       = "the policy's subject selector could not be resolved"
+	reasonNodePeer      = "a node-selector rule - whether this address is a cluster node is unknown here"
+	reasonDNSName       = "DNS-name rule (%s) - resolution unknown here"
+	reasonUnresolved    = "a destination form this trace cannot resolve"
+	reasonEqualPriority = "an admin policy at the same priority may decide first, in an order OVN-Kubernetes leaves undefined"
 )
+
+// unenforcedReason words why an ANP past the programmed range only may apply.
+func unenforcedReason(priority int) string {
+	return fmt.Sprintf("OVN-Kubernetes does not enforce priority %d (it programs 0-%d), so only an earlier in-range version of this policy can apply",
+		priority, netgen.MaxANPPriority)
+}
 
 // peerTarget is what rule peers are matched against: the flow's other end -
 // an in-cluster workload, or a bare external address.
@@ -132,7 +141,7 @@ func selMatch(sel *metav1.LabelSelector, lbls map[string]string) matched {
 }
 
 // resolveAddrs returns the target's parseable addresses, or the conditional
-// match when the workload reports none (not running).
+// match when the workload reports none (stopped or starting).
 func resolveAddrs(t peerTarget) ([]netip.Addr, *matched) {
 	raw := t.addrs()
 	if len(raw) == 0 || (len(raw) == 1 && raw[0] == "") {

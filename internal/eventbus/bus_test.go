@@ -28,7 +28,7 @@ func TestPublishWakesOnlySubscribersOfThatKind(t *testing.T) {
 
 func TestSubscribeMultipleKinds(t *testing.T) {
 	b := New()
-	ch, _ := b.Subscribe(VMSpecChanged, NamespaceChanged)
+	ch, _ := b.Subscribe(NetworkChanged, NamespaceChanged)
 
 	b.Publish(NamespaceChanged)
 	if !drained(ch) {
@@ -81,22 +81,22 @@ func TestNilBusIsNoop(t *testing.T) {
 
 func TestVersionIncrementsPerKind(t *testing.T) {
 	b := New()
-	if v := b.Version(VMSpecChanged); v != 0 {
+	if v := b.Version(NetworkChanged); v != 0 {
 		t.Fatalf("fresh bus Version = %d, want 0", v)
 	}
-	b.Publish(VMSpecChanged)
-	if v := b.Version(VMSpecChanged); v != 1 {
-		t.Errorf("after one publish Version(VMSpecChanged) = %d, want 1", v)
+	b.Publish(NetworkChanged)
+	if v := b.Version(NetworkChanged); v != 1 {
+		t.Errorf("after one publish Version(NetworkChanged) = %d, want 1", v)
 	}
 	// A different kind doesn't move this one.
 	b.Publish(LiveChanged)
-	if v := b.Version(VMSpecChanged); v != 1 {
-		t.Errorf("Version(VMSpecChanged) moved on a LiveChanged publish: %d", v)
+	if v := b.Version(NetworkChanged); v != 1 {
+		t.Errorf("Version(NetworkChanged) moved on a LiveChanged publish: %d", v)
 	}
 	// The summed version of multiple kinds strictly increases when ANY moves.
-	sum := b.Version(VMSpecChanged, LiveChanged)
+	sum := b.Version(NetworkChanged, LiveChanged)
 	b.Publish(LiveChanged)
-	if got := b.Version(VMSpecChanged, LiveChanged); got <= sum {
+	if got := b.Version(NetworkChanged, LiveChanged); got <= sum {
 		t.Errorf("summed Version did not increase: %d <= %d", got, sum)
 	}
 }

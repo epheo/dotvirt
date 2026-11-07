@@ -9,8 +9,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 
+	authnv1 "k8s.io/api/authentication/v1"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -161,11 +164,87 @@ func TestVisibleForNoCrossTokenLeak(t *testing.T) {
 	}
 }
 
-// TestCanCreateCachedVerdicts pins the SSAR cache: one round per (token, ref) at
-// a given RBAC version - a DENIED verdict is cached exactly like an allowed one
-// (else every unauthorized poll re-posts an SSAR), a version bump re-asks, and a
-// different token never reuses another's verdict.
-func TestCanCreateCachedVerdicts(t *testing.T) {
+// TestVisibleForNeverCachesAFailure pins LIVE-1: one failed namespace review
+// fails the probe instead of dropping that namespace, and the next read probes
+// again instead of serving a cached partial set.
+func TestVisibleForNeverCachesAFailure(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.readsVMs = tenantReadsTeamA
+	var down atomic.Bool
+	down.Store(true)
+	fc.ssarFail = func(a *authzv1.ResourceAttributes) int {
+		if down.Load() && a.Namespace == "orphans-ns" {
+			return http.StatusServiceUnavailable
+		}
+		return 0
+	}
+	s := fc.server(nil, Config{})
+	id := auth.Identity{Token: tenantToken, Username: "tenant"}
+	c, err := s.clusterF.For(id.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := s.visibleFor(context.Background(), id, c); err == nil {
+		t.Fatalf("a failed review answered %v with nil error", got)
+	}
+	wantStatus(t, do(s, tenantToken, http.MethodGet, "/api/inventory", ""), http.StatusServiceUnavailable)
+	down.Store(false)
+	got, err := s.visibleFor(context.Background(), id, c)
+	if err != nil || !got["team-a-dev"] || len(got) != 1 {
+		t.Fatalf("after recovery: %v, %v; want only team-a-dev (the failure must not be cached)", got, err)
+	}
+}
+
+// TestOnlyARejectedSessionIs401 pins the session end: an apiserver 401 on
+// the caller's review is checked against a fresh TokenReview. A rejected token
+// answers 401 (the UI signs out); a token that still validates - an
+// authenticator blip - answers 503 and keeps the session. Neither body names a
+// namespace the probe touched.
+func TestOnlyARejectedSessionIs401(t *testing.T) {
+	fc := newFakeCluster(t)
+	// The per-namespace probe fails, so the raw error names the namespace.
+	fc.ssarFail = func(a *authzv1.ResourceAttributes) int {
+		if a.Namespace != "" {
+			return http.StatusUnauthorized
+		}
+		return 0
+	}
+	s := fc.server(nil, Config{})
+	var alive atomic.Bool
+	kube := fake.NewSimpleClientset()
+	kube.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		tr := action.(k8stesting.CreateAction).GetObject().(*authnv1.TokenReview).DeepCopy()
+		tr.Status = authnv1.TokenReviewStatus{Authenticated: alive.Load(), User: authnv1.UserInfo{Username: "tenant"}}
+		return true, tr, nil
+	})
+	s.auth = auth.New(kube, []byte("0123456789abcdef0123456789abcdef"))
+	mux := http.NewServeMux()
+	s.routes(mux)
+	get := func() *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, asUser(httptest.NewRequest(http.MethodGet, "/api/inventory", nil), tenantToken))
+		return rec
+	}
+
+	alive.Store(true)
+	rec := get()
+	wantStatus(t, rec, http.StatusServiceUnavailable)
+	alive.Store(false)
+	rec401 := get()
+	wantStatus(t, rec401, http.StatusUnauthorized)
+	for _, r := range []*httptest.ResponseRecorder{rec, rec401} {
+		if body := r.Body.String(); strings.Contains(body, "team-a-dev") || strings.Contains(body, "orphans-ns") || strings.Contains(body, "of 2") {
+			t.Errorf("body names a probed namespace: %q", body)
+		}
+	}
+}
+
+// TestCanCachesVerdicts pins the SSAR cache: one round per (token, question)
+// at a given RBAC version - a DENIED verdict is cached exactly like an allowed
+// one (else every unauthorized poll re-posts an SSAR), a version bump re-asks,
+// and a different token never reuses another's verdict.
+func TestCanCachesVerdicts(t *testing.T) {
 	bus := eventbus.New()
 	s := scopeServer(bus)
 	c, reviews := ssarCountingClient(func(a *authzv1.ResourceAttributes) bool {
@@ -173,65 +252,95 @@ func TestCanCreateCachedVerdicts(t *testing.T) {
 	})
 	ctx := context.Background()
 	id := auth.Identity{Token: "tok-admin", Username: "admin"}
+	can := func(id auth.Identity, ref ssarRef) bool {
+		t.Helper()
+		ok, err := s.can(ctx, id, c, verbCreate, ref, "")
+		if err != nil {
+			t.Fatalf("can: %v", err)
+		}
+		return ok
+	}
 
-	first, second := s.canCreateCached(ctx, id, c, ssarCUDN), s.canCreateCached(ctx, id, c, ssarCUDN)
-	if !first || !second {
-		t.Fatal("allowed ref should read true")
+	for range 2 {
+		if !can(id, ssarCUDN) {
+			t.Fatal("allowed ref should read true")
+		}
 	}
 	if *reviews != 1 {
 		t.Fatalf("allowed verdict: %d rounds, want 1", *reviews)
 	}
-	first, second = s.canCreateCached(ctx, id, c, ssarMachineCfg), s.canCreateCached(ctx, id, c, ssarMachineCfg)
-	if first || second {
-		t.Fatal("denied ref should read false")
+	for range 2 {
+		if can(id, ssarMachineCfg) {
+			t.Fatal("denied ref should read false")
+		}
 	}
 	if *reviews != 2 {
 		t.Fatalf("denied verdict must be cached too: %d rounds, want 2", *reviews)
 	}
 	bus.Publish(eventbus.RBACChanged)
-	if !s.canCreateCached(ctx, id, c, ssarCUDN) {
+	if !can(id, ssarCUDN) {
 		t.Fatal("re-asked ref should still read true")
 	}
 	if *reviews != 3 {
 		t.Fatalf("after RBACChanged: %d rounds, want 3 (verdict re-asked)", *reviews)
 	}
-	other := auth.Identity{Token: "tok-other", Username: "other"}
-	s.canCreateCached(ctx, other, c, ssarCUDN)
+	can(auth.Identity{Token: "tok-other", Username: "other"}, ssarCUDN)
 	if *reviews != 4 {
 		t.Fatalf("distinct token reused a cached verdict: %d rounds, want 4", *reviews)
 	}
 }
 
-// TestCanReadNodesCachedKeyIsolation pins two things: the node-read signal is
-// cached like the create verdicts, and its cache key lives outside the create
-// tuple namespace - a crafted create ref spelling "read"/"nodes" must neither
-// read nor overwrite the node-read verdict.
-func TestCanReadNodesCachedKeyIsolation(t *testing.T) {
+// TestCanKeyIsolation pins that every part of the question keys the cache:
+// verb, group, resource and namespace each make a distinct review, so a
+// crafted ref can neither read nor overwrite another question's verdict.
+func TestCanKeyIsolation(t *testing.T) {
 	s := scopeServer(eventbus.New())
 	c, reviews := ssarCountingClient(func(a *authzv1.ResourceAttributes) bool {
-		return a.Verb == "list" && a.Resource == "nodes"
+		return a.Verb == "list" && a.Resource == "nodes" && a.Group == "" && a.Namespace == ""
 	})
 	ctx := context.Background()
 	id := auth.Identity{Token: "tok-net", Username: "net"}
 
-	first, second := s.canReadNodesCached(ctx, id, c), s.canReadNodesCached(ctx, id, c)
-	if !first || !second {
-		t.Fatal("node read should be allowed")
+	for i, q := range []struct {
+		verb string
+		ref  ssarRef
+		ns   string
+		want bool
+	}{
+		{verbList, ssarNodes, "", true},
+		{verbList, ssarNodes, "", true},
+		{verbCreate, ssarNodes, "", false},
+		{verbList, ssarRef{"read", "nodes"}, "", false},
+		{verbList, ssarRef{"", "nodes"}, "ns", false},
+		{verbList, ssarNodes, "", true},
+	} {
+		if ok, err := s.can(ctx, id, c, q.verb, q.ref, q.ns); ok != q.want || err != nil {
+			t.Fatalf("question %d = %v, %v; want %v", i, ok, err, q.want)
+		}
 	}
-	if *reviews != 1 {
-		t.Fatalf("node-read verdict: %d rounds, want 1", *reviews)
+	if *reviews != 4 {
+		t.Fatalf("reviews = %d, want 4 (one per distinct question)", *reviews)
 	}
-	// The nearest possible create-tuple collision with the read key.
-	near := ssarRef{group: "read", resource: "nodes"}
-	if s.canCreateCached(ctx, id, c, near) {
-		t.Fatal("create nodes must not inherit the cached read-nodes allow")
+}
+
+// TestCanNeverCachesAFailure pins API-2: a failed review is the caller's
+// error, never a cached denial - the gate answers 503, not 403, and the next
+// request after recovery is allowed instead of denied for the TTL.
+func TestCanNeverCachesAFailure(t *testing.T) {
+	fc := newFakeCluster(t)
+	var down atomic.Bool
+	down.Store(true)
+	fc.ssarFail = func(*authzv1.ResourceAttributes) int {
+		if down.Load() {
+			return http.StatusServiceUnavailable
+		}
+		return 0
 	}
-	if *reviews != 2 {
-		t.Fatalf("crafted create ref answered from the read entry: %d rounds, want 2", *reviews)
-	}
-	if !s.canReadNodesCached(ctx, id, c) || *reviews != 2 {
-		t.Fatalf("read-nodes verdict clobbered by the create ref: allowed=%v rounds=%d", false, *reviews)
-	}
+	s := fc.server(&planeDraft{}, Config{PlatformRepo: platformRepo})
+
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/drs", `{}`), http.StatusServiceUnavailable)
+	down.Store(false)
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/drs", `{}`), http.StatusOK)
 }
 
 // platformFactory builds a real per-token cluster.Factory whose kubeconfig points

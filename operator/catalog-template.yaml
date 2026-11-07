@@ -1,7 +1,5 @@
-# File-Based Catalog source of truth (opm `basic` template). `make catalog` renders
-# this into catalog/dotvirt-operator/catalog.yaml by pulling each olm.bundle image and
-# expanding its properties. The channel graph (replaces) lives here, in git — the
-# committed bundle no longer relies on `run bundle-upgrade` to inject the edge.
+# File-Based Catalog source (opm basic template), written by hack/release.sh: hand edits are
+# lost at the next release. make catalog renders it into catalog/dotvirt-operator/catalog.yaml.
 schema: olm.template.basic
 entries:
   - schema: olm.package

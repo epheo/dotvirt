@@ -200,6 +200,59 @@ func TestRevertMergeOpensPR(t *testing.T) {
 	}
 }
 
+// A revert opened before branches carried the identity hash keeps its owner
+// and is updated in place: reverting the same commit again must not open a
+// duplicate PR beside it.
+func TestRevertReusesLegacyBranch(t *testing.T) {
+	bare, _, hash := seedMerged(t)
+	r := &Reader{proposed: "dotvirt/proposed"}
+	legacy := r.legacyRevertPrefix("alice", "p") + hash[:8]
+	legacyPR := `{"number":7,"state":"open","html_url":"http://forge/pulls/7","base":{"ref":"main"},"head":{"ref":"` + legacy + `"}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Forgejo's base/head pair lookup and the list's head filter, both on
+		// the bare branch name.
+		if _, pair, ok := strings.Cut(req.URL.Path, "/pulls/main/"); ok && req.Method == "GET" {
+			if pair == legacy {
+				_, _ = w.Write([]byte(legacyPR))
+				return
+			}
+			http.NotFound(w, req)
+			return
+		}
+		if req.Method == "GET" && strings.HasSuffix(req.URL.Path, "/pulls") {
+			if req.URL.Query().Get("head") == legacy {
+				_, _ = w.Write([]byte("[" + legacyPR + "]"))
+				return
+			}
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		t.Errorf("unexpected forge call %s %s", req.Method, req.URL.Path)
+		http.Error(w, "unexpected", http.StatusNotImplemented)
+	}))
+	t.Cleanup(srv.Close)
+	c := newTestCoordinator(t, true)
+	c.forge = forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, "")
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+
+	out, err := c.Revert(auth.Identity{Username: "alice"}, proj, hash)
+	if err != nil {
+		t.Fatalf("Revert: %v", err)
+	}
+	if out.Branch != legacy || out.PRNumber != 7 || !out.Existing {
+		t.Fatalf("result = %+v, want the legacy PR #7 updated in place", out)
+	}
+	alice := auth.Identity{Username: "alice"}
+	if !c.OwnsProposal(alice, proj, legacy) {
+		t.Error("alice lost the marker on her legacy revert")
+	}
+	// A colliding identity's hashed revert branch matches the legacy readable
+	// prefix but is not alice's.
+	if b := c.revertBranch("alice/", "p", hash); c.OwnsProposal(alice, proj, b) {
+		t.Errorf("alice owns %s, another identity's revert", b)
+	}
+}
+
 // A cluster-scoped object reviews by its bare name: the directory it lives in
 // is not a namespace, and the review must not invent one.
 func TestCommitItemsClusterScopedName(t *testing.T) {
@@ -270,7 +323,7 @@ func TestOpenProposalsListsEveryPR(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	c := New(store, git.NewRepoSet(ctx, "", nil, false, nil, time.Hour), forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, ""), nil, nil, nil, "main", "dotvirt/proposed")
+	c := New(store, git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour), forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, ""), nil, nil, nil, "main", "dotvirt/proposed")
 
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 	prs, err := c.OpenProposals(proj)
@@ -334,7 +387,7 @@ func TestProposalRendersBranchDiff(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	c := New(store, git.NewRepoSet(ctx, "", nil, false, nil, time.Hour), forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, ""), nil, nil, nil, "main", "dotvirt/proposed")
+	c := New(store, git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour), forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, ""), nil, nil, nil, "main", "dotvirt/proposed")
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
 	d, err := c.Proposal(proj, 5)
@@ -386,7 +439,7 @@ func TestReaderServesHistoryWithoutStore(t *testing.T) {
 	bare, _, hash := seedMerged(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	r := NewReader(git.NewRepoSet(ctx, "", nil, false, nil, time.Hour), nil, nil, "main", "dotvirt/proposed")
+	r := NewReader(git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour), nil, nil, "main", "dotvirt/proposed")
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
 	commits, err := r.History(proj, 10)

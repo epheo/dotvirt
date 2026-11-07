@@ -173,6 +173,29 @@ func TestValidateCaches(t *testing.T) {
 	}
 }
 
+// TestRecheck pins the session-end rule: a token the apiserver refused is
+// re-reviewed despite the cached session, a rejection is cached and answered
+// without another review, and a token that still validates is not rejected.
+func TestRecheck(t *testing.T) {
+	valid := map[string]authnv1.UserInfo{"good": {Username: "alice"}, "fine": {Username: "bob"}}
+	a, calls := fakeAuth(valid)
+	for _, tok := range []string{"good", "fine"} {
+		if _, err := a.Validate(context.Background(), tok); err != nil {
+			t.Fatalf("Validate(%s): %v", tok, err)
+		}
+	}
+	delete(valid, "good")
+	if err := a.Recheck(context.Background(), "good"); !errors.Is(err, ErrRejected) || *calls != 3 {
+		t.Fatalf("dead token: err = %v, reviews = %d; want a fresh rejecting review", err, *calls)
+	}
+	if err := a.Recheck(context.Background(), "good"); !errors.Is(err, ErrRejected) || *calls != 3 {
+		t.Fatalf("cached rejection: err = %v, reviews = %d; want no further review", err, *calls)
+	}
+	if err := a.Recheck(context.Background(), "fine"); err != nil || *calls != 4 {
+		t.Fatalf("live token: err = %v, reviews = %d; want a fresh accepting review", err, *calls)
+	}
+}
+
 // TestValidateThrottlesUnknownTokens pins the amplification bound: distinct
 // unknown tokens beyond the review budget are refused without a TokenReview and
 // without a rejection verdict, while a cached session keeps validating.

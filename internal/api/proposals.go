@@ -18,17 +18,19 @@ import (
 // the broadcast hot path. So reads are pure cache hits, and a background
 // refresher owns freshness: it re-queries the forge for a watched project when
 // its repo's heads move (a propose/merge), when a nudge names its repo or finds
-// it uncached, and for all of them on a slow backstop tick - then wakes the hub
-// only when some lane actually changed. The lane is project-scoped, not
+// its lane never read, and for all of them on a slow backstop tick - then wakes
+// the hub only when some lane actually changed. The lane is project-scoped, not
 // per-token: every member of a project sees the same PRs, and which are theirs
 // is marked at read time.
 const (
 	// proposalsRefreshEvery is the backstop cadence; real freshness comes from the
 	// git-change signal and explicit nudges.
 	proposalsRefreshEvery = 60 * time.Second
-	// proposalsTrackFor keeps a token watched after it last built an inventory.
-	// Active subscribers re-track every heartbeat (15s); tokens gone longer than
-	// this stop being refreshed and their cached lanes age out.
+	// proposalsTrackFor keeps a token watched after it last built an inventory
+	// and closed its last stream. Frames rebuild only when something they show
+	// moves, so a quiet open tab stays watched through its stream, not through
+	// rebuilds; tokens gone longer than this stop being refreshed and their
+	// cached lanes age out.
 	proposalsTrackFor = 5 * time.Minute
 	// proposalsCacheTTL bounds a cached lane's life without a refresh. It must
 	// exceed proposalsRefreshEvery so watched tokens never miss between cycles.
@@ -46,11 +48,12 @@ type propTarget struct {
 // id opened - a pure cache read on the broadcast hot path. It registers id as a
 // refresh target; a project not cached yet nudges the refresher and is left out
 // of this frame (the refresher wakes the hub when its lane lands). Nil when no
-// project has a lane yet, so a cold frame ships without one.
-func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo) []model.Proposal {
+// project has a lane yet, so a cold frame ships without one. keepPlatform
+// carries a tracked platform lane through a build whose platform review failed.
+func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo, keepPlatform bool) []model.Proposal {
 	out := []model.Proposal{}
 	hit, cold := false, false
-	for _, p := range s.trackProposals(id, projects) {
+	for _, p := range s.trackProposals(id, projects, keepPlatform) {
 		rows, ok := s.proposals.Get(p.Name)
 		if !ok {
 			cold = true
@@ -73,15 +76,16 @@ func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo) 
 
 // trackProposals records id as a live refresh target and returns the projects
 // it watches. Called on every inventory build, so the watched set mirrors who
-// is actually looking. Builds include the synthetic platform tier
-// (InventoryForIdentity seeds it), but a build whose platform discovery
-// transiently failed would drop it; carry a previously tracked platform entry
-// forward so the lane survives the blip.
-func (s *Server) trackProposals(id auth.Identity, projects []project.ProjectInfo) []project.ProjectInfo {
+// is actually looking. Builds include the synthetic platform tier for its
+// authors (InventoryForIdentity seeds it). keepPlatform says the platform
+// review failed this build: a tracked platform entry then carries forward so
+// the lane survives the blip. Otherwise its absence is a verdict, and a
+// demoted author stops seeing platform PRs.
+func (s *Server) trackProposals(id auth.Identity, projects []project.ProjectInfo, keepPlatform bool) []project.ProjectInfo {
 	key := restfactory.TokenKey(id.Token)
 	s.propMu.Lock()
 	defer s.propMu.Unlock()
-	if prev, ok := s.propTargets[key]; ok && !hasProject(projects, platformProjectName) {
+	if prev, ok := s.propTargets[key]; ok && keepPlatform && !hasProject(projects, platformProjectName) {
 		if p, found := findProject(prev.projects, platformProjectName); found {
 			projects = append(projects, p)
 		}
@@ -125,7 +129,7 @@ func findProject(ps []project.ProjectInfo, name string) (project.ProjectInfo, bo
 
 // nudgeProposals asks the refresher for an out-of-cycle pass (coalesced). A
 // non-empty repo (canonical URL) marks that repo's projects due even though no
-// head moved; with none, the pass picks up only lanes not cached yet.
+// head moved; with none, the pass picks up only lanes never read.
 func (s *Server) nudgeProposals(repo string) {
 	if repo != "" {
 		s.propMu.Lock()
@@ -179,17 +183,19 @@ func (s *Server) RunProposalsRefresher(ctx context.Context, bus *eventbus.Bus) {
 
 // refreshProposals re-queries the forge for the watched projects that are due,
 // updates the cache, re-derives their merged-PR lane, and reports whether any open
-// lane changed. A project is due when all is set (the backstop), its lane is not
-// cached, a nudge named its repo, or its repo's GitChanged version moved since its
-// lane was read. Expired targets are dropped. Best-effort per project: a failing
-// forge lookup skips that project and leaves it due. One round-trip per project,
-// however many tokens or users watch it.
+// lane changed. A project is due when all is set (the backstop), its lane was never
+// read, a nudge named its repo, or its repo's GitChanged version moved since its
+// lane was read. Expired targets are dropped. A failed lookup counts as a read and
+// keeps the last rows: frame builds keep nudging for a cold lane, and each nudge
+// must not reach a failing forge, so only the backstop, a head move or a nudge
+// naming its repo retries it. One round-trip per project, however many tokens or
+// users watch it.
 func (s *Server) refreshProposals(all bool) bool {
 	now := time.Now()
 	s.propMu.Lock()
 	watched := map[string]project.ProjectInfo{}
 	for key, t := range s.propTargets {
-		if now.Sub(t.lastSeen) > proposalsTrackFor {
+		if !s.streamOpen(key) && now.Sub(t.lastSeen) > proposalsTrackFor {
 			delete(s.propTargets, key)
 			continue
 		}
@@ -216,17 +222,19 @@ func (s *Server) refreshProposals(all bool) bool {
 		prev, cached := s.proposals.Get(name)
 		last, read := seen[name]
 		_, nudged := dirty[repo]
-		if !all && cached && read && last == ver && !nudged {
+		if !all && read && last == ver && !nudged {
 			continue
 		}
 		due = append(due, p)
 		rows, err := s.reader.OpenProposals(p)
+		seen[name] = ver
 		if err != nil {
 			log.Printf("proposals: %s: %v (skipping)", name, err)
-			delete(seen, name)
+			if cached {
+				s.proposals.Put(name, prev)
+			}
 			continue
 		}
-		seen[name] = ver
 		if rows == nil {
 			rows = []model.Proposal{}
 		}

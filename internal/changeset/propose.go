@@ -214,10 +214,12 @@ func (r *Reader) proposalRow(proj project.ProjectInfo, pr forge.PR) model.Propos
 // OwnsProposal reports whether id opened the PR on branch: the per-(user,
 // project) draft branch or one of the user's revert branches. Exact by
 // construction - both names carry a hash of the raw identity - where the By
-// segment a row shows is lossy. Pure string work, safe on the broadcast path.
+// segment a row shows is lossy; a revert branch from before the hash is
+// matched by its readable name. Pure string work, safe on the broadcast path.
 func (r *Reader) OwnsProposal(id auth.Identity, proj project.ProjectInfo, branch string) bool {
 	return branch == r.proposedBranch(id.Username, proj.Name) ||
-		strings.HasPrefix(branch, r.revertPrefix(id.Username, proj.Name))
+		strings.HasPrefix(branch, r.revertPrefix(id.Username, proj.Name)) ||
+		r.ownsLegacyRevert(id.Username, proj.Name, branch)
 }
 
 // defaultTitle names an untitled proposal by what it does, so the history row

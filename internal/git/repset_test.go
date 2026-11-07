@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
@@ -18,7 +19,7 @@ func TestRepoSetCachesByURL(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	rs := NewRepoSet(ctx, "", nil, false, nil, time.Hour) // long interval: poll won't fire in-test
+	rs := NewRepoSet(ctx, "", "", nil, false, nil, time.Hour) // long interval: poll won't fire in-test
 
 	read1, write1, err := rs.Get(bareA)
 	if err != nil {
@@ -55,7 +56,7 @@ func TestRepoSetCachesByURL(t *testing.T) {
 func TestRepoSetGetBadURLErrors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	rs := NewRepoSet(ctx, "", nil, false, nil, time.Hour)
+	rs := NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
 
 	if _, _, err := rs.Get("/nonexistent/repo.git"); err == nil {
 		t.Error("expected an error opening a nonexistent repo")
@@ -74,7 +75,7 @@ func (c *fakeClock) advance(d time.Duration) { c.ns.Add(int64(d)) }
 func TestRepoSetBacksOffFailedOpen(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	rs := NewRepoSet(ctx, "", nil, false, nil, time.Hour)
+	rs := NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
 	clock := &fakeClock{}
 	rs.now = clock.now
 	var opens atomic.Int32
@@ -108,12 +109,63 @@ func TestRepoSetBacksOffFailedOpen(t *testing.T) {
 	}
 }
 
+// A repo whose clone failed comes back without moving a head, so the poll has
+// nothing to report: the recovering open itself must publish GitChanged, or
+// frames keep showing it unavailable until an unrelated event. A first open
+// publishes nothing.
+func TestRepoSetPublishesRecoveredOpen(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	bus := eventbus.New()
+	rs := NewRepoSet(ctx, "", "", nil, false, bus, time.Hour)
+	clock := &fakeClock{}
+	rs.now = clock.now
+	var fail atomic.Bool
+	rs.open = func(string, string, forge.TokenSource) (*Repo, error) {
+		if fail.Load() {
+			return nil, errors.New("dead")
+		}
+		return &Repo{}, nil
+	}
+	ver := func(url string) uint64 { return bus.KeyVersion(eventbus.GitChanged, forge.NormalizeRepoURL(url)) }
+
+	if _, _, err := rs.Get("https://forge/o/fresh.git"); err != nil || ver("https://forge/o/fresh") != 0 {
+		t.Fatalf("a first open published: err=%v ver=%d", err, ver("https://forge/o/fresh"))
+	}
+
+	fail.Store(true)
+	if _, _, err := rs.Get("https://forge/o/r.git"); err == nil {
+		t.Fatal("expected the open error")
+	}
+	fail.Store(false)
+	clock.advance(openBackoff + time.Second)
+	if _, _, err := rs.Get("https://forge/o/r"); err != nil {
+		t.Fatal(err)
+	}
+	if ver("https://forge/o/r") != 1 {
+		t.Fatalf("a recovered open published %d times, want 1", ver("https://forge/o/r"))
+	}
+
+	fail.Store(true)
+	if _, _, err := rs.Get("https://forge/o/p.git"); err == nil {
+		t.Fatal("expected the open error")
+	}
+	fail.Store(false)
+	rs.Poke("https://forge/o/p")
+	if _, _, err := rs.Get("https://forge/o/p"); err != nil {
+		t.Fatal(err)
+	}
+	if ver("https://forge/o/p") != 1 {
+		t.Fatalf("an open recovered through a poke published %d times, want 1", ver("https://forge/o/p"))
+	}
+}
+
 // Concurrent Gets of one unopened repo share a single clone.
 func TestRepoSetSharesConcurrentOpen(t *testing.T) {
 	bare := seedRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	rs := NewRepoSet(ctx, "", nil, false, nil, time.Hour)
+	rs := NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
 	release := make(chan struct{})
 	var opens atomic.Int32
 	rs.open = func(url, user string, tok forge.TokenSource) (*Repo, error) {
@@ -166,7 +218,7 @@ func TestRepoSetEvictsIdleRepo(t *testing.T) {
 	bare := seedRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	rs := NewRepoSet(ctx, "", nil, false, nil, 10*time.Millisecond)
+	rs := NewRepoSet(ctx, "", "", nil, false, nil, 10*time.Millisecond)
 	clock := &fakeClock{}
 	rs.now = clock.now
 
@@ -190,7 +242,7 @@ func TestRepoSetEvictsGoneRepo(t *testing.T) {
 	bare := seedRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	rs := NewRepoSet(ctx, "", nil, false, nil, time.Hour)
+	rs := NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
 	if _, _, err := rs.Get(bare); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -199,4 +251,31 @@ func TestRepoSetEvictsGoneRepo(t *testing.T) {
 	}
 	rs.Poke(bare)
 	waitEvicted(t, rs, bare)
+}
+
+// TestRepoSetTokenOnlyToTheForge pins CHG-11 at the one place repos are
+// opened: the read clone and the push view of a repo on another host get no
+// token, while the forge's own repos keep it.
+func TestRepoSetTokenOnlyToTheForge(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rs := NewRepoSet(ctx, "https://forge.example", "bot", forge.StaticToken("secret"), false, nil, time.Hour)
+	got := map[string]bool{}
+	rs.open = func(url, _ string, tok forge.TokenSource) (*Repo, error) {
+		got[url] = tok != nil
+		return &Repo{creds: creds{url: url, tokenFn: tok}}, nil
+	}
+	for url, want := range map[string]bool{
+		"https://forge.example/dotvirt/team-a.git": true,
+		"https://evil.example/dotvirt/team-a.git":  false,
+		"http://forge.example/dotvirt/team-b.git":  false,
+	} {
+		_, write, err := rs.Get(url)
+		if err != nil {
+			t.Fatalf("Get(%s): %v", url, err)
+		}
+		if got[url] != want || (write.auth() != nil) != want {
+			t.Errorf("%s: read token %v, push token %v; want %v", url, got[url], write.auth() != nil, want)
+		}
+	}
 }
