@@ -65,7 +65,7 @@ func (s *Server) handleObjectUpdateManifest(w http.ResponseWriter, r *http.Reque
 	if !ok || !s.authorizeObject(w, r, sc, verbUpdate, resource, ns, name) {
 		return
 	}
-	_, req, ok := readBody[model.UpdateManifestRequest](w, r, false)
+	req, ok := decode[model.UpdateManifestRequest](w, r)
 	if !ok {
 		return
 	}
