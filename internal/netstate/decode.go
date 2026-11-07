@@ -193,16 +193,17 @@ func decodeExtRoute(u *unstructured.Unstructured) *policy {
 
 type decoder func(*unstructured.Unstructured) *policy
 
-// sortedList lists a store by (namespace, name). Stores iterate in hash
-// order; a walk, plane or merge that followed it would answer differently for
-// one unchanged snapshot.
-func sortedList(idx cache.Indexer) []*unstructured.Unstructured {
-	objs := reflect.List(idx)
+// byKey orders objects by (namespace, name). Stores iterate in hash order; a
+// walk, plane or merge that followed it would answer differently for one
+// unchanged snapshot.
+func byKey(objs []*unstructured.Unstructured) []*unstructured.Unstructured {
 	slices.SortFunc(objs, func(a, b *unstructured.Unstructured) int {
 		return cmp.Or(cmp.Compare(a.GetNamespace(), b.GetNamespace()), cmp.Compare(a.GetName(), b.GetName()))
 	})
 	return objs
 }
+
+func sortedList(idx cache.Indexer) []*unstructured.Unstructured { return byKey(reflect.List(idx)) }
 
 // decoded runs one store's objects through a kind's decoder, in sortedList
 // order.
@@ -217,11 +218,15 @@ func decoded(idx cache.Indexer, dec decoder) []*policy {
 
 // inNamespace decodes a namespaced store's objects for ns, by name.
 func inNamespace(idx cache.Indexer, ns string, dec decoder) []*policy {
-	var out []*policy
-	for _, u := range sortedList(idx) {
+	var objs []*unstructured.Unstructured
+	for _, u := range reflect.List(idx) {
 		if u.GetNamespace() == ns {
-			out = append(out, dec(u))
+			objs = append(objs, u)
 		}
+	}
+	out := make([]*policy, 0, len(objs))
+	for _, u := range byKey(objs) {
+		out = append(out, dec(u))
 	}
 	return out
 }
