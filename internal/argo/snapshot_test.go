@@ -248,50 +248,58 @@ func TestDriftPublishesOnlyOnContentChange(t *testing.T) {
 	}
 }
 
-// ObjectDriftGen must advance only when a NON-VM object's drift content changes:
-// Application churn with identical drift (reconciledAt ticks) and VM-only drift moves
-// must not bump it - it feeds the catalog watermark, and a false bump would send
+// ObjectDriftGen must advance only when a NON-VM object's drift content changes
+// in that scope: Application churn with identical drift (reconciledAt ticks),
+// VM-only drift moves and another namespace's objects must not bump it - it
+// feeds each caller's catalog watermark, and a false bump would send
 // otherwise-suppressed frames and refetch the catalog for nothing.
 func TestObjectDriftGen(t *testing.T) {
 	s := NewSnapshot(&Client{}, nil)
 	st := s.store()
-	a := app("argocd", "net", []any{
-		vmResource("prod", "vm-a", "Synced", "Healthy"),
-		udnResource("prod", "db-net", "Synced", ""),
-	})
-	_ = st.Replace([]any{a}, "1")
+	cudn := map[string]any{"group": "k8s.ovn.org", "kind": "ClusterUserDefinedNetwork", "name": "shared", "status": "Synced"}
+	nsObj := map[string]any{"group": "", "kind": "Namespace", "name": "dev", "status": "Synced"}
+	resources := func(prodNet, devNet, vm string, extra ...any) []any {
+		return append([]any{
+			vmResource("prod", "vm-a", vm, "Healthy"),
+			udnResource("prod", "db-net", prodNet, ""),
+			udnResource("dev", "db-net", devNet, ""),
+		}, extra...)
+	}
+	set := func(rs []any) {
+		_ = st.Update(app("argocd", "net", rs))
+		settle(s)
+	}
+	_ = st.Replace([]any{app("argocd", "net", resources("Synced", "Synced", "Synced"))}, "1")
 	settle(s)
 
-	gen := s.ObjectDriftGen()
-	if gen == 0 {
-		t.Fatal("the first view holding a segment must move the gen off zero")
+	prod, dev := s.ObjectDriftGen("prod"), s.ObjectDriftGen("dev")
+	if prod == 0 || dev == 0 {
+		t.Fatal("the first view holding a segment must move its scope's gen off zero")
+	}
+	want := func(what string, wantProd, wantDev uint64) {
+		t.Helper()
+		if gp, gd := s.ObjectDriftGen("prod"), s.ObjectDriftGen("dev"); gp != wantProd || gd != wantDev {
+			t.Errorf("%s: prod %d dev %d, want %d %d", what, gp, gd, wantProd, wantDev)
+		}
 	}
 
-	// Store churn, same content.
-	_ = st.Update(a.DeepCopy())
-	settle(s)
-	if got := s.ObjectDriftGen(); got != gen {
-		t.Errorf("gen bumped on contentless churn: %d -> %d", gen, got)
-	}
+	set(resources("Synced", "Synced", "Synced"))
+	want("contentless churn", prod, dev)
 
-	// A VM-only drift move: rides the frame itself, must not bump the catalog gen.
-	_ = st.Update(app("argocd", "net", []any{
-		vmResource("prod", "vm-a", "OutOfSync", "Degraded"),
-		udnResource("prod", "db-net", "Synced", ""),
-	}))
-	settle(s)
-	if got := s.ObjectDriftGen(); got != gen {
-		t.Errorf("gen bumped on a VM-only drift change: %d -> %d", gen, got)
-	}
+	set(resources("Synced", "Synced", "OutOfSync"))
+	want("VM-only drift", prod, dev)
 
-	// The segment's drift moves: gen must bump.
-	_ = st.Update(app("argocd", "net", []any{
-		vmResource("prod", "vm-a", "OutOfSync", "Degraded"),
-		udnResource("prod", "db-net", "OutOfSync", "Progressing"),
-	}))
-	settle(s)
-	if got := s.ObjectDriftGen(); got != gen+1 {
-		t.Errorf("gen did not bump on a segment drift change: %d -> %d", gen, got)
+	set(resources("OutOfSync", "Synced", "OutOfSync"))
+	want("a prod segment moved", prod+1, dev)
+
+	set(resources("OutOfSync", "OutOfSync", "OutOfSync"))
+	want("a dev segment moved", prod+1, dev+1)
+
+	// A Namespace object is its own scope; other cluster-scoped kinds share "".
+	set(resources("OutOfSync", "OutOfSync", "OutOfSync", cudn, nsObj))
+	want("cluster-scoped objects added", prod+1, dev+2)
+	if s.ObjectDriftGen("") == 0 {
+		t.Error("a cluster-scoped object must move the shared scope")
 	}
 }
 

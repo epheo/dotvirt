@@ -7,7 +7,6 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
-	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/inventory"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/pkg/forge"
@@ -118,19 +117,13 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		propProjects = append(propProjects, s.platformProject())
 	}
 	inv.Proposals = s.proposalsFor(id, propProjects, platformErr != nil)
-	// Watermark for the out-of-band network catalog: bumps when a port group moves
-	// (NetworkChanged) or a non-VM object's drift content moves (ObjectDriftGen), so
-	// the client re-pulls /api/networks - a merged segment, and its badge, show live.
-	// The drift term is the non-VM generation, not the DriftChanged version: that
-	// also moves on VM-only drift, which the frame carries itself, and counting it
-	// would refetch the catalog for nothing.
-	inv.NetworksVersion = s.bus.Version(eventbus.NetworkChanged)
-	if s.drift != nil {
-		inv.NetworksVersion += s.drift.ObjectDriftGen()
-	}
-	// Same contract for the recent-tasks feed: the client re-pulls /api/tasks
-	// when this bumps (an op recorded, a merged PR landed).
-	inv.TasksVersion = s.bus.Version(eventbus.TaskChanged)
+	// Watermarks for the out-of-band pulls, scoped to what this caller's pulls
+	// read (watermark.go): a merged segment and its badge, or a recorded op,
+	// show live without another tenant's act ever moving this frame. Node read
+	// gates node-level detail in both, as in the pulls themselves.
+	canNodes, _ := s.can(ctx, id, userCluster, verbList, ssarNodes, "")
+	inv.NetworksVersion = s.networksWatermark(visible, canNodes)
+	inv.TasksVersion = s.tasksWatermark(propProjects, canNodes)
 	return inv, nil
 }
 

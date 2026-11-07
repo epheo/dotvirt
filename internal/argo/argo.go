@@ -86,6 +86,18 @@ func (c *Client) applicationsListWatch() *cache.ListWatch {
 // namespace is "" for cluster-scoped kinds (a CUDN, an EgressIP).
 type resKey struct{ group, kind, namespace, name string }
 
+func (k resKey) isVM() bool { return k.group == "kubevirt.io" && k.kind == "VirtualMachine" }
+
+// scope is who may see an object's drift: those who see its namespace, or a
+// Namespace's own name, since the object is that namespace. "" is the rest of
+// the cluster scope, the catalog every caller shares.
+func (k resKey) scope() string {
+	if k.namespace == "" && k.group == "" && k.kind == "Namespace" {
+		return k.name
+	}
+	return k.namespace
+}
+
 // resourceDriftFromApps builds per-object drift keyed by identity from a set of ArgoCD
 // Application objects (the reflector store's *unstructured.Unstructured). Un-scoped:
 // EVERY kind an Application manages is kept, so a non-VM object (a segment, a policy)
@@ -119,7 +131,7 @@ func resourceDriftFromApps(objs []*unstructured.Unstructured) map[resKey]Drift {
 func vmView(all map[resKey]Drift) map[string]Drift {
 	out := make(map[string]Drift, len(all))
 	for k, d := range all {
-		if k.group == "kubevirt.io" && k.kind == "VirtualMachine" {
+		if k.isVM() {
 			out[k.namespace+"/"+k.name] = d
 		}
 	}
