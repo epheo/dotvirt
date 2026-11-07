@@ -92,5 +92,7 @@ Preview v$VERSION published to candidate-v0 (stable-v0 untouched at v$REL_VER):
 
 Roll a candidate-v0 cluster (e.g. hetznet) to it:
   kubectl apply -f operator/install/catalogsource-preview.yaml
-(Working tree restored — nothing committed. Promote with: VERSION=<final> PREV=$REL_VER make release)
+Working tree restored; nothing committed. Promote by pushing a bare tag on main, and the
+release workflow cuts it (never run release.sh locally first):
+  git tag v<final> && git push origin v<final>
 EOF
