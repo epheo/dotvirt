@@ -69,7 +69,7 @@ func projectUDN(s Spec) (string, []byte, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	return s.Namespace + "/networks/" + s.Name + ".yaml", out, nil
+	return model.KindUDN.RepoPath(s.Namespace, s.Name), out, nil
 }
 
 // sharedCUDN is an isolated (Layer2, secondary) cluster-scoped port group spanning
@@ -97,7 +97,7 @@ func sharedCUDN(s Spec) (string, []byte, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	return "networks/" + s.Name + ".yaml", out, nil
+	return model.KindCUDN.RepoPath("", s.Name), out, nil
 }
 
 // vlanCUDN is a VLAN-backed (localnet, secondary) cluster-scoped port group: it
@@ -143,5 +143,5 @@ func vlanCUDN(s Spec) (string, []byte, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	return "networks/" + s.Name + ".yaml", out, nil
+	return model.KindCUDN.RepoPath("", s.Name), out, nil
 }
