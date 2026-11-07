@@ -165,6 +165,7 @@ func (s *Server) RunProposalsRefresher(ctx context.Context, bus *eventbus.Bus) {
 	defer cancel()
 	t := time.NewTicker(proposalsRefreshEvery)
 	defer t.Stop()
+	merged := mergedReads{}
 	for {
 		all := false
 		select {
@@ -178,12 +179,12 @@ func (s *Server) RunProposalsRefresher(ctx context.Context, bus *eventbus.Bus) {
 		if s.refreshProposals(all) {
 			bus.Publish(eventbus.ProposalsChanged)
 		}
+		s.refreshMerged(merged, all)
 	}
 }
 
 // refreshProposals re-queries the forge for the watched projects that are due,
-// updates the cache, re-derives their merged-PR lane, and reports whether any open
-// lane changed. A project is due when all is set (the backstop), its lane was never
+// updates the cache, and reports whether any open lane changed. A project is due when all is set (the backstop), its lane was never
 // read, a nudge named its repo, or its repo's GitChanged version moved since its
 // lane was read. Expired targets are dropped. A failed lookup counts as a read and
 // keeps the last rows: frame builds keep nudging for a cold lane, and each nudge
@@ -214,7 +215,6 @@ func (s *Server) refreshProposals(all bool) bool {
 	s.propMu.Unlock()
 
 	anyChanged := false
-	var due []project.ProjectInfo
 	for name, p := range watched {
 		repo := forge.NormalizeRepoURL(p.Repo)
 		// Read before the query: a push landing mid-query leaves the project due.
@@ -225,7 +225,6 @@ func (s *Server) refreshProposals(all bool) bool {
 		if !all && read && last == ver && !nudged {
 			continue
 		}
-		due = append(due, p)
 		rows, err := s.reader.OpenProposals(p)
 		seen[name] = ver
 		if err != nil {
@@ -252,28 +251,58 @@ func (s *Server) refreshProposals(all bool) bool {
 	s.propMu.Lock()
 	s.propSeen = seen
 	s.propMu.Unlock()
-	s.refreshMerged(due)
 	return anyChanged
 }
 
-// refreshMerged re-derives the merged-PR lane from the forge for projects - the
-// poll backstop behind the webhook's instant record, and what reseeds the lane
-// after a restart. Repos are deduped (the lane is project-scoped, not per-token;
-// visibility applies at read time). The feed publishes only on actual change, so
-// the steady-state pass is silent.
-func (s *Server) refreshMerged(projects []project.ProjectInfo) {
+// mergedReads is, per watched repo, the GitChanged version its merged lane was
+// last read at and whether a backstop tick has read it again since. Owned by
+// the refresher goroutine.
+type mergedReads map[string]mergedRead
+
+type mergedRead struct {
+	ver     uint64
+	settled bool
+}
+
+// refreshMerged re-derives the merged-PR lane of each watched repo whose head
+// moved since its last read: the poll backstop behind the webhook's instant
+// record, and what reseeds the lane after a restart. A merge moves its base
+// head, so a quiet repo costs no forge call. The forge pushes a merge before it
+// marks the PR merged, so a read on the move alone can miss it: the next
+// backstop tick (settle) reads once more, and a failed read is retried on each
+// tick until one lands. Repos are deduped (the lane is project-scoped, not
+// per-token; visibility applies at read time). The feed publishes only on
+// actual change, so the steady-state pass is silent.
+func (s *Server) refreshMerged(reads mergedReads, settle bool) {
 	if s.tasks == nil {
 		return
 	}
 	byRepo := map[string]project.ProjectInfo{}
-	for _, p := range projects {
-		if p.Repo != "" {
-			byRepo[p.Repo] = p
+	s.propMu.Lock()
+	for _, t := range s.propTargets {
+		for _, p := range t.projects {
+			if p.Repo != "" {
+				byRepo[forge.NormalizeRepoURL(p.Repo)] = p
+			}
+		}
+	}
+	s.propMu.Unlock()
+	for repo := range reads {
+		if _, ok := byRepo[repo]; !ok {
+			delete(reads, repo)
 		}
 	}
 	since := time.Now().Add(-tasks.MergeRetention)
-	for _, p := range byRepo {
+	for repo, p := range byRepo {
+		// Read before the query: a merge landing mid-query leaves the repo due.
+		ver := s.bus.KeyVersion(eventbus.GitChanged, repo)
+		last, read := reads[repo]
+		again := read && last.ver == ver
+		if again && (last.settled || !settle) {
+			continue
+		}
 		merges, err := s.reader.RecentlyMerged(p, since)
+		reads[repo] = mergedRead{ver: ver, settled: again && err == nil}
 		if err != nil {
 			log.Printf("tasks: merged PRs for %s: %v (skipping)", p.Name, err)
 			continue

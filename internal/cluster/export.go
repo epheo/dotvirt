@@ -6,7 +6,7 @@ import (
 
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
-	"github.com/epheo/dotvirt/internal/vmgen"
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // annotationsToStrip are server- or controller-set annotations that would make
@@ -64,8 +64,7 @@ func stripAnnotations(in map[string]string) map[string]string {
 	return out
 }
 
-// ExportPath is the repo-relative path a serialized VM's manifest lands at when
-// adopted: the wizard's layout, so adopt-then-edit converges on one file.
+// ExportPath is the repo-relative path a serialized VM's manifest lands at.
 func ExportPath(vm kubevirtcorev1.VirtualMachine) string {
-	return vmgen.ManifestPath(vm.Namespace, vm.Name)
+	return model.KindVM.RepoPath(vm.Namespace, vm.Name)
 }
