@@ -8,8 +8,8 @@
 #
 #   VERSION=0.0.6-rc.1 hack/preview.sh
 #
-# The rc replaces the current released (stable-v0) head, so promotion is roll-forward:
-# 0.0.5 -> 0.0.6-rc.1 (preview) -> 0.0.6 (`make release`).
+# The rc replaces the current released (stable-v0) head and skips every older version, so
+# promotion is roll-forward from any earlier rc: 0.0.5 -> 0.0.6-rc.1 -> 0.0.6-rc.2 -> 0.0.6.
 set -euo pipefail
 VERSION="${VERSION:?set VERSION=x.y.z-rc.N}"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -53,13 +53,12 @@ entries:
     package: dotvirt-operator
     name: stable-v0
     entries:
-      - name: dotvirt-operator.v$REL_VER
+$(entry "$REL_VER")
   - schema: olm.channel
     package: dotvirt-operator
     name: candidate-v0
     entries:
-      - name: dotvirt-operator.v$VERSION
-        replaces: dotvirt-operator.v$REL_VER
+$(entry "$VERSION" "$REL_VER")
   - schema: olm.bundle
     image: $REL_BUNDLE
   - schema: olm.bundle

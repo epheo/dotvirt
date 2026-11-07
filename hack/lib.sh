@@ -1,6 +1,7 @@
 # Shared helpers for the release + preview orchestrators (hack/release.sh, hack/preview.sh).
 # SOURCED, not executed. Holds the parts that are byte-identical between the two flows:
-# image build/push, digest resolution + pinning, and the stable-channel head extraction.
+# image build/push, digest resolution + pinning, the channel entry shape, and the
+# stable-channel head extraction.
 # Each orchestrator keeps only its divergent tail (channel handling, commit-vs-restore,
 # validation, manager.yaml update). Sourcing this also cds to the repo root and pins the
 # tool versions, so the orchestrators stay thin.
@@ -40,6 +41,17 @@ build_push() {
 		$TOOL manifest push --all "$tag" "docker://$tag"
 		;;
 	esac
+}
+
+# entry <version> [replaces] -> one olm.channel entry for $TMPL. The catalog keeps only the
+# channel heads, and replaces is an edge from the one version it names, so alone it strands
+# every other install: an older release, an rc (each rc replaces the release, not the
+# previous rc), or the release whose pin PR had not merged when the next tag was cut.
+# skipRange is the edge OLM follows from any older installed CSV, in the catalog or not.
+entry() {
+	echo "      - name: dotvirt-operator.v$1"
+	[ -z "${2:-}" ] || echo "        replaces: dotvirt-operator.v$2"
+	echo "        skipRange: '>=0.0.0 <$1'"
 }
 
 # current_stable_head -> the released version at the head of the stable-v0 channel (e.g. 0.0.6).
