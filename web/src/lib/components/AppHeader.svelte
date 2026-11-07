@@ -214,19 +214,22 @@
 
 	<!-- Issues: standing problems and firing alerts (never pending applies), one
 	     count, named in words so a clean fleet reads as a stated fact. -->
-	<HeaderMenu>
+	<HeaderMenu align="right">
 		{#snippet trigger({ open, toggle })}
 			<button
 				onclick={toggle}
 				aria-expanded={open}
 				title="Issues: standing problems and firing alerts in the visible inventory"
-				class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium hover:opacity-90 {issues.length
-					? TONE_PILL[worstTone]
-					: 'text-side-dim hover:bg-side-hover'}"
+				class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium hover:opacity-90 {!issues.length
+					? 'text-side-dim hover:bg-side-hover'
+					: worstTone === 'danger'
+						? 'bg-danger text-white'
+						: TONE_PILL.warn}"
 			>
 				{#if issues.length}
 					<TriangleAlert size={13} />
 					{issues.length} issue{issues.length === 1 ? '' : 's'}
+					<ChevronDown size={12} class="transition-transform {open ? 'rotate-180' : ''}" />
 				{:else}
 					<CircleCheck size={13} class="text-ok" /> No issues
 				{/if}
@@ -234,8 +237,15 @@
 		{/snippet}
 		{#snippet children({ close })}
 			<div class="w-[30rem] max-w-[90vw] text-xs">
-				<div class="flex items-baseline justify-between gap-3 border-b border-line px-3 py-2">
-					<span class="text-sm font-semibold text-ink">Issues</span>
+				<div class="flex items-center justify-between gap-3 border-b border-line px-3 py-2.5">
+					<span class="flex items-center gap-1.5 text-sm font-semibold text-ink"
+						>Issues{#if issues.length}<span
+								class="rounded-full px-1.5 text-[11px] leading-4 font-semibold text-white {worstTone ===
+								'danger'
+									? 'bg-danger'
+									: 'bg-warn-ink'}">{issues.length}</span
+							>{/if}</span
+					>
 					<span class="text-ink-faint">GitOps state and cluster alerts, one list</span>
 				</div>
 				{#if !issues.length}
@@ -256,7 +266,7 @@
 				{/if}
 				{#if suggestions.length}
 					<div
-						class="border-t border-line bg-inset px-3 pt-2 text-[11px] tracking-wide text-ink-faint uppercase"
+						class="border-t border-line bg-inset px-3 pt-2.5 pb-0.5 text-[11px] font-semibold tracking-wide text-ink-faint uppercase"
 					>
 						Suggestions
 					</div>

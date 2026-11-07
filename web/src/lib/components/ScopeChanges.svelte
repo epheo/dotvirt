@@ -8,7 +8,15 @@
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
-	import { TONE_PILL } from '#lib/status.js';
+	import { TONE_TEXT } from '#lib/status.js';
+	import {
+		Check,
+		ExternalLink,
+		GitPullRequest,
+		LoaderCircle,
+		Pencil,
+		TriangleAlert,
+	} from '@lucide/svelte';
 	import { itemLine } from '#lib/tray.js';
 	import Button from './Button.svelte';
 	import InfoCard from './InfoCard.svelte';
@@ -88,12 +96,10 @@
 	{:else}
 		<ul class="divide-y divide-line-soft text-xs">
 			{#each staged as d (d.project)}
-				<li class="flex items-start gap-3 px-3 py-2">
+				<li class="flex items-start gap-3 px-3 py-2.5">
+					<Pencil size={14} class="mt-0.5 shrink-0 text-accent-ink" />
 					<div class="min-w-0 flex-1">
-						<p class="text-ink">
-							<span class="rounded-full px-1.5 {TONE_PILL.info}">Staged</span>
-							by you in {d.project}
-						</p>
+						<p class="text-ink"><strong>Staged by you</strong> in {d.project}</p>
 						{#each d.draft.items.slice(0, 2) as it (it.kind + it.namespace + it.name)}
 							<p class="truncate text-ink-soft">{it.name}: {itemLine(it)}</p>
 						{/each}
@@ -103,38 +109,45 @@
 					</div>
 					<Button
 						size="sm"
-						variant="secondary"
+						variant="outline"
 						onclick={() => (ui.modal = { kind: 'propose', project: d.project })}>Review</Button
 					>
 				</li>
 			{/each}
 			{#each open as p (p.project + p.prNumber)}
 				{@const appr = approvalLine(p)}
-				<li class="flex items-start gap-3 px-3 py-2">
+				<li class="flex items-start gap-3 px-3 py-2.5">
+					<GitPullRequest size={14} class="mt-0.5 shrink-0 text-accent-ink" />
 					<div class="min-w-0 flex-1">
 						<p class="text-ink">
-							<span class="rounded-full px-1.5 {TONE_PILL.warn}">In review</span>
-							PR #{p.prNumber}{p.mine ? ', yours' : p.by ? ` by ${p.by}` : ''}
+							<strong>PR #{p.prNumber}</strong>{p.mine ? ', yours' : p.by ? ` by ${p.by}` : ''},
+							open
 						</p>
 						<p class="truncate text-ink-soft">
 							{p.title ?? ''}{appr ? `${p.title ? '. ' : ''}${appr.text}.` : ''}
 						</p>
 					</div>
-					<Button size="sm" variant="ghost" href={p.prURL} target="_blank">Open in forge</Button>
+					<Button size="sm" variant="outline" href={p.prURL} target="_blank" class="gap-1"
+						>Open in forge <ExternalLink size={12} class="inline" /></Button
+					>
 				</li>
 			{/each}
 			{#each merged as { t, state } (`${t.project}#${t.prNumber}@${t.at}`)}
-				<li class="flex items-start gap-3 px-3 py-2">
+				<li class="flex items-start gap-3 px-3 py-2.5">
+					{#if state?.tone === 'danger'}
+						<TriangleAlert size={14} class="mt-0.5 shrink-0 text-danger-ink" />
+					{:else if state?.tone === 'info'}
+						<LoaderCircle size={14} class="mt-0.5 shrink-0 text-accent-ink" />
+					{:else}
+						<Check size={14} class="mt-0.5 shrink-0 text-ok-ink" />
+					{/if}
 					<div class="min-w-0 flex-1">
-						<p class="text-ink">
-							<span class="rounded-full px-1.5 {TONE_PILL.ok}">Merged</span>
-							PR #{t.prNumber}
-							{relativeAge(t.at)}{state ? '.' : ''}
-							{#if state}<span class="rounded-full px-1.5 {TONE_PILL[state.tone]}"
-									>{state.text}</span
+						<p class="truncate text-ink"><strong>PR #{t.prNumber}</strong> {t.title ?? ''}</p>
+						<p class="text-ink-soft">
+							Merged {relativeAge(t.at)}.{#if state}<span class={TONE_TEXT[state.tone]}
+									>{` ${state.text}.`}</span
 								>{/if}
 						</p>
-						{#if t.title}<p class="truncate text-ink-soft">{t.title}</p>{/if}
 					</div>
 				</li>
 			{/each}

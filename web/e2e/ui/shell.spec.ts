@@ -26,7 +26,7 @@ test('base: shell, tree and VM table render from the stream', async ({ page }) =
 	await expect(issues).toHaveText('1 issue');
 	await issues.click();
 	await expect(
-		page.getByRole('button', { name: /web-prod\/web-1 VMI excessive migrations/ }),
+		page.getByRole('button', { name: /web-1 web-prod VMI excessive migrations/ }),
 	).toBeVisible();
 	await expect(
 		page.getByRole('banner').getByRole('button', { name: 'Open monitor' }),
@@ -69,6 +69,9 @@ test('base: VM detail opens with live facts and tabs', async ({ page }) => {
 	// The stage lands as a toast + staged badge, never an immediate power change.
 	await expect(page.getByText(/Power Off staged for web-1/)).toBeVisible();
 	await expect(page.getByRole('button', { name: '1 staged, not proposed' })).toBeVisible();
+	// The Changes tab counts what is in flight for this VM: the staged power
+	// change and bob's open PR #42, which also touches web-1.
+	await expect(page.getByRole('link', { name: /^Changes\s*2$/ })).toBeVisible();
 	await page.getByRole('button', { name: 'Actions' }).click();
 	await expect(page.getByRole('button', { name: 'Delete VM' })).toBeVisible();
 	await page.keyboard.press('Escape');
@@ -100,6 +103,10 @@ test('base: the summary shows changes in scope; the table names open PRs per VM'
 	await setScenario(page, 'base');
 	await login(page);
 	const main = page.locator('main');
+	// Issues beside capacity, and capacity leads with its answer.
+	await expect(main.getByText('Issues in All VMs')).toBeVisible();
+	await expect(main.getByText('Room for 21 more VMs')).toBeVisible();
+	await expect(main.getByText('worker-3, in maintenance')).toBeVisible();
 	const card = main.locator('section', { hasText: 'Changes in this scope' });
 	await expect(card.getByText(/PR #41, yours/)).toBeVisible();
 	await expect(card.getByText(/PR #42 by bob/)).toBeVisible();

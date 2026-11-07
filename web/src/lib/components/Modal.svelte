@@ -8,7 +8,9 @@
 	// content into the standard bottom bar.
 	let {
 		title,
+		subtitle,
 		size = 'md',
+		drawer = false,
 		danger = false,
 		dismissable = true,
 		icon,
@@ -17,7 +19,11 @@
 		footer,
 	}: {
 		title: string;
+		// One line under the title, in the title bar.
+		subtitle?: string;
 		size?: 'md' | 'lg' | '3xl';
+		// A full-height sheet from the right, for reviews that read top to bottom.
+		drawer?: boolean;
 		// Destructive dialogs render the title in red.
 		danger?: boolean;
 		// false pins the dialog open - backdrop, Escape, and the X button all
@@ -76,7 +82,9 @@
 </script>
 
 <div
-	class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+	class="fixed inset-0 z-50 flex bg-black/40 {drawer
+		? 'justify-end'
+		: 'items-center justify-center p-4'}"
 	onclick={(e) => e.target === e.currentTarget && dismiss()}
 	onkeydown={(e) => e.key === 'Escape' && dismiss()}
 	role="presentation"
@@ -88,17 +96,22 @@
 		aria-labelledby={titleId}
 		tabindex="-1"
 		onkeydown={trapTab}
-		class="flex max-h-[90vh] w-full {width} flex-col rounded-lg bg-panel shadow-xl outline-none"
+		class="flex w-full {width} flex-col bg-panel shadow-xl outline-none {drawer
+			? 'h-full border-l border-line'
+			: 'max-h-[90vh] rounded-lg'}"
 	>
-		<header class="flex items-center justify-between border-b border-line px-5 py-3">
-			<h2
-				id={titleId}
-				class="flex items-center gap-2 text-base font-semibold {danger
-					? 'text-danger-ink'
-					: 'text-ink'}"
-			>
-				{#if icon}{@render icon()}{/if}{title}
-			</h2>
+		<header class="flex items-center justify-between gap-4 border-b border-line px-5 py-3">
+			<div class="min-w-0">
+				<h2
+					id={titleId}
+					class="flex items-center gap-2 font-semibold {drawer ? 'text-lg' : 'text-base'} {danger
+						? 'text-danger-ink'
+						: 'text-ink'}"
+				>
+					{#if icon}{@render icon()}{/if}{title}
+				</h2>
+				{#if subtitle}<p class="mt-0.5 text-[13px] text-ink-soft">{subtitle}</p>{/if}
+			</div>
 			<button
 				onclick={dismiss}
 				aria-label="Close"

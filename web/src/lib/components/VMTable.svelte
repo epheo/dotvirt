@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { ChevronDown, ChevronUp } from '@lucide/svelte';
-	import { vmKey, type DraftItem, type Options, type Proposal, type VM } from '#lib/api.js';
+	import { vmKey, type DraftItem, type Options, type VM } from '#lib/api.js';
 	import { adoptVM } from '#lib/actions.js';
 	import { quantity, quantityBytes } from '#lib/format.js';
 	import type { Issue } from '#lib/issues.js';
@@ -13,7 +13,6 @@
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { TBODY, THEAD_TR } from '#lib/table.js';
-	import { itemLine } from '#lib/tray.js';
 	import { vmHref } from '#lib/nav.js';
 	import StagedBadge from './StagedBadge.svelte';
 	import StatusPill from './StatusPill.svelte';
@@ -72,20 +71,9 @@
 	// once per PR; the load re-runs only when the set of open PRs moves.
 	$effect(() => {
 		inventory.proposalsKey;
-		for (const p of untrack(() => inventory.proposals))
-			reviewCache.loadProposal(p.project, p.prNumber);
+		untrack(() => reviewCache.loadProposals(inventory.proposals));
 	});
-	const prsOf = $derived.by(() => {
-		const m = new Map<string, { pr: Proposal; line: string }[]>();
-		for (const pr of inventory.proposals)
-			for (const it of reviewCache.proposal(pr.project, pr.prNumber)?.data?.items ?? []) {
-				if (it.resource && it.resource !== 'vm') continue;
-				const k = `${it.namespace}/${it.name}`;
-				const line = it.kind === 'create' ? 'create' : itemLine(it);
-				m.set(k, [...(m.get(k) ?? []), { pr, line }]);
-			}
-		return m;
-	});
+	const prsOf = $derived(reviewCache.vmPRs(inventory.proposals));
 
 	// What a person does next about a VM: the fix its issue offers, or bringing
 	// it under git. A fix that is the VM's own page reads as the reason to go.
@@ -369,11 +357,8 @@
 				{#each rows as vm, i (vm.namespace + '/' + vm.name)}
 					{@const k = vmKey(vm)}
 					{#if groups && (i === 0 || i === groups.issues)}
-						<tr class="bg-inset">
-							<td
-								colspan={cols.length + 3}
-								class="px-3 py-1 text-[11px] font-medium tracking-wide text-ink-muted uppercase"
-							>
+						<tr class="border-y border-line bg-inset">
+							<td colspan={cols.length + 3} class="px-3 py-1.5 text-xs font-semibold text-ink">
 								{i === 0
 									? `With issues (${groups.issues}), always on top`
 									: `Everything else (${groups.rest})`}

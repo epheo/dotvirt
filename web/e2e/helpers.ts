@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { signIn } from './shared';
+import { openTray, signIn } from './shared';
 
 export { openVM } from './shared';
 
@@ -42,8 +42,9 @@ async function mergePR(page: Page, repo: string, pr: number) {
 // project), fills the PR title, proposes (capturing the PR number from the
 // propose response), then merges that PR and returns to the previous view.
 export async function proposeAndMerge(page: Page, project: string, title: string): Promise<number> {
-	await page
-		.getByRole('complementary', { name: 'Changes in flight' })
+	await (
+		await openTray(page)
+	)
 		.locator('section', { hasText: `in ${project}` })
 		.getByRole('link', { name: 'Open in Changes' })
 		.click();

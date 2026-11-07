@@ -1,4 +1,4 @@
-import { expect, login, openVM, setScenario, test } from './fx';
+import { expect, login, openTray, openVM, setScenario, test } from './fx';
 
 // Screenshot capture, not assertion: every key view in both themes, per
 // scenario, written to e2e/screenshots/ and uploaded as a CI artifact for a
@@ -54,11 +54,7 @@ test('trouble states', async ({ page }) => {
 	await page.locator('button[title^="Issues"]').click();
 	await shot(page, 'drift-issues-bell');
 	await page.keyboard.press('Escape');
-	await page
-		.getByRole('complementary', { name: 'Changes in flight' })
-		.getByRole('link', { name: 'Open in Changes' })
-		.first()
-		.click();
+	await (await openTray(page)).getByRole('link', { name: 'Open in Changes' }).first().click();
 	await shot(page, 'drift-changes-prune-warning');
 
 	await setScenario(page, 'degraded');

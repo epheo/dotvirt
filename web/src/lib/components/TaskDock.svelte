@@ -42,13 +42,9 @@
 
 	type DockTab = 'tasks' | 'events';
 
-	// Collapsed by default: the rail is ambient, the pane is on demand. The
-	// choice persists like the dock height does.
-	const dockOpen = persisted('dotvirt.dock.open', false);
-	let openPane = $state(dockOpen.value);
-	$effect(() => {
-		dockOpen.value = openPane;
-	});
+	// Collapsed on every load: the rail is ambient, the pane is on demand and
+	// never comes back open by itself. Only its height persists.
+	let openPane = $state(false);
 	let tab = $state<DockTab>('tasks');
 
 	// Events lane: pulled only while the Events tab is open (never on the

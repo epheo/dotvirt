@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, login, openVM, setScenario, test } from './fx';
+import { expect, login, openTray, openVM, setScenario, test } from './fx';
 
 // Axe pass over the main surfaces (base scenario), color-contrast included —
 // the ink/accent tokens are tuned to clear 4.5:1 on every ground, in both
@@ -73,11 +73,7 @@ test('hosts, storage, catalog and trouble states are accessible', async ({ page 
 	await page.locator('button[title^="Issues"]').click();
 	await checkA11y(page, 'issues bell (drift)');
 	await page.keyboard.press('Escape');
-	await page
-		.getByRole('complementary', { name: 'Changes in flight' })
-		.getByRole('link', { name: 'Open in Changes' })
-		.first()
-		.click();
+	await (await openTray(page)).getByRole('link', { name: 'Open in Changes' }).first().click();
 	await page.waitForTimeout(300);
 	await checkA11y(page, 'changes route (drift)');
 });

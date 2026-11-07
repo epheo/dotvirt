@@ -1,4 +1,4 @@
-import { expect, login, setScenario, test } from './fx';
+import { expect, login, openTray, setScenario, test } from './fx';
 
 // Every section root is a container with the same breadcrumb + tab chrome;
 // roots differ only in what their Summary shows. Non-object views (the policy
@@ -115,9 +115,7 @@ test('Changes is a section: the tree scopes the review, a VM opens its own tab',
 	// that project's draft.
 	await main.getByRole('button', { name: 'Restore this version' }).click();
 	await expect(page.getByText(/Restore of web-2 to 99fe210a staged/)).toBeVisible();
-	const propose = page
-		.getByRole('complementary', { name: 'Changes in flight' })
-		.getByRole('link', { name: 'Open in Changes' });
+	const propose = (await openTray(page)).getByRole('link', { name: 'Open in Changes' });
 	await expect(propose).toHaveAttribute('href', '/changes/team-web');
 	await expect(main.getByText(/part of your team-web draft/)).toBeVisible();
 	await propose.click();

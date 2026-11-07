@@ -1,4 +1,4 @@
-import { expect, login, openVM, setScenario, stageChange, test } from './fx';
+import { expect, login, openTray, openVM, setScenario, stageChange, test } from './fx';
 
 // The staging lifecycle end to end in the UI: edit -> staged draft -> the
 // /changes review route -> propose. The highest-blast-radius flow in the
@@ -17,7 +17,7 @@ test('edit stages into the draft and proposes as a PR', async ({ page }) => {
 
 	// The change tray unfolds with the draft, without a reload, and counts what
 	// it would propose.
-	const tray = page.getByRole('complementary', { name: 'Changes in flight' });
+	const tray = await openTray(page);
 	await expect(tray.getByText('1 staged change')).toBeVisible();
 
 	// The full view shows the semantic item with its impact, not YAML.
@@ -46,12 +46,15 @@ test('the tray reviews and proposes in a sheet; merge stays in the forge', async
 	await page.getByRole('dialog').getByLabel('Memory').fill('8Gi');
 	await stageChange(page);
 
-	const tray = page.getByRole('complementary', { name: 'Changes in flight' });
+	const tray = await openTray(page);
 	await tray.getByRole('button', { name: 'Review and propose' }).click();
 	const sheet = page.getByRole('dialog');
 	// Consequences come before the button: the title is written, the restart named.
-	await expect(sheet.getByLabel('Pull request title')).toHaveValue(/Update web-1/);
+	await expect(sheet.getByLabel('Pull request title')).toHaveValue(/web-1: 8 GiB memory/);
 	await expect(sheet.getByText('1 change to 1 VM. Opens one pull request on main.')).toBeVisible();
+	// Each change says whether it restarts the VM or applies live.
+	await expect(sheet.getByText('Restart', { exact: true })).toBeVisible();
+	await expect(sheet.getByRole('button', { name: 'Unstage all' })).toBeVisible();
 	await expect(sheet.getByText(/web-1 restarts once\. The memory change needs it\./)).toBeVisible();
 	await expect(sheet.getByText(/web-1 at 8 GiB fits on 2 of 2 hosts/)).toBeVisible();
 	await expect(sheet.getByText('Nothing else in team-web changes.')).toBeVisible();
@@ -70,11 +73,7 @@ test('a failed stage shows the backend detail in the dialog', async ({ page }) =
 	await page.getByRole('button', { name: /Edit Settings/ }).click();
 	await page.getByRole('dialog').getByLabel('Memory').fill('16Gi');
 	await stageChange(page);
-	await page
-		.getByRole('complementary', { name: 'Changes in flight' })
-		.getByRole('link', { name: 'Open in Changes' })
-		.first()
-		.click();
+	await (await openTray(page)).getByRole('link', { name: 'Open in Changes' }).first().click();
 	const main = page.locator('main');
 	await main.getByLabel('Pull request title').fill('!fail');
 	await main.getByRole('button', { name: 'Propose pull request' }).click();
@@ -90,23 +89,19 @@ test('the propose form shows the default title and body; Tab takes them', async 
 	await page.getByRole('button', { name: /Edit Settings/ }).click();
 	await page.getByRole('dialog').getByLabel('Memory').fill('8Gi');
 	await stageChange(page);
-	await page
-		.getByRole('complementary', { name: 'Changes in flight' })
-		.getByRole('link', { name: 'Open in Changes' })
-		.first()
-		.click();
+	await (await openTray(page)).getByRole('link', { name: 'Open in Changes' }).first().click();
 
 	// What a blank propose pushes is visible in place, not a surprise after.
 	const main = page.locator('main');
 	const title = main.getByLabel('Pull request title');
 	const body = main.getByLabel('Pull request description');
-	await expect(title).toHaveAttribute('placeholder', /Update web-1/);
+	await expect(title).toHaveAttribute('placeholder', /web-1: 8 GiB memory/);
 	await expect(body).toHaveAttribute('placeholder', /## Changes/);
 
 	// Tab on the empty field takes the default and keeps focus to edit it.
 	await title.focus();
 	await page.keyboard.press('Tab');
-	await expect(title).toHaveValue(/Update web-1/);
+	await expect(title).toHaveValue(/web-1: 8 GiB memory/);
 	await expect(title).toBeFocused();
 	await body.focus();
 	await page.keyboard.press('Tab');
@@ -145,7 +140,7 @@ test('a setting edits in place: consequence first, fields add up, one unstages a
 	await memory.fill('8Gi');
 	await expect(page.getByText(/Fits on 2 of 2 hosts\./)).toBeVisible();
 	await page.getByRole('button', { name: 'Stage', exact: true }).click();
-	const tray = page.getByRole('complementary', { name: 'Changes in flight' });
+	const tray = await openTray(page);
 	await expect(tray.getByText(/cpu 2 to 4/)).toBeVisible();
 	await expect(tray.getByText(/memory 4Gi to 8Gi/)).toBeVisible();
 
@@ -166,7 +161,7 @@ test('the tray discards a draft in place, asking once', async ({ page }) => {
 	// The header says what waits to be proposed.
 	await expect(page.getByRole('button', { name: '1 staged, not proposed' })).toBeVisible();
 
-	const tray = page.getByRole('complementary', { name: 'Changes in flight' });
+	const tray = await openTray(page);
 	await tray.getByRole('button', { name: 'Discard' }).click();
 	await expect(tray.getByText('Discard 1 staged change?')).toBeVisible();
 	await tray.getByRole('button', { name: 'Keep' }).click();

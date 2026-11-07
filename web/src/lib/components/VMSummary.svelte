@@ -101,18 +101,88 @@
 	});
 </script>
 
-<!-- The object fact grid (the review-screen idiom): the configuration across
-     the top (git, live and staged per field), then cards that each carry their
-     next action, with the live console preview beside them. -->
-<div class="flex flex-col gap-4 xl:flex-row xl:items-start">
-	<div class="grid min-w-0 flex-1 gap-4 md:grid-cols-2">
-		<div class="md:col-span-2">
-			<VMConfigCard {vm} {stagedItem} {driftChanges} canAuthor={!!onedit} {onedit} />
+<!-- Two columns: the configuration (git, live and staged per field) and the
+     cards that carry a next action on the left; the guest, its placement and
+     the console preview on the right. -->
+<div class="grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(17rem,1fr)]">
+	<div class="flex min-w-0 flex-col gap-4">
+		<VMConfigCard {vm} {stagedItem} {driftChanges} canAuthor={!!onedit} {onedit} />
+		<div class="grid items-start gap-4 xl:grid-cols-2">
+			<InfoCard title="GitOps">
+				{#snippet action()}
+					{#if stagedItem}
+						<Button
+							variant="link"
+							size="sm"
+							onclick={() => ui.openChanges({ kind: 'item', project, key: itemKey(stagedItem) })}
+							>Review changes</Button
+						>
+					{/if}
+				{/snippet}
+				<div class="px-3 pt-2 pb-1">
+					<GitOpsStepper
+						stage={stagedItem ? 'staged' : vm.sync === 'Synced' ? 'synced' : 'merged'}
+					/>
+				</div>
+				<dl class="divide-y divide-line-soft text-[13px]">
+					<Row label="Source" value={vm.sourceFile} mono />
+					<Row label="Sync"><SyncBadge sync={vm.sync} error={vm.syncError} /></Row>
+					<Row
+						label="Live vs git"
+						value={driftChanges === null
+							? '—'
+							: driftChanges.length
+								? `${driftChanges.length} field${driftChanges.length > 1 ? 's' : ''} differ — see below`
+								: 'Identical'}
+					/>
+				</dl>
+				{#if vm.sourceFile}
+					<div class="flex items-center gap-2 border-t border-line-soft px-3 py-1.5 text-xs">
+						{#if historyRes.loading}
+							<span class="text-ink-faint">loading history…</span>
+						{:else if historyRes.failed}
+							<span class="text-danger-ink">{historyRes.error}</span>
+						{:else if !latest}
+							<span class="text-ink-faint">No merged changes yet.</span>
+						{:else}
+							<span class="min-w-0 truncate text-ink-soft" title={latest.title}
+								>Last change: {latest.title}</span
+							>
+							<span class="shrink-0 text-ink-faint">{relativeAge(latest.when)}</span>
+						{/if}
+						<Button
+							variant="link"
+							class="ml-auto shrink-0"
+							href="?tab=changes"
+							data-sveltekit-replacestate>All changes</Button
+						>
+					</div>
+				{/if}
+			</InfoCard>
+			<InfoCard title="Issues">
+				{#if vmIssues.length === 0}
+					<p class="flex items-center gap-2 px-3 py-2 text-xs text-ink-faint">
+						<StatusDot tone="ok" size="xs" /> No standing problems.
+					</p>
+				{:else}
+					<ul class="divide-y divide-line-soft">
+						{#each vmIssues as i (i.label)}
+							<li class="flex items-start gap-2 px-3 py-2 text-xs">
+								<span class="mt-0.5"><StatusDot tone={i.severity} size="xs" /></span>
+								<span class="text-ink-soft">{i.label}{i.detail ? ` — ${i.detail}` : ''}</span>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</InfoCard>
 		</div>
+		<CapacityUsage {usage} loading={usageLoading} failed={usageFailed} />
+	</div>
+	<div class="flex min-w-0 flex-col gap-4">
 		<InfoCard title="Guest">
 			{#snippet action()}
 				{#if vm.phase === 'Running'}
-					<Button variant="link" size="sm" onclick={onconsole}>Console</Button>
+					<Button variant="link" size="sm" onclick={onconsole}>Open console</Button>
 				{/if}
 			{/snippet}
 			<dl class="divide-y divide-line-soft text-[13px]">
@@ -128,7 +198,6 @@
 				<Row label="Uptime" value={vm.power === 'On' ? duration(vm.startedAt) : ''} />
 			</dl>
 		</InfoCard>
-
 		<InfoCard title="Placement">
 			{#snippet action()}
 				{#if onmigrate && vm.phase === 'Running'}
@@ -153,77 +222,8 @@
 				<Row label="Eviction strategy" value={vm.evictionStrategy || 'Cluster default'} />
 			</dl>
 		</InfoCard>
-
-		<InfoCard title="GitOps">
-			{#snippet action()}
-				{#if stagedItem}
-					<Button
-						variant="link"
-						size="sm"
-						onclick={() => ui.openChanges({ kind: 'item', project, key: itemKey(stagedItem) })}
-						>Review changes</Button
-					>
-				{/if}
-			{/snippet}
-			<div class="px-3 pt-2 pb-1">
-				<GitOpsStepper stage={stagedItem ? 'staged' : vm.sync === 'Synced' ? 'synced' : 'merged'} />
-			</div>
-			<dl class="divide-y divide-line-soft text-[13px]">
-				<Row label="Source" value={vm.sourceFile} mono />
-				<Row label="Sync"><SyncBadge sync={vm.sync} error={vm.syncError} /></Row>
-				<Row
-					label="Live vs git"
-					value={driftChanges === null
-						? '—'
-						: driftChanges.length
-							? `${driftChanges.length} field${driftChanges.length > 1 ? 's' : ''} differ — see below`
-							: 'Identical'}
-				/>
-			</dl>
-			{#if vm.sourceFile}
-				<div class="flex items-center gap-2 border-t border-line-soft px-3 py-1.5 text-xs">
-					{#if historyRes.loading}
-						<span class="text-ink-faint">loading history…</span>
-					{:else if historyRes.failed}
-						<span class="text-danger-ink">{historyRes.error}</span>
-					{:else if !latest}
-						<span class="text-ink-faint">No merged changes yet.</span>
-					{:else}
-						<span class="min-w-0 truncate text-ink-soft" title={latest.title}
-							>Last change: {latest.title}</span
-						>
-						<span class="shrink-0 text-ink-faint">{relativeAge(latest.when)}</span>
-					{/if}
-					<Button
-						variant="link"
-						class="ml-auto shrink-0"
-						href="?tab=changes"
-						data-sveltekit-replacestate>All changes</Button
-					>
-				</div>
-			{/if}
-		</InfoCard>
-
-		<InfoCard title="Issues">
-			{#if vmIssues.length === 0}
-				<p class="flex items-center gap-2 px-3 py-2 text-xs text-ink-faint">
-					<StatusDot tone="ok" size="xs" /> No standing problems.
-				</p>
-			{:else}
-				<ul class="divide-y divide-line-soft">
-					{#each vmIssues as i (i.label)}
-						<li class="flex items-start gap-2 px-3 py-2 text-xs">
-							<span class="mt-0.5"><StatusDot tone={i.severity} size="xs" /></span>
-							<span class="text-ink-soft">{i.label}{i.detail ? ` — ${i.detail}` : ''}</span>
-						</li>
-					{/each}
-				</ul>
-			{/if}
-		</InfoCard>
-
-		<CapacityUsage {usage} loading={usageLoading} failed={usageFailed} />
+		<ConsolePreview {vm} onopen={() => onconsole()} />
 	</div>
-	<ConsolePreview {vm} onopen={() => onconsole()} />
 </div>
 
 {#if !vm.sourceFile}

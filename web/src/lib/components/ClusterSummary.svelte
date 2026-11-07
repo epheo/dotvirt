@@ -1,19 +1,21 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
+	import { GitPullRequest } from '@lucide/svelte';
 	import {
 		api,
 		vmKey,
-		type ClusterMetric,
 		type ClusterSummary,
 		type HostCapacity,
 		type Node,
 		type VM,
 	} from '#lib/api.js';
-	import { bytes, quantity } from '#lib/format.js';
 	import { headroom } from '#lib/headroom.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 	import { TONE_DOT } from '#lib/status.js';
+	import CapacityCard from './CapacityCard.svelte';
 	import IssuesCard from './IssuesCard.svelte';
 	import QuotaBand from './QuotaBand.svelte';
 	import ScopeChanges from './ScopeChanges.svelte';
@@ -59,7 +61,13 @@
 	});
 
 	// The stat line counts the same VMs the VMs tab lists, and "with issues"
-	// reads the same plane as the header.
+	// reads the same plane as the header. "In a change" is staged or in an
+	// open PR, the same set as the VMs tab's chip.
+	$effect(() => {
+		inventory.proposalsKey;
+		untrack(() => reviewCache.loadProposals(inventory.proposals));
+	});
+	const inPRs = $derived(reviewCache.vmPRs(inventory.proposals));
 	const stats = $derived.by(() => {
 		const issueKeys = new Set(inventory.issues.map((i) => i.scope));
 		const phases = new Map<string, number>();
@@ -67,7 +75,7 @@
 		let staged = 0;
 		for (const vm of vms) {
 			if (issueKeys.has(vmKey(vm))) issues++;
-			if (drafts.stagedByKey.has(vmKey(vm))) staged++;
+			if (drafts.stagedByKey.has(vmKey(vm)) || inPRs.has(vmKey(vm))) staged++;
 			const p = vm.paused ? 'Paused' : (vm.phase ?? (vm.power === 'Off' ? 'Stopped' : ''));
 			if (p) phases.set(p, (phases.get(p) ?? 0) + 1);
 		}
@@ -90,50 +98,12 @@
 					: /Err|CrashLoop|Unschedulable|Failed/.test(p)
 						? TONE_DOT.danger
 						: TONE_DOT.info;
-
-	// Each bar: what is in use now, what VMs have committed (the lighter band,
-	// clipped at the boundary), against node-allocatable.
-	type Bar = { label: string; now: string; committed?: string; used: number; held: number };
-	const pct = (v: number, total: number) => (total > 0 ? Math.min(100, (v / total) * 100) : 0);
-	const bars = $derived.by((): Bar[] => {
-		if (!data) return [];
-		const c = (m: ClusterMetric) => ({
-			used: pct(m.used, m.total),
-			held: pct(m.allocated ?? 0, m.total),
-		});
-		return [
-			{
-				label: 'CPU',
-				now: data.cpu.total
-					? `${trim(data.cpu.used)} of ${trim(data.cpu.total)} cores in use`
-					: 'no data',
-				committed: data.cpu.allocated ? `${trim(data.cpu.allocated)} vCPU committed` : undefined,
-				...c(data.cpu),
-			},
-			{
-				label: 'Memory',
-				now: data.memory.total
-					? `${bytes(data.memory.used)} of ${bytes(data.memory.total)} in use`
-					: 'no data',
-				committed: data.memory.allocated ? `${bytes(data.memory.allocated)} committed` : undefined,
-				...c(data.memory),
-			},
-			{
-				label: 'Guest disks',
-				now: data.storage.total
-					? `${bytes(data.storage.used)} of ${bytes(data.storage.total)} used`
-					: 'no data',
-				used: pct(data.storage.used, data.storage.total),
-				held: 0,
-			},
-		];
-	});
-	const trim = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
 </script>
 
-<div class="border-b border-line bg-inset px-4 py-3">
+<div class="border-b border-line px-4 py-3">
 	<div class="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-sm">
-		<span class="text-lg font-semibold text-ink">{vms.length} VM{vms.length === 1 ? '' : 's'}</span>
+		<span class="text-2xl font-semibold text-ink">{vms.length} VM{vms.length === 1 ? '' : 's'}</span
+		>
 		{#if stats.issues}
 			<span class="flex items-center gap-1.5 font-medium text-danger-ink">
 				<span class="inline-block h-2 w-2 rounded-full {TONE_DOT.danger}"
@@ -147,60 +117,11 @@
 			</span>
 		{/each}
 		{#if stats.staged}
-			<span class="text-accent-ink">{stats.staged} staged</span>
+			<a href="?tab=vms" class="flex items-center gap-1.5 text-accent-ink hover:underline"
+				><GitPullRequest size={13} />{`${stats.staged} in a change`}</a
+			>
 		{/if}
 	</div>
-
-	{#if data}
-		<div class="mt-3 grid gap-x-8 gap-y-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-			<div class="grid gap-3 sm:grid-cols-3">
-				{#each bars as b (b.label)}
-					<div class="min-w-0">
-						<div class="text-xs font-semibold tracking-wide text-ink-muted uppercase">
-							{b.label}
-						</div>
-						<div class="mt-0.5 text-[13px] text-ink tabular-nums">{b.now}</div>
-						<div class="relative mt-1.5 h-2 overflow-hidden rounded-sm bg-[var(--chart-track)]">
-							<span
-								class="absolute inset-y-0 left-0 bg-[var(--chart-1)] opacity-35"
-								style:width="{b.held}%"
-							></span>
-							<span class="absolute inset-y-0 left-0 bg-[var(--chart-1)]" style:width="{b.used}%"
-							></span>
-						</div>
-						{#if b.committed}
-							<div class="mt-1 text-xs text-ink-muted tabular-nums">{b.committed}</div>
-						{/if}
-					</div>
-				{/each}
-			</div>
-
-			{#if room}
-				<div class="min-w-0">
-					<div class="text-xs font-semibold tracking-wide text-ink-muted uppercase">Headroom</div>
-					<div class="mt-0.5 text-[15px] font-semibold text-ink">
-						Room for about {room.count} more VM{room.count === 1 ? '' : 's'}
-					</div>
-					<p class="mt-0.5 text-xs text-ink-soft">
-						Sized like most of yours: {room.size.cpu} vCPU, {quantity(room.size.memory)}{room.size
-							.name
-							? ` (${room.size.name})`
-							: ''}. Memory is the limit; vCPU is shared, {room.vcpuPerCore.toFixed(1)} committed per
-						core.
-					</p>
-					{#each room.excluded as x (x.node)}
-						<p class="text-xs text-ink-muted">{x.node} is {x.reason} and not counted.</p>
-					{/each}
-				</div>
-			{/if}
-		</div>
-	{:else if summary.loading}
-		<p class="mt-2 text-xs text-ink-faint">Loading capacity...</p>
-	{:else if summary.failed}
-		<p class="mt-2 text-xs text-ink-muted">
-			Capacity unavailable: cluster metrics are off or unreachable.
-		</p>
-	{/if}
 
 	<!-- Quota-aware capacity: ResourceQuota bars at project/namespace scope -
 	     the tenant's real boundary, where node-allocatable is the cluster's. -->
@@ -212,9 +133,19 @@
 </div>
 
 <div class="grid items-start gap-4 p-4 lg:grid-cols-2">
-	<IssuesCard scope={{ project: scope.project, namespace: scope.namespace }} />
-	<ScopeChanges scope={{ project: scope.project, namespace: scope.namespace }} />
+	<IssuesCard
+		scope={{ project: scope.project, namespace: scope.namespace }}
+		label={scope.namespace ?? scope.project ?? scope.node ?? 'All VMs'}
+	/>
+	<CapacityCard
+		{data}
+		loading={summary.loading}
+		failed={summary.failed}
+		{room}
+		cap={cap.failed ? null : cap.data}
+	/>
 	{#if data}
 		<TopConsumers topCpu={data.topCpu} topMemory={data.topMemory} {vms} {onselect} />
 	{/if}
+	<ScopeChanges scope={{ project: scope.project, namespace: scope.namespace }} />
 </div>

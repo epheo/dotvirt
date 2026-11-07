@@ -341,11 +341,49 @@ func defaultTitle(view model.DraftView) string {
 	if !ok {
 		return fmt.Sprintf("%d changes: %s", len(view.Items), list)
 	}
-	title := verb + " " + list
 	if kind == "edit" && len(view.Items) == 1 {
-		title += ": " + changeSummary(view.Items[0].Changes)
+		if t := valueTitle(view.Items[0]); t != "" {
+			return t
+		}
+		return verb + " " + list + ": " + changeSummary(view.Items[0].Changes)
 	}
-	return title
+	return verb + " " + list
+}
+
+// valueTitle says what a one-VM edit sets, the way a reviewer reads it:
+// "web-1: 4 vCPU, 8 GiB memory". Empty unless every change is a plain value
+// on a VM and there are few enough to read in a title.
+func valueTitle(it model.DraftItem) string {
+	if (it.Resource != "" && it.Resource != "vm") || len(it.Changes) == 0 || len(it.Changes) > 3 {
+		return ""
+	}
+	parts := make([]string, 0, len(it.Changes))
+	for _, c := range it.Changes {
+		if c.Action != "change" || c.To == "" {
+			return ""
+		}
+		switch c.Field {
+		case "CPU", "Instance type":
+			parts = append(parts, c.To)
+		case "Memory":
+			parts = append(parts, binaryUnits(c.To)+" memory")
+		case "Power":
+			parts = append(parts, "power "+strings.ToLower(c.To))
+		default:
+			return ""
+		}
+	}
+	return it.Name + ": " + strings.Join(parts, ", ")
+}
+
+// binaryUnits spells a Kubernetes quantity's binary suffix out: "8Gi" reads "8 GiB".
+func binaryUnits(q string) string {
+	for _, s := range []string{"Ki", "Mi", "Gi", "Ti"} {
+		if n, ok := strings.CutSuffix(q, s); ok && n != "" {
+			return n + " " + s + "B"
+		}
+	}
+	return q
 }
 
 // changeSummary is one change spelled out, or the fields a multi-field edit touches.

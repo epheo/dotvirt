@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import {
 		ArrowRightLeft,
 		ChevronDown,
@@ -33,7 +34,8 @@
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { duration } from '#lib/format.js';
-	import { phaseTone, TONE_DOT, TONE_TEXT } from '#lib/status.js';
+	import { phaseTone, TONE_DOT, TONE_PILL } from '#lib/status.js';
+	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 	import ActionMenu from './ActionMenu.svelte';
 	import Banner from './Banner.svelte';
 	import Console from './Console.svelte';
@@ -175,15 +177,26 @@
 	);
 	const driftChanges = $derived(driftRes.data);
 
-	// Where it runs and for how long, or the state it is in instead.
-	const runLine = $derived.by(() => {
-		const state = vm.paused
-			? 'Paused'
-			: (vm.phase ?? (vm.power === 'Off' ? 'Stopped' : String(vm.power)));
-		if (!vm.nodeName) return state;
-		const up = vm.phase === 'Running' && !vm.paused ? duration(vm.startedAt) : '';
-		return `${state} on ${vm.nodeName}${up ? `, up ${up}` : ''}`;
+	// What it is doing and for how long; the host is a link in the line.
+	const runState = $derived(
+		vm.paused ? 'Paused' : (vm.phase ?? (vm.power === 'Off' ? 'Stopped' : String(vm.power))),
+	);
+	const uptime = $derived(
+		vm.phase === 'Running' && !vm.paused && vm.nodeName ? duration(vm.startedAt) : '',
+	);
+
+	// The Changes tab counts what is in flight for this VM: its staged edit and
+	// the open PRs whose diff names it.
+	$effect(() => {
+		inventory.proposalsKey;
+		untrack(() => reviewCache.loadProposals(inventory.proposals));
 	});
+	const inFlight = $derived(
+		(stagedItem ? 1 : 0) + (reviewCache.vmPRs(inventory.proposals).get(vmKey(vm))?.length ?? 0),
+	);
+	const tabs = $derived(
+		VM_TABS.map((t) => (t.id === 'changes' && inFlight ? { ...t, count: inFlight } : t)),
+	);
 
 	// adoptVM owns its toasts; the run only feeds the busy state.
 	const adopt = () => reconcileOp.run(() => adoptVM(vm));
@@ -200,51 +213,56 @@
 
 <div class="flex h-full flex-col">
 	<div class="border-b border-line px-4 pt-4">
-		<div class="flex items-center gap-2.5">
+		<!-- Where the VM stands, in one line: what runs and where, then on the
+		     right whether it matches git and what waits to be proposed. -->
+		<div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
 			<Server size={20} class="shrink-0 text-ink-muted" />
-			<h2 class="text-lg font-semibold text-ink">{vm.name}</h2>
-			<SyncBadge sync={vm.sync} error={vm.syncError} />
-			<span class="ml-1 flex min-w-0 items-center gap-1.5 truncate text-xs text-ink-faint">
-				{vm.namespace}{#if vm.instancetype}<span class="text-line-strong">/</span
-					>{vm.instancetype}{/if}
+			<h2 class="text-xl font-semibold text-ink">{vm.name}</h2>
+			<span class="flex items-center gap-1.5 text-[13px] text-ink-soft">
+				<span class="size-2 shrink-0 rounded-full {TONE_DOT[phaseTone(vm.phase, vm.paused)]}"
+				></span>
+				<span
+					>{`${runState}${vm.nodeName ? ' on ' : ''}`}{#if vm.nodeName}<a
+							href="/hosts/{encodeURIComponent(vm.nodeName)}"
+							class="text-accent-ink underline decoration-line-strong underline-offset-2 hover:decoration-current"
+							>{vm.nodeName}</a
+						>{/if}{uptime ? `, up ${uptime}` : ''}</span
+				>
+			</span>
+			<span class="ml-auto flex flex-wrap items-center gap-2">
+				{#if vm.sync !== 'Synced' && !driftChanges?.length}
+					<SyncBadge sync={vm.sync} error={vm.syncError} />
+				{/if}
+				{#if driftChanges?.length}
+					<span class="rounded-full px-2 py-0.5 text-xs {TONE_PILL.warn}"
+						>Live differs from git in {driftChanges.length} field{driftChanges.length === 1
+							? ''
+							: 's'}</span
+					>
+				{/if}
+				{#if stagedItem}
+					<button
+						class="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs hover:underline {TONE_PILL.info}"
+						onclick={() =>
+							(ui.modal = { kind: 'propose', project: inventory.projectOf(vm.namespace) })}
+						><Pencil size={11} />{stagedItem.changes.length || 1} staged, not proposed</button
+					>
+				{/if}
 			</span>
 		</div>
-		<!-- Where the VM stands in one line: what runs, whether it matches git,
-		     and what waits to be proposed. -->
-		<p class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-soft">
-			<span class="flex items-center gap-1.5">
-				<span class="size-2 rounded-full {TONE_DOT[phaseTone(vm.phase, vm.paused)]}"></span>
-				{runLine}
-			</span>
-			{#if driftChanges?.length}
-				<span class={TONE_TEXT.warn}
-					>Live differs from git in {driftChanges.length} field{driftChanges.length === 1
-						? ''
-						: 's'}</span
-				>
-			{/if}
-			{#if stagedItem}
-				<button
-					class="text-accent-ink hover:underline"
-					onclick={() =>
-						(ui.modal = { kind: 'propose', project: inventory.projectOf(vm.namespace) })}
-					>{stagedItem.changes.length || 1} staged, not proposed</button
-				>
-			{/if}
-		</p>
 		<!-- Two groups, named: what runs now, and what only stages a change for a
 		     pull request. The git glyph repeats the second on each button. -->
 		<div class="mt-2 mb-2 flex flex-wrap items-end gap-x-3 gap-y-2">
 			<div role="group" aria-label="Runs now" class="flex flex-col gap-1">
 				<span class="px-1 text-[11px] tracking-wide text-ink-muted uppercase">Runs now</span>
-				<div class="flex flex-wrap items-center gap-0.5">
+				<div class="flex flex-wrap items-center gap-1.5">
 					{#each toolbar as t (t.id)}
 						{@const Icon = t.icon}
 						<button
 							onclick={() => handleAction(t.action)}
 							disabled={!t.action.enabled(vm) || runtimeOp.busy}
 							title={t.action.title ?? ''}
-							class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-45 disabled:hover:bg-transparent"
+							class="flex items-center gap-1.5 rounded border border-line-strong bg-panel px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-45 disabled:hover:bg-panel"
 						>
 							<Icon size={13} />
 							{t.label}
@@ -309,7 +327,7 @@
 				{/snippet}
 			</HeaderMenu>
 		</div>
-		<TabBar tabs={[...VM_TABS]} active={tab} href={(t) => `?tab=${t}`} />
+		<TabBar {tabs} active={tab} href={(t) => `?tab=${t}`} />
 	</div>
 
 	{#if vm.migration && !vm.migration.completed && !vm.migration.failed}

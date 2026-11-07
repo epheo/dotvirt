@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Folder, Layers, LayoutGrid, TriangleAlert } from '@lucide/svelte';
+	import { Folder, Layers, LayoutGrid } from '@lucide/svelte';
 	import type { Project, ProjectNamespace } from '#lib/api.js';
 	import { issueCountByProject } from '#lib/issues.js';
 	import { hrefForScope, scopeFromPath } from '#lib/nav.js';
@@ -43,8 +43,17 @@
 	const projectDrift = (p: Project) => p.namespaces.some(nsDrift);
 	const vmCount = (p: Project) => p.namespaces.reduce((n, ns) => n + ns.vms.length, 0);
 
-	// Standing problems per project, for the attention badge on the row.
+	// Standing problems per project, for the attention dot on the row.
 	const issueCounts = $derived(issueCountByProject(inventory.issues));
+	const issueTone = $derived.by(() => {
+		const rank = { danger: 3, warn: 2, info: 1 };
+		const m = new Map<string, 'danger' | 'warn' | 'info'>();
+		for (const i of inventory.issues) {
+			const have = m.get(i.project);
+			if (!have || rank[i.severity] > rank[have]) m.set(i.project, i.severity);
+		}
+		return m;
+	});
 
 	function ctxContainer(
 		e: MouseEvent,
@@ -86,24 +95,23 @@
 					<Folder size={14} class="shrink-0 text-accent-hover" />
 				{/snippet}
 				<span class="truncate font-semibold text-side-ink">{project.name}</span>
-				{@const n = issueCounts.get(project.name) ?? 0}
-				{#if n > 0}
-					<span
-						class="rounded bg-warn/15 p-0.5 text-warn"
-						title="{n} issue{n === 1 ? '' : 's'} in this project, listed under Issues"
-						><TriangleAlert size={10} /></span
-					>
-				{/if}
-				{#if !project.error}
-					<!-- The Application rollup spans every kind the repo declares (segments,
-					     policies, tenancy). Fall back to the VM-only drift dot only when Argo
-					     isn't wired, so a project never shows two dots. -->
-					<ProjectSyncBadge gitOps={project.gitOps} compact />
-					{#if !project.gitOps && projectDrift(project)}
-						<StatusDot tone="danger" size="xs" title="A VM is out of sync" />
-					{/if}
-				{/if}
+				<!-- The tree only marks state, one dot per row at the right: the worst
+				     issue when the project has any, else the Application rollup (or the
+				     VM-only drift dot when Argo isn't wired). -->
 				{#snippet trailing()}
+					{@const n = issueCounts.get(project.name) ?? 0}
+					{#if n > 0}
+						<StatusDot
+							tone={issueTone.get(project.name) ?? 'warn'}
+							size="xs"
+							title="{n} issue{n === 1 ? '' : 's'} in this project, listed under Issues"
+						/>
+					{:else if !project.error}
+						<ProjectSyncBadge gitOps={project.gitOps} compact />
+						{#if !project.gitOps && projectDrift(project)}
+							<StatusDot tone="danger" size="xs" title="A VM is out of sync" />
+						{/if}
+					{/if}
 					<span class="text-xs text-side-dim">{vmCount(project)}</span>
 				{/snippet}
 			</TreeRow>
@@ -135,10 +143,10 @@
 								<Layers size={13} class="shrink-0 text-side-dim" />
 							{/snippet}
 							<span class="truncate text-side-ink">{ns.namespace}</span>
-							{#if nsDrift(ns)}
-								<StatusDot tone="danger" size="xs" title="A VM is out of sync" />
-							{/if}
 							{#snippet trailing()}
+								{#if nsDrift(ns)}
+									<StatusDot tone="danger" size="xs" title="A VM is out of sync" />
+								{/if}
 								<span class="text-xs text-side-dim">{ns.vms.length}</span>
 							{/snippet}
 						</TreeRow>
