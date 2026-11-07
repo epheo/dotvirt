@@ -88,7 +88,7 @@ push_catalog() {
 		return 0
 	fi
 	FORCE=1
-	build_push operator/catalog.Dockerfile operator "$tag" --build-arg OPM_VERSION="$OPM_VERSION"
+	build_push operator/catalog.Dockerfile operator "$tag"
 }
 
 # entry <version> [replaces] -> one olm.channel entry for $TMPL. The catalog keeps only the

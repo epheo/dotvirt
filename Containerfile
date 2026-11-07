@@ -7,24 +7,28 @@
 FROM --platform=$BUILDPLATFORM docker.io/library/node:26-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94 AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY web/ ./
 RUN npm run build
 
 # --- Stage 2: build the static Go binary ---
 # CGO is disabled, so the Go toolchain cross-compiles for $TARGETARCH on the native build
-# host (no QEMU) — buildx sets TARGETOS/TARGETARCH per target platform.
+# host (no QEMU); buildx sets TARGETOS/TARGETARCH per target platform.
 FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.27.3@sha256:f20d83a83e18dbd2a4714b8ffd4b30b287b6243962dd75608e86abcc63ba4efc AS build
-# GOWORK=off: the repo-root go.work arrives with `COPY . .` and would change the build
-# list after `go mod download`, sending the build to the network uncached.
-ENV GOTOOLCHAIN=auto CGO_ENABLED=0 GOWORK=off GOFLAGS="-buildvcs=false -mod=readonly" \
+ENV GOTOOLCHAIN=auto CGO_ENABLED=0 GOFLAGS="-buildvcs=false -mod=readonly" \
     GOPROXY="https://proxy.golang.org|direct"
-ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /dotvirt ./cmd/dotvirt
+COPY pkg/forge/go.mod pkg/forge/
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+# Declared after the download so every arch shares that layer.
+ARG TARGETOS TARGETARCH
+# Go sources only: a web/ edit must not invalidate this stage.
+COPY cmd cmd
+COPY internal internal
+COPY pkg pkg
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /dotvirt ./cmd/dotvirt
 
 # --- Stage 3: minimal runtime ---
 FROM gcr.io/distroless/static:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3

@@ -28,7 +28,6 @@ on:
         default: false
 
 env:
-  GOTOOLCHAIN: auto
   GOPROXY: https://proxy.golang.org|direct # '|' falls back on any proxy error, not only 404/410
 
 jobs:
@@ -46,11 +45,6 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-      - name: Load pinned tool versions
-        run: grep -v '^#' hack/versions.env >> "$GITHUB_ENV"
       - name: Resolve version + prev
         run: |
           source hack/lib.sh   # current_stable_head + repo-root cd
@@ -71,13 +65,8 @@ jobs:
             echo "REL_SKIP=true" >> "$GITHUB_ENV"
           fi
           echo "Releasing v$ver (replaces v$prev)"
-      - name: Install skopeo + operator-sdk
+      - uses: ./.github/actions/operator-tools # skopeo ships on the runner image
         if: env.REL_SKIP != 'true'
-        run: |
-          sudo apt-get update && sudo apt-get install -y skopeo
-          sudo curl -fsSL -o /usr/local/bin/operator-sdk \
-            "https://github.com/operator-framework/operator-sdk/releases/download/$OPERATOR_SDK_VERSION/operator-sdk_linux_amd64"
-          sudo chmod +x /usr/local/bin/operator-sdk
       - name: Registry login (docker + skopeo)
         if: env.REL_SKIP != 'true'
         env:
@@ -94,6 +83,7 @@ jobs:
         if: env.REL_SKIP != 'true'
         env:
           FORCE: ${{ inputs.force && '1' || '' }}
+          OPM: opm # the operator-tools binary; the scripts' default compiles opm from source
         run: VERSION="$REL_VERSION" PREV="$REL_PREV" CONTAINER_TOOL=docker ./hack/release.sh
       - name: Record the pinned catalog image
         id: pins

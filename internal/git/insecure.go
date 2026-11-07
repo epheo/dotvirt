@@ -28,14 +28,6 @@ func AllowCustomCA(caFile string) {
 }
 
 func installHTTPS(tlsCfg *tls.Config) {
-	client := &http.Client{Transport: transportWith(tlsCfg)}
+	client := &http.Client{Transport: forge.TLSTransport(tlsCfg)}
 	gittransport.InstallProtocol("https", githttp.NewClient(client))
-}
-
-// transportWith keeps the default transport's proxy and dial/TLS/idle
-// timeouts; a bare Transport would drop them and hang on a dead remote.
-func transportWith(tlsCfg *tls.Config) *http.Transport {
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.TLSClientConfig = tlsCfg
-	return t
 }

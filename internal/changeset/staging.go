@@ -105,12 +105,12 @@ func (c *Coordinator) StageCreateVM(id auth.Identity, proj project.ProjectInfo, 
 // multi-document file at another path; a failed read is a failure, never
 // absence.
 func (c *Coordinator) requireUndeclaredVM(read *git.Repo, namespace, name string) error {
-	idx, err := read.DeclaredFilesOnBranch(c.baseBranch)
+	idx, err := indexDeclared(read, c.baseBranch)
 	if err != nil {
 		return err
 	}
-	if _, ok := declaredRef(idx, draft.ResourceVM, namespace, name); ok {
-		return fmt.Errorf("%w: %s/%s already exists in git", model.ErrConflict, namespace, name)
+	if ref, ok := declaredRef(idx, draft.ResourceVM, namespace, name); ok {
+		return fmt.Errorf("%w: %s/%s already exists in git (%s)", model.ErrConflict, namespace, name, idx.Files[ref])
 	}
 	return nil
 }
@@ -136,11 +136,11 @@ func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, 
 		return model.DraftView{}, invalid(err)
 	}
 	entry.Kind = draft.KindCreate
-	idx, err := read.DeclaredFilesOnBranch(c.baseBranch)
+	idx, err := indexDeclared(read, c.baseBranch)
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if path, err := soleDeclarer(idx, git.DeclaredRefs(entry.SourceFile, []byte(entry.Manifest))); err != nil {
+	if path, err := soleDeclarer(idx, declaredRefs(entry.SourceFile, []byte(entry.Manifest))); err != nil {
 		return model.DraftView{}, err
 	} else if path != "" {
 		entry.Kind, entry.SourceFile = draft.KindEdit, path
@@ -157,7 +157,7 @@ func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, 
 // beside its primary network) or documents the index cannot name. A rewrite
 // or removal acts on the whole file, so it is offered only when the file is
 // nothing but the objects asked for.
-func soleDeclarer(idx git.DeclaredIndex, refs []model.ObjectRef) (string, error) {
+func soleDeclarer(idx declaredIndex, refs []model.ObjectRef) (string, error) {
 	path := ""
 	for _, ref := range refs {
 		if p, ok := idx.Files[ref]; ok && path != "" && p != path {
