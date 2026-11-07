@@ -28,12 +28,12 @@ trap restore EXIT   # preview is throwaway — never leave committed files chang
 # The per-commit SHA tag belongs to CI's image job. A second push to it orphans the
 # loser and quay prunes untagged manifests, so a digest pinned here can vanish.
 echo ">> app  -> $REG/dotvirt:v$VERSION"
-build_push Containerfile . "$REG/dotvirt:v$VERSION"
+build_push Containerfile . "$REG/dotvirt:v$VERSION" --build-arg VERSION="$VERSION"
 D_APP="$(digest "$REG/dotvirt:v$VERSION")"
 repin "$REG/dotvirt" "$D_APP" operator/internal/install/dotvirt.go operator/config/manager/manager.yaml
 
 echo ">> operator -> $REG/dotvirt-operator:v$VERSION"
-build_push operator/Dockerfile . "$REG/dotvirt-operator:v$VERSION"
+build_push operator/Dockerfile . "$REG/dotvirt-operator:v$VERSION" --build-arg VERSION="$VERSION"
 D_OP="$(digest "$REG/dotvirt-operator:v$VERSION")"
 repin "$REG/dotvirt-operator" "$D_OP" "$CSV"
 sed -i -E "s#(digest: )sha256:[0-9a-f]{64}#\1${D_OP}#" operator/config/default/kustomization.yaml
