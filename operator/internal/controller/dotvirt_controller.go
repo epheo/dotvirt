@@ -15,9 +15,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/deps"
@@ -475,8 +477,12 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// drifted Deployment/Secret re-reconciles promptly. Services, SAs, PVCs and
 	// Ingresses stay unwatched by design (least-privilege RBAC); their drift heals
 	// on the driftResync requeue.
+	// The CR triggers on spec changes and deletion (which bumps the generation of
+	// an object holding finalizers), never on the pass's own status write: an
+	// error message carrying an ephemeral port would otherwise re-run the pass
+	// back to back against a struggling forge.
 	b := ctrl.NewControllerManagedBy(mgr).
-		For(&dotvirtv1alpha1.Dotvirt{}).
+		For(&dotvirtv1alpha1.Dotvirt{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("dotvirt").
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Secret{})

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
+	"github.com/epheo/dotvirt/operator/internal/deps"
 	"github.com/epheo/dotvirt/operator/internal/install"
 	"github.com/epheo/dotvirt/operator/internal/platform"
 )
@@ -126,7 +128,7 @@ func TestEnvtest(t *testing.T) {
 	})
 
 	// One manager for the remaining subtests: its cleanup belongs to the parent.
-	runManager(t, opCfg, scheme)
+	passes := runManager(t, opCfg, scheme)
 
 	t.Run("install reconciles to ready as the operator", func(t *testing.T) {
 		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
@@ -195,6 +197,21 @@ func TestEnvtest(t *testing.T) {
 		}
 	})
 
+	t.Run("a status-only change does not re-run the pass", func(t *testing.T) {
+		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
+		settle(t, admin, dv, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: install.AppName, Namespace: "dotvirt"}})
+		before := passes.Load()
+		base := dv.DeepCopy()
+		dv.Status.Phase = "Probe"
+		if err := admin.Status().Patch(ctx, dv, client.MergeFrom(base)); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Second)
+		if n := passes.Load() - before; n != 0 {
+			t.Errorf("a status-only change ran %d passes", n)
+		}
+	})
+
 	t.Run("deletion cleans up as the operator", func(t *testing.T) {
 		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
 		if err := admin.Delete(ctx, dv); err != nil {
@@ -221,8 +238,9 @@ func TestEnvtest(t *testing.T) {
 	})
 }
 
-// runManager starts the controller as cmd/main.go wires it, under cfg.
-func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) {
+// runManager starts the controller as cmd/main.go wires it, under cfg, and
+// counts its install passes.
+func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) *atomic.Int64 {
 	t.Helper()
 	hasInstance, _ := labels.NewRequirement(install.InstanceLabel, selection.Exists, nil)
 	instanceOnly := cache.ByObject{Label: labels.NewSelector().Add(*hasInstance)}
@@ -239,13 +257,17 @@ func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	passes := &atomic.Int64{}
 	r := &DotvirtReconciler{
 		Client:    mgr.GetClient(),
 		Scheme:    mgr.GetScheme(),
 		Config:    mgr.GetConfig(),
 		Platform:  platform.Kubernetes,
 		APIReader: mgr.GetAPIReader(),
-		probe:     depsOK,
+		probe: func(c *rest.Config) (deps.Result, error) {
+			passes.Add(1)
+			return depsOK(c)
+		},
 	}
 	if err := r.SetupWithManager(mgr); err != nil {
 		t.Fatal(err)
@@ -259,6 +281,7 @@ func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) {
 			t.Errorf("manager: %v", err)
 		}
 	})
+	return passes
 }
 
 // argoStubCRDs registers the argoproj.io kinds the install applies, schemaless:
@@ -321,6 +344,29 @@ func managedBy(fields []metav1.ManagedFieldsEntry, manager string, op metav1.Man
 		}
 	}
 	return false
+}
+
+// settle waits until the objects' resourceVersions hold still, so the passes
+// their last writes triggered have run.
+func settle(t *testing.T, c client.Client, objs ...client.Object) {
+	t.Helper()
+	versions := func() string {
+		var vs []string
+		for _, obj := range objs {
+			if err := c.Get(context.Background(), client.ObjectKeyFromObject(obj), obj); err != nil {
+				t.Fatal(err)
+			}
+			vs = append(vs, obj.GetResourceVersion())
+		}
+		return strings.Join(vs, ",")
+	}
+	last, stableSince := versions(), time.Now()
+	eventually(t, "objects settled", func() bool {
+		if v := versions(); v != last {
+			last, stableSince = v, time.Now()
+		}
+		return time.Since(stableSince) > 1500*time.Millisecond
+	})
 }
 
 func eventually(t *testing.T, what string, cond func() bool) {
