@@ -51,7 +51,7 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 // aimed at another namespace's manifest. manifest.ValidateEdit is the cheap,
 // repo-free part, for refusing a partial edit early.
 func (c *Coordinator) checkEdit(read *git.Repo, namespace, name string, edit model.VMEdit) (string, error) {
-	idx, err := read.DeclaredFilesOnBranch(c.baseBranch)
+	idx, err := indexDeclared(read, c.baseBranch)
 	if err != nil {
 		return "", err
 	}
@@ -64,7 +64,7 @@ func (c *Coordinator) checkEdit(read *git.Repo, namespace, name string, edit mod
 	if err != nil {
 		return "", err
 	}
-	if _, err := manifest.ApplyEdit(content, git.DefaultNamespace(path), namespace, name, edit); err != nil {
+	if _, err := manifest.ApplyEdit(content, defaultNamespace(path), namespace, name, edit); err != nil {
 		return "", err
 	}
 	return path, nil

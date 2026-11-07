@@ -186,7 +186,7 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) []git.ChangesetIte
 			items = append(items, git.ChangesetItem{
 				Path: e.SourceFile,
 				Transform: func(current []byte) ([]byte, error) {
-					out, err := manifest.ApplyEdit(current, git.DefaultNamespace(e.SourceFile), e.Namespace, e.Name, edit)
+					out, err := manifest.ApplyEdit(current, defaultNamespace(e.SourceFile), e.Namespace, e.Name, edit)
 					if err != nil {
 						// The base can move after stage, and not every edit in a
 						// draft was dry-run (adoption): name the entry to unstage.

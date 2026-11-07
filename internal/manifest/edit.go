@@ -16,11 +16,11 @@ type VMEdit = model.VMEdit
 
 // ApplyEdit edits the VirtualMachine named (namespace, name) within a manifest,
 // changing only the targeted fields. defaultNS is the namespace a document
-// without metadata.namespace belongs to (the file's directory, see
-// git.DefaultNamespace), as ParseVMs takes it. It works by splicing new values into the
-// original text at the exact lines of the target scalars - never re-serializing
-// the document - so the resulting diff touches only the changed lines and all
-// formatting, comments, and key order are preserved byte-for-byte elsewhere.
+// without metadata.namespace belongs to (the repo layout's directory rule), as
+// ParseVMs takes it. It works by splicing new values into the original text at
+// the exact lines of the target scalars - never re-serializing the document -
+// so the resulting diff touches only the changed lines and all formatting,
+// comments, and key order are preserved byte-for-byte elsewhere.
 //
 // yaml.v3's encoder reformats sequences on round-trip, so a node-tree re-marshal
 // would produce noisy diffs; line splicing avoids that entirely.
