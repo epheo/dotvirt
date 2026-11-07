@@ -52,14 +52,32 @@ type OAuth struct {
 	auth   *Authenticator
 	client *http.Client // token exchange; carries the CA the oauth Route is signed with
 
-	mu   sync.Mutex
-	meta *oauthMeta
-	// Probe cache for ClientRegistered: a definitive yes sticks, a definitive no
-	// re-probes after a short TTL.
+	// mu guards the caches below and is never held across network I/O: the
+	// routes that probe are reachable before authentication.
+	mu sync.Mutex
+	// Discovery cache: endpoints stick once found; a failure is answered from
+	// metaErr until probeTTL passes.
+	meta    *oauthMeta
+	metaErr error
+	metaAt  time.Time
+	// Probe cache for ClientRegistered: a definitive yes sticks, any other
+	// outcome re-probes after probeTTL.
 	registered    bool
 	probedPending bool
 	probedAt      time.Time
 }
+
+// probeTTL is how long a probe outcome other than success answers for the
+// next caller. A probe is claimed under mu before it starts, so callers
+// within the window never fan out into outbound requests.
+const probeTTL = 10 * time.Second
+
+// probeTimeout bounds every outbound call the flow makes.
+const probeTimeout = 15 * time.Second
+
+// errDiscoveryPending answers a caller that arrives while another runs the
+// first discovery.
+var errDiscoveryPending = errors.New("oauth discovery: in progress")
 
 type oauthMeta struct {
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
@@ -82,19 +100,44 @@ func NewOAuth(cfg OAuthConfig, saKube kubernetes.Interface, auth *Authenticator)
 		cfg:    cfg,
 		saKube: saKube,
 		auth:   auth,
-		client: &http.Client{Transport: transport, Timeout: 15 * time.Second},
+		client: &http.Client{Transport: transport, Timeout: probeTimeout},
 	}, nil
 }
 
-// discover fetches (once, then cached) the OAuth endpoints from the API server's
-// well-known document. Reached through the SA client so TLS + auth to the API
-// server need no extra wiring.
+// discover returns the OAuth endpoints from the API server's well-known
+// document: fetched once, then cached for good; a failure answers callers for
+// probeTTL. Reached through the SA client so TLS + auth to the API server need
+// no extra wiring.
 func (o *OAuth) discover(ctx context.Context) (*oauthMeta, error) {
 	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.meta != nil {
-		return o.meta, nil
+	if o.meta != nil || time.Since(o.metaAt) < probeTTL {
+		m, err := o.meta, o.metaErr
+		o.mu.Unlock()
+		if m == nil && err == nil {
+			err = errDiscoveryPending
+		}
+		return m, err
 	}
+	o.metaAt = time.Now()
+	o.mu.Unlock()
+
+	// Detached from the caller: a client hanging up must not stamp a failure.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), probeTimeout)
+	defer cancel()
+	m, err := o.fetchMeta(ctx)
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.metaAt = time.Now()
+	if err != nil {
+		o.metaErr = err
+		return nil, err
+	}
+	o.meta, o.metaErr = m, nil
+	return m, nil
+}
+
+func (o *OAuth) fetchMeta(ctx context.Context) (*oauthMeta, error) {
 	raw, err := o.saKube.Discovery().RESTClient().Get().
 		AbsPath("/.well-known/oauth-authorization-server").DoRaw(ctx)
 	if err != nil {
@@ -107,8 +150,7 @@ func (o *OAuth) discover(ctx context.Context) (*oauthMeta, error) {
 	if m.AuthorizationEndpoint == "" || m.TokenEndpoint == "" {
 		return nil, errors.New("oauth discovery: no endpoints in well-known document")
 	}
-	o.meta = &m
-	return o.meta, nil
+	return &m, nil
 }
 
 func (o *OAuth) oauth2Config(m *oauthMeta) *oauth2.Config {
@@ -231,29 +273,40 @@ func (o *OAuth) DesiredClient() (id, secret, redirectURL string) {
 // a reinstall regenerates the Secret while the cluster-scoped OAuthClient
 // survives with the old one, which the authorize endpoint can't see.
 // Network/5xx reads as registered: a flaky oauth stack must not talk users out
-// of a working button. Yes caches for good; no re-probes after a short TTL, so
-// an out-of-band CLI fix clears the state on its own.
+// of a working button. Yes caches for good; any other outcome re-probes after
+// probeTTL, so an out-of-band CLI fix clears the state on its own. One probe
+// runs per window: callers meanwhile read the last outcome.
 func (o *OAuth) ClientRegistered(ctx context.Context) bool {
 	o.mu.Lock()
-	if o.registered || time.Since(o.probedAt) < 10*time.Second {
+	if o.registered || time.Since(o.probedAt) < probeTTL {
 		reg, pending := o.registered, o.probedPending
 		o.mu.Unlock()
-		if reg {
-			return true
-		}
-		return !pending
+		return reg || !pending
 	}
+	o.probedAt = time.Now()
 	o.mu.Unlock()
 
+	registered, definitive := o.probe(ctx)
+	o.mu.Lock()
+	o.registered = registered && definitive
+	o.probedPending = !registered
+	o.probedAt = time.Now()
+	o.mu.Unlock()
+	return registered
+}
+
+// probe runs ClientRegistered's two checks. definitive is false when
+// registered is only the benefit of the doubt.
+func (o *OAuth) probe(ctx context.Context) (registered, definitive bool) {
 	m, err := o.discover(ctx)
 	if err != nil {
-		return true
+		return true, false
 	}
 	u := fmt.Sprintf("%s?response_type=code&client_id=%s&redirect_uri=%s&scope=user:full&state=probe",
 		m.AuthorizationEndpoint, url.QueryEscape(o.cfg.ClientID), url.QueryEscape(o.cfg.RedirectURL))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return true
+		return true, false
 	}
 	// Hold redirects: the probe only needs the status class, never the login page.
 	probeClient := &http.Client{
@@ -265,22 +318,17 @@ func (o *OAuth) ClientRegistered(ctx context.Context) bool {
 	}
 	resp, err := probeClient.Do(req)
 	if err != nil {
-		return true
+		return true, false
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
 
-	registered := resp.StatusCode < 400 || resp.StatusCode >= 500
-	definitive := resp.StatusCode < 400
+	registered = resp.StatusCode < 400 || resp.StatusCode >= 500
+	definitive = resp.StatusCode < 400
 	if definitive && o.secretStale(ctx, m) {
-		registered, definitive = false, false
+		return false, false
 	}
-	o.mu.Lock()
-	o.registered = registered && definitive
-	o.probedPending = !registered
-	o.probedAt = time.Now()
-	o.mu.Unlock()
-	return registered
+	return registered, definitive
 }
 
 // secretStale authenticates the client at the token endpoint with a bogus
