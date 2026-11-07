@@ -200,7 +200,7 @@ func (o *OAuth) LoginRedirect(w http.ResponseWriter, r *http.Request) {
 	state := base64.RawURLEncoding.EncodeToString(b)
 	http.SetCookie(w, &http.Cookie{
 		Name:     stateCookie,
-		Value:    cookieValue(state, o.auth.secret),
+		Value:    cookieValue(state, o.auth.sealer),
 		Path:     "/api/auth",
 		HttpOnly: true,
 		Secure:   isTLS(r),
@@ -226,7 +226,7 @@ func (o *OAuth) Callback(w http.ResponseWriter, r *http.Request) {
 		failLogin("state cookie missing", err)
 		return
 	}
-	want, ok := parseCookieValue(c.Value, o.auth.secret)
+	want, ok := parseCookieValue(c.Value, o.auth.sealer)
 	state := r.URL.Query().Get("state")
 	if !ok || state == "" || !hmac.Equal([]byte(state), []byte(want)) {
 		failLogin("state mismatch", nil)
@@ -264,7 +264,7 @@ func (o *OAuth) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("oauth: %s signed in via OpenShift SSO", id.Username)
 	clearStateCookie(w, r)
-	setCookie(w, r, tok.AccessToken, o.auth.secret)
+	setCookie(w, r, tok.AccessToken, o.auth.sealer)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 

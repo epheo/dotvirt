@@ -11,6 +11,7 @@
 package stream
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -110,18 +111,18 @@ func NewHub(inventory InventoryFunc, wake <-chan struct{}, levels Levels, uiOrig
 }
 
 // conn is one WebSocket connection. Within a pass, the one goroutine handling its
-// identity (Run or a build worker) is the sole writer of lastJS, the sole
+// identity (Run or a build worker) is the sole writer of last, the sole
 // producer into out (a conflating 1-slot mailbox) and the sole closer of evict;
 // passes never overlap. The connection's writePump drains out and writes the
 // latest frame, and ends the connection once evict closes. quit is closed on
 // teardown.
 type conn struct {
-	id     auth.Identity
-	key    string // groups connections of the same identity (same token -> one build)
-	out    chan []byte
-	quit   chan struct{}
-	evict  chan struct{}
-	lastJS string // last frame delivered to THIS conn; owned as described above
+	id    auth.Identity
+	key   string // groups connections of the same identity (same token -> one build)
+	out   chan []byte
+	quit  chan struct{}
+	evict chan struct{}
+	last  []byte // last frame delivered to THIS conn; owned as described above
 }
 
 func newConn(id auth.Identity, key string) *conn {
@@ -354,13 +355,13 @@ func (h *Hub) reject(conns []*conn) {
 }
 
 // sendLatest delivers data to each of conns that doesn't already hold it.
+// Frames are never written after marshalling, so last shares data, not a copy.
 func sendLatest(conns []*conn, data []byte) {
-	js := string(data)
 	for _, c := range conns {
-		if c.lastJS == js {
+		if bytes.Equal(c.last, data) {
 			continue // this connection already holds the latest frame
 		}
-		c.lastJS = js
+		c.last = data
 		c.deliver(data)
 	}
 }

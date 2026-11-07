@@ -7,7 +7,7 @@
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
-	import { ago, num } from '#lib/storage.js';
+	import { ago, num, repeatedNames } from '#lib/storage.js';
 	import Button from '#lib/components/Button.svelte';
 	import Pager from '#lib/components/Pager.svelte';
 	import { DEFAULT_PAGE_SIZE, pageSlice } from '#lib/paging.js';
@@ -34,6 +34,13 @@
 		),
 	);
 	const failures = $derived(snapshots.filter(failed).length);
+	const repeated = $derived(
+		repeatedNames(
+			shown,
+			(s) => s.namespace ?? '',
+			(s) => s.vm ?? '',
+		),
+	);
 	const size = $derived(Number(q.get('per')) || DEFAULT_PAGE_SIZE);
 	const s = $derived(pageSlice(shown.length, Number(q.get('page')) || 1, size));
 	const pageRows = $derived(shown.slice(s.start, s.end));
@@ -122,7 +129,9 @@
 							<a
 								href={vmHref(s.namespace ?? '', s.vm ?? '')}
 								class="font-mono text-xs font-medium text-ink hover:text-accent-ink">{s.vm}</a
-							>
+							>{#if repeated.has(s.vm ?? '')}<span class="ml-1.5 text-xs text-ink-faint"
+									>{s.namespace}</span
+								>{/if}
 						</td>
 						<td class="{TD} font-mono text-xs">{s.name}</td>
 						<td class={TD} title={s.created}>{ago(s.created)}</td>

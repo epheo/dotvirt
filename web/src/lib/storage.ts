@@ -274,6 +274,25 @@ export function applyFilters(rows: DiskRow[], f: DiskFilters): DiskRow[] {
 	);
 }
 
+// Names that appear in more than one namespace of a list. Rows with such a
+// name also show their namespace: two VMs named "test" would read the same.
+export function repeatedNames<T>(
+	items: readonly T[],
+	namespace: (t: T) => string,
+	name: (t: T) => string,
+): Set<string> {
+	const seen = new Map<string, string>();
+	const repeated = new Set<string>();
+	for (const t of items) {
+		const n = name(t);
+		const ns = namespace(t);
+		const first = seen.get(n);
+		if (first === undefined) seen.set(n, ns);
+		else if (first !== ns) repeated.add(n);
+	}
+	return repeated;
+}
+
 // --- sorting ---
 
 export const num = (n: number) => n.toLocaleString('en-US');

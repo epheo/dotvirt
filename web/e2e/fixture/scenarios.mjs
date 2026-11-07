@@ -590,6 +590,43 @@ base.storageClaims = [
 	claim('batch-prod', 'batch-1-rootdisk', 'fast-ssd', '20Gi', 'worker-2'),
 ];
 
+// dupnames: one VM name in two namespaces, as on a real cluster where two
+// teams each made a "test". Storage rows must tell them apart.
+const qaVM = (namespace, node) =>
+	vm(namespace, 'test', {
+		nodeName: node,
+		disks: [rootdisk('test', '20Gi', 'fedora-42'), cloudinit],
+	});
+const dupnames = {
+	...base,
+	name: 'dupnames',
+	inventory: {
+		...base.inventory,
+		projects: [
+			...base.inventory.projects,
+			{
+				name: 'team-qa',
+				repo: 'https://forge.example/dotvirt/team-qa.git',
+				gitOps: { sync: 'Synced', health: 'Healthy', operation: 'Succeeded', revision: 'aa11bb2' },
+				namespaces: [
+					{ namespace: 'qa-a', canAuthor: true, vms: [qaVM('qa-a', 'worker-1')] },
+					{ namespace: 'qa-b', canAuthor: true, vms: [qaVM('qa-b', 'worker-2')] },
+				],
+			},
+		],
+	},
+	storageSnapshots: [
+		...base.storageSnapshots,
+		vmSnapshot('qa-a', 'test', 'test-before-upgrade', 90, ['rootdisk']),
+		vmSnapshot('qa-b', 'test', 'test-nightly', 300, ['rootdisk']),
+	],
+	storageClaims: [
+		...base.storageClaims,
+		claim('qa-a', 'test-rootdisk', 'fast-ssd', '20Gi', 'worker-1'),
+		claim('qa-b', 'test-rootdisk', 'fast-ssd', '20Gi', 'worker-2'),
+	],
+};
+
 // ── empty: pristine install, nothing visible yet ───────────────────────────────
 
 const empty = {
@@ -889,4 +926,5 @@ export const scenarios = {
 	// A full platform at the boards' numbers (2,846 VMs, 131 networks, 3,412
 	// disks); see scale.mjs.
 	scale: scaleScenario(base),
+	dupnames,
 };

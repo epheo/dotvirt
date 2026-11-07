@@ -74,13 +74,13 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 	return view, nil
 }
 
-// objectLabel names an entry's object: "namespace/name", or the bare name for a
-// cluster-scoped object and for a namespace itself.
+// objectLabel names an entry's object; a namespace's entry is keyed under its
+// own name.
 func objectLabel(e draft.Entry) string {
-	if e.Namespace == model.ClusterScopeNS || e.Resource == draft.ResourceNamespace {
+	if e.Resource == draft.ResourceNamespace {
 		return e.Name
 	}
-	return e.Namespace + "/" + e.Name
+	return qualified(e.Namespace, e.Name)
 }
 
 // wizardChanges summarizes a wizard-rendered VM by its sizing and devices, read

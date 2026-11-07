@@ -160,3 +160,31 @@ test('at scale the disks tab reads like the board and pages 50 at a time', async
 	await main.getByRole('checkbox', { name: 'Select all 100 on this page' }).check();
 	await expect(main.getByText(/web-1 rootdisk is already in it\./)).toBeVisible();
 });
+
+test('images nothing was made from fold into one plain row', async ({ page }) => {
+	await page.goto('/storage');
+	const row = page.locator('main tbody tr', { hasText: 'more images' });
+	await expect(row).toContainText('2 more images, none used by a disk yet');
+	await expect(row.getByRole('img')).toHaveCount(0);
+	await expect(row.getByRole('link', { name: 'Show all 2' })).toBeVisible();
+});
+
+test('a VM name in two namespaces shows the namespace on its rows', async ({ page }) => {
+	await setScenario(page, 'dupnames');
+	await page.goto('/storage?tab=disks&q=test');
+	const main = page.locator('main');
+	await expect(main.locator('tbody tr')).toHaveCount(2);
+	await expect(main.locator('tbody tr').nth(0)).toContainText(/test\s*qa-a/);
+	await expect(main.locator('tbody tr').nth(1)).toContainText(/test\s*qa-b/);
+	// A name that appears once reads bare.
+	await page.goto('/storage?tab=disks&q=web-1');
+	await expect(main.locator('tbody tr')).toHaveCount(1);
+	await expect(main.locator('tbody tr')).not.toContainText('web-prod');
+
+	await page.goto('/storage?tab=snapshots');
+	await expect(main.locator('tbody tr', { hasText: 'test-before-upgrade' })).toContainText('qa-a');
+	await expect(main.locator('tbody tr', { hasText: 'test-nightly' })).toContainText('qa-b');
+	await expect(main.locator('tbody tr', { hasText: 'before-release-41' })).not.toContainText(
+		'web-prod',
+	);
+});
