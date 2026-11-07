@@ -499,3 +499,39 @@ func TestCreateProjectRefusesVMNetworkOnExistingNamespace(t *testing.T) {
 		t.Fatalf("want ErrConflict, got %v", err)
 	}
 }
+
+// The preview lists what staging would, restart flags included, and stages
+// nothing; the staged edit then rides the view so an editor can extend it.
+func TestPreviewEditStagesNothing(t *testing.T) {
+	f := newProposeFixture(t)
+	cpu := 64
+	changes, err := f.c.PreviewEdit(f.proj, "alpha", "web", model.VMEdit{CPUCores: &cpu, SetLabels: map[string]string{"env": "prod"}})
+	if err != nil {
+		t.Fatalf("PreviewEdit: %v", err)
+	}
+	restart := map[string]bool{}
+	for _, c := range changes {
+		restart[c.Field] = c.Restart
+	}
+	if !restart["CPU"] || restart["Label env"] {
+		t.Fatalf("want CPU to restart and the label not to, got %+v", changes)
+	}
+	if n := f.draftCount(t); n != 0 {
+		t.Fatalf("preview staged %d entries", n)
+	}
+	if _, err := f.c.PreviewEdit(f.proj, "alpha", "ghost", model.VMEdit{CPUCores: &cpu}); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("a VM git does not declare: want ErrNotFound, got %v", err)
+	}
+
+	req := model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{CPUCores: &cpu}}
+	if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", req); err != nil {
+		t.Fatalf("StageEdit: %v", err)
+	}
+	view, err := f.c.Get(f.id, f.proj)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(view.Items) != 1 || view.Items[0].Edit == nil || *view.Items[0].Edit.CPUCores != 64 {
+		t.Fatalf("the staged edit must ride the view, got %+v", view.Items)
+	}
+}

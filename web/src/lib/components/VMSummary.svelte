@@ -12,7 +12,6 @@
 	import { duration, relativeAge } from '#lib/format.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import { itemKey } from '#lib/review.js';
-	import { vmSizing } from '#lib/sizing.js';
 	import CapacityUsage from './CapacityUsage.svelte';
 	import Button from './Button.svelte';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -22,9 +21,9 @@
 	import GitOpsStepper from './GitOpsStepper.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 	import InfoCard from './InfoCard.svelte';
+	import VMConfigCard from './VMConfigCard.svelte';
 	import Note from './Note.svelte';
 	import Row from './Row.svelte';
-	import StagedDiff from './StagedDiff.svelte';
 	import StatusDot from './StatusDot.svelte';
 
 	// The Summary tab body: at-a-glance tiles, live usage, guest/runtime cards,
@@ -90,15 +89,6 @@
 	);
 	const latest = $derived(historyRes.data?.[0] ?? null);
 
-	const sizing = $derived(vmSizing(vm, inventory.options));
-
-	// Staged changes for this VM, keyed by field label (for inline current->future).
-	const stagedChanges = $derived.by(() => {
-		const m = new Map<string, Change>();
-		for (const c of stagedItem?.changes ?? []) m.set(c.field, c);
-		return m;
-	});
-
 	// Standing problems scoped to this VM (the Issues card), off the same
 	// derivation the bell and the inspector use.
 	const vmIssues = $derived(inventory.issues.filter((i) => i.scope === key));
@@ -111,12 +101,14 @@
 	});
 </script>
 
-<!-- The object fact grid (the review-screen idiom): six cards, each carrying
-     its next action, with the live console preview beside them. Usage bars and
-     sparklines live in the Capacity card; staged values render inline as
-     current -> future wherever the field appears. -->
+<!-- The object fact grid (the review-screen idiom): the configuration across
+     the top (git, live and staged per field), then cards that each carry their
+     next action, with the live console preview beside them. -->
 <div class="flex flex-col gap-4 xl:flex-row xl:items-start">
 	<div class="grid min-w-0 flex-1 gap-4 md:grid-cols-2">
+		<div class="md:col-span-2">
+			<VMConfigCard {vm} {stagedItem} {driftChanges} canAuthor={!!onedit} {onedit} />
+		</div>
 		<InfoCard title="Guest">
 			{#snippet action()}
 				{#if vm.phase === 'Running'}
@@ -125,12 +117,7 @@
 			{/snippet}
 			<dl class="divide-y divide-line-soft text-[13px]">
 				<Row label="Operating system" value={vm.os ?? ''} />
-				<Row label="Power (desired)">
-					{#if stagedChanges.has('Power')}
-						<StagedDiff from={vm.power} to={stagedChanges.get('Power')?.to ?? ''} />
-					{:else}<span class="text-ink">{vm.power}</span>{/if}
-				</Row>
-				<Row label="Status (actual)" value={statusText} />
+				<Row label="Status" value={statusText} />
 				<Row label="IP addresses">
 					<div class="font-mono text-xs text-ink">
 						{#if vm.ips?.length}
@@ -139,45 +126,6 @@
 					</div>
 				</Row>
 				<Row label="Uptime" value={vm.power === 'On' ? duration(vm.startedAt) : ''} />
-			</dl>
-		</InfoCard>
-
-		<InfoCard title="Hardware">
-			{#snippet action()}
-				{#if onedit && vm.sourceFile}
-					<Button variant="link" size="sm" onclick={onedit}>Edit</Button>
-				{/if}
-			{/snippet}
-			<dl class="divide-y divide-line-soft text-[13px]">
-				<Row label="Instance type" value={vm.instancetype ?? ''} />
-				<Row label="Preference" value={vm.preference ?? ''} />
-				<Row label="vCPU">
-					{#if stagedChanges.has('CPU')}
-						<StagedDiff from={`${sizing.cpu ?? '—'}`} to={stagedChanges.get('CPU')?.to ?? ''} />
-					{:else}<span class="text-ink">{sizing.cpu ?? '—'}</span>{/if}
-				</Row>
-				<Row label="Memory">
-					{#if stagedChanges.has('Memory')}
-						<StagedDiff from={sizing.memory ?? '—'} to={stagedChanges.get('Memory')?.to ?? ''} />
-					{:else}<span class="text-ink">{sizing.memory ?? '—'}</span>{/if}
-				</Row>
-				<Row label="Disks">
-					<span class="text-ink">
-						{vm.disks?.length ?? 0}
-						{#if vm.disks?.some((d) => d.size)}
-							<span class="text-ink-faint"
-								>({vm.disks
-									.filter((d) => d.size)
-									.map((d) => d.size)
-									.join(', ')})</span
-							>
-						{/if}
-					</span>
-				</Row>
-				<Row
-					label="Networks"
-					value={vm.networks?.length ? vm.networks.map((n) => n.network || n.name).join(', ') : ''}
-				/>
 			</dl>
 		</InfoCard>
 

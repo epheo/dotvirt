@@ -11,7 +11,7 @@ test('edit stages into the draft and proposes as a PR', async ({ page }) => {
 
 	// Stage a memory change through Edit Settings.
 	await page.getByRole('button', { name: /Edit Settings/ }).click();
-	const memory = page.getByLabel('Memory');
+	const memory = page.getByRole('dialog').getByLabel('Memory');
 	await memory.fill('8Gi');
 	await stageChange(page);
 
@@ -43,7 +43,7 @@ test('the tray reviews and proposes in a sheet; merge stays in the forge', async
 	await login(page);
 	await openVM(page, 'web-1');
 	await page.getByRole('button', { name: /Edit Settings/ }).click();
-	await page.getByLabel('Memory').fill('8Gi');
+	await page.getByRole('dialog').getByLabel('Memory').fill('8Gi');
 	await stageChange(page);
 
 	const tray = page.getByRole('complementary', { name: 'Changes in flight' });
@@ -65,7 +65,7 @@ test('a failed stage shows the backend detail in the dialog', async ({ page }) =
 	// web-2 lives in team-web too — force the failure with the fixture's
 	// sentinel title, which it refuses with a 400 like a backend error.
 	await page.getByRole('button', { name: /Edit Settings/ }).click();
-	await page.getByLabel('Memory').fill('16Gi');
+	await page.getByRole('dialog').getByLabel('Memory').fill('16Gi');
 	await stageChange(page);
 	await page
 		.getByRole('complementary', { name: 'Changes in flight' })
@@ -85,7 +85,7 @@ test('the propose form shows the default title and body; Tab takes them', async 
 	await login(page);
 	await openVM(page, 'web-1');
 	await page.getByRole('button', { name: /Edit Settings/ }).click();
-	await page.getByLabel('Memory').fill('8Gi');
+	await page.getByRole('dialog').getByLabel('Memory').fill('8Gi');
 	await stageChange(page);
 	await page
 		.getByRole('complementary', { name: 'Changes in flight' })
@@ -117,4 +117,32 @@ test('the propose form shows the default title and body; Tab takes them', async 
 	await body.fill('');
 	await main.getByRole('button', { name: 'Propose pull request' }).click();
 	await expect(main.getByRole('button', { name: /PR #77/ })).toBeVisible();
+});
+
+test('a setting edits in place: consequence first, fields add up, one unstages alone', async ({
+	page,
+}) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await openVM(page, 'web-1');
+
+	await page.getByRole('button', { name: 'Change vCPU' }).click();
+	await page.getByRole('spinbutton', { name: 'vCPU' }).fill('4');
+	// The backend says what merging does before anything stages.
+	await expect(page.getByText('web-1 restarts once when the PR merges.')).toBeVisible();
+	await page.getByRole('button', { name: 'Stage', exact: true }).click();
+	await expect(page.getByText(/vCPU staged for web-1/)).toBeVisible();
+
+	// A second field joins the staged edit instead of replacing it.
+	await page.getByRole('button', { name: 'Change Memory' }).click();
+	await page.getByRole('textbox', { name: 'Memory' }).fill('8Gi');
+	await page.getByRole('button', { name: 'Stage', exact: true }).click();
+	const tray = page.getByRole('complementary', { name: 'Changes in flight' });
+	await expect(tray.getByText(/cpu 2 to 4/)).toBeVisible();
+	await expect(tray.getByText(/memory 4Gi to 8Gi/)).toBeVisible();
+
+	// Unstaging one field keeps the other.
+	await page.getByRole('row', { name: /^vCPU/ }).getByRole('button', { name: 'Unstage' }).click();
+	await expect(tray.getByText(/cpu 2 to 4/)).toHaveCount(0);
+	await expect(tray.getByText(/memory 4Gi to 8Gi/)).toBeVisible();
 });

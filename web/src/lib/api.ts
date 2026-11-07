@@ -372,6 +372,9 @@ export const api = {
 	// per-VM routes need no project param.
 	stageEdit: (namespace: string, name: string, req: EditRequest) =>
 		post<DraftView>(`${vmPath(namespace, name)}/edit`, req),
+	// What staging an edit would list, restart flags included; stages nothing.
+	previewEdit: (namespace: string, name: string, edit: Omit<EditRequest, 'sourceFile'>) =>
+		post<Change[]>(`${vmPath(namespace, name)}/edit/preview`, edit),
 	stageCreate: (req: CreateVMRequest) => post<DraftView>('/api/vms', req),
 	createNetwork: (req: NetworkCreate) => post<DraftView>('/api/networks', req),
 	createUplink: (req: UplinkCreate) => post<DraftView>('/api/uplinks', req),

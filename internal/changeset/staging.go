@@ -7,6 +7,7 @@ import (
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
+	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
@@ -39,6 +40,31 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 		return model.DraftView{}, err
 	}
 	return c.Get(id, proj)
+}
+
+// PreviewEdit renders an edit as the changes staging it would list, restart
+// flags included, without touching the draft: an inline editor states the
+// consequence before the user stages.
+func (c *Coordinator) PreviewEdit(proj project.ProjectInfo, namespace, name string, edit model.VMEdit) ([]model.Change, error) {
+	if err := requireRepo(proj); err != nil {
+		return nil, err
+	}
+	read, err := c.read(proj)
+	if err != nil {
+		return nil, err
+	}
+	current, ok, err := findVM(read, c.baseBranch, namespace, name)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("%w: %s/%s is not in git", model.ErrNotFound, namespace, name)
+	}
+	changes := manifest.ChangesForEdit(current, edit)
+	if changes == nil {
+		changes = []model.Change{}
+	}
+	return changes, nil
 }
 
 // StageCreateVM records a new VM in (id, proj)'s draft: the wizard spec rendered

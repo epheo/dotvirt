@@ -52,6 +52,7 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 				return model.DraftView{}, err
 			}
 			item.Changes = manifest.ChangesForEdit(current, *e.Edit)
+			item.Edit = e.Edit
 		case draft.KindCreate:
 			// The manifest IS the change; the rows only explain it.
 			item.YAML = e.Manifest

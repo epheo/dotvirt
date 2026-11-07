@@ -58,6 +58,10 @@ func (d *reachedDraft) StageEdit(auth.Identity, project.ProjectInfo, string, str
 	d.hit("StageEdit")
 	return view, nil
 }
+func (d *reachedDraft) PreviewEdit(project.ProjectInfo, string, string, model.VMEdit) ([]model.Change, error) {
+	d.hit("PreviewEdit")
+	return nil, nil
+}
 func (d *reachedDraft) StageCreateVM(auth.Identity, project.ProjectInfo, json.RawMessage) (model.DraftView, error) {
 	d.hit("StageCreateVM")
 	return view, nil
@@ -199,6 +203,7 @@ var authorRoutes = []struct {
 	method, path, body, reaches string
 }{
 	{http.MethodPost, "/api/vms/web/vm1/edit", `{"sourceFile":"web/vm1.yaml"}`, "StageEdit"},
+	{http.MethodPost, "/api/vms/web/vm1/edit/preview", `{"cpuCores":4}`, "PreviewEdit"},
 	{http.MethodPost, "/api/vms", `{"namespace":"web","name":"vm2"}`, "StageCreateVM"},
 	{http.MethodPost, "/api/vms/web/vm1/delete", ``, "StageDelete"},
 	{http.MethodPost, "/api/vms/web/vm1/adopt", ``, "Adopt"},

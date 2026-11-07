@@ -162,28 +162,47 @@ function stage(res, namespace, name, item) {
 	const p = projectOf(namespace);
 	if (!p) return sendText(res, 404, 'namespace not found in any visible project');
 	if (!p.repo) return sendText(res, 503, 'project has no usable repo');
-	const items = state.staged.get(p.name) ?? [];
+	// One entry per VM, replaced on every stage, like the backend's draft store.
+	const items = (state.staged.get(p.name) ?? []).filter(
+		(i) => i.namespace !== namespace || i.name !== name,
+	);
 	items.push({ namespace, name, ...item });
 	state.staged.set(p.name, items);
 	sendJSON(res, 200, draftFor(p.name));
 }
 
-// Human-readable change rows from a VMEdit body, the way the backend's semantic
-// diff would spell them — enough for the Changes panel to render real content.
-function editChanges(body) {
+// Human-readable change rows from a VMEdit body, with the backend's labels and
+// restart flags (manifest.ChangesForEdit), against the VM as git declares it.
+function editChanges(body, vm) {
 	const changes = [];
-	if (body.power) changes.push({ field: 'power', action: 'change', to: body.power });
-	if (body.cpuCores)
-		changes.push({ field: 'cpuCores', action: 'change', to: String(body.cpuCores), restart: true });
-	if (body.memory)
-		changes.push({ field: 'memory', action: 'change', to: body.memory, restart: true });
-	if (body.instancetype)
-		changes.push({ field: 'instancetype', action: 'change', to: body.instancetype });
+	const change = (field, from, to, restart = false) => {
+		if (String(from ?? '') !== String(to))
+			changes.push({
+				field,
+				action: 'change',
+				from: from === undefined ? undefined : String(from),
+				to: String(to),
+				restart,
+			});
+	};
+	if (body.power) change('Power', vm?.power, body.power);
+	if (body.cpuCores) change('CPU', vm?.cpuCores, body.cpuCores, true);
+	if (body.memory) change('Memory', vm?.memory, body.memory, true);
+	if (body.instancetype) change('Instance type', vm?.instancetype, body.instancetype, true);
 	for (const d of body.addDisks ?? [])
-		changes.push({ field: `disk ${d.name}`, action: 'add', to: d.size });
-	for (const d of body.removeDisks ?? []) changes.push({ field: `disk ${d}`, action: 'remove' });
-	if (!changes.length) changes.push({ field: 'manifest', action: 'change' });
+		changes.push({ field: 'Disk', action: 'add', to: `${d.name} (${d.size})`, restart: true });
+	for (const d of body.removeDisks ?? [])
+		changes.push({ field: 'Disk', action: 'remove', from: d, restart: true });
 	return changes;
+}
+
+function findVM(ns, name) {
+	for (const p of state.scenario.inventory.projects)
+		for (const n of p.namespaces) {
+			const vm = n.vms.find((v) => v.namespace === ns && v.name === name);
+			if (vm) return vm;
+		}
+	return undefined;
 }
 
 // ── the /api surface ───────────────────────────────────────────────────────────
@@ -361,6 +380,12 @@ async function handleAPI(req, res, url) {
 		});
 	}
 
+	m = path.match(/^\/api\/vms\/([^/]+)\/([^/]+)\/edit\/preview$/);
+	if (m && req.method === 'POST') {
+		const body = await readBody(req);
+		return sendJSON(res, 200, editChanges(body ?? {}, findVM(m[1], m[2])));
+	}
+
 	m = path.match(/^\/api\/vms\/([^/]+)\/([^/]+)(?:\/([a-z]+))?$/);
 	if (m) {
 		const [, ns, name, sub] = m;
@@ -368,7 +393,13 @@ async function handleAPI(req, res, url) {
 			if (sub === 'edit') {
 				const body = await readBody(req);
 				if (!body?.sourceFile) return sendText(res, 400, 'sourceFile is required');
-				return stage(res, ns, name, { kind: 'edit', changes: editChanges(body) });
+				const { sourceFile: _, ...edit } = body;
+				const changes = editChanges(edit, findVM(ns, name));
+				return stage(res, ns, name, {
+					kind: 'edit',
+					changes: changes.length ? changes : [{ field: 'manifest', action: 'change' }],
+					edit,
+				});
 			}
 			if (sub === 'delete') return stage(res, ns, name, { kind: 'delete', changes: [] });
 			if (sub === 'restore') {

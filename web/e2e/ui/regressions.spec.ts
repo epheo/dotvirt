@@ -12,7 +12,7 @@ test('#151: sizing below the preference minimum refuses at stage time', async ({
 	// windows.11 requires 2 vCPUs / 4Gi; understaging must fail HERE, not at
 	// KubeVirt's webhook three merges later.
 	await page.getByLabel('Preference').selectOption('windows.11');
-	await page.getByLabel('Memory').fill('1Gi');
+	await page.getByRole('dialog').getByLabel('Memory').fill('1Gi');
 	await expect(page.getByText(/requires at least 4Gi/)).toBeVisible();
 
 	const finish = page.getByRole('button', { name: 'Stage change' });
@@ -200,7 +200,7 @@ test('a drafts refresh keeps the half-typed PR title', async ({ page }) => {
 	await login(page);
 	await openVM(page, 'web-1');
 	await page.getByRole('button', { name: /Edit Settings/ }).click();
-	await page.getByLabel('Memory').fill('8Gi');
+	await page.getByRole('dialog').getByLabel('Memory').fill('8Gi');
 	await stageChange(page);
 	await page
 		.getByRole('complementary', { name: 'Changes in flight' })
@@ -230,7 +230,7 @@ test('context-menu Edit settings on another VM opens on that VM', async ({ page 
 	await page.locator('aside').getByText('web-2', { exact: true }).click({ button: 'right' });
 	await page.getByRole('button', { name: 'Edit settings', exact: true }).click();
 	await expect(page).toHaveURL(/\/vm\/web-prod\/web-2/);
-	await expect(page.getByLabel('Memory')).toBeVisible();
+	await expect(page.getByRole('dialog').getByLabel('Memory')).toBeVisible();
 });
 
 test('the click that closes a context menu does not select the row under it', async ({ page }) => {

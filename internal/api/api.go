@@ -76,6 +76,7 @@ type Reader interface {
 // method takes the caller's Identity and the resolved target project.
 type Draft interface {
 	StageEdit(id auth.Identity, proj project.ProjectInfo, namespace, name string, req model.EditRequest) (model.DraftView, error)
+	PreviewEdit(proj project.ProjectInfo, namespace, name string, edit model.VMEdit) ([]model.Change, error)
 	StageCreateVM(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
 	// StageCreate renders one network-family object from its form spec; the
 	// route resolved proj from the object's scope, resource picks the form.
