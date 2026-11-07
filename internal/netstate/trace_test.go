@@ -170,8 +170,10 @@ func TestTraceBaselineAndDefault(t *testing.T) {
 	}
 }
 
-// Isolated primary networks are unreachable before any policy runs; a shared
-// CUDN-generated secondary segment is surfaced as a bypass, not a verdict.
+// Isolated primary networks carry nothing, so no policy runs; a shared
+// CUDN-generated secondary segment is then the only path, unfiltered: the
+// answer is Conditional with the bypass as its reason, never a certain
+// Unreachable. Without one, Unreachable is certain.
 func TestTraceUnreachableAndSegmentBypass(t *testing.T) {
 	s := New(nil, nil)
 	add(t, s.udn, map[string]any{
@@ -200,20 +202,25 @@ func TestTraceUnreachableAndSegmentBypass(t *testing.T) {
 	dst.Nets = []string{"team-b/shared-vlan"}
 
 	res := s.Trace(src, &dst, "", "TCP", 5432)
-	if res.Verdict != "Unreachable" {
-		t.Fatalf("isolated primaries: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	if res.Verdict != "Conditional" {
+		t.Fatalf("isolated primaries sharing a segment: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 	var bypass bool
 	for _, st := range res.Steps {
-		if st.Stage == "segment" && st.Action == "Bypass" {
+		if st.Stage == "segment" && st.Action == "Bypass" && st.Conditional {
 			bypass = true
 		}
-		if st.Stage == "admin" || st.Stage == "dfw" || st.Stage == "baseline" {
-			t.Fatalf("unreachable flow must not walk policy, got %v", stepKinds(t, res))
+		if st.Decisive || st.Stage == "admin" || st.Stage == "dfw" || st.Stage == "baseline" {
+			t.Fatalf("no step decides a flow only the bypass can carry, got %+v", res.Steps)
 		}
 	}
 	if !bypass {
-		t.Fatalf("shared segment must surface as bypass, got %v", stepKinds(t, res))
+		t.Fatalf("shared segment must surface as a flagged bypass, got %v", stepKinds(t, res))
+	}
+
+	dst.Nets = nil
+	if res := s.Trace(src, &dst, "", "TCP", 5432); res.Verdict != "Unreachable" {
+		t.Fatalf("isolated primaries, nothing shared: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 }
 

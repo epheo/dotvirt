@@ -43,10 +43,10 @@ func (s *Snapshot) Trace(src TraceWorkload, dst *TraceWorkload, dstIP, protocol 
 	}
 
 	if dst != nil {
-		reachable, steps := s.connectivity(src, *dst)
+		decided, steps := s.connectivity(src, *dst)
 		res.Steps = append(res.Steps, steps...)
-		if !reachable {
-			res.Verdict = "Unreachable"
+		if decided != "" {
+			res.Verdict = decided
 			return res
 		}
 		eg := s.directionWalk("Egress", src, peerTarget{w: dst}, protocol, port)
@@ -365,15 +365,22 @@ func planeStep(b bound, stage, action, note string) model.TraceStep {
 		Conditional: b.m == matchCond, Note: note}
 }
 
-// connectivity decides whether an east-west path exists at all: both ends
-// must sit on the same primary network - isolated primaries drop the flow
-// before any policy runs. A shared secondary segment is surfaced as an
-// unfiltered bypass either way.
-func (s *Snapshot) connectivity(src, dst TraceWorkload) (bool, []model.TraceStep) {
-	var steps []model.TraceStep
+// connectivity decides whether an east-west path exists: both ends must sit
+// on the same primary network, or isolated primaries drop the flow before any
+// policy runs. A shared secondary segment is an unfiltered layer-2 bypass;
+// without a shared primary it is the only path, so the answer is Conditional,
+// never a certain Unreachable. decided is "" when the policy walk decides.
+func (s *Snapshot) connectivity(src, dst TraceWorkload) (decided string, steps []model.TraceStep) {
 	srcKey, srcName := s.primaryOf(src)
 	dstKey, dstName := s.primaryOf(dst)
 	reachable := srcKey != "" && srcKey == dstKey
+	shared := s.sharedSegments(src.Nets, dst.Nets)
+	if !reachable {
+		decided = "Unreachable"
+		if len(shared) > 0 {
+			decided = "Conditional"
+		}
+	}
 	switch {
 	case reachable:
 		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Reachable",
@@ -383,17 +390,17 @@ func (s *Snapshot) connectivity(src, dst TraceWorkload) (bool, []model.TraceStep
 		if srcKey != "" {
 			who = dst.Name
 		}
-		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: true,
+		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: len(shared) == 0,
 			Note: who + " has no primary network attachment."})
 	default:
-		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: true,
+		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: len(shared) == 0,
 			Note: fmt.Sprintf("Isolated primary networks: %s is on %s, %s on %s.", src.Name, srcName, dst.Name, dstName)})
 	}
-	for _, name := range s.sharedSegments(src.Nets, dst.Nets) {
-		steps = append(steps, model.TraceStep{Stage: "segment", Action: "Bypass",
+	for _, name := range shared {
+		steps = append(steps, model.TraceStep{Stage: "segment", Action: "Bypass", Conditional: !reachable,
 			Note: "Both attach segment " + name + " - an unfiltered layer-2 path; east-west policy does not apply on secondary segments."})
 	}
-	return reachable, steps
+	return decided, steps
 }
 
 // externalConnectivity frames the egress path. The cluster controls filter
