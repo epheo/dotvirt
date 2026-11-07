@@ -15,7 +15,7 @@
 	import { networkKey, networkKind } from '#lib/networks.js';
 	import { canEditUplink, openEdit, uplinkRef } from '#lib/objects.js';
 	import { resource } from '#lib/resource.svelte.js';
-	import { topLines, vmRuleLines } from '#lib/rulelines.js';
+	import { hasOwnRule, topLines, vmRuleLines } from '#lib/rulelines.js';
 	import { vmSizing } from '#lib/sizing.js';
 	import { vmState } from '#lib/status.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -194,6 +194,11 @@
 						{:else if !eff}
 							<p class="text-xs text-ink-faint">Reading the rules...</p>
 						{:else}
+							{#if !hasOwnRule(lines)}
+								<p class="mb-2.5 text-[13px] text-ink-soft">
+									No rule of its own: it accepts traffic from anywhere the cluster rules allow.
+								</p>
+							{/if}
 							<RuleList lines={topLines(lines, 3)} />
 							{#if lines.length > 3}
 								<p class="mt-2 text-xs text-ink-faint">

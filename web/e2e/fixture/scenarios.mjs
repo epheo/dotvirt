@@ -536,6 +536,48 @@ const netPolicies = {
 	],
 };
 
+// The platform's own rules on a real cluster: each lets any namespace reach
+// its own VMs, so every network matches it without being named (wildcard).
+const PLATFORM_RULES = [
+	[
+		'openshift-gitops',
+		'app.kubernetes.io/name=openshift-gitops-application-controller',
+		'TCP/8082',
+	],
+	['openshift-monitoring', 'app.kubernetes.io/name=prometheus', 'TCP/9091'],
+	['openshift-dns', 'dns.operator.openshift.io/daemonset-dns=default', 'UDP/53'],
+	[
+		'openshift-ingress',
+		'ingresscontroller.operator.openshift.io/deployment-ingresscontroller=default',
+		'TCP/443',
+	],
+	['openshift-console', 'app=console', 'TCP/8443'],
+	['openshift-operators', 'name=gitops-operator', 'TCP/8443'],
+];
+const platformWildcards = PLATFORM_RULES.map(([ns, target, ports]) => {
+	const rule = {
+		direction: 'Ingress',
+		action: 'Allow',
+		peer: 'ns any',
+		ports,
+		text: `Accepts ${ports.replace('/', ' ')} from VMs in any namespace.`,
+	};
+	return {
+		policy: {
+			name: 'allow-from-any-namespace',
+			kind: 'dfw',
+			namespace: ns,
+			backing: 'NetworkPolicy',
+			target,
+			applies: `VMs labeled ${target} in ${ns}`,
+			rules: [rule],
+		},
+		rule,
+		text: `VMs in any namespace can reach VMs labeled ${target} in ${ns} on ${ports.replace('/', ' ')}.`,
+		wildcard: true,
+	};
+});
+
 // Rules elsewhere that name a network's VMs as their other end, by network key.
 const netReaches = {
 	'web-prod/web-net': [
@@ -545,7 +587,10 @@ const netReaches = {
 			text: 'VMs labeled app=web-1 in web-prod can reach VMs labeled app=db-1 in db-prod on TCP 5432.',
 			conditional: true,
 		},
+		...platformWildcards,
 	],
+	// A network whose namespace has no rule of its own: only the platform's.
+	'batch-prod/udn-tcp-frontend': platformWildcards,
 };
 
 // Which extra NICs the base VMs carry, by "namespace/name".
@@ -614,6 +659,7 @@ function withScaleNetworking(sc) {
 					text: 'VMs labeled app=web in web-prod can reach VMs labeled app=db-1 in db-prod on TCP 5432.',
 					conditional: true,
 				},
+				...platformWildcards,
 			],
 		},
 	};

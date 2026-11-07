@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EffectivePolicy, NetworkRules, Policy } from '#lib/api.js';
-import { networkRuleLines, topLines, vmRuleLines } from './rulelines';
+import { hasOwnRule, networkRuleLines, topLines, vmRuleLines, wildcardSummary } from './rulelines';
 
 const denyLateral: Policy = {
 	name: 'deny-lateral',
@@ -114,5 +114,33 @@ describe('topLines on a network', () => {
 			'Accepts TCP 5432 from VMs labeled app=web in web-prod.',
 			'VMs in web-prod can reach db-1.',
 		]);
+	});
+});
+
+describe('wildcard rules', () => {
+	const platform = (ns: string): NetworkRules['reaches'][number] => ({
+		policy: { name: `allow-${ns}`, kind: 'dfw', namespace: ns, backing: 'NetworkPolicy' },
+		rule: { direction: 'Ingress', action: 'Allow', peer: 'ns any', ports: 'TCP/8082' },
+		text: `VMs in any namespace can reach every VM in ${ns} on TCP 8082.`,
+		wildcard: true,
+	});
+	const rules: NetworkRules = {
+		network: 'default/udn-frontend',
+		namespaces: ['default'],
+		applies: [{ policy: denyLateral }],
+		reaches: [platform('openshift-gitops'), platform('openshift-monitoring')],
+	};
+	it('never lists them in a summary, folds them into one line', () => {
+		const lines = networkRuleLines(rules);
+		expect(topLines(lines, 3).map((l) => l.group)).toEqual(['own']);
+		expect(wildcardSummary(lines)).toBe(
+			'2 rules in other projects let any namespace reach their own VMs.',
+		);
+	});
+	it('says when no project rule of its own binds the VMs', () => {
+		expect(hasOwnRule(networkRuleLines(rules))).toBe(false);
+		expect(
+			hasOwnRule(vmRuleLines({ namespace: 'db-prod', eastWest: [{ policy: allowDB }] }, 'x')),
+		).toBe(true);
 	});
 });
