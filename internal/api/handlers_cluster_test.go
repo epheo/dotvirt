@@ -5,12 +5,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
@@ -261,6 +263,40 @@ func TestUploads(t *testing.T) {
 	}
 }
 
+// "Add a boot image" registers the upload as a DataSource over its claim; a
+// caller who may not create DataSources is refused before anything exists.
+func TestUploadBootImage(t *testing.T) {
+	fc := newFakeCluster(t)
+	var dv, ds map[string]any
+	fc.on(http.MethodPost, "/apis/cdi.kubevirt.io/v1beta1/namespaces/team-a-dev/datavolumes", echoCreate(&dv, nil))
+	fc.on(http.MethodPost, "/apis/cdi.kubevirt.io/v1beta1/namespaces/team-a-dev/datasources", echoCreate(&ds, nil))
+	allowDS := false
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		if a.Resource == "datasources" {
+			return allowDS && a.Verb == "create" && a.Namespace == "team-a-dev"
+		}
+		return token == adminToken
+	}
+	s := fc.server(nil, Config{UploadProxyURL: "https://cdi-uploadproxy.example"})
+	body := `{"namespace":"team-a-dev","name":"rhel-10","size":"20Gi","bootImage":true}`
+
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/uploads", body), http.StatusForbidden)
+	if dv != nil || ds != nil {
+		t.Fatalf("a refused boot image left objects behind: dv=%v ds=%v", dv, ds)
+	}
+
+	allowDS = true
+	rec := do(s, adminToken, http.MethodPost, "/api/uploads", body)
+	wantStatus(t, rec, http.StatusOK)
+	if got := decodeBody[model.UploadTarget](t, rec); got.Image != "team-a-dev/rhel-10" {
+		t.Errorf("target = %+v", got)
+	}
+	pvc := ds["spec"].(map[string]any)["source"].(map[string]any)["pvc"].(map[string]any)
+	if dv == nil || pvc["name"] != "rhel-10" || pvc["namespace"] != "team-a-dev" {
+		t.Errorf("datasource = %v", ds)
+	}
+}
+
 // A token request the proxy answers without a token is an internal failure,
 // never an empty token handed to the browser.
 func TestUploadTokenNotIssued(t *testing.T) {
@@ -366,5 +402,84 @@ func TestFinishSSO(t *testing.T) {
 	}
 	if !o.ClientRegistered(t.Context()) {
 		t.Error("a successful apply left SSO pending")
+	}
+}
+
+// The cluster-wide snapshot listing reads every managed namespace under the
+// caller's token, carries the source VM and captured volumes, and skips a
+// repoless project's namespace like the events lane.
+func TestStorageSnapshots(t *testing.T) {
+	fc := newFakeCluster(t)
+	snap := func(name, vm, created string, volumes ...any) map[string]any {
+		return map[string]any{
+			"apiVersion": "snapshot.kubevirt.io/v1beta1", "kind": "VirtualMachineSnapshot",
+			"metadata": map[string]any{"name": name, "namespace": "team-a-dev", "creationTimestamp": created},
+			"spec":     map[string]any{"source": map[string]any{"kind": "VirtualMachine", "name": vm}},
+			"status": map[string]any{"phase": "Succeeded", "readyToUse": true,
+				"snapshotVolumes": map[string]any{"includedVolumes": volumes}},
+		}
+	}
+	fc.on(http.MethodGet, "/apis/snapshot.kubevirt.io/v1beta1/namespaces/team-a-dev/virtualmachinesnapshots", func(w http.ResponseWriter, r *http.Request) {
+		if bearer(r) != adminToken {
+			t.Errorf("snapshots listed as %q, want the caller", bearer(r))
+		}
+		unstructuredList("snapshot.kubevirt.io/v1beta1", "VirtualMachineSnapshotList",
+			snap("web-old", "web", "2026-01-01T00:00:00Z", "rootdisk"),
+			snap("db-new", "db", "2026-01-03T00:00:00Z", "rootdisk", "data"))(w, r)
+	})
+	s := fc.server(nil, Config{})
+
+	rec := do(s, adminToken, http.MethodGet, "/api/storage/snapshots", "")
+	wantStatus(t, rec, http.StatusOK)
+	got := decodeBody[[]model.Snapshot](t, rec)
+	if len(got) != 2 || got[0].Name != "db-new" || got[0].VM != "db" || got[0].Namespace != "team-a-dev" ||
+		len(got[0].Volumes) != 2 || got[1].Volumes[0] != "rootdisk" {
+		t.Errorf("snapshots = %+v", got)
+	}
+	if fc.called(http.MethodGet, "/apis/snapshot.kubevirt.io/v1beta1/namespaces/orphans-ns/virtualmachinesnapshots") {
+		t.Error("snapshots listed in a repoless project's namespace")
+	}
+	wantStatus(t, do(s, adminToken, http.MethodGet, "/api/storage/snapshots?project=nope", ""), http.StatusNotFound)
+	// A tenant who sees no project namespace lists nothing at all.
+	rec = do(s, tenantToken, http.MethodGet, "/api/storage/snapshots", "")
+	wantStatus(t, rec, http.StatusOK)
+	if got := decodeBody[[]model.Snapshot](t, rec); len(got) != 0 {
+		t.Errorf("tenant snapshots = %+v", got)
+	}
+}
+
+func TestStorageSnapshotsForbidden(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.on(http.MethodGet, "/apis/snapshot.kubevirt.io/v1beta1/namespaces/team-a-dev/virtualmachinesnapshots", func(w http.ResponseWriter, r *http.Request) {
+		writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
+	})
+	s := fc.server(nil, Config{})
+	wantStatus(t, do(s, adminToken, http.MethodGet, "/api/storage/snapshots", ""), http.StatusForbidden)
+}
+
+// A claim reports the host the scheduler bound it to, so a stopped VM's
+// local disk still has a host.
+func TestStorageClaims(t *testing.T) {
+	fc := newFakeCluster(t)
+	class := "lvms-vgslow"
+	fc.on(http.MethodGet, "/api/v1/namespaces/team-a-dev/persistentvolumeclaims", func(w http.ResponseWriter, r *http.Request) {
+		writeObj(w, corev1.PersistentVolumeClaimList{
+			TypeMeta: metav1.TypeMeta{Kind: "PersistentVolumeClaimList", APIVersion: "v1"},
+			Items: []corev1.PersistentVolumeClaim{{
+				ObjectMeta: metav1.ObjectMeta{Name: "web-rootdisk", Namespace: "team-a-dev",
+					Annotations: map[string]string{"volume.kubernetes.io/selected-node": "host-07"}},
+				Spec: corev1.PersistentVolumeClaimSpec{StorageClassName: &class},
+				Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound,
+					Capacity: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("30Gi")}},
+			}},
+		})
+	})
+	s := fc.server(nil, Config{})
+	rec := do(s, adminToken, http.MethodGet, "/api/storage/claims?project=team-a", "")
+	wantStatus(t, rec, http.StatusOK)
+	got := decodeBody[[]model.Claim](t, rec)
+	want := model.Claim{Namespace: "team-a-dev", Name: "web-rootdisk", Node: "host-07", StorageClass: class, Capacity: "30Gi", Phase: "Bound"}
+	if len(got) != 1 || !reflect.DeepEqual(got[0], want) {
+		t.Errorf("claims = %+v", got)
 	}
 }
