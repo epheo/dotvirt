@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -26,7 +27,14 @@ func applyDisksNetworks(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) {
 	domain := get(tmplSpec, "domain")
 	devices := get(domain, "devices")
 
-	applyAddDisks(ed, spec, tmplSpec, devices, nodeValue(get(get(vmRoot, "metadata"), "name")), edit.AddDisks)
+	vm := nodeValue(get(get(vmRoot, "metadata"), "name"))
+	if len(edit.AddNetworks) > 0 && get(devices, "interfaces") == nil {
+		// KubeVirt attaches the pod network only to a template declaring no
+		// interface, so the first one declared would silently drop it.
+		ed.fail(fmt.Errorf("%w: %s declares no interfaces and runs on the implicit pod network, which adding a network would drop; declare its interfaces in git first", model.ErrConflict, vm))
+		return
+	}
+	applyAddDisks(ed, spec, tmplSpec, devices, vm, edit.AddDisks)
 	for _, name := range edit.RemoveDisks {
 		removeDisk(ed, spec, tmplSpec, devices, name)
 	}
@@ -126,7 +134,7 @@ func removeDisk(ed *lineEditor, spec, tmplSpec, devices *yaml.Node, name string)
 // removeTemplateNamed deletes the dataVolumeTemplates item whose metadata.name
 // equals name - their identity, unlike the top-level name: of disks and volumes.
 func removeTemplateNamed(ed *lineEditor, seq *yaml.Node, name string) {
-	if i, item := findNamed(seq, name, true); item != nil {
+	if i, item := findNamed(seq, name, true); item != nil && !ed.inFlow(seq) {
 		ed.removeRange(item.Line-1, itemEndLine(ed, seq, i))
 	}
 }
@@ -139,7 +147,7 @@ func templateSpecNode(vmRoot *yaml.Node) *yaml.Node {
 
 // removeNamedItem deletes the sequence item whose `name:` equals name.
 func removeNamedItem(ed *lineEditor, seq *yaml.Node, name string) {
-	if i, item := findNamed(seq, name, false); item != nil {
+	if i, item := findNamed(seq, name, false); item != nil && !ed.inFlow(seq) {
 		ed.removeRange(item.Line-1, itemEndLine(ed, seq, i))
 	}
 }

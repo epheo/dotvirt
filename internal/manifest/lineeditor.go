@@ -54,6 +54,17 @@ func (e *lineEditor) fail(err error) {
 	}
 }
 
+// inFlow fails the edit when n is a flow collection ({...} or [...]): its
+// entries share lines, so a line splice inside it would cut through siblings
+// or land beside it instead.
+func (e *lineEditor) inFlow(n *yaml.Node) bool {
+	if n.Style&yaml.FlowStyle == 0 {
+		return false
+	}
+	e.fail(fmt.Errorf("%w: line %d is written in flow style ({...} or [...]), which the editor cannot change in place; rewrite it as a block in git first", model.ErrConflict, n.Line))
+	return true
+}
+
 // str is yamlString for a value or key an applier splices; a refusal fails the
 // edit.
 func (e *lineEditor) str(s string) string {
@@ -148,6 +159,9 @@ func (e *lineEditor) deleteChild(mapping *yaml.Node, key string) {
 		if mapping.Content[i].Value != key {
 			continue
 		}
+		if e.inFlow(mapping) {
+			return
+		}
 		start := mapping.Content[i].Line - 1
 		if start < 0 || start >= len(e.lines) {
 			return
@@ -198,7 +212,7 @@ func (e *lineEditor) insertChild(mapping *yaml.Node, key, val string) {
 // its first child, so children align at mapping.Column and we anchor the insert
 // after the mapping's last child line.
 func (e *lineEditor) insertBlock(mapping *yaml.Node, block []string) {
-	if mapping == nil || mapping.Kind != yaml.MappingNode || len(mapping.Content) == 0 {
+	if mapping == nil || mapping.Kind != yaml.MappingNode || e.inFlow(mapping) || len(mapping.Content) == 0 {
 		return
 	}
 	indent := mapping.Column - 1
@@ -262,10 +276,10 @@ func trailingComment(rest string) string {
 
 // appendItem queues a sequence item (block lines, already including the leading
 // "- ") to be inserted after the last existing item of seq, indented to match
-// the sequence. Does nothing if seq is nil/empty (we only edit VMs that already
-// have the relevant device lists).
+// the sequence. Does nothing if seq is nil/empty: there is no item to align
+// with, and verifyEdit refuses the edit the missing item leaves unapplied.
 func appendItem(ed *lineEditor, seq *yaml.Node, itemLines []string) {
-	if seq == nil || seq.Kind != yaml.SequenceNode || len(seq.Content) == 0 {
+	if seq == nil || seq.Kind != yaml.SequenceNode || ed.inFlow(seq) || len(seq.Content) == 0 {
 		return
 	}
 	last := seq.Content[len(seq.Content)-1]

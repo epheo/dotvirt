@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -185,17 +186,14 @@ func TestMigrateVolumeRepeated(t *testing.T) {
 	}
 }
 
-// Volumes that aren't DataVolume-backed (or reference no template) are left
-// alone entirely - including the updateVolumesStrategy marker.
+// A volume that isn't DataVolume-backed (or references no template) cannot
+// migrate: the edit is refused rather than proposed as a change it never makes.
 func TestMigrateVolumeNonDataVolume(t *testing.T) {
-	out, err := ApplyEdit([]byte(vmWithDataVolumes), "alpha", "web", VMEdit{
+	_, err := ApplyEdit([]byte(vmWithDataVolumes), "alpha", "web", VMEdit{
 		MigrateVolumes: []model.VolumeMigration{{Name: "cloudinit", StorageClass: "fast"}},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(out) != vmWithDataVolumes {
-		t.Errorf("non-DV migration must be a no-op:\n%s", out)
+	if !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("want ErrConflict, got %v", err)
 	}
 }
 

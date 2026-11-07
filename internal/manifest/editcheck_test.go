@@ -122,3 +122,106 @@ func TestEditRefusesInvalidValues(t *testing.T) {
 		}
 	}
 }
+
+// vmFlowCPU writes cpu as a flow mapping: its axes share one line, so a line
+// splice on one axis cuts through the others.
+const vmFlowCPU = `apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: web
+  namespace: alpha
+spec:
+  runStrategy: Always
+  template:
+    spec:
+      domain:
+        cpu: {cores: 2, sockets: 1}
+        memory:
+          guest: 1Gi
+        resources:
+          requests: {cpu: "2", hugepages: huge}
+        devices:
+          disks:
+          - name: rootdisk
+            disk:
+              bus: virtio
+`
+
+// The editor never silently applies a different change than asked: a layout
+// it cannot splice is refused as a conflict naming what to do, never written
+// half-applied (the flow-style cpu lost its whole block; a network added to a
+// VM without an interfaces list was a no-op the PR body still announced).
+func TestEditRefusesWhatItCannotApply(t *testing.T) {
+	const noInterfaces = `apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: web
+  namespace: alpha
+spec:
+  runStrategy: Always
+  template:
+    spec:
+      domain:
+        devices:
+          disks:
+          - name: rootdisk
+            disk:
+              bus: virtio
+      volumes:
+      - name: rootdisk
+        containerDisk:
+          image: fedora
+`
+	const noTemplate = `apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: web
+  namespace: alpha
+spec:
+  runStrategy: Always
+`
+	const blockScalar = `apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: web
+  namespace: alpha
+spec:
+  runStrategy: Always
+  template:
+    spec:
+      domain:
+        memory:
+          guest: |-
+            1Gi
+`
+	cases := []struct {
+		name, in, msg string
+		edit          VMEdit
+	}{
+		{"flow cpu", vmFlowCPU, "flow style", VMEdit{CPUCores: ptr(4)}},
+		{"flow requests", vmFlowCPU, "flow style", VMEdit{Sizing: ptr("instancetype"), Instancetype: ptr("u1.small")}},
+		{"network without interfaces", noInterfaces, "implicit pod network", VMEdit{AddNetworks: []model.NetworkAdd{{Name: "vlan-10"}}}},
+		{"cpu without template", noTemplate, "CPU", VMEdit{CPUCores: ptr(2)}},
+		{"eviction without template", noTemplate, "eviction strategy", VMEdit{EvictionStrategy: ptr("None")}},
+		{"multi-line scalar", blockScalar, "memory", VMEdit{Memory: ptr("4Gi")}},
+		{"migration of a non-DataVolume disk", noInterfaces, "rootdisk", VMEdit{MigrateVolumes: []model.VolumeMigration{{Name: "rootdisk", StorageClass: "fast"}}}},
+	}
+	for _, c := range cases {
+		out, err := ApplyEdit([]byte(c.in), "alpha", "web", c.edit)
+		if !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), c.msg) {
+			t.Errorf("%s: want ErrConflict naming %q, got %v\n%s", c.name, c.msg, err, out)
+		}
+	}
+}
+
+// Deleting a key of a flow mapping that does not hold it is not a splice, so
+// the flow guard leaves such edits alone.
+func TestEditLeavesUntouchedFlowAlone(t *testing.T) {
+	out, err := ApplyEdit([]byte(vmFlowCPU), "alpha", "web", VMEdit{Memory: ptr("2Gi"), SetLabels: map[string]string{"env": "prod"}})
+	if err != nil {
+		t.Fatalf("ApplyEdit: %v", err)
+	}
+	if !strings.Contains(string(out), "cpu: {cores: 2, sockets: 1}") || !strings.Contains(string(out), "guest: 2Gi") {
+		t.Fatalf("unexpected edit:\n%s", out)
+	}
+}

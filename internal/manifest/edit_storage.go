@@ -17,8 +17,7 @@ import (
 // as a migration cancel - the GitOps rollback IS the cancellation.
 //
 // Only DataVolume-backed volumes with a dataVolumeTemplates entry qualify;
-// anything else is left untouched (same silent-no-op convention as the other
-// appliers - the UI only offers eligible disks).
+// verifyEdit refuses a migration asked of any other.
 func applyVolumeMigrations(ed *lineEditor, vmRoot *yaml.Node, migrations []model.VolumeMigration) {
 	if len(migrations) == 0 {
 		return

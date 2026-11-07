@@ -3,6 +3,7 @@ package manifest
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/epheo/dotvirt/internal/model"
@@ -72,4 +73,136 @@ func validateEdit(e VMEdit) error {
 		add(validate.RequireOneOf("group mode", g.Mode, "together", "apart"))
 	}
 	return errors.Join(errs...)
+}
+
+// verifyEdit re-reads the edited manifest and refuses an edit that did not
+// land as asked. Line splicing trusts the document's layout, and a shape it
+// does not expect (a multi-line scalar, a missing list, no template, or the
+// degenerate indentation fuzzing found) would otherwise corrupt the file or
+// apply a different change than the PR description states.
+func verifyEdit(out []byte, namespace, name string, edit VMEdit) error {
+	vms, err := ParseVMs("", out, namespace)
+	if err != nil {
+		return fmt.Errorf("%w: edit would corrupt the manifest of %s/%s; edit it in git directly: %v", model.ErrConflict, namespace, name, err)
+	}
+	i := slices.IndexFunc(vms, func(v model.VM) bool { return v.Namespace == namespace && v.Name == name })
+	if i < 0 {
+		return fmt.Errorf("%w: edit would lose %s/%s from its manifest; edit it in git directly", model.ErrConflict, namespace, name)
+	}
+	vm := vms[i]
+
+	var missed []string
+	want := func(ok bool, what string) {
+		if !ok {
+			missed = append(missed, what)
+		}
+	}
+	if edit.Power != nil {
+		want(string(vm.Power) == *edit.Power, "power")
+	}
+	verifySizing(vm, edit, want)
+	if edit.Preference != nil {
+		want(vm.Preference == *edit.Preference, "preference")
+	}
+	for _, k := range sortedKeys(edit.SetLabels) {
+		v, ok := vm.Labels[k]
+		want(ok && v == edit.SetLabels[k], "label "+k)
+	}
+	for _, k := range edit.RemoveLabels {
+		_, ok := vm.Labels[k]
+		want(!ok, "label "+k+" removal")
+	}
+	if edit.DRSExclude != nil {
+		want(vm.DRSExclude == *edit.DRSExclude, "DRS exclusion")
+	}
+	if edit.EvictionStrategy != nil {
+		want(vm.EvictionStrategy == *edit.EvictionStrategy, "eviction strategy")
+	}
+
+	disks := map[string]model.Disk{}
+	for _, d := range vm.Disks {
+		disks[d.Name] = d
+	}
+	for _, d := range edit.AddDisks {
+		_, ok := disks[d.Name]
+		want(ok, "disk "+d.Name)
+	}
+	for _, n := range edit.RemoveDisks {
+		_, ok := disks[n]
+		want(!ok, "disk "+n+" removal")
+	}
+	for _, m := range edit.MigrateVolumes {
+		d, ok := disks[m.Name]
+		want(ok && d.StorageClass == m.StorageClass, "storage migration of disk "+m.Name)
+	}
+
+	// The implicit pod adapter is KubeVirt's default, not the manifest's: a
+	// template left without interfaces reads it back by design.
+	nics := map[string]model.NIC{}
+	for _, n := range vm.Networks {
+		if !n.Implicit {
+			nics[n.Name] = n
+		}
+	}
+	for _, n := range edit.AddNetworks {
+		nic, ok := nics[model.InterfaceName(n.Name)]
+		want(ok && nic.Network == n.Name, "network "+n.Name)
+	}
+	for _, n := range edit.RemoveNetworks {
+		_, ok := nics[n]
+		want(!ok, "network "+n+" removal")
+	}
+
+	if edit.Pin != nil {
+		want(slices.Equal(schedPinOf(vm), *edit.Pin), "host pinning")
+	}
+	groups := map[string]model.PlacementGroup{}
+	if vm.Scheduling != nil {
+		for _, g := range vm.Scheduling.Groups {
+			groups[g.Name] = g
+		}
+	}
+	for _, g := range edit.AddGroups {
+		got, ok := groups[g.Name]
+		want(ok && got == g, "placement group "+g.Name)
+	}
+	for _, n := range edit.RemoveGroups {
+		_, ok := groups[n]
+		want(!ok, "placement group "+n+" removal")
+	}
+
+	if len(missed) > 0 {
+		return fmt.Errorf("%w: the manifest of %s/%s is laid out in a way the editor cannot change (%s would not apply); edit it in git directly",
+			model.ErrConflict, namespace, name, strings.Join(missed, ", "))
+	}
+	return nil
+}
+
+// verifySizing checks the sizing outcome applySizing promises: an
+// instancetype, when the result has one, owns CPU and memory alone; without
+// one, the inline values asked for are what the manifest holds.
+func verifySizing(vm model.VM, edit VMEdit, want func(bool, string)) {
+	mode := ""
+	if edit.Sizing != nil {
+		mode = *edit.Sizing
+	}
+	switch mode {
+	case "custom":
+		want(vm.Instancetype == "", "instance type removal")
+	case "instancetype":
+		want(vm.Instancetype != "", "instance type")
+	}
+	if edit.Instancetype != nil && mode != "custom" {
+		want(vm.Instancetype == *edit.Instancetype, "instance type")
+	}
+	if vm.Instancetype != "" {
+		want(vm.CPUCores == 0 && vm.Memory == "", "inline CPU and memory removal")
+		return
+	}
+	if edit.CPUCores != nil {
+		want(vm.CPUCores == *edit.CPUCores, "CPU")
+	}
+	if edit.Memory != nil {
+		want(vm.Memory == *edit.Memory, "memory")
+	}
 }
