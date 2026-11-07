@@ -30,16 +30,13 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 	if err := validate.RequireRepoPath("source file", req.SourceFile); err != nil {
 		return model.DraftView{}, err
 	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
+	return c.stage(id, proj, draft.Entry{
 		Kind:       draft.KindEdit,
 		Namespace:  namespace,
 		Name:       name,
 		SourceFile: req.SourceFile,
 		Edit:       &edit,
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
+	})
 }
 
 // PreviewEdit renders an edit as the changes staging it would list, restart
@@ -86,17 +83,14 @@ func (c *Coordinator) StageCreateVM(id auth.Identity, proj project.ProjectInfo, 
 	if err := c.requireUndeclaredVM(read, spec.Namespace, spec.Name); err != nil {
 		return model.DraftView{}, err
 	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
+	return c.stage(id, proj, draft.Entry{
 		Kind:       draft.KindCreate,
 		Namespace:  spec.Namespace,
 		Name:       spec.Name,
 		SourceFile: path,
 		Manifest:   string(content),
 		FromWizard: true,
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
+	})
 }
 
 // requireUndeclaredVM refuses a create of a VM the base branch already
@@ -145,10 +139,7 @@ func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, 
 	} else if path != "" {
 		entry.Kind, entry.SourceFile = draft.KindEdit, path
 	}
-	if err := c.store.Stage(id.Username, proj.Name, entry); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
+	return c.stage(id, proj, entry)
 }
 
 // soleDeclarer is the base-branch file declaring exactly refs, or "" when git
@@ -323,16 +314,13 @@ func (c *Coordinator) StageDelete(id auth.Identity, proj project.ProjectInfo, re
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
+	return c.stage(id, proj, draft.Entry{
 		Kind:       draft.KindDelete,
 		Resource:   draft.Resource(resource),
 		Namespace:  namespace,
 		Name:       name,
 		SourceFile: path,
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
+	})
 }
 
 // Unstage removes one pending change (of the given resource - empty means VM)
@@ -341,31 +329,19 @@ func (c *Coordinator) StageDelete(id auth.Identity, proj project.ProjectInfo, re
 // would leave a proposable half-change.
 func (c *Coordinator) Unstage(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) error {
 	if r := draft.Resource(resource); r.Atomic() {
-		_, err := c.unstageResource(id, proj, r)
+		_, err := c.store.ReplaceResource(id.Username, proj.Name, r)
 		return err
 	}
 	return c.store.Unstage(id.Username, proj.Name, draft.Resource(resource), namespace, name)
 }
 
-// unstageResource drops every entry of one resource from (id, proj)'s draft,
-// reporting how many it removed. Backs both the atomic-resource unstage (see
-// draft.Resource.Atomic) and the declarative DRS restage.
-func (c *Coordinator) unstageResource(id auth.Identity, proj project.ProjectInfo, r draft.Resource) (int, error) {
-	entries, err := c.store.List(id.Username, proj.Name)
-	if err != nil {
-		return 0, err
+// stage writes entries into (id, proj)'s draft as one change and renders the
+// draft that results.
+func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entries ...draft.Entry) (model.DraftView, error) {
+	if err := c.store.Stage(id.Username, proj.Name, entries...); err != nil {
+		return model.DraftView{}, err
 	}
-	removed := 0
-	for _, e := range entries {
-		if e.Resource != r {
-			continue
-		}
-		if err := c.store.Unstage(id.Username, proj.Name, e.Resource, e.Namespace, e.Name); err != nil {
-			return removed, err
-		}
-		removed++
-	}
-	return removed, nil
+	return c.Get(id, proj)
 }
 
 // Discard clears (id, proj)'s draft.

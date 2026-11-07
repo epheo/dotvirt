@@ -81,10 +81,7 @@ func (c *Coordinator) AdoptObject(id auth.Identity, proj project.ProjectInfo, o 
 		}
 		entry.Kind, entry.SourceFile = draft.KindEdit, path
 	}
-	if err := c.store.Stage(id.Username, proj.Name, entry); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
+	return c.stage(id, proj, entry)
 }
 
 // DeclaredFiles maps every object proj's base branch declares to its file - the
@@ -154,15 +151,12 @@ func (c *Coordinator) StageUpdateManifest(id auth.Identity, proj project.Project
 	if manifest.SameDocument(current, []byte(yaml)) {
 		return model.DraftView{}, fmt.Errorf("%w: %s/%s already matches git", model.ErrInvalid, namespace, name)
 	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
+	return c.stage(id, proj, draft.Entry{
 		Kind:       draft.KindEdit,
 		Resource:   draft.Resource(resource),
 		Namespace:  namespace,
 		Name:       name,
 		SourceFile: path,
 		Manifest:   yaml,
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
+	})
 }

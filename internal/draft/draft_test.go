@@ -198,3 +198,83 @@ func TestCorruptDraftQuarantined(t *testing.T) {
 		t.Fatalf("List after re-stage: %v, %+v", err, entries)
 	}
 }
+
+// Propose unstages what it committed; an entry restaged meanwhile is newer
+// work and must survive, on disk too.
+func TestRemoveKeepsRestagedEntries(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	if err := s.Stage("alice", "p", editEntry("ns", "a"), editEntry("ns", "b")); err != nil {
+		t.Fatal(err)
+	}
+	committed, _ := s.List("alice", "p")
+	cpu := 4
+	restaged := editEntry("ns", "a")
+	restaged.Edit.CPUCores = &cpu
+	if err := s.Stage("alice", "p", restaged, editEntry("ns", "c")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Remove("alice", "p", committed...); err != nil {
+		t.Fatal(err)
+	}
+	reopened, _ := Open(dir)
+	got, _ := reopened.List("alice", "p")
+	if len(got) != 2 || got[0].Name != "a" || got[0].Edit.CPUCores == nil || got[1].Name != "c" {
+		t.Fatalf("want the restaged a and the new c kept, got %+v", got)
+	}
+}
+
+// A write that fails stages nothing: memory must not hold what disk lacks.
+func TestFailedWriteStagesNothing(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	// The draft file reads as absent but cannot be written: a directory holds
+	// its temp name.
+	if err := os.MkdirAll(filepath.Join(dir, "alice", "p.json.tmp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Stage("alice", "p", editEntry("ns", "a"), editEntry("ns", "b")); err == nil {
+		t.Fatal("want the write to fail")
+	}
+	if got, _ := s.List("alice", "p"); len(got) != 0 {
+		t.Fatalf("a failed write staged %d entries", len(got))
+	}
+}
+
+func TestReplaceResource(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	drs := func(name string) Entry {
+		return Entry{Kind: KindCreate, Resource: ResourceDRS, Namespace: "_cluster", Name: name, SourceFile: name + ".yaml", Manifest: "x"}
+	}
+	if err := s.Stage("alice", "p", drs("a"), drs("b"), editEntry("ns", "vm")); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := s.ReplaceResource("alice", "p", ResourceDRS, drs("c"))
+	if err != nil || removed != 2 {
+		t.Fatalf("ReplaceResource = %d, %v; want 2 dropped", removed, err)
+	}
+	got, _ := s.List("alice", "p")
+	if len(got) != 2 || got[0].Name != "c" || got[1].Name != "vm" {
+		t.Fatalf("want the VM edit and the new DRS file, got %+v", got)
+	}
+}
+
+// Update sees the staged entry and may drop it.
+func TestUpdate(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	e := editEntry("ns", "a")
+	if err := s.Stage("alice", "p", e); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Update("alice", "p", e.Key(), func(staged *Entry) (*Entry, error) {
+		if staged == nil || *staged.Edit.Memory != "2Gi" {
+			t.Fatalf("Update must see the staged entry, got %+v", staged)
+		}
+		return nil, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.List("alice", "p"); len(got) != 0 {
+		t.Fatalf("a nil result must unstage, got %+v", got)
+	}
+}

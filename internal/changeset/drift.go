@@ -89,39 +89,28 @@ func (c *Coordinator) Adopt(id auth.Identity, proj project.ProjectInfo, namespac
 		return model.DraftView{}, fmt.Errorf("%w: %s/%s is not running", model.ErrNotFound, namespace, name)
 	}
 	if !okD {
-		if err := c.stageAdoptCreate(id.Username, proj.Name, actual); err != nil {
-			return model.DraftView{}, err
-		}
-		return c.Get(id, proj)
+		// No file on base: the live manifest is staged verbatim, so the
+		// proposal is exactly what the cluster holds.
+		return c.stage(id, proj, draft.Entry{
+			Kind:       draft.KindCreate,
+			Namespace:  actual.vm.Namespace,
+			Name:       actual.vm.Name,
+			SourceFile: actual.vm.SourceFile,
+			Manifest:   string(actual.content),
+		})
 	}
 
 	edit := manifest.EditToMatch(desired, actual.vm)
 	if edit.Empty() {
 		return model.DraftView{}, fmt.Errorf("%w: no drift to adopt for %s/%s", model.ErrInvalid, namespace, name)
 	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
+	return c.stage(id, proj, draft.Entry{
 		Kind:      draft.KindEdit,
 		Namespace: namespace,
 		Name:      name,
 		// The file main actually holds, which need not be where an export would put it.
 		SourceFile: desired.SourceFile,
 		Edit:       &edit,
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
-}
-
-// stageAdoptCreate stages a brand-new manifest from live state, for a VM with no file
-// on base. The serialized bytes are staged verbatim, so the proposal is exactly what
-// the cluster holds.
-func (c *Coordinator) stageAdoptCreate(username, projName string, l liveVM) error {
-	return c.store.Stage(username, projName, draft.Entry{
-		Kind:       draft.KindCreate,
-		Namespace:  l.vm.Namespace,
-		Name:       l.vm.Name,
-		SourceFile: l.vm.SourceFile,
-		Manifest:   string(l.content),
 	})
 }
 
@@ -147,27 +136,24 @@ func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, w
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	staged := 0
+	var entries []draft.Entry
 	for _, o := range objs {
 		if declared[model.ObjectRef{Kind: o.Kind, Namespace: o.Namespace, Name: o.Name}] {
 			continue
 		}
-		if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
+		entries = append(entries, draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   adoptResource(o.Kind),
 			Namespace:  model.DraftNamespace(o.Namespace),
 			Name:       o.Name,
 			SourceFile: o.Path,
 			Manifest:   string(o.Manifest),
-		}); err != nil {
-			return model.DraftView{}, err
-		}
-		staged++
+		})
 	}
-	if staged == 0 {
+	if len(entries) == 0 {
 		return model.DraftView{}, fmt.Errorf("%w: nothing to adopt in %s: git already describes everything running there", model.ErrInvalid, where)
 	}
-	return c.Get(id, proj)
+	return c.stage(id, proj, entries...)
 }
 
 // adoptResource maps a captured kind onto the draft vocabulary, so the Changes view

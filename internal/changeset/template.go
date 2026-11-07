@@ -73,17 +73,14 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 	if err := c.requireUndeclaredVM(targetRead, req.Namespace, rendered.Name); err != nil {
 		return model.DraftView{}, err
 	}
-	if err := c.store.Stage(id.Username, targetProj.Name, draft.Entry{
+	return c.stage(id, targetProj, draft.Entry{
 		Kind:         draft.KindCreate,
 		Namespace:    req.Namespace,
 		Name:         rendered.Name,
 		SourceFile:   vmgen.ManifestPath(req.Namespace, rendered.Name),
 		Manifest:     string(rendered.Manifest),
 		FromTemplate: libraryProj.Name + "/" + req.Template,
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, targetProj)
+	})
 }
 
 // StageSaveTemplate derives a template from an existing VM's git manifest and
@@ -128,17 +125,14 @@ func (c *Coordinator) StageSaveTemplate(id auth.Identity, commitProj, sourceProj
 		return model.DraftView{}, fmt.Errorf("%w: template %q already exists in library %q", model.ErrConflict, req.Name, commitProj.Name)
 	}
 
-	if err := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
+	return c.stage(id, commitProj, draft.Entry{
 		Kind:       draft.KindCreate,
 		Resource:   draft.ResourceTemplate,
 		Namespace:  model.ClusterScopeNS,
 		Name:       req.Name,
 		SourceFile: path,
 		Manifest:   string(tplYAML),
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, commitProj)
+	})
 }
 
 // StageUpdateTemplate replaces a library template's manifest - editing a
@@ -166,17 +160,14 @@ func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.P
 		return model.DraftView{}, fmt.Errorf("%w: template %q not in library %q", model.ErrNotFound, req.Name, commitProj.Name)
 	}
 
-	if err := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
+	return c.stage(id, commitProj, draft.Entry{
 		Kind:       draft.KindEdit,
 		Resource:   draft.ResourceTemplate,
 		Namespace:  model.ClusterScopeNS,
 		Name:       req.Name,
 		SourceFile: path,
 		Manifest:   req.YAML,
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, commitProj)
+	})
 }
 
 // seedTemplates pushes the starter library onto a repo dotvirt just created.

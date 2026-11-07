@@ -200,6 +200,7 @@ func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target proje
 	if err != nil {
 		return nil, nil, err
 	}
+	var entries []draft.Entry
 	for _, ns := range target.Namespaces {
 		path := "namespaces/" + ns + ".yaml"
 		content, ok, lerr := read.LookupOnBranch(c.baseBranch, path)
@@ -220,17 +221,18 @@ func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target proje
 		if gerr != nil {
 			return nil, nil, invalid(gerr)
 		}
-		if serr := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
+		entries = append(entries, draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   draft.ResourceNamespace,
 			Namespace:  ns,
 			Name:       ns,
 			SourceFile: path,
 			Manifest:   string(released),
-		}); serr != nil {
-			return nil, nil, serr
-		}
+		})
 		staged = append(staged, ns)
+	}
+	if err := c.store.Stage(id.Username, commitProj.Name, entries...); err != nil {
+		return nil, nil, err
 	}
 	return staged, residue, nil
 }
@@ -285,21 +287,20 @@ func tenantNamespaces(target project.ProjectInfo, repoURL string, live LiveNames
 // namespace already in the platform repo (e.g. dotvirt-made, annotation later
 // dropped) is corrected rather than duplicated.
 func (c *Coordinator) stageProjectAdoption(username, commitProjName string, specs []netgen.NamespaceSpec, owners []string) error {
+	var entries []draft.Entry
 	for _, spec := range specs {
 		nsPath, nsContent, err := netgen.NamespaceManifest(spec)
 		if err != nil {
 			return invalid(err)
 		}
-		if err := c.store.Stage(username, commitProjName, draft.Entry{
+		entries = append(entries, draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   draft.ResourceNamespace,
 			Namespace:  spec.Name,
 			Name:       spec.Name,
 			SourceFile: nsPath,
 			Manifest:   string(nsContent),
-		}); err != nil {
-			return err
-		}
+		})
 		if len(owners) == 0 {
 			continue
 		}
@@ -307,18 +308,16 @@ func (c *Coordinator) stageProjectAdoption(username, commitProjName string, spec
 		if err != nil {
 			return invalid(err)
 		}
-		if err := c.store.Stage(username, commitProjName, draft.Entry{
+		entries = append(entries, draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   draft.ResourceRoleBinding,
 			Namespace:  spec.Name,
 			Name:       spec.Name + "-admins",
 			SourceFile: rbPath,
 			Manifest:   string(rbContent),
-		}); err != nil {
-			return err
-		}
+		})
 	}
-	return nil
+	return c.store.Stage(username, commitProjName, entries...)
 }
 
 // tenantName validates a tenant project name: a DNS-1123 label that is not the

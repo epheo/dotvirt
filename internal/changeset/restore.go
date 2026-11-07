@@ -39,7 +39,7 @@ func (c *Coordinator) RestoreVersion(id auth.Identity, proj project.ProjectInfo,
 	if ok && bytes.Equal(current, restored) {
 		return model.DraftView{}, fmt.Errorf("%w: %s/%s already matches %s", model.ErrInvalid, namespace, name, shortCommit(hash))
 	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
+	return c.stage(id, proj, draft.Entry{
 		Kind:        draft.KindEdit,
 		Resource:    draft.Resource(resource),
 		Namespace:   namespace,
@@ -47,8 +47,5 @@ func (c *Coordinator) RestoreVersion(id auth.Identity, proj project.ProjectInfo,
 		SourceFile:  path,
 		Manifest:    string(restored),
 		FromVersion: shortCommit(hash),
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
+	})
 }
