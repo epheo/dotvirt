@@ -12,27 +12,13 @@ export const FIELD_LABEL: Record<InlineField, string> = {
 	memory: 'Memory',
 };
 
-// Staging replaces a VM's whole entry, so one field cannot be staged alone
-// without dropping the rest: the edit to send is what is staged, with this
-// field set, or without it once it is back at git's value. null means the
-// result stages nothing, so the entry should be unstaged instead.
-export function composeEdit(
-	staged: Edit | undefined,
-	field: InlineField,
-	value: InlineValue,
-	gitValue: InlineValue | undefined,
-): Edit | null {
-	const next: Edit = { ...(staged ?? {}) };
-	if (value === gitValue) delete next[field];
-	else (next as Record<InlineField, InlineValue>)[field] = value;
-	return Object.values(next).some((v) => v !== undefined && v !== null && !emptyList(v))
-		? next
-		: null;
+// The edit staging one field sends. The backend lays it over what is staged
+// for the VM and drops a field back at git's value, so sending git's value
+// unstages the field; a value git leaves unset is sent as its zero.
+export function fieldEdit(field: InlineField, value: InlineValue | undefined): Edit {
+	const zero = field === 'cpuCores' ? 0 : '';
+	return { [field]: field === 'cpuCores' ? Number(value ?? zero) : (value ?? zero) } as Edit;
 }
-
-const emptyList = (v: unknown) =>
-	(Array.isArray(v) && v.length === 0) ||
-	(typeof v === 'object' && v !== null && !Array.isArray(v) && Object.keys(v).length === 0);
 
 // Why a row cannot be edited in place, or '' when it can. A staged create,
 // delete or whole-file edit has no field model to extend, and an instance type
