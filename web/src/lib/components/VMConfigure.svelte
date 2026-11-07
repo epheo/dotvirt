@@ -95,7 +95,7 @@
 			<InfoCard title="Disks">
 				{#snippet action()}{@render editButton('storage')}{/snippet}
 				{#if vm.disks?.length}
-					<ul class="divide-y divide-line-soft px-3 text-[13px]">
+					<ul class="divide-y divide-line-soft px-card text-[13px]">
 						{#each vm.disks as d (d.name)}
 							<li class="flex justify-between gap-3 py-1.5">
 								<span class="text-ink">{d.name}</span>
@@ -108,14 +108,14 @@
 						{/each}
 					</ul>
 				{:else}
-					<p class="px-3 py-3 text-xs text-ink-faint">No disks defined in the manifest.</p>
+					<p class="px-card py-3 text-xs text-ink-faint">No disks defined in the manifest.</p>
 				{/if}
 			</InfoCard>
 		{:else if view === 'network'}
 			<InfoCard title="Network adapters">
 				{#snippet action()}{@render editButton('network')}{/snippet}
 				{#if vm.networks?.length}
-					<ul class="divide-y divide-line-soft px-3 text-[13px]">
+					<ul class="divide-y divide-line-soft px-card text-[13px]">
 						{#each vm.networks as n (n.name)}
 							{@const pg = resolveNIC(n, vm.namespace, networks)}
 							{@const detail = [
@@ -154,13 +154,13 @@
 						{/each}
 					</ul>
 				{:else}
-					<p class="px-3 py-3 text-xs text-ink-faint">No adapters defined in the manifest.</p>
+					<p class="px-card py-3 text-xs text-ink-faint">No adapters defined in the manifest.</p>
 				{/if}
 			</InfoCard>
 		{:else if view === 'labels'}
 			<InfoCard title="Labels">
 				{#snippet action()}{@render editButton('labels')}{/snippet}
-				<div class="px-3 py-2">
+				<div class="px-card py-2">
 					{#if vm.labels && Object.keys(vm.labels).length}
 						{#each Object.entries(vm.labels) as [k, v] (k)}
 							<button
@@ -182,7 +182,7 @@
 					<Row label="Namespace" value={vm.namespace} />
 					<Row label="Sync" value={vm.sync} />
 				</dl>
-				<div class="border-t border-line-soft px-3 py-2">
+				<div class="border-t border-line-soft px-card py-2">
 					<a href={manifestURL(vm)} target="_blank" class="text-xs text-accent-ink hover:underline"
 						>Download manifest ↗</a
 					>

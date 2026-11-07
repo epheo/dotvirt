@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { VMUsage } from '#lib/api.js';
 	import { relativeAge } from '#lib/format.js';
+	import Card from './Card.svelte';
 	import UsageBar from './UsageBar.svelte';
 
 	// Pure view over the summary's usage snapshot - VMSummary owns the fetch so
@@ -9,16 +10,11 @@
 		$props();
 </script>
 
-<section class="rounded border border-line">
-	<h3
-		class="flex items-center justify-between border-b border-line bg-inset px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
-	>
-		<span>Capacity &amp; usage</span>
-		{#if usage}<span class="font-normal text-ink-faint normal-case"
-				>updated {relativeAge(usage.updated)}</span
-			>{/if}
-	</h3>
-	<div class="space-y-3 p-3">
+<Card title="Capacity &amp; usage" flush>
+	{#snippet actions()}
+		{#if usage}<span class="text-ink-faint">updated {relativeAge(usage.updated)}</span>{/if}
+	{/snippet}
+	<div class="space-y-3 px-card py-3">
 		{#if usage}
 			<UsageBar
 				label="CPU"
@@ -50,4 +46,4 @@
 			<p class="text-xs text-ink-faint">Usage metrics unavailable.</p>
 		{/if}
 	</div>
-</section>
+</Card>

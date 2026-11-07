@@ -13,6 +13,7 @@
 	import { draftKindTone, TONE_PILL } from '#lib/status.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import Button from '#lib/components/Button.svelte';
+	import Card from '#lib/components/Card.svelte';
 	import ChangeList from '#lib/components/ChangeList.svelte';
 	import ErrorNote from '#lib/components/ErrorNote.svelte';
 	import GitOpsStepper from '#lib/components/GitOpsStepper.svelte';
@@ -110,22 +111,14 @@
 		>
 	{/snippet}
 
-	<section class="rounded border border-line">
-		<div class="border-b border-line bg-inset px-3 py-1.5">
-			<h3 class="text-xs font-semibold tracking-wide text-ink-muted uppercase">
-				Changes against git main
-			</h3>
-		</div>
-		<div class="px-3 py-2">
+	<Card title="Changes against git main" flush>
+		<div class="px-card py-2">
 			<ChangeList changes={item.changes} />
 		</div>
-	</section>
+	</Card>
 
-	<section class="rounded border border-line">
-		<div class="border-b border-line bg-inset px-3 py-1.5">
-			<h3 class="text-xs font-semibold tracking-wide text-ink-muted uppercase">Impact</h3>
-		</div>
-		<div class="space-y-2 px-3 py-2 text-xs text-ink-soft">
+	<Card title="Impact" flush>
+		<div class="space-y-2 px-card py-2 text-xs text-ink-soft">
 			{#if item.kind === 'delete'}
 				<p class="flex items-start gap-2">
 					<TriangleAlert size={14} class="mt-0.5 shrink-0 text-danger-ink" />
@@ -156,7 +149,7 @@
 				</p>
 			{/if}
 		</div>
-	</section>
+	</Card>
 
 	{#if item.yaml}
 		<details class="rounded border border-line">

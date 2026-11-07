@@ -3,6 +3,7 @@
 	import { api, type NodeInfo, type VM } from '#lib/api.js';
 	import { action, resource } from '#lib/resource.svelte.js';
 	import Button from './Button.svelte';
+	import Card from './Card.svelte';
 
 	// Host maintenance: entering flips
 	// the node's maintenance annotation + cordon in one server patch, then one
@@ -100,13 +101,8 @@
 </script>
 
 {#if info?.canCordon}
-	<section class="max-w-2xl rounded border border-line">
-		<h3
-			class="border-b border-line bg-inset px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
-		>
-			Maintenance
-		</h3>
-		<div class="space-y-3 p-3">
+	<Card title="Maintenance" flush class="max-w-2xl">
+		<div class="space-y-3 px-card py-3">
 			<div class="flex items-center gap-2 text-sm">
 				<span class="text-ink-muted">Status:</span>
 				{#if entering}
@@ -203,5 +199,5 @@
 				<p class="text-xs {ok ? 'text-ink-soft' : 'text-danger-ink'}">{msg}</p>
 			{/if}
 		</div>
-	</section>
+	</Card>
 {/if}

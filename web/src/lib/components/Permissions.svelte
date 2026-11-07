@@ -5,6 +5,7 @@
 	import { Check, X } from '@lucide/svelte';
 	import { api, type Permissions } from '#lib/api.js';
 	import { resource } from '#lib/resource.svelte.js';
+	import Card from './Card.svelte';
 	import Note from './Note.svelte';
 
 	let { namespaces }: { namespaces: string[] } = $props();
@@ -27,15 +28,10 @@
 {:else}
 	<div class="space-y-4">
 		{#each data as p (p.namespace)}
-			<section class="max-w-2xl rounded border border-line">
-				<h3
-					class="border-b border-line bg-inset px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
-				>
-					Your access in {p.namespace}
-				</h3>
+			<Card title="Your access in {p.namespace}" flush class="max-w-2xl">
 				<ul class="divide-y divide-line-soft text-[13px]">
 					{#each p.capabilities as c (c.id)}
-						<li class="flex items-center gap-2 px-3 py-1.5" title={c.detail}>
+						<li class="flex items-center gap-2 px-card py-1.5" title={c.detail}>
 							{#if c.allowed}
 								<Check size={14} class="shrink-0 text-ok-ink" />
 							{:else}
@@ -46,11 +42,11 @@
 					{/each}
 				</ul>
 				{#if p.incomplete}
-					<p class="border-t border-warn-soft bg-warn-soft/60 px-3 py-1.5 text-xs text-warn-ink">
+					<p class="border-t border-warn-soft bg-warn-soft/60 px-card py-1.5 text-xs text-warn-ink">
 						The cluster couldn't enumerate every rule; some allowed actions may show as denied.
 					</p>
 				{/if}
-			</section>
+			</Card>
 		{/each}
 		<p class="max-w-2xl text-xs text-ink-faint">
 			These reflect your own Kubernetes permissions. Configuration, power, and delete aren't listed:

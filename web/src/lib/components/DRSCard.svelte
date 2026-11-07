@@ -86,7 +86,7 @@
 	{/snippet}
 
 	{#if !view}
-		<p class="px-3 py-3 text-xs text-ink-faint">{error || 'Loading…'}</p>
+		<p class="px-card py-3 text-xs text-ink-faint">{error || 'Loading…'}</p>
 	{:else}
 		<dl class="divide-y divide-line-soft text-[13px]">
 			<Row label="Status" value={status} />
@@ -109,24 +109,24 @@
 			<Row label="Live state" value={liveStatus} />
 		</dl>
 		{#if view.warning}
-			<p class="border-t border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
+			<p class="border-t border-warn-soft bg-warn-soft/60 px-card py-2 text-xs text-warn-ink">
 				{view.warning}
 			</p>
 		{/if}
 		{#if view.live.degraded}
-			<p class="border-t border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
+			<p class="border-t border-warn-soft bg-warn-soft/60 px-card py-2 text-xs text-warn-ink">
 				{view.live.degraded}
 			</p>
 		{/if}
 		{#if !view.configured}
-			<p class="border-t border-line-soft px-3 py-2 text-xs text-ink-faint">
+			<p class="border-t border-line-soft px-card py-2 text-xs text-ink-faint">
 				Without dynamic rescheduling, VMs are placed once at start and stay put. Enabling stages the
 				descheduler operator + configuration into the platform repository — applied when the PR
 				merges.
 			</p>
 		{/if}
 		{#if error}
-			<p class="border-t border-danger-soft bg-danger-soft/60 px-3 py-2 text-xs text-danger-ink">
+			<p class="border-t border-danger-soft bg-danger-soft/60 px-card py-2 text-xs text-danger-ink">
 				{error}
 			</p>
 		{/if}

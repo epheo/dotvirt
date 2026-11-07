@@ -83,18 +83,18 @@
 	{/snippet}
 	<ErrorNote error={restoreOp.error} class="m-3" />
 	{#if historyRes.loading}
-		<p class="px-3 py-2 text-xs text-ink-faint">loading…</p>
+		<p class="px-card py-2 text-xs text-ink-faint">loading…</p>
 	{:else if historyRes.failed}
-		<p class="px-3 py-2 text-xs text-danger-ink">{historyRes.error}</p>
+		<p class="px-card py-2 text-xs text-danger-ink">{historyRes.error}</p>
 	{:else if commits.length === 0}
-		<p class="px-3 py-2 text-xs text-ink-faint">No merged changes yet.</p>
+		<p class="px-card py-2 text-xs text-ink-faint">No merged changes yet.</p>
 	{:else}
 		<ul class="divide-y divide-line-soft text-[13px]">
 			{#each commits as c, i (c.hash)}
 				{@const current = i === 0}
 				{@const shown = open === c.hash}
 				<li>
-					<div class="flex items-center gap-3 px-3 py-2 {shown ? 'bg-select-soft' : ''}">
+					<div class="flex items-center gap-3 px-card py-2 {shown ? 'bg-select-soft' : ''}">
 						<span
 							class="h-2.5 w-2.5 shrink-0 rounded-full border-2 border-accent {current
 								? 'bg-accent'
@@ -169,7 +169,7 @@
 			{/each}
 		</ul>
 		<p
-			class="flex items-center gap-2 border-t border-line-soft bg-inset px-3 py-1.5 text-xs text-ink-faint"
+			class="flex items-center gap-2 border-t border-line-soft bg-inset px-card py-1.5 text-xs text-ink-faint"
 		>
 			<History size={12} />
 			<span>
