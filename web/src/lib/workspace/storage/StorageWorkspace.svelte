@@ -25,7 +25,7 @@
 	const tab = $derived(storageTab(page.url.searchParams.get('tab')));
 	const project = $derived(page.url.searchParams.get('project') ?? '');
 	const rows = $derived(project ? storage.rows.filter((r) => r.project === project) : storage.rows);
-	const disks = $derived(rows.filter((r) => !r.ephemeral).length);
+	const disks = $derived(storage.rows.filter((r) => !r.ephemeral).length);
 	const namespaces = $derived(
 		new Set(
 			inventory.projects
@@ -37,9 +37,10 @@
 		storage.snapshots?.filter((s) => !project || namespaces.has(s.namespace ?? '')) ?? null,
 	);
 
+	// The header and the tab counts speak for the whole platform; the project
+	// narrows what the tabs list, like any other filter.
 	const context = $derived(
-		(project ? `${project}: ` : '') +
-			storageContext(rows, storage.classNames.length, project ? 0 : storage.hostCount),
+		storageContext(storage.rows, storage.classNames.length, storage.hostCount),
 	);
 	const tabs = $derived(
 		STORAGE_TABS.map((t) => ({
@@ -51,7 +52,7 @@
 					: t.id === 'images'
 						? storage.images.filter((u) => u.image).length
 						: t.id === 'snapshots'
-							? snapshots?.length
+							? (storage.snapshots?.length ?? undefined)
 							: t.id === 'classes'
 								? storage.classNames.length
 								: undefined,
@@ -118,10 +119,17 @@
 			/>
 		</div>
 
+		{#if project && tab !== 'disks'}
+			<p class="-mt-2 text-[13px] text-ink-muted">
+				Showing <strong class="text-ink">{project}</strong> only.
+				<a class="text-accent-ink hover:underline" href={storageHref(tab)}>Show all projects</a>
+			</p>
+		{/if}
+
 		{#if tab === 'library'}
 			<LibraryTab {rows} {project} snapshotsLoaded={snapshots !== null} />
 		{:else if tab === 'disks'}
-			<DisksTab {rows} {go} />
+			<DisksTab rows={storage.rows} {go} />
 		{:else if tab === 'images'}
 			<ImagesTab {rows} {project} {go} />
 		{:else if tab === 'snapshots'}

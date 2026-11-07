@@ -82,8 +82,15 @@ test('the rail scopes every tab to a project', async ({ page }) => {
 		.click();
 	await expect(page).toHaveURL(/project=team-db/);
 	const main = page.locator('main');
-	await expect(main.getByText('team-db: 2 disks on 2 classes')).toBeVisible();
-	await expect(main.getByText('2 of 2 disks')).toBeVisible();
+	// The header speaks for the platform; the project narrows the list.
+	await expect(main.getByText('6 disks on 2 classes, 3 hosts')).toBeVisible();
+	await expect(main.getByText('2 of 6 disks')).toBeVisible();
+	await main.getByRole('link', { name: /^Library/ }).click();
+	await expect(main.getByText('Showing team-db only.')).toBeVisible();
+	await expect(main.getByText('disk cannot live-migrate', { exact: true })).toBeVisible();
+	await main.getByRole('link', { name: 'Show all projects' }).click();
+	await expect(page).not.toHaveURL(/project=/);
+	await page.goto('/storage?tab=disks&project=team-db');
 	await main.getByRole('button', { name: 'Remove filter: project team-db' }).click();
 	await expect(main.getByText('6 of 6 disks')).toBeVisible();
 });

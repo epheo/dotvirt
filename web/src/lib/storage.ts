@@ -312,6 +312,10 @@ export const showing = (p: Page<unknown>) =>
 
 export type DiskSort = 'vm' | 'size' | 'snapshot';
 
+// web-2 before web-10, the way people number VMs.
+const collator = new Intl.Collator('en', { numeric: true });
+const naturally = (a: string, b: string) => collator.compare(a, b);
+
 export function sortRows(rows: DiskRow[], by: DiskSort, desc = false): DiskRow[] {
 	const dir = desc ? -1 : 1;
 	const last = (r: DiskRow) => r.snapshots[0]?.created ?? '';
@@ -323,7 +327,7 @@ export function sortRows(rows: DiskRow[], by: DiskSort, desc = false): DiskRow[]
 	return [...rows].sort(
 		(a, b) =>
 			cmp(a, b) ||
-			a.vm.name.localeCompare(b.vm.name) * (by === 'vm' ? dir : 1) ||
+			naturally(a.vm.name, b.vm.name) * (by === 'vm' ? dir : 1) ||
 			a.vm.namespace.localeCompare(b.vm.namespace) ||
 			a.disk.name.localeCompare(b.disk.name),
 	);
@@ -530,6 +534,8 @@ export interface MovePlan {
 	moving: number; // disks the edits move
 	vms: number;
 	liveMigrateAfter: number; // VMs whose every persistent disk is shared once it merges
+	// Disks leaving a class other than the default: a class picked on purpose
+	// (faster, closer), which the move gives up.
 	leaving: { storageClass: string; count: number; description: string }[];
 	added: number; // bytes the moves add to the target
 	targetFree: number | null;
@@ -639,6 +645,7 @@ export function planBulkMove(
 	plan.vms = plan.edits.length;
 	plan.projects = [...projects].sort();
 	plan.leaving = [...leaving.entries()]
+		.filter(([storageClass]) => !classes.get(storageClass)?.default)
 		.map(([storageClass, count]) => ({
 			storageClass,
 			count,
@@ -648,6 +655,7 @@ export function planBulkMove(
 	return plan;
 }
 
+const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 const plural = (n: number, one: string, many = `${one}s`) => `${num(n)} ${n === 1 ? one : many}`;
 
 // "Adds 49 moves to the team-web draft. web-1 rootdisk is already in it."
@@ -685,12 +693,13 @@ export function moveConsequences(plan: MovePlan): { tone: Tone; text: string }[]
 			});
 		out.push({ tone: 'info', text: 'Running VMs keep running while their disk copies.' });
 	}
-	for (const l of plan.leaving)
-		if (l.description)
-			out.push({
-				tone: 'warn',
-				text: `${num(l.count)} leave ${l.description} on ${l.storageClass}.`,
-			});
+	for (const l of plan.leaving) {
+		const what = l.description ? `${lower(l.description)} on ${l.storageClass}` : l.storageClass;
+		out.push({
+			tone: 'warn',
+			text: `${num(l.count)} ${l.count === 1 ? 'leaves' : 'leave'} ${what}.`,
+		});
+	}
 	if (plan.moving) {
 		const added = size(plan.added);
 		if (plan.targetFree === null)

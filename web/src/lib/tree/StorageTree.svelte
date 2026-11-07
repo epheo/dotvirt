@@ -44,14 +44,16 @@
 		return `/storage?${q}`;
 	}
 
-	// The default class first, the way disks that name none land.
+	// The default class first (where disks that name none land), then local
+	// before shared.
 	const classes = $derived(
 		storage.classNames
 			.map((name) => {
 				const info = storage.classes?.find((c) => c.name === name);
-				return { name, tag: info ? classTag(info) : 'not on the cluster', first: !!info?.default };
+				const rank = info?.default ? 0 : info?.profile?.shared ? 2 : 1;
+				return { name, tag: info ? classTag(info) : 'not on the cluster', rank };
 			})
-			.sort((a, b) => Number(b.first) - Number(a.first)),
+			.sort((a, b) => a.rank - b.rank),
 	);
 
 	const ROW = 'flex items-center justify-between gap-2 rounded px-2 py-1.5';

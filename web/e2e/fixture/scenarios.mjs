@@ -535,6 +535,8 @@ base.templates = {
 		libraryTemplate('fedora-server', 'fedora-42'),
 		libraryTemplate('fedora-minimal', 'fedora-42'),
 		libraryTemplate('centos-stream-server', 'centos-stream-9'),
+		libraryTemplate('rhel-9-server', 'rhel-9.6'),
+		libraryTemplate('windows-2025-server', 'windows-2025'),
 	],
 };
 

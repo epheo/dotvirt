@@ -232,9 +232,9 @@ describe('paging', () => {
 	});
 
 	it('sorts by VM with a stable tiebreak', () => {
-		const r = rows([vm('b'), vm('a'), vm('c')]);
-		expect(sortRows(r, 'vm').map((x) => x.vm.name)).toEqual(['a', 'b', 'c']);
-		expect(sortRows(r, 'vm', true).map((x) => x.vm.name)).toEqual(['c', 'b', 'a']);
+		const r = rows([vm('web-10'), vm('web-2'), vm('web-1')]);
+		expect(sortRows(r, 'vm').map((x) => x.vm.name)).toEqual(['web-1', 'web-2', 'web-10']);
+		expect(sortRows(r, 'vm', true).map((x) => x.vm.name)).toEqual(['web-10', 'web-2', 'web-1']);
 	});
 });
 
@@ -411,9 +411,9 @@ describe('planBulkMove', () => {
 		// two keeps its local data disk, so only cache-1 live-migrates after.
 		expect(plan.liveMigrateAfter).toBe(1);
 		expect(plan.added).toBe(50 * 2 ** 30);
+		// Leaving the default class is the expected move; leaving a picked one is news.
 		expect(plan.leaving).toEqual([
 			{ storageClass: 'lvms-vgfast', count: 1, description: 'local NVMe' },
-			{ storageClass: 'lvms-vgslow', count: 1, description: '' },
 		]);
 
 		expect(moveNote(plan)).toBe(
@@ -425,7 +425,7 @@ describe('planBulkMove', () => {
 				text: '1 of 2 VMs can live-migrate once it merges; the rest keep a local disk.',
 			},
 			{ tone: 'info', text: 'Running VMs keep running while their disk copies.' },
-			{ tone: 'warn', text: '1 leave local NVMe on lvms-vgfast.' },
+			{ tone: 'warn', text: '1 leaves local NVMe on lvms-vgfast.' },
 			{ tone: 'warn', text: 'bulk-hdd does not report free space. This adds 50 GiB.' },
 			{
 				tone: 'danger',

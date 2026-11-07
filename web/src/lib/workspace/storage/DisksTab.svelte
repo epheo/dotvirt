@@ -45,7 +45,7 @@
 		rows,
 		go,
 	}: {
-		rows: DiskRow[]; // already scoped to the project
+		rows: DiskRow[];
 		go: (params: Record<string, string | undefined>, opts?: { replace?: boolean }) => void;
 	} = $props();
 
