@@ -47,7 +47,7 @@ func TestRepoSetCachesByURL(t *testing.T) {
 	}
 
 	// The read view actually works (proves Get opened a usable mirror).
-	if _, err := read1.VMManifests("main"); err != nil {
+	if _, err := read1.FileOnBranch("main", "web.yaml"); err != nil {
 		t.Errorf("cached read repo unusable: %v", err)
 	}
 }

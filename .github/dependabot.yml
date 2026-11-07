@@ -46,3 +46,7 @@ updates:
       # update-types semver-major only skips the newest major, so name the range.
       - dependency-name: 'library/node'
         versions: ['>=27']
+      # Moves with OPM_VERSION in hack/versions.env (CI validate checks they match);
+      # raise both by hand.
+      - dependency-name: '*operator-framework/opm'
+        update-types: [version-update:semver-major, version-update:semver-minor, version-update:semver-patch]
