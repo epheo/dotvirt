@@ -83,7 +83,8 @@ func (s *Snapshot) uplinks() []model.Uplink {
 	out := []model.Uplink{{
 		Name: "br-ex", Bridge: "br-ex", Builtin: true, Nodes: all, NodeCount: len(all),
 	}}
-	for _, u := range reflect.List(s.nncp) {
+	// Policy name order: the merge keeps the first policy's bridge.
+	for _, u := range sortedList(s.nncp) {
 		out = append(out, s.uplinksFromNNCP(u)...)
 	}
 	return mergeUplinks(out)
@@ -123,12 +124,9 @@ func mergeUplinks(in []model.Uplink) []model.Uplink {
 	return out
 }
 
-// sortedSet dedupes and orders names, keeping a nil slice nil (an uplink with no
-// node list means "every node", which an empty list would not).
+// sortedSet dedupes and orders names, never nil: the web reads a missing node
+// list as every node.
 func sortedSet(in []string) []string {
-	if len(in) == 0 {
-		return in
-	}
 	seen := make(map[string]struct{}, len(in))
 	out := make([]string, 0, len(in))
 	for _, v := range in {
@@ -229,9 +227,11 @@ func cudnConfig(u *unstructured.Unstructured) netgen.NetworkConfig {
 // nadConfig decodes a NAD's spec.config CNI JSON blob; ok is false when absent
 // or unparsable.
 func nadConfig(u *unstructured.Unstructured) (cfg struct {
-	Topology string `json:"topology"`
-	VLANID   int    `json:"vlanID"`
-	Subnets  string `json:"subnets"`
+	Name                string `json:"name"`
+	Topology            string `json:"topology"`
+	PhysicalNetworkName string `json:"physicalNetworkName"`
+	VLANID              int    `json:"vlanID"`
+	Subnets             string `json:"subnets"`
 }, ok bool) {
 	raw, _, _ := unstructured.NestedString(u.Object, "spec", "config")
 	if raw == "" || json.Unmarshal([]byte(raw), &cfg) != nil {

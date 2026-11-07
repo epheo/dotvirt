@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/epheo/dotvirt/internal/model"
 	"go.yaml.in/yaml/v3"
@@ -31,9 +32,15 @@ type vmDoc struct {
 		// (CDI accepts both storage and the legacy pvc spec form).
 		DataVolumeTemplates []struct {
 			Metadata struct {
-				Name string `yaml:"name"`
+				Name        string            `yaml:"name"`
+				Annotations map[string]string `yaml:"annotations"`
 			} `yaml:"metadata"`
 			Spec struct {
+				SourceRef *struct {
+					Kind      string `yaml:"kind"`
+					Name      string `yaml:"name"`
+					Namespace string `yaml:"namespace"`
+				} `yaml:"sourceRef"`
 				Storage *dvStorageSpec `yaml:"storage"`
 				PVC     *dvStorageSpec `yaml:"pvc"`
 			} `yaml:"spec"`
@@ -137,7 +144,7 @@ func ParseVMs(path string, content []byte, defaultNS string) ([]model.VM, error)
 			DRSExclude:       drsExclude,
 			EvictionStrategy: doc.Spec.Template.Spec.EvictionStrategy,
 			Scheduling:       scheduling,
-			Disks:            disksFromDoc(doc),
+			Disks:            disksFromDoc(doc, ns),
 			Networks:         networksFromDoc(doc),
 			SourceFile:       path,
 			Sync:             model.SyncUnknown,
@@ -155,10 +162,11 @@ func refName(ref *struct {
 	return ref.Name
 }
 
-// dvStorageSpec is the size + class part of a DataVolume's storage (or legacy
-// pvc) spec.
+// dvStorageSpec is the size, class and access part of a DataVolume's storage
+// (or legacy pvc) spec.
 type dvStorageSpec struct {
-	StorageClassName string `yaml:"storageClassName"`
+	StorageClassName string   `yaml:"storageClassName"`
+	AccessModes      []string `yaml:"accessModes"`
 	Resources        struct {
 		Requests struct {
 			Storage string `yaml:"storage"`
@@ -166,22 +174,33 @@ type dvStorageSpec struct {
 	} `yaml:"resources"`
 }
 
+// ImageAnnotation records, on a DataVolume template, the boot image a disk was
+// first provisioned from once its own source no longer says so: a storage
+// migration provisions the destination blank.
+const ImageAnnotation = "dotvirt.io/image"
+
 // disksFromDoc derives disk devices, joining each disk with its volume to label
 // the type, and dataVolume volumes with their dataVolumeTemplates for the
-// provisioned size + storage class.
-func disksFromDoc(d vmDoc) []model.Disk {
-	// DV template name -> (size, class), from whichever spec form is present.
-	type dvInfo struct{ size, class string }
+// provisioned size, storage class, access modes and boot image.
+func disksFromDoc(d vmDoc, namespace string) []model.Disk {
+	type dvInfo struct {
+		size, class, image string
+		modes              []string
+	}
 	dvs := map[string]dvInfo{}
 	for _, t := range d.Spec.DataVolumeTemplates {
+		info := dvInfo{image: imageRef(t.Metadata.Annotations[ImageAnnotation], namespace)}
+		if ref := t.Spec.SourceRef; ref != nil && (ref.Kind == "" || ref.Kind == "DataSource") && ref.Name != "" {
+			info.image = imageRef(ref.Namespace+"/"+ref.Name, namespace)
+		}
 		spec := t.Spec.Storage
 		if spec == nil {
 			spec = t.Spec.PVC
 		}
-		if spec == nil {
-			continue
+		if spec != nil {
+			info.size, info.class, info.modes = spec.Resources.Requests.Storage, spec.StorageClassName, spec.AccessModes
 		}
-		dvs[t.Metadata.Name] = dvInfo{size: spec.Resources.Requests.Storage, class: spec.StorageClassName}
+		dvs[t.Metadata.Name] = info
 	}
 
 	ts := d.Spec.Template.Spec
@@ -191,11 +210,13 @@ func disksFromDoc(d vmDoc) []model.Disk {
 		switch {
 		case v.DataVolume != nil:
 			disk.Type = "dataVolume"
+			disk.Claim = v.DataVolume.Name
 			if info, ok := dvs[v.DataVolume.Name]; ok {
-				disk.Size, disk.StorageClass = info.size, info.class
+				disk.Size, disk.StorageClass, disk.AccessModes, disk.Image = info.size, info.class, info.modes, info.image
 			}
 		case v.PVC != nil:
 			disk.Type = "pvc"
+			disk.Claim = v.PVC.ClaimName
 		case v.ContainerDisk != nil:
 			disk.Type = "containerDisk"
 		case v.CloudInit != nil:
@@ -217,6 +238,22 @@ func disksFromDoc(d vmDoc) []model.Disk {
 	return out
 }
 
+// imageRef normalizes a DataSource reference to "namespace/name": CDI resolves
+// a sourceRef without a namespace in the DataVolume's own namespace.
+func imageRef(ref, namespace string) string {
+	ns, name, ok := strings.Cut(ref, "/")
+	if !ok {
+		ns, name = "", ref
+	}
+	if name == "" {
+		return ""
+	}
+	if ns == "" {
+		ns = namespace
+	}
+	return ns + "/" + name
+}
+
 func networksFromDoc(d vmDoc) []model.NIC {
 	ts := d.Spec.Template.Spec
 	netType := map[string]string{}
@@ -235,7 +272,7 @@ func networksFromDoc(d vmDoc) []model.NIC {
 	// KubeVirt attaches the pod network when a template declares no interface.
 	// That defaulting lands on the VMI, never on the manifest, so mirror it here
 	// or a minimal manifest reads as unattached while its VMI has an address.
-	// clusterstate.WorkloadNetworks applies the same rule for the trace check.
+	// clusterstate.State.Workload applies the same rule for the trace check.
 	if len(out) == 0 {
 		if auto := ts.Domain.Devices.AutoattachPodInterface; auto == nil || *auto {
 			out = append(out, model.NIC{Name: "default", Network: "pod", Implicit: true})

@@ -26,8 +26,6 @@
 	import BulkDeleteConfirm from './BulkDeleteConfirm.svelte';
 	import HostsRootSummary from './HostsRootSummary.svelte';
 	import NodeConfigure from './NodeConfigure.svelte';
-	import StorageClassSummary from './StorageClassSummary.svelte';
-	import StorageRootSummary from './StorageRootSummary.svelte';
 	import TabPane from '#lib/components/TabPane.svelte';
 
 	// The container workspace: every inventory level, section roots included,
@@ -211,11 +209,7 @@
 {/if}
 
 {#if tab === 'summary'}
-	{#if scope.kind === 'storage'}
-		<StorageClassSummary storageClass={scope.storageClass} vms={scopedVMs} />
-	{:else if root && section === 'storage'}
-		<StorageRootSummary vms={scopedVMs} />
-	{:else if root && section === 'hosts'}
+	{#if root && section === 'hosts'}
 		<HostsRootSummary vms={scopedVMs} />
 	{:else}
 		{#if scope.kind === 'project' || scope.kind === 'namespace'}

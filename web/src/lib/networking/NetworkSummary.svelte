@@ -12,7 +12,7 @@
 	import { POD_NETWORK, vmNetworkKeys } from '#lib/lenses.js';
 	import { uplinkLabel } from '#lib/netmap.js';
 	import { networkHref, vmHref } from '#lib/nav.js';
-	import { networkKey } from '#lib/networks.js';
+	import { attachRef, networkKey } from '#lib/networks.js';
 	import {
 		canAdoptNetwork,
 		canAuthorRef,
@@ -28,6 +28,7 @@
 	import { overlaps, usableAddresses } from '#lib/subnets.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { networking } from '#lib/state/networking.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import Button from '#lib/components/Button.svelte';
 	import Card from '#lib/components/Card.svelte';
 	import Consequence from '#lib/components/Consequence.svelte';
@@ -161,6 +162,9 @@
 			: [],
 	);
 	const clashProblem = $derived(networking.problemsOf(nkey)[0]);
+	const reuseText = $derived(
+		`${clash.map((o) => o.name).join(', ')} ${clash.length === 1 ? 'reuses' : 'reuse'} this range in another namespace. They never meet, so that is fine.`,
+	);
 
 	// --- top VMs ---
 	let rank = $state<'traffic' | 'started'>('traffic');
@@ -495,11 +499,7 @@
 							{/each}
 						</div>
 					{:else if clash.length}
-						<span class="text-[13px] text-ink-faint">
-							{clash.map((o) => o.name).join(', ')}
-							{clash.length === 1 ? 'reuses' : 'reuse'} this range in another namespace. They never meet,
-							so that is fine.
-						</span>
+						<span class="text-[13px] text-ink-faint">{reuseText}</span>
 					{/if}
 				</div>
 			{:else}
@@ -579,6 +579,22 @@
 							</Consequence>
 						</div>
 					{/if}
+					<div class="flex flex-col gap-1.5 border-t border-line-soft py-3">
+						<div class="flex flex-wrap items-center gap-2">
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={() =>
+									(ui.modal = {
+										kind: 'newNetwork',
+										like: attachRef(net),
+										from: `${net.name}, where you were`,
+									})}><Plus size={14} />New network like this</Button
+							>
+							<StageChip kind="pr" />
+						</div>
+						<Consequence size="sm">Same project and size, on the next free range.</Consequence>
+					</div>
 					{#if canAdoptNetwork(net)}
 						<div class="flex flex-col gap-1.5 py-3">
 							<div class="flex flex-wrap items-center gap-2">

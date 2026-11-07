@@ -1,6 +1,9 @@
 package clusterstate
 
 import (
+	"maps"
+	"slices"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -46,38 +49,69 @@ func TestLiveVMsMergesVMIOntoVM(t *testing.T) {
 	}
 }
 
-// WorkloadLabels prefers the running VMI's labels (what the virt-launcher pod
-// carries) over the manifest template's, and falls back for stopped VMs.
+// Selectors match the virt-launcher pod, not the VMI: the identity carries
+// KubeVirt's fixed launcher labels on top of the VMI's own (the template's
+// for a stopped VM, minus the instance UID a start assigns).
 func TestWorkloadLabels(t *testing.T) {
 	s := stateWithIndexers()
 	tmpl := &kubevirtcorev1.VirtualMachineInstanceTemplateSpec{}
 	tmpl.ObjectMeta.Labels = map[string]string{"app": "authored"}
+	tmpl.ObjectMeta.Annotations = map[string]string{"sidecar.istio.io/inject": "true"}
 	_ = s.vms.Add(&kubevirtcorev1.VirtualMachine{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "vm"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "vm.example"},
 		Spec:       kubevirtcorev1.VirtualMachineSpec{Template: tmpl},
 	})
 
-	lbls, live, found := s.WorkloadLabels("ns", "vm")
-	if !found || live || lbls["app"] != "authored" {
-		t.Errorf("stopped VM: want manifest labels, got %v live=%v found=%v", lbls, live, found)
+	w, found := s.Workload("ns", "vm.example")
+	want := map[string]string{
+		"app":                     "authored",
+		"kubevirt.io":             "virt-launcher",
+		"vm.kubevirt.io/name":     "vm",
+		"vmi.kubevirt.io/id":      "vm.example",
+		"sidecar.istio.io/inject": "true",
+	}
+	if !found || w.Live || !maps.Equal(w.Labels, want) {
+		t.Errorf("stopped VM: labels %v live=%v found=%v, want %v", w.Labels, w.Live, found, want)
+	}
+	if tmpl.ObjectMeta.Labels["kubevirt.io"] != "" {
+		t.Error("the template's labels must not be mutated")
 	}
 
-	_ = s.vmis.Add(&kubevirtcorev1.VirtualMachineInstance{ObjectMeta: metav1.ObjectMeta{
-		Namespace: "ns", Name: "vm", Labels: map[string]string{"app": "live"},
-	}})
-	lbls, live, found = s.WorkloadLabels("ns", "vm")
-	if !found || !live || lbls["app"] != "live" {
-		t.Errorf("running VM: want VMI labels, got %v live=%v found=%v", lbls, live, found)
+	_ = s.vmis.Add(&kubevirtcorev1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "vm.example", UID: "u-1", Labels: map[string]string{"app": "live"}},
+		Spec:       kubevirtcorev1.VirtualMachineInstanceSpec{Hostname: "web"},
+	})
+	w, found = s.Workload("ns", "vm.example")
+	want = map[string]string{
+		"app":                    "live",
+		"kubevirt.io":            "virt-launcher",
+		"kubevirt.io/created-by": "u-1",
+		"vm.kubevirt.io/name":    "web",
+		"vmi.kubevirt.io/id":     "vm.example",
+	}
+	if !found || !w.Live || !maps.Equal(w.Labels, want) {
+		t.Errorf("running VM: labels %v live=%v found=%v, want %v", w.Labels, w.Live, found, want)
 	}
 
-	if _, _, found := s.WorkloadLabels("ns", "ghost"); found {
+	if _, found := s.Workload("ns", "ghost"); found {
 		t.Errorf("unknown VM must not be found")
 	}
 }
 
-// WorkloadNetworks must mirror KubeVirt's VMI-creation defaulting for stopped
-// VMs (a template naming no networks gets the pod network autoattached) and
-// must report a default multus binding as a substituted segment, never as the
+// A VMI name past a label value's length gets KubeVirt's hashed id.
+func TestVMIIDLongName(t *testing.T) {
+	name := strings.Repeat("a", 70)
+	if got, want := vmiID(name), strings.Repeat("a", 54)+"-"+"ed6c69d9"; got != want {
+		t.Errorf("vmiID = %q, want %q", got, want)
+	}
+	if got := vmiID("short"); got != "short" {
+		t.Errorf("vmiID(short) = %q", got)
+	}
+}
+
+// Workload must mirror KubeVirt's VMI-creation defaulting for stopped VMs (a
+// template naming no networks gets the pod network autoattached) and must
+// report a default multus binding as a substituted segment, never as the
 // namespace primary.
 func TestWorkloadNetworks(t *testing.T) {
 	s := stateWithIndexers()
@@ -92,16 +126,16 @@ func TestWorkloadNetworks(t *testing.T) {
 	}
 
 	addVM("minimal", tmpl())
-	podNet, defaultNet, _, _, found := s.WorkloadNetworks("ns", "minimal")
-	if !found || !podNet || defaultNet != "" {
-		t.Errorf("minimal template must autoattach the pod net: podNet=%v defaultNet=%q found=%v", podNet, defaultNet, found)
+	w, found := s.Workload("ns", "minimal")
+	if !found || !w.PodNet || w.DefaultNet != "" {
+		t.Errorf("minimal template must autoattach the pod net: %+v found=%v", w, found)
 	}
 
 	off := false
 	noNet := tmpl()
 	noNet.Spec.Domain.Devices.AutoattachPodInterface = &off
 	addVM("unattached", noNet)
-	if podNet, _, _, _, _ = s.WorkloadNetworks("ns", "unattached"); podNet {
+	if w, _ = s.Workload("ns", "unattached"); w.PodNet {
 		t.Error("autoattach off must not report a pod net")
 	}
 
@@ -113,9 +147,34 @@ func TestWorkloadNetworks(t *testing.T) {
 		},
 	}}
 	addVM("substituted", sub)
-	podNet, defaultNet, _, _, _ = s.WorkloadNetworks("ns", "substituted")
-	if podNet || defaultNet != "ns/vlan" {
-		t.Errorf("default multus binding: podNet=%v defaultNet=%q, want false ns/vlan", podNet, defaultNet)
+	if w, _ = s.Workload("ns", "substituted"); w.PodNet || w.DefaultNet != "ns/vlan" {
+		t.Errorf("default multus binding: podNet=%v defaultNet=%q, want false ns/vlan", w.PodNet, w.DefaultNet)
+	}
+}
+
+// Only the primary NIC carries the flows the cluster policies filter: a
+// secondary NIC's or a guest-only interface's address must never reach a
+// CIDR peer match.
+func TestWorkloadIPsPrimaryOnly(t *testing.T) {
+	s := stateWithIndexers()
+	_ = s.vmis.Add(&kubevirtcorev1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "vm"},
+		Spec: kubevirtcorev1.VirtualMachineInstanceSpec{Networks: []kubevirtcorev1.Network{
+			{Name: "default", NetworkSource: kubevirtcorev1.NetworkSource{Pod: &kubevirtcorev1.PodNetwork{}}},
+			{Name: "dc", NetworkSource: kubevirtcorev1.NetworkSource{Multus: &kubevirtcorev1.MultusNetwork{NetworkName: "vlan10"}}},
+		}},
+		Status: kubevirtcorev1.VirtualMachineInstanceStatus{Interfaces: []kubevirtcorev1.VirtualMachineInstanceNetworkInterface{
+			{Name: "default", IP: "10.128.2.5", IPs: []string{"10.128.2.5", "fd02::5"}},
+			{Name: "dc", IP: "192.168.10.5", IPs: []string{"192.168.10.5"}},
+			{InterfaceName: "docker0", IP: "172.17.0.1", IPs: []string{"172.17.0.1"}},
+		}},
+	})
+	w, _ := s.Workload("ns", "vm")
+	if !slices.Equal(w.IPs, []string{"10.128.2.5", "fd02::5"}) {
+		t.Errorf("IPs = %v, want the primary NIC's only", w.IPs)
+	}
+	if !slices.Equal(w.Nets, []string{"ns/vlan10"}) {
+		t.Errorf("Nets = %v", w.Nets)
 	}
 }
 

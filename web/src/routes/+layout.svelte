@@ -21,6 +21,7 @@
 	import { catalog } from '#lib/state/catalog.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
+	import { storage } from '#lib/state/storage.svelte.js';
 	import { lastSection } from '#lib/state/nav.svelte.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { tray } from '#lib/state/tray.svelte.js';
@@ -40,9 +41,9 @@
 	import CatalogTree from '#lib/tree/CatalogTree.svelte';
 	import ChangesTree from '#lib/tree/ChangesTree.svelte';
 	import ComputeTree from '#lib/tree/ComputeTree.svelte';
-	import FlatSectionTree from '#lib/tree/FlatSectionTree.svelte';
 	import HostsTree from '#lib/tree/HostsTree.svelte';
 	import NetworkingTree from '#lib/tree/NetworkingTree.svelte';
+	import StorageTree from '#lib/tree/StorageTree.svelte';
 
 	let { children }: { children: Snippet } = $props();
 
@@ -74,6 +75,7 @@
 			reviewCache.reset();
 			ui.reset();
 			catalog.reset();
+			storage.reset();
 			tray.reset();
 		}
 	});
@@ -251,7 +253,7 @@
 			</Banner>
 		{/if}
 
-		<div class="flex min-h-0 flex-1">
+		<div class="flex min-h-0 flex-1" data-workspace>
 			<aside class="flex w-72 flex-col border-r border-side-line bg-side">
 				<SectionSwitcher active={treeSection} />
 				<div class="min-h-0 flex-1 overflow-y-auto">
@@ -273,7 +275,7 @@
 					{:else if treeSection === 'networking'}
 						<NetworkingTree />
 					{:else if treeSection === 'storage'}
-						<FlatSectionTree kind="storage" />
+						<StorageTree />
 					{:else if treeSection === 'changes'}
 						<ChangesTree />
 					{:else}

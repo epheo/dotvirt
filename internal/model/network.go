@@ -62,7 +62,7 @@ type Uplink struct {
 	Name      string   `json:"name"`              // physicalNetworkName
 	Bridge    string   `json:"bridge"`            // OVS bridge (br-ex, br-physnet...)
 	Builtin   bool     `json:"builtin,omitempty"` // the default br-ex uplink
-	Nodes     []string `json:"nodes,omitempty"`   // nodes carrying the mapping
+	Nodes     []string `json:"nodes"`             // nodes carrying the mapping; never omitted, the web reads absent as every node
 	NodeCount int      `json:"nodeCount"`         // len(Nodes), for the "N/M nodes" badge
 	// Policy is the NodeNetworkConfigurationPolicy declaring this uplink - the
 	// identity edit, delete and adoption act on. Empty for the builtin uplink and

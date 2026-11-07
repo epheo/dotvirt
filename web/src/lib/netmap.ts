@@ -209,10 +209,10 @@ export function clusterMap(input: MapInput): ClusterMap {
 	const uplinks = [...input.uplinks];
 	const known = new Set(uplinks.map((u) => u.name));
 	if (!uplinks.some((u) => u.builtin))
-		uplinks.push({ name: 'default', bridge: '', builtin: true, nodeCount: 0 });
+		uplinks.push({ name: 'default', bridge: '', builtin: true, nodes: [], nodeCount: 0 });
 	for (const n of networks)
 		if (n.kind === 'vlan' && n.uplink && !uplinks.some((u) => u.name === n.uplink))
-			uplinks.push({ name: n.uplink, bridge: '', nodeCount: 0 });
+			uplinks.push({ name: n.uplink, bridge: '', nodes: [], nodeCount: 0 });
 	uplinks.sort((a, b) => Number(!!b.builtin) - Number(!!a.builtin) || a.name.localeCompare(b.name));
 	const hostCount = uplinks.find((u) => u.builtin)?.nodeCount ?? 0;
 	const rowOf = (n: Network): string =>

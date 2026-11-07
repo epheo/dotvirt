@@ -88,11 +88,12 @@ const networks: Network[] = [
 ];
 
 const uplinks: Uplink[] = [
-	{ name: 'br-ex', bridge: 'br-ex', builtin: true, nodeCount: 3 },
-	{ name: 'physnet', bridge: 'br-physnet', nodeCount: 2 },
+	{ name: 'br-ex', bridge: 'br-ex', builtin: true, nodes: ['w1', 'w2', 'w3'], nodeCount: 3 },
+	{ name: 'physnet', bridge: 'br-physnet', nodes: ['w1', 'w2'], nodeCount: 2 },
 	{
 		name: 'dc-vlan',
 		bridge: 'br-dc',
+		nodes: ['worker-2'],
 		nodeCount: 1,
 		failures: [{ node: 'worker-2', reason: 'FailedToConfigure' }],
 	},

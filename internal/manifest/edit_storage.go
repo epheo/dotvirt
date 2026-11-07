@@ -71,6 +71,8 @@ func migrateOneVolume(ed *lineEditor, templates, volumes *yaml.Node, m model.Vol
 		ed.insertChild(storage, "storageClassName", m.StorageClass)
 	}
 
+	keepImage(ed, tmpl)
+
 	// The destination provisions blank: its content comes from the live copy,
 	// so importing the original source again would only be overwritten.
 	if get(get(tmplSpec, "source"), "blank") == nil {
@@ -79,6 +81,30 @@ func migrateOneVolume(ed *lineEditor, templates, volumes *yaml.Node, m model.Vol
 		ed.insertBlock(tmplSpec, []string{"source:", "  blank: {}"})
 	}
 	return true
+}
+
+// keepImage carries a disk's boot image across the blank re-provision as
+// ImageAnnotation, so its lineage outlives the sourceRef the move drops. A
+// template already annotated by an earlier move keeps its annotation.
+func keepImage(ed *lineEditor, tmpl *yaml.Node) {
+	ref := get(get(tmpl, "spec"), "sourceRef")
+	name := nodeValue(get(ref, "name"))
+	if kind := nodeValue(get(ref, "kind")); name == "" || (kind != "" && kind != "DataSource") {
+		return
+	}
+	image := name
+	if ns := nodeValue(get(ref, "namespace")); ns != "" {
+		image = ns + "/" + name
+	}
+	meta := get(tmpl, "metadata")
+	annotations := get(meta, "annotations")
+	switch {
+	case get(annotations, ImageAnnotation) != nil:
+	case annotations != nil && annotations.Kind == yaml.MappingNode && len(annotations.Content) > 0:
+		ed.insertChild(annotations, ImageAnnotation, image)
+	case annotations == nil:
+		ed.insertBlock(meta, []string{"annotations:", "  " + ImageAnnotation + ": " + image})
+	}
 }
 
 var migSuffix = regexp.MustCompile(`-mig-\d+$`)

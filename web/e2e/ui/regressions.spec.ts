@@ -22,20 +22,16 @@ test('#151: sizing below the preference minimum refuses at stage time', async ({
 	await expect(finish).toBeDisabled();
 });
 
-test('#116: the review step names every unmet field', async ({ page }) => {
+test('#116: a disabled Stage names what it waits for', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);
 	await page.getByRole('button', { name: /^New$/ }).click();
-	await page.getByRole('button', { name: 'New VM', exact: true }).click();
-
-	// Navigation is free; jumping straight to the end must summarize what is
-	// missing instead of a dead disabled button.
-	await page.getByRole('button', { name: 'Ready to complete' }).click();
-	await expect(page.getByText('Complete the required fields to stage this VM:')).toBeVisible();
-	await expect(page.getByText(/• Name/).first()).toBeVisible();
-	await expect(
-		page.getByRole('button', { name: /Stage VM|Create VM|Stage/ }).last(),
-	).toBeDisabled();
+	const sheet = page.getByRole('dialog');
+	await sheet.getByLabel('Name', { exact: true }).fill('');
+	await expect(sheet.getByRole('status')).toHaveText('Name the VM');
+	await expect(sheet.getByRole('button', { name: 'Stage VM' })).toBeDisabled();
+	await sheet.getByLabel('Name', { exact: true }).fill('Bad_Name');
+	await expect(sheet.getByRole('status')).toContainText('lowercase');
 });
 
 test('New from inside a namespace preselects that namespace', async ({ page }) => {
@@ -44,12 +40,14 @@ test('New from inside a namespace preselects that namespace', async ({ page }) =
 	// batch-prod sorts before web-prod, so a first-of-list default would miss.
 	await page.goto('/compute/team-web/web-prod');
 	await page.getByRole('button', { name: /^New$/ }).click();
-	await page.getByRole('button', { name: 'Upload Image', exact: true }).click();
-	await expect(page.getByLabel('Project (namespace)')).toHaveValue('web-prod');
-	await page.keyboard.press('Escape');
-	await page.getByRole('button', { name: /^New$/ }).click();
-	await page.getByRole('button', { name: 'New Segment', exact: true }).click();
-	await expect(page.getByLabel('Project (namespace)')).toHaveValue('web-prod');
+	const sheet = page.getByRole('dialog');
+	await expect(sheet.getByText('Filled in from web-prod, where you were.')).toBeVisible();
+	await expect(sheet.getByLabel('Project and namespace')).toHaveText(/team-web \/ web-prod/);
+	// The place survives a switch of what to create.
+	await sheet.getByRole('radio', { name: 'Image' }).click();
+	await expect(sheet.getByLabel('Project and namespace')).toHaveText(/team-web \/ web-prod/);
+	await sheet.getByRole('radio', { name: 'Network', exact: true }).click();
+	await expect(sheet.getByLabel('Project', { exact: true })).toHaveText(/team-web/);
 });
 
 test('#142: the hosts tree lists VM-less nodes too', async ({ page }) => {
@@ -70,21 +68,26 @@ test('#144: classless disks group under the real default class', async ({ page }
 	const aside = page.locator('aside');
 	await expect(aside.getByText('fast-ssd')).toBeVisible();
 	await aside.getByText('fast-ssd').click();
-	await expect(page.locator('main').getByText('web-1')).toBeVisible();
+	await page.locator('main').getByRole('link', { name: 'Show the 5 disks' }).click();
+	await expect(page.locator('main').getByRole('link', { name: 'web-1' })).toBeVisible();
 });
 
 test('storage summary shows platform facts beside the VM footprint', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);
 	await page.locator('aside').getByRole('link', { name: 'Storage', exact: true }).click();
+	await page
+		.locator('main')
+		.getByRole('link', { name: /^Classes/ })
+		.click();
 	const table = page.locator('main').getByRole('table');
 	// The local class: per-node free capacity summed, single-attach disks.
 	const fast = table.getByRole('row').filter({ hasText: 'fast-ssd' });
 	await expect(fast).toContainText('2.9 TiB');
-	await expect(fast).toContainText('RWO only');
-	// The shared class carries no VMs in the fixture but still lists with its facts.
+	await expect(fast).toContainText('Not possible');
+	// The shared class lists with its facts.
 	const bulk = table.getByRole('row').filter({ hasText: 'bulk-hdd' });
-	await expect(bulk).toContainText('Supported');
+	await expect(bulk).toContainText('Possible');
 	await expect(bulk).toContainText('nfs.csi.k8s.io');
 	// The class page repeats the facts and lists every provisioned disk.
 	await fast.getByRole('link', { name: 'fast-ssd' }).click();

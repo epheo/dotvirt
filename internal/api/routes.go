@@ -35,6 +35,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tasks", s.handleTasks)
 	mux.HandleFunc("GET /api/options", s.handleOptions)
 	mux.HandleFunc("GET /api/storage/classes", s.handleStorageClasses)
+	mux.HandleFunc("GET /api/storage/snapshots", s.handleStorageSnapshots)
+	mux.HandleFunc("GET /api/storage/claims", s.handleStorageClaims)
 	mux.HandleFunc("GET /api/networks", s.handleNetworks)
 	mux.HandleFunc("GET /api/networks/rules", s.handleNetworkRules)
 	mux.HandleFunc("GET /api/policies", s.handlePolicies)

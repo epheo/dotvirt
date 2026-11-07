@@ -19,6 +19,26 @@ func TestParseValidTemplate(t *testing.T) {
 	if len(tpl.Parameters) != 5 || tpl.Parameters[0].Name != "NAME" || tpl.Parameters[0].Generate != "expression" {
 		t.Fatalf("parameters wrong: %+v", tpl.Parameters)
 	}
+	// The image namespace is a parameter: its default resolves the reference.
+	if tpl.Image != "openshift-virtualization-os-images/fedora" {
+		t.Fatalf("image = %q", tpl.Image)
+	}
+}
+
+// An image left to a parameter without a default, or to the deploy
+// namespace, matches no catalog entry, so it stays empty.
+func TestParseTemplateImageUnresolved(t *testing.T) {
+	for _, content := range []string{
+		strings.Replace(fedoraServer, "name: fedora\n              namespace:", "name: ${SSH_AUTHORIZED_KEY}\n              namespace:", 1),
+		strings.Replace(fedoraServer, "              namespace: ${OS_IMAGE_NAMESPACE}\n", "", 1),
+	} {
+		if content == fedoraServer {
+			t.Fatal("fixture edit did not apply")
+		}
+		if tpl := Parse("templates/t.yaml", []byte(content), "acme"); tpl.Image != "" {
+			t.Errorf("image = %q, want empty", tpl.Image)
+		}
+	}
 }
 
 func TestParseBadFilesStillListed(t *testing.T) {

@@ -1,6 +1,6 @@
 # dotvirt installer operator — Kubebuilder-style targets. Tools are pinned and run
 # via `go run` (no global installs). Build from this directory; the operator module
-# resolves the app module via the replace in go.mod (and the root go.work).
+# resolves the shared pkg/forge module via the replace in go.mod (and the root go.work).
 include ../hack/versions.env   # pinned tool versions — single source (OPM_VERSION, OPERATOR_MANIFEST_TOOLS_VERSION, …)
 VERSION ?= 0.0.0
 # Images live under quay.io/epheo. IMG defaults to the version tag (never :latest);

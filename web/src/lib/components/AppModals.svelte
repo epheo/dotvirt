@@ -5,31 +5,24 @@
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Button from './Button.svelte';
+	import CreateSheet from './create/CreateSheet.svelte';
+	import { isCreate } from './create/sheet.svelte.js';
 	import Modal from './Modal.svelte';
 	import AddUplinkModal from './AddUplinkModal.svelte';
-	import AdminFirewallModal from './AdminFirewallModal.svelte';
 	import AdoptProjectModal from './AdoptProjectModal.svelte';
 	import CloneModal from './CloneModal.svelte';
 	import ReleaseProjectModal from './ReleaseProjectModal.svelte';
 	import DeleteObjectModal from './DeleteObjectModal.svelte';
 	import DeleteVMModal from './DeleteVMModal.svelte';
-	import DeployTemplateModal from './DeployTemplateModal.svelte';
-	import DistributedFirewallModal from './DistributedFirewallModal.svelte';
 	import EditManifestModal from './EditManifestModal.svelte';
 	import EditSettings from './EditSettings.svelte';
-	import EgressFirewallModal from './EgressFirewallModal.svelte';
 	import MigrateModal from './MigrateModal.svelte';
 	import NewNamespaceModal from './NewNamespaceModal.svelte';
-	import NewNetworkModal from './NewNetworkModal.svelte';
-	import NewProjectModal from './NewProjectModal.svelte';
-	import NewVMWizard from './NewVMWizard.svelte';
 	import ProposeSheet from './ProposeSheet.svelte';
 	import SaveTemplateModal from './SaveTemplateModal.svelte';
 	import StagedChangesModal from './StagedChangesModal.svelte';
 	import StorageMigrateModal from './StorageMigrateModal.svelte';
-	import Tier0Modal from './Tier0Modal.svelte';
 	import TraceModal from '#lib/networking/TraceModal.svelte';
-	import UploadModal from './UploadModal.svelte';
 	import UndoModal from '#lib/workspace/UndoModal.svelte';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 
@@ -63,26 +56,12 @@
 	const vm = $derived(ref ? inventory.findVM(ref.namespace, ref.name) : null);
 </script>
 
-{#if m?.kind === 'newVM'}
-	<NewVMWizard
-		namespaces={m.namespaces ?? inventory.namespaces}
-		namespace={m.namespace}
-		image={m.image}
-		networks={inventory.networks}
-		onclose={close}
-	/>
+{#if isCreate(m)}
+	<!-- Keyed on the request: a sheet that opens another (New VM from an
+	     uploaded image) starts fresh from the new one. -->
+	{#key m}<CreateSheet modal={m} onclose={close} />{/key}
 {:else if m?.kind === 'trace'}
 	<TraceModal source={m.source} onclose={close} />
-{:else if m?.kind === 'newNetwork'}
-	<NewNetworkModal
-		namespaces={inventory.namespaces}
-		namespace={m.namespace}
-		uplinks={inventory.uplinks}
-		canManage={inventory.canManage}
-		initial={m.initial}
-		onAddUplink={() => (ui.modal = { kind: 'uplink' })}
-		onclose={close}
-	/>
 {:else if m?.kind === 'uplink'}
 	<AddUplinkModal adapters={inventory.physicalAdapters} initial={m.initial} onclose={close} />
 {:else if m?.kind === 'namespace'}
@@ -91,8 +70,6 @@
 		project={m.project ?? undefined}
 		onclose={close}
 	/>
-{:else if m?.kind === 'newProject'}
-	<NewProjectModal adopt={m.adopt} onclose={close} />
 {:else if m?.kind === 'adoptProject'}
 	<AdoptProjectModal
 		project={m.project}
@@ -102,41 +79,12 @@
 	/>
 {:else if m?.kind === 'releaseProject'}
 	<ReleaseProjectModal project={m.project} namespaces={m.namespaces} onclose={close} />
-{:else if m?.kind === 'egressFw'}
-	<EgressFirewallModal
-		namespaces={m.namespaces}
-		namespace={m.namespace}
-		initial={m.initial}
-		onclose={close}
-	/>
-{:else if m?.kind === 'dfw'}
-	<DistributedFirewallModal
-		namespaces={m.namespaces}
-		namespace={m.namespace}
-		vms={inventory.allVMs}
-		initial={m.initial}
-		onclose={close}
-	/>
-{:else if m?.kind === 'tier0'}
-	<Tier0Modal namespaces={inventory.repoNamespaces} initial={m.initial} onclose={close} />
-{:else if m?.kind === 'adminFw'}
-	<AdminFirewallModal initial={m.initial} onclose={close} />
 {:else if m?.kind === 'deleteObject'}
 	<DeleteObjectModal
 		resource={m.resource}
 		namespace={m.namespace}
 		name={m.name}
 		sourceFile={m.sourceFile}
-		onclose={close}
-	/>
-{:else if m?.kind === 'upload'}
-	<UploadModal namespaces={inventory.namespaces} namespace={m.namespace} onclose={close} />
-{:else if m?.kind === 'deployTemplate'}
-	<DeployTemplateModal
-		namespaces={inventory.namespaces}
-		namespace={m.namespace}
-		library={m.library}
-		template={m.template}
 		onclose={close}
 	/>
 {:else if m?.kind === 'editTemplate'}

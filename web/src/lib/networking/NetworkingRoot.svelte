@@ -2,6 +2,7 @@
 	import { Plus } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { NETWORKING_TABS, networkingTab } from '#lib/nav.js';
+	import { attachRef } from '#lib/networks.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { networking } from '#lib/state/networking.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -38,6 +39,27 @@
 			.join(', '),
 	);
 	const canCreate = $derived(inventory.namespaces.length > 0 || inventory.canManage);
+
+	// New network fills in from what the map has selected: a network's project
+	// and range, or a VM's namespace.
+	function newNetwork() {
+		const sel = page.url.searchParams.get('sel') ?? '';
+		const net = sel.startsWith('net:') ? networking.byKey.get(sel.slice(4)) : undefined;
+		if (net) {
+			ui.modal = {
+				kind: 'newNetwork',
+				like: attachRef(net),
+				from: `${net.name}, selected on the map`,
+			};
+			return;
+		}
+		if (sel.startsWith('vm:')) {
+			const [ns, name] = sel.slice(3).split('/');
+			ui.modal = { kind: 'newNetwork', namespace: ns, from: `${name}, selected on the map` };
+			return;
+		}
+		ui.modal = { kind: 'newNetwork' };
+	}
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col bg-canvas">
@@ -60,9 +82,7 @@
 		>
 			{#snippet actions()}
 				{#if canCreate}
-					<Button variant="outline" onclick={() => (ui.modal = { kind: 'newNetwork' })}
-						><Plus size={16} />New network</Button
-					>
+					<Button variant="outline" onclick={newNetwork}><Plus size={16} />New network</Button>
 				{/if}
 			{/snippet}
 		</PageHeader>

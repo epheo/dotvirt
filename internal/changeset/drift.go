@@ -89,6 +89,11 @@ func (c *Coordinator) Adopt(id auth.Identity, proj project.ProjectInfo, namespac
 		return model.DraftView{}, fmt.Errorf("%w: %s/%s is not running", model.ErrNotFound, namespace, name)
 	}
 	if !okD {
+		// The VM index skips a file that does not parse; the declared index
+		// still names it, and a create would declare the VM a second time.
+		if err := c.requireUndeclaredVM(read, namespace, name); err != nil {
+			return model.DraftView{}, err
+		}
 		if err := c.stageAdoptCreate(id.Username, proj.Name, actual); err != nil {
 			return model.DraftView{}, err
 		}
@@ -143,13 +148,13 @@ func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, w
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	declared, err := read.DeclaredOnBranch(c.baseBranch)
+	idx, err := indexDeclared(read, c.baseBranch)
 	if err != nil {
 		return model.DraftView{}, err
 	}
 	staged := 0
 	for _, o := range objs {
-		if declared[model.ObjectRef{Kind: o.Kind, Namespace: o.Namespace, Name: o.Name}] {
+		if _, ok := idx.Files[model.ObjectRef{Kind: o.Kind, Namespace: o.Namespace, Name: o.Name}]; ok {
 			continue
 		}
 		if err := c.store.Stage(id.Username, proj.Name, draft.Entry{

@@ -153,6 +153,97 @@ spec:
 	if scratch.Type != "emptyDisk" || scratch.Size != "2Gi" || scratch.StorageClass != "" {
 		t.Errorf("emptyDisk unchanged by DV join: %+v", scratch)
 	}
+	if root.Claim != "db-rootdisk" || data.Claim != "db-data" || scratch.Claim != "" {
+		t.Errorf("claims = %q %q %q, want the DataVolume names", root.Claim, data.Claim, scratch.Claim)
+	}
+	// A sourceRef without a namespace resolves in the VM's own, like CDI.
+	if root.Image != "alpha/fedora" || data.Image != "" {
+		t.Errorf("images = %q %q", root.Image, data.Image)
+	}
+}
+
+// The disk's lineage: the boot image from a DataSource sourceRef, the
+// annotation a storage move leaves when it drops the sourceRef, never an
+// import or a clone; explicit access modes ride along for the live-migration
+// verdict, and a PVC volume names its claim.
+func TestParseVMsDiskLineage(t *testing.T) {
+	manifest := []byte(`
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: app
+  namespace: beta
+spec:
+  dataVolumeTemplates:
+    - metadata:
+        name: app-rootdisk
+      spec:
+        sourceRef:
+          kind: DataSource
+          name: rhel-9.6
+          namespace: os-images
+        storage:
+          accessModes: [ReadWriteMany]
+          storageClassName: bulk-hdd
+    - metadata:
+        name: app-moved-mig-1
+        annotations:
+          dotvirt.io/image: os-images/fedora-42
+      spec:
+        source:
+          blank: {}
+        storage:
+          storageClassName: bulk-hdd
+    - metadata:
+        name: app-imported
+      spec:
+        source:
+          registry:
+            url: docker://quay.io/containerdisks/fedora:42
+        storage: {}
+  template:
+    spec:
+      domain:
+        devices:
+          disks:
+            - name: rootdisk
+            - name: moved
+            - name: imported
+            - name: shared
+      volumes:
+        - name: rootdisk
+          dataVolume:
+            name: app-rootdisk
+        - name: moved
+          dataVolume:
+            name: app-moved-mig-1
+        - name: imported
+          dataVolume:
+            name: app-imported
+        - name: shared
+          persistentVolumeClaim:
+            claimName: team-share
+`)
+	vms, err := ParseVMs("beta/app.yaml", manifest, "beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := vms[0].Disks
+	if len(d) != 4 {
+		t.Fatalf("disks = %+v", d)
+	}
+	if d[0].Image != "os-images/rhel-9.6" || len(d[0].AccessModes) != 1 || d[0].AccessModes[0] != "ReadWriteMany" {
+		t.Errorf("rootdisk = %+v", d[0])
+	}
+	if d[1].Image != "os-images/fedora-42" || d[1].Claim != "app-moved-mig-1" {
+		t.Errorf("moved disk lost its lineage: %+v", d[1])
+	}
+	if d[2].Image != "" || d[2].AccessModes != nil {
+		t.Errorf("an imported disk names no boot image: %+v", d[2])
+	}
+	if d[3].Type != "pvc" || d[3].Claim != "team-share" {
+		t.Errorf("pvc disk = %+v", d[3])
+	}
 }
 
 // A template that names no interface still runs on the pod network: the

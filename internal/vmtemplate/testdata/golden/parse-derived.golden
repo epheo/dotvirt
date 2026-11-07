@@ -13,5 +13,6 @@
   ],
   "instancetype": "u1.medium",
   "preference": "fedora",
+  "image": "images/fedora",
   "yaml": ""
 }

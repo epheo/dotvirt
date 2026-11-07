@@ -91,6 +91,22 @@ export function memoryFit(
 	return { fits, hosts: hosts.length, best };
 }
 
+export type Placement = MemoryFit & {
+	// Hosts that take no new VMs, with why; hosts adds these back for the
+	// "47 of 48" count a new VM is placed against.
+	excluded: Headroom['excluded'];
+	total: number;
+};
+
+// Where a new VM needing `need` bytes of guest memory could start, counted
+// against every host so the ones left out are named. A hint, as memoryFit.
+export function placement(cap: HostCapacity, nodes: Node[] | null, need: number): Placement | null {
+	if (!cap.nodes.length) return null;
+	const f = memoryFit(cap, nodes, need, { bytes: 0 }) ?? { fits: 0, hosts: 0, best: null };
+	const { excluded } = schedulable(cap, nodes);
+	return { ...f, excluded, total: f.hosts + excluded.length };
+}
+
 // The capacity line for giving a VM `size` of guest memory: silent unless
 // it is an increase over what the VM holds and capacity is known. subject
 // names the VM in the line, for lists that hold several.

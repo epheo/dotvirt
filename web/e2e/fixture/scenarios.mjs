@@ -1,3 +1,5 @@
+import { createNetworks, createTemplates } from './create.mjs';
+
 // Scenario states for the fixture API server. Each scenario is a full backend
 // state the UI can be pointed at — including the corner-case states a live
 // cluster is almost never in (standing sync failures, degraded planes, huge
@@ -289,21 +291,22 @@ const vmUsage = {
 // ── networking: the Networking section's catalog, rules and history ──────────
 // One picture of the networking states the Map, the network page and the
 // firewall show: project networks, shared overlays, VLAN networks, rules on
-// both sides of a network; drift adds an uplink failing on one host, scale
-// the overlap. Rule texts are what the server renders from the typed rules.
+// both sides of a network, a range reused by isolated networks; drift adds an
+// uplink failing on one host, scale an overlap that is a problem. Rule texts
+// are what the server renders from the typed rules.
 
 const netCatalog = {
 	...networks,
 	networks: [
 		{
 			name: 'web-net',
-			kind: 'internal',
+			kind: 'default',
 			scope: 'project',
 			namespace: 'web-prod',
 			subnets: ['10.40.0.0/16'],
 			attachRef: 'web-prod/web-net',
 			backing: 'UserDefinedNetwork',
-			topology: 'Layer2',
+			topology: 'Layer3',
 			sourceFile: 'networks/web-net.yaml',
 			sync: 'Synced',
 		},
@@ -317,30 +320,6 @@ const netCatalog = {
 			backing: 'UserDefinedNetwork',
 			topology: 'Layer2',
 			sourceFile: 'networks/internal-l2.yaml',
-			sync: 'Synced',
-		},
-		{
-			name: 'udn-frontend',
-			kind: 'internal',
-			scope: 'project',
-			namespace: 'db-prod',
-			subnets: ['10.200.0.0/16'],
-			attachRef: 'db-prod/udn-frontend',
-			backing: 'UserDefinedNetwork',
-			topology: 'Layer3',
-			sourceFile: 'networks/udn-frontend.yaml',
-			sync: 'Synced',
-		},
-		{
-			name: 'udn-tcp-frontend',
-			kind: 'internal',
-			scope: 'project',
-			namespace: 'db-prod',
-			subnets: ['10.201.0.0/16'],
-			attachRef: 'db-prod/udn-tcp-frontend',
-			backing: 'UserDefinedNetwork',
-			topology: 'Layer3',
-			sourceFile: 'networks/udn-tcp-frontend.yaml',
 			sync: 'Synced',
 		},
 		{
@@ -368,6 +347,9 @@ const netCatalog = {
 			sync: 'Synced',
 		},
 		{ ...networks.networks[1], sourceFile: 'networks/lan-101.yaml' },
+		// The create sheet's networks: an overlapping pair in two namespaces
+		// (isolated, so never an issue) and one with no range.
+		...createNetworks,
 		{
 			name: 'dc-vlan-net',
 			kind: 'vlan',
@@ -568,14 +550,8 @@ const netReaches = {
 
 // Which extra NICs the base VMs carry, by "namespace/name".
 const netNICs = {
-	'web-prod/web-1': [
-		{ name: 'web-net', network: 'web-prod/web-net' },
-		{ name: 'lan', network: 'lan-101' },
-	],
-	'web-prod/web-2': [
-		{ name: 'web-net', network: 'web-prod/web-net' },
-		{ name: 'blue', network: 'blue-secondary' },
-	],
+	'web-prod/web-1': [{ name: 'lan', network: 'lan-101' }],
+	'web-prod/web-2': [{ name: 'blue', network: 'blue-secondary' }],
 	'batch-prod/batch-1': [
 		{ name: 'l2', network: 'batch-prod/internal-l2' },
 		{ name: 'dc', network: 'dc-vlan-net' },
@@ -805,7 +781,9 @@ let base = {
 	],
 	options,
 	storageClasses,
-	networks,
+	// The create sheet's additions (create.mjs): an overlapping pair of
+	// networks and a library to deploy from.
+	networks: { ...networks, networks: [...networks.networks, ...createNetworks] },
 	policies,
 	nodes,
 	quotas: [
@@ -825,7 +803,6 @@ let base = {
 		canManage: true,
 		canPSI: true,
 	},
-	templates: { templates: [] },
 	permissions: {
 		namespace: 'web-prod',
 		capabilities: [
@@ -846,11 +823,123 @@ let base = {
 
 base = withNetworking(base);
 
+// ── storage (S3): disk lineage, snapshots and claims over base ──────────────────
+// Kept as one block that patches base, so the other streams' edits to base do
+// not collide with it. Disk counts per VM stay as they were except web-2's
+// data disk (the merged "add data disk" change in history) and db-1's data
+// disk on the local class beside a shared root.
+
+const IMAGES_NS = 'dotvirt-images';
+const img = (name) => `${IMAGES_NS}/${name}`;
+const rootdisk = (vmName, size, image, over = {}) => ({
+	name: 'rootdisk',
+	type: 'dataVolume',
+	size,
+	claim: `${vmName}-rootdisk`,
+	image: img(image),
+	...over,
+});
+const cloudinit = { name: 'cloudinitdisk', type: 'cloudInitNoCloud' };
+
+function patchDisks(scenario, disksByVM) {
+	for (const p of scenario.inventory.projects)
+		for (const n of p.namespaces)
+			for (const v of n.vms) if (disksByVM[v.name]) v.disks = disksByVM[v.name];
+}
+
+patchDisks(base, {
+	'web-1': [rootdisk('web-1', '30Gi', 'fedora-42'), cloudinit],
+	'web-2': [
+		rootdisk('web-2', '30Gi', 'fedora-42'),
+		{ name: 'data', type: 'dataVolume', size: '50Gi', claim: 'web-2-data' },
+		cloudinit,
+	],
+	'db-1': [
+		rootdisk('db-1', '40Gi', 'centos-stream-9', { storageClass: 'bulk-hdd' }),
+		{ name: 'data', type: 'dataVolume', size: '100Gi', claim: 'db-1-data' },
+	],
+	'batch-1': [rootdisk('batch-1', '20Gi', 'rhel-9.6'), cloudinit],
+});
+
+options.osImages.push(
+	{ name: 'centos-stream-9', namespace: IMAGES_NS, ready: true },
+	{ name: 'rhel-9.6', namespace: IMAGES_NS, ready: true },
+	{ name: 'windows-2025', namespace: IMAGES_NS, ready: true },
+);
+
+const libraryTemplate = (name, image) => ({
+	name,
+	library: 'platform',
+	sourceFile: `templates/${name}.yaml`,
+	instancetype: 'u1.medium',
+	preference: 'fedora',
+	image: img(image),
+	yaml: `apiVersion: template.kubevirt.io/v1beta1\nkind: VirtualMachineTemplate\nmetadata:\n  name: ${name}\n`,
+});
+base.templates = {
+	templates: [
+		libraryTemplate('fedora-server', 'fedora-42'),
+		libraryTemplate('fedora-minimal', 'fedora-42'),
+		libraryTemplate('centos-stream-server', 'centos-stream-9'),
+		libraryTemplate('rhel-9-server', 'rhel-9.6'),
+		libraryTemplate('windows-2025-server', 'windows-2025'),
+		// The create sheet's project library template (create.mjs).
+		...createTemplates.templates,
+	],
+};
+
+const vmSnapshot = (namespace, vmName, name, minsAgo, volumes, over = {}) => ({
+	namespace,
+	vm: vmName,
+	name,
+	created: iso(minsAgo),
+	phase: 'Succeeded',
+	readyToUse: true,
+	indications: ['Online', 'GuestAgent'],
+	volumes,
+	...over,
+});
+const DAY = 1440;
+base.storageSnapshots = [
+	vmSnapshot('web-prod', 'web-1', 'before-release-41', 120, ['rootdisk']),
+	vmSnapshot('web-prod', 'web-1', 'web-1-20261106', DAY + 60, ['rootdisk']),
+	vmSnapshot('web-prod', 'web-1', 'before-php-8.4', 4 * DAY, ['rootdisk']),
+	...Array.from({ length: 9 }, (_, i) =>
+		vmSnapshot('web-prod', 'web-1', `web-1-daily-${i + 1}`, (5 + i) * DAY, ['rootdisk']),
+	),
+	vmSnapshot('web-prod', 'web-2', 'web-2-before-data', 9 * DAY, ['rootdisk']),
+	vmSnapshot('db-prod', 'db-1', 'db-1-nightly', DAY, ['rootdisk', 'data']),
+	vmSnapshot('db-prod', 'db-1', 'db-1-adhoc', 30, ['rootdisk', 'data'], {
+		phase: 'Failed',
+		readyToUse: false,
+		error: 'VolumeSnapshot db-1-data failed: snapshot class not ready',
+	}),
+];
+
+const claim = (namespace, name, storageClass, capacity, node) => ({
+	namespace,
+	name,
+	storageClass,
+	capacity,
+	phase: 'Bound',
+	...(node ? { node } : {}),
+});
+base.storageClaims = [
+	claim('web-prod', 'web-1-rootdisk', 'fast-ssd', '30Gi', 'worker-1'),
+	claim('web-prod', 'web-2-rootdisk', 'fast-ssd', '30Gi', 'worker-3'),
+	claim('web-prod', 'web-2-data', 'fast-ssd', '50Gi', 'worker-3'),
+	claim('db-prod', 'db-1-rootdisk', 'bulk-hdd', '40Gi'),
+	claim('db-prod', 'db-1-data', 'fast-ssd', '100Gi', 'worker-1'),
+	claim('batch-prod', 'batch-1-rootdisk', 'fast-ssd', '20Gi', 'worker-2'),
+];
+
 // ── empty: pristine install, nothing visible yet ───────────────────────────────
 
 const empty = {
 	...base,
 	name: 'empty',
+	storageSnapshots: [],
+	storageClaims: [],
 	inventory: { projects: [], networksVersion: 1, tasksVersion: 1 },
 	tasks: [],
 	alarms: [],
@@ -931,6 +1020,10 @@ const degraded = {
 	alarms: null,
 	metrics: null,
 };
+
+// storage (S3): the live snapshot and claim reads fail with the cluster.
+degraded.storageSnapshots = null;
+degraded.storageClaims = null;
 
 // ── drift: every GitOps trouble state at once ──────────────────────────────────
 // Standing sync failure (stays after the operation ends), Pending (declared,

@@ -1,16 +1,22 @@
-# Build from the REPO ROOT so both modules are in context (the operator imports the
-# app module via the replace directive):
+# Build from the REPO ROOT: the operator's go.mod resolves ../pkg/forge from the tree.
 #   docker build -f operator/Dockerfile -t quay.io/epheo/dotvirt-operator:<tag> .
 # CGO is disabled, so the manager cross-compiles for $TARGETARCH on the native build host
-# (no QEMU) — buildx sets TARGETOS/TARGETARCH per target platform.
+# (no QEMU); buildx sets TARGETOS/TARGETARCH per target platform.
 FROM --platform=$BUILDPLATFORM golang:1.27.3@sha256:f20d83a83e18dbd2a4714b8ffd4b30b287b6243962dd75608e86abcc63ba4efc AS build
+ENV GOTOOLCHAIN=auto CGO_ENABLED=0 GOFLAGS="-buildvcs=false -mod=readonly" \
+    GOPROXY="https://proxy.golang.org|direct"
+WORKDIR /src/operator
+COPY operator/go.mod operator/go.sum ./
+COPY pkg/forge/go.mod /src/pkg/forge/
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+# Declared after the download so every arch shares that layer.
 ARG TARGETOS TARGETARCH
-ENV GOPROXY="https://proxy.golang.org|direct"
-WORKDIR /src
-COPY . .
-# GOWORK=off so the operator builds standalone via its replace directive: the
-# repo-root go.work is copied in by `COPY . .`, and workspace mode rejects -mod=mod.
-RUN cd operator && CGO_ENABLED=0 GOWORK=off GOFLAGS=-mod=mod GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/manager ./cmd
+COPY pkg/forge /src/pkg/forge
+COPY operator/api api
+COPY operator/cmd cmd
+COPY operator/internal internal
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/manager ./cmd
 
 FROM gcr.io/distroless/static:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
 ARG VERSION=dev

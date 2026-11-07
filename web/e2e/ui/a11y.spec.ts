@@ -81,3 +81,20 @@ test('hosts, storage, catalog and trouble states are accessible', async ({ page 
 	await page.waitForTimeout(300);
 	await checkA11y(page, 'changes route (drift)');
 });
+
+test('the create sheet is accessible, editors open, in both themes', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await page.goto('/compute/team-web/web-prod');
+	await page.getByTitle('Create a VM, network, rule or project').click();
+	const sheet = page.getByRole('dialog');
+	await sheet.getByRole('button', { name: 'Change network' }).click();
+	await sheet.getByRole('button', { name: 'Show YAML' }).click();
+	await expect(sheet.getByText('kind: VirtualMachine')).toBeVisible();
+	await checkA11y(page, 'vm sheet');
+	await sheet.getByRole('radio', { name: 'Network', exact: true }).click();
+	await sheet.getByLabel('Subnet').fill('10.200.0.0/16');
+	await checkA11y(page, 'network sheet');
+	await page.evaluate(() => (document.documentElement.dataset.theme = 'dark'));
+	await checkA11y(page, 'network sheet (dark)');
+});

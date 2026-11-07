@@ -86,6 +86,13 @@ type Draft interface {
 	StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, spec json.RawMessage, live changeset.LiveNamespaces) (model.DraftView, error)
 	StageCreateProject(id auth.Identity, commitProj project.ProjectInfo, spec json.RawMessage, live changeset.LiveNamespaces) (model.DraftView, error)
 	StageDeployFromTemplate(id auth.Identity, targetProj, libraryProj project.ProjectInfo, req model.DeployTemplateRequest) (model.DraftView, error)
+	// Each Preview* renders exactly what its Stage* twin would stage and stages
+	// nothing: a create route's ?dryRun=true, the form's Show YAML.
+	PreviewCreateVM(proj project.ProjectInfo, spec json.RawMessage) (model.StagePreview, error)
+	PreviewCreate(proj project.ProjectInfo, resource draft.Resource, spec json.RawMessage) (model.StagePreview, error)
+	PreviewCreateNamespace(commitProj, joinProj project.ProjectInfo, spec json.RawMessage, live changeset.LiveNamespaces) (model.StagePreview, error)
+	PreviewCreateProject(commitProj project.ProjectInfo, spec json.RawMessage, live changeset.LiveNamespaces) (model.StagePreview, error)
+	PreviewDeployFromTemplate(targetProj, libraryProj project.ProjectInfo, req model.DeployTemplateRequest) (model.StagePreview, error)
 	StageSaveTemplate(id auth.Identity, commitProj, sourceProj project.ProjectInfo, req model.SaveTemplateRequest) (model.DraftView, error)
 	StageUpdateTemplate(id auth.Identity, commitProj project.ProjectInfo, req model.UpdateTemplateRequest) (model.DraftView, error)
 	StageEnableDRS(id auth.Identity, proj project.ProjectInfo, spec json.RawMessage) (model.DraftView, error)
@@ -427,6 +434,10 @@ func withBodyLimit(n int64, next http.Handler) http.Handler {
 }
 
 // respond writes v as JSON, or the error mapped to a status by its kind.
+// dryRun reports a create route asked to render without staging: the same
+// gates and the same render as the stage, and nothing recorded.
+func dryRun(r *http.Request) bool { return r.URL.Query().Get("dryRun") == "true" }
+
 func respond(w http.ResponseWriter, v any, err error) {
 	if err != nil {
 		fail(w, err)

@@ -204,6 +204,28 @@ export interface DraftView {
   defaultBody?: string;
 }
 /**
+ * StagePreview is what a create form would stage, rendered by the staging
+ * path itself but never recorded: the files its pull request would carry.
+ * Answered by a create route called with ?dryRun=true.
+ */
+export interface StagePreview {
+  /**
+   * Project names the repo the change lands in: the tenant project owning
+   * the object, or the platform project for a cluster-scoped one.
+   */
+  project: string;
+  files: PreviewFile[];
+}
+/**
+ * PreviewFile is one file a staged create writes. Kind is "edit" when git
+ * already declares the object: staging replaces that file instead.
+ */
+export interface PreviewFile {
+  kind: string; // create | edit
+  path: string;
+  yaml: string;
+}
+/**
  * ProposeResult is returned after proposing the draft as a PR.
  */
 export interface ProposeResult {
@@ -679,7 +701,7 @@ export interface Uplink {
   name: string; // physicalNetworkName
   bridge: string; // OVS bridge (br-ex, br-physnet...)
   builtin?: boolean; // the default br-ex uplink
-  nodes?: string[]; // nodes carrying the mapping
+  nodes: string[]; // nodes carrying the mapping; never omitted, the web reads absent as every node
   nodeCount: number /* int */; // len(Nodes), for the "N/M nodes" badge
   /**
    * Policy is the NodeNetworkConfigurationPolicy declaring this uplink - the
@@ -802,12 +824,35 @@ export interface Event {
  * snapshots are a flat list (no parent/child tree).
  */
 export interface Snapshot {
+  namespace?: string;
+  vm?: string; // the source VM
   name: string;
   created?: string; // RFC3339
   phase?: string; // InProgress | Succeeded | Failed
   readyToUse: boolean;
   indications?: string[]; // Online | GuestAgent | NoGuestAgent
+  /**
+   * Volumes are the VM volumes the snapshot captured; a volume on a class
+   * without snapshot support is left out of it.
+   */
+  volumes?: string[];
   error?: string;
+}
+/**
+ * Claim is a VM disk's PersistentVolumeClaim as the cluster holds it: where a
+ * local disk lives, which the manifest cannot say once its VM stops.
+ */
+export interface Claim {
+  namespace: string;
+  name: string;
+  /**
+   * Node is the host the scheduler bound the claim to (WaitForFirstConsumer
+   * classes); empty for a claim any host can reach.
+   */
+  node?: string;
+  storageClass?: string;
+  capacity?: string; // what the volume got, e.g. "30Gi"
+  phase?: string; // Pending | Bound | Lost
 }
 /**
  * Clone is a VirtualMachineClone whose source is a VM - one row in the Clone
@@ -840,11 +885,13 @@ export interface UploadToken {
   uploadUrl: string;
 }
 /**
- * UploadTarget identifies the upload DataVolume just created.
+ * UploadTarget identifies the upload DataVolume just created. Image is the
+ * boot image ("namespace/name" DataSource) registered over it, when asked for.
  */
 export interface UploadTarget {
   namespace: string;
   name: string;
+  image?: string;
 }
 /**
  * Node is one virtualization host - a node KubeVirt marks schedulable for
@@ -1037,8 +1084,9 @@ export interface EffectivePolicy {
   namespace: string;
   vm?: string;
   /**
-   * Labels pod selectors were matched against. Live: the running VMI's (what
-   * the virt-launcher pod carries); otherwise the manifest template's.
+   * Labels pod selectors were matched against: the virt-launcher pod's, the
+   * VMI's own plus KubeVirt's fixed set. Live: from the running VMI;
+   * otherwise the template's, without the instance UID a start assigns.
    */
   labels?: { [key: string]: string};
   labelsLive?: boolean;
@@ -1209,6 +1257,12 @@ export interface Template {
   parameters?: TemplateParameter[];
   instancetype?: string; // blueprint summary, best-effort
   preference?: string;
+  /**
+   * Image is the boot image ("namespace/name" DataSource) the blueprint's
+   * first disk is made from, parameters resolved by their defaults; empty
+   * when a parameter without a default names it.
+   */
+  image?: string;
   yaml: string;
   error?: string; // parse failure - listed, but not deployable
 }
@@ -1367,9 +1421,24 @@ export interface Migration {
  */
 export interface Disk {
   name: string;
-  type?: string; // dataVolume | emptyDisk | containerDisk | cloudInitNoCloud | ...
+  type?: string; // dataVolume | pvc | emptyDisk | containerDisk | cloudInitNoCloud | ...
   size?: string; // emptyDisk capacity or dataVolume requested storage
   storageClass?: string; // dataVolume storageClassName (empty = cluster default)
+  /**
+   * Claim is the PersistentVolumeClaim behind a dataVolume or pvc disk (a
+   * DataVolume names its claim after itself).
+   */
+  claim?: string;
+  /**
+   * AccessModes are the DataVolume's explicit access modes; empty means CDI
+   * applies the class profile's first claim property set.
+   */
+  accessModes?: string[];
+  /**
+   * Image is the boot image ("namespace/name" of a DataSource) the disk was
+   * provisioned from; empty for blank, imported or cloned disks.
+   */
+  image?: string;
 }
 /**
  * NIC is a network interface on the VM. Name/Network come from the manifest;

@@ -288,3 +288,28 @@ func TestObjectSpec(t *testing.T) {
 		t.Errorf("spec = %+v", spec)
 	}
 }
+
+// History only reads, so an object sharing its file (netgen's namespace beside
+// its primary network) has one; and a trailing separator is no content, so it
+// leaves its file deletable.
+func TestSharedAndTrailingSeparatorFiles(t *testing.T) {
+	npPath, np, err := netgen.NetworkPolicyManifest(netgen.NetworkPolicySpec{Name: "deny", Namespace: "alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nsPath, nsContent, err := netgen.NamespaceManifest(netgen.NamespaceSpec{Name: "alpha", Project: "p", Repo: "r", VMNetwork: &netgen.PrimaryNet{Name: "vm-net", Subnet: "10.30.0.0/24"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare := seedBareFiles(t, map[string][]byte{nsPath: nsContent, npPath: append(np, []byte("---\n")...)})
+	c := newTestCoordinator(t, false)
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+
+	commits, err := c.ObjectHistory(proj, string(draft.ResourceNetwork), "alpha", "vm-net", 10)
+	if err != nil || len(commits) != 1 {
+		t.Errorf("history of a network sharing its file: %+v, %v", commits, err)
+	}
+	if _, err := c.StageDelete(auth.Identity{Username: "alice"}, proj, string(draft.ResourceNetworkPolicy), "alpha", "deny"); err != nil {
+		t.Errorf("delete of a policy file ending in ---: %v", err)
+	}
+}
