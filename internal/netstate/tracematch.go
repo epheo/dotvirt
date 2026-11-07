@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/epheo/dotvirt/internal/netgen"
 )
 
 // matched is a rule-component verdict plus why it couldn't be resolved when
@@ -66,6 +68,12 @@ const (
 	reasonUnresolved    = "a destination form this trace cannot resolve"
 	reasonEqualPriority = "an admin policy at the same priority may decide first, in an order OVN-Kubernetes leaves undefined"
 )
+
+// unenforcedReason words why an ANP past the programmed range only may apply.
+func unenforcedReason(priority int) string {
+	return fmt.Sprintf("OVN-Kubernetes does not enforce priority %d (it programs 0-%d), so only an earlier in-range version of this policy can apply",
+		priority, netgen.MaxANPPriority)
+}
 
 // peerTarget is what rule peers are matched against: the flow's other end -
 // an in-cluster workload, or a bare external address.

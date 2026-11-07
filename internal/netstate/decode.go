@@ -245,6 +245,13 @@ func (s *Snapshot) sortedANPs() []*policy {
 	return ps
 }
 
+// enforcedANPs splits sortedANPs at the priority OVN-K stops programming.
+func (s *Snapshot) enforcedANPs() (enforced, unenforced []*policy) {
+	ps := s.sortedANPs()
+	i := sort.Search(len(ps), func(i int) bool { return ps[i].view.Priority > netgen.MaxANPPriority })
+	return ps[:i], ps[i:]
+}
+
 // ANPAtPriority names the AdminNetworkPolicy other than name that holds
 // priority, if any. OVN-K applies equal-priority policies in an undefined
 // order, so a second one there makes both unpredictable.

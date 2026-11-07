@@ -233,9 +233,20 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 		return nil
 	}
 
+	// OVN-K never programs a priority past MaxANPPriority, yet an earlier
+	// in-range version keeps its ACLs: such a policy applies at an unknown
+	// precedence or not at all, so its rules only ever weigh as maybes.
+	anps, unenforced := s.enforcedANPs()
+	for _, b := range bind(unenforced, subject.NSLabels, subject.PodLabels, true) {
+		for _, c := range b.candidates(dir, peer, protocol, port) {
+			rv := c.r.view(dir)
+			w.maybe(&c.pol.view, &rv, "admin", c.r.action, unenforcedReason(c.pol.view.Priority))
+		}
+	}
+
 	// Admin tier: every ANP rule in (priority, rule) order. The first match
 	// decides - Allow/Deny are final for the flow, Pass hands it down.
-	if res := adminTier(s.sortedANPs(), "admin"); res != nil {
+	if res := adminTier(anps, "admin"); res != nil {
 		return *res
 	}
 

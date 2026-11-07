@@ -714,3 +714,36 @@ func TestTraceExternalAdminAllowMeetsGateway(t *testing.T) {
 		t.Fatalf("the gateway must decide, got %v", stepKinds(t, res))
 	}
 }
+
+// OVN-K never programs an ANP past priority 99, but a stale in-range version
+// may still be: its rules stay visible and only ever weigh as maybes, never as
+// the deciding Deny.
+func TestTraceUnenforcedANPPriority(t *testing.T) {
+	src := wl("team-b", "client", nil, nil)
+	dst := wl("team-a", "web", nil, nil)
+
+	s := New(nil, nil)
+	anp(t, s, "too-low", 500, anpEgress("Deny", "team-a"))
+	res := s.Trace(src, &dst, "", "TCP", 443)
+	if res.Verdict != "Conditional" {
+		t.Fatalf("unenforced deny vs default allow: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	var noted bool
+	for _, st := range res.Steps {
+		if st.Stage == "admin" && st.Action == "Deny" {
+			if st.Decisive || !st.Conditional || !strings.Contains(st.Note, "does not enforce priority 500") {
+				t.Fatalf("unenforced rule must be a flagged maybe, got %+v", st)
+			}
+			noted = true
+		}
+	}
+	if !noted {
+		t.Fatalf("unenforced rule must stay visible, got %v", stepKinds(t, res))
+	}
+
+	// An enforced lower priority number still decides, and agrees.
+	anp(t, s, "lockdown", 10, anpEgress("Deny", "team-a"))
+	if res := s.Trace(src, &dst, "", "TCP", 443); res.Verdict != "Deny" {
+		t.Fatalf("enforced deny agreeing with the unenforced one: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+}
