@@ -61,7 +61,7 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	if found && pr.State == "open" {
 		return run.extend(pr, rec, hasRec)
 	}
-	if hasRec {
+	if hasRec && run.fc != nil {
 		// Its PR merged or closed: what it carried is in base, or turned down.
 		_ = c.store.DropProposal(id.Username, proj.Name)
 	}

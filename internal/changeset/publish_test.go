@@ -507,3 +507,22 @@ func TestProposeAsksAgainBeforeOverwritingAnExistingBranch(t *testing.T) {
 		t.Fatal("the branch must stand")
 	}
 }
+
+// With no forge to ask, a propose learns nothing about the recorded PR: the
+// record stays for when the forge answers again.
+func TestProposeWithoutAForgeKeepsTheRecord(t *testing.T) {
+	c := newTestCoordinator(t, true)
+	id, proj := auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: seedBare(t)}
+	if err := c.store.SetProposal(id.Username, proj.Name, draft.Proposal{PR: 3, Head: "abc"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.StageDelete(id, proj, "", "alpha", "web"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Propose(id, proj, model.ProposeRequest{}); err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	if rec, ok, _ := c.store.Proposal(id.Username, proj.Name); !ok || rec.PR != 3 {
+		t.Fatalf("the record must stay, got %+v ok=%v", rec, ok)
+	}
+}
