@@ -66,6 +66,7 @@
 	<NewVMWizard
 		namespaces={m.namespaces ?? inventory.namespaces}
 		namespace={m.namespace}
+		image={m.image}
 		networks={inventory.networks}
 		onclose={close}
 	/>
