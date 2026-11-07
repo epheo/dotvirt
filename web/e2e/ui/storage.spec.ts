@@ -134,3 +134,29 @@ test('the search finds disks from any tab', async ({ page }) => {
 	await expect(main.locator('tbody tr')).toHaveCount(1);
 	await expect(main.locator('tbody tr')).toContainText('batch-1');
 });
+
+test('at scale the disks tab reads like the board and pages 50 at a time', async ({ page }) => {
+	test.setTimeout(60_000);
+	await setScenario(page, 'scale');
+	await page.goto('/storage');
+	const main = page.locator('main');
+	await expect(main.getByText('3,412 disks on 3 classes, 48 hosts')).toBeVisible();
+	await expect(main.getByText('2,980', { exact: true })).toBeVisible();
+	await expect(main.getByText('611', { exact: true })).toBeVisible();
+	await expect(main.getByText('41 without, 43% of them')).toBeVisible();
+
+	await page.goto('/storage?tab=disks&f=nolm&project=team-web');
+	await expect(main.getByText('389 of 3,412 disks')).toBeVisible();
+	await expect(main.getByText('Page 1 of 8')).toBeVisible();
+	await main.getByRole('button', { name: 'Next page' }).click();
+	await expect(main.getByText('Page 2 of 8')).toBeVisible();
+	await expect(page).toHaveURL(/page=2/);
+	await main.getByLabel('Rows per page').selectOption('100');
+	await expect(main.getByText('Page 1 of 4')).toBeVisible();
+	await expect(page).toHaveURL(/per=100/);
+	await expect(page).not.toHaveURL(/page=/);
+
+	// web-1's move is already staged in the team-web draft.
+	await main.getByRole('checkbox', { name: 'Select all 100 on this page' }).check();
+	await expect(main.getByText(/web-1 rootdisk is already in it\./)).toBeVisible();
+});

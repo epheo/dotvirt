@@ -13,12 +13,10 @@ import {
 	libraryTiles,
 	moveConsequences,
 	moveNote,
-	pageOf,
 	planBulkMove,
 	planBulkSnapshot,
 	settleEach,
 	projectsBySize,
-	showing,
 	sortRows,
 	staleShare,
 	storageContext,
@@ -219,18 +217,7 @@ describe('filters', () => {
 	});
 });
 
-describe('paging', () => {
-	const items = Array.from({ length: 389 }, (_, i) => i);
-	it('pages 50 at a time and clamps the page', () => {
-		const p = pageOf(items, 1, 50);
-		expect(p).toMatchObject({ page: 1, pages: 8, from: 1, to: 50, total: 389 });
-		expect(showing(p)).toBe('Showing 1-50 of 389');
-		expect(pageOf(items, 99, 50)).toMatchObject({ page: 8, from: 351, to: 389 });
-		expect(pageOf(items, 1, 7).rows).toHaveLength(50);
-		expect(showing(pageOf([], 1, 50))).toBe('Showing 0 of 0');
-		expect(showing(pageOf(Array.from({ length: 2846 }), 1, 50))).toBe('Showing 1-50 of 2,846');
-	});
-
+describe('sorting', () => {
 	it('sorts by VM with a stable tiebreak', () => {
 		const r = rows([vm('web-10'), vm('web-2'), vm('web-1')]);
 		expect(sortRows(r, 'vm').map((x) => x.vm.name)).toEqual(['web-1', 'web-2', 'web-10']);

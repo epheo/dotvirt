@@ -62,13 +62,19 @@
 
 	// Moves to another view of the section. replace keeps typing and paging out
 	// of history; a tab or a drill-in is a step back can return to.
+	// Two moves in one handler (a page size, then page 1) must compose: the
+	// second reads the first's query, not the URL that has not caught up yet.
+	let pending: URLSearchParams | null = null;
 	function go(params: Record<string, string | undefined>, opts: { replace?: boolean } = {}) {
-		const q = new URLSearchParams(page.url.search);
+		const q = new URLSearchParams(pending ?? page.url.search);
 		for (const [k, v] of Object.entries(params)) {
 			if (v) q.set(k, v);
 			else q.delete(k);
 		}
-		goto(`/storage?${q}`, { replace: opts.replace ?? false, reset: false });
+		pending = q;
+		goto(`/storage?${q}`, { replace: opts.replace ?? false, reset: false }).finally(() => {
+			if (pending === q) pending = null;
+		});
 	}
 
 	// The search finds disks: it lands on the Disks tab, filtered as you type.

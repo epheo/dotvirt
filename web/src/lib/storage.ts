@@ -273,42 +273,12 @@ export function applyFilters(rows: DiskRow[], f: DiskFilters): DiskRow[] {
 	);
 }
 
-// --- paging and sorting ---
-
-export const PAGE_SIZES = [50, 100, 200];
-
-export interface Page<T> {
-	rows: T[];
-	page: number; // 1-based, clamped
-	pages: number;
-	from: number; // 1-based index of the first row; 0 when empty
-	to: number;
-	total: number;
-}
-
-export function pageOf<T>(rows: T[], page: number, per: number): Page<T> {
-	const size = PAGE_SIZES.includes(per) ? per : PAGE_SIZES[0];
-	const pages = Math.max(1, Math.ceil(rows.length / size));
-	const p = Math.min(Math.max(1, Math.floor(page) || 1), pages);
-	const start = (p - 1) * size;
-	const slice = rows.slice(start, start + size);
-	return {
-		rows: slice,
-		page: p,
-		pages,
-		from: slice.length ? start + 1 : 0,
-		to: start + slice.length,
-		total: rows.length,
-	};
-}
+// --- sorting ---
 
 export const num = (n: number) => n.toLocaleString('en-US');
 
 // A byte size without a trailing ".0": "150 GiB", "2.9 TiB".
 export const size = (n: number) => bytes(n).replace('.0 ', ' ');
-
-export const showing = (p: Page<unknown>) =>
-	p.total ? `Showing ${p.from}-${p.to} of ${num(p.total)}` : 'Showing 0 of 0';
 
 export type DiskSort = 'vm' | 'size' | 'snapshot';
 

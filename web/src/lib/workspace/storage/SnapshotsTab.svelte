@@ -7,9 +7,10 @@
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
-	import { ago, num, pageOf } from '#lib/storage.js';
+	import { ago, num } from '#lib/storage.js';
 	import Button from '#lib/components/Button.svelte';
-	import Pager from './Pager.svelte';
+	import Pager from '#lib/components/Pager.svelte';
+	import { DEFAULT_PAGE_SIZE, pageSlice } from '#lib/paging.js';
 
 	// Every VM snapshot the caller can read, newest first, paged. A VM filter
 	// arrives from a disk's lineage; failures float up on their own filter.
@@ -33,8 +34,9 @@
 		),
 	);
 	const failures = $derived(snapshots.filter(failed).length);
-	const per = $derived(Number(q.get('per')) || 50);
-	const pg = $derived(pageOf(shown, Number(q.get('page')) || 1, per));
+	const size = $derived(Number(q.get('per')) || DEFAULT_PAGE_SIZE);
+	const s = $derived(pageSlice(shown.length, Number(q.get('page')) || 1, size));
+	const pageRows = $derived(shown.slice(s.start, s.end));
 	const projectOf = $derived(
 		new Map(
 			inventory.projects.flatMap((p) => p.namespaces.map((n) => [n.namespace, p.name] as const)),
@@ -113,7 +115,7 @@
 				</tr>
 			</thead>
 			<tbody>
-				{#each pg.rows as s (`${s.namespace}/${s.name}`)}
+				{#each pageRows as s (`${s.namespace}/${s.name}`)}
 					{@const key = `${s.namespace}/${s.name}`}
 					<tr class="hover:bg-select-soft">
 						<td class="{TD} pl-card">
@@ -168,9 +170,12 @@
 		</table>
 	</div>
 	<Pager
-		page={pg}
-		{per}
-		onpage={(n) => go({ page: n > 1 ? String(n) : undefined }, { replace: true })}
-		onper={(n) => go({ per: n === 50 ? undefined : String(n), page: undefined }, { replace: true })}
+		class="border-t border-line px-card py-3"
+		total={s.total}
+		bind:page={() => s.page, (n) => go({ page: n > 1 ? String(n) : undefined }, { replace: true })}
+		bind:size={
+			() => size,
+			(n) => go({ per: n === DEFAULT_PAGE_SIZE ? undefined : String(n) }, { replace: true })
+		}
 	/>
 </section>

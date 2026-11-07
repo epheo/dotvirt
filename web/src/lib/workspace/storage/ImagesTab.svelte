@@ -10,14 +10,14 @@
 		FRESH_DAYS,
 		imageUsage,
 		num,
-		pageOf,
 		shortName,
 		type DiskRow,
 		type ImageUse,
 	} from '#lib/storage.js';
 	import Button from '#lib/components/Button.svelte';
 	import LocalSharedBar from './LocalSharedBar.svelte';
-	import Pager from './Pager.svelte';
+	import Pager from '#lib/components/Pager.svelte';
+	import { DEFAULT_PAGE_SIZE, pageSlice } from '#lib/paging.js';
 
 	// Every boot image with what was made from it, biggest first; one opens
 	// beside the list with the way to a new VM and to its disks.
@@ -37,8 +37,11 @@
 			(u) => u.image,
 		),
 	);
-	const per = $derived(Number(page.url.searchParams.get('per')) || 50);
-	const pg = $derived(pageOf(images, Number(page.url.searchParams.get('page')) || 1, per));
+	const size = $derived(Number(page.url.searchParams.get('per')) || DEFAULT_PAGE_SIZE);
+	const s = $derived(
+		pageSlice(images.length, Number(page.url.searchParams.get('page')) || 1, size),
+	);
+	const pageRows = $derived(images.slice(s.start, s.end));
 	const openKey = $derived(page.url.searchParams.get('image'));
 	const open = $derived(openKey ? (images.find((u) => u.image === openKey) ?? null) : null);
 
@@ -81,7 +84,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each pg.rows as u (u.image)}
+					{#each pageRows as u (u.image)}
 						{@const current = u.image === openKey}
 						<tr
 							class="cursor-pointer {current
@@ -154,11 +157,15 @@
 			</table>
 		</div>
 		<Pager
-			page={pg}
-			{per}
-			onpage={(n) => go({ page: n > 1 ? String(n) : undefined }, { replace: true })}
-			onper={(n) =>
-				go({ per: n === 50 ? undefined : String(n), page: undefined }, { replace: true })}
+			class="border-t border-line px-card py-3"
+			total={s.total}
+			bind:page={
+				() => s.page, (n) => go({ page: n > 1 ? String(n) : undefined }, { replace: true })
+			}
+			bind:size={
+				() => size,
+				(n) => go({ per: n === DEFAULT_PAGE_SIZE ? undefined : String(n) }, { replace: true })
+			}
 		/>
 	</section>
 

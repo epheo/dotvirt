@@ -19,7 +19,6 @@
 		moveConsequences,
 		moveNote,
 		num,
-		pageOf,
 		planBulkMove,
 		planBulkSnapshot,
 		settleEach,
@@ -37,7 +36,8 @@
 	import Consequence from '#lib/components/Consequence.svelte';
 	import StageChip from '#lib/components/StageChip.svelte';
 	import DiskPanel from './DiskPanel.svelte';
-	import Pager from './Pager.svelte';
+	import Pager from '#lib/components/Pager.svelte';
+	import { DEFAULT_PAGE_SIZE, pageSlice } from '#lib/paging.js';
 
 	// The Disks tab: a tile's filter becomes a paged table where a bulk move or
 	// snapshot shows its consequences before it runs; one disk opens beside it.
@@ -59,8 +59,9 @@
 	);
 	const desc = $derived(q.get('sort') === 'vm-desc');
 	const sorted = $derived(sortRows(shown, 'vm', desc));
-	const per = $derived(Number(q.get('per')) || 50);
-	const pg = $derived(pageOf(sorted, Number(q.get('page')) || 1, per));
+	const size = $derived(Number(q.get('per')) || DEFAULT_PAGE_SIZE);
+	const s = $derived(pageSlice(sorted.length, Number(q.get('page')) || 1, size));
+	const pageRows = $derived(sorted.slice(s.start, s.end));
 	const openKey = $derived(q.get('disk'));
 	const open = $derived(openKey ? (rows.find((r) => r.key === openKey) ?? null) : null);
 
@@ -117,7 +118,7 @@
 		void viewKey;
 		selected = new Set();
 	});
-	const pageKeys = $derived(pg.rows.map((r) => r.key));
+	const pageKeys = $derived(pageRows.map((r) => r.key));
 	const onPage = $derived(pageKeys.filter((k) => selected.has(k)).length);
 	const allOnPage = $derived(pageKeys.length > 0 && onPage === pageKeys.length);
 	const selectable = $derived(!filters.flags.includes('nodata'));
@@ -424,7 +425,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each pg.rows as r (r.key)}
+					{#each pageRows as r (r.key)}
 						{@const on = selected.has(r.key)}
 						{@const current = r.key === openKey}
 						{@const staged = drafts.stagedByKey
@@ -531,11 +532,15 @@
 		</div>
 
 		<Pager
-			page={pg}
-			{per}
-			onpage={(n) => go({ page: n > 1 ? String(n) : undefined }, { replace: true })}
-			onper={(n) =>
-				go({ per: n === 50 ? undefined : String(n), page: undefined }, { replace: true })}
+			class="border-t border-line px-card py-3"
+			total={s.total}
+			bind:page={
+				() => s.page, (n) => go({ page: n > 1 ? String(n) : undefined }, { replace: true })
+			}
+			bind:size={
+				() => size,
+				(n) => go({ per: n === DEFAULT_PAGE_SIZE ? undefined : String(n) }, { replace: true })
+			}
 		/>
 	</section>
 
