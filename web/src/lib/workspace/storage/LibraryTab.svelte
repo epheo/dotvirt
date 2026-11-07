@@ -279,23 +279,35 @@
 				{/each}
 				{#if summary.more}
 					{@const more = summary.more}
+					{@const label = `${num(more.count)} more ${more.count === 1 ? 'image' : 'images'}`}
 					<tr>
-						<td class="border-b border-line-soft p-3">
-							<div class="flex items-center gap-2.5">
-								<Layers size={16} class="shrink-0 text-ink-faint" />
-								<div>
-									<span>{num(more.count)} more {more.count === 1 ? 'image' : 'images'}</span>
-									<span class="block text-xs leading-4 text-ink-faint"
-										>Sorted by use on the Images tab</span
-									>
+						{#if more.disks === 0}
+							<!-- Images nothing was made from yet: no disks to count, place or
+							     snapshot, so the row says that instead of a row of zeros. -->
+							<td colspan="4" class="border-b border-line-soft p-3">
+								<div class="flex items-center gap-2.5">
+									<Layers size={16} class="shrink-0 text-ink-faint" />
+									<span>{label}, none used by a disk yet</span>
 								</div>
-							</div>
-						</td>
-						<td class="border-b border-line-soft p-3 text-right">
-							<span class="text-base font-bold">{num(more.disks)}</span>
-						</td>
-						<td class="border-b border-line-soft p-3">{@render where(more)}</td>
-						<td class="border-b border-line-soft p-3">{@render snap(more, '')}</td>
+							</td>
+						{:else}
+							<td class="border-b border-line-soft p-3">
+								<div class="flex items-center gap-2.5">
+									<Layers size={16} class="shrink-0 text-ink-faint" />
+									<div>
+										<span>{label}</span>
+										<span class="block text-xs leading-4 text-ink-faint"
+											>Sorted by use on the Images tab</span
+										>
+									</div>
+								</div>
+							</td>
+							<td class="border-b border-line-soft p-3 text-right">
+								<span class="text-base font-bold">{num(more.disks)}</span>
+							</td>
+							<td class="border-b border-line-soft p-3">{@render where(more)}</td>
+							<td class="border-b border-line-soft p-3">{@render snap(more, '')}</td>
+						{/if}
 						<td class="border-b border-line-soft p-3">
 							<div class="flex justify-end">
 								<Button variant="secondary" size="sm" href={storageHref('images', { project: p })}
