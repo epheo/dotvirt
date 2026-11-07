@@ -258,10 +258,7 @@ func (s *Server) handleNetworkTraffic(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	var nets []model.Network
-	if s.netstate != nil {
-		nets = scopeNetworks(s.netstate.Catalog().Networks, visible)
-	}
+	nets := s.callerNetworks(r.Context(), id, c, visible)
 	key := r.URL.Query().Get("network")
 	target, ok := model.Network{}, key == podNetworkKey
 	if !ok {

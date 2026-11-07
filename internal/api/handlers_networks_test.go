@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -13,36 +14,52 @@ import (
 	"github.com/epheo/dotvirt/internal/netstate"
 )
 
-// scopeNetworks must keep shared (cluster) networks discoverable to every tenant
-// but never reveal a namespace the caller can't already see - neither a project
-// network in a foreign namespace nor, on a shared network, the foreign entries of
-// its own Namespaces list (a CUDN publishes cluster-wide, so that list can name
-// other tenants' namespaces).
+// A tenant sees only its own scope: project networks in its namespaces and
+// shared networks published to one of them, never an unpublished or
+// foreign-published one, and never another tenant's namespace on a shared one.
+// A caller with platform networking authority sees every network, to fix it.
 func TestScopeNetworks(t *testing.T) {
 	visible := map[string]bool{"tenant-a": true}
 	in := []model.Network{
 		{Name: "vm-net", Scope: model.ScopeProject, Namespace: "tenant-a"},
 		{Name: "secret", Scope: model.ScopeProject, Namespace: "tenant-b"},
-		{Name: "prod-vlan", Scope: model.ScopeShared, Namespaces: []string{"tenant-a", "tenant-b", "tenant-c"}},
+		{Name: "prod-vlan", Kind: model.NetworkVLAN, Scope: model.ScopeShared, Namespaces: []string{"tenant-a", "tenant-b", "tenant-c"}},
+		{Name: "mt-b", Scope: model.ScopeShared, Namespaces: []string{"tenant-b"}},
+		{Name: "green-secondary", Scope: model.ScopeShared},
 	}
-	got := scopeNetworks(in, visible)
+	names := func(nets []model.Network) map[string]model.Network {
+		m := map[string]model.Network{}
+		for _, n := range nets {
+			m[n.Name] = n
+		}
+		return m
+	}
 
-	byName := map[string]model.Network{}
-	for _, n := range got {
-		byName[n.Name] = n
+	tenant := names(scopeNetworks(in, visible, false))
+	for _, hidden := range []string{"secret", "mt-b", "green-secondary"} {
+		if _, ok := tenant[hidden]; ok {
+			t.Errorf("a tenant sees %s", hidden)
+		}
 	}
-	if _, ok := byName["secret"]; ok {
-		t.Error("a project network in a non-visible namespace leaked")
-	}
-	if _, ok := byName["vm-net"]; !ok {
+	if _, ok := tenant["vm-net"]; !ok {
 		t.Error("a project network in the caller's namespace should be kept")
 	}
-	shared, ok := byName["prod-vlan"]
+	shared, ok := tenant["prod-vlan"]
 	if !ok {
-		t.Fatal("a shared network should stay discoverable to every tenant")
+		t.Fatal("a shared network published to the caller should be kept")
 	}
 	if len(shared.Namespaces) != 1 || shared.Namespaces[0] != "tenant-a" {
 		t.Errorf("shared network namespaces = %v, want [tenant-a] (foreign namespaces redacted)", shared.Namespaces)
+	}
+
+	platform := names(scopeNetworks(in, visible, true))
+	for _, want := range []string{"vm-net", "prod-vlan", "mt-b", "green-secondary"} {
+		if _, ok := platform[want]; !ok {
+			t.Errorf("a platform caller misses %s", want)
+		}
+	}
+	if _, ok := platform["secret"]; ok {
+		t.Error("a project network stays namespace-scoped, platform caller or not")
 	}
 	// Per-request scoping must not mutate the shared, cached catalog.
 	if len(in[2].Namespaces) != 3 {
@@ -157,4 +174,84 @@ func TestCreateAdminNetworkPolicyRefusesTakenPriority(t *testing.T) {
 	d.none(t)
 	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/adminnetworkpolicies?dryRun=true", `{"name":"other","priority":6}`), http.StatusOK)
 	d.only(t, "PreviewCreate "+platformProjectName+" adminnetworkpolicy")
+}
+
+// Through the route: a tenant's catalog lists only the shared network
+// published to its namespace; a platform caller's lists all three, the
+// unpublished and the foreign-published one included.
+func TestNetworksTenantSeesOwnScope(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.readsVMs = tenantReadsTeamA
+	resources := func(gv string, names ...string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			list := metav1.APIResourceList{TypeMeta: metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"}, GroupVersion: gv}
+			for _, n := range names {
+				list.APIResources = append(list.APIResources, metav1.APIResource{Name: n, Verbs: []string{"list", "watch"}})
+			}
+			writeObj(w, list)
+		}
+	}
+	cudn := func(name string) map[string]any {
+		return map[string]any{
+			"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork",
+			"metadata": map[string]any{"name": name, "resourceVersion": "1"},
+			"spec":     map[string]any{"network": map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Secondary", "subnets": []any{"10.0.0.0/24"}}}},
+		}
+	}
+	nad := func(ns, owner string) map[string]any {
+		return map[string]any{
+			"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
+			"metadata": map[string]any{
+				"name": owner, "namespace": ns, "resourceVersion": "1",
+				"ownerReferences": []any{map[string]any{"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork", "name": owner, "uid": owner}},
+			},
+		}
+	}
+	fc.on(http.MethodGet, "/apis/k8s.ovn.org/v1", resources("k8s.ovn.org/v1", "clusteruserdefinednetworks", "userdefinednetworks"))
+	fc.on(http.MethodGet, "/apis/k8s.cni.cncf.io/v1", resources("k8s.cni.cncf.io/v1", "network-attachment-definitions"))
+	fc.on(http.MethodGet, "/apis/k8s.ovn.org/v1/clusteruserdefinednetworks", unstructuredList("k8s.ovn.org/v1", "ClusterUserDefinedNetwork",
+		cudn("blue-secondary"), cudn("mt-b"), cudn("green-secondary")))
+	fc.on(http.MethodGet, "/apis/k8s.ovn.org/v1/userdefinednetworks", unstructuredList("k8s.ovn.org/v1", "UserDefinedNetwork"))
+	fc.on(http.MethodGet, "/apis/k8s.cni.cncf.io/v1/network-attachment-definitions", unstructuredList("k8s.cni.cncf.io/v1", "NetworkAttachmentDefinition",
+		nad("team-a-dev", "blue-secondary"), nad("team-b-dev", "mt-b")))
+	// No platform repo: the CUDN create authority alone is the platform signal.
+	s := fc.server(nil, Config{})
+	ns := netstate.New(fc.sa, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ns.Run(ctx)
+	s.netstate = ns
+	for deadline := time.Now().Add(10 * time.Second); len(ns.Catalog().Networks) < 3 || len(ns.Catalog().Networks[0].Namespaces) == 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("netstate never synced the shared networks: %+v", ns.Catalog().Networks)
+		}
+	}
+
+	names := func(token string) []string {
+		t.Helper()
+		rec := do(s, token, http.MethodGet, "/api/networks", "")
+		wantStatus(t, rec, http.StatusOK)
+		var inv model.NetworkInventory
+		if err := json.Unmarshal(rec.Body.Bytes(), &inv); err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, n := range inv.Networks {
+			out = append(out, n.Name)
+			for _, other := range n.Namespaces {
+				if token == tenantToken && other != "team-a-dev" {
+					t.Errorf("a tenant reads %s published to %s", n.Name, other)
+				}
+			}
+		}
+		return out
+	}
+	if got := names(tenantToken); strings.Join(got, ",") != "blue-secondary" {
+		t.Errorf("tenant sees %v, want only blue-secondary", got)
+	}
+	if got := names(adminToken); strings.Join(got, ",") != "blue-secondary,green-secondary,mt-b" {
+		t.Errorf("platform caller sees %v, want every shared network", got)
+	}
+	// A network the tenant cannot list is not found by key either.
+	wantStatus(t, do(s, tenantToken, http.MethodGet, "/api/networks/rules?network=mt-b", ""), http.StatusNotFound)
 }
