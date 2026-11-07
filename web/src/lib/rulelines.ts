@@ -99,26 +99,29 @@ export function networkRuleLines(rules: NetworkRules): RuleLine[] {
 }
 
 /**
- * The n lines most worth a glance, kept in the evaluator's order: rules a
- * project wrote to let traffic in, then the first cluster rule that blocks
- * and rules elsewhere naming these VMs, then what reaches outside, then the
- * rest.
+ * The n lines most worth a glance, kept in the evaluator's order: one of each
+ * kind first (a project rule letting traffic in, the first cluster rule that
+ * blocks, a rule elsewhere naming these VMs, what reaches outside), then the
+ * rest in order.
  */
 export function topLines(lines: RuleLine[], n: number): RuleLine[] {
 	const firstDeny = lines.find((l) => l.policy?.kind === 'admin' && l.icon === 'deny');
-	const score = (l: RuleLine) => {
-		if (l.key.startsWith('peer:')) return 1;
+	const kind = (l: RuleLine) => {
+		if (l.key.startsWith('peer:')) return 2;
 		if (l.policy?.kind === 'dfw' && l.icon !== 'deny') return 0;
 		if (l === firstDeny) return 1;
-		if (l.icon === 'out') return 2;
-		return 3;
+		if (l.icon === 'out') return 3;
+		return 4;
 	};
-	const picked = new Set(
-		lines
-			.map((l, i) => ({ i, s: score(l) }))
-			.sort((a, b) => a.s - b.s || a.i - b.i)
-			.slice(0, n)
-			.map((x) => x.i),
-	);
+	const firsts = new Map<number, number>();
+	lines.forEach((l, i) => {
+		const k = kind(l);
+		if (k < 4 && !firsts.has(k)) firsts.set(k, i);
+	});
+	const order = [
+		...[...firsts.entries()].sort((a, b) => a[0] - b[0]).map(([, i]) => i),
+		...lines.map((_, i) => i).filter((i) => ![...firsts.values()].includes(i)),
+	];
+	const picked = new Set(order.slice(0, n));
 	return lines.filter((_, i) => picked.has(i));
 }

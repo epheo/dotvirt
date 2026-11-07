@@ -93,3 +93,26 @@ describe('topLines', () => {
 		]);
 	});
 });
+
+describe('topLines on a network', () => {
+	it('shows one of each kind before a second project rule', () => {
+		const more: Policy = { ...allowDB, name: 'allow-more', isolation: undefined };
+		const lines = networkRuleLines({
+			network: 'web-prod/web-net',
+			namespaces: ['web-prod'],
+			applies: [{ policy: denyLateral }, { policy: allowDB }, { policy: more }],
+			reaches: [
+				{
+					policy: allowDB,
+					rule: { direction: 'Ingress', action: 'Allow' },
+					text: 'VMs in web-prod can reach db-1.',
+				},
+			],
+		});
+		expect(topLines(lines, 3).map((l) => l.text)).toEqual([
+			'Blocks all traffic from VMs in any namespace.',
+			'Accepts TCP 5432 from VMs labeled app=web in web-prod.',
+			'VMs in web-prod can reach db-1.',
+		]);
+	});
+});

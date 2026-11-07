@@ -80,7 +80,8 @@ function bindingsFor(s, nss) {
 		.sort((a, b) => rank[a.kind] - rank[b.kind] || (a.priority ?? 0) - (b.priority ?? 0))
 		.map((policy) => ({
 			policy,
-			conditional: policy.kind === 'dfw' && policy.target !== 'all pods',
+			conditional:
+				policy.kind === 'dfw' && policy.target !== 'all pods' && policy.target !== 'all VMs',
 		}));
 }
 
@@ -91,6 +92,7 @@ function effectiveFor(s, ns, vm) {
 			(x) =>
 				x.policy.kind !== 'dfw' ||
 				x.policy.target === 'all pods' ||
+				x.policy.target === 'all VMs' ||
 				x.policy.target === `app=${vm}`,
 		)
 		.map((x) => ({ ...x, conditional: false }));
