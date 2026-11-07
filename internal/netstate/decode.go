@@ -240,6 +240,18 @@ func (s *Snapshot) sortedANPs() []*policy {
 	return ps
 }
 
+// ANPAtPriority names the AdminNetworkPolicy other than name that holds
+// priority, if any. OVN-K applies equal-priority policies in an undefined
+// order, so a second one there makes both unpredictable.
+func (s *Snapshot) ANPAtPriority(priority int, name string) (string, bool) {
+	for _, p := range s.sortedANPs() {
+		if p.view.Priority == priority && p.view.Name != name {
+			return p.view.Name, true
+		}
+	}
+	return "", false
+}
+
 func (s *Snapshot) baselines() []*policy { return decoded(s.banp, decodeBANP) }
 
 // gateways returns the namespace's EgressFirewalls (OVN-K allows one).
