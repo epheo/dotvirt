@@ -3,6 +3,7 @@ package changeset
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/git"
@@ -45,7 +46,16 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 	view.Warning, _ = c.revertState(read, d.Files)
 	body := prBody(view, fmt.Sprintf("Reverts commit %s, %q.", short, d.Commit.Title), id.Username)
 
+	fc := c.forge.For(proj.Repo)
 	branch := c.revertBranch(id.Username, proj.Name, hash)
+	// A revert of this commit opened before branches carried the identity hash
+	// is updated in place rather than duplicated.
+	if fc != nil {
+		legacy := c.legacyRevertPrefix(id.Username, proj.Name) + shortCommit(hash)
+		if pr, ok, err := fc.FindPR(legacy, c.baseBranch); err == nil && ok && pr.State == "open" {
+			branch = legacy
+		}
+	}
 	by := git.Author{Name: id.Username, Email: authorEmail(id.Username)}
 	res, err := write.CommitChangeset(c.baseBranch, branch, title, items, by)
 	if errors.Is(err, git.ErrNoChanges) {
@@ -56,7 +66,7 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 	}
 	out := model.ProposeResult{Branch: res.Branch}
 
-	if fc := c.forge.For(proj.Repo); fc != nil {
+	if fc != nil {
 		c.openOrRecoverPR(fc, &out, branch, title, body)
 	}
 	return out, nil
@@ -69,9 +79,25 @@ func (r *Reader) revertBranch(user, project, hash string) string {
 
 // revertPrefix is what every revert branch of (user, project) starts with - how
 // the open-PR lane recognizes them. The user segment sits where the task feed's
-// attribution expects it (tasks.MergeAuthor).
+// attribution expects it (tasks.MergeAuthor); the identity hash keeps two users
+// whose names sanitize alike off each other's branches, as on proposedBranch.
 func (r *Reader) revertPrefix(user, project string) string {
+	return r.legacyRevertPrefix(user, project) + shortHash(user, project) + "-"
+}
+
+// legacyRevertPrefix is revertPrefix without the identity hash: how revert
+// branches were named before it, with the bare short commit as their tail.
+// Still read so those open PRs keep their owner.
+func (r *Reader) legacyRevertPrefix(user, project string) string {
 	return r.proposed + "/" + tasks.RevertSegment + "/" + refSegment(user) + "/" + refSegment(project) + "-"
+}
+
+// ownsLegacyRevert reports whether branch is a hash-less revert branch of
+// (user, project). The tail must be a bare commit: a hashed branch whose
+// readable prefix collides is someone else's.
+func (r *Reader) ownsLegacyRevert(user, project, branch string) bool {
+	tail, ok := strings.CutPrefix(branch, r.legacyRevertPrefix(user, project))
+	return ok && tail != "" && !strings.Contains(tail, "-")
 }
 
 // shortCommit abbreviates a commit hash to 8 chars for branch names + titles.

@@ -210,13 +210,13 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 					if c.m.m == matchYes {
 						reason = reasonEqualPriority
 					}
-					rv := c.r.view(dir)
+					rv := c.r.view(dir, nil)
 					w.maybe(&c.pol.view, &rv, stage, c.r.action, reason)
 				}
 				continue
 			}
 			for _, c := range cands {
-				rv := c.r.view(dir)
+				rv := c.r.view(dir, nil)
 				if c.m.m == matchCond {
 					w.maybe(&c.pol.view, &rv, stage, c.r.action, c.m.reason)
 					continue
@@ -239,7 +239,7 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 	anps, unenforced := s.enforcedANPs()
 	for _, b := range bind(unenforced, subject.NSLabels, subject.PodLabels, true) {
 		for _, c := range b.candidates(dir, peer, protocol, port) {
-			rv := c.r.view(dir)
+			rv := c.r.view(dir, nil)
 			w.maybe(&c.pol.view, &rv, "admin", c.r.action, unenforcedReason(c.pol.view.Priority))
 		}
 	}
@@ -279,7 +279,7 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 	if len(selecting) > 0 {
 		for _, b := range selecting {
 			for _, c := range b.candidates(dir, peer, protocol, port) {
-				rv := c.r.view(dir)
+				rv := c.r.view(dir, nil)
 				if c.m.m == matchCond {
 					w.maybe(&b.pol.view, &rv, "dfw", c.r.action, c.m.reason)
 					continue
@@ -322,7 +322,7 @@ func (s *Snapshot) gatewayWalk(ns, dstIP, protocol string, port int) walkResult 
 			if m.m == matchNo {
 				continue
 			}
-			rv := r.view("Egress")
+			rv := r.view("Egress", nil)
 			if m.m == matchCond {
 				w.maybe(&p.view, &rv, "gateway", r.action, m.reason)
 				continue
