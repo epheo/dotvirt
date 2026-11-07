@@ -348,6 +348,42 @@ func TestStorageClasses(t *testing.T) {
 	}
 }
 
+// A capacity segment names the node it sits on: a caller who may read nodes
+// sees the per-node split, anyone else the summed free capacity alone, and the
+// shared cached sheet keeps its segments for the next node reader.
+func TestStorageClassesSegmentsNeedNodeRead(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.on(http.MethodGet, "/apis/storage.k8s.io/v1/storageclasses", unstructuredList("storage.k8s.io/v1", "StorageClass",
+		map[string]any{"apiVersion": "storage.k8s.io/v1", "kind": "StorageClass", "metadata": map[string]any{"name": "local"}, "provisioner": "topolvm.io"}))
+	capacity := func(node, free string) map[string]any {
+		return map[string]any{
+			"apiVersion": "storage.k8s.io/v1", "kind": "CSIStorageCapacity",
+			"metadata":         map[string]any{"name": "cap-" + node, "namespace": "openshift-storage"},
+			"storageClassName": "local",
+			"nodeTopology":     map[string]any{"matchLabels": map[string]any{"topology.topolvm.io/node": node}},
+			"capacity":         free,
+		}
+	}
+	fc.on(http.MethodGet, "/apis/storage.k8s.io/v1/csistoragecapacities", unstructuredList("storage.k8s.io/v1", "CSIStorageCapacity",
+		capacity("host-01", "1Ti"), capacity("host-02", "3Ti")))
+	s := fc.server(nil, Config{})
+
+	for _, tc := range []struct {
+		token    string
+		segments int
+	}{{tenantToken, 0}, {adminToken, 2}, {tenantToken, 0}} {
+		rec := do(s, tc.token, http.MethodGet, "/api/storage/classes", "")
+		wantStatus(t, rec, http.StatusOK)
+		got := decodeBody[[]model.StorageClassInfo](t, rec)
+		if len(got) != 1 || got[0].Free == nil || *got[0].Free != 4<<40 || len(got[0].Segments) != tc.segments {
+			t.Fatalf("%s: classes = %+v", tc.token, got)
+		}
+		if tc.segments == 0 && strings.Contains(rec.Body.String(), "host-0") {
+			t.Errorf("%s: node names leaked: %s", tc.token, rec.Body.String())
+		}
+	}
+}
+
 // An SA-side read failure is dotvirt's, never the caller's: a 503 naming no
 // internals, and above all never a 401, which would sign the caller out.
 func TestStorageClassesFailure(t *testing.T) {
