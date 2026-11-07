@@ -225,14 +225,18 @@ func TestCanCachesVerdicts(t *testing.T) {
 		return ok
 	}
 
-	if !can(id, ssarCUDN) || !can(id, ssarCUDN) {
-		t.Fatal("allowed ref should read true")
+	for range 2 {
+		if !can(id, ssarCUDN) {
+			t.Fatal("allowed ref should read true")
+		}
 	}
 	if *reviews != 1 {
 		t.Fatalf("allowed verdict: %d rounds, want 1", *reviews)
 	}
-	if can(id, ssarMachineCfg) || can(id, ssarMachineCfg) {
-		t.Fatal("denied ref should read false")
+	for range 2 {
+		if can(id, ssarMachineCfg) {
+			t.Fatal("denied ref should read false")
+		}
 	}
 	if *reviews != 2 {
 		t.Fatalf("denied verdict must be cached too: %d rounds, want 2", *reviews)
