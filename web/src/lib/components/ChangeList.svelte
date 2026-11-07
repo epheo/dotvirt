@@ -1,8 +1,13 @@
 <script lang="ts">
 	import type { Change } from '#lib/api.js';
 	// marks: also name the changes that apply without a restart, where a VM
-	// edit mixes both.
-	let { changes, marks = false }: { changes: Change[]; marks?: boolean } = $props();
+	// edit mixes both. pills: each change ends in a right-aligned Restart or
+	// Live pill, the review sheet's reading.
+	let {
+		changes,
+		marks = false,
+		pills = false,
+	}: { changes: Change[]; marks?: boolean; pills?: boolean } = $props();
 </script>
 
 <ul class="space-y-0.5 text-[13px]">
@@ -18,7 +23,15 @@
 			{:else}
 				<span class="font-medium text-danger-ink line-through">− {c.from}</span>
 			{/if}
-			{#if c.restart}
+			{#if pills}
+				<span
+					class="ml-auto shrink-0 rounded-full px-2 text-xs {c.restart
+						? 'bg-warn-soft text-warn-ink'
+						: 'bg-ok-soft text-ok-ink'}"
+					title={c.restart ? "Applies at the VM's next power cycle" : 'Applies to the running VM'}
+					>{c.restart ? 'Restart' : 'Live'}</span
+				>
+			{:else if c.restart}
 				<span
 					class="rounded bg-warn-soft px-1 text-[10px] text-warn-ink"
 					title="Applies at the VM's next power cycle">restart</span

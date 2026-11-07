@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Check, Power, RotateCw, Server, Trash2, TriangleAlert } from '@lucide/svelte';
 	import { api, type DraftItem } from '#lib/api.js';
 	import { memoryHint } from '#lib/headroom.js';
 	import { action } from '#lib/resource.svelte.js';
@@ -38,6 +39,9 @@
 	let ack = $state(false);
 
 	const isVM = (it: DraftItem) => !it.resource || it.resource === 'vm';
+	const kindName = (it: DraftItem) =>
+		isVM(it) ? 'VirtualMachine' : (it.resource ?? '').replace(/^./, (x) => x.toUpperCase());
+	const blocked = $derived(prune.length > 0 && !ack);
 	const word = (f: string) => (f === f.toUpperCase() ? f : f.toLowerCase());
 	const list = (xs: string[]) =>
 		xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
@@ -53,25 +57,39 @@
 	// What merging does to each object, worst first: deletes, restarts, power
 	// moves, then everything that applies in place. A restart names the field
 	// that causes it, so a mixed edit says which part could have gone live.
-	type Effect = { tone: 'danger' | 'warn' | 'ok'; text: string };
+	// lead is the bold opening; icon names the kind of consequence.
+	type Effect = {
+		tone: 'danger' | 'warn' | 'ok';
+		icon: 'delete' | 'restart' | 'power' | 'warn' | 'ok';
+		lead?: string;
+		text: string;
+	};
 	function consequence(it: DraftItem): Effect {
-		if (it.kind === 'delete') return { tone: 'danger', text: `${it.name} is deleted` };
-		if (it.kind === 'create') return { tone: 'ok', text: `${it.name} is created` };
+		if (it.kind === 'delete')
+			return { tone: 'danger', icon: 'delete', lead: `${it.name} is deleted.`, text: '' };
+		if (it.kind === 'create') return { tone: 'ok', icon: 'ok', text: `${it.name} is created.` };
 		const power = it.changes.find((c) => c.field === 'Power');
 		const restart = it.changes.filter((c) => c.restart).map((c) => word(c.field));
 		const quiet = it.changes.filter((c) => !c.restart && c !== power).map((c) => word(c.field));
 		if (restart.length)
 			return {
 				tone: 'warn',
+				icon: 'restart',
+				lead: `${it.name} restarts once.`,
 				text:
-					`${it.name} restarts once. The ${list(restart)} change${restart.length === 1 ? ' needs' : 's need'} it.` +
+					`The ${list(restart)} change${restart.length === 1 ? ' needs' : 's need'} it.` +
 					(quiet.length
 						? ` The ${list(quiet)} change${quiet.length === 1 ? '' : 's'} alone would not.`
 						: ''),
 			};
 		if (power)
-			return { tone: 'warn', text: `${it.name} ${power.to === 'Off' ? 'stops' : 'starts'}` };
-		return { tone: 'ok', text: `${it.name} changes without a restart` };
+			return {
+				tone: 'warn',
+				icon: 'power',
+				lead: `${it.name} ${power.to === 'Off' ? 'stops' : 'starts'}.`,
+				text: '',
+			};
+		return { tone: 'ok', icon: 'ok', text: `${it.name} changes without a restart.` };
 	}
 
 	// A memory increase is checked against host room, the one hard limit a
@@ -87,7 +105,9 @@
 		memoryUps.flatMap(({ it, c }): Effect[] => {
 			const vm = inventory.findVM(it.namespace, it.name) ?? { name: it.name };
 			const h = memoryHint(room.data, vm, c.from, c.to ?? '', true);
-			return h ? [{ tone: h.warn ? 'warn' : 'ok', text: h.text }] : [];
+			return h
+				? [{ tone: h.warn ? 'warn' : 'ok', icon: h.warn ? 'warn' : 'ok', text: h.text }]
+				: [];
 		}),
 	);
 
@@ -96,7 +116,9 @@
 		...[...(lane?.items ?? []).map(consequence), ...fits].sort(
 			(a, b) => RANK[a.tone] - RANK[b.tone],
 		),
-		...(lane ? [{ tone: 'ok' as const, text: `Nothing else in ${project} changes.` }] : []),
+		...(lane
+			? [{ tone: 'ok' as const, icon: 'ok' as const, text: `Nothing else in ${project} changes.` }]
+			: []),
 	]);
 
 	const unstageOp = action();
@@ -122,16 +144,14 @@
 					...declared,
 				});
 			drafts.refresh();
-			tray.open = true;
 			ui.toastProposed(project, r);
 		});
 		if (ok) onclose();
 	}
 </script>
 
-<Modal title="Propose to {project}" size="3xl" {onclose}>
-	<div class="max-h-[70vh] space-y-5 overflow-y-auto px-5 py-4 text-sm">
-		{#if lane}<p class="-mt-1 text-ink-soft">{scale}</p>{/if}
+<Modal title="Propose to {project}" subtitle={lane ? scale : undefined} size="3xl" drawer {onclose}>
+	<div class="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5 text-sm">
 		<ol class="grid grid-cols-4 gap-2 text-xs" aria-label="Where this change is">
 			{#each ['Staged', 'Pull request', 'Approved and merged in the forge', 'Live on the cluster'] as step, i (step)}
 				<li class="flex flex-col gap-1.5 {i === 0 ? 'font-semibold text-ink' : 'text-ink-muted'}">
@@ -155,22 +175,26 @@
 			<section class="space-y-2">
 				<h3 class="text-xs font-semibold tracking-wide text-ink-muted uppercase">What changes</h3>
 				{#each lane.items as it (it.kind + it.namespace + it.name)}
-					<div class="rounded border border-line">
-						<div class="flex items-center gap-2 border-b border-line-soft bg-inset px-3 py-1.5">
-							<strong class="text-ink">{it.namespace}/{it.name}</strong>
-							<span class="rounded-full px-1.5 text-xs {TONE_PILL[draftKindTone(it.kind)]}"
-								>{it.kind}</span
-							>
+					<div class="overflow-hidden rounded border border-line">
+						<div class="flex items-center gap-2 border-b border-line bg-inset px-3 py-2">
+							<Server size={14} class="shrink-0 text-ink-muted" />
+							<strong class="text-ink">{it.name}</strong>
+							<span class="truncate text-ink-muted">{it.namespace}, {kindName(it)}</span>
+							{#if it.kind !== 'edit'}
+								<span class="rounded-full px-1.5 text-xs {TONE_PILL[draftKindTone(it.kind)]}"
+									>{it.kind}</span
+								>
+							{/if}
 							<Button
-								class="ml-auto"
+								class="ml-auto shrink-0"
 								variant="link"
 								size="sm"
 								disabled={unstageOp.busy}
-								onclick={() => unstage(it)}>Unstage</Button
+								onclick={() => unstage(it)}>Unstage all</Button
 							>
 						</div>
 						<div class="px-3 py-2">
-							<ChangeList changes={it.changes} marks={it.kind === 'edit' && isVM(it)} />
+							<ChangeList changes={it.changes} pills={it.kind === 'edit' && isVM(it)} />
 						</div>
 					</div>
 				{/each}
@@ -181,37 +205,59 @@
 				<h3 class="text-xs font-semibold tracking-wide text-ink-muted uppercase">When it merges</h3>
 				<ul class="divide-y divide-line-soft rounded border border-line">
 					{#each effects as e, i (i)}
-						<li class="flex items-center gap-2 px-3 py-1.5">
-							<span class="rounded-full px-1.5 text-xs {TONE_PILL[e.tone]}"
-								>{e.tone === 'ok' ? 'Fine' : e.tone === 'warn' ? 'Heads up' : 'Removes'}</span
+						<li class="flex items-start gap-2.5 px-3 py-2">
+							{#if e.icon === 'restart'}<RotateCw size={14} class="mt-0.5 shrink-0 text-warn-ink" />
+							{:else if e.icon === 'power'}<Power size={14} class="mt-0.5 shrink-0 text-warn-ink" />
+							{:else if e.icon === 'delete'}<Trash2
+									size={14}
+									class="mt-0.5 shrink-0 text-danger-ink"
+								/>
+							{:else if e.icon === 'warn'}<TriangleAlert
+									size={14}
+									class="mt-0.5 shrink-0 text-warn-ink"
+								/>
+							{:else}<Check size={14} class="mt-0.5 shrink-0 text-ok-ink" />{/if}
+							<span class="text-ink-soft"
+								>{#if e.lead}<strong class="text-ink">{`${e.lead} `}</strong>{/if}{e.text}</span
 							>
-							{e.text}
 						</li>
 					{/each}
 				</ul>
 			</section>
 
 			{#if prune.length}
-				<section class="space-y-2 rounded border border-danger/30 bg-danger-soft px-3 py-2.5">
-					<p class="font-medium text-danger-ink">
-						The sync also deletes {prune.length} object{prune.length === 1 ? '' : 's'} from the cluster.
-						Git main no longer declares {prune.length === 1 ? 'it' : 'them'}.
-					</p>
-					<ul class="space-y-0.5 font-mono text-xs text-ink">
-						{#each prune as r (r.kind + r.namespace + r.name)}
-							<li>
-								{r.namespace ? `${r.namespace}/` : ''}{r.name}
-								<span class="text-ink-muted">{r.kind}</span>
-							</li>
-						{/each}
-					</ul>
-					<label class="flex items-center gap-2 font-medium text-ink">
-						<input type="checkbox" bind:checked={ack} />
-						Delete {prune.length === 1 ? 'it' : `these ${prune.length}`} when this merges
-					</label>
-					<p class="text-xs text-ink-soft">
-						Not meant to go? Adopt {prune.length === 1 ? 'it' : 'them'} into git first, from Issues.
-					</p>
+				<section class="space-y-2">
+					<h3 class="text-xs font-semibold tracking-wide text-ink-muted uppercase">
+						Also in this merge
+					</h3>
+					<div class="space-y-2 rounded border border-danger/40 bg-danger-soft px-3 py-2.5">
+						<p class="flex items-start gap-2 text-danger-ink">
+							<TriangleAlert size={14} class="mt-0.5 shrink-0" />
+							<span
+								><strong
+									>The sync deletes {prune.length} object{prune.length === 1 ? '' : 's'} from the cluster.</strong
+								>
+								Git main no longer declares {prune.length === 1 ? 'it' : 'them'}.</span
+							>
+						</p>
+						<ul class="space-y-0.5 pl-6 font-mono text-xs text-ink">
+							{#each prune as r (r.kind + r.namespace + r.name)}
+								<li>
+									{r.namespace ? `${r.namespace}/` : ''}{r.name}
+									<span class="text-ink-muted">{r.kind}</span>
+								</li>
+							{/each}
+						</ul>
+						<div class="flex flex-wrap items-center gap-x-4 gap-y-1 pl-6">
+							<label class="flex items-center gap-2 font-medium text-ink">
+								<input type="checkbox" bind:checked={ack} />
+								Delete {prune.length === 1 ? 'it' : `these ${prune.length}`} when this merges
+							</label>
+							<span class="text-xs text-ink-soft"
+								>Not meant to go? Adopt {prune.length === 1 ? 'it' : 'them'} into git first, from Issues.</span
+							>
+						</div>
+					</div>
 				</section>
 			{:else if lane.warning}
 				<p class="rounded border border-warn/50 bg-warn-soft px-3 py-2 text-warn-ink">
@@ -246,14 +292,16 @@
 	</div>
 
 	{#snippet footer()}
-		<span class="mr-auto text-xs text-ink-muted"
-			>{prune.length > 0 && !ack
-				? 'Tick the deletion box to continue.'
-				: 'Approval and merge happen in the forge. The tray follows it until it is live.'}</span
+		<span class="mr-auto max-w-72 text-xs text-ink-muted"
+			>Approval and merge happen in the forge. The tray follows it until it is live.</span
 		>
 		<Button variant="ghost" onclick={onclose}>Keep editing</Button>
-		<Button onclick={propose} disabled={!lane || op.busy || (prune.length > 0 && !ack)}>
-			{op.busy ? 'Opening...' : 'Open pull request'}
-		</Button>
+		<div class="flex flex-col items-end gap-1">
+			<Button onclick={propose} disabled={!lane || op.busy || blocked}>
+				{op.busy ? 'Opening...' : 'Open pull request'}
+			</Button>
+			{#if blocked}<span class="text-xs text-danger-ink">Tick the deletion box to continue</span
+				>{/if}
+		</div>
 	{/snippet}
 </Modal>

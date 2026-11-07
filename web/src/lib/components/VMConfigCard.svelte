@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Check, GitBranch, Minus, Pencil, Plus } from '@lucide/svelte';
+	import { ArrowRight, Check, GitBranch, Minus, Pencil, Plus, Undo2 } from '@lucide/svelte';
 	import { api, vmKey, type Change, type DraftItem, type VM } from '#lib/api.js';
 	import { friendlyError, quantity, quantityBytes } from '#lib/format.js';
 	import { memoryHint } from '#lib/headroom.js';
@@ -56,14 +56,6 @@
 	};
 	const rows = $derived.by((): Row[] => [
 		{
-			key: 'power',
-			label: 'Power',
-			git: vm.power,
-			fields: ['Power'],
-			inline: { field: 'power', gitValue: vm.power },
-			live: status,
-		},
-		{
 			key: 'cpu',
 			label: 'vCPU',
 			git: sizing.cpu ? String(sizing.cpu) : '-',
@@ -92,6 +84,16 @@
 			fields: ['Preference'],
 		},
 		{
+			key: 'labels',
+			label: 'Labels',
+			git: Object.keys(vm.labels ?? {}).length
+				? Object.entries(vm.labels ?? {})
+						.map(([k, v]) => `${k}=${v}`)
+						.join(', ')
+				: 'None',
+			fields: ['Label '],
+		},
+		{
 			key: 'disks',
 			label: 'Disks',
 			git: vm.disks?.length
@@ -108,16 +110,17 @@
 			label: 'Networks',
 			git: vm.networks?.length ? vm.networks.map((n) => n.network || n.name).join(', ') : 'None',
 			fields: ['Network'],
+			live: vm.guestIP
+				? `${vm.networks?.map((n) => n.network || n.name).join(', ') || 'pod'}, ${vm.guestIP}`
+				: undefined,
 		},
 		{
-			key: 'labels',
-			label: 'Labels',
-			git: Object.keys(vm.labels ?? {}).length
-				? Object.entries(vm.labels ?? {})
-						.map(([k, v]) => `${k}=${v}`)
-						.join(', ')
-				: 'None',
-			fields: ['Label '],
+			key: 'power',
+			label: 'Power',
+			git: vm.power,
+			fields: ['Power'],
+			inline: { field: 'power', gitValue: vm.power },
+			live: status,
 		},
 		{
 			key: 'eviction',
@@ -260,21 +263,25 @@
 
 <InfoCard title="Configuration">
 	{#snippet action()}
-		{#if onedit && vm.sourceFile && canAuthor}
-			<Button variant="link" size="sm" onclick={onedit}>Edit all settings</Button>
-		{/if}
+		<span class="flex min-w-0 items-center gap-3">
+			<span class="ml-4 hidden truncate text-xs text-ink-muted md:inline"
+				>{canAuthor && vm.sourceFile ? 'Click a value in git to change it. ' : ''}Nothing reaches
+				the cluster until its PR merges.</span
+			>
+			{#if onedit && vm.sourceFile && canAuthor}
+				<Button variant="link" size="sm" class="shrink-0" onclick={onedit}>Edit all settings</Button
+				>
+			{/if}
+		</span>
 	{/snippet}
-	<p class="border-b border-line-soft px-3 py-1.5 text-xs text-ink-muted">
-		{canAuthor && vm.sourceFile ? 'Click a value in the git column to change it. ' : ''}Edits stage;
-		nothing reaches the cluster until its pull request merges.
-	</p>
 	<div class="overflow-x-auto">
 		<table class="w-full text-[13px]">
 			<thead>
 				<tr class="border-b border-line text-left text-xs text-ink-muted">
 					<th class="w-32 px-3 py-1.5 font-medium">Setting</th>
-					<th class="w-1/2 px-3 py-1.5 font-medium">In git (main)</th>
+					<th class="w-2/5 px-3 py-1.5 font-medium">In git (main)</th>
 					<th class="px-3 py-1.5 font-medium">Live on the cluster</th>
+					<th class="w-px px-3 py-1.5"><span class="sr-only">Actions</span></th>
 				</tr>
 			</thead>
 			<tbody class="divide-y divide-line-soft">
@@ -379,29 +386,30 @@
 							{:else if staged.length}
 								<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
 									{#each staged as c (c.field)}
-										<span class="text-ink-muted line-through"
-											>{c.action === 'add' ? '' : c.from}</span
-										>
-										<span class="font-medium text-accent-ink"
-											>{c.action === 'remove' ? 'removed' : c.to}</span
-										>
+										{#if c.action !== 'add'}<span class="text-ink-muted line-through">{c.from}</span
+											><ArrowRight size={12} class="text-ink-faint" />{/if}
+										{#if r.inline && !block}
+											<button
+												onclick={() => start(r)}
+												title={`Change ${r.label.toLowerCase()}; it stages into a PR`}
+												class="-mx-1 rounded px-1 font-semibold text-accent-ink hover:bg-inset"
+												><span class="sr-only">Change {r.label}:</span>{c.to}</button
+											>
+										{:else}
+											<span class="font-semibold text-accent-ink"
+												>{c.action === 'remove' ? 'removed' : c.to}</span
+											>
+										{/if}
 									{/each}
 									<span
 										class="inline-flex items-center gap-1 rounded-full px-1.5 text-xs {TONE_PILL.info}"
 										><GitBranch size={11} />Staged</span
 									>
 									<span class="text-xs text-ink-muted"
-										>{staged.some((c) => c.restart) ? 'restart on merge' : 'no restart'}</span
+										>{staged.some((c) => c.restart)
+											? 'restarts when it merges'
+											: 'applies without restart'}</span
 									>
-									{#if r.inline && !block}
-										<button class="text-xs text-accent-ink hover:underline" onclick={() => start(r)}
-											>Change</button
-										>
-										<button
-											class="text-xs text-accent-ink hover:underline"
-											onclick={() => unstageField(r)}>Unstage</button
-										>
-									{/if}
 								</div>
 							{:else}
 								{#if r.inline && !block}
@@ -443,12 +451,24 @@
 									<span class="rounded-full px-1.5 text-xs {TONE_PILL.warn}">Live differs</span>
 								</span>
 							{:else if r.live}
-								<span class="text-ink-soft">{r.live}</span>
+								<span class="text-ink">{r.live}</span>
 							{:else if driftChanges === null}
 								<span class="text-ink-muted" title="Live state not read yet">-</span>
 							{:else}
-								<span class="inline-flex items-center gap-1 text-xs text-ink-muted"
-									><Check size={12} /> Same</span
+								<!-- Read and matching: the value it runs with, the match secondary. -->
+								<span class="text-ink-soft"
+									>{r.git}<span
+										class="ml-2 inline-flex items-center gap-1 text-xs whitespace-nowrap text-ink-muted"
+										><Check size={12} /> Same</span
+									></span
+								>
+							{/if}
+						</td>
+						<td class="px-3 py-2 text-right whitespace-nowrap">
+							{#if staged.length && r.inline && !block}
+								<button
+									class="inline-flex items-center gap-1 text-xs text-accent-ink hover:underline"
+									onclick={() => unstageField(r)}><Undo2 size={12} />Unstage</button
 								>
 							{/if}
 						</td>

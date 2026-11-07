@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { expect, login, openVM, setScenario, test } from './fx';
+import { expect, login, openTray, openVM, setScenario, test } from './fx';
 
 // The change tray past the pull request: applying, live, refused. What it
 // follows is persisted, so each test seeds it and reloads, which also holds
@@ -31,11 +31,10 @@ test('a merge that runs says what is live, offers undo, and closes by itself', a
 	await setScenario(page, 'base');
 	await login(page);
 	await following(page, [merged({ lines: ['web-2: Disk data added'] })]);
-	const tray = trayOf(page);
+	// Folded while browsing; the pill names the merge that went live.
+	await expect(trayOf(page).getByText(/PR #40 is live/)).toBeVisible();
+	const tray = await openTray(page);
 	await expect(tray.getByText('Live on the cluster')).toBeVisible();
-	// It opened for the merge; the PR still in review keeps to its header.
-	await expect(tray.getByText('PR #41 open')).toBeVisible();
-	await expect(tray.getByRole('button', { name: 'Copy link for a reviewer' })).toHaveCount(0);
 	await expect(tray.getByText('web-2: Disk data added')).toBeVisible();
 	await expect(tray.getByText(/Closes in \d+ s/)).toBeVisible();
 	await tray.getByRole('button', { name: 'Undo this change' }).click();
@@ -59,7 +58,9 @@ test('a refused merge offers the fix and the undo', async ({ page }) => {
 	await setScenario(page, 'drift');
 	await login(page);
 	await following(page, [merged()]);
-	const tray = trayOf(page);
+	// The pill carries the refusal, so a folded tray never hides it.
+	await expect(trayOf(page).getByText(/PR #40 refused/)).toBeVisible();
+	const tray = await openTray(page);
 	await expect(tray.getByText('The cluster refused PR #40')).toBeVisible();
 	await expect(tray.getByRole('link', { name: 'Fix and propose again' })).toBeVisible();
 	await tray.getByRole('button', { name: 'Undo the merge' }).click();
@@ -79,16 +80,17 @@ test('a PR in review hands its link to a reviewer', async ({ page, context }) =>
 	);
 });
 
-test('a folded draft still opens its review in one click', async ({ page }) => {
+test('a staged draft stays a pill that opens its review in one click', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);
 	await openVM(page, 'web-1');
 	await page.getByRole('button', { name: 'Change vCPU' }).click();
 	await page.getByRole('button', { name: 'One vCPU more' }).click();
 	await page.getByRole('button', { name: 'Stage', exact: true }).click();
+	// A fresh staged change leaves the tray a pill; the pill still names it.
 	const tray = trayOf(page);
-	await tray.getByRole('button', { name: 'Fold' }).click();
 	await expect(tray.getByText(/1 staged in team-web/)).toBeVisible();
+	await expect(tray.getByRole('button', { name: 'Fold' })).toHaveCount(0);
 	await tray.getByRole('button', { name: 'Review', exact: true }).click();
 	await expect(page.getByRole('dialog').getByText('Propose to team-web')).toBeVisible();
 });

@@ -1,7 +1,8 @@
 import { untrack } from 'svelte';
-import { api, type CommitDetail, type ProposalDetail } from '#lib/api.js';
+import { api, type CommitDetail, type Proposal, type ProposalDetail } from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
 import { commitKey, prKey } from '#lib/review.js';
+import { itemLine } from '#lib/tray.js';
 
 // A review is a past commit's or an open PR's items: the same field diff a
 // staged item shows. The Changes panes, the VM page's Changes tab and every
@@ -38,6 +39,24 @@ class ReviewCache {
 			retry,
 		);
 	}
+	loadProposals(proposals: Proposal[]) {
+		for (const p of proposals) this.loadProposal(p.project, p.prNumber);
+	}
+
+	// Open PRs whose diff names a VM, by "ns/name", each with its change in a
+	// few words. Reads the reviews loaded so far: a derived, never a load.
+	vmPRs(proposals: Proposal[]): Map<string, { pr: Proposal; line: string }[]> {
+		const m = new Map<string, { pr: Proposal; line: string }[]>();
+		for (const pr of proposals)
+			for (const it of this.proposal(pr.project, pr.prNumber)?.data?.items ?? []) {
+				if (it.resource && it.resource !== 'vm') continue;
+				const k = `${it.namespace}/${it.name}`;
+				const line = it.kind === 'create' ? 'create' : itemLine(it);
+				m.set(k, [...(m.get(k) ?? []), { pr, line }]);
+			}
+		return m;
+	}
+
 	forgetProposals(project: string) {
 		for (const key of Object.keys(this.#proposals))
 			if (key.startsWith(`${project}#`)) delete this.#proposals[key];

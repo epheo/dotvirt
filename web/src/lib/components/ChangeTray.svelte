@@ -120,17 +120,9 @@
 
 	const hidden = $derived(page.url.pathname.startsWith('/changes') || lanes.length === 0);
 
-	// Unfolded while something needs this user (a draft to propose, a refusal,
-	// a merge that just went live) or once they open it; a PR waiting on its
-	// reviewers stays a pill, so the tray never sits over work for nothing.
-	let pinned = $state(false);
-	const actionable = $derived(
-		lanes.some((l) => l.kind === 'staged' || l.kind === 'refused' || l.kind === 'live'),
-	);
-	const expanded = $derived(tray.open && (pinned || actionable));
-	// Opened by itself for one lane, the tray keeps the others to a line.
-	const compact = (l: TrayLane) =>
-		!pinned && (l.kind === 'review' || l.kind === 'applying' || l.kind === 'merged');
+	// A pill while browsing; it unfolds only when the user asks, so it never
+	// sits over work by itself. The pill names the lane that matters most.
+	const expanded = $derived(tray.open);
 
 	function pillText(l: TrayLane): string {
 		switch (l.kind) {
@@ -150,9 +142,16 @@
 	}
 	function unfold() {
 		tray.open = true;
-		pinned = true;
 	}
-	const worst = $derived(lanes.find((l) => l.kind === 'refused') ?? lanes[0]);
+	const RANK: Record<TrayLane['kind'], number> = {
+		refused: 0,
+		staged: 1,
+		live: 2,
+		applying: 3,
+		review: 4,
+		merged: 5,
+	};
+	const worst = $derived([...lanes].sort((a, b) => RANK[a.kind] - RANK[b.kind])[0]);
 </script>
 
 {#if !hidden}
@@ -207,16 +206,9 @@
 								<strong class="text-sm text-ink">PR #{lane.pr.prNumber} merged</strong>
 							{/if}
 							<span class="truncate text-ink-muted">in {lane.project}</span>
-							{#if compact(lane)}
-								<button class="ml-auto shrink-0 text-ink-soft hover:underline" onclick={unfold}
-									>Details</button
-								>
-							{/if}
 						</header>
 
-						{#if compact(lane)}
-							<!-- Header only: nothing here waits on this user. -->
-						{:else if lane.kind === 'staged'}
+						{#if lane.kind === 'staged'}
 							<ul class="divide-y divide-line-soft">
 								{#each lane.draft.items.slice(0, 4) as it (it.kind + it.namespace + it.name)}
 									<li class="flex items-center gap-2 px-3 py-1.5">
@@ -429,7 +421,6 @@
 				class="pointer-events-auto flex items-center gap-1 rounded-full border border-line-strong bg-panel px-3 py-1 text-xs text-ink-soft shadow hover:bg-inset"
 				onclick={() => {
 					tray.open = false;
-					pinned = false;
 				}}
 			>
 				<ChevronDown size={12} /> Fold

@@ -16,8 +16,9 @@ test('the tree and the all-VMs table render a 300-VM fleet', async ({ page }) =>
 
 	const main = page.locator('main');
 	await main.getByRole('link', { name: 'VMs', exact: true }).click();
-	await expect(main.locator('tbody tr').first()).toBeVisible();
-	const rows = await main.locator('tbody tr').count();
+	const grid = main.getByRole('grid', { name: 'VMs' });
+	await expect(grid.locator('tbody tr').first()).toBeVisible();
+	const rows = await grid.locator('tbody tr').count();
 	expect(rows).toBeGreaterThanOrEqual(300);
 });
 

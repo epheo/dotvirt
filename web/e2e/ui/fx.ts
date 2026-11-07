@@ -1,7 +1,7 @@
 import { test as base, expect, type Page } from '@playwright/test';
 import { signIn } from '../shared';
 
-export { openVM } from '../shared';
+export { openTray, openVM } from '../shared';
 
 // Shared plumbing for the hermetic UI suite: scenario switching against the
 // fixture server's control plane, the login shortcut, and a console gate that
