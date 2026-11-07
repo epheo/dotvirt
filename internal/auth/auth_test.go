@@ -173,6 +173,25 @@ func TestValidateCaches(t *testing.T) {
 	}
 }
 
+// TestForgetRevalidates pins the expired-session path: once the apiserver
+// rejects a token the cache vouched for, Forget makes the next request ask
+// again, so a revoked token is a 401 now rather than a cached session.
+func TestForgetRevalidates(t *testing.T) {
+	valid := map[string]authnv1.UserInfo{"good": {Username: "alice"}}
+	a, calls := fakeAuth(valid)
+	if _, err := a.Validate(context.Background(), "good"); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	delete(valid, "good")
+	if _, err := a.Validate(context.Background(), "good"); err != nil {
+		t.Fatalf("cached session: %v", err)
+	}
+	a.Forget("good")
+	if _, err := a.Validate(context.Background(), "good"); !errors.Is(err, ErrRejected) || *calls != 2 {
+		t.Fatalf("after Forget: err = %v, reviews = %d; want a fresh rejecting review", err, *calls)
+	}
+}
+
 // TestValidateThrottlesUnknownTokens pins the amplification bound: distinct
 // unknown tokens beyond the review budget are refused without a TokenReview and
 // without a rejection verdict, while a cached session keeps validating.

@@ -170,7 +170,12 @@ func TestVisibleForNeverCachesAFailure(t *testing.T) {
 	fc.readsVMs = tenantReadsTeamA
 	var down atomic.Bool
 	down.Store(true)
-	fc.ssarDown = func(a *authzv1.ResourceAttributes) bool { return down.Load() && a.Namespace == "orphans-ns" }
+	fc.ssarFail = func(a *authzv1.ResourceAttributes) int {
+		if down.Load() && a.Namespace == "orphans-ns" {
+			return http.StatusServiceUnavailable
+		}
+		return 0
+	}
 	s := fc.server(nil, Config{})
 	id := auth.Identity{Token: tenantToken, Username: "tenant"}
 	c, err := s.clusterF.For(id.Token)
@@ -181,11 +186,22 @@ func TestVisibleForNeverCachesAFailure(t *testing.T) {
 	if got, err := s.visibleFor(context.Background(), id, c); err == nil {
 		t.Fatalf("a failed review answered %v with nil error", got)
 	}
+	wantStatus(t, do(s, tenantToken, http.MethodGet, "/api/inventory", ""), http.StatusServiceUnavailable)
 	down.Store(false)
 	got, err := s.visibleFor(context.Background(), id, c)
 	if err != nil || !got["team-a-dev"] || len(got) != 1 {
 		t.Fatalf("after recovery: %v, %v; want only team-a-dev (the failure must not be cached)", got, err)
 	}
+}
+
+// TestCallerTokenRejectedIs401 pins the session end: when the apiserver
+// rejects the caller's own token mid-request, the answer is a 401 (the UI
+// signs out), never a 500 that leaves a dead session on screen.
+func TestCallerTokenRejectedIs401(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.ssarFail = func(*authzv1.ResourceAttributes) int { return http.StatusUnauthorized }
+	s := fc.server(nil, Config{})
+	wantStatus(t, do(s, tenantToken, http.MethodGet, "/api/inventory", ""), http.StatusUnauthorized)
 }
 
 // TestCanCachesVerdicts pins the SSAR cache: one round per (token, question)
@@ -274,7 +290,12 @@ func TestCanNeverCachesAFailure(t *testing.T) {
 	fc := newFakeCluster(t)
 	var down atomic.Bool
 	down.Store(true)
-	fc.ssarDown = func(*authzv1.ResourceAttributes) bool { return down.Load() }
+	fc.ssarFail = func(*authzv1.ResourceAttributes) int {
+		if down.Load() {
+			return http.StatusServiceUnavailable
+		}
+		return 0
+	}
 	s := fc.server(&planeDraft{}, Config{PlatformRepo: platformRepo})
 
 	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/drs", `{}`), http.StatusServiceUnavailable)

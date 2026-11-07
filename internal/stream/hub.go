@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/model"
@@ -59,6 +60,7 @@ type Hub struct {
 	kick      chan struct{}   // a connection was added - rebuild so it gets a first frame
 	timeout   time.Duration   // per-identity build bound (buildTimeout; tests shorten it)
 	upgrader  websocket.Upgrader
+	forget    func(token string) // drops a rejected token's cached session; nil skips
 
 	mu    sync.Mutex
 	conns map[*conn]struct{}
@@ -89,17 +91,28 @@ func NewHub(inventory InventoryFunc, wake <-chan struct{}, levels Levels, uiOrig
 	}
 }
 
+// OnRejected sets forget, called with a token the apiserver rejected during a
+// build so the next handshake re-validates it instead of riding the cached
+// session. Set before Run.
+func (h *Hub) OnRejected(forget func(token string)) { h.forget = forget }
+
 // conn is one WebSocket connection. Within a pass, the one goroutine handling its
-// identity (Run or a build worker) is the sole writer of lastJS and the sole
-// producer into out (a conflating 1-slot mailbox); passes never overlap. The
-// connection's writePump drains out and writes the latest frame. quit is closed on
+// identity (Run or a build worker) is the sole writer of lastJS, the sole
+// producer into out (a conflating 1-slot mailbox) and the sole closer of evict;
+// passes never overlap. The connection's writePump drains out and writes the
+// latest frame, and ends the connection once evict closes. quit is closed on
 // teardown.
 type conn struct {
 	id     auth.Identity
 	key    string // groups connections of the same identity (same token -> one build)
 	out    chan []byte
 	quit   chan struct{}
+	evict  chan struct{}
 	lastJS string // last frame delivered to THIS conn; owned as described above
+}
+
+func newConn(id auth.Identity, key string) *conn {
+	return &conn{id: id, key: key, out: make(chan []byte, 1), quit: make(chan struct{}), evict: make(chan struct{})}
 }
 
 func (h *Hub) add(c *conn) {
@@ -149,8 +162,9 @@ func (h *Hub) Run(ctx context.Context) {
 // tabs of one user share a build) on a bounded worker pool, and delivers each frame
 // to that identity's connections that haven't sent it yet. An identity is built by
 // one worker per pass and passes never overlap, so its frames arrive in build order.
-// A per-identity build failure (e.g. token expiry) is logged and skips that
-// identity, never the others; it stays due for the next pass.
+// A per-identity build failure is logged and skips that identity, never the
+// others; it stays due for the next pass. A token the apiserver rejects ends
+// that identity's connections instead (see reject).
 func (h *Hub) reconcile(ctx context.Context) {
 	h.mu.Lock()
 	byKey := make(map[string][]*conn, len(h.conns))
@@ -223,6 +237,9 @@ func (h *Hub) build(ctx context.Context, conns []*conn, prev *frame) *frame {
 	cancel()
 	if err != nil {
 		log.Printf("stream: inventory build failed for %s: %v", conns[0].id.Username, err)
+		if apierrors.IsUnauthorized(err) {
+			h.reject(conns)
+		}
 		return nil
 	}
 	data, err := json.Marshal(inv)
@@ -241,6 +258,23 @@ func (h *Hub) build(ctx context.Context, conns []*conn, prev *frame) *frame {
 		return nil
 	}
 	return f
+}
+
+// reject ends conns whose token the apiserver refused: a frozen frame would
+// otherwise stand in for a session that is over. The client reconnects, and
+// with the cached session forgotten its handshake meets the 401 that signs it
+// out. Only the caller's own token builds a frame, so the 401 is theirs.
+func (h *Hub) reject(conns []*conn) {
+	if h.forget != nil {
+		h.forget(conns[0].id.Token)
+	}
+	for _, c := range conns {
+		select {
+		case <-c.evict:
+		default:
+			close(c.evict)
+		}
+	}
 }
 
 // sendLatest delivers data to each of conns that doesn't already hold it.

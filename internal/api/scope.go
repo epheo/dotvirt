@@ -78,7 +78,7 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 	candidates := namespaceNames(s.state.Namespaces())
 	names, err := c.VisibleNamespaces(ctx, candidates)
 	if err != nil {
-		return nil, err
+		return nil, reviewFailed(err)
 	}
 	set := make(map[string]bool, len(names))
 	for _, n := range names {
@@ -130,7 +130,7 @@ func saCached[T any](s *Server, w http.ResponseWriter, r *http.Request, cache *t
 		return id, nil, v, false
 	}
 	if v, err = fetch(sa, r.Context()); err != nil {
-		fail(w, err)
+		fail(w, unavailable(err))
 		return id, nil, v, false
 	}
 	cache.Put("all", v)

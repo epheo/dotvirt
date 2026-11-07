@@ -51,8 +51,9 @@ type fakeCluster struct {
 	// readsVMs grants list virtualmachines in one namespace, the visibility
 	// probe, ahead of ssar.
 	readsVMs func(token, namespace string) bool
-	// ssarDown fails a review with 503 when it returns true, ahead of the rest.
-	ssarDown func(a *authzv1.ResourceAttributes) bool
+	// ssarFail fails a review with the status it returns, ahead of the rest;
+	// 0 lets the review through.
+	ssarFail func(a *authzv1.ResourceAttributes) int
 	// ssrr answers a SelfSubjectRulesReview; nil grants nothing.
 	ssrr func(token, namespace string) []authzv1.ResourceRule
 }
@@ -138,9 +139,16 @@ func (fc *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		attrs := obj.(*authzv1.SelfSubjectAccessReview).Spec.ResourceAttributes
-		if fc.ssarDown != nil && fc.ssarDown(attrs) {
-			writeStatus(w, http.StatusServiceUnavailable, metav1.StatusReasonServiceUnavailable)
-			return
+		if fc.ssarFail != nil {
+			switch code := fc.ssarFail(attrs); code {
+			case 0:
+			case http.StatusUnauthorized:
+				writeStatus(w, code, metav1.StatusReasonUnauthorized)
+				return
+			default:
+				writeStatus(w, code, metav1.StatusReasonServiceUnavailable)
+				return
+			}
 		}
 		allow := bearer(r) == adminToken
 		switch {

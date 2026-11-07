@@ -5,10 +5,12 @@ import (
 	"errors"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/epheo/dotvirt/internal/model"
 )
@@ -262,5 +264,25 @@ func TestResyncRecordsCallerAndMissesAsNotFound(t *testing.T) {
 	user, _, _ := unstructured.NestedString(got.Object, "operation", "initiatedBy", "username")
 	if user != `al"ice` {
 		t.Errorf("initiatedBy.username = %q, want the caller", user)
+	}
+}
+
+// TestResyncHidesTheSAStatus pins that the SA patch's own apiserver verdict
+// never reaches the caller as theirs: a 401 there would end the caller's
+// session, a 403 would read as the caller's RBAC.
+func TestResyncHidesTheSAStatus(t *testing.T) {
+	a := appWithSource("argocd", "team-a", "https://forge/team-a.git",
+		[]any{vmResource("prod", "vm-a", "Synced", "Healthy")})
+	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), a)
+	dyn.PrependReactor("patch", "applications", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewUnauthorized("sa token expired")
+	})
+	s := NewSnapshot(&Client{dyn: dyn}, nil)
+	_ = s.apps.Add(a)
+	s.synced.Mark()
+
+	_, err := s.Resync(context.Background(), "alice", "prod", "vm-a")
+	if apierrors.IsUnauthorized(err) || !errors.Is(err, model.ErrUnavailable) {
+		t.Fatalf("err = %v; want ErrUnavailable with the SA status dropped", err)
 	}
 }

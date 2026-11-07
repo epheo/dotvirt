@@ -455,7 +455,9 @@ func fail(w http.ResponseWriter, err error) {
 func invalid(err error) error { return fmt.Errorf("%w: %v", model.ErrInvalid, err) }
 
 // unavailable logs err and returns a 503 kind that names only the failure: dial
-// errors from the cluster can embed endpoints and tokens.
+// errors from the cluster can embed endpoints and tokens. It drops err's
+// apiserver status, which makes it the wrapper for every error from dotvirt's
+// own identity.
 func unavailable(err error) error {
 	log.Printf("api: cluster access unavailable: %v", err)
 	return fmt.Errorf("%w: cluster access", model.ErrUnavailable)
@@ -473,11 +475,16 @@ func reviewFailed(err error) error {
 
 // statusFor maps an error to an HTTP status by the kind it wraps: a model.Err*
 // kind, or an apiserver status from an operation run under the caller's token
-// (Forbidden is the caller's RBAC verdict; Conflict and BadRequest both mean the
-// object's state refuses the act, e.g. pausing a stopped VM). Anything
-// unclassified is a 500.
+// (Unauthorized means that token died, so the session ends; Forbidden is the
+// caller's RBAC verdict; Conflict and BadRequest both mean the object's state
+// refuses the act, e.g. pausing a stopped VM; throttling and timeouts are
+// transient). Anything unclassified is a 500. An apiserver status from
+// dotvirt's own identity must never reach here unwrapped (see unavailable): its
+// 401 would sign the caller out.
 func statusFor(err error) int {
 	switch {
+	case apierrors.IsUnauthorized(err):
+		return http.StatusUnauthorized
 	case errors.Is(err, model.ErrInvalid):
 		return http.StatusBadRequest
 	case errors.Is(err, model.ErrNotFound), apierrors.IsNotFound(err):
@@ -486,7 +493,8 @@ func statusFor(err error) int {
 		return http.StatusForbidden
 	case errors.Is(err, model.ErrConflict), apierrors.IsConflict(err), apierrors.IsBadRequest(err):
 		return http.StatusConflict
-	case errors.Is(err, model.ErrUnavailable):
+	case errors.Is(err, model.ErrUnavailable), apierrors.IsTooManyRequests(err),
+		apierrors.IsTimeout(err), apierrors.IsServiceUnavailable(err):
 		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError

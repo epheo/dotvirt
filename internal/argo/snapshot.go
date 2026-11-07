@@ -321,7 +321,10 @@ func (s *Snapshot) Resync(ctx context.Context, username, namespace, name string)
 		return model.ResyncResult{}, err
 	}
 	if _, err := s.sa.patchApp(ctx, ref.Namespace, ref.Name, patch); err != nil {
-		return model.ResyncResult{}, fmt.Errorf("trigger sync of %s: %w", ref.Name, err)
+		// The patch runs as dotvirt: its apiserver status is never the caller's
+		// verdict, and a 401 passed through would end their session.
+		log.Printf("argo: trigger sync of %s/%s: %v", ref.Namespace, ref.Name, err)
+		return model.ResyncResult{}, fmt.Errorf("%w: could not trigger the sync of %s", model.ErrUnavailable, ref.Name)
 	}
 	return model.ResyncResult{Application: ref.Name, Revision: revision}, nil
 }

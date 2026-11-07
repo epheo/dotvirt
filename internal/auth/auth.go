@@ -96,6 +96,12 @@ var ErrThrottled = errors.New("token validation throttled")
 // -> 503, so an API-server blip doesn't sign valid users out.
 var ErrRejected = errors.New("token rejected")
 
+// Forget drops token's cached validation, so its next request runs a fresh
+// TokenReview: the apiserver rejected it after the cache vouched for it.
+func (a *Authenticator) Forget(token string) {
+	a.cache.Delete(restfactory.TokenKey(token))
+}
+
 // Validate checks token via TokenReview and returns the attributed Identity.
 // Cached by token hash (positive and negative) for ttl.
 func (a *Authenticator) Validate(ctx context.Context, token string) (Identity, error) {
