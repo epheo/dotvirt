@@ -3,10 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	authnv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -210,5 +213,45 @@ func BenchmarkFrameWatermarks(b *testing.B) {
 				_ = s.tasksWatermark(projects, c.nodes)
 			}
 		})
+	}
+}
+
+// A frame re-validates its token on the authenticator's cache: a revoked
+// token ends its stream (ErrRejected evicts it) without waiting for a cached
+// review to expire; a review outage does not.
+func TestFrameRejectsARevokedToken(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.namespaces = []corev1.Namespace{{ObjectMeta: metav1.ObjectMeta{Name: "team-a-dev", Labels: map[string]string{"dotvirt.io/project": "team-a"}}}}
+	fc.readsVMs = tenantReadsTeamA
+	s := fc.server(nil, Config{})
+	var alive, down atomic.Bool
+	authenticator := func() *auth.Authenticator {
+		kube := fake.NewSimpleClientset()
+		kube.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			if down.Load() {
+				return true, nil, errors.New("apiserver unavailable")
+			}
+			tr := action.(k8stesting.CreateAction).GetObject().(*authnv1.TokenReview).DeepCopy()
+			tr.Status = authnv1.TokenReviewStatus{Authenticated: alive.Load(), User: authnv1.UserInfo{Username: "tenant"}}
+			return true, tr, nil
+		})
+		return auth.New(kube, []byte("0123456789abcdef0123456789abcdef"))
+	}
+	id := auth.Identity{Token: tenantToken, Username: "tenant"}
+
+	alive.Store(true)
+	s.auth = authenticator()
+	if _, err := s.InventoryForIdentity(context.Background(), id); err != nil {
+		t.Fatalf("a live token: %v", err)
+	}
+	down.Store(true)
+	s.auth = authenticator() // the cached verdict expired
+	if _, err := s.InventoryForIdentity(context.Background(), id); err != nil {
+		t.Fatalf("a review outage must not end the stream: %v", err)
+	}
+	down.Store(false)
+	alive.Store(false)
+	if _, err := s.InventoryForIdentity(context.Background(), id); !errors.Is(err, auth.ErrRejected) {
+		t.Fatalf("a revoked token built a frame: %v", err)
 	}
 }

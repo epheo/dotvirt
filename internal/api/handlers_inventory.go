@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -21,6 +22,16 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		// The WS hub calls this directly (bypassing userCluster's guard); fail closed
 		// rather than nil-deref the factory and crash the hub goroutine.
 		return model.Inventory{}, fmt.Errorf("cluster not configured")
+	}
+	// A stream outlives the request that authenticated it, and its cached
+	// reviews now outlive a revoked token by minutes: re-validate on the
+	// authenticator's cache, shared with the session's REST calls, so a dead
+	// token ends its stream at the next frame past that cache's TTL. A
+	// transient review failure is not a rejection.
+	if s.auth != nil {
+		if _, err := s.auth.Validate(ctx, id.Token); errors.Is(err, auth.ErrRejected) {
+			return model.Inventory{}, errSessionRejected
+		}
 	}
 	userCluster, err := s.clusterF.For(id.Token)
 	if err != nil {
