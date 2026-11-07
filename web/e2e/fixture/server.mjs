@@ -282,8 +282,8 @@ async function handleAPI(req, res, url) {
 		if (path === '/api/metrics/scope') return sendJSON(res, 200, s.metrics.vmMetrics);
 	}
 
-	const storage = await handleStorage(req, res, url);
-	if (storage !== undefined) return storage;
+	await handleStorage(req, res, url);
+	if (res.headersSent) return;
 
 	if (path === '/api/draft' && req.method === 'GET') {
 		return sendJSON(res, 200, draftFor(url.searchParams.get('project')));
@@ -498,8 +498,9 @@ async function handleAPI(req, res, url) {
 }
 
 // ── storage (S3): snapshots, claims, uploads ───────────────────────────────────
-// Answers the storage routes, or returns undefined to let the caller go on.
-// A scenario's null listing answers 503, like an unreachable cluster read.
+// Answers the storage routes; a request it leaves unanswered goes on to the
+// rest of the API. A scenario's null listing answers 503, like an unreachable
+// cluster read.
 
 const newestFirst = (a, b) => (b.created ?? '').localeCompare(a.created ?? '');
 

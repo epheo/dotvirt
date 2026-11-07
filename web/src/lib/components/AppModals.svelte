@@ -127,7 +127,13 @@
 		onclose={close}
 	/>
 {:else if m?.kind === 'upload'}
-	<UploadModal namespaces={inventory.namespaces} namespace={m.namespace} onclose={close} />
+	<UploadModal
+		namespaces={inventory.namespaces}
+		namespace={m.namespace}
+		file={m.file}
+		bootImage={m.bootImage}
+		onclose={close}
+	/>
 {:else if m?.kind === 'deployTemplate'}
 	<DeployTemplateModal
 		namespaces={inventory.namespaces}

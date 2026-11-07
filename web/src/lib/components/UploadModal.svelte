@@ -20,10 +20,16 @@
 	let {
 		namespaces,
 		namespace: initialNamespace = '',
+		file: initialFile,
+		bootImage = false,
 		onclose,
 	}: {
 		namespaces: string[];
 		namespace?: string; // preselected target (the opener's scope)
+		file?: File; // a file dropped where the upload was opened
+		// Also register the disk as a boot image, so the catalog and the
+		// create flow offer it.
+		bootImage?: boolean;
 		onclose: () => void;
 	} = $props();
 
@@ -57,7 +63,12 @@
 	const ready = $derived(missing.length === 0);
 
 	function pickFile(e: Event) {
-		const f = (e.target as HTMLInputElement).files?.[0] ?? null;
+		useFile((e.target as HTMLInputElement).files?.[0] ?? null);
+	}
+	// svelte-ignore state_referenced_locally
+	if (initialFile) useFile(initialFile);
+
+	function useFile(f: File | null) {
 		file = f;
 		if (f) {
 			if (!name)
@@ -144,7 +155,13 @@
 		error = '';
 		try {
 			stage = 'creating';
-			await api.createUpload({ namespace, name, size, storageClass: storageClass || undefined });
+			await api.createUpload({
+				namespace,
+				name,
+				size,
+				storageClass: storageClass || undefined,
+				bootImage,
+			});
 			stage = 'preparing';
 			await pollUntil((p) => p === 'UploadReady', 'storage to be ready');
 			const { token, uploadUrl } = await api.uploadToken(namespace, name);
@@ -161,13 +178,23 @@
 	}
 </script>
 
-<Modal title="Upload image" size="lg" dismissable={stage !== 'uploading'} {onclose}>
+<Modal
+	title={bootImage ? 'Add a boot image' : 'Upload image'}
+	size="lg"
+	dismissable={stage !== 'uploading'}
+	{onclose}
+>
 	{#snippet icon()}<Upload size={16} />{/snippet}
 	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm">
 		{#if stage === 'form' || stage === 'error'}
 			<p class="mb-3 text-xs text-ink-muted">
-				Uploads a disk image (qcow2/raw/iso) as a DataVolume your VMs can boot from. The file
-				streams straight from your browser to the cluster's upload proxy.
+				{#if bootImage}
+					Uploads a disk image (qcow2, raw or iso) and offers it as a boot image in the project. The
+					file streams straight from your browser to the cluster. No pull request.
+				{:else}
+					Uploads a disk image (qcow2/raw/iso) as a DataVolume your VMs can boot from. The file
+					streams straight from your browser to the cluster's upload proxy.
+				{/if}
 			</p>
 			<div class="grid grid-cols-2 gap-4">
 				<label class="col-span-2 block">
@@ -236,7 +263,13 @@
 
 				{#if stage === 'done'}
 					<p class="mt-3 rounded bg-ok-soft/60 p-3 text-xs text-ok-ink">
-						<strong>{name}</strong> is ready in <strong>{namespace}</strong> — use it as a VM's boot disk.
+						{#if bootImage}
+							<strong>{name}</strong> is a boot image in <strong>{namespace}</strong>. Create VM
+							offers it once the catalog refreshes.
+						{:else}
+							<strong>{name}</strong> is ready in <strong>{namespace}</strong> — use it as a VM's boot
+							disk.
+						{/if}
 					</p>
 				{/if}
 			</div>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DraftItem, Project, Snapshot, StorageClassInfo, VM } from '#lib/api.js';
 import {
+	ago,
 	applyFilters,
 	classFacts,
 	classTag,
@@ -106,6 +107,17 @@ function rows(
 		...extra,
 	});
 }
+
+describe('ago', () => {
+	it('words the age of a snapshot', () => {
+		expect(ago(hoursAgo(0), NOW)).toBe('just now');
+		expect(ago(hoursAgo(0.5), NOW)).toBe('30 min ago');
+		expect(ago(hoursAgo(2), NOW)).toBe('2 h ago');
+		expect(ago(hoursAgo(30), NOW)).toBe('1 day ago');
+		expect(ago(hoursAgo(24 * 9 + 1), NOW)).toBe('9 days ago');
+		expect(ago(undefined, NOW)).toBe('');
+	});
+});
 
 describe('diskShared', () => {
 	it('reads explicit access modes before the class profile', () => {
@@ -279,6 +291,11 @@ describe('library', () => {
 		expect(uses[0].templates).toEqual(['fedora-server', 'fedora-minimal']);
 		expect(staleShare(uses[0])).toBeCloseTo(2 / 3);
 
+		// An unused catalog image never leads, even with room at the top.
+		expect(topImages(uses, 4).top.map((u) => u.image)).toEqual([
+			'os-images/fedora-42',
+			'os-images/centos-stream-9',
+		]);
 		const sum = topImages(uses, 1);
 		expect(sum.top.map((u) => u.image)).toEqual(['os-images/fedora-42']);
 		expect(sum.more).toMatchObject({ count: 2, disks: 1, shared: 1, fresh: 1 });
@@ -330,7 +347,7 @@ describe('tree and class facts', () => {
 		expect(classFacts(classes[0])).toMatchObject({
 			liveMigration: false,
 			snapshots: true,
-			free: '412.0 TiB free',
+			free: '412 TiB free',
 		});
 		expect(classFacts(classes[2]).free).toBe('Not reported');
 		expect(classFacts(undefined).liveMigration).toBeNull();
@@ -408,7 +425,7 @@ describe('planBulkMove', () => {
 			},
 			{ tone: 'info', text: 'Running VMs keep running while their disk copies.' },
 			{ tone: 'warn', text: '1 leave local NVMe on lvms-vgfast.' },
-			{ tone: 'warn', text: 'bulk-hdd does not report free space. This adds 50.0 GiB.' },
+			{ tone: 'warn', text: 'bulk-hdd does not report free space. This adds 50 GiB.' },
 			{
 				tone: 'danger',
 				text: '1 disk of stopped VMs is left out: a disk copies only while its VM runs.',
@@ -474,7 +491,7 @@ describe('planBulkMove', () => {
 		});
 		expect(moveConsequences(big)).toContainEqual({
 			tone: 'danger',
-			text: 'lvms-vgfast has 1.0 GiB free. This adds 100.0 GiB.',
+			text: 'lvms-vgfast has 1 GiB free. This adds 100 GiB.',
 		});
 	});
 });

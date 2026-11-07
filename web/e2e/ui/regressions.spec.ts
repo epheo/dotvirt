@@ -77,14 +77,18 @@ test('storage summary shows platform facts beside the VM footprint', async ({ pa
 	await setScenario(page, 'base');
 	await login(page);
 	await page.locator('aside').getByRole('link', { name: 'Storage', exact: true }).click();
+	await page
+		.locator('main')
+		.getByRole('link', { name: /^Classes/ })
+		.click();
 	const table = page.locator('main').getByRole('table');
 	// The local class: per-node free capacity summed, single-attach disks.
 	const fast = table.getByRole('row').filter({ hasText: 'fast-ssd' });
 	await expect(fast).toContainText('2.9 TiB');
-	await expect(fast).toContainText('RWO only');
-	// The shared class carries no VMs in the fixture but still lists with its facts.
+	await expect(fast).toContainText('Not possible');
+	// The shared class lists with its facts.
 	const bulk = table.getByRole('row').filter({ hasText: 'bulk-hdd' });
-	await expect(bulk).toContainText('Supported');
+	await expect(bulk).toContainText('Possible');
 	await expect(bulk).toContainText('nfs.csi.k8s.io');
 	// The class page repeats the facts and lists every provisioned disk.
 	await fast.getByRole('link', { name: 'fast-ssd' }).click();

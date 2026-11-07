@@ -30,7 +30,6 @@
 	import SecurityPlane from './SecurityPlane.svelte';
 	import SegmentSummary from './SegmentSummary.svelte';
 	import StorageClassSummary from './StorageClassSummary.svelte';
-	import StorageRootSummary from './StorageRootSummary.svelte';
 	import TabPane from '#lib/components/TabPane.svelte';
 
 	// The container workspace: every inventory level, section roots included,
@@ -188,8 +187,6 @@
 		<SegmentSummary network={scope.network} vms={scopedVMs} />
 	{:else if scope.kind === 'storage'}
 		<StorageClassSummary storageClass={scope.storageClass} vms={scopedVMs} />
-	{:else if root && section === 'storage'}
-		<StorageRootSummary vms={scopedVMs} />
 	{:else if root && section === 'hosts'}
 		<HostsRootSummary vms={scopedVMs} />
 	{:else if root && section === 'networking'}

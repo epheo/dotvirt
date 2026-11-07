@@ -33,7 +33,7 @@ test('inventory sections switch tree and workspace', async ({ page }) => {
 	await expect(aside.getByText('All Nodes')).toBeVisible();
 	await aside.getByRole('link', { name: 'Storage', exact: true }).click();
 	await expect(page).toHaveURL(/\/storage$/);
-	await expect(aside.getByText('All Storage')).toBeVisible();
+	await expect(aside.getByText('All projects')).toBeVisible();
 });
 
 test('VMs tab lists VMs and opens a detail route', async ({ page }) => {

@@ -30,7 +30,7 @@ const NEAR_FULL = 0.1;
 const RWX = 'ReadWriteMany';
 const PERSISTENT = new Set(['dataVolume', 'pvc']);
 
-export const isPersistent = (d: Disk) => PERSISTENT.has(d.type ?? '');
+const isPersistent = (d: Disk) => PERSISTENT.has(d.type ?? '');
 
 export interface DiskRow {
 	key: string; // "namespace/vm/disk": selection, the side panel, deep links
@@ -69,7 +69,7 @@ export function diskShared(disk: Disk, info: StorageClassInfo | undefined): bool
 }
 
 // Whether a class offers shared disks at all (the tree's local/shared tag).
-export const classShared = (info: StorageClassInfo | undefined): boolean | null =>
+const classShared = (info: StorageClassInfo | undefined): boolean | null =>
 	info?.profile ? !!info.profile.shared : null;
 
 // Ready snapshots per VM, newest first.
@@ -90,7 +90,20 @@ function snapshotsByVM(snapshots: Snapshot[]): Map<string, Snapshot[]> {
 // taken) is read as covering every disk of its VM.
 const captured = (s: Snapshot, disk: string) => !s.volumes?.length || s.volumes.includes(disk);
 
-export function isFresh(s: Snapshot | undefined, now = Date.now()): boolean {
+// How long ago a snapshot was taken, in the words the tables use: "2 h ago",
+// "1 day ago", "9 days ago".
+export function ago(iso: string | undefined, now = Date.now()): string {
+	const t = iso ? new Date(iso).getTime() : NaN;
+	if (Number.isNaN(t)) return '';
+	const mins = Math.max(0, Math.floor((now - t) / 60_000));
+	if (mins < 60) return mins < 1 ? 'just now' : `${mins} min ago`;
+	const hours = Math.floor(mins / 60);
+	if (hours < 24) return `${hours} h ago`;
+	const days = Math.floor(hours / 24);
+	return days === 1 ? '1 day ago' : `${days} days ago`;
+}
+
+function isFresh(s: Snapshot | undefined, now = Date.now()): boolean {
 	if (!s?.created) return false;
 	const t = new Date(s.created).getTime();
 	return !Number.isNaN(t) && now - t <= FRESH_MS;
@@ -291,6 +304,9 @@ export function pageOf<T>(rows: T[], page: number, per: number): Page<T> {
 
 export const num = (n: number) => n.toLocaleString('en-US');
 
+// A byte size without a trailing ".0": "150 GiB", "2.9 TiB".
+export const size = (n: number) => bytes(n).replace('.0 ', ' ');
+
 export const showing = (p: Page<unknown>) =>
 	p.total ? `Showing ${p.from}-${p.to} of ${num(p.total)}` : 'Showing 0 of 0';
 
@@ -367,7 +383,9 @@ export interface ImageSummary {
 
 export function topImages(uses: ImageUse[], n = 4): ImageSummary {
 	const images = uses.filter((u) => u.image);
-	const rest = images.slice(n);
+	// Only images something was made from lead; unused ones fold into the rest.
+	const lead = Math.min(n, images.filter((u) => u.disks > 0).length);
+	const rest = images.slice(lead);
 	const more = rest.length
 		? rest.reduce<ImageUse & { count: number }>(
 				(acc, u) => ({
@@ -381,7 +399,7 @@ export function topImages(uses: ImageUse[], n = 4): ImageSummary {
 			)
 		: null;
 	return {
-		top: images.slice(0, n),
+		top: images.slice(0, lead),
 		more,
 		none: uses.find((u) => !u.image) ?? null,
 		total: images.length,
@@ -480,7 +498,7 @@ export function classFacts(info: StorageClassInfo | undefined): ClassFacts {
 		liveMigration: shared,
 		shared,
 		snapshots: info ? !!info.snapshotClass : null,
-		free: info?.free != null ? `${bytes(info.free)} free` : 'Not reported',
+		free: info?.free != null ? `${size(info.free)} free` : 'Not reported',
 	};
 }
 
@@ -668,7 +686,7 @@ export function moveConsequences(plan: MovePlan): { tone: Tone; text: string }[]
 				text: `${num(l.count)} leave ${l.description} on ${l.storageClass}.`,
 			});
 	if (plan.moving) {
-		const added = bytes(plan.added);
+		const added = size(plan.added);
 		if (plan.targetFree === null)
 			out.push({
 				tone: 'warn',
@@ -677,12 +695,12 @@ export function moveConsequences(plan: MovePlan): { tone: Tone; text: string }[]
 		else if (plan.added > plan.targetFree)
 			out.push({
 				tone: 'danger',
-				text: `${plan.target} has ${bytes(plan.targetFree)} free. This adds ${added}.`,
+				text: `${plan.target} has ${size(plan.targetFree)} free. This adds ${added}.`,
 			});
 		else
 			out.push({
 				tone: 'ok',
-				text: `Adds ${added} to ${plan.target}, ${bytes(plan.targetFree)} free.`,
+				text: `Adds ${added} to ${plan.target}, ${size(plan.targetFree)} free.`,
 			});
 	}
 	if (plan.stopped.length)
