@@ -360,14 +360,16 @@ func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entries 
 	return c.Get(id, proj)
 }
 
-// pin records on each entry writing a manifest the version of its file on
-// base (draft.Entry.BaseBlob), in one read. An entry already pinned keeps its
-// pin: one whose content the server derived from bytes it read is pinned to
-// those bytes (pinOf), never to a second read that may see a newer file.
+// pin records on each entry writing or removing a file the version of that
+// file on base (draft.Entry.BaseBlob), in one read. An entry already pinned
+// keeps its pin: one whose content the server derived from bytes it read is
+// pinned to those bytes (pinOf), never to a second read that may see a newer
+// file.
 func (c *Coordinator) pin(proj project.ProjectInfo, entries []draft.Entry) error {
+	pinned := func(e draft.Entry) bool { return e.BaseBlob != "" || e.Manifest == "" && e.Kind != draft.KindDelete }
 	var paths []string
 	for _, e := range entries {
-		if e.Manifest != "" && e.BaseBlob == "" {
+		if !pinned(e) {
 			paths = append(paths, e.SourceFile)
 		}
 	}
@@ -383,7 +385,7 @@ func (c *Coordinator) pin(proj project.ProjectInfo, entries []draft.Entry) error
 		return err
 	}
 	for i, e := range entries {
-		if e.Manifest != "" && e.BaseBlob == "" {
+		if !pinned(e) {
 			entries[i].BaseBlob = pins[e.SourceFile]
 		}
 	}

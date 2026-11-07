@@ -84,7 +84,7 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) []git.ChangesetIte
 		case draft.KindCreate:
 			items = append(items, git.ChangesetItem{Path: e.SourceFile, NewContent: []byte(e.Manifest), BaseBlob: e.BaseBlob})
 		case draft.KindDelete:
-			items = append(items, git.ChangesetItem{Path: e.SourceFile, Delete: true})
+			items = append(items, git.ChangesetItem{Path: e.SourceFile, Delete: true, BaseBlob: e.BaseBlob})
 		}
 	}
 	return items

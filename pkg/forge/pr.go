@@ -72,11 +72,11 @@ const closedPageLimit = 2
 // name, and versions ignore one or both - so matching is client-side. A
 // fork's PR reusing the branch name never matches.
 func (c *Client) FindPR(head, base string) (pr PR, ok bool, err error) {
-	if direct, err := c.pairPR(head, base); err == nil && direct.State == "open" && direct.Base.Ref == base && direct.from(head) {
+	if direct, err := c.pairPR(head, base); err == nil && direct.State == "open" && direct.Base.Ref == base && direct.From(head) {
 		return direct, true, nil
 	}
 	match := func(p PR) bool {
-		if p.from(head) {
+		if p.From(head) {
 			pr, ok = p, true
 		}
 		return ok
@@ -99,10 +99,10 @@ func (c *Client) pairPR(head, base string) (PR, error) {
 	return pr, err
 }
 
-// from reports whether p's head is branch in the base repo. A merged PR
+// From reports whether p's head is branch in the base repo. A merged PR
 // whose branch was deleted reports its own refs/pull/<n>/head as the ref and
 // keeps the branch name only in the label.
-func (p PR) from(branch string) bool {
+func (p PR) From(branch string) bool {
 	if p.Head.RepoID != p.Base.RepoID {
 		return false
 	}

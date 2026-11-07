@@ -252,11 +252,11 @@ func TestProposeChangesetBeforePush(t *testing.T) {
 		t.Fatal(err)
 	}
 	stop := errors.New("stop")
-	if _, err := w.ProposeChangeset("main", "p", "x", drop, by, PushPlan{Lease: first.Hash, BeforePush: func() error { return stop }}); !errors.Is(err, stop) {
+	if _, err := w.ProposeChangeset("main", "p", "x", drop, by, PushPlan{Lease: first.Hash, BeforePush: func(string) error { return stop }}); !errors.Is(err, stop) {
 		t.Fatalf("want the hook's error, got %v", err)
 	}
 	theirs := ""
-	_, err = w.ProposeChangeset("main", "p", "x", drop, by, PushPlan{Lease: first.Hash, BeforePush: func() error {
+	_, err = w.ProposeChangeset("main", "p", "x", drop, by, PushPlan{Lease: first.Hash, BeforePush: func(string) error {
 		cmd := exec.Command("git", "--git-dir", bare, "commit-tree", "-m", "theirs", "main^{tree}")
 		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@x", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@x")
 		out, err := cmd.Output()

@@ -345,7 +345,20 @@ func sortedEntries(d map[string]Entry) []Entry {
 // rebuilds the branch from current base with these plus the draft, so the
 // proposal is always replayed on the base it will merge into.
 type Proposal struct {
-	PR      int     `json:"pr"`
+	// Repo and Branch say where the record holds: a record for another repo
+	// or branch is no record.
+	Repo    string  `json:"repo"`
+	Branch  string  `json:"branch"`
+	PR      int     `json:"pr"` // 0: the branch is pushed but has no PR yet
+	Head    string  `json:"head"`
+	Entries []Entry `json:"entries"`
+	// Pending is a push under way, written before it lands: if the record
+	// write after it fails, the remote's head says which of the two holds.
+	Pending *Pending `json:"pending,omitempty"`
+}
+
+// Pending is a pushed head and what it carries, not yet confirmed.
+type Pending struct {
 	Head    string  `json:"head"`
 	Entries []Entry `json:"entries"`
 }
@@ -388,4 +401,23 @@ func (s *Store) DropProposal(user, project string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return writeJSON(s.proposalPath(user, project), nil)
+}
+
+// Pushed reports whether head is a push p knows: its head or the pending one.
+func (p Proposal) Pushed(head string) bool {
+	return head != "" && (head == p.Head || p.Pending != nil && head == p.Pending.Head)
+}
+
+// Settle makes p describe the remote's head: a pending push that landed
+// becomes the record. False when head is neither push p knows.
+func (p *Proposal) Settle(head string) bool {
+	switch {
+	case head != "" && head == p.Head:
+	case p.Pending != nil && head != "" && head == p.Pending.Head:
+		p.Head, p.Entries = p.Pending.Head, p.Pending.Entries
+	default:
+		return false
+	}
+	p.Pending = nil
+	return true
 }

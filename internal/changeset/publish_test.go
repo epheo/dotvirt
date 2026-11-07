@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -261,16 +262,20 @@ func TestReproposePinsAgainstTheCurrentBase(t *testing.T) {
 	}
 }
 
-// The PR merges while its branch is rebuilt. What it carried is in main now;
-// the rebuilt branch gets a new PR for the draft alone.
+// The PR merges, at its old head, while its branch is rebuilt. What it
+// carried is in main now; the draft alone goes out as a new PR, rebuilt once
+// more on the main that holds the merge, so the new PR never carries the
+// merged change again (a later revert of it stays reverted).
 func TestProposeAfterTheOpenPRMergedMeanwhile(t *testing.T) {
 	f, prs := newPRFixture(t)
 	f.stageLabel(t, "env", "prod")
 	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); err != nil {
 		t.Fatal(err)
 	}
+	old := revParse(t, f.proj.Repo, prs.head)
 	prs.onRead = func(pr *forge.PR, reads int) {
 		if pr.Number == 1 && reads == 2 {
+			mergeInto(t, f.proj.Repo, old)
 			pr.State, pr.Merged = "closed", true
 		}
 	}
@@ -286,6 +291,31 @@ func TestProposeAfterTheOpenPRMergedMeanwhile(t *testing.T) {
 	if !ok || rec.PR != 2 || len(rec.Entries) != 1 || rec.Entries[0].Edit.SetLabels["tier"] != "gold" || rec.Entries[0].Edit.SetLabels["env"] != "" {
 		t.Fatalf("the new PR carries the draft alone, got %+v", rec)
 	}
+	if revParse(t, f.proj.Repo, prs.head+"^") != revParse(t, f.proj.Repo, "main") {
+		t.Fatal("the new PR's branch must sit on the main that holds the merge")
+	}
+	if diff := gitDiff(t, f.proj.Repo, "main", prs.head); !strings.Contains(diff, "+    tier: gold") || strings.Contains(diff, "+    env") || strings.Contains(diff, "-    env") {
+		t.Fatalf("the new PR must change tier alone:\n%s", diff)
+	}
+}
+
+// mergeInto lands rev on main with a merge commit, as the forge merging a PR.
+func mergeInto(t *testing.T, bare, rev string) {
+	t.Helper()
+	work := t.TempDir()
+	gitRun(t, work, "clone", "-q", bare, ".")
+	gitRun(t, work, "fetch", "-q", "origin", rev)
+	gitRun(t, work, "merge", "-q", "--no-ff", "-m", "Merge PR", "FETCH_HEAD")
+	gitRun(t, work, "push", "-q", "origin", "main")
+}
+
+func gitDiff(t *testing.T, repo, from, to string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", repo, "diff", from, to).Output()
+	if err != nil {
+		t.Fatalf("git diff: %v", err)
+	}
+	return string(out)
 }
 
 // The PR closes while its branch is rebuilt: the draft stays, the record goes,
@@ -508,21 +538,308 @@ func TestProposeAsksAgainBeforeOverwritingAnExistingBranch(t *testing.T) {
 	}
 }
 
-// With no forge to ask, a propose learns nothing about the recorded PR: the
-// record stays for when the forge answers again.
-func TestProposeWithoutAForgeKeepsTheRecord(t *testing.T) {
+// A record and no forge to ask about its PR: the branch is rebuilt with what
+// the record carries under its lease, as for an open PR, never forced over.
+func TestProposeWithoutAForgeRebuildsUnderTheRecord(t *testing.T) {
 	c := newTestCoordinator(t, true)
 	id, proj := auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: seedBare(t)}
-	if err := c.store.SetProposal(id.Username, proj.Name, draft.Proposal{PR: 3, Head: "abc"}); err != nil {
+	branch := c.proposedBranch(id.Username, proj.Name)
+	_, write, err := c.write(proj)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.StageDelete(id, proj, "", "alpha", "web"); err != nil {
+	env := draft.Entry{Kind: draft.KindEdit, Namespace: "alpha", Name: "web", SourceFile: "web.yaml", Edit: &model.VMEdit{SetLabels: map[string]string{"env": "prod"}}}
+	first, err := write.CommitChangeset("main", branch, "env", c.toChangesetItems([]draft.Entry{env}), git.Author{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := draft.Proposal{Repo: forge.NormalizeRepoURL(proj.Repo), Branch: branch, PR: 3, Head: "0123456789012345678901234567890123456789", Entries: []draft.Entry{env}}
+	if err := c.store.SetProposal(id.Username, proj.Name, rec); err != nil {
+		t.Fatal(err)
+	}
+	req := model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{SetLabels: map[string]string{"tier": "gold"}}}
+	if _, err := c.StageEdit(id, proj, "alpha", "web", req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Propose(id, proj, model.ProposeRequest{}); !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("a record whose head the branch does not hold: want ErrConflict, got %v", err)
+	}
+	if revParse(t, proj.Repo, branch) != first.Hash {
+		t.Fatal("nothing may be pushed")
+	}
+	rec.Head = first.Hash
+	if err := c.store.SetProposal(id.Username, proj.Name, rec); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.Propose(id, proj, model.ProposeRequest{}); err != nil {
 		t.Fatalf("Propose: %v", err)
 	}
-	if rec, ok, _ := c.store.Proposal(id.Username, proj.Name); !ok || rec.PR != 3 {
-		t.Fatalf("the record must stay, got %+v ok=%v", rec, ok)
+	file, _ := exec.Command("git", "-C", proj.Repo, "show", branch+":web.yaml").Output()
+	if !strings.Contains(string(file), "env: prod") || !strings.Contains(string(file), "tier: gold") {
+		t.Fatalf("want both labels on the rebuilt branch:\n%s", file)
+	}
+	if got, ok, _ := c.store.Proposal(id.Username, proj.Name); !ok || got.PR != 3 || got.Head != revParse(t, proj.Repo, branch) {
+		t.Fatalf("the record must follow the push, got %+v", got)
+	}
+}
+
+// A failed re-read after the push leaves the PR's fate unknown: the push is
+// recorded, the draft stays staged, and the next propose replays it, adding
+// nothing twice.
+func TestProposeKeepsTheDraftWhenThePRCannotBeReread(t *testing.T) {
+	prs := newForgePRs()
+	var mu sync.Mutex
+	gets, fail := 0, false
+	down := func(m, path string) (int, string, bool) {
+		if m == "GET" && strings.HasSuffix(path, "/pulls/1") {
+			mu.Lock()
+			defer mu.Unlock()
+			gets++
+			if fail && gets == 2 {
+				return http.StatusBadGateway, "down", true
+			}
+		}
+		return 0, "", false
+	}
+	f := newProposeFixture(t, down, prs.route)
+	prs.f = f
+	f.stageLabel(t, "env", "prod")
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	gets, fail = 0, true
+	mu.Unlock()
+	f.stageLabel(t, "tier", "gold")
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	if n := f.draftCount(t); n != 1 {
+		t.Fatalf("the draft must stay staged, got %d entries", n)
+	}
+	if rec, _ := f.proposal(t); rec.Head != revParse(t, f.proj.Repo, prs.head) || rec.Entries[0].Edit.SetLabels["tier"] != "gold" {
+		t.Fatalf("the push must be recorded, got %+v", rec)
+	}
+	mu.Lock()
+	fail = false
+	mu.Unlock()
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if n := f.draftCount(t); n != 0 {
+		t.Fatalf("the replay must unstage the draft, got %d entries", n)
+	}
+	if file := f.show(t, prs.head+":web.yaml"); strings.Count(file, "tier: gold") != 1 || !strings.Contains(file, "env: prod") {
+		t.Fatalf("want both labels once:\n%s", file)
+	}
+}
+
+// A push that landed while the record write after it failed: the record
+// written ahead of the push still knows it, so the next propose goes on
+// from the pushed head instead of reading it as someone else's push.
+func TestProposeRecoversAPushTheRecordMissed(t *testing.T) {
+	f, prs := newPRFixture(t)
+	f.stageLabel(t, "env", "prod")
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := f.proposal(t)
+	f.stageLabel(t, "tier", "gold")
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := f.proposal(t)
+	// What the record says when the write after the push did not land.
+	missed := before
+	missed.Pending = &draft.Pending{Head: after.Head, Entries: after.Entries}
+	if err := f.c.store.SetProposal(f.id.Username, f.proj.Name, missed); err != nil {
+		t.Fatal(err)
+	}
+	f.stageLabel(t, "zone", "a")
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	file := f.show(t, prs.head+":web.yaml")
+	for _, want := range []string{"env: prod", "tier: gold", "zone: a"} {
+		if !strings.Contains(file, want) {
+			t.Fatalf("lost %q:\n%s", want, file)
+		}
+	}
+}
+
+// A whole-file edit made on base's version would replace the open PR's own
+// whole-file edit of that object unseen: refused, naming the PR.
+func TestProposeRefusesAWholeFileEditOverThePRsWholeFileEdit(t *testing.T) {
+	f, prs := newPRFixture(t)
+	base := f.show(t, "main:web.yaml")
+	label := func(k string) string {
+		return strings.Replace(base, "namespace: alpha\n", "namespace: alpha\n  labels:\n    "+k+": \"1\"\n", 1)
+	}
+	if _, err := f.c.StageUpdateManifest(f.id, f.proj, "", "alpha", "web", model.UpdateManifestRequest{YAML: label("a")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	before := revParse(t, f.proj.Repo, prs.head)
+	if _, err := f.c.StageUpdateManifest(f.id, f.proj, "", "alpha", "web", model.UpdateManifestRequest{YAML: label("b")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "#1") {
+		t.Fatalf("want ErrConflict naming #1, got %v", err)
+	}
+	if revParse(t, f.proj.Repo, prs.head) != before {
+		t.Fatal("nothing may be pushed")
+	}
+}
+
+// A delete is pinned to the file it was staged against: once main adds to
+// that file, the rebuild refuses rather than delete what it never saw.
+func TestProposeRefusesADeleteOfAFileMainChanged(t *testing.T) {
+	f, prs := newPRFixture(t)
+	if _, err := f.c.StageDelete(f.id, f.proj, "", "alpha", "web"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	f.commitMain(t, "web.yaml", f.show(t, "main:web.yaml")+"---\napiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web2\n  namespace: alpha\n")
+	f.commitMain(t, "db.yaml", "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: db\n  namespace: alpha\n")
+	before := revParse(t, f.proj.Repo, prs.head)
+	if _, err := f.c.StageDelete(f.id, f.proj, "", "alpha", "db"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "alpha/web") {
+		t.Fatalf("want ErrConflict naming alpha/web, got %v", err)
+	}
+	if revParse(t, f.proj.Repo, prs.head) != before {
+		t.Fatal("nothing may be pushed")
+	}
+}
+
+// The forge would not open the PR: the push is recorded, and a PR the user
+// then opens by hand on that push is adopted by the next propose.
+func TestProposeAdoptsAPROpenedByHand(t *testing.T) {
+	prs := newForgePRs()
+	refuse := true
+	var mu sync.Mutex
+	create := func(m, path string) (int, string, bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		if refuse && m == "POST" && strings.HasSuffix(path, "/pulls") {
+			return http.StatusInternalServerError, "boom", true
+		}
+		return 0, "", false
+	}
+	f := newProposeFixture(t, create, prs.route)
+	prs.f = f
+	f.stageLabel(t, "env", "prod")
+	out, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{})
+	if err != nil || out.CompareURL == "" {
+		t.Fatalf("want the compare URL, got %+v %v", out, err)
+	}
+	head := revParse(t, f.proj.Repo, prs.head)
+	if rec, ok := f.proposal(t); !ok || rec.PR != 0 || rec.Head != head {
+		t.Fatalf("the push must be recorded without a PR, got %+v", rec)
+	}
+	mu.Lock()
+	refuse = false
+	mu.Unlock()
+	byHand := forge.PR{Number: 1, State: "open", HTMLURL: "http://forge/pulls/1"}
+	byHand.Head.Ref, byHand.Head.Sha, byHand.Base.Ref = prs.head, head, "main"
+	prs.mu.Lock()
+	prs.prs = append(prs.prs, byHand)
+	prs.mu.Unlock()
+	f.stageLabel(t, "tier", "gold")
+	out, err = f.c.Propose(f.id, f.proj, model.ProposeRequest{})
+	if err != nil || out.PRNumber != 1 || !out.Existing {
+		t.Fatalf("want #1 adopted, got %+v %v", out, err)
+	}
+	if file := f.show(t, prs.head+":web.yaml"); !strings.Contains(file, "env: prod") || !strings.Contains(file, "tier: gold") {
+		t.Fatalf("want both labels:\n%s", file)
+	}
+}
+
+// A PR reopened for a push that then fails is closed again: it must not sit
+// open on the content its closing turned down.
+func TestPublishRecloseAfterAFailedPush(t *testing.T) {
+	prs := newForgePRs()
+	var f *proposeFixture
+	broken := ""
+	breakRemote := func(m, path string) (int, string, bool) {
+		if m == "PATCH" && strings.HasSuffix(path, "/pulls/1") && strings.Contains(f.lastBody(), `"state":"open"`) {
+			broken = f.proj.Repo + ".gone"
+			if err := os.Rename(f.proj.Repo, broken); err != nil {
+				t.Errorf("break the remote: %v", err)
+			}
+		}
+		return 0, "", false
+	}
+	f = newProposeFixture(t, breakRemote, prs.route)
+	prs.f = f
+	t.Cleanup(func() {
+		if broken != "" {
+			_ = os.Rename(broken, f.proj.Repo)
+		}
+	})
+	closed := forge.PR{Number: 1, State: "closed", HTMLURL: "http://forge/pulls/1"}
+	closed.Head.Ref, closed.Base.Ref = prs.head, "main"
+	prs.prs = append(prs.prs, closed)
+	_, write, err := f.c.write(f.proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := []git.ChangesetItem{{Path: "new.yaml", NewContent: []byte("kind: ConfigMap\n")}}
+	if _, _, _, err := f.c.publish(f.c.forgeFor(f.proj.Repo), write, prs.head, "m", "t", "b", items, git.Author{}, closed, true, nil); err == nil {
+		t.Fatal("want the push to fail")
+	}
+	if got := prs.pr(1).State; got != "closed" {
+		t.Fatalf("the PR must be closed again, is %s", got)
+	}
+}
+
+// A record for another repo or branch is no record: the open PR is refused
+// rather than rebuilt from entries meant elsewhere.
+func TestProposeIgnoresARecordForAnotherBranch(t *testing.T) {
+	f, _ := newPRFixture(t)
+	f.stageLabel(t, "env", "prod")
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := f.proposal(t)
+	rec.Branch = "dotvirt/proposed/someone/else"
+	if err := f.c.store.SetProposal(f.id.Username, f.proj.Name, rec); err != nil {
+		t.Fatal(err)
+	}
+	f.stageLabel(t, "tier", "gold")
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "before dotvirt kept a record") {
+		t.Fatalf("want the unrecorded-PR refusal, got %v", err)
+	}
+}
+
+// The lease fails because the PR merged and its branch moved on: that is no
+// one else's push, so the draft goes out on its own instead of advising to
+// merge or close a PR that is already merged.
+func TestProposeAfterAMergeMovedTheBranch(t *testing.T) {
+	f, prs := newPRFixture(t)
+	f.stageLabel(t, "env", "prod")
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	work := t.TempDir()
+	gitRun(t, work, "clone", "-q", "-b", prs.head, f.proj.Repo, ".")
+	writeWorkFile(t, work, "extra.yaml", []byte("kind: ConfigMap\n"))
+	gitRun(t, work, "add", "-A")
+	gitRun(t, work, "commit", "-qm", "a fixup before the merge")
+	gitRun(t, work, "push", "-q", "origin", prs.head)
+	prs.onRead = func(pr *forge.PR, reads int) {
+		if pr.Number == 1 && reads == 2 {
+			pr.State, pr.Merged = "closed", true
+		}
+	}
+	f.stageLabel(t, "tier", "gold")
+	out, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{})
+	if err != nil || out.PRNumber != 2 {
+		t.Fatalf("want the draft as new PR #2, got %+v %v", out, err)
 	}
 }

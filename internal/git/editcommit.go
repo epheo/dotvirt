@@ -26,8 +26,9 @@ type ChangesetItem struct {
 	NewContent []byte
 	Delete     bool
 
-	// BaseBlob, when set, is the version of Path on base NewContent was made
-	// from: a blob ID, or AbsentBlob for a file that did not exist.
+	// BaseBlob, when set, is the version of Path on base the item was made
+	// from: a blob ID, or AbsentBlob for a file that did not exist. A delete
+	// pinned this way removes only the version it was staged against.
 	BaseBlob string
 }
 
@@ -71,9 +72,9 @@ type PushPlan struct {
 	// commit dotvirt last pushed for an open pull request. A branch moved by
 	// anyone else, or deleted, is ErrBranchMoved and nothing is pushed.
 	Lease string
-	// BeforePush runs once the commit is built and just before the push,
+	// BeforePush runs with the built commit's hash just before the push,
 	// which an error from it stops.
-	BeforePush func() error
+	BeforePush func(hash string) error
 }
 
 // ProposeChangeset is CommitChangeset under plan.
@@ -121,7 +122,7 @@ func (w *WriteRepo) ProposeChangeset(base, branch, message string, items []Chang
 // worktree, commit what changed on branch, run beforePush if any, push under
 // lease (see pushBranch). Committed is false when every item already matched
 // the tree.
-func (w *WriteRepo) commitItems(repo *git.Repository, wt *git.Worktree, branch, message string, items []ChangesetItem, by Author, lease plumbing.Hash, beforePush func() error) (CommitResult, error) {
+func (w *WriteRepo) commitItems(repo *git.Repository, wt *git.Worktree, branch, message string, items []ChangesetItem, by Author, lease plumbing.Hash, beforePush func(string) error) (CommitResult, error) {
 	for _, it := range items {
 		if err := applyItem(wt, it); err != nil {
 			return CommitResult{}, err
@@ -141,7 +142,7 @@ func (w *WriteRepo) commitItems(repo *git.Repository, wt *git.Worktree, branch, 
 		return CommitResult{}, fmt.Errorf("commit: %w", err)
 	}
 	if beforePush != nil {
-		if err := beforePush(); err != nil {
+		if err := beforePush(hash.String()); err != nil {
 			return CommitResult{}, err
 		}
 	}
@@ -216,7 +217,8 @@ func checkPins(repo *git.Repository, items []ChangesetItem) error {
 		if err != nil {
 			return fmt.Errorf("file %s on base: %w", it.Path, err)
 		}
-		if pin != it.BaseBlob {
+		gone := it.Delete && pin == AbsentBlob // already satisfies its delete
+		if pin != it.BaseBlob && !gone {
 			return &BaseMovedError{Path: it.Path}
 		}
 	}

@@ -74,7 +74,7 @@ func (c *Coordinator) StageDisableDRS(id auth.Identity, proj project.ProjectInfo
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	_, configured, err := read.LookupOnBranch(c.baseBranch, drs.CRPath)
+	cr, configured, err := read.LookupOnBranch(c.baseBranch, drs.CRPath)
 	if err != nil {
 		return model.DraftView{}, err
 	}
@@ -86,6 +86,7 @@ func (c *Coordinator) StageDisableDRS(id auth.Identity, proj project.ProjectInfo
 			Namespace:  model.ClusterScopeNS,
 			Name:       "kubedescheduler",
 			SourceFile: drs.CRPath,
+			BaseBlob:   git.BlobID(cr),
 		})
 	}
 	pending, err := c.store.ReplaceResource(id.Username, proj.Name, draft.ResourceDRS, entries...)

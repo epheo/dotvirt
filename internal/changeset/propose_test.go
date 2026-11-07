@@ -447,7 +447,7 @@ func TestPublish(t *testing.T) {
 				t.Fatal(err)
 			}
 			items := []git.ChangesetItem{{Path: "new.yaml", NewContent: []byte("kind: ConfigMap\n")}}
-			out, _, ok, err := f.c.publish(f.c.forgeFor(f.proj.Repo), write, head, "m", "t", "b", items, git.Author{}, c.prior, c.found)
+			out, _, ok, err := f.c.publish(f.c.forgeFor(f.proj.Repo), write, head, "m", "t", "b", items, git.Author{}, c.prior, c.found, nil)
 			if err != nil {
 				t.Fatalf("publish: %v", err)
 			}

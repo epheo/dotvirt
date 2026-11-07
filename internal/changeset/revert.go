@@ -64,7 +64,7 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 		}
 	}
 	by := git.Author{Name: id.Username, Email: authorEmail(id.Username)}
-	out, _, _, err := c.publish(fc, write, branch, title, title, body, items, by, prior, found)
+	out, _, _, err := c.publish(fc, write, branch, title, title, body, items, by, prior, found, nil)
 	if errors.Is(err, git.ErrNoChanges) {
 		return model.ProposeResult{}, fmt.Errorf("%w: %s already matches the state before this change", model.ErrInvalid, c.baseBranch)
 	}
