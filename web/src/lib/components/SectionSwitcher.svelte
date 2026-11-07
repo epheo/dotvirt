@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ClipboardList, Database, Folder, Library, Network, Server } from '@lucide/svelte';
+	import { Book, Database, GitBranch, Monitor, Network, Server } from '@lucide/svelte';
 	import type { Section } from '#lib/nav.js';
 
 	// The section switcher: six sections, each with its own tree below, all
@@ -17,23 +17,23 @@
 	];
 </script>
 
-<!-- Two rows of three, a 12px label under each icon: every name reads whole
+<!-- Two rows of three tiles, the label under its icon: every name reads whole
      at the rail's width. -->
-<nav class="grid grid-cols-3 border-b border-side-line">
+<nav class="grid grid-cols-3 gap-1 border-b border-side-line px-2 py-2">
 	{#each SECTIONS as s (s.id)}
 		<a
 			href={s.href}
-			title={s.label}
-			class="relative flex flex-col items-center gap-1 py-2 text-xs {active === s.id
-				? 'bg-side-active font-medium text-side-ink shadow-[inset_0_-2px_0_var(--color-accent-hover)]'
+			aria-current={active === s.id ? 'page' : undefined}
+			class="flex flex-col items-center gap-1.5 rounded-lg px-1 py-2 text-sm {active === s.id
+				? 'bg-side-active text-side-ink'
 				: 'text-side-dim hover:bg-side-hover hover:text-side-ink'}"
 		>
-			{#if s.id === 'compute'}<Folder size={14} class="shrink-0" />
-			{:else if s.id === 'hosts'}<Server size={14} class="shrink-0" />
-			{:else if s.id === 'networking'}<Network size={14} class="shrink-0" />
-			{:else if s.id === 'storage'}<Database size={14} class="shrink-0" />
-			{:else if s.id === 'catalog'}<Library size={14} class="shrink-0" />
-			{:else}<ClipboardList size={14} class="shrink-0" />{/if}
+			{#if s.id === 'compute'}<Monitor size={22} strokeWidth={1.75} class="shrink-0" />
+			{:else if s.id === 'hosts'}<Server size={22} strokeWidth={1.75} class="shrink-0" />
+			{:else if s.id === 'networking'}<Network size={22} strokeWidth={1.75} class="shrink-0" />
+			{:else if s.id === 'storage'}<Database size={22} strokeWidth={1.75} class="shrink-0" />
+			{:else if s.id === 'catalog'}<Book size={22} strokeWidth={1.75} class="shrink-0" />
+			{:else}<GitBranch size={22} strokeWidth={1.75} class="shrink-0" />{/if}
 			{s.label}
 		</a>
 	{/each}
