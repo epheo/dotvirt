@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -45,6 +46,7 @@ type Client struct {
 	alerts    *ttlcache.Cache[[]model.Alert]
 	hosts     *ttlcache.Cache[model.HostLoad]
 	capacity  *ttlcache.Cache[model.HostCapacity]
+	traffic   *ttlcache.Cache[[]model.TrafficVM]
 }
 
 // New builds a Client for the query API at baseURL (e.g. the thanos-querier
@@ -77,6 +79,7 @@ func New(baseURL, caPath string, insecure bool) (*Client, error) {
 		alerts:    ttlcache.New[[]model.Alert](clusterTTL),
 		hosts:     ttlcache.New[model.HostLoad](clusterTTL),
 		capacity:  ttlcache.New[model.HostCapacity](clusterTTL),
+		traffic:   ttlcache.New[[]model.TrafficVM](clusterTTL),
 	}, nil
 }
 
@@ -520,4 +523,73 @@ func (c *Client) VMMetrics(ctx context.Context, token, ns, name, rng string) (mo
 		c.vmMetrics.Put(key, out)
 	}
 	return out, nil
+}
+
+// Attachment is one VM interface on a network: KubeVirt's network counters
+// carry the interface name, so traffic on a network is measured per attachment.
+type Attachment struct {
+	Namespace, Name, Interface string
+}
+
+// NetworkTraffic ranks the VMs on one network by traffic (received plus sent,
+// averaged over the last hour) and returns the busiest limit, in bits/s. One
+// instant query narrowed by namespace and interface name; the exact (VM,
+// interface) pairs are matched here, since an interface name may repeat on
+// another network. Cached by the attachment set, like the scope views.
+func (c *Client) NetworkTraffic(ctx context.Context, token string, attached []Attachment, limit int) ([]model.TrafficVM, error) {
+	if len(attached) == 0 {
+		return []model.TrafficVM{}, nil
+	}
+	want := make(map[Attachment]bool, len(attached))
+	nsSet, ifSet := map[string]bool{}, map[string]bool{}
+	keys := make([]string, 0, len(attached))
+	for _, a := range attached {
+		want[a] = true
+		nsSet[a.Namespace], ifSet[a.Interface] = true, true
+		keys = append(keys, a.Namespace+"/"+a.Name+"/"+a.Interface)
+	}
+	key := scopeKey(keys, fmt.Sprint(limit))
+	if v, ok := c.traffic.Get(key); ok {
+		return v, nil
+	}
+	sel := fmt.Sprintf("{namespace=~%q,interface=~%q}", alternation(nsSet), alternation(ifSet))
+	sum := func(metric string) string {
+		return fmt.Sprintf("sum by(namespace,name,interface)(rate(%s%s[1h]))", metric, sel)
+	}
+	vec, err := c.vector(ctx, token, sum("kubevirt_vmi_network_receive_bytes_total")+" + "+sum("kubevirt_vmi_network_transmit_bytes_total"))
+	if err != nil {
+		return nil, unreachable(err)
+	}
+	perVM := map[[2]string]float64{}
+	for _, lv := range vec {
+		a := Attachment{Namespace: lv.labels["namespace"], Name: lv.labels["name"], Interface: lv.labels["interface"]}
+		if want[a] {
+			perVM[[2]string{a.Namespace, a.Name}] += lv.value * 8
+		}
+	}
+	out := make([]model.TrafficVM, 0, len(perVM))
+	for k, v := range perVM {
+		out = append(out, model.TrafficVM{Namespace: k[0], Name: k[1], BitsPerSecond: v})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].BitsPerSecond != out[j].BitsPerSecond {
+			return out[i].BitsPerSecond > out[j].BitsPerSecond
+		}
+		return out[i].Namespace+"/"+out[i].Name < out[j].Namespace+"/"+out[j].Name
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	c.traffic.Put(key, out)
+	return out, nil
+}
+
+// alternation is an anchored-by-PromQL regex matching exactly the given names.
+func alternation(set map[string]bool) string {
+	parts := make([]string, 0, len(set))
+	for s := range set {
+		parts = append(parts, regexp.QuoteMeta(s))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "|")
 }

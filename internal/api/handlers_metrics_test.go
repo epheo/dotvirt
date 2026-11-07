@@ -1,11 +1,14 @@
 package api
 
 import (
+	"strings"
+	"testing"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
 	"github.com/epheo/dotvirt/internal/clusterstate"
-	"testing"
-
+	"github.com/epheo/dotvirt/internal/metrics"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
@@ -80,5 +83,58 @@ func TestFoldStoppedVMs(t *testing.T) {
 	foldStoppedVMs(&cs, []kubevirtcorev1.VirtualMachine{vmo("demo", "recovery-web")}, live)
 	if cs.VMs["stopped"] != 1 {
 		t.Fatalf("vms = %v, want stopped:1", cs.VMs)
+	}
+}
+
+// A network's attachments are the VM interfaces that resolve to it: a pod
+// interface rides the namespace's primary network when one exists, a multus
+// reference resolves a project network by "namespace/name" (bare names are
+// namespace-relative) and a shared network by name.
+func TestNetworkAttachments(t *testing.T) {
+	nets := []model.Network{
+		{Name: "web-net", Kind: model.NetworkDefault, Scope: model.ScopeProject, Namespace: "web-prod", AttachRef: "web-prod/web-net"},
+		{Name: "l2", Kind: model.NetworkInternal, Scope: model.ScopeProject, Namespace: "db-prod", AttachRef: "db-prod/l2"},
+		{Name: "l2", Kind: model.NetworkInternal, Scope: model.ScopeProject, Namespace: "web-prod", AttachRef: "web-prod/l2"},
+		{Name: "lan-101", Kind: model.NetworkVLAN, Scope: model.ScopeShared, AttachRef: "lan-101", Namespaces: []string{"web-prod", "db-prod"}},
+	}
+	vm := func(ns, name string, nws ...kubevirtcorev1.Network) kubevirtcorev1.VirtualMachine {
+		return kubevirtcorev1.VirtualMachine{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+			Spec: kubevirtcorev1.VirtualMachineSpec{Template: &kubevirtcorev1.VirtualMachineInstanceTemplateSpec{
+				Spec: kubevirtcorev1.VirtualMachineInstanceSpec{Networks: nws},
+			}},
+		}
+	}
+	pod := func(name string) kubevirtcorev1.Network {
+		return kubevirtcorev1.Network{Name: name, NetworkSource: kubevirtcorev1.NetworkSource{Pod: &kubevirtcorev1.PodNetwork{}}}
+	}
+	multus := func(name, ref string) kubevirtcorev1.Network {
+		return kubevirtcorev1.Network{Name: name, NetworkSource: kubevirtcorev1.NetworkSource{Multus: &kubevirtcorev1.MultusNetwork{NetworkName: ref}}}
+	}
+	vms := []kubevirtcorev1.VirtualMachine{
+		vm("web-prod", "web-1", pod("default"), multus("lan", "lan-101"), multus("l2", "l2")),
+		vm("db-prod", "db-1", pod("default"), multus("lan", "db-prod/lan-101"), multus("l2", "db-prod/l2")),
+	}
+	str := func(as []metrics.Attachment) []string {
+		var out []string
+		for _, a := range as {
+			out = append(out, a.Namespace+"/"+a.Name+"/"+a.Interface)
+		}
+		return out
+	}
+	for _, c := range []struct {
+		target model.Network
+		want   []string
+	}{
+		{nets[0], []string{"web-prod/web-1/default"}},
+		{model.Network{}, []string{"db-prod/db-1/default"}},
+		{nets[1], []string{"db-prod/db-1/l2"}},
+		{nets[2], []string{"web-prod/web-1/l2"}},
+		{nets[3], []string{"web-prod/web-1/lan", "db-prod/db-1/lan"}},
+	} {
+		got := str(networkAttachments(vms, nets, c.target))
+		if strings.Join(got, ",") != strings.Join(c.want, ",") {
+			t.Errorf("%s/%s: attachments = %v, want %v", c.target.Namespace, c.target.Name, got, c.want)
+		}
 	}
 }

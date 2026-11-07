@@ -3,11 +3,15 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"slices"
+	"strconv"
+	"strings"
 
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/clusterstate"
+	"github.com/epheo/dotvirt/internal/metrics"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
@@ -236,4 +240,115 @@ func (s *Server) handleQuotas(w http.ResponseWriter, r *http.Request) {
 	}
 	q, err := sc.cluster.ListQuotas(r.Context(), nss)
 	respond(w, q, err)
+}
+
+// handleNetworkTraffic ranks the VMs on one network by traffic over the last
+// hour: the network page's Top VMs. The network resolves through the
+// caller-scoped catalog and its VMs through the caller's visible namespaces;
+// the query runs under the caller's token like every metrics read.
+func (s *Server) handleNetworkTraffic(w http.ResponseWriter, r *http.Request) {
+	if !s.metricsReady(w) {
+		return
+	}
+	id, c, err := s.userCluster(r)
+	if err != nil {
+		fail(w, unavailable(err))
+		return
+	}
+	visible, err := s.visibleFor(r.Context(), id, c)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	var nets []model.Network
+	if s.netstate != nil {
+		nets = scopeNetworks(s.netstate.Catalog().Networks, visible)
+	}
+	key := r.URL.Query().Get("network")
+	target, ok := model.Network{}, key == podNetworkKey
+	if !ok {
+		if target, ok = findNetwork(nets, key); !ok {
+			fail(w, fmt.Errorf("%w: network %q", model.ErrNotFound, key))
+			return
+		}
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 50 {
+		limit = 5
+	}
+	nss := make([]string, 0, len(visible))
+	for ns, ok := range visible {
+		if ok {
+			nss = append(nss, ns)
+		}
+	}
+	att := networkAttachments(s.state.VMObjects(nss), nets, target)
+	vms, err := s.metrics.NetworkTraffic(r.Context(), id.Token, att, limit)
+	respond(w, model.NetworkTraffic{Network: key, Window: "1h", VMs: vms}, err)
+}
+
+// podNetworkKey is the UI's key for the cluster's built-in pod network.
+const podNetworkKey = "Pod network"
+
+// networkAttachments lists the VM interfaces attached to target (the pod
+// network when target is the zero Network), resolving each interface the way
+// the UI does: a pod interface rides its namespace's primary network when one
+// exists, a multus reference matches a project network by "namespace/name"
+// and a shared network by name.
+func networkAttachments(vms []kubevirtcorev1.VirtualMachine, nets []model.Network, target model.Network) []metrics.Attachment {
+	same := func(n *model.Network) bool {
+		if target.Name == "" {
+			return n == nil
+		}
+		return n != nil && n.Name == target.Name && n.Namespace == target.Namespace && n.Scope == target.Scope
+	}
+	primary := func(ns string) *model.Network {
+		for i := range nets {
+			n := &nets[i]
+			if n.Kind == model.NetworkDefault && (n.Namespace == ns || slices.Contains(n.Namespaces, ns)) {
+				return n
+			}
+		}
+		return nil
+	}
+	byRef := func(ns, ref string) *model.Network {
+		if !strings.Contains(ref, "/") {
+			ref = ns + "/" + ref
+		}
+		base := ref[strings.LastIndex(ref, "/")+1:]
+		for i := range nets {
+			if nets[i].AttachRef == ref {
+				return &nets[i]
+			}
+		}
+		for i := range nets {
+			if nets[i].Scope == model.ScopeShared && nets[i].Name == base {
+				return &nets[i]
+			}
+		}
+		return nil
+	}
+	var out []metrics.Attachment
+	for _, vm := range vms {
+		if vm.Spec.Template == nil {
+			continue
+		}
+		for _, n := range vm.Spec.Template.Spec.Networks {
+			var on *model.Network
+			switch {
+			case n.Pod != nil:
+				on = primary(vm.Namespace)
+			case n.Multus != nil:
+				if on = byRef(vm.Namespace, n.Multus.NetworkName); on == nil {
+					continue // an unknown network is no network's traffic
+				}
+			default:
+				continue
+			}
+			if same(on) {
+				out = append(out, metrics.Attachment{Namespace: vm.Namespace, Name: vm.Name, Interface: n.Name})
+			}
+		}
+	}
+	return out
 }

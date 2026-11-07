@@ -568,6 +568,23 @@ export interface NamespaceQuota {
   name: string;
   items: QuotaItem[];
 }
+/**
+ * NetworkTraffic is GET /api/metrics/network: the busiest VMs on one network
+ * by traffic over Window.
+ */
+export interface NetworkTraffic {
+  network: string;
+  window: string;
+  vms: TrafficVM[];
+}
+/**
+ * TrafficVM is one VM's traffic on a network: received plus sent, averaged.
+ */
+export interface TrafficVM {
+  namespace: string;
+  name: string;
+  bitsPerSecond: number /* float64 */;
+}
 
 //////////
 // source: model.go
@@ -676,11 +693,24 @@ export interface Uplink {
    */
   sourceFile?: string;
   /**
+   * Failures are the hosts where the policy did not apply, from nmstate's
+   * per-host enactments: the uplink is missing there.
+   */
+  failures?: UplinkFailure[];
+  /**
    * The policy's own ArgoCD drift, as segments and rules carry it.
    */
   sync?: SyncStatus;
   health?: string;
   syncError?: string;
+}
+/**
+ * UplinkFailure is one host where an uplink's policy failed or was aborted.
+ */
+export interface UplinkFailure {
+  node: string;
+  reason: string; // FailedToConfigure, ConfigurationAborted...
+  message?: string; // the first line of nmstate's report
 }
 /**
  * PhysicalAdapter is one node NIC from NodeNetworkState - the host "Physical
@@ -928,6 +958,11 @@ export interface PolicyRuleView {
   action: string; // Allow | Deny | Pass
   peer?: string; // source/destination summary; empty = any
   ports?: string; // "TCP/443, UDP/53"; empty = any
+  /**
+   * Text is the rule as one plain sentence from the subject's side
+   * ("Accepts TCP 5432 from VMs labeled app=web in web-prod.").
+   */
+  text?: string;
 }
 /**
  * Policy is one live firewall/routing object rendered in security vocabulary,
@@ -940,6 +975,15 @@ export interface Policy {
   backing: string; // the Kubernetes kind behind the row
   priority?: number /* int */; // ANP precedence (lower wins)
   target?: string; // what the policy applies to, summarized
+  /**
+   * Applies names the subject in plain words ("VMs labeled app=db in db-prod").
+   */
+  applies?: string;
+  /**
+   * Isolation is what selecting VMs does beyond the rules (a project rule
+   * admits only what it allows in each direction it declares); empty otherwise.
+   */
+  isolation?: string;
   /**
    * Namespaces a cluster-scoped policy provably pins to (the metadata.name
    * selector netgen writes). Nil when the selector isn't enumerable - a tenant
@@ -1057,6 +1101,34 @@ export interface TraceStep {
   conditional?: boolean;
   decisive?: boolean;
   note?: string;
+}
+/**
+ * NetworkRules is GET /api/networks/rules: what bears on the VMs of one
+ * network. Applies holds the policies binding its namespaces, in evaluation
+ * order (pod-selecting ones conditional); Reaches holds rules elsewhere that
+ * name those VMs as their other end, each read from the network's side.
+ */
+export interface NetworkRules {
+  network: string;
+  namespaces: string[];
+  applies: PolicyBinding[];
+  reaches: PeerRule[];
+}
+/**
+ * PeerRule is one rule whose peer selects a network's VMs.
+ */
+export interface PeerRule {
+  policy: Policy;
+  rule: PolicyRuleView;
+  /**
+   * Text reads the rule from the network's side ("VMs labeled app=web in
+   * web-prod can reach VMs labeled app=db in db-prod on TCP 5432.").
+   */
+  text: string;
+  /**
+   * Conditional: the peer narrows by pod labels, so only the matching VMs.
+   */
+  conditional?: boolean;
 }
 
 //////////
