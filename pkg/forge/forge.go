@@ -217,17 +217,35 @@ func (c *Client) repoPath(suffix string) string {
 // do performs one repo API call as the forge token: any non-2xx is an error
 // carrying the status and the forge's own message, a 2xx body decodes into out.
 func (c *Client) do(method, path string, body, out any) error {
-	status, data, err := c.f.call(method, path, c.f.auth(), body)
+	_, err := c.doRead(method, path, body, out)
+	return err
+}
+
+// StatusError is a forge answer outside 2xx, so a caller can tell a missing
+// repo (404) from an outage.
+type StatusError struct {
+	Method, Path string
+	Status       int
+	Message      string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("forge %s %s: %s: %s", e.Method, e.Path, statusText(e.Status), e.Message)
+}
+
+// doRead is do returning the response headers.
+func (c *Client) doRead(method, path string, body, out any) (http.Header, error) {
+	status, header, data, err := c.f.exchange(method, path, c.f.auth(), body)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !ok2xx(status) {
-		return fmt.Errorf("forge %s %s: %s: %s", method, path, statusText(status), strings.TrimSpace(string(data)))
+		return nil, &StatusError{Method: method, Path: path, Status: status, Message: strings.TrimSpace(string(data))}
 	}
 	if out != nil && len(data) > 0 {
-		return json.Unmarshal(data, out)
+		return header, json.Unmarshal(data, out)
 	}
-	return nil
+	return header, nil
 }
 
 // authMode is how one request authenticates: the forge token (the runtime's
@@ -249,17 +267,23 @@ func (f *Factory) auth() authMode { return tokenAuth(f.tokenFn()) }
 // each caller keeps its own rule (a 404 is "absent" to exists and an error to
 // do); only a transport failure is err.
 func (f *Factory) call(method, path string, a authMode, body any) (status int, data []byte, err error) {
+	status, _, data, err = f.exchange(method, path, a, body)
+	return status, data, err
+}
+
+// exchange is call returning the response headers too.
+func (f *Factory) exchange(method, path string, a authMode, body any) (status int, header http.Header, data []byte, err error) {
 	var reader io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return 0, nil, err
+			return 0, nil, nil, err
 		}
 		reader = bytes.NewReader(b)
 	}
 	req, err := http.NewRequest(method, f.baseURL+path, reader)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	if a.user != "" {
 		req.SetBasicAuth(a.user, a.password)
@@ -272,11 +296,11 @@ func (f *Factory) call(method, path string, a authMode, body any) (status int, d
 	req.Header.Set("Accept", "application/json")
 	resp, err := f.http.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("forge %s %s: %w", method, path, err)
+		return 0, nil, nil, fmt.Errorf("forge %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
 	data, _ = io.ReadAll(resp.Body)
-	return resp.StatusCode, data, nil
+	return resp.StatusCode, resp.Header, data, nil
 }
 
 func ok2xx(status int) bool { return status >= 200 && status < 300 }

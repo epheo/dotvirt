@@ -1,6 +1,7 @@
 package draft
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -196,5 +197,116 @@ func TestCorruptDraftQuarantined(t *testing.T) {
 	}
 	if entries, err = s.List("alice", "team-a"); err != nil || len(entries) != 1 {
 		t.Fatalf("List after re-stage: %v, %+v", err, entries)
+	}
+}
+
+// Propose unstages what it committed; an entry restaged meanwhile is newer
+// work and must survive, on disk too.
+func TestRemoveKeepsRestagedEntries(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	if err := s.Stage("alice", "p", editEntry("ns", "a"), editEntry("ns", "b")); err != nil {
+		t.Fatal(err)
+	}
+	committed, _ := s.List("alice", "p")
+	cpu := 4
+	restaged := editEntry("ns", "a")
+	restaged.Edit.CPUCores = &cpu
+	if err := s.Stage("alice", "p", restaged, editEntry("ns", "c")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Remove("alice", "p", committed...); err != nil {
+		t.Fatal(err)
+	}
+	reopened, _ := Open(dir)
+	got, _ := reopened.List("alice", "p")
+	if len(got) != 2 || got[0].Name != "a" || got[0].Edit.CPUCores == nil || got[1].Name != "c" {
+		t.Fatalf("want the restaged a and the new c kept, got %+v", got)
+	}
+}
+
+// A write that fails stages nothing: memory must not hold what disk lacks.
+func TestFailedWriteStagesNothing(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	// The draft file reads as absent but cannot be written: a directory holds
+	// its temp name.
+	if err := os.MkdirAll(filepath.Join(dir, "alice", "p.json.tmp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Stage("alice", "p", editEntry("ns", "a"), editEntry("ns", "b")); err == nil {
+		t.Fatal("want the write to fail")
+	}
+	if got, _ := s.List("alice", "p"); len(got) != 0 {
+		t.Fatalf("a failed write staged %d entries", len(got))
+	}
+}
+
+func TestReplaceResource(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	drs := func(name string) Entry {
+		return Entry{Kind: KindCreate, Resource: ResourceDRS, Namespace: "_cluster", Name: name, SourceFile: name + ".yaml", Manifest: "x"}
+	}
+	if err := s.Stage("alice", "p", drs("a"), drs("b"), editEntry("ns", "vm")); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := s.ReplaceResource("alice", "p", ResourceDRS, drs("c"))
+	if err != nil || removed != 2 {
+		t.Fatalf("ReplaceResource = %d, %v; want 2 dropped", removed, err)
+	}
+	got, _ := s.List("alice", "p")
+	if len(got) != 2 || got[0].Name != "c" || got[1].Name != "vm" {
+		t.Fatalf("want the VM edit and the new DRS file, got %+v", got)
+	}
+}
+
+// A refused change stages nothing, not even the part fn made before refusing.
+func TestApplyErrorStagesNothing(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	if err := s.Stage("alice", "p", editEntry("ns", "a")); err != nil {
+		t.Fatal(err)
+	}
+	refused := errors.New("refused")
+	err := s.Apply("alice", "p", func(d map[string]Entry) error {
+		delete(d, editEntry("ns", "a").Key())
+		d[editEntry("ns", "b").Key()] = editEntry("ns", "b")
+		return refused
+	})
+	if !errors.Is(err, refused) {
+		t.Fatalf("want fn's error, got %v", err)
+	}
+	if got, _ := s.List("alice", "p"); len(got) != 1 || got[0].Name != "a" {
+		t.Fatalf("want the draft as it was, got %+v", got)
+	}
+}
+
+// A proposal record survives a restart and is dropped on request; a project
+// whose name ends like the record's file never collides with it.
+func TestProposalRecord(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	if _, ok, err := s.Proposal("alice", "p"); ok || err != nil {
+		t.Fatalf("want none, got ok=%v err=%v", ok, err)
+	}
+	want := Proposal{PR: 3, Head: "abc", Entries: []Entry{editEntry("ns", "a")}}
+	if err := s.SetProposal("alice", "p", want); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Stage("alice", "p.proposal", editEntry("ns", "b")); err != nil {
+		t.Fatal(err)
+	}
+	reopened, _ := Open(dir)
+	got, ok, err := reopened.Proposal("alice", "p")
+	if err != nil || !ok || got.PR != 3 || got.Head != "abc" || len(got.Entries) != 1 {
+		t.Fatalf("got %+v ok=%v err=%v", got, ok, err)
+	}
+	if err := reopened.DropProposal("alice", "p"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := reopened.Proposal("alice", "p"); ok {
+		t.Fatal("a dropped proposal must read as none")
+	}
+	if d, _ := reopened.List("alice", "p.proposal"); len(d) != 1 {
+		t.Fatalf("the look-alike project's draft must stand, got %+v", d)
 	}
 }

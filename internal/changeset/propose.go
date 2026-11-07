@@ -1,9 +1,7 @@
 package changeset
 
 import (
-	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -16,112 +14,6 @@ import (
 	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
-
-// Propose builds the working branch from (id, proj)'s whole draft, pushes it to
-// the project repo, and opens (or finds) a Forgejo PR. Clears the draft on success.
-func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req model.ProposeRequest) (model.ProposeResult, error) {
-	entries, err := c.store.List(id.Username, proj.Name)
-	if err != nil {
-		return model.ProposeResult{}, err
-	}
-	if len(entries) == 0 {
-		return model.ProposeResult{}, fmt.Errorf("%w: draft is empty", model.ErrInvalid)
-	}
-	_, write, err := c.write(proj)
-	if err != nil {
-		return model.ProposeResult{}, err
-	}
-
-	items := c.toChangesetItems(entries)
-
-	// The semantic view becomes the PR description (best-effort: a body render
-	// failure must not block the propose). Read BEFORE the commit below - the
-	// view diffs against the base branch the draft still targets.
-	body := req.Message
-	view, verr := c.Get(id, proj)
-	if verr == nil {
-		body = prBody(view, req.Message, id.Username)
-	}
-
-	title := req.Title
-	if title == "" && verr == nil {
-		title = defaultTitle(view)
-	}
-	if title == "" {
-		title = fmt.Sprintf("dotvirt: %d change(s)", len(entries))
-	}
-	commitMsg := title
-	if req.Message != "" {
-		commitMsg = title + "\n\n" + req.Message
-	}
-
-	// The working branch is per-(user, project): a constant branch would be
-	// force-pushed by every user proposing into the same repo, so concurrent
-	// proposals would clobber each other's PR. Scoping it isolates them.
-	branch := c.proposedBranch(id.Username, proj.Name)
-
-	// Attribute the commit to the k8s user (committer stays dotvirt, the SA that
-	// pushes). K8s usernames aren't emails, so synthesize a stable noreply address.
-	by := git.Author{Name: id.Username, Email: authorEmail(id.Username)}
-	res, err := write.CommitChangeset(c.baseBranch, branch, commitMsg, items, by)
-	if errors.Is(err, git.ErrNoChanges) {
-		// Self-heal: the draft's whole intent is already true in git (typical
-		// after staging against a briefly-stale mirror), so keeping it would
-		// wedge the user behind a permanent error. Clear it and say what happened.
-		_ = c.store.Clear(id.Username, proj.Name)
-		return model.ProposeResult{}, fmt.Errorf("%w: every staged change already matches git; the draft has been cleared", model.ErrInvalid)
-	}
-	if err != nil {
-		return model.ProposeResult{}, err
-	}
-	out := model.ProposeResult{Branch: res.Branch}
-
-	fc := c.forge.For(proj.Repo)
-	if fc == nil {
-		// No forge configured (or unparsable repo): report the pushed branch only.
-		return out, c.store.Clear(id.Username, proj.Name)
-	}
-	if !c.openOrRecoverPR(fc, &out, branch, title, body) {
-		// Kept staged so the user can retry once the forge answers.
-		return out, nil
-	}
-	return out, c.store.Clear(id.Username, proj.Name)
-}
-
-// openOrRecoverPR gives a pushed branch its pull request and records it on out.
-// Propose and Revert both reuse a deterministic branch, so a PR for this
-// head->base often already exists, possibly closed: an open one is reused, a
-// closed-unmerged one reopened so the fresh push surfaces, and one is created
-// only when the branch has no live PR (none yet, or the last one merged). A
-// found or reopened PR is marked Existing. When the forge will not answer with
-// a PR, out carries the compare URL instead and ok is false: the branch IS
-// pushed, so the user can still open the PR by hand, and the caller decides
-// what a missing PR means for the draft. That is a 200, not an error - an error
-// would make the handler drop the result body.
-func (c *Coordinator) openOrRecoverPR(fc *forge.Client, out *model.ProposeResult, branch, title, body string) bool {
-	if found, ok, err := fc.FindPR(branch, c.baseBranch); err == nil && ok {
-		switch {
-		case found.State == "open":
-			out.PRURL, out.PRNumber, out.Existing = found.HTMLURL, found.Number, true
-			return true
-		case !found.Merged:
-			reopened, err := fc.ReopenPR(found.Number)
-			if err == nil {
-				out.PRURL, out.PRNumber, out.Existing = reopened.HTMLURL, reopened.Number, true
-				return true
-			}
-			log.Printf("changeset: %s: found closed PR #%d but reopen failed: %v", branch, found.Number, err)
-		}
-	}
-	pr, err := fc.CreatePR(title, body, branch, c.baseBranch)
-	if err != nil {
-		log.Printf("changeset: %s: branch pushed but PR unavailable: %v", branch, err)
-		out.CompareURL = fc.CompareURL(branch, c.baseBranch)
-		return false
-	}
-	out.PRURL, out.PRNumber = pr.HTMLURL, pr.Number
-	return true
-}
 
 // RecentlyMerged lists PRs merged into proj's base branch since 'since' - the
 // task feed's merged lane (the poll backstop behind the forge webhook, and the
@@ -176,7 +68,7 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) []git.ChangesetIte
 			// edit patches targeted fields into the file as base holds it at
 			// commit time.
 			if e.Manifest != "" {
-				items = append(items, git.ChangesetItem{Path: e.SourceFile, NewContent: []byte(e.Manifest)})
+				items = append(items, git.ChangesetItem{Path: e.SourceFile, NewContent: []byte(e.Manifest), BaseBlob: e.BaseBlob})
 				continue
 			}
 			if e.Edit == nil {
@@ -190,9 +82,9 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) []git.ChangesetIte
 				},
 			})
 		case draft.KindCreate:
-			items = append(items, git.ChangesetItem{Path: e.SourceFile, NewContent: []byte(e.Manifest)})
+			items = append(items, git.ChangesetItem{Path: e.SourceFile, NewContent: []byte(e.Manifest), BaseBlob: e.BaseBlob})
 		case draft.KindDelete:
-			items = append(items, git.ChangesetItem{Path: e.SourceFile, Delete: true})
+			items = append(items, git.ChangesetItem{Path: e.SourceFile, Delete: true, BaseBlob: e.BaseBlob})
 		}
 	}
 	return items
@@ -211,7 +103,8 @@ type reviewed struct {
 // settled reports whether pr's cached state can still be trusted: the head is
 // the same, nothing touched the PR since (a review bumps updated_at), and CI
 // has finished - a status change does not touch the PR, so a pending check
-// must be polled until it lands.
+// must be polled until it lands. No status at all settles once the PR has
+// been quiet for ciGrace: a repo without CI never reports one.
 func (rv reviewed) settled(pr forge.PR) bool {
 	if rv.sha != pr.Head.Sha || !rv.updatedAt.Equal(pr.UpdatedAt) {
 		return false
@@ -219,9 +112,15 @@ func (rv reviewed) settled(pr forge.PR) bool {
 	switch rv.checks {
 	case "success", "failure", "error":
 		return true
+	case "":
+		return time.Since(pr.UpdatedAt) > ciGrace
 	}
 	return false
 }
+
+// ciGrace is how long after a PR's last activity (a push bumps it) CI that
+// exists would have reported its first status.
+const ciGrace = 10 * time.Minute
 
 // OpenProposals lists every open PR into proj's base branch - the Changes
 // pane's Proposed lane, one read shared by all the project's members: a PR is
@@ -236,7 +135,7 @@ func (r *Reader) OpenProposals(proj project.ProjectInfo) ([]model.Proposal, erro
 	if fc == nil {
 		return nil, nil
 	}
-	open, err := fc.OpenPRs(r.baseBranch, 50)
+	open, err := fc.OpenPRs(r.baseBranch)
 	if err != nil {
 		return nil, err
 	}

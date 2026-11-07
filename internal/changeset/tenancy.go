@@ -6,6 +6,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
+	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
@@ -99,10 +100,11 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	// The first namespace joins the new project, with its primary VM Network
 	// when the form chose one.
 	first := []netgen.NamespaceSpec{{Name: ns, Project: spec.Name, Repo: forge.PathRef(repoURL), VMNetwork: spec.VMNetwork, Live: ln}}
-	if err := c.stageProjectAdoption(id.Username, commitProj.Name, first, spec.Owners); err != nil {
+	entries, err := projectAdoption(first, spec.Owners)
+	if err != nil {
 		return model.DraftView{}, err
 	}
-	view, err := c.Get(id, commitProj)
+	view, err := c.stage(id, commitProj, entries...)
 	if err != nil {
 		return view, err
 	}
@@ -160,10 +162,11 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 			if err != nil {
 				return model.DraftView{}, err
 			}
-			if err := c.stageProjectAdoption(id.Username, commitProj.Name, specs, owners); err != nil {
+			entries, err := projectAdoption(specs, owners)
+			if err != nil {
 				return model.DraftView{}, err
 			}
-			return c.Get(id, commitProj)
+			return c.stage(id, commitProj, entries...)
 		}
 		if exists {
 			return model.DraftView{}, fmt.Errorf("%w: project %q already has a repo (%s)", model.ErrConflict, target.Name, target.Repo)
@@ -179,10 +182,11 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if err := c.stageProjectAdoption(id.Username, commitProj.Name, specs, owners); err != nil {
+	entries, err := projectAdoption(specs, owners)
+	if err != nil {
 		return model.DraftView{}, err
 	}
-	return c.Get(id, commitProj)
+	return c.stage(id, commitProj, entries...)
 }
 
 // ReleaseDeclared stages the declarative half of a project release: every
@@ -203,6 +207,7 @@ func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target proje
 	if err != nil {
 		return nil, nil, err
 	}
+	var entries []draft.Entry
 	for _, ns := range target.Namespaces {
 		ref := model.ObjectRef{Kind: model.KindNS.Kind, Name: ns}
 		path, ok := idx.Files[ref]
@@ -223,17 +228,20 @@ func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target proje
 		if gerr != nil {
 			return nil, nil, invalid(gerr)
 		}
-		if serr := c.store.Stage(id.Username, commitProj.Name, draft.Entry{
+		e := draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   draft.ResourceNamespace,
 			Namespace:  ns,
 			Name:       ns,
 			SourceFile: path,
 			Manifest:   string(released),
-		}); serr != nil {
-			return nil, nil, serr
+			BaseBlob:   git.BlobID(content),
 		}
+		entries = append(entries, e)
 		staged = append(staged, ns)
+	}
+	if err := c.store.Stage(id.Username, commitProj.Name, entries...); err != nil {
+		return nil, nil, err
 	}
 	return staged, residue, nil
 }
@@ -280,48 +288,45 @@ func tenantNamespaces(target project.ProjectInfo, repoURL string, live LiveNames
 	return specs, nil
 }
 
-// stageProjectAdoption stages the Namespace manifest of each spec (and, when
-// owners are given, the namespace-admin RoleBinding that makes them a tenant)
-// into commitProjName's platform draft: the declarative half of creating,
-// adopting and re-homing a project, unit-testable without a forge. Staged as
-// creates that the propose step writes by path - create-or-overwrite - so a
-// namespace already in the platform repo (e.g. dotvirt-made, annotation later
-// dropped) is corrected rather than duplicated.
-func (c *Coordinator) stageProjectAdoption(username, commitProjName string, specs []netgen.NamespaceSpec, owners []string) error {
+// projectAdoption is the Namespace manifest of each spec (and, when owners are
+// given, the namespace-admin RoleBinding that makes them a tenant) for the
+// platform draft: the declarative half of creating, adopting and re-homing a
+// project, unit-testable without a forge. They stage as creates that the
+// propose step writes by path - create-or-overwrite - so a namespace already
+// in the platform repo (e.g. dotvirt-made, annotation later dropped) is
+// corrected rather than duplicated.
+func projectAdoption(specs []netgen.NamespaceSpec, owners []string) ([]draft.Entry, error) {
+	var entries []draft.Entry
 	for _, spec := range specs {
 		nsPath, nsContent, err := netgen.NamespaceManifest(spec)
 		if err != nil {
-			return invalid(err)
+			return nil, invalid(err)
 		}
-		if err := c.store.Stage(username, commitProjName, draft.Entry{
+		entries = append(entries, draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   draft.ResourceNamespace,
 			Namespace:  spec.Name,
 			Name:       spec.Name,
 			SourceFile: nsPath,
 			Manifest:   string(nsContent),
-		}); err != nil {
-			return err
-		}
+		})
 		if len(owners) == 0 {
 			continue
 		}
 		rbPath, rbContent, err := netgen.RoleBindingManifest(netgen.RoleBindingSpec{Namespace: spec.Name, Project: spec.Project, Owners: owners})
 		if err != nil {
-			return invalid(err)
+			return nil, invalid(err)
 		}
-		if err := c.store.Stage(username, commitProjName, draft.Entry{
+		entries = append(entries, draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   draft.ResourceRoleBinding,
 			Namespace:  spec.Name,
 			Name:       spec.Name + "-admins",
 			SourceFile: rbPath,
 			Manifest:   string(rbContent),
-		}); err != nil {
-			return err
-		}
+		})
 	}
-	return nil
+	return entries, nil
 }
 
 // tenantName validates a tenant project name: a DNS-1123 label that is not the

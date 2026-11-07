@@ -18,6 +18,11 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 	if err != nil {
 		return model.DraftView{}, err
 	}
+	return c.render(id, proj, entries)
+}
+
+// render is entries as the draft view renders them against the base branch.
+func (c *Coordinator) render(id auth.Identity, proj project.ProjectInfo, entries []draft.Entry) (model.DraftView, error) {
 	view := model.DraftView{Base: c.baseBranch, Branch: c.proposedBranch(id.Username, proj.Name), Count: len(entries), Items: []model.DraftItem{}}
 	view.Prune = c.prunePending(proj, entries)
 	view.Warning = pruneWarning(view.Prune)
