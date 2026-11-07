@@ -71,9 +71,11 @@ func stagedChange(e draft.Entry) string {
 
 // overlayEdit is staged with next laid over it: next's scalars win, labels
 // merge by key, and add/remove lists merge by name, where adding what is
-// staged for removal (or the reverse) cancels the earlier intent. A sizing
-// change in one representation replaces a staged one in the other: inline
-// cpu/memory and an instance type cannot both apply.
+// staged for removal (or the reverse) cancels the earlier intent. A disk or
+// network the draft alone adds and then removes leaves nothing behind: base
+// has no such device to remove. A sizing change in one representation
+// replaces a staged one in the other: inline cpu/memory and an instance type
+// cannot both apply.
 func overlayEdit(staged, next model.VMEdit) model.VMEdit {
 	out := staged
 	if rep := sizingRep(next); rep != "" && rep != sizingRep(staged) {
@@ -102,12 +104,10 @@ func overlayEdit(staged, next model.VMEdit) model.VMEdit {
 	}
 
 	diskName := func(d model.DiskAdd) string { return d.Name }
-	out.AddDisks = upsert(dropNamed(out.AddDisks, next.RemoveDisks, diskName), next.AddDisks, diskName)
-	out.RemoveDisks = union(without(out.RemoveDisks, names(next.AddDisks, diskName)), next.RemoveDisks)
+	out.AddDisks, out.RemoveDisks = mergeDevices(out.AddDisks, out.RemoveDisks, next.AddDisks, next.RemoveDisks, diskName)
 
 	netName := func(n model.NetworkAdd) string { return n.Name }
-	out.AddNetworks = upsert(dropNamed(out.AddNetworks, next.RemoveNetworks, netName), next.AddNetworks, netName)
-	out.RemoveNetworks = union(without(out.RemoveNetworks, names(next.AddNetworks, netName)), next.RemoveNetworks)
+	out.AddNetworks, out.RemoveNetworks = mergeDevices(out.AddNetworks, out.RemoveNetworks, next.AddNetworks, next.RemoveNetworks, netName)
 
 	groupName := func(g model.PlacementGroup) string { return g.Name }
 	out.AddGroups = upsert(dropNamed(out.AddGroups, next.RemoveGroups, groupName), next.AddGroups, groupName)
@@ -115,6 +115,28 @@ func overlayEdit(staged, next model.VMEdit) model.VMEdit {
 
 	out.MigrateVolumes = upsert(out.MigrateVolumes, next.MigrateVolumes, func(m model.VolumeMigration) string { return m.Name })
 	return out
+}
+
+// mergeDevices lays next's device adds and removals over staged ones. A
+// removal of a device only the staged edit adds cancels that add and is not
+// kept, and an add of a device the staged edit removes cancels that removal:
+// each pair nets to nothing.
+func mergeDevices[T any](adds []T, removes []string, nextAdds []T, nextRemoves []string, name func(T) string) ([]T, []string) {
+	staged := names(adds, name)
+	var keep []string
+	for _, n := range nextRemoves {
+		if !slices.Contains(staged, n) {
+			keep = append(keep, n)
+		}
+	}
+	cancelled := names(nextAdds, name)
+	var fresh []T
+	for _, a := range nextAdds {
+		if !slices.Contains(removes, name(a)) {
+			fresh = append(fresh, a)
+		}
+	}
+	return upsert(dropNamed(adds, nextRemoves, name), fresh, name), union(without(removes, cancelled), keep)
 }
 
 // sizingRep is the representation an edit sizes the VM in: "instancetype",

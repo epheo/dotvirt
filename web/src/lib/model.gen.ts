@@ -150,6 +150,10 @@ export interface ObjectSpec {
   manifest: string;
   spec?: unknown;
   reason?: string;
+  /**
+   * BaseBlob is the git blob ID of Manifest, for UpdateManifestRequest.
+   */
+  baseBlob?: string;
 }
 /**
  * UpdateManifestRequest replaces a declared object's manifest verbatim - the
@@ -157,6 +161,11 @@ export interface ObjectSpec {
  */
 export interface UpdateManifestRequest {
   yaml: string;
+  /**
+   * BaseBlob is the version the edit was made on (ObjectSpec.BaseBlob); a
+   * stale one is refused. Optional.
+   */
+  baseBlob?: string;
 }
 /**
  * DraftItem is one pending change rendered for the UI.
@@ -1138,6 +1147,7 @@ export interface Template {
   instancetype?: string; // blueprint summary, best-effort
   preference?: string;
   yaml: string;
+  baseBlob?: string; // git blob ID of YAML, for UpdateTemplateRequest
   error?: string; // parse failure - listed, but not deployable
 }
 /**
@@ -1179,6 +1189,11 @@ export interface UpdateTemplateRequest {
   library: string;
   name: string;
   yaml: string;
+  /**
+   * BaseBlob is the version the edit was made on (Template.BaseBlob); a
+   * stale one is refused. Optional.
+   */
+  baseBlob?: string;
 }
 /**
  * SaveTemplateRequest derives a template from an existing VM's git manifest and

@@ -7,6 +7,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
+	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
@@ -132,6 +133,7 @@ func (c *Coordinator) StageSaveTemplate(id auth.Identity, commitProj, sourceProj
 		Name:       req.Name,
 		SourceFile: path,
 		Manifest:   string(tplYAML),
+		BaseBlob:   git.AbsentBlob,
 	})
 }
 
@@ -152,12 +154,15 @@ func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.P
 	if t := vmtemplate.Parse(path, []byte(req.YAML), commitProj.Name); t.Error != "" {
 		return model.DraftView{}, fmt.Errorf("%w: %s", model.ErrInvalid, t.Error)
 	}
-	_, exists, err := read.LookupOnBranch(c.baseBranch, path)
+	current, exists, err := read.LookupOnBranch(c.baseBranch, path)
 	if err != nil {
 		return model.DraftView{}, err
 	}
 	if !exists {
 		return model.DraftView{}, fmt.Errorf("%w: template %q not in library %q", model.ErrNotFound, req.Name, commitProj.Name)
+	}
+	if err := loadedCurrent(req.BaseBlob, current, "template "+req.Name, c.baseBranch); err != nil {
+		return model.DraftView{}, err
 	}
 
 	return c.stage(id, commitProj, draft.Entry{
@@ -167,6 +172,7 @@ func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.P
 		Name:       req.Name,
 		SourceFile: path,
 		Manifest:   req.YAML,
+		BaseBlob:   git.BlobID(current),
 	})
 }
 

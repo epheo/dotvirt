@@ -47,5 +47,6 @@ func (c *Coordinator) RestoreVersion(id auth.Identity, proj project.ProjectInfo,
 		SourceFile:  path,
 		Manifest:    string(restored),
 		FromVersion: shortCommit(hash),
+		BaseBlob:    pinOf(current, ok),
 	})
 }

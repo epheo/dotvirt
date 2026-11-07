@@ -3,6 +3,7 @@ package changeset
 import (
 	"fmt"
 
+	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/vmtemplate"
@@ -46,7 +47,9 @@ func (r *Reader) Templates(proj project.ProjectInfo) []model.Template {
 	}
 	out := make([]model.Template, 0, len(files))
 	for _, f := range files {
-		out = append(out, vmtemplate.Parse(f.Path, f.Content, proj.Name))
+		t := vmtemplate.Parse(f.Path, f.Content, proj.Name)
+		t.BaseBlob = git.BlobID(f.Content)
+		out = append(out, t)
 	}
 	return out
 }

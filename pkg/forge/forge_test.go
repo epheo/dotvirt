@@ -142,10 +142,6 @@ func TestFindPR(t *testing.T) {
 		p.Head.Label = head
 		return p
 	}
-	var old []PR
-	for n := 20; n < 26; n++ {
-		old = append(old, listedPR(n, "closed", fmt.Sprintf("other-%d", n), "main", true))
-	}
 	cases := []struct {
 		name string
 		prs  []PR

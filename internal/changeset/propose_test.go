@@ -88,6 +88,11 @@ func newProposeFixture(t *testing.T, routes ...route) *proposeFixture {
 				return
 			}
 		}
+		// The forge's base/head pair lookup knows no PR unless a route says so.
+		if r.Method == "GET" && strings.Contains(r.URL.Path, "/pulls/main/") {
+			http.NotFound(w, r)
+			return
+		}
 		t.Errorf("unhandled forge call: %s %s", r.Method, r.URL.Path)
 		http.Error(w, "unhandled", http.StatusNotImplemented)
 	}))
@@ -393,41 +398,59 @@ func TestProposeSelfHealsSatisfiedDraft(t *testing.T) {
 	}
 }
 
-// openOrRecoverPR is the one way a pushed branch gets its PR: an open one is
-// reused, a closed-unmerged one reopened, and one is created only when the
-// branch has none - or its last PR merged, when a create the forge refuses
-// falls back to the compare URL.
-func TestOpenOrRecoverPR(t *testing.T) {
+// publish is the one way a fresh branch gets its PR: an open one is reused, a
+// closed-unmerged one reopened before the push (Forgejo syncs a PR's head
+// only while it is open), and one is created only when the branch has none -
+// or its last PR merged, when a create the forge refuses falls back to the
+// compare URL.
+func TestPublish(t *testing.T) {
 	head := proposedBranchFor("alice", "p")
+	listed := func(state string, merged bool) forge.PR {
+		pr := forge.PR{Number: 4, State: state, Merged: merged, HTMLURL: "http://forge/pulls/4"}
+		pr.Head.Ref = head
+		return pr
+	}
+	var pushedAtReopen atomic.Bool
+	var f *proposeFixture
 	cases := []struct {
 		name         string
 		routes       []route
+		prior        forge.PR
+		found        bool
 		wantNumber   int
 		wantExisting bool
 		wantOK       bool
 	}{
-		{"open PR is reused", []route{
-			whenList("GET", "/pulls", http.StatusOK, "open", false),
-		}, 4, true, true},
-		{"closed PR is reopened", []route{
-			whenList("GET", "/pulls", http.StatusOK, "closed", false),
-			when("PATCH", "/pulls/4", http.StatusOK, `{"number":4,"state":"open","html_url":"http://forge/pulls/4"}`),
-		}, 4, true, true},
+		{"open PR is reused", nil, listed("open", false), true, 4, true, true},
+		{"closed PR is reopened before the push", []route{
+			func(m, path string) (int, string, bool) {
+				if m != "PATCH" || !strings.HasSuffix(path, "/pulls/4") {
+					return 0, "", false
+				}
+				out, _ := exec.Command("git", "-C", f.proj.Repo, "branch", "--list", head).Output()
+				pushedAtReopen.Store(len(out) > 0)
+				return http.StatusOK, `{"number":4,"state":"open","html_url":"http://forge/pulls/4"}`, true
+			},
+		}, listed("closed", false), true, 4, true, true},
 		{"no PR is created", []route{
-			when("GET", "/pulls", http.StatusOK, "[]"),
 			when("POST", "/pulls", http.StatusCreated, `{"number":1,"state":"open","html_url":"http://forge/pulls/1"}`),
-		}, 1, false, true},
+		}, forge.PR{}, false, 1, false, true},
 		{"merged PR leaves the compare URL", []route{
-			whenList("GET", "/pulls", http.StatusOK, "closed", true),
 			when("POST", "/pulls", http.StatusConflict, "pull request already exists"),
-		}, 0, false, false},
+		}, listed("closed", true), true, 0, false, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			f := newProposeFixture(t, c.routes...)
-			fc := f.c.forge.For(f.proj.Repo)
-			var out model.ProposeResult
-			ok := f.c.openOrRecoverPR(fc, &out, head, "t", "b")
+			f = newProposeFixture(t, c.routes...)
+			_, write, err := f.c.write(f.proj)
+			if err != nil {
+				t.Fatal(err)
+			}
+			items := []git.ChangesetItem{{Path: "new.yaml", NewContent: []byte("kind: ConfigMap\n")}}
+			out, _, ok, err := f.c.publish(f.c.forgeFor(f.proj.Repo), write, head, "m", "t", "b", items, git.Author{}, c.prior, c.found)
+			if err != nil {
+				t.Fatalf("publish: %v", err)
+			}
 			if ok != c.wantOK || out.PRNumber != c.wantNumber || out.Existing != c.wantExisting {
 				t.Fatalf("got ok=%v %+v, want ok=%v #%d existing=%v", ok, out, c.wantOK, c.wantNumber, c.wantExisting)
 			}
@@ -435,6 +458,9 @@ func TestOpenOrRecoverPR(t *testing.T) {
 				t.Fatal("a missing PR must leave the compare URL")
 			}
 		})
+	}
+	if pushedAtReopen.Load() {
+		t.Fatal("the reopen must land before the push")
 	}
 }
 
@@ -603,77 +629,6 @@ func TestProposeKeepsWhatWasStagedDuringThePush(t *testing.T) {
 	}
 }
 
-// Re-proposing while the branch's PR is open adds to that PR: the new commit
-// sits on the PR's head, nothing the PR carried is lost, and its title and
-// body are rewritten to describe both changes under the user's message.
-func TestReproposeAddsOntoTheOpenPR(t *testing.T) {
-	head := proposedBranchFor("alice", "p")
-	var opened atomic.Bool
-	f := newProposeFixture(t,
-		func(m, path string) (int, string, bool) {
-			if m != "GET" || !strings.HasSuffix(path, "/pulls") {
-				return 0, "", false
-			}
-			if !opened.Load() {
-				return http.StatusOK, "[]", true
-			}
-			return http.StatusOK, `[{"number":1,"state":"open","html_url":"http://forge/pulls/1","body":"Why: launch.\n\n## Changes\n- old","base":{"ref":"main"},"head":{"ref":"` + head + `"}}]`, true
-		},
-		func(m, path string) (int, string, bool) {
-			if m != "POST" || !strings.HasSuffix(path, "/pulls") {
-				return 0, "", false
-			}
-			opened.Store(true)
-			return http.StatusCreated, `{"number":1,"state":"open","html_url":"http://forge/pulls/1"}`, true
-		},
-		when("PATCH", "/pulls/1", http.StatusOK, `{"number":1,"state":"open"}`),
-	)
-	f.stageAndPropose(t)
-	first := revParse(t, f.proj.Repo, head)
-
-	req := model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{SetLabels: map[string]string{"tier": "gold"}}}
-	view, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", req)
-	if err != nil {
-		t.Fatalf("StageEdit: %v", err)
-	}
-	out, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{Title: view.DefaultTitle})
-	if err != nil {
-		t.Fatalf("Propose: %v", err)
-	}
-	if out.PRNumber != 1 || !out.Existing {
-		t.Fatalf("got %+v, want the open PR #1", out)
-	}
-	if parent := revParse(t, f.proj.Repo, head+"^"); parent != first {
-		t.Fatalf("the new commit must sit on the PR's head %s, parent is %s", first, parent)
-	}
-	file, err := exec.Command("git", "-C", f.proj.Repo, "show", head+":web.yaml").Output()
-	if err != nil || !strings.Contains(string(file), "env: prod") || !strings.Contains(string(file), "tier: gold") {
-		t.Fatalf("the PR must carry both labels, web.yaml = %s (%v)", file, err)
-	}
-	patches := f.sentTo("PATCH", "/pulls/1")
-	if len(patches) != 1 {
-		t.Fatalf("want one PR rewrite, got %q", patches)
-	}
-	var edit forge.PREdit
-	if err := json.Unmarshal([]byte(patches[0]), &edit); err != nil {
-		t.Fatal(err)
-	}
-	if edit.Title == view.DefaultTitle || !strings.Contains(edit.Title, "web") {
-		t.Errorf("the title must describe the whole PR, not this draft alone: %q", edit.Title)
-	}
-	for _, want := range []string{"Why: launch.", "prod", "gold"} {
-		if !strings.Contains(edit.Body, want) {
-			t.Errorf("the body must carry %q:\n%s", want, edit.Body)
-		}
-	}
-	if strings.Contains(edit.Body, "- old") {
-		t.Errorf("the generated part must be rebuilt, not kept:\n%s", edit.Body)
-	}
-	if n := f.draftCount(t); n != 0 {
-		t.Fatalf("draft not cleared: %d entries", n)
-	}
-}
-
 // A forge that cannot say whether the branch has an open PR stops the
 // propose before the push: guessing "none" would rebuild an open PR's branch.
 func TestProposeWithoutAForgeAnswerPushesNothing(t *testing.T) {
@@ -702,48 +657,51 @@ func revParse(t *testing.T, repo, rev string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// A whole-file edit is made from base's version of the file. Extending an
-// open PR that already changed that file would undo the PR's change: refused,
-// naming the PR and the way forward, with nothing pushed.
-func TestProposeRefusesWholeFileEditOverTheOpenPRsChange(t *testing.T) {
+// A repo without CI reports no status at all. Once the PR has been quiet past
+// the CI grace, that is settled too: a refresh reads the list alone. A PR
+// touched moments ago is still re-read, as CI may not have reported yet.
+func TestOpenProposalsSettlesWithoutCI(t *testing.T) {
 	head := proposedBranchFor("alice", "p")
-	var opened atomic.Bool
+	var reads atomic.Int32
+	var updated atomic.Value
 	f := newProposeFixture(t,
 		func(m, path string) (int, string, bool) {
-			if m != "GET" || !strings.HasSuffix(path, "/pulls") {
+			if m != "GET" {
 				return 0, "", false
 			}
-			if !opened.Load() {
-				return http.StatusOK, "[]", true
+			switch {
+			case strings.HasSuffix(path, "/pulls"):
+				return http.StatusOK, `[{"number":4,"state":"open","html_url":"http://forge/pulls/4","updated_at":"` + updated.Load().(string) +
+					`","base":{"ref":"main"},"head":{"ref":"` + head + `","sha":"aaa"}}]`, true
+			case strings.HasSuffix(path, "/branch_protections"):
+				return http.StatusOK, `[]`, true
+			case strings.Contains(path, "/reviews"):
+				reads.Add(1)
+				return http.StatusOK, `[]`, true
+			case strings.Contains(path, "/status"):
+				reads.Add(1)
+				return http.StatusOK, `{"state":"","total_count":0}`, true
 			}
-			return http.StatusOK, `[{"number":1,"state":"open","html_url":"http://forge/pulls/1","base":{"ref":"main"},"head":{"ref":"` + head + `"}}]`, true
-		},
-		func(m, path string) (int, string, bool) {
-			if m != "POST" || !strings.HasSuffix(path, "/pulls") {
-				return 0, "", false
-			}
-			opened.Store(true)
-			return http.StatusCreated, `{"number":1,"state":"open","html_url":"http://forge/pulls/1"}`, true
-		},
-	)
-	// A second version on main, so there is an older one to restore.
-	initial := revParse(t, f.proj.Repo, "main")
-	work := t.TempDir()
-	gitRun(t, work, "clone", "-q", f.proj.Repo, ".")
-	writeWorkFile(t, work, "web.yaml", []byte("apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\nspec:\n  runStrategy: Halted\n"))
-	gitRun(t, work, "commit", "-qam", "halt web")
-	gitRun(t, work, "push", "-q", "origin", "main")
-
-	f.stageAndPropose(t) // PR #1 now labels web.yaml
-	before := revParse(t, f.proj.Repo, head)
-	if _, err := f.c.RestoreVersion(f.id, f.proj, "", "alpha", "web", initial); err != nil {
-		t.Fatalf("RestoreVersion: %v", err)
+			return 0, "", false
+		})
+	refresh := func() {
+		t.Helper()
+		if _, err := f.c.OpenProposals(f.proj); err != nil {
+			t.Fatal(err)
+		}
 	}
-	_, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{})
-	if !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "#1") {
-		t.Fatalf("want ErrConflict naming PR #1, got %v", err)
+	updated.Store(time.Now().UTC().Format(time.RFC3339))
+	refresh()
+	before := reads.Load()
+	refresh()
+	if reads.Load() == before {
+		t.Fatal("a PR touched moments ago must be re-read: its CI may not have reported yet")
 	}
-	if after := revParse(t, f.proj.Repo, head); after != before {
-		t.Fatalf("nothing may be pushed, the branch moved %s -> %s", before, after)
+	updated.Store("2026-01-01T00:00:00Z")
+	refresh()
+	before = reads.Load()
+	refresh()
+	if n := reads.Load() - before; n != 0 {
+		t.Fatalf("a quiet PR with no CI must settle, got %d extra forge calls", n)
 	}
 }

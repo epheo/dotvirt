@@ -242,7 +242,12 @@ func TestObjectSpecWithoutFormAndVerbatimEdit(t *testing.T) {
 	}
 
 	edited := strings.Replace(flat, "dc-vlan: \"true\"", "dc-vlan: \"yes\"", 1)
-	view, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), model.ClusterScopeNS, "dc-vlan", edited)
+	// An edit made on another version than base's is refused at stage.
+	stale := model.UpdateManifestRequest{YAML: edited, BaseBlob: git.BlobID([]byte("an older version\n"))}
+	if _, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), model.ClusterScopeNS, "dc-vlan", stale); !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("a stale editor version: want ErrConflict, got %v", err)
+	}
+	view, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), model.ClusterScopeNS, "dc-vlan", model.UpdateManifestRequest{YAML: edited, BaseBlob: got.BaseBlob})
 	if err != nil {
 		t.Fatalf("StageUpdateManifest: %v", err)
 	}
@@ -250,10 +255,10 @@ func TestObjectSpecWithoutFormAndVerbatimEdit(t *testing.T) {
 		t.Errorf("verbatim edit item = %+v", it)
 	}
 	renamed := strings.Replace(flat, "name: dc-vlan", "name: other", 1)
-	if _, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), model.ClusterScopeNS, "dc-vlan", renamed); !errors.Is(err, model.ErrInvalid) {
+	if _, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), model.ClusterScopeNS, "dc-vlan", model.UpdateManifestRequest{YAML: renamed}); !errors.Is(err, model.ErrInvalid) {
 		t.Errorf("a manifest declaring another object must be refused, got %v", err)
 	}
-	if _, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), model.ClusterScopeNS, "dc-vlan", flat); !errors.Is(err, model.ErrInvalid) {
+	if _, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), model.ClusterScopeNS, "dc-vlan", model.UpdateManifestRequest{YAML: flat}); !errors.Is(err, model.ErrInvalid) {
 		t.Errorf("an unchanged manifest must be refused, got %v", err)
 	}
 }

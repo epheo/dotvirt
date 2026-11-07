@@ -337,21 +337,12 @@ func (c *Coordinator) Unstage(id auth.Identity, proj project.ProjectInfo, resour
 }
 
 // stage writes entries into (id, proj)'s draft as one change and renders the
-// draft that results. Each whole-file edit records the base version it
-// replaces (draft.Entry.BaseBlob), and never replaces staged field edits:
-// they would vanish from the draft without the user knowing.
+// draft that results. Each entry writing a manifest records the version of
+// the file it replaces (see pin), and a whole-file edit never replaces staged
+// field edits: they would vanish from the draft without the user knowing.
 func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entries ...draft.Entry) (model.DraftView, error) {
-	for i, e := range entries {
-		if e.Kind != draft.KindEdit || e.Manifest == "" {
-			continue
-		}
-		read, err := c.read(proj)
-		if err != nil {
-			return model.DraftView{}, err
-		}
-		if err := c.pinBase(read, &entries[i]); err != nil {
-			return model.DraftView{}, err
-		}
+	if err := c.pin(proj, entries); err != nil {
+		return model.DraftView{}, err
 	}
 	err := c.store.Apply(id.Username, proj.Name, func(d map[string]draft.Entry) error {
 		for _, e := range entries {
@@ -369,12 +360,42 @@ func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entries 
 	return c.Get(id, proj)
 }
 
-// pinBase records on e the base blob of the file it replaces wholesale (see
-// draft.Entry.BaseBlob).
-func (c *Coordinator) pinBase(read *git.Repo, e *draft.Entry) error {
-	blob, _, err := read.BlobOnBranch(c.baseBranch, e.SourceFile)
-	e.BaseBlob = blob
-	return err
+// pin records on each entry writing a manifest the version of its file on
+// base (draft.Entry.BaseBlob), in one read. An entry already pinned keeps its
+// pin: one whose content the server derived from bytes it read is pinned to
+// those bytes (pinOf), never to a second read that may see a newer file.
+func (c *Coordinator) pin(proj project.ProjectInfo, entries []draft.Entry) error {
+	var paths []string
+	for _, e := range entries {
+		if e.Manifest != "" && e.BaseBlob == "" {
+			paths = append(paths, e.SourceFile)
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	read, err := c.read(proj)
+	if err != nil {
+		return err
+	}
+	pins, err := read.Pins(c.baseBranch, paths...)
+	if err != nil {
+		return err
+	}
+	for i, e := range entries {
+		if e.Manifest != "" && e.BaseBlob == "" {
+			entries[i].BaseBlob = pins[e.SourceFile]
+		}
+	}
+	return nil
+}
+
+// pinOf is the pin of a file read as content, ok=false when it was absent.
+func pinOf(content []byte, ok bool) string {
+	if !ok {
+		return git.AbsentBlob
+	}
+	return git.BlobID(content)
 }
 
 // Discard clears (id, proj)'s draft.

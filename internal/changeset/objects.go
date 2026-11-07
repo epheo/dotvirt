@@ -79,7 +79,7 @@ func (c *Coordinator) AdoptObject(id auth.Identity, proj project.ProjectInfo, o 
 		if manifest.SameDocument(current, o.Manifest) {
 			return model.DraftView{}, fmt.Errorf("%w: %s/%s already matches git", model.ErrInvalid, ns, o.Name)
 		}
-		entry.Kind, entry.SourceFile = draft.KindEdit, path
+		entry.Kind, entry.SourceFile, entry.BaseBlob = draft.KindEdit, path, git.BlobID(current)
 	}
 	return c.stage(id, proj, entry)
 }
@@ -114,7 +114,7 @@ func (r *Reader) ObjectSpec(proj project.ProjectInfo, resource, namespace, name 
 	if err != nil {
 		return model.ObjectSpec{}, err
 	}
-	out := model.ObjectSpec{Resource: resource, Namespace: namespace, Name: name, SourceFile: path, Manifest: string(content)}
+	out := model.ObjectSpec{Resource: resource, Namespace: namespace, Name: name, SourceFile: path, Manifest: string(content), BaseBlob: git.BlobID(content)}
 	spec, err := netgen.Decode(content)
 	if err != nil {
 		out.Reason = err.Error()
@@ -126,11 +126,14 @@ func (r *Reader) ObjectSpec(proj project.ProjectInfo, resource, namespace, name 
 	return out, nil
 }
 
-// StageUpdateManifest replaces a declared object's file with yaml verbatim -
-// the edit for a manifest no form expresses, on the same whole-file rule as
-// every other edit. The new content must declare exactly the object it
-// replaces: a renamed or extra object is a different change.
-func (c *Coordinator) StageUpdateManifest(id auth.Identity, proj project.ProjectInfo, resource, namespace, name, yaml string) (model.DraftView, error) {
+// StageUpdateManifest replaces a declared object's file with req.YAML
+// verbatim - the edit for a manifest no form expresses, on the same
+// whole-file rule as every other edit. The new content must declare exactly
+// the object it replaces: a renamed or extra object is a different change.
+// req.BaseBlob, when set, is the version the editor loaded (ObjectSpec): one
+// that is no longer base's is refused, since the edit was made on it.
+func (c *Coordinator) StageUpdateManifest(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string, req model.UpdateManifestRequest) (model.DraftView, error) {
+	yaml := req.YAML
 	read, err := c.read(proj)
 	if err != nil {
 		return model.DraftView{}, err
@@ -148,6 +151,9 @@ func (c *Coordinator) StageUpdateManifest(id auth.Identity, proj project.Project
 	if err != nil {
 		return model.DraftView{}, err
 	}
+	if err := loadedCurrent(req.BaseBlob, current, namespace+"/"+name, c.baseBranch); err != nil {
+		return model.DraftView{}, err
+	}
 	if manifest.SameDocument(current, []byte(yaml)) {
 		return model.DraftView{}, fmt.Errorf("%w: %s/%s already matches git", model.ErrInvalid, namespace, name)
 	}
@@ -158,5 +164,16 @@ func (c *Coordinator) StageUpdateManifest(id auth.Identity, proj project.Project
 		Name:       name,
 		SourceFile: path,
 		Manifest:   yaml,
+		BaseBlob:   git.BlobID(current),
 	})
+}
+
+// loadedCurrent refuses an edit made on a version of what other than
+// current, base's: loaded is the blob the editor read, empty when the
+// client did not say.
+func loadedCurrent(loaded string, current []byte, what, base string) error {
+	if loaded != "" && loaded != git.BlobID(current) {
+		return fmt.Errorf("%w: %s changed on %s since the editor loaded it; reload it and make the edit again", model.ErrConflict, what, base)
+	}
+	return nil
 }

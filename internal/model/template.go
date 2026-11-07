@@ -14,7 +14,8 @@ type Template struct {
 	Instancetype string              `json:"instancetype,omitempty"` // blueprint summary, best-effort
 	Preference   string              `json:"preference,omitempty"`
 	YAML         string              `json:"yaml"`
-	Error        string              `json:"error,omitempty"` // parse failure - listed, but not deployable
+	BaseBlob     string              `json:"baseBlob,omitempty"` // git blob ID of YAML, for UpdateTemplateRequest
+	Error        string              `json:"error,omitempty"`    // parse failure - listed, but not deployable
 }
 
 // TemplateParameter mirrors template.kubevirt.io/v1beta1 Parameter, so the
@@ -51,6 +52,9 @@ type UpdateTemplateRequest struct {
 	Library string `json:"library"`
 	Name    string `json:"name"`
 	YAML    string `json:"yaml"`
+	// BaseBlob is the version the edit was made on (Template.BaseBlob); a
+	// stale one is refused. Optional.
+	BaseBlob string `json:"baseBlob,omitempty"`
 }
 
 // SaveTemplateRequest derives a template from an existing VM's git manifest and

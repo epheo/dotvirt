@@ -1,8 +1,7 @@
 // Package git is dotvirt's git plane: it clones a repo once into memory and
 // reads manifests from any branch's tree without checking it out. Reads never
 // touch the network - a single background fetcher (driven by the git poll, and
-// nudged after dotvirt's own pushes) owns freshness, and a writer that must
-// read its own push back calls Refresh.
+// nudged after dotvirt's own pushes) owns freshness.
 package git
 
 import (
@@ -183,9 +182,6 @@ func forkStorage(s storage.Storer) (*memory.Storage, error) {
 	return dst, nil
 }
 
-// Refresh fetches the remote's branch heads now.
-func (r *Repo) Refresh() error { return r.refresh() }
-
 // headsSignature refreshes from the remote and returns a stable string
 // summarizing all branch heads (name+hash). A change means some branch moved.
 // This is the background fetcher's entry point: it both fetches (the single
@@ -256,23 +252,22 @@ func (r *Repo) LookupOnBranch(branch, path string) (content []byte, ok bool, err
 	return b, err == nil, err
 }
 
-// BlobOnBranch is the blob hash of path on branch, ok=false when the branch
-// holds no such file.
-func (r *Repo) BlobOnBranch(branch, path string) (hash string, ok bool, err error) {
+// Pins is each of paths' blob ID on branch, AbsentBlob for a path the
+// branch does not hold: the versions whole-file content is made from.
+func (r *Repo) Pins(branch string, paths ...string) (map[string]string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	tree, err := r.treeFor(branch)
 	if err != nil {
-		return "", false, err
+		return nil, err
 	}
-	f, err := tree.File(path)
-	if errors.Is(err, object.ErrFileNotFound) {
-		return "", false, nil
+	out := make(map[string]string, len(paths))
+	for _, p := range paths {
+		if out[p], err = pinIn(tree, p); err != nil {
+			return nil, fmt.Errorf("file %s on %s: %w", p, branch, err)
+		}
 	}
-	if err != nil {
-		return "", false, fmt.Errorf("file %s on %s: %w", path, branch, err)
-	}
-	return f.Hash.String(), true, nil
+	return out, nil
 }
 
 // FileOnBranch returns one file's raw content on branch - e.g. a base-branch

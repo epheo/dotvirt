@@ -215,13 +215,10 @@ func TestAdoptObjectsAllDeclaredIsInvalid(t *testing.T) {
 	}
 }
 
-// stageProjectAdoption stamps each of a project's namespaces with the dotvirt.io/repo
-// annotation (+ an owners RoleBinding) into the platform draft - the staging core of
+// projectAdoption stamps each of a project's namespaces with the dotvirt.io/repo
+// annotation (+ an owners RoleBinding) for the platform draft - the staging core of
 // AdoptProject, exercised without a forge.
-func TestStageProjectAdoptionStampsRepoOnEveryNamespace(t *testing.T) {
-	c := newTestCoordinator(t, false)
-	id := "alice"
-	const platform = "platform"
+func TestProjectAdoptionStampsRepoOnEveryNamespace(t *testing.T) {
 	target := project.ProjectInfo{Name: "team-a", Namespaces: []string{"team-a", "team-a-db"}}
 	repoURL := "https://forge.example/acme/team-a.git"
 
@@ -229,12 +226,9 @@ func TestStageProjectAdoptionStampsRepoOnEveryNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tenantNamespaces: %v", err)
 	}
-	if err := c.stageProjectAdoption(id, platform, specs, []string{"alice", "bob"}); err != nil {
-		t.Fatalf("stageProjectAdoption: %v", err)
-	}
-	entries, err := c.store.List(id, platform)
+	entries, err := projectAdoption(specs, []string{"alice", "bob"})
 	if err != nil {
-		t.Fatalf("store.List: %v", err)
+		t.Fatalf("projectAdoption: %v", err)
 	}
 
 	nsByName := map[string]draft.Entry{}

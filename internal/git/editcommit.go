@@ -11,6 +11,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/format/index"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/storage/memory"
 
 	"github.com/epheo/dotvirt/internal/model"
 )
@@ -25,21 +26,28 @@ type ChangesetItem struct {
 	NewContent []byte
 	Delete     bool
 
-	// BaseBlob, when set, is the blob Path must still hold where the commit
-	// lands, base and an extended branch alike: the version NewContent was
-	// computed against.
+	// BaseBlob, when set, is the version of Path on base NewContent was made
+	// from: a blob ID, or AbsentBlob for a file that did not exist.
 	BaseBlob string
 }
 
+// AbsentBlob pins a path that must not exist on base: git's null object ID.
+const AbsentBlob = "0000000000000000000000000000000000000000"
+
+// BlobID is the git blob ID of content, the pin of a file read as content.
+func BlobID(content []byte) string {
+	return plumbing.ComputeHash(plumbing.BlobObject, content).String()
+}
+
 // BaseMovedError reports an item whose path no longer holds its BaseBlob on
-// Branch: base moved past it, or an extended branch already changed the file.
-type BaseMovedError struct{ Path, Branch string }
+// base: a merge since staging moved, created or deleted the file.
+type BaseMovedError struct{ Path string }
 
-func (e *BaseMovedError) Error() string { return e.Path + " changed on " + e.Branch }
+func (e *BaseMovedError) Error() string { return e.Path + " changed on the base branch" }
 
-// ErrBranchMoved reports a push refused because the branch moved past the
-// head the commit was built on: someone else pushed meanwhile.
-var ErrBranchMoved = errors.New("the branch moved while the commit was built")
+// ErrBranchMoved reports a branch that no longer holds the head a rebuild
+// was leased to: someone else pushed to it, or it was deleted.
+var ErrBranchMoved = errors.New("the branch moved off the head dotvirt pushed")
 
 // ErrNoChanges reports a changeset whose every item already matches base -
 // nothing to commit because the intent is already true in git.
@@ -51,22 +59,25 @@ var ErrNoChanges = errors.New("every staged change already matches git")
 // against current trunk, not the mirror the draft was staged from. Pushes
 // when enabled.
 //
-// The branch is rebuilt at base and force-pushed: it is for a branch no open
-// pull request is reviewing (see ExtendChangeset).
+// The branch is rebuilt at base and force-pushed (see PushPlan for the
+// guarded forms).
 func (w *WriteRepo) CommitChangeset(base, branch, message string, items []ChangesetItem, by Author) (CommitResult, error) {
-	return w.commitChangeset(base, branch, false, message, items, by)
+	return w.ProposeChangeset(base, branch, message, items, by, PushPlan{})
 }
 
-// ExtendChangeset is CommitChangeset on top of branch as the remote holds it -
-// an open pull request's head - so what the branch already proposes stays and
-// a Transform sees it. The push is leased to that head: a branch moved by
-// someone else meanwhile is refused, never overwritten. A branch the remote
-// lacks forks from base.
-func (w *WriteRepo) ExtendChangeset(base, branch, message string, items []ChangesetItem, by Author) (CommitResult, error) {
-	return w.commitChangeset(base, branch, true, message, items, by)
+// PushPlan guards how ProposeChangeset replaces the remote branch.
+type PushPlan struct {
+	// Lease, when set, is the head the remote branch must still hold: the
+	// commit dotvirt last pushed for an open pull request. A branch moved by
+	// anyone else, or deleted, is ErrBranchMoved and nothing is pushed.
+	Lease string
+	// BeforePush runs once the commit is built and just before the push,
+	// which an error from it stops.
+	BeforePush func() error
 }
 
-func (w *WriteRepo) commitChangeset(base, branch string, extend bool, message string, items []ChangesetItem, by Author) (CommitResult, error) {
+// ProposeChangeset is CommitChangeset under plan.
+func (w *WriteRepo) ProposeChangeset(base, branch, message string, items []ChangesetItem, by Author, plan PushPlan) (CommitResult, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -81,25 +92,19 @@ func (w *WriteRepo) commitChangeset(base, branch string, extend bool, message st
 	if err := checkoutBranch(repo, wt, base); err != nil {
 		return CommitResult{}, fmt.Errorf("checkout base %q: %w", base, err)
 	}
-	if err := checkPins(repo, base, items); err != nil {
+	if err := checkPins(repo, items); err != nil {
 		return CommitResult{}, err
 	}
-
-	var lease plumbing.Hash
-	if extend {
-		if lease, err = w.fetchBranch(repo, branch); err != nil {
+	lease := plumbing.NewHash(plan.Lease)
+	if !lease.IsZero() && w.push {
+		if err := w.holdLease(repo, branch, lease); err != nil {
 			return CommitResult{}, err
 		}
 	}
-	if lease.IsZero() {
-		err = resetBranchTo(repo, wt, branch)
-	} else if err = checkoutBranch(repo, wt, branch); err == nil {
-		err = checkPins(repo, branch, items)
-	}
-	if err != nil {
+	if err := resetBranchTo(repo, wt, branch); err != nil {
 		return CommitResult{}, err
 	}
-	res, err := w.commitItems(repo, wt, branch, message, items, by, lease)
+	res, err := w.commitItems(repo, wt, branch, message, items, by, lease, plan.BeforePush)
 	if err != nil {
 		return CommitResult{}, err
 	}
@@ -113,9 +118,10 @@ func (w *WriteRepo) commitChangeset(base, branch string, extend bool, message st
 }
 
 // commitItems is the tail every write shares: apply items to the checked-out
-// worktree, commit what changed on branch, push under lease (see pushBranch).
-// Committed is false when every item already matched the tree.
-func (w *WriteRepo) commitItems(repo *git.Repository, wt *git.Worktree, branch, message string, items []ChangesetItem, by Author, lease plumbing.Hash) (CommitResult, error) {
+// worktree, commit what changed on branch, run beforePush if any, push under
+// lease (see pushBranch). Committed is false when every item already matched
+// the tree.
+func (w *WriteRepo) commitItems(repo *git.Repository, wt *git.Worktree, branch, message string, items []ChangesetItem, by Author, lease plumbing.Hash, beforePush func() error) (CommitResult, error) {
 	for _, it := range items {
 		if err := applyItem(wt, it); err != nil {
 			return CommitResult{}, err
@@ -133,6 +139,11 @@ func (w *WriteRepo) commitItems(repo *git.Repository, wt *git.Worktree, branch, 
 	hash, err := wt.Commit(message, &git.CommitOptions{Author: by.signature(), Committer: dotvirtSig()})
 	if err != nil {
 		return CommitResult{}, fmt.Errorf("commit: %w", err)
+	}
+	if beforePush != nil {
+		if err := beforePush(); err != nil {
+			return CommitResult{}, err
+		}
 	}
 	if err := w.pushBranch(repo, branch, lease); err != nil {
 		return CommitResult{}, err
@@ -182,9 +193,9 @@ func applyItem(wt *git.Worktree, it ChangesetItem) error {
 }
 
 // checkPins refuses the changeset when an item's file no longer holds its
-// BaseBlob on the checked-out branch: the fresh clone is the authority, where
+// BaseBlob on the checked-out base: the fresh clone is the authority, where
 // the mirror the draft was staged from may lag.
-func checkPins(repo *git.Repository, branch string, items []ChangesetItem) error {
+func checkPins(repo *git.Repository, items []ChangesetItem) error {
 	head, err := repo.Head()
 	if err != nil {
 		return err
@@ -201,39 +212,74 @@ func checkPins(repo *git.Repository, branch string, items []ChangesetItem) error
 		if it.BaseBlob == "" {
 			continue
 		}
-		f, err := tree.File(it.Path)
-		if errors.Is(err, object.ErrFileNotFound) || err == nil && f.Hash.String() != it.BaseBlob {
-			return &BaseMovedError{Path: it.Path, Branch: branch}
-		}
+		pin, err := pinIn(tree, it.Path)
 		if err != nil {
-			return fmt.Errorf("file %s on %s: %w", it.Path, branch, err)
+			return fmt.Errorf("file %s on base: %w", it.Path, err)
+		}
+		if pin != it.BaseBlob {
+			return &BaseMovedError{Path: it.Path}
 		}
 	}
 	return nil
 }
 
-// fetchBranch fetches branch's remote head into the shallow clone as its
-// remote-tracking ref and returns it; zero when the remote has no such branch.
-func (w *WriteRepo) fetchBranch(repo *git.Repository, branch string) (plumbing.Hash, error) {
+// pinIn is path's blob ID in tree, AbsentBlob when the tree has no such file.
+func pinIn(tree *object.Tree, path string) (string, error) {
+	f, err := tree.File(path)
+	if errors.Is(err, object.ErrFileNotFound) {
+		return AbsentBlob, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return f.Hash.String(), nil
+}
+
+// holdLease checks that the remote branch still holds lease and records it
+// as the remote-tracking ref, which go-git's leased push compares against
+// again at push time. A deleted branch fails the lease too.
+func (w *WriteRepo) holdLease(repo *git.Repository, branch string, lease plumbing.Hash) error {
+	remote, err := repo.Remote("origin")
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
 	defer cancel()
-	tracking := plumbing.NewRemoteReferenceName("origin", branch)
-	err := repo.FetchContext(ctx, &git.FetchOptions{
-		Auth:     w.auth(),
-		RefSpecs: []config.RefSpec{config.RefSpec(fmt.Sprintf("+%s:%s", plumbing.NewBranchReferenceName(branch), tracking))},
-		Depth:    1,
-	})
-	if isMissingRef(err) {
-		return plumbing.ZeroHash, nil
-	}
-	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
-		return plumbing.ZeroHash, fmt.Errorf("fetch %s: %w", branch, err)
-	}
-	ref, err := repo.Reference(tracking, true)
+	refs, err := remote.ListContext(ctx, &git.ListOptions{Auth: w.auth()})
 	if err != nil {
-		return plumbing.ZeroHash, fmt.Errorf("fetch %s: %w", branch, err)
+		return fmt.Errorf("list remote refs: %w", err)
 	}
-	return ref.Hash(), nil
+	if headIn(refs, branch) != lease {
+		return ErrBranchMoved
+	}
+	return repo.Storer.SetReference(plumbing.NewHashReference(plumbing.NewRemoteReferenceName("origin", branch), lease))
+}
+
+// headIn is branch's head among refs, zero when absent.
+func headIn(refs []*plumbing.Reference, branch string) plumbing.Hash {
+	name := plumbing.NewBranchReferenceName(branch)
+	for _, ref := range refs {
+		if ref.Name() == name {
+			return ref.Hash()
+		}
+	}
+	return plumbing.ZeroHash
+}
+
+// RemoteHead is branch's head on the remote, "" when the remote has no such
+// branch.
+func (w *WriteRepo) RemoteHead(branch string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+	defer cancel()
+	remote := git.NewRemote(memory.NewStorage(), &config.RemoteConfig{Name: "origin", URLs: []string{w.url}})
+	refs, err := remote.ListContext(ctx, &git.ListOptions{Auth: w.auth()})
+	if err != nil {
+		return "", fmt.Errorf("list remote refs: %w", err)
+	}
+	if h := headIn(refs, branch); !h.IsZero() {
+		return h.String(), nil
+	}
+	return "", nil
 }
 
 // resetBranchTo creates branch at the current HEAD (deleting any existing local

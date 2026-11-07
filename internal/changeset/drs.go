@@ -56,6 +56,7 @@ func (c *Coordinator) StageEnableDRS(id auth.Identity, proj project.ProjectInfo,
 			Name:       f.Name,
 			SourceFile: f.Path,
 			Manifest:   string(f.Content),
+			BaseBlob:   pinOf(current, ok),
 		})
 	}
 	if _, err := c.store.ReplaceResource(id.Username, proj.Name, draft.ResourceDRS, entries...); err != nil {

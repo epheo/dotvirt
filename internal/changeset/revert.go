@@ -9,6 +9,7 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/tasks"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // Revert proposes a forward commit that undoes `hash` in proj's repo, opening (or
@@ -47,17 +48,23 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 
 	branch := c.revertBranch(id.Username, proj.Name, hash)
 	by := git.Author{Name: id.Username, Email: authorEmail(id.Username)}
-	res, err := write.CommitChangeset(c.baseBranch, branch, title, items, by)
+	fc := c.forgeFor(proj.Repo)
+	var prior forge.PR
+	var found bool
+	if fc != nil {
+		// Best-effort: a forge that cannot say reads as no PR, and the create
+		// then stands on its own.
+		var err error
+		if prior, found, err = fc.FindPR(branch, c.baseBranch); err != nil {
+			found = false
+		}
+	}
+	out, _, _, err := c.publish(fc, write, branch, title, title, body, items, by, prior, found)
 	if errors.Is(err, git.ErrNoChanges) {
 		return model.ProposeResult{}, fmt.Errorf("%w: %s already matches the state before this change", model.ErrInvalid, c.baseBranch)
 	}
 	if err != nil {
 		return model.ProposeResult{}, err
-	}
-	out := model.ProposeResult{Branch: res.Branch}
-
-	if fc := c.forge.For(proj.Repo); fc != nil {
-		c.openOrRecoverPR(fc, &out, branch, title, body)
 	}
 	return out, nil
 }

@@ -132,8 +132,7 @@ func (w *WriteRepo) pushBranch(repo *git.Repository, branch string, lease plumbi
 		opts.ForceWithLease = &git.ForceWithLease{RefName: plumbing.NewBranchReferenceName(branch), Hash: lease}
 	}
 	err := repo.PushContext(ctx, opts)
-	// go-git reports a broken lease only as this text.
-	if err != nil && !lease.IsZero() && strings.Contains(err.Error(), "non-fast-forward update") {
+	if err != nil && !lease.IsZero() && leaseRefused(err, branch) {
 		return fmt.Errorf("push %s: %w", branch, ErrBranchMoved)
 	}
 	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
@@ -160,7 +159,7 @@ func (w *WriteRepo) Commit(branch, message string, files []model.File) (CommitRe
 	for i, f := range files {
 		items[i] = ChangesetItem{Path: f.Path, NewContent: f.Content}
 	}
-	return w.commitItems(repo, wt, branch, message, items, Author{}, plumbing.ZeroHash)
+	return w.commitItems(repo, wt, branch, message, items, Author{}, plumbing.ZeroHash, nil)
 }
 
 // checkoutBranch checks out branch as a local branch tracking the remote. A
@@ -211,4 +210,14 @@ func ensureDir(wt *git.Worktree, path string) error {
 		}
 	}
 	return nil
+}
+
+// leaseRefused reports a push of branch refused because the branch moved
+// after holdLease read it. go-git has no typed error for it: the client-side
+// check says "non-fast-forward update: <ref>", and a refusal the server makes
+// after its advertisement comes back as "command error on <ref>: ...".
+func leaseRefused(err error, branch string) bool {
+	ref := plumbing.NewBranchReferenceName(branch).String()
+	msg := err.Error()
+	return strings.Contains(msg, "non-fast-forward update: "+ref) || strings.Contains(msg, "command error on "+ref+":")
 }

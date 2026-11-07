@@ -155,6 +155,10 @@ func TestRevertMergeOpensPR(t *testing.T) {
 			_, _ = w.Write([]byte("[]")) // no PR on the revert branch yet
 			return
 		}
+		if r.Method == "GET" && strings.Contains(r.URL.Path, "/pulls/main/") {
+			http.NotFound(w, r)
+			return
+		}
 		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/pulls") {
 			t.Errorf("unexpected forge call %s %s", r.Method, r.URL.Path)
 			http.Error(w, "unexpected", http.StatusNotImplemented)
