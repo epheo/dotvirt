@@ -135,3 +135,14 @@ func TestProposeEditThatNoLongerAppliesIsConflict(t *testing.T) {
 		})
 	}
 }
+
+// A preview refuses what staging would, so the inline editor shows a bad value
+// before the user stages it.
+func TestPreviewEditRefusesInvalidValues(t *testing.T) {
+	c := newTestCoordinator(t, false)
+	proj := project.ProjectInfo{Name: "p", Repo: seedBare(t)}
+	bad := model.VMEdit{SetLabels: map[string]string{"env": "true\nkind: RoleBinding"}}
+	if _, err := c.PreviewEdit(proj, "alpha", "web", bad); !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("want ErrInvalid, got %v", err)
+	}
+}

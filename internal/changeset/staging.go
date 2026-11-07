@@ -72,9 +72,12 @@ func (c *Coordinator) checkEdit(read *git.Repo, namespace, name string, edit mod
 
 // PreviewEdit renders an edit as the changes staging it would list, restart
 // flags included, without touching the draft: an inline editor states the
-// consequence before the user stages.
+// consequence, or the value staging would refuse, before the user stages.
 func (c *Coordinator) PreviewEdit(proj project.ProjectInfo, namespace, name string, edit model.VMEdit) ([]model.Change, error) {
 	if err := requireRepo(proj); err != nil {
+		return nil, err
+	}
+	if err := manifest.ValidateEdit(edit); err != nil {
 		return nil, err
 	}
 	read, err := c.read(proj)
