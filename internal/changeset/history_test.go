@@ -155,6 +155,10 @@ func TestRevertMergeOpensPR(t *testing.T) {
 			_, _ = w.Write([]byte("[]")) // no PR on the revert branch yet
 			return
 		}
+		if r.Method == "GET" && strings.Contains(r.URL.Path, "/pulls/main/") {
+			http.NotFound(w, r)
+			return
+		}
 		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/pulls") {
 			t.Errorf("unexpected forge call %s %s", r.Method, r.URL.Path)
 			http.Error(w, "unexpected", http.StatusNotImplemented)
@@ -203,10 +207,21 @@ func TestRevertReusesLegacyBranch(t *testing.T) {
 	bare, _, hash := seedMerged(t)
 	r := &Reader{proposed: "dotvirt/proposed"}
 	legacy := r.legacyRevertPrefix("alice", "p") + hash[:8]
+	legacyPR := `{"number":7,"state":"open","html_url":"http://forge/pulls/7","base":{"ref":"main"},"head":{"ref":"` + legacy + `"}}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Forgejo's base/head pair lookup and the list's head filter, both on
+		// the bare branch name.
+		if _, pair, ok := strings.Cut(req.URL.Path, "/pulls/main/"); ok && req.Method == "GET" {
+			if pair == legacy {
+				_, _ = w.Write([]byte(legacyPR))
+				return
+			}
+			http.NotFound(w, req)
+			return
+		}
 		if req.Method == "GET" && strings.HasSuffix(req.URL.Path, "/pulls") {
-			if strings.HasSuffix(req.URL.Query().Get("head"), ":"+legacy) {
-				_, _ = w.Write([]byte(`[{"number":7,"state":"open","html_url":"http://forge/pulls/7","base":{"ref":"main"},"head":{"ref":"` + legacy + `"}}]`))
+			if req.URL.Query().Get("head") == legacy {
+				_, _ = w.Write([]byte("[" + legacyPR + "]"))
 				return
 			}
 			_, _ = w.Write([]byte("[]"))
@@ -285,6 +300,7 @@ func TestOpenProposalsListsEveryPR(t *testing.T) {
 		q := r.URL.Query()
 		switch {
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/pulls") && q.Get("state") == "open":
+			w.Header().Set("X-Total-Count", "4")
 			_, _ = w.Write([]byte(`[{"number":4,"state":"open","html_url":"http://forge/pulls/4","title":"edit web","base":{"ref":"main"},"head":{"ref":"` + draftHead + `","sha":"aaa"}},` +
 				`{"number":9,"state":"open","html_url":"http://forge/pulls/9","title":"Revert \"Resize web\" (#12)","base":{"ref":"main"},"head":{"ref":"` + revertHead + `","sha":"bbb"}},` +
 				`{"number":10,"state":"open","html_url":"http://forge/pulls/10","title":"bob's revert","base":{"ref":"main"},"head":{"ref":"dotvirt/proposed/revert/bob/p-` + hash[:8] + `","sha":"ccc"}},` +

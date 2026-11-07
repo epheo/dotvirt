@@ -5,8 +5,8 @@
 	import { friendlyError, quantity, quantityBytes } from '#lib/format.js';
 	import { memoryHint } from '#lib/headroom.js';
 	import {
-		composeEdit,
 		FIELD_LABEL,
+		fieldEdit,
 		inlineBlock,
 		type InlineField,
 		type InlineValue,
@@ -176,19 +176,13 @@
 				? 'Use a whole number of vCPU'
 				: '';
 
-	const composed = (r: Row) =>
-		composeEdit(
-			stagedItem?.edit as Parameters<typeof composeEdit>[0],
-			r.inline!.field,
-			r.inline!.field === 'cpuCores' ? Number(value) : value,
-			r.inline!.gitValue,
-		);
+	const edit = (r: Row) => fieldEdit(r.inline!.field, value);
 
 	// Ask the backend what staging would change, a beat after typing stops.
 	// Keyed on the edit itself, so a live frame never re-asks.
 	const previewKey = $derived.by(() => {
 		const r = rows.find((x) => x.key === editing);
-		return r?.inline && !invalid(r) ? JSON.stringify(composed(r)) : '';
+		return r?.inline && !invalid(r) ? JSON.stringify(edit(r)) : '';
 	});
 	let seq = 0;
 	$effect(() => {
@@ -197,12 +191,12 @@
 			preview = { changes: null, error: '', loading: false };
 			return;
 		}
-		const edit = JSON.parse(k) as ReturnType<typeof composed>;
+		const next = JSON.parse(k) as ReturnType<typeof edit>;
 		const mine = ++seq;
 		preview = { changes: null, error: '', loading: true };
 		const t = setTimeout(async () => {
 			try {
-				const changes = edit ? await api.previewEdit(vm.namespace, vm.name, edit) : [];
+				const changes = await api.previewEdit(vm.namespace, vm.name, next);
 				if (mine === seq) preview = { changes, error: '', loading: false };
 			} catch (e) {
 				if (mine === seq) preview = { changes: null, error: friendlyError(e), loading: false };
@@ -233,17 +227,25 @@
 		editing === 'memory' ? memoryHint(room.data, vm, sizing.memory, String(value)) : null,
 	);
 
-	const project = $derived(inventory.projectOf(vm.namespace));
 	const stageOp = action();
-	async function stage(r: Row, edit = composed(r)) {
+	async function stage(r: Row, next = edit(r)) {
 		const label = r.label;
+		let left = true;
 		const ok = await stageOp.run(async () => {
-			if (edit) await api.stageEdit(vm.namespace, vm.name, { sourceFile: vm.sourceFile, ...edit });
-			else await api.unstage(vm.namespace, vm.name, undefined, project);
+			const view = await api.stageEdit(vm.namespace, vm.name, {
+				sourceFile: vm.sourceFile,
+				...next,
+			});
+			left = view.items.some(
+				(i) =>
+					(!i.resource || i.resource === 'vm') &&
+					i.namespace === vm.namespace &&
+					i.name === vm.name,
+			);
 		});
 		if (!ok) return;
 		editing = null;
-		if (edit) ui.toastStaged(`${label} staged for ${vm.name}. It applies when the PR merges.`);
+		if (left) ui.toastStaged(`${label} staged for ${vm.name}. It applies when the PR merges.`);
 		else {
 			drafts.refresh();
 			ui.showToast(`Nothing left staged for ${vm.name}.`, { kind: 'success' });
@@ -251,14 +253,7 @@
 	}
 
 	function unstageField(r: Row) {
-		if (!r.inline) return;
-		const edit = composeEdit(
-			stagedItem?.edit as Parameters<typeof composeEdit>[0],
-			r.inline.field,
-			r.inline.gitValue ?? '',
-			r.inline.gitValue ?? '',
-		);
-		void stage(r, edit);
+		if (r.inline) void stage(r, fieldEdit(r.inline.field, r.inline.gitValue));
 	}
 </script>
 

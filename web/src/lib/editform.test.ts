@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { VM } from '#lib/api.js';
-import { buildEditRequest, seedEditForm } from '#lib/editform.js';
+import { buildEditRequest, seedEditForm, summarize } from '#lib/editform.js';
 
 function vm(over: Partial<VM> = {}): VM {
 	return {
@@ -57,28 +57,27 @@ describe('buildEditRequest', () => {
 		expect(buildEditRequest(v, form)).toEqual({ sourceFile: v.sourceFile, power: 'Off' });
 	});
 
-	it('a cpu change sends the full custom sizing and nothing else', () => {
+	// The backend lays an edit over what is staged: a field sent at git's value
+	// would unstage a staged change of it.
+	it('a cpu change on a custom-sized VM sends the cpu alone', () => {
 		const v = customVM();
 		const form = seedEditForm(v);
 		form.cpuCores = 4;
-		expect(buildEditRequest(v, form)).toEqual({
-			sourceFile: v.sourceFile,
-			sizing: 'custom',
-			cpuCores: 4,
-			memory: '4Gi',
-		});
+		expect(buildEditRequest(v, form)).toEqual({ sourceFile: v.sourceFile, cpuCores: 4 });
 	});
 
-	it('a memory change sends the full custom sizing', () => {
+	it('the review names a single sizing field it stages', () => {
+		const v = customVM();
+		const form = seedEditForm(v);
+		form.cpuCores = 4;
+		expect(summarize(v, form)).toEqual([{ label: 'CPU', value: '2 -> 4' }]);
+	});
+
+	it('a memory change on a custom-sized VM sends the memory alone', () => {
 		const v = customVM();
 		const form = seedEditForm(v);
 		form.memory = '8Gi';
-		expect(buildEditRequest(v, form)).toEqual({
-			sourceFile: v.sourceFile,
-			sizing: 'custom',
-			cpuCores: 2,
-			memory: '8Gi',
-		});
+		expect(buildEditRequest(v, form)).toEqual({ sourceFile: v.sourceFile, memory: '8Gi' });
 	});
 
 	it('custom -> instancetype conversion sends the instancetype, never cpu/memory', () => {

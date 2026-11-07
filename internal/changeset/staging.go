@@ -16,7 +16,8 @@ import (
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
-// StageEdit records a VM edit in (id, proj)'s draft.
+// StageEdit records a VM edit in (id, proj)'s draft, on top of any edit
+// already staged for the VM (see stageEdit).
 func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, namespace, name string, req model.EditRequest) (model.DraftView, error) {
 	if err := requireRepo(proj); err != nil {
 		return model.DraftView{}, err
@@ -30,16 +31,13 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 	if err := validate.RequireRepoPath("source file", req.SourceFile); err != nil {
 		return model.DraftView{}, err
 	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
+	return c.stageEdit(id, proj, draft.Entry{
 		Kind:       draft.KindEdit,
 		Namespace:  namespace,
 		Name:       name,
 		SourceFile: req.SourceFile,
 		Edit:       &edit,
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
+	})
 }
 
 // PreviewEdit renders an edit as the changes staging it would list, restart
@@ -111,14 +109,6 @@ func (c *Coordinator) renderVM(proj project.ProjectInfo, rawSpec json.RawMessage
 		Manifest:   string(content),
 		FromWizard: true,
 	}, nil
-}
-
-// stage records one rendered entry and answers with the draft it joined.
-func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entry draft.Entry) (model.DraftView, error) {
-	if err := c.store.Stage(id.Username, proj.Name, entry); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
 }
 
 // preview lists what staging entries into proj's draft would write.
@@ -402,16 +392,13 @@ func (c *Coordinator) StageDelete(id auth.Identity, proj project.ProjectInfo, re
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
+	return c.stage(id, proj, draft.Entry{
 		Kind:       draft.KindDelete,
 		Resource:   draft.Resource(resource),
 		Namespace:  namespace,
 		Name:       name,
 		SourceFile: path,
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
+	})
 }
 
 // Unstage removes one pending change (of the given resource - empty means VM)
@@ -420,31 +407,74 @@ func (c *Coordinator) StageDelete(id auth.Identity, proj project.ProjectInfo, re
 // would leave a proposable half-change.
 func (c *Coordinator) Unstage(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) error {
 	if r := draft.Resource(resource); r.Atomic() {
-		_, err := c.unstageResource(id, proj, r)
+		_, err := c.store.ReplaceResource(id.Username, proj.Name, r)
 		return err
 	}
 	return c.store.Unstage(id.Username, proj.Name, draft.Resource(resource), namespace, name)
 }
 
-// unstageResource drops every entry of one resource from (id, proj)'s draft,
-// reporting how many it removed. Backs both the atomic-resource unstage (see
-// draft.Resource.Atomic) and the declarative DRS restage.
-func (c *Coordinator) unstageResource(id auth.Identity, proj project.ProjectInfo, r draft.Resource) (int, error) {
-	entries, err := c.store.List(id.Username, proj.Name)
+// stage writes entries into (id, proj)'s draft as one change and renders the
+// draft that results. Each entry writing a manifest records the version of
+// the file it replaces (see pin), and a whole-file edit never replaces staged
+// field edits: they would vanish from the draft without the user knowing.
+func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entries ...draft.Entry) (model.DraftView, error) {
+	if err := c.pin(proj, entries); err != nil {
+		return model.DraftView{}, err
+	}
+	err := c.store.Apply(id.Username, proj.Name, func(d map[string]draft.Entry) error {
+		for _, e := range entries {
+			if staged, ok := d[e.Key()]; ok && fieldEdit(staged) && e.Kind == draft.KindEdit {
+				return fmt.Errorf("%w: %s has staged setting changes; propose or unstage them before replacing its whole manifest",
+					model.ErrConflict, objectLabel(e))
+			}
+			d[e.Key()] = e
+		}
+		return nil
+	})
 	if err != nil {
-		return 0, err
+		return model.DraftView{}, err
 	}
-	removed := 0
+	return c.Get(id, proj)
+}
+
+// pin records on each entry writing or removing a file the version of that
+// file on base (draft.Entry.BaseBlob), in one read. An entry already pinned
+// keeps its pin: one whose content the server derived from bytes it read is
+// pinned to those bytes (pinOf), never to a second read that may see a newer
+// file.
+func (c *Coordinator) pin(proj project.ProjectInfo, entries []draft.Entry) error {
+	pinned := func(e draft.Entry) bool { return e.BaseBlob != "" || e.Manifest == "" && e.Kind != draft.KindDelete }
+	var paths []string
 	for _, e := range entries {
-		if e.Resource != r {
-			continue
+		if !pinned(e) {
+			paths = append(paths, e.SourceFile)
 		}
-		if err := c.store.Unstage(id.Username, proj.Name, e.Resource, e.Namespace, e.Name); err != nil {
-			return removed, err
-		}
-		removed++
 	}
-	return removed, nil
+	if len(paths) == 0 {
+		return nil
+	}
+	read, err := c.read(proj)
+	if err != nil {
+		return err
+	}
+	pins, err := read.Pins(c.baseBranch, paths...)
+	if err != nil {
+		return err
+	}
+	for i, e := range entries {
+		if !pinned(e) {
+			entries[i].BaseBlob = pins[e.SourceFile]
+		}
+	}
+	return nil
+}
+
+// pinOf is the pin of a file read as content, ok=false when it was absent.
+func pinOf(content []byte, ok bool) string {
+	if !ok {
+		return git.AbsentBlob
+	}
+	return git.BlobID(content)
 }
 
 // Discard clears (id, proj)'s draft.

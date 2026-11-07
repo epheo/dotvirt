@@ -317,6 +317,46 @@ function editChanges(body, vm) {
 	return changes;
 }
 
+// changeset.stageEdit's contract: incoming fields lay over the staged edit
+// (labels by key, lists by name), a field back at git's value drops out, and
+// an empty result unstages the VM.
+function overlayEdit(staged, incoming, vm) {
+	const out = { ...staged, ...incoming };
+	const byName = (a = [], b = [], key = (x) => x.name ?? x) => [
+		...a.filter((x) => !b.some((y) => key(y) === key(x))),
+		...b,
+	];
+	if (staged.setLabels || incoming.setLabels)
+		out.setLabels = { ...staged.setLabels, ...incoming.setLabels };
+	for (const k of [
+		'removeLabels',
+		'addDisks',
+		'removeDisks',
+		'addNetworks',
+		'removeNetworks',
+		'addGroups',
+		'removeGroups',
+		'migrateVolumes',
+	])
+		if (staged[k] || incoming[k]) out[k] = byName(staged[k], incoming[k]);
+	for (const k of [
+		'power',
+		'cpuCores',
+		'memory',
+		'instancetype',
+		'preference',
+		'evictionStrategy',
+		'drsExclude',
+	])
+		if (out[k] !== undefined && vm && String(out[k]) === String(vm[k] ?? '')) delete out[k];
+	for (const [k, v] of Object.entries(vm?.labels ?? {}))
+		if (out.setLabels?.[k] === v) delete out.setLabels[k];
+	for (const k of Object.keys(out))
+		if (out[k] === undefined || (typeof out[k] === 'object' && !Object.keys(out[k]).length))
+			delete out[k];
+	return out;
+}
+
 function findVM(ns, name) {
 	for (const p of state.scenario.inventory.projects)
 		for (const n of p.namespaces) {
@@ -565,8 +605,20 @@ async function handleAPI(req, res, url) {
 			if (sub === 'edit') {
 				const body = await readBody(req);
 				if (!body?.sourceFile) return sendText(res, 400, 'sourceFile is required');
-				const { sourceFile: _, ...edit } = body;
-				const changes = editChanges(edit, findVM(ns, name));
+				const { sourceFile: _, ...incoming } = body;
+				const vm = findVM(ns, name);
+				const proj = projectOf(ns);
+				const prev =
+					proj && state.staged.get(proj.name)?.find((i) => i.namespace === ns && i.name === name);
+				if (prev && (prev.kind !== 'edit' || !prev.edit))
+					return sendText(res, 409, `${ns}/${name} has a staged ${prev.kind} waiting`);
+				const edit = overlayEdit(prev?.edit ?? {}, incoming, vm);
+				if (proj && !Object.keys(edit).length) {
+					const rest = (state.staged.get(proj.name) ?? []).filter((i) => i !== prev);
+					state.staged.set(proj.name, rest);
+					return sendJSON(res, 200, draftFor(proj.name));
+				}
+				const changes = editChanges(edit, vm);
 				return stage(res, ns, name, {
 					kind: 'edit',
 					changes: changes.length ? changes : [{ field: 'manifest', action: 'change' }],
