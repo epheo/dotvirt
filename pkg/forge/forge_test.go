@@ -6,8 +6,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -69,11 +71,14 @@ func testClient(srvURL string) *Client {
 
 // pullsServer lists prs the way Forgejo's GET /pulls does: state, base and
 // head filter by exact column match (head against the bare branch name),
-// pages cap at maxPage items whatever limit asks, and the list keeps the
-// given order (callers pass it most recently updated first).
-func pullsServer(t *testing.T, maxPage int, prs ...PR) *httptest.Server {
+// pages cap at maxPage items whatever limit asks, X-Total-Count carries the
+// match count, and the list keeps the given order (callers pass it most
+// recently updated first). calls counts the requests.
+func pullsServer(t *testing.T, maxPage int, prs ...PR) (srv *httptest.Server, calls *atomic.Int32) {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	calls = new(atomic.Int32)
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
 		q := r.URL.Query()
 		var match []PR
 		for _, pr := range prs {
@@ -93,10 +98,11 @@ func pullsServer(t *testing.T, maxPage int, prs ...PR) *httptest.Server {
 			page = 1
 		}
 		from, to := min((page-1)*maxPage, len(match)), min(page*maxPage, len(match))
+		w.Header().Set("X-Total-Count", strconv.Itoa(len(match)))
 		writeJSON(t, w, match[from:to])
 	}))
 	t.Cleanup(srv.Close)
-	return srv
+	return srv, calls
 }
 
 func listedPR(number int, state, head, base string, merged bool) PR {
@@ -127,7 +133,7 @@ func TestFindPR(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			srv := pullsServer(t, 2, c.prs...)
+			srv, _ := pullsServer(t, 2, c.prs...)
 			got, ok, err := testClient(srv.URL).FindPR(head, "main")
 			if err != nil {
 				t.Fatalf("FindPR: %v", err)
@@ -142,6 +148,29 @@ func TestFindPR(t *testing.T) {
 				t.Fatalf("got (#%d, ok=%v), want #%d", got.Number, ok, c.want)
 			}
 		})
+	}
+}
+
+// The lane lists every open PR into base across pages, and stops at the
+// forge's stated total instead of asking for an empty page.
+func TestOpenPRsPages(t *testing.T) {
+	srv, calls := pullsServer(t, 2,
+		listedPR(1, "open", "a", "main", false), listedPR(2, "open", "b", "release", false),
+		listedPR(3, "open", "c", "main", false), listedPR(4, "closed", "d", "main", true),
+		listedPR(5, "open", "e", "main", false))
+	prs, err := testClient(srv.URL).OpenPRs("main")
+	if err != nil {
+		t.Fatalf("OpenPRs: %v", err)
+	}
+	var got []int
+	for _, pr := range prs {
+		got = append(got, pr.Number)
+	}
+	if !slices.Equal(got, []int{1, 3, 5}) {
+		t.Fatalf("got %v, want every open PR into main", got)
+	}
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("3 PRs at 2 a page are 2 requests, made %d", n)
 	}
 }
 

@@ -321,7 +321,7 @@ func (r *Reader) OpenProposals(proj project.ProjectInfo) ([]model.Proposal, erro
 	if fc == nil {
 		return nil, nil
 	}
-	open, err := fc.OpenPRs(r.baseBranch, 50)
+	open, err := fc.OpenPRs(r.baseBranch)
 	if err != nil {
 		return nil, err
 	}

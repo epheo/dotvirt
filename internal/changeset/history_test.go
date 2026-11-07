@@ -243,6 +243,7 @@ func TestOpenProposalsListsEveryPR(t *testing.T) {
 		q := r.URL.Query()
 		switch {
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/pulls") && q.Get("state") == "open":
+			w.Header().Set("X-Total-Count", "4")
 			_, _ = w.Write([]byte(`[{"number":4,"state":"open","html_url":"http://forge/pulls/4","title":"edit web","base":{"ref":"main"},"head":{"ref":"` + draftHead + `","sha":"aaa"}},` +
 				`{"number":9,"state":"open","html_url":"http://forge/pulls/9","title":"Revert \"Resize web\" (#12)","base":{"ref":"main"},"head":{"ref":"` + revertHead + `","sha":"bbb"}},` +
 				`{"number":10,"state":"open","html_url":"http://forge/pulls/10","title":"bob's revert","base":{"ref":"main"},"head":{"ref":"dotvirt/proposed/revert/bob/p-` + hash[:8] + `","sha":"ccc"}},` +

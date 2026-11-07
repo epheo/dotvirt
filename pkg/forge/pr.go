@@ -50,8 +50,7 @@ func (c *Client) CreatePR(title, body, head, base string) (PR, error) {
 	return pr, nil
 }
 
-// prPageSize is the page a PR scan asks for. Forgejo caps it at its own
-// MAX_RESPONSE_ITEMS, so a short page does not mean the last one.
+// prPageSize is the page a PR scan asks for.
 const prPageSize = 50
 
 // prPageLimit bounds one scan; a PR past it reads as absent.
@@ -63,31 +62,44 @@ const prPageLimit = 20
 // the "owner:branch" form matches nothing, and older versions ignore the
 // filters altogether. A fork's PR reusing the branch name never matches.
 func (c *Client) FindPR(head, base string) (pr PR, ok bool, err error) {
-	if pr, ok, err := c.scanPRs("open", head, base); err != nil || ok {
+	match := func(p PR) bool {
+		if p.Head.Ref == head && p.Head.RepoID == p.Base.RepoID {
+			pr, ok = p, true
+		}
+		return ok
+	}
+	if err = c.eachPR("open", base, match); err != nil || ok {
 		return pr, ok, err
 	}
-	return c.scanPRs("closed", head, base)
+	err = c.eachPR("closed", base, match)
+	return pr, ok, err
 }
 
-// scanPRs pages through state's PRs, most recently updated first, until one
-// from head into base turns up or a page comes back empty.
-func (c *Client) scanPRs(state, head, base string) (PR, bool, error) {
+// eachPR visits the PRs into base in state, most recently updated first,
+// page by page until visit returns true, the forge's X-Total-Count is
+// reached or a page comes back empty. A short page alone ends nothing: the
+// forge caps a page at its own MAX_RESPONSE_ITEMS.
+func (c *Client) eachPR(state, base string, visit func(PR) bool) error {
+	seen := 0
 	for page := 1; page <= prPageLimit; page++ {
 		q := fmt.Sprintf("/pulls?state=%s&sort=recentupdate&base=%s&limit=%d&page=%d", state, url.QueryEscape(base), prPageSize, page)
 		var prs []PR
-		if err := c.do("GET", c.repoPath(q), nil, &prs); err != nil {
-			return PR{}, false, err
-		}
-		if len(prs) == 0 {
-			break
+		header, err := c.doRead("GET", c.repoPath(q), nil, &prs)
+		if err != nil {
+			return err
 		}
 		for _, pr := range prs {
-			if pr.State == state && pr.Head.Ref == head && pr.Base.Ref == base && pr.Head.RepoID == pr.Base.RepoID {
-				return pr, true, nil
+			if pr.State == state && pr.Base.Ref == base && visit(pr) {
+				return nil
 			}
 		}
+		seen += len(prs)
+		total, terr := strconv.Atoi(header.Get("X-Total-Count"))
+		if len(prs) == 0 || terr == nil && seen >= total {
+			return nil
+		}
 	}
-	return PR{}, false, nil
+	return nil
 }
 
 // PR fetches one pull request by number.
@@ -99,20 +111,14 @@ func (c *Client) PR(number int) (PR, error) {
 	return pr, nil
 }
 
-// OpenPRs lists the open PRs targeting base, bounded by limit.
-func (c *Client) OpenPRs(base string, limit int) ([]PR, error) {
-	q := fmt.Sprintf("/pulls?state=open&limit=%d&base=%s", limit, url.QueryEscape(base))
-	var prs []PR
-	if err := c.do("GET", c.repoPath(q), nil, &prs); err != nil {
-		return nil, err
-	}
-	out := prs[:0]
-	for _, pr := range prs {
-		if pr.Base.Ref == base {
-			out = append(out, pr)
-		}
-	}
-	return out, nil
+// OpenPRs lists every open PR into base.
+func (c *Client) OpenPRs(base string) ([]PR, error) {
+	var out []PR
+	err := c.eachPR("open", base, func(pr PR) bool {
+		out = append(out, pr)
+		return false
+	})
+	return out, err
 }
 
 // MergedPRs lists PRs merged into base, most recently updated first, bounded by
