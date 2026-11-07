@@ -1,7 +1,16 @@
 <script lang="ts">
 	import { Check, GitBranch, Pencil } from '@lucide/svelte';
-	import { api, vmKey, type Change, type DraftItem, type VM } from '#lib/api.js';
-	import { friendlyError, quantity, quantityBytes } from '#lib/format.js';
+	import {
+		api,
+		vmKey,
+		type Change,
+		type DraftItem,
+		type HostCapacity,
+		type Node,
+		type VM,
+	} from '#lib/api.js';
+	import { bytes, friendlyError, quantity, quantityBytes } from '#lib/format.js';
+	import { memoryFit } from '#lib/headroom.js';
 	import {
 		composeEdit,
 		FIELD_LABEL,
@@ -9,7 +18,7 @@
 		type InlineField,
 		type InlineValue,
 	} from '#lib/inlineedit.js';
-	import { action } from '#lib/resource.svelte.js';
+	import { action, resource } from '#lib/resource.svelte.js';
 	import { vmSizing } from '#lib/sizing.js';
 	import { TONE_PILL } from '#lib/status.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
@@ -208,6 +217,43 @@
 			: { tone: 'ok', text: 'Applies without a restart when the PR merges.' };
 	}
 
+	// Memory only: guest memory is reserved per VM, so an increase past every
+	// host's free memory leaves the VM unable to start; vCPU is time-shared.
+	// Capacity is metrics-backed: with metrics off the hint stays silent.
+	const fitInputs = resource<{ cap: HostCapacity | null; nodes: Node[] | null } | null>(
+		() => (editing === 'memory' ? 'fit' : ''),
+		async (k) => {
+			if (!k) return null;
+			const [cap, nodes] = await Promise.all([
+				api.capacity().catch(() => null),
+				api.nodes().catch(() => null),
+			]);
+			return { cap, nodes };
+		},
+	);
+	const fitHint = $derived.by((): { warn: boolean; text: string } | null => {
+		const cap = fitInputs.data?.cap;
+		if (editing !== 'memory' || !cap) return null;
+		const need = quantityBytes(String(value));
+		const current = quantityBytes(vm.memoryActual || sizing.memory || '') || 0;
+		if (!(need > current)) return null;
+		const f = memoryFit(cap, fitInputs.data?.nodes ?? null, need, {
+			node: vm.nodeName,
+			bytes: current,
+		});
+		if (!f?.best) return null;
+		const most = `Most room: ${f.best.node}, ${bytes(f.best.free)} free.`;
+		return f.fits
+			? {
+					warn: false,
+					text: `Fits on ${f.fits} of ${f.hosts} host${f.hosts === 1 ? '' : 's'}. ${most}`,
+				}
+			: {
+					warn: true,
+					text: `No host has ${quantity(String(value))} free. ${most} ${vm.name} could not start until a host frees memory.`,
+				};
+	});
+
 	const project = $derived(inventory.projectOf(vm.namespace));
 	const stageOp = action();
 	async function stage(r: Row, edit = composed(r)) {
@@ -320,6 +366,11 @@
 								{:else if cq}
 									<p class="mt-1 text-xs {cq.tone === 'warn' ? 'text-warn-ink' : 'text-ok-ink'}">
 										{cq.text}
+									</p>
+								{/if}
+								{#if fitHint && !err}
+									<p class="mt-1 text-xs {fitHint.warn ? 'text-warn-ink' : 'text-ink-muted'}">
+										{fitHint.text}
 									</p>
 								{/if}
 								{#if stageOp.error}<p class="mt-1 text-xs text-danger-ink">{stageOp.error}</p>{/if}

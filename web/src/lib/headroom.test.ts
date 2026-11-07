@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HostCapacity, VM } from '#lib/api.js';
-import { headroom } from '#lib/headroom.js';
+import { headroom, memoryFit } from '#lib/headroom.js';
 
 const GiB = 2 ** 30;
 
@@ -73,5 +73,37 @@ describe('headroom', () => {
 
 	it('has nothing to say without a sized VM', () => {
 		expect(headroom(cap, null, [], null)).toBeNull();
+	});
+});
+
+describe('memoryFit', () => {
+	const nodes = [
+		{ name: 'w1', ready: true },
+		{ name: 'w2', ready: true },
+		{ name: 'w3', ready: true, unschedulable: true },
+	];
+
+	it('counts hosts with room and names the freest, skipping cordoned ones', () => {
+		// w1 37.2 GiB free, w2 48.4 GiB; w3 is cordoned.
+		const f = memoryFit(cap, nodes, 40 * GiB, { bytes: 0 })!;
+		expect(f.fits).toBe(1);
+		expect(f.hosts).toBe(2);
+		expect(f.best!.node).toBe('w2');
+		expect(f.best!.free / GiB).toBeCloseTo(48.4);
+	});
+
+	it('gives the VM its own memory back on its current host', () => {
+		const f = memoryFit(cap, nodes, 50 * GiB, { node: 'w1', bytes: 16 * GiB })!;
+		expect(f.fits).toBe(1);
+		expect(f.best!.node).toBe('w1');
+	});
+
+	it('reports no fit rather than nothing when every host is short', () => {
+		expect(memoryFit(cap, nodes, 64 * GiB, { bytes: 0 })!.fits).toBe(0);
+	});
+
+	it('has nothing to say when no host takes VMs', () => {
+		const down = nodes.map((n) => ({ ...n, ready: false }));
+		expect(memoryFit(cap, down, GiB, { bytes: 0 })).toBeNull();
 	});
 });
