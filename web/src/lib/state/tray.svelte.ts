@@ -1,0 +1,64 @@
+import { api, type Proposal, type TaskEntry } from '#lib/api.js';
+import { follow, followKey, type Followed } from '#lib/tray.js';
+import { persisted } from './persisted.svelte';
+
+// How often a merged PR whose commit is not in history yet asks again.
+const RESOLVE_EVERY_MS = 30_000;
+
+// The change tray's memory: whether it is unfolded, and the PRs this user
+// opened, followed until they are live or dismissed. Persisted so a reload
+// keeps following; cleared on sign-out so the next user starts clean.
+class TrayStore {
+	#open = persisted('dotvirt.tray.open', true);
+	#followed = persisted<Followed[]>('dotvirt.tray.followed', []);
+	#asked = new Map<string, number>();
+
+	get open(): boolean {
+		return this.#open.value;
+	}
+	set open(v: boolean) {
+		this.#open.value = v;
+	}
+	get followed(): Followed[] {
+		return this.#followed.value;
+	}
+
+	// Called when the open PRs or the merge feed move.
+	update(proposals: Proposal[], feed: TaskEntry[]) {
+		const merges = feed.filter((t) => t.kind === 'merge');
+		const next = follow(this.#followed.value, proposals, merges);
+		if (next !== this.#followed.value) this.#followed.value = next;
+		for (const f of next) if (f.mergedAt && !f.hash) void this.#resolve(f);
+	}
+
+	// The merge commit is what Argo's revision is checked against; history is
+	// read under the caller's token, once per merge until it shows up.
+	async #resolve(f: Followed) {
+		const key = followKey(f.project, f.prNumber);
+		const last = this.#asked.get(key) ?? 0;
+		if (Date.now() - last < RESOLVE_EVERY_MS) return;
+		this.#asked.set(key, Date.now());
+		try {
+			const c = (await api.history(f.project)).find((c) => c.prNumber === f.prNumber);
+			if (!c) return;
+			this.#followed.value = this.#followed.value.map((x) =>
+				followKey(x.project, x.prNumber) === key ? { ...x, hash: c.hash } : x,
+			);
+		} catch {
+			// History unreadable for now: the lane stays applying and asks again.
+		}
+	}
+
+	dismiss(key: string) {
+		this.#followed.value = this.#followed.value.filter(
+			(f) => followKey(f.project, f.prNumber) !== key,
+		);
+	}
+
+	reset() {
+		this.#followed.value = [];
+		this.#asked.clear();
+	}
+}
+
+export const tray = new TrayStore();

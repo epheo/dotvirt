@@ -14,6 +14,7 @@ import type {
 import type { EditSection } from '#lib/editform.js';
 import { reviewURL, type ReviewTarget } from '#lib/review.js';
 import { drafts } from './drafts.svelte';
+import { tray } from './tray.svelte';
 
 export type Tier0Initial =
 	{ kind: 'snat'; spec: EgressIPCreate } | { kind: 'route'; spec: ExternalRouteCreate };
@@ -53,6 +54,7 @@ export type AppModal =
 			reason?: string;
 	  }
 	| { kind: 'staged'; vm: VMRef } // the per-VM staged-changes modal (from a Staged badge)
+	| { kind: 'propose'; project: string } // review a project's draft and open its PR
 	// The VM dialogs live here, not on the detail page, so every VM menu (detail
 	// toolbar, context menu, inspector, palette) opens them the same way. They
 	// hold the identity only: the host resolves the live VM every frame.
@@ -129,10 +131,22 @@ class Ui {
 		opts?: { kind?: ToastKind; target?: ReviewTarget },
 	) {
 		drafts.refresh();
+		// New work unfolds the tray, even one folded earlier.
+		tray.open = true;
 		this.showToast(msg, {
 			kind: opts?.kind ?? 'success',
-			action: { label: 'Review & propose', run: () => this.openChanges(opts?.target ?? null) },
+			action: { label: 'Review & propose', run: () => this.reviewStaged(opts?.target) },
 		});
+	}
+
+	// A staging toast's way forward: an explicit review target opens Changes on
+	// it; otherwise the one project with a draft opens its propose sheet, and
+	// several unfold the change tray to pick from.
+	reviewStaged(target?: ReviewTarget) {
+		if (target) return this.openChanges(target);
+		const staged = drafts.drafts.filter((d) => d.draft.count > 0);
+		if (staged.length === 1) this.modal = { kind: 'propose', project: staged[0].project };
+		else tray.open = true;
 	}
 
 	modal = $state<AppModal | null>(null);

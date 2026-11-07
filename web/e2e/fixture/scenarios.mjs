@@ -674,6 +674,10 @@ const drift = {
 			],
 			warning:
 				'Merging will prune 2 objects the repo no longer declares (web-prod/old-vm, web-prod/old-net). Verify they are meant to go.',
+			prune: [
+				{ kind: 'VirtualMachine', namespace: 'web-prod', name: 'old-vm' },
+				{ kind: 'NetworkAttachmentDefinition', namespace: 'web-prod', name: 'old-net' },
+			],
 		},
 	},
 	vmDrift: {

@@ -17,7 +17,6 @@
 	import ContainerMonitor from '#lib/components/ContainerMonitor.svelte';
 	import EffectivePolicyPanel from '#lib/components/EffectivePolicyPanel.svelte';
 	import NetworkTopology from '#lib/components/NetworkTopology.svelte';
-	import PendingBanner from '#lib/components/PendingBanner.svelte';
 	import PlatformAdoptBanner from '#lib/components/PlatformAdoptBanner.svelte';
 	import RepoBanner from '#lib/components/RepoBanner.svelte';
 	import Permissions from '#lib/components/Permissions.svelte';
@@ -207,7 +206,6 @@
 	{:else}
 		{#if scope.kind === 'project' || scope.kind === 'namespace'}
 			<RepoBanner project={scope.project} />
-			<PendingBanner project={scope.project} />
 			<AdoptBanner
 				project={scope.project}
 				namespace={scope.kind === 'namespace' ? scope.namespace : undefined}

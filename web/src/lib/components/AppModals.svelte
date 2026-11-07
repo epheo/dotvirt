@@ -23,6 +23,7 @@
 	import NewNetworkModal from './NewNetworkModal.svelte';
 	import NewProjectModal from './NewProjectModal.svelte';
 	import NewVMWizard from './NewVMWizard.svelte';
+	import ProposeSheet from './ProposeSheet.svelte';
 	import SaveTemplateModal from './SaveTemplateModal.svelte';
 	import StagedChangesModal from './StagedChangesModal.svelte';
 	import StorageMigrateModal from './StorageMigrateModal.svelte';
@@ -187,4 +188,6 @@
 	/>
 {:else if m?.kind === 'migrateStorage' && vm}
 	<StorageMigrateModal {vm} onclose={close} />
+{:else if m?.kind === 'propose'}
+	<ProposeSheet project={m.project} onclose={close} />
 {/if}

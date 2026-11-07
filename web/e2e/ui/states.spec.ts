@@ -63,9 +63,20 @@ test('untracked VM in a healthy project offers adoption where the user is', asyn
 	await expect(main.locator('tbody tr', { hasText: 'legacy-1' })).toContainText('Not in git');
 });
 
-test('prune risk warns before anything merges', async ({ page }) => {
-	await page.getByRole('link', { name: /Propose \d+ change/ }).click();
-	const main = page.locator('main');
-	await expect(main.getByText(/Merging will prune 2 objects/)).toBeVisible();
-	await expect(main.getByText('web-1').first()).toBeVisible();
+test('prune risk needs an explicit yes before the PR opens', async ({ page }) => {
+	const tray = page.getByRole('complementary', { name: 'Changes in flight' });
+	await expect(tray.getByText(/also deletes 2 objects/)).toBeVisible();
+	await tray.getByRole('button', { name: 'Review and propose' }).click();
+	const sheet = page.getByRole('dialog');
+	await expect(sheet.getByText(/deletes 2 objects from the cluster/)).toBeVisible();
+	await expect(sheet.getByText(/web-prod\/old-vm/)).toBeVisible();
+	await expect(sheet.getByText(/web-prod\/old-net/)).toBeVisible();
+	const open = sheet.getByRole('button', { name: 'Open pull request' });
+	await expect(open).toBeDisabled();
+	await sheet.getByLabel(/Delete these 2 when this merges/).check();
+	await expect(open).toBeEnabled();
+	// The full lane still carries Argo's own sentence.
+	await page.keyboard.press('Escape');
+	await tray.getByRole('link', { name: 'Open in Changes' }).click();
+	await expect(page.locator('main').getByText(/Merging will prune 2 objects/)).toBeVisible();
 });

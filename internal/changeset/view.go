@@ -19,7 +19,8 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 		return model.DraftView{}, err
 	}
 	view := model.DraftView{Base: c.baseBranch, Branch: c.proposedBranch(id.Username, proj.Name), Count: len(entries), Items: []model.DraftItem{}}
-	view.Warning = c.pruneWarning(proj, entries)
+	view.Prune = c.prunePending(proj, entries)
+	view.Warning = pruneWarning(view.Prune)
 	if len(entries) == 0 {
 		return view, nil
 	}
@@ -92,16 +93,16 @@ func wizardChanges(e draft.Entry) []model.Change {
 	return createChanges(docs.order[0])
 }
 
-// pruneWarning: what a merge lets ArgoCD delete, from Argo's own requiresPruning
+// prunePending: what a merge lets ArgoCD delete, from Argo's own requiresPruning
 // minus what the draft speaks for. Derived every render, never stored: a stored
 // warning outlived the state and read partial captures as complete.
-func (c *Coordinator) pruneWarning(proj project.ProjectInfo, entries []draft.Entry) string {
+func (c *Coordinator) prunePending(proj project.ProjectInfo, entries []draft.Entry) []model.ObjectRef {
 	if c.prune == nil {
-		return ""
+		return nil
 	}
 	pending := c.prune.PrunePending(proj.Repo, proj.Namespaces)
 	if len(pending) == 0 {
-		return ""
+		return nil
 	}
 	covered := map[model.ObjectRef]bool{}
 	for _, e := range entries {
@@ -109,14 +110,24 @@ func (c *Coordinator) pruneWarning(proj project.ProjectInfo, entries []draft.Ent
 			covered[ref] = true
 		}
 	}
-	var missing []string
+	var missing []model.ObjectRef
 	for _, ref := range pending {
 		if !covered[ref] {
-			missing = append(missing, ref.Kind+" "+ref.Namespace+"/"+ref.Name)
+			missing = append(missing, ref)
 		}
 	}
-	if len(missing) == 0 {
+	return missing
+}
+
+// pruneWarning words the pending prune for the PR body and the views that show
+// one sentence; the review lists every object from DraftView.Prune.
+func pruneWarning(refs []model.ObjectRef) string {
+	if len(refs) == 0 {
 		return ""
+	}
+	missing := make([]string, len(refs))
+	for i, ref := range refs {
+		missing[i] = ref.Kind + " " + ref.Namespace + "/" + ref.Name
 	}
 	const maxShown = 4
 	more := ""
