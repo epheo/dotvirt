@@ -4,11 +4,17 @@
 // before a project rule, and the list must not suggest otherwise.
 import type { EffectivePolicy, NetworkRules, Policy, PolicyBinding } from '#lib/api.js';
 
+// How a rule relates to what is described: it binds its own VMs, it names
+// them from elsewhere, or it merely matches them from elsewhere ("any
+// namespace" and the like - on a real cluster, most of the platform's rules).
+export type RuleGroup = 'own' | 'names' | 'wildcard';
+
 export interface RuleLine {
 	key: string;
 	icon: 'allow' | 'deny' | 'out' | 'pass';
 	text: string;
 	tier: string; // "Cluster rule", "Project rule", ...
+	group: RuleGroup;
 	policy?: Policy;
 	note?: string; // "Priority 10", "For VMs labeled app=db in db-prod"
 }
@@ -51,6 +57,7 @@ function linesOf(b: PolicyBinding): RuleLine[] {
 			icon: iconOf(r.direction, r.action),
 			text: r.text!,
 			tier: tierOf(p),
+			group: 'own' as const,
 			policy: p,
 			note: note || undefined,
 		}));
@@ -60,6 +67,7 @@ function linesOf(b: PolicyBinding): RuleLine[] {
 			icon: 'deny',
 			text: p.isolation,
 			tier: tierOf(p),
+			group: 'own',
 			policy: p,
 			note: note || undefined,
 		});
@@ -79,6 +87,7 @@ export function vmRuleLines(eff: EffectivePolicy, project: string): RuleLine[] {
 			icon: 'out',
 			text: 'Reaches anything outside.',
 			tier: `No outbound rules in ${project}`,
+			group: 'own',
 		});
 	return out;
 }
@@ -92,19 +101,37 @@ export function networkRuleLines(rules: NetworkRules): RuleLine[] {
 			icon: iconOf(r.rule.direction === 'Ingress' ? 'Egress' : 'Ingress', r.rule.action),
 			text: r.text,
 			tier: tierOf(r.policy),
+			group: r.wildcard ? 'wildcard' : 'names',
 			policy: r.policy,
 			note: r.conditional ? 'only the VMs its labels pick' : undefined,
 		});
 	return out;
 }
 
+/** Whether a project rule of its own binds these VMs (else only cluster rules do). */
+export const hasOwnRule = (lines: RuleLine[]) =>
+	lines.some((l) => l.group === 'own' && l.policy?.kind === 'dfw');
+
+/**
+ * The wildcard rules folded into one sentence: never worth listing one by
+ * one in a summary, but worth knowing about. '' when there are none.
+ */
+export function wildcardSummary(lines: RuleLine[]): string {
+	const wild = lines.filter((l) => l.group === 'wildcard');
+	const n = new Set(wild.map((l) => l.key.slice(0, l.key.lastIndexOf(':')))).size;
+	if (!n) return '';
+	const where = wild.every((l) => l.policy?.namespace) ? 'in other projects' : 'elsewhere';
+	return `${n} rule${n === 1 ? '' : 's'} ${where} ${n === 1 ? 'lets' : 'let'} any namespace reach ${n === 1 ? 'its' : 'their'} own VMs.`;
+}
+
 /**
  * The n lines most worth a glance, kept in the evaluator's order: one of each
  * kind first (a project rule letting traffic in, the first cluster rule that
  * blocks, a rule elsewhere naming these VMs, what reaches outside), then the
- * rest in order.
+ * rest in order. Wildcard rules never make the cut (see wildcardSummary).
  */
-export function topLines(lines: RuleLine[], n: number): RuleLine[] {
+export function topLines(all: RuleLine[], n: number): RuleLine[] {
+	const lines = all.filter((l) => l.group !== 'wildcard');
 	const firstDeny = lines.find((l) => l.policy?.kind === 'admin' && l.icon === 'deny');
 	const kind = (l: RuleLine) => {
 		if (l.key.startsWith('peer:')) return 2;

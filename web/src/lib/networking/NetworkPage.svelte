@@ -8,7 +8,7 @@
 	import { networkByRef, networkKey, networkKind } from '#lib/networks.js';
 	import { canAuthorRef, networkRef } from '#lib/objects.js';
 	import { resource } from '#lib/resource.svelte.js';
-	import { networkRuleLines } from '#lib/rulelines.js';
+	import { hasOwnRule, networkRuleLines } from '#lib/rulelines.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { networking } from '#lib/state/networking.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -181,22 +181,47 @@
 					rulesFailed={rulesRes.failed}
 				/>
 			{:else if tab === 'rules'}
-				<Card
-					title="Rules that apply"
-					meta={rulesRes.data || isPod ? `${ruleLines.length}` : undefined}
-				>
-					{#if rulesRes.failed}
+				{#if rulesRes.failed}
+					<Card title="Rules that apply">
 						<p class="text-[13px] text-danger-ink">The rules could not be read.</p>
-					{:else if !isPod && !rulesRes.data}
+					</Card>
+				{:else if !isPod && !rulesRes.data}
+					<Card title="Rules that apply">
 						<p class="text-[13px] text-ink-faint">Reading the rules...</p>
-					{:else if !ruleLines.length}
-						<p class="text-[13px] text-ink-faint">
-							No rule bears on this network. Its VMs accept traffic from anywhere.
-						</p>
-					{:else}
-						<RuleList lines={ruleLines} owner gap="gap-3" />
-					{/if}
-				</Card>
+					</Card>
+				{:else}
+					{@const groups = [
+						{ id: 'own', title: 'Its own rules', meta: 'binding its namespace or its VMs' },
+						{
+							id: 'names',
+							title: 'Rules elsewhere that name it',
+							meta: 'naming its namespace or project',
+						},
+						{
+							id: 'wildcard',
+							title: 'Rules elsewhere that let any namespace in',
+							meta: 'matching it without naming it',
+						},
+					]}
+					<div class="flex flex-col gap-4">
+						{#each groups as g (g.id)}
+							{@const list = ruleLines.filter((l) => l.group === g.id)}
+							{#if g.id === 'own' || list.length}
+								<Card title={g.title} meta="{list.length}, {g.meta}">
+									{#if g.id === 'own' && !isPod && !hasOwnRule(ruleLines)}
+										<p class="mb-3 text-[13px] text-ink-soft">
+											No rule of its own: every VM here accepts traffic from anywhere the cluster
+											rules allow.
+										</p>
+									{/if}
+									{#if list.length}
+										<RuleList lines={list} owner gap="gap-3" />
+									{/if}
+								</Card>
+							{/if}
+						{/each}
+					</div>
+				{/if}
 			{:else if net?.sourceFile && project}
 				{@const ref = networkRef(net)}
 				<FileHistory

@@ -67,3 +67,23 @@ test('the firewall reads as sentences, cluster rules first', async ({ page }) =>
 	await expect(main.getByText('allow-https')).toHaveCount(0);
 	await expect(main.getByText('allow-web-to-db')).toBeVisible();
 });
+
+test('rules that merely match any namespace fold into one line', async ({ page }) => {
+	// On a real cluster the platform's own rules let any namespace in: they
+	// must not read as this network's rules, and REACHES never shows them.
+	await setScenario(page, 'base');
+	await login(page);
+	await page.goto('/networking/batch-prod/udn-tcp-frontend');
+	const main = page.locator('main');
+	await expect(main.getByText(/^No rule of its own: every VM here accepts traffic/)).toBeVisible();
+	await expect(
+		main.getByText(/6 rules in other projects let any namespace reach their own VMs/),
+	).toBeVisible();
+	await expect(main.getByText(/openshift-gitops/)).toHaveCount(0);
+	await main.getByRole('link', { name: 'All on the Rules tab' }).click();
+	await expect(
+		main.getByRole('heading', { name: 'Rules elsewhere that let any namespace in' }),
+	).toBeVisible();
+	await expect(main.getByText(/openshift-gitops on TCP 8082/)).toBeVisible();
+	await expect(main.getByRole('heading', { name: 'Rules elsewhere that name it' })).toHaveCount(0);
+});

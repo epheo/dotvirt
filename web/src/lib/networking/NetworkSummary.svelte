@@ -24,7 +24,7 @@
 		openEdit,
 	} from '#lib/objects.js';
 	import { resource } from '#lib/resource.svelte.js';
-	import { topLines, type RuleLine } from '#lib/rulelines.js';
+	import { hasOwnRule, topLines, wildcardSummary, type RuleLine } from '#lib/rulelines.js';
 	import { overlaps, usableAddresses } from '#lib/subnets.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { networking } from '#lib/state/networking.svelte.js';
@@ -86,7 +86,7 @@
 		const out: Reach[] = [];
 		const byProject = new Map<string, Reach>();
 		for (const r of rules?.reaches ?? []) {
-			if (r.rule.direction !== 'Ingress' || r.rule.action !== 'Allow') continue;
+			if (r.wildcard || r.rule.direction !== 'Ingress' || r.rule.action !== 'Allow') continue;
 			const ns = r.policy.namespace;
 			const title = ns ? inventory.projectOf(ns) || ns : r.policy.name;
 			if (!byProject.has(title))
@@ -130,6 +130,14 @@
 		if (out.length < 3) out.push(...[...byProject.values()].slice(1, 1 + 3 - out.length));
 		return out.slice(0, 3);
 	});
+
+	// Rules ranked for a summary: its own and those naming it; the "any
+	// namespace" kind folds into one quiet line.
+	const shown = $derived(topLines(lines, 3));
+	const own = $derived(hasOwnRule(lines));
+	const folded = $derived(wildcardSummary(lines));
+	const NO_OWN =
+		'No rule of its own: every VM here accepts traffic from anywhere the cluster rules allow.';
 
 	// --- recent changes ---
 	const ref = $derived(net?.sourceFile ? networkRef(net) : null);
@@ -372,7 +380,7 @@
 					{/each}
 					{#if !reaches.length}
 						<p class="absolute top-[86px] left-[496px] w-[184px] text-xs text-ink-faint">
-							{rules ? 'No rule names another place for it.' : 'Reading the rules...'}
+							{!rules ? 'Reading the rules...' : own ? 'No rule elsewhere names it.' : NO_OWN}
 						</p>
 					{/if}
 				</div>
@@ -399,7 +407,7 @@
 
 		<Card
 			title="Rules that apply"
-			meta={rules || !net ? `${Math.min(3, lines.length)} of ${lines.length}` : undefined}
+			meta={rules || !net ? `${shown.length} of ${lines.length}` : undefined}
 			link={lines.length
 				? { label: `All ${lines.length} on the Rules tab`, href: '?tab=rules' }
 				: undefined}
@@ -413,7 +421,18 @@
 					No rule bears on it. Its VMs accept traffic from anywhere.
 				</p>
 			{:else}
-				<RuleList lines={topLines(lines, 3)} owner gap="gap-3" />
+				<div class="flex flex-col gap-3">
+					{#if net && !own}<p class="text-[13px] text-ink-soft">{NO_OWN}</p>{/if}
+					{#if shown.length}<RuleList lines={shown} owner gap="gap-3" />{/if}
+					{#if folded}
+						<p class="text-xs text-ink-faint">
+							{folded}
+							<a href="?tab=rules" class="text-accent-ink underline underline-offset-2"
+								>All on the Rules tab</a
+							>
+						</p>
+					{/if}
+				</div>
 			{/if}
 		</Card>
 
