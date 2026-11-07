@@ -16,7 +16,8 @@ import (
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
-// StageEdit records a VM edit in (id, proj)'s draft.
+// StageEdit records a VM edit in (id, proj)'s draft, on top of any edit
+// already staged for the VM (see stageEdit).
 func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, namespace, name string, req model.EditRequest) (model.DraftView, error) {
 	if err := requireRepo(proj); err != nil {
 		return model.DraftView{}, err
@@ -30,7 +31,7 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 	if err := validate.RequireRepoPath("source file", req.SourceFile); err != nil {
 		return model.DraftView{}, err
 	}
-	return c.stage(id, proj, draft.Entry{
+	return c.stageEdit(id, proj, draft.Entry{
 		Kind:       draft.KindEdit,
 		Namespace:  namespace,
 		Name:       name,
