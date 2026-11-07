@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+	api,
 	draftsByProject,
+	HttpError,
 	retryDelay,
 	streamInventory,
 	Unauthorized,
@@ -65,6 +67,50 @@ describe('withRetry', () => {
 	});
 });
 
+describe('HttpError', () => {
+	const answer = (r: Response) =>
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() => Promise.resolve(r)),
+		);
+	const caught = (p: Promise<unknown>) =>
+		p.then(
+			() => null,
+			(e: unknown) => e as HttpError,
+		);
+
+	it("shows people the server's message and keeps the path and status for logs", async () => {
+		answer(new Response('project has no usable repo\n', { status: 503 }));
+		try {
+			const e = await caught(api.tasks());
+			expect(e).toBeInstanceOf(HttpError);
+			expect(e!.message).toBe('project has no usable repo');
+			expect(e!.status).toBe(503);
+			expect(e!.path).toBe('/api/tasks');
+			expect(e!.detail).toBe('/api/tasks: 503 project has no usable repo');
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('says the status when the answer has no message of its own', async () => {
+		answer(new Response('', { status: 502, statusText: 'Bad Gateway' }));
+		try {
+			expect((await caught(api.tasks()))!.message).toBe('502 Bad Gateway');
+			answer(
+				new Response('<html><body>nginx</body></html>', {
+					status: 504,
+					statusText: 'Gateway Timeout',
+					headers: { 'Content-Type': 'text/html' },
+				}),
+			);
+			expect((await caught(api.tasks()))!.message).toBe('504 Gateway Timeout');
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+});
+
 describe('draftsByProject', () => {
 	it('reports a failed project, skips a 403, and keeps non-empty drafts', async () => {
 		const answers: Record<string, Response> = {
@@ -82,9 +128,7 @@ describe('draftsByProject', () => {
 		try {
 			const out = await draftsByProject(['web', 'empty', 'platform', 'db']);
 			expect(out.drafts.map((d) => d.project)).toEqual(['web']);
-			expect(out.failed).toEqual([
-				{ project: 'db', error: '/api/draft?project=db: 503 forge unavailable' },
-			]);
+			expect(out.failed).toEqual([{ project: 'db', error: 'forge unavailable' }]);
 		} finally {
 			vi.unstubAllGlobals();
 		}

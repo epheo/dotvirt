@@ -254,10 +254,25 @@ export class HttpError extends Error {
 	constructor(
 		message: string,
 		readonly status: number,
+		// The request that failed: in detail, for logs and tests, never in the
+		// message people read.
+		readonly path = '',
 	) {
 		super(message);
 		this.name = 'HttpError';
 	}
+
+	get detail(): string {
+		return `${this.path}: ${this.status} ${this.message}`;
+	}
+}
+
+// What a failed answer says to people: the server's own message, or the
+// status when it sent none (or a proxy's HTML error page).
+async function failure(path: string, res: Response): Promise<HttpError> {
+	const html = (res.headers.get('Content-Type') ?? '').includes('text/html');
+	const text = html ? '' : (await res.text()).trim();
+	return new HttpError(text || `${res.status} ${res.statusText}`.trim(), res.status, path);
 }
 
 // The one signed-out sink: every 401 funnels through req(), so the page
@@ -275,7 +290,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 		unauthorizedSink?.();
 		throw new Unauthorized();
 	}
-	if (!res.ok) throw new HttpError(`${path}: ${res.status} ${await res.text()}`, res.status);
+	if (!res.ok) throw await failure(path, res);
 	if (res.status === 204) return undefined as T;
 	return res.json() as Promise<T>;
 }
