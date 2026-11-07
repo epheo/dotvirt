@@ -6,6 +6,7 @@ go 1.27.3
 ignore ./web/node_modules
 
 require (
+	github.com/epheo/dotvirt/pkg/forge v0.0.0
 	github.com/go-git/go-billy/v5 v5.9.2
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
@@ -27,6 +28,10 @@ require (
 // tag (its own replace is ignored here); pin the pseudo-version k8s.io/client-go
 // requires instead.
 replace k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20250910181357-589584f1c912
+
+// pkg/forge is its own stdlib-only module so the operator shares it without
+// requiring this one. Resolved from the tree, so no pkg/forge/vX tag is needed.
+replace github.com/epheo/dotvirt/pkg/forge => ./pkg/forge
 
 require (
 	dario.cat/mergo v1.0.0 // indirect
