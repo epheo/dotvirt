@@ -39,7 +39,7 @@
 
 <div class="p-4">
 	<TabBar
-		class="mb-3 border-b border-line"
+		class="mb-3"
 		tabs={[
 			{ id: 'events', label: 'Events' },
 			{ id: 'performance', label: 'Performance' },

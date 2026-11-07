@@ -22,6 +22,7 @@
 </script>
 
 <Breadcrumb
+	class="border-b border-line px-4 py-2"
 	trail={[{ label: 'All VMs', href: '/compute' }, { label: namespace }, { label: name }]}
 />
 

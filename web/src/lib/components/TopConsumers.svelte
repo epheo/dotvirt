@@ -45,15 +45,15 @@
 	<table class="w-full text-[13px]">
 		<thead>
 			<tr class="border-b border-line text-left text-xs text-ink-muted">
-				<th class="w-1/2 px-3 py-1.5 font-semibold">VM</th>
+				<th class="w-1/2 py-1.5 pr-3 pl-card font-semibold">VM</th>
 				<th class="px-3 py-1.5 font-semibold">CPU</th>
-				<th class="px-3 py-1.5 font-semibold">Memory</th>
+				<th class="py-1.5 pr-card pl-3 font-semibold">Memory</th>
 			</tr>
 		</thead>
 		<tbody class="divide-y divide-line-soft">
 			{#each rows as c (c.namespace + '/' + c.name)}
 				<tr>
-					<td class="max-w-0 truncate px-3 py-2">
+					<td class="max-w-0 truncate py-2 pr-3 pl-card">
 						<button
 							onclick={() => onselect?.(c.namespace, c.name)}
 							class="text-ink hover:text-accent-ink hover:underline">{c.name}</button
@@ -61,10 +61,12 @@
 						<span class="ml-1 text-ink-muted">{c.namespace}</span>
 					</td>
 					<td class="px-3 py-2 whitespace-nowrap text-ink-soft tabular-nums">{cpuText(c)}</td>
-					<td class="px-3 py-2 whitespace-nowrap text-ink-soft tabular-nums">{memText(c)}</td>
+					<td class="py-2 pr-card pl-3 whitespace-nowrap text-ink-soft tabular-nums"
+						>{memText(c)}</td
+					>
 				</tr>
 			{:else}
-				<tr><td colspan="3" class="px-3 py-2 text-xs text-ink-faint">No usage data.</td></tr>
+				<tr><td colspan="3" class="px-card py-2 text-xs text-ink-faint">No usage data.</td></tr>
 			{/each}
 		</tbody>
 	</table>

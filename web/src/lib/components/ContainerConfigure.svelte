@@ -47,12 +47,12 @@
 					</Row>
 				</dl>
 				{#if p.error}
-					<p class="border-t border-warn-soft bg-warn-soft/60 px-3 py-2 text-xs text-warn-ink">
+					<p class="border-t border-warn-soft bg-warn-soft/60 px-card py-2 text-xs text-warn-ink">
 						{p.error}
 					</p>
 				{/if}
 				<!-- Quota-aware capacity: the project's ResourceQuotas. -->
-				<div class="border-t border-line-soft px-3 py-2">
+				<div class="border-t border-line-soft px-card py-2">
 					<QuotaBand scope={{ project: p.name }} showEmpty />
 				</div>
 			</InfoCard>

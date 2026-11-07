@@ -25,7 +25,8 @@ export type Tier0Initial =
 export type AppModal =
 	// namespace on the create forms is the preselected target: the one the
 	// opener's view is focused on, so a New from inside a project lands there.
-	| { kind: 'newVM'; namespaces: string[] | null; namespace?: string } // null = all creatable namespaces
+	// image prefills the boot image, as "namespace/name".
+	| { kind: 'newVM'; namespaces: string[] | null; namespace?: string; image?: string } // null = all creatable namespaces
 	// The network-family forms take an optional initial spec: the object read
 	// back from git, so the create form doubles as the edit form.
 	| { kind: 'newNetwork'; initial?: NetworkCreate; namespace?: string }
