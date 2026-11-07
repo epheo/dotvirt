@@ -59,7 +59,7 @@ test('a bulk move stages one edit per running VM, into each project draft', asyn
 test('one disk opens beside the table and snapshots now', async ({ page }) => {
 	await page.goto('/storage?tab=disks');
 	const main = page.locator('main');
-	await main.locator('tbody tr', { hasText: 'web-1' }).click();
+	await main.getByRole('button', { name: 'Open web-1 rootdisk' }).press('Enter');
 	const panel = main.getByRole('complementary', { name: 'web-1 rootdisk' });
 	await expect(panel.getByRole('link', { name: 'fedora-42' })).toBeVisible();
 	await expect(panel.getByText('Pinned to worker-1.')).toBeVisible();

@@ -93,7 +93,14 @@
 								<div class="flex items-center gap-2.5">
 									<CircleDot size={16} class="shrink-0 text-ink-faint" />
 									<div class="min-w-0">
-										<span class="font-mono font-medium">{shortName(u.image)}</span>
+										<button
+											class="font-mono font-medium hover:text-accent-ink"
+											aria-expanded={current}
+											onclick={(e) => {
+												e.stopPropagation();
+												go({ image: current ? undefined : u.image }, { replace: true });
+											}}>{shortName(u.image)}</button
+										>
 										<span class="block text-xs leading-4 text-ink-faint">
 											{u.templates.length
 												? `${u.templates.length === 1 ? 'Template' : 'Templates'} ${u.templates.join(', ')}`

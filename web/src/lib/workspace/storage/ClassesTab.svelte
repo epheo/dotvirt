@@ -18,19 +18,23 @@
 	const classes = $derived(new Map((storage.classes ?? []).map((c) => [c.name, c])));
 	const facts = $derived(classes.size > 0);
 
+	// The tree's order: the default class, then local, then shared.
+	const rank = (info?: StorageClassInfo) => (info?.default ? 0 : info?.profile?.shared ? 2 : 1);
 	const list = $derived(
-		storage.classNames.map((name) => {
-			const info = classes.get(name);
-			const disks = rows.filter((r) => !r.ephemeral && r.storageClass === name);
-			return {
-				name,
-				info,
-				state: stateOf(info, disks.length > 0),
-				vms: new Set(disks.map((d) => d.vmKey)).size,
-				disks: disks.length,
-				held: disks.reduce((n, d) => n + (Number.isNaN(d.size) ? 0 : d.size), 0),
-			};
-		}),
+		[...storage.classNames]
+			.sort((a, b) => rank(classes.get(a)) - rank(classes.get(b)))
+			.map((name) => {
+				const info = classes.get(name);
+				const disks = rows.filter((r) => !r.ephemeral && r.storageClass === name);
+				return {
+					name,
+					info,
+					state: stateOf(info, disks.length > 0),
+					vms: new Set(disks.map((d) => d.vmKey)).size,
+					disks: disks.length,
+					held: disks.reduce((n, d) => n + (Number.isNaN(d.size) ? 0 : d.size), 0),
+				};
+			}),
 	);
 
 	// A class disks reference but the cluster lacks leaves their DataVolumes

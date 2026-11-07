@@ -457,7 +457,16 @@
 								>{#if !r.running}<span class="ml-1.5 text-xs text-ink-faint">stopped</span>{/if}
 							</td>
 							<td class="h-10 border-b border-line-soft px-2 whitespace-nowrap">
-								<span class="font-mono text-xs font-medium">{r.disk.name || r.disk.type}</span>
+								<!-- The row opens the disk on click; this is the keyboard way in. -->
+								<button
+									class="font-mono text-xs font-medium hover:text-accent-ink"
+									aria-expanded={current}
+									aria-label="Open {r.vm.name} {r.disk.name || r.disk.type}"
+									onclick={(e) => {
+										e.stopPropagation();
+										go({ disk: current ? undefined : r.key }, { replace: true });
+									}}>{r.disk.name || r.disk.type}</button
+								>
 								{#if staged}<span class="ml-1.5 align-[1px]"><StageChip kind="staged" /></span>{/if}
 							</td>
 							<td class="h-10 border-b border-line-soft px-2 text-right whitespace-nowrap">

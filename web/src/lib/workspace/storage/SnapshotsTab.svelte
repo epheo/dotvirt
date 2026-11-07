@@ -88,6 +88,7 @@
 				variant={failedOnly ? 'outline' : 'secondary'}
 				size="sm"
 				aria-pressed={failedOnly}
+				disabled={!failures && !failedOnly}
 				onclick={() =>
 					go({ state: failedOnly ? undefined : 'failed', page: undefined }, { replace: true })}
 				>Failed {num(failures)}</Button
