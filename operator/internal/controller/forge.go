@@ -166,20 +166,16 @@ func forgeAdminHint(ns string) string {
 // condition plus the app's recover-repo UI carry the signal) but requeues, since
 // no watch event fires when the forge comes back.
 func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, _ *reconcileCtx) (*ctrl.Result, error) {
-	switch {
-	case dv.Spec.Forge.PlatformRepo == "":
-		// No platform tier configured; nothing to bootstrap.
-	case r.DryRun:
-		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionForgeRepoReady, "platform-repo bootstrap")
-	default:
-		if err := r.ensurePlatformRepo(ctx, dv); err != nil {
-			// phase "": the operand still serves, so the retry must not regress
-			// a Ready install.
-			return r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeRepoReady, "Error",
-				err.Error(), "", time.Minute), nil
-		}
-		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionTrue, "Ready", "platform repo present")
+	if dv.Spec.Forge.PlatformRepo == "" {
+		return nil, nil
 	}
+	if err := r.ensurePlatformRepo(ctx, dv); err != nil {
+		// phase "": the operand still serves, so the retry must not regress
+		// a Ready install.
+		return r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeRepoReady, "Error",
+			err.Error(), "", time.Minute), nil
+	}
+	r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionTrue, "Ready", "platform repo present")
 	return nil, nil
 }
 

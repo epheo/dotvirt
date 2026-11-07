@@ -69,6 +69,10 @@ const dotvirtFinalizer = "dotvirt.io/finalizer"
 type reconcilePhase struct {
 	cond string
 	run  func(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (*ctrl.Result, error)
+	// dryRunSkip names the work a -dry-run pass skips instead of running the
+	// phase: forge and Secret mutations server-side dry-run cannot model. ""
+	// runs the phase, which then validates its applies as dry-run.
+	dryRunSkip string
 }
 
 // Reconcile drives the install in order, recording a status condition per step so a
@@ -138,16 +142,20 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 	// invisible in status; a completed pass falls through to the Ready roll-up
 	// below.
 	for _, phase := range []reconcilePhase{
-		{dotvirtv1alpha1.ConditionDependenciesReady, r.reconcileDependencies},
-		{dotvirtv1alpha1.ConditionForgeReady, r.reconcileForge},
-		{dotvirtv1alpha1.ConditionSecretsReady, r.reconcileSecrets},
-		{dotvirtv1alpha1.ConditionWorkloadReady, r.reconcileWorkload},
-		{dotvirtv1alpha1.ConditionArgoReady, r.reconcileArgo},
-		{dotvirtv1alpha1.ConditionArgoWebhook, r.reconcileArgoWebhook},
-		{dotvirtv1alpha1.ConditionDotvirtWebhook, r.reconcileDotvirtWebhook},
+		{dotvirtv1alpha1.ConditionDependenciesReady, r.reconcileDependencies, ""},
+		{dotvirtv1alpha1.ConditionForgeReady, r.reconcileForge, ""},
+		{dotvirtv1alpha1.ConditionSecretsReady, r.reconcileSecrets, "secret generation"},
+		{dotvirtv1alpha1.ConditionWorkloadReady, r.reconcileWorkload, ""},
+		{dotvirtv1alpha1.ConditionArgoReady, r.reconcileArgo, ""},
+		{dotvirtv1alpha1.ConditionArgoWebhook, r.reconcileArgoWebhook, "argo webhook"},
+		{dotvirtv1alpha1.ConditionDotvirtWebhook, r.reconcileDotvirtWebhook, "dotvirt webhook"},
 		// Last: its failure requeues, and nothing above depends on the repo.
-		{dotvirtv1alpha1.ConditionForgeRepoReady, r.reconcilePlatformRepo},
+		{dotvirtv1alpha1.ConditionForgeRepoReady, r.reconcilePlatformRepo, "platform-repo bootstrap"},
 	} {
+		if r.DryRun && phase.dryRunSkip != "" {
+			r.dryRunSkip(dv, phase.cond, phase.dryRunSkip)
+			continue
+		}
 		res, err := phase.run(ctx, dv, rc)
 		if err != nil {
 			r.recordFailure(dv, phase.cond, err)
@@ -309,8 +317,8 @@ func (r *DotvirtReconciler) secret(ctx context.Context, ns, name string) (*corev
 	return &s, nil
 }
 
-// dryRunSkip records the standard condition for a phase whose real work mutates
-// state (the forge, argocd-secret) that server-side dry-run cannot model.
+// dryRunSkip records the standard condition for work that mutates state (the
+// forge, argocd-secret) server-side dry-run cannot model.
 func (r *DotvirtReconciler) dryRunSkip(dv *dotvirtv1alpha1.Dotvirt, condType, what string) {
 	r.setCondition(dv, condType, metav1.ConditionUnknown, "DryRun", "skipped "+what+" in dry-run")
 }

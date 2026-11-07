@@ -337,6 +337,9 @@ func TestReconcileDryRunReportsSkippedArgoWork(t *testing.T) {
 		dotvirtv1alpha1.ConditionSecretsReady,
 		dotvirtv1alpha1.ConditionWorkloadReady,
 		dotvirtv1alpha1.ConditionArgoReady,
+		dotvirtv1alpha1.ConditionArgoWebhook,
+		dotvirtv1alpha1.ConditionDotvirtWebhook,
+		dotvirtv1alpha1.ConditionForgeRepoReady,
 		dotvirtv1alpha1.ConditionAvailable,
 	} {
 		if co := cond(got, ct); co == nil || co.Status != metav1.ConditionUnknown || co.Reason != "DryRun" {

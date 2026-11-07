@@ -86,10 +86,6 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 // model). A registration failure is recorded on the condition but doesn't halt
 // the pipeline - Argo falls back to its poll.
 func (r *DotvirtReconciler) reconcileArgoWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (*ctrl.Result, error) {
-	if r.DryRun {
-		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionArgoWebhook, "argo webhook")
-		return nil, nil
-	}
 	if configured, err := r.ensureArgoWebhook(ctx, dv, rc); err != nil {
 		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionFalse, "Error", err.Error())
 	} else if configured {
