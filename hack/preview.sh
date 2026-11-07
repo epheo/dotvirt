@@ -8,8 +8,9 @@
 #
 #   VERSION=0.0.6-rc.1 hack/preview.sh
 #
-# The rc replaces the current released (stable-v0) head, so promotion is roll-forward:
-# 0.0.5 -> 0.0.6-rc.1 (preview) -> 0.0.6 (`make release`).
+# The rc replaces the current released (stable-v0) head and skips every older version, so
+# promotion is roll-forward from any earlier rc: 0.0.5 -> 0.0.6-rc.1 -> 0.0.6-rc.2 -> 0.0.6.
+# A re-run of the same VERSION reuses the images it already pushed; FORCE=1 rebuilds.
 set -euo pipefail
 VERSION="${VERSION:?set VERSION=x.y.z-rc.N}"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -27,19 +28,18 @@ trap restore EXIT   # preview is throwaway — never leave committed files chang
 # The per-commit SHA tag belongs to CI's image job. A second push to it orphans the
 # loser and quay prunes untagged manifests, so a digest pinned here can vanish.
 echo ">> app  -> $REG/dotvirt:v$VERSION"
-build_push Containerfile . "$REG/dotvirt:v$VERSION"
+build_push Containerfile . "$REG/dotvirt:v$VERSION" --build-arg VERSION="$VERSION"
 D_APP="$(digest "$REG/dotvirt:v$VERSION")"
 repin "$REG/dotvirt" "$D_APP" operator/internal/install/dotvirt.go operator/config/manager/manager.yaml
 
 echo ">> operator -> $REG/dotvirt-operator:v$VERSION"
-build_push operator/Dockerfile . "$REG/dotvirt-operator:v$VERSION"
+build_push operator/Dockerfile . "$REG/dotvirt-operator:v$VERSION" --build-arg VERSION="$VERSION"
 D_OP="$(digest "$REG/dotvirt-operator:v$VERSION")"
 repin "$REG/dotvirt-operator" "$D_OP" "$CSV"
 sed -i -E "s#(digest: )sha256:[0-9a-f]{64}#\1${D_OP}#" operator/config/default/kustomization.yaml
 
 echo ">> bundle -> $REG/dotvirt-operator-bundle:v$VERSION"
-make -C operator bundle VERSION="$VERSION" >/dev/null
-make -C operator bundle-build bundle-push VERSION="$VERSION" CONTAINER_TOOL="$TOOL" >/dev/null
+push_bundle
 D_BUNDLE="$(digest "$REG/dotvirt-operator-bundle:v$VERSION")"
 
 echo ">> catalog (stable-v0=v$REL_VER unchanged, candidate-v0=v$VERSION)"
@@ -53,20 +53,18 @@ entries:
     package: dotvirt-operator
     name: stable-v0
     entries:
-      - name: dotvirt-operator.v$REL_VER
+$(entry "$REL_VER")
   - schema: olm.channel
     package: dotvirt-operator
     name: candidate-v0
     entries:
-      - name: dotvirt-operator.v$VERSION
-        replaces: dotvirt-operator.v$REL_VER
+$(entry "$VERSION" "$REL_VER")
   - schema: olm.bundle
     image: $REL_BUNDLE
   - schema: olm.bundle
     image: $REG/dotvirt-operator-bundle@$D_BUNDLE
 YAML
-make -C operator catalog VERSION="$VERSION" >/dev/null
-build_push operator/catalog.Dockerfile operator "$REG/dotvirt-operator-catalog:v$VERSION" --build-arg OPM_VERSION="$OPM_VERSION"
+push_catalog
 D_CAT="$(digest "$REG/dotvirt-operator-catalog:v$VERSION")"
 
 cat > operator/install/catalogsource-preview.yaml <<YAML
@@ -94,5 +92,7 @@ Preview v$VERSION published to candidate-v0 (stable-v0 untouched at v$REL_VER):
 
 Roll a candidate-v0 cluster (e.g. hetznet) to it:
   kubectl apply -f operator/install/catalogsource-preview.yaml
-(Working tree restored — nothing committed. Promote with: VERSION=<final> PREV=$REL_VER make release)
+Working tree restored; nothing committed. Promote by pushing a bare tag on main, and the
+release workflow cuts it (never run release.sh locally first):
+  git tag v<final> && git push origin v<final>
 EOF
