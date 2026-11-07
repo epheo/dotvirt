@@ -81,9 +81,17 @@ owns one status condition; a phase that fails or waits records why there, so
    A tenant AppProject (`dotvirt-p-<project>`) is derived from the namespaces
    labeled `dotvirt.io/project=<project>`: those namespaces are its only
    destinations and the `dotvirt.io/repo` they name its only source, so a manifest
-   merged into one tenant's repo cannot land in another tenant's namespace. A
-   labeled namespace appearing, leaving or changing project or repo re-runs the
-   pass.
+   merged into one tenant's repo cannot land in another tenant's namespace.
+   Platform space (`openshift-*`, `kube-*`, the dotvirt, operator and ArgoCD
+   namespaces) is never a destination, and a repo that does not resolve to one URL
+   admits no source. The rules live in `pkg/tenancy`, shared with the app's plugin
+   generator. A labeled namespace appearing, leaving or changing project or repo
+   re-runs the pass.
+   `ArgoReady` turns `False` (`Degraded`) while a project is not served as labeled:
+   a project whose AppProject name is invalid or held by something else is kept
+   out of the ApplicationSet, since Argo would place its Application under that
+   AppProject's permissions; a labeled namespace in platform space; or an error the
+   ApplicationSet itself reports.
 6. **Platform repo** (`ForgeRepoReady`): ensures the platform git repo exists
    (`forge.EnsureRepo`, the imperative step a declarative installer can't do) and,
    for a managed forge, its owner org. Best-effort: a failure is recorded and the
@@ -255,6 +263,20 @@ no extra trust configuration is needed.
   - The `Dotvirt` resource and the workloads are untouched by the swap.
 - The first reconcile after the upgrade restarts the dotvirt and managed Forgejo
   pods once (a new instance label on the pods, new Forgejo settings).
+- Tenant Applications move from the shared `dotvirt-tenants` AppProject to one per
+  project, each aimed at one of the project's own namespaces instead of `default`.
+  Before upgrading:
+  - Bump or unpin `spec.image` together with the operator. An older app image does
+    not hand the ApplicationSet the destination namespace, so it stops updating
+    every tenant Application (nothing is deleted) and `ArgoReady` reports the
+    ApplicationSet's error until the image moves.
+  - Give every tenant manifest a `metadata.namespace`. Argo applies one without it
+    to the Application's destination namespace, no longer to `default`, re-creating
+    its object there and pruning the old one, disks included. The inventory lists
+    such documents per project (`unnamespaced`).
+  - Move objects a tenant repo declares in a namespace outside its project. The
+    project's AppProject refuses them, which fails that Application's whole sync.
+    The inventory lists them per project (`outOfProject`).
 
 ## Managed Forgejo credentials
 

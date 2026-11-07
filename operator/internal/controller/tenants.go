@@ -3,23 +3,22 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
 	"github.com/epheo/dotvirt/pkg/forge"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
-
-// reservedProject is the app's platform tier name (internal/project.PlatformName):
-// the app never generates an Application for it.
-const reservedProject = "platform"
 
 // tenantProject is one project as its labeled namespaces describe it.
 type tenantProject struct {
@@ -69,25 +68,37 @@ func (p *tenantProject) sourceRepo() (string, bool) {
 	return "", false
 }
 
+// tenantTier is what a pass renders for tenant Applications and what it could
+// not: the AppProjects, the projects kept out of the generator because no
+// AppProject of this install's confines them, and the notes for ArgoReady,
+// degraded ones (a project not served as labeled) apart from the rest.
+type tenantTier struct {
+	objs       []client.Object
+	unconfined []string
+	degraded   []string
+	notes      []string
+}
+
 // tenantAppProjects renders one AppProject per project from the live namespace
-// labels: its namespaces as the only destinations, its repo as the only
-// source. It also keeps the owned AppProjects Applications still reference
-// though no live project derives them: the shared tier while the ApplicationSet
-// moves its Applications off it, and a vanished project's, admitting nothing,
-// until its Application is removed. Unreferenced, they leave the render and
-// prune deletes them. notes say what could not be confined as derived.
-func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (objs []client.Object, notes []string, err error) {
+// labels: its namespaces outside platform space as the only destinations, its
+// repo as the only source. It also keeps the owned AppProjects Applications
+// still reference though no live project derives them: the shared tier while
+// the ApplicationSet moves its Applications off it, and a vanished project's,
+// admitting nothing, until its Application is removed. Unreferenced, they
+// leave the render and prune deletes them.
+func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string, platformNS []string) (tenantTier, error) {
+	var t tenantTier
 	var nsList corev1.NamespaceList
 	if err := r.List(ctx, &nsList, client.HasLabels{install.ProjectLabel}); err != nil {
-		return nil, nil, fmt.Errorf("list project namespaces: %w", err)
+		return t, fmt.Errorf("list project namespaces: %w", err)
 	}
 	forgeBase, err := r.appForgeBase(ctx, dv)
 	if err != nil {
-		return nil, nil, err
+		return t, err
 	}
 	held := unstructuredList(install.ArgoGVK("AppProject"))().(*unstructured.UnstructuredList)
-	if err := r.reader().List(ctx, held, client.InNamespace(rc.argoNS)); err != nil {
-		return nil, nil, fmt.Errorf("list AppProjects: %w", err)
+	if err := r.reader().List(ctx, held, client.InNamespace(argoNS)); err != nil {
+		return t, fmt.Errorf("list AppProjects: %w", err)
 	}
 	foreign := map[string]bool{}
 	for _, o := range held.Items {
@@ -97,45 +108,38 @@ func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1
 	}
 
 	projects := deriveTenantProjects(nsList.Items, forgeBase)
-	fallback := install.TenantRepoFallback(dv.Spec.Forge.PlatformRepo)
-	reserved := func(ns string) bool {
-		return strings.HasPrefix(ns, "openshift-") || strings.HasPrefix(ns, "kube-") ||
-			ns == dv.Namespace || ns == rc.argoNS || ns == r.OperatorNamespace
-	}
 	rendered := map[string]bool{}
-	names := make([]string, 0, len(projects))
-	for name := range projects {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		p, apName := projects[name], install.TenantProjectName(name)
-		switch {
-		case name == reservedProject:
+	for _, name := range slices.Sorted(maps.Keys(projects)) {
+		if name == tenancy.PlatformProject {
 			continue
-		case len(validation.IsDNS1123Subdomain(apName)) > 0:
-			notes = append(notes, fmt.Sprintf("project %q has no valid AppProject name", name))
+		}
+		p := projects[name]
+		apName, ok := tenancy.AppProjectName(name)
+		switch {
+		case !ok:
+			t.unconfined = append(t.unconfined, name)
+			t.degraded = append(t.degraded, fmt.Sprintf("project %q has no valid AppProject name; no Application is generated for it", name))
 			continue
 		case foreign[apName]:
-			notes = append(notes, fmt.Sprintf("AppProject %s belongs to someone else; project %s is not confined", apName, name))
+			t.unconfined = append(t.unconfined, name)
+			t.degraded = append(t.degraded, fmt.Sprintf("AppProject %s is not this install's; no Application is generated for project %s", apName, name))
 			continue
 		}
 		var destinations []string
 		for _, ns := range p.namespaces {
-			if reserved(ns) {
-				notes = append(notes, fmt.Sprintf("namespace %s is platform space, not a destination of project %s", ns, name))
+			if tenancy.Reserved(ns, platformNS) {
+				t.degraded = append(t.degraded, fmt.Sprintf("namespace %s is platform space, not a destination of project %s", ns, name))
 				continue
 			}
 			destinations = append(destinations, ns)
 		}
-		repo, ok := p.sourceRepo()
-		if !ok {
-			repo = fallback
-			if len(p.repos) > 0 {
-				notes = append(notes, fmt.Sprintf("project %s: no single resolvable repo, sources limited to %s", name, fallback))
-			}
+		var sources []string
+		if repo, ok := p.sourceRepo(); ok {
+			sources = []string{repo}
+		} else if len(p.repos) > 0 {
+			t.notes = append(t.notes, fmt.Sprintf("project %s names no single resolvable repo; its AppProject admits no source", name))
 		}
-		objs = append(objs, install.TenantAppProject(dv, rc.argoNS, name, destinations, []string{repo}))
+		t.objs = append(t.objs, install.TenantAppProject(dv, argoNS, apName, name, destinations, sources))
 		rendered[apName] = true
 	}
 
@@ -147,11 +151,11 @@ func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1
 		}
 	}
 	if len(stale) == 0 {
-		return objs, notes, nil
+		return t, nil
 	}
-	refs, err := r.projectReferences(ctx, rc.argoNS)
+	refs, err := r.projectReferences(ctx, argoNS)
 	if err != nil {
-		return nil, nil, err
+		return t, err
 	}
 	for _, o := range stale {
 		n := refs[o.GetName()]
@@ -159,19 +163,20 @@ func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1
 			continue
 		}
 		if o.GetName() == install.TenantsProjectName {
-			objs = append(objs, install.TenantsAppProject(dv, rc.argoNS, dv.Spec.Forge.PlatformRepo, dv.Namespace))
-			notes = append(notes, fmt.Sprintf("%s kept while %d Applications still reference it", install.TenantsProjectName, n))
+			t.objs = append(t.objs, install.TenantsAppProject(dv, argoNS, dv.Spec.Forge.PlatformRepo, dv.Namespace))
+			t.notes = append(t.notes, fmt.Sprintf("%s kept while %d Applications still reference it", install.TenantsProjectName, n))
 			continue
 		}
-		objs = append(objs, install.TenantAppProject(dv, rc.argoNS, o.GetLabels()[install.ProjectLabel], nil, nil))
+		t.objs = append(t.objs, install.TenantAppProject(dv, argoNS, o.GetName(), o.GetLabels()[install.ProjectLabel], nil, nil))
 	}
-	return objs, notes, nil
+	return t, nil
 }
 
-// projectReferences counts the Applications in argoNS per AppProject name.
+// projectReferences counts the generated Applications in argoNS per AppProject
+// name: the ApplicationSet labels each with its project.
 func (r *DotvirtReconciler) projectReferences(ctx context.Context, argoNS string) (map[string]int, error) {
 	apps := unstructuredList(install.ArgoGVK("Application"))().(*unstructured.UnstructuredList)
-	if err := r.reader().List(ctx, apps, client.InNamespace(argoNS)); err != nil {
+	if err := r.reader().List(ctx, apps, client.InNamespace(argoNS), client.HasLabels{install.ProjectLabel}); err != nil {
 		return nil, fmt.Errorf("list Applications: %w", err)
 	}
 	refs := map[string]int{}
@@ -181,6 +186,34 @@ func (r *DotvirtReconciler) projectReferences(ctx context.Context, argoNS string
 		}
 	}
 	return refs, nil
+}
+
+// platformNamespaces are the namespaces dotvirt, its operator and ArgoCD run
+// in, in name order: never a tenant destination (tenancy.Reserved).
+func (r *DotvirtReconciler) platformNamespaces(dv *dotvirtv1alpha1.Dotvirt, argoNS string) []string {
+	var out []string
+	for _, ns := range []string{dv.Namespace, argoNS, r.OperatorNamespace} {
+		if ns != "" {
+			out = append(out, ns)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// applicationSetError is the ApplicationSet's own ErrorOccurred message, ""
+// when it reports none: a template the plugin's parameters cannot fill, or an
+// Application it refused, freezes the tenant Applications where they are.
+func applicationSetError(appset *unstructured.Unstructured) string {
+	conds, _, _ := unstructured.NestedSlice(appset.Object, "status", "conditions")
+	for _, c := range conds {
+		m, ok := c.(map[string]any)
+		if ok && m["type"] == "ErrorOccurred" && m["status"] == "True" {
+			msg, _ := m["message"].(string)
+			return fmt.Sprintf("ApplicationSet %s: %s", appset.GetName(), msg)
+		}
+	}
+	return ""
 }
 
 // appForgeBase is the forge URL the app resolves relative repo refs against,
@@ -203,11 +236,13 @@ func (r *DotvirtReconciler) appForgeBase(ctx context.Context, dv *dotvirtv1alpha
 	return string(s.Data["url"]), nil
 }
 
-// argoNote joins the tenant notes into the ArgoReady message.
-func argoNote(notes []string) string {
-	msg := "argo resources applied"
-	if len(notes) > 0 {
-		msg += "; " + strings.Join(notes, "; ")
+// setArgoReady records the tier's state: Degraded while a project is not
+// served as labeled, Ready otherwise, the notes said either way.
+func (r *DotvirtReconciler) setArgoReady(dv *dotvirtv1alpha1.Dotvirt, t tenantTier) {
+	msg := strings.Join(append(append([]string{"argo resources applied"}, t.degraded...), t.notes...), "; ")
+	if len(t.degraded) > 0 {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoReady, metav1.ConditionFalse, "Degraded", msg)
+		return
 	}
-	return msg
+	r.setCondition(dv, dotvirtv1alpha1.ConditionArgoReady, metav1.ConditionTrue, "Ready", msg)
 }

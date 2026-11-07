@@ -303,7 +303,7 @@ func TestReconcileMinimalCRToReady(t *testing.T) {
 	if !exists(t, c, &corev1.Secret{}, argoNS, install.AppsetSecretName) {
 		t.Error("appset token not mirrored into the ArgoCD namespace")
 	}
-	appset := install.ApplicationSet(dv, argoNS)
+	appset := install.ApplicationSet(dv, argoNS, nil, nil)
 	if !exists(t, c, argoObj("ApplicationSet", argoNS, appset.GetName(), nil), argoNS, appset.GetName()) {
 		t.Error("ApplicationSet not applied")
 	}

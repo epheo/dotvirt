@@ -177,7 +177,7 @@ func TestEnvtest(t *testing.T) {
 		if len(crbs.Items) != 3 {
 			t.Errorf("instance ClusterRoleBindings = %d, want 3", len(crbs.Items))
 		}
-		appset := install.ApplicationSet(got, "argocd")
+		appset := install.ApplicationSet(got, "argocd", nil, nil)
 		if err := admin.Get(ctx, client.ObjectKeyFromObject(appset), argoObj("ApplicationSet", "", "", nil)); err != nil {
 			t.Errorf("ApplicationSet: %v", err)
 		}
@@ -196,6 +196,42 @@ func TestEnvtest(t *testing.T) {
 		if len(dests) != 1 || dests[0].(map[string]any)["namespace"] != "team-b" {
 			t.Errorf("destinations = %v, want team-b only", dests)
 		}
+	})
+
+	t.Run("label removal and relabel re-derive the AppProjects", func(t *testing.T) {
+		dests := func(name string) ([]string, bool) {
+			ap := argoObj("AppProject", "", "", nil)
+			if admin.Get(ctx, types.NamespacedName{Namespace: "argocd", Name: name}, ap) != nil {
+				return nil, false
+			}
+			ds, _, _ := unstructured.NestedSlice(ap.Object, "spec", "destinations")
+			var out []string
+			for _, d := range ds {
+				out = append(out, d.(map[string]any)["namespace"].(string))
+			}
+			return out, true
+		}
+		mustCreate(t, admin, projectNS("team-b2", "team-b", "https://forge.example/dotvirt/team-b.git"))
+		eventually(t, "team-b gains team-b2", func() bool { d, _ := dests("dotvirt-p-team-b"); return len(d) == 2 })
+		ns := &corev1.Namespace{}
+		if err := admin.Get(ctx, types.NamespacedName{Name: "team-b2"}, ns); err != nil {
+			t.Fatal(err)
+		}
+		delete(ns.Labels, install.ProjectLabel)
+		if err := admin.Update(ctx, ns); err != nil {
+			t.Fatal(err)
+		}
+		// The label leaving takes the namespace out of the cache: a delete event.
+		eventually(t, "team-b loses team-b2", func() bool { d, _ := dests("dotvirt-p-team-b"); return len(d) == 1 && d[0] == "team-b" })
+		if err := admin.Get(ctx, types.NamespacedName{Name: "team-b"}, ns); err != nil {
+			t.Fatal(err)
+		}
+		ns.Labels[install.ProjectLabel] = "team-z"
+		if err := admin.Update(ctx, ns); err != nil {
+			t.Fatal(err)
+		}
+		eventually(t, "team-z derived", func() bool { d, ok := dests("dotvirt-p-team-z"); return ok && len(d) == 1 && d[0] == "team-b" })
+		eventually(t, "unreferenced team-b pruned", func() bool { _, ok := dests("dotvirt-p-team-b"); return !ok })
 	})
 
 	t.Run("apply reclaims owned fields and keeps foreign ones", func(t *testing.T) {
@@ -249,9 +285,10 @@ func TestEnvtest(t *testing.T) {
 			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "dotvirt"},
 		}
 		mustCreate(t, admin, legacy)
-		// Same name shape, not this install's: the unscoped AppProject delete
-		// must still leave it.
-		foreign := argoObj("AppProject", "argocd", "dotvirt-p-foreign", nil)
+		// Our instance label, another install's namespace: prune lists it, and
+		// OwnedBy is what keeps the unscoped AppProject delete off it.
+		foreign := argoObj("AppProject", "argocd", "dotvirt-p-foreign",
+			map[string]string{install.InstanceLabel: dv.Name, install.InstanceNamespaceLabel: "elsewhere"})
 		mustCreate(t, admin, foreign)
 		if err := admin.Delete(ctx, dv); err != nil {
 			t.Fatal(err)
@@ -286,11 +323,8 @@ func TestEnvtest(t *testing.T) {
 				left[obj.GetNamespace()+"/"+obj.GetName()] = true
 			}
 		}
-		if len(left) != 1 || !left["/"+legacy.Name] {
-			t.Errorf("left after deletion: %v, want only the refused legacy binding", left)
-		}
-		if err := admin.Get(ctx, client.ObjectKeyFromObject(foreign), argoObj("AppProject", "", "", nil)); err != nil {
-			t.Errorf("foreign AppProject: %v", err)
+		if len(left) != 2 || !left["/"+legacy.Name] || !left["argocd/"+foreign.GetName()] {
+			t.Errorf("left after deletion: %v, want only the refused legacy binding and the other install's AppProject", left)
 		}
 	})
 }

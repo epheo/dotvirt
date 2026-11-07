@@ -469,7 +469,8 @@ func TestStatusBaseIsReadUncached(t *testing.T) {
 func TestDeleteGrantCoversEveryRenderedName(t *testing.T) {
 	// The tenant AppProjects are named after their projects, so their delete
 	// cannot be scoped by name; prune bounds it to this install's labels
-	// (TestFinalizeDeletesOnlyOwnedAppProjects). Nothing else may join them.
+	// (TestFinalizeDeletesOnlyThisInstance; as the operator, the envtest deletion
+	// subtest). Nothing else may join them.
 	unscoped := map[string]bool{"argoproj.io/appprojects": true}
 	granted := map[string]bool{}
 	for _, role := range readClusterRoles(t, filepath.Join("..", "..", "config", "rbac", "role.yaml")) {

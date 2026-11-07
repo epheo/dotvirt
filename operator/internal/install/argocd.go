@@ -18,13 +18,10 @@ const (
 	argoVersion = "v1alpha1"
 
 	// TenantsProjectName is the shared tenant tier (TenantsAppProject);
-	// projectPlatform is the privileged tier.
+	// projectPlatform is the privileged tier. Per-project AppProjects are named
+	// by tenancy.AppProjectName.
 	TenantsProjectName = "dotvirt-tenants"
 	projectPlatform    = "dotvirt-platform"
-
-	// tenantProjectPrefix names the per-project AppProjects. It cannot produce
-	// either tier name above, so a project can never claim one.
-	tenantProjectPrefix = "dotvirt-p-"
 
 	// appTargetRevision is the branch every dotvirt Application syncs, spelled once so
 	// the tenant template and the platform app cannot drift apart.
@@ -137,27 +134,21 @@ const (
 	RepoAnnotation = "dotvirt.io/repo"
 )
 
-// TenantProjectName is the AppProject confining one project's Application. The
-// ApplicationSet template spells the same name from {{.project}}.
-func TenantProjectName(project string) string { return tenantProjectPrefix + project }
-
-// TenantAppProject confines one project's Application to exactly its own
-// namespaces and repos. Argo checks the Application's destination and every
-// object's namespace against destinations, so a manifest merged into this
-// project's repo cannot land in another tenant's namespace. No namespaces
-// permits nothing: the state of a project whose namespaces are gone while its
-// Application is still being removed. Labeled with the project, which is how
-// a pass finds the ones it no longer derives.
-func TenantAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, project string, namespaces, sourceRepos []string) *unstructured.Unstructured {
+// TenantAppProject, named name (tenancy.AppProjectName), confines one project's
+// Application to exactly its own namespaces and repos. Argo checks the
+// Application's destination and every object's namespace against
+// destinations, so a manifest merged into this project's repo cannot land in
+// another tenant's namespace. No namespaces or repos permit nothing: a project
+// whose namespaces are gone while its Application is still being removed, or
+// whose repo does not resolve. Labeled with the project, which is how a pass
+// finds the ones it no longer derives.
+func TenantAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, name, project string, namespaces, sourceRepos []string) *unstructured.Unstructured {
 	destinations := make([]any, 0, len(namespaces))
 	for _, ns := range namespaces {
 		destinations = append(destinations, map[string]any{"server": inClusterServer, "namespace": ns})
 	}
-	repos := make([]any, 0, len(sourceRepos))
-	for _, r := range sourceRepos {
-		repos = append(repos, r)
-	}
-	u := argoObject("AppProject", TenantProjectName(project), argoNS, dv, tenantWhitelist(map[string]any{
+	repos := toAny(sourceRepos)
+	u := argoObject("AppProject", name, argoNS, dv, tenantWhitelist(map[string]any{
 		"description":  "dotvirt project " + project + ": its own namespaces and repo only.",
 		"sourceRepos":  repos,
 		"destinations": destinations,
@@ -167,10 +158,6 @@ func TenantAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, project string, names
 	u.SetLabels(labels)
 	return u
 }
-
-// TenantRepoFallback is the sourceRepos glob for a project whose repo cannot
-// be resolved to one URL: the forge owner prefix the shared tier used.
-func TenantRepoFallback(platformRepo string) string { return repoPrefix(platformRepo) }
 
 // PlatformAppProject is the only tier allowed cluster-scoped + tenancy objects.
 func PlatformAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo string) *unstructured.Unstructured {

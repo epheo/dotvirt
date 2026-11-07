@@ -32,8 +32,10 @@ func projectNS(name, project, repo string) *corev1.Namespace {
 	return ns
 }
 
+// application is a generated Application: the ApplicationSet labels each with
+// its project.
 func application(name, project string) *unstructured.Unstructured {
-	app := argoObj("Application", "argocd", name, nil)
+	app := argoObj("Application", "argocd", name, map[string]string{install.ProjectLabel: strings.TrimPrefix(name, "dotvirt-")})
 	app.Object["spec"] = map[string]any{"project": project}
 	return app
 }
@@ -53,8 +55,9 @@ func appProjectSpec(t *testing.T, c client.Client, name string) (destinations, s
 }
 
 // Each project gets an AppProject admitting exactly its namespaces and its
-// repo, resolved as the app resolves it; what cannot be confined as derived
-// falls back narrowly and is said in ArgoReady.
+// repo, resolved as the app resolves it. A repo that does not resolve admits
+// no source; a project no AppProject of this install's can confine is kept out
+// of the generator, and ArgoReady turns Degraded saying why.
 func TestTenantAppProjectsFromNamespaceLabels(t *testing.T) {
 	forgeDown := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -62,7 +65,9 @@ func TestTenantAppProjectsFromNamespaceLabels(t *testing.T) {
 	defer forgeDown.Close()
 	dv, creds := byoForgeCR(forgeDown.URL)
 	forge := forgeDown.URL
-	foreign := argoObj("AppProject", "argocd", "dotvirt-p-taken", map[string]string{"team": "theirs"})
+	// Same instance name, another install's namespace: OwnedBy must refuse it.
+	foreign := argoObj("AppProject", "argocd", "dotvirt-p-taken",
+		map[string]string{install.InstanceLabel: dv.Name, install.InstanceNamespaceLabel: "elsewhere"})
 	c := testBuilder(t).WithObjects(dv, creds, foreign,
 		projectNS("a-prod", "team-a", "dotvirt/team-a.git"),
 		projectNS("a-dev", "team-a", "dotvirt/team-a.git"),
@@ -82,16 +87,15 @@ func TestTenantAppProjectsFromNamespaceLabels(t *testing.T) {
 	r := newReconciler(c, depsOK)
 	reconcileOnce(t, r, dv)
 
-	fallback := forge + "/dotvirt/*"
 	for name, want := range map[string]struct{ dests, sources []string }{
 		"team-a": {[]string{"a-dev", "a-prod"}, []string{forge + "/dotvirt/team-a.git"}},
 		"team-b": {[]string{"b"}, []string{"https://other.example/x/team-b"}},
-		"team-c": {[]string{"c1", "c2"}, []string{fallback}},
-		"team-g": {[]string{"g"}, []string{fallback}},
-		"plain":  {[]string{"plain"}, []string{fallback}},
+		"team-c": {[]string{"c1", "c2"}, nil},
+		"team-g": {[]string{"g"}, nil},
+		"plain":  {[]string{"plain"}, nil},
 		"team-k": {[]string{"k"}, []string{forge + "/dotvirt/k.git"}},
 	} {
-		dests, sources := appProjectSpec(t, c, install.TenantProjectName(name))
+		dests, sources := appProjectSpec(t, c, "dotvirt-p-"+name)
 		if !slices.Equal(dests, want.dests) || !slices.Equal(sources, want.sources) {
 			t.Errorf("%s: destinations %v sources %v, want %v %v", name, dests, sources, want.dests, want.sources)
 		}
@@ -104,8 +108,15 @@ func TestTenantAppProjectsFromNamespaceLabels(t *testing.T) {
 	if !exists(t, c, foreign, "argocd", "dotvirt-p-taken") || install.OwnedBy(foreign.GetLabels(), dv) {
 		t.Errorf("a foreign AppProject was taken over: %v", foreign.GetLabels())
 	}
+	appset := argoObj("ApplicationSet", "", "", nil)
+	exists(t, c, appset, "argocd", "dotvirt-projects")
+	gen, _, _ := unstructured.NestedSlice(appset.Object, "spec", "generators")
+	values, _, _ := unstructured.NestedStringSlice(gen[0].(map[string]any)["selector"].(map[string]any)["matchExpressions"].([]any)[0].(map[string]any), "values")
+	if !slices.Equal(values, []string{"Team_Bad", "taken"}) {
+		t.Errorf("generator excludes %v, want the unconfined projects", values)
+	}
 	cond := meta.FindStatusCondition(getCR(t, c, dv).Status.Conditions, dotvirtv1alpha1.ConditionArgoReady)
-	if cond == nil || cond.Status != metav1.ConditionTrue {
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "Degraded" {
 		t.Fatalf("ArgoReady = %+v", cond)
 	}
 	for _, said := range []string{"team-c", "team-g", "kube-x", "argocd is platform space", "Team_Bad", "dotvirt-p-taken"} {
@@ -125,15 +136,14 @@ func TestTenantAppProjectResolvesAgainstBYOForge(t *testing.T) {
 	dv.Spec.Forge.URL = "https://spec.example"
 	c := testBuilder(t).WithObjects(dv, creds, projectNS("a", "team-a", "dotvirt/team-a.git")).Build()
 	r := newReconciler(c, depsOK)
-	rc := phaseCtx(r, dv)
-	objs, _, err := r.tenantAppProjects(context.Background(), dv, rc)
+	tier, err := r.tenantAppProjects(context.Background(), dv, "argocd", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(objs) != 1 {
-		t.Fatalf("rendered %d AppProjects", len(objs))
+	if len(tier.objs) != 1 {
+		t.Fatalf("rendered %d AppProjects", len(tier.objs))
 	}
-	sources, _, _ := unstructured.NestedStringSlice(objs[0].(*unstructured.Unstructured).Object, "spec", "sourceRepos")
+	sources, _, _ := unstructured.NestedStringSlice(tier.objs[0].(*unstructured.Unstructured).Object, "spec", "sourceRepos")
 	if !slices.Equal(sources, []string{"https://forge.byo.example/dotvirt/team-a.git"}) {
 		t.Errorf("sourceRepos = %v", sources)
 	}
@@ -147,9 +157,12 @@ func TestTenantMigrationOrder(t *testing.T) {
 	dv := testCR()
 	shared := argoObj("AppProject", "argocd", install.TenantsProjectName, install.Labels(dv))
 	app := application("dotvirt-team-a", install.TenantsProjectName)
+	// Not generated: no project label, so it holds nothing in place.
+	handMade := argoObj("Application", "argocd", "hand-made", nil)
+	handMade.Object["spec"] = map[string]any{"project": install.TenantsProjectName}
 	var applied []string
 	failProject := true
-	c := testBuilder(t).WithObjects(dv, shared, app, projectNS("team-a", "team-a", "dotvirt/team-a.git")).
+	c := testBuilder(t).WithObjects(dv, shared, app, handMade, projectNS("team-a", "team-a", "dotvirt/team-a.git")).
 		WithInterceptorFuncs(interceptor.Funcs{
 			Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
 				kind := obj.GetObjectKind().GroupVersionKind().Kind
@@ -210,7 +223,7 @@ func TestTenantMigrationOrder(t *testing.T) {
 // while its Application is still being removed, then it is pruned.
 func TestEmptiedProjectAppProject(t *testing.T) {
 	dv := testCR()
-	gone := install.TenantAppProject(dv, "argocd", "gone", []string{"gone-ns"}, []string{"https://forge/dotvirt/gone.git"})
+	gone := install.TenantAppProject(dv, "argocd", "dotvirt-p-gone", "gone", []string{"gone-ns"}, []string{"https://forge/dotvirt/gone.git"})
 	app := application("dotvirt-gone", gone.GetName())
 	c := testBuilder(t).WithObjects(dv, gone, app).Build()
 	r := newReconciler(c, depsOK)
@@ -271,5 +284,22 @@ func TestCacheByObjectScope(t *testing.T) {
 		if want := map[platform.Platform]int{platform.OpenShift: 1, platform.Kubernetes: 0}[plat]; routes != want {
 			t.Errorf("%s: Route entries = %d, want %d", plat, routes, want)
 		}
+	}
+}
+
+// An ApplicationSet that reports an error freezes every tenant Application
+// where it is (an app image without the namespace parameter, say): ArgoReady
+// says so instead of reading Ready.
+func TestArgoReadyCarriesApplicationSetError(t *testing.T) {
+	dv := testCR()
+	appset := argoObj("ApplicationSet", "argocd", "dotvirt-projects", install.Labels(dv))
+	appset.Object["status"] = map[string]any{"conditions": []any{
+		map[string]any{"type": "ErrorOccurred", "status": "True", "message": `map has no entry for key "namespace"`},
+	}}
+	c := testBuilder(t).WithObjects(dv, appset).Build()
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	cond := meta.FindStatusCondition(getCR(t, c, dv).Status.Conditions, dotvirtv1alpha1.ConditionArgoReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || !strings.Contains(cond.Message, `no entry for key "namespace"`) {
+		t.Errorf("ArgoReady = %+v", cond)
 	}
 }
