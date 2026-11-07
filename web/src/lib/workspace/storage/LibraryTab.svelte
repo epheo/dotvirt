@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CircleDot, HardDrive, Layers, Upload } from '@lucide/svelte';
+	import { ChevronRight, CircleDot, HardDrive, Layers, Upload } from '@lucide/svelte';
 	import { storageHref } from '#lib/nav.js';
 	import { catalog } from '#lib/state/catalog.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -216,9 +216,15 @@
 			<thead>
 				<tr class="border-b border-line text-left text-xs font-bold text-ink-muted">
 					<th scope="col" class="px-3 py-2 whitespace-nowrap">Image</th>
-					<th scope="col" class="px-3 py-2 text-right whitespace-nowrap">Disks made from it</th>
+					<th scope="col" class="px-3 py-2 text-right whitespace-nowrap">
+						<ChevronRight size={12} class="mr-1 inline align-[-1px] text-ink-faint" />Disks made
+						from it
+					</th>
 					<th scope="col" class="px-3 py-2 whitespace-nowrap">Where they live</th>
-					<th scope="col" class="px-3 py-2 whitespace-nowrap">Snapshot in {FRESH_DAYS} days</th>
+					<th scope="col" class="px-3 py-2 whitespace-nowrap">
+						<ChevronRight size={12} class="mr-1 inline align-[-1px] text-ink-faint" />Snapshot in {FRESH_DAYS}
+						days
+					</th>
 					<th scope="col" class="px-3 py-2"><span class="sr-only">Actions</span></th>
 				</tr>
 			</thead>

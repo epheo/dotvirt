@@ -24,7 +24,7 @@ describe('storage routes', () => {
 	it('keeps a storage tab on the root, not on a class drill-in', () => {
 		expect(keepTab('/storage', 'snapshots')).toBe('/storage?tab=snapshots');
 		expect(keepTab('/storage/bulk-hdd', 'snapshots')).toBe('/storage/bulk-hdd');
-		expect(keepTab('/storage/bulk-hdd', 'vms')).toBe('/storage/bulk-hdd?tab=vms');
+		expect(keepTab('/storage/bulk-hdd', 'vms')).toBe('/storage/bulk-hdd');
 	});
 	it('builds root views with an explicit tab and only set parameters', () => {
 		expect(storageHref('disks', { f: 'nolm', project: 'team-web', host: undefined })).toBe(

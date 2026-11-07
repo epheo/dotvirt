@@ -70,7 +70,8 @@ test('#144: classless disks group under the real default class', async ({ page }
 	const aside = page.locator('aside');
 	await expect(aside.getByText('fast-ssd')).toBeVisible();
 	await aside.getByText('fast-ssd').click();
-	await expect(page.locator('main').getByText('web-1')).toBeVisible();
+	await page.locator('main').getByRole('link', { name: 'Show the 5 disks' }).click();
+	await expect(page.locator('main').getByRole('link', { name: 'web-1' })).toBeVisible();
 });
 
 test('storage summary shows platform facts beside the VM footprint', async ({ page }) => {

@@ -117,9 +117,8 @@ const CONTAINER_TABS = [
 
 // The tab set of a container: compute containers carry the full set, hosts
 // drop Permissions (nodes aren't namespaced) and configure DRS at the root,
-// networking's root carries the policy plane as Security, segments and
-// storage classes are fact sheets (Summary + their VMs). The Storage root has
-// its own tabs (STORAGE_TABS).
+// networking's root carries the policy plane as Security, segments are fact
+// sheets (Summary + their VMs). Storage has its own tabs (STORAGE_TABS).
 export function containerTabs(scope: Scope, section: Section): typeof CONTAINER_TABS {
 	const only = (...ids: string[]) => CONTAINER_TABS.filter((t) => ids.includes(t.id));
 	switch (section) {
@@ -127,8 +126,6 @@ export function containerTabs(scope: Scope, section: Section): typeof CONTAINER_
 			return only('summary', 'vms', 'monitor', 'configure');
 		case 'networking':
 			return scope.kind === 'all' ? only('summary', 'vms', 'security') : only('summary', 'vms');
-		case 'storage':
-			return only('summary', 'vms');
 	}
 	// Effective policy evaluates against exactly one namespace.
 	return scope.kind === 'namespace'
@@ -143,7 +140,8 @@ function tabsAt(href: string): string[] | null {
 	const section = sectionOf(path);
 	if (!section || section === 'catalog' || section === 'changes') return null;
 	const scope = scopeFromPath(path);
-	if (section === 'storage' && scope.kind === 'all') return STORAGE_TABS.map((t) => t.id);
+	// A class drill-in is one page without tabs.
+	if (section === 'storage') return scope.kind === 'all' ? STORAGE_TABS.map((t) => t.id) : [];
 	return containerTabs(scope, section).map((t) => t.id);
 }
 
