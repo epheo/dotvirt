@@ -1,7 +1,8 @@
 // Package git is dotvirt's git plane: it clones a repo once into memory and
 // reads VM manifests from any branch's tree without checking it out. Reads never
 // touch the network - a single background fetcher (driven by the git poll, and
-// nudged after dotvirt's own pushes) owns freshness by calling Refresh.
+// nudged after dotvirt's own pushes) owns freshness, and a writer that must
+// read its own push back calls Refresh.
 package git
 
 import (
@@ -165,6 +166,9 @@ func forkStorage(s storage.Storer) (*memory.Storage, error) {
 	dst.ShallowStorage = slices.Clone(src.ShallowStorage)
 	return dst, nil
 }
+
+// Refresh fetches the remote's branch heads now.
+func (r *Repo) Refresh() error { return r.refresh() }
 
 // headsSignature refreshes from the remote and returns a stable string
 // summarizing all branch heads (name+hash). A change means some branch moved.

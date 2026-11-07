@@ -203,3 +203,63 @@ func TestCommitChangesetChecksBaseBlob(t *testing.T) {
 		t.Fatalf("an unmoved base must commit: %v", err)
 	}
 }
+
+// Extending stacks on the branch's remote head: the earlier commit stays as
+// the new one's parent, and a Transform sees the file as the branch has it.
+func TestExtendChangesetStacksOnTheBranch(t *testing.T) {
+	bare := seedMultiRepo(t)
+	w := OpenWrite(bare, "", nil, true)
+	by := Author{Name: "u", Email: "u@x"}
+	first, err := w.ExtendChangeset("main", "p", "drop db", []ChangesetItem{{Path: "tenant-a/db.yaml", Delete: true}}, by)
+	if err != nil {
+		t.Fatalf("a branch the remote lacks must fork from base: %v", err)
+	}
+	second, err := w.ExtendChangeset("main", "p", "rename web", []ChangesetItem{{Path: "tenant-a/web.yaml", Transform: func(b []byte) ([]byte, error) {
+		return bytes.ReplaceAll(b, []byte("name: web"), []byte("name: www")), nil
+	}}}, by)
+	if err != nil {
+		t.Fatalf("ExtendChangeset: %v", err)
+	}
+	parent, err := exec.Command("git", "--git-dir", bare, "rev-parse", second.Hash+"^").Output()
+	if err != nil || strings.TrimSpace(string(parent)) != first.Hash {
+		t.Fatalf("the second commit must sit on the first, parent %q (%v)", parent, err)
+	}
+	tree := lsTree(t, bare, "p")
+	if contains(tree, "tenant-a/db.yaml") {
+		t.Error("the earlier commit's delete must stay")
+	}
+	if out, _ := exec.Command("git", "--git-dir", bare, "show", "p:tenant-a/web.yaml").Output(); !bytes.Contains(out, []byte("name: www")) {
+		t.Errorf("web.yaml = %q, want the stacked rename", out)
+	}
+}
+
+// A branch someone else moved after the fetch is refused, not overwritten.
+func TestExtendChangesetRefusesAMovedBranch(t *testing.T) {
+	bare := seedMultiRepo(t)
+	w := OpenWrite(bare, "", nil, true)
+	by := Author{Name: "u", Email: "u@x"}
+	if _, err := w.ExtendChangeset("main", "p", "drop db", []ChangesetItem{{Path: "tenant-a/db.yaml", Delete: true}}, by); err != nil {
+		t.Fatal(err)
+	}
+	theirs := ""
+	_, err := w.ExtendChangeset("main", "p", "rename", []ChangesetItem{{Path: "tenant-a/web.yaml", Transform: func(b []byte) ([]byte, error) {
+		// Another writer lands on the branch between the fetch and the push.
+		cmd := exec.Command("git", "--git-dir", bare, "commit-tree", "-m", "theirs", "main^{tree}")
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@x", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@x")
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("commit-tree: %v", err)
+		}
+		theirs = strings.TrimSpace(string(out))
+		if out, err := exec.Command("git", "--git-dir", bare, "update-ref", "refs/heads/p", theirs).CombinedOutput(); err != nil {
+			t.Fatalf("update-ref: %v\n%s", err, out)
+		}
+		return bytes.ReplaceAll(b, []byte("name: web"), []byte("name: www")), nil
+	}}}, by)
+	if err == nil {
+		t.Fatal("want the push refused")
+	}
+	if head, _ := exec.Command("git", "--git-dir", bare, "rev-parse", "p").Output(); strings.TrimSpace(string(head)) != theirs {
+		t.Fatalf("the other writer's head must stand, got %q", head)
+	}
+}

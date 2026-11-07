@@ -1,11 +1,13 @@
 package git
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/format/index"
 	"github.com/go-git/go-git/v5/plumbing/object"
@@ -44,9 +46,22 @@ var ErrNoChanges = errors.New("every staged change already matches git")
 // against current trunk, not the mirror the draft was staged from. Pushes
 // when enabled.
 //
-// The branch is force-updated, so re-proposing replaces its contents rather than
-// stacking commits - keeping one PR per draft.
+// The branch is rebuilt at base and force-pushed: it is for a branch no open
+// pull request is reviewing (see ExtendChangeset).
 func (w *WriteRepo) CommitChangeset(base, branch, message string, items []ChangesetItem, by Author) (CommitResult, error) {
+	return w.commitChangeset(base, branch, false, message, items, by)
+}
+
+// ExtendChangeset is CommitChangeset on top of branch as the remote holds it -
+// an open pull request's head - so what the branch already proposes stays and
+// a Transform sees it. The push is leased to that head: a branch moved by
+// someone else meanwhile is refused, never overwritten. A branch the remote
+// lacks forks from base.
+func (w *WriteRepo) ExtendChangeset(base, branch, message string, items []ChangesetItem, by Author) (CommitResult, error) {
+	return w.commitChangeset(base, branch, true, message, items, by)
+}
+
+func (w *WriteRepo) commitChangeset(base, branch string, extend bool, message string, items []ChangesetItem, by Author) (CommitResult, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -65,11 +80,21 @@ func (w *WriteRepo) CommitChangeset(base, branch, message string, items []Change
 		return CommitResult{}, err
 	}
 
-	// Recreate the branch fresh at base so re-proposes don't stack.
-	if err := resetBranchTo(repo, wt, branch); err != nil {
+	var lease plumbing.Hash
+	if extend {
+		if lease, err = w.fetchBranch(repo, branch); err != nil {
+			return CommitResult{}, err
+		}
+	}
+	if lease.IsZero() {
+		err = resetBranchTo(repo, wt, branch)
+	} else {
+		err = checkoutBranch(repo, wt, branch)
+	}
+	if err != nil {
 		return CommitResult{}, err
 	}
-	res, err := w.commitItems(repo, wt, branch, message, items, by)
+	res, err := w.commitItems(repo, wt, branch, message, items, by, lease)
 	if err != nil {
 		return CommitResult{}, err
 	}
@@ -83,9 +108,9 @@ func (w *WriteRepo) CommitChangeset(base, branch, message string, items []Change
 }
 
 // commitItems is the tail every write shares: apply items to the checked-out
-// worktree, commit what changed on branch, push. Committed is false when every
-// item already matched the tree.
-func (w *WriteRepo) commitItems(repo *git.Repository, wt *git.Worktree, branch, message string, items []ChangesetItem, by Author) (CommitResult, error) {
+// worktree, commit what changed on branch, push under lease (see pushBranch).
+// Committed is false when every item already matched the tree.
+func (w *WriteRepo) commitItems(repo *git.Repository, wt *git.Worktree, branch, message string, items []ChangesetItem, by Author, lease plumbing.Hash) (CommitResult, error) {
 	for _, it := range items {
 		if err := applyItem(wt, it); err != nil {
 			return CommitResult{}, err
@@ -104,7 +129,7 @@ func (w *WriteRepo) commitItems(repo *git.Repository, wt *git.Worktree, branch, 
 	if err != nil {
 		return CommitResult{}, fmt.Errorf("commit: %w", err)
 	}
-	if err := w.pushBranch(repo, branch); err != nil {
+	if err := w.pushBranch(repo, branch, lease); err != nil {
 		return CommitResult{}, err
 	}
 	return CommitResult{Branch: branch, Committed: true, Hash: hash.String()}, nil
@@ -180,6 +205,30 @@ func checkBase(repo *git.Repository, items []ChangesetItem) error {
 		}
 	}
 	return nil
+}
+
+// fetchBranch fetches branch's remote head into the shallow clone as its
+// remote-tracking ref and returns it; zero when the remote has no such branch.
+func (w *WriteRepo) fetchBranch(repo *git.Repository, branch string) (plumbing.Hash, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+	defer cancel()
+	tracking := plumbing.NewRemoteReferenceName("origin", branch)
+	err := repo.FetchContext(ctx, &git.FetchOptions{
+		Auth:     w.auth(),
+		RefSpecs: []config.RefSpec{config.RefSpec(fmt.Sprintf("+%s:%s", plumbing.NewBranchReferenceName(branch), tracking))},
+		Depth:    1,
+	})
+	if isMissingRef(err) {
+		return plumbing.ZeroHash, nil
+	}
+	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return plumbing.ZeroHash, fmt.Errorf("fetch %s: %w", branch, err)
+	}
+	ref, err := repo.Reference(tracking, true)
+	if err != nil {
+		return plumbing.ZeroHash, fmt.Errorf("fetch %s: %w", branch, err)
+	}
+	return ref.Hash(), nil
 }
 
 // resetBranchTo creates branch at the current HEAD (deleting any existing local

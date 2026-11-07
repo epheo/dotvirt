@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +35,24 @@ type proposeFixture struct {
 	proj    project.ProjectInfo
 	id      auth.Identity
 	forgeAt string
+
+	mu   sync.Mutex
+	sent []sentRequest // every forge call, in order
+}
+
+type sentRequest struct{ method, path, body string }
+
+// sentTo is the bodies of every method call to a path ending in suffix, in order.
+func (f *proposeFixture) sentTo(method, suffix string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, r := range f.sent {
+		if r.method == method && strings.HasSuffix(r.path, suffix) {
+			out = append(out, r.body)
+		}
+	}
+	return out
 }
 
 // target is a project whose repo lives on the fixture's own forge, which is what the
@@ -48,7 +70,12 @@ type route func(method, path string) (status int, body string, matched bool)
 
 func newProposeFixture(t *testing.T, routes ...route) *proposeFixture {
 	t.Helper()
+	f := &proposeFixture{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		f.mu.Lock()
+		f.sent = append(f.sent, sentRequest{r.Method, r.URL.Path, string(body)})
+		f.mu.Unlock()
 		// Every scripted list is one page long.
 		if page, _ := strconv.Atoi(r.URL.Query().Get("page")); page > 1 {
 			_, _ = w.Write([]byte("[]"))
@@ -72,17 +99,14 @@ func newProposeFixture(t *testing.T, routes ...route) *proposeFixture {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	repos := git.NewRepoSet(ctx, "", nil, false, nil, time.Hour)
+	repos := git.NewRepoSet(ctx, "", nil, true, nil, time.Hour)
 	ff := forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, "")
-	c := New(store, repos, ff, nil, nil, nil, "main", "dotvirt/proposed")
-
-	return &proposeFixture{
-		c:       c,
-		repos:   repos,
-		proj:    project.ProjectInfo{Name: "p", Repo: seedBare(t)},
-		id:      auth.Identity{Username: "alice"},
-		forgeAt: srv.URL,
-	}
+	f.c = New(store, repos, ff, nil, nil, nil, "main", "dotvirt/proposed")
+	f.repos = repos
+	f.proj = project.ProjectInfo{Name: "p", Repo: seedBare(t)}
+	f.id = auth.Identity{Username: "alice"}
+	f.forgeAt = srv.URL
+	return f
 }
 
 // An existing repo must not block New Project: refusing would burn the name for
@@ -267,6 +291,11 @@ func TestProposeReopensClosedPR(t *testing.T) {
 	if out.PRURL != "http://forge/pulls/4" || !out.Existing {
 		t.Fatalf("got %+v, want reopened existing PR #4", out)
 	}
+	// The branch was rebuilt from the draft alone, so the reopened PR must say
+	// so rather than keep the text of what was turned down.
+	if p := f.sentTo("PATCH", "/pulls/4"); len(p) != 1 || !strings.Contains(p[0], `"title":"edit web"`) || !strings.Contains(p[0], `"state":"open"`) {
+		t.Fatalf("want one reopen carrying the new title, got %q", p)
+	}
 	if n := f.draftCount(t); n != 0 {
 		t.Fatalf("draft not cleared: %d entries", n)
 	}
@@ -337,10 +366,10 @@ func proposedBranchFor(user, proj string) string {
 // A draft whose whole intent is already true in git (here: a delete staged
 // against a stale mirror, with git losing the file before the propose) must
 // SELF-HEAL: propose answers a classified error naming what happened, clears
-// the draft, and never reaches the forge - not the masked internal error that
-// wedged the user until they guessed to unstage the item.
+// the draft, and opens no PR - not the masked internal error that wedged the
+// user until they guessed to unstage the item.
 func TestProposeSelfHealsSatisfiedDraft(t *testing.T) {
-	f := newProposeFixture(t) // no forge routes: any forge call fails the test
+	f := newProposeFixture(t, when("GET", "/pulls", http.StatusOK, "[]")) // any other forge call fails the test
 
 	if _, err := f.c.StageDelete(f.id, f.proj, "", "alpha", "web"); err != nil {
 		t.Fatalf("StageDelete: %v", err)
@@ -572,4 +601,103 @@ func TestProposeKeepsWhatWasStagedDuringThePush(t *testing.T) {
 	if len(entries) != 2 || entries[0].Name != "db" || entries[1].Edit == nil || entries[1].Edit.CPUCores == nil {
 		t.Fatalf("want the restaged web and the new db kept, got %+v", entries)
 	}
+}
+
+// Re-proposing while the branch's PR is open adds to that PR: the new commit
+// sits on the PR's head, nothing the PR carried is lost, and its title and
+// body are rewritten to describe both changes under the user's message.
+func TestReproposeAddsOntoTheOpenPR(t *testing.T) {
+	head := proposedBranchFor("alice", "p")
+	var opened atomic.Bool
+	f := newProposeFixture(t,
+		func(m, path string) (int, string, bool) {
+			if m != "GET" || !strings.HasSuffix(path, "/pulls") {
+				return 0, "", false
+			}
+			if !opened.Load() {
+				return http.StatusOK, "[]", true
+			}
+			return http.StatusOK, `[{"number":1,"state":"open","html_url":"http://forge/pulls/1","body":"Why: launch.\n\n## Changes\n- old","base":{"ref":"main"},"head":{"ref":"` + head + `"}}]`, true
+		},
+		func(m, path string) (int, string, bool) {
+			if m != "POST" || !strings.HasSuffix(path, "/pulls") {
+				return 0, "", false
+			}
+			opened.Store(true)
+			return http.StatusCreated, `{"number":1,"state":"open","html_url":"http://forge/pulls/1"}`, true
+		},
+		when("PATCH", "/pulls/1", http.StatusOK, `{"number":1,"state":"open"}`),
+	)
+	f.stageAndPropose(t)
+	first := revParse(t, f.proj.Repo, head)
+
+	req := model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{SetLabels: map[string]string{"tier": "gold"}}}
+	view, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", req)
+	if err != nil {
+		t.Fatalf("StageEdit: %v", err)
+	}
+	out, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{Title: view.DefaultTitle})
+	if err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	if out.PRNumber != 1 || !out.Existing {
+		t.Fatalf("got %+v, want the open PR #1", out)
+	}
+	if parent := revParse(t, f.proj.Repo, head+"^"); parent != first {
+		t.Fatalf("the new commit must sit on the PR's head %s, parent is %s", first, parent)
+	}
+	file, err := exec.Command("git", "-C", f.proj.Repo, "show", head+":web.yaml").Output()
+	if err != nil || !strings.Contains(string(file), "env: prod") || !strings.Contains(string(file), "tier: gold") {
+		t.Fatalf("the PR must carry both labels, web.yaml = %s (%v)", file, err)
+	}
+	patches := f.sentTo("PATCH", "/pulls/1")
+	if len(patches) != 1 {
+		t.Fatalf("want one PR rewrite, got %q", patches)
+	}
+	var edit forge.PREdit
+	if err := json.Unmarshal([]byte(patches[0]), &edit); err != nil {
+		t.Fatal(err)
+	}
+	if edit.Title == view.DefaultTitle || !strings.Contains(edit.Title, "web") {
+		t.Errorf("the title must describe the whole PR, not this draft alone: %q", edit.Title)
+	}
+	for _, want := range []string{"Why: launch.", "prod", "gold"} {
+		if !strings.Contains(edit.Body, want) {
+			t.Errorf("the body must carry %q:\n%s", want, edit.Body)
+		}
+	}
+	if strings.Contains(edit.Body, "- old") {
+		t.Errorf("the generated part must be rebuilt, not kept:\n%s", edit.Body)
+	}
+	if n := f.draftCount(t); n != 0 {
+		t.Fatalf("draft not cleared: %d entries", n)
+	}
+}
+
+// A forge that cannot say whether the branch has an open PR stops the
+// propose before the push: guessing "none" would rebuild an open PR's branch.
+func TestProposeWithoutAForgeAnswerPushesNothing(t *testing.T) {
+	f := newProposeFixture(t, when("GET", "/pulls", http.StatusBadGateway, "down"))
+	req := model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{SetLabels: map[string]string{"env": "prod"}}}
+	if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); !errors.Is(err, model.ErrUnavailable) {
+		t.Fatalf("want ErrUnavailable, got %v", err)
+	}
+	if out, _ := exec.Command("git", "-C", f.proj.Repo, "branch", "--list", "dotvirt/*").Output(); len(out) != 0 {
+		t.Fatalf("nothing may be pushed, got %q", out)
+	}
+	if n := f.draftCount(t); n != 1 {
+		t.Fatalf("the draft must stay, got %d entries", n)
+	}
+}
+
+func revParse(t *testing.T, repo, rev string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", repo, "rev-parse", rev).Output()
+	if err != nil {
+		t.Fatalf("rev-parse %s: %v", rev, err)
+	}
+	return strings.TrimSpace(string(out))
 }

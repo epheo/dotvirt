@@ -17,10 +17,14 @@ import (
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
-// Propose builds the working branch from (id, proj)'s whole draft, pushes it to
-// the project repo, and opens (or finds) a Forgejo PR. On success it unstages
-// what it committed; anything staged or restaged meanwhile stays for the next
-// propose.
+// Propose commits (id, proj)'s whole draft to the per-(user, project) working
+// branch and gives it a pull request. While that branch has an open PR, the
+// commit stacks on the PR's head and the PR's title and body are rewritten to
+// describe everything it now carries; otherwise the branch starts fresh from
+// base. A closed, unmerged PR is reopened over the fresh branch: closing it
+// turned its content down, so only the draft is proposed again. On success it
+// unstages what it committed; anything staged or restaged meanwhile stays for
+// the next propose.
 func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req model.ProposeRequest) (model.ProposeResult, error) {
 	entries, err := c.store.List(id.Username, proj.Name)
 	if err != nil {
@@ -29,7 +33,7 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	if len(entries) == 0 {
 		return model.ProposeResult{}, fmt.Errorf("%w: draft is empty", model.ErrInvalid)
 	}
-	_, write, err := c.write(proj)
+	read, write, err := c.write(proj)
 	if err != nil {
 		return model.ProposeResult{}, err
 	}
@@ -62,16 +66,40 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	// proposals would clobber each other's PR. Scoping it isolates them.
 	branch := c.proposedBranch(id.Username, proj.Name)
 
+	// Whether the branch has an open PR decides how it is built, so it is
+	// asked before the commit: rebuilding an open PR's branch from base would
+	// force-push away what it already proposes. A forge that cannot answer
+	// stops the propose before anything is pushed.
+	fc := c.forge.For(proj.Repo)
+	var prior forge.PR
+	var found bool
+	if fc != nil {
+		if prior, found, err = fc.FindPR(branch, c.baseBranch); err != nil {
+			log.Printf("changeset: %s: find PR: %v", branch, err)
+			return model.ProposeResult{}, fmt.Errorf("%w: the forge did not say whether this draft already has a pull request; nothing was pushed and the draft is kept, so propose again in a moment", model.ErrUnavailable)
+		}
+	}
+	extend := found && prior.State == "open"
+
 	// Attribute the commit to the k8s user (committer stays dotvirt, the SA that
 	// pushes). K8s usernames aren't emails, so synthesize a stable noreply address.
 	by := git.Author{Name: id.Username, Email: authorEmail(id.Username)}
-	res, err := write.CommitChangeset(c.baseBranch, branch, commitMsg, items, by)
+	commit := write.CommitChangeset
+	if extend {
+		commit = write.ExtendChangeset
+	}
+	res, err := commit(c.baseBranch, branch, commitMsg, items, by)
 	if errors.Is(err, git.ErrNoChanges) {
 		// Self-heal: the draft's whole intent is already true in git (typical
-		// after staging against a briefly-stale mirror), so keeping it would
-		// wedge the user behind a permanent error. Drop it and say what happened.
+		// after staging against a briefly-stale mirror) or already on the open
+		// PR, so keeping it would wedge the user behind a permanent error. Drop
+		// it and say what happened.
 		_ = c.store.Remove(id.Username, proj.Name, entries...)
-		return model.ProposeResult{}, fmt.Errorf("%w: every staged change already matches git; the draft has been cleared", model.ErrInvalid)
+		where := "git"
+		if extend {
+			where = "its open pull request"
+		}
+		return model.ProposeResult{}, fmt.Errorf("%w: every staged change already matches %s; the draft has been cleared", model.ErrInvalid, where)
 	}
 	if moved := (*git.BaseMovedError)(nil); errors.As(err, &moved) {
 		return model.ProposeResult{}, baseMoved(entries, moved.Path, c.baseBranch)
@@ -81,42 +109,80 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	}
 	out := model.ProposeResult{Branch: res.Branch}
 
-	fc := c.forge.For(proj.Repo)
-	if fc == nil {
+	switch {
+	case fc == nil:
 		// No forge configured (or unparsable repo): report the pushed branch only.
-		return out, c.store.Remove(id.Username, proj.Name, entries...)
-	}
-	if !c.openOrRecoverPR(fc, &out, branch, title, body) {
+	case extend:
+		out.PRURL, out.PRNumber, out.Existing = prior.HTMLURL, prior.Number, true
+		c.reviseOpenPR(fc, read, prior, view, req, id.Username)
+	case !c.recoverPR(fc, &out, branch, title, body, prior, found):
 		// Kept staged so the user can retry once the forge answers.
 		return out, nil
 	}
 	return out, c.store.Remove(id.Username, proj.Name, entries...)
 }
 
-// openOrRecoverPR gives a pushed branch its pull request and records it on out.
-// Propose and Revert both reuse a deterministic branch, so a PR for this
-// head->base often already exists, possibly closed: an open one is reused, a
-// closed-unmerged one reopened so the fresh push surfaces, and one is created
-// only when the branch has no live PR (none yet, or the last one merged). A
-// found or reopened PR is marked Existing. When the forge will not answer with
-// a PR, out carries the compare URL instead and ok is false: the branch IS
-// pushed, so the user can still open the PR by hand, and the caller decides
-// what a missing PR means for the draft. That is a 200, not an error - an error
-// would make the handler drop the result body.
+// reviseOpenPR rewrites an extended PR's title and body to describe the
+// branch as a whole: its diff against base, rendered the way the PR review
+// renders it, under the user's message (the new one, else the PR's). A title
+// the user typed wins; the draft's own default describes this commit alone,
+// so it yields to the cumulative one. Best-effort: the commit is on the PR
+// either way, so a failure is logged.
+func (c *Coordinator) reviseOpenPR(fc *forge.Client, read *git.Repo, pr forge.PR, draftView model.DraftView, req model.ProposeRequest, username string) {
+	if err := read.Refresh(); err != nil {
+		log.Printf("changeset: PR #%d: describe: %v", pr.Number, err)
+		return
+	}
+	files, err := read.BranchDiff(c.baseBranch, pr.Head.Ref)
+	if err != nil {
+		log.Printf("changeset: PR #%d: describe: %v", pr.Number, err)
+		return
+	}
+	view := model.DraftView{Items: commitItems(files), Warning: draftView.Warning}
+	title := req.Title
+	if title == "" || title == draftView.DefaultTitle {
+		title = defaultTitle(view)
+	}
+	message := userMessage(req.Message)
+	if message == "" {
+		message = userMessage(pr.Body)
+	}
+	if _, err := fc.EditPR(pr.Number, forge.PREdit{Title: title, Body: prBody(view, message, username)}); err != nil {
+		log.Printf("changeset: PR #%d: describe: %v", pr.Number, err)
+	}
+}
+
+// openOrRecoverPR gives a pushed branch its pull request and records it on
+// out (see recoverPR), asking the forge for the branch's PR first. A forge
+// that cannot say reads as no PR: the create then stands on its own.
 func (c *Coordinator) openOrRecoverPR(fc *forge.Client, out *model.ProposeResult, branch, title, body string) bool {
-	if found, ok, err := fc.FindPR(branch, c.baseBranch); err == nil && ok {
-		switch {
-		case found.State == "open":
-			out.PRURL, out.PRNumber, out.Existing = found.HTMLURL, found.Number, true
+	found, ok, err := fc.FindPR(branch, c.baseBranch)
+	return c.recoverPR(fc, out, branch, title, body, found, ok && err == nil)
+}
+
+// recoverPR gives a pushed branch its pull request and records it on out.
+// Propose and Revert both reuse a deterministic branch, so found (ok) is
+// often the branch's PR already, possibly closed: an open one is reused, a
+// closed-unmerged one reopened with title and body so the fresh push
+// surfaces, and one is created only when the branch has no live PR (none
+// yet, or the last one merged). A found or reopened PR is marked Existing.
+// When the forge will not answer with a PR, out carries the compare URL
+// instead and the result is false: the branch IS pushed, so the user can
+// still open the PR by hand, and the caller decides what a missing PR means
+// for the draft. That is a 200, not an error - an error would make the
+// handler drop the result body.
+func (c *Coordinator) recoverPR(fc *forge.Client, out *model.ProposeResult, branch, title, body string, found forge.PR, ok bool) bool {
+	switch {
+	case ok && found.State == "open":
+		out.PRURL, out.PRNumber, out.Existing = found.HTMLURL, found.Number, true
+		return true
+	case ok && !found.Merged:
+		reopened, err := fc.EditPR(found.Number, forge.PREdit{State: "open", Title: title, Body: body})
+		if err == nil {
+			out.PRURL, out.PRNumber, out.Existing = reopened.HTMLURL, reopened.Number, true
 			return true
-		case !found.Merged:
-			reopened, err := fc.EditPR(found.Number, forge.PREdit{State: "open", Title: title, Body: body})
-			if err == nil {
-				out.PRURL, out.PRNumber, out.Existing = reopened.HTMLURL, reopened.Number, true
-				return true
-			}
-			log.Printf("changeset: %s: found closed PR #%d but reopen failed: %v", branch, found.Number, err)
 		}
+		log.Printf("changeset: %s: found closed PR #%d but reopen failed: %v", branch, found.Number, err)
 	}
 	pr, err := fc.CreatePR(title, body, branch, c.baseBranch)
 	if err != nil {

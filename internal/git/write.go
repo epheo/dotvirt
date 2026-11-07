@@ -77,9 +77,10 @@ func (a Author) signature() *object.Signature {
 const writeTimeout = time.Minute
 
 // openWorktree clones branch alone, one commit deep, into memory - every write
-// starts from fresh remote state and needs nothing older: commits build on the
-// tip and the push forces. A branch the remote lacks falls back to the default
-// branch, which checkoutBranch forks it from. Callers hold w.mu.
+// starts from fresh remote state and needs nothing older: commits build on a
+// tip and the push replaces the remote one. A branch the remote lacks falls
+// back to the default branch, which checkoutBranch forks it from. Callers
+// hold w.mu.
 func (w *WriteRepo) openWorktree(branch string) (*git.Repository, *git.Worktree, error) {
 	repo, err := w.cloneShallow(plumbing.NewBranchReferenceName(branch))
 	if isMissingRef(err) {
@@ -111,20 +112,25 @@ func isMissingRef(err error) bool {
 	return errors.Is(err, plumbing.ErrReferenceNotFound) || errors.Is(err, git.NoMatchingRefSpecError{})
 }
 
-// pushBranch force-pushes branch when pushes are enabled (no-op otherwise); an
-// already-up-to-date remote is not an error. Force is correct for both callers:
-// the template seed lands on a repo dotvirt just created, and a re-propose
-// rebuilds its branch fresh.
-func (w *WriteRepo) pushBranch(repo *git.Repository, branch string) error {
+// pushBranch pushes branch when pushes are enabled (no-op otherwise); an
+// already-up-to-date remote is not an error. A zero lease forces: the seed
+// lands on a repo dotvirt just created, and a branch rebuilt from base
+// replaces its old self. Otherwise the remote must still hold lease, the head
+// the commit was built on.
+func (w *WriteRepo) pushBranch(repo *git.Repository, branch string, lease plumbing.Hash) error {
 	if !w.push {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
 	defer cancel()
-	err := repo.PushContext(ctx, &git.PushOptions{
+	opts := &git.PushOptions{
 		Auth:     w.auth(),
 		RefSpecs: []config.RefSpec{config.RefSpec(fmt.Sprintf("+refs/heads/%s:refs/heads/%s", branch, branch))},
-	})
+	}
+	if !lease.IsZero() {
+		opts.ForceWithLease = &git.ForceWithLease{RefName: plumbing.NewBranchReferenceName(branch), Hash: lease}
+	}
+	err := repo.PushContext(ctx, opts)
 	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
 		return fmt.Errorf("push %s: %w", branch, err)
 	}
@@ -149,7 +155,7 @@ func (w *WriteRepo) Commit(branch, message string, files []model.File) (CommitRe
 	for i, f := range files {
 		items[i] = ChangesetItem{Path: f.Path, NewContent: f.Content}
 	}
-	return w.commitItems(repo, wt, branch, message, items, Author{})
+	return w.commitItems(repo, wt, branch, message, items, Author{}, plumbing.ZeroHash)
 }
 
 // checkoutBranch checks out branch as a local branch tracking the remote. A
