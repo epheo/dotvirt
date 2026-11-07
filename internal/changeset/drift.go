@@ -70,8 +70,9 @@ func (r *Reader) findLiveVM(namespace, name string) (liveVM, bool, error) {
 
 // Adopt stages a VM's live state into (id, proj)'s draft, so out-of-band cluster
 // changes can be proposed INTO main (live->main reconcile): as an edit making base
-// match the cluster when the VM is tracked, or as a create of its manifest when it
-// exists only in the cluster (a fresh clone target, an out-of-band create).
+// match the cluster when the VM is tracked, laid over any edit staged for it (see
+// stageEdit), or as a create of its manifest when it exists only in the cluster
+// (a fresh clone target, an out-of-band create).
 func (c *Coordinator) Adopt(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error) {
 	read, err := c.read(proj)
 	if err != nil {
@@ -94,39 +95,28 @@ func (c *Coordinator) Adopt(id auth.Identity, proj project.ProjectInfo, namespac
 		if err := c.requireUndeclaredVM(read, namespace, name); err != nil {
 			return model.DraftView{}, err
 		}
-		if err := c.stageAdoptCreate(id.Username, proj.Name, actual); err != nil {
-			return model.DraftView{}, err
-		}
-		return c.Get(id, proj)
+		// No file on base: the live manifest is staged verbatim, so the
+		// proposal is exactly what the cluster holds.
+		return c.stage(id, proj, draft.Entry{
+			Kind:       draft.KindCreate,
+			Namespace:  actual.vm.Namespace,
+			Name:       actual.vm.Name,
+			SourceFile: actual.vm.SourceFile,
+			Manifest:   string(actual.content),
+		})
 	}
 
 	edit := manifest.EditToMatch(desired, actual.vm)
 	if edit.Empty() {
 		return model.DraftView{}, fmt.Errorf("%w: no drift to adopt for %s/%s", model.ErrInvalid, namespace, name)
 	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
+	return c.stageEdit(id, proj, draft.Entry{
 		Kind:      draft.KindEdit,
 		Namespace: namespace,
 		Name:      name,
 		// The file main actually holds, which need not be where an export would put it.
 		SourceFile: desired.SourceFile,
 		Edit:       &edit,
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
-}
-
-// stageAdoptCreate stages a brand-new manifest from live state, for a VM with no file
-// on base. The serialized bytes are staged verbatim, so the proposal is exactly what
-// the cluster holds.
-func (c *Coordinator) stageAdoptCreate(username, projName string, l liveVM) error {
-	return c.store.Stage(username, projName, draft.Entry{
-		Kind:       draft.KindCreate,
-		Namespace:  l.vm.Namespace,
-		Name:       l.vm.Name,
-		SourceFile: l.vm.SourceFile,
-		Manifest:   string(l.content),
 	})
 }
 
@@ -152,7 +142,7 @@ func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, w
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	staged := 0
+	var entries []draft.Entry
 	var platformTier error
 	for _, o := range objs {
 		if _, ok := idx.Files[model.ObjectRef{Kind: o.Kind, Namespace: o.Namespace, Name: o.Name}]; ok {
@@ -167,25 +157,22 @@ func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, w
 		if err := requirePlacement(proj, o.Path, o.Manifest); err != nil {
 			return model.DraftView{}, err
 		}
-		if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
+		entries = append(entries, draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   adoptResource(o.Kind),
 			Namespace:  model.DraftNamespace(o.Namespace),
 			Name:       o.Name,
 			SourceFile: o.Path,
 			Manifest:   string(o.Manifest),
-		}); err != nil {
-			return model.DraftView{}, err
-		}
-		staged++
+		})
 	}
-	if staged == 0 && platformTier != nil {
+	if len(entries) == 0 && platformTier != nil {
 		return model.DraftView{}, platformTier
 	}
-	if staged == 0 {
+	if len(entries) == 0 {
 		return model.DraftView{}, fmt.Errorf("%w: nothing to adopt in %s: git already describes everything running there", model.ErrInvalid, where)
 	}
-	return c.Get(id, proj)
+	return c.stage(id, proj, entries...)
 }
 
 // adoptResource maps a captured kind onto the draft vocabulary, so the Changes view

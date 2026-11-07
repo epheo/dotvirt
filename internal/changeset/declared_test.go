@@ -77,7 +77,7 @@ func TestStagingRefusesImpliedNamespace(t *testing.T) {
 
 	stripped := strings.Replace(pinned, "  namespace: alpha\n", "", 1)
 	stripped = strings.Replace(stripped, "podSelector: {}", "podSelector: {matchLabels: {a: b}}", 1)
-	if _, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetworkPolicy), "alpha", "web", stripped); !errors.Is(err, model.ErrInvalid) {
+	if _, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetworkPolicy), "alpha", "web", model.UpdateManifestRequest{YAML: stripped}); !errors.Is(err, model.ErrInvalid) {
 		t.Errorf("namespace-less edit: err = %v, want ErrInvalid", err)
 	}
 	loose := model.Adoptable{Kind: "NetworkPolicy", Namespace: "alpha", Name: "new", Path: "alpha/networkpolicies/new.yaml",
@@ -164,9 +164,9 @@ func TestTenantRepoRefusesNAD(t *testing.T) {
 		}
 	}
 
-	_, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), "alpha", "net", nad("net", "20"))
+	_, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), "alpha", "net", model.UpdateManifestRequest{YAML: nad("net", "20")})
 	platformTier("network rewritten into a NAD", err)
-	_, err = c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), "alpha", "raw", nad("raw", "30"))
+	_, err = c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), "alpha", "raw", model.UpdateManifestRequest{YAML: nad("raw", "30")})
 	platformTier("hand-written NAD edited", err)
 
 	live := model.Adoptable{Kind: "NetworkAttachmentDefinition", Namespace: "alpha", Name: "live", Path: "alpha/live.networkattachmentdefinition.yaml", Manifest: []byte(nad("live", "40"))}
