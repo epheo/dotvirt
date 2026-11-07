@@ -8,45 +8,125 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/cache"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
+	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/reflect"
 )
 
 // stateWithIndexers builds a State around fresh indexers the test can seed
 // directly, standing in for what the reflectors would populate from the cluster.
 func stateWithIndexers() *State {
-	return &State{vms: reflect.NewIndexer(), vmis: reflect.NewIndexer(), nss: reflect.NewIndexer()}
+	s := &State{vms: reflect.NewIndexer(), vmis: reflect.NewIndexer(), nss: reflect.NewIndexer()}
+	s.live = newLiveIndex(s.vms, s.vmis, func() {})
+	return s
 }
 
-func TestLiveVMsMergesVMIOntoVM(t *testing.T) {
-	s := stateWithIndexers()
-	// A stopped VM (no VMI) and a running VM (VM + VMI).
-	_ = s.vms.Add(&kubevirtcorev1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "stopped"}})
-	_ = s.vms.Add(&kubevirtcorev1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "running"}})
-	_ = s.vmis.Add(&kubevirtcorev1.VirtualMachineInstance{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "running"},
+// vmStore and vmiStore are the reflector sinks New wires, for tests that feed
+// watch events.
+func (s *State) vmStore() cache.Store  { return s.live.store(s.vms, nil) }
+func (s *State) vmiStore() cache.Store { return s.live.store(s.vmis, nil) }
+
+func runningVMI(ns, name, node string) *kubevirtcorev1.VirtualMachineInstance {
+	return &kubevirtcorev1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
 		Status: kubevirtcorev1.VirtualMachineInstanceStatus{
 			Phase:      kubevirtcorev1.Running,
-			NodeName:   "node-1",
+			NodeName:   node,
 			Interfaces: []kubevirtcorev1.VirtualMachineInstanceNetworkInterface{{IP: "10.0.0.5"}},
 			Conditions: []kubevirtcorev1.VirtualMachineInstanceCondition{
 				{Type: kubevirtcorev1.VirtualMachineInstanceReady, Status: corev1.ConditionTrue},
 			},
 		},
-	})
+	}
+}
 
-	live := s.LiveVMs()
-	if got, ok := live["ns/stopped"]; !ok || got.Phase != "" {
+func testVM(ns, name string) *kubevirtcorev1.VirtualMachine {
+	return &kubevirtcorev1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
+}
+
+func TestLiveMergesVMIOntoVM(t *testing.T) {
+	s := stateWithIndexers()
+	// A stopped VM (no VMI) and a running VM (VM + VMI).
+	_ = s.vmStore().Add(testVM("ns", "stopped"))
+	_ = s.vmStore().Add(testVM("ns", "running"))
+	_ = s.vmiStore().Add(runningVMI("ns", "running", "node-1"))
+
+	live := s.Live()
+	if got, ok := live["ns"]["stopped"]; !ok || got.Phase != "" {
 		t.Errorf("stopped VM should be present with empty phase, got %+v (ok=%v)", got, ok)
 	}
-	r, ok := live["ns/running"]
+	r, ok := live["ns"]["running"]
 	if !ok {
 		t.Fatal("running VM missing from live state")
 	}
 	if r.Phase != "Running" || r.NodeName != "node-1" || r.GuestIP != "10.0.0.5" || !r.Ready {
 		t.Errorf("running VM live state wrong: %+v", r)
 	}
+	if n := s.StoppedVMs([]string{"ns", "other"}); n != 1 {
+		t.Errorf("StoppedVMs = %d, want 1", n)
+	}
+}
+
+// LiveChanged wakes every connected frame, so it must fire only when what a frame
+// shows moved: KubeVirt rewrites VM status and VMI status (probe times, guest
+// agent polls) far more often than that. A view a frame already holds must
+// never change underneath it.
+func TestLivePublishesOnlyViewChanges(t *testing.T) {
+	s := stateWithIndexers()
+	var n int
+	s.live.onChange = func() { n++ }
+	vms, vmis := s.vmStore(), s.vmiStore()
+	step := func(what string, want int) {
+		t.Helper()
+		if n != want {
+			t.Fatalf("%s: %d publishes, want %d", what, n, want)
+		}
+	}
+
+	_ = vms.Replace([]any{testVM("ns", "a")}, "1")
+	step("initial list", 1)
+	held := s.Live()
+
+	vm := testVM("ns", "a")
+	vm.Status.PrintableStatus = kubevirtcorev1.VirtualMachineStatusStopped
+	_ = vms.Update(vm)
+	step("VM status write", 1)
+
+	_ = vmis.Add(runningVMI("ns", "a", "node-1"))
+	step("VMI started", 2)
+	if held["ns"]["a"].Phase != "" {
+		t.Fatal("a held view was modified in place")
+	}
+
+	beat := runningVMI("ns", "a", "node-1")
+	beat.Status.Conditions[0].LastProbeTime = metav1.Now()
+	beat.Status.GuestOSInfo.Version = "40"
+	_ = vmis.Update(beat)
+	step("VMI heartbeat", 2)
+
+	_ = vmis.Update(runningVMI("ns", "a", "node-2"))
+	step("VMI migrated", 3)
+
+	_ = vms.Add(testVM("ns", "b"))
+	step("VM added", 4)
+
+	_ = vmis.Delete(runningVMI("ns", "a", "node-2"))
+	step("VMI stopped", 5)
+	if got, ok := s.Live()["ns"]["a"]; !ok || got.Phase != "" {
+		t.Fatalf("a VM whose VMI is gone must read stopped, got %+v ok=%v", got, ok)
+	}
+
+	_ = vms.Delete(testVM("ns", "a"))
+	_ = vms.Delete(testVM("ns", "b"))
+	step("VMs deleted", 7)
+	if len(s.Live()) != 0 {
+		t.Fatalf("an emptied namespace must leave the view, got %v", s.Live())
+	}
+
+	_ = vms.Replace(nil, "2")
+	step("relist of nothing new", 7)
 }
 
 // Selectors match the virt-launcher pod, not the VMI: the identity carries
@@ -201,50 +281,34 @@ func TestNamespacesExposesLabelsAndAnnotations(t *testing.T) {
 	}
 }
 
-func testVM(gen int64) *kubevirtcorev1.VirtualMachine {
-	return &kubevirtcorev1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "vm", Generation: gen}}
-}
-
-// TestVMSpecStoreGatesOnGeneration is the core of the export-CPU fix: a status-only
-// VM Update (generation unchanged) must fire LiveChanged but NOT VMSpecChanged, so
-// VMSpecChanged consumers don't wake on KubeVirt's frequent VM.status writes. Add/Delete and a
-// real spec change (generation bump) fire both.
-func TestVMSpecStoreGatesOnGeneration(t *testing.T) {
-	var spec, live int
-	store := newVMSpecStore(reflect.NewIndexer(), func() { spec++ }, func() { live++ }, nil)
-
-	if err := store.Add(testVM(1)); err != nil {
+// The store trims managedFields and the last-applied annotation on insert; the
+// manifest drift and adoption serialize from the stored VM must not change.
+func TestStoredVMExportsUnchanged(t *testing.T) {
+	vm := testVM("ns", "web")
+	vm.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "kubectl", Operation: metav1.ManagedFieldsOperationApply}}
+	vm.Labels = map[string]string{"app": "web"}
+	vm.Annotations = map[string]string{
+		"kubectl.kubernetes.io/last-applied-configuration": `{"spec":{}}`,
+		"keep": "yes",
+	}
+	rs := kubevirtcorev1.RunStrategyAlways
+	vm.Spec.RunStrategy = &rs
+	want, err := cluster.ExportManifest(*vm.DeepCopy())
+	if err != nil {
 		t.Fatal(err)
 	}
-	if spec != 1 || live != 1 {
-		t.Fatalf("after Add: spec=%d live=%d, want 1,1", spec, live)
-	}
-	// Status-only Update (same generation) -> LiveChanged only.
-	_ = store.Update(testVM(1))
-	if spec != 1 || live != 2 {
-		t.Errorf("after status-only Update: spec=%d live=%d, want 1,2", spec, live)
-	}
-	// Spec change (generation bump) -> both.
-	_ = store.Update(testVM(2))
-	if spec != 2 || live != 3 {
-		t.Errorf("after spec Update: spec=%d live=%d, want 2,3", spec, live)
-	}
-	// Delete -> both (prunes the manifest).
-	_ = store.Delete(testVM(2))
-	if spec != 3 || live != 4 {
-		t.Errorf("after Delete: spec=%d live=%d, want 3,4", spec, live)
-	}
-}
 
-func TestVMSpecStoreReplaceFiresSyncedOnce(t *testing.T) {
-	var spec, live, synced int
-	store := newVMSpecStore(reflect.NewIndexer(), func() { spec++ }, func() { live++ }, func() { synced++ })
-	_ = store.Replace([]any{testVM(1)}, "1")
-	_ = store.Replace([]any{testVM(1)}, "2") // a later relist must NOT re-fire synced
-	if spec != 2 || live != 2 {
-		t.Errorf("two Replaces: spec=%d live=%d, want 2,2", spec, live)
+	s := stateWithIndexers()
+	_ = s.vmStore().Add(vm)
+	objs := s.VMObjects([]string{"ns"})
+	if len(objs) != 1 || objs[0].ManagedFields != nil {
+		t.Fatalf("stored VM not trimmed: %+v", objs)
 	}
-	if synced != 1 {
-		t.Errorf("synced fired %d times, want exactly 1 (first Replace)", synced)
+	got, err := cluster.ExportManifest(objs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("export moved:\n%s\nwant:\n%s", got, want)
 	}
 }

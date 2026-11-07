@@ -157,7 +157,9 @@ type Config struct {
 // ClusterRoleBinding/ClusterRole, which the version does NOT observe. The TTL is the
 // backstop that bounds staleness for those un-watched RBAC sources, so it stays short
 // - long enough to spare the periodic SelfSubjectRulesReview on quiet tokens, short
-// enough that a cluster-level revocation can't linger.
+// enough that a cluster-level revocation can't linger. An expired entry is only
+// re-evaluated by a rebuild, which RunTTLBackstop causes for open streams, so a
+// revocation reaches an open frame within ttlBackstopBound.
 const visibleTTL = 30 * time.Second
 
 // optionsTTL caches the wizard catalog (instancetypes/preferences/datasources).
@@ -211,6 +213,10 @@ type Server struct {
 	propNudge   chan struct{}
 	propDirty   map[string]struct{}
 	propSeen    map[string]uint64
+
+	// Open inventory streams per token key (see streams.go).
+	streamMu sync.Mutex
+	streams  map[string]int
 }
 
 // Deps are the collaborators for NewServer. Reader and Draft are required:
@@ -271,6 +277,7 @@ func NewServer(d Deps) *Server {
 		propNudge:   make(chan struct{}, 1),
 		propDirty:   map[string]struct{}{},
 		propSeen:    map[string]uint64{},
+		streams:     map[string]int{},
 	}
 }
 

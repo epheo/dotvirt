@@ -60,7 +60,8 @@ func NewSnapshot(sa *cluster.Client) *Snapshot {
 func (s *Snapshot) Run(ctx context.Context) {
 	served := reflect.Served(s.sa.HasAPIResource, &s.apiPresent)
 	store := reflect.NewStore(s.store, func() {}, s.synced.Mark)
-	reflect.RunWhenServed(ctx, served, kubedeschedulersGVR, s.sa.DynamicListWatch(kubedeschedulersGVR), store, &s.healthy)
+	// No flip publish: DRS health is read per request, never by a frame.
+	reflect.RunWhenServed(ctx, served, kubedeschedulersGVR, s.sa.DynamicListWatch(kubedeschedulersGVR), store, &s.healthy, nil)
 }
 
 // Live reads the current DRS live state from the in-memory store. Only scalar

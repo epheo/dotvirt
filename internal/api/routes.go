@@ -115,7 +115,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/projects/{project}/release", s.handleReleaseProject)
 
 	if s.stream != nil {
-		mux.HandleFunc("GET /api/inventory/stream", s.stream.Handler)
+		mux.HandleFunc("GET /api/inventory/stream", s.streaming(s.stream.Handler))
 	}
 	if s.vnc != nil {
 		mux.HandleFunc("GET /api/vms/{namespace}/{name}/vnc", s.vnc.Handler)

@@ -168,7 +168,10 @@ func (s *Snapshot) watch(ctx context.Context, w watchSpec, healthy *atomic.Bool)
 		}
 	}
 	store := reflect.NewStore(w.idx, onChange, onSynced)
-	reflect.RunWhenServed(ctx, served, w.gvr, s.sa.DynamicListWatch(w.gvr), store, healthy)
+	// Every watch, silent ones included, publishes its health flips: the frame's
+	// stale-catalog warning reads them.
+	flip := func() { s.bus.Publish(eventbus.NetworkChanged) }
+	reflect.RunWhenServed(ctx, served, w.gvr, s.sa.DynamicListWatch(w.gvr), store, healthy, flip)
 }
 
 // refreshNodes keeps the node-name cache current via a periodic LIST (populated at once

@@ -7,7 +7,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
-	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/metrics"
 	"github.com/epheo/dotvirt/internal/model"
 )
@@ -53,34 +52,22 @@ func TestFoldDRSBand(t *testing.T) {
 // on the live console). foldStoppedVMs adds them under the same lowercase
 // key convention the metric-derived entries use.
 func TestFoldStoppedVMs(t *testing.T) {
-	vmo := func(ns, name string) kubevirtcorev1.VirtualMachine {
-		v := kubevirtcorev1.VirtualMachine{}
-		v.Namespace, v.Name = ns, name
-		return v
-	}
 	cs := model.ClusterSummary{VMs: map[string]int{"running": 2}}
-	live := map[string]clusterstate.LiveVM{
-		"demo/casd":         {Phase: "Running"},
-		"demo/test":         {Phase: "Running"},
-		"demo/recovery-web": {}, // VM object exists, no instance
-	}
-	foldStoppedVMs(&cs, []kubevirtcorev1.VirtualMachine{
-		vmo("demo", "casd"), vmo("demo", "test"), vmo("demo", "recovery-web"),
-	}, live)
+	foldStoppedVMs(&cs, 1)
 	if cs.VMs["running"] != 2 || cs.VMs["stopped"] != 1 {
 		t.Fatalf("vms = %v, want running:2 stopped:1", cs.VMs)
 	}
 
 	// All running: the map is left untouched (no zero entry).
 	cs = model.ClusterSummary{VMs: map[string]int{"running": 1}}
-	foldStoppedVMs(&cs, []kubevirtcorev1.VirtualMachine{vmo("demo", "casd")}, live)
+	foldStoppedVMs(&cs, 0)
 	if _, ok := cs.VMs["stopped"]; ok {
 		t.Fatal("no stopped VMs must add no entry")
 	}
 
 	// Nil map (metrics returned nothing): still reports the stopped VM.
 	cs = model.ClusterSummary{}
-	foldStoppedVMs(&cs, []kubevirtcorev1.VirtualMachine{vmo("demo", "recovery-web")}, live)
+	foldStoppedVMs(&cs, 1)
 	if cs.VMs["stopped"] != 1 {
 		t.Fatalf("vms = %v, want stopped:1", cs.VMs)
 	}
