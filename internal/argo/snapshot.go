@@ -149,11 +149,7 @@ func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.Object
 		if !slices.Contains(appRepos(u.Object), own) {
 			continue
 		}
-		resources, found, err := unstructured.NestedSlice(u.Object, "status", "resources")
-		if err != nil || !found {
-			continue
-		}
-		for _, raw := range resources {
+		for _, raw := range nestedSlice(u.Object, "status", "resources") {
 			res, ok := raw.(map[string]any)
 			if !ok {
 				continue
@@ -412,11 +408,7 @@ func appRefOf(app *unstructured.Unstructured) AppRef {
 // appManagesVM reports whether app's status.resources[] includes the VirtualMachine
 // namespace/name.
 func appManagesVM(app map[string]any, namespace, name string) bool {
-	resources, found, err := unstructured.NestedSlice(app, "status", "resources")
-	if err != nil || !found {
-		return false
-	}
-	for _, raw := range resources {
+	for _, raw := range nestedSlice(app, "status", "resources") {
 		res, ok := raw.(map[string]any)
 		if !ok {
 			continue
