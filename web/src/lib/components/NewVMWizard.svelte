@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { api, type CreateVMRequest, type Network } from '#lib/api.js';
+	import { defaultUser } from '#lib/create.js';
 	import { attachableNetworks } from '#lib/networks.js';
 	import { rowList } from '#lib/rowlist.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -87,14 +88,6 @@
 		selectedNetworks = [];
 		attachPrimary = true;
 	});
-
-	// Conventional first-boot login per image family; a prefill, freely editable.
-	function defaultUser(image: string): string {
-		if (image.includes('fedora')) return 'fedora';
-		if (image.includes('ubuntu')) return 'ubuntu';
-		if (image.includes('debian')) return 'debian';
-		return 'cloud-user';
-	}
 
 	// Follow the image's conventional user until the field is hand-edited.
 	let userAuto = '';
