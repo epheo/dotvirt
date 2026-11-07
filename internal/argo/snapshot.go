@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	"slices"
 	"sort"
-	"sync"
 	"sync/atomic"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -23,10 +24,9 @@ import (
 
 // Snapshot is the SA-maintained, watch-fed in-memory view of every ArgoCD
 // Application - the drift plane's equivalent of clusterstate.State. A single
-// reflector keeps the store current and publishes DriftChanged on the shared bus so
-// the hub rebroadcasts; reads (Drift, managingApp) are lock-free store scans, never
-// a cluster LIST. The store is always current post-sync, so drift is never staler
-// than the watch delivers.
+// reflector keeps the store current and derives the drift view on every store
+// move; reads are lock-free (an atomic view load, or a store scan), never a
+// cluster LIST, so drift is never staler than the watch delivers.
 type Snapshot struct {
 	sa      *Client
 	apps    cache.Indexer
@@ -34,21 +34,21 @@ type Snapshot struct {
 	healthy atomic.Bool // false while the Applications watch errors (ArgoCD unreachable)
 	bus     *eventbus.Bus
 
-	// Memoized drift: rebuilt lazily only when the Application store moves
-	// (driftDirty), so one reconcile across N identities parses the apps once, not N
-	// times - the N:1 sharing the read path needs on the hot inventory-build path. The
-	// general per-object map, its per-VM view, and the per-project rollup are all
-	// rebuilt from the same scan.
-	driftMu       sync.Mutex
-	resourceCache map[resKey]Drift
-	driftCache    map[string]Drift
-	appSyncCache  map[string]model.ProjectSync
-	driftDirty    atomic.Bool
-	// objGen counts CONTENT changes to the non-VM drift entries (VM drift rides the
-	// inventory frame itself). It feeds the catalog watermark, so an Application
-	// object churning without any drift moving (reconciledAt ticks every reconcile)
-	// doesn't defeat the hub's identical-frame suppression or trigger client refetches.
-	objGen atomic.Uint64
+	// view is derived once per store move and shared by every identity's frame.
+	view atomic.Pointer[driftView]
+}
+
+// driftView is one derivation of the Application store: the per-object map, its
+// per-VM slice, and the per-project rollup, all from the same sorted scan.
+// Immutable once stored; readers share its maps.
+type driftView struct {
+	resources map[resKey]Drift
+	vms       map[string]Drift
+	projects  map[string]model.ProjectSync
+	// objGen counts content changes to the non-VM entries only: VM drift rides the
+	// frame itself, and objGen feeds the catalog watermark, which must not move
+	// (and refetch the catalog) on a VM badge change.
+	objGen uint64
 }
 
 // NewSnapshot builds the Application snapshot over the SA argo client. bus may be
@@ -61,11 +61,47 @@ func NewSnapshot(sa *Client, bus *eventbus.Bus) *Snapshot {
 // when ctx is cancelled. Returns immediately - call WaitForSync to block until the
 // initial LIST has populated the snapshot.
 func (s *Snapshot) Run(ctx context.Context) {
-	store := reflect.NewStore(s.apps,
-		func() { s.driftDirty.Store(true); s.publish() },
-		s.synced.Mark,
-	)
-	reflect.Run(ctx, reflect.TrackHealth(s.sa.applicationsListWatch(), &s.healthy, s.publish), store)
+	reflect.Run(ctx, reflect.TrackHealth(s.sa.applicationsListWatch(), &s.healthy, s.publish), s.store())
+}
+
+// store is the reflector's sink: every mutation re-derives the view.
+func (s *Snapshot) store() cache.Store {
+	return reflect.NewStore(s.apps, s.derive, s.synced.Mark)
+}
+
+// derive rebuilds the view from the store and publishes DriftChanged only when
+// its content moved: Argo rewrites every Application on each reconcile
+// (status.reconciledAt), and publishing those rebuilt every connected frame to
+// find identical bytes. The scan is sorted so two apps claiming one repo or one
+// resource resolve the same way every time and never flap. Runs on the reflector
+// goroutine only, so prev cannot move underneath it.
+func (s *Snapshot) derive() {
+	objs := reflect.List(s.apps)
+	sort.Slice(objs, func(i, j int) bool { return appKey(objs[i]) < appKey(objs[j]) })
+	next := &driftView{resources: resourceDriftFromApps(objs), projects: appSyncFromApps(objs)}
+	prev := s.view.Load()
+	var prevRes map[resKey]Drift
+	if prev != nil {
+		if maps.Equal(prev.resources, next.resources) && equality.Semantic.DeepEqual(prev.projects, next.projects) {
+			return
+		}
+		prevRes, next.objGen = prev.resources, prev.objGen
+	}
+	if !nonVMEqual(prevRes, next.resources) {
+		next.objGen++
+	}
+	next.vms = vmView(next.resources)
+	s.view.Store(next)
+	s.publish()
+}
+
+// current is the drift view, nil until the initial LIST has landed and been
+// derived (the store marks synced just before it derives).
+func (s *Snapshot) current() *driftView {
+	if !s.synced.Done() {
+		return nil
+	}
+	return s.view.Load()
 }
 
 func (s *Snapshot) publish() { s.bus.Publish(eventbus.DriftChanged) }
@@ -79,35 +115,29 @@ func (s *Snapshot) Healthy() bool { return s.healthy.Load() }
 // WaitForSync blocks until the initial Applications LIST has landed or ctx is done.
 func (s *Snapshot) WaitForSync(ctx context.Context) error { return s.synced.Wait(ctx) }
 
-// Drift returns per-VM drift keyed "namespace/name", computed from the in-memory
-// Application store. It returns nil UNTIL the initial LIST has landed: inventory
-// treats a non-nil (even empty) Drift map as "Argo is configured, so a VM absent
-// from it is NotTracked" - returning an empty map pre-sync would flash every VM to
-// NotTracked. nil instead leaves Sync unset (the benign not-yet-known state), the
-// same as when Argo is disabled. Always non-nil once synced.
+// Drift returns per-VM drift keyed "namespace/name". It returns nil UNTIL the
+// initial LIST has landed: inventory treats a non-nil (even empty) Drift map as
+// "Argo is configured, so a VM absent from it is NotTracked" - returning an empty
+// map pre-sync would flash every VM to NotTracked. nil instead leaves Sync unset
+// (the benign not-yet-known state), the same as when Argo is disabled. Always
+// non-nil once synced. Shared and read-only.
 func (s *Snapshot) Drift() map[string]Drift {
-	if !s.synced.Done() {
-		return nil
+	if v := s.current(); v != nil {
+		return v.vms
 	}
-	s.driftMu.Lock()
-	defer s.driftMu.Unlock()
-	s.rebuildLocked()
-	return s.driftCache
+	return nil
 }
 
 // ProjectDrift returns each project's overall Application sync/health keyed by
 // canonical repoURL - the rollup covering every object kind the repo declares, not
-// just VMs. Same nil-before-sync contract and one-parse memoization as Drift, so the
-// inventory build can distinguish "Argo disabled/not-yet-synced" (nil) from "tracked"
-// (non-nil, a repo absent from it simply has no managing Application).
+// just VMs. Same nil-before-sync contract as Drift, so the inventory build can
+// distinguish "Argo disabled/not-yet-synced" (nil) from "tracked" (non-nil, a repo
+// absent from it simply has no managing Application). Shared and read-only.
 func (s *Snapshot) ProjectDrift() map[string]model.ProjectSync {
-	if !s.synced.Done() {
-		return nil
+	if v := s.current(); v != nil {
+		return v.projects
 	}
-	s.driftMu.Lock()
-	defer s.driftMu.Unlock()
-	s.rebuildLocked()
-	return s.appSyncCache
+	return nil
 }
 
 // ForeignApps: live apps except those sourcing ownRepo, under every tracking-id
@@ -190,50 +220,22 @@ func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.Object
 // are the ArgoCD resource's own (e.g. "k8s.ovn.org","UserDefinedNetwork"); namespace is
 // "" for cluster-scoped kinds.
 func (s *Snapshot) ResourceDrift(group, kind, namespace, name string) (Drift, bool) {
-	if !s.synced.Done() {
+	v := s.current()
+	if v == nil {
 		return Drift{}, false
 	}
-	s.driftMu.Lock()
-	defer s.driftMu.Unlock()
-	s.rebuildLocked()
-	d, ok := s.resourceCache[resKey{group, kind, namespace, name}]
+	d, ok := v.resources[resKey{group, kind, namespace, name}]
 	return d, ok
 }
 
 // ObjectDriftGen returns the generation of the non-VM drift content - a monotonic
 // counter that moves only when a non-VM object's sync/health/error actually changed,
-// not on every Application object churn. Rebuilds like the other readers, so it's
-// current as of this call.
+// not on every Application object churn.
 func (s *Snapshot) ObjectDriftGen() uint64 {
-	if !s.synced.Done() {
-		return 0
+	if v := s.current(); v != nil {
+		return v.objGen
 	}
-	s.driftMu.Lock()
-	defer s.driftMu.Unlock()
-	s.rebuildLocked()
-	return s.objGen.Load()
-}
-
-// rebuildLocked refreshes the memoized maps from a single Application-store scan when
-// the store has moved since the last build (or on first read). Callers hold driftMu.
-// Results are read-only to callers; a rebuild swaps in fresh maps (the extractors
-// allocate anew), never mutating one a caller still holds. The store scan is sorted so
-// every rebuild over the same Applications yields identical maps - an unordered scan
-// would let two apps claiming one repo (or one resource) flap between rebuilds and
-// defeat the hub's identical-frame suppression.
-func (s *Snapshot) rebuildLocked() {
-	if s.resourceCache != nil && !s.driftDirty.Swap(false) {
-		return
-	}
-	objs := reflect.List(s.apps)
-	sort.Slice(objs, func(i, j int) bool { return appKey(objs[i]) < appKey(objs[j]) })
-	prev := s.resourceCache
-	s.resourceCache = resourceDriftFromApps(objs)
-	s.driftCache = vmView(s.resourceCache)
-	s.appSyncCache = appSyncFromApps(objs)
-	if !nonVMEqual(prev, s.resourceCache) {
-		s.objGen.Add(1)
-	}
+	return 0
 }
 
 // appKey is an Application's stable sort key for the deterministic rebuild scan.

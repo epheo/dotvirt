@@ -39,7 +39,9 @@ const (
 	// RBACChanged: a RoleBinding moved, so a token's visible-namespace set may have
 	// changed - the cue to revalidate the per-token visibility cache.
 	RBACChanged
-	// DriftChanged: an ArgoCD Application moved - sync/health drift.
+	// DriftChanged: the drift Argo reports moved - an object's sync/health/apply
+	// error or a project's rollup - or the Applications watch's health flipped.
+	// An Application write that moves none of it (each reconcile) is not published.
 	DriftChanged
 	// GitChanged: a project repo's branch heads moved (a push/merge, seen via the
 	// forge webhook or the backstop poll). Published per repo: the key is the

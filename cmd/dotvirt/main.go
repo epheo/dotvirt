@@ -141,8 +141,8 @@ func run() error {
 		}
 		// The Application snapshot is the drift plane: a reflector feeds an in-memory
 		// store and publishes DriftChanged, so reads are lock-free and the hub
-		// rebroadcasts on every Application move. It is also the resyncer - it owns the
-		// app index the per-VM re-sync resolves.
+		// rebroadcasts when drift moves. It is also the resyncer - it owns the app
+		// index the per-VM re-sync resolves.
 		argoSnapshot = argo.NewSnapshot(saArgo, bus)
 		argoSnapshot.Run(ctx)
 		resyncer = argoSnapshot

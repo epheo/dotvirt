@@ -31,16 +31,17 @@ func benchApp(i int) *unstructured.Unstructured {
 }
 
 // BenchmarkDriftRebuild is one derivation of the drift view over 50
-// Applications.
+// Applications: the cost of one Application write (here a reconcile that moved
+// nothing, the steady state).
 func BenchmarkDriftRebuild(b *testing.B) {
 	s := NewSnapshot(&Client{}, nil)
 	for i := range 50 {
 		_ = s.apps.Add(benchApp(i))
 	}
 	s.synced.Mark()
+	s.derive()
 	b.ReportAllocs()
 	for b.Loop() {
-		s.driftDirty.Store(true)
-		_ = s.Drift()
+		s.derive()
 	}
 }
