@@ -144,9 +144,11 @@ class InventoryStore {
 	// placeholders until reload, so the pull retries with backoff and the
 	// dialogs that need the catalog call again on open, which re-pulls after a
 	// failure that outlasted the retries. Concurrent callers share one pull.
-	loadOptions(): Promise<void> {
+	// force re-pulls a catalog the caller just added to (a new boot image);
+	// the current one stays on screen until the new one lands.
+	loadOptions(force = false): Promise<void> {
 		if (this.#optionsPull) return this.#optionsPull;
-		if (this.options && !this.optionsError) return Promise.resolve();
+		if (this.options && !this.optionsError && !force) return Promise.resolve();
 		const gen = this.#generation;
 		const pull = withRetry(() => api.options())
 			.then((o) => {

@@ -6,6 +6,7 @@
 	import { friendlyError } from '#lib/format.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import { NAME_HINT, validName } from '#lib/validate.js';
 	import Button from '../Button.svelte';
 	import Consequence from '../Consequence.svelte';
@@ -16,11 +17,22 @@
 	import StagesPanel from './StagesPanel.svelte';
 	import { FIELD, HELP, LABEL, plural, useSheet } from './sheet.svelte.js';
 
-	// A boot image: dotvirt creates the upload target and mints a token, then
-	// the browser streams the file straight to the cluster's upload proxy, so
-	// multi-GB images never pass through dotvirt. It runs now: an image is a
-	// disk, not config, so no pull request carries it.
-	let { namespace = $bindable(), onclose }: { namespace: string; onclose: () => void } = $props();
+	// A boot image: dotvirt creates the upload target (and, for a boot image,
+	// registers it so New VM offers it) and mints a token, then the browser
+	// streams the file straight to the cluster's upload proxy, so multi-GB
+	// images never pass through dotvirt. It runs now: an image is a disk, not
+	// config, so no pull request carries it.
+	let {
+		namespace = $bindable(),
+		file: dropped,
+		bootImage,
+		onclose,
+	}: {
+		namespace: string;
+		file?: File; // dropped where the sheet was opened
+		bootImage?: boolean; // unset = a boot image, the usual reason to upload
+		onclose: () => void;
+	} = $props();
 
 	const sheet = useSheet();
 	inventory.loadOptions();
@@ -41,6 +53,9 @@
 	let importInfo = $state('');
 
 	let file = $state<File | null>(null);
+	// svelte-ignore state_referenced_locally
+	let asBoot = $state(bootImage ?? true);
+	let image = $state(''); // the boot image registered, "namespace/name"
 	let name = $state('');
 	let size = $state('10Gi');
 	let storageClass = $state('');
@@ -55,6 +70,9 @@
 	);
 
 	const sizeOK = $derived(/^\d+(Mi|Gi|Ti)$/.test(size));
+	const bootTaken = $derived(
+		(inventory.options?.osImages ?? []).some((i) => i.namespace === namespace && i.name === name),
+	);
 	const missing = $derived.by(() => {
 		const m: string[] = [];
 		if (!file) m.push('Pick an image file');
@@ -62,6 +80,7 @@
 		else if (!validName(name)) m.push('The name needs lowercase letters, digits and -');
 		if (!namespace) m.push('Pick a project and namespace');
 		if (!sizeOK) m.push('The size needs a unit, like 10Gi');
+		if (asBoot && bootTaken) m.push(`${name} is already a boot image in ${namespace}`);
 		return m;
 	});
 
@@ -77,6 +96,8 @@
 		// A little larger than the file: a qcow2's virtual size can exceed it.
 		size = `${Math.max(1, Math.ceil(f.size / 1024 ** 3) + 1)}Gi`;
 	}
+	// svelte-ignore state_referenced_locally
+	if (dropped) take(dropped);
 
 	const ORDER: Phase[] = ['creating', 'preparing', 'uploading', 'importing', 'done'];
 	const at = $derived(ORDER.indexOf(phase));
@@ -150,7 +171,14 @@
 		error = '';
 		try {
 			phase = 'creating';
-			await api.createUpload({ namespace, name, size, storageClass: storageClass || undefined });
+			const target = await api.createUpload({
+				namespace,
+				name,
+				size,
+				storageClass: storageClass || undefined,
+				bootImage: asBoot,
+			});
+			image = target.image ?? '';
 			phase = 'preparing';
 			await until((p) => p === 'UploadReady', 'storage to be ready');
 			const { token, uploadUrl } = await api.uploadToken(namespace, name);
@@ -159,6 +187,8 @@
 			phase = 'importing';
 			await until((p) => p === 'Succeeded', 'the import to finish');
 			phase = 'done';
+			// The catalog New VM reads gains the image now, not at the next sign-in.
+			if (image) void inventory.loadOptions(true);
 		} catch (e) {
 			if (e instanceof Unauthorized || teardown.signal.aborted) return;
 			error = friendlyError(e);
@@ -250,6 +280,15 @@
 				onpick={(c) => (storageClass = c)}
 				classes={classRows}
 			/>
+			<label class="flex cursor-pointer items-start gap-2 text-sm text-ink">
+				<input type="checkbox" class="mt-0.5 size-4 accent-accent" bind:checked={asBoot} />
+				<span
+					>Offer it as a boot image<span class="block text-xs text-ink-muted"
+						>New VM lists it. Needs the right to add boot images in {namespace ||
+							'the namespace'}.</span
+					></span
+				>
+			</label>
 		{:else}
 			<ol class="flex flex-col gap-3 py-1">
 				{#each STEPS as s (s.at)}
@@ -275,7 +314,8 @@
 			</ol>
 			{#if phase === 'done'}
 				<p class="rounded-lg border border-ok/40 bg-ok-soft px-3.5 py-2.5 text-[13px] text-ok-ink">
-					<span class="font-mono font-medium">{name}</span> is ready in
+					<span class="font-mono font-medium">{name}</span>
+					{image ? 'is a boot image in' : 'is ready in'}
 					<span class="font-mono">{namespace}</span>.
 				</p>
 			{/if}
@@ -294,6 +334,9 @@
 					>A disk named {name || 'after the file'} in {namespace || 'that namespace'}, ready once
 					imported.</Consequence
 				>
+				{#if asBoot}
+					<Consequence tone="ok">New VM lists it as a boot image.</Consequence>
+				{/if}
 				{#if info}
 					<Consequence tone={liveMigrates(info) ? 'ok' : 'warn'}
 						>{liveMigrates(info) ? 'Any host can read it.' : 'It stays on one host.'}</Consequence
@@ -307,7 +350,16 @@
 	{#snippet footer()}
 		{#if phase === 'done'}
 			<span class="flex-1 text-ink-muted">Uploaded and imported.</span>
-			<Button class="h-9! px-4!" onclick={onclose}>Done</Button>
+			{#if image}
+				<Button variant="secondary" class="h-9! px-3!" onclick={onclose}>Done</Button>
+				<Button
+					class="h-9! px-4!"
+					onclick={() => (ui.modal = { kind: 'newVM', namespaces: null, namespace, image })}
+					>New VM from it</Button
+				>
+			{:else}
+				<Button class="h-9! px-4!" onclick={onclose}>Done</Button>
+			{/if}
 		{:else if running}
 			<span class="flex-1 text-ink-muted">Working. Keep this tab open.</span>
 		{:else}

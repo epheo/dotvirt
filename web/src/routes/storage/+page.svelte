@@ -1,5 +1,5 @@
 <script lang="ts">
-	import ContainerWorkspace from '#lib/workspace/ContainerWorkspace.svelte';
+	import StorageWorkspace from '#lib/workspace/storage/StorageWorkspace.svelte';
 </script>
 
-<ContainerWorkspace scope={{ kind: 'all' }} section="storage" trail={[{ label: 'All Storage' }]} />
+<StorageWorkspace />

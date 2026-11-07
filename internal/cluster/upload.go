@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	authzv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -96,4 +97,31 @@ func (c *Client) CreateUploadToken(ctx context.Context, namespace, name string) 
 		return "", fmt.Errorf("upload token not issued for %s/%s", namespace, name)
 	}
 	return token, nil
+}
+
+// CanCreateBootImages reports whether this token may register boot images
+// (DataSources) in namespace. Checked before an upload starts, so a refusal
+// leaves no half-made image behind.
+func (c *Client) CanCreateBootImages(ctx context.Context, namespace string) (bool, error) {
+	return c.allowed(ctx, &authzv1.ResourceAttributes{Namespace: namespace, Verb: "create", Group: gvrDataSources.Group, Resource: gvrDataSources.Resource})
+}
+
+// CreateBootImage registers the upload's claim as a boot image: a DataSource
+// of the same name over it, which the catalog offers once the import is
+// ready and a new VM's disk is cloned from.
+func (c *Client) CreateBootImage(ctx context.Context, namespace, name string) error {
+	dyn, err := c.dynamic()
+	if err != nil {
+		return err
+	}
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "cdi.kubevirt.io/v1beta1",
+		"kind":       "DataSource",
+		"metadata":   map[string]any{"name": name, "namespace": namespace},
+		"spec": map[string]any{
+			"source": map[string]any{"pvc": map[string]any{"name": name, "namespace": namespace}},
+		},
+	}}
+	_, err = dyn.Resource(gvrDataSources).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
+	return err
 }

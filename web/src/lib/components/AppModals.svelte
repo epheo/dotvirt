@@ -56,7 +56,9 @@
 </script>
 
 {#if isCreate(m)}
-	<CreateSheet modal={m} onclose={close} />
+	<!-- Keyed on the request: a sheet that opens another (New VM from an
+	     uploaded image) starts fresh from the new one. -->
+	{#key m}<CreateSheet modal={m} onclose={close} />{/key}
 {:else if m?.kind === 'uplink'}
 	<AddUplinkModal adapters={inventory.physicalAdapters} initial={m.initial} onclose={close} />
 {:else if m?.kind === 'namespace'}

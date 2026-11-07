@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import type { DraftItem, VM } from '#lib/api.js';
 import { inventory } from '#lib/state/inventory.svelte.js';
@@ -148,7 +149,7 @@ describe('VMTable', () => {
 		await fireEvent.input(screen.getByPlaceholderText('Filter by name, IP or host'), {
 			target: { value: 'team-a' },
 		});
-		await fireEvent.click(screen.getByLabelText('Select all (filtered)'));
+		await fireEvent.click(screen.getByLabelText('Select this page'));
 		const rows = screen.getAllByRole('row').slice(1);
 		expect(rows.map((r) => r.getAttribute('aria-selected'))).toEqual(['true', 'true']);
 		await fireEvent.input(screen.getByPlaceholderText('Filter by name, IP or host'), {
@@ -192,6 +193,62 @@ describe('VMTable', () => {
 		await fireEvent.click(within(web.closest('tr')!).getByText(/removal|Delete|Staged/i));
 		expect(onstagedopen).toHaveBeenCalledWith(expect.objectContaining({ name: 'web' }));
 		expect(onselect).not.toHaveBeenCalled();
+	});
+
+	describe('at fleet scale', () => {
+		const many = Array.from({ length: 120 }, (_, i) =>
+			vm(`vm-${String(i).padStart(3, '0')}`, { nodeName: 'worker-1' }),
+		);
+		const rowsShown = () => screen.getAllByRole('row').slice(1);
+
+		it('shows one page and says where it sits', async () => {
+			setup({ vms: many });
+			expect(rowsShown()).toHaveLength(50);
+			expect(screen.getByRole('navigation', { name: 'Pages' }).textContent).toContain(
+				'Showing 1-50 of 120',
+			);
+			await fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+			expect(names()[0]).toBe('vm-050');
+			expect(screen.getByText('Page 2 of 3')).toBeTruthy();
+		});
+
+		it('starts over at page 1 when the filter changes', async () => {
+			setup({ vms: many });
+			await fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+			await fireEvent.input(screen.getByPlaceholderText('Filter by name, IP or host'), {
+				target: { value: 'vm-1' },
+			});
+			expect(names()[0]).toBe('vm-100');
+			expect(screen.getByRole('navigation', { name: 'Pages' }).textContent).toContain(
+				'Showing 1-20 of 20',
+			);
+		});
+
+		it('opens on the page of the peeked row', () => {
+			setup({ vms: many, activeKey: 'team-a/vm-075' });
+			expect(names()).toContain('vm-075');
+			expect(screen.getByText('Page 2 of 3')).toBeTruthy();
+		});
+
+		it('selects a page, then every row on request', async () => {
+			render(VMTableHost, { vms: many });
+			await fireEvent.click(screen.getByLabelText('Select this page'));
+			expect(screen.getByRole('status').textContent!.split(',')).toHaveLength(50);
+			await fireEvent.click(screen.getByRole('button', { name: 'Select all 120' }));
+			expect(screen.getByRole('status').textContent!.split(',')).toHaveLength(120);
+			await fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }));
+			expect(screen.getByRole('status').textContent).toBe('');
+		});
+
+		it('walks the arrow keys across a page boundary', async () => {
+			setup({ vms: many });
+			const last = rowsShown()[49];
+			last.focus();
+			await fireEvent.keyDown(last, { key: 'ArrowDown' });
+			await tick();
+			expect(screen.getByText('Page 2 of 3')).toBeTruthy();
+			expect((document.activeElement as HTMLElement).dataset.key).toBe('team-a/vm-050');
+		});
 	});
 
 	it('hands the row to the context menu', async () => {

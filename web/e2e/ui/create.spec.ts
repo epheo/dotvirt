@@ -152,20 +152,38 @@ test('a project rule says what it protects and refuses', async ({ page }) => {
 	});
 });
 
-test('an image uploads now, with no pull request', async ({ page }) => {
+test('an image uploads now as a boot image, then a VM boots from it', async ({ page }) => {
 	const sheet = await openNew(page, '/storage');
 	await expect(sheet.getByRole('heading', { name: 'New image' })).toBeVisible();
 	await expect(sheet.getByText('Runs now')).toBeVisible();
+	await expect(sheet.getByRole('checkbox', { name: /Offer it as a boot image/ })).toBeChecked();
 	await sheet.locator('input[type=file]').setInputFiles({
 		name: 'Fedora-43.qcow2',
 		mimeType: 'application/octet-stream',
 		buffer: Buffer.alloc(1024),
 	});
 	await expect(sheet.getByLabel('Name', { exact: true })).toHaveValue('fedora-43');
+	const posted = page.waitForRequest(
+		(r) => r.method() === 'POST' && r.url().endsWith('/api/uploads'),
+	);
 	await sheet.getByRole('button', { name: 'Upload image' }).click();
-	await expect(sheet.getByText(/is ready in/)).toBeVisible({ timeout: 15_000 });
-	await sheet.getByRole('button', { name: 'Done' }).click();
-	await expect(sheet).toBeHidden();
+	expect((await posted).postDataJSON()).toMatchObject({ name: 'fedora-43', bootImage: true });
+	await expect(sheet.getByText(/is a boot image in/)).toBeVisible({ timeout: 15_000 });
+	await sheet.getByRole('button', { name: 'New VM from it' }).click();
+	await expect(sheet.getByRole('heading', { name: 'New VM' })).toBeVisible();
+	await expect(sheet.getByText('Filled in from fedora-43, the image you picked.')).toBeVisible();
+	await expect(sheet.getByText('fedora-43', { exact: true })).toBeVisible();
+	const posted2 = page.waitForRequest(
+		(r) =>
+			r.method() === 'POST' &&
+			new URL(r.url()).pathname === '/api/vms' &&
+			!r.url().includes('dryRun'),
+	);
+	await sheet.getByRole('button', { name: 'Stage VM' }).click();
+	expect((await posted2).postDataJSON().osImage).toEqual({
+		name: 'fedora-43',
+		namespace: 'web-prod',
+	});
 });
 
 test('Escape closes the sheet and hands focus back to New', async ({ page }) => {

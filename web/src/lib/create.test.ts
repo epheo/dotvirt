@@ -236,8 +236,7 @@ describe('sharedClass', () => {
 
 describe('usual choices', () => {
 	it('counts disks per boot image', () => {
-		const disk = (image?: string) =>
-			({ name: 'root', image }) as VM['disks'] extends (infer D)[] | undefined ? D : never;
+		const disk = (image?: string) => ({ name: 'root', image });
 		const vms = [
 			vm('a', { disks: [disk('imgs/fedora-42'), disk()] }),
 			vm('b', { disks: [disk('imgs/fedora-42')] }),

@@ -69,6 +69,7 @@
 	);
 	const from = $derived(
 		('from' in modal && modal.from) ||
+			(modal.kind === 'upload' && modal.file ? `${modal.file.name}, the file you dropped` : '') ||
 			(modal.kind === 'newVM' && modal.image
 				? `${modal.image.split('/').pop()}, the image you picked`
 				: '') ||
@@ -238,7 +239,12 @@
 					{onclose}
 				/>
 			{:else if type === 'image'}
-				<ImageForm bind:namespace {onclose} />
+				<ImageForm
+					bind:namespace
+					file={own?.kind === 'upload' ? own.file : undefined}
+					bootImage={own?.kind === 'upload' ? own.bootImage : undefined}
+					{onclose}
+				/>
 			{:else if type === 'network'}
 				<NetworkForm
 					bind:namespace

@@ -81,8 +81,7 @@ export function imageTally(vms: VM[]): Map<string, number> {
 	const tally = new Map<string, number>();
 	for (const vm of vms)
 		for (const d of vm.disks ?? []) {
-			const img = (d as { image?: string }).image;
-			if (img) tally.set(img, (tally.get(img) ?? 0) + 1);
+			if (d.image) tally.set(d.image, (tally.get(d.image) ?? 0) + 1);
 		}
 	return tally;
 }

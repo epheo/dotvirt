@@ -1,7 +1,8 @@
 // The create sheet's slice of the fixture: the extra base data its defaults
 // read (an overlapping pair of networks, a project network with no range,
 // templates) and the create routes it posts to, each with the backend's
-// ?dryRun=true twin that answers what staging would write.
+// ?dryRun=true twin that answers what staging would write. Uploads are the
+// storage block's (server.mjs).
 
 // ── base data ─────────────────────────────────────────────────────────────────
 
@@ -48,23 +49,6 @@ const TEMPLATE_YAML = (name) =>
 
 export const createTemplates = {
 	templates: [
-		{
-			name: 'fedora-server',
-			library: 'platform',
-			description: 'Fedora 42 with the web stack, 2 vCPU 4 GiB',
-			sourceFile: 'templates/fedora-server.yaml',
-			instancetype: 'u1.medium',
-			preference: 'fedora',
-			parameters: [
-				{ name: 'NAME', generate: 'expression', from: 'fedora-[a-z0-9]{5}' },
-				{
-					name: 'SSH_KEY',
-					displayName: 'SSH public key',
-					description: 'Added to the default user',
-				},
-			],
-			yaml: TEMPLATE_YAML('fedora-server'),
-		},
 		{
 			name: 'web-node',
 			library: 'team-web',
@@ -553,44 +537,4 @@ export async function handleCreate(req, res, url, ctx) {
 		sendText(res, e.status, e.message);
 	}
 	return true;
-}
-
-// The image upload: the target is created at once, then reports ready, takes
-// the bytes at a fixture URL and finishes importing on the next status read.
-export async function handleUpload(req, res, url, ctx) {
-	const { sendJSON, readBody } = ctx;
-	if (url.pathname === '/api/uploads' && req.method === 'POST') {
-		const b = (await readBody(req)) ?? {};
-		ctx.state.uploads ??= new Map();
-		ctx.state.uploads.set(`${b.namespace}/${b.name}`, 'UploadReady');
-		sendJSON(res, 200, { namespace: b.namespace, name: b.name });
-		return true;
-	}
-	let m = url.pathname.match(/^\/api\/uploads\/([^/]+)\/([^/]+)$/);
-	if (m && req.method === 'GET') {
-		const key = `${m[1]}/${m[2]}`;
-		const phase = ctx.state.uploads?.get(key) ?? 'Pending';
-		if (phase === 'Uploaded') ctx.state.uploads.set(key, 'Succeeded');
-		sendJSON(res, 200, { phase, ready: phase === 'Succeeded', progress: '100.0%' });
-		return true;
-	}
-	m = url.pathname.match(/^\/api\/uploads\/([^/]+)\/([^/]+)\/token$/);
-	if (m && req.method === 'POST') {
-		sendJSON(res, 200, {
-			token: 'fixture-upload-token',
-			uploadUrl: `/__fixture/upload/${m[1]}/${m[2]}`,
-		});
-		return true;
-	}
-	m = url.pathname.match(/^\/__fixture\/upload\/([^/]+)\/([^/]+)$/);
-	if (m && req.method === 'POST') {
-		req.resume();
-		req.on('end', () => {
-			ctx.state.uploads?.set(`${m[1]}/${m[2]}`, 'Uploaded');
-			res.writeHead(200);
-			res.end();
-		});
-		return true;
-	}
-	return false;
 }

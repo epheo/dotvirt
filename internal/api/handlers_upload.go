@@ -14,7 +14,9 @@ import (
 // image bytes straight to cdi-uploadproxy (which ships open CORS), so multi-GB
 // images never pass through dotvirt. Disabled when -upload-proxy-url is unset.
 
-// handleCreateUpload creates the upload-target DataVolume in the caller's project.
+// handleCreateUpload creates the upload-target DataVolume in the caller's
+// project. With bootImage it also registers the volume as a boot image; that
+// authority is checked first, so a refusal creates nothing.
 func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.UploadProxyURL == "" {
 		fail(w, fmt.Errorf("%w: image upload not configured", model.ErrUnavailable))
@@ -25,6 +27,7 @@ func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 		Name         string `json:"name"`
 		Size         string `json:"size"`
 		StorageClass string `json:"storageClass"`
+		BootImage    bool   `json:"bootImage"`
 	}](w, r)
 	if !ok {
 		return
@@ -37,11 +40,30 @@ func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if req.BootImage {
+		ok, err := sc.cluster.CanCreateBootImages(r.Context(), req.Namespace)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		if !ok {
+			fail(w, fmt.Errorf("%w: you may not add boot images in %s", model.ErrForbidden, req.Namespace))
+			return
+		}
+	}
 	if err := sc.cluster.CreateUploadDataVolume(r.Context(), req.Namespace, req.Name, req.Size, req.StorageClass); err != nil {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, model.UploadTarget{Namespace: req.Namespace, Name: req.Name})
+	target := model.UploadTarget{Namespace: req.Namespace, Name: req.Name}
+	if req.BootImage {
+		if err := sc.cluster.CreateBootImage(r.Context(), req.Namespace, req.Name); err != nil {
+			fail(w, fmt.Errorf("the disk %s was created but not registered as a boot image: %w", req.Name, err))
+			return
+		}
+		target.Image = req.Namespace + "/" + req.Name
+	}
+	writeJSON(w, target)
 }
 
 // handleUploadStatus reports the upload DataVolume's phase + import progress.

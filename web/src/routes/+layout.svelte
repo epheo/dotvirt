@@ -21,6 +21,7 @@
 	import { catalog } from '#lib/state/catalog.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
+	import { storage } from '#lib/state/storage.svelte.js';
 	import { lastSection } from '#lib/state/nav.svelte.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { tray } from '#lib/state/tray.svelte.js';
@@ -41,6 +42,7 @@
 	import ChangesTree from '#lib/tree/ChangesTree.svelte';
 	import ComputeTree from '#lib/tree/ComputeTree.svelte';
 	import FlatSectionTree from '#lib/tree/FlatSectionTree.svelte';
+	import StorageTree from '#lib/tree/StorageTree.svelte';
 
 	let { children }: { children: Snippet } = $props();
 
@@ -72,6 +74,7 @@
 			reviewCache.reset();
 			ui.reset();
 			catalog.reset();
+			storage.reset();
 			tray.reset();
 		}
 	});
@@ -271,7 +274,7 @@
 					{:else if treeSection === 'networking'}
 						<FlatSectionTree kind="network" />
 					{:else if treeSection === 'storage'}
-						<FlatSectionTree kind="storage" />
+						<StorageTree />
 					{:else if treeSection === 'changes'}
 						<ChangesTree />
 					{:else}

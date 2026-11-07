@@ -57,7 +57,7 @@ export type AppModal =
 	// Stage the removal of a git-declared object (segment, firewall rule, Tier-0
 	// service) - the VM delete's confirm, for the rest of the inventory.
 	| { kind: 'deleteObject'; resource: string; namespace: string; name: string; sourceFile: string }
-	| { kind: 'upload'; namespace?: string }
+	| { kind: 'upload'; namespace?: string; file?: File; bootImage?: boolean }
 	| { kind: 'deployTemplate'; library?: string; template?: string; namespace?: string } // Deploy from Template (Catalog / New ▾)
 	| { kind: 'editTemplate'; template: Template } // edit a library item's manifest (Catalog)
 	// Edit a declared object's manifest verbatim, when its form has no field for it.
