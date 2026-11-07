@@ -87,3 +87,46 @@ func TestRedact(t *testing.T) {
 		t.Errorf("unredacted target = %q", full.Target)
 	}
 }
+
+// A step Trace emits maps back to its policy row, so Redact rewrites that row
+// rather than hiding it whole - and the verdict is the one Trace computed.
+func TestRedactTraceStep(t *testing.T) {
+	s := New(nil, nil)
+	add(t, s.anp, map[string]any{
+		"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "AdminNetworkPolicy",
+		"metadata": map[string]any{"name": "guard"},
+		"spec": map[string]any{
+			"priority": int64(10),
+			"subject":  map[string]any{"namespaces": nameInSelector("team-a")},
+			"ingress": []any{map[string]any{
+				"action": "Deny",
+				"from":   []any{map[string]any{"namespaces": nameInSelector("team-a", "team-b")}},
+			}},
+		},
+	})
+	src := wl("team-b", "client", nil, map[string]string{"app": "client"})
+	dst := wl("team-a", "web", nil, map[string]string{"app": "web"})
+	res := s.Trace(src, &dst, "", "TCP", 443)
+	if res.Verdict != "Deny" {
+		t.Fatalf("verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	red := &Redaction{
+		Namespace: func(ns string) bool { return ns == "team-a" },
+		Project:   func(string) bool { return false },
+	}
+	found := false
+	for i := range res.Steps {
+		st := &res.Steps[i]
+		if st.Policy == nil || st.Policy.Name != "guard" || st.Rule == nil {
+			continue
+		}
+		found = true
+		s.Redact(st.Policy, st.Rule, red)
+		if st.Rule.Peer != "ns team-a, other namespaces" || st.Rule.Action != "Deny" || st.Rule.Direction != "Ingress" {
+			t.Errorf("step row = %+v, want the row rewritten in place", *st.Rule)
+		}
+	}
+	if !found {
+		t.Fatalf("no step for guard: %v", stepKinds(t, res))
+	}
+}
