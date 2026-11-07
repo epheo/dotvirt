@@ -1,8 +1,11 @@
 package ttlcache
 
 import (
+	"context"
+	"errors"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -89,5 +92,80 @@ func BenchmarkPutWarm(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		c.Put("hot", 1)
+	}
+}
+
+// Concurrent misses on one key share one fill; another key fills on its own;
+// a waiter that gives up leaves the call to the rest.
+func TestDoSharesOneFill(t *testing.T) {
+	c := New[int](time.Minute)
+	var fills atomic.Int32
+	release := make(chan struct{})
+	fill := func() (int, error) {
+		fills.Add(1)
+		<-release
+		return 7, nil
+	}
+	var wg sync.WaitGroup
+	results := make(chan int, 8)
+	for range 8 {
+		wg.Go(func() {
+			v, err := c.Do(context.Background(), "k", fill)
+			if err != nil {
+				t.Error(err)
+			}
+			results <- v
+		})
+	}
+	for deadline := time.Now().Add(5 * time.Second); fills.Load() == 0; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("no fill started")
+		}
+	}
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.Do(gone, "k", fill); !errors.Is(err, context.Canceled) {
+		t.Errorf("a waiter whose context ended got %v, want context.Canceled", err)
+	}
+	if v, err := c.Do(context.Background(), "other", func() (int, error) { return 1, nil }); err != nil || v != 1 {
+		t.Errorf("another key: %d, %v", v, err)
+	}
+	time.Sleep(50 * time.Millisecond) // let every caller join the call in flight
+	close(release)
+	wg.Wait()
+	close(results)
+	for v := range results {
+		if v != 7 {
+			t.Errorf("a caller got %d, want the shared 7", v)
+		}
+	}
+	if n := fills.Load(); n != 1 {
+		t.Errorf("%d fills for one key, want 1", n)
+	}
+}
+
+// A fill that never returns hands its waiters an error, never a zero value
+// posing as a result.
+func TestDoAbortedFill(t *testing.T) {
+	c := New[int](time.Minute)
+	started, release := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer func() { _ = recover() }()
+		_, _ = c.Do(context.Background(), "k", func() (int, error) {
+			close(started)
+			<-release
+			panic("boom")
+		})
+	}()
+	<-started
+	done := make(chan error)
+	go func() {
+		_, err := c.Do(context.Background(), "k", func() (int, error) { return 1, nil })
+		done <- err
+	}()
+	time.Sleep(50 * time.Millisecond) // let the waiter join
+	close(release)
+	if err := <-done; !errors.Is(err, errFillAborted) {
+		t.Errorf("a waiter on a panicked fill got %v, want errFillAborted", err)
 	}
 }

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
@@ -65,6 +67,22 @@ func (s *Server) projectsFor(ctx context.Context, id auth.Identity, c *cluster.C
 	return s.resolver.Resolve(s.state.Namespaces(), visible), nil
 }
 
+// reviewTimeout bounds a shared review (see review): it runs detached from
+// the caller that started it, so that caller leaving fails none of the others
+// waiting on it.
+const reviewTimeout = 15 * time.Second
+
+// review runs fill once per key and RBAC version, however many frame builds
+// and pulls of one token miss at once (ttlcache.Do). A caller with a newer
+// version never joins an older review.
+func review[V any](ctx context.Context, cache *ttlcache.Cache[V], key string, ver uint64, fill func(context.Context) (V, error)) (V, error) {
+	return cache.Do(ctx, key+"\x00"+strconv.FormatUint(ver, 10), func() (V, error) {
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reviewTimeout)
+		defer cancel()
+		return fill(rctx)
+	})
+}
+
 // visibleFor returns the set of namespaces id's token may read VMs in, cached by
 // token for visibleTTL. The snapshot's project namespaces are the candidates
 // VisibleNamespaces probes when the token lacks cluster-wide VM read. A failed
@@ -75,17 +93,22 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 	if e, ok := s.visible.Get(key); ok && e.ver == ver {
 		return e.ns, nil
 	}
-	candidates := namespaceNames(s.state.Namespaces())
-	names, err := c.VisibleNamespaces(ctx, candidates)
+	e, err := review(ctx, s.visible, key, ver, func(ctx context.Context) (visibleSet, error) {
+		names, err := c.VisibleNamespaces(ctx, namespaceNames(s.state.Namespaces()))
+		if err != nil {
+			return visibleSet{}, err
+		}
+		e := visibleSet{ns: make(map[string]bool, len(names)), ver: ver}
+		for _, n := range names {
+			e.ns[n] = true
+		}
+		s.visible.Put(key, e)
+		return e, nil
+	})
 	if err != nil {
 		return nil, s.reviewFailed(ctx, id, err)
 	}
-	set := make(map[string]bool, len(names))
-	for _, n := range names {
-		set[n] = true
-	}
-	s.visible.Put(key, visibleSet{ns: set, ver: ver})
-	return set, nil
+	return e.ns, nil
 }
 
 // can answers verb on ref in ns ("" for cluster scope) under id's token,
@@ -101,12 +124,16 @@ func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, v
 	if e, ok := s.ssar.Get(k); ok && e.ver == ver {
 		return e.ok, nil
 	}
-	ok, err := c.Can(ctx, verb, ref.group, ref.resource, ns)
-	if err != nil {
-		return false, err
-	}
-	s.ssar.Put(k, ssarVerdict{ok: ok, ver: ver})
-	return ok, nil
+	e, err := review(ctx, s.ssar, k, ver, func(ctx context.Context) (ssarVerdict, error) {
+		ok, err := c.Can(ctx, verb, ref.group, ref.resource, ns)
+		if err != nil {
+			return ssarVerdict{}, err
+		}
+		e := ssarVerdict{ok: ok, ver: ver}
+		s.ssar.Put(k, e)
+		return e, nil
+	})
+	return e.ok, err
 }
 
 // saCached is the preamble of a catalog route: the caller's identity first

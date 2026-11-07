@@ -8,6 +8,8 @@
 package ttlcache
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"time"
 )
@@ -17,9 +19,10 @@ import (
 type Cache[V any] struct {
 	ttl time.Duration
 
-	mu    sync.Mutex
-	m     map[string]entry[V]
-	swept time.Time
+	mu     sync.Mutex
+	m      map[string]entry[V]
+	swept  time.Time
+	flight map[string]*call[V] // Do calls in progress, by key
 }
 
 type entry[V any] struct {
@@ -29,7 +32,48 @@ type entry[V any] struct {
 
 // New builds a Cache whose entries live for ttl.
 func New[V any](ttl time.Duration) *Cache[V] {
-	return &Cache[V]{ttl: ttl, m: map[string]entry[V]{}}
+	return &Cache[V]{ttl: ttl, m: map[string]entry[V]{}, flight: map[string]*call[V]{}}
+}
+
+// call is one Do in progress; done closes once val and err are final.
+type call[V any] struct {
+	done chan struct{}
+	val  V
+	err  error
+}
+
+// errFillAborted is what waiters see when the fill they waited on never
+// returned (it panicked): never a zero value posing as a result.
+var errFillAborted = errors.New("ttlcache: fill aborted")
+
+// Do runs fill for key unless a Do for key is already in flight, in which
+// case it waits for that call's result instead: concurrent misses on one key
+// cost one fill. It neither reads nor writes the cache; fill does. A waiter
+// whose ctx ends first returns ctx.Err() and leaves the call running for the
+// others, so a fill that serves waiters must not stop with its own caller.
+func (c *Cache[V]) Do(ctx context.Context, key string, fill func() (V, error)) (V, error) {
+	c.mu.Lock()
+	if f, ok := c.flight[key]; ok {
+		c.mu.Unlock()
+		select {
+		case <-f.done:
+			return f.val, f.err
+		case <-ctx.Done():
+			var zero V
+			return zero, ctx.Err()
+		}
+	}
+	f := &call[V]{done: make(chan struct{}), err: errFillAborted}
+	c.flight[key] = f
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		delete(c.flight, key)
+		c.mu.Unlock()
+		close(f.done)
+	}()
+	f.val, f.err = fill()
+	return f.val, f.err
 }
 
 // Get returns the cached value for key if present and unexpired.

@@ -10,8 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	authnv1 "k8s.io/api/authentication/v1"
 	authzv1 "k8s.io/api/authorization/v1"
@@ -96,6 +98,52 @@ func TestVisibleForCachesPerToken(t *testing.T) {
 	}
 	if len(second) != len(first) || !second["tenant-a"] || !second["tenant-b"] {
 		t.Fatalf("cached read = %v, want the same set as the first", second)
+	}
+}
+
+// Concurrent misses for one token share one probe: a frame build and the
+// pulls its watermarks trigger never review one token's visibility twice. The
+// probe runs on when the caller that started it leaves, so the others waiting
+// on it still get its answer.
+func TestVisibleForSharesOneProbe(t *testing.T) {
+	s := scopeServer(eventbus.New())
+	kube := fake.NewSimpleClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-a"}})
+	gate := make(chan struct{})
+	var started atomic.Bool
+	lists := 0
+	kube.PrependReactor("list", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
+		lists++
+		started.Store(true)
+		<-gate
+		return false, nil, nil
+	})
+	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		ssar := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview).DeepCopy()
+		ssar.Status.Allowed = true
+		return true, ssar, nil
+	})
+	c := cluster.NewClient(kube, nil, nil)
+	id := auth.Identity{Token: "tok-alice", Username: "alice"}
+
+	leader, leave := context.WithCancel(context.Background())
+	go func() { _, _ = s.visibleFor(leader, id, c) }()
+	for !started.Load() {
+		time.Sleep(time.Millisecond)
+	}
+	var wg sync.WaitGroup
+	for range 3 {
+		wg.Go(func() {
+			if got, err := s.visibleFor(context.Background(), id, c); err != nil || !got["tenant-a"] {
+				t.Errorf("a waiter got %v, %v; want tenant-a", got, err)
+			}
+		})
+	}
+	time.Sleep(50 * time.Millisecond) // let the waiters join the probe in flight
+	leave()
+	close(gate)
+	wg.Wait()
+	if lists != 1 {
+		t.Fatalf("four concurrent misses cost %d probes, want 1", lists)
 	}
 }
 
