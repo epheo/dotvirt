@@ -73,7 +73,7 @@
 			{/snippet}
 			{#if stagedItem}
 				<div
-					class="flex items-center gap-2 border-b border-line-soft px-3 py-1.5 text-xs text-ink-muted"
+					class="flex items-center gap-2 border-b border-line-soft px-card py-1.5 text-xs text-ink-muted"
 				>
 					<Pencil size={12} class="text-accent-ink" />
 					<span class="capitalize">{stagedItem.kind}</span>
@@ -81,14 +81,14 @@
 						>part of your {project} draft ({draftCount} item{draftCount === 1 ? '' : 's'})</span
 					>
 				</div>
-				<div class="px-3 py-2">
+				<div class="px-card py-2">
 					<ChangeList changes={stagedItem.changes} />
 				</div>
-				<p class="border-t border-line-soft bg-inset px-3 py-1.5 text-xs text-ink-faint">
+				<p class="border-t border-line-soft bg-inset px-card py-1.5 text-xs text-ink-faint">
 					Propose sends the whole {project} draft as one pull request.
 				</p>
 			{:else}
-				<p class="px-3 py-2 text-xs text-ink-faint">
+				<p class="px-card py-2 text-xs text-ink-faint">
 					Nothing staged for this VM. Edit Settings, power and restore all land here first.
 				</p>
 			{/if}
@@ -99,7 +99,7 @@
 				<span class="text-xs text-ink-faint">pull requests touching {vm.name}</span>
 			{/snippet}
 			{#if touching.length === 0}
-				<p class="px-3 py-2 text-xs text-ink-faint">
+				<p class="px-card py-2 text-xs text-ink-faint">
 					{prsLoading ? 'Checking open pull requests…' : 'No open pull request touches this VM.'}
 				</p>
 			{:else}
@@ -107,7 +107,7 @@
 					{#each touching as p (p.prNumber)}
 						{@const appr = approvalLine(p)}
 						{@const chk = checksPill(p)}
-						<li class="flex items-center gap-2 px-3 py-1.5">
+						<li class="flex items-center gap-2 px-card py-1.5">
 							<GitPullRequest size={13} class="shrink-0 text-accent-ink" />
 							<span class="font-medium text-ink">PR #{p.prNumber}</span>
 							{#if p.by}<span class="text-xs text-ink-faint">{p.mine ? 'yours' : `by ${p.by}`}</span

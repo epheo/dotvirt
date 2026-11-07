@@ -11,7 +11,7 @@
 	}: { label: string; value?: string; mono?: boolean; children?: Snippet } = $props();
 </script>
 
-<div class="flex justify-between gap-3 px-3 py-1.5">
+<div class="flex justify-between gap-3 px-card py-1.5">
 	<dt class="shrink-0 text-ink-muted">{label}</dt>
 	{#if children}
 		<dd class="min-w-0 text-right">{@render children()}</dd>

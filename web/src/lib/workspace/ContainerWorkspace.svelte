@@ -179,9 +179,9 @@
 	}
 </script>
 
-<Breadcrumb {trail} />
+<Breadcrumb class="border-b border-line px-4 py-2" {trail} />
 
-<TabBar class="border-b border-line px-4" {tabs} active={tab} href={(t) => `?tab=${t}`} />
+<TabBar class="px-4" {tabs} active={tab} href={(t) => `?tab=${t}`} />
 
 {#if tab === 'summary'}
 	{#if scope.kind === 'network'}

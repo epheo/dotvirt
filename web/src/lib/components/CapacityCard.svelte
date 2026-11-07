@@ -85,7 +85,7 @@
 	{#snippet action()}
 		<Button variant="link" size="sm" href="/hosts">See hosts</Button>
 	{/snippet}
-	<div class="space-y-4 px-4 py-3">
+	<div class="space-y-4 px-card py-3">
 		{#if room}
 			<div>
 				<p class="text-xl font-semibold text-balance text-ink">
