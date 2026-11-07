@@ -13,6 +13,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -27,9 +28,8 @@ import (
 
 // reconcileForge stands up + bootstraps the managed Forgejo (opt-in, eval-grade)
 // before anything that needs the forge credential. Once dotvirt-forge exists, the
-// rest of the install can't tell it from a BYO forge. For a wholly unconfigured forge
-// it records NotConfigured (push-only) and returns; for a BYO forge only the
-// trust anchors remain. Requeues while Forgejo is coming up or its router host
+// rest of the install can't tell it from a BYO forge. Any other forge is only
+// observed (observeForge). Requeues while Forgejo is coming up or its router host
 // isn't assigned yet.
 func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (*ctrl.Result, error) {
 	// Before the first pod a pass may start: the managed Forgejo and the app both
@@ -42,18 +42,7 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 		// Derived status, so a switch off managed retires the stale bootstrap hint too.
 		dv.Status.ForgeURL = dv.Spec.Forge.URL
 		dv.Status.ForgeAdminHint = ""
-		if !install.ForgeConfigured(dv) {
-			if dv.Spec.Forge.URL != "" {
-				// A URL alone is not a forge: the app reads URL and token from the
-				// credentials secret. A generic reason beside a plainly set url is a lie.
-				r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "CredentialsRequired",
-					"spec.forge.url is set but spec.forge.credentialsSecret is not; name a Secret with url/username/token keys (or set forge.managed)")
-			} else {
-				r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "NotConfigured",
-					"no forge configured; propose pushes a branch but opens no pull request")
-			}
-		}
-		return nil, nil
+		return nil, r.observeForge(ctx, dv)
 	}
 	// Apply the base workload (incl. the exposure) first: on OpenShift with no explicit
 	// URL that Route is hostless, so the router assigns a host we read back and fill into
@@ -97,6 +86,33 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionTrue, "Ready", "managed Forgejo bootstrapped")
 	return nil, nil
+}
+
+// observeForge reports a forge the operator does not run. It never touches the
+// forge; the condition says whether the app has the credential it reads URL and
+// token from, since a missing one otherwise shows only as a pod stuck starting.
+func (r *DotvirtReconciler) observeForge(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
+	name := dv.Spec.Forge.CredentialsSecret
+	switch {
+	case name == "" && dv.Spec.Forge.URL != "":
+		// A URL alone is not a forge. A generic reason beside a plainly set url is a lie.
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "CredentialsRequired",
+			"spec.forge.url is set but spec.forge.credentialsSecret is not; name a Secret with url/username/token keys (or set forge.managed)")
+	case name == "":
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "NotConfigured",
+			"no forge configured; propose pushes a branch but opens no pull request")
+	default:
+		if _, err := r.secret(ctx, dv.Namespace, name); apierrors.IsNotFound(err) {
+			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "CredentialsSecretMissing",
+				fmt.Sprintf("spec.forge.credentialsSecret names %s/%s, which does not exist; the dotvirt pod cannot start without it", dv.Namespace, name))
+		} else if err != nil {
+			return fmt.Errorf("read forge credentials %q: %w", name, err)
+		} else {
+			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionTrue, "BringYourOwn",
+				"bring-your-own forge, credentials from secret "+name)
+		}
+	}
+	return nil
 }
 
 // managedForgeAPIBase is the base URL the operator uses for the managed Forgejo's
@@ -171,6 +187,8 @@ func forgeAdminHint(ns string) string {
 // comes back.
 func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, _ *reconcileCtx) (*ctrl.Result, error) {
 	if dv.Spec.Forge.PlatformRepo == "" {
+		// Derived: a cleared platformRepo retires the repo's last verdict.
+		meta.RemoveStatusCondition(&dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeRepoReady)
 		return nil, nil
 	}
 	if err := r.ensurePlatformRepo(ctx, dv); err != nil {

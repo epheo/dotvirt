@@ -394,3 +394,29 @@ func TestForgeTemplateReadErrorsFailThePhase(t *testing.T) {
 		}
 	})
 }
+
+// Every condition and derived field is re-derived from the current spec: a
+// switch from a managed forge with a platform repo to a BYO forge without one
+// must not leave the managed verdicts behind.
+func TestSpecChangeRetiresStaleStatus(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Forge = dotvirtv1alpha1.ForgeSpec{URL: "https://byo.example", CredentialsSecret: "byo-creds"}
+	var seed DotvirtReconciler
+	seed.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionTrue, "Ready", "managed Forgejo bootstrapped")
+	seed.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionTrue, "Ready", "platform repo present")
+	dv.Status.ForgeAdminHint = "managed hint"
+	creds := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "byo-creds", Namespace: dv.Namespace}}
+	c := testBuilder(t).WithObjects(dv, creds).Build()
+
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	got := getCR(t, c, dv)
+	if fc := cond(got, dotvirtv1alpha1.ConditionForgeReady); fc == nil || fc.Reason != "BringYourOwn" {
+		t.Errorf("ForgeReady = %+v, want the BYO verdict", fc)
+	}
+	if repo := cond(got, dotvirtv1alpha1.ConditionForgeRepoReady); repo != nil {
+		t.Errorf("ForgeRepoReady = %+v survived the platform repo's removal", repo)
+	}
+	if got.Status.ForgeAdminHint != "" {
+		t.Errorf("forgeAdminHint = %q survived the switch off managed", got.Status.ForgeAdminHint)
+	}
+}

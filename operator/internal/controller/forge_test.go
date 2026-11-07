@@ -160,28 +160,48 @@ func TestBootstrapForgejoAdminMismatchReturnsErrUnauthorized(t *testing.T) {
 	}
 }
 
-// reconcileForge is a silent no-op for a bring-your-own forge (URL set, not managed):
-// the BYO path is handled entirely by the later secret/workload phases.
-func TestReconcileForgeSilentForBYO(t *testing.T) {
-	dv := testCR()
-	dv.Spec.Forge.URL = "https://byo-forge.example"
-	dv.Spec.Forge.CredentialsSecret = "byo-creds"
-	dv.Status.ForgeAdminHint = "stale hint from a managed past"
-	c := testBuilder(t).WithObjects(dv).Build()
-	r := newReconciler(c, depsOK)
+// A bring-your-own forge is observed, never touched: ForgeReady says whether the
+// credential the app reads exists, so a credentialsSecret typo reads as itself
+// instead of as a pod that never starts.
+func TestReconcileForgeReportsBYO(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		secret bool
+		status metav1.ConditionStatus
+		reason string
+	}{
+		{"present", true, metav1.ConditionTrue, "BringYourOwn"},
+		{"missing", false, metav1.ConditionFalse, "CredentialsSecretMissing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dv := testCR()
+			dv.Spec.Forge.URL = "https://byo-forge.example"
+			dv.Spec.Forge.CredentialsSecret = "byo-creds"
+			dv.Status.ForgeAdminHint = "stale hint from a managed past"
+			b := testBuilder(t).WithObjects(dv)
+			if tc.secret {
+				b = b.WithObjects(&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "byo-creds", Namespace: dv.Namespace}})
+			}
+			r := newReconciler(b.Build(), depsOK)
 
-	res, err := r.reconcileForge(context.Background(), dv, phaseCtx(r, dv))
-	if err != nil || res != nil {
-		t.Fatalf("reconcileForge (BYO) = (%+v, %v), want (nil, nil)", res, err)
-	}
-	if cond(getCR(t, c, dv), dotvirtv1alpha1.ConditionForgeReady) != nil {
-		t.Error("ForgeReady set for a BYO forge; the phase must stay silent")
-	}
-	if dv.Status.ForgeURL != dv.Spec.Forge.URL {
-		t.Errorf("status.forgeURL = %q, want the BYO url %q", dv.Status.ForgeURL, dv.Spec.Forge.URL)
-	}
-	if dv.Status.ForgeAdminHint != "" {
-		t.Errorf("switching off managed must retire the bootstrap hint, got %q", dv.Status.ForgeAdminHint)
+			res, err := r.reconcileForge(context.Background(), dv, phaseCtx(r, dv))
+			if err != nil || res != nil {
+				t.Fatalf("reconcileForge (BYO) = (%+v, %v), want (nil, nil)", res, err)
+			}
+			fc := cond(dv, dotvirtv1alpha1.ConditionForgeReady)
+			if fc == nil || fc.Status != tc.status || fc.Reason != tc.reason {
+				t.Fatalf("ForgeReady = %+v, want %s/%s", fc, tc.status, tc.reason)
+			}
+			if !tc.secret && !strings.Contains(fc.Message, "byo-creds") {
+				t.Errorf("message %q does not name the missing secret", fc.Message)
+			}
+			if dv.Status.ForgeURL != dv.Spec.Forge.URL {
+				t.Errorf("status.forgeURL = %q, want the BYO url %q", dv.Status.ForgeURL, dv.Spec.Forge.URL)
+			}
+			if dv.Status.ForgeAdminHint != "" {
+				t.Errorf("switching off managed must retire the bootstrap hint, got %q", dv.Status.ForgeAdminHint)
+			}
+		})
 	}
 }
 
