@@ -143,13 +143,13 @@ func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, w
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	declared, err := read.DeclaredOnBranch(c.baseBranch)
+	idx, err := indexDeclared(read, c.baseBranch)
 	if err != nil {
 		return model.DraftView{}, err
 	}
 	staged := 0
 	for _, o := range objs {
-		if declared[model.ObjectRef{Kind: o.Kind, Namespace: o.Namespace, Name: o.Name}] {
+		if _, ok := idx.Files[model.ObjectRef{Kind: o.Kind, Namespace: o.Namespace, Name: o.Name}]; ok {
 			continue
 		}
 		if err := c.store.Stage(id.Username, proj.Name, draft.Entry{

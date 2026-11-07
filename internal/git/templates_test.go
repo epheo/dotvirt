@@ -43,7 +43,7 @@ func TestTemplatesDirSplit(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, f := range vms {
-		if inTemplatesDir(f.Path) {
+		if InTemplatesDir(f.Path) {
 			t.Fatalf("VMManifests leaked a library file: %s", f.Path)
 		}
 	}

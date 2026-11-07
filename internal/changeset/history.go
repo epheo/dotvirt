@@ -242,9 +242,9 @@ func documentsIn(path string, content []byte) orderedDocs {
 	if len(content) == 0 {
 		return out
 	}
-	ns := git.DefaultNamespace(path)
+	ns := defaultNamespace(path)
 	for _, chunk := range documentSeparator.Split(string(content), -1) {
-		refs := git.DeclaredRefs(path, []byte(chunk))
+		refs := declaredRefs(path, []byte(chunk))
 		if len(refs) != 1 {
 			continue
 		}

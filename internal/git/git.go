@@ -206,10 +206,10 @@ func (r *Repo) headsSignature() (string, error) {
 	return strings.Join(heads, ","), nil
 }
 
-// walkYAML visits branch's .yaml/.yml files passing include, under the repo
-// lock - the one tree-walk behind VMManifests, TemplatesOnBranch and
-// DeclaredOnBranch.
-func (r *Repo) walkYAML(branch string, include func(path string) bool, visit func(path string, content []byte) error) error {
+// WalkYAML visits branch's .yaml/.yml files passing include: the one tree
+// walk behind every per-branch index. visit runs under the repo lock, so it
+// must not call back into r.
+func (r *Repo) WalkYAML(branch string, include func(path string) bool, visit func(path string, content []byte) error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	tree, err := r.treeFor(branch)
@@ -233,8 +233,8 @@ func (r *Repo) walkYAML(branch string, include func(path string) bool, visit fun
 // single file with multiple docs is still found.
 func (r *Repo) VMManifests(branch string) ([]model.File, error) {
 	var out []model.File
-	err := r.walkYAML(branch,
-		func(path string) bool { return !inTemplatesDir(path) },
+	err := r.WalkYAML(branch,
+		func(path string) bool { return !InTemplatesDir(path) },
 		func(path string, content []byte) error {
 			if containsVirtualMachine(content) {
 				out = append(out, model.File{Path: path, Content: content})
@@ -312,9 +312,9 @@ func containsVirtualMachine(content []byte) bool {
 	return strings.Contains(string(content), "kind: VirtualMachine")
 }
 
-// inTemplatesDir: VMManifests skips the library (a template's embedded VM
-// blueprint is not inventory); TemplatesOnBranch reads only it.
-func inTemplatesDir(name string) bool {
+// InTemplatesDir: the library holds blueprints, not declared objects (a
+// template's embedded VM is not inventory); TemplatesOnBranch reads only it.
+func InTemplatesDir(name string) bool {
 	return strings.HasPrefix(name, model.TemplatesDir+"/")
 }
 
@@ -322,7 +322,7 @@ func inTemplatesDir(name string) bool {
 // repo's template library, parsed by the caller.
 func (r *Repo) TemplatesOnBranch(branch string) ([]model.File, error) {
 	var out []model.File
-	err := r.walkYAML(branch, inTemplatesDir, func(path string, content []byte) error {
+	err := r.WalkYAML(branch, InTemplatesDir, func(path string, content []byte) error {
 		out = append(out, model.File{Path: path, Content: content})
 		return nil
 	})

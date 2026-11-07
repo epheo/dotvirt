@@ -18,7 +18,7 @@ func VMsOnBranch(read *git.Repo, branch string) ([]model.VM, error) {
 		}
 		var out []model.VM
 		for _, f := range files {
-			vms, err := manifest.ParseVMs(f.Path, f.Content, git.DefaultNamespace(f.Path))
+			vms, err := manifest.ParseVMs(f.Path, f.Content, defaultNamespace(f.Path))
 			if err != nil {
 				return nil, err
 			}

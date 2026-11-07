@@ -6,7 +6,6 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
-	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
@@ -210,7 +209,7 @@ func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target proje
 			residue = append(residue, ns)
 			continue
 		}
-		refs := git.DeclaredRefs(path, content)
+		refs := declaredRefs(path, content)
 		if len(refs) != 1 || refs[0].Kind != "Namespace" {
 			return nil, nil, fmt.Errorf(
 				"%w: %s declares more than the namespace %s (e.g. a VM Network); rewriting it would prune those - release this project by editing the platform repo",
