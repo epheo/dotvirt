@@ -2,6 +2,7 @@ package changeset
 
 import (
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -73,5 +74,40 @@ func TestNamespaceHistoryFollowsDirectory(t *testing.T) {
 	beta, err := c.NamespaceHistory(proj, "beta", 25)
 	if err != nil || len(beta) != 0 {
 		t.Errorf("beta history = %v %+v, want none", err, beta)
+	}
+}
+
+// A whole-file edit is content computed against base as it stood at staging.
+// Once a later merge moves that file, proposing it would silently undo the
+// merge: propose refuses, names the object, pushes nothing, keeps the draft.
+func TestProposeRefusesWholeFileEditOverAMovedBase(t *testing.T) {
+	bare, work := seedWork(t, map[string][]byte{"alpha/web.yaml": sizedVM("web", 2)})
+	initial, err := exec.Command("git", "-C", work, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitWeb := func(cores int) {
+		writeWorkFile(t, work, "alpha/web.yaml", sizedVM("web", cores))
+		gitRun(t, work, "commit", "-qam", "resize")
+		gitRun(t, work, "push", "-q", "origin", "main")
+	}
+	commitWeb(4)
+	c := newTestCoordinator(t, true)
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+	id := auth.Identity{Username: "admin"}
+	if _, err := c.RestoreVersion(id, proj, "", "alpha", "web", strings.TrimSpace(string(initial))); err != nil {
+		t.Fatalf("RestoreVersion: %v", err)
+	}
+
+	commitWeb(6) // merged after the restore was staged
+	_, err = c.Propose(id, proj, model.ProposeRequest{Title: "restore web"})
+	if !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "alpha/web") {
+		t.Fatalf("want ErrConflict naming alpha/web, got %v", err)
+	}
+	if out, err := exec.Command("git", "-C", bare, "branch", "--list", "dotvirt/*").Output(); err != nil || len(out) != 0 {
+		t.Fatalf("nothing may be pushed, got branches %q (%v)", out, err)
+	}
+	if entries, _ := c.store.List(id.Username, proj.Name); len(entries) != 1 {
+		t.Fatalf("the draft must stay for the user to redo, got %+v", entries)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/format/index"
+	"github.com/go-git/go-git/v5/plumbing/object"
 
 	"github.com/epheo/dotvirt/internal/model"
 )
@@ -21,7 +22,17 @@ type ChangesetItem struct {
 	Transform  func(current []byte) ([]byte, error)
 	NewContent []byte
 	Delete     bool
+
+	// BaseBlob, when set, is the blob Path must still hold on base: the
+	// version NewContent was computed against.
+	BaseBlob string
 }
+
+// BaseMovedError reports an item whose path moved on base past the version
+// its content was computed against.
+type BaseMovedError struct{ Path string }
+
+func (e *BaseMovedError) Error() string { return e.Path + " changed on the base branch" }
 
 // ErrNoChanges reports a changeset whose every item already matches base -
 // nothing to commit because the intent is already true in git.
@@ -49,6 +60,9 @@ func (w *WriteRepo) CommitChangeset(base, branch, message string, items []Change
 	}
 	if err := checkoutBranch(repo, wt, base); err != nil {
 		return CommitResult{}, fmt.Errorf("checkout base %q: %w", base, err)
+	}
+	if err := checkBase(repo, items); err != nil {
+		return CommitResult{}, err
 	}
 
 	// Recreate the branch fresh at base so re-proposes don't stack.
@@ -133,6 +147,37 @@ func applyItem(wt *git.Worktree, it ChangesetItem) error {
 	}
 	if _, err := wt.Add(it.Path); err != nil {
 		return fmt.Errorf("stage %s: %w", it.Path, err)
+	}
+	return nil
+}
+
+// checkBase refuses the changeset when an item's file no longer holds its
+// BaseBlob on the checked-out base: the fresh clone is the authority, where
+// the mirror the draft was staged from may lag.
+func checkBase(repo *git.Repository, items []ChangesetItem) error {
+	head, err := repo.Head()
+	if err != nil {
+		return err
+	}
+	commit, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		return err
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return err
+	}
+	for _, it := range items {
+		if it.BaseBlob == "" {
+			continue
+		}
+		f, err := tree.File(it.Path)
+		if errors.Is(err, object.ErrFileNotFound) || err == nil && f.Hash.String() != it.BaseBlob {
+			return &BaseMovedError{Path: it.Path}
+		}
+		if err != nil {
+			return fmt.Errorf("file %s on base: %w", it.Path, err)
+		}
 	}
 	return nil
 }

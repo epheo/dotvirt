@@ -337,8 +337,21 @@ func (c *Coordinator) Unstage(id auth.Identity, proj project.ProjectInfo, resour
 }
 
 // stage writes entries into (id, proj)'s draft as one change and renders the
-// draft that results.
+// draft that results. Each whole-file edit records the base version it
+// replaces (draft.Entry.BaseBlob).
 func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entries ...draft.Entry) (model.DraftView, error) {
+	for i, e := range entries {
+		if e.Kind != draft.KindEdit || e.Manifest == "" {
+			continue
+		}
+		read, err := c.read(proj)
+		if err != nil {
+			return model.DraftView{}, err
+		}
+		if entries[i].BaseBlob, _, err = read.BlobOnBranch(c.baseBranch, e.SourceFile); err != nil {
+			return model.DraftView{}, err
+		}
+	}
 	if err := c.store.Stage(id.Username, proj.Name, entries...); err != nil {
 		return model.DraftView{}, err
 	}

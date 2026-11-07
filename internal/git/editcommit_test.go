@@ -183,3 +183,23 @@ func TestCommitChangesetStampsRealTime(t *testing.T) {
 		t.Errorf("commit author time %d is the epoch placeholder; want a real time", ts)
 	}
 }
+
+// An item pinned to a base blob commits only while base still holds it.
+func TestCommitChangesetChecksBaseBlob(t *testing.T) {
+	bare := seedMultiRepo(t)
+	w := OpenWrite(bare, "", nil, true)
+	blob, err := exec.Command("git", "--git-dir", bare, "rev-parse", "main:tenant-a/web.yaml").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := func(pin string) []ChangesetItem {
+		return []ChangesetItem{{Path: "tenant-a/web.yaml", NewContent: []byte("kind: VirtualMachine\n"), BaseBlob: pin}}
+	}
+	var moved *BaseMovedError
+	if _, err := w.CommitChangeset("main", "p", "m", item("0123456789012345678901234567890123456789"), Author{}); !errors.As(err, &moved) || moved.Path != "tenant-a/web.yaml" {
+		t.Fatalf("want BaseMovedError for tenant-a/web.yaml, got %v", err)
+	}
+	if _, err := w.CommitChangeset("main", "p", "m", item(strings.TrimSpace(string(blob))), Author{}); err != nil {
+		t.Fatalf("an unmoved base must commit: %v", err)
+	}
+}

@@ -256,6 +256,25 @@ func (r *Repo) LookupOnBranch(branch, path string) (content []byte, ok bool, err
 	return b, err == nil, err
 }
 
+// BlobOnBranch is the blob hash of path on branch, ok=false when the branch
+// holds no such file.
+func (r *Repo) BlobOnBranch(branch, path string) (hash string, ok bool, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tree, err := r.treeFor(branch)
+	if err != nil {
+		return "", false, err
+	}
+	f, err := tree.File(path)
+	if errors.Is(err, object.ErrFileNotFound) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("file %s on %s: %w", path, branch, err)
+	}
+	return f.Hash.String(), true, nil
+}
+
 // FileOnBranch returns one file's raw content on branch - e.g. a base-branch
 // manifest for the raw-YAML view.
 func (r *Repo) FileOnBranch(branch, path string) ([]byte, error) {

@@ -73,6 +73,9 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 		_ = c.store.Remove(id.Username, proj.Name, entries...)
 		return model.ProposeResult{}, fmt.Errorf("%w: every staged change already matches git; the draft has been cleared", model.ErrInvalid)
 	}
+	if moved := (*git.BaseMovedError)(nil); errors.As(err, &moved) {
+		return model.ProposeResult{}, baseMoved(entries, moved.Path, c.baseBranch)
+	}
 	if err != nil {
 		return model.ProposeResult{}, err
 	}
@@ -123,6 +126,20 @@ func (c *Coordinator) openOrRecoverPR(fc *forge.Client, out *model.ProposeResult
 	}
 	out.PRURL, out.PRNumber = pr.HTMLURL, pr.Number
 	return true
+}
+
+// baseMoved names the staged object whose file changed on base after its
+// whole-file edit was staged, and how to carry the edit forward.
+func baseMoved(entries []draft.Entry, path, base string) error {
+	what := path
+	for _, e := range entries {
+		if e.SourceFile == path {
+			what = objectLabel(e)
+			break
+		}
+	}
+	return fmt.Errorf("%w: %s changed on %s after it was staged, and proposing would undo that change; unstage it and make the edit again on the current version",
+		model.ErrConflict, what, base)
 }
 
 // RecentlyMerged lists PRs merged into proj's base branch since 'since' - the
@@ -178,7 +195,7 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) []git.ChangesetIte
 			// edit patches targeted fields into the file as base holds it at
 			// commit time.
 			if e.Manifest != "" {
-				items = append(items, git.ChangesetItem{Path: e.SourceFile, NewContent: []byte(e.Manifest)})
+				items = append(items, git.ChangesetItem{Path: e.SourceFile, NewContent: []byte(e.Manifest), BaseBlob: e.BaseBlob})
 				continue
 			}
 			if e.Edit == nil {

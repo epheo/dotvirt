@@ -110,6 +110,12 @@ type Entry struct {
 	// FromVersion is the short commit hash a verbatim-manifest VM edit restores
 	// the file to (the VM page's Restore), so the draft view can name it.
 	FromVersion string `json:"fromVersion,omitempty"`
+
+	// BaseBlob is the git blob SourceFile held on the base branch when a
+	// whole-file edit was staged. Its content was computed against that
+	// version, so propose refuses it once base moves on: committing it would
+	// silently revert the newer change.
+	BaseBlob string `json:"baseBlob,omitempty"`
 }
 
 // Key is the stable identity used to dedupe/replace entries within a draft. VM
