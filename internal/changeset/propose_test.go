@@ -541,3 +541,35 @@ func TestPreviewEditStagesNothing(t *testing.T) {
 		t.Fatalf("the staged edit must ride the view, got %+v", view.Items)
 	}
 }
+
+// Staging goes on while a propose pushes: what lands meanwhile, new or a
+// restage of a committed entry, is not in the PR and must stay staged.
+func TestProposeKeepsWhatWasStagedDuringThePush(t *testing.T) {
+	var during func()
+	f := newProposeFixture(t,
+		when("GET", "/pulls", http.StatusOK, "[]"),
+		func(m, path string) (int, string, bool) {
+			if m != "POST" || !strings.HasSuffix(path, "/pulls") {
+				return 0, "", false
+			}
+			during()
+			return http.StatusCreated, `{"number":1,"state":"open","html_url":"http://forge/pulls/1"}`, true
+		})
+	cpu := 8
+	during = func() {
+		if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{CPUCores: &cpu}}); err != nil {
+			t.Errorf("StageEdit during the push: %v", err)
+		}
+		if err := f.c.store.Stage(f.id.Username, f.proj.Name, draft.Entry{Kind: draft.KindDelete, Namespace: "alpha", Name: "db", SourceFile: "db.yaml"}); err != nil {
+			t.Errorf("stage during the push: %v", err)
+		}
+	}
+	f.stageAndPropose(t)
+	entries, err := f.c.store.List(f.id.Username, f.proj.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 || entries[0].Name != "db" || entries[1].Edit == nil || entries[1].Edit.CPUCores == nil {
+		t.Fatalf("want the restaged web and the new db kept, got %+v", entries)
+	}
+}

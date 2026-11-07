@@ -18,7 +18,9 @@ import (
 )
 
 // Propose builds the working branch from (id, proj)'s whole draft, pushes it to
-// the project repo, and opens (or finds) a Forgejo PR. Clears the draft on success.
+// the project repo, and opens (or finds) a Forgejo PR. On success it unstages
+// what it committed; anything staged or restaged meanwhile stays for the next
+// propose.
 func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req model.ProposeRequest) (model.ProposeResult, error) {
 	entries, err := c.store.List(id.Username, proj.Name)
 	if err != nil {
@@ -67,8 +69,8 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	if errors.Is(err, git.ErrNoChanges) {
 		// Self-heal: the draft's whole intent is already true in git (typical
 		// after staging against a briefly-stale mirror), so keeping it would
-		// wedge the user behind a permanent error. Clear it and say what happened.
-		_ = c.store.Clear(id.Username, proj.Name)
+		// wedge the user behind a permanent error. Drop it and say what happened.
+		_ = c.store.Remove(id.Username, proj.Name, entries...)
 		return model.ProposeResult{}, fmt.Errorf("%w: every staged change already matches git; the draft has been cleared", model.ErrInvalid)
 	}
 	if err != nil {
@@ -79,13 +81,13 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	fc := c.forge.For(proj.Repo)
 	if fc == nil {
 		// No forge configured (or unparsable repo): report the pushed branch only.
-		return out, c.store.Clear(id.Username, proj.Name)
+		return out, c.store.Remove(id.Username, proj.Name, entries...)
 	}
 	if !c.openOrRecoverPR(fc, &out, branch, title, body) {
 		// Kept staged so the user can retry once the forge answers.
 		return out, nil
 	}
-	return out, c.store.Clear(id.Username, proj.Name)
+	return out, c.store.Remove(id.Username, proj.Name, entries...)
 }
 
 // openOrRecoverPR gives a pushed branch its pull request and records it on out.
