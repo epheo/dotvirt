@@ -3,6 +3,8 @@
 // cluster is almost never in (standing sync failures, degraded planes, huge
 // fleets). Shapes mirror src/lib/model.gen.ts; the UI is the contract's judge.
 
+import { scaleScenario } from './scale.mjs';
+
 const now = () => new Date();
 const iso = (minsAgo) => new Date(now().getTime() - minsAgo * 60_000).toISOString();
 
@@ -877,4 +879,7 @@ export const scenarios = {
 	degraded,
 	drift,
 	large: largeScenario(),
+	// A full platform at the boards' numbers (2,846 VMs, 131 networks, 3,412
+	// disks); see scale.mjs.
+	scale: scaleScenario(base),
 };

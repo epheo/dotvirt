@@ -4,6 +4,7 @@
 // forge, or Argo — so CI can hold the app in corner-case states on demand.
 //
 //   node e2e/fixture/server.mjs        (expects ../build from `npm run build`)
+//   FIXTURE_SCENARIO=scale node e2e/fixture/server.mjs   (start in another scenario)
 //
 // Control plane (no auth, test-only):
 //   POST /__fixture/scenario/{name}    switch state; resets session drafts

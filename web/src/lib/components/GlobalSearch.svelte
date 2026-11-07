@@ -253,19 +253,22 @@
 
 <svelte:window onkeydown={onWindowKey} />
 
-<div class="relative mx-auto w-80" {@attach showing && dismiss(close)}>
-	<div class="flex items-center gap-2 rounded bg-side-hover px-2.5 py-1">
-		<Search size={13} class="shrink-0 text-side-dim" />
+<div class="relative max-w-[420px] min-w-0 flex-[1_1_140px]" {@attach showing && dismiss(close)}>
+	<div
+		class="flex h-8 items-center gap-2 rounded-md border border-side-edge bg-side pr-2 pl-2.5 focus-within:border-side-dim"
+	>
+		<Search size={16} class="shrink-0 text-side-dim" />
 		<input
 			bind:this={input}
 			bind:value={query}
 			onfocus={() => (open = true)}
 			{onkeydown}
-			placeholder="Search, or type a verb: migrate web…"
+			placeholder="Search VMs, hosts, disks"
 			aria-label="Search inventory"
-			class="w-full bg-transparent text-xs text-white placeholder-side-dim focus:outline-none"
+			class="w-full min-w-0 bg-transparent text-[13px] text-white placeholder-side-dim focus:outline-none"
 		/>
-		<kbd class="shrink-0 rounded border border-side-active px-1 text-[10px] text-side-dim"
+		<kbd
+			class="shrink-0 rounded border border-side-active px-1.5 font-mono text-[11px] leading-4 text-side-dim"
 			>Ctrl K</kbd
 		>
 	</div>
