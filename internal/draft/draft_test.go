@@ -1,6 +1,7 @@
 package draft
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -259,22 +260,22 @@ func TestReplaceResource(t *testing.T) {
 	}
 }
 
-// Update sees the staged entry and may drop it.
-func TestUpdate(t *testing.T) {
+// A refused change stages nothing, not even the part fn made before refusing.
+func TestApplyErrorStagesNothing(t *testing.T) {
 	s, _ := Open(t.TempDir())
-	e := editEntry("ns", "a")
-	if err := s.Stage("alice", "p", e); err != nil {
+	if err := s.Stage("alice", "p", editEntry("ns", "a")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Update("alice", "p", e.Key(), func(staged *Entry) (*Entry, error) {
-		if staged == nil || *staged.Edit.Memory != "2Gi" {
-			t.Fatalf("Update must see the staged entry, got %+v", staged)
-		}
-		return nil, nil
-	}); err != nil {
-		t.Fatal(err)
+	refused := errors.New("refused")
+	err := s.Apply("alice", "p", func(d map[string]Entry) error {
+		delete(d, editEntry("ns", "a").Key())
+		d[editEntry("ns", "b").Key()] = editEntry("ns", "b")
+		return refused
+	})
+	if !errors.Is(err, refused) {
+		t.Fatalf("want fn's error, got %v", err)
 	}
-	if got, _ := s.List("alice", "p"); len(got) != 0 {
-		t.Fatalf("a nil result must unstage, got %+v", got)
+	if got, _ := s.List("alice", "p"); len(got) != 1 || got[0].Name != "a" {
+		t.Fatalf("want the draft as it was, got %+v", got)
 	}
 }

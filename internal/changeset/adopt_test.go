@@ -106,6 +106,27 @@ func TestAdoptStagesEditForDriftedVM(t *testing.T) {
 	}
 }
 
+// Adopting drift onto a staged edit of the VM adds to it, as any field edit
+// does; it never drops what the user staged.
+func TestAdoptLaysDriftOverStagedEdit(t *testing.T) {
+	bare, live := seedBareWithLive(t)
+	c := newTestCoordinator(t, false)
+	c.live = live
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+	off := "Off"
+	if _, err := c.StageEdit(id, proj, "alpha", "web", model.EditRequest{SourceFile: "alpha/web.yaml", VMEdit: model.VMEdit{Power: &off}}); err != nil {
+		t.Fatalf("StageEdit: %v", err)
+	}
+	if _, err := c.Adopt(id, proj, "alpha", "web"); err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+	entries, _ := c.store.List(id.Username, proj.Name)
+	if len(entries) != 1 || entries[0].Edit == nil || entries[0].Edit.Power == nil || entries[0].Edit.SetLabels["env"] != "prod" {
+		t.Fatalf("want the staged power and the adopted label together, got %+v", entries)
+	}
+}
+
 // AdoptObjects stages every captured object whatever its kind, so a namespace comes
 // under git whole rather than VM by VM. What is worth capturing is decided by the
 // caller (cluster.AdoptableObjects); this only stages.

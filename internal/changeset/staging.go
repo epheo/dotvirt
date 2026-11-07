@@ -338,7 +338,8 @@ func (c *Coordinator) Unstage(id auth.Identity, proj project.ProjectInfo, resour
 
 // stage writes entries into (id, proj)'s draft as one change and renders the
 // draft that results. Each whole-file edit records the base version it
-// replaces (draft.Entry.BaseBlob).
+// replaces (draft.Entry.BaseBlob), and never replaces staged field edits:
+// they would vanish from the draft without the user knowing.
 func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entries ...draft.Entry) (model.DraftView, error) {
 	for i, e := range entries {
 		if e.Kind != draft.KindEdit || e.Manifest == "" {
@@ -348,14 +349,32 @@ func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entries 
 		if err != nil {
 			return model.DraftView{}, err
 		}
-		if entries[i].BaseBlob, _, err = read.BlobOnBranch(c.baseBranch, e.SourceFile); err != nil {
+		if err := c.pinBase(read, &entries[i]); err != nil {
 			return model.DraftView{}, err
 		}
 	}
-	if err := c.store.Stage(id.Username, proj.Name, entries...); err != nil {
+	err := c.store.Apply(id.Username, proj.Name, func(d map[string]draft.Entry) error {
+		for _, e := range entries {
+			if staged, ok := d[e.Key()]; ok && fieldEdit(staged) && e.Kind == draft.KindEdit {
+				return fmt.Errorf("%w: %s has staged setting changes; propose or unstage them before replacing its whole manifest",
+					model.ErrConflict, objectLabel(e))
+			}
+			d[e.Key()] = e
+		}
+		return nil
+	})
+	if err != nil {
 		return model.DraftView{}, err
 	}
 	return c.Get(id, proj)
+}
+
+// pinBase records on e the base blob of the file it replaces wholesale (see
+// draft.Entry.BaseBlob).
+func (c *Coordinator) pinBase(read *git.Repo, e *draft.Entry) error {
+	blob, _, err := read.BlobOnBranch(c.baseBranch, e.SourceFile)
+	e.BaseBlob = blob
+	return err
 }
 
 // Discard clears (id, proj)'s draft.

@@ -26,12 +26,13 @@ func (c *Coordinator) stageEdit(id auth.Identity, proj project.ProjectInfo, e dr
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	err = c.store.Update(id.Username, proj.Name, e.Key(), func(staged *draft.Entry) (*draft.Entry, error) {
+	key := e.Key()
+	err = c.store.Apply(id.Username, proj.Name, func(d map[string]draft.Entry) error {
 		edit := *e.Edit
-		if staged != nil {
-			if staged.Kind != draft.KindEdit || staged.Edit == nil {
-				return nil, fmt.Errorf("%w: %s/%s has a staged %s waiting; propose or unstage it before editing its settings",
-					model.ErrConflict, e.Namespace, e.Name, stagedChange(*staged))
+		if staged, ok := d[key]; ok {
+			if !fieldEdit(staged) {
+				return fmt.Errorf("%w: %s/%s has a staged %s waiting; propose or unstage it before editing its settings",
+					model.ErrConflict, e.Namespace, e.Name, stagedChange(staged))
 			}
 			edit = overlayEdit(*staged.Edit, edit)
 		}
@@ -39,17 +40,23 @@ func (c *Coordinator) stageEdit(id auth.Identity, proj project.ProjectInfo, e dr
 			edit = withoutBase(edit, current)
 		}
 		if edit.Empty() {
-			return nil, nil
+			delete(d, key)
+			return nil
 		}
 		next := e
 		next.Edit = &edit
-		return &next, nil
+		d[key] = next
+		return nil
 	})
 	if err != nil {
 		return model.DraftView{}, err
 	}
 	return c.Get(id, proj)
 }
+
+// fieldEdit reports whether e is a VM field edit, the one kind of entry an
+// edit can be laid over.
+func fieldEdit(e draft.Entry) bool { return e.Kind == draft.KindEdit && e.Edit != nil }
 
 // stagedChange names a staged entry a field edit cannot extend.
 func stagedChange(e draft.Entry) string {

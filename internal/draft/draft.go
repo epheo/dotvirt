@@ -231,10 +231,11 @@ func (s *Store) persistLocked(user, project string, d map[string]Entry) error {
 	return os.Rename(tmp, p)
 }
 
-// mutate applies fn to a copy of (user, project)'s draft and persists the
-// result once. Memory moves only when the write lands, so a call either
-// stages all of its change or none of it.
-func (s *Store) mutate(user, project string, fn func(d map[string]Entry) error) error {
+// Apply runs fn on a copy of (user, project)'s draft, keyed by Entry.Key, and
+// persists the result once. Memory moves only when the write lands, so a call
+// either stages all of its change or none of it; an error from fn stages
+// nothing.
+func (s *Store) Apply(user, project string, fn func(d map[string]Entry) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cur, err := s.loadLocked(user, project)
@@ -254,30 +255,9 @@ func (s *Store) mutate(user, project string, fn func(d map[string]Entry) error) 
 
 // Stage adds or replaces entries in (user, project)'s draft.
 func (s *Store) Stage(user, project string, entries ...Entry) error {
-	return s.mutate(user, project, func(d map[string]Entry) error {
+	return s.Apply(user, project, func(d map[string]Entry) error {
 		for _, e := range entries {
 			d[e.Key()] = e
-		}
-		return nil
-	})
-}
-
-// Update replaces the entry under key with fn's result: fn sees what is
-// staged there (nil when nothing is) and returns nil to unstage it. No other
-// write interleaves between the read and the write.
-func (s *Store) Update(user, project, key string, fn func(staged *Entry) (*Entry, error)) error {
-	return s.mutate(user, project, func(d map[string]Entry) error {
-		var staged *Entry
-		if e, ok := d[key]; ok {
-			staged = &e
-		}
-		next, err := fn(staged)
-		if err != nil {
-			return err
-		}
-		delete(d, key)
-		if next != nil {
-			d[next.Key()] = *next
 		}
 		return nil
 	})
@@ -286,7 +266,7 @@ func (s *Store) Update(user, project, key string, fn func(staged *Entry) (*Entry
 // ReplaceResource makes entries the whole of resource r in (user, project)'s
 // draft, reporting how many staged entries of r it dropped.
 func (s *Store) ReplaceResource(user, project string, r Resource, entries ...Entry) (removed int, err error) {
-	err = s.mutate(user, project, func(d map[string]Entry) error {
+	err = s.Apply(user, project, func(d map[string]Entry) error {
 		removed = 0
 		for k, e := range d {
 			if e.Resource == r {
@@ -305,7 +285,7 @@ func (s *Store) ReplaceResource(user, project string, r Resource, entries ...Ent
 // Remove unstages each of entries still staged exactly as given; one
 // restaged since (a newer edit of the same object) stays.
 func (s *Store) Remove(user, project string, entries ...Entry) error {
-	return s.mutate(user, project, func(d map[string]Entry) error {
+	return s.Apply(user, project, func(d map[string]Entry) error {
 		for _, e := range entries {
 			if cur, ok := d[e.Key()]; ok && reflect.DeepEqual(cur, e) {
 				delete(d, e.Key())
@@ -318,7 +298,7 @@ func (s *Store) Remove(user, project string, entries ...Entry) error {
 // Unstage removes one entry (of the given resource) from (user,project)'s draft.
 // No error if absent.
 func (s *Store) Unstage(user, project string, resource Resource, namespace, name string) error {
-	return s.mutate(user, project, func(d map[string]Entry) error {
+	return s.Apply(user, project, func(d map[string]Entry) error {
 		delete(d, Entry{Resource: resource, Namespace: namespace, Name: name}.Key())
 		return nil
 	})

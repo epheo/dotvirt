@@ -70,8 +70,9 @@ func (r *Reader) findLiveVM(namespace, name string) (liveVM, bool, error) {
 
 // Adopt stages a VM's live state into (id, proj)'s draft, so out-of-band cluster
 // changes can be proposed INTO main (live->main reconcile): as an edit making base
-// match the cluster when the VM is tracked, or as a create of its manifest when it
-// exists only in the cluster (a fresh clone target, an out-of-band create).
+// match the cluster when the VM is tracked, laid over any edit staged for it (see
+// stageEdit), or as a create of its manifest when it exists only in the cluster
+// (a fresh clone target, an out-of-band create).
 func (c *Coordinator) Adopt(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error) {
 	read, err := c.read(proj)
 	if err != nil {
@@ -104,7 +105,7 @@ func (c *Coordinator) Adopt(id auth.Identity, proj project.ProjectInfo, namespac
 	if edit.Empty() {
 		return model.DraftView{}, fmt.Errorf("%w: no drift to adopt for %s/%s", model.ErrInvalid, namespace, name)
 	}
-	return c.stage(id, proj, draft.Entry{
+	return c.stageEdit(id, proj, draft.Entry{
 		Kind:      draft.KindEdit,
 		Namespace: namespace,
 		Name:      name,

@@ -111,3 +111,27 @@ func TestProposeRefusesWholeFileEditOverAMovedBase(t *testing.T) {
 		t.Fatalf("the draft must stay for the user to redo, got %+v", entries)
 	}
 }
+
+// A whole-file edit would silently drop the field edits staged for the same
+// VM; it is refused with the way forward, and the field edits stay.
+func TestWholeFileEditOverStagedFieldEditConflicts(t *testing.T) {
+	bare, _, _ := seedMerged(t)
+	c := newTestCoordinator(t, false)
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+	id := auth.Identity{Username: "admin"}
+	commits, err := c.History(proj, 25)
+	if err != nil || len(commits) != 2 {
+		t.Fatalf("History = %v %+v", err, commits)
+	}
+	off := "Off"
+	if _, err := c.StageEdit(id, proj, "alpha", "web", model.EditRequest{SourceFile: "alpha/web.yaml", VMEdit: model.VMEdit{Power: &off}}); err != nil {
+		t.Fatalf("StageEdit: %v", err)
+	}
+	_, err = c.RestoreVersion(id, proj, "", "alpha", "web", commits[1].Hash)
+	if !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "unstage") {
+		t.Fatalf("want ErrConflict naming the way forward, got %v", err)
+	}
+	if entries, _ := c.store.List(id.Username, proj.Name); len(entries) != 1 || entries[0].Edit == nil {
+		t.Fatalf("the staged field edit must stay, got %+v", entries)
+	}
+}
