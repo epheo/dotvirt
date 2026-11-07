@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { ChevronDown, ChevronUp } from '@lucide/svelte';
 	import { vmKey, type DraftItem, type Options, type VM } from '#lib/api.js';
@@ -14,6 +14,8 @@
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { TBODY, THEAD_TR } from '#lib/table.js';
 	import { vmHref } from '#lib/nav.js';
+	import { DEFAULT_PAGE_SIZE, pageFor, pageOf, pageSlice } from '#lib/paging.js';
+	import Pager from './Pager.svelte';
 	import StagedBadge from './StagedBadge.svelte';
 	import StatusPill from './StatusPill.svelte';
 	import TextInput from './TextInput.svelte';
@@ -107,13 +109,12 @@
 	type SortKey = 'name' | 'namespace' | 'state' | 'nodeName' | 'cpuCores' | 'memory' | 'guestIP';
 	type Filter = 'all' | 'issues' | 'running' | 'stopped' | 'staged';
 
-	// Sort + filter survive reloads; the search box is transient on purpose.
-	// The default sort puts what needs a person on top.
-	const prefs = persisted<{ sortKey: SortKey; sortDir: 1 | -1; filter: Filter }>('dotvirt.vmgrid', {
-		sortKey: 'state',
-		sortDir: 1,
-		filter: 'all',
-	});
+	// Sort, filter and page size survive reloads; the search box is transient
+	// on purpose. The default sort puts what needs a person on top.
+	const prefs = persisted<{ sortKey: SortKey; sortDir: 1 | -1; filter: Filter; size?: number }>(
+		'dotvirt.vmgrid',
+		{ sortKey: 'state', sortDir: 1, filter: 'all' },
+	);
 
 	function setSort(k: SortKey) {
 		prefs.value =
@@ -192,6 +193,32 @@
 		});
 	});
 
+	// One page at a time: a fleet of thousands never renders every row.
+	let page = $state(1);
+	const size = $derived(prefs.value.size ?? DEFAULT_PAGE_SIZE);
+	const slice = $derived(pageSlice(rows.length, page, size));
+	const pageRows = $derived(rows.slice(slice.start, slice.end));
+
+	// A new filter, sort or page size starts over at page 1, unless the peeked
+	// row is still listed: then its page, so the row stays in view.
+	const viewKey = $derived(
+		`${prefs.value.filter}|${prefs.value.sortKey}|${prefs.value.sortDir}|${search.trim()}|${size}`,
+	);
+	$effect(() => {
+		viewKey;
+		untrack(() => (page = pageFor(rows.map(vmKey), activeKey, size)));
+	});
+	// A row peeked from outside the table (search, the tree, a deep link) brings
+	// its page; closing the peek keeps the page the person is on.
+	$effect(() => {
+		const k = activeKey;
+		if (!k) return;
+		untrack(() => {
+			const i = rows.findIndex((vm) => vmKey(vm) === k);
+			if (i >= 0) page = pageOf(i, size);
+		});
+	});
+
 	// Under the default sort, issue rows sit under their own heading.
 	const groups = $derived.by(() => {
 		if (prefs.value.sortKey !== 'state' || prefs.value.sortDir !== 1) return null;
@@ -209,8 +236,12 @@
 		{ key: 'guestIP', label: 'IP' },
 	];
 
-	const allSelected = $derived(rows.length > 0 && rows.every((vm) => selected.has(vmKey(vm))));
-	const someSelected = $derived(rows.some((vm) => selected.has(vmKey(vm))) && !allSelected);
+	// The header checkbox acts on this page; "Select all N" reaches the rest.
+	const allSelected = $derived(
+		pageRows.length > 0 && pageRows.every((vm) => selected.has(vmKey(vm))),
+	);
+	const someSelected = $derived(pageRows.some((vm) => selected.has(vmKey(vm))) && !allSelected);
+	const everySelected = $derived(rows.length > 0 && rows.every((vm) => selected.has(vmKey(vm))));
 
 	function toggleOne(vm: VM) {
 		const k = vmKey(vm);
@@ -221,42 +252,50 @@
 
 	function toggleAll() {
 		const next = new Set(selected);
-		if (allSelected) rows.forEach((vm) => next.delete(vmKey(vm)));
-		else rows.forEach((vm) => next.add(vmKey(vm)));
+		if (allSelected) pageRows.forEach((vm) => next.delete(vmKey(vm)));
+		else pageRows.forEach((vm) => next.add(vmKey(vm)));
 		selected = next;
 	}
 
-	// Roving tabindex: one row is in the tab order, arrows move focus between
-	// rows. Falls back to the peeked row, then the first, when the focused VM
-	// leaves the filtered set.
+	function selectEvery() {
+		selected = new Set([...selected, ...rows.map(vmKey)]);
+	}
+
+	// Roving tabindex: one row on the page is in the tab order, arrows move
+	// focus between rows and across pages. Falls back to the peeked row, then
+	// the page's first, when the focused VM is not on this page.
 	let focusKey = $state<string | null>(null);
 	const tabKey = $derived.by(() => {
-		const keys = new Set(rows.map(vmKey));
+		const keys = new Set(pageRows.map(vmKey));
 		if (focusKey && keys.has(focusKey)) return focusKey;
 		if (activeKey && keys.has(activeKey)) return activeKey;
-		return rows.length ? vmKey(rows[0]) : null;
+		return pageRows.length ? vmKey(pageRows[0]) : null;
 	});
+
+	let tbody = $state<HTMLElement>();
+	async function focusRow(i: number) {
+		const vm = rows[i];
+		if (!vm) return;
+		const k = vmKey(vm);
+		page = pageOf(i, size);
+		focusKey = k;
+		await tick();
+		tbody?.querySelector<HTMLElement>(`tr[data-key="${CSS.escape(k)}"]`)?.focus();
+	}
 
 	function onrowkeydown(e: KeyboardEvent, vm: VM) {
 		// The checkbox and the name link keep their own keys.
 		if (e.target !== e.currentTarget) return;
-		const row = e.currentTarget as HTMLElement;
-		const body = row.parentElement!;
-		// Group headings are rows too; focus skips them.
-		const vmRow = (el: Element | null, up: boolean) => {
-			while (el && !el.hasAttribute('tabindex'))
-				el = up ? el.previousElementSibling : el.nextElementSibling;
-			return el;
-		};
+		const i = rows.indexOf(vm);
 		const target = {
-			ArrowDown: vmRow(row.nextElementSibling, false),
-			ArrowUp: vmRow(row.previousElementSibling, true),
-			Home: vmRow(body.firstElementChild, false),
-			End: vmRow(body.lastElementChild, true),
+			ArrowDown: Math.min(i + 1, rows.length - 1),
+			ArrowUp: Math.max(i - 1, 0),
+			Home: 0,
+			End: rows.length - 1,
 		}[e.key];
 		if (target !== undefined) {
 			e.preventDefault();
-			(target as HTMLElement | null)?.focus();
+			void focusRow(target);
 		} else if (e.key === 'Enter') {
 			// On the peeked row Enter reaches the inspector, which opens the full page.
 			if (vmKey(vm) === activeKey) return;
@@ -312,6 +351,27 @@
 		/>
 	</div>
 
+	{#if slice.pages > 1 && (allSelected || everySelected)}
+		<!-- The header checkbox took this page; the rest of the list is one click away. -->
+		<div
+			class="flex flex-wrap items-center gap-x-3 border-b border-line bg-select-soft px-4 py-1.5 text-xs text-ink-soft"
+		>
+			{#if everySelected}
+				<span>All {rows.length.toLocaleString('en-US')} VMs are selected.</span>
+				<button
+					type="button"
+					class="text-accent-ink hover:underline"
+					onclick={() => (selected = new Set())}>Clear selection</button
+				>
+			{:else}
+				<span>All {pageRows.length} VMs on this page are selected.</span>
+				<button type="button" class="text-accent-ink hover:underline" onclick={selectEvery}
+					>Select all {rows.length.toLocaleString('en-US')}</button
+				>
+			{/if}
+		</div>
+	{/if}
+
 	<div class="min-h-0 flex-1 overflow-auto">
 		<table
 			class="w-full text-[13px] whitespace-nowrap"
@@ -327,8 +387,8 @@
 							checked={allSelected}
 							indeterminate={someSelected}
 							onchange={toggleAll}
-							title="Select all (filtered)"
-							aria-label="Select all (filtered)"
+							title="Select this page"
+							aria-label="Select this page"
 							class="cursor-pointer align-middle"
 						/>
 					</th>
@@ -353,13 +413,14 @@
 					<th class="px-3 py-2 font-medium">Next step</th>
 				</tr>
 			</thead>
-			<tbody class={TBODY}>
-				{#each rows as vm, i (vm.namespace + '/' + vm.name)}
+			<tbody class={TBODY} bind:this={tbody}>
+				{#each pageRows as vm, j (vm.namespace + '/' + vm.name)}
 					{@const k = vmKey(vm)}
-					{#if groups && (i === 0 || i === groups.issues)}
+					{@const i = slice.start + j}
+					{#if groups && (i === 0 || i === groups.issues || (j === 0 && i > 0))}
 						<tr class="border-y border-line bg-inset">
 							<td colspan={cols.length + 3} class="px-3 py-1.5 text-xs font-semibold text-ink">
-								{i === 0
+								{i < groups.issues
 									? `With issues (${groups.issues}), always on top`
 									: `Everything else (${groups.rest})`}
 							</td>
@@ -370,6 +431,7 @@
 					{@const st = stateOf(vm)}
 					{@const next = nextStep(vm)}
 					<tr
+						data-key={k}
 						tabindex={k === tabKey ? 0 : -1}
 						aria-selected={selected.has(k)}
 						onfocus={() => (focusKey = k)}
@@ -489,4 +551,16 @@
 			</div>
 		{/if}
 	</div>
+
+	<!-- The change tray floats over main's bottom-right corner: the controls
+	     stay left of it. -->
+	{#if rows.length > 0}
+		<Pager
+			total={rows.length}
+			bind:page
+			bind:size={() => size, (v) => (prefs.value = { ...prefs.value, size: v })}
+			spread={false}
+			class="border-t border-line px-4 py-2.5"
+		/>
+	{/if}
 </div>

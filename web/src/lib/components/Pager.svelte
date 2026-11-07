@@ -5,19 +5,22 @@
 	// The footer of a paged table: where the page sits ("Showing 1-50 of 389"),
 	// rows per page, and prev / next. Below the smallest page size there is
 	// nothing to page, so only the count shows. The host slices its rows with
-	// pageSlice(total, page, size) and owns when page resets. class is for
-	// placement only (a top border, padding).
+	// pageSlice(total, page, size) and owns when page resets. The controls sit
+	// at the right edge unless spread is false (a table whose bottom-right
+	// corner something else floats over). class is for placement only.
 	let {
 		total,
 		page = $bindable(1),
 		size = $bindable(DEFAULT_PAGE_SIZE),
 		sizes = PAGE_SIZES,
+		spread = true,
 		class: cls = '',
 	}: {
 		total: number;
 		page?: number;
 		size?: number;
 		sizes?: readonly number[];
+		spread?: boolean;
 		class?: string;
 	} = $props();
 
@@ -37,7 +40,7 @@
 	<span>Showing <strong class="font-bold text-ink">{rangeLabel(s)}</strong> of {totalLabel(s)}</span
 	>
 	{#if paged}
-		<span class="flex-1"></span>
+		<span class={spread ? 'flex-1' : 'w-3'}></span>
 		<label for={id} class="text-ink-faint">Rows per page</label>
 		<select
 			{id}
