@@ -56,9 +56,6 @@ func TestBootstrapForgejoMintsViaServiceURLWritesExternalURL(t *testing.T) {
 			sawTokenPOST = true
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"sha1":"tok123"}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt":
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{}`)) // org already exists
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
@@ -163,28 +160,48 @@ func TestBootstrapForgejoAdminMismatchReturnsErrUnauthorized(t *testing.T) {
 	}
 }
 
-// reconcileForge is a silent no-op for a bring-your-own forge (URL set, not managed):
-// the BYO path is handled entirely by the later secret/workload phases.
-func TestReconcileForgeSilentForBYO(t *testing.T) {
-	dv := testCR()
-	dv.Spec.Forge.URL = "https://byo-forge.example"
-	dv.Spec.Forge.CredentialsSecret = "byo-creds"
-	dv.Status.ForgeAdminHint = "stale hint from a managed past"
-	c := testBuilder(t).WithObjects(dv).Build()
-	r := newReconciler(c, depsOK)
+// A bring-your-own forge is observed, never touched: ForgeReady says whether the
+// credential the app reads exists, so a credentialsSecret typo reads as itself
+// instead of as a pod that never starts.
+func TestReconcileForgeReportsBYO(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		secret bool
+		status metav1.ConditionStatus
+		reason string
+	}{
+		{"present", true, metav1.ConditionTrue, "BringYourOwn"},
+		{"missing", false, metav1.ConditionFalse, "CredentialsSecretMissing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dv := testCR()
+			dv.Spec.Forge.URL = "https://byo-forge.example"
+			dv.Spec.Forge.CredentialsSecret = "byo-creds"
+			dv.Status.ForgeAdminHint = "stale hint from a managed past"
+			b := testBuilder(t).WithObjects(dv)
+			if tc.secret {
+				b = b.WithObjects(&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "byo-creds", Namespace: dv.Namespace}})
+			}
+			r := newReconciler(b.Build(), depsOK)
 
-	res, err := r.reconcileForge(context.Background(), dv, phaseCtx(r, dv))
-	if err != nil || res != nil {
-		t.Fatalf("reconcileForge (BYO) = (%+v, %v), want (nil, nil)", res, err)
-	}
-	if cond(getCR(t, c, dv), dotvirtv1alpha1.ConditionForgeReady) != nil {
-		t.Error("ForgeReady set for a BYO forge; the phase must stay silent")
-	}
-	if dv.Status.ForgeURL != dv.Spec.Forge.URL {
-		t.Errorf("status.forgeURL = %q, want the BYO url %q", dv.Status.ForgeURL, dv.Spec.Forge.URL)
-	}
-	if dv.Status.ForgeAdminHint != "" {
-		t.Errorf("switching off managed must retire the bootstrap hint, got %q", dv.Status.ForgeAdminHint)
+			res, err := r.reconcileForge(context.Background(), dv, phaseCtx(r, dv))
+			if err != nil || res != nil {
+				t.Fatalf("reconcileForge (BYO) = (%+v, %v), want (nil, nil)", res, err)
+			}
+			fc := cond(dv, dotvirtv1alpha1.ConditionForgeReady)
+			if fc == nil || fc.Status != tc.status || fc.Reason != tc.reason {
+				t.Fatalf("ForgeReady = %+v, want %s/%s", fc, tc.status, tc.reason)
+			}
+			if !tc.secret && !strings.Contains(fc.Message, "byo-creds") {
+				t.Errorf("message %q does not name the missing secret", fc.Message)
+			}
+			if dv.Status.ForgeURL != dv.Spec.Forge.URL {
+				t.Errorf("status.forgeURL = %q, want the BYO url %q", dv.Status.ForgeURL, dv.Spec.Forge.URL)
+			}
+			if dv.Status.ForgeAdminHint != "" {
+				t.Errorf("switching off managed must retire the bootstrap hint, got %q", dv.Status.ForgeAdminHint)
+			}
+		})
 	}
 }
 
@@ -328,7 +345,7 @@ func TestResolveForgeURLRequiresURLOnVanilla(t *testing.T) {
 	if res == nil || res.RequeueAfter != 0 {
 		t.Fatalf("result = %+v, want a halt (no requeue)", res)
 	}
-	if fc := cond(getCR(t, c, dv), dotvirtv1alpha1.ConditionForgeReady); fc == nil || fc.Reason != "ForgeURLRequired" {
+	if fc := cond(dv, dotvirtv1alpha1.ConditionForgeReady); fc == nil || fc.Reason != "ForgeURLRequired" {
 		t.Errorf("ForgeReady = %+v, want False/ForgeURLRequired", fc)
 	}
 }
@@ -384,5 +401,98 @@ func TestEffectiveForgeSpecNotPersisted(t *testing.T) {
 	if stored.Spec.Forge.URL != "" || stored.Spec.Forge.PlatformRepo != "" {
 		t.Errorf("stored spec mutated: url=%q platformRepo=%q, both must stay empty",
 			stored.Spec.Forge.URL, stored.Spec.Forge.PlatformRepo)
+	}
+}
+
+// The managed forge's owner org is ensured beside the platform repo on every
+// pass: created once at token mint, a single failed create would leave every
+// later repo create 404ing forever.
+func TestPlatformRepoEnsuresManagedOrg(t *testing.T) {
+	dv := managedForgeCR()
+	var orgCreated, repoCreated bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && (r.URL.Path == "/api/v1/orgs/dotvirt" || r.URL.Path == "/api/v1/repos/dotvirt/platform"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/orgs":
+			orgCreated = true
+			w.WriteHeader(http.StatusCreated)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/orgs/dotvirt/repos":
+			if !orgCreated {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			repoCreated = true
+			w.WriteHeader(http.StatusCreated)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	cred := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: install.ForgeSecretName(dv), Namespace: dv.Namespace},
+		Data:       map[string][]byte{"token": []byte("tok")},
+	}
+	r := newReconciler(testBuilder(t).WithObjects(dv, cred).Build(), depsOK)
+	r.forgeAPIBase = func(*dotvirtv1alpha1.Dotvirt) string { return srv.URL }
+
+	if _, err := r.reconcilePlatformRepo(context.Background(), dv, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !orgCreated || !repoCreated {
+		t.Errorf("org created=%v repo created=%v, want both", orgCreated, repoCreated)
+	}
+	if repo := cond(dv, dotvirtv1alpha1.ConditionForgeRepoReady); repo == nil || repo.Status != metav1.ConditionTrue {
+		t.Errorf("ForgeRepoReady = %+v, want True", repo)
+	}
+}
+
+// On a fresh managed forge the org the ArgoCD webhook registers on is created
+// by the platform-repo phase, so that phase must run first: otherwise the
+// first full pass defers the hook until some later event re-runs the pipeline.
+func TestManagedOrgExistsBeforeOrgWebhook(t *testing.T) {
+	dv := managedForgeCR()
+	dv.Spec.ArgoCD.ServerURL = "https://argocd.example"
+	org := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/user":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/orgs":
+			org = true
+			w.WriteHeader(http.StatusCreated)
+		case !org:
+			w.WriteHeader(http.StatusNotFound)
+		case r.URL.Path == "/api/v1/orgs/dotvirt":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/dotvirt/platform":
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/hooks":
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":1}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	minted := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: install.ForgeSecretName(dv), Namespace: dv.Namespace},
+		Data: map[string][]byte{
+			"url": []byte(dv.Spec.Forge.URL), "username": []byte(install.ForgejoBotUser), "token": []byte("tok"),
+		},
+	}
+	c := testBuilder(t).WithObjects(dv, minted).Build()
+	r := newReconciler(c, depsOK)
+	r.forgeAPIBase = func(*dotvirtv1alpha1.Dotvirt) string { return srv.URL }
+
+	reconcileOnce(t, r, dv)
+	got := getCR(t, c, dv)
+	if wh := cond(got, dotvirtv1alpha1.ConditionArgoWebhook); wh == nil || wh.Status != metav1.ConditionTrue {
+		t.Errorf("ArgoWebhook = %+v, want True on the pass that creates the org", wh)
+	}
+	if repo := cond(got, dotvirtv1alpha1.ConditionForgeRepoReady); repo == nil || repo.Status != metav1.ConditionTrue {
+		t.Errorf("ForgeRepoReady = %+v, want True", repo)
 	}
 }
