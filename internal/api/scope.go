@@ -30,7 +30,7 @@ type ssarVerdict struct {
 }
 
 // rbacVersion is the change-version a token's derived authorization depends on: a
-// RoleBinding move OR a namespace add/remove/relabel can change what it may see.
+// watched grant move OR a namespace add/remove/relabel can change what it may see.
 func (s *Server) rbacVersion() uint64 {
 	return s.bus.Version(eventbus.RBACChanged, eventbus.NamespaceChanged)
 }
@@ -91,10 +91,9 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 // can answers verb on ref in ns ("" for cluster scope) under id's token,
 // behind a per-(token, question) cache stamped with rbacVersion, so a signal
 // read on a polled or broadcast path does not post an SSAR per request. A
-// RoleBinding/namespace move invalidates lazily via the stamp; the TTL
-// backstops the cluster-scoped RBAC changes the stamp doesn't observe (see
-// visibleTTL). Only a verdict is cached: a failed review is returned, so a
-// blip can never pin a denial. A gate answers the error with s.reviewFailed; a
+// watched grant or namespace move invalidates lazily via the stamp; the TTL
+// backstops what no watch observes (see RunTTLBackstop). Only a verdict is
+// cached: a failed review is returned, so a blip can never pin a denial. A gate answers the error with s.reviewFailed; a
 // UI signal or a filter reads it as no.
 func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, verb string, ref ssarRef, ns string) (bool, error) {
 	ver := s.rbacVersion()

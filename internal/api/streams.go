@@ -47,17 +47,27 @@ const (
 	// younger than visibleTTL, so the first tick to find it expired comes up to one
 	// period after it ages out: ticking at visibleTTL would double the bound.
 	ttlBackstopEvery = visibleTTL / 2
-	// ttlBackstopBound is how long a cluster-scoped RBAC change can take to reach
-	// an open frame: the entry's TTL, then the wait for the next tick.
+	// ttlBackstopBound is how long an unwatched authorization change can take to
+	// reach an open frame: the entry's TTL, then the wait for the next tick.
 	ttlBackstopBound = visibleTTL + ttlBackstopEvery
 )
 
-// RunTTLBackstop is the TTL backstop for frame inputs no watch observes: a
-// token's visible namespaces and SSAR verdicts also move with ClusterRoleBindings,
-// ClusterRoles and group membership, and are cached for visibleTTL only. An
-// expired entry is re-evaluated by the next frame build, so while a stream is open
-// this publishes TTLBackstop every ttlBackstopEvery to cause one, which bounds
-// such a change at ttlBackstopBound (45s); a frame that comes out identical is not
+// RunTTLBackstop is the TTL backstop for authorization no RBAC watch observes.
+// The watches publish RBACChanged for RoleBindings and Roles in project
+// namespaces, ClusterRoleBindings, ClusterRoles and OpenShift Groups. A token's
+// visible namespaces and SSAR verdicts still move unseen with:
+//   - RBAC outside project namespaces (the shared image namespaces the options
+//     filter reviews),
+//   - system: ClusterRoles bound directly, and bindings that grant only
+//     platform ServiceAccounts,
+//   - a watched kind the SA may not list yet,
+//   - group membership kept anywhere but user.openshift.io Groups,
+//   - authorizers other than RBAC.
+//
+// Those entries are cached for visibleTTL only. An expired entry is
+// re-evaluated by the next frame build, so while a stream is open this
+// publishes TTLBackstop every ttlBackstopEvery to cause one, which bounds such a
+// change at ttlBackstopBound (45s); a frame that comes out identical is not
 // resent. TTLBackstop is in no cache's version stamp, so nothing is invalidated
 // before its TTL.
 func (s *Server) RunTTLBackstop(ctx context.Context) {

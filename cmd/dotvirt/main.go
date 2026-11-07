@@ -241,8 +241,8 @@ func run() error {
 	// forge; a changed lane publishes ProposalsChanged.
 	go server.RunProposalsRefresher(ctx, bus)
 
-	// Frames also read TTL-cached authorization that no watch observes; while a
-	// stream is open, the backstop rebuilds frames often enough that an expired
+	// Frames also read TTL-cached authorization that no RBAC watch observes; while
+	// a stream is open, the backstop rebuilds frames often enough that an expired
 	// entry is re-evaluated within 45s (identical frames are not resent).
 	go server.RunTTLBackstop(ctx)
 
