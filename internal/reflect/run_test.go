@@ -52,7 +52,7 @@ func TestRunWhenServedStartsOnce(t *testing.T) {
 	var ready Ready
 	store := NewStore(NewIndexer(), func() {}, ready.Mark)
 
-	go runWhenServed(ctx, time.Millisecond, has, schema.GroupVersionResource{Resource: "things"}, lw, store, &healthy)
+	go runWhenServed(ctx, time.Millisecond, has, schema.GroupVersionResource{Resource: "things"}, lw, store, &healthy, nil)
 
 	eventually(t, "a few probes", func() bool { return probes.Load() >= 3 })
 	if lists.Load() != 0 {
@@ -96,6 +96,30 @@ func TestReadyLatch(t *testing.T) {
 	}
 	if err := r.Wait(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A discovery-gated watch reports its health flips too: its relist publishes while
+// the flag still reads unhealthy, and a silent watch (NNS) publishes nothing else.
+func TestRunWhenServedReportsFlips(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	lw := &cache.ListWatch{
+		ListWithContextFunc: func(context.Context, metav1.ListOptions) (runtime.Object, error) {
+			return nil, context.DeadlineExceeded
+		},
+		WatchFuncWithContext: func(context.Context, metav1.ListOptions) (watch.Interface, error) {
+			return watch.NewFake(), nil
+		},
+	}
+	var healthy atomic.Bool
+	var flips atomic.Int32
+	has := func(schema.GroupVersionResource) bool { return true }
+	go runWhenServed(ctx, time.Millisecond, has, schema.GroupVersionResource{Resource: "things"}, lw,
+		NewStore(NewIndexer(), func() {}, nil), &healthy, func() { flips.Add(1) })
+	eventually(t, "the failing list's flip", func() bool { return flips.Load() >= 1 })
+	if healthy.Load() {
+		t.Error("a failing list must read unhealthy")
 	}
 }
 

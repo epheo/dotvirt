@@ -43,11 +43,12 @@ const discoveryInterval = time.Minute
 
 // RunWhenServed starts a discovery-gated reflector and returns immediately: it
 // re-probes has(gvr) slowly until the API is served, then runs lw (health
-// tracked into healthy) into store for the rest of the process. Absence reads
-// as an empty store, never a reflector error loop, so a snapshot can watch a
-// CRD whose installation is itself something dotvirt proposes.
-func RunWhenServed(ctx context.Context, has func(schema.GroupVersionResource) bool, gvr schema.GroupVersionResource, lw *cache.ListWatch, store cache.Store, healthy *atomic.Bool) {
-	go runWhenServed(ctx, discoveryInterval, has, gvr, lw, store, healthy)
+// tracked into healthy, transitions reported to onFlip as TrackHealth does) into
+// store for the rest of the process. Absence reads as an empty store, never a
+// reflector error loop, so a snapshot can watch a CRD whose installation is
+// itself something dotvirt proposes.
+func RunWhenServed(ctx context.Context, has func(schema.GroupVersionResource) bool, gvr schema.GroupVersionResource, lw *cache.ListWatch, store cache.Store, healthy *atomic.Bool, onFlip func()) {
+	go runWhenServed(ctx, discoveryInterval, has, gvr, lw, store, healthy, onFlip)
 }
 
 // Served returns has with one side effect: a positive probe also sets flag,
@@ -62,14 +63,12 @@ func Served(has func(schema.GroupVersionResource) bool, flag *atomic.Bool) func(
 	}
 }
 
-func runWhenServed(ctx context.Context, every time.Duration, has func(schema.GroupVersionResource) bool, gvr schema.GroupVersionResource, lw *cache.ListWatch, store cache.Store, healthy *atomic.Bool) {
+func runWhenServed(ctx context.Context, every time.Duration, has func(schema.GroupVersionResource) bool, gvr schema.GroupVersionResource, lw *cache.ListWatch, store cache.Store, healthy *atomic.Bool, onFlip func()) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
 		if has(gvr) {
-			// No flip publish: discovery-gated stores publish on every
-			// mutation, so a flip shows with their next event.
-			Run(ctx, TrackHealth(lw, healthy, nil), store)
+			Run(ctx, TrackHealth(lw, healthy, onFlip), store)
 			return
 		}
 		select {
