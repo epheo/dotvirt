@@ -153,7 +153,7 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 				if m.m == matchNo {
 					continue
 				}
-				rv := r.view(dir)
+				rv := r.view(dir, nil)
 				if m.m == matchCond {
 					w.maybe(&b.pol.view, &rv, stage, r.action, m.reason)
 					continue
@@ -209,7 +209,7 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 				if m.m == matchNo {
 					continue
 				}
-				rv := r.view(dir)
+				rv := r.view(dir, nil)
 				if m.m == matchCond {
 					w.maybe(&b.pol.view, &rv, "dfw", r.action, m.reason)
 					continue
@@ -252,7 +252,7 @@ func (s *Snapshot) gatewayWalk(ns, dstIP, protocol string, port int) walkResult 
 			if m.m == matchNo {
 				continue
 			}
-			rv := r.view("Egress")
+			rv := r.view("Egress", nil)
 			if m.m == matchCond {
 				w.maybe(&p.view, &rv, "gateway", r.action, m.reason)
 				continue

@@ -74,13 +74,13 @@ func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res := s.netstate.Trace(src, dst, req.Destination.IP, req.Protocol, req.Port)
-	can := s.clusterAuthority(r.Context(), sc.id, sc.cluster)
+	pr := s.policyRedactor(r.Context(), sc.id, sc.cluster)
 	for i := range res.Steps {
 		if p := res.Steps[i].Policy; p != nil {
 			if s.drift != nil {
 				s.policyDrift(p)
 			}
-			redactSubjects(can, p)
+			pr.apply(p, res.Steps[i].Rule)
 		}
 	}
 	writeJSON(w, res)
