@@ -267,8 +267,8 @@
 							<strong>{name}</strong> is a boot image in <strong>{namespace}</strong>. Create VM
 							offers it once the catalog refreshes.
 						{:else}
-							<strong>{name}</strong> is ready in <strong>{namespace}</strong> — use it as a VM's boot
-							disk.
+							<strong>{name}</strong> is ready in <strong>{namespace}</strong>. Use it as a VM's
+							boot disk.
 						{/if}
 					</p>
 				{/if}
