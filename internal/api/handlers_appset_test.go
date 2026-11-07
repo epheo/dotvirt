@@ -5,7 +5,10 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -79,37 +82,52 @@ func TestAppSetPluginAuth(t *testing.T) {
 	})
 }
 
-// Each repo-backed project gets its own destination namespace, one the
-// project owns: the namespace named after the project when there is one, so
-// adding a namespace never moves it, else the first by name.
+// Each repo-backed project gets a destination its AppProject admits, and it
+// holds still as namespaces join: the namespace named after the project, else
+// the oldest, never platform space (the operator's reserved list included). A
+// project no AppProject can confine gets no Application.
 func TestAppSetPluginParams(t *testing.T) {
-	fc := newFakeCluster(t)
-	label := func(name, proj string) corev1.Namespace {
-		return corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name,
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	label := func(name, proj string, age time.Duration) corev1.Namespace {
+		return corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, CreationTimestamp: metav1.NewTime(t0.Add(age)),
 			Labels: map[string]string{"dotvirt.io/project": proj}, Annotations: map[string]string{"dotvirt.io/repo": "https://forge/" + proj + ".git"}}}
 	}
-	fc.namespaces = append(fc.namespaces, label("team-b-prod", "team-b"), label("team-b-dev", "team-b"),
-		label("aaa", "team-c"), label("team-c", "team-c"))
-	s := fc.server(nil, Config{AppSetPluginToken: "tok"})
-
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/getparams.execute", nil)
-	r.Header.Set("Authorization", "Bearer tok")
-	rec := httptest.NewRecorder()
-	s.handleAppSetPlugin(rec, r)
-	var out struct {
-		Output struct {
-			Parameters []map[string]string `json:"parameters"`
-		} `json:"output"`
+	base := []corev1.Namespace{
+		label("team-b-prod", "team-b", 0), label("team-b-dev", "team-b", time.Hour),
+		label("aaa", "team-c", 0), label("team-c", "team-c", time.Hour),
+		label("kube-k", "team-k", -time.Hour), label("k-argo", "team-k", -time.Hour), label("k-work", "team-k", time.Hour),
+		label("r-argo", "team-r", 0),
+		label("bad", "Team_Bad", 0),
 	}
-	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
+	destinations := func(nss []corev1.Namespace) map[string]string {
+		fc := newFakeCluster(t)
+		fc.namespaces = append(fc.namespaces, nss...)
+		s := fc.server(nil, Config{AppSetPluginToken: "tok"})
+		body := `{"applicationSetName":"dotvirt-projects","input":{"parameters":{"reservedNamespaces":["k-argo","r-argo"]}}}`
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/getparams.execute", strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer tok")
+		rec := httptest.NewRecorder()
+		s.handleAppSetPlugin(rec, r)
+		var out struct {
+			Output struct {
+				Parameters []map[string]string `json:"parameters"`
+			} `json:"output"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		got := map[string]string{}
+		for _, p := range out.Output.Parameters {
+			got[p["project"]] = p["namespace"]
+		}
+		return got
 	}
-	got := map[string]string{}
-	for _, p := range out.Output.Parameters {
-		got[p["project"]] = p["namespace"]
+	want := map[string]string{"team-a": "team-a-dev", "team-b": "team-b-prod", "team-c": "team-c", "team-k": "k-work"}
+	if got := destinations(base); !maps.Equal(got, want) {
+		t.Fatalf("destinations = %v, want %v", got, want)
 	}
-	want := map[string]string{"team-a": "team-a-dev", "team-b": "team-b-dev", "team-c": "team-c"}
-	if !maps.Equal(got, want) {
-		t.Errorf("destination namespaces = %v, want %v", got, want)
+	joined := append(slices.Clone(base), label("team-b-aaa", "team-b", 2*time.Hour), label("c-new", "team-c", 2*time.Hour))
+	if got := destinations(joined); !maps.Equal(got, want) {
+		t.Errorf("after namespaces joined: destinations = %v, want %v", got, want)
 	}
 }

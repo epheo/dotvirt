@@ -1,0 +1,81 @@
+// Package tenancy holds the rules dotvirt and its operator must apply alike to a
+// tenant project's Argo wiring: the AppProject confining it, the namespaces no
+// tenant may target, and the namespace its Application aims at. The plugin
+// generator and the AppProjects disagreeing on any of them leaves a project
+// unsynced or unconfined, hence one stdlib-only module both import, like
+// pkg/forge.
+package tenancy
+
+import (
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+)
+
+// PlatformProject is the platform tier's name, reserved: a tenant by that name
+// would share the platform's draft and route gates, and no tenant Application
+// or AppProject is made for it.
+const PlatformProject = "platform"
+
+// AppProjectPrefix starts every tenant AppProject name. It cannot spell the
+// platform tier's AppProject or the shared tenant tier's (dotvirt-platform,
+// dotvirt-tenants), so no project can claim one.
+const AppProjectPrefix = "dotvirt-p-"
+
+var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+
+// AppProjectName is the AppProject confining project's Application. ok=false
+// for the reserved platform name and for a name that makes no valid object
+// name, which the Application's own name ("dotvirt-<project>") cannot be either.
+func AppProjectName(project string) (string, bool) {
+	name := AppProjectPrefix + project
+	if project == "" || project == PlatformProject || len(name) > 253 {
+		return name, false
+	}
+	for _, label := range strings.Split(name, ".") {
+		if !dnsLabel.MatchString(label) {
+			return name, false
+		}
+	}
+	return name, true
+}
+
+// Reserved reports whether ns is platform space no tenant Application may
+// target: the openshift-* and kube-* system namespaces, and platform, the
+// namespaces dotvirt, its operator and ArgoCD run in.
+func Reserved(ns string, platform []string) bool {
+	return strings.HasPrefix(ns, "openshift-") || strings.HasPrefix(ns, "kube-") || slices.Contains(platform, ns)
+}
+
+// Namespace is a project namespace as Destination weighs it.
+type Namespace struct {
+	Name    string
+	Created time.Time
+}
+
+// Destination is the namespace a project's Application targets, where Argo
+// places a document without metadata.namespace: one of the project's own
+// namespaces outside platform space. It must hold still as namespaces join,
+// since a move re-creates those documents' objects in the new namespace and
+// prunes the originals, disks included: the namespace named after the project
+// wins, then the oldest, then name order. ok=false when none qualifies.
+func Destination(project string, namespaces []Namespace, platform []string) (string, bool) {
+	var best *Namespace
+	for i := range namespaces {
+		ns := &namespaces[i]
+		if Reserved(ns.Name, platform) {
+			continue
+		}
+		if ns.Name == project {
+			return ns.Name, true
+		}
+		if best == nil || ns.Created.Before(best.Created) || (ns.Created.Equal(best.Created) && ns.Name < best.Name) {
+			best = ns
+		}
+	}
+	if best == nil {
+		return "", false
+	}
+	return best.Name, true
+}
