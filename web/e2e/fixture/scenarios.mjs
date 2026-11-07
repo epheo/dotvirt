@@ -1,3 +1,5 @@
+import { createNetworks, createTemplates } from './create.mjs';
+
 // Scenario states for the fixture API server. Each scenario is a full backend
 // state the UI can be pointed at — including the corner-case states a live
 // cluster is almost never in (standing sync failures, degraded planes, huge
@@ -436,7 +438,9 @@ const base = {
 	],
 	options,
 	storageClasses,
-	networks,
+	// The create sheet's additions (create.mjs): an overlapping pair of
+	// networks and a library to deploy from.
+	networks: { ...networks, networks: [...networks.networks, ...createNetworks] },
 	policies,
 	nodes,
 	quotas: [
@@ -456,7 +460,7 @@ const base = {
 		canManage: true,
 		canPSI: true,
 	},
-	templates: { templates: [] },
+	templates: createTemplates,
 	permissions: {
 		namespace: 'web-prod',
 		capabilities: [

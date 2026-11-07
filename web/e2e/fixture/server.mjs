@@ -18,6 +18,7 @@ import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { scenarios } from './scenarios.mjs';
+import { handleCreate, handleUpload } from './create.mjs';
 
 const buildDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'build');
 if (!existsSync(join(buildDir, 'index.html'))) {
@@ -180,13 +181,19 @@ function stage(res, namespace, name, item) {
 	const p = projectOf(namespace);
 	if (!p) return sendText(res, 404, 'namespace not found in any visible project');
 	if (!p.repo) return sendText(res, 503, 'project has no usable repo');
-	// One entry per VM, replaced on every stage, like the backend's draft store.
-	const items = (state.staged.get(p.name) ?? []).filter(
-		(i) => i.namespace !== namespace || i.name !== name,
-	);
-	items.push({ namespace, name, ...item });
-	state.staged.set(p.name, items);
+	stageInto(p.name, { namespace, name, ...item });
 	sendJSON(res, 200, draftFor(p.name));
+}
+
+// One entry per object, replaced on every stage, like the backend's draft store.
+function stageInto(project, item) {
+	const same = (i) =>
+		(i.resource ?? '') === (item.resource ?? '') &&
+		i.namespace === item.namespace &&
+		i.name === item.name;
+	const items = (state.staged.get(project) ?? []).filter((i) => !same(i));
+	items.push(item);
+	state.staged.set(project, items);
 }
 
 // Human-readable change rows from a VMEdit body, with the backend's labels and
@@ -389,14 +396,10 @@ async function handleAPI(req, res, url) {
 		});
 	}
 
-	if (path === '/api/vms' && req.method === 'POST') {
-		const body = await readBody(req);
-		if (!body?.namespace) return sendText(res, 400, 'spec namespace is required');
-		return stage(res, body.namespace, body.name, {
-			kind: 'create',
-			changes: [{ field: 'manifest', action: 'add', to: body.instancetype ?? 'custom' }],
-		});
-	}
+	// The create routes and their dry runs (create.mjs).
+	const createCtx = { state, sendJSON, sendText, readBody, projectOf, stageInto, draftFor };
+	if (await handleCreate(req, res, url, createCtx)) return;
+	if (await handleUpload(req, res, url, createCtx)) return;
 
 	m = path.match(/^\/api\/vms\/([^/]+)\/([^/]+)\/edit\/preview$/);
 	if (m && req.method === 'POST') {
@@ -541,6 +544,10 @@ function serveStatic(req, res, url) {
 
 const server = createServer((req, res) => {
 	const url = new URL(req.url, `http://localhost:${port}`);
+	if (url.pathname.startsWith('/__fixture/upload/')) {
+		handleUpload(req, res, url, { state, sendJSON, readBody });
+		return;
+	}
 	if (url.pathname.startsWith('/__fixture/')) return handleControl(req, res, url);
 	if (url.pathname.startsWith('/api/')) {
 		handleAPI(req, res, url).catch((e) => sendText(res, 500, String(e)));
