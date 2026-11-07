@@ -76,3 +76,26 @@ func TestReleaseDeclaredRefusesMultiDocManifest(t *testing.T) {
 		t.Fatalf("want ErrConflict on a multi-doc manifest, got %v", err)
 	}
 }
+
+// A namespace declared outside namespaces/<ns>.yaml is still git's: its file is
+// rewritten in place, never sent to the imperative path the next sync undoes.
+func TestReleaseDeclaredFindsNamespaceAnywhere(t *testing.T) {
+	const path = "tenancy/alpha-namespace.yaml"
+	bare, _ := seedWork(t, map[string][]byte{path: []byte(declaredNS)})
+	c := newTestCoordinator(t, false)
+	id := auth.Identity{Username: "alice"}
+	plat := project.ProjectInfo{Name: "platform", Repo: bare}
+	target := project.ProjectInfo{Name: "legacy", Namespaces: []string{"alpha"}}
+
+	staged, residue, err := c.ReleaseDeclared(id, plat, target)
+	if err != nil {
+		t.Fatalf("ReleaseDeclared: %v", err)
+	}
+	if len(staged) != 1 || len(residue) != 0 {
+		t.Fatalf("staged=%v residue=%v, want alpha staged", staged, residue)
+	}
+	entries, err := c.store.List(id.Username, plat.Name)
+	if err != nil || len(entries) != 1 || entries[0].SourceFile != path {
+		t.Fatalf("want one rewrite of %s, got %+v (%v)", path, entries, err)
+	}
+}
