@@ -39,23 +39,32 @@
 </script>
 
 <div
-	class="flex w-full items-center gap-1 py-1 pr-2 hover:bg-side-hover {INDENT[indent]}
-		{active
-		? 'bg-side-active shadow-[inset_3px_0_0_var(--color-accent-hover)] hover:bg-side-active'
-		: ''}"
+	class="flex w-full items-center gap-1.5 rounded py-1.5 pr-2 {INDENT[indent]} {active
+		? 'bg-side-hover text-side-ink'
+		: 'text-side-dim hover:bg-side-hover/60'}"
 >
 	{#if expanded !== undefined}
-		<button class="flex w-3 items-center text-side-dim" onclick={ontoggle} title="Expand/collapse">
-			{#if expanded}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}
+		<button
+			class="flex w-3.5 shrink-0 items-center text-side-dim hover:text-side-ink"
+			onclick={ontoggle}
+			aria-expanded={expanded}
+			title="Expand/collapse"
+		>
+			{#if expanded}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}
 		</button>
 	{:else if alignChevron}
-		<span class="w-3"></span>
+		<span class="w-3.5 shrink-0"></span>
 	{/if}
-	<a class="flex min-w-0 flex-1 items-center gap-1 text-left" href={target} {oncontextmenu}>
+	<a
+		class="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+		href={target}
+		aria-current={active ? 'page' : undefined}
+		{oncontextmenu}
+	>
 		{#if icon}{@render icon()}{/if}
 		{@render children()}
 		{#if trailing}
-			<span class="ml-auto flex shrink-0 items-center gap-1">{@render trailing()}</span>
+			<span class="ml-auto flex shrink-0 items-center gap-1.5">{@render trailing()}</span>
 		{/if}
 	</a>
 </div>
