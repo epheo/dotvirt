@@ -2,10 +2,13 @@ package api
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/epheo/dotvirt/internal/cluster"
@@ -74,4 +77,39 @@ func TestAppSetPluginAuth(t *testing.T) {
 			t.Fatal("parameters must be an empty list, not absent")
 		}
 	})
+}
+
+// Each repo-backed project gets its own destination namespace, one the
+// project owns: the namespace named after the project when there is one, so
+// adding a namespace never moves it, else the first by name.
+func TestAppSetPluginParams(t *testing.T) {
+	fc := newFakeCluster(t)
+	label := func(name, proj string) corev1.Namespace {
+		return corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name,
+			Labels: map[string]string{"dotvirt.io/project": proj}, Annotations: map[string]string{"dotvirt.io/repo": "https://forge/" + proj + ".git"}}}
+	}
+	fc.namespaces = append(fc.namespaces, label("team-b-prod", "team-b"), label("team-b-dev", "team-b"),
+		label("aaa", "team-c"), label("team-c", "team-c"))
+	s := fc.server(nil, Config{AppSetPluginToken: "tok"})
+
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/getparams.execute", nil)
+	r.Header.Set("Authorization", "Bearer tok")
+	rec := httptest.NewRecorder()
+	s.handleAppSetPlugin(rec, r)
+	var out struct {
+		Output struct {
+			Parameters []map[string]string `json:"parameters"`
+		} `json:"output"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got := map[string]string{}
+	for _, p := range out.Output.Parameters {
+		got[p["project"]] = p["namespace"]
+	}
+	want := map[string]string{"team-a": "team-a-dev", "team-b": "team-b-dev", "team-c": "team-c"}
+	if !maps.Equal(got, want) {
+		t.Errorf("destination namespaces = %v, want %v", got, want)
+	}
 }
