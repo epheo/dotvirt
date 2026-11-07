@@ -48,6 +48,8 @@ func (p *policy) rules(dir string) []rule {
 // finish fills the columns derived from the subject and rules.
 func (p *policy) finish() *policy {
 	p.view.Target = p.subject.summary()
+	p.view.Applies = p.subject.applies(p.view.Namespace)
+	p.view.Isolation = p.isolation()
 	for _, r := range p.ingress {
 		p.view.Rules = append(p.view.Rules, r.view("Ingress"))
 	}
@@ -163,7 +165,10 @@ func decodeEgressIP(u *unstructured.Unstructured) *policy {
 	}
 	p.view.Namespaces = netgen.NamespaceNames(p.subject.ns)
 	if len(doc.Spec.EgressIPs) > 0 {
-		p.view.Rules = []model.PolicyRuleView{{Direction: "Egress", Action: "SNAT", Peer: strings.Join(doc.Spec.EgressIPs, ", ")}}
+		p.view.Rules = []model.PolicyRuleView{{
+			Direction: "Egress", Action: "SNAT", Peer: strings.Join(doc.Spec.EgressIPs, ", "),
+			Text: "Leaves with source IP " + strings.Join(doc.Spec.EgressIPs, " or ") + ".",
+		}}
 	}
 	return p.finish()
 }
@@ -184,7 +189,10 @@ func decodeExtRoute(u *unstructured.Unstructured) *policy {
 		}
 	}
 	if len(ips) > 0 {
-		p.view.Rules = []model.PolicyRuleView{{Direction: "Egress", Action: "Route", Peer: "via " + strings.Join(ips, ", ")}}
+		p.view.Rules = []model.PolicyRuleView{{
+			Direction: "Egress", Action: "Route", Peer: "via " + strings.Join(ips, ", "),
+			Text: "Leaves through " + strings.Join(ips, " or ") + ".",
+		}}
 	}
 	return p.finish()
 }

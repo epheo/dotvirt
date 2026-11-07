@@ -157,7 +157,7 @@ func decodePorts(docs []netgen.PortDoc, defaultProto string) []port {
 
 // view renders the rule as one Security table row.
 func (r rule) view(dir string) model.PolicyRuleView {
-	return model.PolicyRuleView{Direction: dir, Action: r.action, Peer: r.peerSummary(), Ports: r.portSummary()}
+	return model.PolicyRuleView{Direction: dir, Action: r.action, Peer: r.peerSummary(), Ports: r.portSummary(), Text: r.text(dir)}
 }
 
 func (r rule) peerSummary() string {
