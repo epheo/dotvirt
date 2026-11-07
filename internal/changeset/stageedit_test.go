@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 )
@@ -80,5 +81,53 @@ func TestStageEditDryRuns(t *testing.T) {
 	}
 	if entries, _ := c.store.List(id.Username, proj.Name); len(entries) != 0 {
 		t.Errorf("a refused edit must not be staged, got %+v", entries)
+	}
+}
+
+// A staged edit the base branch has since moved out from under (the VM's file
+// deleted or rewritten by another merge, or a draft staged before a check
+// existed) fails the propose as a conflict naming the entry to unstage, never
+// as an unclassified error.
+func TestProposeEditThatNoLongerAppliesIsConflict(t *testing.T) {
+	const other = "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: other\n  namespace: alpha\nspec:\n  runStrategy: Always\n"
+	seed := "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\nspec:\n  runStrategy: Always\n"
+	label := model.VMEdit{SetLabels: map[string]string{"env": "prod"}}
+	for _, tc := range []struct {
+		name  string
+		move  func(t *testing.T, work string)
+		stage model.VMEdit
+		named string
+	}{
+		{"file deleted", func(t *testing.T, work string) { gitRun(t, work, "rm", "-q", "web.yaml") }, label, "web.yaml"},
+		{"VM gone from its file", func(t *testing.T, work string) {
+			writeWorkFile(t, work, "web.yaml", []byte(other))
+			gitRun(t, work, "add", "-A")
+		}, label, "alpha/web"},
+		{"draft from before validation", nil, model.VMEdit{SetLabels: map[string]string{"env": "has space"}}, "alpha/web"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bare, work := seedWork(t, map[string][]byte{"web.yaml": []byte(seed)})
+			c := newTestCoordinator(t, true)
+			id := auth.Identity{Username: "alice"}
+			proj := project.ProjectInfo{Name: "p", Repo: bare}
+			edit := tc.stage
+			if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
+				Kind: draft.KindEdit, Namespace: "alpha", Name: "web", SourceFile: "web.yaml", Edit: &edit,
+			}); err != nil {
+				t.Fatalf("Stage: %v", err)
+			}
+			if tc.move != nil {
+				tc.move(t, work)
+				gitRun(t, work, "commit", "-qm", "another merge")
+				gitRun(t, work, "push", "-q", "origin", "main")
+			}
+			_, err := c.Propose(id, proj, model.ProposeRequest{Title: "label web"})
+			if !errors.Is(err, model.ErrConflict) || errors.Is(err, model.ErrInvalid) || !strings.Contains(err.Error(), tc.named) {
+				t.Fatalf("want ErrConflict naming %s, got %v", tc.named, err)
+			}
+			if entries, _ := c.store.List(id.Username, proj.Name); len(entries) != 1 {
+				t.Errorf("a refused propose must keep the draft, got %+v", entries)
+			}
+		})
 	}
 }

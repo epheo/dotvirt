@@ -186,7 +186,13 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) []git.ChangesetIte
 			items = append(items, git.ChangesetItem{
 				Path: e.SourceFile,
 				Transform: func(current []byte) ([]byte, error) {
-					return manifest.ApplyEdit(current, git.DefaultNamespace(e.SourceFile), e.Namespace, e.Name, edit)
+					out, err := manifest.ApplyEdit(current, git.DefaultNamespace(e.SourceFile), e.Namespace, e.Name, edit)
+					if err != nil {
+						// The base can move after stage, and not every edit in a
+						// draft was dry-run (adoption): name the entry to unstage.
+						return nil, fmt.Errorf("%w: the staged edit of %s/%s no longer applies; unstage it: %v", model.ErrConflict, e.Namespace, e.Name, err)
+					}
+					return out, nil
 				},
 			})
 		case draft.KindCreate:
