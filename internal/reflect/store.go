@@ -28,8 +28,18 @@ import (
 // warning while the store keeps serving its last-good contents. The flag
 // starts true: nothing has failed yet, and a watch not yet established is
 // not a stale one.
-func TrackHealth(lw *cache.ListWatch, healthy *atomic.Bool) *cache.ListWatch {
+//
+// onFlip (optional) fires on each transition. A snapshot whose stores publish
+// only on content change must publish here too: the watch re-establishes after
+// the relist's Replace, so a relist that changed nothing would otherwise leave
+// the stale warning standing until unrelated churn.
+func TrackHealth(lw *cache.ListWatch, healthy *atomic.Bool, onFlip func()) *cache.ListWatch {
 	healthy.Store(true)
+	set := func(v bool) {
+		if healthy.Swap(v) != v && onFlip != nil {
+			onFlip()
+		}
+	}
 	// Sources set the WithContext pair (the reflector cancels in-flight calls on
 	// shutdown through it); the deprecated context-free fields stay nil.
 	list, watchFn := lw.ListWithContextFunc, lw.WatchFuncWithContext
@@ -37,13 +47,13 @@ func TrackHealth(lw *cache.ListWatch, healthy *atomic.Bool) *cache.ListWatch {
 		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
 			obj, err := list(ctx, o)
 			if err != nil {
-				healthy.Store(false)
+				set(false)
 			}
 			return obj, err
 		},
 		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
 			w, err := watchFn(ctx, o)
-			healthy.Store(err == nil)
+			set(err == nil)
 			return w, err
 		},
 	}

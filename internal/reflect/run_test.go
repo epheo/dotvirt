@@ -98,3 +98,46 @@ func TestReadyLatch(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestTrackHealthFlips: onFlip fires on each transition only, so a sustained
+// outage of repeated failing relists publishes once, and recovery once.
+func TestTrackHealthFlips(t *testing.T) {
+	var fail atomic.Bool
+	lw := &cache.ListWatch{
+		ListWithContextFunc: func(context.Context, metav1.ListOptions) (runtime.Object, error) {
+			if fail.Load() {
+				return nil, context.DeadlineExceeded
+			}
+			return &unstructured.UnstructuredList{}, nil
+		},
+		WatchFuncWithContext: func(context.Context, metav1.ListOptions) (watch.Interface, error) {
+			if fail.Load() {
+				return nil, context.DeadlineExceeded
+			}
+			return watch.NewFake(), nil
+		},
+	}
+	var healthy atomic.Bool
+	var flips int
+	tracked := TrackHealth(lw, &healthy, func() { flips++ })
+	ctx := context.Background()
+
+	_, _ = tracked.ListWithContextFunc(ctx, metav1.ListOptions{})
+	_, _ = tracked.WatchFuncWithContext(ctx, metav1.ListOptions{})
+	if flips != 0 || !healthy.Load() {
+		t.Fatalf("healthy start: flips=%d healthy=%v", flips, healthy.Load())
+	}
+	fail.Store(true)
+	_, _ = tracked.ListWithContextFunc(ctx, metav1.ListOptions{})
+	_, _ = tracked.ListWithContextFunc(ctx, metav1.ListOptions{})
+	_, _ = tracked.WatchFuncWithContext(ctx, metav1.ListOptions{})
+	if flips != 1 || healthy.Load() {
+		t.Fatalf("outage: flips=%d healthy=%v, want one flip to unhealthy", flips, healthy.Load())
+	}
+	fail.Store(false)
+	_, _ = tracked.ListWithContextFunc(ctx, metav1.ListOptions{})
+	_, _ = tracked.WatchFuncWithContext(ctx, metav1.ListOptions{})
+	if flips != 2 || !healthy.Load() {
+		t.Fatalf("recovery: flips=%d healthy=%v, want one flip back", flips, healthy.Load())
+	}
+}

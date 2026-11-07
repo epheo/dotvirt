@@ -67,7 +67,9 @@ func runWhenServed(ctx context.Context, every time.Duration, has func(schema.Gro
 	defer t.Stop()
 	for {
 		if has(gvr) {
-			Run(ctx, TrackHealth(lw, healthy), store)
+			// No flip publish: discovery-gated stores publish on every
+			// mutation, so a flip shows with their next event.
+			Run(ctx, TrackHealth(lw, healthy, nil), store)
 			return
 		}
 		select {

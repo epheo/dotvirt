@@ -62,11 +62,13 @@ func NewSnapshot(sa *Client, bus *eventbus.Bus) *Snapshot {
 // initial LIST has populated the snapshot.
 func (s *Snapshot) Run(ctx context.Context) {
 	store := reflect.NewStore(s.apps,
-		func() { s.driftDirty.Store(true); s.bus.Publish(eventbus.DriftChanged) },
+		func() { s.driftDirty.Store(true); s.publish() },
 		s.synced.Mark,
 	)
-	reflect.Run(ctx, reflect.TrackHealth(s.sa.applicationsListWatch(), &s.healthy), store)
+	reflect.Run(ctx, reflect.TrackHealth(s.sa.applicationsListWatch(), &s.healthy, s.publish), store)
 }
+
+func (s *Snapshot) publish() { s.bus.Publish(eventbus.DriftChanged) }
 
 // Healthy reports whether the Applications watch is currently established
 // (reflect.TrackHealth). Drift keeps serving its last-good store while

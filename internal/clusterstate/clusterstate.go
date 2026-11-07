@@ -163,9 +163,13 @@ type reflectorSpec struct {
 // until the initial LIST has populated the snapshot.
 func (s *State) Run(ctx context.Context) {
 	for i, spec := range s.specs {
-		reflect.RunTyped(ctx, reflect.TrackHealth(spec.lw, &s.healthy[i]), spec.expected, spec.store)
+		reflect.RunTyped(ctx, reflect.TrackHealth(spec.lw, &s.healthy[i], s.publishLive), spec.expected, spec.store)
 	}
 }
+
+// publishLive also carries health flips: the frame's stale warning reads
+// Healthy.
+func (s *State) publishLive() { s.bus.Publish(eventbus.LiveChanged) }
 
 // Healthy reports whether every watch is currently established
 // (reflect.TrackHealth). The snapshot keeps serving its last-good stores while
