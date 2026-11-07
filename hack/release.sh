@@ -10,10 +10,11 @@
 #
 #   VERSION=0.0.6 PREV=0.0.5 hack/release.sh        # PREV = the version this replaces
 #
-# Idempotent: re-running rebuilds and re-pins. Afterwards the working tree holds the
-# digest-pinned files — commit them as the release commit and tag v$VERSION. The images are
-# already published; `kubectl apply -f operator/install/catalogsource.yaml` rolls a cluster
-# forward (OLM upgrades within the stable-v0 channel).
+# Idempotent: a re-run reuses every :v$VERSION image already pushed and re-pins; FORCE=1
+# rebuilds and moves those tags. Afterwards the working tree holds the digest-pinned files:
+# commit them as the release commit and tag v$VERSION. The images are already published;
+# `kubectl apply -f operator/install/catalogsource.yaml` rolls a cluster forward (OLM
+# upgrades within the stable-v0 channel).
 set -euo pipefail
 VERSION="${VERSION:?set VERSION=x.y.z}"
 PREV="${PREV:?set PREV=x.y.z — the version $VERSION replaces}"
@@ -32,8 +33,7 @@ sed -i -E "s#(digest: )sha256:[0-9a-f]{64}#\1${D_OP}#" operator/config/default/k
 sed -i -E "s#(dotvirt-operator:)v[0-9.]+#\1v$VERSION#" operator/config/manager/manager.yaml
 
 echo ">> [3/4] bundle -> $REG/dotvirt-operator-bundle:v$VERSION"
-make -C operator bundle VERSION="$VERSION" >/dev/null
-make -C operator bundle-build bundle-push VERSION="$VERSION" CONTAINER_TOOL="$TOOL" >/dev/null
+push_bundle
 D_BUNDLE="$(digest "$REG/dotvirt-operator-bundle:v$VERSION")"; echo "   bundle digest: $D_BUNDLE"
 
 echo ">> [4/4] catalog -> $REG/dotvirt-operator-catalog:v$VERSION"
@@ -58,8 +58,7 @@ $(entry "$VERSION" "$PREV")
   - schema: olm.bundle
     image: $REG/dotvirt-operator-bundle@$D_BUNDLE
 YAML
-make -C operator catalog VERSION="$VERSION" >/dev/null
-build_push operator/catalog.Dockerfile operator "$REG/dotvirt-operator-catalog:v$VERSION" --build-arg OPM_VERSION="$OPM_VERSION"
+push_catalog
 D_CAT="$(digest "$REG/dotvirt-operator-catalog:v$VERSION")"; echo "   catalog digest: $D_CAT"
 repin "$REG/dotvirt-operator-catalog" "$D_CAT" operator/install/catalogsource.yaml
 

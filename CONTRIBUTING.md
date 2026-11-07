@@ -74,6 +74,12 @@ override `PREV`, trigger the workflow via `workflow_dispatch` (version + prev in
 cut one entirely locally, run `VERSION=0.0.6 PREV=0.0.5 hack/release.sh` and commit + tag
 the pinned tree yourself.
 
+Re-runs (Re-run on the tag, or a dispatch of the same version) reuse every `:vVERSION`
+image already on quay, so the digests the first run pinned are never pruned; they then
+force-push the pin branch and refresh the draft Release asset. The catalog is rebuilt only
+when its render changed (e.g. another `prev`). The dispatch `force` input (`FORCE=1` for
+the scripts) rebuilds everything and moves the tags: use it only when the source changed.
+
 Each channel entry `replaces` the previous release and carries
 `skipRange: '>=0.0.0 <VERSION'`. The catalog holds only the channel heads, so the range
 is the edge every other install follows: an rc to the next rc or to the release, a

@@ -10,6 +10,7 @@
 #
 # The rc replaces the current released (stable-v0) head and skips every older version, so
 # promotion is roll-forward from any earlier rc: 0.0.5 -> 0.0.6-rc.1 -> 0.0.6-rc.2 -> 0.0.6.
+# A re-run of the same VERSION reuses the images it already pushed; FORCE=1 rebuilds.
 set -euo pipefail
 VERSION="${VERSION:?set VERSION=x.y.z-rc.N}"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -38,8 +39,7 @@ repin "$REG/dotvirt-operator" "$D_OP" "$CSV"
 sed -i -E "s#(digest: )sha256:[0-9a-f]{64}#\1${D_OP}#" operator/config/default/kustomization.yaml
 
 echo ">> bundle -> $REG/dotvirt-operator-bundle:v$VERSION"
-make -C operator bundle VERSION="$VERSION" >/dev/null
-make -C operator bundle-build bundle-push VERSION="$VERSION" CONTAINER_TOOL="$TOOL" >/dev/null
+push_bundle
 D_BUNDLE="$(digest "$REG/dotvirt-operator-bundle:v$VERSION")"
 
 echo ">> catalog (stable-v0=v$REL_VER unchanged, candidate-v0=v$VERSION)"
@@ -64,8 +64,7 @@ $(entry "$VERSION" "$REL_VER")
   - schema: olm.bundle
     image: $REG/dotvirt-operator-bundle@$D_BUNDLE
 YAML
-make -C operator catalog VERSION="$VERSION" >/dev/null
-build_push operator/catalog.Dockerfile operator "$REG/dotvirt-operator-catalog:v$VERSION" --build-arg OPM_VERSION="$OPM_VERSION"
+push_catalog
 D_CAT="$(digest "$REG/dotvirt-operator-catalog:v$VERSION")"
 
 cat > operator/install/catalogsource-preview.yaml <<YAML

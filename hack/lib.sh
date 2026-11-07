@@ -1,7 +1,7 @@
 # Shared helpers for the release + preview orchestrators (hack/release.sh, hack/preview.sh).
 # SOURCED, not executed. Holds the parts that are byte-identical between the two flows:
-# image build/push, digest resolution + pinning, the channel entry shape, and the
-# stable-channel head extraction.
+# image build/push (reusing what an earlier run of the version pushed), digest resolution +
+# pinning, the channel entry shape, and the stable-channel head extraction.
 # Each orchestrator keeps only its divergent tail (channel handling, commit-vs-restore,
 # validation, manager.yaml update). Sourcing this also cds to the repo root and pins the
 # tool versions, so the orchestrators stay thin.
@@ -25,12 +25,37 @@ digest() { skopeo inspect --format '{{.Digest}}' "docker://$1"; }
 # Anchored on '@' so .../dotvirt never matches .../dotvirt-operator.
 repin() { local ref="$1" d="$2"; shift 2; sed -i -E "s#${ref}@sha256:[0-9a-f]{64}#${ref}@${d}#g" "$@"; }
 
+# pushed <ref> -> succeeds when <ref> is on the registry. Any error but "manifest unknown"
+# aborts: reading it as absent would rebuild, moving a tag something already pins.
+pushed() {
+	local err
+	err="$(skopeo inspect --raw "docker://$1" 2>&1 >/dev/null)" && return 0
+	grep -q 'manifest unknown' <<<"$err" && return 1
+	echo "$err" >&2
+	exit 1
+}
+
+# reuse <tag> -> succeeds when this run keeps <tag> where an earlier run of this version
+# pushed it. Rebuilding would move the tag, and quay prunes the digest that run already
+# pinned into its pin PR, its draft Release, and any cluster that applied them. Every later
+# image pins this one, so once one is rebuilt FORCE=1 rebuilds the rest.
+reuse() {
+	if [ "${FORCE:-}" != 1 ] && pushed "$1"; then
+		echo "   reusing $1 (FORCE=1 rebuilds)"
+		return 0
+	fi
+	FORCE=1
+	return 1
+}
+
 # build_push <dockerfile> <context> <tag> [build args...]   build a multi-arch image
-# ($PLATFORMS) and push it as a manifest list. Bridges docker (buildx builds+pushes in one
-# step) and podman (build a --manifest, then push it). Extra args (e.g. --build-arg VERSION=)
-# pass through. digest() then resolves the manifest-list digest — exactly what we pin.
+# ($PLATFORMS) and push it as a manifest list, unless reuse keeps the pushed tag. Bridges
+# docker (buildx builds+pushes in one step) and podman (build a --manifest, then push it).
+# Extra args (e.g. --build-arg VERSION=) pass through. digest() then resolves the
+# manifest-list digest, which is what we pin.
 build_push() {
 	local file="$1" ctx="$2" tag="$3"; shift 3
+	reuse "$tag" && return 0
 	case "$TOOL" in
 	docker)
 		docker buildx build --platform "$PLATFORMS" "$@" -f "$file" -t "$tag" --push "$ctx"
@@ -41,6 +66,29 @@ build_push() {
 		$TOOL manifest push --all "$tag" "docker://$tag"
 		;;
 	esac
+}
+
+# push_bundle -> regenerate operator/bundle at $VERSION and push it as :v$VERSION. A reused
+# tag keeps the earlier run's bundle; the regenerated tree differs from it only in createdAt.
+push_bundle() {
+	make -C operator bundle VERSION="$VERSION" >/dev/null
+	reuse "$REG/dotvirt-operator-bundle:v$VERSION" ||
+		make -C operator bundle-build bundle-push VERSION="$VERSION" CONTAINER_TOOL="$TOOL" >/dev/null
+}
+
+# push_catalog -> render $TMPL into operator/catalog and push it as :v$VERSION. A pushed tag
+# is reused only when it serves this exact render: a re-run with another PREV renders a
+# different catalog, and shipping the earlier one would contradict the committed pins.
+push_catalog() {
+	local tag="$REG/dotvirt-operator-catalog:v$VERSION"
+	make -C operator catalog VERSION="$VERSION" >/dev/null
+	if [ "${FORCE:-}" != 1 ] && pushed "$tag" &&
+		$OPM render "$tag" -o yaml 2>/dev/null | cmp -s - operator/catalog/dotvirt-operator/catalog.yaml; then
+		echo "   reusing $tag (serves this exact catalog)"
+		return 0
+	fi
+	FORCE=1
+	build_push operator/catalog.Dockerfile operator "$tag" --build-arg OPM_VERSION="$OPM_VERSION"
 }
 
 # entry <version> [replaces] -> one olm.channel entry for $TMPL. The catalog keeps only the
