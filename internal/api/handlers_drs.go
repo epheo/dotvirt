@@ -31,8 +31,8 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.cfg.PlatformRepo != "" {
 		ctx := r.Context()
-		view.CanManage = s.canCreateCached(ctx, id, c, ssarDescheduler)
-		view.CanPSI = s.canCreateCached(ctx, id, c, ssarMachineCfg)
+		view.CanManage, _ = s.can(ctx, id, c, verbCreate, ssarDescheduler, "")
+		view.CanPSI, _ = s.can(ctx, id, c, verbCreate, ssarMachineCfg, "")
 		platform := s.platformProject()
 		if git, err := s.reader.DRSState(platform); err != nil {
 			log.Printf("api: drs: read platform repo: %v", err)
@@ -64,9 +64,16 @@ func (s *Server) handleDRSEnable(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if p.InstallPSI && !s.canCreateCached(r.Context(), sc.id, sc.cluster, ssarMachineCfg) {
-		fail(w, fmt.Errorf("%w: not authorized to create machineconfigs", model.ErrForbidden))
-		return
+	if p.InstallPSI {
+		ok, err := s.can(r.Context(), sc.id, sc.cluster, verbCreate, ssarMachineCfg, "")
+		if err != nil {
+			fail(w, reviewFailed(err))
+			return
+		}
+		if !ok {
+			fail(w, fmt.Errorf("%w: not authorized to create machineconfigs", model.ErrForbidden))
+			return
+		}
 	}
 	view, err := s.draft.StageEnableDRS(sc.id, sc.proj, raw)
 	respond(w, view, err)

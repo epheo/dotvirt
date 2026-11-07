@@ -18,6 +18,7 @@ import (
 // keeps its own create-SSAR gates (platformScope), so these pass it through.
 
 const (
+	verbList   = "list"
 	verbCreate = "create"
 	verbUpdate = "update"
 	verbDelete = "delete"
@@ -53,24 +54,15 @@ func (s *Server) stagedKinds(resource, ns, name string) []model.Kind {
 	return kinds
 }
 
-// canAuthor answers verb on ref in ns under the caller's token, behind the
-// rbacVersion-stamped cache.
-func (s *Server) canAuthor(ctx context.Context, id auth.Identity, c *cluster.Client, verb string, ref ssarRef, ns string) (bool, error) {
-	key := "author\x00" + verb + "\x00" + ref.group + "/" + ref.resource + "\x00" + ns
-	return s.ssarChecked(id, key, func() (bool, error) {
-		return c.Can(ctx, verb, ref.group, ref.resource, ns)
-	})
-}
-
 // authorize gates one staged change: verb on ref in ns. ok=false means the
 // response is written.
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request, sc scope, verb string, ref ssarRef, ns string) bool {
 	if sc.platform {
 		return true
 	}
-	ok, err := s.canAuthor(r.Context(), sc.id, sc.cluster, verb, ref, ns)
+	ok, err := s.can(r.Context(), sc.id, sc.cluster, verb, ref, ns)
 	if err != nil {
-		fail(w, unavailable(err))
+		fail(w, reviewFailed(err))
 		return false
 	}
 	if !ok {
@@ -111,9 +103,9 @@ func (s *Server) authorizeDraft(w http.ResponseWriter, r *http.Request, sc scope
 		return true
 	}
 	for _, ns := range sc.proj.Namespaces {
-		ok, err := s.canAuthor(r.Context(), sc.id, sc.cluster, verbUpdate, ssarVM, ns)
+		ok, err := s.can(r.Context(), sc.id, sc.cluster, verbUpdate, ssarVM, ns)
 		if err != nil {
-			fail(w, unavailable(err))
+			fail(w, reviewFailed(err))
 			return false
 		}
 		if ok {
@@ -155,7 +147,7 @@ const authorConcurrency = 8
 // fails is left out of the map, so a timeout reads as unknown, never as no.
 func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *cluster.Client, nss []string) map[string]bool {
 	out := make(map[string]bool, len(nss))
-	if all, err := s.canAuthor(ctx, id, c, verbUpdate, ssarVM, ""); err == nil && all {
+	if all, err := s.can(ctx, id, c, verbUpdate, ssarVM, ""); err == nil && all {
 		for _, ns := range nss {
 			out[ns] = true
 		}
@@ -170,7 +162,7 @@ func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *clus
 		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			ok, err := s.canAuthor(ctx, id, c, verbUpdate, ssarVM, ns)
+			ok, err := s.can(ctx, id, c, verbUpdate, ssarVM, ns)
 			if err != nil {
 				return
 			}

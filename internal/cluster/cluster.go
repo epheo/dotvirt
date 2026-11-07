@@ -512,27 +512,7 @@ func nodeReady(n corev1.Node) bool {
 	return false
 }
 
-// CanReadNodes reports whether this token may list nodes (cluster-scoped). It
-// gates the networking read's physical fabric (Uplinks + Physical adapters):
-// those are node-level infrastructure, so a plain tenant who can't see nodes
-// doesn't see node NICs either. Best-effort - a review error reads as "no".
-func (c *Client) CanReadNodes(ctx context.Context) bool {
-	ok, _ := c.allowed(ctx, &authzv1.ResourceAttributes{Verb: "list", Resource: "nodes"})
-	return ok
-}
-
 // canPatchNodes reports whether this token may update nodes (cluster-scoped).
 func (c *Client) canPatchNodes(ctx context.Context) (bool, error) {
 	return c.allowed(ctx, &authzv1.ResourceAttributes{Verb: "update", Resource: "nodes"})
-}
-
-// CanCreateClusterResource reports whether this token may create the cluster-scoped
-// group/resource. It gates dotvirt's platform/Infrastructure authoring actions
-// (CUDN, NNCP, Namespace): the user never creates these - Argo applies them from the
-// platform repo - so can-i-create is the authorization SIGNAL standing in for "is a
-// platform operator" (matching the dotvirt-platform-network-admin role). Best-effort
-// like CanReadNodes - a review error reads as "no".
-func (c *Client) CanCreateClusterResource(ctx context.Context, group, resource string) bool {
-	ok, _ := c.allowed(ctx, &authzv1.ResourceAttributes{Verb: "create", Group: group, Resource: resource})
-	return ok
 }

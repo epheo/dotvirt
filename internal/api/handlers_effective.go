@@ -50,18 +50,21 @@ func (s *Server) handleNamespacePolicy(w http.ResponseWriter, r *http.Request) {
 // routes enforce, cached per (token, kind).
 func (s *Server) clusterAuthority(ctx context.Context, id auth.Identity, c *cluster.Client) func(model.PolicyKind) bool {
 	return func(k model.PolicyKind) bool {
-		switch k {
-		case model.PolicyAdmin:
-			return s.canCreateCached(ctx, id, c, ssarANP)
-		case model.PolicyBaseline:
-			return s.canCreateCached(ctx, id, c, ssarBANP)
-		case model.PolicyEgressIP:
-			return s.canCreateCached(ctx, id, c, ssarEgressIP)
-		case model.PolicyRoute:
-			return s.canCreateCached(ctx, id, c, ssarExtRoute)
+		ref, ok := clusterPolicyRefs[k]
+		if !ok {
+			return false
 		}
-		return false
+		allowed, _ := s.can(ctx, id, c, verbCreate, ref, "")
+		return allowed
 	}
+}
+
+// clusterPolicyRefs is the create authority over each cluster-tier policy kind.
+var clusterPolicyRefs = map[model.PolicyKind]ssarRef{
+	model.PolicyAdmin:    ssarANP,
+	model.PolicyBaseline: ssarBANP,
+	model.PolicyEgressIP: ssarEgressIP,
+	model.PolicyRoute:    ssarExtRoute,
 }
 
 // redactSubjects strips a cluster-tier policy's enumerated subject namespaces

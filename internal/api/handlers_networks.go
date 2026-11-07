@@ -158,7 +158,10 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	// gates the platform-draft view. All false when no platform repo is configured.
 	if s.cfg.PlatformRepo != "" {
 		ctx := r.Context()
-		can := func(ref ssarRef) bool { return s.canCreateCached(ctx, id, c, ref) }
+		can := func(ref ssarRef) bool {
+			ok, _ := s.can(ctx, id, c, verbCreate, ref, "")
+			return ok
+		}
 		cudn := can(ssarCUDN)
 		out.CanManage = cudn
 		out.Caps = model.NetworkCaps{
@@ -167,8 +170,8 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 			EgressIP:           can(ssarEgressIP),
 			ExternalRoute:      can(ssarExtRoute),
 			AdminNetworkPolicy: can(ssarANP),
-			Platform:           s.canAuthorPlatform(ctx, id, c),
 		}
+		out.Caps.Platform, _ = s.canAuthorPlatform(ctx, id, c)
 	}
 	// Which file declares each segment: the edit/delete affordance. A shared
 	// segment's platform file shows only to callers who may author that tier.
@@ -179,7 +182,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	}
 	// The physical fabric is node-level infrastructure - show it only to callers
 	// who can read nodes (cluster-admins), not every tenant who can attach a NIC.
-	if s.canReadNodesCached(r.Context(), id, c) {
+	if canNodes, _ := s.can(r.Context(), id, c, verbList, ssarNodes, ""); canNodes {
 		out.Uplinks = full.Uplinks
 		out.PhysicalAdapters = full.PhysicalAdapters
 		if out.Caps.Uplink {

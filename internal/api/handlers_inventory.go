@@ -100,14 +100,16 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	// Propose existing tenants (namespaces with VMs, no project label) to callers
 	// who could adopt them - the same namespace-create authority the create-project
 	// route enforces. Rides the frame, so the list drains as adoptions merge.
-	if s.cfg.PlatformRepo != "" && s.canCreateCached(ctx, id, userCluster, ssarNamespace) {
-		inv.Adoptable = inventory.Adoptable(in.Live, s.state.Namespaces())
+	if s.cfg.PlatformRepo != "" {
+		if ok, _ := s.can(ctx, id, userCluster, verbCreate, ssarNamespace, ""); ok {
+			inv.Adoptable = inventory.Adoptable(in.Live, s.state.Namespaces())
+		}
 	}
 	// The platform tier is config-only (never a labeled namespace), so it's absent
 	// from `projects` - seed it for platform authors so its open PR shows on a cold
 	// load, not just right after a propose tracks it.
 	propProjects := projects
-	if s.canAuthorPlatform(ctx, id, userCluster) {
+	if platform, _ := s.canAuthorPlatform(ctx, id, userCluster); platform {
 		propProjects = append(propProjects, s.platformProject())
 	}
 	inv.Proposals = s.proposalsFor(id, propProjects)
@@ -179,25 +181,36 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.optionsFor(r.Context(), id, c, visible, all))
 }
 
+// ssarDataSources and ssarNADs are the list authorities over the namespaced
+// option kinds (cluster.ListOptions reads the same resources).
+var (
+	ssarDataSources = ssarRef{"cdi.kubevirt.io", "datasources"}
+	ssarNADs        = ssarFor(model.KindNAD)
+)
+
 // optionsFor narrows the shared catalog to what id may see: a namespaced entry
 // passes when its namespace is in the caller's visible set, or when the caller
 // could list that kind there itself (a shared golden-image namespace grants that
 // to every authenticated user; the verdict is SSAR-cached per token). The cached
 // catalog is never mutated - fresh, non-nil slices so they serialize as [].
 func (s *Server) optionsFor(ctx context.Context, id auth.Identity, c *cluster.Client, visible map[string]bool, all model.Options) model.Options {
-	allowed := func(ns, kind string, can func(context.Context, string) bool) bool {
-		return visible[ns] || s.ssarCached(id, "read\x00"+kind+"\x00"+ns, func() bool { return can(ctx, ns) })
+	allowed := func(ns string, ref ssarRef) bool {
+		if visible[ns] {
+			return true
+		}
+		ok, _ := s.can(ctx, id, c, verbList, ref, ns)
+		return ok
 	}
 	out := all
 	out.OSImages = make([]model.OSImage, 0, len(all.OSImages))
 	for _, img := range all.OSImages {
-		if allowed(img.Namespace, "osimages", c.CanListOSImages) {
+		if allowed(img.Namespace, ssarDataSources) {
 			out.OSImages = append(out.OSImages, img)
 		}
 	}
 	out.Networks = make([]model.NetworkOption, 0, len(all.Networks))
 	for _, n := range all.Networks {
-		if allowed(n.Namespace, "networks", c.CanListNetworks) {
+		if allowed(n.Namespace, ssarNADs) {
 			out.Networks = append(out.Networks, n)
 		}
 	}

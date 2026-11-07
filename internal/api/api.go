@@ -181,7 +181,7 @@ type Server struct {
 	resolver  *project.Resolver
 	repos     *git.RepoSet
 	visible   *ttlcache.Cache[visibleSet]       // per-token visible-namespace set, RBAC-version-stamped
-	ssar      *ttlcache.Cache[ssarVerdict]      // per-(token, resource) create-SSAR, RBAC-version-stamped
+	ssar      *ttlcache.Cache[ssarVerdict]      // per-(token, question) SSAR verdict, RBAC-version-stamped
 	proposals *ttlcache.Cache[[]model.Proposal] // per-project open-PR set; written by the refresher, read on broadcast
 	options   *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
 	storage   *ttlcache.Cache[[]model.StorageClassInfo]
@@ -459,6 +459,16 @@ func invalid(err error) error { return fmt.Errorf("%w: %v", model.ErrInvalid, er
 func unavailable(err error) error {
 	log.Printf("api: cluster access unavailable: %v", err)
 	return fmt.Errorf("%w: cluster access", model.ErrUnavailable)
+}
+
+// reviewFailed answers an authorization review that could not be made under
+// the caller's token: a token the apiserver rejects stays a 401 so the session
+// ends; anything else is a 503 naming no internals.
+func reviewFailed(err error) error {
+	if apierrors.IsUnauthorized(err) {
+		return err
+	}
+	return unavailable(err)
 }
 
 // statusFor maps an error to an HTTP status by the kind it wraps: a model.Err*

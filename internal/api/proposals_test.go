@@ -180,7 +180,7 @@ func TestCanAuthorPlatformNoRepo(t *testing.T) {
 	id := auth.Identity{Token: "tok", Username: "u"}
 	// A nil cluster client is safe here: the repo-empty guard returns before any
 	// SSAR, so it must not be dereferenced.
-	if s.canAuthorPlatform(context.TODO(), id, nil) {
+	if ok, err := s.canAuthorPlatform(context.TODO(), id, nil); ok || err != nil {
 		t.Fatal("canAuthorPlatform must be false when no platform repo is configured")
 	}
 }
