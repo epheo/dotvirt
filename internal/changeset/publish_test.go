@@ -843,3 +843,64 @@ func TestProposeAfterAMergeMovedTheBranch(t *testing.T) {
 		t.Fatalf("want the draft as new PR #2, got %+v %v", out, err)
 	}
 }
+
+// No forge to ask, and the record's PR evidently merged: main now holds the
+// whole-file content the PR carried, so its pin trips. The record goes, the
+// draft is pushed on its own, and the result says so - instead of refusing
+// every propose from then on.
+func TestProposeWithoutAForgeDropsASupersededRecord(t *testing.T) {
+	f, prs := newPRFixture(t)
+	f.commitMain(t, "db.yaml", "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: db\n  namespace: alpha\nspec:\n  runStrategy: Always\n")
+	a := strings.Replace(f.show(t, "main:web.yaml"), "namespace: alpha\n", "namespace: alpha\n  labels:\n    a: \"1\"\n", 1)
+	if _, err := f.c.StageUpdateManifest(f.id, f.proj, "", "alpha", "web", model.UpdateManifestRequest{YAML: a}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	f.commitMain(t, "web.yaml", a) // #1 merged
+	f.c.forge = nil
+	if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "db", model.EditRequest{SourceFile: "db.yaml", VMEdit: model.VMEdit{SetLabels: map[string]string{"k": "v"}}}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{})
+	if err != nil || !strings.Contains(out.Warning, "#1") {
+		t.Fatalf("want the draft pushed with a note about #1, got %+v %v", out, err)
+	}
+	if _, ok := f.proposal(t); ok {
+		t.Fatal("the superseded record must go")
+	}
+	if !strings.Contains(f.show(t, prs.head+":db.yaml"), "k: v") {
+		t.Fatal("the draft must be pushed")
+	}
+}
+
+// A delete whose file left main while main still declares the object at
+// another path is a move, not a removal: refused naming the new path, the
+// draft kept.
+func TestProposeRefusesADeleteOfAMovedObject(t *testing.T) {
+	f, _ := newPRFixture(t)
+	if _, err := f.c.StageDelete(f.id, f.proj, "", "alpha", "web"); err != nil {
+		t.Fatal(err)
+	}
+	work := t.TempDir()
+	gitRun(t, work, "clone", "-q", f.proj.Repo, ".")
+	gitRun(t, work, "mv", "web.yaml", "alpha-web.yaml")
+	gitRun(t, work, "commit", "-qm", "move web")
+	gitRun(t, work, "push", "-q", "origin", "main")
+	f.commitMain(t, "README.md", "sync\n")
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "alpha-web.yaml") {
+		t.Fatalf("want ErrConflict naming alpha-web.yaml, got %v", err)
+	}
+	if n := f.draftCount(t); n != 1 {
+		t.Fatalf("the draft must stay, got %d entries", n)
+	}
+}
+
+// A refused lease on a branch no PR names says so plainly, never "#0".
+func TestBranchMovedWithoutAPRNamesTheBranch(t *testing.T) {
+	r := &proposeRun{c: &Coordinator{}, branch: "dotvirt/proposed/alice/p-x"}
+	if err := r.commitFailed(git.ErrBranchMoved, nil, 0); !errors.Is(err, model.ErrConflict) || strings.Contains(err.Error(), "#0") || !strings.Contains(err.Error(), r.branch) {
+		t.Fatalf("got %v", err)
+	}
+}

@@ -198,6 +198,9 @@ type ProposeResult struct {
 	PRNumber   int    `json:"prNumber,omitempty"`
 	CompareURL string `json:"compareURL,omitempty"`
 	Existing   bool   `json:"existing,omitempty"`
+	// Warning is what the propose decided on the user's behalf and they
+	// should read.
+	Warning string `json:"warning,omitempty"`
 }
 
 // ReleaseResult is POST /api/projects/{project}/release: namespaces released

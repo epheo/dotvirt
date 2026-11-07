@@ -221,6 +221,11 @@ export interface ProposeResult {
   prNumber?: number /* int */;
   compareURL?: string;
   existing?: boolean;
+  /**
+   * Warning is what the propose decided on the user's behalf and they
+   * should read.
+   */
+  warning?: string;
 }
 /**
  * ReleaseResult is POST /api/projects/{project}/release: namespaces released

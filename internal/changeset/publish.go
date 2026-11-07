@@ -192,8 +192,14 @@ func (r *proposeRun) extend(pr forge.PR, rec draft.Proposal, hasRec bool) (model
 		ahead.Pending = &draft.Pending{Head: hash, Entries: all}
 		return r.record(ahead)
 	}}
+	if err := c.deletesStillDeclared(r.read, all); err != nil {
+		return model.ProposeResult{}, err
+	}
 	res, err := r.write.ProposeChangeset(c.baseBranch, r.branch, commitMessage(title, message), c.toChangesetItems(all), r.author(), plan)
 	var moved *git.BaseMovedError
+	if r.fc == nil && errors.As(err, &moved) && !r.staged(moved.Path) {
+		return r.supersede(rec, moved.Path, all)
+	}
 	if errors.Is(err, git.ErrBranchMoved) || errors.As(err, &moved) {
 		return r.moved(pr, all, err)
 	}
@@ -241,12 +247,88 @@ func (r *proposeRun) moved(pr forge.PR, carried []draft.Entry, err error) (model
 	return model.ProposeResult{}, r.commitFailed(err, carried, pr.Number)
 }
 
+// supersede answers, with no forge to ask, a rebuild refused because main
+// moved a file an entry the PR carries was made from: that PR evidently
+// merged or was overtaken. Its record goes, and the draft is pushed on its
+// own, leased to the head the record held; the result says so.
+func (r *proposeRun) supersede(rec draft.Proposal, path string, carried []draft.Entry) (model.ProposeResult, error) {
+	_ = r.c.store.DropProposal(r.id.Username, r.proj.Name)
+	title, _ := r.draftText()
+	if err := r.c.deletesStillDeclared(r.read, r.entries); err != nil {
+		return model.ProposeResult{}, err
+	}
+	res, err := r.write.ProposeChangeset(r.c.baseBranch, r.branch, commitMessage(title, r.req.Message), r.c.toChangesetItems(r.entries), r.author(), git.PushPlan{Lease: rec.Head})
+	if err != nil {
+		return model.ProposeResult{}, r.commitFailed(err, r.entries, 0)
+	}
+	what := path
+	for _, e := range carried {
+		if e.SourceFile == path {
+			what = objectLabel(e)
+		}
+	}
+	earlier := "the earlier proposal"
+	if rec.PR > 0 {
+		earlier = fmt.Sprintf("pull request #%d", rec.PR)
+	}
+	out := model.ProposeResult{Branch: res.Branch, Warning: fmt.Sprintf(
+		"%s changed on %s since %s proposed it, so that proposal has merged or been overtaken; this draft was pushed on its own.", what, r.c.baseBranch, earlier)}
+	return out, r.c.store.Remove(r.id.Username, r.proj.Name, r.entries...)
+}
+
+// staged reports whether a draft entry of this run writes path.
+func (r *proposeRun) staged(path string) bool {
+	for _, e := range r.entries {
+		if e.SourceFile == path {
+			return true
+		}
+	}
+	return false
+}
+
+// deletesStillDeclared refuses a delete whose file is gone from base while
+// base still declares its object at another path: the object moved, and
+// removing the old path would leave it in git.
+func (c *Coordinator) deletesStillDeclared(read *git.Repo, entries []draft.Entry) error {
+	var paths []string
+	for _, e := range entries {
+		if e.Kind == draft.KindDelete {
+			paths = append(paths, e.SourceFile)
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	pins, err := read.Pins(c.baseBranch, paths...)
+	if err != nil {
+		return err
+	}
+	var idx declaredIndex
+	for _, e := range entries {
+		if e.Kind != draft.KindDelete || pins[e.SourceFile] != git.AbsentBlob {
+			continue
+		}
+		if idx.Files == nil {
+			if idx, err = indexDeclared(read, c.baseBranch); err != nil {
+				return err
+			}
+		}
+		if ref, ok := declaredRef(idx, e.Resource, e.Namespace, e.Name); ok {
+			return fmt.Errorf("%w: %s moved to %s on %s after its removal was staged; unstage it and stage the removal again", model.ErrConflict, objectLabel(e), idx.Files[ref], c.baseBranch)
+		}
+	}
+	return nil
+}
+
 // afterMerge proposes the draft alone once the PR merged under the rebuild:
 // what it carried is in base now, and the branch just pushed sits on the
 // base from before the merge, so it is rebuilt again on current base, leased
 // to the head just pushed. A draft base already satisfies opens no PR.
 func (r *proposeRun) afterMerge(pushed string) (model.ProposeResult, error) {
 	title, body := r.draftText()
+	if err := r.c.deletesStillDeclared(r.read, r.entries); err != nil {
+		return model.ProposeResult{}, err
+	}
 	res, err := r.write.ProposeChangeset(r.c.baseBranch, r.branch, commitMessage(title, r.req.Message), r.c.toChangesetItems(r.entries), r.author(), git.PushPlan{Lease: pushed})
 	if err != nil {
 		return model.ProposeResult{}, r.commitFailed(err, r.entries, 0)
@@ -271,6 +353,9 @@ func (r *proposeRun) fresh(prior forge.PR, found bool) (model.ProposeResult, err
 		rec := r.proposal(0, "", nil)
 		rec.Pending = &draft.Pending{Head: hash, Entries: r.entries}
 		return r.record(rec)
+	}
+	if err := r.c.deletesStillDeclared(r.read, r.entries); err != nil {
+		return model.ProposeResult{}, err
 	}
 	out, head, ok, err := r.c.publish(r.fc, r.write, r.branch, commitMessage(title, r.req.Message), title, body,
 		r.c.toChangesetItems(r.entries), r.author(), prior, found, ahead)
@@ -402,6 +487,9 @@ func (r *proposeRun) commitFailed(err error, carried []draft.Entry, pr int) erro
 		// wedge the user behind a permanent error. Drop it and say what happened.
 		_ = r.c.store.Remove(r.id.Username, r.proj.Name, r.entries...)
 		return fmt.Errorf("%w: every staged change already matches git; the draft has been cleared", model.ErrInvalid)
+	}
+	if errors.Is(err, git.ErrBranchMoved) && pr == 0 {
+		return fmt.Errorf("%w: the branch %s was changed outside dotvirt while this was proposed; nothing was overwritten and the draft is kept, so propose again", model.ErrConflict, r.branch)
 	}
 	if errors.Is(err, git.ErrBranchMoved) {
 		return fmt.Errorf("%w: pull request #%d's branch was changed outside dotvirt (pushed to or deleted); nothing was pushed and the draft is kept: merge or close #%d, then propose", model.ErrConflict, pr, pr)
