@@ -54,12 +54,13 @@ const (
 
 // RunTTLBackstop is the TTL backstop for authorization no RBAC watch observes.
 // The watches publish RBACChanged for RoleBindings and Roles in project
-// namespaces, ClusterRoleBindings, ClusterRoles and OpenShift Groups. A token's
-// visible namespaces and SSAR verdicts still move unseen with:
+// namespaces, ClusterRoleBindings, the ClusterRoles those bind, and OpenShift
+// Groups. A token's visible namespaces and SSAR verdicts still move unseen
+// with:
 //   - RBAC outside project namespaces (the shared image namespaces the options
 //     filter reviews),
-//   - system: ClusterRoles bound directly, and bindings that grant only
-//     platform ServiceAccounts,
+//   - bindings that grant only platform ServiceAccounts, and the roles only
+//     they bind,
 //   - a watched kind the SA may not list yet,
 //   - group membership kept anywhere but user.openshift.io Groups,
 //   - authorizers other than RBAC.

@@ -36,9 +36,9 @@ const (
 	// inventory topology change AND a visibility (RBAC) change.
 	NamespaceChanged
 	// RBACChanged: a grant moved - a RoleBinding or Role in a project namespace, a
-	// ClusterRoleBinding, a ClusterRole, or an OpenShift Group's members - so a
-	// token's visible namespaces and review verdicts may have changed: the cue to
-	// revalidate the per-token authorization caches.
+	// ClusterRoleBinding, a ClusterRole one of those binds, or an OpenShift
+	// Group's members - so a token's visible namespaces and review verdicts may
+	// have changed: the cue to revalidate the per-token authorization caches.
 	RBACChanged
 	// DriftChanged: the drift Argo reports moved - an object's sync/health/apply
 	// error or a project's rollup - or the Applications watch's health flipped.

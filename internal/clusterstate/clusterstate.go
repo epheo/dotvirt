@@ -15,9 +15,9 @@
 // model the argo drift snapshot also follows - fed by watches, not polled.
 //
 // Signal-only watches follow what a token's authorization derives from -
-// RoleBindings and Roles in project namespaces, ClusterRoleBindings,
-// ClusterRoles, and OpenShift Groups - and publish RBACChanged when a grant
-// moves, so the per-token visibility and review caches are invalidated
+// RoleBindings and Roles in project namespaces, ClusterRoleBindings, the
+// ClusterRoles those bind, and OpenShift Groups - and publish RBACChanged when
+// a grant moves, so the per-token visibility and review caches are invalidated
 // promptly instead of on their TTL. dotvirt never reads them (rbacSignal).
 //
 // The VM and VMI stores keep a derived live view current as they move and
