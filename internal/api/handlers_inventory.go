@@ -91,7 +91,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 			}
 		}
 	}
-	platformAuthor, _ := s.canAuthorPlatform(ctx, id, userCluster)
+	platformAuthor, platformErr := s.canAuthorPlatform(ctx, id, userCluster)
 	// The platform tier has no project row; its Application rollup rides the frame
 	// on its own so the issues plane names what it failed to apply or keeps
 	// unhealthy. Every user sees its verdict (a user scoped to no project must not
@@ -117,7 +117,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	if platformAuthor {
 		propProjects = append(propProjects, s.platformProject())
 	}
-	inv.Proposals = s.proposalsFor(id, propProjects)
+	inv.Proposals = s.proposalsFor(id, propProjects, platformErr != nil)
 	// Watermark for the out-of-band network catalog: bumps when a port group moves
 	// (NetworkChanged) or a non-VM object's drift content moves (ObjectDriftGen), so
 	// the client re-pulls /api/networks - a merged segment, and its badge, show live.

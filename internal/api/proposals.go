@@ -46,11 +46,12 @@ type propTarget struct {
 // id opened - a pure cache read on the broadcast hot path. It registers id as a
 // refresh target; a project not cached yet nudges the refresher and is left out
 // of this frame (the refresher wakes the hub when its lane lands). Nil when no
-// project has a lane yet, so a cold frame ships without one.
-func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo) []model.Proposal {
+// project has a lane yet, so a cold frame ships without one. keepPlatform
+// carries a tracked platform lane through a build whose platform review failed.
+func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo, keepPlatform bool) []model.Proposal {
 	out := []model.Proposal{}
 	hit, cold := false, false
-	for _, p := range s.trackProposals(id, projects) {
+	for _, p := range s.trackProposals(id, projects, keepPlatform) {
 		rows, ok := s.proposals.Get(p.Name)
 		if !ok {
 			cold = true
@@ -73,15 +74,16 @@ func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo) 
 
 // trackProposals records id as a live refresh target and returns the projects
 // it watches. Called on every inventory build, so the watched set mirrors who
-// is actually looking. Builds include the synthetic platform tier
-// (InventoryForIdentity seeds it), but a build whose platform discovery
-// transiently failed would drop it; carry a previously tracked platform entry
-// forward so the lane survives the blip.
-func (s *Server) trackProposals(id auth.Identity, projects []project.ProjectInfo) []project.ProjectInfo {
+// is actually looking. Builds include the synthetic platform tier for its
+// authors (InventoryForIdentity seeds it). keepPlatform says the platform
+// review failed this build: a tracked platform entry then carries forward so
+// the lane survives the blip. Otherwise its absence is a verdict, and a
+// demoted author stops seeing platform PRs.
+func (s *Server) trackProposals(id auth.Identity, projects []project.ProjectInfo, keepPlatform bool) []project.ProjectInfo {
 	key := restfactory.TokenKey(id.Token)
 	s.propMu.Lock()
 	defer s.propMu.Unlock()
-	if prev, ok := s.propTargets[key]; ok && !hasProject(projects, platformProjectName) {
+	if prev, ok := s.propTargets[key]; ok && keepPlatform && !hasProject(projects, platformProjectName) {
 		if p, found := findProject(prev.projects, platformProjectName); found {
 			projects = append(projects, p)
 		}
