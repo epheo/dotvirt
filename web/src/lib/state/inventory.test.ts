@@ -43,7 +43,7 @@ describe('inventory.apply', () => {
 });
 
 describe('inventory authoring signal', () => {
-	it('offers staging only where the frame grants it', () => {
+	it('offers staging only where the frame grants it, failing closed on no verdict', () => {
 		inventory.apply({
 			projects: [
 				{
@@ -52,17 +52,22 @@ describe('inventory authoring signal', () => {
 					namespaces: [
 						{ namespace: 'web', vms: [], canAuthor: true },
 						{ namespace: 'db', vms: [], canAuthor: false },
-						// No verdict: the review failed this frame, so keep offering.
+						// No verdict: the review failed this frame. Unknown is not a yes.
 						{ namespace: 'tmp', vms: [] },
 					],
 				},
 			],
 		} as unknown as Inventory);
 		expect(inventory.repoNamespaces).toEqual(['web', 'db', 'tmp']);
-		expect(inventory.namespaces).toEqual(['web', 'tmp']);
-		expect(inventory.canAuthor('tmp')).toBe(true);
+		expect(inventory.namespaces).toEqual(['web']);
 		expect(inventory.canAuthor('web')).toBe(true);
 		expect(inventory.canAuthor('db')).toBe(false);
+		expect(inventory.canAuthor('tmp')).toBe(false);
+		// The two closed cases say different things.
+		expect(inventory.authoring('web')).toBe('yes');
+		expect(inventory.authoring('db')).toBe('no');
+		expect(inventory.authoring('tmp')).toBe('unknown');
+		expect(inventory.authoring('nowhere')).toBe('no');
 		expect(inventory.canRevert('p')).toBe(false);
 	});
 });

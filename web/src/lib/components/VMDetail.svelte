@@ -202,7 +202,7 @@
 	// adoptVM owns its toasts; the run only feeds the busy state.
 	const adopt = () => reconcileOp.run(() => adoptVM(vm));
 	const canAuthor = $derived(inventory.canAuthor(vm.namespace));
-	const block = $derived(editBlock(vm, canAuthor));
+	const block = $derived(editBlock(vm, inventory.authoring(vm.namespace)));
 
 	function resync() {
 		return reconcileOp.run(async () => {

@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import type { VM } from '#lib/api.js';
 	import { adoptNamespaces, dispatchVMAction, type VMAction } from '#lib/actions.js';
+	import { ACCESS_UNKNOWN, READ_ONLY } from '#lib/authoring.js';
 	import { repoError } from '#lib/gitops.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -60,7 +61,9 @@
 				? 'Project has no backing repo'
 				: authorNS.length
 					? ''
-					: 'Read-only: you may not edit VMs here'}
+					: ctx.namespaces.some((ns) => inventory.authoring(ns) === 'unknown')
+						? ACCESS_UNKNOWN
+						: READ_ONLY}
 			<div class="w-48 rounded border border-line bg-panel py-1 text-xs shadow-lg">
 				<div class="truncate px-3 py-1 text-[10px] tracking-wide text-ink-faint uppercase">
 					{ctx.namespace ?? ctx.project}

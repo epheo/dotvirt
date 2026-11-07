@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { Plus } from '@lucide/svelte';
+	import { ACCESS_UNKNOWN } from '#lib/authoring.js';
 	import { scopeFromPath } from '#lib/nav.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -42,7 +43,11 @@
 	onclick={() =>
 		(ui.modal = newFromHere(page.url.pathname + page.url.search, scopeNamespace, scopeNamespaces))}
 	disabled={!canCreate}
-	title={canCreate ? 'Create a VM, network, rule or project' : 'No project you may change yet'}
+	title={canCreate
+		? 'Create a VM, network, rule or project'
+		: inventory.accessUnknown
+			? ACCESS_UNKNOWN
+			: 'No project you may change yet'}
 >
 	<Plus size={14} /> New
 </Button>

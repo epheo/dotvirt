@@ -11,13 +11,16 @@ import {
 	type TaskEntry,
 	type VM,
 } from '#lib/api.js';
+import type { Authoring } from '#lib/authoring.js';
 import { friendlyError } from '#lib/format.js';
 import { deriveIssues, deriveSuggestions } from '#lib/issues.js';
 import { membership, networkProblems } from '#lib/netmap.js';
 import { prKey } from '#lib/review.js';
 import { share } from '#lib/share.js';
 
-const authorable = (n: { canAuthor?: boolean }) => n.canAuthor !== false;
+// Only the server's yes authors: an absent verdict (the review failed this
+// frame) fails closed, like the stage routes behind it.
+const authorable = (n: { canAuthor?: boolean }) => n.canAuthor === true;
 
 // The live cluster read layer: the WS inventory snapshot plus the once-per-
 // session networking inventory (GET /api/networks). Everything else the UI
@@ -134,14 +137,28 @@ class InventoryStore {
 		this.projects.filter((p) => p.repo).flatMap((p) => p.namespaces.map((n) => n.namespace)),
 	);
 	// Namespaces the caller may stage into: repo-backed and canAuthor, the gate
-	// every stage route enforces. An absent verdict (the review failed this
-	// frame) keeps offering; the route still refuses.
+	// every stage route enforces. Every author-gated action reads this set,
+	// through canAuthor or here.
 	readonly namespaces = $derived(
 		this.projects
 			.filter((p) => p.repo)
 			.flatMap((p) => p.namespaces.filter(authorable).map((n) => n.namespace)),
 	);
 	readonly #authorSet = $derived(new Set(this.namespaces));
+	// The verdict behind each namespace, for saying why an action is not offered.
+	readonly #authoring = $derived(
+		new Map<string, Authoring>(
+			this.projects.flatMap((p) =>
+				p.namespaces.map((n): [string, Authoring] => [
+					n.namespace,
+					!p.repo || n.canAuthor === false ? 'no' : n.canAuthor === true ? 'yes' : 'unknown',
+				]),
+			),
+		),
+	);
+	// Some namespace's review failed this frame, so what is offered may be
+	// short of what the caller can do.
+	readonly accessUnknown = $derived([...this.#authoring.values()].includes('unknown'));
 	// Projects with a backing repo - the ones with commit history to browse +
 	// revert from (the Changes panel's History section).
 	readonly repoProjects = $derived(this.projects.filter((p) => p.repo).map((p) => p.name));
@@ -235,6 +252,10 @@ class InventoryStore {
 
 	canAuthor(namespace: string): boolean {
 		return this.#authorSet.has(namespace);
+	}
+
+	authoring(namespace: string): Authoring {
+		return this.#authoring.get(namespace) ?? 'no';
 	}
 
 	// Revert rewrites any file of the project, so the backend wants authoring

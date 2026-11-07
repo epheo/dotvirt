@@ -37,7 +37,7 @@
 	// manifest's own, and Edit changes them by picking another flavor.
 	const sizing = $derived(vmSizing(vm, inventory.options));
 	// An Edit that staging would refuse is not offered; the reason shows once.
-	const block = $derived(editBlock(vm, inventory.canAuthor(vm.namespace)));
+	const block = $derived(editBlock(vm, inventory.authoring(vm.namespace)));
 	const sized = (v: number | string | undefined) =>
 		v === undefined ? '' : sizing.from ? `${v} (from ${sizing.from})` : String(v);
 </script>

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { ArrowRight, Check, GitBranch, Minus, Pencil, Plus, Undo2 } from '@lucide/svelte';
 	import { api, vmKey, type Change, type DraftItem, type VM } from '#lib/api.js';
+	import { authorBlock } from '#lib/authoring.js';
 	import { friendlyError, quantity, quantityBytes } from '#lib/format.js';
 	import { memoryHint } from '#lib/headroom.js';
 	import {
@@ -290,7 +291,7 @@
 					{@const drift = driftChanges?.filter((c) => owns(r, c)) ?? []}
 					{@const block = r.inline
 						? inlineBlock(vm, r.inline.field, stagedItem) ||
-							(canAuthor ? '' : 'Read-only: you may not edit VMs here')
+							authorBlock(inventory.authoring(vm.namespace))
 						: ''}
 					<tr class="align-top {editing === r.key ? 'bg-select-soft' : ''}">
 						<td class="py-2 pr-3 pl-card text-ink-soft">{r.label}</td>
