@@ -221,6 +221,18 @@ func (c *Client) do(method, path string, body, out any) error {
 	return err
 }
 
+// StatusError is a forge answer outside 2xx, so a caller can tell a missing
+// repo (404) from an outage.
+type StatusError struct {
+	Method, Path string
+	Status       int
+	Message      string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("forge %s %s: %s: %s", e.Method, e.Path, statusText(e.Status), e.Message)
+}
+
 // doRead is do returning the response headers.
 func (c *Client) doRead(method, path string, body, out any) (http.Header, error) {
 	status, header, data, err := c.f.exchange(method, path, c.f.auth(), body)
@@ -228,7 +240,7 @@ func (c *Client) doRead(method, path string, body, out any) (http.Header, error)
 		return nil, err
 	}
 	if !ok2xx(status) {
-		return nil, fmt.Errorf("forge %s %s: %s: %s", method, path, statusText(status), strings.TrimSpace(string(data)))
+		return nil, &StatusError{Method: method, Path: path, Status: status, Message: strings.TrimSpace(string(data))}
 	}
 	if out != nil && len(data) > 0 {
 		return header, json.Unmarshal(data, out)

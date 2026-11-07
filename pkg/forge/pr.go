@@ -26,6 +26,9 @@ type PR struct {
 	Title     string    `json:"title"`
 	Body      string    `json:"body"`
 	Head      struct {
+		// Label is the head branch's name even after the branch is deleted,
+		// when Ref turns into the PR's own refs/pull/<n>/head.
+		Label  string `json:"label"`
 		Ref    string `json:"ref"`
 		Sha    string `json:"sha"`
 		RepoID int64  `json:"repo_id"`
@@ -53,38 +56,77 @@ func (c *Client) CreatePR(title, body, head, base string) (PR, error) {
 // prPageSize is the page a PR scan asks for.
 const prPageSize = 50
 
-// prPageLimit bounds one scan; a PR past it reads as absent.
+// prPageLimit bounds a scan of open PRs; a PR past it reads as absent.
 const prPageLimit = 20
 
+// closedPageLimit bounds FindPR's scan of closed PRs: with the head filter
+// honored, the branch's own closed PRs come first, and without it an old
+// closed PR only decides reopen against create.
+const closedPageLimit = 2
+
 // FindPR returns head's pull request into base: the open one, else the most
-// recently updated closed one (merged or not), else ok=false. Matching is
-// client-side: Forgejo compares its head filter to the bare branch name, so
-// the "owner:branch" form matches nothing, and older versions ignore the
-// filters altogether. A fork's PR reusing the branch name never matches.
+// recently updated closed one (merged or not), else ok=false. The forge's
+// own base/head lookup answers in one call but picks any one PR of the pair,
+// so only an open answer ends the search; the list scan follows. Its head
+// and base filters are hints - Forgejo compares head to the bare branch
+// name, and versions ignore one or both - so matching is client-side. A
+// fork's PR reusing the branch name never matches.
 func (c *Client) FindPR(head, base string) (pr PR, ok bool, err error) {
+	if direct, err := c.pairPR(head, base); err == nil && direct.State == "open" && direct.Base.Ref == base && direct.from(head) {
+		return direct, true, nil
+	}
 	match := func(p PR) bool {
-		if p.Head.Ref == head && p.Head.RepoID == p.Base.RepoID {
+		if p.from(head) {
 			pr, ok = p, true
 		}
 		return ok
 	}
-	if err = c.eachPR("open", base, match); err != nil || ok {
+	if err = c.eachPR("open", base, head, prPageLimit, match); err != nil || ok {
 		return pr, ok, err
 	}
-	err = c.eachPR("closed", base, match)
+	err = c.eachPR("closed", base, head, closedPageLimit, match)
 	return pr, ok, err
+}
+
+// pairPR is the forge's base/head lookup (Gitea 1.18 and later).
+func (c *Client) pairPR(head, base string) (PR, error) {
+	segs := strings.Split(head, "/")
+	for i, s := range segs {
+		segs[i] = url.PathEscape(s)
+	}
+	var pr PR
+	err := c.do("GET", c.repoPath("/pulls/"+url.PathEscape(base)+"/"+strings.Join(segs, "/")), nil, &pr)
+	return pr, err
+}
+
+// from reports whether p's head is branch in the base repo. A merged PR
+// whose branch was deleted reports its own refs/pull/<n>/head as the ref and
+// keeps the branch name only in the label.
+func (p PR) from(branch string) bool {
+	if p.Head.RepoID != p.Base.RepoID {
+		return false
+	}
+	if p.Head.Ref == branch {
+		return true
+	}
+	return p.Merged && p.Head.Label == branch && p.Head.Ref == fmt.Sprintf("refs/pull/%d/head", p.Number)
 }
 
 // eachPR visits the PRs into base in state, most recently updated first,
 // page by page until visit returns true, the forge's X-Total-Count is
-// reached or a page comes back empty. A short page alone ends nothing: the
-// forge caps a page at its own MAX_RESPONSE_ITEMS.
-func (c *Client) eachPR(state, base string, visit func(PR) bool) error {
+// reached, a page comes back empty or pages run out. A short page alone ends
+// nothing: the forge caps a page at its own MAX_RESPONSE_ITEMS. head, when
+// set, narrows the list on forges that honor it.
+func (c *Client) eachPR(state, base, head string, pages int, visit func(PR) bool) error {
 	seen := 0
-	for page := 1; page <= prPageLimit; page++ {
-		q := fmt.Sprintf("/pulls?state=%s&sort=recentupdate&base=%s&limit=%d&page=%d", state, url.QueryEscape(base), prPageSize, page)
+	for page := 1; page <= pages; page++ {
+		q := url.Values{"state": {state}, "sort": {"recentupdate"}, "base": {base},
+			"limit": {strconv.Itoa(prPageSize)}, "page": {strconv.Itoa(page)}}
+		if head != "" {
+			q.Set("head", head)
+		}
 		var prs []PR
-		header, err := c.doRead("GET", c.repoPath(q), nil, &prs)
+		header, err := c.doRead("GET", c.repoPath("/pulls?"+q.Encode()), nil, &prs)
 		if err != nil {
 			return err
 		}
@@ -114,7 +156,7 @@ func (c *Client) PR(number int) (PR, error) {
 // OpenPRs lists every open PR into base.
 func (c *Client) OpenPRs(base string) ([]PR, error) {
 	var out []PR
-	err := c.eachPR("open", base, func(pr PR) bool {
+	err := c.eachPR("open", base, "", prPageLimit, func(pr PR) bool {
 		out = append(out, pr)
 		return false
 	})
