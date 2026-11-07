@@ -32,8 +32,10 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"log"
 	"maps"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -135,6 +137,7 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 
 	namespace := func() { bus.Publish(eventbus.NamespaceChanged) }
 	rbac := func() { bus.Publish(eventbus.RBACChanged) }
+	refs := newRoleRefs()
 	s.specs = []reflectorSpec{
 		{s.live.store(s.vms, s.vmsReady.Mark), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch()},
 		{s.live.store(s.vmis, s.vmisReady.Mark), &kubevirtcorev1.VirtualMachineInstance{}, sa.VMIListWatch()},
@@ -143,7 +146,7 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 		{reflect.NewStore(s.nss, namespace, s.nssReady.Mark), &corev1.Namespace{}, sa.NamespaceListWatch(projectLabel)},
 		// Every operand role grants RoleBindings, so their signal watch starts with
 		// the snapshot; the other RBAC kinds wait for their grant (signals).
-		{newRBACSignal(rbac, roleBindingDigest(s.inProject)), &rbacv1.RoleBinding{}, sa.RoleBindingListWatch()},
+		{newRBACSignal(rbac, refs, roleBindingDigest(s.inProject)), &rbacv1.RoleBinding{}, sa.RoleBindingListWatch()},
 	}
 	s.healthy = make([]atomic.Bool, len(s.specs))
 	sources := map[schema.GroupVersionResource]*cache.ListWatch{
@@ -152,7 +155,7 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 		gvrClusterRoles:        sa.ClusterRoleListWatch(),
 		gvrGroups:              sa.DynamicListWatch(gvrGroups),
 	}
-	s.signals = s.signalWatches(func(gvr schema.GroupVersionResource) *cache.ListWatch { return sources[gvr] }, rbac)
+	s.signals = s.signalWatches(func(gvr schema.GroupVersionResource) *cache.ListWatch { return sources[gvr] }, rbac, refs)
 	return s
 }
 
@@ -173,15 +176,18 @@ type signalWatch struct {
 	store    cache.Store
 }
 
-func (s *State) signalWatches(lw func(schema.GroupVersionResource) *cache.ListWatch, onChange func()) []signalWatch {
-	watch := func(gvr schema.GroupVersionResource, expected any, digest func(any) (uint64, bool)) signalWatch {
-		return signalWatch{gvr, expected, lw(gvr), newRBACSignal(onChange, digest)}
+// signalWatches wires the gated RBAC watches; refs is shared with the
+// RoleBinding sink, so a ClusterRole signals while any relevant binding of
+// either kind binds it.
+func (s *State) signalWatches(lw func(schema.GroupVersionResource) *cache.ListWatch, onChange func(), refs *roleRefs) []signalWatch {
+	watch := func(gvr schema.GroupVersionResource, expected any, binds *roleRefs, digest func(any) (grant, bool)) signalWatch {
+		return signalWatch{gvr, expected, lw(gvr), newRBACSignal(onChange, binds, digest)}
 	}
 	return []signalWatch{
-		watch(gvrRoles, &rbacv1.Role{}, roleDigest(s.inProject)),
-		watch(gvrClusterRoleBindings, &rbacv1.ClusterRoleBinding{}, clusterRoleBindingDigest),
-		watch(gvrClusterRoles, &rbacv1.ClusterRole{}, clusterRoleDigest),
-		watch(gvrGroups, &unstructured.Unstructured{}, groupDigest),
+		watch(gvrRoles, &rbacv1.Role{}, nil, roleDigest(s.inProject)),
+		watch(gvrClusterRoleBindings, &rbacv1.ClusterRoleBinding{}, refs, clusterRoleBindingDigest),
+		watch(gvrClusterRoles, &rbacv1.ClusterRole{}, nil, clusterRoleDigest(refs)),
+		watch(gvrGroups, &unstructured.Unstructured{}, nil, groupDigest),
 	}
 }
 
@@ -218,10 +224,18 @@ func (s *State) runSignals(ctx context.Context, has func(schema.GroupVersionReso
 // listable admits a signal watch once the SA may list its kind (an operator
 // release may not grant it yet) and the cluster serves it (Groups exist only
 // on OpenShift). The review goes first: a cluster lacking the grant answers it
-// without a discovery read. A refusal re-probes on the discovery pace.
+// without a discovery read. A refusal re-probes on the discovery pace, one
+// review a minute per kind; a missing grant is logged once, since until it
+// lands that kind's changes reach cached authorization only through its TTL.
 func listable(ctx context.Context, sa *cluster.Client) func(schema.GroupVersionResource) bool {
+	var warned sync.Map
 	return func(gvr schema.GroupVersionResource) bool {
 		ok, err := sa.Can(ctx, "list", gvr.Group, gvr.Resource, "")
+		if err == nil && !ok {
+			if _, dup := warned.LoadOrStore(gvr, true); !dup {
+				log.Printf("clusterstate: may not list %s; its changes reach cached authorization only through the TTL", gvr.GroupResource())
+			}
+		}
 		return err == nil && ok && sa.HasAPIResource(gvr)
 	}
 }

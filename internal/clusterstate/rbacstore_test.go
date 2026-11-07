@@ -84,8 +84,9 @@ func signalStores(t *testing.T) (map[string]cache.Store, *int) {
 	s := withProject(t)
 	n := new(int)
 	count := func() { *n++ }
-	stores := map[string]cache.Store{"rolebindings": newRBACSignal(count, roleBindingDigest(s.inProject))}
-	for _, w := range s.signalWatches(func(schema.GroupVersionResource) *cache.ListWatch { return nil }, count) {
+	refs := newRoleRefs()
+	stores := map[string]cache.Store{"rolebindings": newRBACSignal(count, refs, roleBindingDigest(s.inProject))}
+	for _, w := range s.signalWatches(func(schema.GroupVersionResource) *cache.ListWatch { return nil }, count, refs) {
 		stores[w.gvr.Resource] = w.store
 	}
 	return stores, n
@@ -98,6 +99,10 @@ func TestRBACSignalPublishesGrantMoves(t *testing.T) {
 		t.Run(resource, func(t *testing.T) {
 			stores, n := signalStores(t)
 			store := stores[resource]
+			if resource == "clusterroles" {
+				_ = stores["clusterrolebindings"].Add(clusterRoleBinding("readers", "vm-reader", user("carol")))
+				*n = 0
+			}
 			step := func(what string, want int) {
 				t.Helper()
 				if *n != want {
@@ -167,6 +172,37 @@ func TestRBACSignalFiltersNoise(t *testing.T) {
 	}
 }
 
+// A ClusterRole signals only while a relevant binding of either kind binds
+// it: the roles an operator writes for its own ServiceAccount stay silent.
+func TestClusterRoleSignalsOnlyWhileBound(t *testing.T) {
+	stores, n := signalStores(t)
+	roles := stores["clusterroles"]
+	role := func(verbs ...string) *rbacv1.ClusterRole {
+		return &rbacv1.ClusterRole{ObjectMeta: meta("", "edit"), Rules: vmRules(verbs...)}
+	}
+	_ = roles.Add(role("get"))
+	_ = stores["clusterrolebindings"].Add(clusterRoleBinding("op", "edit", serviceAccount("openshift-cnv", "op")))
+	_ = roles.Update(role("list"))
+	if *n != 0 {
+		t.Fatalf("an unbound role published %d times, want 0", *n)
+	}
+
+	_ = stores["rolebindings"].Add(roleBinding("proj", "editors", "edit", user("alice")))
+	*n = 0
+	_ = roles.Update(role("get", "list"))
+	if *n != 1 {
+		t.Fatalf("a role a tenant binding binds published %d times, want 1", *n)
+	}
+
+	_ = stores["rolebindings"].Delete(roleBinding("proj", "editors", "edit", user("alice")))
+	*n = 0
+	_ = roles.Update(role("watch")) // ends its relevance: one last publish
+	_ = roles.Update(role("get"))
+	if *n != 1 {
+		t.Fatalf("an unbound role published %d times after its last binding went, want 1", *n)
+	}
+}
+
 // fakeSource is one kind's list and watch: the list counts calls, the watch is
 // a fake the test pushes events through.
 type fakeSource struct {
@@ -213,11 +249,13 @@ func runSignalsWith(t *testing.T, served func(schema.GroupVersionResource) bool)
 	t.Cleanup(cancel)
 	bus := eventbus.New()
 	s := withProject(t)
+	refs := newRoleRefs()
+	refs.hold("vm-reader") // as a relevant binding of it would
 	sources := map[string]*fakeSource{}
 	s.signals = s.signalWatches(func(gvr schema.GroupVersionResource) *cache.ListWatch {
 		sources[gvr.Resource] = &fakeSource{}
 		return sources[gvr.Resource].lw()
-	}, func() { bus.Publish(eventbus.RBACChanged) })
+	}, func() { bus.Publish(eventbus.RBACChanged) }, refs)
 	s.runSignals(ctx, served)
 	return bus, sources
 }
