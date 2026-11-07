@@ -223,6 +223,9 @@ func dotvirtArgs(dv *dotvirtv1alpha1.Dotvirt) []string {
 		// updates; the git poll is only the missed-event backstop, so keep it slow
 		// to spare the forge - the managed Forgejo is a single SQLite-backed pod.
 		"-git-poll-interval=5m",
+		// The keys the tenant AppProjects are derived from (TenantAppProject).
+		"-project-label=" + ProjectLabel,
+		"-repo-annotation=" + RepoAnnotation,
 	}
 	if dv.Spec.Forge.InsecureTLS {
 		// A self-signed forge Route: skip TLS verification for forge API calls +

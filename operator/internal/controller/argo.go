@@ -22,7 +22,8 @@ import (
 // reconcileArgo applies the cluster-scoped + ArgoCD-namespace resources: the RBAC
 // BINDINGS wiring the static operand ClusterRoles (config/rbac/operand_roles.yaml,
 // OLM/kustomize-owned) to the dotvirt SA / Argo controller / platform-admins, plus
-// the AppProject tier (+ the static platform Application). Not owner-referenceable
+// the AppProjects (one per tenant project, the platform tier) and the
+// ApplicationSet (+ the static platform Application). Not owner-referenceable
 // by a namespaced CR, so they carry managed-by labels and the finalizer cleans
 // them up.
 func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (*ctrl.Result, error) {
@@ -41,14 +42,22 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 			return nil, err
 		}
 	}
+	platformNS := r.platformNamespaces(dv, argoNS)
+	tenants, err := r.tenantAppProjects(ctx, dv, argoNS, platformNS)
+	if err != nil {
+		return nil, err
+	}
+	appset := install.ApplicationSet(dv, argoNS, platformNS, tenants.unconfined)
 	objs := []client.Object{
 		install.DotvirtClusterRoleBinding(dv),
 		install.ArgocdApplyClusterRoleBinding(dv, argoNS, argoSA),
 		install.PlatformNetworkAdminBinding(dv),
-		install.TenantsAppProject(dv, argoNS, platformRepo, dv.Namespace),
-		install.AppsetPluginConfigMap(dv, argoNS, dv.Namespace),
-		install.ApplicationSet(dv, argoNS),
 	}
+	// The tenant AppProjects precede the ApplicationSet whose template names
+	// them, and apply stops at the first failure: the template never switches
+	// an Application to a project that does not exist yet.
+	objs = append(objs, tenants.objs...)
+	objs = append(objs, install.AppsetPluginConfigMap(dv, argoNS, dv.Namespace), appset)
 	// The platform tier (its AppProject + the static Application) only applies when a
 	// platform repo is configured.
 	if platformRepo != "" {
@@ -76,7 +85,11 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionArgoReady, "appset-token mirror and forge TLS trust")
 		return nil, nil
 	}
-	r.setCondition(dv, dotvirtv1alpha1.ConditionArgoReady, metav1.ConditionTrue, "Ready", "argo resources applied")
+	// The apply answered with the live object, status included.
+	if msg := applicationSetError(appset); msg != "" {
+		tenants.degraded = append(tenants.degraded, msg)
+	}
+	r.setArgoReady(dv, tenants)
 	return nil, nil
 }
 

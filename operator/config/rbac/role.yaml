@@ -24,6 +24,13 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - namespaces
+  verbs:
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - persistentvolumeclaims
   verbs:
   - create
@@ -98,7 +105,6 @@ rules:
   resources:
   - applications
   - applicationsets
-  - appprojects
   verbs:
   - create
   - list
@@ -113,13 +119,13 @@ rules:
   - delete
 - apiGroups:
   - argoproj.io
-  resourceNames:
-  - dotvirt-platform
-  - dotvirt-tenants
   resources:
   - appprojects
   verbs:
+  - create
   - delete
+  - list
+  - patch
 - apiGroups:
   - dotvirt.io
   resources:
