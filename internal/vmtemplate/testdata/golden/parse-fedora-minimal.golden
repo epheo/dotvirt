@@ -18,5 +18,6 @@
   ],
   "instancetype": "u1.small",
   "preference": "fedora",
+  "image": "openshift-virtualization-os-images/fedora",
   "yaml": ""
 }
