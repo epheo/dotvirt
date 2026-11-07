@@ -61,7 +61,7 @@ type Repo struct {
 	memos memoTable
 }
 
-// Open clones url into memory (bare, all branches) and returns a Repo. username +
+// Open clones url's branches into memory (bare) and returns a Repo. username +
 // tokenFn provide https basic auth, resolved on each fetch (pass a nil/empty
 // source for public/local).
 func Open(url, username string, tokenFn forge.TokenSource) (*Repo, error) {
@@ -84,20 +84,37 @@ func (r *Repo) branchHash(branch string) string {
 	return ref.Hash().String()
 }
 
+// headRefs maps the remote's branches onto local branch refs, the only refs
+// reads resolve. A mirror clone would also pull the forge's refs/pull/*, one
+// per PR ever opened, and never move them again.
+var headRefs = []config.RefSpec{"+refs/heads/*:refs/heads/*"}
+
 func (r *Repo) clone() error {
 	ctx, cancel := context.WithTimeout(context.Background(), cloneTimeout)
 	defer cancel()
-	repo, err := git.CloneContext(ctx, memory.NewStorage(), nil, &git.CloneOptions{
-		URL:          r.url,
-		Auth:         r.auth(),
-		Mirror:       true, // fetch all refs; we read branches directly from refs
-		SingleBranch: false,
-	})
-	if err != nil {
+	repo, err := git.Init(memory.NewStorage(), nil)
+	if err == nil {
+		_, err = repo.CreateRemote(&config.RemoteConfig{Name: git.DefaultRemoteName, URLs: []string{r.url}, Fetch: headRefs})
+	}
+	if err == nil {
+		err = r.fetchHeads(ctx, repo)
+	}
+	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
 		return fmt.Errorf("clone %s: %w", r.url, err)
 	}
 	r.repo = repo
 	return nil
+}
+
+// fetchHeads brings repo's branches level with the remote's, dropping the
+// ones deleted there so a merged PR's branch does not outlive it.
+func (r *Repo) fetchHeads(ctx context.Context, repo *git.Repository) error {
+	return repo.FetchContext(ctx, &git.FetchOptions{
+		Auth:     r.auth(),
+		RefSpecs: headRefs,
+		Force:    true,
+		Prune:    true,
+	})
 }
 
 // Network bounds: a stalled remote (common over a flaky or self-signed Route)
@@ -130,11 +147,7 @@ func (r *Repo) refresh() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 	defer cancel()
-	err = next.FetchContext(ctx, &git.FetchOptions{
-		Auth:     r.auth(),
-		RefSpecs: []config.RefSpec{"+refs/heads/*:refs/heads/*"},
-		Force:    true,
-	})
+	err = r.fetchHeads(ctx, next)
 	if errors.Is(err, git.NoErrAlreadyUpToDate) {
 		return nil
 	}
