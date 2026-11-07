@@ -82,3 +82,13 @@ test('prune risk needs an explicit yes before the PR opens', async ({ page }) =>
 	await tray.getByRole('link', { name: 'Open in Changes' }).click();
 	await expect(page.locator('main').getByText(/Merging will prune 2 objects/)).toBeVisible();
 });
+
+test('the Changes pane holds its propose to the same deletion yes', async ({ page }) => {
+	await page.goto('/changes?project=team-web&item=vm:web-prod/web-1');
+	const main = page.locator('main');
+	await expect(main.getByText(/deletes 2 objects from the cluster/)).toBeVisible();
+	const propose = main.getByRole('button', { name: 'Propose pull request' });
+	await expect(propose).toBeDisabled();
+	await main.getByLabel(/Delete these 2 when this merges/).check();
+	await expect(propose).toBeEnabled();
+});
