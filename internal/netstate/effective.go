@@ -5,6 +5,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/netgen"
 )
 
 // Effective computes the policy chain governing one workload - the same pure
@@ -20,8 +21,16 @@ import (
 func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, podScoped bool) model.EffectivePolicy {
 	eff := model.EffectivePolicy{Namespace: ns}
 
-	for _, b := range bind(s.sortedANPs(), nsLabels, podLabels, podScoped) {
-		eff.EastWest = append(eff.EastWest, b.binding(""))
+	anps := bind(s.sortedANPs(), nsLabels, podLabels, podScoped)
+	for i, b := range anps {
+		var note string
+		switch p := b.pol.view.Priority; {
+		case p > netgen.MaxANPPriority:
+			note = unenforcedReason(p) + "."
+		case i > 0 && anps[i-1].pol.view.Priority == p, i+1 < len(anps) && anps[i+1].pol.view.Priority == p:
+			note = "Shared priority: " + reasonEqualPriority + "."
+		}
+		eff.EastWest = append(eff.EastWest, b.binding(note))
 	}
 	// A definite selection default-denies the directions the policy declares
 	// - the fact the panel must surface, since it flips the namespace from

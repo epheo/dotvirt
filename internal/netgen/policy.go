@@ -85,6 +85,11 @@ func NetworkPolicyManifest(s NetworkPolicySpec) (path string, content []byte, er
 	return s.Namespace + "/networkpolicies/" + s.Name + ".yaml", out, nil
 }
 
+// MaxANPPriority is the lowest-precedence ANP priority OVN-Kubernetes programs.
+// The API admits up to 1000, but OVN-K refuses anything above with an
+// ANPWithUnsupportedPriority event and never enforces it.
+const MaxANPPriority = 99
+
 // AdminNetworkPolicySpec describes the cluster-wide admin DFW tier -
 // AdminNetworkPolicy (priority-ordered, actions Allow/Deny/Pass) or, when Baseline,
 // BaselineAdminNetworkPolicy (the cluster default: a singleton named "default", no
@@ -94,7 +99,7 @@ func NetworkPolicyManifest(s NetworkPolicySpec) (path string, content []byte, er
 type AdminNetworkPolicySpec struct {
 	Name     string            `json:"name"`
 	Baseline bool              `json:"baseline,omitempty"` // render a BaselineAdminNetworkPolicy
-	Priority int               `json:"priority,omitempty"` // 0..1000, lower = higher precedence (ANP only)
+	Priority int               `json:"priority,omitempty"` // 0..MaxANPPriority, lower = higher precedence (ANP only)
 	Subject  map[string]string `json:"subject,omitempty"`  // namespaceSelector matchLabels; empty = all namespaces
 	Ingress  []AdminPolicyRule `json:"ingress,omitempty"`
 	Egress   []AdminPolicyRule `json:"egress,omitempty"`
@@ -119,8 +124,8 @@ func AdminNetworkPolicyManifest(s AdminNetworkPolicySpec) (path string, content 
 		if err := validate.RequireDNS1123("name", name); err != nil {
 			return "", nil, err
 		}
-		if s.Priority < 0 || s.Priority > 1000 {
-			return "", nil, fmt.Errorf("priority must be 0..1000")
+		if s.Priority < 0 || s.Priority > MaxANPPriority {
+			return "", nil, fmt.Errorf("priority must be 0..%d, the range OVN-Kubernetes enforces", MaxANPPriority)
 		}
 	}
 	subjectSel := map[string]any{}
