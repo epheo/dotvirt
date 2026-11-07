@@ -156,7 +156,7 @@ type Config struct {
 // RoleBindings + namespaces; a token's visibility can ALSO change via a
 // ClusterRoleBinding/ClusterRole, which the version does NOT observe. The TTL is the
 // backstop that bounds staleness for those un-watched RBAC sources, so it stays short
-// - long enough to spare the periodic SelfSubjectRulesReview on quiet tokens, short
+// - long enough to spare the periodic visibility probe on quiet tokens, short
 // enough that a cluster-level revocation can't linger. An expired entry is only
 // re-evaluated by a rebuild, which RunTTLBackstop causes for open streams, so a
 // revocation reaches an open frame within ttlBackstopBound.
@@ -190,7 +190,7 @@ type Server struct {
 	resolver  *project.Resolver
 	repos     *git.RepoSet
 	visible   *ttlcache.Cache[visibleSet]       // per-token visible-namespace set, RBAC-version-stamped
-	ssar      *ttlcache.Cache[ssarVerdict]      // per-(token, resource) create-SSAR, RBAC-version-stamped
+	ssar      *ttlcache.Cache[ssarVerdict]      // per-(token, question) SSAR verdict, RBAC-version-stamped
 	proposals *ttlcache.Cache[[]model.Proposal] // per-project open-PR set; written by the refresher, read on broadcast
 	options   *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
 	storage   *ttlcache.Cache[[]model.StorageClassInfo]
@@ -473,19 +473,48 @@ func fail(w http.ResponseWriter, err error) {
 func invalid(err error) error { return fmt.Errorf("%w: %v", model.ErrInvalid, err) }
 
 // unavailable logs err and returns a 503 kind that names only the failure: dial
-// errors from the cluster can embed endpoints and tokens.
+// errors from the cluster can embed endpoints and tokens. It drops err's
+// apiserver status, which makes it the wrapper for every error from dotvirt's
+// own identity.
 func unavailable(err error) error {
 	log.Printf("api: cluster access unavailable: %v", err)
 	return fmt.Errorf("%w: cluster access", model.ErrUnavailable)
 }
 
+// errSessionRejected is the one error that answers 401, so the UI signs out. It
+// is produced only by reviewFailed, after a fresh TokenReview rejected the
+// token.
+var errSessionRejected = fmt.Errorf("%w: session expired", auth.ErrRejected)
+
+// reviewFailed answers an authorization review that failed under the caller's
+// token. A 401 there is checked against a fresh TokenReview: only a rejected
+// token ends the session; a token that still validates, or a review that
+// cannot run, is a 503. Either way the answer is a fixed line and the detail
+// is only logged: a visibility probe's error can name other tenants'
+// namespaces.
+func (s *Server) reviewFailed(ctx context.Context, id auth.Identity, err error) error {
+	if apierrors.IsUnauthorized(err) && s.auth != nil {
+		if errors.Is(s.auth.Recheck(ctx, id.Token), auth.ErrRejected) {
+			log.Printf("api: %s: session rejected: %v", id.Username, err)
+			return errSessionRejected
+		}
+	}
+	return unavailable(err)
+}
+
 // statusFor maps an error to an HTTP status by the kind it wraps: a model.Err*
 // kind, or an apiserver status from an operation run under the caller's token
-// (Forbidden is the caller's RBAC verdict; Conflict and BadRequest both mean the
-// object's state refuses the act, e.g. pausing a stopped VM). Anything
-// unclassified is a 500.
+// (Forbidden is the caller's RBAC verdict; Conflict and BadRequest both mean
+// the object's state refuses the act, e.g. pausing a stopped VM; throttling,
+// timeouts and a bare Unauthorized are transient). Only errSessionRejected is
+// a 401: an apiserver 401 alone can be a subresource's or an authenticator
+// outage, and must not sign a valid session out. Anything unclassified is a
+// 500. An apiserver status from dotvirt's own identity must never reach here
+// unwrapped (see unavailable).
 func statusFor(err error) int {
 	switch {
+	case errors.Is(err, auth.ErrRejected):
+		return http.StatusUnauthorized
 	case errors.Is(err, model.ErrInvalid):
 		return http.StatusBadRequest
 	case errors.Is(err, model.ErrNotFound), apierrors.IsNotFound(err):
@@ -494,7 +523,8 @@ func statusFor(err error) int {
 		return http.StatusForbidden
 	case errors.Is(err, model.ErrConflict), apierrors.IsConflict(err), apierrors.IsBadRequest(err):
 		return http.StatusConflict
-	case errors.Is(err, model.ErrUnavailable):
+	case errors.Is(err, model.ErrUnavailable), apierrors.IsUnauthorized(err), apierrors.IsTooManyRequests(err),
+		apierrors.IsTimeout(err), apierrors.IsServiceUnavailable(err):
 		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError

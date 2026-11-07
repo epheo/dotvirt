@@ -98,12 +98,7 @@ func TestDRSEnableDisable(t *testing.T) {
 
 func TestTemplatesList(t *testing.T) {
 	fc := newFakeCluster(t)
-	fc.ssrr = func(token, ns string) []authzv1.ResourceRule {
-		if token == tenantToken && ns == "team-a-dev" {
-			return []authzv1.ResourceRule{{Verbs: []string{"list"}, APIGroups: []string{"kubevirt.io"}, Resources: []string{"virtualmachines"}}}
-		}
-		return nil
-	}
+	fc.readsVMs = tenantReadsTeamA
 	d := &planeDraft{templates: map[string][]model.Template{
 		"platform": {{Name: "rhel9", Library: "platform"}},
 		"team-a":   {{Name: "web", Library: "team-a"}},
@@ -216,12 +211,7 @@ func TestUpdateTemplate(t *testing.T) {
 
 func TestSaveTemplate(t *testing.T) {
 	fc := newFakeCluster(t)
-	fc.ssrr = func(token, ns string) []authzv1.ResourceRule {
-		if token == tenantToken && ns == "team-a-dev" {
-			return []authzv1.ResourceRule{{Verbs: []string{"list"}, APIGroups: []string{"kubevirt.io"}, Resources: []string{"virtualmachines"}}}
-		}
-		return nil
-	}
+	fc.readsVMs = tenantReadsTeamA
 	// The tenant edits VMs in its namespace: saving into its own library needs
 	// that, saving into the shared one needs the template create it lacks.
 	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
@@ -258,12 +248,7 @@ func TestSaveTemplate(t *testing.T) {
 
 func TestCreateNamespace(t *testing.T) {
 	fc := newFakeCluster(t)
-	fc.ssrr = func(token, ns string) []authzv1.ResourceRule {
-		if token == tenantToken && ns == "team-a-dev" {
-			return []authzv1.ResourceRule{{Verbs: []string{"list"}, APIGroups: []string{"kubevirt.io"}, Resources: []string{"virtualmachines"}}}
-		}
-		return nil
-	}
+	fc.readsVMs = tenantReadsTeamA
 	d := &planeDraft{}
 	s := fc.server(d, Config{PlatformRepo: platformRepo})
 

@@ -29,7 +29,7 @@ const saTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 const clientTTL = 5 * time.Minute
 
 // client-go defaults to 5 QPS / burst 10 per client. A user without cluster-wide VM
-// read is probed with one SelfSubjectRulesReview per project namespace, so a 100+
+// read is probed with one SelfSubjectAccessReview per project namespace, so a 100+
 // namespace cluster would queue for ~20s at the default; the burst absorbs one full
 // probe sweep and APF still guards the apiserver.
 const (

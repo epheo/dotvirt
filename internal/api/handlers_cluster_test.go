@@ -348,16 +348,26 @@ func TestStorageClasses(t *testing.T) {
 	}
 }
 
+// An SA-side read failure is dotvirt's, never the caller's: a 503 naming no
+// internals, and above all never a 401, which would sign the caller out.
 func TestStorageClassesFailure(t *testing.T) {
-	fc := newFakeCluster(t)
-	fc.on(http.MethodGet, "/apis/storage.k8s.io/v1/storageclasses", func(w http.ResponseWriter, r *http.Request) {
-		writeStatus(w, http.StatusInternalServerError, metav1.StatusReasonInternalError)
-	})
-	s := fc.server(nil, Config{})
-	rec := do(s, adminToken, http.MethodGet, "/api/storage/classes", "")
-	wantStatus(t, rec, http.StatusInternalServerError)
-	if strings.Contains(rec.Body.String(), "storageclasses") {
-		t.Errorf("internal detail leaked: %q", rec.Body.String())
+	for _, c := range []struct {
+		code   int
+		reason metav1.StatusReason
+	}{
+		{http.StatusInternalServerError, metav1.StatusReasonInternalError},
+		{http.StatusUnauthorized, metav1.StatusReasonUnauthorized},
+	} {
+		fc := newFakeCluster(t)
+		fc.on(http.MethodGet, "/apis/storage.k8s.io/v1/storageclasses", func(w http.ResponseWriter, r *http.Request) {
+			writeStatus(w, c.code, c.reason)
+		})
+		s := fc.server(nil, Config{})
+		rec := do(s, adminToken, http.MethodGet, "/api/storage/classes", "")
+		wantStatus(t, rec, http.StatusServiceUnavailable)
+		if strings.Contains(rec.Body.String(), "storageclasses") {
+			t.Errorf("internal detail leaked: %q", rec.Body.String())
+		}
 	}
 }
 
