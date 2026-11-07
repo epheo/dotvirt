@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -31,7 +32,7 @@ func TestReadsDoNotWaitOnFetch(t *testing.T) {
 	}))
 	defer srv.Close()
 	defer close(release)
-	cfg, err := r.repo.Config()
+	cfg, err := r.repo.Load().Config()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +73,7 @@ func TestMirrorTracksBranchesOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	refs, err := r.repo.References()
+	refs, err := r.repo.Load().References()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,5 +96,51 @@ func TestMirrorTracksBranchesOnly(t *testing.T) {
 	}
 	if r.branchHash("main") == "" {
 		t.Error("refresh lost main")
+	}
+}
+
+// A long read (a deep history walk, an index rebuild) must not hold up other
+// reads of the same mirror, nor the refresh that swaps a new one in.
+func TestLongReadDoesNotBlockReads(t *testing.T) {
+	r, err := Open(seedRepo(t), "", nil)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	inside, release := make(chan struct{}), make(chan struct{})
+	walked := make(chan error, 1)
+	go func() {
+		walked <- r.WalkYAML("main", func(string) bool { return true }, func(string, []byte) error {
+			close(inside)
+			<-release
+			return nil
+		})
+	}()
+	<-inside
+	defer func() {
+		close(release)
+		if err := <-walked; err != nil {
+			t.Errorf("WalkYAML: %v", err)
+		}
+	}()
+
+	done := make(chan error, 1)
+	go func() {
+		if r.branchHash("main") == "" {
+			done <- errors.New("main did not resolve")
+			return
+		}
+		if _, err := r.FileOnBranch("main", "web.yaml"); err != nil {
+			done <- err
+			return
+		}
+		done <- r.refresh()
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a read or refresh blocked behind a long read")
 	}
 }
