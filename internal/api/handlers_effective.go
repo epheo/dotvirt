@@ -23,13 +23,13 @@ func (s *Server) handleVMPolicy(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	lbls, live, found := s.state.WorkloadLabels(ns, name)
+	wl, found := s.state.Workload(ns, name)
 	if !found {
 		fail(w, fmt.Errorf("%w: vm %s/%s", model.ErrNotFound, ns, name))
 		return
 	}
-	eff := s.effectivePolicy(ns, lbls, true)
-	eff.VM, eff.Labels, eff.LabelsLive = name, lbls, live
+	eff := s.effectivePolicy(ns, wl.Labels, true)
+	eff.VM, eff.Labels, eff.LabelsLive = name, wl.Labels, wl.Live
 	s.redactEffective(r.Context(), sc, &eff)
 	writeJSON(w, eff)
 }

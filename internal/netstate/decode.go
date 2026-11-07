@@ -6,6 +6,7 @@ package netstate
 // and Trace all read through here, so no reader can walk a shape differently.
 
 import (
+	"cmp"
 	"slices"
 	"sort"
 	"strings"
@@ -200,9 +201,22 @@ func decodeExtRoute(u *unstructured.Unstructured) *policy {
 
 type decoder func(*unstructured.Unstructured) *policy
 
-// decoded runs one store's objects through a kind's decoder.
+// byKey orders objects by (namespace, name). Stores iterate in hash order; a
+// walk, plane or merge that followed it would answer differently for one
+// unchanged snapshot.
+func byKey(objs []*unstructured.Unstructured) []*unstructured.Unstructured {
+	slices.SortFunc(objs, func(a, b *unstructured.Unstructured) int {
+		return cmp.Or(cmp.Compare(a.GetNamespace(), b.GetNamespace()), cmp.Compare(a.GetName(), b.GetName()))
+	})
+	return objs
+}
+
+func sortedList(idx cache.Indexer) []*unstructured.Unstructured { return byKey(reflect.List(idx)) }
+
+// decoded runs one store's objects through a kind's decoder, in sortedList
+// order.
 func decoded(idx cache.Indexer, dec decoder) []*policy {
-	objs := reflect.List(idx)
+	objs := sortedList(idx)
 	out := make([]*policy, 0, len(objs))
 	for _, u := range objs {
 		out = append(out, dec(u))
@@ -210,16 +224,18 @@ func decoded(idx cache.Indexer, dec decoder) []*policy {
 	return out
 }
 
-// inNamespace decodes a namespaced store's objects for ns, by name, so a
-// tier's walk order does not follow the store's hash order.
+// inNamespace decodes a namespaced store's objects for ns, by name.
 func inNamespace(idx cache.Indexer, ns string, dec decoder) []*policy {
-	var out []*policy
+	var objs []*unstructured.Unstructured
 	for _, u := range reflect.List(idx) {
 		if u.GetNamespace() == ns {
-			out = append(out, dec(u))
+			objs = append(objs, u)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].view.Name < out[j].view.Name })
+	out := make([]*policy, 0, len(objs))
+	for _, u := range byKey(objs) {
+		out = append(out, dec(u))
+	}
 	return out
 }
 
@@ -235,6 +251,25 @@ func (s *Snapshot) sortedANPs() []*policy {
 		return a.Name < b.Name
 	})
 	return ps
+}
+
+// enforcedANPs splits sortedANPs at the priority OVN-K stops programming.
+func (s *Snapshot) enforcedANPs() (enforced, unenforced []*policy) {
+	ps := s.sortedANPs()
+	i := sort.Search(len(ps), func(i int) bool { return ps[i].view.Priority > netgen.MaxANPPriority })
+	return ps[:i], ps[i:]
+}
+
+// ANPAtPriority names the AdminNetworkPolicy other than name that holds
+// priority, if any. OVN-K applies equal-priority policies in an undefined
+// order, so a second one there makes both unpredictable.
+func (s *Snapshot) ANPAtPriority(priority int, name string) (string, bool) {
+	for _, p := range s.sortedANPs() {
+		if p.view.Priority == priority && p.view.Name != name {
+			return p.view.Name, true
+		}
+	}
+	return "", false
 }
 
 func (s *Snapshot) baselines() []*policy { return decoded(s.banp, decodeBANP) }

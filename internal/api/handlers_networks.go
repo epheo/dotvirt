@@ -96,10 +96,13 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 
 // handleCreateAdminNetworkPolicy stages a cluster-wide admin DFW policy
 // (AdminNetworkPolicy or the baseline default) - always platform-tier and admin-only,
-// gated on the caller's authority to create the matching kind.
+// gated on the caller's authority to create the matching kind. A priority a live
+// policy already holds is refused: OVN-K would order the two arbitrarily.
 func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.Request) {
 	raw, p, ok := readBody[struct {
-		Baseline bool `json:"baseline"`
+		Name     string `json:"name"`
+		Baseline bool   `json:"baseline"`
+		Priority int    `json:"priority"`
 	}](w, r, false)
 	if !ok {
 		return
@@ -111,6 +114,13 @@ func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.R
 	sc, ok := s.platformScope(w, r, ref)
 	if !ok {
 		return
+	}
+	if !p.Baseline && s.netstate != nil {
+		if other, taken := s.netstate.ANPAtPriority(p.Priority, p.Name); taken {
+			fail(w, fmt.Errorf("%w: priority %d is held by admin network policy %q; pick a free one, equal priorities apply in an undefined order",
+				model.ErrConflict, p.Priority, other))
+			return
+		}
 	}
 	view, err := s.draft.StageCreate(sc.id, sc.proj, draft.ResourceAdminNetworkPolicy, raw)
 	respond(w, view, err)

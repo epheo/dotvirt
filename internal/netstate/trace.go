@@ -14,11 +14,11 @@ type TraceWorkload struct {
 	Namespace  string
 	Name       string
 	NSLabels   map[string]string
-	PodLabels  map[string]string
-	IPs        []string // live VMI addresses; nil for a stopped VM
-	PodNet     bool     // attaches the namespace's primary network
-	DefaultNet string   // NAD ref substituted as the default network, "namespace/name"
-	Nets       []string // secondary multus refs, "namespace/name"
+	PodLabels  map[string]string // the virt-launcher pod's
+	IPs        []string          // the primary NIC's live addresses; nil for a stopped VM
+	PodNet     bool              // attaches the namespace's primary network
+	DefaultNet string            // NAD ref substituted as the default network, "namespace/name"
+	Nets       []string          // secondary multus refs, "namespace/name"
 }
 
 // Trace simulates one flow through the policy planes: the same pure in-memory
@@ -30,7 +30,8 @@ type TraceWorkload struct {
 // destination, each through admin (by precedence, Pass delegating down), then
 // the selecting NetworkPolicies (selection alone isolates: no allowing rule
 // means default-deny), then baseline. An external destination runs the egress
-// side plus the gateway firewall, and reports the SNAT/route planes.
+// side plus the gateway firewall, and reports the SNAT/route planes; a VLAN
+// NIC is a path none of them filter.
 //
 // Deny is only ever certain. A rule that cannot be resolved here (named port,
 // a stopped VM's unknown addresses, a DNS rule) stays visible as a
@@ -42,10 +43,10 @@ func (s *Snapshot) Trace(src TraceWorkload, dst *TraceWorkload, dstIP, protocol 
 	}
 
 	if dst != nil {
-		reachable, steps := s.connectivity(src, *dst)
+		decided, steps := s.connectivity(src, *dst)
 		res.Steps = append(res.Steps, steps...)
-		if !reachable {
-			res.Verdict = "Unreachable"
+		if decided != "" {
+			res.Verdict = decided
 			return res
 		}
 		eg := s.directionWalk("Egress", src, peerTarget{w: dst}, protocol, port)
@@ -55,12 +56,24 @@ func (s *Snapshot) Trace(src TraceWorkload, dst *TraceWorkload, dstIP, protocol 
 		return res
 	}
 
-	res.Steps = append(res.Steps, s.externalConnectivity(src, dstIP)...)
+	steps, decided, vlan := s.externalConnectivity(src, dstIP)
+	res.Steps = append(res.Steps, steps...)
+	if decided != "" {
+		res.Verdict = decided
+		return res
+	}
+	// Both must pass: OVN-K runs the admin, project and baseline egress rules
+	// as from-lport ACLs in the source switch's ingress pipeline and the
+	// EgressFirewall as to-lport ACLs in its egress pipeline, each stage with
+	// its own tier walk, so an admin Allow never skips the gateway.
 	eg := s.directionWalk("Egress", src, peerTarget{ip: dstIP}, protocol, port)
 	gw := s.gatewayWalk(src.Namespace, dstIP, protocol, port)
 	res.Steps = append(append(res.Steps, eg.steps...), gw.steps...)
 	res.Steps = append(res.Steps, s.egressPlaneSteps(src)...)
 	res.Verdict = verdict(eg, gw)
+	if vlan && res.Verdict == "Deny" {
+		res.Verdict = "Conditional" // the guest may route the flow out its VLAN NIC
+	}
 	return res
 }
 
@@ -132,6 +145,36 @@ func (w *walk) result(outcome string) walkResult {
 	return walkResult{steps: w.steps, outcome: outcome}
 }
 
+// candidate is a rule that may match the flow, judged against both the
+// policy's subject and the rule itself.
+type candidate struct {
+	pol *policy
+	r   rule
+	m   matched
+}
+
+// candidates returns the bound policy's rules that may match the flow, in
+// order, through the first certain match: nothing after it can decide. An
+// unresolved subject leaves every rule unresolved.
+func (b bound) candidates(dir string, peer peerTarget, protocol string, port int) []candidate {
+	sel := matched{m: b.m}
+	if sel.m == matchCond {
+		sel.reason = reasonSubject
+	}
+	var out []candidate
+	for _, r := range b.pol.rules(dir) {
+		m := allOf(sel, r.match(peer, protocol, port))
+		if m.m == matchNo {
+			continue
+		}
+		out = append(out, candidate{b.pol, r, m})
+		if m.m == matchYes {
+			break
+		}
+	}
+	return out
+}
+
 // directionWalk runs one side of the flow (egress rules on the source,
 // ingress rules on the destination) through the east-west tiers.
 func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTarget, protocol string, port int) walkResult {
@@ -143,36 +186,67 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 	// the tiers below (no decision, or a Pass delegation).
 	adminTier := func(policies []*policy, stage string) *walkResult {
 		baseline := stage == "baseline"
-		for _, b := range bind(policies, subject.NSLabels, subject.PodLabels, true) {
-			sm := matched{m: b.m}
-			if sm.m == matchCond {
-				sm.reason = reasonSubject
+		bs := bind(policies, subject.NSLabels, subject.PodLabels, true)
+		for len(bs) > 0 {
+			n := 1
+			for !baseline && n < len(bs) && bs[n].pol.view.Priority == bs[0].pol.view.Priority {
+				n++
 			}
-			for _, r := range b.pol.rules(dir) {
-				m := allOf(sm, r.match(peer, protocol, port))
-				if m.m == matchNo {
+			var cands []candidate
+			deciders := 0
+			for _, b := range bs[:n] {
+				if c := b.candidates(dir, peer, protocol, port); len(c) > 0 {
+					cands = append(cands, c...)
+					deciders++
+				}
+			}
+			bs = bs[n:]
+			if deciders > 1 {
+				// OVN-K maps equal-priority policies onto one ACL priority
+				// range, where OVN's pick between matching ACLs is undefined:
+				// none of their rules decides with certainty.
+				for _, c := range cands {
+					reason := c.m.reason
+					if c.m.m == matchYes {
+						reason = reasonEqualPriority
+					}
+					rv := c.r.view(dir, nil)
+					w.maybe(&c.pol.view, &rv, stage, c.r.action, reason)
+				}
+				continue
+			}
+			for _, c := range cands {
+				rv := c.r.view(dir, nil)
+				if c.m.m == matchCond {
+					w.maybe(&c.pol.view, &rv, stage, c.r.action, c.m.reason)
 					continue
 				}
-				rv := r.view(dir, nil)
-				if m.m == matchCond {
-					w.maybe(&b.pol.view, &rv, stage, r.action, m.reason)
-					continue
-				}
-				if !baseline && r.action == "Pass" {
-					w.addStep(&b.pol.view, &rv, stage, r.action, "Delegates this flow to the project tier.", false, true)
+				if !baseline && c.r.action == "Pass" {
+					w.addStep(&c.pol.view, &rv, stage, c.r.action, "Delegates this flow to the project tier.", false, true)
 					return nil
 				}
-				w.addStep(&b.pol.view, &rv, stage, r.action, "", false, true)
-				res := w.decide(r.action)
+				w.addStep(&c.pol.view, &rv, stage, c.r.action, "", false, true)
+				res := w.decide(c.r.action)
 				return &res
 			}
 		}
 		return nil
 	}
 
+	// OVN-K never programs a priority past MaxANPPriority, yet an earlier
+	// in-range version keeps its ACLs: such a policy applies at an unknown
+	// precedence or not at all, so its rules only ever weigh as maybes.
+	anps, unenforced := s.enforcedANPs()
+	for _, b := range bind(unenforced, subject.NSLabels, subject.PodLabels, true) {
+		for _, c := range b.candidates(dir, peer, protocol, port) {
+			rv := c.r.view(dir, nil)
+			w.maybe(&c.pol.view, &rv, "admin", c.r.action, unenforcedReason(c.pol.view.Priority))
+		}
+	}
+
 	// Admin tier: every ANP rule in (priority, rule) order. The first match
 	// decides - Allow/Deny are final for the flow, Pass hands it down.
-	if res := adminTier(s.sortedANPs(), "admin"); res != nil {
+	if res := adminTier(anps, "admin"); res != nil {
 		return *res
 	}
 
@@ -204,18 +278,14 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 	}
 	if len(selecting) > 0 {
 		for _, b := range selecting {
-			for _, r := range b.pol.rules(dir) {
-				m := r.match(peer, protocol, port)
-				if m.m == matchNo {
+			for _, c := range b.candidates(dir, peer, protocol, port) {
+				rv := c.r.view(dir, nil)
+				if c.m.m == matchCond {
+					w.maybe(&b.pol.view, &rv, "dfw", c.r.action, c.m.reason)
 					continue
 				}
-				rv := r.view(dir, nil)
-				if m.m == matchCond {
-					w.maybe(&b.pol.view, &rv, "dfw", r.action, m.reason)
-					continue
-				}
-				w.addStep(&b.pol.view, &rv, "dfw", r.action, "", false, true)
-				return w.decide(r.action)
+				w.addStep(&b.pol.view, &rv, "dfw", c.r.action, "", false, true)
+				return w.decide(c.r.action)
 			}
 		}
 		note := fmt.Sprintf("Selected by %d project %s for %s; no rule allows this flow.",
@@ -295,15 +365,22 @@ func planeStep(b bound, stage, action, note string) model.TraceStep {
 		Conditional: b.m == matchCond, Note: note}
 }
 
-// connectivity decides whether an east-west path exists at all: both ends
-// must sit on the same primary network - isolated primaries drop the flow
-// before any policy runs. A shared secondary segment is surfaced as an
-// unfiltered bypass either way.
-func (s *Snapshot) connectivity(src, dst TraceWorkload) (bool, []model.TraceStep) {
-	var steps []model.TraceStep
+// connectivity decides whether an east-west path exists: both ends must sit
+// on the same primary network, or isolated primaries drop the flow before any
+// policy runs. A shared secondary segment is an unfiltered layer-2 bypass;
+// without a shared primary it is the only path, so the answer is Conditional,
+// never a certain Unreachable. decided is "" when the policy walk decides.
+func (s *Snapshot) connectivity(src, dst TraceWorkload) (decided string, steps []model.TraceStep) {
 	srcKey, srcName := s.primaryOf(src)
 	dstKey, dstName := s.primaryOf(dst)
 	reachable := srcKey != "" && srcKey == dstKey
+	shared := s.sharedSegments(src.Nets, dst.Nets)
+	if !reachable {
+		decided = "Unreachable"
+		if len(shared) > 0 {
+			decided = "Conditional"
+		}
+	}
 	switch {
 	case reachable:
 		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Reachable",
@@ -313,30 +390,53 @@ func (s *Snapshot) connectivity(src, dst TraceWorkload) (bool, []model.TraceStep
 		if srcKey != "" {
 			who = dst.Name
 		}
-		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: true,
+		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: len(shared) == 0,
 			Note: who + " has no primary network attachment."})
 	default:
-		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: true,
+		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: len(shared) == 0,
 			Note: fmt.Sprintf("Isolated primary networks: %s is on %s, %s on %s.", src.Name, srcName, dst.Name, dstName)})
 	}
-	for _, name := range s.sharedSegments(src.Nets, dst.Nets) {
-		steps = append(steps, model.TraceStep{Stage: "segment", Action: "Bypass",
+	for _, name := range shared {
+		steps = append(steps, model.TraceStep{Stage: "segment", Action: "Bypass", Conditional: !reachable,
 			Note: "Both attach segment " + name + " - an unfiltered layer-2 path; east-west policy does not apply on secondary segments."})
 	}
-	return reachable, steps
+	return decided, steps
 }
 
-// externalConnectivity frames the egress path, flagging VLAN NICs whose
-// traffic leaves through the fabric around every control the trace evaluates.
-func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string) []model.TraceStep {
-	steps := []model.TraceStep{{Stage: "connectivity", Action: "Reachable",
-		Note: "Cluster egress path to " + dstIP + ", evaluated against the source's egress controls."}}
-	for _, ref := range src.Nets {
+// externalConnectivity frames the egress path. The cluster controls filter
+// only the primary NIC (the pod network, or a default multus binding that is
+// not localnet); a VLAN NIC reaches the fabric around all of them. decided is
+// the verdict when no primary NIC exists, so no cluster control sees the flow;
+// vlan reports a VLAN NIC, which leaves a cluster Deny inconclusive.
+func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string) (steps []model.TraceStep, decided string, vlan bool) {
+	cluster := src.PodNet || (src.DefaultNet != "" && !s.isLocalnet(src.DefaultNet))
+	refs := src.Nets
+	if src.DefaultNet != "" && !cluster {
+		refs = append([]string{src.DefaultNet}, src.Nets...)
+	}
+	var segments []model.TraceStep
+	for _, ref := range refs {
 		if s.isLocalnet(ref) {
 			_, name := s.segmentKey(ref)
-			steps = append(steps, model.TraceStep{Stage: "segment", Action: "Bypass",
-				Note: "NIC on VLAN segment " + name + " - traffic leaving through it bypasses these controls."})
+			segments = append(segments, model.TraceStep{Stage: "segment", Action: "Bypass", Conditional: true,
+				Note: "NIC on VLAN segment " + name + " - the guest can route this flow out of it, around every control evaluated here."})
 		}
 	}
-	return steps
+	vlan = len(segments) > 0
+	switch {
+	case cluster:
+		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Reachable",
+			Note: "Cluster egress path to " + dstIP + ", evaluated against the source's egress controls."})
+	case len(refs) > 0:
+		// A secondary segment has no cluster egress, but a VLAN, or a router
+		// on the segment, may still carry the flow.
+		decided = "Conditional"
+		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Bypass", Conditional: true,
+			Note: src.Name + " has no primary network: traffic to " + dstIP + " can leave only through a secondary segment, which no cluster control filters. The network behind it decides."})
+	default:
+		decided = "Unreachable"
+		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: true,
+			Note: src.Name + " has no network attachment."})
+	}
+	return append(steps, segments...), decided, vlan
 }
