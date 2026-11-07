@@ -67,8 +67,8 @@ const (
 // Those entries are cached for visibleTTL only. An expired entry is
 // re-evaluated by the next frame build, so while a stream is open this
 // publishes TTLBackstop every ttlBackstopEvery to cause one, which bounds such a
-// change at ttlBackstopBound (45s); a frame that comes out identical is not
-// resent. TTLBackstop is in no cache's version stamp, so nothing is invalidated
+// change at ttlBackstopBound (7.5 minutes); a frame that comes out identical is
+// not resent. TTLBackstop is in no cache's version stamp, so nothing is invalidated
 // before its TTL.
 func (s *Server) RunTTLBackstop(ctx context.Context) {
 	t := time.NewTicker(ttlBackstopEvery)

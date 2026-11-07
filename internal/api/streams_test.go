@@ -17,8 +17,8 @@ import (
 // tick that finds it expired must come within ttlBackstopBound; ticking at
 // visibleTTL itself would let it wait a whole second TTL.
 func TestTTLBackstopBound(t *testing.T) {
-	if ttlBackstopBound != 45*time.Second {
-		t.Fatalf("documented bound is 45s, constant says %s", ttlBackstopBound)
+	if ttlBackstopBound != 7*time.Minute+30*time.Second {
+		t.Fatalf("documented bound is 7.5 minutes, constant says %s", ttlBackstopBound)
 	}
 	for cached := time.Duration(0); cached < ttlBackstopEvery; cached += 100 * time.Millisecond {
 		tick := time.Duration(0)
@@ -31,7 +31,7 @@ func TestTTLBackstopBound(t *testing.T) {
 	}
 }
 
-// Visibility and SSAR verdicts also move with cluster-scoped RBAC no watch
+// Visibility and SSAR verdicts also move with authorization no watch
 // observes; they are cached for visibleTTL only, and an expired entry is
 // re-evaluated only by a rebuild. Frames rebuild only on bus events, so the
 // backstop must publish while a stream is open, never when none is, and never
