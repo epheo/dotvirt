@@ -22,6 +22,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage"
@@ -156,6 +157,9 @@ func (r *Repo) refresh() error {
 	if err != nil {
 		return fmt.Errorf("fetch: %w", err)
 	}
+	if err := collect(fork); err != nil {
+		return fmt.Errorf("fetch: %w", err)
+	}
 	r.repo.Store(next)
 	return nil
 }
@@ -177,6 +181,62 @@ func forkStorage(s storage.Storer) (*memory.Storage, error) {
 	maps.Copy(dst.ReferenceStorage, src.ReferenceStorage)
 	dst.ShallowStorage = slices.Clone(src.ShallowStorage)
 	return dst, nil
+}
+
+// collect drops the objects no ref reaches. forkStorage carries every object
+// forward, so a deleted or force-pushed branch's would otherwise live as long
+// as the mirror. s must not be published yet: this deletes from its maps.
+func collect(s *memory.Storage) error {
+	live := map[plumbing.Hash]bool{}
+	var todo []plumbing.Hash
+	for _, ref := range s.ReferenceStorage {
+		if ref.Type() == plumbing.HashReference {
+			todo = append(todo, ref.Hash())
+		}
+	}
+	for len(todo) > 0 {
+		h := todo[len(todo)-1]
+		todo = todo[:len(todo)-1]
+		obj, ok := s.Objects[h]
+		if live[h] || !ok {
+			continue
+		}
+		live[h] = true
+		switch obj.Type() {
+		case plumbing.CommitObject:
+			c, err := object.DecodeCommit(s, obj)
+			if err != nil {
+				return err
+			}
+			todo = append(append(todo, c.TreeHash), c.ParentHashes...)
+		case plumbing.TreeObject:
+			t, err := object.DecodeTree(s, obj)
+			if err != nil {
+				return err
+			}
+			for _, e := range t.Entries {
+				if e.Mode != filemode.Submodule {
+					todo = append(todo, e.Hash)
+				}
+			}
+		case plumbing.TagObject:
+			t, err := object.DecodeTag(s, obj)
+			if err != nil {
+				return err
+			}
+			todo = append(todo, t.Target)
+		}
+	}
+	for h := range s.Objects {
+		if !live[h] {
+			delete(s.Objects, h)
+			delete(s.Commits, h)
+			delete(s.Trees, h)
+			delete(s.Blobs, h)
+			delete(s.Tags, h)
+		}
+	}
+	return nil
 }
 
 // headsSignature refreshes from the remote and returns a stable string
