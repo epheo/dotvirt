@@ -22,6 +22,7 @@ ENV GOTOOLCHAIN=auto CGO_ENABLED=0 GOWORK=off GOFLAGS="-buildvcs=false -mod=read
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
+COPY pkg/forge/go.mod pkg/forge/
 RUN go mod download
 COPY . .
 RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /dotvirt ./cmd/dotvirt

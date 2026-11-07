@@ -11,8 +11,10 @@ clone/push token.
 The operator lives in the dotvirt monorepo (shared `pkg/forge`, lockstep versioning,
 atomic binary + render PRs, one CI) but is its **own** Go module so controller-runtime's
 large `k8s.io/*` dependency tree doesn't constrain the app binary's KubeVirt/Argo
-client versions. The root `go.work` ties them for tooling; the `replace` in `go.mod`
-lets the operator also build standalone (its container image).
+client versions. `pkg/forge` is a stdlib-only module of its own, so the operator
+shares it without requiring the app module. The root `go.work` ties all three for
+tooling; the `replace` in `go.mod` lets the operator also build standalone (its
+container image).
 
 ## Platform-agnostic, OpenShift as a profile
 

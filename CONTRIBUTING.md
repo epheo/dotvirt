@@ -1,15 +1,16 @@
 # Contributing to dotvirt
 
 Thanks for helping. dotvirt is a monorepo: the app (root Go module + the SvelteKit
-SPA under `web/`) and the installer **operator** (its own Go module under `operator/`,
-tied by `go.work`). See [`operator/README.md`](operator/README.md) for the operator's
+SPA under `web/`), the installer **operator** (its own Go module under `operator/`),
+and the forge client both share (a stdlib-only module under `pkg/forge/`), tied by
+`go.work`. See [`operator/README.md`](operator/README.md) for the operator's
 architecture.
 
 ## Develop & test
 
 ```sh
 # App
-go test ./...                       # backend
+go test ./... ./pkg/forge/...      # backend (./... stops at nested modules)
 ( cd web && npm ci && npm run check && npm run build )   # SPA
 
 # Operator (from operator/)

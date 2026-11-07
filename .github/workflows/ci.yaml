@@ -20,9 +20,10 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - run: go vet ./...
+      # ./... stops at nested modules, so pkg/forge is named.
+      - run: go vet ./... ./pkg/forge/...
         env: { GOFLAGS: -buildvcs=false }
-      - run: go test ./...
+      - run: go test ./... ./pkg/forge/...
         env: { GOFLAGS: -buildvcs=false }
       # The operator is a SEPARATE module (operator/go.mod), so the root `go test ./...`
       # above doesn't reach it — vet + test it explicitly.
@@ -41,7 +42,7 @@ jobs:
         with:
           go-version-file: go.mod
       - run: grep -v '^#' hack/versions.env >> "$GITHUB_ENV"
-      # Both modules share .golangci.yml (resolved by walking up from operator/).
+      # Every module shares .golangci.yml (resolved by walking up).
       - uses: golangci/golangci-lint-action@v9
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
@@ -50,6 +51,11 @@ jobs:
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: operator
+        env: { GOFLAGS: -buildvcs=false }
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: pkg/forge
         env: { GOFLAGS: -buildvcs=false }
 
   web:
