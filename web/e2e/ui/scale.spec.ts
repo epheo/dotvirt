@@ -17,15 +17,28 @@ test('every section renders the full platform', async ({ page }) => {
 
 	await page.goto('/compute');
 	await expect(aside.getByText('team-batch', { exact: true })).toBeVisible();
+	// The rail folds 47 of 52 projects and never lists a whole namespace.
+	await expect(aside.getByPlaceholder('Filter 52 projects')).toBeVisible();
+	await expect(aside.getByRole('button', { name: '47 more projects' })).toBeVisible();
+	await page.goto('/vm/web-prod/web-300');
+	await expect(aside.locator('a[href="/vm/web-prod/web-300"]')).toBeVisible();
+	await expect(aside.getByRole('link', { name: '401 more VMs' })).toBeVisible();
+	await page.goto('/compute');
 	await expect(main.getByText('Top consumers').first()).toBeVisible();
 
+	await page.goto('/compute/team-web/web-prod');
+	await expect(main.getByRole('heading', { level: 1, name: 'web-prod' })).toBeVisible();
+	await expect(main.getByText('412 VMs in team-web')).toBeVisible();
+
 	await page.goto('/compute?tab=vms');
+	await expect(main.getByText('2,846 VMs in 52 projects')).toBeVisible();
 	await expect(main.getByRole('navigation', { name: 'Pages' })).toContainText(
 		'Showing 1-50 of 2,846',
 	);
 
 	await page.goto('/hosts');
 	await expect(main.locator('tbody tr', { hasText: 'host-17' })).toContainText('Maintenance');
+	await expect(aside.getByRole('link', { name: /host-17\s*maintenance\s*0/ })).toBeVisible();
 
 	await page.goto('/networking');
 	await expect(main.getByText('web-net').first()).toBeVisible();

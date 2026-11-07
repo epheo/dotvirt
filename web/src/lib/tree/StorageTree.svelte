@@ -1,14 +1,15 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import TreeRow from '#lib/components/TreeRow.svelte';
 	import { hrefForScope, scopeFromPath, storageHref, storageTab } from '#lib/nav.js';
+	import { TOP_GROUPS, fold, matches } from '#lib/rail.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { classTag, num, projectsBySize } from '#lib/storage.js';
+	import RailFilter from './RailFilter.svelte';
 
 	// The Storage rail: the project scope every tab reads (?project=), biggest
 	// projects first with the rest folded, then the classes as drill-ins.
-	const TOP = 5;
-
 	storage.ensure();
 
 	const scope = $derived(scopeFromPath(page.url.pathname));
@@ -17,18 +18,9 @@
 	const projects = $derived(projectsBySize(inventory.projects));
 
 	let expanded = $state(false);
-	let filter = $state('');
-	const shown = $derived.by(() => {
-		if (!expanded) {
-			const top = projects.slice(0, TOP);
-			// The scoped project stays in view even when it is not a big one.
-			const cur = projects.find((p) => p.name === current);
-			return cur && !top.includes(cur) ? [...top, cur] : top;
-		}
-		const f = filter.trim().toLowerCase();
-		return f ? projects.filter((p) => p.name.toLowerCase().includes(f)) : projects;
-	});
-	const hidden = $derived(Math.max(0, projects.length - TOP));
+	let query = $state('');
+	const folded = $derived(fold(projects, TOP_GROUPS, (p) => p.name === current));
+	const shown = $derived(expanded ? projects.filter((p) => matches(query, p.name)) : folded.shown);
 
 	// A project keeps the tab and the disk filters in view; the page and the
 	// open disk belong to the old scope.
@@ -56,66 +48,60 @@
 			.sort((a, b) => a.rank - b.rank),
 	);
 
-	const ROW = 'flex items-center justify-between gap-2 rounded px-2 py-1.5';
+	const HEAD = 'px-2 pb-1 text-[11px] font-bold tracking-[.06em] text-side-dim uppercase';
 </script>
 
-{#snippet row(href: string, label: string, count: string, active: boolean)}
-	<a
-		{href}
-		aria-current={active ? 'page' : undefined}
-		class="{ROW} {active
-			? 'bg-side-hover text-side-ink'
-			: 'text-side-dim hover:bg-side-hover hover:text-side-ink'}"
-	>
-		<span class="truncate">{label}</span>
-		{#if count}<span class="shrink-0 text-xs text-side-dim">{count}</span>{/if}
-	</a>
-{/snippet}
-
-<nav aria-label="Storage scope" class="flex flex-col gap-0.5 px-2.5 py-3 text-[13px] select-none">
-	<div class="px-2 py-1 text-[11px] font-bold tracking-[.06em] text-side-dim uppercase">
-		Projects
-	</div>
-	{@render row(projectHref(null), 'All projects', num(projects.length), onRoot && !current)}
+<nav
+	aria-label="Storage scope"
+	class="flex flex-col gap-0.5 px-2.5 pt-3 pb-3 text-[13px] select-none"
+>
+	<div class={HEAD}>Projects</div>
+	<TreeRow href={projectHref(null)} active={onRoot && !current}>
+		<span class="truncate">All projects</span>
+		{#snippet trailing()}<span class="text-xs text-side-dim">{num(projects.length)}</span>{/snippet}
+	</TreeRow>
 	{#if expanded && projects.length > 20}
-		<input
-			bind:value={filter}
+		<RailFilter
+			bind:value={query}
+			label="Filter projects"
 			placeholder="Filter {projects.length} projects"
-			aria-label="Filter projects"
-			class="mx-1 my-1 h-7 rounded border border-side-line bg-side-hover px-2 text-xs text-side-ink placeholder:text-side-dim"
 		/>
 	{/if}
 	{#each shown as p (p.name)}
-		{@render row(
-			projectHref(p.name),
-			p.name,
-			`${num(p.vms)} ${p.vms === 1 ? 'VM' : 'VMs'}`,
-			p.name === current,
-		)}
+		<TreeRow href={projectHref(p.name)} active={p.name === current}>
+			<span class="truncate">{p.name}</span>
+			{#snippet trailing()}
+				<span class="text-xs text-side-dim">{num(p.vms)} {p.vms === 1 ? 'VM' : 'VMs'}</span>
+			{/snippet}
+		</TreeRow>
 	{/each}
-	{#if hidden > 0}
+	{#if expanded && query.trim() && shown.length === 0}
+		<div class="px-2 py-1.5 text-xs text-side-dim">No project matches.</div>
+	{/if}
+	{#if folded.folded.length > 0}
 		<button
-			class="{ROW} text-left text-side-dim hover:bg-side-hover hover:text-side-ink"
+			class="flex w-full items-center rounded py-1.5 pr-2 pl-2 text-left text-side-dim hover:bg-side-hover/60 hover:text-side-ink"
 			aria-expanded={expanded}
 			onclick={() => {
 				expanded = !expanded;
-				filter = '';
+				query = '';
 			}}
 		>
-			{expanded ? 'Fewer projects' : `${num(hidden)} more ${hidden === 1 ? 'project' : 'projects'}`}
+			{expanded
+				? 'Fewer projects'
+				: `${num(folded.folded.length)} more ${folded.folded.length === 1 ? 'project' : 'projects'}`}
 		</button>
 	{/if}
 
-	<div class="px-2 pt-3 pb-1 text-[11px] font-bold tracking-[.06em] text-side-dim uppercase">
-		Classes
-	</div>
+	<div class="{HEAD} pt-3">Classes</div>
 	{#each classes as c (c.name)}
-		{@render row(
-			hrefForScope({ kind: 'storage', storageClass: c.name }),
-			c.name,
-			c.tag,
-			scope.kind === 'storage' && scope.storageClass === c.name,
-		)}
+		<TreeRow
+			href={hrefForScope({ kind: 'storage', storageClass: c.name })}
+			active={scope.kind === 'storage' && scope.storageClass === c.name}
+		>
+			<span class="truncate">{c.name}</span>
+			{#snippet trailing()}<span class="text-xs text-side-dim">{c.tag}</span>{/snippet}
+		</TreeRow>
 	{:else}
 		<p class="px-2 py-1 text-xs text-side-dim">No storage classes visible.</p>
 	{/each}

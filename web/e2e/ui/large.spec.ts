@@ -10,11 +10,39 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('the tree and the all-VMs table render a 300-VM fleet', async ({ page }) => {
+	// The tree shows the biggest projects and folds the rest; a filter or the
+	// fold row reaches any of them.
 	const aside = page.locator('aside');
+	await expect(aside.getByText('All VMs')).toBeVisible();
+	await expect(aside.getByText('312')).toBeVisible();
 	await expect(aside.getByText('tenant-0', { exact: true })).toBeVisible();
+	await expect(aside.getByText('tenant-11', { exact: true })).toHaveCount(0);
+	await aside.getByRole('button', { name: '7 more projects' }).click();
 	await expect(aside.getByText('tenant-11', { exact: true })).toBeVisible();
+	await aside.getByRole('button', { name: 'Show the biggest only' }).click();
+	await aside.getByLabel('Filter projects').fill('tenant-11');
+	await expect(aside.getByText('tenant-11', { exact: true })).toBeVisible();
+	await expect(aside.getByText('tenant-0', { exact: true })).toHaveCount(0);
+	await aside.getByLabel('Filter projects').fill('');
+
+	// An open namespace lists ten VMs, then a row into its VMs tab.
+	await aside
+		.getByText('tenant-0', { exact: true })
+		.locator('xpath=../..')
+		.getByTitle('Expand/collapse')
+		.click();
+	await aside
+		.getByText('tenant-0-ns-0')
+		.locator('xpath=../..')
+		.getByTitle('Expand/collapse')
+		.click();
+	await expect(aside.getByText('vm-0-0-9', { exact: true })).toBeVisible();
+	await expect(aside.getByText('vm-0-0-10', { exact: true })).toHaveCount(0);
+	await aside.getByRole('link', { name: '3 more VMs' }).click();
+	await expect(page).toHaveURL(/\/compute\/tenant-0\/tenant-0-ns-0\?tab=vms$/);
 
 	// The table pages: one page renders, the footer says where it sits.
+	await page.goto('/compute');
 	const main = page.locator('main');
 	await main.getByRole('link', { name: 'VMs', exact: true }).click();
 	const grid = main.getByRole('grid', { name: 'VMs' });
@@ -51,5 +79,9 @@ test('global search finds one VM among hundreds', async ({ page }) => {
 
 test('hosts lens groups the fleet by node', async ({ page }) => {
 	await page.locator('aside').getByRole('link', { name: 'Hosts' }).click();
-	await expect(page.locator('aside').getByText('worker-1').first()).toBeVisible();
+	const aside = page.locator('aside');
+	await expect(aside.getByText('worker-1').first()).toBeVisible();
+	// Hosts stay closed at this size; opening one lists ten VMs and the rest.
+	await aside.getByText('worker-1').locator('xpath=../..').getByTitle('Expand/collapse').click();
+	await expect(aside.getByRole('link', { name: /^\d+ more VMs$/ })).toBeVisible();
 });

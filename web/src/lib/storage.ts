@@ -18,6 +18,7 @@ import type {
 } from '#lib/api.js';
 import { vmKey } from '#lib/api.js';
 import { bytes, quantityBytes } from '#lib/format.js';
+import { bySize } from '#lib/rail.js';
 
 // A disk counts as protected by a snapshot this recent.
 export const FRESH_DAYS = 7;
@@ -444,9 +445,14 @@ export interface ProjectCount {
 }
 
 export function projectsBySize(projects: Project[]): ProjectCount[] {
-	return projects
-		.map((p) => ({ name: p.name, vms: p.namespaces.reduce((n, ns) => n + ns.vms.length, 0) }))
-		.sort((a, b) => b.vms - a.vms || a.name.localeCompare(b.name));
+	return bySize(
+		projects.map((p) => ({
+			name: p.name,
+			vms: p.namespaces.reduce((n, ns) => n + ns.vms.length, 0),
+		})),
+		(p) => p.vms,
+		(p) => p.name,
+	);
 }
 
 // "local, default" / "shared" / "" while the class facts are missing.
