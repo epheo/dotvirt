@@ -3,13 +3,17 @@ package argo
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
@@ -30,8 +34,8 @@ func TestSnapshotDriftNilUntilSynced(t *testing.T) {
 	if s.Drift() != nil {
 		t.Fatal("Drift() must be nil before the initial LIST has landed (else every VM flashes NotTracked)")
 	}
-	_ = s.apps.Add(app("argocd", "managed", []any{vmResource("prod", "vm-a", "Synced", "Healthy")}))
-	s.synced.Mark()
+	_ = s.store().Replace([]any{app("argocd", "managed", []any{vmResource("prod", "vm-a", "Synced", "Healthy")})}, "1")
+	settle(s)
 
 	d := s.Drift()
 	if d == nil {
@@ -102,25 +106,143 @@ func TestSnapshotRefreshForRepoNoopUntilSynced(t *testing.T) {
 	}
 }
 
-// TestSnapshotDriftMemoizedUntilStoreMoves proves Drift() serves one memoized map
-// across calls (the N:1 sharing the hot broadcast path needs) and rebuilds only when
-// the reflector signals a store move via driftDirty.
-func TestSnapshotDriftMemoizedUntilStoreMoves(t *testing.T) {
-	s := NewSnapshot(&Client{}, nil)
-	_ = s.apps.Add(app("argocd", "managed", []any{vmResource("prod", "vm-a", "Synced", "Healthy")}))
-	s.synced.Mark()
-
-	_ = s.Drift() // populate the memoized cache
-
-	// Add an app WITHOUT signalling a move: the memoized map must not yet reflect it.
-	_ = s.apps.Add(app("argocd", "managed2", []any{vmResource("prod", "vm-b", "OutOfSync", "Degraded")}))
-	if _, ok := s.Drift()["prod/vm-b"]; ok {
-		t.Error("Drift() rebuilt without a store-move signal — memoization not in effect")
+// settle runs the derive a pending store move asks for, as the deriver would.
+func settle(s *Snapshot) {
+	select {
+	case <-s.dirty:
+		s.derive()
+	default:
 	}
-	// Signal the move (what the reflector's onChange does): the rebuild includes it.
-	s.driftDirty.Store(true)
-	if _, ok := s.Drift()["prod/vm-b"]; !ok {
-		t.Error("Drift() did not rebuild after the store-move signal")
+}
+
+// Argo writes every Application on each reconcile; at 1000 apps a derive per
+// write is most of a core even with no change. A write that moves only the
+// reconcile stamps must not mark the view dirty; any other move must.
+func TestReconcileOnlyWriteSkipsDerive(t *testing.T) {
+	s := NewSnapshot(&Client{}, nil)
+	st := s.store()
+	a := benchApp(0)
+	a.SetResourceVersion("1")
+	a.SetGeneration(1)
+	_ = st.Replace([]any{a}, "1")
+	settle(s)
+	pending := func() bool { return len(s.dirty) > 0 }
+
+	tick := a.DeepCopy()
+	tick.SetResourceVersion("2")
+	tick.SetGeneration(2)
+	tick.SetManagedFields([]metav1.ManagedFieldsEntry{{Manager: "argocd-application-controller"}})
+	_ = unstructured.SetNestedField(tick.Object, "2026-11-07T10:00:00Z", "status", "reconciledAt")
+	_ = unstructured.SetNestedField(tick.Object, "2026-11-07T10:00:00Z", "status", "observedAt")
+	_ = st.Update(tick)
+	if pending() {
+		t.Fatal("a reconcile-only write marked the view dirty")
+	}
+
+	moved := tick.DeepCopy()
+	moved.SetResourceVersion("3")
+	_ = unstructured.SetNestedField(moved.Object, "OutOfSync", "status", "sync", "status")
+	_ = st.Update(moved)
+	if !pending() {
+		t.Fatal("a sync status move did not mark the view dirty")
+	}
+	settle(s)
+
+	unlisted := moved.DeepCopy()
+	_ = unstructured.SetNestedField(unlisted.Object, "x", "status", "summary", "externalURLs")
+	_ = st.Update(unlisted)
+	if !pending() {
+		t.Fatal("a field outside the named noise must count as a change")
+	}
+}
+
+// A derive scans every Application, and a sync wave or a relist writes many in a
+// burst: moves that land while one derive runs must share the next derive, not
+// queue one each.
+func TestDeriveCoalescesBursts(t *testing.T) {
+	bus := eventbus.New()
+	s := NewSnapshot(&Client{}, bus)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.deriveLoop(ctx)
+	st := s.store()
+	var list []any
+	for i := range 200 {
+		list = append(list, benchApp(i))
+	}
+	_ = st.Replace(list, "1")
+	if err := s.WaitForSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Each write moves content (a distinct apply error), so every derive publishes.
+	failing := func(n int) *unstructured.Unstructured {
+		a := benchApp(0)
+		status := a.Object["status"].(map[string]any)
+		status["resources"].([]any)[0] = vmResource("ns-0", "vm-0", "OutOfSync", "Healthy")
+		results := status["operationState"].(map[string]any)["syncResult"].(map[string]any)["resources"].([]any)
+		results[0] = map[string]any{
+			"group": "kubevirt.io", "kind": "VirtualMachine", "namespace": "ns-0", "name": "vm-0",
+			"status": "SyncFailed", "message": fmt.Sprintf("boom-%d", n),
+		}
+		return a
+	}
+	const writes = 500
+	burst := make([]*unstructured.Unstructured, writes)
+	for i := range burst {
+		burst[i] = failing(i)
+	}
+	before := bus.Version(eventbus.DriftChanged)
+	for _, a := range burst {
+		_ = st.Update(a)
+	}
+	last := fmt.Sprintf("boom-%d", writes-1)
+	deadline := time.Now().Add(10 * time.Second)
+	for s.Drift()["ns-0/vm-0"].Message != last {
+		if time.Now().After(deadline) {
+			t.Fatal("the last write never reached the view")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if derives := bus.Version(eventbus.DriftChanged) - before; derives > writes/10 {
+		t.Fatalf("%d writes in a burst cost %d derives, want them coalesced", writes, derives)
+	}
+}
+
+// Argo rewrites every Application on each reconcile; only a write that moves
+// what the view holds may publish DriftChanged, or every frame rebuilds every
+// few seconds to identical bytes.
+func TestDriftPublishesOnlyOnContentChange(t *testing.T) {
+	bus := eventbus.New()
+	s := NewSnapshot(&Client{}, bus)
+	st := s.store()
+	a := app("argocd", "managed", []any{vmResource("prod", "vm-a", "Synced", "Healthy")})
+	_ = st.Replace([]any{a}, "1")
+	settle(s)
+	v := bus.Version(eventbus.DriftChanged)
+	if v == 0 {
+		t.Fatal("the initial LIST must publish")
+	}
+	view := s.Drift()
+
+	tick := a.DeepCopy()
+	_ = unstructured.SetNestedField(tick.Object, "2026-11-07T10:00:00Z", "status", "reconciledAt")
+	_ = st.Update(tick)
+	settle(s)
+	if bus.Version(eventbus.DriftChanged) != v {
+		t.Fatal("a reconcile that moved no drift published DriftChanged")
+	}
+	if got := s.Drift(); reflect.ValueOf(got).Pointer() != reflect.ValueOf(view).Pointer() {
+		t.Error("an unchanged view must stay the shared map, not a rebuilt copy")
+	}
+
+	_ = st.Update(app("argocd", "managed", []any{vmResource("prod", "vm-a", "OutOfSync", "Healthy")}))
+	settle(s)
+	if bus.Version(eventbus.DriftChanged) == v {
+		t.Fatal("a drift move did not publish")
+	}
+	if got := s.Drift()["prod/vm-a"].Sync; got != model.SyncOutOfSync {
+		t.Errorf("vm-a sync = %q after the move", got)
 	}
 }
 
@@ -130,37 +252,42 @@ func TestSnapshotDriftMemoizedUntilStoreMoves(t *testing.T) {
 // otherwise-suppressed frames and refetch the catalog for nothing.
 func TestObjectDriftGen(t *testing.T) {
 	s := NewSnapshot(&Client{}, nil)
+	st := s.store()
 	a := app("argocd", "net", []any{
 		vmResource("prod", "vm-a", "Synced", "Healthy"),
 		udnResource("prod", "db-net", "Synced", ""),
 	})
-	_ = s.apps.Add(a)
-	s.synced.Mark()
+	_ = st.Replace([]any{a}, "1")
+	settle(s)
 
 	gen := s.ObjectDriftGen()
+	if gen == 0 {
+		t.Fatal("the first view holding a segment must move the gen off zero")
+	}
 
-	// Store churn, same content (the reflector marks dirty on ANY object update).
-	s.driftDirty.Store(true)
+	// Store churn, same content.
+	_ = st.Update(a.DeepCopy())
+	settle(s)
 	if got := s.ObjectDriftGen(); got != gen {
 		t.Errorf("gen bumped on contentless churn: %d -> %d", gen, got)
 	}
 
 	// A VM-only drift move: rides the frame itself, must not bump the catalog gen.
-	_ = s.apps.Update(app("argocd", "net", []any{
+	_ = st.Update(app("argocd", "net", []any{
 		vmResource("prod", "vm-a", "OutOfSync", "Degraded"),
 		udnResource("prod", "db-net", "Synced", ""),
 	}))
-	s.driftDirty.Store(true)
+	settle(s)
 	if got := s.ObjectDriftGen(); got != gen {
 		t.Errorf("gen bumped on a VM-only drift change: %d -> %d", gen, got)
 	}
 
 	// The segment's drift moves: gen must bump.
-	_ = s.apps.Update(app("argocd", "net", []any{
+	_ = st.Update(app("argocd", "net", []any{
 		vmResource("prod", "vm-a", "OutOfSync", "Degraded"),
 		udnResource("prod", "db-net", "OutOfSync", "Progressing"),
 	}))
-	s.driftDirty.Store(true)
+	settle(s)
 	if got := s.ObjectDriftGen(); got != gen+1 {
 		t.Errorf("gen did not bump on a segment drift change: %d -> %d", gen, got)
 	}

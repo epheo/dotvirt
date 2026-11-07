@@ -6,6 +6,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
+	"sigs.k8s.io/yaml"
 )
 
 func sampleVM() kubevirtcorev1.VirtualMachine {
@@ -51,6 +52,82 @@ func TestExportManifestDeterministicAndClean(t *testing.T) {
 	}
 	if !strings.Contains(s, "runStrategy: Always") {
 		t.Error("export lost runStrategy")
+	}
+}
+
+// Drift compares these bytes against git, so the serialization itself is pinned:
+// keys sorted, quoted scalars that would retype, block strings kept, no status.
+func TestExportManifestBytes(t *testing.T) {
+	var vm kubevirtcorev1.VirtualMachine
+	if err := yaml.Unmarshal([]byte(`apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: web
+  namespace: alpha
+  labels:
+    version: "1.0"
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: '{}'
+    note: "line1\nline2"
+spec:
+  runStrategy: Always
+  template:
+    spec:
+      terminationGracePeriodSeconds: 180
+      domain:
+        cpu:
+          cores: 2
+        memory:
+          guest: 1Gi
+        devices: {}
+      volumes:
+      - name: cloudinitdisk
+        cloudInitNoCloud:
+          userData: |
+            #cloud-config
+            password: "1234"
+status:
+  printableStatus: Running
+`), &vm); err != nil {
+		t.Fatal(err)
+	}
+	want := `apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  annotations:
+    note: |-
+      line1
+      line2
+  labels:
+    version: "1.0"
+  name: web
+  namespace: alpha
+spec:
+  runStrategy: Always
+  template:
+    metadata: {}
+    spec:
+      domain:
+        cpu:
+          cores: 2
+        devices: {}
+        memory:
+          guest: 1Gi
+        resources: {}
+      terminationGracePeriodSeconds: 180
+      volumes:
+      - cloudInitNoCloud:
+          userData: |
+            #cloud-config
+            password: "1234"
+        name: cloudinitdisk
+`
+	got, err := ExportManifest(vm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Errorf("export bytes moved:\n%s\nwant:\n%s", got, want)
 	}
 }
 

@@ -76,10 +76,17 @@ override `PREV`, trigger the workflow via `workflow_dispatch` (version + prev in
 cut one entirely locally, run `VERSION=0.0.6 PREV=0.0.5 hack/release.sh` and commit + tag
 the pinned tree yourself.
 
-> A preview/rc and a release both `replace` the prior *released* version, so there's
-> no OLM upgrade edge *between* previews (or preview→release). To move a cluster off a
-> preview, delete its CSV and re-create the Subscription (same channel) — OLM then
-> resolves to the catalog's current head.
+Re-runs (Re-run on the tag, or a dispatch of the same version) reuse every `:vVERSION`
+image already on quay, so the digests the first run pinned are never pruned; they then
+force-push the pin branch and refresh the draft Release asset. The catalog is rebuilt only
+when its render changed (e.g. another `prev`). The dispatch `force` input (`FORCE=1` for
+the scripts) rebuilds everything and moves the tags: use it only when the source changed.
+
+Each channel entry `replaces` the previous release and carries
+`skipRange: '>=0.0.0 <VERSION'`. The catalog holds only the channel heads, so the range
+is the edge every other install follows: an rc to the next rc or to the release, a
+release older than `PREV`, or a release whose pin PR had not merged when the next tag was
+cut. No delete-and-resubscribe step is needed to move a cluster forward.
 
 ## Seamless upgrades
 
@@ -139,8 +146,10 @@ repo's preflight), and runs scorecard. Pipeline failures are fixed by **pushing 
 same PR**, never by opening a new one. The **submitted bundle CSV carries no
 `spec.replaces`**: OperatorHub's `updateGraph: semver-mode` derives the edge from
 `spec.version`, and the OpenShift catalogs get their graph from the semver template.
-The `replaces` edges in our FBC (`operator/catalog-template.yaml`) are for
-**self-hosting only** and are not part of a community submission.
+The `replaces` and `skipRange` edges in our FBC (`operator/catalog-template.yaml`) are
+for **self-hosting only** and are not part of a community submission. The CSV carries no
+`olm.skipRange` annotation either: the semver template ignores it, and both community
+catalogs already chain every submitted version, so no install there is stranded.
 
 ### Notes / future work
 

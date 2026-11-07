@@ -27,19 +27,20 @@ import (
 type Kind int
 
 const (
-	// VMSpecChanged: a VirtualMachine's spec/generation changed, or a VM was added or
-	// removed - the exported manifest set moved. (NOT fired on VM status churn.)
-	VMSpecChanged Kind = iota
-	// LiveChanged: runtime state moved - a VMI status change, or a VM status/existence
-	// change. The live inventory tree's per-VM phase/IP/node.
-	LiveChanged
+	// LiveChanged: a VM's live state moved - a VM or VMI added or removed, or a
+	// change to what the inventory shows of a VMI (phase, IPs, node, guest facts,
+	// migration) - or a cluster watch's health flipped. VM and VMI status writes
+	// that move none of it are not published.
+	LiveChanged Kind = iota
 	// NamespaceChanged: a project namespace was added, removed, or relabeled - both an
 	// inventory topology change AND a visibility (RBAC) change.
 	NamespaceChanged
 	// RBACChanged: a RoleBinding moved, so a token's visible-namespace set may have
 	// changed - the cue to revalidate the per-token visibility cache.
 	RBACChanged
-	// DriftChanged: an ArgoCD Application moved - sync/health drift.
+	// DriftChanged: the drift Argo reports moved - an object's sync/health/apply
+	// error or a project's rollup - or the Applications watch's health flipped.
+	// An Application write that moves none of it (each reconcile) is not published.
 	DriftChanged
 	// GitChanged: a project repo's branch heads moved (a push/merge, seen via the
 	// forge webhook or the backstop poll). Published per repo: the key is the
@@ -53,6 +54,11 @@ const (
 	// TaskChanged: the recent-tasks feed moved - an imperative op was recorded or a
 	// merged PR landed. The feed is fetched out-of-band, like the network catalog.
 	TaskChanged
+	// TTLBackstop: TTL-cached frame inputs no watch observes (cluster-scoped RBAC,
+	// group membership) may have expired - published on a fixed cadence while a
+	// stream is open so frames re-evaluate them. Keep it out of every cache's
+	// version stamp: it must not invalidate anything before its TTL.
+	TTLBackstop
 
 	// kindCount is the number of kinds - keep it last. Sizes the version array.
 	kindCount
