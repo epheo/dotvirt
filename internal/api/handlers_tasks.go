@@ -31,10 +31,10 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	if s.canAuthorPlatform(r.Context(), id, c) {
+	if platform, _ := s.canAuthorPlatform(r.Context(), id, c); platform {
 		projects = append(projects, s.platformProject())
 	}
-	canNodes := s.canReadNodesCached(r.Context(), id, c)
+	canNodes, _ := s.can(r.Context(), id, c, verbList, ssarNodes, "")
 	writeJSON(w, scopeTasks(s.tasks.Ops(), s.tasks.Merges(), projects, canNodes))
 }
 

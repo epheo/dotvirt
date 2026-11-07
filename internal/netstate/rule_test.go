@@ -95,7 +95,7 @@ func TestRuleForms(t *testing.T) {
 			"unresolved destination", matchCond, matchCond, matchCond},
 	}
 	for _, c := range peers {
-		if got := c.rule.view("Ingress").Peer; got != c.summary {
+		if got := c.rule.view("Ingress", nil).Peer; got != c.summary {
 			t.Errorf("%s: summary = %q, want %q", c.name, got, c.summary)
 		}
 		for _, tt := range []struct {
@@ -153,7 +153,7 @@ func TestRuleForms(t *testing.T) {
 		{"two entries", netpolPorts(map[string]any{"protocol": "TCP", "port": int64(443)}, map[string]any{"protocol": "TCP", "port": int64(80)}), "TCP/443, TCP/80", matchYes, matchYes, matchCond},
 	}
 	for _, c := range ports {
-		if got := c.rule.view("Ingress").Ports; got != c.summary {
+		if got := c.rule.view("Ingress", nil).Ports; got != c.summary {
 			t.Errorf("%s: summary = %q, want %q", c.name, got, c.summary)
 		}
 		for _, tt := range []struct {

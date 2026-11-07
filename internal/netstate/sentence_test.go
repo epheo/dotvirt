@@ -1,6 +1,7 @@
 package netstate
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/epheo/dotvirt/internal/model"
@@ -136,5 +137,79 @@ func TestPolicySentences(t *testing.T) {
 		if got := ruleTexts(p); !eqStrings(got, c.texts) {
 			t.Errorf("%s texts = %q, want %q", c.name, got, c.texts)
 		}
+	}
+}
+
+// A tenant never reads another tenant's namespace or project in a sentence:
+// subjects, rule sentences and peer-side sentences all go through the
+// caller's redaction.
+func TestSentencesRedactOtherTenants(t *testing.T) {
+	s := New(nil, nil)
+	nameIn := func(ns ...any) map[string]any {
+		return map[string]any{"matchExpressions": []any{map[string]any{
+			"key": "kubernetes.io/metadata.name", "operator": "In", "values": ns,
+		}}}
+	}
+	add(t, s.anp, map[string]any{
+		"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "AdminNetworkPolicy",
+		"metadata": map[string]any{"name": "split"},
+		"spec": map[string]any{
+			"priority": int64(10),
+			"subject":  map[string]any{"namespaces": nameIn("tenant-a", "tenant-b")},
+			"ingress": []any{map[string]any{"action": "Deny", "from": []any{map[string]any{
+				"namespaces": map[string]any{"matchLabels": map[string]any{"dotvirt.io/project": "team-b"}},
+			}}}},
+			"egress": []any{map[string]any{"action": "Allow", "to": []any{map[string]any{
+				"pods": map[string]any{"namespaceSelector": nameIn("tenant-b"), "podSelector": map[string]any{"matchLabels": map[string]any{"app": "db"}}},
+			}}}},
+		},
+	})
+	add(t, s.anp, map[string]any{
+		"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "AdminNetworkPolicy",
+		"metadata": map[string]any{"name": "into-b"},
+		"spec": map[string]any{
+			"priority": int64(20),
+			"subject":  map[string]any{"namespaces": nameIn("tenant-b")},
+			"ingress":  []any{map[string]any{"action": "Allow", "from": []any{map[string]any{"namespaces": nameIn("tenant-a", "tenant-c")}}}},
+		},
+	})
+	add(t, s.egressip, map[string]any{
+		"apiVersion": "k8s.ovn.org/v1", "kind": "EgressIP",
+		"metadata": map[string]any{"name": "pool"},
+		"spec":     map[string]any{"egressIPs": []any{"192.0.2.10"}, "namespaceSelector": nameIn("tenant-a", "tenant-b")},
+	})
+	red := &Redaction{
+		ProjectLabel: "dotvirt.io/project",
+		Namespace:    func(ns string) bool { return ns == "tenant-a" },
+		Project:      func(p string) bool { return p == "team-a" },
+	}
+	leaks := func(where string, texts ...string) {
+		t.Helper()
+		for _, x := range texts {
+			for _, other := range []string{"tenant-b", "tenant-c", "team-b"} {
+				if strings.Contains(x, other) {
+					t.Errorf("%s leaks %q: %q", where, other, x)
+				}
+			}
+		}
+	}
+	for _, p := range s.Policies() {
+		s.Redact(&p, nil, red)
+		texts := []string{p.Target, p.Applies}
+		for _, r := range p.Rules {
+			texts = append(texts, r.Text, r.Peer)
+		}
+		leaks(p.Name, texts...)
+	}
+	nsLabels := func(ns string) map[string]string {
+		return map[string]string{"kubernetes.io/metadata.name": ns, "dotvirt.io/project": "team-a"}
+	}
+	got := s.NetworkRules([]string{"tenant-a"}, nsLabels, red)
+	if len(got.Reaches) != 1 {
+		t.Fatalf("reaches = %+v, want into-b naming tenant-a", got.Reaches)
+	}
+	leaks("into-b peer sentence", got.Reaches[0].Text)
+	if !strings.Contains(got.Reaches[0].Text, "tenant-a") || !strings.Contains(got.Reaches[0].Text, "other namespaces") {
+		t.Errorf("peer sentence = %q, want tenant-a named and the rest hidden", got.Reaches[0].Text)
 	}
 }

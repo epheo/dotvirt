@@ -11,7 +11,10 @@ import (
 // lists them, pod selectors conditional), then the rules elsewhere that name
 // those namespaces' VMs as their other end, each read from the network's side.
 // A policy listed as binding is never repeated as a peer rule.
-func (s *Snapshot) NetworkRules(namespaces []string, nsLabels func(string) map[string]string) model.NetworkRules {
+//
+// red renders the peer rules' sentences for one caller (nil renders
+// everything); policies and rows come out whole, for the caller's redactor.
+func (s *Snapshot) NetworkRules(namespaces []string, nsLabels func(string) map[string]string, red *Redaction) model.NetworkRules {
 	out := model.NetworkRules{Namespaces: namespaces, Applies: []model.PolicyBinding{}, Reaches: []model.PeerRule{}}
 	bound := map[string]int{} // policy identity -> index in Applies
 	for _, ns := range namespaces {
@@ -53,7 +56,7 @@ func (s *Snapshot) NetworkRules(namespaces []string, nsLabels func(string) map[s
 		}
 		for _, dir := range []string{"Ingress", "Egress"} {
 			for _, r := range p.rules(dir) {
-				if pr, ok := peerRule(p, r, dir, namespaces, nsLabels); ok {
+				if pr, ok := peerRule(p, r, dir, namespaces, nsLabels, red); ok {
 					out.Reaches = append(out.Reaches, pr)
 				}
 			}
@@ -77,7 +80,7 @@ func (s *Snapshot) NetworkRules(namespaces []string, nsLabels func(string) map[s
 
 // peerRule reads one rule from the side of the network's namespaces: the
 // first peer alternative that may select their VMs decides the sentence.
-func peerRule(p *policy, r rule, dir string, namespaces []string, nsLabels func(string) map[string]string) (model.PeerRule, bool) {
+func peerRule(p *policy, r rule, dir string, namespaces []string, nsLabels func(string) map[string]string, red *Redaction) (model.PeerRule, bool) {
 	for _, pe := range r.peers {
 		if pe.kind != peerSelector {
 			continue
@@ -95,10 +98,13 @@ func peerRule(p *policy, r rule, dir string, namespaces []string, nsLabels func(
 		if best == matchNo {
 			continue
 		}
+		// Policy and Rule come out whole, for the caller's redactor to match
+		// and re-render; the sentence is rendered for the caller here.
+		_, applies, _ := p.render(red)
 		return model.PeerRule{
 			Policy:      p.view,
-			Rule:        r.view(dir),
-			Text:        r.peerText(dir, pe, p.view.Applies),
+			Rule:        r.view(dir, nil),
+			Text:        r.peerText(dir, pe, applies, red),
 			Conditional: best == matchCond,
 		}, true
 	}

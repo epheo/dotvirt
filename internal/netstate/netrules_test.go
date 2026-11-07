@@ -78,7 +78,7 @@ func TestNetworkRules(t *testing.T) {
 		"spec":     map[string]any{"egressIPs": []any{"192.0.2.10"}, "namespaceSelector": nameIn("web-prod")},
 	})
 
-	got := s.NetworkRules([]string{"web-prod"}, nsLabels)
+	got := s.NetworkRules([]string{"web-prod"}, nsLabels, nil)
 	var applies []string
 	for _, b := range got.Applies {
 		applies = append(applies, b.Policy.Name)
@@ -108,7 +108,7 @@ func TestNetworkRules(t *testing.T) {
 	}
 
 	// A shared network across two namespaces lists a policy once.
-	both := s.NetworkRules([]string{"web-prod", "db-prod"}, nsLabels)
+	both := s.NetworkRules([]string{"web-prod", "db-prod"}, nsLabels, nil)
 	n := 0
 	for _, b := range both.Applies {
 		if b.Policy.Name == "deny-lateral" {

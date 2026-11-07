@@ -52,6 +52,7 @@ type Config struct {
 
 	// Forge (Forgejo) for PR creation; empty url/token degrades to push-only. The
 	// per-project owner/repo are derived from each project's repo URL, not config.
+	// The token rides git only to ForgeURL's host, so without it git is anonymous.
 	ForgeURL   string
 	ForgeToken string
 	// ForgeTokenFile, when set, is a mounted-secret path read on EVERY forge/git
@@ -129,7 +130,7 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.BaseBranch, "base-branch", envOr("DOTVIRT_BASE_BRANCH", "main"), "branch the inventory reads + PRs target")
 	fs.StringVar(&c.ProposedBranch, "proposed-branch", envOr("DOTVIRT_PROPOSED_BRANCH", "dotvirt/proposed"), "working branch holding the draft changeset")
 	fs.StringVar(&c.DraftDir, "draft-dir", envOr("DOTVIRT_DRAFT_DIR", "./.dotvirt-drafts"), "root dir for persisted drafts (<dir>/<user>/<project>.json)")
-	fs.StringVar(&c.ForgeURL, "forge-url", os.Getenv("DOTVIRT_FORGE_URL"), "Forgejo base URL (empty = push-only, no PR)")
+	fs.StringVar(&c.ForgeURL, "forge-url", os.Getenv("DOTVIRT_FORGE_URL"), "Forgejo base URL (empty = push-only, no PR, anonymous git)")
 	fs.StringVar(&c.ForgeToken, "forge-token", os.Getenv("DOTVIRT_FORGE_TOKEN"), "Forgejo API token (git https + API; falls back to -git-token)")
 	fs.StringVar(&c.ForgeTokenFile, "forge-token-file", os.Getenv("DOTVIRT_FORGE_TOKEN_FILE"), "path to a mounted secret holding the forge token, re-read per call (rotation-safe; overrides -forge-token)")
 	fs.BoolVar(&c.InsecureTLS, "insecure-tls", envBool("DOTVIRT_INSECURE_TLS", false), "skip TLS verification for git+forge (dev only)")

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,27 +69,49 @@ func TestFindNetwork(t *testing.T) {
 	}
 }
 
-// A network's binding rules govern the caller's own VMs and stay; peer rules
-// belong to other namespaces or the cluster and follow /api/policies.
+// A network's bindings and the cluster rules naming its VMs govern the
+// caller's own VMs: they stay, through the caller's redactor. A peer rule in
+// a namespace the caller cannot see never shows.
 func TestScopeNetworkRules(t *testing.T) {
 	in := model.NetworkRules{
-		Applies: []model.PolicyBinding{{Policy: model.Policy{Name: "deny-lateral", Kind: model.PolicyAdmin, Namespaces: []string{"a", "b"}}}},
+		Applies: []model.PolicyBinding{{Policy: model.Policy{Name: "deny-lateral", Kind: model.PolicyAdmin}}},
 		Reaches: []model.PeerRule{
 			{Policy: model.Policy{Name: "mine", Kind: model.PolicyDFW, Namespace: "a"}},
 			{Policy: model.Policy{Name: "foreign", Kind: model.PolicyDFW, Namespace: "b"}},
 			{Policy: model.Policy{Name: "cluster", Kind: model.PolicyAdmin}},
 		},
 	}
-	got := scopeNetworkRules(in, map[string]bool{"a": true}, func(model.PolicyKind) bool { return false })
-	if got.Applies[0].Policy.Namespaces != nil {
-		t.Error("a binding's enumerated subject must be redacted without authority")
+	var redacted []string
+	got := scopeNetworkRules(in, map[string]bool{"a": true}, func(p *model.Policy, _ *model.PolicyRuleView) {
+		redacted = append(redacted, p.Name)
+	})
+	var names []string
+	for _, r := range got.Reaches {
+		names = append(names, r.Policy.Name)
 	}
-	if len(got.Reaches) != 1 || got.Reaches[0].Policy.Name != "mine" {
-		t.Errorf("reaches = %+v, want only the visible namespace's rule", got.Reaches)
+	if strings.Join(names, ",") != "mine,cluster" {
+		t.Errorf("reaches = %v, want mine and cluster", names)
 	}
-	all := scopeNetworkRules(in, map[string]bool{"a": true}, func(model.PolicyKind) bool { return true })
-	if len(all.Reaches) != 2 {
-		t.Errorf("with authority the cluster peer rule shows: %+v", all.Reaches)
+	if strings.Join(redacted, ",") != "deny-lateral,mine,cluster" {
+		t.Errorf("redacted = %v, want every kept policy through the redactor", redacted)
+	}
+}
+
+// A shared network's apply error can name every namespace its selector
+// reaches: it reaches only callers who may author shared networks, a
+// project network's own error stays with its tenant.
+func TestRedactSharedErrors(t *testing.T) {
+	nets := []model.Network{
+		{Name: "dc-vlan", Scope: model.ScopeShared, SyncError: "NAD exists in namespace team-b"},
+		{Name: "backend", Scope: model.ScopeProject, Namespace: "team-a", SyncError: "invalid subnet"},
+		{Name: "quiet", Scope: model.ScopeShared},
+	}
+	redactSharedErrors(nets)
+	if strings.Contains(nets[0].SyncError, "team-b") || nets[0].SyncError == "" {
+		t.Errorf("shared error = %q, want a generic line", nets[0].SyncError)
+	}
+	if nets[1].SyncError != "invalid subnet" || nets[2].SyncError != "" {
+		t.Errorf("redaction reached beyond shared errors: %+v", nets[1:])
 	}
 }
 

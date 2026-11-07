@@ -24,9 +24,10 @@ import (
 // forge. The poll is the missed-event backstop; the forge webhook (via Poke) is the
 // primary, near-instant trigger.
 type RepoSet struct {
-	user    string
-	tokenFn forge.TokenSource
-	push    bool
+	forgeURL string // the one host the token may travel to (forge.CarriesToken)
+	user     string
+	tokenFn  forge.TokenSource
+	push     bool
 
 	// Poll wiring, shared by every repo's poll goroutine.
 	ctx      context.Context
@@ -70,13 +71,15 @@ const (
 	idleTimeout = time.Hour
 )
 
-// NewRepoSet builds a RepoSet. forgeUser/forgeToken authenticate every repo's
-// clone/push; push=false disables pushes (offline/tests). ctx bounds the per-repo
+// NewRepoSet builds a RepoSet. forgeUser/tokenFn authenticate the clone/push
+// of every repo the forge at forgeURL serves; a repo elsewhere is reached
+// anonymously. push=false disables pushes (offline/tests). ctx bounds the per-repo
 // poll goroutines. bus receives a coalesced GitChanged whenever any repo's branch
 // heads move (subscribers: the inventory hub and the proposals refresher); it may
 // be nil to disable signalling (tests).
-func NewRepoSet(ctx context.Context, forgeUser string, tokenFn forge.TokenSource, push bool, bus *eventbus.Bus, interval time.Duration) *RepoSet {
+func NewRepoSet(ctx context.Context, forgeURL, forgeUser string, tokenFn forge.TokenSource, push bool, bus *eventbus.Bus, interval time.Duration) *RepoSet {
 	return &RepoSet{
+		forgeURL: forgeURL,
 		user:     forgeUser,
 		tokenFn:  tokenFn,
 		push:     push,
@@ -122,7 +125,11 @@ func (s *RepoSet) Get(repoURL string) (*Repo, *WriteRepo, error) {
 	// Open outside the lock with the RAW url (the clone may need the exact form):
 	// the read clone hits the network and can be slow; we don't want to block Get
 	// for other repos.
-	read, err := s.open(repoURL, s.user, s.tokenFn)
+	tokenFn := s.tokenFn
+	if !forge.CarriesToken(s.forgeURL, repoURL) {
+		tokenFn = nil
+	}
+	read, err := s.open(repoURL, s.user, tokenFn)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -137,7 +144,7 @@ func (s *RepoSet) Get(repoURL string) (*Repo, *WriteRepo, error) {
 	pair := &repoPair{
 		key:   key,
 		read:  read,
-		write: OpenWrite(repoURL, s.user, s.tokenFn, s.push),
+		write: OpenWrite(repoURL, s.user, tokenFn, s.push),
 		poke:  make(chan struct{}, 1),
 		used:  s.now(),
 	}
