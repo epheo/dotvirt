@@ -31,17 +31,13 @@ func TestAvailableRollUpSparesPlatformRepoRetry(t *testing.T) {
 	r.setCondition(dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionTrue, "Reconciled", "")
 	dv.Status.Phase = dotvirtv1alpha1.PhaseReady
 
-	if _, err := r.waitPhase(context.Background(), dv, dotvirtv1alpha1.ConditionForgeRepoReady, "Error", "forge down", "", time.Minute); err != nil {
-		t.Fatal(err)
-	}
+	r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeRepoReady, "Error", "forge down", "", time.Minute)
 	if av := cond(dv, dotvirtv1alpha1.ConditionAvailable); av.Status != metav1.ConditionTrue || dv.Status.Phase != dotvirtv1alpha1.PhaseReady {
 		t.Errorf("platform-repo retry regressed a serving install: Available=%+v phase=%q", av, dv.Status.Phase)
 	}
 
-	if _, err := r.waitPhase(context.Background(), dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing", "forge starting",
-		dotvirtv1alpha1.PhaseProvisioning, time.Minute); err != nil {
-		t.Fatal(err)
-	}
+	r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing", "forge starting",
+		dotvirtv1alpha1.PhaseProvisioning, time.Minute)
 	av := cond(dv, dotvirtv1alpha1.ConditionAvailable)
 	if av.Status != metav1.ConditionFalse || av.Reason != "Progressing" || !strings.HasPrefix(av.Message, dotvirtv1alpha1.ConditionForgeReady) {
 		t.Errorf("Available = %+v, want False/Progressing naming ForgeReady", av)
@@ -255,5 +251,33 @@ func TestPruneRunsOnRenderChangeOrTimer(t *testing.T) {
 	reconcileOnce(t, r, dv)
 	if lists != 3 {
 		t.Errorf("drift timer did not prune")
+	}
+}
+
+// The status write is diffed against the pass's read, so it carries no
+// resourceVersion: OLM or a label edit landing between the read and the write
+// must not fail the pass with a conflict.
+func TestStatusWriteSurvivesConcurrentWriter(t *testing.T) {
+	dv := testCR()
+	touched := false
+	c := testBuilder(t).WithObjects(dv).WithInterceptorFuncs(interceptor.Funcs{
+		SubResourcePatch: func(ctx context.Context, cl client.Client, sub string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+			if !touched {
+				touched = true
+				other := &dotvirtv1alpha1.Dotvirt{}
+				if err := cl.Get(ctx, client.ObjectKeyFromObject(obj), other); err != nil {
+					return err
+				}
+				other.Labels = map[string]string{"touched": "true"}
+				if err := cl.Update(ctx, other); err != nil {
+					return err
+				}
+			}
+			return cl.SubResource(sub).Patch(ctx, obj, patch, opts...)
+		},
+	}).Build()
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	if got := getCR(t, c, dv); got.Status.Phase == "" {
+		t.Error("status not written")
 	}
 }

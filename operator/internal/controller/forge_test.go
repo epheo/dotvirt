@@ -328,7 +328,7 @@ func TestResolveForgeURLRequiresURLOnVanilla(t *testing.T) {
 	if res == nil || res.RequeueAfter != 0 {
 		t.Fatalf("result = %+v, want a halt (no requeue)", res)
 	}
-	if fc := cond(getCR(t, c, dv), dotvirtv1alpha1.ConditionForgeReady); fc == nil || fc.Reason != "ForgeURLRequired" {
+	if fc := cond(dv, dotvirtv1alpha1.ConditionForgeReady); fc == nil || fc.Reason != "ForgeURLRequired" {
 		t.Errorf("ForgeReady = %+v, want False/ForgeURLRequired", fc)
 	}
 }

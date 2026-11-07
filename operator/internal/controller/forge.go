@@ -83,17 +83,17 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 		// reconciles the DB password to the admin secret on every start, so this should
 		// self-clear on the next pod restart; surface a legible reason (not a raw
 		// "mint token: 401") and requeue rather than hot-looping on the error.
-		return r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "AdminCredentialRejected",
+		return r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeReady, "AdminCredentialRejected",
 			fmt.Sprintf("Forgejo rejected the operator's admin credential. Restart the managed forge to reconcile "+
 				"its admin password: oc -n %s rollout restart deployment/%s", dv.Namespace, install.ForgejoServiceName),
-			dotvirtv1alpha1.PhaseProvisioning, time.Minute)
+			dotvirtv1alpha1.PhaseProvisioning, time.Minute), nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	if !ready {
-		return r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing",
-			"waiting for Forgejo to come up", dotvirtv1alpha1.PhaseProvisioning, 15*time.Second)
+		return r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing",
+			"waiting for Forgejo to come up", dotvirtv1alpha1.PhaseProvisioning, 15*time.Second), nil
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionTrue, "Ready", "managed Forgejo bootstrapped")
 	return nil, nil
@@ -128,16 +128,14 @@ func (r *DotvirtReconciler) resolveForgeURL(ctx context.Context, dv *dotvirtv1al
 	// Reading routeHost in those cases would wait for a Route nothing creates, requeueing
 	// forever, so halt on the same predicate the exposure uses.
 	if r.Platform != platform.OpenShift || r.resolveExposureType(dv) != dotvirtv1alpha1.IngressRoute {
-		res, err := r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "ForgeURLRequired",
+		return "", r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeReady, "ForgeURLRequired",
 			"set spec.forge.url: the operator can only discover a managed forge's hostname from an OpenShift Route, which this install does not create",
-			dotvirtv1alpha1.PhaseProvisioning, 0)
-		return "", res, err
+			dotvirtv1alpha1.PhaseProvisioning, 0), nil
 	}
 	host := r.routeHost(ctx, dv.Namespace, install.ForgejoServiceName)
 	if host == "" {
-		res, err := r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing",
-			"waiting for the router to assign the forge hostname", dotvirtv1alpha1.PhaseProvisioning, 5*time.Second)
-		return "", res, err
+		return "", r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing",
+			"waiting for the router to assign the forge hostname", dotvirtv1alpha1.PhaseProvisioning, 5*time.Second), nil
 	}
 	return "https://" + host, nil, nil
 }
@@ -177,8 +175,8 @@ func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvi
 		if err := r.ensurePlatformRepo(ctx, dv); err != nil {
 			// phase "": the operand still serves, so the retry must not regress
 			// a Ready install.
-			return r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeRepoReady, "Error",
-				err.Error(), "", time.Minute)
+			return r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeRepoReady, "Error",
+				err.Error(), "", time.Minute), nil
 		}
 		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionTrue, "Ready", "platform repo present")
 	}

@@ -72,7 +72,8 @@ type reconcilePhase struct {
 }
 
 // Reconcile drives the install in order, recording a status condition per step so a
-// stuck install is legible from `kubectl get dotvirt` / `describe`.
+// stuck install is legible from `kubectl get dotvirt` / `describe`. Phases change
+// status in memory only; the pass persists it once, whichever way it ends.
 func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -85,42 +86,57 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if !dv.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, r.finalize(ctx, &dv)
 	}
+	base := dv.DeepCopy()
+	var res ctrl.Result
+	var err error
 	// One install per cluster: the ClusterRoleBindings it provisions carry fixed
 	// cluster-scoped names, so two CRs would rewrite each other's subjects on every
 	// reconcile and each finalizer would delete the other's bindings. The oldest CR
 	// wins; a later one halts here, before the finalizer, so it stays freely
 	// deletable and owns nothing. The timer matters: the older CR's deletion fires
 	// no event for this one.
-	if other, found, err := r.olderInstall(ctx, &dv); err != nil {
-		return ctrl.Result{}, err
+	if other, found, lerr := r.olderInstall(ctx, &dv); lerr != nil {
+		return ctrl.Result{}, lerr
 	} else if found {
 		msg := fmt.Sprintf("another dotvirt install exists at %s/%s and owns this cluster's bindings; delete one of the two",
 			other.Namespace, other.Name)
-		res, err := r.waitPhase(ctx, &dv, dotvirtv1alpha1.ConditionAvailable, "Conflict", msg,
+		res = *r.waitPhase(&dv, dotvirtv1alpha1.ConditionAvailable, "Conflict", msg,
 			dotvirtv1alpha1.PhaseProvisioning, time.Minute)
-		if err != nil {
-			return ctrl.Result{}, err
+	} else {
+		// Ensure the finalizer is present before provisioning anything cluster-scoped.
+		// Skipped under -dry-run so a validation run mutates nothing (and the CR stays
+		// freely deletable, since the finalizer would otherwise gate its removal).
+		if !r.DryRun && controllerutil.AddFinalizer(&dv, dotvirtFinalizer) {
+			if err := r.Update(ctx, &dv); err != nil {
+				return ctrl.Result{}, err
+			}
+			// The Update moved resourceVersion; a stale base would put it in the
+			// status patch and turn it into an optimistic lock.
+			base = dv.DeepCopy()
 		}
-		return *res, nil
+		// Only after the finalizer add, the reconcile's one spec write: the effective
+		// spec must never reach the stored CR.
+		r.normalizeSpec(&dv)
+		res, err = r.provision(ctx, req.NamespacedName, &dv)
 	}
-	// Ensure the finalizer is present before provisioning anything cluster-scoped.
-	// Skipped under -dry-run so a validation run mutates nothing (and the CR stays
-	// freely deletable, since the finalizer would otherwise gate its removal).
-	if !r.DryRun && controllerutil.AddFinalizer(&dv, dotvirtFinalizer) {
-		if err := r.Update(ctx, &dv); err != nil {
-			return ctrl.Result{}, err
+	if werr := r.writeStatus(ctx, &dv, base); werr != nil {
+		if err == nil {
+			return ctrl.Result{}, werr
 		}
+		log.Error(werr, "status update failed")
 	}
-	// Only after the finalizer add, the reconcile's one spec write: the effective
-	// spec must never reach the stored CR.
-	r.normalizeSpec(&dv)
-	rc := r.newReconcileCtx(ctx, &dv)
+	return res, err
+}
+
+// provision runs the install pipeline over the effective spec.
+func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedName, dv *dotvirtv1alpha1.Dotvirt) (ctrl.Result, error) {
+	rc := r.newReconcileCtx(ctx, dv)
 	ctx, rendered := withRenderSet(ctx)
 
 	// The install pipeline, in dependency order. A phase that halts on a wait has
 	// already recorded why; one that fails is recorded here, so no error is
-	// invisible in status; a completed pass falls through to the Ready status
-	// write below.
+	// invisible in status; a completed pass falls through to the Ready roll-up
+	// below.
 	for _, phase := range []reconcilePhase{
 		{dotvirtv1alpha1.ConditionDependenciesReady, r.reconcileDependencies},
 		{dotvirtv1alpha1.ConditionForgeReady, r.reconcileForge},
@@ -132,9 +148,10 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// Last: its failure requeues, and nothing above depends on the repo.
 		{dotvirtv1alpha1.ConditionForgeRepoReady, r.reconcilePlatformRepo},
 	} {
-		res, err := phase.run(ctx, &dv, rc)
+		res, err := phase.run(ctx, dv, rc)
 		if err != nil {
-			return ctrl.Result{}, r.recordFailure(ctx, &dv, phase.cond, err)
+			r.recordFailure(dv, phase.cond, err)
+			return ctrl.Result{}, err
 		}
 		if res != nil {
 			return *res, nil
@@ -143,33 +160,25 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	dv.Status.ObservedGeneration = dv.Generation
 	if r.DryRun {
-		log.Info("dry-run complete: all rendered resources accepted by the API server (nothing persisted)")
-		r.setCondition(&dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionUnknown, "DryRun",
+		logf.FromContext(ctx).Info("dry-run complete: all rendered resources accepted by the API server (nothing persisted)")
+		r.setCondition(dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionUnknown, "DryRun",
 			"dry-run validated the render; nothing was persisted, so nothing serves")
-		return ctrl.Result{}, r.writeStatus(ctx, &dv)
+		return ctrl.Result{}, nil
 	}
 	if wr := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionWorkloadReady); wr != nil && wr.Status == metav1.ConditionTrue {
-		r.setCondition(&dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionTrue, "Reconciled", "install reconciled and serving")
+		r.setCondition(dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionTrue, "Reconciled", "install reconciled and serving")
 		dv.Status.Phase = dotvirtv1alpha1.PhaseReady
 	} else {
-		r.markUnavailable(&dv, dotvirtv1alpha1.ConditionWorkloadReady, "WorkloadProgressing", "the dotvirt pod is not ready yet")
+		r.markUnavailable(dv, dotvirtv1alpha1.ConditionWorkloadReady, "WorkloadProgressing", "the dotvirt pod is not ready yet")
 		dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
 	}
 	// Only a completed pass knows the full render; a halted one would prune
 	// whatever its skipped phases own.
-	var pruneErr error
-	if digest := rendered.digest(); r.pruneDue(req.NamespacedName, digest) {
-		if pruneErr = r.prune(ctx, &dv, rendered); pruneErr != nil {
-			log.Error(pruneErr, "prune failed; retrying")
-		} else {
-			r.markPruned(req.NamespacedName, digest)
+	if digest := rendered.digest(); r.pruneDue(key, digest) {
+		if err := r.prune(ctx, dv, rendered); err != nil {
+			return ctrl.Result{}, fmt.Errorf("prune: %w", err)
 		}
-	}
-	if err := r.writeStatus(ctx, &dv); err != nil {
-		return ctrl.Result{}, err
-	}
-	if pruneErr != nil {
-		return ctrl.Result{}, pruneErr
+		r.markPruned(key, digest)
 	}
 	// The watches cover the CR, Deployments, Secrets and Routes; this timer heals
 	// drift on the rest.
@@ -255,13 +264,13 @@ func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvi
 		// report "all dependencies present" from the zero result.
 		logf.FromContext(ctx).Error(err, "dependency probe failed")
 		dv.Status.ObservedGeneration = dv.Generation
-		return r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionDependenciesReady, "ProbeFailed",
-			err.Error(), dotvirtv1alpha1.PhaseBlockedOnDependencies, time.Minute)
+		return r.waitPhase(dv, dotvirtv1alpha1.ConditionDependenciesReady, "ProbeFailed",
+			err.Error(), dotvirtv1alpha1.PhaseBlockedOnDependencies, time.Minute), nil
 	}
 	if len(depRes.MissingHard) > 0 {
 		dv.Status.ObservedGeneration = dv.Generation
-		return r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionDependenciesReady, "MissingPrerequisite",
-			depRes.Summary(), dotvirtv1alpha1.PhaseBlockedOnDependencies, time.Minute)
+		return r.waitPhase(dv, dotvirtv1alpha1.ConditionDependenciesReady, "MissingPrerequisite",
+			depRes.Summary(), dotvirtv1alpha1.PhaseBlockedOnDependencies, time.Minute), nil
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionDependenciesReady, metav1.ConditionTrue, "Satisfied", depRes.Summary())
 	return nil, nil
@@ -417,10 +426,8 @@ func (f phaseFailure) Unwrap() error { return f.err }
 // instead of the "Error" a raw error returned from a phase is recorded under.
 func applyFailed(err error) error { return phaseFailure{reason: "ApplyFailed", err: err} }
 
-// recordFailure writes the phase's failure condition + the Provisioning phase
-// (best-effort: Reconcile returns the error, so nothing else would persist the
-// status) and hands the error back for the requeue.
-func (r *DotvirtReconciler) recordFailure(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, condType string, err error) error {
+// recordFailure records the phase's failure condition and the Provisioning phase.
+func (r *DotvirtReconciler) recordFailure(dv *dotvirtv1alpha1.Dotvirt, condType string, err error) {
 	reason := "Error"
 	var f phaseFailure
 	if errors.As(err, &f) {
@@ -429,30 +436,20 @@ func (r *DotvirtReconciler) recordFailure(ctx context.Context, dv *dotvirtv1alph
 	r.setCondition(dv, condType, metav1.ConditionFalse, reason, err.Error())
 	r.markUnavailable(dv, condType, reason, err.Error())
 	dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
-	if uerr := r.writeStatus(ctx, dv); uerr != nil {
-		logf.FromContext(ctx).Error(uerr, "status update failed", "phase", dotvirtv1alpha1.PhaseProvisioning)
-	}
-	return err
 }
 
 // waitPhase is the explicit form of an EXPECTED wait: record the not-ready
-// condition + phase, persist status, and hand back the halt result.
+// condition + phase and hand back the halt result.
 // requeue 0 halts without a retry timer (the wait clears via a watch event).
 // phase "" leaves Status.Phase and Available untouched (a late retry must not
 // regress a serving install).
-func (r *DotvirtReconciler) waitPhase(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, condType, reason, msg, phase string, requeue time.Duration) (*ctrl.Result, error) {
+func (r *DotvirtReconciler) waitPhase(dv *dotvirtv1alpha1.Dotvirt, condType, reason, msg, phase string, requeue time.Duration) *ctrl.Result {
 	r.setCondition(dv, condType, metav1.ConditionFalse, reason, msg)
 	if phase != "" {
 		r.markUnavailable(dv, condType, reason, msg)
 		dv.Status.Phase = phase
 	}
-	if err := r.writeStatus(ctx, dv); err != nil {
-		return nil, err
-	}
-	if requeue == 0 {
-		return &ctrl.Result{}, nil
-	}
-	return &ctrl.Result{RequeueAfter: requeue}, nil
+	return &ctrl.Result{RequeueAfter: requeue}
 }
 
 // SetupWithManager registers the reconciler; r.Platform must already be set
@@ -479,12 +476,12 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return b.Complete(r)
 }
 
-// writeStatus persists the derived status as a MERGE PATCH, not an Update: OLM and
-// the status informer touch the object between our read and write often enough that
-// resourceVersion'd updates spray "object has been modified" requeue noise into the
-// log, which reads as a broken install to anyone skimming it. A merge patch carries
-// no resourceVersion, and every status field (conditions included) is derived and
-// dotvirt-owned, so replace-wholesale semantics are exact.
-func (r *DotvirtReconciler) writeStatus(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
-	return r.Status().Patch(ctx, dv, client.Merge)
+// writeStatus persists the pass's status as a merge patch diffed against base,
+// the pass's own read. OLM and the status informer touch the object between that
+// read and this write often enough that a resourceVersion'd write sprays "object
+// has been modified" requeue noise into the log, which reads as a broken install.
+// The diff never carries resourceVersion while base and dv share one, and a
+// derived field the pass cleared goes out as a null, so it still converges.
+func (r *DotvirtReconciler) writeStatus(ctx context.Context, dv, base *dotvirtv1alpha1.Dotvirt) error {
+	return r.Status().Patch(ctx, dv, client.MergeFrom(base))
 }
