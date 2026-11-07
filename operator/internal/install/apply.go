@@ -16,9 +16,7 @@ import (
 	"context"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/selection"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
@@ -36,7 +34,7 @@ const AppName = "dotvirt"
 const HTTPPort int32 = 8080
 
 // InstanceLabel and InstanceNamespaceLabel together tie a rendered object to the
-// install that owns it; prune and the finalizer's cleanup select on both. Two
+// install that owns it; prune, which the finalizer runs too, selects on both. Two
 // labels, not one "<ns>.<name>" value: a label value caps at 63 characters and a
 // CR name alone may be longer.
 const (
@@ -64,18 +62,6 @@ func OwnedBy(labels map[string]string, dv *dotvirtv1alpha1.Dotvirt) bool {
 	}
 	ns, ok := labels[InstanceNamespaceLabel]
 	return !ok || ns == dv.Namespace
-}
-
-// InstanceSelectors match dv's objects: the current label pair, and the legacy
-// name-only label (OwnedBy explains why that one is still dv's).
-func InstanceSelectors(dv *dotvirtv1alpha1.Dotvirt) []labels.Selector {
-	name, _ := labels.NewRequirement(InstanceLabel, selection.Equals, []string{dv.Name})
-	ns, _ := labels.NewRequirement(InstanceNamespaceLabel, selection.Equals, []string{dv.Namespace})
-	noNS, _ := labels.NewRequirement(InstanceNamespaceLabel, selection.DoesNotExist, nil)
-	return []labels.Selector{
-		labels.NewSelector().Add(*name, *ns),
-		labels.NewSelector().Add(*name, *noNS),
-	}
 }
 
 // unstructuredObject renders a labeled unstructured object with the given spec -

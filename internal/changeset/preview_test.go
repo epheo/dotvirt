@@ -191,3 +191,16 @@ func TestPreviewDeployFromTemplate(t *testing.T) {
 		t.Errorf("an absent template must refuse as ErrNotFound, got %v", err)
 	}
 }
+
+// A file that does not parse costs a preview nothing elsewhere: a new VM
+// beside it still renders, as staging would.
+func TestPreviewSurvivesUnparsedFile(t *testing.T) {
+	bare := seedBareFiles(t, map[string][]byte{"alpha/bad.yaml": []byte("kind: VirtualMachine\n---\nfoo: [\n")})
+	c := newTestCoordinator(t, false)
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+	p, err := c.PreviewCreateVM(proj, json.RawMessage(`{"name":"db","namespace":"alpha","instancetype":"u1.medium",
+		"preference":"fedora","osImage":{"name":"fedora","namespace":"kv"}}`))
+	if err != nil || len(p.Files) != 1 || p.Files[0].Path != "alpha/db.yaml" {
+		t.Fatalf("PreviewCreateVM beside an unparsed file = %+v, %v", p, err)
+	}
+}

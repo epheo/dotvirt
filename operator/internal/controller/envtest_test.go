@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,8 +17,8 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/selection"
@@ -32,6 +33,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
+	"github.com/epheo/dotvirt/operator/internal/deps"
 	"github.com/epheo/dotvirt/operator/internal/install"
 	"github.com/epheo/dotvirt/operator/internal/platform"
 )
@@ -103,6 +105,13 @@ func TestEnvtest(t *testing.T) {
 			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "clusterroles"}, false},
 			{authzv1.ResourceAttributes{Verb: "update", Group: "apps", Resource: "deployments", Namespace: "dotvirt"}, false},
 			{authzv1.ResourceAttributes{Verb: "watch", Resource: "configmaps"}, false},
+			// Deletes are scoped to the names the install renders.
+			{authzv1.ResourceAttributes{Verb: "delete", Resource: "secrets", Namespace: "argocd", Name: install.AppsetSecretName}, true},
+			{authzv1.ResourceAttributes{Verb: "delete", Resource: "secrets", Namespace: "argocd", Name: "argocd-secret"}, false},
+			{authzv1.ResourceAttributes{Verb: "deletecollection", Resource: "secrets", Namespace: "argocd"}, false},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: "dotvirt"}, true},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: "cluster-admin"}, false},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "argoproj.io", Resource: "applications", Namespace: "argocd", Name: "some-tenant"}, false},
 		} {
 			res, err := kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx,
 				&authzv1.SelfSubjectAccessReview{Spec: authzv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &c.attrs}}, metav1.CreateOptions{})
@@ -126,7 +135,7 @@ func TestEnvtest(t *testing.T) {
 	})
 
 	// One manager for the remaining subtests: its cleanup belongs to the parent.
-	runManager(t, opCfg, scheme)
+	passes := runManager(t, opCfg, scheme)
 
 	t.Run("install reconciles to ready as the operator", func(t *testing.T) {
 		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
@@ -195,34 +204,72 @@ func TestEnvtest(t *testing.T) {
 		}
 	})
 
+	t.Run("a status-only change does not re-run the pass", func(t *testing.T) {
+		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
+		settle(t, admin, dv, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: install.AppName, Namespace: "dotvirt"}})
+		before := passes.Load()
+		base := dv.DeepCopy()
+		dv.Status.Phase = "Probe"
+		if err := admin.Status().Patch(ctx, dv, client.MergeFrom(base)); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Second)
+		if n := passes.Load() - before; n != 0 {
+			t.Errorf("a status-only change ran %d passes", n)
+		}
+	})
+
 	t.Run("deletion cleans up as the operator", func(t *testing.T) {
 		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
+		// A name only an older version rendered: the name-scoped delete grant
+		// refuses it, which must not wedge deletion.
+		legacy := &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-legacy", Labels: install.Labels(dv)},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "dotvirt"},
+		}
+		mustCreate(t, admin, legacy)
 		if err := admin.Delete(ctx, dv); err != nil {
 			t.Fatal(err)
 		}
 		eventually(t, "CR gone", func() bool {
 			return apierrors.IsNotFound(admin.Get(ctx, client.ObjectKeyFromObject(dv), &dotvirtv1alpha1.Dotvirt{}))
 		})
-		var crbs rbacv1.ClusterRoleBindingList
-		if err := admin.List(ctx, &crbs, client.MatchingLabels{install.InstanceLabel: "x"}); err != nil {
-			t.Fatal(err)
+		left := map[string]bool{}
+		for _, list := range []client.ObjectList{
+			&rbacv1.ClusterRoleBindingList{},
+			&corev1.SecretList{},
+			&corev1.ConfigMapList{},
+			&appsv1.DeploymentList{},
+			&corev1.ServiceList{},
+			&corev1.ServiceAccountList{},
+			unstructuredList(install.ArgoGVK("AppProject"))(),
+			unstructuredList(install.ArgoGVK("ApplicationSet"))(),
+		} {
+			if err := admin.List(ctx, list, client.MatchingLabels{install.InstanceLabel: dv.Name}); err != nil {
+				t.Fatal(err)
+			}
+			items, err := apimeta.ExtractList(list)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, item := range items {
+				obj := item.(client.Object)
+				// The install namespace's state is ownerRef-GC'd, and envtest runs no GC.
+				if _, isSecret := obj.(*corev1.Secret); isSecret && obj.GetNamespace() == dv.Namespace {
+					continue
+				}
+				left[obj.GetNamespace()+"/"+obj.GetName()] = true
+			}
 		}
-		if len(crbs.Items) != 0 {
-			t.Errorf("instance ClusterRoleBindings left: %d", len(crbs.Items))
-		}
-		ul := &unstructured.UnstructuredList{}
-		ul.SetGroupVersionKind(install.ArgoGVK("ApplicationSetList"))
-		if err := admin.List(ctx, ul, client.InNamespace("argocd"), client.MatchingLabels{install.InstanceLabel: "x"}); err != nil {
-			t.Fatal(err)
-		}
-		if len(ul.Items) != 0 {
-			t.Errorf("instance ApplicationSets left: %d", len(ul.Items))
+		if len(left) != 1 || !left["/"+legacy.Name] {
+			t.Errorf("left after deletion: %v, want only the refused legacy binding", left)
 		}
 	})
 }
 
-// runManager starts the controller as cmd/main.go wires it, under cfg.
-func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) {
+// runManager starts the controller as cmd/main.go wires it, under cfg, and
+// counts its install passes.
+func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) *atomic.Int64 {
 	t.Helper()
 	hasInstance, _ := labels.NewRequirement(install.InstanceLabel, selection.Exists, nil)
 	instanceOnly := cache.ByObject{Label: labels.NewSelector().Add(*hasInstance)}
@@ -239,13 +286,17 @@ func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	passes := &atomic.Int64{}
 	r := &DotvirtReconciler{
 		Client:    mgr.GetClient(),
 		Scheme:    mgr.GetScheme(),
 		Config:    mgr.GetConfig(),
 		Platform:  platform.Kubernetes,
 		APIReader: mgr.GetAPIReader(),
-		probe:     depsOK,
+		probe: func(c *rest.Config) (deps.Result, error) {
+			passes.Add(1)
+			return depsOK(c)
+		},
 	}
 	if err := r.SetupWithManager(mgr); err != nil {
 		t.Fatal(err)
@@ -259,6 +310,7 @@ func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) {
 			t.Errorf("manager: %v", err)
 		}
 	})
+	return passes
 }
 
 // argoStubCRDs registers the argoproj.io kinds the install applies, schemaless:
@@ -321,6 +373,29 @@ func managedBy(fields []metav1.ManagedFieldsEntry, manager string, op metav1.Man
 		}
 	}
 	return false
+}
+
+// settle waits until the objects' resourceVersions hold still, so the passes
+// their last writes triggered have run.
+func settle(t *testing.T, c client.Client, objs ...client.Object) {
+	t.Helper()
+	versions := func() string {
+		var vs []string
+		for _, obj := range objs {
+			if err := c.Get(context.Background(), client.ObjectKeyFromObject(obj), obj); err != nil {
+				t.Fatal(err)
+			}
+			vs = append(vs, obj.GetResourceVersion())
+		}
+		return strings.Join(vs, ",")
+	}
+	last, stableSince := versions(), time.Now()
+	eventually(t, "objects settled", func() bool {
+		if v := versions(); v != last {
+			last, stableSince = v, time.Now()
+		}
+		return time.Since(stableSince) > 1500*time.Millisecond
+	})
 }
 
 func eventually(t *testing.T, what string, cond func() bool) {

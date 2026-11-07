@@ -36,22 +36,31 @@ func Header(content []byte) (model.ObjectRef, error) {
 }
 
 // Headers is Header over every document of a file, in one pass: the
-// identities declared, in order, and the document count - empty, comment-only
-// and headerless documents counted too, so a count above len(heads) means the
-// file holds content the headers cannot name. A document without kind or name
-// declares nothing; docs is -1 when a document fails to parse.
+// identities declared, in order, and the document count - headerless
+// documents counted too, so a count above len(heads) means the file holds
+// content the headers cannot name. A null document (a trailing ---, a
+// comment-only one) is no content, as kubectl reads it, so it is not counted.
+// A document without kind or name declares nothing; docs is -1 when a
+// document fails to parse.
 func Headers(content []byte) (heads []model.ObjectRef, docs int) {
 	dec := yaml.NewDecoder(bytes.NewReader(content))
 	for {
-		var h header
-		err := dec.Decode(&h)
+		var doc yaml.Node
+		err := dec.Decode(&doc)
 		if err == io.EOF {
 			return heads, docs
 		}
 		if err != nil {
 			return heads, -1
 		}
+		if len(doc.Content) == 0 || doc.Content[0].ShortTag() == "!!null" {
+			continue
+		}
 		docs++
+		var h header
+		if err := doc.Decode(&h); err != nil {
+			return heads, -1
+		}
 		if h.Kind == "" || h.Metadata.Name == "" {
 			continue
 		}

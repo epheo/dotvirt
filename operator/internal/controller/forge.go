@@ -13,6 +13,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -27,9 +28,8 @@ import (
 
 // reconcileForge stands up + bootstraps the managed Forgejo (opt-in, eval-grade)
 // before anything that needs the forge credential. Once dotvirt-forge exists, the
-// rest of the install can't tell it from a BYO forge. For a wholly unconfigured forge
-// it records NotConfigured (push-only) and returns; for a BYO forge only the
-// trust anchors remain. Requeues while Forgejo is coming up or its router host
+// rest of the install can't tell it from a BYO forge. Any other forge is only
+// observed (observeForge). Requeues while Forgejo is coming up or its router host
 // isn't assigned yet.
 func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (*ctrl.Result, error) {
 	// Before the first pod a pass may start: the managed Forgejo and the app both
@@ -42,18 +42,7 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 		// Derived status, so a switch off managed retires the stale bootstrap hint too.
 		dv.Status.ForgeURL = dv.Spec.Forge.URL
 		dv.Status.ForgeAdminHint = ""
-		if !install.ForgeConfigured(dv) {
-			if dv.Spec.Forge.URL != "" {
-				// A URL alone is not a forge: the app reads URL and token from the
-				// credentials secret. A generic reason beside a plainly set url is a lie.
-				r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "CredentialsRequired",
-					"spec.forge.url is set but spec.forge.credentialsSecret is not; name a Secret with url/username/token keys (or set forge.managed)")
-			} else {
-				r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "NotConfigured",
-					"no forge configured; propose pushes a branch but opens no pull request")
-			}
-		}
-		return nil, nil
+		return nil, r.observeForge(ctx, dv)
 	}
 	// Apply the base workload (incl. the exposure) first: on OpenShift with no explicit
 	// URL that Route is hostless, so the router assigns a host we read back and fill into
@@ -71,7 +60,7 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 	applyEffectiveForgeSpec(dv, forgeURL)
 	dv.Status.ForgeURL = forgeURL
 	if err := r.applyForgejoDeployment(ctx, dv, rc); err != nil {
-		return nil, applyFailed(err)
+		return nil, err
 	}
 	if r.DryRun {
 		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionForgeReady, "Forgejo bootstrap")
@@ -83,20 +72,47 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 		// reconciles the DB password to the admin secret on every start, so this should
 		// self-clear on the next pod restart; surface a legible reason (not a raw
 		// "mint token: 401") and requeue rather than hot-looping on the error.
-		return r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "AdminCredentialRejected",
+		return r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeReady, "AdminCredentialRejected",
 			fmt.Sprintf("Forgejo rejected the operator's admin credential. Restart the managed forge to reconcile "+
 				"its admin password: oc -n %s rollout restart deployment/%s", dv.Namespace, install.ForgejoServiceName),
-			dotvirtv1alpha1.PhaseProvisioning, time.Minute)
+			dotvirtv1alpha1.PhaseProvisioning, time.Minute), nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	if !ready {
-		return r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing",
-			"waiting for Forgejo to come up", dotvirtv1alpha1.PhaseProvisioning, 15*time.Second)
+		return r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing",
+			"waiting for Forgejo to come up", dotvirtv1alpha1.PhaseProvisioning, 15*time.Second), nil
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionTrue, "Ready", "managed Forgejo bootstrapped")
 	return nil, nil
+}
+
+// observeForge reports a forge the operator does not run. It never touches the
+// forge; the condition says whether the app has the credential it reads URL and
+// token from, since a missing one otherwise shows only as a pod stuck starting.
+func (r *DotvirtReconciler) observeForge(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
+	name := dv.Spec.Forge.CredentialsSecret
+	switch {
+	case name == "" && dv.Spec.Forge.URL != "":
+		// A URL alone is not a forge. A generic reason beside a plainly set url is a lie.
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "CredentialsRequired",
+			"spec.forge.url is set but spec.forge.credentialsSecret is not; name a Secret with url/username/token keys (or set forge.managed)")
+	case name == "":
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "NotConfigured",
+			"no forge configured; propose pushes a branch but opens no pull request")
+	default:
+		if _, err := r.secret(ctx, dv.Namespace, name); apierrors.IsNotFound(err) {
+			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "CredentialsSecretMissing",
+				fmt.Sprintf("spec.forge.credentialsSecret names %s/%s, which does not exist; the dotvirt pod cannot start without it", dv.Namespace, name))
+		} else if err != nil {
+			return fmt.Errorf("read forge credentials %q: %w", name, err)
+		} else {
+			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionTrue, "BringYourOwn",
+				"bring-your-own forge, credentials from secret "+name)
+		}
+	}
+	return nil
 }
 
 // managedForgeAPIBase is the base URL the operator uses for the managed Forgejo's
@@ -128,16 +144,17 @@ func (r *DotvirtReconciler) resolveForgeURL(ctx context.Context, dv *dotvirtv1al
 	// Reading routeHost in those cases would wait for a Route nothing creates, requeueing
 	// forever, so halt on the same predicate the exposure uses.
 	if r.Platform != platform.OpenShift || r.resolveExposureType(dv) != dotvirtv1alpha1.IngressRoute {
-		res, err := r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "ForgeURLRequired",
+		return "", r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeReady, "ForgeURLRequired",
 			"set spec.forge.url: the operator can only discover a managed forge's hostname from an OpenShift Route, which this install does not create",
-			dotvirtv1alpha1.PhaseProvisioning, 0)
-		return "", res, err
+			dotvirtv1alpha1.PhaseProvisioning, 0), nil
 	}
-	host := r.routeHost(ctx, dv.Namespace, install.ForgejoServiceName)
+	host, err := r.routeHost(ctx, dv.Namespace, install.ForgejoServiceName)
+	if err != nil {
+		return "", nil, fmt.Errorf("read the forge Route: %w", err)
+	}
 	if host == "" {
-		res, err := r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing",
-			"waiting for the router to assign the forge hostname", dotvirtv1alpha1.PhaseProvisioning, 5*time.Second)
-		return "", res, err
+		return "", r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing",
+			"waiting for the router to assign the forge hostname", dotvirtv1alpha1.PhaseProvisioning, 5*time.Second), nil
 	}
 	return "https://" + host, nil, nil
 }
@@ -162,36 +179,40 @@ func forgeAdminHint(ns string) string {
 
 // reconcilePlatformRepo ensures the platform repo exists - the imperative
 // bootstrap pure declarative installers can't do. Skipped in dry-run (a real forge
-// mutation server-side dry-run can't model). Runs LAST in the pipeline: nothing
-// below it depends on the repo existing, so its retry never delays another phase.
-// A failure keeps Available and Phase untouched (the operand still serves; the
-// condition plus the app's recover-repo UI carry the signal) but requeues, since
-// no watch event fires when the forge comes back.
+// mutation server-side dry-run can't model). Best-effort, like the webhooks: a
+// failure is recorded and the pass completes, since the operand serves without
+// the repo (the condition plus the app's recover-repo UI carry the signal), so
+// Available, the observed generation and prune must not wait on the forge. The
+// pass then requeues on platformRepoRetry: no watch event fires when the forge
+// comes back.
 func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, _ *reconcileCtx) (*ctrl.Result, error) {
-	switch {
-	case dv.Spec.Forge.PlatformRepo == "":
-		// No platform tier configured; nothing to bootstrap.
-	case r.DryRun:
-		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionForgeRepoReady, "platform-repo bootstrap")
-	default:
-		if err := r.ensurePlatformRepo(ctx, dv); err != nil {
-			// phase "": the operand still serves, so the retry must not regress
-			// a Ready install.
-			return r.waitPhase(ctx, dv, dotvirtv1alpha1.ConditionForgeRepoReady, "Error",
-				err.Error(), "", time.Minute)
-		}
-		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionTrue, "Ready", "platform repo present")
+	if dv.Spec.Forge.PlatformRepo == "" {
+		// Derived: a cleared platformRepo retires the repo's last verdict.
+		meta.RemoveStatusCondition(&dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeRepoReady)
+		return nil, nil
 	}
+	if err := r.ensurePlatformRepo(ctx, dv); err != nil {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionFalse, "Error", err.Error())
+		return nil, nil
+	}
+	r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionTrue, "Ready", "platform repo present")
 	return nil, nil
 }
 
 // ensurePlatformRepo creates the platform repo on the forge if absent - the
 // install-time step a Helm/Kustomize/ArgoCD-app installer structurally can't do
-// (it's a forge API call, not a kubectl apply).
+// (it's a forge API call, not a kubectl apply). A managed forge's owner org is
+// the operator's to create too (repos live under it for the org-level webhook);
+// ensuring it every pass, not only at token mint, lets one failed create heal.
 func (r *DotvirtReconciler) ensurePlatformRepo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
 	client, err := r.forgeClient(ctx, dv)
 	if err != nil {
 		return err
+	}
+	if dv.Spec.Forge.Managed {
+		if err := client.EnsureOrg(); err != nil {
+			return err
+		}
 	}
 	created, err := client.EnsureRepo()
 	if err != nil {
@@ -245,37 +266,48 @@ func (r *DotvirtReconciler) applyForgejoBase(ctx context.Context, dv *dotvirtv1a
 
 // applyForgejoDeployment renders the Forgejo Deployment once the effective URL is filled,
 // so its ROOT_URL is the browser-facing host. Kept separate from applyForgejoBase for
-// that ordering.
+// that ordering. A failed read of a template input fails the phase: rendering it
+// blank would roll the Recreate pod twice for one read blip.
 func (r *DotvirtReconciler) applyForgejoDeployment(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) error {
 	// The webhook allowlist needs ArgoCD's externally-visible host (see forgejoEnv),
 	// the URL webhook registration posts to. Empty (no Argo URL yet) renders the
 	// baseline allowlist; the pass that resolves it re-renders the Deployment with
 	// the host in place.
+	if rc.argoURLErr != nil {
+		return fmt.Errorf("read the ArgoCD Route: %w", rc.argoURLErr)
+	}
 	argoHost := ""
 	if u, err := url.Parse(rc.argoURL); err == nil {
 		argoHost = u.Hostname()
 	}
+	hash, err := r.adminSecretHash(ctx, dv)
+	if err != nil {
+		return err
+	}
 	// fsGroup only on vanilla K8s; OpenShift's restricted-v2 injects its own.
-	return r.applyOwned(ctx, dv, install.ForgejoDeployment(dv, r.Platform != platform.OpenShift, argoHost, r.adminSecretHash(ctx, dv)))
+	if err := r.applyOwned(ctx, dv, install.ForgejoDeployment(dv, r.Platform != platform.OpenShift, argoHost, hash)); err != nil {
+		return applyFailed(err)
+	}
+	return nil
 }
 
 // adminSecretHash rides the pod template so a rotated secret rolls the pod and
 // the initContainer converges the DB password with no human runbook. Empty in
-// dry-run and on read failure; the 401 path stays the legible fallback.
-func (r *DotvirtReconciler) adminSecretHash(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) string {
+// dry-run, where the secret is never generated.
+func (r *DotvirtReconciler) adminSecretHash(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (string, error) {
 	if r.DryRun {
-		return ""
+		return "", nil
 	}
 	s, err := r.secret(ctx, dv.Namespace, install.ForgejoAdminSecret)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("read the forge admin secret: %w", err)
 	}
 	sum := sha256.Sum256(s.Data["password"])
-	return hex.EncodeToString(sum[:8])
+	return hex.EncodeToString(sum[:8]), nil
 }
 
-// bootstrapForgejo mints the scoped token + ensures the owner org once the managed
-// Forgejo is up, then writes the dotvirt-forge secret. Idempotent: a no-op once
+// bootstrapForgejo mints the scoped token once the managed Forgejo is up, then
+// writes the dotvirt-forge secret. Idempotent: a no-op once
 // dotvirt-forge exists; returns ready=false (caller requeues) while Forgejo isn't up.
 func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (bool, error) {
 	credName := install.ForgeSecretName(dv)
@@ -339,14 +371,6 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	}
 	if err := r.writeForgeSecret(ctx, dv, credName, dv.Spec.Forge.URL, install.ForgejoBotUser, token); err != nil {
 		return false, err
-	}
-	// Ensure the owner org exists (repos live under it for the org-level webhook).
-	if dv.Spec.Forge.PlatformRepo != "" {
-		if c := forge.NewFactory(apiBase, forge.StaticToken(token), false, "").For(dv.Spec.Forge.PlatformRepo); c != nil {
-			if err := c.EnsureOrg(); err != nil {
-				return false, err
-			}
-		}
 	}
 	return true, nil
 }

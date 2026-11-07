@@ -10,11 +10,17 @@ rules:
   - configmaps
   verbs:
   - create
-  - delete
-  - deletecollection
   - get
   - list
   - patch
+- apiGroups:
+  - ""
+  resourceNames:
+  - dotvirt-appset-plugin
+  resources:
+  - configmaps
+  verbs:
+  - delete
 - apiGroups:
   - ""
   resources:
@@ -28,12 +34,19 @@ rules:
   - secrets
   verbs:
   - create
-  - delete
-  - deletecollection
   - get
   - list
   - patch
   - watch
+- apiGroups:
+  - ""
+  resourceNames:
+  - dotvirt-appset-plugin
+  - dotvirt-repo-creds
+  resources:
+  - secrets
+  verbs:
+  - delete
 - apiGroups:
   - ""
   resources:
@@ -41,20 +54,45 @@ rules:
   - services
   verbs:
   - create
-  - delete
   - list
   - patch
+- apiGroups:
+  - ""
+  resourceNames:
+  - dotvirt
+  - dotvirt-forgejo
+  resources:
+  - serviceaccounts
+  - services
+  verbs:
+  - delete
 - apiGroups:
   - apps
   resources:
   - deployments
   verbs:
   - create
-  - delete
   - get
   - list
   - patch
   - watch
+- apiGroups:
+  - apps
+  resourceNames:
+  - dotvirt
+  - dotvirt-forgejo
+  resources:
+  - deployments
+  verbs:
+  - delete
+- apiGroups:
+  - argoproj.io
+  resourceNames:
+  - dotvirt-platform
+  resources:
+  - applications
+  verbs:
+  - delete
 - apiGroups:
   - argoproj.io
   resources:
@@ -63,10 +101,25 @@ rules:
   - appprojects
   verbs:
   - create
-  - delete
-  - deletecollection
   - list
   - patch
+- apiGroups:
+  - argoproj.io
+  resourceNames:
+  - dotvirt-projects
+  resources:
+  - applicationsets
+  verbs:
+  - delete
+- apiGroups:
+  - argoproj.io
+  resourceNames:
+  - dotvirt-platform
+  - dotvirt-tenants
+  resources:
+  - appprojects
+  verbs:
+  - delete
 - apiGroups:
   - dotvirt.io
   resources:
@@ -97,19 +150,36 @@ rules:
   - networkpolicies
   verbs:
   - create
-  - delete
   - list
   - patch
+- apiGroups:
+  - networking.k8s.io
+  resourceNames:
+  - dotvirt
+  - dotvirt-forgejo
+  resources:
+  - ingresses
+  - networkpolicies
+  verbs:
+  - delete
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:
   - clusterrolebindings
   verbs:
   - create
-  - delete
-  - deletecollection
   - list
   - patch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resourceNames:
+  - dotvirt
+  - dotvirt-argocd-apply
+  - dotvirt-platform-network-admin
+  resources:
+  - clusterrolebindings
+  verbs:
+  - delete
 - apiGroups:
   - rbac.authorization.k8s.io
   resourceNames:
@@ -126,11 +196,19 @@ rules:
   - routes
   verbs:
   - create
-  - delete
   - get
   - list
   - patch
   - watch
+- apiGroups:
+  - route.openshift.io
+  resourceNames:
+  - dotvirt
+  - dotvirt-forgejo
+  resources:
+  - routes
+  verbs:
+  - delete
 - apiGroups:
   - route.openshift.io
   resources:

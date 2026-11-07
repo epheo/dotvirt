@@ -1,4 +1,5 @@
-# dotvirt build/test entry points. The same targets back .github/workflows/ci.yaml.
+# Local build/test entry points. CI (.github/workflows/ci.yaml) runs its own steps,
+# not these targets, so a change here does not change what CI gates.
 #
 # Image: quay.io/epheo/dotvirt, tagged with the immutable short-commit SHA — never a
 # moving :latest (references pin the @sha256 digest). Push needs `podman login quay.io`.
@@ -13,8 +14,8 @@ build:
 	go build -o dotvirt ./cmd/dotvirt
 
 test:
-	go vet ./...
-	go test ./...
+	go vet ./... ./pkg/forge/...
+	go test ./... ./pkg/forge/...
 
 web:
 	cd web && npm ci && npm run build
