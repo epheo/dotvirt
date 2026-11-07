@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 
@@ -39,9 +40,7 @@ func (r *Repo) DirHistory(branch, dir string, limit int) ([]model.Commit, error)
 // FileAt reads path as it was in commit hash. ErrNoFile when the commit's
 // tree has no such file.
 func (r *Repo) FileAt(hash, path string) ([]byte, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, err := r.commit(hash)
+	c, err := commitAt(r.repo.Load(), hash)
 	if err != nil {
 		return nil, err
 	}
@@ -60,17 +59,14 @@ func (r *Repo) FileAt(hash, path string) ([]byte, error) {
 }
 
 // historyScan bounds one walk: a file untouched for this many commits reads as
-// having no older history rather than holding r.mu for the whole branch.
+// having no older history rather than costing a walk of the whole branch.
 const historyScan = 1000
 
 // walkHistory follows first parents from branch's head, keeping the commits
 // keep accepts, until limit are kept, the root is reached, or historyScan
 // commits have been inspected.
 func (r *Repo) walkHistory(branch string, limit int, keep func(*object.Commit) (bool, error)) ([]model.Commit, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	c, err := r.branchCommit(branch)
+	c, err := branchCommit(r.repo.Load(), branch)
 	if err != nil {
 		return nil, err
 	}
@@ -177,9 +173,7 @@ type CommitDiff struct {
 // CommitDiff resolves hash and diffs it against its first parent (a root commit
 // diffs against the empty tree).
 func (r *Repo) CommitDiff(hash string) (CommitDiff, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, err := r.commit(hash)
+	c, err := commitAt(r.repo.Load(), hash)
 	if err != nil {
 		return CommitDiff{}, err
 	}
@@ -202,13 +196,12 @@ var ErrNoFile = errors.New("file not in the commit")
 // diff from their merge base to head, which is what merging head introduces.
 // Without a common ancestor the diff is against base itself.
 func (r *Repo) BranchDiff(base, head string) ([]FileChange, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	from, err := r.branchCommit(base)
+	repo := r.repo.Load()
+	from, err := branchCommit(repo, base)
 	if err != nil {
 		return nil, err
 	}
-	to, err := r.branchCommit(head)
+	to, err := branchCommit(repo, head)
 	if err != nil {
 		return nil, err
 	}
@@ -230,16 +223,15 @@ func (r *Repo) BranchDiff(base, head string) ([]FileChange, error) {
 
 // branchCommit is the one branch resolver: every read of a branch head goes
 // through it, so a branch the mirror lacks reads as ErrNoBranch everywhere.
-// Caller holds r.mu.
-func (r *Repo) branchCommit(branch string) (*object.Commit, error) {
-	ref, err := r.repo.Reference(plumbing.NewBranchReferenceName(branch), true)
+func branchCommit(repo *git.Repository, branch string) (*object.Commit, error) {
+	ref, err := repo.Reference(plumbing.NewBranchReferenceName(branch), true)
 	if errors.Is(err, plumbing.ErrReferenceNotFound) {
 		return nil, fmt.Errorf("%w: %s", ErrNoBranch, branch)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("resolve branch %q: %w", branch, err)
 	}
-	c, err := r.repo.CommitObject(ref.Hash())
+	c, err := repo.CommitObject(ref.Hash())
 	if err != nil {
 		return nil, fmt.Errorf("commit for %q: %w", branch, err)
 	}
@@ -267,9 +259,9 @@ func (d CommitDiff) RevertItems() ([]ChangesetItem, error) {
 	return items, nil
 }
 
-// commit resolves a full hash to its object. Caller holds r.mu.
-func (r *Repo) commit(hash string) (*object.Commit, error) {
-	c, err := r.repo.CommitObject(plumbing.NewHash(hash))
+// commitAt resolves a full hash to its object in repo.
+func commitAt(repo *git.Repository, hash string) (*object.Commit, error) {
+	c, err := repo.CommitObject(plumbing.NewHash(hash))
 	if err != nil {
 		return nil, fmt.Errorf("commit %s: %w", hash, err)
 	}
@@ -277,7 +269,7 @@ func (r *Repo) commit(hash string) (*object.Commit, error) {
 }
 
 // firstParentDiff lists the YAML files c changed against its first parent, with
-// both sides' content, in path order. Caller holds r.mu.
+// both sides' content, in path order.
 func firstParentDiff(c *object.Commit) ([]FileChange, error) {
 	tree, err := c.Tree()
 	if err != nil {

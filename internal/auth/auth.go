@@ -8,6 +8,7 @@ package auth
 
 import (
 	"context"
+	"crypto/cipher"
 	"errors"
 	"fmt"
 	"time"
@@ -49,7 +50,7 @@ func FromContext(ctx context.Context) (Identity, bool) {
 // doesn't issue a TokenReview each time.
 type Authenticator struct {
 	saKube kubernetes.Interface
-	secret []byte
+	sealer cipher.AEAD // seals the session cookie (newSealer)
 
 	cache   *ttlcache.Cache[cachedIdentity] // keyed by sha256(token)
 	reviews *rate.Limiter                   // TokenReview budget for uncached tokens (reviewRate)
@@ -65,11 +66,11 @@ type cachedIdentity struct {
 const authCacheTTL = time.Minute
 
 // New builds an Authenticator. saKube is the SA-identity kube client (from
-// cluster.Factory.SAKube). secret signs the session cookie.
+// cluster.Factory.SAKube). secret keys the session cookie.
 func New(saKube kubernetes.Interface, secret []byte) *Authenticator {
 	return &Authenticator{
 		saKube:  saKube,
-		secret:  secret,
+		sealer:  newSealer(secret),
 		cache:   ttlcache.New[cachedIdentity](authCacheTTL),
 		reviews: rate.NewLimiter(reviewRate, reviewBurst),
 	}

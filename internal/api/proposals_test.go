@@ -14,6 +14,7 @@ import (
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
@@ -27,6 +28,20 @@ type fakeDraft struct {
 	fail  string                    // project whose lookup errors
 	calls int
 	by    map[string]int // forge calls per project
+
+	merged      []tasks.Merge // what the forge lists as merged
+	mergedFail  bool
+	mergedCalls int
+}
+
+func (f *fakeDraft) RecentlyMerged(project.ProjectInfo, time.Time) ([]tasks.Merge, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mergedCalls++
+	if f.mergedFail {
+		return nil, errors.New("forge down")
+	}
+	return f.merged, nil
 }
 
 func (f *fakeDraft) OpenProposals(proj project.ProjectInfo) ([]model.Proposal, error) {
@@ -354,4 +369,62 @@ func TestProposalsOpenStreamKeepsTokenWatched(t *testing.T) {
 	if got := fd.takeCalls(); len(got) != 0 {
 		t.Fatalf("a closed stream's token is still refreshed: %v", got)
 	}
+}
+
+// The merged lane costs a forge call only when its repo's head moved, plus one
+// settling read on the next backstop tick: the forge pushes a merge before it
+// marks the PR merged, so the read on the move can miss it.
+func TestMergedLaneReadsOnHeadMoves(t *testing.T) {
+	bus := eventbus.New()
+	feed := tasks.New(bus)
+	fd := &fakeDraft{prs: map[string]model.Proposal{}}
+	s := NewServer(Deps{Reader: fd, Draft: fd, Bus: bus, Tasks: feed})
+	repo := forge.NormalizeRepoURL("https://forge/o/a.git")
+	s.trackProposals(auth.Identity{Token: "tok-alice", Username: "alice"},
+		[]project.ProjectInfo{{Name: "team-a", Repo: "https://forge/o/a.git"}}, false)
+	reads := mergedReads{}
+	pass := func(step string, tick bool, want int) {
+		t.Helper()
+		fd.mu.Lock()
+		fd.mergedCalls = 0
+		fd.mu.Unlock()
+		s.refreshMerged(reads, tick)
+		fd.mu.Lock()
+		defer fd.mu.Unlock()
+		if fd.mergedCalls != want {
+			t.Fatalf("%s: %d merged-lane reads, want %d", step, fd.mergedCalls, want)
+		}
+	}
+	set := func(fn func()) {
+		fd.mu.Lock()
+		fn()
+		fd.mu.Unlock()
+	}
+
+	pass("cold lane", false, 1)
+	pass("nothing moved", false, 0)
+	pass("settle the reseed", true, 1)
+	pass("quiet backstop", true, 0)
+
+	bus.PublishKey(eventbus.GitChanged, repo)
+	pass("head moved, PR not marked merged yet", false, 1)
+	set(func() { fd.merged = []tasks.Merge{{RepoURL: repo, Number: 7, At: time.Now()}} })
+	pass("no move", false, 0)
+	if len(feed.Merges()) != 0 {
+		t.Fatal("merge recorded before the forge listed it")
+	}
+	pass("settle the move", true, 1)
+	if m := feed.Merges(); len(m) != 1 || m[0].Number != 7 {
+		t.Fatalf("settling read missed the merge: %+v", m)
+	}
+	pass("settled", true, 0)
+
+	set(func() { fd.mergedFail = true })
+	bus.PublishKey(eventbus.GitChanged, repo)
+	pass("failing read on a move", false, 1)
+	pass("failure waits for the backstop", false, 0)
+	pass("failed settle", true, 1)
+	set(func() { fd.mergedFail = false })
+	pass("retried on the next tick", true, 1)
+	pass("settled after recovery", true, 0)
 }

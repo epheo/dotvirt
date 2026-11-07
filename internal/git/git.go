@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/model"
@@ -21,6 +22,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage"
@@ -55,8 +57,10 @@ type Repo struct {
 	// cannot stall them.
 	fetchMu sync.Mutex
 
-	mu   sync.Mutex
-	repo *git.Repository
+	// repo is the published mirror. Refresh fetches into a fork and swaps it
+	// in, and a published repository is never written again: a read loads it
+	// once and walks it without a lock, on one consistent snapshot.
+	repo atomic.Pointer[git.Repository]
 
 	memos memoTable
 }
@@ -78,9 +82,7 @@ func (r *Repo) URL() string { return r.url }
 // branchHash returns branch's current commit hash from the local mirror (no fetch),
 // or "" if the branch can't be resolved - the memo invalidation key.
 func (r *Repo) branchHash(branch string) string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	ref, err := r.repo.Reference(plumbing.NewBranchReferenceName(branch), true)
+	ref, err := r.repo.Load().Reference(plumbing.NewBranchReferenceName(branch), true)
 	if err != nil {
 		return ""
 	}
@@ -105,7 +107,7 @@ func (r *Repo) clone() error {
 	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
 		return fmt.Errorf("clone %s: %w", r.url, err)
 	}
-	r.repo = repo
+	r.repo.Store(repo)
 	return nil
 }
 
@@ -131,16 +133,14 @@ const (
 // single point of network freshness: the background fetcher calls it on a
 // schedule, and it's nudged after dotvirt's own pushes. Reads never call it.
 //
-// The fetch writes into a fork of the mirror's storage and swaps it in under
-// r.mu: go-git's memory storage is unsynchronized maps, so fetching into the
-// live one would race the reads, and locking it would stall them on the network.
+// The fetch writes into a fork of the mirror's storage and swaps it in:
+// go-git's memory storage is unsynchronized maps, so fetching into the live one
+// would race the reads, and locking it would stall them on the network.
 func (r *Repo) refresh() error {
 	r.fetchMu.Lock()
 	defer r.fetchMu.Unlock()
 
-	r.mu.Lock()
-	fork, err := forkStorage(r.repo.Storer)
-	r.mu.Unlock()
+	fork, err := forkStorage(r.repo.Load().Storer)
 	if err != nil {
 		return fmt.Errorf("fetch: %w", err)
 	}
@@ -157,9 +157,10 @@ func (r *Repo) refresh() error {
 	if err != nil {
 		return fmt.Errorf("fetch: %w", err)
 	}
-	r.mu.Lock()
-	r.repo = next
-	r.mu.Unlock()
+	if err := collect(fork); err != nil {
+		return fmt.Errorf("fetch: %w", err)
+	}
+	r.repo.Store(next)
 	return nil
 }
 
@@ -182,6 +183,62 @@ func forkStorage(s storage.Storer) (*memory.Storage, error) {
 	return dst, nil
 }
 
+// collect drops the objects no ref reaches. forkStorage carries every object
+// forward, so a deleted or force-pushed branch's would otherwise live as long
+// as the mirror. s must not be published yet: this deletes from its maps.
+func collect(s *memory.Storage) error {
+	live := map[plumbing.Hash]bool{}
+	var todo []plumbing.Hash
+	for _, ref := range s.ReferenceStorage {
+		if ref.Type() == plumbing.HashReference {
+			todo = append(todo, ref.Hash())
+		}
+	}
+	for len(todo) > 0 {
+		h := todo[len(todo)-1]
+		todo = todo[:len(todo)-1]
+		obj, ok := s.Objects[h]
+		if live[h] || !ok {
+			continue
+		}
+		live[h] = true
+		switch obj.Type() {
+		case plumbing.CommitObject:
+			c, err := object.DecodeCommit(s, obj)
+			if err != nil {
+				return err
+			}
+			todo = append(append(todo, c.TreeHash), c.ParentHashes...)
+		case plumbing.TreeObject:
+			t, err := object.DecodeTree(s, obj)
+			if err != nil {
+				return err
+			}
+			for _, e := range t.Entries {
+				if e.Mode != filemode.Submodule {
+					todo = append(todo, e.Hash)
+				}
+			}
+		case plumbing.TagObject:
+			t, err := object.DecodeTag(s, obj)
+			if err != nil {
+				return err
+			}
+			todo = append(todo, t.Target)
+		}
+	}
+	for h := range s.Objects {
+		if !live[h] {
+			delete(s.Objects, h)
+			delete(s.Commits, h)
+			delete(s.Trees, h)
+			delete(s.Blobs, h)
+			delete(s.Tags, h)
+		}
+	}
+	return nil
+}
+
 // headsSignature refreshes from the remote and returns a stable string
 // summarizing all branch heads (name+hash). A change means some branch moved.
 // This is the background fetcher's entry point: it both fetches (the single
@@ -191,10 +248,7 @@ func (r *Repo) headsSignature() (string, error) {
 	if err := r.refresh(); err != nil {
 		return "", err
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	iter, err := r.repo.Branches()
+	iter, err := r.repo.Load().Branches()
 	if err != nil {
 		return "", err
 	}
@@ -210,12 +264,9 @@ func (r *Repo) headsSignature() (string, error) {
 }
 
 // WalkYAML visits branch's .yaml/.yml files passing include: the one tree
-// walk behind every per-branch index. visit runs under the repo lock, so it
-// must not call back into r.
+// walk behind every per-branch index.
 func (r *Repo) WalkYAML(branch string, include func(path string) bool, visit func(path string, content []byte) error) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	tree, err := r.treeFor(branch)
+	tree, err := treeFor(r.repo.Load(), branch)
 	if err != nil {
 		return err
 	}
@@ -235,9 +286,7 @@ func (r *Repo) WalkYAML(branch string, include func(path string) bool, visit fun
 // with a nil error means the branch resolves but holds no such file - the
 // release path branches on exactly that.
 func (r *Repo) LookupOnBranch(branch, path string) (content []byte, ok bool, err error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	tree, err := r.treeFor(branch)
+	tree, err := treeFor(r.repo.Load(), branch)
 	if err != nil {
 		return nil, false, err
 	}
@@ -255,9 +304,7 @@ func (r *Repo) LookupOnBranch(branch, path string) (content []byte, ok bool, err
 // FileOnBranch returns one file's raw content on branch - e.g. a base-branch
 // manifest for the raw-YAML view.
 func (r *Repo) FileOnBranch(branch, path string) ([]byte, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	tree, err := r.treeFor(branch)
+	tree, err := treeFor(r.repo.Load(), branch)
 	if err != nil {
 		return nil, err
 	}
@@ -268,9 +315,9 @@ func (r *Repo) FileOnBranch(branch, path string) ([]byte, error) {
 	return readFile(f)
 }
 
-// treeFor is branch's head tree. Caller holds r.mu.
-func (r *Repo) treeFor(branch string) (*object.Tree, error) {
-	c, err := r.branchCommit(branch)
+// treeFor is branch's head tree in repo.
+func treeFor(repo *git.Repository, branch string) (*object.Tree, error) {
+	c, err := branchCommit(repo, branch)
 	if err != nil {
 		return nil, err
 	}
