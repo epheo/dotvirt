@@ -7,10 +7,10 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 	"net/url"
 	"sort"
+	"sync"
 	"time"
 
 	authzv1 "k8s.io/api/authorization/v1"
@@ -97,18 +97,17 @@ func clientsFor(cfg *rest.Config) (*Client, error) {
 // The fast path is a cluster-wide Namespaces().List - but listing namespaces
 // does not imply reading VMs in them (an auditor-style role holds the former
 // without the latter), so it counts only when a cluster-wide VM read SSAR also
-// passes. Anything less falls back to probing each candidate namespace with a
-// SelfSubjectRulesReview and keeping those that grant get/list on
-// virtualmachines. candidates is the SA-discovered project namespace set;
-// without it the fallback has nothing to probe and returns empty.
+// passes. Anything less falls back to one list-virtualmachines SSAR per
+// candidate, at most probeConcurrency at once. candidates is the SA-discovered
+// project namespace set; without it the fallback has nothing to probe and
+// returns empty. A failed review is an error, never a smaller set: a smaller
+// set reads as lost access and would be cached as the answer.
 func (c *Client) VisibleNamespaces(ctx context.Context, candidates []string) ([]string, error) {
 	nsList, err := c.kube.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err == nil {
-		ok, aerr := c.allowed(ctx, &authzv1.ResourceAttributes{
-			Verb: "list", Group: "kubevirt.io", Resource: "virtualmachines",
-		})
+		ok, aerr := c.Can(ctx, "list", "kubevirt.io", "virtualmachines", "")
 		if aerr != nil {
-			return nil, fmt.Errorf("cluster-wide vm read review: %w", aerr)
+			return nil, aerr
 		}
 		if ok {
 			names := make([]string, 0, len(nsList.Items))
@@ -121,22 +120,53 @@ func (c *Client) VisibleNamespaces(ctx context.Context, candidates []string) ([]
 		return nil, fmt.Errorf("list namespaces: %w", err)
 	}
 
-	// No cluster-wide VM read: probe the candidate set instead.
-	// Skip (don't abort) on a per-candidate probe error so one transient/odd
-	// namespace can't blank the whole inventory.
-	var out []string
-	for _, ns := range candidates {
-		ok, err := c.canReadVMs(ctx, ns)
-		if err != nil {
-			log.Printf("visible namespaces: probe %s: %v (skipping)", ns, err)
-			continue
-		}
-		if ok {
-			out = append(out, ns)
-		}
+	var (
+		mu       sync.Mutex
+		wg       sync.WaitGroup
+		out      []string
+		failed   int
+		firstErr error
+		next     = make(chan string)
+	)
+	for range min(probeConcurrency, len(candidates)) {
+		wg.Go(func() {
+			for ns := range next {
+				if ctx.Err() != nil {
+					continue
+				}
+				ok, err := c.Can(ctx, "list", "kubevirt.io", "virtualmachines", ns)
+				mu.Lock()
+				switch {
+				case err != nil:
+					failed++
+					if firstErr == nil {
+						firstErr = err
+					}
+				case ok:
+					out = append(out, ns)
+				}
+				mu.Unlock()
+			}
+		})
 	}
+	for _, ns := range candidates {
+		next <- ns
+	}
+	close(next)
+	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if failed > 0 {
+		return nil, fmt.Errorf("vm read review failed in %d of %d namespaces: %w", failed, len(candidates), firstErr)
+	}
+	sort.Strings(out)
 	return out, nil
 }
+
+// probeConcurrency bounds the per-namespace reviews one visibility probe fans
+// out, so a token without cluster-wide VM read cannot burst the apiserver.
+const probeConcurrency = 8
 
 // VMListWatch is the List+Watch source for a cluster-wide VirtualMachine
 // reflector (run on the SA client). It backs clusterstate's snapshot so the read
@@ -199,24 +229,6 @@ func (c *Client) RoleBindingListWatch() *cache.ListWatch {
 	}
 }
 
-// canReadVMs reports whether this token may get/list VirtualMachines in ns, via a
-// SelfSubjectRulesReview. It checks VM read specifically (not a broader proxy like
-// pods): a namespace's project membership exposes its git repo URL, so only users
-// who can actually read its VMs should learn it.
-func (c *Client) canReadVMs(ctx context.Context, ns string) (bool, error) {
-	review := &authzv1.SelfSubjectRulesReview{Spec: authzv1.SelfSubjectRulesReviewSpec{Namespace: ns}}
-	res, err := c.kube.AuthorizationV1().SelfSubjectRulesReviews().Create(ctx, review, metav1.CreateOptions{})
-	if err != nil {
-		return false, fmt.Errorf("rules review for %s: %w", ns, err)
-	}
-	for _, rule := range res.Status.ResourceRules {
-		if grantsRead(rule, "kubevirt.io", "virtualmachines") {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 // allowed reports whether this token may perform the action described by attrs, via
 // a SelfSubjectAccessReview - the single SSAR primitive the capability checks share.
 func (c *Client) allowed(ctx context.Context, attrs *authzv1.ResourceAttributes) (bool, error) {
@@ -251,14 +263,6 @@ func (c *Client) Can(ctx context.Context, verb, group, resource, namespace strin
 		return false, fmt.Errorf("access review for %s %s in %s: %w", verb, resource, namespace, err)
 	}
 	return ok, nil
-}
-
-// grantsRead reports whether a resource rule allows get or list on the given
-// group/resource. "*" matches any verb, group, or resource.
-func grantsRead(rule authzv1.ResourceRule, group, resource string) bool {
-	return contains(rule.Verbs, "get", "list") &&
-		contains(rule.APIGroups, group) &&
-		contains(rule.Resources, resource)
 }
 
 // contains reports whether haystack holds "*" or any of the wanted values.

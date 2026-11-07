@@ -149,7 +149,7 @@ type Config struct {
 // RoleBindings + namespaces; a token's visibility can ALSO change via a
 // ClusterRoleBinding/ClusterRole, which the version does NOT observe. The TTL is the
 // backstop that bounds staleness for those un-watched RBAC sources, so it stays short
-// - long enough to spare the periodic SelfSubjectRulesReview on quiet tokens, short
+// - long enough to spare the periodic visibility probe on quiet tokens, short
 // enough that a cluster-level revocation can't linger.
 const visibleTTL = 30 * time.Second
 

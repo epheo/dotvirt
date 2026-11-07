@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	authzv1 "k8s.io/api/authorization/v1"
@@ -158,6 +159,32 @@ func TestVisibleForNoCrossTokenLeak(t *testing.T) {
 	}
 	if *aliceLists != 1 {
 		t.Fatalf("alice re-read cost %d rounds, want 1 (bob's fill evicted her entry)", *aliceLists)
+	}
+}
+
+// TestVisibleForNeverCachesAFailure pins LIVE-1: one failed namespace review
+// fails the probe instead of dropping that namespace, and the next read probes
+// again instead of serving a cached partial set.
+func TestVisibleForNeverCachesAFailure(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.readsVMs = tenantReadsTeamA
+	var down atomic.Bool
+	down.Store(true)
+	fc.ssarDown = func(a *authzv1.ResourceAttributes) bool { return down.Load() && a.Namespace == "orphans-ns" }
+	s := fc.server(nil, Config{})
+	id := auth.Identity{Token: tenantToken, Username: "tenant"}
+	c, err := s.clusterF.For(id.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := s.visibleFor(context.Background(), id, c); err == nil {
+		t.Fatalf("a failed review answered %v with nil error", got)
+	}
+	down.Store(false)
+	got, err := s.visibleFor(context.Background(), id, c)
+	if err != nil || !got["team-a-dev"] || len(got) != 1 {
+		t.Fatalf("after recovery: %v, %v; want only team-a-dev (the failure must not be cached)", got, err)
 	}
 }
 

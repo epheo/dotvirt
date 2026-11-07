@@ -65,8 +65,9 @@ func (s *Server) projectsFor(ctx context.Context, id auth.Identity, c *cluster.C
 }
 
 // visibleFor returns the set of namespaces id's token may read VMs in, cached by
-// token for visibleTTL. The snapshot's project namespaces feed the Forbidden->SSRR
-// fallback inside VisibleNamespaces.
+// token for visibleTTL. The snapshot's project namespaces are the candidates
+// VisibleNamespaces probes when the token lacks cluster-wide VM read. A failed
+// probe is never cached: the next read asks again.
 func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Client) (map[string]bool, error) {
 	ver := s.rbacVersion()
 	key := restfactory.TokenKey(id.Token)
