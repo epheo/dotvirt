@@ -58,7 +58,7 @@ func anyOf(parts ...matched) matched {
 const (
 	reasonPortNeeded    = "the rule restricts ports; give a destination port to resolve it"
 	reasonNamedPort     = "a named port can't be resolved here"
-	reasonNoAddrs       = "the VM reports no addresses (not running), so CIDR rules can't be resolved"
+	reasonNoAddrs       = "the VM reports no primary-network address (stopped or starting), so CIDR rules can't be resolved"
 	reasonSelector      = "a selector could not be resolved"
 	reasonSubject       = "the policy's subject selector could not be resolved"
 	reasonNodePeer      = "a node-selector rule - whether this address is a cluster node is unknown here"
@@ -133,7 +133,7 @@ func selMatch(sel *metav1.LabelSelector, lbls map[string]string) matched {
 }
 
 // resolveAddrs returns the target's parseable addresses, or the conditional
-// match when the workload reports none (not running).
+// match when the workload reports none (stopped or starting).
 func resolveAddrs(t peerTarget) ([]netip.Addr, *matched) {
 	raw := t.addrs()
 	if len(raw) == 0 || (len(raw) == 1 && raw[0] == "") {
