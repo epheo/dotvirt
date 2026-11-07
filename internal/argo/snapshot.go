@@ -69,10 +69,88 @@ func (s *Snapshot) Run(ctx context.Context) {
 	reflect.Run(ctx, reflect.TrackHealth(s.sa.applicationsListWatch(), &s.healthy, s.publish), s.store())
 }
 
-// store is the reflector's sink: every mutation marks the view dirty. derive
-// marks synced, not the store, so a synced snapshot always has a view to read.
+// store is the reflector's sink: every mutation that can move drift marks the
+// view dirty. derive marks synced, not the store, so a synced snapshot always has
+// a view to read.
 func (s *Snapshot) store() cache.Store {
-	return reflect.NewStore(s.apps, s.markDirty, nil)
+	return appStore{Indexer: reflect.NewStore(s.apps, func() {}, nil), dirty: s.markDirty}
+}
+
+// appStore marks the view dirty on every write except one that moved only what
+// Argo stamps on each reconcile, which no derive reads.
+type appStore struct {
+	cache.Indexer
+	dirty func()
+}
+
+func (c appStore) Add(obj any) error {
+	if err := c.Indexer.Add(obj); err != nil {
+		return err
+	}
+	c.dirty()
+	return nil
+}
+
+func (c appStore) Update(obj any) error {
+	old, had, _ := c.Get(obj)
+	if err := c.Indexer.Update(obj); err != nil {
+		return err
+	}
+	if had && reconcileOnly(old, obj) {
+		return nil
+	}
+	c.dirty()
+	return nil
+}
+
+func (c appStore) Delete(obj any) error {
+	if err := c.Indexer.Delete(obj); err != nil {
+		return err
+	}
+	c.dirty()
+	return nil
+}
+
+func (c appStore) Replace(list []any, rv string) error {
+	if err := c.Indexer.Replace(list, rv); err != nil {
+		return err
+	}
+	c.dirty()
+	return nil
+}
+
+// reconcileOnly reports whether two versions of an Application differ only in
+// per-reconcile noise. The noise is named, never the fields derive reads, so a
+// field nobody listed counts as a change and costs one extra derive at worst.
+// generation is noise too: without a status subresource it moves on every status
+// write, and a spec change still shows in spec itself.
+func reconcileOnly(old, cur any) bool {
+	a, ok := old.(*unstructured.Unstructured)
+	b, ok2 := cur.(*unstructured.Unstructured)
+	if !ok || !ok2 {
+		return false
+	}
+	return equality.Semantic.DeepEqual(withoutNoise(a.Object), withoutNoise(b.Object))
+}
+
+// withoutNoise drops the per-reconcile stamps from shallow copies of the maps on
+// their path only; the rest is shared with the stored object, read, never written.
+func withoutNoise(obj map[string]any) map[string]any {
+	out := maps.Clone(obj)
+	if md, ok := out["metadata"].(map[string]any); ok {
+		md = maps.Clone(md)
+		delete(md, "resourceVersion")
+		delete(md, "generation")
+		delete(md, "managedFields")
+		out["metadata"] = md
+	}
+	if st, ok := out["status"].(map[string]any); ok {
+		st = maps.Clone(st)
+		delete(st, "reconciledAt")
+		delete(st, "observedAt")
+		out["status"] = st
+	}
+	return out
 }
 
 // markDirty runs after the store write, so the derive that consumes it lists

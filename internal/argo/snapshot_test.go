@@ -115,6 +115,47 @@ func settle(s *Snapshot) {
 	}
 }
 
+// Argo writes every Application on each reconcile; at 1000 apps a derive per
+// write is most of a core even with no change. A write that moves only the
+// reconcile stamps must not mark the view dirty; any other move must.
+func TestReconcileOnlyWriteSkipsDerive(t *testing.T) {
+	s := NewSnapshot(&Client{}, nil)
+	st := s.store()
+	a := benchApp(0)
+	a.SetResourceVersion("1")
+	a.SetGeneration(1)
+	_ = st.Replace([]any{a}, "1")
+	settle(s)
+	pending := func() bool { return len(s.dirty) > 0 }
+
+	tick := a.DeepCopy()
+	tick.SetResourceVersion("2")
+	tick.SetGeneration(2)
+	tick.SetManagedFields([]metav1.ManagedFieldsEntry{{Manager: "argocd-application-controller"}})
+	_ = unstructured.SetNestedField(tick.Object, "2026-11-07T10:00:00Z", "status", "reconciledAt")
+	_ = unstructured.SetNestedField(tick.Object, "2026-11-07T10:00:00Z", "status", "observedAt")
+	_ = st.Update(tick)
+	if pending() {
+		t.Fatal("a reconcile-only write marked the view dirty")
+	}
+
+	moved := tick.DeepCopy()
+	moved.SetResourceVersion("3")
+	_ = unstructured.SetNestedField(moved.Object, "OutOfSync", "status", "sync", "status")
+	_ = st.Update(moved)
+	if !pending() {
+		t.Fatal("a sync status move did not mark the view dirty")
+	}
+	settle(s)
+
+	unlisted := moved.DeepCopy()
+	_ = unstructured.SetNestedField(unlisted.Object, "x", "status", "summary", "externalURLs")
+	_ = st.Update(unlisted)
+	if !pending() {
+		t.Fatal("a field outside the named noise must count as a change")
+	}
+}
+
 // A derive scans every Application, and a sync wave or a relist writes many in a
 // burst: moves that land while one derive runs must share the next derive, not
 // queue one each.

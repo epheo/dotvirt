@@ -45,3 +45,29 @@ func BenchmarkDriftRebuild(b *testing.B) {
 		s.derive()
 	}
 }
+
+// BenchmarkReconcileWrite is one Application write that moves only the reconcile
+// stamps: the store write plus the noise compare, and no derive.
+func BenchmarkReconcileWrite(b *testing.B) {
+	s := NewSnapshot(&Client{}, nil)
+	st := s.store()
+	var list []any
+	for i := range 50 {
+		list = append(list, benchApp(i))
+	}
+	_ = st.Replace(list, "1")
+	<-s.dirty
+	// Two distinct objects, so every compare walks two separate trees.
+	var ticks [2]*unstructured.Unstructured
+	for i := range ticks {
+		ticks[i] = benchApp(7)
+		_ = unstructured.SetNestedField(ticks[i].Object, fmt.Sprintf("t%d", i), "status", "reconciledAt")
+	}
+	b.ReportAllocs()
+	for i := 0; b.Loop(); i++ {
+		_ = st.Update(ticks[i%2])
+	}
+	if len(s.dirty) > 0 {
+		b.Fatal("a reconcile-only write marked the view dirty")
+	}
+}
