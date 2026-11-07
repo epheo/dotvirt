@@ -1,4 +1,4 @@
-import { expect, login, openVM, setScenario, stageChange, test } from './fx';
+import { expect, login, openTray, openVM, setScenario, stageChange, test } from './fx';
 
 // One test per UX bug the git history already paid for once. Each names the
 // PR that fixed it; the fixture holds the state that triggered it.
@@ -160,11 +160,7 @@ test('bulk selection stages a power change per VM', async ({ page }) => {
 	await page.getByRole('button', { name: 'Power Off (staged)' }).click();
 	// Deliberate skip: web-2 is already Off, so only web-1 stages - a bulk op
 	// must not write no-op edits into the draft.
-	await page
-		.getByRole('complementary', { name: 'Changes in flight' })
-		.getByRole('link', { name: 'Open in Changes' })
-		.first()
-		.click();
+	await (await openTray(page)).getByRole('link', { name: 'Open in Changes' }).first().click();
 	const staged = page.locator('main [data-project]');
 	await expect(staged).toHaveCount(1);
 	await expect(staged.first()).toContainText('web-1');
@@ -202,11 +198,7 @@ test('a drafts refresh keeps the half-typed PR title', async ({ page }) => {
 	await page.getByRole('button', { name: /Edit Settings/ }).click();
 	await page.getByRole('dialog').getByLabel('Memory').fill('8Gi');
 	await stageChange(page);
-	await page
-		.getByRole('complementary', { name: 'Changes in flight' })
-		.getByRole('link', { name: 'Open in Changes' })
-		.first()
-		.click();
+	await (await openTray(page)).getByRole('link', { name: 'Open in Changes' }).first().click();
 
 	const main = page.locator('main');
 	const title = main.getByLabel('Pull request title');

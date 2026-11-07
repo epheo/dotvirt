@@ -39,22 +39,27 @@
 				}`;
 </script>
 
+{#snippet count(t: Tab)}
+	{#if t.count !== undefined}
+		<span
+			class="ml-0.5 rounded-full px-1.5 text-[11px] {t.countTone === 'warn'
+				? 'bg-warn/30 font-medium text-warn-ink'
+				: 'bg-line-strong text-ink-soft'}">{t.count}</span
+		>
+	{/if}
+{/snippet}
+
 <nav class="flex {variant === 'underline' ? 'gap-1 text-sm' : 'flex-wrap gap-1'} {cls}">
 	{#each tabs as t (t.id)}
 		{#if href}
 			<a href={href(t.id)} data-sveltekit-replacestate class={itemClass(t)}>
 				{t.label}
+				{@render count(t)}
 			</a>
 		{:else}
 			<button onclick={() => onchange?.(t.id)} class={itemClass(t)}>
 				{t.label}
-				{#if t.count !== undefined}
-					<span
-						class="ml-0.5 rounded-full px-1.5 text-[11px] {t.countTone === 'warn'
-							? 'bg-warn/30 font-medium text-warn-ink'
-							: 'bg-line-strong text-ink-soft'}">{t.count}</span
-					>
-				{/if}
+				{@render count(t)}
 			</button>
 		{/if}
 	{/each}

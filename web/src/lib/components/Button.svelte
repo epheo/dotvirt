@@ -15,7 +15,7 @@
 		children,
 		...rest
 	}: {
-		variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'link';
+		variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'link';
 		size?: 'md' | 'sm';
 		href?: string;
 		class?: string;
@@ -28,6 +28,8 @@
 			'rounded-full bg-accent font-medium text-white hover:bg-accent-hover disabled:bg-line-strong',
 		secondary:
 			'rounded border border-line-strong bg-panel text-ink-soft hover:bg-inset disabled:opacity-50',
+		outline:
+			'rounded border border-accent bg-panel text-accent-ink hover:bg-select-soft disabled:opacity-50',
 		ghost: 'rounded text-ink-soft hover:bg-inset-strong disabled:text-ink-faint',
 		danger: 'rounded bg-danger font-medium text-white hover:bg-danger-ink disabled:opacity-50',
 		link: 'text-accent-ink hover:underline disabled:opacity-50',

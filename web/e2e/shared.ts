@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 
-// The steps both suites take, live and fixture-backed: the token login and
-// the walk to one VM's detail page.
+// The steps both suites take, live and fixture-backed: the token login, the
+// walk to one VM's detail page, and unfolding the change tray.
 
 // signIn pastes a token and waits for the shell: the section links in the
 // sidebar exist only once authenticated.
@@ -24,4 +24,14 @@ export async function openVM(page: Page, name?: string) {
 	const link = name ? row.getByRole('link', { name, exact: true }) : row.getByRole('link').first();
 	await link.click();
 	await expect(page.getByRole('button', { name: /Edit Settings/ })).toBeVisible();
+}
+
+// openTray unfolds the change tray, a pill until the user asks, and returns it.
+export async function openTray(page: Page) {
+	const tray = page.getByRole('complementary', { name: 'Changes in flight' });
+	await tray.waitFor();
+	if (!(await tray.getByRole('button', { name: 'Fold' }).isVisible()))
+		await tray.getByRole('button').first().click();
+	await expect(tray.getByRole('button', { name: 'Fold' })).toBeVisible();
+	return tray;
 }

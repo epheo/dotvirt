@@ -10,6 +10,10 @@
 	// button that fixes it. onleave lets a menu close before either navigates.
 	let { issue, onleave }: { issue: Issue; onleave?: () => void } = $props();
 
+	// "ns/name" reads as the name first, its namespace beside it.
+	const name = $derived(issue.scope.includes('/') ? issue.scope.split('/')[1] : issue.scope);
+	const ns = $derived(issue.scope.includes('/') ? issue.scope.split('/')[0] : '');
+
 	function view() {
 		onleave?.();
 		goto(issue.href);
@@ -24,14 +28,18 @@
 	}
 </script>
 
-<li class="flex items-center gap-3 px-3 py-2">
+<li class="flex items-center gap-3 px-3 py-2.5">
 	<StatusDot tone={issue.severity} size="sm" />
 	<button onclick={view} title={issue.detail ?? ''} class="min-w-0 flex-1 text-left">
-		<span class="font-medium text-ink">{issue.scope}</span>
-		<span class="text-ink-soft">{issue.label}</span>
+		<span class="block truncate"
+			><span class="font-semibold text-ink">{name}</span>{#if ns}<span class="text-ink-muted"
+					>{` ${ns}`}</span
+				>{/if}</span
+		>
+		<span class="block text-ink-soft first-letter:uppercase">{issue.label}</span>
 		{#if issue.detail}
 			<span class="block truncate font-mono text-[11px] text-ink-faint">{issue.detail}</span>
 		{/if}
 	</button>
-	<Button variant="secondary" size="sm" class="shrink-0" onclick={fix}>{issue.action.label}</Button>
+	<Button variant="outline" size="sm" class="shrink-0" onclick={fix}>{issue.action.label}</Button>
 </li>

@@ -153,8 +153,6 @@ class Ui {
 		opts?: { kind?: ToastKind; target?: ReviewTarget },
 	) {
 		drafts.refresh();
-		// New work unfolds the tray, even one folded earlier.
-		tray.open = true;
 		this.showToast(msg, {
 			kind: opts?.kind ?? 'success',
 			action: { label: 'Review & propose', run: () => this.reviewStaged(opts?.target) },

@@ -5,19 +5,21 @@ import { persisted } from './persisted.svelte';
 // How often a merged PR whose commit is not in history yet asks again.
 const RESOLVE_EVERY_MS = 30_000;
 
-// The change tray's memory: whether it is unfolded, and the PRs this user
-// opened, followed until they are live or dismissed. Persisted so a reload
-// keeps following; cleared on sign-out so the next user starts clean.
+// The change tray's memory: the PRs this user opened, followed until they are
+// live or dismissed, persisted so a reload keeps following and cleared on
+// sign-out so the next user starts clean; and whether it is unfolded.
 class TrayStore {
-	#open = persisted('dotvirt.tray.open', true);
+	// Folded on every load, like the task dock: the tray unfolds only when
+	// the user asks; the pill never hides a staged draft.
+	#open = $state(false);
 	#followed = persisted<Followed[]>('dotvirt.tray.followed', []);
 	#asked = new Map<string, number>();
 
 	get open(): boolean {
-		return this.#open.value;
+		return this.#open;
 	}
 	set open(v: boolean) {
-		this.#open.value = v;
+		this.#open = v;
 	}
 	get followed(): Followed[] {
 		return this.#followed.value;

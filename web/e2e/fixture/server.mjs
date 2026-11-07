@@ -125,6 +125,23 @@ function draftFor(project) {
 	};
 }
 
+// changeset.valueTitle: one VM edit of plain values reads "web-1: 4 vCPU, 8 GiB memory".
+function valueTitle(items) {
+	const it = items.length === 1 && items[0].kind === 'edit' ? items[0] : null;
+	const cs = it?.changes ?? [];
+	if (!it || (it.resource && it.resource !== 'vm') || !cs.length || cs.length > 3) return null;
+	const parts = [];
+	for (const c of cs) {
+		if (c.action !== 'change' || !c.to) return null;
+		if (c.field === 'CPU' || c.field === 'Instance type')
+			parts.push(/^\d+$/.test(c.to) ? `${c.to} vCPU` : c.to);
+		else if (c.field === 'Memory') parts.push(`${c.to.replace(/(Ki|Mi|Gi|Ti)$/, ' $1B')} memory`);
+		else if (c.field === 'Power') parts.push(`power ${c.to.toLowerCase()}`);
+		else return null;
+	}
+	return `${it.name}: ${parts.join(', ')}`;
+}
+
 // The backend's untitled-propose defaults, shown in the form as suggestions.
 // A JS twin of changeset.defaultTitle / prBody, close enough for the UI.
 function proposeDefaults(items) {
@@ -133,7 +150,8 @@ function proposeDefaults(items) {
 	const kinds = new Set(items.map((it) => it.kind));
 	const names = items.map((it) => it.name).join(', ');
 	const defaultTitle =
-		kinds.size === 1 ? `${verbs[items[0].kind]} ${names}` : `${items.length} changes: ${names}`;
+		valueTitle(items) ??
+		(kinds.size === 1 ? `${verbs[items[0].kind]} ${names}` : `${items.length} changes: ${names}`);
 	const lines = items.flatMap((it) => [
 		'',
 		`**${it.kind} ${it.namespace}/${it.name}**`,
