@@ -37,6 +37,8 @@ var (
 	// Node state is read, never declared, so the table does not list it; it
 	// shares nmstate's group with the policy.
 	gvrNNS = schema.GroupVersionResource{Group: gvrNNCP.Group, Version: "v1beta1", Resource: "nodenetworkstates"}
+	// One enactment per (node, policy): where an uplink policy failed to apply.
+	gvrNNCE = schema.GroupVersionResource{Group: gvrNNCP.Group, Version: "v1beta1", Resource: "nodenetworkconfigurationenactments"}
 
 	// The policy plane (see policies.go): the DFW tiers and the Tier-0/Tier-1
 	// firewall + routing objects the Security view reads.
@@ -54,8 +56,8 @@ type Snapshot struct {
 	sa  *cluster.Client
 	bus *eventbus.Bus
 
-	udn, cudn, nad, nns, nncp cache.Indexer
-	nmstatePresent            atomic.Bool // the NNS CRD is served (nmstate installed)
+	udn, cudn, nad, nns, nncp, nnce cache.Indexer
+	nmstatePresent                  atomic.Bool // the NNS CRD is served (nmstate installed)
 
 	// Policy-plane stores; each empty until its CRD/API is discovered.
 	netpol, anp, banp, egressfw, egressip, extroute cache.Indexer
@@ -75,7 +77,7 @@ func New(sa *cluster.Client, bus *eventbus.Bus) *Snapshot {
 	idx := reflect.NewIndexer
 	s := &Snapshot{
 		sa: sa, bus: bus,
-		udn: idx(), cudn: idx(), nad: idx(), nns: idx(), nncp: idx(),
+		udn: idx(), cudn: idx(), nad: idx(), nns: idx(), nncp: idx(), nnce: idx(),
 		netpol: idx(), anp: idx(), banp: idx(), egressfw: idx(), egressip: idx(), extroute: idx(),
 	}
 	s.watches = []watchSpec{
@@ -84,6 +86,7 @@ func New(sa *cluster.Client, bus *eventbus.Bus) *Snapshot {
 		{gvrNAD, s.nad, true},
 		{gvrNNCP, s.nncp, true},
 		{gvrNNS, s.nns, false}, // NNS churn must not repaint the catalog
+		{gvrNNCE, s.nnce, true},
 		{gvrNetpol, s.netpol, true},
 		{gvrANP, s.anp, true},
 		{gvrBANP, s.banp, true},

@@ -130,6 +130,7 @@ rules:
   resources:
   - nodenetworkstates
   - nodenetworkconfigurationpolicies
+  - nodenetworkconfigurationenactments
   verbs:
   - get
   - list
