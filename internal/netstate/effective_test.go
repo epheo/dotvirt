@@ -1,6 +1,7 @@
 package netstate
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/epheo/dotvirt/internal/model"
@@ -243,5 +244,28 @@ func TestEffectiveEgressPlanes(t *testing.T) {
 
 	if eff := s.Effective("team-b", map[string]string{"kubernetes.io/metadata.name": "team-b"}, nil, false); len(eff.Gateway)+len(eff.SNAT)+len(eff.Routes) != 0 {
 		t.Errorf("team-b: nothing binds, got %+v", eff)
+	}
+}
+
+// Egress planes bind in name order, not the store's hash order.
+func TestEffectiveEgressPlanesOrdered(t *testing.T) {
+	s := New(nil, nil)
+	names := []string{"pool-d", "pool-b", "pool-a", "pool-c"}
+	for _, name := range names {
+		add(t, s.egressip, map[string]any{
+			"apiVersion": "k8s.ovn.org/v1", "kind": "EgressIP",
+			"metadata": map[string]any{"name": name},
+			"spec":     map[string]any{"egressIPs": []any{"192.0.2.10"}, "namespaceSelector": map[string]any{}},
+		})
+	}
+	for range 50 {
+		eff := s.Effective("team-a", nil, nil, true)
+		var got []string
+		for _, b := range eff.SNAT {
+			got = append(got, b.Policy.Name)
+		}
+		if !slices.Equal(got, []string{"pool-a", "pool-b", "pool-c", "pool-d"}) {
+			t.Fatalf("SNAT order = %v", got)
+		}
 	}
 }

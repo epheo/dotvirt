@@ -6,6 +6,8 @@ package netstate
 // and Trace all read through here, so no reader can walk a shape differently.
 
 import (
+	"cmp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -191,9 +193,21 @@ func decodeExtRoute(u *unstructured.Unstructured) *policy {
 
 type decoder func(*unstructured.Unstructured) *policy
 
-// decoded runs one store's objects through a kind's decoder.
-func decoded(idx cache.Indexer, dec decoder) []*policy {
+// sortedList lists a store by (namespace, name). Stores iterate in hash
+// order; a walk, plane or merge that followed it would answer differently for
+// one unchanged snapshot.
+func sortedList(idx cache.Indexer) []*unstructured.Unstructured {
 	objs := reflect.List(idx)
+	slices.SortFunc(objs, func(a, b *unstructured.Unstructured) int {
+		return cmp.Or(cmp.Compare(a.GetNamespace(), b.GetNamespace()), cmp.Compare(a.GetName(), b.GetName()))
+	})
+	return objs
+}
+
+// decoded runs one store's objects through a kind's decoder, in sortedList
+// order.
+func decoded(idx cache.Indexer, dec decoder) []*policy {
+	objs := sortedList(idx)
 	out := make([]*policy, 0, len(objs))
 	for _, u := range objs {
 		out = append(out, dec(u))
@@ -201,16 +215,14 @@ func decoded(idx cache.Indexer, dec decoder) []*policy {
 	return out
 }
 
-// inNamespace decodes a namespaced store's objects for ns, by name, so a
-// tier's walk order does not follow the store's hash order.
+// inNamespace decodes a namespaced store's objects for ns, by name.
 func inNamespace(idx cache.Indexer, ns string, dec decoder) []*policy {
 	var out []*policy
-	for _, u := range reflect.List(idx) {
+	for _, u := range sortedList(idx) {
 		if u.GetNamespace() == ns {
 			out = append(out, dec(u))
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].view.Name < out[j].view.Name })
 	return out
 }
 
