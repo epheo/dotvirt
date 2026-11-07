@@ -16,6 +16,7 @@ import {
 	pageOf,
 	planBulkMove,
 	planBulkSnapshot,
+	settleEach,
 	projectsBySize,
 	showing,
 	sortRows,
@@ -512,5 +513,29 @@ describe('planBulkSnapshot', () => {
 		expect(plan.vms.map((v) => v.name)).toEqual(['a', 'b']);
 		expect(plan.disks).toBe(2);
 		expect(plan.unsupported.map((x) => x.disk.name)).toEqual(['scratch']);
+	});
+});
+
+describe('settleEach', () => {
+	it('bounds concurrency and settles in item order', async () => {
+		let running = 0;
+		let peak = 0;
+		const out = await settleEach(
+			[1, 2, 3, 4, 5, 6],
+			async (n) => {
+				running++;
+				peak = Math.max(peak, running);
+				await new Promise((r) => setTimeout(r, 5));
+				running--;
+				if (n === 4) throw new Error('four');
+				return n * 10;
+			},
+			2,
+		);
+		expect(peak).toBe(2);
+		expect(
+			out.map((r) => (r.status === 'fulfilled' ? r.value : (r.reason as Error).message)),
+		).toEqual([10, 20, 30, 'four', 50, 60]);
+		expect(await settleEach([], async () => 1)).toEqual([]);
 	});
 });

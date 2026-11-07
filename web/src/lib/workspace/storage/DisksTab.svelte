@@ -22,6 +22,7 @@
 		pageOf,
 		planBulkMove,
 		planBulkSnapshot,
+		settleEach,
 		ago,
 		shortName,
 		sortRows,
@@ -158,7 +159,7 @@
 		call: (vm: VM) => Promise<unknown>,
 		verb: string,
 	) {
-		const results = await Promise.allSettled(items.map((i) => call(i.vm)));
+		const results = await settleEach(items, (i) => call(i.vm));
 		const denied = results.find(
 			(r) => r.status === 'rejected' && r.reason instanceof Unauthorized,
 		) as PromiseRejectedResult | undefined;

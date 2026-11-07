@@ -596,6 +596,12 @@ export function planBulkMove(
 		byVM.get(r.vmKey)!.push(r);
 	}
 
+	const rowsOfVM = new Map<string, DiskRow[]>();
+	for (const r of ctx.rows) {
+		if (r.ephemeral || !byVM.has(r.vmKey)) continue;
+		if (!rowsOfVM.has(r.vmKey)) rowsOfVM.set(r.vmKey, []);
+		rowsOfVM.get(r.vmKey)!.push(r);
+	}
 	const leaving = new Map<string, number>();
 	const projects = new Set<string>();
 	for (const [key, disks] of byVM) {
@@ -621,8 +627,8 @@ export function planBulkMove(
 		// After the merge each moved disk carries the target's access, the rest
 		// keep their own: the VM live-migrates only when all are shared.
 		const after = moves.map((m) => m.storageClass);
-		const others = ctx.rows.filter(
-			(r) => r.vmKey === key && !r.ephemeral && !moves.some((m) => m.name === r.disk.name),
+		const others = (rowsOfVM.get(key) ?? []).filter(
+			(r) => !moves.some((m) => m.name === r.disk.name),
 		);
 		const targetShared = (cls: string) =>
 			classes.get(cls)?.profile?.accessModes.includes(RWX) ?? false;
@@ -738,4 +744,28 @@ export function planBulkSnapshot(selected: DiskRow[], classes: StorageClassInfo[
 		vms.set(r.vmKey, r.vm);
 	}
 	return { vms: [...vms.values()], disks, unsupported };
+}
+
+// Runs call once per item, at most limit at a time, settling like
+// Promise.allSettled in item order: a bulk action over thousands of disks
+// must not open thousands of requests at once.
+export async function settleEach<T>(
+	items: T[],
+	call: (item: T) => Promise<unknown>,
+	limit = 8,
+): Promise<PromiseSettledResult<unknown>[]> {
+	const out: PromiseSettledResult<unknown>[] = new Array(items.length);
+	let next = 0;
+	async function worker() {
+		while (next < items.length) {
+			const i = next++;
+			try {
+				out[i] = { status: 'fulfilled', value: await call(items[i]) };
+			} catch (reason) {
+				out[i] = { status: 'rejected', reason };
+			}
+		}
+	}
+	await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+	return out;
 }

@@ -106,3 +106,24 @@ test('create VM and add a boot image start from the library', async ({ page }) =
 	await dialog.getByRole('button', { name: 'Upload' }).click();
 	await expect(dialog.getByText('is a boot image in')).toBeVisible({ timeout: 15_000 });
 });
+
+test('a failed snapshot read says so and offers the retry', async ({ page }) => {
+	await setScenario(page, 'degraded');
+	await page.goto('/storage');
+	const main = page.locator('main');
+	await expect(main.getByText('Snapshots unavailable')).toBeVisible();
+	await expect(main.getByRole('button', { name: 'Try again' })).toBeVisible();
+	await page.goto('/storage?tab=snapshots');
+	await expect(main.getByText('cluster read failed')).toBeVisible();
+});
+
+test('the search finds disks from any tab', async ({ page }) => {
+	await page.goto('/storage');
+	await page.getByPlaceholder('Find a disk, VM or image').fill('rhel');
+	await expect(page).toHaveURL(/tab=disks/);
+	await expect(page).toHaveURL(/q=rhel/);
+	const main = page.locator('main');
+	await expect(main.getByText('1 of 6 disks')).toBeVisible();
+	await expect(main.locator('tbody tr')).toHaveCount(1);
+	await expect(main.locator('tbody tr')).toContainText('batch-1');
+});

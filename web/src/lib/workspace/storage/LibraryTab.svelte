@@ -73,7 +73,7 @@
 </script>
 
 {#snippet snap(u: ImageUse, image: string)}
-	{#if !snapshotsLoaded}
+	{#if !snapshotsLoaded || !u.disks}
 		<span class="text-ink-faint">-</span>
 	{:else}
 		{@const without = u.disks - u.fresh}

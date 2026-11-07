@@ -669,6 +669,10 @@ const degraded = {
 	metrics: null,
 };
 
+// storage (S3): the live snapshot and claim reads fail with the cluster.
+degraded.storageSnapshots = null;
+degraded.storageClaims = null;
+
 // ── drift: every GitOps trouble state at once ──────────────────────────────────
 // Standing sync failure (stays after the operation ends), Pending (declared,
 // awaiting first sync), NotTracked (cluster-only, adoptable), a prune warning
