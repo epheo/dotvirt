@@ -60,7 +60,9 @@
 	);
 </script>
 
-<h3 class="text-sm leading-5 font-bold text-ink">What this stages</h3>
+<h3 class="text-sm leading-5 font-bold text-ink">
+	{mode === 'pr' ? 'What this stages' : 'What this does'}
+</h3>
 {#if mode === 'pr'}
 	<div class="flex min-w-0 items-start gap-2">
 		<FileText size={16} class="mt-0.5 shrink-0 text-accent-ink" />

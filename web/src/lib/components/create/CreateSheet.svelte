@@ -179,7 +179,9 @@
 			<div class="flex items-start gap-3">
 				<div class="min-w-0 flex-1">
 					<h2 id="create-title" class="text-xl leading-7 font-bold text-ink">{title}</h2>
-					{#if from}<p class="text-sm text-ink-muted">Filled in from {from}.</p>{/if}
+					{#if from && type !== 'project'}<p class="text-sm text-ink-muted">
+							Filled in from {from}.
+						</p>{/if}
 				</div>
 				<button
 					type="button"

@@ -221,9 +221,7 @@
 						{@const need = p.required && !p.value && !p.generate}
 						<div class="flex flex-col gap-1.5">
 							<label class={LABEL} for="tpl-{p.name}"
-								>{p.displayName || p.name}{#if need}<span class="font-normal text-ink-faint">
-										(required)</span
-									>{/if}</label
+								>{p.displayName || p.name}{need ? ', required' : ''}</label
 							>
 							{#if long(p.name)}
 								<textarea

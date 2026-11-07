@@ -89,11 +89,11 @@ export function newFromHere(
 export function stagePath<K extends CreateKind>(kind: K, body: CreateBodies[K]): string {
 	const b = body as unknown as Record<string, unknown>;
 	const ns = String(b.namespace ?? '');
-	const name = String(b.name ?? '');
+	const name = String(b.name || '<name>');
 	switch (kind) {
 		case 'vm':
 		case 'template':
-			return `${ns}/${name || '<generated>'}.yaml`;
+			return `${ns}/${b.name || '<generated>'}.yaml`;
 		case 'network':
 			return (b.scope ?? 'project') === 'project'
 				? `${ns}/networks/${name}.yaml`

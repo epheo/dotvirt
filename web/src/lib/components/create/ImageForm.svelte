@@ -232,7 +232,7 @@
 					<label class={LABEL} for="img-where">Project and namespace</label>
 					<PlacePicker id="img-where" bind:value={namespace} namespaces={places} first={opener} />
 					<span class={HELP}
-						>VMs here boot from it. Search {plural(
+						>Where the disk lives. Search {plural(
 							new Set(places.map((n) => inventory.projectOf(n))).size,
 							'project',
 						)}.</span
@@ -296,9 +296,7 @@
 				>
 				{#if info}
 					<Consequence tone={liveMigrates(info) ? 'ok' : 'warn'}
-						>{liveMigrates(info)
-							? 'VMs made from it can live-migrate.'
-							: 'It stays on one host; copies made from it follow their class.'}</Consequence
+						>{liveMigrates(info) ? 'Any host can read it.' : 'It stays on one host.'}</Consequence
 					>
 				{/if}
 				<Consequence>Keep this tab open until it finishes.</Consequence>

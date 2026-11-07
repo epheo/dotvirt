@@ -194,7 +194,9 @@
 							oninput={() => (subnetTouched = true)}
 						/>
 						{#if suggestion}<span class={HELP}
-								>Suggested <span class="font-mono text-ink-soft">{suggestion.cidr}</span>, {suggestion.reason}.</span
+								><span
+									>Suggested <span class="font-mono text-ink-soft">{suggestion.cidr}</span>. Why: {suggestion.reason}.</span
+								></span
 							>{/if}
 					</div>
 				</div>
@@ -251,8 +253,10 @@
 					>{joining
 						? `${namespace} joins ${joinProject}; its VMs show up there, ready to bring into git.`
 						: adopt
-							? `${namespace} becomes the project ${name || '...'}; its VMs show up there, ready to bring into git.`
-							: `The namespace ${namespace || '...'} is created and joins ${name || 'the project'}.`}</Consequence
+							? `${namespace} becomes a project; its VMs show up there, ready to bring into git.`
+							: namespace
+								? `The namespace ${namespace} is created and joins ${name || 'the project'}.`
+								: 'Its first namespace is created with it.'}</Consequence
 				>
 				{#if splitList(owners).length && !joining}
 					<Consequence>{splitList(owners).join(', ')} can change anything in it.</Consequence>

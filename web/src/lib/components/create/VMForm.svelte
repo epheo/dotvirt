@@ -274,6 +274,27 @@
 		...(attachPrimary ? [primaryLabel] : []),
 		...selectedNets.map((r) => netByRef(r)?.name ?? r),
 	]);
+	// The row names the networks a VM is put on; the plain pod network every
+	// VM keeps by default goes unnamed unless it is the only one.
+	const named = $derived(
+		selectedNets.length
+			? [
+					...(attachPrimary && primaryNet ? [primaryNet.name] : []),
+					...attached.slice(attachPrimary ? 1 : 0),
+				]
+			: attachPrimary
+				? [primaryNet?.name ?? 'The default network']
+				: [],
+	);
+	const netWhy = $derived(
+		netTouched
+			? attachPrimary && !primaryNet && selectedNets.length
+				? 'Plus the default network'
+				: !attachPrimary
+					? 'No default network'
+					: ''
+			: `Same as most VMs in ${namespace}`,
+	);
 	const addressed = $derived(
 		[
 			...(attachPrimary && primaryNet?.subnets?.length ? [primaryNet] : []),
@@ -634,14 +655,14 @@
 							onopen={() => (open = 'network')}
 							onclose={close}
 						>
-							{#snippet value()}<span class="font-mono font-medium"
-									>{attached.join(', ') || 'None'}</span
-								>{/snippet}
+							{#snippet value()}
+								{#if named.length && (selectedNets.length || primaryNet)}<span
+										class="font-mono font-medium">{named.join(', ')}</span
+									>{:else}{named[0] ?? 'None'}{/if}
+							{/snippet}
 							{#snippet sub()}
 								{#if !hasNetwork}<TriangleAlert size={13} class="text-warn-ink" />A VM needs a
-									network{:else if netTouched}{attached.length} network{attached.length === 1
-										? ''
-										: 's'}{:else}Same as most VMs in {namespace}{/if}
+									network{:else}{netWhy}{/if}
 							{/snippet}
 							{#snippet editor(done)}
 								<PickList
