@@ -166,11 +166,6 @@ const optionsTTL = 60 * time.Second
 // capacity, which the Storage summary polls to keep current.
 const storageTTL = 20 * time.Second
 
-// declaredTTL backstops a project's declared-files index. Freshness comes from
-// its repo's GitChanged stamp: every poll or webhook that moves one of its heads
-// invalidates the entry, so the TTL only bounds a repo that stopped publishing.
-const declaredTTL = 5 * time.Minute
-
 // Server holds the long-lived collaborators and builds per-request, identity-
 // scoped state.
 type Server struct {
@@ -187,9 +182,8 @@ type Server struct {
 	proposals *ttlcache.Cache[[]model.Proposal] // per-project open-PR set; written by the refresher, read on broadcast
 	options   *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
 	storage   *ttlcache.Cache[[]model.StorageClassInfo]
-	declared  *ttlcache.Cache[declaredIndex] // per-repo declared-files index, GitChanged-stamped
-	metrics   *metrics.Client                // Prometheus/Thanos for the Performance tab; nil disables it
-	tasks     *tasks.Feed                    // recent-activity feed (ops + merged PRs); nil disables it
+	metrics   *metrics.Client // Prometheus/Thanos for the Performance tab; nil disables it
+	tasks     *tasks.Feed     // recent-activity feed (ops + merged PRs); nil disables it
 	reader    Reader
 	draft     Draft
 	auth      *auth.Authenticator // nil leaves the API open (dev)
@@ -257,7 +251,6 @@ func NewServer(d Deps) *Server {
 		proposals: ttlcache.New[[]model.Proposal](proposalsCacheTTL),
 		options:   ttlcache.New[model.Options](optionsTTL),
 		storage:   ttlcache.New[[]model.StorageClassInfo](storageTTL),
-		declared:  ttlcache.New[declaredIndex](declaredTTL),
 		metrics:   d.Metrics,
 		tasks:     d.Tasks,
 		reader:    d.Reader,

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/cipher"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -40,7 +41,7 @@ func (a *Authenticator) Login(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	setCookie(w, r, token, a.secret)
+	setCookie(w, r, token, a.sealer)
 	writeJSON(w, http.StatusOK, userResponse{Username: id.Username, Groups: id.Groups})
 }
 
@@ -70,7 +71,7 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		token, ok := tokenFromRequest(r, a.secret)
+		token, ok := tokenFromRequest(r, a.sealer)
 		if !ok {
 			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return
@@ -127,8 +128,8 @@ func isOpenPath(path string) bool {
 
 // tokenFromRequest pulls the bearer token from the session cookie, falling back
 // to an Authorization: Bearer header.
-func tokenFromRequest(r *http.Request, secret []byte) (string, bool) {
-	if token, ok := readCookie(r, secret); ok {
+func tokenFromRequest(r *http.Request, sealer cipher.AEAD) (string, bool) {
+	if token, ok := readCookie(r, sealer); ok {
 		return token, true
 	}
 	if h := r.Header.Get("Authorization"); h != "" {
