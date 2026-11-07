@@ -90,7 +90,7 @@ func run() error {
 	// Per-project git + the Forge API share ONE token source (resolved per call, so
 	// an operator re-mint/rotation is picked up without restart).
 	tokenSrc := cfg.ForgeTokenSource()
-	repos := git.NewRepoSet(ctx, cfg.GitUsername, tokenSrc, true, bus, cfg.GitPollInterval)
+	repos := git.NewRepoSet(ctx, cfg.ForgeURL, cfg.GitUsername, tokenSrc, true, bus, cfg.GitPollInterval)
 
 	draftStore, err := draft.Open(cfg.DraftDir)
 	if err != nil {

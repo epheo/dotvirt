@@ -265,7 +265,7 @@ func TestOpenProposalsListsEveryPR(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	c := New(store, git.NewRepoSet(ctx, "", nil, false, nil, time.Hour), forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, ""), nil, nil, nil, "main", "dotvirt/proposed")
+	c := New(store, git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour), forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, ""), nil, nil, nil, "main", "dotvirt/proposed")
 
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 	prs, err := c.OpenProposals(proj)
@@ -329,7 +329,7 @@ func TestProposalRendersBranchDiff(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	c := New(store, git.NewRepoSet(ctx, "", nil, false, nil, time.Hour), forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, ""), nil, nil, nil, "main", "dotvirt/proposed")
+	c := New(store, git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour), forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, ""), nil, nil, nil, "main", "dotvirt/proposed")
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
 	d, err := c.Proposal(proj, 5)
@@ -381,7 +381,7 @@ func TestReaderServesHistoryWithoutStore(t *testing.T) {
 	bare, _, hash := seedMerged(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	r := NewReader(git.NewRepoSet(ctx, "", nil, false, nil, time.Hour), nil, nil, "main", "dotvirt/proposed")
+	r := NewReader(git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour), nil, nil, "main", "dotvirt/proposed")
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
 	commits, err := r.History(proj, 10)
