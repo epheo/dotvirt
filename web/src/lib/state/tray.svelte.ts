@@ -49,6 +49,18 @@ class TrayStore {
 		}
 	}
 
+	// Called when the review sheet opens a PR: the tray follows it from now,
+	// with what it declares, before the open list catches up.
+	remember(f: Followed) {
+		const key = followKey(f.project, f.prNumber);
+		const have = this.#followed.value.some((x) => followKey(x.project, x.prNumber) === key);
+		this.#followed.value = have
+			? this.#followed.value.map((x) =>
+					followKey(x.project, x.prNumber) === key ? { ...x, ...f } : x,
+				)
+			: [...this.#followed.value, f];
+	}
+
 	dismiss(key: string) {
 		this.#followed.value = this.#followed.value.filter(
 			(f) => followKey(f.project, f.prNumber) !== key,

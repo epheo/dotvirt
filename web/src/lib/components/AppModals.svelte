@@ -29,6 +29,8 @@
 	import StorageMigrateModal from './StorageMigrateModal.svelte';
 	import Tier0Modal from './Tier0Modal.svelte';
 	import UploadModal from './UploadModal.svelte';
+	import UndoModal from '#lib/workspace/UndoModal.svelte';
+	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 
 	// One host for every shell-level modal: ui.modal is a discriminated union, so
 	// exactly one can be open and opening any is a single assignment.
@@ -190,4 +192,15 @@
 	<StorageMigrateModal {vm} onclose={close} />
 {:else if m?.kind === 'propose'}
 	<ProposeSheet project={m.project} onclose={close} />
+{:else if m?.kind === 'undo'}
+	{@const u = m}
+	{@const review = reviewCache.commit(u.project, u.hash)?.data}
+	<UndoModal
+		project={u.project}
+		hash={u.hash}
+		commit={review?.commit}
+		warning={review?.revertWarning}
+		onclose={close}
+		onreverted={(r) => ui.toastProposed(u.project, r, 'Undo PR')}
+	/>
 {/if}

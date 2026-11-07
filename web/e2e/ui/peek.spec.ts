@@ -36,7 +36,8 @@ test('rows move by arrow keys; Enter peeks then expands; Space selects', async (
 	await setScenario(page, 'base');
 	await login(page);
 	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
-	const rows = page.locator('main tbody tr');
+	// VM rows only: group headings are rows too, outside the tab order.
+	const rows = page.locator('main tbody tr[tabindex]');
 	await rows.first().focus();
 	await page.keyboard.press('ArrowDown');
 	const second = rows.nth(1);

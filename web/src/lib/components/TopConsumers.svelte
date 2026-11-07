@@ -1,6 +1,8 @@
 <script lang="ts">
-	import type { ConsumerVM } from '#lib/api.js';
-	import { bytes, cores } from '#lib/format.js';
+	import type { ConsumerVM, VM } from '#lib/api.js';
+	import { bytes, cores, quantity, quantityBytes } from '#lib/format.js';
+	import { vmSizing } from '#lib/sizing.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
 	import InfoCard from './InfoCard.svelte';
 
 	// Top VM consumers as a card: CPU-ranked rows with usage bars scaled to the
@@ -8,12 +10,33 @@
 	let {
 		topCpu,
 		topMemory,
+		vms = [],
 		onselect,
 	}: {
 		topCpu: ConsumerVM[];
 		topMemory: ConsumerVM[];
+		// Sizes each row against what the VM was given, not just raw use.
+		vms?: VM[];
 		onselect?: (namespace: string, name: string) => void;
 	} = $props();
+
+	const sizeOf = (c: ConsumerVM) => {
+		const vm = vms.find((v) => v.namespace === c.namespace && v.name === c.name);
+		return vm ? vmSizing(vm, inventory.options) : {};
+	};
+	const cpuText = (c: ConsumerVM) => {
+		const n = sizeOf(c).cpu;
+		return n ? `${Math.round((c.value / n) * 100)}% of ${n} vCPU` : `${cores(c.value)} cores`;
+	};
+	const memText = (c: ConsumerVM) => {
+		const used = topMemory.find((x) => x.name === c.name && x.namespace === c.namespace)?.value;
+		if (used === undefined) return '-';
+		const m = sizeOf(c).memory;
+		if (!m || !(quantityBytes(m) > 0)) return bytes(used);
+		const [n, unit] = quantity(m).split(' ');
+		const scale = quantityBytes(m) / Number(n);
+		return `${(used / scale).toFixed(1)} of ${n} ${unit}`;
+	};
 
 	const rows = $derived(topCpu.slice(0, 5));
 	const maxCpu = $derived(Math.max(1e-9, ...rows.map((c) => c.value)));
@@ -23,6 +46,11 @@
 </script>
 
 <InfoCard title="Top consumers">
+	<div
+		class="grid grid-cols-[minmax(8rem,1.4fr)_1fr_1fr] gap-3 border-b border-line-soft px-3 py-1 text-[11px] text-ink-muted"
+	>
+		<span>VM</span><span>CPU</span><span>Memory</span>
+	</div>
 	<ul class="divide-y divide-line-soft">
 		{#each rows as c (c.namespace + '/' + c.name)}
 			<li
@@ -43,7 +71,7 @@
 							style="width: {(c.value / maxCpu) * 100}%"
 						></span>
 					</span>
-					<span class="w-16 shrink-0 text-right text-ink-muted">{cores(c.value)} cores</span>
+					<span class="w-24 shrink-0 text-right text-ink-muted tabular-nums">{cpuText(c)}</span>
 				</div>
 				<div class="flex items-center gap-2">
 					<span class="h-1.5 flex-1 overflow-hidden rounded bg-inset-strong">
@@ -52,7 +80,7 @@
 							style="width: {(memOf(c) / maxMem) * 100}%; background: var(--chart-2)"
 						></span>
 					</span>
-					<span class="w-14 shrink-0 text-right text-ink-muted">{bytes(memOf(c))}</span>
+					<span class="w-24 shrink-0 text-right text-ink-muted tabular-nums">{memText(c)}</span>
 				</div>
 			</li>
 		{:else}

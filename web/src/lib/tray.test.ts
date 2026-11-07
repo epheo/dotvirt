@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DraftView, Proposal, ProjectSync } from '#lib/api.js';
-import { follow, trayLanes, type Followed } from '#lib/tray.js';
+import type { DraftItem } from '#lib/api.js';
+import { changeSummary, follow, itemLine, trayLanes, type Followed } from '#lib/tray.js';
 
 const draft = (count: number): DraftView => ({ base: 'main', branch: 'b', count, items: [] });
 const pr = (over: Partial<Proposal>): Proposal => ({
@@ -55,6 +56,15 @@ describe('trayLanes', () => {
 		]);
 		expect(lanes({ followed: [merged] })).toEqual(['merged']);
 	});
+
+	it('marks an applying merge picked up once Argo runs its commit', () => {
+		const at = (g: ProjectSync) =>
+			trayLanes({ drafts: [], proposals: [], followed: [merged], sync: () => g }).map((l) =>
+				l.kind === 'applying' ? l.picked : l.kind,
+			);
+		expect(at({ sync: 'OutOfSync', revision: '9999999' })).toEqual([false]);
+		expect(at({ sync: 'OutOfSync', revision: 'abc1234' })).toEqual([true]);
+	});
 });
 
 describe('follow', () => {
@@ -73,8 +83,38 @@ describe('follow', () => {
 		expect(follow(gone, [], [], 1000 + 6 * 60_000)).toHaveLength(0);
 	});
 
+	it('restarts the grace when a PR it thought gone is open again', () => {
+		const gone = follow(follow([], [pr({})], []), [], [], 1000);
+		expect(follow(gone, [pr({})], [], 2000)[0].goneAt).toBeUndefined();
+	});
+
 	it('returns the same list when nothing moved', () => {
 		const f1 = follow([], [pr({})], []);
 		expect(follow(f1, [pr({})], [])).toBe(f1);
+	});
+});
+
+describe('changeSummary', () => {
+	const edit: DraftItem = {
+		kind: 'edit',
+		namespace: 'web-prod',
+		name: 'web-1',
+		changes: [
+			{ field: 'CPU', action: 'change', from: '2', to: '4', restart: true },
+			{ field: 'Memory', action: 'change', from: '4Gi', to: '8Gi' },
+		],
+	} as DraftItem;
+	const gone = { kind: 'delete', namespace: 'web-prod', name: 'old', changes: [] } as DraftItem;
+
+	it('says what runs once live and which VMs restart', () => {
+		expect(changeSummary([edit, gone])).toEqual({
+			lines: ['web-1: CPU 4, Memory 8Gi', 'old deleted'],
+			restarts: ['web-1'],
+		});
+	});
+
+	it('lists a change in a few words', () => {
+		expect(itemLine(edit)).toBe('cpu 2 to 4, memory 4Gi to 8Gi');
+		expect(itemLine(gone)).toBe('delete');
 	});
 });

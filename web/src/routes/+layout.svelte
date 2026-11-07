@@ -63,8 +63,10 @@
 	onUnauthorized(() => {
 		session.user = null;
 	});
+	// Signed out, not merely still checking: the tray's followed PRs persist
+	// across a reload and must survive the boot probe.
 	$effect(() => {
-		if (!session.user) {
+		if (!session.user && !session.checking) {
 			inventory.reset();
 			drafts.reset();
 			reviewCache.reset();

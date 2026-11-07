@@ -28,7 +28,13 @@ test('base: shell, tree and VM table render from the stream', async ({ page }) =
 	await expect(
 		page.getByRole('button', { name: /web-prod\/web-1 VMI excessive migrations/ }),
 	).toBeVisible();
-	await expect(page.getByRole('button', { name: 'Open monitor' })).toBeVisible();
+	await expect(
+		page.getByRole('banner').getByRole('button', { name: 'Open monitor' }),
+	).toBeVisible();
+	// The VM's row offers the same step.
+	await expect(
+		main.locator('tbody tr', { hasText: 'web-1' }).getByRole('button', { name: 'Open monitor' }),
+	).toBeVisible();
 });
 
 test('base: VM detail opens with live facts and tabs', async ({ page }) => {
@@ -43,6 +49,11 @@ test('base: VM detail opens with live facts and tabs', async ({ page }) => {
 
 	await expect(page).toHaveURL(/\/vm\/web-prod\/web-1/);
 	await expect(page.getByRole('button', { name: /Edit Settings/ })).toBeVisible();
+	// Where it runs, in one line under the name; the file it lives in, with its history.
+	await expect(page.getByText(/Running on worker-1, up \d/)).toBeVisible();
+	const source = page.locator('main tr', { hasText: 'Source file' });
+	await expect(source).toContainText('vms/web-1.yaml');
+	await expect(source.getByRole('link', { name: 'History' })).toBeVisible();
 	await expect(page.locator('main').getByText('worker-1').first()).toBeVisible();
 	await expect(page.locator('main').getByText('10.128.0.10').first()).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Snapshots', exact: true })).toBeVisible();
@@ -57,7 +68,7 @@ test('base: VM detail opens with live facts and tabs', async ({ page }) => {
 	await page.getByRole('button', { name: 'Power off', exact: true }).click();
 	// The stage lands as a toast + staged badge, never an immediate power change.
 	await expect(page.getByText(/Power Off staged for web-1/)).toBeVisible();
-	await expect(page.getByRole('button', { name: 'Staged' }).first()).toBeVisible();
+	await expect(page.getByRole('button', { name: '1 staged, not proposed' })).toBeVisible();
 	await page.getByRole('button', { name: 'Actions' }).click();
 	await expect(page.getByRole('button', { name: 'Delete VM' })).toBeVisible();
 	await page.keyboard.press('Escape');
@@ -81,4 +92,23 @@ test('deep links survive a hard reload', async ({ page }) => {
 	await expect(page.getByRole('button', { name: /Edit Settings/ })).toBeVisible();
 	await page.goto('/catalog?kind=instancetypes');
 	await expect(page.getByText('Read-only platform objects')).toBeVisible();
+});
+
+test('base: the summary shows changes in scope; the table names open PRs per VM', async ({
+	page,
+}) => {
+	await setScenario(page, 'base');
+	await login(page);
+	const main = page.locator('main');
+	const card = main.locator('section', { hasText: 'Changes in this scope' });
+	await expect(card.getByText(/PR #41, yours/)).toBeVisible();
+	await expect(card.getByText(/PR #42 by bob/)).toBeVisible();
+	// The merge feed's PR #40 is the applied revision, so it reads live.
+	await expect(card.locator('li', { hasText: 'PR #40' })).toContainText('Live');
+
+	await main.getByRole('link', { name: 'VMs', exact: true }).click();
+	const web1 = main.locator('tbody tr', { hasText: 'web-1' }).first();
+	await expect(web1.getByRole('link', { name: /PR #42 by bob: balancer/ })).toBeVisible();
+	const db1 = main.locator('tbody tr', { hasText: 'db-1' }).first();
+	await expect(db1.getByRole('link', { name: /PR #41: memory 8Gi to 12Gi/ })).toBeVisible();
 });

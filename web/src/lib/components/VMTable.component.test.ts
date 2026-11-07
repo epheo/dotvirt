@@ -37,12 +37,13 @@ function setup(props: Partial<Parameters<typeof render<typeof VMTable>>[1]> = {}
 	return { ...result, onselect, onstagedopen };
 }
 
-// Row names in display order.
+// Row names in display order; group headings carry no link.
 const names = () =>
 	screen
 		.getAllByRole('row')
 		.slice(1)
-		.map((r) => within(r).getAllByRole('link')[0].textContent);
+		.flatMap((r) => within(r).queryAllByRole('link').slice(0, 1))
+		.map((a) => a.textContent);
 
 beforeEach(() => {
 	localStorage.clear();
@@ -76,6 +77,11 @@ describe('VMTable', () => {
 		};
 		setup({ vms: [...fleet, broken] });
 		expect(names()[0]).toBe('zeta');
+		// Under the default sort the issue rows sit under their own heading.
+		expect(screen.getByText('With issues (1), always on top')).toBeTruthy();
+		expect(screen.getByText('Everything else (3)')).toBeTruthy();
+		const zeta = screen.getByText('zeta').closest('tr')!;
+		expect(within(zeta).getByRole('button', { name: 'See why' })).toBeTruthy();
 		const chip = screen.getByRole('button', { name: /^With issues/ });
 		expect(chip.textContent).toContain('1');
 		await fireEvent.click(chip);

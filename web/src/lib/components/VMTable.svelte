@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { ChevronDown, ChevronUp } from '@lucide/svelte';
-	import { vmKey, type DraftItem, type Options, type VM } from '#lib/api.js';
+	import { vmKey, type DraftItem, type Options, type Proposal, type VM } from '#lib/api.js';
 	import { adoptVM } from '#lib/actions.js';
 	import { quantity, quantityBytes } from '#lib/format.js';
 	import type { Issue } from '#lib/issues.js';
@@ -8,7 +10,10 @@
 	import { TONE_DOT, TONE_PILL, vmState, vmStateRank, type VMStateView } from '#lib/status.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { persisted } from '#lib/state/persisted.svelte.js';
+	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import { TBODY, THEAD_TR } from '#lib/table.js';
+	import { itemLine } from '#lib/tray.js';
 	import { vmHref } from '#lib/nav.js';
 	import StagedBadge from './StagedBadge.svelte';
 	import StatusPill from './StatusPill.svelte';
@@ -62,6 +67,46 @@
 		return m;
 	});
 
+	// Open PRs whose diff names a VM, by VM: the "In a change" column shows
+	// other people's work beside this user's staged edit. A PR's items load
+	// once per PR; the load re-runs only when the set of open PRs moves.
+	$effect(() => {
+		inventory.proposalsKey;
+		for (const p of untrack(() => inventory.proposals))
+			reviewCache.loadProposal(p.project, p.prNumber);
+	});
+	const prsOf = $derived.by(() => {
+		const m = new Map<string, { pr: Proposal; line: string }[]>();
+		for (const pr of inventory.proposals)
+			for (const it of reviewCache.proposal(pr.project, pr.prNumber)?.data?.items ?? []) {
+				if (it.resource && it.resource !== 'vm') continue;
+				const k = `${it.namespace}/${it.name}`;
+				const line = it.kind === 'create' ? 'create' : itemLine(it);
+				m.set(k, [...(m.get(k) ?? []), { pr, line }]);
+			}
+		return m;
+	});
+
+	// What a person does next about a VM: the fix its issue offers, or bringing
+	// it under git. A fix that is the VM's own page reads as the reason to go.
+	type Step = { label: string; run: () => void };
+	function nextStep(vm: VM): Step | null {
+		const i = issueOf.get(vmKey(vm));
+		if (i) {
+			const a = i.action;
+			if ('href' in a)
+				return {
+					label: a.href === vmHref(vm.namespace, vm.name) ? 'See why' : a.label,
+					run: () => goto(a.href),
+				};
+			if ('modal' in a) return { label: a.label, run: () => (ui.modal = a.modal) };
+			return { label: a.label, run: () => void adoptVM(vm) };
+		}
+		if (vm.sync === 'NotTracked' && inventory.canAuthor(vm.namespace))
+			return { label: 'Adopt into git', run: () => void adoptVM(vm) };
+		return null;
+	}
+
 	function stateOf(vm: VM): VMStateView {
 		const v = vmState(vm);
 		if (v.exception) return v;
@@ -93,7 +138,11 @@
 		const key = prefs.value.sortKey;
 		switch (key) {
 			case 'state':
-				return vmStateRank(stateOf(b)) - vmStateRank(stateOf(a));
+				// Issues first, as their own group, then by how bad the state is.
+				return (
+					Number(issueOf.has(vmKey(b))) - Number(issueOf.has(vmKey(a))) ||
+					vmStateRank(stateOf(b)) - vmStateRank(stateOf(a))
+				);
 			case 'cpuCores':
 				return (sizeOf(a).cpu ?? 0) - (sizeOf(b).cpu ?? 0);
 			case 'memory':
@@ -121,14 +170,14 @@
 		issues: (vm) => issueOf.has(vmKey(vm)),
 		running: (vm) => vm.phase === 'Running',
 		stopped,
-		staged: (vm) => staged.has(vmKey(vm)),
+		staged: (vm) => staged.has(vmKey(vm)) || prsOf.has(vmKey(vm)),
 	};
 	const FILTERS: { id: Filter; label: string }[] = [
 		{ id: 'all', label: 'All' },
 		{ id: 'issues', label: 'With issues' },
 		{ id: 'running', label: 'Running' },
 		{ id: 'stopped', label: 'Stopped' },
-		{ id: 'staged', label: 'Staged' },
+		{ id: 'staged', label: 'In a change' },
 	];
 	const counts = $derived(
 		Object.fromEntries(FILTERS.map((f) => [f.id, vms.filter(MATCH[f.id]).length])) as Record<
@@ -153,6 +202,13 @@
 			const c = cmp(a, b) * sortDir;
 			return c !== 0 ? c : a.name.localeCompare(b.name);
 		});
+	});
+
+	// Under the default sort, issue rows sit under their own heading.
+	const groups = $derived.by(() => {
+		if (prefs.value.sortKey !== 'state' || prefs.value.sortDir !== 1) return null;
+		const n = rows.filter((vm) => issueOf.has(vmKey(vm))).length;
+		return n > 0 && n < rows.length ? { issues: n, rest: rows.length - n } : null;
 	});
 
 	const cols: { key: SortKey; label: string; class?: string }[] = [
@@ -198,11 +254,17 @@
 		if (e.target !== e.currentTarget) return;
 		const row = e.currentTarget as HTMLElement;
 		const body = row.parentElement!;
+		// Group headings are rows too; focus skips them.
+		const vmRow = (el: Element | null, up: boolean) => {
+			while (el && !el.hasAttribute('tabindex'))
+				el = up ? el.previousElementSibling : el.nextElementSibling;
+			return el;
+		};
 		const target = {
-			ArrowDown: row.nextElementSibling,
-			ArrowUp: row.previousElementSibling,
-			Home: body.firstElementChild,
-			End: body.lastElementChild,
+			ArrowDown: vmRow(row.nextElementSibling, false),
+			ArrowUp: vmRow(row.previousElementSibling, true),
+			Home: vmRow(body.firstElementChild, false),
+			End: vmRow(body.lastElementChild, true),
 		}[e.key];
 		if (target !== undefined) {
 			e.preventDefault();
@@ -299,15 +361,29 @@
 							</button>
 						</th>
 					{/each}
-					<th class="px-3 py-2 font-medium">Change</th>
+					<th class="px-3 py-2 font-medium">In a change</th>
+					<th class="px-3 py-2 font-medium">Next step</th>
 				</tr>
 			</thead>
 			<tbody class={TBODY}>
-				{#each rows as vm (vm.namespace + '/' + vm.name)}
+				{#each rows as vm, i (vm.namespace + '/' + vm.name)}
 					{@const k = vmKey(vm)}
+					{#if groups && (i === 0 || i === groups.issues)}
+						<tr class="bg-inset">
+							<td
+								colspan={cols.length + 3}
+								class="px-3 py-1 text-[11px] font-medium tracking-wide text-ink-muted uppercase"
+							>
+								{i === 0
+									? `With issues (${groups.issues}), always on top`
+									: `Everything else (${groups.rest})`}
+							</td>
+						</tr>
+					{/if}
 					{@const sc = staged.get(k)}
 					{@const size = sizeOf(vm)}
 					{@const st = stateOf(vm)}
+					{@const next = nextStep(vm)}
 					<tr
 						tabindex={k === tabKey ? 0 : -1}
 						aria-selected={selected.has(k)}
@@ -372,16 +448,6 @@
 										>
 									{/if}
 								{/if}
-								{#if vm.sync === 'NotTracked' && inventory.canAuthor(vm.namespace)}
-									<button
-										type="button"
-										onclick={(e) => {
-											e.stopPropagation();
-											void adoptVM(vm);
-										}}
-										class="text-xs text-accent-ink hover:underline">Adopt into git</button
-									>
-								{/if}
 							</span>
 						</td>
 						<td class="px-3 py-1.5 {vm.nodeName ? 'text-ink-soft' : 'text-ink-muted'}"
@@ -395,7 +461,33 @@
 						>
 						<td class="px-3 py-1.5 font-mono text-xs text-ink-soft">{vm.guestIP ?? '-'}</td>
 						<td class="px-3 py-1.5">
-							{#if sc}<StagedBadge item={sc} onopen={() => onstagedopen(vm)} />{/if}
+							<span class="flex items-center gap-2">
+								{#if sc}<StagedBadge item={sc} onopen={() => onstagedopen(vm)} />{/if}
+								{#each prsOf.get(k) ?? [] as { pr, line } (pr.project + pr.prNumber)}
+									<a
+										href={pr.prURL}
+										target="_blank"
+										title={pr.title}
+										onclick={(e) => e.stopPropagation()}
+										class="text-xs text-ink-soft hover:underline"
+										>PR #{pr.prNumber}{pr.mine ? '' : pr.by ? ` by ${pr.by}` : ''}{line
+											? `: ${line}`
+											: ''}</a
+									>
+								{/each}
+							</span>
+						</td>
+						<td class="px-3 py-1.5">
+							{#if next}
+								<button
+									type="button"
+									onclick={(e) => {
+										e.stopPropagation();
+										next.run();
+									}}
+									class="text-xs text-accent-ink hover:underline">{next.label}</button
+								>
+							{/if}
 						</td>
 					</tr>
 				{/each}

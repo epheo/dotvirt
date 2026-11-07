@@ -4,10 +4,9 @@
 	import Breadcrumb from '#lib/components/Breadcrumb.svelte';
 	import VMDetail from '#lib/components/VMDetail.svelte';
 	import { VM_TABS, type VMTab } from '#lib/nav.js';
-	import { vmKey, vmRef } from '#lib/api.js';
+	import { vmKey } from '#lib/api.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
-	import { ui } from '#lib/state/ui.svelte.js';
 
 	const namespace = $derived(page.params.namespace!);
 	const name = $derived(page.params.name!);
@@ -33,7 +32,6 @@
 			{tab}
 			ontab={setTab}
 			stagedItem={drafts.stagedByKey.get(vmKey(vm)) ?? null}
-			onstagedopen={() => vm && (ui.modal = { kind: 'staged', vm: vmRef(vm) })}
 			networks={inventory.networks}
 		/>
 	</div>

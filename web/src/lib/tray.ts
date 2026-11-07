@@ -1,4 +1,4 @@
-import type { DraftView, Proposal, ProjectSync } from '#lib/api.js';
+import type { Change, DraftItem, DraftView, Proposal, ProjectSync } from '#lib/api.js';
 import { opStands } from '#lib/gitops.js';
 
 // A PR this user opened, followed past its review: the open list drops it on
@@ -13,6 +13,10 @@ export type Followed = {
 	goneAt?: number; // left the open list, merge not seen yet
 	mergedAt?: number;
 	hash?: string;
+	// What the PR declares and which VMs restart, kept from the review sheet;
+	// absent for a PR opened elsewhere.
+	lines?: string[];
+	restarts?: string[];
 };
 
 export type TrayLane =
@@ -24,6 +28,8 @@ export type TrayLane =
 			project: string;
 			pr: Followed;
 			error?: string;
+			// Argo runs the merge commit; applying is then the sync itself.
+			picked?: boolean;
 	  };
 
 export const followKey = (project: string, prNumber: number) => `${project}#${prNumber}`;
@@ -64,9 +70,11 @@ export function trayLanes(src: {
 		const lane = { key, project: f.project, pr: f };
 		if (!g) out.push({ kind: 'merged', ...lane });
 		else if (opStands(g)) out.push({ kind: 'refused', ...lane, error: g.syncError });
-		else if (f.hash && g.revision && f.hash.startsWith(g.revision) && g.sync === 'Synced')
-			out.push({ kind: 'live', ...lane });
-		else out.push({ kind: 'applying', ...lane });
+		else {
+			const picked = !!(f.hash && g.revision && f.hash.startsWith(g.revision));
+			if (picked && g.sync === 'Synced') out.push({ kind: 'live', ...lane });
+			else out.push({ kind: 'applying', ...lane, picked });
+		}
 	}
 	return out;
 }
@@ -89,6 +97,13 @@ export function follow(
 	const next: Followed[] = [];
 	for (const f of followed) {
 		const key = followKey(f.project, f.prNumber);
+		if (open.has(key) && f.goneAt) {
+			// Back in the open list: the grace restarts the next time it leaves.
+			const { goneAt: _, ...rest } = f;
+			next.push(rest);
+			changed = true;
+			continue;
+		}
 		if (open.has(key) || f.mergedAt) {
 			next.push(f);
 			continue;
@@ -110,3 +125,34 @@ export function follow(
 		}
 	return changed ? next : followed;
 }
+
+// One line per object a PR declares, as the tray says it once live:
+// "web-1: CPU 4, Memory 8Gi". Restarts names the VMs the merge restarts.
+export function changeSummary(items: DraftItem[]): { lines: string[]; restarts: string[] } {
+	return {
+		lines: items.map((it) =>
+			it.kind === 'delete'
+				? `${it.name} deleted`
+				: it.kind === 'create'
+					? `${it.name} created`
+					: `${it.name}: ${it.changes
+							.map((c) => (c.action === 'remove' ? `${c.field} removed` : `${c.field} ${c.to}`))
+							.join(', ')}`,
+		),
+		restarts: items.filter((it) => it.changes.some((c) => c.restart)).map((it) => it.name),
+	};
+}
+
+// A change in a few words, the way the tray and the tables list it.
+const changeLine = (c: Change) =>
+	c.action === 'change'
+		? `${c.field.toLowerCase()} ${c.from} to ${c.to}`
+		: c.action === 'add'
+			? `${c.field.toLowerCase()}${c.to ? ` ${c.to}` : ''}`
+			: `remove ${c.field.toLowerCase()}`;
+
+export const itemLine = (it: DraftItem) =>
+	it.kind === 'delete'
+		? 'delete'
+		: it.changes.slice(0, 2).map(changeLine).join(', ') +
+			(it.changes.length > 2 ? `, +${it.changes.length - 2} more` : '');

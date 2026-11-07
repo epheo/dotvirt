@@ -73,8 +73,10 @@ test('prune risk needs an explicit yes before the PR opens', async ({ page }) =>
 	await expect(sheet.getByText(/web-prod\/old-net/)).toBeVisible();
 	const open = sheet.getByRole('button', { name: 'Open pull request' });
 	await expect(open).toBeDisabled();
+	await expect(sheet.getByText('Tick the deletion box to continue.')).toBeVisible();
 	await sheet.getByLabel(/Delete these 2 when this merges/).check();
 	await expect(open).toBeEnabled();
+	await expect(sheet.getByText('Tick the deletion box to continue.')).toHaveCount(0);
 	// The full lane still carries Argo's own sentence.
 	await page.keyboard.press('Escape');
 	await tray.getByRole('link', { name: 'Open in Changes' }).click();

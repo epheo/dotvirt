@@ -51,7 +51,10 @@ test('the tray reviews and proposes in a sheet; merge stays in the forge', async
 	const sheet = page.getByRole('dialog');
 	// Consequences come before the button: the title is written, the restart named.
 	await expect(sheet.getByLabel('Pull request title')).toHaveValue(/Update web-1/);
-	await expect(sheet.getByText(/web-1 restarts once/)).toBeVisible();
+	await expect(sheet.getByText('1 change to 1 VM. Opens one pull request on main.')).toBeVisible();
+	await expect(sheet.getByText(/web-1 restarts once\. The memory change needs it\./)).toBeVisible();
+	await expect(sheet.getByText(/web-1 at 8 GiB fits on 2 of 2 hosts/)).toBeVisible();
+	await expect(sheet.getByText('Nothing else in team-web changes.')).toBeVisible();
 	await sheet.getByRole('button', { name: 'Open pull request' }).click();
 	await expect(page.getByText(/PR #77 opened in team-web/)).toBeVisible();
 	await expect(tray.getByText('1 staged change')).toHaveCount(0);
@@ -150,4 +153,26 @@ test('a setting edits in place: consequence first, fields add up, one unstages a
 	await page.getByRole('row', { name: /^vCPU/ }).getByRole('button', { name: 'Unstage' }).click();
 	await expect(tray.getByText(/cpu 2 to 4/)).toHaveCount(0);
 	await expect(tray.getByText(/memory 4Gi to 8Gi/)).toBeVisible();
+});
+
+test('the tray discards a draft in place, asking once', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await openVM(page, 'web-1');
+	await page.getByRole('button', { name: 'Change vCPU' }).click();
+	await page.getByRole('button', { name: 'One vCPU more' }).click();
+	await expect(page.getByRole('spinbutton', { name: 'vCPU' })).toHaveValue('3');
+	await page.getByRole('button', { name: 'Stage', exact: true }).click();
+	// The header says what waits to be proposed.
+	await expect(page.getByRole('button', { name: '1 staged, not proposed' })).toBeVisible();
+
+	const tray = page.getByRole('complementary', { name: 'Changes in flight' });
+	await tray.getByRole('button', { name: 'Discard' }).click();
+	await expect(tray.getByText('Discard 1 staged change?')).toBeVisible();
+	await tray.getByRole('button', { name: 'Keep' }).click();
+	await expect(tray.getByRole('button', { name: 'Review and propose' })).toBeVisible();
+	await tray.getByRole('button', { name: 'Discard' }).click();
+	await tray.getByRole('button', { name: 'Discard' }).click();
+	await expect(page.getByText('Discarded the staged changes in team-web.')).toBeVisible();
+	await expect(tray.getByText(/staged change/)).toHaveCount(0);
 });

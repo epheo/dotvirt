@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { Change } from '#lib/api.js';
-	let { changes }: { changes: Change[] } = $props();
+	// marks: also name the changes that apply without a restart, where a VM
+	// edit mixes both.
+	let { changes, marks = false }: { changes: Change[]; marks?: boolean } = $props();
 </script>
 
 <ul class="space-y-0.5 text-[13px]">
@@ -21,6 +23,8 @@
 					class="rounded bg-warn-soft px-1 text-[10px] text-warn-ink"
 					title="Applies at the VM's next power cycle">restart</span
 				>
+			{:else if marks}
+				<span class="text-[10px] text-ink-muted">no restart</span>
 			{/if}
 		</li>
 	{/each}

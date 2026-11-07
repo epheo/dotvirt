@@ -6,6 +6,7 @@ import type {
 	ExternalRouteCreate,
 	NetworkCreate,
 	NetworkPolicyCreate,
+	ProposeResult,
 	Template,
 	UplinkCreate,
 	VM,
@@ -55,6 +56,7 @@ export type AppModal =
 	  }
 	| { kind: 'staged'; vm: VMRef } // the per-VM staged-changes modal (from a Staged badge)
 	| { kind: 'propose'; project: string } // review a project's draft and open its PR
+	| { kind: 'undo'; project: string; hash: string } // revert a merged commit through a PR
 	// The VM dialogs live here, not on the detail page, so every VM menu (detail
 	// toolbar, context menu, inspector, palette) opens them the same way. They
 	// hold the identity only: the host resolves the live VM every frame.
@@ -114,6 +116,26 @@ class Ui {
 	// An arrow so it can be handed to action() unbound: the primitive takes a
 	// reporter rather than importing the shell.
 	toastError = (msg: string) => this.showToast(msg, { kind: 'error' });
+
+	// A pull request opened or updated from the app: what happened, who acts
+	// next, and the way to it.
+	toastProposed(project: string, r: ProposeResult, what = 'PR') {
+		const url = r.prURL || r.compareURL;
+		this.showToast(
+			r.prNumber
+				? `${what} #${r.prNumber} ${r.existing ? 'updated' : 'opened'} in ${project}. Approve and merge it in the forge.`
+				: `Pushed ${r.branch}. Open the pull request in the forge.`,
+			{
+				kind: 'success',
+				action: url
+					? {
+							label: r.prURL ? `Open PR #${r.prNumber}` : 'Open in forge',
+							run: () => window.open(url, '_blank', 'noopener'),
+						}
+					: undefined,
+			},
+		);
+	}
 
 	// The Changes section is a route (deep-linkable, back-button-walkable); this is
 	// the one navigation every review affordance shares. A target lands on one
