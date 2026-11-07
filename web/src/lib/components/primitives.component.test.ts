@@ -5,6 +5,7 @@ import Card from './Card.svelte';
 import Consequence from './Consequence.svelte';
 import CountTile from './CountTile.svelte';
 import PageHeader from './PageHeader.svelte';
+import Pager from './Pager.svelte';
 import StageChip from './StageChip.svelte';
 import TabBar from './TabBar.svelte';
 
@@ -140,5 +141,31 @@ describe('PageHeader', () => {
 			status: { tone: 'ok', text: text('Project network of <a href="#">team-web</a>') },
 		});
 		expect(screen.getByRole('link', { name: 'team-web' })).toBeTruthy();
+	});
+});
+
+describe('Pager', () => {
+	it('says where the page sits and walks pages', async () => {
+		render(Pager, { total: 389, page: 1, size: 50 });
+		expect(screen.getByText('1-50').parentElement?.textContent).toBe('Showing 1-50 of 389');
+		expect(screen.getByText('Page 1 of 8')).toBeTruthy();
+		expect(
+			(screen.getByRole('button', { name: 'Previous page' }) as HTMLButtonElement).disabled,
+		).toBe(true);
+		await fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+		expect(screen.getByText('Page 2 of 8')).toBeTruthy();
+		expect(screen.getByText('51-100')).toBeTruthy();
+	});
+
+	it('goes back to page 1 when the page size changes', async () => {
+		render(Pager, { total: 389, page: 3, size: 50 });
+		await fireEvent.change(screen.getByLabelText('Rows per page'), { target: { value: '25' } });
+		expect(screen.getByText('Page 1 of 16')).toBeTruthy();
+	});
+
+	it('only counts a list too short to page', () => {
+		render(Pager, { total: 12, page: 1, size: 50 });
+		expect(screen.getByText('1-12')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Next page' })).toBeNull();
 	});
 });
