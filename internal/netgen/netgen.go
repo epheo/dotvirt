@@ -10,6 +10,9 @@ package netgen
 import (
 	"fmt"
 	"net"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // validCIDR reports whether s parses as a CIDR (e.g. 10.0.0.0/24). Subnet/egress
@@ -24,6 +27,25 @@ func validCIDR(s string) bool {
 // validIP reports whether s parses as a bare IP address.
 func validIP(s string) bool {
 	return net.ParseIP(s) != nil
+}
+
+// validIfName reports whether s is a Linux interface name, the kernel rule
+// nmstate holds NICs and OVS bridges to: 1..15 bytes, not "." or "..", no '/',
+// ':' or whitespace.
+func validIfName(s string) bool {
+	if s == "" || len(s) > 15 || s == "." || s == ".." {
+		return false
+	}
+	return !strings.ContainsFunc(s, func(r rune) bool { return r == '/' || r == ':' || unicode.IsSpace(r) })
+}
+
+// validPhysicalNetwork reports whether s passes the CUDN CRD's own rule for a
+// localnet physicalNetworkName: 1..253 characters, no ',' or ':'. dotvirt's
+// uplinks are DNS-1123, but a hand-made bridge mapping may use anything the
+// CRD allows.
+func validPhysicalNetwork(s string) bool {
+	n := utf8.RuneCountInString(s)
+	return n >= 1 && n <= 253 && !strings.ContainsAny(s, ",:")
 }
 
 // requireCIDRs validates each subnet as a CIDR.
