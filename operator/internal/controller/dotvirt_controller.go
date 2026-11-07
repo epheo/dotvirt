@@ -39,7 +39,8 @@ type DotvirtReconciler struct {
 	Config   *rest.Config      // discovery for the dependency probe
 	Platform platform.Platform // detected once at startup (cmd/main.go)
 	DryRun   bool              // -dry-run: validate via server-side dry-run apply; persist nothing
-	// APIReader bypasses the cache for prune's cluster-wide lists.
+	// APIReader bypasses the cache: the pass's read of the CR and prune's
+	// cluster-wide lists.
 	APIReader client.Reader
 	// OperatorNamespace is admitted by the NetworkPolicies; "" when unknown.
 	OperatorNamespace string
@@ -86,8 +87,12 @@ type reconcilePhase struct {
 func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
+	// Uncached: the status write is a diff against this read, and the cache can
+	// lag the previous pass's own write. Diffed against that stale base, a field
+	// flipping back (Ready after a Provisioning the cache never saw) would drop
+	// out of the patch and stay wrong on the server.
 	var dv dotvirtv1alpha1.Dotvirt
-	if err := r.Get(ctx, req.NamespacedName, &dv); err != nil {
+	if err := r.reader().Get(ctx, req.NamespacedName, &dv); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	log.Info("reconciling dotvirt install", "platform", r.Platform)

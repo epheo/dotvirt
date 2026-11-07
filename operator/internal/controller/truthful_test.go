@@ -420,3 +420,36 @@ func TestSpecChangeRetiresStaleStatus(t *testing.T) {
 		t.Errorf("forgeAdminHint = %q survived the switch off managed", got.Status.ForgeAdminHint)
 	}
 }
+
+// The status diff's base is read uncached: a cache still holding the Ready of
+// two passes ago, behind the Provisioning the last pass wrote, would make a
+// return to Ready an empty patch and leave Provisioning on the server.
+func TestStatusBaseIsReadUncached(t *testing.T) {
+	dv := testCR()
+	c := testBuilder(t).WithObjects(dv).Build()
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	markOperandReady(t, c, dv)
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	cached := getCR(t, c, dv)
+
+	lastWrite := cached.DeepCopy()
+	lastWrite.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
+	if err := c.Status().Update(context.Background(), lastWrite); err != nil {
+		t.Fatal(err)
+	}
+	lagging := interceptor.NewClient(c.(client.WithWatch), interceptor.Funcs{
+		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if out, ok := obj.(*dotvirtv1alpha1.Dotvirt); ok {
+				cached.DeepCopyInto(out)
+				return nil
+			}
+			return cl.Get(ctx, key, obj, opts...)
+		},
+	})
+	r := newReconciler(lagging, depsOK)
+	r.APIReader = c
+	reconcileOnce(t, r, dv)
+	if got := getCR(t, c, dv); got.Status.Phase != dotvirtv1alpha1.PhaseReady {
+		t.Errorf("phase = %q, want Ready: the diff ran against a stale base", got.Status.Phase)
+	}
+}
