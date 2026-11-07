@@ -33,7 +33,7 @@ func TestRefSegmentLegal(t *testing.T) {
 
 // TestProposedBranchNoCollision is the isolation guard: distinct (user, project)
 // identities must never share a working branch, even when their readable segments
-// sanitize identically.
+// sanitize identically - the revert branches included.
 func TestProposedBranchNoCollision(t *testing.T) {
 	c := &Reader{proposed: "dotvirt/proposed"}
 
@@ -51,6 +51,10 @@ func TestProposedBranchNoCollision(t *testing.T) {
 		b1 := c.proposedBranch(p[1], "proj")
 		if b0 == b1 {
 			t.Errorf("distinct users %q and %q share branch %q", p[0], p[1], b0)
+		}
+		r0, r1 := c.revertBranch(p[0], "proj", "0123456789abcdef"), c.revertBranch(p[1], "proj", "0123456789abcdef")
+		if r0 == r1 || strings.HasPrefix(r1, c.revertPrefix(p[0], "proj")) {
+			t.Errorf("distinct users %q and %q share revert branch %q", p[0], p[1], r0)
 		}
 	}
 

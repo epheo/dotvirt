@@ -1,9 +1,16 @@
 package api
 
 import (
+	"context"
+	"net/http"
+	"strings"
 	"testing"
+	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/netstate"
 )
 
 // scopeNetworks must keep shared (cluster) networks discoverable to every tenant
@@ -41,4 +48,60 @@ func TestScopeNetworks(t *testing.T) {
 	if len(in[2].Namespaces) != 3 {
 		t.Errorf("scopeNetworks mutated the cached input slice: %v", in[2].Namespaces)
 	}
+}
+
+// A shared network's apply error can name every namespace its selector
+// reaches: it reaches only callers who may author shared networks, a
+// project network's own error stays with its tenant.
+func TestRedactSharedErrors(t *testing.T) {
+	nets := []model.Network{
+		{Name: "dc-vlan", Scope: model.ScopeShared, SyncError: "NAD exists in namespace team-b"},
+		{Name: "backend", Scope: model.ScopeProject, Namespace: "team-a", SyncError: "invalid subnet"},
+		{Name: "quiet", Scope: model.ScopeShared},
+	}
+	redactSharedErrors(nets)
+	if strings.Contains(nets[0].SyncError, "team-b") || nets[0].SyncError == "" {
+		t.Errorf("shared error = %q, want a generic line", nets[0].SyncError)
+	}
+	if nets[1].SyncError != "invalid subnet" || nets[2].SyncError != "" {
+		t.Errorf("redaction reached beyond shared errors: %+v", nets[1:])
+	}
+}
+
+// A second AdminNetworkPolicy at a priority a live one holds would be ordered
+// arbitrarily by OVN-K: the create is refused before anything is staged.
+func TestCreateAdminNetworkPolicyRefusesTakenPriority(t *testing.T) {
+	fc := newFakeCluster(t)
+	gv := "policy.networking.k8s.io/v1alpha1"
+	fc.on(http.MethodGet, "/apis/"+gv, func(w http.ResponseWriter, _ *http.Request) {
+		writeObj(w, metav1.APIResourceList{
+			TypeMeta:     metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"},
+			GroupVersion: gv,
+			APIResources: []metav1.APIResource{{Name: "adminnetworkpolicies", Kind: "AdminNetworkPolicy", Verbs: []string{"list", "watch"}}},
+		})
+	})
+	fc.on(http.MethodGet, "/apis/"+gv+"/adminnetworkpolicies", unstructuredList(gv, "AdminNetworkPolicy", map[string]any{
+		"apiVersion": gv, "kind": "AdminNetworkPolicy",
+		"metadata": map[string]any{"name": "lockdown", "resourceVersion": "1"},
+		"spec":     map[string]any{"priority": int64(5), "subject": map[string]any{"namespaces": map[string]any{}}},
+	}))
+	d := &planeDraft{}
+	s := fc.server(d, Config{PlatformRepo: platformRepo})
+	ns := netstate.New(fc.sa, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ns.Run(ctx)
+	s.netstate = ns
+	for deadline := time.Now().Add(10 * time.Second); len(ns.Policies()) == 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("netstate never synced the live ANP")
+		}
+	}
+
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/adminnetworkpolicies", `{"name":"other","priority":5}`), http.StatusConflict)
+	d.none(t)
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/adminnetworkpolicies", `{"name":"other","priority":6}`), http.StatusOK)
+	d.only(t, "StageCreate "+platformProjectName+" adminnetworkpolicy")
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/adminnetworkpolicies", `{"baseline":true}`), http.StatusOK)
+	d.only(t, "StageCreate "+platformProjectName+" adminnetworkpolicy")
 }

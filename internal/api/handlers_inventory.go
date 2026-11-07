@@ -27,10 +27,11 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	if err != nil {
 		return model.Inventory{}, err
 	}
-	projects, err := s.projectsFor(ctx, id, userCluster)
+	visible, err := s.visibleFor(ctx, id, userCluster)
 	if err != nil {
 		return model.Inventory{}, err
 	}
+	projects := s.resolver.Resolve(s.state.Namespaces(), visible)
 
 	// Live state + topology come from the SA-owned snapshot: the hot path reads
 	// in-memory state, never the cluster, however many subscribers a broadcast
@@ -40,7 +41,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		Projects: projects,
 		Branch:   s.cfg.BaseBranch,
 		Repos:    s.repos,
-		Live:     s.state.LiveVMs(),
+		Live:     s.state.Live(),
 	}
 	// Drift comes from the SA-owned Application snapshot (lock-free, watch-fed).
 	// Three states the inventory must NOT conflate: Argo off (s.drift nil: no
@@ -90,34 +91,39 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 			}
 		}
 	}
+	platformAuthor, platformErr := s.canAuthorPlatform(ctx, id, userCluster)
 	// The platform tier has no project row; its Application rollup rides the frame
 	// on its own so the issues plane names what it failed to apply or keeps
-	// unhealthy. Cluster-wide (the snapshot is unfiltered): a user scoped to no
-	// project must not mask a broken platform sync.
+	// unhealthy. Every user sees its verdict (a user scoped to no project must not
+	// mask a broken platform sync); only platform authors see its detail.
 	if s.cfg.PlatformRepo != "" {
 		inv.Platform = platformRollup(in.ProjectDrift, s.cfg.PlatformRepo)
+		if !platformAuthor {
+			inv.Platform = tenantPlatformView(inv.Platform, visible)
+		}
 	}
 	// Propose existing tenants (namespaces with VMs, no project label) to callers
 	// who could adopt them - the same namespace-create authority the create-project
 	// route enforces. Rides the frame, so the list drains as adoptions merge.
-	if s.cfg.PlatformRepo != "" && s.canCreateCached(ctx, id, userCluster, ssarNamespace) {
-		inv.Adoptable = inventory.Adoptable(in.Live, s.state.Namespaces())
+	if s.cfg.PlatformRepo != "" {
+		if ok, _ := s.can(ctx, id, userCluster, verbCreate, ssarNamespace, ""); ok {
+			inv.Adoptable = inventory.Adoptable(in.Live, s.state.Namespaces())
+		}
 	}
 	// The platform tier is config-only (never a labeled namespace), so it's absent
 	// from `projects` - seed it for platform authors so its open PR shows on a cold
 	// load, not just right after a propose tracks it.
 	propProjects := projects
-	if s.canAuthorPlatform(ctx, id, userCluster) {
+	if platformAuthor {
 		propProjects = append(propProjects, s.platformProject())
 	}
-	inv.Proposals = s.proposalsFor(id, propProjects)
+	inv.Proposals = s.proposalsFor(id, propProjects, platformErr != nil)
 	// Watermark for the out-of-band network catalog: bumps when a port group moves
 	// (NetworkChanged) or a non-VM object's drift content moves (ObjectDriftGen), so
 	// the client re-pulls /api/networks - a merged segment, and its badge, show live.
-	// The drift term is the CONTENT generation, not the raw DriftChanged version:
-	// Application objects churn on every reconcile (reconciledAt), and a version that
-	// counted that would defeat the hub's identical-frame suppression and refetch the
-	// catalog for nothing.
+	// The drift term is the non-VM generation, not the DriftChanged version: that
+	// also moves on VM-only drift, which the frame carries itself, and counting it
+	// would refetch the catalog for nothing.
 	inv.NetworksVersion = s.bus.Version(eventbus.NetworkChanged)
 	if s.drift != nil {
 		inv.NetworksVersion += s.drift.ObjectDriftGen()
@@ -145,6 +151,32 @@ func platformRollup(drift map[string]model.ProjectSync, platformRepo string) *mo
 		SyncError: "no ArgoCD Application sources the platform repo - the dotvirt-platform Application is missing, so tenancy changes cannot apply",
 	}
 }
+
+// tenantPlatformView is the platform rollup for a caller without platform
+// authority: the verdict, the unhealthy objects in namespaces they can see
+// (their own Namespace objects included), and a generic line for the apply
+// error, whose text can name any tenant's namespace.
+func tenantPlatformView(ps *model.ProjectSync, visible map[string]bool) *model.ProjectSync {
+	if ps == nil {
+		return nil
+	}
+	out := &model.ProjectSync{Sync: ps.Sync, Health: ps.Health, Operation: ps.Operation}
+	if ps.SyncError != "" {
+		out.SyncError = platformErrorForTenants
+	}
+	for _, o := range ps.Unhealthy {
+		ns := o.Namespace
+		if ns == "" && o.Kind == model.KindNS.Kind {
+			ns = o.Name
+		}
+		if visible[ns] {
+			out.Unhealthy = append(out.Unhealthy, o)
+		}
+	}
+	return out
+}
+
+const platformErrorForTenants = "the platform repo failed to apply; a platform administrator can see why"
 
 func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 	id, _, err := s.userCluster(r)
@@ -179,25 +211,36 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.optionsFor(r.Context(), id, c, visible, all))
 }
 
+// ssarDataSources and ssarNADs are the list authorities over the namespaced
+// option kinds (cluster.ListOptions reads the same resources).
+var (
+	ssarDataSources = ssarRef{"cdi.kubevirt.io", "datasources"}
+	ssarNADs        = ssarFor(model.KindNAD)
+)
+
 // optionsFor narrows the shared catalog to what id may see: a namespaced entry
 // passes when its namespace is in the caller's visible set, or when the caller
 // could list that kind there itself (a shared golden-image namespace grants that
 // to every authenticated user; the verdict is SSAR-cached per token). The cached
 // catalog is never mutated - fresh, non-nil slices so they serialize as [].
 func (s *Server) optionsFor(ctx context.Context, id auth.Identity, c *cluster.Client, visible map[string]bool, all model.Options) model.Options {
-	allowed := func(ns, kind string, can func(context.Context, string) bool) bool {
-		return visible[ns] || s.ssarCached(id, "read\x00"+kind+"\x00"+ns, func() bool { return can(ctx, ns) })
+	allowed := func(ns string, ref ssarRef) bool {
+		if visible[ns] {
+			return true
+		}
+		ok, _ := s.can(ctx, id, c, verbList, ref, ns)
+		return ok
 	}
 	out := all
 	out.OSImages = make([]model.OSImage, 0, len(all.OSImages))
 	for _, img := range all.OSImages {
-		if allowed(img.Namespace, "osimages", c.CanListOSImages) {
+		if allowed(img.Namespace, ssarDataSources) {
 			out.OSImages = append(out.OSImages, img)
 		}
 	}
 	out.Networks = make([]model.NetworkOption, 0, len(all.Networks))
 	for _, n := range all.Networks {
-		if allowed(n.Namespace, "networks", c.CanListNetworks) {
+		if allowed(n.Namespace, ssarNADs) {
 			out.Networks = append(out.Networks, n)
 		}
 	}

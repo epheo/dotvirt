@@ -26,6 +26,7 @@ import (
 	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
+	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
@@ -34,10 +35,11 @@ import (
 // fakeCluster is one fake apiserver behind both dotvirt's SA and every caller
 // token, so a test drives a handler end to end: the SA snapshot syncs from its
 // lists, and the caller's reads and writes land on its routes. admin-token
-// passes every SSAR; any other token sees only what ssrr grants it.
+// passes every SSAR; any other token sees only the namespaces readsVMs grants.
 type fakeCluster struct {
 	t   *testing.T
 	srv *httptest.Server
+	sa  *cluster.Client // dotvirt's SA over srv, set by server
 
 	namespaces []corev1.Namespace
 	vms        []kubevirtcorev1.VirtualMachine
@@ -48,6 +50,12 @@ type fakeCluster struct {
 	calls  []string                    // "METHOD /path" of every non-authz, non-snapshot request
 	// ssar decides a SelfSubjectAccessReview; nil allows exactly admin-token.
 	ssar func(token string, a *authzv1.ResourceAttributes) bool
+	// readsVMs grants list virtualmachines in one namespace, the visibility
+	// probe, ahead of ssar.
+	readsVMs func(token, namespace string) bool
+	// ssarFail fails a review with the status it returns, ahead of the rest;
+	// 0 lets the review through.
+	ssarFail func(a *authzv1.ResourceAttributes) int
 	// ssrr answers a SelfSubjectRulesReview; nil grants nothing.
 	ssrr func(token, namespace string) []authzv1.ResourceRule
 }
@@ -57,6 +65,9 @@ const (
 	tenantToken = "tenant-token"
 	repoTeamA   = "https://forge/team-a.git"
 )
+
+// tenantReadsTeamA is the readsVMs of a tenant scoped to team-a-dev.
+func tenantReadsTeamA(token, ns string) bool { return token == tenantToken && ns == "team-a-dev" }
 
 // newFakeCluster seeds team-a (one repo-backed namespace, team-a-dev) and
 // orphans (a repoless one, orphans-ns).
@@ -130,8 +141,23 @@ func (fc *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		attrs := obj.(*authzv1.SelfSubjectAccessReview).Spec.ResourceAttributes
+		if fc.ssarFail != nil {
+			switch code := fc.ssarFail(attrs); code {
+			case 0:
+			case http.StatusUnauthorized:
+				writeStatus(w, code, metav1.StatusReasonUnauthorized)
+				return
+			default:
+				writeStatus(w, code, metav1.StatusReasonServiceUnavailable)
+				return
+			}
+		}
 		allow := bearer(r) == adminToken
-		if fc.ssar != nil {
+		switch {
+		case fc.readsVMs != nil && fc.readsVMs(bearer(r), attrs.Namespace) &&
+			attrs.Verb == "list" && attrs.Resource == "virtualmachines":
+			allow = true
+		case fc.ssar != nil:
 			allow = fc.ssar(bearer(r), attrs)
 		}
 		writeObj(w, authzv1.SelfSubjectAccessReview{
@@ -214,6 +240,7 @@ func (fc *fakeCluster) server(d coordinator, cfg Config) *Server {
 	if err != nil {
 		t.Fatalf("SA client: %v", err)
 	}
+	fc.sa = sa
 	bus := eventbus.New()
 	state := clusterstate.New(sa, "dotvirt.io/project", bus)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -401,6 +428,11 @@ func (d *planeDraft) AdoptProject(_ auth.Identity, commit, target project.Projec
 func (d *planeDraft) ReleaseDeclared(_ auth.Identity, commit, target project.ProjectInfo) ([]string, []string, error) {
 	d.record("ReleaseDeclared "+commit.Name+","+target.Name, nil)
 	return d.releaseStaged, d.releaseResidue, nil
+}
+
+func (d *planeDraft) StageCreate(_ auth.Identity, p project.ProjectInfo, res draft.Resource, spec json.RawMessage) (model.DraftView, error) {
+	d.record("StageCreate "+p.Name+" "+string(res), spec)
+	return stagedView, nil
 }
 
 func (d *planeDraft) Get(auth.Identity, project.ProjectInfo) (model.DraftView, error) {

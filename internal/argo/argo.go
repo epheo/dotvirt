@@ -96,20 +96,17 @@ type resKey struct{ group, kind, namespace, name string }
 func resourceDriftFromApps(objs []*unstructured.Unstructured) map[resKey]Drift {
 	out := map[resKey]Drift{}
 	for _, app := range objs {
-		resources, found, err := unstructured.NestedSlice(app.Object, "status", "resources")
-		if err == nil && found {
-			for _, raw := range resources {
-				res, ok := raw.(map[string]any)
-				if !ok {
-					continue
-				}
-				if asString(res, "name") == "" {
-					continue
-				}
-				out[keyOf(res)] = Drift{
-					Sync:   syncStatus(asString(res, "status")),
-					Health: nestedString(res, "health", "status"),
-				}
+		for _, raw := range nestedSlice(app.Object, "status", "resources") {
+			res, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if asString(res, "name") == "" {
+				continue
+			}
+			out[keyOf(res)] = Drift{
+				Sync:   syncStatus(asString(res, "status")),
+				Health: nestedString(res, "health", "status"),
 			}
 		}
 		mergeSyncMessages(out, app.Object)
@@ -141,11 +138,7 @@ func keyOf(res map[string]any) resKey {
 // surface the latter so the UI can show *why* an object is OutOfSync. Synced rows carry
 // a benign "unchanged" message, so only non-Synced ones are kept.
 func mergeSyncMessages(out map[resKey]Drift, app map[string]any) {
-	results, found, err := unstructured.NestedSlice(app, "status", "operationState", "syncResult", "resources")
-	if err != nil || !found {
-		return
-	}
-	for _, raw := range results {
+	for _, raw := range nestedSlice(app, "status", "operationState", "syncResult", "resources") {
 		res, ok := raw.(map[string]any)
 		if !ok {
 			continue
@@ -246,8 +239,7 @@ func unhealthyResources(app map[string]any, opStands bool) []model.ObjectHealth 
 		return o
 	}
 	synced := map[resKey]bool{}
-	resources, _, _ := unstructured.NestedSlice(app, "status", "resources")
-	for _, raw := range resources {
+	for _, raw := range nestedSlice(app, "status", "resources") {
 		res, ok := raw.(map[string]any)
 		if !ok || asString(res, "name") == "" {
 			continue
@@ -263,8 +255,7 @@ func unhealthyResources(app map[string]any, opStands bool) []model.ObjectHealth 
 		}
 	}
 	if opStands {
-		results, _, _ := unstructured.NestedSlice(app, "status", "operationState", "syncResult", "resources")
-		for _, raw := range results {
+		for _, raw := range nestedSlice(app, "status", "operationState", "syncResult", "resources") {
 			res, ok := raw.(map[string]any)
 			if !ok || asString(res, "name") == "" {
 				continue
@@ -304,8 +295,7 @@ func appRepos(app map[string]any) []string {
 	if u := nestedString(app, "spec", "source", "repoURL"); u != "" {
 		out = append(out, forge.NormalizeRepoURL(u))
 	}
-	sources, _, _ := unstructured.NestedSlice(app, "spec", "sources")
-	for _, raw := range sources {
+	for _, raw := range nestedSlice(app, "spec", "sources") {
 		if src, ok := raw.(map[string]any); ok {
 			if u := asString(src, "repoURL"); u != "" {
 				out = append(out, forge.NormalizeRepoURL(u))
@@ -399,15 +389,21 @@ func nestedString(m map[string]any, keys ...string) string {
 	return s
 }
 
+// nestedSlice reads a list field in place, nil when absent or not a list.
+// unstructured.NestedSlice deep-copies every entry, and these lists hold one
+// row per managed object; callers only read scalars out of the entries and must
+// never write through them (they are the reflector store's objects).
+func nestedSlice(m map[string]any, keys ...string) []any {
+	v, _, _ := unstructured.NestedFieldNoCopy(m, keys...)
+	s, _ := v.([]any)
+	return s
+}
+
 // errorCondition returns the first error condition's message. Every Application
 // condition ends in "Error" or "Warning", so the suffix beats a list that will grow.
 // ApplicationSet does not follow this (it uses ErrorOccurred).
 func errorCondition(app map[string]any) string {
-	conds, found, err := unstructured.NestedSlice(app, "status", "conditions")
-	if !found || err != nil {
-		return ""
-	}
-	for _, c := range conds {
+	for _, c := range nestedSlice(app, "status", "conditions") {
 		cond, ok := c.(map[string]any)
 		if !ok {
 			continue

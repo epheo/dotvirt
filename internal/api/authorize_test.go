@@ -357,11 +357,9 @@ func TestRevertNeedsEveryNamespace(t *testing.T) {
 }
 
 // The verdict is cached per (token, verb, resource, namespace): a different
-// namespace or verb is its own review, a repeat is not, and a failed review is
-// never cached as a denial.
-func TestCanAuthorCacheKey(t *testing.T) {
+// namespace or verb is its own review, a repeat is not.
+func TestCanCacheKey(t *testing.T) {
 	s := scopeServer(eventbus.New())
-	fail := true
 	c, reviews := ssarCountingClient(func(*authzv1.ResourceAttributes) bool { return true })
 	id := auth.Identity{Token: "tok", Username: "u"}
 	ctx := context.Background()
@@ -369,25 +367,11 @@ func TestCanAuthorCacheKey(t *testing.T) {
 	for _, q := range []struct{ verb, ns string }{
 		{verbUpdate, "a"}, {verbUpdate, "a"}, {verbUpdate, "b"}, {verbDelete, "a"},
 	} {
-		if ok, err := s.canAuthor(ctx, id, c, q.verb, ssarVM, q.ns); !ok || err != nil {
+		if ok, err := s.can(ctx, id, c, q.verb, ssarVM, q.ns); !ok || err != nil {
 			t.Fatalf("%s in %s = %v, %v", q.verb, q.ns, ok, err)
 		}
 	}
 	if *reviews != 3 {
 		t.Fatalf("reviews = %d, want 3 (one per distinct verb and namespace)", *reviews)
-	}
-
-	probe := func() (bool, error) {
-		if fail {
-			return false, errors.New("apiserver down")
-		}
-		return true, nil
-	}
-	if _, err := s.ssarChecked(id, "k", probe); err == nil {
-		t.Fatal("a failed review returned no error")
-	}
-	fail = false
-	if ok, err := s.ssarChecked(id, "k", probe); !ok || err != nil {
-		t.Fatalf("after recovery = %v, %v; the failure was cached", ok, err)
 	}
 }
