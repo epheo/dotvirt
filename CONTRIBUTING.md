@@ -20,10 +20,11 @@ make -C operator bundle             # regenerate + validate the OLM bundle
 make -C operator scorecard          # scorecard (needs a cluster)
 ```
 
-CI (`.github/workflows/ci.yaml`) runs `go vet`/`go test`, the SPA build, the operator
-build, a **generated-manifests-in-sync** check, `operator-sdk bundle validate
---select-optional suite=operatorframework` + `opm validate`, and an on-cluster kind + OLM
-install + scorecard. Run the equivalents locally before pushing.
+CI (`.github/workflows/ci.yaml`) runs `go test` and golangci-lint (`go vet` included)
+on every module, the SPA checks and the hermetic UI suite, both images for amd64 +
+arm64 (`docker buildx bake`), **generated-files-in-sync** checks, `operator-sdk bundle
+validate --select-optional suite=operatorframework` + `opm validate`, and an on-cluster
+kind + OLM install + scorecard. Run the equivalents locally before pushing.
 
 ## Sign your commits (DCO)
 
