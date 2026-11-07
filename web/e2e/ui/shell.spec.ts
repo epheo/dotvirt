@@ -13,16 +13,22 @@ test('base: shell, tree and VM table render from the stream', async ({ page }) =
 
 	const main = page.locator('main');
 	await main.getByRole('link', { name: 'VMs', exact: true }).click();
-	await expect(main.getByText('web-1')).toBeVisible();
-	await expect(main.getByText('web-2')).toBeVisible();
+	await expect(main.getByRole('link', { name: 'web-1', exact: true })).toBeVisible();
+	await expect(main.getByRole('link', { name: 'web-2', exact: true })).toBeVisible();
 
 	// The stopped VM reads as stopped, not as an error state.
 	const stopped = main.locator('tbody tr', { hasText: 'web-2' });
 	await expect(stopped).toContainText(/Stopped|Off/);
 
-	// No standing problems in a healthy fleet: the issues bell is clean.
-	await page.locator('button[title^="Issues"]').click();
-	await expect(page.getByText('No standing issues.')).toBeVisible();
+	// A healthy fleet has no GitOps problem; its one firing cluster alert is
+	// the only issue, named by VM, with the step that looks into it.
+	const issues = page.locator('button[title^="Issues"]');
+	await expect(issues).toHaveText('1 issue');
+	await issues.click();
+	await expect(
+		page.getByRole('button', { name: /web-prod\/web-1 VMI excessive migrations/ }),
+	).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Open monitor' })).toBeVisible();
 });
 
 test('base: VM detail opens with live facts and tabs', async ({ page }) => {

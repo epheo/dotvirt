@@ -22,8 +22,9 @@
 	} from '@lucide/svelte';
 	import { dispatchVMAction } from '#lib/actions.js';
 	import { changesHref, hrefForScope, scopeFromPath, vmHref } from '#lib/nav.js';
-	import StatusDot from './StatusDot.svelte';
+	import { TONE_PILL } from '#lib/status.js';
 	import Button from './Button.svelte';
+	import IssueRow from './IssueRow.svelte';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { session } from '#lib/state/session.svelte.js';
@@ -88,9 +89,10 @@
 	const staged = $derived(drafts.drafts.filter((d) => d.draft.count > 0));
 	const proposeHref = $derived(staged.length === 1 ? changesHref(staged[0].project) : '/changes');
 
-	// The issues bell: standing problems derived from the live stream, so the
-	// count moves with the same frames the tree and grid repaint on.
+	// The issues count: derived from the live stream and the alerts poll, so it
+	// moves with the same frames the tree and grid repaint on.
 	const issues = $derived(inventory.issues);
+	const suggestions = $derived(inventory.suggestions);
 	const worstTone = $derived(issues.some((i) => i.severity === 'danger') ? 'danger' : 'warn');
 
 	// The "New" menu, one row per creatable kind. divider starts the
@@ -219,51 +221,40 @@
 		{/snippet}
 	</HeaderMenu>
 
-	<!-- Issues: the attention bell - standing problems only (never pending
-	     applies), so a lit badge always means something is actually wrong. -->
+	<!-- Issues: standing problems and firing alerts (never pending applies), one
+	     count, named in words so a clean fleet reads as a stated fact. -->
 	<HeaderMenu>
 		{#snippet trigger({ open, toggle })}
 			<button
 				onclick={toggle}
-				title="Issues — standing problems in the visible inventory"
-				class="relative rounded p-1.5 hover:bg-side-hover {open
-					? 'bg-side-hover text-white'
-					: 'text-side-dim'}"
+				aria-expanded={open}
+				title="Issues: standing problems and firing alerts in the visible inventory"
+				class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium hover:opacity-90 {issues.length
+					? TONE_PILL[worstTone]
+					: 'text-side-dim hover:bg-side-hover'}"
 			>
-				<TriangleAlert size={16} />
-				{#if issues.length > 0}
-					<span
-						class="absolute -top-1 -right-1 rounded-full px-1 text-[10px] font-medium text-white {worstTone ===
-						'danger'
-							? 'bg-danger'
-							: 'bg-warn'}">{issues.length}</span
-					>
+				{#if issues.length}
+					<TriangleAlert size={13} />
+					{issues.length} issue{issues.length === 1 ? '' : 's'}
+				{:else}
+					<CircleCheck size={13} class="text-ok" /> No issues
 				{/if}
 			</button>
 		{/snippet}
 		{#snippet children({ close })}
-			<div class="w-96 max-w-[90vw]">
+			<div class="w-[30rem] max-w-[90vw] text-xs">
+				<div class="flex items-baseline justify-between gap-3 border-b border-line px-3 py-2">
+					<span class="text-sm font-semibold text-ink">Issues</span>
+					<span class="text-ink-faint">GitOps state and cluster alerts, one list</span>
+				</div>
 				{#if !issues.length}
-					<p class="flex items-center gap-2 px-3 py-2.5 text-xs text-ink-faint">
+					<p class="flex items-center gap-2 px-3 py-2.5 text-ink-faint">
 						<CircleCheck size={14} class="text-ok" /> No standing issues.
 					</p>
 				{:else}
-					<ul class="max-h-96 divide-y divide-line-soft overflow-y-auto text-xs">
+					<ul class="max-h-96 divide-y divide-line-soft overflow-y-auto">
 						{#each issues.slice(0, 12) as i (i.scope + i.label)}
-							<li>
-								<button
-									onclick={() => {
-										close();
-										goto(i.href);
-									}}
-									class="flex w-full items-baseline gap-2 px-3 py-1.5 text-left hover:bg-inset"
-									title={i.detail ?? ''}
-								>
-									<span class="self-center"><StatusDot tone={i.severity} size="xs" /></span>
-									<span class="shrink-0 font-medium text-ink">{i.scope}</span>
-									<span class="truncate text-ink-soft">{i.label}</span>
-								</button>
-							</li>
+							<IssueRow issue={i} onleave={close} />
 						{/each}
 					</ul>
 					{#if issues.length > 12}
@@ -271,6 +262,23 @@
 							and {issues.length - 12} more
 						</p>
 					{/if}
+				{/if}
+				{#if suggestions.length}
+					<div
+						class="border-t border-line bg-inset px-3 pt-2 text-[11px] tracking-wide text-ink-faint uppercase"
+					>
+						Suggestions
+					</div>
+					<ul class="max-h-48 divide-y divide-line-soft overflow-y-auto bg-inset">
+						{#each suggestions.slice(0, 5) as i (i.scope + i.label)}
+							<IssueRow issue={i} onleave={close} />
+						{/each}
+					</ul>
+				{/if}
+				{#if inventory.alerts === null}
+					<p class="border-t border-line-soft px-3 py-1.5 text-ink-faint">
+						Cluster alerts unavailable: metrics are off or unreachable.
+					</p>
 				{/if}
 			</div>
 		{/snippet}

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import type { DraftItem, VM } from '#lib/api.js';
+import { inventory } from '#lib/state/inventory.svelte.js';
 import VMTable from './VMTable.svelte';
 import VMTableHost from '../../test/VMTableHost.svelte';
 
@@ -18,7 +19,7 @@ const vm = (name: string, over: Partial<VM> = {}): VM => ({
 });
 
 const fleet = [
-	vm('web', { guestIP: '10.0.0.5', cpuCores: 2, memory: '4Gi' }),
+	vm('web', { guestIP: '10.0.0.5', cpuCores: 2, memory: '4Gi', nodeName: 'worker-1' }),
 	vm('db', { namespace: 'team-b', power: 'Off', phase: 'Stopped', cpuCores: 8, memory: '16Gi' }),
 	vm('cache', { sync: 'OutOfSync', cpuCores: 1, memory: '512Mi' }),
 ];
@@ -45,16 +46,41 @@ const names = () =>
 
 beforeEach(() => {
 	localStorage.clear();
+	inventory.inventory = null;
 });
 
 describe('VMTable', () => {
-	it('lists every VM sorted by name with its sizing', () => {
+	it('lists every VM, exceptions first, with its host and sizing in real units', () => {
 		setup();
 		expect(names()).toEqual(['cache', 'db', 'web']);
-		expect(screen.getByText('3 VMs')).toBeTruthy();
+		expect(screen.getByRole('button', { name: /^All/ }).textContent).toContain('3');
 		const web = screen.getByText('web').closest('tr')!;
 		expect(within(web).getByText('10.0.0.5')).toBeTruthy();
-		expect(within(web).getByText('4Gi')).toBeTruthy();
+		expect(within(web).getByText('worker-1')).toBeTruthy();
+		expect(within(web).getByText('4 GiB')).toBeTruthy();
+	});
+
+	it('says only the run state for a healthy VM and names the exception otherwise', () => {
+		setup();
+		const web = screen.getByText('web').closest('tr')!;
+		expect(within(web).getByText('Running')).toBeTruthy();
+		expect(within(web).queryByText(/Synced|Healthy/)).toBeNull();
+		const cache = screen.getByText('cache').closest('tr')!;
+		expect(within(cache).getByText('Differs from git')).toBeTruthy();
+	});
+
+	it('counts and floats VMs with issues from the same list as the header', async () => {
+		const broken = vm('zeta', { syncError: 'webhook denied' });
+		inventory.inventory = {
+			projects: [{ name: 'p', namespaces: [{ namespace: 'team-a', vms: [broken] }] }],
+		};
+		setup({ vms: [...fleet, broken] });
+		expect(names()[0]).toBe('zeta');
+		const chip = screen.getByRole('button', { name: /^With issues/ });
+		expect(chip.textContent).toContain('1');
+		await fireEvent.click(chip);
+		expect(names()).toEqual(['zeta']);
+		expect(within(screen.getByText('zeta').closest('tr')!).getByText('Apply refused')).toBeTruthy();
 	});
 
 	it('sorts by a column, then reverses on a second click', async () => {
@@ -68,36 +94,34 @@ describe('VMTable', () => {
 
 	it('remembers the sort across mounts', async () => {
 		const first = setup();
-		await fireEvent.click(screen.getByRole('button', { name: 'Sort by CPU' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Sort by vCPU' }));
 		first.unmount();
 		setup();
 		expect(names()).toEqual(['cache', 'web', 'db']);
 	});
 
-	it('filters by search across name, namespace and IP', async () => {
+	it('filters by search across name, namespace, IP and host', async () => {
 		setup();
-		const search = screen.getByPlaceholderText('Search name, namespace, IP…');
+		const search = screen.getByPlaceholderText('Filter by name, IP or host');
 		await fireEvent.input(search, { target: { value: 'team-b' } });
 		expect(names()).toEqual(['db']);
 		await fireEvent.input(search, { target: { value: '10.0.0' } });
 		expect(names()).toEqual(['web']);
+		await fireEvent.input(search, { target: { value: 'worker-1' } });
+		expect(names()).toEqual(['web']);
 		await fireEvent.input(search, { target: { value: 'nothing' } });
-		expect(screen.getByText('No VMs match the current filters.')).toBeTruthy();
+		expect(screen.getByText('No VMs match the current filter.')).toBeTruthy();
 	});
 
-	it('filters by power and sync state', async () => {
-		setup();
-		await fireEvent.change(screen.getByLabelText('Filter by power state'), {
-			target: { value: 'Off' },
-		});
+	it('filters with the state chips and remembers the choice', async () => {
+		const first = setup();
+		await fireEvent.click(screen.getByRole('button', { name: /^Stopped/ }));
 		expect(names()).toEqual(['db']);
-		await fireEvent.change(screen.getByLabelText('Filter by power state'), {
-			target: { value: 'all' },
-		});
-		await fireEvent.change(screen.getByLabelText('Filter by ArgoCD sync status'), {
-			target: { value: 'OutOfSync' },
-		});
-		expect(names()).toEqual(['cache']);
+		first.unmount();
+		setup();
+		expect(names()).toEqual(['db']);
+		await fireEvent.click(screen.getByRole('button', { name: /^All/ }));
+		expect(names()).toEqual(['cache', 'db', 'web']);
 	});
 
 	it('says so when the scope holds no VMs', () => {
@@ -115,13 +139,13 @@ describe('VMTable', () => {
 
 	it('select-all takes only the filtered rows', async () => {
 		setup();
-		await fireEvent.input(screen.getByPlaceholderText('Search name, namespace, IP…'), {
+		await fireEvent.input(screen.getByPlaceholderText('Filter by name, IP or host'), {
 			target: { value: 'team-a' },
 		});
 		await fireEvent.click(screen.getByLabelText('Select all (filtered)'));
 		const rows = screen.getAllByRole('row').slice(1);
 		expect(rows.map((r) => r.getAttribute('aria-selected'))).toEqual(['true', 'true']);
-		await fireEvent.input(screen.getByPlaceholderText('Search name, namespace, IP…'), {
+		await fireEvent.input(screen.getByPlaceholderText('Filter by name, IP or host'), {
 			target: { value: '' },
 		});
 		expect(
@@ -152,7 +176,7 @@ describe('VMTable', () => {
 		expect(onselect).toHaveBeenCalledWith(expect.objectContaining({ name: 'db' }));
 	});
 
-	it('shows a staged change in place of the sync badge and opens it', async () => {
+	it('shows a staged change in its own column and opens it', async () => {
 		const staged = new Map<string, DraftItem>([
 			['team-a/web', { kind: 'delete', namespace: 'team-a', name: 'web', changes: [] }],
 		]);

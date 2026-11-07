@@ -1,25 +1,17 @@
 <script lang="ts">
 	import { ChevronDown, ChevronUp } from '@lucide/svelte';
-	import {
-		vmKey,
-		type DraftItem,
-		type Options,
-		type Power,
-		type SyncStatus,
-		type VM,
-	} from '#lib/api.js';
-	import { quantityBytes } from '#lib/format.js';
+	import { vmKey, type DraftItem, type Options, type VM } from '#lib/api.js';
+	import { adoptVM } from '#lib/actions.js';
+	import { quantity, quantityBytes } from '#lib/format.js';
+	import type { Issue } from '#lib/issues.js';
 	import { vmSizing } from '#lib/sizing.js';
-	import { phaseTone } from '#lib/status.js';
+	import { TONE_DOT, TONE_PILL, vmState, vmStateRank, type VMStateView } from '#lib/status.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { persisted } from '#lib/state/persisted.svelte.js';
 	import { TBODY, THEAD_TR } from '#lib/table.js';
-	import PowerDot from './PowerDot.svelte';
 	import { vmHref } from '#lib/nav.js';
-	import SelectInput from './SelectInput.svelte';
 	import StagedBadge from './StagedBadge.svelte';
 	import StatusPill from './StatusPill.svelte';
-	import SyncBadge from './SyncBadge.svelte';
 	import TextInput from './TextInput.svelte';
 
 	let {
@@ -61,18 +53,34 @@
 		return s;
 	}
 
+	// The issues plane, per VM: the header's count and the "With issues" chip
+	// read the same list, so the two numbers can never disagree. A firing alert
+	// on a VM that is otherwise fine becomes its State exception.
+	const issueOf = $derived.by(() => {
+		const m = new Map<string, Issue>();
+		for (const i of inventory.issues) if (!m.has(i.scope)) m.set(i.scope, i);
+		return m;
+	});
+
+	function stateOf(vm: VM): VMStateView {
+		const v = vmState(vm);
+		if (v.exception) return v;
+		const i = issueOf.get(vmKey(vm));
+		return i ? { ...v, exception: { tone: i.severity, label: i.label, hint: i.detail } } : v;
+	}
+
 	let search = $state('');
 
-	type SortKey =
-		'power' | 'name' | 'namespace' | 'phase' | 'guestIP' | 'cpuCores' | 'memory' | 'sync';
+	type SortKey = 'name' | 'namespace' | 'state' | 'nodeName' | 'cpuCores' | 'memory' | 'guestIP';
+	type Filter = 'all' | 'issues' | 'running' | 'stopped' | 'staged';
 
-	// Sort + filters survive reloads; the search box is transient on purpose.
-	const prefs = persisted<{
-		sortKey: SortKey;
-		sortDir: 1 | -1;
-		powerFilter: 'all' | Power;
-		syncFilter: 'all' | SyncStatus;
-	}>('dotvirt.vmtable', { sortKey: 'name', sortDir: 1, powerFilter: 'all', syncFilter: 'all' });
+	// Sort + filter survive reloads; the search box is transient on purpose.
+	// The default sort puts what needs a person on top.
+	const prefs = persisted<{ sortKey: SortKey; sortDir: 1 | -1; filter: Filter }>('dotvirt.vmgrid', {
+		sortKey: 'state',
+		sortDir: 1,
+		filter: 'all',
+	});
 
 	function setSort(k: SortKey) {
 		prefs.value =
@@ -81,19 +89,11 @@
 				: { ...prefs.value, sortKey: k, sortDir: 1 };
 	}
 
-	// Rank power/sync so the interesting states sort first (drift/problems at top).
-	// Higher rank sorts earlier on ascending.
-	const powerRank = (p: Power) => (p === 'On' ? 2 : p === 'Off' ? 1 : 0);
-	const syncRank = (s: SyncStatus) =>
-		s === 'OutOfSync' ? 4 : s === 'Pending' ? 3 : s === 'Unknown' ? 2 : s === 'NotTracked' ? 1 : 0;
-
 	function cmp(a: VM, b: VM): number {
 		const key = prefs.value.sortKey;
 		switch (key) {
-			case 'power':
-				return powerRank(a.power) - powerRank(b.power);
-			case 'sync':
-				return syncRank(a.sync) - syncRank(b.sync);
+			case 'state':
+				return vmStateRank(stateOf(b)) - vmStateRank(stateOf(a));
 			case 'cpuCores':
 				return (sizeOf(a).cpu ?? 0) - (sizeOf(b).cpu ?? 0);
 			case 'memory':
@@ -106,15 +106,45 @@
 		}
 	}
 
+	// A healthy row stays quiet; its git relation is one hover away.
+	const SYNC_TITLE: Record<string, string> = {
+		Synced: 'In sync with git',
+		OutOfSync: 'Differs from git',
+		NotTracked: 'Not in git',
+		Pending: 'Waiting for its first sync',
+		Unknown: 'Sync state unknown',
+	};
+
+	const stopped = (vm: VM) => vm.phase === 'Stopped' || (!vm.phase && vm.power === 'Off');
+	const MATCH: Record<Filter, (vm: VM) => boolean> = {
+		all: () => true,
+		issues: (vm) => issueOf.has(vmKey(vm)),
+		running: (vm) => vm.phase === 'Running',
+		stopped,
+		staged: (vm) => staged.has(vmKey(vm)),
+	};
+	const FILTERS: { id: Filter; label: string }[] = [
+		{ id: 'all', label: 'All' },
+		{ id: 'issues', label: 'With issues' },
+		{ id: 'running', label: 'Running' },
+		{ id: 'stopped', label: 'Stopped' },
+		{ id: 'staged', label: 'Staged' },
+	];
+	const counts = $derived(
+		Object.fromEntries(FILTERS.map((f) => [f.id, vms.filter(MATCH[f.id]).length])) as Record<
+			Filter,
+			number
+		>,
+	);
+
 	const rows = $derived.by(() => {
 		const q = search.trim().toLowerCase();
-		const { powerFilter, syncFilter, sortDir } = prefs.value;
+		const { filter, sortDir } = prefs.value;
 		const filtered = vms.filter((vm) => {
-			if (powerFilter !== 'all' && vm.power !== powerFilter) return false;
-			if (syncFilter !== 'all' && vm.sync !== syncFilter) return false;
+			if (!MATCH[filter](vm)) return false;
 			if (q) {
-				const hay = `${vm.name} ${vm.namespace} ${vm.guestIP ?? ''}`.toLowerCase();
-				if (!hay.includes(q)) return false;
+				const hay = `${vm.name} ${vm.namespace} ${vm.guestIP ?? ''} ${vm.nodeName ?? ''}`;
+				if (!hay.toLowerCase().includes(q)) return false;
 			}
 			return true;
 		});
@@ -125,42 +155,14 @@
 		});
 	});
 
-	// The two toolbar filters are structurally identical: one spec each, one
-	// rendering below.
-	const FILTERS: { key: 'powerFilter' | 'syncFilter'; title: string; options: string[][] }[] = [
-		{
-			key: 'powerFilter',
-			title: 'Filter by power state',
-			options: [
-				['all', 'Power: all'],
-				['On', 'On'],
-				['Off', 'Off'],
-				['Unknown', 'Unknown'],
-			],
-		},
-		{
-			key: 'syncFilter',
-			title: 'Filter by ArgoCD sync status',
-			options: [
-				['all', 'Sync: all'],
-				['Synced', 'Synced'],
-				['OutOfSync', 'Out of sync'],
-				['NotTracked', 'Not tracked'],
-				['Pending', 'Pending sync'],
-				['Unknown', 'Unknown'],
-			],
-		},
-	];
-
 	const cols: { key: SortKey; label: string; class?: string }[] = [
-		{ key: 'power', label: '', class: 'w-8' },
 		{ key: 'name', label: 'Name' },
 		{ key: 'namespace', label: 'Namespace' },
-		{ key: 'phase', label: 'Status' },
-		{ key: 'guestIP', label: 'IP' },
-		{ key: 'cpuCores', label: 'CPU', class: 'text-right' },
+		{ key: 'state', label: 'State' },
+		{ key: 'nodeName', label: 'Host' },
+		{ key: 'cpuCores', label: 'vCPU', class: 'text-right' },
 		{ key: 'memory', label: 'Memory', class: 'text-right' },
-		{ key: 'sync', label: 'Sync' },
+		{ key: 'guestIP', label: 'IP' },
 	];
 
 	const allSelected = $derived(rows.length > 0 && rows.every((vm) => selected.has(vmKey(vm))));
@@ -228,31 +230,45 @@
 </script>
 
 <div class="flex h-full flex-col">
-	<div class="flex items-center gap-2 border-b border-line px-4 py-2">
-		<TextInput bind:value={search} placeholder="Search name, namespace, IP…" width="w-64" />
-		{#each FILTERS as f (f.key)}
-			<SelectInput
-				value={prefs.value[f.key]}
-				onchange={(e) =>
-					(prefs.value = {
-						...prefs.value,
-						[f.key]: e.currentTarget.value as 'all' | Power | SyncStatus,
-					} as typeof prefs.value)}
-				width="w-auto"
-				class="text-ink-soft"
-				title={f.title}
-				aria-label={f.title}
-			>
-				{#each f.options as [value, label] (value)}
-					<option {value}>{label}</option>
-				{/each}
-			</SelectInput>
-		{/each}
-		<span class="ml-auto text-xs text-ink-faint">{rows.length} VMs</span>
+	<div class="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2">
+		<div class="flex flex-wrap gap-1.5" role="group" aria-label="Show">
+			{#each FILTERS as f (f.id)}
+				{@const on = prefs.value.filter === f.id}
+				<button
+					type="button"
+					aria-pressed={on}
+					onclick={() => (prefs.value = { ...prefs.value, filter: f.id })}
+					class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium {on
+						? 'border-accent bg-select text-ink'
+						: 'border-line-strong bg-panel text-ink-soft hover:bg-inset'}"
+				>
+					{f.label}
+					<span
+						class="rounded-full px-1.5 text-[11px] tabular-nums {f.id === 'issues' &&
+						counts.issues > 0
+							? TONE_PILL.danger
+							: 'text-ink-muted'}">{counts[f.id]}</span
+					>
+				</button>
+			{/each}
+		</div>
+		<TextInput
+			bind:value={search}
+			placeholder="Filter by name, IP or host"
+			width="w-60"
+			size="sm"
+			class="ml-auto"
+			aria-label="Filter VMs"
+		/>
 	</div>
 
 	<div class="min-h-0 flex-1 overflow-auto">
-		<table class="w-full text-[13px]" role="grid" aria-multiselectable="true" aria-label="VMs">
+		<table
+			class="w-full text-[13px] whitespace-nowrap"
+			role="grid"
+			aria-multiselectable="true"
+			aria-label="VMs"
+		>
 			<thead class="sticky top-0 bg-inset text-left text-xs text-ink-muted">
 				<tr class={THEAD_TR}>
 					<th class="w-8 px-3 py-2">
@@ -270,7 +286,7 @@
 						<th class="px-3 py-2 font-medium {c.class ?? ''}">
 							<button
 								onclick={() => setSort(c.key)}
-								aria-label="Sort by {c.label || 'power state'}"
+								aria-label="Sort by {c.label}"
 								class="inline-flex items-center gap-1 hover:text-ink"
 							>
 								{c.label}
@@ -283,7 +299,7 @@
 							</button>
 						</th>
 					{/each}
-					<th class="px-3 py-2 font-medium">Health</th>
+					<th class="px-3 py-2 font-medium">Change</th>
 				</tr>
 			</thead>
 			<tbody class={TBODY}>
@@ -291,6 +307,7 @@
 					{@const k = vmKey(vm)}
 					{@const sc = staged.get(k)}
 					{@const size = sizeOf(vm)}
+					{@const st = stateOf(vm)}
 					<tr
 						tabindex={k === tabKey ? 0 : -1}
 						aria-selected={selected.has(k)}
@@ -318,7 +335,6 @@
 								class="cursor-pointer align-middle"
 							/>
 						</td>
-						<td class="px-3 py-1.5"><PowerDot power={vm.power} paused={vm.paused} /></td>
 						<td
 							class="px-3 py-1.5 font-medium {sc?.kind === 'delete'
 								? 'text-ink-faint line-through'
@@ -332,32 +348,55 @@
 								class="hover:underline focus-visible:underline">{vm.name}</a
 							>
 						</td>
-						<td class="px-3 py-1.5 text-ink-soft">{vm.namespace}</td>
-						<td class="px-3 py-1.5">
-							<StatusPill
-								tone={phaseTone(vm.phase, vm.paused)}
-								label={vm.paused ? 'Paused' : (vm.phase ?? '—')}
-								dot={false}
-							/>
-						</td>
-						<td class="px-3 py-1.5 font-mono text-xs text-ink-soft">{vm.guestIP ?? '—'}</td>
-						<td class="px-3 py-1.5 text-right text-ink-soft" title={vm.instancetype}
-							>{size.cpu ?? '—'}</td
-						>
-						<td class="px-3 py-1.5 text-right text-ink-soft" title={vm.instancetype}
-							>{size.memory ?? '—'}</td
-						>
-						<td class="px-3 py-1.5">
-							{#if sc}
-								<span class="inline-flex items-center gap-1.5">
-									<StagedBadge item={sc} onopen={() => onstagedopen(vm)} />
-									<SyncBadge sync={vm.sync} compact />
+						<td class="px-3 py-1.5 text-ink-muted">{vm.namespace}</td>
+						<td class="px-3 py-1.5" title={SYNC_TITLE[vm.sync] ?? SYNC_TITLE.Unknown}>
+							<span class="flex min-w-0 items-center gap-2">
+								<span class="flex shrink-0 items-center gap-1.5 text-ink-soft">
+									<span
+										class="inline-block h-2 w-2 rounded-full {st.tone === 'neutral'
+											? 'border border-ink-faint'
+											: TONE_DOT[st.tone]}"
+									></span>
+									{st.word}
 								</span>
-							{:else}
-								<SyncBadge sync={vm.sync} />
-							{/if}
+								{#if st.exception}
+									<StatusPill
+										tone={st.exception.tone}
+										label={st.exception.label}
+										dot={false}
+										title={st.exception.detail ?? st.exception.hint}
+									/>
+									{#if st.exception.detail}
+										<span class="max-w-56 truncate font-mono text-[11px] text-ink-muted"
+											>{st.exception.detail}</span
+										>
+									{/if}
+								{/if}
+								{#if vm.sync === 'NotTracked' && inventory.canAuthor(vm.namespace)}
+									<button
+										type="button"
+										onclick={(e) => {
+											e.stopPropagation();
+											void adoptVM(vm);
+										}}
+										class="text-xs text-accent-ink hover:underline">Adopt into git</button
+									>
+								{/if}
+							</span>
 						</td>
-						<td class="px-3 py-1.5 text-ink-soft">{vm.health ?? '—'}</td>
+						<td class="px-3 py-1.5 {vm.nodeName ? 'text-ink-soft' : 'text-ink-muted'}"
+							>{vm.nodeName ?? '-'}</td
+						>
+						<td class="px-3 py-1.5 text-right text-ink-soft" title={vm.instancetype}
+							>{size.cpu ?? '-'}</td
+						>
+						<td class="px-3 py-1.5 text-right text-ink-soft" title={vm.instancetype}
+							>{size.memory ? quantity(size.memory) : '-'}</td
+						>
+						<td class="px-3 py-1.5 font-mono text-xs text-ink-soft">{vm.guestIP ?? '-'}</td>
+						<td class="px-3 py-1.5">
+							{#if sc}<StagedBadge item={sc} onopen={() => onstagedopen(vm)} />{/if}
+						</td>
 					</tr>
 				{/each}
 			</tbody>
@@ -365,7 +404,11 @@
 
 		{#if rows.length === 0}
 			<div class="p-8 text-center text-sm text-ink-faint">
-				{vms.length === 0 ? 'No VMs in scope.' : 'No VMs match the current filters.'}
+				{vms.length === 0
+					? 'No VMs in scope.'
+					: prefs.value.filter === 'issues' && !search
+						? 'No VM in scope has an issue.'
+						: 'No VMs match the current filter.'}
 			</div>
 		{/if}
 	</div>

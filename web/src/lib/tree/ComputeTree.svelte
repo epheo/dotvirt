@@ -2,7 +2,6 @@
 	import { page } from '$app/state';
 	import { Folder, Layers, LayoutGrid, TriangleAlert } from '@lucide/svelte';
 	import type { Project, ProjectNamespace } from '#lib/api.js';
-	import { repoError } from '#lib/gitops.js';
 	import { issueCountByProject } from '#lib/issues.js';
 	import { hrefForScope, scopeFromPath } from '#lib/nav.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -68,26 +67,6 @@
 		<span class="truncate font-semibold text-side-ink">All VMs</span>
 	</TreeRow>
 
-	<!-- Attach and Recover share one button: same modal, recover only flips the
-	     backend path and the wording. -->
-	{#snippet repoAction(project: Project, recover: boolean)}
-		<button
-			onclick={() =>
-				(ui.modal = {
-					kind: 'adoptProject',
-					project: project.name,
-					namespaces: project.namespaces.map((n) => n.namespace),
-					recover,
-				})}
-			title={recover
-				? "Re-create this project's lost repo and re-adopt what is running"
-				: 'Create a repo for this project and bring it under GitOps'}
-			class="mb-1 ml-7 rounded border border-warn/50 bg-warn/10 px-2 py-0.5 text-[11px] font-medium text-warn hover:bg-warn/25"
-		>
-			{recover ? 'Recover repo' : 'Attach repo'}
-		</button>
-	{/snippet}
-
 	{#snippet projectNode(project: Project)}
 		<div>
 			<!-- Project: chevron toggles collapse, the label focuses the grid. -->
@@ -107,19 +86,15 @@
 					<Folder size={14} class="shrink-0 text-accent-hover" />
 				{/snippet}
 				<span class="truncate font-semibold text-side-ink">{project.name}</span>
-				{#if project.error}
-					<span class="rounded bg-warn/15 p-0.5 text-warn" title={project.error}
+				{@const n = issueCounts.get(project.name) ?? 0}
+				{#if n > 0}
+					<span
+						class="rounded bg-warn/15 p-0.5 text-warn"
+						title="{n} issue{n === 1 ? '' : 's'} in this project, listed under Issues"
 						><TriangleAlert size={10} /></span
 					>
-				{:else}
-					{@const n = issueCounts.get(project.name) ?? 0}
-					{#if n > 0}
-						<span
-							class="rounded bg-warn/15 p-0.5 text-warn"
-							title="{n} issue{n === 1 ? '' : 's'} in this project"
-							><TriangleAlert size={10} /></span
-						>
-					{/if}
+				{/if}
+				{#if !project.error}
 					<!-- The Application rollup spans every kind the repo declares (segments,
 					     policies, tenancy). Fall back to the VM-only drift dot only when Argo
 					     isn't wired, so a project never shows two dots. -->
@@ -134,23 +109,6 @@
 			</TreeRow>
 
 			{#if projectOpen(project)}
-				{#if project.error}
-					<div class="py-1 pr-2 pl-7 text-xs text-warn italic" title={project.error}>
-						{project.error}
-					</div>
-					{#if inventory.canNamespace}
-						{@render repoAction(project, false)}
-					{/if}
-				{:else if project.repo && repoError(project.gitOps) && inventory.canNamespace}
-					<!-- Only a comparison-plane error says the forge lost this repo (the
-					     annotation still parses); an apply failure never offers recovery.
-					     The backend refuses when the repo resolves. -->
-					<div class="py-1 pr-2 pl-7 text-xs text-warn italic" title={repoError(project.gitOps)}>
-						{repoError(project.gitOps).slice(0, 120)}
-					</div>
-					{@render repoAction(project, true)}
-				{/if}
-
 				<!-- Namespaces -->
 				{#each project.namespaces as ns (ns.namespace)}
 					{@const nid = `n:${project.name}/${ns.namespace}`}
@@ -225,20 +183,18 @@
 			Existing tenants
 		</div>
 		{#each inventory.adoptable as cand (cand.namespace)}
-			<div class="flex items-center gap-2 px-2 py-1">
+			<button
+				onclick={() => (ui.modal = { kind: 'newProject', adopt: cand.namespace })}
+				title="Create a project and repo for {cand.namespace} and bring its VMs under GitOps"
+				class="group flex w-full items-center gap-2 px-2 py-1 text-left hover:bg-side-hover"
+			>
 				<Layers size={13} class="shrink-0 text-side-dim" />
-				<span class="min-w-0 flex-1 truncate text-side-ink" title={cand.namespace}
-					>{cand.namespace}</span
-				>
+				<span class="min-w-0 flex-1 truncate text-side-ink">{cand.namespace}</span>
 				<span class="text-xs text-side-dim">{cand.vms}</span>
-				<button
-					onclick={() => (ui.modal = { kind: 'newProject', adopt: cand.namespace })}
-					title="Create a project + repo for this namespace and bring its VMs under GitOps"
-					class="rounded border border-warn/50 bg-warn/10 px-2 py-0.5 text-[11px] font-medium text-warn hover:bg-warn/25"
+				<span class="text-xs text-side-dim group-hover:text-side-ink group-hover:underline"
+					>Adopt</span
 				>
-					Adopt
-				</button>
-			</div>
+			</button>
 		{/each}
 	{/if}
 

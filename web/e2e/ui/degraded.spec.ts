@@ -20,14 +20,17 @@ test('live-plane outage is a banner, not silently stopped VMs', async ({ page })
 
 test('a broken repo is a named standing issue', async ({ page }) => {
 	await page.locator('button[title^="Issues"]').click();
-	await expect(page.getByText('Repository problem')).toBeVisible();
+	const menu = page.getByRole('banner');
+	await expect(menu.getByRole('button', { name: 'team-web Repository problem' })).toBeVisible();
+	// An unreachable repo GitOps cannot compare against is one too.
+	await expect(menu.getByRole('button', { name: 'team-db Repository problem' })).toBeVisible();
 	// The cause rides the row's tooltip; the row itself links to the project.
-	await expect(page.locator('button[title*="503 Service Unavailable"]')).toBeVisible();
+	await expect(menu.locator('button[title*="503 Service Unavailable"]')).toBeVisible();
 });
 
-test('absent alerts feed says so instead of showing an empty list', async ({ page }) => {
-	await page.getByRole('button', { name: /Alarms/ }).click();
-	await expect(page.getByText(/alerts feed unavailable/)).toBeVisible();
+test('absent alerts feed says so instead of reading as none firing', async ({ page }) => {
+	await page.locator('button[title^="Issues"]').click();
+	await expect(page.getByText(/Cluster alerts unavailable/)).toBeVisible();
 });
 
 test('metrics-less install renders Monitor without a crash', async ({ page }) => {

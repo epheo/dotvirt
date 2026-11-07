@@ -113,10 +113,16 @@ test('#154: a converged app retires its old operation failure', async ({ page })
 	await setScenario(page, 'base');
 	await login(page);
 	// team-batch carries operation=Failed + an old syncError, but sync=Synced:
-	// history, not a standing problem - no bell entry, no tree badge.
-	await expect(page.locator('aside').getByText('team-batch')).toBeVisible();
+	// history, not a standing problem - no issue, no tree badge, and never an
+	// offer to recover its healthy repo.
+	const aside = page.locator('aside');
+	await expect(aside.getByText('team-batch')).toBeVisible();
+	await expect(
+		aside.locator('a', { hasText: 'team-batch' }).locator('[title*="issue"]'),
+	).toHaveCount(0);
 	await page.locator('button[title^="Issues"]').click();
-	await expect(page.getByText('No standing issues.')).toBeVisible();
+	await expect(page.getByRole('button', { name: /team-batch/ })).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Recover repo' })).toHaveCount(0);
 });
 
 test('#119: hand-written affinity refuses the scheduling form', async ({ page }) => {
@@ -164,11 +170,11 @@ test('stopped VMs are visible in the summary tile', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);
 	// The live console showed "2 Running" on a 3-VM project: the phase map came
-	// from VMI metrics and stopped VMs (no VMI) were invisible. The backend now
-	// folds them in from the snapshot; the tile must show both.
+	// from VMI metrics and stopped VMs (no VMI) were invisible. The stat line
+	// counts the live inventory, so both must show.
 	const main = page.locator('main');
-	await expect(main.getByText('Running', { exact: true })).toBeVisible();
-	await expect(main.getByText('Stopped', { exact: true })).toBeVisible();
+	await expect(main.getByText(/\d+ running/)).toBeVisible();
+	await expect(main.getByText(/\d+ stopped/)).toBeVisible();
 });
 
 test('an empty scope reads "no data", not zero-of-zero', async ({ page }) => {

@@ -22,7 +22,7 @@
 	} = $props();
 
 	const cls = $derived(
-		`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${TONE_PILL[tone]}`,
+		`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs whitespace-nowrap ${TONE_PILL[tone]}`,
 	);
 </script>
 

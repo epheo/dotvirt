@@ -21,21 +21,23 @@
 	const inFlight = $derived(drafts.count > 0 || inventory.proposals.some((p) => p.mine));
 </script>
 
-<nav class="grid grid-cols-6 border-b border-side-line">
+<!-- Two rows of three, a 12px label under each icon: every name reads whole
+     at the rail's width. -->
+<nav class="grid grid-cols-3 border-b border-side-line">
 	{#each SECTIONS as s (s.id)}
 		<a
 			href={s.href}
 			title={s.label}
-			class="relative flex flex-col items-center gap-0.5 py-2 text-[10px] {active === s.id
-				? 'bg-side-active font-medium text-side-ink shadow-[inset_0_2px_0_var(--color-accent-hover)]'
+			class="relative flex flex-col items-center gap-1 py-2 text-xs {active === s.id
+				? 'bg-side-active font-medium text-side-ink shadow-[inset_0_-2px_0_var(--color-accent-hover)]'
 				: 'text-side-dim hover:bg-side-hover hover:text-side-ink'}"
 		>
-			{#if s.id === 'compute'}<Folder size={15} />
-			{:else if s.id === 'hosts'}<Server size={15} />
-			{:else if s.id === 'networking'}<Network size={15} />
-			{:else if s.id === 'storage'}<Database size={15} />
-			{:else if s.id === 'catalog'}<Library size={15} />
-			{:else}<ClipboardList size={15} />{/if}
+			{#if s.id === 'compute'}<Folder size={14} class="shrink-0" />
+			{:else if s.id === 'hosts'}<Server size={14} class="shrink-0" />
+			{:else if s.id === 'networking'}<Network size={14} class="shrink-0" />
+			{:else if s.id === 'storage'}<Database size={14} class="shrink-0" />
+			{:else if s.id === 'catalog'}<Library size={14} class="shrink-0" />
+			{:else}<ClipboardList size={14} class="shrink-0" />{/if}
 			{s.label}
 			{#if s.id === 'changes' && inFlight}
 				<span

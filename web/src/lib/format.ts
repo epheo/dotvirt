@@ -32,6 +32,13 @@ export function quantityBytes(q: string): number {
 	return Number(m[1]) * (bin[s] ?? dec[s] ?? 1);
 }
 
+// A Kubernetes quantity in the unit people read: "4Gi" -> "4 GiB". Shapes it
+// cannot parse pass through unchanged.
+export function quantity(q: string): string {
+	const b = quantityBytes(q);
+	return Number.isNaN(b) ? q : bytes(b).replace(/\.0 /, ' ');
+}
+
 // compactSpan renders elapsed seconds at two units of precision ("3d 21h",
 // "5m"); sub-minute stays in seconds - events can be seconds old.
 function compactSpan(s: number): string {

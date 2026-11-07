@@ -214,7 +214,7 @@
 			/>
 		{/if}
 		<TabPane>
-			<ClusterSummary scope={containerScope} onselect={openVM} />
+			<ClusterSummary scope={containerScope} vms={scopedVMs} onselect={openVM} />
 		</TabPane>
 	{/if}
 {:else if tab === 'monitor'}
