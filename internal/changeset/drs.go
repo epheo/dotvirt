@@ -40,9 +40,7 @@ func (c *Coordinator) StageEnableDRS(id auth.Identity, proj project.ProjectInfo,
 	if err != nil {
 		return model.DraftView{}, invalid(err)
 	}
-	if _, err := c.unstageResource(id, proj, draft.ResourceDRS); err != nil {
-		return model.DraftView{}, err
-	}
+	var entries []draft.Entry
 	for _, f := range files {
 		current, ok, err := read.LookupOnBranch(c.baseBranch, f.Path)
 		if err != nil {
@@ -51,16 +49,18 @@ func (c *Coordinator) StageEnableDRS(id auth.Identity, proj project.ProjectInfo,
 		if ok && bytes.Equal(current, f.Content) {
 			continue // already live in git; nothing to propose for this file
 		}
-		if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
+		entries = append(entries, draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   draft.ResourceDRS,
 			Namespace:  model.ClusterScopeNS,
 			Name:       f.Name,
 			SourceFile: f.Path,
 			Manifest:   string(f.Content),
-		}); err != nil {
-			return model.DraftView{}, err
-		}
+			BaseBlob:   pinOf(current, ok),
+		})
+	}
+	if _, err := c.store.ReplaceResource(id.Username, proj.Name, draft.ResourceDRS, entries...); err != nil {
+		return model.DraftView{}, err
 	}
 	return c.Get(id, proj)
 }
@@ -74,28 +74,27 @@ func (c *Coordinator) StageDisableDRS(id auth.Identity, proj project.ProjectInfo
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	pending, err := c.unstageResource(id, proj, draft.ResourceDRS)
+	cr, configured, err := read.LookupOnBranch(c.baseBranch, drs.CRPath)
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	_, configured, err := read.LookupOnBranch(c.baseBranch, drs.CRPath)
+	var entries []draft.Entry
+	if configured {
+		entries = append(entries, draft.Entry{
+			Kind:       draft.KindDelete,
+			Resource:   draft.ResourceDRS,
+			Namespace:  model.ClusterScopeNS,
+			Name:       "kubedescheduler",
+			SourceFile: drs.CRPath,
+			BaseBlob:   git.BlobID(cr),
+		})
+	}
+	pending, err := c.store.ReplaceResource(id.Username, proj.Name, draft.ResourceDRS, entries...)
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if !configured {
-		if pending == 0 {
-			return model.DraftView{}, fmt.Errorf("%w: DRS is not configured on %s", model.ErrNotFound, c.baseBranch)
-		}
-		return c.Get(id, proj) // cancelled the staged enable
-	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
-		Kind:       draft.KindDelete,
-		Resource:   draft.ResourceDRS,
-		Namespace:  model.ClusterScopeNS,
-		Name:       "kubedescheduler",
-		SourceFile: drs.CRPath,
-	}); err != nil {
-		return model.DraftView{}, err
+	if !configured && pending == 0 {
+		return model.DraftView{}, fmt.Errorf("%w: DRS is not configured on %s", model.ErrNotFound, c.baseBranch)
 	}
 	return c.Get(id, proj)
 }

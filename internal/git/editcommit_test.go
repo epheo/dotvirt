@@ -183,3 +183,132 @@ func TestCommitChangesetStampsRealTime(t *testing.T) {
 		t.Errorf("commit author time %d is the epoch placeholder; want a real time", ts)
 	}
 }
+
+// An item pinned to a base blob commits only while base still holds it.
+func TestCommitChangesetChecksBaseBlob(t *testing.T) {
+	bare := seedMultiRepo(t)
+	w := OpenWrite(bare, "", nil, true)
+	blob, err := exec.Command("git", "--git-dir", bare, "rev-parse", "main:tenant-a/web.yaml").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := func(pin string) []ChangesetItem {
+		return []ChangesetItem{{Path: "tenant-a/web.yaml", NewContent: []byte("kind: VirtualMachine\n"), BaseBlob: pin}}
+	}
+	var moved *BaseMovedError
+	if _, err := w.CommitChangeset("main", "p", "m", item("0123456789012345678901234567890123456789"), Author{}); !errors.As(err, &moved) || moved.Path != "tenant-a/web.yaml" {
+		t.Fatalf("want BaseMovedError for tenant-a/web.yaml, got %v", err)
+	}
+	if _, err := w.CommitChangeset("main", "p", "m", item(strings.TrimSpace(string(blob))), Author{}); err != nil {
+		t.Fatalf("an unmoved base must commit: %v", err)
+	}
+}
+
+// A leased rebuild replaces the branch only while it still holds the head
+// dotvirt pushed: it rebuilds from base, never on the old head, and a branch
+// moved or deleted since is ErrBranchMoved with nothing pushed.
+func TestProposeChangesetLease(t *testing.T) {
+	bare := seedMultiRepo(t)
+	w := OpenWrite(bare, "", nil, true)
+	by := Author{Name: "u", Email: "u@x"}
+	drop := []ChangesetItem{{Path: "tenant-a/db.yaml", Delete: true}}
+	first, err := w.CommitChangeset("main", "p", "drop db", drop, by)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := w.ProposeChangeset("main", "p", "drop db again", drop, by, PushPlan{Lease: first.Hash})
+	if err != nil {
+		t.Fatalf("a held lease must push: %v", err)
+	}
+	if parent := revParse(t, bare, second.Hash+"^"); parent != revParse(t, bare, "main") {
+		t.Fatalf("the rebuild must sit on base, parent is %s", parent)
+	}
+	if _, err := w.ProposeChangeset("main", "p", "stale", drop, by, PushPlan{Lease: first.Hash}); !errors.Is(err, ErrBranchMoved) {
+		t.Fatalf("a stale lease: want ErrBranchMoved, got %v", err)
+	}
+	if head := revParse(t, bare, "p"); head != second.Hash {
+		t.Fatalf("a refused push must leave the branch, got %s", head)
+	}
+	if _, err := w.ProposeChangeset("main", "gone", "deleted", drop, by, PushPlan{Lease: first.Hash}); !errors.Is(err, ErrBranchMoved) {
+		t.Fatalf("a deleted branch: want ErrBranchMoved, got %v", err)
+	}
+	if h, err := w.RemoteHead("p"); err != nil || h != second.Hash {
+		t.Fatalf("RemoteHead(p) = %q, %v; want %s", h, err, second.Hash)
+	}
+	if h, err := w.RemoteHead("gone"); err != nil || h != "" {
+		t.Fatalf("RemoteHead(gone) = %q, %v; want none", h, err)
+	}
+}
+
+// BeforePush runs between the commit and the push; its error stops the push,
+// and a branch moved under it is refused at the push.
+func TestProposeChangesetBeforePush(t *testing.T) {
+	bare := seedMultiRepo(t)
+	w := OpenWrite(bare, "", nil, true)
+	by := Author{Name: "u", Email: "u@x"}
+	drop := []ChangesetItem{{Path: "tenant-a/db.yaml", Delete: true}}
+	first, err := w.CommitChangeset("main", "p", "drop db", drop, by)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := errors.New("stop")
+	if _, err := w.ProposeChangeset("main", "p", "x", drop, by, PushPlan{Lease: first.Hash, BeforePush: func(string) error { return stop }}); !errors.Is(err, stop) {
+		t.Fatalf("want the hook's error, got %v", err)
+	}
+	theirs := ""
+	_, err = w.ProposeChangeset("main", "p", "x", drop, by, PushPlan{Lease: first.Hash, BeforePush: func(string) error {
+		cmd := exec.Command("git", "--git-dir", bare, "commit-tree", "-m", "theirs", "main^{tree}")
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@x", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@x")
+		out, err := cmd.Output()
+		if err != nil {
+			return err
+		}
+		theirs = strings.TrimSpace(string(out))
+		return exec.Command("git", "--git-dir", bare, "update-ref", "refs/heads/p", theirs).Run()
+	}})
+	if !errors.Is(err, ErrBranchMoved) {
+		t.Fatalf("want ErrBranchMoved, got %v", err)
+	}
+	if head := revParse(t, bare, "p"); head != theirs {
+		t.Fatalf("the other writer's head must stand, got %s", head)
+	}
+}
+
+// Both forms go-git reports a refused lease in, for the pushed ref only.
+func TestLeaseRefused(t *testing.T) {
+	for msg, want := range map[string]bool{
+		"non-fast-forward update: refs/heads/p":               true,
+		"command error on refs/heads/p: failed to update ref": true,
+		"command error on refs/heads/q: failed to update ref": false,
+		"authentication required":                             false,
+	} {
+		if got := leaseRefused(errors.New(msg), "p"); got != want {
+			t.Errorf("%q: got %v, want %v", msg, got, want)
+		}
+	}
+}
+
+// A create pins the path absent: one created on base since is refused.
+func TestCommitChangesetChecksAbsentPin(t *testing.T) {
+	bare := seedMultiRepo(t)
+	w := OpenWrite(bare, "", nil, true)
+	item := func(path string) []ChangesetItem {
+		return []ChangesetItem{{Path: path, NewContent: []byte("kind: VirtualMachine\n"), BaseBlob: AbsentBlob}}
+	}
+	var moved *BaseMovedError
+	if _, err := w.CommitChangeset("main", "p", "m", item("tenant-a/web.yaml"), Author{}); !errors.As(err, &moved) {
+		t.Fatalf("an existing path pinned absent: want BaseMovedError, got %v", err)
+	}
+	if _, err := w.CommitChangeset("main", "p", "m", item("tenant-a/new.yaml"), Author{}); err != nil {
+		t.Fatalf("an absent path pinned absent must commit: %v", err)
+	}
+}
+
+func revParse(t *testing.T, bare, rev string) string {
+	t.Helper()
+	out, err := exec.Command("git", "--git-dir", bare, "rev-parse", rev).Output()
+	if err != nil {
+		t.Fatalf("rev-parse %s: %v", rev, err)
+	}
+	return strings.TrimSpace(string(out))
+}
