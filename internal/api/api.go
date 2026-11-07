@@ -196,11 +196,13 @@ type Server struct {
 	vnc       VNCHandler
 	cfg       Config
 
-	// Proposals-refresher state (see proposals.go): who to refresh, the coalesced
-	// out-of-cycle trigger, the repos a nudge named, and the repo version each
-	// project's lane was last read at.
+	// Proposals-refresher state (see proposals.go): who to refresh, the open
+	// streams per token that keep them watched, the coalesced out-of-cycle
+	// trigger, the repos a nudge named, and the repo version each project's lane
+	// was last read at.
 	propMu      sync.Mutex
 	propTargets map[string]propTarget
+	propStreams map[string]int
 	propNudge   chan struct{}
 	propDirty   map[string]struct{}
 	propSeen    map[string]uint64
@@ -261,6 +263,7 @@ func NewServer(d Deps) *Server {
 		cfg:       d.Config,
 
 		propTargets: map[string]propTarget{},
+		propStreams: map[string]int{},
 		propNudge:   make(chan struct{}, 1),
 		propDirty:   map[string]struct{}{},
 		propSeen:    map[string]uint64{},

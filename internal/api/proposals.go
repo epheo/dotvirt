@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -18,17 +19,19 @@ import (
 // the broadcast hot path. So reads are pure cache hits, and a background
 // refresher owns freshness: it re-queries the forge for a watched project when
 // its repo's heads move (a propose/merge), when a nudge names its repo or finds
-// it uncached, and for all of them on a slow backstop tick - then wakes the hub
-// only when some lane actually changed. The lane is project-scoped, not
+// its lane never read, and for all of them on a slow backstop tick - then wakes
+// the hub only when some lane actually changed. The lane is project-scoped, not
 // per-token: every member of a project sees the same PRs, and which are theirs
 // is marked at read time.
 const (
 	// proposalsRefreshEvery is the backstop cadence; real freshness comes from the
 	// git-change signal and explicit nudges.
 	proposalsRefreshEvery = 60 * time.Second
-	// proposalsTrackFor keeps a token watched after it last built an inventory.
-	// Active subscribers re-track every heartbeat (15s); tokens gone longer than
-	// this stop being refreshed and their cached lanes age out.
+	// proposalsTrackFor keeps a token watched after it last built an inventory
+	// and closed its last stream. Frames rebuild only when something they show
+	// moves, so a quiet open tab stays watched through its stream, not through
+	// rebuilds; tokens gone longer than this stop being refreshed and their
+	// cached lanes age out.
 	proposalsTrackFor = 5 * time.Minute
 	// proposalsCacheTTL bounds a cached lane's life without a refresh. It must
 	// exceed proposalsRefreshEvery so watched tokens never miss between cycles.
@@ -123,6 +126,31 @@ func findProject(ps []project.ProjectInfo, name string) (project.ProjectInfo, bo
 	return project.ProjectInfo{}, false
 }
 
+// streaming counts a token's open inventory streams while each is served (the
+// stream handler returns when its connection closes), so the refresher keeps
+// that token's lanes fresh however long its frames stay unchanged.
+func (s *Server) streaming(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, ok := auth.FromContext(r.Context())
+		if !ok {
+			next(w, r)
+			return
+		}
+		key := restfactory.TokenKey(id.Token)
+		s.propMu.Lock()
+		s.propStreams[key]++
+		s.propMu.Unlock()
+		defer func() {
+			s.propMu.Lock()
+			if s.propStreams[key]--; s.propStreams[key] <= 0 {
+				delete(s.propStreams, key)
+			}
+			s.propMu.Unlock()
+		}()
+		next(w, r)
+	}
+}
+
 // nudgeProposals asks the refresher for an out-of-cycle pass (coalesced). A
 // non-empty repo (canonical URL) marks that repo's projects due even though no
 // head moved; with none, the pass picks up only lanes not cached yet.
@@ -179,17 +207,19 @@ func (s *Server) RunProposalsRefresher(ctx context.Context, bus *eventbus.Bus) {
 
 // refreshProposals re-queries the forge for the watched projects that are due,
 // updates the cache, re-derives their merged-PR lane, and reports whether any open
-// lane changed. A project is due when all is set (the backstop), its lane is not
-// cached, a nudge named its repo, or its repo's GitChanged version moved since its
-// lane was read. Expired targets are dropped. Best-effort per project: a failing
-// forge lookup skips that project and leaves it due. One round-trip per project,
-// however many tokens or users watch it.
+// lane changed. A project is due when all is set (the backstop), its lane was never
+// read, a nudge named its repo, or its repo's GitChanged version moved since its
+// lane was read. Expired targets are dropped. A failed lookup counts as a read and
+// keeps the last rows: frame builds keep nudging for a cold lane, and each nudge
+// must not reach a failing forge, so only the backstop, a head move or a nudge
+// naming its repo retries it. One round-trip per project, however many tokens or
+// users watch it.
 func (s *Server) refreshProposals(all bool) bool {
 	now := time.Now()
 	s.propMu.Lock()
 	watched := map[string]project.ProjectInfo{}
 	for key, t := range s.propTargets {
-		if now.Sub(t.lastSeen) > proposalsTrackFor {
+		if s.propStreams[key] == 0 && now.Sub(t.lastSeen) > proposalsTrackFor {
 			delete(s.propTargets, key)
 			continue
 		}
@@ -216,17 +246,19 @@ func (s *Server) refreshProposals(all bool) bool {
 		prev, cached := s.proposals.Get(name)
 		last, read := seen[name]
 		_, nudged := dirty[repo]
-		if !all && cached && read && last == ver && !nudged {
+		if !all && read && last == ver && !nudged {
 			continue
 		}
 		due = append(due, p)
 		rows, err := s.reader.OpenProposals(p)
+		seen[name] = ver
 		if err != nil {
 			log.Printf("proposals: %s: %v (skipping)", name, err)
-			delete(seen, name)
+			if cached {
+				s.proposals.Put(name, prev)
+			}
 			continue
 		}
-		seen[name] = ver
 		if rows == nil {
 			rows = []model.Proposal{}
 		}
