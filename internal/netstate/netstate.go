@@ -81,18 +81,18 @@ func New(sa *cluster.Client, bus *eventbus.Bus) *Snapshot {
 		netpol: idx(), anp: idx(), banp: idx(), egressfw: idx(), egressip: idx(), extroute: idx(),
 	}
 	s.watches = []watchSpec{
-		{gvrUDN, s.udn, true},
-		{gvrCUDN, s.cudn, true},
-		{gvrNAD, s.nad, true},
-		{gvrNNCP, s.nncp, true},
-		{gvrNNS, s.nns, false}, // NNS churn must not repaint the catalog
-		{gvrNNCE, s.nnce, true},
-		{gvrNetpol, s.netpol, true},
-		{gvrANP, s.anp, true},
-		{gvrBANP, s.banp, true},
-		{gvrEgressFW, s.egressfw, true},
-		{gvrEgressIP, s.egressip, true},
-		{gvrExtRoute, s.extroute, true},
+		{gvrUDN, s.udn, true, false},
+		{gvrCUDN, s.cudn, true, false},
+		{gvrNAD, s.nad, true, false},
+		{gvrNNCP, s.nncp, true, false},
+		{gvrNNS, s.nns, false, false}, // NNS churn must not repaint the catalog
+		{gvrNNCE, s.nnce, true, true},
+		{gvrNetpol, s.netpol, true, false},
+		{gvrANP, s.anp, true, false},
+		{gvrBANP, s.banp, true, false},
+		{gvrEgressFW, s.egressfw, true, false},
+		{gvrEgressIP, s.egressip, true, false},
+		{gvrExtRoute, s.extroute, true, false},
 	}
 	s.healthy = make([]atomic.Bool, len(s.watches))
 	for i := range s.healthy {
@@ -101,12 +101,28 @@ func New(sa *cluster.Client, bus *eventbus.Bus) *Snapshot {
 	return s
 }
 
-// watchSpec is one reflector's wiring: its GVR, target store, and whether store
-// moves signal NetworkChanged.
+// watchSpec is one reflector's wiring: its GVR, target store, whether store
+// moves signal NetworkChanged, and whether the watch is optional.
 type watchSpec struct {
 	gvr    schema.GroupVersionResource
 	idx    cache.Indexer
 	signal bool
+	// optional: the data only enriches the catalog (per-host uplink failures),
+	// and an operator release may not grant it yet. The watch starts only once
+	// the SA may list the kind, and its failures never read as staleness.
+	optional bool
+}
+
+// listable gates an optional watch: the kind is served and the SA may list it.
+// A review error reads as "not yet"; the gate re-probes on the discovery pace.
+func (s *Snapshot) listable(ctx context.Context) func(schema.GroupVersionResource) bool {
+	return func(gvr schema.GroupVersionResource) bool {
+		if !s.sa.HasAPIResource(gvr) {
+			return false
+		}
+		ok, err := s.sa.Can(ctx, "list", gvr.Group, gvr.Resource, "")
+		return err == nil && ok
+	}
 }
 
 // Healthy reports whether every started networking watch is currently established.
@@ -134,6 +150,10 @@ func (s *Snapshot) watch(ctx context.Context, w watchSpec, healthy *atomic.Bool)
 	served := s.sa.HasAPIResource
 	if w.gvr == gvrNNS {
 		served = reflect.Served(served, &s.nmstatePresent)
+	}
+	if w.optional {
+		served = s.listable(ctx)
+		healthy = new(atomic.Bool)
 	}
 	onChange := func() {}
 	var onSynced func()
