@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -66,47 +67,82 @@ func testClient(srvURL string) *Client {
 	return NewFactory(srvURL, StaticToken("tok"), false, "").For(srvURL + "/dotvirt/team-a.git")
 }
 
-func TestFindPRAcrossStates(t *testing.T) {
+// pullsServer lists prs the way Forgejo's GET /pulls does: state, base and
+// head filter by exact column match (head against the bare branch name),
+// pages cap at maxPage items whatever limit asks, and the list keeps the
+// given order (callers pass it most recently updated first).
+func pullsServer(t *testing.T, maxPage int, prs ...PR) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		var match []PR
+		for _, pr := range prs {
+			if st := q.Get("state"); st != "all" && st != pr.State {
+				continue
+			}
+			if b := q.Get("base"); b != "" && b != pr.Base.Ref {
+				continue
+			}
+			if h := q.Get("head"); h != "" && h != pr.Head.Ref {
+				continue
+			}
+			match = append(match, pr)
+		}
+		page, _ := strconv.Atoi(q.Get("page"))
+		if page < 1 {
+			page = 1
+		}
+		from, to := min((page-1)*maxPage, len(match)), min(page*maxPage, len(match))
+		writeJSON(t, w, match[from:to])
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func listedPR(number int, state, head, base string, merged bool) PR {
+	p := PR{Number: number, State: state, Merged: merged, HTMLURL: fmt.Sprintf("u%d", number)}
+	p.Head.Ref, p.Base.Ref = head, base
+	return p
+}
+
+func TestFindPR(t *testing.T) {
 	const head = "dotvirt/proposed/alice/team-a-abc123"
-
-	t.Run("closed only", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(t, w, []PR{{Number: 4, State: "closed", HTMLURL: "u4", Head: refHead(head)}})
-		}))
-		defer srv.Close()
-		pr, ok, err := testClient(srv.URL).FindPR(head, "main")
-		if err != nil || !ok {
-			t.Fatalf("FindPR: ok=%v err=%v", ok, err)
-		}
-		if pr.Number != 4 || pr.State != "closed" {
-			t.Fatalf("got %+v, want closed #4", pr)
-		}
-	})
-
-	t.Run("open wins over closed", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(t, w, []PR{
-				{Number: 4, State: "closed", HTMLURL: "u4", Head: refHead(head)},
-				{Number: 7, State: "open", HTMLURL: "u7", Head: refHead(head)},
-			})
-		}))
-		defer srv.Close()
-		pr, ok, err := testClient(srv.URL).FindPR(head, "main")
-		if err != nil || !ok || pr.Number != 7 {
-			t.Fatalf("got (#%d, ok=%v, err=%v), want open #7", pr.Number, ok, err)
-		}
-	})
-
-	t.Run("non-matching head ref ignored", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(t, w, []PR{{Number: 9, State: "open", Head: refHead("someone-elses-branch")}})
-		}))
-		defer srv.Close()
-		_, ok, err := testClient(srv.URL).FindPR(head, "main")
-		if err != nil || ok {
-			t.Fatalf("want ok=false, got ok=%v err=%v", ok, err)
-		}
-	})
+	fork := listedPR(3, "open", head, "main", false)
+	fork.Head.RepoID, fork.Base.RepoID = 2, 1
+	cases := []struct {
+		name string
+		prs  []PR
+		want int // 0: none
+	}{
+		{"closed only", []PR{listedPR(4, "closed", head, "main", false)}, 4},
+		{"open wins over a more recent closed", []PR{listedPR(4, "closed", head, "main", true), listedPR(7, "open", head, "main", false)}, 7},
+		{"most recent closed decides", []PR{listedPR(9, "closed", head, "main", true), listedPR(4, "closed", head, "main", false)}, 9},
+		{"open PR past the first page", []PR{
+			listedPR(1, "open", "other-1", "main", false), listedPR(2, "open", "other-2", "main", false),
+			listedPR(5, "open", head, "main", false),
+		}, 5},
+		{"other base ignored", []PR{listedPR(6, "open", head, "release", false)}, 0},
+		{"other head ignored", []PR{listedPR(9, "open", "someone-elses-branch", "main", false)}, 0},
+		{"fork reusing the branch name ignored", []PR{fork}, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := pullsServer(t, 2, c.prs...)
+			got, ok, err := testClient(srv.URL).FindPR(head, "main")
+			if err != nil {
+				t.Fatalf("FindPR: %v", err)
+			}
+			if c.want == 0 {
+				if ok {
+					t.Fatalf("want none, got #%d", got.Number)
+				}
+				return
+			}
+			if !ok || got.Number != c.want {
+				t.Fatalf("got (#%d, ok=%v), want #%d", got.Number, ok, c.want)
+			}
+		})
+	}
 }
 
 // MergedPRs filters the closed-PR list down to merges into base, and a null
@@ -137,7 +173,7 @@ func TestMergedPRs(t *testing.T) {
 	}
 }
 
-func TestReopenPR(t *testing.T) {
+func TestEditPR(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPatch {
 			t.Errorf("method = %s, want PATCH", r.Method)
@@ -149,16 +185,16 @@ func TestReopenPR(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode body: %v", err)
 		}
-		if body["state"] != "open" {
-			t.Errorf("body = %v, want state=open", body)
+		if len(body) != 2 || body["state"] != "open" || body["title"] != "t" {
+			t.Errorf("body = %v, want state=open and the title alone", body)
 		}
 		writeJSON(t, w, PR{Number: 4, State: "open", HTMLURL: "u4"})
 	}))
 	defer srv.Close()
 
-	pr, err := testClient(srv.URL).ReopenPR(4)
+	pr, err := testClient(srv.URL).EditPR(4, PREdit{State: "open", Title: "t"})
 	if err != nil {
-		t.Fatalf("ReopenPR: %v", err)
+		t.Fatalf("EditPR: %v", err)
 	}
 	if pr.State != "open" || pr.Number != 4 {
 		t.Fatalf("got %+v, want open #4", pr)
@@ -179,16 +215,6 @@ func TestCreatePRConflictPreservesStatus(t *testing.T) {
 	if !strings.Contains(err.Error(), "409") {
 		t.Fatalf("error %q does not mention 409", err)
 	}
-}
-
-func refHead(ref string) struct {
-	Ref string `json:"ref"`
-	Sha string `json:"sha"`
-} {
-	return struct {
-		Ref string `json:"ref"`
-		Sha string `json:"sha"`
-	}{Ref: ref}
 }
 
 func writeJSON(t *testing.T, w io.Writer, v any) {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,11 @@ type route func(method, path string) (status int, body string, matched bool)
 func newProposeFixture(t *testing.T, routes ...route) *proposeFixture {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Every scripted list is one page long.
+		if page, _ := strconv.Atoi(r.URL.Query().Get("page")); page > 1 {
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
 		for _, rt := range routes {
 			if status, body, ok := rt(r.Method, r.URL.Path); ok {
 				w.WriteHeader(status)
@@ -309,7 +315,7 @@ func whenList(method, suffix string, status int, state string, merged bool) rout
 		}
 		head := proposedBranchFor("alice", "p")
 		body := `[{"number":4,"state":"` + state + `","merged":` + boolStr(merged) +
-			`,"html_url":"http://forge/pulls/4","head":{"ref":"` + head + `"}}]`
+			`,"html_url":"http://forge/pulls/4","base":{"ref":"main"},"head":{"ref":"` + head + `"}}]`
 		return status, body, true
 	}
 }

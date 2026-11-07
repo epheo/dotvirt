@@ -105,7 +105,7 @@ func (c *Coordinator) openOrRecoverPR(fc *forge.Client, out *model.ProposeResult
 			out.PRURL, out.PRNumber, out.Existing = found.HTMLURL, found.Number, true
 			return true
 		case !found.Merged:
-			reopened, err := fc.ReopenPR(found.Number)
+			reopened, err := fc.EditPR(found.Number, forge.PREdit{State: "open", Title: title, Body: body})
 			if err == nil {
 				out.PRURL, out.PRNumber, out.Existing = reopened.HTMLURL, reopened.Number, true
 				return true

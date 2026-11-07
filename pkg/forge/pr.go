@@ -24,12 +24,15 @@ type PR struct {
 	// but not with commit statuses, which hang off the commit.
 	UpdatedAt time.Time `json:"updated_at"`
 	Title     string    `json:"title"`
+	Body      string    `json:"body"`
 	Head      struct {
-		Ref string `json:"ref"`
-		Sha string `json:"sha"`
+		Ref    string `json:"ref"`
+		Sha    string `json:"sha"`
+		RepoID int64  `json:"repo_id"`
 	} `json:"head"`
 	Base struct {
-		Ref string `json:"ref"`
+		Ref    string `json:"ref"`
+		RepoID int64  `json:"repo_id"`
 	} `json:"base"`
 	User struct {
 		Login string `json:"login"`
@@ -37,7 +40,7 @@ type PR struct {
 }
 
 // CreatePR opens a pull request from head into base. If one already exists for
-// the same head->base, Forgejo returns 409; callers can fall back to ListOpenPRs.
+// the same head->base, Forgejo returns 409; callers can fall back to FindPR.
 func (c *Client) CreatePR(title, body, head, base string) (PR, error) {
 	payload := map[string]string{"title": title, "body": body, "head": head, "base": base}
 	var pr PR
@@ -47,32 +50,42 @@ func (c *Client) CreatePR(title, body, head, base string) (PR, error) {
 	return pr, nil
 }
 
-// FindPR returns the PR for head->base regardless of state, or ok=false if none.
-// It filters by head branch (Forgejo's "owner:branch" form) and confirms the
-// returned PR's head ref matches, so a user's re-propose never matches an
-// unrelated PR (e.g. another user's branch or a human feature PR) into the same
-// base. An open match is preferred; otherwise the first head-matching PR is
-// returned - the reopen target when the prior PR was closed.
+// prPageSize is the page a PR scan asks for. Forgejo caps it at its own
+// MAX_RESPONSE_ITEMS, so a short page does not mean the last one.
+const prPageSize = 50
+
+// prPageLimit bounds one scan; a PR past it reads as absent.
+const prPageLimit = 20
+
+// FindPR returns head's pull request into base: the open one, else the most
+// recently updated closed one (merged or not), else ok=false. Matching is
+// client-side: Forgejo compares its head filter to the bare branch name, so
+// the "owner:branch" form matches nothing, and older versions ignore the
+// filters altogether. A fork's PR reusing the branch name never matches.
 func (c *Client) FindPR(head, base string) (pr PR, ok bool, err error) {
-	q := fmt.Sprintf("/pulls?state=all&base=%s&head=%s:%s", url.QueryEscape(base), url.QueryEscape(c.owner), url.QueryEscape(head))
-	var prs []PR
-	if err := c.do("GET", c.repoPath(q), nil, &prs); err != nil {
-		return PR{}, false, err
+	if pr, ok, err := c.scanPRs("open", head, base); err != nil || ok {
+		return pr, ok, err
 	}
-	var fallback *PR
-	for i := range prs {
-		if prs[i].Head.Ref != head {
-			continue
+	return c.scanPRs("closed", head, base)
+}
+
+// scanPRs pages through state's PRs, most recently updated first, until one
+// from head into base turns up or a page comes back empty.
+func (c *Client) scanPRs(state, head, base string) (PR, bool, error) {
+	for page := 1; page <= prPageLimit; page++ {
+		q := fmt.Sprintf("/pulls?state=%s&sort=recentupdate&base=%s&limit=%d&page=%d", state, url.QueryEscape(base), prPageSize, page)
+		var prs []PR
+		if err := c.do("GET", c.repoPath(q), nil, &prs); err != nil {
+			return PR{}, false, err
 		}
-		if prs[i].State == "open" {
-			return prs[i], true, nil
+		if len(prs) == 0 {
+			break
 		}
-		if fallback == nil {
-			fallback = &prs[i]
+		for _, pr := range prs {
+			if pr.State == state && pr.Head.Ref == head && pr.Base.Ref == base && pr.Head.RepoID == pr.Base.RepoID {
+				return pr, true, nil
+			}
 		}
-	}
-	if fallback != nil {
-		return *fallback, true, nil
 	}
 	return PR{}, false, nil
 }
@@ -190,10 +203,18 @@ func (c *Client) CombinedStatus(sha string) (string, error) {
 	return st.State, nil
 }
 
-// ReopenPR reopens a closed (unmerged) pull request and returns its updated state.
-func (c *Client) ReopenPR(number int) (PR, error) {
+// PREdit changes a pull request; empty fields stay as they are.
+type PREdit struct {
+	Title string `json:"title,omitempty"`
+	Body  string `json:"body,omitempty"`
+	// State "open" reopens a closed, unmerged pull request.
+	State string `json:"state,omitempty"`
+}
+
+// EditPR applies edit to pull request number and returns its updated state.
+func (c *Client) EditPR(number int, edit PREdit) (PR, error) {
 	var pr PR
-	if err := c.do("PATCH", c.repoPath("/pulls/"+strconv.Itoa(number)), map[string]string{"state": "open"}, &pr); err != nil {
+	if err := c.do("PATCH", c.repoPath("/pulls/"+strconv.Itoa(number)), edit, &pr); err != nil {
 		return PR{}, err
 	}
 	return pr, nil
