@@ -13,6 +13,7 @@ import (
 	"context"
 	"sync/atomic"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -63,7 +64,8 @@ func TrackHealth(lw *cache.ListWatch, healthy *atomic.Bool, onFlip func()) *cach
 // reflector applies (Add/Update/Delete/Replace), so the read methods never have to
 // diff anything. Replace fires onChange once for a whole relist rather than per
 // item - exactly the coarse signal we want - and also fires onSynced the first
-// time (the initial LIST landed), for readiness gating.
+// time (the initial LIST landed), for readiness gating. Objects are trimmed
+// before they are stored.
 type countingStore struct {
 	cache.Indexer
 	onChange func()
@@ -75,7 +77,30 @@ func NewStore(idx cache.Indexer, onChange, onSynced func()) cache.Indexer {
 	return &countingStore{Indexer: idx, onChange: onChange, onSynced: onSynced}
 }
 
+// lastApplied is kubectl's copy of the whole applied manifest.
+const lastApplied = "kubectl.kubernetes.io/last-applied-configuration"
+
+// trim drops what no snapshot reader uses yet every object carries at size:
+// managedFields and the last-applied annotation. The reflector hands the store
+// freshly decoded objects it keeps no other reference to, so trimming in place
+// is safe.
+func trim(obj any) {
+	m, err := meta.Accessor(obj)
+	if err != nil {
+		return
+	}
+	m.SetManagedFields(nil)
+	// Unstructured returns a copy of its annotations, so write the result back.
+	if a := m.GetAnnotations(); a != nil {
+		if _, ok := a[lastApplied]; ok {
+			delete(a, lastApplied)
+			m.SetAnnotations(a)
+		}
+	}
+}
+
 func (c *countingStore) Add(obj any) error {
+	trim(obj)
 	if err := c.Indexer.Add(obj); err != nil {
 		return err
 	}
@@ -84,6 +109,7 @@ func (c *countingStore) Add(obj any) error {
 }
 
 func (c *countingStore) Update(obj any) error {
+	trim(obj)
 	if err := c.Indexer.Update(obj); err != nil {
 		return err
 	}
@@ -100,6 +126,9 @@ func (c *countingStore) Delete(obj any) error {
 }
 
 func (c *countingStore) Replace(list []any, rv string) error {
+	for _, obj := range list {
+		trim(obj)
+	}
 	if err := c.Indexer.Replace(list, rv); err != nil {
 		return err
 	}

@@ -8,6 +8,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
+	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/reflect"
 )
 
@@ -218,5 +219,37 @@ func TestNamespacesExposesLabelsAndAnnotations(t *testing.T) {
 	}
 	if lbls := s.NamespaceLabels("absent"); lbls != nil {
 		t.Errorf("NamespaceLabels(absent) = %v, want nil", lbls)
+	}
+}
+
+// The store trims managedFields and the last-applied annotation on insert; the
+// manifest drift and adoption serialize from the stored VM must not change.
+func TestStoredVMExportsUnchanged(t *testing.T) {
+	vm := testVM("ns", "web")
+	vm.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "kubectl", Operation: metav1.ManagedFieldsOperationApply}}
+	vm.Labels = map[string]string{"app": "web"}
+	vm.Annotations = map[string]string{
+		"kubectl.kubernetes.io/last-applied-configuration": `{"spec":{}}`,
+		"keep": "yes",
+	}
+	rs := kubevirtcorev1.RunStrategyAlways
+	vm.Spec.RunStrategy = &rs
+	want, err := cluster.ExportManifest(*vm.DeepCopy())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := stateWithIndexers()
+	_ = s.vmStore().Add(vm)
+	objs := s.VMObjects([]string{"ns"})
+	if len(objs) != 1 || objs[0].ManagedFields != nil {
+		t.Fatalf("stored VM not trimmed: %+v", objs)
+	}
+	got, err := cluster.ExportManifest(objs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("export moved:\n%s\nwant:\n%s", got, want)
 	}
 }
