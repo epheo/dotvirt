@@ -27,10 +27,11 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	if err != nil {
 		return model.Inventory{}, err
 	}
-	projects, err := s.projectsFor(ctx, id, userCluster)
+	visible, err := s.visibleFor(ctx, id, userCluster)
 	if err != nil {
 		return model.Inventory{}, err
 	}
+	projects := s.resolver.Resolve(s.state.Namespaces(), visible)
 
 	// Live state + topology come from the SA-owned snapshot: the hot path reads
 	// in-memory state, never the cluster, however many subscribers a broadcast
@@ -90,12 +91,16 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 			}
 		}
 	}
+	platformAuthor, _ := s.canAuthorPlatform(ctx, id, userCluster)
 	// The platform tier has no project row; its Application rollup rides the frame
 	// on its own so the issues plane names what it failed to apply or keeps
-	// unhealthy. Cluster-wide (the snapshot is unfiltered): a user scoped to no
-	// project must not mask a broken platform sync.
+	// unhealthy. Every user sees its verdict (a user scoped to no project must not
+	// mask a broken platform sync); only platform authors see its detail.
 	if s.cfg.PlatformRepo != "" {
 		inv.Platform = platformRollup(in.ProjectDrift, s.cfg.PlatformRepo)
+		if !platformAuthor {
+			inv.Platform = tenantPlatformView(inv.Platform, visible)
+		}
 	}
 	// Propose existing tenants (namespaces with VMs, no project label) to callers
 	// who could adopt them - the same namespace-create authority the create-project
@@ -109,7 +114,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	// from `projects` - seed it for platform authors so its open PR shows on a cold
 	// load, not just right after a propose tracks it.
 	propProjects := projects
-	if platform, _ := s.canAuthorPlatform(ctx, id, userCluster); platform {
+	if platformAuthor {
 		propProjects = append(propProjects, s.platformProject())
 	}
 	inv.Proposals = s.proposalsFor(id, propProjects)
@@ -147,6 +152,32 @@ func platformRollup(drift map[string]model.ProjectSync, platformRepo string) *mo
 		SyncError: "no ArgoCD Application sources the platform repo - the dotvirt-platform Application is missing, so tenancy changes cannot apply",
 	}
 }
+
+// tenantPlatformView is the platform rollup for a caller without platform
+// authority: the verdict, the unhealthy objects in namespaces they can see
+// (their own Namespace objects included), and a generic line for the apply
+// error, whose text can name any tenant's namespace.
+func tenantPlatformView(ps *model.ProjectSync, visible map[string]bool) *model.ProjectSync {
+	if ps == nil {
+		return nil
+	}
+	out := &model.ProjectSync{Sync: ps.Sync, Health: ps.Health, Operation: ps.Operation}
+	if ps.SyncError != "" {
+		out.SyncError = platformErrorForTenants
+	}
+	for _, o := range ps.Unhealthy {
+		ns := o.Namespace
+		if ns == "" && o.Kind == model.KindNS.Kind {
+			ns = o.Name
+		}
+		if visible[ns] {
+			out.Unhealthy = append(out.Unhealthy, o)
+		}
+	}
+	return out
+}
+
+const platformErrorForTenants = "the platform repo failed to apply; a platform administrator can see why"
 
 func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 	id, _, err := s.userCluster(r)
