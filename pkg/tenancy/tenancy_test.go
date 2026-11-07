@@ -62,3 +62,16 @@ func TestDestination(t *testing.T) {
 		t.Error("a project in platform space only has no destination")
 	}
 }
+
+// A tenant repo never declares a NetworkAttachmentDefinition: the project's
+// own admin role cannot create one, and Argo would apply it with its rights.
+func TestTenantKindsExcludeNAD(t *testing.T) {
+	for _, k := range TenantKinds {
+		if k.Kind == "NetworkAttachmentDefinition" {
+			t.Fatal("NetworkAttachmentDefinition is platform tier")
+		}
+	}
+	if TenantKind("NetworkAttachmentDefinition") || !TenantKind("VirtualMachine") {
+		t.Error("TenantKind disagrees with TenantKinds")
+	}
+}

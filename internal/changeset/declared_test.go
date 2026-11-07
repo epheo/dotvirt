@@ -2,6 +2,7 @@ package changeset
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -84,9 +85,10 @@ func TestStagingRefusesImpliedNamespace(t *testing.T) {
 	}
 }
 
-// Every namespaced manifest dotvirt renders into a tenant repo names its
-// namespace: the Application applies a namespace-less one to its destination
-// namespace, which need not be the file's directory.
+// Every namespaced manifest dotvirt renders names its namespace: the
+// Application applies a namespace-less one to its destination namespace, which
+// need not be the file's directory. What it renders into a tenant repo is a
+// tenant kind: a project's networks are UDNs, never NADs.
 func TestRenderedTenantManifestsCarryNamespace(t *testing.T) {
 	render := map[string]func() (string, []byte, error){
 		"vm": func() (string, []byte, error) {
@@ -111,6 +113,7 @@ func TestRenderedTenantManifestsCarryNamespace(t *testing.T) {
 			return netgen.RoleBindingManifest(netgen.RoleBindingSpec{Namespace: "alpha", Project: "p", Owners: []string{"alice"}})
 		},
 	}
+	tenant := project.ProjectInfo{Name: "p"}
 	for name, r := range render {
 		path, content, err := r()
 		if err != nil {
@@ -120,5 +123,65 @@ func TestRenderedTenantManifestsCarryNamespace(t *testing.T) {
 		if len(refs) == 0 || len(implied) != 0 {
 			t.Errorf("%s: refs %v, namespace-less %v", name, refs, implied)
 		}
+		// The namespace and its grant are committed to the platform repo.
+		if name == "namespace with primary network" || name == "rolebinding" {
+			continue
+		}
+		if err := requirePlacement(tenant, path, content); err != nil {
+			t.Errorf("%s renders what a tenant repo may not hold: %v", name, err)
+		}
+	}
+}
+
+// A tenant repo never gains a NetworkAttachmentDefinition through dotvirt: the
+// manifest editor cannot turn a network into one or rewrite a hand-written
+// one, adopting one names the platform tier, and adopting a namespace leaves
+// its raw NADs out while its VMs come under git.
+func TestTenantRepoRefusesNAD(t *testing.T) {
+	udn := "apiVersion: k8s.ovn.org/v1\nkind: UserDefinedNetwork\nmetadata:\n  name: net\n  namespace: alpha\nspec:\n  topology: Layer2\n"
+	nad := func(name, vlan string) string {
+		return "apiVersion: k8s.cni.cncf.io/v1\nkind: NetworkAttachmentDefinition\nmetadata:\n  name: " + name + "\n  namespace: alpha\nspec:\n  config: '{\"cniVersion\":\"0.4.0\",\"name\":\"" + name + "\",\"type\":\"ovn-k8s-cni-overlay\",\"topology\":\"localnet\",\"physicalNetworkName\":\"dc-vlan\",\"vlanID\":" + vlan + "}'\n"
+	}
+	bare := seedBareFiles(t, map[string][]byte{
+		"alpha/networks/net.yaml": []byte(udn),
+		"alpha/raw.yaml":          []byte(nad("raw", "10")),
+	})
+	c := newTestCoordinator(t, false)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare, Namespaces: []string{"alpha"}}
+	platformTier := func(what string, err error) {
+		t.Helper()
+		if !errors.Is(err, model.ErrInvalid) || !strings.Contains(fmt.Sprint(err), "platform tier") {
+			t.Errorf("%s: err = %v, want a refusal naming the platform tier", what, err)
+		}
+	}
+
+	_, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), "alpha", "net", nad("net", "20"))
+	platformTier("network rewritten into a NAD", err)
+	_, err = c.StageUpdateManifest(id, proj, string(draft.ResourceNetwork), "alpha", "raw", nad("raw", "30"))
+	platformTier("hand-written NAD edited", err)
+
+	live := model.Adoptable{Kind: "NetworkAttachmentDefinition", Namespace: "alpha", Name: "live", Path: "alpha/live.networkattachmentdefinition.yaml", Manifest: []byte(nad("live", "40"))}
+	_, err = c.AdoptObject(id, proj, live)
+	platformTier("NAD adopted", err)
+	_, err = c.AdoptObjects(id, proj, "alpha", []model.Adoptable{live})
+	platformTier("namespace holding only a NAD adopted", err)
+	if entries, _ := c.store.List(id.Username, proj.Name); len(entries) != 0 {
+		t.Fatalf("refused stages left %+v", entries)
+	}
+
+	vm := model.Adoptable{Kind: "VirtualMachine", Namespace: "alpha", Name: "web", Path: "alpha/web.yaml", Manifest: []byte(liveVMYAML("web", ""))}
+	if _, err := c.AdoptObjects(id, proj, "alpha", []model.Adoptable{vm, live}); err != nil {
+		t.Fatalf("namespace adoption: %v", err)
+	}
+	entries, _ := c.store.List(id.Username, proj.Name)
+	if len(entries) != 1 || entries[0].Name != "web" {
+		t.Errorf("staged %+v, want the VM alone", entries)
+	}
+
+	// The platform repo keeps them.
+	plat := project.ProjectInfo{Name: project.PlatformName, Repo: bare}
+	if err := requirePlacement(plat, live.Path, live.Manifest); err != nil {
+		t.Errorf("platform repo refused a NAD: %v", err)
 	}
 }

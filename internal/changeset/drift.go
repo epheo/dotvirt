@@ -153,11 +153,18 @@ func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, w
 		return model.DraftView{}, err
 	}
 	staged := 0
+	var platformTier error
 	for _, o := range objs {
 		if _, ok := idx.Files[model.ObjectRef{Kind: o.Kind, Namespace: o.Namespace, Name: o.Name}]; ok {
 			continue
 		}
-		if err := requireNamedNamespace(o.Path, o.Manifest); err != nil {
+		// A raw NetworkAttachmentDefinition beside the VMs is the platform's to
+		// declare: left out, so the rest of the namespace still comes under git.
+		if err := tenantDeclarable(proj, o.Kind, o.Name); err != nil {
+			platformTier = err
+			continue
+		}
+		if err := requirePlacement(proj, o.Path, o.Manifest); err != nil {
 			return model.DraftView{}, err
 		}
 		if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
@@ -171,6 +178,9 @@ func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, w
 			return model.DraftView{}, err
 		}
 		staged++
+	}
+	if staged == 0 && platformTier != nil {
+		return model.DraftView{}, platformTier
 	}
 	if staged == 0 {
 		return model.DraftView{}, fmt.Errorf("%w: nothing to adopt in %s: git already describes everything running there", model.ErrInvalid, where)

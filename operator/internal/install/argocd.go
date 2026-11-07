@@ -8,6 +8,7 @@ import (
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/pkg/forge"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // repoCredsName is the Argo repo-credentials template secret (in the ArgoCD ns).
@@ -89,21 +90,17 @@ func RepoCredsSecret(dv *dotvirtv1alpha1.Dotvirt, argoNS, urlPrefix, username, t
 	}
 }
 
-// tenantWhitelist is what a tenant repo may hold: namespaced workloads only.
+// tenantWhitelist is what a tenant repo may hold: tenancy.TenantKinds, the
+// list dotvirt stages by, so neither side admits what the other refuses.
 // clusterResourceWhitelist stays empty, so a tenant repo cannot reconcile a
 // CUDN/NNCP/Namespace even though the shared Argo controller SA could.
 func tenantWhitelist(spec map[string]any) map[string]any {
-	spec["clusterResourceWhitelist"] = []any{}
-	spec["namespaceResourceWhitelist"] = []any{
-		map[string]any{"group": "kubevirt.io", "kind": "VirtualMachine"},
-		map[string]any{"group": "cdi.kubevirt.io", "kind": "DataVolume"},
-		map[string]any{"group": "k8s.ovn.org", "kind": "UserDefinedNetwork"},
-		map[string]any{"group": "k8s.cni.cncf.io", "kind": "NetworkAttachmentDefinition"},
-		// The Tier-1 gateway firewall - namespace-scoped, authored into the tenant repo.
-		map[string]any{"group": "k8s.ovn.org", "kind": "EgressFirewall"},
-		// The east-west Distributed Firewall.
-		map[string]any{"group": "networking.k8s.io", "kind": "NetworkPolicy"},
+	kinds := make([]any, 0, len(tenancy.TenantKinds))
+	for _, k := range tenancy.TenantKinds {
+		kinds = append(kinds, map[string]any{"group": k.Group, "kind": k.Kind})
 	}
+	spec["clusterResourceWhitelist"] = []any{}
+	spec["namespaceResourceWhitelist"] = kinds
 	return spec
 }
 

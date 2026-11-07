@@ -54,7 +54,7 @@ func (c *Coordinator) AdoptObject(id auth.Identity, proj project.ProjectInfo, o 
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if err := requireNamedNamespace(o.Path, o.Manifest); err != nil {
+	if err := requirePlacement(proj, o.Path, o.Manifest); err != nil {
 		return model.DraftView{}, err
 	}
 	idx, err := indexDeclared(read, c.baseBranch)
@@ -150,7 +150,7 @@ func (c *Coordinator) StageUpdateManifest(id auth.Identity, proj project.Project
 	if len(refs) != 1 || refs[0].Namespace != ns || refs[0].Name != name || !slices.Contains(draft.Resource(resource).Kinds(), refs[0].Kind) {
 		return model.DraftView{}, fmt.Errorf("%w: the manifest must declare exactly %s/%s", model.ErrInvalid, namespace, name)
 	}
-	if err := requireNamedNamespace(path, []byte(yaml)); err != nil {
+	if err := requirePlacement(proj, path, []byte(yaml)); err != nil {
 		return model.DraftView{}, err
 	}
 	current, err := read.FileOnBranch(c.baseBranch, path)

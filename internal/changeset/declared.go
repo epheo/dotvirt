@@ -9,6 +9,8 @@ import (
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // unmanagedClusterScoped lists the cluster-scoped kinds a repo may carry that
@@ -143,13 +145,32 @@ func PlacementOnBranch(read *git.Repo, branch string) (Placement, error) {
 	return idx.Placement, nil
 }
 
-// requireNamedNamespace refuses content holding a namespaced document without
-// metadata.namespace: dotvirt would read it in its directory's namespace while
-// Argo applies it to the Application's destination namespace.
-func requireNamedNamespace(path string, content []byte) error {
-	if _, implied, _ := declared(path, content); len(implied) > 0 {
+// requirePlacement refuses content proj's repo must not declare: a namespaced
+// document without metadata.namespace, which dotvirt reads in its directory's
+// namespace while Argo applies it to the Application's destination; and, in a
+// tenant repo, a kind outside tenancy.TenantKinds, which the project's
+// AppProject refuses because Argo would apply it with more rights than the
+// project holds.
+func requirePlacement(proj project.ProjectInfo, path string, content []byte) error {
+	refs, implied, _ := declared(path, content)
+	if len(implied) > 0 {
 		r := implied[0]
 		return fmt.Errorf("%w: %s %s must set metadata.namespace", model.ErrInvalid, r.Kind, r.Name)
 	}
+	for _, r := range refs {
+		if err := tenantDeclarable(proj, r.Kind, r.Name); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// tenantDeclarable refuses a kind a tenant repo may not declare, naming the
+// tier that may.
+func tenantDeclarable(proj project.ProjectInfo, kind, name string) error {
+	if proj.Name == project.PlatformName || tenancy.TenantKind(kind) {
+		return nil
+	}
+	return fmt.Errorf("%w: %s %s is platform tier: only the platform repo may declare it, not project %s",
+		model.ErrInvalid, kind, name, proj.Name)
 }

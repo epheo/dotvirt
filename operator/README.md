@@ -277,6 +277,11 @@ no extra trust configuration is needed.
   - Move objects a tenant repo declares in a namespace outside its project. The
     project's AppProject refuses them, which fails that Application's whole sync.
     The inventory lists them per project (`outOfProject`).
+  - Move every NetworkAttachmentDefinition out of tenant repos into the platform
+    repo. Tenant AppProjects no longer admit NADs: a project's admin role may only
+    read them, while Argo applies with its own rights, so a tenant NAD could join
+    another project's VLAN or reach the underlay. A tenant repo still holding one
+    fails to sync.
 
 ## Managed Forgejo credentials
 

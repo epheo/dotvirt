@@ -410,3 +410,24 @@ func TestDeploymentPinsTenancyKeys(t *testing.T) {
 		}
 	}
 }
+
+// A tenant repo can never reach a NetworkAttachmentDefinition through Argo's
+// rights: no tenant AppProject admits one, the platform tier keeps them.
+func TestTenantAppProjectsAdmitNoNAD(t *testing.T) {
+	dv := testDotvirt()
+	nad := func(ap *unstructured.Unstructured) bool {
+		kinds, _, _ := unstructured.NestedSlice(ap.Object, "spec", "namespaceResourceWhitelist")
+		for _, k := range kinds {
+			if k.(map[string]any)["kind"] == "NetworkAttachmentDefinition" {
+				return true
+			}
+		}
+		return false
+	}
+	if nad(TenantAppProject(dv, "argocd", "dotvirt-p-a", "a", []string{"a"}, nil)) || nad(TenantsAppProject(dv, "argocd", "https://forge/dotvirt/platform.git", "ns")) {
+		t.Error("a tenant AppProject admits NetworkAttachmentDefinitions")
+	}
+	if !nad(PlatformAppProject(dv, "argocd", "https://forge/dotvirt/platform.git")) {
+		t.Error("the platform AppProject lost NetworkAttachmentDefinitions")
+	}
+}
