@@ -33,5 +33,8 @@ export function inlineBlock(
 		return `A staged ${staged.kind} of this VM is waiting; review it in Changes first`;
 	if (field !== 'power' && vm.instancetype)
 		return `Sized by instance type ${vm.instancetype}; change it in Edit settings`;
+	const switching = staged?.edit?.sizing === 'instancetype' || !!staged?.edit?.instancetype;
+	if (field !== 'power' && switching)
+		return `A staged switch to instance type ${staged?.edit?.instancetype ?? ''} owns CPU and memory; change it in Edit settings`;
 	return '';
 }

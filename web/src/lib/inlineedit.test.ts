@@ -48,5 +48,8 @@ describe('inlineBlock', () => {
 		);
 		expect(inlineBlock(vm({ instancetype: 'u1.medium' }), 'cpuCores', null)).toMatch(/u1.medium/);
 		expect(inlineBlock(vm({ instancetype: 'u1.medium' }), 'power', null)).toBe('');
+		const switching = staged({ edit: { sizing: 'instancetype', instancetype: 'u1.large' } });
+		expect(inlineBlock(vm(), 'cpuCores', switching)).toMatch(/u1.large/);
+		expect(inlineBlock(vm(), 'power', switching)).toBe('');
 	});
 });
