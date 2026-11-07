@@ -3,8 +3,10 @@ package argo
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -33,6 +35,7 @@ func TestSnapshotDriftNilUntilSynced(t *testing.T) {
 		t.Fatal("Drift() must be nil before the initial LIST has landed (else every VM flashes NotTracked)")
 	}
 	_ = s.store().Replace([]any{app("argocd", "managed", []any{vmResource("prod", "vm-a", "Synced", "Healthy")})}, "1")
+	settle(s)
 
 	d := s.Drift()
 	if d == nil {
@@ -103,6 +106,68 @@ func TestSnapshotRefreshForRepoNoopUntilSynced(t *testing.T) {
 	}
 }
 
+// settle runs the derive a pending store move asks for, as the deriver would.
+func settle(s *Snapshot) {
+	select {
+	case <-s.dirty:
+		s.derive()
+	default:
+	}
+}
+
+// A derive scans every Application, and a sync wave or a relist writes many in a
+// burst: moves that land while one derive runs must share the next derive, not
+// queue one each.
+func TestDeriveCoalescesBursts(t *testing.T) {
+	bus := eventbus.New()
+	s := NewSnapshot(&Client{}, bus)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.deriveLoop(ctx)
+	st := s.store()
+	var list []any
+	for i := range 200 {
+		list = append(list, benchApp(i))
+	}
+	_ = st.Replace(list, "1")
+	if err := s.WaitForSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Each write moves content (a distinct apply error), so every derive publishes.
+	failing := func(n int) *unstructured.Unstructured {
+		a := benchApp(0)
+		status := a.Object["status"].(map[string]any)
+		status["resources"].([]any)[0] = vmResource("ns-0", "vm-0", "OutOfSync", "Healthy")
+		results := status["operationState"].(map[string]any)["syncResult"].(map[string]any)["resources"].([]any)
+		results[0] = map[string]any{
+			"group": "kubevirt.io", "kind": "VirtualMachine", "namespace": "ns-0", "name": "vm-0",
+			"status": "SyncFailed", "message": fmt.Sprintf("boom-%d", n),
+		}
+		return a
+	}
+	const writes = 500
+	burst := make([]*unstructured.Unstructured, writes)
+	for i := range burst {
+		burst[i] = failing(i)
+	}
+	before := bus.Version(eventbus.DriftChanged)
+	for _, a := range burst {
+		_ = st.Update(a)
+	}
+	last := fmt.Sprintf("boom-%d", writes-1)
+	deadline := time.Now().Add(10 * time.Second)
+	for s.Drift()["ns-0/vm-0"].Message != last {
+		if time.Now().After(deadline) {
+			t.Fatal("the last write never reached the view")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if derives := bus.Version(eventbus.DriftChanged) - before; derives > writes/10 {
+		t.Fatalf("%d writes in a burst cost %d derives, want them coalesced", writes, derives)
+	}
+}
+
 // Argo rewrites every Application on each reconcile; only a write that moves
 // what the view holds may publish DriftChanged, or every frame rebuilds every
 // few seconds to identical bytes.
@@ -112,6 +177,7 @@ func TestDriftPublishesOnlyOnContentChange(t *testing.T) {
 	st := s.store()
 	a := app("argocd", "managed", []any{vmResource("prod", "vm-a", "Synced", "Healthy")})
 	_ = st.Replace([]any{a}, "1")
+	settle(s)
 	v := bus.Version(eventbus.DriftChanged)
 	if v == 0 {
 		t.Fatal("the initial LIST must publish")
@@ -121,6 +187,7 @@ func TestDriftPublishesOnlyOnContentChange(t *testing.T) {
 	tick := a.DeepCopy()
 	_ = unstructured.SetNestedField(tick.Object, "2026-11-07T10:00:00Z", "status", "reconciledAt")
 	_ = st.Update(tick)
+	settle(s)
 	if bus.Version(eventbus.DriftChanged) != v {
 		t.Fatal("a reconcile that moved no drift published DriftChanged")
 	}
@@ -129,6 +196,7 @@ func TestDriftPublishesOnlyOnContentChange(t *testing.T) {
 	}
 
 	_ = st.Update(app("argocd", "managed", []any{vmResource("prod", "vm-a", "OutOfSync", "Healthy")}))
+	settle(s)
 	if bus.Version(eventbus.DriftChanged) == v {
 		t.Fatal("a drift move did not publish")
 	}
@@ -149,6 +217,7 @@ func TestObjectDriftGen(t *testing.T) {
 		udnResource("prod", "db-net", "Synced", ""),
 	})
 	_ = st.Replace([]any{a}, "1")
+	settle(s)
 
 	gen := s.ObjectDriftGen()
 	if gen == 0 {
@@ -157,6 +226,7 @@ func TestObjectDriftGen(t *testing.T) {
 
 	// Store churn, same content.
 	_ = st.Update(a.DeepCopy())
+	settle(s)
 	if got := s.ObjectDriftGen(); got != gen {
 		t.Errorf("gen bumped on contentless churn: %d -> %d", gen, got)
 	}
@@ -166,6 +236,7 @@ func TestObjectDriftGen(t *testing.T) {
 		vmResource("prod", "vm-a", "OutOfSync", "Degraded"),
 		udnResource("prod", "db-net", "Synced", ""),
 	}))
+	settle(s)
 	if got := s.ObjectDriftGen(); got != gen {
 		t.Errorf("gen bumped on a VM-only drift change: %d -> %d", gen, got)
 	}
@@ -175,6 +246,7 @@ func TestObjectDriftGen(t *testing.T) {
 		vmResource("prod", "vm-a", "OutOfSync", "Degraded"),
 		udnResource("prod", "db-net", "OutOfSync", "Progressing"),
 	}))
+	settle(s)
 	if got := s.ObjectDriftGen(); got != gen+1 {
 		t.Errorf("gen did not bump on a segment drift change: %d -> %d", gen, got)
 	}

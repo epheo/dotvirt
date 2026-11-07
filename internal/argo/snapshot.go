@@ -24,9 +24,9 @@ import (
 
 // Snapshot is the SA-maintained, watch-fed in-memory view of every ArgoCD
 // Application - the drift plane's equivalent of clusterstate.State. A single
-// reflector keeps the store current and derives the drift view on every store
-// move; reads are lock-free (an atomic view load, or a store scan), never a
-// cluster LIST, so drift is never staler than the watch delivers.
+// reflector keeps the store current and a deriver goroutine keeps the drift view
+// current behind it; reads are lock-free (an atomic view load, or a store scan),
+// never a cluster LIST, so drift is never staler than the watch delivers.
 type Snapshot struct {
 	sa      *Client
 	apps    cache.Indexer
@@ -34,7 +34,11 @@ type Snapshot struct {
 	healthy atomic.Bool // false while the Applications watch errors (ArgoCD unreachable)
 	bus     *eventbus.Bus
 
-	// view is derived once per store move and shared by every identity's frame.
+	// dirty holds one pending store move. A derive scans every Application, and
+	// Argo writes each one per reconcile, so every move that lands while a derive
+	// runs is covered by the single derive after it.
+	dirty chan struct{}
+	// view is the latest derivation, shared by every identity's frame.
 	view atomic.Pointer[driftView]
 }
 
@@ -54,27 +58,48 @@ type driftView struct {
 // NewSnapshot builds the Application snapshot over the SA argo client. bus may be
 // nil (signalling disabled, e.g. in tests).
 func NewSnapshot(sa *Client, bus *eventbus.Bus) *Snapshot {
-	return &Snapshot{sa: sa, apps: reflect.NewIndexer(), bus: bus}
+	return &Snapshot{sa: sa, apps: reflect.NewIndexer(), bus: bus, dirty: make(chan struct{}, 1)}
 }
 
-// Run starts the Applications reflector; it owns its own relist/backoff and stops
-// when ctx is cancelled. Returns immediately - call WaitForSync to block until the
-// initial LIST has populated the snapshot.
+// Run starts the Applications reflector and the deriver; both stop when ctx is
+// cancelled, and the reflector owns its own relist/backoff. Returns immediately -
+// call WaitForSync to block until the initial LIST has populated the snapshot.
 func (s *Snapshot) Run(ctx context.Context) {
+	go s.deriveLoop(ctx)
 	reflect.Run(ctx, reflect.TrackHealth(s.sa.applicationsListWatch(), &s.healthy, s.publish), s.store())
 }
 
-// store is the reflector's sink: every mutation re-derives the view. derive
+// store is the reflector's sink: every mutation marks the view dirty. derive
 // marks synced, not the store, so a synced snapshot always has a view to read.
 func (s *Snapshot) store() cache.Store {
-	return reflect.NewStore(s.apps, s.derive, nil)
+	return reflect.NewStore(s.apps, s.markDirty, nil)
+}
+
+// markDirty runs after the store write, so the derive that consumes it lists
+// that write.
+func (s *Snapshot) markDirty() {
+	select {
+	case s.dirty <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Snapshot) deriveLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.dirty:
+			s.derive()
+		}
+	}
 }
 
 // derive rebuilds the view from the store and publishes DriftChanged only when
 // its content moved: Argo rewrites every Application on each reconcile
 // (status.reconciledAt), and publishing those rebuilt every connected frame to
 // find identical bytes. The scan is sorted so two apps claiming one repo or one
-// resource resolve the same way every time and never flap. Runs on the reflector
+// resource resolve the same way every time and never flap. Runs on the deriver
 // goroutine only, so prev cannot move underneath it.
 func (s *Snapshot) derive() {
 	objs := reflect.List(s.apps)
@@ -98,8 +123,8 @@ func (s *Snapshot) derive() {
 }
 
 // current is the drift view, nil until the initial LIST has landed: the reflector
-// always relists before it applies any other event, so the first derive is that
-// LIST's.
+// always relists before it applies any other event, so the first derive includes
+// that LIST.
 func (s *Snapshot) current() *driftView { return s.view.Load() }
 
 func (s *Snapshot) publish() { s.bus.Publish(eventbus.DriftChanged) }
