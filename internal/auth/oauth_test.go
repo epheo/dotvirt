@@ -268,7 +268,7 @@ func TestDiscoverCachesFailureWithoutHoldingTheLock(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := o.discover(context.Background())
+		_, err := o.discover(context.Background(), false)
 		done <- err
 	}()
 	for hits.Load() == 0 {
@@ -284,17 +284,64 @@ func TestDiscoverCachesFailureWithoutHoldingTheLock(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("discovery held the lock across its network call")
 	}
-	if _, err := o.discover(context.Background()); !errors.Is(err, errDiscoveryPending) {
+	if _, err := o.discover(context.Background(), false); !errors.Is(err, errDiscoveryPending) {
 		t.Fatalf("concurrent discover = %v, want errDiscoveryPending without a second dial", err)
 	}
 	close(release)
 	if err := <-done; err == nil {
 		t.Fatal("a 404 well-known document must fail discovery")
 	}
-	if _, err := o.discover(context.Background()); err == nil || errors.Is(err, errDiscoveryPending) {
+	if _, err := o.discover(context.Background(), false); err == nil || errors.Is(err, errDiscoveryPending) {
 		t.Fatalf("after the failure: %v, want the cached failure", err)
 	}
 	if n := hits.Load(); n != 1 {
 		t.Fatalf("discovery dials = %d, want 1 per window", n)
+	}
+}
+
+// TestLoginWaitsOnInFlightDiscovery pins the login side of the shared
+// discovery: a sign-in arriving while the first discovery runs waits for its
+// outcome and redirects, instead of failing with "in progress".
+func TestLoginWaitsOnInFlightDiscovery(t *testing.T) {
+	var hits atomic.Int32
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"authorization_endpoint":"https://oauth.example/oauth/authorize","token_endpoint":"https://oauth.example/oauth/token"}`))
+	}))
+	defer srv.Close()
+	kube, err := kubernetes.NewForConfig(&rest.Config{Host: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := fakeAuth(nil)
+	o := &OAuth{saKube: kube, client: srv.Client(), auth: a, cfg: OAuthConfig{ClientID: "dotvirt", RedirectURL: "https://dotvirt.example/api/auth/callback"}}
+
+	first := make(chan error, 1)
+	go func() {
+		_, err := o.discover(context.Background(), false)
+		first <- err
+	}()
+	for hits.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	login := make(chan int, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		o.LoginRedirect(rec, httptest.NewRequest(http.MethodGet, "/api/auth/openshift", nil))
+		login <- rec.Code
+	}()
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	if err := <-first; err != nil {
+		t.Fatalf("discovery: %v", err)
+	}
+	if code := <-login; code != http.StatusFound {
+		t.Fatalf("login during discovery = %d, want 302 once it lands", code)
+	}
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("discovery dials = %d, want 1", n)
 	}
 }

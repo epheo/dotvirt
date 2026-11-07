@@ -56,10 +56,11 @@ type OAuth struct {
 	// routes that probe are reachable before authentication.
 	mu sync.Mutex
 	// Discovery cache: endpoints stick once found; a failure is answered from
-	// metaErr until probeTTL passes.
-	meta    *oauthMeta
-	metaErr error
-	metaAt  time.Time
+	// metaErr until probeTTL passes. metaDone is open while a discovery runs.
+	meta     *oauthMeta
+	metaErr  error
+	metaAt   time.Time
+	metaDone chan struct{}
 	// Probe cache for ClientRegistered: a definitive yes sticks, any other
 	// outcome re-probes after probeTTL.
 	registered    bool
@@ -75,8 +76,8 @@ const probeTTL = 10 * time.Second
 // probeTimeout bounds every outbound call the flow makes.
 const probeTimeout = 15 * time.Second
 
-// errDiscoveryPending answers a caller that arrives while another runs the
-// first discovery.
+// errDiscoveryPending answers a caller that will not wait while another runs
+// the first discovery.
 var errDiscoveryPending = errors.New("oauth discovery: in progress")
 
 type oauthMeta struct {
@@ -106,35 +107,50 @@ func NewOAuth(cfg OAuthConfig, saKube kubernetes.Interface, auth *Authenticator)
 
 // discover returns the OAuth endpoints from the API server's well-known
 // document: fetched once, then cached for good; a failure answers callers for
-// probeTTL. Reached through the SA client so TLS + auth to the API server need
-// no extra wiring.
-func (o *OAuth) discover(ctx context.Context) (*oauthMeta, error) {
+// probeTTL. One discovery runs at a time: a caller arriving meanwhile waits for
+// its outcome when wait is set (a login needs the endpoints; the fetch is
+// bounded by probeTimeout), else gets errDiscoveryPending. Reached through the
+// SA client so TLS + auth to the API server need no extra wiring.
+func (o *OAuth) discover(ctx context.Context, wait bool) (*oauthMeta, error) {
 	o.mu.Lock()
-	if o.meta != nil || time.Since(o.metaAt) < probeTTL {
-		m, err := o.meta, o.metaErr
+	switch {
+	case o.meta != nil:
+		m := o.meta
 		o.mu.Unlock()
-		if m == nil && err == nil {
-			err = errDiscoveryPending
+		return m, nil
+	case o.metaDone != nil:
+		done := o.metaDone
+		o.mu.Unlock()
+		if !wait {
+			return nil, errDiscoveryPending
 		}
-		return m, err
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		o.mu.Lock()
+		defer o.mu.Unlock()
+		return o.meta, o.metaErr
+	case time.Since(o.metaAt) < probeTTL:
+		err := o.metaErr
+		o.mu.Unlock()
+		return nil, err
 	}
-	o.metaAt = time.Now()
+	done := make(chan struct{})
+	o.metaDone = done
 	o.mu.Unlock()
 
 	// Detached from the caller: a client hanging up must not stamp a failure.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), probeTimeout)
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), probeTimeout)
 	defer cancel()
-	m, err := o.fetchMeta(ctx)
+	m, err := o.fetchMeta(fctx)
 
 	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.metaAt = time.Now()
-	if err != nil {
-		o.metaErr = err
-		return nil, err
-	}
-	o.meta, o.metaErr = m, nil
-	return m, nil
+	o.meta, o.metaErr, o.metaAt, o.metaDone = m, err, time.Now(), nil
+	o.mu.Unlock()
+	close(done)
+	return m, err
 }
 
 func (o *OAuth) fetchMeta(ctx context.Context) (*oauthMeta, error) {
@@ -171,7 +187,7 @@ const stateCookie = "dotvirt_oauth_state"
 // LoginRedirect (GET /api/auth/openshift) sends the browser to the cluster's
 // authorize endpoint with a fresh signed state.
 func (o *OAuth) LoginRedirect(w http.ResponseWriter, r *http.Request) {
-	m, err := o.discover(r.Context())
+	m, err := o.discover(r.Context(), true)
 	if err != nil {
 		http.Error(w, "OpenShift SSO unavailable: "+err.Error(), http.StatusServiceUnavailable)
 		return
@@ -221,7 +237,7 @@ func (o *OAuth) Callback(w http.ResponseWriter, r *http.Request) {
 		failLogin("no code (user denied or oauth error)", errors.New(r.URL.Query().Get("error")))
 		return
 	}
-	m, err := o.discover(r.Context())
+	m, err := o.discover(r.Context(), true)
 	if err != nil {
 		failLogin("discovery", err)
 		return
@@ -298,7 +314,7 @@ func (o *OAuth) ClientRegistered(ctx context.Context) bool {
 // probe runs ClientRegistered's two checks. definitive is false when
 // registered is only the benefit of the doubt.
 func (o *OAuth) probe(ctx context.Context) (registered, definitive bool) {
-	m, err := o.discover(ctx)
+	m, err := o.discover(ctx, false)
 	if err != nil {
 		return true, false
 	}
