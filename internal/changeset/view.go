@@ -146,7 +146,7 @@ func pruneWarning(refs []model.ObjectRef) string {
 // else maps to nothing.
 func entryRefs(e draft.Entry) []model.ObjectRef {
 	if e.Manifest != "" {
-		return git.DeclaredRefs(e.SourceFile, []byte(e.Manifest))
+		return declaredRefs(e.SourceFile, []byte(e.Manifest))
 	}
 	if e.Resource == "" || e.Resource == draft.ResourceVM {
 		return []model.ObjectRef{{Kind: "VirtualMachine", Namespace: e.Namespace, Name: e.Name}}
