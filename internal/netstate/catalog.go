@@ -190,9 +190,11 @@ func cudnConfig(u *unstructured.Unstructured) netgen.NetworkConfig {
 // nadConfig decodes a NAD's spec.config CNI JSON blob; ok is false when absent
 // or unparsable.
 func nadConfig(u *unstructured.Unstructured) (cfg struct {
-	Topology string `json:"topology"`
-	VLANID   int    `json:"vlanID"`
-	Subnets  string `json:"subnets"`
+	Name                string `json:"name"`
+	Topology            string `json:"topology"`
+	PhysicalNetworkName string `json:"physicalNetworkName"`
+	VLANID              int    `json:"vlanID"`
+	Subnets             string `json:"subnets"`
 }, ok bool) {
 	raw, _, _ := unstructured.NestedString(u.Object, "spec", "config")
 	if raw == "" || json.Unmarshal([]byte(raw), &cfg) != nil {

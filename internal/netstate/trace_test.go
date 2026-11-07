@@ -512,3 +512,46 @@ func TestTraceNetpolSameNamespacePeer(t *testing.T) {
 		t.Fatalf("other-ns web: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 }
+
+// Localnet segments meet on the fabric: different objects mapping one physical
+// network and VLAN are one layer-2 domain, so the trace must surface the
+// bypass; another VLAN on the same physical network is not.
+func TestTraceLocalnetSegmentByPhysnetVLAN(t *testing.T) {
+	s := New(nil, nil)
+	nad := func(ns, name, config string, owner ...any) {
+		meta := map[string]any{"name": name, "namespace": ns}
+		if len(owner) > 0 {
+			meta["ownerReferences"] = owner
+		}
+		add(t, s.nad, map[string]any{
+			"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
+			"metadata": meta, "spec": map[string]any{"config": config},
+		})
+	}
+	nad("team-a", "dc-100", `{"name":"cluster_udn_dc-100","topology":"localnet","physicalNetworkName":"datacenter","vlanID":100}`,
+		map[string]any{"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork", "name": "dc-100", "uid": "x"})
+	nad("team-b", "legacy", `{"name":"datacenter","topology":"localnet","vlanID":100}`)
+	nad("team-b", "other-vlan", `{"name":"other","topology":"localnet","physicalNetworkName":"datacenter","vlanID":200}`)
+
+	src := wl("team-a", "web", nil, nil)
+	src.Nets = []string{"team-a/dc-100"}
+	dst := wl("team-b", "db", nil, nil)
+	dst.Nets = []string{"team-b/legacy"}
+	res := s.Trace(src, &dst, "", "TCP", 5432)
+	var bypass int
+	for _, st := range res.Steps {
+		if st.Stage == "segment" && st.Action == "Bypass" {
+			bypass++
+		}
+	}
+	if bypass != 1 {
+		t.Fatalf("same physnet+VLAN must be one shared segment, got %v", stepKinds(t, res))
+	}
+
+	dst.Nets = []string{"team-b/other-vlan"}
+	for _, st := range s.Trace(src, &dst, "", "TCP", 5432).Steps {
+		if st.Stage == "segment" {
+			t.Fatalf("another VLAN is another domain, got %+v", st)
+		}
+	}
+}
