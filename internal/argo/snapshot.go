@@ -64,9 +64,10 @@ func (s *Snapshot) Run(ctx context.Context) {
 	reflect.Run(ctx, reflect.TrackHealth(s.sa.applicationsListWatch(), &s.healthy, s.publish), s.store())
 }
 
-// store is the reflector's sink: every mutation re-derives the view.
+// store is the reflector's sink: every mutation re-derives the view. derive
+// marks synced, not the store, so a synced snapshot always has a view to read.
 func (s *Snapshot) store() cache.Store {
-	return reflect.NewStore(s.apps, s.derive, s.synced.Mark)
+	return reflect.NewStore(s.apps, s.derive, nil)
 }
 
 // derive rebuilds the view from the store and publishes DriftChanged only when
@@ -92,17 +93,14 @@ func (s *Snapshot) derive() {
 	}
 	next.vms = vmView(next.resources)
 	s.view.Store(next)
+	s.synced.Mark()
 	s.publish()
 }
 
-// current is the drift view, nil until the initial LIST has landed and been
-// derived (the store marks synced just before it derives).
-func (s *Snapshot) current() *driftView {
-	if !s.synced.Done() {
-		return nil
-	}
-	return s.view.Load()
-}
+// current is the drift view, nil until the initial LIST has landed: the reflector
+// always relists before it applies any other event, so the first derive is that
+// LIST's.
+func (s *Snapshot) current() *driftView { return s.view.Load() }
 
 func (s *Snapshot) publish() { s.bus.Publish(eventbus.DriftChanged) }
 

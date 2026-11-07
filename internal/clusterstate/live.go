@@ -40,9 +40,10 @@ func newLiveIndex(vms, vmis cache.Indexer, onChange func()) *liveIndex {
 func (x *liveIndex) load() LiveView { return *x.view.Load() }
 
 // store wraps idx (the VM or the VMI indexer) as a reflector sink that keeps
-// the view current.
+// the view current. onSynced (optional, idempotent) fires after each relist has
+// reached the view, so a synced store never reads as empty.
 func (x *liveIndex) store(idx cache.Indexer, onSynced func()) cache.Store {
-	return liveStore{Indexer: reflect.NewStore(idx, func() {}, onSynced), live: x}
+	return liveStore{Indexer: reflect.NewStore(idx, func() {}, nil), live: x, onSynced: onSynced}
 }
 
 // derive is key's view entry recomputed from both indexers. Recomputing from both,
@@ -138,7 +139,8 @@ func (x *liveIndex) rebuild() {
 // liveStore is the reflector sink of the VM or the VMI indexer.
 type liveStore struct {
 	cache.Indexer
-	live *liveIndex
+	live     *liveIndex
+	onSynced func()
 }
 
 func (c liveStore) Add(obj any) error {
@@ -170,5 +172,8 @@ func (c liveStore) Replace(list []any, rv string) error {
 		return err
 	}
 	c.live.rebuild()
+	if c.onSynced != nil {
+		c.onSynced()
+	}
 	return nil
 }
