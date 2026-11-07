@@ -26,7 +26,7 @@ func reparse(t *testing.T, content []byte, ns, name string) model.VM {
 }
 
 func TestApplyEditAddPlacementGroup(t *testing.T) {
-	out, err := ApplyEdit([]byte(drsVM), "alpha", "web", VMEdit{
+	out, err := ApplyEdit([]byte(drsVM), "alpha", "alpha", "web", VMEdit{
 		AddGroups: []model.PlacementGroup{{Name: "web-tier", Mode: "together", Strict: true}},
 	})
 	if err != nil {
@@ -54,7 +54,7 @@ func TestApplyEditAddPlacementGroup(t *testing.T) {
 }
 
 func TestApplyEditGroupsPreferredAndApart(t *testing.T) {
-	out, err := ApplyEdit([]byte(drsVM), "alpha", "web", VMEdit{
+	out, err := ApplyEdit([]byte(drsVM), "alpha", "alpha", "web", VMEdit{
 		AddGroups: []model.PlacementGroup{
 			{Name: "web-tier", Mode: "together"},
 			{Name: "db", Mode: "apart", Strict: true},
@@ -89,13 +89,13 @@ func TestApplyEditGroupsPreferredAndApart(t *testing.T) {
 }
 
 func TestApplyEditRemoveGroupClearsAffinity(t *testing.T) {
-	withGroup, err := ApplyEdit([]byte(drsVM), "alpha", "web", VMEdit{
+	withGroup, err := ApplyEdit([]byte(drsVM), "alpha", "alpha", "web", VMEdit{
 		AddGroups: []model.PlacementGroup{{Name: "web-tier", Mode: "together", Strict: true}},
 	})
 	if err != nil {
 		t.Fatalf("ApplyEdit add: %v", err)
 	}
-	out, err := ApplyEdit(withGroup, "alpha", "web", VMEdit{RemoveGroups: []string{"web-tier"}})
+	out, err := ApplyEdit(withGroup, "alpha", "alpha", "web", VMEdit{RemoveGroups: []string{"web-tier"}})
 	if err != nil {
 		t.Fatalf("ApplyEdit remove: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestApplyEditRemoveGroupClearsAffinity(t *testing.T) {
 func TestApplyEditPinReplaceAndClear(t *testing.T) {
 	pin := func(hosts ...string) VMEdit { return VMEdit{Pin: &hosts} }
 
-	out, err := ApplyEdit([]byte(drsVM), "alpha", "web", pin("w1", "w2"))
+	out, err := ApplyEdit([]byte(drsVM), "alpha", "alpha", "web", pin("w1", "w2"))
 	if err != nil {
 		t.Fatalf("ApplyEdit pin: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestApplyEditPinReplaceAndClear(t *testing.T) {
 		t.Fatalf("Scheduling = %+v, want pin w1,w2", vm.Scheduling)
 	}
 
-	out, err = ApplyEdit(out, "alpha", "web", pin("w3"))
+	out, err = ApplyEdit(out, "alpha", "alpha", "web", pin("w3"))
 	if err != nil {
 		t.Fatalf("ApplyEdit repin: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestApplyEditPinReplaceAndClear(t *testing.T) {
 		t.Fatalf("repin must replace the host list:\n%s", got)
 	}
 
-	out, err = ApplyEdit(out, "alpha", "web", pin())
+	out, err = ApplyEdit(out, "alpha", "alpha", "web", pin())
 	if err != nil {
 		t.Fatalf("ApplyEdit unpin: %v", err)
 	}
@@ -162,7 +162,7 @@ spec:
 
 func TestApplyEditPinClearsHostnameNodeSelector(t *testing.T) {
 	hosts := []string{"w2"}
-	out, err := ApplyEdit([]byte(nodeSelectorVM), "alpha", "pinned", VMEdit{Pin: &hosts})
+	out, err := ApplyEdit([]byte(nodeSelectorVM), "alpha", "alpha", "pinned", VMEdit{Pin: &hosts})
 	if err != nil {
 		t.Fatalf("ApplyEdit: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestParseVMsNodeSelectorPin(t *testing.T) {
 // Groups must survive an untouched nodeSelector pin: the pin stays in
 // nodeSelector (not duplicated into the affinity block) and reads back.
 func TestApplyEditGroupKeepsNodeSelectorPin(t *testing.T) {
-	out, err := ApplyEdit([]byte(nodeSelectorVM), "alpha", "pinned", VMEdit{
+	out, err := ApplyEdit([]byte(nodeSelectorVM), "alpha", "alpha", "pinned", VMEdit{
 		AddGroups: []model.PlacementGroup{{Name: "g1", Mode: "apart", Strict: true}},
 	})
 	if err != nil {
@@ -234,7 +234,7 @@ spec:
 `
 
 func TestApplyEditSchedulingRefusesCustomAffinity(t *testing.T) {
-	_, err := ApplyEdit([]byte(customAffinityVM), "alpha", "tuned", VMEdit{
+	_, err := ApplyEdit([]byte(customAffinityVM), "alpha", "alpha", "tuned", VMEdit{
 		AddGroups: []model.PlacementGroup{{Name: "g1", Mode: "together"}},
 	})
 	if !errors.Is(err, model.ErrConflict) {
@@ -243,7 +243,7 @@ func TestApplyEditSchedulingRefusesCustomAffinity(t *testing.T) {
 
 	// A non-scheduling edit must still work and leave the affinity untouched.
 	power := "Off"
-	out, err := ApplyEdit([]byte(customAffinityVM), "alpha", "tuned", VMEdit{Power: &power})
+	out, err := ApplyEdit([]byte(customAffinityVM), "alpha", "alpha", "tuned", VMEdit{Power: &power})
 	if err != nil {
 		t.Fatalf("ApplyEdit power: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestApplyEditSchedulingValidation(t *testing.T) {
 		{AddGroups: []model.PlacementGroup{{Name: "ok", Mode: "sideways"}}},
 		{Pin: &[]string{" "}},
 	} {
-		if _, err := ApplyEdit([]byte(drsVM), "alpha", "web", edit); !errors.Is(err, model.ErrInvalid) {
+		if _, err := ApplyEdit([]byte(drsVM), "alpha", "alpha", "web", edit); !errors.Is(err, model.ErrInvalid) {
 			t.Errorf("edit %+v: err = %v, want ErrInvalid", edit, err)
 		}
 	}
@@ -273,7 +273,7 @@ func TestApplyEditSchedulingValidation(t *testing.T) {
 // metadata block carrying both the label and the annotation.
 func TestApplyEditSchedulingCreatesTemplateMetadataOnce(t *testing.T) {
 	exclude := true
-	out, err := ApplyEdit([]byte(realisticVM), "vm-health-gitops", "vm-health", VMEdit{
+	out, err := ApplyEdit([]byte(realisticVM), "vm-health-gitops", "vm-health-gitops", "vm-health", VMEdit{
 		AddGroups:  []model.PlacementGroup{{Name: "g1", Mode: "together", Strict: true}},
 		DRSExclude: &exclude,
 	})

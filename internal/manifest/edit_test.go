@@ -35,7 +35,7 @@ spec:
 `
 
 func TestApplyEditMinimalMemory(t *testing.T) {
-	out, err := ApplyEdit([]byte(realisticVM), "vm-health-gitops", "vm-health", VMEdit{Memory: ptr("2Gi")})
+	out, err := ApplyEdit([]byte(realisticVM), "vm-health-gitops", "vm-health-gitops", "vm-health", VMEdit{Memory: ptr("2Gi")})
 	if err != nil {
 		t.Fatalf("ApplyEdit: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestApplyEditMinimalMemory(t *testing.T) {
 }
 
 func TestApplyEditPowerAndCPU(t *testing.T) {
-	out, err := ApplyEdit([]byte(realisticVM), "vm-health-gitops", "vm-health",
+	out, err := ApplyEdit([]byte(realisticVM), "vm-health-gitops", "vm-health-gitops", "vm-health",
 		VMEdit{Power: ptr("Off"), CPUCores: ptr(4)})
 	if err != nil {
 		t.Fatalf("ApplyEdit: %v", err)
@@ -90,7 +90,7 @@ spec:
           requests:
             memory: 512Mi
 `
-	out, err := ApplyEdit([]byte(legacy), "any", "legacy", VMEdit{Power: ptr("Off"), Memory: ptr("1Gi")})
+	out, err := ApplyEdit([]byte(legacy), "any", "any", "legacy", VMEdit{Power: ptr("Off"), Memory: ptr("1Gi")})
 	if err != nil {
 		t.Fatalf("ApplyEdit: %v", err)
 	}
@@ -111,7 +111,7 @@ spec:
 }
 
 func TestApplyEditNotFound(t *testing.T) {
-	_, err := ApplyEdit([]byte(realisticVM), "wrong", "nope", VMEdit{Memory: ptr("2Gi")})
+	_, err := ApplyEdit([]byte(realisticVM), "wrong", "wrong", "nope", VMEdit{Memory: ptr("2Gi")})
 	if err == nil {
 		t.Fatal("expected error for missing VM")
 	}
@@ -125,12 +125,12 @@ func TestApplyEditRefusesNonLFLineBreaks(t *testing.T) {
 	add := VMEdit{AddDisks: []model.DiskAdd{{Name: "data", Size: "1Gi"}}}
 	for _, sep := range []string{"\r", "\u0085", "\u2028", "\u2029"} {
 		in := strings.ReplaceAll(realisticVM, "\n", sep)
-		if _, err := ApplyEdit([]byte(in), "vm-health-gitops", "vm-health", add); err == nil {
+		if _, err := ApplyEdit([]byte(in), "vm-health-gitops", "vm-health-gitops", "vm-health", add); err == nil {
 			t.Errorf("separator %q: expected refusal", sep)
 		}
 	}
 	crlf := strings.ReplaceAll(realisticVM, "\n", "\r\n")
-	out, err := ApplyEdit([]byte(crlf), "vm-health-gitops", "vm-health", add)
+	out, err := ApplyEdit([]byte(crlf), "vm-health-gitops", "vm-health-gitops", "vm-health", add)
 	if err != nil {
 		t.Fatalf("CRLF must stay editable: %v", err)
 	}
@@ -198,7 +198,7 @@ spec:
         memory:
           guest: 1Gi
 `
-	out, err := ApplyEdit([]byte(twoVMs), "alpha", "second", VMEdit{Memory: ptr("4Gi")})
+	out, err := ApplyEdit([]byte(twoVMs), "alpha", "alpha", "second", VMEdit{Memory: ptr("4Gi")})
 	if err != nil {
 		t.Fatalf("ApplyEdit: %v", err)
 	}
@@ -210,7 +210,47 @@ spec:
 	if n := changedLines(twoVMs, got); n != 1 {
 		t.Errorf("expected 1 changed line, got %d:\n%s", n, unifiedish(twoVMs, got))
 	}
-	if _, err := ApplyEdit([]byte(twoVMs), "alpha", "third", VMEdit{Memory: ptr("4Gi")}); err == nil {
+	if _, err := ApplyEdit([]byte(twoVMs), "alpha", "alpha", "third", VMEdit{Memory: ptr("4Gi")}); err == nil {
 		t.Error("a VM no document declares must not be found")
+	}
+}
+
+// A document without metadata.namespace belongs to its file's directory, never
+// to whatever namespace the caller names: an edit of b/x must not land on the
+// a/x such a document declares.
+func TestApplyEditDefaultsNamespaceToOwner(t *testing.T) {
+	const mixed = `apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: x
+spec:
+  template:
+    spec:
+      domain:
+        memory:
+          guest: 1Gi
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: x
+  namespace: b
+spec:
+  template:
+    spec:
+      domain:
+        memory:
+          guest: 1Gi
+`
+	out, err := ApplyEdit([]byte(mixed), "a", "b", "x", VMEdit{Memory: ptr("4Gi")})
+	if err != nil {
+		t.Fatalf("ApplyEdit: %v", err)
+	}
+	first, second, _ := strings.Cut(string(out), "---")
+	if strings.Contains(first, "4Gi") || !strings.Contains(second, "guest: 4Gi") {
+		t.Fatalf("edit of b/x must land on the document in b:\n%s", out)
+	}
+	if _, err := ApplyEdit([]byte(mixed), "a", "c", "x", VMEdit{Memory: ptr("4Gi")}); err == nil {
+		t.Error("c/x is declared nowhere; the namespace-less document is a/x")
 	}
 }

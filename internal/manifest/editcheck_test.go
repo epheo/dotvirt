@@ -33,7 +33,7 @@ func TestEditLabelValuesStayStrings(t *testing.T) {
 	set := map[string]string{"env": "true", "ver": "1.0", "flag": "yes", "hex": "0x10", "app": "web"}
 	noLabels := strings.Replace(realisticVM, "  labels:\n    app: vm-health\n", "", 1)
 	for name, in := range map[string]string{"existing map": realisticVM, "new map": noLabels} {
-		out, err := ApplyEdit([]byte(in), "vm-health-gitops", "vm-health", VMEdit{SetLabels: set})
+		out, err := ApplyEdit([]byte(in), "vm-health-gitops", "vm-health-gitops", "vm-health", VMEdit{SetLabels: set})
 		if err != nil {
 			t.Fatalf("%s: ApplyEdit: %v", name, err)
 		}
@@ -56,7 +56,7 @@ func TestEditRefusesNewlineInjection(t *testing.T) {
 		"memory":      {Memory: ptr("1Gi\n---\nkind: RoleBinding")},
 		"preference":  {Preference: ptr(inject)},
 	} {
-		out, err := ApplyEdit([]byte(realisticVM), "vm-health-gitops", "vm-health", edit)
+		out, err := ApplyEdit([]byte(realisticVM), "vm-health-gitops", "vm-health-gitops", "vm-health", edit)
 		if !errors.Is(err, model.ErrInvalid) {
 			t.Errorf("%s: want ErrInvalid, got %v\n%s", name, err, out)
 		}
@@ -117,7 +117,7 @@ func TestEditRefusesInvalidValues(t *testing.T) {
 		"group mode":         {AddGroups: []model.PlacementGroup{{Name: "web", Mode: "near"}}},
 		"line break in host": {Pin: &[]string{"n1\n- n2"}},
 	} {
-		if _, err := ApplyEdit([]byte(realisticVM), "vm-health-gitops", "vm-health", edit); !errors.Is(err, model.ErrInvalid) {
+		if _, err := ApplyEdit([]byte(realisticVM), "vm-health-gitops", "vm-health-gitops", "vm-health", edit); !errors.Is(err, model.ErrInvalid) {
 			t.Errorf("%s: want ErrInvalid, got %v", name, err)
 		}
 	}
@@ -207,7 +207,7 @@ spec:
 		{"migration of a non-DataVolume disk", noInterfaces, "rootdisk", VMEdit{MigrateVolumes: []model.VolumeMigration{{Name: "rootdisk", StorageClass: "fast"}}}},
 	}
 	for _, c := range cases {
-		out, err := ApplyEdit([]byte(c.in), "alpha", "web", c.edit)
+		out, err := ApplyEdit([]byte(c.in), "alpha", "alpha", "web", c.edit)
 		if !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), c.msg) {
 			t.Errorf("%s: want ErrConflict naming %q, got %v\n%s", c.name, c.msg, err, out)
 		}
@@ -217,7 +217,7 @@ spec:
 // Deleting a key of a flow mapping that does not hold it is not a splice, so
 // the flow guard leaves such edits alone.
 func TestEditLeavesUntouchedFlowAlone(t *testing.T) {
-	out, err := ApplyEdit([]byte(vmFlowCPU), "alpha", "web", VMEdit{Memory: ptr("2Gi"), SetLabels: map[string]string{"env": "prod"}})
+	out, err := ApplyEdit([]byte(vmFlowCPU), "alpha", "alpha", "web", VMEdit{Memory: ptr("2Gi"), SetLabels: map[string]string{"env": "prod"}})
 	if err != nil {
 		t.Fatalf("ApplyEdit: %v", err)
 	}

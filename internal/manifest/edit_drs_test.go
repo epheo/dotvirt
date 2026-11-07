@@ -31,7 +31,7 @@ spec:
 `
 
 func TestApplyEditDRSExcludeAddsAnnotation(t *testing.T) {
-	out, err := ApplyEdit([]byte(drsVM), "alpha", "web", VMEdit{DRSExclude: ptr(true)})
+	out, err := ApplyEdit([]byte(drsVM), "alpha", "alpha", "web", VMEdit{DRSExclude: ptr(true)})
 	if err != nil {
 		t.Fatalf("ApplyEdit: %v", err)
 	}
@@ -62,11 +62,11 @@ func TestApplyEditDRSExcludeAddsAnnotation(t *testing.T) {
 }
 
 func TestApplyEditDRSExcludeRemovesAnnotation(t *testing.T) {
-	withAnnotation, err := ApplyEdit([]byte(drsVM), "alpha", "web", VMEdit{DRSExclude: ptr(true)})
+	withAnnotation, err := ApplyEdit([]byte(drsVM), "alpha", "alpha", "web", VMEdit{DRSExclude: ptr(true)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := ApplyEdit(withAnnotation, "alpha", "web", VMEdit{DRSExclude: ptr(false)})
+	out, err := ApplyEdit(withAnnotation, "alpha", "alpha", "web", VMEdit{DRSExclude: ptr(false)})
 	if err != nil {
 		t.Fatalf("ApplyEdit remove: %v", err)
 	}
@@ -111,14 +111,14 @@ spec:
         cpu:
           cores: 1
 `
-	removed, err := ApplyEdit([]byte(bare), "alpha", "web", VMEdit{DRSExclude: ptr(false)})
+	removed, err := ApplyEdit([]byte(bare), "alpha", "alpha", "web", VMEdit{DRSExclude: ptr(false)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if excluded(t, removed) {
 		t.Fatalf("annotation not removed:\n%s", removed)
 	}
-	readded, err := ApplyEdit(removed, "alpha", "web", VMEdit{DRSExclude: ptr(true)})
+	readded, err := ApplyEdit(removed, "alpha", "alpha", "web", VMEdit{DRSExclude: ptr(true)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestApplyEditDRSExcludeDegenerateShapes(t *testing.T) {
 	} {
 		manifest := "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\nspec:\n  runStrategy: Always\n" +
 			tmpl + "    spec:\n      domain:\n        cpu:\n          cores: 1\n"
-		out, err := ApplyEdit([]byte(manifest), "alpha", "web", VMEdit{DRSExclude: ptr(true)})
+		out, err := ApplyEdit([]byte(manifest), "alpha", "alpha", "web", VMEdit{DRSExclude: ptr(true)})
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -150,7 +150,7 @@ func TestApplyEditDRSExcludeDegenerateShapes(t *testing.T) {
 
 func TestApplyEditDRSExcludeCreatesTemplateMetadata(t *testing.T) {
 	// realisticVM's template has no metadata block at all.
-	out, err := ApplyEdit([]byte(realisticVM), "vm-health-gitops", "vm-health", VMEdit{DRSExclude: ptr(true)})
+	out, err := ApplyEdit([]byte(realisticVM), "vm-health-gitops", "vm-health-gitops", "vm-health", VMEdit{DRSExclude: ptr(true)})
 	if err != nil {
 		t.Fatalf("ApplyEdit: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestApplyEditDRSExcludeCreatesTemplateMetadata(t *testing.T) {
 
 func TestApplyEditEvictionStrategy(t *testing.T) {
 	// Change an existing strategy in place.
-	out, err := ApplyEdit([]byte(drsVM), "alpha", "web", VMEdit{EvictionStrategy: ptr("None")})
+	out, err := ApplyEdit([]byte(drsVM), "alpha", "alpha", "web", VMEdit{EvictionStrategy: ptr("None")})
 	if err != nil {
 		t.Fatalf("ApplyEdit: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestApplyEditEvictionStrategy(t *testing.T) {
 	}
 
 	// Empty string removes the line (cluster default).
-	out, err = ApplyEdit([]byte(drsVM), "alpha", "web", VMEdit{EvictionStrategy: ptr("")})
+	out, err = ApplyEdit([]byte(drsVM), "alpha", "alpha", "web", VMEdit{EvictionStrategy: ptr("")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestApplyEditEvictionStrategy(t *testing.T) {
 	}
 
 	// Insert when absent.
-	out, err = ApplyEdit([]byte(realisticVM), "vm-health-gitops", "vm-health", VMEdit{EvictionStrategy: ptr("LiveMigrate")})
+	out, err = ApplyEdit([]byte(realisticVM), "vm-health-gitops", "vm-health-gitops", "vm-health", VMEdit{EvictionStrategy: ptr("LiveMigrate")})
 	if err != nil {
 		t.Fatal(err)
 	}

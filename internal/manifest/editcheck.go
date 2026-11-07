@@ -80,8 +80,8 @@ func validateEdit(e VMEdit) error {
 // does not expect (a multi-line scalar, a missing list, no template, or the
 // degenerate indentation fuzzing found) would otherwise corrupt the file or
 // apply a different change than the PR description states.
-func verifyEdit(out []byte, namespace, name string, edit VMEdit) error {
-	vms, err := ParseVMs("", out, namespace)
+func verifyEdit(out []byte, defaultNS, namespace, name string, edit VMEdit) error {
+	vms, err := ParseVMs("", out, defaultNS)
 	if err != nil {
 		return fmt.Errorf("%w: edit would corrupt the manifest of %s/%s; edit it in git directly: %v", model.ErrConflict, namespace, name, err)
 	}

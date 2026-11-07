@@ -88,7 +88,7 @@ func volumeDV(t *testing.T, m map[string]any, name string) string {
 }
 
 func TestMigrateVolume(t *testing.T) {
-	out, err := ApplyEdit([]byte(vmWithDataVolumes), "alpha", "web", VMEdit{
+	out, err := ApplyEdit([]byte(vmWithDataVolumes), "alpha", "alpha", "web", VMEdit{
 		MigrateVolumes: []model.VolumeMigration{{Name: "rootdisk", StorageClass: "fast"}},
 	})
 	if err != nil {
@@ -132,7 +132,7 @@ func TestMigrateVolume(t *testing.T) {
 // A disk on the cluster default class has no storageClassName - the edit must
 // insert one. Its source is already blank and must be kept as-is.
 func TestMigrateVolumeInsertsClass(t *testing.T) {
-	out, err := ApplyEdit([]byte(vmWithDataVolumes), "alpha", "web", VMEdit{
+	out, err := ApplyEdit([]byte(vmWithDataVolumes), "alpha", "alpha", "web", VMEdit{
 		MigrateVolumes: []model.VolumeMigration{{Name: "data", StorageClass: "fast"}},
 	})
 	if err != nil {
@@ -158,13 +158,13 @@ func TestMigrateVolumeInsertsClass(t *testing.T) {
 // A second migration of the same disk cycles the -mig-N suffix instead of
 // accreting, and rewrites the existing updateVolumesStrategy in place.
 func TestMigrateVolumeRepeated(t *testing.T) {
-	once, err := ApplyEdit([]byte(vmWithDataVolumes), "alpha", "web", VMEdit{
+	once, err := ApplyEdit([]byte(vmWithDataVolumes), "alpha", "alpha", "web", VMEdit{
 		MigrateVolumes: []model.VolumeMigration{{Name: "rootdisk", StorageClass: "fast"}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := ApplyEdit(once, "alpha", "web", VMEdit{
+	out, err := ApplyEdit(once, "alpha", "alpha", "web", VMEdit{
 		MigrateVolumes: []model.VolumeMigration{{Name: "rootdisk", StorageClass: "standard"}},
 	})
 	if err != nil {
@@ -189,7 +189,7 @@ func TestMigrateVolumeRepeated(t *testing.T) {
 // A volume that isn't DataVolume-backed (or references no template) cannot
 // migrate: the edit is refused rather than proposed as a change it never makes.
 func TestMigrateVolumeNonDataVolume(t *testing.T) {
-	_, err := ApplyEdit([]byte(vmWithDataVolumes), "alpha", "web", VMEdit{
+	_, err := ApplyEdit([]byte(vmWithDataVolumes), "alpha", "alpha", "web", VMEdit{
 		MigrateVolumes: []model.VolumeMigration{{Name: "cloudinit", StorageClass: "fast"}},
 	})
 	if !errors.Is(err, model.ErrConflict) {
@@ -200,7 +200,7 @@ func TestMigrateVolumeNonDataVolume(t *testing.T) {
 // The legacy pvc-spec template form: the class lands under spec.pvc.
 func TestMigrateVolumePVCSpec(t *testing.T) {
 	src := strings.ReplaceAll(vmWithDataVolumes, "      storage:", "      pvc:")
-	out, err := ApplyEdit([]byte(src), "alpha", "web", VMEdit{
+	out, err := ApplyEdit([]byte(src), "alpha", "alpha", "web", VMEdit{
 		MigrateVolumes: []model.VolumeMigration{{Name: "rootdisk", StorageClass: "fast"}},
 	})
 	if err != nil {

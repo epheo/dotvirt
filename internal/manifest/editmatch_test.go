@@ -74,7 +74,7 @@ spec:
 		if len(DiffVMs(from, to)) > 0 && edit.Empty() {
 			t.Fatalf("%s: DiffVMs reports drift but EditToMatch is empty (unadoptable drift)", name)
 		}
-		out, err := ApplyEdit([]byte(base), "alpha", "web", edit)
+		out, err := ApplyEdit([]byte(base), "alpha", "alpha", "web", edit)
 		if err != nil {
 			t.Fatalf("%s: ApplyEdit: %v", name, err)
 		}

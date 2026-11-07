@@ -15,7 +15,9 @@ import (
 type VMEdit = model.VMEdit
 
 // ApplyEdit edits the VirtualMachine named (namespace, name) within a manifest,
-// changing only the targeted fields. It works by splicing new values into the
+// changing only the targeted fields. defaultNS is the namespace a document
+// without metadata.namespace belongs to (the file's directory, see
+// git.DefaultNamespace), as ParseVMs takes it. It works by splicing new values into the
 // original text at the exact lines of the target scalars - never re-serializing
 // the document - so the resulting diff touches only the changed lines and all
 // formatting, comments, and key order are preserved byte-for-byte elsewhere.
@@ -25,11 +27,11 @@ type VMEdit = model.VMEdit
 //
 // Errors are classified: model.ErrInvalid for a value the edit carries,
 // model.ErrConflict for a manifest the editor cannot apply it to.
-func ApplyEdit(content []byte, namespace, name string, edit VMEdit) ([]byte, error) {
+func ApplyEdit(content []byte, defaultNS, namespace, name string, edit VMEdit) ([]byte, error) {
 	if err := validateEdit(edit); err != nil {
 		return nil, err
 	}
-	vm, err := findVM(content, namespace, name)
+	vm, err := findVM(content, defaultNS, namespace, name)
 	if err != nil {
 		return nil, fmt.Errorf("%w: the manifest of %s/%s does not parse; fix it in git: %v", model.ErrConflict, namespace, name, err)
 	}
@@ -69,7 +71,7 @@ func ApplyEdit(content []byte, namespace, name string, edit VMEdit) ([]byte, err
 	}
 
 	out := ed.bytes()
-	if err := verifyEdit(out, namespace, name, edit); err != nil {
+	if err := verifyEdit(out, defaultNS, namespace, name, edit); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -194,11 +196,13 @@ func applyRef(ed *lineEditor, vmRoot *yaml.Node, key, value string) {
 }
 
 // findVM locates the VirtualMachine mapping node for (namespace, name), nil
-// when no document declares it. Documents are decoded one by one: a single
-// Unmarshal yields only the first of a multi-document file. Node lines count
-// from the start of content whichever document they sit in, so the node found
-// addresses the line editor directly.
-func findVM(content []byte, namespace, name string) (*yaml.Node, error) {
+// when no document declares it. A document without metadata.namespace is in
+// defaultNS, never in any namespace: otherwise an edit of b/x could land on
+// the a/x a namespace-less file in a/ declares. Documents are decoded one by
+// one: a single Unmarshal yields only the first of a multi-document file.
+// Node lines count from the start of content whichever document they sit in,
+// so the node found addresses the line editor directly.
+func findVM(content []byte, defaultNS, namespace, name string) (*yaml.Node, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(content))
 	for {
 		var doc yaml.Node
@@ -217,7 +221,11 @@ func findVM(content []byte, namespace, name string) (*yaml.Node, error) {
 		if meta == nil || nodeValue(get(meta, "name")) != name {
 			continue
 		}
-		if ns := nodeValue(get(meta, "namespace")); ns != "" && ns != namespace {
+		ns := nodeValue(get(meta, "namespace"))
+		if ns == "" {
+			ns = defaultNS
+		}
+		if ns != namespace {
 			continue
 		}
 		return m, nil
