@@ -336,6 +336,10 @@ export const api = {
 	tasks: () => get<TaskEntry[]>('/api/tasks'),
 	options: () => get<gen.Options>('/api/options'),
 	storageClasses: () => get<gen.StorageClassInfo[]>('/api/storage/classes'),
+	// Every VM snapshot and disk claim in the caller's managed namespaces: live
+	// reads under the caller's token, fetched when the Storage section opens.
+	storageSnapshots: () => get<gen.Snapshot[]>('/api/storage/snapshots'),
+	storageClaims: () => get<gen.Claim[]>('/api/storage/claims'),
 	networks: () => get<gen.NetworkInventory>('/api/networks'),
 	policies: () => get<gen.PolicyInventory>('/api/policies'),
 	vmPolicy: (namespace: string, name: string) =>
@@ -459,8 +463,13 @@ export const api = {
 
 	// Image upload: create the target DataVolume + mint a token; the browser
 	// then streams the file straight to the proxy (uploadUrl from uploadToken).
-	createUpload: (req: { namespace: string; name: string; size: string; storageClass?: string }) =>
-		post<gen.UploadTarget>('/api/uploads', req),
+	createUpload: (req: {
+		namespace: string;
+		name: string;
+		size: string;
+		storageClass?: string;
+		bootImage?: boolean; // also register it as a boot image (a DataSource over it)
+	}) => post<gen.UploadTarget>('/api/uploads', req),
 	uploadStatus: (namespace: string, name: string) =>
 		get<gen.UploadStatus>(`/api/uploads/${enc(namespace)}/${enc(name)}`),
 	uploadToken: (namespace: string, name: string) =>
