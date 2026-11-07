@@ -1,5 +1,5 @@
 // Package git is dotvirt's git plane: it clones a repo once into memory and
-// reads VM manifests from any branch's tree without checking it out. Reads never
+// reads manifests from any branch's tree without checking it out. Reads never
 // touch the network - a single background fetcher (driven by the git poll, and
 // nudged after dotvirt's own pushes) owns freshness by calling Refresh.
 package git
