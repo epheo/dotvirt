@@ -34,16 +34,40 @@ export type TrayLane =
 
 export const followKey = (project: string, prNumber: number) => `${project}#${prNumber}`;
 
+// How a merge stands on its project: live once Argo runs a revision that holds
+// the merge commit and the app is Synced, refused while a failed operation
+// stands, applying in between, and plain merged when no Argo watches. A later
+// merge on top still holds this one: commits, the project's history newest
+// first, orders the two. Without it only the merge commit itself counts.
+export type MergeState = { kind: 'merged' | 'refused' | 'live' | 'applying'; picked: boolean };
+
+export function mergeState(
+	g: ProjectSync | undefined,
+	hash: string | undefined,
+	commits?: readonly string[],
+): MergeState {
+	if (!g) return { kind: 'merged', picked: false };
+	const picked = !!hash && !!g.revision && holds(g.revision, hash, commits);
+	if (picked && g.sync === 'Synced') return { kind: 'live', picked };
+	if (opStands(g)) return { kind: 'refused', picked };
+	return { kind: 'applying', picked };
+}
+
+function holds(revision: string, hash: string, commits?: readonly string[]): boolean {
+	if (hash.startsWith(revision)) return true;
+	const r = commits?.findIndex((c) => c.startsWith(revision)) ?? -1;
+	return r >= 0 && commits!.indexOf(hash) > r;
+}
+
 // Every change of this user's in flight, one lane each, in pipeline order:
-// staged drafts, PRs in review, merges on their way to the cluster. A merge
-// reads live only once the project's Argo revision is the merge commit and the
-// app is Synced; a standing failed operation reads refused. Without Argo there
-// is nothing to watch, so a merge stays plain "merged".
+// staged drafts, PRs in review, merges on their way to the cluster, each
+// placed by mergeState.
 export function trayLanes(src: {
 	drafts: { project: string; draft: DraftView }[];
 	proposals: Proposal[];
 	followed: Followed[];
 	sync: (project: string) => ProjectSync | undefined;
+	commits?: (project: string) => readonly string[] | undefined;
 }): TrayLane[] {
 	const out: TrayLane[] = [];
 	for (const { project, draft } of src.drafts)
@@ -68,13 +92,10 @@ export function trayLanes(src: {
 		if (!f.mergedAt) continue;
 		const g = src.sync(f.project);
 		const lane = { key, project: f.project, pr: f };
-		if (!g) out.push({ kind: 'merged', ...lane });
-		else if (opStands(g)) out.push({ kind: 'refused', ...lane, error: g.syncError });
-		else {
-			const picked = !!(f.hash && g.revision && f.hash.startsWith(g.revision));
-			if (picked && g.sync === 'Synced') out.push({ kind: 'live', ...lane });
-			else out.push({ kind: 'applying', ...lane, picked });
-		}
+		const m = mergeState(g, f.hash, src.commits?.(f.project));
+		if (m.kind === 'refused') out.push({ kind: 'refused', ...lane, error: g?.syncError });
+		else if (m.kind === 'applying') out.push({ kind: 'applying', ...lane, picked: m.picked });
+		else out.push({ kind: m.kind, ...lane });
 	}
 	return out;
 }

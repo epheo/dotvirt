@@ -27,17 +27,38 @@
 	// it replaces the header Propose button, the Changes dot and the pending
 	// banners. Every lane names what happens next and who acts. Hidden on
 	// /changes, which is the full view of the same pipeline.
+	const syncOf = (p: string) =>
+		p === PLATFORM_PROJECT
+			? inventory.inventory?.platform
+			: inventory.projects.find((x) => x.name === p)?.gitOps;
 	const lanes = $derived(
 		trayLanes({
 			drafts: drafts.drafts,
 			proposals: inventory.proposals,
 			followed: tray.followed,
-			sync: (p) =>
-				p === PLATFORM_PROJECT
-					? inventory.inventory?.platform
-					: inventory.projects.find((x) => x.name === p)?.gitOps,
+			sync: syncOf,
+			commits: (p) => tray.commits(p),
 		}),
 	);
+
+	// A merge Argo has not picked up may already be held by a newer revision
+	// than the last history read knows: each revision move reads again.
+	const waitingKey = $derived(
+		lanes
+			.flatMap((l) =>
+				l.kind === 'applying' && !l.picked
+					? [`${l.project}@${syncOf(l.project)?.revision ?? ''}`]
+					: [],
+			)
+			.sort()
+			.join(' '),
+	);
+	$effect(() => {
+		if (!waitingKey) return;
+		untrack(() => {
+			for (const k of waitingKey.split(' ')) tray.want(k.slice(0, k.lastIndexOf('@')));
+		});
+	});
 
 	// Follow on the stable keys, never the per-frame arrays, and only once the
 	// first frame has landed: before it the open list is empty, not answered.
