@@ -180,7 +180,11 @@ func TestStageUpdateTemplate(t *testing.T) {
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
 	edited := strings.Replace(libraryTemplate, "name: base", "name: base\n  annotations:\n    description: edited", 1)
-	view, err := c.StageUpdateTemplate(id, proj, model.UpdateTemplateRequest{Name: "base", YAML: edited})
+	listed := c.Templates(proj)
+	if len(listed) != 1 || listed[0].BaseBlob != git.BlobID([]byte(libraryTemplate)) {
+		t.Fatalf("the listing must carry the version an edit starts from, got %+v", listed)
+	}
+	view, err := c.StageUpdateTemplate(id, proj, model.UpdateTemplateRequest{Name: "base", YAML: edited, BaseBlob: listed[0].BaseBlob})
 	if err != nil {
 		t.Fatalf("StageUpdateTemplate: %v", err)
 	}
@@ -217,6 +221,7 @@ func TestStageUpdateTemplateErrors(t *testing.T) {
 		{"garbage YAML", model.UpdateTemplateRequest{Name: "base", YAML: ":\n:not yaml"}, model.ErrInvalid},
 		{"wrong kind", model.UpdateTemplateRequest{Name: "base", YAML: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: x\n"}, model.ErrInvalid},
 		{"not in library", model.UpdateTemplateRequest{Name: "ghost", YAML: libraryTemplate}, model.ErrNotFound},
+		{"edited on a stale version", model.UpdateTemplateRequest{Name: "base", YAML: libraryTemplate + "# edited\n", BaseBlob: git.BlobID([]byte("older"))}, model.ErrConflict},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := c.StageUpdateTemplate(id, proj, tc.req); !errors.Is(err, tc.want) {

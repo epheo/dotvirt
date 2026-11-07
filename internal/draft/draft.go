@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"sync"
 
@@ -108,6 +110,12 @@ type Entry struct {
 	// FromVersion is the short commit hash a verbatim-manifest VM edit restores
 	// the file to (the VM page's Restore), so the draft view can name it.
 	FromVersion string `json:"fromVersion,omitempty"`
+
+	// BaseBlob is the git blob SourceFile held on the base branch when an
+	// entry replacing that file wholesale was staged. Its content was made
+	// from that version, so propose refuses it once the file moves on:
+	// committing it would silently revert the newer change.
+	BaseBlob string `json:"baseBlob,omitempty"`
 }
 
 // Key is the stable identity used to dedupe/replace entries within a draft. VM
@@ -202,8 +210,15 @@ func safeSegment(s string) string {
 // persistLocked writes a (user,project) draft to disk atomically, or removes the
 // file when the draft is empty so emptied projects don't linger. Caller holds s.mu.
 func (s *Store) persistLocked(user, project string, d map[string]Entry) error {
-	p := s.path(user, project)
 	if len(d) == 0 {
+		return writeJSON(s.path(user, project), nil)
+	}
+	return writeJSON(s.path(user, project), sortedEntries(d))
+}
+
+// writeJSON replaces p with v atomically; a nil v removes p.
+func writeJSON(p string, v any) error {
+	if v == nil {
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			return err
 		}
@@ -212,7 +227,7 @@ func (s *Store) persistLocked(user, project string, d map[string]Entry) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(sortedEntries(d), "", "  ")
+	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -223,29 +238,77 @@ func (s *Store) persistLocked(user, project string, d map[string]Entry) error {
 	return os.Rename(tmp, p)
 }
 
-// Stage adds or replaces an entry in (user,project)'s draft and persists.
-func (s *Store) Stage(user, project string, e Entry) error {
+// Apply runs fn on a copy of (user, project)'s draft, keyed by Entry.Key, and
+// persists the result once. Memory moves only when the write lands, so a call
+// either stages all of its change or none of it; an error from fn stages
+// nothing.
+func (s *Store) Apply(user, project string, fn func(d map[string]Entry) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	d, err := s.loadLocked(user, project)
+	cur, err := s.loadLocked(user, project)
 	if err != nil {
 		return err
 	}
-	d[e.Key()] = e
-	return s.persistLocked(user, project, d)
+	next := maps.Clone(cur)
+	if err := fn(next); err != nil {
+		return err
+	}
+	if err := s.persistLocked(user, project, next); err != nil {
+		return err
+	}
+	s.drafts[pairKey(user, project)] = next
+	return nil
+}
+
+// Stage adds or replaces entries in (user, project)'s draft.
+func (s *Store) Stage(user, project string, entries ...Entry) error {
+	return s.Apply(user, project, func(d map[string]Entry) error {
+		for _, e := range entries {
+			d[e.Key()] = e
+		}
+		return nil
+	})
+}
+
+// ReplaceResource makes entries the whole of resource r in (user, project)'s
+// draft, reporting how many staged entries of r it dropped.
+func (s *Store) ReplaceResource(user, project string, r Resource, entries ...Entry) (removed int, err error) {
+	err = s.Apply(user, project, func(d map[string]Entry) error {
+		removed = 0
+		for k, e := range d {
+			if e.Resource == r {
+				delete(d, k)
+				removed++
+			}
+		}
+		for _, e := range entries {
+			d[e.Key()] = e
+		}
+		return nil
+	})
+	return removed, err
+}
+
+// Remove unstages each of entries still staged exactly as given; one
+// restaged since (a newer edit of the same object) stays.
+func (s *Store) Remove(user, project string, entries ...Entry) error {
+	return s.Apply(user, project, func(d map[string]Entry) error {
+		for _, e := range entries {
+			if cur, ok := d[e.Key()]; ok && reflect.DeepEqual(cur, e) {
+				delete(d, e.Key())
+			}
+		}
+		return nil
+	})
 }
 
 // Unstage removes one entry (of the given resource) from (user,project)'s draft.
 // No error if absent.
 func (s *Store) Unstage(user, project string, resource Resource, namespace, name string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	d, err := s.loadLocked(user, project)
-	if err != nil {
-		return err
-	}
-	delete(d, Entry{Resource: resource, Namespace: namespace, Name: name}.Key())
-	return s.persistLocked(user, project, d)
+	return s.Apply(user, project, func(d map[string]Entry) error {
+		delete(d, Entry{Resource: resource, Namespace: namespace, Name: name}.Key())
+		return nil
+	})
 }
 
 // Clear empties (user,project)'s draft; persistLocked removes the now-empty file
@@ -275,4 +338,86 @@ func sortedEntries(d map[string]Entry) []Entry {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
 	return out
+}
+
+// Proposal is what the open pull request of one (user, project) carries: the
+// entries its branch was built from and the head dotvirt pushed. A re-propose
+// rebuilds the branch from current base with these plus the draft, so the
+// proposal is always replayed on the base it will merge into.
+type Proposal struct {
+	// Repo and Branch say where the record holds: a record for another repo
+	// or branch is no record.
+	Repo    string  `json:"repo"`
+	Branch  string  `json:"branch"`
+	PR      int     `json:"pr"` // 0: the branch is pushed but has no PR yet
+	Head    string  `json:"head"`
+	Entries []Entry `json:"entries"`
+	// Pending is a push under way, written before it lands: if the record
+	// write after it fails, the remote's head says which of the two holds.
+	Pending *Pending `json:"pending,omitempty"`
+}
+
+// Pending is a pushed head and what it carries, not yet confirmed.
+type Pending struct {
+	Head    string  `json:"head"`
+	Entries []Entry `json:"entries"`
+}
+
+// proposalPath sits beside the draft file. Draft files end in .json, so no
+// project name maps onto it.
+func (s *Store) proposalPath(user, project string) string {
+	return filepath.Join(s.dir, safeSegment(user), safeSegment(project)+".proposal")
+}
+
+// Proposal reads (user, project)'s recorded proposal, ok=false when none. An
+// unreadable record reads as none: the open PR is then refused, never rebuilt
+// from a guess.
+func (s *Store) Proposal(user, project string) (p Proposal, ok bool, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, err := os.ReadFile(s.proposalPath(user, project))
+	if os.IsNotExist(err) {
+		return Proposal{}, false, nil
+	}
+	if err != nil {
+		return Proposal{}, false, fmt.Errorf("read proposal %s/%s: %w", user, project, err)
+	}
+	if err := json.Unmarshal(data, &p); err != nil {
+		log.Printf("draft: proposal %s/%s is corrupt (%v); reading it as none", user, project, err)
+		return Proposal{}, false, nil
+	}
+	return p, true, nil
+}
+
+// SetProposal records p as (user, project)'s open proposal.
+func (s *Store) SetProposal(user, project string, p Proposal) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return writeJSON(s.proposalPath(user, project), p)
+}
+
+// DropProposal forgets (user, project)'s proposal: its PR merged or closed.
+func (s *Store) DropProposal(user, project string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return writeJSON(s.proposalPath(user, project), nil)
+}
+
+// Pushed reports whether head is a push p knows: its head or the pending one.
+func (p Proposal) Pushed(head string) bool {
+	return head != "" && (head == p.Head || p.Pending != nil && head == p.Pending.Head)
+}
+
+// Settle makes p describe the remote's head: a pending push that landed
+// becomes the record. False when head is neither push p knows.
+func (p *Proposal) Settle(head string) bool {
+	switch {
+	case head != "" && head == p.Head:
+	case p.Pending != nil && head != "" && head == p.Pending.Head:
+		p.Head, p.Entries = p.Pending.Head, p.Pending.Entries
+	default:
+		return false
+	}
+	p.Pending = nil
+	return true
 }

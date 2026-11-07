@@ -10,6 +10,7 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/tasks"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // Revert proposes a forward commit that undoes `hash` in proj's repo, opening (or
@@ -46,28 +47,29 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 	view.Warning, _ = c.revertState(read, d.Files)
 	body := prBody(view, fmt.Sprintf("Reverts commit %s, %q.", short, d.Commit.Title), id.Username)
 
-	fc := c.forge.For(proj.Repo)
+	fc := c.forgeFor(proj.Repo)
 	branch := c.revertBranch(id.Username, proj.Name, hash)
-	// A revert of this commit opened before branches carried the identity hash
-	// is updated in place rather than duplicated.
+	var prior forge.PR
+	var found bool
 	if fc != nil {
+		// A revert of this commit opened before branches carried the identity
+		// hash is updated in place rather than duplicated. Lookups are
+		// best-effort: a forge that cannot say reads as no PR, and the create
+		// then stands on its own.
 		legacy := c.legacyRevertPrefix(id.Username, proj.Name) + shortCommit(hash)
 		if pr, ok, err := fc.FindPR(legacy, c.baseBranch); err == nil && ok && pr.State == "open" {
-			branch = legacy
+			branch, prior, found = legacy, pr, true
+		} else if pr, ok, err := fc.FindPR(branch, c.baseBranch); err == nil {
+			prior, found = pr, ok
 		}
 	}
 	by := git.Author{Name: id.Username, Email: authorEmail(id.Username)}
-	res, err := write.CommitChangeset(c.baseBranch, branch, title, items, by)
+	out, _, _, err := c.publish(fc, write, branch, title, title, body, items, by, prior, found, nil)
 	if errors.Is(err, git.ErrNoChanges) {
 		return model.ProposeResult{}, fmt.Errorf("%w: %s already matches the state before this change", model.ErrInvalid, c.baseBranch)
 	}
 	if err != nil {
 		return model.ProposeResult{}, err
-	}
-	out := model.ProposeResult{Branch: res.Branch}
-
-	if fc != nil {
-		c.openOrRecoverPR(fc, &out, branch, title, body)
 	}
 	return out, nil
 }
