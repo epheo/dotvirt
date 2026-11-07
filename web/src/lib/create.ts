@@ -75,6 +75,18 @@ export function mostCommonSize(vms: VM[], options: Options | null): Size | null 
 	return best;
 }
 
+// Disks made from each boot image, keyed "namespace/name" as a disk names
+// its source image.
+export function imageTally(vms: VM[]): Map<string, number> {
+	const tally = new Map<string, number>();
+	for (const vm of vms)
+		for (const d of vm.disks ?? []) {
+			const img = (d as { image?: string }).image;
+			if (img) tally.set(img, (tally.get(img) ?? 0) + 1);
+		}
+	return tally;
+}
+
 // The preference most of vms are tuned with, when one is.
 export function usualPreference(vms: VM[]): string {
 	const tally = new Map<string, number>();

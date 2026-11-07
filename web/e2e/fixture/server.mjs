@@ -286,6 +286,11 @@ async function handleAPI(req, res, url) {
 	}
 	if (!authed(req)) return sendText(res, 401, 'no session');
 
+	// The create routes and their dry runs (create.mjs).
+	const createCtx = { state, sendJSON, sendText, readBody, projectOf, stageInto, draftFor };
+	if (await handleCreate(req, res, url, createCtx)) return;
+	if (await handleUpload(req, res, url, createCtx)) return;
+
 	if (path === '/api/inventory') return sendJSON(res, 200, s.inventory);
 	if (path === '/api/options') return sendJSON(res, 200, s.options);
 	if (path === '/api/storage/classes') return sendJSON(res, 200, s.storageClasses ?? []);
@@ -418,11 +423,6 @@ async function handleAPI(req, res, url) {
 			prURL: `https://forge.example/dotvirt/${m[1]}/pulls/78`,
 		});
 	}
-
-	// The create routes and their dry runs (create.mjs).
-	const createCtx = { state, sendJSON, sendText, readBody, projectOf, stageInto, draftFor };
-	if (await handleCreate(req, res, url, createCtx)) return;
-	if (await handleUpload(req, res, url, createCtx)) return;
 
 	m = path.match(/^\/api\/vms\/([^/]+)\/([^/]+)\/edit\/preview$/);
 	if (m && req.method === 'POST') {

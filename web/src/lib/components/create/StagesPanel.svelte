@@ -64,7 +64,9 @@
 {#if mode === 'pr'}
 	<div class="flex min-w-0 items-start gap-2">
 		<FileText size={16} class="mt-0.5 shrink-0 text-accent-ink" />
-		<span class="min-w-0 font-mono text-sm font-medium break-all text-ink">{shownPath}</span>
+		<span class="min-w-0 font-mono text-sm font-medium text-ink"
+			>{#each shownPath.split('/') as part, i (i)}{#if i}/<wbr />{/if}{part}{/each}</span
+		>
 	</div>
 	<p class="-mt-1.5 text-[13px] text-ink-soft">
 		{isEdit ? 'Changes this file in the' : 'New file in the'}
@@ -115,7 +117,10 @@
 					{#if yaml.data.files.length > 1}
 						<p class="mt-2 font-mono text-xs font-medium text-ink-soft">{f.path}</p>
 					{/if}
+					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 					<pre
+						tabindex="0"
+						aria-label="YAML of {f.path}"
 						class="mt-2 max-h-80 overflow-auto rounded-md border border-line bg-panel p-2.5 font-mono text-[11px] leading-4 text-ink-soft">{f.yaml}</pre>
 				{/each}
 			{/if}

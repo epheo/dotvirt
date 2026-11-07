@@ -5,6 +5,7 @@
 	import {
 		defaultUser,
 		generatePassword,
+		imageTally,
 		liveMigrates,
 		matchRanges,
 		mostCommonSize,
@@ -143,6 +144,11 @@
 	// ── boot image and OS tuning ───────────────────────────────────────────
 	const ready = $derived((options?.osImages ?? []).filter((i) => i.ready));
 	const refOf = (i: { name: string; namespace: string }) => `${i.name}|${i.namespace}`;
+	// Disks per image across the fleet: the most used image is the default,
+	// and the picker leads with the ones in use.
+	const used = $derived(imageTally(inventory.allVMs));
+	const usedBy = (i: { name: string; namespace: string }) =>
+		used.get(`${i.namespace}/${i.name}`) ?? 0;
 	const usualPref = $derived(usualPreference(projectVMs));
 	// svelte-ignore state_referenced_locally
 	let osImage = $state(image ? image.split('/').reverse().join('|') : '');
@@ -152,23 +158,31 @@
 		const list = ready;
 		const prefs = options?.preferences ?? [];
 		const usual = usualPref;
+		const most = [...list].sort((a, b) => usedBy(b) - usedBy(a))[0];
 		untrack(() => {
 			if (imageTouched || !list.length) return;
-			const like = usual
-				? list.find((i) => preferenceFor(i.name, prefs)?.name === usual)
-				: undefined;
-			const pick = like ?? list.find((i) => i.name.startsWith('fedora')) ?? list.find(() => true);
+			const like =
+				most && usedBy(most) > 0
+					? most
+					: usual
+						? list.find((i) => preferenceFor(i.name, prefs)?.name === usual)
+						: undefined;
+			const pick = like ?? list.find((i) => i.name.startsWith('fedora')) ?? list[0];
 			if (pick) osImage = refOf(pick);
 		});
 	});
 	const imageName = $derived(osImage.split('|')[0]);
-	const imageWhy = $derived(
-		image && osImage === image.split('/').reverse().join('|')
-			? 'The image you picked'
-			: usualPref && preferenceFor(imageName, options?.preferences ?? [])?.name === usualPref
-				? `Like most VMs in ${project}`
-				: `Ready to boot, 1 of ${ready.length} image${ready.length === 1 ? '' : 's'}`,
-	);
+	const picked = $derived(ready.find((i) => refOf(i) === osImage));
+	const imageWhy = $derived.by(() => {
+		if (image && osImage === image.split('/').reverse().join('|')) return 'The image you picked';
+		const n = picked ? usedBy(picked) : 0;
+		const top = ready.every((i) => usedBy(i) <= n);
+		if (n && top) return `Most used of ${plural(ready.length, 'image')}, on ${plural(n, 'disk')}`;
+		if (n) return `On ${plural(n, 'disk')}`;
+		if (usualPref && preferenceFor(imageName, options?.preferences ?? [])?.name === usualPref)
+			return `Like most VMs in ${project}`;
+		return `Ready to boot, one of ${plural(ready.length, 'image')}`;
+	});
 	let preference = $state('');
 	let prefTouched = false;
 	$effect(() => {
@@ -184,9 +198,9 @@
 	});
 	let imageQuery = $state('');
 	const images = $derived(
-		(options?.osImages ?? []).filter(
-			(i) => !imageQuery || i.name.toLowerCase().includes(imageQuery.trim().toLowerCase()),
-		),
+		(options?.osImages ?? [])
+			.filter((i) => !imageQuery || i.name.toLowerCase().includes(imageQuery.trim().toLowerCase()))
+			.sort((a, b) => usedBy(b) - usedBy(a) || a.name.localeCompare(b.name)),
 	);
 
 	// ── disks ──────────────────────────────────────────────────────────────
@@ -317,6 +331,18 @@
 	});
 
 	// ── the request ────────────────────────────────────────────────────────
+	// A size under the OS tuning's minimum fails KubeVirt's webhook at sync
+	// time, so it is refused here, before staging.
+	const short = $derived.by(() => {
+		const p = options?.preferences?.find((x) => x.name === preference);
+		if (!p || !it) return '';
+		const cpuLow = p.minCPU && it.cpu < p.minCPU;
+		const memLow = p.minMemory && quantityBytes(it.memory) < quantityBytes(p.minMemory);
+		return cpuLow || memLow
+			? `${p.displayName || p.name} needs at least ${p.minCPU ?? it.cpu} vCPU ${quantity(p.minMemory ?? it.memory)}`
+			: '';
+	});
+
 	const missing = $derived.by(() => {
 		const m: string[] = [];
 		if (!name) m.push('Name the VM');
@@ -326,6 +352,7 @@
 		if (!osImage) m.push('Pick an image to boot from');
 		if (!instancetype) m.push('Pick a size');
 		if (!preference) m.push('Pick an OS tuning');
+		else if (short) m.push(short);
 		if (!sizeOK(diskSize)) m.push('The disk size needs a unit, like 30Gi');
 		if (!hasNetwork) m.push('Keep at least one network');
 		return m;
@@ -547,7 +574,11 @@
 											<span class="font-mono text-sm font-medium text-ink"
 												>{@render marked(i.name, imageQuery)}</span
 											>
-											{#if !i.ready}<span class="text-xs text-ink-faint">importing</span>{/if}
+											{#if !i.ready}<span class="text-xs text-ink-faint">importing</span
+												>{:else if usedBy(i)}<span
+													class="text-[13px] whitespace-nowrap text-ink-soft tabular-nums"
+													>{plural(usedBy(i), 'disk')}</span
+												>{/if}
 										</span>
 										<span class="text-xs text-ink-muted">in {i.namespace}</span>
 									{/snippet}

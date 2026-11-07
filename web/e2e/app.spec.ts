@@ -6,12 +6,14 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('shell + container workspace renders after login', async ({ page }) => {
-	// Creation collapses into the "+ New" header menu; its items exist only while open.
+	// New opens the create sheet. Enabled, not just visible: it stays disabled
+	// until the first inventory frame proves a project the user may change,
+	// so this also waits out the login race.
+	await expect(page.getByRole('button', { name: /^New$/ })).toBeEnabled();
 	await page.getByRole('button', { name: /^New$/ }).click();
-	// Exact: "New VM from Template" sits beside it. Enabled, not just visible:
-	// the item stays disabled until the first inventory frame proves a
-	// repo-backed project, so this also waits out the login race.
-	await expect(page.getByRole('button', { name: 'New VM', exact: true })).toBeEnabled();
+	await expect(
+		page.getByRole('dialog').getByRole('radio', { name: 'VM', exact: true }),
+	).toBeChecked();
 	await page.keyboard.press('Escape');
 	await expect(
 		page.locator('aside').getByRole('link', { name: 'Changes', exact: true }),

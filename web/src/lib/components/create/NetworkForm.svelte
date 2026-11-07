@@ -141,6 +141,8 @@
 		);
 	const failure = (u: { policy?: string }) =>
 		inventory.inventory?.platform?.unhealthy?.find((o) => o.name === u.policy)?.message ?? '';
+	// The hosts a failure names, when its message lists them ("... (host-41)").
+	const failingOn = (u: { policy?: string }) => /\(([^)]+)\)\s*$/.exec(failure(u))?.[1] ?? '';
 	$effect(() => {
 		const first = uplinks.find((u) => !failing(u)) ?? uplinks[0];
 		untrack(() => {
@@ -148,6 +150,13 @@
 		});
 	});
 	const chosenUplink = $derived(uplinks.find((u) => u.name === physnet));
+	// The "Carried by" line names the failing uplinks first, then the ones
+	// carrying the most VLAN networks; the rest are a count.
+	const vlansOn = (u: { name: string }) =>
+		networks.filter((n) => n.kind === 'vlan' && n.uplink === u.name).length;
+	const carriers = $derived(
+		[...uplinks].sort((a, b) => Number(failing(b)) - Number(failing(a)) || vlansOn(b) - vlansOn(a)),
+	);
 
 	// ── projects for a shared network ──────────────────────────────────────
 	let nsQuery = $state('');
@@ -266,18 +275,21 @@
 									class="col-start-2 flex flex-wrap items-center gap-x-3.5 gap-y-0.5 text-xs leading-[18px] text-ink-soft"
 								>
 									<span class="text-ink-faint">Carried by</span>
-									{#each uplinks as u (u.name)}
+									{#each carriers.slice(0, 2) as u (u.name)}
 										<span class="inline-flex items-center gap-1.5">
 											<span class="size-[7px] rounded-full {failing(u) ? 'bg-danger' : 'bg-ok'}"
 											></span>
 											<span class="font-mono font-medium">{u.name}</span>
 											{failing(u)
-												? 'failing'
+												? `failing${failingOn(u) ? ` on ${failingOn(u)}` : ''}`
 												: hostCount
 													? `on ${u.nodeCount} of ${hostCount} hosts`
 													: `on ${u.nodeCount} hosts`}
 										</span>
 									{/each}
+									{#if carriers.length > 2}<span class="text-ink-faint"
+											>and {carriers.length - 2} more</span
+										>{/if}
 								</span>
 							{/if}
 						</label>

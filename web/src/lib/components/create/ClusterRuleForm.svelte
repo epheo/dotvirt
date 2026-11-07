@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import { Plus, X } from '@lucide/svelte';
 	import { api, type AdminNetworkPolicyCreate, type AdminPolicyRule } from '#lib/api.js';
 	import { action } from '#lib/resource.svelte.js';
@@ -46,6 +46,7 @@
 	let name = $state(initial?.name ?? '');
 	// svelte-ignore state_referenced_locally
 	let priority = $state<number | null>(initial ? (initial.priority ?? 0) : 10);
+	let prioTouched = false;
 	let subjKey = $state(k0);
 	let subjValue = $state(v0);
 	const rules = rowList<Row>(
@@ -71,13 +72,43 @@
 			.sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0)),
 	);
 
+	// Two cluster rules may not share a priority: the backend refuses it, so
+	// the form names the rule holding it first.
+	const holder = $derived(
+		baseline
+			? undefined
+			: inventory.policies.find(
+					(p) => p.kind === 'admin' && p.name !== name && p.priority === priority,
+				),
+	);
+	// The nearest free priority, for the hint beside a taken one.
+	const freePriority = $derived.by(() => {
+		const used = new Set(
+			inventory.policies
+				.filter((p) => p.kind === 'admin' && p.name !== name)
+				.map((p) => p.priority),
+		);
+		for (let d = 0; d < 100; d++)
+			for (const v of [(priority ?? 0) + d, (priority ?? 0) - d])
+				if (v >= 0 && v <= 99 && !used.has(v)) return v;
+		return null;
+	});
+
+	// A new rule starts on the free priority nearest 10.
+	$effect(() => {
+		const free = freePriority;
+		untrack(() => {
+			if (!editing && !prioTouched && holder && free != null) priority = free;
+		});
+	});
+
 	const missing = $derived.by(() => {
 		if (baseline) return [];
 		const m: string[] = [];
 		if (!name) m.push('Name the rule');
 		else if (!validName(name)) m.push('The name needs lowercase letters, digits and -');
-		if (priority == null || priority < 0 || priority > 1000)
-			m.push('Set a priority from 0 to 1000');
+		if (priority == null || priority < 0 || priority > 99) m.push('Set a priority from 0 to 99');
+		else if (holder) m.push(`Priority ${priority} is taken by ${holder.name}`);
 		return m;
 	});
 	const request = $derived.by((): AdminNetworkPolicyCreate => {
@@ -153,11 +184,23 @@
 						id="cr-prio"
 						type="number"
 						min="0"
-						max="1000"
-						class="{FIELD} font-mono"
+						max="99"
+						class="{FIELD} font-mono {holder ? 'border-warn! ring-1 ring-warn' : ''}"
 						bind:value={priority}
+						oninput={() => (prioTouched = true)}
 					/>
-					<span class={HELP}>Lower runs first.</span>
+					{#if holder}
+						<span class="{HELP} text-warn-ink!"
+							>Taken by {holder.name}.{#if freePriority != null}
+								<button
+									type="button"
+									class="text-accent-ink hover:underline"
+									onclick={() => (priority = freePriority)}>Use {freePriority}</button
+								>{/if}</span
+						>
+					{:else}
+						<span class={HELP}>0 to 99. Lower runs first.</span>
+					{/if}
 				</div>
 			</div>
 		{/if}

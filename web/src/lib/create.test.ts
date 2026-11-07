@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { Network, Options, StorageClassInfo, VM } from '#lib/api.js';
 import {
 	defaultUser,
+	generatePassword,
+	imageTally,
 	liveMigrates,
 	matchRanges,
 	mostCommonSize,
@@ -11,6 +13,8 @@ import {
 	searchNetworks,
 	sharedClass,
 	sizeLabel,
+	usualNetworks,
+	usualPreference,
 	vmCountByNetwork,
 } from '#lib/create.js';
 
@@ -227,5 +231,45 @@ describe('sharedClass', () => {
 		expect(liveMigrates(local)).toBe(false);
 		expect(sharedClass([local, nfs, ceph])?.name).toBe('ceph');
 		expect(sharedClass([local])).toBeUndefined();
+	});
+});
+
+describe('usual choices', () => {
+	it('counts disks per boot image', () => {
+		const disk = (image?: string) =>
+			({ name: 'root', image }) as VM['disks'] extends (infer D)[] | undefined ? D : never;
+		const vms = [
+			vm('a', { disks: [disk('imgs/fedora-42'), disk()] }),
+			vm('b', { disks: [disk('imgs/fedora-42')] }),
+			vm('c', { disks: [disk('imgs/rhel-9.6')] }),
+		];
+		expect(Object.fromEntries(imageTally(vms))).toEqual({
+			'imgs/fedora-42': 2,
+			'imgs/rhel-9.6': 1,
+		});
+	});
+	it('takes the preference most VMs carry', () => {
+		const vms = [
+			vm('a', { preference: 'rhel.9' }),
+			vm('b', { preference: 'rhel.9' }),
+			vm('c', { preference: 'fedora' }),
+		];
+		expect(usualPreference(vms)).toBe('rhel.9');
+		expect(usualPreference([vm('x')])).toBe('');
+	});
+	it('picks secondary networks more than half the VMs attach', () => {
+		const lan = { name: 'a', network: 'lan-101' };
+		const vms = [
+			vm('a', { networks: [lan] }),
+			vm('b', { networks: [lan] }),
+			vm('c', { networks: [{ name: 'b', network: 'web-prod/web-internal' }] }),
+		];
+		expect(usualNetworks(vms, nets)).toEqual(['lan-101']);
+		expect(usualNetworks([], nets)).toEqual([]);
+	});
+	it('makes a fresh 16-character password each time', () => {
+		const a = generatePassword();
+		expect(a).toMatch(/^[a-zA-Z0-9]{16}$/);
+		expect(generatePassword()).not.toBe(a);
 	});
 });
