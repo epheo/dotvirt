@@ -82,7 +82,7 @@ func NetworkPolicyManifest(s NetworkPolicySpec) (path string, content []byte, er
 	if err != nil {
 		return "", nil, err
 	}
-	return s.Namespace + "/networkpolicies/" + s.Name + ".yaml", out, nil
+	return model.KindNetpol.RepoPath(s.Namespace, s.Name), out, nil
 }
 
 // MaxANPPriority is the lowest-precedence ANP priority OVN-Kubernetes programs.
@@ -198,5 +198,5 @@ func AdminNetworkPolicyManifest(s AdminNetworkPolicySpec) (path string, content 
 	if err != nil {
 		return "", nil, err
 	}
-	return kind.Plural + "/" + name + ".yaml", out, nil
+	return kind.RepoPath("", name), out, nil
 }

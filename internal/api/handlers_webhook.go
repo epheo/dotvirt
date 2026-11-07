@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -68,16 +69,11 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 		} `json:"repository"`
 	}
 	_ = json.Unmarshal(body, &event)
-	// Projects annotate the https clone URL; try the payload's forms against the
-	// open-repo cache (an unknown repo is simply not being watched yet).
-	for _, u := range []string{event.Repository.CloneURL, event.Repository.HTMLURL, event.Repository.HTMLURL + ".git"} {
-		if u != "" && u != ".git" {
-			s.repos.Poke(u)
-		}
-	}
-	repo := forge.NormalizeRepoURL(event.Repository.CloneURL)
-	if repo == "" {
-		repo = forge.NormalizeRepoURL(event.Repository.HTMLURL)
+	// Every spelling of a repo normalizes to the open-repo cache's key (an
+	// unknown repo is simply not being watched yet).
+	repo := cmp.Or(forge.NormalizeRepoURL(event.Repository.CloneURL), forge.NormalizeRepoURL(event.Repository.HTMLURL))
+	if repo != "" {
+		s.repos.Poke(repo)
 	}
 	// A push reaches the lane through the poke's GitChanged; a PR event may move
 	// no head (opened after its push, closed unmerged), so it nudges that repo.

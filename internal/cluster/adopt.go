@@ -223,37 +223,17 @@ func adoptManifest(obj *unstructured.Unstructured) ([]byte, error) {
 }
 
 // adoptPath places a captured object where dotvirt's own generators would have written
-// it (internal/netgen, internal/vmgen), so adopting then editing through the UI lands on
-// ONE file. A layout of its own would leave the same object declared twice in the same
-// Application source, which Argo reports as a duplicate and neither file's deletion
-// resolves. A kind with no generator falls back to a kind-suffixed name, which cannot
-// collide with a VM of the same name.
+// it (model.Kind.RepoPath), so adopting then editing through the UI lands on ONE file. A
+// layout of its own would leave the same object declared twice in the same Application
+// source, which Argo reports as a duplicate and neither file's deletion resolves. A kind
+// the layout does not place falls back to a kind-suffixed name, which cannot collide
+// with a VM of the same name.
 func adoptPath(obj *unstructured.Unstructured) string {
 	ns, name := obj.GetNamespace(), obj.GetName()
-	switch obj.GetKind() {
-	case "VirtualMachine":
-		return ns + "/" + name + ".yaml"
-	case "UserDefinedNetwork":
-		return ns + "/networks/" + name + ".yaml"
-	case "NetworkPolicy":
-		return ns + "/networkpolicies/" + name + ".yaml"
-	case "EgressFirewall":
-		// OVN allows one per namespace, always named "default", and netgen writes exactly
-		// that file.
-		return ns + "/egressfirewalls/default.yaml"
-	// The platform tier's layouts, as netgen writes them.
-	case "ClusterUserDefinedNetwork":
-		return "networks/" + name + ".yaml"
-	case "EgressIP":
-		return "egressips/" + name + ".yaml"
-	case "AdminPolicyBasedExternalRoute":
-		return "externalroutes/" + name + ".yaml"
-	case "AdminNetworkPolicy":
-		return "adminnetworkpolicies/" + name + ".yaml"
-	case "BaselineAdminNetworkPolicy":
-		return "baselineadminnetworkpolicies/default.yaml"
-	case "NodeNetworkConfigurationPolicy":
-		return "uplinks/" + strings.TrimPrefix(name, "uplink-") + ".yaml"
+	if _, k, ok := model.LookupKind(obj.GetKind()); ok {
+		if p := k.RepoPath(ns, name); p != "" {
+			return p
+		}
 	}
 	if ns == "" {
 		return name + "." + strings.ToLower(obj.GetKind()) + ".yaml"
