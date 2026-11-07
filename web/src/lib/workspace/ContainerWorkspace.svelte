@@ -19,6 +19,7 @@
 	import NetworkTopology from '#lib/components/NetworkTopology.svelte';
 	import PlatformAdoptBanner from '#lib/components/PlatformAdoptBanner.svelte';
 	import RepoBanner from '#lib/components/RepoBanner.svelte';
+	import PageHeader from '#lib/components/PageHeader.svelte';
 	import Permissions from '#lib/components/Permissions.svelte';
 	import TabBar from '#lib/components/TabBar.svelte';
 	import VMTable from '#lib/components/VMTable.svelte';
@@ -101,6 +102,27 @@
 	);
 	const scopedNamespaces = $derived([...new Set(scopedVMs.map((v) => v.namespace))]);
 
+	// A compute container names itself above its tabs: what it is, and how
+	// many VMs it holds in what.
+	const plural = (n: number, one: string) =>
+		`${n.toLocaleString('en-US')} ${one}${n === 1 ? '' : 's'}`;
+	const heading = $derived.by(() => {
+		const sc = scope;
+		const vms = plural(scopedVMs.length, 'VM');
+		if (sc.kind === 'namespace') return { title: sc.namespace, context: `${vms} in ${sc.project}` };
+		if (sc.kind === 'project') {
+			const p = inventory.projects.find((x) => x.name === sc.project);
+			return {
+				title: sc.project,
+				context: `${vms} in ${plural(p?.namespaces.length ?? 0, 'namespace')}`,
+			};
+		}
+		return {
+			title: 'All VMs',
+			context: `${vms} in ${plural(inventory.projects.length, 'project')}`,
+		};
+	});
+
 	const openVM = (namespace: string, name: string) => goto(vmHref(namespace, name));
 
 	// The side peek: ?peek=ns/name inspects a row in place (replaceState, like
@@ -179,9 +201,18 @@
 	}
 </script>
 
-<Breadcrumb class="border-b border-line px-4 py-2" {trail} />
+{#if section === 'compute'}
+	<div class="flex flex-col gap-2 px-4 pt-4">
+		<!-- A root has no ancestor to walk up to; its title says where it is. -->
+		{#if trail.length > 1}<Breadcrumb {trail} />{/if}
+		<PageHeader title={heading.title} context={heading.context} />
+		<TabBar {tabs} active={tab} href={(t) => `?tab=${t}`} />
+	</div>
+{:else}
+	<Breadcrumb class="border-b border-line px-4 py-2" {trail} />
 
-<TabBar class="px-4" {tabs} active={tab} href={(t) => `?tab=${t}`} />
+	<TabBar class="px-4" {tabs} active={tab} href={(t) => `?tab=${t}`} />
+{/if}
 
 {#if tab === 'summary'}
 	{#if scope.kind === 'network'}
@@ -212,7 +243,12 @@
 			/>
 		{/if}
 		<TabPane>
-			<ClusterSummary scope={containerScope} vms={scopedVMs} onselect={openVM} />
+			<ClusterSummary
+				scope={containerScope}
+				vms={scopedVMs}
+				onselect={openVM}
+				total={section !== 'compute'}
+			/>
 		</TabPane>
 	{/if}
 {:else if tab === 'monitor'}

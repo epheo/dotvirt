@@ -28,10 +28,13 @@
 		scope = {},
 		vms,
 		onselect,
+		total = true,
 	}: {
 		scope?: { project?: string; namespace?: string; node?: string };
 		vms: VM[];
 		onselect?: (namespace: string, name: string) => void;
+		// false when the page header above already says how many VMs there are.
+		total?: boolean;
 	} = $props();
 
 	// Keyed on a stable scope string; old data stays up while a scope switch loads.
@@ -102,8 +105,11 @@
 
 <div class="border-b border-line px-4 py-3">
 	<div class="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-sm">
-		<span class="text-2xl font-semibold text-ink">{vms.length} VM{vms.length === 1 ? '' : 's'}</span
-		>
+		{#if total}
+			<span class="text-2xl font-semibold text-ink"
+				>{vms.length} VM{vms.length === 1 ? '' : 's'}</span
+			>
+		{/if}
 		{#if stats.issues}
 			<span class="flex items-center gap-1.5 font-medium text-danger-ink">
 				<span class="inline-block h-2 w-2 rounded-full {TONE_DOT.danger}"

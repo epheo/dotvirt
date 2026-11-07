@@ -26,7 +26,12 @@ test('every section renders the full platform', async ({ page }) => {
 	await page.goto('/compute');
 	await expect(main.getByText('Top consumers').first()).toBeVisible();
 
+	await page.goto('/compute/team-web/web-prod');
+	await expect(main.getByRole('heading', { level: 1, name: 'web-prod' })).toBeVisible();
+	await expect(main.getByText('412 VMs in team-web')).toBeVisible();
+
 	await page.goto('/compute?tab=vms');
+	await expect(main.getByText('2,846 VMs in 52 projects')).toBeVisible();
 	await expect(main.getByRole('navigation', { name: 'Pages' })).toContainText(
 		'Showing 1-50 of 2,846',
 	);
