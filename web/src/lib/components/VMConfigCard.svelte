@@ -1,16 +1,8 @@
 <script lang="ts">
-	import { Check, GitBranch, Pencil } from '@lucide/svelte';
-	import {
-		api,
-		vmKey,
-		type Change,
-		type DraftItem,
-		type HostCapacity,
-		type Node,
-		type VM,
-	} from '#lib/api.js';
-	import { bytes, friendlyError, quantity, quantityBytes } from '#lib/format.js';
-	import { memoryFit } from '#lib/headroom.js';
+	import { Check, GitBranch, Minus, Pencil, Plus } from '@lucide/svelte';
+	import { api, vmKey, type Change, type DraftItem, type VM } from '#lib/api.js';
+	import { friendlyError, quantity, quantityBytes } from '#lib/format.js';
+	import { memoryHint } from '#lib/headroom.js';
 	import {
 		composeEdit,
 		FIELD_LABEL,
@@ -18,7 +10,8 @@
 		type InlineField,
 		type InlineValue,
 	} from '#lib/inlineedit.js';
-	import { action, resource } from '#lib/resource.svelte.js';
+	import { action } from '#lib/resource.svelte.js';
+	import { memoryRoom } from '#lib/state/hosts.svelte.js';
 	import { vmSizing } from '#lib/sizing.js';
 	import { TONE_PILL } from '#lib/status.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
@@ -57,6 +50,9 @@
 		fields: string[];
 		inline?: { field: InlineField; gitValue: InlineValue | undefined };
 		live?: string;
+		// A row with no live counterpart, and where to read more.
+		gitOnly?: boolean;
+		link?: { label: string; href: string };
 	};
 	const rows = $derived.by((): Row[] => [
 		{
@@ -128,6 +124,14 @@
 			label: 'Eviction',
 			git: vm.evictionStrategy || 'Cluster default',
 			fields: ['Eviction strategy'],
+		},
+		{
+			key: 'source',
+			label: 'Source file',
+			git: vm.sourceFile || 'Not in git',
+			fields: [],
+			gitOnly: true,
+			link: vm.sourceFile ? { label: 'History', href: '?tab=changes' } : undefined,
 		},
 	]);
 
@@ -220,39 +224,10 @@
 	// Memory only: guest memory is reserved per VM, so an increase past every
 	// host's free memory leaves the VM unable to start; vCPU is time-shared.
 	// Capacity is metrics-backed: with metrics off the hint stays silent.
-	const fitInputs = resource<{ cap: HostCapacity | null; nodes: Node[] | null } | null>(
-		() => (editing === 'memory' ? 'fit' : ''),
-		async (k) => {
-			if (!k) return null;
-			const [cap, nodes] = await Promise.all([
-				api.capacity().catch(() => null),
-				api.nodes().catch(() => null),
-			]);
-			return { cap, nodes };
-		},
+	const room = memoryRoom(() => editing === 'memory');
+	const fitHint = $derived(
+		editing === 'memory' ? memoryHint(room.data, vm, sizing.memory, String(value)) : null,
 	);
-	const fitHint = $derived.by((): { warn: boolean; text: string } | null => {
-		const cap = fitInputs.data?.cap;
-		if (editing !== 'memory' || !cap) return null;
-		const need = quantityBytes(String(value));
-		const current = quantityBytes(vm.memoryActual || sizing.memory || '') || 0;
-		if (!(need > current)) return null;
-		const f = memoryFit(cap, fitInputs.data?.nodes ?? null, need, {
-			node: vm.nodeName,
-			bytes: current,
-		});
-		if (!f?.best) return null;
-		const most = `Most room: ${f.best.node}, ${bytes(f.best.free)} free.`;
-		return f.fits
-			? {
-					warn: false,
-					text: `Fits on ${f.fits} of ${f.hosts} host${f.hosts === 1 ? '' : 's'}. ${most}`,
-				}
-			: {
-					warn: true,
-					text: `No host has ${quantity(String(value))} free. ${most} ${vm.name} could not start until a host frees memory.`,
-				};
-	});
 
 	const project = $derived(inventory.projectOf(vm.namespace));
 	const stageOp = action();
@@ -290,8 +265,8 @@
 		{/if}
 	{/snippet}
 	<p class="border-b border-line-soft px-3 py-1.5 text-xs text-ink-muted">
-		What git main declares, what runs, and what is staged. Edits stage; nothing reaches the cluster
-		until its pull request merges.
+		{canAuthor && vm.sourceFile ? 'Click a value in the git column to change it. ' : ''}Edits stage;
+		nothing reaches the cluster until its pull request merges.
 	</p>
 	<div class="overflow-x-auto">
 		<table class="w-full text-[13px]">
@@ -341,14 +316,41 @@
 											{/each}
 										</span>
 									{:else}
-										<input
-											aria-label={r.label}
-											type={r.inline.field === 'cpuCores' ? 'number' : 'text'}
-											min={r.inline.field === 'cpuCores' ? 1 : undefined}
-											bind:value
-											data-autofocus
-											class="w-24 rounded border border-accent bg-panel px-2 py-1 text-[13px] text-ink"
-										/>
+										{#if r.inline.field === 'cpuCores'}
+											<span class="inline-flex items-center">
+												<button
+													type="button"
+													aria-label="One vCPU fewer"
+													disabled={Number(value) <= 1}
+													onclick={() => (value = Math.max(1, Number(value) - 1))}
+													class="rounded-l border border-r-0 border-line-strong bg-panel px-2 py-1.5 text-ink-soft hover:bg-inset disabled:opacity-40"
+													><Minus size={12} /></button
+												>
+												<input
+													aria-label={r.label}
+													type="number"
+													min="1"
+													bind:value
+													data-autofocus
+													class="w-14 border border-accent bg-panel px-2 py-1 text-center text-[13px] text-ink"
+												/>
+												<button
+													type="button"
+													aria-label="One vCPU more"
+													onclick={() => (value = Number(value) + 1)}
+													class="rounded-r border border-l-0 border-line-strong bg-panel px-2 py-1.5 text-ink-soft hover:bg-inset"
+													><Plus size={12} /></button
+												>
+											</span>
+										{:else}
+											<input
+												aria-label={r.label}
+												type="text"
+												bind:value
+												data-autofocus
+												class="w-24 rounded border border-accent bg-panel px-2 py-1 text-[13px] text-ink"
+											/>
+										{/if}
 									{/if}
 									<Button
 										size="sm"
@@ -402,23 +404,40 @@
 									{/if}
 								</div>
 							{:else}
-								<span class="flex items-center gap-2">
-									<span class="text-ink">{r.git}</span>
-									{#if r.inline}
-										<button
-											onclick={() => start(r)}
-											disabled={!!block}
-											title={block || `Change ${r.label.toLowerCase()}; it stages into a PR`}
-											aria-label="Change {r.label}"
-											class="rounded p-0.5 text-ink-muted hover:bg-inset hover:text-accent-ink disabled:opacity-40 disabled:hover:bg-transparent"
-											><Pencil size={12} /></button
+								{#if r.inline && !block}
+									<!-- The value is the control: click it to change it. -->
+									<button
+										onclick={() => start(r)}
+										title={`Change ${r.label.toLowerCase()}; it stages into a PR`}
+										class="group -mx-1 flex items-center gap-2 rounded px-1 text-ink hover:bg-inset"
+										><span class="sr-only">Change {r.label}:</span>{r.git}<Pencil
+											size={12}
+											class="text-ink-muted group-hover:text-accent-ink"
+										/></button
+									>
+								{:else}
+									<span class="flex items-center gap-2">
+										<span class={r.gitOnly ? 'font-mono text-xs text-ink-soft' : 'text-ink'}
+											>{r.git}</span
 										>
-									{/if}
-								</span>
+										{#if r.inline}
+											<span title={block}
+												><Pencil size={12} class="text-ink-muted opacity-40" /></span
+											>
+										{/if}
+										{#if r.link}
+											<a class="text-xs text-accent-ink hover:underline" href={r.link.href}
+												>{r.link.label}</a
+											>
+										{/if}
+									</span>
+								{/if}
 							{/if}
 						</td>
 						<td class="px-3 py-2">
-							{#if drift.length}
+							{#if r.gitOnly}
+								<span class="text-ink-muted">-</span>
+							{:else if drift.length}
 								<span class="flex flex-wrap items-center gap-2">
 									<span class="text-ink">{drift.map(show).join(', ')}</span>
 									<span class="rounded-full px-1.5 text-xs {TONE_PILL.warn}">Live differs</span>

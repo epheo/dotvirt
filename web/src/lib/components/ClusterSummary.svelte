@@ -16,6 +16,7 @@
 	import { TONE_DOT } from '#lib/status.js';
 	import IssuesCard from './IssuesCard.svelte';
 	import QuotaBand from './QuotaBand.svelte';
+	import ScopeChanges from './ScopeChanges.svelte';
 	import TopConsumers from './TopConsumers.svelte';
 
 	// A scope's Summary answers three questions in order: what runs here and
@@ -212,7 +213,8 @@
 
 <div class="grid items-start gap-4 p-4 lg:grid-cols-2">
 	<IssuesCard scope={{ project: scope.project, namespace: scope.namespace }} />
+	<ScopeChanges scope={{ project: scope.project, namespace: scope.namespace }} />
 	{#if data}
-		<TopConsumers topCpu={data.topCpu} topMemory={data.topMemory} {onselect} />
+		<TopConsumers topCpu={data.topCpu} topMemory={data.topMemory} {vms} {onselect} />
 	{/if}
 </div>

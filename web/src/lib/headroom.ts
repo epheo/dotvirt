@@ -1,5 +1,5 @@
 import type { HostCapacity, HostCapacityNode, Node, Options, VM } from '#lib/api.js';
-import { quantityBytes } from '#lib/format.js';
+import { bytes, quantity, quantityBytes } from '#lib/format.js';
 import { vmSizing } from '#lib/sizing.js';
 
 export type Headroom = {
@@ -89,6 +89,36 @@ export function memoryFit(
 		if (!best || f > best.free) best = { node: c.node, free: f };
 	}
 	return { fits, hosts: hosts.length, best };
+}
+
+// The capacity line for giving a VM `size` of guest memory: silent unless
+// it is an increase over what the VM holds and capacity is known. subject
+// names the VM in the line, for lists that hold several.
+export function memoryHint(
+	room: { cap: HostCapacity | null; nodes: Node[] | null } | null,
+	vm: { name: string; nodeName?: string; memoryActual?: string },
+	declared: string | undefined,
+	size: string,
+	subject = false,
+): { warn: boolean; text: string } | null {
+	if (!room?.cap) return null;
+	const need = quantityBytes(size);
+	const have = quantityBytes(vm.memoryActual || declared || '') || 0;
+	if (!(need > have)) return null;
+	const f = memoryFit(room.cap, room.nodes, need, { node: vm.nodeName, bytes: have });
+	if (!f?.best) return null;
+	const most = `Most room: ${f.best.node}, ${bytes(f.best.free)} free.`;
+	const hosts = `${f.hosts} host${f.hosts === 1 ? '' : 's'}`;
+	const at = quantity(size);
+	return f.fits
+		? {
+				warn: false,
+				text: `${subject ? `${vm.name} at ${at} fits` : 'Fits'} on ${f.fits} of ${hosts}. ${most}`,
+			}
+		: {
+				warn: true,
+				text: `No host has ${at} free. ${most} ${vm.name} could not start until a host frees memory.`,
+			};
 }
 
 const free = (c: HostCapacityNode) => Math.max(0, c.memAllocatable - (c.memAllocated ?? 0));

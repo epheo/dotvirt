@@ -33,7 +33,7 @@
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { duration } from '#lib/format.js';
-	import { phaseTone } from '#lib/status.js';
+	import { phaseTone, TONE_DOT, TONE_TEXT } from '#lib/status.js';
 	import ActionMenu from './ActionMenu.svelte';
 	import Banner from './Banner.svelte';
 	import Console from './Console.svelte';
@@ -43,9 +43,7 @@
 	import MetricsPanel from './MetricsPanel.svelte';
 	import Permissions from './Permissions.svelte';
 	import Snapshots from './Snapshots.svelte';
-	import StagedBadge from './StagedBadge.svelte';
 	import StatusDot from './StatusDot.svelte';
-	import StatusPill from './StatusPill.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 	import TabBar from './TabBar.svelte';
 	import VMConfigure from './VMConfigure.svelte';
@@ -58,7 +56,6 @@
 		tab = 'summary',
 		ontab,
 		stagedItem = null,
-		onstagedopen,
 		networks = [],
 	}: {
 		vm: VM;
@@ -67,7 +64,6 @@
 		tab?: VMTab;
 		ontab?: (t: VMTab) => void;
 		stagedItem?: DraftItem | null;
-		onstagedopen?: () => void;
 		// The port-group catalog (GET /api/networks), to resolve each NIC's raw
 		// network ref into the port group the admin recognizes.
 		networks?: Network[];
@@ -179,6 +175,16 @@
 	);
 	const driftChanges = $derived(driftRes.data);
 
+	// Where it runs and for how long, or the state it is in instead.
+	const runLine = $derived.by(() => {
+		const state = vm.paused
+			? 'Paused'
+			: (vm.phase ?? (vm.power === 'Off' ? 'Stopped' : String(vm.power)));
+		if (!vm.nodeName) return state;
+		const up = vm.phase === 'Running' && !vm.paused ? duration(vm.startedAt) : '';
+		return `${state} on ${vm.nodeName}${up ? `, up ${up}` : ''}`;
+	});
+
 	// adoptVM owns its toasts; the run only feeds the busy state.
 	const adopt = () => reconcileOp.run(() => adoptVM(vm));
 	const canAuthor = $derived(inventory.canAuthor(vm.namespace));
@@ -197,20 +203,35 @@
 		<div class="flex items-center gap-2.5">
 			<Server size={20} class="shrink-0 text-ink-muted" />
 			<h2 class="text-lg font-semibold text-ink">{vm.name}</h2>
-			<StatusPill
-				tone={phaseTone(vm.phase, vm.paused)}
-				label={vm.paused ? 'Paused' : (vm.phase ?? String(vm.power))}
-			/>
 			<SyncBadge sync={vm.sync} error={vm.syncError} />
-			{#if stagedItem}
-				<StagedBadge item={stagedItem} onopen={() => onstagedopen?.()} />
-			{/if}
 			<span class="ml-1 flex min-w-0 items-center gap-1.5 truncate text-xs text-ink-faint">
-				{vm.namespace}{#if vm.nodeName}<span class="text-line-strong">/</span
-					>{vm.nodeName}{/if}{#if vm.instancetype}<span class="text-line-strong">/</span
+				{vm.namespace}{#if vm.instancetype}<span class="text-line-strong">/</span
 					>{vm.instancetype}{/if}
 			</span>
 		</div>
+		<!-- Where the VM stands in one line: what runs, whether it matches git,
+		     and what waits to be proposed. -->
+		<p class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-soft">
+			<span class="flex items-center gap-1.5">
+				<span class="size-2 rounded-full {TONE_DOT[phaseTone(vm.phase, vm.paused)]}"></span>
+				{runLine}
+			</span>
+			{#if driftChanges?.length}
+				<span class={TONE_TEXT.warn}
+					>Live differs from git in {driftChanges.length} field{driftChanges.length === 1
+						? ''
+						: 's'}</span
+				>
+			{/if}
+			{#if stagedItem}
+				<button
+					class="text-accent-ink hover:underline"
+					onclick={() =>
+						(ui.modal = { kind: 'propose', project: inventory.projectOf(vm.namespace) })}
+					>{stagedItem.changes.length || 1} staged, not proposed</button
+				>
+			{/if}
+		</p>
 		<!-- Two groups, named: what runs now, and what only stages a change for a
 		     pull request. The git glyph repeats the second on each button. -->
 		<div class="mt-2 mb-2 flex flex-wrap items-end gap-x-3 gap-y-2">

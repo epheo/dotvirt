@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HostCapacity, VM } from '#lib/api.js';
-import { headroom, memoryFit } from '#lib/headroom.js';
+import { headroom, memoryFit, memoryHint } from '#lib/headroom.js';
 
 const GiB = 2 ** 30;
 
@@ -105,5 +105,28 @@ describe('memoryFit', () => {
 	it('has nothing to say when no host takes VMs', () => {
 		const down = nodes.map((n) => ({ ...n, ready: false }));
 		expect(memoryFit(cap, down, GiB, { bytes: 0 })).toBeNull();
+	});
+});
+
+describe('memoryHint', () => {
+	const room = { cap, nodes: null };
+	const web = { name: 'web-1', nodeName: 'w1' };
+
+	it('stays silent unless memory goes up and capacity is known', () => {
+		expect(memoryHint(room, web, '8Gi', '4Gi')).toBeNull();
+		expect(memoryHint(null, web, '4Gi', '8Gi')).toBeNull();
+	});
+
+	it('names the freest host, and the VM when a list holds several', () => {
+		expect(memoryHint(room, web, '4Gi', '8Gi')!.text).toBe(
+			'Fits on 3 of 3 hosts. Most room: w3, 54.0 GiB free.',
+		);
+		expect(memoryHint(room, web, '4Gi', '8Gi', true)!.text).toMatch(/^web-1 at 8 GiB fits on 3/);
+	});
+
+	it('warns when no host has room', () => {
+		const h = memoryHint(room, web, '4Gi', '100Gi')!;
+		expect(h.warn).toBe(true);
+		expect(h.text).toMatch(/^No host has 100 GiB free\. .* web-1 could not start/);
 	});
 });

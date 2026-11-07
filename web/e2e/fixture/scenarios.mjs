@@ -193,7 +193,7 @@ function clusterSummary(vmCount) {
 		// Lowercase keys, like the kubevirt_vmi_info-derived map; stopped is the
 		// backend's snapshot overlay (VM objects without an instance).
 		vms: { running: Math.max(vmCount - 1, 0), stopped: Math.min(vmCount, 1) },
-		topCpu: [{ namespace: 'web-prod', name: 'web-1', value: 38.2 }],
+		topCpu: [{ namespace: 'web-prod', name: 'web-1', value: 0.76 }], // cores in use
 		topMemory: [{ namespace: 'db-prod', name: 'db-1', value: 3.1e9 }],
 	};
 }

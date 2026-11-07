@@ -1,10 +1,14 @@
 <script lang="ts">
 	import { api, type DraftItem } from '#lib/api.js';
+	import { memoryHint } from '#lib/headroom.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
+	import { memoryRoom } from '#lib/state/hosts.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { tray } from '#lib/state/tray.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { draftKindTone, TONE_PILL } from '#lib/status.js';
+	import { changeSummary } from '#lib/tray.js';
 	import Button from './Button.svelte';
 	import ChangeList from './ChangeList.svelte';
 	import ErrorNote from './ErrorNote.svelte';
@@ -33,46 +37,93 @@
 	});
 	let ack = $state(false);
 
+	const isVM = (it: DraftItem) => !it.resource || it.resource === 'vm';
+	const word = (f: string) => (f === f.toUpperCase() ? f : f.toLowerCase());
+	const list = (xs: string[]) =>
+		xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
+
+	// One line on what is proposed, the way the PR will read.
+	const scale = $derived.by(() => {
+		const items = lane?.items ?? [];
+		const n = items.reduce((t, it) => t + (it.kind === 'edit' ? it.changes.length : 1), 0);
+		const noun = items.every(isVM) ? 'VM' : 'object';
+		return `${n} change${n === 1 ? '' : 's'} to ${items.length} ${noun}${items.length === 1 ? '' : 's'}. Opens one pull request on ${lane?.base ?? 'main'}.`;
+	});
+
 	// What merging does to each object, worst first: deletes, restarts, power
-	// moves, then everything that applies in place.
-	function consequence(it: DraftItem): { tone: 'danger' | 'warn' | 'ok'; text: string } {
+	// moves, then everything that applies in place. A restart names the field
+	// that causes it, so a mixed edit says which part could have gone live.
+	type Effect = { tone: 'danger' | 'warn' | 'ok'; text: string };
+	function consequence(it: DraftItem): Effect {
 		if (it.kind === 'delete') return { tone: 'danger', text: `${it.name} is deleted` };
 		if (it.kind === 'create') return { tone: 'ok', text: `${it.name} is created` };
 		const power = it.changes.find((c) => c.field === 'Power');
-		const restart = it.changes.filter((c) => c.restart).map((c) => c.field);
+		const restart = it.changes.filter((c) => c.restart).map((c) => word(c.field));
+		const quiet = it.changes.filter((c) => !c.restart && c !== power).map((c) => word(c.field));
 		if (restart.length)
-			return { tone: 'warn', text: `${it.name} restarts once (${restart.join(', ')})` };
+			return {
+				tone: 'warn',
+				text:
+					`${it.name} restarts once. The ${list(restart)} change${restart.length === 1 ? ' needs' : 's need'} it.` +
+					(quiet.length
+						? ` The ${list(quiet)} change${quiet.length === 1 ? '' : 's'} alone would not.`
+						: ''),
+			};
 		if (power)
 			return { tone: 'warn', text: `${it.name} ${power.to === 'Off' ? 'stops' : 'starts'}` };
 		return { tone: 'ok', text: `${it.name} changes without a restart` };
 	}
-	const RANK = { danger: 0, warn: 1, ok: 2 };
-	const effects = $derived(
-		(lane?.items ?? []).map(consequence).sort((a, b) => RANK[a.tone] - RANK[b.tone]),
+
+	// A memory increase is checked against host room, the one hard limit a
+	// restart can hit.
+	const memoryUps = $derived(
+		(lane?.items ?? []).flatMap((it) => {
+			const c = it.kind === 'edit' && isVM(it) && it.changes.find((x) => x.field === 'Memory');
+			return c && c.to ? [{ it, c }] : [];
+		}),
 	);
+	const room = memoryRoom(() => memoryUps.length > 0);
+	const fits = $derived(
+		memoryUps.flatMap(({ it, c }): Effect[] => {
+			const vm = inventory.findVM(it.namespace, it.name) ?? { name: it.name };
+			const h = memoryHint(room.data, vm, c.from, c.to ?? '', true);
+			return h ? [{ tone: h.warn ? 'warn' : 'ok', text: h.text }] : [];
+		}),
+	);
+
+	const RANK = { danger: 0, warn: 1, ok: 2 };
+	const effects = $derived<Effect[]>([
+		...[...(lane?.items ?? []).map(consequence), ...fits].sort(
+			(a, b) => RANK[a.tone] - RANK[b.tone],
+		),
+		...(lane ? [{ tone: 'ok' as const, text: `Nothing else in ${project} changes.` }] : []),
+	]);
+
+	const unstageOp = action();
+	async function unstage(it: DraftItem) {
+		if (await unstageOp.run(() => api.unstage(it.namespace, it.name, it.resource, project)))
+			drafts.refresh();
+	}
 
 	const op = action();
 	async function propose() {
 		if (op.busy || (prune.length && !ack)) return;
+		// Read before the refresh empties the lane.
+		const declared = changeSummary(lane?.items ?? []);
+		const prTitle = title.trim() || lane?.defaultTitle || '';
 		const ok = await op.run(async () => {
 			const r = await api.propose(project, title.trim(), editingText ? message : '');
+			if (r.prNumber)
+				tray.remember({
+					project,
+					prNumber: r.prNumber,
+					title: prTitle,
+					prURL: r.prURL ?? '',
+					...declared,
+				});
 			drafts.refresh();
 			tray.open = true;
-			ui.showToast(
-				r.prNumber
-					? `PR #${r.prNumber} ${r.existing ? 'updated' : 'opened'} in ${project}. Approve and merge it in the forge.`
-					: `Pushed ${r.branch}. Open the pull request in the forge.`,
-				{
-					kind: 'success',
-					action:
-						r.prURL || r.compareURL
-							? {
-									label: r.prURL ? `Open PR #${r.prNumber}` : 'Open in forge',
-									run: () => window.open(r.prURL || r.compareURL, '_blank', 'noopener'),
-								}
-							: undefined,
-				},
-			);
+			ui.toastProposed(project, r);
 		});
 		if (ok) onclose();
 	}
@@ -80,6 +131,7 @@
 
 <Modal title="Propose to {project}" size="3xl" {onclose}>
 	<div class="max-h-[70vh] space-y-5 overflow-y-auto px-5 py-4 text-sm">
+		{#if lane}<p class="-mt-1 text-ink-soft">{scale}</p>{/if}
 		<ol class="grid grid-cols-4 gap-2 text-xs" aria-label="Where this change is">
 			{#each ['Staged', 'Pull request', 'Approved and merged in the forge', 'Live on the cluster'] as step, i (step)}
 				<li class="flex flex-col gap-1.5 {i === 0 ? 'font-semibold text-ink' : 'text-ink-muted'}">
@@ -97,6 +149,7 @@
 					>Pull request title</span
 				>
 				<TextInput bind:value={title} suggest={lane.defaultTitle} data-autofocus />
+				<span class="block text-xs text-ink-muted">Written from the changes. Edit freely.</span>
 			</label>
 
 			<section class="space-y-2">
@@ -108,10 +161,20 @@
 							<span class="rounded-full px-1.5 text-xs {TONE_PILL[draftKindTone(it.kind)]}"
 								>{it.kind}</span
 							>
+							<Button
+								class="ml-auto"
+								variant="link"
+								size="sm"
+								disabled={unstageOp.busy}
+								onclick={() => unstage(it)}>Unstage</Button
+							>
 						</div>
-						<div class="px-3 py-2"><ChangeList changes={it.changes} /></div>
+						<div class="px-3 py-2">
+							<ChangeList changes={it.changes} marks={it.kind === 'edit' && isVM(it)} />
+						</div>
 					</div>
 				{/each}
+				<ErrorNote error={unstageOp.error} />
 			</section>
 
 			<section class="space-y-2">
@@ -184,7 +247,9 @@
 
 	{#snippet footer()}
 		<span class="mr-auto text-xs text-ink-muted"
-			>Approval and merge happen in the forge. The tray follows it until it is live.</span
+			>{prune.length > 0 && !ack
+				? 'Tick the deletion box to continue.'
+				: 'Approval and merge happen in the forge. The tray follows it until it is live.'}</span
 		>
 		<Button variant="ghost" onclick={onclose}>Keep editing</Button>
 		<Button onclick={propose} disabled={!lane || op.busy || (prune.length > 0 && !ack)}>

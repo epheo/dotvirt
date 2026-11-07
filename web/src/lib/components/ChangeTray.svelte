@@ -3,21 +3,24 @@
 	import { page } from '$app/state';
 	import {
 		ChevronDown,
+		Circle,
 		CircleCheck,
 		GitBranch,
 		GitPullRequest,
 		LoaderCircle,
 		TriangleAlert,
 	} from '@lucide/svelte';
-	import type { Change, DraftItem } from '#lib/api.js';
+	import { api } from '#lib/api.js';
 	import { changesHref, hrefForScope } from '#lib/nav.js';
+	import { action } from '#lib/resource.svelte.js';
 	import { approvalLine, checksPill, reviewURL } from '#lib/review.js';
 	import { TONE_PILL, TONE_TEXT } from '#lib/status.js';
 	import { drafts, PLATFORM_PROJECT } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 	import { tray } from '#lib/state/tray.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
-	import { trayLanes, type TrayLane } from '#lib/tray.js';
+	import { itemLine, trayLanes, type TrayLane } from '#lib/tray.js';
 	import Button from './Button.svelte';
 
 	// The one place a change of this user's is followed from staged to live:
@@ -36,26 +39,84 @@
 		}),
 	);
 
-	// Follow on the stable keys, never the per-frame arrays.
+	// Follow on the stable keys, never the per-frame arrays, and only once the
+	// first frame has landed: before it the open list is empty, not answered.
+	const streamed = $derived(inventory.inventory !== null);
 	$effect(() => {
 		inventory.proposalsKey;
 		inventory.taskFeed;
-		untrack(() => tray.update(inventory.proposals, inventory.taskFeed));
+		if (streamed) untrack(() => tray.update(inventory.proposals, inventory.taskFeed));
 	});
 
-	// A live merge has said what it had to; it leaves by itself.
+	// A live merge has said what it had to; it leaves by itself, with the
+	// countdown in view, and waits while the pointer rests on it.
+	const LIVE_MS = 15_000;
 	const liveKeys = $derived(
 		lanes
 			.filter((l) => l.kind === 'live')
 			.map((l) => l.key)
 			.join(' '),
 	);
+	let now = $state(Date.now());
+	let held = $state<string | null>(null);
+	const since = new Map<string, number>();
 	$effect(() => {
 		const keys = liveKeys ? liveKeys.split(' ') : [];
 		if (!keys.length) return;
-		const t = setTimeout(() => keys.forEach((k) => tray.dismiss(k)), 15_000);
-		return () => clearTimeout(t);
+		const t = setInterval(() => {
+			now = Date.now();
+			for (const k of keys) {
+				const at = since.get(k);
+				if (at === undefined || k === held) since.set(k, now);
+				else if (now - at >= LIVE_MS) {
+					since.delete(k);
+					tray.dismiss(k);
+				}
+			}
+		}, 1000);
+		return () => clearInterval(t);
 	});
+	const closesIn = (key: string) =>
+		Math.max(1, Math.ceil((LIVE_MS - (now - (since.get(key) ?? now))) / 1000));
+
+	// Discard asks once, in place: the draft is the user's unproposed work.
+	let confirmDiscard = $state<string | null>(null);
+	const discardOp = action();
+	async function discard(project: string) {
+		if (!(await discardOp.run(() => api.discardDraft(project)))) return;
+		confirmDiscard = null;
+		drafts.refresh();
+		ui.showToast(`Discarded the staged changes in ${project}.`, { kind: 'success' });
+	}
+
+	async function copyLink(pr: { prNumber: number; prURL: string }) {
+		try {
+			await navigator.clipboard.writeText(pr.prURL);
+			ui.showToast(`Link to PR #${pr.prNumber} copied. Send it to a reviewer.`, {
+				kind: 'success',
+			});
+		} catch {
+			ui.toastError(`Could not copy. PR #${pr.prNumber} is at ${pr.prURL}`);
+		}
+	}
+
+	// Undo is a revert PR of the merge commit, the project's own undo verb.
+	function undo(project: string, hash: string) {
+		reviewCache.loadCommit(project, hash);
+		ui.modal = { kind: 'undo', project, hash };
+	}
+
+	type Step = { text: string; state: 'done' | 'now' | 'todo' };
+	const applySteps = (picked: boolean, restarts: string[] = []): Step[] => [
+		{ text: 'Git main updated', state: 'done' },
+		{ text: 'Argo CD picked up the merge', state: picked ? 'done' : 'now' },
+		{
+			text: restarts.length
+				? `Applying; ${restarts.join(', ')} restart${restarts.length === 1 ? 's' : ''} once`
+				: 'Applying to the cluster',
+			state: picked ? 'now' : 'todo',
+		},
+	];
 
 	const hidden = $derived(page.url.pathname.startsWith('/changes') || lanes.length === 0);
 
@@ -67,18 +128,9 @@
 		lanes.some((l) => l.kind === 'staged' || l.kind === 'refused' || l.kind === 'live'),
 	);
 	const expanded = $derived(tray.open && (pinned || actionable));
-
-	const summary = (c: Change) =>
-		c.action === 'change'
-			? `${c.field.toLowerCase()} ${c.from} to ${c.to}`
-			: c.action === 'add'
-				? `${c.field.toLowerCase()}${c.to ? ` ${c.to}` : ''}`
-				: `remove ${c.field.toLowerCase()}`;
-	const itemLine = (it: DraftItem) =>
-		it.kind === 'delete'
-			? 'delete'
-			: it.changes.slice(0, 2).map(summary).join(', ') +
-				(it.changes.length > 2 ? `, +${it.changes.length - 2} more` : '');
+	// Opened by itself for one lane, the tray keeps the others to a line.
+	const compact = (l: TrayLane) =>
+		!pinned && (l.kind === 'review' || l.kind === 'applying' || l.kind === 'merged');
 
 	function pillText(l: TrayLane): string {
 		switch (l.kind) {
@@ -96,6 +148,10 @@
 				return `PR #${l.pr.prNumber} merged`;
 		}
 	}
+	function unfold() {
+		tray.open = true;
+		pinned = true;
+	}
 	const worst = $derived(lanes.find((l) => l.kind === 'refused') ?? lanes[0]);
 </script>
 
@@ -108,6 +164,10 @@
 			<div class="pointer-events-auto flex max-h-[65vh] w-full flex-col gap-2 overflow-y-auto">
 				{#each lanes as lane (lane.key)}
 					<section
+						aria-label={lane.kind === 'live' ? `PR #${lane.pr.prNumber} is live` : undefined}
+						role={lane.kind === 'live' ? 'group' : undefined}
+						onpointerenter={() => (held = lane.kind === 'live' ? lane.key : null)}
+						onpointerleave={() => (held = null)}
 						class="overflow-hidden rounded-lg border bg-panel text-xs shadow-lg {lane.kind ===
 						'refused'
 							? 'border-danger/40'
@@ -147,9 +207,16 @@
 								<strong class="text-sm text-ink">PR #{lane.pr.prNumber} merged</strong>
 							{/if}
 							<span class="truncate text-ink-muted">in {lane.project}</span>
+							{#if compact(lane)}
+								<button class="ml-auto shrink-0 text-ink-soft hover:underline" onclick={unfold}
+									>Details</button
+								>
+							{/if}
 						</header>
 
-						{#if lane.kind === 'staged'}
+						{#if compact(lane)}
+							<!-- Header only: nothing here waits on this user. -->
+						{:else if lane.kind === 'staged'}
 							<ul class="divide-y divide-line-soft">
 								{#each lane.draft.items.slice(0, 4) as it (it.kind + it.namespace + it.name)}
 									<li class="flex items-center gap-2 px-3 py-1.5">
@@ -159,6 +226,8 @@
 										>
 										{#if it.changes.some((c) => c.restart)}
 											<span class="shrink-0 rounded-full px-1.5 {TONE_PILL.warn}">Restart</span>
+										{:else if it.kind === 'edit'}
+											<span class="shrink-0 text-ink-muted">No restart</span>
 										{/if}
 									</li>
 								{/each}
@@ -183,15 +252,43 @@
 								</p>
 							{/each}
 							<footer class="flex items-center gap-3 border-t border-line-soft px-3 py-2">
-								<Button
-									size="sm"
-									onclick={() => (ui.modal = { kind: 'propose', project: lane.project })}
-									>Review and propose</Button
-								>
-								<a class="text-ink-soft hover:underline" href={changesHref(lane.project)}
-									>Open in Changes</a
-								>
+								{#if confirmDiscard === lane.project}
+									<span class="text-ink"
+										>Discard {lane.draft.count} staged change{lane.draft.count === 1
+											? ''
+											: 's'}?</span
+									>
+									<Button
+										size="sm"
+										variant="danger"
+										disabled={discardOp.busy}
+										onclick={() => discard(lane.project)}>Discard</Button
+									>
+									<button
+										class="text-ink-soft hover:underline"
+										onclick={() => (confirmDiscard = null)}>Keep</button
+									>
+								{:else}
+									<Button
+										size="sm"
+										onclick={() => (ui.modal = { kind: 'propose', project: lane.project })}
+										>Review and propose</Button
+									>
+									<button
+										class="text-ink-soft hover:underline"
+										onclick={() => {
+											discardOp.clear();
+											confirmDiscard = lane.project;
+										}}>Discard</button
+									>
+									<a class="ml-auto text-ink-soft hover:underline" href={changesHref(lane.project)}
+										>Open in Changes</a
+									>
+								{/if}
 							</footer>
+							{#if discardOp.error && confirmDiscard === lane.project}
+								<p class="px-3 pb-2 {TONE_TEXT.danger}">{discardOp.error}</p>
+							{/if}
 						{:else if lane.kind === 'review'}
 							{@const checks = checksPill(lane.pr)}
 							{@const approvals = approvalLine(lane.pr)}
@@ -215,8 +312,11 @@
 								<Button size="sm" variant="secondary" href={lane.pr.prURL} target="_blank"
 									>Open PR #{lane.pr.prNumber}</Button
 								>
+								<button class="text-ink-soft hover:underline" onclick={() => copyLink(lane.pr)}
+									>Copy link for a reviewer</button
+								>
 								<a
-									class="text-ink-soft hover:underline"
+									class="ml-auto text-ink-soft hover:underline"
 									href={reviewURL({
 										kind: 'proposal',
 										project: lane.project,
@@ -225,19 +325,59 @@
 								>
 							</footer>
 						{:else if lane.kind === 'applying'}
-							<p class="px-3 py-2 text-ink-soft">
-								{#if lane.pr.title}<span class="text-ink">{lane.pr.title}.</span>{/if}
-								Applying to the cluster. Nothing to do; this updates as the cluster moves.
-							</p>
+							<div class="space-y-1.5 px-3 py-2">
+								{#if lane.pr.title}<p class="truncate text-ink">{lane.pr.title}</p>{/if}
+								<ol class="space-y-1">
+									{#each applySteps(!!lane.picked, lane.pr.restarts) as st (st.text)}
+										<li
+											class="flex items-center gap-2 {st.state === 'todo'
+												? 'text-ink-muted'
+												: 'text-ink'}"
+										>
+											{#if st.state === 'done'}<CircleCheck
+													size={13}
+													class="shrink-0 text-ok-ink"
+												/>{:else if st.state === 'now'}<LoaderCircle
+													size={13}
+													class="shrink-0 animate-spin text-accent-ink"
+												/>{:else}<Circle size={13} class="shrink-0 text-line-strong" />{/if}
+											{st.text}
+										</li>
+									{/each}
+								</ol>
+								<p class="text-ink-muted">Nothing to do. This updates as the cluster moves.</p>
+							</div>
 						{:else if lane.kind === 'live'}
-							<div class="flex items-center gap-3 px-3 py-2">
-								<p class="min-w-0 flex-1 text-ink-soft">
-									PR #{lane.pr.prNumber}{lane.pr.title ? ` ${lane.pr.title}` : ''} runs as git main declares.
-								</p>
+							<div class="space-y-1 px-3 py-2">
+								{#if lane.pr.lines?.length}
+									<p class="text-ink-soft">Running as git main declares:</p>
+									<ul class="space-y-0.5 text-ink">
+										{#each lane.pr.lines.slice(0, 4) as l (l)}<li class="truncate">{l}</li>{/each}
+									</ul>
+								{:else}
+									<p class="text-ink-soft">
+										PR #{lane.pr.prNumber}{lane.pr.title ? ` ${lane.pr.title}` : ''} runs as git main
+										declares.
+									</p>
+								{/if}
+							</div>
+							<footer class="flex items-center gap-3 border-t border-line-soft px-3 py-2">
+								{#if lane.pr.hash}
+									<Button
+										size="sm"
+										variant="secondary"
+										onclick={() => undo(lane.project, lane.pr.hash ?? '')}>Undo this change</Button
+									>
+								{/if}
 								<button class="text-ink-soft hover:underline" onclick={() => tray.dismiss(lane.key)}
 									>Dismiss</button
 								>
-							</div>
+								<span class="ml-auto text-ink-muted tabular-nums"
+									>{held === lane.key
+										? 'Stays while you look'
+										: `Closes in ${closesIn(lane.key)} s`}</span
+								>
+							</footer>
 						{:else if lane.kind === 'refused'}
 							<div class="space-y-1 px-3 py-2">
 								<p class="text-ink-soft">What ran before keeps running.</p>
@@ -254,11 +394,19 @@
 									variant="secondary"
 									href={lane.project === PLATFORM_PROJECT
 										? '/changes'
-										: hrefForScope({ kind: 'project', project: lane.project })}>See why</Button
+										: hrefForScope({ kind: 'project', project: lane.project })}
+									>Fix and propose again</Button
 								>
-								<a class="text-ink-soft hover:underline" href={changesHref(lane.project)}
-									>Undo in Changes</a
-								>
+								{#if lane.pr.hash}
+									<button
+										class="text-ink-soft hover:underline"
+										onclick={() => undo(lane.project, lane.pr.hash ?? '')}>Undo the merge</button
+									>
+								{:else}
+									<a class="text-ink-soft hover:underline" href={changesHref(lane.project)}
+										>Undo in Changes</a
+									>
+								{/if}
 								<button
 									class="ml-auto text-ink-soft hover:underline"
 									onclick={() => tray.dismiss(lane.key)}>Dismiss</button
@@ -287,23 +435,32 @@
 				<ChevronDown size={12} /> Fold
 			</button>
 		{:else}
-			<button
-				onclick={() => {
-					tray.open = true;
-					pinned = true;
-				}}
+			<!-- A staged draft never hides: its pill opens the review sheet in one click. -->
+			<div
 				class="pointer-events-auto flex items-center gap-2 rounded-full border bg-panel py-1.5 pr-1.5 pl-3 text-xs font-medium text-ink shadow-lg {worst.kind ===
 				'refused'
 					? 'border-danger/50'
 					: 'border-accent'}"
 			>
-				{#if worst.kind === 'refused'}<TriangleAlert
-						size={13}
-						class="text-danger-ink"
-					/>{:else}<GitBranch size={13} class="text-accent-ink" />{/if}
-				{pillText(worst)}{lanes.length > 1 ? `, +${lanes.length - 1}` : ''}
-				<span class="rounded-full bg-accent px-2.5 py-0.5 text-white">Show</span>
-			</button>
+				<button class="flex items-center gap-2" onclick={unfold}>
+					{#if worst.kind === 'refused'}<TriangleAlert
+							size={13}
+							class="text-danger-ink"
+						/>{:else}<GitBranch size={13} class="text-accent-ink" />{/if}
+					{pillText(worst)}{lanes.length > 1 ? `, +${lanes.length - 1}` : ''}
+				</button>
+				{#if worst.kind === 'staged'}
+					{@const project = worst.project}
+					<button
+						class="rounded-full bg-accent px-2.5 py-0.5 text-white"
+						onclick={() => (ui.modal = { kind: 'propose', project })}>Review</button
+					>
+				{:else}
+					<button class="rounded-full bg-accent px-2.5 py-0.5 text-white" onclick={unfold}
+						>Show</button
+					>
+				{/if}
+			</div>
 		{/if}
 	</aside>
 {/if}

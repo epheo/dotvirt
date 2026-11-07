@@ -1,4 +1,4 @@
-import { api, type NodeTarget } from '#lib/api.js';
+import { api, type HostCapacity, type Node, type NodeTarget } from '#lib/api.js';
 import { resource, type Resource } from '#lib/resource.svelte.js';
 
 // The host roster behind every host picker, pulled fresh per dialog open
@@ -9,5 +9,24 @@ export function nodeTargets(): Resource<NodeTarget[]> {
 	return resource<NodeTarget[]>(
 		() => '',
 		() => api.nodes(),
+	);
+}
+
+export type Room = { cap: HostCapacity | null; nodes: Node[] | null };
+
+// Host capacity and node state, read only while a memory size is being
+// chosen. Capacity is metrics-backed: with metrics off cap is null and the
+// memory hint stays silent; without node rights every host counts.
+export function memoryRoom(active: () => boolean): Resource<Room | null> {
+	return resource<Room | null>(
+		() => (active() ? 'room' : ''),
+		async (k) => {
+			if (!k) return null;
+			const [cap, nodes] = await Promise.all([
+				api.capacity().catch(() => null),
+				api.nodes().catch(() => null),
+			]);
+			return { cap, nodes };
+		},
 	);
 }
