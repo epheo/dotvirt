@@ -1,0 +1,16 @@
+# operator-sdk and opm at the versions pinned in hack/versions.env. Release
+# binaries, not `go run`: compiling opm from source takes over a minute.
+name: operator-tools
+description: operator-sdk + opm release binaries, versions from hack/versions.env
+runs:
+  using: composite
+  steps:
+    - name: Load pinned tool versions
+      shell: bash
+      run: grep -v '^#' hack/versions.env >> "$GITHUB_ENV"
+    - name: Install operator-sdk + opm
+      shell: bash
+      run: |
+        get() { sudo curl -fsSL -o "/usr/local/bin/$1" "$2" && sudo chmod +x "/usr/local/bin/$1"; }
+        get operator-sdk "https://github.com/operator-framework/operator-sdk/releases/download/$OPERATOR_SDK_VERSION/operator-sdk_linux_amd64"
+        get opm "https://github.com/operator-framework/operator-registry/releases/download/$OPM_VERSION/linux-amd64-opm"

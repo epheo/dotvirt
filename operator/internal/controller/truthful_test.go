@@ -3,16 +3,25 @@ package controller
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
@@ -21,30 +30,68 @@ import (
 	"github.com/epheo/dotvirt/operator/internal/platform"
 )
 
-// The platform-repo retry passes phase "": the operand still serves, so a
-// serving install stays Available. Every other blocking wait or failure rolls
-// up into Available=False.
-func TestAvailableRollUpSparesPlatformRepoRetry(t *testing.T) {
+// byoForgeCR is a CR wired to a bring-your-own forge at url, with its
+// credentials Secret.
+func byoForgeCR(url string) (*dotvirtv1alpha1.Dotvirt, *corev1.Secret) {
 	dv := testCR()
-	c := testBuilder(t).WithObjects(dv).Build()
+	dv.Spec.Forge = dotvirtv1alpha1.ForgeSpec{
+		URL:               url,
+		CredentialsSecret: "byo-creds",
+		PlatformRepo:      url + "/dotvirt/platform.git",
+	}
+	creds := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "byo-creds", Namespace: dv.Namespace},
+		Data:       map[string][]byte{"url": []byte(url), "username": []byte("bot"), "token": []byte("tok")},
+	}
+	return dv, creds
+}
+
+// A fresh install whose forge is down still completes its pass: the operand
+// serves without the platform repo, so Available, the phase and the observed
+// generation land, and only the requeue tightens until the repo exists.
+func TestPlatformRepoFailureNeverBlocksAvailable(t *testing.T) {
+	forgeDown := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer forgeDown.Close()
+	dv, creds := byoForgeCR(forgeDown.URL)
+	c := testBuilder(t).WithObjects(dv, creds).Build()
 	r := newReconciler(c, depsOK)
+
+	reconcileOnce(t, r, dv)
+	markOperandReady(t, c, dv)
+	res := reconcileOnce(t, r, dv)
+
+	got := getCR(t, c, dv)
+	if av := cond(got, dotvirtv1alpha1.ConditionAvailable); av == nil || av.Status != metav1.ConditionTrue {
+		t.Errorf("Available = %+v, want True: the operand serves without the platform repo", av)
+	}
+	if got.Status.Phase != dotvirtv1alpha1.PhaseReady || got.Status.ObservedGeneration != got.Generation {
+		t.Errorf("phase=%q observedGeneration=%d, want Ready at generation %d", got.Status.Phase, got.Status.ObservedGeneration, got.Generation)
+	}
+	if repo := cond(got, dotvirtv1alpha1.ConditionForgeRepoReady); repo == nil || repo.Status != metav1.ConditionFalse {
+		t.Errorf("ForgeRepoReady = %+v, want False", repo)
+	}
+	if res.RequeueAfter != platformRepoRetry {
+		t.Errorf("RequeueAfter = %v, want %v while the repo is missing", res.RequeueAfter, platformRepoRetry)
+	}
+}
+
+// A blocking wait rolls up into Available=False naming the phase.
+func TestWaitRollsUpIntoAvailable(t *testing.T) {
+	dv := testCR()
+	r := newReconciler(testBuilder(t).WithObjects(dv).Build(), depsOK)
 	r.setCondition(dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionTrue, "Reconciled", "")
 	dv.Status.Phase = dotvirtv1alpha1.PhaseReady
 
-	if _, err := r.waitPhase(context.Background(), dv, dotvirtv1alpha1.ConditionForgeRepoReady, "Error", "forge down", "", time.Minute); err != nil {
-		t.Fatal(err)
-	}
-	if av := cond(dv, dotvirtv1alpha1.ConditionAvailable); av.Status != metav1.ConditionTrue || dv.Status.Phase != dotvirtv1alpha1.PhaseReady {
-		t.Errorf("platform-repo retry regressed a serving install: Available=%+v phase=%q", av, dv.Status.Phase)
-	}
-
-	if _, err := r.waitPhase(context.Background(), dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing", "forge starting",
-		dotvirtv1alpha1.PhaseProvisioning, time.Minute); err != nil {
-		t.Fatal(err)
-	}
+	r.waitPhase(dv, dotvirtv1alpha1.ConditionForgeReady, "Progressing", "forge starting",
+		dotvirtv1alpha1.PhaseProvisioning, time.Minute)
 	av := cond(dv, dotvirtv1alpha1.ConditionAvailable)
 	if av.Status != metav1.ConditionFalse || av.Reason != "Progressing" || !strings.HasPrefix(av.Message, dotvirtv1alpha1.ConditionForgeReady) {
 		t.Errorf("Available = %+v, want False/Progressing naming ForgeReady", av)
+	}
+	if dv.Status.Phase != dotvirtv1alpha1.PhaseProvisioning {
+		t.Errorf("phase = %q, want Provisioning", dv.Status.Phase)
 	}
 }
 
@@ -255,5 +302,241 @@ func TestPruneRunsOnRenderChangeOrTimer(t *testing.T) {
 	reconcileOnce(t, r, dv)
 	if lists != 3 {
 		t.Errorf("drift timer did not prune")
+	}
+}
+
+// The status write is diffed against the pass's read, so it carries no
+// resourceVersion: OLM or a label edit landing between the read and the write
+// must not fail the pass with a conflict.
+func TestStatusWriteSurvivesConcurrentWriter(t *testing.T) {
+	dv := testCR()
+	touched := false
+	c := testBuilder(t).WithObjects(dv).WithInterceptorFuncs(interceptor.Funcs{
+		SubResourcePatch: func(ctx context.Context, cl client.Client, sub string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+			if !touched {
+				touched = true
+				other := &dotvirtv1alpha1.Dotvirt{}
+				if err := cl.Get(ctx, client.ObjectKeyFromObject(obj), other); err != nil {
+					return err
+				}
+				other.Labels = map[string]string{"touched": "true"}
+				if err := cl.Update(ctx, other); err != nil {
+					return err
+				}
+			}
+			return cl.SubResource(sub).Patch(ctx, obj, patch, opts...)
+		},
+	}).Build()
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	if got := getCR(t, c, dv); got.Status.Phase == "" {
+		t.Error("status not written")
+	}
+}
+
+// failRouteGet fails reads of the named Route; every other read passes through.
+func failRouteGet(name string) interceptor.Funcs {
+	return interceptor.Funcs{
+		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if u, ok := obj.(*unstructured.Unstructured); ok && u.GroupVersionKind() == install.RouteGVK && key.Name == name {
+				return errors.New("apiserver unavailable")
+			}
+			return cl.Get(ctx, key, obj, opts...)
+		},
+	}
+}
+
+// A failed Route read is not "no host yet": rendering the console without
+// DOTVIRT_PUBLIC_URL rolls the Recreate pod and breaks OAuth until the next pass.
+func TestRouteReadErrorFailsWorkload(t *testing.T) {
+	dv := testCR()
+	c := testBuilder(t).WithObjects(dv).WithInterceptorFuncs(failRouteGet(install.AppName)).Build()
+	r := newReconciler(c, depsOK)
+	r.Platform = platform.OpenShift
+
+	if _, err := r.reconcileWorkload(context.Background(), dv, phaseCtx(r, dv)); err == nil {
+		t.Error("reconcileWorkload succeeded on a failed Route read")
+	}
+	if exists(t, c, &appsv1.Deployment{}, dv.Namespace, install.AppName) {
+		t.Error("Deployment rendered without the console host")
+	}
+}
+
+// The Forgejo pod template carries the ArgoCD host and the admin secret hash; a
+// failed read of either fails the phase instead of rendering a blank that rolls
+// the pod.
+func TestForgeTemplateReadErrorsFailThePhase(t *testing.T) {
+	t.Run("ArgoCD Route", func(t *testing.T) {
+		dv := managedForgeCR()
+		c := testBuilder(t).WithObjects(dv).WithInterceptorFuncs(failRouteGet("openshift-gitops-server")).Build()
+		r := newReconciler(c, depsOK)
+		r.Platform = platform.OpenShift
+		if _, err := r.reconcileForge(context.Background(), dv, phaseCtx(r, dv)); err == nil {
+			t.Error("reconcileForge succeeded on a failed ArgoCD Route read")
+		}
+		if exists(t, c, &appsv1.Deployment{}, dv.Namespace, install.ForgejoServiceName) {
+			t.Error("Forgejo Deployment rendered without the ArgoCD host")
+		}
+	})
+	t.Run("admin secret", func(t *testing.T) {
+		dv := managedForgeCR()
+		reads := 0
+		c := testBuilder(t).WithObjects(dv).WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if key.Name == install.ForgejoAdminSecret {
+					if reads++; reads > 1 {
+						return errors.New("apiserver unavailable")
+					}
+				}
+				return cl.Get(ctx, key, obj, opts...)
+			},
+		}).Build()
+		r := newReconciler(c, depsOK)
+		if _, err := r.reconcileForge(context.Background(), dv, phaseCtx(r, dv)); err == nil {
+			t.Error("reconcileForge succeeded on a failed admin secret read")
+		}
+		if exists(t, c, &appsv1.Deployment{}, dv.Namespace, install.ForgejoServiceName) {
+			t.Error("Forgejo Deployment rendered without the admin secret hash")
+		}
+	})
+}
+
+// Every condition and derived field is re-derived from the current spec: a
+// switch from a managed forge with a platform repo to a BYO forge without one
+// must not leave the managed verdicts behind.
+func TestSpecChangeRetiresStaleStatus(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Forge = dotvirtv1alpha1.ForgeSpec{URL: "https://byo.example", CredentialsSecret: "byo-creds"}
+	var seed DotvirtReconciler
+	seed.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionTrue, "Ready", "managed Forgejo bootstrapped")
+	seed.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionTrue, "Ready", "platform repo present")
+	dv.Status.ForgeAdminHint = "managed hint"
+	creds := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "byo-creds", Namespace: dv.Namespace}}
+	c := testBuilder(t).WithObjects(dv, creds).Build()
+
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	got := getCR(t, c, dv)
+	if fc := cond(got, dotvirtv1alpha1.ConditionForgeReady); fc == nil || fc.Reason != "BringYourOwn" {
+		t.Errorf("ForgeReady = %+v, want the BYO verdict", fc)
+	}
+	if repo := cond(got, dotvirtv1alpha1.ConditionForgeRepoReady); repo != nil {
+		t.Errorf("ForgeRepoReady = %+v survived the platform repo's removal", repo)
+	}
+	if got.Status.ForgeAdminHint != "" {
+		t.Errorf("forgeAdminHint = %q survived the switch off managed", got.Status.ForgeAdminHint)
+	}
+}
+
+// The status diff's base is read uncached: a cache still holding the Ready of
+// two passes ago, behind the Provisioning the last pass wrote, would make a
+// return to Ready an empty patch and leave Provisioning on the server.
+func TestStatusBaseIsReadUncached(t *testing.T) {
+	dv := testCR()
+	c := testBuilder(t).WithObjects(dv).Build()
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	markOperandReady(t, c, dv)
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	cached := getCR(t, c, dv)
+
+	lastWrite := cached.DeepCopy()
+	lastWrite.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
+	if err := c.Status().Update(context.Background(), lastWrite); err != nil {
+		t.Fatal(err)
+	}
+	lagging := interceptor.NewClient(c, interceptor.Funcs{
+		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if out, ok := obj.(*dotvirtv1alpha1.Dotvirt); ok {
+				cached.DeepCopyInto(out)
+				return nil
+			}
+			return cl.Get(ctx, key, obj, opts...)
+		},
+	})
+	r := newReconciler(lagging, depsOK)
+	r.APIReader = c
+	reconcileOnce(t, r, dv)
+	if got := getCR(t, c, dv); got.Status.Phase != dotvirtv1alpha1.PhaseReady {
+		t.Errorf("phase = %q, want Ready: the diff ran against a stale base", got.Status.Phase)
+	}
+}
+
+// Prune and the finalizer delete one object at a time under a delete grant that
+// names each object (rbac_markers.go). Every object prune may sweep, across the
+// installs that render the most, must be named there and nothing may be deleted
+// cluster-wide or by collection: an unnamed object is skipped and left behind.
+func TestDeleteGrantCoversEveryRenderedName(t *testing.T) {
+	granted := map[string]bool{}
+	for _, role := range readClusterRoles(t, filepath.Join("..", "..", "config", "rbac", "role.yaml")) {
+		for _, rule := range role.Rules {
+			if slices.Contains(rule.Verbs, "deletecollection") {
+				t.Errorf("deletecollection granted on %v", rule.Resources)
+			}
+			if !slices.Contains(rule.Verbs, "delete") {
+				continue
+			}
+			if len(rule.ResourceNames) == 0 {
+				t.Errorf("delete on %v is not scoped by name", rule.Resources)
+			}
+			for _, g := range rule.APIGroups {
+				for _, res := range rule.Resources {
+					for _, name := range rule.ResourceNames {
+						granted[g+"/"+res+"/"+name] = true
+					}
+				}
+			}
+		}
+	}
+	scheme := testScheme(t)
+	scopes := map[schema.GroupKind]pruneScope{}
+	for _, sc := range pruneScopes() {
+		gvk, err := apiutil.GVKForObject(sc.list(), scheme)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scopes[schema.GroupKind{Group: gvk.Group, Kind: strings.TrimSuffix(gvk.Kind, "List")}] = sc
+	}
+
+	forgeDown := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer forgeDown.Close()
+	byo, creds := byoForgeCR(forgeDown.URL)
+	withIngress := managedForgeCR()
+	withIngress.Spec.Ingress.Host = "dotvirt.example"
+	for _, pass := range []struct {
+		name     string
+		dv       *dotvirtv1alpha1.Dotvirt
+		objs     []client.Object
+		platform platform.Platform
+		dryRun   bool
+	}{
+		// Real: the appset mirror and repo-creds Secrets render outside dry-run only.
+		{"BYO forge on OpenShift", byo, []client.Object{creds}, platform.OpenShift, false},
+		{"managed forge on OpenShift", managedForgeCR(), nil, platform.OpenShift, true},
+		{"managed forge behind Ingresses", withIngress, nil, platform.Kubernetes, true},
+	} {
+		var applied []objKey
+		c := testBuilder(t).WithObjects(append(pass.objs, pass.dv)...).WithInterceptorFuncs(interceptor.Funcs{
+			Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+				gvk, err := apiutil.GVKForObject(obj, cl.Scheme())
+				if err != nil {
+					return err
+				}
+				applied = append(applied, objKey{gvk.GroupKind(), obj.GetNamespace(), obj.GetName()})
+				return cl.Patch(ctx, obj, patch, opts...)
+			},
+		}).Build()
+		r := newReconciler(c, depsOK)
+		r.Platform, r.DryRun = pass.platform, pass.dryRun
+		reconcileOnce(t, r, pass.dv)
+		for _, k := range applied {
+			sc, prunable := scopes[k.gk]
+			if !prunable || (sc.where == writtenNS && k.namespace == pass.dv.Namespace) {
+				continue
+			}
+			resource, _ := apimeta.UnsafeGuessKindToResource(k.gk.WithVersion(""))
+			if !granted[k.gk.Group+"/"+resource.Resource+"/"+k.name] {
+				t.Errorf("%s: %s %s/%s is rendered, but the delete grant does not name it", pass.name, k.gk.Kind, k.namespace, k.name)
+			}
+		}
 	}
 }
