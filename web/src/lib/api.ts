@@ -327,6 +327,36 @@ function scopeQS(scope: ScopeQuery, extra?: Record<string, string>): string {
 	return qs({ project: scope.project, namespace: scope.namespace, node: scope.node, ...extra });
 }
 
+// Every create route, by the request body it takes. ?dryRun=true on any of
+// them renders what staging would write and stages nothing.
+const createRoutes = {
+	vm: '/api/vms',
+	template: '/api/templates/deploy',
+	network: '/api/networks',
+	uplink: '/api/uplinks',
+	egressFirewall: '/api/egressfirewalls',
+	egressIP: '/api/egressips',
+	externalRoute: '/api/externalroutes',
+	networkPolicy: '/api/networkpolicies',
+	adminNetworkPolicy: '/api/adminnetworkpolicies',
+	namespace: '/api/namespaces',
+	project: '/api/projects',
+} as const;
+export type CreateBodies = {
+	vm: CreateVMRequest;
+	template: gen.DeployTemplateRequest;
+	network: NetworkCreate;
+	uplink: UplinkCreate;
+	egressFirewall: EgressFirewallCreate;
+	egressIP: EgressIPCreate;
+	externalRoute: ExternalRouteCreate;
+	networkPolicy: NetworkPolicyCreate;
+	adminNetworkPolicy: AdminNetworkPolicyCreate;
+	namespace: NamespaceCreate;
+	project: ProjectCreate;
+};
+export type CreateKind = keyof CreateBodies;
+
 export const api = {
 	// Auth
 	login: (token: string) => post<User>('/api/login', { token }),
@@ -375,17 +405,24 @@ export const api = {
 	// What staging an edit would list, restart flags included; stages nothing.
 	previewEdit: (namespace: string, name: string, edit: Omit<EditRequest, 'sourceFile'>) =>
 		post<Change[]>(`${vmPath(namespace, name)}/edit/preview`, edit),
-	stageCreate: (req: CreateVMRequest) => post<DraftView>('/api/vms', req),
-	createNetwork: (req: NetworkCreate) => post<DraftView>('/api/networks', req),
-	createUplink: (req: UplinkCreate) => post<DraftView>('/api/uplinks', req),
-	createEgressFirewall: (req: EgressFirewallCreate) => post<DraftView>('/api/egressfirewalls', req),
-	createEgressIP: (req: EgressIPCreate) => post<DraftView>('/api/egressips', req),
-	createExternalRoute: (req: ExternalRouteCreate) => post<DraftView>('/api/externalroutes', req),
-	createNetworkPolicy: (req: NetworkPolicyCreate) => post<DraftView>('/api/networkpolicies', req),
+	stageCreate: (req: CreateVMRequest) => post<DraftView>(createRoutes.vm, req),
+	createNetwork: (req: NetworkCreate) => post<DraftView>(createRoutes.network, req),
+	createUplink: (req: UplinkCreate) => post<DraftView>(createRoutes.uplink, req),
+	createEgressFirewall: (req: EgressFirewallCreate) =>
+		post<DraftView>(createRoutes.egressFirewall, req),
+	createEgressIP: (req: EgressIPCreate) => post<DraftView>(createRoutes.egressIP, req),
+	createExternalRoute: (req: ExternalRouteCreate) =>
+		post<DraftView>(createRoutes.externalRoute, req),
+	createNetworkPolicy: (req: NetworkPolicyCreate) =>
+		post<DraftView>(createRoutes.networkPolicy, req),
 	createAdminNetworkPolicy: (req: AdminNetworkPolicyCreate) =>
-		post<DraftView>('/api/adminnetworkpolicies', req),
-	createNamespace: (req: NamespaceCreate) => post<DraftView>('/api/namespaces', req),
-	createProject: (req: ProjectCreate) => post<DraftView>('/api/projects', req),
+		post<DraftView>(createRoutes.adminNetworkPolicy, req),
+	createNamespace: (req: NamespaceCreate) => post<DraftView>(createRoutes.namespace, req),
+	createProject: (req: ProjectCreate) => post<DraftView>(createRoutes.project, req),
+	// The files a create would stage, rendered by its own route and staged
+	// nowhere: the create sheet's Show YAML.
+	previewCreate: <K extends CreateKind>(kind: K, body: CreateBodies[K]) =>
+		post<gen.StagePreview>(`${createRoutes[kind]}?dryRun=true`, body),
 
 	// DRS (platform tier): read the merged git/live view; enable/reconfigure and
 	// disable stage into the platform draft like every other cluster-scoped kind.
@@ -483,7 +520,7 @@ export const api = {
 	// and stages the VM into the draft; save derives a template from a VM's git
 	// manifest ("Clone to Template") - both land as PR-gated changes.
 	templates: () => get<{ templates: gen.Template[] }>('/api/templates'),
-	deployTemplate: (req: gen.DeployTemplateRequest) => post<DraftView>('/api/templates/deploy', req),
+	deployTemplate: (req: gen.DeployTemplateRequest) => post<DraftView>(createRoutes.template, req),
 	saveTemplate: (req: gen.SaveTemplateRequest) => post<DraftView>('/api/templates', req),
 	updateTemplate: (req: gen.UpdateTemplateRequest) => put<DraftView>('/api/templates', req),
 	resync: (namespace: string, name: string) =>

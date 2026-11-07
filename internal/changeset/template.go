@@ -21,28 +21,45 @@ import (
 // platform library); the render is pure computation, so deploying needs only
 // the authority to stage into the target project.
 func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libraryProj project.ProjectInfo, req model.DeployTemplateRequest) (model.DraftView, error) {
-	targetRead, err := c.read(targetProj)
+	entry, err := c.renderTemplate(targetProj, libraryProj, req)
 	if err != nil {
 		return model.DraftView{}, err
 	}
+	return c.stage(id, targetProj, entry)
+}
+
+// PreviewDeployFromTemplate is StageDeployFromTemplate without the store write.
+func (c *Coordinator) PreviewDeployFromTemplate(targetProj, libraryProj project.ProjectInfo, req model.DeployTemplateRequest) (model.StagePreview, error) {
+	entry, err := c.renderTemplate(targetProj, libraryProj, req)
+	if err != nil {
+		return model.StagePreview{}, err
+	}
+	return preview(targetProj, entry), nil
+}
+
+func (c *Coordinator) renderTemplate(targetProj, libraryProj project.ProjectInfo, req model.DeployTemplateRequest) (draft.Entry, error) {
+	targetRead, err := c.read(targetProj)
+	if err != nil {
+		return draft.Entry{}, err
+	}
 	if req.Template == "" || req.Namespace == "" {
-		return model.DraftView{}, fmt.Errorf("%w: template and namespace are required", model.ErrInvalid)
+		return draft.Entry{}, fmt.Errorf("%w: template and namespace are required", model.ErrInvalid)
 	}
 	// The template name becomes a repo path segment - same trust boundary as
 	// project/namespace names.
 	if err := validate.RequireDNS1123("template name", req.Template); err != nil {
-		return model.DraftView{}, err
+		return draft.Entry{}, err
 	}
 	libRead, err := c.read(libraryProj)
 	if err != nil {
-		return model.DraftView{}, err
+		return draft.Entry{}, err
 	}
 	raw, ok, err := libRead.LookupOnBranch(c.baseBranch, vmtemplate.Path(req.Template))
 	if err != nil {
-		return model.DraftView{}, err
+		return draft.Entry{}, err
 	}
 	if !ok {
-		return model.DraftView{}, fmt.Errorf("%w: template %q not in library %q", model.ErrNotFound, req.Template, libraryProj.Name)
+		return draft.Entry{}, fmt.Errorf("%w: template %q not in library %q", model.ErrNotFound, req.Template, libraryProj.Name)
 	}
 
 	params := maps.Clone(req.Parameters)
@@ -54,10 +71,10 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 	}
 	rendered, err := c.renderer.Render(raw, params, req.Namespace)
 	if err != nil {
-		return model.DraftView{}, err
+		return draft.Entry{}, err
 	}
 	if err := validate.RequireDNS1123("rendered VM name", rendered.Name); err != nil {
-		return model.DraftView{}, err
+		return draft.Entry{}, err
 	}
 	// Templates blueprint their VMs Halted; "Power on after deployment" flips
 	// the rendered manifest so the VM boots as soon as the merge syncs.
@@ -65,25 +82,22 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 		on := string(model.PowerOn)
 		patched, err := manifest.ApplyEdit(rendered.Manifest, req.Namespace, rendered.Name, manifest.VMEdit{Power: &on})
 		if err != nil {
-			return model.DraftView{}, fmt.Errorf("power on rendered VM: %w", err)
+			return draft.Entry{}, fmt.Errorf("power on rendered VM: %w", err)
 		}
 		rendered.Manifest = patched
 	}
 
 	if err := c.requireUndeclaredVM(targetRead, req.Namespace, rendered.Name); err != nil {
-		return model.DraftView{}, err
+		return draft.Entry{}, err
 	}
-	if err := c.store.Stage(id.Username, targetProj.Name, draft.Entry{
+	return draft.Entry{
 		Kind:         draft.KindCreate,
 		Namespace:    req.Namespace,
 		Name:         rendered.Name,
 		SourceFile:   vmgen.ManifestPath(req.Namespace, rendered.Name),
 		Manifest:     string(rendered.Manifest),
 		FromTemplate: libraryProj.Name + "/" + req.Template,
-	}); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, targetProj)
+	}, nil
 }
 
 // StageSaveTemplate derives a template from an existing VM's git manifest and

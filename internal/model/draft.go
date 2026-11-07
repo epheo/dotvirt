@@ -186,6 +186,24 @@ type DraftView struct {
 	DefaultBody  string `json:"defaultBody,omitempty"`
 }
 
+// StagePreview is what a create form would stage, rendered by the staging
+// path itself but never recorded: the files its pull request would carry.
+// Answered by a create route called with ?dryRun=true.
+type StagePreview struct {
+	// Project names the repo the change lands in: the tenant project owning
+	// the object, or the platform project for a cluster-scoped one.
+	Project string        `json:"project"`
+	Files   []PreviewFile `json:"files"`
+}
+
+// PreviewFile is one file a staged create writes. Kind is "edit" when git
+// already declares the object: staging replaces that file instead.
+type PreviewFile struct {
+	Kind string `json:"kind"` // create | edit
+	Path string `json:"path"`
+	YAML string `json:"yaml"`
+}
+
 // ProposeResult is returned after proposing the draft as a PR.
 type ProposeResult struct {
 	Branch     string `json:"branch"`

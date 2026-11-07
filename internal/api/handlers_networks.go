@@ -23,6 +23,18 @@ type nsPeek struct {
 	Namespace string `json:"namespace"`
 }
 
+// stageCreate is every network-family create's tail, past its gates: stage
+// the form, or render it for a dry run.
+func (s *Server) stageCreate(w http.ResponseWriter, r *http.Request, sc scope, resource draft.Resource, raw []byte) {
+	if dryRun(r) {
+		p, err := s.draft.PreviewCreate(sc.proj, resource, raw)
+		respond(w, p, err)
+		return
+	}
+	view, err := s.draft.StageCreate(sc.id, sc.proj, resource, raw)
+	respond(w, view, err)
+}
+
 // platformCreate builds the handler for a cluster-scoped create: always the
 // platform tier, SSAR-gated on the caller's authority to create ref's kind.
 func (s *Server) platformCreate(ref ssarRef, resource draft.Resource) http.HandlerFunc {
@@ -35,8 +47,7 @@ func (s *Server) platformCreate(ref ssarRef, resource draft.Resource) http.Handl
 		if !ok {
 			return
 		}
-		view, err := s.draft.StageCreate(sc.id, sc.proj, resource, raw)
-		respond(w, view, err)
+		s.stageCreate(w, r, sc, resource, raw)
 	}
 }
 
@@ -58,8 +69,7 @@ func (s *Server) namespacedCreate(what string, resource draft.Resource) http.Han
 		if !ok || !s.authorizeObject(w, r, sc, verbCreate, string(resource), p.Namespace, "") {
 			return
 		}
-		view, err := s.draft.StageCreate(sc.id, sc.proj, resource, raw)
-		respond(w, view, err)
+		s.stageCreate(w, r, sc, resource, raw)
 	}
 }
 
@@ -90,8 +100,7 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	view, err := s.draft.StageCreate(sc.id, sc.proj, draft.ResourceNetwork, raw)
-	respond(w, view, err)
+	s.stageCreate(w, r, sc, draft.ResourceNetwork, raw)
 }
 
 // handleCreateAdminNetworkPolicy stages a cluster-wide admin DFW policy
@@ -112,8 +121,7 @@ func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	view, err := s.draft.StageCreate(sc.id, sc.proj, draft.ResourceAdminNetworkPolicy, raw)
-	respond(w, view, err)
+	s.stageCreate(w, r, sc, draft.ResourceAdminNetworkPolicy, raw)
 }
 
 // handleNetworks lists the networks (Distributed Port Groups) the caller may

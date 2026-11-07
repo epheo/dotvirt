@@ -71,32 +71,63 @@ func (c *Coordinator) PreviewEdit(proj project.ProjectInfo, namespace, name stri
 // to its manifest here, once, so the preview shows the bytes propose commits and
 // a spec the renderer refuses fails at the form rather than at propose.
 func (c *Coordinator) StageCreateVM(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	read, err := c.read(proj)
+	entry, err := c.renderVM(proj, rawSpec)
 	if err != nil {
 		return model.DraftView{}, err
+	}
+	return c.stage(id, proj, entry)
+}
+
+// PreviewCreateVM is StageCreateVM without the store write.
+func (c *Coordinator) PreviewCreateVM(proj project.ProjectInfo, rawSpec json.RawMessage) (model.StagePreview, error) {
+	entry, err := c.renderVM(proj, rawSpec)
+	if err != nil {
+		return model.StagePreview{}, err
+	}
+	return preview(proj, entry), nil
+}
+
+func (c *Coordinator) renderVM(proj project.ProjectInfo, rawSpec json.RawMessage) (draft.Entry, error) {
+	read, err := c.read(proj)
+	if err != nil {
+		return draft.Entry{}, err
 	}
 	var spec vmgen.Spec
 	if err := json.Unmarshal(rawSpec, &spec); err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: invalid VM spec: %v", model.ErrInvalid, err)
+		return draft.Entry{}, fmt.Errorf("%w: invalid VM spec: %v", model.ErrInvalid, err)
 	}
 	path, content, err := vmgen.Manifest(spec)
 	if err != nil {
-		return model.DraftView{}, invalid(err)
+		return draft.Entry{}, invalid(err)
 	}
 	if err := c.requireUndeclaredVM(read, spec.Namespace, spec.Name); err != nil {
-		return model.DraftView{}, err
+		return draft.Entry{}, err
 	}
-	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
+	return draft.Entry{
 		Kind:       draft.KindCreate,
 		Namespace:  spec.Namespace,
 		Name:       spec.Name,
 		SourceFile: path,
 		Manifest:   string(content),
 		FromWizard: true,
-	}); err != nil {
+	}, nil
+}
+
+// stage records one rendered entry and answers with the draft it joined.
+func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entry draft.Entry) (model.DraftView, error) {
+	if err := c.store.Stage(id.Username, proj.Name, entry); err != nil {
 		return model.DraftView{}, err
 	}
 	return c.Get(id, proj)
+}
+
+// preview lists what staging entries into proj's draft would write.
+func preview(proj project.ProjectInfo, entries ...draft.Entry) model.StagePreview {
+	p := model.StagePreview{Project: proj.Name, Files: make([]model.PreviewFile, 0, len(entries))}
+	for _, e := range entries {
+		p.Files = append(p.Files, model.PreviewFile{Kind: string(e.Kind), Path: e.SourceFile, YAML: e.Manifest})
+	}
+	return p
 }
 
 // requireUndeclaredVM refuses a create of a VM the base branch already
@@ -127,28 +158,42 @@ func (c *Coordinator) requireUndeclaredVM(read *git.Repo, namespace, name string
 // and an edit - the same rendering replacing the declaring file - when it does:
 // one path for the form that creates an object and the form that changes it.
 func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, render func() (draft.Entry, error)) (model.DraftView, error) {
-	read, err := c.read(proj)
+	entry, err := c.resolveRendered(proj, render)
 	if err != nil {
 		return model.DraftView{}, err
 	}
+	return c.stage(id, proj, entry)
+}
+
+// previewRendered is stageRendered without the store write.
+func (c *Coordinator) previewRendered(proj project.ProjectInfo, render func() (draft.Entry, error)) (model.StagePreview, error) {
+	entry, err := c.resolveRendered(proj, render)
+	if err != nil {
+		return model.StagePreview{}, err
+	}
+	return preview(proj, entry), nil
+}
+
+func (c *Coordinator) resolveRendered(proj project.ProjectInfo, render func() (draft.Entry, error)) (draft.Entry, error) {
+	read, err := c.read(proj)
+	if err != nil {
+		return draft.Entry{}, err
+	}
 	entry, err := render()
 	if err != nil {
-		return model.DraftView{}, invalid(err)
+		return draft.Entry{}, invalid(err)
 	}
 	entry.Kind = draft.KindCreate
 	idx, err := read.DeclaredFilesOnBranch(c.baseBranch)
 	if err != nil {
-		return model.DraftView{}, err
+		return draft.Entry{}, err
 	}
 	if path, err := soleDeclarer(idx, git.DeclaredRefs(entry.SourceFile, []byte(entry.Manifest))); err != nil {
-		return model.DraftView{}, err
+		return draft.Entry{}, err
 	} else if path != "" {
 		entry.Kind, entry.SourceFile = draft.KindEdit, path
 	}
-	if err := c.store.Stage(id.Username, proj.Name, entry); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
+	return entry, nil
 }
 
 // soleDeclarer is the base-branch file declaring exactly refs, or "" when git
@@ -259,11 +304,28 @@ func render[S any](what string, manifest func(S) (path string, content []byte, e
 // the object's scope - the tenant repo owning a namespaced object, the
 // platform repo for a cluster-scoped one - so resource only picks the renderer.
 func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, resource draft.Resource, rawSpec json.RawMessage) (model.DraftView, error) {
-	stage, ok := renderers[resource]
-	if !ok {
-		return model.DraftView{}, fmt.Errorf("%w: %s has no create form", model.ErrInvalid, resource)
+	render, err := createForm(resource, rawSpec)
+	if err != nil {
+		return model.DraftView{}, err
 	}
-	return c.stageRendered(id, proj, func() (draft.Entry, error) { return stage(rawSpec) })
+	return c.stageRendered(id, proj, render)
+}
+
+// PreviewCreate is StageCreate without the store write.
+func (c *Coordinator) PreviewCreate(proj project.ProjectInfo, resource draft.Resource, rawSpec json.RawMessage) (model.StagePreview, error) {
+	render, err := createForm(resource, rawSpec)
+	if err != nil {
+		return model.StagePreview{}, err
+	}
+	return c.previewRendered(proj, render)
+}
+
+func createForm(resource draft.Resource, rawSpec json.RawMessage) (func() (draft.Entry, error), error) {
+	r, ok := renderers[resource]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s has no create form", model.ErrInvalid, resource)
+	}
+	return func() (draft.Entry, error) { return r(rawSpec) }, nil
 }
 
 // StageCreateNamespace records a new namespace (with an optional primary "VM
@@ -273,20 +335,37 @@ func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, re
 // workloads into it once it exists. The namespace + primary UDN land as one
 // multi-doc manifest.
 func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (model.DraftView, error) {
+	render, err := c.namespaceForm(joinProj, rawSpec, live)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	return c.stageRendered(id, commitProj, render)
+}
+
+// PreviewCreateNamespace is StageCreateNamespace without the store write.
+func (c *Coordinator) PreviewCreateNamespace(commitProj, joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (model.StagePreview, error) {
+	render, err := c.namespaceForm(joinProj, rawSpec, live)
+	if err != nil {
+		return model.StagePreview{}, err
+	}
+	return c.previewRendered(commitProj, render)
+}
+
+func (c *Coordinator) namespaceForm(joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (func() (draft.Entry, error), error) {
 	var spec netgen.NamespaceSpec
 	if err := json.Unmarshal(rawSpec, &spec); err != nil {
-		return model.DraftView{}, invalid(fmt.Errorf("invalid namespace spec: %v", err))
+		return nil, invalid(fmt.Errorf("invalid namespace spec: %v", err))
 	}
 	// An existing namespace joins as it is; only a new one may take a VM Network.
 	ln, err := live.lookup(spec.Name)
 	if err != nil {
-		return model.DraftView{}, err
+		return nil, err
 	}
 	if err := primaryNetworkOnExisting(spec.Name, ln, spec.VMNetwork); err != nil {
-		return model.DraftView{}, err
+		return nil, err
 	}
 	spec.Live = ln
-	return c.stageRendered(id, commitProj, func() (draft.Entry, error) {
+	return func() (draft.Entry, error) {
 		if joinProj.Repo == "" {
 			return draft.Entry{}, fmt.Errorf("the joining project has no repo")
 		}
@@ -306,7 +385,7 @@ func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinPro
 			SourceFile: path,
 			Manifest:   string(content),
 		}, err
-	})
+	}, nil
 }
 
 // StageDelete records the removal of an existing object (a VM when resource is

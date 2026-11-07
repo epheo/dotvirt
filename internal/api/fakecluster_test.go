@@ -26,6 +26,7 @@ import (
 	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
+	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
@@ -391,6 +392,26 @@ func (d *planeDraft) StageCreateNamespace(_ auth.Identity, commit, join project.
 func (d *planeDraft) StageCreateProject(_ auth.Identity, commit project.ProjectInfo, spec json.RawMessage, _ changeset.LiveNamespaces) (model.DraftView, error) {
 	d.record("StageCreateProject "+commit.Name, spec)
 	return stagedView, nil
+}
+
+func (d *planeDraft) StageCreate(_ auth.Identity, commit project.ProjectInfo, resource draft.Resource, spec json.RawMessage) (model.DraftView, error) {
+	d.record("StageCreate "+commit.Name+" "+string(resource), spec)
+	return stagedView, nil
+}
+
+func (d *planeDraft) PreviewCreate(commit project.ProjectInfo, resource draft.Resource, spec json.RawMessage) (model.StagePreview, error) {
+	d.record("PreviewCreate "+commit.Name+" "+string(resource), spec)
+	return model.StagePreview{Project: commit.Name}, nil
+}
+
+func (d *planeDraft) PreviewCreateNamespace(commit, join project.ProjectInfo, spec json.RawMessage, _ changeset.LiveNamespaces) (model.StagePreview, error) {
+	d.record("PreviewCreateNamespace "+commit.Name+","+join.Name, spec)
+	return model.StagePreview{Project: commit.Name}, nil
+}
+
+func (d *planeDraft) PreviewCreateProject(commit project.ProjectInfo, spec json.RawMessage, _ changeset.LiveNamespaces) (model.StagePreview, error) {
+	d.record("PreviewCreateProject "+commit.Name, spec)
+	return model.StagePreview{Project: commit.Name}, nil
 }
 
 func (d *planeDraft) AdoptProject(_ auth.Identity, commit, target project.ProjectInfo, owners []string, _ changeset.LiveNamespaces) (model.DraftView, error) {
