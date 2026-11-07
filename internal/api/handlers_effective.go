@@ -67,19 +67,31 @@ var clusterPolicyRefs = map[model.PolicyKind]ssarRef{
 	model.PolicyRoute:    ssarExtRoute,
 }
 
-// redactSubjects strips a cluster-tier policy's enumerated subject namespaces
-// for callers without authority over the kind. The rules stay - a rule that
-// governs the caller's workload is never hidden - but where else an admin
-// policy applies (namespaces across other tenants) is the rollup-tier
-// information /api/policies gates, so the same authority gates it here.
+// redactSubjects strips what a cluster-tier policy says about other tenants
+// for callers without authority over the kind: its subject namespaces, the
+// target summary that spells the same selector, and the apply error text. The
+// rules stay - a rule that governs the caller's workload is never hidden - but
+// where else an admin policy applies is the rollup-tier information
+// /api/policies gates, so the same authority gates it here.
 func redactSubjects(can func(model.PolicyKind) bool, p *model.Policy) {
-	switch p.Kind {
-	case model.PolicyAdmin, model.PolicyBaseline, model.PolicyEgressIP, model.PolicyRoute:
-		if p.Namespaces != nil && !can(p.Kind) {
-			p.Namespaces = nil
-		}
+	if _, cluster := clusterPolicyRefs[p.Kind]; !cluster || can(p.Kind) {
+		return
+	}
+	p.Namespaces = nil
+	if p.Target != "" {
+		p.Target = redactedTarget
+	}
+	if p.SyncError != "" {
+		p.SyncError = redactedSyncError
 	}
 }
+
+// redactedTarget and redactedSyncError stand in for a cluster-tier policy's
+// subject summary and apply error, which can name other tenants' namespaces.
+const (
+	redactedTarget    = "selected namespaces"
+	redactedSyncError = "the platform could not apply this policy"
+)
 
 func (s *Server) redactEffective(ctx context.Context, sc scope, eff *model.EffectivePolicy) {
 	can := s.clusterAuthority(ctx, sc.id, sc.cluster)

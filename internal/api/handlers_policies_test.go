@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/epheo/dotvirt/internal/model"
@@ -41,10 +42,22 @@ func TestScopePolicies(t *testing.T) {
 func TestRedactSubjects(t *testing.T) {
 	none := func(model.PolicyKind) bool { return false }
 
-	anp := model.Policy{Name: "lockdown", Kind: model.PolicyAdmin, Namespaces: []string{"tenant-a", "tenant-b"}}
+	anp := model.Policy{
+		Name: "lockdown", Kind: model.PolicyAdmin, Namespaces: []string{"tenant-a", "tenant-b"},
+		Target: "tenant-a, tenant-b pods app=web", SyncError: "namespace tenant-b: denied",
+	}
 	redactSubjects(none, &anp)
 	if anp.Namespaces != nil {
 		t.Errorf("admin subject namespaces survived without authority: %v", anp.Namespaces)
+	}
+	if strings.Contains(anp.Target, "tenant-b") || strings.Contains(anp.SyncError, "tenant-b") {
+		t.Errorf("the target or apply error still names another tenant: %+v", anp)
+	}
+	// A selector netgen cannot enumerate still spells namespace names.
+	mixed := model.Policy{Name: "mixed", Kind: model.PolicyBaseline, Target: "tenant-b, env in (prod)"}
+	redactSubjects(none, &mixed)
+	if strings.Contains(mixed.Target, "tenant-b") {
+		t.Errorf("an unenumerated selector's target survived: %q", mixed.Target)
 	}
 	if anp.Name != "lockdown" {
 		t.Error("the binding itself must stay")
@@ -56,9 +69,9 @@ func TestRedactSubjects(t *testing.T) {
 		t.Error("namespace-tier policies are not admin-tier: must keep their namespaces")
 	}
 
-	allowed := model.Policy{Name: "lockdown", Kind: model.PolicyAdmin, Namespaces: []string{"tenant-a"}}
+	allowed := model.Policy{Name: "lockdown", Kind: model.PolicyAdmin, Namespaces: []string{"tenant-a"}, Target: "tenant-a"}
 	redactSubjects(func(model.PolicyKind) bool { return true }, &allowed)
-	if allowed.Namespaces == nil {
-		t.Error("authority over the kind keeps the enumeration")
+	if allowed.Namespaces == nil || allowed.Target != "tenant-a" {
+		t.Error("authority over the kind keeps the enumeration and the target")
 	}
 }
