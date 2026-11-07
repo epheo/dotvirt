@@ -401,11 +401,18 @@ func TestFailedBuildRetriesWithoutAnEvent(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("a failed first build was never retried")
 	}
-	h.mu.Lock()
-	pending := len(h.retries)
-	h.mu.Unlock()
-	if pending != 0 {
-		t.Errorf("a built identity kept %d pending retries", pending)
+	// The frame reaches the conn from inside the build; the pass settles the
+	// retry only after every build of the pass returns.
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		h.mu.Lock()
+		pending := len(h.retries)
+		h.mu.Unlock()
+		if pending == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("a built identity kept %d pending retries", pending)
+		}
 	}
 }
 
