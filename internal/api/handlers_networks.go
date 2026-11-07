@@ -150,19 +150,22 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		PhysicalAdapters: []model.PhysicalAdapter{},
 		NMStatePresent:   full.NMStatePresent,
 	}
+	ctx := r.Context()
+	can := func(ref ssarRef) bool {
+		ok, _ := s.can(ctx, id, c, verbCreate, ref, "")
+		return ok
+	}
+	cudn := can(ssarCUDN)
 	// Per-object drift: attach each segment's own ArgoCD sync/health at serve time
 	// (always fresh, off the cached catalog) - the same surface VMs carry.
 	s.enrichNetworkDrift(out.Networks)
+	if !cudn {
+		redactSharedErrors(out.Networks)
+	}
 	// Per-action authoring authority: the same SSARs the create handlers enforce, so
 	// the UI gates each button precisely. CanManage stays the coarse CUDN signal that
 	// gates the platform-draft view. All false when no platform repo is configured.
 	if s.cfg.PlatformRepo != "" {
-		ctx := r.Context()
-		can := func(ref ssarRef) bool {
-			ok, _ := s.can(ctx, id, c, verbCreate, ref, "")
-			return ok
-		}
-		cudn := can(ssarCUDN)
 		out.CanManage = cudn
 		out.Caps = model.NetworkCaps{
 			Uplink:             can(ssarUplink),
@@ -216,6 +219,19 @@ func scopeNetworks(nets []model.Network, visible map[string]bool) []model.Networ
 	}
 	return out
 }
+
+// redactSharedErrors replaces a shared network's apply error with a generic
+// line: a CUDN's error can name every namespace its selector reaches, which
+// only its authors may read.
+func redactSharedErrors(nets []model.Network) {
+	for i := range nets {
+		if nets[i].Scope == model.ScopeShared && nets[i].SyncError != "" {
+			nets[i].SyncError = sharedNetworkErrorForTenants
+		}
+	}
+}
+
+const sharedNetworkErrorForTenants = "the platform could not apply this network"
 
 // enrichNetworkDrift attaches each segment's own ArgoCD sync/health/apply-error
 // - the same per-object drift plane VMs use. Mutates the scoped copies in place
