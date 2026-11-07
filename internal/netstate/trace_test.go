@@ -170,8 +170,10 @@ func TestTraceBaselineAndDefault(t *testing.T) {
 	}
 }
 
-// Isolated primary networks are unreachable before any policy runs; a shared
-// CUDN-generated secondary segment is surfaced as a bypass, not a verdict.
+// Isolated primary networks carry nothing, so no policy runs; a shared
+// CUDN-generated secondary segment is then the only path, unfiltered: the
+// answer is Conditional with the bypass as its reason, never a certain
+// Unreachable. Without one, Unreachable is certain.
 func TestTraceUnreachableAndSegmentBypass(t *testing.T) {
 	s := New(nil, nil)
 	add(t, s.udn, map[string]any{
@@ -200,20 +202,25 @@ func TestTraceUnreachableAndSegmentBypass(t *testing.T) {
 	dst.Nets = []string{"team-b/shared-vlan"}
 
 	res := s.Trace(src, &dst, "", "TCP", 5432)
-	if res.Verdict != "Unreachable" {
-		t.Fatalf("isolated primaries: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	if res.Verdict != "Conditional" {
+		t.Fatalf("isolated primaries sharing a segment: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 	var bypass bool
 	for _, st := range res.Steps {
-		if st.Stage == "segment" && st.Action == "Bypass" {
+		if st.Stage == "segment" && st.Action == "Bypass" && st.Conditional {
 			bypass = true
 		}
-		if st.Stage == "admin" || st.Stage == "dfw" || st.Stage == "baseline" {
-			t.Fatalf("unreachable flow must not walk policy, got %v", stepKinds(t, res))
+		if st.Decisive || st.Stage == "admin" || st.Stage == "dfw" || st.Stage == "baseline" {
+			t.Fatalf("no step decides a flow only the bypass can carry, got %+v", res.Steps)
 		}
 	}
 	if !bypass {
-		t.Fatalf("shared segment must surface as bypass, got %v", stepKinds(t, res))
+		t.Fatalf("shared segment must surface as a flagged bypass, got %v", stepKinds(t, res))
+	}
+
+	dst.Nets = nil
+	if res := s.Trace(src, &dst, "", "TCP", 5432); res.Verdict != "Unreachable" {
+		t.Fatalf("isolated primaries, nothing shared: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 }
 
@@ -510,5 +517,240 @@ func TestTraceNetpolSameNamespacePeer(t *testing.T) {
 	other := wl("team-b", "web", nil, map[string]string{"app": "web"})
 	if res := s.Trace(other, &dst, "", "TCP", 5432); res.Verdict != "Deny" {
 		t.Fatalf("other-ns web: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+}
+
+// Localnet segments meet on the fabric: different objects mapping one physical
+// network and VLAN are one layer-2 domain, so the trace must surface the
+// bypass; another VLAN on the same physical network is not.
+func TestTraceLocalnetSegmentByPhysnetVLAN(t *testing.T) {
+	s := New(nil, nil)
+	nad := func(ns, name, config string, owner ...any) {
+		meta := map[string]any{"name": name, "namespace": ns}
+		if len(owner) > 0 {
+			meta["ownerReferences"] = owner
+		}
+		add(t, s.nad, map[string]any{
+			"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
+			"metadata": meta, "spec": map[string]any{"config": config},
+		})
+	}
+	nad("team-a", "dc-100", `{"name":"cluster_udn_dc-100","topology":"localnet","physicalNetworkName":"datacenter","vlanID":100}`,
+		map[string]any{"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork", "name": "dc-100", "uid": "x"})
+	nad("team-b", "legacy", `{"name":"datacenter","topology":"localnet","vlanID":100}`)
+	nad("team-b", "other-vlan", `{"name":"other","topology":"localnet","physicalNetworkName":"datacenter","vlanID":200}`)
+
+	src := wl("team-a", "web", nil, nil)
+	src.Nets = []string{"team-a/dc-100"}
+	dst := wl("team-b", "db", nil, nil)
+	dst.Nets = []string{"team-b/legacy"}
+	res := s.Trace(src, &dst, "", "TCP", 5432)
+	var bypass int
+	for _, st := range res.Steps {
+		if st.Stage == "segment" && st.Action == "Bypass" {
+			bypass++
+		}
+	}
+	if bypass != 1 {
+		t.Fatalf("same physnet+VLAN must be one shared segment, got %v", stepKinds(t, res))
+	}
+
+	dst.Nets = []string{"team-b/other-vlan"}
+	for _, st := range s.Trace(src, &dst, "", "TCP", 5432).Steps {
+		if st.Stage == "segment" {
+			t.Fatalf("another VLAN is another domain, got %+v", st)
+		}
+	}
+}
+
+func anp(t *testing.T, s *Snapshot, name string, priority int64, egress ...any) {
+	t.Helper()
+	add(t, s.anp, map[string]any{
+		"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "AdminNetworkPolicy",
+		"metadata": map[string]any{"name": name},
+		"spec": map[string]any{
+			"priority": priority,
+			"subject":  map[string]any{"namespaces": map[string]any{}},
+			"egress":   egress,
+		},
+	})
+}
+
+func anpEgress(action string, namespaces ...any) map[string]any {
+	return map[string]any{"action": action, "to": []any{map[string]any{"namespaces": nameInSelector(namespaces...)}}}
+}
+
+// OVN-K leaves the order between equal-priority ANPs undefined: when more than
+// one of them may decide, no verdict is certain. One deciding policy at a
+// shared priority is still certain, and agreeing Passes still converge.
+func TestTraceEqualPriorityANPs(t *testing.T) {
+	src := wl("team-b", "client", nil, nil)
+	dst := wl("team-a", "web", nil, nil)
+
+	s := New(nil, nil)
+	anp(t, s, "a-deny", 5, anpEgress("Deny", "team-a"))
+	anp(t, s, "b-allow", 5, anpEgress("Allow", "team-a"))
+	res := s.Trace(src, &dst, "", "TCP", 443)
+	if res.Verdict != "Conditional" {
+		t.Fatalf("conflicting equal-priority ANPs: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	var flagged int
+	for _, st := range res.Steps {
+		if st.Stage == "admin" && st.Conditional && strings.Contains(st.Note, "same priority") {
+			flagged++
+		}
+	}
+	if flagged != 2 {
+		t.Fatalf("both rules must stay visible and flagged, got %+v", res.Steps)
+	}
+
+	s = New(nil, nil)
+	anp(t, s, "a-deny", 5, anpEgress("Deny", "team-a"))
+	anp(t, s, "b-elsewhere", 5, anpEgress("Allow", "team-c"))
+	if res := s.Trace(src, &dst, "", "TCP", 443); res.Verdict != "Deny" {
+		t.Fatalf("one deciding policy at the priority: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+
+	s = New(nil, nil)
+	anp(t, s, "a-pass", 5, anpEgress("Pass", "team-a"))
+	anp(t, s, "b-pass", 5, anpEgress("Pass", "team-a"))
+	if res := s.Trace(src, &dst, "", "TCP", 443); res.Verdict != "Allow" {
+		t.Fatalf("agreeing passes converge: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+}
+
+// A NetworkPolicy whose selection cannot be resolved may not apply, so its
+// allow rule is a maybe, never the deciding rule.
+func TestTraceProjectSelectionUnresolved(t *testing.T) {
+	s := New(nil, nil)
+	add(t, s.netpol, map[string]any{
+		"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
+		"metadata": map[string]any{"name": "isolate", "namespace": "team-a"},
+		"spec":     map[string]any{"podSelector": map[string]any{}, "policyTypes": []any{"Ingress"}},
+	})
+	add(t, s.netpol, map[string]any{
+		"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
+		"metadata": map[string]any{"name": "unreadable", "namespace": "team-a"},
+		"spec": map[string]any{
+			"podSelector": map[string]any{"matchExpressions": []any{
+				map[string]any{"key": "app", "operator": "Bogus"},
+			}},
+			"policyTypes": []any{"Ingress"},
+			"ingress":     []any{map[string]any{}},
+		},
+	})
+	src := wl("team-b", "client", nil, nil)
+	dst := wl("team-a", "web", nil, map[string]string{"app": "web"})
+	res := s.Trace(src, &dst, "", "TCP", 443)
+	if res.Verdict != "Conditional" {
+		t.Fatalf("allow from an unresolved selection: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+}
+
+// An external flow is filtered only on the primary NIC. With no primary, a
+// secondary NIC is the only way out and no cluster control applies; beside a
+// primary, a VLAN NIC leaves a cluster Deny inconclusive; with no NIC at all
+// nothing leaves.
+func TestTraceExternalVLAN(t *testing.T) {
+	s := New(nil, nil)
+	add(t, s.nad, map[string]any{
+		"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
+		"metadata": map[string]any{"name": "vlan10", "namespace": "team-a"},
+		"spec":     map[string]any{"config": `{"name":"vlan10","topology":"localnet","physicalNetworkName":"dc","vlanID":10}`},
+	})
+	add(t, s.egressfw, map[string]any{
+		"apiVersion": "k8s.ovn.org/v1", "kind": "EgressFirewall",
+		"metadata": map[string]any{"name": "default", "namespace": "team-a"},
+		"spec": map[string]any{"egress": []any{
+			map[string]any{"type": "Deny", "to": map[string]any{"cidrSelector": "0.0.0.0/0"}},
+		}},
+	})
+
+	vlanOnly := wl("team-a", "appliance", nil, nil, "192.0.2.5")
+	vlanOnly.PodNet, vlanOnly.Nets = false, []string{"team-a/vlan10"}
+	res := s.Trace(vlanOnly, nil, "203.0.113.9", "TCP", 443)
+	if res.Verdict != "Conditional" {
+		t.Fatalf("VLAN-only source: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	for _, st := range res.Steps {
+		if st.Stage == "gateway" || st.Stage == "admin" || st.Stage == "default" {
+			t.Fatalf("no cluster control filters a VLAN-only source, got %v", stepKinds(t, res))
+		}
+	}
+
+	both := wl("team-a", "web", nil, nil, "10.128.2.5")
+	both.Nets = []string{"team-a/vlan10"}
+	if res := s.Trace(both, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Conditional" {
+		t.Fatalf("primary plus VLAN under a gateway deny: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+
+	internal := wl("team-a", "backend", nil, nil)
+	internal.PodNet, internal.Nets = false, []string{"team-a/db-segment"}
+	if res := s.Trace(internal, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Conditional" {
+		t.Fatalf("secondary-only source, a router may carry it: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+
+	bare := wl("team-a", "island", nil, nil)
+	bare.PodNet = false
+	if res := s.Trace(bare, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Unreachable" {
+		t.Fatalf("no NIC: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+}
+
+// The gateway runs in its own OVN ACL stage: an admin Allow ends the egress
+// tiers but never skips the EgressFirewall.
+func TestTraceExternalAdminAllowMeetsGateway(t *testing.T) {
+	s := New(nil, nil)
+	anp(t, s, "allow-partner", 1, map[string]any{
+		"action": "Allow", "to": []any{map[string]any{"networks": []any{"198.51.100.0/24"}}},
+	})
+	add(t, s.egressfw, map[string]any{
+		"apiVersion": "k8s.ovn.org/v1", "kind": "EgressFirewall",
+		"metadata": map[string]any{"name": "default", "namespace": "team-a"},
+		"spec": map[string]any{"egress": []any{
+			map[string]any{"type": "Deny", "to": map[string]any{"cidrSelector": "0.0.0.0/0"}},
+		}},
+	})
+	src := wl("team-a", "web", nil, nil, "10.128.2.5")
+	res := s.Trace(src, nil, "198.51.100.7", "TCP", 443)
+	if res.Verdict != "Deny" {
+		t.Fatalf("admin allow then gateway deny: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	last := res.Steps[len(res.Steps)-1]
+	if last.Stage != "gateway" || last.Action != "Deny" || !last.Decisive {
+		t.Fatalf("the gateway must decide, got %v", stepKinds(t, res))
+	}
+}
+
+// OVN-K never programs an ANP past priority 99, but a stale in-range version
+// may still be: its rules stay visible and only ever weigh as maybes, never as
+// the deciding Deny.
+func TestTraceUnenforcedANPPriority(t *testing.T) {
+	src := wl("team-b", "client", nil, nil)
+	dst := wl("team-a", "web", nil, nil)
+
+	s := New(nil, nil)
+	anp(t, s, "too-low", 500, anpEgress("Deny", "team-a"))
+	res := s.Trace(src, &dst, "", "TCP", 443)
+	if res.Verdict != "Conditional" {
+		t.Fatalf("unenforced deny vs default allow: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	var noted bool
+	for _, st := range res.Steps {
+		if st.Stage == "admin" && st.Action == "Deny" {
+			if st.Decisive || !st.Conditional || !strings.Contains(st.Note, "does not enforce priority 500") {
+				t.Fatalf("unenforced rule must be a flagged maybe, got %+v", st)
+			}
+			noted = true
+		}
+	}
+	if !noted {
+		t.Fatalf("unenforced rule must stay visible, got %v", stepKinds(t, res))
+	}
+
+	// An enforced lower priority number still decides, and agrees.
+	anp(t, s, "lockdown", 10, anpEgress("Deny", "team-a"))
+	if res := s.Trace(src, &dst, "", "TCP", 443); res.Verdict != "Deny" {
+		t.Fatalf("enforced deny agreeing with the unenforced one: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 }

@@ -39,6 +39,7 @@ import (
 type fakeCluster struct {
 	t   *testing.T
 	srv *httptest.Server
+	sa  *cluster.Client // dotvirt's SA over srv, set by server
 
 	namespaces []corev1.Namespace
 	vms        []kubevirtcorev1.VirtualMachine
@@ -215,6 +216,7 @@ func (fc *fakeCluster) server(d coordinator, cfg Config) *Server {
 	if err != nil {
 		t.Fatalf("SA client: %v", err)
 	}
+	fc.sa = sa
 	bus := eventbus.New()
 	state := clusterstate.New(sa, "dotvirt.io/project", bus)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -394,11 +396,6 @@ func (d *planeDraft) StageCreateProject(_ auth.Identity, commit project.ProjectI
 	return stagedView, nil
 }
 
-func (d *planeDraft) StageCreate(_ auth.Identity, commit project.ProjectInfo, resource draft.Resource, spec json.RawMessage) (model.DraftView, error) {
-	d.record("StageCreate "+commit.Name+" "+string(resource), spec)
-	return stagedView, nil
-}
-
 func (d *planeDraft) PreviewCreate(commit project.ProjectInfo, resource draft.Resource, spec json.RawMessage) (model.StagePreview, error) {
 	d.record("PreviewCreate "+commit.Name+" "+string(resource), spec)
 	return model.StagePreview{Project: commit.Name}, nil
@@ -422,6 +419,11 @@ func (d *planeDraft) AdoptProject(_ auth.Identity, commit, target project.Projec
 func (d *planeDraft) ReleaseDeclared(_ auth.Identity, commit, target project.ProjectInfo) ([]string, []string, error) {
 	d.record("ReleaseDeclared "+commit.Name+","+target.Name, nil)
 	return d.releaseStaged, d.releaseResidue, nil
+}
+
+func (d *planeDraft) StageCreate(_ auth.Identity, p project.ProjectInfo, res draft.Resource, spec json.RawMessage) (model.DraftView, error) {
+	d.record("StageCreate "+p.Name+" "+string(res), spec)
+	return stagedView, nil
 }
 
 func (d *planeDraft) Get(auth.Identity, project.ProjectInfo) (model.DraftView, error) {

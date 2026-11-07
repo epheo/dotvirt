@@ -272,7 +272,7 @@ func networksFromDoc(d vmDoc) []model.NIC {
 	// KubeVirt attaches the pod network when a template declares no interface.
 	// That defaulting lands on the VMI, never on the manifest, so mirror it here
 	// or a minimal manifest reads as unattached while its VMI has an address.
-	// clusterstate.WorkloadNetworks applies the same rule for the trace check.
+	// clusterstate.State.Workload applies the same rule for the trace check.
 	if len(out) == 0 {
 		if auto := ts.Domain.Devices.AutoattachPodInterface; auto == nil || *auto {
 			out = append(out, model.NIC{Name: "default", Network: "pod", Implicit: true})
