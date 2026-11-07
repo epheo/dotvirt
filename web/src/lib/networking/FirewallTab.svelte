@@ -21,7 +21,8 @@
 	import FileHistory from '#lib/components/FileHistory.svelte';
 	import SelectInput from '#lib/components/SelectInput.svelte';
 	import SyncBadge from '#lib/components/SyncBadge.svelte';
-	import Pager from './Pager.svelte';
+	import { DEFAULT_PAGE_SIZE, pageSlice } from '#lib/paging.js';
+	import Pager from '#lib/components/Pager.svelte';
 
 	// The Firewall tab: every rule as sentences, cluster rules first (they are
 	// met first, by priority), then project rules, then what happens at the
@@ -36,7 +37,8 @@
 		tenant = v;
 	}
 	let query = $state(page.url.searchParams.get('q') ?? '');
-	let projectPage = $state(0);
+	let projectPage = $state(1);
+	let size = $state(DEFAULT_PAGE_SIZE);
 	const q = $derived(query.trim().toLowerCase());
 
 	const tenantNS = $derived(
@@ -65,7 +67,8 @@
 	const cluster = $derived(keep(networking.clusterRules));
 	const project = $derived(keep(networking.projectRules));
 	const egress = $derived(keep(networking.egress));
-	const projectRows = $derived(project.slice(projectPage * 50, projectPage * 50 + 50));
+	const slice = $derived(pageSlice(project.length, projectPage, size));
+	const projectRows = $derived(project.slice(slice.start, slice.end));
 
 	const keyOf = (p: Policy) => `${p.backing}:${p.namespace ?? ''}:${p.name}`;
 	const projectOf = (p: Policy) => (p.namespace ? inventory.projectOf(p.namespace) : 'platform');
@@ -191,7 +194,7 @@
 			<input
 				type="text"
 				bind:value={query}
-				oninput={() => (projectPage = 0)}
+				oninput={() => (projectPage = 1)}
 				placeholder="Filter by name, port or address"
 				aria-label="Filter rules"
 				class="min-w-0 flex-1 border-0 bg-transparent text-sm text-ink outline-0"
@@ -244,7 +247,12 @@
 			<ul>
 				{#each projectRows as p (keyOf(p))}{@render policyRow(p)}{/each}
 			</ul>
-			<Pager total={project.length} bind:page={projectPage} noun="project rules" />
+			<Pager
+				total={project.length}
+				bind:page={projectPage}
+				bind:size
+				class="border-t border-line-soft px-card py-2.5"
+			/>
 		{:else}
 			{@render empty('No project rules. Every VM accepts traffic from anywhere.')}
 		{/if}

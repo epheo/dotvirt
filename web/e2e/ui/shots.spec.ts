@@ -64,6 +64,7 @@ test('trouble states', async ({ page }) => {
 
 	await setScenario(page, 'large');
 	await page.goto('/compute');
+	await page.locator('aside').getByRole('button', { name: '7 more projects' }).click();
 	await expect(page.locator('aside').getByText('tenant-11', { exact: true })).toBeVisible();
 	await shot(page, 'large-tree');
 });

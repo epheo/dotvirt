@@ -9,7 +9,8 @@
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { networking } from '#lib/state/networking.svelte.js';
 	import Card from '#lib/components/Card.svelte';
-	import Pager from './Pager.svelte';
+	import { DEFAULT_PAGE_SIZE, pageSlice } from '#lib/paging.js';
+	import Pager from '#lib/components/Pager.svelte';
 
 	// Every network, paged: kind chips with counts, a text filter over name,
 	// subnet and owner, and ?kind= / ?project= so the tree and the map can
@@ -17,7 +18,8 @@
 	const kind = $derived(page.url.searchParams.get('kind') ?? 'all');
 	const project = $derived(page.url.searchParams.get('project') ?? '');
 	let query = $state('');
-	let pageNo = $state(0);
+	let pageNo = $state(1);
+	let size = $state(DEFAULT_PAGE_SIZE);
 
 	type Row = {
 		n: Network;
@@ -62,13 +64,14 @@
 					(r.n.subnets ?? []).some((s) => s.startsWith(q))),
 		),
 	);
-	const pageRows = $derived(shown.slice(pageNo * 50, pageNo * 50 + 50));
+	const slice = $derived(pageSlice(shown.length, pageNo, size));
+	const pageRows = $derived(shown.slice(slice.start, slice.end));
 	function setKind(id: string) {
 		const u = new URL(page.url.href);
 		if (id === 'all') u.searchParams.delete('kind');
 		else u.searchParams.set('kind', id);
 		u.searchParams.delete('project');
-		pageNo = 0;
+		pageNo = 1;
 		goto(u.pathname + u.search, { replace: true, reset: false });
 	}
 	const ownerText = (r: Row) => {
@@ -106,7 +109,7 @@
 			<input
 				type="text"
 				bind:value={query}
-				oninput={() => (pageNo = 0)}
+				oninput={() => (pageNo = 1)}
 				placeholder="Filter by name, subnet or project"
 				aria-label="Filter networks"
 				class="min-w-0 flex-1 border-0 bg-transparent text-sm text-ink outline-0"
@@ -162,6 +165,11 @@
 				</tbody>
 			</table>
 		</div>
-		<Pager total={shown.length} bind:page={pageNo} noun="networks" />
+		<Pager
+			total={shown.length}
+			bind:page={pageNo}
+			bind:size
+			class="border-t border-line-soft px-card py-2.5"
+		/>
 	</Card>
 </div>

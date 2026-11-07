@@ -74,7 +74,7 @@
 	<div
 		class="flex w-full items-center gap-1.5 rounded py-1.5 pr-2 text-[13px] leading-5 {opts.active
 			? 'bg-side-hover text-side-ink'
-			: 'text-side-dim hover:bg-side-hover/70 hover:text-side-ink'}"
+			: 'text-side-dim hover:bg-side-hover/60 hover:text-side-ink'}"
 		style="padding-left: {8 + (opts.indent ?? 0)}px"
 	>
 		{#if opts.expanded !== undefined}
@@ -176,7 +176,7 @@
 		class="flex items-center gap-1.5 rounded px-2 py-1.5 text-[13px] leading-5 {onRoot &&
 		rootTab === 'map'
 			? 'bg-side-hover text-side-ink'
-			: 'text-side-dim hover:bg-side-hover/70 hover:text-side-ink'}"><MapIcon size={14} />Map</a
+			: 'text-side-dim hover:bg-side-hover/60 hover:text-side-ink'}"><MapIcon size={14} />Map</a
 	>
 
 	{@render label('Networks', fmt(inventory.networks.length))}
