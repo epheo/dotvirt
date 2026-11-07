@@ -624,3 +624,54 @@ metadata:
 		t.Errorf("an emptied labels map must go:\n%s", out)
 	}
 }
+
+// Selector labels, namespace lists and DNS names all reach the API server
+// verbatim: a value it rejects must fail here, not after merge at Argo apply.
+func TestSelectorAndNamespaceValidation(t *testing.T) {
+	badLabels := []map[string]string{{"bad key": "x"}, {"app": "has space"}, {"app": "a\nb"}}
+	for _, l := range badLabels {
+		if _, _, err := NetworkPolicyManifest(NetworkPolicySpec{Name: "p", Namespace: "n", AppliedTo: l}); err == nil {
+			t.Errorf("NetworkPolicy accepted appliedTo %q", l)
+		}
+		if _, _, err := NetworkPolicyManifest(NetworkPolicySpec{Name: "p", Namespace: "n",
+			Ingress: []PolicyRule{{From: []map[string]string{l}}}}); err == nil {
+			t.Errorf("NetworkPolicy accepted peer %q", l)
+		}
+		if _, _, err := AdminNetworkPolicyManifest(AdminNetworkPolicySpec{Name: "a", Priority: 1, Subject: l}); err == nil {
+			t.Errorf("ANP accepted subject %q", l)
+		}
+		if _, _, err := AdminNetworkPolicyManifest(AdminNetworkPolicySpec{Name: "a", Priority: 1,
+			Egress: []AdminPolicyRule{{Action: "Deny", Peers: []map[string]string{l}}}}); err == nil {
+			t.Errorf("ANP accepted peer %q", l)
+		}
+		if _, _, err := UplinkManifest(UplinkSpec{Name: "u", NIC: "eth1", NodeSelector: l}); err == nil {
+			t.Errorf("uplink accepted node selector %q", l)
+		}
+	}
+
+	for _, ns := range [][]string{{"ok", "Bad"}, {"a/b"}, {""}} {
+		if _, _, err := Manifest(Spec{Name: "s", Scope: ScopeShared, Namespaces: ns}); err == nil {
+			t.Errorf("shared network accepted namespaces %q", ns)
+		}
+		if _, _, err := Manifest(Spec{Name: "v", Scope: ScopeVLAN, VLAN: 10, PhysicalNetwork: "p", Namespaces: ns}); err == nil {
+			t.Errorf("VLAN network accepted namespaces %q", ns)
+		}
+		if _, _, err := EgressIPManifest(EgressIPSpec{Name: "e", EgressIPs: []string{"1.1.1.1"}, Namespaces: ns}); err == nil {
+			t.Errorf("EgressIP accepted namespaces %q", ns)
+		}
+		if _, _, err := ExternalRouteManifest(ExternalRouteSpec{Name: "r", NextHops: []string{"1.1.1.1"}, Namespaces: ns}); err == nil {
+			t.Errorf("external route accepted namespaces %q", ns)
+		}
+	}
+
+	for _, dns := range []string{"example.com", "*.example.com", "Example.COM.", "host"} {
+		if _, _, err := EgressFirewallManifest(EgressFirewallSpec{Namespace: "n", Rules: []EgressRule{{Action: "Allow", DNSName: dns}}}); err != nil {
+			t.Errorf("egress firewall refused dnsName %q: %v", dns, err)
+		}
+	}
+	for _, dns := range []string{"a b.com", "a.*.com", "**.com", "x.com\n- to: {}", "http://x.com"} {
+		if _, _, err := EgressFirewallManifest(EgressFirewallSpec{Namespace: "n", Rules: []EgressRule{{Action: "Allow", DNSName: dns}}}); err == nil {
+			t.Errorf("egress firewall accepted dnsName %q", dns)
+		}
+	}
+}

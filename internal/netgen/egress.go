@@ -2,6 +2,7 @@ package netgen
 
 import (
 	"fmt"
+	"regexp"
 
 	"sigs.k8s.io/yaml"
 
@@ -29,6 +30,10 @@ type EgressRule struct {
 	Ports   []PolicyPort `json:"ports,omitempty"`
 }
 
+// egressDNSName is the EgressFirewall CRD's own dnsName pattern: a single
+// leading "*." wildcard at most, matching exactly one label.
+var egressDNSName = regexp.MustCompile(`^(\*\.)?([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?$`)
+
 // EgressFirewallManifest renders the EgressFirewall YAML plus its repo-relative
 // path. The object is always named "default" (OVN-K permits one per namespace); the
 // rules render in order, since an EgressFirewall is first-match.
@@ -50,6 +55,9 @@ func EgressFirewallManifest(s EgressFirewallSpec) (path string, content []byte, 
 		}
 		if r.CIDR != "" && !validCIDR(r.CIDR) {
 			return "", nil, fmt.Errorf("rule %d: cidr %q must be a CIDR (e.g. 0.0.0.0/0)", i+1, r.CIDR)
+		}
+		if r.DNSName != "" && !egressDNSName.MatchString(r.DNSName) {
+			return "", nil, fmt.Errorf("rule %d: dnsName %q must be a DNS name, optionally starting with *. (e.g. *.example.com)", i+1, r.DNSName)
 		}
 		to := map[string]any{}
 		if r.CIDR != "" {
@@ -105,6 +113,9 @@ func EgressIPManifest(s EgressIPSpec) (path string, content []byte, err error) {
 			return "", nil, fmt.Errorf("egress IP %q must be an IP address", ip)
 		}
 	}
+	if err := validate.RequireDNS1123List("namespace", s.Namespaces); err != nil {
+		return "", nil, err
+	}
 	out, err := yaml.Marshal(map[string]any{
 		"apiVersion": model.KindEgressIP.APIVersion(),
 		"kind":       model.KindEgressIP.Kind,
@@ -140,6 +151,9 @@ func ExternalRouteManifest(s ExternalRouteSpec) (path string, content []byte, er
 		return "", nil, fmt.Errorf("at least one namespace must be selected")
 	case len(s.NextHops) == 0:
 		return "", nil, fmt.Errorf("at least one next-hop IP is required")
+	}
+	if err := validate.RequireDNS1123List("namespace", s.Namespaces); err != nil {
+		return "", nil, err
 	}
 	static := make([]any, 0, len(s.NextHops))
 	for _, ip := range s.NextHops {

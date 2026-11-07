@@ -31,6 +31,9 @@ func UplinkManifest(s UplinkSpec) (path string, content []byte, err error) {
 	if s.NIC == "" {
 		return "", nil, fmt.Errorf("a NIC is required")
 	}
+	if err := validate.RequireLabels("node selector label", s.NodeSelector); err != nil {
+		return "", nil, err
+	}
 	bridge := s.Bridge
 	if bridge == "" {
 		bridge = "br-" + s.Name

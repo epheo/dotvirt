@@ -82,6 +82,9 @@ func sharedCUDN(s Spec) (string, []byte, error) {
 	if len(s.Namespaces) == 0 {
 		return "", nil, fmt.Errorf("at least one namespace must be selected")
 	}
+	if err := validate.RequireDNS1123List("namespace", s.Namespaces); err != nil {
+		return "", nil, err
+	}
 	if err := requireCIDRs(s.Subnets); err != nil {
 		return "", nil, err
 	}
@@ -114,6 +117,9 @@ func vlanCUDN(s Spec) (string, []byte, error) {
 		return "", nil, fmt.Errorf("a VLAN id in 1..4094 is required")
 	case len(s.Namespaces) == 0:
 		return "", nil, fmt.Errorf("at least one namespace must be selected")
+	}
+	if err := validate.RequireDNS1123List("namespace", s.Namespaces); err != nil {
+		return "", nil, err
 	}
 	if err := requireCIDRs(s.Subnets); err != nil {
 		return "", nil, err

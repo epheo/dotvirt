@@ -44,6 +44,9 @@ func NetworkPolicyManifest(s NetworkPolicySpec) (path string, content []byte, er
 	if err := validate.RequireDNS1123("namespace", s.Namespace); err != nil {
 		return "", nil, err
 	}
+	if err := validate.RequireLabels("applied-to label", s.AppliedTo); err != nil {
+		return "", nil, err
+	}
 	// An empty podSelector ({}) selects every pod in the namespace - the "applied to
 	// the whole project" case; otherwise scope to the Group's labels.
 	podSelector := map[string]any{}
@@ -53,11 +56,14 @@ func NetworkPolicyManifest(s NetworkPolicySpec) (path string, content []byte, er
 	spec := map[string]any{"podSelector": podSelector, "policyTypes": []any{"Ingress"}}
 	if len(s.Ingress) > 0 {
 		ingress := make([]any, 0, len(s.Ingress))
-		for _, r := range s.Ingress {
+		for i, r := range s.Ingress {
 			rule := map[string]any{}
 			if len(r.From) > 0 {
 				from := make([]any, 0, len(r.From))
 				for _, peer := range r.From {
+					if err := validate.RequireLabels(fmt.Sprintf("rule %d peer label", i+1), peer); err != nil {
+						return "", nil, err
+					}
 					from = append(from, map[string]any{"podSelector": map[string]any{"matchLabels": peer}})
 				}
 				rule["from"] = from
@@ -123,6 +129,9 @@ func AdminNetworkPolicyManifest(s AdminNetworkPolicySpec) (path string, content 
 			return "", nil, fmt.Errorf("priority must be 0..1000")
 		}
 	}
+	if err := validate.RequireLabels("subject label", s.Subject); err != nil {
+		return "", nil, err
+	}
 	subjectSel := map[string]any{}
 	if len(s.Subject) > 0 {
 		subjectSel = map[string]any{"matchLabels": s.Subject}
@@ -148,6 +157,9 @@ func AdminNetworkPolicyManifest(s AdminNetworkPolicySpec) (path string, content 
 			}
 			peers := make([]any, 0, len(r.Peers))
 			for _, p := range r.Peers {
+				if err := validate.RequireLabels(fmt.Sprintf("rule %d peer label", i+1), p); err != nil {
+					return nil, err
+				}
 				sel := map[string]any{}
 				if len(p) > 0 {
 					sel = map[string]any{"matchLabels": p}
