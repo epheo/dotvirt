@@ -4,6 +4,7 @@
 // forge, or Argo — so CI can hold the app in corner-case states on demand.
 //
 //   node e2e/fixture/server.mjs        (expects ../build from `npm run build`)
+//   FIXTURE_SCENARIO=scale node e2e/fixture/server.mjs   (start in another scenario)
 //
 // Control plane (no auth, test-only):
 //   POST /__fixture/scenario/{name}    switch state; resets session drafts
@@ -221,6 +222,28 @@ function findVM(ns, name) {
 			if (vm) return vm;
 		}
 	return undefined;
+}
+
+// A scenario names a VM's snapshots outright, or plans them as [count, newest
+// age in minutes], one a day further back each; ages resolve at request time.
+function snapshotsFor(s, ns, name) {
+	const key = `${ns}/${name}`;
+	const plan = s.snapshotPlan?.[key];
+	const rows =
+		s.snapshots?.[key] ??
+		(plan
+			? Array.from({ length: plan[0] }, (_, i) => ({
+					name: `${name}-snap-${plan[0] - i}`,
+					minsAgo: plan[1] + i * 1440,
+				}))
+			: []);
+	return rows.map((r) => ({
+		name: r.name,
+		created: new Date(Date.now() - r.minsAgo * 60_000).toISOString(),
+		phase: 'Succeeded',
+		readyToUse: true,
+		indications: ['Online', 'GuestAgent'],
+	}));
 }
 
 // ── the /api surface ───────────────────────────────────────────────────────────
@@ -464,7 +487,7 @@ async function handleAPI(req, res, url) {
 			if (!s.metrics) return sendText(res, 503, 'metrics not configured');
 			return sendJSON(res, 200, s.metrics.vmMetrics);
 		}
-		if (sub === 'snapshots') return sendJSON(res, 200, []);
+		if (sub === 'snapshots') return sendJSON(res, 200, snapshotsFor(s, ns, name));
 		if (sub === 'clones') return sendJSON(res, 200, []);
 		if (sub === 'policy') {
 			return sendJSON(res, 200, {
