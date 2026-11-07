@@ -186,34 +186,38 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 }
 
 // ReleaseDeclared stages the declarative half of a project release: every
-// project namespace the PLATFORM repo declares is rewritten without its
-// tenancy - the file and whatever else it carries stay (handing Argo a
-// deletion would prune the namespace itself), only the project label and repo
-// annotation go. Namespaces the
-// platform repo does not describe come back as residue for the caller to
-// unlabel imperatively (label residue has no git path). A declared file
-// carrying more than its Namespace (a VM Network rides some) refuses the whole
-// release rather than pruning tenant networking.
+// project namespace the PLATFORM repo declares, wherever its file sits, is
+// rewritten without its tenancy - the file stays (handing Argo a deletion
+// would prune the namespace itself), only the project label and repo
+// annotation go. Namespaces the platform repo does not describe come back as
+// residue for the caller to unlabel imperatively (label residue has no git
+// path); a declared one sent there would be relabeled by the next sync. A
+// declared file carrying more than its Namespace (a VM Network rides some)
+// refuses the whole release rather than pruning tenant networking.
 func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target project.ProjectInfo) (staged, residue []string, err error) {
 	read, err := c.read(commitProj)
 	if err != nil {
 		return nil, nil, err
 	}
+	idx, err := indexDeclared(read, c.baseBranch)
+	if err != nil {
+		return nil, nil, err
+	}
 	for _, ns := range target.Namespaces {
-		path := "namespaces/" + ns + ".yaml"
-		content, ok, lerr := read.LookupOnBranch(c.baseBranch, path)
-		if lerr != nil {
-			return nil, nil, lerr
-		}
+		ref := model.ObjectRef{Kind: model.KindNS.Kind, Name: ns}
+		path, ok := idx.Files[ref]
 		if !ok {
 			residue = append(residue, ns)
 			continue
 		}
-		refs := declaredRefs(path, content)
-		if len(refs) != 1 || refs[0].Kind != "Namespace" {
+		if _, serr := soleDeclarer(idx, []model.ObjectRef{ref}); serr != nil {
 			return nil, nil, fmt.Errorf(
 				"%w: %s declares more than the namespace %s (e.g. a VM Network); rewriting it would prune those - release this project by editing the platform repo",
 				model.ErrConflict, path, ns)
+		}
+		content, rerr := read.FileOnBranch(c.baseBranch, path)
+		if rerr != nil {
+			return nil, nil, rerr
 		}
 		released, gerr := netgen.ReleasedNamespaceManifest(content)
 		if gerr != nil {
