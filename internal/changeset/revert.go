@@ -69,9 +69,10 @@ func (r *Reader) revertBranch(user, project, hash string) string {
 
 // revertPrefix is what every revert branch of (user, project) starts with - how
 // the open-PR lane recognizes them. The user segment sits where the task feed's
-// attribution expects it (tasks.MergeAuthor).
+// attribution expects it (tasks.MergeAuthor); the identity hash keeps two users
+// whose names sanitize alike off each other's branches, as on proposedBranch.
 func (r *Reader) revertPrefix(user, project string) string {
-	return r.proposed + "/" + tasks.RevertSegment + "/" + refSegment(user) + "/" + refSegment(project) + "-"
+	return r.proposed + "/" + tasks.RevertSegment + "/" + refSegment(user) + "/" + refSegment(project) + "-" + shortHash(user, project) + "-"
 }
 
 // shortCommit abbreviates a commit hash to 8 chars for branch names + titles.
