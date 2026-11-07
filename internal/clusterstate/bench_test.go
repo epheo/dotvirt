@@ -26,17 +26,35 @@ func benchVMI(ns, name string) *kubevirtcorev1.VirtualMachineInstance {
 	}
 }
 
-// BenchmarkLiveVMs is the per-frame live read at 2000 running VMs in 50
+// BenchmarkLiveRead is the per-frame live read at 2000 running VMs in 50
 // namespaces.
-func BenchmarkLiveVMs(b *testing.B) {
+func BenchmarkLiveRead(b *testing.B) {
 	s := stateWithIndexers()
+	vms, vmis := s.vmStore(), s.vmiStore()
 	for i := range 2000 {
 		ns, name := fmt.Sprintf("ns-%d", i%50), fmt.Sprintf("vm-%d", i)
-		_ = s.vms.Add(&kubevirtcorev1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}})
-		_ = s.vmis.Add(benchVMI(ns, name))
+		_ = vms.Add(&kubevirtcorev1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}})
+		_ = vmis.Add(benchVMI(ns, name))
 	}
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = s.LiveVMs()
+		_ = s.Live()
+	}
+}
+
+// BenchmarkVMIHeartbeat is one VMI status write that moves nothing the view
+// holds, at 2000 VMs: the steady-state cost per KubeVirt status update.
+func BenchmarkVMIHeartbeat(b *testing.B) {
+	s := stateWithIndexers()
+	vms, vmis := s.vmStore(), s.vmiStore()
+	for i := range 2000 {
+		ns, name := fmt.Sprintf("ns-%d", i%50), fmt.Sprintf("vm-%d", i)
+		_ = vms.Add(&kubevirtcorev1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}})
+		_ = vmis.Add(benchVMI(ns, name))
+	}
+	beat := benchVMI("ns-7", "vm-7")
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = vmis.Update(beat)
 	}
 }

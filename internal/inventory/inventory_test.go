@@ -83,8 +83,8 @@ func TestBuildFiltersAndEnriches(t *testing.T) {
 			{Name: "team-a", Repo: bare, Namespaces: []string{"tenant-a"}},
 			{Name: "broken", Error: "no repo configured"}, // unresolved: listed, empty
 		},
-		Live: map[string]clusterstate.LiveVM{
-			"tenant-a/web": {Phase: "Running", GuestIP: "10.0.0.1"},
+		Live: clusterstate.LiveView{
+			"tenant-a": {"web": {Phase: "Running", GuestIP: "10.0.0.1"}},
 		},
 	}
 
@@ -168,10 +168,12 @@ func TestBuildSurfacesClusterOnlyVMs(t *testing.T) {
 		Branch:   "main",
 		Repos:    repos,
 		Projects: []project.ProjectInfo{{Name: "team-a", Repo: bare, Namespaces: []string{"tenant-a"}}},
-		Live: map[string]clusterstate.LiveVM{
-			"tenant-a/web":       {Phase: "Running"},
-			"tenant-a/web-clone": {},                 // cluster-only: halted clone target
-			"tenant-b/other":     {Phase: "Running"}, // outside the project -> ignored
+		Live: clusterstate.LiveView{
+			"tenant-a": {
+				"web":       {Phase: "Running"},
+				"web-clone": {}, // cluster-only: halted clone target
+			},
+			"tenant-b": {"other": {Phase: "Running"}}, // outside the project -> ignored
 		},
 	}
 	inv := Build(in)
@@ -215,9 +217,7 @@ func TestBuildRepoLessProjectShowsLiveVMs(t *testing.T) {
 		Projects: []project.ProjectInfo{
 			{Name: "team-a", Error: "no repo configured", Namespaces: []string{"tenant-a"}},
 		},
-		Live: map[string]clusterstate.LiveVM{
-			"tenant-a/web": {Phase: "Running"},
-		},
+		Live: clusterstate.LiveView{"tenant-a": {"web": {Phase: "Running"}}},
 	}
 	inv := Build(in)
 	p := inv.Projects[0]
@@ -235,14 +235,13 @@ func TestBuildRepoLessProjectShowsLiveVMs(t *testing.T) {
 // Namespaces holding VMs but no project label are adoption candidates; labeled
 // and system namespaces are not.
 func TestAdoptable(t *testing.T) {
-	live := map[string]clusterstate.LiveVM{
-		"legacy-a/vm1":            {Phase: "Running"},
-		"legacy-a/vm2":            {},
-		"legacy-b/vm1":            {Phase: "Running"},
-		"tenant-a/web":            {Phase: "Running"}, // labeled -> already a project
-		"openshift-cnv/plumbing":  {},                 // system -> never proposed
-		"acme-operator-system/op": {},                 // an operator's home is never a tenant
-		"kube-system/should-skip": {},
+	live := clusterstate.LiveView{
+		"legacy-a":             {"vm1": {Phase: "Running"}, "vm2": {}},
+		"legacy-b":             {"vm1": {Phase: "Running"}},
+		"tenant-a":             {"web": {Phase: "Running"}}, // labeled -> already a project
+		"openshift-cnv":        {"plumbing": {}},            // system -> never proposed
+		"acme-operator-system": {"op": {}},                  // an operator's home is never a tenant
+		"kube-system":          {"should-skip": {}},
 	}
 	labeled := []project.Namespace{{Name: "tenant-a"}}
 	got := Adoptable(live, labeled)
@@ -263,9 +262,7 @@ func TestBuildRepoUnavailableStillShowsLiveVMs(t *testing.T) {
 		Branch:   "main",
 		Repos:    repos,
 		Projects: []project.ProjectInfo{{Name: "team-a", Repo: "https://dead.example/x/y.git", Namespaces: []string{"tenant-a"}}},
-		Live: map[string]clusterstate.LiveVM{
-			"tenant-a/web": {Phase: "Running"},
-		},
+		Live:     clusterstate.LiveView{"tenant-a": {"web": {Phase: "Running"}}},
 	}
 	inv := Build(in)
 	p := inv.Projects[0]

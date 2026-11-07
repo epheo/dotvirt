@@ -40,7 +40,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		Projects: projects,
 		Branch:   s.cfg.BaseBranch,
 		Repos:    s.repos,
-		Live:     s.state.LiveVMs(),
+		Live:     s.state.Live(),
 	}
 	// Drift comes from the SA-owned Application snapshot (lock-free, watch-fed).
 	// Three states the inventory must NOT conflate: Argo off (s.drift nil: no

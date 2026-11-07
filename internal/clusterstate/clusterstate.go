@@ -19,8 +19,9 @@
 // publishes RBACChanged to invalidate the per-token visible-set cache promptly.
 // Only bindings in project namespaces signal (projectRBACStore).
 //
-// On any mutation a reflector publishes its kind to the shared event bus, which the
-// hub subscribes to; the read path doesn't diff anything.
+// The VM and VMI stores keep a derived live view current as they move and
+// publish LiveChanged only when it changes; the namespace store publishes on any
+// mutation. The hub subscribes to both; the read path diffs nothing.
 //
 // Authorization is unchanged: the snapshot is global truth, but a user only ever
 // sees the namespaces their own RBAC grants - the filter is the security gate.
@@ -44,9 +45,9 @@ import (
 	"github.com/epheo/dotvirt/internal/reflect"
 )
 
-// LiveVM is one VM's actual state, keyed by "namespace/name" for merging into the
-// git-derived inventory - clusterstate's own read DTO, derived from the watched
-// VMI objects (inventory.applyLive copies it onto each model.VM).
+// LiveVM is one VM's actual state, for merging into the git-derived inventory -
+// clusterstate's own read DTO, derived from the watched VMI objects
+// (inventory.applyLive copies it onto each model.VM).
 type LiveVM struct {
 	Phase    string
 	GuestIP  string   // primary interface IP (the inventory grid's IP column)
@@ -94,11 +95,12 @@ type Migration struct {
 }
 
 // State is the SA-maintained snapshot. Build with New, start with Run; reads
-// (LiveVMs, Namespaces) are lock-free indexer scans safe for concurrent callers.
+// (Live, Namespaces) are lock-free and safe for concurrent callers.
 type State struct {
 	vms  cache.Indexer
 	vmis cache.Indexer
 	nss  cache.Indexer
+	live *liveIndex
 	// RoleBindings are watched too, but only as an RBACChanged signal - via a
 	// retain-nothing signal store, so there's no indexer for them here.
 
@@ -123,17 +125,13 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 	s.vms = reflect.NewIndexer()
 	s.vmis = reflect.NewIndexer()
 	s.nss = reflect.NewIndexer()
+	s.live = newLiveIndex(s.vms, s.vmis, s.publishLive)
 
-	vmSpec := func() { bus.Publish(eventbus.VMSpecChanged) }
-	live := func() { bus.Publish(eventbus.LiveChanged) }
 	namespace := func() { bus.Publish(eventbus.NamespaceChanged) }
 	rbac := func() { bus.Publish(eventbus.RBACChanged) }
 	s.specs = []reflectorSpec{
-		// vms: VMSpecChanged is gated on metadata.generation by vmSpecStore, so a
-		// status-only VM write fires only LiveChanged, so consumers of VMSpecChanged
-		// don't wake on VM-status heartbeats.
-		{newVMSpecStore(s.vms, vmSpec, live, s.vmsReady.Mark), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch()},
-		{reflect.NewStore(s.vmis, live, s.vmisReady.Mark), &kubevirtcorev1.VirtualMachineInstance{}, sa.VMIListWatch()},
+		{s.live.store(s.vms, s.vmsReady.Mark), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch()},
+		{s.live.store(s.vmis, s.vmisReady.Mark), &kubevirtcorev1.VirtualMachineInstance{}, sa.VMIListWatch()},
 		// A namespace move is both a topology change (inventory) and a visibility
 		// change; NamespaceChanged is summed into both the inventory and RBAC versions.
 		{reflect.NewStore(s.nss, namespace, s.nssReady.Mark), &corev1.Namespace{}, sa.NamespaceListWatch(projectLabel)},
@@ -217,26 +215,22 @@ func (s *State) VMObjects(namespaces []string) []kubevirtcorev1.VirtualMachine {
 	return out
 }
 
-// LiveVMs returns the current live state of every VM in the snapshot, keyed by
-// "namespace/name". A VM with no running VMI is present with a zero (stopped)
-// LiveVM; a VMI supplies phase/IP/node. Pure in-memory - no cluster call.
-func (s *State) LiveVMs() map[string]LiveVM {
-	out := map[string]LiveVM{}
-	for _, obj := range s.vms.List() {
-		vm, ok := obj.(*kubevirtcorev1.VirtualMachine)
-		if !ok {
-			continue
+// Live returns the current live state of every VM in the snapshot - one view
+// shared by all callers, which must not modify it. Pure in-memory, no copy.
+func (s *State) Live() LiveView { return s.live.load() }
+
+// StoppedVMs counts the VMs in namespaces that have no running instance.
+func (s *State) StoppedVMs(namespaces []string) int {
+	live := s.Live()
+	n := 0
+	for _, ns := range namespaces {
+		for _, vm := range live[ns] {
+			if vm.Phase == "" {
+				n++
+			}
 		}
-		out[vm.Namespace+"/"+vm.Name] = LiveVM{} // exists, no running instance
 	}
-	for _, obj := range s.vmis.List() {
-		vmi, ok := obj.(*kubevirtcorev1.VirtualMachineInstance)
-		if !ok {
-			continue
-		}
-		out[vmi.Namespace+"/"+vmi.Name] = liveFromVMI(vmi)
-	}
-	return out
+	return n
 }
 
 // WorkloadLabels returns the labels network policies match for one VM's

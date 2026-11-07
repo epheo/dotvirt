@@ -27,12 +27,11 @@ import (
 type Kind int
 
 const (
-	// VMSpecChanged: a VirtualMachine's spec/generation changed, or a VM was added or
-	// removed - the exported manifest set moved. (NOT fired on VM status churn.)
-	VMSpecChanged Kind = iota
-	// LiveChanged: runtime state moved - a VMI status change, or a VM status/existence
-	// change. The live inventory tree's per-VM phase/IP/node.
-	LiveChanged
+	// LiveChanged: a VM's live state moved - a VM or VMI added or removed, or a
+	// change to what the inventory shows of a VMI (phase, IPs, node, guest facts,
+	// migration) - or a cluster watch's health flipped. VM and VMI status writes
+	// that move none of it are not published.
+	LiveChanged Kind = iota
 	// NamespaceChanged: a project namespace was added, removed, or relabeled - both an
 	// inventory topology change AND a visibility (RBAC) change.
 	NamespaceChanged

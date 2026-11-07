@@ -112,10 +112,10 @@ func run() error {
 	}
 
 	// One SA-maintained snapshot of live VM state + project topology, fed by
-	// reflectors (not per-request fetches). Its reflectors publish VMSpecChanged /
-	// LiveChanged (VMs/VMIs) and NamespaceChanged to the bus, so the hub re-broadcasts
-	// on any cluster change; the read path filters this shared snapshot per token
-	// instead of hitting the cluster.
+	// reflectors (not per-request fetches). Its reflectors publish LiveChanged (a
+	// VM's live state moved) and NamespaceChanged to the bus, so the hub
+	// re-broadcasts on any cluster change a frame shows; the read path filters this
+	// shared snapshot per token instead of hitting the cluster.
 	clusterSnapshot := clusterstate.New(saCluster, cfg.ProjectLabel, bus)
 	clusterSnapshot.Run(ctx)
 
@@ -227,7 +227,7 @@ func run() error {
 	// the repos its frame shows - so it coalesces by build duration (no debounce)
 	// and never rebuilds a frame when nothing it depends on moved.
 	inventoryKinds := []eventbus.Kind{
-		eventbus.VMSpecChanged, eventbus.LiveChanged, eventbus.NamespaceChanged,
+		eventbus.LiveChanged, eventbus.NamespaceChanged,
 		eventbus.RBACChanged, eventbus.DriftChanged, eventbus.GitChanged, eventbus.ProposalsChanged,
 		eventbus.NetworkChanged, eventbus.TaskChanged,
 	}
