@@ -28,7 +28,7 @@ type VMEdit = model.VMEdit
 // Errors are classified: model.ErrInvalid for a value the edit carries,
 // model.ErrConflict for a manifest the editor cannot apply it to.
 func ApplyEdit(content []byte, defaultNS, namespace, name string, edit VMEdit) ([]byte, error) {
-	if err := validateEdit(edit); err != nil {
+	if err := ValidateEdit(edit); err != nil {
 		return nil, err
 	}
 	vm, err := findVM(content, defaultNS, namespace, name)

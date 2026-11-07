@@ -84,8 +84,10 @@ func (e VMEdit) Empty() bool {
 		e.Pin == nil && len(e.AddGroups) == 0 && len(e.RemoveGroups) == 0
 }
 
-// EditRequest is the body of an edit: which VM source file, and which fields to
-// change. Embedding flattens VMEdit's fields into the request body.
+// EditRequest is the body of an edit: which fields to change. Embedding
+// flattens VMEdit's fields into the request body. SourceFile is accepted and
+// ignored: the server resolves the VM's file from git, since a client-named
+// file could aim the edit at another namespace's manifest.
 type EditRequest struct {
 	SourceFile string `json:"sourceFile"`
 	VMEdit

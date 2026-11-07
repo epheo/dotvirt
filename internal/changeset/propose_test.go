@@ -523,7 +523,8 @@ func TestPreviewEditStagesNothing(t *testing.T) {
 		t.Fatalf("a VM git does not declare: want ErrNotFound, got %v", err)
 	}
 
-	req := model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{CPUCores: &cpu}}
+	off := string(model.PowerOff)
+	req := model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{Power: &off}}
 	if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", req); err != nil {
 		t.Fatalf("StageEdit: %v", err)
 	}
@@ -531,7 +532,7 @@ func TestPreviewEditStagesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if len(view.Items) != 1 || view.Items[0].Edit == nil || *view.Items[0].Edit.CPUCores != 64 {
+	if len(view.Items) != 1 || view.Items[0].Edit == nil || view.Items[0].Edit.Power == nil || *view.Items[0].Edit.Power != off {
 		t.Fatalf("the staged edit must ride the view, got %+v", view.Items)
 	}
 }

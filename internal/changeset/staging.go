@@ -11,7 +11,6 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
-	"github.com/epheo/dotvirt/internal/validate"
 	"github.com/epheo/dotvirt/internal/vmgen"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
@@ -25,9 +24,11 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 	if edit.Empty() {
 		return model.DraftView{}, fmt.Errorf("%w: no fields to edit", model.ErrInvalid)
 	}
-	// SourceFile addresses a file in the proposal diff - the one repo path a
-	// client supplies directly, so it passes the same gate created names do.
-	if err := validate.RequireRepoPath("source file", req.SourceFile); err != nil {
+	read, err := c.read(proj)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	if req.SourceFile, err = c.checkEdit(read, namespace, name, edit); err != nil {
 		return model.DraftView{}, err
 	}
 	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
@@ -40,6 +41,33 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 		return model.DraftView{}, err
 	}
 	return c.Get(id, proj)
+}
+
+// checkEdit dry-runs edit against the base-branch file declaring VM
+// (namespace, name) and returns that file: field validation, the splice and
+// the read-back all run, so a refusal lands on the form at stage instead of
+// failing the propose. Run it on the edit as it will be staged. The file comes
+// from git's declared index, never from the client, so an edit cannot be
+// aimed at another namespace's manifest. manifest.ValidateEdit is the cheap,
+// repo-free part, for refusing a partial edit early.
+func (c *Coordinator) checkEdit(read *git.Repo, namespace, name string, edit model.VMEdit) (string, error) {
+	idx, err := read.DeclaredFilesOnBranch(c.baseBranch)
+	if err != nil {
+		return "", err
+	}
+	ref, ok := declaredRef(idx, draft.ResourceVM, namespace, name)
+	if !ok {
+		return "", fmt.Errorf("%w: %s/%s is not in git", model.ErrNotFound, namespace, name)
+	}
+	path := idx.Files[ref]
+	content, err := read.FileOnBranch(c.baseBranch, path)
+	if err != nil {
+		return "", err
+	}
+	if _, err := manifest.ApplyEdit(content, git.DefaultNamespace(path), namespace, name, edit); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // PreviewEdit renders an edit as the changes staging it would list, restart

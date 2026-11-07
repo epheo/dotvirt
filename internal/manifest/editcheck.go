@@ -10,12 +10,14 @@ import (
 	"github.com/epheo/dotvirt/internal/validate"
 )
 
-// validateEdit refuses an edit carrying a value the API server or KubeVirt
-// would reject, before anything is spliced, naming every such value at once.
+// ValidateEdit refuses an edit carrying a value the API server or KubeVirt
+// would reject, naming every such value at once. It needs no manifest, so a
+// partial edit can be refused before it is merged or spliced; ApplyEdit runs
+// it first.
 // Removals only name what the manifest already holds and are never written,
 // so they are not checked: a hand-written name outside these rules must stay
 // removable.
-func validateEdit(e VMEdit) error {
+func ValidateEdit(e VMEdit) error {
 	var errs []error
 	add := func(err error) { errs = append(errs, err) }
 	if e.Power != nil {

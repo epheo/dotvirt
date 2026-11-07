@@ -27,10 +27,6 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if req.SourceFile == "" {
-		fail(w, invalid(errors.New("sourceFile is required")))
-		return
-	}
 	result, err := s.draft.StageEdit(sc.id, sc.proj, ns, name, req)
 	respond(w, result, err)
 }

@@ -85,8 +85,10 @@ export interface VMEdit {
   removeGroups?: string[];
 }
 /**
- * EditRequest is the body of an edit: which VM source file, and which fields to
- * change. Embedding flattens VMEdit's fields into the request body.
+ * EditRequest is the body of an edit: which fields to change. Embedding
+ * flattens VMEdit's fields into the request body. SourceFile is accepted and
+ * ignored: the server resolves the VM's file from git, since a client-named
+ * file could aim the edit at another namespace's manifest.
  */
 export interface EditRequest {
   sourceFile: string;
