@@ -239,3 +239,86 @@ func visibleSubset(nss []string, visible map[string]bool) []string {
 	}
 	return out
 }
+
+// handleNetworkRules answers what bears on one network's VMs: the rules
+// binding its namespaces and the rules elsewhere naming those VMs as their
+// other end, from the SA policy snapshot. The network resolves through the
+// caller-scoped catalog, so a network in a namespace the caller can't see is
+// not found, and a shared network spans only its visible namespaces.
+func (s *Server) handleNetworkRules(w http.ResponseWriter, r *http.Request) {
+	id, c, err := s.userCluster(r)
+	if err != nil {
+		fail(w, unavailable(err))
+		return
+	}
+	if s.netstate == nil {
+		fail(w, fmt.Errorf("%w: networking is not wired", model.ErrUnavailable))
+		return
+	}
+	visible, err := s.visibleFor(r.Context(), id, c)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	key := r.URL.Query().Get("network")
+	n, ok := findNetwork(scopeNetworks(s.netstate.Catalog().Networks, visible), key)
+	if !ok {
+		fail(w, fmt.Errorf("%w: network %q", model.ErrNotFound, key))
+		return
+	}
+	nss := n.Namespaces
+	if n.Scope == model.ScopeProject {
+		nss = []string{n.Namespace}
+	}
+	out := s.netstate.NetworkRules(nss, s.state.NamespaceLabels)
+	out.Network = key
+	out = scopeNetworkRules(out, visible, s.clusterAuthority(r.Context(), id, c))
+	for i := range out.Applies {
+		s.policyDrift(&out.Applies[i].Policy)
+	}
+	for i := range out.Reaches {
+		s.policyDrift(&out.Reaches[i].Policy)
+	}
+	writeJSON(w, out)
+}
+
+// findNetwork resolves a network key the way the UI routes it: a project
+// network by its "namespace/name" attach ref, a shared one by name; a bare
+// name falls back to the first network so named.
+func findNetwork(nets []model.Network, key string) (model.Network, bool) {
+	for _, n := range nets {
+		if n.AttachRef == key || (n.Scope == model.ScopeShared && n.Name == key) {
+			return n, true
+		}
+	}
+	for _, n := range nets {
+		if n.Name == key {
+			return n, true
+		}
+	}
+	return model.Network{}, false
+}
+
+// scopeNetworkRules applies the policy plane's visibility to one network's
+// rules: a binding governs the caller's own VMs so it stays (its enumerated
+// subject redacted without authority, as the effective view does), while a
+// peer rule is another namespace's or the cluster's - kept only where
+// /api/policies would show it.
+func scopeNetworkRules(in model.NetworkRules, visible map[string]bool, can func(model.PolicyKind) bool) model.NetworkRules {
+	for i := range in.Applies {
+		redactSubjects(can, &in.Applies[i].Policy)
+	}
+	reaches := make([]model.PeerRule, 0, len(in.Reaches))
+	for _, pr := range in.Reaches {
+		switch {
+		case pr.Policy.Namespace != "":
+			if visible[pr.Policy.Namespace] {
+				reaches = append(reaches, pr)
+			}
+		case can(pr.Policy.Kind):
+			reaches = append(reaches, pr)
+		}
+	}
+	in.Reaches = reaches
+	return in
+}

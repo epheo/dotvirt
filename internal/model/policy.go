@@ -145,3 +145,25 @@ type TraceStep struct {
 	Decisive    bool   `json:"decisive,omitempty"`
 	Note        string `json:"note,omitempty"`
 }
+
+// NetworkRules is GET /api/networks/rules: what bears on the VMs of one
+// network. Applies holds the policies binding its namespaces, in evaluation
+// order (pod-selecting ones conditional); Reaches holds rules elsewhere that
+// name those VMs as their other end, each read from the network's side.
+type NetworkRules struct {
+	Network    string          `json:"network"`
+	Namespaces []string        `json:"namespaces"`
+	Applies    []PolicyBinding `json:"applies"`
+	Reaches    []PeerRule      `json:"reaches"`
+}
+
+// PeerRule is one rule whose peer selects a network's VMs.
+type PeerRule struct {
+	Policy Policy         `json:"policy"`
+	Rule   PolicyRuleView `json:"rule"`
+	// Text reads the rule from the network's side ("VMs labeled app=web in
+	// web-prod can reach VMs labeled app=db in db-prod on TCP 5432.").
+	Text string `json:"text"`
+	// Conditional: the peer narrows by pod labels, so only the matching VMs.
+	Conditional bool `json:"conditional,omitempty"`
+}
