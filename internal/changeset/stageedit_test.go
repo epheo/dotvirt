@@ -146,3 +146,48 @@ func TestPreviewEditRefusesInvalidValues(t *testing.T) {
 		t.Fatalf("want ErrInvalid, got %v", err)
 	}
 }
+
+// flowMeta writes the VM's metadata as a flow mapping, which the editor cannot
+// add labels to.
+const flowMeta = "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata: {name: web, namespace: alpha}\nspec:\n  runStrategy: Always\n"
+
+// The dry run covers the edit as it will be staged, merged with what the VM
+// already has staged: a power toggle that applies on its own is still refused
+// when the staged label it joins no longer can, and the draft keeps the
+// staged edit as it was.
+func TestStageEditChecksTheMergedEdit(t *testing.T) {
+	f := newProposeFixture(t)
+	label := model.EditRequest{VMEdit: model.VMEdit{SetLabels: map[string]string{"env": "prod"}}}
+	if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", label); err != nil {
+		t.Fatalf("StageEdit label: %v", err)
+	}
+	f.commitMain(t, "web.yaml", flowMeta)
+
+	off := string(model.PowerOff)
+	_, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", model.EditRequest{VMEdit: model.VMEdit{Power: &off}})
+	if !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("want ErrConflict for the merged edit, got %v", err)
+	}
+	entries, err := f.c.store.List(f.id.Username, f.proj.Name)
+	if err != nil || len(entries) != 1 || entries[0].Edit.Power != nil || entries[0].SourceFile != "web.yaml" {
+		t.Fatalf("want the staged label edit untouched, got %+v (%v)", entries, err)
+	}
+}
+
+// Adoption stages through the same check: drift the editor cannot write into
+// the file is refused at adopt, not staged to fail the propose.
+func TestAdoptChecksTheEdit(t *testing.T) {
+	bare, _ := seedWork(t, map[string][]byte{"alpha/web.yaml": []byte(flowMeta)})
+	c := newTestCoordinator(t, false)
+	c.live = fakeLive{"alpha/web.yaml": liveVMYAML("web", "  labels:\n    env: prod\n")}
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+
+	if _, err := c.Adopt(id, proj, "alpha", "web"); !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("want ErrConflict, got %v", err)
+	}
+	if entries, _ := c.store.List(id.Username, proj.Name); len(entries) != 0 {
+		t.Errorf("a refused adopt must not be staged, got %+v", entries)
+	}
+}
+

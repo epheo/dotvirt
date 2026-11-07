@@ -25,29 +25,21 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 	if edit.Empty() {
 		return model.DraftView{}, fmt.Errorf("%w: no fields to edit", model.ErrInvalid)
 	}
-	read, err := c.read(proj)
-	if err != nil {
-		return model.DraftView{}, err
-	}
-	if req.SourceFile, err = c.checkEdit(read, namespace, name, edit); err != nil {
-		return model.DraftView{}, err
-	}
+	// req.SourceFile is ignored: stageEdit resolves the file from git.
 	return c.stageEdit(id, proj, draft.Entry{
-		Kind:       draft.KindEdit,
-		Namespace:  namespace,
-		Name:       name,
-		SourceFile: req.SourceFile,
-		Edit:       &edit,
+		Kind:      draft.KindEdit,
+		Namespace: namespace,
+		Name:      name,
+		Edit:      &edit,
 	})
 }
 
 // checkEdit dry-runs edit against the base-branch file declaring VM
 // (namespace, name) and returns that file: field validation, the splice and
 // the read-back all run, so a refusal lands on the form at stage instead of
-// failing the propose. Run it on the edit as it will be staged. The file comes
-// from git's declared index, never from the client, so an edit cannot be
-// aimed at another namespace's manifest. manifest.ValidateEdit is the cheap,
-// repo-free part, for refusing a partial edit early.
+// failing the propose. stageEdit runs it on the edit as it will be staged.
+// The file comes from git's declared index, never from the client, so an
+// edit cannot be aimed at another namespace's manifest.
 func (c *Coordinator) checkEdit(read *git.Repo, namespace, name string, edit model.VMEdit) (string, error) {
 	idx, err := indexDeclared(read, c.baseBranch)
 	if err != nil {

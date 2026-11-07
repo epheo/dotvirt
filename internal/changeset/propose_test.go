@@ -611,9 +611,9 @@ func TestProposeKeepsWhatWasStagedDuringThePush(t *testing.T) {
 			during()
 			return http.StatusCreated, `{"number":1,"state":"open","html_url":"http://forge/pulls/1"}`, true
 		})
-	cpu := 8
+	off := string(model.PowerOff)
 	during = func() {
-		if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{CPUCores: &cpu}}); err != nil {
+		if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{Power: &off}}); err != nil {
 			t.Errorf("StageEdit during the push: %v", err)
 		}
 		if err := f.c.store.Stage(f.id.Username, f.proj.Name, draft.Entry{Kind: draft.KindDelete, Namespace: "alpha", Name: "db", SourceFile: "db.yaml"}); err != nil {
@@ -625,7 +625,7 @@ func TestProposeKeepsWhatWasStagedDuringThePush(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 2 || entries[0].Name != "db" || entries[1].Edit == nil || entries[1].Edit.CPUCores == nil {
+	if len(entries) != 2 || entries[0].Name != "db" || entries[1].Edit == nil || entries[1].Edit.Power == nil {
 		t.Fatalf("want the restaged web and the new db kept, got %+v", entries)
 	}
 }

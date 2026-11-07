@@ -8,6 +8,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
+	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 )
@@ -16,8 +17,13 @@ import (
 // partial edit (a power toggle, a storage move, one inline field) adds to the
 // staged change instead of replacing it. A field back at the base branch's
 // value drops out: staging git's own value unstages that field, and an edit
-// left with nothing unstages the VM.
+// left with nothing unstages the VM. The incoming values are checked before
+// the merge, the merged edit is dry-run (checkEdit) before it is written, and
+// the entry's file is the one checkEdit resolves.
 func (c *Coordinator) stageEdit(id auth.Identity, proj project.ProjectInfo, e draft.Entry) (model.DraftView, error) {
+	if err := manifest.ValidateEdit(*e.Edit); err != nil {
+		return model.DraftView{}, err
+	}
 	read, err := c.read(proj)
 	if err != nil {
 		return model.DraftView{}, err
@@ -43,8 +49,12 @@ func (c *Coordinator) stageEdit(id auth.Identity, proj project.ProjectInfo, e dr
 			delete(d, key)
 			return nil
 		}
+		src, err := c.checkEdit(read, e.Namespace, e.Name, edit)
+		if err != nil {
+			return err
+		}
 		next := e
-		next.Edit = &edit
+		next.SourceFile, next.Edit = src, &edit
 		d[key] = next
 		return nil
 	})

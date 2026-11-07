@@ -114,9 +114,7 @@ func (c *Coordinator) Adopt(id auth.Identity, proj project.ProjectInfo, namespac
 		Kind:      draft.KindEdit,
 		Namespace: namespace,
 		Name:      name,
-		// The file main actually holds, which need not be where an export would put it.
-		SourceFile: desired.SourceFile,
-		Edit:       &edit,
+		Edit:      &edit,
 	})
 }
 
