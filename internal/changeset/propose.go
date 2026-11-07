@@ -190,7 +190,7 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) []git.ChangesetIte
 					if err != nil {
 						// The base can move after stage, and not every edit in a
 						// draft was dry-run (adoption): name the entry to unstage.
-						return nil, fmt.Errorf("%w: the staged edit of %s/%s no longer applies; unstage it: %v", model.ErrConflict, e.Namespace, e.Name, err)
+						return nil, conflict(err, "the staged edit of %s/%s no longer applies; unstage it", e.Namespace, e.Name)
 					}
 					return out, nil
 				},

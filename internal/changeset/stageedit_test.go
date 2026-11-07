@@ -125,6 +125,10 @@ func TestProposeEditThatNoLongerAppliesIsConflict(t *testing.T) {
 			if !errors.Is(err, model.ErrConflict) || errors.Is(err, model.ErrInvalid) || !strings.Contains(err.Error(), tc.named) {
 				t.Fatalf("want ErrConflict naming %s, got %v", tc.named, err)
 			}
+			// The reason reads once, under the one kind the user sees.
+			if msg := err.Error(); strings.Count(msg, model.ErrConflict.Error()+":") != 1 || strings.Contains(msg, model.ErrInvalid.Error()) {
+				t.Errorf("want a single kind prefix, got %q", msg)
+			}
 			if entries, _ := c.store.List(id.Username, proj.Name); len(entries) != 1 {
 				t.Errorf("a refused propose must keep the draft, got %+v", entries)
 			}

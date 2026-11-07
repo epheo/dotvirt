@@ -66,3 +66,16 @@ func invalid(err error) error {
 	}
 	return fmt.Errorf("%w: %v", model.ErrInvalid, err)
 }
+
+// conflict re-files err under model.ErrConflict with context, dropping the
+// kind each line of err leads with, so the message names one kind once.
+func conflict(err error, format string, args ...any) error {
+	lines := strings.Split(err.Error(), "\n")
+	for i, l := range lines {
+		for _, kind := range []error{model.ErrInvalid, model.ErrConflict} {
+			l = strings.TrimPrefix(l, kind.Error()+": ")
+		}
+		lines[i] = l
+	}
+	return fmt.Errorf("%w: %s: %s", model.ErrConflict, fmt.Sprintf(format, args...), strings.Join(lines, "; "))
+}
