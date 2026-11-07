@@ -132,6 +132,36 @@ func (w *walk) result(outcome string) walkResult {
 	return walkResult{steps: w.steps, outcome: outcome}
 }
 
+// candidate is a rule that may match the flow, judged against both the
+// policy's subject and the rule itself.
+type candidate struct {
+	pol *policy
+	r   rule
+	m   matched
+}
+
+// candidates returns the bound policy's rules that may match the flow, in
+// order, through the first certain match: nothing after it can decide. An
+// unresolved subject leaves every rule unresolved.
+func (b bound) candidates(dir string, peer peerTarget, protocol string, port int) []candidate {
+	sel := matched{m: b.m}
+	if sel.m == matchCond {
+		sel.reason = reasonSubject
+	}
+	var out []candidate
+	for _, r := range b.pol.rules(dir) {
+		m := allOf(sel, r.match(peer, protocol, port))
+		if m.m == matchNo {
+			continue
+		}
+		out = append(out, candidate{b.pol, r, m})
+		if m.m == matchYes {
+			break
+		}
+	}
+	return out
+}
+
 // directionWalk runs one side of the flow (egress rules on the source,
 // ingress rules on the destination) through the east-west tiers.
 func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTarget, protocol string, port int) walkResult {
@@ -143,27 +173,47 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 	// the tiers below (no decision, or a Pass delegation).
 	adminTier := func(policies []*policy, stage string) *walkResult {
 		baseline := stage == "baseline"
-		for _, b := range bind(policies, subject.NSLabels, subject.PodLabels, true) {
-			sm := matched{m: b.m}
-			if sm.m == matchCond {
-				sm.reason = reasonSubject
+		bs := bind(policies, subject.NSLabels, subject.PodLabels, true)
+		for len(bs) > 0 {
+			n := 1
+			for !baseline && n < len(bs) && bs[n].pol.view.Priority == bs[0].pol.view.Priority {
+				n++
 			}
-			for _, r := range b.pol.rules(dir) {
-				m := allOf(sm, r.match(peer, protocol, port))
-				if m.m == matchNo {
+			var cands []candidate
+			deciders := 0
+			for _, b := range bs[:n] {
+				if c := b.candidates(dir, peer, protocol, port); len(c) > 0 {
+					cands = append(cands, c...)
+					deciders++
+				}
+			}
+			bs = bs[n:]
+			if deciders > 1 {
+				// OVN-K maps equal-priority policies onto one ACL priority
+				// range, where OVN's pick between matching ACLs is undefined:
+				// none of their rules decides with certainty.
+				for _, c := range cands {
+					reason := c.m.reason
+					if c.m.m == matchYes {
+						reason = reasonEqualPriority
+					}
+					rv := c.r.view(dir)
+					w.maybe(&c.pol.view, &rv, stage, c.r.action, reason)
+				}
+				continue
+			}
+			for _, c := range cands {
+				rv := c.r.view(dir)
+				if c.m.m == matchCond {
+					w.maybe(&c.pol.view, &rv, stage, c.r.action, c.m.reason)
 					continue
 				}
-				rv := r.view(dir)
-				if m.m == matchCond {
-					w.maybe(&b.pol.view, &rv, stage, r.action, m.reason)
-					continue
-				}
-				if !baseline && r.action == "Pass" {
-					w.addStep(&b.pol.view, &rv, stage, r.action, "Delegates this flow to the project tier.", false, true)
+				if !baseline && c.r.action == "Pass" {
+					w.addStep(&c.pol.view, &rv, stage, c.r.action, "Delegates this flow to the project tier.", false, true)
 					return nil
 				}
-				w.addStep(&b.pol.view, &rv, stage, r.action, "", false, true)
-				res := w.decide(r.action)
+				w.addStep(&c.pol.view, &rv, stage, c.r.action, "", false, true)
+				res := w.decide(c.r.action)
 				return &res
 			}
 		}
@@ -204,18 +254,14 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 	}
 	if len(selecting) > 0 {
 		for _, b := range selecting {
-			for _, r := range b.pol.rules(dir) {
-				m := r.match(peer, protocol, port)
-				if m.m == matchNo {
+			for _, c := range b.candidates(dir, peer, protocol, port) {
+				rv := c.r.view(dir)
+				if c.m.m == matchCond {
+					w.maybe(&b.pol.view, &rv, "dfw", c.r.action, c.m.reason)
 					continue
 				}
-				rv := r.view(dir)
-				if m.m == matchCond {
-					w.maybe(&b.pol.view, &rv, "dfw", r.action, m.reason)
-					continue
-				}
-				w.addStep(&b.pol.view, &rv, "dfw", r.action, "", false, true)
-				return w.decide(r.action)
+				w.addStep(&b.pol.view, &rv, "dfw", c.r.action, "", false, true)
+				return w.decide(c.r.action)
 			}
 		}
 		note := fmt.Sprintf("Selected by %d project %s for %s; no rule allows this flow.",

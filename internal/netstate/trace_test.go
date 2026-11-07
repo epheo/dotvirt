@@ -555,3 +555,87 @@ func TestTraceLocalnetSegmentByPhysnetVLAN(t *testing.T) {
 		}
 	}
 }
+
+func anp(t *testing.T, s *Snapshot, name string, priority int64, egress ...any) {
+	t.Helper()
+	add(t, s.anp, map[string]any{
+		"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "AdminNetworkPolicy",
+		"metadata": map[string]any{"name": name},
+		"spec": map[string]any{
+			"priority": priority,
+			"subject":  map[string]any{"namespaces": map[string]any{}},
+			"egress":   egress,
+		},
+	})
+}
+
+func anpEgress(action string, namespaces ...any) map[string]any {
+	return map[string]any{"action": action, "to": []any{map[string]any{"namespaces": nameInSelector(namespaces...)}}}
+}
+
+// OVN-K leaves the order between equal-priority ANPs undefined: when more than
+// one of them may decide, no verdict is certain. One deciding policy at a
+// shared priority is still certain, and agreeing Passes still converge.
+func TestTraceEqualPriorityANPs(t *testing.T) {
+	src := wl("team-b", "client", nil, nil)
+	dst := wl("team-a", "web", nil, nil)
+
+	s := New(nil, nil)
+	anp(t, s, "a-deny", 5, anpEgress("Deny", "team-a"))
+	anp(t, s, "b-allow", 5, anpEgress("Allow", "team-a"))
+	res := s.Trace(src, &dst, "", "TCP", 443)
+	if res.Verdict != "Conditional" {
+		t.Fatalf("conflicting equal-priority ANPs: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	var flagged int
+	for _, st := range res.Steps {
+		if st.Stage == "admin" && st.Conditional && strings.Contains(st.Note, "same priority") {
+			flagged++
+		}
+	}
+	if flagged != 2 {
+		t.Fatalf("both rules must stay visible and flagged, got %+v", res.Steps)
+	}
+
+	s = New(nil, nil)
+	anp(t, s, "a-deny", 5, anpEgress("Deny", "team-a"))
+	anp(t, s, "b-elsewhere", 5, anpEgress("Allow", "team-c"))
+	if res := s.Trace(src, &dst, "", "TCP", 443); res.Verdict != "Deny" {
+		t.Fatalf("one deciding policy at the priority: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+
+	s = New(nil, nil)
+	anp(t, s, "a-pass", 5, anpEgress("Pass", "team-a"))
+	anp(t, s, "b-pass", 5, anpEgress("Pass", "team-a"))
+	if res := s.Trace(src, &dst, "", "TCP", 443); res.Verdict != "Allow" {
+		t.Fatalf("agreeing passes converge: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+}
+
+// A NetworkPolicy whose selection cannot be resolved may not apply, so its
+// allow rule is a maybe, never the deciding rule.
+func TestTraceProjectSelectionUnresolved(t *testing.T) {
+	s := New(nil, nil)
+	add(t, s.netpol, map[string]any{
+		"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
+		"metadata": map[string]any{"name": "isolate", "namespace": "team-a"},
+		"spec":     map[string]any{"podSelector": map[string]any{}, "policyTypes": []any{"Ingress"}},
+	})
+	add(t, s.netpol, map[string]any{
+		"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
+		"metadata": map[string]any{"name": "unreadable", "namespace": "team-a"},
+		"spec": map[string]any{
+			"podSelector": map[string]any{"matchExpressions": []any{
+				map[string]any{"key": "app", "operator": "Bogus"},
+			}},
+			"policyTypes": []any{"Ingress"},
+			"ingress":     []any{map[string]any{}},
+		},
+	})
+	src := wl("team-b", "client", nil, nil)
+	dst := wl("team-a", "web", nil, map[string]string{"app": "web"})
+	res := s.Trace(src, &dst, "", "TCP", 443)
+	if res.Verdict != "Conditional" {
+		t.Fatalf("allow from an unresolved selection: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+}

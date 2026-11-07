@@ -56,14 +56,15 @@ func anyOf(parts ...matched) matched {
 // Conditional-outcome reasons. Each situation is worded here once, so the
 // trace UI never shows two phrasings for one condition.
 const (
-	reasonPortNeeded = "the rule restricts ports; give a destination port to resolve it"
-	reasonNamedPort  = "a named port can't be resolved here"
-	reasonNoAddrs    = "the VM reports no addresses (not running), so CIDR rules can't be resolved"
-	reasonSelector   = "a selector could not be resolved"
-	reasonSubject    = "the policy's subject selector could not be resolved"
-	reasonNodePeer   = "a node-selector rule - whether this address is a cluster node is unknown here"
-	reasonDNSName    = "DNS-name rule (%s) - resolution unknown here"
-	reasonUnresolved = "a destination form this trace cannot resolve"
+	reasonPortNeeded    = "the rule restricts ports; give a destination port to resolve it"
+	reasonNamedPort     = "a named port can't be resolved here"
+	reasonNoAddrs       = "the VM reports no addresses (not running), so CIDR rules can't be resolved"
+	reasonSelector      = "a selector could not be resolved"
+	reasonSubject       = "the policy's subject selector could not be resolved"
+	reasonNodePeer      = "a node-selector rule - whether this address is a cluster node is unknown here"
+	reasonDNSName       = "DNS-name rule (%s) - resolution unknown here"
+	reasonUnresolved    = "a destination form this trace cannot resolve"
+	reasonEqualPriority = "an admin policy at the same priority may decide first, in an order OVN-Kubernetes leaves undefined"
 )
 
 // peerTarget is what rule peers are matched against: the flow's other end -
