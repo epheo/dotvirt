@@ -54,6 +54,11 @@ const (
 	// TaskChanged: the recent-tasks feed moved - an imperative op was recorded or a
 	// merged PR landed. The feed is fetched out-of-band, like the network catalog.
 	TaskChanged
+	// TTLBackstop: TTL-cached frame inputs no watch observes (cluster-scoped RBAC,
+	// group membership) may have expired - published on a fixed cadence while a
+	// stream is open so frames re-evaluate them. Keep it out of every cache's
+	// version stamp: it must not invalidate anything before its TTL.
+	TTLBackstop
 
 	// kindCount is the number of kinds - keep it last. Sizes the version array.
 	kindCount

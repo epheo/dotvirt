@@ -150,7 +150,8 @@ type Config struct {
 // ClusterRoleBinding/ClusterRole, which the version does NOT observe. The TTL is the
 // backstop that bounds staleness for those un-watched RBAC sources, so it stays short
 // - long enough to spare the periodic SelfSubjectRulesReview on quiet tokens, short
-// enough that a cluster-level revocation can't linger.
+// enough that a cluster-level revocation can't linger. An expired entry is only
+// re-evaluated by a rebuild, so RunTTLBackstop wakes open streams at this cadence.
 const visibleTTL = 30 * time.Second
 
 // optionsTTL caches the wizard catalog (instancetypes/preferences/datasources).
@@ -196,16 +197,18 @@ type Server struct {
 	vnc       VNCHandler
 	cfg       Config
 
-	// Proposals-refresher state (see proposals.go): who to refresh, the open
-	// streams per token that keep them watched, the coalesced out-of-cycle
-	// trigger, the repos a nudge named, and the repo version each project's lane
-	// was last read at.
+	// Proposals-refresher state (see proposals.go): who to refresh, the coalesced
+	// out-of-cycle trigger, the repos a nudge named, and the repo version each
+	// project's lane was last read at.
 	propMu      sync.Mutex
 	propTargets map[string]propTarget
-	propStreams map[string]int
 	propNudge   chan struct{}
 	propDirty   map[string]struct{}
 	propSeen    map[string]uint64
+
+	// Open inventory streams per token key (see streams.go).
+	streamMu sync.Mutex
+	streams  map[string]int
 }
 
 // Deps are the collaborators for NewServer. Reader and Draft are required:
@@ -263,10 +266,10 @@ func NewServer(d Deps) *Server {
 		cfg:       d.Config,
 
 		propTargets: map[string]propTarget{},
-		propStreams: map[string]int{},
 		propNudge:   make(chan struct{}, 1),
 		propDirty:   map[string]struct{}{},
 		propSeen:    map[string]uint64{},
+		streams:     map[string]int{},
 	}
 }
 

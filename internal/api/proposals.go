@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"log"
-	"net/http"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -126,31 +125,6 @@ func findProject(ps []project.ProjectInfo, name string) (project.ProjectInfo, bo
 	return project.ProjectInfo{}, false
 }
 
-// streaming counts a token's open inventory streams while each is served (the
-// stream handler returns when its connection closes), so the refresher keeps
-// that token's lanes fresh however long its frames stay unchanged.
-func (s *Server) streaming(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id, ok := auth.FromContext(r.Context())
-		if !ok {
-			next(w, r)
-			return
-		}
-		key := restfactory.TokenKey(id.Token)
-		s.propMu.Lock()
-		s.propStreams[key]++
-		s.propMu.Unlock()
-		defer func() {
-			s.propMu.Lock()
-			if s.propStreams[key]--; s.propStreams[key] <= 0 {
-				delete(s.propStreams, key)
-			}
-			s.propMu.Unlock()
-		}()
-		next(w, r)
-	}
-}
-
 // nudgeProposals asks the refresher for an out-of-cycle pass (coalesced). A
 // non-empty repo (canonical URL) marks that repo's projects due even though no
 // head moved; with none, the pass picks up only lanes never read.
@@ -219,7 +193,7 @@ func (s *Server) refreshProposals(all bool) bool {
 	s.propMu.Lock()
 	watched := map[string]project.ProjectInfo{}
 	for key, t := range s.propTargets {
-		if s.propStreams[key] == 0 && now.Sub(t.lastSeen) > proposalsTrackFor {
+		if !s.streamOpen(key) && now.Sub(t.lastSeen) > proposalsTrackFor {
 			delete(s.propTargets, key)
 			continue
 		}

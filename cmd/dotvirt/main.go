@@ -229,7 +229,7 @@ func run() error {
 	inventoryKinds := []eventbus.Kind{
 		eventbus.LiveChanged, eventbus.NamespaceChanged,
 		eventbus.RBACChanged, eventbus.DriftChanged, eventbus.GitChanged, eventbus.ProposalsChanged,
-		eventbus.NetworkChanged, eventbus.TaskChanged,
+		eventbus.NetworkChanged, eventbus.TaskChanged, eventbus.TTLBackstop,
 	}
 	hubWake, _ := bus.Subscribe(inventoryKinds...)
 	hub := stream.NewHub(server.InventoryForIdentity, hubWake, stream.RepoLevels(bus, eventbus.GitChanged, inventoryKinds...), cfg.UIOrigin)
@@ -240,6 +240,11 @@ func run() error {
 	// handler nudges, and a slow backstop - so the broadcast path never calls the
 	// forge; a changed lane publishes ProposalsChanged.
 	go server.RunProposalsRefresher(ctx, bus)
+
+	// Frames also read TTL-cached authorization that no watch observes; while a
+	// stream is open, the backstop rebuilds frames at that TTL (identical frames
+	// are not resent).
+	go server.RunTTLBackstop(ctx)
 
 	// VNC dials as the requesting user (KubeVirt RBAC gates the console).
 	server.UseVNC(stream.NewVNCProxy(func(token string) (stream.VNCDialer, error) {
