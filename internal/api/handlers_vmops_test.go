@@ -325,16 +325,11 @@ func TestPermissions(t *testing.T) {
 	}
 }
 
-// A tenant who reads VMs only in its own namespace (the SSRR fallback) sees
+// A tenant who reads VMs only in its own namespace (the per-namespace probe) sees
 // that project and nothing else.
-func TestTenantVisibilityThroughRulesReview(t *testing.T) {
+func TestTenantVisibilityThroughNamespaceProbe(t *testing.T) {
 	fc := newFakeCluster(t)
-	fc.ssrr = func(token, ns string) []authzv1.ResourceRule {
-		if token == tenantToken && ns == "team-a-dev" {
-			return []authzv1.ResourceRule{{Verbs: []string{"get", "list"}, APIGroups: []string{"kubevirt.io"}, Resources: []string{"virtualmachines"}}}
-		}
-		return nil
-	}
+	fc.readsVMs = tenantReadsTeamA
 	fc.on(http.MethodGet, "/apis/clone.kubevirt.io/v1beta1/namespaces/team-a-dev/virtualmachineclones", unstructuredList("clone.kubevirt.io/v1beta1", "VirtualMachineClone"))
 	s := fc.server(nil, Config{})
 

@@ -63,3 +63,10 @@ func (c *Cache[V]) Put(key string, val V) {
 	}
 	c.m[key] = entry[V]{val: val, at: now}
 }
+
+// Delete drops key.
+func (c *Cache[V]) Delete(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.m, key)
+}

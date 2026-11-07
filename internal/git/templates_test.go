@@ -13,7 +13,7 @@ func TestTemplatesDirSplit(t *testing.T) {
 	bare := seedMultiRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	repos := NewRepoSet(ctx, "", nil, true, nil, time.Hour)
+	repos := NewRepoSet(ctx, "", "", nil, true, nil, time.Hour)
 	read, write, err := repos.Get(bare)
 	if err != nil {
 		t.Fatal(err)
