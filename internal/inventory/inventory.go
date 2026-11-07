@@ -38,6 +38,14 @@ type Inputs struct {
 	// repoURL. Nil (like Drift) means Argo isn't wired or hasn't synced; non-nil with a
 	// repo absent means no Application manages it (GitOps left nil, no alarm).
 	ProjectDrift map[string]model.ProjectSync
+
+	// Visible is the caller's visible namespaces, nil meaning all; Owners maps
+	// every project namespace to its project (project.Resolver.Owners), nil
+	// leaving OutOfProject unreported. A placement issue is shown when its
+	// namespace is visible or belongs to no project, so a caller never learns
+	// about a tenant namespace hidden from them.
+	Visible map[string]bool
+	Owners  map[string]string
 }
 
 // Build produces the inventory. A project whose repo can't be read (or that has
@@ -92,7 +100,7 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 		} else if vms, err = changeset.VMsOnBranch(read, in.Branch); err != nil {
 			out.Error = "repo unreadable"
 			err = fmt.Errorf("read repo: %w", err)
-		} else if out.Unnamespaced, err = changeset.UnnamespacedOnBranch(read, in.Branch); err != nil {
+		} else if err = placementIssues(&out, in, read); err != nil {
 			out.Error = "repo unreadable"
 			err = fmt.Errorf("read repo: %w", err)
 		}
@@ -135,6 +143,32 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 
 	out.Namespaces = groupNamespaces(byNS)
 	return out
+}
+
+// placementIssues fills the project's Unnamespaced and OutOfProject from the
+// base branch, limited to what the caller may see.
+func placementIssues(out *model.Project, in Inputs, read *git.Repo) error {
+	pl, err := changeset.PlacementOnBranch(read, in.Branch)
+	if err != nil {
+		return err
+	}
+	shown := func(ns string) bool {
+		return in.Visible == nil || in.Visible[ns] || in.Owners[ns] == ""
+	}
+	for _, ref := range pl.Implied {
+		if shown(ref.Namespace) {
+			out.Unnamespaced = append(out.Unnamespaced, ref)
+		}
+	}
+	if in.Owners == nil {
+		return nil
+	}
+	for _, ns := range pl.Namespaces {
+		if in.Owners[ns] != out.Name && shown(ns) {
+			out.OutOfProject = append(out.OutOfProject, pl.Named[ns]...)
+		}
+	}
+	return nil
 }
 
 // groupNamespaces turns a namespace->VMs map into sorted ProjectNamespace

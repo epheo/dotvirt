@@ -143,6 +143,10 @@ type Project struct {
 	// to the Application's destination namespace instead, so each is an issue
 	// to fix in git.
 	Unnamespaced []ObjectRef `json:"unnamespaced,omitempty"`
+	// OutOfProject are the objects the repo declares in a namespace outside the
+	// project. Its AppProject refuses them, which fails the Application's whole
+	// sync, so each is an issue to fix in git.
+	OutOfProject []ObjectRef `json:"outOfProject,omitempty"`
 }
 
 // AdoptableNamespace is a namespace holding VMs but no dotvirt.io/project label -

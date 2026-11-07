@@ -157,6 +157,9 @@ func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, w
 		if _, ok := idx.Files[model.ObjectRef{Kind: o.Kind, Namespace: o.Namespace, Name: o.Name}]; ok {
 			continue
 		}
+		if err := requireNamedNamespace(o.Path, o.Manifest); err != nil {
+			return model.DraftView{}, err
+		}
 		if err := c.store.Stage(id.Username, proj.Name, draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   adoptResource(o.Kind),

@@ -1,9 +1,13 @@
 package changeset
 
 import (
+	"errors"
 	"slices"
+	"strings"
 	"testing"
 
+	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
@@ -11,13 +15,14 @@ import (
 )
 
 // A namespaced document without metadata.namespace keeps its directory reading
-// in the index and is reported; cluster-scoped kinds and the template library
-// are not.
-func TestUnnamespacedOnBranch(t *testing.T) {
+// in the index and is reported as implied; the rest are grouped by the
+// namespace they name. Cluster-scoped kinds and the template library are
+// neither.
+func TestPlacementOnBranch(t *testing.T) {
 	bare := seedBareFiles(t, map[string][]byte{
 		"alpha/web.yaml":    []byte(liveVMYAML("web", "")),
 		"alpha/loose.yaml":  []byte("apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: loose\n"),
-		"alpha/policy.yaml": []byte("apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: open\n---\napiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: pinned\n  namespace: alpha\n"),
+		"alpha/policy.yaml": []byte("apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: open\n---\napiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: pinned\n  namespace: beta\n"),
 		"root.yaml":         []byte("apiVersion: cdi.kubevirt.io/v1beta1\nkind: DataVolume\nmetadata:\n  name: disk\n"),
 		"networks/wan.yaml": []byte("apiVersion: k8s.ovn.org/v1\nkind: ClusterUserDefinedNetwork\nmetadata:\n  name: wan\n"),
 		"templates/t.yaml":  []byte("apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: t\n"),
@@ -25,24 +30,57 @@ func TestUnnamespacedOnBranch(t *testing.T) {
 	c := newTestCoordinator(t, false)
 	read := mustRead(t, c, project.ProjectInfo{Name: "p", Repo: bare})
 
-	got, err := UnnamespacedOnBranch(read, "main")
+	got, err := PlacementOnBranch(read, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []model.ObjectRef{
+	implied := []model.ObjectRef{
 		{Kind: "VirtualMachine", Namespace: "alpha", Name: "loose"},
 		{Kind: "NetworkPolicy", Namespace: "alpha", Name: "open"},
 		{Kind: "DataVolume", Namespace: "default", Name: "disk"},
 	}
-	if !slices.Equal(got, want) {
-		t.Errorf("unnamespaced = %+v, want %+v", got, want)
+	if !slices.Equal(got.Implied, implied) {
+		t.Errorf("implied = %+v, want %+v", got.Implied, implied)
+	}
+	if !slices.Equal(got.Namespaces, []string{"alpha", "beta"}) ||
+		!slices.Equal(got.Named["alpha"], []model.ObjectRef{{Kind: "VirtualMachine", Namespace: "alpha", Name: "web"}}) ||
+		!slices.Equal(got.Named["beta"], []model.ObjectRef{{Kind: "NetworkPolicy", Namespace: "beta", Name: "pinned"}}) {
+		t.Errorf("named = %v %+v", got.Namespaces, got.Named)
 	}
 	idx, err := indexDeclared(read, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if idx.Files[want[0]] != "alpha/loose.yaml" {
+	if idx.Files[implied[0]] != "alpha/loose.yaml" {
 		t.Errorf("the directory reading changed: %v", idx.Files)
+	}
+}
+
+// An edit, a form render or an adoption cannot stage a document that leaves
+// its namespace to the directory: the manifest editor stripping
+// metadata.namespace is refused, not staged.
+func TestStagingRefusesImpliedNamespace(t *testing.T) {
+	pinned := "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: web\n  namespace: alpha\nspec:\n  podSelector: {}\n"
+	bare := seedBareFiles(t, map[string][]byte{"alpha/web.yaml": []byte(pinned)})
+	c := newTestCoordinator(t, false)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare, Namespaces: []string{"alpha"}}
+
+	stripped := strings.Replace(pinned, "  namespace: alpha\n", "", 1)
+	stripped = strings.Replace(stripped, "podSelector: {}", "podSelector: {matchLabels: {a: b}}", 1)
+	if _, err := c.StageUpdateManifest(id, proj, string(draft.ResourceNetworkPolicy), "alpha", "web", stripped); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("namespace-less edit: err = %v, want ErrInvalid", err)
+	}
+	loose := model.Adoptable{Kind: "NetworkPolicy", Namespace: "alpha", Name: "new", Path: "alpha/networkpolicies/new.yaml",
+		Manifest: []byte("apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: new\n")}
+	if _, err := c.AdoptObject(id, proj, loose); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("namespace-less adoption: err = %v, want ErrInvalid", err)
+	}
+	if _, err := c.AdoptObjects(id, proj, "alpha", []model.Adoptable{loose}); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("namespace-less bulk adoption: err = %v, want ErrInvalid", err)
+	}
+	if entries, _ := c.store.List(id.Username, proj.Name); len(entries) != 0 {
+		t.Errorf("refused stages left %+v", entries)
 	}
 }
 

@@ -1,6 +1,9 @@
 package changeset
 
 import (
+	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/epheo/dotvirt/internal/git"
@@ -71,12 +74,21 @@ func defaultNamespace(path string) string {
 // declaredIndex is one branch's declared objects: which file holds each, and
 // which files hold more than their declared objects (extra documents the
 // index cannot name), so a rewrite or removal of those files is never offered
-// as if it touched only the object asked for. Implied lists, in tree order,
-// the namespaced objects whose document omits metadata.namespace.
+// as if it touched only the object asked for.
 type declaredIndex struct {
-	Files   map[model.ObjectRef]string
-	Opaque  map[string]bool
-	Implied []model.ObjectRef
+	Files     map[model.ObjectRef]string
+	Opaque    map[string]bool
+	Placement Placement
+}
+
+// Placement is where a branch's namespaced objects are declared, each list in
+// tree order: Implied omit metadata.namespace (each under the namespace its
+// directory gives it), Named name theirs, keyed by it, Namespaces holding the
+// keys in name order.
+type Placement struct {
+	Implied    []model.ObjectRef
+	Named      map[string][]model.ObjectRef
+	Namespaces []string
 }
 
 // indexDeclared indexes every object branch declares by file - the edit and
@@ -92,35 +104,52 @@ type declaredIndex struct {
 func indexDeclared(read *git.Repo, branch string) (declaredIndex, error) {
 	return git.Memoized(read, "declared", branch, func() (declaredIndex, error) {
 		idx := declaredIndex{Files: map[model.ObjectRef]string{}, Opaque: map[string]bool{}}
+		named := map[string][]model.ObjectRef{}
 		err := read.WalkYAML(branch,
 			func(path string) bool { return !git.InTemplatesDir(path) },
 			func(path string, content []byte) error {
 				refs, implied, docs := declared(path, content)
 				for _, ref := range refs {
 					idx.Files[ref] = path
+					if ref.Namespace != "" && !slices.Contains(implied, ref) {
+						named[ref.Namespace] = append(named[ref.Namespace], ref)
+					}
 				}
 				if docs != len(refs) {
 					idx.Opaque[path] = true
 				}
-				idx.Implied = append(idx.Implied, implied...)
+				idx.Placement.Implied = append(idx.Placement.Implied, implied...)
 				return nil
 			})
 		if err != nil {
 			return declaredIndex{}, err
 		}
+		idx.Placement.Named = named
+		idx.Placement.Namespaces = slices.Sorted(maps.Keys(named))
 		return idx, nil
 	})
 }
 
-// UnnamespacedOnBranch lists the namespaced objects branch declares without
-// metadata.namespace, each under the namespace dotvirt reads from its
-// directory. Argo applies them to the Application's destination namespace, so
-// such a document is a standing issue to fix in git. Shares the memoized
+// PlacementOnBranch is where branch declares its namespaced objects. A tenant
+// Application applies a document without metadata.namespace to its destination
+// namespace, and refuses its whole sync over one naming a namespace outside
+// its project, so both are standing issues to fix in git. Shares the memoized
 // declared index; read only.
-func UnnamespacedOnBranch(read *git.Repo, branch string) ([]model.ObjectRef, error) {
+func PlacementOnBranch(read *git.Repo, branch string) (Placement, error) {
 	idx, err := indexDeclared(read, branch)
 	if err != nil {
-		return nil, err
+		return Placement{}, err
 	}
-	return idx.Implied, nil
+	return idx.Placement, nil
+}
+
+// requireNamedNamespace refuses content holding a namespaced document without
+// metadata.namespace: dotvirt would read it in its directory's namespace while
+// Argo applies it to the Application's destination namespace.
+func requireNamedNamespace(path string, content []byte) error {
+	if _, implied, _ := declared(path, content); len(implied) > 0 {
+		r := implied[0]
+		return fmt.Errorf("%w: %s %s must set metadata.namespace", model.ErrInvalid, r.Kind, r.Name)
+	}
+	return nil
 }

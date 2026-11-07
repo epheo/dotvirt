@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -133,23 +134,56 @@ func TestBuildFiltersAndEnriches(t *testing.T) {
 	}
 }
 
-// A document without metadata.namespace rides the project as an issue, under
-// the namespace its directory gives it.
-func TestBuildSurfacesUnnamespacedObjects(t *testing.T) {
+// Documents Argo will not apply as dotvirt reads them ride the project as
+// issues: one without metadata.namespace, one naming a namespace outside the
+// project. A caller sees only those whose namespace they can see or that
+// belongs to no project: never one in a tenant namespace hidden from them.
+func TestBuildSurfacesPlacementIssues(t *testing.T) {
+	np := func(ns, name string) string {
+		meta := "  name: " + name + "\n"
+		if ns != "" {
+			meta += "  namespace: " + ns + "\n"
+		}
+		return "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n" + meta
+	}
 	bare := seedRepoFiles(t, map[string]string{
-		"tenant-a/web.yaml":  vmYAML("web", "tenant-a"),
-		"tenant-a/open.yaml": "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: open\n",
+		"a-dev/web.yaml":    vmYAML("web", "a-dev"),
+		"a-dev/open.yaml":   np("", "open"),
+		"a-prod/loose.yaml": np("", "loose"),
+		"a-dev/into-b.yaml": np("b-ns", "into-b"),
+		"a-dev/typo.yaml":   np("a-dve", "typo"),
+		"a-dev/prod.yaml":   np("a-prod", "prod"),
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	inv := Build(Inputs{
-		Branch:   "main",
-		Repos:    git.NewRepoSet(ctx, "", nil, false, nil, time.Hour),
-		Projects: []project.ProjectInfo{{Name: "team-a", Repo: bare, Namespaces: []string{"tenant-a"}}},
-	})
-	got := inv.Projects[0].Unnamespaced
-	if len(got) != 1 || got[0] != (model.ObjectRef{Kind: "NetworkPolicy", Namespace: "tenant-a", Name: "open"}) {
-		t.Errorf("unnamespaced = %+v", got)
+	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
+	owners := map[string]string{"a-dev": "team-a", "a-prod": "team-a", "b-ns": "team-b"}
+	build := func(visible map[string]bool) model.Project {
+		return Build(Inputs{
+			Branch: "main", Repos: repos, Visible: visible, Owners: owners,
+			Projects: []project.ProjectInfo{{Name: "team-a", Repo: bare, Namespaces: []string{"a-dev"}}},
+		}).Projects[0]
+	}
+	ref := func(ns, name string) model.ObjectRef {
+		return model.ObjectRef{Kind: "NetworkPolicy", Namespace: ns, Name: name}
+	}
+
+	// Sees a-dev only: a-prod's loose document and B's namespace stay hidden;
+	// the typo names no project's namespace, so it shows.
+	got := build(map[string]bool{"a-dev": true})
+	if !slices.Equal(got.Unnamespaced, []model.ObjectRef{ref("a-dev", "open")}) {
+		t.Errorf("unnamespaced = %+v", got.Unnamespaced)
+	}
+	if !slices.Equal(got.OutOfProject, []model.ObjectRef{ref("a-dve", "typo")}) {
+		t.Errorf("out of project = %+v", got.OutOfProject)
+	}
+
+	all := build(map[string]bool{"a-dev": true, "a-prod": true, "b-ns": true})
+	if !slices.Equal(all.Unnamespaced, []model.ObjectRef{ref("a-dev", "open"), ref("a-prod", "loose")}) {
+		t.Errorf("unnamespaced = %+v", all.Unnamespaced)
+	}
+	if !slices.Equal(all.OutOfProject, []model.ObjectRef{ref("a-dve", "typo"), ref("b-ns", "into-b")}) {
+		t.Errorf("out of project = %+v", all.OutOfProject)
 	}
 }
 

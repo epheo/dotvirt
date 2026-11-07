@@ -1354,6 +1354,12 @@ export interface Project {
    * to fix in git.
    */
   unnamespaced?: ObjectRef[];
+  /**
+   * OutOfProject are the objects the repo declares in a namespace outside the
+   * project. Its AppProject refuses them, which fails the Application's whole
+   * sync, so each is an issue to fix in git.
+   */
+  outOfProject?: ObjectRef[];
 }
 /**
  * AdoptableNamespace is a namespace holding VMs but no dotvirt.io/project label -
