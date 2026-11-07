@@ -145,8 +145,8 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 	return out
 }
 
-// placementIssues fills the project's Unnamespaced and OutOfProject from the
-// base branch, limited to what the caller may see.
+// placementIssues fills the project's Unnamespaced, OutOfProject and
+// PlatformKinds from the base branch, limited to what the caller may see.
 func placementIssues(out *model.Project, in Inputs, read *git.Repo) error {
 	pl, err := changeset.PlacementOnBranch(read, in.Branch)
 	if err != nil {
@@ -158,6 +158,11 @@ func placementIssues(out *model.Project, in Inputs, read *git.Repo) error {
 	for _, ref := range pl.Implied {
 		if shown(ref.Namespace) {
 			out.Unnamespaced = append(out.Unnamespaced, ref)
+		}
+	}
+	for _, ref := range pl.PlatformKinds {
+		if shown(ref.Namespace) {
+			out.PlatformKinds = append(out.PlatformKinds, ref)
 		}
 	}
 	if in.Owners == nil {

@@ -147,6 +147,11 @@ type Project struct {
 	// project. Its AppProject refuses them, which fails the Application's whole
 	// sync, so each is an issue to fix in git.
 	OutOfProject []ObjectRef `json:"outOfProject,omitempty"`
+	// PlatformKinds are the objects the repo declares of a kind only the
+	// platform repo may hold, a NetworkAttachmentDefinition say. Its AppProject
+	// refuses them, which fails the Application's whole sync, so each is an
+	// issue to fix in git.
+	PlatformKinds []ObjectRef `json:"platformKinds,omitempty"`
 }
 
 // AdoptableNamespace is a namespace holding VMs but no dotvirt.io/project label -

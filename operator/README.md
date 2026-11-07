@@ -281,7 +281,7 @@ no extra trust configuration is needed.
     repo. Tenant AppProjects no longer admit NADs: a project's admin role may only
     read them, while Argo applies with its own rights, so a tenant NAD could join
     another project's VLAN or reach the underlay. A tenant repo still holding one
-    fails to sync.
+    fails to sync. The inventory lists such objects per project (`platformKinds`).
 
 ## Managed Forgejo credentials
 

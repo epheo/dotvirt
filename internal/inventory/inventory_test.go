@@ -136,8 +136,9 @@ func TestBuildFiltersAndEnriches(t *testing.T) {
 
 // Documents Argo will not apply as dotvirt reads them ride the project as
 // issues: one without metadata.namespace, one naming a namespace outside the
-// project. A caller sees only those whose namespace they can see or that
-// belongs to no project: never one in a tenant namespace hidden from them.
+// project, one of a platform-tier kind. A caller sees only those whose
+// namespace they can see or that belongs to no project: never one in a tenant
+// namespace hidden from them.
 func TestBuildSurfacesPlacementIssues(t *testing.T) {
 	np := func(ns, name string) string {
 		meta := "  name: " + name + "\n"
@@ -153,6 +154,8 @@ func TestBuildSurfacesPlacementIssues(t *testing.T) {
 		"a-dev/into-b.yaml": np("b-ns", "into-b"),
 		"a-dev/typo.yaml":   np("a-dve", "typo"),
 		"a-dev/prod.yaml":   np("a-prod", "prod"),
+		"a-dev/vlan.yaml":   "apiVersion: k8s.cni.cncf.io/v1\nkind: NetworkAttachmentDefinition\nmetadata:\n  name: vlan\n  namespace: a-dev\n",
+		"a-prod/raw.yaml":   "apiVersion: k8s.cni.cncf.io/v1\nkind: NetworkAttachmentDefinition\nmetadata:\n  name: raw\n  namespace: a-prod\n",
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -177,6 +180,12 @@ func TestBuildSurfacesPlacementIssues(t *testing.T) {
 	if !slices.Equal(got.OutOfProject, []model.ObjectRef{ref("a-dve", "typo")}) {
 		t.Errorf("out of project = %+v", got.OutOfProject)
 	}
+	nad := func(ns, name string) model.ObjectRef {
+		return model.ObjectRef{Kind: "NetworkAttachmentDefinition", Namespace: ns, Name: name}
+	}
+	if !slices.Equal(got.PlatformKinds, []model.ObjectRef{nad("a-dev", "vlan")}) {
+		t.Errorf("platform kinds = %+v", got.PlatformKinds)
+	}
 
 	all := build(map[string]bool{"a-dev": true, "a-prod": true, "b-ns": true})
 	if !slices.Equal(all.Unnamespaced, []model.ObjectRef{ref("a-dev", "open"), ref("a-prod", "loose")}) {
@@ -184,6 +193,9 @@ func TestBuildSurfacesPlacementIssues(t *testing.T) {
 	}
 	if !slices.Equal(all.OutOfProject, []model.ObjectRef{ref("a-dve", "typo"), ref("b-ns", "into-b")}) {
 		t.Errorf("out of project = %+v", all.OutOfProject)
+	}
+	if !slices.Equal(all.PlatformKinds, []model.ObjectRef{nad("a-dev", "vlan"), nad("a-prod", "raw")}) {
+		t.Errorf("platform kinds = %+v", all.PlatformKinds)
 	}
 }
 

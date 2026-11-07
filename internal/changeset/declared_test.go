@@ -26,6 +26,7 @@ func TestPlacementOnBranch(t *testing.T) {
 		"alpha/policy.yaml": []byte("apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: open\n---\napiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: pinned\n  namespace: beta\n"),
 		"root.yaml":         []byte("apiVersion: cdi.kubevirt.io/v1beta1\nkind: DataVolume\nmetadata:\n  name: disk\n"),
 		"networks/wan.yaml": []byte("apiVersion: k8s.ovn.org/v1\nkind: ClusterUserDefinedNetwork\nmetadata:\n  name: wan\n"),
+		"alpha/vlan.yaml":   []byte("apiVersion: k8s.cni.cncf.io/v1\nkind: NetworkAttachmentDefinition\nmetadata:\n  name: vlan\n  namespace: alpha\n"),
 		"templates/t.yaml":  []byte("apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: t\n"),
 	})
 	c := newTestCoordinator(t, false)
@@ -43,8 +44,15 @@ func TestPlacementOnBranch(t *testing.T) {
 	if !slices.Equal(got.Implied, implied) {
 		t.Errorf("implied = %+v, want %+v", got.Implied, implied)
 	}
+	platform := []model.ObjectRef{
+		{Kind: "NetworkAttachmentDefinition", Namespace: "alpha", Name: "vlan"},
+		{Kind: "ClusterUserDefinedNetwork", Name: "wan"},
+	}
+	if !slices.Equal(got.PlatformKinds, platform) {
+		t.Errorf("platform kinds = %+v, want %+v", got.PlatformKinds, platform)
+	}
 	if !slices.Equal(got.Namespaces, []string{"alpha", "beta"}) ||
-		!slices.Equal(got.Named["alpha"], []model.ObjectRef{{Kind: "VirtualMachine", Namespace: "alpha", Name: "web"}}) ||
+		!slices.Equal(got.Named["alpha"], []model.ObjectRef{{Kind: "NetworkAttachmentDefinition", Namespace: "alpha", Name: "vlan"}, {Kind: "VirtualMachine", Namespace: "alpha", Name: "web"}}) ||
 		!slices.Equal(got.Named["beta"], []model.ObjectRef{{Kind: "NetworkPolicy", Namespace: "beta", Name: "pinned"}}) {
 		t.Errorf("named = %v %+v", got.Namespaces, got.Named)
 	}

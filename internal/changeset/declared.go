@@ -83,14 +83,16 @@ type declaredIndex struct {
 	Placement Placement
 }
 
-// Placement is where a branch's namespaced objects are declared, each list in
-// tree order: Implied omit metadata.namespace (each under the namespace its
-// directory gives it), Named name theirs, keyed by it, Namespaces holding the
-// keys in name order.
+// Placement is where a branch's objects are declared, each list in tree order:
+// Implied omit metadata.namespace (each under the namespace its directory gives
+// it), Named name theirs, keyed by it, Namespaces holding the keys in name
+// order. PlatformKinds are those of a kind outside tenancy.TenantKinds,
+// namespaced or not: a tenant AppProject refuses them.
 type Placement struct {
-	Implied    []model.ObjectRef
-	Named      map[string][]model.ObjectRef
-	Namespaces []string
+	Implied       []model.ObjectRef
+	Named         map[string][]model.ObjectRef
+	Namespaces    []string
+	PlatformKinds []model.ObjectRef
 }
 
 // indexDeclared indexes every object branch declares by file - the edit and
@@ -116,6 +118,9 @@ func indexDeclared(read *git.Repo, branch string) (declaredIndex, error) {
 					if ref.Namespace != "" && !slices.Contains(implied, ref) {
 						named[ref.Namespace] = append(named[ref.Namespace], ref)
 					}
+					if !tenancy.TenantKind(ref.Kind) {
+						idx.Placement.PlatformKinds = append(idx.Placement.PlatformKinds, ref)
+					}
 				}
 				if docs != len(refs) {
 					idx.Opaque[path] = true
@@ -132,11 +137,11 @@ func indexDeclared(read *git.Repo, branch string) (declaredIndex, error) {
 	})
 }
 
-// PlacementOnBranch is where branch declares its namespaced objects. A tenant
+// PlacementOnBranch is where branch declares its objects. A tenant
 // Application applies a document without metadata.namespace to its destination
-// namespace, and refuses its whole sync over one naming a namespace outside
-// its project, so both are standing issues to fix in git. Shares the memoized
-// declared index; read only.
+// namespace, and refuses its whole sync over one naming a namespace outside its
+// project or of a platform-tier kind, so in a tenant repo each is a standing
+// issue to fix in git. Shares the memoized declared index; read only.
 func PlacementOnBranch(read *git.Repo, branch string) (Placement, error) {
 	idx, err := indexDeclared(read, branch)
 	if err != nil {
