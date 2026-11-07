@@ -138,6 +138,11 @@ type Project struct {
 	// policies and tenancy, not just VMs. Nil when Argo isn't wired or no Application
 	// tracks this repo.
 	GitOps *ProjectSync `json:"gitOps,omitempty"`
+	// Unnamespaced are the objects the repo declares without metadata.namespace,
+	// under the namespace dotvirt reads from their directory. Argo applies them
+	// to the Application's destination namespace instead, so each is an issue
+	// to fix in git.
+	Unnamespaced []ObjectRef `json:"unnamespaced,omitempty"`
 }
 
 // AdoptableNamespace is a namespace holding VMs but no dotvirt.io/project label -

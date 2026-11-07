@@ -19,6 +19,15 @@ import (
 // seedRepo makes a bare repo on main holding two VMs in different namespaces.
 func seedRepo(t *testing.T) string {
 	t.Helper()
+	return seedRepoFiles(t, map[string]string{
+		"tenant-a/web.yaml": vmYAML("web", "tenant-a"),
+		"tenant-b/db.yaml":  vmYAML("db", "tenant-b"),
+	})
+}
+
+// seedRepoFiles makes a bare repo on main holding files (path -> content).
+func seedRepoFiles(t *testing.T, files map[string]string) string {
+	t.Helper()
 	dir := t.TempDir()
 	bare := filepath.Join(dir, "remote.git")
 	work := filepath.Join(dir, "work")
@@ -45,8 +54,9 @@ func seedRepo(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	write("tenant-a/web.yaml", vmYAML("web", "tenant-a"))
-	write("tenant-b/db.yaml", vmYAML("db", "tenant-b"))
+	for path, content := range files {
+		write(path, content)
+	}
 	run(work, "add", "-A")
 	run(work, "commit", "-qm", "seed")
 	run(work, "remote", "add", "origin", bare)
@@ -120,6 +130,26 @@ func TestBuildFiltersAndEnriches(t *testing.T) {
 	broken := inv.Projects[1]
 	if broken.Error == "" || len(broken.Namespaces) != 0 {
 		t.Errorf("broken project should keep its error and no namespaces: %+v", broken)
+	}
+}
+
+// A document without metadata.namespace rides the project as an issue, under
+// the namespace its directory gives it.
+func TestBuildSurfacesUnnamespacedObjects(t *testing.T) {
+	bare := seedRepoFiles(t, map[string]string{
+		"tenant-a/web.yaml":  vmYAML("web", "tenant-a"),
+		"tenant-a/open.yaml": "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: open\n",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inv := Build(Inputs{
+		Branch:   "main",
+		Repos:    git.NewRepoSet(ctx, "", nil, false, nil, time.Hour),
+		Projects: []project.ProjectInfo{{Name: "team-a", Repo: bare, Namespaces: []string{"tenant-a"}}},
+	})
+	got := inv.Projects[0].Unnamespaced
+	if len(got) != 1 || got[0] != (model.ObjectRef{Kind: "NetworkPolicy", Namespace: "tenant-a", Name: "open"}) {
+		t.Errorf("unnamespaced = %+v", got)
 	}
 }
 

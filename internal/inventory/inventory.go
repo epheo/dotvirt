@@ -92,6 +92,9 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 		} else if vms, err = changeset.VMsOnBranch(read, in.Branch); err != nil {
 			out.Error = "repo unreadable"
 			err = fmt.Errorf("read repo: %w", err)
+		} else if out.Unnamespaced, err = changeset.UnnamespacedOnBranch(read, in.Branch); err != nil {
+			out.Error = "repo unreadable"
+			err = fmt.Errorf("read repo: %w", err)
 		}
 		logRepoErr(p.Name, err)
 	}

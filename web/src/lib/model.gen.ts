@@ -1346,6 +1346,13 @@ export interface Project {
    * tracks this repo.
    */
   gitOps?: ProjectSync;
+  /**
+   * Unnamespaced are the objects the repo declares without metadata.namespace,
+   * under the namespace dotvirt reads from their directory. Argo applies them
+   * to the Application's destination namespace instead, so each is an issue
+   * to fix in git.
+   */
+  unnamespaced?: ObjectRef[];
 }
 /**
  * AdoptableNamespace is a namespace holding VMs but no dotvirt.io/project label -
