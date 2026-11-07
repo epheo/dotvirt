@@ -279,3 +279,34 @@ func TestApplyErrorStagesNothing(t *testing.T) {
 		t.Fatalf("want the draft as it was, got %+v", got)
 	}
 }
+
+// A proposal record survives a restart and is dropped on request; a project
+// whose name ends like the record's file never collides with it.
+func TestProposalRecord(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	if _, ok, err := s.Proposal("alice", "p"); ok || err != nil {
+		t.Fatalf("want none, got ok=%v err=%v", ok, err)
+	}
+	want := Proposal{PR: 3, Head: "abc", Entries: []Entry{editEntry("ns", "a")}}
+	if err := s.SetProposal("alice", "p", want); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Stage("alice", "p.proposal", editEntry("ns", "b")); err != nil {
+		t.Fatal(err)
+	}
+	reopened, _ := Open(dir)
+	got, ok, err := reopened.Proposal("alice", "p")
+	if err != nil || !ok || got.PR != 3 || got.Head != "abc" || len(got.Entries) != 1 {
+		t.Fatalf("got %+v ok=%v err=%v", got, ok, err)
+	}
+	if err := reopened.DropProposal("alice", "p"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := reopened.Proposal("alice", "p"); ok {
+		t.Fatal("a dropped proposal must read as none")
+	}
+	if d, _ := reopened.List("alice", "p.proposal"); len(d) != 1 {
+		t.Fatalf("the look-alike project's draft must stand, got %+v", d)
+	}
+}

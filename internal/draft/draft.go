@@ -210,8 +210,15 @@ func safeSegment(s string) string {
 // persistLocked writes a (user,project) draft to disk atomically, or removes the
 // file when the draft is empty so emptied projects don't linger. Caller holds s.mu.
 func (s *Store) persistLocked(user, project string, d map[string]Entry) error {
-	p := s.path(user, project)
 	if len(d) == 0 {
+		return writeJSON(s.path(user, project), nil)
+	}
+	return writeJSON(s.path(user, project), sortedEntries(d))
+}
+
+// writeJSON replaces p with v atomically; a nil v removes p.
+func writeJSON(p string, v any) error {
+	if v == nil {
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			return err
 		}
@@ -220,7 +227,7 @@ func (s *Store) persistLocked(user, project string, d map[string]Entry) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(sortedEntries(d), "", "  ")
+	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -331,4 +338,54 @@ func sortedEntries(d map[string]Entry) []Entry {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
 	return out
+}
+
+// Proposal is what the open pull request of one (user, project) carries: the
+// entries its branch was built from and the head dotvirt pushed. A re-propose
+// rebuilds the branch from current base with these plus the draft, so the
+// proposal is always replayed on the base it will merge into.
+type Proposal struct {
+	PR      int     `json:"pr"`
+	Head    string  `json:"head"`
+	Entries []Entry `json:"entries"`
+}
+
+// proposalPath sits beside the draft file. Draft files end in .json, so no
+// project name maps onto it.
+func (s *Store) proposalPath(user, project string) string {
+	return filepath.Join(s.dir, safeSegment(user), safeSegment(project)+".proposal")
+}
+
+// Proposal reads (user, project)'s recorded proposal, ok=false when none. An
+// unreadable record reads as none: the open PR is then refused, never rebuilt
+// from a guess.
+func (s *Store) Proposal(user, project string) (p Proposal, ok bool, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, err := os.ReadFile(s.proposalPath(user, project))
+	if os.IsNotExist(err) {
+		return Proposal{}, false, nil
+	}
+	if err != nil {
+		return Proposal{}, false, fmt.Errorf("read proposal %s/%s: %w", user, project, err)
+	}
+	if err := json.Unmarshal(data, &p); err != nil {
+		log.Printf("draft: proposal %s/%s is corrupt (%v); reading it as none", user, project, err)
+		return Proposal{}, false, nil
+	}
+	return p, true, nil
+}
+
+// SetProposal records p as (user, project)'s open proposal.
+func (s *Store) SetProposal(user, project string, p Proposal) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return writeJSON(s.proposalPath(user, project), p)
+}
+
+// DropProposal forgets (user, project)'s proposal: its PR merged or closed.
+func (s *Store) DropProposal(user, project string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return writeJSON(s.proposalPath(user, project), nil)
 }
