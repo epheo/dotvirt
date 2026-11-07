@@ -427,16 +427,21 @@ async function handleAPI(req, res, url) {
 		);
 		// A VM is on the network when a NIC names it: by attach ref, or a
 		// shared network by its bare name; the pod network takes pod NICs.
-		const on = (n) =>
-			key === 'Pod network'
-				? !n.network || n.network === 'pod'
-				: !!net &&
-					(n.network === net.attachRef ||
-						(net.scope === 'shared' && n.network?.split('/').pop() === net.name));
+		// A pod NIC rides its namespace's primary network when it has one.
+		const on = (v, n) => {
+			const pod = !n.network || n.network === 'pod';
+			if (key === 'Pod network') return pod;
+			if (!net) return false;
+			if (pod) return net.kind === 'default' && net.namespace === v.namespace;
+			return (
+				n.network === net.attachRef ||
+				(net.scope === 'shared' && n.network.split('/').pop() === net.name)
+			);
+		};
 		const vms = s.inventory.projects
 			.flatMap((p) => p.namespaces)
 			.flatMap((n) => n.vms)
-			.filter((v) => v.phase === 'Running' && (v.networks ?? []).some(on));
+			.filter((v) => v.phase === 'Running' && (v.networks ?? []).some((n) => on(v, n)));
 		return sendJSON(res, 200, {
 			network: key,
 			window: '1h',
