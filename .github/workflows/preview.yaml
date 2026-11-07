@@ -13,7 +13,6 @@ on:
         required: true
 
 env:
-  GOTOOLCHAIN: auto
   GOPROXY: https://proxy.golang.org|direct # '|' falls back on any proxy error, not only 404/410
 
 jobs:
@@ -25,17 +24,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-      - name: Load pinned tool versions
-        run: grep -v '^#' hack/versions.env >> "$GITHUB_ENV"
-      - name: Install skopeo + operator-sdk
-        run: |
-          sudo apt-get update && sudo apt-get install -y skopeo
-          sudo curl -fsSL -o /usr/local/bin/operator-sdk \
-            "https://github.com/operator-framework/operator-sdk/releases/download/$OPERATOR_SDK_VERSION/operator-sdk_linux_amd64"
-          sudo chmod +x /usr/local/bin/operator-sdk
+      - uses: ./.github/actions/operator-tools # skopeo ships on the runner image
       - name: Registry login (docker + skopeo)
         env:
           U: ${{ secrets.QUAY_USERNAME }}
