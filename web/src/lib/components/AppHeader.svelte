@@ -1,57 +1,26 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { page } from '$app/state';
 	import {
-		BookCopy,
 		Check,
 		ChevronDown,
 		CircleCheck,
-		FolderPlus,
 		Monitor,
 		Moon,
-		Network,
-		Plus,
-		Radio,
-		Server,
-		Shield,
 		Sun,
 		TriangleAlert,
-		Upload,
 		User as UserIcon,
 	} from '@lucide/svelte';
 	import { dispatchVMAction } from '#lib/actions.js';
-	import { hrefForScope, scopeFromPath, vmHref } from '#lib/nav.js';
+	import { hrefForScope, vmHref } from '#lib/nav.js';
 	import { TONE_PILL } from '#lib/status.js';
-	import Button from './Button.svelte';
 	import IssueRow from './IssueRow.svelte';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { theme } from '#lib/state/theme.svelte.js';
-	import { ui } from '#lib/state/ui.svelte.js';
 	import GlobalSearch, { type SearchHit } from './GlobalSearch.svelte';
 	import HeaderMenu from './HeaderMenu.svelte';
 	import MenuItem from './MenuItem.svelte';
-
-	// Repo-backed namespaces under the current URL's scope - what "New VM"
-	// pre-targets, mirroring the tree context menu's "New VM here". null = no
-	// scope narrowing, so the wizard offers every creatable namespace.
-	const scopeNamespaces = $derived.by(() => {
-		const sc = scopeFromPath(page.url.pathname);
-		if (sc.kind === 'project' || sc.kind === 'namespace') {
-			const p = inventory.projects.find((proj) => proj.name === sc.project);
-			if (!p?.repo) return null;
-			return sc.kind === 'namespace' ? [sc.namespace] : p.namespaces.map((n) => n.namespace);
-		}
-		return null;
-	});
-	// The namespace every create form preselects: the one in view (a namespace
-	// scope, a VM page, or a project's first namespace). Empty leaves the form
-	// to its own first choice.
-	const scopeNamespace = $derived.by(() => {
-		const parts = page.url.pathname.split('/').slice(1).map(decodeURIComponent);
-		if (parts[0] === 'vm' && parts.length >= 2) return parts[1];
-		return scopeNamespaces?.[0] ?? '';
-	});
+	import NewMenu from './NewMenu.svelte';
 
 	// Global search: a hit either opens a VM or focuses its scope.
 	function onSearchPick(hit: SearchHit) {
@@ -85,132 +54,20 @@
 	const issues = $derived(inventory.issues);
 	const suggestions = $derived(inventory.suggestions);
 	const worstTone = $derived(issues.some((i) => i.severity === 'danger') ? 'danger' : 'warn');
-
-	// The "New" menu, one row per creatable kind. divider starts the
-	// platform-tier section. newVM's payload alone carries extra state
-	// (scopeNamespaces), added at dispatch.
-	type NewItem = {
-		icon: typeof Server;
-		label: string;
-		kind: 'newVM' | 'deployTemplate' | 'newNetwork' | 'upload' | 'newProject' | 'tier0' | 'adminFw';
-		enabled: boolean;
-		title: string;
-		divider?: boolean;
-	};
-	const NEW_ITEMS = $derived.by((): NewItem[] => {
-		const noRepo = !inventory.namespaces.length;
-		const repoTitle = !noRepo
-			? ''
-			: inventory.repoNamespaces.length
-				? 'Read-only: you may not edit VMs in any namespace'
-				: 'No project with a backing repo yet';
-		return [
-			{
-				icon: Server,
-				label: 'New VM',
-				kind: 'newVM',
-				enabled: !noRepo,
-				title: repoTitle,
-			},
-			{
-				icon: BookCopy,
-				label: 'New VM from Template',
-				kind: 'deployTemplate',
-				enabled: !noRepo,
-				title: repoTitle,
-			},
-			{
-				icon: Network,
-				label: 'New Segment',
-				kind: 'newNetwork',
-				enabled: !noRepo || inventory.canManage,
-				title: 'Create a Segment (Port Group) — an overlay or VLAN Layer 2 network VMs attach to',
-			},
-			{
-				icon: Upload,
-				label: 'Upload Image',
-				kind: 'upload',
-				enabled: !noRepo,
-				title: 'Upload a disk image (qcow2/raw/iso) as a bootable DataVolume',
-			},
-			{
-				icon: FolderPlus,
-				label: 'New Project',
-				kind: 'newProject',
-				enabled: inventory.canNamespace,
-				title: inventory.canNamespace
-					? 'Create a new tenant project (repo + first namespace)'
-					: 'Requires permission to create namespaces',
-				divider: true,
-			},
-			{
-				icon: Radio,
-				label: 'New Tier-0 Service',
-				kind: 'tier0',
-				enabled: inventory.canEgress,
-				title: inventory.canEgress
-					? 'Add a Tier-0 provider-edge service (Source NAT or external route)'
-					: 'Requires permission to create EgressIPs or external routes',
-			},
-			{
-				icon: Shield,
-				label: 'New Admin Firewall',
-				kind: 'adminFw',
-				enabled: inventory.canAdminFw,
-				title: inventory.canAdminFw
-					? 'Add a cluster-wide admin firewall (AdminNetworkPolicy / Baseline)'
-					: 'Requires permission to create AdminNetworkPolicies',
-			},
-		];
-	});
 </script>
 
-<!-- The bar stays dark in both themes, so its chrome uses raw slate, not ink tokens. -->
-<header class="flex items-center gap-3 border-b border-line-strong bg-bar px-4 py-2 text-white">
-	<a href="/compute" class="font-semibold">dotvirt</a>
+<!-- The bar stays dark in both themes, so its chrome uses the rail's side-*
+     tokens, not ink tokens. -->
+<header class="flex h-12 shrink-0 items-center gap-4 bg-bar px-4 text-white">
+	<a href="/compute" class="flex items-center gap-2 text-[17px] font-bold">
+		<span class="size-2.5 rounded-full bg-brand" aria-hidden="true"></span>dotvirt
+	</a>
 
 	<GlobalSearch onpick={onSearchPick} />
 
-	<!-- Create actions collapse into one primary menu (the global chrome stays
-	     identity + search + tasks; creation is otherwise contextual via
-	     the tree's right-click menus). New VM pre-targets the current scope. -->
-	<HeaderMenu>
-		{#snippet trigger({ open, toggle })}
-			<Button size="sm" onclick={toggle}>
-				<Plus size={14} /> New <ChevronDown
-					size={12}
-					class="transition-transform {open ? 'rotate-180' : ''}"
-				/>
-			</Button>
-		{/snippet}
-		{#snippet children({ close })}
-			{#each NEW_ITEMS as item (item.kind)}
-				{@const Icon = item.icon}
-				{#if item.divider}
-					<div class="my-1 border-t border-line-soft"></div>
-				{/if}
-				<MenuItem
-					onclick={() => {
-						close();
-						const namespace = scopeNamespace || undefined;
-						ui.modal =
-							item.kind === 'newVM'
-								? { kind: 'newVM', namespaces: scopeNamespaces, namespace }
-								: item.kind === 'newNetwork' ||
-									  item.kind === 'upload' ||
-									  item.kind === 'deployTemplate'
-									? { kind: item.kind, namespace }
-									: { kind: item.kind };
-					}}
-					disabled={!item.enabled}
-					title={item.title}
-				>
-					{#snippet icon()}<Icon size={13} />{/snippet}
-					{item.label}
-				</MenuItem>
-			{/each}
-		{/snippet}
-	</HeaderMenu>
+	<NewMenu />
+
+	<div class="flex-1"></div>
 
 	<!-- Issues: standing problems and firing alerts (never pending applies), one
 	     count, named in words so a clean fleet reads as a stated fact. -->
@@ -220,18 +77,15 @@
 				onclick={toggle}
 				aria-expanded={open}
 				title="Issues: standing problems and firing alerts in the visible inventory"
-				class="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium hover:opacity-90 {!issues.length
+				class="flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium hover:opacity-90 {!issues.length
 					? 'text-side-dim hover:bg-side-hover'
-					: worstTone === 'danger'
-						? 'bg-danger text-white'
-						: TONE_PILL.warn}"
+					: TONE_PILL[worstTone]}"
 			>
 				{#if issues.length}
-					<TriangleAlert size={13} />
+					<TriangleAlert size={16} />
 					{issues.length} issue{issues.length === 1 ? '' : 's'}
-					<ChevronDown size={12} class="transition-transform {open ? 'rotate-180' : ''}" />
 				{:else}
-					<CircleCheck size={13} class="text-ok" /> No issues
+					<CircleCheck size={16} class="text-ok" /> No issues
 				{/if}
 			</button>
 		{/snippet}
@@ -285,15 +139,18 @@
 		{/snippet}
 	</HeaderMenu>
 
-	<HeaderMenu align="right" class="ml-auto">
+	<HeaderMenu align="right">
 		{#snippet trigger({ open, toggle })}
 			<button
 				onclick={toggle}
-				class="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-side-ink hover:bg-side-hover"
+				aria-expanded={open}
+				class="flex h-8 items-center gap-2 rounded-md px-1 text-[13px] text-side-ink hover:bg-side-hover"
 			>
-				<UserIcon size={14} />
+				<span class="flex size-7 items-center justify-center rounded-full bg-side-active">
+					<UserIcon size={16} />
+				</span>
 				{session.user?.username}
-				<ChevronDown size={12} class="transition-transform {open ? 'rotate-180' : ''}" />
+				<ChevronDown size={16} class="transition-transform {open ? 'rotate-180' : ''}" />
 			</button>
 		{/snippet}
 		{#snippet children({ close })}

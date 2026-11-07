@@ -79,6 +79,8 @@
 	--color-side-hover: #333638;
 	--color-side-active: #4f5255;
 	--color-side-line: #151515;
+	--color-side-edge: #3c3f42; /* field borders on the dark chrome */
+	--color-brand: #2b9af3; /* the wordmark's dot */
 }
 
 /* Chart series + furniture. Plain :root (no utilities wanted); hex on purpose —
