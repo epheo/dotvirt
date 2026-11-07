@@ -28,6 +28,7 @@
 		vmActions,
 		type VMAction,
 	} from '#lib/actions.js';
+	import { editBlock } from '#lib/authoring.js';
 	import { type EditSection } from '#lib/editform.js';
 	import { VM_TABS, type VMTab } from '#lib/nav.js';
 	import { action, resource } from '#lib/resource.svelte.js';
@@ -201,7 +202,7 @@
 	// adoptVM owns its toasts; the run only feeds the busy state.
 	const adopt = () => reconcileOp.run(() => adoptVM(vm));
 	const canAuthor = $derived(inventory.canAuthor(vm.namespace));
-	const readOnly = 'Read-only: you may not edit VMs in this namespace';
+	const block = $derived(editBlock(vm, canAuthor));
 
 	function resync() {
 		return reconcileOp.run(async () => {
@@ -278,12 +279,8 @@
 				<div class="flex flex-wrap items-center gap-1.5">
 					<button
 						onclick={stagePower}
-						disabled={!vm.sourceFile || !canAuthor || powerOp.busy}
-						title={!vm.sourceFile
-							? 'Not in git: adopt this VM first'
-							: canAuthor
-								? 'Stages a power change into a PR; nothing happens until it merges'
-								: readOnly}
+						disabled={!!block || powerOp.busy}
+						title={block || 'Stages a power change into a PR; nothing happens until it merges'}
 						class="flex items-center gap-1.5 rounded border border-accent/30 bg-select-soft px-2.5 py-1 text-xs font-medium text-ink hover:bg-select disabled:opacity-45"
 					>
 						{#if vm.power === 'On'}<Square size={13} /> Power off{:else}<Play size={13} /> Power on{/if}
@@ -291,12 +288,8 @@
 					</button>
 					<button
 						onclick={() => openEdit()}
-						disabled={!vm.sourceFile || !canAuthor}
-						title={!vm.sourceFile
-							? 'Not in git: adopt this VM first'
-							: canAuthor
-								? 'Edit settings; changes stage into a PR'
-								: readOnly}
+						disabled={!!block}
+						title={block || 'Edit settings; changes stage into a PR'}
 						class="flex items-center gap-1.5 rounded border border-accent/30 bg-select-soft px-2.5 py-1 text-xs font-medium text-ink hover:bg-select disabled:opacity-45"
 					>
 						<Pencil size={13} /> Edit Settings

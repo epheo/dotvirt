@@ -92,3 +92,10 @@ test('the Changes pane holds its propose to the same deletion yes', async ({ pag
 	await main.getByLabel(/Delete these 2 when this merges/).check();
 	await expect(propose).toBeEnabled();
 });
+
+test('Configure offers no Edit on a VM git does not hold, and says why', async ({ page }) => {
+	await page.goto('/vm/db-prod/legacy-1?tab=configure');
+	const main = page.locator('main');
+	await expect(main.getByText('Not in git: adopt this VM first')).toBeVisible();
+	await expect(main.getByRole('button', { name: 'Edit', exact: true })).toBeDisabled();
+});

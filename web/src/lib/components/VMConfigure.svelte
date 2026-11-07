@@ -2,6 +2,7 @@
 	import { Pencil } from '@lucide/svelte';
 	import type { Network, VM } from '#lib/api.js';
 	import { manifestURL } from '#lib/actions.js';
+	import { editBlock } from '#lib/authoring.js';
 	import type { EditSection } from '#lib/editform.js';
 	import { resolveNIC, kindLabel } from '#lib/networks.js';
 	import { vmSizing } from '#lib/sizing.js';
@@ -9,6 +10,7 @@
 	import { ui } from '#lib/state/ui.svelte.js';
 	import InfoCard from './InfoCard.svelte';
 	import Button from './Button.svelte';
+	import Note from './Note.svelte';
 	import Row from './Row.svelte';
 
 	// The Configure tab: a left sub-rail of read-only sections; every
@@ -34,12 +36,20 @@
 	// Numbers an instancetype supplied are labelled with it: they are not the
 	// manifest's own, and Edit changes them by picking another flavor.
 	const sizing = $derived(vmSizing(vm, inventory.options));
+	// An Edit that staging would refuse is not offered; the reason shows once.
+	const block = $derived(editBlock(vm, inventory.canAuthor(vm.namespace)));
 	const sized = (v: number | string | undefined) =>
 		v === undefined ? '' : sizing.from ? `${v} (from ${sizing.from})` : String(v);
 </script>
 
 {#snippet editButton(section: EditSection)}
-	<Button variant="link" size="sm" onclick={() => onedit(section)}>
+	<Button
+		variant="link"
+		size="sm"
+		disabled={!!block}
+		title={block || 'Changes stage into a pull request'}
+		onclick={() => onedit(section)}
+	>
 		<Pencil size={11} /> Edit
 	</Button>
 {/snippet}
@@ -58,6 +68,7 @@
 		{/each}
 	</nav>
 	<div class="min-w-0 flex-1">
+		{#if block}<Note tone="neutral" border class="mb-3 px-3 py-2 text-xs">{block}</Note>{/if}
 		{#if view === 'hardware'}
 			<InfoCard title="VM Hardware">
 				{#snippet action()}{@render editButton('compute')}{/snippet}
