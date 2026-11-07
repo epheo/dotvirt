@@ -507,6 +507,9 @@ func TestVCPUQueries(t *testing.T) {
 		{vcpuCount(sel), `(max by(namespace,name)(kubevirt_vmi_vcpu_count{namespace="ns",name="vm"}) or count by(namespace,name)(count by(namespace,name,id)(kubevirt_vmi_vcpu_seconds_total{namespace="ns",name="vm"})))`},
 		{vcpuTotal(sel), `sum(max by(namespace,name)(kubevirt_vmi_vcpu_count{namespace="ns",name="vm"}) or count by(namespace,name)(count by(namespace,name,id)(kubevirt_vmi_vcpu_seconds_total{namespace="ns",name="vm"})))`},
 		{nodeVCPUs(), `sum by(node)(max by(node,namespace,name)(kubevirt_vmi_vcpu_count) or count by(node,namespace,name)(count by(node,namespace,name,id)(kubevirt_vmi_vcpu_seconds_total)))`},
+		// A migrating VM reports usage from two launchers; the sum keeps the
+		// division one-to-one.
+		{cpuPercent(sel, "2m"), `sum by(namespace,name)(rate(kubevirt_vmi_cpu_usage_seconds_total{namespace="ns",name="vm"}[2m]))*100 / on(namespace,name) (max by(namespace,name)(kubevirt_vmi_vcpu_count{namespace="ns",name="vm"}) or count by(namespace,name)(count by(namespace,name,id)(kubevirt_vmi_vcpu_seconds_total{namespace="ns",name="vm"})))`},
 	} {
 		if c.got != c.want {
 			t.Errorf("query\n got %s\nwant %s", c.got, c.want)
