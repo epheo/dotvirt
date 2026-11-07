@@ -150,13 +150,18 @@
 		});
 	});
 	const chosenUplink = $derived(uplinks.find((u) => u.name === physnet));
-	// The "Carried by" line names the failing uplinks first, then the ones
-	// carrying the most VLAN networks; the rest are a count.
+	// The "Carried by" line names the uplink carrying the most VLAN networks
+	// and a failing one when there is; the rest are a count.
 	const vlansOn = (u: { name: string }) =>
 		networks.filter((n) => n.kind === 'vlan' && n.uplink === u.name).length;
-	const carriers = $derived(
-		[...uplinks].sort((a, b) => Number(failing(b)) - Number(failing(a)) || vlansOn(b) - vlansOn(a)),
-	);
+	const carriers = $derived.by(() => {
+		const byUse = [...uplinks].sort((a, b) => vlansOn(b) - vlansOn(a));
+		const lead = [
+			...byUse.filter((u) => !failing(u)).slice(0, 1),
+			...byUse.filter(failing).slice(0, 1),
+		];
+		return [...lead, ...byUse.filter((u) => !lead.includes(u))];
+	});
 
 	// ── projects for a shared network ──────────────────────────────────────
 	let nsQuery = $state('');
