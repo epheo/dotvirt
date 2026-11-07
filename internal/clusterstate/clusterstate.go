@@ -28,6 +28,8 @@ package clusterstate
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"maps"
 	"strings"
 	"sync/atomic"
@@ -35,6 +37,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/tools/cache"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
@@ -235,84 +238,138 @@ func (s *State) LiveVMs() map[string]LiveVM {
 	return out
 }
 
-// WorkloadLabels returns the labels network policies match for one VM's
-// workload: the running VMI's (what the virt-launcher pod carries), else the
-// manifest template's for a stopped VM. live reports which source answered;
-// found=false when the VM is in neither store. Copies - reflector-owned
-// objects must never escape.
-func (s *State) WorkloadLabels(namespace, name string) (lbls map[string]string, live, found bool) {
-	if obj, ok, _ := s.vmis.GetByKey(namespace + "/" + name); ok {
-		if vmi, ok := obj.(*kubevirtcorev1.VirtualMachineInstance); ok {
-			return maps.Clone(vmi.Labels), true, true
-		}
-	}
-	if obj, ok, _ := s.vms.GetByKey(namespace + "/" + name); ok {
-		if vm, ok := obj.(*kubevirtcorev1.VirtualMachine); ok {
-			if vm.Spec.Template != nil {
-				lbls = maps.Clone(vm.Spec.Template.ObjectMeta.Labels)
-			}
-			return lbls, false, true
-		}
-	}
-	return nil, false, false
+// Workload is one VM as network policy sees it.
+type Workload struct {
+	// Labels are the virt-launcher pod's, the ones selectors match: the VMI's
+	// own plus KubeVirt's fixed set.
+	Labels map[string]string
+	// Live: a running VMI answered. Otherwise the VM template supplied the
+	// deterministic subset, without the instance UID or node a start assigns.
+	Live bool
+
+	// PodNet: binds the namespace's primary network. DefaultNet: the NAD a
+	// default multus binding substitutes for it, "namespace/name"; it is NOT
+	// the namespace primary. Nets: secondary multus refs, namespace-qualified.
+	PodNet     bool
+	DefaultNet string
+	Nets       []string
+
+	// IPs are the primary NIC's addresses, nil when stopped. Secondary and
+	// guest-only interfaces never carry a flow the cluster policies filter.
+	IPs []string
 }
 
-// WorkloadNetworks reports one VM workload's NIC attachments for the trace
-// connectivity check: whether it binds the namespace's primary network (pod
-// binding), the NAD substituted as its default network (a default multus
-// binding replaces the pod network with that NAD's segment - it is NOT the
-// namespace primary), and its secondary multus refs, namespace-qualified.
-// Live VMI spec first (what actually runs), else the VM template; addresses
-// come from the running VMI's interfaces, nil when stopped.
-func (s *State) WorkloadNetworks(namespace, name string) (podNet bool, defaultNet string, nets, ips []string, found bool) {
-	fromSpec := func(spec *kubevirtcorev1.VirtualMachineInstanceSpec) {
-		for _, n := range spec.Networks {
-			switch {
-			case n.Pod != nil:
-				podNet = true
-			case n.Multus != nil && n.Multus.Default:
-				ref := n.Multus.NetworkName
-				if !strings.Contains(ref, "/") {
-					ref = namespace + "/" + ref
-				}
-				defaultNet = ref
-			case n.Multus != nil:
-				ref := n.Multus.NetworkName
-				if !strings.Contains(ref, "/") {
-					ref = namespace + "/" + ref
-				}
-				nets = append(nets, ref)
-			}
-		}
-	}
+// Workload resolves one VM's network identity, from the running VMI (what
+// actually runs) else the VM template; found=false when the VM is in neither
+// store. Both Effective and Trace match against it. Copies - reflector-owned
+// objects must never escape.
+func (s *State) Workload(namespace, name string) (w Workload, found bool) {
 	if obj, ok, _ := s.vmis.GetByKey(namespace + "/" + name); ok {
 		if vmi, ok := obj.(*kubevirtcorev1.VirtualMachineInstance); ok {
-			fromSpec(&vmi.Spec)
+			w.Live = true
+			primary := w.attach(namespace, &vmi.Spec)
+			w.Labels = launcherLabels(vmi.Name, vmi.Spec.Hostname, vmi.Labels, vmi.Annotations)
+			w.Labels[kubevirtcorev1.CreatedByLabel] = string(vmi.UID)
 			for _, iface := range vmi.Status.Interfaces {
-				ips = append(ips, iface.IPs...)
+				if primary == "" || iface.Name != primary {
+					continue
+				}
+				if len(iface.IPs) > 0 {
+					w.IPs = append(w.IPs, iface.IPs...)
+				} else if iface.IP != "" {
+					w.IPs = append(w.IPs, iface.IP)
+				}
 			}
-			return podNet, defaultNet, nets, ips, true
+			return w, true
 		}
 	}
 	if obj, ok, _ := s.vms.GetByKey(namespace + "/" + name); ok {
 		if vm, ok := obj.(*kubevirtcorev1.VirtualMachine); ok {
-			if vm.Spec.Template != nil {
-				spec := &vm.Spec.Template.Spec
-				fromSpec(spec)
-				// KubeVirt autoattaches the pod network when a template names
-				// none; that defaulting lands on the VMI at creation, never on
-				// the stored template, so mirror it here or a stopped minimal
-				// manifest reads as unattached.
-				if len(spec.Networks) == 0 {
-					if auto := spec.Domain.Devices.AutoattachPodInterface; auto == nil || *auto {
-						podNet = true
-					}
+			t := vm.Spec.Template
+			if t == nil {
+				t = &kubevirtcorev1.VirtualMachineInstanceTemplateSpec{}
+			}
+			w.attach(namespace, &t.Spec)
+			// KubeVirt autoattaches the pod network when a template names
+			// none; that defaulting lands on the VMI at creation, never on the
+			// stored template, so mirror it here or a stopped minimal manifest
+			// reads as unattached.
+			if len(t.Spec.Networks) == 0 {
+				if auto := t.Spec.Domain.Devices.AutoattachPodInterface; auto == nil || *auto {
+					w.PodNet = true
 				}
 			}
-			return podNet, defaultNet, nets, nil, true
+			// The VMI a start creates takes the template's metadata and the VM's name.
+			w.Labels = launcherLabels(vm.Name, t.Spec.Hostname, t.ObjectMeta.Labels, t.ObjectMeta.Annotations)
+			return w, true
 		}
 	}
-	return false, "", nil, nil, false
+	return Workload{}, false
+}
+
+// attach records spec's NIC bindings and returns the primary one's network
+// name (pod or default multus), "" when there is none.
+func (w *Workload) attach(namespace string, spec *kubevirtcorev1.VirtualMachineInstanceSpec) (primary string) {
+	qualify := func(ref string) string {
+		if strings.Contains(ref, "/") {
+			return ref
+		}
+		return namespace + "/" + ref
+	}
+	for _, n := range spec.Networks {
+		switch {
+		case n.Pod != nil:
+			w.PodNet, primary = true, n.Name
+		case n.Multus != nil && n.Multus.Default:
+			w.DefaultNet, primary = qualify(n.Multus.NetworkName), n.Name
+		case n.Multus != nil:
+			w.Nets = append(w.Nets, qualify(n.Multus.NetworkName))
+		}
+	}
+	return primary
+}
+
+// istioInject is copied from a VMI annotation to the same pod label.
+const istioInject = "sidecar.istio.io/inject"
+
+// launcherLabels mirrors virt-controller's virt-launcher pod labels (KubeVirt
+// v1.8 services.podLabels) except kubevirt.io/created-by, the VMI UID, which
+// only a live VMI has.
+func launcherLabels(name, hostname string, labels, annotations map[string]string) map[string]string {
+	out := maps.Clone(labels)
+	if out == nil {
+		out = map[string]string{}
+	}
+	out[kubevirtcorev1.AppLabel] = "virt-launcher"
+	out[kubevirtcorev1.DeprecatedVirtualMachineNameLabel] = launcherHostname(name, hostname)
+	out[kubevirtcorev1.VirtualMachineInstanceIDLabel] = vmiID(name)
+	if v, ok := annotations[istioInject]; ok {
+		out[istioInject] = v
+	}
+	return out
+}
+
+// launcherHostname is KubeVirt's dns.SanitizeHostname.
+func launcherHostname(name, hostname string) string {
+	if hostname != "" {
+		return hostname
+	}
+	h, _, _ := strings.Cut(name, ".")
+	if len(h) > validation.DNS1123LabelMaxLength {
+		h = h[:validation.DNS1123LabelMaxLength]
+	}
+	return h
+}
+
+// vmiID is KubeVirt's apimachinery.CalculateVirtualMachineInstanceID: the
+// name, or a hash-suffixed prefix when it overflows a label value.
+func vmiID(name string) string {
+	if len(name) <= validation.DNS1035LabelMaxLength {
+		return name
+	}
+	const hashLen = 8
+	sum := sha1.Sum([]byte(name)) // KubeVirt's derivation, not a security use
+	return name[:validation.DNS1035LabelMaxLength-hashLen-1] + "-" + hex.EncodeToString(sum[:])[:hashLen]
 }
 
 // NamespaceLabels returns one namespace's labels by name, nil when the

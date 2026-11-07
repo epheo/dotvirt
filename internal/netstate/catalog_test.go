@@ -1,7 +1,9 @@
 package netstate
 
 import (
+	"encoding/json"
 	"sort"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -224,6 +226,62 @@ func TestUplinksMergeByName(t *testing.T) {
 	}
 	if b := seen["br-ex"]; !b.Builtin || b.NodeCount != 2 {
 		t.Errorf("br-ex = %+v, want the builtin over both nodes", b)
+	}
+}
+
+// An uplink whose policy selects no node is on no node: the list must reach
+// the wire as [], since the web reads a missing list as every node.
+func TestUplinkNoNodesOnTheWire(t *testing.T) {
+	s := New(nil, nil)
+	s.nodes = []cluster.NodeLabels{{Name: "w1", Labels: map[string]string{"zone": "a"}}}
+	if err := s.nncp.Add(&unstructured.Unstructured{Object: map[string]any{
+		"metadata": map[string]any{"name": "nowhere"},
+		"spec": map[string]any{
+			"nodeSelector": map[string]any{"zone": "z"},
+			"desiredState": map[string]any{"ovn": map[string]any{"bridge-mappings": []any{
+				map[string]any{"localnet": "physnet-z", "bridge": "br-z"},
+			}}},
+		},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range s.uplinks() {
+		if u.Name != "physnet-z" {
+			continue
+		}
+		raw, err := json.Marshal(u)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), `"nodes":[]`) {
+			t.Fatalf("uplink on no node must carry nodes:[], got %s", raw)
+		}
+		return
+	}
+	t.Fatal("physnet-z uplink missing")
+}
+
+// Two policies restating one localnet with different bridges: the merge keeps
+// the first policy's bridge by name, never the store's hash order.
+func TestUplinksMergeDeterministic(t *testing.T) {
+	s := New(nil, nil)
+	s.nodes = []cluster.NodeLabels{{Name: "w1"}}
+	for _, name := range []string{"b-policy", "a-policy", "d-policy", "c-policy"} {
+		if err := s.nncp.Add(&unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{"name": name},
+			"spec": map[string]any{"desiredState": map[string]any{"ovn": map[string]any{"bridge-mappings": []any{
+				map[string]any{"localnet": "physnet", "bridge": "br-" + name},
+			}}}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 50 {
+		for _, u := range s.uplinks() {
+			if u.Name == "physnet" && u.Bridge != "br-a-policy" {
+				t.Fatalf("bridge = %q, want br-a-policy", u.Bridge)
+			}
+		}
 	}
 }
 

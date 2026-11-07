@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
@@ -129,6 +130,21 @@ func renderedNamespaces(dv *dotvirtv1alpha1.Dotvirt, rendered renderSet) map[str
 	return ns
 }
 
+// finalize handles deletion: a prune with nothing rendered takes every object
+// this install owns, including the cluster-scoped and ArgoCD-namespace ones a
+// namespaced CR cannot ownerRef, then the finalizer comes off.
+func (r *DotvirtReconciler) finalize(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
+	if r.DryRun || !controllerutil.ContainsFinalizer(dv, dotvirtFinalizer) {
+		return nil
+	}
+	if err := r.prune(ctx, dv, renderSet{}); err != nil {
+		return err
+	}
+	r.markPruned(client.ObjectKeyFromObject(dv), "")
+	controllerutil.RemoveFinalizer(dv, dotvirtFinalizer)
+	return r.Update(ctx, dv)
+}
+
 // prune deletes this install's objects that the completed pass did not render:
 // an exposure whose type changed, the platform tier after platformRepo is
 // cleared, the ArgoCD-namespace objects after the namespace moves, a managed
@@ -136,9 +152,14 @@ func renderedNamespaces(dv *dotvirtv1alpha1.Dotvirt, rendered renderSet) map[str
 // install.OwnedBy marks as this install's are candidates. Listing goes to the
 // API server directly: the cache holds none of these kinds cluster-wide.
 func (r *DotvirtReconciler) prune(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rendered renderSet) error {
-	// Seeded with this pass's namespaces; a former ArgoCD namespace joins when
-	// an argoproj object of this install is found there.
+	// Seeded with this pass's namespaces and the current ArgoCD namespace, which
+	// finalize must sweep though it renders nothing there (and a pass always
+	// writes). A former ArgoCD namespace joins when an argoproj object of this
+	// install is found there.
 	written := renderedNamespaces(dv, rendered)
+	if argoNS, _ := r.argoTarget(dv); argoNS != dv.Namespace {
+		written[argoNS] = true
+	}
 	for _, sc := range pruneScopes() {
 		var namespaces []string
 		switch sc.where {
@@ -194,9 +215,16 @@ func (r *DotvirtReconciler) pruneList(ctx context.Context, dv *dotvirtv1alpha1.D
 		if _, keep := rendered[objKey{gvk.GroupKind(), obj.GetNamespace(), obj.GetName()}]; keep {
 			continue
 		}
-		logf.FromContext(ctx).Info("pruning object the install no longer renders",
-			"kind", gvk.Kind, "namespace", obj.GetNamespace(), "name", obj.GetName())
-		if err := r.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+		log := logf.FromContext(ctx).WithValues("kind", gvk.Kind, "namespace", obj.GetNamespace(), "name", obj.GetName())
+		log.Info("pruning object the install no longer renders")
+		err = r.Delete(ctx, obj)
+		if apierrors.IsForbidden(err) {
+			// The delete grant names only what this version renders (rbac_markers.go);
+			// a name only an older version rendered must not wedge prune or deletion.
+			log.Info("left in place: the operator may delete only names it renders; delete it by hand")
+			continue
+		}
+		if err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
 	}
