@@ -2,24 +2,18 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import {
-		BookCopy,
 		Check,
 		ChevronDown,
 		CircleCheck,
-		FolderPlus,
 		Monitor,
 		Moon,
-		Network,
 		Plus,
-		Radio,
-		Server,
-		Shield,
 		Sun,
 		TriangleAlert,
-		Upload,
 		User as UserIcon,
 	} from '@lucide/svelte';
 	import { dispatchVMAction } from '#lib/actions.js';
+	import { newFromHere } from './create/sheet.svelte.js';
 	import { hrefForScope, scopeFromPath, vmHref } from '#lib/nav.js';
 	import { TONE_PILL } from '#lib/status.js';
 	import Button from './Button.svelte';
@@ -86,83 +80,17 @@
 	const suggestions = $derived(inventory.suggestions);
 	const worstTone = $derived(issues.some((i) => i.severity === 'danger') ? 'danger' : 'warn');
 
-	// The "New" menu, one row per creatable kind. divider starts the
-	// platform-tier section. newVM's payload alone carries extra state
-	// (scopeNamespaces), added at dispatch.
-	type NewItem = {
-		icon: typeof Server;
-		label: string;
-		kind: 'newVM' | 'deployTemplate' | 'newNetwork' | 'upload' | 'newProject' | 'tier0' | 'adminFw';
-		enabled: boolean;
-		title: string;
-		divider?: boolean;
-	};
-	const NEW_ITEMS = $derived.by((): NewItem[] => {
-		const noRepo = !inventory.namespaces.length;
-		const repoTitle = !noRepo
-			? ''
-			: inventory.repoNamespaces.length
-				? 'Read-only: you may not edit VMs in any namespace'
-				: 'No project with a backing repo yet';
-		return [
-			{
-				icon: Server,
-				label: 'New VM',
-				kind: 'newVM',
-				enabled: !noRepo,
-				title: repoTitle,
-			},
-			{
-				icon: BookCopy,
-				label: 'New VM from Template',
-				kind: 'deployTemplate',
-				enabled: !noRepo,
-				title: repoTitle,
-			},
-			{
-				icon: Network,
-				label: 'New Segment',
-				kind: 'newNetwork',
-				enabled: !noRepo || inventory.canManage,
-				title: 'Create a Segment (Port Group) — an overlay or VLAN Layer 2 network VMs attach to',
-			},
-			{
-				icon: Upload,
-				label: 'Upload Image',
-				kind: 'upload',
-				enabled: !noRepo,
-				title: 'Upload a disk image (qcow2/raw/iso) as a bootable DataVolume',
-			},
-			{
-				icon: FolderPlus,
-				label: 'New Project',
-				kind: 'newProject',
-				enabled: inventory.canNamespace,
-				title: inventory.canNamespace
-					? 'Create a new tenant project (repo + first namespace)'
-					: 'Requires permission to create namespaces',
-				divider: true,
-			},
-			{
-				icon: Radio,
-				label: 'New Tier-0 Service',
-				kind: 'tier0',
-				enabled: inventory.canEgress,
-				title: inventory.canEgress
-					? 'Add a Tier-0 provider-edge service (Source NAT or external route)'
-					: 'Requires permission to create EgressIPs or external routes',
-			},
-			{
-				icon: Shield,
-				label: 'New Admin Firewall',
-				kind: 'adminFw',
-				enabled: inventory.canAdminFw,
-				title: inventory.canAdminFw
-					? 'Add a cluster-wide admin firewall (AdminNetworkPolicy / Baseline)'
-					: 'Requires permission to create AdminNetworkPolicies',
-			},
-		];
-	});
+	// New opens the create sheet on what this section makes most, prefilled
+	// with the namespace in view; its chips reach every other kind.
+	const canCreate = $derived(
+		inventory.namespaces.length > 0 ||
+			inventory.canManage ||
+			inventory.canNamespace ||
+			inventory.canEgress,
+	);
+	function openNew() {
+		ui.modal = newFromHere(page.url.pathname + page.url.search, scopeNamespace, scopeNamespaces);
+	}
 </script>
 
 <!-- The bar stays dark in both themes, so its chrome uses raw slate, not ink tokens. -->
@@ -171,46 +99,14 @@
 
 	<GlobalSearch onpick={onSearchPick} />
 
-	<!-- Create actions collapse into one primary menu (the global chrome stays
-	     identity + search + tasks; creation is otherwise contextual via
-	     the tree's right-click menus). New VM pre-targets the current scope. -->
-	<HeaderMenu>
-		{#snippet trigger({ open, toggle })}
-			<Button size="sm" onclick={toggle}>
-				<Plus size={14} /> New <ChevronDown
-					size={12}
-					class="transition-transform {open ? 'rotate-180' : ''}"
-				/>
-			</Button>
-		{/snippet}
-		{#snippet children({ close })}
-			{#each NEW_ITEMS as item (item.kind)}
-				{@const Icon = item.icon}
-				{#if item.divider}
-					<div class="my-1 border-t border-line-soft"></div>
-				{/if}
-				<MenuItem
-					onclick={() => {
-						close();
-						const namespace = scopeNamespace || undefined;
-						ui.modal =
-							item.kind === 'newVM'
-								? { kind: 'newVM', namespaces: scopeNamespaces, namespace }
-								: item.kind === 'newNetwork' ||
-									  item.kind === 'upload' ||
-									  item.kind === 'deployTemplate'
-									? { kind: item.kind, namespace }
-									: { kind: item.kind };
-					}}
-					disabled={!item.enabled}
-					title={item.title}
-				>
-					{#snippet icon()}<Icon size={13} />{/snippet}
-					{item.label}
-				</MenuItem>
-			{/each}
-		{/snippet}
-	</HeaderMenu>
+	<Button
+		size="sm"
+		onclick={openNew}
+		disabled={!canCreate}
+		title={canCreate ? 'Create a VM, network, rule or project' : 'No project you may change yet'}
+	>
+		<Plus size={14} /> New
+	</Button>
 
 	<!-- Issues: standing problems and firing alerts (never pending applies), one
 	     count, named in words so a clean fleet reads as a stated fact. -->

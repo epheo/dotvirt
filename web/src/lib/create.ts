@@ -40,10 +40,10 @@ export function nextFreeName(taken: Iterable<string>, fallback: string): NextNam
 
 export type Size = { it: Instancetype; count: number };
 
-// The instancetype most of vms run at. A custom-sized VM counts for the
+// How many of vms run at each instancetype. A custom-sized VM counts for the
 // instancetype with the same vCPU and memory, so a fleet sized by hand still
-// names its usual size; ties go to the larger size.
-export function mostCommonSize(vms: VM[], options: Options | null): Size | null {
+// names its usual size.
+export function sizeTally(vms: VM[], options: Options | null): Map<string, number> {
 	const its = options?.instancetypes ?? [];
 	const tally = new Map<string, number>();
 	for (const vm of vms) {
@@ -56,8 +56,14 @@ export function mostCommonSize(vms: VM[], options: Options | null): Size | null 
 		}
 		if (name) tally.set(name, (tally.get(name) ?? 0) + 1);
 	}
+	return tally;
+}
+
+// The instancetype most of vms run at; ties go to the larger size.
+export function mostCommonSize(vms: VM[], options: Options | null): Size | null {
+	const its = options?.instancetypes ?? [];
 	let best: Size | null = null;
-	for (const [name, count] of tally) {
+	for (const [name, count] of sizeTally(vms, options)) {
 		const it = its.find((i) => i.name === name)!;
 		if (
 			!best ||
@@ -67,6 +73,38 @@ export function mostCommonSize(vms: VM[], options: Options | null): Size | null 
 			best = { it, count };
 	}
 	return best;
+}
+
+// The preference most of vms are tuned with, when one is.
+export function usualPreference(vms: VM[]): string {
+	const tally = new Map<string, number>();
+	for (const vm of vms)
+		if (vm.preference) tally.set(vm.preference, (tally.get(vm.preference) ?? 0) + 1);
+	let best = '';
+	for (const [p, n] of tally) if (!best || n > tally.get(best)!) best = p;
+	return best;
+}
+
+// The secondary networks most of vms attach (more than half of them), among
+// those still attachable.
+export function usualNetworks(vms: VM[], attachable: Network[]): string[] {
+	if (!vms.length) return [];
+	const refs = new Set(attachable.map(attachRef));
+	const tally = new Map<string, number>();
+	for (const vm of vms)
+		for (const ref of new Set((vm.networks ?? []).map((n) => n.network ?? '')))
+			if (refs.has(ref)) tally.set(ref, (tally.get(ref) ?? 0) + 1);
+	return [...tally].filter(([, n]) => n * 2 > vms.length).map(([ref]) => ref);
+}
+
+// A console password for a new VM: cloud images ship with locked ones. 16
+// unambiguous alphanumerics (about 92 bits), so the bcrypt hash git keeps is
+// useless to an offline attacker.
+export function generatePassword(): string {
+	const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+	const buf = new Uint32Array(16);
+	crypto.getRandomValues(buf);
+	return Array.from(buf, (n) => chars[n % chars.length]).join('');
 }
 
 // "Medium, 2 vCPU 4 GiB": the size word an instancetype name carries after

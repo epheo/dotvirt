@@ -249,7 +249,7 @@
 			</Banner>
 		{/if}
 
-		<div class="flex min-h-0 flex-1">
+		<div class="flex min-h-0 flex-1" data-workspace>
 			<aside class="flex w-72 flex-col border-r border-side-line bg-side">
 				<SectionSwitcher active={treeSection} />
 				<div class="min-h-0 flex-1 overflow-y-auto">

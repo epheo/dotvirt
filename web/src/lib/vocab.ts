@@ -44,12 +44,6 @@ export const TERMS = {
 	group: { net: 'Group', virt: 'Selector', backing: 'label selector' },
 } satisfies Record<string, Term>;
 
-// Render a term as "Fabric (Inventory)" - the default dual presentation for a heading
-// or chip. Components that have room for two lines can read t.net / t.virt directly.
-export function dual(t: Term): string {
-	return `${t.net} (${t.virt})`;
-}
-
 // A segment kind named in both idioms plus its OVN-K backing - the dual-vocabulary
 // successor to $lib/networks' kindLabel. The primary "VM Network" is the Project
 // Gateway's own segment (a primary UDN, born with its namespace); VLAN segments ride
