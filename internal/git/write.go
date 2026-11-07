@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -131,6 +132,10 @@ func (w *WriteRepo) pushBranch(repo *git.Repository, branch string, lease plumbi
 		opts.ForceWithLease = &git.ForceWithLease{RefName: plumbing.NewBranchReferenceName(branch), Hash: lease}
 	}
 	err := repo.PushContext(ctx, opts)
+	// go-git reports a broken lease only as this text.
+	if err != nil && !lease.IsZero() && strings.Contains(err.Error(), "non-fast-forward update") {
+		return fmt.Errorf("push %s: %w", branch, ErrBranchMoved)
+	}
 	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
 		return fmt.Errorf("push %s: %w", branch, err)
 	}

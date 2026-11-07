@@ -111,10 +111,10 @@ type Entry struct {
 	// the file to (the VM page's Restore), so the draft view can name it.
 	FromVersion string `json:"fromVersion,omitempty"`
 
-	// BaseBlob is the git blob SourceFile held on the base branch when a
-	// whole-file edit was staged. Its content was computed against that
-	// version, so propose refuses it once base moves on: committing it would
-	// silently revert the newer change.
+	// BaseBlob is the git blob SourceFile held on the base branch when an
+	// entry replacing that file wholesale was staged. Its content was made
+	// from that version, so propose refuses it once the file moves on:
+	// committing it would silently revert the newer change.
 	BaseBlob string `json:"baseBlob,omitempty"`
 }
 

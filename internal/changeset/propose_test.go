@@ -701,3 +701,49 @@ func revParse(t *testing.T, repo, rev string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// A whole-file edit is made from base's version of the file. Extending an
+// open PR that already changed that file would undo the PR's change: refused,
+// naming the PR and the way forward, with nothing pushed.
+func TestProposeRefusesWholeFileEditOverTheOpenPRsChange(t *testing.T) {
+	head := proposedBranchFor("alice", "p")
+	var opened atomic.Bool
+	f := newProposeFixture(t,
+		func(m, path string) (int, string, bool) {
+			if m != "GET" || !strings.HasSuffix(path, "/pulls") {
+				return 0, "", false
+			}
+			if !opened.Load() {
+				return http.StatusOK, "[]", true
+			}
+			return http.StatusOK, `[{"number":1,"state":"open","html_url":"http://forge/pulls/1","base":{"ref":"main"},"head":{"ref":"` + head + `"}}]`, true
+		},
+		func(m, path string) (int, string, bool) {
+			if m != "POST" || !strings.HasSuffix(path, "/pulls") {
+				return 0, "", false
+			}
+			opened.Store(true)
+			return http.StatusCreated, `{"number":1,"state":"open","html_url":"http://forge/pulls/1"}`, true
+		},
+	)
+	// A second version on main, so there is an older one to restore.
+	initial := revParse(t, f.proj.Repo, "main")
+	work := t.TempDir()
+	gitRun(t, work, "clone", "-q", f.proj.Repo, ".")
+	writeWorkFile(t, work, "web.yaml", []byte("apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\nspec:\n  runStrategy: Halted\n"))
+	gitRun(t, work, "commit", "-qam", "halt web")
+	gitRun(t, work, "push", "-q", "origin", "main")
+
+	f.stageAndPropose(t) // PR #1 now labels web.yaml
+	before := revParse(t, f.proj.Repo, head)
+	if _, err := f.c.RestoreVersion(f.id, f.proj, "", "alpha", "web", initial); err != nil {
+		t.Fatalf("RestoreVersion: %v", err)
+	}
+	_, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{})
+	if !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "#1") {
+		t.Fatalf("want ErrConflict naming PR #1, got %v", err)
+	}
+	if after := revParse(t, f.proj.Repo, head); after != before {
+		t.Fatalf("nothing may be pushed, the branch moved %s -> %s", before, after)
+	}
+}

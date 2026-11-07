@@ -102,7 +102,10 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 		return model.ProposeResult{}, fmt.Errorf("%w: every staged change already matches %s; the draft has been cleared", model.ErrInvalid, where)
 	}
 	if moved := (*git.BaseMovedError)(nil); errors.As(err, &moved) {
-		return model.ProposeResult{}, baseMoved(entries, moved.Path, c.baseBranch)
+		return model.ProposeResult{}, c.pinMoved(entries, moved, prior.Number)
+	}
+	if errors.Is(err, git.ErrBranchMoved) {
+		return model.ProposeResult{}, fmt.Errorf("%w: pull request #%d's branch moved while this was proposed; nothing was overwritten and the draft is kept, so propose again", model.ErrConflict, prior.Number)
 	}
 	if err != nil {
 		return model.ProposeResult{}, err
@@ -194,18 +197,24 @@ func (c *Coordinator) recoverPR(fc *forge.Client, out *model.ProposeResult, bran
 	return true
 }
 
-// baseMoved names the staged object whose file changed on base after its
-// whole-file edit was staged, and how to carry the edit forward.
-func baseMoved(entries []draft.Entry, path, base string) error {
-	what := path
+// pinMoved names the staged object whose file no longer holds the version
+// its whole-file content was made from, and the way forward: on base, a
+// later merge; on the extended branch, the open pull request pr already
+// changed it.
+func (c *Coordinator) pinMoved(entries []draft.Entry, moved *git.BaseMovedError, pr int) error {
+	what := moved.Path
 	for _, e := range entries {
-		if e.SourceFile == path {
+		if e.SourceFile == moved.Path {
 			what = objectLabel(e)
 			break
 		}
 	}
+	if moved.Branch != c.baseBranch {
+		return fmt.Errorf("%w: pull request #%d already changes %s, and this edit was made on %s's version, so proposing it would undo that change; merge or close #%d, then make the edit again",
+			model.ErrConflict, pr, what, c.baseBranch, pr)
+	}
 	return fmt.Errorf("%w: %s changed on %s after it was staged, and proposing would undo that change; unstage it and make the edit again on the current version",
-		model.ErrConflict, what, base)
+		model.ErrConflict, what, c.baseBranch)
 }
 
 // RecentlyMerged lists PRs merged into proj's base branch since 'since' - the
@@ -275,7 +284,7 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) []git.ChangesetIte
 				},
 			})
 		case draft.KindCreate:
-			items = append(items, git.ChangesetItem{Path: e.SourceFile, NewContent: []byte(e.Manifest)})
+			items = append(items, git.ChangesetItem{Path: e.SourceFile, NewContent: []byte(e.Manifest), BaseBlob: e.BaseBlob})
 		case draft.KindDelete:
 			items = append(items, git.ChangesetItem{Path: e.SourceFile, Delete: true})
 		}

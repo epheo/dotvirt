@@ -25,16 +25,21 @@ type ChangesetItem struct {
 	NewContent []byte
 	Delete     bool
 
-	// BaseBlob, when set, is the blob Path must still hold on base: the
-	// version NewContent was computed against.
+	// BaseBlob, when set, is the blob Path must still hold where the commit
+	// lands, base and an extended branch alike: the version NewContent was
+	// computed against.
 	BaseBlob string
 }
 
-// BaseMovedError reports an item whose path moved on base past the version
-// its content was computed against.
-type BaseMovedError struct{ Path string }
+// BaseMovedError reports an item whose path no longer holds its BaseBlob on
+// Branch: base moved past it, or an extended branch already changed the file.
+type BaseMovedError struct{ Path, Branch string }
 
-func (e *BaseMovedError) Error() string { return e.Path + " changed on the base branch" }
+func (e *BaseMovedError) Error() string { return e.Path + " changed on " + e.Branch }
+
+// ErrBranchMoved reports a push refused because the branch moved past the
+// head the commit was built on: someone else pushed meanwhile.
+var ErrBranchMoved = errors.New("the branch moved while the commit was built")
 
 // ErrNoChanges reports a changeset whose every item already matches base -
 // nothing to commit because the intent is already true in git.
@@ -76,7 +81,7 @@ func (w *WriteRepo) commitChangeset(base, branch string, extend bool, message st
 	if err := checkoutBranch(repo, wt, base); err != nil {
 		return CommitResult{}, fmt.Errorf("checkout base %q: %w", base, err)
 	}
-	if err := checkBase(repo, items); err != nil {
+	if err := checkPins(repo, base, items); err != nil {
 		return CommitResult{}, err
 	}
 
@@ -88,8 +93,8 @@ func (w *WriteRepo) commitChangeset(base, branch string, extend bool, message st
 	}
 	if lease.IsZero() {
 		err = resetBranchTo(repo, wt, branch)
-	} else {
-		err = checkoutBranch(repo, wt, branch)
+	} else if err = checkoutBranch(repo, wt, branch); err == nil {
+		err = checkPins(repo, branch, items)
 	}
 	if err != nil {
 		return CommitResult{}, err
@@ -176,10 +181,10 @@ func applyItem(wt *git.Worktree, it ChangesetItem) error {
 	return nil
 }
 
-// checkBase refuses the changeset when an item's file no longer holds its
-// BaseBlob on the checked-out base: the fresh clone is the authority, where
+// checkPins refuses the changeset when an item's file no longer holds its
+// BaseBlob on the checked-out branch: the fresh clone is the authority, where
 // the mirror the draft was staged from may lag.
-func checkBase(repo *git.Repository, items []ChangesetItem) error {
+func checkPins(repo *git.Repository, branch string, items []ChangesetItem) error {
 	head, err := repo.Head()
 	if err != nil {
 		return err
@@ -198,10 +203,10 @@ func checkBase(repo *git.Repository, items []ChangesetItem) error {
 		}
 		f, err := tree.File(it.Path)
 		if errors.Is(err, object.ErrFileNotFound) || err == nil && f.Hash.String() != it.BaseBlob {
-			return &BaseMovedError{Path: it.Path}
+			return &BaseMovedError{Path: it.Path, Branch: branch}
 		}
 		if err != nil {
-			return fmt.Errorf("file %s on base: %w", it.Path, err)
+			return fmt.Errorf("file %s on %s: %w", it.Path, branch, err)
 		}
 	}
 	return nil

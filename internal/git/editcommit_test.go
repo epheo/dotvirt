@@ -256,10 +256,36 @@ func TestExtendChangesetRefusesAMovedBranch(t *testing.T) {
 		}
 		return bytes.ReplaceAll(b, []byte("name: web"), []byte("name: www")), nil
 	}}}, by)
-	if err == nil {
-		t.Fatal("want the push refused")
+	if !errors.Is(err, ErrBranchMoved) {
+		t.Fatalf("want ErrBranchMoved, got %v", err)
 	}
 	if head, _ := exec.Command("git", "--git-dir", bare, "rev-parse", "p").Output(); strings.TrimSpace(string(head)) != theirs {
 		t.Fatalf("the other writer's head must stand, got %q", head)
+	}
+}
+
+// Extending checks pins on the branch too: a file the branch already changed
+// is not the version the item was made from.
+func TestExtendChangesetChecksPinsOnTheBranch(t *testing.T) {
+	bare := seedMultiRepo(t)
+	w := OpenWrite(bare, "", nil, true)
+	by := Author{Name: "u", Email: "u@x"}
+	blob, err := exec.Command("git", "--git-dir", bare, "rev-parse", "main:tenant-a/web.yaml").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned := []ChangesetItem{{Path: "tenant-a/web.yaml", NewContent: []byte("kind: VirtualMachine\n"), BaseBlob: strings.TrimSpace(string(blob))}}
+	if _, err := w.ExtendChangeset("main", "p", "rename", []ChangesetItem{{Path: "tenant-a/web.yaml", NewContent: []byte("kind: VirtualMachine\nmetadata: {name: www}\n")}}, by); err != nil {
+		t.Fatal(err)
+	}
+	var moved *BaseMovedError
+	if _, err := w.ExtendChangeset("main", "p", "replace", pinned, by); !errors.As(err, &moved) || moved.Branch != "p" {
+		t.Fatalf("want BaseMovedError on branch p, got %v", err)
+	}
+	if _, err := w.ExtendChangeset("main", "q", "drop db", []ChangesetItem{{Path: "tenant-a/db.yaml", Delete: true}}, by); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.ExtendChangeset("main", "q", "replace", pinned, by); err != nil {
+		t.Fatalf("a branch that left the file alone must take the pin: %v", err)
 	}
 }

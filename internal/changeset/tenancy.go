@@ -221,14 +221,20 @@ func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target proje
 		if gerr != nil {
 			return nil, nil, invalid(gerr)
 		}
-		entries = append(entries, draft.Entry{
+		e := draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   draft.ResourceNamespace,
 			Namespace:  ns,
 			Name:       ns,
 			SourceFile: path,
 			Manifest:   string(released),
-		})
+		}
+		// The release is the declared file rewritten, so it is made from
+		// that version as much as any whole-file edit.
+		if err := c.pinBase(read, &e); err != nil {
+			return nil, nil, err
+		}
+		entries = append(entries, e)
 		staged = append(staged, ns)
 	}
 	if err := c.store.Stage(id.Username, commitProj.Name, entries...); err != nil {
