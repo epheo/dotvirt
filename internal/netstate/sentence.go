@@ -16,7 +16,7 @@ import (
 )
 
 // text renders the rule as one sentence from its subject's side, naming only
-// the namespaces red lets the caller see (nil names all).
+// what red lets the caller read (nil names all).
 func (r rule) text(dir string, red *Redaction) string {
 	peers, ports := r.peersPhrase(red), portsPhrase(r.ports)
 	if dir == "Ingress" {
@@ -94,6 +94,9 @@ func (p peer) phrase(red *Redaction) string {
 		}
 		return s
 	case peerNodes:
+		if red.hidesNodes(p.nodes) {
+			return selectedLabels + " hosts"
+		}
 		if l := selectorSummary(p.nodes, nil); l != "" {
 			return "hosts labeled " + l
 		}
@@ -113,11 +116,14 @@ func (p peer) phrase(red *Redaction) string {
 
 // vmsPhrase names the VMs a namespace and pod selector pair picks. own is the
 // namespace a selector-free NetworkPolicy peer or subject means (its policy
-// is only ever shown to a caller who sees it). Namespace names and project
-// labels outside red read "other namespaces".
+// is only ever shown to a caller who sees it). Whatever the pair selects
+// outside red reads "other namespaces" or "selected".
 func vmsPhrase(ns, pod *metav1.LabelSelector, own string, red *Redaction) string {
 	who := "VMs"
-	if l := selectorSummary(pod, nil); l != "" {
+	switch l := selectorSummary(pod, nil); {
+	case red.hidesLabels(pod, ns):
+		who = selectedLabels + " VMs"
+	case l != "":
 		who = "VMs labeled " + l
 	}
 	switch {
@@ -126,10 +132,19 @@ func vmsPhrase(ns, pod *metav1.LabelSelector, own string, red *Redaction) string
 	case ns == nil || emptySelector(ns):
 		return who + " in any namespace"
 	}
+	return who + " in " + namespacesPhrase(ns, red)
+}
+
+// namespacesPhrase names the namespaces a non-empty selector picks, as red
+// lets the caller read them.
+func namespacesPhrase(ns *metav1.LabelSelector, red *Redaction) string {
 	if names := netgen.NamespaceNames(ns); names != nil {
-		return who + " in " + strings.Join(red.filter(netgen.NamespaceNameLabel, names), ", ")
+		return strings.Join(red.filter(netgen.NamespaceNameLabel, names), ", ")
 	}
-	return who + " in namespaces labeled " + selectorSummary(ns, red)
+	if !red.confined(ns) {
+		return red.read(ns).own
+	}
+	return "namespaces labeled " + selectorSummary(ns, red)
 }
 
 // applies names a policy's subject in words; ns is the policy's own
@@ -148,8 +163,8 @@ func (s subject) applies(ns string, red *Redaction) string {
 		switch {
 		case emptySelector(s.ns):
 			return "every namespace"
-		case netgen.NamespaceNames(s.ns) != nil:
-			return "every VM in " + strings.Join(red.filter(netgen.NamespaceNameLabel, netgen.NamespaceNames(s.ns)), ", ")
+		case netgen.NamespaceNames(s.ns) != nil || !red.confined(s.ns):
+			return "every VM in " + namespacesPhrase(s.ns, red)
 		}
 		return "namespaces labeled " + selectorSummary(s.ns, red)
 	}

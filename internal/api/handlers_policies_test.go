@@ -6,12 +6,17 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	authzv1 "k8s.io/api/authorization/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/netstate"
 )
 
 // scopePolicies must keep namespace-tier rows only in visible namespaces and
@@ -100,5 +105,106 @@ func TestPolicyRedactorView(t *testing.T) {
 	v = s.policyRedactor(context.Background(), id, c).view
 	if v.Namespace("team-a-dev") || v.Project("team-a") {
 		t.Error("a failed visibility read must hide every name")
+	}
+}
+
+// Through the routes: a tenant reads the cluster rule governing its VM on the
+// effective chain, its network's rules and a trace, and never a selector value
+// that reaches past its own namespace; a value confined to it stays in clear.
+// The policy plane holds no cluster row for it. A caller with authority over
+// the kind reads every value.
+func TestTenantReadsOwnScopeOnEveryPolicySurface(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.readsVMs = tenantReadsTeamA
+	fc.namespaces[0].Labels["env"] = "prod"
+	fc.namespaces[1].Labels["env"], fc.namespaces[1].Labels["tier"] = "prod", "gold"
+	fc.namespaces = append(fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kube-system"}})
+	tmpl := &kubevirtcorev1.VirtualMachineInstanceTemplateSpec{}
+	tmpl.ObjectMeta.Labels = map[string]string{"app": "web"}
+	tmpl.Spec.Networks = []kubevirtcorev1.Network{{Name: "default", NetworkSource: kubevirtcorev1.NetworkSource{Pod: &kubevirtcorev1.PodNetwork{}}}}
+	fc.vms = []kubevirtcorev1.VirtualMachine{{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a-dev", Name: "web"},
+		Spec:       kubevirtcorev1.VirtualMachineSpec{Template: tmpl},
+	}}
+	resources := func(gv string, names ...string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			list := metav1.APIResourceList{TypeMeta: metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"}, GroupVersion: gv}
+			for _, n := range names {
+				list.APIResources = append(list.APIResources, metav1.APIResource{Name: n, Verbs: []string{"list", "watch"}})
+			}
+			writeObj(w, list)
+		}
+	}
+	sel := func(k, v string) map[string]any { return map[string]any{"matchLabels": map[string]any{k: v}} }
+	anpGV := "policy.networking.k8s.io/v1alpha1"
+	fc.on(http.MethodGet, "/apis/"+anpGV, resources(anpGV, "adminnetworkpolicies"))
+	fc.on(http.MethodGet, "/apis/"+anpGV+"/adminnetworkpolicies", unstructuredList(anpGV, "AdminNetworkPolicy", map[string]any{
+		"apiVersion": anpGV, "kind": "AdminNetworkPolicy",
+		"metadata": map[string]any{"name": "platform", "resourceVersion": "1"},
+		"spec": map[string]any{
+			"priority": int64(10),
+			"subject":  map[string]any{"namespaces": sel("env", "prod")},
+			"ingress": []any{map[string]any{"action": "Allow", "from": []any{map[string]any{"pods": map[string]any{
+				"namespaceSelector": sel("tier", "gold"), "podSelector": sel("app", "billing"),
+			}}}}},
+			"egress": []any{
+				map[string]any{"action": "Allow", "to": []any{map[string]any{"namespaces": sel("dotvirt.io/project", "team-a")}}},
+				map[string]any{"action": "Allow", "to": []any{map[string]any{"networks": []any{"198.51.100.0/24"}}}},
+			},
+		},
+	}))
+	fc.on(http.MethodGet, "/apis/k8s.ovn.org/v1", resources("k8s.ovn.org/v1", "userdefinednetworks"))
+	fc.on(http.MethodGet, "/apis/k8s.ovn.org/v1/userdefinednetworks", unstructuredList("k8s.ovn.org/v1", "UserDefinedNetwork", map[string]any{
+		"apiVersion": "k8s.ovn.org/v1", "kind": "UserDefinedNetwork",
+		"metadata": map[string]any{"name": "vm-net", "namespace": "team-a-dev", "resourceVersion": "1"},
+		"spec":     map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Secondary", "subnets": []any{"10.0.0.0/24"}}},
+	}))
+	s := fc.server(nil, Config{})
+	ns := netstate.New(fc.sa, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ns.Run(ctx)
+	s.netstate = ns
+	for deadline := time.Now().Add(10 * time.Second); len(ns.Policies()) == 0 || len(ns.Catalog().Networks) == 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("netstate never synced the ANP and the network")
+		}
+	}
+
+	trace := `{"source":{"namespace":"team-a-dev","vm":"web"},"destination":{"ip":"198.51.100.7"},"port":443}`
+	surfaces := []struct{ method, path, body string }{
+		{http.MethodGet, vmPath + "/policy", ""},
+		{http.MethodGet, "/api/networks/rules?network=team-a-dev/vm-net", ""},
+		{http.MethodPost, "/api/networking/trace", trace},
+	}
+	read := func(token, method, path, body string) string {
+		t.Helper()
+		rec := do(s, token, method, path, body)
+		wantStatus(t, rec, http.StatusOK)
+		return rec.Body.String()
+	}
+	for _, sf := range surfaces {
+		tenant := read(tenantToken, sf.method, sf.path, sf.body)
+		for _, secret := range []string{"orphans", "kube-system", "gold", "tier", "billing", "env=prod"} {
+			if strings.Contains(tenant, secret) {
+				t.Errorf("%s: a tenant reads %q: %s", sf.path, secret, tenant)
+			}
+		}
+		if !strings.Contains(tenant, "platform") || !strings.Contains(tenant, "other namespaces") {
+			t.Errorf("%s: the rule governing the tenant's VM must stay, redacted: %s", sf.path, tenant)
+		}
+		if sf.method == http.MethodGet && !strings.Contains(tenant, "dotvirt.io/project=team-a") {
+			t.Errorf("%s: a selector confined to the tenant's namespace was hidden: %s", sf.path, tenant)
+		}
+		admin := read(adminToken, sf.method, sf.path, sf.body)
+		if !strings.Contains(admin, "env=prod") {
+			t.Errorf("%s: authority over the kind must read every value: %s", sf.path, admin)
+		}
+	}
+	if pols := read(tenantToken, http.MethodGet, "/api/policies", ""); strings.Contains(pols, "platform") {
+		t.Errorf("the policy plane lists a cluster rule to a tenant: %s", pols)
+	}
+	if pols := read(adminToken, http.MethodGet, "/api/policies", ""); !strings.Contains(pols, "tier=gold") || !strings.Contains(pols, "app=billing") {
+		t.Errorf("the policy plane hides values from authority over the kind: %s", pols)
 	}
 }
