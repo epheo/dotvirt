@@ -89,3 +89,14 @@ func Apply(ctx context.Context, c client.Client, obj client.Object, dryRun bool)
 	// Client.Apply takes ApplyConfigurations, which the typed builders do not render.
 	return c.Patch(ctx, obj, client.Apply, opts...) //nolint:staticcheck // SA1019, see above
 }
+
+// ApplyShared server-side-applies obj, a field of an object another owner
+// runs, without forcing: a field another manager holds is that manager's, so
+// the apply fails with a conflict instead of taking it.
+func ApplyShared(ctx context.Context, c client.Client, obj client.Object, dryRun bool) error {
+	opts := []client.PatchOption{client.FieldOwner(fieldManager)}
+	if dryRun {
+		opts = append(opts, client.DryRunAll)
+	}
+	return c.Patch(ctx, obj, client.Apply, opts...) //nolint:staticcheck // SA1019, see Apply
+}
