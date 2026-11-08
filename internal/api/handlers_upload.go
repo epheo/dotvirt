@@ -119,6 +119,27 @@ func (s *Server) handleCreateImport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, model.UploadTarget{Namespace: req.Namespace, Name: req.Name, Image: req.Namespace + "/" + req.Name})
 }
 
+// handleDeleteBootImage removes a boot image that never finished (a failed
+// or abandoned download or upload), under the caller's token and gated
+// whole first, so a refusal deletes nothing. The cluster call refuses a
+// ready boot image and any shape dotvirt does not make.
+func (s *Server) handleDeleteBootImage(w http.ResponseWriter, r *http.Request) {
+	sc, ns, name, ok := s.vmScope(w, r)
+	if !ok {
+		return
+	}
+	if !s.gate(w, r, sc, bootImageDeleteAction(ns)) {
+		return
+	}
+	err := sc.cluster.DeleteBootImage(r.Context(), ns, name)
+	s.options.Delete("all")
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleUploadStatus reports the upload DataVolume's phase + import progress.
 func (s *Server) handleUploadStatus(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)

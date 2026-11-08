@@ -162,6 +162,7 @@ func (s *Server) namespaceCaps(ctx context.Context, sc scope, ns string) model.N
 		{&out.SnapshotDelete, snapshotDeleteAction(ns)},
 		{&out.Clone, cloneAction(ns)},
 		{&out.BootImageImport, bootImageImportAction(ns)},
+		{&out.BootImageDelete, bootImageDeleteAction(ns)},
 		{&out.NetworkAttachment.Update, kindAction(verbUpdate, model.KindNAD, ns)},
 		{&out.NetworkAttachment.Delete, kindAction(verbDelete, model.KindNAD, ns)},
 	}

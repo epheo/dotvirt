@@ -110,6 +110,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/imports", s.handleCreateImport)
 	mux.HandleFunc("GET /api/uploads/{namespace}/{name}", s.handleUploadStatus)
 	mux.HandleFunc("POST /api/uploads/{namespace}/{name}/token", s.handleUploadToken)
+	mux.HandleFunc("DELETE /api/images/{namespace}/{name}", s.handleDeleteBootImage)
 	mux.HandleFunc("GET /api/projects/{project}/history", s.handleHistory)
 	mux.HandleFunc("GET /api/projects/{project}/history/{hash}", s.handleCommit)
 	mux.HandleFunc("GET /api/projects/{project}/proposals/{number}", s.handleProposal)

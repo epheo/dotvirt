@@ -78,6 +78,7 @@ func (c *Client) ListOptions(ctx context.Context) (model.Options, error) {
 				Name:      items[i].GetName(),
 				Namespace: items[i].GetNamespace(),
 				Ready:     dataSourceReady(&items[i]),
+				Removable: notOwnShape(&items[i]) == "",
 			}
 			a := items[i].GetAnnotations()
 			if kind, src := a[importKindAnnotation], a[importSourceAnnotation]; kind != "" && src != "" {

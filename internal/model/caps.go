@@ -87,6 +87,9 @@ type NamespaceCaps struct {
 	// BootImageImport is a boot image the cluster downloads from a registry
 	// or a URL: its DataVolume and DataSource. It needs no upload proxy.
 	BootImageImport bool `json:"bootImageImport"`
+	// BootImageDelete removes a boot image that never finished: its
+	// DataSource, DataVolume and claim.
+	BootImageDelete bool `json:"bootImageDelete"`
 	// The namespaced network family, staged through git. Network is the
 	// project networks (UserDefinedNetwork).
 	Network ObjectCaps `json:"network"`

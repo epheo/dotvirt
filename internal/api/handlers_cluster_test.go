@@ -426,6 +426,99 @@ func TestImportRefusalMakesNothing(t *testing.T) {
 	}
 }
 
+// unfinishedImage answers the DataSource noble in team-a-dev, in the shape
+// dotvirt makes, and records each delete of it, its DataVolume and its claim
+// in order; failing names a resource path whose delete is forbidden.
+func unfinishedImage(fc *fakeCluster, ready bool, failing string) *[]string {
+	const cdi = "/apis/cdi.kubevirt.io/v1beta1/namespaces/team-a-dev/"
+	status := "False"
+	if ready {
+		status = "True"
+	}
+	fc.on(http.MethodGet, cdi+"datasources/noble", func(w http.ResponseWriter, _ *http.Request) {
+		writeObj(w, map[string]any{
+			"apiVersion": "cdi.kubevirt.io/v1beta1", "kind": "DataSource",
+			"metadata": map[string]any{"name": "noble", "namespace": "team-a-dev", "resourceVersion": "7"},
+			"spec":     map[string]any{"source": map[string]any{"pvc": map[string]any{"name": "noble", "namespace": "team-a-dev"}}},
+			"status":   map[string]any{"conditions": []any{map[string]any{"type": "Ready", "status": status}}},
+		})
+	})
+	var deleted []string
+	for _, res := range []string{cdi + "datasources", cdi + "datavolumes", "/api/v1/namespaces/team-a-dev/persistentvolumeclaims"} {
+		fc.on(http.MethodDelete, res+"/noble", func(w http.ResponseWriter, _ *http.Request) {
+			if res == failing {
+				writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
+				return
+			}
+			deleted = append(deleted, res[strings.LastIndex(res, "/")+1:])
+			writeObj(w, metav1.Status{TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"}, Status: metav1.StatusSuccess})
+		})
+	}
+	return &deleted
+}
+
+// A refused delete removes nothing: the three rights are asked whole before
+// the first delete, and the capability reads false without any one.
+func TestBootImageDeleteRefusalDeletesNothing(t *testing.T) {
+	g := newGateRig(t)
+	deleted := unfinishedImage(g.fc, false, "")
+	for i := range deleteGrants {
+		tok := g.token(without(deleteGrants, i))
+		if _, nc := g.caps(tok, "team-a-dev"); nc.BootImageDelete {
+			t.Errorf("without %v: bootImageDelete true", deleteGrants[i])
+		}
+		wantStatus(t, do(g.s, tok, http.MethodDelete, "/api/images/team-a-dev/noble", ""), http.StatusForbidden)
+	}
+	if len(*deleted) != 0 {
+		t.Errorf("a refused delete removed %v", *deleted)
+	}
+	tok := g.token(deleteGrants)
+	if _, nc := g.caps(tok, "team-a-dev"); !nc.BootImageDelete {
+		t.Error("with the delete rights: bootImageDelete false")
+	}
+	wantStatus(t, do(g.s, tok, http.MethodDelete, "/api/images/team-a-dev/noble", ""), http.StatusNoContent)
+	if want := []string{"datasources", "datavolumes", "persistentvolumeclaims"}; !reflect.DeepEqual(*deleted, want) {
+		t.Errorf("deleted %v, want %v", *deleted, want)
+	}
+}
+
+// The route refuses a ready boot image with the reason and removes nothing;
+// an unfinished one goes, and the shared catalog is read again so New VM and
+// the Images tab drop it at once. A delete that stops partway says what
+// remains, with the apiserver's status.
+func TestBootImageDelete(t *testing.T) {
+	fc := newFakeCluster(t)
+	deleted := unfinishedImage(fc, true, "")
+	s := fc.server(nil, Config{})
+	rec := do(s, adminToken, http.MethodDelete, "/api/images/team-a-dev/noble", "")
+	wantStatus(t, rec, http.StatusConflict)
+	if !strings.Contains(rec.Body.String(), "noble is ready") || len(*deleted) != 0 {
+		t.Errorf("ready: %q, deleted %v", rec.Body.String(), *deleted)
+	}
+	wantStatus(t, do(s, adminToken, http.MethodDelete, "/api/images/elsewhere/noble", ""), http.StatusNotFound)
+
+	fc = newFakeCluster(t)
+	deleted = unfinishedImage(fc, false, "")
+	s = fc.server(nil, Config{})
+	s.options.Put("all", model.Options{OSImages: []model.OSImage{{Name: "noble", Namespace: "team-a-dev"}}})
+	wantStatus(t, do(s, adminToken, http.MethodDelete, "/api/images/team-a-dev/noble", ""), http.StatusNoContent)
+	if len(*deleted) != 3 {
+		t.Errorf("deleted %v, want all three", *deleted)
+	}
+	if _, ok := s.options.Get("all"); ok {
+		t.Error("the catalog cache still holds the deleted boot image")
+	}
+
+	fc = newFakeCluster(t)
+	unfinishedImage(fc, false, "/apis/cdi.kubevirt.io/v1beta1/namespaces/team-a-dev/datavolumes")
+	s = fc.server(nil, Config{})
+	rec = do(s, adminToken, http.MethodDelete, "/api/images/team-a-dev/noble", "")
+	wantStatus(t, rec, http.StatusForbidden)
+	if !strings.Contains(rec.Body.String(), "removed the boot image noble; its data volume and its claim remain") {
+		t.Errorf("partial: %q", rec.Body.String())
+	}
+}
+
 // A token request the proxy answers without a token is an internal failure,
 // never an empty token handed to the browser.
 func TestUploadTokenNotIssued(t *testing.T) {

@@ -122,6 +122,11 @@ export interface NamespaceCaps {
    */
   bootImageImport: boolean;
   /**
+   * BootImageDelete removes a boot image that never finished: its
+   * DataSource, DataVolume and claim.
+   */
+  bootImageDelete: boolean;
+  /**
    * The namespaced network family, staged through git. Network is the
    * project networks (UserDefinedNetwork).
    */
@@ -1206,6 +1211,12 @@ export interface OSImage {
    * made it from a registry or a URL.
    */
   import?: DiskImport;
+  /**
+   * Removable is the shape a boot image dotvirt adds has: a DataSource over
+   * the claim of its own name, that no scheduled import keeps. Until it is
+   * Ready, DELETE /api/images removes it.
+   */
+  removable?: boolean;
 }
 export interface NetworkOption {
   name: string;

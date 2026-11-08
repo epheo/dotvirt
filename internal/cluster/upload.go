@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -186,4 +187,87 @@ func (c *Client) CreateBootImage(ctx context.Context, namespace, name string, im
 	}}
 	_, err = dyn.Resource(gvrDataSources).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
 	return err
+}
+
+var gvrPVCs = schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumeclaims"}
+
+// dataImportCronLabel marks a DataSource a DataImportCron keeps: CDI points
+// it at each scheduled import and would bring a deleted one back.
+const dataImportCronLabel = "cdi.kubevirt.io/dataImportCron"
+
+// notOwnShape says why ds is not the boot image CreateBootImage makes, ""
+// when it is: a DataSource over the claim of its own name, in its own
+// namespace, that no DataImportCron keeps.
+func notOwnShape(ds *unstructured.Unstructured) string {
+	if _, ok := ds.GetLabels()[dataImportCronLabel]; ok {
+		return "a scheduled import keeps it"
+	}
+	name, _, _ := unstructured.NestedString(ds.Object, "spec", "source", "pvc", "name")
+	ns, _, _ := unstructured.NestedString(ds.Object, "spec", "source", "pvc", "namespace")
+	if name != ds.GetName() || (ns != "" && ns != ds.GetNamespace()) {
+		return "it points at another disk"
+	}
+	return ""
+}
+
+// DeleteBootImage removes a boot image that never finished, under the
+// caller's token: the DataSource first, so the catalog stops listing it, then
+// the DataVolume of its name, then the claim, which CDI collects with the
+// DataVolume but which outlives one already gone. Only the shape
+// CreateBootImage makes, while not Ready, is removed; anything else is
+// refused before the first delete. NotFound is no failure; any other error
+// stops and says what was removed and what remains.
+func (c *Client) DeleteBootImage(ctx context.Context, namespace, name string) error {
+	dyn, err := c.dynamic()
+	if err != nil {
+		return err
+	}
+	ds, err := dyn.Resource(gvrDataSources).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	if why := notOwnShape(ds); why != "" {
+		return fmt.Errorf("%w: %s is not a boot image dotvirt added (%s); nothing was removed", model.ErrConflict, name, why)
+	}
+	if dataSourceReady(ds) {
+		return fmt.Errorf("%w: %s is ready, and only an unfinished boot image is deleted here; nothing was removed", model.ErrConflict, name)
+	}
+	steps := []struct {
+		gvr  schema.GroupVersionResource
+		what string
+	}{
+		{gvrDataSources, "the boot image " + name},
+		{gvrDataVolumes, "its data volume"},
+		{gvrPVCs, "its claim"},
+	}
+	for i, st := range steps {
+		opts := metav1.DeleteOptions{}
+		if i == 0 {
+			// Ready between the read and the delete changes the version.
+			rv := ds.GetResourceVersion()
+			opts.Preconditions = &metav1.Preconditions{ResourceVersion: &rv}
+		}
+		err := dyn.Resource(st.gvr).Namespace(namespace).Delete(ctx, name, opts)
+		switch {
+		case err == nil, apierrors.IsNotFound(err):
+			continue
+		case i == 0 && apierrors.IsConflict(err):
+			return fmt.Errorf("%w: %s changed while it was being deleted; nothing was removed", model.ErrConflict, name)
+		case i == 0:
+			return fmt.Errorf("nothing was removed: %w", err)
+		}
+		var done, left []string
+		for _, s := range steps[:i] {
+			done = append(done, s.what)
+		}
+		for _, s := range steps[i:] {
+			left = append(left, s.what)
+		}
+		verb := "remains"
+		if len(left) > 1 {
+			verb = "remain"
+		}
+		return fmt.Errorf("removed %s; %s %s: %w", strings.Join(done, " and "), strings.Join(left, " and "), verb, err)
+	}
+	return nil
 }

@@ -200,6 +200,7 @@ var (
 	ssarClones       = ssarRef{"clone.kubevirt.io", "virtualmachineclones"}
 	ssarOAuthClients = ssarRef{"oauth.openshift.io", "oauthclients"}
 	ssarUploadTokens = ssarRef{"upload.cdi.kubevirt.io", "uploadtokenrequests"}
+	ssarClaims       = ssarRef{"", "persistentvolumeclaims"}
 )
 
 // kubevirtSub is verb on a KubeVirt subresource in ns: virt-api authorizes
@@ -244,6 +245,11 @@ var (
 	// import DataVolume and its DataSource, no upload token.
 	bootImageImportAction = func(ns string) action {
 		return action{refQ(verbCreate, ssarDataVolumes, ns), refQ(verbCreate, ssarDataSources, ns)}
+	}
+	// bootImageDeleteAction removes an unfinished boot image: its DataSource,
+	// its DataVolume and the claim, asked whole before the first delete.
+	bootImageDeleteAction = func(ns string) action {
+		return action{refQ(verbDelete, ssarDataSources, ns), refQ(verbDelete, ssarDataVolumes, ns), refQ(verbDelete, ssarClaims, ns)}
 	}
 )
 

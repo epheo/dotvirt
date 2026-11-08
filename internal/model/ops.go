@@ -172,6 +172,10 @@ type OSImage struct {
 	// Import is the source dotvirt downloaded the boot image from, when it
 	// made it from a registry or a URL.
 	Import *DiskImport `json:"import,omitempty"`
+	// Removable is the shape a boot image dotvirt adds has: a DataSource over
+	// the claim of its own name, that no scheduled import keeps. Until it is
+	// Ready, DELETE /api/images removes it.
+	Removable bool `json:"removable,omitempty"`
 }
 
 type NetworkOption struct {
