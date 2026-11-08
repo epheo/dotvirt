@@ -11,9 +11,10 @@ import (
 
 // handleCapabilities answers GET /api/capabilities (see model.Capabilities):
 // the cluster scope, or with ?namespace= that namespace and its project. The UI
-// asks on demand, never per frame; every verdict is a cached review built by
-// the same action its route gates on, at most authConcurrency at once. A
-// namespace outside the caller's projects is a 404 like every VM route.
+// asks on demand, never per frame; each field is built from the actions its
+// route and the coordinator ask, and every review is cached, at most
+// authConcurrency at once. A namespace outside the caller's projects is a 404
+// like every VM route.
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	if ns := r.URL.Query().Get("namespace"); ns != "" {
 		sc, ok := s.resolveProject(w, r, byNamespace(ns))
