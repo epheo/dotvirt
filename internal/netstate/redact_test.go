@@ -1,6 +1,7 @@
 package netstate
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -317,24 +318,30 @@ func TestRedactOwnScopeEverySurface(t *testing.T) {
 	}
 }
 
-// A caller who sees every namespace and may read nodes, or no Redaction at
-// all, reads every cluster rule exactly as the policy plane renders it.
+// No Redaction - a caller with authority over the kind - reads every
+// cluster rule exactly as the policy plane renders it. A caller who sees
+// every namespace and may read nodes reads all of it but a value no
+// namespace carries: platform text no namespace of theirs explains.
 func TestRedactAdminSeesAll(t *testing.T) {
 	s, _, all, _, _ := ownScope(t)
-	admin := &Redaction{
+	everywhere := &Redaction{
 		ProjectLabel: "dotvirt.io/project",
 		Namespace:    func(string) bool { return true },
 		Project:      func(string) bool { return true },
 		Namespaces:   func() []NamespaceLabels { return all },
 		Nodes:        func() bool { return true },
 	}
-	for _, red := range []*Redaction{admin, nil} {
-		for _, full := range s.Policies() {
+	for _, full := range s.Policies() {
+		for _, red := range []*Redaction{nil, everywhere} {
 			p := full
 			p.Rules = slices.Clone(full.Rules)
 			s.Redact(&p, nil, red)
-			if !slices.Equal(policyTexts(p, nil), policyTexts(full, nil)) {
-				t.Errorf("%s through %v = %q, want %q", full.Name, red != nil, policyTexts(p, nil), policyTexts(full, nil))
+			got, want := policyTexts(p, nil), policyTexts(full, nil)
+			if red != nil && full.Name == "platform" {
+				want[4], want[5] = "ns tenant-a, tenant-b, other namespaces", "Blocks all traffic from VMs in tenant-a, tenant-b, other namespaces."
+			}
+			if !slices.Equal(got, want) {
+				t.Errorf("%s through %v = %q, want %q", full.Name, red != nil, got, want)
 			}
 		}
 	}
@@ -446,5 +453,73 @@ func TestRedactVacuousSelector(t *testing.T) {
 	s.Redact(&whole, nil, nil)
 	if !strings.Contains(whole.Target, "team=finance") || !strings.Contains(whole.Rules[0].Peer, "app=ledger") {
 		t.Errorf("without a Redaction the rule reads whole: %q %q", whole.Target, whole.Rules[0].Peer)
+	}
+}
+
+// A selector confined to the caller's namespaces still renders in clear only
+// with values those namespaces carry: a NotIn or In value only another
+// tenant's namespace explains reads as other namespaces.
+func TestRedactConfinedSpellsOnlyCarriedValues(t *testing.T) {
+	s := New(nil, nil)
+	add(t, s.anp, map[string]any{
+		"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "AdminNetworkPolicy",
+		"metadata": map[string]any{"name": "x"},
+		"spec": map[string]any{
+			"priority": int64(10),
+			"subject": map[string]any{"namespaces": map[string]any{
+				"matchLabels":      map[string]any{"dotvirt.io/project": "team-a"},
+				"matchExpressions": []any{map[string]any{"key": "customer", "operator": "NotIn", "values": []any{"acme-of-team-b"}}},
+			}},
+			"ingress": []any{map[string]any{"action": "Allow", "from": []any{
+				map[string]any{"namespaces": map[string]any{
+					"matchLabels":      map[string]any{"dotvirt.io/project": "team-a"},
+					"matchExpressions": []any{map[string]any{"key": "env", "operator": "In", "values": []any{"prod", "secret-env-b"}}},
+				}},
+				map[string]any{"namespaces": map[string]any{
+					"matchLabels":      map[string]any{"dotvirt.io/project": "team-a"},
+					"matchExpressions": []any{map[string]any{"key": "env", "operator": "In", "values": []any{"prod"}}},
+				}},
+			}}},
+		},
+	})
+	red := &Redaction{
+		ProjectLabel: "dotvirt.io/project",
+		Namespace:    func(ns string) bool { return ns == "team-a" },
+		Project:      func(p string) bool { return p == "team-a" },
+		Namespaces:   universe,
+	}
+	p := s.Policies()[0]
+	s.Redact(&p, nil, red)
+	for _, txt := range policyTexts(p, nil) {
+		if strings.Contains(txt, "acme-of-team-b") || strings.Contains(txt, "secret-env-b") {
+			t.Errorf("a value no namespace of the caller's carries reads in clear: %q", txt)
+		}
+	}
+	if p.Target != "team-a, other namespaces" || p.Rules[0].Peer != "ns team-a, other namespaces; ns dotvirt.io/project=team-a, env in (prod)" {
+		t.Errorf("target %q, peer %q", p.Target, p.Rules[0].Peer)
+	}
+}
+
+// One request's redaction over a large cluster: the namespace list splits
+// once, and a project selector tests only that project's namespaces.
+func BenchmarkRedactionRead(b *testing.B) {
+	var all []NamespaceLabels
+	for i := range 5000 {
+		if i%2 == 0 {
+			all = append(all, NamespaceLabels{Name: fmt.Sprintf("ns-%d", i), Labels: map[string]string{"dotvirt.io/project": fmt.Sprintf("p%d", i/10), "env": "prod"}})
+		} else {
+			all = append(all, NamespaceLabels{Name: fmt.Sprintf("ns-%d", i)})
+		}
+	}
+	var sels []*metav1.LabelSelector
+	for j := range 50 {
+		sels = append(sels, &metav1.LabelSelector{MatchLabels: map[string]string{"dotvirt.io/project": fmt.Sprintf("p%d", j)}})
+	}
+	for b.Loop() {
+		r := &Redaction{ProjectLabel: "dotvirt.io/project", Namespace: func(ns string) bool { return ns == "ns-0" },
+			Project: func(string) bool { return false }, Namespaces: func() []NamespaceLabels { return all }}
+		for _, s := range sels {
+			r.confined(s)
+		}
 	}
 }

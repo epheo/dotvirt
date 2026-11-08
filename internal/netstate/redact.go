@@ -14,14 +14,14 @@ import (
 
 // Redaction is what a cluster policy's text may tell one caller: only what
 // lies in the namespaces they see. A namespace selector renders in clear only
-// when it selects some of their namespaces and can match none outside their
-// view, and even then hides a namespace name or project label value they do
-// not see; otherwise it reads as the caller's own namespaces it selects, then
-// otherNamespaces. A selector matching none of theirs speaks only of others,
-// even one matching nothing at all. Pod labels render only beside a namespace
-// side so confined, node labels only to a caller who may read nodes. Actions,
-// ports and directions render as they are, and matching never reads text, so
-// verdicts are untouched.
+// when it selects some of their namespaces, can match none outside their
+// view, and names no label value (or absent key) that none of their
+// namespaces carries; otherwise it reads as the caller's own namespaces it
+// selects, then otherNamespaces. A selector matching none of theirs speaks
+// only of others, even one matching nothing at all. Pod labels render only
+// beside a namespace side so confined, node labels only to a caller who may
+// read nodes. Actions, ports and directions render as they are, and matching
+// never reads text, so verdicts are untouched.
 //
 // One Redaction serves one request: it memoizes per selector without locking.
 type Redaction struct {
@@ -29,11 +29,12 @@ type Redaction struct {
 	Namespace    func(name string) bool // the caller sees this namespace
 	Project      func(name string) bool // the caller sees this project
 	// Namespaces lists every namespace in the cluster. Nil confines only the
-	// selectors that pin their namespaces by name to ones the caller sees.
+	// selectors that name their namespaces, each one the caller sees.
 	Namespaces func() []NamespaceLabels
 	Nodes      func() bool // the caller may read nodes; nil: they may not
 
 	memo map[string]selection
+	idx  *namespaceIndex
 }
 
 // NamespaceLabels is one namespace as the snapshot holds it. Labels is nil
@@ -52,13 +53,12 @@ const (
 
 // selection is one namespace selector as the caller may read it.
 type selection struct {
-	confined bool   // it selects some of the caller's namespaces and none outside
+	confined bool   // it may render in clear (see Redaction)
 	own      string // the caller's namespaces it selects, then otherNamespaces
 }
 
-// confined reports whether a namespace selector selects some of the caller's
-// namespaces and can match none outside their view. A nil Redaction confines
-// everything.
+// confined reports whether a namespace selector may render in clear for the
+// caller (see Redaction). A nil Redaction confines everything.
 func (r *Redaction) confined(sel *metav1.LabelSelector) bool {
 	return r == nil || r.read(sel).confined
 }
@@ -84,29 +84,21 @@ func (r *Redaction) read(sel *metav1.LabelSelector) selection {
 	if v, ok := r.memo[key]; ok {
 		return v
 	}
-	v := selection{confined: true}
+	v := selection{own: otherNamespaces}
 	if r.Namespaces == nil {
-		if !r.pinned(sel) {
-			v = selection{own: otherNamespaces}
-		}
+		v.confined = r.namedOnly(sel)
 	} else {
+		x := r.index()
 		var own []string
-		for _, ns := range r.Namespaces() {
-			m := r.selects(sel, ns)
-			switch {
-			case r.Namespace(ns.Name):
-				if m == matchYes {
-					own = append(own, ns.Name)
-				}
-			case m != matchNo:
-				v.confined = false
+		for _, ns := range x.visible {
+			if r.selects(sel, ns) == matchYes {
+				own = append(own, ns.Name)
 			}
 		}
-		if len(own) == 0 {
-			v.confined = false
+		v.confined = len(own) > 0 && x.carries(sel) && !r.reachesOutside(sel, x)
+		if !v.confined {
+			v.own = strings.Join(append(own, otherNamespaces), ", ")
 		}
-		slices.Sort(own)
-		v.own = strings.Join(append(own, otherNamespaces), ", ")
 	}
 	// An invalid selector formats to one shared key: never memoized.
 	if key != "<error>" {
@@ -118,18 +110,129 @@ func (r *Redaction) read(sel *metav1.LabelSelector) selection {
 	return v
 }
 
-// pinned reports whether sel names its namespaces outright, at least one and
-// each one the caller sees: whatever else it requires only narrows that set.
-func (r *Redaction) pinned(sel *metav1.LabelSelector) bool {
-	if v, ok := sel.MatchLabels[netgen.NamespaceNameLabel]; ok && r.Namespace(v) {
-		return true
+// namedOnly reports whether every requirement of sel names namespaces, at
+// least one and each one the caller sees.
+func (r *Redaction) namedOnly(sel *metav1.LabelSelector) bool {
+	if len(sel.MatchLabels)+len(sel.MatchExpressions) == 0 {
+		return false
 	}
-	for _, e := range sel.MatchExpressions {
-		if vals, ok := netgen.NameIn(e); ok && len(vals) > 0 && !slices.ContainsFunc(vals, func(v string) bool { return !r.Namespace(v) }) {
-			return true
+	for k, v := range sel.MatchLabels {
+		if k != netgen.NamespaceNameLabel || !r.Namespace(v) {
+			return false
 		}
 	}
-	return false
+	for _, e := range sel.MatchExpressions {
+		vals, ok := netgen.NameIn(e)
+		if !ok || len(vals) == 0 || slices.ContainsFunc(vals, func(v string) bool { return !r.Namespace(v) }) {
+			return false
+		}
+	}
+	return true
+}
+
+// namespaceIndex is the namespace list split for one caller, built once per
+// Redaction.
+type namespaceIndex struct {
+	visible   []NamespaceLabels            // the caller's, in name order
+	outside   []NamespaceLabels            // outside their view, labels held
+	byProject map[string][]NamespaceLabels // outside, by project label value
+	blind     bool                         // some namespace outside has no labels held
+	carried   map[string]map[string]bool   // label key: the values the caller's namespaces carry
+}
+
+func (r *Redaction) index() *namespaceIndex {
+	if r.idx != nil {
+		return r.idx
+	}
+	x := &namespaceIndex{byProject: map[string][]NamespaceLabels{}, carried: map[string]map[string]bool{}}
+	carry := func(k, v string) {
+		if x.carried[k] == nil {
+			x.carried[k] = map[string]bool{}
+		}
+		x.carried[k][v] = true
+	}
+	for _, ns := range r.Namespaces() {
+		switch {
+		case r.Namespace(ns.Name):
+			x.visible = append(x.visible, ns)
+			carry(netgen.NamespaceNameLabel, ns.Name)
+			for k, v := range ns.Labels {
+				carry(k, v)
+			}
+		case ns.Labels == nil:
+			x.blind = true
+		default:
+			x.outside = append(x.outside, ns)
+			if v, ok := ns.Labels[r.ProjectLabel]; ok && r.ProjectLabel != "" {
+				x.byProject[v] = append(x.byProject[v], ns)
+			}
+		}
+	}
+	slices.SortFunc(x.visible, func(a, b NamespaceLabels) int { return strings.Compare(a.Name, b.Name) })
+	r.idx = x
+	return x
+}
+
+// carries reports whether every label value sel names, and every key it
+// requires absent, is one the caller's namespaces carry.
+func (x *namespaceIndex) carries(sel *metav1.LabelSelector) bool {
+	for k, v := range sel.MatchLabels {
+		if !x.carried[k][v] {
+			return false
+		}
+	}
+	for _, e := range sel.MatchExpressions {
+		switch e.Operator {
+		case metav1.LabelSelectorOpIn, metav1.LabelSelectorOpNotIn:
+			for _, v := range e.Values {
+				if !x.carried[e.Key][v] {
+					return false
+				}
+			}
+		case metav1.LabelSelectorOpDoesNotExist:
+			if x.carried[e.Key] == nil {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// reachesOutside reports whether sel, which carries only the caller's
+// values, may match a namespace outside their view. Its namespace names are
+// then all the caller's, and a project requirement leaves only that
+// project's namespaces to test; a namespace whose labels are not held carries
+// no project label, and may match any other selector.
+func (r *Redaction) reachesOutside(sel *metav1.LabelSelector, x *namespaceIndex) bool {
+	if _, named := sel.MatchLabels[netgen.NamespaceNameLabel]; named {
+		return false
+	}
+	candidates := x.outside
+	anchored := false
+	if v, ok := sel.MatchLabels[r.ProjectLabel]; ok && r.ProjectLabel != "" {
+		candidates, anchored = x.byProject[v], true
+	}
+	for _, e := range sel.MatchExpressions {
+		if _, named := netgen.NameIn(e); named {
+			return false
+		}
+		if anchored || r.ProjectLabel == "" || e.Key != r.ProjectLabel {
+			continue
+		}
+		switch e.Operator {
+		case metav1.LabelSelectorOpIn:
+			candidates, anchored = nil, true
+			for _, v := range e.Values {
+				candidates = append(candidates, x.byProject[v]...)
+			}
+		case metav1.LabelSelectorOpExists:
+			anchored = true
+		}
+	}
+	if !anchored && x.blind {
+		return true
+	}
+	return slices.ContainsFunc(candidates, func(ns NamespaceLabels) bool { return r.selects(sel, ns) != matchNo })
 }
 
 // selects evaluates sel against one namespace from what the snapshot holds
