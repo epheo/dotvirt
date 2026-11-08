@@ -9,6 +9,7 @@ import (
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
 )
 
@@ -222,10 +223,7 @@ func TestProjectAdoptionStampsRepoOnEveryNamespace(t *testing.T) {
 	target := project.ProjectInfo{Name: "team-a", Namespaces: []string{"team-a", "team-a-db"}}
 	repoURL := "https://forge.example/acme/team-a.git"
 
-	specs, err := tenantNamespaces(target, repoURL, nil)
-	if err != nil {
-		t.Fatalf("tenantNamespaces: %v", err)
-	}
+	specs := tenantNamespaces(target, repoURL, make([]*netgen.LiveNamespace, len(target.Namespaces)))
 	entries, err := projectAdoption(specs, []string{"alice", "bob"})
 	if err != nil {
 		t.Fatalf("projectAdoption: %v", err)

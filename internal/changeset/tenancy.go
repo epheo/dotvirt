@@ -21,8 +21,10 @@ import (
 
 // LiveNamespaces reads what a namespace already carries on the cluster, nil
 // when it does not exist. Bound to the caller's token by the handler, so the
-// coordinator stays cluster-free and a user adopts exactly what they can read.
-// A nil func means nothing exists yet.
+// coordinator stays cluster-free and a user adopts exactly what they can read;
+// the handler also refuses there a namespace the caller may not claim, since
+// whether it exists decides what claiming it takes. A nil func means nothing
+// exists yet.
 type LiveNamespaces func(name string) (*netgen.LiveNamespace, error)
 
 func (l LiveNamespaces) lookup(name string) (*netgen.LiveNamespace, error) {
@@ -137,6 +139,16 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	if len(target.Namespaces) == 0 {
 		return model.DraftView{}, fmt.Errorf("%w: project %q has no namespaces to adopt", model.ErrInvalid, target.Name)
 	}
+	// Read (and so gate) every namespace before any repo exists: a refusal must
+	// not leave one behind.
+	lives := make([]*netgen.LiveNamespace, 0, len(target.Namespaces))
+	for _, ns := range target.Namespaces {
+		ln, err := live.lookup(ns)
+		if err != nil {
+			return model.DraftView{}, err
+		}
+		lives = append(lives, ln)
+	}
 	// A resolving annotation means already managed: conflict. Two dead ends recover:
 	// the forge LOST the repo (re-create; safe, allowEmpty refuses an empty source),
 	// or the HOST changed while the repo survived under the same owner/name
@@ -158,11 +170,7 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 				return model.DraftView{}, fmt.Errorf("%w: project %q's repo (%s) is hosted on another forge", model.ErrConflict, target.Name, target.Repo)
 			}
 			// Re-home: no repo create, no seed; the repo is already here.
-			specs, err := tenantNamespaces(target, target.Repo, live)
-			if err != nil {
-				return model.DraftView{}, err
-			}
-			entries, err := projectAdoption(specs, owners)
+			entries, err := projectAdoption(tenantNamespaces(target, target.Repo, lives), owners)
 			if err != nil {
 				return model.DraftView{}, err
 			}
@@ -178,11 +186,7 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	specs, err := tenantNamespaces(target, repoURL, live)
-	if err != nil {
-		return model.DraftView{}, err
-	}
-	entries, err := projectAdoption(specs, owners)
+	entries, err := projectAdoption(tenantNamespaces(target, repoURL, lives), owners)
 	if err != nil {
 		return model.DraftView{}, err
 	}
@@ -275,17 +279,14 @@ func (c *Coordinator) ensureTenantRepo(platformRepo, name string) (repoURL strin
 // repoURL: stamped with target's dotvirt.io/project label and the HOST-FREE
 // dotvirt.io/repo annotation, so the forge identity lives only in the install
 // config and a host change re-resolves projects instead of stranding them (the
-// re-home path depends on it). Each keeps what it already carries on the cluster.
-func tenantNamespaces(target project.ProjectInfo, repoURL string, live LiveNamespaces) ([]netgen.NamespaceSpec, error) {
+// re-home path depends on it). Each keeps what it carries on the cluster, lives
+// in target.Namespaces order.
+func tenantNamespaces(target project.ProjectInfo, repoURL string, lives []*netgen.LiveNamespace) []netgen.NamespaceSpec {
 	specs := make([]netgen.NamespaceSpec, 0, len(target.Namespaces))
-	for _, ns := range target.Namespaces {
-		ln, err := live.lookup(ns)
-		if err != nil {
-			return nil, err
-		}
-		specs = append(specs, netgen.NamespaceSpec{Name: ns, Project: target.Name, Repo: forge.PathRef(repoURL), Live: ln})
+	for i, ns := range target.Namespaces {
+		specs = append(specs, netgen.NamespaceSpec{Name: ns, Project: target.Name, Repo: forge.PathRef(repoURL), Live: lives[i]})
 	}
-	return specs, nil
+	return specs
 }
 
 // projectAdoption is the Namespace manifest of each spec (and, when owners are

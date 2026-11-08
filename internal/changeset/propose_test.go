@@ -174,6 +174,28 @@ func TestAdoptProjectRecreatesLostRepo(t *testing.T) {
 	}
 }
 
+// The namespace capture gates the claim, so it runs before the forge write: a
+// refused namespace leaves no repo behind.
+func TestAdoptProjectRefusalCreatesNoRepo(t *testing.T) {
+	created := false
+	f := newProposeFixture(t,
+		when("GET", "team-a", http.StatusNotFound, ""),
+		func(m, path string) (int, string, bool) {
+			if m == "POST" && strings.HasPrefix(path, "/api/v1/orgs/") && strings.HasSuffix(path, "/repos") {
+				created = true
+				return http.StatusCreated, "{}", true
+			}
+			return 0, "", false
+		})
+	refuse := func(string) (*netgen.LiveNamespace, error) { return nil, model.ErrForbidden }
+	if _, err := f.c.AdoptProject(f.id, f.proj, f.target("team-a"), nil, refuse); !errors.Is(err, model.ErrForbidden) {
+		t.Fatalf("err = %v, want the capture's refusal", err)
+	}
+	if created {
+		t.Fatal("a refused adoption created the project repo")
+	}
+}
+
 // A lost repo's clone failure, cached by inventory builds before adoption,
 // must not outlive dotvirt re-creating it: the seed and the first propose
 // open it right away.
