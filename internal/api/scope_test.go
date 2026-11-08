@@ -107,8 +107,8 @@ func TestVisibleForCachesPerToken(t *testing.T) {
 
 // Concurrent misses for one token share one probe: a frame build and the
 // pulls its watermarks trigger never review one token's visibility twice. The
-// probe runs on when the caller that started it leaves, so the others waiting
-// on it still get its answer.
+// caller that started the probe leaves on its own deadline, and the probe runs
+// on for the others still waiting on it.
 func TestVisibleForSharesOneProbe(t *testing.T) {
 	s := scopeServer(eventbus.New())
 	kube := fake.NewSimpleClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-a"}})
@@ -130,7 +130,11 @@ func TestVisibleForSharesOneProbe(t *testing.T) {
 	id := auth.Identity{Token: "tok-alice", Username: "alice"}
 
 	leader, leave := context.WithCancel(context.Background())
-	go func() { _, _ = s.visibleFor(leader, id, c) }()
+	left := make(chan error, 1)
+	go func() {
+		_, err := s.visibleFor(leader, id, c)
+		left <- err
+	}()
 	for !started.Load() {
 		time.Sleep(time.Millisecond)
 	}
@@ -144,6 +148,14 @@ func TestVisibleForSharesOneProbe(t *testing.T) {
 	}
 	time.Sleep(50 * time.Millisecond) // let the waiters join the probe in flight
 	leave()
+	select {
+	case err := <-left:
+		if err == nil {
+			t.Error("the leader left with an answer it never waited for")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the leader could not leave while its probe ran")
+	}
 	close(gate)
 	wg.Wait()
 	if lists != 1 {
@@ -233,6 +245,61 @@ func TestVisibleForTTLFollowsTheWatches(t *testing.T) {
 	}
 	if n := probes(scopeServer(eventbus.New())); n != 1 {
 		t.Errorf("never watched: a minute-old entry cost %d probes, want 1", n)
+	}
+}
+
+// A caller whose deadline has passed posts no review at all, and one whose
+// deadline passes mid-review returns on it rather than on the review's bound.
+func TestReviewsHonorTheCallerDeadline(t *testing.T) {
+	s := scopeServer(eventbus.New())
+	c, reviews := ssarCountingClient(func(*authzv1.ResourceAttributes) bool { return true })
+	id := auth.Identity{Token: "tok-alice", Username: "alice"}
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := s.can(gone, id, c, verbList, ssarNodes, ""); err == nil || *reviews != 0 {
+		t.Fatalf("an expired caller: err %v after %d reviews, want an error and none", err, *reviews)
+	}
+
+	soon, done := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer done()
+	begin := time.Now()
+	_, err := review(soon, s.ssar, "k", 1, func(ctx context.Context) (ssarVerdict, error) {
+		<-ctx.Done()
+		return ssarVerdict{}, ctx.Err()
+	})
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(begin) > time.Second {
+		t.Fatalf("a caller with a 20ms deadline returned %v after %s", err, time.Since(begin))
+	}
+}
+
+// A review that begins right after a grant move may read the old grant from a
+// lagging apiserver: its answer serves the short TTL even while every watch
+// runs. One that begins once grants settled serves the long TTL.
+func TestUnsettledReviewsServeTheShortTTL(t *testing.T) {
+	bus := eventbus.New()
+	st, _ := watchedState(t, bus) // its initial lists are grant moves
+	s := NewServer(Deps{State: st, Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}})
+	id := auth.Identity{Token: "tok-alice", Username: "alice"}
+	c, lists := listCountingClient("tenant-a")
+	if _, err := s.visibleFor(context.Background(), id, c); err != nil {
+		t.Fatal(err)
+	}
+	key := restfactory.TokenKey(id.Token)
+	e, ok := s.visible.Get(key)
+	if !ok || !e.unsettled {
+		t.Fatalf("a review right after a grant move cached %+v (ok=%v), want it unsettled", e, ok)
+	}
+	s.visible.PutAt(key, e, time.Now().Add(-time.Minute))
+	if _, err := s.visibleFor(context.Background(), id, c); err != nil || *lists != 2 {
+		t.Fatalf("a minute-old unsettled entry: %v after %d probes, want a second probe", err, *lists)
+	}
+
+	settled := scopeServer(eventbus.New()) // no grant move ever reported
+	if settled.unsettled(time.Now()) {
+		t.Error("a review with no grant move behind it read as unsettled")
+	}
+	if !s.unsettled(st.LastGrantMove().Add(grantSettle/2)) || s.unsettled(st.LastGrantMove().Add(grantSettle)) {
+		t.Error("the settle window is not grantSettle long")
 	}
 }
 

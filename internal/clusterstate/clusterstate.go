@@ -120,6 +120,8 @@ type State struct {
 	rbSink   *rbacSignal
 	rbHealth int
 
+	grantMoved atomic.Int64 // unix nanos of the last RBACChanged the RBAC sinks published
+
 	// Per-store readiness: each reflector's initial LIST (first Replace) landing.
 	// Tracked per store (not a single counter) so a consumer gates on exactly the
 	// stores it reads: drift must not stall on a failing VMI reflector, and
@@ -141,7 +143,10 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 	s.live = newLiveIndex(s.vms, s.vmis, s.publishLive)
 
 	namespace := func() { bus.Publish(eventbus.NamespaceChanged) }
-	rbac := func() { bus.Publish(eventbus.RBACChanged) }
+	rbac := func() {
+		s.grantMoved.Store(time.Now().UnixNano())
+		bus.Publish(eventbus.RBACChanged)
+	}
 	refs := newRoleRefs()
 	s.specs = []reflectorSpec{
 		{s.live.store(s.vms, s.vmsReady.Mark), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch()},
@@ -272,6 +277,15 @@ func listable(ctx context.Context, sa *cluster.Client) func(schema.GroupVersionR
 		}
 		return admitted
 	}
+}
+
+// LastGrantMove is when an RBAC watch last reported a grant move, zero before
+// any.
+func (s *State) LastGrantMove() time.Time {
+	if n := s.grantMoved.Load(); n != 0 {
+		return time.Unix(0, n)
+	}
+	return time.Time{}
 }
 
 // RBACWatched reports whether every RBAC signal watch has listed and is

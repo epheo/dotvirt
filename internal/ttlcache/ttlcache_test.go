@@ -96,12 +96,13 @@ func BenchmarkPutWarm(b *testing.B) {
 }
 
 // Concurrent misses on one key share one fill; another key fills on its own;
-// a waiter that gives up leaves the call to the rest.
+// a caller that gives up leaves the call to the rest; one whose context has
+// already ended starts nothing.
 func TestDoSharesOneFill(t *testing.T) {
 	c := New[int](time.Minute)
 	var fills atomic.Int32
 	release := make(chan struct{})
-	fill := func() (int, error) {
+	fill := func(context.Context) (int, error) {
 		fills.Add(1)
 		<-release
 		return 7, nil
@@ -117,17 +118,16 @@ func TestDoSharesOneFill(t *testing.T) {
 			results <- v
 		})
 	}
-	for deadline := time.Now().Add(5 * time.Second); fills.Load() == 0; time.Sleep(time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatal("no fill started")
-		}
-	}
+	waitFor(t, "a fill", func() bool { return fills.Load() > 0 })
 	gone, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := c.Do(gone, "k", fill); !errors.Is(err, context.Canceled) {
-		t.Errorf("a waiter whose context ended got %v, want context.Canceled", err)
+		t.Errorf("a caller whose context ended got %v, want context.Canceled", err)
 	}
-	if v, err := c.Do(context.Background(), "other", func() (int, error) { return 1, nil }); err != nil || v != 1 {
+	if _, err := c.Do(gone, "fresh", fill); !errors.Is(err, context.Canceled) {
+		t.Errorf("an ended context started a fill: %v", err)
+	}
+	if v, err := c.Do(context.Background(), "other", func(context.Context) (int, error) { return 1, nil }); err != nil || v != 1 {
 		t.Errorf("another key: %d, %v", v, err)
 	}
 	time.Sleep(50 * time.Millisecond) // let every caller join the call in flight
@@ -144,49 +144,65 @@ func TestDoSharesOneFill(t *testing.T) {
 	}
 }
 
-// A fill that never returns hands its waiters an error, never a zero value
-// posing as a result.
-func TestDoAbortedFill(t *testing.T) {
+// The caller that starts a fill leaves on its own deadline like any other;
+// once no caller waits, the fill's context ends, and the next caller starts a
+// fresh fill instead of joining the cancelled one.
+func TestDoCallersLeaveOnTheirOwnDeadline(t *testing.T) {
 	c := New[int](time.Minute)
-	started, release := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer func() { _ = recover() }()
-		_, _ = c.Do(context.Background(), "k", func() (int, error) {
-			close(started)
-			<-release
-			panic("boom")
-		})
-	}()
-	<-started
-	done := make(chan error)
-	go func() {
-		_, err := c.Do(context.Background(), "k", func() (int, error) { return 1, nil })
-		done <- err
-	}()
-	time.Sleep(50 * time.Millisecond) // let the waiter join
-	close(release)
-	if err := <-done; !errors.Is(err, errFillAborted) {
-		t.Errorf("a waiter on a panicked fill got %v, want errFillAborted", err)
+	stopped := make(chan struct{})
+	slow := func(ctx context.Context) (int, error) {
+		<-ctx.Done()
+		close(stopped)
+		return 0, ctx.Err()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	begin := time.Now()
+	if _, err := c.Do(ctx, "k", slow); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("the leader got %v, want its own deadline", err)
+	}
+	if waited := time.Since(begin); waited > time.Second {
+		t.Fatalf("the leader waited %s past its 20ms deadline", waited)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the fill ran on with no caller waiting")
+	}
+	if v, err := c.Do(context.Background(), "k", func(context.Context) (int, error) { return 3, nil }); err != nil || v != 3 {
+		t.Fatalf("the next caller got %d, %v; want a fresh fill", v, err)
 	}
 }
 
-// An entry serves within the tighter of the cache's TTL and the caller's
-// bound, aging from the time it was stored as of.
-func TestGetWithinAndPutAt(t *testing.T) {
+// A fill that panics hands its callers an error, never a zero value posing as
+// a result, and never takes the process down.
+func TestDoAbortedFill(t *testing.T) {
+	c := New[int](time.Minute)
+	_, err := c.Do(context.Background(), "k", func(context.Context) (int, error) { panic("boom") })
+	if !errors.Is(err, errFillAborted) {
+		t.Errorf("a caller of a panicked fill got %v, want errFillAborted", err)
+	}
+}
+
+// An entry reports its age from the time it was stored as of, and expires
+// with the cache's TTL whatever the caller's own bound.
+func TestGetAgeAndPutAt(t *testing.T) {
 	c := New[int](time.Hour)
 	c.PutAt("old", 1, time.Now().Add(-time.Minute))
-	c.Put("new", 2)
-	if _, ok := c.GetWithin("old", 30*time.Second); ok {
-		t.Error("a minute-old entry served a 30s bound")
-	}
-	if v, ok := c.GetWithin("old", 5*time.Minute); !ok || v != 1 {
-		t.Error("a minute-old entry missed a 5m bound")
-	}
-	if _, ok := c.GetWithin("new", 2*time.Hour); !ok {
-		t.Error("a fresh entry missed")
+	if v, age, ok := c.GetAge("old"); !ok || v != 1 || age < time.Minute || age > 2*time.Minute {
+		t.Errorf("a minute-old entry: %d, %s, %v", v, age, ok)
 	}
 	c.PutAt("ancient", 3, time.Now().Add(-2*time.Hour))
-	if _, ok := c.GetWithin("ancient", 3*time.Hour); ok {
-		t.Error("a bound past the TTL extended an entry")
+	if _, _, ok := c.GetAge("ancient"); ok {
+		t.Error("an entry past the TTL served")
+	}
+}
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); !cond(); time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
 	}
 }

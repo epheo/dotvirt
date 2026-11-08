@@ -20,16 +20,18 @@ import (
 
 // visibleSet is a token's visible-namespace set stamped with the RBAC version it was
 // derived at; the read is valid only while that version still matches the bus and
-// the entry is younger than authTTL.
+// the entry is younger than its maxAge.
 type visibleSet struct {
-	ns  map[string]bool
-	ver uint64
+	ns        map[string]bool
+	ver       uint64
+	unsettled bool // its review began right after a grant move (see unsettled)
 }
 
 // ssarVerdict is one (token, question) SSAR verdict, stamped the same way.
 type ssarVerdict struct {
-	ok  bool
-	ver uint64
+	ok        bool
+	ver       uint64
+	unsettled bool
 }
 
 // unwatchedTTL is how long a cached visible set or verdict serves while some
@@ -46,6 +48,27 @@ func (s *Server) authTTL() time.Duration {
 		return visibleTTL
 	}
 	return unwatchedTTL
+}
+
+// grantSettle is how long after a grant move a review may still read the old
+// grant: on a control plane of several apiservers, each one's RBAC informer
+// catches up on its own, and the review may land on a lagging one.
+const grantSettle = 5 * time.Second
+
+// unsettled reports whether a review beginning at start is within grantSettle
+// of the last grant move a watch reported. Its answer serves unwatchedTTL
+// only: a stale verdict from a lagging apiserver, stamped with the new RBAC
+// version, must not hold for the long TTL.
+func (s *Server) unsettled(start time.Time) bool {
+	return s.state != nil && start.Sub(s.state.LastGrantMove()) < grantSettle
+}
+
+// maxAge is how long an entry serves.
+func (s *Server) maxAge(unsettled bool) time.Duration {
+	if unsettled {
+		return unwatchedTTL
+	}
+	return s.authTTL()
 }
 
 // rbacVersion is the change-version a token's derived authorization depends on: a
@@ -84,19 +107,19 @@ func (s *Server) projectsFor(ctx context.Context, id auth.Identity, c *cluster.C
 	return s.resolver.Resolve(s.state.Namespaces(), visible), nil
 }
 
-// reviewTimeout bounds a shared review (see review): it runs detached from
-// the caller that started it, so that caller leaving fails none of the others
-// waiting on it.
+// reviewTimeout bounds a shared review (see review), which no single
+// caller's deadline ends while others still wait on it.
 const reviewTimeout = 15 * time.Second
 
 // review runs fill once per key and RBAC version, however many frame builds
-// and pulls of one token miss at once (ttlcache.Do). A caller with a newer
+// and pulls of one token miss at once (ttlcache.Do): each caller leaves on its
+// own deadline, and the review stops once none waits. A caller with a newer
 // version never joins an older review.
 func review[V any](ctx context.Context, cache *ttlcache.Cache[V], key string, ver uint64, fill func(context.Context) (V, error)) (V, error) {
-	return cache.Do(ctx, key+"\x00"+strconv.FormatUint(ver, 10), func() (V, error) {
-		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reviewTimeout)
+	return cache.Do(ctx, key+"\x00"+strconv.FormatUint(ver, 10), func(ctx context.Context) (V, error) {
+		ctx, cancel := context.WithTimeout(ctx, reviewTimeout)
 		defer cancel()
-		return fill(rctx)
+		return fill(ctx)
 	})
 }
 
@@ -107,7 +130,7 @@ func review[V any](ctx context.Context, cache *ttlcache.Cache[V], key string, ve
 func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Client) (map[string]bool, error) {
 	ver := s.rbacVersion()
 	key := restfactory.TokenKey(id.Token)
-	if e, ok := s.visible.GetWithin(key, s.authTTL()); ok && e.ver == ver {
+	if e, age, ok := s.visible.GetAge(key); ok && e.ver == ver && age < s.maxAge(e.unsettled) {
 		return e.ns, nil
 	}
 	e, err := review(ctx, s.visible, key, ver, func(ctx context.Context) (visibleSet, error) {
@@ -116,7 +139,7 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 		if err != nil {
 			return visibleSet{}, err
 		}
-		e := visibleSet{ns: make(map[string]bool, len(names)), ver: ver}
+		e := visibleSet{ns: make(map[string]bool, len(names)), ver: ver, unsettled: s.unsettled(start)}
 		for _, n := range names {
 			e.ns[n] = true
 		}
@@ -140,7 +163,7 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, verb string, ref ssarRef, ns string) (bool, error) {
 	ver := s.rbacVersion()
 	k := strings.Join([]string{restfactory.TokenKey(id.Token), verb, ref.group, ref.resource, ns}, "\x00")
-	if e, ok := s.ssar.GetWithin(k, s.authTTL()); ok && e.ver == ver {
+	if e, age, ok := s.ssar.GetAge(k); ok && e.ver == ver && age < s.maxAge(e.unsettled) {
 		return e.ok, nil
 	}
 	e, err := review(ctx, s.ssar, k, ver, func(ctx context.Context) (ssarVerdict, error) {
@@ -149,7 +172,7 @@ func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, v
 		if err != nil {
 			return ssarVerdict{}, err
 		}
-		e := ssarVerdict{ok: ok, ver: ver}
+		e := ssarVerdict{ok: ok, ver: ver, unsettled: s.unsettled(start)}
 		s.ssar.PutAt(k, e, start)
 		return e, nil
 	})

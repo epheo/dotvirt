@@ -10,6 +10,7 @@ package ttlcache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -35,60 +36,96 @@ func New[V any](ttl time.Duration) *Cache[V] {
 	return &Cache[V]{ttl: ttl, m: map[string]entry[V]{}, flight: map[string]*call[V]{}}
 }
 
-// call is one Do in progress; done closes once val and err are final.
+// call is one Do in progress: its fill runs in a goroutine of its own, done
+// closes once val and err are final, and cancel stops the fill once no caller
+// waits on it.
 type call[V any] struct {
-	done chan struct{}
-	val  V
-	err  error
+	done    chan struct{}
+	val     V
+	err     error
+	waiters int // guarded by the cache's mu
+	cancel  context.CancelFunc
 }
 
-// errFillAborted is what waiters see when the fill they waited on never
+// errFillAborted is what callers see when the fill they waited on never
 // returned (it panicked): never a zero value posing as a result.
 var errFillAborted = errors.New("ttlcache: fill aborted")
 
 // Do runs fill for key unless a Do for key is already in flight, in which
 // case it waits for that call's result instead: concurrent misses on one key
-// cost one fill. It neither reads nor writes the cache; fill does. A waiter
-// whose ctx ends first returns ctx.Err() and leaves the call running for the
-// others, so a fill that serves waiters must not stop with its own caller.
-func (c *Cache[V]) Do(ctx context.Context, key string, fill func() (V, error)) (V, error) {
-	c.mu.Lock()
-	if f, ok := c.flight[key]; ok {
-		c.mu.Unlock()
-		select {
-		case <-f.done:
-			return f.val, f.err
-		case <-ctx.Done():
-			var zero V
-			return zero, ctx.Err()
-		}
+// cost one fill. It neither reads nor writes the cache; fill does. Every
+// caller, the one that started the fill included, returns ctx.Err() as soon as
+// its own ctx ends, and a caller whose ctx has already ended starts nothing.
+// The fill runs under a context that keeps ctx's values and ends only when
+// every caller waiting on it has left, so it serves those still waiting and
+// stops for nobody.
+func (c *Cache[V]) Do(ctx context.Context, key string, fill func(context.Context) (V, error)) (V, error) {
+	var zero V
+	if err := ctx.Err(); err != nil {
+		return zero, err
 	}
-	f := &call[V]{done: make(chan struct{}), err: errFillAborted}
-	c.flight[key] = f
+	c.mu.Lock()
+	f, ok := c.flight[key]
+	if !ok {
+		fctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+		f = &call[V]{done: make(chan struct{}), err: errFillAborted, cancel: cancel}
+		c.flight[key] = f
+		go c.run(fctx, key, f, fill)
+	}
+	f.waiters++
 	c.mu.Unlock()
-	defer func() {
+	select {
+	case <-f.done:
+		return f.val, f.err
+	case <-ctx.Done():
 		c.mu.Lock()
-		delete(c.flight, key)
+		if f.waiters--; f.waiters == 0 {
+			// Nobody is left to serve: stop the fill, and let the next caller
+			// start a fresh one rather than join one being cancelled.
+			f.cancel()
+			if c.flight[key] == f {
+				delete(c.flight, key)
+			}
+		}
+		c.mu.Unlock()
+		return zero, ctx.Err()
+	}
+}
+
+func (c *Cache[V]) run(ctx context.Context, key string, f *call[V], fill func(context.Context) (V, error)) {
+	defer func() {
+		if r := recover(); r != nil {
+			f.err = fmt.Errorf("%w: %v", errFillAborted, r)
+		}
+		f.cancel()
+		c.mu.Lock()
+		if c.flight[key] == f {
+			delete(c.flight, key)
+		}
 		c.mu.Unlock()
 		close(f.done)
 	}()
-	f.val, f.err = fill()
-	return f.val, f.err
+	f.val, f.err = fill(ctx)
 }
 
 // Get returns the cached value for key if present and unexpired.
-func (c *Cache[V]) Get(key string) (V, bool) { return c.GetWithin(key, c.ttl) }
+func (c *Cache[V]) Get(key string) (V, bool) {
+	v, _, ok := c.GetAge(key)
+	return v, ok
+}
 
-// GetWithin is Get for a caller whose own bound on an entry's age, maxAge, may
-// be shorter than the cache's TTL right now.
-func (c *Cache[V]) GetWithin(key string, maxAge time.Duration) (V, bool) {
+// GetAge is Get that also returns the entry's age, for a caller whose own
+// bound on it may be shorter than the cache's TTL.
+func (c *Cache[V]) GetAge(key string) (V, time.Duration, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if e, ok := c.m[key]; ok && time.Since(e.at) < min(c.ttl, maxAge) {
-		return e.val, true
+	if e, ok := c.m[key]; ok {
+		if age := time.Since(e.at); age < c.ttl {
+			return e.val, age, true
+		}
 	}
 	var zero V
-	return zero, false
+	return zero, 0, false
 }
 
 // Put stores val under key, stamped now, and evicts expired entries so the cache
