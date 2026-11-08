@@ -42,33 +42,77 @@ func (s *Server) streamOpen(key string) bool {
 	return s.streams[key] > 0
 }
 
-const (
-	// ttlBackstopEvery is the TTL backstop's cadence. A cached entry serves while
-	// younger than visibleTTL, so the first tick to find it expired comes up to one
-	// period after it ages out: ticking at visibleTTL would double the bound.
-	ttlBackstopEvery = visibleTTL / 2
-	// ttlBackstopBound is how long a cluster-scoped RBAC change can take to reach
-	// an open frame: the entry's TTL, then the wait for the next tick.
-	ttlBackstopBound = visibleTTL + ttlBackstopEvery
-)
+// backstopEvery is the TTL backstop's period for entries serving ttl. An entry
+// serves while younger than ttl, so the first backstop to find it expired comes
+// up to one period after it ages out: a period of ttl would double the bound.
+func backstopEvery(ttl time.Duration) time.Duration { return ttl / 2 }
 
-// RunTTLBackstop is the TTL backstop for frame inputs no watch observes: a
-// token's visible namespaces and SSAR verdicts also move with ClusterRoleBindings,
-// ClusterRoles and group membership, and are cached for visibleTTL only. An
-// expired entry is re-evaluated by the next frame build, so while a stream is open
-// this publishes TTLBackstop every ttlBackstopEvery to cause one, which bounds
-// such a change at ttlBackstopBound (45s); a frame that comes out identical is not
-// resent. TTLBackstop is in no cache's version stamp, so nothing is invalidated
-// before its TTL.
+// backstopBound is how long an unwatched authorization change can take to
+// reach an open frame: the entry's TTL, then the wait for the next backstop.
+func backstopBound(ttl time.Duration) time.Duration { return ttl + backstopEvery(ttl) }
+
+// backstopTick is the backstop's clock: the short TTL's period, so a switch to
+// it takes effect at the next tick; the long TTL's period is a whole number of
+// ticks.
+var backstopTick = backstopEvery(unwatchedTTL)
+
+// backstopDue reports whether ticks backstop ticks since the last publish make
+// a period for entries serving ttl.
+func backstopDue(ticks int, ttl time.Duration) bool {
+	return time.Duration(ticks)*backstopTick >= backstopEvery(ttl)
+}
+
+// backstopTTL is the entry life the backstop's period follows: authTTL, or
+// the short TTL while an entry reviewed right after a grant move (unsettled)
+// may still be serving and expiring on it.
+func (s *Server) backstopTTL() time.Duration {
+	if s.state != nil && unsettledMayServe(time.Since(s.state.LastGrantMove())) {
+		return unwatchedTTL
+	}
+	return s.authTTL()
+}
+
+// unsettledMayServe reports whether an unsettled entry can still be serving,
+// or have just expired unseen, sinceMove after the last grant move: one
+// reviewed up to grantSettle after it serves unwatchedTTL, and the expiry
+// waits up to a tick for a backstop to notice.
+func unsettledMayServe(sinceMove time.Duration) bool {
+	return sinceMove < grantSettle+unwatchedTTL+backstopTick
+}
+
+// RunTTLBackstop is the TTL backstop for authorization no RBAC watch observes.
+// The watches publish RBACChanged for RoleBindings and Roles in project
+// namespaces, ClusterRoleBindings, the ClusterRoles those bind, and OpenShift
+// Groups. A token's visible namespaces and SSAR verdicts still move unseen
+// with:
+//   - RBAC outside project namespaces (the shared image namespaces the options
+//     filter reviews),
+//   - bindings that grant only platform ServiceAccounts, and the roles only
+//     they bind,
+//   - a watched kind the SA may not list yet,
+//   - group membership kept anywhere but user.openshift.io Groups,
+//   - authorizers other than RBAC.
+//
+// Those entries serve for authTTL only. An expired entry is re-evaluated by
+// the next frame build, so while a stream is open this publishes TTLBackstop
+// once per backstopEvery(backstopTTL) to cause one. That bounds such a change
+// at backstopBound: 7.5 minutes while every RBAC watch runs (5 minute
+// entries), 45 seconds otherwise (30 second entries, as on an operator role
+// older than the app, or for a review right after a grant move). A frame that comes out identical is not resent. TTLBackstop is in
+// no cache's version stamp, so nothing is invalidated before its TTL.
 func (s *Server) RunTTLBackstop(ctx context.Context) {
-	t := time.NewTicker(ttlBackstopEvery)
+	t := time.NewTicker(backstopTick)
 	defer t.Stop()
+	ticks := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			s.ttlBackstop()
+			if ticks++; backstopDue(ticks, s.backstopTTL()) {
+				ticks = 0
+				s.ttlBackstop()
+			}
 		}
 	}
 }
