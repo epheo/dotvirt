@@ -328,7 +328,7 @@ func TestCreateProjectGatedBeforeTheRepo(t *testing.T) {
 		return 0, "", false
 	})
 	f.c.UseAuthorizer(&rbac{deny: verbOn("create", "namespaces")})
-	_, err := f.c.StageCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"team-a","namespace":"team-a"}`), nil)
+	_, err := f.c.StageCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"team-a","namespace":"team-a"}`), nil, nil)
 	if !errors.Is(err, model.ErrForbidden) {
 		t.Errorf("err = %v, want ErrForbidden", err)
 	}

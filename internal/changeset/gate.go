@@ -84,26 +84,36 @@ func (c *Coordinator) authorize(id auth.Identity, need []Access) error {
 // file it weighed (draft.Entry.BaseBlob) and answers *git.BaseMovedError for
 // one pinned to another: its accesses would be read off the wrong version.
 func (c *Coordinator) gate(id auth.Identity, proj project.ProjectInfo, entries []draft.Entry) error {
+	need, err := c.needs(proj, entries)
+	if err != nil {
+		return err
+	}
+	return c.authorize(id, need)
+}
+
+// needs is every access committing entries to proj's base branch makes the
+// cluster perform once merged.
+func (c *Coordinator) needs(proj project.ProjectInfo, entries []draft.Entry) ([]Access, error) {
 	if len(entries) == 0 {
-		return nil
+		return nil, nil
 	}
 	read, err := c.read(proj)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	idx, err := indexDeclared(read, c.baseBranch)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var need []Access
 	for i := range entries {
 		a, err := c.entryAccess(read, idx, proj, &entries[i])
 		if err != nil {
-			return err
+			return nil, err
 		}
 		need = append(need, a...)
 	}
-	return c.authorize(id, need)
+	return need, nil
 }
 
 // write is how an entry changes its file: the one reading the gate weighs

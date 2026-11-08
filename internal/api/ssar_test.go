@@ -27,9 +27,9 @@ func TestEverySSARIsATableKind(t *testing.T) {
 			t.Errorf("ssar %s = %+v is not in the kind table", name, ref)
 		}
 	}
-	for _, r := range platformAuthorResources {
-		if r.resource == "" {
-			t.Errorf("platform authoring signal %+v is empty", r)
+	for _, act := range platformActions() {
+		if len(act) == 0 || act[0].Resource == "" {
+			t.Errorf("platform action %+v is empty", act)
 		}
 	}
 }

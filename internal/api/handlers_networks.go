@@ -179,7 +179,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		out.CanManage = cudn
 		out.Caps = model.NetworkCaps{
 			Uplink:                     can(model.KindNNCP),
-			Namespace:                  s.capable(ctx, id, c, newNamespaceAction(false, false)),
+			Namespace:                  s.newProjectCap(ctx, id, c, `{"name":"`+newNamespace+`"}`),
 			EgressIP:                   can(model.KindEgressIP),
 			ExternalRoute:              can(model.KindExtRoute),
 			AdminNetworkPolicy:         can(model.KindANP),

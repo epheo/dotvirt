@@ -2,8 +2,9 @@ package model
 
 // Capabilities is GET /api/capabilities: the caller's verdict on each action
 // dotvirt gates, each asking every question its route, the coordinator's gate
-// on what it stages, or the apiserver on an imperative call asks of it, so the
-// UI offers only what the server allows. A review that failed reads as false:
+// on what it stages, or the apiserver on an imperative call asks of it,
+// weighed as the gate weighs them, so the UI offers only what the server
+// allows. A review that failed reads as false:
 // unknown never offers an action. Without ?namespace= it answers Cluster; with
 // it, Namespace.
 type Capabilities struct {
@@ -21,9 +22,8 @@ type ObjectCaps struct {
 
 // ClusterCaps are the platform tier's actions and the cluster-scoped ones.
 type ClusterCaps struct {
-	// Platform is the platform draft lane: view, propose and revert the
-	// caller's own platform draft, and adopt cluster-scoped objects (each
-	// captured kind then needs its own create right).
+	// Platform is any platform-tier field below (OAuthClient aside): the
+	// platform lane, the caller's own platform draft and its proposals.
 	Platform bool `json:"platform"`
 	// Network is the shared segments (ClusterUserDefinedNetwork).
 	Network                    ObjectCaps `json:"network"`
@@ -69,10 +69,13 @@ type NamespaceCaps struct {
 	DataVolumeCreate bool `json:"dataVolumeCreate"` // image upload
 	// The namespaced network family, staged through git. Network is the
 	// project segments (UserDefinedNetwork).
-	Network        ObjectCaps  `json:"network"`
-	NetworkPolicy  ObjectCaps  `json:"networkPolicy"`
-	EgressFirewall ObjectCaps  `json:"egressFirewall"`
-	Project        ProjectCaps `json:"project"`
+	Network ObjectCaps `json:"network"`
+	// NetworkAttachment is a NetworkAttachmentDefinition git still declares
+	// under the network routes (update, delete): no form creates one.
+	NetworkAttachment ObjectCaps  `json:"networkAttachment"`
+	NetworkPolicy     ObjectCaps  `json:"networkPolicy"`
+	EgressFirewall    ObjectCaps  `json:"egressFirewall"`
+	Project           ProjectCaps `json:"project"`
 }
 
 // ProjectCaps are the actions on a namespace's whole project, over every one
@@ -81,8 +84,12 @@ type ProjectCaps struct {
 	Name string `json:"name"`
 	// TemplateEdit writes the project's template library.
 	TemplateEdit bool `json:"templateEdit"`
+	// NewNamespace joins a new namespace to the project (with a VM Network,
+	// ClusterCaps.VMNetwork too).
+	NewNamespace bool `json:"newNamespace"`
 	// Adopt attaches a repo to the repoless project; GrantAdmin names owners
-	// while doing so. Release dissolves it.
+	// while doing so. Release dissolves it. All false for a project with a
+	// repo.
 	Adopt      bool `json:"adopt"`
 	GrantAdmin bool `json:"grantAdmin"`
 	Release    bool `json:"release"`

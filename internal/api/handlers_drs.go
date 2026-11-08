@@ -9,7 +9,8 @@ import (
 
 // The DRS routes are platform-tier: the descheduler rebalances every node, so
 // its config commits to the platform repo. The mutating routes gate on their
-// verb over the KubeDescheduler CR; the coordinator checks each file staged.
+// verb over the KubeDescheduler CR (enable: its create, or its update when
+// DRS is reconfigured); the coordinator checks each file staged.
 
 // handleDRS reports the DRS tier: the platform repo's committed configuration,
 // the caller's staged draft, the live operator state from the SA-watched
@@ -29,8 +30,7 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.cfg.PlatformRepo != "" {
 		ctx := r.Context()
-		verdicts := s.capableAll(ctx, id, c, []action{drsEnableAction(false), drsEnableAction(true), drsDisableAction()})
-		view.CanManage, view.CanPSI, view.CanDisable = verdicts[0], verdicts[1], verdicts[2]
+		view.CanManage, view.CanPSI, view.CanDisable = s.drsCaps(ctx, id, c)
 		platform := s.platformProject()
 		if git, err := s.reader.DRSState(platform); err != nil {
 			log.Printf("api: drs: read platform repo: %v", err)
@@ -56,7 +56,7 @@ func (s *Server) handleDRSEnable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sc, ok := s.platformScopeGated(w, r)
-	if !ok || !s.gate(w, r, sc, drsCreateAction()) {
+	if !ok || !s.gateAny(w, r, sc, drsSchedulerActions()) {
 		return
 	}
 	view, err := s.draft.StageEnableDRS(sc.id, sc.proj, raw)

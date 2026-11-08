@@ -210,8 +210,6 @@ var authorRoutes = []struct {
 	{http.MethodPost, "/api/vms/web/vm1/delete", ``, "StageDelete"},
 	{http.MethodPost, "/api/vms/web/vm1/adopt", ``, "Adopt"},
 	{http.MethodPost, "/api/vms/web/vm1/restore", `{"hash":"` + hash40 + `"}`, "RestoreVersion"},
-	{http.MethodPost, "/api/draft/propose?project=team", `{"title":"t"}`, "Propose"},
-	{http.MethodPost, "/api/projects/team/revert", `{"hash":"` + hash40 + `"}`, "Revert"},
 	{http.MethodPost, "/api/networks", `{"scope":"project","namespace":"web"}`, "StageCreate"},
 	{http.MethodPost, "/api/egressfirewalls", `{"namespace":"web"}`, "StageCreate"},
 	{http.MethodPost, "/api/networkpolicies", `{"namespace":"web"}`, "StageCreate"},
@@ -223,8 +221,17 @@ var authorRoutes = []struct {
 	{http.MethodPost, "/api/templates", `{"sourceNamespace":"web","sourceName":"vm1"}`, "StageSaveTemplate"},
 	// The adoption captures read the cluster before staging, so passing the
 	// gate is all these assert for the editor.
-	{http.MethodPost, "/api/namespaces/web/adopt", ``, ""},
 	{http.MethodPost, "/api/objects/networkpolicy/web/p1/adopt", ``, ""},
+}
+
+// The routes no stand-in right gates: propose and revert reach the
+// coordinator, whose gate weighs every entry under the caller's token, and a
+// namespace adoption keeps only what that gate would allow.
+var coordinatorGated = []struct {
+	method, path, body, reaches string
+}{
+	{http.MethodPost, "/api/draft/propose?project=team", `{"title":"t"}`, "Propose"},
+	{http.MethodPost, "/api/projects/team/revert", `{"hash":"` + hash40 + `"}`, "Revert"},
 }
 
 func serve(s *Server, method, path, body, token string) *httptest.ResponseRecorder {
@@ -264,6 +271,18 @@ func TestAuthorGateViewerForbiddenEditorPasses(t *testing.T) {
 	}
 }
 
+// A viewer reaches the coordinator on the routes it gates itself.
+func TestCoordinatorGatedRoutesReachIt(t *testing.T) {
+	d := &reachedDraft{}
+	s := tenantServer(t, d, []string{"web"}, []string{"web"})
+	for _, rt := range coordinatorGated {
+		rec := serve(s, rt.method, rt.path, rt.body, viewerToken)
+		if got := d.take(); len(got) != 1 || got[0] != rt.reaches {
+			t.Errorf("viewer %s %s = %d %q, reached %v", rt.method, rt.path, rec.Code, rec.Body.String(), got)
+		}
+	}
+}
+
 // The read paths keep serving a viewer, and discard and unstage only clear
 // the caller's own draft, so a demoted user can still drop leftovers.
 func TestAuthorGateLeavesReadsAndCleanupOpen(t *testing.T) {
@@ -284,8 +303,8 @@ func TestAuthorGateLeavesReadsAndCleanupOpen(t *testing.T) {
 	}
 }
 
-// A project name never stands for the platform tier: only platformScope sets
-// the bypass, and a namespace labelled with the reserved name resolves nowhere.
+// A project name never stands for the platform tier: no scope field grants
+// anything, and a namespace labelled with the reserved name resolves nowhere.
 func TestPlatformNameIsNotABypass(t *testing.T) {
 	d := &reachedDraft{}
 	s := tenantServer(t, d, []string{"web", "sneaky"}, []string{"web", "sneaky"})
@@ -301,9 +320,8 @@ func TestPlatformNameIsNotABypass(t *testing.T) {
 	sc := scope{id: auth.Identity{Token: viewerToken}, cluster: c, proj: project.ProjectInfo{Name: platformProjectName, Namespaces: []string{"web"}}}
 	r := httptest.NewRequest(http.MethodPost, "/", nil)
 	for name, gate := range map[string]func(http.ResponseWriter) bool{
-		"gate":           func(w http.ResponseWriter) bool { return s.gate(w, r, sc, vmAction(verbUpdate, "web")) },
-		"authorizeDraft": func(w http.ResponseWriter) bool { return s.authorizeDraft(w, r, sc) },
-		"authorizeRepo":  func(w http.ResponseWriter) bool { return s.authorizeRepo(w, r, sc) },
+		"gate":             func(w http.ResponseWriter) bool { return s.gate(w, r, sc, vmAction(verbUpdate, "web")) },
+		"authorizeLibrary": func(w http.ResponseWriter) bool { return s.authorizeLibrary(w, r, sc) },
 	} {
 		if gate(httptest.NewRecorder()) {
 			t.Errorf("%s let a project named %q through on its name", name, platformProjectName)

@@ -210,6 +210,14 @@ func (fc *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if name, one := strings.CutPrefix(r.URL.Path, "/api/v1/namespaces/"); h == nil && r.Method == http.MethodGet && one && !strings.Contains(name, "/") {
+		allow := bearer(r) == adminToken
+		if fc.ssar != nil {
+			allow = fc.ssar(bearer(r), &authzv1.ResourceAttributes{Verb: "get", Resource: "namespaces", Name: name})
+		}
+		if !allow {
+			writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
+			return
+		}
 		for _, ns := range fc.namespaces {
 			if ns.Name == name {
 				ns.TypeMeta = metav1.TypeMeta{Kind: "Namespace", APIVersion: "v1"}
@@ -426,6 +434,7 @@ type planeDraft struct {
 	releaseStaged, releaseResidue []string
 
 	declared map[model.ObjectRef]string // what DeclaredFiles answers
+	staged   bool                       // a call staged something: Get shows a draft
 }
 
 var stagedView = model.DraftView{Base: "main", Count: 1}
@@ -435,6 +444,7 @@ func (d *planeDraft) record(call string, raw []byte) {
 	defer d.mu.Unlock()
 	d.calls = append(d.calls, call)
 	d.raw = raw
+	d.staged = true
 }
 
 func (d *planeDraft) only(t *testing.T, want string) {
@@ -506,7 +516,7 @@ func (d *planeDraft) StageCreateNamespace(_ auth.Identity, commit, join project.
 	return stagedView, nil
 }
 
-func (d *planeDraft) StageCreateProject(_ auth.Identity, commit project.ProjectInfo, spec json.RawMessage, live changeset.LiveNamespaces) (model.DraftView, error) {
+func (d *planeDraft) StageCreateProject(_ auth.Identity, commit project.ProjectInfo, spec json.RawMessage, live changeset.LiveNamespaces, exists changeset.ProjectExists) (model.DraftView, error) {
 	var p struct{ Name, Namespace string }
 	_ = json.Unmarshal(spec, &p)
 	if p.Namespace == "" {
@@ -514,6 +524,9 @@ func (d *planeDraft) StageCreateProject(_ auth.Identity, commit project.ProjectI
 	}
 	if _, err := live(p.Namespace); err != nil {
 		return model.DraftView{}, err
+	}
+	if exists(p.Name) {
+		return model.DraftView{}, fmt.Errorf("%w: that project already exists", model.ErrConflict)
 	}
 	d.record("StageCreateProject "+commit.Name, spec)
 	return stagedView, nil
@@ -548,6 +561,39 @@ func (d *planeDraft) DeclaredFiles(project.ProjectInfo) (map[model.ObjectRef]str
 	return d.declared, nil
 }
 
+// The Needs answer nothing: a test of what the gate asks runs a real
+// coordinator (coordinator_test.go).
+func (d *planeDraft) ProjectNeeds(project.ProjectInfo, json.RawMessage) ([]changeset.Access, error) {
+	return nil, nil
+}
+func (d *planeDraft) NamespaceNeeds(project.ProjectInfo, project.ProjectInfo, json.RawMessage) ([]changeset.Access, error) {
+	return nil, nil
+}
+func (d *planeDraft) AdoptNeeds(project.ProjectInfo, project.ProjectInfo, []string) ([]changeset.Access, error) {
+	return nil, nil
+}
+func (d *planeDraft) ReleaseNeeds(project.ProjectInfo, project.ProjectInfo) ([]changeset.Access, []string, error) {
+	return nil, d.releaseResidue, nil
+}
+func (d *planeDraft) EnableDRSNeeds(project.ProjectInfo, json.RawMessage) ([]changeset.Access, error) {
+	return nil, nil
+}
+func (d *planeDraft) DisableDRSNeeds(project.ProjectInfo) ([]changeset.Access, error) {
+	return nil, nil
+}
+
+func (d *planeDraft) Discard(auth.Identity, project.ProjectInfo) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.staged = false
+	return nil
+}
+
 func (d *planeDraft) Get(auth.Identity, project.ProjectInfo) (model.DraftView, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.staged {
+		return model.DraftView{Base: "main"}, nil
+	}
 	return stagedView, nil
 }

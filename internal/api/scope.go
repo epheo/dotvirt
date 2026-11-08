@@ -253,30 +253,34 @@ var (
 	ssarVMTemplate  = ssarFor(model.KindTemplate)
 )
 
-// platformAuthorResources are the create-SSARs that signal platform-tier
-// authoring - one per family of platform create routes. Holding ANY of them
-// grants access to the caller's OWN platform draft (drafts are per-user: a
-// caller can only view/unstage/propose what their per-route create gates let
-// them stage), so the whole-draft routes OR these rather than demanding one
-// specific verb; the PR merge review remains the apply boundary.
-var platformAuthorResources = []ssarRef{ssarCUDN, ssarDescheduler, ssarVMTemplate}
+// platformActions open the platform tier's routes: each network-family
+// kind's create, update and delete, a namespace's create or claim, the shared
+// library's create and the DRS routes' verbs. Holding any opens the platform
+// lane: the caller's OWN platform draft, its history and its proposals -
+// drafts are per user, every entry passed its own gate, and propose weighs
+// each again.
+func platformActions() []action {
+	var acts []action
+	for _, k := range []model.Kind{model.KindCUDN, model.KindNNCP, model.KindEgressIP, model.KindExtRoute, model.KindANP, model.KindBANP} {
+		for _, verb := range []string{verbCreate, verbUpdate, verbDelete} {
+			acts = append(acts, kindAction(verb, k, ""))
+		}
+	}
+	acts = append(acts, ask(verbCreate, ssarNamespace, ""), claimAction(""), ask(verbCreate, ssarVMTemplate, ""), drsDisableAction())
+	return append(acts, drsSchedulerActions()...)
+}
 
-// canAuthorPlatform reports whether id may author platform-tier changes -
-// any platform authoring signal, TTL-cached per token so the inventory
+// canAuthorPlatform reports whether id may author platform-tier changes - any
+// of platformActions, each a review cached per token, so the inventory
 // broadcast path stays free of a per-subscriber cluster call. False when no
-// platform repo is configured. Used to seed the synthetic platform project
-// into the proposals query so a platform PR surfaces on a cold page load, not
-// only right after proposing. An error means no signal allowed and at least
-// one review failed.
+// platform repo is configured. It also seeds the synthetic platform project
+// into the proposals query, so a platform PR surfaces on a cold page load. An
+// error means none allowed and at least one review failed.
 func (s *Server) canAuthorPlatform(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
 	if s.cfg.PlatformRepo == "" {
 		return false, nil
 	}
-	acts := make([]action, 0, len(platformAuthorResources))
-	for _, r := range platformAuthorResources {
-		acts = append(acts, ask(verbCreate, r, ""))
-	}
-	return s.anyAllowed(ctx, id, c, acts)
+	return s.anyAllowed(ctx, id, c, platformActions())
 }
 
 func namespaceNames(nss []project.Namespace) []string {
@@ -288,14 +292,12 @@ func namespaceNames(nss []project.Namespace) []string {
 }
 
 // scope is the per-request context every draft/VM handler resolves up front: the
-// caller's identity, their cluster client, and the target project.
+// caller's identity, their cluster client, and the target project. No field
+// stands for authority: every gate asks its own questions.
 type scope struct {
 	id      auth.Identity
 	cluster *cluster.Client
 	proj    project.ProjectInfo
-	// platform is set only by platformScopeWith, after its own SSAR gate; a
-	// project name is never trusted to mean the platform tier.
-	platform bool
 }
 
 // resolveProject is the shared preamble for every draft/VM route: identity -> user
@@ -425,16 +427,31 @@ func (s *Server) draftScope(w http.ResponseWriter, r *http.Request) (scope, bool
 		fail(w, invalid(errors.New("project query parameter is required")))
 		return scope{}, false
 	}
-	return s.pickProject(w, r, want)
+	return s.pickDraft(w, r, want)
+}
+
+// pickDraft resolves the project whose draft a route acts on: pickProject,
+// and for the platform tier also any caller holding a draft there, whatever
+// right staged it (a claim on one namespace), so nothing staged is stranded.
+func (s *Server) pickDraft(w http.ResponseWriter, r *http.Request, want string) (scope, bool) {
+	if want != platformProjectName {
+		return s.pickProject(w, r, want)
+	}
+	return s.platformScopeWith(w, r, func(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
+		if ok, err := s.canAuthorPlatform(ctx, id, c); ok || err != nil {
+			return ok, err
+		}
+		v, err := s.draft.Get(id, s.platformProject())
+		return err == nil && v.Count > 0, nil
+	}, "not authorized to author platform changes")
 }
 
 // pickProject resolves a project named by a ?project= query or {project} path
-// segment (the whole-project routes: draft, propose, unstage, history, revert).
-// The platform tier resolves ONLY for callers who can author platform changes
-// (any signal in platformAuthorResources - the routes touch the caller's own
-// draft, staged behind those same per-route gates), so a plain tenant cannot
-// reach the platform repo's draft, history, or revert. Any other name resolves
-// from the caller's visible projects.
+// segment (the whole-project routes: history, revert, and through pickDraft
+// the draft routes). The platform tier resolves ONLY for callers who can
+// author platform changes (platformActions), so a plain tenant cannot reach
+// the platform repo's history or revert. Any other name resolves from the
+// caller's visible projects.
 func (s *Server) pickProject(w http.ResponseWriter, r *http.Request, want string) (scope, bool) {
 	if want == platformProjectName {
 		return s.platformScopeAny(w, r)
@@ -442,9 +459,9 @@ func (s *Server) pickProject(w http.ResponseWriter, r *http.Request, want string
 	return s.resolveProject(w, r, byName(want))
 }
 
-// platformScopeAny resolves the platform tier for the whole-draft routes: any
-// platform authoring signal suffices (see platformAuthorResources). The
-// per-kind create routes keep platformScope's exact-resource gate.
+// platformScopeAny resolves the platform tier for the whole-project routes:
+// any of platformActions suffices. The per-kind create routes keep their own
+// gate.
 func (s *Server) platformScopeAny(w http.ResponseWriter, r *http.Request) (scope, bool) {
 	return s.platformScopeWith(w, r, s.canAuthorPlatform, "not authorized to author platform changes")
 }
@@ -467,7 +484,8 @@ func (s *Server) platformScope(w http.ResponseWriter, r *http.Request, ref ssarR
 
 // platformScopeGated resolves the platform tier for a route that gates its
 // own verb or claim once it knows what it acts on (a namespace that exists or
-// not); the coordinator then checks each object the change writes.
+// not); the coordinator then checks each object the change writes. It grants
+// nothing by itself.
 func (s *Server) platformScopeGated(w http.ResponseWriter, r *http.Request) (scope, bool) {
 	return s.platformScopeWith(w, r, func(context.Context, auth.Identity, *cluster.Client) (bool, error) {
 		return true, nil
@@ -499,5 +517,5 @@ func (s *Server) platformScopeWith(w http.ResponseWriter, r *http.Request, autho
 		fail(w, fmt.Errorf("%w: %s", model.ErrForbidden, deny))
 		return scope{}, false
 	}
-	return scope{id: id, cluster: c, proj: s.platformProject(), platform: true}, true
+	return scope{id: id, cluster: c, proj: s.platformProject()}, true
 }

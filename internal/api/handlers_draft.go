@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -105,7 +104,7 @@ func (s *Server) handleUnstage(w http.ResponseWriter, r *http.Request) {
 	var sc scope
 	var ok bool
 	if p := r.URL.Query().Get("project"); p != "" {
-		sc, ok = s.pickProject(w, r, p) // platform tier is gated; tenants resolve by name
+		sc, ok = s.pickDraft(w, r, p) // platform tier is gated; tenants resolve by name
 	} else {
 		sc, ok = s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
 	}
@@ -119,9 +118,12 @@ func (s *Server) handleUnstage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handlePropose opens a PR from the caller's draft of a project they see. The
+// coordinator weighs every entry again under the caller's token, so no
+// stand-in right is asked here.
 func (s *Server) handlePropose(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.draftScope(w, r)
-	if !ok || !s.authorizeDraft(w, r, sc) {
+	if !ok {
 		return
 	}
 	req, ok := decode[model.ProposeRequest](w, r)
@@ -156,11 +158,11 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 // handleAdoptNamespace brings a whole namespace under GitOps in one draft: everything
 // it runs that git does not describe, not only its VMs, so the namespace does not end
 // up half declared. The capture runs under the caller's own token, so a user adopts
-// exactly what their RBAC lets them read, of the kinds it lets them create. One
-// draft, proposed as one PR.
+// exactly what their RBAC lets them read, of the objects the gate would let
+// them bring under git (adoptableByRight). One draft, proposed as one PR.
 func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
 	sc, ns, _, ok := s.vmScope(w, r)
-	if !ok || !s.gate(w, r, sc, vmAction(verbUpdate, ns)) {
+	if !ok {
 		return
 	}
 	objs, unreadable, ok := s.captureAdoptable(w, r, sc, ns)
@@ -238,22 +240,14 @@ func withUnreadable(v model.DraftView, where string, unreadable, denied []string
 
 func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 	// Resync runs the reconcile with dotvirt's SA, gated on the caller's OWN
-	// authority over the VM (not just namespace read): they may trigger a sync only
-	// if they could update the VM themselves - otherwise read access would escalate
-	// into an SA-privileged Argo sync. The check runs inside Resync, beside the
-	// escalation, so no other caller can reach it unchecked.
+	// authority over what the sync applies (not just namespace read), weighed
+	// inside Resync beside the escalation, so no other caller can reach it
+	// unchecked.
 	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	mayResync := func(ctx context.Context, namespace, _ string) (bool, error) {
-		_, ok, err := s.allowed(ctx, sc.id, sc.cluster, vmAction(verbUpdate, namespace))
-		if err != nil {
-			return false, s.reviewFailed(ctx, sc.id, err)
-		}
-		return ok, nil
-	}
-	result, err := s.draft.Resync(r.Context(), mayResync, sc.id.Username, ns, name)
+	result, err := s.draft.Resync(r.Context(), sc.id, sc.proj, ns, name)
 	s.recordTask("Resync", ns, name, sc.id.Username, err == nil)
 	respond(w, result, err)
 }

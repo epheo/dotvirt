@@ -352,6 +352,16 @@ func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinPro
 		return model.DraftView{}, err
 	}
 	spec.Live = ln
+	entries, err := c.namespaceEntries(commitProj, joinProj, spec)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	return c.stage(id, commitProj, entries...)
+}
+
+// namespaceEntries is what joining namespace spec to joinProj stages into
+// commitProj: its Namespace (and primary VM Network) and its grants.
+func (c *Coordinator) namespaceEntries(commitProj, joinProj project.ProjectInfo, spec netgen.NamespaceSpec) ([]draft.Entry, error) {
 	entry, err := c.renderedEntry(commitProj, func() (draft.Entry, error) {
 		if joinProj.Repo == "" {
 			return draft.Entry{}, fmt.Errorf("the joining project has no repo")
@@ -374,23 +384,23 @@ func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinPro
 		}, err
 	})
 	if err != nil {
-		return model.DraftView{}, err
+		return nil, err
 	}
 	grants, err := c.grantSource(commitProj)
 	if err != nil {
-		return model.DraftView{}, err
+		return nil, err
 	}
 	// The joining project's people come with it: its sync account never
 	// holds a namespace they do not.
 	inherit, err := grants.inherited(joinProj)
 	if err != nil {
-		return model.DraftView{}, err
+		return nil, err
 	}
 	grant, err := grants.entries(spec.Name, joinProj.Name, nil, inherit)
 	if err != nil {
-		return model.DraftView{}, err
+		return nil, err
 	}
-	return c.stage(id, commitProj, append([]draft.Entry{entry}, grant...)...)
+	return append([]draft.Entry{entry}, grant...), nil
 }
 
 // StageDelete records the removal of an existing object (a VM when resource is

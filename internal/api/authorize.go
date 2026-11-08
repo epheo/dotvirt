@@ -20,7 +20,6 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/drs"
 	"github.com/epheo/dotvirt/internal/model"
-	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
@@ -190,12 +189,12 @@ func (s *Server) capableAll(ctx context.Context, id auth.Identity, c *cluster.Cl
 
 var (
 	ssarVM           = ssarFor(model.KindVM)
-	ssarRoleBindings = ssarFor(model.KindRB)
 	ssarDataVolumes  = ssarRef{"cdi.kubevirt.io", "datavolumes"}
 	ssarSnapshots    = ssarRef{"snapshot.kubevirt.io", "virtualmachinesnapshots"}
 	ssarRestores     = ssarRef{"snapshot.kubevirt.io", "virtualmachinerestores"}
 	ssarClones       = ssarRef{"clone.kubevirt.io", "virtualmachineclones"}
 	ssarOAuthClients = ssarRef{"oauth.openshift.io", "oauthclients"}
+	ssarUploadTokens = ssarRef{"upload.cdi.kubevirt.io", "uploadtokenrequests"}
 )
 
 // kubevirtSub is verb on a KubeVirt subresource in ns: virt-api authorizes
@@ -228,121 +227,56 @@ var (
 	snapshotRestoreAction = func(ns string) action { return ask(verbCreate, ssarRestores, ns) }
 	snapshotDeleteAction  = func(ns string) action { return ask(verbDelete, ssarSnapshots, ns) }
 	cloneAction           = func(ns string) action { return ask(verbCreate, ssarClones, ns) }
-	dataVolumeAction      = func(ns string) action { return ask(verbCreate, ssarDataVolumes, ns) }
+	dataVolumeAction      = func(ns string) action {
+		return action{refQ(verbCreate, ssarDataVolumes, ns), refQ(verbCreate, ssarUploadTokens, ns)}
+	}
 )
 
 // claimAction is relabelling the existing namespace ns: what joining it to a
-// project asks of the route, and what the coordinator asks of its Namespace
-// object, which the snapshot (or a dry run) finds running. A new namespace
-// asks nothing here: the coordinator weighs creating it.
+// project asks of the route. ns "" asks it of every namespace.
 func claimAction(ns string) action {
 	return action{{Verb: verbUpdate, Group: ssarNamespace.group, Resource: ssarNamespace.resource, Name: ns}}
 }
 
-// relabelAction is claimAction for every namespace in nss.
-func relabelAction(nss []string) action {
-	act := make(action, 0, len(nss))
-	for _, ns := range nss {
-		act = append(act, claimAction(ns)...)
-	}
-	return act
+// readNamespace is reading namespace ns under the caller's token, which every
+// tenancy route does first to learn what it already carries: get, asked of
+// the one name (ns "" asks it of every namespace, as a name no namespace
+// holds yet).
+func readNamespace(ns string) action {
+	return action{{Verb: verbGet, Group: ssarNamespace.group, Resource: ssarNamespace.resource, Name: ns}}
 }
 
-// releaseAction is releasing a project over nss: the coordinator weighs the
-// update of each Namespace the platform repo declares, the apiserver the
-// label patch of each other one.
-func (s *Server) releaseAction(nss []string) action {
-	files, err := s.reader.DeclaredFiles(s.platformProject())
-	act := make(action, 0, len(nss))
-	for _, ns := range nss {
-		verb := verbPatch
-		if _, declared := files[model.ObjectRef{Kind: model.KindNS.Kind, Name: ns}]; err == nil && declared {
-			verb = verbUpdate
-		}
-		act = append(act, question{Verb: verb, Group: ssarNamespace.group, Resource: ssarNamespace.resource, Name: ns})
-	}
-	return act
+// drsSchedulerActions open the enable route: creating the KubeDescheduler, or
+// updating it when DRS is reconfigured.
+func drsSchedulerActions() []action {
+	q := refQ(verbCreate, ssarDescheduler, drs.Namespace)
+	u := q
+	u.Verb, u.Name = verbUpdate, drs.SchedulerName
+	return []action{{q}, {u}}
 }
 
-// newNamespaceAction is staging a namespace that does not exist yet, as the
-// coordinator weighs it: creating it, its owners' RoleBinding, and its
-// primary VM Network. Asked of no namespace in particular: a dry run of one
-// that does not exist reaches no further than these reviews, and no
-// RoleBinding exists in it, so the cluster-wide verdict is each new one's.
-func newNamespaceAction(owners, vmNetwork bool) action {
-	act := ask(verbCreate, ssarNamespace, "")
-	if owners {
-		act = append(act,
-			refQ(verbCreate, ssarRoleBindings, ""),
-			question{Verb: verbBind, Group: ssarRoleBindings.group, Resource: "clusterroles", Name: netgen.OwnerRole})
-	}
-	if vmNetwork {
-		act = append(act, kindAction(verbCreate, model.KindUDN, "")...)
-	}
-	return act
-}
-
-// grantAdminAction is the owners' RoleBinding in each of nss as the
-// coordinator stages it, weighed by the apiserver's dry run with its
-// escalation rule. The caller stands in for the owners: the rule weighs the
-// role a binding grants, never whom it grants it to. One that does not
-// render is the empty action, denied.
-func grantAdminAction(nss []string, project, caller string) action {
-	act := make(action, 0, len(nss))
-	for _, ns := range nss {
-		_, raw, err := netgen.RoleBindingManifest(netgen.RoleBindingSpec{Namespace: ns, Project: project, Owners: []string{caller}})
-		if err != nil {
-			return nil
-		}
-		q, err := objectQuestion(raw)
-		if err != nil {
-			return nil
-		}
-		act = append(act, q)
-	}
-	return act
-}
-
-// drsCreateAction is the enable route's gate: creating the KubeDescheduler.
-func drsCreateAction() action {
-	return action{refQ(verbCreate, ssarDescheduler, drs.Namespace)}
-}
-
-// drsEnableAction is enabling DRS: the route's gate and each object of the
-// file set as the coordinator weighs it - the operator's namespace,
-// OperatorGroup and Subscription, the KubeDescheduler, and with psi the worker
-// MachineConfig that reboots the pool. A set that does not render is the
-// empty action, denied.
-func drsEnableAction(psi bool) action {
-	files, err := drs.Manifests(drs.Spec{Mode: drs.ModePredictive, InstallPSI: psi})
-	if err != nil {
-		return nil
-	}
-	act := drsCreateAction()
-	for _, f := range files {
-		q, err := objectQuestion(f.Content)
-		if err != nil {
-			return nil
-		}
-		act = append(act, q)
-	}
-	return act
-}
-
-// drsDisableAction removes the KubeDescheduler, the disable route's gate and
-// the one object the coordinator then weighs; the operator install stays.
+// drsDisableAction removes the KubeDescheduler: the disable route's gate.
 func drsDisableAction() action {
 	q := refQ(verbDelete, ssarDescheduler, drs.Namespace)
 	q.Name = drs.SchedulerName
 	return action{q}
 }
 
-// oauthClientAction is the server-side apply of OAuthClient name: a patch,
-// which creates it when absent.
-func oauthClientAction(name string) action {
+// oauthClientCap is the server-side apply of OAuthClient name as the
+// apiserver weighs it: its patch, and its create unless it exists, the apply
+// then only patching - asked as the gate asks a create the caller may not
+// make (weighCreate).
+func (s *Server) oauthClientCap(ctx context.Context, id auth.Identity, c *cluster.Client, name string) bool {
 	patch := refQ(verbPatch, ssarOAuthClients, "")
 	patch.Name = name
-	return action{refQ(verbCreate, ssarOAuthClients, ""), patch}
+	if !s.capable(ctx, id, c, action{patch}) {
+		return false
+	}
+	if s.capable(ctx, id, c, ask(verbCreate, ssarOAuthClients, "")) {
+		return true
+	}
+	found, err := s.exists(ctx, patch, "v1")
+	return err == nil && found
 }
 
 // nodeAction is a patch of node: cordon, maintenance, and the evacuation the
@@ -482,8 +416,7 @@ const authorizeTimeout = 15 * time.Second
 // Authorize implements changeset.Authorizer: every access a staged, proposed
 // or reverted change makes Argo perform, placed and weighed as every route
 // gate and capability field weighs its own (placed, allows), under id's own
-// token, at most authConcurrency at once. A create the change pairs with a
-// delete is a replace and stays a create.
+// token, at most authConcurrency at once.
 func (s *Server) Authorize(id auth.Identity, need []changeset.Access) error {
 	if s.clusterF == nil {
 		return unavailable(errors.New("cluster not configured"))
@@ -494,6 +427,24 @@ func (s *Server) Authorize(id auth.Identity, need []changeset.Access) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), authorizeTimeout)
 	defer cancel()
+	denied, err := s.weighAll(ctx, id, c, need)
+	switch {
+	case errors.Is(err, model.ErrInvalid), errors.Is(err, model.ErrForbidden):
+		return err
+	case err != nil:
+		return s.reviewFailed(ctx, id, err)
+	case len(denied) > 0:
+		return fmt.Errorf("%w: you may not %s, which this change makes the cluster do once merged",
+			model.ErrForbidden, strings.Join(denied, ", or "))
+	}
+	return nil
+}
+
+// weighAll weighs every access of need, each distinct one once, at most
+// authConcurrency at once: the ones denied, or the first weighing that
+// failed. A create the change pairs with a delete is a replace and stays a
+// create.
+func (s *Server) weighAll(ctx context.Context, id auth.Identity, c *cluster.Client, need []changeset.Access) ([]string, error) {
 	identity := func(a changeset.Access) changeset.Access {
 		return changeset.Access{Group: a.Group, Resource: a.Resource, Namespace: a.Namespace, Name: a.Name}
 	}
@@ -526,10 +477,8 @@ func (s *Server) Authorize(id auth.Identity, need []changeset.Access) error {
 	var denied []string
 	for i, a := range asks {
 		switch {
-		case errors.Is(errs[i], model.ErrInvalid), errors.Is(errs[i], model.ErrForbidden):
-			return errs[i]
 		case errs[i] != nil:
-			return s.reviewFailed(ctx, id, errs[i])
+			return nil, errs[i]
 		case !oks[i]:
 			if a.Verb == verbDryRun {
 				a.Verb = "create or update"
@@ -537,11 +486,17 @@ func (s *Server) Authorize(id auth.Identity, need []changeset.Access) error {
 			denied = append(denied, a.String())
 		}
 	}
-	if len(denied) > 0 {
-		return fmt.Errorf("%w: you may not %s, which this change makes the cluster do once merged",
-			model.ErrForbidden, strings.Join(denied, ", or "))
+	return denied, nil
+}
+
+// needsAllowed is a change's accesses as a capability: every one allowed,
+// as the coordinator's gate weighs them. A failure reads as no.
+func (s *Server) needsAllowed(ctx context.Context, id auth.Identity, c *cluster.Client, need []changeset.Access, err error) bool {
+	if err != nil {
+		return false
 	}
-	return nil
+	denied, err := s.weighAll(ctx, id, c, need)
+	return err == nil && len(denied) == 0
 }
 
 // verbDryRun marks a create the snapshot cannot place: asked by a dry run.
@@ -747,23 +702,17 @@ func apiVersionOf(raw string) string {
 	return v
 }
 
-// authorizeDraft gates the routes that open a PR from the caller's draft or
-// write a project library: authoring rights in any of the project's
-// namespaces. Drafts are per user and every entry passed its own per-change
-// gate, so a mixed-role caller may still propose what they could stage.
-// Discard and unstage stay ungated: they only clear the caller's own local
-// draft, so a demoted user can drop leftovers.
-func (s *Server) authorizeDraft(w http.ResponseWriter, r *http.Request, sc scope) bool {
-	if sc.platform {
-		return true
-	}
+// authorizeLibrary gates a write to a project's template library, which no
+// gate weighs: blueprints Argo never applies, so the project's authoring
+// right (projectAuthor) stands for it.
+func (s *Server) authorizeLibrary(w http.ResponseWriter, r *http.Request, sc scope) bool {
 	ok, err := s.projectAuthor(r.Context(), sc.id, sc.cluster, sc.proj.Namespaces)
 	if err != nil {
 		fail(w, s.reviewFailed(r.Context(), sc.id, err))
 		return false
 	}
 	if !ok {
-		fail(w, fmt.Errorf("%w: you may not update virtualmachines in any namespace of %s; proposing changes needs edit rights",
+		fail(w, fmt.Errorf("%w: you may not update virtualmachines in any namespace of %s; writing its library needs edit rights",
 			model.ErrForbidden, sc.proj.Name))
 		return false
 	}
@@ -771,7 +720,7 @@ func (s *Server) authorizeDraft(w http.ResponseWriter, r *http.Request, sc scope
 }
 
 // projectAuthor is authoring rights in any of nss: the gate on a project's
-// own template library and on its proposals.
+// own template library.
 func (s *Server) projectAuthor(ctx context.Context, id auth.Identity, c *cluster.Client, nss []string) (bool, error) {
 	acts := make([]action, 0, len(nss))
 	for _, ns := range nss {
@@ -780,22 +729,14 @@ func (s *Server) projectAuthor(ctx context.Context, id auth.Identity, c *cluster
 	return s.anyAllowed(ctx, id, c, acts)
 }
 
-// authorizeRepo gates a revert before the coordinator weighs it: authoring
-// rights in every namespace of a tenant project, the ones hidden from the
-// caller included, since a commit may touch any of them. The coordinator then
-// checks each object the revert changes with its exact verb, which is all the
-// platform tier's revert passes: its repo has no namespaces of its own.
+// authorizeRepo gates a revert before the coordinator weighs it: a commit may
+// touch any namespace of a tenant project, so the caller must see every one -
+// one they cannot read is refused without being named. The coordinator then
+// checks each object the revert changes with its exact verb.
 func (s *Server) authorizeRepo(w http.ResponseWriter, r *http.Request, sc scope) bool {
-	// A namespace the caller cannot read is one they cannot author; it is
-	// refused without being named.
 	if full, ok := s.projectByName(sc.proj.Name); ok && len(full.Namespaces) > len(sc.proj.Namespaces) {
-		fail(w, fmt.Errorf("%w: reverting needs edit rights in every namespace of %s", model.ErrForbidden, sc.proj.Name))
+		fail(w, fmt.Errorf("%w: reverting needs every namespace of %s in your view", model.ErrForbidden, sc.proj.Name))
 		return false
-	}
-	for _, ns := range sc.proj.Namespaces {
-		if !s.gate(w, r, sc, vmAction(verbUpdate, ns)) {
-			return false
-		}
 	}
 	return true
 }

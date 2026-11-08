@@ -6,8 +6,9 @@
 /**
  * Capabilities is GET /api/capabilities: the caller's verdict on each action
  * dotvirt gates, each asking every question its route, the coordinator's gate
- * on what it stages, or the apiserver on an imperative call asks of it, so the
- * UI offers only what the server allows. A review that failed reads as false:
+ * on what it stages, or the apiserver on an imperative call asks of it,
+ * weighed as the gate weighs them, so the UI offers only what the server
+ * allows. A review that failed reads as false:
  * unknown never offers an action. Without ?namespace= it answers Cluster; with
  * it, Namespace.
  */
@@ -29,9 +30,8 @@ export interface ObjectCaps {
  */
 export interface ClusterCaps {
   /**
-   * Platform is the platform draft lane: view, propose and revert the
-   * caller's own platform draft, and adopt cluster-scoped objects (each
-   * captured kind then needs its own create right).
+   * Platform is any platform-tier field below (OAuthClient aside): the
+   * platform lane, the caller's own platform draft and its proposals.
    */
   platform: boolean;
   /**
@@ -98,6 +98,11 @@ export interface NamespaceCaps {
    * project segments (UserDefinedNetwork).
    */
   network: ObjectCaps;
+  /**
+   * NetworkAttachment is a NetworkAttachmentDefinition git still declares
+   * under the network routes (update, delete): no form creates one.
+   */
+  networkAttachment: ObjectCaps;
   networkPolicy: ObjectCaps;
   egressFirewall: ObjectCaps;
   project: ProjectCaps;
@@ -113,8 +118,14 @@ export interface ProjectCaps {
    */
   templateEdit: boolean;
   /**
+   * NewNamespace joins a new namespace to the project (with a VM Network,
+   * ClusterCaps.VMNetwork too).
+   */
+  newNamespace: boolean;
+  /**
    * Adopt attaches a repo to the repoless project; GrantAdmin names owners
-   * while doing so. Release dissolves it.
+   * while doing so. Release dissolves it. All false for a project with a
+   * repo.
    */
   adopt: boolean;
   grantAdmin: boolean;

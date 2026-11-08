@@ -15,21 +15,20 @@ import (
 	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
+	"github.com/epheo/dotvirt/internal/project"
 )
 
 // claimNamespaces binds the namespace capture to the caller's token and gates
 // the claim on each namespace there, where its existence is known: one that
 // already exists is adopted as the caller can read it, never regenerated, and
 // needs the right to update it (claimAction), as the coordinator weighs its
-// Namespace object. One the SA snapshot holds for another project - the
-// snapshot the coordinator places namespaces by - is refused: joining would
-// take it from that project, whose Application then fails on everything it
-// declares there.
+// Namespace object. Only then is one the SA snapshot holds for another
+// project - the snapshot the coordinator places namespaces by - refused:
+// joining would take it from that project, whose Application then fails on
+// everything it declares there. That project is named only to a caller who
+// sees it.
 func (s *Server) claimNamespaces(ctx context.Context, sc scope, project string) changeset.LiveNamespaces {
 	return func(name string) (*netgen.LiveNamespace, error) {
-		if held := s.state.NamespaceLabels(name)[s.cfg.ProjectLabel]; held != "" && held != project {
-			return nil, fmt.Errorf("%w: namespace %s belongs to project %s; release it there first", model.ErrConflict, name, held)
-		}
 		live, err := sc.cluster.LiveNamespace(ctx, name)
 		if err != nil || live == nil {
 			return nil, err
@@ -37,8 +36,41 @@ func (s *Server) claimNamespaces(ctx context.Context, sc scope, project string) 
 		if err := s.require(ctx, sc.id, sc.cluster, claimAction(name)); err != nil {
 			return nil, err
 		}
-		return live, nil
+		held := s.state.NamespaceLabels(name)[s.cfg.ProjectLabel]
+		if held == "" || held == project {
+			return live, nil
+		}
+		if projects, err := s.projectsFor(ctx, sc.id, sc.cluster); err == nil {
+			if _, seen := findProject(projects, held); seen {
+				return nil, fmt.Errorf("%w: namespace %s belongs to project %s; release it there first", model.ErrConflict, name, held)
+			}
+		}
+		return nil, fmt.Errorf("%w: namespace %s belongs to another project", model.ErrConflict, name)
 	}
+}
+
+// tenancyTarget resolves the project an adopt, release or sync-access route
+// names: from every project when the caller may relabel any namespace
+// (claimAction("")), else from the projects they see. ok=false means the
+// response is written, the same 404 for a project hidden as for none.
+func (s *Server) tenancyTarget(w http.ResponseWriter, r *http.Request, sc scope) (project.ProjectInfo, bool) {
+	name := r.PathValue("project")
+	var target project.ProjectInfo
+	found := false
+	if s.capable(r.Context(), sc.id, sc.cluster, claimAction("")) {
+		target, found = s.projectByName(name)
+	} else if projects, err := s.projectsFor(r.Context(), sc.id, sc.cluster); err != nil {
+		fail(w, err)
+		return project.ProjectInfo{}, false
+	} else if visible, ok := findProject(projects, name); ok {
+		// The whole project, as the claim and the gate weigh every namespace.
+		target, found = s.projectByName(visible.Name)
+	}
+	if !found {
+		fail(w, fmt.Errorf("%w: project %q", model.ErrNotFound, name))
+		return project.ProjectInfo{}, false
+	}
+	return target, true
 }
 
 // handleCreateNamespace stages a new namespace (+ optional primary "VM Network").
@@ -93,21 +125,22 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The cluster is dotvirt's registry, so an existing project is what makes this a
-	// re-manage rather than a create. Checked here, before the coordinator touches the
-	// forge, so a refusal never leaves a repo behind.
-	if _, exists := s.projectByName(p.Name); exists {
-		fail(w, fmt.Errorf("%w: that project already exists; adopt it instead of creating it", model.ErrConflict))
-		return
+	// re-manage rather than a create. The coordinator asks once its gate passed and
+	// before it touches the forge: a refusal never leaves a repo behind, and never
+	// tells a caller without the rights which projects exist.
+	exists := func(name string) bool {
+		_, ok := s.projectByName(name)
+		return ok
 	}
-	view, err := s.draft.StageCreateProject(plat.id, plat.proj, raw, s.claimNamespaces(r.Context(), plat, p.Name))
+	view, err := s.draft.StageCreateProject(plat.id, plat.proj, raw, s.claimNamespaces(r.Context(), plat, p.Name), exists)
 	respond(w, view, err)
 }
 
 // handleAdoptProject wires a repo to an existing labeled-but-repoless project - the
 // "Attach repo" action on the inventory's no-repo dead-end. It lands a Namespace +
 // repo annotation per namespace in the platform tier, each gated on the claim on
-// that namespace; the target tenant is resolved from the SA snapshot and must
-// currently be repoless.
+// that namespace; the target tenant (tenancyTarget) must currently be
+// repoless.
 func (s *Server) handleAdoptProject(w http.ResponseWriter, r *http.Request) {
 	body, ok := decodeOptional[struct {
 		Owners []string `json:"owners,omitempty"`
@@ -119,9 +152,8 @@ func (s *Server) handleAdoptProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	target, ok := s.projectByName(r.PathValue("project"))
+	target, ok := s.tenancyTarget(w, r, plat)
 	if !ok {
-		fail(w, fmt.Errorf("%w: project %q", model.ErrNotFound, r.PathValue("project")))
 		return
 	}
 	view, err := s.draft.AdoptProject(plat.id, plat.proj, target, body.Owners, s.claimNamespaces(r.Context(), plat, target.Name))
@@ -138,9 +170,8 @@ func (s *Server) handleProjectSyncAccess(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	target, ok := s.projectByName(r.PathValue("project"))
+	target, ok := s.tenancyTarget(w, r, plat)
 	if !ok {
-		fail(w, fmt.Errorf("%w: project %q", model.ErrNotFound, r.PathValue("project")))
 		return
 	}
 	view, err := s.draft.StageSyncAccess(plat.id, plat.proj, target)
@@ -158,9 +189,8 @@ func (s *Server) handleReleaseProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	target, ok := s.projectByName(r.PathValue("project"))
+	target, ok := s.tenancyTarget(w, r, plat)
 	if !ok {
-		fail(w, fmt.Errorf("%w: project %q", model.ErrNotFound, r.PathValue("project")))
 		return
 	}
 	if target.Repo != "" {

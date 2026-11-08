@@ -63,35 +63,18 @@ type ProjectSpec struct {
 // RoleBinding granting them namespace-admin are staged into the PLATFORM repo
 // (cluster-tenancy is admin-tier; a tenant repo couldn't carry either). commitProj
 // is the platform project.
-func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (model.DraftView, error) {
-	if err := requireRepo(commitProj); err != nil {
+func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces, exists ProjectExists) (model.DraftView, error) {
+	spec, ns, err := parseProject(commitProj, rawSpec)
+	if err != nil {
 		return model.DraftView{}, err
 	}
-	var spec ProjectSpec
-	if err := json.Unmarshal(rawSpec, &spec); err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: invalid project spec: %v", model.ErrInvalid, err)
-	}
-	if spec.Name == "" {
-		return model.DraftView{}, fmt.Errorf("%w: a project name is required", model.ErrInvalid)
-	}
-	ns := spec.Namespace
-	if ns == "" {
-		ns = spec.Name
-	}
-	// The name becomes a repo path segment, a Namespace name, a label value, and a
-	// staged manifest path - so it must be a strict DNS-1123 label. This rejects
-	// path-traversal ("../x"), separators ("a/b"), and anything k8s would refuse.
-	if err := tenantName(spec.Name); err != nil {
-		return model.DraftView{}, err
-	}
-	if err := validate.RequireDNS1123("namespace name", ns); err != nil {
-		return model.DraftView{}, err
-	}
-	// Whether the tenant already exists is a CLUSTER fact, checked by the caller before
-	// this runs. Refusing here on a pre-existing repo instead would burn the name: the
-	// repo is created first, so a run that failed or was discarded after that point
-	// could never be retried. ensureTenantRepo is idempotent, so a retry reuses it.
-	// Read the namespace before the repo exists: a refusal must not leave one behind.
+	// Whether the tenant already exists is a CLUSTER fact (exists), asked once
+	// the gate passed: asked first, it would tell anyone which projects exist.
+	// Refusing here on a pre-existing repo instead would burn the name: the
+	// repo is created first, so a run that failed or was discarded after that
+	// point could never be retried. ensureTenantRepo is idempotent, so a retry
+	// reuses it. Read the namespace before the repo exists: a refusal must not
+	// leave one behind.
 	ln, err := live.lookup(ns)
 	if err != nil {
 		return model.DraftView{}, err
@@ -99,20 +82,16 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	if err := primaryNetworkOnExisting(ns, ln, spec.VMNetwork); err != nil {
 		return model.DraftView{}, err
 	}
-	repoURL, err := tenantRepoURL(commitProj.Repo, spec.Name)
-	if err != nil {
-		return model.DraftView{}, err
-	}
-	// The first namespace joins the new project, with its primary VM Network
-	// when the form chose one.
-	first := []netgen.NamespaceSpec{{Name: ns, Project: spec.Name, Repo: forge.PathRef(repoURL), VMNetwork: spec.VMNetwork, Live: ln}}
-	entries, err := c.projectAdoption(commitProj, first, spec.Owners)
+	entries, repoURL, err := c.projectEntries(commitProj, spec, ns, ln)
 	if err != nil {
 		return model.DraftView{}, err
 	}
 	// Gated before the repo exists: a refusal must not leave one behind.
 	if err := c.gate(id, commitProj, entries); err != nil {
 		return model.DraftView{}, err
+	}
+	if exists != nil && exists(spec.Name) {
+		return model.DraftView{}, fmt.Errorf("%w: that project already exists; adopt it instead of creating it", model.ErrConflict)
 	}
 	created, err := c.ensureTenantRepo(repoURL)
 	if err != nil {
@@ -130,6 +109,52 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 			fmt.Sprintf("Reusing the existing repo %s: whatever it currently holds deploys once this project lands.", repoURL))
 	}
 	return view, nil
+}
+
+// ProjectExists reports whether a project by that name exists, the cluster
+// being dotvirt's registry. nil reads none.
+type ProjectExists func(name string) bool
+
+// parseProject decodes and validates a new project's spec, with the name of
+// its first namespace.
+func parseProject(commitProj project.ProjectInfo, rawSpec json.RawMessage) (ProjectSpec, string, error) {
+	if err := requireRepo(commitProj); err != nil {
+		return ProjectSpec{}, "", err
+	}
+	var spec ProjectSpec
+	if err := json.Unmarshal(rawSpec, &spec); err != nil {
+		return ProjectSpec{}, "", fmt.Errorf("%w: invalid project spec: %v", model.ErrInvalid, err)
+	}
+	if spec.Name == "" {
+		return ProjectSpec{}, "", fmt.Errorf("%w: a project name is required", model.ErrInvalid)
+	}
+	ns := spec.Namespace
+	if ns == "" {
+		ns = spec.Name
+	}
+	// The name becomes a repo path segment, a Namespace name, a label value, and a
+	// staged manifest path - so it must be a strict DNS-1123 label. This rejects
+	// path-traversal ("../x"), separators ("a/b"), and anything k8s would refuse.
+	if err := tenantName(spec.Name); err != nil {
+		return ProjectSpec{}, "", err
+	}
+	if err := validate.RequireDNS1123("namespace name", ns); err != nil {
+		return ProjectSpec{}, "", err
+	}
+	return spec, ns, nil
+}
+
+// projectEntries is what creating project spec stages into commitProj: its
+// first namespace ns, carrying ln when it exists, with its primary VM Network
+// when the form chose one, and its grants. repoURL is the project's repo.
+func (c *Coordinator) projectEntries(commitProj project.ProjectInfo, spec ProjectSpec, ns string, ln *netgen.LiveNamespace) ([]draft.Entry, string, error) {
+	repoURL, err := tenantRepoURL(commitProj.Repo, spec.Name)
+	if err != nil {
+		return nil, "", err
+	}
+	first := []netgen.NamespaceSpec{{Name: ns, Project: spec.Name, Repo: forge.PathRef(repoURL), VMNetwork: spec.VMNetwork, Live: ln}}
+	entries, err := c.projectAdoption(commitProj, first, spec.Owners)
+	return entries, repoURL, err
 }
 
 // AdoptProject wires a repo to an EXISTING labeled-but-repoless project - the
@@ -252,15 +277,30 @@ func (c *Coordinator) StageSyncAccess(id auth.Identity, commitProj, target proje
 // refuses the whole release rather than pruning tenant networking. The
 // project's sync account leaves its grants too (grantSource.released).
 func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target project.ProjectInfo) (staged, residue []string, err error) {
-	read, err := c.read(commitProj)
+	entries, staged, residue, err := c.releaseEntries(commitProj, target)
 	if err != nil {
 		return nil, nil, err
+	}
+	if err := c.gate(id, commitProj, entries); err != nil {
+		return nil, nil, err
+	}
+	if err := c.store.Stage(id.Username, commitProj.Name, entries...); err != nil {
+		return nil, nil, err
+	}
+	return staged, residue, nil
+}
+
+// releaseEntries is what releasing target stages into commitProj, the names
+// it stages, and the namespaces the platform repo does not declare.
+func (c *Coordinator) releaseEntries(commitProj, target project.ProjectInfo) (entries []draft.Entry, staged, residue []string, err error) {
+	read, err := c.read(commitProj)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	idx, err := indexDeclared(read, c.baseBranch)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	var entries []draft.Entry
 	for _, ns := range target.Namespaces {
 		ref := model.ObjectRef{Kind: model.KindNS.Kind, Name: ns}
 		path, ok := idx.Files[ref]
@@ -269,17 +309,17 @@ func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target proje
 			continue
 		}
 		if _, serr := soleDeclarer(idx, []model.ObjectRef{ref}); serr != nil {
-			return nil, nil, fmt.Errorf(
+			return nil, nil, nil, fmt.Errorf(
 				"%w: %s declares more than the namespace %s (e.g. a VM Network); rewriting it would prune those - release this project by editing the platform repo",
 				model.ErrConflict, path, ns)
 		}
 		content, rerr := read.FileOnBranch(c.baseBranch, path)
 		if rerr != nil {
-			return nil, nil, rerr
+			return nil, nil, nil, rerr
 		}
 		released, gerr := netgen.ReleasedNamespaceManifest(content)
 		if gerr != nil {
-			return nil, nil, invalid(gerr)
+			return nil, nil, nil, invalid(gerr)
 		}
 		e := draft.Entry{
 			Kind:       draft.KindCreate,
@@ -295,23 +335,17 @@ func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target proje
 	}
 	grants, err := c.grantSource(commitProj)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	revoked, err := grants.released(target)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	for _, e := range revoked {
 		entries = append(entries, e)
 		staged = append(staged, e.Name)
 	}
-	if err := c.gate(id, commitProj, entries); err != nil {
-		return nil, nil, err
-	}
-	if err := c.store.Stage(id.Username, commitProj.Name, entries...); err != nil {
-		return nil, nil, err
-	}
-	return staged, residue, nil
+	return entries, staged, residue, nil
 }
 
 // tenantRepoURL is the tenant repo of project name: a sibling of the platform

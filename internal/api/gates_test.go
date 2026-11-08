@@ -17,6 +17,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/argo"
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 )
@@ -45,7 +46,9 @@ type gateRig struct {
 
 const descheduler = "openshift-kube-descheduler-operator"
 
-func newGateRig(t *testing.T) *gateRig {
+// newGrantCluster is the fake apiserver of a rig: reviews and dry runs answer
+// from the token's grants, and every token sees team-a-dev and orphans-ns.
+func newGrantCluster(t *testing.T) *gateRig {
 	g := &gateRig{t: t, grants: map[string][]grant{}}
 	g.fc = newFakeCluster(t)
 	g.fc.readsVMs = func(token, ns string) bool { return ns == "team-a-dev" || ns == "orphans-ns" }
@@ -61,6 +64,11 @@ func newGateRig(t *testing.T) *gateRig {
 		return false
 	}
 	g.fc.dryRuns = g.fc.ssar
+	return g
+}
+
+func newGateRig(t *testing.T) *gateRig {
+	g := newGrantCluster(t)
 	g.fc.on(http.MethodGet, "/api/v1/nodes/w1", func(w http.ResponseWriter, r *http.Request) { writeObj(w, node("w1", false, false, true)) })
 	g.d = &gatedDraft{planeDraft: &planeDraft{declared: map[model.ObjectRef]string{}}}
 	for _, ref := range []model.ObjectRef{
@@ -76,7 +84,9 @@ func newGateRig(t *testing.T) *gateRig {
 	} {
 		g.d.declared[ref] = ref.Name + ".yaml"
 	}
+	g.fc.vms = []kubevirtcorev1.VirtualMachine{{ObjectMeta: metav1.ObjectMeta{Namespace: "team-a-dev", Name: "web"}}}
 	g.s = g.fc.server(g.d, Config{PlatformRepo: platformRepo, UploadProxyURL: "https://upload.example"})
+	g.d.authz = g.s
 	o, err := auth.NewOAuth(auth.OAuthConfig{ClientID: "dotvirt", ClientSecret: "s", RedirectURL: "https://dotvirt.example/api/auth/callback"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -114,6 +124,7 @@ func (g *gateRig) caps(tok, ns string) (model.ClusterCaps, model.NamespaceCaps) 
 // recording what an adoption captured.
 type gatedDraft struct {
 	*planeDraft
+	authz   changeset.Authorizer
 	adopted []model.Adoptable
 }
 
@@ -136,13 +147,13 @@ func (d *gatedDraft) AdoptObjects(_ auth.Identity, _ project.ProjectInfo, _ stri
 	d.adopted = objs
 	return stagedView, nil
 }
-func (d *gatedDraft) Resync(ctx context.Context, may func(context.Context, string, string) (bool, error), _ string, ns, name string) (model.ResyncResult, error) {
-	ok, err := may(ctx, ns, name)
-	if err != nil {
+
+// Resync asks the server, as the coordinator does, what Argo applying the VM
+// asks: its create, which the server weighs as the update of a running VM.
+func (d *gatedDraft) Resync(_ context.Context, id auth.Identity, _ project.ProjectInfo, ns, name string) (model.ResyncResult, error) {
+	vm := changeset.Access{Verb: verbCreate, Group: model.KindVM.Group, Resource: model.KindVM.Plural, Namespace: ns, Name: name, Object: "{}"}
+	if err := d.authz.Authorize(id, []changeset.Access{vm}); err != nil {
 		return model.ResyncResult{}, err
-	}
-	if !ok {
-		return model.ResyncResult{}, fmt.Errorf("%w: resync", model.ErrForbidden)
 	}
 	return model.ResyncResult{Application: "app"}, nil
 }
@@ -211,22 +222,6 @@ func objectCases(label string, k model.Kind, ns, objPath, create, body string) [
 
 func gateCases() []gateCase {
 	vm := func(verb string) []grant { return []grant{kind(verb, model.KindVM, "team-a-dev")} }
-	ns := func(verb, name string) grant { return grant{verb: verb, resource: "namespaces", name: name} }
-	rbIn := func(ns string) grant {
-		return grant{verb: verbCreate, group: "rbac.authorization.k8s.io", resource: "rolebindings", ns: ns}
-	}
-	bindIn := func(ns string) grant {
-		return grant{verb: verbBind, group: "rbac.authorization.k8s.io", resource: "clusterroles", ns: ns, name: "admin"}
-	}
-	scheduler := func(verb string) grant {
-		return grant{verb: verb, group: "operator.openshift.io", resource: "kubedeschedulers", ns: descheduler}
-	}
-	drs := []grant{
-		scheduler(verbCreate),
-		ns(verbCreate, ""),
-		{verb: verbCreate, group: "operators.coreos.com", resource: "operatorgroups", ns: descheduler},
-		{verb: verbCreate, group: "operators.coreos.com", resource: "subscriptions", ns: descheduler},
-	}
 	nsCap := func(f func(model.NamespaceCaps) bool) func(model.ClusterCaps, model.NamespaceCaps) bool {
 		return func(_ model.ClusterCaps, n model.NamespaceCaps) bool { return f(n) }
 	}
@@ -259,43 +254,24 @@ func gateCases() []gateCase {
 		imperative("snapshot restore", verbCreate, "snapshot.kubevirt.io", "virtualmachinerestores", "", func(n model.NamespaceCaps) bool { return n.SnapshotRestore }),
 		imperative("snapshot delete", verbDelete, "snapshot.kubevirt.io", "virtualmachinesnapshots", "", func(n model.NamespaceCaps) bool { return n.SnapshotDelete }),
 		imperative("clone", verbCreate, "clone.kubevirt.io", "virtualmachineclones", "", func(n model.NamespaceCaps) bool { return n.Clone }),
-		imperative("upload", verbCreate, "cdi.kubevirt.io", "datavolumes", "", func(n model.NamespaceCaps) bool { return n.DataVolumeCreate }),
+		// An upload creates its DataVolume, then its token request.
+		{name: "upload", needs: []grant{
+			{verb: verbCreate, group: "cdi.kubevirt.io", resource: "datavolumes", ns: "team-a-dev"},
+			{verb: verbCreate, group: "upload.cdi.kubevirt.io", resource: "uploadtokenrequests", ns: "team-a-dev"},
+		}, cap: nsCap(func(n model.NamespaceCaps) bool { return n.DataVolumeCreate })},
 		{name: "project template edit", call: route(http.MethodPut, "/api/templates", `{"library":"team-a","name":"t","yaml":"x"}`),
 			routeNeeds: vm(verbUpdate), needs: vm(verbUpdate), cap: nsCap(func(n model.NamespaceCaps) bool { return n.Project.TemplateEdit })},
-		// Attaching a repo claims each existing namespace at the route, and
-		// writes Namespace files the platform repo does not hold yet.
-		// Attaching a repo claims each existing namespace at the route; the
-		// coordinator weighs its Namespace object, which the snapshot holds,
-		// as that same update.
-		{name: "attach repo", ns: "orphans-ns", call: route(http.MethodPost, "/api/projects/orphans/adopt", ""),
-			routeNeeds: []grant{ns(verbUpdate, "orphans-ns")}, needs: []grant{ns(verbUpdate, "orphans-ns")},
-			cap: nsCap(func(n model.NamespaceCaps) bool { return n.Project.Adopt })},
-		{name: "attach repo with owners", ns: "orphans-ns", call: route(http.MethodPost, "/api/projects/orphans/adopt", `{"owners":["alice"]}`),
-			routeNeeds: []grant{ns(verbUpdate, "orphans-ns")},
-			needs:      []grant{ns(verbUpdate, "orphans-ns"), rbIn("orphans-ns"), bindIn("orphans-ns")},
-			cap:        nsCap(func(n model.NamespaceCaps) bool { return n.Project.Adopt && n.Project.GrantAdmin })},
-		// The platform repo does not declare orphans-ns: release patches its
-		// labels away under the caller's token.
-		{name: "release", ns: "orphans-ns", call: route(http.MethodPost, "/api/projects/orphans/release", ""),
-			needs: []grant{ns(verbPatch, "orphans-ns")}, cap: nsCap(func(n model.NamespaceCaps) bool { return n.Project.Release })},
-		{name: "project over an existing namespace", call: route(http.MethodPost, "/api/projects", `{"name":"team-c","namespace":"plain"}`),
-			routeNeeds: []grant{ns(verbUpdate, "plain")}},
-		{name: "new namespace", call: route(http.MethodPost, "/api/namespaces", `{"project":"team-a","name":"newns"}`),
-			needs: []grant{ns(verbCreate, "")}, cap: clCap(func(c model.ClusterCaps) bool { return c.NamespaceCreate })},
-		{name: "new namespace with a VM Network", call: route(http.MethodPost, "/api/namespaces", `{"project":"team-a","name":"newns","vmNetwork":{"name":"v","subnet":"10.0.0.0/24"}}`),
-			needs: []grant{ns(verbCreate, ""), kind(verbCreate, model.KindUDN, "")}, cap: clCap(func(c model.ClusterCaps) bool { return c.VMNetwork })},
-		{name: "new project with owners", call: route(http.MethodPost, "/api/projects", `{"name":"team-c","owners":["alice"]}`),
-			needs: []grant{ns(verbCreate, ""), rbIn(""), bindIn("")}, cap: clCap(func(c model.ClusterCaps) bool { return c.GrantAdmin })},
 		{name: "shared library", call: route(http.MethodPut, "/api/templates", `{"library":"platform","name":"t","yaml":"x"}`),
 			routeNeeds: []grant{kind(verbCreate, model.KindTemplate, "")}, needs: []grant{kind(verbCreate, model.KindTemplate, "")},
 			cap: clCap(func(c model.ClusterCaps) bool { return c.SharedLibrary })},
-		{name: "drs enable", call: route(http.MethodPost, "/api/drs", `{}`),
-			routeNeeds: []grant{scheduler(verbCreate)}, needs: drs, cap: clCap(func(c model.ClusterCaps) bool { return c.DRSEnable })},
-		{name: "drs enable with PSI", call: route(http.MethodPost, "/api/drs", `{"installPSI":true}`),
-			routeNeeds: []grant{scheduler(verbCreate)}, needs: append(append([]grant(nil), drs...), kind(verbCreate, model.KindMachCfg, "")),
-			cap: clCap(func(c model.ClusterCaps) bool { return c.DRSPSI })},
-		{name: "drs disable", call: route(http.MethodDelete, "/api/drs", ""),
-			routeNeeds: []grant{scheduler(verbDelete)}, needs: []grant{scheduler(verbDelete)}, cap: clCap(func(c model.ClusterCaps) bool { return c.DRSDisable })},
+		// A NetworkAttachmentDefinition git still declares under the network
+		// routes: edited and deleted, never created by a form.
+		{name: "network attachment manifest edit", call: route(http.MethodPut, "/api/objects/network/team-a-dev/n2", `{"yaml":"x"}`),
+			routeNeeds: []grant{kind(verbUpdate, model.KindNAD, "team-a-dev")}, needs: []grant{kind(verbUpdate, model.KindNAD, "team-a-dev")},
+			cap: nsCap(func(n model.NamespaceCaps) bool { return n.NetworkAttachment.Update })},
+		{name: "network attachment delete", call: route(http.MethodDelete, "/api/objects/network/team-a-dev/n2", ""),
+			routeNeeds: []grant{kind(verbDelete, model.KindNAD, "team-a-dev")}, needs: []grant{kind(verbDelete, model.KindNAD, "team-a-dev")},
+			cap: nsCap(func(n model.NamespaceCaps) bool { return n.NetworkAttachment.Delete })},
 		// The apply runs under the caller's token; the apiserver asks these.
 		{name: "finish SSO", needs: []grant{{verb: verbCreate, group: "oauth.openshift.io", resource: "oauthclients"}, {verb: verbPatch, group: "oauth.openshift.io", resource: "oauthclients", name: "dotvirt"}},
 			cap: clCap(func(c model.ClusterCaps) bool { return c.OAuthClient })},
@@ -367,6 +343,8 @@ func TestPlatformLaneMatchesItsGate(t *testing.T) {
 	g := newGateRig(t)
 	for _, gs := range [][]grant{
 		{kind(verbCreate, model.KindCUDN, "")},
+		{kind(verbCreate, model.KindEgressIP, "")},
+		{kind(verbDelete, model.KindNNCP, "")},
 		{kind(verbCreate, model.KindDesched, "")},
 		{kind(verbCreate, model.KindTemplate, "")},
 		nil,
@@ -377,6 +355,26 @@ func TestPlatformLaneMatchesItsGate(t *testing.T) {
 		if allowed := rec.Code != http.StatusForbidden; allowed != cl.Platform || allowed != (gs != nil) {
 			t.Errorf("with %v: draft = %d, capability = %v", gs, rec.Code, cl.Platform)
 		}
+	}
+}
+
+// A caller whose only right staged something there - a claim on one
+// namespace - still reaches their platform draft: nothing staged is stranded.
+func TestOwnPlatformDraftIsReachable(t *testing.T) {
+	g := newGateRig(t)
+	tok := g.token([]grant{{verb: verbGet, resource: "namespaces", name: "orphans-ns"}, {verb: verbUpdate, resource: "namespaces", name: "orphans-ns"}})
+	wantStatus(t, do(g.s, tok, http.MethodGet, "/api/draft?project=platform", ""), http.StatusForbidden)
+	wantStatus(t, do(g.s, tok, http.MethodPost, "/api/projects/orphans/adopt", ""), http.StatusOK)
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodGet, "/api/draft?project=platform", ""},
+		{http.MethodDelete, "/api/draft?project=platform", ""},
+	} {
+		if rec := do(g.s, tok, c.method, c.path, c.body); rec.Code == http.StatusForbidden {
+			t.Errorf("%s %s = %d %q, want the own draft reached", c.method, c.path, rec.Code, rec.Body.String())
+		}
+	}
+	if rec := do(g.s, tok, http.MethodGet, "/api/projects/platform/history", ""); rec.Code != http.StatusForbidden {
+		t.Errorf("platform history = %d, want refused: a draft opens only the draft", rec.Code)
 	}
 }
 
@@ -406,20 +404,56 @@ func TestNodeGateMatchesCanCordon(t *testing.T) {
 }
 
 // Joining a namespace another project holds would take it from that project.
+// The holding project is named only to a caller who sees it, and only once
+// they hold the claim; without the claim the refusal is the claim's.
 func TestProjectRefusesANamespaceOfAnotherProject(t *testing.T) {
 	g := newGateRig(t)
-	tok := g.token([]grant{{verb: verbUpdate, resource: "namespaces"}, {verb: verbCreate, resource: "namespaces"}})
-	for _, body := range []string{`{"name":"team-c","namespace":"orphans-ns"}`} {
-		rec := do(g.s, tok, http.MethodPost, "/api/projects", body)
-		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "orphans") {
-			t.Errorf("project over orphans-ns = %d %q, want 409 naming its project", rec.Code, rec.Body.String())
-		}
+	claim := []grant{{verb: verbGet, resource: "namespaces"}, {verb: verbUpdate, resource: "namespaces"}, {verb: verbCreate, resource: "namespaces"}}
+	tok := g.token(claim)
+	rec := do(g.s, tok, http.MethodPost, "/api/projects", `{"name":"team-c","namespace":"orphans-ns"}`)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "project orphans") {
+		t.Errorf("project over orphans-ns = %d %q, want 409 naming its project", rec.Code, rec.Body.String())
 	}
-	rec := do(g.s, tok, http.MethodPost, "/api/namespaces", `{"project":"team-a","name":"orphans-ns"}`)
+	rec = do(g.s, tok, http.MethodPost, "/api/namespaces", `{"project":"team-a","name":"orphans-ns"}`)
 	if rec.Code != http.StatusConflict {
 		t.Errorf("namespace join of orphans-ns = %d %q, want 409", rec.Code, rec.Body.String())
 	}
 	g.d.none(t)
+
+	// A caller who sees only team-a-dev learns no other project's name.
+	g.fc.readsVMs = func(token, ns string) bool { return ns == "team-a-dev" }
+	rec = do(g.s, g.token(claim), http.MethodPost, "/api/namespaces", `{"project":"team-a","name":"orphans-ns"}`)
+	if rec.Code != http.StatusConflict || strings.Contains(rec.Body.String(), "project orphans") {
+		t.Errorf("hidden holder = %d %q, want an unnamed 409", rec.Code, rec.Body.String())
+	}
+	rec = do(g.s, g.token(claim[:1]), http.MethodPost, "/api/namespaces", `{"project":"team-a","name":"orphans-ns"}`)
+	if rec.Code != http.StatusForbidden || strings.Contains(rec.Body.String(), "project orphans") {
+		t.Errorf("no claim = %d %q, want the claim's 403", rec.Code, rec.Body.String())
+	}
+	g.d.none(t)
+}
+
+// Adopt and release resolve their target among the projects the caller sees,
+// unless they may relabel any namespace: a hidden project answers as none.
+// Whether a project exists is told only past the gate.
+func TestTenancyRoutesHideProjects(t *testing.T) {
+	g := newGateRig(t)
+	g.fc.readsVMs = func(token, ns string) bool { return ns == "team-a-dev" }
+	nobody := g.token(nil)
+	for _, path := range []string{"/api/projects/orphans/adopt", "/api/projects/orphans/release"} {
+		hidden := do(g.s, nobody, http.MethodPost, path, "")
+		ghost := do(g.s, nobody, http.MethodPost, strings.Replace(path, "orphans", "ghost", 1), "")
+		if hidden.Code != http.StatusNotFound || strings.Replace(hidden.Body.String(), "orphans", "ghost", 1) != ghost.Body.String() {
+			t.Errorf("%s: hidden = %d %q, ghost = %d %q, want the same 404", path, hidden.Code, hidden.Body.String(), ghost.Code, ghost.Body.String())
+		}
+	}
+	admin := g.token([]grant{{verb: verbGet, resource: "namespaces"}, {verb: verbUpdate, resource: "namespaces"}})
+	if rec := do(g.s, admin, http.MethodPost, "/api/projects/orphans/adopt", ""); rec.Code == http.StatusNotFound {
+		t.Errorf("a cluster-wide claim: %d %q, want the project found", rec.Code, rec.Body.String())
+	}
+	if rec := do(g.s, nobody, http.MethodPost, "/api/projects", `{"name":"orphans"}`); rec.Code == http.StatusConflict {
+		t.Errorf("an existing project told to a caller without rights: %q", rec.Body.String())
+	}
 }
 
 // A namespace adoption leaves out the objects the coordinator would refuse,

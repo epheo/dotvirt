@@ -154,9 +154,9 @@ func (s *Server) handleObjectRestore(w http.ResponseWriter, r *http.Request) {
 
 // handlePlatformAdopt stages every cluster-scoped object the platform repo does
 // not describe - the platform tier's counterpart of the namespace adoption -
-// of the kinds the caller may create.
+// of the objects the gate would let the caller bring under git.
 func (s *Server) handlePlatformAdopt(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.platformScopeAny(w, r)
+	sc, ok := s.platformScopeGated(w, r)
 	if !ok {
 		return
 	}

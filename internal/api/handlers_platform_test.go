@@ -50,10 +50,12 @@ func TestDRSView(t *testing.T) {
 		t.Errorf("admin view = %+v", v)
 	}
 
+	// What the coordinator asks of the file set (the PSI MachineConfig among
+	// it) is weighed against a real coordinator in coordinator_test.go.
 	rec = do(s, "drs-token", http.MethodGet, "/api/drs", "")
 	wantStatus(t, rec, http.StatusOK)
-	if v := decodeBody[model.DRSView](t, rec); !v.CanManage || v.CanPSI {
-		t.Errorf("drs author view = %+v, want manage without PSI", v)
+	if v := decodeBody[model.DRSView](t, rec); !v.CanManage || !v.CanDisable {
+		t.Errorf("drs author view = %+v, want manage", v)
 	}
 
 	// A tenant reads the committed state but never a draft.
@@ -313,7 +315,8 @@ func TestAdoptProject(t *testing.T) {
 	d := &planeDraft{}
 	s := fc.server(d, Config{PlatformRepo: platformRepo})
 
-	wantStatus(t, do(s, tenantToken, http.MethodPost, "/api/projects/orphans/adopt", ""), http.StatusForbidden)
+	// A project the tenant does not see answers as none.
+	wantStatus(t, do(s, tenantToken, http.MethodPost, "/api/projects/orphans/adopt", ""), http.StatusNotFound)
 	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/projects/ghost/adopt", ""), http.StatusNotFound)
 	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/projects/orphans/adopt", `{"owners":`), http.StatusBadRequest)
 	d.none(t)
@@ -355,9 +358,9 @@ func TestReleaseProject(t *testing.T) {
 	// Release covers only the repoless dead end, never a healthy tenant.
 	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/projects/team-a/release", ""), http.StatusConflict)
 	d.none(t)
-	// The residue strip runs under the caller's token: the apiserver refuses it.
-	wantStatus(t, do(s, tenantToken, http.MethodPost, "/api/projects/orphans/release", ""), http.StatusForbidden)
-	d.calls = nil
+	// A project the tenant does not see answers as none.
+	wantStatus(t, do(s, tenantToken, http.MethodPost, "/api/projects/orphans/release", ""), http.StatusNotFound)
+	d.none(t)
 
 	rec := do(s, adminToken, http.MethodPost, "/api/projects/orphans/release", "")
 	wantStatus(t, rec, http.StatusOK)
