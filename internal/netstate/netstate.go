@@ -182,20 +182,35 @@ func (s *Snapshot) Run(ctx context.Context) {
 }
 
 // ovnServed gates the k8s.ovn.org watches, and from the same discovery read
-// records whether the RouteAdvertisements API is served: no request of its
-// own. It is read again only while one of those watches still waits for its
-// kind. A failed read keeps the last answer.
+// records whether the RouteAdvertisements API is served. A failed read keeps
+// the last answer.
 func (s *Snapshot) ovnServed(gvr schema.GroupVersionResource) bool {
 	served, err := s.sa.ServedResources(gvr.GroupVersion())
 	if err != nil {
 		return false
 	}
+	s.recordRouteAds(served)
+	return served[gvr.Resource]
+}
+
+// probeRouteAds re-reads discovery on the node tick until RouteAdvertisements
+// is served: once every OVN-K watch is admitted no gate reads it, and it may
+// be installed later.
+func (s *Snapshot) probeRouteAds() {
+	if s.routeAds.Load() == routeAdsServed {
+		return
+	}
+	if served, err := s.sa.ServedResources(gvrRouteAds.GroupVersion()); err == nil {
+		s.recordRouteAds(served)
+	}
+}
+
+func (s *Snapshot) recordRouteAds(served map[string]bool) {
 	if served[gvrRouteAds.Resource] {
 		s.routeAds.Store(routeAdsServed)
 	} else {
 		s.routeAds.Store(routeAdsAbsent)
 	}
-	return served[gvr.Resource]
 }
 
 // mayJoin reports whether route advertisement may join primary networks
@@ -239,8 +254,9 @@ func (s *Snapshot) watch(ctx context.Context, w watchSpec, healthy *atomic.Bool)
 // on start, then every nodeRefreshInterval). A changed node set signals NetworkChanged:
 // uplink membership derives from it, and the first LIST usually lands after clients
 // already pulled the catalog. The same LIST carries the default network's node
-// subnets, and the same tick reads the cluster's pod and service networks:
-// only the trace reads those, so their moves signal nothing.
+// subnets, and the same tick reads the cluster's pod and service networks
+// and, until it is served, whether route advertisement is: only the trace
+// reads those, so their moves signal nothing.
 func (s *Snapshot) refreshNodes(ctx context.Context) {
 	t := time.NewTicker(nodeRefreshInterval)
 	defer t.Stop()
@@ -256,6 +272,7 @@ func (s *Snapshot) refreshNodes(ctx context.Context) {
 			}
 		}
 		s.refreshClusterNetworks(ctx)
+		s.probeRouteAds()
 		select {
 		case <-ctx.Done():
 			return

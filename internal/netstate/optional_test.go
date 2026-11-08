@@ -109,8 +109,7 @@ func TestEnactmentListFailureIsNotStaleness(t *testing.T) {
 }
 
 // The k8s.ovn.org discovery read that admits a watch also records whether
-// route advertisement is served: no request of its own, and a failed read
-// keeps the last answer.
+// route advertisement is served, and a failed read keeps the last answer.
 func TestOVNServedRecordsRouteAds(t *testing.T) {
 	kube := fake.NewSimpleClientset()
 	disc := kube.Discovery().(*fakediscovery.FakeDiscovery)
@@ -140,9 +139,16 @@ func TestOVNServedRecordsRouteAds(t *testing.T) {
 		t.Fatalf("a failed read must keep the last answer: state %d", s.routeAds.Load())
 	}
 	failing.Store(0)
+
+	// Installed once every OVN-K watch is admitted: no gate reads discovery
+	// again, the node tick does, until it is served.
 	ovn(gvrUDN.Resource, gvrRouteAds.Resource)
-	if !s.ovnServed(gvrUDN) || s.routeAds.Load() != routeAdsServed {
-		t.Fatalf("route advertisement served: state %d", s.routeAds.Load())
+	before := reads.Load()
+	if s.probeRouteAds(); s.routeAds.Load() != routeAdsServed || reads.Load() != before+1 {
+		t.Fatalf("route advertisement installed later: state %d after %d reads", s.routeAds.Load(), reads.Load()-before)
+	}
+	if s.probeRouteAds(); reads.Load() != before+1 {
+		t.Error("once served, the tick reads discovery no more")
 	}
 }
 
