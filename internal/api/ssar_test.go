@@ -10,7 +10,7 @@ import (
 // the gate and the apply-time AppProject boundary are spelled from one place.
 func TestEverySSARIsATableKind(t *testing.T) {
 	refs := map[string]ssarRef{
-		"cudn": ssarCUDN, "uplink": ssarUplink, "namespace": ssarNamespace, "egressip": ssarEgressIP,
+		"cudn": ssarCUDN, "namespace": ssarNamespace, "egressip": ssarEgressIP,
 		"externalroute": ssarExtRoute, "anp": ssarANP, "banp": ssarBANP, "descheduler": ssarDescheduler,
 		"machineconfig": ssarMachineCfg, "template": ssarVMTemplate,
 	}
@@ -27,9 +27,9 @@ func TestEverySSARIsATableKind(t *testing.T) {
 			t.Errorf("ssar %s = %+v is not in the kind table", name, ref)
 		}
 	}
-	for _, r := range platformAuthorResources {
-		if r.resource == "" {
-			t.Errorf("platform authoring signal %+v is empty", r)
+	for _, act := range platformReaders() {
+		if len(act) == 0 || act[0].Resource == "" || act[0].Namespace != "" {
+			t.Errorf("platform reader %+v is empty or namespace-scoped", act)
 		}
 	}
 }

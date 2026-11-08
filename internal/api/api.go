@@ -84,7 +84,7 @@ type Draft interface {
 	// The tenancy stagers take the caller-token namespace capture: a namespace
 	// that already exists keeps what it carries.
 	StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, spec json.RawMessage, live changeset.LiveNamespaces) (model.DraftView, error)
-	StageCreateProject(id auth.Identity, commitProj project.ProjectInfo, spec json.RawMessage, live changeset.LiveNamespaces) (model.DraftView, error)
+	StageCreateProject(id auth.Identity, commitProj project.ProjectInfo, spec json.RawMessage, live changeset.LiveNamespaces, exists changeset.ProjectExists) (model.DraftView, error)
 	StageDeployFromTemplate(id auth.Identity, targetProj, libraryProj project.ProjectInfo, req model.DeployTemplateRequest) (model.DraftView, error)
 	StageSaveTemplate(id auth.Identity, commitProj, sourceProj project.ProjectInfo, req model.SaveTemplateRequest) (model.DraftView, error)
 	StageUpdateTemplate(id auth.Identity, commitProj project.ProjectInfo, req model.UpdateTemplateRequest) (model.DraftView, error)
@@ -112,9 +112,19 @@ type Draft interface {
 	// platform draft: the PR a project made before sync impersonation needs.
 	StageSyncAccess(id auth.Identity, commitProj, target project.ProjectInfo) (model.DraftView, error)
 	// Resync runs with dotvirt's SA (Argo operations carry no user context);
-	// canUpdateVM is the caller-token SSAR the implementation enforces before
-	// escalating, so no future caller can reach the SA-privileged patch unchecked.
-	Resync(ctx context.Context, canUpdateVM func(context.Context, string, string) (bool, error), username, namespace, name string) (model.ResyncResult, error)
+	// the implementation weighs what the sync applies under id's own token
+	// before escalating, so no future caller can reach the SA-privileged patch
+	// unchecked.
+	Resync(ctx context.Context, id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.ResyncResult, error)
+	// The Needs are what the gate would ask of a tenancy or DRS change the
+	// matching route stages, unstaged: the capability signals weigh them.
+	ProjectNeeds(commitProj project.ProjectInfo, spec json.RawMessage) ([]changeset.Access, error)
+	NamespaceNeeds(commitProj, joinProj project.ProjectInfo, spec json.RawMessage) ([]changeset.Access, error)
+	AdoptNeeds(commitProj, target project.ProjectInfo, owners []string) ([]changeset.Access, error)
+	ReleaseNeeds(commitProj, target project.ProjectInfo) (need []changeset.Access, residue []string, err error)
+	EnableDRSNeeds(proj project.ProjectInfo, spec json.RawMessage) ([]changeset.Access, error)
+	DisableDRSNeeds(proj project.ProjectInfo) ([]changeset.Access, error)
+	ResyncNeeds(proj project.ProjectInfo, namespace, name string) ([]changeset.Access, error)
 	Revert(id auth.Identity, proj project.ProjectInfo, hash string) (model.ProposeResult, error)
 	// RestoreVersion stages one VM's manifest as a past commit held it: the
 	// object-level undo, through the caller's draft like any edit.

@@ -126,7 +126,7 @@ func newProposeFixture(t *testing.T, routes ...route) *proposeFixture {
 // only the warning tells a former install's leftover from a harmless retry.
 func TestCreateProjectReusesExistingRepoWithWarning(t *testing.T) {
 	f := newProposeFixture(t, when("GET", "team-a", http.StatusOK, "{}"))
-	view, err := f.c.StageCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"team-a","namespace":"team-a"}`), nil)
+	view, err := f.c.StageCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"team-a","namespace":"team-a"}`), nil, nil)
 	if err != nil {
 		t.Fatalf("a pre-existing repo must be reused, not refused: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestCreateProjectFreshRepoNoWarning(t *testing.T) {
 			}
 			return 0, "", false
 		})
-	view, err := f.c.StageCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"team-a","namespace":"team-a"}`), nil)
+	view, err := f.c.StageCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"team-a","namespace":"team-a"}`), nil, nil)
 	if err != nil {
 		t.Fatalf("StageCreateProject: %v", err)
 	}
@@ -178,6 +178,56 @@ func TestAdoptProjectRecreatesLostRepo(t *testing.T) {
 		})
 	if _, err := f.c.AdoptProject(f.id, f.platform(), f.target("team-a"), nil, nil); err != nil {
 		t.Fatalf("a lost repo must be re-created, not refused: %v", err)
+	}
+}
+
+// The namespace capture gates the claim, so it runs before the forge write: a
+// refused namespace leaves no repo behind.
+func TestAdoptProjectRefusalCreatesNoRepo(t *testing.T) {
+	created := false
+	f := newProposeFixture(t,
+		when("GET", "team-a", http.StatusNotFound, ""),
+		func(m, path string) (int, string, bool) {
+			if m == "POST" && strings.HasPrefix(path, "/api/v1/orgs/") && strings.HasSuffix(path, "/repos") {
+				created = true
+				return http.StatusCreated, "{}", true
+			}
+			return 0, "", false
+		})
+	refuse := func(string) (*netgen.LiveNamespace, error) { return nil, model.ErrForbidden }
+	if _, err := f.c.AdoptProject(f.id, f.proj, f.target("team-a"), nil, refuse); !errors.Is(err, model.ErrForbidden) {
+		t.Fatalf("err = %v, want the capture's refusal", err)
+	}
+	if created {
+		t.Fatal("a refused adoption created the project repo")
+	}
+}
+
+// Whether the project exists is asked only once the gate passed, so a caller
+// without the rights never learns it, and a refusal creates no repo.
+func TestCreateProjectAsksExistenceAfterTheGate(t *testing.T) {
+	created := false
+	f := newProposeFixture(t,
+		when("GET", "team-a", http.StatusNotFound, ""),
+		func(m, path string) (int, string, bool) {
+			if m == "POST" && strings.HasPrefix(path, "/api/v1/orgs/") && strings.HasSuffix(path, "/repos") {
+				created = true
+				return http.StatusCreated, "{}", true
+			}
+			return 0, "", false
+		})
+	exists := func(string) bool { return true }
+	spec := json.RawMessage(`{"name":"team-a","namespace":"team-a"}`)
+	f.c.UseAuthorizer(&rbac{deny: verbOn("create", "namespaces")})
+	if _, err := f.c.StageCreateProject(f.id, f.platform(), spec, nil, exists); !errors.Is(err, model.ErrForbidden) {
+		t.Fatalf("a caller the gate refuses: %v, want ErrForbidden", err)
+	}
+	f.c.UseAuthorizer(allowAll{})
+	if _, err := f.c.StageCreateProject(f.id, f.platform(), spec, nil, exists); !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("an existing project: %v, want ErrConflict", err)
+	}
+	if created {
+		t.Fatal("a refused create made the project repo")
 	}
 }
 
@@ -540,7 +590,7 @@ func TestCreateProjectKeepsExistingNamespaceMetadata(t *testing.T) {
 	live := func(string) (*netgen.LiveNamespace, error) {
 		return &netgen.LiveNamespace{Labels: map[string]string{"tenant": "a", "k8s.ovn.org/primary-user-defined-network": ""}}, nil
 	}
-	view, err := f.c.StageCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"tenant-a","namespace":"tenant-a"}`), live)
+	view, err := f.c.StageCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"tenant-a","namespace":"tenant-a"}`), live, nil)
 	if err != nil {
 		t.Fatalf("StageCreateProject: %v", err)
 	}
@@ -562,7 +612,7 @@ func TestCreateProjectRefusesVMNetworkOnExistingNamespace(t *testing.T) {
 	f := newProposeFixture(t)
 	live := func(string) (*netgen.LiveNamespace, error) { return &netgen.LiveNamespace{}, nil }
 	_, err := f.c.StageCreateProject(f.id, f.platform(),
-		json.RawMessage(`{"name":"tenant-a","namespace":"tenant-a","vmNetwork":{"name":"vm-net","subnet":"10.40.0.0/24"}}`), live)
+		json.RawMessage(`{"name":"tenant-a","namespace":"tenant-a","vmNetwork":{"name":"vm-net","subnet":"10.40.0.0/24"}}`), live, nil)
 	if !errors.Is(err, model.ErrConflict) {
 		t.Fatalf("want ErrConflict, got %v", err)
 	}

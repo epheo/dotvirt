@@ -16,15 +16,27 @@ import (
 
 const platformRepo = "https://forge/platform.git"
 
-// deschedOnly may create KubeDeschedulers but not MachineConfigs: the DRS
+// deschedOnly may create the DRS file set but not MachineConfigs: the DRS
 // author who must not reboot the worker pool.
 func deschedOnly(token string, a *authzv1.ResourceAttributes) bool {
-	return token == adminToken || (token == "drs-token" && a.Resource == "kubedeschedulers")
+	if token == adminToken {
+		return true
+	}
+	if token != "drs-token" {
+		return false
+	}
+	switch a.Resource {
+	case "kubedeschedulers", "operatorgroups", "subscriptions":
+		return a.Namespace == "openshift-kube-descheduler-operator"
+	case "namespaces":
+		return a.Verb == "create"
+	}
+	return false
 }
 
 func TestDRSView(t *testing.T) {
 	fc := newFakeCluster(t)
-	fc.ssar = deschedOnly
+	fc.ssar, fc.dryRuns = deschedOnly, deschedOnly
 	d := &planeDraft{
 		drs:      model.DRSGitState{Configured: true, PSIConfigured: true},
 		drsDraft: model.DRSDraftState{DisableStaged: true},
@@ -38,10 +50,12 @@ func TestDRSView(t *testing.T) {
 		t.Errorf("admin view = %+v", v)
 	}
 
+	// What the coordinator asks of the file set (the PSI MachineConfig among
+	// it) is weighed against a real coordinator in coordinator_test.go.
 	rec = do(s, "drs-token", http.MethodGet, "/api/drs", "")
 	wantStatus(t, rec, http.StatusOK)
-	if v := decodeBody[model.DRSView](t, rec); !v.CanManage || v.CanPSI {
-		t.Errorf("drs author view = %+v, want manage without PSI", v)
+	if v := decodeBody[model.DRSView](t, rec); !v.CanManage || !v.CanDisable {
+		t.Errorf("drs author view = %+v, want manage", v)
 	}
 
 	// A tenant reads the committed state but never a draft.
@@ -81,8 +95,6 @@ func TestDRSEnableDisable(t *testing.T) {
 	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/drs", `{`), http.StatusBadRequest)
 	wantStatus(t, do(s, tenantToken, http.MethodPost, "/api/drs", `{}`), http.StatusForbidden)
 	wantStatus(t, do(s, tenantToken, http.MethodDelete, "/api/drs", ""), http.StatusForbidden)
-	// The PSI file reboots workers: it needs its own authority.
-	wantStatus(t, do(s, "drs-token", http.MethodPost, "/api/drs", `{"installPSI":true}`), http.StatusForbidden)
 	d.none(t)
 
 	wantStatus(t, do(s, "drs-token", http.MethodPost, "/api/drs", `{"installPSI":false,"mode":"Automatic"}`), http.StatusOK)
@@ -258,8 +270,9 @@ func TestCreateNamespace(t *testing.T) {
 	}{
 		{adminToken, `{"name":"team-a-test"}`, http.StatusBadRequest},
 		{adminToken, `{"project":"ghost","name":"x"}`, http.StatusNotFound},
-		// Seeing the project is not authority to land a Namespace.
-		{tenantToken, `{"project":"team-a","name":"x"}`, http.StatusForbidden},
+		// Seeing the project is not authority to relabel its namespace; a new
+		// one's create is the coordinator's check.
+		{tenantToken, `{"project":"team-a","name":"team-a-dev"}`, http.StatusForbidden},
 	} {
 		if rec := do(s, c.token, http.MethodPost, "/api/namespaces", c.body); rec.Code != c.want {
 			t.Errorf("%s create %s = %d %q, want %d", c.token, c.body, rec.Code, rec.Body.String(), c.want)
@@ -284,7 +297,6 @@ func TestCreateProject(t *testing.T) {
 		want        int
 	}{
 		{adminToken, `{}`, http.StatusBadRequest},
-		{tenantToken, `{"name":"team-c"}`, http.StatusForbidden},
 		// An existing project is adopted, never re-created over its repo.
 		{adminToken, `{"name":"team-a"}`, http.StatusConflict},
 		{adminToken, `{"name":"orphans"}`, http.StatusConflict},
@@ -303,7 +315,8 @@ func TestAdoptProject(t *testing.T) {
 	d := &planeDraft{}
 	s := fc.server(d, Config{PlatformRepo: platformRepo})
 
-	wantStatus(t, do(s, tenantToken, http.MethodPost, "/api/projects/orphans/adopt", ""), http.StatusForbidden)
+	// A project the tenant does not see answers as none.
+	wantStatus(t, do(s, tenantToken, http.MethodPost, "/api/projects/orphans/adopt", ""), http.StatusNotFound)
 	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/projects/ghost/adopt", ""), http.StatusNotFound)
 	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/projects/orphans/adopt", `{"owners":`), http.StatusBadRequest)
 	d.none(t)
@@ -330,6 +343,10 @@ func TestReleaseProject(t *testing.T) {
 	fc := newFakeCluster(t)
 	var patch string
 	fc.on(http.MethodPatch, "/api/v1/namespaces/orphans-ns", func(w http.ResponseWriter, r *http.Request) {
+		if bearer(r) != adminToken {
+			writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
+			return
+		}
 		b, _ := io.ReadAll(r.Body)
 		patch = string(b)
 		writeObj(w, corev1.Namespace{TypeMeta: metav1.TypeMeta{Kind: "Namespace", APIVersion: "v1"}, ObjectMeta: metav1.ObjectMeta{Name: "orphans-ns"}})
@@ -337,10 +354,12 @@ func TestReleaseProject(t *testing.T) {
 	d := &planeDraft{releaseStaged: []string{"namespaces/orphans-ns.yaml"}, releaseResidue: []string{"orphans-ns"}}
 	s := fc.server(d, Config{PlatformRepo: platformRepo})
 
-	wantStatus(t, do(s, tenantToken, http.MethodPost, "/api/projects/orphans/release", ""), http.StatusForbidden)
 	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/projects/ghost/release", ""), http.StatusNotFound)
 	// Release covers only the repoless dead end, never a healthy tenant.
 	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/projects/team-a/release", ""), http.StatusConflict)
+	d.none(t)
+	// A project the tenant does not see answers as none.
+	wantStatus(t, do(s, tenantToken, http.MethodPost, "/api/projects/orphans/release", ""), http.StatusNotFound)
 	d.none(t)
 
 	rec := do(s, adminToken, http.MethodPost, "/api/projects/orphans/release", "")
