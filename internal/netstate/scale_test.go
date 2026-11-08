@@ -354,6 +354,29 @@ func BenchmarkCatalog(b *testing.B) {
 	}
 }
 
+// A host's NodeNetworkState moves (its status churns), then a caller
+// re-pulls the catalog.
+func BenchmarkCatalogAfterHostMove(b *testing.B) {
+	s := scaleSnapshot(b)
+	host, _, _ := s.nns.GetByKey("worker-01")
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = s.nns.Update(host)
+		_ = s.Catalog()
+	}
+}
+
+// One NetworkPolicy moves, then a caller re-pulls the policy plane.
+func BenchmarkPoliciesAfterMove(b *testing.B) {
+	s := scaleSnapshot(b)
+	np, _, _ := s.netpol.GetByKey(scaleNS(4) + "/allow-web")
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = s.netpol.Update(np)
+		_ = s.Policies()
+	}
+}
+
 func BenchmarkPolicies(b *testing.B) {
 	s := scaleSnapshot(b)
 	b.ReportAllocs()
