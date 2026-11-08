@@ -151,13 +151,14 @@ func TestTraceOverlayRangeIsNeverUnreachable(t *testing.T) {
 func seeing(vms ...TraceWorkload) *TraceView {
 	return &TraceView{
 		Namespace: func(string) bool { return true },
-		Workload: func(addr netip.Addr) (TraceWorkload, bool) {
+		Workloads: func(addr netip.Addr) []TraceWorkload {
+			var out []TraceWorkload
 			for _, w := range vms {
 				if slices.Contains(w.IPs, addr.String()) {
-					return w, true
+					out = append(out, w)
 				}
 			}
-			return TraceWorkload{}, false
+			return out
 		},
 	}
 }
@@ -168,7 +169,7 @@ func seeing(vms ...TraceWorkload) *TraceView {
 // default network alone.
 func TestTraceSameNetworkUnchanged(t *testing.T) {
 	s := isolated(t, true)
-	peer := wl("plain", "db", nil, nil, "10.128.0.7")
+	peers := seeing(wl("plain", "db", nil, nil, "10.128.0.7"), wl("tenant-d", "peer", nil, nil, "10.50.0.9"))
 	for name, c := range map[string]struct {
 		src TraceWorkload
 		ip  string
@@ -176,7 +177,7 @@ func TestTraceSameNetworkUnchanged(t *testing.T) {
 		"same CUDN, other namespace": {wl("tenant-c", "app", nil, nil, "10.50.0.4"), "10.50.0.9"},
 		"default network to itself":  {wl("plain", "legacy", nil, nil, "10.128.0.9"), "10.128.0.7"},
 	} {
-		res := s.Trace(seeing(peer), c.src, nil, c.ip, "TCP", 443)
+		res := s.Trace(peers, c.src, nil, c.ip, "TCP", 443)
 		if st := connectivityStep(t, res); res.Verdict != "Allow" || st.Action != "Reachable" || st.Conditional {
 			t.Errorf("%s: verdict %s, step %+v", name, res.Verdict, st)
 		}
@@ -412,6 +413,7 @@ func TestTraceViewOwnScope(t *testing.T) {
 		return func(ns string) bool { return slices.Contains(nss, ns) }
 	}
 	tenant := &TraceView{Namespace: sees("tenant-a"), Shared: false}
+	tenant.Workloads = seeing(wl("tenant-a", "db", nil, nil, "10.100.0.7")).Workloads
 	if res := s.Trace(tenant, a, nil, "10.100.0.7", "TCP", 443); res.Verdict != "Allow" {
 		t.Errorf("own network: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -449,7 +451,7 @@ func TestTraceDefaultPodBesideUDN(t *testing.T) {
 
 	alone := New(nil, nil)
 	alone.podNet = parsePrefixes([]string{"10.128.0.0/23"})
-	if res := alone.Trace(nil, plain, nil, "10.128.1.77", "TCP", 443); res.Verdict != "Allow" {
+	if res := alone.Trace(seeing(wl("plain", "db", nil, nil, "10.128.1.77")), plain, nil, "10.128.1.77", "TCP", 443); res.Verdict != "Allow" {
 		t.Errorf("no primary UDN: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 }
@@ -471,9 +473,12 @@ func TestTraceOutboundRulesBindOnlyLeavingTraffic(t *testing.T) {
 	alone.podNet = parsePrefixes([]string{"10.128.0.0/23"})
 	fwDeny(alone, "plain", "0.0.0.0/0")
 	plain := wl("plain", "legacy", nil, nil, "10.128.0.9")
-	res := alone.Trace(nil, plain, nil, "10.128.1.77", "TCP", 443)
-	if res.Verdict != "Allow" || slices.ContainsFunc(res.Steps, func(st model.TraceStep) bool { return st.Stage == "gateway" || st.Stage == "snat" }) {
-		t.Errorf("pod address under an outbound deny: verdict %s (%v)", res.Verdict, stepKinds(t, res))
+	outbound := func(st model.TraceStep) bool { return st.Stage == "gateway" || st.Stage == "snat" }
+	for view, want := range map[*TraceView]string{nil: "Conditional", seeing(wl("plain", "db", nil, nil, "10.128.1.77")): "Allow"} {
+		res := alone.Trace(view, plain, nil, "10.128.1.77", "TCP", 443)
+		if res.Verdict != want || slices.ContainsFunc(res.Steps, outbound) {
+			t.Errorf("pod address under an outbound deny: verdict %s, want %s (%v)", res.Verdict, want, stepKinds(t, res))
+		}
 	}
 	for _, ip := range []string{"172.30.12.7", "172.30.0.10"} {
 		if res := alone.Trace(nil, plain, nil, ip, "TCP", 443); res.Verdict != "Conditional" {
@@ -543,5 +548,39 @@ func TestTraceForgedOwnerReference(t *testing.T) {
 	}
 	if key, _ := s.primaryDomain("tenant-c"); key != "cudn:shared" {
 		t.Errorf("a proven reference must still publish: tenant-c on %s", key)
+	}
+}
+
+// A pod address on the source's own network is a VM: traced by address it
+// answers as traced by name, its ingress walked, when the caller sees that
+// VM; otherwise its ingress is unread and the answer is Conditional, worded
+// alike for every such address.
+func TestTracePodAddressWalksIngress(t *testing.T) {
+	s := New(nil, nil)
+	s.routeAds.Store(routeAdsAbsent)
+	s.clusterNet, s.svcNet = parsePrefixes([]string{"10.128.0.0/14"}), parsePrefixes([]string{"172.30.0.0/16"})
+	s.podNet = parsePrefixes([]string{"10.128.0.0/23"})
+	add(t, s.netpol, map[string]any{
+		"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
+		"metadata": map[string]any{"name": "deny-in", "namespace": "db"},
+		"spec":     map[string]any{"podSelector": map[string]any{}, "policyTypes": []any{"Ingress"}},
+	})
+	src := wl("plain", "legacy", nil, nil, "10.128.0.9")
+	dst := wl("db", "pg", nil, nil, "10.128.1.5")
+	byVM := s.Trace(nil, src, &dst, "", "TCP", 5432)
+	byIP := s.Trace(seeing(dst), src, nil, "10.128.1.5", "TCP", 5432)
+	if byVM.Verdict != "Deny" || byIP.Verdict != byVM.Verdict || !strings.Contains(connectivityStep(t, byIP).Note, "10.128.1.5 is pg in db") {
+		t.Errorf("by name %s, by address %s (%v)", byVM.Verdict, byIP.Verdict, stepKinds(t, byIP))
+	}
+	var want string
+	for _, ip := range []string{"10.128.1.5", "10.128.1.6"} {
+		res := s.Trace(nil, src, nil, ip, "TCP", 5432)
+		note := strings.ReplaceAll(connectivityStep(t, res).Note, ip, "<ip>")
+		if want == "" {
+			want = note
+		}
+		if res.Verdict != "Conditional" || note != want || !strings.Contains(note, "ingress rules cannot be read") {
+			t.Errorf("unseen pod %s: verdict %s, note %q", ip, res.Verdict, note)
+		}
 	}
 }

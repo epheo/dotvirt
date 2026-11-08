@@ -195,9 +195,9 @@ func (p placement) inCluster() bool { return p == placeSame || p == placePodMayb
 type TraceView struct {
 	Namespace func(name string) bool // the caller sees this namespace
 	Shared    bool                   // the caller sees every shared network, published to them or not
-	// Workload resolves an address to a VM the caller sees, from the
-	// snapshot; nil resolves none.
-	Workload func(netip.Addr) (TraceWorkload, bool)
+	// Workloads resolves an address to the VMs the caller sees that hold it,
+	// from the snapshot; nil resolves none.
+	Workloads func(netip.Addr) []TraceWorkload
 }
 
 // reads reports whether the caller may read a UDN or CUDN range: a UDN in a
@@ -274,8 +274,7 @@ func (s *Snapshot) clusterRange() []netip.Prefix {
 // place classifies addr for src, on primary network key. A service address
 // other than the API and DNS may belong to an isolated network wherever a
 // primary UDN or CUDN exists, and so may a default-network pod address: a
-// primary UDN's VMs keep a default-network interface OVN-K isolates, so only
-// a default-network VM the caller sees is certainly reachable there. From
+// primary UDN's VMs keep a default-network interface OVN-K isolates. From
 // the default network an address in a range the caller cannot read is as
 // reachable as any outside one; from another network an address the
 // infrastructure ranges cannot rule out stays unknown, the same for every
@@ -303,8 +302,6 @@ func (s *Snapshot) place(src TraceWorkload, key string, addr netip.Addr, view *T
 		return placeOverlay
 	case containsAddr(svc, addr) && !apiOrDNS(svc, addr) && beside:
 		return placeService
-	case onDefault && beside && s.defaultVM(view, addr):
-		return placeSame
 	case onDefault && beside && len(pods) == 0:
 		return placeUnknown
 	case onDefault && containsAddr(pods, addr):
@@ -333,21 +330,21 @@ func (s *Snapshot) onOwn(src TraceWorkload, key string, own []netip.Prefix) bool
 	return slices.ContainsFunc(src.IPs, func(ip string) bool { return containsIP(own, ip) })
 }
 
-// defaultVM reports whether addr is the primary address of a VM the caller
-// sees on the default network.
-func (s *Snapshot) defaultVM(view *TraceView, addr netip.Addr) bool {
-	if view == nil || view.Workload == nil {
-		return false
+// peer resolves addr to a VM the caller sees whose primary address it is on
+// network key.
+func (s *Snapshot) peer(view *TraceView, key string, addr netip.Addr) (TraceWorkload, bool) {
+	if view == nil || view.Workloads == nil {
+		return TraceWorkload{}, false
 	}
-	w, ok := view.Workload(addr)
-	if !ok {
-		return false
+	for _, w := range view.Workloads(addr) {
+		if k, _ := s.primaryOf(w); k == key && slices.ContainsFunc(w.IPs, func(ip string) bool {
+			a, err := netip.ParseAddr(ip)
+			return err == nil && a.Unmap() == addr
+		}) {
+			return w, true
+		}
 	}
-	key, _ := s.primaryOf(w)
-	return key == "default" && slices.ContainsFunc(w.IPs, func(ip string) bool {
-		a, err := netip.ParseAddr(ip)
-		return err == nil && a.Unmap() == addr
-	})
+	return TraceWorkload{}, false
 }
 
 // apiOrDNS reports whether addr is a service address every network reaches:

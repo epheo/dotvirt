@@ -59,6 +59,12 @@ func (s *Snapshot) Trace(view *TraceView, src TraceWorkload, dst *TraceWorkload,
 	}
 
 	path := s.externalConnectivity(src, dstIP, view)
+	if path.peer != nil {
+		// A pod address a visible VM holds is that VM: its ingress decides too.
+		res = s.Trace(view, src, path.peer, "", protocol, port)
+		res.Steps[0].Note = dstIP + " is " + path.peer.Name + " in " + path.peer.Namespace + ". " + res.Steps[0].Note
+		return res
+	}
 	res.Steps = append(res.Steps, path.steps...)
 	if path.decided != "" {
 		res.Verdict = path.decided
@@ -83,9 +89,9 @@ func (s *Snapshot) Trace(view *TraceView, src TraceWorkload, dst *TraceWorkload,
 		res.Verdict = "Conditional" // the guest may route the flow out its VLAN NIC
 	}
 	switch path.place {
-	case placePodMaybe, placeService, placeOverlay, placeUnknown:
+	case placeSame, placePodMaybe, placeService, placeOverlay, placeUnknown:
 		if res.Verdict == "Allow" {
-			res.Verdict = "Conditional" // the address may be a workload or service no path reaches
+			res.Verdict = "Conditional" // a pod whose ingress is unread, or a workload or service no path reaches
 		}
 	}
 	// A service flow is DNATed into the pod subnets the EgressFirewall
@@ -428,13 +434,15 @@ func (s *Snapshot) connectivity(src, dst TraceWorkload) (decided string, steps [
 
 // egressPath frames a flow to a bare address. decided is the verdict when no
 // policy walk applies; vlan reports a VLAN NIC, which leaves a cluster Deny
-// inconclusive; place is where the address lies, for a primary NIC, and
-// service whether it is a service address.
+// inconclusive; place is where the address lies, for a primary NIC, peer the
+// visible VM a pod address resolves to, and service whether it is a service
+// address.
 type egressPath struct {
 	steps   []model.TraceStep
 	decided string
 	vlan    bool
 	place   placement
+	peer    *TraceWorkload
 	service bool
 }
 
@@ -459,7 +467,7 @@ func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string, view *T
 	p := egressPath{vlan: len(bypasses) > 0}
 	switch {
 	case cluster:
-		p.steps, p.decided, p.place = s.primaryPath(src, dstIP, p.vlan, view)
+		p.steps, p.decided, p.place, p.peer = s.primaryPath(src, dstIP, p.vlan, view)
 		if a, err := netip.ParseAddr(dstIP); err == nil {
 			p.service = containsAddr(s.serviceRange(), a.Unmap())
 		}
@@ -479,14 +487,16 @@ func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string, view *T
 }
 
 // primaryPath frames a flow out of the primary NIC by where the address
-// lies. In the source's own network's range or outside the cluster, the
+// lies. A pod address on the source's own network that a VM the caller sees
+// holds resolves to that VM, whose ingress the trace then walks too; any
+// other is Conditional, its ingress unread. In the source's own network's range or outside the cluster, the
 // egress controls decide. In the default network's range, the source on
 // another, there is no path; route advertisement that may join the networks,
 // a VLAN NIC, or a secondary NIC whose range may hold the address leaves that
 // inconclusive. A service address another network may serve, an address in
 // another network's range the caller reads, or one an unknown range leaves
 // unplaced may be a workload or service no path reaches.
-func (s *Snapshot) primaryPath(src TraceWorkload, dstIP string, vlan bool, view *TraceView) (steps []model.TraceStep, decided string, where placement) {
+func (s *Snapshot) primaryPath(src TraceWorkload, dstIP string, vlan bool, view *TraceView) (steps []model.TraceStep, decided string, where placement, peer *TraceWorkload) {
 	reach := model.TraceStep{Stage: "connectivity", Action: "Reachable",
 		Note: "Cluster egress path to " + dstIP + ", evaluated against the source's egress controls."}
 	key, name := s.primaryOf(src)
@@ -496,6 +506,11 @@ func (s *Snapshot) primaryPath(src TraceWorkload, dstIP string, vlan bool, view 
 		addr = addr.Unmap()
 		where = s.place(src, key, addr, view)
 	}
+	if where.inCluster() {
+		if w, ok := s.peer(view, key, addr); ok {
+			return nil, "", where, &w
+		}
+	}
 	switch where {
 	case placeIsolated:
 		joinable := s.mayJoin()
@@ -503,15 +518,16 @@ func (s *Snapshot) primaryPath(src TraceWorkload, dstIP string, vlan bool, view 
 			Note: fmt.Sprintf("%s is on %s, isolated from the cluster default network, which holds %s.", src.Name, name, dstIP) + joinNote(joinable)}
 		if seg := s.secondaryHolding(src, addr); seg != "" {
 			return []model.TraceStep{cut, {Stage: "segment", Action: "Bypass", Conditional: true,
-				Note: "NIC on network " + seg + " may hold " + dstIP + " - the guest can reach it there, around every control evaluated here."}}, "Conditional", where
+				Note: "NIC on network " + seg + " may hold " + dstIP + " - the guest can reach it there, around every control evaluated here."}}, "Conditional", where, nil
 		}
 		if vlan || joinable {
-			return []model.TraceStep{cut}, "Conditional", where
+			return []model.TraceStep{cut}, "Conditional", where, nil
 		}
 		cut.Decisive = true
-		return []model.TraceStep{cut}, "Unreachable", where
+		return []model.TraceStep{cut}, "Unreachable", where, nil
 	case placeSame:
-		reach.Note = dstIP + " is on " + name + ", the source's own network: evaluated against its egress rules; the outbound rules and egress planes bind only traffic leaving the cluster."
+		reach.Conditional = true
+		reach.Note = dstIP + " is a pod address on " + name + ", the source's own network, held by no VM visible here: its ingress rules cannot be read."
 	case placePodMaybe:
 		reach.Conditional = true
 		reach.Note = dstIP + " is a pod address on the cluster default network, but no VM visible here: a primary user-defined network's VMs keep one there, which OVN-Kubernetes isolates."
@@ -528,7 +544,7 @@ func (s *Snapshot) primaryPath(src TraceWorkload, dstIP string, vlan bool, view 
 		reach.Note = dstIP + " may be a workload or service on a network isolated from " + name +
 			", which no path reaches; that cannot be ruled out here."
 	}
-	return []model.TraceStep{reach}, "", where
+	return []model.TraceStep{reach}, "", where, nil
 }
 
 // joinNote words why isolated primaries are not certainly apart: OVN-K

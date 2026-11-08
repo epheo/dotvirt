@@ -117,7 +117,8 @@ func (s *Server) traceView(r *http.Request, sc scope) *netstate.TraceView {
 	return &netstate.TraceView{
 		Namespace: func(ns string) bool { return visible[ns] },
 		Shared:    s.seesAllNetworks(ctx, sc.id, sc.cluster),
-		Workload: func(addr netip.Addr) (netstate.TraceWorkload, bool) {
+		Workloads: func(addr netip.Addr) []netstate.TraceWorkload {
+			var out []netstate.TraceWorkload
 			live := s.state.Live()
 			for ns := range visible {
 				for name, vm := range live[ns] {
@@ -125,11 +126,13 @@ func (s *Server) traceView(r *http.Request, sc scope) *netstate.TraceView {
 						a, err := netip.ParseAddr(ip)
 						return err == nil && a.Unmap() == addr
 					}) {
-						return s.traceWorkload(ns, name)
+						if w, ok := s.traceWorkload(ns, name); ok {
+							out = append(out, w)
+						}
 					}
 				}
 			}
-			return netstate.TraceWorkload{}, false
+			return out
 		},
 	}
 }
