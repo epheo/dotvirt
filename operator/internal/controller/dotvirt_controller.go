@@ -11,15 +11,21 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/deps"
@@ -476,6 +482,29 @@ func (r *DotvirtReconciler) waitPhase(dv *dotvirtv1alpha1.Dotvirt, condType, rea
 	return &ctrl.Result{RequeueAfter: requeue}
 }
 
+// CacheByObject scopes the manager's cache: the watched kinds only where they
+// carry the instance label, so the operator never holds every Secret in the
+// cluster in memory, and namespaces only where they carry the project label,
+// the ones tenant AppProjects derive from. A namespace that loses the label
+// leaves the cache, which reads as its deletion.
+func CacheByObject(plat platform.Platform) map[client.Object]cache.ByObject {
+	hasInstance, _ := labels.NewRequirement(install.InstanceLabel, selection.Exists, nil)
+	instanceOnly := cache.ByObject{Label: labels.NewSelector().Add(*hasInstance)}
+	hasProject, _ := labels.NewRequirement(install.ProjectLabel, selection.Exists, nil)
+	byObject := map[client.Object]cache.ByObject{
+		&corev1.Secret{}:     instanceOnly,
+		&appsv1.Deployment{}: instanceOnly,
+		&corev1.Namespace{}:  {Label: labels.NewSelector().Add(*hasProject)},
+	}
+	// Registering the Route kind on vanilla Kubernetes fails the cache's REST lookup.
+	if plat == platform.OpenShift {
+		route := &unstructured.Unstructured{}
+		route.SetGroupVersionKind(install.RouteGVK)
+		byObject[route] = instanceOnly
+	}
+	return byObject
+}
+
 // SetupWithManager registers the reconciler; r.Platform must already be set
 // (main.go detects it, failing startup rather than guessing).
 func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -491,7 +520,12 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&dotvirtv1alpha1.Dotvirt{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("dotvirt").
 		Owns(&appsv1.Deployment{}).
-		Owns(&corev1.Secret{})
+		Owns(&corev1.Secret{}).
+		// A project's namespaces and repo are its AppProject's destinations and
+		// source, so a project namespace appearing, leaving or changing either
+		// re-derives them.
+		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.installs),
+			builder.WithPredicates(predicate.Funcs{UpdateFunc: tenancyChanged}))
 	// Routes exist only where the route API does, so gate the watch on the same
 	// platform detection that gates rendering them; on vanilla Kubernetes the
 	// informer could never sync. Unstructured because the module carries no
@@ -502,6 +536,28 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		b = b.Owns(route)
 	}
 	return b.Complete(r)
+}
+
+// installs enqueues every install: a project namespace is an input to each.
+func (r *DotvirtReconciler) installs(ctx context.Context, _ client.Object) []reconcile.Request {
+	var list dotvirtv1alpha1.DotvirtList
+	if err := r.List(ctx, &list); err != nil {
+		logf.FromContext(ctx).Error(err, "list installs for a project namespace event")
+		return nil
+	}
+	reqs := make([]reconcile.Request, 0, len(list.Items))
+	for i := range list.Items {
+		reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
+	}
+	return reqs
+}
+
+// tenancyChanged passes a namespace update that moves its project or repo; the
+// rest of a namespace's churn says nothing about tenancy.
+func tenancyChanged(e event.UpdateEvent) bool {
+	o, n := e.ObjectOld, e.ObjectNew
+	return o.GetLabels()[install.ProjectLabel] != n.GetLabels()[install.ProjectLabel] ||
+		o.GetAnnotations()[install.RepoAnnotation] != n.GetAnnotations()[install.RepoAnnotation]
 }
 
 // writeStatus persists the pass's status as a merge patch diffed against base,
