@@ -915,8 +915,8 @@ export interface NetworkCaps {
    */
   baselineAdminNetworkPolicy: boolean;
   /**
-   * Platform is the platform tier's shared reads (its history, proposals and
-   * revert): ClusterCaps.PlatformRead, as of this pull.
+   * Platform is ClusterCaps.PlatformRead: the platform tier's shared reads
+   * (its history, proposals and revert).
    */
   platform: boolean;
 }
