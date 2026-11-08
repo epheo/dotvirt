@@ -1,15 +1,22 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { CircleAlert, GitPullRequest } from '@lucide/svelte';
 	import { isStaged, toastStageResult } from '#lib/actions.js';
 	import { api, Unauthorized, vmKey, vmRef, type DraftView, type VM } from '#lib/api.js';
 	import { bulkOutcome } from '#lib/bulk.js';
+	import { bytes, plural } from '#lib/format.js';
 	import { vmEditGate, vmGate, type Gate } from '#lib/gates.js';
+	import { hostState, hostsAttention, vmHeadline, vmStats, type Headline } from '#lib/headline.js';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '#lib/lenses.js';
-	import { containerTabs, vmHref, type Section } from '#lib/nav.js';
+	import { metricsGap } from '#lib/metrics.js';
+	import { containerTabs, vmHref } from '#lib/nav.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
+	import { hostFacts } from '#lib/state/hosts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import AdoptBanner from '#lib/components/AdoptBanner.svelte';
 	import Breadcrumb from '#lib/components/Breadcrumb.svelte';
@@ -18,6 +25,7 @@
 	import ContainerConfigure from '#lib/components/ContainerConfigure.svelte';
 	import ContainerMonitor from '#lib/components/ContainerMonitor.svelte';
 	import EffectivePolicyPanel from '#lib/components/EffectivePolicyPanel.svelte';
+	import NodeActions from '#lib/components/NodeActions.svelte';
 	import RepoBanner from '#lib/components/RepoBanner.svelte';
 	import PageHeader from '#lib/components/PageHeader.svelte';
 	import Permissions from '#lib/components/Permissions.svelte';
@@ -28,31 +36,31 @@
 	import BulkDeleteConfirm from './BulkDeleteConfirm.svelte';
 	import HostsRootSummary from './HostsRootSummary.svelte';
 	import NodeConfigure from './NodeConfigure.svelte';
-	import TabPane from '#lib/components/TabPane.svelte';
 
 	// The container workspace: every inventory level, section roots included,
-	// gets the same breadcrumb + tab chrome. Roots differ only in what their
-	// Summary shows (cluster capacity, the host fleet, the network topology, the
-	// storage classes). The tab SET follows the object kind: compute containers
-	// carry the full set, hosts drop Permissions (nodes aren't namespaced),
-	// networks and storage classes are fact sheets (Summary + their VMs).
+	// gets the same breadcrumb, header and tab chrome over the grey ground.
+	// Roots differ only in what their Summary shows (cluster capacity, the host
+	// fleet). The tab SET follows the object kind: compute containers carry the
+	// full set, hosts drop Permissions (nodes aren't namespaced).
 	let {
 		scope,
 		section,
 		trail,
 	}: {
 		scope: Scope;
-		// The section this workspace serves; only a root ('all' scope) needs it
-		// to pick its Summary, but every route names it so the chrome can't drift.
-		section: Exclude<Section, 'catalog'>;
+		// The section this workspace serves: a root ('all' scope) picks its
+		// Summary and header by it, and every route names it so the chrome
+		// can't drift.
+		section: 'compute' | 'hosts';
+		// A root's trail is the section alone; the tab in view is appended.
 		trail: { label: string; href?: string }[];
 	} = $props();
 	const root = $derived(scope.kind === 'all');
 
-	const tabs = $derived(containerTabs(scope, section));
+	const tabSet = $derived(containerTabs(scope, section));
 	const tab = $derived.by(() => {
 		const t = page.url.searchParams.get('tab');
-		return tabs.some((x) => x.id === t) ? t! : 'summary';
+		return tabSet.some((x) => x.id === t) ? t! : 'summary';
 	});
 
 	// VMs in the current scope, feeding the grid. Network/storage membership uses
@@ -98,23 +106,97 @@
 	);
 	const scopedNamespaces = $derived([...new Set(scopedVMs.map((v) => v.namespace))]);
 
-	// A compute container names itself above its tabs: what it is, and how
-	// many VMs it holds in what.
-	const plural = (n: number, one: string) =>
-		`${n.toLocaleString('en-US')} ${one}${n === 1 ? '' : 's'}`;
-	const heading = $derived.by(() => {
+	const tabs = $derived(
+		tabSet.map((t) => ({ ...t, count: t.id === 'vms' ? scopedVMs.length : undefined })),
+	);
+	const crumbs = $derived(
+		root ? [...trail, { label: tabSet.find((t) => t.id === tab)?.label ?? 'Summary' }] : trail,
+	);
+
+	// What the Hosts pages read about their hosts, shared by the header and
+	// the Summary so each is asked once per page.
+	const node = $derived(scope.kind === 'node' ? scope.node : '');
+	const facts = hostFacts({
+		on: () => section === 'hosts',
+		node: () => node,
+		live: () => tab === 'summary',
+	});
+	const nodes = $derived(facts.nodes.failed ? null : facts.nodes.data);
+	const capacity = $derived(
+		facts.cap.failed || !facts.cap.data || metricsGap(facts.cap.data.unavailable)
+			? null
+			: facts.cap.data,
+	);
+	const nodeInfo = $derived(facts.info.failed ? null : facts.info.data);
+
+	// What the scope's VMs are doing, for the header; the Hosts root counts
+	// hosts instead. "In a change" is staged or in an open PR, the same set as
+	// the VMs tab's chip.
+	const vmHeader = $derived(!(root && section === 'hosts'));
+	$effect(() => {
+		inventory.proposalsKey;
+		if (vmHeader) untrack(() => reviewCache.loadProposals(inventory.proposals));
+	});
+	const inPRs = $derived(reviewCache.vmPRs(inventory.proposals));
+	const issueKeys = $derived(new Set(inventory.issues.map((i) => i.scope)));
+	const stats = $derived(
+		vmHeader
+			? vmStats(scopedVMs, issueKeys, (k) => drafts.stagedByKey.has(k) || inPRs.has(k))
+			: null,
+	);
+
+	// The header names the scope, says how it stands, and how big it is: a
+	// compute container by its VMs, a host by its state, the Hosts root by the
+	// hosts that need a person.
+	const head = $derived.by((): { title: string; status: Headline | null; context: string } => {
 		const sc = scope;
 		const vms = plural(scopedVMs.length, 'VM');
-		if (sc.kind === 'namespace') return { title: sc.namespace, context: `${vms} in ${sc.project}` };
+		if (sc.kind === 'node') {
+			const listed = nodes?.find((n) => n.name === sc.node);
+			const flags = {
+				ready: listed?.ready,
+				unschedulable: nodeInfo?.unschedulable ?? listed?.unschedulable,
+				maintenance: nodeInfo?.maintenance ?? listed?.maintenance,
+			};
+			// Readiness is the node list's alone: without it, only a cordon or
+			// maintenance the host's own read reports is said.
+			const st = listed || flags.maintenance || flags.unschedulable ? hostState(flags) : null;
+			const c = capacity?.nodes.find((n) => n.node === sc.node);
+			return {
+				title: sc.node,
+				status: st && { tone: st.tone, text: st.label },
+				context: [
+					vms,
+					c ? plural(Math.round(c.cpuAllocatable), 'core') : '',
+					c ? `${bytes(c.memAllocatable)} memory` : '',
+				]
+					.filter(Boolean)
+					.join(', '),
+			};
+		}
+		if (sc.kind === 'all' && section === 'hosts') {
+			const names = new Set((nodes ?? []).map((n) => n.name));
+			for (const v of scopedVMs) if (v.nodeName) names.add(v.nodeName);
+			return {
+				title: 'Hosts',
+				status: nodes ? hostsAttention(nodes) : null,
+				context: `${plural(names.size, 'host')}, ${vms}`,
+			};
+		}
+		const status = stats && vmHeadline(stats);
+		if (sc.kind === 'namespace')
+			return { title: sc.namespace, status, context: `${vms} in ${sc.project}` };
 		if (sc.kind === 'project') {
 			const p = inventory.projects.find((x) => x.name === sc.project);
 			return {
 				title: sc.project,
+				status,
 				context: `${vms} in ${plural(p?.namespaces.length ?? 0, 'namespace')}`,
 			};
 		}
 		return {
 			title: 'All VMs',
+			status,
 			context: `${vms} in ${plural(inventory.projects.length, 'project')}`,
 		};
 	});
@@ -220,88 +302,128 @@
 	}
 </script>
 
-{#if section === 'compute'}
-	<div class="flex flex-col gap-2 px-4 pt-4">
-		<!-- A root has no ancestor to walk up to; its title says where it is. -->
-		{#if trail.length > 1}<Breadcrumb {trail} />{/if}
-		<PageHeader title={heading.title} context={heading.context} />
-		<TabBar {tabs} active={tab} href={(t) => `?tab=${t}`} />
-	</div>
-{:else}
-	<Breadcrumb class="border-b border-line px-4 py-2" {trail} />
-
-	<TabBar class="px-4" {tabs} active={tab} href={(t) => `?tab=${t}`} />
-{/if}
-
-{#if tab === 'summary'}
-	{#if root && section === 'hosts'}
-		<HostsRootSummary vms={scopedVMs} />
-	{:else}
-		{#if scope.kind === 'project' || scope.kind === 'namespace'}
-			<RepoBanner project={scope.project} />
-			<AdoptBanner
-				project={scope.project}
-				namespace={scope.kind === 'namespace' ? scope.namespace : undefined}
-			/>
+{#snippet context()}
+	<span class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]">
+		<span class="text-ink-faint">{head.context}</span>
+		{#if scope.kind === 'node' && stats?.issues}
+			<a href="?tab=vms" class="inline-flex items-center gap-1.5 text-danger-ink hover:underline"
+				><CircleAlert size={14} />{plural(stats.issues, 'VM')} with issues</a
+			>
 		{/if}
-		<TabPane>
-			<ClusterSummary
-				scope={containerScope}
-				vms={scopedVMs}
-				onselect={openVM}
-				total={section !== 'compute'}
-			/>
-		</TabPane>
-	{/if}
-{:else if tab === 'monitor'}
-	<TabPane>
-		<ContainerMonitor namespaces={scopedNamespaces} scope={containerScope} onselect={openVM} />
-	</TabPane>
-{:else if tab === 'permissions'}
-	<TabPane class="p-4">
-		<Permissions namespaces={scopedNamespaces} />
-	</TabPane>
-{:else if tab === 'configure'}
-	{#if scope.kind === 'node'}
-		<NodeConfigure node={scope.node} vms={scopedVMs} />
-	{:else}
-		<ContainerConfigure projects={cfgProjects} cluster={root && section === 'hosts'} />
-	{/if}
-{:else if tab === 'security'}
-	{#if scope.kind === 'namespace'}
-		<TabPane class="p-4">
-			<EffectivePolicyPanel namespace={scope.namespace} />
-		</TabPane>
-	{/if}
-{:else}
-	{#if picked.size > 0}
-		<BulkActionsBar
-			count={picked.size}
-			busy={bulkOp.busy}
-			{powerWhy}
-			{deleteWhy}
-			onpower={bulkPower}
-			ondelete={() => (confirmingBulkDelete = true)}
-			onclear={() => (picked = new Set())}
+		{#if stats?.inChange}
+			<a href="?tab=vms" class="inline-flex items-center gap-1.5 text-accent-ink hover:underline"
+				><GitPullRequest size={14} />{stats.inChange.toLocaleString('en-US')} in a change</a
+			>
+		{/if}
+	</span>
+{/snippet}
+
+{#snippet hostActions()}
+	{#if nodeInfo}
+		<NodeActions
+			{node}
+			vms={scopedVMs}
+			info={nodeInfo}
+			onchange={() => Promise.all([facts.info.refresh(), facts.nodes.refresh()])}
 		/>
 	{/if}
-	<div class="flex min-h-0 flex-1">
-		<div class="min-w-0 flex-1">
-			<VMTable
-				vms={scopedVMs}
-				bind:selected={picked}
-				staged={drafts.stagedByKey}
-				activeKey={peekVM ? peekKey : null}
-				onselect={(vm) => setPeek(peekKey === vmKey(vm) ? null : vm)}
-				onstagedopen={(vm) => (ui.modal = { kind: 'staged', vm: vmRef(vm) })}
-				oncontextvm={contextVM}
-			/>
-		</div>
-		{#if peekVM}
-			<Inspector vm={peekVM} onclose={() => setPeek(null)} />
-		{/if}
+{/snippet}
+
+<div class="flex min-h-0 flex-1 flex-col bg-canvas">
+	<div class="flex flex-col gap-2 px-6 pt-5">
+		<Breadcrumb trail={crumbs} />
+		<PageHeader
+			title={head.title}
+			status={head.status ?? undefined}
+			{context}
+			actions={scope.kind === 'node' ? hostActions : undefined}
+		/>
+		<TabBar {tabs} active={tab} href={(t) => `?tab=${t}`} />
 	</div>
-{/if}
+
+	{#if tab === 'vms'}
+		<div class="flex min-h-0 flex-1 flex-col px-6 pt-4 pb-7">
+			<section
+				aria-label="{head.title}, VMs"
+				class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-line bg-panel"
+			>
+				{#if picked.size > 0}
+					<BulkActionsBar
+						count={picked.size}
+						busy={bulkOp.busy}
+						{powerWhy}
+						{deleteWhy}
+						onpower={bulkPower}
+						ondelete={() => (confirmingBulkDelete = true)}
+						onclear={() => (picked = new Set())}
+					/>
+				{/if}
+				<div class="flex min-h-0 flex-1">
+					<div class="min-w-0 flex-1">
+						<VMTable
+							vms={scopedVMs}
+							bind:selected={picked}
+							staged={drafts.stagedByKey}
+							activeKey={peekVM ? peekKey : null}
+							onselect={(vm) => setPeek(peekKey === vmKey(vm) ? null : vm)}
+							onstagedopen={(vm) => (ui.modal = { kind: 'staged', vm: vmRef(vm) })}
+							oncontextvm={contextVM}
+						/>
+					</div>
+					{#if peekVM}
+						<Inspector vm={peekVM} onclose={() => setPeek(null)} />
+					{/if}
+				</div>
+			</section>
+		</div>
+	{:else}
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+		<div
+			class="min-h-0 flex-1 overflow-y-auto px-6 pt-4 pb-7"
+			role="region"
+			aria-label="{head.title}, {tab}"
+			tabindex="0"
+		>
+			{#if tab === 'summary'}
+				{#if root && section === 'hosts'}
+					<HostsRootSummary vms={scopedVMs} {facts} />
+				{:else}
+					{#if scope.kind === 'project' || scope.kind === 'namespace'}
+						<!-- The project's standing prompts, as callouts on the ground; the
+						     frame hides itself when neither has anything to say. -->
+						<div
+							class="mb-4 flex flex-col gap-2 [&:not(:has(*))]:hidden [&>*]:rounded-lg [&>*]:border"
+						>
+							<RepoBanner project={scope.project} />
+							<AdoptBanner
+								project={scope.project}
+								namespace={scope.kind === 'namespace' ? scope.namespace : undefined}
+							/>
+						</div>
+					{/if}
+					<ClusterSummary
+						scope={containerScope}
+						vms={scopedVMs}
+						onselect={openVM}
+						hosts={section === 'hosts' ? facts : undefined}
+					/>
+				{/if}
+			{:else if tab === 'monitor'}
+				<ContainerMonitor namespaces={scopedNamespaces} scope={containerScope} onselect={openVM} />
+			{:else if tab === 'permissions'}
+				<Permissions namespaces={scopedNamespaces} />
+			{:else if tab === 'configure'}
+				{#if scope.kind === 'node'}
+					<NodeConfigure node={scope.node} vms={scopedVMs} />
+				{:else}
+					<ContainerConfigure projects={cfgProjects} cluster={root && section === 'hosts'} />
+				{/if}
+			{:else if tab === 'security' && scope.kind === 'namespace'}
+				<EffectivePolicyPanel namespace={scope.namespace} />
+			{/if}
+		</div>
+	{/if}
+</div>
 
 {#if bulkCtx}
 	<BulkActionsMenu

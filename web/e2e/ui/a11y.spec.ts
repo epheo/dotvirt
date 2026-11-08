@@ -30,7 +30,10 @@ test('inventory surfaces are accessible', async ({ page }) => {
 	await checkA11y(page, 'compute summary (dark)');
 	await page.emulateMedia({ colorScheme: 'light' });
 
-	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
+	await page
+		.locator('main')
+		.getByRole('link', { name: /^VMs [\d,]+$/ })
+		.click();
 	await checkA11y(page, 'vm table');
 
 	await openVM(page, 'web-1');
@@ -55,7 +58,10 @@ test('networking and security surfaces are accessible', async ({ page }) => {
 test('a VM opens by keyboard alone', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);
-	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
+	await page
+		.locator('main')
+		.getByRole('link', { name: /^VMs [\d,]+$/ })
+		.click();
 	// The name cell is a real link, so Tab reaches it and Enter opens it — the
 	// row's mouse onclick alone left keyboard users no way in.
 	const link = page.locator('main tbody').getByRole('link', { name: 'web-1' });

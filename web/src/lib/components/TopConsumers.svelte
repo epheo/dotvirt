@@ -56,7 +56,7 @@
 					<td class="max-w-0 truncate py-2 pr-3 pl-card">
 						<button
 							onclick={() => onselect?.(c.namespace, c.name)}
-							class="text-ink hover:text-accent-ink hover:underline">{c.name}</button
+							class="font-mono text-ink hover:text-accent-ink hover:underline">{c.name}</button
 						>
 						<span class="ml-1 text-ink-muted">{c.namespace}</span>
 					</td>

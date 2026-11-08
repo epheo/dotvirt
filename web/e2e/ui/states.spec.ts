@@ -46,7 +46,7 @@ test('Pending is a waiting state, never a failure', async ({ page }) => {
 	// NotTracked here made adoption look failed (the bug that minted the state).
 	await page.locator('aside').getByText('db-prod').click();
 	const main = page.locator('main');
-	await main.getByRole('link', { name: 'VMs', exact: true }).click();
+	await main.getByRole('link', { name: /^VMs [\d,]+$/ }).click();
 	const row = main.locator('tbody tr', { hasText: 'db-2' });
 	await expect(row).toContainText('Pending');
 	await expect(row).not.toContainText('Not in git');
@@ -59,7 +59,7 @@ test('untracked VM in a healthy project offers adoption where the user is', asyn
 	await expect(main.getByText(/not described in git/)).toBeVisible();
 	await expect(main.getByRole('button', { name: 'Adopt into git' })).toBeVisible();
 	// And the VM row itself says what it is.
-	await main.getByRole('link', { name: 'VMs', exact: true }).click();
+	await main.getByRole('link', { name: /^VMs [\d,]+$/ }).click();
 	await expect(main.locator('tbody tr', { hasText: 'legacy-1' })).toContainText('Not in git');
 });
 

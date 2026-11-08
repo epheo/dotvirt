@@ -8,13 +8,28 @@
 	// The Summary lane of the issues plane: standing problems in this scope,
 	// derived from the live stream - no fetch of its own. Rendered even when
 	// clean so "no issues" is a stated fact, not an absence; the count outside
-	// the scope keeps it honest against the header's total.
+	// the scope keeps it honest against the header's total. A host's scope is
+	// the VMs placed on it and the problems that name it.
 	let {
 		scope = {},
+		host,
 		label = 'this scope',
-	}: { scope?: { project?: string; namespace?: string }; label?: string } = $props();
+	}: {
+		scope?: { project?: string; namespace?: string };
+		host?: { name: string; vms: ReadonlySet<string> };
+		label?: string;
+	} = $props();
 
-	const issues = $derived(issuesInScope(inventory.issues, scope));
+	const names = $derived(
+		host && new RegExp(`\\b${host.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`),
+	);
+	const issues = $derived(
+		host && names
+			? inventory.issues.filter(
+					(i) => host.vms.has(i.scope) || names.test(`${i.label} ${i.detail ?? ''}`),
+				)
+			: issuesInScope(inventory.issues, scope),
+	);
 	const elsewhere = $derived(inventory.issues.filter((i) => !issues.includes(i)));
 	const MAX = 6;
 </script>

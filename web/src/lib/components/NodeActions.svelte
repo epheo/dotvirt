@@ -1,203 +1,163 @@
 <script lang="ts">
 	import { Ban, CheckCircle2, LogOut, MoveRight, Wrench } from '@lucide/svelte';
 	import { api, type NodeInfo, type VM } from '#lib/api.js';
-	import { action, resource } from '#lib/resource.svelte.js';
+	import { plural } from '#lib/format.js';
+	import { hostGate } from '#lib/gates.js';
+	import { action } from '#lib/resource.svelte.js';
+	import { ui } from '#lib/state/ui.svelte.js';
 	import Button from './Button.svelte';
-	import Card from './Card.svelte';
+	import Consequence from './Consequence.svelte';
+	import StageChip from './StageChip.svelte';
 
-	// Host maintenance: entering flips
-	// the node's maintenance annotation + cordon in one server patch, then one
+	// A host's maintenance verbs, for its page header. Entering flips the
+	// node's maintenance annotation + cordon in one server patch, then one
 	// evacuate call sweeps EVERY running VM off the node - the server reads the
 	// full snapshot, so VMs outside the caller's projects (invisible in `vms`)
 	// move too, while each migrate still runs under the caller's RBAC and lands
 	// in the action dock. `vms` is the live inventory stream, so the visible
 	// remaining count drains as migrations complete. Plain cordon stays as the
-	// lighter verb. Hidden unless the token may patch nodes.
+	// lighter verb. info is the host's own read; onchange reads it again.
 	let {
 		node,
 		vms,
+		info,
+		onchange,
 	}: {
 		node: string;
 		vms: VM[];
+		info: NodeInfo;
+		onchange: () => Promise<unknown>;
 	} = $props();
 
-	const op = action(); // one busy/error pair drives every maintenance verb
-	let confirming = $state(false);
-	let msg = $state(''); // success/summary line; op.error carries failures
-	let ok = $state(true); // false when an evacuation sweep had failures
+	const op = action({ toast: ui.toastError }); // one busy flag drives every verb
+	const gate = $derived(hostGate(info));
+	// Entering maintenance asks once more, in place, with what it will do.
+	let armed = $state(false);
+	$effect(() => {
+		void node;
+		armed = false;
+	});
 
 	const running = $derived(vms.filter((v) => v.phase === 'Running'));
 	// Not yet on the move: retry targets. An active migration would 409 a second one.
 	const pending = $derived(
 		running.filter((v) => !v.migration || v.migration.completed || v.migration.failed),
 	);
+	const draining = $derived(info.maintenance && running.length > 0);
 
-	// no node-read RBAC -> panel stays hidden (failed maps to null)
-	const infoRes = resource<NodeInfo>(
-		() => node,
-		() => api.nodeInfo(node),
-		{ reset: true },
-	);
-	const info = $derived(infoRes.failed ? null : infoRes.data);
-	const entering = $derived(!!info?.maintenance && running.length > 0);
-
-	async function toggleCordon() {
-		if (!info) return;
+	function toggleCordon() {
 		const cordon = !info.unschedulable;
-		msg = '';
-		if (
-			await op.run(async () => {
-				await api.setNodeCordon(node, cordon);
-				await infoRes.refresh();
-			})
-		) {
-			msg = info?.unschedulable ? 'Node cordoned — no new placements.' : 'Node uncordoned.';
-			ok = true;
-		}
+		op.run(async () => {
+			await api.setNodeCordon(node, cordon);
+			await onchange();
+			ui.showToast(cordon ? `${node} cordoned. No new VMs land there.` : `${node} uncordoned.`, {
+				kind: 'success',
+			});
+		});
 	}
 
 	// One server-side sweep per click: failures are tallied per VM, never
 	// aborting the sweep, and cordon already blocks new placements - stragglers
 	// get the Retry button.
-	async function evacuate(): Promise<string> {
+	async function evacuate(lead: string) {
 		const res = await api.evacuateNode(node);
-		ok = res.failures.length === 0;
 		const skipped = res.skipped ? `, ${res.skipped} already migrating` : '';
 		const failed = res.failures.length ? `, ${res.failures.length} failed` : '';
-		return `migration requested for ${res.requested} VM${res.requested === 1 ? '' : 's'}${skipped}${failed}`;
+		ui.showToast(
+			`${lead}: migration requested for ${plural(res.requested, 'VM')}${skipped}${failed}.`,
+			{ kind: res.failures.length ? 'error' : 'success' },
+		);
 	}
 
-	async function enterMaintenance() {
-		confirming = false;
-		msg = '';
-		await op.run(async () => {
+	function enterMaintenance() {
+		if (!armed) {
+			armed = true;
+			return;
+		}
+		armed = false;
+		op.run(async () => {
 			await api.setNodeMaintenance(node, true);
-			await infoRes.refresh();
+			await onchange();
 			// Always sweep: the node may hold VMs outside the caller's projects,
 			// which the visible `running` count cannot see.
-			msg = `Entering maintenance mode — ${await evacuate()}.`;
+			await evacuate(`${node} entering maintenance`);
 		});
 	}
 
-	async function retryEvacuation() {
-		msg = '';
-		await op.run(async () => {
-			msg = `Evacuation ${await evacuate()} ; watch the migrations under Recent Tasks.`;
+	function retryEvacuation() {
+		op.run(() => evacuate(`Evacuating ${node}`));
+	}
+
+	function exitMaintenance() {
+		op.run(async () => {
+			await api.setNodeMaintenance(node, false);
+			await onchange();
+			ui.showToast(`${node} left maintenance. New VMs can land there again.`, {
+				kind: 'success',
+			});
 		});
 	}
 
-	async function exitMaintenance() {
-		msg = '';
-		if (
-			await op.run(async () => {
-				await api.setNodeMaintenance(node, false);
-				await infoRes.refresh();
-			})
-		) {
-			msg = 'Maintenance mode exited — node is schedulable again.';
-			ok = true;
-		}
-	}
+	const disabled = $derived(op.busy || !gate.ok);
 </script>
 
-{#if info?.canCordon}
-	<Card title="Maintenance" flush class="max-w-2xl">
-		<div class="space-y-3 px-card py-3">
-			<div class="flex items-center gap-2 text-sm">
-				<span class="text-ink-muted">Status:</span>
-				{#if entering}
-					<span class="inline-flex items-center gap-1.5 font-medium text-warn-ink">
-						<Wrench size={14} /> Entering maintenance — {running.length} VM{running.length === 1
-							? ''
-							: 's'} still here
-					</span>
-				{:else if info.maintenance}
-					<span class="inline-flex items-center gap-1.5 font-medium text-warn-ink">
-						<Wrench size={14} /> Maintenance mode
-					</span>
-				{:else if info.unschedulable}
-					<span class="inline-flex items-center gap-1.5 font-medium text-warn-ink">
-						<Ban size={14} /> Cordoned
-					</span>
-				{:else}
-					<span class="inline-flex items-center gap-1.5 font-medium text-ok-ink">
-						<CheckCircle2 size={14} /> Schedulable
-					</span>
-				{/if}
-			</div>
-			{#if confirming}
-				<div class="space-y-2 rounded border border-line bg-inset p-2.5">
-					<p class="text-xs text-ink-soft">
-						Cordon <span class="font-mono">{node}</span> and live-migrate every running VM to other
-						hosts?
-						{#if running.length}
-							{running.length} of your VM{running.length === 1 ? ' is' : 's are'} here; VMs outside your
-							projects move too.
-						{:else}
-							None of your VMs are here, but VMs outside your projects move too.
-						{/if}
-					</p>
-					<div class="flex items-center gap-2">
-						<Button size="sm" onclick={enterMaintenance} disabled={op.busy}>
-							Enter Maintenance Mode
-						</Button>
-						<Button
-							variant="secondary"
-							size="sm"
-							onclick={() => (confirming = false)}
-							disabled={op.busy}
-						>
-							Cancel
-						</Button>
-					</div>
-				</div>
-			{:else}
-				<div class="flex flex-wrap items-center gap-2">
-					{#if info.maintenance}
-						<Button variant="secondary" size="sm" onclick={exitMaintenance} disabled={op.busy}>
-							<LogOut size={13} /> Exit Maintenance Mode
-						</Button>
-						<!-- Always offered: the node may still hold VMs outside the caller's
-						     projects, which `pending` cannot count. -->
-						<Button
-							variant="secondary"
-							size="sm"
-							onclick={retryEvacuation}
-							disabled={op.busy}
-							title="Live-migrate the VMs still on this node"
-						>
-							<MoveRight size={13} /> Retry evacuation{pending.length ? ` (${pending.length})` : ''}
-						</Button>
-					{:else}
-						<Button
-							variant="secondary"
-							size="sm"
-							onclick={() => (confirming = true)}
-							disabled={op.busy}
-							title="Cordon this node and live-migrate every running VM away"
-						>
-							<Wrench size={13} /> Enter Maintenance Mode
-						</Button>
-						<Button variant="secondary" size="sm" onclick={toggleCordon} disabled={op.busy}>
-							{#if info.unschedulable}<CheckCircle2 size={13} /> Uncordon{:else}<Ban size={13} /> Cordon{/if}
-						</Button>
-					{/if}
-				</div>
-			{/if}
-			<p class="text-xs text-ink-faint">
-				{#if info.maintenance}
-					Maintenance holds until you exit it, even if the node is uncordoned elsewhere.
-					Live-migration needs another schedulable host with capacity.
-				{:else}
-					Maintenance mode cordons the node and live-migrates its running VMs away. Cordon alone
-					stops new placements; running VMs stay.
-				{/if}
-			</p>
-			{#if op.error}
-				<p class="text-xs text-danger-ink">{op.error}</p>
-			{:else if msg}
-				<p class="text-xs {ok ? 'text-ink-soft' : 'text-danger-ink'}">{msg}</p>
-			{/if}
-		</div>
-	</Card>
-{/if}
+<div class="flex max-w-[460px] flex-col items-end gap-1.5">
+	<div class="flex flex-wrap items-center justify-end gap-2">
+		{#if info.maintenance}
+			<!-- Always offered: the node may still hold VMs outside the caller's
+			     projects, which `pending` cannot count. -->
+			<Button
+				variant="secondary"
+				onclick={retryEvacuation}
+				{disabled}
+				title={gate.why || 'Live-migrate the VMs still on this host'}
+				><MoveRight size={16} />Retry evacuation{pending.length
+					? ` (${pending.length})`
+					: ''}</Button
+			>
+			<Button variant="outline" onclick={exitMaintenance} {disabled} title={gate.why}
+				><LogOut size={16} />Exit maintenance</Button
+			>
+		{:else if armed}
+			<Button variant="ghost" onclick={() => (armed = false)} disabled={op.busy}>Cancel</Button>
+			<Button onclick={enterMaintenance} {disabled}><Wrench size={16} />Confirm maintenance</Button>
+		{:else}
+			<Button variant="secondary" onclick={toggleCordon} {disabled} title={gate.why}>
+				{#if info.unschedulable}<CheckCircle2 size={16} />Uncordon{:else}<Ban
+						size={16}
+					/>Cordon{/if}
+			</Button>
+			<Button
+				variant="outline"
+				onclick={enterMaintenance}
+				{disabled}
+				title={gate.why || 'Cordon this host and live-migrate every running VM away'}
+				><Wrench size={16} />Enter maintenance</Button
+			>
+		{/if}
+		<StageChip kind="now" />
+	</div>
+	{#if !gate.ok}
+		<p class="text-xs leading-4 text-ink-faint">{gate.why}</p>
+	{:else if armed}
+		<Consequence size="sm" tone="warn">
+			Cordons {node} and live-migrates {running.length
+				? `its ${plural(running.length, 'running VM')}`
+				: 'every running VM'} to other hosts. VMs outside your projects move too.
+		</Consequence>
+	{:else if draining}
+		<Consequence size="sm" tone="warn">
+			{plural(running.length, 'VM')} still here. Live migration needs another host with room.
+		</Consequence>
+	{:else if info.maintenance}
+		<Consequence size="sm">
+			Holds until you exit it, even if something else uncordons {node}.
+		</Consequence>
+	{:else if info.unschedulable}
+		<Consequence size="sm">Takes no new VMs; the VMs running here stay.</Consequence>
+	{:else}
+		<Consequence size="sm">
+			Maintenance moves its running VMs to other hosts. Cordon only stops new ones.
+		</Consequence>
+	{/if}
+</div>

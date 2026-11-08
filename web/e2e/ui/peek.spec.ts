@@ -6,7 +6,10 @@ import { expect, login, setScenario, test } from './fx';
 test('row click peeks; Enter expands; Esc closes', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);
-	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
+	await page
+		.locator('main')
+		.getByRole('link', { name: /^VMs [\d,]+$/ })
+		.click();
 	await page.locator('main tbody tr', { hasText: 'web-1' }).first().click();
 
 	const peek = page.getByRole('complementary', { name: 'VM inspector' });
@@ -35,7 +38,10 @@ test('row click peeks; Enter expands; Esc closes', async ({ page }) => {
 test('rows move by arrow keys; Enter peeks then expands; Space selects', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);
-	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
+	await page
+		.locator('main')
+		.getByRole('link', { name: /^VMs [\d,]+$/ })
+		.click();
 	// VM rows only: group headings are rows too, outside the tab order.
 	const rows = page.locator('main tbody tr[tabindex]');
 	await rows.first().focus();
@@ -59,7 +65,10 @@ test('rows move by arrow keys; Enter peeks then expands; Space selects', async (
 test('a peeked VM that leaves the scope closes its peek', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);
-	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
+	await page
+		.locator('main')
+		.getByRole('link', { name: /^VMs [\d,]+$/ })
+		.click();
 	await page.locator('main tbody tr', { hasText: 'web-1' }).first().click();
 	await expect(page.getByRole('complementary', { name: 'VM inspector' })).toBeVisible();
 

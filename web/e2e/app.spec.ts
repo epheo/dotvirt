@@ -22,7 +22,7 @@ test('shell + container workspace renders after login', async ({ page }) => {
 	// are links (?tab=), scoped to main — the tree carries links of its own.
 	const main = page.locator('main');
 	await expect(main.getByRole('link', { name: 'Summary', exact: true })).toBeVisible();
-	await expect(main.getByRole('link', { name: 'VMs', exact: true })).toBeVisible();
+	await expect(main.getByRole('link', { name: /^VMs [\d,]+$/ })).toBeVisible();
 	await expect(main.getByRole('link', { name: 'Monitor', exact: true })).toBeVisible();
 });
 
@@ -31,8 +31,8 @@ test('inventory sections switch tree and workspace', async ({ page }) => {
 	await expect(aside.getByRole('link', { name: 'Compute' })).toBeVisible();
 	await aside.getByRole('link', { name: 'Hosts' }).click();
 	await expect(page).toHaveURL(/\/hosts$/);
-	// The Hosts tree roots at All Nodes and groups VMs by node.
-	await expect(aside.getByText('All Nodes')).toBeVisible();
+	// The Hosts tree roots at All hosts and groups VMs by host.
+	await expect(aside.getByText('All hosts')).toBeVisible();
 	await aside.getByRole('link', { name: 'Storage', exact: true }).click();
 	await expect(page).toHaveURL(/\/storage$/);
 	await expect(aside.getByText('All projects')).toBeVisible();

@@ -2,8 +2,8 @@
 	import { api, type VMEvent } from '#lib/api.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import EventsTable from './EventsTable.svelte';
+	import Card from './Card.svelte';
 	import MetricsPanel from './MetricsPanel.svelte';
-	import TabBar from './TabBar.svelte';
 
 	let {
 		namespaces,
@@ -17,6 +17,10 @@
 	} = $props();
 
 	// Monitor sub-rail: events + performance, mirroring the VM detail's Monitor.
+	const VIEWS = [
+		{ id: 'events', label: 'Events' },
+		{ id: 'performance', label: 'Performance' },
+	] as const;
 	let view = $state<'events' | 'performance'>('events');
 
 	// Keyed on the namespace SET, not the array identity: the parent re-derives
@@ -35,16 +39,26 @@
 	);
 </script>
 
-<div class="p-4">
-	<TabBar
-		class="mb-3"
-		tabs={[
-			{ id: 'events', label: 'Events' },
-			{ id: 'performance', label: 'Performance' },
-		]}
-		active={view}
-		onchange={(v) => (view = v as typeof view)}
-	/>
+{#snippet views()}
+	<div
+		role="group"
+		aria-label="Show"
+		class="inline-flex overflow-hidden rounded-md border border-line"
+	>
+		{#each VIEWS as v, i (v.id)}
+			<button
+				type="button"
+				aria-pressed={view === v.id}
+				onclick={() => (view = v.id)}
+				class="px-2.5 py-1 {i ? 'border-l border-line' : ''} {view === v.id
+					? 'bg-select text-accent-ink'
+					: 'bg-panel text-ink-soft hover:bg-inset'}">{v.label}</button
+			>
+		{/each}
+	</div>
+{/snippet}
+
+<Card title={view === 'events' ? 'Events' : 'Performance'} actions={views}>
 	{#if view === 'performance'}
 		{#key `${scope.project ?? ''}|${scope.namespace ?? ''}|${scope.node ?? ''}`}
 			<MetricsPanel
@@ -66,4 +80,4 @@
 			{onselect}
 		/>
 	{/if}
-</div>
+</Card>
