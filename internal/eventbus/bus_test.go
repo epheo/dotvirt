@@ -3,6 +3,7 @@ package eventbus
 import (
 	"slices"
 	"testing"
+	"time"
 )
 
 // drained reports whether ch has a pending wake (and consumes it).
@@ -201,27 +202,72 @@ func TestMovedSince(t *testing.T) {
 	}
 }
 
-// A reader that sees KeySeq move sees the key that moved it: the mark lands
-// first. Version would not do: it moves before the key.
-func TestKeySeqTrailsTheMark(t *testing.T) {
+// A stamp of Version is never newer than the key levels a build reads after
+// it: while a publish's key state is still being written (the lock held, as a
+// long MovedSince scan holds it), Version has not moved, and once it has, the
+// keys have too. A hub stamping a frame with Version therefore never records
+// a level its build did not see.
+func TestVersionNeverLeadsTheKeys(t *testing.T) {
+	b := New()
+	l := &b.keys[RBACChanged]
+	l.mu.Lock()
+	done := make(chan struct{})
+	go func() {
+		b.PublishKey(RBACChanged, "x")
+		close(done)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	if v := b.Version(RBACChanged); v != 0 {
+		t.Errorf("Version moved to %d before the key state was written", v)
+	}
+	l.mu.Unlock()
+	<-done
+	if b.Version(RBACChanged) != 1 || b.KeySeq(RBACChanged) != 1 {
+		t.Fatalf("after the publish: Version %d, KeySeq %d", b.Version(RBACChanged), b.KeySeq(RBACChanged))
+	}
+}
+
+// Under concurrent publishes of both forms, every Version reading is covered
+// by the key levels read after it.
+func TestKeyLevelsCoverVersion(t *testing.T) {
 	b := New()
 	stop := make(chan struct{})
 	go func() {
 		defer close(stop)
-		for range 20000 {
-			b.PublishKey(RBACChanged, "x")
+		for i := range 20000 {
+			if i%3 == 0 {
+				b.Publish(RBACChanged)
+			} else {
+				b.PublishKey(RBACChanged, "x")
+			}
 		}
 	}()
-	for since := uint64(0); ; {
+	for {
 		select {
 		case <-stop:
 			return
 		default:
 		}
-		now := b.KeySeq(RBACChanged)
-		if now > since && b.MovedSince(RBACChanged, since, []string{"x"}) == nil {
-			t.Fatalf("KeySeq moved to %d, but x reads unmoved since %d", now, since)
+		v := b.Version(RBACChanged)
+		if levels := b.BroadVersion(RBACChanged) + b.KeySeq(RBACChanged); levels < v {
+			t.Fatalf("Version %d read ahead of the key levels %d", v, levels)
 		}
-		since = now
+	}
+}
+
+// A forgotten key reads as never published, and its next publish marks it
+// above every mark it had: a namespace deleted, forgotten, recreated and
+// moved once can never re-equal a stamp taken before.
+func TestForgetNeverReequalsAMark(t *testing.T) {
+	b := New()
+	b.PublishKey(RBACChanged, "x")
+	stamp := b.KeyMark(RBACChanged, "x")
+	b.Forget(RBACChanged, "x")
+	if b.KeyMark(RBACChanged, "x") != 0 || b.MovedSince(RBACChanged, 0, []string{"x"}) != nil {
+		t.Fatal("a forgotten key still reads published")
+	}
+	b.PublishKey(RBACChanged, "x")
+	if got := b.KeyMark(RBACChanged, "x"); got <= stamp {
+		t.Fatalf("the recreated key's first move marks %d, at or below the old stamp %d", got, stamp)
 	}
 }
