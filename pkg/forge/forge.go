@@ -206,7 +206,7 @@ func (c *Client) exists(path string) (bool, error) {
 	case ok2xx(status):
 		return true, nil
 	default:
-		return false, fmt.Errorf("forge GET %s: %s", path, statusText(status))
+		return false, &StatusError{Method: "GET", Path: path, Status: status}
 	}
 }
 
@@ -222,7 +222,8 @@ func (c *Client) do(method, path string, body, out any) error {
 }
 
 // StatusError is a forge answer outside 2xx, so a caller can tell a missing
-// repo (404) from an outage.
+// repo (404) from an outage. Status alone is safe to show anyone; Error()
+// carries the forge's API path and its own message, for logs only.
 type StatusError struct {
 	Method, Path string
 	Status       int
@@ -230,7 +231,11 @@ type StatusError struct {
 }
 
 func (e *StatusError) Error() string {
-	return fmt.Sprintf("forge %s %s: %s: %s", e.Method, e.Path, statusText(e.Status), e.Message)
+	s := fmt.Sprintf("forge %s %s: %s", e.Method, e.Path, statusText(e.Status))
+	if e.Message != "" {
+		s += ": " + e.Message
+	}
+	return s
 }
 
 // doRead is do returning the response headers.

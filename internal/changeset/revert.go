@@ -32,7 +32,7 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 	}
 	d, err := read.CommitDiff(hash)
 	if err != nil {
-		return model.ProposeResult{}, fmt.Errorf("%w: %v", model.ErrNotFound, err)
+		return model.ProposeResult{}, gitFailed(hash, err)
 	}
 	items, err := d.RevertItems()
 	if err != nil {

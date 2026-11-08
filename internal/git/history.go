@@ -216,6 +216,9 @@ var ErrNoBranch = fmt.Errorf("%w: branch not mirrored yet", model.ErrUnavailable
 // ErrNoFile: a commit's tree has no such file (FileAt).
 var ErrNoFile = errors.New("file not in the commit")
 
+// ErrNoCommit: the mirror holds no commit by that hash.
+var ErrNoCommit = errors.New("commit not in the mirror")
+
 // BranchDiff lists the YAML files head changed since it forked from base: the
 // diff from their merge base to head, which is what merging head introduces.
 // Without a common ancestor the diff is against base itself.
@@ -286,6 +289,9 @@ func (d CommitDiff) RevertItems() ([]ChangesetItem, error) {
 // commitAt resolves a full hash to its object in repo.
 func commitAt(repo *git.Repository, hash string) (*object.Commit, error) {
 	c, err := repo.CommitObject(plumbing.NewHash(hash))
+	if errors.Is(err, plumbing.ErrObjectNotFound) {
+		return nil, fmt.Errorf("%w: %s", ErrNoCommit, hash)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("commit %s: %w", hash, err)
 	}

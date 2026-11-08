@@ -85,7 +85,7 @@ func (r *Reader) Commit(proj project.ProjectInfo, hash string) (model.CommitDeta
 	}
 	d, err := read.CommitDiff(hash)
 	if err != nil {
-		return model.CommitDetail{}, fmt.Errorf("%w: %v", model.ErrNotFound, err)
+		return model.CommitDetail{}, gitFailed(hash, err)
 	}
 	r.nameByPR(&d.Commit, proj)
 	out := model.CommitDetail{Commit: d.Commit, Items: commitItems(d.Files)}
@@ -109,7 +109,7 @@ func (r *Reader) Proposal(proj project.ProjectInfo, number int) (model.ProposalD
 	}
 	pr, err := fc.PR(number)
 	if err != nil {
-		return model.ProposalDetail{}, fmt.Errorf("%w: pull request #%d: %v", model.ErrNotFound, number, err)
+		return model.ProposalDetail{}, forgeFailed(fmt.Sprintf("pull request #%d", number), err)
 	}
 	files, err := read.BranchDiff(r.baseBranch, pr.Head.Ref)
 	if errors.Is(err, git.ErrNoBranch) {

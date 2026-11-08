@@ -6,12 +6,17 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/changeset"
+	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/eventbus"
+	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/tasks"
@@ -461,5 +466,50 @@ func TestPlatformLaneReadWithNoTenantWatched(t *testing.T) {
 	}
 	if !s.platformBusy() {
 		t.Fatal("the frame should see the platform busy")
+	}
+}
+
+// A proposal's review asks the forge as dotvirt, so the caller reads what
+// failed and its class, never the forge's answer: no API path, host, body or
+// token. The forge refusing dotvirt is a 503, never the caller's 403.
+func TestProposalRouteNeverEchoesTheForge(t *testing.T) {
+	const token = "forge-token-7f3a"
+	var status atomic.Int32
+	forgeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"repo-internal-detail at `+r.URL.Path+` for `+r.Header.Get("Authorization")+`","url":"https://forge.internal.example/api/swagger"}`, int(status.Load()))
+	}))
+	t.Cleanup(forgeSrv.Close)
+	fc := newFakeCluster(t)
+	fc.namespaces[0].Annotations["dotvirt.io/repo"] = "file://" + seedPlatformRepo(t, map[string]string{"README.md": "seed\n"})
+	fc.readsVMs = func(_, ns string) bool { return ns == "team-a-dev" }
+	store, err := draft.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
+	c := changeset.New(store, repos, forge.NewFactory(forgeSrv.URL, forge.StaticToken(token), false, ""), nil, nil, nil, "main", "dotvirt/proposed")
+	s := fc.server(c, Config{BaseBranch: "main"})
+
+	for _, tc := range []struct {
+		forge, want int
+		says        string
+	}{
+		{http.StatusNotFound, http.StatusNotFound, "the forge has no pull request #7"},
+		{http.StatusForbidden, http.StatusServiceUnavailable, "the forge refused dotvirt (403)"},
+		{http.StatusInternalServerError, http.StatusServiceUnavailable, "the forge failed (500)"},
+	} {
+		status.Store(int32(tc.forge))
+		rec := do(s, "tenant", http.MethodGet, "/api/projects/team-a/proposals/7", "")
+		body := rec.Body.String()
+		if rec.Code != tc.want || !strings.Contains(body, tc.says) {
+			t.Errorf("forge %d: route = %d %q, want %d saying %q", tc.forge, rec.Code, body, tc.want, tc.says)
+		}
+		for _, leak := range []string{strings.TrimPrefix(forgeSrv.URL, "http://"), "/api/v1", "repo-internal-detail", "forge.internal.example", token} {
+			if strings.Contains(body, leak) {
+				t.Errorf("forge %d: response %q carries %q", tc.forge, body, leak)
+			}
+		}
 	}
 }

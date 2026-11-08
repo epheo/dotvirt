@@ -230,7 +230,7 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 		}
 		exists, err := fc.RepoExists()
 		if err != nil {
-			return model.DraftView{}, fmt.Errorf("check project repo: %w", err)
+			return model.DraftView{}, forgeFailed("repo for project "+target.Name, err)
 		}
 		if !c.forge.SameForge(target.Repo) {
 			if !exists {
@@ -411,7 +411,8 @@ func (c *Coordinator) ensureTenantRepo(repoURL string) (created bool, err error)
 	}
 	created, err = fc.EnsureRepo()
 	if err != nil {
-		return false, fmt.Errorf("create project repo: %w", err)
+		// Only the create 404s: its owner organization is missing.
+		return false, forgeFailed("organization for project repos", err)
 	}
 	if created {
 		c.repos.Created(repoURL)

@@ -2,6 +2,7 @@ package forge
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -221,5 +222,20 @@ func TestEnsureRepoSkipsWhenPresent(t *testing.T) {
 	}
 	if created {
 		t.Error("expected no create when the repo already exists")
+	}
+}
+
+// A presence probe the forge answers outside 2xx and 404 carries its status
+// typed, as every other call does, so a caller classifies it without parsing.
+func TestRepoExistsKeepsTheStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	_, err := NewFactory(srv.URL, StaticToken("tok"), false, "").For("http://forge/dotvirt/platform.git").RepoExists()
+	var se *StatusError
+	if !errors.As(err, &se) || se.Status != http.StatusForbidden {
+		t.Fatalf("err = %v, want a *StatusError with 403", err)
 	}
 }
