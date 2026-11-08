@@ -3,14 +3,18 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	authzv1 "k8s.io/api/authorization/v1"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/changeset"
@@ -70,6 +74,10 @@ func (f *fakeDraft) OpenProposals(proj project.ProjectInfo) ([]model.Proposal, e
 // per-reader marking.
 func (f *fakeDraft) OwnsProposal(id auth.Identity, _ project.ProjectInfo, branch string) bool {
 	return branch == id.Username
+}
+
+func (f *fakeDraft) ProposedBranch(id auth.Identity, _ project.ProjectInfo) string {
+	return id.Username
 }
 
 func (f *fakeDraft) forgeCalls() int {
@@ -469,6 +477,43 @@ func TestPlatformLaneReadWithNoTenantWatched(t *testing.T) {
 	}
 }
 
+// A non-reader's frame before the platform lane is read ships no lane and
+// nudges the refresher, whose next pass reads it, not the backstop. Once
+// read, their draft's row shows, beside a tenant lane still unread.
+func TestNonReaderColdPlatformLaneNudges(t *testing.T) {
+	fd := &fakeDraft{prs: map[string]model.Proposal{platformProjectName: {Project: platformProjectName, PRNumber: 1, Branch: "alice"}}}
+	s := NewServer(Deps{Reader: fd, Draft: fd, Config: Config{PlatformRepo: "https://forge/dotvirt/platform.git"}})
+	alice := auth.Identity{Token: "tok-alice", Username: "alice"}
+	nudged := func() bool {
+		select {
+		case <-s.propNudge:
+			return true
+		default:
+			return false
+		}
+	}
+	if got := s.proposalsFor(alice, nil, false); got != nil {
+		t.Fatalf("cold platform lane = %v, want no lane", got)
+	}
+	if !nudged() {
+		t.Fatal("a cold platform lane must nudge the refresher")
+	}
+	s.refreshProposals(false)
+	if got := s.proposalsFor(alice, nil, false); len(got) != 1 || got[0].PRNumber != 1 || !got[0].Mine {
+		t.Fatalf("after the nudged pass = %+v, want her PR #1", got)
+	}
+	if nudged() {
+		t.Error("a read platform lane nudged again")
+	}
+	teamA := []project.ProjectInfo{{Name: "team-a", Repo: "http://x/a.git"}}
+	if got := s.proposalsFor(alice, teamA, false); len(got) != 1 || got[0].PRNumber != 1 {
+		t.Errorf("with team-a unread = %+v, want her platform PR", got)
+	}
+	if !nudged() {
+		t.Error("an unread tenant lane must nudge the refresher")
+	}
+}
+
 // A proposal's review asks the forge as dotvirt, so the caller reads what
 // failed and its class, never the forge's answer: no API path, host, body or
 // token. The forge refusing dotvirt is a 503, never the caller's 403.
@@ -511,5 +556,194 @@ func TestProposalRouteNeverEchoesTheForge(t *testing.T) {
 				t.Errorf("forge %d: response %q carries %q", tc.forge, body, leak)
 			}
 		}
+	}
+}
+
+// laneDraft is the gate rig's coordinator answering platform reviews: a
+// reader's from the forge (#99 is one the forge lacks), an owner's from the
+// lane row (foreign is the PR whose branch carries another's commit). Every
+// review is recorded.
+type laneDraft struct {
+	*gatedDraft
+	foreign int
+	mu      sync.Mutex
+	reviews []string
+}
+
+func (d *laneDraft) Proposal(proj project.ProjectInfo, n int) (model.ProposalDetail, error) {
+	d.review(fmt.Sprintf("Proposal %d", n))
+	if n == 99 {
+		return model.ProposalDetail{}, fmt.Errorf("%w: the forge has no pull request #%d", model.ErrNotFound, n)
+	}
+	return model.ProposalDetail{Proposal: model.Proposal{Project: proj.Name, PRNumber: n, Branch: platformLane[n-1].Branch}, Items: []model.DraftItem{{Name: "theirs"}}}, nil
+}
+
+func (d *laneDraft) OwnProposal(_ auth.Identity, proj project.ProjectInfo, row model.Proposal) (model.ProposalDetail, error) {
+	d.review(fmt.Sprintf("OwnProposal %d", row.PRNumber))
+	if row.PRNumber == d.foreign {
+		return model.ProposalDetail{}, fmt.Errorf("pull request #%d: %w", row.PRNumber, git.ErrForeignCommit)
+	}
+	return model.ProposalDetail{Proposal: model.Proposal{Project: proj.Name, PRNumber: row.PRNumber, Branch: row.Branch}, Items: []model.DraftItem{{Name: "mine"}}}, nil
+}
+
+func (d *laneDraft) review(call string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.reviews = append(d.reviews, call)
+}
+
+func (d *laneDraft) takeReviews() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := d.reviews
+	d.reviews = nil
+	return out
+}
+
+// platformLane is the open platform PRs a lane rig caches: alice's draft, bob's,
+// her legacy revert, her draft someone pushed to, and her revert.
+var platformLane = []model.Proposal{
+	{Project: platformProjectName, PRNumber: 1, Branch: "alice"},
+	{Project: platformProjectName, PRNumber: 2, Branch: "bob"},
+	{Project: platformProjectName, PRNumber: 3, Branch: "legacy-alice"},
+	{Project: platformProjectName, PRNumber: 4, Branch: "alice"},
+	{Project: platformProjectName, PRNumber: 5, Branch: "revert/alice"},
+}
+
+// platformReader is the grant reading the lane rig's platform repo, which
+// declares nothing: listing namespaces cluster-wide.
+var platformReader = []grant{{verb: verbList, resource: "namespaces"}}
+
+// newLaneRig is a grant rig over laneDraft, its platform lane cached. Its
+// callers see no project, so a frame reads no repo.
+func newLaneRig(t *testing.T) (*gateRig, *laneDraft) {
+	g := newGrantCluster(t)
+	g.fc.readsVMs = func(string, string) bool { return false }
+	d := &laneDraft{gatedDraft: &gatedDraft{planeDraft: &planeDraft{}}, foreign: 4}
+	g.d = d.gatedDraft
+	g.s = g.fc.server(d, Config{PlatformRepo: platformRepo})
+	g.s.proposals.Put(platformProjectName, platformLane)
+	return g, d
+}
+
+// failPlatformRead fails every review of listing namespaces, the platform
+// read's first question; a token asked before keeps its cached verdict.
+func (g *gateRig) failPlatformRead() {
+	g.fc.mu.Lock()
+	defer g.fc.mu.Unlock()
+	g.fc.ssarFail = func(a *authzv1.ResourceAttributes) int {
+		if a.Verb == verbList && a.Group == "" && a.Resource == "namespaces" {
+			return http.StatusServiceUnavailable
+		}
+		return 0
+	}
+}
+
+func doAs(s *Server, id auth.Identity, method, target string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(method, target, nil)
+	r = r.WithContext(auth.NewContext(r.Context(), id))
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, r)
+	return rec
+}
+
+// A caller who may not read the platform repo sees, of its open PRs, exactly
+// their own draft's, on every frame after their propose, a review that failed
+// included; never a revert of theirs. A platform reader sees them all.
+func TestFrameShowsANonReaderTheirOwnPlatformProposals(t *testing.T) {
+	g, _ := newLaneRig(t)
+	platformRows := func(id auth.Identity) (out []string) {
+		t.Helper()
+		inv, err := g.s.InventoryForIdentity(context.Background(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range inv.Proposals {
+			if p.Project == platformProjectName {
+				out = append(out, fmt.Sprintf("#%d mine=%v", p.PRNumber, p.Mine))
+			}
+		}
+		return out
+	}
+	want := func(who string, got []string, want ...string) {
+		t.Helper()
+		if !slices.Equal(got, want) {
+			t.Errorf("%s: platform rows %q, want %q", who, got, want)
+		}
+	}
+	alice := auth.Identity{Token: g.token(nil), Username: "alice"}
+	g.s.proposalOpened(scope{id: alice, proj: g.s.platformProject()})
+	want("alice", platformRows(alice), "#1 mine=true", "#4 mine=true")
+	want("alice rebuilt", platformRows(alice), "#1 mine=true", "#4 mine=true")
+	want("bob", platformRows(auth.Identity{Token: g.token(nil), Username: "bob"}), "#2 mine=true")
+	want("carol", platformRows(auth.Identity{Token: g.token(nil), Username: "carol"}))
+	want("reader", platformRows(auth.Identity{Token: g.token(platformReader), Username: "alice"}),
+		"#1 mine=true", "#2 mine=false", "#3 mine=true", "#4 mine=true", "#5 mine=true")
+
+	// A propose tracks the platform for its caller, which is no read verdict:
+	// a build whose review fails carries only their own rows.
+	blip := auth.Identity{Token: g.token(nil), Username: "alice"}
+	g.s.proposalOpened(scope{id: blip, proj: g.s.platformProject()})
+	g.failPlatformRead()
+	want("alice, review failed", platformRows(blip), "#1 mine=true", "#4 mine=true")
+}
+
+// The review of a platform PR opens to a non-reader for their own draft's
+// alone, read off the lane and never the forge. Another's PR, a revert of
+// theirs and one that does not exist answer the same refusal without a read;
+// a review that failed answers the same for all. A branch someone else pushed
+// to answers why, without its items. A reader reads any.
+func TestPlatformReviewOpensToItsOwnerAlone(t *testing.T) {
+	g, d := newLaneRig(t)
+	alice := auth.Identity{Token: g.token(nil), Username: "alice"}
+	get := func(id auth.Identity, n string) *httptest.ResponseRecorder {
+		return doAs(g.s, id, http.MethodGet, "/api/projects/platform/proposals/"+n)
+	}
+
+	rec := get(alice, "1")
+	wantStatus(t, rec, http.StatusOK)
+	if detail := decodeBody[model.ProposalDetail](t, rec); !detail.Proposal.Mine || len(detail.Items) != 1 || detail.Items[0].Name != "mine" {
+		t.Errorf("own review = %+v, want hers, marked mine", detail)
+	}
+	if got := d.takeReviews(); !slices.Equal(got, []string{"OwnProposal 1"}) {
+		t.Errorf("own review read %q, want the lane row's review alone", got)
+	}
+
+	denied := get(alice, "2")
+	if denied.Code != http.StatusForbidden || !strings.Contains(denied.Body.String(), platformReadDenied) {
+		t.Fatalf("another's PR = %d %q, want the platform repo's refusal", denied.Code, denied.Body.String())
+	}
+	for _, n := range []string{"3", "5", "7", "99"} {
+		if rec := get(alice, n); rec.Code != denied.Code || rec.Body.String() != denied.Body.String() {
+			t.Errorf("#%s = %d %q, want the same refusal as another's PR", n, rec.Code, rec.Body.String())
+		}
+	}
+	if got := d.takeReviews(); len(got) != 0 {
+		t.Errorf("refused reviews read %q, want nothing read", got)
+	}
+
+	rec = get(alice, "4")
+	if body := rec.Body.String(); rec.Code != http.StatusForbidden ||
+		!strings.Contains(body, "changed outside dotvirt since you proposed it; a platform administrator can review it") || strings.Contains(body, "items") {
+		t.Errorf("own PR someone pushed to = %d %q, want the guided refusal without items", rec.Code, body)
+	}
+
+	reader := auth.Identity{Token: g.token(platformReader), Username: "carol"}
+	rec = get(reader, "2")
+	wantStatus(t, rec, http.StatusOK)
+	if detail := decodeBody[model.ProposalDetail](t, rec); detail.Proposal.Mine || detail.Items[0].Name != "theirs" {
+		t.Errorf("reader's review = %+v, want bob's from the forge", detail)
+	}
+	wantStatus(t, get(reader, "99"), http.StatusNotFound)
+	d.takeReviews()
+
+	blip := auth.Identity{Token: g.token(nil), Username: "alice"}
+	g.failPlatformRead()
+	failed := get(blip, "1")
+	if missing := get(blip, "99"); failed.Code != http.StatusServiceUnavailable || missing.Code != failed.Code || missing.Body.String() != failed.Body.String() {
+		t.Errorf("review failed: own = %d %q, missing = %d %q, want the same 503", failed.Code, failed.Body.String(), missing.Code, missing.Body.String())
+	}
+	if got := d.takeReviews(); len(got) != 0 {
+		t.Errorf("a failed review read %q", got)
 	}
 }

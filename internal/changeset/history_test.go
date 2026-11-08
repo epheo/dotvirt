@@ -649,3 +649,60 @@ func TestReaderServesHistoryWithoutStore(t *testing.T) {
 		t.Errorf("without a live source drift is unavailable, got %v", err)
 	}
 }
+
+// A caller's own proposal reviews from its lane row, never asking the forge,
+// and only while every commit on its branch is dotvirt's for them: the commit
+// a propose writes passes, for its proposer alone; a reviewer's push onto the
+// branch makes it another's.
+func TestOwnProposalOnlyWhileDotvirtWroteIt(t *testing.T) {
+	f := newProposeFixture(t,
+		when("GET", "/pulls", http.StatusOK, "[]"),
+		when("POST", "/pulls", http.StatusCreated, `{"number":1,"state":"open","html_url":"http://forge/pulls/1"}`),
+	)
+	out := f.stageAndPropose(t)
+	if b := f.c.ProposedBranch(f.id, f.proj); b != out.Branch {
+		t.Fatalf("ProposedBranch = %q, want the branch the propose pushed, %q", b, out.Branch)
+	}
+	row := model.Proposal{Project: f.proj.Name, PRNumber: out.PRNumber, PRURL: out.PRURL, Title: "edit web", Branch: out.Branch, By: "alice", Approvals: 2}
+	f.mu.Lock()
+	asked := len(f.sent)
+	f.mu.Unlock()
+	// A reader opened after each push mirrors it.
+	review := func(id auth.Identity) (model.ProposalDetail, error) {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		r := NewReader(git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour), f.c.forge, nil, "main", "dotvirt/proposed")
+		return r.OwnProposal(id, f.proj, row)
+	}
+
+	d, err := review(f.id)
+	if err != nil {
+		t.Fatalf("own proposal: %v", err)
+	}
+	if len(d.Items) != 1 || d.Items[0].Name != "web" || d.Items[0].Kind != "edit" {
+		t.Errorf("items = %+v, want the web edit", d.Items)
+	}
+	if p := d.Proposal; p.PRNumber != 1 || p.Branch != out.Branch || p.Head != revParse(t, f.proj.Repo, out.Branch) || p.Approvals != 0 {
+		t.Errorf("proposal = %+v, want the row's identity at the mirrored head", p)
+	}
+	if _, err := review(auth.Identity{Username: "bob"}); !errors.Is(err, git.ErrForeignCommit) {
+		t.Errorf("another caller on alice's branch: %v, want ErrForeignCommit", err)
+	}
+
+	work := t.TempDir()
+	gitRun(t, work, "clone", "-q", "-b", out.Branch, f.proj.Repo, ".")
+	writeWorkFile(t, work, "other/secret.yaml", []byte("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: other-tenant\n"))
+	gitRun(t, work, "add", "-A")
+	gitRun(t, work, "commit", "-qm", "reviewer fixup")
+	gitRun(t, work, "push", "-q", "origin", out.Branch)
+	d, err = review(f.id)
+	if !errors.Is(err, git.ErrForeignCommit) || len(d.Items) != 0 {
+		t.Errorf("after a reviewer's push: %v %+v, want ErrForeignCommit and no items", err, d.Items)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.sent) != asked {
+		t.Errorf("OwnProposal asked the forge: %+v", f.sent[asked:])
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/tasks"
@@ -32,11 +33,9 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	if platform, _ := s.canReadPlatform(r.Context(), id, c); platform {
-		projects = append(projects, s.platformProject())
-	}
+	platform, _ := s.canReadPlatform(r.Context(), id, c)
 	canNodes := s.capable(r.Context(), id, c, ask(verbList, ssarNodes, ""))
-	writeJSON(w, scopeTasks(s.tasks.Ops(), s.tasks.Merges(), projects, canNodes))
+	writeJSON(w, scopeTasks(s.tasks.Ops(), s.tasks.Merges(), s.taskScope(id, projects, platform, canNodes)))
 }
 
 // recordTask logs one imperative act into the feed. Nil-safe so handlers need no
@@ -52,9 +51,27 @@ func (s *Server) recordTask(verb, namespace, name, by string, ok bool) {
 // (namespace-less node ops behind the node-read signal), merges in a repo
 // backing one of their projects. The served feed and the frame's TasksVersion
 // both read through it, so the watermark moves exactly when the feed does.
+// ownRepo is the platform repo of a caller who does not read it: its merges
+// show only from ownBranch, their draft branch.
 type taskScope struct {
 	nsProject, repoProject map[string]string
 	canNodes               bool
+	ownRepo, ownBranch     string
+}
+
+// taskScope is id's view of the feed over their projects: every platform
+// merge for a platform reader, their own draft's for anyone else.
+func (s *Server) taskScope(id auth.Identity, projects []project.ProjectInfo, readsPlatform, canNodes bool) taskScope {
+	platform := s.platformProject()
+	if readsPlatform {
+		projects = append(projects[:len(projects):len(projects)], platform)
+	}
+	sc := newTaskScope(projects, canNodes)
+	if !readsPlatform && platform.Repo != "" {
+		sc.ownRepo = forge.NormalizeRepoURL(platform.Repo)
+		sc.ownBranch = s.reader.ProposedBranch(id, platform)
+	}
+	return sc
 }
 
 func newTaskScope(projects []project.ProjectInfo, canNodes bool) taskScope {
@@ -81,14 +98,18 @@ func (sc taskScope) op(o tasks.Op) (project string, ok bool) {
 
 // merge reports whether the caller sees m, and the project it shows under.
 func (sc taskScope) merge(m tasks.Merge) (project string, ok bool) {
-	project, ok = sc.repoProject[m.RepoURL]
-	return project, ok
+	if project, ok = sc.repoProject[m.RepoURL]; ok {
+		return project, true
+	}
+	if sc.ownBranch != "" && m.RepoURL == sc.ownRepo && m.Branch == sc.ownBranch {
+		return platformProjectName, true
+	}
+	return "", false
 }
 
-// scopeTasks projects the feed onto one caller's visibility (taskScope). Pure,
-// so it unit-tests without a Server.
-func scopeTasks(ops []tasks.Op, merges []tasks.Merge, projects []project.ProjectInfo, canNodes bool) []model.TaskEntry {
-	sc := newTaskScope(projects, canNodes)
+// scopeTasks projects the feed onto one caller's visibility. Pure, so it
+// unit-tests without a Server.
+func scopeTasks(ops []tasks.Op, merges []tasks.Merge, sc taskScope) []model.TaskEntry {
 	out := []model.TaskEntry{}
 	for _, o := range ops {
 		proj, ok := sc.op(o)

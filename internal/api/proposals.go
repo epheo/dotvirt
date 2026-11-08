@@ -38,10 +38,14 @@ const (
 )
 
 // propTarget is one token's refresh target: whose lane, over which projects.
+// readsPlatform is the last build's platform read verdict, the one a build
+// whose review failed carries: a platform entry a propose tracked
+// (trackProposalsProject) is no verdict.
 type propTarget struct {
-	id       auth.Identity
-	projects []project.ProjectInfo
-	lastSeen time.Time
+	id            auth.Identity
+	projects      []project.ProjectInfo
+	readsPlatform bool
+	lastSeen      time.Time
 }
 
 // proposalsFor returns the open PRs across id's projects, marked with the ones
@@ -49,11 +53,15 @@ type propTarget struct {
 // refresh target; a project not cached yet nudges the refresher and is left out
 // of this frame (the refresher wakes the hub when its lane lands). Nil when no
 // project has a lane yet, so a cold frame ships without one. keepPlatform
-// carries a tracked platform lane through a build whose platform review failed.
+// carries a platform reader's lane through a build whose platform review
+// failed. A caller who does not read the platform tier gets their own draft's
+// platform row alone, off the lane the refresher reads whenever anyone looks:
+// no forge call, and no tracked entry for a rebuild to drop.
 func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo, keepPlatform bool) []model.Proposal {
 	out := []model.Proposal{}
 	hit, cold := false, false
-	for _, p := range s.trackProposals(id, projects, keepPlatform) {
+	tracked, readsPlatform := s.trackProposals(id, projects, keepPlatform)
+	for _, p := range tracked {
 		rows, ok := s.proposals.Get(p.Name)
 		if !ok {
 			cold = true
@@ -65,6 +73,14 @@ func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo, 
 			out = append(out, row)
 		}
 	}
+	if !readsPlatform && s.cfg.PlatformRepo != "" {
+		if rows, ok := s.proposals.Get(platformProjectName); ok {
+			hit = true
+			out = append(out, s.ownPlatformRows(id, rows)...)
+		} else {
+			cold = true
+		}
+	}
 	if cold {
 		s.nudgeProposals("")
 	}
@@ -74,24 +90,54 @@ func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo, 
 	return out
 }
 
+// ownPlatformRows is the rows of a platform lane on id's draft branch, marked
+// theirs. Their revert branches are left out: opening a revert takes platform
+// read, and its diff restores others' files.
+func (s *Server) ownPlatformRows(id auth.Identity, rows []model.Proposal) []model.Proposal {
+	var out []model.Proposal
+	branch := s.reader.ProposedBranch(id, s.platformProject())
+	for _, row := range rows {
+		if row.Branch == branch {
+			row.Mine = true
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// ownPlatformRow is id's own open platform PR numbered n, off the cached
+// lane: another's PR, a closed one and none at all answer alike, before
+// anything reads the forge or the repo.
+func (s *Server) ownPlatformRow(id auth.Identity, n int) (model.Proposal, bool) {
+	rows, _ := s.proposals.Get(platformProjectName)
+	for _, row := range s.ownPlatformRows(id, rows) {
+		if row.PRNumber == n {
+			return row, true
+		}
+	}
+	return model.Proposal{}, false
+}
+
 // trackProposals records id as a live refresh target and returns the projects
-// it watches. Called on every inventory build, so the watched set mirrors who
-// is actually looking. Builds include the synthetic platform tier for its
-// authors (InventoryForIdentity seeds it). keepPlatform says the platform
-// review failed this build: a tracked platform entry then carries forward so
-// the lane survives the blip. Otherwise its absence is a verdict, and a
-// demoted author stops seeing platform PRs.
-func (s *Server) trackProposals(id auth.Identity, projects []project.ProjectInfo, keepPlatform bool) []project.ProjectInfo {
+// it watches, and whether the platform tier is among them by id's platform
+// read. Called on every inventory build, so the watched set mirrors who is
+// actually looking. Builds include the synthetic platform tier for its
+// readers (InventoryForIdentity seeds it). keepPlatform says the platform
+// review failed this build: the last build's reader verdict then carries
+// forward so the lane survives the blip. Otherwise its absence is a verdict,
+// and a demoted reader stops seeing others' platform PRs.
+func (s *Server) trackProposals(id auth.Identity, projects []project.ProjectInfo, keepPlatform bool) ([]project.ProjectInfo, bool) {
 	key := restfactory.TokenKey(id.Token)
 	s.propMu.Lock()
 	defer s.propMu.Unlock()
-	if prev, ok := s.propTargets[key]; ok && keepPlatform && !hasProject(projects, platformProjectName) {
+	reads := hasProject(projects, platformProjectName)
+	if prev, ok := s.propTargets[key]; ok && keepPlatform && !reads && prev.readsPlatform {
 		if p, found := findProject(prev.projects, platformProjectName); found {
-			projects = append(projects, p)
+			projects, reads = append(projects, p), true
 		}
 	}
-	s.propTargets[key] = propTarget{id: id, projects: projects, lastSeen: time.Now()}
-	return projects
+	s.propTargets[key] = propTarget{id: id, projects: projects, readsPlatform: reads, lastSeen: time.Now()}
+	return projects, reads
 }
 
 // trackProposalsProject ensures proj is in id's refresh target before a propose

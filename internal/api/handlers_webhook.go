@@ -91,6 +91,7 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 				URL:     pr.HTMLURL,
 				Title:   pr.Title,
 				By:      tasks.MergeAuthor(pr.Head.Ref, s.cfg.ProposedBranch, pr.User.Login),
+				Branch:  pr.Head.Ref,
 				At:      pr.MergedAt,
 			})
 		}

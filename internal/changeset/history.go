@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/manifest"
@@ -119,6 +120,32 @@ func (r *Reader) Proposal(proj project.ProjectInfo, number int) (model.ProposalD
 		return model.ProposalDetail{}, err
 	}
 	return model.ProposalDetail{Proposal: r.proposalRow(proj, pr, read), Items: commitItems(files)}, nil
+}
+
+// OwnProposal is Proposal for id's own open PR, row as the lane lists it,
+// for a caller who may read nothing else of the repo: the forge is not asked,
+// and the items render only while every commit on the branch past its fork
+// is dotvirt's for id. Anyone else's push could name what id may not read, so
+// that answers git.ErrForeignCommit.
+func (r *Reader) OwnProposal(id auth.Identity, proj project.ProjectInfo, row model.Proposal) (model.ProposalDetail, error) {
+	read, err := r.read(proj)
+	if err != nil {
+		return model.ProposalDetail{}, err
+	}
+	files, head, err := read.BranchDiffBy(r.baseBranch, row.Branch, git.Author{Name: id.Username, Email: authorEmail(id.Username)})
+	if errors.Is(err, git.ErrNoBranch) {
+		return model.ProposalDetail{}, fmt.Errorf("%w: branch %s is not mirrored yet; retry in a moment", model.ErrNotFound, row.Branch)
+	}
+	if err != nil {
+		return model.ProposalDetail{}, fmt.Errorf("pull request #%d: %w", row.PRNumber, err)
+	}
+	return model.ProposalDetail{
+		Proposal: model.Proposal{
+			Project: proj.Name, PRNumber: row.PRNumber, PRURL: row.PRURL, Title: row.Title,
+			Branch: row.Branch, Head: head, By: row.By, Revert: row.Revert,
+		},
+		Items: commitItems(files),
+	}, nil
 }
 
 // nameByPR replaces a forge merge subject with the merged PR's title and link.

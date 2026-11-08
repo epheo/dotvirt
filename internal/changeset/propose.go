@@ -43,6 +43,7 @@ func (r *Reader) RecentlyMerged(proj project.ProjectInfo, since time.Time) ([]ta
 			URL:     pr.HTMLURL,
 			Title:   pr.Title,
 			By:      tasks.MergeAuthor(pr.Head.Ref, r.proposed, pr.User.Login),
+			Branch:  pr.Head.Ref,
 			At:      pr.MergedAt,
 		})
 	}
@@ -230,6 +231,12 @@ func (r *Reader) OwnsProposal(id auth.Identity, proj project.ProjectInfo, branch
 	return branch == r.proposedBranch(id.Username, proj.Name) ||
 		strings.HasPrefix(branch, r.revertPrefix(id.Username, proj.Name)) ||
 		r.ownsLegacyRevert(id.Username, proj.Name, branch)
+}
+
+// ProposedBranch is the branch id's draft for proj is proposed on: exact, as
+// it carries the identity hash.
+func (r *Reader) ProposedBranch(id auth.Identity, proj project.ProjectInfo) string {
+	return r.proposedBranch(id.Username, proj.Name)
 }
 
 // defaultTitle names an untitled proposal by what it does, so the history row

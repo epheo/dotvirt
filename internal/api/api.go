@@ -57,10 +57,17 @@ type Reader interface {
 	ObjectHistory(proj project.ProjectInfo, resource, namespace, name string, limit int) ([]model.Commit, error)
 	Commit(proj project.ProjectInfo, hash string) (model.CommitDetail, error)
 	Proposal(proj project.ProjectInfo, number int) (model.ProposalDetail, error)
+	// OwnProposal reviews id's own open PR (a lane row) for a caller who may
+	// read nothing else of the repo: git.ErrForeignCommit once anyone else's
+	// commit is on its branch.
+	OwnProposal(id auth.Identity, proj project.ProjectInfo, row model.Proposal) (model.ProposalDetail, error)
 	// OpenProposals is project-wide (the lane is shared by the project's
 	// members); OwnsProposal marks the caller's own rows without the forge.
+	// ProposedBranch is id's draft branch: the one PR owning opens to a caller
+	// who may not read the repo. A revert is not, as opening one takes read.
 	OpenProposals(proj project.ProjectInfo) ([]model.Proposal, error)
 	OwnsProposal(id auth.Identity, proj project.ProjectInfo, branch string) bool
+	ProposedBranch(id auth.Identity, proj project.ProjectInfo) string
 	// RecentlyMerged lists PRs merged into proj's base branch since 'since' - the
 	// task feed's poll backstop behind the forge webhook (and its restart reseed).
 	RecentlyMerged(proj project.ProjectInfo, since time.Time) ([]tasks.Merge, error)

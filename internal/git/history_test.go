@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -364,5 +365,76 @@ func TestOnBranch(t *testing.T) {
 		if err != nil || got != want {
 			t.Errorf("OnBranch(%s) = %v, %v; want %v", rev, got, err, want)
 		}
+	}
+}
+
+// A branch reviews for its proposer only while every commit past its fork is
+// dotvirt's for them; main moving past the fork changes nothing. Another
+// author's commit, a forge-side rebase (another committer), a merge of main
+// into the branch or any merge at all makes it someone else's.
+func TestBranchDiffBy(t *testing.T) {
+	h := seedHistoryRepo(t)
+	alice := Author{Name: "alice", Email: "alice@dotvirt.noreply"}
+	dotvirt := Author{Name: "dotvirt", Email: "dotvirt@localhost"}
+	bob := Author{Name: "bob", Email: "bob@x"}
+	git := func(author, committer Author, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = h.work
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME="+author.Name, "GIT_AUTHOR_EMAIL="+author.Email,
+			"GIT_COMMITTER_NAME="+committer.Name, "GIT_COMMITTER_EMAIL="+committer.Email)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	commit := func(author, committer Author, from, branch, path, content string) {
+		t.Helper()
+		git(author, committer, "checkout", "-qB", branch, from)
+		h.write(path, content)
+		git(author, committer, "add", "-A")
+		git(author, committer, "commit", "-qm", branch)
+		git(author, committer, "push", "-qf", "origin", branch)
+	}
+	web := "tenant-a/web.yaml"
+	commit(alice, dotvirt, "main", "own", web, webYAML(16))
+	commit(bob, bob, "own", "pushed-to", web, webYAML(32))
+	commit(alice, bob, "main", "rebased", web, webYAML(16))
+	commit(alice, dotvirt, "main", "updated", web, webYAML(16))
+	// main moves past every fork
+	commit(alice, dotvirt, "main", "main", "tenant-a/db.yaml", "kind: VirtualMachine\nmetadata: {name: db, namespace: tenant-a}\nspec: {cores: 2}\n")
+	git(bob, bob, "checkout", "-q", "updated")
+	git(bob, bob, "merge", "-q", "--no-ff", "-m", "update branch", "main")
+	git(bob, bob, "push", "-q", "origin", "updated")
+	// A merge signed as dotvirt's for alice still brings in bob's commit.
+	commit(bob, bob, "main", "side", "tenant-a/side.yaml", "kind: VirtualMachine\nmetadata: {name: side, namespace: tenant-a}\n")
+	commit(alice, dotvirt, "main", "smuggled", web, webYAML(16))
+	git(alice, dotvirt, "merge", "-q", "--no-ff", "-m", "smuggle", "side")
+	git(alice, dotvirt, "push", "-q", "origin", "smuggled")
+
+	r, err := Open(h.bare, "", nil)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	files, at, err := r.BranchDiffBy("main", "own", alice)
+	if err != nil {
+		t.Fatalf("own branch: %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "tenant-a/web.yaml" || !strings.Contains(string(files[0].After), "cores: 16") || !strings.Contains(string(files[0].Before), "cores: 4") {
+		t.Errorf("own branch diff = %+v, want web from its fork, without main's later db edit", files)
+	}
+	if at != r.BranchHash("own") {
+		t.Errorf("at = %q, want the head diffed %q", at, r.BranchHash("own"))
+	}
+	for _, c := range []struct {
+		branch string
+		by     Author
+	}{{"own", bob}, {"pushed-to", alice}, {"rebased", alice}, {"updated", alice}, {"smuggled", alice}} {
+		if files, _, err := r.BranchDiffBy("main", c.branch, c.by); !errors.Is(err, ErrForeignCommit) || files != nil {
+			t.Errorf("%s for %s: %v and %d files, want ErrForeignCommit and no diff", c.branch, c.by.Name, err, len(files))
+		}
+	}
+	if _, _, err := r.BranchDiffBy("main", "missing", alice); !errors.Is(err, ErrNoBranch) {
+		t.Errorf("missing branch: %v, want ErrNoBranch", err)
 	}
 }

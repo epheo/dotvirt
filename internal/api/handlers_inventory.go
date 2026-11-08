@@ -120,9 +120,9 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	// on its own so the issues plane names what it failed to apply or keeps
 	// unhealthy. Every user sees its verdict (a user scoped to no project must not
 	// mask a broken platform sync); only platform readers (canReadPlatform) see
-	// its detail, its open proposals and its merges. That is asked only when
-	// the frame holds one of those: a quiet platform costs a caller with no
-	// platform right nothing.
+	// its detail, its open proposals and its merges, anyone else only their own
+	// draft's proposal and merges. That is asked only when the frame holds one
+	// of those: a quiet platform costs a caller with no platform right nothing.
 	var platformAuthor bool
 	var platformErr error
 	if s.cfg.PlatformRepo != "" {
@@ -160,7 +160,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	// verdicts that shape the pulls (netGrants) shape the watermarks too.
 	grants := s.netGrants(ctx, id, userCluster, platformAuthor)
 	inv.NetworksVersion = s.networksWatermark(visible, grants)
-	inv.TasksVersion = s.tasksWatermark(propProjects, grants.nodes)
+	inv.TasksVersion = s.tasksWatermark(s.taskScope(id, projects, platformAuthor, grants.nodes))
 	return inv, nil
 }
 
