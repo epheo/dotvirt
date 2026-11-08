@@ -283,6 +283,14 @@ spec:
                   OAuthClient SSO needs, with the redirect URI filled from the assigned console host.
                   Set only while auth.openShiftSSO is on; run it once to finish SSO.
                 type: string
+              syncImpersonationInstance:
+                description: |-
+                  SyncImpersonationInstance is the ArgoCD resource, as namespace/name, the
+                  operator set application.sync.impersonation.enabled on: it removes the
+                  setting there when spec.argocd moves to another instance and before the
+                  install is deleted, so no Application is left needing an account dotvirt
+                  no longer maps.
+                type: string
             type: object
         type: object
     served: true
