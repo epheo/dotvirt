@@ -1,6 +1,6 @@
 <script lang="ts">
-	import RFB from '@novnc/novnc';
-	import type { VM } from '#lib/api.js';
+	import type RFB from '@novnc/novnc';
+	import { api, Unauthorized, type VM } from '#lib/api.js';
 	import StatusDot from './StatusDot.svelte';
 
 	let { vm }: { vm: VM } = $props();
@@ -8,7 +8,18 @@
 	let screen = $state<HTMLDivElement>();
 	let status = $state<'connecting' | 'connected' | 'disconnected'>('connecting');
 	let detail = $state('');
+	// The server ended the dotvirt session (logout, its lifetime cap, a
+	// rejected token): a reconnect would be refused, so sign-in is offered.
+	let ended = $state(false);
 	let reconnectKey = $state(0); // bumping it re-runs the connect effect
+
+	// The policy-violation close the server sends when the session behind a
+	// console ends; noVNC's disconnect event does not carry the code.
+	const SESSION_ENDED = 1008;
+
+	// noVNC also takes an unopened WebSocket in place of a URL (src/novnc.d.ts
+	// declares only the URL form); owning the socket is what exposes the code.
+	type RFBOnSocket = new (target: HTMLElement, socket: WebSocket) => RFB;
 
 	function wsURL(v: VM) {
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -26,25 +37,59 @@
 		// an explicit reconnect.
 		reconnectKey;
 		if (!screen || !running) return;
+		const target = screen;
+		const socketURL = url;
 
 		status = 'connecting';
 		detail = '';
-		const rfb = new RFB(screen, url, {});
-		rfb.scaleViewport = true;
-		rfb.background = '#151515';
+		ended = false;
+		let rfb: RFB | null = null;
+		let gone = false;
+		// Loaded on first connect, so the VM page does not carry the viewer.
+		import('@novnc/novnc').then(
+			({ default: Viewer }) => {
+				if (gone) return;
+				const socket = new WebSocket(socketURL);
+				// Registered before noVNC attaches its own handler, so it runs first.
+				socket.addEventListener('close', (e) => (ended = e.code === SESSION_ENDED));
+				rfb = new (Viewer as unknown as RFBOnSocket)(target, socket);
+				rfb.scaleViewport = true;
+				rfb.background = '#151515';
 
-		rfb.addEventListener('connect', () => (status = 'connected'));
-		rfb.addEventListener('disconnect', (e: Event) => {
-			status = 'disconnected';
-			detail = (e as CustomEvent).detail?.clean ? 'Session ended' : 'Connection lost';
-		});
-		rfb.addEventListener('securityfailure', (e: Event) => {
-			status = 'disconnected';
-			detail = (e as CustomEvent).detail?.reason ?? 'Security failure';
-		});
+				rfb.addEventListener('connect', () => (status = 'connected'));
+				rfb.addEventListener('disconnect', (e: Event) => {
+					status = 'disconnected';
+					if (ended) detail = 'Your dotvirt session ended';
+					else detail = (e as CustomEvent).detail?.clean ? 'Session ended' : 'Connection lost';
+				});
+				rfb.addEventListener('securityfailure', (e: Event) => {
+					status = 'disconnected';
+					detail = (e as CustomEvent).detail?.reason ?? 'Security failure';
+				});
+			},
+			() => {
+				if (gone) return;
+				status = 'disconnected';
+				detail = 'The console viewer did not load';
+			},
+		);
 
-		return () => rfb.disconnect();
+		return () => {
+			gone = true;
+			rfb?.disconnect();
+		};
 	});
+
+	// The probe's 401 signs out centrally, which lands on the sign-in screen;
+	// a session that answers is live after all, so the console redials.
+	function signIn() {
+		api.me().then(
+			() => reconnectKey++,
+			(e) => {
+				if (!(e instanceof Unauthorized)) reconnectKey++;
+			},
+		);
+	}
 </script>
 
 {#if !running}
@@ -68,11 +113,19 @@
 					class="absolute inset-0 flex flex-col items-center justify-center gap-1 text-sm text-side-dim"
 				>
 					<span>{detail || 'Disconnected'}</span>
-					<button
-						onclick={() => reconnectKey++}
-						class="rounded border border-side-active px-2 py-0.5 text-xs text-side-dim hover:bg-[#333638]"
-						>Reconnect</button
-					>
+					{#if ended}
+						<button
+							onclick={signIn}
+							class="rounded border border-side-active px-2 py-0.5 text-xs text-side-dim hover:bg-[#333638]"
+							>Sign in again</button
+						>
+					{:else}
+						<button
+							onclick={() => reconnectKey++}
+							class="rounded border border-side-active px-2 py-0.5 text-xs text-side-dim hover:bg-[#333638]"
+							>Reconnect</button
+						>
+					{/if}
 				</div>
 			{/if}
 		</div>
