@@ -27,7 +27,7 @@ type memoEntry struct {
 // memoized.
 func Memoized[T any](r *Repo, view, branch string, build func() (T, error)) (T, error) {
 	key := memoKey{view: view, branch: branch}
-	hash := r.branchHash(branch)
+	hash := r.BranchHash(branch)
 	if hash != "" {
 		r.memos.mu.Lock()
 		e, ok := r.memos.entries[key]
