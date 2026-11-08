@@ -35,8 +35,10 @@ const (
 	// NamespaceChanged: a project namespace was added, removed, or relabeled - both an
 	// inventory topology change AND a visibility (RBAC) change.
 	NamespaceChanged
-	// RBACChanged: a RoleBinding moved, so a token's visible-namespace set may have
-	// changed - the cue to revalidate the per-token visibility cache.
+	// RBACChanged: a grant moved - a RoleBinding or Role in a project namespace, a
+	// ClusterRoleBinding, a ClusterRole one of those binds, or an OpenShift
+	// Group's members - so a token's visible namespaces and review verdicts may
+	// have changed: the cue to revalidate the per-token authorization caches.
 	RBACChanged
 	// DriftChanged: the drift Argo reports moved - an object's sync/health/apply
 	// error or a project's rollup - or the Applications watch's health flipped.
@@ -54,9 +56,9 @@ const (
 	// TaskChanged: the recent-tasks feed moved - an imperative op was recorded or a
 	// merged PR landed. The feed is fetched out-of-band, like the network catalog.
 	TaskChanged
-	// TTLBackstop: TTL-cached frame inputs no watch observes (cluster-scoped RBAC,
-	// group membership) may have expired - published on a fixed cadence while a
-	// stream is open so frames re-evaluate them. Keep it out of every cache's
+	// TTLBackstop: TTL-cached authorization no RBAC watch observes (see
+	// api.RunTTLBackstop) may have expired - published on a fixed cadence while a
+	// stream is open so frames re-evaluate it. Keep it out of every cache's
 	// version stamp: it must not invalidate anything before its TTL.
 	TTLBackstop
 	// SessionEnded: sessions ended - a logout, or a TokenReview rejected their

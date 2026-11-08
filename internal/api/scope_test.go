@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,22 +11,27 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	authnv1 "k8s.io/api/authentication/v1"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/kubernetes/scheme"
 	k8stesting "k8s.io/client-go/testing"
+	kvfake "kubevirt.io/client-go/kubevirt/fake"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/eventbus"
+	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 // scopeServer builds a Server with only what the scope caches read: the version
@@ -96,6 +102,204 @@ func TestVisibleForCachesPerToken(t *testing.T) {
 	}
 	if len(second) != len(first) || !second["tenant-a"] || !second["tenant-b"] {
 		t.Fatalf("cached read = %v, want the same set as the first", second)
+	}
+}
+
+// Concurrent misses for one token share one probe: a frame build and the
+// pulls its watermarks trigger never review one token's visibility twice. The
+// caller that started the probe leaves on its own deadline, and the probe runs
+// on for the others still waiting on it.
+func TestVisibleForSharesOneProbe(t *testing.T) {
+	s := scopeServer(eventbus.New())
+	kube := fake.NewSimpleClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-a"}})
+	gate := make(chan struct{})
+	var started atomic.Bool
+	lists := 0
+	kube.PrependReactor("list", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
+		lists++
+		started.Store(true)
+		<-gate
+		return false, nil, nil
+	})
+	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		ssar := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview).DeepCopy()
+		ssar.Status.Allowed = true
+		return true, ssar, nil
+	})
+	c := cluster.NewClient(kube, nil, nil)
+	id := auth.Identity{Token: "tok-alice", Username: "alice"}
+
+	leader, leave := context.WithCancel(context.Background())
+	left := make(chan error, 1)
+	go func() {
+		_, err := s.visibleFor(leader, id, c)
+		left <- err
+	}()
+	for !started.Load() {
+		time.Sleep(time.Millisecond)
+	}
+	var wg sync.WaitGroup
+	for range 3 {
+		wg.Go(func() {
+			if got, err := s.visibleFor(context.Background(), id, c); err != nil || !got["tenant-a"] {
+				t.Errorf("a waiter got %v, %v; want tenant-a", got, err)
+			}
+		})
+	}
+	time.Sleep(50 * time.Millisecond) // let the waiters join the probe in flight
+	leave()
+	select {
+	case err := <-left:
+		if err == nil {
+			t.Error("the leader left with an answer it never waited for")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the leader could not leave while its probe ran")
+	}
+	close(gate)
+	wg.Wait()
+	if lists != 1 {
+		t.Fatalf("four concurrent misses cost %d probes, want 1", lists)
+	}
+}
+
+// watchedState runs a snapshot over a fake clientset whose RBAC watches all
+// run: the SA may list every kind, and Groups are absent as on any cluster but
+// OpenShift. fail makes the ClusterRole watch fail from then on.
+func watchedState(t *testing.T, bus *eventbus.Bus) (st *clusterstate.State, fail func()) {
+	t.Helper()
+	kube := fake.NewSimpleClientset()
+	var rbac []metav1.APIResource
+	for _, r := range []string{"rolebindings", "roles", "clusterrolebindings", "clusterroles"} {
+		rbac = append(rbac, metav1.APIResource{Name: r})
+	}
+	kube.Resources = []*metav1.APIResourceList{{GroupVersion: "rbac.authorization.k8s.io/v1", APIResources: rbac}}
+	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		ssar := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview).DeepCopy()
+		ssar.Status.Allowed = true
+		return true, ssar, nil
+	})
+	var (
+		down atomic.Bool
+		mu   sync.Mutex
+		w    *watch.FakeWatcher
+	)
+	kube.PrependWatchReactor("clusterroles", func(k8stesting.Action) (bool, watch.Interface, error) {
+		if down.Load() {
+			return true, nil, errors.New("watch refused")
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		w = watch.NewFake()
+		return true, w, nil
+	})
+	st = clusterstate.New(cluster.NewClient(kube, kvfake.NewSimpleClientset(), nil), "dotvirt.io/project", bus)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	st.Run(ctx)
+	waitUntil(t, "every RBAC watch running", st.RBACWatched)
+	return st, func() {
+		down.Store(true)
+		mu.Lock()
+		defer mu.Unlock()
+		w.Stop()
+	}
+}
+
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); !cond(); time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+}
+
+// While every RBAC watch runs, a cached visible set serves for minutes; once
+// one fails, the same entry serves only seconds, so a revocation the watches
+// cannot report waits no longer than it did before them. A snapshot whose
+// watches never ran keeps the short TTL throughout.
+func TestVisibleForTTLFollowsTheWatches(t *testing.T) {
+	bus := eventbus.New()
+	st, fail := watchedState(t, bus)
+	watched := NewServer(Deps{State: st, Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}})
+	id := auth.Identity{Token: "tok-alice", Username: "alice"}
+	probes := func(s *Server) int {
+		t.Helper()
+		// The entry a review left a minute ago.
+		s.visible.PutAt(restfactory.TokenKey(id.Token), visibleSet{ns: map[string]bool{"tenant-a": true}, ver: s.rbacVersion()}, time.Now().Add(-time.Minute))
+		c, lists := listCountingClient("tenant-a")
+		if got, err := s.visibleFor(context.Background(), id, c); err != nil || !got["tenant-a"] {
+			t.Fatalf("visibleFor: %v, %v", got, err)
+		}
+		return *lists
+	}
+
+	if n := probes(watched); n != 0 {
+		t.Errorf("watched: a minute-old entry cost %d probes, want 0", n)
+	}
+	fail()
+	waitUntil(t, "the failed watch to count", func() bool { return !st.RBACWatched() })
+	if n := probes(watched); n != 1 {
+		t.Errorf("a watch down: a minute-old entry cost %d probes, want 1", n)
+	}
+	if n := probes(scopeServer(eventbus.New())); n != 1 {
+		t.Errorf("never watched: a minute-old entry cost %d probes, want 1", n)
+	}
+}
+
+// A caller whose deadline has passed posts no review at all, and one whose
+// deadline passes mid-review returns on it rather than on the review's bound.
+func TestReviewsHonorTheCallerDeadline(t *testing.T) {
+	s := scopeServer(eventbus.New())
+	c, reviews := ssarCountingClient(func(*authzv1.ResourceAttributes) bool { return true })
+	id := auth.Identity{Token: "tok-alice", Username: "alice"}
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := s.can(gone, id, c, verbList, ssarNodes, ""); err == nil || *reviews != 0 {
+		t.Fatalf("an expired caller: err %v after %d reviews, want an error and none", err, *reviews)
+	}
+
+	soon, done := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer done()
+	begin := time.Now()
+	_, err := review(soon, s.ssar, "k", 1, func(ctx context.Context) (ssarVerdict, error) {
+		<-ctx.Done()
+		return ssarVerdict{}, ctx.Err()
+	})
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(begin) > time.Second {
+		t.Fatalf("a caller with a 20ms deadline returned %v after %s", err, time.Since(begin))
+	}
+}
+
+// A review that begins right after a grant move may read the old grant from a
+// lagging apiserver: its answer serves the short TTL even while every watch
+// runs. One that begins once grants settled serves the long TTL.
+func TestUnsettledReviewsServeTheShortTTL(t *testing.T) {
+	bus := eventbus.New()
+	st, _ := watchedState(t, bus) // its initial lists are grant moves
+	s := NewServer(Deps{State: st, Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}})
+	id := auth.Identity{Token: "tok-alice", Username: "alice"}
+	c, lists := listCountingClient("tenant-a")
+	if _, err := s.visibleFor(context.Background(), id, c); err != nil {
+		t.Fatal(err)
+	}
+	key := restfactory.TokenKey(id.Token)
+	e, ok := s.visible.Get(key)
+	if !ok || !e.unsettled {
+		t.Fatalf("a review right after a grant move cached %+v (ok=%v), want it unsettled", e, ok)
+	}
+	s.visible.PutAt(key, e, time.Now().Add(-time.Minute))
+	if _, err := s.visibleFor(context.Background(), id, c); err != nil || *lists != 2 {
+		t.Fatalf("a minute-old unsettled entry: %v after %d probes, want a second probe", err, *lists)
+	}
+
+	settled := scopeServer(eventbus.New()) // no grant move ever reported
+	if settled.unsettled(time.Now()) {
+		t.Error("a review with no grant move behind it read as unsettled")
+	}
+	if !s.unsettled(st.LastGrantMove().Add(grantSettle/2)) || s.unsettled(st.LastGrantMove().Add(grantSettle)) {
+		t.Error("the settle window is not grantSettle long")
 	}
 }
 

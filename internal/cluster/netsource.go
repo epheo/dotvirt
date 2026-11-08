@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -32,16 +33,27 @@ func (c *Client) DynamicListWatch(gvr schema.GroupVersionResource) *cache.ListWa
 // snapshot uses to stay a slow probe where a CRD is absent (OVN-K UDN or nmstate not
 // installed), never a reflector error loop.
 func (c *Client) HasAPIResource(gvr schema.GroupVersionResource) bool {
+	ok, _ := c.ServesAPIResource(gvr)
+	return ok
+}
+
+// ServesAPIResource is HasAPIResource that tells a definite absence (the group
+// version or the resource is not served) from a failed discovery read, which
+// returns its error.
+func (c *Client) ServesAPIResource(gvr schema.GroupVersionResource) (bool, error) {
 	rls, err := c.kube.Discovery().ServerResourcesForGroupVersion(gvr.GroupVersion().String())
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
 	if err != nil {
-		return false
+		return false, err
 	}
 	for _, r := range rls.APIResources {
 		if r.Name == gvr.Resource {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // NodeLabels is a node's name + labels - enough for netstate to compute which nodes

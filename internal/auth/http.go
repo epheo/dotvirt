@@ -94,7 +94,7 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			http.Error(w, "session ended", http.StatusUnauthorized)
 			return
 		}
-		id, err := a.validate(r.Context(), s.token, key)
+		id, err := a.validate(r.Context(), s.token, key, true)
 		if err != nil {
 			// Only a definitive rejection signs the user out (401); a transient
 			// inability to validate (API server down/throttled) is 503, so a blip

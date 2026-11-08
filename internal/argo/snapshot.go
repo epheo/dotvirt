@@ -49,10 +49,11 @@ type driftView struct {
 	resources map[resKey]Drift
 	vms       map[string]Drift
 	projects  map[string]model.ProjectSync
-	// objGen counts content changes to the non-VM entries only: VM drift rides the
-	// frame itself, and objGen feeds the catalog watermark, which must not move
-	// (and refetch the catalog) on a VM badge change.
-	objGen uint64
+	// objGens counts content changes to the non-VM entries, per scope (see
+	// resKey.scope): VM drift rides the frame itself, and objGens feeds each
+	// caller's catalog watermark, which must not move (and refetch the catalog)
+	// on a VM badge change or on another tenant's object.
+	objGens map[string]uint64
 }
 
 // NewSnapshot builds the Application snapshot over the SA argo client. bus may be
@@ -185,15 +186,14 @@ func (s *Snapshot) derive() {
 	next := &driftView{resources: resourceDriftFromApps(objs), projects: appSyncFromApps(objs)}
 	prev := s.view.Load()
 	var prevRes map[resKey]Drift
+	var gens map[string]uint64
 	if prev != nil {
 		if maps.Equal(prev.resources, next.resources) && equality.Semantic.DeepEqual(prev.projects, next.projects) {
 			return
 		}
-		prevRes, next.objGen = prev.resources, prev.objGen
+		prevRes, gens = prev.resources, prev.objGens
 	}
-	if !nonVMEqual(prevRes, next.resources) {
-		next.objGen++
-	}
+	next.objGens = objectGens(gens, prevRes, next.resources)
 	next.vms = vmView(next.resources)
 	s.view.Store(next)
 	s.synced.Mark()
@@ -329,12 +329,14 @@ func (s *Snapshot) ResourceDrift(group, kind, namespace, name string) (Drift, bo
 	return d, ok
 }
 
-// ObjectDriftGen returns the generation of the non-VM drift content - a monotonic
-// counter that moves only when a non-VM object's sync/health/error actually changed,
-// not on every Application object churn.
-func (s *Snapshot) ObjectDriftGen() uint64 {
+// ObjectDriftGen returns the generation of the non-VM drift content in one
+// scope: a namespace, or one cluster-scoped kind's ClusterScope (see
+// resKey.scope). A monotonic counter that moves only when a non-VM
+// object's sync/health/error in that scope actually changed, not on every
+// Application object churn.
+func (s *Snapshot) ObjectDriftGen(scope string) uint64 {
 	if v := s.current(); v != nil {
-		return v.objGen
+		return v.objGens[scope]
 	}
 	return 0
 }
@@ -344,32 +346,33 @@ func appKey(u *unstructured.Unstructured) string {
 	return u.GetNamespace() + "/" + u.GetName()
 }
 
-// nonVMEqual reports whether the non-VM drift entries of two builds match. VM entries
-// are excluded because their changes already repaint the frame (per-VM badges), so only
-// other kinds should advance the catalog watermark.
-func nonVMEqual(a, b map[resKey]Drift) bool {
-	isVM := func(k resKey) bool { return k.group == "kubevirt.io" && k.kind == "VirtualMachine" }
-	count := func(m map[resKey]Drift) int {
-		n := 0
-		for k := range m {
-			if !isVM(k) {
-				n++
-			}
-		}
-		return n
-	}
-	if count(a) != count(b) {
-		return false
-	}
-	for k, d := range a {
-		if isVM(k) {
-			continue
-		}
-		if bd, ok := b[k]; !ok || bd != d {
-			return false
+// objectGens advances the generation of every scope whose non-VM drift differs
+// between two builds, and shares gens when none does. VM entries are excluded
+// because their changes already repaint the frame (per-VM badges), so only
+// other kinds should advance a catalog watermark.
+func objectGens(gens map[string]uint64, prev, next map[resKey]Drift) map[string]uint64 {
+	moved := map[string]bool{}
+	for k, d := range next {
+		if pd, ok := prev[k]; !k.isVM() && (!ok || pd != d) {
+			moved[k.scope()] = true
 		}
 	}
-	return true
+	for k := range prev {
+		if _, ok := next[k]; !k.isVM() && !ok {
+			moved[k.scope()] = true
+		}
+	}
+	if len(moved) == 0 {
+		return gens
+	}
+	out := maps.Clone(gens)
+	if out == nil {
+		out = make(map[string]uint64, len(moved))
+	}
+	for sc := range moved {
+		out[sc]++
+	}
+	return out
 }
 
 // AppRef locates the Application managing a VM: enough to read its sync revision and

@@ -130,13 +130,26 @@ func (a *Authenticator) Recheck(ctx context.Context, token string) error {
 }
 
 // Validate checks token via TokenReview and returns the attributed Identity.
-// Cached by token hash (positive and negative) for ttl.
+// Cached by token hash (positive and negative) for ttl; an uncached token
+// spends the review budget.
 func (a *Authenticator) Validate(ctx context.Context, token string) (Identity, error) {
-	return a.validate(ctx, token, restfactory.TokenKey(token))
+	return a.validate(ctx, token, restfactory.TokenKey(token), true)
 }
 
-// validate is Validate for a token whose key the caller already holds.
-func (a *Authenticator) validate(ctx context.Context, token, key string) (Identity, error) {
+// Revalidate re-checks a token an open session already presented, as a live
+// stream does: the cached verdict when there is one, else a review outside
+// the budget unknown tokens spend, so streams re-checking cannot starve
+// sign-ins and a re-check is never refused into a pass. Its load is bounded
+// by the open sessions: one review per token per authCacheTTL. A transient
+// failure is returned as such, never as a rejection.
+func (a *Authenticator) Revalidate(ctx context.Context, token string) error {
+	_, err := a.validate(ctx, token, restfactory.TokenKey(token), false)
+	return err
+}
+
+// validate is Validate for a token whose key the caller already holds, with the
+// budget optional. Concurrent misses on one token share one TokenReview.
+func (a *Authenticator) validate(ctx context.Context, token, key string, budgeted bool) (Identity, error) {
 	if token == "" {
 		return Identity{}, fmt.Errorf("%w: empty token", ErrRejected)
 	}
@@ -148,15 +161,23 @@ func (a *Authenticator) validate(ctx context.Context, token, key string) (Identi
 		return c.id, nil
 	}
 
-	if !a.reviews.Allow() {
+	if budgeted && !a.reviews.Allow() {
 		return Identity{}, ErrThrottled
 	}
+	c, err := a.cache.Do(ctx, key, func(ctx context.Context) (cachedIdentity, error) {
+		return a.review(ctx, key, token)
+	})
+	return c.id, err
+}
+
+// review runs one TokenReview and caches its verdict.
+func (a *Authenticator) review(ctx context.Context, key, token string) (cachedIdentity, error) {
 	review := &authnv1.TokenReview{Spec: authnv1.TokenReviewSpec{Token: token}}
 	res, err := a.saKube.AuthenticationV1().TokenReviews().Create(ctx, review, metav1.CreateOptions{})
 	if err != nil {
 		// A transient API error is NOT a rejection; don't poison the cache and don't
 		// wrap ErrRejected, so the caller returns 503 rather than signing the user out.
-		return Identity{}, fmt.Errorf("token review: %w", err)
+		return cachedIdentity{}, fmt.Errorf("token review: %w", err)
 	}
 	if !res.Status.Authenticated {
 		a.cache.Put(key, cachedIdentity{err: true})
@@ -164,14 +185,13 @@ func (a *Authenticator) validate(ctx context.Context, token, key string) (Identi
 		if reason == "" {
 			reason = "not authenticated"
 		}
-		return Identity{}, fmt.Errorf("%w: %s", ErrRejected, reason)
+		return cachedIdentity{}, fmt.Errorf("%w: %s", ErrRejected, reason)
 	}
-
-	id := Identity{
+	c := cachedIdentity{id: Identity{
 		Token:    token,
 		Username: res.Status.User.Username,
 		Groups:   res.Status.User.Groups,
-	}
-	a.cache.Put(key, cachedIdentity{id: id})
-	return id, nil
+	}}
+	a.cache.Put(key, c)
+	return c, nil
 }
