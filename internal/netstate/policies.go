@@ -77,11 +77,16 @@ func kindRank(k model.PolicyKind) int {
 // selectorSummary renders a LabelSelector for humans: "k=v, k2=v2" plus
 // "key op (values)" expressions. The name-In expression netgen writes for
 // namespace pickers collapses to the bare namespace list. Empty selector = "".
-// red, for a namespace selector, replaces the values it hides with
-// otherNamespaces; nil renders everything.
+// red, for a namespace selector, renders it as the caller may read it: one
+// reaching past their view reads as their own namespaces it selects, then
+// otherNamespaces, and a hidden name stands as otherNamespaces. nil renders
+// everything.
 func selectorSummary(sel *metav1.LabelSelector, red *Redaction) string {
 	if sel == nil {
 		return ""
+	}
+	if !emptySelector(sel) && netgen.NamespaceNames(sel) == nil && !red.confined(sel) {
+		return red.read(sel).own
 	}
 	var parts []string
 	add := func(part string) {

@@ -16,8 +16,10 @@ import (
 // those namespaces' VMs as their other end, each read from the network's side.
 // A policy listed as binding is never repeated as a peer rule.
 //
-// red renders the peer rules' sentences for one caller (nil renders
-// everything); policies and rows come out whole, for the caller's redactor.
+// red renders the cluster rules' peer sentences for one caller (nil renders
+// everything); a namespaced policy's read whole, as the policy plane shows it
+// to whoever sees its namespace. Policies and rows come out whole, for the
+// caller's redactor.
 // projectLabel is the namespace label naming a project: a selector on it
 // names the project, as a namespace list names its namespaces.
 func (s *Snapshot) NetworkRules(namespaces []string, nsLabels func(string) map[string]string, red *Redaction, projectLabel string) model.NetworkRules {
@@ -123,7 +125,10 @@ func peerRule(p *policy, r rule, dir string, namespaces []string, nsLabels func(
 	}
 	// Policy and Rule come out whole, for the caller's redactor to match and
 	// re-render; the sentence is rendered for the caller here.
-	_, applies, _ := p.render(red)
+	if p.view.Namespace != "" {
+		red = nil
+	}
+	applies := p.subject.applies(p.view.Namespace, red)
 	return model.PeerRule{
 		Policy:      p.view,
 		Rule:        r.view(dir, nil),

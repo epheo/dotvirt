@@ -12,7 +12,7 @@ func TestTraceNotesSpeakTheUIsWords(t *testing.T) {
 			map[string]any{"type": "Allow", "to": map[string]any{"cidrSelector": "198.51.100.0/24"}},
 		}},
 	})
-	res := s.Trace(wl("team-a", "web", nil, nil, "10.128.2.5"), nil, "203.0.113.9", "TCP", 443)
+	res := s.Trace(nil, wl("team-a", "web", nil, nil, "10.128.2.5"), nil, "203.0.113.9", "TCP", 443)
 	var note string
 	for _, st := range res.Steps {
 		if st.Stage == "gateway" && st.Action == "Allow" {

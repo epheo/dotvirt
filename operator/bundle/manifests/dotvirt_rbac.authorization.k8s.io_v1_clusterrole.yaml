@@ -172,3 +172,11 @@ rules:
   verbs:
   - get
   - list
+- apiGroups:
+  - config.openshift.io
+  resourceNames:
+  - cluster
+  resources:
+  - networks
+  verbs:
+  - get
