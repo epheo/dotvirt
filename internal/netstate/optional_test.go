@@ -2,6 +2,7 @@ package netstate
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	authzv1 "k8s.io/api/authorization/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	fakediscovery "k8s.io/client-go/discovery/fake"
@@ -103,5 +105,93 @@ func TestEnactmentListFailureIsNotStaleness(t *testing.T) {
 	}
 	if !s.Healthy() {
 		t.Error("a refused optional LIST must not mark the catalog stale")
+	}
+}
+
+// The k8s.ovn.org discovery read that admits a watch also records whether
+// route advertisement is served, and a failed read keeps the last answer.
+func TestOVNServedRecordsRouteAds(t *testing.T) {
+	kube := fake.NewSimpleClientset()
+	disc := kube.Discovery().(*fakediscovery.FakeDiscovery)
+	var reads, failing atomic.Int64
+	kube.PrependReactor("get", "resource", func(k8stesting.Action) (bool, runtime.Object, error) {
+		reads.Add(1)
+		if failing.Load() > 0 {
+			return true, nil, errors.New("discovery down")
+		}
+		return false, nil, nil
+	})
+	s := New(cluster.NewClient(kube, nil, nil), nil)
+	ovn := func(names ...string) {
+		list := &metav1.APIResourceList{GroupVersion: gvrUDN.GroupVersion().String()}
+		for _, n := range names {
+			list.APIResources = append(list.APIResources, metav1.APIResource{Name: n})
+		}
+		disc.Resources = []*metav1.APIResourceList{list}
+	}
+
+	ovn(gvrUDN.Resource)
+	if !s.ovnServed(gvrUDN) || s.routeAds.Load() != routeAdsAbsent || reads.Load() != 1 {
+		t.Fatalf("served UDNs, no route advertisement: state %d after %d reads", s.routeAds.Load(), reads.Load())
+	}
+	failing.Store(1)
+	if s.ovnServed(gvrCUDN) || s.routeAds.Load() != routeAdsAbsent {
+		t.Fatalf("a failed read must keep the last answer: state %d", s.routeAds.Load())
+	}
+	failing.Store(0)
+
+	// Installed once every OVN-K watch is admitted: no gate reads discovery
+	// again, the node tick does, until it is served.
+	ovn(gvrUDN.Resource, gvrRouteAds.Resource)
+	before := reads.Load()
+	if s.probeRouteAds(); s.routeAds.Load() != routeAdsServed || reads.Load() != before+1 {
+		t.Fatalf("route advertisement installed later: state %d after %d reads", s.routeAds.Load(), reads.Load()-before)
+	}
+	if s.probeRouteAds(); reads.Load() != before+1 {
+		t.Error("once served, the tick reads discovery no more")
+	}
+}
+
+// The node tick reads the cluster's pod and service networks: a cluster
+// without OpenShift's Network config, or one the SA may not read, leaves them
+// unknown, and a failed read keeps the last answer.
+func TestRefreshClusterNetworks(t *testing.T) {
+	gvr := schema.GroupVersionResource{Group: "config.openshift.io", Version: "v1", Resource: "networks"}
+	network := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "config.openshift.io/v1", "kind": "Network",
+		"metadata": map[string]any{"name": "cluster"},
+		"status": map[string]any{
+			"clusterNetwork": []any{map[string]any{"cidr": "10.128.0.0/14", "hostPrefix": int64(23)}},
+			"serviceNetwork": []any{"172.30.0.0/16"},
+		},
+	}}
+	var fail error // the read's failure; nil reads the object
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{gvr: "NetworkList"}, network)
+	dyn.PrependReactor("get", "networks", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if fail != nil {
+			return true, nil, fail
+		}
+		return false, nil, nil
+	})
+	s := New(cluster.NewClient(fake.NewSimpleClientset(), nil, dyn), nil)
+	ctx := context.Background()
+	known := func() bool { return s.serviceRange() != nil && s.clusterNet != nil }
+
+	s.refreshClusterNetworks(ctx)
+	if !known() || s.svcNet[0].String() != "172.30.0.0/16" || s.clusterNet[0].String() != "10.128.0.0/14" {
+		t.Fatalf("read: cluster %v, service %v", s.clusterNet, s.svcNet)
+	}
+	fail = errors.New("connection reset")
+	if s.refreshClusterNetworks(ctx); !known() {
+		t.Error("a failed read must keep the last answer")
+	}
+	for name, err := range map[string]error{
+		"not served":   apierrors.NewNotFound(gvr.GroupResource(), "cluster"),
+		"not readable": apierrors.NewForbidden(gvr.GroupResource(), "cluster", nil),
+	} {
+		fail = err
+		if s.refreshClusterNetworks(ctx); known() {
+			t.Errorf("%s: the ranges must read unknown", name)
+		}
 	}
 }

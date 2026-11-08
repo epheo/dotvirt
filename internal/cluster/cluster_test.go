@@ -236,3 +236,17 @@ func TestLiveNamespaceKeepsAuthorMetadata(t *testing.T) {
 		t.Errorf("a namespace that does not exist must read as nil, got %v, %v", absent, err)
 	}
 }
+
+// The node LIST uplinks already read carries each node's OVN-Kubernetes pod
+// subnets, the default network's range the trace places addresses in.
+func TestListNodeLabelsCarriesPodSubnets(t *testing.T) {
+	kube := fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name: "w1", Labels: map[string]string{"zone": "a"},
+		Annotations: map[string]string{"k8s.ovn.org/node-subnets": `{"default":["10.128.0.0/23"]}`},
+	}})
+	c := &Client{kube: kube}
+	got, err := c.ListNodeLabels(context.Background())
+	if err != nil || len(got) != 1 || got[0].Labels["zone"] != "a" || got[0].PodSubnets != `{"default":["10.128.0.0/23"]}` {
+		t.Fatalf("ListNodeLabels = %+v, %v", got, err)
+	}
+}
