@@ -140,13 +140,13 @@ func TestMigrateVolumeKeepsImage(t *testing.T) {
         name: fedora-42
         namespace: os-images
 `, 1)
-	once, err := ApplyEdit([]byte(src), "alpha", "web", VMEdit{
+	once, err := ApplyEdit([]byte(src), "alpha", "alpha", "web", VMEdit{
 		MigrateVolumes: []model.VolumeMigration{{Name: "rootdisk", StorageClass: "fast"}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	twice, err := ApplyEdit(once, "alpha", "web", VMEdit{
+	twice, err := ApplyEdit(once, "alpha", "alpha", "web", VMEdit{
 		MigrateVolumes: []model.VolumeMigration{{Name: "rootdisk", StorageClass: "standard"}},
 	})
 	if err != nil {
