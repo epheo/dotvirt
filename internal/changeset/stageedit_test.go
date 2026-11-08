@@ -263,3 +263,22 @@ func TestStageEditRefusesAnImpliedNamespace(t *testing.T) {
 		t.Errorf("a refused edit must not be staged, got %+v", entries)
 	}
 }
+
+// A draft staged before the namespace check existed still proposes through
+// the Transform: a VM document that leaves its namespace to the directory is
+// refused there too, naming the VM and the fix.
+func TestProposeRefusesAnImpliedNamespace(t *testing.T) {
+	loose := "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: x\nspec:\n  runStrategy: Always\n"
+	bare := seedBareFiles(t, map[string][]byte{"a/x.yaml": []byte(loose)})
+	c := newTestCoordinator(t, true)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+	edit := model.VMEdit{SetLabels: map[string]string{"env": "prod"}}
+	if err := c.store.Stage(id.Username, proj.Name, draft.Entry{Kind: draft.KindEdit, Namespace: "a", Name: "x", SourceFile: "a/x.yaml", Edit: &edit}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := c.Propose(id, proj, model.ProposeRequest{Title: "label x"})
+	if !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "a/x") || !strings.Contains(err.Error(), "set it in git") {
+		t.Fatalf("want ErrConflict naming a/x and the fix, got %v", err)
+	}
+}

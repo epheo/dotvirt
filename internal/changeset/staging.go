@@ -71,10 +71,8 @@ func (c *Coordinator) editTarget(read *git.Repo, namespace, name string) (vmFile
 	if !ok {
 		return vmFile{}, retry
 	}
-	// The directory reading is dotvirt's; Argo applies the document to its
-	// Application's namespace, which the edit's authorization never checked.
-	if _, implied, _ := declared(path, content); slices.Contains(implied, ref) {
-		return vmFile{}, fmt.Errorf("%w: %s does not set metadata.namespace for %s/%s; set it in git before editing the VM here", model.ErrConflict, path, namespace, name)
+	if err := namedVM(path, content, namespace, name); err != nil {
+		return vmFile{}, err
 	}
 	vms, err := manifest.ParseVMs(path, content, defaultNamespace(path))
 	if err != nil {
@@ -88,6 +86,17 @@ func (c *Coordinator) editTarget(read *git.Repo, namespace, name string) (vmFile
 		return vmFile{}, fmt.Errorf("%w: %s declares %s/%s twice; keep one declaration in git", model.ErrConflict, path, namespace, name)
 	}
 	return vmFile{path: path, content: content, vm: vms[i]}, nil
+}
+
+// namedVM refuses a VM document that leaves its namespace to the directory:
+// dotvirt reads it there, but Argo applies it to its Application's namespace,
+// which the edit's authorization never checked.
+func namedVM(path string, content []byte, namespace, name string) error {
+	ref := model.ObjectRef{Kind: model.KindVM.Kind, Namespace: namespace, Name: name}
+	if _, implied, _ := declared(path, content); slices.Contains(implied, ref) {
+		return fmt.Errorf("%w: %s does not set metadata.namespace for VM %s/%s; set it in git", model.ErrConflict, path, namespace, name)
+	}
+	return nil
 }
 
 // PreviewEdit renders an edit as the changes staging it would list, restart
