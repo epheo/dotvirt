@@ -635,6 +635,17 @@ export interface DRSView {
 // source: metrics.go
 
 /**
+ * MetricsReason says why a metrics read carries no data, or not all of it;
+ * empty means it is whole. Any reason but partial holds no numbers to show:
+ * its zeros are not zeros.
+ */
+export type MetricsReason = string;
+export const MetricsForbidden: MetricsReason = "forbidden"; // the metrics backend refused the caller
+export const MetricsUnreachable: MetricsReason = "unreachable"; // the metrics backend is down or failing
+export const MetricsUnconfigured: MetricsReason = "unconfigured"; // no metrics endpoint serves this caller
+export const MetricsScope: MetricsReason = "scope"; // too many namespaces for one per-namespace read: narrow to a project
+export const MetricsPartial: MetricsReason = "partial"; // some queries failed: the numbers leave something out
+/**
  * HostCapacityNode is one worker's commitment picture: what is promised to
  * VMs (vCPUs, guest memory) against what the node can offer.
  */
@@ -652,6 +663,7 @@ export interface HostCapacityNode {
 export interface HostCapacity {
   updated: number /* int64 */;
   nodes: HostCapacityNode[];
+  unavailable?: MetricsReason;
 }
 /**
  * MetricSeries is one line in a chart: a value per timestamp in the parent
@@ -680,6 +692,7 @@ export interface MetricChart {
 export interface VMMetrics {
   range: string;
   charts: MetricChart[];
+  unavailable?: MetricsReason;
 }
 /**
  * UsageMetric is one resource's point-in-time usage for a VM Summary bar - Used of
@@ -699,6 +712,7 @@ export interface VMUsage {
   cpu: UsageMetric; // Used = % of allocated vCPU, Total = 100
   memory: UsageMetric; // bytes; Total = allocated (domain)
   storage: UsageMetric; // bytes; guest filesystem used / capacity
+  unavailable?: MetricsReason;
 }
 /**
  * ClusterMetric is one aggregate resource for the cluster/infrastructure rings:
@@ -729,9 +743,10 @@ export interface ClusterSummary {
   cpu: ClusterMetric; // cores
   memory: ClusterMetric; // bytes
   storage: ClusterMetric; // bytes
-  vms: { [key: string]: number /* int */}; // phase -> count
+  vms?: { [key: string]: number /* int */}; // phase -> count
   topCpu: ConsumerVM[];
   topMemory: ConsumerVM[];
+  unavailable?: MetricsReason;
 }
 /**
  * HostWorker is one worker in the utilization distribution. The full roster
@@ -766,6 +781,7 @@ export interface HostLoad {
   mean: number /* float64 */; // CPU percent
   nodes: HostWorker[];
   band?: HostBand;
+  unavailable?: MetricsReason;
 }
 /**
  * QuotaItem is one resource row of a ResourceQuota: current usage against the
@@ -794,6 +810,7 @@ export interface NetworkTraffic {
   network: string;
   window: string;
   vms: TrafficVM[];
+  unavailable?: MetricsReason;
 }
 /**
  * TrafficVM is one VM's traffic on a network: received plus sent, averaged.

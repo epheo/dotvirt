@@ -13,10 +13,13 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 )
 
+// wide is a caller whose queries span every namespace at once.
+var wide = Caller{Token: "tok", Wide: true}
+
 // mustNew builds a metrics client for tests (no CA, no insecure).
 func mustNew(t *testing.T, url string) *Client {
 	t.Helper()
-	c, err := New(url, "", false)
+	c, err := New(url, "", "", false)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -63,7 +66,7 @@ func TestVMMetricsAlignsSeries(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m, err := mustNew(t, srv.URL).VMMetrics(context.Background(), "tok", "ns", "vm", "1h")
+	m, err := mustNew(t, srv.URL).VMMetrics(context.Background(), wide, "ns", "vm", "1h")
 	if err != nil {
 		t.Fatalf("VMMetrics: %v", err)
 	}
@@ -118,7 +121,7 @@ func TestVMMetricsFansOutPerLabel(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m, err := mustNew(t, srv.URL).VMMetrics(context.Background(), "tok", "ns", "vm", "1h")
+	m, err := mustNew(t, srv.URL).VMMetrics(context.Background(), wide, "ns", "vm", "1h")
 	if err != nil {
 		t.Fatalf("VMMetrics: %v", err)
 	}
@@ -167,7 +170,7 @@ func TestScopeMetricsNamesAndAlignsSeries(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m, err := mustNew(t, srv.URL).ScopeMetrics(context.Background(), "tok", []string{"a", "b"}, "", "1h")
+	m, err := mustNew(t, srv.URL).ScopeMetrics(context.Background(), wide, []string{"a", "b"}, "", "1h")
 	if err != nil {
 		t.Fatalf("ScopeMetrics: %v", err)
 	}
@@ -212,7 +215,7 @@ func TestAlertsCollapsesAndSorts(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	alerts, err := mustNew(t, srv.URL).Alerts(context.Background(), "tok", []string{"a", "b"})
+	alerts, err := mustNew(t, srv.URL).Alerts(context.Background(), wide, []string{"a", "b"})
 	if err != nil {
 		t.Fatalf("Alerts: %v", err)
 	}
@@ -238,10 +241,7 @@ func TestVectorAndConsumers(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	vec, err := mustNew(t, srv.URL).vector(context.Background(), "tok", "q")
-	if err != nil {
-		t.Fatal(err)
-	}
+	vec := mustNew(t, srv.URL).read("tok").vector(context.Background(), "", "q")
 	if len(vec) != 2 {
 		t.Fatalf("vector parsed %d series, want 2", len(vec))
 	}
@@ -286,7 +286,7 @@ func TestHostLoadDistribution(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	load, err := mustNew(t, srv.URL).HostLoad(context.Background(), "tok")
+	load, err := mustNew(t, srv.URL).HostLoad(context.Background(), wide)
 	if err != nil {
 		t.Fatalf("HostLoad: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestHostLoadNoWorkers(t *testing.T) {
 		fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[]}}`)
 	}))
 	defer srv.Close()
-	if _, err := mustNew(t, srv.URL).HostLoad(context.Background(), "tok"); err == nil {
+	if _, err := mustNew(t, srv.URL).HostLoad(context.Background(), wide); err == nil {
 		t.Fatal("want an error for an empty worker set")
 	}
 }
@@ -353,11 +353,11 @@ func TestCapacity(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "", false)
+	c, err := New(srv.URL, "", "", false)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	cap, err := c.Capacity(context.Background(), "tok")
+	cap, err := c.Capacity(context.Background(), wide)
 	if err != nil {
 		t.Fatalf("Capacity: %v", err)
 	}
@@ -378,14 +378,14 @@ func TestCapacity(t *testing.T) {
 }
 
 // promStub answers every query with one series of value v; a query containing
-// fail answers 403 instead. It counts the requests it serves.
+// fail answers 503 instead. It counts the requests it serves.
 func promStub(t *testing.T, fail string, hits *atomic.Int64) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		q := r.URL.Query().Get("query")
 		if fail != "" && strings.Contains(q, fail) {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -399,35 +399,42 @@ func promStub(t *testing.T, fail string, hits *atomic.Int64) *httptest.Server {
 	return srv
 }
 
-// A summary with a failed query still renders, but is never cached: the next
-// caller with the same scope re-queries instead of inheriting the zeros.
-func TestClusterSummaryNotCachedOnQueryError(t *testing.T) {
+// A summary with a failed query still renders, and serves only the negative
+// TTL: past it, the next caller re-queries instead of inheriting the gap.
+func TestClusterSummaryPartialServesNegativeTTL(t *testing.T) {
 	var hits atomic.Int64
 	c := mustNew(t, promStub(t, "kube_node_status_allocatable", &hits).URL)
-	cs, err := c.ClusterSummary(context.Background(), "tok", []string{"a"}, "", true)
+	cs, err := c.ClusterSummary(context.Background(), wide, []string{"a"}, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cs.CPU.Total != 0 || cs.CPU.Used != 7 {
-		t.Errorf("degraded summary = %+v, want used 7, total 0", cs.CPU)
+	if cs.CPU.Total != 0 || cs.CPU.Used != 7 || cs.Unavailable != model.MetricsPartial {
+		t.Errorf("degraded summary = %+v, want used 7, total 0, partial", cs)
 	}
 	first := hits.Load()
-	if _, err := c.ClusterSummary(context.Background(), "tok", []string{"a"}, "", true); err != nil {
+	if _, err := c.ClusterSummary(context.Background(), wide, []string{"a"}, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if hits.Load() != first {
+		t.Error("a partial summary within the negative TTL was re-queried")
+	}
+	c.negTTL = 0
+	if _, err := c.ClusterSummary(context.Background(), wide, []string{"a"}, "", true); err != nil {
 		t.Fatal(err)
 	}
 	if hits.Load() == first {
-		t.Error("a summary with a failed query was served from cache")
+		t.Error("a partial summary served past the negative TTL")
 	}
 }
 
 func TestClusterSummaryCachedWhenClean(t *testing.T) {
 	var hits atomic.Int64
 	c := mustNew(t, promStub(t, "", &hits).URL)
-	if _, err := c.ClusterSummary(context.Background(), "tok", []string{"a"}, "", true); err != nil {
+	if _, err := c.ClusterSummary(context.Background(), wide, []string{"a"}, "", true); err != nil {
 		t.Fatal(err)
 	}
 	first := hits.Load()
-	if _, err := c.ClusterSummary(context.Background(), "tok", []string{"a"}, "", true); err != nil {
+	if _, err := c.ClusterSummary(context.Background(), wide, []string{"a"}, "", true); err != nil {
 		t.Fatal(err)
 	}
 	if hits.Load() != first {
@@ -440,14 +447,14 @@ func TestClusterSummaryCachedWhenClean(t *testing.T) {
 func TestClusterSummaryNodeTotalsGated(t *testing.T) {
 	var hits atomic.Int64
 	c := mustNew(t, promStub(t, "", &hits).URL)
-	admin, err := c.ClusterSummary(context.Background(), "admin", []string{"a"}, "", true)
+	admin, err := c.ClusterSummary(context.Background(), Caller{Token: "admin", Wide: true}, []string{"a"}, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if admin.CPU.Total != 7 || admin.Memory.Total != 7 {
 		t.Fatalf("node reader totals = %v/%v, want 7/7", admin.CPU.Total, admin.Memory.Total)
 	}
-	tenant, err := c.ClusterSummary(context.Background(), "tenant", []string{"a"}, "", false)
+	tenant, err := c.ClusterSummary(context.Background(), Caller{Token: "tenant", Wide: true}, []string{"a"}, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +463,9 @@ func TestClusterSummaryNodeTotalsGated(t *testing.T) {
 	}
 }
 
-func TestHostLoadNotCachedOnQueryError(t *testing.T) {
+// A host load with a failed query says partial and serves only the negative
+// TTL.
+func TestHostLoadPartialServesNegativeTTL(t *testing.T) {
 	var hits atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
@@ -470,31 +479,38 @@ func TestHostLoadNotCachedOnQueryError(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := mustNew(t, srv.URL)
-	if _, err := c.HostLoad(context.Background(), "tok"); err != nil {
-		t.Fatal(err)
+	if load, err := c.HostLoad(context.Background(), wide); err != nil || load.Unavailable != model.MetricsPartial {
+		t.Fatalf("host load = %+v, %v, want partial", load, err)
 	}
 	first := hits.Load()
-	if _, err := c.HostLoad(context.Background(), "tok"); err != nil {
+	if _, err := c.HostLoad(context.Background(), wide); err != nil {
+		t.Fatal(err)
+	}
+	if hits.Load() != first {
+		t.Error("a partial host load within the negative TTL was re-queried")
+	}
+	c.negTTL = 0
+	if _, err := c.HostLoad(context.Background(), wide); err != nil {
 		t.Fatal(err)
 	}
 	if hits.Load() == first {
-		t.Error("a host load with a failed query was served from cache")
+		t.Error("a partial host load served past the negative TTL")
 	}
 }
 
-// A total failure surfaces as a fixed 503 message: the backend's error text
-// can carry its URL.
-func TestScopeMetricsErrorHidesBackendDetail(t *testing.T) {
+// A total failure answers its reason and no charts, never the backend's
+// text, which can carry its URL.
+func TestScopeMetricsFailureAnswersReason(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "nope", http.StatusForbidden)
+		http.Error(w, "nope "+r.Host, http.StatusForbidden)
 	}))
 	defer srv.Close()
-	_, err := mustNew(t, srv.URL).ScopeMetrics(context.Background(), "tok", []string{"a"}, "", "")
-	if err == nil {
-		t.Fatal("want an error")
+	m, err := mustNew(t, srv.URL).ScopeMetrics(context.Background(), wide, []string{"a"}, "", "")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(err.Error(), srv.URL) || strings.Contains(err.Error(), "403") {
-		t.Errorf("error leaks backend detail: %v", err)
+	if m.Unavailable != model.MetricsForbidden || len(m.Charts) != 0 {
+		t.Errorf("metrics = %+v, want forbidden with no charts", m)
 	}
 }
 
@@ -513,7 +529,7 @@ func TestNetworkTraffic(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := mustNew(t, srv.URL).NetworkTraffic(context.Background(), "tok", []Attachment{
+	got, err := mustNew(t, srv.URL).NetworkTraffic(context.Background(), wide, []Attachment{
 		{"web-prod", "web-1", "web-net"},
 		{"web-prod", "web-2", "web-net"},
 		{"web-prod", "web-2", "web-net-b"},
@@ -521,13 +537,13 @@ func TestNetworkTraffic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`namespace=~"web-prod"`, `interface=~"web-net|web-net-b"`, "[1h]", "receive", "transmit"} {
+	for _, want := range []string{`namespace="web-prod"`, `interface=~"web-net|web-net-b"`, "[1h]", "receive", "transmit"} {
 		if !strings.Contains(query, want) {
 			t.Errorf("query %q lacks %q", query, want)
 		}
 	}
-	if len(got) != 2 || got[0].Name != "web-2" || got[0].BitsPerSecond != 44000 || got[1].Name != "web-1" || got[1].BitsPerSecond != 8000 {
-		t.Errorf("traffic = %+v, want web-2 44000 then web-1 8000", got)
+	if vms := got.VMs; len(vms) != 2 || vms[0].Name != "web-2" || vms[0].BitsPerSecond != 44000 || vms[1].Name != "web-1" || vms[1].BitsPerSecond != 8000 {
+		t.Errorf("traffic = %+v, want web-2 44000 then web-1 8000", vms)
 	}
 }
 

@@ -2,6 +2,19 @@ package model
 
 // Performance and capacity: the Performance tab, summary widgets, host planes.
 
+// MetricsReason says why a metrics read carries no data, or not all of it;
+// empty means it is whole. Any reason but partial holds no numbers to show:
+// its zeros are not zeros.
+type MetricsReason string
+
+const (
+	MetricsForbidden    MetricsReason = "forbidden"    // the metrics backend refused the caller
+	MetricsUnreachable  MetricsReason = "unreachable"  // the metrics backend is down or failing
+	MetricsUnconfigured MetricsReason = "unconfigured" // no metrics endpoint serves this caller
+	MetricsScope        MetricsReason = "scope"        // too many namespaces for one per-namespace read: narrow to a project
+	MetricsPartial      MetricsReason = "partial"      // some queries failed: the numbers leave something out
+)
+
 // HostCapacityNode is one worker's commitment picture: what is promised to
 // VMs (vCPUs, guest memory) against what the node can offer.
 type HostCapacityNode struct {
@@ -15,8 +28,9 @@ type HostCapacityNode struct {
 // HostCapacity is the per-worker allocation/overcommit breakdown behind the
 // host capacity card - the cluster overcommit ratios, per host.
 type HostCapacity struct {
-	Updated int64              `json:"updated"`
-	Nodes   []HostCapacityNode `json:"nodes"`
+	Updated     int64              `json:"updated"`
+	Nodes       []HostCapacityNode `json:"nodes"`
+	Unavailable MetricsReason      `json:"unavailable,omitempty"`
 }
 
 // MetricSeries is one line in a chart: a value per timestamp in the parent
@@ -40,8 +54,9 @@ type MetricChart struct {
 // VMMetrics is a VM's performance time-series for one range - several charts built
 // from KubeVirt's kubevirt_vmi_* Prometheus metrics, shaped for direct charting.
 type VMMetrics struct {
-	Range  string        `json:"range"`
-	Charts []MetricChart `json:"charts"`
+	Range       string        `json:"range"`
+	Charts      []MetricChart `json:"charts"`
+	Unavailable MetricsReason `json:"unavailable,omitempty"`
 }
 
 // UsageMetric is one resource's point-in-time usage for a VM Summary bar - Used of
@@ -59,6 +74,8 @@ type VMUsage struct {
 	CPU     UsageMetric `json:"cpu"`     // Used = % of allocated vCPU, Total = 100
 	Memory  UsageMetric `json:"memory"`  // bytes; Total = allocated (domain)
 	Storage UsageMetric `json:"storage"` // bytes; guest filesystem used / capacity
+
+	Unavailable MetricsReason `json:"unavailable,omitempty"`
 }
 
 // ClusterMetric is one aggregate resource for the cluster/infrastructure rings:
@@ -83,12 +100,14 @@ type ConsumerVM struct {
 // node capacity is the cluster-wide boundary.
 type ClusterSummary struct {
 	Updated   int64          `json:"updated"`
-	CPU       ClusterMetric  `json:"cpu"`     // cores
-	Memory    ClusterMetric  `json:"memory"`  // bytes
-	Storage   ClusterMetric  `json:"storage"` // bytes
-	VMs       map[string]int `json:"vms"`     // phase -> count
+	CPU       ClusterMetric  `json:"cpu"`           // cores
+	Memory    ClusterMetric  `json:"memory"`        // bytes
+	Storage   ClusterMetric  `json:"storage"`       // bytes
+	VMs       map[string]int `json:"vms,omitempty"` // phase -> count
 	TopCPU    []ConsumerVM   `json:"topCpu"`
 	TopMemory []ConsumerVM   `json:"topMemory"`
+
+	Unavailable MetricsReason `json:"unavailable,omitempty"`
 }
 
 // HostWorker is one worker in the utilization distribution. The full roster
@@ -120,6 +139,8 @@ type HostLoad struct {
 	Mean    float64      `json:"mean"` // CPU percent
 	Nodes   []HostWorker `json:"nodes"`
 	Band    *HostBand    `json:"band,omitempty"`
+
+	Unavailable MetricsReason `json:"unavailable,omitempty"`
 }
 
 // QuotaItem is one resource row of a ResourceQuota: current usage against the
@@ -142,9 +163,10 @@ type NamespaceQuota struct {
 // NetworkTraffic is GET /api/metrics/network: the busiest VMs on one network
 // by traffic over Window.
 type NetworkTraffic struct {
-	Network string      `json:"network"`
-	Window  string      `json:"window"`
-	VMs     []TrafficVM `json:"vms"`
+	Network     string        `json:"network"`
+	Window      string        `json:"window"`
+	VMs         []TrafficVM   `json:"vms"`
+	Unavailable MetricsReason `json:"unavailable,omitempty"`
 }
 
 // TrafficVM is one VM's traffic on a network: received plus sent, averaged.

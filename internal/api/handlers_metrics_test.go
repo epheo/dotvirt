@@ -1,9 +1,14 @@
 package api
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
+	authzv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
@@ -123,5 +128,169 @@ func TestNetworkAttachments(t *testing.T) {
 		if strings.Join(got, ",") != strings.Join(c.want, ",") {
 			t.Errorf("%s/%s: attachments = %v, want %v", c.target.Namespace, c.target.Name, got, c.want)
 		}
+	}
+}
+
+// Through the routes: the cluster-wide metrics right, asked as the querier's
+// cluster-wide port asks it, sends an admin's summary there as one query per
+// sum; a tenant without it reads its own namespace on the tenancy port and
+// never the cluster-wide one. With metrics off the view says so, not 503.
+func TestMetricsCallerPicksThePort(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.readsVMs = tenantReadsTeamA
+	var mu sync.Mutex
+	var asked []authzv1.ResourceAttributes
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		if a.Resource == "prometheuses" {
+			mu.Lock()
+			asked = append(asked, *a)
+			mu.Unlock()
+		}
+		return token == adminToken
+	}
+	type hit struct{ port, token, ns string }
+	var hits []hit
+	querier := func(port string) *httptest.Server {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			hits = append(hits, hit{port, bearer(r), r.URL.Query().Get("namespace")})
+			mu.Unlock()
+			if port == "wide" && bearer(r) != adminToken {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if strings.HasSuffix(r.URL.Path, "query_range") {
+				fmt.Fprint(w, `{"status":"success","data":{"result":[{"metric":{},"values":[[100,"2"]]}]}}`)
+				return
+			}
+			fmt.Fprint(w, `{"status":"success","data":{"result":[{"metric":{"phase":"running"},"value":[100,"2"]}]}}`)
+		}))
+		t.Cleanup(srv.Close)
+		return srv
+	}
+	wide, tenancy := querier("wide"), querier("tenancy")
+	s := fc.server(nil, Config{})
+	fresh := func() {
+		var err error
+		if s.metrics, err = metrics.New(wide.URL, tenancy.URL, "", false); err != nil {
+			t.Fatal(err)
+		}
+		mu.Lock()
+		hits = nil
+		mu.Unlock()
+	}
+
+	fresh()
+	rec := do(s, tenantToken, http.MethodGet, "/api/metrics/cluster", "")
+	wantStatus(t, rec, http.StatusOK)
+	if cs := decodeBody[model.ClusterSummary](t, rec); cs.Unavailable != "" || cs.VMs["running"] != 2 {
+		t.Errorf("tenant summary = %+v, want its namespace's VMs", cs)
+	}
+	mu.Lock()
+	for _, h := range hits {
+		if h != (hit{"tenancy", tenantToken, "team-a-dev"}) {
+			t.Errorf("tenant query went to %+v, want the tenancy port in team-a-dev", h)
+		}
+	}
+	tenantHits := len(hits)
+	mu.Unlock()
+	if tenantHits == 0 {
+		t.Fatal("tenant summary sent no query")
+	}
+
+	fresh()
+	wantStatus(t, do(s, adminToken, http.MethodGet, "/api/metrics/cluster", ""), http.StatusOK)
+	mu.Lock()
+	for _, h := range hits {
+		if h != (hit{"wide", adminToken, ""}) {
+			t.Errorf("admin query went to %+v, want the cluster-wide port", h)
+		}
+	}
+	if len(hits) != tenantHits+2 {
+		t.Errorf("admin sent %d queries, want %d: one per sum plus the 2 node totals", len(hits), tenantHits+2)
+	}
+	want := authzv1.ResourceAttributes{Verb: "get", Group: "monitoring.coreos.com", Resource: "prometheuses", Subresource: "api", Namespace: "openshift-monitoring", Name: "k8s"}
+	if len(asked) != 2 || asked[0] != want || asked[1] != want {
+		t.Errorf("metrics reviews = %+v, want one per caller of %+v", asked, want)
+	}
+	mu.Unlock()
+
+	s.metrics = nil
+	rec = do(s, tenantToken, http.MethodGet, "/api/metrics/cluster", "")
+	wantStatus(t, rec, http.StatusOK)
+	if cs := decodeBody[model.ClusterSummary](t, rec); cs.Unavailable != model.MetricsUnconfigured {
+		t.Errorf("metrics off: summary = %+v, want unconfigured", cs)
+	}
+}
+
+// The summary served from the metrics cache is shared by every caller: the
+// stopped-VM fold must not write into it. Writing grew the count on every
+// hit, and two concurrent hits wrote one map at once (fatal under load).
+func TestClusterSummaryFoldLeavesCacheAlone(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.vms = []kubevirtcorev1.VirtualMachine{{ObjectMeta: metav1.ObjectMeta{Name: "off", Namespace: "team-a-dev"}}}
+	querier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "query_range") {
+			fmt.Fprint(w, `{"status":"success","data":{"result":[{"metric":{},"values":[[100,"2"]]}]}}`)
+			return
+		}
+		fmt.Fprint(w, `{"status":"success","data":{"result":[{"metric":{"phase":"running"},"value":[100,"2"]}]}}`)
+	}))
+	t.Cleanup(querier.Close)
+	s := fc.server(nil, Config{})
+	var err error
+	if s.metrics, err = metrics.New(querier.URL, querier.URL, "", false); err != nil {
+		t.Fatal(err)
+	}
+	check := func() {
+		rec := do(s, adminToken, http.MethodGet, "/api/metrics/cluster", "")
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d", rec.Code)
+			return
+		}
+		if cs := decodeBody[model.ClusterSummary](t, rec); cs.VMs["stopped"] != 1 || cs.VMs["running"] != 2 {
+			t.Errorf("vms = %v, want running 2, stopped 1 on every hit", cs.VMs)
+		}
+	}
+	for range 3 {
+		check()
+	}
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(check)
+	}
+	wg.Wait()
+}
+
+// A partial summary still counts phases: its stopped VMs come from the
+// snapshot, not the failed query, so they are folded in like a whole one's.
+func TestPartialSummaryFoldsStoppedVMs(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.vms = []kubevirtcorev1.VirtualMachine{{ObjectMeta: metav1.ObjectMeta{Name: "off", Namespace: "team-a-dev"}}}
+	querier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Query().Get("query"), "kube_node_status_allocatable") {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "query_range") {
+			fmt.Fprint(w, `{"status":"success","data":{"result":[{"metric":{},"values":[[100,"2"]]}]}}`)
+			return
+		}
+		fmt.Fprint(w, `{"status":"success","data":{"result":[{"metric":{"phase":"running"},"value":[100,"2"]}]}}`)
+	}))
+	t.Cleanup(querier.Close)
+	s := fc.server(nil, Config{})
+	var err error
+	if s.metrics, err = metrics.New(querier.URL, querier.URL, "", false); err != nil {
+		t.Fatal(err)
+	}
+	rec := do(s, adminToken, http.MethodGet, "/api/metrics/cluster", "")
+	wantStatus(t, rec, http.StatusOK)
+	cs := decodeBody[model.ClusterSummary](t, rec)
+	if cs.Unavailable != model.MetricsPartial || cs.VMs["running"] != 2 || cs.VMs["stopped"] != 1 {
+		t.Errorf("summary = %+v, want partial with running 2 and stopped 1", cs)
 	}
 }

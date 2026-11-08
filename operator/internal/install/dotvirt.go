@@ -2,6 +2,8 @@ package install
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strings"
 
@@ -51,6 +53,22 @@ const (
 	IngressCAKey = "ca-bundle.crt"
 	ServiceCAKey = "service-ca.crt"
 )
+
+// metricsTenancyURL is the thanos-querier tenancy port beside its
+// cluster-wide one: the service serves every namespace on 9091 and one
+// namespace per query on 9092, under the same serving cert. "" for any other
+// endpoint, prometheus-k8s on 9091 included: none has a known tenancy port.
+func metricsTenancyURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Port() != "9091" {
+		return ""
+	}
+	if h := u.Hostname(); h != "thanos-querier.openshift-monitoring.svc" && h != "thanos-querier.openshift-monitoring.svc.cluster.local" {
+		return ""
+	}
+	u.Host = net.JoinHostPort(u.Hostname(), "9092")
+	return u.String()
+}
 
 // OAuthClientName is the OpenShift OAuthClient this install registers as. An OAuthClient
 // is CLUSTER-scoped, so the name carries the install's namespace: a shared constant would
@@ -164,6 +182,9 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string) []corev1.EnvVar {
 	}
 	if dv.Spec.Metrics.URL != "" {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: dv.Spec.Metrics.URL})
+		if t := metricsTenancyURL(dv.Spec.Metrics.URL); t != "" {
+			env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_TENANCY_URL", Value: t})
+		}
 	}
 	// OpenShift SSO: the operator generates the client secret and wires it here; the admin
 	// applies the OAuthClient (a cluster-admin act it deliberately doesn't perform; no
