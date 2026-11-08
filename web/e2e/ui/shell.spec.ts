@@ -97,7 +97,7 @@ test('deep links survive a hard reload', async ({ page }) => {
 	await page.reload();
 	await expect(page.getByRole('button', { name: /Edit Settings/ })).toBeVisible();
 	await page.goto('/catalog?kind=instancetypes');
-	await expect(page.getByText('Read-only platform objects')).toBeVisible();
+	await expect(page.getByText('Managed by the cluster platform, not dotvirt')).toBeVisible();
 });
 
 test('base: the summary shows changes in scope; the table names open PRs per VM', async ({

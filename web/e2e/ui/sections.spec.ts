@@ -68,8 +68,8 @@ test('catalog: kinds are tabs, the tree lists items, selection rides the URL', a
 	await page.goto('/catalog');
 	const main = page.locator('main');
 	const aside = page.locator('aside');
-	await expect(main.getByRole('link', { name: 'Instance types', exact: true })).toBeVisible();
-	await main.getByRole('link', { name: 'Instance types', exact: true }).click();
+	await expect(main.getByRole('link', { name: /^Instance types\s*3$/ })).toBeVisible();
+	await main.getByRole('link', { name: /^Instance types/ }).click();
 	await expect(page).toHaveURL(/\/catalog\?kind=instancetypes$/);
 	// The tree carries the kind's items; clicking one selects it in the pane.
 	const item = aside.locator('a[href^="/catalog?kind=instancetypes&item="]').first();
@@ -80,6 +80,47 @@ test('catalog: kinds are tabs, the tree lists items, selection rides the URL', a
 	// A reload keeps the selection: the item is URL state, not component state.
 	await page.reload();
 	await expect(main.locator('aside').getByRole('heading', { name })).toBeVisible();
+});
+
+test('catalog: a template or a boot image makes a VM; images link their disks', async ({
+	page,
+}) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await page.goto('/catalog');
+	const main = page.locator('main');
+	await expect(
+		main.getByText('6 templates in 2 libraries, 5 boot images, 3 instance types'),
+	).toBeVisible();
+	// Where templates live is the card's own note.
+	await expect(main.getByText('In git, under templates/ in each library repo')).toBeVisible();
+	await main.getByRole('button', { name: 'Create VM from web-node' }).click();
+	const sheet = page.getByRole('dialog');
+	await expect(sheet.getByRole('heading', { name: 'New VM from template' })).toBeVisible();
+	await expect(sheet.getByRole('radio', { name: /web-node/ })).toBeChecked();
+	await sheet.getByRole('button', { name: 'Close' }).click();
+
+	await main.getByRole('link', { name: /^Boot images\s*5$/ }).click();
+	// An image still importing stays offered, disabled, with the reason.
+	await expect(main.getByRole('button', { name: 'Create VM from debian-13' })).toBeDisabled();
+	await expect(main.getByRole('button', { name: 'Create VM from debian-13' })).toHaveAttribute(
+		'title',
+		'The image is still importing',
+	);
+	const fedora = main.locator('tbody tr', { hasText: 'fedora-42' });
+	await fedora.getByRole('link', { name: /^\d+ disks?$/ }).click();
+	await expect(page).toHaveURL(/\/storage\?tab=disks&image=dotvirt-images%2Ffedora-42$/);
+});
+
+test('catalog: a shared network is one row that opens its page in Networking', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await page.goto('/catalog?kind=networks');
+	const main = page.locator('main');
+	const row = main.locator('tbody tr', { hasText: 'lan-101' });
+	await expect(row).toContainText('VLAN network, in web-prod');
+	await row.getByRole('link', { name: 'Open lan-101 in Networking' }).click();
+	await expect(page).toHaveURL(/\/networking\/lan-101$/);
 });
 
 test('Changes is a section: the tree scopes the review, a VM opens its own tab', async ({
@@ -100,12 +141,16 @@ test('Changes is a section: the tree scopes the review, a VM opens its own tab',
 	await expect(page).toHaveURL(/\/changes\/team-web$/);
 	await expect(main.getByRole('button', { name: /PR #42/ })).toBeVisible();
 	await expect(main.getByRole('button', { name: /PR #41/ })).toHaveCount(0);
+	await main.getByRole('link', { name: /^History/ }).click();
 	await expect(main.getByRole('button', { name: /web-2: add data disk/ })).toBeVisible();
 	// A namespace narrows history to its directory: db-prod saw only the import.
-	await aside.locator('a[href="/changes/team-db"]').click();
+	// The tree keeps the tab across scopes.
+	await aside.locator('a[href="/changes/team-db?tab=history"]').click();
+	await main.getByRole('link', { name: /^In review/ }).click();
 	await expect(main.getByRole('button', { name: /PR #41/ })).toBeVisible();
-	await aside.locator('a[href="/changes/team-db/db-prod"]').click();
-	await expect(page).toHaveURL(/\/changes\/team-db\/db-prod$/);
+	await main.getByRole('link', { name: /^History/ }).click();
+	await aside.locator('a[href="/changes/team-db/db-prod?tab=history"]').click();
+	await expect(page).toHaveURL(/\/changes\/team-db\/db-prod\?tab=history$/);
 	await expect(main.getByRole('button', { name: /initial import/ })).toBeVisible();
 	await expect(main.getByRole('button', { name: /web-2: add data disk/ })).toHaveCount(0);
 	// A VM leaf opens the VM page on its Changes tab, keeping this tree.

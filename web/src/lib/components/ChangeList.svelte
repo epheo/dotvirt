@@ -15,13 +15,13 @@
 		<li class="flex items-baseline gap-2">
 			<span class="w-32 shrink-0 text-ink-muted">{c.field}</span>
 			{#if c.action === 'change'}
-				<span class="text-ink-faint line-through">{c.from || '∅'}</span>
-				<span class="text-ink-faint">→</span>
+				<span class="text-ink-faint line-through">{c.from || 'none'}</span>
+				<span class="text-ink-faint">to</span>
 				<span class="font-medium text-ink">{c.to}</span>
 			{:else if c.action === 'add'}
 				<span class="font-medium text-ok-ink">+ {c.to}</span>
 			{:else}
-				<span class="font-medium text-danger-ink line-through">− {c.from}</span>
+				<span class="font-medium text-danger-ink line-through">- {c.from}</span>
 			{/if}
 			{#if pills}
 				<span

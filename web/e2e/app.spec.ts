@@ -65,7 +65,7 @@ test('Snapshots tab shows the take control', async ({ page }) => {
 test('views are deep-linkable and refresh-safe', async ({ page }) => {
 	// Catalog is a routed workspace, not a drawer.
 	await page.goto('/catalog?kind=instancetypes');
-	await expect(page.getByText('Read-only — these are platform objects')).toBeVisible();
+	await expect(page.getByText('Managed by the cluster platform, not dotvirt')).toBeVisible();
 	// The map is the Networking root's first tab.
 	await page.goto('/networking');
 	await expect(page.getByRole('heading', { name: 'Cluster map' })).toBeVisible();

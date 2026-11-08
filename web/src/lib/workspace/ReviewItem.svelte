@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Server, TriangleAlert } from '@lucide/svelte';
+	import { Undo2 } from '@lucide/svelte';
 	import {
 		api,
 		vmKey,
@@ -8,23 +8,25 @@
 		type ProposeResult,
 		type VM,
 	} from '#lib/api.js';
-	import { bytes, quantityBytes } from '#lib/format.js';
+	import { bytes, plural, quantityBytes } from '#lib/format.js';
 	import { action } from '#lib/resource.svelte.js';
-	import { draftKindTone, TONE_PILL } from '#lib/status.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import Button from '#lib/components/Button.svelte';
 	import Card from '#lib/components/Card.svelte';
 	import ChangeList from '#lib/components/ChangeList.svelte';
+	import Consequence from '#lib/components/Consequence.svelte';
 	import ErrorNote from '#lib/components/ErrorNote.svelte';
 	import GitOpsStepper from '#lib/components/GitOpsStepper.svelte';
 	import ManifestDiff from '#lib/components/ManifestDiff.svelte';
 	import PruneAck from '#lib/components/PruneAck.svelte';
+	import StageChip from '#lib/components/StageChip.svelte';
 	import TextArea from '#lib/components/TextArea.svelte';
 	import TextInput from '#lib/components/TextInput.svelte';
 	import ReviewPane from './ReviewPane.svelte';
+	import ReviewSection from './ReviewSection.svelte';
 
-	// A staged item under review: its field diff, what merging does to the
-	// running system, and the propose footer - the one primary action, which
+	// A staged item under review: its field diff and what merging does to the
+	// running system; below it, the propose card, the one primary action, which
 	// opens one pull request for the whole project draft.
 	let {
 		project,
@@ -43,6 +45,8 @@
 	} = $props();
 
 	const restart = $derived(item.changes.filter((c) => c.restart));
+	const noun = $derived(!item.resource || item.resource === 'vm' ? 'VM' : 'object');
+	const kindLabel = $derived(item.kind.charAt(0).toUpperCase() + item.kind.slice(1));
 
 	// "+2 vCPU, +4.0 GiB memory" from the CPU/Memory change entries, when both
 	// sides parse.
@@ -102,103 +106,110 @@
 		drafts.refresh();
 	}
 	const count = $derived(lane?.count ?? 0);
+	const others = $derived(count - 1);
 </script>
 
-<ReviewPane title={item.namespace ? vmKey(item) : item.name}>
-	{#snippet icon()}<Server size={16} class="text-ink-muted" />{/snippet}
-	{#snippet head()}
-		<span class="rounded px-1.5 py-0.5 text-xs {TONE_PILL[draftKindTone(item.kind)]}"
-			>{item.kind}</span
-		>
-		<button
-			onclick={unstage}
-			disabled={unstageOp.busy}
-			class="ml-auto text-xs text-danger hover:text-danger-ink disabled:text-ink-faint"
-			>{unstageOp.busy ? 'unstaging…' : 'unstage'}</button
-		>
-	{/snippet}
+<ReviewPane title={item.namespace ? vmKey(item) : item.name} mono>
+	{#snippet sub()}{kindLabel} staged in {project}, not proposed yet.{/snippet}
 
-	<Card title="Changes against git main" flush>
-		<div class="px-card py-2">
-			<ChangeList changes={item.changes} />
-		</div>
-	</Card>
+	<ReviewSection title="Changes against git main">
+		<ChangeList changes={item.changes} />
+	</ReviewSection>
 
-	<Card title="Impact" flush>
-		<div class="space-y-2 px-card py-2 text-xs text-ink-soft">
+	<ReviewSection title="What merging does">
+		<div class="flex flex-col gap-1.5">
 			{#if item.kind === 'delete'}
-				<p class="flex items-start gap-2">
-					<TriangleAlert size={14} class="mt-0.5 shrink-0 text-danger-ink" />
-					<span>
-						Merging removes this VM from git; ArgoCD then deletes it from the cluster
-						{#if vm?.power === 'On'}<b class="font-medium">
-								— it is running now{vm.nodeName ? ` on ${vm.nodeName}` : ''}</b
-							>{/if}.
-					</span>
-				</p>
+				<Consequence tone="danger">
+					Merging removes this {noun} from git, then ArgoCD deletes it from the cluster.
+					{#if vm?.power === 'On'}<b class="font-medium text-ink"
+							>It is running now{vm.nodeName ? ` on ${vm.nodeName}` : ''}.</b
+						>{/if}
+				</Consequence>
 			{:else if item.kind === 'create'}
-				<p>ArgoCD creates this object after the pull request merges.</p>
+				<Consequence tone="info"
+					>ArgoCD creates this object after the pull request merges.</Consequence
+				>
 			{:else if restart.length > 0}
-				<p class="flex items-start gap-2">
-					<TriangleAlert size={14} class="mt-0.5 shrink-0 text-warn-ink" />
-					<span>
-						<b class="font-medium">Restart required:</b>
-						{restart.map((c) => c.field).join(', ')} appl{restart.length > 1 ? 'y' : 'ies'} at the next
-						power cycle{#if vm?.power === 'On'}; the VM keeps running until you restart it{/if}.
-					</span>
-				</p>
+				<Consequence tone="warn">
+					<b class="font-medium text-ink">Restart required:</b>
+					{restart.map((c) => c.field).join(', ')} appl{restart.length > 1 ? 'y' : 'ies'} at the next
+					power cycle{#if vm?.power === 'On'}; the VM keeps running until you restart it{/if}.
+				</Consequence>
 			{:else}
-				<p>Applies without a restart once the pull request merges and syncs.</p>
+				<Consequence tone="ok">
+					Applies without a restart once the pull request merges and syncs.
+				</Consequence>
 			{/if}
 			{#if delta && vm?.nodeName}
-				<p>
-					Capacity: {delta} on <b class="font-medium">{vm.nodeName}</b> once applied.
-				</p>
+				<Consequence>
+					Capacity: {delta} on <b class="font-mono font-medium text-ink">{vm.nodeName}</b> once applied.
+				</Consequence>
 			{/if}
 		</div>
-	</Card>
+	</ReviewSection>
 
 	{#if item.yaml}
-		<details class="rounded border border-line">
-			<summary
-				class="cursor-pointer border-line bg-inset px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
+		<details class="group px-card py-3">
+			<summary class="cursor-pointer text-[13px] font-bold text-ink"
 				>{item.baseYAML ? 'Manifest diff' : 'Manifest'}</summary
 			>
-			<ManifestDiff before={item.baseYAML} after={item.yaml} />
+			<div class="mt-2 overflow-hidden rounded-md border border-line-soft">
+				<ManifestDiff before={item.baseYAML} after={item.yaml} />
+			</div>
 		</details>
 	{/if}
 
 	{#snippet footer()}
-		{#if prune.length}<div class="mb-2 text-xs"><PruneAck {prune} bind:ack /></div>{/if}
-		<ErrorNote error={proposeOp.error || unstageOp.error} class="mb-2" />
-		<div class="mb-2 flex items-center gap-3">
-			<GitOpsStepper stage="staged" />
-			<span class="ml-auto text-[11px] text-ink-faint">
-				Opens one pull request for the {count} staged change{count > 1 ? 's' : ''} in {project}.
-				Blank fields use the text shown; Tab takes it to edit.
-			</span>
-		</div>
-		<div class="flex items-start gap-2">
-			<TextInput
-				bind:value={title}
-				suggest={lane?.defaultTitle}
-				placeholder="Pull request title"
-				aria-label="Pull request title"
-				class="flex-1"
-			/>
-			<Button onclick={propose} disabled={proposeOp.busy || blocked}>
-				{proposeOp.busy ? 'Proposing…' : 'Propose pull request'}
+		<ErrorNote error={unstageOp.error} />
+		<div class="flex flex-wrap items-center gap-2">
+			<Button variant="danger-secondary" size="sm" onclick={unstage} disabled={unstageOp.busy}>
+				<Undo2 size={14} />{unstageOp.busy ? 'Unstaging...' : 'Unstage'}
 			</Button>
 		</div>
-		{#if blocked}<p class="mt-1 text-right text-xs text-danger-ink">
-				Tick the deletion box to continue
-			</p>{/if}
+		<p class="text-xs leading-4 text-ink-faint">
+			Drops this change from the {project} draft{others === 1
+				? '; the other one stays staged'
+				: others > 1
+					? `; the other ${others} stay staged`
+					: ''}. Nothing reaches git.
+		</p>
+	{/snippet}
+</ReviewPane>
+
+<Card title="Propose {project}" meta={plural(count, 'staged change')}>
+	<div class="flex flex-col gap-3">
+		<GitOpsStepper stage="staged" />
+		{#if prune.length}<div class="text-[13px]"><PruneAck {prune} bind:ack /></div>{/if}
+		<TextInput
+			bind:value={title}
+			suggest={lane?.defaultTitle}
+			placeholder="Pull request title"
+			aria-label="Pull request title"
+		/>
 		<TextArea
 			bind:value={message}
 			suggest={lane?.defaultBody}
 			placeholder="Description (optional; the change summary is appended)"
 			aria-label="Pull request description"
-			class="mt-2"
 		/>
-	{/snippet}
-</ReviewPane>
+		<p class="-mt-1.5 text-xs leading-4 text-ink-faint">
+			Blank fields use the text shown; Tab takes it to edit.
+		</p>
+		<ErrorNote error={proposeOp.error} />
+		<div class="flex flex-col gap-1.5">
+			<div class="flex flex-wrap items-center gap-2">
+				<Button onclick={propose} disabled={proposeOp.busy || blocked}>
+					{proposeOp.busy ? 'Proposing...' : 'Propose pull request'}
+				</Button>
+				<StageChip kind="pr" />
+			</div>
+			{#if blocked}
+				<p class="text-xs leading-4 text-danger-ink">Tick the deletion box to continue</p>
+			{/if}
+			<Consequence size="sm">
+				Opens one pull request for the {plural(count, 'staged change')} in {project}. Nothing
+				changes until it is approved and merged in the forge.
+			</Consequence>
+		</div>
+	</div>
+</Card>

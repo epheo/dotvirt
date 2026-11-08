@@ -53,6 +53,7 @@ test('a past change reviews like a staged one and reverts as a new PR', async ({
 	await page.goto('/changes');
 
 	const main = page.locator('main');
+	await main.getByRole('link', { name: /^History/ }).click();
 	await main.getByRole('button', { name: /^team-web$/ }).click();
 	// A forge merge is named by the PR it merged, not the merge boilerplate.
 	const row = main.getByRole('button', { name: /web-2: add data disk/ });
@@ -90,6 +91,7 @@ test('a review is deep-linkable, and the VM page links its own history', async (
 	await expect(main.getByText(/^\+\s+- name: data$/)).toBeVisible();
 	await expect(main.getByText(/^-\s+/)).toHaveCount(0);
 	// Selecting a PR moves the URL with it.
+	await main.getByRole('link', { name: /^In review/ }).click();
 	await main.getByRole('button', { name: /PR #41/ }).click();
 	await expect(page).toHaveURL(/\/changes\?project=team-db&pr=41$/);
 
@@ -100,4 +102,51 @@ test('a review is deep-linkable, and the VM page links its own history', async (
 	await row.click();
 	await expect(page).toHaveURL(new RegExp(`/changes\\?project=team-web&commit=${MERGE_HASH}$`));
 	await expect(page.locator('main').getByText(/data \(50Gi\)/)).toBeVisible();
+});
+
+test('one job per tab: the page opens on what waits and says so', async ({ page }) => {
+	await setScenario(page, 'drift');
+	await login(page);
+	await page.goto('/changes');
+
+	const main = page.locator('main');
+	// A staged draft opens on Staged; the header names the refused merge and
+	// where to deal with it.
+	await expect(main.getByRole('link', { name: /^Staged\s*1$/ })).toHaveAttribute(
+		'aria-current',
+		'page',
+	);
+	await expect(main.getByText(/The cluster refused the last merge in team-web/)).toBeVisible();
+	await expect(main.getByText('1 staged, 0 in review, 2 projects')).toBeVisible();
+	await main.getByRole('link', { name: 'Open history' }).click();
+	await expect(page).toHaveURL(/\/changes\/team-web\?tab=history$/);
+	await expect(main.getByRole('button', { name: /web-2: add data disk/ })).toBeVisible();
+	// Unstage and discard say what they drop before anything is sent.
+	await main.getByRole('link', { name: /^Staged/ }).click();
+	await expect(main.getByText(/Drops this change from the team-web draft/)).toBeVisible();
+	await main.getByRole('button', { name: 'Discard all' }).click();
+	await expect(
+		main.getByText('Drops every staged change in team-web. Nothing reaches git.'),
+	).toBeVisible();
+	await main.getByRole('button', { name: 'Keep' }).click();
+});
+
+test('at scale, history pages its projects and the tree folds', async ({ page }) => {
+	test.setTimeout(90_000);
+	await setScenario(page, 'scale');
+	await login(page);
+	await page.goto('/changes?tab=history');
+
+	const main = page.locator('main');
+	const aside = page.locator('aside');
+	await expect(main.getByRole('navigation', { name: 'Pages' })).toContainText('Showing 1-50 of 53');
+	await main.getByLabel('Find a project').fill('team-w');
+	await expect(main.getByRole('button', { name: /^team-web$/ })).toBeVisible();
+	await expect(main.getByRole('button', { name: /^analytics$/ })).toHaveCount(0);
+	// The rail keeps what is in flight and folds the rest; an open namespace
+	// lists its first VMs.
+	await expect(aside.getByRole('button', { name: '47 more projects' })).toBeVisible();
+	await aside.locator('a[href="/changes/team-web?tab=history"]').click();
+	await aside.locator('a[href="/changes/team-web/web-prod?tab=history"]').click();
+	await expect(aside.getByRole('link', { name: /^\d+ more VMs$/ })).toBeVisible();
 });
