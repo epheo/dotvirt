@@ -1,8 +1,10 @@
-// Subnet arithmetic for the create forms: which visible networks a range
-// collides with, and the nearest ranges that collide with none. "Free" means
-// free among the networks the caller can see; a tenant never sees another
-// tenant's ranges, and the cluster's own pod and service ranges are not in
-// the network catalog.
+// Subnet arithmetic for the networking views and the create forms: how many
+// addresses a range holds, which visible networks it collides with (and
+// whether those can meet), and the nearest ranges that collide with none.
+// "Free" means free among the networks the caller can see; a tenant never
+// sees another tenant's ranges, and the cluster's own pod and service ranges
+// are not in the network catalog.
+import type { Network } from '#lib/api.js';
 
 export type CIDR = { v6: boolean; base: bigint; prefix: number };
 
@@ -138,4 +140,45 @@ export function suggestSubnet(
 	}
 	const [first] = nearestFree(FIRST_RANGE, taken);
 	return first ? { cidr: first, reason: 'free, first open range' } : null;
+}
+
+// Two ranges given as strings share an address; false when either does not parse.
+export function overlaps(a: string, b: string): boolean {
+	const x = parseCIDR(a);
+	const y = parseCIDR(b);
+	return !!x && !!y && cidrOverlaps(x, y);
+}
+
+/** Whether an address falls inside a subnet. */
+export function contains(cidr: string, ip: string): boolean {
+	return overlaps(cidr, `${ip}/${ip.includes(':') ? 128 : 32}`);
+}
+
+/**
+ * Addresses a subnet can hand out: IPv4 keeps its network and broadcast
+ * addresses back (none for /31 and /32), IPv6 hands out all of them.
+ */
+export function usableAddresses(cidr: string): number {
+	const c = parseCIDR(cidr);
+	if (!c) return 0;
+	const n = Number(size(c));
+	return !c.v6 && c.prefix < 31 ? n - 2 : n;
+}
+
+/**
+ * Whether two networks can meet, so an overlap between them is a problem: one
+ * VM already sits on both, or one could (the same namespace, or a shared or
+ * VLAN network published where the other lives). Isolated project networks in
+ * different namespaces may reuse a range: OVN-K keeps them apart.
+ */
+export function canMeet(
+	a: Pick<Network, 'namespace' | 'namespaces'>,
+	b: Pick<Network, 'namespace' | 'namespaces'>,
+	sharesVM = false,
+): boolean {
+	if (sharesVM) return true;
+	const where = (n: Pick<Network, 'namespace' | 'namespaces'>) =>
+		n.namespaces?.length ? n.namespaces : [n.namespace ?? ''];
+	const wa = where(a);
+	return where(b).some((ns) => ns !== '' && wa.includes(ns));
 }

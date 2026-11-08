@@ -473,20 +473,22 @@ for (const v of range('batch-', 1, 20)) attach(get('batch-prod', v), batchCtl);
 for (const v of range('batch-dev-', 151, 180)) attach(get('batch-dev', v), batchDev);
 
 // The 47 smaller projects: two networks each, demo one (internal-l2). The
-// overlap the boards flag: udn-frontend and udn-tcp-frontend share a range.
+// overlap the boards flag: udn-frontend and udn-tcp-frontend share a range in
+// one namespace (storefront), as the pair does in "default" on the live cluster.
 const otherNets = new Map();
 for (const p of OTHER_PROJECTS) {
 	if (p === 'demo') {
 		otherNets.set(p, [projectNet(p, p, 'internal-l2', { subnets: ['10.20.9.0/24'] })]);
 		continue;
 	}
-	const first =
-		p === 'storefront'
-			? projectNet(p, p, 'udn-frontend', { subnets: ['10.200.0.0/16'] })
-			: p === 'checkout'
-				? projectNet(p, p, 'udn-tcp-frontend', { subnets: ['10.200.0.0/16'] })
-				: projectNet(p, p, `${p}-net`);
-	otherNets.set(p, [first, projectNet(p, p, `${p}-l2`)]);
+	if (p === 'storefront') {
+		otherNets.set(p, [
+			projectNet(p, p, 'udn-frontend', { subnets: ['10.200.0.0/16'] }),
+			projectNet(p, p, 'udn-tcp-frontend', { subnets: ['10.200.0.0/16'] }),
+		]);
+		continue;
+	}
+	otherNets.set(p, [projectNet(p, p, `${p}-net`), projectNet(p, p, `${p}-l2`)]);
 }
 for (const v of ['test-02', 'demo-4', 'demo-5']) attach(get('demo', v), otherNets.get('demo')[0]);
 for (const p of ['storefront', 'checkout'])

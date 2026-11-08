@@ -70,7 +70,7 @@ rules:
     resources: ["adminnetworkpolicies", "baselineadminnetworkpolicies"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["nmstate.io"]
-    resources: ["nodenetworkstates", "nodenetworkconfigurationpolicies"]
+    resources: ["nodenetworkstates", "nodenetworkconfigurationpolicies", "nodenetworkconfigurationenactments"]
     verbs: ["get", "list", "watch"]
   # Watched for the DRS panel's live descheduler status.
   - apiGroups: ["operator.openshift.io"]

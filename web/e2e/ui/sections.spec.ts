@@ -37,18 +37,20 @@ test('compute root no longer carries the host cards', async ({ page }) => {
 	await expect(main.getByText('Host capacity')).toHaveCount(0);
 });
 
-test('networking root: topology is Summary, the policy plane is a tab', async ({ page }) => {
+test('networking root: the map is the first tab, the rules are the Firewall tab', async ({
+	page,
+}) => {
 	await setScenario(page, 'base');
 	await login(page);
 	await page.goto('/networking');
 	const main = page.locator('main');
-	await expect(main.getByText('Provider Gateway').first()).toBeVisible();
-	await expect(main.getByRole('link', { name: 'VMs', exact: true })).toBeVisible();
-	await main.getByRole('link', { name: 'Security', exact: true }).click();
-	await expect(page).toHaveURL(/\/networking\?tab=security$/);
-	await expect(main.getByRole('button', { name: 'Trace flow' })).toBeVisible();
-	// The tree has no Security row any more: only the root and the segments.
-	await expect(page.locator('aside').getByText('All Networks')).toBeVisible();
+	await expect(main.getByRole('heading', { name: 'Cluster map' })).toBeVisible();
+	await expect(main.getByRole('link', { name: /^VMs/ })).toBeVisible();
+	await main.getByRole('link', { name: /^Firewall/ }).click();
+	await expect(page).toHaveURL(/\/networking\?tab=firewall$/);
+	await expect(main.getByRole('button', { name: 'Check connectivity' })).toBeVisible();
+	// The tree has no Security row: the map, networks by kind and the uplinks.
+	await expect(page.locator('aside').getByRole('link', { name: 'Map' })).toBeVisible();
 	await expect(page.locator('aside a[href="/networking/security"]')).toHaveCount(0);
 });
 
@@ -56,7 +58,7 @@ test('the old security path redirects and keeps its tenant', async ({ page }) =>
 	await setScenario(page, 'base');
 	await login(page);
 	await page.goto('/networking/security?tenant=team-web');
-	await expect(page).toHaveURL(/\/networking\?tab=security&tenant=team-web$/);
+	await expect(page).toHaveURL(/\/networking\?tab=firewall&tenant=team-web$/);
 	await expect(page.getByLabel('Filter by tenant')).toHaveValue('team-web');
 });
 
@@ -140,8 +142,8 @@ test('the tree and breadcrumb keep the tab in view across objects', async ({ pag
 	await aside.locator('a[href="/vm/web-prod/web-2?tab=snapshots"]').click();
 	await expect(page).toHaveURL(/\/vm\/web-prod\/web-2\?tab=snapshots$/);
 	// A target without the tab lands on its Summary.
-	await page.goto('/networking?tab=security');
+	await page.goto('/networking?tab=firewall');
 	await aside.locator('a[href^="/networking/"]').first().click();
 	await expect(page).not.toHaveURL(/tab=/);
-	await expect(main.getByText('VMs attached')).toBeVisible();
+	await expect(main.getByRole('heading', { name: 'Where it connects' })).toBeVisible();
 });

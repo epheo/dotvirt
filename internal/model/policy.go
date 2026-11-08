@@ -26,6 +26,9 @@ type PolicyRuleView struct {
 	Action    string `json:"action"`          // Allow | Deny | Pass
 	Peer      string `json:"peer,omitempty"`  // source/destination summary; empty = any
 	Ports     string `json:"ports,omitempty"` // "TCP/443, UDP/53"; empty = any
+	// Text is the rule as one plain sentence from the subject's side
+	// ("Accepts TCP 5432 from VMs labeled app=web in web-prod.").
+	Text string `json:"text,omitempty"`
 }
 
 // Policy is one live firewall/routing object rendered in security vocabulary,
@@ -37,6 +40,11 @@ type Policy struct {
 	Backing   string     `json:"backing"`             // the Kubernetes kind behind the row
 	Priority  int        `json:"priority,omitempty"`  // ANP precedence (lower wins)
 	Target    string     `json:"target,omitempty"`    // what the policy applies to, summarized
+	// Applies names the subject in plain words ("VMs labeled app=db in db-prod").
+	Applies string `json:"applies,omitempty"`
+	// Isolation is what selecting VMs does beyond the rules (a project rule
+	// admits only what it allows in each direction it declares); empty otherwise.
+	Isolation string `json:"isolation,omitempty"`
 	// Namespaces a cluster-scoped policy provably pins to (the metadata.name
 	// selector netgen writes). Nil when the selector isn't enumerable - a tenant
 	// filter must then keep the row rather than hide a possibly-applying rule.
@@ -137,4 +145,29 @@ type TraceStep struct {
 	Conditional bool   `json:"conditional,omitempty"`
 	Decisive    bool   `json:"decisive,omitempty"`
 	Note        string `json:"note,omitempty"`
+}
+
+// NetworkRules is GET /api/networks/rules: what bears on the VMs of one
+// network. Applies holds the policies binding its namespaces, in evaluation
+// order (pod-selecting ones conditional); Reaches holds rules elsewhere that
+// name those VMs as their other end, each read from the network's side.
+type NetworkRules struct {
+	Network    string          `json:"network"`
+	Namespaces []string        `json:"namespaces"`
+	Applies    []PolicyBinding `json:"applies"`
+	Reaches    []PeerRule      `json:"reaches"`
+}
+
+// PeerRule is one rule whose peer selects a network's VMs.
+type PeerRule struct {
+	Policy Policy         `json:"policy"`
+	Rule   PolicyRuleView `json:"rule"`
+	// Text reads the rule from the network's side ("VMs labeled app=web in
+	// web-prod can reach VMs labeled app=db in db-prod on TCP 5432.").
+	Text string `json:"text"`
+	// Conditional: the peer narrows by pod labels, so only the matching VMs.
+	Conditional bool `json:"conditional,omitempty"`
+	// Wildcard: no peer names these namespaces or their project; one merely
+	// matches them ("any namespace", or a label they happen to carry).
+	Wildcard bool `json:"wildcard,omitempty"`
 }

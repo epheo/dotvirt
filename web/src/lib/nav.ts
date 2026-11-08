@@ -36,6 +36,11 @@ export function hrefForScope(s: Scope): string {
 	}
 }
 
+/** A network's page, by its key (see networks.networkKey). */
+export function networkHref(key: string, tab?: string): string {
+	return `${hrefForScope({ kind: 'network', network: key })}${tab ? `?tab=${tab}` : ''}`;
+}
+
 export function vmHref(namespace: string, name: string, tab?: string): string {
 	return `/vm/${enc(namespace)}/${enc(name)}${tab ? `?tab=${tab}` : ''}`;
 }
@@ -80,6 +85,28 @@ export const VM_TABS = [
 ] as const;
 export type VMTab = (typeof VM_TABS)[number]['id'];
 
+// The Networking root's tabs and one network's page tabs.
+export const NETWORKING_TABS = [
+	{ id: 'map', label: 'Map' },
+	{ id: 'networks', label: 'Networks' },
+	{ id: 'firewall', label: 'Firewall' },
+	{ id: 'uplinks', label: 'Uplinks' },
+	{ id: 'vms', label: 'VMs' },
+];
+export const NETWORK_TABS = [
+	{ id: 'summary', label: 'Summary' },
+	{ id: 'vms', label: 'VMs' },
+	{ id: 'rules', label: 'Rules' },
+	{ id: 'history', label: 'History' },
+];
+
+// The Networking root's tab for a ?tab= value: the old names still deep-link
+// (its Summary was the topology, its Security the policy plane).
+export function networkingTab(raw: string | null): string {
+	if (raw === 'security') return 'firewall';
+	return NETWORKING_TABS.some((t) => t.id === raw) ? raw! : 'map';
+}
+
 // The Storage root's tabs: one section page, each tab one job. Disks, Images
 // and Snapshots are where the Library's counts drill in.
 export const STORAGE_TABS = [
@@ -117,15 +144,15 @@ const CONTAINER_TABS = [
 
 // The tab set of a container: compute containers carry the full set, hosts
 // drop Permissions (nodes aren't namespaced) and configure DRS at the root,
-// networking's root carries the policy plane as Security, segments are fact
-// sheets (Summary + their VMs). Storage has its own tabs (STORAGE_TABS).
+// Networking has its own (map and firewall at the root, a network's rules and
+// history on its page). Storage has its own tabs (STORAGE_TABS).
 export function containerTabs(scope: Scope, section: Section): typeof CONTAINER_TABS {
 	const only = (...ids: string[]) => CONTAINER_TABS.filter((t) => ids.includes(t.id));
 	switch (section) {
 		case 'hosts':
 			return only('summary', 'vms', 'monitor', 'configure');
 		case 'networking':
-			return scope.kind === 'all' ? only('summary', 'vms', 'security') : only('summary', 'vms');
+			return scope.kind === 'all' ? NETWORKING_TABS : NETWORK_TABS;
 	}
 	// Effective policy evaluates against exactly one namespace.
 	return scope.kind === 'namespace'
@@ -170,7 +197,7 @@ export function trailForScope(s: Scope): { label: string; href?: string }[] {
 		case 'node':
 			return [{ label: 'All Nodes', href: '/hosts' }, { label: `Node: ${s.node}` }];
 		case 'network':
-			return [{ label: 'All Networks', href: '/networking' }, { label: `Segment: ${s.network}` }];
+			return [{ label: 'Networking', href: '/networking' }, { label: s.network }];
 		case 'storage':
 			return [
 				{ label: 'Storage', href: storageHref('library') },

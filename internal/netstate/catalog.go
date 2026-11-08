@@ -116,6 +116,10 @@ func mergeUplinks(in []model.Uplink) []model.Uplink {
 		if m.Policy != u.Policy {
 			m.Policy = "" // several policies, no single object to act on
 		}
+		if len(u.Failures) > 0 {
+			m.Failures = append(m.Failures, u.Failures...)
+			sort.Slice(m.Failures, func(i, j int) bool { return m.Failures[i].Node < m.Failures[j].Node })
+		}
 	}
 	return out
 }
@@ -149,8 +153,41 @@ func (s *Snapshot) uplinksFromNNCP(u *unstructured.Unstructured) []model.Uplink 
 		out = append(out, model.Uplink{
 			Name: m.Localnet, Bridge: m.Bridge, Policy: u.GetName(),
 			Nodes: nodes, NodeCount: len(nodes),
+			Failures: s.failures(u.GetName()),
 		})
 	}
+	return out
+}
+
+// failures lists the hosts where a policy's enactment failed or was aborted,
+// by node. nmstate's own report can run to pages; its first line names the
+// cause.
+func (s *Snapshot) failures(policy string) []model.UplinkFailure {
+	var out []model.UplinkFailure
+	for _, u := range reflect.List(s.nnce) {
+		lbl := u.GetLabels()
+		if lbl["nmstate.io/policy"] != policy {
+			continue
+		}
+		node := lbl["nmstate.io/node"]
+		if node == "" {
+			node = strings.TrimSuffix(u.GetName(), "."+policy)
+		}
+		conds, _, _ := unstructured.NestedSlice(u.Object, "status", "conditions")
+		for _, c := range conds {
+			m, _ := c.(map[string]any)
+			if (m["type"] != "Failing" && m["type"] != "Aborted") || m["status"] != "True" {
+				continue
+			}
+			msg, _, _ := strings.Cut(strings.TrimSpace(str(m["message"])), "\n")
+			if len(msg) > 300 {
+				msg = msg[:300]
+			}
+			out = append(out, model.UplinkFailure{Node: node, Reason: str(m["reason"]), Message: msg})
+			break
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Node < out[j].Node })
 	return out
 }
 

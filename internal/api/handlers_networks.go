@@ -1,13 +1,17 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 
+	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
+	"github.com/epheo/dotvirt/internal/netstate"
 )
 
 // The networking create routes resolve their target TIER from the object's SCOPE,
@@ -167,15 +171,15 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := r.Context()
+	can := func(k model.Kind) bool { return s.capable(ctx, id, c, kindAction(verbCreate, k, "")) }
+	cudn := can(model.KindCUDN)
 	out := model.NetworkInventory{
-		Networks:         scopeNetworks(full.Networks, visible),
+		Networks:         scopeNetworks(full.Networks, visible, s.seesAllNetworks(ctx, id, c)),
 		Uplinks:          []model.Uplink{},
 		PhysicalAdapters: []model.PhysicalAdapter{},
 		NMStatePresent:   full.NMStatePresent,
 	}
-	ctx := r.Context()
-	can := func(k model.Kind) bool { return s.capable(ctx, id, c, kindAction(verbCreate, k, "")) }
-	cudn := can(model.KindCUDN)
 	// Per-object drift: attach each segment's own ArgoCD sync/health at serve time
 	// (always fresh, off the cached catalog) - the same surface VMs carry.
 	s.enrichNetworkDrift(out.Networks)
@@ -222,23 +226,48 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
-// scopeNetworks keeps shared (cluster) networks and only the project networks in
-// namespaces the caller can see. A shared network publishes cluster-wide, so its
-// own Namespaces list can name other tenants' namespaces - filter it to the
-// caller's visible set so the port group stays discoverable (name/kind/VLAN, like
-// a StorageClass) without ever revealing a namespace outside the caller's RBAC.
-func scopeNetworks(nets []model.Network, visible map[string]bool) []model.Network {
+// scopeNetworks is the catalog one caller sees: project networks in the
+// namespaces they can see, and shared networks published to at least one of
+// them, its Namespaces narrowed to those (a shared network's name and its
+// other namespaces echo other tenants). A caller with platform networking
+// authority (all) sees every shared network, published or not, to fix it.
+func scopeNetworks(nets []model.Network, visible map[string]bool, all bool) []model.Network {
 	out := make([]model.Network, 0, len(nets))
 	for _, n := range nets {
 		switch {
 		case n.Scope == model.ScopeShared:
 			n.Namespaces = visibleSubset(n.Namespaces, visible)
-			out = append(out, n)
+			if all || len(n.Namespaces) > 0 {
+				out = append(out, n)
+			}
 		case visible[n.Namespace]:
 			out = append(out, n)
 		}
 	}
 	return out
+}
+
+// callerNetworks is the catalog as /api/networks serves it to this caller, for
+// the routes that resolve one network by key: a network the caller cannot
+// see there is not found here either.
+func (s *Server) callerNetworks(ctx context.Context, id auth.Identity, c *cluster.Client, visible map[string]bool) []model.Network {
+	if s.netstate == nil {
+		return nil
+	}
+	return scopeNetworks(s.netstate.Catalog().Networks, visible, s.seesAllNetworks(ctx, id, c))
+}
+
+// seesAllNetworks reports whether the caller's catalog holds every shared
+// network, published to them or not: they may create shared networks, read
+// the platform tier, or list shared networks cluster-wide (which kubectl
+// would show them anyway). Every review goes through the cached layer.
+func (s *Server) seesAllNetworks(ctx context.Context, id auth.Identity, c *cluster.Client) bool {
+	if s.capable(ctx, id, c, kindAction(verbCreate, model.KindCUDN, "")) ||
+		s.capable(ctx, id, c, kindAction(verbList, model.KindCUDN, "")) {
+		return true
+	}
+	ok, _ := s.canReadPlatform(ctx, id, c)
+	return ok
 }
 
 // redactSharedErrors replaces a shared network's apply error with a generic
@@ -278,4 +307,91 @@ func visibleSubset(nss []string, visible map[string]bool) []string {
 		}
 	}
 	return out
+}
+
+// handleNetworkRules answers what bears on one network's VMs: the rules
+// binding its namespaces and the rules elsewhere naming those VMs as their
+// other end, from the SA policy snapshot. The network resolves through the
+// caller-scoped catalog, so a network in a namespace the caller can't see is
+// not found, and a shared network spans only its visible namespaces.
+func (s *Server) handleNetworkRules(w http.ResponseWriter, r *http.Request) {
+	id, c, err := s.userCluster(r)
+	if err != nil {
+		fail(w, unavailable(err))
+		return
+	}
+	if s.netstate == nil {
+		fail(w, fmt.Errorf("%w: networking is not wired", model.ErrUnavailable))
+		return
+	}
+	visible, err := s.visibleFor(r.Context(), id, c)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	key := r.URL.Query().Get("network")
+	n, ok := findNetwork(s.callerNetworks(r.Context(), id, c, visible), key)
+	if !ok {
+		fail(w, fmt.Errorf("%w: network %q", model.ErrNotFound, key))
+		return
+	}
+	nss := n.Namespaces
+	if n.Scope == model.ScopeProject {
+		nss = []string{n.Namespace}
+	}
+	pr := s.policyRedactor(r.Context(), id, c)
+	// A peer rule's sentence names its subject; a caller without authority
+	// over the cluster tier reads it with other tenants' names hidden.
+	var red *netstate.Redaction
+	if !pr.can(model.PolicyAdmin) || !pr.can(model.PolicyBaseline) {
+		red = pr.view
+	}
+	out := s.netstate.NetworkRules(nss, s.state.NamespaceLabels, red, s.cfg.ProjectLabel)
+	out.Network = key
+	out = scopeNetworkRules(out, visible, pr.apply)
+	for i := range out.Applies {
+		s.policyDrift(&out.Applies[i].Policy)
+	}
+	for i := range out.Reaches {
+		s.policyDrift(&out.Reaches[i].Policy)
+	}
+	writeJSON(w, out)
+}
+
+// findNetwork resolves a network key the way the UI routes it: a project
+// network by its "namespace/name" attach ref, a shared one by name; a bare
+// name falls back to the first network so named.
+func findNetwork(nets []model.Network, key string) (model.Network, bool) {
+	for _, n := range nets {
+		if n.AttachRef == key || (n.Scope == model.ScopeShared && n.Name == key) {
+			return n, true
+		}
+	}
+	for _, n := range nets {
+		if n.Name == key {
+			return n, true
+		}
+	}
+	return model.Network{}, false
+}
+
+// scopeNetworkRules applies the policy plane's visibility to one network's
+// rules. A binding governs the caller's own VMs, so it stays, redacted like
+// the effective view. A peer rule in another namespace shows only where the
+// caller sees that namespace; a cluster rule naming these VMs governs them
+// too, so it stays, redacted.
+func scopeNetworkRules(in model.NetworkRules, visible map[string]bool, redact func(*model.Policy, *model.PolicyRuleView)) model.NetworkRules {
+	for i := range in.Applies {
+		redact(&in.Applies[i].Policy, nil)
+	}
+	reaches := make([]model.PeerRule, 0, len(in.Reaches))
+	for _, pr := range in.Reaches {
+		if pr.Policy.Namespace != "" && !visible[pr.Policy.Namespace] {
+			continue
+		}
+		redact(&pr.Policy, &pr.Rule)
+		reaches = append(reaches, pr)
+	}
+	in.Reaches = reaches
+	return in
 }

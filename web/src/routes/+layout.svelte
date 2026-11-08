@@ -41,8 +41,8 @@
 	import CatalogTree from '#lib/tree/CatalogTree.svelte';
 	import ChangesTree from '#lib/tree/ChangesTree.svelte';
 	import ComputeTree from '#lib/tree/ComputeTree.svelte';
-	import FlatSectionTree from '#lib/tree/FlatSectionTree.svelte';
 	import HostsTree from '#lib/tree/HostsTree.svelte';
+	import NetworkingTree from '#lib/tree/NetworkingTree.svelte';
 	import StorageTree from '#lib/tree/StorageTree.svelte';
 
 	let { children }: { children: Snippet } = $props();
@@ -273,7 +273,7 @@
 					{:else if treeSection === 'hosts'}
 						<HostsTree />
 					{:else if treeSection === 'networking'}
-						<FlatSectionTree />
+						<NetworkingTree />
 					{:else if treeSection === 'storage'}
 						<StorageTree />
 					{:else if treeSection === 'changes'}

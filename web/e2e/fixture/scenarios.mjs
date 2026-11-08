@@ -288,9 +288,411 @@ const vmUsage = {
 	storage: { used: 8.2e9, total: 21.5e9 },
 };
 
+// ── networking: the Networking section's catalog, rules and history ──────────
+// One picture of the networking states the Map, the network page and the
+// firewall show: project networks, shared overlays, VLAN networks, rules on
+// both sides of a network, a range reused by isolated networks; drift adds an
+// uplink failing on one host, scale an overlap that is a problem. Rule texts
+// are what the server renders from the typed rules.
+
+const netCatalog = {
+	...networks,
+	networks: [
+		{
+			name: 'web-net',
+			kind: 'default',
+			scope: 'project',
+			namespace: 'web-prod',
+			subnets: ['10.40.0.0/16'],
+			attachRef: 'web-prod/web-net',
+			backing: 'UserDefinedNetwork',
+			topology: 'Layer3',
+			sourceFile: 'networks/web-net.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'internal-l2',
+			kind: 'internal',
+			scope: 'project',
+			namespace: 'batch-prod',
+			subnets: ['10.20.9.0/24'],
+			attachRef: 'batch-prod/internal-l2',
+			backing: 'UserDefinedNetwork',
+			topology: 'Layer2',
+			sourceFile: 'networks/internal-l2.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'blue-secondary',
+			kind: 'internal',
+			scope: 'shared',
+			subnets: ['10.222.1.0/24'],
+			attachRef: 'blue-secondary',
+			backing: 'ClusterUserDefinedNetwork',
+			topology: 'Layer2',
+			namespaces: ['web-prod', 'db-prod', 'batch-prod'],
+			sourceFile: 'networks/blue-secondary.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'green-secondary',
+			kind: 'internal',
+			scope: 'shared',
+			subnets: ['10.222.2.0/24'],
+			attachRef: 'green-secondary',
+			backing: 'ClusterUserDefinedNetwork',
+			topology: 'Layer2',
+			namespaces: ['web-prod'],
+			sourceFile: 'networks/green-secondary.yaml',
+			sync: 'Synced',
+		},
+		{ ...networks.networks[1], sourceFile: 'networks/lan-101.yaml' },
+		// The create sheet's networks: an overlapping pair in two namespaces
+		// (isolated, so never an issue) and one with no range.
+		...createNetworks,
+		// A raw attachment in a tenant namespace: platform tier, never adoptable
+		// into the project's repo.
+		{
+			name: 'legacy-l2',
+			kind: 'internal',
+			scope: 'project',
+			namespace: 'web-prod',
+			attachRef: 'web-prod/legacy-l2',
+			backing: 'NetworkAttachmentDefinition',
+			topology: 'layer2',
+		},
+		{
+			name: 'dc-vlan-net',
+			kind: 'vlan',
+			scope: 'shared',
+			vlan: 100,
+			uplink: 'dc-vlan',
+			attachRef: 'dc-vlan-net',
+			backing: 'ClusterUserDefinedNetwork',
+			topology: 'Localnet',
+			namespaces: ['batch-prod', 'db-prod'],
+			sourceFile: 'networks/dc-vlan-net.yaml',
+			sync: 'Synced',
+		},
+	],
+	uplinks: [
+		{
+			name: 'default',
+			bridge: 'br-ex',
+			builtin: true,
+			nodes: ['worker-1', 'worker-2', 'worker-3'],
+			nodeCount: 3,
+		},
+		{
+			name: 'physnet',
+			bridge: 'br-physnet',
+			nodes: ['worker-1', 'worker-2'],
+			nodeCount: 2,
+			policy: 'uplink-physnet',
+			sourceFile: 'uplinks/physnet.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'dc-vlan',
+			bridge: 'br-dc',
+			nodes: ['worker-1', 'worker-2', 'worker-3'],
+			nodeCount: 3,
+			policy: 'uplink-dc-vlan',
+			sourceFile: 'uplinks/dc-vlan.yaml',
+			sync: 'Synced',
+		},
+	],
+};
+
+// The same catalog in trouble: the dc-vlan uplink failing on one host, and
+// team-web's repo declaring the raw attachment only the platform may hold.
+const netTrouble = {
+	...netCatalog,
+	networks: netCatalog.networks.map((n) =>
+		n.name === 'legacy-l2' ? { ...n, sourceFile: 'networks/legacy-l2.yaml' } : n,
+	),
+	uplinks: netCatalog.uplinks.map((u) =>
+		u.name === 'dc-vlan'
+			? {
+					...u,
+					failures: [
+						{
+							node: 'worker-2',
+							reason: 'FailedToConfigure',
+							message:
+								'error reconciling NodeNetworkConfigurationPolicy: VerificationError on br-dc',
+						},
+					],
+				}
+			: u,
+	),
+};
+
+const netPolicies = {
+	policies: [
+		{
+			name: 'deny-lateral',
+			kind: 'admin',
+			backing: 'AdminNetworkPolicy',
+			priority: 10,
+			target: 'all namespaces',
+			applies: 'every namespace',
+			rules: [
+				{
+					direction: 'Ingress',
+					action: 'Deny',
+					peer: 'ns any',
+					text: 'Blocks all traffic from VMs in any namespace.',
+				},
+			],
+			sourceFile: 'policies/deny-lateral.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'allow-web-to-db',
+			kind: 'dfw',
+			namespace: 'db-prod',
+			backing: 'NetworkPolicy',
+			target: 'app=db-1',
+			applies: 'VMs labeled app=db-1 in db-prod',
+			isolation: 'Blocks other incoming traffic.',
+			rules: [
+				{
+					direction: 'Ingress',
+					action: 'Allow',
+					peer: 'ns web-prod pods app=web-1',
+					ports: 'TCP/5432',
+					text: 'Accepts TCP 5432 from VMs labeled app=web-1 in web-prod.',
+				},
+			],
+			sourceFile: 'policies/allow-web-to-db.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'allow-https',
+			kind: 'dfw',
+			namespace: 'web-prod',
+			backing: 'NetworkPolicy',
+			target: 'all pods',
+			applies: 'every VM in web-prod',
+			isolation: 'Blocks other incoming traffic.',
+			rules: [
+				{
+					direction: 'Ingress',
+					action: 'Allow',
+					peer: 'pods any',
+					ports: 'TCP/443',
+					text: 'Accepts TCP 443 from VMs in web-prod.',
+				},
+			],
+			sourceFile: 'policies/allow-https.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'default',
+			kind: 'gateway',
+			namespace: 'batch-prod',
+			backing: 'EgressFirewall',
+			applies: 'every VM in batch-prod',
+			rules: [
+				{
+					direction: 'Egress',
+					action: 'Allow',
+					peer: 'mirror.example.com',
+					ports: 'TCP/443',
+					text: 'Can reach mirror.example.com on TCP 443.',
+				},
+				{
+					direction: 'Egress',
+					action: 'Deny',
+					peer: '0.0.0.0/0',
+					text: 'Cannot reach anything outside.',
+				},
+			],
+			sourceFile: 'policies/egress.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'web-egress',
+			kind: 'egressip',
+			backing: 'EgressIP',
+			target: 'web-prod',
+			applies: 'every VM in web-prod',
+			namespaces: ['web-prod'],
+			rules: [
+				{
+					direction: 'Egress',
+					action: 'SNAT',
+					peer: '192.0.2.10',
+					text: 'Leaves with source IP 192.0.2.10.',
+				},
+			],
+			sourceFile: 'egress/web-egress.yaml',
+			sync: 'Synced',
+		},
+		{
+			name: 'dmz-route',
+			kind: 'route',
+			backing: 'AdminPolicyBasedExternalRoute',
+			target: 'batch-prod',
+			applies: 'every VM in batch-prod',
+			namespaces: ['batch-prod'],
+			rules: [
+				{
+					direction: 'Egress',
+					action: 'Route',
+					peer: 'via 10.0.0.1',
+					text: 'Leaves through 10.0.0.1.',
+				},
+			],
+			sourceFile: 'egress/dmz-route.yaml',
+			sync: 'Synced',
+		},
+	],
+};
+
+// The platform's own rules on a real cluster: each lets any namespace reach
+// its own VMs, so every network matches it without being named (wildcard).
+const PLATFORM_RULES = [
+	[
+		'openshift-gitops',
+		'app.kubernetes.io/name=openshift-gitops-application-controller',
+		'TCP/8082',
+	],
+	['openshift-monitoring', 'app.kubernetes.io/name=prometheus', 'TCP/9091'],
+	['openshift-dns', 'dns.operator.openshift.io/daemonset-dns=default', 'UDP/53'],
+	[
+		'openshift-ingress',
+		'ingresscontroller.operator.openshift.io/deployment-ingresscontroller=default',
+		'TCP/443',
+	],
+	['openshift-console', 'app=console', 'TCP/8443'],
+	['openshift-operators', 'name=gitops-operator', 'TCP/8443'],
+];
+const platformWildcards = PLATFORM_RULES.map(([ns, target, ports]) => {
+	const rule = {
+		direction: 'Ingress',
+		action: 'Allow',
+		peer: 'ns any',
+		ports,
+		text: `Accepts ${ports.replace('/', ' ')} from VMs in any namespace.`,
+	};
+	return {
+		policy: {
+			name: 'allow-from-any-namespace',
+			kind: 'dfw',
+			namespace: ns,
+			backing: 'NetworkPolicy',
+			target,
+			applies: `VMs labeled ${target} in ${ns}`,
+			rules: [rule],
+		},
+		rule,
+		text: `VMs in any namespace can reach VMs labeled ${target} in ${ns} on ${ports.replace('/', ' ')}.`,
+		wildcard: true,
+	};
+});
+
+// Rules elsewhere that name a network's VMs as their other end, by network key.
+const netReaches = {
+	'web-prod/web-net': [
+		{
+			policy: netPolicies.policies[1],
+			rule: netPolicies.policies[1].rules[0],
+			text: 'VMs labeled app=web-1 in web-prod can reach VMs labeled app=db-1 in db-prod on TCP 5432.',
+			conditional: true,
+		},
+		...platformWildcards,
+	],
+	// A network whose namespace has no rule of its own: only the platform's.
+	'batch-prod/udn-tcp-frontend': platformWildcards,
+};
+
+// Which extra NICs the base VMs carry, by "namespace/name".
+const netNICs = {
+	'web-prod/web-1': [{ name: 'lan', network: 'lan-101' }],
+	'web-prod/web-2': [{ name: 'blue', network: 'blue-secondary' }],
+	'batch-prod/batch-1': [
+		{ name: 'l2', network: 'batch-prod/internal-l2' },
+		{ name: 'dc', network: 'dc-vlan-net' },
+	],
+};
+
+// The scale scenario's networking, in the shapes the server renders: rule
+// sentences, the failing uplink's host, the rules naming web-net's VMs.
+function sentence(r) {
+	const ports = r.ports ? r.ports.replaceAll('/', ' ') : '';
+	const peer = (r.peer ?? '')
+		.replace(/^ns any$/, 'VMs in any namespace')
+		.replace(/^namespace (.+)$/, 'VMs in $1')
+		.replace(/^([\w.-]+=[\w.-]+)$/, 'VMs labeled $1');
+	if (r.action === 'SNAT') return `Leaves with source IP ${r.peer}.`;
+	if (r.action === 'Route') return `Leaves through ${r.peer.replace(/^via /, '')}.`;
+	if (r.direction === 'Ingress')
+		return `${r.action === 'Deny' ? 'Blocks' : 'Accepts'} ${ports || 'all traffic'} from ${peer}.`;
+	return `${r.action === 'Deny' ? 'Cannot reach' : 'Can reach'} ${peer}${ports ? ` on ${ports}` : ''}.`;
+}
+
+function appliesOf(p) {
+	const t = p.target ?? '';
+	if (t === 'all namespaces') return 'every namespace';
+	if (t === 'all VMs' || t === 'all pods') return `every VM in ${p.namespace}`;
+	if (t.startsWith('namespace ')) return `every VM in ${t.slice(10)}`;
+	return `VMs labeled ${t} in ${p.namespace}`;
+}
+
+function withScaleNetworking(sc) {
+	const policies = sc.policies.policies.map((p) => {
+		const rules = (p.rules ?? []).map((r) =>
+			p.name === 'deny-lateral' ? { ...r, peer: 'ns any' } : r,
+		);
+		return {
+			...p,
+			applies: appliesOf(p),
+			isolation: p.kind === 'dfw' ? 'Blocks other incoming traffic.' : undefined,
+			rules: rules.map((r) => ({ ...r, text: sentence(r) })),
+		};
+	});
+	const uplinks = sc.networks.uplinks.map((u) =>
+		u.name === 'dc-vlan'
+			? {
+					...u,
+					failures: [{ node: 'host-41', reason: 'FailedToConfigure', message: 'bond0 not found' }],
+				}
+			: u,
+	);
+	const toDB = policies.find((p) => p.name === 'allow-web-to-db');
+	return {
+		...sc,
+		networks: { ...sc.networks, uplinks },
+		policies: { policies },
+		networkReaches: {
+			'web-prod/web-net': [
+				{
+					policy: toDB,
+					rule: toDB.rules[0],
+					text: 'VMs labeled app=web in web-prod can reach VMs labeled app=db-1 in db-prod on TCP 5432.',
+					conditional: true,
+				},
+				...platformWildcards,
+			],
+		},
+	};
+}
+
+function withNetworking(sc) {
+	for (const p of sc.inventory.projects)
+		for (const ns of p.namespaces)
+			for (const v of ns.vms) {
+				const extra = netNICs[`${v.namespace}/${v.name}`];
+				if (extra) v.networks = [...(v.networks ?? []), ...extra];
+			}
+	return { ...sc, networks: netCatalog, policies: netPolicies, networkReaches: netReaches };
+}
+
 // ── base: a small healthy fleet ────────────────────────────────────────────────
 
-const base = {
+let base = {
 	name: 'base',
 	user: { username: 'admin', groups: ['dotvirt-admins'] },
 	inventory: {
@@ -479,6 +881,8 @@ const base = {
 		vmUsage,
 	},
 };
+
+base = withNetworking(base);
 
 // ── storage (S3): disk lineage, snapshots and claims over base ──────────────────
 // Kept as one block that patches base, so the other streams' edits to base do
@@ -736,6 +1140,7 @@ degraded.storageClaims = null;
 const drift = {
 	...base,
 	name: 'drift',
+	networks: netTrouble,
 	inventory: {
 		// The platform tier's standing problem: an uplink policy nmstate cannot
 		// apply. It must reach the issues plane by name, with a link.
@@ -757,6 +1162,12 @@ const drift = {
 			{
 				name: 'team-web',
 				repo: 'https://forge.example/dotvirt/team-web.git',
+				// Where team-web's repo declares what its Application cannot keep.
+				unnamespaced: [{ kind: 'NetworkPolicy', namespace: 'web-prod', name: 'allow-https' }],
+				outOfProject: [{ kind: 'VirtualMachine', namespace: 'db-prod', name: 'web-9' }],
+				platformKinds: [
+					{ kind: 'NetworkAttachmentDefinition', namespace: 'web-prod', name: 'legacy-l2' },
+				],
 				gitOps: {
 					sync: 'OutOfSync',
 					health: 'Degraded',
@@ -923,6 +1334,43 @@ const residue = {
 	},
 };
 
+// A tenant's view (team-web only): what the server serves a caller without
+// platform networking authority - project networks in its namespace, shared
+// networks published there, its own rules, no fabric, no cluster rules.
+function tenantView(sc, project) {
+	const projects = sc.inventory.projects.filter((p) => p.name === project);
+	const nss = projects.flatMap((p) => p.namespaces.map((n) => n.namespace));
+	const mine = (n) =>
+		n.scope === 'shared'
+			? (n.namespaces ?? []).some((ns) => nss.includes(ns))
+			: nss.includes(n.namespace);
+	return {
+		...sc,
+		name: 'tenant',
+		inventory: {
+			...sc.inventory,
+			projects,
+			proposals: (sc.inventory.proposals ?? []).filter((p) => p.project === project),
+		},
+		networks: {
+			...sc.networks,
+			networks: sc.networks.networks
+				.filter(mine)
+				.map((n) =>
+					n.scope === 'shared'
+						? { ...n, namespaces: n.namespaces.filter((x) => nss.includes(x)) }
+						: n,
+				),
+			uplinks: [],
+			physicalAdapters: [],
+			canManage: false,
+			caps: Object.fromEntries(Object.keys(sc.networks.caps).map((k) => [k, false])),
+		},
+		policies: { policies: sc.policies.policies.filter((p) => nss.includes(p.namespace)) },
+		networkReaches: {},
+	};
+}
+
 export const scenarios = {
 	residue,
 	sso,
@@ -934,8 +1382,9 @@ export const scenarios = {
 	large: largeScenario(),
 	// A full platform at the boards' numbers (2,846 VMs, 131 networks, 3,412
 	// disks); see scale.mjs.
-	scale: scaleScenario(base),
+	scale: withScaleNetworking(scaleScenario(base)),
 	dupnames,
+	tenant: tenantView(base, 'team-web'),
 	noboot,
 	noupload,
 };

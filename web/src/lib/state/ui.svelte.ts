@@ -81,7 +81,9 @@ export type AppModal =
 	| { kind: 'cloneVM'; vm: VMRef }
 	| { kind: 'saveTemplate'; vm: VMRef }
 	| { kind: 'migrateVM'; vm: VMRef }
-	| { kind: 'migrateStorage'; vm: VMRef };
+	| { kind: 'migrateStorage'; vm: VMRef }
+	// Check connectivity: the trace, from a VM when the opener names one.
+	| { kind: 'trace'; source?: VMRef };
 
 // Right-click context menus - the inventory's signature interaction. The bulk variant
 // (right-click inside a grid multi-selection) renders inside the workspace that

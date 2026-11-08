@@ -22,6 +22,7 @@
 	import SaveTemplateModal from './SaveTemplateModal.svelte';
 	import StagedChangesModal from './StagedChangesModal.svelte';
 	import StorageMigrateModal from './StorageMigrateModal.svelte';
+	import TraceModal from '#lib/networking/TraceModal.svelte';
 	import UndoModal from '#lib/workspace/UndoModal.svelte';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 
@@ -59,6 +60,8 @@
 	<!-- Keyed on the request: a sheet that opens another (New VM from an
 	     uploaded image) starts fresh from the new one. -->
 	{#key m}<CreateSheet modal={m} onclose={close} />{/key}
+{:else if m?.kind === 'trace'}
+	<TraceModal source={m.source} onclose={close} />
 {:else if m?.kind === 'uplink'}
 	<AddUplinkModal adapters={inventory.physicalAdapters} initial={m.initial} onclose={close} />
 {:else if m?.kind === 'namespace'}

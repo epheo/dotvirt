@@ -66,12 +66,14 @@ test('views are deep-linkable and refresh-safe', async ({ page }) => {
 	// Catalog is a routed workspace, not a drawer.
 	await page.goto('/catalog?kind=instancetypes');
 	await expect(page.getByText('Read-only — these are platform objects')).toBeVisible();
-	// Topology is the Networking root's Summary.
+	// The map is the Networking root's first tab.
 	await page.goto('/networking');
-	await expect(page.getByText('Provider Gateway').first()).toBeVisible();
-	// A segment group in the tree opens its object page (Summary fact sheet).
+	await expect(page.getByRole('heading', { name: 'Cluster map' })).toBeVisible();
+	// A network in the tree opens its own page.
 	await page.locator('aside a[href^="/networking/"]').first().click();
-	await expect(page.locator('main').getByText('VMs attached')).toBeVisible();
+	await expect(
+		page.locator('main').getByRole('heading', { name: 'Where it connects' }),
+	).toBeVisible();
 	// A VM URL survives a hard reload (session cookie + fallback routing).
 	await page.goto('/compute');
 	await openVM(page);

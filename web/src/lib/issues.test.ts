@@ -165,11 +165,11 @@ describe('scope helpers', () => {
 			[
 				'dc-vlan-bridge',
 				'NodeNetworkConfigurationPolicy degraded',
-				'/networking',
+				'/networking?tab=uplinks',
 				'platform',
 				'warn',
 			],
-			['ns-a/net-a', 'UserDefinedNetwork degraded', '/networking/net-a', 'p1', 'warn'],
+			['ns-a/net-a', 'UserDefinedNetwork degraded', '/networking/ns-a/net-a', 'p1', 'warn'],
 		]);
 		expect(issues[0].detail).toBe('FailedToConfigure: 1/1 nodes failed to configure');
 	});
@@ -302,5 +302,86 @@ describe('deriveSuggestions', () => {
 		]);
 		expect(s.every((x) => x.severity === 'info')).toBe(true);
 		expect(deriveIssues(i)).toEqual([]);
+	});
+});
+
+describe('network problems in the issues plane', () => {
+	it('names the uplink and the overlapping networks, and drops the repeated policy rollup', () => {
+		const inv: Inventory = {
+			projects: [{ name: 'p1', namespaces: [{ namespace: 'ns-a', vms: [] }] }],
+			platform: {
+				sync: 'Synced',
+				health: 'Degraded',
+				unhealthy: [
+					{ kind: 'NodeNetworkConfigurationPolicy', name: 'uplink-dc', health: 'Degraded' },
+				],
+			},
+		};
+		const issues = deriveIssues(inv, {
+			network: [
+				{
+					id: 'uplink:dc',
+					kind: 'uplink',
+					severity: 'danger',
+					title: 'Fails on host-41',
+					detail: 'dc is not configured on host-41: FailedToConfigure.',
+					uplink: 'dc',
+					policy: 'uplink-dc',
+					hosts: ['host-41'],
+				},
+				{
+					id: 'overlap:x',
+					kind: 'overlap',
+					severity: 'warn',
+					title: 'Overlap',
+					detail: 'a and b both use 10.200.0.0/16.',
+					networks: ['ns-a/a', 'ns-a/b'],
+				},
+			],
+		});
+		expect(issues.map((x) => [x.scope, x.label, x.href, x.project, x.severity])).toEqual([
+			['dc', 'fails on host-41', '/networking?tab=uplinks', 'platform', 'danger'],
+			['a and b', 'subnets overlap', '/networking/ns-a/a', 'p1', 'warn'],
+		]);
+	});
+});
+
+describe('objects a project repo cannot keep', () => {
+	it('names each by object, with its next action', () => {
+		const inv: Inventory = {
+			projects: [
+				{
+					name: 'team-web',
+					namespaces: [{ namespace: 'web-prod', vms: [] }],
+					unnamespaced: [{ kind: 'NetworkPolicy', namespace: 'web-prod', name: 'allow-https' }],
+					outOfProject: [{ kind: 'VirtualMachine', namespace: 'db-prod', name: 'web-9' }],
+					platformKinds: [
+						{ kind: 'NetworkAttachmentDefinition', namespace: 'web-prod', name: 'legacy-l2' },
+					],
+				},
+			],
+		};
+		const issues = deriveIssues(inv);
+		expect(issues.map((i) => [i.scope, i.label, i.severity, i.action.label])).toEqual([
+			['db-prod/web-9', 'VirtualMachine outside team-web', 'danger', "Open the project's changes"],
+			[
+				'web-prod/legacy-l2',
+				'NetworkAttachmentDefinition only the platform repo may hold',
+				'danger',
+				'Open the network',
+			],
+			[
+				'web-prod/allow-https',
+				'NetworkPolicy has no namespace in git',
+				'warn',
+				'Set its namespace',
+			],
+		]);
+		const unns = issues.find((i) => i.label.includes('no namespace'))!;
+		expect(unns.action).toEqual({
+			label: 'Set its namespace',
+			edit: { resource: 'networkpolicy', namespace: 'web-prod', name: 'allow-https' },
+		});
+		expect(issues[1].href).toBe('/networking/web-prod/legacy-l2');
 	});
 });

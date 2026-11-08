@@ -64,8 +64,11 @@ func (s *Snapshot) Redact(p *model.Policy, rule *model.PolicyRuleView, red *Reda
 		hideAll(p, rule)
 		return
 	}
-	target, rows := pol.render(red)
+	target, applies, rows := pol.render(red)
 	p.Target = target
+	if p.Applies != "" {
+		p.Applies = applies
+	}
 	if p.Rules != nil {
 		p.Rules = rows
 	}
@@ -83,12 +86,16 @@ func hideAll(p *model.Policy, rule *model.PolicyRuleView) {
 		if p.Target != "" {
 			p.Target = otherNamespaces
 		}
+		if p.Applies != "" {
+			p.Applies = otherNamespaces
+		}
 		for i := range p.Rules {
 			hideAll(nil, &p.Rules[i])
 		}
 	}
 	if rule != nil && rule.Peer != "" {
 		rule.Peer = otherNamespaces
+		rule.Text = "" // the sentence names the peers it can no longer show
 	}
 }
 

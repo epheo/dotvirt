@@ -3,7 +3,7 @@
 // never disagree on what belongs to a key.
 import type { Disk, Network, VM } from '#lib/api.js';
 import { quantityBytes } from '#lib/format.js';
-import { resolveNIC } from '#lib/networks.js';
+import { networkKey, resolveNIC } from '#lib/networks.js';
 
 // The inventory model: the tree is a scope selector, the center pane is the VM grid.
 // Every inventory level the tree can focus is one of these.
@@ -21,17 +21,17 @@ export const NO_STORAGE = '(no provisioned storage)';
 export const DEFAULT_CLASS = '(cluster default)';
 
 /**
- * The networks a VM appears under: one key per distinct port group, resolved
- * through the catalog so the lens groups by the catalog port-group name (a
- * tenant's primary "VM Network", a shared VLAN…) rather than the raw OVN-K ref —
- * otherwise every primary-UDN VM collapses under a single "pod" key. Falls back
- * to the raw ref (then "Pod network") before the catalog has loaded.
+ * The networks a VM appears under: one key per distinct network, resolved
+ * through the catalog (networkKey) so the lens groups by network identity (a
+ * tenant's primary network, a shared VLAN) rather than the raw OVN-K ref -
+ * otherwise every primary-network VM collapses under a single "pod" key. Falls
+ * back to the raw ref (then "Pod network") before the catalog has loaded.
  */
 export function vmNetworkKeys(vm: VM, networks: Network[] = []): string[] {
 	const keys = new Set<string>();
 	for (const nic of vm.networks ?? []) {
 		const pg = resolveNIC(nic, vm.namespace, networks);
-		if (pg) keys.add(pg.name);
+		if (pg) keys.add(networkKey(pg));
 		else if (nic.network && nic.network !== 'pod') keys.add(nic.network);
 		else keys.add(POD_NETWORK);
 	}
