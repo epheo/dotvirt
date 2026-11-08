@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"slices"
-	"sort"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,38 +18,11 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 )
-
-func TestVisibleNamespacesClusterWide(t *testing.T) {
-	kube := fake.NewSimpleClientset(
-		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "alpha"}},
-		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "beta"}},
-	)
-	allowSSAR(kube, true)
-	c := &Client{kube: kube}
-
-	got, err := c.VisibleNamespaces(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("VisibleNamespaces: %v", err)
-	}
-	sort.Strings(got)
-	if want := []string{"alpha", "beta"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
-	}
-}
-
-func allowSSAR(kube *fake.Clientset, allowed bool) {
-	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		ssar := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview).DeepCopy()
-		ssar.Status.Allowed = allowed
-		return true, ssar, nil
-	})
-}
 
 // vmReadIn answers each list-virtualmachines SSAR by namespace: allowed in
 // the namespaces of allow, a review failure in those of fail, denied elsewhere
@@ -67,62 +39,30 @@ func vmReadIn(kube *fake.Clientset, allow, fail []string) {
 	})
 }
 
-// TestVisibleNamespacesListWithoutVMRead pins the auditor-role gap: listing
-// namespaces cluster-wide must not stand in for reading VMs in them - without
-// the cluster-wide VM read the candidates are probed like any other token.
-func TestVisibleNamespacesListWithoutVMRead(t *testing.T) {
-	kube := fake.NewSimpleClientset(
-		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-a"}},
-		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-b"}},
-	)
-	vmReadIn(kube, []string{"tenant-a"}, nil)
-
-	c := &Client{kube: kube}
-	got, err := c.VisibleNamespaces(context.Background(), []string{"tenant-a", "tenant-b"})
-	if err != nil {
-		t.Fatalf("VisibleNamespaces: %v", err)
-	}
-	if want := []string{"tenant-a"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v (namespace list alone must not grant visibility)", got, want)
-	}
-}
-
-// denyNamespaceList refuses the cluster-wide namespace list, forcing the
-// per-candidate probe.
-func denyNamespaceList(kube *fake.Clientset) {
-	kube.PrependReactor("list", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "namespaces"}, "", nil)
-	})
-}
-
-// TestVisibleNamespacesForbiddenFallback drives the probe path: a token that
-// may not list namespaces cluster-wide is reviewed per candidate, keeping only
-// the ones where it can list VMs.
-func TestVisibleNamespacesForbiddenFallback(t *testing.T) {
+// CanIn keeps only the namespaces whose review allows.
+func TestCanIn(t *testing.T) {
 	kube := fake.NewSimpleClientset()
-	denyNamespaceList(kube)
 	vmReadIn(kube, []string{"tenant-a", "tenant-c"}, nil)
 
 	c := &Client{kube: kube}
-	got, err := c.VisibleNamespaces(context.Background(), []string{"tenant-c", "tenant-a", "tenant-b"})
+	got, err := c.CanIn(context.Background(), "list", "kubevirt.io", "virtualmachines", []string{"tenant-c", "tenant-a", "tenant-b"})
 	if err != nil {
-		t.Fatalf("VisibleNamespaces: %v", err)
+		t.Fatalf("CanIn: %v", err)
 	}
 	if want := []string{"tenant-a", "tenant-c"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v (only namespaces granting VM read should survive)", got, want)
 	}
 }
 
-// TestVisibleNamespacesProbeFailureIsAnError pins fail-closed without a false
-// answer: one failed review makes the whole set unknown. Returning the others
-// would read as lost access to the failed namespace and get cached as such.
-func TestVisibleNamespacesProbeFailureIsAnError(t *testing.T) {
+// TestCanInFailureIsAnError pins fail-closed without a false answer: one
+// failed review makes the whole set unknown. Returning the others would read
+// as lost access to the failed namespace and get cached as such.
+func TestCanInFailureIsAnError(t *testing.T) {
 	kube := fake.NewSimpleClientset()
-	denyNamespaceList(kube)
 	vmReadIn(kube, []string{"tenant-a", "tenant-b"}, []string{"tenant-b"})
 
 	c := &Client{kube: kube}
-	got, err := c.VisibleNamespaces(context.Background(), []string{"tenant-a", "tenant-b"})
+	got, err := c.CanIn(context.Background(), "list", "kubevirt.io", "virtualmachines", []string{"tenant-a", "tenant-b"})
 	if err == nil {
 		t.Fatalf("got %v with nil error; a failed review must fail the probe", got)
 	}
@@ -131,11 +71,10 @@ func TestVisibleNamespacesProbeFailureIsAnError(t *testing.T) {
 	}
 }
 
-// TestVisibleNamespacesCanceled pins the cancel path: a done context is the
-// answer, never the reviews that happened to finish first.
-func TestVisibleNamespacesCanceled(t *testing.T) {
+// TestCanInCanceled pins the cancel path: a done context is the answer,
+// never the reviews that happened to finish first.
+func TestCanInCanceled(t *testing.T) {
 	kube := fake.NewSimpleClientset()
-	denyNamespaceList(kube)
 	ctx, cancel := context.WithCancel(context.Background())
 	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		ssar := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview).DeepCopy()
@@ -145,24 +84,19 @@ func TestVisibleNamespacesCanceled(t *testing.T) {
 	})
 
 	c := &Client{kube: kube}
-	got, err := c.VisibleNamespaces(ctx, []string{"tenant-a", "tenant-b", "tenant-c"})
+	got, err := c.CanIn(ctx, "list", "kubevirt.io", "virtualmachines", []string{"tenant-a", "tenant-b", "tenant-c"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("got %v, %v; want context.Canceled", got, err)
 	}
 }
 
-// TestVisibleNamespacesBoundsConcurrency pins the probe fan-out: parallel, so
-// a many-namespace tenant is not a serial chain of reviews, and bounded. A real
+// TestCanInBoundsConcurrency pins the probe fan-out: parallel, so a
+// many-namespace tenant is not a serial chain of reviews, and bounded. A real
 // client over HTTP, since the fake clientset serializes every action.
-func TestVisibleNamespacesBoundsConcurrency(t *testing.T) {
+func TestCanInBoundsConcurrency(t *testing.T) {
 	var inFlight, peak atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = io.WriteString(w, `{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Forbidden","code":403}`)
-			return
-		}
 		n := inFlight.Add(1)
 		defer inFlight.Add(-1)
 		for p := peak.Load(); n > p && !peak.CompareAndSwap(p, n); p = peak.Load() {
@@ -181,7 +115,7 @@ func TestVisibleNamespacesBoundsConcurrency(t *testing.T) {
 	}
 
 	c := &Client{kube: kube}
-	got, err := c.VisibleNamespaces(context.Background(), candidates)
+	got, err := c.CanIn(context.Background(), "list", "kubevirt.io", "virtualmachines", candidates)
 	if err != nil || len(got) != len(candidates) {
 		t.Fatalf("got %d namespaces, err %v; want all %d", len(got), err, len(candidates))
 	}

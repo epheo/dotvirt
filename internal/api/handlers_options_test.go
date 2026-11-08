@@ -11,7 +11,6 @@ import (
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
-	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 // TestOptionsFilteredPerCaller pins the tenant boundary on the SA-read catalog:
@@ -37,7 +36,7 @@ func TestOptionsFilteredPerCaller(t *testing.T) {
 	}
 	s.options.Put("all", all)
 	id := auth.Identity{Token: "tenant-token", Username: "tenant"}
-	s.visible.Put(restfactory.TokenKey(id.Token), visibleSet{ns: map[string]bool{"team-a": true}, ver: s.rbacVersion()})
+	seedVisible(s, id.Token, map[string]bool{"team-a": true})
 
 	r := httptest.NewRequest(http.MethodGet, "/api/options", nil)
 	r = r.WithContext(auth.NewContext(r.Context(), id))

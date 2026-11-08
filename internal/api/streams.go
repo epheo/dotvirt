@@ -81,12 +81,10 @@ func unsettledMayServe(sinceMove time.Duration) bool {
 }
 
 // RunTTLBackstop is the TTL backstop for authorization no RBAC watch observes.
-// The watches publish RBACChanged for RoleBindings and Roles in project
-// namespaces, ClusterRoleBindings, the ClusterRoles those bind, and OpenShift
-// Groups. A token's visible namespaces and SSAR verdicts still move unseen
-// with:
-//   - RBAC outside project namespaces (the shared image namespaces the options
-//     filter reviews),
+// The watches publish RBACChanged (OtherRBACChanged outside the projects) for
+// RoleBindings, ClusterRoleBindings, the Roles and ClusterRoles those bind,
+// and OpenShift Groups. A token's visible namespaces and SSAR verdicts still
+// move unseen with:
 //   - bindings that grant only platform ServiceAccounts, and the roles only
 //     they bind,
 //   - a watched kind the SA may not list yet,
