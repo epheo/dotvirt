@@ -41,8 +41,8 @@ jobs:
       catalog-image: ${{ steps.pins.outputs.catalog-image }}
       version: ${{ steps.pins.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - name: Resolve version + prev
@@ -75,9 +75,10 @@ jobs:
         run: |
           echo "$P" | docker login quay.io -u "$U" --password-stdin
           echo "$P" | skopeo login quay.io -u "$U" --password-stdin
-      - uses: docker/setup-qemu-action@v4   # emulation for the catalog image's arm64 cache-build RUN
+      # Emulation for the catalog image's arm64 cache-build RUN.
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         if: env.REL_SKIP != 'true'
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         if: env.REL_SKIP != 'true'
       - name: Cut release (build + push + digest-pin)
         if: env.REL_SKIP != 'true'

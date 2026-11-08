@@ -24,8 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: QUAY
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - uses: ./.github/actions/operator-tools # skopeo ships on the runner image
@@ -36,14 +36,15 @@ jobs:
         run: |
           echo "$P" | docker login quay.io -u "$U" --password-stdin
           echo "$P" | skopeo login quay.io -u "$U" --password-stdin
-      - uses: docker/setup-qemu-action@v4   # emulation for the catalog image's arm64 cache-build RUN
-      - uses: docker/setup-buildx-action@v4
+      # Emulation for the catalog image's arm64 cache-build RUN.
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Cut preview
         env:
           FORCE: ${{ inputs.force && '1' || '' }}
           OPM: opm # the operator-tools binary; the scripts' default compiles opm from source
         run: VERSION=${{ inputs.version }} CONTAINER_TOOL=docker ./hack/preview.sh
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: catalogsource-preview-${{ inputs.version }}
           path: operator/install/catalogsource-preview.yaml
