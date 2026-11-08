@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
@@ -249,7 +251,7 @@ func (s *Server) Authorize(id auth.Identity, need []changeset.Access) error {
 	var denied []string
 	for i, a := range asks {
 		switch {
-		case errors.Is(errs[i], model.ErrInvalid):
+		case errors.Is(errs[i], model.ErrInvalid), errors.Is(errs[i], model.ErrForbidden):
 			return errs[i]
 		case errs[i] != nil:
 			return s.reviewFailed(ctx, id, errs[i])
@@ -339,20 +341,50 @@ func (s *Server) dryRun(ctx context.Context, id auth.Identity, c *cluster.Client
 }
 
 // weighCreate dry-runs a create the snapshot cannot place, under the
-// caller's token: the object found there is an update, asked as one;
-// forbidden is a denial; any other answer came after authorization, which
-// is all this asks. Admission runs too, but only webhooks declaring
-// sideEffects None or NoneOnDryRun: a dry run reaches no other.
+// caller's token: the object found there is an update, asked as one; any
+// answer but a denial came after authorization, which is all this asks.
+// Admission runs too, but only webhooks declaring sideEffects None or
+// NoneOnDryRun: a dry run reaches no other.
+//
+// The apiserver authorizes a create before it looks for the object, so a
+// caller who may update an object but not create it is denied though Argo
+// would patch it as them. A denied create is therefore asked as the update,
+// and allowed when the object exists.
 func (s *Server) weighCreate(ctx context.Context, id auth.Identity, c *cluster.Client, a changeset.Access) (bool, error) {
-	out, _, err := c.DryRun(ctx, verbCreate, a.Group, apiVersionOf(a.Object), a.Resource, a.Namespace, a.Name, []byte(a.Object))
-	switch {
-	case err != nil:
+	version := apiVersionOf(a.Object)
+	out, _, err := c.DryRun(ctx, verbCreate, a.Group, version, a.Resource, a.Namespace, a.Name, []byte(a.Object))
+	if err != nil {
 		return false, err
-	case out == cluster.DryRunExists:
-		a.Verb = verbUpdate
-		return s.updates(ctx, id, c, a)
 	}
-	return out != cluster.DryRunDenied, nil
+	update := a
+	update.Verb = verbUpdate
+	switch out {
+	case cluster.DryRunExists:
+		return s.updates(ctx, id, c, update)
+	case cluster.DryRunDenied:
+		if ok, err := s.updates(ctx, id, c, update); !ok || err != nil {
+			return false, err
+		}
+		return s.exists(ctx, a, version)
+	}
+	return true, nil
+}
+
+// exists asks dotvirt's SA whether the object a names exists: one GET of
+// it, for a create the caller may not make but may make as an update. A
+// kind the SA cannot read keeps the create's denial, saying why.
+func (s *Server) exists(ctx context.Context, a changeset.Access, version string) (bool, error) {
+	sa, err := s.clusterF.SA()
+	if err != nil {
+		return false, unavailable(err)
+	}
+	found, err := sa.Exists(ctx, a.Group, version, a.Resource, a.Namespace, a.Name)
+	if apierrors.IsForbidden(err) {
+		a.Verb = verbCreate
+		return false, fmt.Errorf("%w: you may not %s, and dotvirt may not read whether it exists to weigh the change as its update",
+			model.ErrForbidden, a)
+	}
+	return found, err
 }
 
 // weighBinding has the apiserver weigh a RoleBinding as Argo would apply it:

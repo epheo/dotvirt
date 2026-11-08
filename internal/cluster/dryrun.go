@@ -40,14 +40,7 @@ const (
 // DryRunRefused. A failure to get an answer (an outage, a rejected token,
 // throttling) is the error.
 func (c *Client) DryRun(ctx context.Context, verb, group, version, resource, namespace, name string, raw []byte) (out DryRun, refused, err error) {
-	path := []string{"/apis", group, version}
-	if group == "" {
-		path = []string{"/api", version}
-	}
-	if namespace != "" {
-		path = append(path, "namespaces", namespace)
-	}
-	path = append(path, resource)
+	path := collectionPath(group, version, resource, namespace)
 	rc := c.kube.CoreV1().RESTClient()
 	req := rc.Post()
 	switch verb {
@@ -77,4 +70,32 @@ func (c *Client) DryRun(ctx context.Context, verb, group, version, resource, nam
 		}
 	}
 	return 0, nil, fmt.Errorf("dry run of %s %s/%s: %w", resource, namespace, name, err)
+}
+
+// Exists reports whether the object of group/version/resource named
+// namespace/name exists, with one GET of it under this token. An answer
+// other than the object or its absence is the error.
+func (c *Client) Exists(ctx context.Context, group, version, resource, namespace, name string) (bool, error) {
+	path := append(collectionPath(group, version, resource, namespace), name)
+	err := c.kube.CoreV1().RESTClient().Get().AbsPath(path...).Do(ctx).Error()
+	switch {
+	case err == nil:
+		return true, nil
+	case apierrors.IsNotFound(err):
+		return false, nil
+	}
+	return false, err
+}
+
+// collectionPath is the API path of a resource's collection, in namespace
+// unless it is "".
+func collectionPath(group, version, resource, namespace string) []string {
+	path := []string{"/apis", group, version}
+	if group == "" {
+		path = []string{"/api", version}
+	}
+	if namespace != "" {
+		path = append(path, "namespaces", namespace)
+	}
+	return append(path, resource)
 }

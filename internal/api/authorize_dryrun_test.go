@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	authzv1 "k8s.io/api/authorization/v1"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -257,5 +258,53 @@ func TestRoleRefIsReadCaseSensitively(t *testing.T) {
 	kind, name := roleRefOf(`{"roleref":{"kind":"ClusterRole","name":"view"},"roleRef":{"kind":"ClusterRole","name":"cluster-admin"}}`)
 	if kind != "ClusterRole" || name != "cluster-admin" {
 		t.Errorf("roleRef = %s %s, want ClusterRole cluster-admin", kind, name)
+	}
+}
+
+// A caller who may update a namespace but not create one may join it while it
+// exists, as Kubernetes lets them patch it: their denied create is asked as
+// the update, and dotvirt's SA reads whether the namespace is there. One that
+// does not exist stays refused, and so does one the SA may not read.
+func TestAuthorizeACreateDeniedButExistingIsAnUpdate(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		return token == tenantToken && a.Verb == "update"
+	}
+	fc.on(http.MethodPost, "/api/v1/namespaces", func(w http.ResponseWriter, r *http.Request) {
+		writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
+	})
+	var mu sync.Mutex
+	var reads []string
+	fc.on(http.MethodGet, "/api/v1/namespaces/existing", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		reads = append(reads, bearer(r))
+		mu.Unlock()
+		writeObj(w, corev1.Namespace{TypeMeta: metav1.TypeMeta{Kind: "Namespace", APIVersion: "v1"}, ObjectMeta: metav1.ObjectMeta{Name: "existing"}})
+	})
+	fc.on(http.MethodGet, "/api/v1/namespaces/sealed", func(w http.ResponseWriter, r *http.Request) {
+		writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
+	})
+	s := fc.server(nil, Config{})
+	id := auth.Identity{Token: tenantToken, Username: "tenant"}
+	namespace := func(name string) changeset.Access {
+		return changeset.Access{Verb: "create", Resource: "namespaces", Name: name,
+			Object: `{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"` + name + `"}}`}
+	}
+
+	for range 2 {
+		if err := s.Authorize(id, []changeset.Access{namespace("existing")}); err != nil {
+			t.Errorf("an existing namespace the caller may update: %v", err)
+		}
+	}
+	if mu.Lock(); len(reads) != 1 || reads[0] != "sa-token" {
+		t.Errorf("reads %v, want one by dotvirt's SA, the repeat cached", reads)
+	}
+	mu.Unlock()
+	if err := s.Authorize(id, []changeset.Access{namespace("missing")}); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("a namespace that does not exist: %v, want ErrForbidden", err)
+	}
+	err := s.Authorize(id, []changeset.Access{namespace("sealed")})
+	if !errors.Is(err, model.ErrForbidden) || !strings.Contains(err.Error(), "may not read whether it exists") {
+		t.Errorf("a namespace the SA may not read: %v", err)
 	}
 }
