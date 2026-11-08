@@ -3,6 +3,8 @@ package changeset
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
@@ -34,30 +36,53 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 	})
 }
 
-// checkEdit dry-runs edit against the base-branch file declaring VM
-// (namespace, name) and returns that file: field validation, the splice and
-// the read-back all run, so a refusal lands on the form at stage instead of
-// failing the propose. stageEdit runs it on the edit as it will be staged.
-// The file comes from git's declared index, never from the client, so an
-// edit cannot be aimed at another namespace's manifest.
-func (c *Coordinator) checkEdit(read *git.Repo, namespace, name string, edit model.VMEdit) (string, error) {
+// vmFile is the base-branch file declaring a VM, read once: the edit merged
+// over what is staged, its dry run and the entry all work from these bytes.
+type vmFile struct {
+	path    string
+	content []byte
+	vm      model.VM
+}
+
+// editTarget resolves the file declaring VM (namespace, name) from git's
+// declared index, never from the client, so an edit cannot be aimed at
+// another namespace's manifest. It runs before the draft store's lock: the
+// index walk on a memo miss must not hold every user's staging. The index
+// and the read may see different heads; a file that moved in between is a
+// conflict to retry, never an internal error.
+func (c *Coordinator) editTarget(read *git.Repo, namespace, name string) (vmFile, error) {
 	idx, err := indexDeclared(read, c.baseBranch)
 	if err != nil {
-		return "", err
+		return vmFile{}, err
 	}
 	ref, ok := declaredRef(idx, draft.ResourceVM, namespace, name)
 	if !ok {
-		return "", fmt.Errorf("%w: %s/%s is not in git", model.ErrNotFound, namespace, name)
+		return vmFile{}, fmt.Errorf("%w: %s/%s is not in git", model.ErrNotFound, namespace, name)
 	}
 	path := idx.Files[ref]
-	content, err := read.FileOnBranch(c.baseBranch, path)
+	if files := idx.Repeated[ref]; len(files) > 0 {
+		return vmFile{}, fmt.Errorf("%w: %s/%s is declared in %s; keep one declaration in git", model.ErrConflict, namespace, name, strings.Join(files, " and "))
+	}
+	content, ok, err := read.LookupOnBranch(c.baseBranch, path)
 	if err != nil {
-		return "", err
+		return vmFile{}, err
 	}
-	if _, err := manifest.ApplyEdit(content, defaultNamespace(path), namespace, name, edit); err != nil {
-		return "", err
+	retry := fmt.Errorf("%w: %s changed while this was staged; try again", model.ErrConflict, path)
+	if !ok {
+		return vmFile{}, retry
 	}
-	return path, nil
+	vms, err := manifest.ParseVMs(path, content, defaultNamespace(path))
+	if err != nil {
+		return vmFile{}, fmt.Errorf("%w: %s does not parse; fix it in git: %v", model.ErrConflict, path, err)
+	}
+	i := slices.IndexFunc(vms, func(vm model.VM) bool { return vm.Namespace == namespace && vm.Name == name })
+	switch {
+	case i < 0:
+		return vmFile{}, retry
+	case slices.ContainsFunc(vms[i+1:], func(vm model.VM) bool { return vm.Namespace == namespace && vm.Name == name }):
+		return vmFile{}, fmt.Errorf("%w: %s declares %s/%s twice; keep one declaration in git", model.ErrConflict, path, namespace, name)
+	}
+	return vmFile{path: path, content: content, vm: vms[i]}, nil
 }
 
 // PreviewEdit renders an edit as the changes staging it would list, restart

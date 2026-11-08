@@ -213,3 +213,40 @@ func TestReproposeOfAnEditMainNoLongerTakesIsConflict(t *testing.T) {
 		t.Errorf("a refused propose must keep the draft, got %d entries", n)
 	}
 }
+
+// A VM two files declare has no one file an edit could rewrite: the declared
+// index keeps the last, while the inventory may show the first.
+func TestStageEditRefusesARepeatedDeclaration(t *testing.T) {
+	a := "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: x\nspec:\n  runStrategy: Always\n"
+	b := "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: x\n  namespace: a\nspec:\n  runStrategy: Always\n"
+	bare := seedBareFiles(t, map[string][]byte{"a/x.yaml": []byte(a), "a/y.yaml": []byte(b)})
+	c := newTestCoordinator(t, false)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+	_, err := c.StageEdit(id, proj, "a", "x", model.EditRequest{VMEdit: model.VMEdit{SetLabels: map[string]string{"env": "prod"}}})
+	if !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "a/x.yaml and a/y.yaml") {
+		t.Fatalf("want ErrConflict naming both files, got %v", err)
+	}
+}
+
+// Removals name interfaces, so a staged network add is cancelled by removing
+// the interface it adds.
+func TestStageEditRemovesAStagedNetworkByInterface(t *testing.T) {
+	vm := "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\nspec:\n  runStrategy: Always\n" +
+		"  template:\n    spec:\n      domain:\n        devices:\n          interfaces:\n          - name: default\n            masquerade: {}\n" +
+		"      networks:\n      - name: default\n        pod: {}\n"
+	bare := seedBareFiles(t, map[string][]byte{"alpha/web.yaml": []byte(vm)})
+	c := newTestCoordinator(t, false)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+	add := model.VMEdit{AddNetworks: []model.NetworkAdd{{Name: "alpha/vlan-10"}}}
+	if _, err := c.StageEdit(id, proj, "alpha", "web", model.EditRequest{VMEdit: add}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if _, err := c.StageEdit(id, proj, "alpha", "web", model.EditRequest{VMEdit: model.VMEdit{RemoveNetworks: []string{"vlan-10"}}}); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if entries, _ := c.store.List(id.Username, proj.Name); len(entries) != 0 {
+		t.Fatalf("the add and its removal must net to nothing, got %+v", entries)
+	}
+}
