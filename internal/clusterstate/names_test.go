@@ -89,7 +89,7 @@ func TestAllNamespaces(t *testing.T) {
 	}
 }
 
-// A deleted namespace's grant levels are forgotten once forgetAfter passed,
+// A deleted namespace's grant levels are forgotten once ForgetAfter passed,
 // at the next sweep; one recreated in between keeps them.
 func TestDeletedNamespacesAreForgotten(t *testing.T) {
 	s, forgot := sinkState(t)
@@ -100,7 +100,7 @@ func TestDeletedNamespacesAreForgotten(t *testing.T) {
 	_ = s.names.Delete(namespace("back"))
 	now = now.Add(time.Minute)
 	_ = s.names.Add(namespace("back"))
-	now = now.Add(forgetAfter)
+	now = now.Add(ForgetAfter)
 	_ = s.names.Delete(namespace("ci"))
 	if !slices.Equal(*forgot, []string{"gone"}) {
 		t.Fatalf("forgot %v, want [gone]", *forgot)

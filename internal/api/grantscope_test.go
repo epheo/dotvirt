@@ -20,6 +20,7 @@ import (
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
+	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/restfactory"
 )
@@ -504,6 +505,24 @@ func TestCrossKindRevocation(t *testing.T) {
 		}
 		if g.ask("tok", tenant, q) {
 			t.Errorf("between=%v: the verdict cached in z kept the revoked allow", between)
+		}
+	}
+}
+
+// A forgotten namespace's marks read 0 again (eventbus.Forget), which a stamp
+// taken before its last move could re-equal: every stamp of a mark must have
+// expired by then. The caches holding them (visible, ssar, dry runs in ssar)
+// evict at visibleTTL, verdicts serve at most that or unwatchedTTL, and an
+// open frame re-reads within the backstop bound of either.
+func TestForgetOutlivesEveryGrantStamp(t *testing.T) {
+	for name, ttl := range map[string]time.Duration{
+		"cache eviction and the long TTL": visibleTTL,
+		"the short TTL and dry runs":      unwatchedTTL,
+		"the long backstop bound":         backstopBound(visibleTTL),
+		"the short backstop bound":        backstopBound(unwatchedTTL),
+	} {
+		if clusterstate.ForgetAfter <= ttl {
+			t.Errorf("ForgetAfter %s does not outlive %s (%s)", clusterstate.ForgetAfter, name, ttl)
 		}
 	}
 }

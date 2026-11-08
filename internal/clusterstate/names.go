@@ -17,7 +17,7 @@ import (
 // rebuilds no frame, since what a frame shows of it arrives with its objects,
 // whose own kinds publish.
 //
-// A deleted namespace's grant levels are forgotten forgetAfter later unless
+// A deleted namespace's grant levels are forgotten ForgetAfter later unless
 // it came back (forget): its bus marks would otherwise outlive it.
 type namespaceSink struct {
 	project  labels.Selector
@@ -34,10 +34,11 @@ type namespaceSink struct {
 	swept  time.Time
 }
 
-// forgetAfter is how long a deleted namespace's grant levels are kept: longer
-// than any authorization cache entry serves (api.visibleTTL), so no stamp
-// read before its last move can still serve once they go (eventbus.Forget).
-const forgetAfter = 15 * time.Minute
+// ForgetAfter is how long a deleted namespace's grant levels are kept: longer
+// than any stamp of them serves (api.TestForgetOutlivesEveryGrantStamp), so
+// no stamp read before its last move can still serve once they go
+// (eventbus.Forget).
+const ForgetAfter = 15 * time.Minute
 
 func newNamespaceSink(project labels.Selector, projects cache.Indexer, forget func(string), synced func()) *namespaceSink {
 	return &namespaceSink{project: project, projects: projects, forget: forget, synced: synced, now: time.Now,
@@ -131,7 +132,7 @@ func (n *namespaceSink) Replace(list []any, rv string) error {
 	return nil
 }
 
-// sweep takes the namespaces gone longer than forgetAfter, at most once a
+// sweep takes the namespaces gone longer than ForgetAfter, at most once a
 // minute. Called under mu.
 func (n *namespaceSink) sweep(now time.Time) []string {
 	if now.Sub(n.swept) < time.Minute {
@@ -140,7 +141,7 @@ func (n *namespaceSink) sweep(now time.Time) []string {
 	n.swept = now
 	var due []string
 	for name, at := range n.gone {
-		if now.Sub(at) >= forgetAfter {
+		if now.Sub(at) >= ForgetAfter {
 			due = append(due, name)
 			delete(n.gone, name)
 		}
