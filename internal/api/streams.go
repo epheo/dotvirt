@@ -42,15 +42,25 @@ func (s *Server) streamOpen(key string) bool {
 	return s.streams[key] > 0
 }
 
-const (
-	// ttlBackstopEvery is the TTL backstop's cadence. A cached entry serves while
-	// younger than visibleTTL, so the first tick to find it expired comes up to one
-	// period after it ages out: ticking at visibleTTL would double the bound.
-	ttlBackstopEvery = visibleTTL / 2
-	// ttlBackstopBound is how long an unwatched authorization change can take to
-	// reach an open frame: the entry's TTL, then the wait for the next tick.
-	ttlBackstopBound = visibleTTL + ttlBackstopEvery
-)
+// backstopEvery is the TTL backstop's period for entries serving ttl. An entry
+// serves while younger than ttl, so the first backstop to find it expired comes
+// up to one period after it ages out: a period of ttl would double the bound.
+func backstopEvery(ttl time.Duration) time.Duration { return ttl / 2 }
+
+// backstopBound is how long an unwatched authorization change can take to
+// reach an open frame: the entry's TTL, then the wait for the next backstop.
+func backstopBound(ttl time.Duration) time.Duration { return ttl + backstopEvery(ttl) }
+
+// backstopTick is the backstop's clock: the short TTL's period, so a switch to
+// it takes effect at the next tick; the long TTL's period is a whole number of
+// ticks.
+var backstopTick = backstopEvery(unwatchedTTL)
+
+// backstopDue reports whether ticks backstop ticks since the last publish make
+// a period for entries serving ttl.
+func backstopDue(ticks int, ttl time.Duration) bool {
+	return time.Duration(ticks)*backstopTick >= backstopEvery(ttl)
+}
 
 // RunTTLBackstop is the TTL backstop for authorization no RBAC watch observes.
 // The watches publish RBACChanged for RoleBindings and Roles in project
@@ -65,21 +75,26 @@ const (
 //   - group membership kept anywhere but user.openshift.io Groups,
 //   - authorizers other than RBAC.
 //
-// Those entries are cached for visibleTTL only. An expired entry is
-// re-evaluated by the next frame build, so while a stream is open this
-// publishes TTLBackstop every ttlBackstopEvery to cause one, which bounds such a
-// change at ttlBackstopBound (7.5 minutes); a frame that comes out identical is
-// not resent. TTLBackstop is in no cache's version stamp, so nothing is invalidated
-// before its TTL.
+// Those entries serve for authTTL only. An expired entry is re-evaluated by
+// the next frame build, so while a stream is open this publishes TTLBackstop
+// once per backstopEvery(authTTL) to cause one. That bounds such a change at
+// backstopBound: 7.5 minutes while every RBAC watch runs (5 minute entries),
+// 45 seconds otherwise (30 second entries, as on an operator role older than
+// the app). A frame that comes out identical is not resent. TTLBackstop is in
+// no cache's version stamp, so nothing is invalidated before its TTL.
 func (s *Server) RunTTLBackstop(ctx context.Context) {
-	t := time.NewTicker(ttlBackstopEvery)
+	t := time.NewTicker(backstopTick)
 	defer t.Stop()
+	ticks := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			s.ttlBackstop()
+			if ticks++; backstopDue(ticks, s.authTTL()) {
+				ticks = 0
+				s.ttlBackstop()
+			}
 		}
 	}
 }

@@ -243,7 +243,8 @@ func run() error {
 
 	// Frames also read TTL-cached authorization that no RBAC watch observes; while
 	// a stream is open, the backstop rebuilds frames often enough that an expired
-	// entry is re-evaluated within 7.5 minutes (identical frames are not resent).
+	// entry is re-evaluated within 7.5 minutes, or 45 seconds while an RBAC watch
+	// is down (identical frames are not resent).
 	go server.RunTTLBackstop(ctx)
 
 	// VNC dials as the requesting user (KubeVirt RBAC gates the console).

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,14 +21,17 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/kubernetes/scheme"
 	k8stesting "k8s.io/client-go/testing"
+	kvfake "kubevirt.io/client-go/kubevirt/fake"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/eventbus"
+	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 // scopeServer builds a Server with only what the scope caches read: the version
@@ -144,6 +148,91 @@ func TestVisibleForSharesOneProbe(t *testing.T) {
 	wg.Wait()
 	if lists != 1 {
 		t.Fatalf("four concurrent misses cost %d probes, want 1", lists)
+	}
+}
+
+// watchedState runs a snapshot over a fake clientset whose RBAC watches all
+// run: the SA may list every kind, and Groups are absent as on any cluster but
+// OpenShift. fail makes the ClusterRole watch fail from then on.
+func watchedState(t *testing.T, bus *eventbus.Bus) (st *clusterstate.State, fail func()) {
+	t.Helper()
+	kube := fake.NewSimpleClientset()
+	var rbac []metav1.APIResource
+	for _, r := range []string{"rolebindings", "roles", "clusterrolebindings", "clusterroles"} {
+		rbac = append(rbac, metav1.APIResource{Name: r})
+	}
+	kube.Resources = []*metav1.APIResourceList{{GroupVersion: "rbac.authorization.k8s.io/v1", APIResources: rbac}}
+	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		ssar := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview).DeepCopy()
+		ssar.Status.Allowed = true
+		return true, ssar, nil
+	})
+	var (
+		down atomic.Bool
+		mu   sync.Mutex
+		w    *watch.FakeWatcher
+	)
+	kube.PrependWatchReactor("clusterroles", func(k8stesting.Action) (bool, watch.Interface, error) {
+		if down.Load() {
+			return true, nil, errors.New("watch refused")
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		w = watch.NewFake()
+		return true, w, nil
+	})
+	st = clusterstate.New(cluster.NewClient(kube, kvfake.NewSimpleClientset(), nil), "dotvirt.io/project", bus)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	st.Run(ctx)
+	waitUntil(t, "every RBAC watch running", st.RBACWatched)
+	return st, func() {
+		down.Store(true)
+		mu.Lock()
+		defer mu.Unlock()
+		w.Stop()
+	}
+}
+
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); !cond(); time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+}
+
+// While every RBAC watch runs, a cached visible set serves for minutes; once
+// one fails, the same entry serves only seconds, so a revocation the watches
+// cannot report waits no longer than it did before them. A snapshot whose
+// watches never ran keeps the short TTL throughout.
+func TestVisibleForTTLFollowsTheWatches(t *testing.T) {
+	bus := eventbus.New()
+	st, fail := watchedState(t, bus)
+	watched := NewServer(Deps{State: st, Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}})
+	id := auth.Identity{Token: "tok-alice", Username: "alice"}
+	probes := func(s *Server) int {
+		t.Helper()
+		// The entry a review left a minute ago.
+		s.visible.Put(restfactory.TokenKey(id.Token), visibleSet{ns: map[string]bool{"tenant-a": true}, ver: s.rbacVersion(), at: time.Now().Add(-time.Minute)})
+		c, lists := listCountingClient("tenant-a")
+		if got, err := s.visibleFor(context.Background(), id, c); err != nil || !got["tenant-a"] {
+			t.Fatalf("visibleFor: %v, %v", got, err)
+		}
+		return *lists
+	}
+
+	if n := probes(watched); n != 0 {
+		t.Errorf("watched: a minute-old entry cost %d probes, want 0", n)
+	}
+	fail()
+	waitUntil(t, "the failed watch to count", func() bool { return !st.RBACWatched() })
+	if n := probes(watched); n != 1 {
+		t.Errorf("a watch down: a minute-old entry cost %d probes, want 1", n)
+	}
+	if n := probes(scopeServer(eventbus.New())); n != 1 {
+		t.Errorf("never watched: a minute-old entry cost %d probes, want 1", n)
 	}
 }
 

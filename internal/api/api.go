@@ -142,15 +142,16 @@ type Config struct {
 	RepoAnnotation    string // namespace annotation holding the repo URL (release strips it)
 }
 
-// visibleTTL bounds a token's cached visible-namespace set and SSAR verdicts.
-// Freshness comes from the RBAC version stamp (bus.Version(RBACChanged,
-// NamespaceChanged)): the RBAC signal watches move it on every grant change they
-// observe, and the entry is invalidated lazily, that token only. The TTL is the
-// safety net for what no watch observes (see RunTTLBackstop), so it runs to
-// minutes: each expiry costs a visibility probe of one review per project
-// namespace under the token. An expired entry is only re-evaluated by a rebuild,
-// which RunTTLBackstop causes for open streams, so an unwatched change reaches
-// an open frame within ttlBackstopBound.
+// visibleTTL bounds a token's cached visible-namespace set and SSAR verdicts
+// while every RBAC watch runs. Freshness comes from the RBAC version stamp
+// (bus.Version(RBACChanged, NamespaceChanged)): the RBAC signal watches move it
+// on every grant change they observe, and the entry is invalidated lazily, that
+// token only. The TTL is the safety net for what no watch observes (see
+// RunTTLBackstop), so it runs to minutes: each expiry costs a visibility probe
+// of one review per project namespace under the token. While a watch is not
+// running, entries serve unwatchedTTL instead (authTTL). An expired entry is only
+// re-evaluated by a rebuild, which RunTTLBackstop causes for open streams, so an
+// unwatched change reaches an open frame within backstopBound(authTTL).
 const visibleTTL = 5 * time.Minute
 
 // optionsTTL caches the wizard catalog (instancetypes/preferences/datasources).

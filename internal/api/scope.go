@@ -19,17 +19,39 @@ import (
 )
 
 // visibleSet is a token's visible-namespace set stamped with the RBAC version it was
-// derived at; the read is valid only while that version still matches the bus.
+// derived at and when; the read is valid only while that version still matches the
+// bus and the entry is younger than authTTL.
 type visibleSet struct {
 	ns  map[string]bool
 	ver uint64
+	at  time.Time
 }
 
 // ssarVerdict is one (token, question) SSAR verdict, stamped the same way.
 type ssarVerdict struct {
 	ok  bool
 	ver uint64
+	at  time.Time
 }
+
+// unwatchedTTL is how long a cached visible set or verdict serves while some
+// RBAC watch is not running: a grant move may then publish nothing, and this
+// age is all that bounds a revocation.
+const unwatchedTTL = 30 * time.Second
+
+// authTTL is how long a cached visible set or verdict serves now: visibleTTL
+// while every RBAC watch runs (clusterstate.RBACWatched) and RBACChanged
+// reports each grant move, unwatchedTTL otherwise. Read on every use, so a
+// watch failing shortens the entries already cached.
+func (s *Server) authTTL() time.Duration {
+	if s.state != nil && s.state.RBACWatched() {
+		return visibleTTL
+	}
+	return unwatchedTTL
+}
+
+// fresh reports whether an entry cached at at still serves.
+func (s *Server) fresh(at time.Time) bool { return time.Since(at) < s.authTTL() }
 
 // rbacVersion is the change-version a token's derived authorization depends on: a
 // watched grant move OR a namespace add/remove/relabel can change what it may see.
@@ -84,13 +106,13 @@ func review[V any](ctx context.Context, cache *ttlcache.Cache[V], key string, ve
 }
 
 // visibleFor returns the set of namespaces id's token may read VMs in, cached by
-// token for visibleTTL. The snapshot's project namespaces are the candidates
+// token for authTTL. The snapshot's project namespaces are the candidates
 // VisibleNamespaces probes when the token lacks cluster-wide VM read. A failed
 // probe is never cached: the next read asks again.
 func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Client) (map[string]bool, error) {
 	ver := s.rbacVersion()
 	key := restfactory.TokenKey(id.Token)
-	if e, ok := s.visible.Get(key); ok && e.ver == ver {
+	if e, ok := s.visible.Get(key); ok && e.ver == ver && s.fresh(e.at) {
 		return e.ns, nil
 	}
 	e, err := review(ctx, s.visible, key, ver, func(ctx context.Context) (visibleSet, error) {
@@ -98,7 +120,7 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 		if err != nil {
 			return visibleSet{}, err
 		}
-		e := visibleSet{ns: make(map[string]bool, len(names)), ver: ver}
+		e := visibleSet{ns: make(map[string]bool, len(names)), ver: ver, at: time.Now()}
 		for _, n := range names {
 			e.ns[n] = true
 		}
@@ -114,14 +136,14 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 // can answers verb on ref in ns ("" for cluster scope) under id's token,
 // behind a per-(token, question) cache stamped with rbacVersion, so a signal
 // read on a polled or broadcast path does not post an SSAR per request. A
-// watched grant or namespace move invalidates lazily via the stamp; the TTL
+// watched grant or namespace move invalidates lazily via the stamp; authTTL
 // backstops what no watch observes (see RunTTLBackstop). Only a verdict is
 // cached: a failed review is returned, so a blip can never pin a denial. A gate answers the error with s.reviewFailed; a
 // UI signal or a filter reads it as no.
 func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, verb string, ref ssarRef, ns string) (bool, error) {
 	ver := s.rbacVersion()
 	k := strings.Join([]string{restfactory.TokenKey(id.Token), verb, ref.group, ref.resource, ns}, "\x00")
-	if e, ok := s.ssar.Get(k); ok && e.ver == ver {
+	if e, ok := s.ssar.Get(k); ok && e.ver == ver && s.fresh(e.at) {
 		return e.ok, nil
 	}
 	e, err := review(ctx, s.ssar, k, ver, func(ctx context.Context) (ssarVerdict, error) {
@@ -129,7 +151,7 @@ func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, v
 		if err != nil {
 			return ssarVerdict{}, err
 		}
-		e := ssarVerdict{ok: ok, ver: ver}
+		e := ssarVerdict{ok: ok, ver: ver, at: time.Now()}
 		s.ssar.Put(k, e)
 		return e, nil
 	})
