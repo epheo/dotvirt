@@ -78,8 +78,12 @@ jobs:
       # Emulation for the catalog image's arm64 cache-build RUN.
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         if: env.REL_SKIP != 'true'
+        with:
+          image: ${{ env.BINFMT_IMAGE }}
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         if: env.REL_SKIP != 'true'
+        with:
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
       - name: Cut release (build + push + digest-pin)
         if: env.REL_SKIP != 'true'
         env:

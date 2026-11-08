@@ -135,6 +135,11 @@ jobs:
         run: |
           grep -q "^FROM quay.io/operator-framework/opm:$OPM_VERSION@sha256:" operator/catalog.Dockerfile \
             || { echo "::error::operator/catalog.Dockerfile must pin opm:$OPM_VERSION (hack/versions.env) by digest"; exit 1; }
+      - name: Scorecard config pins SCORECARD_TEST_IMAGE
+        # bundle-test preloads exactly that image; any other ref would be pulled mid-test.
+        run: |
+          other="$(grep -rh 'image: ' operator/config/scorecard/patches | grep -vF "image: $SCORECARD_TEST_IMAGE" || true)"
+          [ -z "$other" ] || { echo "::error::operator/config/scorecard must use $SCORECARD_TEST_IMAGE (hack/versions.env)"; exit 1; }
       - name: Generated manifests in sync
         run: |
           make -C operator manifests generate
@@ -185,7 +190,9 @@ jobs:
         with:
           # Host network reaches the kind-local registry on 127.0.0.1:5000. use: false
           # keeps the plain `docker build`s below on the daemon, where `docker push` looks.
-          driver-opts: network=host
+          driver-opts: |
+            network=host
+            image=${{ env.BUILDKIT_IMAGE }}
           use: false
       - name: Build the operator image from this tree
         # Reads the layer cache image-build writes on main, so a PR that leaves the
@@ -281,7 +288,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: grep -v '^#' hack/versions.env >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
       - name: Build (no push)
         uses: docker/bake-action@59cb1203cd42bcefd40a1b6d73b589e48c86040e # v7.5.0
         with:
@@ -306,7 +316,10 @@ jobs:
           registry: quay.io
           username: ${{ secrets.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_PASSWORD }}
+      - run: grep -v '^#' hack/versions.env >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
       - run: echo "TAG=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
       - name: Build & push (multi-arch)
         # Push the immutable per-commit SHA tag only, never a moving :latest (a moving tag

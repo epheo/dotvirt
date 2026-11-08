@@ -17,12 +17,13 @@ runs:
     - name: Pull + save preloaded images (cache miss)
       if: steps.images.outputs.cache-hit != 'true'
       shell: bash
+      # Pulled by digest, saved and run by tag: not every docker image store keeps a
+      # digest ref through save and load, and a lost one means a pull on every run.
       run: |
         mkdir -p ~/.cache
-        images=("$KIND_NODE_IMAGE" registry:2
-          "quay.io/operator-framework/scorecard-test:$OPERATOR_SDK_VERSION")
-        for img in "${images[@]}"; do docker pull "$img"; done
-        docker save -o ~/.cache/olm-kind-images.tar "${images[@]}"
+        images=("$KIND_NODE_IMAGE" "$REGISTRY_IMAGE" "$SCORECARD_TEST_IMAGE")
+        for img in "${images[@]}"; do docker pull "$img" && docker tag "$img" "${img%@*}"; done
+        docker save -o ~/.cache/olm-kind-images.tar "${images[@]%@*}"
     - name: Load preloaded images (cache hit)
       if: steps.images.outputs.cache-hit == 'true'
       shell: bash
@@ -36,8 +37,8 @@ runs:
         # CatalogSource never serving — i.e. a Subscription with no InstallPlan. Raise
         # the ceiling before the node starts. -w is runtime-only: fine on a throwaway VM.
         sudo sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576
-        docker run -d --restart=always -p 127.0.0.1:5000:5000 --name kind-registry registry:2
-        kind create cluster --image "$KIND_NODE_IMAGE" --wait 5m
+        docker run -d --restart=always -p 127.0.0.1:5000:5000 --name kind-registry "${REGISTRY_IMAGE%@*}"
+        kind create cluster --image "${KIND_NODE_IMAGE%@*}" --wait 5m
         # containerd 2 dropped registry.mirrors; kind node images ship config_path
         # pointing at certs.d, so the alias is a hosts.toml per node.
         for node in $(kind get nodes); do
@@ -47,8 +48,13 @@ runs:
         done
         docker network connect kind kind-registry
         # Scorecard's test pods pull this with IfNotPresent semantics — loading it into
-        # the node means they never hit the network.
-        kind load docker-image "quay.io/operator-framework/scorecard-test:$OPERATOR_SDK_VERSION"
+        # the node means they never hit the network. They name it by digest, so each
+        # node also gets that name for the loaded image.
+        scorecard="${SCORECARD_TEST_IMAGE%@*}"
+        kind load docker-image "$scorecard"
+        for node in $(kind get nodes); do
+          docker exec "$node" ctr -n k8s.io images tag --force "$scorecard" "${scorecard%:*}@${SCORECARD_TEST_IMAGE#*@}"
+        done
     - name: Install OLM
       shell: bash
       # Pin the OLM version: unpinned pulls latest-of-the-day, whose images
