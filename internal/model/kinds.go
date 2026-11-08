@@ -6,8 +6,9 @@ import "strings"
 // declare, the draft resource each backs, and what the Changes pane calls a
 // change to it. Draft labels, API gates, watches, renderers, adoption and the
 // git index all derive their view from this table, so a kind is added here and
-// nowhere else. The operator's AppProject whitelists mirror it by hand: they
-// live across the module boundary and ship in the same release.
+// nowhere else. Which kinds a tenant repo may hold is pkg/tenancy's TenantKinds,
+// shared with the operator's tenant AppProject; the platform AppProject's
+// whitelist mirrors this table by hand across the module boundary.
 
 // ClusterScopeNS stands in for the empty namespace of a cluster-scoped object
 // wherever an identity is ns/name-shaped: draft keys and the object routes.

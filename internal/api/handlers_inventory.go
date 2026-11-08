@@ -31,7 +31,8 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	if err != nil {
 		return model.Inventory{}, err
 	}
-	projects := s.resolver.Resolve(s.state.Namespaces(), visible)
+	all := s.state.Namespaces()
+	projects := s.resolver.Resolve(all, visible)
 
 	// Live state + topology come from the SA-owned snapshot: the hot path reads
 	// in-memory state, never the cluster, however many subscribers a broadcast
@@ -42,6 +43,8 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		Branch:   s.cfg.BaseBranch,
 		Repos:    s.repos,
 		Live:     s.state.Live(),
+		Visible:  visible,
+		Owners:   s.resolver.Owners(all),
 	}
 	// Drift comes from the SA-owned Application snapshot (lock-free, watch-fed).
 	// Three states the inventory must NOT conflate: Argo off (s.drift nil: no

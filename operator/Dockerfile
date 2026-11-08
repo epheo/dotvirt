@@ -1,4 +1,5 @@
-# Build from the REPO ROOT: the operator's go.mod resolves ../pkg/forge from the tree.
+# Build from the REPO ROOT: the operator's go.mod resolves ../pkg/forge and
+# ../pkg/tenancy from the tree.
 #   docker build -f operator/Dockerfile -t quay.io/epheo/dotvirt-operator:<tag> .
 # CGO is disabled, so the manager cross-compiles for $TARGETARCH on the native build host
 # (no QEMU); buildx sets TARGETOS/TARGETARCH per target platform.
@@ -8,10 +9,12 @@ ENV GOTOOLCHAIN=auto CGO_ENABLED=0 GOFLAGS="-buildvcs=false -mod=readonly" \
 WORKDIR /src/operator
 COPY operator/go.mod operator/go.sum ./
 COPY pkg/forge/go.mod /src/pkg/forge/
+COPY pkg/tenancy/go.mod /src/pkg/tenancy/
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 # Declared after the download so every arch shares that layer.
 ARG TARGETOS TARGETARCH
 COPY pkg/forge /src/pkg/forge
+COPY pkg/tenancy /src/pkg/tenancy
 COPY operator/api api
 COPY operator/cmd cmd
 COPY operator/internal internal

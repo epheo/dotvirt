@@ -149,9 +149,9 @@ func fileAccess(proj project.ProjectInfo, ch fileChange, want func(after, before
 	if git.InTemplatesDir(ch.path) {
 		return libraryAccess(proj, ch, before, after, want)
 	}
-	for _, o := range after {
-		if !o.kind.ClusterScoped && o.written.Namespace == "" {
-			return nil, fmt.Errorf("%w: %s %s must set metadata.namespace: Argo would place it in its Application's namespace", model.ErrInvalid, o.ref.Kind, o.ref.Name)
+	if !ch.remove {
+		if err := requirePlacement(proj, ch.path, ch.after); err != nil {
+			return nil, err
 		}
 	}
 	if want != nil {
