@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,16 +22,44 @@ import (
 	"github.com/epheo/dotvirt/internal/ttlcache"
 )
 
-// visibleSet is a token's visible-namespace set stamped with the RBAC version it was
-// derived at; the read is valid only while that version still matches the bus and
-// the entry is younger than its maxAge.
+// visibleSet is a token's visible namespaces and what they were reviewed at,
+// so a grant move re-asks only what it can change: a cluster-wide move, or
+// the age of the last sweep, sweeps every candidate again; a move in one
+// namespace re-asks that namespace; a new project namespace is asked alone.
+// It keeps one verdict per visible namespace, never one per candidate: what
+// moved since comes from the bus (MovedSince).
 type visibleSet struct {
-	ns        map[string]bool
-	ver       uint64
-	unsettled bool // its review began right after a grant move (see unsettled)
+	ns    map[string]bool // never mutated once cached
+	cands *candidates     // the project namespaces ns was reviewed over
+	wide  bool            // may list VMs in every namespace: every candidate is visible
+	names bool            // wide, and may list namespaces: every namespace is (AllNamespaces)
+	lv    visLevels       // what the set was reconciled at
+
+	// swept is when the last sweep began, and sweptUnsettled whether right
+	// after a cluster-wide grant move: a verdict reviewed since ages from it
+	// all the same. unsettled is when each namespace reviewed right after a
+	// move in it was, which serves the short TTL from then (see unsettled).
+	swept          time.Time
+	sweptUnsettled bool
+	unsettled      map[string]time.Time
 }
 
-// ssarVerdict is one (token, question) SSAR verdict, stamped the same way.
+// visLevels are the bus levels a visible set depends on: cluster-wide grant
+// moves, the keyed grant sequence (which namespaces moved comes from it), and
+// the project namespaces. Each is read before what it covers, so a set
+// stamped with them never misses a move they count.
+type visLevels struct{ cluster, seq, ns uint64 }
+
+func (s *Server) visLevels() visLevels {
+	return visLevels{
+		cluster: s.bus.BroadVersion(eventbus.RBACChanged),
+		seq:     s.bus.KeySeq(eventbus.RBACChanged),
+		ns:      s.bus.Version(eventbus.NamespaceChanged),
+	}
+}
+
+// ssarVerdict is one (token, question) SSAR verdict, stamped with the grant
+// version of the question's namespace (grantVersion).
 type ssarVerdict struct {
 	ok        bool
 	ver       uint64
@@ -57,12 +87,13 @@ func (s *Server) authTTL() time.Duration {
 // catches up on its own, and the review may land on a lagging one.
 const grantSettle = 5 * time.Second
 
-// unsettled reports whether a review beginning at start is within grantSettle
-// of the last grant move a watch reported. Its answer serves unwatchedTTL
-// only: a stale verdict from a lagging apiserver, stamped with the new RBAC
-// version, must not hold for the long TTL.
-func (s *Server) unsettled(start time.Time) bool {
-	return s.state != nil && start.Sub(s.state.LastGrantMove()) < grantSettle
+// unsettled reports whether a review in ns beginning at start is within
+// grantSettle of the last grant move it can read: a cluster-wide one, or one
+// in ns. Its answer serves unwatchedTTL only: a stale verdict from a lagging
+// apiserver, stamped with the new grant version, must not hold for the long
+// TTL.
+func (s *Server) unsettled(start time.Time, ns string) bool {
+	return s.state != nil && start.Sub(s.state.LastGrantMoveFor(ns)) < grantSettle
 }
 
 // maxAge is how long an entry serves.
@@ -73,14 +104,16 @@ func (s *Server) maxAge(unsettled bool) time.Duration {
 	return s.authTTL()
 }
 
-// rbacVersion is the change-version a token's derived authorization depends on: a
-// watched grant move OR a namespace add/remove/relabel can change what it may see.
-// It is one version for every token, so one tenant's grant move invalidates all of
-// their entries: a visibility probe reviews every project namespace, so a
-// per-namespace version would not narrow it, while one keyed by the moved
-// bindings' subjects would.
-func (s *Server) rbacVersion() uint64 {
-	return s.bus.Version(eventbus.RBACChanged, eventbus.NamespaceChanged)
+// grantVersion is the change-version a review in ns depends on. The
+// apiserver weighs a request in a namespace by the cluster-wide grants and
+// the RoleBindings in that namespace, and a request in none by the
+// cluster-wide grants alone, so a move in one namespace leaves every other
+// namespace's verdicts standing. A Namespace object is asked in itself (ask).
+func (s *Server) grantVersion(ns string) uint64 {
+	if ns == "" {
+		return s.bus.BroadVersion(eventbus.RBACChanged)
+	}
+	return s.bus.KeyVersion(eventbus.RBACChanged, ns)
 }
 
 // This file is every handler's shared preamble: who is calling (identity ->
@@ -117,7 +150,7 @@ func (s *Server) projectsFor(ctx context.Context, id auth.Identity, c *cluster.C
 // caller's deadline ends while others still wait on it.
 const reviewTimeout = 15 * time.Second
 
-// review runs fill once per key and RBAC version, however many frame builds
+// review runs fill once per key and version, however many frame builds
 // and pulls of one token miss at once (ttlcache.Do): each caller leaves on its
 // own deadline, and the review stops once none waits. A caller with a newer
 // version never joins an older review.
@@ -130,43 +163,187 @@ func review[V any](ctx context.Context, cache *ttlcache.Cache[V], key string, ve
 }
 
 // visibleFor returns the set of namespaces id's token may read VMs in, cached by
-// token for authTTL. The snapshot's project namespaces are the candidates
-// VisibleNamespaces probes when the token lacks cluster-wide VM read. A failed
-// probe is never cached: the next read asks again.
+// token. A token that may list VMs in every namespace sees every candidate;
+// one that may also list namespaces sees every namespace's name, read off the
+// SA's own watch (AllNamespaces). Any other token's candidates, the snapshot's
+// project namespaces, are reviewed one by one. A failed review is never
+// cached: the next read asks again.
 func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Client) (map[string]bool, error) {
-	ver := s.rbacVersion()
 	key := restfactory.TokenKey(id.Token)
-	if e, age, ok := s.visible.GetAge(key); ok && e.ver == ver && age < s.maxAge(e.unsettled) {
-		return e.ns, nil
+	lv := s.visLevels()
+	if e, ok := s.visible.Get(key); ok && e.lv == lv && s.fresh(e, time.Now()) {
+		return s.visibleNames(e), nil
 	}
-	e, err := review(ctx, s.visible, key, ver, func(ctx context.Context) (visibleSet, error) {
-		start := time.Now()
-		names, err := c.VisibleNamespaces(ctx, namespaceNames(s.state.Namespaces()))
+	e, err := review(ctx, s.visible, key, lv.cluster+lv.seq+lv.ns, func(ctx context.Context) (visibleSet, error) {
+		prev, had := s.visible.Get(key)
+		e, err := s.reconcile(ctx, c, prev, had, lv)
 		if err != nil {
 			return visibleSet{}, err
 		}
-		e := visibleSet{ns: make(map[string]bool, len(names)), ver: ver, unsettled: s.unsettled(start)}
-		for _, n := range names {
-			e.ns[n] = true
-		}
-		s.visible.PutAt(key, e, start)
+		s.visible.Put(key, e)
 		return e, nil
 	})
 	if err != nil {
 		return nil, s.reviewFailed(ctx, id, err)
 	}
-	return e.ns, nil
+	return s.visibleNames(e), nil
+}
+
+func (s *Server) visibleNames(e visibleSet) map[string]bool {
+	if e.names {
+		return s.state.AllNamespaces()
+	}
+	return e.ns
+}
+
+// fresh reports whether every verdict e holds may still serve at now.
+func (s *Server) fresh(e visibleSet, now time.Time) bool {
+	if now.Sub(e.swept) >= s.maxAge(e.sweptUnsettled) {
+		return false
+	}
+	for _, at := range e.unsettled {
+		if now.Sub(at) >= unwatchedTTL {
+			return false
+		}
+	}
+	return true
+}
+
+// reconcile brings prev up to lv: a sweep when there is none, a cluster-wide
+// grant moved, or the sweep aged out; otherwise the namespaces whose grants
+// moved since prev, the project namespaces new since prev, and those whose
+// short TTL ran out are reviewed again, and the ones no longer projects
+// dropped.
+func (s *Server) reconcile(ctx context.Context, c *cluster.Client, prev visibleSet, had bool, lv visLevels) (visibleSet, error) {
+	cands := s.candidates(lv.ns)
+	now := time.Now()
+	if !had || prev.cands == nil || prev.lv.cluster != lv.cluster || now.Sub(prev.swept) >= s.maxAge(prev.sweptUnsettled) {
+		return s.sweep(ctx, c, cands, lv)
+	}
+	next := prev
+	next.lv, next.cands = lv, cands
+	if prev.wide {
+		next.ns = cands.names
+		return next, nil
+	}
+	due := map[string]bool{}
+	for _, ns := range s.bus.MovedSince(eventbus.RBACChanged, prev.lv.seq, cands.list) {
+		due[ns] = true
+	}
+	if cands != prev.cands {
+		for _, ns := range cands.list {
+			if !prev.cands.names[ns] {
+				due[ns] = true
+			}
+		}
+	}
+	for ns, at := range prev.unsettled {
+		if now.Sub(at) >= unwatchedTTL && cands.names[ns] {
+			due[ns] = true
+		}
+	}
+	if len(due) == 0 && cands == prev.cands {
+		return next, nil
+	}
+	start := time.Now()
+	allowed, err := c.CanIn(ctx, "list", "kubevirt.io", "virtualmachines", slices.Sorted(maps.Keys(due)))
+	if err != nil {
+		return visibleSet{}, err
+	}
+	next.ns = make(map[string]bool, len(prev.ns)+len(allowed))
+	for ns := range prev.ns {
+		if cands.names[ns] && !due[ns] {
+			next.ns[ns] = true
+		}
+	}
+	for _, ns := range allowed {
+		next.ns[ns] = true
+	}
+	next.unsettled = make(map[string]time.Time, len(prev.unsettled))
+	for ns, at := range prev.unsettled {
+		if cands.names[ns] && !due[ns] {
+			next.unsettled[ns] = at
+		}
+	}
+	for ns := range due {
+		if s.unsettled(start, ns) {
+			next.unsettled[ns] = start
+		}
+	}
+	return next, nil
+}
+
+// sweep reviews the token's visibility from scratch: whether it may list VMs
+// in every namespace (and namespaces too), else each candidate. The cluster-
+// wide review goes first, so a token holding it costs no per-namespace one.
+func (s *Server) sweep(ctx context.Context, c *cluster.Client, cands *candidates, lv visLevels) (visibleSet, error) {
+	e := visibleSet{cands: cands, lv: lv, swept: time.Now()}
+	wide, err := c.Can(ctx, "list", "kubevirt.io", "virtualmachines", "")
+	if err != nil {
+		return visibleSet{}, err
+	}
+	if wide {
+		e.wide, e.ns = true, cands.names
+		if e.names, err = c.Can(ctx, "list", "", "namespaces", ""); err != nil {
+			return visibleSet{}, err
+		}
+	} else {
+		allowed, err := c.CanIn(ctx, "list", "kubevirt.io", "virtualmachines", cands.list)
+		if err != nil {
+			return visibleSet{}, err
+		}
+		e.ns = make(map[string]bool, len(allowed))
+		for _, ns := range allowed {
+			e.ns[ns] = true
+		}
+	}
+	if e.sweptUnsettled = s.unsettled(e.swept, ""); !e.wide && !e.sweptUnsettled {
+		for _, ns := range cands.list {
+			if s.unsettled(e.swept, ns) {
+				if e.unsettled == nil {
+					e.unsettled = map[string]time.Time{}
+				}
+				e.unsettled[ns] = e.swept
+			}
+		}
+	}
+	return e, nil
+}
+
+// candidates is the project namespaces visibility is reviewed over, one value
+// shared by every token's set until the namespaces move.
+type candidates struct {
+	ver   uint64
+	list  []string
+	names map[string]bool // never mutated once built
+}
+
+// candidates is the snapshot's project namespaces at ver, a
+// Version(NamespaceChanged) reading taken before it.
+func (s *Server) candidates(ver uint64) *candidates {
+	if c := s.cands.Load(); c != nil && c.ver == ver {
+		return c
+	}
+	nss := s.state.Namespaces()
+	c := &candidates{ver: ver, list: make([]string, 0, len(nss)), names: make(map[string]bool, len(nss))}
+	for _, ns := range nss {
+		c.list = append(c.list, ns.Name)
+		c.names[ns.Name] = true
+	}
+	s.cands.Store(c)
+	return c
 }
 
 // can answers one question under id's token, behind a per-(token, question)
-// cache stamped with rbacVersion, so a signal read on a polled or broadcast
-// path does not post an SSAR per request. A watched grant or namespace move
-// invalidates lazily via the stamp; authTTL backstops what no watch observes
-// (see RunTTLBackstop). Only a verdict is cached: a failed review is returned,
-// so a blip can never pin a denial. A gate answers the error with
-// s.reviewFailed; a UI signal or a filter reads it as no.
+// cache stamped with the grant version of the question's namespace, so a
+// signal read on a polled or broadcast path does not post an SSAR per
+// request, and a grant move re-asks only the questions it can change. A
+// watched grant move invalidates lazily via the stamp; authTTL backstops what
+// no watch observes (see RunTTLBackstop). Only a verdict is cached: a failed
+// review is returned, so a blip can never pin a denial. A gate answers the
+// error with s.reviewFailed; a UI signal or a filter reads it as no.
 func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, q question) (bool, error) {
-	ver := s.rbacVersion()
+	ver := s.grantVersion(q.Namespace)
 	k := strings.Join([]string{restfactory.TokenKey(id.Token), q.Verb, q.Group, q.Resource, q.Subresource, q.Namespace, q.Name}, "\x00")
 	if e, age, ok := s.ssar.GetAge(k); ok && e.ver == ver && age < s.maxAge(e.unsettled) {
 		return e.ok, nil
@@ -179,7 +356,7 @@ func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, q
 		if err != nil {
 			return ssarVerdict{}, err
 		}
-		e := ssarVerdict{ok: ok, ver: ver, unsettled: s.unsettled(start)}
+		e := ssarVerdict{ok: ok, ver: ver, unsettled: s.unsettled(start, q.Namespace)}
 		s.ssar.PutAt(k, e, start)
 		return e, nil
 	})
@@ -277,14 +454,6 @@ func (s *Server) canReadPlatform(ctx context.Context, id auth.Identity, c *clust
 		return false, nil
 	}
 	return s.anyAllowed(ctx, id, c, platformReaders())
-}
-
-func namespaceNames(nss []project.Namespace) []string {
-	out := make([]string, 0, len(nss))
-	for _, ns := range nss {
-		out = append(out, ns.Name)
-	}
-	return out
 }
 
 // scope is the per-request context every draft/VM handler resolves up front: the

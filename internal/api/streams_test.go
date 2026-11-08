@@ -49,7 +49,7 @@ func TestTTLBackstopBound(t *testing.T) {
 // the next long tick.
 func TestTTLBackstopShortWhileReviewsSettle(t *testing.T) {
 	bus := eventbus.New()
-	st, _ := watchedState(t, bus) // its initial lists are grant moves
+	st, _, _ := watchedState(t, bus) // its initial lists are grant moves
 	s := NewServer(Deps{State: st, Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}})
 	if s.authTTL() != visibleTTL {
 		t.Fatal("every watch runs, yet entries do not serve the long TTL")
@@ -108,12 +108,12 @@ func TestTTLBackstopWakesOnlyOpenStreams(t *testing.T) {
 	}()
 	<-entered
 
-	rbac := s.rbacVersion()
+	lv := s.visLevels()
 	s.ttlBackstop()
 	if v := bus.Version(eventbus.TTLBackstop); v != 1 {
 		t.Fatalf("published %d times with a stream open, want 1", v)
 	}
-	if s.rbacVersion() != rbac {
+	if s.visLevels() != lv {
 		t.Fatal("the backstop invalidated the RBAC-stamped caches")
 	}
 

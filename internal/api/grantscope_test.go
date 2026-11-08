@@ -1,0 +1,317 @@
+package api
+
+import (
+	"context"
+	"fmt"
+	"maps"
+	"slices"
+	"sync/atomic"
+	"testing"
+
+	authzv1 "k8s.io/api/authorization/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/changeset"
+	"github.com/epheo/dotvirt/internal/cluster"
+	"github.com/epheo/dotvirt/internal/eventbus"
+)
+
+// grantRig is a server over a snapshot whose RBAC watches run on a fake
+// clientset, so a binding written there reaches the caches the way a real
+// grant move does: through the signal watch and the bus.
+type grantRig struct {
+	t    *testing.T
+	s    *Server
+	bus  *eventbus.Bus
+	kube *fake.Clientset
+}
+
+func newGrantRig(t *testing.T, projects []string, objs ...runtime.Object) *grantRig {
+	t.Helper()
+	for _, p := range projects {
+		objs = append(objs, projectNS(p))
+	}
+	bus := eventbus.New()
+	st, kube, _ := watchedState(t, bus, objs...)
+	return &grantRig{t: t, s: NewServer(Deps{State: st, Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}}), bus: bus, kube: kube}
+}
+
+func userBinding(ns, name, user string) *rbacv1.RoleBinding {
+	return &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "edit"},
+		Subjects:   []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: user}},
+	}
+}
+
+// bind writes a RoleBinding in ns, or a ClusterRoleBinding when ns is "",
+// and waits for its watch to publish it.
+func (g *grantRig) bind(ns, name string) {
+	g.t.Helper()
+	ctx := context.Background()
+	seq, broad := g.bus.KeySeq(eventbus.RBACChanged), g.bus.BroadVersion(eventbus.RBACChanged)
+	var err error
+	if ns == "" {
+		_, err = g.kube.RbacV1().ClusterRoleBindings().Create(ctx, &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
+			Subjects:   []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "carol"}},
+		}, metav1.CreateOptions{})
+	} else {
+		_, err = g.kube.RbacV1().RoleBindings(ns).Create(ctx, userBinding(ns, name, "carol"), metav1.CreateOptions{})
+	}
+	if err != nil {
+		g.t.Fatal(err)
+	}
+	waitUntil(g.t, "the binding's publish", func() bool {
+		return g.bus.KeySeq(eventbus.RBACChanged) != seq || g.bus.BroadVersion(eventbus.RBACChanged) != broad
+	})
+}
+
+// vmUpdate is the per-namespace question a frame asks of each namespace.
+func vmUpdate(ns string) question {
+	return question{Verb: verbUpdate, Group: "kubevirt.io", Resource: "virtualmachines", Namespace: ns}
+}
+
+func (g *grantRig) ask(tok string, a *asking, q question) bool {
+	g.t.Helper()
+	ok, err := g.s.can(context.Background(), auth.Identity{Token: tok, Username: tok}, a.c, q)
+	if err != nil {
+		g.t.Fatalf("can(%s): %v", tok, err)
+	}
+	return ok
+}
+
+// A RoleBinding moving in one namespace re-asks, for every token, only the
+// questions about that namespace and only its visibility; a
+// ClusterRoleBinding moving re-asks everything.
+func TestGrantMoveReasksOnlyItsNamespace(t *testing.T) {
+	g := newGrantRig(t, []string{"p0", "p1", "p2"})
+	tokens := map[string]*asking{}
+	for i := range 20 {
+		tokens[fmt.Sprint("tok-", i)] = newAsking(readsVMsIn("p0", "p1"))
+	}
+	read := func() {
+		for tok, a := range tokens {
+			visibleOf(t, g.s, tok, a.c)
+			g.ask(tok, a, vmUpdate("p0"))
+			g.ask(tok, a, vmUpdate("p1"))
+		}
+	}
+	read()
+	for _, a := range tokens {
+		a.take()
+	}
+
+	g.bind("p1", "carol-edit")
+	read()
+	for tok, a := range tokens {
+		if got := a.take(); !slices.Equal(got, []string{"p1", "p1"}) {
+			t.Fatalf("%s after a move in p1 asked %q, want p1's visibility and p1's question", tok, got)
+		}
+	}
+
+	g.bind("", "carol-view")
+	read()
+	for tok, a := range tokens {
+		if got := a.take(); !slices.Equal(got, []string{"", "p0", "p0", "p1", "p1", "p2"}) {
+			t.Fatalf("%s after a cluster-wide move asked %q, want everything again", tok, got)
+		}
+	}
+}
+
+// A revocation outside every project namespace still invalidates the
+// verdict cached there: a platform kind's create in an operator namespace is
+// asked in that namespace, and its RoleBinding is watched like any other.
+func TestRevokeOutsideAProjectInvalidates(t *testing.T) {
+	const ns = "openshift-kube-descheduler-operator"
+	g := newGrantRig(t, []string{"proj"}, userBinding(ns, "alice-desched", "alice"))
+	var granted atomic.Bool
+	granted.Store(true)
+	alice := newAsking(func(a *authzv1.ResourceAttributes) bool {
+		return granted.Load() && a.Namespace == ns && a.Resource == ssarDescheduler.resource
+	})
+	q := refQ(verbCreate, ssarDescheduler, ns)
+	if !g.ask("tok-alice", alice, q) {
+		t.Fatal("the grant reads denied")
+	}
+	if g.ask("tok-alice", alice, q); len(alice.take()) != 1 {
+		t.Fatal("the verdict was not cached")
+	}
+
+	granted.Store(false)
+	if err := g.kube.RbacV1().RoleBindings(ns).Delete(context.Background(), "alice-desched", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the revocation to reach the cached verdict", func() bool { return !g.ask("tok-alice", alice, q) })
+}
+
+// A new project namespace is the only one a visible set reviews, and one that
+// stops being a project leaves the set with no review at all.
+func TestNamespaceMovesAreDeltas(t *testing.T) {
+	g := newGrantRig(t, []string{"a", "b"})
+	tenant := newAsking(readsVMsIn("a", "b", "c"))
+	if got := visibleOf(t, g.s, "tok", tenant.c); !maps.Equal(got, map[string]bool{"a": true, "b": true}) {
+		t.Fatalf("visible = %v", got)
+	}
+	tenant.take()
+
+	ctx := context.Background()
+	if _, err := g.kube.CoreV1().Namespaces().Create(ctx, projectNS("c"), metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "c to become a candidate", func() bool { return len(g.s.state.Namespaces()) == 3 })
+	if got := visibleOf(t, g.s, "tok", tenant.c); !maps.Equal(got, map[string]bool{"a": true, "b": true, "c": true}) {
+		t.Fatalf("after c was added: visible = %v", got)
+	}
+	if got := tenant.take(); !slices.Equal(got, []string{"c"}) {
+		t.Fatalf("adding c asked %q, want c alone", got)
+	}
+
+	if err := g.kube.CoreV1().Namespaces().Delete(ctx, "a", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "a to leave the candidates", func() bool { return len(g.s.state.Namespaces()) == 2 })
+	if got := visibleOf(t, g.s, "tok", tenant.c); !maps.Equal(got, map[string]bool{"b": true, "c": true}) {
+		t.Fatalf("after a was removed: visible = %v", got)
+	}
+	if got := tenant.take(); len(got) != 0 {
+		t.Fatalf("removing a asked %q, want nothing", got)
+	}
+}
+
+// A partial re-review that fails is never cached, and never leaves the
+// failed namespace's old verdict serving: the read fails until the review
+// answers, then reads the new grant.
+func TestFailedPartialReviewIsNotCached(t *testing.T) {
+	g := newGrantRig(t, []string{"x", "y", "z"})
+	tenant := newAsking(readsVMsIn("x", "y"))
+	visibleOf(t, g.s, "tok", tenant.c)
+
+	tenant.set(readsVMsIn("x"), func(a *authzv1.ResourceAttributes) bool { return a.Namespace == "y" })
+	g.bus.PublishKey(eventbus.RBACChanged, "x")
+	g.bus.PublishKey(eventbus.RBACChanged, "y")
+	id := auth.Identity{Token: "tok", Username: "tok"}
+	for range 2 {
+		if got, err := g.s.visibleFor(context.Background(), id, tenant.c); err == nil {
+			t.Fatalf("a failed review of y answered %v", got)
+		}
+	}
+	tenant.set(readsVMsIn("x"), nil)
+	tenant.take()
+	if got := visibleOf(t, g.s, "tok", tenant.c); !maps.Equal(got, map[string]bool{"x": true}) {
+		t.Fatalf("after recovery: visible = %v, want x alone (y's old verdict must not survive)", got)
+	}
+	if got := tenant.take(); !slices.Contains(got, "y") {
+		t.Fatalf("recovery asked %q, want y asked again", got)
+	}
+}
+
+// The request cost of one grant move at N tokens over M project namespaces:
+// a RoleBinding in one project namespace costs a review per token, one
+// outside the projects none, and a ClusterRoleBinding a sweep per token, one
+// cluster-wide review and one per namespace. A sweep per token is what a
+// RoleBinding in a project namespace cost before (a namespace list and a
+// review per namespace), each repeated once its unsettled answers expired.
+func TestReviewsPerGrantMove(t *testing.T) {
+	const n, m = 50, 20
+	projects := make([]string, m)
+	for i := range projects {
+		projects[i] = fmt.Sprintf("p%02d", i)
+	}
+	g := newGrantRig(t, projects)
+	tokens := make([]*asking, n)
+	for i := range tokens {
+		tokens[i] = newAsking(readsVMsIn(projects[i%m]))
+	}
+	cost := func() int {
+		total := 0
+		for i, a := range tokens {
+			visibleOf(t, g.s, fmt.Sprint("tok-", i), a.c)
+			total += len(a.take())
+		}
+		return total
+	}
+	if got := cost(); got != n*(1+m) {
+		t.Fatalf("first reads cost %d reviews, want %d", got, n*(1+m))
+	}
+	g.bind("p03", "rb")
+	keyed := cost()
+	g.bind("ci-builds", "rb")
+	outside := cost()
+	g.bind("", "crb")
+	wide := cost()
+	t.Logf("reviews per grant move at %d tokens x %d namespaces: RoleBinding in a project %d, outside %d, ClusterRoleBinding %d",
+		n, m, keyed, outside, wide)
+	if keyed != n || outside != 0 || wide != n*(1+m) {
+		t.Fatalf("got %d, %d, %d reviews; want %d, 0, %d", keyed, outside, wide, n, n*(1+m))
+	}
+}
+
+// A dry run's verdict stands while the grants of every namespace it asks in
+// stand: its own, and for a Namespace object the namespace itself, where its
+// update is asked.
+func TestDryRunVerdictFollowsItsNamespaces(t *testing.T) {
+	bus := eventbus.New()
+	s := scopeServer(bus)
+	id := auth.Identity{Token: "tok", Username: "tok"}
+	weighed := 0
+	weigh := func(context.Context, auth.Identity, *cluster.Client, changeset.Access) (bool, error) {
+		weighed++
+		return true, nil
+	}
+	for _, tc := range []struct {
+		name string
+		a    changeset.Access
+	}{
+		{"a VM in x", changeset.Access{Verb: verbDryRun, Group: "kubevirt.io", Resource: "virtualmachines", Namespace: "x", Name: "web", Object: `{"kind":"VirtualMachine"}`}},
+		{"the Namespace x", changeset.Access{Verb: verbDryRun, Resource: "namespaces", Name: "x", Object: `{"kind":"Namespace"}`}},
+	} {
+		weighed = 0
+		step := func(what string, want int) {
+			t.Helper()
+			if _, err := s.dryRun(context.Background(), id, nil, tc.a, weigh); err != nil {
+				t.Fatal(err)
+			}
+			if weighed != want {
+				t.Fatalf("%s, %s: weighed %d times, want %d", tc.name, what, weighed, want)
+			}
+		}
+		step("first", 1)
+		step("cached", 1)
+		bus.PublishKey(eventbus.RBACChanged, "y")
+		step("after a move in y", 1)
+		bus.PublishKey(eventbus.RBACChanged, "x")
+		step("after a move in x", 2)
+		bus.Publish(eventbus.RBACChanged)
+		step("after a cluster-wide move", 3)
+	}
+}
+
+// A question about one Namespace object is asked in that namespace, so a
+// move there re-asks it and a move elsewhere does not.
+func TestNamespaceObjectQuestionFollowsItsNamespace(t *testing.T) {
+	bus := eventbus.New()
+	s := scopeServer(bus)
+	a := newAsking(func(*authzv1.ResourceAttributes) bool { return true })
+	id := auth.Identity{Token: "tok", Username: "tok"}
+	q := question{Verb: verbPatch, Resource: ssarNamespace.resource, Name: "x"}
+	step := func(what string, want ...string) {
+		t.Helper()
+		if ok, err := s.ask(context.Background(), id, a.c, q); !ok || err != nil {
+			t.Fatalf("%s: %v, %v", what, ok, err)
+		}
+		if got := a.take(); !slices.Equal(got, want) {
+			t.Fatalf("%s: asked in %q, want %q", what, got, want)
+		}
+	}
+	step("first", "x")
+	bus.PublishKey(eventbus.RBACChanged, "y")
+	step("after a move in y")
+	bus.PublishKey(eventbus.RBACChanged, "x")
+	step("after a move in x", "x")
+}

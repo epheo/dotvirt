@@ -12,7 +12,6 @@ import (
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
-	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 // declaredDraft serves one platform uplink's file; the embedded interface
@@ -43,7 +42,7 @@ func TestSourceFilesPlatformObject(t *testing.T) {
 	id := auth.Identity{Token: "admin-token", Username: "admin"}
 	// A seeded visible set keeps projectsFor off the cluster; the platform repo
 	// needs no tenant namespace to resolve.
-	s.visible.Put(restfactory.TokenKey(id.Token), visibleSet{ns: map[string]bool{}, ver: s.rbacVersion()})
+	seedVisible(s, id.Token, map[string]bool{})
 	lookup := func(withPlatform bool) string {
 		return s.sourceFiles(context.Background(), id, nil, withPlatform)("NodeNetworkConfigurationPolicy", "", "uplink-1")
 	}
