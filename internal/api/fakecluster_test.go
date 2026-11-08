@@ -58,6 +58,8 @@ type fakeCluster struct {
 	ssarFail func(a *authzv1.ResourceAttributes) int
 	// ssrr answers a SelfSubjectRulesReview; nil grants nothing.
 	ssrr func(token, namespace string) []authzv1.ResourceRule
+	// dryRuns authorizes a dry run no route answers; nil leaves those to 404.
+	dryRuns func(token string, a *authzv1.ResourceAttributes) bool
 }
 
 const (
@@ -203,11 +205,89 @@ func (fc *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	fc.calls = append(fc.calls, key)
 	h := fc.routes[key]
 	fc.mu.Unlock()
+	if h == nil && fc.dryRuns != nil && r.URL.Query().Get("dryRun") == metav1.DryRunAll {
+		fc.dryRun(w, r)
+		return
+	}
+	if name, one := strings.CutPrefix(r.URL.Path, "/api/v1/namespaces/"); h == nil && r.Method == http.MethodGet && one && !strings.Contains(name, "/") {
+		allow := bearer(r) == adminToken
+		if fc.ssar != nil {
+			allow = fc.ssar(bearer(r), &authzv1.ResourceAttributes{Verb: "get", Resource: "namespaces", Namespace: name, Name: name})
+		}
+		if !allow {
+			writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
+			return
+		}
+		for _, ns := range fc.namespaces {
+			if ns.Name == name {
+				ns.TypeMeta = metav1.TypeMeta{Kind: "Namespace", APIVersion: "v1"}
+				writeObj(w, ns)
+				return
+			}
+		}
+	}
 	if h == nil {
 		writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound)
 		return
 	}
 	h(w, r)
+}
+
+// dryRun answers a dry-run create (POST) or replace (PUT) no test routed as
+// the apiserver would: the caller's RBAC first (dryRuns), a binding's
+// escalation rule as bind on its role, then a namespace that does not exist,
+// then a create of an object that does.
+func (fc *fakeCluster) dryRun(w http.ResponseWriter, r *http.Request) {
+	var group string
+	rest, core := strings.CutPrefix(r.URL.Path, "/api/v1/")
+	if !core {
+		parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/apis/"), "/", 3)
+		group, rest = parts[0], parts[2]
+	}
+	seg := strings.Split(rest, "/")
+	attrs := &authzv1.ResourceAttributes{Group: group, Verb: "create"}
+	if seg[0] == "namespaces" && len(seg) >= 3 {
+		attrs.Namespace, seg = seg[1], seg[2:]
+	}
+	attrs.Resource = seg[0]
+	if len(seg) > 1 {
+		attrs.Name = seg[1]
+	}
+	if core && attrs.Resource == "namespaces" {
+		attrs.Namespace = attrs.Name
+	}
+	if r.Method == http.MethodPut {
+		attrs.Verb = "update"
+	}
+	var obj map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&obj)
+	meta, _ := obj["metadata"].(map[string]any)
+	name, _ := meta["name"].(string)
+	allow := fc.dryRuns(bearer(r), attrs)
+	if ref, ok := obj["roleRef"].(map[string]any); ok && allow {
+		role, _ := ref["name"].(string)
+		allow = fc.dryRuns(bearer(r), &authzv1.ResourceAttributes{Verb: "bind", Group: group, Resource: "clusterroles", Namespace: attrs.Namespace, Name: role})
+	}
+	exists := func(ns string) bool {
+		for _, n := range fc.namespaces {
+			if n.Name == ns {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case !allow:
+		writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
+	case attrs.Namespace != "" && !exists(attrs.Namespace):
+		writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound)
+	case attrs.Resource == "namespaces" && r.Method == http.MethodPost && exists(name):
+		writeStatus(w, http.StatusConflict, metav1.StatusReasonAlreadyExists)
+	default:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(obj)
+	}
 }
 
 // coordinator is the git plane a handler test stands up behind the transport.
@@ -355,6 +435,9 @@ type planeDraft struct {
 	templates map[string][]model.Template // by library name
 
 	releaseStaged, releaseResidue []string
+
+	declared map[model.ObjectRef]string // what DeclaredFiles answers
+	staged   bool                       // a call staged something: Get shows a draft
 }
 
 var stagedView = model.DraftView{Base: "main", Count: 1}
@@ -364,6 +447,7 @@ func (d *planeDraft) record(call string, raw []byte) {
 	defer d.mu.Unlock()
 	d.calls = append(d.calls, call)
 	d.raw = raw
+	d.staged = true
 }
 
 func (d *planeDraft) only(t *testing.T, want string) {
@@ -422,17 +506,41 @@ func (d *planeDraft) StageUpdateTemplate(_ auth.Identity, commit project.Project
 	return stagedView, nil
 }
 
-func (d *planeDraft) StageCreateNamespace(_ auth.Identity, commit, join project.ProjectInfo, spec json.RawMessage, _ changeset.LiveNamespaces) (model.DraftView, error) {
+// The tenancy stagers read each namespace through live first, as the
+// coordinator does, so the claim gate the handler binds there runs.
+
+func (d *planeDraft) StageCreateNamespace(_ auth.Identity, commit, join project.ProjectInfo, spec json.RawMessage, live changeset.LiveNamespaces) (model.DraftView, error) {
+	var p struct{ Name string }
+	_ = json.Unmarshal(spec, &p)
+	if _, err := live(p.Name); err != nil {
+		return model.DraftView{}, err
+	}
 	d.record("StageCreateNamespace "+commit.Name+","+join.Name, spec)
 	return stagedView, nil
 }
 
-func (d *planeDraft) StageCreateProject(_ auth.Identity, commit project.ProjectInfo, spec json.RawMessage, _ changeset.LiveNamespaces) (model.DraftView, error) {
+func (d *planeDraft) StageCreateProject(_ auth.Identity, commit project.ProjectInfo, spec json.RawMessage, live changeset.LiveNamespaces, exists changeset.ProjectExists) (model.DraftView, error) {
+	var p struct{ Name, Namespace string }
+	_ = json.Unmarshal(spec, &p)
+	if p.Namespace == "" {
+		p.Namespace = p.Name
+	}
+	if _, err := live(p.Namespace); err != nil {
+		return model.DraftView{}, err
+	}
+	if exists(p.Name) {
+		return model.DraftView{}, fmt.Errorf("%w: that project already exists", model.ErrConflict)
+	}
 	d.record("StageCreateProject "+commit.Name, spec)
 	return stagedView, nil
 }
 
-func (d *planeDraft) AdoptProject(_ auth.Identity, commit, target project.ProjectInfo, owners []string, _ changeset.LiveNamespaces) (model.DraftView, error) {
+func (d *planeDraft) AdoptProject(_ auth.Identity, commit, target project.ProjectInfo, owners []string, live changeset.LiveNamespaces) (model.DraftView, error) {
+	for _, ns := range target.Namespaces {
+		if _, err := live(ns); err != nil {
+			return model.DraftView{}, err
+		}
+	}
 	d.record("AdoptProject "+commit.Name+","+target.Name+" "+strings.Join(owners, "+"), nil)
 	return stagedView, nil
 }
@@ -452,6 +560,49 @@ func (d *planeDraft) StageCreate(_ auth.Identity, p project.ProjectInfo, res dra
 	return stagedView, nil
 }
 
+func (d *planeDraft) DeclaredFiles(project.ProjectInfo) (map[model.ObjectRef]string, error) {
+	return d.declared, nil
+}
+
+// The Needs answer nothing: a test of what the gate asks runs a real
+// coordinator (coordinator_test.go).
+func (d *planeDraft) ProjectNeeds(project.ProjectInfo, json.RawMessage) ([]changeset.Access, error) {
+	return nil, nil
+}
+func (d *planeDraft) NamespaceNeeds(project.ProjectInfo, project.ProjectInfo, json.RawMessage) ([]changeset.Access, error) {
+	return nil, nil
+}
+func (d *planeDraft) AdoptNeeds(project.ProjectInfo, project.ProjectInfo, []string) ([]changeset.Access, error) {
+	return nil, nil
+}
+func (d *planeDraft) ReleaseNeeds(project.ProjectInfo, project.ProjectInfo) ([]changeset.Access, []string, error) {
+	return nil, d.releaseResidue, nil
+}
+func (d *planeDraft) EnableDRSNeeds(project.ProjectInfo, json.RawMessage) ([]changeset.Access, error) {
+	return nil, nil
+}
+func (d *planeDraft) DisableDRSNeeds(project.ProjectInfo) ([]changeset.Access, error) {
+	return nil, nil
+}
+
+// ResyncNeeds is the VM's create carrying its object, as the coordinator
+// states what Argo applying it does.
+func (d *planeDraft) ResyncNeeds(_ project.ProjectInfo, ns, name string) ([]changeset.Access, error) {
+	return []changeset.Access{{Verb: "create", Group: model.KindVM.Group, Resource: model.KindVM.Plural, Namespace: ns, Name: name, Object: "{}"}}, nil
+}
+
+func (d *planeDraft) Discard(auth.Identity, project.ProjectInfo) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.staged = false
+	return nil
+}
+
 func (d *planeDraft) Get(auth.Identity, project.ProjectInfo) (model.DraftView, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.staged {
+		return model.DraftView{Base: "main"}, nil
+	}
 	return stagedView, nil
 }

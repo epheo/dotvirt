@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 
@@ -9,9 +8,9 @@ import (
 )
 
 // The DRS routes are platform-tier: the descheduler rebalances every node, so
-// its config commits to the platform repo, and the mutating routes gate on the
-// caller's authority to create the KubeDescheduler CR - matching the AppProject
-// boundary that lets only the platform app apply it.
+// its config commits to the platform repo. The mutating routes gate on their
+// verb over the KubeDescheduler CR (enable: its create, or its update when
+// DRS is reconfigured); the coordinator checks each file staged.
 
 // handleDRS reports the DRS tier: the platform repo's committed configuration,
 // the caller's staged draft, the live operator state from the SA-watched
@@ -31,8 +30,7 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.cfg.PlatformRepo != "" {
 		ctx := r.Context()
-		view.CanManage, _ = s.can(ctx, id, c, verbCreate, ssarDescheduler, "")
-		view.CanPSI, _ = s.can(ctx, id, c, verbCreate, ssarMachineCfg, "")
+		view.CanManage, view.CanPSI, view.CanDisable = s.drsCaps(ctx, id, c)
 		platform := s.platformProject()
 		if git, err := s.reader.DRSState(platform); err != nil {
 			log.Printf("api: drs: read platform repo: %v", err)
@@ -40,7 +38,7 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 		} else {
 			view.Configured, view.Config, view.PSIConfigured = git.Configured, git.Config, git.PSIConfigured
 		}
-		if view.CanManage {
+		if view.CanManage || view.CanDisable {
 			if d, err := s.draft.DRSDraft(id, platform); err == nil && (d.Config != nil || d.PSI || d.DisableStaged) {
 				view.Draft = &d
 			}
@@ -50,30 +48,16 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDRSEnable stages the DRS (descheduler) file set - operator install +
-// KubeDescheduler CR, optionally the PSI MachineConfig - into the platform
-// draft. The PSI file reboots the worker pool when merged, so it carries its
-// own machineconfigs-create SSAR on top of the kubedeschedulers gate.
+// KubeDescheduler CR, optionally the PSI MachineConfig, which reboots the
+// worker pool when merged - into the platform draft.
 func (s *Server) handleDRSEnable(w http.ResponseWriter, r *http.Request) {
-	raw, p, ok := readBody[struct {
-		InstallPSI bool `json:"installPSI"`
-	}](w, r, false)
+	raw, _, ok := readBody[struct{}](w, r, false)
 	if !ok {
 		return
 	}
-	sc, ok := s.platformScope(w, r, ssarDescheduler)
-	if !ok {
+	sc, ok := s.platformScopeGated(w, r)
+	if !ok || !s.gateAny(w, r, sc, drsSchedulerActions()) {
 		return
-	}
-	if p.InstallPSI {
-		ok, err := s.can(r.Context(), sc.id, sc.cluster, verbCreate, ssarMachineCfg, "")
-		if err != nil {
-			fail(w, s.reviewFailed(r.Context(), sc.id, err))
-			return
-		}
-		if !ok {
-			fail(w, fmt.Errorf("%w: not authorized to create machineconfigs", model.ErrForbidden))
-			return
-		}
 	}
 	view, err := s.draft.StageEnableDRS(sc.id, sc.proj, raw)
 	respond(w, view, err)
@@ -82,8 +66,8 @@ func (s *Server) handleDRSEnable(w http.ResponseWriter, r *http.Request) {
 // handleDRSDisable stages the removal of the KubeDescheduler CR (the operator
 // install and any PSI MachineConfig stay committed).
 func (s *Server) handleDRSDisable(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.platformScope(w, r, ssarDescheduler)
-	if !ok {
+	sc, ok := s.platformScopeGated(w, r)
+	if !ok || !s.gate(w, r, sc, drsDisableAction()) {
 		return
 	}
 	view, err := s.draft.StageDisableDRS(sc.id, sc.proj)
