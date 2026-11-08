@@ -310,8 +310,17 @@ func TestUnavailableIsAState(t *testing.T) {
 		t.Errorf("forbidden alerts err = %v, want ErrUnavailable, never an empty list", err)
 	}
 
-	// Allowed again: the failure was not cached.
+	// A second poll within the negative TTL sends no second fan-out; past it,
+	// the grant shows.
+	_, before := q.seen()
+	if cs, _ := c.ClusterSummary(ctx, tenant, []string{"a", "b"}, "", false); cs.Unavailable != model.MetricsForbidden {
+		t.Errorf("second poll = %+v, want the cached forbidden", cs)
+	}
+	if _, after := q.seen(); len(after["a"]) != len(before["a"]) || len(after["b"]) != len(before["b"]) {
+		t.Errorf("second poll within the negative TTL fanned out again: a %d to %d", len(before["a"]), len(after["a"]))
+	}
 	q.setAllow(func(string, string) bool { return true })
+	c.negTTL = 0
 	if cs, _ := c.ClusterSummary(ctx, tenant, []string{"a", "b"}, "", false); cs.Unavailable != "" || cs.VMs["running"] != 3 {
 		t.Errorf("after the grant, summary = %+v, want data", cs)
 	}
@@ -326,16 +335,40 @@ func TestUnavailableIsAState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before, _ := q.seen()
+	wideBefore, _ := q.seen()
 	if sm, _ := noTenancy.ScopeMetrics(ctx, tenant, []string{"a"}, "", "1h"); sm.Unavailable != model.MetricsUnconfigured {
 		t.Errorf("no tenancy URL: scope = %+v, want unconfigured", sm)
 	}
-	if after, _ := q.seen(); len(after) != len(before) {
+	if wideAfter, _ := q.seen(); len(wideAfter) != len(wideBefore) {
 		t.Error("a tenant with no tenancy URL was sent to the cluster-wide port")
 	}
 	var off *Client
 	if u, _ := off.VMUsage(ctx, Caller{Token: adminTok, Wide: true}, "a", "vm-a"); u.Unavailable != model.MetricsUnconfigured {
 		t.Errorf("metrics off: usage = %+v, want unconfigured", u)
+	}
+}
+
+// No cached result reaches a caller with fewer rights: a wide fill serves only
+// wide callers, and a tenancy fill only the token it ran under, so the
+// tenancy port judges every other caller itself.
+func TestCacheKeepsCallersApart(t *testing.T) {
+	ctx := context.Background()
+	q := newQuerier(t)
+	q.setAllow(func(tok, ns string) bool { return tok == tenantTok })
+	c := q.client()
+	admin, other := Caller{Token: adminTok, Wide: true}, Caller{Token: "tenant-b"}
+
+	if m, _ := c.VMMetrics(ctx, admin, "a", "vm-a", "1h"); m.Unavailable != "" {
+		t.Fatalf("admin VM metrics = %+v", m)
+	}
+	if m, _ := c.VMMetrics(ctx, other, "a", "vm-a", "1h"); m.Unavailable != model.MetricsForbidden {
+		t.Errorf("a wide fill reached a tenancy caller: %+v", m)
+	}
+	if cs, _ := c.ClusterSummary(ctx, tenant, []string{"a", "b"}, "", false); cs.VMs["running"] != 3 {
+		t.Fatalf("tenant summary = %+v", cs)
+	}
+	if cs, _ := c.ClusterSummary(ctx, other, []string{"a", "b"}, "", false); cs.Unavailable != model.MetricsForbidden {
+		t.Errorf("one tenant's fill reached another: %+v", cs)
 	}
 }
 

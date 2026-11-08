@@ -23,19 +23,21 @@ import (
 	"github.com/epheo/dotvirt/internal/ttlcache"
 )
 
-// Result caches are keyed by QUERY PARAMETERS, not the caller's token: the data for
-// a VM (or a scope) is identical for any user authorized to see it, whether one
-// cluster-wide query or a tenancy query per namespace fetched it, and the API
-// handler has already gated access before calling here. So same-scope users and
-// re-mounts share one Thanos fan-out instead of each re-querying, and concurrent
-// misses on one key share one fill. Every input that changes what a caller may
-// see (namespace set, node-read access) is part of the key, and a result with
-// any failed query is never cached: one caller's Forbidden must not become
-// another's zeros. TTLs are short (well under the UI's 30s poll) to stay fresh
-// while absorbing bursts.
+// Result caches are keyed by caller class, then query parameters (Caller.key).
+// A wide caller holds the cluster-wide port's right over every namespace, so
+// wide results are shared among wide callers. Any other caller's results are
+// its own: each tenancy fill runs under that caller's token, so the tenancy
+// port's check, not the API's VM visibility gate, decides what it sees.
+// Every input that changes what a caller may see (namespace set, node-read
+// access) is part of the key too. Concurrent misses on one key share one
+// fill. A whole result serves the TTL, short (well under the UI's 30s poll)
+// to stay fresh while absorbing bursts; a failed or partial one serves
+// negativeTTL, so an outage or a forbidden namespace costs one fan-out per
+// key per negativeTTL, not one per request.
 const (
-	vmTTL      = 15 * time.Second
-	clusterTTL = 20 * time.Second
+	vmTTL       = 15 * time.Second
+	clusterTTL  = 20 * time.Second
+	negativeTTL = 5 * time.Second
 	// viewTimeout bounds one view's whole fan-out: the queries still waiting
 	// past it fail, and the view answers with what it has.
 	viewTimeout = 20 * time.Second
@@ -48,14 +50,21 @@ type Client struct {
 	base      string
 	tenancy   string // "" when no tenancy endpoint is configured
 	http      *http.Client
-	vmMetrics *ttlcache.Cache[model.VMMetrics]
-	vmUsage   *ttlcache.Cache[model.VMUsage]
-	cluster   *ttlcache.Cache[model.ClusterSummary]
-	scope     *ttlcache.Cache[model.VMMetrics]
-	alerts    *ttlcache.Cache[alertRows]
+	negTTL    time.Duration // negativeTTL; a field so tests can expire it
+	vmMetrics *ttlcache.Cache[result[model.VMMetrics]]
+	vmUsage   *ttlcache.Cache[result[model.VMUsage]]
+	cluster   *ttlcache.Cache[result[model.ClusterSummary]]
+	scope     *ttlcache.Cache[result[model.VMMetrics]]
+	alerts    *ttlcache.Cache[result[alertRows]]
 	hosts     *ttlcache.Cache[model.HostLoad]
 	capacity  *ttlcache.Cache[model.HostCapacity]
-	traffic   *ttlcache.Cache[model.NetworkTraffic]
+	traffic   *ttlcache.Cache[result[model.NetworkTraffic]]
+}
+
+// result is one cached view answer and whether it is whole.
+type result[V any] struct {
+	v     V
+	whole bool
 }
 
 // New builds a Client for the cluster-wide query API at baseURL and the
@@ -82,14 +91,15 @@ func New(baseURL, tenancyURL, caPath string, insecure bool) (*Client, error) {
 		base:      strings.TrimRight(baseURL, "/"),
 		tenancy:   strings.TrimRight(tenancyURL, "/"),
 		http:      &http.Client{Timeout: 20 * time.Second, Transport: tr},
-		vmMetrics: ttlcache.New[model.VMMetrics](vmTTL),
-		vmUsage:   ttlcache.New[model.VMUsage](vmTTL),
-		cluster:   ttlcache.New[model.ClusterSummary](clusterTTL),
-		scope:     ttlcache.New[model.VMMetrics](clusterTTL),
-		alerts:    ttlcache.New[alertRows](clusterTTL),
+		negTTL:    negativeTTL,
+		vmMetrics: ttlcache.New[result[model.VMMetrics]](vmTTL),
+		vmUsage:   ttlcache.New[result[model.VMUsage]](vmTTL),
+		cluster:   ttlcache.New[result[model.ClusterSummary]](clusterTTL),
+		scope:     ttlcache.New[result[model.VMMetrics]](clusterTTL),
+		alerts:    ttlcache.New[result[alertRows]](clusterTTL),
 		hosts:     ttlcache.New[model.HostLoad](clusterTTL),
 		capacity:  ttlcache.New[model.HostCapacity](clusterTTL),
-		traffic:   ttlcache.New[model.NetworkTraffic](clusterTTL),
+		traffic:   ttlcache.New[result[model.NetworkTraffic]](clusterTTL),
 	}, nil
 }
 
@@ -103,28 +113,31 @@ func (c *Client) unserved(who Caller) model.MetricsReason {
 }
 
 // cached serves key from cache, else fills it once for every concurrent
-// caller of key under viewTimeout, caching only a whole result.
-func cached[V any](ctx context.Context, cache *ttlcache.Cache[V], key string, fill func(context.Context) (V, bool)) (V, error) {
-	if v, ok := cache.Get(key); ok {
-		return v, nil
+// caller of key under viewTimeout. A result that is not whole serves negTTL.
+func cached[V any](ctx context.Context, cache *ttlcache.Cache[result[V]], negTTL time.Duration, key string, fill func(context.Context) (V, bool)) (V, error) {
+	hit := func() (result[V], bool) {
+		e, age, ok := cache.GetAge(key)
+		return e, ok && (e.whole || age < negTTL)
 	}
-	v, err := cache.Do(ctx, key, func(ctx context.Context) (V, error) {
-		if v, ok := cache.Get(key); ok {
-			return v, nil
+	if e, ok := hit(); ok {
+		return e.v, nil
+	}
+	e, err := cache.Do(ctx, key, func(ctx context.Context) (result[V], error) {
+		if e, ok := hit(); ok {
+			return e, nil
 		}
 		ctx, cancel := context.WithTimeout(ctx, viewTimeout)
 		defer cancel()
 		v, whole := fill(ctx)
-		if whole {
-			cache.Put(key, v)
-		}
-		return v, nil
+		e := result[V]{v: v, whole: whole}
+		cache.Put(key, e)
+		return e, nil
 	})
 	if err != nil {
 		// The fill returns no error: the caller left, or the fill panicked.
-		return v, fmt.Errorf("%w: %v", model.ErrUnavailable, err)
+		return e.v, fmt.Errorf("%w: %v", model.ErrUnavailable, err)
 	}
-	return v, nil
+	return e.v, nil
 }
 
 // vmSelector scopes a VM metric to namespaces (+ a node when drilling into
@@ -152,7 +165,7 @@ func (c *Client) VMUsage(ctx context.Context, who Caller, ns, name string) (mode
 	if gap := c.unserved(who); gap != "" {
 		return model.VMUsage{Updated: time.Now().Unix(), Unavailable: gap}, nil
 	}
-	return cached(ctx, c.vmUsage, ns+"/"+name, func(ctx context.Context) (model.VMUsage, bool) {
+	return cached(ctx, c.vmUsage, c.negTTL, who.key(ns+"/"+name), func(ctx context.Context) (model.VMUsage, bool) {
 		r, at, w := c.read(who.Token), who.in(ns), lastHour()
 		s := fmt.Sprintf("{namespace=%q,name=%q}", ns, name)
 		var cpu, mem, stor sparkResult
@@ -194,10 +207,8 @@ func (c *Client) ClusterSummary(ctx context.Context, who Caller, namespaces []st
 	// Node series carry no namespace label, so the tenancy port answers them
 	// empty: only a wide caller has node totals to read.
 	nodeTotals = nodeTotals && who.Wide
-	// Cache by the scope (sorted namespaces + node + node access), not the
-	// token: any user with this view gets the same aggregate.
 	key := scopeKey(namespaces, node, fmt.Sprintf("nodes=%t", nodeTotals))
-	return cached(ctx, c.cluster, key, func(ctx context.Context) (model.ClusterSummary, bool) {
+	return cached(ctx, c.cluster, c.negTTL, who.key(key), func(ctx context.Context) (model.ClusterSummary, bool) {
 		r, o, w := c.read(who.Token), over{wide: who.Wide, nss: namespaces}, lastHour()
 		// q is one VM query, format's %s the caller's selector.
 		q := func(format string) func([]string) string {
@@ -389,14 +400,13 @@ func unavailableMetrics(rng string, gap model.MetricsReason) model.VMMetrics {
 // ScopeMetrics returns the per-VM top-consumer time-series for a container
 // scope over the given range - the container Monitor's Performance view. Each
 // chart is one topk query; its result series are named namespace/name. Cached
-// by scope (not token), like ClusterSummary: any user authorized for this
-// namespace set gets identical data.
+// like ClusterSummary.
 func (c *Client) ScopeMetrics(ctx context.Context, who Caller, namespaces []string, node, rng string) (model.VMMetrics, error) {
 	rng, spec := resolveRange(rng)
 	if gap := c.unserved(who); gap != "" {
 		return unavailableMetrics(rng, gap), nil
 	}
-	return cached(ctx, c.scope, scopeKey(namespaces, node, rng), func(ctx context.Context) (model.VMMetrics, bool) {
+	return cached(ctx, c.scope, c.negTTL, who.key(scopeKey(namespaces, node, rng)), func(ctx context.Context) (model.VMMetrics, bool) {
 		r, o, w := c.read(who.Token), over{wide: who.Wide, nss: namespaces}, spec.span()
 		charts := scopeChartSpecs(promDur(rateWindow(spec.step)))
 		results := make([][]labeledSeries, len(charts))
@@ -441,7 +451,7 @@ func (c *Client) Alerts(ctx context.Context, who Caller, namespaces []string) ([
 	if len(namespaces) == 0 {
 		return []model.Alert{}, nil
 	}
-	got, err := cached(ctx, c.alerts, scopeKey(namespaces), func(ctx context.Context) (alertRows, bool) {
+	got, err := cached(ctx, c.alerts, c.negTTL, who.key(scopeKey(namespaces)), func(ctx context.Context) (alertRows, bool) {
 		r := c.read(who.Token)
 		vec := r.vectorOver(ctx, over{wide: who.Wide, nss: namespaces}, func(nss []string) string {
 			return fmt.Sprintf(`ALERTS{alertstate="firing",%s}`, nsMatch(nss))
@@ -529,7 +539,7 @@ func (c *Client) VMMetrics(ctx context.Context, who Caller, ns, name, rng string
 	if gap := c.unserved(who); gap != "" {
 		return unavailableMetrics(rng, gap), nil
 	}
-	return cached(ctx, c.vmMetrics, ns+"/"+name+"|"+rng, func(ctx context.Context) (model.VMMetrics, bool) {
+	return cached(ctx, c.vmMetrics, c.negTTL, who.key(ns+"/"+name+"|"+rng), func(ctx context.Context) (model.VMMetrics, bool) {
 		r, at, w := c.read(who.Token), who.in(ns), spec.span()
 		specs := chartSpecs(ns, name, promDur(rateWindow(spec.step)))
 		results := make([][][]namedSeries, len(specs)) // results[chart][spec] = its series
@@ -605,7 +615,7 @@ func (c *Client) NetworkTraffic(ctx context.Context, who Caller, attached []Atta
 		ifaces[a.Namespace][a.Interface] = true
 		keys = append(keys, a.Namespace+"/"+a.Name+"/"+a.Interface)
 	}
-	return cached(ctx, c.traffic, scopeKey(keys, fmt.Sprint(limit)), func(ctx context.Context) (model.NetworkTraffic, bool) {
+	return cached(ctx, c.traffic, c.negTTL, who.key(scopeKey(keys, fmt.Sprint(limit))), func(ctx context.Context) (model.NetworkTraffic, bool) {
 		r := c.read(who.Token)
 		o := over{wide: who.Wide, nss: slices.Sorted(maps.Keys(ifaces))}
 		vec := r.vectorOver(ctx, o, func(nss []string) string {

@@ -399,9 +399,9 @@ func promStub(t *testing.T, fail string, hits *atomic.Int64) *httptest.Server {
 	return srv
 }
 
-// A summary with a failed query still renders, but is never cached: the next
-// caller with the same scope re-queries instead of inheriting the zeros.
-func TestClusterSummaryNotCachedOnQueryError(t *testing.T) {
+// A summary with a failed query still renders, and serves only the negative
+// TTL: past it, the next caller re-queries instead of inheriting the gap.
+func TestClusterSummaryPartialServesNegativeTTL(t *testing.T) {
 	var hits atomic.Int64
 	c := mustNew(t, promStub(t, "kube_node_status_allocatable", &hits).URL)
 	cs, err := c.ClusterSummary(context.Background(), wide, []string{"a"}, "", true)
@@ -415,8 +415,15 @@ func TestClusterSummaryNotCachedOnQueryError(t *testing.T) {
 	if _, err := c.ClusterSummary(context.Background(), wide, []string{"a"}, "", true); err != nil {
 		t.Fatal(err)
 	}
+	if hits.Load() != first {
+		t.Error("a partial summary within the negative TTL was re-queried")
+	}
+	c.negTTL = 0
+	if _, err := c.ClusterSummary(context.Background(), wide, []string{"a"}, "", true); err != nil {
+		t.Fatal(err)
+	}
 	if hits.Load() == first {
-		t.Error("a summary with a failed query was served from cache")
+		t.Error("a partial summary served past the negative TTL")
 	}
 }
 

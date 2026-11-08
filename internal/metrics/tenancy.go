@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 // Caller is who a read runs as and how far one of its queries may reach.
@@ -31,6 +33,15 @@ func (who Caller) in(ns string) string {
 		return ""
 	}
 	return ns
+}
+
+// key is who's cache key for a view: one per view for every wide caller, one
+// per view and token for anyone else.
+func (who Caller) key(view string) string {
+	if who.Wide {
+		return "wide|" + view
+	}
+	return "user|" + restfactory.TokenKey(who.Token) + "|" + view
 }
 
 // over is the namespaces one view query spans, and whether one query may span
