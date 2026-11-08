@@ -24,13 +24,15 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		return model.Inventory{}, fmt.Errorf("cluster not configured")
 	}
 	// A stream outlives the request that authenticated it, and its cached
-	// reviews now outlive a revoked token by minutes: re-validate on the
+	// reviews can outlive a revoked token by minutes: re-check it on the
 	// authenticator's cache, shared with the session's REST calls, so a dead
-	// token ends its stream at the next frame past that cache's TTL. A
-	// transient review failure is not a rejection.
+	// token ends its stream at the next frame past that cache's TTL. A failed
+	// re-check withholds the frame without ending the session.
 	if s.auth != nil {
-		if _, err := s.auth.Validate(ctx, id.Token); errors.Is(err, auth.ErrRejected) {
+		if err := s.auth.Revalidate(ctx, id.Token); errors.Is(err, auth.ErrRejected) {
 			return model.Inventory{}, errSessionRejected
+		} else if err != nil {
+			return model.Inventory{}, unavailable(err)
 		}
 	}
 	userCluster, err := s.clusterF.For(id.Token)
