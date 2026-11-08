@@ -53,7 +53,7 @@ const discards = () => fetchMock.mock.calls.filter(([, init]) => init?.method ==
 describe('ChangesLanes discard all', () => {
 	it('asks before discarding, then reports it', async () => {
 		setup();
-		await fireEvent.click(screen.getAllByRole('button', { name: 'discard all' })[0]);
+		await fireEvent.click(screen.getAllByRole('button', { name: 'Discard all' })[0]);
 		expect(discards()).toHaveLength(0);
 		expect(screen.getByText('Discard 2 staged changes?')).toBeTruthy();
 
@@ -67,17 +67,17 @@ describe('ChangesLanes discard all', () => {
 
 	it('keeps the draft on Keep', async () => {
 		setup();
-		await fireEvent.click(screen.getAllByRole('button', { name: 'discard all' })[1]);
+		await fireEvent.click(screen.getAllByRole('button', { name: 'Discard all' })[1]);
 		await fireEvent.click(screen.getByRole('button', { name: 'Keep' }));
 		expect(discards()).toHaveLength(0);
-		expect(screen.getAllByRole('button', { name: 'discard all' })).toHaveLength(2);
+		expect(screen.getAllByRole('button', { name: 'Discard all' })).toHaveLength(2);
 	});
 
 	it('a discard in flight is busy in its own lane only', async () => {
 		let answer!: (r: Response) => void;
 		fetchMock.mockImplementationOnce(() => new Promise<Response>((r) => (answer = r)));
 		setup();
-		const [alpha, beta] = screen.getAllByRole('button', { name: 'discard all' });
+		const [alpha, beta] = screen.getAllByRole('button', { name: 'Discard all' });
 		await fireEvent.click(alpha);
 		await fireEvent.click(beta);
 		const [discardAlpha, discardBeta] = screen.getAllByRole('button', { name: 'Discard' });

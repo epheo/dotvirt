@@ -100,12 +100,16 @@ test('Changes is a section: the tree scopes the review, a VM opens its own tab',
 	await expect(page).toHaveURL(/\/changes\/team-web$/);
 	await expect(main.getByRole('button', { name: /PR #42/ })).toBeVisible();
 	await expect(main.getByRole('button', { name: /PR #41/ })).toHaveCount(0);
+	await main.getByRole('link', { name: /^History/ }).click();
 	await expect(main.getByRole('button', { name: /web-2: add data disk/ })).toBeVisible();
 	// A namespace narrows history to its directory: db-prod saw only the import.
-	await aside.locator('a[href="/changes/team-db"]').click();
+	// The tree keeps the tab across scopes.
+	await aside.locator('a[href="/changes/team-db?tab=history"]').click();
+	await main.getByRole('link', { name: /^In review/ }).click();
 	await expect(main.getByRole('button', { name: /PR #41/ })).toBeVisible();
-	await aside.locator('a[href="/changes/team-db/db-prod"]').click();
-	await expect(page).toHaveURL(/\/changes\/team-db\/db-prod$/);
+	await main.getByRole('link', { name: /^History/ }).click();
+	await aside.locator('a[href="/changes/team-db/db-prod?tab=history"]').click();
+	await expect(page).toHaveURL(/\/changes\/team-db\/db-prod\?tab=history$/);
 	await expect(main.getByRole('button', { name: /initial import/ })).toBeVisible();
 	await expect(main.getByRole('button', { name: /web-2: add data disk/ })).toHaveCount(0);
 	// A VM leaf opens the VM page on its Changes tab, keeping this tree.
