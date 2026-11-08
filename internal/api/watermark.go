@@ -11,7 +11,6 @@ import (
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/model"
-	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/tasks"
 )
 
@@ -149,14 +148,12 @@ func (s *Server) networksWatermark(visible map[string]bool, g netGrants) uint64 
 	return sum & wireMask
 }
 
-// tasksWatermark covers the entries the caller's tasks pull returns (taskScope
-// over the same projects and node signal), each with the project it shows
-// under.
-func (s *Server) tasksWatermark(projects []project.ProjectInfo, canNodes bool) uint64 {
+// tasksWatermark covers the entries the caller's tasks pull returns (the
+// same taskScope), each with the project it shows under.
+func (s *Server) tasksWatermark(sc taskScope) uint64 {
 	if s.tasks == nil {
 		return 0
 	}
-	sc := newTaskScope(projects, canNodes)
 	var sum uint64
 	var t term
 	s.tasks.Visit(func(o tasks.Op) {

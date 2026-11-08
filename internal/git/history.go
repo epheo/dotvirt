@@ -248,6 +248,63 @@ func (r *Repo) BranchDiff(base, head string) ([]FileChange, error) {
 	return treeDiff(fromTree, toTree)
 }
 
+// ErrForeignCommit: a branch carries, past its fork from base, a commit
+// dotvirt did not write for the author asked about (BranchDiffBy).
+var ErrForeignCommit = errors.New("the branch carries a commit dotvirt did not write for its author")
+
+// byCommitsMax bounds the walk of BranchDiffBy: dotvirt writes one commit per
+// branch build, so a longer run is someone else's.
+const byCommitsMax = 16
+
+// BranchDiffBy is BranchDiff for a branch only by may have changed: every
+// commit head carries past its fork from base must be one dotvirt committed
+// for by, signed as ProposeChangeset signs it, else ErrForeignCommit and no
+// diff. at is the head diffed. The check and the diff read one snapshot, so a
+// fetch between them cannot slip another commit in.
+func (r *Repo) BranchDiffBy(base, head string, by Author) (files []FileChange, at string, err error) {
+	repo := r.repo.Load()
+	from, err := branchCommit(repo, base)
+	if err != nil {
+		return nil, "", err
+	}
+	to, err := branchCommit(repo, head)
+	if err != nil {
+		return nil, "", err
+	}
+	bases, err := from.MergeBase(to)
+	if err != nil {
+		return nil, "", err
+	}
+	// dotvirt forks every branch from base and never merges into one: no fork
+	// point, or several, means other hands.
+	if len(bases) != 1 {
+		return nil, "", ErrForeignCommit
+	}
+	fork, author, committer := bases[0], by.signature(), dotvirtSig()
+	for c, n := to, 0; c.Hash != fork.Hash; n++ {
+		if n == byCommitsMax || c.NumParents() != 1 || !sameSigner(c.Author, author) || !sameSigner(c.Committer, committer) {
+			return nil, "", ErrForeignCommit
+		}
+		if c, err = c.Parent(0); err != nil {
+			return nil, "", err
+		}
+	}
+	fromTree, err := fork.Tree()
+	if err != nil {
+		return nil, "", err
+	}
+	toTree, err := to.Tree()
+	if err != nil {
+		return nil, "", err
+	}
+	files, err = treeDiff(fromTree, toTree)
+	return files, to.Hash.String(), err
+}
+
+func sameSigner(got object.Signature, want *object.Signature) bool {
+	return got.Name == want.Name && got.Email == want.Email
+}
+
 // branchCommit is the one branch resolver: every read of a branch head goes
 // through it, so a branch the mirror lacks reads as ErrNoBranch everywhere.
 func branchCommit(repo *git.Repository, branch string) (*object.Commit, error) {

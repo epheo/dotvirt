@@ -39,13 +39,15 @@ type Op struct {
 
 // Merge is one PR merged into a project's base branch. RepoURL is the normalized
 // clone URL - mapped to a project name at read time, under the reader's own
-// visibility, so recording needs no project resolution.
+// visibility, so recording needs no project resolution. Branch is the PR's
+// head: whose PR it was, exactly, where By is a lossy readable segment.
 type Merge struct {
 	RepoURL string
 	Number  int
 	URL     string
 	Title   string
 	By      string
+	Branch  string
 	At      time.Time
 }
 

@@ -655,7 +655,22 @@ func (s *Server) pickProject(w http.ResponseWriter, r *http.Request, want string
 // platformScopeAny resolves the platform tier for the whole-project routes:
 // canReadPlatform. The per-kind create routes keep their own gate.
 func (s *Server) platformScopeAny(w http.ResponseWriter, r *http.Request) (scope, bool) {
-	return s.platformScopeWith(w, r, s.canReadPlatform, "not authorized to read the platform repo")
+	return s.platformScopeWith(w, r, s.canReadPlatform, platformReadDenied)
+}
+
+const platformReadDenied = "not authorized to read the platform repo"
+
+// platformReadScope resolves the platform tier for a route that serves a
+// caller what they own there even without platform read: reads is
+// canReadPlatform's verdict. A failed review fails the route, whatever the
+// caller owns.
+func (s *Server) platformReadScope(w http.ResponseWriter, r *http.Request) (sc scope, reads, ok bool) {
+	sc, ok = s.platformScopeWith(w, r, func(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
+		var err error
+		reads, err = s.canReadPlatform(ctx, id, c)
+		return true, err
+	}, "")
+	return sc, reads, ok
 }
 
 // platformProjectName is the synthetic project name for the platform tier - the

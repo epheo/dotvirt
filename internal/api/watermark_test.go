@@ -155,10 +155,10 @@ func TestFrameWatermarksScopedToTheCaller(t *testing.T) {
 func TestTasksWatermarkFollowsTheScopedFeed(t *testing.T) {
 	s := &Server{tasks: tasks.New(nil)}
 	mine := []project.ProjectInfo{{Name: "team-a", Namespaces: []string{"team-a-dev"}, Repo: "https://forge/team-a.git"}}
-	reader, tenant := s.tasksWatermark(mine, true), s.tasksWatermark(mine, false)
+	reader, tenant := s.tasksWatermark(newTaskScope(mine, true)), s.tasksWatermark(newTaskScope(mine, false))
 	check := func(what string, tenantMoves, readerMoves bool) {
 		t.Helper()
-		gotT, gotR := s.tasksWatermark(mine, false), s.tasksWatermark(mine, true)
+		gotT, gotR := s.tasksWatermark(newTaskScope(mine, false)), s.tasksWatermark(newTaskScope(mine, true))
 		if (gotT != tenant) != tenantMoves || (gotR != reader) != readerMoves {
 			t.Errorf("%s: tenant moved %v, node reader moved %v; want %v, %v", what, gotT != tenant, gotR != reader, tenantMoves, readerMoves)
 		}
@@ -212,7 +212,7 @@ func BenchmarkFrameWatermarks(b *testing.B) {
 			g := netGrants{nodes: c.nodes, create: map[ssarRef]bool{ssarANP: c.nodes}, list: map[ssarRef]bool{ssarANP: c.nodes}}
 			for b.Loop() {
 				_ = s.networksWatermark(visible, g)
-				_ = s.tasksWatermark(projects, c.nodes)
+				_ = s.tasksWatermark(newTaskScope(projects, c.nodes))
 			}
 		})
 	}

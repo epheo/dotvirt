@@ -641,6 +641,16 @@ func (d *planeDraft) DeclaredFiles(project.ProjectInfo) (map[model.ObjectRef]str
 	return d.declared, nil
 }
 
+// A caller's draft branch is their name; "revert/<user>" and "legacy-<user>"
+// stand for the revert branches OwnsProposal also gives them.
+func (d *planeDraft) OwnsProposal(id auth.Identity, _ project.ProjectInfo, branch string) bool {
+	return branch == id.Username || branch == "revert/"+id.Username || branch == "legacy-"+id.Username
+}
+
+func (d *planeDraft) ProposedBranch(id auth.Identity, _ project.ProjectInfo) string {
+	return id.Username
+}
+
 func (d *planeDraft) DeclaredKinds(project.ProjectInfo) ([]schema.GroupKind, error) {
 	return d.kinds, nil
 }
