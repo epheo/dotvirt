@@ -172,8 +172,8 @@ type RoleBindingSpec struct {
 	Kept []Subject `json:"-"`
 	// SyncAccount is the project's Argo sync ServiceAccount
 	// (tenancy.SyncAccount), nil for none. It joins the same binding as the
-	// owners, so it holds exactly the project's role, plus EgressFirewall writes
-	// (tenancy.TenantEgressRole), a tenant kind admin lacks.
+	// owners, so it holds exactly the project's role; SyncEgressManifest adds
+	// EgressFirewall writes, a tenant kind admin lacks.
 	SyncAccount *Subject `json:"-"`
 }
 
@@ -190,12 +190,11 @@ func ServiceAccountSubject(namespace, name string) *Subject {
 	return &Subject{Kind: "ServiceAccount", Name: name, Namespace: namespace}
 }
 
-// RoleBindingManifest renders a project namespace's grant file: the
-// RoleBinding granting the given ClusterRole (default "admin", the built-in
+// RoleBindingManifest renders a project namespace's grant: the RoleBinding
+// granting the given ClusterRole (default "admin", the built-in
 // namespace-admin role) to the kept subjects, each owner (kind User) and the
-// sync account, and with a sync account the RoleBinding granting it
-// EgressFirewall writes. With a sync account the file is rendered even
-// without owners: the project's repo syncs as that account.
+// sync account. With a sync account it is rendered even without owners: the
+// project's repo syncs as that account.
 func RoleBindingManifest(s RoleBindingSpec) (path string, content []byte, err error) {
 	if err := validate.RequireDNS1123("namespace", s.Namespace); err != nil {
 		return "", nil, err
@@ -226,18 +225,27 @@ func RoleBindingManifest(s RoleBindingSpec) (path string, content []byte, err er
 		return "", nil, fmt.Errorf("at least one owner is required")
 	}
 	name := tenancy.AdminBinding(s.Namespace)
-	admins, err := roleBinding(name, s.Namespace, s.Project, role, subjects)
+	rb, err := roleBinding(name, s.Namespace, s.Project, role, subjects)
 	if err != nil {
 		return "", nil, err
 	}
-	if s.SyncAccount != nil {
-		egress, err := roleBinding(tenancy.EgressBinding(s.Namespace), s.Namespace, s.Project, tenancy.TenantEgressRole, []Subject{*s.SyncAccount})
-		if err != nil {
-			return "", nil, err
-		}
-		admins = append(admins, append([]byte("---\n"), egress...)...)
+	return model.KindRB.RepoPath(s.Namespace, name), rb, nil
+}
+
+// SyncEgressManifest renders the RoleBinding granting a project namespace's
+// sync account EgressFirewall writes (tenancy.TenantEgressRole): a tenant kind
+// the admin role lacks, so the project's repo keeps syncing its egress firewall
+// once Argo syncs it as that account. The owners do not gain it.
+func SyncEgressManifest(namespace, project string, account Subject) (path string, content []byte, err error) {
+	if err := validate.RequireDNS1123("namespace", namespace); err != nil {
+		return "", nil, err
 	}
-	return model.KindRB.RepoPath(s.Namespace, name), admins, nil
+	name := tenancy.EgressBinding(namespace)
+	rb, err := roleBinding(name, namespace, project, tenancy.TenantEgressRole, []Subject{account})
+	if err != nil {
+		return "", nil, err
+	}
+	return model.KindRB.RepoPath(namespace, name), rb, nil
 }
 
 const rbacGroup = "rbac.authorization.k8s.io"

@@ -209,33 +209,33 @@ func TestRoleBindingManifest(t *testing.T) {
 }
 
 // A project's sync account joins the owners' binding, so it holds exactly the
-// project's role, and is the only subject of the EgressFirewall grant. Without
+// project's role, and is the only subject of its EgressFirewall grant. Without
 // owners the grant still renders: the project's repo syncs as that account.
 func TestRoleBindingManifestSyncAccount(t *testing.T) {
 	sa := ServiceAccountSubject("openshift-gitops", "dotvirt-p-team-a")
 	for name, owners := range map[string][]string{"owners": {"alice"}, "no owners": nil} {
-		_, content, err := RoleBindingManifest(RoleBindingSpec{Namespace: "tenant-a", Project: "team-a", Owners: owners, SyncAccount: sa})
+		path, content, err := RoleBindingManifest(RoleBindingSpec{Namespace: "tenant-a", Project: "team-a", Owners: owners, SyncAccount: sa})
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		docs := strings.Split(string(content), "---\n")
-		if len(docs) != 2 {
-			t.Fatalf("%s: %d documents, want the admin and egress grants:\n%s", name, len(docs), content)
-		}
 		role, subjects, ok, err := DeclaredGrant(content, "tenant-a")
-		if err != nil || !ok || role != "admin" {
-			t.Fatalf("%s: DeclaredGrant = %q %v %v", name, role, ok, err)
+		if err != nil || !ok || role != "admin" || path != "rbac/tenant-a.yaml" {
+			t.Fatalf("%s: DeclaredGrant = %q %v %v at %s", name, role, ok, err, path)
 		}
 		if !slices.Contains(subjects, *sa) || len(subjects) != len(owners)+1 {
 			t.Errorf("%s: admin subjects %+v, want the owners and the sync account", name, subjects)
 		}
-		for _, want := range []string{"name: tenant-a-sync-egress", "name: dotvirt-tenant-egress", "kind: ServiceAccount", "namespace: openshift-gitops"} {
-			if !strings.Contains(docs[1], want) {
-				t.Errorf("%s: egress grant missing %q:\n%s", name, want, docs[1])
-			}
-		}
-		if strings.Contains(docs[1], "alice") {
-			t.Errorf("%s: an owner gained the egress grant:\n%s", name, docs[1])
+	}
+	path, egress, err := SyncEgressManifest("tenant-a", "team-a", *sa)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "rbac/tenant-a/tenant-a-sync-egress.yaml" {
+		t.Errorf("egress grant at %s", path)
+	}
+	for _, want := range []string{"name: tenant-a-sync-egress", "name: dotvirt-tenant-egress", "kind: ServiceAccount", "namespace: openshift-gitops", "dotvirt.io/project: team-a"} {
+		if !strings.Contains(string(egress), want) {
+			t.Errorf("egress grant missing %q:\n%s", want, egress)
 		}
 	}
 	// Kept subjects survive a re-render, each subject once.

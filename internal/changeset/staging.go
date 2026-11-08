@@ -275,8 +275,8 @@ func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, re
 // platform repo) and applied by the platform Argo app - but it is labeled/annotated
 // to joinProj, the tenant project it JOINS, so that project's per-project app syncs
 // workloads into it once it exists. The namespace + primary UDN land as one
-// multi-doc manifest, beside its grant to the joining project's sync account
-// (grantSource.entry) when one is configured: the project syncs into every
+// multi-doc manifest, beside its grants to the joining project's sync account
+// (grantSource.entries) when one is configured: the project syncs into every
 // namespace it holds.
 func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (model.DraftView, error) {
 	var spec netgen.NamespaceSpec
@@ -320,14 +320,11 @@ func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinPro
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	grant, ok, err := grants.entry(spec.Name, joinProj.Name, nil)
+	grant, err := grants.entries(spec.Name, joinProj.Name, nil)
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if !ok {
-		return c.stage(id, commitProj, entry)
-	}
-	return c.stage(id, commitProj, entry, grant)
+	return c.stage(id, commitProj, append([]draft.Entry{entry}, grant...)...)
 }
 
 // StageDelete records the removal of an existing object (a VM when resource is
