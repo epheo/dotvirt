@@ -337,15 +337,12 @@ func (c *Coordinator) Unstage(id auth.Identity, proj project.ProjectInfo, resour
 }
 
 // stage writes entries into (id, proj)'s draft as one change and renders the
-// draft that results. Each passes the gate, each entry writing a manifest
-// records the version of the file it replaces (see pin), and a whole-file
-// edit never replaces staged field edits: they would vanish from the draft
-// without the user knowing.
+// draft that results. Each passes the gate, which pins every entry writing or
+// removing a file to the version it weighed, and a whole-file edit never
+// replaces staged field edits: they would vanish from the draft without the
+// user knowing.
 func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entries ...draft.Entry) (model.DraftView, error) {
 	if err := c.gate(id, proj, entries); err != nil {
-		return model.DraftView{}, err
-	}
-	if err := c.pin(proj, entries); err != nil {
 		return model.DraftView{}, err
 	}
 	err := c.store.Apply(id.Username, proj.Name, func(d map[string]draft.Entry) error {
@@ -362,38 +359,6 @@ func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entries 
 		return model.DraftView{}, err
 	}
 	return c.Get(id, proj)
-}
-
-// pin records on each entry writing or removing a file the version of that
-// file on base (draft.Entry.BaseBlob), in one read. An entry already pinned
-// keeps its pin: one whose content the server derived from bytes it read is
-// pinned to those bytes (pinOf), never to a second read that may see a newer
-// file.
-func (c *Coordinator) pin(proj project.ProjectInfo, entries []draft.Entry) error {
-	pinned := func(e draft.Entry) bool { return e.BaseBlob != "" || e.Manifest == "" && e.Kind != draft.KindDelete }
-	var paths []string
-	for _, e := range entries {
-		if !pinned(e) {
-			paths = append(paths, e.SourceFile)
-		}
-	}
-	if len(paths) == 0 {
-		return nil
-	}
-	read, err := c.read(proj)
-	if err != nil {
-		return err
-	}
-	pins, err := read.Pins(c.baseBranch, paths...)
-	if err != nil {
-		return err
-	}
-	for i, e := range entries {
-		if !pinned(e) {
-			entries[i].BaseBlob = pins[e.SourceFile]
-		}
-	}
-	return nil
 }
 
 // pinOf is the pin of a file read as content, ok=false when it was absent.

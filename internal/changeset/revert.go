@@ -95,6 +95,10 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 // against base as it stands; each item is pinned to that version, so the
 // commit lands on exactly what was weighed.
 func (c *Coordinator) revertAccess(read *git.Repo, proj project.ProjectInfo, items []git.ChangesetItem) ([]Access, error) {
+	idx, err := indexDeclared(read, c.baseBranch)
+	if err != nil {
+		return nil, err
+	}
 	var need []Access
 	for i, it := range items {
 		before, ok, err := read.LookupOnBranch(c.baseBranch, it.Path)
@@ -105,7 +109,7 @@ func (c *Coordinator) revertAccess(read *git.Repo, proj project.ProjectInfo, ite
 			before = nil
 		}
 		items[i].BaseBlob = pinOf(before, ok)
-		a, err := fileAccess(proj, fileChange{path: it.Path, before: before, after: it.NewContent, remove: it.Delete}, nil)
+		a, err := fileAccess(proj, idx, fileChange{path: it.Path, before: before, after: it.NewContent, remove: it.Delete}, nil)
 		if err != nil {
 			return nil, err
 		}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
+	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
@@ -65,8 +67,10 @@ const (
 )
 
 // The manifest editor stages only what Argo would apply as exactly the object
-// edited: nothing Argo unpacks or reads past dotvirt's own parser, no
-// namespace left for Argo to choose, no other kind under the same name.
+// edited. The gate's decoding refuses what Argo unpacks (items) or reads past
+// dotvirt's own parser (a duplicate key ending a document early for one of
+// them); its identity check refuses a second object; the placement guard
+// refuses a namespace left to Argo and a NAD in a tenant repo.
 func TestManifestEditorRefusesWhatArgoReadsOtherwise(t *testing.T) {
 	bare := seedBareFiles(t, map[string][]byte{
 		"alpha/networkpolicies/web.yaml": []byte(webPolicy),
@@ -140,12 +144,13 @@ func TestStageAsksTheCallerForEachEffect(t *testing.T) {
 	}
 }
 
-// A RoleBinding takes the right to bind the role it grants, beyond its own
-// create: the apiserver's escalation check, which Argo applying it skips.
-func TestRoleBindingNeedsBind(t *testing.T) {
+// A RoleBinding's access carries the binding itself, for the authorizer to
+// have the apiserver weigh it with the escalation rule Argo applying it skips;
+// a refusal stages nothing.
+func TestRoleBindingCarriesItself(t *testing.T) {
 	bare := seedBareFiles(t, nil)
 	c := newTestCoordinator(t, false)
-	r := &rbac{deny: verbOn("bind", "clusterroles")}
+	r := &rbac{deny: verbOn("create", "rolebindings")}
 	c.UseAuthorizer(r)
 	id := auth.Identity{Username: "alice"}
 	plat := project.ProjectInfo{Name: project.PlatformName, Repo: bare}
@@ -155,21 +160,173 @@ func TestRoleBindingNeedsBind(t *testing.T) {
 	}
 
 	if _, err := c.stage(id, plat, entries...); !errors.Is(err, model.ErrForbidden) {
-		t.Fatalf("a grant without bind: err = %v, want ErrForbidden", err)
+		t.Fatalf("a refused grant: err = %v, want ErrForbidden", err)
 	}
-	bind := Access{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Namespace: "alpha", Name: "admin"}
-	if !slices.Contains(r.questions(), bind) {
-		t.Errorf("asked %+v, want %+v among them", r.questions(), bind)
+	var grant *Access
+	for _, a := range r.questions() {
+		if a.Resource == "rolebindings" {
+			grant = &a
+		}
 	}
-	r.refuse(nil)
-	if _, err := c.stage(id, plat, entries...); err != nil {
-		t.Errorf("with bind: %v", err)
+	var rb struct {
+		RoleRef struct{ Kind, Name string } `json:"roleRef"`
+	}
+	if grant == nil || grant.Verb != "create" || grant.Namespace != "alpha" || grant.Name != "alpha-admins" ||
+		json.Unmarshal([]byte(grant.Object), &rb) != nil || rb.RoleRef.Kind != "ClusterRole" || rb.RoleRef.Name != "admin" {
+		t.Fatalf("asked %+v, want the binding carried", r.questions())
+	}
+	if entries, _ := c.store.List(id.Username, plat.Name); len(entries) != 0 {
+		t.Errorf("staged %+v", entries)
+	}
+}
+
+// Nothing is staged without an authorizer: an unwired coordinator fails closed.
+func TestGateWithoutAnAuthorizerRefuses(t *testing.T) {
+	c := newTestCoordinator(t, false)
+	c.UseAuthorizer(nil)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: seedBare(t), Namespaces: []string{"alpha"}}
+	raw, _ := json.Marshal(netgen.NetworkPolicySpec{Name: "web", Namespace: "alpha"})
+	if _, err := c.StageCreate(id, proj, draft.ResourceNetworkPolicy, raw); !errors.Is(err, model.ErrUnavailable) {
+		t.Errorf("err = %v, want ErrUnavailable", err)
+	}
+}
+
+// Files dotvirt's parser and Argo's would read apart are refused even when
+// the identity dotvirt reads is the right one.
+func TestArgoObjectsRefusesWhatTheParsersReadApart(t *testing.T) {
+	vm := "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\n"
+	two := vm + "---\n" + ownerRB
+	utf16 := []byte{0xFF, 0xFE}
+	for _, r := range two {
+		utf16 = append(utf16, byte(r), 0)
+	}
+	for name, content := range map[string][]byte{
+		"a merge key overriding the namespace": []byte(vm + "  <<: {namespace: beta}\n"),
+		"carriage returns alone":               []byte(strings.ReplaceAll(two, "\n", "\r")),
+		"a UTF-16 byte order mark":             utf16,
+		"a document after a document end":      []byte(vm + "...\n" + ownerRB),
+	} {
+		if objs, err := argoObjects("alpha/web.yaml", content); err == nil {
+			t.Errorf("%s: read as %+v", name, objs)
+		}
+	}
+}
+
+// A settings edit is checked as Argo reads its result, at stage on the file
+// git declares the VM in and again at the commit: a value breaking into a
+// second document is refused at both.
+func TestSettingsEditCannotAddAnObject(t *testing.T) {
+	f := newProposeFixture(t)
+	injected := map[string]string{"x": "y\n---\n" + strings.TrimSpace(ownerRB)}
+	_, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{SetLabels: injected}})
+	if !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("stage: err = %v, want ErrInvalid", err)
+	}
+	// An entry that reached the draft past the gate meets the commit's own check.
+	items := f.c.toChangesetItems(f.proj, []draft.Entry{{Kind: draft.KindEdit, Namespace: "alpha", Name: "web", SourceFile: "web.yaml",
+		Edit: &model.VMEdit{SetLabels: injected}}})
+	read, err := f.c.read(f.proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := read.FileOnBranch("main", "web.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := items[0].Transform(current); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("commit: err = %v, want ErrInvalid", err)
+	}
+}
+
+// An entry carrying both a manifest and a settings edit is refused: the gate
+// and the commit must read one change.
+func TestGateRefusesAnEntryOfTwoWrites(t *testing.T) {
+	c := newTestCoordinator(t, false)
+	proj := project.ProjectInfo{Name: "p", Repo: seedBare(t), Namespaces: []string{"alpha"}}
+	e := draft.Entry{Kind: draft.KindEdit, Namespace: "alpha", Name: "web", SourceFile: "web.yaml",
+		Manifest: "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata: {name: web, namespace: alpha}\n", Edit: &model.VMEdit{SetLabels: map[string]string{"a": "b"}}}
+	if err := c.gate(auth.Identity{Username: "alice"}, proj, []draft.Entry{e}); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("err = %v, want ErrInvalid", err)
+	}
+}
+
+// The gate reads an entry off the version it is pinned to: an entry made from
+// another version is a conflict, and the commit's pin error to propose.
+func TestGateHoldsTheEntryToItsPin(t *testing.T) {
+	c := newTestCoordinator(t, false)
+	proj := project.ProjectInfo{Name: "p", Repo: seedBare(t), Namespaces: []string{"alpha"}}
+	e := draft.Entry{Kind: draft.KindDelete, Namespace: "alpha", Name: "web", SourceFile: "web.yaml", BaseBlob: git.BlobID([]byte("older"))}
+	err := c.gate(auth.Identity{Username: "alice"}, proj, []draft.Entry{e})
+	var moved *git.BaseMovedError
+	if !errors.Is(err, model.ErrConflict) || !errors.As(err, &moved) || moved.Path != "web.yaml" {
+		t.Errorf("err = %v, want a conflict on web.yaml", err)
+	}
+	unpinned := []draft.Entry{{Kind: draft.KindDelete, Namespace: "alpha", Name: "web", SourceFile: "web.yaml"}}
+	if err := c.gate(auth.Identity{Username: "alice"}, proj, unpinned); err != nil || unpinned[0].BaseBlob == "" {
+		t.Errorf("an unpinned entry: err = %v, pin %q", err, unpinned[0].BaseBlob)
+	}
+}
+
+// Whether an object is new is the branch's answer, not one file's: an
+// object declared elsewhere is updated, and a file declaring one object
+// twice is refused. An object Argo replaces is deleted and created.
+func TestGateReadsEffectsPerObject(t *testing.T) {
+	replaced := strings.Replace(netUDN, "  namespace: alpha\n", "  namespace: alpha\n  annotations: {argocd.argoproj.io/sync-options: \"Replace=true,Force=true\"}\n", 1)
+	bare := seedBareFiles(t, map[string][]byte{"alpha/elsewhere.yaml": []byte(netUDN), "alpha/networks/net.yaml": []byte(netUDN)})
+	c := newTestCoordinator(t, false)
+	r := &rbac{}
+	c.UseAuthorizer(r)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare, Namespaces: []string{"alpha"}}
+	udn := func(verb string) Access {
+		return Access{Verb: verb, Group: "k8s.ovn.org", Resource: "userdefinednetworks", Namespace: "alpha", Name: "net"}
+	}
+
+	moved := draft.Entry{Kind: draft.KindCreate, Resource: draft.ResourceNetwork, Namespace: "alpha", Name: "net", SourceFile: "alpha/net.yaml", Manifest: netUDN}
+	if err := c.gate(id, proj, []draft.Entry{moved}); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.questions(); !slices.Equal(got, []Access{udn("update")}) {
+		t.Errorf("an object declared in another file: asked %+v", got)
+	}
+
+	twice := moved
+	twice.Manifest = netUDN + "---\n" + netUDN
+	if err := c.gate(id, proj, []draft.Entry{twice}); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("one object twice: err = %v, want ErrInvalid", err)
+	}
+
+	r.asked = nil
+	if _, err := c.StageUpdateManifest(id, proj, "network", "alpha", "net", model.UpdateManifestRequest{YAML: replaced}); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.questions(); !slices.Equal(got, []Access{udn("delete"), udn("create")}) {
+		t.Errorf("a replace: asked %+v, want a delete and a create", got)
+	}
+}
+
+// Project creation is gated before its repo is made: a refusal leaves no
+// repo behind.
+func TestCreateProjectGatedBeforeTheRepo(t *testing.T) {
+	f := newProposeFixture(t, when("GET", "team-a", http.StatusNotFound, ""), func(m, path string) (int, string, bool) {
+		if m == "POST" && strings.HasSuffix(path, "/repos") {
+			t.Error("the repo was created")
+			return http.StatusCreated, "{}", true
+		}
+		return 0, "", false
+	})
+	f.c.UseAuthorizer(&rbac{deny: verbOn("create", "namespaces")})
+	_, err := f.c.StageCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"team-a","namespace":"team-a"}`), nil)
+	if !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("err = %v, want ErrForbidden", err)
 	}
 }
 
 // Restore brings back a state base held: a commit only a proposal branch
-// carries is not one, and a past version is held to the object it restores,
-// as the manifest editor holds an edit.
+// carries is not one. A past version passes the gate as an edit would: the
+// identity check refuses a second object, the placement guard a namespace
+// left to Argo and a NAD in a tenant repo.
 func TestRestoreOnlyFromBase(t *testing.T) {
 	vm := "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\nspec:\n  runStrategy: Always\n"
 	nad := "apiVersion: k8s.cni.cncf.io/v1\nkind: NetworkAttachmentDefinition\nmetadata:\n  name: net\n  namespace: alpha\nspec:\n  config: '{}'\n"

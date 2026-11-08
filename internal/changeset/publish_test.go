@@ -549,7 +549,7 @@ func TestProposeWithoutAForgeRebuildsUnderTheRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := draft.Entry{Kind: draft.KindEdit, Namespace: "alpha", Name: "web", SourceFile: "web.yaml", Edit: &model.VMEdit{SetLabels: map[string]string{"env": "prod"}}}
-	first, err := write.CommitChangeset("main", branch, "env", c.toChangesetItems([]draft.Entry{env}), git.Author{})
+	first, err := write.CommitChangeset("main", branch, "env", c.toChangesetItems(proj, []draft.Entry{env}), git.Author{})
 	if err != nil {
 		t.Fatal(err)
 	}

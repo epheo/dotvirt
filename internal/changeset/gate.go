@@ -28,10 +28,14 @@ import (
 // file with its own rights, so this is where a user's RBAC bounds a change.
 
 // Access is one act a change makes the cluster perform once merged, as an
-// access review asks it. Name is empty for a create: the apiserver's own
-// check of a create does not name the object either.
+// access review asks it. Name is set for a create too: the authorizer reads a
+// create of an object that already runs as the update Argo makes of it, and
+// leaves the name out of the review, as the apiserver's own check of a create
+// does. Object, set for a RoleBinding, is the binding as Argo applies it: the
+// authorizer has the apiserver weigh it, escalation rule included.
 type Access struct {
 	Verb, Group, Resource, Namespace, Name string
+	Object                                 string
 }
 
 func (a Access) String() string {
@@ -69,7 +73,10 @@ func (c *Coordinator) authorize(id auth.Identity, need []Access) error {
 }
 
 // gate refuses entries whose files say more than the entries claim, or would
-// make the cluster do what id may not; proj's base branch is what they land on.
+// make the cluster do what id may not; proj's base branch is what they land
+// on. It pins each entry writing or removing a file to the version of that
+// file it weighed (draft.Entry.BaseBlob) and answers *git.BaseMovedError for
+// one pinned to another: its accesses would be read off the wrong version.
 func (c *Coordinator) gate(id auth.Identity, proj project.ProjectInfo, entries []draft.Entry) error {
 	if len(entries) == 0 {
 		return nil
@@ -78,9 +85,13 @@ func (c *Coordinator) gate(id auth.Identity, proj project.ProjectInfo, entries [
 	if err != nil {
 		return err
 	}
+	idx, err := indexDeclared(read, c.baseBranch)
+	if err != nil {
+		return err
+	}
 	var need []Access
-	for _, e := range entries {
-		a, err := c.entryAccess(read, proj, e)
+	for i := range entries {
+		a, err := c.entryAccess(read, idx, proj, &entries[i])
 		if err != nil {
 			return err
 		}
@@ -89,28 +100,132 @@ func (c *Coordinator) gate(id auth.Identity, proj project.ProjectInfo, entries [
 	return c.authorize(id, need)
 }
 
-// entryAccess is what committing e does to the cluster.
-func (c *Coordinator) entryAccess(read *git.Repo, proj project.ProjectInfo, e draft.Entry) ([]Access, error) {
+// write is how an entry changes its file: the one reading the gate weighs
+// and propose commits (toChangesetItems).
+type write int
+
+const (
+	noWrite    write = iota
+	wholeFile        // Manifest replaces the file
+	fieldWrite       // Edit is applied to the VM in the file
+	removal          // the file goes
+)
+
+func writeOf(e draft.Entry) write {
 	switch {
-	case fieldEdit(e):
-		return []Access{access(verbUpdate, model.KindVM, model.ObjectRef{Namespace: e.Namespace, Name: e.Name})}, nil
 	case e.Kind == draft.KindDelete:
-		before, ok, err := read.LookupOnBranch(c.baseBranch, e.SourceFile)
-		if err != nil || !ok {
-			return nil, err
-		}
-		return fileAccess(proj, fileChange{path: e.SourceFile, before: before, remove: true}, nil)
-	case e.Manifest != "":
-		before, ok, err := read.LookupOnBranch(c.baseBranch, e.SourceFile)
+		return removal
+	case e.Manifest != "" && (e.Kind == draft.KindCreate || e.Kind == draft.KindEdit):
+		return wholeFile
+	case e.Kind == draft.KindEdit && e.Edit != nil:
+		return fieldWrite
+	}
+	return noWrite
+}
+
+// entryAccess is what committing e does to the cluster.
+func (c *Coordinator) entryAccess(read *git.Repo, idx declaredIndex, proj project.ProjectInfo, e *draft.Entry) ([]Access, error) {
+	if e.Manifest != "" && e.Edit != nil {
+		return nil, fmt.Errorf("%w: %s carries both a manifest and a settings edit; unstage it and make the change again", model.ErrInvalid, objectLabel(*e))
+	}
+	switch writeOf(*e) {
+	case wholeFile:
+		before, err := c.based(read, e)
 		if err != nil {
 			return nil, err
 		}
-		if !ok {
-			before = nil
+		return fileAccess(proj, idx, fileChange{path: e.SourceFile, before: before, after: []byte(e.Manifest)}, expected(*e))
+	case removal:
+		before, err := c.based(read, e)
+		if err != nil || before == nil {
+			return nil, err
 		}
-		return fileAccess(proj, fileChange{path: e.SourceFile, before: before, after: []byte(e.Manifest)}, expected(e))
+		return fileAccess(proj, idx, fileChange{path: e.SourceFile, before: before, remove: true}, nil)
+	case fieldWrite:
+		return c.fieldEditAccess(read, proj, *e)
 	}
 	return nil, nil
+}
+
+// based is what base holds at e's file (nil when absent), the version its
+// accesses are read off: e is pinned to it when unpinned, and refused when
+// pinned to another. A removal whose file is gone already is satisfied, as
+// the commit's own pin check reads it.
+func (c *Coordinator) based(read *git.Repo, e *draft.Entry) ([]byte, error) {
+	content, ok, err := read.LookupOnBranch(c.baseBranch, e.SourceFile)
+	if err != nil {
+		return nil, err
+	}
+	pin := pinOf(content, ok)
+	switch {
+	case e.BaseBlob == "":
+		e.BaseBlob = pin
+	case e.BaseBlob != pin && (ok || e.Kind != draft.KindDelete):
+		return nil, &movedPin{BaseMovedError: git.BaseMovedError{Path: e.SourceFile}, base: c.baseBranch}
+	}
+	if !ok {
+		return nil, nil
+	}
+	return content, nil
+}
+
+// movedPin is an entry pinned to a version of its file base has moved past:
+// a conflict to the stager, and to propose the *git.BaseMovedError the commit
+// would meet.
+type movedPin struct {
+	git.BaseMovedError
+	base string
+}
+
+func (m *movedPin) Error() string {
+	return fmt.Sprintf("%v: %s changed on %s after this change was made from it; make the change again on the current version", model.ErrConflict, m.Path, m.base)
+}
+
+func (m *movedPin) Unwrap() []error { return []error{model.ErrConflict, &m.BaseMovedError} }
+
+// fieldEditAccess is a settings edit's access, the VM's update, and a dry
+// run of the edit on the file git declares the VM in, never the file the
+// client named: what it would commit is checked as the commit checks it
+// (editedOnly). An edit that does not apply is left to the commit to report.
+func (c *Coordinator) fieldEditAccess(read *git.Repo, proj project.ProjectInfo, e draft.Entry) ([]Access, error) {
+	ref := model.ObjectRef{Kind: model.KindVM.Kind, Namespace: e.Namespace, Name: e.Name}
+	need := []Access{access(verbUpdate, model.KindVM, ref)}
+	vm, declared, err := findVM(read, c.baseBranch, e.Namespace, e.Name)
+	if err != nil || !declared {
+		return need, err
+	}
+	current, err := read.FileOnBranch(c.baseBranch, vm.SourceFile)
+	if err != nil {
+		return nil, err
+	}
+	out, err := manifest.ApplyEdit(current, e.Namespace, e.Name, *e.Edit)
+	if err != nil {
+		return need, nil
+	}
+	return need, editedOnly(proj, vm.SourceFile, ref, current, out)
+}
+
+// editedOnly refuses a settings edit's result unless, read as Argo reads it,
+// it declares what the file declared, in order, with every object but the
+// edited one unchanged, and passes the placement guard: a value carrying a
+// document break or a key would otherwise add or alter an object no gate
+// weighed.
+func editedOnly(proj project.ProjectInfo, path string, edited model.ObjectRef, current, out []byte) error {
+	before, err := argoObjects(path, current)
+	if err != nil {
+		return fmt.Errorf("%w: %s as it stands %v; change it in git", model.ErrConflict, path, err)
+	}
+	after, err := argoObjects(path, out)
+	refuse := fmt.Errorf("%w: the settings edit of %s/%s would change %s beyond that VM", model.ErrInvalid, edited.Namespace, edited.Name, path)
+	if err != nil || len(after) != len(before) {
+		return refuse
+	}
+	for i, o := range after {
+		if o.ref != before[i].ref || o.ref != edited && !reflect.DeepEqual(o.body, before[i].body) {
+			return refuse
+		}
+	}
+	return requirePlacement(proj, path, out)
 }
 
 const (
@@ -128,11 +243,13 @@ type fileChange struct {
 }
 
 // fileAccess validates what ch leaves at its path and derives the accesses it
-// makes, by comparing it with what base holds there: an object only after
-// declares is created, one both declare is updated when it differs, one only
-// before declares is deleted. want, when set, is the identity the write
-// claims; a revert claims none and may restore any managed object.
-func fileAccess(proj project.ProjectInfo, ch fileChange, want func(after []object) error) ([]Access, error) {
+// makes. An object the branch does not declare is created; one it declares,
+// in this file or another, is updated when this file changes it; one only
+// this file declared, and no longer does, is deleted. An object Argo replaces
+// rather than patches (see replaced) is deleted and created. want, when set,
+// is the identity the write claims; a revert claims none and may restore any
+// managed object.
+func fileAccess(proj project.ProjectInfo, idx declaredIndex, ch fileChange, want func(after []object) error) ([]Access, error) {
 	var before, after []object
 	if ch.before != nil {
 		var err error
@@ -163,32 +280,77 @@ func fileAccess(proj project.ProjectInfo, ch fileChange, want func(after []objec
 	for _, o := range before {
 		was[o.ref] = o
 	}
+	declared := make(map[model.ObjectRef]bool, len(after))
 	var need []Access
 	for _, o := range after {
-		prev, had := was[o.ref]
-		delete(was, o.ref)
-		verb := verbCreate
-		if had {
-			if reflect.DeepEqual(prev.body, o.body) {
-				continue
-			}
-			verb = verbUpdate
+		if declared[o.ref] {
+			return nil, fmt.Errorf("%w: %s declares %s %s twice", model.ErrInvalid, ch.path, o.ref.Kind, o.ref.Name)
 		}
-		need = append(need, access(verb, o.kind, o.ref))
-		if o.kind == model.KindRB {
-			bind, err := bindAccess(o)
-			if err != nil {
-				return nil, err
-			}
-			need = append(need, bind)
+		declared[o.ref] = true
+		prev, inFile := was[o.ref]
+		_, onBranch := idx.Files[o.ref]
+		if inFile && reflect.DeepEqual(prev.body, o.body) {
+			continue
 		}
+		a, err := objectAccess(o, inFile || onBranch)
+		if err != nil {
+			return nil, err
+		}
+		need = append(need, a...)
 	}
 	for _, o := range before {
-		if _, gone := was[o.ref]; gone {
-			need = append(need, access(verbDelete, o.kind, o.ref))
+		if declared[o.ref] {
+			continue
 		}
+		if p, ok := idx.Files[o.ref]; ok && p != ch.path {
+			continue
+		}
+		need = append(need, access(verbDelete, o.kind, o.ref))
 	}
 	return need, nil
+}
+
+// objectAccess is what Argo applying o does: a create, or an update when the
+// object is declared already, or a delete and a create when Argo replaces it.
+// A RoleBinding carries itself, for the apiserver to weigh the escalation
+// rule bindings face.
+func objectAccess(o object, declared bool) ([]Access, error) {
+	verb := verbCreate
+	if declared {
+		verb = verbUpdate
+	}
+	var need []Access
+	if replaced(o) {
+		verb = verbCreate
+		need = append(need, access(verbDelete, o.kind, o.ref))
+	}
+	a := access(verb, o.kind, o.ref)
+	if o.kind == model.KindRB {
+		raw, err := json.Marshal(o.body)
+		if err != nil {
+			return nil, err
+		}
+		a.Object = string(raw)
+	}
+	return append(need, a), nil
+}
+
+// replaced reports whether Argo deletes and re-creates o instead of patching
+// it: a sync option forcing a replace, or a hook, which a sync creates anew
+// and deletes by its policy.
+func replaced(o object) bool {
+	meta, _ := o.body["metadata"].(map[string]any)
+	annotations, _ := meta["annotations"].(map[string]any)
+	for k, v := range annotations {
+		value, _ := v.(string)
+		switch {
+		case k == "argocd.argoproj.io/sync-options" && (strings.Contains(value, "Replace=true") || strings.Contains(value, "Force=true")):
+			return true
+		case strings.HasPrefix(k, "argocd.argoproj.io/hook"), strings.HasPrefix(k, "helm.sh/hook"):
+			return true
+		}
+	}
+	return false
 }
 
 // libraryAccess gates a write under templates/: blueprints Argo never
@@ -219,24 +381,7 @@ func access(verb string, k model.Kind, ref model.ObjectRef) Access {
 	if k.ClusterScoped {
 		a.Namespace = ""
 	}
-	if verb == verbCreate {
-		a.Name = ""
-	}
 	return a
-}
-
-// bindAccess is the right a RoleBinding needs beyond its own create or
-// update: binding the role it references, in its namespace, as the
-// apiserver's escalation check asks it.
-func bindAccess(rb object) (Access, error) {
-	ref, _ := rb.body["roleRef"].(map[string]any)
-	kind, _ := ref["kind"].(string)
-	name, _ := ref["name"].(string)
-	resource := map[string]string{"ClusterRole": "clusterroles", "Role": "roles"}[kind]
-	if resource == "" || name == "" {
-		return Access{}, fmt.Errorf("%w: RoleBinding %s must reference a Role or ClusterRole by name", model.ErrInvalid, rb.ref.Name)
-	}
-	return Access{Verb: "bind", Group: model.KindRB.Group, Resource: resource, Namespace: rb.ref.Namespace, Name: name}, nil
 }
 
 // expected is the identity e's manifest claims: one object of e's resource

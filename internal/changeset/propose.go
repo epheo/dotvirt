@@ -59,31 +59,30 @@ func (r *Reader) proposedBranch(user, project string) string {
 	return r.proposed + "/" + refSegment(user) + "/" + refSegment(project) + "-" + shortHash(user, project)
 }
 
-func (c *Coordinator) toChangesetItems(entries []draft.Entry) []git.ChangesetItem {
+// toChangesetItems is the commit of entries, each read as the gate weighed it
+// (writeOf). A settings edit is applied to its file as base holds it at
+// commit time, and its result checked there (editedOnly): those are the bytes
+// the gate could only preview.
+func (c *Coordinator) toChangesetItems(proj project.ProjectInfo, entries []draft.Entry) []git.ChangesetItem {
 	items := make([]git.ChangesetItem, 0, len(entries))
 	for _, e := range entries {
-		switch e.Kind {
-		case draft.KindEdit:
-			// A template edit replaces the file wholesale (Manifest set); a VM
-			// edit patches targeted fields into the file as base holds it at
-			// commit time.
-			if e.Manifest != "" {
-				items = append(items, git.ChangesetItem{Path: e.SourceFile, NewContent: []byte(e.Manifest), BaseBlob: e.BaseBlob})
-				continue
-			}
-			if e.Edit == nil {
-				continue
-			}
+		switch writeOf(e) {
+		case wholeFile:
+			items = append(items, git.ChangesetItem{Path: e.SourceFile, NewContent: []byte(e.Manifest), BaseBlob: e.BaseBlob})
+		case fieldWrite:
 			edit := *e.Edit
+			vm := model.ObjectRef{Kind: model.KindVM.Kind, Namespace: e.Namespace, Name: e.Name}
 			items = append(items, git.ChangesetItem{
 				Path: e.SourceFile,
 				Transform: func(current []byte) ([]byte, error) {
-					return manifest.ApplyEdit(current, e.Namespace, e.Name, edit)
+					out, err := manifest.ApplyEdit(current, e.Namespace, e.Name, edit)
+					if err != nil {
+						return nil, err
+					}
+					return out, editedOnly(proj, e.SourceFile, vm, current, out)
 				},
 			})
-		case draft.KindCreate:
-			items = append(items, git.ChangesetItem{Path: e.SourceFile, NewContent: []byte(e.Manifest), BaseBlob: e.BaseBlob})
-		case draft.KindDelete:
+		case removal:
 			items = append(items, git.ChangesetItem{Path: e.SourceFile, Delete: true, BaseBlob: e.BaseBlob})
 		}
 	}
