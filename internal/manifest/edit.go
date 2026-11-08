@@ -74,6 +74,9 @@ func ApplyEdit(content []byte, defaultNS, namespace, name string, edit VMEdit) (
 	if err := verifyEdit(out, defaultNS, namespace, name, edit); err != nil {
 		return nil, err
 	}
+	if err := verifyScope(content, out, defaultNS, namespace, name, edit); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -85,17 +88,11 @@ func applyEvictionStrategy(ed *lineEditor, vmRoot *yaml.Node, strategy string) {
 	if s == nil {
 		return
 	}
-	if es := get(s, "evictionStrategy"); es != nil {
-		if strategy == "" {
-			ed.deleteChild(s, "evictionStrategy")
-			return
-		}
-		ed.setScalarAt(es, ed.str(strategy))
+	if strategy == "" {
+		ed.deleteChild(s, "evictionStrategy")
 		return
 	}
-	if strategy != "" {
-		ed.insertChild(s, "evictionStrategy", ed.str(strategy))
-	}
+	ed.upsertChild(s, "evictionStrategy", ed.str(strategy))
 }
 
 // applySizing writes the VM's CPU/memory in exactly one representation - an
@@ -182,14 +179,8 @@ func applyRef(ed *lineEditor, vmRoot *yaml.Node, key, value string) {
 		// A captured ControllerRevision pin (older KubeVirt writes it into spec)
 		// must not survive a matcher edit: the webhook rejects a Name change that
 		// keeps the old RevisionName.
-		if get(ref, "revisionName") != nil {
-			ed.deleteChild(ref, "revisionName")
-		}
-		if nameNode := get(ref, "name"); nameNode != nil {
-			ed.setScalarAt(nameNode, value)
-			return
-		}
-		ed.insertChild(ref, "name", value)
+		ed.deleteChild(ref, "revisionName")
+		ed.upsertChild(ref, "name", value)
 		return
 	}
 	ed.insertBlock(spec, []string{key + ":", "  name: " + value})
@@ -238,12 +229,12 @@ func applyPower(ed *lineEditor, spec *yaml.Node, power string) {
 		return
 	}
 	on := power == string(model.PowerOn)
-	if running := get(s, "running"); running != nil {
-		ed.setScalarAt(running, boolStr(on))
+	if get(s, "running") != nil {
+		ed.setChild(s, "running", boolStr(on))
 		return
 	}
-	if rs := get(s, "runStrategy"); rs != nil {
-		ed.setScalarAt(rs, model.RunStrategy(on))
+	if get(s, "runStrategy") != nil {
+		ed.setChild(s, "runStrategy", model.RunStrategy(on))
 		return
 	}
 	ed.insertChild(s, "runStrategy", model.RunStrategy(on))
@@ -270,7 +261,7 @@ func applyCPU(ed *lineEditor, vmRoot *yaml.Node, vcpus int) {
 	}
 	cores, sockets, threads := get(cpu, "cores"), get(cpu, "sockets"), get(cpu, "threads")
 	if cores != nil && sockets == nil && threads == nil {
-		ed.setScalarAt(cores, val)
+		ed.setChild(cpu, "cores", val)
 		return
 	}
 	if cores != nil {
@@ -279,11 +270,7 @@ func applyCPU(ed *lineEditor, vmRoot *yaml.Node, vcpus int) {
 	if threads != nil {
 		ed.deleteChild(cpu, "threads")
 	}
-	if sockets != nil {
-		ed.setScalarAt(sockets, val)
-		return
-	}
-	ed.insertChild(cpu, "sockets", val)
+	ed.upsertChild(cpu, "sockets", val)
 }
 
 func applyMemory(ed *lineEditor, vmRoot *yaml.Node, memory string) {
@@ -293,20 +280,12 @@ func applyMemory(ed *lineEditor, vmRoot *yaml.Node, memory string) {
 	}
 	memory = ed.str(memory)
 	if mem := get(domain, "memory"); mem != nil {
-		if g := get(mem, "guest"); g != nil {
-			ed.setScalarAt(g, memory)
-			return
-		}
-		ed.insertChild(mem, "guest", memory)
+		ed.upsertChild(mem, "guest", memory)
 		return
 	}
-	if res := get(domain, "resources"); res != nil {
-		if reqs := get(res, "requests"); reqs != nil {
-			if m := get(reqs, "memory"); m != nil {
-				ed.setScalarAt(m, memory)
-				return
-			}
-		}
+	if reqs := get(get(domain, "resources"), "requests"); get(reqs, "memory") != nil {
+		ed.setChild(reqs, "memory", memory)
+		return
 	}
 	ed.insertBlock(domain, []string{"memory:", "  guest: " + memory})
 }

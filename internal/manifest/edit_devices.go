@@ -39,12 +39,25 @@ func applyDisksNetworks(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) {
 		removeDisk(ed, spec, tmplSpec, devices, name)
 	}
 
+	added := map[string]bool{}
 	for _, n := range edit.AddNetworks {
-		iface := "- name: " + ed.str(n.InterfaceName())
+		name := n.InterfaceName()
+		if added[name] || namedItem(get(devices, "interfaces"), name) != nil || namedItem(get(tmplSpec, "networks"), name) != nil {
+			ed.fail(fmt.Errorf("%w: %s already has an interface named %s", model.ErrConflict, vm, name))
+			return
+		}
+		if pod := podNetwork(get(tmplSpec, "networks")); n.Name == model.PodNetwork && pod != "" {
+			ed.fail(fmt.Errorf("%w: %s is already on the pod network, through interface %s", model.ErrConflict, vm, pod))
+			return
+		}
+		added[name] = true
+		iface := "- name: " + ed.str(name)
 		binding, network := "  bridge: {}", []string{"  multus:", "    networkName: " + ed.str(n.Name)}
 		if n.Name == model.PodNetwork {
 			// Masquerade, as vmgen's primary NIC: the binding KubeVirt
 			// recommends on the pod network, where bridge is often refused.
+			// The model does not record a live NIC's binding, so an adopted pod
+			// NIC on another one (l2bridge, passt) is written as masquerade too.
 			binding, network = "  masquerade: {}", []string{"  pod: {}"}
 		}
 		appendItem(ed, get(devices, "interfaces"), []string{iface, binding})
@@ -54,6 +67,23 @@ func applyDisksNetworks(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) {
 		removeNamedItem(ed, get(devices, "interfaces"), name)
 		removeNamedItem(ed, get(tmplSpec, "networks"), name)
 	}
+}
+
+// defaultDiskSize is an added disk's size when the edit names none.
+const defaultDiskSize = "10Gi"
+
+// podNetwork is the name of the networks entry on the pod network, "" when
+// none is.
+func podNetwork(networks *yaml.Node) string {
+	if networks == nil {
+		return ""
+	}
+	for _, n := range networks.Content {
+		if get(n, "pod") != nil {
+			return nodeValue(get(n, "name"))
+		}
+	}
+	return ""
 }
 
 // applyAddDisks adds each new disk as a persistent, blank DataVolume: a disk
@@ -66,12 +96,23 @@ func applyAddDisks(ed *lineEditor, spec, tmplSpec, devices *yaml.Node, vm string
 		return
 	}
 	templates := get(spec, "dataVolumeTemplates")
+	if templates != nil && (templates.Kind != yaml.SequenceNode || len(templates.Content) == 0) {
+		// A null or empty list has no item to align with: write it anew.
+		ed.deleteChild(spec, "dataVolumeTemplates")
+		templates = nil
+	}
 	var created []string // a new dataVolumeTemplates section, built when none exists
+	seen := map[string]bool{}
 	for _, d := range adds {
 		dv := vm + "-" + d.Name
+		if seen[d.Name] || namedItem(get(devices, "disks"), d.Name) != nil || namedItem(get(tmplSpec, "volumes"), d.Name) != nil || templateNamed(templates, dv) != nil {
+			ed.fail(fmt.Errorf("%w: %s already has a disk named %s", model.ErrConflict, vm, d.Name))
+			return
+		}
+		seen[d.Name] = true
 		size := d.Size
 		if size == "" {
-			size = "10Gi"
+			size = defaultDiskSize
 		}
 		appendItem(ed, get(devices, "disks"), []string{
 			"- name: " + ed.str(d.Name),

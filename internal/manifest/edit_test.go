@@ -129,7 +129,9 @@ func TestApplyEditRefusesNonLFLineBreaks(t *testing.T) {
 			t.Errorf("separator %q: expected refusal", sep)
 		}
 	}
-	crlf := strings.ReplaceAll(realisticVM, "\n", "\r\n")
+	// A disk lands as device, volume and DataVolume: the VM needs a volumes list.
+	withVolumes := realisticVM + "      volumes:\n      - name: rootdisk\n        containerDisk:\n          image: fedora\n"
+	crlf := strings.ReplaceAll(withVolumes, "\n", "\r\n")
 	out, err := ApplyEdit([]byte(crlf), "vm-health-gitops", "vm-health-gitops", "vm-health", add)
 	if err != nil {
 		t.Fatalf("CRLF must stay editable: %v", err)

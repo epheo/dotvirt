@@ -204,7 +204,7 @@ spec:
 		{"network without interfaces", noInterfaces, "implicit pod network", VMEdit{AddNetworks: []model.NetworkAdd{{Name: "vlan-10"}}}},
 		{"cpu without template", noTemplate, "CPU", VMEdit{CPUCores: ptr(2)}},
 		{"eviction without template", noTemplate, "eviction strategy", VMEdit{EvictionStrategy: ptr("None")}},
-		{"multi-line scalar", blockScalar, "memory", VMEdit{Memory: ptr("4Gi")}},
+		{"multi-line scalar", blockScalar, "spans lines", VMEdit{Memory: ptr("4Gi")}},
 		{"migration of a non-DataVolume disk", noInterfaces, "rootdisk", VMEdit{MigrateVolumes: []model.VolumeMigration{{Name: "rootdisk", StorageClass: "fast"}}}},
 	}
 	for _, c := range cases {
@@ -227,13 +227,9 @@ func TestEditLeavesUntouchedFlowAlone(t *testing.T) {
 	}
 }
 
-// verifyEdit is the only thing standing between a splice the layout defeated
-// and a PR that announces it, so every VMEdit field must be read back. Each
-// sample sets one field to a value the unedited manifest does not hold:
-// verifyEdit must refuse it as unapplied. A field added to VMEdit without a
-// sample here, or one verifyEdit ignores, fails.
-func TestVerifyEditCoversEveryField(t *testing.T) {
-	const base = `apiVersion: kubevirt.io/v1
+// guardVM holds one of everything an edit can touch: labels, inline sizing,
+// a DataVolume disk, a pod NIC, a placement group.
+const guardVM = `apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
   name: web
@@ -277,45 +273,126 @@ spec:
         dataVolume:
           name: web-data
 `
-	samples := map[string]VMEdit{
-		"Power":            {Power: ptr("Off")},
-		"CPUCores":         {CPUCores: ptr(4)},
-		"Memory":           {Memory: ptr("4Gi")},
-		"Instancetype":     {Instancetype: ptr("u1.small")},
-		"Preference":       {Preference: ptr("fedora")},
-		"Sizing":           {Sizing: ptr("instancetype")},
-		"SetLabels":        {SetLabels: map[string]string{"env": "prod"}},
-		"RemoveLabels":     {RemoveLabels: []string{"app"}},
-		"DRSExclude":       {DRSExclude: ptr(true)},
-		"EvictionStrategy": {EvictionStrategy: ptr("None")},
-		"AddDisks":         {AddDisks: []model.DiskAdd{{Name: "extra", Size: "1Gi"}}},
-		"RemoveDisks":      {RemoveDisks: []string{"data"}},
-		"AddNetworks":      {AddNetworks: []model.NetworkAdd{{Name: "vlan-10"}}},
-		"RemoveNetworks":   {RemoveNetworks: []string{"default"}},
-		"MigrateVolumes":   {MigrateVolumes: []model.VolumeMigration{{Name: "data", StorageClass: "fast"}}},
-		"Pin":              {Pin: &[]string{"n1"}},
-		"AddGroups":        {AddGroups: []model.PlacementGroup{{Name: "db", Mode: "apart"}}},
-		"RemoveGroups":     {RemoveGroups: []string{"tier"}},
+
+// guardVMWithInstancetype is guardVM wrongly carrying both representations,
+// the one a sizing switch to custom acts on.
+var guardVMWithInstancetype = strings.Replace(guardVM, "  runStrategy: Always\n", "  runStrategy: Always\n  instancetype:\n    name: u1.small\n", 1)
+
+// The read-back and the scope check are what stand between a splice the
+// layout defeated and a PR that announces it, so both must know every VMEdit
+// field. Each sample sets one field to a value the unedited manifest does not
+// hold: the read-back must refuse the unedited file, the edit must apply, and
+// the scope check must refuse the applied file once something no edit owns
+// changes beside it. A field added to VMEdit without a sample here fails.
+func TestVerifyEditCoversEveryField(t *testing.T) {
+	samples := map[string]struct {
+		base string
+		edit VMEdit
+	}{
+		"Power":            {guardVM, VMEdit{Power: ptr("Off")}},
+		"CPUCores":         {guardVM, VMEdit{CPUCores: ptr(4)}},
+		"Memory":           {guardVM, VMEdit{Memory: ptr("4Gi")}},
+		"Instancetype":     {guardVM, VMEdit{Instancetype: ptr("u1.small")}},
+		"Preference":       {guardVM, VMEdit{Preference: ptr("fedora")}},
+		"Sizing":           {guardVMWithInstancetype, VMEdit{Sizing: ptr("custom")}},
+		"SetLabels":        {guardVM, VMEdit{SetLabels: map[string]string{"env": "prod"}}},
+		"RemoveLabels":     {guardVM, VMEdit{RemoveLabels: []string{"app"}}},
+		"DRSExclude":       {guardVM, VMEdit{DRSExclude: ptr(true)}},
+		"EvictionStrategy": {guardVM, VMEdit{EvictionStrategy: ptr("None")}},
+		"AddDisks":         {guardVM, VMEdit{AddDisks: []model.DiskAdd{{Name: "extra", Size: "1Gi"}}}},
+		"RemoveDisks":      {guardVM, VMEdit{RemoveDisks: []string{"data"}}},
+		"AddNetworks":      {guardVM, VMEdit{AddNetworks: []model.NetworkAdd{{Name: "vlan-10"}}}},
+		"RemoveNetworks":   {guardVM, VMEdit{RemoveNetworks: []string{"default"}}},
+		"MigrateVolumes":   {guardVM, VMEdit{MigrateVolumes: []model.VolumeMigration{{Name: "data", StorageClass: "fast"}}}},
+		"Pin":              {guardVM, VMEdit{Pin: &[]string{"n1"}}},
+		"AddGroups":        {guardVM, VMEdit{AddGroups: []model.PlacementGroup{{Name: "db", Mode: "apart"}}}},
+		"RemoveGroups":     {guardVM, VMEdit{RemoveGroups: []string{"tier"}}},
 	}
-	if err := verifyEdit([]byte(base), "alpha", "alpha", "web", VMEdit{}); err != nil {
+	if err := verifyEdit([]byte(guardVM), "alpha", "alpha", "web", VMEdit{}); err != nil {
 		t.Fatalf("the unedited manifest must verify against an empty edit: %v", err)
 	}
 	typ := reflect.TypeOf(VMEdit{})
 	for i := range typ.NumField() {
 		field := typ.Field(i).Name
-		edit, ok := samples[field]
+		s, ok := samples[field]
 		if !ok {
-			t.Errorf("VMEdit.%s has no sample: add one here and its read-back to verifyEdit", field)
+			t.Errorf("VMEdit.%s has no sample: add one here, its read-back to verifyEdit and its paths to ownedPaths", field)
 			continue
 		}
-		v := reflect.ValueOf(edit)
+		v := reflect.ValueOf(s.edit)
 		for j := range typ.NumField() {
 			if set := !v.Field(j).IsZero(); set != (j == i) {
 				t.Errorf("sample for %s must set only %s, %s set = %v", field, field, typ.Field(j).Name, set)
 			}
 		}
-		if err := verifyEdit([]byte(base), "alpha", "alpha", "web", edit); !errors.Is(err, model.ErrConflict) {
+		if err := verifyEdit([]byte(s.base), "alpha", "alpha", "web", s.edit); !errors.Is(err, model.ErrConflict) {
 			t.Errorf("verifyEdit ignores VMEdit.%s: an unapplied %s passed (%v)", field, field, err)
+		}
+		out, err := ApplyEdit([]byte(s.base), "alpha", "alpha", "web", s.edit)
+		if err != nil {
+			t.Errorf("%s: the sample must apply: %v", field, err)
+			continue
+		}
+		damaged := strings.Replace(string(out), "metadata:\n  name: web\n", "metadata:\n  name: web\n  annotations:\n    collateral: x\n", 1)
+		if err := verifyScope([]byte(s.base), []byte(damaged), "alpha", "alpha", "web", s.edit); !errors.Is(err, model.ErrConflict) {
+			t.Errorf("%s: collateral damage beside the edit passed the scope check (%v)", field, err)
+		}
+	}
+}
+
+// An added or listed item is read back by every field it carries: a sample
+// that differs from guardVM's item in one field must fail the read-back, and
+// the one matching it in all must pass, so the refusal is that field's.
+func TestVerifyEditCoversEveryItemField(t *testing.T) {
+	cases := map[reflect.Type]struct {
+		match  VMEdit
+		differ map[string]VMEdit
+	}{
+		reflect.TypeOf(model.DiskAdd{}): {
+			VMEdit{AddDisks: []model.DiskAdd{{Name: "data", Size: "10Gi"}}},
+			map[string]VMEdit{
+				"Name":         {AddDisks: []model.DiskAdd{{Name: "extra", Size: "10Gi"}}},
+				"Size":         {AddDisks: []model.DiskAdd{{Name: "data", Size: "20Gi"}}},
+				"StorageClass": {AddDisks: []model.DiskAdd{{Name: "data", Size: "10Gi", StorageClass: "fast"}}},
+			},
+		},
+		reflect.TypeOf(model.NetworkAdd{}): {
+			VMEdit{AddNetworks: []model.NetworkAdd{{Name: model.PodNetwork, Interface: "default"}}},
+			map[string]VMEdit{
+				"Name":      {AddNetworks: []model.NetworkAdd{{Name: "alpha/vlan-10", Interface: "default"}}},
+				"Interface": {AddNetworks: []model.NetworkAdd{{Name: model.PodNetwork, Interface: "nic-1"}}},
+			},
+		},
+		reflect.TypeOf(model.VolumeMigration{}): {
+			VMEdit{MigrateVolumes: []model.VolumeMigration{{Name: "data"}}},
+			map[string]VMEdit{
+				"Name":         {MigrateVolumes: []model.VolumeMigration{{Name: "other"}}},
+				"StorageClass": {MigrateVolumes: []model.VolumeMigration{{Name: "data", StorageClass: "fast"}}},
+			},
+		},
+		reflect.TypeOf(model.PlacementGroup{}): {
+			VMEdit{AddGroups: []model.PlacementGroup{{Name: "tier", Mode: "together"}}},
+			map[string]VMEdit{
+				"Name":   {AddGroups: []model.PlacementGroup{{Name: "db", Mode: "together"}}},
+				"Mode":   {AddGroups: []model.PlacementGroup{{Name: "tier", Mode: "apart"}}},
+				"Strict": {AddGroups: []model.PlacementGroup{{Name: "tier", Mode: "together", Strict: true}}},
+			},
+		},
+	}
+	for typ, c := range cases {
+		if err := verifyEdit([]byte(guardVM), "alpha", "alpha", "web", c.match); err != nil {
+			t.Errorf("%s: the matching sample must pass: %v", typ.Name(), err)
+		}
+		for i := range typ.NumField() {
+			field := typ.Field(i).Name
+			edit, ok := c.differ[field]
+			if !ok {
+				t.Errorf("%s.%s has no sample: add one here and its read-back to verifyEdit", typ.Name(), field)
+				continue
+			}
+			if err := verifyEdit([]byte(guardVM), "alpha", "alpha", "web", edit); !errors.Is(err, model.ErrConflict) {
+				t.Errorf("verifyEdit ignores %s.%s (%v)", typ.Name(), field, err)
+			}
 		}
 	}
 }

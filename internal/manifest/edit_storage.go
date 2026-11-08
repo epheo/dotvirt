@@ -38,15 +38,12 @@ func applyVolumeMigrations(ed *lineEditor, vmRoot *yaml.Node, migrations []model
 	if !applied {
 		return
 	}
-	if uvs := get(spec, "updateVolumesStrategy"); uvs != nil {
-		ed.setScalarAt(uvs, "Migration")
-	} else {
-		ed.insertChild(spec, "updateVolumesStrategy", "Migration")
-	}
+	ed.upsertChild(spec, "updateVolumesStrategy", "Migration")
 }
 
 func migrateOneVolume(ed *lineEditor, templates, volumes *yaml.Node, m model.VolumeMigration) bool {
-	dvName := get(get(namedItem(volumes, m.Name), "dataVolume"), "name")
+	dv := get(namedItem(volumes, m.Name), "dataVolume")
+	dvName := get(dv, "name")
 	if dvName == nil {
 		return false // not DataVolume-backed
 	}
@@ -61,15 +58,9 @@ func migrateOneVolume(ed *lineEditor, templates, volumes *yaml.Node, m model.Vol
 	}
 
 	newName := ed.str(nextDVName(dvName.Value, templates))
-	ed.setScalarAt(get(get(tmpl, "metadata"), "name"), newName)
-	ed.setScalarAt(dvName, newName)
-
-	class := ed.str(m.StorageClass)
-	if sc := get(storage, "storageClassName"); sc != nil {
-		ed.setScalarAt(sc, class)
-	} else {
-		ed.insertChild(storage, "storageClassName", class)
-	}
+	ed.setChild(get(tmpl, "metadata"), "name", newName)
+	ed.setChild(dv, "name", newName)
+	ed.upsertChild(storage, "storageClassName", ed.str(m.StorageClass))
 
 	// The destination provisions blank: its content comes from the live copy,
 	// so importing the original source again would only be overwritten.

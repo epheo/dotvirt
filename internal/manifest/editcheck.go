@@ -55,9 +55,7 @@ func ValidateEdit(e VMEdit) error {
 		if n.Name != model.PodNetwork {
 			add(validate.RequireNetworkRef("network", n.Name))
 		}
-		if n.Interface != "" {
-			add(validate.RequireDNS1123("interface name", n.Interface))
-		}
+		add(validate.RequireInterfaceName("interface name", n.InterfaceName()))
 	}
 	for _, m := range e.MigrateVolumes {
 		add(validate.RequireObjectName("storage class", m.StorageClass))
@@ -123,8 +121,12 @@ func verifyEdit(out []byte, defaultNS, namespace, name string, edit VMEdit) erro
 		disks[d.Name] = d
 	}
 	for _, d := range edit.AddDisks {
-		_, ok := disks[d.Name]
-		want(ok, "disk "+d.Name)
+		size := d.Size
+		if size == "" {
+			size = defaultDiskSize
+		}
+		got, ok := disks[d.Name]
+		want(ok && got.Type == "dataVolume" && got.Size == size && got.StorageClass == d.StorageClass, "disk "+d.Name)
 	}
 	for _, n := range edit.RemoveDisks {
 		_, ok := disks[n]

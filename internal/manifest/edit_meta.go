@@ -21,6 +21,9 @@ func applyMapEdits(ed *lineEditor, parent *yaml.Node, field string, set map[stri
 		return
 	}
 	m := mappingField(ed, parent, field)
+	if m != nil && ed.inFlow(m) {
+		return
+	}
 
 	if m == nil {
 		if len(set) == 0 {
@@ -45,16 +48,14 @@ func applyMapEdits(ed *lineEditor, parent *yaml.Node, field string, set map[stri
 	}
 
 	for _, k := range sortedKeys(set) {
-		if existing := get(m, k); existing != nil {
-			ed.setScalarAt(existing, ed.str(set[k]))
+		if get(m, k) != nil {
+			ed.setChild(m, k, ed.str(set[k]))
 		} else {
 			ed.insertChild(m, ed.str(k), ed.str(set[k]))
 		}
 	}
 	for _, k := range remove {
-		if existing := get(m, k); existing != nil {
-			ed.removeLine(existing.Line - 1) // key/value share a line for scalars
-		}
+		ed.deleteChild(m, k)
 	}
 }
 

@@ -131,13 +131,6 @@ func (e *lineEditor) markDeleted(i int) {
 	e.deleted[i] = true
 }
 
-// removeLine marks a single 0-based line for deletion.
-func (e *lineEditor) removeLine(i int) {
-	if i >= 0 && i < len(e.lines) {
-		e.markDeleted(i)
-	}
-}
-
 // removeRange marks lines [start, end) (0-based) for deletion.
 func (e *lineEditor) removeRange(start, end int) {
 	for i := start; i < end && i < len(e.lines); i++ {
@@ -169,7 +162,7 @@ func (e *lineEditor) deleteChild(mapping *yaml.Node, key string) {
 		keyIndent := indentOf(e.lines[start])
 		last := start
 		for j := start + 1; j < len(e.lines); j++ {
-			if strings.TrimSpace(e.lines[j]) == "" {
+			if skippable(e.lines[j]) {
 				continue
 			}
 			if indentOf(e.lines[j]) <= keyIndent {
@@ -182,23 +175,87 @@ func (e *lineEditor) deleteChild(mapping *yaml.Node, key string) {
 	}
 }
 
-// setScalarAt replaces the value of a scalar node in place, keeping the key and
-// indentation, by rewriting "<indent>key: <newval>" from the node's position.
-func (e *lineEditor) setScalarAt(node *yaml.Node, newVal string) {
+// setChild replaces the scalar value of mapping's key in place, keeping the
+// key, the indentation and any trailing comment. No-op if the key is absent.
+// It refuses what a one-line splice cannot rewrite: a value inside a flow
+// collection, one spanning lines, or one an anchor or alias shares.
+func (e *lineEditor) setChild(mapping *yaml.Node, key, newVal string) {
+	node := get(mapping, key)
+	if node == nil || e.inFlow(mapping) {
+		return
+	}
 	idx := node.Line - 1
-	if idx < 0 || idx >= len(e.lines) {
+	if node.Kind != yaml.ScalarNode || node.Anchor != "" || node.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 ||
+		idx < 0 || idx >= len(e.lines) || node.Column < 1 || node.Column-1 > len(e.lines[idx]) {
+		e.fail(fmt.Errorf("%w: the value of %s at line %d spans lines or is shared through an anchor, which the editor cannot rewrite; edit it in git directly", model.ErrConflict, key, node.Line))
 		return
 	}
-	line := e.lines[idx]
-	// The scalar starts at node.Column (1-based). Everything before it (indent +
-	// "key: ") stays; replace from the value onward, preserving trailing comments.
-	prefixLen := node.Column - 1
-	if prefixLen < 0 || prefixLen > len(line) {
+	line, cr := strings.CutSuffix(e.lines[idx], "\r")
+	prefix, rest := line[:node.Column-1], line[node.Column-1:]
+	end, ok := scalarEnd(rest, node.Style)
+	if !ok {
+		e.fail(fmt.Errorf("%w: the value of %s at line %d spans lines, which the editor cannot rewrite; edit it in git directly", model.ErrConflict, key, node.Line))
 		return
 	}
-	prefix := line[:prefixLen]
-	rest := line[prefixLen:]
-	e.lines[idx] = prefix + newVal + trailingComment(rest)
+	e.lines[idx] = prefix + newVal + rest[end:]
+	if cr {
+		e.lines[idx] += "\r"
+	}
+}
+
+// scalarEnd is where the one-line scalar at the start of rest ends, so only
+// the old value is replaced and what follows it (a comment) stays. A tag
+// before the value goes with it. ok is false for a quoted value whose closing
+// quote is not on this line.
+func scalarEnd(rest string, style yaml.Style) (end int, ok bool) {
+	i := 0
+	if strings.HasPrefix(rest, "!") {
+		if i = strings.IndexAny(rest, " \t"); i < 0 {
+			return len(rest), true
+		}
+		for i < len(rest) && (rest[i] == ' ' || rest[i] == '\t') {
+			i++
+		}
+	}
+	switch {
+	case style&yaml.DoubleQuotedStyle != 0:
+		for j := i + 1; j < len(rest); j++ {
+			switch rest[j] {
+			case '\\':
+				j++
+			case '"':
+				return j + 1, true
+			}
+		}
+		return 0, false
+	case style&yaml.SingleQuotedStyle != 0:
+		for j := i + 1; j < len(rest); j++ {
+			if rest[j] != '\'' {
+				continue
+			}
+			if j+1 < len(rest) && rest[j+1] == '\'' {
+				j++
+				continue
+			}
+			return j + 1, true
+		}
+		return 0, false
+	}
+	for j := i; j < len(rest); j++ {
+		if rest[j] == '#' && j > 0 && (rest[j-1] == ' ' || rest[j-1] == '\t') {
+			return strings.LastIndexFunc(rest[:j], func(r rune) bool { return r != ' ' && r != '\t' }) + 1, true
+		}
+	}
+	return len(strings.TrimRight(rest, " \t")), true
+}
+
+// upsertChild is setChild when mapping holds key, insertChild otherwise.
+func (e *lineEditor) upsertChild(mapping *yaml.Node, key, val string) {
+	if get(mapping, key) != nil {
+		e.setChild(mapping, key, val)
+		return
+	}
+	e.insertChild(mapping, key, val)
 }
 
 // insertChild queues "key: val" as a new entry of a block mapping, aligned with
@@ -232,7 +289,7 @@ func (e *lineEditor) mappingLastLine(mapping *yaml.Node) int {
 	start := mapping.Line - 1
 	last := start
 	for i := start; i < len(e.lines); i++ {
-		if strings.TrimSpace(e.lines[i]) == "" {
+		if skippable(e.lines[i]) {
 			continue
 		}
 		// Children sit at indent == col-1; anything shallower ends the mapping.
@@ -265,13 +322,13 @@ func (e *lineEditor) bytes() []byte {
 	return []byte(strings.Join(out, "\n"))
 }
 
-// trailingComment returns any " # ..." comment at the end of a value segment, so
-// rewriting a value preserves an inline comment.
-func trailingComment(rest string) string {
-	if i := strings.Index(rest, " #"); i >= 0 {
-		return rest[i:]
-	}
-	return ""
+// skippable reports whether a line carries no YAML content: blank or a
+// comment. A comment's indentation says nothing about the block around it (a
+// column-0 comment inside a list item is common), so extent scans step over
+// these.
+func skippable(line string) bool {
+	t := strings.TrimSpace(line)
+	return t == "" || strings.HasPrefix(t, "#")
 }
 
 // appendItem queues a sequence item (block lines, already including the leading
@@ -319,7 +376,7 @@ func itemEndLine(ed *lineEditor, seq *yaml.Node, idx int) int {
 	// as part of the item (which would otherwise misplace an append after them).
 	lastContent := startLine
 	for i := startLine + 1; i < len(ed.lines); i++ {
-		if strings.TrimSpace(ed.lines[i]) == "" {
+		if skippable(ed.lines[i]) {
 			continue
 		}
 		if indentOf(ed.lines[i]) <= itemIndent {
