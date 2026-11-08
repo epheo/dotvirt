@@ -251,3 +251,42 @@ func TestVerifyScopeRefusesCollateralDamage(t *testing.T) {
 		t.Errorf("the edit alone must pass: %v", err)
 	}
 }
+
+// Lines of a block scalar are its value even when they start with '#'
+// (cloud-init's "#cloud-config"): an insert after a cloud-init volume listed
+// last must land past the whole script, never inside it.
+func TestEditTreatsBlockScalarLinesAsContent(t *testing.T) {
+	userData := "#cloud-config\npassword: x\n# end\n"
+	ci := strings.Replace(guardVM, "      volumes:\n      - name: data\n        dataVolume:\n          name: web-data\n",
+		"      volumes:\n      - name: data\n        dataVolume:\n          name: web-data\n      - name: cloudinit\n        cloudInitNoCloud:\n          userData: |\n            #cloud-config\n            password: x\n            # end\n", 1)
+	ci = strings.Replace(ci, "              bus: virtio\n", "              bus: virtio\n          - name: cloudinit\n            disk:\n              bus: virtio\n", 1)
+	noEviction := strings.Replace(ci, "      evictionStrategy: LiveMigrate\n", "", 1)
+	for name, c := range map[string]struct {
+		in   string
+		edit VMEdit
+	}{
+		"append a volume after it":   {ci, VMEdit{AddDisks: []model.DiskAdd{{Name: "extra", Size: "1Gi"}}}},
+		"insert into the spec":       {noEviction, VMEdit{EvictionStrategy: ptr("None")}},
+		"remove the volume above it": {ci, VMEdit{RemoveDisks: []string{"data"}}},
+	} {
+		out, err := applyGuard(t, c.in, c.edit)
+		if err != nil {
+			t.Errorf("%s: ApplyEdit: %v", name, err)
+			continue
+		}
+		vols, _ := lookup(decoded(t, out), "spec", "template", "spec", "volumes").([]any)
+		var got any
+		for _, v := range vols {
+			if itemName(v) == "cloudinit" {
+				got = lookup(v, "cloudInitNoCloud", "userData")
+			}
+		}
+		if got != userData {
+			t.Errorf("%s: userData = %q, want %q\n%s", name, got, userData, out)
+		}
+	}
+	out, err := applyGuard(t, ci, VMEdit{RemoveDisks: []string{"cloudinit"}})
+	if err != nil || strings.Contains(string(out), "# end") || strings.Contains(string(out), "cloud-config") {
+		t.Errorf("removing the cloud-init disk must take its whole script: %v\n%s", err, out)
+	}
+}

@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"strconv"
@@ -34,7 +35,49 @@ func newLineEditor(content []byte) (*lineEditor, error) {
 			return nil, errors.New("manifest uses a line break other than LF or CRLF")
 		}
 	}
-	return &lineEditor{lines: strings.Split(s, "\n")}, nil
+	e := &lineEditor{lines: strings.Split(s, "\n")}
+	e.markScalarBodies(content)
+	return e, nil
+}
+
+// markScalarBodies records the lines of every literal or folded scalar's body:
+// they are the value, even when one starts with '#' (a "#cloud-config"
+// header), so the extent scans must not step over them as comments.
+func (e *lineEditor) markScalarBodies(content []byte) {
+	dec := yaml.NewDecoder(bytes.NewReader(content))
+	for {
+		var doc yaml.Node
+		if dec.Decode(&doc) != nil {
+			return
+		}
+		e.markBodies(&doc)
+	}
+}
+
+func (e *lineEditor) markBodies(n *yaml.Node) {
+	if n.Kind == yaml.ScalarNode && n.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 {
+		head := n.Line - 1 // the indicator's line; the body is indented past it
+		if head < 0 || head >= len(e.lines) {
+			return
+		}
+		indent := indentOf(e.lines[head])
+		for i := head + 1; i < len(e.lines); i++ {
+			if strings.TrimSpace(e.lines[i]) == "" {
+				continue
+			}
+			if indentOf(e.lines[i]) <= indent {
+				break
+			}
+			if e.body == nil {
+				e.body = map[int]bool{}
+			}
+			e.body[i] = true
+		}
+		return
+	}
+	for _, c := range n.Content {
+		e.markBodies(c)
+	}
 }
 
 // lineEditor applies in-place line edits, insertions, and deletions to a file's
@@ -45,6 +88,7 @@ type lineEditor struct {
 	lines   []string
 	inserts []insertion  // queued block insertions
 	deleted map[int]bool // 0-based line indices to drop
+	body    map[int]bool // 0-based lines of block scalar bodies (see markScalarBodies)
 	err     error
 }
 
@@ -162,7 +206,7 @@ func (e *lineEditor) deleteChild(mapping *yaml.Node, key string) {
 		keyIndent := indentOf(e.lines[start])
 		last := start
 		for j := start + 1; j < len(e.lines); j++ {
-			if skippable(e.lines[j]) {
+			if e.skippable(j) {
 				continue
 			}
 			if indentOf(e.lines[j]) <= keyIndent {
@@ -289,7 +333,7 @@ func (e *lineEditor) mappingLastLine(mapping *yaml.Node) int {
 	start := mapping.Line - 1
 	last := start
 	for i := start; i < len(e.lines); i++ {
-		if skippable(e.lines[i]) {
+		if e.skippable(i) {
 			continue
 		}
 		// Children sit at indent == col-1; anything shallower ends the mapping.
@@ -322,13 +366,13 @@ func (e *lineEditor) bytes() []byte {
 	return []byte(strings.Join(out, "\n"))
 }
 
-// skippable reports whether a line carries no YAML content: blank or a
-// comment. A comment's indentation says nothing about the block around it (a
-// column-0 comment inside a list item is common), so extent scans step over
-// these.
-func skippable(line string) bool {
-	t := strings.TrimSpace(line)
-	return t == "" || strings.HasPrefix(t, "#")
+// skippable reports whether line i carries no YAML content: blank, or a
+// comment outside any block scalar body. A comment's indentation says nothing
+// about the block around it (a column-0 comment inside a list item is
+// common), so extent scans step over these.
+func (e *lineEditor) skippable(i int) bool {
+	t := strings.TrimSpace(e.lines[i])
+	return t == "" || strings.HasPrefix(t, "#") && !e.body[i]
 }
 
 // appendItem queues a sequence item (block lines, already including the leading
@@ -376,7 +420,7 @@ func itemEndLine(ed *lineEditor, seq *yaml.Node, idx int) int {
 	// as part of the item (which would otherwise misplace an append after them).
 	lastContent := startLine
 	for i := startLine + 1; i < len(ed.lines); i++ {
-		if skippable(ed.lines[i]) {
+		if ed.skippable(i) {
 			continue
 		}
 		if indentOf(ed.lines[i]) <= itemIndent {
