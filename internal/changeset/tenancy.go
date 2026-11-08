@@ -93,7 +93,7 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	if err := primaryNetworkOnExisting(ns, ln, spec.VMNetwork); err != nil {
 		return model.DraftView{}, err
 	}
-	repoURL, created, err := c.ensureTenantRepo(commitProj.Repo, spec.Name)
+	repoURL, err := tenantRepoURL(commitProj.Repo, spec.Name)
 	if err != nil {
 		return model.DraftView{}, err
 	}
@@ -101,6 +101,14 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	// when the form chose one.
 	first := []netgen.NamespaceSpec{{Name: ns, Project: spec.Name, Repo: forge.PathRef(repoURL), VMNetwork: spec.VMNetwork, Live: ln}}
 	entries, err := projectAdoption(first, spec.Owners)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	// Gated before the repo exists: a refusal must not leave one behind.
+	if err := c.gate(id, commitProj, entries); err != nil {
+		return model.DraftView{}, err
+	}
+	created, err := c.ensureTenantRepo(repoURL)
 	if err != nil {
 		return model.DraftView{}, err
 	}
@@ -173,8 +181,9 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 		}
 	}
 	// The project is repoless, or its same-forge repo is genuinely lost;
-	// ensureTenantRepo creates it (created is irrelevant on this path).
-	repoURL, _, err := c.ensureTenantRepo(commitProj.Repo, target.Name)
+	// ensureTenantRepo creates it (created is irrelevant on this path), once
+	// the entries passed the gate.
+	repoURL, err := tenantRepoURL(commitProj.Repo, target.Name)
 	if err != nil {
 		return model.DraftView{}, err
 	}
@@ -184,6 +193,12 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	}
 	entries, err := projectAdoption(specs, owners)
 	if err != nil {
+		return model.DraftView{}, err
+	}
+	if err := c.gate(id, commitProj, entries); err != nil {
+		return model.DraftView{}, err
+	}
+	if _, err := c.ensureTenantRepo(repoURL); err != nil {
 		return model.DraftView{}, err
 	}
 	return c.stage(id, commitProj, entries...)
@@ -240,35 +255,43 @@ func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target proje
 		entries = append(entries, e)
 		staged = append(staged, ns)
 	}
+	if err := c.gate(id, commitProj, entries); err != nil {
+		return nil, nil, err
+	}
 	if err := c.store.Stage(id.Username, commitProj.Name, entries...); err != nil {
 		return nil, nil, err
 	}
 	return staged, residue, nil
 }
 
-// ensureTenantRepo derives the tenant repo URL - a sibling of the platform repo
-// under the same owner - creates it on the forge when absent, and seeds templates
-// into a freshly created one. Shared by project creation and adoption; created is
-// false when the repo already existed, which the caller uses to guard.
-func (c *Coordinator) ensureTenantRepo(platformRepo, name string) (repoURL string, created bool, err error) {
+// tenantRepoURL is the tenant repo of project name: a sibling of the platform
+// repo under the same owner.
+func tenantRepoURL(platformRepo, name string) (string, error) {
 	owner := forge.OwnerPrefixURL(platformRepo)
 	if owner == platformRepo {
-		return "", false, fmt.Errorf("%w: cannot derive a repo URL from the platform repo %q", model.ErrInvalid, platformRepo)
+		return "", fmt.Errorf("%w: cannot derive a repo URL from the platform repo %q", model.ErrInvalid, platformRepo)
 	}
-	repoURL = owner + "/" + name + ".git"
+	return owner + "/" + name + ".git", nil
+}
+
+// ensureTenantRepo creates the tenant repo on the forge when absent and seeds
+// templates into a freshly created one. Shared by project creation and
+// adoption; created is false when the repo already existed, which the caller
+// uses to guard.
+func (c *Coordinator) ensureTenantRepo(repoURL string) (created bool, err error) {
 	fc := c.forge.For(repoURL)
 	if fc == nil {
-		return "", false, fmt.Errorf("%w: forge not configured; cannot create the project repo", model.ErrInvalid)
+		return false, fmt.Errorf("%w: forge not configured; cannot create the project repo", model.ErrInvalid)
 	}
 	created, err = fc.EnsureRepo()
 	if err != nil {
-		return "", false, fmt.Errorf("create project repo: %w", err)
+		return false, fmt.Errorf("create project repo: %w", err)
 	}
 	if created {
 		c.repos.Created(repoURL)
 		c.seedTemplates(repoURL)
 	}
-	return repoURL, created, nil
+	return created, nil
 }
 
 // tenantNamespaces is the namespace spec joining each of target's namespaces to
