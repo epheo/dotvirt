@@ -32,5 +32,6 @@
   ],
   "instancetype": "u1.medium",
   "preference": "fedora",
+  "image": "openshift-virtualization-os-images/fedora",
   "yaml": ""
 }

@@ -97,3 +97,23 @@ func (c *Client) CreateUploadToken(ctx context.Context, namespace, name string) 
 	}
 	return token, nil
 }
+
+// CreateBootImage registers the upload's claim as a boot image: a DataSource
+// of the same name over it, which the catalog offers once the import is
+// ready and a new VM's disk is cloned from.
+func (c *Client) CreateBootImage(ctx context.Context, namespace, name string) error {
+	dyn, err := c.dynamic()
+	if err != nil {
+		return err
+	}
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "cdi.kubevirt.io/v1beta1",
+		"kind":       "DataSource",
+		"metadata":   map[string]any{"name": name, "namespace": namespace},
+		"spec": map[string]any{
+			"source": map[string]any{"pvc": map[string]any{"name": name, "namespace": namespace}},
+		},
+	}}
+	_, err = dyn.Resource(gvrDataSources).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
+	return err
+}

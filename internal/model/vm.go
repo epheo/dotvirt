@@ -86,9 +86,18 @@ type Migration struct {
 // Disk is a disk device on the VM (from the template).
 type Disk struct {
 	Name         string `json:"name"`
-	Type         string `json:"type,omitempty"`         // dataVolume | emptyDisk | containerDisk | cloudInitNoCloud | ...
+	Type         string `json:"type,omitempty"`         // dataVolume | pvc | emptyDisk | containerDisk | cloudInitNoCloud | ...
 	Size         string `json:"size,omitempty"`         // emptyDisk capacity or dataVolume requested storage
 	StorageClass string `json:"storageClass,omitempty"` // dataVolume storageClassName (empty = cluster default)
+	// Claim is the PersistentVolumeClaim behind a dataVolume or pvc disk (a
+	// DataVolume names its claim after itself).
+	Claim string `json:"claim,omitempty"`
+	// AccessModes are the DataVolume's explicit access modes; empty means CDI
+	// applies the class profile's first claim property set.
+	AccessModes []string `json:"accessModes,omitempty"`
+	// Image is the boot image ("namespace/name" of a DataSource) the disk was
+	// provisioned from; empty for blank, imported or cloned disks.
+	Image string `json:"image,omitempty"`
 }
 
 // PodNetwork is the Network of a NIC on the pod network, where any other value

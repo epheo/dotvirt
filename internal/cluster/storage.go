@@ -2,11 +2,15 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -157,4 +161,88 @@ func quantityBytes(obj map[string]any, field string) int64 {
 		return 0
 	}
 	return q.Value()
+}
+
+// ListClaims returns the PersistentVolumeClaims in namespaces under this
+// client's token: the live side of VM disks, chiefly the host a local disk is
+// bound to.
+func (c *Client) ListClaims(ctx context.Context, namespaces []string) ([]model.Claim, error) {
+	out := []model.Claim{}
+	err := eachNamespace(ctx, namespaces, func(ctx context.Context, ns string) (func(), error) {
+		list, err := c.kube.CoreV1().PersistentVolumeClaims(ns).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("list claims in %s: %w", ns, err)
+		}
+		return func() {
+			for i := range list.Items {
+				pvc := &list.Items[i]
+				cl := model.Claim{
+					Namespace: pvc.Namespace,
+					Name:      pvc.Name,
+					Node:      pvc.Annotations[selectedNodeAnnotation],
+					Phase:     string(pvc.Status.Phase),
+				}
+				if pvc.Spec.StorageClassName != nil {
+					cl.StorageClass = *pvc.Spec.StorageClassName
+				}
+				if q, ok := pvc.Status.Capacity[corev1.ResourceStorage]; ok {
+					cl.Capacity = q.String()
+				}
+				out = append(out, cl)
+			}
+		}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(a, b int) bool {
+		return out[a].Namespace+"/"+out[a].Name < out[b].Namespace+"/"+out[b].Name
+	})
+	return out, nil
+}
+
+// selectedNodeAnnotation is where the scheduler records the host it bound a
+// WaitForFirstConsumer claim to. A tenant can read it, unlike the PV's node
+// affinity, which is cluster-scoped.
+const selectedNodeAnnotation = "volume.kubernetes.io/selected-node"
+
+// listParallel bounds the per-namespace lists a cross-namespace read issues at
+// once: an admin sees every project namespace, and one at a time is slow while
+// all at once trips the client's rate limiter.
+const listParallel = 8
+
+// eachNamespace runs list once per namespace, listParallel at a time, and
+// applies each returned merge under one lock so callers append without their
+// own. The first failure cancels the rest and is returned.
+func eachNamespace(ctx context.Context, namespaces []string, list func(context.Context, string) (func(), error)) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var (
+		mu       sync.Mutex
+		firstErr error
+		wg       sync.WaitGroup
+	)
+	slots := make(chan struct{}, listParallel)
+	for _, ns := range namespaces {
+		slots <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer func() { <-slots; wg.Done() }()
+			merge, err := list(ctx, ns)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+					cancel()
+				}
+				return
+			}
+			if firstErr == nil {
+				merge()
+			}
+		}()
+	}
+	wg.Wait()
+	return firstErr
 }

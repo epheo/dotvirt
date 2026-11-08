@@ -1,70 +1,34 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Database, LayoutGrid, Network, Server } from '@lucide/svelte';
-	import { api, type Node, type VM } from '#lib/api.js';
-	import { vmNetworkKeys, vmStorageKeys, type Scope } from '#lib/lenses.js';
+	import { LayoutGrid, Network } from '@lucide/svelte';
+	import { type VM } from '#lib/api.js';
+	import { vmNetworkKeys } from '#lib/lenses.js';
 	import { hrefForScope, scopeFromPath } from '#lib/nav.js';
 	import { networkByRef } from '#lib/networks.js';
-	import { resource } from '#lib/resource.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import SyncBadge from '#lib/components/SyncBadge.svelte';
 	import TreeRow from '#lib/components/TreeRow.svelte';
 	import TreeVMRow from './TreeVMRow.svelte';
 
-	// The flat section trees - Hosts (physical placement), Networking (by NIC
-	// segment), Storage (by dataVolume class): one group per key, a VM under
-	// every key it matches (a VM with two NICs shows under both segments).
-	// Keys come from $lib/lenses so the grid filter agrees.
-	let { kind }: { kind: 'node' | 'network' | 'storage' } = $props();
+	// The Networking tree: one group per NIC segment, a VM under every segment
+	// it attaches (a VM with two NICs shows under both). Keys come from
+	// $lib/lenses so the grid filter agrees.
+	const ROOT = { label: 'All Networks', href: '/networking' };
 
 	const scope = $derived(scopeFromPath(page.url.pathname));
-
-	// The section home row: every section rolls up to the whole inventory.
-	const ROOT = $derived(
-		{
-			node: { label: 'All Nodes', href: '/hosts' },
-			network: { label: 'All Networks', href: '/networking' },
-			storage: { label: 'All Storage', href: '/storage' },
-		}[kind],
-	);
 
 	let collapsed = $state<Record<string, boolean>>({});
 	const toggle = (id: string) => (collapsed[id] = !collapsed[id]);
 
-	// Hosts exist without VMs: seed the node groups from the host list so an
-	// empty (fresh, or fully drained) host still has a row. Caller RBAC gates the
-	// list - a tenant without node-read keeps the VM-derived groups only. kind is
-	// fixed per instance (the layout passes a literal), so reading it at init is
-	// the intent and the conditional resource is init-stable.
-	// svelte-ignore state_referenced_locally
-	const nodesRes = kind === 'node' ? resource<Node[]>(() => 'nodes', api.nodes) : null;
-
 	const groups = $derived.by(() => {
 		const m = new Map<string, VM[]>();
-		const add = (key: string, vm: VM) => {
-			if (!m.has(key)) m.set(key, []);
-			m.get(key)!.push(vm);
-		};
-		for (const node of nodesRes?.data ?? []) m.set(node.name, []);
-		for (const vm of inventory.allVMs) {
-			if (kind === 'node') add(vm.nodeName || '(unscheduled)', vm);
-			else if (kind === 'network')
-				for (const k of vmNetworkKeys(vm, inventory.networks)) add(k, vm);
-			else for (const k of vmStorageKeys(vm, inventory.defaultStorageClass)) add(k, vm);
-		}
+		for (const vm of inventory.allVMs)
+			for (const k of vmNetworkKeys(vm, inventory.networks)) {
+				if (!m.has(k)) m.set(k, []);
+				m.get(k)!.push(vm);
+			}
 		return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 	});
-
-	const groupScope = (key: string): Scope =>
-		kind === 'node'
-			? { kind: 'node', node: key }
-			: kind === 'network'
-				? { kind: 'network', network: key }
-				: { kind: 'storage', storageClass: key };
-	const groupScoped = (key: string) =>
-		(scope.kind === 'node' && scope.node === key) ||
-		(scope.kind === 'network' && scope.network === key) ||
-		(scope.kind === 'storage' && scope.storageClass === key);
 </script>
 
 <div class="select-none text-[13px]">
@@ -76,25 +40,21 @@
 	</TreeRow>
 
 	{#each groups as [key, vms] (key)}
-		{@const gid = `${kind}:${key}`}
+		{@const gid = `network:${key}`}
 		<div>
 			<TreeRow
-				active={groupScoped(key)}
+				active={scope.kind === 'network' && scope.network === key}
 				expanded={!collapsed[gid]}
 				ontoggle={() => toggle(gid)}
-				href={hrefForScope(groupScope(key))}
+				href={hrefForScope({ kind: 'network', network: key })}
 			>
 				{#snippet icon()}
-					{#if kind === 'node'}<Server size={14} class="shrink-0 text-side-dim" />
-					{:else if kind === 'network'}<Network size={14} class="shrink-0 text-side-dim" />
-					{:else}<Database size={14} class="shrink-0 text-side-dim" />{/if}
+					<Network size={14} class="shrink-0 text-side-dim" />
 				{/snippet}
 				<span class="truncate font-semibold text-side-ink">{key}</span>
 				{#snippet trailing()}
-					{#if kind === 'network'}
-						{@const net = networkByRef(key, inventory.networks)}
-						{#if net?.sync}<SyncBadge sync={net.sync} error={net.syncError} compact />{/if}
-					{/if}
+					{@const net = networkByRef(key, inventory.networks)}
+					{#if net?.sync}<SyncBadge sync={net.sync} error={net.syncError} compact />{/if}
 					<span class="text-xs text-side-dim">{vms.length}</span>
 				{/snippet}
 			</TreeRow>

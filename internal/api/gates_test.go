@@ -253,11 +253,17 @@ func gateCases() []gateCase {
 		imperative("snapshot restore", verbCreate, "snapshot.kubevirt.io", "virtualmachinerestores", "", func(n model.NamespaceCaps) bool { return n.SnapshotRestore }),
 		imperative("snapshot delete", verbDelete, "snapshot.kubevirt.io", "virtualmachinesnapshots", "", func(n model.NamespaceCaps) bool { return n.SnapshotDelete }),
 		imperative("clone", verbCreate, "clone.kubevirt.io", "virtualmachineclones", "", func(n model.NamespaceCaps) bool { return n.Clone }),
-		// An upload creates its DataVolume, then its token request.
-		{name: "upload", needs: []grant{
-			{verb: verbCreate, group: "cdi.kubevirt.io", resource: "datavolumes", ns: "team-a-dev"},
-			{verb: verbCreate, group: "upload.cdi.kubevirt.io", resource: "uploadtokenrequests", ns: "team-a-dev"},
-		}, cap: nsCap(func(n model.NamespaceCaps) bool { return n.DataVolumeCreate })},
+		// An upload creates its DataVolume, then its token request: gated whole
+		// before either is made.
+		{name: "upload", call: route(http.MethodPost, "/api/uploads", `{"namespace":"team-a-dev","name":"img","size":"1Gi"}`),
+			routeNeeds: bootImageGrants[:2], needs: bootImageGrants[:2],
+			cap: nsCap(func(n model.NamespaceCaps) bool { return n.DataVolumeCreate })},
+		// Add a boot image: the upload plus its DataSource, gated whole before
+		// anything is made, so a token without datasources create reads the
+		// field false and is refused by the route.
+		{name: "boot image upload", call: route(http.MethodPost, "/api/uploads", `{"namespace":"team-a-dev","name":"img","size":"1Gi","bootImage":true}`),
+			routeNeeds: bootImageGrants, needs: bootImageGrants,
+			cap: nsCap(func(n model.NamespaceCaps) bool { return n.BootImageCreate })},
 		{name: "project template edit", call: route(http.MethodPut, "/api/templates", `{"library":"team-a","name":"t","yaml":"x"}`),
 			routeNeeds: vm(verbUpdate), needs: vm(verbUpdate), cap: nsCap(func(n model.NamespaceCaps) bool { return n.Project.TemplateEdit })},
 		{name: "shared library", call: route(http.MethodPut, "/api/templates", `{"library":"platform","name":"t","yaml":"x"}`),
@@ -285,6 +291,12 @@ func gateCases() []gateCase {
 	cases = append(cases, objectCases("admin policy", model.KindANP, "", "adminnetworkpolicy/cluster/a1", "/api/adminnetworkpolicies", `{"name":"a1","priority":10}`)...)
 	cases = append(cases, objectCases("baseline policy", model.KindBANP, "", "baselineadminnetworkpolicy/cluster/default", "/api/adminnetworkpolicies", `{"baseline":true}`)...)
 	return cases
+}
+
+var bootImageGrants = []grant{
+	{verb: verbCreate, group: "cdi.kubevirt.io", resource: "datavolumes", ns: "team-a-dev"},
+	{verb: verbCreate, group: "upload.cdi.kubevirt.io", resource: "uploadtokenrequests", ns: "team-a-dev"},
+	{verb: verbCreate, group: "cdi.kubevirt.io", resource: "datasources", ns: "team-a-dev"},
 }
 
 func without(gs []grant, i int) []grant {

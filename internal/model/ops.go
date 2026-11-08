@@ -30,12 +30,30 @@ type Event struct {
 // Snapshot is a VirtualMachineSnapshot for a VM - the Snapshots tab. KubeVirt
 // snapshots are a flat list (no parent/child tree).
 type Snapshot struct {
+	Namespace   string   `json:"namespace,omitempty"`
+	VM          string   `json:"vm,omitempty"` // the source VM
 	Name        string   `json:"name"`
 	Created     string   `json:"created,omitempty"` // RFC3339
 	Phase       string   `json:"phase,omitempty"`   // InProgress | Succeeded | Failed
 	ReadyToUse  bool     `json:"readyToUse"`
 	Indications []string `json:"indications,omitempty"` // Online | GuestAgent | NoGuestAgent
-	Error       string   `json:"error,omitempty"`
+	// Volumes are the VM volumes the snapshot captured; a volume on a class
+	// without snapshot support is left out of it.
+	Volumes []string `json:"volumes,omitempty"`
+	Error   string   `json:"error,omitempty"`
+}
+
+// Claim is a VM disk's PersistentVolumeClaim as the cluster holds it: where a
+// local disk lives, which the manifest cannot say once its VM stops.
+type Claim struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	// Node is the host the scheduler bound the claim to (WaitForFirstConsumer
+	// classes); empty for a claim any host can reach.
+	Node         string `json:"node,omitempty"`
+	StorageClass string `json:"storageClass,omitempty"`
+	Capacity     string `json:"capacity,omitempty"` // what the volume got, e.g. "30Gi"
+	Phase        string `json:"phase,omitempty"`    // Pending | Bound | Lost
 }
 
 // Clone is a VirtualMachineClone whose source is a VM - one row in the Clone
@@ -65,10 +83,12 @@ type UploadToken struct {
 	UploadURL string `json:"uploadUrl"`
 }
 
-// UploadTarget identifies the upload DataVolume just created.
+// UploadTarget identifies the upload DataVolume just created. Image is the
+// boot image ("namespace/name" DataSource) registered over it, when asked for.
 type UploadTarget struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
+	Image     string `json:"image,omitempty"`
 }
 
 // Node is one virtualization host - a node KubeVirt marks schedulable for

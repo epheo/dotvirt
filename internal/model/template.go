@@ -13,9 +13,13 @@ type Template struct {
 	Parameters   []TemplateParameter `json:"parameters,omitempty"`
 	Instancetype string              `json:"instancetype,omitempty"` // blueprint summary, best-effort
 	Preference   string              `json:"preference,omitempty"`
-	YAML         string              `json:"yaml"`
-	BaseBlob     string              `json:"baseBlob,omitempty"` // git blob ID of YAML, for UpdateTemplateRequest
-	Error        string              `json:"error,omitempty"`    // parse failure - listed, but not deployable
+	// Image is the boot image ("namespace/name" DataSource) the blueprint's
+	// first disk is made from, parameters resolved by their defaults; empty
+	// when a parameter without a default names it.
+	Image    string `json:"image,omitempty"`
+	YAML     string `json:"yaml"`
+	BaseBlob string `json:"baseBlob,omitempty"` // git blob ID of YAML, for UpdateTemplateRequest
+	Error    string `json:"error,omitempty"`    // parse failure - listed, but not deployable
 }
 
 // TemplateParameter mirrors template.kubevirt.io/v1beta1 Parameter, so the

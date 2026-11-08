@@ -80,6 +80,32 @@ export const VM_TABS = [
 ] as const;
 export type VMTab = (typeof VM_TABS)[number]['id'];
 
+// The Storage root's tabs: one section page, each tab one job. Disks, Images
+// and Snapshots are where the Library's counts drill in.
+export const STORAGE_TABS = [
+	{ id: 'library', label: 'Library' },
+	{ id: 'disks', label: 'Disks' },
+	{ id: 'images', label: 'Images' },
+	{ id: 'snapshots', label: 'Snapshots' },
+	{ id: 'classes', label: 'Classes' },
+] as const;
+export type StorageTab = (typeof STORAGE_TABS)[number]['id'];
+
+export const storageTab = (v: string | null): StorageTab =>
+	STORAGE_TABS.find((t) => t.id === v)?.id ?? 'library';
+
+// A Storage root view: the tab plus its query (project scope, disk filters,
+// the open disk). The tab is always explicit so the breadcrumb and the tree,
+// which keep the current tab on plain hrefs, land exactly here.
+export function storageHref(
+	tab: StorageTab,
+	params: Record<string, string | undefined> = {},
+): string {
+	const q = new URLSearchParams({ tab });
+	for (const [k, v] of Object.entries(params)) if (v) q.set(k, v);
+	return `/storage?${q}`;
+}
+
 const CONTAINER_TABS = [
 	{ id: 'summary', label: 'Summary' },
 	{ id: 'vms', label: 'VMs' },
@@ -91,8 +117,8 @@ const CONTAINER_TABS = [
 
 // The tab set of a container: compute containers carry the full set, hosts
 // drop Permissions (nodes aren't namespaced) and configure DRS at the root,
-// networking's root carries the policy plane as Security, segments and
-// storage classes are fact sheets (Summary + their VMs).
+// networking's root carries the policy plane as Security, segments are fact
+// sheets (Summary + their VMs). Storage has its own tabs (STORAGE_TABS).
 export function containerTabs(scope: Scope, section: Section): typeof CONTAINER_TABS {
 	const only = (...ids: string[]) => CONTAINER_TABS.filter((t) => ids.includes(t.id));
 	switch (section) {
@@ -100,8 +126,6 @@ export function containerTabs(scope: Scope, section: Section): typeof CONTAINER_
 			return only('summary', 'vms', 'monitor', 'configure');
 		case 'networking':
 			return scope.kind === 'all' ? only('summary', 'vms', 'security') : only('summary', 'vms');
-		case 'storage':
-			return only('summary', 'vms');
 	}
 	// Effective policy evaluates against exactly one namespace.
 	return scope.kind === 'namespace'
@@ -115,7 +139,10 @@ function tabsAt(href: string): string[] | null {
 	if (path.split('/')[1] === 'vm') return VM_TABS.map((t) => t.id);
 	const section = sectionOf(path);
 	if (!section || section === 'catalog' || section === 'changes') return null;
-	return containerTabs(scopeFromPath(path), section).map((t) => t.id);
+	const scope = scopeFromPath(path);
+	// A class drill-in is one page without tabs.
+	if (section === 'storage') return scope.kind === 'all' ? STORAGE_TABS.map((t) => t.id) : [];
+	return containerTabs(scope, section).map((t) => t.id);
 }
 
 // Moving between objects keeps the tab in view when the target has it: a
@@ -145,7 +172,11 @@ export function trailForScope(s: Scope): { label: string; href?: string }[] {
 		case 'network':
 			return [{ label: 'All Networks', href: '/networking' }, { label: `Segment: ${s.network}` }];
 		case 'storage':
-			return [{ label: 'All Storage', href: '/storage' }, { label: `Storage: ${s.storageClass}` }];
+			return [
+				{ label: 'Storage', href: storageHref('library') },
+				{ label: 'Classes', href: storageHref('classes') },
+				{ label: s.storageClass },
+			];
 	}
 }
 

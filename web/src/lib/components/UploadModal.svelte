@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Check, Upload } from '@lucide/svelte';
 	import { api, Unauthorized } from '#lib/api.js';
+	import { resource } from '#lib/resource.svelte.js';
 	import { friendlyError } from '#lib/format.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { validName, NAME_HINT } from '#lib/validate.js';
@@ -20,10 +21,16 @@
 	let {
 		namespaces,
 		namespace: initialNamespace = '',
+		file: initialFile,
+		bootImage = false,
 		onclose,
 	}: {
 		namespaces: string[];
 		namespace?: string; // preselected target (the opener's scope)
+		file?: File; // a file dropped where the upload was opened
+		// Start with "offer it as a boot image" on: the catalog and the
+		// create flow then offer the disk. Shown only where the caller may.
+		bootImage?: boolean;
 		onclose: () => void;
 	} = $props();
 
@@ -42,6 +49,20 @@
 	let size = $state('10Gi');
 	let storageClass = $state('');
 
+	// What the caller may do in the picked namespace, asked when it changes. A
+	// missing field reads false: the boot-image choice shows only where the
+	// route would take it.
+	const caps = resource(
+		() => namespace,
+		async (ns) => (ns ? ((await api.capabilities(ns)).namespace ?? null) : null),
+		{ reset: true },
+	);
+	const canImage = $derived(!!caps.data?.bootImageCreate);
+	const canUpload = $derived(!!caps.data?.dataVolumeCreate);
+	// svelte-ignore state_referenced_locally
+	let offerImage = $state(bootImage);
+	const asImage = $derived(offerImage && canImage);
+
 	// RFC 1123 label (a PVC/DataVolume name), like the clone target.
 	const nameOK = $derived(validName(name));
 	const sizeOK = $derived(/^\d+(Mi|Gi|Ti)$/.test(size));
@@ -52,12 +73,20 @@
 		else if (!nameOK) m.push(`Disk name: ${NAME_HINT}`);
 		if (!namespace) m.push('Project is required');
 		if (!sizeOK) m.push('Disk size must be a quantity like 10Gi');
+		if (namespace && caps.data && !canUpload) m.push(`You may not upload images in ${namespace}`);
+		else if (namespace && !caps.data)
+			m.push(caps.loading ? 'Checking your rights' : 'Your rights could not be read');
 		return m;
 	});
 	const ready = $derived(missing.length === 0);
 
 	function pickFile(e: Event) {
-		const f = (e.target as HTMLInputElement).files?.[0] ?? null;
+		useFile((e.target as HTMLInputElement).files?.[0] ?? null);
+	}
+	// svelte-ignore state_referenced_locally
+	if (initialFile) useFile(initialFile);
+
+	function useFile(f: File | null) {
 		file = f;
 		if (f) {
 			if (!name)
@@ -144,7 +173,13 @@
 		error = '';
 		try {
 			stage = 'creating';
-			await api.createUpload({ namespace, name, size, storageClass: storageClass || undefined });
+			await api.createUpload({
+				namespace,
+				name,
+				size,
+				storageClass: storageClass || undefined,
+				bootImage: asImage,
+			});
 			stage = 'preparing';
 			await pollUntil((p) => p === 'UploadReady', 'storage to be ready');
 			const { token, uploadUrl } = await api.uploadToken(namespace, name);
@@ -161,13 +196,23 @@
 	}
 </script>
 
-<Modal title="Upload image" size="lg" dismissable={stage !== 'uploading'} {onclose}>
+<Modal
+	title={asImage ? 'Add a boot image' : 'Upload image'}
+	size="lg"
+	dismissable={stage !== 'uploading'}
+	{onclose}
+>
 	{#snippet icon()}<Upload size={16} />{/snippet}
 	<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm">
 		{#if stage === 'form' || stage === 'error'}
 			<p class="mb-3 text-xs text-ink-muted">
-				Uploads a disk image (qcow2/raw/iso) as a DataVolume your VMs can boot from. The file
-				streams straight from your browser to the cluster's upload proxy.
+				{#if asImage}
+					Uploads a disk image (qcow2, raw or iso) and offers it as a boot image in the project. The
+					file streams straight from your browser to the cluster. No pull request.
+				{:else}
+					Uploads a disk image (qcow2/raw/iso) as a DataVolume your VMs can boot from. The file
+					streams straight from your browser to the cluster's upload proxy.
+				{/if}
 			</p>
 			<div class="grid grid-cols-2 gap-4">
 				<label class="col-span-2 block">
@@ -192,6 +237,12 @@
 						bind:value={storageClass}
 					/>
 				</FormField>
+				{#if canImage}
+					<label class="col-span-2 flex items-center gap-2 text-ink-soft">
+						<input type="checkbox" bind:checked={offerImage} class="size-4 accent-accent" />
+						Offer it as a boot image, so new VMs can start from it
+					</label>
+				{/if}
 			</div>
 			{#if file}
 				<p class="mt-2 text-xs text-ink-faint">
@@ -236,7 +287,13 @@
 
 				{#if stage === 'done'}
 					<p class="mt-3 rounded bg-ok-soft/60 p-3 text-xs text-ok-ink">
-						<strong>{name}</strong> is ready in <strong>{namespace}</strong> — use it as a VM's boot disk.
+						{#if asImage}
+							<strong>{name}</strong> is a boot image in <strong>{namespace}</strong>. Create VM
+							offers it once the catalog refreshes.
+						{:else}
+							<strong>{name}</strong> is ready in <strong>{namespace}</strong>. Use it as a VM's
+							boot disk.
+						{/if}
 					</p>
 				{/if}
 			</div>

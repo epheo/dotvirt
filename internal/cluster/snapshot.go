@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -43,8 +44,47 @@ func (c *Client) ListSnapshots(ctx context.Context, namespace, vmName string) ([
 	return out, nil
 }
 
+// ListVMSnapshots returns every VirtualMachineSnapshot in namespaces, newest
+// first - the Storage section's cluster-wide listing. Each namespace is listed
+// with this client's token, so RBAC gates it and nothing leaks across tenants.
+func (c *Client) ListVMSnapshots(ctx context.Context, namespaces []string) ([]model.Snapshot, error) {
+	dyn, err := c.dynamic()
+	if err != nil {
+		return nil, err
+	}
+	out := []model.Snapshot{}
+	err = eachNamespace(ctx, namespaces, func(ctx context.Context, ns string) (func(), error) {
+		list, err := dyn.Resource(gvrSnapshots).Namespace(ns).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("list snapshots in %s: %w", ns, err)
+		}
+		return func() {
+			for _, item := range list.Items {
+				out = append(out, snapshotFrom(item))
+			}
+		}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Created != b.Created {
+			return a.Created > b.Created
+		}
+		return a.Namespace+"/"+a.Name < b.Namespace+"/"+b.Name
+	})
+	return out, nil
+}
+
 func snapshotFrom(item unstructured.Unstructured) model.Snapshot {
-	s := model.Snapshot{Name: item.GetName(), Created: item.GetCreationTimestamp().UTC().Format(time.RFC3339)}
+	s := model.Snapshot{
+		Namespace: item.GetNamespace(),
+		Name:      item.GetName(),
+		Created:   item.GetCreationTimestamp().UTC().Format(time.RFC3339),
+	}
+	s.VM, _, _ = unstructured.NestedString(item.Object, "spec", "source", "name")
+	s.Volumes, _, _ = unstructured.NestedStringSlice(item.Object, "status", "snapshotVolumes", "includedVolumes")
 	if t, ok, _ := unstructured.NestedString(item.Object, "status", "creationTime"); ok && t != "" {
 		s.Created = t
 	}

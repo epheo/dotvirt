@@ -129,6 +129,43 @@ func TestMigrateVolume(t *testing.T) {
 	}
 }
 
+// A disk made from a boot image keeps that image as an annotation once the
+// move drops its sourceRef, and a second move does not repeat it.
+func TestMigrateVolumeKeepsImage(t *testing.T) {
+	src := strings.Replace(vmWithDataVolumes, `      source:
+        registry:
+          url: docker://quay.io/containerdisks/fedora:41
+`, `      sourceRef:
+        kind: DataSource
+        name: fedora-42
+        namespace: os-images
+`, 1)
+	once, err := ApplyEdit([]byte(src), "alpha", "alpha", "web", VMEdit{
+		MigrateVolumes: []model.VolumeMigration{{Name: "rootdisk", StorageClass: "fast"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	twice, err := ApplyEdit(once, "alpha", "alpha", "web", VMEdit{
+		MigrateVolumes: []model.VolumeMigration{{Name: "rootdisk", StorageClass: "standard"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, out := range [][]byte{once, twice} {
+		if strings.Contains(string(out), "sourceRef") || strings.Count(string(out), ImageAnnotation) != 1 {
+			t.Errorf("move %d:\n%s", i+1, out)
+		}
+		vms, err := ParseVMs("alpha/web.yaml", out, "alpha")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := vms[0].Disks[0].Image; got != "os-images/fedora-42" {
+			t.Errorf("move %d: image = %q", i+1, got)
+		}
+	}
+}
+
 // A disk on the cluster default class has no storageClassName - the edit must
 // insert one. Its source is already blank and must be kept as-is.
 func TestMigrateVolumeInsertsClass(t *testing.T) {

@@ -70,6 +70,11 @@
 	--color-cold-soft: #daf2f2;
 	--color-cold-ink: #005f60;
 
+	/* data glyphs: the first series (navy, "present") and the second (teal),
+	   for counts drawn as bars or squares beside their legend */
+	--color-glyph: #264a73;
+	--color-glyph-2: #009596;
+
 	/* the rail: the dark console nav framing the light workspace - one PF-dark
 	   family in BOTH themes, so the chrome is the identity and the workspace
 	   carries the theme */
@@ -190,6 +195,8 @@
 	--color-danger-ink: #f9a8a0;
 	--color-cold-soft: #0c3033;
 	--color-cold-ink: #7adbdc;
+	--color-glyph: #5b8fc9;
+	--color-glyph-2: #2dbcbd;
 
 	/* the rail against the darker canvas: only its border moves */
 	--color-side-line: #030303;

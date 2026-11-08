@@ -5,12 +5,10 @@
 // throws at import when one drifts. Deterministic: one seeded PRNG, fixed call
 // order, so the same fleet appears on every run.
 //
-// Fields the model does not carry yet ride along under the names a backend
-// piece would most likely give them, so screens can be built before it lands:
-//   Disk.image          "namespace/name" of the boot image a disk was made from
-//   scenario.snapshotPlan  per-VM [count, newest snapshot age in minutes]; the
-//                          server expands it for GET /api/vms/{ns}/{name}/snapshots
-// Rename them here when the model settles.
+// Snapshots are planned per VM as [count, newest age in minutes], one a day
+// further back each, then served as the cluster-wide listing the Storage
+// section reads (storageSnapshots) and per VM from the same list. Disk claims
+// (storageClaims) name the host each local disk is bound to.
 
 const iso = (minsAgo) => new Date(Date.now() - minsAgo * 60_000).toISOString();
 const GiB = 2 ** 30;
@@ -793,6 +791,7 @@ for (const v of vms) {
 					size: diskSize(image),
 					storageClass: v.slot.cls,
 					image: `${IMAGE_NS}/${image}`,
+					claim: `${v.name}-rootdisk`,
 				},
 				...(v.slot.disks === 2
 					? [
@@ -802,6 +801,7 @@ for (const v of vms) {
 								size: '100Gi',
 								storageClass: v.slot.cls,
 								image: `${IMAGE_NS}/${image}`,
+								claim: `${v.name}-data`,
 							},
 						]
 					: []),
@@ -850,6 +850,50 @@ for (const v of vms) {
 }
 
 const all = [...modelVMs.values()];
+
+// ── storage listings: every snapshot and disk claim ────────────────────────────
+
+const persistentDisks = (v) => v.disks.filter((d) => d.type === 'dataVolume');
+const storageSnapshots = [];
+for (const v of all) {
+	const key = `${v.namespace}/${v.name}`;
+	const plan = snapshotPlan[key];
+	if (!plan) continue;
+	const named = key === 'web-prod/web-1' ? WEB1_SNAPSHOTS : null;
+	for (let i = 0; i < plan[0]; i++) {
+		const [name, minsAgo] = named ? named[i] : [`${v.name}-snap-${plan[0] - i}`, plan[1] + i * DAY];
+		storageSnapshots.push({
+			namespace: v.namespace,
+			vm: v.name,
+			name,
+			created: iso(minsAgo),
+			phase: 'Succeeded',
+			readyToUse: true,
+			indications: ['Online', 'GuestAgent'],
+			volumes: persistentDisks(v).map((d) => d.name),
+		});
+	}
+}
+storageSnapshots.sort((a, b) => b.created.localeCompare(a.created));
+check('snapshots listed', storageSnapshots.length, 9870);
+
+// A stopped VM's local disk stays on the host it was bound to.
+const STOPPED_HOST = { 'web-prod/web-2': 'host-07', 'web-prod/web-6': 'host-17' };
+const storageClaims = all.flatMap((v) =>
+	persistentDisks(v).map((d) => {
+		const local = d.storageClass !== 'bulk-hdd';
+		const node =
+			v.nodeName ?? STOPPED_HOST[`${v.namespace}/${v.name}`] ?? HOSTS[v.name.length % HOSTS.length];
+		return {
+			namespace: v.namespace,
+			name: d.claim,
+			storageClass: d.storageClass,
+			capacity: d.size,
+			phase: 'Bound',
+			...(local ? { node } : {}),
+		};
+	}),
+);
 const runningVMs = all.filter((v) => v.phase === 'Running');
 const memBytes = (m) => Number(m.replace('Gi', '')) * GiB;
 
@@ -1140,10 +1184,8 @@ export function scaleScenario(base) {
 				],
 			},
 		},
-		snapshotPlan,
-		snapshots: {
-			'web-prod/web-1': WEB1_SNAPSHOTS.map(([name, minsAgo]) => ({ name, minsAgo })),
-		},
+		storageSnapshots,
+		storageClaims,
 		metrics: {
 			...base.metrics,
 			clusterSummary,

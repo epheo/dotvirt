@@ -75,6 +75,9 @@ type NamespaceCaps struct {
 	SnapshotDelete   bool `json:"snapshotDelete"`
 	Clone            bool `json:"clone"`
 	DataVolumeCreate bool `json:"dataVolumeCreate"` // image upload
+	// BootImageCreate is an upload registered as a boot image (Add a boot
+	// image): the upload plus a DataSource over it.
+	BootImageCreate bool `json:"bootImageCreate"`
 	// The namespaced network family, staged through git. Network is the
 	// project segments (UserDefinedNetwork).
 	Network ObjectCaps `json:"network"`

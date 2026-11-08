@@ -415,6 +415,10 @@ type ssarRef struct{ group, resource string }
 // metrics, node ops in the task feed).
 var ssarNodes = ssarRef{resource: "nodes"}
 
+// ssarDataSources is the boot images: listed for the options catalog, created
+// when an upload registers one.
+var ssarDataSources = ssarRef{group: "cdi.kubevirt.io", resource: "datasources"}
+
 // ssarFor is the authority over one managed kind.
 func ssarFor(k model.Kind) ssarRef { return ssarRef{k.Group, k.Plural} }
 

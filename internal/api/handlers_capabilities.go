@@ -165,7 +165,10 @@ func (s *Server) namespaceCaps(ctx context.Context, sc scope, ns string) model.N
 		{&out.NetworkAttachment.Delete, kindAction(verbDelete, model.KindNAD, ns)},
 	}
 	if s.cfg.UploadProxyURL != "" {
-		fields = append(fields, capField{&out.DataVolumeCreate, dataVolumeAction(ns)})
+		fields = append(fields,
+			capField{&out.DataVolumeCreate, dataVolumeAction(ns)},
+			capField{&out.BootImageCreate, bootImageAction(ns)},
+		)
 	}
 	if s.drift != nil {
 		fields = append(fields, capField{&out.Resync, vmAction(verbUpdate, ns)})

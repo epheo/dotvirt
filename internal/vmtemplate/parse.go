@@ -9,6 +9,7 @@ package vmtemplate
 import (
 	"encoding/json"
 	pathpkg "path"
+	"regexp"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -83,12 +84,57 @@ func Parse(path string, content []byte, library string) model.Template {
 				Preference struct {
 					Name string `json:"name"`
 				} `json:"preference"`
+				DataVolumeTemplates []struct {
+					Spec struct {
+						SourceRef *struct {
+							Kind      string `json:"kind"`
+							Name      string `json:"name"`
+							Namespace string `json:"namespace"`
+						} `json:"sourceRef"`
+					} `json:"spec"`
+				} `json:"dataVolumeTemplates"`
 			} `json:"spec"`
 		}
 		if err := json.Unmarshal(vm.Raw, &bp); err == nil {
 			t.Instancetype = bp.Spec.Instancetype.Name
 			t.Preference = bp.Spec.Preference.Name
+			for _, dv := range bp.Spec.DataVolumeTemplates {
+				if ref := dv.Spec.SourceRef; ref != nil && (ref.Kind == "" || ref.Kind == "DataSource") {
+					t.Image = blueprintImage(ref.Namespace, ref.Name, t.Parameters)
+					break
+				}
+			}
 		}
 	}
 	return t
 }
+
+// blueprintImage resolves a blueprint's DataSource reference with the
+// parameter defaults a deploy would apply. A reference left to a parameter
+// without a default, or without a namespace, names no image the catalog can
+// match.
+func blueprintImage(namespace, name string, params []model.TemplateParameter) string {
+	defaults := map[string]string{}
+	for _, p := range params {
+		if p.Value != "" {
+			defaults[p.Name] = p.Value
+		}
+	}
+	resolved := true
+	expand := func(s string) string {
+		return paramRef.ReplaceAllStringFunc(s, func(m string) string {
+			v, ok := defaults[paramRef.FindStringSubmatch(m)[1]]
+			if !ok {
+				resolved = false
+			}
+			return v
+		})
+	}
+	namespace, name = expand(namespace), expand(name)
+	if !resolved || namespace == "" || name == "" {
+		return ""
+	}
+	return namespace + "/" + name
+}
+
+var paramRef = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)

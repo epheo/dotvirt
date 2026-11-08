@@ -63,6 +63,7 @@ const state = {
 	loginStatus: 0, // one-shot override for POST /api/login
 	wsRefuse: 0, // destroy the next n WS handshakes before the socket opens
 	sockets: new Set(),
+	uploads: new Map(), // "ns/name" -> DataVolume phase, for the upload flow
 };
 
 const MIME = {
@@ -264,28 +265,6 @@ function findVM(ns, name) {
 	return undefined;
 }
 
-// A scenario names a VM's snapshots outright, or plans them as [count, newest
-// age in minutes], one a day further back each; ages resolve at request time.
-function snapshotsFor(s, ns, name) {
-	const key = `${ns}/${name}`;
-	const plan = s.snapshotPlan?.[key];
-	const rows =
-		s.snapshots?.[key] ??
-		(plan
-			? Array.from({ length: plan[0] }, (_, i) => ({
-					name: `${name}-snap-${plan[0] - i}`,
-					minsAgo: plan[1] + i * 1440,
-				}))
-			: []);
-	return rows.map((r) => ({
-		name: r.name,
-		created: new Date(Date.now() - r.minsAgo * 60_000).toISOString(),
-		phase: 'Succeeded',
-		readyToUse: true,
-		indications: ['Online', 'GuestAgent'],
-	}));
-}
-
 // ── the /api surface ───────────────────────────────────────────────────────────
 
 async function handleAPI(req, res, url) {
@@ -343,6 +322,9 @@ async function handleAPI(req, res, url) {
 		if (path === '/api/metrics/capacity') return sendJSON(res, 200, s.metrics.hostCapacity);
 		if (path === '/api/metrics/scope') return sendJSON(res, 200, s.metrics.vmMetrics);
 	}
+
+	await handleStorage(req, res, url);
+	if (res.headersSent) return;
 
 	if (path === '/api/draft' && req.method === 'GET') {
 		return sendJSON(res, 200, draftFor(url.searchParams.get('project')));
@@ -539,7 +521,6 @@ async function handleAPI(req, res, url) {
 			if (!s.metrics) return sendText(res, 503, 'metrics not configured');
 			return sendJSON(res, 200, s.metrics.vmMetrics);
 		}
-		if (sub === 'snapshots') return sendJSON(res, 200, snapshotsFor(s, ns, name));
 		if (sub === 'clones') return sendJSON(res, 200, []);
 		if (sub === 'policy') {
 			return sendJSON(res, 200, {
@@ -569,6 +550,162 @@ async function handleAPI(req, res, url) {
 	return sendText(res, 503, `fixture: no handler for ${req.method} ${path}`);
 }
 
+// ── storage (S3): snapshots, claims, uploads ───────────────────────────────────
+// Answers the storage routes; a request it leaves unanswered goes on to the
+// rest of the API. A scenario's null listing answers 503, like an unreachable
+// cluster read.
+
+const newestFirst = (a, b) => (b.created ?? '').localeCompare(a.created ?? '');
+
+// The caller's verdicts (GET /api/capabilities): everything allowed, unless
+// the scenario's `capabilities` narrows a namespace (by name, or `default`).
+const allowAll = { create: true, update: true, delete: true };
+function namespaceCaps(s, project, ns) {
+	return {
+		namespace: ns,
+		vm: allowAll,
+		resync: true,
+		restart: true,
+		migrate: true,
+		pause: true,
+		unpause: true,
+		console: true,
+		snapshotTake: true,
+		snapshotRestore: true,
+		snapshotDelete: true,
+		clone: true,
+		dataVolumeCreate: true,
+		bootImageCreate: true,
+		network: allowAll,
+		networkAttachment: allowAll,
+		networkPolicy: allowAll,
+		egressFirewall: allowAll,
+		project: {
+			name: project.name,
+			templateEdit: true,
+			newNamespace: true,
+			adopt: !project.repo,
+			grantAdmin: false,
+			release: !project.repo,
+		},
+		...(s.capabilities?.[ns] ?? s.capabilities?.default),
+	};
+}
+function clusterCaps(s) {
+	return {
+		platform: true,
+		platformRead: true,
+		network: allowAll,
+		uplink: allowAll,
+		egressIP: allowAll,
+		externalRoute: allowAll,
+		adminNetworkPolicy: allowAll,
+		baselineAdminNetworkPolicy: allowAll,
+		namespaceCreate: true,
+		vmNetwork: true,
+		grantAdmin: true,
+		sharedLibrary: true,
+		drsEnable: true,
+		drsPSI: true,
+		drsDisable: true,
+		oauthClient: true,
+		...s.capabilities?.cluster,
+	};
+}
+
+async function handleStorage(req, res, url) {
+	const path = url.pathname;
+	const s = state.scenario;
+	const listing = (v) =>
+		v === null ? sendText(res, 503, 'cluster read failed') : sendJSON(res, 200, v ?? []);
+	if (path === '/api/storage/snapshots') return listing(s.storageSnapshots);
+	if (path === '/api/capabilities') {
+		const ns = url.searchParams.get('namespace');
+		if (!ns) return sendJSON(res, 200, { cluster: clusterCaps(s) });
+		const p = projectOf(ns);
+		if (!p) return sendText(res, 404, 'namespace not found in any visible project');
+		return sendJSON(res, 200, { namespace: namespaceCaps(s, p, ns) });
+	}
+	if (path === '/api/storage/claims') return listing(s.storageClaims);
+
+	let m = path.match(/^\/api\/vms\/([^/]+)\/([^/]+)\/snapshots$/);
+	if (m) {
+		const [, ns, vmName] = m;
+		if (req.method === 'GET')
+			return sendJSON(
+				res,
+				200,
+				(s.storageSnapshots ?? [])
+					.filter((x) => x.namespace === ns && x.vm === vmName)
+					.sort(newestFirst),
+			);
+		if (req.method === 'POST') {
+			const body = await readBody(req);
+			const name =
+				body?.name || `${vmName}-${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}`;
+			const vmObj = findVM(ns, vmName);
+			s.storageSnapshots = [
+				{
+					namespace: ns,
+					vm: vmName,
+					name,
+					created: new Date().toISOString(),
+					phase: 'Succeeded',
+					readyToUse: true,
+					volumes: (vmObj?.disks ?? [])
+						.filter((d) => d.type === 'dataVolume' || d.type === 'pvc')
+						.map((d) => d.name),
+				},
+				...(s.storageSnapshots ?? []),
+			];
+			return sendJSON(res, 200, { name });
+		}
+	}
+	m = path.match(/^\/api\/vms\/([^/]+)\/([^/]+)\/snapshots\/([^/]+)(\/restore)?$/);
+	if (m) {
+		const [, ns, , snapName, restore] = m;
+		if (restore && req.method === 'POST') {
+			res.writeHead(204);
+			return res.end();
+		}
+		if (!restore && req.method === 'DELETE') {
+			s.storageSnapshots = (s.storageSnapshots ?? []).filter(
+				(x) => !(x.namespace === ns && x.name === snapName),
+			);
+			res.writeHead(204);
+			return res.end();
+		}
+	}
+
+	if (path === '/api/uploads' && req.method === 'POST') {
+		const body = await readBody(req);
+		if (!body?.namespace || !body?.name || !body?.size)
+			return sendText(res, 400, 'namespace, name and size are required');
+		if (!projectOf(body.namespace))
+			return sendText(res, 404, 'namespace not found in any visible project');
+		state.uploads.set(`${body.namespace}/${body.name}`, 'UploadReady');
+		return sendJSON(res, 200, {
+			namespace: body.namespace,
+			name: body.name,
+			...(body.bootImage ? { image: `${body.namespace}/${body.name}` } : {}),
+		});
+	}
+	m = path.match(/^\/api\/uploads\/([^/]+)\/([^/]+)(\/token)?$/);
+	if (m) {
+		const key = `${m[1]}/${m[2]}`;
+		const phase = state.uploads.get(key);
+		if (!phase) return sendText(res, 404, 'not found: upload');
+		if (m[3] && req.method === 'POST')
+			return sendJSON(res, 200, {
+				token: 'fixture-upload-token',
+				uploadUrl: `http://localhost:${port}/__fixture/upload/${encodeURIComponent(key)}`,
+			});
+		if (!m[3])
+			return sendJSON(res, 200, { phase, ready: phase === 'UploadReady', progress: '100.0%' });
+	}
+	return undefined;
+}
+
 // ── control plane ──────────────────────────────────────────────────────────────
 
 function handleControl(req, res, url) {
@@ -595,6 +732,19 @@ function handleControl(req, res, url) {
 	if (m && req.method === 'POST') {
 		state.wsRefuse = Number(m[1]);
 		return sendJSON(res, 200, { refuse: state.wsRefuse });
+	}
+	// The upload proxy the browser streams an image to: the bytes are dropped,
+	// the upload then reads as imported.
+	m = path.match(/^\/__fixture\/upload\/(.+)$/);
+	if (m && req.method === 'POST') {
+		const key = decodeURIComponent(m[1]);
+		req.resume();
+		req.on('end', () => {
+			if (state.uploads.has(key)) state.uploads.set(key, 'Succeeded');
+			res.writeHead(200);
+			res.end();
+		});
+		return;
 	}
 	m = path.match(/^\/__fixture\/login-status\/(\d+)$/);
 	if (m && req.method === 'POST') {
