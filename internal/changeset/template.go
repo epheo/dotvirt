@@ -30,12 +30,12 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 }
 
 // PreviewDeployFromTemplate is StageDeployFromTemplate without the store write.
-func (c *Coordinator) PreviewDeployFromTemplate(targetProj, libraryProj project.ProjectInfo, req model.DeployTemplateRequest) (model.StagePreview, error) {
+func (c *Coordinator) PreviewDeployFromTemplate(id auth.Identity, targetProj, libraryProj project.ProjectInfo, req model.DeployTemplateRequest) (model.StagePreview, error) {
 	entry, err := c.renderTemplate(targetProj, libraryProj, req)
 	if err != nil {
 		return model.StagePreview{}, err
 	}
-	return preview(targetProj, entry), nil
+	return c.previewOf(id, targetProj, entry)
 }
 
 func (c *Coordinator) renderTemplate(targetProj, libraryProj project.ProjectInfo, req model.DeployTemplateRequest) (draft.Entry, error) {

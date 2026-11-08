@@ -420,17 +420,17 @@ func (d *planeDraft) StageCreateProject(_ auth.Identity, commit project.ProjectI
 	return stagedView, nil
 }
 
-func (d *planeDraft) PreviewCreate(commit project.ProjectInfo, resource draft.Resource, spec json.RawMessage) (model.StagePreview, error) {
+func (d *planeDraft) PreviewCreate(_ auth.Identity, commit project.ProjectInfo, resource draft.Resource, spec json.RawMessage) (model.StagePreview, error) {
 	d.record("PreviewCreate "+commit.Name+" "+string(resource), spec)
 	return model.StagePreview{Project: commit.Name}, nil
 }
 
-func (d *planeDraft) PreviewCreateNamespace(commit, join project.ProjectInfo, spec json.RawMessage, _ changeset.LiveNamespaces) (model.StagePreview, error) {
+func (d *planeDraft) PreviewCreateNamespace(_ auth.Identity, commit, join project.ProjectInfo, spec json.RawMessage, _ changeset.LiveNamespaces) (model.StagePreview, error) {
 	d.record("PreviewCreateNamespace "+commit.Name+","+join.Name, spec)
 	return model.StagePreview{Project: commit.Name}, nil
 }
 
-func (d *planeDraft) PreviewCreateProject(commit project.ProjectInfo, spec json.RawMessage, _ changeset.LiveNamespaces) (model.StagePreview, error) {
+func (d *planeDraft) PreviewCreateProject(_ auth.Identity, commit project.ProjectInfo, spec json.RawMessage, _ changeset.LiveNamespaces) (model.StagePreview, error) {
 	d.record("PreviewCreateProject "+commit.Name, spec)
 	return model.StagePreview{Project: commit.Name}, nil
 }

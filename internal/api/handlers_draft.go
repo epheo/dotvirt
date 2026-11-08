@@ -62,7 +62,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if dryRun(r) {
-		p, err := s.draft.PreviewCreateVM(sc.proj, raw)
+		p, err := s.draft.PreviewCreateVM(sc.id, sc.proj, raw)
 		respond(w, p, err)
 		return
 	}
