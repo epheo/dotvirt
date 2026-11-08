@@ -10,8 +10,10 @@ package changeset
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"sync"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -141,6 +143,32 @@ func (r *Reader) pair(proj project.ProjectInfo) (*git.Repo, *git.WriteRepo, erro
 		return nil, nil, fmt.Errorf("%w: project repo unreachable", model.ErrUnavailable)
 	}
 	return read, write, nil
+}
+
+// forgeFailed turns a failed forge call about what into one fixed line
+// naming the failure's class. The forge answers dotvirt's own token: its API
+// path, host and body are logged here and never returned, and its 401 or 403
+// is dotvirt's configuration, not the caller's authority.
+func forgeFailed(what string, err error) error {
+	log.Printf("changeset: forge: %s: %v", what, err)
+	var se *forge.StatusError
+	switch {
+	case !errors.As(err, &se):
+		return fmt.Errorf("%w: %s: the forge is unreachable; try again in a moment", model.ErrUnavailable, what)
+	case se.Status == http.StatusNotFound:
+		return fmt.Errorf("%w: the forge has no %s", model.ErrNotFound, what)
+	case se.Status == http.StatusUnauthorized, se.Status == http.StatusForbidden:
+		return fmt.Errorf("%w: %s: the forge refused dotvirt (%d); an administrator must check dotvirt's forge token", model.ErrUnavailable, what, se.Status)
+	case se.Status >= http.StatusInternalServerError, se.Status == http.StatusTooManyRequests:
+		return fmt.Errorf("%w: %s: the forge failed (%d); try again in a moment", model.ErrUnavailable, what, se.Status)
+	}
+	// Any other refusal is dotvirt asking wrong: an internal error.
+	return fmt.Errorf("%s: the forge rejected dotvirt's request (%d)", what, se.Status)
+}
+
+func isNotFound(err error) bool {
+	var se *forge.StatusError
+	return errors.As(err, &se) && se.Status == http.StatusNotFound
 }
 
 // write is read's write-side sibling: the mirror beside the push clone a

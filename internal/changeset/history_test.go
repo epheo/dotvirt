@@ -489,6 +489,72 @@ func TestProposalRendersBranchDiff(t *testing.T) {
 	}
 }
 
+// A forge answer is dotvirt's to read: whatever the forge says about a pull
+// request, the caller reads the PR and the failure's class, never the
+// forge's API path, host, body or token. Its 401 or 403 is dotvirt's
+// configuration, not a refusal of the caller.
+func TestProposalForgeFailureNamesOnlyItsClass(t *testing.T) {
+	bare, _, _ := seedMerged(t)
+	var status atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, leakyForgeBody, int(status.Load()))
+	}))
+	t.Cleanup(srv.Close)
+	store, err := draft.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	c := New(store, git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour), forge.NewFactory(srv.URL, forge.StaticToken(forgeToken), false, ""), nil, nil, nil, "main", "dotvirt/proposed")
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+
+	for _, tc := range []struct {
+		status int
+		kind   error
+		says   string
+	}{
+		{http.StatusNotFound, model.ErrNotFound, "the forge has no pull request #7"},
+		{http.StatusUnauthorized, model.ErrUnavailable, "pull request #7: the forge refused dotvirt (401)"},
+		{http.StatusForbidden, model.ErrUnavailable, "pull request #7: the forge refused dotvirt (403)"},
+		{http.StatusBadGateway, model.ErrUnavailable, "pull request #7: the forge failed (502)"},
+	} {
+		status.Store(int32(tc.status))
+		_, err := c.Proposal(proj, 7)
+		if !errors.Is(err, tc.kind) || !strings.Contains(err.Error(), tc.says) {
+			t.Errorf("forge %d: err = %v, want %v saying %q", tc.status, err, tc.kind, tc.says)
+		}
+		wantNoForgeInternals(t, err, srv.URL)
+	}
+	srv.Close()
+	_, err = c.Proposal(proj, 7)
+	if !errors.Is(err, model.ErrUnavailable) || !strings.Contains(err.Error(), "the forge is unreachable") {
+		t.Errorf("forge down: err = %v, want ErrUnavailable saying it is unreachable", err)
+	}
+	wantNoForgeInternals(t, err, srv.URL)
+}
+
+// forgeToken is the token dotvirt sends the fake forge; no caller may read it.
+const forgeToken = "forge-token-7f3a"
+
+// leakyForgeBody is a forge error body carrying every internal a caller must
+// not read: an API path, a host, the token and an opaque detail.
+const leakyForgeBody = `{"message":"repo-internal-detail at /api/v1/repos/dotvirt/p for token ` + forgeToken + `","url":"https://forge.internal.example/api/swagger"}`
+
+// wantNoForgeInternals fails when err carries anything a forge failure may
+// only log: the forge's host, an API path, the body's detail or the token.
+func wantNoForgeInternals(t *testing.T, err error, forgeURL string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	for _, leak := range []string{strings.TrimPrefix(forgeURL, "http://"), "/api/v1", "repo-internal-detail", "forge.internal.example", forgeToken} {
+		if strings.Contains(err.Error(), leak) {
+			t.Errorf("err %q carries %q", err, leak)
+		}
+	}
+}
+
 // A VM's history is its manifest file's, named by the merged PRs; a VM git does
 // not hold has none rather than an error.
 func TestVMHistoryNamesMergedPR(t *testing.T) {

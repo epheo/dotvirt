@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"reflect"
 	"slices"
 	"sort"
@@ -146,18 +145,14 @@ func (r *proposeRun) lookup(rec draft.Proposal, hasRec bool) (forge.PR, bool, er
 	return forge.PR{}, false, nil
 }
 
-// forgeDown classifies a forge failure before anything was pushed; nil
-// stays nil. A 404 is the repo missing on the forge, which waiting does not
-// fix.
+// forgeDown answers a failed lookup of the branch's PR, made before anything
+// was pushed; nil stays nil. Only a missing repo 404s there, so the repo is
+// what it names.
 func (r *proposeRun) forgeDown(err error) error {
 	if err == nil {
 		return nil
 	}
-	log.Printf("changeset: %s: find PR: %v", r.branch, err)
-	if isNotFound(err) {
-		return fmt.Errorf("%w: the forge has no repo at %s (404); check project %s's repo, nothing was pushed", model.ErrNotFound, r.proj.Repo, r.proj.Name)
-	}
-	return fmt.Errorf("%w: the forge did not say whether this draft already has a pull request; nothing was pushed and the draft is kept, so propose again in a moment", model.ErrUnavailable)
+	return fmt.Errorf("%w; nothing was pushed and the draft is kept", forgeFailed("repo for project "+r.proj.Name, err))
 }
 
 // extend rebuilds the open PR's branch from base with what it carries and the
@@ -628,11 +623,6 @@ func (r *Reader) forgeFor(repo string) *forge.Client {
 		return nil
 	}
 	return r.forge.For(repo)
-}
-
-func isNotFound(err error) bool {
-	var se *forge.StatusError
-	return errors.As(err, &se) && se.Status == http.StatusNotFound
 }
 
 func pairOf(id auth.Identity, proj project.ProjectInfo) string {

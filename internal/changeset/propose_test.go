@@ -706,6 +706,80 @@ func TestProposeWithoutAForgeAnswerPushesNothing(t *testing.T) {
 	}
 }
 
+// The lookup before a propose reads the forge as dotvirt: its 404 names the
+// project's repo by the project, never by URL, and its 401 or 403 says
+// dotvirt was refused, which proposing again does not fix.
+func TestProposeForgeFailureNamesOnlyItsClass(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		kind   error
+		says   string
+	}{
+		{http.StatusNotFound, model.ErrNotFound, "the forge has no repo for project p; nothing was pushed and the draft is kept"},
+		{http.StatusForbidden, model.ErrUnavailable, "repo for project p: the forge refused dotvirt (403)"},
+		{http.StatusServiceUnavailable, model.ErrUnavailable, "repo for project p: the forge failed (503); try again in a moment"},
+	} {
+		f := newProposeFixture(t, when("GET", "/pulls", tc.status, leakyForgeBody))
+		req := model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{SetLabels: map[string]string{"env": "prod"}}}
+		if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", req); err != nil {
+			t.Fatal(err)
+		}
+		_, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{})
+		if !errors.Is(err, tc.kind) || !strings.Contains(err.Error(), tc.says) {
+			t.Errorf("forge %d: err = %v, want %v saying %q", tc.status, err, tc.kind, tc.says)
+		}
+		wantNoForgeInternals(t, err, f.forgeAt)
+		if strings.Contains(err.Error(), f.proj.Repo) {
+			t.Errorf("forge %d: err %q names the repo URL", tc.status, err)
+		}
+	}
+}
+
+// Adopting a project probes its repo on the forge, and creating one makes
+// it: either failure reads as its class, never as the forge's answer, and
+// never as the caller's own 403.
+func TestTenantRepoForgeFailureNamesOnlyItsClass(t *testing.T) {
+	createAnswers := func(status int) route {
+		return func(m, path string) (int, string, bool) {
+			if m == "POST" && strings.HasPrefix(path, "/api/v1/orgs/") && strings.HasSuffix(path, "/repos") {
+				return status, leakyForgeBody, true
+			}
+			return 0, "", false
+		}
+	}
+	spec := json.RawMessage(`{"name":"team-a","namespace":"team-a"}`)
+	for _, tc := range []struct {
+		name string
+		run  func(f *proposeFixture) error
+		kind error
+		says string
+		rts  []route
+	}{
+		{"adopt, probe fails", func(f *proposeFixture) error {
+			_, err := f.c.AdoptProject(f.id, f.platform(), f.target("team-a"), nil, nil)
+			return err
+		}, model.ErrUnavailable, "repo for project team-a: the forge failed (500)",
+			[]route{when("GET", "team-a", http.StatusInternalServerError, leakyForgeBody)}},
+		{"create, token refused", func(f *proposeFixture) error {
+			_, err := f.c.StageCreateProject(f.id, f.platform(), spec, nil, nil)
+			return err
+		}, model.ErrUnavailable, "organization for project repos: the forge refused dotvirt (403)",
+			[]route{when("GET", "team-a", http.StatusNotFound, ""), createAnswers(http.StatusForbidden)}},
+		{"create, no organization", func(f *proposeFixture) error {
+			_, err := f.c.StageCreateProject(f.id, f.platform(), spec, nil, nil)
+			return err
+		}, model.ErrNotFound, "the forge has no organization for project repos",
+			[]route{when("GET", "team-a", http.StatusNotFound, ""), createAnswers(http.StatusNotFound)}},
+	} {
+		f := newProposeFixture(t, tc.rts...)
+		err := tc.run(f)
+		if !errors.Is(err, tc.kind) || errors.Is(err, model.ErrForbidden) || !strings.Contains(err.Error(), tc.says) {
+			t.Errorf("%s: err = %v, want %v saying %q", tc.name, err, tc.kind, tc.says)
+		}
+		wantNoForgeInternals(t, err, f.forgeAt)
+	}
+}
+
 func revParse(t *testing.T, repo, rev string) string {
 	t.Helper()
 	out, err := exec.Command("git", "-C", repo, "rev-parse", rev).Output()
